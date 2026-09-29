@@ -68,7 +68,7 @@ const inertEvents = (): PaneEvents => ({
   speed: () => 8,
   setSpeed: vi.fn(),
   rebind: vi.fn(),
-  editScratch: vi.fn(),
+  editSink: () => vi.fn(),
   collapse: vi.fn(),
 })
 
@@ -173,7 +173,7 @@ const labelsOf = (id: string) => [...leaf(id).querySelectorAll('.tape-label')].m
  * unlike the rows themselves, which are a window that moves with the running state.
  */
 const tableHeightOf = (id: string) => leaf(id).querySelector<HTMLElement>('.state-spacer')?.style.height ?? ''
-/** The fork control as `TmPane.#refreshDetach` leaves it: `absent`, `disabled: <its reason>`, or `enabled`. */
+/** The fork control as `CopyEditor.#refreshDetach` leaves it: `absent`, `disabled: <its reason>`, or `enabled`. */
 const forkOf = (id: string) => {
   const button = leaf(id).querySelector<HTMLButtonElement>('button.detach')
   return button === null ? 'absent' : button.disabled ? `disabled: ${button.title}` : 'enabled'

@@ -156,7 +156,7 @@ describe('a cooled buffer warmed and bound to a pane again', () => {
     // rather than assumed: no pane is bound to this buffer, so there is no pane for an editor to mount
     // onto. This is the state the fix must not change.
     clickRowControl('resume λ copy 1 — restarts at step 0')
-    expect(rowNames()).toEqual(['λ copy 1 · not shown · running'])
+    expect(rowNames()).toEqual(['λ copy 1 · not shown'])
     expect(everyEditorHost()).toHaveLength(0)
     closeList()
 
@@ -184,8 +184,8 @@ describe('a cooled buffer warmed and bound to a pane again', () => {
     // STAGE 4 — AND IT IS A LIVE EDITOR OVER A LIVE WORKER, which a mounted `.term-editor` cannot show
     // on its own: the box would look identical over a session `pool.unbind` had terminated, and over one
     // whose `onEdit` reached a buffer that no longer exists. A real keystroke recompiles THIS buffer
-    // (`transport.ts`'s `editScratch` reads `slot.binding.session`), and the frames region moving is
-    // that buffer's own thread answering.
+    // (`transport.ts`'s `editSink` binds the session the view shows when it builds the editor), and the
+    // frames region moving is that buffer's own thread answering.
     //
     // THE WARM'S OWN REBUILD IS AWAITED FIRST, AND IT IS AN ASSERTION RATHER THAN A SETTLING DELAY: the
     // pane was on the source session until the `change` event two statements up, so its frames region is
@@ -202,6 +202,6 @@ describe('a cooled buffer warmed and bound to a pane again', () => {
     // satisfy every assertion above and read two rows here. Reopened first, per `closeList`'s doc: the
     // rebind two stages up changed this row's pane count and no repaint reaches a list already open.
     await openList()
-    expect(rowNames()).toEqual(['λ copy 1 · 1 view · running'])
+    expect(rowNames()).toEqual(['λ copy 1 · 1 view'])
   })
 })

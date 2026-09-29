@@ -5,6 +5,7 @@ import { History } from '../../src/history'
 import { LambdaPane } from '../../src/lambda-pane'
 import type { LeafId } from '../../src/panes'
 import { PaneCollection } from '../../src/panes'
+import type { ScratchEditorConfig } from '../../src/scratch-editor'
 import { ScratchEditor } from '../../src/scratch-editor'
 import type { ClientPort, SessionId } from '../../src/session-client'
 import { SessionClient } from '../../src/session-client'
@@ -70,6 +71,7 @@ function lambdaSession(id: SessionId): SessionEntry {
     tmProgram: null,
     tmScratch: null,
     asmProgram: null,
+    asmScratch: null,
   }
 }
 
@@ -111,7 +113,7 @@ function addPane(
   leaf: LeafId,
   session: SessionId,
   showEditor?: () => void,
-  editScratch?: (src: string) => void,
+  edits?: (session: SessionId, src: string) => void,
   collapse?: (collapsed: boolean) => void,
 ): { pane: LambdaPane; slot: PaneSlot<'lambda'>; host: HTMLElement } {
   const host = document.createElement('div')
@@ -128,11 +130,16 @@ function addPane(
     rebind: (binding) => slot.rebind(binding.session),
     detach: () => undefined,
     ...(showEditor === undefined ? {} : { showEditor }),
-    // CAPTURED AT CONSTRUCTION, WHICH IS THE WHOLE POINT FOR THE `receiveEditor` TESTS BELOW.
-    // `LambdaPane` reads `on.editScratch` once into `#onEdit` and every editor it MOUNTS closes over
-    // that — so a handler set any later way would not reproduce the field the moved-editor defect is
-    // about.
-    ...(editScratch === undefined ? {} : { editScratch }),
+    // THE APP'S OWN SHAPE (`transport.ts`'s `editSink`): the slot's session is read when the pane builds an
+    // editor, and every edit that editor sends names it — which is what the `receiveEditor` tests below are about.
+    ...(edits === undefined
+      ? {}
+      : {
+          editSink: () => {
+            const session = slot.binding.session
+            return (src: string) => edits(session, src)
+          },
+        }),
     ...(collapse === undefined ? {} : { collapse }),
   })
   panes.add({ id: leaf, kind: 'lambda', slot, pane, host })
@@ -254,13 +261,14 @@ describe('reconcileEditors: an editor in custody whose session has been retired'
    * resolves to `undefined` for a session with no pane, so it is a no-op. Without this branch a retire
    * during custody leaves one live `EditorView`, with its own pending debounce, over a terminated worker.
    *
-   * **THE PENDING RECOMPILE IS ASSERTED, NOT ONLY THE UNMOUNT.** A debounce is scheduled and then the
-   * retire is reconciled inside its window; the test then waits out a real multiple of that window. A
-   * `destroy()` removed from this branch fires `onEdit` for a session the pool has already unbound —
-   * which is exactly what `ScratchEditor.destroy`'s own doc says the cancel is for, asserted here against
-   * the timer the app schedules rather than a faked clock.
+   * **THE PENDING EDIT IS ASSERTED, NOT ONLY THE UNMOUNT, AND IT IS SENT AT THE RECONCILE.** A debounce is
+   * scheduled and the retire is reconciled inside its window. `ScratchEditor.destroy` sends a pending edit
+   * rather than dropping it, so the edit is heard the moment the editor comes down — before any timer could
+   * fire it, which is what separates a destroy from a `destroy()` removed from this branch (the edit would then
+   * arrive a debounce later, from an editor still alive). What the app does with an edit for a deleted copy is
+   * `ScratchBuffers.recompile`'s answer: nothing.
    */
-  it('destroys the held editor and cancels the recompile it had pending', async () => {
+  it('destroys the held editor, sending the edit it had pending as it comes down', () => {
     sessions.add(lambdaSession(S))
     const fired: string[] = []
     const editor = makeEditor('\\x. x', (src) => fired.push(src))
@@ -271,8 +279,7 @@ describe('reconcileEditors: an editor in custody whose session has been retired'
     custody.reconcile()
 
     expect(editor.dom.isConnected).toBe(false)
-    await new Promise((r) => setTimeout(r, 100))
-    expect(fired).toEqual([])
+    expect(fired).toEqual(['\\a. a'])
   })
 
   /**
@@ -430,9 +437,11 @@ describe('hasEditor: the third input to the claim control', () => {
  * closing over THAT pane's `editScratch`. `receiveEditor` relocates `editor.dom` — which is all the
  * editor-moves rule ever moved — and left the callback pointing at the pane that built it. That is
  * invisible while both panes are on the same buffer, which is the only state the suite ever reached,
- * and becomes a corruption the moment the ORIGINATING pane is rebound: `transport.ts`'s `editScratch`
- * resolves `slot.binding.session` at EDIT time, so keystrokes in the moved editor recompile whatever
- * the first pane is showing now.
+ * and becomes a corruption the moment the ORIGINATING pane is rebound: the edit handler it had then
+ * resolved `slot.binding.session` at EDIT time, so keystrokes in the moved editor recompiled whatever
+ * the first pane was showing by then. The fix that followed re-pointed the handler at the pane holding
+ * the editor, which left the same gap one move later; an editor's edits are bound to its copy when it
+ * is built now (`transport.ts`'s `editSink`), and the test below holds that.
  *
  * **MEASURED IN CHROMIUM BEFORE THE FIX, five gestures from a fresh page:** fork on `lambda-0` (which
  * builds `scratch 1`'s editor), split, claim the editor onto the new pane, rebind `lambda-0` to source
@@ -446,49 +455,142 @@ describe('hasEditor: the third input to the claim control', () => {
  */
 describe('receiveEditor: where a moved editor sends its edits', () => {
   /**
-   * THE HANDLERS ARE DISTINGUISHED BY WHICH PANE THEY BELONG TO, not by a spy on one of them: each pane
-   * is built with an `editScratch` that records its own name, so the assertion reads "the pane holding
-   * the editor is the one that heard the keystroke" rather than "something fired".
+   * EACH EDIT IS RECORDED WITH THE SESSION ITS SINK NAMES, so the assertion reads "the copy the editor was built
+   * for heard the keystroke" rather than "something fired".
    *
-   * A REAL DEBOUNCE, WAITED OUT, for the reason `makeEditor` states — `#schedule` reads `#onEdit` when
-   * the TIMER expires, not when the keystroke lands, so a test that faked the clock would not exercise
-   * the field this fix reassigns.
+   * **THE VIEW HOLDING THE EDITOR MOVES ON BEFORE THE DEBOUNCE FIRES**, which is the case the old answer — re-point
+   * the editor at the view holding it, which read its own binding when an edit fired — got wrong: the keystroke went
+   * to whatever that view showed by then. A REAL DEBOUNCE, WAITED OUT, for the reason `makeEditor` states.
    */
-  it('routes a claimed editor’s keystrokes to the pane holding it, not to the pane that built it', async () => {
+  it('sends a moved editor’s pending keystroke to its own copy after the view holding it moves on', async () => {
     sessions.add(lambdaSession(S))
     const heard: string[] = []
-    // EACH PANE'S HANDLER RECORDS ITS OWN NAME, so the assertion reads "the pane holding the editor is
-    // the one that heard the keystroke" rather than "something fired".
-    const builder = addPane(
-      'pane-1',
-      S,
-      () => undefined,
-      (src) => heard.push(`builder:${src}`),
-    )
-    const claimer = addPane(
-      'pane-2',
-      S,
-      () => undefined,
-      (src) => heard.push(`claimer:${src}`),
-    )
+    const record = (session: SessionId, src: string) => heard.push(`${session}:${src}`)
+    const builder = addPane('pane-1', S, () => undefined, record)
+    const claimer = addPane('pane-2', S, () => undefined, record)
 
-    // THE BUILD, THEN THE MOVE — `setEditor` mounts a view carrying `builder`'s handler, `takeEditor`
-    // hands it over, `receiveEditor` mounts it on `claimer`. Exactly `reconcileEditors`' own two calls.
+    // THE BUILD, THEN THE MOVE — `setEditor` mounts a view built for `S`, `takeEditor` hands it over,
+    // `receiveEditor` mounts it on `claimer`. Exactly `reconcileEditors`' own two calls.
     builder.pane.setEditor('\\x. x')
     const moved = builder.pane.takeEditor()
     if (moved === null) throw new Error('the builder pane mounted no editor')
     claimer.pane.receiveEditor(moved)
 
     retype(moved, '\\y. y')
-    // PAST `EDITOR_DEBOUNCE_MS` (300), NOT PAST `makeEditor`'s 20. The editor under test is the one
-    // `LambdaPane.setEditor` builds, which uses the app's own constant — this wait was 120 ms first and
-    // the test failed with `[]` on both sides of the fix, which is a test that measures its own timer
-    // rather than the code.
+    // BOTH VIEWS MOVE ON INSIDE THE DEBOUNCE — the one holding the editor and the one that built it.
+    claimer.slot.rebind(OTHER)
+    builder.slot.rebind(OTHER)
+    // PAST `EDITOR_DEBOUNCE_MS` (300), NOT PAST `makeEditor`'s 20: the editor is the one `LambdaPane.setEditor`
+    // builds, which uses the app's own constant.
     await new Promise((r) => setTimeout(r, 600))
 
-    // WITHOUT THE REASSIGNMENT THIS READS `['builder:\\y. y']` — the pane that no longer shows the
-    // editor, and in the app the pane whose binding has since moved somewhere else entirely.
-    expect(heard).toEqual(['claimer:\\y. y'])
+    expect(heard).toEqual([`${S}:\\y. y`])
+  })
+})
+
+/**
+ * **`flush` SENDS A COPY'S PENDING EDIT WHEREVER ITS EDITOR IS** — held here, or mounted on a view of the copy — and
+ * touches no other copy's. `main.ts`'s delete and pause handlers call it before reading or storing the copy, so typing
+ * in the editor's debounce is in what they read. Asserted synchronously after the call: a flush that missed an
+ * editor would leave its edit to a timer this test never waits for.
+ */
+describe('flush: a copy’s pending edit, sent wherever its editor is', () => {
+  const typeIn = (host: HTMLElement, text: string): void => {
+    const view = EditorView.findFromDOM(host)
+    if (view === null) throw new Error('no CodeMirror view in the pane')
+    view.dispatch({ changes: { from: 0, to: view.state.doc.length, insert: text } })
+  }
+
+  it('sends the pending edit of an editor waiting in custody', () => {
+    sessions.add(lambdaSession(S))
+    const heard: string[] = []
+    const editor = makeEditor('\\x. x', (src) => heard.push(src))
+    custody.hold(S, editor)
+    retype(editor, '\\a. a')
+
+    custody.flush(S)
+
+    expect(heard).toEqual(['\\a. a'])
+  })
+
+  it('sends the pending edit of the editor on a view of the copy, and leaves another copy’s alone', () => {
+    sessions.add(lambdaSession(S))
+    sessions.add(lambdaSession(OTHER))
+    const heard: string[] = []
+    const record = (session: SessionId, src: string) => heard.push(`${session}:${src}`)
+    const mine = addPane('pane-1', S, undefined, record)
+    const theirs = addPane('pane-2', OTHER, undefined, record)
+    mine.pane.setEditor('\\x. x')
+    theirs.pane.setEditor('\\y. y')
+    typeIn(mine.host, '\\a. a')
+    typeIn(theirs.host, '\\b. b')
+
+    custody.flush(S)
+
+    expect(heard).toEqual([`${S}:\\a. a`])
+  })
+
+  /**
+   * A `ScratchEditor` whose document's `format()` stays open until the returned `answer` is called — this
+   * describe block's own version of `scratch-editor.test.ts`'s `makeFormattable`, kept local since no other test
+   * here needs a document at all.
+   */
+  function makeFormattableEditor(onEdit: (src: string) => void): { ed: ScratchEditor; answer: (edits: []) => void } {
+    let resolve: (edits: []) => void = () => undefined
+    const client = {
+      openDocument: () => undefined,
+      changeDocument: () => undefined,
+      closeDocument: () => undefined,
+      format: () =>
+        new Promise<[]>((r) => {
+          resolve = r
+        }),
+      documentSymbols: () => undefined,
+      definition: () => undefined,
+      references: () => undefined,
+      hover: () => undefined,
+    } as unknown as NonNullable<ScratchEditorConfig['document']>['client']
+    const host = document.createElement('div')
+    document.body.append(host)
+    const ed = new ScratchEditor({
+      host,
+      initial: '\\x. x',
+      debounceMs: 20,
+      onEdit,
+      document: {
+        uri: 'redextape://copy/test',
+        languageId: 'redextape_lambda',
+        client,
+        formatOnBlur: () => false,
+        notify: () => undefined,
+        label: 'λ · copy 1',
+      },
+    })
+    return { ed, answer: (edits: []) => resolve(edits) }
+  }
+
+  /**
+   * **F1 — THE EXACT CALL A DELETE MAKES, RACING AN IN-FLIGHT FORMAT.** `main.ts`'s delete handler calls
+   * `custody.flush(id)` before it reads the copy's record for undo, with no `destroy()` in between — the pause
+   * handler calls it the same way before storing the copy. At `bec75f0` this reached nothing while a format was in
+   * flight: `format()` had already cleared the editor's own timer, and the pending edit lived only inside its async
+   * closure until the server answered, so the record this call is meant to update stayed stale and undo restored
+   * text missing the keystrokes typed before *format*, silently.
+   */
+  it('sends the pre-format text a format in flight is carrying, before the format answers', async () => {
+    sessions.add(lambdaSession(S))
+    const heard: string[] = []
+    const { ed, answer } = makeFormattableEditor((src) => heard.push(src))
+    custody.hold(S, ed)
+    retype(ed, '\\a. a')
+    const formatting = ed.format()
+
+    custody.flush(S)
+
+    expect(heard).toEqual(['\\a. a'])
+    answer([])
+    await formatting
+    expect(heard, 'format’s own continuation must not resend what flush already sent').toEqual(['\\a. a'])
   })
 })
 

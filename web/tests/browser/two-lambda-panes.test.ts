@@ -547,7 +547,7 @@ describe('two λ panes on two λ sessions', () => {
    * IT DRIVES BOTH ENTRY POINTS, because they are reachable independently and one fix could plausibly
    * miss either. `draw()` is the per-frame path (the TM transport below); `link-wiring.ts` is reached
    * from the source editor's own `updateListener` on every keystroke, through `drawLink` ->
-   * `detachedPanes` -> `theSlot`, per leg, with no λ pane to resolve.
+   * `detachedPanes`, per leg, with no λ pane to count.
    */
   it('keeps working after the last λ pane is closed, rather than throwing on every frame', async () => {
     // UNHANDLED ERRORS ARE COLLECTED, NOT INFERRED FROM A GREEN ASSERTION. A throw inside a click

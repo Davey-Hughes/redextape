@@ -228,6 +228,33 @@ describe('valueLine', () => {
   })
 })
 
+describe('resultRows — a step count of one is singular, on every leg', () => {
+  it('reads one reduction, one transition and one instruction', () => {
+    const rows = resultRows(
+      { ...lambdaOk, state: { ...okState, step: 1 } },
+      { ...asmOk, status: { ...asmOk.status, total_steps: 1 } },
+      { ...tmOk, status: { ...tmOk.status, total_steps: 1 } },
+    )
+    expect([
+      find(rows, 'λ', 'steps')?.value,
+      find(rows, 'asm', 'steps')?.value,
+      find(rows, 'TM', 'steps')?.value,
+    ]).toEqual(['1 reduction', '1 instruction', '1 transition'])
+  })
+
+  it('and in a count that stopped', () => {
+    const rows = resultRows(
+      lambdaOk,
+      { status: { ...asmOk.status, total_steps: 1 }, value: 'Unfinished' },
+      { status: { ...tmOk.status, total_steps: 1 }, value: 'Unfinished' },
+    )
+    expect([find(rows, 'asm', 'steps')?.value, find(rows, 'TM', 'steps')?.value]).toEqual([
+      'stopped after 1 instruction at a cap',
+      'stopped after 1 transition at a cap',
+    ])
+  })
+})
+
 describe('resultRows — the asm leg', () => {
   const asm = (over: Partial<AsmLeg['status']>, value: AsmLeg['value']): AsmLeg => ({
     status: { ...asmOk.status, ...over },

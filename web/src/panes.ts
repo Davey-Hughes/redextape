@@ -71,7 +71,14 @@ export type PaneEntry<K extends Leg> = {
  */
 export class PaneCollection {
   #entries = new Map<LeafId, PaneEntry<Leg>>()
-  #activeByLeg = new Map<Leg, LeafId>()
+  /**
+   * The panes the user has focused, most recent first, each once — `markActive`'s record.
+   *
+   * **AN ORDER, NOT THE LAST PANE PER LEG**, because a reader may refuse the last one: the running focuses take the
+   * most recently focused view that shows the program, and when the view focused last shows a copy the answer is the
+   * one focused before it. A last-per-leg map could only fall back to insertion order there.
+   */
+  #recent: LeafId[] = []
 
   get size(): number {
     return this.#entries.size
@@ -88,9 +95,15 @@ export class PaneCollection {
     this.#entries.set(entry.id, entry as PaneEntry<Leg>)
   }
 
-  /** Forget `id`. Idempotent, mirroring `SessionRegistry.remove`: a second call asks for a state already true. */
+  /**
+   * Forget `id`. Idempotent, mirroring `SessionRegistry.remove`: a second call asks for a state already true.
+   *
+   * Its place in the focus order goes with it, so the order holds only panes that exist: a pane rebuilt under the
+   * same id — a leg change, a reset — is focused afresh before it is anyone's answer.
+   */
   remove(id: LeafId): void {
     this.#entries.delete(id)
+    this.#recent = this.#recent.filter((r) => r !== id)
   }
 
   get(id: LeafId): PaneEntry<Leg> | undefined {
@@ -109,69 +122,70 @@ export class PaneCollection {
   /**
    * Record that `id`'s pane is the one the user is working in.
    *
-   * IT TAKES A `LeafId` AND DERIVES THE LEG, WHICH IS WHAT KEEPS THIS MODULE FREE OF THE DOM. The
-   * caller is a `focusin` listener in `pane-host.ts` and knows only which host fired; the collection
-   * already holds the entry that says which leg that is, so asking the caller would be asking it to
-   * carry a fact this class owns.
+   * IT TAKES A `LeafId` AND NO LEG, WHICH IS WHAT KEEPS THIS MODULE FREE OF THE DOM. The caller is a
+   * `focusin` listener in `pane-host.ts` and knows only which host fired; the collection already holds the
+   * entry that says which leg that is, and `active` reads it when it is asked, so asking the caller would be
+   * asking it to carry a fact this class owns.
    *
    * AN UNKNOWN ID IS IGNORED RATHER THAN THROWN ON. Focus can land in a host whose entry has already
    * been removed — a close repaints and moves focus in the same tick — and that is a race, not a
    * wiring bug.
    */
   markActive(id: LeafId): void {
-    const entry = this.#entries.get(id)
-    if (entry === undefined) return
-    this.#activeByLeg.set(entry.slot.binding.leg, id)
+    if (!this.#entries.has(id)) return
+    this.#recent = [id, ...this.#recent.filter((r) => r !== id)]
   }
 
   /**
-   * The pane on `leg` whose state the app's shared surfaces should describe.
+   * The pane on `leg` whose state the app's shared surfaces should describe: of the panes on `leg` that `accept`
+   * admits, the one the user focused most recently, else the first in insertion order, else `undefined`.
    *
    * THIS REPLACES `first`, AND IT IS THE ANSWER TO THE QUESTION `first`'s DOC DEFERRED to this slice:
-   * "which pane's state should win once several disagree". The two consumers — `draw.ts`'s
-   * running-focus decoration and `link-wiring.ts`'s `detachedPanes` — drive the ONE source editor and
-   * the ONE status line, so with several panes on a leg they need a pane the user can CHOOSE, and
-   * clicking into one is that choice.
+   * "which pane's state should win once several disagree". Its consumer is `draw.ts`, whose running focuses
+   * drive the ONE source editor's focus mark and each machine view's, so with several panes on a leg it needs a
+   * pane the user can CHOOSE, and clicking into one is that choice.
    *
    * PER LEG RATHER THAN ONE GLOBAL ACTIVE PANE. Clicking into the source editor must not blank out
-   * which λ pane the status line is describing; the source editor is on neither leg.
+   * which λ pane is being described; the source editor is on neither leg.
    *
    * THE LEG IS RE-CHECKED RATHER THAN TRUSTED, AND THAT IS THE KIND CHANGE RATHER THAN DEFENSIVE
-   * STYLE. `markActive` may have recorded `lambda -> 'pane-3'` before `pane-3` became a TM pane; the
-   * entry under that id is now a different pane on a different leg.
+   * STYLE. `markActive` may have recorded `pane-3` while it was a λ pane, and `pane-3` may be a TM pane now;
+   * it answers for the leg it is on.
+   *
+   * **`accept` IS WHAT A READER REFUSES, AND THE RUNNING FOCUSES REFUSE A COPY.** A running focus is the
+   * program's: it resolves against the program's link index, and a copy's frames own no construct of it. So
+   * `draw.ts` asks for the most recently focused view that shows the program, and a copy's view focused last
+   * is passed over rather than taken, which left the program's own view unmarked while it was the view being
+   * stepped. With no `accept`, every pane on the leg is admitted.
    *
    * THE FALLBACK IS EXACTLY THE OLD `first`, so the single-pane case and the empty-leg case are
    * unchanged — including the `undefined`, which four modules once each answered privately with a
    * throw. A leg with no pane is a state, not a wiring bug.
-   *
-   * **THE λ LINK CLAUSE ASKS `shown` INSTEAD (Plan 7 part 4a)**, and the λ copy clause asks it first —
-   * this answer among the panes on the page, for a reason that holds only for them; `shown`'s own doc has
-   * it. The running focuses and the TM copy clause ask this, and so does the λ copy clause when no λ view
-   * is on the page.
    */
-  active<K extends Leg>(leg: K): PaneEntry<K> | undefined {
-    const marked = this.#activeByLeg.get(leg)
-    if (marked !== undefined) {
-      const entry = this.#entries.get(marked)
-      if (entry !== undefined && entry.slot.binding.leg === leg) return entry as PaneEntry<K>
+  active<K extends Leg>(leg: K, accept: (e: PaneEntry<K>) => boolean = () => true): PaneEntry<K> | undefined {
+    const admitted = (e: PaneEntry<Leg> | undefined): PaneEntry<K> | undefined =>
+      e !== undefined && e.slot.binding.leg === leg && accept(e as PaneEntry<K>) ? (e as PaneEntry<K>) : undefined
+    for (const id of this.#recent) {
+      const e = admitted(this.#entries.get(id))
+      if (e !== undefined) return e
     }
     for (const e of this.#entries.values()) {
-      if (e.slot.binding.leg === leg) return e as PaneEntry<K>
+      const hit = admitted(e)
+      if (hit !== undefined) return hit
     }
     return undefined
   }
 
   /**
-   * `active(leg)` among the panes `onPage` says are on the page: the active pane if it is one of them,
-   * else the first of them, else `undefined`.
+   * `active(leg, accept)` among the panes `onPage` says are on the page: of those `accept` admits, the one
+   * focused most recently, else the first of them, else `undefined`.
    *
    * **A READER OF A VIEW'S OWN STATE ASKS THIS, NOT `active`.** In Stage one host is on the page and the
    * rest are off it, and selecting a tab records the focused leaf without marking a pane active, so
    * `active(leg)` can name a hidden pane. `draw()` hands a pin and a tree only to views on the page, so a
-   * hidden λ view's `linkState` answered for an earlier pin: the λ link clause asks this, and so does the
-   * λ copy clause, which must name the same view because `linkStatus` suppresses a copy's own clauses.
-   * `undefined` is the link clause's honest absence: no λ view on screen, so no term to explain. The copy
-   * clause then falls back to `active`, as the TM copy clause does, since a copy off the page is still one.
+   * hidden λ view's `linkState` answered for an earlier pin: the λ link clause asks this, of the views that
+   * show the program. `undefined` is the link clause's honest absence: no λ view of the program on screen,
+   * so no term of the program's to explain.
    *
    * **A READER OF A LEG'S LIVE HISTORY ASKS `active`.** The running focuses read the session a pane is
    * bound to, which is current whether or not the pane is drawn, and part 2's spec §8 keeps the step bar
@@ -180,10 +194,12 @@ export class PaneCollection {
    * `onPage` IS THE CALLER'S, which keeps the collection free of the DOM: the app passes the `onPage`
    * below, and a node test passes its own.
    */
-  shown<K extends Leg>(leg: K, onPage: (e: PaneEntry<K>) => boolean): PaneEntry<K> | undefined {
-    const active = this.active(leg)
-    if (active !== undefined && onPage(active)) return active
-    return this.of(leg).find(onPage)
+  shown<K extends Leg>(
+    leg: K,
+    onPage: (e: PaneEntry<K>) => boolean,
+    accept: (e: PaneEntry<K>) => boolean = () => true,
+  ): PaneEntry<K> | undefined {
+    return this.active(leg, (e) => onPage(e) && accept(e))
   }
 
   /** Every pane rendering `leg` AND bound to `session` — the question a reply handler is asking. */

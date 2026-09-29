@@ -1,11 +1,11 @@
 import type { PersistedBuffers } from './buffers-store'
 import { History } from './history'
-import { type CopyLeg, LEG_NAME, unhandled } from './legs'
+import { LEG_NAME, unhandled } from './legs'
 import type { LeafId } from './panes'
-import type { RunReply } from './protocol'
+import type { Leg, RunReply } from './protocol'
 import type { SessionId, SessionPool } from './session-client'
 import { resetLegs, type SessionLegs, type SessionRegistry } from './sessions'
-import type { Diagnostic, LambdaState, TmState } from './types'
+import type { AsmState, Diagnostic, LambdaState, TmState } from './types'
 
 /**
  * What retiring a buffer needs from a pane slot: which session it is on, and the ability to move it
@@ -40,14 +40,14 @@ export type BufferInfo = {
   readonly id: SessionId
   readonly label: string
   readonly warm: boolean
-  readonly leg: CopyLeg
+  readonly leg: Leg
 }
 
 /** What undoing a delete needs to put a copy back: its id, name, leg, text and collapse flag. */
 export type BufferRecord = {
   readonly id: SessionId
   readonly label: string
-  readonly leg: CopyLeg
+  readonly leg: Leg
   readonly text: string
   readonly collapsed: boolean
 }
@@ -82,7 +82,7 @@ type BufferState = {
    * binding must agree with — `SessionRegistry.legOf` throws on a binding naming a leg its session
    * lacks, and this is the field that decides which leg the session was built with.
    */
-  readonly leg: CopyLeg
+  readonly leg: Leg
   text: string
   collapsed: boolean
   warm: boolean
@@ -270,13 +270,13 @@ export type ScratchBuffersConfig = {
  * four numbers; the worker therefore holds only the wasm call, and the minting, the rebinding and the
  * retirement order live here.
  *
- * **BOTH LEGS NOW, WHICH THIS DOC USED TO SAY WAS IMPOSSIBLE — 5d-iv T5.** A `TmScratch` is built from
- * `.tm` TEXT the same way a `LambdaScratch` is built from λ text, and `#spawn` below reads `state.leg`
- * — set once, at mint, and never written again — to pick both the request kind it posts
- * (`client.scratch` against `client.tmScratch`) and the one leg record it builds for the registry. A
- * second class was the alternative this doc used to argue for; one class with a field is what it
- * became, because everything past that one branch — the id, the cap, the retirement order, the
- * snapshot shape — is identical work for either leg.
+ * **EVERY LEG NOW, WHICH THIS DOC USED TO SAY WAS IMPOSSIBLE.** A `TmScratch` is built from `.tm` TEXT, and
+ * an asm copy from asm text, the same way a `LambdaScratch` is built from λ text, and `#spawn` below reads
+ * `state.leg` — set once, at mint, and never written again — to pick both the request kind it posts
+ * (`client.scratch`, `client.tmScratch` or `client.asmScratch`) and the one leg record it builds for the
+ * registry. A second class was the alternative this doc used to argue for; one class with a field is what
+ * it became, because everything past that one branch — the id, the cap, the retirement order, the
+ * snapshot shape — is identical work for every leg.
  *
  * **`fork`'S FOURTH PARAMETER AND `forkBlank` ARE THE TWO DOORS IN, AND THEY ARE NOT THE SAME DOOR
  * NARROWED TWICE.** `fork` still seeds a new buffer from a source-derived VIEW's own text, exactly as
@@ -517,7 +517,7 @@ export class ScratchBuffers {
    *
    * For what this doc used to claim and why it changed, see the history note under `fork`.
    */
-  fork(slot: Detachable, src: string, step: number, leg: CopyLeg): SessionId {
+  fork(slot: Detachable, src: string, step: number, leg: Leg): SessionId {
     // `'cannot make a copy — '` — THIS CALL IS THE ONE OF THE TWO CALLERS FOR WHICH THAT IS TRUE. See
     // `#refuseAtCap`'s own doc for why the prefix is a call-site argument rather than baked into the
     // shared message.
@@ -536,7 +536,7 @@ export class ScratchBuffers {
    * NO PREFIX ON THE REFUSAL — this is not a fork, so `#refuseAtCap`'s call-site prefix argument puts
    * it in the same class as `warm`.
    */
-  forkBlank(leg: CopyLeg): SessionId {
+  forkBlank(leg: Leg): SessionId {
     if (this.warmCount() >= MAX_WARM_BUFFERS) this.#refuseAtCap('')
     return this.#mint('', 0, leg, null)
   }
@@ -548,7 +548,7 @@ export class ScratchBuffers {
    * from a `Detachable` it must then rebind, `forkBlank` from nothing at all. `slot?.rebind(id)` below
    * is the whole of that fork — a `null` here is `forkBlank`'s own claim that no pane is owed a move.
    */
-  #mint(src: string, step: number, leg: CopyLeg, slot: Detachable | null): SessionId {
+  #mint(src: string, step: number, leg: Leg, slot: Detachable | null): SessionId {
     this.#minted += 1
     const id: SessionId = `scratch-${this.#minted}`
     // `copy N` — THE LEG IS SAID WHEREVER THE LABEL IS SHOWN (`nameOf`, `view-header.ts`'s `pairLabel`),
@@ -636,17 +636,15 @@ export class ScratchBuffers {
    * (through `resetLegs`, ahead of the entry that owns them being deleted), registry before pool
    * (`SessionRegistry.remove`'s own doc — terminating a thread is never the registry's job).
    *
-   * **"KEEP ITS TEXT" IN THE SUMMARY LINE IS ALMOST ALWAYS TRUE, NOT QUITE ALWAYS — THE REBIND ABOVE CAN
-   * COST THE LAST KEYSTROKE (5d-ii-d review, Finding 7).** The text `warm` later rebuilds from is
-   * whatever `setText` last wrote, and `setText`'s own doc names its callers: `recompile`, driven by
-   * `ScratchEditor`'s own 300ms debounce (`editor-debounce.ts`'s `EDITOR_DEBOUNCE_MS`), not by every
-   * keystroke. The rebind a few lines up is what makes `editor-custody.ts`'s `reconcileEditors` call
-   * `ScratchEditor.destroy()` on the editor that just lost its pane, and `destroy()`'s whole point is to
-   * CANCEL a pending debounce rather than let it fire against a session about to be unbound (its own
-   * doc). A keystroke typed inside that 300ms window, immediately followed by the two gestures needed to
-   * cool this buffer before the timer would have fired, never reaches `setText` and is lost. Narrow —
-   * the window is 300ms and both gestures have to land inside it — and no code change is wanted for it;
-   * this paragraph exists so "keep its text" stops being a claim the last keystroke can falsify silently.
+   * **"KEEP ITS TEXT" INCLUDES THE LAST KEYSTROKE, WHICH IT ONCE DID NOT (5d-ii-d review, Finding 7).** The
+   * text `warm` later rebuilds from is whatever `setText` last wrote, and `setText`'s own doc names its
+   * callers: `recompile`, driven by `ScratchEditor`'s own 300ms debounce (`editor-debounce.ts`'s
+   * `EDITOR_DEBOUNCE_MS`), not by every keystroke. The rebind a few lines up is what takes the copy's
+   * editor down, and `ScratchEditor.destroy()` used to CANCEL a pending debounce, so a keystroke typed
+   * inside that window and followed by a pause before the timer fired never reached `setText`. The
+   * pause's handler in `main.ts` now sends the pending edit first (`EditorCustody.flush`), and an editor
+   * that comes down sends what it held (`destroy()` flushes). An edit that still arrives after this
+   * method has put the buffer to sleep is recorded too (`recompile`'s own doc names the route).
    *
    * For what this doc used to claim and why it changed, see the history note under `cool`.
    */
@@ -838,18 +836,20 @@ export class ScratchBuffers {
       detached: true,
       client,
       legs: this.#pendingLegs(state.leg),
-      // **`null` AT CONSTRUCTION FOR BOTH LEGS, AND THE REASON IS NOT THE SAME FOR BOTH.** A λ buffer
+      // **`null` AT CONSTRUCTION FOR EVERY LEG, AND THE REASON IS NOT THE SAME FOR EVERY ONE.** A λ buffer
       // never gets a machine at all — its worker answers `scratch-compiled`, which carries no
       // `TmProgram` (5d-i §3.3: no TM leg, no `SourceMap`), and no TM pane can ever bind to it either,
-      // so nothing will ever write here. A TM buffer's worker DOES answer `tm-scratch-compiled`, which
-      // DOES carry a `TmProgram`, and `replies.ts`'s `onScratchReply` stores it here, with the file's
-      // status and value reading in `tmScratch`, once that reply arrives. What is shared between the
-      // two legs is that neither has either at the moment this entry is created, and for a λ buffer
-      // that is permanent.
+      // so nothing will ever write here; nor does an asm copy's `asm-scratch-compiled` carry one. A TM
+      // buffer's worker DOES answer `tm-scratch-compiled`, which DOES carry a `TmProgram`, and
+      // `replies.ts`'s `onScratchReply` stores it here, with the file's status and value reading in
+      // `tmScratch`, once that reply arrives. What is shared between the legs is that none has either at
+      // the moment this entry is created, and for a λ or asm buffer that is permanent.
       tmProgram: null,
       tmScratch: null,
-      // NO COPY HAS AN ASM LEG UNTIL PART 5c (`legs.ts`'s `CopyLeg`), so nothing will ever write here either.
+      // AN ASM COPY'S LISTING AND READING, written by `replies.ts`'s `asm-scratch-compiled` arm as a TM copy's machine
+      // is; `null` for good on a λ or TM copy, which has no asm leg.
       asmProgram: null,
+      asmScratch: null,
     })
     state.warm = true
     // SUPERSEDE THEN POST, the pattern `compile.ts`'s `schedule` uses and for the same reason
@@ -863,9 +863,13 @@ export class ScratchBuffers {
       case 'tm':
         // NO STEP ON THE TM SIDE, FOR `SessionClient.tmScratch`'s OWN REASON: a machine has no step-k
         // term to replay to, since its text IS the machine. `step` is still a parameter of this method —
-        // `warm` passes it as `0` for both legs, `#mint` forwards whatever `fork` was handed — and simply
+        // `warm` passes it as `0` for every leg, `#mint` forwards whatever `fork` was handed — and simply
         // goes unread on the arm that has nothing to replay.
         client.tmScratch(gen, src)
+        break
+      case 'asm':
+        // NO STEP, FOR THE TM ARM'S REASON: an asm copy's text is its program, run from its first instruction.
+        client.asmScratch(gen, src)
         break
       default:
         unhandled(state.leg)
@@ -879,13 +883,15 @@ export class ScratchBuffers {
    * changed is WHICH leg gets it. A session holds at most one leg per `Leg`, and this is where that is
    * decided for a buffer.
    */
-  #pendingLegs(leg: CopyLeg): SessionLegs {
+  #pendingLegs(leg: Leg): SessionLegs {
     const status = { available: false, reason: 'building…' }
     switch (leg) {
       case 'lambda':
         return { lambda: { hist: new History<LambdaState>(this.#bytes), status, done: null, playing: false } }
       case 'tm':
         return { tm: { hist: new History<TmState>(this.#bytes), status, done: null, playing: false } }
+      case 'asm':
+        return { asm: { hist: new History<AsmState>(this.#bytes), status, done: null, playing: false } }
     }
   }
 
@@ -1020,22 +1026,23 @@ export class ScratchBuffers {
    * be a second name for one request.
    *
    * **IT TAKES THE BUFFER IT REBUILDS, AND THAT IS A CHANGE THIS TASK MADE RATHER THAN INHERITED.**
-   * Under the singleton there was nothing to name. Its caller is `transport.ts`'s `editScratch`, one
-   * per λ pane, and the pane knows which buffer it is showing — so passing `slot.binding.session` costs
-   * one argument and removes the only reading under which typing into one pane could rebuild a term
-   * another pane is showing. `retire` and `noSessionReply` below are keyed the same way.
+   * Under the singleton there was nothing to name. Its caller is the sink `transport.ts`'s `editSink` builds for
+   * each editor, which names the buffer the editor was built for — so passing it costs one argument and removes
+   * the only reading under which typing into one pane could rebuild a term another pane is showing. `retire` and
+   * `noSessionReply` below are keyed the same way.
    *
-   * **`this.#reg.entryOf(id)` BELOW WOULD THROW FOR A COLD BUFFER'S ID, AND THAT IS UNREACHABLE RATHER
-   * THAN GUARDED AGAINST.** `#buffers.has(id)` used to imply a registry entry — a buffer was in
-   * `#buffers` and in the registry together or in neither — and that invariant is exactly what 5d-ii-d's
-   * cold buffers falsified (`#buffers`'s own doc records it). What makes the throw unreachable here is a
-   * narrower invariant `cool` now maintains instead: **a cold buffer has no panes bound to it**, because
-   * `cool` rebinds every pane on `id` to `home` before it forgets the session (`cool`'s own doc). This
-   * method's only caller, `transport.ts`'s `editScratch`, is reached from a pane's own binding —
-   * `slot.binding.session` — so calling it with a cold buffer's id would require a pane still bound to
-   * one to call it from, and there is none left to hold. The membership check above still answers
-   * `false` for an id no fork ever minted, or a buffer already retired; it does not need to, and does
-   * not, distinguish warm from cold.
+   * **A COLD BUFFER'S TEXT IS RECORDED AND NOTHING IS POSTED — `this.#reg.entryOf(id)` BELOW WOULD THROW
+   * FOR ITS ID.** `#buffers.has(id)` used to imply a registry entry — a buffer was in `#buffers` and in
+   * the registry together or in neither — and that invariant is exactly what 5d-ii-d's cold buffers
+   * falsified (`#buffers`'s own doc records it). This used to call the throw unreachable, because `cool`
+   * rebinds every pane on `id` before it forgets the session and this method's caller read a pane's
+   * binding. The caller is now an editor's own sink, bound to its copy when the editor was built
+   * (`transport.ts`'s `editSink`), and an edit can arrive after the pause that put its copy to sleep: the
+   * click on *pause* blurs the editor, *format on blur* starts a format that takes the pending edit off
+   * the debounce, and when the server answers after the pause the format sends the edit it owed
+   * (`ScratchEditor.format`). The text is the user's, so it is kept, and `warm` builds it. The membership
+   * check above answers `false` for an id no fork ever minted, or a buffer already retired, which is where
+   * an edit sent after a delete goes: nowhere.
    *
    * **IT DOES NOT REBIND AND DOES NOT TOUCH THE REGISTRY.** The pane is already on this session and
    * stays on it; what changes is the term behind the leg. `resetLegs` is NOT called here either — the
@@ -1056,6 +1063,9 @@ export class ScratchBuffers {
     // text; the other writer is `replies.ts`'s `scratch-compiled` arm, which carries the worker's
     // answer for a fork. Two writers, both already-existing call sites, and no third.
     this.setText(id, src)
+    // A SLEEPING BUFFER KEEPS THE TEXT AND BUILDS NOTHING — it has no worker to build on, and `warm` rebuilds
+    // from what was just written. See this method's doc for how an edit reaches a sleeping buffer at all.
+    if (!state.warm) return true
     const client = this.#reg.entryOf(id).client
     // BRANCHES ON `state.leg`, MIRRORING `#spawn` — 5d-iv T5 REVIEW FIX. This used to post
     // `client.scratch` unconditionally, which is `lambda-scratch` on the wire regardless of which leg
@@ -1070,6 +1080,9 @@ export class ScratchBuffers {
         break
       case 'tm':
         client.tmScratch(gen, src)
+        break
+      case 'asm':
+        client.asmScratch(gen, src)
         break
       default:
         unhandled(state.leg)
@@ -1176,7 +1189,7 @@ export class ScratchBuffers {
    * stays `null`, and `LambdaPane.setDiagnostics` (`this.#editor?.setDiagnostics(ds)`) is a silent
    * no-op — the pane reads the `'building…'` placeholder `fork` seeded forever, and `#refreshDetach`'s
    * `!this.#detached` gate hides the only control that could recover it, because this session IS the
-   * one the pane is stuck on. `editScratch`'s recompile can ALSO fail, on a buffer that already has a
+   * one the pane is stuck on. An edit's recompile can ALSO fail, on a buffer that already has a
    * good build behind it — the ordinary case a user hits on nearly every mid-identifier keystroke —
    * and there 5d-i design §4.4 is explicit: "an edit that does not parse leaves the frames region
    * showing the last good run". Retiring on THAT path would erase the very term that sentence promises
@@ -1189,22 +1202,22 @@ export class ScratchBuffers {
    * the only surface left; a buffer mid-edit has a mounted editor with a gutter built for exactly this. Reporting
    * a mid-edit parse failure as a failed FORK would also be a lie about which gesture failed.
    *
-   * **THE DISCRIMINATOR IS WHETHER THE λ LEG HAS EVER RECORDED A FRAME.** A fork posts exactly one
-   * build per buffer and posts it at creation, so a buffer with no frame yet has had nothing but that
-   * build addressed to it. A buffer that already holds a frame can only be
-   * mid-`recompile`, because that is the only other message this class ever posts to an existing
-   * buffer. The two cases are still exhaustive and mutually exclusive by construction, not by
-   * inspecting which caller happened to trigger this reply — **FOR A λ BUFFER.** The line below reads
-   * `legs.lambda` UNCONDITIONALLY, which is a λ buffer's own leg but never a TM buffer's — `#spawn`
-   * gives a `'tm'` buffer's entry a `tm` leg and no `lambda` leg at all, so `leg !== undefined` is
-   * `false` for one on every call, and this method takes the phantom branch every time regardless of
-   * which of the two reasons actually produced the reply. **THAT NOW DISAGREES WITH WHAT A USER SEES,
-   * AND IS RECORDED HERE RATHER THAN FIXED.** This paragraph used to say it could not, because nothing
-   * routed a TM buffer's `tm-scratch-compiled` or its `tm-frames`. `replies.ts`'s `onScratchReply` routes
-   * both, so a TM buffer's own `tm` leg records frames, and this discriminator answers wrong for a TM
-   * buffer's `recompile` (5d-iv T5 review round, Important 1), as this paragraph predicted. Measured in
-   * Chrome: an unparseable edit to a TM buffer whose build had succeeded put `fork failed — unrecognized
-   * line · …` on `#link-status`.
+   * **THE DISCRIMINATOR IS WHETHER THE COPY'S OWN LEG HAS EVER RECORDED A FRAME.** A fork posts exactly
+   * one build per buffer and posts it at creation, so a buffer with no frame yet has had nothing but that
+   * build addressed to it. A buffer that already holds a frame can only be mid-`recompile`, because that is
+   * the only other message this class ever posts to an existing buffer. The two cases are exhaustive and
+   * mutually exclusive by construction, not by inspecting which caller happened to trigger this reply — on
+   * every leg, because the line below reads `legs[state.leg]`: the one leg `#spawn` gave the buffer's entry.
+   *
+   * **IT READ `legs.lambda` FOR EVERY BUFFER UNTIL SPEC AMENDMENT 27, AND THIS IS THE MEASUREMENT THAT LED
+   * THERE.** `#spawn` gives a TM buffer's entry a `tm` leg and no `lambda` leg at all, so for one the λ leg's
+   * absence took the phantom branch on every call, whichever of the two reasons produced the reply. That was
+   * invisible while nothing routed a TM buffer's `tm-scratch-compiled` or its `tm-frames`; once `replies.ts`'s
+   * `onScratchReply` routed both, the discriminator answered wrong for a TM buffer's `recompile` (Important 1 of
+   * a 5d-iv review round). Measured in Chrome: an unparseable edit to a TM buffer whose build had succeeded put
+   * `fork failed — unrecognized line · …` on `#link-status`, where a λ copy's edit shows its diagnostics in the
+   * editor alone. An asm copy would have inherited it, so amendment 27 made the line read the copy's own leg,
+   * which fixed the TM copy with it.
    *
    * RETURNS THE DIAGNOSTICS ON THE PHANTOM PATH, so the caller has the reason to put on the surface
    * built for it — a routing decision rather than a report on something that has already happened.
@@ -1260,7 +1273,7 @@ export class ScratchBuffers {
   noSessionReply(id: SessionId, diagnostics: readonly Diagnostic[]): readonly Diagnostic[] | null {
     const state = this.#buffers.get(id)
     if (state === undefined || !state.warm) return null
-    const leg = this.#reg.entryOf(id).legs.lambda
+    const leg = this.#reg.entryOf(id).legs[state.leg]
     if (leg !== undefined && leg.hist.current !== undefined) return null
     return diagnostics
   }

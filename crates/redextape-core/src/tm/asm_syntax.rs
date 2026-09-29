@@ -10,8 +10,10 @@
 //! for the TM text form, and for the same reasons.
 
 use crate::core::BinOp;
-use crate::nav::{DefKind, NameIndex};
-use crate::tm::asm::{AsmHeader, Instr, OperandKind, Program, Reg};
+use std::collections::HashSet;
+
+use crate::nav::{DefKind, NameIndex, Role};
+use crate::tm::asm::{AsmHeader, Instr, OperandKind, Program, Reg, label_name_representable};
 use crate::tm::comments::{self, AnchoredComment, AsmAnchor};
 use crate::{Diagnostic, Span};
 
@@ -446,6 +448,49 @@ pub fn parse_asm_nav(src: &str) -> (AsmDocument, NameIndex) {
 pub fn parse_asm(src: &str) -> (Option<Program>, Vec<Diagnostic>) {
     let d = parse_asm_full(src);
     (d.program, d.diagnostics)
+}
+
+/// The labels a file names wrongly, as errors at the names: a jump or call to a label nothing defines, a
+/// label defined again, and a label name the printer cannot write back.
+///
+/// **THE PARSER ACCEPTS ALL THREE AND `Program::validate` REFUSES ALL THREE: THIS IS THE SAME CHECK, WITH
+/// SPANS.** `parse_asm_nav` reads `jmp nowhere` with no diagnostic, resolves a duplicate label to its first
+/// definition, and reads `jmp\ttarget:` as a label with a tab in its name — a line is read alone, and a
+/// name is known wrong only once the whole file has been. `validate` refuses each as a string with no
+/// position, and `redextape run` refuses the file it rejects; an editor needs the position, and the index
+/// has it for every label and every label operand. So a file that parses and has nothing here is one
+/// `validate` passes, but for a register at or over `MAX_REGISTERS`: it has no name to point at, and the
+/// cursor faults on it at step 0. `validate`'s last check, a label past the end of the code, cannot come
+/// from text. `label_diagnostics_are_validate_with_spans` holds the two to each other.
+///
+/// **SEPARATE FROM THE PARSE, NOT MORE OF ITS DIAGNOSTICS.** `parse_asm_full`'s diagnostics are exactly the
+/// reasons it has no program, and none of these takes the program away: `redextape fmt` still formats such
+/// a file, and navigation still answers in it. The language server reports both, and a web copy refuses to
+/// run a file with either.
+#[must_use]
+pub fn asm_label_diagnostics(nav: &NameIndex) -> Vec<Diagnostic> {
+    let mut defined: HashSet<&str> = HashSet::new();
+    let mut out = Vec::new();
+    for o in (0..).map_while(|i| nav.get(i)) {
+        match o.role {
+            Role::Definition { .. } => {
+                if !label_name_representable(&o.name) {
+                    out.push(Diagnostic::error(o.span, "a label name cannot contain whitespace, `:` or `,`"));
+                }
+                if !defined.insert(o.name.as_str()) {
+                    out.push(Diagnostic::error(
+                        o.span,
+                        format!("label `{}` is already defined, and every jump to it reaches the first", o.name),
+                    ));
+                }
+            }
+            Role::Reference { def: None } => {
+                out.push(Diagnostic::error(o.span, format!("undefined label `{}`", o.name)));
+            }
+            Role::Reference { def: Some(_) } => {}
+        }
+    }
+    out
 }
 
 /// One instruction line, already stripped of indentation and comments.
@@ -1048,12 +1093,13 @@ mod tests {
 
     #[test]
     fn a_dangling_jump_target_is_a_reference_that_resolves_to_nothing() {
-        // Probed: this parses with `program: Some` and ZERO diagnostics. asm never checks jump
-        // targets, so this is a clean file carrying a reference to nothing — not an error.
+        // Probed: this parses with `program: Some` and ZERO diagnostics. The parser never checks
+        // jump targets, so to it this is a clean file carrying a reference to nothing — not an
+        // error. `asm_label_diagnostics` is where it becomes one.
         let src = "result Nat\nf:\n\tjmp\tnowhere\n\tret\n";
         let (doc, nav) = parse_asm_nav(src);
         assert!(doc.program.is_some());
-        assert_eq!(doc.diagnostics.len(), 0, "the premise: asm does not check jump targets");
+        assert_eq!(doc.diagnostics.len(), 0, "the premise: the parser does not check jump targets");
         let (i, _) = nav.at(src.find("nowhere").expect("fixture")).expect("still a reference");
         assert_eq!(nav.definition_of(i), None);
     }
@@ -1061,13 +1107,90 @@ mod tests {
     #[test]
     fn a_duplicate_label_is_listed_twice_and_the_first_one_is_linked() {
         // Probed: `labels` comes back [("f", 0), ("f", 0)] with ZERO diagnostics — unlike `.tm`,
-        // which diagnoses a duplicate state name. Both must appear in an outline.
+        // whose parser diagnoses a duplicate state name; `asm_label_diagnostics` marks this one.
+        // Both must appear in an outline.
         let src = "result Nat\nf:\nf:\n\tjmp\tf\n\tret\n";
         let (doc, nav) = parse_asm_nav(src);
-        assert_eq!(doc.diagnostics.len(), 0, "the premise: asm does not diagnose duplicates");
+        assert_eq!(doc.diagnostics.len(), 0, "the premise: the parser does not diagnose duplicates");
         assert_eq!(nav.definitions().count(), 2);
         let (i, _) = nav.at(src.rfind('f').expect("fixture")).expect("the jmp operand");
         assert_eq!(nav.definition_of(i), Some(0), "the FIRST `f:`");
+    }
+
+    /// Each label mistake, at the name that makes it: the text each diagnostic's span covers, and its message.
+    /// Rows are one mistake each, plus a clean file and a register over the cap, which has no name to mark.
+    #[test]
+    fn a_label_mistake_is_marked_at_its_name() {
+        let marks = |src: &str| {
+            let (doc, nav) = parse_asm_nav(src);
+            assert!(doc.program.is_some(), "the premise: {src:?} parses");
+            asm_label_diagnostics(&nav)
+                .into_iter()
+                .map(|d| (src[d.span.start..d.span.end].to_string(), d.message))
+                .collect::<Vec<_>>()
+        };
+        assert_eq!(
+            marks("result Nat\nf:\n\tjmp\tnowhere\n\tret\n"),
+            [("nowhere".into(), "undefined label `nowhere`".into())]
+        );
+        assert_eq!(
+            marks("f:\n\tjz\tr0, g\nf:\n\tjmp\tf\n\thalt\ng:\n\thalt\n"),
+            [("f".into(), "label `f` is already defined, and every jump to it reaches the first".into())],
+        );
+        assert_eq!(
+            marks("jmp\ttarget:\n\thalt\n"),
+            [("jmp\ttarget".into(), "a label name cannot contain whitespace, `:` or `,`".into())],
+        );
+        assert_eq!(
+            marks("x,y:\n\thalt\n"),
+            [("x,y".into(), "a label name cannot contain whitespace, `:` or `,`".into())]
+        );
+        assert_eq!(marks(NAV_ASM), Vec::<(String, String)>::new(), "a clean file has nothing to mark");
+        assert_eq!(marks("\tli\tr1000000, #0\n\thalt\n"), Vec::<(String, String)>::new(), "a register has no name");
+        assert!(
+            !parse_asm_full("\tli\tr1000000, #0\n\thalt\n")
+                .program
+                .map(|p| p.validate())
+                .unwrap_or_default()
+                .is_empty()
+        );
+    }
+
+    mod label_diagnostics_are_validate_with_spans {
+        use proptest::prelude::*;
+
+        use super::super::{asm_label_diagnostics, parse_asm_nav};
+
+        /// Lines that each parse on their own, chosen so a file of them can make every mistake `validate` knows: a
+        /// label defined twice, one that cannot be written back, a jump to nothing, and a register over the cap.
+        const LINES: &[&str] = &[
+            "f:",
+            "g:",
+            "a b:",
+            "x,y:",
+            "\tjmp\tf",
+            "\tcall\tg",
+            "\tjz\tr0, h",
+            "\tjmp\tq",
+            "\thalt",
+            "\tret",
+            "\tli\tr1, #1",
+            "\tli\tr1000000, #0",
+        ];
+
+        proptest! {
+            /// A parsed file has as many label diagnostics as `validate` has complaints that are not a register's:
+            /// each check is one complaint per offending label or jump on both sides, so a count that differs is a
+            /// mistake one side sees and the other does not.
+            #[test]
+            fn label_diagnostics_count_what_validate_refuses_but_a_register(picks in prop::collection::vec(0..LINES.len(), 0..24)) {
+                let src: String = picks.iter().map(|&i| format!("{}\n", LINES[i])).collect();
+                let (doc, nav) = parse_asm_nav(&src);
+                let program = doc.program.expect("every line parses alone, and so does any file of them");
+                let refused = program.validate().into_iter().filter(|e| !e.contains("MAX_REGISTERS")).count();
+                prop_assert_eq!(asm_label_diagnostics(&nav).len(), refused, "{:?}", src);
+            }
+        }
     }
 
     #[test]

@@ -1,9 +1,9 @@
 import { showWorkerError } from './banner'
-import { n } from './format'
+import { counted, n } from './format'
 import { LEG_NAME, LEGS } from './legs'
 import type { AsmLeg, LambdaLeg, RecordEnd, TmLeg } from './protocol'
-import { noSessionRows, resultRows, valueLine } from './results'
-import type { TmScratchReading } from './sessions'
+import { endedLine, noSessionRows, resultRows, valueLine } from './results'
+import type { AsmScratchReading, TmScratchReading } from './sessions'
 import type { Diagnostic } from './types'
 import type { ReadoutSwitch } from './workspace'
 
@@ -76,7 +76,7 @@ export type LambdaCopyLeg = {
 export function lambdaCopyParts(name: string, leg: LambdaCopyLeg): string[] {
   if (!leg.status.available) return [name, leg.status.reason]
   const why = leg.done === null ? '' : STOPPED[leg.done]
-  return [name, `${n(leg.newestStep)} reductions`, ...(why === '' ? [] : [why])]
+  return [name, counted(leg.newestStep, 'reduction'), ...(why === '' ? [] : [why])]
 }
 
 export function lambdaCopySegments(name: string, leg: LambdaCopyLeg): string[] {
@@ -98,19 +98,85 @@ export type TmCopyLeg = {
   readonly status: { readonly available: boolean; readonly reason: string }
 }
 
+/** A TM copy's facts after its name, one per element: how far it has run, its value line and its reduced-file sentence. */
+export function tmCopyFacts(reading: TmScratchReading | null, leg: TmCopyLeg): string[] {
+  if (!leg.status.available) return [leg.status.reason]
+  const facts = [counted(leg.newestStep, 'transition')]
+  const value = valueLine(reading?.value ?? null)
+  if (value !== null) facts.push(value)
+  const reduction = reading?.status.reduction ?? null
+  if (reduction !== null) facts.push(`reduced: ${reduction.stages.join(', ')} · ${n(reduction.steps)} steps`)
+  return facts
+}
+
 /** A TM copy's facts, one per element, by `lambdaCopyParts`' rule. */
 export function tmCopyParts(name: string, reading: TmScratchReading | null, leg: TmCopyLeg): string[] {
-  if (!leg.status.available) return [name, leg.status.reason]
-  const parts = [name, `${n(leg.newestStep)} transitions`]
-  const value = valueLine(reading?.value ?? null)
-  if (value !== null) parts.push(value)
-  const reduction = reading?.status.reduction ?? null
-  if (reduction !== null) parts.push(`reduced: ${reduction.stages.join(', ')} · ${n(reduction.steps)} steps`)
-  return parts
+  return [name, ...tmCopyFacts(reading, leg)]
 }
 
 export function tmCopySegments(name: string, reading: TmScratchReading | null, leg: TmCopyLeg): string[] {
   return [tmCopyParts(name, reading, leg).join(' · ')]
+}
+
+/** What an asm copy's line reads of its leg: how far its recording has got, and whether it has a status yet. */
+export type AsmCopyLeg = {
+  readonly newestStep: number
+  readonly done: RecordEnd | null
+  readonly status: { readonly available: boolean; readonly reason: string }
+}
+
+/**
+ * An asm copy's facts after its name, one per element: how far its recording has got, why it stopped if a cap stopped
+ * it, and its value, which came with its build (spec amendment 26) and reads as its view's value line reads.
+ */
+export function asmCopyFacts(reading: AsmScratchReading | null, leg: AsmCopyLeg): string[] {
+  if (!leg.status.available) return [leg.status.reason]
+  const why = leg.done === null ? '' : STOPPED[leg.done]
+  return [
+    counted(leg.newestStep, 'instruction'),
+    ...(why === '' ? [] : [why]),
+    ...(reading === null ? [] : [endedLine(reading.value)]),
+  ]
+}
+
+/** An asm copy's facts, by `lambdaCopyParts`' rule: its name, then `asmCopyFacts`. */
+export function asmCopyParts(name: string, reading: AsmScratchReading | null, leg: AsmCopyLeg): string[] {
+  return [name, ...asmCopyFacts(reading, leg)]
+}
+
+export function asmCopySegments(name: string, reading: AsmScratchReading | null, leg: AsmCopyLeg): string[] {
+  return [asmCopyParts(name, reading, leg).join(' · ')]
+}
+
+/**
+ * What a TM copy's row in the copies menu says below its name: its readout line without the name, so a copy that
+ * halted with a value, is still running its value run, or has not built yet reads there as it reads in the strip, in
+ * the strip's words. `asmCopyRow` is the asm copy's, which adds a fault and a cap that stopped it.
+ *
+ * **A MACHINE COPY HAS NO TERM, AND ITS ROW USED TO SAY SO IN WORDS THAT WERE NOT TRUE.** The row's second line is a
+ * λ copy's current term; `main.ts` answered `null` for a TM or asm copy, which has none, and `null` reads
+ * `no term yet` — "nothing has come back" — under a copy that had run to `value: 6`. What such a copy holds is its
+ * run, and its readout already says what became of it.
+ */
+export function tmCopyRow(reading: TmScratchReading | null, leg: TmCopyLeg): string {
+  return tmCopyFacts(reading, leg).join(' · ')
+}
+
+/** What an asm copy's row in the copies menu says below its name — `tmCopyRow`'s rule, one leg over. */
+export function asmCopyRow(reading: AsmScratchReading | null, leg: AsmCopyLeg): string {
+  return asmCopyFacts(reading, leg).join(' · ')
+}
+
+/**
+ * A leg's live state as a copy's readout reads it — how far its recording has got, how it ended, and whether it has a
+ * status yet. One shape for every leg: a TM copy's line reads all but `done`.
+ */
+export function copyLegOf(leg: {
+  readonly hist: { readonly newestStep: number }
+  readonly done: RecordEnd | null
+  readonly status: { readonly available: boolean; readonly reason: string }
+}): LambdaCopyLeg & AsmCopyLeg & TmCopyLeg {
+  return { newestStep: leg.hist.newestStep, done: leg.done, status: leg.status }
 }
 
 /**

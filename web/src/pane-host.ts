@@ -1,4 +1,5 @@
 import { AsmPane } from './asm-pane'
+import { seedAsm } from './asm-seed'
 import type { EditablePane, EditorCustody } from './editor-custody'
 import { LambdaPane } from './lambda-pane'
 import {
@@ -19,10 +20,16 @@ import type { LeafId, PaneCollection, PaneKind } from './panes'
 import type { Leg } from './protocol'
 import type { Detachable } from './scratch'
 import type { SessionId } from './session-client'
-import { type Binding, PaneSlot, type TmCompiled, type TmScratchReading } from './sessions'
+import {
+  type AsmCompiled,
+  type AsmScratchReading,
+  type Binding,
+  PaneSlot,
+  type TmCompiled,
+  type TmScratchReading,
+} from './sessions'
 import { TmPane } from './tm-pane'
 import { seedTm } from './tm-seed'
-import type { AsmProgram } from './types'
 import { DEFAULT_DISPLAY, DEFAULT_TM_DISPLAY, type LambdaDisplay, type TmDisplay } from './workspace'
 
 /**
@@ -85,6 +92,11 @@ export type PaneHost = {
    * steps a tree-changing gesture owes, in the one order that works on the stage. See the implementation.
    */
   focusView(id: LeafId | null): void
+  /**
+   * `focusView`, with every view the tree keeps that shows a copy rebuilt on the program — *reset preset*, which says
+   * it restores the default views. See the implementation.
+   */
+  resetViews(id: LeafId): void
   /** Pre-seed the source pane's host, which `main.ts` owns the contents of. */
   seedHost(id: LeafId, host: HTMLElement): void
   /** Record the session a leaf should start on — see the implementation for who asks and when. */
@@ -97,7 +109,7 @@ export type PaneHost = {
   /**
    * Move each of `leaves` that still shows `from` onto `to`, reseeding a TM view first as `reseedingSlots`
    * does — undo's half of a delete (spec §10), which moves back the views the delete moved, if they still
-   * exist and still show the program. Returns the leaves it moved.
+   * exist and still show the program — and mount `to`'s editor on the first of them. Returns the leaves it moved.
    */
   moveBack(leaves: readonly LeafId[], from: SessionId, to: SessionId): LeafId[]
   /**
@@ -185,8 +197,9 @@ function holdsEditor(kind: PaneKind): boolean {
     case 'lambda':
       return true
     case 'asm':
-      // AN ASM VIEW HAS NO EDITOR UNTIL PART 5c'S ASM COPIES, which are the only thing it could edit.
-      return false
+      // AN ASM VIEW HOLDS AN ASM COPY'S EDITOR (Plan 7 part 5 spec, amendment 28), and comes to show a blank one only
+      // through this arm, as a TM view does — the TM arm below has what leaving it out cost that leg.
+      return true
     case 'tm':
       // **`'tm'` TOO, WHERE THE CHECK USED TO BE `'lambda'` ALONE — 5d-iv T10.** A `ScratchBuffers.forkBlank`'d
       // TM buffer binds no pane at mint, so the ONLY way a TM pane ever comes to show one is the same-leg
@@ -261,10 +274,13 @@ export function createPaneHost(deps: {
    */
   tmScratchOf(session: SessionId): TmScratchReading | null
   /**
-   * The asm listing `session` last compiled, or `null` — `tmProgramOf`'s twin for an asm view, asked for its reason: a
-   * view built after the `compiled` reply that told the others has to be told from what the session kept.
+   * The asm listing `session` last compiled and its text, or `null` — `tmProgramOf`'s twin for an asm view, asked for
+   * its reason: a view built after the `compiled` reply that told the others has to be told from what the session
+   * kept. The text is what *edit a copy* seeds a copy from (`sessions.ts`'s `AsmCompiled`).
    */
-  asmProgramOf(session: SessionId): AsmProgram | null
+  asmProgramOf(session: SessionId): AsmCompiled | null
+  /** An asm copy's retained reading, or `null` for any other session — `tmScratchOf`'s twin for an asm view. */
+  asmScratchOf(session: SessionId): AsmScratchReading | null
   /**
    * The text and collapse flag a λ pane newly bound to `session` should mount its editor from, or
    * `null` when `session` is not a warm scratch buffer — `mountScratchEditor` below is the one caller.
@@ -312,20 +328,20 @@ export function createPaneHost(deps: {
     tmProgramOf,
     tmScratchOf,
     asmProgramOf,
+    asmScratchOf,
     scratchSeedOf,
   } = deps
 
   /**
    * Give a pane that has just come to be bound to a warm buffer an editor, if nothing else holds one.
    *
-   * **`pane: EditablePane`, NOT `LambdaPane` — 5d-iv T10.** This took `LambdaPane` specifically until a
-   * blank TM buffer (`ScratchBuffers.forkBlank`) made the identical gap reachable on the other leg: a
-   * `forkBlank`'d buffer binds no pane at mint (unlike a fork, which rebinds its own slot), so the ONLY
-   * route to an editor is a later pick through a TM pane's own selector — this function, called from the
-   * same-leg `rebind` arm below, widened the same way `editor-custody.ts`'s `EditablePane` already lets
-   * `homeFor`/`hold` cover both panes without a union. `TmPane implements EditablePane` exactly as
-   * `LambdaPane` does (`setEditor`/`takeEditor`/`receiveEditor`/`holdsEditor`), so nothing in this body
-   * changes — only the type of what it is handed.
+   * **`pane: EditablePane`, NOT `LambdaPane`.** This took `LambdaPane` specifically until a blank TM buffer
+   * (`ScratchBuffers.forkBlank`) made the identical gap reachable on another leg: a `forkBlank`'d buffer binds no
+   * pane at mint (unlike a fork, which rebinds its own slot), so the ONLY route to an editor is a later pick through
+   * a TM pane's own selector — this function, called from the same-leg `rebind` arm below, widened the same way
+   * `editor-custody.ts`'s `EditablePane` already lets `homeFor`/`hold` cover every view without a union. `TmPane`
+   * and `AsmPane` implement `EditablePane` exactly as `LambdaPane` does, so nothing in this body changes — only the
+   * type of what it is handed.
    *
    * **WITHOUT THIS, A `cool` FOLLOWED BY A `warm` LEAVES A BUFFER THAT CAN NEVER BE EDITED AGAIN.**
    * `ScratchBuffers.cool` rebinds every pane away from the buffer it sleeps (that is the invariant the
@@ -362,9 +378,19 @@ export function createPaneHost(deps: {
    * click.
    *
    * **IT CANNOT MOUNT TWICE.** `LambdaPane.setEditor`'s second branch re-seeds a live editor rather than
-   * building another (`receiveEditor` is the method that throws, and this is not it), and the pane
-   * reaching either call site is holding nothing anyway: a pane one statement old has `#editor === null`,
-   * and the rebind arm hands its outgoing editor to custody before it delegates.
+   * building another (`receiveEditor` is the method that throws, and this is not it), and the `hasEditor`
+   * gate returns before either whenever any view holds the session's editor — the pane this is called for
+   * included.
+   *
+   * **EVERY VIEW, ON EVERY LEG, THAT COMES TO SHOW A COPY WHOSE EDITOR IS MOUNTED NOWHERE — WHERE IT WAS THE λ
+   * CREATION ARM AND THE SAME-LEG PICK.** A TM or asm view's editor otherwise came only from a build that landed, so a
+   * copy whose stored text does not build came back after a reload as a view with no editor and no way to one — the
+   * plainest case an asm copy with a jump before its label — and a view picked onto a copy from another leg, split
+   * onto it, added with `+ view` or brought back by undo showed it the same way. Each of those routes calls this now
+   * (the creation pass, `moveBack`), and so do the two ways a copy's editor comes down while another view shows it:
+   * the view holding it closing or changing leg (the drop pass) and moving to another session (the same-leg rebind
+   * arm), through `mountOnViewOf` below. A view showing a copy whose editor another view holds gets nothing here, and
+   * offers *move the editor here* (`showEditor` below): one editor per copy, in one view.
    *
    * For what this doc used to claim and why it changed, see the history note under `mountScratchEditor`.
    */
@@ -374,6 +400,23 @@ export function createPaneHost(deps: {
     if (seed === null) return
     custody.claim(session, leaf)
     pane.setEditor(seed.text, seed.collapsed)
+  }
+
+  /**
+   * Mount `session`'s editor on the first view in the tree still showing it — after the view that held it destroyed
+   * it by closing, changing leg or moving to another session, which a TM or asm view does (spec amendment 33).
+   *
+   * **THE TREE'S ORDER, THE RESTORE'S RULE** (`main.ts`'s restore loop): stable, visible on screen, and nothing moves
+   * the editor afterwards but a click. A λ view never needs this — the editor it leaves waits in custody, and a view
+   * still showing the copy offers to bring it back — and a copy's views are all on its one leg.
+   */
+  const mountOnViewOf = (session: SessionId): void => {
+    for (const l of leaves(getTree())) {
+      const p = panes.get(l.id)
+      if (p === undefined || p.slot.binding.session !== session) continue
+      mountScratchEditor(l.id, p.pane as unknown as EditablePane, session)
+      return
+    }
   }
 
   /**
@@ -393,7 +436,7 @@ export function createPaneHost(deps: {
    *
    * **A BUFFER'S FORK FACTS ARE PUSHED TOO, `tmText: null` BESIDE ITS RULE COUNT**, although `replies.ts` declines to
    * push them because they would read as "over the cap". Here they are never read as anything. Every buffer's session
-   * is detached, `TmPane.#refreshDetach` shows no control on a detached pane, and every route back to an attached
+   * is detached, `CopyEditor.#refreshDetach` shows no control on a detached pane, and every route back to an attached
    * session reseeds the pane. Skipping them would need to tell a buffer from a source machine over the cap, which
    * also has `tmText: null`, and that is a question this module does not ask of a session.
    */
@@ -403,11 +446,11 @@ export function createPaneHost(deps: {
 
   /**
    * Tell an asm view the listing `session` holds, or that it holds none — `seedTmPane`'s twin, and for its reason: a
-   * view comes to show a session after the reply that told the others, by being built or by being moved. Only the
-   * program has an asm leg until part 5c, so today every asm view is seeded from it.
+   * view comes to show a session after the reply that told the others, by being built or by being moved. The program's
+   * session and an asm copy's both keep a listing — `compiled` and `asm-scratch-compiled` retain it.
    */
   const seedAsmPane = (pane: AsmPane, session: SessionId): void => {
-    pane.setProgram(asmProgramOf(session))
+    seedAsm(pane, asmProgramOf(session), asmScratchOf(session))
   }
 
   /**
@@ -469,10 +512,10 @@ export function createPaneHost(deps: {
    * branch below would go on describing the pane this host used to hold.
    *
    * **IT IS ALSO WHERE "WHICH PANE IS THE USER WORKING IN" GETS ITS ONE ANSWER.** `PaneCollection.active`
-   * — the pane the ONE source-editor decoration (`draw.ts`) and the ONE status line (`link-wiring.ts`)
-   * describe once a leg holds more than one — reads a mark that nothing in the app was setting, so it
-   * degenerated to the insertion-order `first` it replaced and those two surfaces narrated whichever pane
-   * happened to exist earliest. The listener below is that mark's only writer.
+   * — the view each leg's running focus is read from once a leg holds more than one view of the program
+   * (`draw.ts`) — reads a mark that nothing in the app was setting, so it degenerated to the insertion-order
+   * `first` it replaced and the surfaces it drives narrated whichever pane happened to exist earliest. The
+   * listener below is that mark's only writer.
    *
    * For what this doc used to claim and why it changed, see the history note under `hostFor`.
    */
@@ -498,15 +541,15 @@ export function createPaneHost(deps: {
     //
     // THE SOURCE PANE NEVER GETS ONE, AND THAT IS THE RIGHT ABSENCE RATHER THAN AN ACCIDENT OF
     // `seedHost` RUNNING FIRST. Clicking into the source editor must not blank out which λ pane the
-    // status line is describing — `active` is per leg precisely so it cannot, and the source pane is on
-    // neither leg. (`markActive` would ignore the id anyway: `applyLayout` never builds a `PaneEntry`
+    // source editor's focus mark is read from — `active` is per leg precisely so it cannot, and the source
+    // pane is on neither leg. (`markActive` would ignore the id anyway: `applyLayout` never builds a `PaneEntry`
     // for it.)
     //
-    // `markActive` TAKES THE `LeafId` AND DERIVES THE LEG ITSELF, which is what keeps `panes.ts` free of
-    // the DOM: this listener knows only which host fired, and the collection already holds the entry
-    // that says which leg that is.
+    // `markActive` TAKES THE `LeafId` AND LEAVES THE LEG TO THE COLLECTION, which is what keeps `panes.ts`
+    // free of the DOM: this listener knows only which host fired, and the collection already holds the
+    // entry that says which leg that is.
     //
-    // `draw()` IS WHAT REPAINTS THE TWO SURFACES FROM THE NEWLY ACTIVE PANE. It is a full frame for a
+    // `draw()` IS WHAT REPAINTS THE RUNNING FOCUSES FROM THE NEWLY ACTIVE PANE. It is a full frame for a
     // focus click, which is the same cost every transport click already pays; `active`'s fallback makes
     // the whole listener a no-op in outcome for a leg holding one pane.
     //
@@ -545,11 +588,9 @@ export function createPaneHost(deps: {
    * the identical wrapping for the identical reason: `transport.ts` resolves a fork against the
    * registry and the session's own `tmProgram`, neither of which knows a `LeafId` exists; `editorOwner`
    * is keyed by one, so pairing the two has to happen here, the same division `splitRow`/`splitColumn`/
-   * `close` already draw for the layout gestures below them. `showEditor` HAS NO TM COUNTERPART — a TM
-   * view builds a `viewMenu` like any other, but never its *move the editor here* item
-   * (`PaneEvents.showEditor`'s own doc: the affordance "exists only on a pane whose slot may be bound
-   * to a scratch, which today means the λ leg" — a TM scratch's editor never moves between panes the
-   * way a λ one can).
+   * `close` already draw for the layout gestures below them. `showEditor` is every leg's: a TM or asm
+   * view showing a copy whose editor another view of the copy holds offers *move the editor here* as a
+   * λ view does, and it moves the editor the same way.
    *
    * For what this doc used to claim and why it changed, see the history note under `paneEvents`.
    */
@@ -620,79 +661,72 @@ export function createPaneHost(deps: {
       layoutChanged({ kind: 'added', leaf: created, shows: choice })
     }
 
+    /**
+     * A fork handler of `base`'s, wrapped so this leaf claims the copy it made — THE FIRST-MOUNT HALF OF
+     * `editorOwner`, one wrapper for every leg's *edit a copy* (`detach`, `detachMachine`, `detachAsm`). Each base
+     * handler (when it fires at all — the guards inside `transport.ts`'s own handlers can decline, and a fork refused
+     * at the cap declines too) REBINDS `slot` SYNCHRONOUSLY, before this wrapper resumes, so `slot.binding.session`
+     * already names the new copy by the time the claim is made — checked rather than assumed, because a declined
+     * attempt leaves the binding exactly where it was, and recording ownership for a fork that never happened would
+     * point `editorOwner` at a session with no editor to come.
+     *
+     * **THE CHECK IS "DID THE BINDING MOVE", WHERE IT USED TO BE "IS IT THE SCRATCH".** 5d-ii-c decision 1 mints a
+     * buffer id per fork, so there is no constant left to compare with — and comparing before against after is what
+     * that comparison was really asking, since the only thing a fork can do to this slot is move it onto the copy it
+     * just made.
+     */
+    const claiming =
+      <A extends unknown[]>(fork: ((...args: A) => void) | undefined) =>
+      (...args: A): void => {
+        const before = slot.binding.session
+        fork?.(...args)
+        const after = slot.binding.session
+        if (after !== before) custody.claim(after, id)
+      }
+
     return {
       ...base,
-      ...(slot.binding.leg === 'lambda'
-        ? {
-            // THE FIRST-MOUNT HALF OF `editorOwner`. `base.detach` (when it fires at all — the guards
-            // inside `transport.ts`'s own handler can decline) REBINDS `slot` SYNCHRONOUSLY, before this
-            // wrapper resumes, so `slot.binding.session` already names the new buffer by the time this
-            // line runs — checked rather than assumed, because a declined attempt leaves the binding
-            // exactly where it was (still the source session), and recording ownership for a fork that
-            // never happened would point `editorOwner` at a session with no editor to come.
-            //
-            // **THE CHECK IS "DID THE BINDING MOVE", WHERE IT USED TO BE "IS IT THE SCRATCH".** 5d-ii-c
-            // decision 1 mints a buffer id per fork, so there is no constant left to compare with — and
-            // comparing before against after is what that comparison was really asking, since the only
-            // thing `detach` can do to this slot is move it onto the buffer it just made.
-            detach: (step: number) => {
-              const before = slot.binding.session
-              base.detach?.(step)
-              const after = slot.binding.session
-              if (after !== before) custody.claim(after, id)
-            },
-            // THE MOVE HALF. Only `editorOwner` changes here — `reconcileEditors` (below `applyLayout`)
-            // is what actually relocates the mounted `ScratchEditor`, which is what lets this handler stay
-            // as small as `PaneEvents.showEditor`'s own doc says it should be: report the click, know
-            // nothing else.
-            // **AND IT PUTS THE FOCUS BACK, LIKE EVERY OTHER `applyLayout` CALLER — CRITICAL FINDING,
-            // WHOLE-BRANCH REVIEW BEFORE MERGE.** `renderLayout`'s `root.replaceChildren()` detaches
-            // every child of `<main>`, and detaching the subtree holding `document.activeElement` drops
-            // focus to `<body>`; its one rescue matches `.layout-divider` by `data-path`/`data-index`,
-            // which no control inside a host has. That is why `split`, `close`, the cross-leg rebind
-            // arm, `addView` and `main.ts`'s source-view close all end in `focusPane`. This one did not,
-            // and the gesture reaches it. Spec §11's "Focus never falls to `<body>`" is categorical, and
-            // the asymmetry it left inside one menu was the tell: *edit a copy* never calls
-            // `applyLayout` (`transport.ts`'s `detach` rebinds and calls `draw()`), so only this item
-            // lost the focus.
-            //
-            // **WHAT `shut()` LEAVES BEHIND IS THE PRE-OPEN ELEMENT, NOT THE INVOKER AND NOT THE ITEM —
-            // measured, after two wrong guesses, and this comment asserted the invoker until it was.**
-            // `hidePopover()` restores focus to whatever held it before the popover opened, so a menu
-            // item never strands the focus by itself; what strands it is this handler rebuilding the
-            // tree underneath the element that restoration just targeted.
-            // `tests/browser/scratch-buffers.test.ts` had already written this down — "with the invoker
-            // unfocused, `hidePopover` returns focus to whatever held it" — which is what a guess here
-            // contradicted. Instrumented in `two-lambda-panes.test.ts`'s own focus case, the sequence is
-            // `button.view-title`, then the first menu item on open, then `button.view-title` again on
-            // shut: never the `⋯` invoker, because a script-driven `click()` does not focus a button.
-            //
-            // That is also why the same-leg arm of `rebind` below needs no such call and was measured
-            // not to: it rebuilds no layout, so nothing detaches what the restoration targeted.
-            showEditor: () => {
-              custody.claim(slot.binding.session, id)
-              applyLayout()
-              focusPane(id)
-            },
-          }
-        : {}),
-      ...(slot.binding.leg === 'tm'
-        ? {
-            // THE FIRST-MOUNT HALF OF `editorOwner`, THIS LEG'S OWN — 5d-iv Task 9, mirroring the λ
-            // `detach` wrapper above line for line. `base.detachMachine` (`transport.ts`'s handler)
-            // rebinds `slot` SYNCHRONOUSLY when the fork actually happens, so `slot.binding.session`
-            // already names the new TM scratch by the time this wrapper resumes — checked rather than
-            // assumed, because a refused fork (the cap) leaves the binding exactly where it was, and
-            // recording ownership for a fork that never happened would point `editorOwner` at a session
-            // with no editor coming.
-            detachMachine: () => {
-              const before = slot.binding.session
-              base.detachMachine?.()
-              const after = slot.binding.session
-              if (after !== before) custody.claim(after, id)
-            },
-          }
-        : {}),
+      ...(slot.binding.leg === 'lambda' ? { detach: claiming(base.detach) } : {}),
+      // THE MOVE HALF. Only `editorOwner` changes here — `reconcileEditors` (below `applyLayout`)
+      // is what actually relocates the mounted `ScratchEditor`, which is what lets this handler stay
+      // as small as `PaneEvents.showEditor`'s own doc says it should be: report the click, know
+      // nothing else.
+      // **AND IT PUTS THE FOCUS BACK, LIKE EVERY OTHER `applyLayout` CALLER — CRITICAL FINDING,
+      // WHOLE-BRANCH REVIEW BEFORE MERGE.** `renderLayout`'s `root.replaceChildren()` detaches
+      // every child of `<main>`, and detaching the subtree holding `document.activeElement` drops
+      // focus to `<body>`; its one rescue matches `.layout-divider` by `data-path`/`data-index`,
+      // which no control inside a host has. That is why `split`, `close`, the cross-leg rebind
+      // arm, `addView` and `main.ts`'s source-view close all end in `focusPane`. This one did not,
+      // and the gesture reaches it. Spec §11's "Focus never falls to `<body>`" is categorical, and
+      // the asymmetry it left inside one menu was the tell: *edit a copy* never calls
+      // `applyLayout` (`transport.ts`'s `detach` rebinds and calls `draw()`), so only this item
+      // lost the focus.
+      //
+      // **WHAT `shut()` LEAVES BEHIND IS THE PRE-OPEN ELEMENT, NOT THE INVOKER AND NOT THE ITEM —
+      // measured, after two wrong guesses, and this comment asserted the invoker until it was.**
+      // `hidePopover()` restores focus to whatever held it before the popover opened, so a menu
+      // item never strands the focus by itself; what strands it is this handler rebuilding the
+      // tree underneath the element that restoration just targeted.
+      // `tests/browser/scratch-buffers.test.ts` had already written this down — "with the invoker
+      // unfocused, `hidePopover` returns focus to whatever held it" — which is what a guess here
+      // contradicted. Instrumented in `two-lambda-panes.test.ts`'s own focus case, the sequence is
+      // `button.view-title`, then the first menu item on open, then `button.view-title` again on
+      // shut: never the `⋯` invoker, because a script-driven `click()` does not focus a button.
+      //
+      // That is also why the same-leg arm of `rebind` below needs no such call and was measured
+      // not to: it rebuilds no layout, so nothing detaches what the restoration targeted.
+      //
+      // **ON EVERY LEG, WHERE IT WAS λ-ONLY.** A TM or asm view showing a copy whose editor another view holds offers
+      // it too (`CopyEditor.#refreshClaim`), and the sweep that moves it covers every view (`editor-custody.ts`'s
+      // `reconcileEditors`), so the same three lines move a machine copy's editor.
+      showEditor: () => {
+        custody.claim(slot.binding.session, id)
+        applyLayout()
+        focusPane(id)
+      },
+      // EACH MACHINE LEG'S FORK, CLAIMED BY THE SAME WRAPPER AS λ's — `claiming`'s doc.
+      ...(slot.binding.leg === 'tm' ? { detachMachine: claiming(base.detachMachine) } : {}),
+      ...(slot.binding.leg === 'asm' ? { detachAsm: claiming(base.detachAsm) } : {}),
       // **THE PICK, SPLIT BY ITS LEG — and the cross-leg arm is what makes a pane able to change what
       // it shows at all.** The selector offers `pairs()`, every `(leg, session)` pair in the registry,
       // to every pane (`PaneSlot.render`), so a pick can name the leg this pane does not render. The
@@ -743,7 +777,7 @@ export function createPaneHost(deps: {
            * (p.slot.binding.session !== session) continue` and the pane no longer names the session whose
            * editor it holds — and the custody pass never sees the view because nothing put it there. The
            * pane went on rendering buffer B's frames with buffer A's live CodeMirror mounted above them,
-           * permanently, and `transport.ts`'s `editScratch` reads `slot.binding.session` at EDIT time, so
+           * permanently, and `transport.ts`'s edit handler then read `slot.binding.session` at EDIT time, so
            * a keystroke in it called `recompile(B, <A's text>)`.
            *
            * DECISION 1 IS WHAT MADE THE GESTURE REACHABLE. While there was one scratch id, "rebound away
@@ -770,11 +804,11 @@ export function createPaneHost(deps: {
            * makes the cast sound; `slot.binding.leg` would answer the same today, and the entry's own
            * kind is the fact the cast is actually about.
            *
-           * **`holdsEditor` ANSWERS FOR BOTH λ AND TM PANES, WHERE THIS USED TO CHECK ONLY `'lambda'` —
-           * 5d-iv T10**, and its TM arm records what the narrower check cost this arm. `entry.pane as
-           * unknown as EditablePane`, not `as LambdaPane`: `TmPane` implements `EditablePane` exactly as
-           * `LambdaPane` does (`editor-custody.ts`'s own doc), and `PaneView<LegFrame[K]>` — what
-           * `entry.pane` is actually typed as — shares no member with either concrete class, which is why
+           * **`holdsEditor` ANSWERS FOR EVERY KIND OF VIEW THAT EDITS — λ, TM AND ASM — WHERE THIS USED TO
+           * CHECK ONLY `'lambda'`**, and its TM arm records what the narrower check cost this arm. `entry.pane
+           * as unknown as EditablePane`, not `as LambdaPane`: `TmPane` and `AsmPane` implement `EditablePane`
+           * exactly as `LambdaPane` does (`editor-custody.ts`'s own doc), and `PaneView<LegFrame[K]>` — what
+           * `entry.pane` is actually typed as — shares no member with any of the three classes, which is why
            * the cast still needs the `unknown` step `editor-custody.ts`'s `editorHomeFor` already takes for
            * the identical reason.
            *
@@ -793,9 +827,25 @@ export function createPaneHost(deps: {
             choice.session !== leaving && entry !== undefined && holdsEditor(entry.kind)
               ? (entry.pane as unknown as EditablePane)
               : null
+          // THE COPY THIS VIEW LEAVES, WHEN IT DESTROYS THAT COPY'S EDITOR — mounted again below, on a view still
+          // showing it.
+          let unmounted: SessionId | null = null
           if (moved !== null) {
             const held = moved.takeEditor()
-            if (held !== null) custody.hold(leaving, held)
+            // **HELD ONLY FOR A λ VIEW.** A λ view's held editor waits for its `move the editor here`. A TM or asm
+            // view's did too, once, and waited in a map nothing read — since `mountScratchEditor` mounts nothing while
+            // custody has an editor for the session, a view moved off a copy and back found no editor, for good: on
+            // `main`, a TM view taken to the program and back to its copy (spec amendment 33). Destroyed, as the drop
+            // pass destroys a closed TM or asm view's, sending what was typed first (`ScratchEditor.destroy`); the next
+            // view to show the copy mounts a fresh editor from its text of record, and a view showing it now does so
+            // at once (`mountOnViewOf`, below).
+            if (held !== null) {
+              if (entry?.kind === 'lambda') custody.hold(leaving, held)
+              else {
+                held.destroy()
+                unmounted = leaving
+              }
+            }
           }
           // **A TM OR ASM PANE IS RESEEDED FROM THE SESSION IT MOVES ONTO** — a TM pane whether or not it held the
           // editor, which `seedTmPane`'s doc has the finding for, and an asm pane for `seedAsmPane`'s twin reason.
@@ -828,6 +878,9 @@ export function createPaneHost(deps: {
           // before the mount — `setEditor`'s own `#refreshClaim` settles the claim control, and nothing
           // else on screen depends on the editor's presence, so no second draw is owed.
           if (moved !== null) mountScratchEditor(id, moved, choice.session)
+          // AND THE COPY IT LEFT GETS ITS EDITOR BACK IN A VIEW STILL SHOWING IT — the drop pass's remount, for a view
+          // that leaves by a pick rather than by closing.
+          if (unmounted !== null) mountOnViewOf(unmounted)
           // SAID ONLY WHEN THE PAIR CHANGED — picking the pair already in force switches nothing.
           if (choice.session !== leaving) {
             layoutChanged({ kind: 'switched', leaf: id, shows: { kind: choice.leg, session: choice.session } })
@@ -936,6 +989,22 @@ export function createPaneHost(deps: {
   }
 
   /**
+   * *Reset preset*'s rebuild: `focusView`, with every view that shows a copy rebuilt on the program.
+   *
+   * **THE DEFAULT TREE RE-MINTS ITS LEAF IDS, AND A PANE UNDER A RE-MINTED ID WAS KEPT, BINDING AND ALL.** Pass 1 of
+   * `applyLayout` drops an entry only when its leaf left the tree or changed kind, so a `lambda-0` showing a copy before
+   * the reset was still `lambda-0`, still a λ view and still on the copy after it — while the notice said the default
+   * views were back. A fresh preset's views are on the program, so the reset drops each such entry in pass 1, which
+   * hands its editor over as a close does (a λ copy's editor waits in custody, a machine copy's is destroyed, and the
+   * copy itself is untouched), and pass 2 builds the view again on the program. A view already on the program is kept.
+   */
+  const resetViews = (id: LeafId): void => {
+    setFocused(id)
+    applyLayout(true)
+    focusPane(id)
+  }
+
+  /**
    * Reconcile panes to leaves, re-render the tree, and persist it.
    *
    * PANES ARE CREATED AND REMOVED HERE AND NOWHERE ELSE, so "which panes exist" has exactly one answer
@@ -945,7 +1014,8 @@ export function createPaneHost(deps: {
    * predicate compares what the tree says a leaf renders against what the entry in hand renders, so a
    * leaf that is still present but has changed kind is removed exactly like one that left. That is
    * decision 1's whole mechanism: `setLeafKind` (called from `paneEvents`' `rebind`) keeps the leaf's id,
-   * its place and its size, and these two passes then replace the pane inside it.
+   * its place and its size, and these two passes then replace the pane inside it. `resetViews` adds a third,
+   * `toProgram`: an entry showing a copy is dropped too, and built again on the program.
    *
    * **THE TWO REASONS DIFFER IN EXACTLY ONE WAY, AND IT READS AS A CONTRADICTION UNTIL THE ORDER IS
    * NOTICED.** A close KEEPS the host's DOM — that is `hostFor`'s detach-not-destroy rule, and it is why
@@ -969,7 +1039,7 @@ export function createPaneHost(deps: {
    *
    * A NEW LEAF'S SESSION COMES FROM `pendingBinding`, NOT ALWAYS `SOURCE_SESSION` — see that map's own
    * doc. Consulted and cleared in the same pass. The clearing is belt-and-braces, and what makes a stale
-   * entry unreachable is timing rather than uniqueness: `reset preset` re-mints `defaultLayout()`'s three
+   * entry unreachable is timing rather than uniqueness: `reset preset` re-mints `defaultLayout()`'s four
    * literal ids, so an id genuinely can arrive here having been used before (`heldEditors` has the
    * correction in full), and all three writers (`splitRow`, `splitColumn`, and `rebind`'s cross-leg arm)
    * write the entry and call `applyLayout` in the next statement, so every entry is consumed by the pass
@@ -985,12 +1055,16 @@ export function createPaneHost(deps: {
    *
    * For what this doc used to claim and why it changed, see the history note under `applyLayout`.
    */
-  const applyLayout = (): void => {
+  const applyLayout = (toProgram = false): void => {
     // WHAT EACH LIVE LEAF RENDERS, NOT MERELY WHICH LEAVES ARE LIVE — a `Map` where this was a `Set`,
     // because there are two reasons to drop an entry now and the second one is about the VALUE.
     // `sourceLayout.update(live.size > 1, ...)` below is unaffected: a map's size is still the leaf count.
     const live = new Map(leaves(getTree()).map((l) => [l.id, l.pane]))
+    // THE COPIES WHOSE EDITOR PASS 1 DESTROYS — mounted again on a view still showing each, after pass 2.
+    const unmounted: SessionId[] = []
     for (const p of panes.all()) {
+      // `toProgram` IS `resetViews`' THIRD REASON: an entry kept by the two below is dropped when it shows a copy.
+      const onCopy = toProgram && p.slot.binding.session !== SOURCE_SESSION
       // **TWO REASONS TO DROP AN ENTRY, AND THEY ARE ONE SITUATION FROM HERE.** The leaf left the tree
       // (a close), or the leaf is still there and no longer renders what this entry renders (a leg
       // change through the binding selector — `paneEvents`' `rebind` above). `PaneSlot<K>`'s leg has no
@@ -998,7 +1072,7 @@ export function createPaneHost(deps: {
       // whole entry — slot, pane class and view — under an unchanged `LeafId`; the pane in hand is
       // about to stop existing either way, which is why the custody handover below covers both without
       // a branch. `live.get` answers `undefined` for a departed leaf, and no `PaneKind` equals that.
-      if (live.get(p.id) === p.kind) continue
+      if (live.get(p.id) === p.kind && !onCopy) continue
       // THE CUSTODY HANDOVER, AND IT HAS TO BE ON THIS SIDE OF `panes.remove` — see this function's own
       // doc. `takeEditor()` returns `null` for every pane that was not holding one, which is all of
       // them on an ordinary close, so this costs a method call and a field read on the way out.
@@ -1008,7 +1082,7 @@ export function createPaneHost(deps: {
           if (held !== null) custody.hold(p.slot.binding.session, held)
           break
         }
-        case 'tm':
+        case 'tm': {
           // **A TM EDITOR IS DESTROYED RATHER THAN HELD, AND SINCE PART 3a IT HAS TO BE DESTROYED AT
           // ALL.** This arm did not exist: a `TmPane` leaving `panes` — a close, or a cross-leg
           // pick under the same leaf — was removed with neither `takeEditor()` nor `destroy()`, and
@@ -1017,14 +1091,27 @@ export function createPaneHost(deps: {
           // holds its diagnostics sink, which closes over the editor and its pending debounce — and
           // `#died` then replays `didOpen` for a document no view holds, for the life of the page.
           //
-          // DESTROYED, NOT HELD, BECAUSE NOTHING CAN RECLAIM IT. Custody exists to serve `move the
-          // editor here`, and a TM view does not offer it (`setClaim` has one caller, in
-          // `lambda-pane.ts`). Holding a TM editor would put it in a map nothing reads.
-          ;(p.pane as TmPane).takeEditor()?.destroy()
+          // DESTROYED, NOT HELD (spec amendment 33): a machine copy's editor lives in a view, and a view that
+          // leaves the copy destroys it — sending what was typed (`ScratchEditor.destroy`). A held TM editor would
+          // wait for a claim, and a view that came to show the copy would find it "held" and mount nothing, which is
+          // the dead end amendment 33 records. Another view still showing the copy mounts a fresh one instead
+          // (`mountOnViewOf`, after pass 2), and *move the editor here* moves one only between views on the page.
+          const held = (p.pane as TmPane).takeEditor()
+          if (held !== null) {
+            held.destroy()
+            unmounted.push(p.slot.binding.session)
+          }
           break
-        case 'asm':
-          // NOTHING TO HAND OVER: an asm view holds no editor (`holdsEditor`'s own arm).
+        }
+        case 'asm': {
+          // DESTROYED, NOT HELD, FOR THE TM ARM'S REASON.
+          const held = (p.pane as AsmPane).takeEditor()
+          if (held !== null) {
+            held.destroy()
+            unmounted.push(p.slot.binding.session)
+          }
           break
+        }
         default:
           unhandled(p.slot.binding.leg)
       }
@@ -1045,7 +1132,7 @@ export function createPaneHost(deps: {
       if (l.pane === 'source') continue // the source pane is chrome inside its host, not a PaneView
       // A LEAF ID ARRIVING FRESH DROPS ANY EDITOR CLAIM RECORDED AGAINST IT — Minor finding, re-review
       // of the whole-branch review's own custody fix, and the behaviour half of the correction
-      // `heldEditors`' doc carries above. `reset preset` re-mints `defaultLayout()`'s three LITERAL ids,
+      // `heldEditors`' doc carries above. `reset preset` re-mints `defaultLayout()`'s four LITERAL ids,
       // so a closed `lambda-0` genuinely does come back, and `editorOwner` was still naming it: the
       // moment the user pointed the NEW `lambda-0` at the scratch, `editorHomeFor` resolved it as the
       // editor's home and the next layout gesture delivered the held editor onto a pane that never asked
@@ -1153,12 +1240,13 @@ export function createPaneHost(deps: {
           // `reset preset`. Seeding at the picker instead would leave the others blank for no reason a
           // reader could infer.
           //
-          // **`reset preset` IS A ROUTE ONLY WHERE THE TREE ACTUALLY LOST A TM PANE, WHICH IS NARROWER THAN
-          // "it rebuilds the panes".** Pass 1 drops an entry only when `live.get(p.id) !== p.kind`, so a
-          // `tm-0` that is still a live TM pane survives the reset untouched and never reaches this line.
-          // Close that pane, or point its leaf at the other leg, and the reset re-mints `tm-0` — a leaf
-          // with no entry, arriving here long after the session's `compiled` reply, which is the same
-          // stale-blank state a split produces.
+          // **`reset preset` IS A ROUTE ONLY WHERE THE TREE ACTUALLY LOST A TM PANE, OR THE PANE SHOWED A COPY,
+          // WHICH IS NARROWER THAN "it rebuilds the panes".** Pass 1 drops an entry when `live.get(p.id) !==
+          // p.kind`, or, for the reset (`resetViews`), when it shows a copy, so a `tm-0` that is still a live TM
+          // pane on the program survives the reset untouched and never reaches this line. Close that pane, point
+          // its leaf at the other leg, or show a copy in it, and the reset re-mints `tm-0` — a leaf with no
+          // entry, arriving here long after the session's `compiled` reply, which is the same stale-blank state a
+          // split produces.
           //
           // A LAYOUT RESTORED FROM `localStorage` COMES THROUGH THIS LOOP TOO AND IS NOT ONE OF THOSE
           // ROUTES, WHICH IS WORTH SAYING BECAUSE IT LOOKS LIKE ONE. It runs at page load, before anything
@@ -1182,14 +1270,17 @@ export function createPaneHost(deps: {
           // count, not a boolean, and the two callers must not compute it two different ways.
           //
           // **SAFE TO CALL BEFORE THIS PANE'S OWN `#detached` HAS EVER BEEN SET, BECAUSE OF WHEN IT RUNS.**
-          // `TmPane`'s constructor defaults `#detached` to `false`, so a pane bound to a session that IS
+          // `TmPane`'s `CopyEditor` starts with `#detached` `false`, so a pane bound to a session that IS
           // detached (a split onto a TM scratch) would show the control live for the instant between this
           // line and the `draw()` inside `applyLayout`'s own `finally` — except nothing paints in that
           // instant: `draw()` runs synchronously, later in this same call, and its `PaneSlot.render` ->
-          // `TmPane.setDetached` reaches `#refreshDetach` before the browser ever renders a frame. Calling
-          // this any earlier — before `#refreshDetach` existed to correct it — would have handed exactly
+          // `TmPane.setDetached` reaches `CopyEditor.#refreshDetach` before the browser ever renders a frame.
+          // Calling this any earlier — before `#refreshDetach` existed to correct it — would have handed exactly
           // that split-onto-a-scratch pane the same live-and-throwing control Critical 1 fixed.
           seedTmPane(pane, session)
+          // AND ITS COPY'S EDITOR WHEN NO VIEW HOLDS ONE, as the λ arm mounts a λ copy's — `mountScratchEditor`'s doc
+          // has the routes that used to show a copy here with no editor and no way to one.
+          mountScratchEditor(l.id, pane, session)
           panes.add({ id: l.id, kind: 'tm', slot, pane, host })
           break
         }
@@ -1200,15 +1291,19 @@ export function createPaneHost(deps: {
           const registers = panelOpen(l.id, 'registers')
           const stack = panelOpen(l.id, 'stack')
           const heap = panelOpen(l.id, 'heap')
+          const outline = panelOpen(l.id, 'outline')
           const pane = new AsmPane(host, paneEvents(l.id, slot), {
             ...(listing === undefined ? {} : { listing }),
             ...(registers === undefined ? {} : { registers }),
             ...(stack === undefined ? {} : { stack }),
             ...(heap === undefined ? {} : { heap }),
+            ...(outline === undefined ? {} : { outline }),
           })
           // SEEDED FROM ITS SESSION, for the TM arm's reason just above: the `compiled` reply that told the other
           // asm views has already been and gone for a view built by a split, a pick or `reset preset`.
           seedAsmPane(pane, session)
+          // AND ITS COPY'S EDITOR WHEN NO VIEW HOLDS ONE, the TM arm's line for the TM arm's reason.
+          mountScratchEditor(l.id, pane, session)
           panes.add({ id: l.id, kind: 'asm', slot, pane, host })
           break
         }
@@ -1216,6 +1311,10 @@ export function createPaneHost(deps: {
           unhandled(l.pane)
       }
     }
+
+    // A COPY WHOSE EDITOR PASS 1 DESTROYED, ON A VIEW STILL SHOWING IT — after pass 2, so a view this call built
+    // counts, and before the custody sweep, which then finds the claim this makes already true.
+    for (const session of unmounted) mountOnViewOf(session)
 
     // **`try`/`finally`, AND THE `finally` IS THE WHOLE POINT — IMPORTANT FINDING, THIRD REVIEW ROUND.**
     // `LambdaPane.receiveEditor` throws when it is handed a second editor, deliberately (its own doc: a
@@ -1273,9 +1372,10 @@ export function createPaneHost(deps: {
   }
 
   return {
-    applyLayout,
+    applyLayout: () => applyLayout(),
     focusPane,
     focusView,
+    resetViews,
     seedHost(id: LeafId, host: HTMLElement): void {
       hosts.set(id, host)
     },
@@ -1338,8 +1438,7 @@ export function createPaneHost(deps: {
               seedTmPane(p.pane as unknown as TmPane, session)
               break
             case 'asm':
-              // NOTHING TO SEED YET: cool and retire move views off a copy, and no asm view shows a copy until part
-              // 5c's asm copies.
+              seedAsmPane(p.pane as unknown as AsmPane, session)
               break
             default:
               unhandled(p.kind)
@@ -1362,12 +1461,16 @@ export function createPaneHost(deps: {
             seedTmPane(p.pane as unknown as TmPane, to)
             break
           case 'asm':
-            // NOTHING TO SEED YET: the views a delete moved showed a copy, and no asm view shows one until part 5c.
+            seedAsmPane(p.pane as unknown as AsmPane, to)
             break
           default:
             unhandled(p.kind)
         }
         p.slot.rebind(to)
+        // THE COPY'S EDITOR, ON THE FIRST VIEW MOVED BACK — from its text of record, as a view that comes to show a
+        // copy anywhere mounts it (`mountScratchEditor`'s doc). It used to wait for the undone copy's build to land on
+        // a claim, and a copy whose text does not build came back with no editor.
+        mountScratchEditor(id, p.pane as unknown as EditablePane, to)
         moved.push(id)
       }
       return moved

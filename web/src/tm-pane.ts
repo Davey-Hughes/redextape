@@ -1,15 +1,13 @@
 import type { ControlState } from './controls'
+import { CopyEditor } from './copy-editor'
 import type { EditablePane } from './editor-custody'
-import { EDITOR_DEBOUNCE_MS } from './editor-debounce'
 import { n } from './format'
 import type { Dir } from './layout'
-import { createOutlinePanel } from './outline'
-import { type PaneChoice, type PaneEvents, type SplitChoices, textPanel } from './pane-chrome'
+import type { PaneChoice, PaneEvents, SplitChoices } from './pane-chrome'
 import { createPanel, type Panel } from './panel'
 import type { Leg } from './protocol'
 import { valueLine } from './results'
-import type { ScratchEditorConfig } from './scratch-editor'
-import { ScratchEditor } from './scratch-editor'
+import type { ScratchEditor } from './scratch-editor'
 import type { Binding, PaneOption } from './sessions'
 import { StateDiagram } from './state-diagram'
 import { focusedRows, highlight, linkedRows, StateIndex } from './state-table'
@@ -37,12 +35,12 @@ let gridsMinted = 0
  * THE TABLE IS VIRTUALIZED BECAUSE `list60` IS 127,881 ROWS (design §3.1). The `[1, 2]` fixture's 455
  * rows, which sized this feature until it was measured, is 0.4% of that.
  *
- * **`implements EditablePane` (5d-iv Task 8), THE SECOND CLASS TO CARRY THE CLAUSE.** `LambdaPane`'s
- * own doc records why it is load-bearing rather than decorative: `editor-custody.ts`'s cast to
- * `EditablePane` goes through `unknown` of necessity, so without this clause `tsc` verifies nothing
- * about whether this class actually satisfies the shape custody casts to — a renamed method would pass
- * silently. The four members below (`setEditor`, `takeEditor`, `receiveEditor`, `holdsEditor`) are
- * ported from `LambdaPane`'s own, leg-agnostic apart from the wording custody's caller never sees.
+ * **`implements EditablePane`, THE SECOND CLASS TO CARRY THE CLAUSE.** `LambdaPane`'s own doc records why it is
+ * load-bearing rather than decorative: `editor-custody.ts`'s cast to `EditablePane` goes through `unknown` of
+ * necessity, so without this clause `tsc` verifies nothing about whether this class actually satisfies the shape
+ * custody casts to — a renamed method would pass silently. The members below (`setEditor`, `takeEditor`,
+ * `receiveEditor`, `holdsEditor`, `flushEditor`) hand off to `#copy`, the `CopyEditor` this view shares with the asm
+ * view, which carries the clause too and holds the reasons behind each.
  */
 export class TmPane implements EditablePane {
   #status: HTMLElement
@@ -51,41 +49,20 @@ export class TmPane implements EditablePane {
   /** The view's header — `LambdaPane`'s `#header`, the same component. */
   #header: ViewHeader
   /**
-   * The upper half of design §4.2's split body, ported to this leg — a stable parent that outlives any
-   * editor mounted or unmounted inside it, so `setEditor` can do both without touching the pane's own
-   * child order. Same contract as `LambdaPane`'s own `#editorHost`; that field's doc carries the
-   * argument for why it carries no class until `setEditor` gives it one, and is not repeated here.
+   * A copy's editor, its text panel and outline, and the facts behind *format* and *edit a copy* — the part this view
+   * shares with the asm view (`copy-editor.ts`), whose comments carry the reasons behind the handoff's review fixes.
    */
-  #editorHost: HTMLElement
-  /**
-   * The mounted `ScratchEditor`, or `null` on an attached pane. Same contract as `LambdaPane`'s own
-   * `#editor` — never `null` merely because the editor is collapsed away, since collapsing here sets
-   * `hidden` on `#editorHost` through the text panel (below), not on this field.
-   */
-  #editor: ScratchEditor | null = null
-  #collapse: ReturnType<typeof textPanel>
-  /**
-   * `on.editScratch`, captured once at construction — `setEditor` reads it per mount rather than
-   * closing over `on` directly. Same idiom as `LambdaPane.#onEdit`; that field's doc carries the
-   * argument.
-   */
-  #onEdit: ((src: string) => void) | undefined
-  /** Resolves this pane's current binding to an LSP document — see `PaneEvents.lspDocument`. */
-  #lspDocument: (() => ScratchEditorConfig['document']) | undefined
-  /** Resolves this pane's language to its colourer — see `PaneEvents.colour`. */
-  #colour: (() => ScratchEditorConfig['colour']) | undefined
-  /** The page's keymap setting, which this pane's editor joins — see `PaneEvents.keymap`. */
-  #keymap: ScratchEditorConfig['keymap']
+  #copy: CopyEditor
   /**
    * The pane's own body — everything below the heading row, wrapped in one element for `host.replaceChildren`
    * below.
    *
    * **THE COLLAPSE IS NO LONGER A FACT ABOUT THIS ELEMENT, WHICH REVERSES WHAT THIS DOC USED TO SAY —
-   * Plan 7 part 1 Task 8.** It used to carry a `.collapsed` class of its own, read by an ancestor
+   * Plan 7 part 1.** It used to carry a `.collapsed` class of its own, read by an ancestor
    * selector in `style.css` so the tape rows and δ-table stayed outside the thing the toggle named. The
-   * text panel (`textPanel`, constructor below) wraps `#editorHost` directly and hides it with `hidden`
+   * text panel (`CopyEditor.textPanel`) wraps the copy editor's host directly and hides it with `hidden`
    * instead — the same mechanism `LambdaPane` uses — so `#body` carries no class for this at all, and
-   * `#drawTable`'s own independence from a collapse now follows from `#editorHost` being a child of the
+   * `#drawTable`'s own independence from a collapse now follows from that host being a child of the
    * text panel section, itself a sibling `#drawTable` never touches, rather than from which element the
    * class landed on.
    */
@@ -105,13 +82,14 @@ export class TmPane implements EditablePane {
    * element's text (this field's setter, and both branches of `render`), and composing them at one
    * private writer is what stops whichever runs last from erasing what the other two years said.
    *
-   * **CLEARED IN `setEditor(null)` AND `takeEditor()`, NOT ONLY SET IN `setScratchStatus`.** A pane
-   * rebound off the scratch it was reporting for must stop narrating that scratch's header — the same
-   * "fabricated state" class of defect `LambdaPane.setDetached`'s own doc records finding, pointed the
-   * other way: there the bug was an editor outliving the fact that made it appear, here it would be a
-   * sentence outliving the editor it describes.
+   * **CLEARED ON `setEditor(null)`, NOT ONLY SET IN `setScratchStatus`** — by the `onUnmount` this view hands
+   * `#copy`. (`takeEditor()` cleared it too until a take could leave the pane on the copy — *move the editor here* —
+   * and `CopyEditor.takeEditor`'s doc has why it no longer does.) A pane rebound off the scratch it was reporting for
+   * must stop narrating that scratch's header — the same "fabricated state" class of defect `LambdaPane.setDetached`'s
+   * own doc records finding, pointed the other way: there the bug was an editor outliving the fact that made it
+   * appear, here it would be a sentence outliving the editor it describes.
    *
-   * **THOSE TWO CLEARS REACH ONLY THE PANE HOLDING THE EDITOR, AND A BUFFER'S STATUS REACHES EVERY PANE ON IT —
+   * **THAT CLEAR REACHES ONLY THE PANE HOLDING THE EDITOR, AND A BUFFER'S STATUS REACHES EVERY PANE ON IT —
    * Important finding, whole-branch review of the reduced-files slice.** `replies.ts` fans the status out to every
    * TM pane on the session and `pane-host.ts` seeds a new one from the entry, so a split pane that never held the
    * editor kept `reduced: single-tape · 241,666 steps` and `value: 2` after being rebound to source, and kept a
@@ -146,33 +124,10 @@ export class TmPane implements EditablePane {
   /**
    * The view's `⋯` menu and `✕` — `LambdaPane.#menu`'s twin. `edit a copy` is **BUILT ONLY WHEN THE
    * HANDLER EXISTS**, for that field's own reason: a caller with no `detachMachine` gets a view with no
-   * copy offered rather than one that offers a copy and swallows it. No `claim`: `PaneEvents.showEditor`
-   * is λ-only, as its doc says.
+   * copy offered rather than one that offers a copy and swallows it. *Move the editor here* likewise, for
+   * `PaneEvents.showEditor`. `#copy` keeps *format*, *edit a copy* and *move the editor here* in step.
    */
   #menu: ViewMenu
-  /**
-   * The last `setForkAvailable` call's two facts, kept so `#refreshDetach` can re-evaluate them on
-   * every frame rather than only at the moment they arrived — Critical fix, fix round on Task 9.
-   *
-   * **WITHOUT THIS PAIR, THE CONTROL COULD OUTLIVE THE FORK IT JUST PERFORMED.** `replies.ts`'s
-   * `setTmProgram` calls `setForkAvailable` over `panes.ofSession('tm', session)` for the SOURCE session,
-   * and `pane-host.ts`'s `seedTmPane` calls it when a pane is created or moved by a pick, a cool or a
-   * retire, which a fork is not. `scratchpad.fork` rebinds this pane's
-   * slot to the new scratch SYNCHRONOUSLY, so the pane leaves that set on the very click that forked
-   * it — nothing calls `setForkAvailable` again to say the new session has nothing to fork. Storing
-   * the two facts here is what lets a LATER call that has nothing to do with forking — `setDetached`,
-   * driven every frame by `PaneSlot.render` regardless of which session this pane is bound to — still
-   * re-derive the right answer. Same idiom `LambdaPane.#menu`'s own doc states for `#detached`
-   * itself: a fact two different calls both need has to be readable by whichever one runs second.
-   */
-  #tmText: string | null = null
-  #rules = 0
-  /**
-   * Whether this pane's own session is outside the source correspondence — `LambdaPane`'s field of
-   * the same name, ported for the identical reason: `#refreshDetach` needs it alongside `#tmText`/
-   * `#rules`, and it arrives through a different call (`setDetached`) than either of those two do.
-   */
-  #detached = false
 
   /**
    * The rule table: a `VirtualGrid`, whose box is the rules panel's body. This view says what each row shows and does
@@ -182,12 +137,9 @@ export class TmPane implements EditablePane {
   /**
    * The rule table as a panel (Plan 7 part 1, spec §8): the body is the grid's box, the header action is
    * `#reattach`. The panel hides and shows the box and holds whether the table is open (`isOpen`);
-   * this class keeps no copy, so a `setOpen` cannot leave one stale. Its `onToggle` redraws. Not `#rules`,
-   * which is the machine's rule count.
+   * this class keeps no copy, so a `setOpen` cannot leave one stale. Its `onToggle` redraws.
    */
   #rulesPanel: Panel
-  /** This view's outline, present only while it holds an editable copy. */
-  #outline: ReturnType<typeof createOutlinePanel>
   /**
    * The state diagram (spec §8) and its panel, whose header carries *program | local* and *arcs | chips*, and its
    * own re-attach.
@@ -230,14 +182,6 @@ export class TmPane implements EditablePane {
     this.#value = document.createElement('div')
     this.#value.className = 'tm-value'
     this.#value.setAttribute('role', 'status')
-    // THE HOST IS IN THE DOM FROM CONSTRUCTION AND CARRIES NO CLASS UNTIL AN EDITOR IS MOUNTED — same
-    // rule as `LambdaPane`'s own `#editorHost`, and that field's doc carries the argument.
-    this.#editorHost = document.createElement('div')
-    this.#editorHost.className = ''
-    this.#onEdit = on.editScratch
-    this.#lspDocument = on.lspDocument
-    this.#colour = on.colour
-    this.#keymap = on.keymap
     this.#tapes = document.createElement('div')
     this.#tapes.className = 'tapes'
     this.#steps = stepControls(on)
@@ -247,18 +191,34 @@ export class TmPane implements EditablePane {
     this.#menu = viewMenu(this.#header.actions, {
       // REMOVED WHERE THERE IS NO EDITOR, not disabled: a view showing a running leg has no
       // document to format, which is the umbrella's rule for a control that cannot apply.
-      format: () => void this.#editor?.format(),
+      format: () => this.#copy.format(),
       ...(on.splitRow !== undefined && on.splitColumn !== undefined
         ? { split: (dir: Dir, c: PaneChoice) => (dir === 'row' ? on.splitRow?.(c) : on.splitColumn?.(c)) }
         : {}),
       ...(on.close !== undefined ? { close: on.close } : {}),
       ...(detachMachine !== undefined ? { editCopy: { run: detachMachine, what: 'the whole machine' } } : {}),
+      ...(on.showEditor !== undefined ? { claim: on.showEditor } : {}),
       choices: () => this.#choices,
     })
-    // THE TEXT PANEL — the same control `LambdaPane` builds, with the same name ("text") where the two
-    // used to say "term editor" and "machine source". It wraps `#editorHost` and hides it itself; this
-    // callback only reports the gesture, for the buffer's record.
-    this.#collapse = textPanel(this.#editorHost, (collapsed) => on.collapse?.(collapsed))
+    // THE COPY'S EDITOR, TEXT PANEL AND OUTLINE, AND THE MENU'S *FORMAT* AND *EDIT A COPY* (`copy-editor.ts`).
+    //
+    // **A TM VIEW'S OUTLINE IS ITS STATES** — measured against the real server, which answers a `state` block per
+    // symbol at kind 5. Closed by default, like the source view's: a machine of 1,199 states is the ordinary case, and
+    // a list of them above the tapes is not what a reader opened a TM view to see.
+    this.#copy = new CopyEditor(on, {
+      menu: this.#menu,
+      outlineOpen: panels.outline ?? false,
+      noun: 'rules',
+      // THE SCRATCH STATUS GOES WITH THE EDITOR'S UNMOUNT — see `#scratch`'s own doc. Cleared on the unmount rather
+      // than left for whatever `render` happens next, because a caller reading `host.textContent` between the unmount
+      // and the next frame must not see a sentence about a machine this pane no longer shows. Not on `takeEditor`: a
+      // pane that gives its editor to another view of the copy still shows the copy (`CopyEditor.takeEditor`'s doc).
+      onUnmount: () => {
+        this.#scratch = null
+        this.#drawStatus()
+        this.#drawValue()
+      },
+    })
 
     // ADDED AND REMOVED, NEVER DISABLED — same idiom `pane-chrome.ts` states for the continue button.
     // A reattach only does something while the table is detached, so it exists only then; the grid's
@@ -394,20 +354,6 @@ export class TmPane implements EditablePane {
     })
     this.#diagramPanel.actions.append(this.#diagramReattach, this.#levelChoice.el, this.#edgesChoice.el)
 
-    // **A TM VIEW'S OUTLINE IS ITS STATES** — measured against the real server, which answers a
-    // `state` block per symbol at kind 5. Closed by default, like the source view's: a machine of
-    // 1,199 states is the ordinary case, and a list of them above the tapes is not what a reader
-    // opened a TM view to see.
-    this.#outline = createOutlinePanel({
-      open: panels.outline ?? false,
-      onToggle: (open) => on.panel?.('outline', open),
-      symbols: async () => {
-        const doc = this.#lspDocument?.()
-        return doc === undefined ? [] : doc.client.documentSymbols(doc.uri)
-      },
-      reveal: (range) => this.#editor?.reveal(range),
-    })
-
     // `#body` CARRIES EVERYTHING BELOW THE HEADING, WITH THE TEXT PANEL FIRST — design §4.1's "editor
     // region above, today's tape rows and δ-table below". An attached pane (no editor mounted) is
     // unchanged: the panel starts `hidden` and contributes no box to the flow, so this reordering is
@@ -415,19 +361,16 @@ export class TmPane implements EditablePane {
     this.#body = document.createElement('div')
     this.#body.className = 'tm-pane'
     this.#body.append(
-      this.#collapse.el,
+      this.#copy.textPanel,
       this.#status,
       this.#value,
       this.#tapes,
       this.#rulesPanel.el,
       this.#diagramPanel.el,
-      this.#outline.panel.el,
+      this.#copy.outline,
     )
     this.#header.steps.append(this.#steps.el)
     host.replaceChildren(this.#header.el, this.#body)
-    // The pane starts attached, with no editor — so the controls that need one start withdrawn
-    // rather than waiting for the first assignment to withdraw them.
-    this.#syncEditorControls()
   }
 
   /**
@@ -558,20 +501,13 @@ export class TmPane implements EditablePane {
    * exists so the next reader of the grid's `beforeDraw`, which sets `#reattach.hidden`, does not go looking
    * for a connection.
    *
-   * **AN EDITOR CANNOT OUTLIVE `#detached` HERE EITHER — Important finding, review of Task 8.**
-   * `LambdaPane.setDetached`'s own doc records the same line ported below and the defect that made it
-   * necessary: driving the app in a browser, picking `source` in a forked pane's selector dropped the
-   * `[detached]` badge and repainted the body from the newly-bound leg, but left a live `contenteditable`
-   * editor mounted on the buffer the pane had just left. That route is unreachable through this class
-   * today — every path that could mount an editor here is λ-gated — but `PaneSlot.render` already calls
-   * this method on every TM pane, every frame, so the invariant has to live here now rather than wait
-   * for whichever future task first reaches a leaving-`#detached` route this class did not have before:
-   * grepping the plan from here to the end for `setDetached` finds no reminder to add it later.
+   * **THE COPY'S EDITOR AND *EDIT A COPY* FOLLOW `detached` TOO**, in `#copy` (`CopyEditor.setDetached`, whose doc
+   * has the two review findings behind them): an editor cannot outlive the copy it edits, and a view already showing
+   * a copy has nothing left to copy.
    */
   setDetached(detached: boolean): void {
-    this.#detached = detached
     this.#header.setDetached(detached)
-    if (!detached && this.#editor !== null) this.setEditor(null)
+    this.#copy.setDetached(detached)
     // A PANE ON SOURCE DESCRIBES NO BUFFER, so nothing a buffer told it may stay on screen, whichever route moved it
     // there. Every route that moves a pane onto source reseeds it before this runs (`pane-host.ts`'s `seedTmPane` doc
     // lists them), so this clear, kept by the project owner's decision, is a second line behind that seed rather than
@@ -581,12 +517,6 @@ export class TmPane implements EditablePane {
       this.setScratchStatus(null)
       this.setScratchValue(null)
     }
-    // THE FORK CONTROL IS THE OTHER THING THAT MOVES WHEN `#detached` DOES — Critical fix, fix round
-    // on Task 9. `LambdaPane.setDetached`'s own call to `#refreshDetach` is the model: this is what
-    // makes the control withdraw the instant THIS method's own input changes, on the very frame the
-    // pane's session becomes the scratch a fork just made, rather than waiting for a `setForkAvailable`
-    // call that a rebound pane will never receive again.
-    this.#refreshDetach()
   }
 
   /** Spec §8's `steps` switch, per `PaneView.setStepsShown` — the view's header owns the slot. */
@@ -595,137 +525,36 @@ export class TmPane implements EditablePane {
   }
 
   /**
-   * Mount an editor over this pane's body seeded with `text`, or unmount it with `null` — design
-   * §4.2's upper region, ported to this leg. Same contract and same guards as `LambdaPane.setEditor`;
-   * that method's doc carries the full argument (mounted-and-unmounted, the re-seed no-op inside
-   * `ScratchEditor.setText`, `collapsed` seeding the mount and only the mount) and is not repeated here.
-   *
-   * **THE COLLAPSE FLAG LANDS THE SAME WAY `LambdaPane`'S DOES NOW, WHICH REVERSES WHAT THIS PARAGRAPH
-   * USED TO SAY.** It read that the two panes differed in WHERE the flag landed — this one on a
-   * `.collapsed` class on `#body`, `LambdaPane`'s on `#editorHost`'s own class — while agreeing on
-   * WHETHER it did. Plan 7 part 1 Task 8 ended that difference: both panes hand `collapsed` to the text
-   * panel (`textPanel`, constructor above), which hides `#editorHost` itself with `hidden`, so
-   * `#editorHost` here only ever carries the bare `'term-editor'` class or none at all.
-   *
-   * **NO `#refreshClaim` CALL, UNLIKE `LambdaPane.setEditor`.** `PaneEvents.showEditor`'s own doc states
-   * the "move the editor here" control exists only on a pane whose slot may be bound to a
-   * scratch, "which today means the λ leg" — this pane is built with no `showEditor` handler and has no
-   * claim control to refresh.
+   * Mount a copy's editor over this pane's body seeded with `text`, or unmount it with `null` — `CopyEditor.setEditor`,
+   * whose doc carries the contract. An unmount clears the copy's status with it (`#scratch`'s doc).
    */
   setEditor(text: string | null, collapsed = false): void {
-    if (text === null) {
-      this.#editor?.destroy()
-      this.#editor = null
-      this.#syncEditorControls()
-      this.#editorHost.className = ''
-      this.#collapse.update(false)
-      // THE SCRATCH STATUS GOES WITH THE EDITOR — see `#scratch`'s own doc. Cleared here rather than
-      // left for whatever `render` happens next, because a caller reading `host.textContent` between
-      // this call and the next frame must not see a sentence about a machine this pane no longer shows.
-      this.#scratch = null
-      this.#drawStatus()
-      this.#drawValue()
-      return
-    }
-    const onEdit = this.#onEdit
-    if (this.#editor === null) {
-      this.#editorHost.className = 'term-editor'
-      this.#editor = new ScratchEditor({
-        host: this.#editorHost,
-        initial: text,
-        debounceMs: EDITOR_DEBOUNCE_MS,
-        onEdit: (src) => onEdit?.(src),
-        onServerUpdate: () => this.#outline.refresh(),
-        // RESOLVED HERE, NOT AT CONSTRUCTION — the binding this pane shows now is the buffer
-        // the editor being built belongs to.
-        document: this.#lspDocument?.(),
-        colour: this.#colour?.(),
-        keymap: this.#keymap,
-      })
-      this.#collapse.update(true, collapsed)
-      this.#syncEditorControls()
-      return
-    }
-    this.#editor.setText(text)
+    this.#copy.setEditor(text, collapsed)
   }
 
-  /**
-   * Keep the controls that need an editor in step with whether this view has one.
-   *
-   * **CALLED FROM EVERY SITE THAT ASSIGNS `#editor`, WHICH IS WHY IT IS A METHOD AND NOT A BOOLEAN
-   * PASSED AROUND.** Four of those: the mount, the unmount, `takeEditor` and `receiveEditor` — plus
-   * the constructor's last statement, so a pane starts with the controls an editorless view should
-   * have rather than waiting for the first assignment to withdraw them. A control offered on a view
-   * with no editor would do nothing when clicked.
-   */
-  #syncEditorControls(): void {
-    this.#menu.setFormattable(this.#editor !== null)
-    // **THE OUTLINE GOES WITH THE EDITOR, NOT WITH THE VIEW.** A TM view showing the program has
-    // no document for the server to outline; a list that could never fill is removed rather than
-    // shown empty, which is the umbrella's §4 rule 4.
-    this.#outline.panel.el.hidden = this.#editor === null
-    if (this.#editor !== null) this.#outline.refresh()
-  }
-
-  /**
-   * Detach this pane's mounted editor WITHOUT DESTROYING IT, for a caller about to remount it on a
-   * different pane. Same contract as `LambdaPane.takeEditor`; that method's doc carries the full
-   * argument for why the node itself is removed rather than merely dereferenced (a `LeafId` handover
-   * that survives, where the whole host does not leave with it), and is not repeated here.
-   */
+  /** Give up the mounted editor without destroying it — `CopyEditor.takeEditor`. */
   takeEditor(): ScratchEditor | null {
-    const editor = this.#editor
-    if (editor === null) return null
-    this.#editor = null
-    this.#syncEditorControls()
-    editor.dom.remove()
-    this.#editorHost.className = ''
-    this.#collapse.update(false)
-    // SAME REASON AS `setEditor(null)`'s OWN CLEAR, ABOVE — this pane is giving the editor up, so it
-    // must stop announcing that editor's scratch's header the instant it does.
-    this.#scratch = null
-    this.#drawStatus()
-    this.#drawValue()
-    return editor
+    return this.#copy.takeEditor()
   }
 
-  /**
-   * Mount an editor this pane did not build — `takeEditor`'s other half. Same contract and same guard
-   * as `LambdaPane.receiveEditor`, including the throw on a pane already holding one; that method's doc
-   * carries the full argument (the two review findings that made the throw and the `collapsed` seeding
-   * necessary) and is not repeated here.
-   */
-  /**
-   * **`onServerUpdate` IS NOT RE-POINTED HERE, AND THAT IS A KNOWN EDGE RATHER THAN AN OVERSIGHT.**
-   * `onEdit` is — the defect `LambdaPane.receiveEditor`'s doc says took a browser session to find.
-   * `onServerUpdate` is bound at construction to the outline of the pane that BUILT the editor, so
-   * a relocated editor would refresh that pane's outline rather than this one's.
-   *
-   * No gesture reaches it today: a TM view offers no `move the editor here` (`setClaim` has one
-   * caller, in `lambda-pane.ts`), and since part 3a a TM editor is destroyed rather than held when
-   * its pane goes, so nothing can hand one to a different pane. A setter is not added for a path
-   * nothing takes — the rule this branch applied twice already — and this note is what a future
-   * gesture should read before opening one.
-   */
+  /** Mount an editor this pane did not build — `CopyEditor.receiveEditor`, for *move the editor here*. */
   receiveEditor(editor: ScratchEditor, collapsed = false): void {
-    if (this.#editor !== null) throw new Error('a TM pane was handed a second editor while still holding one')
-    this.#editorHost.className = 'term-editor'
-    this.#editorHost.append(editor.dom)
-    // THE EDITS FOLLOW THE VIEW — same fix and same reason as `LambdaPane.receiveEditor`'s own `onEdit`
-    // reassignment; that method's doc carries the argument in full.
-    const onEdit = this.#onEdit
-    editor.onEdit = (src) => onEdit?.(src)
-    this.#editor = editor
-    this.#syncEditorControls()
-    this.#collapse.update(true, collapsed)
+    this.#copy.receiveEditor(editor, collapsed)
   }
 
-  /**
-   * Whether this pane is currently showing an editor. `takeEditor`'s question without `takeEditor`'s
-   * answer — same contract as `LambdaPane.holdsEditor`; that method's doc carries the argument.
-   */
+  /** Whether this pane is showing an editor — `CopyEditor.holdsEditor`. */
   holdsEditor(): boolean {
-    return this.#editor !== null
+    return this.#copy.holdsEditor()
+  }
+
+  /** Whether another view holds this copy's editor, for *move the editor here* — `CopyEditor.setEditorAvailable`. */
+  setEditorAvailable(available: boolean): void {
+    this.#copy.setEditorAvailable(available)
+  }
+
+  /** Send the mounted editor's pending edit now — `CopyEditor.flushEditor`. */
+  flushEditor(): void {
+    this.#copy.flushEditor()
   }
 
   /**
@@ -784,61 +613,12 @@ export class TmPane implements EditablePane {
   }
 
   /**
-   * Record the machine a fork would carry and the count a refusal would name — `viewMenu`'s `CopyState` rule,
-   * as a data dependency rather than a convention — design §4.3. Stores the two facts and defers to
-   * `#refreshDetach`, the same split `setDetached` above and `LambdaPane.setEditor`/`setDetached`
-   * already use: a setter that only ever WROTE the control from here would go stale the moment this
-   * pane stopped being the pane `replies.ts`'s fan-out still calls it on — see `#tmText`'s own doc.
+   * Record the machine a fork would carry, its rule count, and whether its result type has a decoding a
+   * header can name — the three facts that word a refusal — `CopyEditor.setForkAvailable`, whose doc and
+   * `#refreshDetach`'s carry the rule and the review fixes behind it.
    */
-  setForkAvailable(text: string | null, rules: number): void {
-    this.#tmText = text
-    this.#rules = rules
-    this.#refreshDetach()
-  }
-
-  /**
-   * The one writer of the fork control's state — Critical fix, fix round on Task 9. Composes three
-   * independent facts that arrive through two different calls (`setForkAvailable` and `setDetached`),
-   * the same shape `LambdaPane.#refreshDetach` already uses and for the identical reason: whichever
-   * call runs second has to see what the other one left.
-   *
-   * **`!this.#detached` GATES PRESENCE, AND ITS ABSENCE WAS THE WHOLE BUG.** `setForkAvailable` alone
-   * cannot express "this pane's OWN session just became the thing it would fork" — that fact arrives
-   * through `setDetached`, driven every frame by `PaneSlot.render` regardless of which session this
-   * pane is bound to, which is exactly why it is the one call `LambdaPane`'s own `#refreshDetach`
-   * checks first. Left out (as it shipped), the control kept whatever `rules`/`text` the SOURCE
-   * session last reported, forever, on a pane that had since rebound onto its own new scratch — the
-   * button stayed present and enabled, and a second click reached `transport.ts`'s `detachMachine`
-   * with `tmText === null` (a scratch's own `tmProgram.tmText` is always `null`,
-   * `replies.ts`'s `tm-scratch-compiled` arm builds it that way) and threw. The rule this enforces:
-   * A VIEW ALREADY SHOWING A COPY HAS NOTHING LEFT TO COPY.
-   *
-   * **`this.#tmText !== null || this.#rules > 0` IS WHETHER THE CONTROL SHOWS AT ALL — widened from a
-   * bare `rules > 0`, Minor fix in the same round.** A `TmCompiled` whose program parsed to zero δ
-   * rules (`ruleCount(program) === 0`) still has non-`null` `tmText` and is genuinely forkable —
-   * `tests/node/sessions.test.ts`'s own fixture for the machine-fork handler constructs exactly that
-   * shape (one accept state, no rules). `rules > 0` alone withdrew the control for it though nothing
-   * about the machine made it unforkable; `text !== null` is the worker's own `forkable` decision
-   * (`ruleCount(compiled.program)` disagreeing with it only in the direction rules-but-no-text, which
-   * `text === null` below still catches) and is the fact that actually decides presence.
-   *
-   * `text === null` IS STILL WHETHER IT IS DISABLED, UNCHANGED FROM BEFORE THIS ROUND. A session WITH
-   * a machine that is over `MAX_FORK_RULES` (`text === null`, `rules > 0`) is the one case this pane
-   * presents disabled rather than absent: the machine exists, the refusal is a size limit rather than
-   * an absence, and `CopyState`'s own doc has the argument for why that distinction is worth a
-   * visible control. `rules` is for the WORDING of the disabled reason and never for the decision to
-   * disable — the worker already made that decision, with `forkable`, encoded entirely in whether
-   * `text` is `null`. Guarded by `!this.#detached` too, for the same reason presence is: a pane that
-   * has just withdrawn the control entirely has nothing left to disable.
-   */
-  #refreshDetach(): void {
-    if (this.#detached || (this.#tmText === null && this.#rules === 0)) {
-      this.#menu.setCopy(null)
-      return
-    }
-    this.#menu.setCopy(
-      this.#tmText === null ? { reason: `${n(this.#rules)} rules — too large to open in an editor` } : 'ready',
-    )
+  setForkAvailable(text: string | null, rules: number, resultDecodable: boolean): void {
+    this.#copy.setForkAvailable(text, rules, resultDecodable)
   }
 
   /**

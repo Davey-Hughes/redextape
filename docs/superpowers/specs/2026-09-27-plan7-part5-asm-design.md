@@ -144,13 +144,237 @@ listing would have inherited:
     is given the program and the pin when it is next shown. The λ body answers the same trap by detaching
     following on a pin's scroll, and the PR that moves it onto the grid chooses between the two.
 
+**Amended 2026-09-28 for 5c, from reading the code at `e29df3c`, before its plan.** 22 and 25 are the user's
+decisions; 23, 24 and 26 correct or settle what §7 said; 27 to 30 settle what it left open:
+
+22. **A copy flags a label that names nothing or is defined twice, and refuses to run it.** asm's parser accepts
+    both on purpose — a jump to an undefined label parses clean, and a duplicate label resolves to its first
+    definition — so the language server shows nothing, and the run faults only when that jump executes.
+    `redextape run` refuses the same file up front through `Program::validate`. 5c adds a function to core that
+    reads `parse_asm_nav`'s `NameIndex` and returns an error diagnostic at every reference that resolves to no
+    label and at every definition after a label's first; `parse_asm_full`'s own contract is unchanged, and the
+    parser's tests that hold it stay. `redextape-lsp`'s asm diagnostics become the parser's plus these, so Neovim
+    gains them too, and `asmScratch` refuses text that carries any, so a copy's editor always shows why it did not
+    build. A register at or over `MAX_REGISTERS` (1,000,000) has no span of its own to mark: it keeps the cursor's
+    behaviour, a fault at step 0 that the view shows as the run's end. `validate`'s other two checks, a label past
+    the end and a name the printer cannot write, cannot come from parsed text. Decided by the user over running
+    such text with the cursor's lazy faults, and over a refusal shown only in the view's status (§1, §7).
+23. **`BUFFERS_VERSION` stays 2.** §7 raised it to 3 with a v2 store migrating unchanged, but a raise buys
+    nothing. An older tab refuses a store holding an asm copy either way, on the version or on `validBuffer`'s
+    leg check, and a v2 store is already valid under the widened leg. There is no buffer migration to extend:
+    a version mismatch falls back to no copies. §5.5 kept `LAYOUT_VERSION` at 1 on the same reasoning.
+    `validBuffer`'s leg check, two literals today, is derived from the copy legs, so the next leg cannot be
+    refused by it silently (§7).
+24. **One byte cap serves both directions.** `MAX_SCRATCH_ASM_BYTES` in the wasm crate bounds the text
+    `asmScratch` parses and the `asmText` that `compiled` carries; `asmText` is `null` over it, and *edit a copy*
+    is then disabled with a reason that names the size, as the TM view's does with its rule count for the same
+    kind of refusal (a function-valued program's TM text is a different reason, naming no size at all).
+    It is measured as `MAX_SCRATCH_TM_BYTES` was: the text's structured clone to the worker, the parse, the label check of
+    amendment 22, the listing's projection and its clone back, priced together against the 250 ms an initiated
+    gesture may take, on a release build with the check switched off. §7 gave `asmText` a cap in the role
+    `MAX_FORK_RULES` plays; asm text has no second unit to count, so one constant does (§7).
+25. **A copy's caps are measured against its worker's memory.** Under `DEFAULT_CAPS` a hand-written copy can
+    save 64,000,000 words of locals before the memory cap stops it — a register near `MAX_REGISTERS` makes every
+    `call` save a million words, so 64 nested calls reach it — and a saved local is ten bytes (its word, its tag
+    and its written bit), so 640,000,000 bytes. Each warm copy runs in a worker of its own (`SessionPool.bind`
+    spawns one per session, up to `MAX_WARM_BUFFERS`, 11), and a wasm memory only grows. 5c's plan measures a
+    copy worker's peak memory at `DEFAULT_CAPS`' worst hand-written cases, the memory cap's and the heap cap's,
+    and lowers `mem` and `heap` for copies until that peak stays under **256 MiB**, a budget the user set. The
+    step line names whichever cap ends a run, through 5b's `RecordEnd` values (amendment 10). The program's own
+    session keeps `DEFAULT_CAPS`, and the roadmap entry records what the measurement says about it (§7, §8).
+26. **A copy's value is computed when it builds.** `asmScratch` runs the program to its end, as `compile` does
+    (amendment 13), so its status carries the step total and its build reply carries the value; there is no
+    streaming value reply of the kind a TM copy needs. The status is `AsmStatus` itself, not a copy's own type:
+    `TmScratchStatus` exists because a TM copy has no true value for some of `TmStatus`'s fields, and every field
+    of `AsmStatus` is true of a copy — `available` always, `total_steps` from its own run. The value decodes by
+    the header's `result` type, and without a header it is the raw `rr` word marked as having no result type,
+    as §7 said. After a raised step cap it decodes as the session's does (§7).
+27. **A copy's failed build is judged by its own leg.** `ScratchBuffers.noSessionReply` tells a copy's first
+    build from a later edit by whether the λ leg has recorded a frame, and it reads `legs.lambda` for every copy.
+    A TM copy has no λ leg, so every unparseable edit to a TM copy that had built is reported as a failed build,
+    in a notice, where a λ copy's edit shows its diagnostics in the editor alone; the method's own doc records
+    this, measured in Chrome, and leaves it. An asm copy would inherit it, so 5c reads the copy's own leg and
+    fixes the TM copy with it (§7).
+28. **The asm view holds a copy's editor as the TM view does.** The text panel comes first — the editor, in
+    `redextape_asm` — then the copy's status and value, the listing, registers beside the call stack, the heap,
+    and the outline panel. The `⋯` menu gains *format* while the view holds an editor, and *edit a copy* on a
+    view of the program: ready, disabled with amendment 24's reason, or absent when the asm leg is declined or the
+    view is on a copy. An editor is destroyed with its view, as a TM copy's is, not held as a λ copy's. A row in a
+    copy links nothing and says nothing: the link index describes the program, not a copy (§7), and amendment 19's
+    "this instruction has no source construct" is about an instruction `defunc` minted in the program. The TM
+    view calls its link handler on a click whatever its session, and that handler resolves the state through the
+    program's index; 5c's plan checks by a real click what a TM copy's state links, and if it reaches the
+    program's index, guards both views the same way. A blank copy, from *new asm copy*,
+    is an empty program, which parses; its run is the cursor's own, a fault at step 0 that reads "ran past end of
+    program at pc0" (§6.6, §7).
+29. **A step count of one reads in the singular, for every leg.** 5b's asm copy readout would read "1 instructions",
+    and so would the program's asm row, λ's "1 reductions" and TM's "1 transitions": the result rows in
+    `results.ts` and the copy readouts write each leg's step count as `${n} <plural>`. 5c moves the asm copy
+    readout into `readout.ts` beside λ's and TM's, and makes those step counts agree with their number. The asm
+    view's panels already do, for arguments and locals (§5.5).
+30. **5c touches core and the language server.** §1 said wasm and `web/`. Amendment 22's function is in
+    `redextape-core`, beside the parser whose index it reads, and `redextape-lsp` calls it (§1).
+
+**Amended 2026-09-28 again, from 5c's prototype, before its plan.** 31 corrects what amendment 22 said; 32 and 33 are
+bugs on `main` the prototype found and fixed, each on both legs; 34 to 37 settle what the text left open:
+
+31. **A label name the printer cannot write back is marked too.** Amendment 22 said `validate`'s check of a name the
+    printer cannot write cannot come from parsed text. It can: the parser reads `jmp\ttarget:` and `x,y:` as labels
+    with a tab and a comma in their names, as `asm_roundtrip.rs` already pinned. `asm_label_diagnostics` marks such a
+    definition, "a label name cannot contain whitespace, `:` or `,`", and a copy refuses it; only a label past the end
+    of the code cannot come from text. A property test holds the marks' count to `validate`'s complaints but a
+    register's, over random files (§7).
+32. **A row in a TM copy linked the program's constructs, on `main`.** Amendment 28 left the plan to check by a real
+    click, and the check found it: a click on a TM copy's `wl1s2` row pinned `40` in the source, and on its `pc1` row
+    `x`, through the program's link index, which numbers the program's states, not the copy's. The TM view's and the asm
+    view's row handlers both return for a copy now, so a copy's rows link nothing and say nothing (§6.6).
+33. **A TM view moved off its copy and back had no editor, on `main`.** The same-leg rebind held the editor it left for
+    a claim control only λ views offer, and a view arriving at a copy mounts nothing while an editor is held for it, so
+    a TM view taken from its copy to the program and back showed the copy with no way to edit it. A TM or asm view
+    destroys the editor it leaves now, as the drop pass already destroyed a closed one's, and the view that comes back
+    mounts a fresh editor from the copy's text (§7).
+34. **A `[continue]` on an asm copy posts `asm-value`.** A copy gets no `result`, so a raise that carries its cursor
+    past its build's step cap posts the value its cursor reached on its own (§7's worker line).
+35. **A copy's view has a value line and no status line.** Amendment 28 said the copy's status and value. The value
+    reads by the TM copy's value-line rule — a value as `value: 6`, any other ending as itself, `fault: head of empty
+    list at pc1` — and without a header as its raw word, `42 (no result type)`; the status a line would say is already
+    the title's `copy · not linked` and the step line's end (§7).
+36. **The bounds, as measured** (amendments 24 and 25). `MAX_SCRATCH_ASM_BYTES` is 5,400,000, the largest generated
+    file under the 250 ms, with a loop to the step cap added, in both of two runs: one put 5,600,025 bytes under at
+    247.3 ms and 5,800,050 bytes over at 255.4 ms, the other 5,400,000 bytes under at 242.5 ms and 5,600,025 bytes over
+    at 250.8 ms; the loop took about 31 ms. It is the run the cost probe adds: the memory probe built its
+    heap-then-locals case under `COPY_CAPS` in 40.3 ms, one build in a fresh worker. `COPY_CAPS` is `DEFAULT_CAPS`
+    with 2,000,000 heap cells and 12,000,000 saved words: under `DEFAULT_CAPS` a million-word locals bank saved by every
+    `call` grew a copy's worker to 629.8 MiB, and under `COPY_CAPS` the worst measured, a heap filled to its cap and
+    then saved locals to theirs, 168.4 MiB. Both probes are committed, outside the default test set, and run from
+    `web`'s `test:probe:asm-copy` on a build with the `probe-asm-copy` feature. **SUPERSEDED BY AMENDMENT 45'S
+    FIGURE** — 5,200,000, once a later run found `both` itself, not the loop, the heaviest run a copy can make,
+    and priced it in (§12).
+37. **`CopyLeg` is deleted, not widened.** Widened to asm it would be all of `Leg` under a second name; its sites take
+    `Leg`, and `tsc` named the four switches over a copy's leg that needed an asm arm (amendment 20).
+
+**Amended 2026-09-28 a fourth time, from executing 5c's plan and its two fix waves.** 38 is the user's decision
+that a copy's rows mark nothing for a pin, and 39 the sibling bug the same fix found in the same code; 40
+corrects what the whole-branch review found missing, that a copy's view can hold no editor; 41 is the user's
+decision that a pending edit reaches the copy it was typed for; 42 is the user's decision closing the final
+wave's four remaining UI findings; 43 and 44 are the user's decisions that a free type variable is grounded to
+`Nat` and that a function-valued program's TM file is refused up front, both bugs on `main` the final wave found:
+
+38. **A view showing a copy marks none of its rows for a pin, on either leg and by either route a pin takes.**
+    Amendment 32 stopped a copy's own row handlers from answering a click; the review that read it end to end
+    found the complement missing "in the inbound direction," `link-wiring.ts`'s own phrase for it: `setLinkTo`'s
+    fan-out marks every TM and asm view by the program's state and instruction indices, and `draw.ts`'s
+    re-applied pin for a view seeded when it is shown (`tmSeeded`/`asmSeeded`) does the same for a view that
+    arrives at a copy off the page — neither asked whether a view's session is detached, so a program pin
+    painted a copy's rows by whatever the copy happens to have at that index. Found while fixing it, in the same
+    code: the two lines that hand the program's running focus to every machine view (`tmPane.setFocus`/
+    `asmPane.setFocus`, resolved to the program's indices) did the same. All three now read the view's session's
+    own `detached` fact — `link-wiring.ts` inline, `draw.ts` once per view as `unlinked` — and mark nothing for a
+    detached session: a copy has no relationship to the program it forked from, so an index read against it
+    names whatever the copy has there, not what the program does (§6.6).
+39. **Each leg's running focus is read off the most recently focused view of that leg that shows the program.**
+    `PaneCollection.active(leg)` answered "the pane the user focused last on this leg," full stop — that
+    history is the session's, live whether or not the pane is drawn — so a copy's view focused last was still
+    the source of the leg's running focus, reading the copy's own state as the program's and blanking the
+    program's marks in every other view of the leg, even one of the program still on the page. `draw.ts` now
+    asks `panes.active(leg, onProgram)` for each of the three running focuses, `onProgram` admitting only a
+    view whose session is not detached, and the λ link clause's own view the same way. §6.6's "the running
+    focus follows TM's precedent" is unchanged in what it reads; only which view is asked for it narrows (§6.6).
+40. **A TM or asm view showing a copy whose editor is mounted nowhere mounts one; a view whose copy's editor is
+    already held elsewhere offers *move the editor here*, as the λ view's does.** Amendment 33 fixed a view
+    moved off its copy and back showing no editor; the whole-branch review found the wider gap: a reload of a
+    copy whose stored text does not build (diagnostics in its editor, §8), a cross-leg pick onto a copy, a
+    split or `+ view` onto one, and closing the view holding the editor while a split shows the same copy all
+    left a view on a copy with no editor and no way to get one. `pane-host.ts`'s TM and asm creation arms now
+    call `mountScratchEditor`, as λ's already did; `mountOnViewOf` mounts on the first remaining view of a copy
+    once the drop pass or the same-leg arm takes its editor away; `moveBack` mounts on the view it restores.
+    Where a live editor for the copy already exists in another view, the two views share it instead — one
+    editor per copy, moved rather than rebuilt, cursor, undo and pending typing kept — through the same *move
+    the editor here* claim λ views already offer, now on a TM or asm view too (§6.1, §7).
+41. **A pending edit reaches the copy it was typed for, on every route.** `PaneEvents.editScratch` resolved the
+    target session from the view's CURRENT binding when the debounce fired, so a same-leg pick within the
+    debounce put copy A's typing into copy B; a TM or asm view's `destroy()` cancelled a pending edit outright,
+    which a cross-leg pick, `reset preset` and the custody sweep all reach. `editSink` is now bound once, when
+    a view builds an editor, to the copy it shows then, and never re-pointed — an editor is one copy's for its
+    life, as its LSP document already was; `ScratchEditor.destroy()` sends the pending edit before it tears
+    down rather than cancelling it; and `flush()` also discharges an edit a format in flight is still carrying
+    (`#formatPending`), so the delete and pause handlers, which flush the editor before reading the copy's
+    record for undo or its stored text, no longer lose the keystroke a format raced (§7).
+42. **`reset preset` puts every view back on the program, the status note names every view that shows a copy, a
+    Stage tab's label follows its view's title, and a machine copy's row in the copies menu says what its
+    readout says of its run.** `reset preset` rebuilt the tree without checking whether a surviving entry
+    showed a copy, so a view could still show one while the notice said the default views were back;
+    `pane-host.ts`'s `resetViews` now drops such an entry in its first pass — the same editor handover a close
+    gets — and builds it again on the program in its second. The status note that names a detached leg now
+    names every view showing a copy, by title where a leg has more than one (`asm · copy 1 view shows a copy —
+    not linked to the program`; `λ, asm · copy 10 and TM views show copies — not linked to the program`),
+    reading `link-wiring.ts`'s `detachedPanes` over every view of every leg rather than the one view `theSlot`
+    used to pick. A Stage tab kept the label it was created with; `layout-view.ts`'s `retitleStage` now writes
+    every `.stage-tab`'s title each frame. A machine copy's row in the copies menu read `no term yet` or
+    omitted its own status; `readout.ts`'s `asmCopyRow`/`tmCopyRow` now join the same facts the view's own
+    status and value lines use, without the name — `5 instructions · value: 42`, `1 instruction · fault: head
+    of empty list at pc1` (§7).
+43. **A free type variable in a result header is written as `Nat`, in asm and TM headers alike, in the session
+    and the CLI.** `[]`'s type, `List<Var>`, printed as `List<t1>` — a header line neither `AsmHeader::for_type`
+    nor a `.tm` file's reader accepts — so an asm copy of `[]` got no header at all (its value read `0 (no
+    result type)` where the program's own read `[]`) and, on `main` too, a TM copy of `[]` or `[[]]` never
+    built. `ty::ground` grounds every `Ty::Var` to `Ty::Nat`, under `List` and inside `Fun` too, on the
+    reasoning that a closed value holds nothing of a free variable's type and `Nat` is a choice any value type
+    satisfies; `AsmHeader::for_type` and `describe_at` (the one place a program's type becomes a `TmHeader`)
+    both ground before naming a header's type, so `emit --lang asm`, `emit --lang tm` and the session's own
+    `asmScratch`/`tmScratch` text agree (§7).
+44. **A function-valued program has no TM file: `emit --lang tm` refuses it up front, the session offers no TM
+    text, and the TM view's *edit a copy* is disabled with that reason, as asm already gives no header for a
+    function type.** `describe_at` handed a function's grounded type straight to `TmHeader::new`, so
+    `redextape emit --lang tm` of `|x| x + 1` wrote a `result (Nat) -> Nat` line `run`'s own parser refuses,
+    and the session's `tm_text()` printed the identical text — on `main` too, *edit a copy* on such a
+    program's TM view made a copy that could never build. `ty::is_decodable` is `AsmHeader::for_type`'s own
+    round-trip check (`parse_ty(&show(&ground(ty))).is_some()`) pulled out as the one predicate a header
+    writer asks, and `ty::is_decodable_ground` its form for a type already grounded, which `emit_tm` and
+    `Session::tm_text` ask, since each grounds the type once itself; `emit_tm` asks it before any lowering
+    and refuses with a message naming the grounded type, at the exit code every other unemittable program
+    uses, and `Session::tm_text` answers `None` for the same case,
+    beside a declined leg. `Session::tm_result_decodable` crosses the wasm boundary unconditionally, like
+    `asmText`, so `CopyEditor` disables *edit a copy* with this reason rather than the size reason amendment
+    24 already sets apart from it; the TM leg itself still builds and runs a function-valued program exactly
+    as before — only the emitted file's or a fork's text is refused, not the machine (§7, §8).
+
+**Amended 2026-09-28 a fifth time, from the final fix wave's ceiling correction.** 45 is the human's decision to
+lower the asm copy ceiling and have its cost probe price every run the memory probe knows, not the loop alone:
+
+45. **The ceiling is 5,200,000, and the cost probe prices every run the memory probe knows, priced apart, adding
+    the heaviest to every size's total** (supersedes amendment 36's figure). Amendment 36's bracket was not
+    stable under its own method: re-running `test:probe:asm-copy` three times on a quiet machine found
+    `asm-copy-memory.test.ts`'s `both` — a heap filled to `COPY_CAPS`' cap, then locals saved — heavier than the
+    loop in every run (medians 38.4, 36.1 and 38.8 ms against the loop's 32.1, 30.7 and 32.9), and with `both`
+    added 5,400,000 was over the 250 ms budget in two of the three runs (254.3, 256.7 ms) where 5,200,038
+    stayed under in all three (241.5, 243.9, 245.5 ms). The human decided: lower `MAX_SCRATCH_ASM_BYTES` to
+    5,200,000, and have `asm-copy-cost.test.ts` price every run `asm-copy-memory.test.ts` knows — its `CASES`
+    and `both`, at `COPY_CAPS`' heap cap — beside the loop, each its own `RUN` row, adding whichever comes out
+    heaviest to every size's total, so the rule and the measurement can never again name different runs.
+    `asm-copy-corpus.ts` now holds `CASES` and `both` for both probes to import, rather than each keeping its
+    own copy in step by hand. This fix wave's own run agrees: `both` 39.0 ms against the loop's 31.6 — heaviest
+    again — with 5,200,038 bytes under budget at 245.4 ms and 5,300,019, the next size up, over it at 250.2 ms
+    (§7, §12).
+
+**Amended 2026-09-28 a sixth time, from the final fix wave's third round.** 46 is the human's decision that the
+copies menu names a copy's worker only when it is paused:
+
+46. **A copy's row in the copies menu says nothing of a live copy's worker, and keeps `paused` for one that
+    has none.** Plan 7 part 2's design §10 gave the row "*running* or *paused*", opposite whether the copy
+    holds a worker; beside a halted copy's own `value: 42` — its run's own line already saying what became of
+    it — `running` read as the machine still executing, seen by hand at `asm copy 1 · not shown · running`,
+    step 55 of 55. `buffer-list.ts`'s `bufferRow` now appends the word only when the row is cold; a live row's
+    name line ends at its view count. The rule is the menu's, not a leg's: a λ, TM or asm copy's row all drop
+    the word alike. Part 2's §10 is not rewritten; this amendment is its correction of record (part 2's §10).
+
 ## §1 Scope, and the three PRs
 
 | PR | Contains | Touches |
 |---|---|---|
 | **5a** | `AsmCursor`; `run_asm` as a loop over it; display tags and written bits; the `SourceMap` and `LinkIndex` keeping each instruction's owner; the three checks of §4.4 | Rust only, `redextape-core` |
 | **5b** | a refactor with no behaviour change that turns every two-way λ/TM branch into an exhaustive one; a grid module extracted from the TM rule table (amendment 7); the asm view model; the wasm asm leg; protocol, worker and session support for a third leg; the asm view with its listing, registers, call stack and heap panels; linking; the readout's third segment; the new default tree | `redextape-core`'s view model (amendment 6), `redextape-wasm`, `web/` |
-| **5c** | asm copies: *edit a copy*, `asmScratch`, the asm editor with part 3's language support, stored copies at `BUFFERS_VERSION` 3, *new asm copy* | `redextape-wasm`, `web/` |
+| **5c** | asm copies: *edit a copy*, `asmScratch`, the asm editor with part 3's language support, stored copies (`BUFFERS_VERSION` stays 2, amendment 23), *new asm copy*; diagnostics for a label that names nothing or is defined twice (amendment 22) | `redextape-core`'s asm syntax and `redextape-lsp` (amendment 30), `redextape-wasm`, `web/` |
 
 5a lands first and alone; 5b builds on it; 5c builds on 5b. The umbrella's §3 note that part 5's core half
 can run beside `web/` work still holds for 5a.
@@ -397,7 +621,9 @@ every reader free of a branch. The `ts_bindings` gate's rule that a
 
 The header follows umbrella §4: `asm · program ▾` (the title is the selector) · status · step controls
 (when the switch puts them in the view) · `⋯` · `✕`. Each panel's toggle and actions sit in its own header,
-as the TM view's do (amendment 9). The `⋯` menu holds split right, split down and, from 5c, *edit a copy*.
+as the TM view's do (amendment 9). The `⋯` menu holds split right, split down and, from 5c, *edit a copy*; a
+view of a copy whose editor another view already holds offers *move the editor here* too, the λ view's own
+control, now on a machine view as well (amendment 40).
 
 The body is a flex column whose open panels share the height, 4b's mechanism: **listing** two shares,
 **registers** and **call stack** side by side in one share (stacking when the view is narrow), **heap** one
@@ -454,19 +680,26 @@ The controls gate (umbrella §8.1) walks the asm view in every preset; its `view
 
 - **Making one.** *Edit a copy* in the asm view's `⋯` menu copies the whole program with its `result`
   header, as `print_asm_with` writes it; its tooltip says "the whole program", beside λ's "the term at this
-  step" and TM's "the whole machine". `compiled` carries the text as `asmText` under a byte cap that 5c's
-  plan measures, the role `MAX_FORK_RULES` plays for TM.
-- **Running one.** `asmScratch(src)` runs `parse_asm_full` under a byte cap mirroring `MAX_SCRATCH_TM_BYTES`
-  and returns an `AsmScratch` with the asm leg's methods. Its listing comes from the parsed program; no
-  instruction has an owner, so a copy links to nothing, as a TM copy does.
+  step" and TM's "the whole machine". `compiled` carries the text as `asmText` under `MAX_SCRATCH_ASM_BYTES`,
+  the one byte cap that also bounds `asmScratch` (amendment 24; its current figure, 5,200,000, is amendment
+  45's, which supersedes amendment 36's).
+- **Running one.** `asmScratch(src)` runs `parse_asm_full` under that cap, refuses text carrying amendment 22's
+  label diagnostics, runs the program to its end (amendment 26), and returns an `AsmScratch` with the asm leg's
+  methods, under caps measured against its worker's memory (amendment 25). Its listing comes from the parsed
+  program; no instruction has an owner, so a copy links to nothing (amendment 28).
 - **Its value.** Decoded by the header's `result` type when there is one; without it, the raw `rr` word,
-  marked as having no result type.
-- **The worker.** `onAsmScratch` and an `asm-scratch-compiled` reply; frames are 5b's `asm-frames`.
-- **Stored copies.** `PersistedBuffer.leg` gains `asm`, widening 5b's `CopyLeg` (amendment 20); `BUFFERS_VERSION` goes from 2 to 3, and a v2 store
-  migrates unchanged.
+  marked as having no result type. It arrives with the build (amendment 26).
+- **The worker.** `onAsmScratch` and an `asm-scratch-compiled` reply; frames are 5b's `asm-frames`. A failed
+  build is judged by the copy's own leg (amendment 27).
+- **Stored copies.** `PersistedBuffer.leg` gains `asm`: 5b's `CopyLeg` is deleted, not widened, and a copy's leg is
+  any `Leg` (amendment 37, which replaces amendment 20's widening); `BUFFERS_VERSION` stays 2, since every v2 store is
+  still valid now that a copy's leg may be asm (amendment 23).
 - **The copies menu** gains *new asm copy*, as TM has a blank copy.
 - **The editor.** A copy mounts a `ScratchEditor` in `redextape_asm`, so diagnostics, format, hover, outline,
-  definition, references and colour arrive from part 3 unchanged.
+  definition, references and colour arrive from part 3 unchanged, with amendment 22's label diagnostics added.
+  The view holds it as the TM view holds a TM copy's (amendment 28). A view of the copy with no editor mounted
+  anywhere mounts one, and a view whose copy's editor another view already holds offers *move the editor here*
+  instead — one editor per copy (amendment 40).
 
 ## §8 When things fail
 
@@ -479,7 +712,8 @@ Each leaves a working app and at most one notice; none blocks editing or compili
 - **The stack, heap or memory cap.** Raising steps cannot help, so no continue is offered, as for λ's depth
   refusal, and the step line names the cap (amendment 10).
 - **The history budget.** `budget`, as for λ and TM.
-- **A copy that does not parse.** Diagnostics in its editor and no session, as for TM.
+- **A copy that does not parse**, or names a label that is not there or defines one twice (amendment 22).
+  Diagnostics in its editor and no session, as for TM.
 
 ## §9 Testing
 
@@ -487,7 +721,7 @@ Each leaves a working app and at most one notice; none blocks editing or compili
 |---|---|
 | Rust (5a) | §4.4's three checks; the tag table of §4.3 row by row; written bits across `call` and `ret`; `status()` naming each cap; each with sabotages |
 | wasm | `tests/browser.rs` cases for every asm method and the declined leg; the `ts_bindings` gate over the new types |
-| node | frame windows; word formatting by tag; `asm` in layout validation; the buffers v2 → v3 migration; `LANGUAGE_OF_PANE`'s keys |
+| node | frame windows; word formatting by tag; `asm` in layout validation; a v2 store holding an asm copy (amendment 23); `LANGUAGE_OF_PANE`'s keys |
 | browser | the listing by real pointer clicks as well as keys (4b's lesson); follow and detach; linking in both directions; the readout's third segment; the controls gate; the asm editor's diagnostics, format, hover and outline (umbrella §8.5) |
 | by hand | the three presets, light and dark, at 1280×800, including the new default tree |
 
@@ -531,6 +765,14 @@ around it.
 | 3.9, 6.2; 0.059, 0.119; 0.013, 0.028 ms | `run_asm` before and after the cursor on the loop, `sum(1000)` and `upto(200)` (amendment 3), at 5a's plan's final state | 5a's plan, its appendix's `asmbench`: the median of 15 runs, two rounds each, alternated with `main` |
 | r4–r8 left over in `fact(0)` | §2.5's `call` behaviour | hand-traced from `redextape --no-config emit fact.rxt --lang asm` against `run_asm`'s `Call` arm |
 | 14 | two-way branches on the leg | a read of `web/src` at `a4e7c6f`, each of the 14 then re-read at its line with `sed` |
+| 1,000,000 | `MAX_REGISTERS` (amendment 22) | `crates/redextape-core/src/tm/asm.rs`'s `const MAX_REGISTERS`, at `e29df3c` |
+| 64,000,000 words; ten bytes; 640,000,000 bytes; 64 calls | the memory cap; a saved local's size; their product; the nested calls a million-word bank needs to reach it (amendment 25) | `DEFAULT_CAPS.mem` in `tm/asm.rs`; `trace/asm_cursor.rs`'s `Frame`, which saves a `u64`, a one-byte `WordTag` and a `bool` per local (5a's roadmap entry measured the size); arithmetic |
+| 11 | warm copies, each in its own worker (amendment 25) | `web/src/scratch.ts`'s `MAX_WARM_BUFFERS` and `session-client.ts`'s `SessionPool.bind`, at `e29df3c` |
+| 256 MiB | a copy worker's peak memory budget (amendment 25) | set by the user, not measured |
+| 250 ms | the budget an initiated gesture may take (amendment 24) | `MAX_SCRATCH_TM_BYTES`' doc in `crates/redextape-wasm/src/session.rs` |
+| 5,200,038 bytes under budget in all four runs (241.5, 243.9, 245.5 and 245.4 ms); 5,400,000 bytes over it in two of the three runs that priced it (254.3, 256.7 ms), and 5,300,019 over it in the fourth (250.2 ms); `both`, at `COPY_CAPS`' heap cap, the heaviest run known in every run, at medians 38.4, 36.1, 38.8 and 39.0 ms against the loop's 32.1, 30.7, 32.9 and 31.6; the ceiling, 5,200,000 | each of four runs' largest file under the budget and smallest over it, with the heaviest run the memory probe knows — `both`, not the loop alone — added; that run; the ceiling (amendment 45, supersedes amendment 36's figure) | `cd web && pnpm run test:probe:asm-copy`, `asm-copy-cost.test.ts`'s `SIZE`, `RUN` and `BRACKET` rows, three times in the controller's ceiling measurement and once in the final fix wave |
+| 40.3 ms | the memory probe's build of a copy that fills the heap to `COPY_CAPS`' cap and then saves locals, one build in a fresh worker (amendment 36) | the same command, `asm-copy-memory.test.ts`'s `MEM COPY_CAPS both` row's `build_ms`, as 5c's plan records it in its Task 6's Step 4 |
+| 629.8 MiB; 168.4 MiB | a copy's worker filling `DEFAULT_CAPS`' saved frames; the worst under `COPY_CAPS` (amendment 36) | the same command, `asm-copy-memory.test.ts`'s `MEM` rows, in 5c's prototype |
 
 Both probes are built with `CARGO_TARGET_DIR` under the repo's `target/` and run under
 `systemd-run --user --scope -p MemoryMax=4G` (8G for `tmtrace`).

@@ -68,6 +68,27 @@ pub fn show(ty: &Ty) -> String {
     }
 }
 
+/// `ty` with every free type variable written as `Nat`: what a `result` directive names for a program
+/// whose type still has one — `[]` types as `List<t0>`, and `head([])` as `t0`.
+///
+/// **SOUND FOR A VALUE, BECAUSE A CLOSED VALUE HOLDS NOTHING OF A FREE VARIABLE'S TYPE.** `[]` has no
+/// element and `[[]]` no element's element, so reading either as a list of `Nat` reads the same value;
+/// and a program of bare type `t0` has no value to read at all (`head([])` faults). `Nat` is a
+/// choice, not a finding — any value type would read the same — and it is the one `parse_ty` reads
+/// back, so the header a writer builds from this is one its reader accepts.
+///
+/// **A `Fun` STAYS A `Fun`**, its variables grounded like any other: a function value has no decoding,
+/// so no directive names it, grounded or not.
+#[must_use]
+pub fn ground(ty: Ty) -> Ty {
+    match ty {
+        Ty::Var(_) => Ty::Nat,
+        Ty::List(t) => Ty::List(Box::new(ground(*t))),
+        Ty::Fun(ps, r) => Ty::Fun(ps.into_iter().map(ground).collect(), Box::new(ground(*r))),
+        other @ (Ty::Nat | Ty::Bool | Ty::Unit) => other,
+    }
+}
+
 /// Parse a VALUE type — `Nat | Bool | Unit | List<T>` — from its `show` form. `None` for anything
 /// else, INCLUDING the well-formed-but-undecodable `Fun` and `Var`: they are not first-class values
 /// on the tape, so a file naming one is rejected where it is written rather than decoding to a silent
@@ -101,6 +122,39 @@ pub fn parse_ty(s: &str) -> Option<Ty> {
     Some(ty)
 }
 
+/// The round-trip half of `is_decodable` alone — `ty` MUST already be grounded, and this asks nothing
+/// about whether it is. Split out so a caller that has already run `ground` for its own reasons, as
+/// `AsmHeader::for_type` has (its own `result` field holds exactly the value this checks), asks this
+/// directly rather than paying for a second walk of the same tree through `is_decodable`'s own
+/// grounding.
+///
+/// `pub`, NOT `pub(crate)`: `redextape-cli`'s `emit_tm` and `redextape-wasm`'s `Session::tm_text` are
+/// each in a caller's hands that grounded `ty` already — a refusal's own message and an already-grounded
+/// header's `result` — so they ask this directly too, for the identical reason `AsmHeader::for_type` does.
+#[must_use]
+pub fn is_decodable_ground(ty: &Ty) -> bool {
+    parse_ty(&show(ty)).is_some()
+}
+
+/// Whether `ty` names a type a header's `result` line can carry: grounded, shown, and read back
+/// through `parse_ty`. `Fun` never round-trips — a function value has no decoding — nor does a list
+/// nested past `MAX_TY_DEPTH`; a free variable always does, once `ground` writes it as `Nat`.
+///
+/// **THE ONE PREDICATE A HEADER WRITER ASKS BEFORE NAMING A `result` LINE — THROUGH `is_decodable_ground`
+/// ABOVE, NOT THIS FUNCTION, ONCE A CALLER HAS ALREADY GROUNDED ITS OWN TYPE.** `AsmHeader::for_type`,
+/// `redextape emit --lang tm`'s refusal (`emit_tm`) and the wasm session's `tmText` each already hold a
+/// type they grounded themselves — `for_type`'s own `result` field, `emit_tm`'s local `grounded`,
+/// `tmText`'s `header.result` (`describe_at`'s own doc) — so all three ask `is_decodable_ground` of it
+/// directly, for the reason its own doc gives. THIS function is for a caller that has not: it grounds
+/// `ty` itself before asking, which is what `Session::tm_result_decodable` needs of `self.ty` (never
+/// grounded on its own) and what the tests below ask of a bare `Ty`. Both halves round-trip through the
+/// identical `parse_ty(&show(..))`, so the CLI, the session and the asm header cannot disagree with each
+/// other, or with `run`'s own refusal, about which programs get a header.
+#[must_use]
+pub fn is_decodable(ty: &Ty) -> bool {
+    is_decodable_ground(&ground(ty.clone()))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -126,6 +180,23 @@ mod tests {
         assert_eq!(parse_ty("t3"), None);
     }
 
+    /// A free variable is `Nat` wherever it sits — bare, under lists, and inside a function's
+    /// parameters and result — and a type with none is returned unchanged.
+    #[test]
+    fn ground_writes_every_free_variable_as_nat_and_leaves_the_rest() {
+        let list = |t: Ty| Ty::List(Box::new(t));
+        assert_eq!(ground(Ty::Var(3)), Ty::Nat);
+        assert_eq!(ground(list(Ty::Var(0))), list(Ty::Nat));
+        assert_eq!(ground(list(list(Ty::Var(2)))), list(list(Ty::Nat)));
+        assert_eq!(
+            ground(Ty::Fun(vec![Ty::Var(0), Ty::Bool], Box::new(list(Ty::Var(1))))),
+            Ty::Fun(vec![Ty::Nat, Ty::Bool], Box::new(list(Ty::Nat)))
+        );
+        for ty in [Ty::Nat, Ty::Bool, Ty::Unit, list(list(Ty::Bool)), Ty::Fun(vec![Ty::Nat], Box::new(Ty::Unit))] {
+            assert_eq!(ground(ty.clone()), ty);
+        }
+    }
+
     /// Malformed input yields `None`, never a panic. `List<Nat>>` is the interesting one: a naive
     /// peel-the-prefix parser accepts it by ignoring the extra `>`.
     #[test]
@@ -147,5 +218,23 @@ mod tests {
         assert!(parse_ty(&at_cap).is_some());
         let over = format!("{}Nat{}", "List<".repeat(MAX_TY_DEPTH + 1), ">".repeat(MAX_TY_DEPTH + 1));
         assert_eq!(parse_ty(&over), None);
+    }
+
+    /// Every value type is decodable, grounded or not; a bare `Fun` and one nested under `List` are
+    /// not, wherever a free variable sits alongside it — grounding a `Var` cannot make a `Fun` in the
+    /// same type decodable, since `ground` leaves `Fun` a `Fun` (its own doc).
+    #[test]
+    fn is_decodable_answers_false_only_for_a_type_holding_a_function() {
+        let list = |t: Ty| Ty::List(Box::new(t));
+        for ty in [Ty::Nat, Ty::Bool, Ty::Unit, list(Ty::Nat), list(list(Ty::Bool)), Ty::Var(0), list(Ty::Var(1))] {
+            assert!(is_decodable(&ty), "expected decodable: {ty:?}");
+        }
+        for ty in [
+            Ty::Fun(vec![Ty::Nat], Box::new(Ty::Nat)),
+            list(Ty::Fun(vec![Ty::Var(0)], Box::new(Ty::Var(0)))),
+            Ty::Fun(vec![Ty::Var(0), Ty::Bool], Box::new(list(Ty::Nat))),
+        ] {
+            assert!(!is_decodable(&ty), "expected undecodable: {ty:?}");
+        }
     }
 }

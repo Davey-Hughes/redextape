@@ -1,5 +1,6 @@
 import type { EditorView } from '@codemirror/view'
 import type { AsmPane } from './asm-pane'
+import { seedAsm } from './asm-seed'
 import type { EditablePane } from './editor-custody'
 import { setDecline, setLink } from './highlight'
 import type { LambdaTrees } from './lambda-trees'
@@ -11,9 +12,8 @@ import { asmFrameBytes, lambdaFrameBytes, type RunReply, ruleCount, tmFrameBytes
 import type { ProgramResult } from './readout'
 import type { ScratchBuffers } from './scratch'
 import type { SessionId } from './session-client'
-import { resetLegs, type SessionRegistry, type TmCompiled } from './sessions'
+import { type AsmCompiled, resetLegs, type SessionRegistry, type TmCompiled } from './sessions'
 import type { TmPane } from './tm-pane'
-import type { AsmProgram } from './types'
 
 /**
  * `onReply` AND `onScratchReply`, MOVED OUT OF `main.ts` WHOLE — the two reply switches, every inline
@@ -44,7 +44,7 @@ import type { AsmProgram } from './types'
  * the literal source-session id `main.ts` names once at construction and passes to `noSessionReply` as
  * the session a retiring scratchpad rebinds its slots back to."* Nothing retires here now (5d-ii-c
  * decision 2), so there is no home for a pane to be sent to and no slots to send; the arm's own comment
- * below carries what the deletion cost. `panes` stays — two other arms fan out over it — but it is no
+ * below carries what the deletion cost. `panes` stays — other arms fan out over it — but it is no
  * longer read as "every slot a retire might have to move".
  *
  * **`reconcileEditors: () => void` LEFT WITH IT, FOR THE SAME REASON AND ONE TASK AFTER `compile.ts`
@@ -61,9 +61,10 @@ import type { AsmProgram } from './types'
  * which needs a session actually removed, and `tests/browser/scratch-fork.test.ts` was counting a
  * STUBBED `reconcileEditors` here — a call, not a destroy. What the deletion cost was the producer of
  * `!sessions.has`, and `tests/browser/editor-custody.test.ts` is what covers the branch now that
- * `main.ts`'s header-list retire supplies one again. `editorHome` STAYS, because two arms
- * that are not retires read it: `scratch-compiled` mounts text onto the home pane, and `worker-error`
- * unmounts from a pane whose session is still live and still bound.
+ * `main.ts`'s header-list retire supplies one again. `editorHome` STAYS, because arms that are
+ * not retires read it: each copy build's — `scratch-compiled`, `tm-scratch-compiled` and
+ * `asm-scratch-compiled` — mounts text onto the home pane, and `worker-error` unmounts from a pane whose
+ * session is still live and still bound.
  *
  * `root: HTMLElement` WAS PART OF THE SPECIFIED SIGNATURE AND IS NOT HERE. Neither handler reads it —
  * `showBanner(root, ...)` is `main.ts`'s wasm-load and worker-spawn failure surface (`banner.ts`'s own
@@ -86,6 +87,13 @@ export function createReplies(deps: {
    */
   unseen?: WeakSet<TmPane | AsmPane>
   draw: () => void
+  /**
+   * Schedule a callback for the next paint — `requestAnimationFrame`, injectable so a node test can drive
+   * the schedule by hand instead of waiting on a real display. Optional: the app passes none and gets the
+   * real one, `player.ts`'s own dependency, for the identical reason. Used only to coalesce `case
+   * 'tm-value'`'s redraw below — every other arm still calls `draw()` straight.
+   */
+  frame?: (cb: () => void) => void
   /**
    * The pane currently holding `session`'s editor, or `undefined` if none currently is — replaces a
    * local "THE λ pane" helper this file used to define. `setEditor`'s target was a fact
@@ -136,6 +144,7 @@ export function createReplies(deps: {
     trees,
     unseen = new WeakSet<TmPane | AsmPane>(),
     draw,
+    frame = (cb: () => void) => void requestAnimationFrame(cb),
     editorHome,
     onBuffersPersist,
     notify,
@@ -185,9 +194,9 @@ export function createReplies(deps: {
    * **`setForkAvailable` RIDES THE SAME FAN-OUT, NOT A SECOND LOOP — 5d-iv Task 9.** A pane seeded with
    * a machine is exactly a pane that needs to be told whether that machine may be forked; splitting the
    * two into separate passes over `panes.ofSession('tm', session)` would be two chances for one to run
-   * and the other not to. `compiled?.tmText ?? null` and the rule count both fall out of the SAME
-   * `compiled` this call already stores — see `TmCompiled.tmText`'s own doc for why the field rides
-   * beside `program` rather than on a second envelope.
+   * and the other not to. `compiled?.tmText ?? null`, the rule count, and `compiled?.tmResultDecodable`
+   * all fall out of the SAME `compiled` this call already stores — see `TmCompiled.tmText`'s own doc for
+   * why the fields ride beside `program` rather than on a second envelope.
    *
    * **ONLY THIS CALLER PASSES A `tmText` THAT MEANS ANYTHING.** `tm-scratch-compiled` (below) calls
    * `storeAndSetProgram` directly, with no `then` for fork availability at all, precisely because that
@@ -197,7 +206,9 @@ export function createReplies(deps: {
    * comment.
    */
   const setTmProgram = (session: SessionId, compiled: TmCompiled | null): void => {
-    storeAndSetProgram(session, compiled, (pane, rules) => pane.setForkAvailable(compiled?.tmText ?? null, rules))
+    storeAndSetProgram(session, compiled, (pane, rules) =>
+      pane.setForkAvailable(compiled?.tmText ?? null, rules, compiled?.tmResultDecodable ?? true),
+    )
   }
 
   /**
@@ -205,15 +216,18 @@ export function createReplies(deps: {
    * `storeAndSetProgram`'s rule: a view off the page goes in `unseen`, and `draw()` seeds it from the entry when it is
    * shown. One call, so the entry always agrees with what the views were told.
    */
-  const setAsmProgram = (session: SessionId, program: AsmProgram | null): void => {
-    sessions.entryOf(session).asmProgram = program
+  const setAsmProgram = (session: SessionId, compiled: AsmCompiled | null): void => {
+    const entry = sessions.entryOf(session)
+    entry.asmProgram = compiled
     for (const p of panes.ofSession('asm', session)) {
       const pane = p.pane as AsmPane
       if (!p.host.isConnected) {
         unseen.add(pane)
         continue
       }
-      pane.setProgram(program)
+      // EVERYTHING THE SESSION KEEPS, THROUGH THE ONE SEED A VIEW BUILT LATER GETS: the listing, whether it can be
+      // copied, and a copy's value, which its build reply writes on the entry before this runs.
+      seedAsm(pane, compiled, entry.asmScratch)
     }
   }
 
@@ -255,7 +269,7 @@ export function createReplies(deps: {
         return
       case 'compiled':
         resetLegs(legs, { lambda: reply.lambda, asm: reply.asm, tm: reply.tm })
-        setAsmProgram(session, reply.asmProgram)
+        setAsmProgram(session, reply.asmProgram === null ? null : { program: reply.asmProgram, asmText: reply.asmText })
         // THE ONE REPLY THAT CARRIES A MACHINE, RETAINED AS IT IS FANNED OUT. `tmProgram` is nullable on
         // the wire defensively rather than reachably (`protocol.ts`'s own doc), so a reply with no machine
         // in it leaves the session holding nothing rather than an envelope around a `null`.
@@ -263,7 +277,12 @@ export function createReplies(deps: {
           session,
           reply.tmProgram === null
             ? null
-            : { program: reply.tmProgram, tapeNames: reply.tapeNames, tmText: reply.tmText },
+            : {
+                program: reply.tmProgram,
+                tapeNames: reply.tapeNames,
+                tmText: reply.tmText,
+                tmResultDecodable: reply.tmResultDecodable,
+              },
         )
         linkWiring.setIndex(reply.linkIndex === null ? null : new LinkIndex(reply.linkIndex))
         // `setLink.of(null)` HERE TOO, NOT ONLY `setDecline`. `linkMark` clears its own decoration on
@@ -333,13 +352,16 @@ export function createReplies(deps: {
         setProgram({ kind: 'error', error: new Error(reply.message) })
         draw()
         return
-      // THREE KINDS THAT NEVER REACH THE PROGRAM'S SESSION, WRITTEN OUT so that a kind added to `RunReply` is a
+      // FIVE KINDS THAT NEVER REACH THE PROGRAM'S SESSION, WRITTEN OUT so that a kind added to `RunReply` is a
       // type error at `unhandled` below rather than a reply this switch drops with `tsc` green (Plan 7 part 5's
-      // spec, amendment 8). `scratch-compiled` and `tm-scratch-compiled` answer a copy's build, which only
-      // `ScratchBuffers` posts; `tm-value` is a TM copy's value run, where the program's value arrives in `result`.
+      // spec, amendment 8). `scratch-compiled`, `tm-scratch-compiled` and `asm-scratch-compiled` answer a copy's
+      // build, which only `ScratchBuffers` posts; `tm-value` is a TM copy's value run and `asm-value` an asm copy's
+      // value after a `[continue]`, where the program's value arrives in `result`.
       case 'scratch-compiled':
       case 'tm-scratch-compiled':
       case 'tm-value':
+      case 'asm-scratch-compiled':
+      case 'asm-value':
         return
       default:
         unhandled(reply)
@@ -359,17 +381,20 @@ export function createReplies(deps: {
    *
    * AN ARM FOR EVERY KIND, AND `unhandled` AS THE `default`. `session-worker.ts` answers a
    * `lambda-scratch` request with exactly `scratch-compiled`, `lambda-frames`, `no-session` or
-   * `worker-error`, and a `tm-scratch` request with `tm-scratch-compiled`, `tm-frames`, `tm-value`,
+   * `worker-error`; a `tm-scratch` request with `tm-scratch-compiled`, `tm-frames`, `tm-value`,
    * `no-session` or `worker-error` (`onTmScratch`, `session-worker.ts`'s TM counterpart to
-   * `onLambdaScratch`). `tm-value` is the TM leg's one extra shape: a headered TM buffer's value run
-   * reports through it, where a compiled session's value arrives in `result`. `compiled`/`result` still
-   * need a `SourceMap`/`ty` no buffer has, on either leg, so their arm does nothing — written out for the
-   * reason `onReply`'s own do-nothing arm is. `no-session` and `worker-error` are genuinely shared, one arm
-   * apiece for both legs — a buffer's failure to build or its worker's death read the same whichever leg
-   * minted it. `lambda-frames` and `tm-frames` are not shareable in the same way (`hist.push` closes over a
-   * different `LegState`), so each gets its own arm; `scratch-compiled` and `tm-scratch-compiled` likewise,
-   * because their payloads share no field (`tm-scratch-compiled`'s own doc in `protocol.ts` has the
-   * argument).
+   * `onLambdaScratch`); and an `asm-scratch` request with `asm-scratch-compiled`, `asm-frames`, `no-session` or
+   * `worker-error` (`onAsmScratch`), and its `[continue]` with `asm-value`. `tm-value` and `asm-value` are the
+   * machine legs' extra shapes: a headered TM buffer's value run reports through the first, and an asm copy's
+   * value read again once `[continue]` carries it past its build's cap through the second, where a compiled
+   * session's value arrives in `result`. A λ copy's views ask for `lambda-tree` too. `compiled`/`result` still
+   * need a `SourceMap`/`ty` no buffer has, on any leg, so their arm does nothing — written out for the reason
+   * `onReply`'s own do-nothing arm is. `no-session` and `worker-error` are genuinely shared, one arm apiece for
+   * every leg — a buffer's failure to build or its worker's death read the same whichever leg minted it.
+   * `lambda-frames`, `tm-frames` and `asm-frames` are not shareable in the same way (`hist.push` closes over a
+   * different `LegState`), so each gets its own arm; `scratch-compiled`, `tm-scratch-compiled` and
+   * `asm-scratch-compiled` likewise, because their payloads share no field (`tm-scratch-compiled`'s own doc in
+   * `protocol.ts` has the argument).
    *
    * **`tm-scratch-compiled` USED TO BE LEFT OPEN ON PURPOSE, AND THIS IS THE TASK THAT WAS ALWAYS GOING
    * TO CLOSE IT.** The paragraph used to read: "Wiring those two arms needs a TM buffer's own pane and
@@ -384,6 +409,38 @@ export function createReplies(deps: {
    * traffic is not a compile and must not be seen as one finishing. The `worker-error` arm below was the
    * last exception and its own note says why it stopped.
    */
+
+  /**
+   * Coalesce `case 'tm-value'`'s redraw to at most one per animation frame while a value run is `Running` —
+   * that arm's own comment has the reason. `tmValueDrawPending` is shared across every session, not kept
+   * per-copy: `draw()` repaints the whole app regardless of which copy's chunk asked for it, so one pending
+   * frame already covers every copy chunking at once, the same way one `draw()` call always has.
+   *
+   * `scheduleTmValueDraw` is what a `Running` reply calls: the first one in a burst schedules a frame and
+   * flips the flag, and every reply that lands before that frame fires is absorbed (the flag is already
+   * set, so the call is a no-op) rather than scheduling a second one. When the frame fires it checks the
+   * flag again before drawing, because `flushTmValueDraw` may have cleared it first — see below.
+   *
+   * `flushTmValueDraw` is what the reply that ends the run calls: it clears the flag and draws right away,
+   * without waiting on whatever frame is already scheduled. Clearing the flag first, rather than leaving it
+   * set, is what stops that earlier frame from drawing a second time once it fires — a browser's own
+   * `requestAnimationFrame` cannot be uncalled, so the guard is the flag, not the callback.
+   */
+  let tmValueDrawPending = false
+  const scheduleTmValueDraw = (): void => {
+    if (tmValueDrawPending) return
+    tmValueDrawPending = true
+    frame(() => {
+      if (!tmValueDrawPending) return
+      tmValueDrawPending = false
+      draw()
+    })
+  }
+  const flushTmValueDraw = (): void => {
+    tmValueDrawPending = false
+    draw()
+  }
+
   const onScratchReply = (session: SessionId, reply: RunReply): void => {
     switch (reply.kind) {
       case 'lambda-tree':
@@ -483,7 +540,14 @@ export function createReplies(deps: {
         // has the argument. `tapeNames` RIDES THIS REPLY, PER SCRATCH, where it used to be the fixed
         // `tapeNames()` export `onRun` still posts: a reduced file's single-tape stage leaves one tape that
         // the lowered bank names would mislabel, and only the scratch knows its own stage list.
-        const compiled: TmCompiled = { program: reply.tmProgram, tapeNames: reply.tapeNames, tmText: null }
+        // `tmResultDecodable: true` IS INERT FOR THE SAME REASON `tmText: null` IS: this path never calls
+        // `setForkAvailable` (no `then` below), so neither field is ever read off this value.
+        const compiled: TmCompiled = {
+          program: reply.tmProgram,
+          tapeNames: reply.tapeNames,
+          tmText: null,
+          tmResultDecodable: true,
+        }
         sessions.entryOf(session).tmScratch = { status: reply.tm, value: null }
         storeAndSetProgram(session, compiled, (pane) => {
           pane.setScratchStatus(reply.tm)
@@ -523,6 +587,61 @@ export function createReplies(deps: {
           entry.tmScratch = { ...entry.tmScratch, value: { run: reply.run, value: reply.value } }
         for (const p of panes.ofSession('tm', session))
           (p.pane as TmPane).setScratchValue(entry.tmScratch?.value ?? null)
+        // **`draw()`, WHERE THIS ARM USED TO RETURN WITHOUT IT — on `main` too.** The footer readout's TM copy
+        // line (`readout.ts`'s `tmCopyFacts`, which reads `reading.value`) reads this same entry, and only
+        // `draw()` repaints it — nothing else does once the copy's own pane has taken its `setScratchValue`.
+        // Without it, `value: running · N of M steps` stayed on screen long after the value run ended, waiting
+        // on an unrelated event to redraw. **The copies menu's TM row is a different case, not this one's**: it
+        // is not repainted by `draw()` at all — `buffer-list.ts`'s popover rebuilds its rows only when it
+        // opens, on a temperature click and on a delete — so the readout follows the value as it arrives, and
+        // the menu row reads this same entry the next time something rebuilds it.
+        //
+        // **COALESCED TO ONE DRAW PER FRAME WHILE THE RUN IS `Running`**, where this arm used to call `draw()`
+        // unconditionally. The worker posts this once per `VALUE_CHUNK` (500,000 steps) while the run is
+        // `Running` (`session-worker.ts`'s `runValueLoop`), and `draw()` is not frame-coalesced anywhere else in
+        // `web/src` (the only `requestAnimationFrame` user is `player.ts`'s, for playback stepping) — so a
+        // `draw()` per chunk was a full, synchronous redraw the browser could not skip even behind a hidden
+        // tab, on a session that may be posting several chunks a second. `scheduleTmValueDraw` (above) is that
+        // coalescing: at most one redraw is pending at a time, and every `Running` reply that lands before it
+        // fires is absorbed into the one that is already scheduled. The reply that ends the run
+        // (`run.run !== 'Running'`) calls `flushTmValueDraw` instead, so the final value is drawn at once
+        // rather than left waiting on a frame a hidden tab may never paint.
+        if (reply.run.run === 'Running') scheduleTmValueDraw()
+        else flushTmValueDraw()
+        return
+      }
+      case 'asm-scratch-compiled': {
+        // `tm-scratch-compiled`'s arm for an asm copy: one status, the listing stored and fanned out, and the copy's
+        // status and value retained on the entry for a view built after this reply. The value comes with the build
+        // (`protocol.ts`'s own doc on this reply). No `asmText`: a copy offers no copy of itself.
+        resetLegs(sessions.entryOf(session).legs, { asm: reply.asm })
+        sessions.entryOf(session).asmScratch = { status: reply.asm, value: reply.value }
+        setAsmProgram(session, { program: reply.asmProgram, asmText: null })
+        // THE EDITOR FROM THE BUFFER'S OWN TEXT OF RECORD, as `tm-scratch-compiled`'s arm mounts a TM copy's, and for
+        // its reason: a fork and an edit both write the text before posting the build.
+        const asmSeed = scratchpad.editorSeed(session)
+        if (asmSeed !== null) editorHome(session)?.setEditor(asmSeed.text, asmSeed.collapsed)
+        // INTO STORAGE UNCONDITIONALLY, for the reason `tm-scratch-compiled`'s arm gives: every arrival here follows an
+        // edit or a fork that has already written the buffer's text.
+        onBuffersPersist()
+        draw()
+        return
+      }
+      case 'asm-value': {
+        // A `[continue]` carried the copy's cursor past its build's cap. Retained over the build's value, which it
+        // replaces; a reading with no build before it cannot happen, for `tm-value`'s reason.
+        const entry = sessions.entryOf(session)
+        if (entry.asmScratch !== null) entry.asmScratch = { ...entry.asmScratch, value: reply.value }
+        for (const p of panes.ofSession('asm', session)) (p.pane as AsmPane).setScratch(entry.asmScratch)
+        draw()
+        return
+      }
+      case 'asm-frames': {
+        // The asm counterpart of `lambda-frames` below, unguarded for the identical reason.
+        const leg = sessions.legOf({ session, leg: 'asm' })
+        for (const f of reply.frames) leg.hist.push(f, asmFrameBytes(f))
+        leg.done = reply.done
+        draw()
         return
       }
       case 'lambda-frames': {
@@ -556,8 +675,8 @@ export function createReplies(deps: {
           for (const p of panes.ofSession('tm', session)) (p.pane as TmPane).setScratchValue(null)
         }
         // WHICH OF TWO REASONS THIS FIRES IS `ScratchBuffers.noSessionReply`'s QUESTION, NOT THIS
-        // FILE'S — see that method's doc for the discriminator (has this session's λ leg ever recorded
-        // a frame) and why the two demand different surfaces. Everything below is what THIS reply still
+        // FILE'S — see that method's doc for the discriminator (has the copy's own leg ever recorded a
+        // frame) and why the two demand different surfaces. Everything below is what THIS reply still
         // has to do once that question is answered.
         //
         // **`session` IS THE FIRST ARGUMENT, AND IT IS THE ONE FACT THIS ARM HAS THAT THE CALLEE COULD
@@ -617,7 +736,7 @@ export function createReplies(deps: {
         // through the fork control as it stands... `lambda/syntax.rs` round-trips a whole printed
         // term", true of `detach`'s own src (always the worker's own re-print of the source's step-0
         // term, `index.lambdaText` above) — but T8 is what gives this session's worker a SECOND way to
-        // be asked to parse text, `editScratch`'s `recompile`, which posts whatever the user just
+        // be asked to parse text, an editor's edit (`transport.ts`'s `editSink`), which posts whatever the user just
         // typed. Most keystrokes mid-identifier do not parse; this is now the ordinary path, not the
         // defensive one. (`detach` itself can still fail too, on the same two reasons `noSessionReply`
         // names — but every one of those lands in the branch above, on a session with no frame yet,
@@ -662,6 +781,8 @@ export function createReplies(deps: {
         // otherwise go on reading `running` over a thread that will never answer again. Whole-branch review of the
         // reduced-files slice.
         sessions.entryOf(session).tmScratch = null
+        sessions.entryOf(session).asmScratch = null
+        for (const p of panes.ofSession('asm', session)) (p.pane as AsmPane).setScratch(null)
         for (const p of panes.ofSession('tm', session)) {
           const pane = p.pane as TmPane
           pane.setScratchStatus(null)
@@ -683,12 +804,10 @@ export function createReplies(deps: {
         notify(`${scratchpad.nameOf(session) ?? 'a copy'} stopped — ${reply.message}`)
         draw()
         return
-      // THREE KINDS A COPY'S WORKER NEVER SENDS, WRITTEN OUT for the reason `onReply`'s three are: only `onRun`
-      // posts them, for the program's session. A copy has neither the `SourceMap` nor the `ty` `compiled` and `result`
-      // carry, and no copy has an asm leg to send `asm-frames` for until part 5c.
+      // TWO KINDS A COPY'S WORKER NEVER SENDS, WRITTEN OUT for the reason `onReply`'s are: only `onRun` posts them,
+      // for the program's session. A copy has neither the `SourceMap` nor the `ty` `compiled` and `result` carry.
       case 'compiled':
       case 'result':
-      case 'asm-frames':
         return
       default:
         unhandled(reply)

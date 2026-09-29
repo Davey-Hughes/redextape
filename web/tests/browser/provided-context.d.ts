@@ -11,5 +11,7 @@ declare module 'vitest' {
      * empty. That file's doc says why a probe run refuses a stamp that is not its own.
      */
     probeTmBufferRun: string
+    /** `asm-copy-cost.test.ts`'s and `asm-copy-memory.test.ts`'s run stamp, set by `pnpm run test:probe:asm-copy`. */
+    probeAsmCopyRun: string
   }
 }

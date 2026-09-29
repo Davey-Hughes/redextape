@@ -4,14 +4,15 @@ import { SHELL, until } from './harness'
 /**
  * **THE COLOURER, INSTALLED — design §11.2's colour row, over the running app rather than over a stub.**
  *
- * Three editors, three grammars, one mechanism. Each test below asserts a class that its own language's
+ * Four editors, four grammars, one mechanism. Each test below asserts a class that its own language's
  * table produces and no other language's does, so a class appearing in the wrong editor would be a
  * grammar reaching a language it does not describe:
  *
  * ```text
- * source  .tok-operator    Operator   `@operator` in REDEXTAPE, and in no other table
- * λ copy  .tok-binder      Binder     `@keyword.function` and `@variable.parameter` in REDEXTAPE_LAMBDA
- * TM copy .tok-statename   StateName  `@label.reference` in REDEXTAPE_TM, which asm maps to Label instead
+ * source   .tok-operator    Operator   `@operator` in REDEXTAPE, and in no other table
+ * λ copy   .tok-binder      Binder     `@keyword.function` and `@variable.parameter` in REDEXTAPE_LAMBDA
+ * TM copy  .tok-statename   StateName  `@label.reference` in REDEXTAPE_TM, which asm maps to Label instead
+ * asm copy .tok-mnemonic    Mnemonic   `@function` in REDEXTAPE_ASM, which the mini-language maps to Ident
  * ```
  *
  * **THESE ARE `golden.rs`'s WITNESSES, AND THE DISAGREEMENT WAS THE FINDING.**
@@ -23,17 +24,19 @@ import { SHELL, until } from './harness'
  * in the source editor AND in the TM editor on the same page, which is what "no other grammar produces
  * it" was supposed to rule out. `Binder` has two rows rather than one, both λ's, which leaves the CLASS
  * unique to λ even though the row count was wrong. Only `TapeSymbol`, the row this file used for TM, was
- * as described — it is replaced anyway so all three witnesses match the Rust side's, two sides of one
- * argument rather than two arguments.
+ * as described — it is replaced anyway so the witnesses match the Rust side's, two sides of one argument
+ * rather than two arguments.
  *
- * asm has no editor until part 5, so its witness (`Mnemonic`) has no row here.
+ * **ASM'S ROW ARRIVED WITH ITS EDITOR.** An asm copy's editor is coloured by the same mechanism, through
+ * `transport.ts`'s `colour` thunk, so the row is what would catch that thunk handing it another language's
+ * grammar — which every other test here would pass.
  *
  * **EVERY ASSERTION READS THE COMPUTED COLOUR AS WELL AS THE CLASS, BECAUSE A CLASS NO STYLESHEET STYLES
  * WOULD SATISFY A CLASS-ONLY ASSERTION WHILE RENDERING AS PLAIN TEXT.** `tests/browser/setup.ts` gives
  * the tester page `style.css`, so `.tok-keyword` resolves to `--tok-keyword`, `.tok-binder` to
- * `--tok-binder` and `.tok-statename` — the one neutral class of the three — to `--tok-neutral`, each
- * different from the `--fg` a `.cm-content` inherits. A missing rule, or a class the palette forgot,
- * reads here as painted === plain.
+ * `--tok-binder`, and `.tok-statename` and `.tok-mnemonic` — the neutral classes among them — to
+ * `--tok-neutral`, each different from the `--fg` a `.cm-content` inherits. A missing rule, or a class the
+ * palette forgot, reads here as painted === plain.
  *
  * **EVERY QUERY IS SCOPED TO A `.cm-content`, AND FOR THE λ PANE THAT IS LOAD-BEARING.** The λ pane's
  * RENDERED FRAME already emits `.tok-binder` spans, computed by the worker from the term it holds
@@ -122,6 +125,13 @@ describe('the editors colour from their grammars', () => {
     // `@label.reference` reaches it — a `start` or `goto` TARGET, never a defining position, which the
     // TM table maps to `Label` and the asm table maps `@label.reference` to as well (design §5.2).
     expect(state.textContent).not.toBe('')
+  })
+
+  it('colours an asm copy from the asm grammar, in the palette', async () => {
+    fork(paneOf('asm-0'))
+    const mnemonic = await colouredIn(paneOf('asm-0'), '.tok-mnemonic', 'the asm copy’s editor to colour a mnemonic')
+    // The program's first instruction is `li r0, #40`, the literal's load, and its mnemonic is the first in the text.
+    expect(mnemonic.textContent).toBe('li')
   })
 
   /**

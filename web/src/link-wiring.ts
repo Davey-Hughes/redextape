@@ -1,12 +1,11 @@
 import type { EditorView } from '@codemirror/view'
 import type { AsmPane } from './asm-pane'
 import { setLink } from './highlight'
-import { perLeg, unhandled } from './legs'
+import { perLeg } from './legs'
 import type { Link, LinkIndex, Pin } from './link'
 import { type DetachedPanes, type LambdaLinkState, linkStatus } from './link-status'
-import { onPage, type PaneCollection } from './panes'
-import type { Leg } from './protocol'
-import type { PaneSlot, SessionRegistry } from './sessions'
+import type { LeafId, PaneCollection } from './panes'
+import type { SessionRegistry } from './sessions'
 import type { TmPane } from './tm-pane'
 
 /**
@@ -69,84 +68,40 @@ export function createLinkWiring(deps: {
    * link sentence (Plan 7 part 2 spec §11); a keystroke never does.
    */
   announce: (text: string) => void
+  /** A view's title as its header reads it — how the detachment clause names a view showing a copy. */
+  viewTitle: (id: LeafId) => string
 }): LinkWiring {
-  const { view, sessions, panes, draw, announce } = deps
+  const { view, sessions, panes, draw, announce, viewTitle } = deps
   const linkStatusHost = deps.statusHost
 
   /**
-   * "The" pane's slot on `leg` — `undefined` when that leg holds no pane at all — resolved fresh from the
-   * collection on every read rather than cached, the same thunk idiom `view`/`draw` above already use for
-   * the same reason: the answer can change under a caller that keeps this closure around.
-   *
-   * **ONE LOOKUP OVER `Leg`, WHERE THERE WERE TWO NAMED ONES, `theLambdaSlot` AND `theTmSlot`**, which
-   * `detachedPanes` called each by name. A pair of per-leg functions is a list of the legs written out, and a
-   * third leg would not be on it with `tsc` green (`legs.ts` has the class of bug); with a `switch`, a leg
-   * with no arm is a type error here.
-   *
-   * STANDS IN FOR THE `lambdaSlot`/`tmSlot` CONSTS THIS FACTORY USED TO CLOSE OVER DIRECTLY (T7). NO
-   * LONGER "still exactly one pane of each kind", which is what those two used to assert twice by
-   * throwing on an empty collection. That invariant expired when `pane-host.ts`'s `applyLayout` started
-   * deriving panes from the layout tree — `closeLeaf` refuses only the last leaf in the TREE, so
-   * closing the one λ pane a fresh page ships is an ordinary gesture, and `drawLink` ->
-   * `detachedPanes` -> `theSlot` runs on every `draw()`, a keystroke's included. `PaneCollection.active`
-   * answers the question now, and `shown` below is built on it — the pane the user last focused on that
-   * leg, falling back to insertion order when none is marked or the mark no longer resolves (5d-ii-b) —
-   * and its own doc has the argument for why all four consumers were once carrying a private copy of the
-   * same expired invariant.
-   *
-   * **EACH ARM MUST NAME THE VIEW ITS LEG'S OTHER CLAUSES DESCRIBE**, because `linkStatus` suppresses a
-   * detached view's own clauses; each arm says which view that is.
-   *
-   * `detachedPanes` BELOW GIVES AN HONEST ANSWER FOR ABSENCE RATHER THAN PROPAGATING IT: a pane that
-   * does not exist is not detached. `draw()` gives the λ link state the same kind of answer, `'absent'`.
-   */
-  const theSlot = (leg: Leg): PaneSlot<Leg> | undefined => {
-    switch (leg) {
-      case 'lambda':
-        // `PaneCollection.shown` — `active` among the panes on the page — FIRST, because that is the view
-        // `draw()` takes the λ link clause from: in Stage the active pane can be off the page, and a hidden
-        // view's pin and tree are stale (`shown`'s own doc). **WITH NO λ VIEW ON THE PAGE IT FALLS BACK TO
-        // `active`**, as the TM arm does, so a hidden λ copy is still named: the λ link clause then reads
-        // `'absent'` and says nothing, so there is no clause about another view for the copy's to contradict.
-        return (panes.shown('lambda', onPage) ?? panes.active('lambda'))?.slot
-      case 'tm':
-        // `active`, THE PANE `draw()`'s TM RUNNING FOCUS READS, so the copy clause and the "the machine is
-        // here" clause are about one view.
-        return panes.active('tm')?.slot
-      case 'asm':
-        // `active`, AS FOR TM: the asm view `draw()`'s asm running focus reads. No asm view shows a copy until
-        // part 5c, so today its clause is always "linked".
-        return panes.active('asm')?.slot
-      default:
-        // `unhandled` BECAUSE THIS `switch` RETURNS A VALUE THAT MAY BE `undefined`, which is the one kind
-        // TS2366 does not police: a leg with no arm would fall off the end and read as a leg with no pane.
-        unhandled(leg)
-        return undefined
-    }
-  }
-
-  /**
-   * Which panes are outside the source correspondence right now — §4.5's first surface, read off the
-   * bindings.
+   * Which views are outside the source correspondence right now — §4.5's first surface, read off the
+   * bindings: per leg, how many views it has and the title of each one showing a copy.
    *
    * TWO LOOKUPS RATHER THAN A FLAG, and that is what makes §4.5's pairing cheap: detachment is a
-   * property of the SESSION (`SessionEntry.detached`), so a pane is detached exactly when the session
+   * property of the SESSION (`SessionEntry.detached`), so a view is detached exactly when the session
    * it is bound to is, and both surfaces — this sentence and the view's own `copy · not linked` status, which
    * `PaneSlot.render` sets from the same field — cannot disagree.
    *
-   * §5 OWED THE JOINT CASE TO "THE TASK THAT WIRES `main.ts`", which is this one: T6 shipped both
-   * surfaces with no binding to drive them, and this is the call that drives them.
+   * **EVERY VIEW OF EVERY LEG, WHERE THIS READ ONE VIEW PER LEG.** It asked each leg's active view — the one
+   * focused last — so an asm copy on screen went unnamed while a view of the program beside it had been focused
+   * more recently, and a leg's views could not be told apart in the sentence. `linkStatus` names each view showing a
+   * copy, by its title where its leg has more than one view, and suppresses a leg's own clauses only when every view
+   * of it shows a copy. A view OFF the page, in Stage, is counted too: it is still a view, and its tab names it.
    *
-   * A LEG WITH NO PANE READS `false`, WHICH IS THE HONEST ANSWER RATHER THAN A CONVENIENT ONE.
-   * Detachment is a property of the SESSION a pane is BOUND to, so with no pane there is no binding to
+   * A LEG WITH NO VIEW HAS NOTHING TO SAY, WHICH IS THE HONEST ANSWER RATHER THAN A CONVENIENT ONE.
+   * Detachment is a property of the SESSION a view is BOUND to, so with no view there is no binding to
    * read and nothing is outside the correspondence — and the clause this drives ("λ view shows a copy —
-   * not linked to the program") would otherwise narrate a pane that does not exist. A λ pane OFF the page,
-   * in Stage, still reads its session's detachment, as a hidden TM pane does (`theSlot`'s λ arm).
+   * not linked to the program") would otherwise narrate a view that does not exist. `draw()` gives the λ link
+   * state the same kind of answer, `'absent'`.
    */
   const detachedPanes = (): DetachedPanes =>
     perLeg((leg) => {
-      const slot = theSlot(leg)
-      return slot !== undefined && sessions.entryOf(slot.binding.session).detached
+      const views = panes.of(leg)
+      return {
+        views: views.length,
+        copies: views.filter((p) => sessions.entryOf(p.slot.binding.session).detached).map((p) => viewTitle(p.id)),
+      }
     })
 
   /**
@@ -281,10 +236,21 @@ export function createLinkWiring(deps: {
     // CURRENT index can name the wrong rows there, or none — but that pane is about to be reseeded
     // before it is next shown, and `draw.ts`'s seed block re-applies the CURRENT pin once it is, so a
     // wrong answer written here never reaches the screen.
-    for (const p of panes.of('tm')) (p.pane as TmPane).setLink(l?.states ?? [], origin !== 'tm')
-    // AND EVERY ASM VIEW, BY THE TM FAN-OUT'S RULES AND FOR ITS REASONS: hidden ones included, and scrolled to the
-    // construct's first instruction unless the click came from an asm listing (spec §6.6).
-    for (const p of panes.of('asm')) (p.pane as AsmPane).setLink(l?.instrs ?? [], origin !== 'asm')
+    //
+    // **A COPY IS NOT LINKED (§4.5), so it marks nothing whatever is pinned** — `draw.ts`'s λ guard, for the machine
+    // views. `l` holds the PROGRAM's state and instruction indices, and a view showing a copy numbers its rows by the
+    // copy, so an index read there names whatever the copy has at it (spec amendment 32, in the inbound direction).
+    // `detached` is the session's own fact, read here because the view's binding moves.
+    for (const p of panes.of('tm')) {
+      const states = sessions.entryOf(p.slot.binding.session).detached ? [] : (l?.states ?? [])
+      ;(p.pane as TmPane).setLink(states, origin !== 'tm')
+    }
+    // AND EVERY ASM VIEW, BY THE TM FAN-OUT'S RULES AND FOR ITS REASONS: hidden ones included, a copy marking nothing,
+    // and scrolled to the construct's first instruction unless the click came from an asm listing (spec §6.6).
+    for (const p of panes.of('asm')) {
+      const instrs = sessions.entryOf(p.slot.binding.session).detached ? [] : (l?.instrs ?? [])
+      ;(p.pane as AsmPane).setLink(instrs, origin !== 'asm')
+    }
   }
 
   /** Link at a byte offset into the source document, or clear if nothing contains it. */

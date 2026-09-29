@@ -92,10 +92,10 @@ describe('the app, end to end', () => {
    * function serving one, at the cost of the first frame after a mount. A test named for synchrony
    * that awaits is a test whose name lies, so the name went with the contract.
    *
-   * `tests/browser/colour.test.ts` is where the colouring itself is asserted, for all three editors.
-   * What this line keeps is the pairing: the same program that colours is the one that reports its
-   * legs — all three since the asm leg (Plan 7 part 5) — which is the end-to-end claim this test has
-   * always been about.
+   * `tests/browser/colour.test.ts` is where the colouring itself is asserted, for the source editor and
+   * each leg's copy editor. What this line keeps is the pairing: the same program that colours is the one
+   * that reports its legs — all three since the asm leg (Plan 7 part 5) — which is the end-to-end claim
+   * this test has always been about.
    */
   it('colours keywords once the grammar lands, and reports all three legs', async () => {
     retype('let x = 40; x + 2')

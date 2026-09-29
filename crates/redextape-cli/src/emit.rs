@@ -216,12 +216,11 @@ pub fn run(
             }
         },
         Lang::Asm => match redextape_core::tm::lower_asm(&core) {
-            // A header only when the result type is one the directive can express. `parse_ty` admits
-            // exactly Nat/Bool/Unit/List<T>, and `AsmHeader` must not carry anything it would reject
-            // — a file whose own reader refuses its header is worse than one with no header at all.
+            // A header only when the result type is one the directive can express, a free type variable
+            // written as `Nat` — `AsmHeader::for_type`, the function the wasm session's `asm_text` calls
+            // too, so the file written here and the text a copy runs agree on which programs get one.
             Ok(prog) => {
-                let header = redextape_core::ty::parse_ty(&redextape_core::ty::show(&ty))
-                    .map(|result| redextape_core::tm::AsmHeader { result });
+                let header = redextape_core::tm::AsmHeader::for_type(&ty);
                 let listing = match &header {
                     Some(h) => redextape_core::tm::print_asm_with(&prog, h),
                     None => redextape_core::tm::print_asm(&prog),
@@ -262,6 +261,34 @@ fn emit_tm(
     stages: Option<&[StageKind]>,
     err: &mut impl std::io::Write,
 ) -> std::io::Result<Option<String>> {
+    // REFUSED BEFORE ANY LOWERING OR SIMULATION — a fact about `ty` alone, knowable before `core` is
+    // even touched. A `.tm` file's `result` line names the type `run` will decode the final tapes
+    // against, and a function has no decoding (`ty::is_decodable`'s own doc). `AsmHeader::for_type`
+    // answers the identical question for the asm leg by simply omitting its header, which is optional;
+    // a TM header is never optional (it also carries the initial tapes, `TmHeader`'s own doc), so there
+    // is no headerless fallback here and the whole file is refused instead.
+    //
+    // GROUNDED ONCE, NOT TWICE: `ty::is_decodable` grounds `ty` for its own round-trip check, and the
+    // message below used to ground it again through `ty::ground` for the words alone. `AsmHeader::for_type`
+    // grounds once and asks `ty::is_decodable_ground` of the result it already holds; this does the same.
+    // Cloned, not moved: `ty` itself still has to reach the simulation below, ungrounded.
+    let grounded = redextape_core::ty::ground(ty.clone());
+    if !redextape_core::ty::is_decodable_ground(&grounded) {
+        // GROUNDED, LIKE EVERY OTHER `result`-LINE MESSAGE: `ty::show(&ty)` alone would print a free
+        // type variable as `t0` (`ty::show`'s own doc), where `AsmHeader::for_type` and a `.tm`
+        // header's own `describe_at` both name the GROUND type. A function's own free variables are
+        // grounded too (`ty::ground`'s "a `Fun` stays a `Fun`, its variables grounded like any other"),
+        // so this is the one sentence naming a bare `t0` that this refusal could otherwise print for a
+        // program like `|x| x`.
+        writeln!(
+            err,
+            "error: `--lang tm` cannot emit a result of type `{}`\n  \
+             a TM file's `result` line must name a type `run` can decode; the encodings cover Nat, \
+             Bool, Unit and List<T>, and this type has none",
+            redextape_core::ty::show(&grounded)
+        )?;
+        return Ok(None);
+    }
     // `AutoFit` is the fitting search, which is what this command has always done. A pin skips the
     // search, which can refuse a program the search would have accepted — the whole reason to ask
     // for it, and the reason `Width` carries where the pin came from rather than just its value.
@@ -638,6 +665,51 @@ mod tests {
         assert!(doc.header.is_some(), "emitted TM must carry a header, or `run` cannot use it");
     }
 
+    /// A free type variable is written as `Nat` in a `.tm` header too — `[]` wrote `result List<t1>`, which
+    /// `parse_tm_full` refuses, so `run` could not read the file `emit` had just written.
+    #[test]
+    fn emitted_tm_of_a_polymorphic_program_re_parses_with_nat() {
+        let (text, err, outcome) = emit_case("tm-var", "[]", Lang::Tm, Some(EncodingArg::Unary));
+        assert!(matches!(outcome, Outcome::Emitted), "stderr: {err}");
+        let doc = redextape_core::tm::parse_tm_full(&text);
+        assert!(doc.diagnostics.is_empty(), "emitted TM must re-parse cleanly, got: {:?}", doc.diagnostics);
+        assert!(text.contains("result List<Nat>\n"), "the variable is written as `Nat`:\n{text}");
+        assert_eq!(
+            doc.header.map(|h| h.result),
+            Some(redextape_core::ty::Ty::List(Box::new(redextape_core::ty::Ty::Nat)))
+        );
+    }
+
+    /// The sibling `Var` above cannot fix: `|x| x + 1` types as `(Nat) -> Nat`, and a `.tm` header naming
+    /// that in its `result` line is one `parse_tm_full` refuses (D5, `ty::parse_ty`'s own doc) — grounding
+    /// leaves a `Fun` a `Fun`, so unlike `[]` this type never becomes headerable. THE FILE MUST NOT BE
+    /// WRITTEN, refused up front rather than lowered and run first.
+    #[test]
+    fn a_function_valued_program_is_refused_not_emitted_as_tm() {
+        let (out, err, outcome) = emit_case("tm-fun", "|x| x + 1", Lang::Tm, Some(EncodingArg::Unary));
+        assert_eq!(out, "", "no `.tm` file may be written for a function-valued program");
+        assert!(err.contains("result"), "the message must name the `result` line, got: {err}");
+        assert!(err.contains("(Nat) -> Nat"), "the message must name the type, got: {err}");
+        assert!(matches!(outcome, Outcome::ToolFailed), "the program is fine; this tool cannot express it");
+    }
+
+    /// **THE MESSAGE NAMES THE GROUNDED TYPE, NOT THE RAW ONE.** `|x| x`'s own inferred type is
+    /// `(t1) -> t1` — a free variable in both a parameter and the result, unconstrained by any use —
+    /// and `ty::show` alone would print exactly that (`ty::show`'s own doc: a `Var` prints `t{v}`).
+    /// Every other `result`-line consumer (`AsmHeader::for_type`, a `.tm` header's own `describe_at`)
+    /// names the GROUND type instead, and `ty::ground`'s own doc says a `Fun`'s free variables are
+    /// grounded exactly like any other's — so this refusal must too, or it is the one place in the
+    /// tool that shows a user a bare `tN` for a program whose type is otherwise perfectly ordinary.
+    #[test]
+    fn the_refusal_names_the_grounded_type_not_a_free_variable() {
+        let (out, err, outcome) = emit_case("tm-fun-var", "|x| x", Lang::Tm, Some(EncodingArg::Unary));
+        assert_eq!(out, "", "no `.tm` file may be written for a function-valued program");
+        // `|x| x` types raw as `(t1) -> t1` — measured; a regression back to `ty::show(&ty)` prints
+        // exactly that instead, which this positive assertion on the grounded string alone catches.
+        assert!(err.contains("(Nat) -> Nat"), "the message must name the GROUNDED type, got: {err}");
+        assert!(matches!(outcome, Outcome::ToolFailed), "the program is fine; this tool cannot express it");
+    }
+
     #[test]
     fn the_binary_encoding_is_selectable_and_differs() {
         let (unary, _, _) = emit_case("enc-u", "1 + 2", Lang::Tm, Some(EncodingArg::Unary));
@@ -911,7 +983,7 @@ mod tests {
     }
 
     /// `emit --lang asm`'s new behavior: the common path's `ty` (already computed before `match lang`)
-    /// becomes a header when `parse_ty(show(ty))` round-trips. A distinct case name from
+    /// becomes a header when `AsmHeader::for_type` can name it. A distinct case name from
     /// `emitted_asm_parses_back`'s `"asm"` — `emit_case` keys a temp directory by case, and reusing
     /// one is a race two tests should not share even though, here, they would have written identical
     /// bytes.
@@ -928,26 +1000,40 @@ mod tests {
         assert!(!prog.expect("parses").code.is_empty());
     }
 
+    /// **A FREE TYPE VARIABLE IS WRITTEN AS `Nat`.** `[]` is never constrained by anything else in the
+    /// program, so its element type stays a variable, `List<t1>`, which `parse_ty` refuses — and until
+    /// `AsmHeader::for_type` grounded it, `[]` emitted with no header and `run` refused the file. A closed
+    /// `List<t>` holds no `t`, so reading it as `List<Nat>` reads the same value. `[[]]` nests the variable
+    /// a level deeper. Each file starts with its header and runs to the program's value.
+    ///
     /// **NOT a function-typed fixture — `Fun` is unreachable here, and that is a real structural
     /// fact, not a shortcut.** `lower_asm` has no register representation for a function value: a bare
     /// lambda in value position (`Core::Lambda`) errors unconditionally, and a bare function name
     /// (`Core::Var` naming an `fn`) resolves against `ctx.resolve`, which only tracks local variable
     /// registers — function names live in `fn_scopes` instead, so the lookup misses and reports
     /// "unbound". Every fixture tried (`|x| x + 1`, a bare `fn` name, a `let`-bound closure) fails at
-    /// `lower_asm` itself with `Unsupported`, so `Outcome::Emitted` is never reached for `Fun`.
-    ///
-    /// `[]` reaches the SAME outcome through the other type this task's decision names: an unresolved
-    /// `Ty::Var`. Never constrained by anything else in the program, its element type stays
-    /// `List<t1>` — `parse_ty` rejects `t1` exactly as it would reject a `Fun`'s arrow syntax — while
-    /// `lower_asm` accepts `[]` fine (`Instr::Nil` carries no type to check). So it still emits — a
-    /// listing is readable regardless — just without a header.
+    /// `lower_asm` itself with `Unsupported`, so `Outcome::Emitted` is never reached for `Fun`, and
+    /// `for_type`'s unit test is where a type holding a function is shown to get no header.
     #[test]
-    fn a_program_with_no_expressible_result_type_emits_asm_without_a_header() {
-        let (text, err, outcome) = emit_case("asm-var", "[]", Lang::Asm, None);
-        assert!(matches!(outcome, Outcome::Emitted), "emitting a listing does not require a result type: {err}");
-        let doc = redextape_core::tm::parse_asm_full(&text);
-        let (header, ds) = (doc.header, doc.diagnostics);
-        assert!(ds.is_empty(), "{ds:?}");
-        assert_eq!(header, None, "no header, because no value type could be written");
+    fn a_polymorphic_result_type_is_headered_with_nat() {
+        for (case, src, header, value) in [
+            ("asm-var", "[]", "result List<Nat>\n", "[]"),
+            ("asm-var-nested", "[[]]", "result List<List<Nat>>\n", "[[]]"),
+        ] {
+            let (text, err, outcome) = emit_case(case, src, Lang::Asm, None);
+            assert!(matches!(outcome, Outcome::Emitted), "{src}: {err}");
+            let listing = text.strip_prefix(ASM_PREAMBLE).expect("the preamble comes first");
+            assert!(listing.starts_with(header), "{src}: the header names the type, `Nat` for its variable:\n{text}");
+            let doc = redextape_core::tm::parse_asm_full(&text);
+            assert!(doc.diagnostics.is_empty(), "{src}: {:?}", doc.diagnostics);
+            let (prog, header) = (doc.program.expect("parses"), doc.header.expect("headered"));
+            let redextape_core::tm::AsmRun::Ran(outcome) =
+                redextape_core::tm::run_asm(&prog, redextape_core::tm::asm::DEFAULT_CAPS)
+            else {
+                panic!("{src}: the emitted file halts")
+            };
+            let got = redextape_core::tm::decode_asm_ty(&outcome, &header.result).expect("decodes");
+            assert_eq!(redextape_core::value::format_value(&got), value, "{src}");
+        }
     }
 }

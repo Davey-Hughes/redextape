@@ -42,7 +42,7 @@ describe('overCeiling', () => {
     expect(overCeiling(COLOUR_CEILING_UNITS + 1)).toBe(true)
   })
 
-  it('has a ceiling matching the session buffer ceiling, not a number of its own', () => {
+  it('has the larger copy ceiling, a TM copy’s, not a number of its own', () => {
     expect(COLOUR_CEILING_UNITS).toBe(6_100_000)
   })
 })
@@ -354,8 +354,8 @@ describe('the colourer across the ceiling', () => {
  *
  * The second is the case the review found underneath it. `Parser.init` is memoised for the whole
  * registry, so a runtime `.wasm` that will not fetch rejects every language's promise from ONE cause —
- * three notices today and four once part 5 adds an asm editor, for a single event that leaves nothing
- * on the page coloured. `createGrammarRegistry` reports that through `onRuntimeFailure`, once.
+ * four notices, one per language, for a single event that leaves nothing on the page coloured.
+ * `createGrammarRegistry` reports that through `onRuntimeFailure`, once.
  *
  * **NODE, AND THE GRAMMARS ARE THE REAL ONES**, as the two suites above are: `Language.load` takes a
  * filesystem path here, so a fabricated failure sits beside a genuine success in the same registry and

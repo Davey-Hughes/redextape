@@ -1,4 +1,5 @@
-import { type CopyLeg, LEG_NAME } from './legs'
+import { LEG_NAME, LEGS } from './legs'
+import type { Leg } from './protocol'
 import type { SessionId } from './session-client'
 
 /**
@@ -21,18 +22,24 @@ export type BufferRow = {
   readonly label: string
   readonly paneCount: number
   /**
-   * The buffer's current term, or `null` when it has none — **the only field on this row that differs
-   * between two buffers, and it was not here when the list shipped.**
+   * What the copy holds, under its name: a λ copy's current term, or `null` when it has none; a TM or asm copy's
+   * run, as its readout line says it without the name (`readout.ts`'s `tmCopyRow`) — **the only field on this row
+   * that differs between two buffers, and it was not here when the list shipped.**
    *
    * **WITHOUT IT A ROW IS A COUNTER'S OUTPUT AND A PANE COUNT, AND AT THE CAP EVERY PANE COUNT IS THE
    * SAME TOO.** The one gesture this control exists for is *choose a buffer and end it* — and the user
    * reaching it under a refusal has just been told they must choose, with no basis whatsoever on which
-   * to do so. `label` is `λ copy N` or `TM copy N` BY CONSTRUCTION (`#minted` only counts up, and
-   * the leg picks the prefix — `ScratchBuffers`'s own doc in `scratch.ts`), so no amount of naming fixes
-   * this: the distinguishing fact is what the buffer HOLDS.
+   * to do so. `label` is `copy N` BY CONSTRUCTION, said with its leg's name (`#minted` only counts up —
+   * `ScratchBuffers`'s own doc in `scratch.ts`), so no amount of naming fixes this: the distinguishing fact
+   * is what the buffer HOLDS.
+   *
+   * **A MACHINE COPY HOLDS A RUN, NOT A TERM, AND IS NEVER `null` HERE.** Its frames print no term, and it used to
+   * come here as `null` and read `no term yet` — "nothing has come back" — under a copy that had run to its value.
+   * Its readout's words say what became of the run: a value, a fault, a cap, a value run still going, or that it
+   * has not built yet.
    *
    * `string | null` RATHER THAN AN EMPTY STRING FOR THE ABSENT CASE, because the two are different
-   * things the row says differently: a buffer whose fork has not answered yet, or never will, has no
+   * things the row says differently: a λ buffer whose fork has not answered yet, or never will, has no
    * term — where a buffer holding the empty term is not a state the worker can produce. The renderer
    * marks the absent case rather than drawing a blank line, since a blank line under a name reads as a
    * rendering fault rather than as a fact about the buffer.
@@ -61,7 +68,7 @@ export type BufferRow = {
    */
   readonly warm: boolean
   /** The copy's leg, which its name is said with. */
-  readonly leg: CopyLeg
+  readonly leg: Leg
 }
 
 /**
@@ -135,12 +142,19 @@ const bufferRow = (
   // `viewReadout` is a general-purpose reader with no idea `warm` exists, and branching it on a fact
   // from a field it is not passed would tangle two concerns this file otherwise keeps apart. The row
   // still reads correctly, just not minimally — and minimality is not what this comment is fixing.
+  //
+  // A LIVE ROW NAMES NO WORKER AT ALL (part 2 design §10 amended by Plan 7 part 5 spec amendment 46). The
+  // word used to read `running` here, next to a halted copy's own `value: 42` that its run's own line
+  // already states — read by hand as the machine still executing when it was not (`asm copy 1 · not
+  // shown · running` at step 55 of 55). A copy that HAS a worker says nothing about having one; only
+  // `paused`, the state that took the worker away, is still worth a word beside the name.
   const said = `${LEG_NAME[row.leg]} ${row.label}`
-  name.textContent = `${said} · ${viewReadout(row.paneCount)} · ${row.warm ? 'running' : 'paused'}`
+  const worker = row.warm ? '' : ' · paused'
+  name.textContent = `${said} · ${viewReadout(row.paneCount)}${worker}`
 
   /**
-   * The buffer's term, under its name — see `BufferRow.term` for why a row without it is a column of
-   * rows the user cannot tell apart.
+   * What the buffer holds, under its name — see `BufferRow.term` for why a row without it is a column of
+   * rows the user cannot tell apart, and for what a machine copy's line says.
    *
    * **TRUNCATED BY CSS AND NOT BY A SLICE HERE.** A `slice(0, 40)` would be a width written in this file
    * for a box whose width is in the stylesheet, wrong at every zoom level and every font size, and
@@ -153,7 +167,7 @@ const bufferRow = (
    * the one that does not have to fit.
    *
    * THE ABSENT CASE IS A SENTENCE, NOT AN EMPTY LINE, and it deliberately does not guess WHY — **FOR A
-   * WARM ROW.** A buffer with no term is one whose fork has not answered yet or one whose build failed,
+   * WARM λ ROW.** A buffer with no term is one whose fork has not answered yet or one whose build failed,
    * and this row cannot tell those apart — `no term yet` is true of both, where "wedged" would be a
    * claim and "building…" would repeat the very lie a phantom-forked pane already tells (deferred-a11y
    * item 11's neighbourhood). It takes a class of its own so the stylesheet can mark it without this
@@ -233,6 +247,9 @@ const bufferRow = (
   return { id: row.id, el, retire, temperature }
 }
 
+/** Which legs the menu offers a blank copy on: asm and TM (spec §7), whose copy's text is the whole program. */
+const BLANK_COPY: Readonly<Record<Leg, boolean>> = { lambda: false, asm: true, tm: true }
+
 /**
  * The header bar's buffer list — the only surface that can reach a buffer no pane is showing.
  *
@@ -301,7 +318,7 @@ export function bufferList(
   rows: () => readonly BufferRow[],
   onRetire: (id: SessionId) => void,
   onTemperature: (id: SessionId, warm: boolean) => void,
-  onNewTm: () => void,
+  onNew: (leg: Leg) => void,
 ): { update(count: number): void } {
   const id = `buffer-list-${listSeq++}`
   const menu = document.createElement('div')
@@ -326,10 +343,10 @@ export function bufferList(
    * item to move focus back onto it after the rebuild — see `handleTemperature`'s own doc for why
    * (5d-ii-d review round 2, Finding 1).
    *
-   * **THE *new TM copy* CONTROL IS BUILT HERE TOO, FIRST, AHEAD OF EVERY ROW — 5d-iv T10, design §4.7.**
-   * "GIVE ME SOMEWHERE TO PASTE A `.tm` FILE" is a different intention from *edit a copy*, which detaches a view
-   * onto a copy of what it was showing — there is no view to seed a TM copy FROM (`ScratchBuffers.
-   * forkBlank`'s own doc), and above the cap that gesture is unavailable where this one never is. It
+   * **THE *new asm copy* AND *new TM copy* CONTROLS ARE BUILT HERE TOO, FIRST, AHEAD OF EVERY ROW — design §4.7,
+   * and Plan 7 part 5 spec §7 for asm.** "GIVE ME SOMEWHERE TO PASTE A `.tm` FILE" is a different intention from
+   * *edit a copy*, which detaches a view onto a copy of what it was showing — there is no view to seed a blank copy
+   * FROM (`ScratchBuffers.forkBlank`'s own doc), and above the cap that gesture is unavailable where this one never is. It
    * lives here rather than in the app header because this menu is where copies are managed, and it is
    * what makes the menu non-empty at zero — which is why `main.ts`'s `refreshBuffers` no longer hides the
    * invoking button. IT IS BUILT INSIDE `rebuildRows`, NOT ONCE AT CONSTRUCTION, so a temperature click's
@@ -343,16 +360,21 @@ export function bufferList(
     retire: HTMLButtonElement
     temperature: HTMLButtonElement
   }[] => {
-    const newTm = document.createElement('button')
-    newTm.type = 'button'
-    newTm.className = 'new-tm'
-    newTm.textContent = 'new TM copy'
-    newTm.addEventListener('click', () => {
-      menu.hidePopover()
-      onNewTm()
+    // ONE PER LEG A BLANK COPY CAN BE MADE ON, IN `LEGS`' ORDER — asm and TM, whose text is a whole program or machine.
+    // A blank λ copy would be a term with nothing in it, and a λ copy is always made from a step of the program.
+    const news = LEGS.filter((leg) => BLANK_COPY[leg]).map((leg) => {
+      const b = document.createElement('button')
+      b.type = 'button'
+      b.className = `buffer-new new-${leg}`
+      b.textContent = `new ${LEG_NAME[leg]} copy`
+      b.addEventListener('click', () => {
+        menu.hidePopover()
+        onNew(leg)
+      })
+      return b
     })
     const items = rows().map((row) => bufferRow(row, handleDelete, handleTemperature))
-    menu.replaceChildren(newTm, ...items.map((i) => i.el))
+    menu.replaceChildren(...news, ...items.map((i) => i.el))
     return items
   }
 

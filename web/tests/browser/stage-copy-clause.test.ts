@@ -5,16 +5,14 @@ import { SHELL, until } from './harness'
 /**
  * THE λ COPY CLAUSE IN STAGE, where one view is on the page and every other host is off it.
  *
- * It names the λ view on the page when there is one — the view the λ link clause comes from, since
- * `linkStatus` suppresses a copy's own clauses (`stage.test.ts` has that clause's case) — and otherwise the
- * active λ view, off the page, AS THE TM COPY CLAUSE NAMES A HIDDEN TM COPY. With no λ view on the page the
- * λ link clause reads `'absent'` and says nothing, so the two cannot disagree. Selecting a tab records the
- * focused leaf and marks no pane active, so the λ view last clicked into can be off the page while the
- * status line is read.
+ * It names the λ view on a copy whether that view is on the page or not, as it names every view showing a copy:
+ * a view off the page is still a view, and its tab names it (`link-wiring.ts`'s `detachedPanes`). With no λ view
+ * of the program on the page the λ link clause reads `'absent'` and says nothing, so the two cannot disagree —
+ * `stage.test.ts` has that clause's case.
  *
- * THE OTHER SHARED SURFACES ARE NOT HERE, ON PURPOSE. The running focuses and the TM copy clause read a leg's
- * live history through the active pane, on or off the page, and part 2's spec §8 keeps the step bar on "the
- * last view that could" step — `PaneCollection.shown`'s doc has the split.
+ * THE OTHER SHARED SURFACES ARE NOT HERE, ON PURPOSE. The running focuses read a leg's live history through a
+ * view of the program, on or off the page, and part 2's spec §8 keeps the step bar on "the last view that
+ * could" step — `PaneCollection.shown`'s doc has the split.
  */
 let view: EditorView
 const SRC = 'let x = 40; x + 2'

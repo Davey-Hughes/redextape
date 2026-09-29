@@ -192,7 +192,8 @@ result register should decode as. So a header-less `.asm` file parses, validates
 fine; `run` refuses it anyway, before running it, because it would otherwise spend up to
 `DEFAULT_CAPS.steps` (five million) reaching an answer it then has no declared type to print. The
 refusal points at `redextape emit --lang asm`, which writes a `result` header whenever the program's
-result type can be expressed. A run that hits the step, stack or heap cap, or that faults, is the
+result type can be expressed — any type that holds no function, with a free type variable written as
+`Nat`, so `[]` is headered `result List<Nat>` (a closed list of `t` holds no `t`). A run that hits the step, stack or heap cap, or that faults, is the
 program's fault (`1`). A run that finishes decodes its result against the header's declared type, and
 that decode has the same `DecodeFailure::Mismatch` / `DecodeFailure::BudgetExhausted` split `.tm` has,
 above: a result that contradicts the header's declared type is a `Mismatch` — the header lied about
@@ -242,7 +243,7 @@ check took. `redextape run` takes it like any other `.tm` file; see `run` above.
 |---|---|---|
 | `tm` | a complete self-describing machine, header included | yes — `parse_tm_full`, and `redextape run` |
 | `lambda` | the λ-calculus lowering of the program | yes — `parse_lambda` |
-| `asm` | the register-machine lowering, headered when the result type can be expressed | yes — `parse_asm`, and `redextape run` |
+| `asm` | the register-machine lowering, headered when the result type can be expressed, a type variable as `Nat` | yes — `parse_asm`, and `redextape run` |
 
 **All three emitted forms read back, and two of the three are also runnable from the command line.**
 `parse_asm` is the newest of the three readers, landing alongside `Program::validate` and two

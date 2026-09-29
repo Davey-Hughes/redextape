@@ -11,7 +11,17 @@ import type { ClientPort, PoolPort, SessionId } from '../../src/session-client'
 import { SessionClient, SessionPool } from '../../src/session-client'
 import type { LegState, SessionEntry } from '../../src/sessions'
 import { PaneSlot, SessionRegistry } from '../../src/sessions'
-import type { Diagnostic, LambdaState, TmProgram, TmScratchStatus, TmState } from '../../src/types'
+import type {
+  AsmProgram,
+  AsmStatus,
+  Decoded,
+  Diagnostic,
+  LambdaState,
+  TmProgram,
+  TmScratchStatus,
+  TmState,
+} from '../../src/types'
+import { frameOf } from './asm-fixtures'
 
 /**
  * **WHAT A SESSION KEEPS FROM ITS OWN `compiled` REPLY** — the retention a TM pane created later is
@@ -83,6 +93,7 @@ function sourceEntry(): SessionEntry {
     tmProgram: null,
     tmScratch: null,
     asmProgram: null,
+    asmScratch: null,
   }
 }
 
@@ -109,6 +120,8 @@ const compiled = (tmProgram: TmProgram | null, tapeNames: string[]): RunReply =>
   tapeNames,
   linkIndex: null,
   tmText: null,
+  tmResultDecodable: true,
+  asmText: null,
 })
 
 /** The switch under test, over a registry holding `entry`, with no pane in the collection. */
@@ -251,7 +264,19 @@ const noSession = (diagnostics: Diagnostic[]): RunReply => ({ kind: 'no-session'
  * touch, in `panes.test.ts`'s own idiom — a real `LambdaPane` needs a document, which is the browser
  * tier's business (`tests/browser/scratch-edit.test.ts`).
  */
-function scratchDriver() {
+/**
+ * `draw` and `frame` are overridable for the one describe block below that asserts how often `draw()`
+ * runs (`case 'tm-value'`'s frame coalescing) — every other caller takes the defaults, a no-op `draw` and
+ * a `frame` that runs its callback synchronously. **THE DEFAULT `frame` MUST NOT BE
+ * `createReplies`'s OWN DEFAULT**, which is `requestAnimationFrame` itself: this tier's `environment:
+ * 'node'` has no such global (unlike jsdom or a real page), so a test that sends a `Running` tm-value
+ * reply without overriding `frame` would throw `ReferenceError: requestAnimationFrame is not defined`
+ * the moment `case 'tm-value'` schedules one. Running the callback synchronously instead keeps every
+ * existing retention test's behaviour identical to `draw()` being called straight, since none of them
+ * assert on `draw`'s call count or timing — only the coalescing describe block below does, and it passes
+ * both overrides.
+ */
+function scratchDriver(opts: { draw?: () => void; frame?: (cb: () => void) => void } = {}) {
   const reg = new SessionRegistry()
   const ports: (PoolPort & { sent: RunRequest[]; terminated: number })[] = []
   const pool = new SessionPool(
@@ -299,7 +324,8 @@ function scratchDriver() {
     view: () => undefined as unknown as EditorView,
     panes,
     links,
-    draw: () => undefined,
+    draw: opts.draw ?? (() => undefined),
+    frame: opts.frame ?? ((cb: () => void) => cb()),
     editorHome: () => undefined,
     onBuffersPersist: () => {
       persists += 1
@@ -321,6 +347,7 @@ function scratchDriver() {
     buffers,
     ports,
     replies,
+    panes,
     slot,
     gutter,
     notified: () => notified,
@@ -568,6 +595,69 @@ describe('a TM buffer retains what its panes were last told', () => {
     })
   })
 
+  /**
+   * **A RUNNING VALUE'S REDRAW IS COALESCED TO ONE PER FRAME, NOT ONE PER REPLY.** `case 'tm-value'`'s own
+   * comment in `replies.ts` has the reason: the worker posts a chunk far more often than a display paints,
+   * so a `draw()` per chunk is a synchronous redraw the browser cannot skip. This test drives the fake
+   * `frame` scheduler by hand instead of the default synchronous stand-in, so it can tell "several replies
+   * landed before the frame fired" from "each reply drew on its own" — the default stand-in (`cb()` run
+   * straight) collapses that distinction, which is why every OTHER test in this file leaves `frame` at its
+   * default.
+   */
+  it('coalesces a burst of running replies to one draw per frame, and flushes the ending reply at once', () => {
+    let drawn = 0
+    const pending: Array<() => void> = []
+    const frame = (cb: () => void): void => {
+      pending.push(cb)
+    }
+    const fireFrame = (): void => {
+      // A REAL `requestAnimationFrame` HANDS EACH QUEUED CALLBACK THE SAME FRAME — draining what is queued
+      // NOW, not what a callback queues while this drain runs, is what a fake stands in for here.
+      const due = pending.splice(0, pending.length)
+      for (const cb of due) cb()
+    }
+    const { buffers, reg, replies } = scratchDriver({ draw: () => (drawn += 1), frame })
+    const id = buffers.forkBlank('tm')
+    replies.onScratchReply(id, built(['REG']))
+    // PRECONDITION: the build itself draws once, straight, exactly as `tm-scratch-compiled`'s own arm
+    // always has — only `tm-value`'s own redraw is coalesced. Reset the counter so the burst below is
+    // read against a known zero, not against this unrelated draw.
+    expect(drawn).toBe(1)
+    drawn = 0
+    const running = (steps: number) =>
+      ({ kind: 'tm-value', gen: 1, run: { run: 'Running', steps, cap: 2_000_000 }, value: 'Unfinished' }) as const
+
+    // Three chunks land before any frame fires: one redraw is scheduled, not three.
+    replies.onScratchReply(id, running(500_000))
+    replies.onScratchReply(id, running(1_000_000))
+    replies.onScratchReply(id, running(1_500_000))
+    expect(drawn).toBe(0)
+    expect(pending.length).toBe(1)
+    fireFrame()
+    expect(drawn).toBe(1)
+
+    // A frame with nothing newly scheduled draws nothing a second time.
+    fireFrame()
+    expect(drawn).toBe(1)
+
+    // A fourth chunk schedules exactly one more pending frame.
+    replies.onScratchReply(id, running(2_000_000))
+    expect(drawn).toBe(1)
+    expect(pending.length).toBe(1)
+
+    // The reply that ends the run draws AT ONCE, without waiting on the frame already pending —
+    // the whole point: the final value must not wait on a frame a hidden tab may never paint.
+    const ended = { run: 'Ended', steps: 2_000_000, cap: 2_000_000 } as const
+    replies.onScratchReply(id, { kind: 'tm-value', gen: 1, run: ended, value: { Value: { text: '2' } } })
+    expect(drawn).toBe(2)
+
+    // The frame the fourth chunk scheduled still fires later — nothing cancels a browser's own callback —
+    // but it must not draw again for a run that has already ended and already flushed.
+    fireFrame()
+    expect(drawn).toBe(2)
+    expect(reg.entryOf(id).tmScratch?.value).toEqual({ run: ended, value: { Value: { text: '2' } } })
+  })
+
   it('a new build forgets the previous value', () => {
     const { buffers, reg, replies } = scratchDriver()
     const id = buffers.forkBlank('tm')
@@ -611,5 +701,93 @@ describe('a TM buffer retains what its panes were last told', () => {
       run: { run: 'Ended', steps: 241_666, cap: 241_666 },
       value: { Value: { text: '2' } },
     })
+  })
+})
+
+/**
+ * An asm copy retains what its views were last told, as a TM copy does: its listing, its status and its value, all from
+ * the one build reply (Plan 7 part 5 spec, amendment 26), the value replaced by an `asm-value`, the frames recorded
+ * into its asm leg, and all of it written to storage with the build.
+ */
+describe('an asm copy retains what its views were last told', () => {
+  const STATUS: AsmStatus = { available: true, reason: '', run: 'Running', cap: null, total_steps: 1 }
+  const LISTING: AsmProgram = { listing: ['halt'], labels: [] }
+  const built = (value: Decoded): RunReply => ({
+    kind: 'asm-scratch-compiled',
+    gen: 1,
+    asm: STATUS,
+    asmProgram: LISTING,
+    value,
+  })
+
+  it('holds the listing, the status and the value its build reply carried, and persists the copy', () => {
+    const { buffers, reg, replies, persists } = scratchDriver()
+    const id = buffers.forkBlank('asm')
+    replies.onScratchReply(id, built({ Value: { text: '0 (no result type)' } }))
+    const entry = reg.entryOf(id)
+    expect(entry.asmProgram).toEqual({ program: LISTING, asmText: null })
+    expect(entry.asmScratch).toEqual({ status: STATUS, value: { Value: { text: '0 (no result type)' } } })
+    expect(entry.legs.asm?.status).toEqual({ available: true, reason: '' })
+    expect(persists()).toBe(1)
+  })
+
+  it('records its frames into its asm leg', () => {
+    const { buffers, reg, replies } = scratchDriver()
+    const id = buffers.forkBlank('asm')
+    replies.onScratchReply(id, built('Unfinished'))
+    replies.onScratchReply(id, { kind: 'asm-frames', gen: 1, frames: [frameOf(), frameOf({ step: 1 })], done: 'ended' })
+    const leg = reg.legOf({ session: id, leg: 'asm' })
+    expect(leg.hist.current?.step).toBe(1)
+    expect(leg.done).toBe('ended')
+  })
+
+  it('takes the value a [continue] brings in place of the build’s', () => {
+    const { buffers, reg, replies } = scratchDriver()
+    const id = buffers.forkBlank('asm')
+    replies.onScratchReply(id, built('Unfinished'))
+    replies.onScratchReply(id, { kind: 'asm-value', gen: 1, value: { Value: { text: '[1, 2, 3]' } } })
+    expect(reg.entryOf(id).asmScratch).toEqual({ status: STATUS, value: { Value: { text: '[1, 2, 3]' } } })
+  })
+
+  it('tells every view on the copy the value a [continue] brings, and the null a dead worker leaves', () => {
+    const { buffers, reg, replies, panes } = scratchDriver()
+    const id = buffers.forkBlank('asm')
+    const told: unknown[] = []
+    panes.add({
+      id: 'asm-0',
+      kind: 'asm',
+      slot: new PaneSlot('asm', id),
+      pane: { setScratch: (r: unknown) => told.push(r) } as unknown as PaneEntry<'asm'>['pane'],
+      host: {} as HTMLElement,
+    })
+    reg.entryOf(id).asmScratch = { status: STATUS, value: 'Unfinished' }
+    replies.onScratchReply(id, { kind: 'asm-value', gen: 1, value: { Value: { text: '6' } } })
+    replies.onScratchReply(id, { kind: 'worker-error', gen: 1, message: 'boom' })
+    expect(told).toEqual([{ status: STATUS, value: { Value: { text: '6' } } }, null])
+  })
+
+  it('forgets its reading when its worker throws', () => {
+    const { buffers, reg, replies } = scratchDriver()
+    const id = buffers.forkBlank('asm')
+    replies.onScratchReply(id, built('Unfinished'))
+    replies.onScratchReply(id, { kind: 'worker-error', gen: 1, message: 'boom' })
+    expect(reg.entryOf(id).asmScratch).toBeNull()
+  })
+})
+
+/** The program's asm text rides `compiled` beside its listing, for *edit a copy* — `tmText`'s arrangement. */
+describe('a session retains its asm text beside its listing', () => {
+  const LISTING: AsmProgram = { listing: ['li\trr, #1', 'halt'], labels: [] }
+
+  it('holds the text a `compiled` reply carried, and nothing when it carried no listing', () => {
+    const entry = sourceEntry()
+    const { replies } = driver(entry)
+    const asm: AsmStatus = { available: true, reason: '', run: 'Running', cap: null, total_steps: 2 }
+    const text = 'result Nat\n\n    li\trr, #1\n    halt\n'
+    replies.onReply(SOURCE, { ...compiled(PROGRAM, ['TAPE']), asm, asmProgram: LISTING, asmText: text } as RunReply)
+    expect(entry.asmProgram).toEqual({ program: LISTING, asmText: text })
+
+    replies.onReply(SOURCE, compiled(PROGRAM, ['TAPE']))
+    expect(entry.asmProgram).toBeNull()
   })
 })

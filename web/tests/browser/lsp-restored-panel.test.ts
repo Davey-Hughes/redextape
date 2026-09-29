@@ -20,7 +20,7 @@ import { SHELL, until } from './harness'
  * this file exit 1.
  *
  * **THE SEED HAD TO BE THE SOURCE PANEL, AND AN EARLIER VERSION OF THIS FILE SEEDED THE TM ONE AND
- * CONCLUDED THE CRASH COULD NOT BE REPRODUCED.** It can. `TmPane`'s `symbols` thunk is `async`, so
+ * CONCLUDED THE CRASH COULD NOT BE REPRODUCED.** It can. The TM view's `symbols` thunk (`CopyEditor`'s) is `async`, so
  * the throw becomes a rejection that `createOutlinePanel`'s own `.catch` swallows and nothing
  * surfaces. `main.ts`'s is a plain arrow, so it throws synchronously out of `main()` and `ready`
  * rejects. Two thunks, one of which can show the defect — the docstring claimed "the old order" while
@@ -40,7 +40,7 @@ describe('a workspace restored with a panel already open', () => {
 
     // **A RESTORED COPY, NOT JUST A RESTORED PANEL, AND BOTH ARE NEEDED.** The crash wanted a pane
     // that resolves `lspDocument` while it is being constructed, and only a pane with an EDITOR does
-    // that — `#syncEditorControls` refreshes the outline when `#editor` is non-null. A restored
+    // that — `CopyEditor`'s `#syncEditorControls` refreshes the outline when `#editor` is non-null. A restored
     // buffer is what gives a pane an editor at construction. With the panel open but no copy, the
     // old order does not crash and this file was green against it.
     const ws = defaultWorkspace()

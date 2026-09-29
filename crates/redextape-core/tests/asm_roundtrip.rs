@@ -15,7 +15,10 @@ use redextape_test_support::arb_expr_over;
 
 use redextape_core::desugar::desugar;
 use redextape_core::parser::parse;
-use redextape_core::tm::{AsmHeader, Instr, Program, lower_asm, parse_asm, parse_asm_full, print_asm, print_asm_with};
+use redextape_core::tm::{
+    AsmHeader, Instr, Program, asm_label_diagnostics, lower_asm, lower_program, parse_asm, parse_asm_full,
+    parse_asm_nav, print_asm, print_asm_with,
+};
 use redextape_core::ty::Ty;
 
 /// The programs P1 is held over, chosen for `Instr`-variant coverage — which is what P1's evidence
@@ -306,4 +309,43 @@ fn a_header_changes_the_program_not_at_all() {
         let with = parse_asm(&print_asm_with(&prog, &AsmHeader { result: Ty::Nat })).0.expect("headered parses");
         assert_eq!(bare, with, "the header must not perturb the program for {src}");
     }
+}
+
+// ---------------------------------------------------------------------------
+// The text a web copy starts from: the program `lower_program` returns, `defunc` included.
+// ---------------------------------------------------------------------------
+
+/// Two programs `lower_asm` refuses and `defunc` rewrites: a closure passed as a value, and a `let mut` a
+/// closure writes, which `defunc` boxes. Between them they emit the three box instructions no entry in
+/// `DEMOS` can reach.
+const DEFUNC_DEMOS: &[&str] = &[
+    "fn map(xs, f) { if is_empty(xs) { nil } else { cons(f(head(xs)), map(tail(xs), f)) } } map([3, 1, 2], |x| x + 1)",
+    "let mut acc = 0; let bump = |n| { acc = acc + n; acc }; bump(1); acc",
+];
+
+/// Every program the web app runs prints to text that reads back to it, with nothing for
+/// `asm_label_diagnostics` to mark — so *edit a copy* never hands the user a copy that refuses to run.
+///
+/// **OVER `lower_program`, WHICH NOTHING ABOVE REACHES.** The round trips above lower with `lower_asm`
+/// alone; the web session lowers through `lower_program`, which retries through `defunc`, and `defunc`
+/// mints the labels of the functions it builds. A minted name the printer could not write back, or two
+/// minted with one name, would reach a copy as a mark on text the user never wrote. The two corpora
+/// together reach all 16 instruction variants, which this test counts.
+#[test]
+fn every_program_the_web_app_runs_prints_to_text_a_copy_runs() {
+    let mut seen: Vec<&'static str> = Vec::new();
+    for src in DEMOS.iter().chain(DEFUNC_DEMOS) {
+        let (ast, ds) = parse(src);
+        assert!(ds.is_empty(), "parse errors for {src}: {ds:?}");
+        let prog = lower_program(&desugar(&ast.unwrap())).unwrap_or_else(|e| panic!("{src} did not lower: {e:?}"));
+        let text = print_asm_with(&prog, &AsmHeader { result: Ty::Nat });
+        let (doc, nav) = parse_asm_nav(&text);
+        assert!(doc.diagnostics.is_empty(), "diagnostics reading back {src}: {:?}", doc.diagnostics);
+        assert_eq!(asm_label_diagnostics(&nav), Vec::new(), "label marks on the text of {src}");
+        assert_eq!(doc.program.as_ref(), Some(&prog), "{src} did not read back to the program it printed");
+        seen.extend(prog.code.iter().map(variant_name));
+    }
+    seen.sort_unstable();
+    seen.dedup();
+    assert_eq!(seen.len(), 16, "the corpora reach {seen:?}");
 }

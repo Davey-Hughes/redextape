@@ -149,7 +149,7 @@ impl Program {
 /// back as a label declaration, mnemonic included, silently and with no diagnostic (design §3.3).
 /// Rejecting the set uniformly anyway is deliberate: `validate` checks names, not occurrences — it
 /// has no way to know where a given label will be used.
-fn label_name_representable(name: &str) -> bool {
+pub(crate) fn label_name_representable(name: &str) -> bool {
     !name.is_empty() && !name.chars().any(|c| c.is_whitespace() || matches!(c, ';' | ':' | ','))
 }
 
@@ -286,8 +286,33 @@ pub fn print_asm_mapped(prog: &Program) -> (String, crate::analysis::Classified)
 pub struct AsmHeader {
     /// The type of the program's result value, read from `Reg::Rr`. Only `Nat`/`Bool`/`Unit`/`List<T>`
     /// are admissible — `ty::parse_ty` yields nothing else, so the reader gets that restriction for
-    /// free and the writer must not construct one that violates it.
+    /// free, and a writer builds one through `for_type`, which never constructs one that violates it.
     pub result: Ty,
+}
+
+impl AsmHeader {
+    /// The header `.asm` text carries for a program of type `ty`, or `None` when no header can name it.
+    ///
+    /// **THE ONE PLACE A WRITER BUILDS A HEADER FROM A PROGRAM'S TYPE** — `redextape emit --lang asm`,
+    /// the wasm session's `asm_text` that *edit a copy* posts, and the grammar check's headered corpus — so
+    /// the file the CLI writes and the text a copy runs cannot disagree about which programs get one.
+    ///
+    /// **A FREE TYPE VARIABLE IS WRITTEN AS `Nat`** (`ty::ground` says why that reads the same value), so
+    /// `[]`, `[[]]` and `head([])` are headered. **A TYPE THAT HOLDS A FUNCTION GETS NONE**: a function value
+    /// has no decoding, and `ty::is_decodable` refuses it. Neither does a list nested past `MAX_TY_DEPTH`.
+    /// `ty::is_decodable_ground` is asked of `result` — the GROUND type this header actually names, already
+    /// computed on the line above — rather than `ty::is_decodable`, which would ground it a second time for
+    /// nothing; the two share the one round-trip check (`ty::is_decodable_ground`'s own doc), so the header
+    /// is always one its own reader accepts — a file whose reader refuses its header is worse than one with
+    /// no header at all. `redextape emit --lang tm` and the wasm session's `tmText` ask
+    /// `ty::is_decodable_ground` directly too, on a type each has already grounded itself, for a TM header,
+    /// which is never optional the way this one is — see that function's own doc for why that leg refuses a
+    /// whole file rather than omitting a line.
+    #[must_use]
+    pub fn for_type(ty: &Ty) -> Option<AsmHeader> {
+        let result = crate::ty::ground(ty.clone());
+        crate::ty::is_decodable_ground(&result).then_some(AsmHeader { result })
+    }
 }
 
 /// `print_asm`, preceded by `h`'s directives and a blank line.
@@ -2041,6 +2066,25 @@ mod tests {
         let bare = print_asm(&prog);
         let headered = print_asm_with(&prog, &AsmHeader { result: Ty::Bool });
         assert_eq!(headered.strip_prefix("result Bool\n\n"), Some(bare.as_str()));
+    }
+
+    /// A value type is its own header; a free variable is written as `Nat`, under lists too; a type that holds
+    /// a function, or nests past `MAX_TY_DEPTH`, has none.
+    #[test]
+    fn a_header_names_every_value_type_and_grounds_a_free_variable() {
+        let list = |t: Ty| Ty::List(Box::new(t));
+        let header = |ty: Ty| AsmHeader::for_type(&ty).map(|h| h.result);
+        for ty in [Ty::Nat, Ty::Bool, Ty::Unit, list(Ty::Nat), list(list(Ty::Bool))] {
+            assert_eq!(header(ty.clone()), Some(ty));
+        }
+        assert_eq!(header(Ty::Var(0)), Some(Ty::Nat));
+        assert_eq!(header(list(Ty::Var(1))), Some(list(Ty::Nat)));
+        assert_eq!(header(list(list(Ty::Var(2)))), Some(list(list(Ty::Nat))));
+        assert_eq!(header(Ty::Fun(vec![Ty::Nat], Box::new(Ty::Nat))), None);
+        assert_eq!(header(list(Ty::Fun(vec![Ty::Var(0)], Box::new(Ty::Var(0))))), None);
+        let nested = |depth: usize| (0..depth).fold(Ty::Nat, |t, _| list(t));
+        assert!(header(nested(crate::ty::MAX_TY_DEPTH)).is_some());
+        assert_eq!(header(nested(crate::ty::MAX_TY_DEPTH + 1)), None);
     }
 
     #[test]

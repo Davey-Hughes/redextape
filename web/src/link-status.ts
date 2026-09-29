@@ -59,31 +59,28 @@ export type LambdaLinkState =
   | 'absent'
 
 /**
- * WHICH PANES ARE OUTSIDE THE CORRESPONDENCE — a record, not a boolean, because they detach
- * independently. Design §4.3: editing a source-derived λ view seeds a `LambdaScratch` and rebinds
- * THAT pane; the source session keeps running and the TM pane stays bound to it. So "λ detached, TM
- * still linked" is the ordinary state, not a corner, and a single flag could not name it.
+ * WHICH VIEWS ARE OUTSIDE THE CORRESPONDENCE — per leg, how many views it has and the title of each one that shows
+ * a copy. Views detach independently. Design §4.3: editing a source-derived λ view seeds a `LambdaScratch` and
+ * rebinds THAT view; the program keeps running and every other view stays on it. So "λ detached, TM still linked"
+ * is the ordinary state, not a corner — and since a leg holds any number of views, so is "one asm view on a copy,
+ * another on the program".
  *
- * An entry is `true` when that leg's pane is bound to a copy: for `lambda` a `LambdaScratch`, which has no
- * `SourceMap` and so no `sourceSpan`/`linkIndex` (§3.3); for `tm` a `TmScratch`, whose every `TmState`
- * carries `source_node: null` (§3.1).
+ * A view shows a copy when it is bound to one: for `lambda` a `LambdaScratch`, which has no `SourceMap` and so no
+ * `sourceSpan`/`linkIndex` (§3.3); for `tm` a `TmScratch`, whose every `TmState` carries `source_node: null`
+ * (§3.1); for `asm` an asm copy, whose instructions have no owner (Plan 7 part 5 spec, amendment 28).
  *
- * ONE REQUIRED BOOLEAN PER LEG RATHER THAN A LIST OR A TAG (`'lambda' | 'tm' | 'both'`). A caller
- * holds one binding per leg and reads one boolean off each; a tag would make every caller encode the cross
- * product, and a `Pane[]` would admit duplicates and an order that means nothing. The cost is that
- * "nothing detached" is spellable twice — this record all-false, or `LinkStatus.detached` absent —
- * and `linkStatus` collapses the two deliberately (see its own note).
+ * **EVERY VIEW, WHERE THIS WAS ONE BOOLEAN PER LEG READ OFF THE VIEW FOCUSED LAST.** With an asm view on the program
+ * and a second on a copy, the line named the asm copy only while the copy's view was the one focused last, and
+ * "asm view" did not say which of the two it meant. `copies` holds every view showing a copy, and `views` is what
+ * lets `linkStatus` tell a leg whose views all show copies from one that still has a view of the program.
  *
- * **A `Record` OVER `Leg`, WHERE IT USED TO BE TWO NAMED FIELDS**, so a new leg is a required entry here and
- * a type error at every literal that leaves it out, rather than a pane whose copy the status line never
- * mentions (`legs.ts` has the class of bug).
+ * **THE TITLES ARE THE HEADERS' OWN** (`main.ts`'s `viewTitle`), which is how a leg with several views says which
+ * of them shows a copy: `asm · copy 1`.
  *
- * NOT A `Set` OR A MAP KEYED BY PANE ID, EITHER, and that is a 5d-i/5d-ii boundary rather than an
- * oversight: 5d-i's pane set is fixed at three slots (§1), so the panes that can detach are known at
- * compile time and a fixed record is checkable where a keyed collection is not. 5d-ii's multiplexer
- * is what makes the pane set open, and it can widen this then.
+ * **A `Record` OVER `Leg`**, so a new leg is a required entry here and a type error at every literal that leaves it
+ * out, rather than a view whose copy the status line never mentions (`legs.ts` has the class of bug).
  */
-export type DetachedPanes = Record<Leg, boolean>
+export type DetachedPanes = Record<Leg, { readonly views: number; readonly copies: readonly string[] }>
 
 export type LinkStatus = {
   /**
@@ -170,10 +167,17 @@ const LAMBDA_TEXT: Record<LambdaLinkState, string> = {
   absent: '',
 }
 
-const ATTACHED: DetachedPanes = perLeg(() => false)
+const ATTACHED: DetachedPanes = perLeg(() => ({ views: 0, copies: [] }))
 
 /**
- * The detachment clause, or `''` when every leg's pane is inside the correspondence.
+ * Whether every view of a leg shows a copy — a leg with views and none of them on the program. Its own clauses
+ * then describe no view of the program, and `linkStatus` suppresses them. A leg with no view is not detached:
+ * there is no binding to read (`'absent'`'s doc).
+ */
+const allCopies = (leg: DetachedPanes[Leg]): boolean => leg.views > 0 && leg.copies.length === leg.views
+
+/**
+ * The detachment clause, or `''` when no view shows a copy.
  *
  * ONE CLAUSE FOR EVERY DETACHED VIEW, NOT THE SAME SENTENCE ONCE PER VIEW. "not linked to the program" is
  * one fact about one correspondence; emitting it either side of a `·` would read as two unrelated
@@ -184,13 +188,24 @@ const ATTACHED: DetachedPanes = perLeg(() => false)
  * line is the authoritative narration (§4.5), and a reader who has never made a copy cannot derive
  * "not linked to the program" from the word (Plan 7 part 2 spec §12's vocabulary).
  *
- * **THE NAMES ARE BUILT FROM `LEGS` AND `LEG_NAME`, WHERE THE THREE SENTENCES WERE WRITTEN OUT**, one per
- * combination of two legs — a third leg would have been in none of them. The words for one leg and for two
- * are the ones those sentences said: `λ view shows a copy`, `λ and TM views show copies`. More than two
+ * **A LEG WITH ONE VIEW IS NAMED BY ITS LEG, AND A LEG WITH MORE BY THE TITLE OF EACH VIEW SHOWING A COPY.**
+ * `λ view shows a copy` is exact while the leg has one view; beside a second asm view, "asm view" would not say
+ * which, so each view showing a copy is named as its header reads — `asm · copy 1 view shows a copy`. A title two
+ * views show is said once.
+ *
+ * **THE NAMES COME IN `LEGS`' ORDER AND ARE SAID WITH `LEG_NAME`**, where the three sentences were once written
+ * out, one per combination of two legs — a third leg would have been in none of them. The words for one leg and
+ * for two are the ones those sentences said: `λ view shows a copy`, `λ and TM views show copies`. More than two
  * join as a list does, `a, b and c`.
  */
 function detachedText(d: DetachedPanes): string {
-  const names = LEGS.filter((leg) => d[leg]).map((leg) => LEG_NAME[leg])
+  const names: string[] = []
+  for (const leg of LEGS) {
+    const { views, copies } = d[leg]
+    for (const name of views === 1 ? copies.map(() => LEG_NAME[leg]) : copies) {
+      if (!names.includes(name)) names.push(name)
+    }
+  }
   const last = names.pop()
   if (last === undefined) return ''
   if (names.length === 0) return `${last} view shows a copy — not linked to the program`
@@ -200,9 +215,9 @@ function detachedText(d: DetachedPanes): string {
 /**
  * The `link-status` line's text. Empty means the line is blank, not that the line is absent.
  *
- * NO LONGER AN EARLY RETURN PER ARM, and the restructure is what detachment costs: a detached pane is
- * a fact about panes, independent of what is pinned, so it has to be reachable from `none` and
- * `stale` too — `{state:'none'}` with a detached λ pane is the case where this line goes from blank
+ * NO LONGER AN EARLY RETURN PER ARM, and the restructure is what detachment costs: a detached view is
+ * a fact about views, independent of what is pinned, so it has to be reachable from `none` and
+ * `stale` too — `{state:'none'}` with a detached λ view is the case where this line goes from blank
  * to speaking, which is exactly §4.5's obligation.
  *
  * DETACHMENT LEADS, ahead of the coincidence that used to lead. Ordered most-global first — the rule
@@ -210,23 +225,25 @@ function detachedText(d: DetachedPanes): string {
  * answer) — because "this pane is not part
  * of the correspondence" scopes every clause after it: those are about the panes still inside.
  *
- * A DETACHED PANE'S OWN CLAUSES ARE SUPPRESSED, NOT MERELY PRECEDED. §4.5's standard is the one that
- * deleted `node_to_lambda`: a thing that provably cannot work should not be presented as though it
- * might. A detached λ pane is showing a scratch term, so "this construct has no node in the λ term
- * at this step" describes a term that is not on screen; a detached TM pane renders
+ * A LEG'S OWN CLAUSES ARE SUPPRESSED WHEN EVERY VIEW OF IT SHOWS A COPY, NOT MERELY PRECEDED. §4.5's standard
+ * is the one that deleted `node_to_lambda`: a thing that provably cannot work should not be presented as
+ * though it might. A λ view on a copy is showing a scratch term, so "this construct has no node in the λ term
+ * at this step" describes a term that is not on screen; a TM view on a copy renders
  * states whose `source_node` is `null` by construction (§3.1), so neither the coincidence nor the
  * emits-no-states absence is a claim about anything the user is looking at. The asm leg's two clauses,
- * its coincidence and its emits-no-instructions absence, go by the asm flag the same way, though no asm
- * view shows a copy until Plan 7 part 5c.
+ * its coincidence and its emits-no-instructions absence, go by the asm entry the same way.
+ *
+ * **A LEG WITH A VIEW OF THE PROGRAM KEEPS ITS CLAUSES, BESIDE ITS VIEWS ON COPIES.** They are about that view:
+ * `draw.ts` reads each leg's running focus off a view of the program, and the λ link state off a view of the
+ * program on the page, never off a view showing a copy.
  *
  * SUPPRESSION IS UNIFORM ACROSS `LambdaLinkState` RATHER THAN TRIAGED PER MEMBER. `'declined'` is the
- * one that could be argued to survive — it is a property of the program's lowering, not of the pane —
- * but splitting the rule would put "is the λ pane detached" in two places, and the clause is still
- * being read as an explanation of an empty λ pane that is not empty for that reason.
+ * one that could be argued to survive — it is a property of the program's lowering, not of the view —
+ * but splitting the rule would put "does a λ view show the program" in two places, and the clause is still
+ * being read as an explanation of an empty λ view that is not empty for that reason.
  *
- * `s.detached` ABSENT AND ALL-FALSE ARE THE SAME OUTPUT, which is the redundancy `DetachedPanes`'
- * doc admits. Collapsed here, in the one function that reads the field, so no caller has to know
- * which encoding it holds.
+ * `s.detached` ABSENT AND EMPTY ARE THE SAME OUTPUT — no view shows a copy either way. Collapsed here, in the one
+ * function that reads the field, so no caller has to know which encoding it holds.
  */
 export function linkStatus(s: LinkStatus): string {
   const detached = s.detached ?? ATTACHED
@@ -250,18 +267,20 @@ export function linkStatus(s: LinkStatus): string {
   } else if (s.state === 'linked') {
     // REPORTED FIRST OF THE PIN'S OWN PARTS, AHEAD OF ANY ABSENCE BELOW — coincidence is live, present-tense news
     // ("the run just reached what you pinned"), not a reason something is missing, and it is the state 5c exists to
-    // surface. A detached view's own clauses are suppressed, each leg by its own flag (this function's doc).
-    if (!detached.asm && s.asmFocus) parts.push('the asm run is here right now')
-    if (!detached.tm && s.focus) parts.push('the machine is here right now')
+    // surface. A leg whose every view shows a copy has its own clauses suppressed, each leg by its own entry (this
+    // function's doc).
+    const off = perLeg((leg) => allCopies(detached[leg]))
+    if (!off.asm && s.asmFocus) parts.push('the asm run is here right now')
+    if (!off.tm && s.focus) parts.push('the machine is here right now')
     // ONE ABSENCE CLAUSE FOR THE TWO LOWERINGS, NOT TWO SIDE BY SIDE. A construct the asm lowering bills nothing to —
     // a transparent `let`, a `Lambda` — bills nothing to the machine built from it either, so two clauses would say
     // one fact twice on the constructs that are most often clicked.
-    const noInstrs = !detached.asm && !s.instrs
-    const noStates = !detached.tm && !s.tm
+    const noInstrs = !off.asm && !s.instrs
+    const noStates = !off.tm && !s.tm
     if (noInstrs && noStates) parts.push('this construct emits no instructions or machine states')
     else if (noInstrs) parts.push('this construct emits no instructions')
     else if (noStates) parts.push('this construct emits no machine states')
-    if (!detached.lambda) {
+    if (!off.lambda) {
       const lambda = LAMBDA_TEXT[s.lambda]
       if (lambda !== '') parts.push(lambda)
     }

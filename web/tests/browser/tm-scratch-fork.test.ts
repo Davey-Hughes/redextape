@@ -32,7 +32,7 @@ import { SHELL, until } from './harness'
  * **`mountApp` BRINGS THE TM PANE HOME BEFORE EVERY REUSE, WHICH IS WHAT KEEPS THE FIVE TESTS
  * INDEPENDENT DESPITE SHARING ONE PAGE.** The later tests fork the TM pane onto a scratch,
  * synchronously rebinding its slot; without bringing it home first, a later test's `button.detach` query
- * would find nothing (a scratch's own fork control is never offered — `TmPane.#refreshDetach` withdraws
+ * would find nothing (a scratch's own fork control is never offered — `CopyEditor.#refreshDetach` withdraws
  * it the instant this pane's own session is detached, driven every frame by `setDetached` regardless of
  * which session the pane is bound to, and `replies.ts`'s `tm-scratch-compiled` arm never calls
  * `setForkAvailable` at all, so nothing re-enables it either) and every assertion after it would fail for
@@ -250,7 +250,7 @@ describe('forking a TM pane', () => {
    * with no machine text (a TM scratch's own `tmProgram.tmText` is always `null` —
    * `replies.ts`'s `tm-scratch-compiled` arm constructs it that way on purpose) and throws
    * `detachMachine reached with no machine text` rather than doing nothing. A view already showing a
-   * copy has nothing left to copy — `TmPane.#refreshDetach` states that rule and enforces it — so the
+   * copy has nothing left to copy — `CopyEditor.#refreshDetach` states that rule and enforces it — so the
    * control must withdraw the instant this pane's OWN session becomes the scratch it
    * just made — not only when some later reply happens to tell it to.
    */

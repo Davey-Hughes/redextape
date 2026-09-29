@@ -176,8 +176,9 @@ describe('rebinding a forked λ pane through the binding selector', () => {
    * permanently — the exact shape the test above exists to refuse, reached by the one rebind that test
    * does not drive. **Two doc comments named this file as the proof that the state was impossible.**
    *
-   * IT IS WORSE THAN THE ORIGINAL, because `transport.ts`'s `editScratch` reads `slot.binding.session`
-   * at EDIT time rather than closing over it: a keystroke in the stale editor called
+   * IT IS WORSE THAN THE ORIGINAL, because the edit handler then read `slot.binding.session` at EDIT
+   * time rather than closing over it (`transport.ts`'s `editSink` binds it when the editor is built now):
+   * a keystroke in the stale editor called
    * `recompile(B, <A's text>)`, and the reply overwrote whichever pane was showing B. The first test's
    * defect typed into a session that was not on screen; this one typed OVER one that was.
    *
@@ -235,7 +236,7 @@ describe('rebinding a forked λ pane through the binding selector', () => {
     pickBinding('lambda-0', bufferB)
 
     // THE REGRESSION. Without the handover this stayed non-null: buffer A's live CodeMirror, mounted
-    // over buffer B's frames, with `editScratch` ready to route its keystrokes to B.
+    // over buffer B's frames, with the edit handler of the time ready to route its keystrokes to B.
     expect(editor()).toBeNull()
     expect(p()?.dataset.binding).toBe(bufferB)
     // **AND THE NODE IS GONE, NOT MERELY THE CLASS — this line is the one the fix's first version

@@ -30,7 +30,9 @@ pub use asm::{
     decode_asm_reason, decode_asm_ty, decode_asm_ty_reason, print_asm, print_asm_doc, print_asm_mapped, print_asm_with,
     print_asm_with_mapped, print_instr, run_asm,
 };
-pub use asm_syntax::{AsmDocument, MnemonicDoc, instr_at, parse_asm, parse_asm_full, parse_asm_nav};
+pub use asm_syntax::{
+    AsmDocument, MnemonicDoc, asm_label_diagnostics, instr_at, parse_asm, parse_asm_full, parse_asm_nav,
+};
 pub use attribute::{Attribution, StepBucket, attribute, attribute_at, attribute_steps};
 pub use build::{
     AT, BOX, Builder, HEAP, MARK, MAX_FIELD_WIDTH, MAX_MACHINE_STATES, MAX_TAPES, MIN_FIELD_WIDTH, REG, RuleSpec, SEP,
@@ -336,7 +338,10 @@ pub struct DescribedRun {
 /// One lowering, one machine at `width`, one run, one header. No search.
 ///
 /// The single place either public entry point builds a `DescribedRun`, so the pinned path cannot
-/// drift from the fitted one.
+/// drift from the fitted one — and so the one place a program's type becomes a header's `result`:
+/// through `ty::ground`, which writes a free type variable as `Nat`, the rule `AsmHeader::for_type`
+/// follows for asm. `[]` types as `List<t0>`, and a header naming `t0` is one `parse_tm_full` refuses,
+/// so `redextape emit --lang tm` wrote a file `run` could not read and a TM copy of `[]` did not build.
 fn describe_at(
     prog: &Program,
     n_slots: u32,
@@ -348,7 +353,7 @@ fn describe_at(
     let fitted = kind.at(width);
     let (run, machine, init, steps) = attempt(prog, &*fitted, n_slots, caps)?;
     let tapes = init.into_iter().enumerate().collect();
-    let header = TmHeader::new(kind, width, n_slots, result, tapes);
+    let header = TmHeader::new(kind, width, n_slots, crate::ty::ground(result), tapes);
     Some(DescribedRun { run, machine, header, steps })
 }
 
@@ -356,7 +361,8 @@ fn describe_at(
 /// `.tm` file for that run.
 ///
 /// `result` is the program's top-level type (`typeck::result_type`), which the caller supplies
-/// because this function takes `Core` and typing happens on the AST.
+/// because this function takes `Core` and typing happens on the AST. The header names it with each
+/// free type variable written as `Nat` (see `describe_at`).
 ///
 /// `Err` for a program that never ran (`LowerError` / `TooLarge`): there is no configuration to
 /// describe, so there is no honest header to return.

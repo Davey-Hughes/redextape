@@ -84,8 +84,8 @@ export const LANGUAGE_IDS = ['redextape', 'redextape_lambda', 'redextape_tm', 'r
 export type LanguageId = (typeof LANGUAGE_IDS)[number]
 
 /**
- * The language each kind of view's editor holds. An asm view has no editor until part 5c's asm copies, whose editor
- * takes `redextape_asm` from here (Plan 7 part 5 spec §5.5).
+ * The language each kind of view's editor holds. An asm view's is an asm copy's, which takes `redextape_asm` from here
+ * (Plan 7 part 5 spec §5.5, §7).
  *
  * **KEYED BY `PaneKind`, WHERE IT USED TO SPELL `'source' | 'lambda' | 'tm'` OUT.** The spelled union was a
  * second copy of `PaneKind` that nothing held to the first, so a new pane kind would have left this map
@@ -107,13 +107,13 @@ export const LANGUAGE_OF_PANE: Readonly<Record<PaneKind, LanguageId>> = {
  *
  * **THE WORDS ARE THE APP'S EXISTING ONES, NOT NEW ONES**, per the umbrella's rule that every
  * user-visible word is the umbrella's: `source` is what `main.ts`'s `layoutChanged` calls the source
- * view, and `λ`/`TM` are `legs.ts`'s `LEG_NAME` — the same two glyphs every view title and
- * every menu item already carries. A second vocabulary for the same three surfaces is what this map
+ * view, and `λ`/`asm`/`TM` are `legs.ts`'s `LEG_NAME` — the same names every view title and
+ * every menu item already carries. A second vocabulary for the same four surfaces is what this map
  * exists to avoid.
  *
- * `redextape_asm` HAS NO EDITOR UNTIL PART 5, so its entry can never reach a notice today. It is here
- * because `satisfies Record<LanguageId, string>` is what keeps this map total, and a map that went
- * partial the moment a fourth editor appeared would fail at the call site rather than here.
+ * `redextape_asm` IS AN ASM COPY'S EDITOR'S, and its entry reaches the notice when the asm grammar fails to
+ * load. `satisfies Record<LanguageId, string>` is what keeps this map total, so a language added without a
+ * word here fails here rather than at the call site.
  */
 export const LANGUAGE_LABEL = {
   redextape: 'source',

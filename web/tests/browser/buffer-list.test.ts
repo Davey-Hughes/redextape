@@ -66,11 +66,7 @@ describe('bufferList', () => {
   it('lists each copy with its view count, and marks one no view shows', () => {
     bufferList(button, () => THREE, noop, noop, noop)
     button.click()
-    expect(rowText()).toEqual([
-      'λ copy 1 · 2 views · running',
-      'λ copy 2 · 1 view · running',
-      'λ copy 3 · not shown · running',
-    ])
+    expect(rowText()).toEqual(['λ copy 1 · 2 views', 'λ copy 2 · 1 view', 'λ copy 3 · not shown'])
   })
 
   /**
@@ -144,12 +140,12 @@ describe('bufferList', () => {
     expect(fired).toEqual(['scratch-2'])
     // THE LIST STAYS OPEN AND IS REBUILT IN PLACE (spec §11), so no row names a deleted copy.
     expect(menu()?.matches(':popover-open')).toBe(true)
-    expect(rowText()).toEqual(['λ copy 1 · 2 views · running', 'λ copy 3 · not shown · running'])
+    expect(rowText()).toEqual(['λ copy 1 · 2 views', 'λ copy 3 · not shown'])
 
     // AND A RE-OPEN READS THE SAME — the list is still built on `beforetoggle`.
     menu()?.hidePopover()
     button.click()
-    expect(rowText()).toEqual(['λ copy 1 · 2 views · running', 'λ copy 3 · not shown · running'])
+    expect(rowText()).toEqual(['λ copy 1 · 2 views', 'λ copy 3 · not shown'])
   })
 
   /**
@@ -338,6 +334,25 @@ describe('bufferList: temperature', () => {
     button.click()
     expect(temperature('pause', 'λ copy 1')).not.toBeNull()
     expect(temperature('resume', 'λ copy 1')).toBeNull()
+  })
+
+  /**
+   * **THE WORKER WORD ITSELF, PLAN 7 PART 5 SPEC AMENDMENT 46.** A live copy's name line says nothing of
+   * its worker — its run's own line already says what it did — and only a paused copy still needs the
+   * word, since pausing is what took the worker away. Scoped to `.buffer-row-name` rather than the whole
+   * row, because `temperature`'s own text is `pause` for this fixture, and `pause` is a substring
+   * `paused` is not — asserting against the whole row would pass by accident.
+   */
+  it('a live row names no worker, where a paused row still says paused', () => {
+    bufferList(button, () => WARM, noop, noop, noop)
+    button.click()
+    expect(row()?.querySelector('.buffer-row-name')?.textContent).toBe('λ copy 1 · 1 view')
+  })
+
+  it('a paused row still names the worker as paused', () => {
+    bufferList(button, () => COLD, noop, noop, noop)
+    button.click()
+    expect(row()?.querySelector('.buffer-row-name')?.textContent).toBe('λ copy 1 · not shown · paused')
   })
 
   it('clicking resume reports the id and the temperature asked for', () => {

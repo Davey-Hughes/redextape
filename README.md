@@ -14,19 +14,19 @@ computation — not a native run with a decorative overlay.
 
 **The compiler is built, and the thing you watch it run in now has three panes.** The front end
 and three backends — λ, Turing machine, and native — all work, and each is checked against the others
-on every commit. `crates/redextape-wasm` compiles the compiler to WASM through **nine exports** — the
-ninth, `tapeNames()`, labels the five Turing-machine tape rows from the lowering's own constants
+on every commit. `crates/redextape-wasm` compiles the compiler to WASM through **ten exports** — the
+tenth, `tapeNames()`, labels the five Turing-machine tape rows from the lowering's own constants
 (`build.rs`) rather than a hand-copied list, so it can only speak for machines this compiler produced.
 `web/` is a real app: a source pane with lint diagnostics and syntax highlighting driven by a committed
-tree-sitter grammar — the same colourer the λ and TM copy editors take, whose grammar loads
+tree-sitter grammar — the same colourer the λ, TM and asm copy editors take, whose grammar loads
 asynchronously so only the first paint waits on it, while every reparse and rebuild after that runs
 inside the same `ViewUpdate` as the keystroke that triggered it — a λ pane, and a
 Turing-machine pane showing all five tapes, a status line, and — Plan 5a-ii — a virtualized δ-table
 beside them: current state and the rule about to fire highlighted, following the machine by default and
 a control to reattach it after a manual scroll detaches it, toggleable, and tested rendering only a
 viewport's worth of rows — 24 of `map_fold`'s 25,852 at CI's window size, counting the overscan —
-side by side, the first thing in this project a human can click. **Both legs are steppable
-forward and backward** through a recorded, byte-budgeted history (◀ ▶ ⏵ ↺), with a caps
+side by side, the first thing in this project a human can click. **All three legs — λ, Turing machine and
+asm — are steppable forward and backward** through a recorded, byte-budgeted history (◀ ▶ ⏵ ↺), with a caps
 affordance (`[continue]`) for a run that outgrows its recording budget before it outgrows its answer.
 **The λ pane has no structural tree, and that is a decision, not a gap**: Plan 5a-ii measured one and cut
 it — a per-frame tree costs 850 MB against a 32 MB history ring, and most steps have no tree to draw at
@@ -286,7 +286,7 @@ figures above read 841/716/48 until 2026-08-24, having drifted by 315 tests and 
 from the breakdown entirely. Recount rather than trust them.
 
 **Two tiers sit outside that count**, because neither runs under `cargo nextest`. The wasm boundary
-has **30** browser tests (`wasm-pack test --headless --chrome crates/redextape-wasm`), run by CI's
+has **33** browser tests (`wasm-pack test --headless --chrome crates/redextape-wasm`), run by CI's
 `rust-browser` job. `web/` has **246** of its own across two Vitest projects — 187 in Node for the
 pure modules, 59 in real Chromium for the worker and the app end to end — run by CI's `web` job
 under the coverage gate. Recount with `pnpm test`.

@@ -29,7 +29,7 @@ const events = (): PaneEvents => ({
   setSpeed: vi.fn(),
   rebind: vi.fn(),
   detach: vi.fn(),
-  editScratch: vi.fn(),
+  editSink: () => vi.fn(),
 })
 
 /**

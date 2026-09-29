@@ -118,12 +118,12 @@ export class LambdaPane implements EditablePane {
    */
   #choices: SplitChoices = { options: [], sourceAvailable: false, current: null }
   /**
-   * `on.editScratch`, captured once at construction — `setEditor` reads it per mount rather than
-   * closing over `on` directly, so a pane built with no handler mounts an editor that simply drops
-   * its edits, the same "control that cannot work is still absent, an edit that goes nowhere is
-   * invisible" split `PaneEvents.detach`'s doc draws for the fork button.
+   * `on.editSink`, captured once at construction — `setEditor` calls it per mount, so each editor it builds sends
+   * its edits to the copy this pane showed when it was built (`PaneEvents.editSink`). A pane built with no handler
+   * mounts an editor that simply drops its edits, the same "control that cannot work is still absent, an edit that
+   * goes nowhere is invisible" split `PaneEvents.detach`'s doc draws for the fork button.
    */
-  #onEdit: ((src: string) => void) | undefined
+  #editSink: (() => (src: string) => void) | undefined
   /** `PaneEvents.linkLambda`: link from a construct's id. Absent, a click on the term links nothing. */
   #onLinkNode: ((node: number) => void) | undefined
   /** The construct `draw()` says is pinned, or `null` — this view marks every node that carries it. */
@@ -285,7 +285,7 @@ export class LambdaPane implements EditablePane {
     // order; the class is what `.term-editor` selects, so an empty host matches nothing and "is there
     // an editor" has one answer in the DOM as well as in the field.
     this.#editorHost = document.createElement('div')
-    this.#onEdit = on.editScratch
+    this.#editSink = on.editSink
     this.#lspDocument = on.lspDocument
     this.#colour = on.colour
     this.#keymap = on.keymap
@@ -503,16 +503,16 @@ export class LambdaPane implements EditablePane {
       this.#refreshClaim()
       return
     }
-    const onEdit = this.#onEdit
     if (this.#editor === null) {
       this.#editorHost.className = 'term-editor'
+      // RESOLVED HERE, NOT AT CONSTRUCTION — the binding this pane shows now is the buffer the editor being built
+      // belongs to, for its edits as for its document.
+      const sink = this.#editSink?.()
       this.#editor = new ScratchEditor({
         host: this.#editorHost,
         initial: text,
         debounceMs: EDITOR_DEBOUNCE_MS,
-        onEdit: (src) => onEdit?.(src),
-        // RESOLVED HERE, NOT AT CONSTRUCTION — the binding this pane shows now is the buffer
-        // the editor being built belongs to.
+        onEdit: (src) => sink?.(src),
         document: this.#lspDocument?.(),
         colour: this.#colour?.(),
         keymap: this.#keymap,
@@ -628,17 +628,13 @@ export class LambdaPane implements EditablePane {
     if (this.#editor !== null) throw new Error('a λ pane was handed a second editor while still holding one')
     this.#editorHost.className = 'term-editor'
     this.#editorHost.append(editor.dom)
-    // **THE EDITS FOLLOW THE VIEW, AND THIS LINE IS WHY — found by driving the app, not by the suite.**
-    // A `ScratchEditor` is built by the pane that FORKS (`setEditor`'s mount branch), closing over THAT
-    // pane's `editScratch`; moving `editor.dom` here does not move the callback. So a claimed editor
-    // went on reporting through the pane that made it, and `transport.ts` resolves
-    // `slot.binding.session` at edit time — meaning the instant that pane was rebound elsewhere,
-    // keystrokes in the moved editor recompiled whatever IT was showing. `ScratchEditor.onEdit`'s own doc
-    // carries the measurement. `this.#onEdit` may be `undefined` on a pane built without the handler,
-    // which is the same "an edit that goes nowhere is invisible" split `#onEdit` already documents — and
-    // is why this assigns the same wrapper `setEditor` does rather than the field itself.
-    const onEdit = this.#onEdit
-    editor.onEdit = (src) => onEdit?.(src)
+    // **THE EDITS STAY WITH THE COPY, AND NOTHING HERE TOUCHES THEM.** A claimed editor once went on reporting
+    // through the pane that built it, whose handler read that pane's binding when an edit fired — so the instant
+    // that pane was rebound elsewhere, keystrokes in the moved editor recompiled whatever IT was showing, found by
+    // driving the app. This line re-pointed the editor's handler at this pane, which fixed that and left typing
+    // still pending when THIS pane moved on going to the copy it moved to. The editor's sink is now bound to its
+    // copy when it is built (`PaneEvents.editSink`), and this pane shows that same copy, so there is nothing to
+    // re-point.
     this.#editor = editor
     this.#syncEditorControls()
     this.#collapse.update(true, collapsed)
@@ -655,6 +651,11 @@ export class LambdaPane implements EditablePane {
    */
   holdsEditor(): boolean {
     return this.#editor !== null
+  }
+
+  /** Send the mounted editor's pending edit now — `EditablePane.flushEditor`, for `EditorCustody.flush`. */
+  flushEditor(): void {
+    this.#editor?.flush()
   }
 
   /**

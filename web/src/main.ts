@@ -28,7 +28,8 @@ import { History } from './history'
 import { icon } from './icons'
 import { LambdaTrees } from './lambda-trees'
 import { closeLeaf, defaultLayout, LAYOUT_STORAGE_KEY, type LayoutNode, leaves, SOURCE_LEAF } from './layout'
-import { type CopyLeg, LEG_NAME } from './legs'
+import { retitleStage } from './layout-view'
+import { LEG_NAME } from './legs'
 import { createLinkWiring, type LinkWiring } from './link-wiring'
 import { LspClient } from './lsp-client'
 import { lspHover } from './lsp-hover'
@@ -42,9 +43,9 @@ import type { PaneChoice } from './pane-chrome'
 import { createPaneHost, type LayoutEvent } from './pane-host'
 import { createPanel } from './panel'
 import { type LeafId, legOfPane, PaneCollection } from './panes'
-import type { RunReply } from './protocol'
+import type { Leg, RunReply } from './protocol'
 import { HISTORY_BYTES } from './protocol'
-import { createReadout, type ProgramResult } from './readout'
+import { asmCopyRow, copyLegOf, createReadout, type ProgramResult, tmCopyRow } from './readout'
 import { createReplies } from './replies'
 import { BufferCapReached, type BufferRecord, MAX_WARM_BUFFERS, ScratchBuffers } from './scratch'
 import { type SessionId, SessionPool } from './session-client'
@@ -656,6 +657,7 @@ async function main(): Promise<EditorView> {
     tmProgram: null,
     tmScratch: null,
     asmProgram: null,
+    asmScratch: null,
   })
   /** The λ trees the views draw (spec §4) — one cache, asked through each session's own client. */
   const trees = new LambdaTrees((id) => (sessions.has(id) ? sessions.entryOf(id).client : undefined))
@@ -1101,6 +1103,7 @@ async function main(): Promise<EditorView> {
     tmProgramOf: (session: SessionId) => sessions.entryOf(session).tmProgram,
     tmScratchOf: (session: SessionId) => sessions.entryOf(session).tmScratch,
     asmProgramOf: (session: SessionId) => sessions.entryOf(session).asmProgram,
+    asmScratchOf: (session: SessionId) => sessions.entryOf(session).asmScratch,
     // THE SECOND SESSION QUESTION `pane-host.ts` ASKS, ANSWERED HERE FOR THE SAME REASON AS THE FIRST —
     // this file is where `ScratchBuffers` is, and that module takes a function from a `SessionId` to one
     // value rather than the class itself. `editorSeed` answers `null` for everything that is not a warm
@@ -1387,7 +1390,12 @@ async function main(): Promise<EditorView> {
     // `focusView` records the focus BEFORE the rebuild so the stage mounts the view this line means.
     // `defaultFocus` rather than `focusedLeaf()` because the leaf the user was in may not exist in
     // `defaultLayout()`'s tree at all.
-    paneHost.focusView(defaultFocus(tree))
+    //
+    // **`resetViews`, WHICH IS `focusView` IN THAT ORDER, AND MORE — THE NOTICE IS WHY.** `defaultLayout()` re-mints the
+    // leaf ids a view on a copy may already hold, and `applyLayout` keeps a pane whose id and kind survive — so views
+    // stayed on their copies while the notice said the default views were back. `resetViews` rebuilds each of them on
+    // the program, as a fresh preset's views are; the copies themselves stay in the copies menu.
+    paneHost.resetViews(defaultFocus(tree))
     notices.notify(`${presetName(preset)} reset — the default views are back`)
   })
 
@@ -1407,10 +1415,8 @@ async function main(): Promise<EditorView> {
   /**
    * Undo a delete — spec §10. The copy comes back under its own id and name, COLD, and is warmed; a
    * refusal at the cap leaves it paused, which is still a copy restored. The views the delete moved to
-   * the program move back if they still exist and still show the program.
-   *
-   * **THE CLAIM BEFORE THE BUILD LANDS** is what lets `replies.ts`'s `scratch-compiled` arm mount the
-   * editor on that view — `editorHome` resolves through the claim, as a fork's does.
+   * the program move back if they still exist and still show the program, and the first of them mounts the
+   * copy's editor (`PaneHost.moveBack`) — before its build lands, and whether or not it builds.
    */
   const undo = (record: BufferRecord, shown: readonly LeafId[]): void => {
     scratchpad.reinstate(record)
@@ -1430,7 +1436,6 @@ async function main(): Promise<EditorView> {
     }
     const moved = paneHost.moveBack(shown, SOURCE_SESSION, record.id)
     const home = moved[0]
-    if (home !== undefined) custody.claim(record.id, home)
     notices.notify(`${name} restored at step 0`)
     refreshBuffers()
     draw()
@@ -1446,8 +1451,15 @@ async function main(): Promise<EditorView> {
   }
 
   /**
-   * What a WARM copy's row says it holds — the leg's current frame, as its text, or `null` for a leg whose
-   * frame has none. The copies menu's `term` below asks this, and only for a warm buffer (that doc has why).
+   * What a WARM copy's row says it holds, under its name: a λ copy's current frame, as its text, or `null` when it has
+   * none yet; a machine copy's run, as its readout line says it without the name (`readout.ts`'s `tmCopyRow`). The
+   * copies menu's `term` below asks this, and only for a warm buffer (that doc has why).
+   *
+   * **A MACHINE COPY HAS NO TERM, AND THIS ANSWERED `null` FOR ONE, WHICH THE ROW READ AS `no term yet`.** A `TmState`
+   * is tape windows and a state index and an `AsmState` registers and a pc, so neither prints a term; but "no term
+   * yet" said nothing had come back, under a copy that had run to its value. Its readout says what became of its run
+   * — a value, a fault, a cap, a value run still going, or that it has not built yet — so its row says the same, in
+   * the same words.
    *
    * **A BRANCH ON THE LEG IS WHAT KEEPS THIS FROM THROWING FOR A WARM TM BUFFER — 5d-iv T5 REVIEW FIX.**
    * `legOf({ session, leg: 'lambda' })` unconditionally is a throw for any warm buffer whose entry has no
@@ -1455,16 +1467,14 @@ async function main(): Promise<EditorView> {
    * which escaped the `beforetoggle` handler exactly the way a cold buffer's did before `term` below
    * branched on `warm`.
    */
-  const copyTerm = (session: SessionId, leg: CopyLeg): string | null => {
+  const copyHolds = (session: SessionId, leg: Leg): string | null => {
     switch (leg) {
       case 'lambda':
         return sessions.legOf({ session, leg: 'lambda' }).hist.current?.text ?? null
       case 'tm':
-        // `TmState` (`types.ts`) carries no printable `text` field the way `LambdaState` does — a
-        // configuration is tape windows and a state index, not a term to print — so there is no equivalent
-        // string to join for a TM row today; it reads `null` (`no term yet` in the row) rather than
-        // inventing one.
-        return null
+        return tmCopyRow(sessions.entryOf(session).tmScratch, copyLegOf(sessions.legOf({ session, leg: 'tm' })))
+      case 'asm':
+        return asmCopyRow(sessions.entryOf(session).asmScratch, copyLegOf(sessions.legOf({ session, leg: 'asm' })))
     }
   }
 
@@ -1542,17 +1552,19 @@ async function main(): Promise<EditorView> {
          * on purpose, so asking and catching would be treating a designed state as an exception — and
          * it would also swallow the genuine wiring bug the throw exists to report.
          *
-         * **A SECOND BRANCH, ON `b.leg`, IS `copyTerm`'s** — see its own doc for why a warm TM buffer
-         * needs it too.
+         * **A SECOND BRANCH, ON `b.leg`, IS `copyHolds`'s** — see its own doc for why a warm TM buffer
+         * needs it too, and what a machine copy's row says in place of a term.
          *
          * For what this doc used to claim and why it changed, see the history note under `buffers` —
          * the row builder's `term`.
          */
-        term: b.warm ? copyTerm(b.id, b.leg) : null,
+        term: b.warm ? copyHolds(b.id, b.leg) : null,
         warm: b.warm,
         leg: b.leg,
       })),
     (id) => {
+      // TYPING NOT YET SENT GOES INTO THE RECORD FIRST, or undo restores the copy without it (`EditorCustody.flush`).
+      custody.flush(id)
       // WHAT UNDO NEEDS, READ BEFORE THE DELETE ENDS IT: the record, the name, and the views showing it.
       const record = scratchpad.recordOf(id)
       const name = scratchpad.nameOf(id) ?? 'a copy'
@@ -1583,6 +1595,8 @@ async function main(): Promise<EditorView> {
         if (warm) {
           scratchpad.warm(id)
         } else {
+          // TYPING NOT YET SENT IS KEPT, and stored with the pause below rather than after it (`EditorCustody.flush`).
+          custody.flush(id)
           // **THE SLOTS ARGUMENT IS WHAT MAKES THE INVARIANT TRUE, AND THIS IS ITS ONLY REAL CALL
           // SITE.** `cool` rebinds every pane on the buffer it sleeps, so "a cold buffer has no panes
           // bound to it" is a property of what this line passes, not of `ScratchBuffers`. Hand it the
@@ -1609,17 +1623,15 @@ async function main(): Promise<EditorView> {
           `${name} paused${shown === 0 ? '' : ` · ${shown === 1 ? '1 view now shows' : `${shown} views now show`} the program`}`,
         )
     },
-    () => {
+    (leg: Leg) => {
       /**
        * **THE SECOND GESTURE — 5d-iv design §4.7.** `ScratchBuffers.fork` detaches a pane onto a copy of
        * what it was showing, and is unavailable above the fork cap; `forkBlank` mints a warm, empty
        * buffer on `leg` with no view to seed from and binds no pane, and is always available — "give me
-       * somewhere to paste a `.tm` file" is a different intention from a fork, not the same door
-       * narrowed. `'tm'` IS THE ONLY LEG THIS BUTTON EVER MINTS: the menu's own control is `buffer-list.
-       * ts`'s *new TM copy*, built for the TM pane specifically because a λ buffer already has a seed
-       * — the source's own step-0 term, through `fork` — and a TM buffer does not (`ScratchBuffers.
-       * forkBlank`'s own doc: the TM pane renders a δ-table projected from a compiled program, never the
-       * machine source that produced one).
+       * somewhere to paste a `.tm` or `.asm` file" is a different intention from a fork, not the same door
+       * narrowed. `leg` IS TM OR ASM: the menu offers a blank copy on the legs whose copy is a whole machine or
+       * program (`buffer-list.ts`'s `BLANK_COPY`), and never on λ, whose copy is always made from a step of the
+       * program, through `fork`.
        *
        * `BufferCapReached`, NOT A BARE `catch` — the same standard the retire and temperature handlers
        * above hold themselves to. The other throws `forkBlank` can reach are `SessionRegistry.add`'s and
@@ -1628,7 +1640,7 @@ async function main(): Promise<EditorView> {
        */
       let id: SessionId
       try {
-        id = scratchpad.forkBlank('tm')
+        id = scratchpad.forkBlank(leg)
       } catch (e) {
         if (!(e instanceof BufferCapReached)) throw e
         notices.notify(e.message)
@@ -1724,8 +1736,8 @@ async function main(): Promise<EditorView> {
    * `applyLayout`'s FIRST CALL HAS RUN", AND THE `reportStorageFailure` MOVE MADE THAT FALSE — 5d-ii-d
    * review round 2, Finding 1.** `refreshBuffers()`'s start-up call (this function's own doc has the
    * full argument for where it sits) can now reach `reportStorageFailure()` reaches `draw()` reaches
-   * `linkWiring.drawLink(...)` reaches `detachedPanes()` here — `theSlot(leg)` reads
-   * `panes.shown(...)`/`panes.active(...)` — all before `paneHost.applyLayout()` has ever run once.
+   * `linkWiring.drawLink(...)` reaches `detachedPanes()` here — which reads `panes.of(leg)` — all before
+   * `paneHost.applyLayout()` has ever run once.
    *
    * **TWO MORE CALLS REACH `draw()` BEFORE `applyLayout()` DOES, NEITHER THROUGH
    * `reportStorageFailure()`.** `compile.schedule(SAMPLE)` — this file's own start-up compile — is now
@@ -1733,15 +1745,15 @@ async function main(): Promise<EditorView> {
    * reached through `client.supersede()`'s `onSupersede` callback. The restore's warming loop reaches
    * it the same way, once per warmed session: `scratchpad.warm(session)` spawns a worker, and the spawn
    * calls `client.supersede()` too. `draw()`'s own body (`draw.ts`) reads `panes` again before it gets
-   * that far, regardless of which of the three paths reached it: `panes.active('lambda')`/
-   * `panes.active('tm')`, `panes.all()`, `panes.of('lambda')` and `panes.shown('lambda', …)`.
+   * that far, regardless of which of the three paths reached it: `panes.active(…)` for each leg,
+   * `panes.all()`, `panes.of('lambda')` and `panes.shown('lambda', …)`.
    *
    * **STILL SAFE, AND FOR A REASON THAT HAS NOTHING TO DO WITH ORDERING.** `applyLayout` remains the
    * only thing that ever populates `panes`, so every one of those reads runs against a collection that
    * is genuinely, honestly EMPTY at this point — not stale, not partially built. `panes.active(...)` is
    * optional-chained everywhere it is called, `panes.all()`/`panes.of('lambda')` iterate zero entries,
-   * and `detachedPanes()` answers `{lambda: false, tm: false}` (`DetachedPanes`'s own doc: a leg with no
-   * pane reads `false`, the honest answer rather than a lucky one). The true invariant this paragraph
+   * and `detachedPanes()` answers no view and no copy for every leg (its own doc: a leg with no view has
+   * nothing to say, the honest answer rather than a lucky one). The true invariant this paragraph
    * can still state is narrower than the one it used to: nothing in this module MISBEHAVES for reading
    * `panes` before `applyLayout`'s first call — every reader here resolves it live and every reader
    * tolerates empty, which is what makes reading it early safe rather than merely unobserved.
@@ -1758,6 +1770,7 @@ async function main(): Promise<EditorView> {
     panes,
     draw: () => draw(),
     announce: (t: string) => notices.announce(t),
+    viewTitle,
   })
 
   // ASSIGNED HERE, NOT DECLARED HERE — see the `let draw` comment above for why the split is forced
@@ -1801,6 +1814,7 @@ async function main(): Promise<EditorView> {
     stepsInView: () => ws.switches.steps === 'view',
     stage: () => ws.switches.views === 'stage',
     stepBar,
+    stageTabs: { update: () => retitleStage(root, viewTitle) },
   })
 
   // NOT the refreshBuffers() start-up call's home either, though linkWiring/draw are real by here:
@@ -1959,7 +1973,7 @@ async function main(): Promise<EditorView> {
         // pull. The gutter is the surface either way.
         lintGutter(),
         // DEFERRED-ACCESSIBILITY ITEM 16. CodeMirror gives its content a `textbox` role and no
-        // name; on a workspace showing three editors at once they all announced the same way.
+        // name; on a workspace showing several editors at once they all announced the same way.
         EditorView.contentAttributes.of({ 'aria-label': 'source program editor' }),
         EditorView.updateListener.of((u) => {
           if (!u.docChanged) return
@@ -2181,7 +2195,7 @@ async function main(): Promise<EditorView> {
    *
    * **IT IS NO LONGER THE ONLY THING MAKING A RESTORED BUFFER'S EDITOR MOUNT, AND IT IS KEPT ANYWAY —
    * whole-branch review before merge.** `pane-host.ts`'s creation pass now calls `mountScratchEditor`
-   * for every λ pane it builds, which on this page load claims and mounts each restored binding's leaf
+   * for every view it builds, on every leg, which on this page load claims and mounts each restored binding's leaf
    * from the buffer's own text before this line runs — the fix for a DIFFERENT defect (a cooled buffer
    * warmed and re-bound could never be edited again), which happens to cover this one too because the
    * warming loop above `applyLayout()` has already made these buffers warm. This loop is therefore
@@ -2200,7 +2214,7 @@ async function main(): Promise<EditorView> {
    * the creation pass gave it — leaving a stale claim that the next `applyLayout()`'s sweep acts on by
    * relocating a live editor the user did not move. That is the silent relocation `editor-custody.ts`'s
    * `editorOwner` doc refuses in as many words. With the guard, the rule is one sentence and it holds
-   * from the first frame: **the editor mounts on the first λ pane in TREE order bound to that buffer, and
+   * from the first frame: **the editor mounts on the first view in TREE order bound to that buffer, and
    * nothing moves it but a click.**
    *
    * **WHICH IS ALSO THE ANSWER TO A STATE THAT WAS PREVIOUSLY SILENT** (whole-branch review, finding 10a).

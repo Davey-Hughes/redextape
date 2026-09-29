@@ -188,6 +188,42 @@ describe('active', () => {
     panes.markActive('ghost')
     expect(panes.active('lambda')?.id).toBe('a')
   })
+
+  /**
+   * **A READER MAY REFUSE THE PANE FOCUSED LAST, AND THEN THE ONE FOCUSED BEFORE IT ANSWERS** — `draw.ts`'s running
+   * focuses refuse a view showing a copy. `b` is the pane focused before the refused `c`, and `a` is first in
+   * insertion order: a collection that kept only the last mark per leg could fall back to `a` and nothing better.
+   */
+  it('answers the most recently focused pane the reader accepts, passing over one it refuses', () => {
+    const panes = new PaneCollection()
+    panes.add(lambdaEntry('a', 'source'))
+    panes.add(lambdaEntry('b', 'source'))
+    panes.add(lambdaEntry('c', 'scratch-1'))
+    const onSource = (e: PaneEntry<'lambda'>) => e.slot.binding.session === 'source'
+    panes.markActive('b')
+    panes.markActive('c')
+    expect(panes.active('lambda')?.id).toBe('c')
+    expect(panes.active('lambda', onSource)?.id).toBe('b')
+  })
+
+  it('falls back to insertion order among the panes the reader accepts', () => {
+    const panes = new PaneCollection()
+    panes.add(lambdaEntry('a', 'scratch-1'))
+    panes.add(lambdaEntry('b', 'source'))
+    panes.markActive('a')
+    expect(panes.active('lambda', (e) => e.slot.binding.session === 'source')?.id).toBe('b')
+    expect(panes.active('lambda', () => false)).toBeUndefined()
+  })
+
+  it('forgets a removed pane’s place in the focus order', () => {
+    const panes = new PaneCollection()
+    panes.add(lambdaEntry('a', 'source'))
+    panes.add(lambdaEntry('b', 'source'))
+    panes.markActive('b')
+    panes.remove('b')
+    panes.add(lambdaEntry('b', 'source'))
+    expect(panes.active('lambda')?.id).toBe('a')
+  })
 })
 
 /**
@@ -215,6 +251,19 @@ describe('shown', () => {
     panes.add(lambdaEntry('c', 'source'))
     panes.markActive('a')
     expect(panes.shown('lambda', onPage('c'))?.id).toBe('c')
+  })
+
+  it('is the most recently focused pane on the page that the reader accepts', () => {
+    const panes = new PaneCollection()
+    panes.add(lambdaEntry('a', 'source'))
+    panes.add(lambdaEntry('b', 'source'))
+    panes.add(lambdaEntry('c', 'scratch-1'))
+    panes.markActive('b')
+    panes.markActive('c')
+    const onSource = (e: PaneEntry<'lambda'>) => e.slot.binding.session === 'source'
+    expect(panes.shown('lambda', onPage('a', 'b', 'c'), onSource)?.id).toBe('b')
+    expect(panes.shown('lambda', onPage('a', 'c'), onSource)?.id).toBe('a')
+    expect(panes.shown('lambda', onPage('c'), onSource)).toBeUndefined()
   })
 
   it('is undefined when no pane on the leg is on the page', () => {

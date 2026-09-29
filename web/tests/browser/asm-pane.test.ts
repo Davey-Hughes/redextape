@@ -397,3 +397,26 @@ describe('at the width of a real view', () => {
     expect(host.scrollWidth).toBeLessThanOrEqual(host.clientWidth)
   })
 })
+
+describe('edit a copy', () => {
+  const item = (host: HTMLElement) => host.querySelector<HTMLButtonElement>('button.detach')
+
+  it('is offered for the program, disabled with a reason where its text is withheld, and absent with nothing to copy', () => {
+    const { host, pane } = mount(FACT3, events({ detachAsm: vi.fn() }))
+    pane.setForkAvailable('result Nat\n\n    halt\n', 21)
+    expect(item(host)?.disabled).toBe(false)
+    // A PROGRAM WHOSE TEXT WAS WITHHELD HAS NO TEXT TO POST, AND THE REFUSAL SAYS HOW LARGE IT IS.
+    pane.setForkAvailable(null, 300_000)
+    expect(item(host)?.disabled).toBe(true)
+    expect(item(host)?.getAttribute('aria-description')).toBe('300,000 instructions — too large to open in an editor')
+    pane.setForkAvailable(null, 0)
+    expect(item(host)).toBeNull()
+  })
+
+  it('is withdrawn from a view on a copy', () => {
+    const { host, pane } = mount(FACT3, events({ detachAsm: vi.fn() }))
+    pane.setForkAvailable('result Nat\n\n    halt\n', 21)
+    pane.setDetached(true)
+    expect(item(host)).toBeNull()
+  })
+})

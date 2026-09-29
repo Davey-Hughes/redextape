@@ -66,9 +66,14 @@ export function classMapFrom(tables: readonly CaptureTable[]): Map<string, Map<s
 /**
  * The document size past which an editor goes uncoloured, in UTF-16 code units.
  *
- * THE SESSION BUFFER CEILING'S NUMBER, NOT A NUMBER OF THIS MODULE'S OWN. A document the session will
- * not hold is not one worth parsing on the main thread: a full reparse extrapolates to about 480 ms
- * there, a visible stall on every keystroke.
+ * THE LARGER OF THE SESSION'S TWO COPY CEILINGS, NOT A NUMBER OF THIS MODULE'S OWN: a TM copy's,
+ * `MAX_SCRATCH_TM_BYTES` at 6,100,000, where an asm copy's, `MAX_SCRATCH_ASM_BYTES`, is 5,200,000. A
+ * document no copy will hold is not one worth parsing on the main thread: a full reparse extrapolates to
+ * about 480 ms there, a visible stall on every keystroke.
+ *
+ * **ONE CEILING FOR EVERY EDITOR, SO AN ASM DOCUMENT BETWEEN THE TWO IS STILL COLOURED**, though no asm copy
+ * builds it: refusing a document is the session's to say, and this gate only refuses the absurd. A ceiling
+ * per language would be a second place for each copy's number to be kept.
  *
  * **THE UNITS DIFFER AND THE DIRECTION IS WHAT MAKES THAT SAFE.** `MAX_SCRATCH_TM_BYTES` counts UTF-8
  * bytes and `doc.length` counts UTF-16 code units, so these are not the same measurement of the same
@@ -111,8 +116,8 @@ const reasonOf = (e: unknown): string => (e instanceof Error ? e.message : Strin
  * **THE RUNTIME IS SHARED AND ITS FAILURE IS THEREFORE NOT A PER-LANGUAGE ONE — TWO CALLBACKS, NOT
  * ONE, AND THAT SPLIT IS THE WHOLE POINT.** `Parser.init` is memoised across every `load`, so a
  * `web-tree-sitter.wasm` that will not fetch rejects EVERY language's promise from the one cause. Put
- * through `onFailure` that read as three coincidental per-language failures and produced three notices
- * for one event — four once part 5 adds an asm editor — against design §10's one notice per failure.
+ * through `onFailure` that read as four coincidental per-language failures and produced four notices,
+ * one per language, for one event — against design §10's one notice per failure.
  * `onRuntimeFailure` fires at most once per registry and says the thing that is actually true: nothing
  * on the page is coloured. Per-grammar independence below is untouched; only the shared step is folded.
  *

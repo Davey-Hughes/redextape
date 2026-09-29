@@ -134,6 +134,15 @@ export class SessionClient {
   }
 
   /**
+   * Build an asm copy from `.asm` text and run it — Plan 7 part 5 spec §7. No `step`, for `tmScratch`'s reason: the
+   * text is the program, and a copy starts at its first instruction. The same generation guard as its siblings.
+   */
+  asmScratch(gen: number, src: string): void {
+    if (gen !== this.#gen) return
+    this.#port.postMessage({ kind: 'asm-scratch', gen, src })
+  }
+
+  /**
    * Ask for more frames on one leg. ADDRESSES THE CURRENT GENERATION AND DOES NOT ADVANCE IT: this
    * continues the run already in the worker, and bumping the generation would abandon the very
    * session it is trying to extend.

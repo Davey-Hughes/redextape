@@ -55,7 +55,7 @@ export function byteIndexAt(map: Uint32Array, byteOffset: number): number {
  *
  * **THE λ PANE'S RENDERED FRAME IS THE CALLER, AND SINCE PLAN 7 PART 3b IT IS THE ONLY ONE.** This used
  * to colour the SOURCE EDITOR too, from `classify_source`'s spans, through a state field that no longer
- * exists in `highlight.ts`; both are gone — the three editors take `colour.ts`'s `treeSitterColour`,
+ * exists in `highlight.ts`; both are gone — the source and copy editors take `colour.ts`'s `treeSitterColour`,
  * whose offsets are already UTF-16 code units and must NOT come through here. What is left is the λ
  * view's flat text (`lambda-body.ts`'s `flatText`, shown until a step's tree arrives), whose spans the
  * worker computes per frame from a term it holds, in bytes.

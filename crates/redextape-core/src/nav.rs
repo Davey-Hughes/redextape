@@ -92,7 +92,8 @@ pub enum Role {
     Reference {
         /// Index into the document's occurrences. `None` when nothing in this document defines
         /// the name — `parse_asm_full` accepts `jmp nowhere` with zero diagnostics, so a
-        /// dangling reference is an ordinary value rather than an error to report.
+        /// dangling reference is an ordinary value here. Whether it is an error is a language's
+        /// answer, not this module's: for asm, `asm_label_diagnostics` says it is.
         def: Option<usize>,
     },
 }
@@ -182,8 +183,9 @@ impl NameIndex {
         }
     }
 
-    /// Every definition, in source order. A name defined twice appears twice — `.asm` accepts
-    /// that with no diagnostic, and an outline should show the file that exists.
+    /// Every definition, in source order. A name defined twice appears twice — `.asm`'s parser
+    /// accepts that with no diagnostic (`asm_label_diagnostics` marks it), and an outline should
+    /// show the file that exists.
     pub fn definitions(&self) -> impl Iterator<Item = &Occurrence> {
         self.occurrences.iter().filter(|o| matches!(o.role, Role::Definition { .. }))
     }

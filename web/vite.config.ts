@@ -67,6 +67,8 @@ const PROBE_FILES = [
   'tests/browser/pane-floor.test.ts',
   'tests/browser/tm-buffer-cost.test.ts',
   'tests/browser/lambda-tree-cost.test.ts',
+  'tests/browser/asm-copy-cost.test.ts',
+  'tests/browser/asm-copy-memory.test.ts',
 ]
 const PROBE_EXCLUDE = process.env.REDEXTAPE_PROBE === undefined ? PROBE_FILES : []
 
@@ -376,7 +378,10 @@ export default defineConfig({
           // `tm-buffer-cost.test.ts`'s run stamp, which `pnpm run test:probe:tm-buffer` sets and every other run
           // leaves empty. A browser test cannot read `process.env` (`PROBE_FILES`' doc says why), so the probe
           // learns its own run's stamp here, and refuses a corpus or a build under `target/` stamped by another.
-          provide: { probeTmBufferRun: process.env.REDEXTAPE_PROBE_TM_BUFFER_RUN ?? '' },
+          provide: {
+            probeTmBufferRun: process.env.REDEXTAPE_PROBE_TM_BUFFER_RUN ?? '',
+            probeAsmCopyRun: process.env.REDEXTAPE_PROBE_ASM_COPY_RUN ?? '',
+          },
           // Vitest serves its own tester HTML, so this project's `index.html` — and therefore its
           // `<link>` to `style.css` — never reaches the page. See `tests/browser/setup.ts`: without it
           // the state table's `max-height: 40vh` never applies and the browser tier measures a

@@ -170,12 +170,11 @@ pub fn printed_program(src: &str) -> Option<(String, Vec<(Span, TokenClass)>)> {
 ///
 /// **THIS IS THE ONLY PATH IN THIS MODULE THAT REACHES `Keyword` AND `Ident`.**
 ///
-/// **THE HEADER IS BUILT THE WAY `emit --lang asm` BUILDS IT, DELIBERATELY.**
-/// `crates/redextape-cli/src/emit.rs` runs the result type through `ty::show` and back through
-/// `ty::parse_ty`, and writes a header only when that round trip succeeds — `parse_ty` admits
-/// exactly `Nat`/`Bool`/`Unit`/`List<T>`, and `AsmHeader` must not carry anything its own reader
-/// would reject. Constructing an `AsmHeader` some other way would produce text no writer in this
-/// project emits, which is a corpus that checks something nobody would ever see.
+/// **THE HEADER IS BUILT THE WAY `emit --lang asm` BUILDS IT, DELIBERATELY: BY `AsmHeader::for_type`**,
+/// the one function every writer in this project calls, which grounds a free type variable to `Nat`
+/// and names no type that holds a function — `AsmHeader` must not carry anything its own reader would
+/// reject. Constructing an `AsmHeader` some other way would produce text no writer in this project
+/// emits, which is a corpus that checks something nobody would ever see.
 ///
 /// **IT DOES NOT RUN ANYTHING.** `typeck::result_type` is a type, not an execution, which is why
 /// this needs none of the bounds `tm::printed_machine_with_header` documents for its simulation.
@@ -186,8 +185,8 @@ pub fn printed_program_with_header(src: &str) -> Option<(String, Vec<(Span, Toke
     let ty = redextape_core::typeck::result_type(&program).ok()?;
     let core = redextape_core::desugar::desugar(&program);
     let prog = lower_via_program_template(&core)?;
-    let result = redextape_core::ty::parse_ty(&redextape_core::ty::show(&ty))?;
-    Some(redextape_core::tm::print_asm_with_mapped(&prog, &redextape_core::tm::AsmHeader { result }))
+    let header = redextape_core::tm::AsmHeader::for_type(&ty)?;
+    Some(redextape_core::tm::print_asm_with_mapped(&prog, &header))
 }
 
 /// The FIXED list the headered corpus is built from. Fixed rather than generated because

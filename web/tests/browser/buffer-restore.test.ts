@@ -186,7 +186,7 @@ describe('buffers restored from storage', () => {
     // **`— orphan` IS ALSO THE REFUSED `tm-0` BINDING, READ OFF THE ONLY SURFACE THAT COUNTS PANES.**
     // `SEEDED` names `tm-0 → scratch-1`; a version that seeded it would either have killed the page
     // (it did — see `SEEDED`'s own doc) or, guarded elsewhere, left this row reading `1 pane`.
-    expect(rowNames()).toEqual(['λ copy 1 · not shown · paused', 'λ copy 2 · 1 view · running'])
+    expect(rowNames()).toEqual(['λ copy 1 · not shown · paused', 'λ copy 2 · 1 view'])
     // AND THE TM PANE IS ON THE SOURCE SESSION, which is what `— orphan` means from the pane's side:
     // a δ-table is rendered there, which a λ-only buffer could never have supplied.
     expect(document.querySelector('[data-leaf="tm-0"] .view-status')).toBeNull()
@@ -253,7 +253,7 @@ describe('buffers restored from storage', () => {
     // SYNCHRONOUS, AND THAT IS THE ASSERTION: `handleTemperature` rebuilds the rows around the caller's
     // own handler returning, so the row is already redrawn by the time this line runs. A `until` here
     // would hide a version that redrew a frame later or not at all.
-    expect(rowNames()[0]).toBe('λ copy 1 · not shown · running')
+    expect(rowNames()[0]).toBe('λ copy 1 · not shown')
 
     await until(() => termsAfterReopen()[0] !== 'no term yet', 'the warmed orphan to rebuild its term')
     // `(\a. a)` PRINTED — the identity, from the text that was in `localStorage` and nowhere else.

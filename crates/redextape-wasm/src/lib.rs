@@ -13,6 +13,8 @@
 // test-harness pass, so production warnings still surface from the other one.
 #![cfg_attr(test, allow(clippy::pedantic))]
 
+#[cfg(feature = "probe-asm-copy")]
+mod probe;
 mod session;
 
 /// The eight wire types this crate declares, re-exported for `tests/ts_bindings.rs`.
@@ -226,6 +228,42 @@ pub fn tm_scratch(src: &str) -> Result<JsValue, JsValue> {
     Ok(out.into())
 }
 
+/// An asm program typed or pasted into a copy, with no program behind it. Owns the listing, the cursor and
+/// the outcome of its own run.
+///
+/// **SIX OF THE ASM LEG'S METHODS, UNDER THE SESSION'S NAMES, AND NOTHING ELSE** — all but `asmText`, since a
+/// copy's text is what built it. `asmStatus` answers the same `AsmStatus` a `Session` does — every field is true
+/// of a copy (`session::AsmScratch` says why). `sourceSpan` and `linkIndex` are absent, since a copy has no
+/// `SourceMap`; `tests/browser.rs` pins that at compile time.
+#[wasm_bindgen]
+pub struct AsmScratch(session::AsmScratch);
+
+/// `asmScratch(src)` -> `{ diagnostics: Diagnostic[], scratch: AsmScratch | null }`.
+///
+/// `scratch` is null for text over `MAX_SCRATCH_ASM_BYTES`, refused before it is parsed, for text that does not
+/// parse and for text with a label mistake, and the diagnostics say which — see `session::asm_scratch`. Assembled by
+/// hand for the reason `compile` and `lambdaScratch` give: a handle and plain data cross two different ways.
+///
+/// # Errors
+///
+/// Returns `Err` only if `to_value` cannot marshal the diagnostics, or if a `Reflect::set` on the freshly
+/// created object fails; neither is expected for this crate's own types. Text that is refused is NOT an
+/// error — it arrives as diagnostics beside a null `scratch`.
+#[wasm_bindgen(js_name = asmScratch)]
+pub fn asm_scratch(src: &str) -> Result<JsValue, JsValue> {
+    let made = session::asm_scratch(src);
+
+    let out = js_sys::Object::new();
+    let diagnostics = to_value(&made.diagnostics)?;
+    js_sys::Reflect::set(&out, &JsValue::from_str("diagnostics"), &diagnostics)?;
+    let handle = match made.scratch {
+        Some(s) => JsValue::from(AsmScratch(s)),
+        None => JsValue::NULL,
+    };
+    js_sys::Reflect::set(&out, &JsValue::from_str("scratch"), &handle)?;
+    Ok(out.into())
+}
+
 /// `analyze(src)` -> `Diagnostic[]`.
 ///
 /// THE LINT PATH, and the reason it is not `compile`: see `session::analyze`.
@@ -302,7 +340,7 @@ pub fn capture_classes() -> Result<JsValue, JsValue> {
     to_value(&tables)
 }
 
-/// The lowering's tape names, in tape order. The NINTH export.
+/// The lowering's tape names, in tape order. The TENTH export.
 ///
 /// EXPORTED RATHER THAN HARDCODED, for the reason `encodings()` gives one export up: a TypeScript
 /// array of names is a second authoritative registry that not even the compiler is watching. Five
@@ -512,6 +550,15 @@ impl Session {
         }
     }
 
+    /// `tmResultDecodable()` -> `boolean`. Whether this session's result type has a decoding a `.tm`
+    /// header's `result` line can name — `false` only for a function-valued program. A plain `bool`,
+    /// not `JsValue`: unlike `tmText` there is no `None` to marshal by hand.
+    #[wasm_bindgen(js_name = tmResultDecodable)]
+    #[must_use]
+    pub fn tm_result_decodable(&self) -> bool {
+        self.0.tm_result_decodable()
+    }
+
     /// # Errors
     ///
     /// Returns `Err` when this session's TM leg is absent — check `tmStatus().available` first. No
@@ -629,6 +676,19 @@ impl Session {
     #[wasm_bindgen(js_name = asmValue)]
     pub fn asm_value(&self) -> Result<JsValue, JsValue> {
         to_value(&self.0.asm_value().map_err(err)?)
+    }
+
+    /// `asmText()` -> `string | null`. The asm program as `.asm` text, for a copy to seed an `AsmScratch` from;
+    /// `null` for a declined leg, and for text longer than `MAX_SCRATCH_ASM_BYTES`, which `asmScratch` would
+    /// refuse. `JsValue` rather than `Option<String>` for `tmText`'s reason: a bare `None` would cross as
+    /// `undefined`.
+    #[wasm_bindgen(js_name = asmText)]
+    #[must_use]
+    pub fn asm_text(&self) -> JsValue {
+        match self.0.asm_text() {
+            Some(s) => JsValue::from_str(&s),
+            None => JsValue::NULL,
+        }
     }
 
     // --- the reference leg --------------------------------------------------------------------
@@ -852,9 +912,10 @@ impl LambdaScratch {
 /// `linkIndex`. `tmStatus` is present with a DIFFERENT RETURN SHAPE — see `session::TmScratchStatus`.
 /// `tests/browser.rs` pins the absences at compile time.
 ///
-/// Three of the five drop the `Result` `Session`'s carry, for the reason `LambdaScratch`'s impl
-/// records: `SessionError::TmAbsent` is unreachable on a type that holds a cursor rather than a
-/// `Result`. `tapeSlice` keeps its throw because `NoSuchTape` is genuinely reachable.
+/// Two of the five drop the `Result` `Session`'s carry, `stepTm` and `raiseTmCap`, for the reason
+/// `LambdaScratch`'s impl records: `SessionError::TmAbsent` is unreachable on a type that holds a cursor
+/// rather than a `Result`. `tmProgram` and `tmState` keep one for `to_value` alone, and `tapeSlice` keeps
+/// its throw because `NoSuchTape` is genuinely reachable.
 #[wasm_bindgen]
 impl TmScratch {
     /// # Errors
@@ -921,6 +982,63 @@ impl TmScratch {
     #[wasm_bindgen(js_name = tapeNames)]
     pub fn tape_names(&self) -> Result<JsValue, JsValue> {
         to_value(&self.0.tape_names())
+    }
+}
+
+/// The asm leg's methods on a copy. Two of the six drop the `Result` `Session`'s carry, `stepAsm` and
+/// `raiseAsmCap`, for the reason `TmScratch`'s impl records: `SessionError::AsmAbsent` is unreachable on a type
+/// that holds a leg rather than a `Result`. `asmStatus`, `asmProgram` and `asmValue` keep one for `to_value`
+/// alone, and `asmState` for `to_value` and for a `window` that is not an `AsmWindow`, as `Session`'s does.
+#[wasm_bindgen]
+impl AsmScratch {
+    /// # Errors
+    ///
+    /// Returns `Err` only if `to_value` cannot marshal the status; not expected for this crate's own types.
+    #[wasm_bindgen(js_name = asmStatus)]
+    pub fn asm_status(&self) -> Result<JsValue, JsValue> {
+        to_value(&self.0.asm_status())
+    }
+
+    /// # Errors
+    ///
+    /// Returns `Err` only if `to_value` cannot marshal the listing; not expected for this crate's own types.
+    #[wasm_bindgen(js_name = asmProgram)]
+    pub fn asm_program(&self) -> Result<JsValue, JsValue> {
+        to_value(&self.0.asm_program())
+    }
+
+    /// `false` once the run has halted, faulted or been capped — `asmStatus().run` and `.cap` say which.
+    #[wasm_bindgen(js_name = stepAsm)]
+    #[must_use]
+    pub fn step_asm(&mut self) -> bool {
+        self.0.step_asm()
+    }
+
+    /// `source_node` is always `null`: a copy has no lowering to have recorded an owner. `window` is read as
+    /// `Session::asmState` reads it.
+    ///
+    /// # Errors
+    ///
+    /// Returns `Err` when `window` is not an `AsmWindow`, with the deserializer's message.
+    #[wasm_bindgen(js_name = asmState)]
+    pub fn asm_state(&self, window: JsValue) -> Result<JsValue, JsValue> {
+        let window: redextape_core::viewmodel::AsmWindow = serde_wasm_bindgen::from_value(window)
+            .map_err(|e| JsValue::from_str(&format!("asmState: not an AsmWindow: {e}")))?;
+        to_value(&self.0.asm_state(window))
+    }
+
+    /// `u32` and widened, for the reason `Session::raiseLambdaCap` records.
+    #[wasm_bindgen(js_name = raiseAsmCap)]
+    pub fn raise_asm_cap(&mut self, extra_steps: u32) {
+        self.0.raise_asm_cap(u64::from(extra_steps));
+    }
+
+    /// # Errors
+    ///
+    /// Returns `Err` only if `to_value` cannot marshal the `Decoded`; not expected for this crate's own types.
+    #[wasm_bindgen(js_name = asmValue)]
+    pub fn asm_value(&self) -> Result<JsValue, JsValue> {
+        to_value(&self.0.asm_value())
     }
 }
 

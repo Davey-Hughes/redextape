@@ -323,11 +323,10 @@ mod tests {
         assert!(out[0]["error"].is_object(), "an unserved request must answer an error: {:?}", out[0]);
     }
 
-    /// **ASM HAS NO EDITOR UNTIL PART 5, WHICH IS WHY THIS RUNS HERE.** There is nowhere in the app
-    /// yet to place a cursor in an `.asm` document, so its hover answers cannot be proven by driving
-    /// the UI — this test drives `handle`'s JSON instead, exactly as a worker would, so that once
-    /// part 5 mounts an asm editor it inherits a language already proven at the boundary rather than
-    /// an untested one.
+    /// **ASM HOVER AT THE BOUNDARY, THROUGH `handle`'s JSON EXACTLY AS A WORKER SENDS IT.** An asm
+    /// copy's editor is served by this server, and `web/tests/browser/asm-copy.test.ts` hovers one
+    /// label in it through the UI. This test checks below the UI what that one gesture does not: an
+    /// instruction's answer, and a label's two roles, each answering its own sentence.
     ///
     /// **THE REFERENCE ARM HAD ZERO COVERAGE.** `hover::asm`'s `Role::Reference` branch
     /// (`"A jump or call target."`) was never exercised anywhere in the tree — Task 5's fixtures only
@@ -335,7 +334,7 @@ mod tests {
     /// passed every existing test. The fixture below carries a label defined once and referenced
     /// twice, so both roles get hovered and their answers are checked to actually differ.
     #[test]
-    fn asm_answers_hover_at_the_boundary_though_no_editor_mounts_it() {
+    fn asm_hover_answers_an_instruction_and_tells_a_label_reference_from_its_definition() {
         // The same fixture `asm_syntax.rs`'s `NAV_ASM` uses, whose own doc comment records it as
         // parsing clean: `g` is defined once (`g:`) and referenced twice (`jz`'s second operand,
         // `jmp`'s first).

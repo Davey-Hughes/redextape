@@ -557,18 +557,72 @@ enum AsmEnd {
 /// **THE WHOLE RUN HAPPENS HERE, ONCE** (spec amendment 13): the step total and the value both come from it,
 /// and a program that never halts spends the whole step cap here, before `compile` returns.
 fn build_asm_leg(core: &Core, caps: tm::asm::Caps) -> Result<AsmLeg, tm::LowerError> {
-    let program = Rc::new(tm::lower_program(core)?);
-    let mut run = AsmCursor::new(Rc::clone(&program), caps);
-    for _ in run.by_ref() {}
-    let total_steps = run.steps_taken();
-    let end = match run.status().cloned() {
-        Some(trace::AsmStatus::Halted) => AsmEnd::Halted(run.into_outcome()),
-        Some(trace::AsmStatus::Faulted(why)) => AsmEnd::Faulted { pc: run.pc(), why },
-        // `None` cannot be reached: a cursor stops only by latching a status. It answers as a cap, as
-        // `run_asm` does for the same arm, rather than panicking, since a panic under wasm aborts the module.
-        Some(trace::AsmStatus::Capped(_)) | None => AsmEnd::Capped,
-    };
-    Ok(AsmLeg { program: AsmProgram::of(&program), cursor: AsmCursor::new(program, caps), total_steps, end })
+    Ok(AsmLeg::run(Rc::new(tm::lower_program(core)?), caps))
+}
+
+/// The asm leg's run and four of its answers, **ONE IMPLEMENTATION FOR THE PROGRAM'S LEG AND A COPY'S.**
+/// `Session` and `AsmScratch` each hold an `AsmLeg` that `run` built, and their `asm_status`, `step_asm`,
+/// `asm_state` and `asm_value` forward to `status`, `step`, `state` and `value`; the two differ only in what
+/// they hand in — the session its `SourceMap` and the program's type, a copy no map and its header's type, if
+/// it has one. Their `asm_program` and `raise_asm_cap` need no method here: each reads the `program` field or
+/// raises the `cursor`'s cap directly, as `Session::asm_text` prints the cursor's program.
+impl AsmLeg {
+    /// Run `program` to its end under `caps`, then open the cursor a view records: `build_asm_leg`'s whole
+    /// run, for a program from a lowering or from text alike.
+    fn run(program: Rc<Program>, caps: tm::asm::Caps) -> AsmLeg {
+        let mut run = AsmCursor::new(Rc::clone(&program), caps);
+        for _ in run.by_ref() {}
+        let total_steps = run.steps_taken();
+        let end = match run.status().cloned() {
+            Some(trace::AsmStatus::Halted) => AsmEnd::Halted(run.into_outcome()),
+            Some(trace::AsmStatus::Faulted(why)) => AsmEnd::Faulted { pc: run.pc(), why },
+            // `None` cannot be reached: a cursor stops only by latching a status. It answers as a cap, as
+            // `run_asm` does for the same arm, rather than panicking, since a panic under wasm aborts the module.
+            Some(trace::AsmStatus::Capped(_)) | None => AsmEnd::Capped,
+        };
+        AsmLeg { program: AsmProgram::of(&program), cursor: AsmCursor::new(program, caps), total_steps, end }
+    }
+
+    /// `Session::asm_status` for a leg that is there.
+    fn status(&self) -> AsmStatus {
+        let (run, cap) = match self.cursor.status() {
+            None => (RunStatus::Running, None),
+            Some(trace::AsmStatus::Halted | trace::AsmStatus::Faulted(_)) => (RunStatus::Ended, None),
+            Some(trace::AsmStatus::Capped(cap)) => (RunStatus::Capped, Some(*cap)),
+        };
+        AsmStatus { available: true, reason: String::new(), run: Some(run), cap, total_steps: Some(self.total_steps) }
+    }
+
+    /// Advance one instruction; `false` once the run has halted, faulted or been capped.
+    fn step(&mut self) -> bool {
+        self.cursor.next().is_some()
+    }
+
+    /// The cursor's machine cut to `window`; `map` resolves `source_node`, and a copy has none.
+    fn state(&self, map: Option<&SourceMap>, window: AsmWindow) -> AsmState {
+        AsmState::window(&self.cursor, map, window)
+    }
+
+    /// The run's answer: `rr` decoded by `ty` from the leg's own run, or from the cursor once a raised cap has
+    /// carried it further — `Session::asm_value` says why in that order. With no `ty`, the raw word, marked:
+    /// a copy with no `result` header has nothing to decode against.
+    fn value(&self, ty: Option<&redextape_core::ty::Ty>) -> Decoded {
+        let decode = |outcome: &AsmOutcome| match ty {
+            Some(ty) => decoded_or_undecodable(tm::decode_asm_ty(outcome, ty)),
+            None => Decoded::Value { text: format!("{} (no result type)", outcome.result) },
+        };
+        match &self.end {
+            AsmEnd::Halted(outcome) => decode(outcome),
+            AsmEnd::Faulted { pc, why } => asm_fault(*pc, why),
+            AsmEnd::Capped => match self.cursor.status() {
+                Some(trace::AsmStatus::Halted) => {
+                    decode(&AsmOutcome { result: self.cursor.rr(), heap: self.cursor.heap().to_vec() })
+                }
+                Some(trace::AsmStatus::Faulted(why)) => asm_fault(self.cursor.pc(), why),
+                None | Some(trace::AsmStatus::Capped(_)) => Decoded::Unfinished,
+            },
+        }
+    }
 }
 
 /// What `asm_status().reason` says for each way `tm::lower_program` refuses a program. One arm per variant,
@@ -1039,7 +1093,8 @@ impl Session {
         Ok(p.clone())
     }
 
-    /// This session's machine as `.tm` text, or `None` for a declined leg.
+    /// This session's machine as `.tm` text, or `None` for a declined leg or a result type a header
+    /// cannot name.
     ///
     /// **UNCONDITIONAL ON SIZE.** Asked, it prints, however many rules the machine has — `list60` is
     /// 94,182 of them (127,881 is the δ-table's ROW count, states plus rules; see `protocol.ts`'s
@@ -1048,11 +1103,41 @@ impl Session {
     /// rule count to WORD its refusal as well as to make it, so a threshold here would be a second home
     /// for one number.
     ///
+    /// **`None` FOR A FUNCTION-VALUED PROGRAM TOO, THE THIRD REASON BESIDE A DECLINED LEG AND THE SIZE
+    /// CAP.** `header.result` is `ty::ground(self.ty)` (`describe_at`'s own doc), and grounding a `Fun`
+    /// leaves it a `Fun` — a type `ty::is_decodable` refuses, and a `result` line naming it is one
+    /// `parse_tm_full` refuses to read back. Checked here rather than at `compile`, which still builds
+    /// this leg for a function-valued program exactly as it does for any other: the TM VIEW is not
+    /// affected, only the text a fork or `emit --lang tm` would write, which `redextape emit`'s own
+    /// up-front refusal makes for the identical reason.
+    ///
     /// `print_tm_with` AND NOT `print_tm`: without the header the text reparses to a machine running
     /// from blank tapes at `MIN_FIELD_WIDTH`, which is decision 6's state and is not this machine.
     pub fn tm_text(&self) -> Option<String> {
         let (_, cursor, header) = self.tm.as_ref().ok()?;
+        // `header.result` IS ALREADY GROUND (this method's own doc: `ty::ground(self.ty)`), so
+        // `is_decodable_ground` asks the round-trip question directly rather than `is_decodable`
+        // grounding it a second time — `AsmHeader::for_type`'s own idiom for the identical reason.
+        if !redextape_core::ty::is_decodable_ground(&header.result) {
+            return None;
+        }
         Some(tm::print_tm_with(cursor.machine(), header))
+    }
+
+    /// Whether this session's result type has a decoding a `.tm` header's `result` line can name —
+    /// `false` only for a function-valued program.
+    ///
+    /// **ASKED OF `self.ty`, NOT THE TM LEG'S OWN HEADER**, so it reads the same whether or not that leg
+    /// even built — a session with no TM leg still has a type, and the answer does not depend on which
+    /// legs happened to lower. `tmText` folds this same question in for its own reason (it is one of the
+    /// facts behind its `None`, beside a declined leg); this exists separately because `tmText`'s `None`
+    /// also means "over `MAX_FORK_RULES`" once `protocol.ts`'s `forkable` withholds the call entirely —
+    /// a fact this crate cannot see — so a caller needs this to tell the two refusals apart and word
+    /// *edit a copy*'s disabled reason correctly (the umbrella's §4 rule: disabled with the reason that
+    /// is actually true).
+    #[must_use]
+    pub fn tm_result_decodable(&self) -> bool {
+        redextape_core::ty::is_decodable(&self.ty)
     }
 
     /// Advance one δ-step. `false` once the run has halted or hit a cap — `tm_status().run` says
@@ -1128,20 +1213,7 @@ impl Session {
     /// and `cap` are read off the CURSOR, and `total_steps` off `compile`'s run, the split `tm_status` makes.
     pub fn asm_status(&self) -> AsmStatus {
         match &self.asm {
-            Ok(leg) => {
-                let (run, cap) = match leg.cursor.status() {
-                    None => (RunStatus::Running, None),
-                    Some(trace::AsmStatus::Halted | trace::AsmStatus::Faulted(_)) => (RunStatus::Ended, None),
-                    Some(trace::AsmStatus::Capped(cap)) => (RunStatus::Capped, Some(*cap)),
-                };
-                AsmStatus {
-                    available: true,
-                    reason: String::new(),
-                    run: Some(run),
-                    cap,
-                    total_steps: Some(leg.total_steps),
-                }
-            }
+            Ok(leg) => leg.status(),
             Err(e) => {
                 AsmStatus { available: false, reason: asm_decline_reason(e), run: None, cap: None, total_steps: None }
             }
@@ -1159,14 +1231,14 @@ impl Session {
     /// and `.cap` say which, and are the only thing that can.
     pub fn step_asm(&mut self) -> Result<bool, SessionError> {
         let leg = self.asm.as_mut().map_err(|_| SessionError::AsmAbsent)?;
-        Ok(leg.cursor.next().is_some())
+        Ok(leg.step())
     }
 
     /// The cursor's machine cut to `window` — `AsmState::window` and nothing else, with the session's map, so
     /// `source_node` resolves (`build_asm_leg` says why this map indexes this cursor's program).
     pub fn asm_state(&self, window: AsmWindow) -> Result<AsmState, SessionError> {
         let leg = self.asm.as_ref().map_err(|_| SessionError::AsmAbsent)?;
-        Ok(AsmState::window(&leg.cursor, Some(&self.map), window))
+        Ok(leg.state(Some(&self.map), window))
     }
 
     /// Extend the step budget, additively and saturating. It resumes a run the STEP cap stopped and nothing
@@ -1202,18 +1274,37 @@ impl Session {
     /// succeeded and a value too large for `decoded_value`'s capped print. See `Decoded`'s table.
     pub fn asm_value(&self) -> Result<Decoded, SessionError> {
         let leg = self.asm.as_ref().map_err(|_| SessionError::AsmAbsent)?;
-        Ok(match &leg.end {
-            AsmEnd::Halted(outcome) => decoded_or_undecodable(tm::decode_asm_ty(outcome, &self.ty)),
-            AsmEnd::Faulted { pc, why } => asm_fault(*pc, why),
-            AsmEnd::Capped => match leg.cursor.status() {
-                Some(trace::AsmStatus::Halted) => {
-                    let outcome = AsmOutcome { result: leg.cursor.rr(), heap: leg.cursor.heap().to_vec() };
-                    decoded_or_undecodable(tm::decode_asm_ty(&outcome, &self.ty))
-                }
-                Some(trace::AsmStatus::Faulted(why)) => asm_fault(leg.cursor.pc(), why),
-                None | Some(trace::AsmStatus::Capped(_)) => Decoded::Unfinished,
-            },
-        })
+        Ok(leg.value(Some(&self.ty)))
+    }
+
+    /// This session's asm program as `.asm` text, headed by the program's result type — what *edit a copy*
+    /// seeds an `AsmScratch` from. `None` for a declined leg, and for text longer than `MAX_SCRATCH_ASM_BYTES`,
+    /// which a copy would refuse (`asm_text_within`).
+    ///
+    /// **THE PROGRAM THE CURSOR RUNS, `defunc` INCLUDED**, printed by `print_asm_with`, and read back by
+    /// `asm_scratch` to the same program: `asm_roundtrip.rs`'s
+    /// `every_program_the_web_app_runs_prints_to_text_a_copy_runs` holds both halves, and that
+    /// `asm_label_diagnostics` finds nothing to refuse in it.
+    ///
+    /// **THE HEADER IS `AsmHeader::for_type`'s, THE ONE `redextape emit --lang asm` WRITES** — `Nat`, `Bool`,
+    /// `Unit` or a list of them, with a free type variable written as `Nat`, so a copy of `[]` reads `[]`. A
+    /// program whose type holds a function prints with no header, and its copy's value is the raw word, marked,
+    /// where the program's is `Undecodable`: there was never a value of its type to decode.
+    pub fn asm_text(&self) -> Option<String> {
+        self.asm_text_within(MAX_SCRATCH_ASM_BYTES)
+    }
+
+    /// `asm_text`, `None` too when the text is longer than `limit` bytes: a copy could not build it, so *edit a copy*
+    /// is offered disabled with its reason rather than posted text a build refuses. A parameter so a test can reach
+    /// the refusal without a program that prints megabytes.
+    fn asm_text_within(&self, limit: usize) -> Option<String> {
+        let leg = self.asm.as_ref().ok()?;
+        let program = leg.cursor.program();
+        let text = match tm::AsmHeader::for_type(&self.ty) {
+            Some(header) => tm::print_asm_with(program, &header),
+            None => tm::print_asm(program),
+        };
+        (text.len() <= limit).then_some(text)
     }
 
     // --- the reference leg --------------------------------------------------------------------
@@ -1301,10 +1392,11 @@ impl Session {
 
 /// What a scratchpad constructor answers: the thing, or the diagnostics saying why not.
 ///
-/// **THE SAME SHAPE AS `Compiled`, AND GENERIC RATHER THAN WRITTEN TWICE.** Both scratch parsers
-/// (`lambda::parse_lambda`, `tm::parse_tm_full`) return a value alongside diagnostics, so both
-/// constructors answer the same pair; `Compiled` stays its own struct only because its payload field
-/// is named `session` and nothing is gained by renaming it. See the design's §4.1.
+/// **THE SAME SHAPE AS `Compiled`, AND GENERIC RATHER THAN WRITTEN TWICE.** `lambda_scratch` and `asm_scratch`
+/// answer it: their parsers (`lambda::parse_lambda`, `tm::parse_asm_nav`) return a value alongside diagnostics,
+/// so both constructors answer the same pair. `tm_scratch` answers `TmScratched` instead, which carries a value
+/// run beside the pair. `Compiled` stays its own struct only because its payload field is named `session` and
+/// nothing is gained by renaming it. See the design's §4.1.
 ///
 /// **A `None` HERE IS "THE TEXT DID NOT PARSE", NOT "A BACKEND DECLINED"** — the distinction `Compiled`
 /// draws in the other direction. A `Session` with every leg declined is still a session, because
@@ -1325,8 +1417,8 @@ pub struct Scratched<T> {
 ///
 /// **NO `initial_lambda`, AND CHECKING WHY IS WHAT CORRECTED THE FIRST DRAFT OF THE DESIGN.** That
 /// field's doc on `Session` says it is kept "so `link_index` can print step 0 after the cursor has
-/// moved", and `link_index` is its only consumer in this file. §3.3 puts `linkIndex` off both scratch
-/// types — it needs a `SourceMap` as well, and a scratch has none — so the field would be retained for
+/// moved", and `link_index` is its only consumer in this file. §3.3 puts `linkIndex` off every scratch
+/// type — it needs a `SourceMap` as well, and a scratch has none — so the field would be retained for
 /// nobody. `lambda_state` prints from the cursor, not from it. A first draft added it anyway "for the
 /// same `Rc`-bump reason as `Session`", which is a reason to keep a field cheap, not a reason to have
 /// one.
@@ -1354,6 +1446,140 @@ pub fn lambda_scratch(src: &str) -> Scratched<LambdaScratch> {
     let (term, diagnostics) = lambda::parse_lambda(src);
     let scratch = term.map(|t| LambdaScratch { lambda: LambdaLeg::new(&t, lambda::MAX_REDUCTION_STEPS) });
     Scratched { diagnostics, scratch }
+}
+
+/// An asm program typed or pasted into a copy: **an `AsmLeg` and the type its header names, and nothing else.**
+///
+/// **THE PROGRAM'S LEG, NOT A COPY'S VARIANT OF IT.** `asm_scratch` runs the parsed program to its end and
+/// opens a fresh cursor exactly as `compile` does for a lowered one, so `asm_status`, `asm_program`,
+/// `step_asm`, `asm_state`, `raise_asm_cap` and `asm_value` are `AsmLeg`'s, and every field of `AsmStatus`
+/// is true of a copy — which is why this answers `AsmStatus` where `TmScratch` needs a status of its own.
+///
+/// **NO `SourceMap`, SO NO `sourceSpan` OR `linkIndex`** — `LambdaScratch`'s reason, and `asm_state`'s
+/// `source_node` is `null` on every frame. A copy links to nothing.
+///
+/// **A HEADER'S TYPE, WHEN IT HAS ONE.** `.asm` text may carry `result <type>`, and a copy decodes its value
+/// by it; without one there is nothing to decode against, and `asm_value` is the raw `rr` word, marked as
+/// having no result type.
+pub struct AsmScratch {
+    leg: AsmLeg,
+    ty: Option<redextape_core::ty::Ty>,
+}
+
+/// Build an asm copy from `.asm` TEXT, or say why not.
+///
+/// **TEXT OVER `MAX_SCRATCH_ASM_BYTES` IS REFUSED FIRST, UNPARSED**, with a diagnostic naming both sizes — a
+/// bound on the build's cost that `redextape run` does not have.
+///
+/// **OTHERWISE IT REFUSES WHAT `redextape run` REFUSES**: text that does not parse, and — through
+/// `asm_label_diagnostics` — a jump to a label nothing defines, a label defined twice, or a label name the
+/// printer cannot write back. The parser accepts those three and `Program::validate` refuses them; a copy's
+/// editor marks them, from the same function, so a refusal always has its reason on screen. `validate`'s one
+/// other check a text can fail, a register at or over `MAX_REGISTERS`, is not refused: it has no name to
+/// mark, and the cursor faults on it at step 0, which the view shows as the run's end.
+///
+/// **THE WHOLE RUN HAPPENS HERE, ONCE**, as in `compile` (spec amendment 26), under `COPY_CAPS` rather than
+/// `compile`'s caps: the step total and the value come with the build.
+pub fn asm_scratch(src: &str) -> Scratched<AsmScratch> {
+    asm_scratch_with_caps(src, COPY_CAPS)
+}
+
+/// The longest `.asm` text an asm copy builds, in bytes, and the longest `Session::asm_text` hands out for one (Plan 7
+/// part 5 spec, amendment 24; the figure below is amendment 45's, which supersedes amendment 36's).
+///
+/// **MEASURED, NOT CHOSEN, AGAINST THE 250 MS AN INITIATED GESTURE MAY TAKE** — `MAX_SCRATCH_TM_BYTES`' budget. A
+/// copy's build pays four costs before its first frame: the text's structured clone to the worker; `asm_scratch`,
+/// which parses it, checks its labels, projects the listing and runs the program to its end; reading the reply's
+/// status, listing and value off the handle; and the reply's clone back. `web/tests/browser/asm-copy-cost.test.ts`
+/// prices the four together (`cd web && pnpm run test:probe:asm-copy`), over generated files that halt on their first
+/// instruction, and prices every run the memory probe knows apart from that, since none of them grows with the text:
+/// a loop to the step cap, and `asm-copy-corpus.ts`'s `CASES` and its `both` at `COPY_CAPS`' heap cap — the
+/// heaviest of those runs is what the figures below add, not the loop alone (amendment 36 priced only the loop).
+///
+/// FOUR RUNS, ON AN AMD RYZEN 9 9950X3D, RELEASE BUILD, THIS CHECK OFF (`probe-asm-copy`). The ledger's three
+/// quiet-machine runs found `both` heaviest at medians 38.4, 36.1 and 38.8 ms against the loop's 32.1, 30.7 and
+/// 32.9, and with `both` added 5,200,038 bytes stayed under the 250 ms budget in all three (241.5, 243.9, 245.5
+/// ms) while 5,400,000 was over it in two of them (254.3, 256.7 ms). This fix wave's own run agrees: `both` 39.0
+/// ms against the loop's 31.6, 5,200,038 bytes under budget at 245.4 ms and 5,300,019 bytes, the next size up,
+/// over it at 250.2 ms. The ceiling is the largest size known under budget in every run, with the heaviest run
+/// known added, so it is 5,200,000.
+///
+/// ONE CONSTANT FOR BOTH DIRECTIONS (spec amendment 24): the text a copy parses, and the text *edit a copy* would post,
+/// since a text over it is one the copy would refuse.
+pub const MAX_SCRATCH_ASM_BYTES: usize = 5_200_000;
+
+/// The caps an asm copy runs under: `DEFAULT_CAPS` with fewer heap cells and fewer saved words (Plan 7 part 5 spec,
+/// amendment 25).
+///
+/// **SET SO A COPY'S WORKER STAYS UNDER 256 MIB, THE BUDGET THE USER SET, AND MEASURED THERE.** Each warm copy has a
+/// worker of its own, up to `MAX_WARM_BUFFERS` of them, and a wasm memory only grows, so a copy that once filled its
+/// caps holds that memory until its worker ends. Under `DEFAULT_CAPS` a hand-written copy can fill far more:
+/// `web/tests/browser/asm-copy-memory.test.ts` (`cd web && pnpm run test:probe:asm-copy`) builds each worst case in a
+/// worker of its own, records it as the session worker does, and reads the worker's wasm memory. One run, on the machine
+/// above: 629.8 MiB for a million-word locals bank saved by every `call`, to the memory cap; 264.6 MiB for a `cons` a
+/// step, to the step cap; 136.6 MiB for a `box` a step; 18.4 MiB for bare recursion, to the stack cap. Under these caps
+/// the same cases read 133.1, 72.5, 40.4 and 18.4 MiB, and a copy that fills the heap to its cap and then saves locals
+/// to theirs — the two together, since a run stops at the first cap it meets — reads 168.4 MiB.
+///
+/// A copy of the program therefore stops, heap-full or with its saved frames full, where the program's own session
+/// runs on: the session keeps `DEFAULT_CAPS`, and the step line names the cap that ended a copy.
+pub const COPY_CAPS: tm::asm::Caps = tm::asm::Caps { heap: 2_000_000, mem: 12_000_000, ..tm::asm::DEFAULT_CAPS };
+
+/// `asm_scratch` under `caps`, so a test can reach a cap without millions of steps, and the memory probe can price
+/// `DEFAULT_CAPS` beside `COPY_CAPS` (`probe-asm-copy`).
+pub(crate) fn asm_scratch_with_caps(src: &str, caps: tm::asm::Caps) -> Scratched<AsmScratch> {
+    // BEFORE THE PARSE, FOR `tm_scratch_with_caps`' REASON: the parse is one of the costs the ceiling bounds. Off under
+    // `probe-asm-copy`, which prices both sides of it; `cfg!`, so the constant is read in every build.
+    if !cfg!(feature = "probe-asm-copy") && src.len() > MAX_SCRATCH_ASM_BYTES {
+        let message = format!(
+            "this file is {} bytes; an asm copy builds files up to {} bytes — `redextape run` has no such limit",
+            grouped(src.len() as u64),
+            grouped(MAX_SCRATCH_ASM_BYTES as u64)
+        );
+        return Scratched { diagnostics: vec![Diagnostic::error(Span { start: 0, end: 0 }, message)], scratch: None };
+    }
+    let (doc, nav) = tm::parse_asm_nav(src);
+    let mut diagnostics = doc.diagnostics;
+    diagnostics.extend(tm::asm_label_diagnostics(&nav));
+    let scratch = match doc.program {
+        Some(program) if diagnostics.is_empty() => {
+            Some(AsmScratch { leg: AsmLeg::run(Rc::new(program), caps), ty: doc.header.map(|h| h.result) })
+        }
+        _ => None,
+    };
+    Scratched { diagnostics, scratch }
+}
+
+impl AsmScratch {
+    /// See `Session::asm_status`; always `available`.
+    pub fn asm_status(&self) -> AsmStatus {
+        self.leg.status()
+    }
+
+    /// The listing and labels, projected once when the copy was built.
+    pub fn asm_program(&self) -> AsmProgram {
+        self.leg.program.clone()
+    }
+
+    /// See `Session::step_asm`.
+    pub fn step_asm(&mut self) -> bool {
+        self.leg.step()
+    }
+
+    /// The cursor's machine cut to `window`, with no map: `source_node` is `None` on every frame.
+    pub fn asm_state(&self, window: AsmWindow) -> AsmState {
+        self.leg.state(None, window)
+    }
+
+    /// See `Session::raise_asm_cap`.
+    pub fn raise_asm_cap(&mut self, extra_steps: u64) {
+        self.leg.cursor.raise_cap(extra_steps);
+    }
+
+    /// See `Session::asm_value`, decoded by the header's type; with no header, the raw word, marked.
+    pub fn asm_value(&self) -> Decoded {
+        self.leg.value(self.ty.as_ref())
+    }
 }
 
 /// A λ scratchpad forked from step `step` of `src`, **and the text that built it**.
@@ -3011,6 +3237,206 @@ mod tests {
         assert!(owners.iter().all(|o| *o >= 0), "a first-order program owns every instruction: {owners:?}");
     }
 
+    // --- the asm copy -------------------------------------------------------------------------------
+
+    /// A higher-order program: `lower_asm` refuses it and `defunc` rewrites it, so its asm has labels
+    /// `defunc` minted.
+    const MAP: &str = "fn map(xs, f) { if is_empty(xs) { nil } else { cons(f(head(xs)), map(tail(xs), f)) } } \
+                       map([3, 1, 2], |x| x + 1)";
+
+    /// Step a copy's cursor until it stops, and say how many steps it took.
+    fn run_copy_out(sc: &mut AsmScratch) -> u64 {
+        let mut steps = 0;
+        while sc.step_asm() {
+            steps += 1;
+        }
+        steps
+    }
+
+    /// A copy of the program's text runs as the program does: the same status before a step, the same listing,
+    /// the same value, and the same frame at every step but for its owner, which a copy has none of. Over a
+    /// first-order program, a recursive one, one that faults, one with a heap, one `defunc` rewrote, and two
+    /// whose type has a free variable, `List<t>` and `List<List<t>>`, whose headers name it as `Nat`.
+    #[test]
+    fn a_copy_of_the_programs_text_runs_as_the_program_does() {
+        for src in ["let x = 40; x + 2", FACT3, "head([])", "[1, 2, 3]", MAP, "[]", "[[]]"] {
+            let mut s = Session::compile(src, EncodingKind::Unary).session.expect("compiles");
+            let text = s.asm_text().expect("the asm leg is there");
+            let made = asm_scratch(&text);
+            assert_eq!(made.diagnostics, Vec::new(), "{src}");
+            let mut sc = made.scratch.expect("the program's text builds a copy");
+            assert_eq!(sc.asm_status(), s.asm_status(), "{src}");
+            assert_eq!(Ok(sc.asm_program()), s.asm_program(), "{src}");
+            assert_eq!(Ok(sc.asm_value()), s.asm_value(), "{src}");
+            loop {
+                let (mine, theirs) = (sc.asm_state(ASM_WHOLE), s.asm_state(ASM_WHOLE).expect("asm available"));
+                assert_eq!(mine.source_node, None, "{src}: a copy has no owners");
+                assert_eq!(mine, AsmState { source_node: None, ..theirs }, "{src}");
+                let (a, b) = (sc.step_asm(), s.step_asm().expect("asm available"));
+                assert_eq!(a, b, "{src}: the two stop together");
+                if !a {
+                    break;
+                }
+            }
+            assert_eq!(sc.asm_status(), s.asm_status(), "{src}: and end together");
+        }
+    }
+
+    /// The text carries the program's type as its header when a header can name it, a free variable as `Nat`, and
+    /// none when it cannot: a function-typed program's copy has no type to decode by, so its value is the raw
+    /// word, marked, where the program's own is `Undecodable`.
+    #[test]
+    fn a_copy_decodes_by_its_header_and_marks_a_raw_word_without_one() {
+        let s = Session::compile("[1, 2, 3]", EncodingKind::Unary).session.expect("compiles");
+        let text = s.asm_text().expect("the asm leg is there");
+        assert!(text.starts_with("result List<Nat>\n"), "{text}");
+        assert_eq!(
+            asm_scratch(&text).scratch.expect("builds").asm_value(),
+            Decoded::Value { text: "[1, 2, 3]".into() }
+        );
+
+        let s = Session::compile("[]", EncodingKind::Unary).session.expect("compiles");
+        assert!(matches!(&s.ty, redextape_core::ty::Ty::List(t) if matches!(**t, redextape_core::ty::Ty::Var(_))));
+        let text = s.asm_text().expect("the asm leg is there");
+        assert!(text.starts_with("result List<Nat>\n"), "a free variable is written as `Nat`: {text}");
+
+        let s = Session::compile("|x| x + 1", EncodingKind::Unary).session.expect("compiles");
+        let text = s.asm_text().expect("the asm leg is there");
+        assert!(!text.contains("result"), "a function type has no header: {text}");
+        let sc = asm_scratch(&text).scratch.expect("builds");
+        assert_eq!(s.asm_value(), Ok(Decoded::Undecodable), "the program's own value");
+        assert!(matches!(sc.asm_value(), Decoded::Value { text } if text.ends_with(" (no result type)")));
+
+        let sc = asm_scratch("\tli\trr, #42\n\thalt\n").scratch.expect("builds");
+        assert_eq!(sc.asm_value(), Decoded::Value { text: "42 (no result type)".into() });
+    }
+
+    /// No asm leg, no text.
+    #[test]
+    fn a_declined_asm_leg_has_no_text() {
+        let src = format!("[{}]", (0..2048).map(|i| i.to_string()).collect::<Vec<_>>().join(", "));
+        let s = Session::compile(&src, EncodingKind::Unary).session.expect("a declined leg is still a session");
+        assert!(!s.asm_status().available, "the premise");
+        assert_eq!(s.asm_text(), None);
+    }
+
+    /// A copy refuses what `redextape run` refuses, and says why in the diagnostics its editor shows: a line
+    /// that does not parse, a jump to nothing, a label defined twice.
+    #[test]
+    fn a_copy_refuses_a_parse_error_and_a_label_mistake() {
+        for (text, message) in [
+            ("\tbogus\n", "unknown mnemonic `bogus`"),
+            ("\tjmp\tnowhere\n", "undefined label `nowhere`"),
+            ("f:\nf:\n\thalt\n", "label `f` is already defined, and every jump to it reaches the first"),
+        ] {
+            let made = asm_scratch(text);
+            assert!(made.scratch.is_none(), "{text:?} builds nothing");
+            let said: Vec<_> = made.diagnostics.iter().map(|d| d.message.as_str()).collect();
+            assert_eq!(said, [message], "{text:?}");
+        }
+    }
+
+    /// What a copy cannot refuse by name ends its run at step 0 instead, and the value says where: a register
+    /// over the cap, and an empty program, whose first fetch runs past its end.
+    #[test]
+    fn a_register_over_the_cap_and_an_empty_program_fault_at_step_0() {
+        for (text, fault) in [
+            ("\tli\tr1000000, #0\n\thalt\n", "register index exceeds MAX_REGISTERS at pc0"),
+            ("", "ran past end of program at pc0"),
+        ] {
+            let mut sc = asm_scratch(text).scratch.expect("it parses and has no label to mark");
+            assert_eq!(sc.asm_status().total_steps, Some(0), "{text:?}");
+            assert_eq!(sc.asm_value(), Decoded::Fault { message: fault.into() }, "{text:?}");
+            assert_eq!(run_copy_out(&mut sc), 0, "{text:?}");
+            assert_eq!(sc.asm_status().run, Some(RunStatus::Ended), "{text:?}");
+        }
+    }
+
+    /// A copy the step cap stopped resumes under a raised cap to its value, read off the cursor.
+    #[test]
+    fn a_capped_copy_resumes_to_its_value() {
+        let s = Session::compile("[1, 2, 3]", EncodingKind::Unary).session.expect("compiles");
+        let text = s.asm_text().expect("the asm leg is there");
+        let caps = tm::asm::Caps { steps: 3, ..tm::asm::DEFAULT_CAPS };
+        let mut sc = asm_scratch_with_caps(&text, caps).scratch.expect("builds");
+        assert_eq!((sc.asm_status().total_steps, sc.asm_value()), (Some(3), Decoded::Unfinished));
+        assert_eq!(run_copy_out(&mut sc), 3);
+        assert_eq!(sc.asm_status().cap, Some(AsmCap::Steps));
+        sc.raise_asm_cap(1_000_000);
+        run_copy_out(&mut sc);
+        assert_eq!(sc.asm_value(), Decoded::Value { text: "[1, 2, 3]".into() });
+    }
+
+    /// `.asm` text of exactly `bytes` bytes: one `halt`, and a comment to make up the rest.
+    fn asm_padded_to(bytes: usize) -> String {
+        let text = format!("    halt\n;{}\n", "x".repeat(bytes - "    halt\n;\n".len()));
+        assert_eq!(text.len(), bytes);
+        text
+    }
+
+    /// The ceiling admits a file of exactly its size and refuses one byte more, before parsing it, in words that name
+    /// both sizes.
+    #[cfg(not(feature = "probe-asm-copy"))]
+    #[test]
+    fn an_asm_copy_at_the_ceiling_builds_and_one_byte_more_is_refused_unparsed() {
+        let at = asm_scratch(&asm_padded_to(MAX_SCRATCH_ASM_BYTES));
+        assert!(at.diagnostics.is_empty() && at.scratch.is_some(), "{:?}", at.diagnostics);
+        let over = asm_scratch(&asm_padded_to(MAX_SCRATCH_ASM_BYTES + 1));
+        assert!(over.scratch.is_none());
+        let said: Vec<&str> = over.diagnostics.iter().map(|d| d.message.as_str()).collect();
+        assert_eq!(
+            said,
+            [format!(
+                "this file is {} bytes; an asm copy builds files up to {} bytes — `redextape run` has no such limit",
+                grouped(MAX_SCRATCH_ASM_BYTES as u64 + 1),
+                grouped(MAX_SCRATCH_ASM_BYTES as u64)
+            )]
+        );
+        // UNPARSED: a file too long and with a label mistake hears only about its size.
+        let both = asm_scratch(&format!("\tjmp\tnowhere\n{}", asm_padded_to(MAX_SCRATCH_ASM_BYTES)));
+        assert_eq!(both.diagnostics.len(), 1, "{:?}", both.diagnostics);
+        assert!(both.diagnostics[0].message.starts_with("this file is "), "{:?}", both.diagnostics);
+    }
+
+    /// The probe build parses what the product build refuses, so its probe can price both sides of the ceiling.
+    #[cfg(feature = "probe-asm-copy")]
+    #[test]
+    fn the_probe_build_parses_asm_text_over_the_ceiling() {
+        let over = asm_scratch(&asm_padded_to(MAX_SCRATCH_ASM_BYTES + 1));
+        assert!(over.diagnostics.is_empty() && over.scratch.is_some(), "{:?}", over.diagnostics);
+    }
+
+    /// A session hands out no text a copy would refuse.
+    #[test]
+    fn a_session_hands_out_no_asm_text_longer_than_the_limit() {
+        let s = Session::compile("let x = 40; x + 2", EncodingKind::Unary).session.expect("compiles");
+        let text = s.asm_text().expect("the asm leg is there");
+        assert_eq!(s.asm_text_within(text.len()), Some(text.clone()), "exactly the limit is handed out");
+        assert_eq!(s.asm_text_within(text.len() - 1), None, "one byte over is not");
+    }
+
+    /// A copy runs under `COPY_CAPS`, not `DEFAULT_CAPS`: a `cons` a step stops heap-full at `COPY_CAPS.heap` cells, where
+    /// `DEFAULT_CAPS` would run on to its step cap; and a thousand-word locals bank saved by every `call` stops with its
+    /// saved frames full after `COPY_CAPS.mem` / 1,000 calls. Each allocates about what its cap allows.
+    #[test]
+    fn a_copy_runs_under_copy_caps() {
+        let cons = format!("    nil\tr0\nloop:\n{}    jmp\tloop\n", "    cons\tr0, r1, r0\n".repeat(100));
+        let mut sc = asm_scratch(&cons).scratch.expect("builds");
+        run_copy_out(&mut sc);
+        let end = sc.asm_state(AsmWindow { locals: 0, args: 0, frames: 0, cells: 0, boxes: 0 });
+        assert_eq!((sc.asm_status().cap, end.heap_len), (Some(AsmCap::Heap), 2_000_000));
+
+        let saved = "f:\n    li\tr999, #1\n    call\tf\n";
+        let mut sc = asm_scratch(saved).scratch.expect("builds");
+        assert_eq!(
+            sc.asm_status().total_steps,
+            Some(2 * 12_000 + 1),
+            "12,000 calls, and the `li` before the refused one"
+        );
+        run_copy_out(&mut sc);
+        assert_eq!(sc.asm_status().cap, Some(AsmCap::Mem));
+    }
+
     // --- the TM scratchpad -----------------------------------------------------------------------
 
     /// A hand-written unary incrementer with NO header — δ and a start state and nothing else, which is
@@ -3198,6 +3624,28 @@ state halt: accept
         assert_eq!(s.tm_text(), None);
     }
 
+    /// **A FUNCTION-VALUED PROGRAM'S TM LEG BUILDS — THE VIEW STILL SHOWS IT — BUT ITS TEXT IS
+    /// WITHHELD.** `|x| x + 1` types as `(Nat) -> Nat`; `tm_program` proves the leg is genuinely there
+    /// (unlike the declined-leg case above), and `tm_text` is `None` anyway because the header's
+    /// `result` would have to name that type, which `ty::is_decodable` refuses and `parse_tm_full`
+    /// would refuse to read back. `[]` (a free type variable, grounded to `Nat`) and an ordinary
+    /// program are the positive controls: both still get text.
+    #[test]
+    fn tm_text_is_none_for_a_function_valued_program_and_some_for_others() {
+        let fun = Session::compile("|x| x + 1", EncodingKind::Unary).session.expect("compiles");
+        assert!(fun.tm_program().is_ok(), "this fixture's TM leg must build for the test to mean anything");
+        assert_eq!(fun.tm_text(), None);
+        assert!(!fun.tm_result_decodable());
+
+        let var = Session::compile("[]", EncodingKind::Unary).session.expect("compiles");
+        assert!(var.tm_text().is_some(), "a free type variable is grounded to `Nat`, and still gets text");
+        assert!(var.tm_result_decodable());
+
+        let ord = Session::compile("let x = 40; x + 2", EncodingKind::Unary).session.expect("compiles");
+        assert!(ord.tm_text().is_some());
+        assert!(ord.tm_result_decodable());
+    }
+
     /// **`TmScratchStatus` HAS EXACTLY THESE FIVE FIELDS, AND A SIXTH FAILS TO COMPILE HERE.** The
     /// field this type exists in order NOT to have is `total_steps` — `Session::tm_status` reports one
     /// from the run `compile` performed, and a scratch is stepped rather than described-run, so any
@@ -3382,6 +3830,25 @@ state halt: accept
         assert_eq!(end.cap, tm::TM_DEFAULT_CAPS.steps, "a lowered file runs under the defaults");
         assert_eq!(got, s.tm_value().expect("TM available"));
         assert_eq!(got, Decoded::Value { text: "42".into() });
+    }
+
+    /// A TM copy of a program whose type has a free variable builds, and reads the program's value: the header
+    /// writes the variable as `Nat`, where `result List<t1>` was one the copy's own parser refused.
+    #[test]
+    fn a_tm_copy_of_a_polymorphic_program_builds_and_reads_its_value() {
+        for (src, header) in [("[]", "result List<Nat>\n"), ("[[]]", "result List<List<Nat>>\n")] {
+            let s = Session::compile(src, EncodingKind::Unary).session.expect("compiles");
+            assert_ne!(redextape_core::ty::ground(s.ty.clone()), s.ty, "{src}: the premise, a free variable");
+            let text = s.tm_text().expect("an available TM leg has text");
+            let made = tm_scratch(&text);
+            assert_eq!(made.diagnostics, Vec::new(), "{src}");
+            assert!(made.scratch.is_some(), "{src}: the copy builds");
+            assert!(text.contains(header), "{src}: the variable is written as `Nat`:\n{text}");
+            let (end, got) = run_out(&mut made.value.expect("an emitted file has a header"));
+            assert_eq!(end.run, RunStatus::Ended, "{src}");
+            assert_eq!(got, s.tm_value().expect("TM available"), "{src}");
+            assert_eq!(got, Decoded::Value { text: src.into() }, "{src}");
+        }
     }
 
     /// The recorded count is exact: at it the run accepts, and one fewer is the file's fault.

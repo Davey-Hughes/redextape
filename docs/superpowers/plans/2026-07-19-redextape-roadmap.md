@@ -20658,3 +20658,828 @@ link sentence. The four screenshots are kept outside the tree.
 | 12 of 12 exit 0 | the hygiene scans | `scripts/check-{text-bytes,citations,attributions,doc-figures,shared-docs,lua}.sh`, each `--self-test` then alone |
 | 162, 1,440; 96.58, 89.95, 97.5, 98.14 against 95, 89, 97, 97 | the web CI sequence: its files and tests; statements, branches, functions and lines against their floors | `pnpm run build:wasm && pnpm exec biome ci --error-on-warnings && pnpm run typecheck && pnpm run test:coverage && pnpm run build:app` |
 | 200; healthy | the image's status and health (the gate unit's own `curl` read port 8098, where it had not started the container, and got `000`; the status is from the image that run built, started by hand on port 8096) | the unit's `docker build -t redextape-check-5b-final .` and `docker inspect --format '{{.State.Health.Status}}'`; by hand, `docker run -d --name redextape-check-5b-final-c3 -p 8096:80 redextape-check-5b-final` and `curl -s -o /dev/null -w '%{http_code}' http://127.0.0.1:8096/` |
+
+#### PLAN 7 PART 5c, ASM COPIES: THE ASM VIEW EDITS A COPY OF THE PROGRAM, OR A BLANK ONE FROM THE COPIES MENU, IN AN EDITOR PART 3'S LANGUAGE SERVER SERVES, WHICH NOW MARKS A LABEL THAT NAMES NOTHING, IS DEFINED TWICE OR CANNOT BE WRITTEN BACK; THE WORKER BUILDS AND RECORDS THE COPY UNDER A BYTE CEILING AND CAPS EACH MEASURED BY A PROBE, AND THE COPY SURVIVES A RELOAD — AND THE PROTOTYPE FOUND TWO BUGS ON `main`, A TM COPY'S STATE ROWS PINNING THE PROGRAM'S CONSTRUCTS AND A TM VIEW MOVED OFF ITS COPY AND BACK LEFT WITH NO EDITOR; A TASK REVIEW FOUND A PIN STILL MARKING A COPY'S ROWS FROM THE OTHER SIDE, ON BOTH LEGS, AND ITS FIX FOUND THE PROGRAM'S RUNNING FOCUS MARKING THEM TOO; THE WHOLE-BRANCH REVIEW FOUND A MACHINE VIEW THAT COULD SHOW A COPY WITH NO EDITOR AND NO WAY TO GET ONE, WHICH THE CHECK BY HAND REACHED BY A SPLIT; AND A PROBE CONFIRMED ON `main` THAT A λ VIEW PICKING ANOTHER COPY WITHIN THE 300 MS DEBOUNCE WROTE WHAT HAD JUST BEEN TYPED INTO THE COPY IT PICKED — THE FINAL WAVE GAVE EVERY VIEW LEFT WITHOUT ONE AN EDITOR OR A WAY TO CLAIM ONE AND BOUND EACH EDITOR'S PENDING EDIT TO THE COPY IT WAS BUILT FOR, SO NEITHER GAP SURVIVED IT (2026-09-28, branch `plan7-part5c-asm-copies`, `e29df3c..2a3f15e`, 51 commits, plus this entry)
+
+**Part 5c of Plan 7** ([design](../specs/2026-09-27-plan7-part5-asm-design.md),
+[plan](2026-09-28-plan7-part5c-asm-copies.md)), the last of part 5's three PRs and its copies half. It touches
+`redextape-core`'s asm syntax and `redextape-lsp` (amendment 30), `redextape-wasm`, `redextape-cli`,
+`redextape-lsp-wasm` and `redextape-grammar-check` (the final wave's header grounding and the docs it made true, and
+a test in `redextape-native`'s own oracle), the README's counts of the wasm crate's exports and browser tests,
+`scripts/check-all.sh` and `scripts/check-doc-figures.sh`, and `web/`. The spec gained twenty-five amendments for it,
+22 to 46: nine from reading the code at `e29df3c` before the plan (22 to 30, of which 22 and 25 are the user's
+decisions), seven from the plan's prototype, also before the plan (31 to 37), seven more from executing the plan
+and its two fix waves (38 to 44, of which all but 39 and 40 are the user's or the human's decisions), and one more
+each from the final wave's ceiling correction and its third round (45 and 46, each the human's decision). Amendment 36
+was rewritten once, when replaying the plan put the ceiling lower (`0256926`), reworded again by the final wave's
+own docs sweep to name the run its cost probe adds rather than call it "the longest" (`f8e2f09`, which also
+corrected §7's `CopyLeg` sentence), and marked superseded a third time by the final wave's ceiling correction,
+amendment 45 (`f9c2eb5`). Amendment 44 was corrected once, when fix round 4's own report found it still named
+`is_decodable` where `636fc16` had already moved `emit_tm` and `Session::tm_text` onto `is_decodable_ground`, and
+the controller reworded it in place (`2a3f15e`). Nine of the commits touch only `docs/`: the three amendment
+commits from before the plan, the plan itself, three more amendment commits from executing it, and two more from
+the final wave's fourth fix round, the plan alone 5,344 of the branch's 12,747 added lines.
+
+**The user's decisions:** before the plan (2026-09-28), a copy marks a label that names nothing or is defined twice
+and refuses to run it, over running such text with the cursor's lazy faults and over a refusal shown only in the
+view's status (amendment 22), and a copy's worker is held to a peak of 256 MiB (amendment 25); for executing, to do
+"as much in parallel as possible", which became the six lanes below; after Tasks 3 and 4's reviews, each Important
+as recommended — a copy's rows mark nothing on either leg, the asm and TM views share one copy-editor part, the forks
+share one helper and their claims one wrapper, and Task 3's two; after the whole-branch review, the probe and the
+check by hand, the final wave's four, below; after the final wave's own Rust concern, that a function-valued
+program's TM file is refused up front, as asm's already is (amendment 44); after the ceiling measurement, to lower
+it to 5,200,000 and have its cost probe price every run its memory probe knows (amendment 45); and after the second
+check by hand, that a copy's row names its worker only when paused (amendment 46), and that a TM copy's value
+reaches its footer readout as it arrives.
+
+##### WHAT PART 5c BUILT
+
+- **asm marks a label mistake, and the language server shows it** (amendments 22 and 31). `asm_label_diagnostics`,
+  in core beside the parser, is `Program::validate`'s label checks with spans, read off the name index
+  `parse_asm_nav` already builds: an error at a reference that resolves to no label, at a definition after a label's
+  first, and at a definition whose name the printer cannot write back, "a label name cannot contain whitespace, `:`
+  or `,`". The parser's own contract is unchanged, and so are the tests that hold it. A property test holds the
+  marks' count to `validate`'s complaints over random files, a register over `MAX_REGISTERS` aside: it has no name
+  to mark, and the cursor faults on it at step 0. `redextape-lsp`'s asm diagnostics are the parse's plus these, so
+  Neovim gains them too. A round trip over `lower_program`'s output — `defunc` included, which nothing reached
+  before — finds nothing to mark in the text `asm_roundtrip.rs`'s `DEMOS` and two programs `defunc` rewrites print
+  to, which between them reach all 16 instruction variants.
+- **The wasm session prints its asm, and a copy runs text** (amendments 24 and 26). `Session.asmText()` prints the
+  program the asm cursor runs, `defunc` included, headed by `result <type>` when a header can name the type; a
+  function type gets none, and a free type variable grounds to `Nat`, so `[]`'s header reads `result List<Nat>`
+  (amendment 43, from the final wave's R1). `asmScratch(src)` refuses what `redextape run` refuses — a
+  parse error, or a label mistake — and runs the rest to its end as `compile` does, so its status is `AsmStatus`
+  itself, carrying the step total, and its value comes with the build: decoded by the header's type, or the raw `rr`
+  word marked "(no result type)" without one. A copy holds the asm leg in an `AsmLeg`, as the session does, and
+  answers the asm leg's six methods; it passes no source map, so `source_node` is null. A register over the cap and
+  an empty program each fault at step 0.
+- **The worker builds and records an asm copy** (amendments 23, 27, 34 and 37). The `asm-scratch` request builds an
+  `AsmScratch` and records its run through the asm leg's own recording; its reply, `asm-scratch-compiled`, carries
+  the status, the listing and the value, and a `[continue]` on a copy posts `asm-value`, since a copy gets no
+  `result`. `compiled` carries the program's asm text as `asmText`, `null` over the ceiling. `legs.ts`'s `CopyLeg`
+  is deleted rather than widened, since widened it would be all of `Leg` under a second name: a copy's leg is any
+  `Leg`, and `tsc` named the four switches over one that needed an asm arm. The copies collection mints, rebuilds and
+  warms an asm copy with its own request, and the store accepts one with `BUFFERS_VERSION` still 2. A failed build is
+  judged by the copy's own leg, where every copy was read by its λ leg, which fixes a TM copy: each unparseable edit
+  to one that had built was reported as a failed build, in a notice.
+- **The asm view edits a copy** (amendments 28, 33 and 35). *Edit a copy* in the asm view's `⋯` menu, "the whole
+  program", is ready, disabled with its reason when the program's text is over the ceiling, or absent when the asm
+  leg is declined or the view shows a copy. The view then shows the copy as the TM view shows a TM copy: the text
+  panel first, its editor in `redextape_asm`, so diagnostics with the label marks, format, hover, outline and colour
+  come from part 3; a value line by the TM copy's rule — `value: 6`, `fault: head of empty list at pc1`,
+  `42 (no result type)` — and no status line; the listing, the registers beside the call stack, the heap; and an
+  outline of its labels. `⋯` gains *format* while the view holds an editor. `seedAsm` (`asm-seed.ts`) tells an asm
+  view what it needs of its session: the listing, whether it can be copied, a copy's value. A copy survives a
+  reload, on its leg. A TM or asm view destroys the editor it leaves, and the view that comes back mounts a fresh
+  one from the copy's text. Since fix round 1 both views hold a copy's editor through one part, `CopyEditor`
+  (`copy-editor.ts`); λ's, TM's and asm's *edit a copy* fork through `transport.ts`'s `forkCopy`, and their claims
+  through `pane-host.ts`'s `claiming`.
+- **A copy's rows link nothing and are marked by nothing** (amendment 32, and fix round 1). A click on a row in a TM
+  or asm copy returns before it reaches the program's link index, which numbers the program's states and
+  instructions, not the copy's. The other way, a pin — from the source or from a view of the program — marks no row
+  in a view showing a copy, whether it arrives through `link-wiring.ts`'s fan-out or through `draw.ts`'s re-applied
+  pin for a view seeded when it is shown, as the λ view's guard already did; and the program's running focus marks
+  none either.
+- **A blank asm copy, and the readout** (amendments 28 and 29). The copies menu offers *new asm copy* beside *new TM copy*;
+  an asm view's title then offers the copy, whose empty program parses and faults on its first fetch, "ran past end
+  of program at pc0", until something is typed. An asm copy's readout line moved into `readout.ts` beside λ's and
+  TM's: its name, its instructions, why its recording stopped, and its value as its view reads it. A step count of
+  one reads in the singular, in the result rows and the copy lines alike, where it read "1 reductions",
+  "1 transitions" and "1 instructions".
+- **Two bounds, each measured by a probe** (amendments 24, 25, 36 and 45). `MAX_SCRATCH_ASM_BYTES`, 5,200,000, refuses
+  longer text before parsing it, and `asmText` hands out none longer. `COPY_CAPS` is `DEFAULT_CAPS` with 2,000,000
+  heap cells and 12,000,000 saved words, and a copy runs under it; the program's own session keeps `DEFAULT_CAPS`.
+  `asm-copy-cost.test.ts` prices a build's four costs by the size of its text — the clone to the worker,
+  `asmScratch`, reading the reply off the handle, the clone back — with every run the memory probe knows priced
+  apart and the heaviest added, not the loop alone. `asm-copy-memory.test.ts` builds each worst case in a worker of its own and reads the worker's memory. Both run
+  from `web`'s `test:probe:asm-copy`, outside the default test set, on a build with the `probe-asm-copy` feature,
+  which switches the ceiling off and adds `asmScratchWithCaps` in a module of its own; `check-all.sh` gains the
+  feature's clippy and test legs. The figures are below.
+
+- **A view showing a copy always has an editor, or a control to get one** (amendment 40). `pane-host.ts`'s TM and
+  asm creation arms call `mountScratchEditor`, as λ's already did, so a split, a `+ view`, a cross-leg pick, `reset
+  preset` and a restore of a copy whose stored text does not build all mount one; the drop pass and the same-leg
+  arm remount on the first remaining view of a copy once they take its editor away, and `moveBack` mounts on the
+  view it restores. Where the copy's editor already lives in another view, the two share it instead of building a
+  second one, through the *move the editor here* claim the λ view already offered, now on every leg.
+- **A pending edit reaches the copy it was typed for, on every route** (amendment 41). An editor's edit sink is
+  bound once, to the copy it was built for, and never re-pointed, so a same-leg pick inside the 300 ms debounce no
+  longer writes what was just typed into the copy just picked; `ScratchEditor.destroy()` sends a pending edit
+  before it tears down rather than cancelling it, and `flush()` also sends an edit a format in flight is still
+  carrying, so the delete and pause handlers, which flush before reading a copy's record, no longer lose the
+  keystroke a format raced.
+- **Each leg's running focus comes from a view of the program, never a copy's** (amendment 39). `PaneCollection`'s
+  `active(leg, accept)` answers the most recently focused view the caller admits, and `draw.ts` asks it for each of
+  the three running focuses and the λ link clause with a filter admitting only a view whose session is not
+  detached, so a copy's view focused last no longer blanks the program's own marks in every other view of the leg.
+- **Four things the check by hand found on `main` too, closed together**, three of them amendment 42: a Stage tab's
+  label follows its view's title every frame, not only the frame it was created on; the copies menu's row for a
+  machine copy says what its own readout says of its run — `5 instructions · value: 42` — rather than "no term yet";
+  the header keeps the title on one row with the new-copy buttons styled and given a gap, in no amendment; and
+  `reset preset` rebuilds a view still showing a copy onto the program in its second pass, its status note naming
+  every view of every leg that shows a copy, by title where a leg has more than one.
+- **A free type variable is written `Nat`, in asm and TM headers alike, in the session and the CLI** (amendment
+  43). `[]`'s type printed as `List<t1>`, a header line neither reader accepts, so an asm copy of `[]` got no
+  header and, on `main` too, a TM copy of `[]` or `[[]]` never built; `ty::ground` grounds every `Ty::Var` to
+  `Ty::Nat`, under `List` and inside `Fun` too, and `AsmHeader::for_type` and `describe_at` both ground before
+  naming a header's type.
+- **A function-valued program has no TM file** (amendment 44), on `main` too: `emit --lang tm` of a function wrote
+  a `result (Nat) -> Nat` line its own reader refuses. `ty::is_decodable` is the round-trip check
+  `AsmHeader::for_type` already ran, pulled out as the one predicate a header writer asks, and
+  `ty::is_decodable_ground` its form for a type already grounded, which `emit_tm` and `Session::tm_text` ask since
+  each grounds the type once itself; `emit_tm` asks it up front, naming the grounded type, and the TM view's *edit a
+  copy* is disabled with that reason, as asm already gives no header for a function type — the leg itself still
+  builds and runs the program, only the emitted file's or a fork's text is refused.
+- **The ceiling is 5,200,000, and its cost probe prices every run its memory probe knows** (amendment 45).
+  Re-running the probe three times on a quiet machine found `both` — a heap filled to its cap, then locals saved —
+  heavier than the loop to the step cap in every run, and 5,400,000 over the 250 ms budget in two of them once
+  `both` was priced in; the ceiling is lowered and the cost probe now adds whichever run comes out heaviest to
+  every size's total, so the rule and the measurement can never again name different runs.
+- **A copy's row in the copies menu names its worker only when it is paused** (amendment 46). Part 2's design gave
+  the row "*running* or *paused*" opposite whether the copy holds a worker, so a halted copy's own `value: 42` sat
+  beside a `running` that read as the machine still executing; `buffer-list.ts` now appends the word only when the
+  row is cold, on every leg alike. Amendment 46's own trailing citation, written pointing at this spec's §7, was
+  corrected to point at part 2's §10, the section it actually corrects (fix round 4, `7f698e6`).
+- **A TM copy's value reaches the footer readout as it arrives, on `main` too, coalesced to one draw per frame.**
+  `replies.ts`'s `tm-value` arm updated the copy's own value line but never called `draw()`, so the footer's copy of
+  the same fact lagged until something else redrew it; it first called `draw()` unconditionally, as `asm-value`'s
+  arm already did (fix round 3), then — once the re-review found that fix's own comment overclaiming what `draw()`
+  repaints, and its per-chunk `draw()` wanting the coalescing the brief had asked for — gained an injectable `frame`
+  dependency (`player.ts`'s own pattern) and a pending-frame flag shared across every session and copy, so a burst
+  of `Running` chunks draws once per frame and the ending reply still flushes at once (fix round 4, `d3ccbbb`).
+- **Docs and a colour test the branch had made false say what is true.** The asm and TM ceiling's Rust docs, the
+  caps' spelling, `AsmLeg`'s and `AsmScratch`'s method counts, the built wasm's asm-ceiling sentence, the language
+  server's own "no editor" claim, `colour.ts`'s ceiling comparison, and the "three editors"/"λ and TM copy editors"
+  sentences across `web/` all say what is true now, and a new browser test checks an asm copy's editor for the asm
+  grammar's `Mnemonic` colour, as the TM one already was; and, after fix round 3's own double-grounding fix
+  (`636fc16`) made them false, `ty::is_decodable`'s and `AsmHeader::for_type`'s own docs name the three callers that
+  ground first and ask `is_decodable_ground` instead (fix round 4, `7767239`).
+
+##### THE PLAN WAS BUILT AND REPLAYED BEFORE IT WAS HANDED OUT
+
+Every task was built, gated and sabotaged in a scratch worktree off `364f386`, the spec's amendments 22 to 30, before
+the plan was written, and the plan's code blocks are that prototype's patches. The plan was then rebuilt task by task
+from its own blocks on a fresh worktree at `0256926`, which differs from `364f386` only in `docs/`: 6 trees of 6
+identical to the prototype's, `docs/` aside, every red and green step as written, and **66 of 66 sabotages fired** on
+the test each was aimed at. What the prototype found, each answered in the plan's code before any task ran:
+
+1. **Amendment 22 was wrong about names** (amendment 31). It said `validate`'s check of a name the printer cannot
+   write back could not come from parsed text; the parser reads `jmp\ttarget:` and `x,y:` as labels, and
+   `asm_roundtrip.rs` already pinned such a case. The label check marks them too.
+2. **A TM copy's state rows linked the program's constructs, on `main`** (amendment 32). Amendment 28 left a check by
+   a real click to the plan: a click on a TM copy's `wl1s2` row pinned `40` in the source, and on its `pc1` row `x`,
+   through the program's link index. Both views' row handlers return for a copy.
+3. **A TM view moved off its copy and back had no editor, on `main`** (amendment 33), found writing the asm view's
+   test for the same gesture: the same-leg rebind held the editor it left for a claim control only λ views offer,
+   and a view arriving at a copy mounts nothing while an editor is held for it. A TM or asm view destroys the editor
+   it leaves.
+4. **A copy's `[continue]` needed a reply of its own**, `asm-value`, since a copy gets no `result` (amendment 34).
+5. **The value line needed the TM copy's rule**: the first draft wrote `value: fault: …` (amendment 35).
+6. **A copy's worst case for memory is the two caps together** (amendment 36): a heap filled to its cap and then a
+   million-word locals bank saved by every `call` reached 168.4 MiB under the caps chosen, saved locals alone 133.1
+   and heap cells alone 72.5. A `cons` a step under a loop hit the step cap before the heap cap, so the probe unrolls
+   a hundred to a jump.
+7. **The ceiling's first boundary test could not fail**: it built its over-the-ceiling text by prefixing a label
+   mistake to the at-the-ceiling one, 13 bytes over, so a ceiling admitting one byte more passed. The boundary is
+   `MAX_SCRATCH_ASM_BYTES + 1` exactly, and "refused unparsed" is its own assertion.
+8. **Two sabotages could not fire, and neither is in a table.** A value clear in `AsmPane.setDetached`, the TM
+   view's "second line", repeated a clear `seedAsm` already makes, so it was removed. The drop pass's destroy of a
+   closed asm view's editor is held by no test, nor is the TM view's: removing the TM one left 733 of 733 browser
+   tests green. It stays, as the TM view's does (below).
+9. **The asm view's CSS would have shown its hidden panels**: `.asm-pane > .panel[data-open="true"]` gave
+   `display: flex` to the text and outline panels a view of the program hides, outranking `[hidden]`. The rules name
+   their panels, and `hidden.test.ts` catches the outline's case.
+10. **Every leg's step count read "1 reductions" for one step**, not only asm's (amendment 29).
+11. **Two hygiene gates refused three of the prototype's commits**, each over a claim the change had made stale:
+    `check-doc-figures.sh` on the README's export and browser-test counts and `tapeNames`' ordinal;
+    `check-attributions.sh` on `draw.ts` citing `legs.ts`'s deleted `CopyLeg`, and on `tm-blank-buffer-cap.test.ts`
+    citing `buffer-list.ts`'s renamed `onNewTm`.
+12. **A copy in a half-height view puts its listing below the fold**: in the default tree at 1280×800 the editor
+    takes the top of the asm view, and the listing is reached by scrolling the view or collapsing the text panel, as
+    a TM copy's tapes are. Seen by hand, not changed.
+
+Replaying the plan found four things more, fixed before it was committed: the reload test passed in Task 5's red
+step, since a reloaded asm copy needs Task 3's store and Task 4's gesture and nothing of Task 5's, so it moved to Task
+4, whose red step it fails; the probe's second run had 5,600,025 bytes over the budget at 250.8 ms, where the
+prototype's run had them under at 247.3 ms, so 5,700,000, the ceiling the first run gave, would have been over, and
+the ceiling became the largest size under budget in both runs, 5,400,000 (amendment 36, rewritten in `0256926`); five
+runs of the probe during the replays each kept 5,400,000 bytes under the 250 ms, two of them putting 5,600,025 over,
+at 250.8 and 251.8 ms, with the memory figures the same to the tenth of a MiB in each; and nothing tested hover in a
+copy's editor, which the spec's §9 asks for beside diagnostics, format and outline — Task 4 tests it now, and a
+sabotage that builds the copy's editor with no language server fails it.
+
+##### WHAT EXECUTING THE PLAN FOUND
+
+**Six lanes at once, on scaffold commits.** The user asked for as much in parallel as possible, so the six tasks ran
+at once: Task 1 in the main checkout on the branch, and Tasks 2 to 6 each in a worktree of its own, on a lane branch
+based on a scaffold commit whose tree was the plan's commit plus the prototype's diff of the tasks before it, each
+scaffold checked equal to its prototype commit outside `docs/` (`7440298`, `947c322`, `f4d26a0`, `a6fc621`,
+`54a0e6f`, and `d4a511b` after Task 6). A scaffold never lands. Each worktree had its own `CARGO_TARGET_DIR` and its
+own `web/node_modules`, a real install rather than a symlink, and each browser suite in each lane ran under one shared
+`flock`. The implementers cut each task's two patches from their briefs with a script rather than retyping them and
+applied each after `git apply --check`; a sabotage runner held each task's table, took the browser lock itself when a
+case started a browser, restored each file byte for byte, and cleared what a case left behind, such as the
+`proptest-regressions` directory Task 1's first four cases wrote.
+
+**Each lane's commit matched its prototype.** The six trees were identical to their prototype commits outside
+`docs/`, before the sabotages and after; each red and green step's summary was the plan's *Expected*, Task 2's red
+step adding four errors from the wasm crate's browser test binary that the block does not transcribe; and 66 of 66
+sabotages fired again: 7, 10, 17, 17, 8 and 7. Their counts are below. Task 6's probe, whose timings the plan says
+move from run to run, was run under the other lanes' load: it read the memory the plan records, to the tenth of a
+MiB, and put 5,400,000 bytes under the budget at 242.8 ms with its worst run, its bracket moving to 5,600,025 bytes
+under at 248.7 ms and 5,800,050 over at 262.3 ms. The six task reviews read the scaffold ranges, which are the
+prototype's trees, and ran alongside the implementers; a review applied to a lane's commit once that commit's tree
+equalled its scaffold's, and each did. The lane commits were then cherry-picked in order — Task 1's `518c399` in
+place, then `49838c6` as `29df134`, `b49ac30` as `a650a23`, `41ecf8b` as `301bfcf`, `5a9d086` as `6ea42dd` and
+`8d89665` as `4928a0f` — and the branch's tree equalled the last scaffold's, and the prototype's `79c176d`, outside
+`docs/`.
+
+**Tasks 1, 2, 5 and 6's reviews approved them**, with no Critical or Important finding, and their Minors went to the
+whole-branch review. The first of Task 2's was a design call: a program whose result type has a free type variable —
+`[]`, `nil`, `[[]]`, typed `List<tN>` — gets no header, since `ty::show` prints a type `ty::parse_ty` refuses, so a
+copy of `[]` read `0 (no result type)` where the program read `[]`; the CLI's `emit --lang asm` has the same rule.
+
+**Task 3's review: "needs fixes", two Importants in the plan's own code.** `noSessionReply`'s doc still said the
+discriminator reads the λ leg unconditionally, and recorded the TM copy's false notice as live — the bug the task had
+just fixed; and `worker.test.ts`'s `askUntil` repeated `askAll` line for line. Two of its flags held across tasks:
+after Task 6's ceiling the docs of `compiled.asmText` and of the worker still said `null` meant only "no asm leg",
+and `link-status.test.ts` still said no asm view shows a copy until part 5c, a sentence no task touched.
+
+**Task 4's review: "needs fixes", a gap against the spec and two Importants in the plan's code.** The gap: a pin made
+in the source still reached a copy's rows, since `link-wiring.ts` fanned the program's instruction indices out to each
+asm view and `draw.ts` re-applied the pin to a seeded view, with no `detached` guard where the λ view has one —
+amendment 32's mis-reading, inbound, and on `main` for TM. The Importants: `AsmPane` copied `TmPane`'s copy-editor
+machinery verbatim, and `transport.ts`'s `detachAsm` repeated `detachMachine` line for line, dropping its
+comments on why its catch is narrow and why a refusal moves no count, beside a repeated claim wrapper in
+`pane-host.ts`. Two of its Minors came back later: destroying the editor a view leaves drops up to 300 ms of pending
+typing, and a cross-leg pick onto an asm copy mounts no editor.
+
+**The user decided all four as recommended, and fix round 1 made them**, in `web/` alone, on top of the stitched
+branch:
+
+- `9068896`: a view whose session is detached gets no rows from the fan-out or from the re-applied pin, on either
+  leg. `copy-pin.test.ts` pins with real gestures, on the page and, in Stage, off it; each of its four sabotages
+  failed its case. With `bf9e5fa`'s two it holds five tests, and `copy-editor.test.ts` two.
+- `66e5546`: `CopyEditor` owns a copy's editor host and text panel, its outline, and the facts behind *format* and
+  *edit a copy*; the TM view's status clear rides an `onUnmount` hook, the too-large reason takes the view's noun, and
+  `TmPane`'s comments on its review-round fixes moved with the code. `copy-editor.test.ts` holds two behaviours no
+  view's test reached. The round's first two passes of its sabotage table were void — one used an invalid vitest
+  flag, one passed the file list as a single zsh word — and each run in them reported nothing; the table is the third
+  pass's, whose baseline and each run printed a `Tests` line.
+- `82b8781`: `forkCopy` is the one body behind `detach`, `detachMachine` and `detachAsm` — λ's folded in too, whose
+  comments were the fullest copy — and `claiming` wraps each leg's fork with the claim. Sabotaged to claim even when
+  the binding did not move, `claiming` failed nothing in nine files and 55 tests: a refused fork leaves the view on
+  the source session, where a claim names no editor. The three wrappers it replaced had the same gap.
+- `2cae7c5`: the docs, and `onRun`'s guard on `asmText` dropped, since it cannot throw. `asm-copy.test.ts` had
+  asserted `copy.length > 0` of a split whose length is never 0; it asserts on the copy's key, and a sabotage the old
+  assertion passed now fails it.
+- `bf9e5fa`, beyond the brief: `draw.ts` also handed the program's running focus, at the program's indices, to each
+  machine view on the page, a copy's included. The test was red on both legs before the guard — an asm copy's view
+  marked `pc0` beside a view of the program restarted to step 0, and a TM copy's painted a focus row beside a program
+  view at step 2,869 — and the controller kept it, as the same class as the user's "a copy's rows mark nothing".
+
+Node tests stayed at 747 and browser tests went from 741 to 748, over 22 files changed, +973/−689. The pre-commit hook
+refused two of the round's commits once each — `editor-custody.ts` citing `pane-host.ts`'s `detachMachine`, which the
+round had turned from a declaration into a `claiming`-wrapped handler, and a possessive citation of a call beside an
+unformatted line — and both were fixed and recommitted. Its re-review approved it with no Critical or Important,
+judged `bf9e5fa` justified, and diffed the moved bodies statement for statement against `TmPane`'s originals; its
+Minors went to the final wave. The round left three Rust docs the ceiling had made false —
+`Session::asm_text`'s, the `asmText` binding's and `asmScratch`'s — since it touched no Rust.
+
+##### WHAT THE WHOLE-BRANCH REVIEW FOUND
+
+The whole-branch review read `e29df3c..bf9e5fa`, the plan file excluded, while fix round 1's re-review, the web gates
+and the check by hand ran. It returned "with fixes": no Critical, two Important findings, and a triage of the
+ledger's Minors.
+
+- **Important: a TM or asm view could show a copy with no editor and no control to get one.** `pane-host.ts`'s λ
+  creation arm calls `mountScratchEditor`, and its TM and asm arms did not, so a machine view's editor came only from
+  a same-leg pick or a build reply. The routes: a reload or warm of a copy whose stored text does not build — ordinary
+  for asm, whose label check refuses the whole text (a real case is `jmp\tnowhere`, naming a label nothing defines), and the
+  user got a notice and a view reading `building…` with no editor, against §8's "Diagnostics in its editor"; a
+  cross-leg pick onto a copy; and closing the view that holds the editor while a split shows the same copy. The TM
+  half is on `main`.
+- **Important: docs the branch had made false**, beyond fix round 1's sweep of `web/`: the language server's wasm
+  crate saying asm has no editor until part 5, and a test named for no editor mounting it; `lsp-protocol.ts`,
+  `colour.ts` and its node test ("four once part 5 adds an asm editor"); `colour.test.ts`'s "Three editors" and the
+  row it now owes, since nothing checked that an asm copy's editor is coloured by the asm grammar; `spans.ts`,
+  `app.test.ts`, `highlight.ts` and the README's "λ and TM copy editors"; `COLOUR_CEILING_UNITS` called the session
+  buffer ceiling's number, which is TM's 6,100,000 where asm's is 5,400,000; `onScratchReply`'s "an arm for every
+  kind" listing λ's and TM's; the three Rust ceiling docs; `lib.rs`'s "Four drop the `Result`" and `AsmLeg`'s "six
+  answers"; and the spec's §7 still widening `CopyLeg`, against amendment 37.
+- **Minors.** "The longest run a copy can take", said of the cost probe's loop, about 31 ms, in `session.rs`, the
+  cost probe and the spec, is contradicted by the memory probe's own build of 40.3 ms under both copy caps: name the
+  value. `wasm-vocabulary.test.ts` checks the TM ceiling's sentence in the built wasm and not asm's. A live edit over
+  the ceiling is silent, as a TM copy's is on `main` (can wait). The polymorphic header: fix the doc now, and the
+  behaviour is the user's call. Destroying a machine view's editor drops up to 300 ms of typing (can wait). Test gaps
+  (can wait): `moveBack`'s asm arm, the outline's state restored, `[continue]` end to end, `claiming`'s negative
+  branch, and `replies.test.ts`'s `as RunReply` cast. Nits: task numbers in `editor-custody.ts` and
+  `buffer-list.ts`, `draw.ts`'s identical leg literals, the `COPY_CAPS` spelling, and `asm-pane.ts`'s `setDetached`
+  doc saying every route seeds through `seedAsm`, which a fork does not.
+- **The triage:** fix before merge the doc of Task 2's first Minor, its second and third, the three Rust ceiling
+  docs, and Task 4's cross-leg pick, inside the first Important; the rest can wait or was done.
+
+**A recommendation outside the branch, which a probe confirmed on `main`.** The review suspected, without running it,
+that on a λ copy a same-leg pick within 300 ms of typing rebuilds copy A's text into copy B. A probe typed into λ copy
+A through the real app and picked copy B through the same view's title, with a measured gap of 8.9 to 9.4 ms: in 4 of
+4 runs A's typed term landed in B's editor and B's stored text, and A kept its old text, the edit never reaching it; a
+control with a 1,010 ms gap passed each time. `LambdaPane` fixes its `onEdit` at construction, `transport.ts`'s
+`editScratch` reads the view's session when the debounce fires, and the same-leg rebind holds the leaving editor
+without cancelling or flushing its pending edit. The bug is on `main`: `scratch-editor.ts` and `lambda-pane.ts` are
+byte-identical at `e29df3c` and `bf9e5fa`, and the same-leg arm runs the same hold for a λ copy at both. It is the
+class of the review's 300 ms Minor: on this branch a machine view drops the edit, where a λ view sends it to the
+wrong copy.
+
+##### WHAT THE CHECK BY HAND FOUND
+
+The check (below, under VERIFICATION) found fix round 1's guard holding in each of the three presets, light and dark:
+with a copy's view beside the program's, the copy's rows never carried a pin's or the running focus's mark, with the
+same row indices on screen beside the program's marked ones. It found the half-height listing below the fold, as the
+plan knew, and nine things that read wrong:
+
+1. **A copy's view opened by *split* or *+ view* had no editor and nothing to fetch one**, on asm and TM, in each
+   preset — the whole-branch review's first Important, by a route it had not named. The only way back the check
+   found was to pick another binding in the view's title and then the copy again.
+2. **In Stage, a tab kept its old label after its view changed binding**, until another tab was selected; λ and TM
+   too, on `main`.
+3. **The program's asm view lost its running-focus marks whenever a copy's view was the last asm view focused**,
+   since `draw.ts` took the focus from `panes.active('asm')` — in Stage even while the program's tab was the one shown
+   and stepped. TM takes its focus the same way.
+4. **The copies menu read "no term yet", and "· running", under asm and TM copies that had halted with a value**;
+   TM's on `main`.
+5. ***reset preset* said the default views were back while views still showed copies**, on each leg.
+6. **The note "… shows a copy — not linked to the program" named legs by each leg's active view**, so with two asm
+   views it could leave out the asm copy on screen, and its "asm view shows a copy" did not say which of the two.
+7. ***new asm copy* and *new TM copy* were unstyled native buttons, touching**; `.new-tm` had no rule on `main`.
+8. **The `copy · not linked` badge wrapped a copy view's header** onto a second row where the program's view of the
+   same width fits one, costing about 30 px in a half-height view.
+9. **The copy's editor read unevenly beside its listing**, cosmetic: the formatter's tab after a mnemonic leaves the
+   operand column ragged, and the editor mutes the mnemonic where the listing below makes it bold.
+
+##### THE FINAL FIX WAVE
+
+**The user decided the final wave** from the review, the probe and the check: fix the debounce class on each leg in
+this branch, flushing a pending edit to the session it was typed for before any rebind or destroy; take each leg's
+running focus from the most recently focused view of the program; fix all four of the check's items that `main`
+shares — the Stage tab, the copies menu's words for a machine copy, the header's wrap with the new-copy buttons, and
+*reset preset* with the not-linked note; and write a free type variable as `Nat` in the asm header, in
+the session and the CLI alike, since a closed value of type `List<t>` holds no `t`.
+
+Three fixers were dispatched at once off `bf9e5fa`, each in its own checkout, their commits to be cherry-picked onto
+the branch:
+
+- **Rust**, in lane t2's worktree on `fix5c-rust`: one function grounding free type variables to `Nat` for the
+  session's header and the CLI's, with `[]` and a nested case added to the test that runs a copy of the program's
+  text as the program; the docs the review listed in `crates/`, and the asm leg's caps spelled
+  `tm::asm::DEFAULT_CAPS`; "the longest run a copy can take" replaced by its values in `session.rs`, the cost probe
+  and the spec; §7's `CopyLeg` sentence; and the asm ceiling's sentence in `wasm-vocabulary.test.ts`.
+- **A copy's editor**, in the main checkout: a TM or asm view showing a copy whose editor is mounted nowhere mounts
+  one, in the creation arms and on a surviving view after the drop pass destroys a closed one's, with what a split
+  shows when the editor is mounted in another machine view left to the fixer under the umbrella's §4 rules; each
+  route that rebinds a view or destroys a copy's editor flushes its pending edit first, starting from the probe's
+  test; and the re-review's Minors in that code — `CopyEditor`'s `implements` rationale and its two `text`s,
+  `forkCopy`'s redundant `leg`, `editor-custody.ts`'s width and task labels, `copy-pin.test.ts`'s missing positive
+  control, `setDetached`'s `seedAsm` doc, and a test for `claiming`'s negative branch if one can see it.
+- **UI and docs**, in lane t5's worktree on `fix5c-ui`: the running focus, the Stage tab, the copies menu's words in
+  the readout's own, the header on one row and the new-copy buttons styled with a gap, *reset preset* restoring the
+  default views unless keeping bindings proves a documented choice, the not-linked note naming each leg with a view on
+  a copy, and the web and README docs the review listed, with the asm row `colour.test.ts` owes, sabotaged by handing
+  an asm copy's editor TM's grammar.
+
+**Rust** (`278e9a0`..`25a0361`, cherry-picked from `090476e`..`2c4b028` on lane t2). `ty::ground` grounds every
+`Ty::Var` to `Ty::Nat`; `AsmHeader::for_type` is the one function every asm header writer calls, and a sibling
+search found a third writer, `redextape-grammar-check`'s `printed_program_with_header`, switched to it, and
+`redextape-native`'s `aot_oracle.rs`'s own `concretize` deleted in `ty::ground`'s favour. Beyond the brief's letter, on the
+fixer's own reading of the decision ("in the session and the CLI alike"): `redextape-core`'s `describe_at`, the one
+place a program's type becomes a `TmHeader`, grounds too, since `emit --lang tm` of `[]` wrote a `result List<t1>`
+line `run` itself refuses — on `main`. Nine sabotages fired, none by a crash. `cargo nextest` went from 1,889 to
+1,893 passed (+5 new, −1 replaced — the CLI's own polymorphic-header test, pre-existing, written against
+the behaviour just decided against); node stayed at 747, browser at 748 in 114 files, neither gaining a test.
+Sibling searches for `parse_ty(&…show(…))`, `AsmHeader { result`, `Ty::Var` and every wrong-count doc sentence
+(`Three of the five`, `Four drop`, `six answers`) each came back with no unfixed site left, only the sites already
+fixed and unrelated matches (a round-trip test, a refusing `serialize_ty`, a fixture). Left as a concern,
+not fixed: the ceiling's margin, since the second cost run's 242.5 ms, with the memory probe's 40.3 ms build in
+place of the loop's 31 ms, comes to about 251.8 ms, over the 250 ms budget — the controller's own later ceiling
+measurement, below.
+
+**A copy's editor lifecycle** (`bf9e5fa`..`278e9a0`, main checkout). E2 first, since E1's remount relies on it — an
+edit's sink is bound once, to the copy an editor is built for, never re-pointed, so a same-leg pick inside the
+debounce rebuilds the copy typed into rather than its neighbour, and `ScratchEditor.destroy()` sends a pending edit
+instead of cancelling it, and `format()` sends the edit it took off the timer once it finds the editor destroyed.
+E1: the TM and asm creation arms mount an editor as λ's already did, `mountOnViewOf` remounts on a surviving view once the drop pass or the
+same-leg arm takes one away, and `moveBack` mounts on the view it restores; where a copy's editor already lives in
+another view, the two share it through the *move the editor here* claim, now on every leg — the choice the brief
+left open, over a note naming the other view, since it is an action rather than a sentence and the control users
+already know. E3 tidied names, a fork's redundant `leg` parameter, docs, and `copy-pin.test.ts`'s missing positive
+control; `claiming`'s negative branch stayed untested on the fixer's own evidence — with the check removed,
+`sessions.test.ts` and ten browser files, 84 tests, passed unchanged, since a fork is offered only on a view of the
+program, so `before` never names anything but the program's session. Fifteen new app-level tests, run against
+`bf9e5fa`'s unmodified `web/src`, all fifteen failed, each at its own behaviour wait or assertion. Node went from
+747 to 748, browser from 748 to 769 in 116 files. `NO_TEXT.lambda` was kept, on the fixer's own reading of
+`Record<Leg, string>`'s own exhaustiveness doc: a leg added to `Leg` is a type error here until it names its fork
+handler.
+
+**UI and docs** (`25a0361`..`bec75f0`, cherry-picked from `6d6888d`..`bffce3c` on lane t5). U1 replaced
+`PaneCollection`'s per-leg last-marked pane with a focus order, admitting only a view of the program for each
+running focus and the λ link clause; U2 retitles every Stage tab from its view's title each frame; U3 splits a
+machine copy's facts from its name so the copies menu's row reuses the same strip a view's own status and value
+lines build; U4 lets the header's heading grow to its own width before the badge gives, fixing a proportional-shrink
+bug found along the way — a title cut short with room to spare; U5 rebuilds a view still on a copy onto the program
+in `reset preset`'s second pass, chose to restore rather than reword after finding no documented choice to keep
+bindings, and replaced the status note's one-view-per-leg reader, `theSlot`, with one counting every view of every
+leg; U6 swept every doc and colour test the branch's
+asm editor had made false. Node went from 747 to 762, browser from 748 to 766 in 118 files, every new test
+sabotaged. Left as concerns: `pane-host.ts` shared with the editor fixer (a small merge was expected and
+materialised, below); the copies menu's `· running` on a halted copy, left for a spec amendment (amendment 46,
+below); the badge cut hard at narrow widths, its meaning kept in its `title` and the status line; and
+`active-pane.test.ts`'s two original tests, which asserted the status line and the source decoration follow focus
+onto a copy's view, rewritten since both decisions reverse that.
+
+**The stitch.** Editor and Rust were fast-forwarded together (`bf9e5fa`..`25a0361`), then UI's six commits
+cherry-picked onto it (`89ca250`..`bec75f0`); one comment-only conflict, in `transport.ts` ("either leg" to "any
+leg", taking the editor fixer's wording), and `pane-host.ts`'s merge — U5's `resetViews` and
+`applyLayout(toProgram)` beside E1's mount arms — went clean, its semantic interplay untested until the gates. At
+`bec75f0`: node 763, browser 787 in 120 files, `cargo nextest` 1,893 passed, 33 skipped; 763 is 747 plus the
+editor's one plus the UI's fifteen, and 787 is 748 plus the editor's twenty-one plus the UI's eighteen — no test
+lost in the merge.
+
+**Three re-reviews, on sonnet, since opus's weekly limit was reached** (the same limit that stalled the
+TM-refusal dispatch, below, first). Rust's (`278e9a0`..`25a0361`) approved clean, with two flags kept for the roadmap
+rather than a fix: the TM grounding sibling beyond the brief's asm wording, and the ceiling's margin. UI's
+(`25a0361`..`bec75f0`) approved clean, its test deltas — node +15, browser +18 — recomputed from the diff and
+matching; its edits in the other fixers' files were comment-only except `pane-host.ts`'s `resetViews`/
+`applyLayout`. **Editor's (`bf9e5fa`..`278e9a0`) came back "needs fixes", one Important: a delete racing an
+in-flight format loses the pre-format edit.** `format()` clears `#timer` at its start and carries the pending text
+in its own async closure; `main.ts`'s delete calls `custody.flush(id)` — a no-op, since `#timer` is already null —
+reads the copy's record for undo, and retire deletes the buffer; format's continuation then calls `onEdit`, whose
+recompile finds no buffer and drops it, so undo restores text without the keystrokes a format had not yet returned.
+A pause is unaffected, since `cool` keeps the entry. Fix round 2, next, closed it; the merge interplay at `bec75f0`
+— `pane-host.ts`'s `resetViews` against `mountOnViewOf`, `draw.ts`'s loop — was checked clean.
+
+**Fix round 2** (`54b768b`, `4d4f36f`, main checkout, on `bec75f0`) closed the Important and four small things:
+`flush()` now also discharges an edit a format in flight is carrying, so `destroy()` sends it at once rather than
+deferring to the server's answer — a timing change disclosed rather than hidden, since it touches every route that
+tears an editor down mid-format, not only delete; `lib.rs`'s 167-character doc line rewrapped; `pane-host.ts`'s
+"three literal ids" corrected to four; the README's "Both legs are steppable" widened to name asm; and
+`stage-tab-titles.test.ts`'s TM/λ case extended to drive the same three gestures the asm case already did. Node
+stayed at 763, browser rose to 789. Its own re-review approved it, with two Minors: one resolved by the controller
+directly — the extended test's sabotage fired at the first gesture, so its own later assertions were never shown
+able to fail, until a sabotage that skips the retitle only on a copy-to-copy pick made both tests fail exactly at
+the pick-another-copy assertion — and one left, that `editor-custody.test.ts`'s `makeFormattableEditor` near-duplicates
+`scratch-editor.test.ts`'s `makeFormattable`.
+
+**A Rust-wave concern became a decision: a function-valued program's TM file is refused up front, as asm's already
+is** (amendment 44). `redextape emit --lang tm` of `|x| x + 1` wrote a `result (Nat) -> Nat` header line `run`'s own
+parser refuses, at exit 0 — on `main` too — and the session's `tm_text()` printed the identical broken text, so
+*edit a copy* on such a program's TM view made a copy that could never build. Dispatched on lane t2 (`fix5c-tmfn`)
+at `bec75f0`; its first attempt, on opus, failed at the start on the weekly usage limit and was re-dispatched on
+sonnet with no commits lost. `ty::is_decodable` is the round-trip check `AsmHeader::for_type` already ran, pulled
+out as the one predicate a header writer asks; `emit_tm` calls it before any lowering and refuses at the exit code
+every other unemittable program uses, and `Session::tm_result_decodable` crosses the wasm boundary unconditionally,
+like `asmText`, so `CopyEditor` can tell a function-valued refusal from a rule-count refusal without re-deriving
+either from `ruleCount`. Cherry-picked as `e65b4ed`, `f550aa3`, `1d649fa`: `cargo nextest` 1,893 to 1,896, node
+unchanged at 763, browser 787 to 788 in the fixer's own lane baseline, 790 once landed behind fix round 2's two.
+Its re-review approved it, flagging one Important as unconfirmed reachability rather than a fix outright:
+`#refreshDetach`'s absence check ran before the new disabled-reason check, so a function-valued program whose own
+machine happened to have a zero rule count — not known to exist, but not ruled out — would show *edit a copy*
+absent rather than disabled, against §4. **The TM follow-up** (`85019f9`, `a19cbe0`, `6907c1b`) closed it: probing
+six small function-valued programs found none reaching a zero-rule machine, so the fix was made on the rule rather
+than the case — `#refreshDetach` now checks the result-decodable reason before the absence branch — and two small
+double-groundings were corrected alongside it, `AsmHeader::for_type` calling a grounding-free `is_decodable_ground`
+rather than re-grounding what it had just grounded, and the CLI's refusal message naming the grounded type rather
+than a bare free variable. `cargo nextest` 1,896 to 1,897, browser 790 to 792. Left as a sibling, not fixed:
+`session.rs`'s `tm_text` still re-grounds an already-grounded `header.result` through `is_decodable`, the identical
+waste just closed in `AsmHeader::for_type`.
+
+**Spec amendments 38 to 44** (`d36bc8e`, docs only) recorded what executing 5c and its fix waves had decided, in
+the main checkout, in parallel with the TM re-review and the investigation below.
+
+**The reset-preset flake, found once in one browser run of 787 tests, investigated and reproduced 100% of the time under a diagnostic
+delay.** `reset-preset-copies.test.ts`'s λ case failed once with a `TypeError` reading `null.click` on the
+claim-editor button, its screenshot showing the λ copy's editor already mounted with no claim to make. Traced to a
+test assumption, not a product bug: *edit a copy* rebinds a pane's title synchronously, but its editor mounts only
+once the worker's `scratch-compiled` reply lands, and nothing the test waited on — the title, or the buffers list's
+`running` marker, both set synchronously at fork time — told it the build had actually landed; if `reset preset`'s
+first pass ran before that reply, there was no editor to hold in custody, its claim was dropped regardless, and the
+next pick mounted a fresh editor by `mountScratchEditor`'s own documented fallback. Delaying every
+`scratch-compiled` reply by 2 s reproduced the failure 100% of the time, on every run; the unmodified test ran 0 of
+20 failures at normal speed, even with the λ fork moved to leave the least slack before reset. The fix (`0bc278e`)
+makes the test wait for each copy's editor to actually mount before reset is clicked, no product code touched, and
+passed 15 of 15 against the unmodified timing and every time against the 2 s delay.
+
+**The ceiling measurement, on a quiet machine, found amendment 36's bracket unstable under its own method.**
+Pricing the memory probe's own `both` case — a heap filled to `COPY_CAPS`' cap, then locals saved — apart from the
+loop to the step cap, in three runs, found `both` heavier than the loop in every run (medians 38.4, 36.1, 38.8 ms
+against the loop's 32.1, 30.7, 32.9), and 5,400,000 bytes over the 250 ms budget in two of the three runs once
+`both` was priced in (254.3, 256.7 ms), where 5,200,038 stayed under in all three. **The
+human decided: lower `MAX_SCRATCH_ASM_BYTES` to 5,200,000, and have the cost probe price every run the memory probe
+knows, adding whichever comes out heaviest to every size's total** (amendment 45). `asm-copy-corpus.ts` now holds
+the shared cases both probes import, rather than each keeping its own copy in step by hand; the fix wave's own run
+agreed, `both` heaviest again at 39.0 ms against the loop's 31.6, 5,200,038 bytes under budget at 245.4 ms and
+5,300,019 over at 250.2 ms (`0d6d1bf`, `f9c2eb5`).
+
+**Final gates ran at `f9c2eb5`** — spec-only itself, its last code commit `0d6d1bf` — in lane t6's checkout,
+detached, in parallel with a re-review of `1d649fa..f9c2eb5`: `check-all.sh` 0 (196 s, "all configs green — base,
+LLVM and browser"); `check-slow.sh` 0 (504 s, "slow tier green"); the coverage floor 0 (65 s; 95.67% of 32,606
+lines; 1,897 run, 33 skipped); the web CI sequence 0 (55 s: 173 files, 1,555 tests; 96.9, 90.43, 97.96, 98.4 against
+95, 89, 97, 97); 12 of 12 hygiene runs 0 (citations 648 files; attributions 614 sites; doc-figures 46); and the
+Docker image built, run and checked healthy on port 8099. The re-review itself failed once, at its own end, on a
+session rate limit, its last words recording all four of its risk checks done; re-dispatched, it approved clean,
+spot-checking amendments 38 to 45 against the code, confirming `asm-copy-corpus.ts` is collected by no test runner
+and needs no `PROBE_FILES` entry, and that `#refreshDetach`'s new order preserves all four of its outcomes; it
+flagged one Minor for the roadmap rather than a fix — the double-grounding class fix round 3 later closed in
+`emit_tm` and `Session::tm_text`.
+
+**The second check by hand, at `f9c2eb5`, read 11 of 11 checklist items right** and found two loose ends, both the
+same class as bugs this branch had already fixed once: the copies menu still said "· running" beside a halted
+copy's own final value, part 2's own design's §10 worker word carried over unchanged; and a TM copy's
+footer readout gained its `value:` suffix only once a second view of the same copy had been interacted with, which
+the controller traced to `replies.ts`'s `tm-value` arm updating the view's own line without calling `draw()` — on `main` too,
+since `e29df3c`'s arm is identical. **The human decided both: the copies menu names a copy's worker only when it is
+paused** (amendment 46), **and the TM value redraw is fixed here, coalesced across chunks, with a test.**
+
+**Fix round 3** (`1d4aad7`, `bfe96ae`, `636fc16`, main checkout, on `f9c2eb5`) made both, plus the two
+double-groundings the last re-review had flagged: `buffer-list.ts`'s row now appends the worker word only for a
+cold copy, on every leg alike; `replies.ts`'s `tm-value` arm now calls `draw()` as `asm-value`'s already did; and
+`emit_tm`'s refusal and `Session::tm_text` each ground their type once rather than twice. `cargo nextest` stayed at
+1,897, node at 763, browser rose from 792 to 795.
+
+**Fix round 3's re-review** (`f9c2eb5..636fc16`) came back "needs fixes", four findings: the `tm-value` arm's own
+comment said `draw()` repaints the copies menu's TM row too, which it does not — `buffer-list.ts`'s popover
+(`rebuildRows`) rebuilds only on the menu opening, a temperature click or a delete; the `tm-value` redraw round 3
+added was a full synchronous `draw()` per value chunk, and `draw()` is frame-coalesced nowhere in `web/src` (only
+`player.ts`'s own playback stepping uses `requestAnimationFrame`), where the brief had asked for coalescing in this
+case; X3's own fix left two doc comments false — `ty.rs`'s `is_decodable` doc and `tm/asm.rs`'s
+`AsmHeader::for_type` doc still said `emit_tm` and the wasm session's `tmText` ask `is_decodable` directly, where
+both now ask `is_decodable_ground`; and, a Minor, amendment 46's trailing `"(§7)"` pointed at this spec's own §7
+(asm copies), not part 2's §10, the section it actually corrects.
+
+**Fix round 4** (`d3ccbbb`, `7767239`, `7f698e6`, main checkout, on `636fc16`) made all four. `replies.ts` gains an
+injectable `frame` dependency (`player.ts`'s own pattern, defaulting to `requestAnimationFrame`) and two closures,
+`scheduleTmValueDraw` and `flushTmValueDraw`, sharing one pending-frame flag across every session and copy since one
+`draw()` already repaints the whole app; the `tm-value` arm's tail now schedules while the run is `Running` and
+flushes at once once it ends, and its comment now states what `draw()` actually repaints — the footer follows the
+value as it arrives, and the copies menu's row reads the same entry only the next time something rebuilds the menu.
+A new node test (`web/tests/node/replies.test.ts`) drives a fake frame queue through `scratchDriver`'s new `{
+draw?, frame? }` overrides: a burst of three `Running` chunks draws zero times and holds one pending frame, one
+tick draws once, a second tick with nothing pending draws nothing, and an `Ended` reply flushes at once without
+waiting for a still-pending frame; sabotaged by reverting the arm to a bare `draw()`, which failed the test's first
+assertion (three draws where zero were expected) while the other 21 cases in the file stayed green. `ty.rs`'s
+`is_decodable` doc and `tm/asm.rs`'s `AsmHeader::for_type` doc now name all three callers that ground first and ask
+`is_decodable_ground` (`AsmHeader::for_type`, `emit_tm`, `tmText`), and what `is_decodable` itself remains for: a
+caller that has not already grounded, `Session::tm_result_decodable`, and the module's own tests. Amendment 46's
+trailing pointer now reads `"(part 2's §10)"`, confirmed by reading that section's still-unchanged "*running* or
+*paused*" sentence. `cargo nextest` stayed at 1,897, node rose from 763 to 764, browser stayed at 795. A sibling
+search over every `draw()`-calling arm of `onReply` and `onScratchReply` found `lambda-frames`, `tm-frames` and
+`asm-frames` still calling `draw()` unconditionally, once per `RECORD_CHUNK` (256 steps), from `record-loop.ts`'s
+shared `recordLeg` — the same defect class `tm-value` had, on plumbing shared by every session and every copy leg,
+well outside this round's own scope and already reasoned about and accepted by round 3's own report; flagged for
+the roadmap rather than fixed. The report also flagged amendment 44 as stale, still saying "`emit_tm` calls it
+[`is_decodable`]" where `636fc16` had already moved it onto `is_decodable_ground`; left unedited in the report, per
+the project's convention of correcting an old amendment with a new one rather than rewriting it in place, and
+reported for whoever next touched the spec's amendment list.
+
+**Fix round 4's re-review** (`636fc16..2a3f15e`) approved with no Critical, Important or Minor finding: it traced
+the coalescing through a burst (one draw), a final flush (preempting a pending frame, the leftover frame inert, no
+session captured), confirmed the new test fails on `636fc16` (three draws where zero are expected), and grepped
+eleven hits of `is_decodable`/`is_decodable_ground` prose across `web/`, `crates/` and the spec, all true. **The
+controller corrected amendment 44 in place** (`2a3f15e`, docs only, the pre-commit hook green): it now names
+`is_decodable_ground` as the predicate `emit_tm` and `Session::tm_text` ask, since each grounds the type once
+itself, and that the refusal names the grounded type.
+
+**Gates ran again at `636fc16`** (fix round 3's last commit), by the same two scripts and the same command list as
+every earlier run, below: all exited 0 — `check-all.sh` 171 s; `check-slow.sh` 506 s; the coverage floor 66
+s, 95.67% of 32,607 lines, 1,897 run, 33 skipped; the web CI sequence 55 s, 1,558 tests, 96.88% statements, 90.43%
+branches, 97.87% functions, 98.39% lines against the 95, 89, 97, 97 floors; 12 of 12 hygiene runs; and the Docker
+image built in 53 s, run and checked healthy on port 8099. Superseded at once: fix round 3's own re-review, running
+in parallel, came back "needs fixes" above, so this run's figures are kept only for the record, not quoted
+elsewhere in this entry.
+
+**Final gates ran at `2a3f15e`**, the branch's last commit before this entry — its last code commit `d3ccbbb`,
+`7767239`'s Rust docs, `7f698e6` and `2a3f15e`'s spec on top — the same unit and command list: all exited 0 —
+`check-all.sh` 167 s, "all configs green — base, LLVM and browser"; `check-slow.sh` 511 s, "slow tier green"; the
+coverage floor 69 s, 95.67% of 32,607 lines, 1,897 run, 33 skipped; the web CI sequence 53 s, 174 files, 1,559
+tests, 96.89% statements, 90.45% branches, 97.88% functions, 98.39% lines against the 95, 89, 97, 97 floors; 12 of
+12 hygiene runs (`check-doc-figures.sh` matching 46 figures, `check-attributions.sh` 617 sites with 0 violations,
+`check-citations.sh` 649 files); and the Docker image built in 51 s, run in 8 s, `HTTP 200` on port 8099, health
+`healthy`. These are the figures this entry quotes as final, except where a row below names an earlier commit
+directly.
+
+**Branch figures at `2a3f15e`**, the branch's last commit: 51 commits since `e29df3c`
+(`git rev-list --count e29df3c..2a3f15e`); 115 files, +12,747/−1,544, and without `docs/` 113 files, +7,147/−1,530
+(`git diff --shortstat e29df3c..2a3f15e`, then with `-- . ':!docs'`); nine commits touching only `docs/`. This
+entry itself is the branch's 52nd commit, not counted above.
+
+##### WHAT THIS DID NOT CLOSE
+
+- **The running instruction's line in a copy's editor** (§3, row 6): `parse_asm_nav` pushes instructions with no position,
+  so this needs core work first.
+- **The state diagram and the λ body on `VirtualGrid`**, 5b's leftover, unchanged: a PR of its own (amendment 7,
+  §10).
+- **The program's own session keeps `DEFAULT_CAPS`** (amendment 25). Task 6's memory probe prices a worker filling
+  `DEFAULT_CAPS`' saved frames — a million-word locals bank saved by each `call`, 129 steps to the memory cap — at
+  629.8 MiB, and one filling its heap cells at 264.6 MiB, against the 256 MiB a copy's worker is held to. No compiled
+  program is known to reach the saved-locals case.
+- **The drop pass's destroy of a closed view's editor, with no other view of the copy on the page, is still held by
+  no test.** Removing the TM view's destroy of it left 733 of 733 browser tests green in the prototype, and the
+  final wave's own remount tests (`copy-editor-mount.test.ts`) all show a *surviving* view somewhere else on the
+  page, never a copy's last one closing. Freeing the editor, whose language-server document the next editor on the
+  copy reopens, is no longer its only effect, since `destroy()` also flushes any edit still pending.
+- **The copy's editor beside its listing**, the check by hand's ninth item: the formatter's tab leaves the operand
+  column ragged, and the editor mutes the mnemonic the listing makes bold. No brief took it.
+- **A copy in a half-height view puts its listing below the fold**, as the plan knew: in Explorer the listing's header
+  sits at the view's bottom edge, and in Debugger its first row is cut off; scrolling reaches it, and collapsing the
+  text panel brings it up to the value line. At Stage's full height it is on screen.
+- **A live edit over the ceiling is silent**, as a TM copy's is on `main`; the whole-branch review left it to wait.
+- **Test gaps the reviews recorded and no brief took**: the outline's state restored; `[continue]` on an
+  asm copy end to end, after a step-cap stop; a copy-level Rust test of `AsmLeg::value`'s capped-then-faulted arm;
+  `extend` for λ or TM on an asm copy posting nothing; `replies.test.ts`'s `as RunReply` cast, which hides misspelt
+  fields; and `claiming`'s negative branch, which the final wave's own evidence confirms no test can see — a fork is
+  offered only on a view of the program, so `before` always names it, and `sessions.test.ts` and ten browser files,
+  84 tests, pass unchanged with the check removed.
+- **Repetition the reviews recorded and left**: the asm and TM ceiling guards in `session.rs` are near-identical
+  blocks; `Session::asm_state` and `AsmScratch::asm_state` repeat the window's deserialization and its error text;
+  the worker's recording reset is written out word for word in four handlers; and `asm_label_diagnostics` walks the
+  name index by position, for want of an iterator over every occurrence. `session.rs` went from 3,794 to 4,045 lines
+  in Task 2 and 4,261 by the final commit, after the Rust wave's grounding function and its docs, the TM refusal and
+  its follow-up, and the ceiling correction. `asm-copy-cost.test.ts` measures and prints the editor's mount at each
+  size, and the mount never enters the bracket.
+- **What the check by hand noted and did not call a finding**: a blank *new asm copy* opens on "fault: ran past end
+  of program at pc0"; `li r0, #7` then `halt` reads `value: 0 (no result type)`, `rr`'s, which that program never
+  writes; nothing on screen says the listing and value kept after a bad edit belong to the previous text, which is
+  the designed "last run stays"; and at the 11-copy cap *edit a copy* stays enabled and answers with a notice, as it
+  did before 5c. Its own fifth note — that an asm copy's readout line carried its value and a TM copy's carried
+  none — was the same class of bug fix round 3 closed above: the TM copy's own line was current, only the footer's
+  copy of it lagged.
+- **What the final wave's own reports leave open.** The leaving tests' race precondition (amendment 41) held with
+  margin at half CPU but failed once at a quarter, loudly, never vacuously — a timing margin on a very slow machine,
+  not a correctness gap. The copy header's badge is heavily cut at narrow widths (`cop…` in a roughly 240 px split),
+  its meaning kept in its `title` attribute and the status line rather than fixed further. `redextape-grammar-check`'s
+  `printed_machine_with_header` builds a TM header from a fixed, hand-picked corpus with no function-typed fixture
+  today, so amendment 44's bug does not reach it, but nothing guards it either if one is ever added. The copies
+  menu's row for a machine copy is current only when the menu is next opened or rebuilt by another gesture — the
+  worker-word fix and the TM-value fix are both to the row's own line and the footer, not to the popover's live
+  paint while it stays open; `buffer-list.ts`'s popover stays deliberately build-on-open, and giving it a
+  live-update hook was judged new plumbing, not the "if cheap" the brief allowed. Every other `draw()`-calling arm
+  of `onReply` and `onScratchReply` still repaints synchronously and unconditionally, including `lambda-frames`,
+  `tm-frames` and `asm-frames`, which `record-loop.ts`'s shared `recordLeg` posts once per `RECORD_CHUNK` (256
+  steps) while any leg records — the same defect class the `tm-value` arm had before fix round 4's coalescing, on
+  plumbing every session and copy leg shares; round 3's own report reasoned about it, calling its own `tm-value` fix
+  proportionate by the same comparison, and round 4's own sibling search confirmed it again and left it alone as a
+  materially larger change than either round's scope, flagging it as a candidate for a future, deliberately-scoped
+  fix round. Two documents are left as history,
+  on the convention that a closed plan's own spec is a record rather than a living one:
+  `2026-08-17-plan5d-iv-editable-tm-design.md`'s §4.3, which still says `tmText === null` is the only fact behind a
+  TM copy's refusal, and Plan 7 part 2's design §10, whose "*running* or *paused*" sentence amendment 46 corrects
+  without rewriting. And the user noted, outside this branch: the header's encoding dropdown is a native `<select>`,
+  unstyled like the new-copy buttons were before U4 styled them — a follow-up, not asked for here.
+- **E1's split rule and U5's reset preset both held.** The editor re-review checked their interplay at the stitched
+  head directly — `pane-host.ts`'s `resetViews` against `mountOnViewOf`, and `draw.ts`'s per-view loop — and found
+  it clean; neither decision reopened anything in the rounds after.
+
+##### VERIFICATION
+
+**Final gates ran at `2a3f15e`**, the branch's last commit before this entry, in a lane checkout detached at it, by
+two scripts run one after another from a background shell — each step in its own `systemd-run --user --scope` capped
+at 16G with no swap, inheriting the shell's `CARGO_HOME`, `RUSTUP_HOME` and `HOME`, with `/usr/sbin` first on `PATH`
+and a `CARGO_TARGET_DIR` apart from the main checkout's, and every step that starts a browser under the lanes' shared
+browser lock — running one after another:
+`check-all.sh` (with `TREE_SITTER` at the pinned `.tools/tree-sitter`), `check-slow.sh`, the Rust coverage floor,
+the web CI sequence, the six hygiene scans (each `--self-test`, then alone), and the Docker image built, started
+and checked. All exited 0: `check-all.sh` 167 s, "all configs green — base, LLVM and browser"; `check-slow.sh` 511
+s, "slow tier green"; the coverage floor 69 s, 95.67% of 32,607 lines, 1,897 run, 33 skipped; the web CI sequence 53
+s, 174 files, 1,559 tests, 96.89% statements, 90.45% branches, 97.88% functions, 98.39% lines against the 95, 89,
+97, 97 floors; 12 of 12 hygiene runs (`check-doc-figures.sh` matching 46 figures, `check-attributions.sh` 617 sites
+with 0 violations, `check-citations.sh` 649 files); and the Docker image built in 51 s, run in 8 s, `HTTP 200` on
+port 8099, health `healthy`. These are the figures this entry quotes as final, except where a row below names an
+earlier commit directly.
+
+Final gates ran once before fix round 3, at `f9c2eb5` — spec-only itself, its last code commit `0d6d1bf` — in lane
+t6's checkout, detached, in parallel with a re-review of `1d649fa..f9c2eb5`: `check-all.sh` 0 (196 s, "all configs
+green — base, LLVM and browser"); `check-slow.sh` 0 (504 s, "slow tier green"); the coverage floor 0 (65 s; 95.67%
+of 32,606 lines; 1,897 run, 33 skipped); the web CI sequence 0 (55 s: 173 files, 1,555 tests; 96.9, 90.43, 97.96,
+98.4 against 95, 89, 97, 97); 12 of 12 hygiene runs 0 (citations 648 files; attributions 614 sites; doc-figures 46);
+and the Docker image built, run and checked healthy on port 8099. Fix round 3's three commits touch Rust and `web/`
+code (`buffer-list.ts`, `replies.ts`, `emit.rs`, `ty.rs`, `session.rs`), so every one of those gates needed their own re-run
+at `636fc16`.
+
+Gates ran again at `636fc16` (fix round 3's last commit), the same unit and command list: all exited 0 —
+`check-all.sh` 171 s; `check-slow.sh` 506 s; the coverage floor 66 s, 95.67% of 32,607 lines, 1,897 run, 33 skipped;
+the web CI sequence 55 s, 1,558 tests, 96.88% statements, 90.43% branches, 97.87% functions, 98.39% lines against
+the 95, 89, 97, 97 floors; 12 of 12 hygiene runs; and the Docker image built in 53 s, run and checked healthy on
+port 8099. Superseded at once by fix round 3's own re-review, which came back "needs fixes" in parallel (above), so
+this run's figures are kept only for the record; fix round 4's three commits then needed the gates' final re-run at
+`2a3f15e`, above.
+
+Before the final wave the gates ran in two halves, in lane t6's checkout. The Rust half ran at tree `4928a0f`, in that
+checkout at `8d89665`, whose tree equals it — `check-all.sh` under the browser lock, `check-slow.sh` and the coverage
+floor — and fix round 1, touching only `web/`, left it standing for `bf9e5fa`. The web half ran at `bf9e5fa`, the
+checkout detached there: the web CI sequence, the six hygiene scans, twelve runs (`check-doc-figures.sh` matching 46
+figures, `check-attributions.sh` 600 sites with 0 violations, `check-citations.sh` 641 files), and the Docker image,
+whose `docker run` and `curl` read one port variable, 8099, where 5b's gate script had started its container on one
+port and curled another. Each exited 0. The Docker build took its Rust stages from the cache, the crates being
+unchanged since the prototype's image, and rebuilt the web stage. Their figures are below; the branch's gates then
+ran in full three times more — at `f9c2eb5`, at `636fc16`, and finally at `2a3f15e`, all above.
+
+The check by hand ran at `bf9e5fa` against a dev server from lane t6's checkout, its `pkg/` and `pkg-lsp/` built after
+that commit, in Playwright's Chromium at 1280×800 with storage cleared first, light and then dark by
+`prefers-color-scheme` emulation, in Explorer, Debugger and Stage, with
+`fn fact(n) { if n == 0 { 1 } else { n * fact(n - 1) } } fact(3)` compiled: λ 6 · 1,319 reductions, asm 6 · 55
+instructions, TM 6 · 18,574 transitions · width 8. In each it made a copy with *edit a copy* and read its panels and
+outline (`fact.0 else2 endif3 skip1`); typed `jmp nowhere` over `jmp skip1`, which was marked, hover saying
+"undefined label `nowhere`", with the listing and `value: 6` staying from the last run; formatted mangled text; made a
+*new asm copy* and typed `\tli\tr0, #7⏎\thalt` into it, for `step 2 of 2` and `value: 0 (no result type)`; read the
+readout's `1 instruction` with only `halt`; moved the view back to the program; and checked fix round 1's guard on asm
+and TM beside a view of the program. The console showed 0 errors, and in dark the nine contrast ratios it measured
+inside the copy's view, below, raised no problem. The 137 screenshots are untracked, in `.playwright-mcp/`.
+
+The check was repeated once more, at `f9c2eb5`, after the wave's UI and editor changes had landed and the ceiling had
+been lowered — through the app's own theme toggle rather than `prefers-color-scheme` emulation, and against its own
+dev server built after that commit. Eleven items were checked: the split/`+ view` editor and *move the editor here*,
+the Stage tab's label, the running focus surviving a copy's view being focused last, the copies menu's readout line,
+*reset preset*, the not-linked note naming a specific copy view, the new-copy buttons' styling, the copy header's one
+row, a function-valued program's disabled TM copy beside asm's own headerless one, typing surviving a fast
+title-picker switch, and an asm copy of `[]` reading `[]`. All eleven read right, in both themes, with the console at
+0 errors throughout. It found two loose ends, both closed by fix round 3, above: the copies menu still said
+"· running" beside a halted copy's own value, and a TM copy's footer readout gained its value only once a second
+view of it had been used. No check by hand has run against fix round 3's or round 4's own tree.
+
+**Every count this entry quotes, with what produces it:**
+
+| Value | What | Produced by |
+|---|---|---|
+| 51 | commits before this entry, anchored to `2a3f15e` (this entry is the branch's 52nd) | `git rev-list --count e29df3c..2a3f15e` |
+| nine | of them touching only `docs/`: three amendment commits from before the plan (`364f386`, `a390563`, `0256926`), the plan (`398f230`), three more amendment commits from executing it (`1d649fa`, `d36bc8e`, `f9c2eb5`), and two more from the final wave's fourth fix round (`7f698e6`, `2a3f15e`) | each commit's `git show --name-only` |
+| 115 files, +12,747/−1,544; 113 files, +7,147/−1,530 | the branch against main, at `2a3f15e`; without `docs/` | `git diff --shortstat e29df3c..2a3f15e`, then with `-- . ':!docs'` |
+| 5,344 | lines of the plan | `git show --stat 398f230` |
+| twenty-five, 22 to 46; nine, seven, seven, one, one | 5c's amendments; from reading the code at `e29df3c`, from the prototype, from executing the plan and its two fix waves, from the final wave's ceiling correction, from the final wave's third round | the five "Amended" blocks for 5c at the head of the spec |
+| three: `0256926`, `f8e2f09`, `f9c2eb5` | commits that reworded amendment 36 after `a390563` | `git log --oneline a390563..636fc16 -- docs/superpowers/specs/`, then `git show -U0 <sha> -- docs` for each |
+| 6 of 6; 66 of 66: 7, 10, 17, 17, 8, 7 | trees identical to the prototype's in the replay; sabotages fired there, Tasks 1 to 6 | the plan's Pre-flight status |
+| twelve; four | what the prototype found; what replaying the plan found | the plan's two lists under Pre-flight status |
+| 16; two | instruction variants the label round trip's programs reach; the programs `defunc` rewrites among them | the plan's verified fixtures |
+| 13 | bytes the first boundary test's text was over the ceiling | the plan's "What the prototype found", 7 |
+| 733 of 733 | browser tests green with the TM view's drop-pass destroy removed | the plan's "What the prototype found", 8 |
+| 168.4; 133.1, 72.5 MiB | a copy's worker under `COPY_CAPS`: both caps; saved locals alone, heap cells alone | `asm-copy-memory.test.ts`'s `MEM` rows from `cd web && pnpm run test:probe:asm-copy`: the plan's Task 6, step 4, and the same MiB in Task 6's lane run |
+| 629.8, 264.6 MiB; 129 | the same under `DEFAULT_CAPS`: saved locals, heap cells; the saved-locals case's steps to the memory cap | the same rows |
+| 40.3 ms | the memory probe's build under both copy caps (`build_ms`) | the same rows, in the plan's run |
+| 5,600,025 bytes, 247.3 ms; 5,600,025 bytes, 250.8 ms; 5,700,000 | the prototype's first probe run and the replay's: the same file under the budget and over it; the ceiling the first run gave | the plan's "What replaying this plan found", 2; amendment 36 (`cd web && pnpm run test:probe:asm-copy`, `asm-copy-cost.test.ts`'s `SIZE`, `RUN` and `BRACKET` rows, the spec's §12) |
+| about 31 ms | the loop to the step cap the cost probe adds | amendment 36, the same rows |
+| five; 250.8, 251.8 ms | the replays' probe runs, each keeping 5,400,000 bytes under; the two putting 5,600,025 bytes over | the plan's "What replaying this plan found", 3 |
+| 5,400,000 bytes, 242.8 ms; 5,600,025 bytes, 248.7 ms; 5,800,050 bytes, 262.3 ms | Task 6's lane run, under the other lanes' load: the ceiling's `SIZE` row with the worst run; its bracket | `flock … pnpm run test:probe:asm-copy` in lane t6; the Task 6 report (`.superpowers/sdd/p5c-task-6-report.md`, not tracked); the ledger (`.superpowers/sdd/progress.md`, same place) |
+| 250 ms; 256 MiB | a gesture's budget; a copy worker's peak, a budget the user set | the spec's §12 |
+| 5,200,000; 6,100,000 | `MAX_SCRATCH_ASM_BYTES`, lowered by the final wave's ceiling correction (amendment 45); `MAX_SCRATCH_TM_BYTES` | `git grep -n -E 'const MAX_SCRATCH_(ASM\|TM)_BYTES' -- crates/redextape-wasm/src/session.rs` |
+| 2,000,000; 12,000,000 | `COPY_CAPS`' heap cells and saved words | `git grep -n 'pub const COPY_CAPS' -- crates/redextape-wasm/src/session.rs` |
+| 11 | `MAX_WARM_BUFFERS`, the warm copies, each in a worker of its own | `git grep -n 'MAX_WARM_BUFFERS =' -- web/src/scratch.ts`; the spec's §12 |
+| 300 ms | `EDITOR_DEBOUNCE_MS` | `git grep -n 'EDITOR_DEBOUNCE_MS =' -- web/src` |
+| 38; 1,387, 32 skipped; 7 of 7 | Task 1: its green step's targeted run; `redextape-core` and `redextape-lsp`'s tests; its sabotages | the Task 1 report (`p5c-task-1-report.md`, same place) |
+| 13, and 4 more; 112; 33; 10 of 10 | Task 2: its red step's errors, and the browser test binary's; `redextape-wasm`'s native tests; its browser tests; its sabotages | the Task 2 report |
+| 14 of 131, 4 of 19; 739; 19; 17 of 17 | Task 3: its red steps' failures; the node suite; `worker.test.ts`; its sabotages | the Task 3 report |
+| 1 of 21, 16 of 41; 740; 111 files, 737 tests; 17 of 17 | Task 4: its red steps' failures; the node suite; the browser suite; its sabotages | the Task 4 report |
+| 7 of 46, 4 of 4; 747; 112 files, 741 tests; 8 of 8 | Task 5: its red steps' failures; the node suite; the browser suite; its sabotages | the Task 5 report |
+| 7; 115, with and without `probe-asm-copy`; 112 files, 741 tests; 7 of 7 | Task 6: its red step's errors; `redextape-wasm`'s tests; the browser suite; its sabotages | the Task 6 report |
+| `7440298`, `947c322`, `f4d26a0`, `a6fc621`, `54a0e6f`, `d4a511b`; `79c176d` | the scaffolds after Tasks 1 to 6; the prototype's last commit | the ledger; the lane protocol (`p5c-lanes.md`, same place) |
+| two; one, two | Task 3's Importants; Task 4's gap against the spec and its Importants | the ledger |
+| four; four, and one beyond | the user's decisions after the task reviews; fix round 1's briefed commits, and `bf9e5fa` | the ledger; the fix round 1 brief and report (`p5c-fix-1-brief.md`, `p5c-fix-1-report.md`, same place) |
+| 747; 741, 748 in 114 files; five, two; 22 files, +973/−689 | fix round 1: the node suite; the browser suite before and after; the tests `copy-pin.test.ts` and `copy-editor.test.ts` add; its diff | the fix round 1 report; the ledger |
+| four; nine files, 55 tests; two | fix round 1: `9068896`'s sabotages; the files and tests the `claiming` sabotage failed none of; the hook's refusals | the fix round 1 report |
+| 2,869 | the program view's step in `bf9e5fa`'s TM focus case | the fix round 1 report |
+| 0; two | the whole-branch review's Critical and Important findings | the ledger |
+| 8.9–9.4 ms; 4 of 4; 1,010.0 ms | the probe's typing-to-pick gap; runs that reproduced the bug; the control's gap | the probe's report (`p5c-probe-lambda-pick-report.md`, same place) |
+| 3,794; 4,045; 4,261 | `session.rs`'s lines before Task 2, after it, and at the final commit | Task 2's review, in the ledger; `wc -l crates/redextape-wasm/src/session.rs` |
+| 1280×800; 0; nine | the first by-hand check's viewport; console errors; findings | the by-hand report (`p5c-byhand-report.md`, same place) |
+| 1,319; 55; 18,574, 8 | `fact(3)`'s reductions, instructions, transitions and tape width | the same report |
+| 6.86, 14.1, 6.86, 7.85, 7.16, 6.86, 6.37, 14.1, 6.32 to 1 | contrast in dark: the value line, editor text, a mnemonic token, `#0`, `result`, a listing pc, panel headers, the outline, the readout's note | the same report |
+| about 30 px | what the badge's wrap costs a half-height view | the same report, finding 8 |
+| 11 | copies running when *edit a copy* answered with its notice | the same report |
+| 137 | screenshots of the first check by hand | `ls .playwright-mcp \| grep -c '^p5c-.*\.png$'` |
+| 1280×800; 0; 11 of 11; 30 | the second by-hand check's viewport; console errors; items reading right; its screenshots (`p5c2-*.png`) | `p5c-byhand2-report.md`; `ls .playwright-mcp \| grep -c '^p5c2-.*\.png$'` |
+| 237, 508, 68 s; 95.67% of 32,470 lines; 1,889 run, 33 skipped, 1 leaky | the Rust gates at tree `4928a0f`: `check-all`, `check-slow`, llvm-cov; the coverage; its tests | the ledger's gate records: `TREE_SITTER=/home/davey/projects/redextape/.tools/tree-sitter scripts/check-all.sh`, `scripts/check-slow.sh`, `cargo llvm-cov nextest --workspace --fail-under-lines 90` |
+| 51 s; 167 files, 1,495 tests; 96.73, 90.2, 97.56, 98.26 against 95, 89, 97, 97 | the web CI sequence at `bf9e5fa`: its time; its files and tests; statements, branches, functions and lines against their floors | the ledger's gate records: `pnpm run build:wasm && pnpm run build:lsp-wasm && pnpm exec biome ci --error-on-warnings && pnpm run typecheck && pnpm run test:coverage && pnpm run build:app` |
+| 12 of 12; 46; 600, 0; 641 | the hygiene runs at `bf9e5fa`, exit 0; `check-doc-figures`' matched figures; `check-attributions`' sites and violations; `check-citations`' files | the ledger's gate records: `scripts/check-{text-bytes,citations,attributions,doc-figures,shared-docs,lua}.sh`, each `--self-test` then alone |
+| 200; healthy; 8099 | the image at `bf9e5fa`: its status and health; the port its `docker run` and `curl` shared | the ledger's gate records: `docker build`, `docker run -d -p 8099:80`, `curl -s -o /dev/null -w '%{http_code}' http://127.0.0.1:8099/`, `docker inspect --format '{{.State.Health.Status}}'`, from the gate script `gates-web.sh` (scratch, not tracked) |
+| 196, 504, 65 s; 95.67% of 32,606 lines; 1,897 run, 33 skipped | the Rust gates at `f9c2eb5`, its last code commit `0d6d1bf`: `check-all`, `check-slow`, llvm-cov; the coverage; its tests | the ledger's gate records, same commands as the `4928a0f` row |
+| 55 s; 173 files, 1,555 tests; 96.9, 90.43, 97.96, 98.4 against 95, 89, 97, 97 | the web CI sequence at `f9c2eb5` | the ledger's gate records, same command as the `bf9e5fa` row |
+| 12 of 12; 46; 614, 0; 648 | the hygiene runs at `f9c2eb5`, exit 0; `check-doc-figures`' matched figures; `check-attributions`' sites and violations; `check-citations`' files | the ledger's gate records, same commands as the `bf9e5fa` row |
+| 200; healthy; 8099 | the image at `f9c2eb5`: its status and health; the port shared by both `docker run` and `curl` | the ledger's gate records, same commands as the `bf9e5fa` row |
+| 5; 9; 1,889, 1,893 (+5 new, −1 replaced); 747, 748 in 114 files (unchanged) | the Rust wave: its commits; sabotages fired; `cargo nextest` before and after; node and browser (neither gains a test) | `p5c-final-rust-report.md` (same place) |
+| 6; 15 of 15 shown failing against `bf9e5fa`'s unmodified `web/src`; 747, 748; 748, 769 in 116 files | the editor wave: its commits; its new app-level tests, each shown failing on the unmodified branch; node before/after; browser before/after and files | `p5c-final-editor-report.md` (same place) |
+| 6; 747, 762; 748, 766 in 118 files | the UI wave: its commits; node before/after; browser before/after and files | `p5c-final-ui-report.md` (same place) |
+| 763, 53 files; 787, 120 files; 1,893, 33 skipped | the stitched head, `bec75f0`: node; browser; `cargo nextest` | the ledger |
+| 2; 787, 789 | fix round 2: its commits; browser before and after (node unchanged at 763) | `p5c-final-fix2-report.md` (same place) |
+| 3; 1,893, 1,896; 763; 787, 790 | the TM refusal: its commits; `cargo nextest` before and after; node (unchanged); browser before and after, once landed behind fix round 2 | `p5c-final-tmfn-report.md`; the ledger |
+| 3; 1,896, 1,897; 763; 790, 792 | the TM follow-up: its commits; `cargo nextest`; node (unchanged); browser | `p5c-final-tmfn2-report.md`; the ledger |
+| 1; 0 of 20 at normal speed, 100% of runs under a 2 s reply delay; 15 of 15 | the reset-preset flake: its commit; failure rates, unmodified and under the diagnostic delay; the fixed test's own repeat runs | `p5c-investigate-reset-report.md` |
+| 3; 38.4, 36.1, 38.8 ms; 32.1, 30.7, 32.9 ms; 5,200,038; 254.3, 256.7 ms | the ceiling measurement's three runs: `both`'s medians; the loop's; the largest size under budget in all three; where 5,400,000 went over | the ledger |
+| 2; 39.0, 31.6 ms; 5,200,038 bytes at 245.4 ms, 5,300,019 at 250.2 ms | the ceiling fix's own probe run: its commits; `both`'s median against the loop's; its bracket | `p5c-final-ceiling-report.md` |
+| 3; 1,897 (unchanged); 763 (unchanged); 792, 795 | fix round 3: its commits; `cargo nextest`; node; browser before and after | `p5c-final-fix3-report.md` |
+| four | fix round 3's re-review's findings, `f9c2eb5..636fc16`: the `tm-value` comment's overclaim of what `draw()` repaints, the `tm-value` redraw wanting frame-coalescing, two stale `is_decodable` docs, and amendment 46's trailing pointer | the ledger |
+| 3; 1,897 (unchanged); 763, 764; 795 (unchanged) | fix round 4: its commits; `cargo nextest`; node before and after; browser (unchanged) | `p5c-final-fix4-report.md` (same place) |
+| approved, no Critical, Important or Minor | fix round 4's re-review, `636fc16..2a3f15e` | the ledger |
+| `2a3f15e` | the controller's correction of amendment 44 in place, docs only, hook green | `git show 2a3f15e`; the ledger |
+| 171, 506, 66 s; 95.67% of 32,607 lines; 1,897 run, 33 skipped | the Rust gates at `636fc16`, superseded by round 4: `check-all`, `check-slow`, llvm-cov; the coverage; its tests | the ledger's gate records, same commands as the `4928a0f` row |
+| 55 s; 1,558 tests; 96.88, 90.43, 97.87, 98.39 against 95, 89, 97, 97 | the web CI sequence at `636fc16` | the ledger's gate records, same command as the `bf9e5fa` row |
+| 12 of 12; 53 s; 200; healthy; 8099 | the hygiene runs and the image at `636fc16`, exit 0; the image's build time, status, health and port | the ledger's gate records, same commands as the `bf9e5fa` row |
+| 167, 511, 69 s; 95.67% of 32,607 lines; 1,897 run, 33 skipped | the FINAL Rust gates, at `2a3f15e`: `check-all`, `check-slow`, llvm-cov; the coverage; its tests | `TREE_SITTER=/home/davey/projects/redextape/.tools/tree-sitter scripts/check-all.sh`, `scripts/check-slow.sh`, `cargo llvm-cov nextest --workspace --fail-under-lines 90` |
+| 53 s; 174 files, 1,559 tests; 96.89, 90.45, 97.88, 98.39 against 95, 89, 97, 97 | the FINAL web CI sequence, at `2a3f15e` | `pnpm run build:wasm && pnpm run build:lsp-wasm && pnpm exec biome ci --error-on-warnings && pnpm run typecheck && pnpm run test:coverage && pnpm run build:app` |
+| 12 of 12; 46; 617, 0; 649 | the FINAL hygiene runs, at `2a3f15e`, exit 0: `check-doc-figures`' matched figures; `check-attributions`' sites and violations; `check-citations`' files | `scripts/check-{text-bytes,citations,attributions,doc-figures,shared-docs,lua}.sh`, each `--self-test` then alone |
+| 200; healthy; 8099; 51, 8 s | the FINAL image, at `2a3f15e`: status; health; port; build and run seconds | `docker build -t redextape-check .`, `docker run -d --name c -p 8099:80 redextape-check`, `curl -s -o /dev/null -w '%{http_code}' http://127.0.0.1:8099/`, `docker inspect --format '{{.State.Health.Status}}' c` |

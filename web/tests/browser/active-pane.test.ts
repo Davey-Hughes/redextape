@@ -1,28 +1,28 @@
 import type { EditorView } from '@codemirror/view'
 import { beforeAll, beforeEach, describe, expect, it } from 'vitest'
+import { userEvent } from 'vitest/browser'
 import { LAYOUT_STORAGE_KEY } from '../../src/layout'
 import { bindingKey } from '../../src/view-header'
 import { SHELL, until } from './harness'
 
 /**
- * **THE SHARED SURFACES FOLLOW FOCUS** — which pane the ONE status line and the ONE source editor
- * decoration are talking about, once a leg holds more than one.
+ * **THE SHARED SURFACES AND THE λ LEG'S TWO VIEWS** — what the ONE status line and the ONE source editor decoration
+ * say once the λ leg holds a view of the program and a view of a copy.
  *
- * `PaneCollection.active` has answered this since the collection gained `#activeByLeg`: the pane the
- * user last focused on that leg, falling back to insertion order. What it did not have was a CALLER —
- * nothing anywhere in the app called `markActive`, so the map stayed empty and `active` degenerated to
- * the `first` it replaced. With two λ panes that made `#link-status` describe whichever pane happened to
- * be created first, whatever the user was working in. The `focusin` listener `pane-host.ts`'s `hostFor`
- * now wires on each host's creation is the missing caller, and this file is what says so from the app.
+ * They used to follow focus: `PaneCollection.active`, the pane the user last focused on the leg, answered for both,
+ * through the `focusin` listener `pane-host.ts`'s `hostFor` wires on each host's creation. The check by hand found
+ * what that cost on the machine legs: a copy's view focused last took the program's running focus off the program's
+ * own view, and the status line named a copy only while its view had been focused last. So neither follows focus
+ * onto a copy now. The decoration is the program's λ running focus, read off the most recently focused view of the
+ * program, and the status line names every view showing a copy, by its title where the leg has more than one view.
  *
- * **THE TWO PANES ARE MADE TO DISAGREE, WHICH IS THE WHOLE FIXTURE.** One λ pane is on the scratch (so
- * `detachedPanes().lambda` reads `true` for it) and the other is back on the source session (so it reads
- * `false`), and `#link-status` can only be describing one of them at a time. A test with both panes on
- * one session could not fail against the bug at all: the two answers would be the same sentence.
+ * **THE TWO VIEWS ARE MADE TO DISAGREE, WHICH IS THE WHOLE FIXTURE.** One λ view is on a copy and the other is back on
+ * the program, so what the line and the decoration say can depend on which one has the focus — and each test drives
+ * the focus into both, so an answer that followed it would change under the test.
  *
  * THE SENTENCE IS THE REAL ONE, NOT A `/detached/` REGEX — `link-status.ts`'s `detachedText` is where it
  * is written, and matching it exactly is what makes the assertion fail if that clause is reworded into
- * something else about a pane rather than merely deleted.
+ * something else about a view rather than merely deleted.
  *
  * THE HARNESS IS `pane-picker.test.ts`'s, WHICH IS `two-lambda-panes.test.ts`'s — the same shell, the
  * same one-mount-per-file `beforeAll` (ES module imports are cached, so `main()` runs once per page and
@@ -30,8 +30,10 @@ import { SHELL, until } from './harness'
  * leave behind.
  */
 
-/** `link-status.ts`'s `detachedText` for a detached λ pane, verbatim. */
-const LAMBDA_DETACHED = 'λ view shows a copy — not linked to the program'
+/** `link-status.ts`'s `detachedText` for a λ view on a copy named by `title`, beside another λ view, verbatim. */
+const lambdaDetached = (title: string) => `${title} view shows a copy — not linked to the program`
+/** `link-status.ts`'s λ clause for a pin with no node in the term at this step. */
+const NO_NODE = 'this construct has no node in the λ term at this step'
 
 const leafIds = () => [...document.querySelectorAll<HTMLElement>('[data-leaf]')].map((e) => e.dataset.leaf ?? '')
 const lambdaLeaves = () =>
@@ -164,10 +166,10 @@ beforeEach(async () => {
  * that name, performed. Returns `[scratchLeaf, sourceLeaf]`: the first is `lambda-0` forked onto the λ
  * scratchpad, the second is its split pointed back at the source session.
  *
- * SHARED BY BOTH TESTS BECAUSE BOTH `active('lambda')` CONSUMERS NEED THE SAME DISAGREEMENT, and for
- * one reason: the panes must be on two SESSIONS, not merely two leaves. A session owns the history and
- * the detachment flag alike, so two panes on one session answer both questions identically and neither
- * test could fail against a missing `markActive`.
+ * SHARED BY BOTH TESTS BECAUSE BOTH SURFACES NEED THE SAME DISAGREEMENT, and for one reason: the panes
+ * must be on two SESSIONS, not merely two leaves. A session owns the history and the detachment flag
+ * alike, so two panes on one session answer both questions identically, and neither test could tell an
+ * answer that follows the focus onto a copy from one that does not.
  *
  * THE BINDINGS ARE ASSERTED HERE, BEFORE ANY CALLER LOOKS AT FOCUS. A rebind that never happened would
  * leave both panes on the scratch — where both answers are the same and no expectation downstream could
@@ -202,72 +204,84 @@ async function twoDisagreeingLambdaPanes(): Promise<[string, string]> {
   return [first ?? '', second ?? '']
 }
 
-describe('the app-wide surfaces describe the pane the user is working in', () => {
+describe('the app-wide surfaces beside a λ view on a copy', () => {
   /**
-   * **THE CLAIM, AND WHAT MAKES IT FAIL WITHOUT THE LISTENER.** `panes.of('lambda')` here is
-   * `[lambda-0, <the split>]` in insertion order, and only the FIRST of those is detached — so with no
-   * `markActive` caller, `active('lambda')` answers `lambda-0` forever and the line reads the detachment
-   * sentence no matter which pane has focus. The first expectation below is exactly that failure.
-   *
-   * BOTH DIRECTIONS ARE DRIVEN, NOT ONLY THE ONE THAT WAS BROKEN. Focusing the attached pane must clear
-   * the sentence AND focusing the detached one must bring it back — an implementation that marked the
-   * wrong leaf, or marked once and never again, satisfies one and not the other.
+   * **THE LINE NAMES THE COPY'S VIEW WHICHEVER λ VIEW HAS THE FOCUS.** It read the λ leg's active view, so with the
+   * view of the program focused it said nothing of the copy on screen, and with the copy's focused it said "λ view",
+   * which does not say which of the two. Focusing the program's view is the expectation the old reading failed.
    */
-  it('the status line follows focus between two λ panes that disagree about detachment', async () => {
+  it('the status line names the λ copy by its title whichever of the two λ views has the focus', async () => {
     const [scratchPane, sourcePane] = await twoDisagreeingLambdaPanes()
+    const title = titleOf(scratchPane)?.textContent?.trim() ?? ''
+    expect(title).toMatch(/^λ · copy \d+$/)
 
-    // THE PANE THE USER IS WORKING IN IS THE ATTACHED ONE — nothing is outside the correspondence, so
-    // the line has nothing to say. THIS is the expectation the missing caller failed.
     focusPane(sourcePane)
-    expect(status()).toBe('')
+    expect(status()).toBe(lambdaDetached(title))
 
-    // AND BACK: the detached pane is the one being described again.
     focusPane(scratchPane)
-    expect(status()).toBe(LAMBDA_DETACHED)
+    expect(status()).toBe(lambdaDetached(title))
   })
 
   /**
-   * **THE OTHER CONSUMER OF `active('lambda')`, AND IT WAS THE UNTESTED ONE.** `PaneCollection.active`'s
-   * own doc names exactly two: `link-wiring.ts`'s `detachedPanes`, which the case above drives, and
-   * `draw.ts`'s running-focus decoration on the ONE source editor, which nothing asserted followed
-   * focus. The two read the same answer through different code — `drawLink`'s three arms against
-   * `setFocus.of(...)` — so a fix that satisfied one is not evidence about the other.
+   * **THE SOURCE EDITOR'S FOCUS DECORATION IS THE PROGRAM'S λ RUNNING FOCUS, WHICHEVER λ VIEW HAS THE FOCUS** — the
+   * λ half of the machine legs' fix (`copy-beside-program.test.ts`). `draw.ts` reads it off the most recently focused
+   * view of the program, so focusing the copy's view leaves it where the program's view put it.
    *
-   * **WHY THE DECORATION CAN DISAGREE BETWEEN THE TWO PANES AT ALL**: a scratch session has no lowering
-   * behind it, so every λ frame it records carries `Owner::None` (`session.rs`'s `lambda_state`
-   * commentary: "a scratch has no lowering that could have recorded an owner — which is what 'detached'
-   * means"), and `runningFocus` answers `null` for `'None'`. The source session's frames carry real
-   * owners. So "which pane is active" is the whole of whether the editor is marked at all.
+   * **WHY THE DECORATION COULD DISAGREE BETWEEN THE TWO VIEWS AT ALL**: a scratch session has no lowering behind it,
+   * so every λ frame it records carries `Owner::None` (`session.rs`'s `lambda_state` commentary: "a scratch has no
+   * lowering that could have recorded an owner — which is what 'detached' means"), and `runningFocus` answers `null`
+   * for `'None'`. Read off the copy's view, the decoration went dark.
    *
-   * THE SOURCE PANE IS PARKED AT STEP 1 RATHER THAN LEFT AT THE FRONTIER, and that is not tidiness.
-   * `running-focus.test.ts` records that steps 4-7 of this program are inside `plus` and inside two
-   * Church numerals — `Owner::None`, every one — so a settled λ leg sits on an UNMARKED frame and this
-   * test would read `''` in both directions and assert nothing. Step 1 owns `let x = 40;`.
-   *
-   * THREE TRANSITIONS, NOT TWO, AND NONE OF THEM IS SATISFIED BY A CONSTANT. Dark on the scratch pane,
-   * lit on the source pane, dark again on the scratch: "never paints" fails the middle one and "paints
-   * whatever the frontier holds" fails the outer two. Against a missing `markActive`, `active('lambda')`
-   * is `lambda-0` — the scratch pane — forever, and the middle expectation is the one that fails.
+   * THE PROGRAM'S VIEW IS PARKED AT STEP 1 RATHER THAN LEFT AT THE FRONTIER, and that is not tidiness.
+   * `running-focus.test.ts` records that steps 4-7 of this program are inside `plus` and inside two Church numerals
+   * — `Owner::None`, every one — so a settled λ leg sits on an UNMARKED frame and this test would read `''` either
+   * way and assert nothing. Step 1 owns `let x = 40;`, and step 2 is inside `x + 2`, which is how stepping the
+   * program is seen to move the decoration.
    */
-  it('the source editor focus decoration follows focus between two λ panes on two sessions', async () => {
+  it('the source editor focus decoration stays the program’s whichever λ view has the focus', async () => {
     const [scratchPane, sourcePane] = await twoDisagreeingLambdaPanes()
 
-    // The two panes are on two sessions, so this moves the SOURCE session's play head and leaves the
-    // scratch's where it is. `↺` first because the settled leg is parked at its frontier.
+    // The two views are on two sessions, so this moves the PROGRAM's play head and leaves the copy's where it is.
+    // `↺` first because the settled leg is parked at its frontier.
+    transportClick(sourcePane, '↺')
+    transportClick(sourcePane, '▶')
+    expect(stepTextOf(sourcePane)).toContain('step 1')
+    expect(sourceFocusText()).toBe('let x = 40;')
+
+    // THE COPY'S VIEW FOCUSED LAST: the program's focus stands.
+    focusPane(scratchPane)
+    expect(sourceFocusText(), 'the copy’s view took the program’s focus away').toBe('let x = 40;')
+
+    // THE PROGRAM STEPS, AND THE DECORATION MOVES WITH IT — then the copy's view is focused again.
+    transportClick(sourcePane, '▶')
+    expect(stepTextOf(sourcePane)).toContain('step 2')
+    focusPane(scratchPane)
+    expect(sourceFocusText()).toBe('x + 2')
+  })
+
+  /**
+   * **THE λ CLAUSE IS THE PROGRAM'S VIEW'S, AND IT IS SAID BESIDE THE COPY'S.** `linkStatus` keeps a leg's clauses
+   * while any view of the leg shows the program, so `draw.ts` must take the λ link state from a view of the program:
+   * the copy's view marks nothing whatever is pinned and would answer `'shown'`, saying nothing about a term of the
+   * program's that has no node for the pin. At step 1 `40` has none (`stage.test.ts` has the case).
+   */
+  it('the λ clause is the program’s view’s whichever of the two λ views has the focus', async () => {
+    const [scratchPane, sourcePane] = await twoDisagreeingLambdaPanes()
+    const title = titleOf(scratchPane)?.textContent?.trim() ?? ''
     transportClick(sourcePane, '↺')
     transportClick(sourcePane, '▶')
     expect(stepTextOf(sourcePane)).toContain('step 1')
 
-    // DARK: the pane being described records no owner, so there is nothing to mark.
-    focusPane(scratchPane)
-    expect(sourceFocusText(), 'a scratch frame owns no construct').toBe('')
+    const src = view.state.doc.toString()
+    view.dispatch({ selection: { anchor: src.indexOf('40') } })
+    view.focus()
+    await userEvent.keyboard("{Control>}'{/Control}")
+    await until(() => status().includes(NO_NODE), 'the program’s λ view to say `40` has no node at step 1')
+    expect(status().startsWith(lambdaDetached(title))).toBe(true)
 
-    // LIT: the same editor, the same frame on screen, a different active pane.
+    focusPane(scratchPane)
+    expect(status(), 'the copy’s view answered for the program’s term').toContain(NO_NODE)
     focusPane(sourcePane)
-    expect(sourceFocusText()).toBe('let x = 40;')
-
-    // AND DARK AGAIN — a decoration that is painted once and never withdrawn passes the line above.
-    focusPane(scratchPane)
-    expect(sourceFocusText()).toBe('')
+    expect(status()).toContain(NO_NODE)
   })
 })

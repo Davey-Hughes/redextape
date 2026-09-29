@@ -32,7 +32,7 @@ const events = (): PaneEvents => ({
   speed: () => 8,
   setSpeed: vi.fn(),
   rebind: vi.fn(),
-  editScratch: vi.fn(),
+  editSink: () => vi.fn(),
   collapse: vi.fn(),
 })
 
@@ -299,9 +299,10 @@ describe('the TM pane editor region', () => {
     })
 
     /**
-     * **THE EDITS FOLLOW THE VIEW — `LambdaPane.receiveEditor`'s own fix, ported.** A `ScratchEditor` is
-     * built closing over the pane that FORKED it; without re-pointing `editor.onEdit`, a keystroke typed
-     * into the MOVED editor would still report through pane A's handler rather than pane B's.
+     * **A MOVED EDITOR'S EDITS STAY WITH THE COPY IT WAS BUILT FOR** — `PaneEvents.editSink`'s doc. The sink is taken
+     * when the editor is built, so neither the view it moves to nor the copy the view that built it shows later can
+     * redirect a keystroke. `builtFor` stands for the building view's binding: it moves on after the handover, as
+     * the app's view does when it is picked onto another copy, and the keystroke must still reach the first.
      */
     /**
      * `try`/`finally` AROUND THE FAKE-TIMER PAIR — Minor finding, review of Task 8. The sibling
@@ -310,18 +311,25 @@ describe('the TM pane editor region', () => {
      * no such guarantee, so a failing assertion here would leak fake timers into every test that runs
      * after it in this file.
      */
-    it('re-points a moved editor onto the receiving pane, not the one that built it', () => {
+    it('keeps a moved editor’s edits on the copy it was built for, whichever view holds it', () => {
       vi.useFakeTimers()
       try {
-        const onEditA = vi.fn()
-        const onEditB = vi.fn()
+        const heard: string[] = []
+        let builtFor = 'copy 1'
         const hostB = host()
-        const a = new TmPane(host(), { ...events(), editScratch: onEditA })
-        const b = new TmPane(hostB, { ...events(), editScratch: onEditB })
+        const a = new TmPane(host(), {
+          ...events(),
+          editSink: () => {
+            const copy = builtFor
+            return (src) => heard.push(`${copy}:${src}`)
+          },
+        })
+        const b = new TmPane(hostB, { ...events(), editSink: () => (src) => heard.push(`b:${src}`) })
         a.setEditor('tapes 1\n')
         const editor = a.takeEditor()
         if (editor === null) throw new Error('takeEditor returned null for a pane holding an editor')
         b.receiveEditor(editor)
+        builtFor = 'copy 2'
 
         const editorHost = hostB.querySelector<HTMLElement>('.term-editor')
         if (editorHost === null) throw new Error('the moved editor was not mounted on the receiving pane')
@@ -330,8 +338,7 @@ describe('the TM pane editor region', () => {
         view.dispatch({ changes: { from: 0, to: view.state.doc.length, insert: 'tapes 2\n' } })
         vi.advanceTimersByTime(300)
 
-        expect(onEditB).toHaveBeenCalledWith('tapes 2\n')
-        expect(onEditA).not.toHaveBeenCalled()
+        expect(heard).toEqual(['copy 1:tapes 2\n'])
       } finally {
         vi.useRealTimers()
       }
@@ -340,7 +347,7 @@ describe('the TM pane editor region', () => {
 
   /**
    * The re-seed branch (`setEditor` called again while an editor is already mounted) and the debounced
-   * `editScratch` callback — both unreachable from the tests above, and both real behaviour rather than
+   * `editSink` callback — both unreachable from the tests above, and both real behaviour rather than
    * padding: `ScratchBuffers.recompile` reseeds a live editor on every warm/cool cycle, and a keystroke
    * is the whole reason this pane offers an editor at all.
    *
@@ -361,10 +368,10 @@ describe('the TM pane editor region', () => {
       expect(host.querySelector('.cm-content')?.textContent).toContain('tapes 2')
     })
 
-    it('reports a debounced keystroke through PaneEvents.editScratch', () => {
+    it('reports a debounced keystroke through the sink PaneEvents.editSink returned', () => {
       const onEdit = vi.fn()
       const el = host()
-      const pane = new TmPane(el, { ...events(), editScratch: onEdit })
+      const pane = new TmPane(el, { ...events(), editSink: () => onEdit })
       pane.setEditor('tapes 1\n')
       const editorHost = el.querySelector<HTMLElement>('.term-editor')
       if (editorHost === null) throw new Error('the editor region was not mounted')

@@ -16,7 +16,6 @@
 //! `aot.rs`'s unit tests (`emits_a_valid_object_with_main_and_rt_run` et al).
 
 use redextape_core::tm::{DEFAULT_CAPS, defunc, lower_asm};
-use redextape_core::ty::Ty;
 use redextape_core::typeck::result_type;
 use redextape_core::value::format_value;
 use redextape_core::{desugar::desugar, parser::parse, run};
@@ -24,25 +23,6 @@ use redextape_native::{LinkOptions, OptLevel, emit_object, link_executable};
 
 fn cc_available() -> bool {
     std::env::var_os("PATH").is_some_and(|p| std::env::split_paths(&p).any(|d| d.join("cc").is_file()))
-}
-
-/// `result_type` can legitimately return an unresolved type variable for a program whose result type
-/// is never pinned down by anything (`head(nil)`: the reference `typeck` module documents this exact
-/// case as "nil-typed head is polymorphic but well-typed" in `result_type_infers_top_level`). But
-/// `emit_object` needs a *concrete* `Ty` to serialize into the CONFIG blob's decode/print branch --
-/// and that branch is provably dead for a program that faults or hits the depth cap: `rt_run` returns
-/// (exit 2 / exit 3) before ever reading `ty` on either path (see
-/// `redextape_native_rt::{rt_run, print_outcome}`). So substituting any concrete placeholder for a
-/// leftover `Var` here is safe on those paths and never masks a real value-decoding disagreement --
-/// the value cases below all resolve to genuinely concrete types already (`Nat`/`Bool`/`List<Nat>`)
-/// and never touch this substitution.
-fn concretize(ty: Ty) -> Ty {
-    match ty {
-        Ty::Var(_) => Ty::Nat,
-        Ty::List(t) => Ty::List(Box::new(concretize(*t))),
-        Ty::Fun(ps, r) => Ty::Fun(ps.into_iter().map(concretize).collect(), Box::new(concretize(*r))),
-        other => other,
-    }
 }
 
 /// Compile `src` to a native binary, run it, return (stdout, exit_code).
@@ -56,7 +36,14 @@ fn concretize(ty: Ty) -> Ty {
 /// accumulating under `/tmp` on every call, forever, the way it did before.
 fn run_binary(src: &str, name: &str) -> (String, i32) {
     let ast = parse(src).0.unwrap();
-    let ty = concretize(result_type(&ast).unwrap());
+    // `result_type` can legitimately return an unresolved type variable for a program whose result
+    // type is never pinned down by anything (`head(nil)`: the reference `typeck` module documents this
+    // exact case as "nil-typed head is polymorphic but well-typed" in `result_type_infers_top_level`).
+    // `emit_object` needs a *concrete* `Ty` to serialize into the CONFIG blob, and `ty::ground` writes
+    // each variable as `Nat` -- sound for a value, for the reason its own doc gives, and never read at
+    // all for a program that faults or hits the depth cap: `rt_run` returns (exit 2 / exit 3) before
+    // reading `ty` on either path (see `redextape_native_rt::{rt_run, print_outcome}`).
+    let ty = redextape_core::ty::ground(result_type(&ast).unwrap());
     let core = desugar(&ast);
     let prog = lower_asm(&core).or_else(|_| defunc(&core).and_then(|d| lower_asm(&d))).unwrap();
     let obj = emit_object(&prog, DEFAULT_CAPS, &ty, OptLevel::default()).unwrap();

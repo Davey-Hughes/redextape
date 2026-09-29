@@ -11,7 +11,7 @@ import type { Span } from './types'
  * from `main.ts`'s update listener in the same frame as every keystroke. Plan 7 part 3b replaced it
  * with `colour.ts`'s `treeSitterColour` — a `ViewPlugin` over a committed tree-sitter grammar, which
  * needs no effect because it reads the same `ViewUpdate` the editor already hands it, and which serves
- * the λ and TM copies as well as this one. One mechanism across four languages, at the cost of the
+ * the λ, asm and TM copies as well as this one. One mechanism across four languages, at the cost of the
  * synchrony: a grammar arrives over a fetch, so the first frame after a mount is uncoloured.
  *
  * WHAT STAYS HERE IS EVERYTHING THAT IS NOT SYNTAX. The three fields below are three other facts about

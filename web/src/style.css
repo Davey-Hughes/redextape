@@ -299,11 +299,15 @@ body {
    Finding 2. `buffer-list.ts`'s temperature button shipped with no class at all, so nothing in this file
    matched it and it rendered as a native grey sans-serif button beside a monospace bordered one in the
    same row; adding it to THIS selector rather than writing a fourth block is the same reasoning that put
-   `.buffer-delete` here — one declaration, not a second copy to drift out of step with it. */
+   `.buffer-delete` here — one declaration, not a second copy to drift out of step with it.
+
+   `.buffer-new` — *new asm copy* and *new TM copy* — JOINS IT FOR THE SAME REASON AND AFTER THE SAME DEFECT: it had
+   no rule, so the two rendered as the browser's own buttons, touching, beside the menu's styled ones. */
 .view-more,
 .view-close,
 .buffer-delete,
 .buffer-temperature,
+.buffer-new,
 .panel-actions button {
   font: inherit;
   font-family: var(--font-mono);
@@ -517,11 +521,21 @@ body {
   gap: var(--space-2) var(--space-3);
   margin-bottom: var(--space-2);
 }
+/* THE HEADING WRAPS THE HEADER AS ITS TITLE DOES, WHATEVER ITS BADGE. A copy's `copy · not linked` sat in the
+   heading's width when the header broke its line, so in a half-width view it pushed `⋯` and `✕` onto a second row
+   where the program's view, with the same title, fits one — about 30px out of a view whose listing is already below
+   the fold. So the line breaks on the heading's MIN-CONTENT width, which is the title's (the badge's own is one
+   character, below), and the heading then grows toward its max-content width ahead of the step controls — the 1000
+   — so the badge takes whatever the row has left, cut with an ellipsis. Alone on a narrower row, it shrinks to the
+   row, the title's text taking the ellipsis too (`.view-title-text`), where it used to wrap to two lines. */
 .view-header .view-title-heading {
   display: flex;
   align-items: center;
   gap: var(--space-2);
   margin: 0;
+  flex: 1000 1 min-content;
+  min-width: 0;
+  max-width: max-content;
 }
 .view-steps {
   flex: 1 1 auto;
@@ -544,6 +558,19 @@ body {
   color: var(--fg);
   letter-spacing: inherit;
   text-transform: none;
+  /* THE TITLE KEEPS ITS WIDTH WHILE THE BADGE BESIDE IT CAN GIVE ANY, and gives way only to the heading's own width,
+     alone on a row narrower than it. A shrink factor, however small beside the badge's, still took a fraction of a
+     pixel from the title, and the ellipsis below then cut its last characters where there was room for them. */
+  flex: none;
+  max-width: 100%;
+}
+/* A TITLE IS ONE LINE, CUT WITH AN ELLIPSIS WHEN THE ROW IS NARROWER THAN IT (the heading's rule above); its full
+   text stays in the document, where the accessible name comes from, and in `.view-title-text`'s `title`. */
+span.view-title,
+.view-title-text {
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 button.view-title {
   display: inline-flex;
@@ -561,6 +588,7 @@ button.view-title[aria-expanded="true"] {
 }
 .view-title-caret {
   rotate: 90deg;
+  flex: none;
 }
 /* `copy · not linked` — the `[detached]` badge's successor, and its rule: NOT COLOUR-ONLY. A border and the
    monospace face carry it; `tests/browser/view-status.test.ts` asserts the border computes to a non-zero
@@ -574,6 +602,20 @@ button.view-title[aria-expanded="true"] {
   letter-spacing: normal;
   text-transform: none;
   color: var(--fg);
+  /* ONE LINE, CUT WITH AN ELLIPSIS TO THE ROOM THE HEADER LEAVES IT (the heading's rule above), its full meaning in
+     its `title`. `word-break: break-all` is what makes its min-content width one character, so the header breaks its
+     line on the title alone, and it fills a line to its last character where a break at a space would leave a gap
+     inside the border; the one-line clamp then shows that first line, ended by `…`, where the badge used to wrap to
+     two lines. IT GIVES WAY BEFORE THE TITLE DOES (`.view-title`), since the title says which view this is and the badge
+     only that it is a copy, which its border and the view's own title already show. */
+  flex: 0 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  word-break: break-all;
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 1;
+  line-clamp: 1;
 }
 /* The title's menu, on the view menu's positioning — `.view-menu`'s comment has the argument for every
    declaration this SHARES with it: the implicit anchor, `position-try-fallbacks` as the viewport edge,
@@ -737,7 +779,8 @@ button.view-title[aria-expanded="true"] {
 }
 
 .tm-status,
-.tm-value {
+.tm-value,
+.asm-value {
   font-family: var(--font-mono);
   font-size: var(--step--1);
   color: var(--fg-dim);
@@ -751,7 +794,8 @@ button.view-title[aria-expanded="true"] {
    NOT LOAD-BEARING IN TODAY'S LAYOUT, MEASURED. `.tm-pane` is a block box, so an empty line's margin collapses into
    `.tm-status`'s: in Chromium the status-to-tapes gap measured 8 px with this rule, 8 px without it, and 8 px with the
    line at `display: none`. `tm-pane-editor.test.ts` holds the gap itself, not the rule. */
-.tm-value:empty {
+.tm-value:empty,
+.asm-value:empty {
   margin-bottom: 0;
 }
 
@@ -1071,9 +1115,10 @@ button.view-title[aria-expanded="true"] {
   min-width: 0;
 }
 
-/* The buffer's own term — `buffer-list.ts`'s `BufferRow.term` has why the row carries one at all.
-   Monospace because it is a term and the panes print terms in `--font-mono`; dim and one step down
-   because the NAME is what the row is aimed at and this is what tells two names apart.
+/* What the buffer holds: a λ copy's term, or a machine copy's run as its readout says it — `buffer-list.ts`'s
+   `BufferRow.term` has why the row carries one at all. Monospace because the panes print terms, and the strip
+   its readout, in `--font-mono`; dim and one step down because the NAME is what the row is aimed at and this is
+   what tells two names apart.
 
    TRUNCATED HERE RATHER THAN IN THE BUILDER, which is the other half of that file's argument: the
    ellipsis lands at whatever width the list has at this zoom and font size, and the whole term stays
@@ -1093,6 +1138,12 @@ button.view-title[aria-expanded="true"] {
 .buffer-row-term.is-absent {
   font-family: inherit;
   font-style: italic;
+}
+
+/* THE NEW-COPY CONTROLS SIT APART, AND IN LINE WITH THE ROWS: each takes a row's inset as its margin, so two side by
+   side are a row's inset apart twice over, and neither touches the list's edge. */
+.buffer-new {
+  margin: var(--space-1);
 }
 
 /* THE CONTROL DOES NOT SHRINK. Without this the flex line takes the button's width first when a term is
@@ -1970,7 +2021,8 @@ main {
 /* THE ASM VIEW (Plan 7 part 5 spec §6.1): the TM view's mechanism, with its own shares. The listing takes two, the
    registers and call stack one between them, side by side, and the heap one; a closed panel keeps only its header, and
    each body keeps a floor of five rows. `.asm-machine` is the row the registers and the call stack share: it wraps, so
-   the two stack when the view is too narrow for both, and it takes no share of its own while both are closed. */
+   the two stack when the view is too narrow for both, and it takes no share of its own while both are closed. On a
+   copy the text panel keeps its own height above them all and the outline takes one share below, as in a TM view. */
 .pane[data-kind="asm"] {
   display: flex;
   flex-direction: column;
@@ -1983,7 +2035,12 @@ main {
 .asm-pane > * {
   flex: none;
 }
-.asm-pane > .panel[data-open="true"],
+/* NAMED, NOT EVERY OPEN PANEL: the text panel keeps its own height, and both it and the outline are `hidden` on a view of
+   the program — a `display` here would outrank the browser's `[hidden]` and show them, the trap `hidden.test.ts` found
+   in the TM view. */
+.asm-pane > .panel[data-panel="listing"][data-open="true"],
+.asm-pane > .panel[data-panel="heap"][data-open="true"],
+.asm-pane > .panel[data-panel="outline"][data-open="true"]:not([hidden]),
 .asm-machine > .panel[data-open="true"] {
   display: flex;
   flex-direction: column;
@@ -1992,8 +2049,14 @@ main {
   flex: 2 1 0;
 }
 .asm-pane > .panel[data-panel="heap"][data-open="true"],
+.asm-pane > .panel[data-panel="outline"][data-open="true"],
 .asm-pane > .asm-machine:has(> .panel[data-open="true"]) {
   flex: 1 1 0;
+}
+.asm-pane > .panel[data-open="true"] > .outline {
+  flex: 1 1 0;
+  max-height: none;
+  min-height: 5lh;
 }
 .asm-machine {
   display: flex;

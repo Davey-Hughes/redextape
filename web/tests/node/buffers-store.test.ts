@@ -73,13 +73,20 @@ describe('parseBuffers', () => {
     expect(parseBuffers(raw({ buffers: [{ ...VALID.buffers[0], collapsed: 'yes' }] }))).toBeNull()
   })
 
-  it('answers null for a leg that is neither lambda nor tm', () => {
+  it('answers null for a leg that is not a leg', () => {
     expect(parseBuffers(raw({ buffers: [{ ...VALID.buffers[0], leg: 'source' }] }))).toBeNull()
   })
 
   // THE OTHER LEG IS ACCEPTED TOO — this rejects only a leg outside `Leg`, not `'tm'` itself.
   it('accepts a tm buffer', () => {
     expect(parseBuffers(raw({ buffers: [{ ...VALID.buffers[0], leg: 'tm' }] }))?.buffers[0]?.leg).toBe('tm')
+  })
+
+  // AN ASM COPY IS STORED AT VERSION 2 (Plan 7 part 5 spec, amendment 23): the version did not move, so a store written
+  // before asm copies existed and one holding one read under the same version.
+  it('accepts an asm buffer, at the version it always was', () => {
+    expect(BUFFERS_VERSION).toBe(2)
+    expect(parseBuffers(raw({ buffers: [{ ...VALID.buffers[0], leg: 'asm' }] }))?.buffers[0]?.leg).toBe('asm')
   })
 
   it('answers null for a binding naming no buffer in the same payload', () => {

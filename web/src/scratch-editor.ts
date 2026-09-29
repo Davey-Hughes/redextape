@@ -23,6 +23,14 @@ export type ScratchEditorConfig = {
   initial: string
   /** `compile.ts`'s `DEBOUNCE_MS`, passed in rather than imported — see the class doc. */
   debounceMs: number
+  /**
+   * Where this editor's edits go — for the app, a rebuild of the copy it was built for (`PaneEvents.editSink`).
+   *
+   * **FIXED FOR THE EDITOR'S LIFE, BECAUSE AN EDITOR IS ONE COPY'S.** It moves between views, and the view it was
+   * built on moves between copies, but it only ever holds one copy's text — `document` below is keyed the same way
+   * for the same reason. A sink that resolved "the copy the view shows now" when it fired sent typing into the copy
+   * a view had just moved to.
+   */
   onEdit: (src: string) => void
   /**
    * The colourer for this editor's language — `colour.ts`'s `treeSitterColour`, already built.
@@ -103,7 +111,7 @@ export type ScratchEditorConfig = {
 }
 
 /**
- * **THE SCRATCH TEXT EDITOR — design §4.2's upper region and §4.3's recompile trigger, for either leg
+ * **THE SCRATCH TEXT EDITOR — design §4.2's upper region and §4.3's recompile trigger, for any leg
  * a scratch buffer can hold.**
  *
  * A CodeMirror 6 instance over a scratch session's text. It is the surface 5d-i's §6 said had no
@@ -141,6 +149,17 @@ export type ScratchEditorConfig = {
 export class ScratchEditor {
   #view: EditorView
   #timer: ReturnType<typeof setTimeout> | null = null
+  /**
+   * The pre-format text `format()` took off `#timer`, still owed to `onEdit` — or `null` when nothing is owed.
+   *
+   * **SET BY `format()`, DISCHARGED BY WHICHEVER OF `flush()` OR `format()`'S OWN CONTINUATION GETS THERE
+   * FIRST.** `format()` clears `#timer` at its start and carries the pending edit inside its own async closure
+   * until the server answers — so `flush()`, which used to look at `#timer` alone, saw nothing pending for the
+   * whole time a format is in flight. A delete or a pause reads a copy's record before any editor comes down
+   * (`EditorCustody.flush`), which is BEFORE that closure can ever run; without this field the record was read
+   * stale and undo restored text missing the keystrokes typed before *format*.
+   */
+  #formatPending: string | null = null
   #ms: number
   #onEdit: (src: string) => void
   /**
@@ -224,57 +243,76 @@ export class ScratchEditor {
   /**
    * This editor's own DOM root — CodeMirror's node, not a wrapper around it.
    *
-   * EXPOSED SO A CALLER CAN RELOCATE IT — `LambdaPane.receiveEditor` (wave 3's editor-moves rule) is
-   * the one caller, and it exists precisely because moving `dom` into a different parent element is
-   * what CodeMirror already supports for free: `Node.append` on a node already in the document MOVES
-   * it rather than duplicating it — the DOM removes a node from its old parent before inserting it, so
-   * there is never a moment with two copies and never a detach call to write. No CodeMirror API is
-   * needed beyond that; this getter is the only reason
-   * `#view` was ever private.
+   * EXPOSED SO A CALLER CAN RELOCATE IT — `LambdaPane.receiveEditor` (wave 3's editor-moves rule) and
+   * `CopyEditor.receiveEditor` are the callers, and they exist precisely because moving `dom` into a
+   * different parent element is what CodeMirror already supports for free: `Node.append` on a node
+   * already in the document MOVES it rather than duplicating it — the DOM removes a node from its old
+   * parent before inserting it, so there is never a moment with two copies and never a detach call to
+   * write. No CodeMirror API is needed beyond that; this getter is the only reason `#view` was ever
+   * private.
    */
   get dom(): HTMLElement {
     return this.#view.dom
   }
 
   /**
-   * Re-point where this editor's debounced edits go — `LambdaPane.receiveEditor`'s other half, and the
-   * half that was missing.
+   * Re-point what refreshes when the server publishes for this document — the outline of the view the editor is
+   * mounted in, which changes when *move the editor here* moves it (`CopyEditor.receiveEditor`).
    *
-   * **THE VIEW MOVES AND ITS CALLBACK DID NOT, WHICH ROUTED KEYSTROKES TO ANOTHER BUFFER — found by
-   * driving the app in a browser.** `dom` above is the whole of what a relocation used to move: a
-   * `ScratchEditor` is constructed by the pane that FORKS, closing over that pane's `editScratch`, and
-   * `receiveEditor` re-parents the node without touching this field. So an editor claimed by a second
-   * pane still reported its edits through the FIRST pane's handler — and `transport.ts` resolves
-   * `slot.binding.session` at edit time, so the moment that first pane was rebound anywhere else, typing
-   * in the moved editor recompiled whatever the first pane happened to be showing. Measured in Chromium:
-   * three characters typed into a pane showing `scratch 1` put the parse error on a different pane's
-   * editor, over `scratch 2`.
-   *
-   * A SETTER RATHER THAN A SESSION ID CARRIED ON THIS CLASS. The alternative is to make the editor name
-   * its own buffer and have `recompile` read that — truer in the abstract, and a bigger change than the
-   * defect warrants: it would give this class a second identity to keep in step with custody's, which
-   * already keys editors by session. What is actually wrong is narrower and is exactly what this fixes:
-   * the ONE field a relocation has to carry across was not being carried.
-   *
-   * A PENDING DEBOUNCE FROM BEFORE THE MOVE FIRES THROUGH THE NEW HANDLER, which is correct rather than
-   * merely tolerable: `#schedule` reads this field when the timer expires, and the text it will send is
-   * this editor's text, which belongs to the buffer whichever pane is showing it.
+   * **ONLY THIS ONE MOVES WITH THE EDITOR, AND `onEdit` DOES NOT.** An edit belongs to the copy the editor was built
+   * for, wherever it is shown (`ScratchEditorConfig.onEdit`); a server update is news for the view showing it, whose
+   * outline lists the document.
    */
-  set onEdit(fn: (src: string) => void) {
-    this.#onEdit = fn
+  set onServerUpdate(fn: (() => void) | undefined) {
+    this.#onServerUpdate = fn
   }
 
   #schedule(): void {
     if (this.#timer !== null) clearTimeout(this.#timer)
-    this.#timer = setTimeout(() => {
-      this.#timer = null
-      const text = this.#view.state.doc.toString()
-      // TOLD TO THE SERVER ON THE SAME DEBOUNCE AS THE RECOMPILE, not on every keystroke. The
-      // source editor posts per keystroke because nothing else there is debounced; here the
-      // gesture already has a speed, and a buffer's text is the thing both consumers read.
-      this.#document?.client.changeDocument(this.#document.uri, text)
+    this.#timer = setTimeout(() => this.#send(), this.#ms)
+  }
+
+  /** Send the editor's text as an edit — the debounce's body, and `flush`'s. */
+  #send(): void {
+    this.#timer = null
+    const text = this.#view.state.doc.toString()
+    // TOLD TO THE SERVER ON THE SAME DEBOUNCE AS THE RECOMPILE, not on every keystroke. The
+    // source editor posts per keystroke because nothing else there is debounced; here the
+    // gesture already has a speed, and a buffer's text is the thing both consumers read.
+    this.#document?.client.changeDocument(this.#document.uri, text)
+    this.#onEdit(text)
+  }
+
+  /**
+   * Send a pending edit now rather than when its debounce fires, and do nothing when none is pending.
+   *
+   * **WHAT A VIEW OWES ITS COPY BEFORE IT STOPS SHOWING IT.** A keystroke reaches its copy when the debounce fires, so
+   * typing is in the editor alone for up to `debounceMs` after the last key. `destroy` below flushes, so a view that
+   * destroys the editor it leaves sends that typing first; `editor-custody.ts`'s `flush` calls this where a copy's
+   * record is read or put to sleep before any editor comes down — a delete, whose undo restores what it read, and a
+   * pause.
+   *
+   * **A FORMAT IN FLIGHT HOLDS ITS OWN PENDING TEXT OUTSIDE `#timer`, AND THIS IS WHERE THAT GETS SENT TOO.**
+   * `format()` clears `#timer` at its start and carries what it took off it inside its own async closure until the
+   * server answers, in `#formatPending` — so a `flush()` that looked at `#timer` alone found nothing pending for the
+   * whole time a format is in flight, and a delete's undo restored text missing the keystrokes typed before *format*.
+   * `#formatPending` is cleared here the same way `#timer` is, so `format()`'s own completion does not send it again.
+   */
+  flush(): void {
+    if (this.#timer !== null) {
+      clearTimeout(this.#timer)
+      // A LATER DEBOUNCE ALREADY SUPERSEDES WHATEVER `format()` TOOK: `#send()` below sends the FULL current
+      // text, cumulative with everything typed — including the pre-format keystrokes this field was holding —
+      // so nothing is lost by discarding it unsent here rather than sending it as a second, stale call.
+      this.#formatPending = null
+      this.#send()
+      return
+    }
+    if (this.#formatPending !== null) {
+      const text = this.#formatPending
+      this.#formatPending = null
       this.#onEdit(text)
-    }, this.#ms)
+    }
   }
 
   /**
@@ -361,41 +399,56 @@ export class ScratchEditor {
     }
     const asked = this.#view.state.doc
     const before = asked.toString()
+    // **TAKEN OFF THE TIMER AND HELD HERE INSTEAD OF ONLY IN THIS CLOSURE**, so `flush()` still has
+    // something to send while this waits on the server — see `#formatPending`'s own doc for why a
+    // closure alone was not enough (a delete or a pause reads a copy's record before this can ever run).
+    if (pending) this.#formatPending = before
     doc.client.changeDocument(doc.uri, before)
     try {
       const edits = await doc.client.format(doc.uri)
-      if (this.#destroyed) return
-      applyEdits(this.#view, edits, asked)
+      if (!this.#destroyed) applyEdits(this.#view, edits, asked)
     } catch {
       // Reported by the client, once, for the server rather than for this gesture.
     }
-    // **CHECKED AFTER THE AWAIT, BECAUSE `destroy()` CANNOT CANCEL THIS.** `destroy()` clears the
-    // debounce timer and its doc calls that cancel the point — but a format launched from the blur
-    // handler is an async continuation with no timer to clear, and a blur is exactly what a click
-    // on `retire` produces. Without this the gesture would recompile a buffer that has been
-    // removed and dispatch into a destroyed view.
-    if (this.#destroyed) return
+    // **`destroy()` CAN NOW DISCHARGE THIS BEFORE THE AWAIT EVER RETURNS, WHERE IT ONCE COULD NOT.**
+    // `destroy()` calls `flush()`, and `flush()` sends `#formatPending` the moment it is asked —
+    // synchronously, from a delete or a pause that reads a copy's record before any editor comes down
+    // (`EditorCustody.flush`), and from `destroy()` itself when a pick or a close is what ends the view.
+    // `owed` is what is LEFT for this method to send once the server answers: `false` when `flush()`
+    // already sent it, `true` otherwise (destroyed with no intervening flush, or never destroyed at all).
+    // Typing that overtook the format and was sent by a LATER debounce clears it too (`flush()`'s own
+    // doc) — sending the same text twice would rebuild the copy once for nothing.
+    const owed = this.#formatPending !== null
+    this.#formatPending = null
+    if (this.#destroyed) {
+      if (owed) this.#onEdit(this.#view.state.doc.toString())
+      return
+    }
     const after = this.#view.state.doc.toString()
     // Rebuilt when a recompile was owed, or when the text changed — by the format, or by typing that
     // overtook it. Skipped when neither holds, so formatting an untouched, already-formatted editor
     // costs nothing.
-    if (pending || after !== before) this.#onEdit(after)
+    if (owed || after !== before) this.#onEdit(after)
   }
 
   /**
-   * Tear down the instance and **cancel any pending recompile**.
+   * Tear down the instance, **sending any pending edit first** (`flush`).
    *
-   * THE CANCEL IS THE POINT. A retirement destroys this while a debounce may be in flight; firing it
-   * afterwards would post a `lambda-scratch` to a session the pool has already unbound. (The
-   * retirement in question was §4.3's recompile-from-source until 5d-ii-c decision 2 deleted it; a
-   * rebind away from the buffer destroys this on the same terms, and the retire control §4.4 puts in
-   * the header list is the other.) `SessionClient.scratch` guards on generation, so the message would be
-   * dropped rather than misdelivered — but a message sent to be dropped is a race left in on purpose.
+   * **THE PENDING EDIT IS SENT, WHERE THIS USED TO CANCEL IT, AND THE CANCEL LOST TYPING.** A TM or asm view destroys
+   * the editor it leaves (spec amendment 33) — a pick through its title, a close, a change to another leg — and a λ
+   * view destroys its editor when it moves to the program, so cancelling dropped whatever was typed in the last
+   * `debounceMs` before the view moved, silently. The cancel was there for a retirement: firing after one "would post
+   * a `lambda-scratch` to a session the pool has already unbound". Sending now reaches no worker either, because the
+   * sink an editor is built with is its own copy's (`ScratchEditorConfig.onEdit`), and `ScratchBuffers.recompile`
+   * posts nothing for a copy that is deleted or asleep — it records the text of one asleep, which is the pause
+   * keeping what was typed.
+   *
+   * **AND `flush()` NOW REACHES A FORMAT IN FLIGHT'S OWN PENDING TEXT TOO** (`#formatPending`), not only `#timer`'s —
+   * `format()`'s own doc has the reason a closure alone was not enough.
    */
   destroy(): void {
+    this.flush()
     this.#destroyed = true
-    if (this.#timer !== null) clearTimeout(this.#timer)
-    this.#timer = null
     // CLOSED WITH THE EDITOR, because the document exists to serve it. A pane rebinding away
     // destroys this editor while the buffer lives on; the next pane to show that buffer builds a
     // new editor, which opens the document again. Leaving it open would keep publishing

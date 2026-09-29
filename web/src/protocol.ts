@@ -515,6 +515,11 @@ export type RunRequest =
    */
   | { kind: 'tm-scratch'; gen: number; src: string }
   /**
+   * Build an asm copy from `.asm` TEXT and run it — Plan 7 part 5 spec §7. `tm-scratch`'s shape and for its reasons: no
+   * `step`, since the text is the program, and no `encoding`, since a copy decodes by its own `result` header.
+   */
+  | { kind: 'asm-scratch'; gen: number; src: string }
+  /**
    * Record further. For a `capped` leg the worker raises the cursor cap first; for a `budget` leg it
    * simply allows another `HISTORY_BYTES` and resumes.
    */
@@ -609,6 +614,21 @@ export type RunReply =
    */
   | { kind: 'tm-value'; gen: number; run: ValueRun; value: Decoded }
   /**
+   * An asm copy was built: its status, its listing and its value — `tm-scratch-compiled`'s counterpart.
+   *
+   * **THE VALUE COMES WITH THE BUILD**, where a TM copy's streams in on `tm-value`: `asmScratch` runs the program to
+   * its end before it answers, as `compile` does (spec amendment 26). `asm` is the same `AsmStatus` `compiled`
+   * carries, since every field of it is true of a copy. No `text` echo, for `tm-scratch-compiled`'s reason: the main
+   * thread sent the text.
+   */
+  | { kind: 'asm-scratch-compiled'; gen: number; asm: AsmStatus; asmProgram: AsmProgram; value: Decoded }
+  /**
+   * An asm copy's value after `[continue]` carried its cursor further — where a compiled session's arrives in
+   * `result`, which a copy never gets. Only a step cap can be continued, so this changes a value only for a copy
+   * whose build that cap stopped.
+   */
+  | { kind: 'asm-value'; gen: number; value: Decoded }
+  /**
    * A session exists. Sent BEFORE any recording, so the panes can mount and show their declines
    * while the legs are still being stepped.
    *
@@ -646,8 +666,9 @@ export type RunReply =
        */
       linkIndex: LinkIndexWire | null
       /**
-       * This session's machine as `.tm` text, or `null` when there is no TM leg or the machine is over
-       * `MAX_FORK_RULES`.
+       * This session's machine as `.tm` text, or `null` when there is no TM leg, the machine is over
+       * `MAX_FORK_RULES`, or the program's result type is a function (`tmResultDecodable` below is
+       * `false`) — a `.tm` header's `result` line has no way to name a function value.
        *
        * **IT RIDES THIS REPLY FOR `linkIndex`'s REASON, AND THE CAP IS WHAT MAKES THAT AFFORDABLE.**
        * A lazy fetch on first click costs a round trip into a worker measured starved for 4,679 ms
@@ -655,12 +676,36 @@ export type RunReply =
        * post 7.8 MB on every `list60` compile whether or not anyone ever forks; eager and capped costs
        * at most `MAX_FORK_RULES` rules of text.
        *
-       * **`null` IS THE ONLY FACT BEHIND THE REFUSAL.** There is no `canFork` boolean beside it: a
-       * second encoding of one fact is how a control comes to be offered for a fork that cannot happen.
-       * The pane words its refusal from `ruleCount(tmProgram)`, so the decision and the message read
-       * the same object.
+       * **`null` IS THE ONLY FACT BEHIND *WHETHER* THE CONTROL IS OFFERED.** There is no `canFork`
+       * boolean beside it: a second encoding of one fact is how a control comes to be offered for a
+       * fork that cannot happen. `tmResultDecodable` exists beside it anyway, for a narrower job: not
+       * deciding presence, but telling apart the two reasons `null` can now mean, so the pane can word
+       * the right one — `ruleCount(tmProgram)` for one, `tmResultDecodable` for the other.
        */
       tmText: string | null
+      /**
+       * Whether this session's result type has a decoding a `.tm` header's `result` line can name —
+       * `false` only for a function-valued program (`ty::is_decodable`'s answer, `redextape-core`).
+       *
+       * **READ ONLY WHEN `tmProgram` IS NOT `null` AND `tmText` IS**, to tell "the type has no decoding"
+       * apart from "the machine is over `MAX_FORK_RULES`", which also leaves `tmText` `null` without
+       * this session ever having been asked (`session-worker.ts` guards the call with this file's own
+       * `forkable`, short-circuiting `session.tmText()` first). `CopyEditor.setForkAvailable`'s third
+       * argument is this fact, worded into *edit a copy*'s disabled reason by `#refreshDetach`.
+       */
+      tmResultDecodable: boolean
+      /**
+       * This session's asm program as `.asm` text, for *edit a copy* — the role `tmText` plays for the TM view — or
+       * `null` when there is no asm leg or the text is longer than `session.rs`'s `MAX_SCRATCH_ASM_BYTES`, which no
+       * copy could build. As with `tmText`, `null` is the only fact behind a refusal: the view words its reason from
+       * the listing's instruction count, and offers *edit a copy* disabled where there is a program and no text.
+       *
+       * **NO EQUIVALENT OF `tmResultDecodable` FOR ASM.** A function-valued program's asm text is still
+       * `Some`, headerless (`AsmHeader::for_type` answers `None` and `asm_text` falls back to
+       * `print_asm`) — the asm leg's header is optional, unlike TM's, so it has no analogous refusal to
+       * word.
+       */
+      asmText: string | null
     }
   | { kind: 'lambda-frames'; gen: number; frames: LambdaState[]; done: RecordEnd | null }
   | { kind: 'tm-frames'; gen: number; frames: TmState[]; done: RecordEnd | null }

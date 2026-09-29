@@ -4,7 +4,7 @@ import { SHELL, until } from './harness'
 import { lambdaSettled } from './lambda-text'
 
 /**
- * **THE SECOND EDIT GESTURE, DRIVEN THROUGH THE APP** — design §4.3's `editScratch`, plan T8's last
+ * **THE SECOND EDIT GESTURE, DRIVEN THROUGH THE APP** — design §4.3's edit path (`editSink`), plan T8's last
  * obligation. `scratch-fork.test.ts`'s new DOM `describe` proves the FIRST gesture (a truncated frame
  * forks and seeds an editor); this file proves the second one works on what that editor becomes: a
  * real CodeMirror buffer whose keystrokes recompile the SAME scratch (`ScratchBuffers.recompile`,

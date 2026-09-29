@@ -9,7 +9,17 @@ import { LEGS } from './legs'
 import type { SplitChoices } from './pane-chrome'
 import type { Leg, RecordEnd } from './protocol'
 import type { SessionClient, SessionId } from './session-client'
-import type { AsmProgram, AsmState, LambdaState, TmProgram, TmScratchStatus, TmState, ValueReading } from './types'
+import type {
+  AsmProgram,
+  AsmState,
+  AsmStatus,
+  Decoded,
+  LambdaState,
+  TmProgram,
+  TmScratchStatus,
+  TmState,
+  ValueReading,
+} from './types'
 
 /**
  * One leg's live state on this side of the boundary: its history, how recording ended, and what the
@@ -94,8 +104,31 @@ export type SessionLegs = { [L in Leg]?: LegState<LegFrame[L]> }
  * `MAX_FORK_RULES` (`protocol.ts`'s `compiled` reply, `tmText`'s own doc: "null when there is no TM leg  check-attributions: allow
  * or the machine is over the cap") — so this field carries a fact `program`'s own nullability cannot
  * stand in for.
+ *
+ * **`tmResultDecodable` RIDES BESIDE `tmText` FOR THE IDENTICAL REASON**, and is `TmPane.setForkAvailable`'s
+ * own third argument: `tmText: null` alone cannot say WHY once a function-valued program joined "over
+ * `MAX_FORK_RULES`" as a second cause, and `CopyEditor.#refreshDetach` needs to know which one to word.
  */
-export type TmCompiled = { readonly program: TmProgram; readonly tapeNames: string[]; readonly tmText: string | null }
+export type TmCompiled = {
+  readonly program: TmProgram
+  readonly tapeNames: string[]
+  readonly tmText: string | null
+  readonly tmResultDecodable: boolean
+}
+
+/**
+ * The asm listing a session compiled, and the text *edit a copy* seeds a copy from — `TmCompiled`'s shape for the asm
+ * leg, and for its reason: the view that offers a copy needs both, and a view built after the reply is seeded from
+ * here. `asmText` is `null` on a copy, which offers no copy of itself, and for a program whose text is longer than
+ * `session.rs`'s `MAX_SCRATCH_ASM_BYTES`, which no copy could build.
+ */
+export type AsmCompiled = { readonly program: AsmProgram; readonly asmText: string | null }
+
+/**
+ * What an asm copy's views were last told about its run: the status and value its build reply carried, the value
+ * replaced by any `asm-value` a `[continue]` brings. `null` on every session that is not an asm copy.
+ */
+export type AsmScratchReading = { readonly status: AsmStatus; readonly value: Decoded }
 
 /**
  * What a TM buffer's panes were last told about the FILE rather than the machine: its status, and its value run's
@@ -187,11 +220,13 @@ export type SessionEntry = {
    */
   tmScratch: TmScratchReading | null
   /**
-   * The asm listing a session's last `compiled` reply carried, retained for `tmProgram`'s reason: an asm view created
-   * after that reply is seeded from here (`pane-host.ts`'s `seedAsmPane`). `null` for a session with no asm leg — a
-   * program that does not lower, and every copy, since no copy has an asm leg until part 5c.
+   * The asm listing a session's last `compiled` or `asm-scratch-compiled` reply carried, and the program's text,
+   * retained for `tmProgram`'s reason: an asm view created after that reply is seeded from here (`pane-host.ts`'s
+   * `seedAsmPane`). `null` for a session with no asm leg — a program that does not lower, and a λ or TM copy.
    */
-  asmProgram: AsmProgram | null
+  asmProgram: AsmCompiled | null
+  /** An asm copy's status and value, retained for `tmScratch`'s reason. `null` for every other session. */
+  asmScratch: AsmScratchReading | null
 }
 
 /**

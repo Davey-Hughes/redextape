@@ -6,7 +6,8 @@ import type { ClientPort, PoolPort, SessionId } from '../../src/session-client'
 import { SessionClient, SessionPool } from '../../src/session-client'
 import type { LegState, SessionEntry } from '../../src/sessions'
 import { PaneSlot, SessionRegistry } from '../../src/sessions'
-import type { LambdaState } from '../../src/types'
+import type { LambdaState, TmState } from '../../src/types'
+import { frameOf } from './asm-fixtures'
 
 /**
  * **A FORK MINTS A BUFFER** — 5d-ii-c design decision 1, at the level where the rule is decided rather
@@ -158,6 +159,7 @@ function sourceEntry(text = 'from source'): SessionEntry {
     tmProgram: null,
     tmScratch: null,
     asmProgram: null,
+    asmScratch: null,
   }
 }
 
@@ -753,7 +755,8 @@ describe('ScratchBuffers.noSessionReply', () => {
     const phantom = buffers.fork(slotA, 'not a term (((', 0, 'lambda')
     const live = buffers.fork(slotB, 'λx. x', 0, 'lambda')
     // THE ONE FACT THAT DISTINGUISHES THE TWO BUFFERS — `noSessionReply`'s discriminator is whether the
-    // λ leg has ever recorded a frame, and the worker that would have recorded one is a fake port here.
+    // copy's own leg, λ for both here, has ever recorded a frame, and the worker that would have recorded one
+    // is a fake port here.
     reg.legOf({ session: live, leg: 'lambda' }).hist.push(lambdaFrame('λx. x'), 1)
 
     const diagnostics = [{ span: { start: 0, end: 0 }, severity: 'Error' as const, message: 'unexpected `(`' }]
@@ -825,6 +828,45 @@ describe('ScratchBuffers.noSessionReply', () => {
   })
 })
 
+/**
+ * **A COPY'S FAILED BUILD IS JUDGED BY ITS OWN LEG** (Plan 7 part 5 spec, amendment 27). The discriminator — has this
+ * copy recorded a frame — used to read the λ leg for every copy, and a TM or asm copy has none: every unparseable edit to
+ * one that had built was answered as a failed build, which `replies.ts` says in a notice, where a λ copy's edit shows
+ * its diagnostics in the editor alone.
+ */
+describe('ScratchBuffers.noSessionReply, on the copy’s own leg', () => {
+  const tmFrame: TmState = {
+    state: 0,
+    step: 0,
+    heads: [0],
+    window_start: [0],
+    window: [['_']],
+    source_node: null,
+    rule: null,
+  }
+  const diagnostics = [{ span: { start: 0, end: 0 }, severity: 'Error' as const, message: 'unknown mnemonic `x`' }]
+
+  it('answers null for a TM copy that has built a frame, and the diagnostics for one that has not', () => {
+    const { reg, buffers } = harness()
+    const built = buffers.forkBlank('tm')
+    const never = buffers.forkBlank('tm')
+    reg.legOf({ session: built, leg: 'tm' }).hist.push(tmFrame, 1)
+
+    expect(buffers.noSessionReply(built, diagnostics)).toBe(null)
+    expect(buffers.noSessionReply(never, diagnostics)).toEqual(diagnostics)
+  })
+
+  it('answers null for an asm copy that has built a frame, and the diagnostics for one that has not', () => {
+    const { reg, buffers } = harness()
+    const built = buffers.forkBlank('asm')
+    const never = buffers.forkBlank('asm')
+    reg.legOf({ session: built, leg: 'asm' }).hist.push(frameOf(), 1)
+
+    expect(buffers.noSessionReply(built, diagnostics)).toBe(null)
+    expect(buffers.noSessionReply(never, diagnostics)).toEqual(diagnostics)
+  })
+})
+
 describe('ScratchBuffers.recompile', () => {
   /**
    * **5d-i §4.3's EDIT PATH, AND `recompile`'s OWN DOC IS THE CLAIM UNDER TEST: "IT IS `fork` WITH
@@ -850,7 +892,7 @@ describe('ScratchBuffers.recompile', () => {
   /**
    * **THE BUFFER IT NAMES, NOT THE NEWEST ONE** — the reason `recompile` took a buffer id in the task
    * that made buffers plural rather than waiting for the task that re-keys `retire`. Its caller is
-   * `transport.ts`'s `editScratch`, one per λ pane, and a pane editing an OLDER buffer while a newer
+   * the sink `transport.ts`'s `editSink` builds for each editor, and a pane editing an OLDER buffer while a newer
    * one exists is reachable the moment two forks are: the newest-buffer reading would rebuild a term
    * the user is not looking at and leave the one they are typing into untouched.
    */
@@ -1070,6 +1112,28 @@ describe('cold and warm buffers', () => {
     buffers.warm(id)
 
     expect(lastScratchPost()).toEqual({ src: 'typed-term', step: 0 })
+  })
+
+  // A COLD BUFFER KEEPS AN EDIT AND BUILDS NOTHING — `recompile`'s own doc names the edit that arrives after a pause:
+  // a format started by the pause's own click, answering after it. No worker is spawned and nothing is posted, and the
+  // next `warm` builds what was typed. Unguarded, `entryOf` throws for the id the pause forgot.
+  it('recompile keeps a cold buffer’s text and posts nothing', () => {
+    const { reg, pool, buffers, ports, lastScratchPost } = harness()
+    reg.add(sourceEntry())
+    const id = buffers.fork(new PaneSlot('lambda', SOURCE), 'seed', 0, 'lambda')
+    buffers.cool(id, SOURCE, [])
+    ports.length = 0
+
+    let kept: boolean | undefined
+    expect(() => {
+      kept = buffers.recompile(id, 'typed-after-the-pause')
+    }).not.toThrow()
+    expect(kept).toBe(true)
+    expect(ports.length).toBe(0)
+    expect(pool.has(id)).toBe(false)
+
+    buffers.warm(id)
+    expect(lastScratchPost()).toEqual({ src: 'typed-after-the-pause', step: 0 })
   })
 
   // FINDING 3.1 — the cap's new meaning (threads, not records) is easiest to get wrong on this path:
@@ -1356,5 +1420,55 @@ describe('two legs, one collection', () => {
     fresh.buffers.restore(snap)
 
     expect(fresh.buffers.list()).toEqual([{ id, label: 'copy 1', warm: false, leg: 'tm' }])
+  })
+})
+
+/** An asm copy is a copy on a third leg: the same collection, one seat, one id space, and its own request. */
+describe('asm copies', () => {
+  it('sends asm-scratch for an asm copy, whether forked or blank', () => {
+    const { buffers, slotOf, postedTo } = harness()
+    const forked = buffers.fork(slotOf(), 'result Nat\n\thalt\n', 0, 'asm')
+    const blank = buffers.forkBlank('asm')
+    expect(postedTo(forked)).toEqual([{ kind: 'asm-scratch', gen: 1, src: 'result Nat\n\thalt\n' }])
+    expect(postedTo(blank)).toEqual([{ kind: 'asm-scratch', gen: 1, src: '' }])
+  })
+
+  it('registers an asm copy detached, with one asm leg building and nothing retained yet', () => {
+    const { reg, buffers } = harness()
+    const id = buffers.forkBlank('asm')
+    const entry = reg.entryOf(id)
+    expect(entry.detached).toBe(true)
+    expect(Object.keys(entry.legs)).toEqual(['asm'])
+    expect(entry.legs.asm?.status).toEqual({ available: false, reason: 'building…' })
+    expect([entry.asmProgram, entry.asmScratch, entry.tmProgram, entry.tmScratch]).toEqual([null, null, null, null])
+    expect(buffers.nameOf(id)).toBe('asm copy 1')
+  })
+
+  it('recompile posts asm-scratch for an asm copy', () => {
+    const { buffers, postedTo } = harness()
+    const id = buffers.forkBlank('asm')
+    expect(buffers.recompile(id, '\thalt\n')).toBe(true)
+    expect(postedTo(id)).toEqual([
+      { kind: 'asm-scratch', gen: 1, src: '' },
+      { kind: 'asm-scratch', gen: 2, src: '\thalt\n' },
+    ])
+  })
+
+  it('warm re-spawns a cold asm copy with asm-scratch', () => {
+    const { buffers, postedTo } = harness()
+    const id = buffers.forkBlank('asm')
+    buffers.setText(id, '\thalt\n')
+    buffers.cool(id, SOURCE, [])
+    buffers.warm(id)
+    expect(postedTo(id)).toEqual([{ kind: 'asm-scratch', gen: 1, src: '\thalt\n' }])
+  })
+
+  it('round-trips an asm copy’s leg through snapshot and restore', () => {
+    const h = harness()
+    const id = h.buffers.forkBlank('asm')
+    h.buffers.setText(id, '\thalt\n')
+    const fresh = harness()
+    fresh.buffers.restore(h.buffers.snapshot({}))
+    expect(fresh.buffers.list()).toEqual([{ id, label: 'copy 1', warm: false, leg: 'asm' }])
   })
 })

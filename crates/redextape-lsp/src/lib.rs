@@ -618,8 +618,9 @@ state q1: accept
 
     #[test]
     fn references_on_a_name_nothing_defines_lists_its_other_mentions() {
-        // Probed: this parses with `program: Some` and ZERO diagnostics — asm never checks jump
-        // targets — and records two dangling references to `nowhere`. This used to answer `null`,
+        // Probed: this parses with `program: Some` and no diagnostics of the parser's own — the
+        // parser never checks jump targets; `asm_label_diagnostics` marks both, and navigation
+        // answers anyway — and records two dangling references to `nowhere`. This used to answer `null`,
         // which tells someone hunting every jump still to fix that the name under their cursor is
         // not a name. `include_declaration` has nothing to include: with no binding, every
         // occurrence IS a reference, so both are listed either way.

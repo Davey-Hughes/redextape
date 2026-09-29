@@ -2,11 +2,14 @@ import { describe, expect, it } from 'vitest'
 import type { RunReply, RunRequest } from '../../src/protocol'
 
 /**
- * Collect EVERY reply for one request. PR 3c's worker answered once per generation; this one
- * answers many times, and a helper that resolved on the first message would silently test only the
- * `compiled` reply.
+ * Post `req` to a fresh worker and collect every reply until `last` says the answer is complete, or the worker reports
+ * an error, which ends every answer.
  */
-function askAll(req: RunRequest, timeoutMs = 30_000): Promise<{ replies: RunReply[]; worker: Worker }> {
+function askUntil(
+  req: RunRequest,
+  last: (r: RunReply) => boolean,
+  timeoutMs = 30_000,
+): Promise<{ replies: RunReply[]; worker: Worker }> {
   const worker = new Worker(new URL('../../src/session-worker.ts', import.meta.url), { type: 'module' })
   return new Promise((resolve, reject) => {
     const replies: RunReply[] = []
@@ -16,13 +19,23 @@ function askAll(req: RunRequest, timeoutMs = 30_000): Promise<{ replies: RunRepl
     }, timeoutMs)
     worker.addEventListener('message', (e: MessageEvent<RunReply>) => {
       replies.push(e.data)
-      if (e.data.kind === 'result' || e.data.kind === 'no-session' || e.data.kind === 'worker-error') {
+      if (last(e.data) || e.data.kind === 'worker-error') {
         clearTimeout(timer)
         resolve({ replies, worker })
       }
     })
     worker.postMessage(req)
   })
+}
+
+/**
+ * Collect EVERY reply for one request. PR 3c's worker answered once per generation; this one
+ * answers many times, and a helper that resolved on the first message would silently test only the
+ * `compiled` reply. A program's answer ends at its `result`, or at `no-session` for one that did not build; a copy
+ * never gets a `result`, so its tests ask `askUntil` for its frames' end instead.
+ */
+function askAll(req: RunRequest, timeoutMs = 30_000): Promise<{ replies: RunReply[]; worker: Worker }> {
+  return askUntil(req, (r) => r.kind === 'result' || r.kind === 'no-session', timeoutMs)
 }
 
 const run = (src: string, gen = 1, encoding = 'unary'): RunRequest => ({ kind: 'run', gen, src, encoding })
@@ -257,5 +270,69 @@ describe('session-worker recording', () => {
     worker.terminate()
     expect(replies.some((r) => r.kind === 'lambda-frames' && r.frames.length === 0 && r.done === 'ended')).toBe(true)
     expect(replies.some((r) => r.kind === 'result')).toBe(true)
+  })
+})
+
+const recorded = (r: RunReply): boolean => (r.kind === 'asm-frames' && r.done !== null) || r.kind === 'no-session'
+
+describe('session-worker asm copies', () => {
+  const FORTY_TWO = 'result Nat\n\n    li\trr, #42\n    halt\n'
+
+  it('sends the program’s asm as text on compiled, headed by its type, and null with no asm leg', async () => {
+    const { replies, worker } = await askAll(run('let x = 40; x + 2'))
+    worker.terminate()
+    const compiled = replies.find((r) => r.kind === 'compiled')
+    expect(compiled?.kind === 'compiled' && compiled.asmText).toBe(
+      'result Nat\n\n    li\tr0, #40\n    mov\tr1, r0\n    li\tr2, #2\n    add\trr, r1, r2\n    halt\n',
+    )
+
+    const list = `[${Array.from({ length: 2048 }, (_, i) => i).join(', ')}]`
+    const declined = await askAll(run(list))
+    declined.worker.terminate()
+    const second = declined.replies.find((r) => r.kind === 'compiled')
+    expect(second?.kind === 'compiled' && [second.asm.available, second.asmText]).toEqual([false, null])
+  })
+
+  it('builds an asm copy, answers with its status, listing and value, then records its frames', async () => {
+    const { replies, worker } = await askUntil({ kind: 'asm-scratch', gen: 1, src: FORTY_TWO }, recorded)
+    worker.terminate()
+    const [built, ...rest] = replies
+    expect(built?.kind).toBe('asm-scratch-compiled')
+    if (built?.kind !== 'asm-scratch-compiled') return
+    expect(built.asm).toEqual({ available: true, reason: '', run: 'Running', cap: null, total_steps: 2 })
+    expect(built.asmProgram).toEqual({ listing: ['li\trr, #42', 'halt'], labels: [] })
+    expect(built.value).toEqual({ Value: { text: '42' } })
+    const frames = rest.flatMap((r) => (r.kind === 'asm-frames' ? r.frames : []))
+    expect(frames.map((f) => [f.step, f.source_node])).toEqual([
+      [0, null],
+      [1, null],
+      [2, null],
+    ])
+    expect(rest.at(-1)).toMatchObject({ kind: 'asm-frames', done: 'ended' })
+  })
+
+  it('refuses text with a label mistake, and names it', async () => {
+    const { replies, worker } = await askUntil({ kind: 'asm-scratch', gen: 1, src: '\tjmp\tnowhere\n' }, recorded)
+    worker.terminate()
+    expect(replies.map((r) => r.kind)).toEqual(['no-session'])
+    expect(replies[0]?.kind === 'no-session' && replies[0].diagnostics.map((d) => d.message)).toEqual([
+      'undefined label `nowhere`',
+    ])
+  })
+
+  it('answers extend on an asm copy with its frames and its value, where a session gets a result', async () => {
+    const { worker } = await askUntil({ kind: 'asm-scratch', gen: 1, src: FORTY_TWO }, recorded)
+    const replies: RunReply[] = []
+    const done = new Promise<void>((resolve) => {
+      worker.addEventListener('message', (e: MessageEvent<RunReply>) => {
+        replies.push(e.data)
+        if (e.data.kind === 'asm-value') resolve()
+      })
+    })
+    worker.postMessage({ kind: 'extend', gen: 1, leg: 'asm' })
+    await done
+    worker.terminate()
+    expect(replies.map((r) => r.kind)).toEqual(['asm-frames', 'asm-value'])
+    expect(replies.at(-1)).toEqual({ kind: 'asm-value', gen: 1, value: { Value: { text: '42' } } })
   })
 })

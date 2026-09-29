@@ -1,6 +1,6 @@
 import type { EditorView } from '@codemirror/view'
 import type { AsmPane } from './asm-pane'
-import { n } from './format'
+import { seedAsm } from './asm-seed'
 import { setFocus } from './highlight'
 import type { LambdaPane } from './lambda-pane'
 import type { LambdaTrees } from './lambda-trees'
@@ -10,6 +10,9 @@ import type { LambdaLinkState } from './link-status'
 import type { LinkWiring } from './link-wiring'
 import { type LeafId, onPage, type PaneCollection } from './panes'
 import {
+  asmCopyParts,
+  asmCopySegments,
+  copyLegOf,
   copyRows,
   type Lines,
   lambdaCopyParts,
@@ -60,9 +63,10 @@ import { seedTm } from './tm-seed'
  * binding, which are the rest of a `SplitChoices`, are both already in the loop below's hands.
  *
  * `hasEditor: (session) => boolean` IS THE SAME SHAPE AGAIN, over the OTHER thing `main.ts` owns and
- * this module has no other route to: `editor-custody.ts`'s two maps. A λ pane cannot work out whether
+ * this module has no other route to: `editor-custody.ts`'s two maps. A view cannot work out whether
  * its session has an editor anywhere — that is a fact about other panes and about the editors waiting
- * between them — so `LambdaPane.setEditorAvailable` is fed from here, per frame, alongside `renderTree`.
+ * between them — so `LambdaPane.setEditorAvailable` is fed from here, per frame, alongside `renderTree`,
+ * and the TM and asm views' `setEditorAvailable` in the pass over every view.
  * A thunk for the same reason as its two siblings: custody moves under a `draw()` that did not cause it.
  */
 export function createDraw(deps: {
@@ -93,6 +97,8 @@ export function createDraw(deps: {
   stage: () => boolean
   /** The one bottom bar, brought up to date once per frame after every pane has been painted (spec §8). */
   stepBar: { update(): void }
+  /** The stage's tabs, whose labels follow their views' titles — brought up to date once per frame in Stage (§5). */
+  stageTabs: { update(): void }
   nameOf: (session: SessionId) => string | null
 }): () => void {
   const {
@@ -113,9 +119,10 @@ export function createDraw(deps: {
     stepsInView,
     stage,
     stepBar,
+    stageTabs,
   } = deps
   return () => {
-    // "THE" λ AND TM PANES, RESOLVED THROUGH THE COLLECTION RATHER THAN CLOSED OVER — AND EITHER MAY
+    // "THE" λ, ASM AND TM PANES, RESOLVED THROUGH THE COLLECTION RATHER THAN CLOSED OVER — AND ANY MAY
     // BE ABSENT. This block used to destructure `of(leg)[0]` and throw when it came back `undefined`,
     // on the strength of "`main.ts` always registers one pane of each leg before `draw` can be called".
     // That was true while panes were two consts and false from the moment `applyLayout` began deriving
@@ -126,7 +133,7 @@ export function createDraw(deps: {
     // reload — only `reset preset` escaped it. `PaneCollection.active` is now the one place that
     // answers this question, and it answers `undefined` when the leg is empty; see its own doc for why
     // all four consumers were once holding the same expired invariant privately, and for how it now
-    // picks among several panes on the same leg — the pane the user last focused, per leg, falling back
+    // picks among several panes on the same leg — the pane the user focused most recently, falling back
     // to insertion order (5d-ii-b).
     //
     // A LEG WITH NO PANE CONTRIBUTES NOTHING, RATHER THAN BEING FAKED WITH A DEFAULT. The scalar reads
@@ -134,15 +141,23 @@ export function createDraw(deps: {
     // line and the ONE source editor's decoration, neither of which has a per-pane identity yet. What a
     // leg with NO pane should contribute has an answer today, and it is `null` at both sites.
     //
-    // **WHICH PANE ANSWERS DEPENDS ON WHAT THE READER READS.** `lam` and `tm` ask `active` — the pane the
-    // user last focused on the leg, and in Stage possibly one off the page. They read the leg's own
-    // history through the pane's binding, which is live whether or not the pane is drawn, so a hidden pane
-    // still answers truly for its session; and part 2's spec §8 keeps the step bar on "the last view that
-    // could" step, so a hidden view's leg can still move. The λ link clause at the end of this function
-    // asks `shown` instead, because it reads a view's own pin and tree, which only a view on the page has
-    // fresh (`PaneCollection.shown`'s doc).
-    const lam = panes.active('lambda')?.slot.resolve(sessions)
-    const tm = panes.active('tm')?.slot.resolve(sessions)
+    // **EACH LEG'S RUNNING FOCUS IS THE PROGRAM'S, SO IT IS READ OFF A VIEW OF THE PROGRAM — `onProgram`.** It
+    // resolves against the program's link index and marks the program's rows, and a copy's frames own no construct
+    // of the program's. Read off whichever view was focused last, it went blank the moment that view showed a copy:
+    // the program's own view lost its marks, in Stage even while it was the view shown and being stepped. So each
+    // leg asks for the most recently focused view that shows the program, and a copy's view is never the source.
+    // With no view of the program on a leg, that leg has no running focus, as a leg with no view has none.
+    //
+    // **WHICH PANE ANSWERS DEPENDS ON WHAT THE READER READS.** `lam`, `asm` and `tm` ask `active` — in Stage
+    // possibly a view off the page. They read the leg's own history through the pane's binding, which is live
+    // whether or not the pane is drawn, so a hidden pane still answers truly for its session; and part 2's spec §8
+    // keeps the step bar on "the last view that could" step, so a hidden view's leg can still move. The λ link
+    // clause at the end of this function asks `shown` instead, because it reads a view's own pin and tree, which
+    // only a view on the page has fresh (`PaneCollection.shown`'s doc).
+    const onProgram = (e: { readonly slot: { readonly binding: { readonly session: SessionId } } }): boolean =>
+      !sessions.entryOf(e.slot.binding.session).detached
+    const lam = panes.active('lambda', onProgram)?.slot.resolve(sessions)
+    const tm = panes.active('tm', onProgram)?.slot.resolve(sessions)
     // THE TM LEG'S OWN RUNNING FOCUS — `TmState.source_node`, NOT `lam.hist.current?.owner` below.
     // Design table (`2026-08-10-plan5c-dual-focus-design.md` §4.2): "TM: TmState.source_node,
     // resolved through SourceMap::tm_owner ... none; shipped 2026-07-30." Each pane reports what ITS
@@ -158,9 +173,9 @@ export function createDraw(deps: {
     // which the loop's own comment covers.
     //
     // `tm !== undefined` IS A THIRD GATE ALONGSIDE `linkable`/`index`, NOT A NULL-CHECK BOLTED ON. With
-    // no TM pane on screen there is no TM leg being watched, so there is nothing for a running focus to
-    // mark — and feeding `sourceNodeOwner(null)` through anyway would report a definite "the machine is
-    // nowhere" where the honest answer is "no one is asking".
+    // no TM view of the program there is no TM leg of the program's being watched, so there is nothing for a
+    // running focus to mark — and feeding `sourceNodeOwner(null)` through anyway would report a definite "the
+    // machine is nowhere" where the honest answer is "no one is asking".
     const tmFocus =
       linkWiring.linkable && linkWiring.index !== null && tm !== undefined
         ? runningFocus(linkWiring.index, sourceNodeOwner(tm.hist.current?.source_node ?? null))
@@ -168,10 +183,10 @@ export function createDraw(deps: {
     const tmFocusLink: Link | null =
       tmFocus !== null && linkWiring.index !== null ? linkWiring.index.linkFor(tmFocus.node) : null
     // THE ASM LEG'S OWN RUNNING FOCUS, BY THE TM LEG'S RULES (Plan 7 part 5 spec §6.6): `AsmState.source_node`, the owner
-    // of the instruction about to run, read off the asm view the user last focused, and nothing when no asm view is
-    // asking. It marks that view's rows and feeds the status line's coincidence; the source editor's focus mark stays
-    // λ's, as Plan 5c's dual-focus design settled.
-    const asm = panes.active('asm')?.slot.resolve(sessions)
+    // of the instruction about to run, read off the asm view of the program the user focused most recently, and
+    // nothing when no asm view of the program is asking. It marks the program's asm views' rows and feeds the status
+    // line's coincidence; the source editor's focus mark stays λ's, as Plan 5c's dual-focus design settled.
+    const asm = panes.active('asm', onProgram)?.slot.resolve(sessions)
     const asmFocus =
       linkWiring.linkable && linkWiring.index !== null && asm !== undefined
         ? runningFocus(linkWiring.index, sourceNodeOwner(asm.hist.current?.source_node ?? null))
@@ -213,17 +228,23 @@ export function createDraw(deps: {
         seedTm(tmPane, entry.tmProgram, entry.tmScratch)
         unseen.delete(tmPane)
       }
-      // AN ASM VIEW THAT MISSED ITS SESSION'S LISTING, by being off the page when it came, is seeded from what the
-      // session kept — `seedTm`'s arrangement above, for the one fact an asm view is told once per compile.
+      // AN ASM VIEW THAT MISSED WHAT ITS SESSION WAS TOLD, by being off the page when it came, is seeded from what the
+      // session kept — `seedTm`'s arrangement above, one leg over.
       const asmPane = p.slot.binding.leg === 'asm' ? (p.pane as AsmPane) : null
       const asmSeeded = asmPane !== null && unseen.has(asmPane)
       if (asmSeeded) {
-        asmPane.setProgram(sessions.entryOf(p.slot.binding.session).asmProgram)
+        const entry = sessions.entryOf(p.slot.binding.session)
+        seedAsm(asmPane, entry.asmProgram, entry.asmScratch)
         unseen.delete(asmPane)
       }
       const leg = p.slot.resolve(sessions)
-      if (tmPane !== null) tmPane.setFocus(tmFocusLink?.states ?? [])
-      if (asmPane !== null) asmPane.setFocus(asmFocusLink?.instrs ?? [])
+      // **A MACHINE VIEW SHOWING A COPY MARKS NOTHING OF THE PROGRAM'S** — neither its running focus here nor its pin
+      // below. Both resolve to the PROGRAM's state and instruction indices, and a copy numbers its rows by itself, so
+      // an index read there names whatever the copy has at it (spec amendment 32, in the inbound direction): the λ
+      // loop's guard below, "A COPY IS NOT LINKED", for the machine views. Asked only of a TM or asm view.
+      const unlinked = (tmPane !== null || asmPane !== null) && sessions.entryOf(p.slot.binding.session).detached
+      if (tmPane !== null) tmPane.setFocus(unlinked ? [] : (tmFocusLink?.states ?? []))
+      if (asmPane !== null) asmPane.setFocus(unlinked ? [] : (asmFocusLink?.instrs ?? []))
       p.slot.render(sessions, p.pane, leg)
       // **THE SEED DROPPED THE PIN AND ITS SCROLL, AND BOTH ARE GIVEN BACK AFTER THE VIEW'S RENDER.** The view missed
       // the compile, so its seed's `setProgram` dropped the pin it held and any link row still waiting in its grid —
@@ -238,22 +259,21 @@ export function createDraw(deps: {
       // **AFTER `render`, NOT BEFORE IT.** The seed's `setProgram` nulled the view's frame, so a scroll written before
       // `render` would be held against a `null` frame, and `render`'s own draw of this tick's frame would release it
       // at once. After it, the view shows this tick's frame, and the draw `setLink` makes holds against that.
-      if (tmSeeded) {
-        tmPane.setLink(
-          linkWiring.linkable && linkWiring.link !== null && linkWiring.index !== null
-            ? linkWiring.index.linkFor(linkWiring.link.node).states
-            : [],
-          linkWiring.link !== null && linkWiring.link.origin !== 'tm',
-        )
-      }
+      //
+      // **A COPY IS NOT LINKED (§4.5), so it marks nothing whatever is pinned** — `unlinked` above, as
+      // `link-wiring.ts`'s fan-out guards its own. Resolved once, and only for a view seeded this frame.
+      const seededPin =
+        (tmSeeded || asmSeeded) &&
+        !unlinked &&
+        linkWiring.linkable &&
+        linkWiring.link !== null &&
+        linkWiring.index !== null
+          ? linkWiring.index.linkFor(linkWiring.link.node)
+          : null
+      if (tmSeeded) tmPane.setLink(seededPin?.states ?? [], linkWiring.link !== null && linkWiring.link.origin !== 'tm')
       // THE ASM VIEW'S PIN, by the TM view's rules above and for their reasons.
       if (asmSeeded) {
-        asmPane.setLink(
-          linkWiring.linkable && linkWiring.link !== null && linkWiring.index !== null
-            ? linkWiring.index.linkFor(linkWiring.link.node).instrs
-            : [],
-          linkWiring.link !== null && linkWiring.link.origin !== 'asm',
-        )
+        asmPane.setLink(seededPin?.instrs ?? [], linkWiring.link !== null && linkWiring.link.origin !== 'asm')
       }
       // WHICH LAYOUT GESTURES THIS PANE OFFERS — T12's own addition, driven from here for the same
       // reason `setBindings` already is (`PaneSlot.render`'s doc): both are facts about something
@@ -282,6 +302,10 @@ export function createDraw(deps: {
       // up: it is a fact about the workspace rather than about the frame just rendered, so this per-frame
       // pass is the only hook a caller with no render loop of its own has.
       p.pane.setStepsShown(stepsInView())
+      // *MOVE THE EDITOR HERE* ON A TM OR ASM VIEW, fed from custody every frame as the λ pass below feeds a λ view's:
+      // whether another view holds the copy's editor is a fact about other views (`CopyEditor.#editorAvailable`).
+      const machine = tmPane ?? asmPane
+      if (machine !== null) machine.setEditorAvailable(hasEditor(p.slot.binding.session))
     }
 
     // RESOLVED ONCE, HERE, FOR `drawLink` AT THE END. `draw()` runs on every recorded frame during
@@ -361,10 +385,15 @@ export function createDraw(deps: {
     // has handed it this frame's pin.
     //
     // **A VIEW OFF THE PAGE DREW NOTHING.** The loop above skipped it, so its pin and its tree are whatever
-    // it last drew, and asking it answered for an earlier pin. So the view is `shown`'s: the active one
-    // while it is on the page, else the one the stage shows. With no λ view on the page there is no term on
-    // screen to explain, which is `'absent'`.
-    const drewLambda = panes.shown('lambda', onPage)
+    // it last drew, and asking it answered for an earlier pin. So the view is `shown`'s: of the λ views on the
+    // page, the one focused most recently. With no λ view on the page there is no term on screen to explain,
+    // which is `'absent'`.
+    //
+    // **AND A VIEW OF THE PROGRAM, `onProgram`, AS FOR THE RUNNING FOCUSES.** The clause explains why the program's
+    // term does not show the pin, and a copy's view marks nothing whatever is pinned (§4.5). `linkStatus` keeps the
+    // λ clause while any λ view shows the program, so a copy's view answering here would put its term's answer in a
+    // sentence about the program's.
+    const drewLambda = panes.shown('lambda', onPage, onProgram)
     const lambdaLink: LambdaLinkState =
       drewLambda === undefined
         ? 'absent'
@@ -390,28 +419,30 @@ export function createDraw(deps: {
       const name = nameOf(session) ?? 'a copy'
       const leg = entry.slot.resolve(sessions)
       // **THE LEG FACTS ARE HOISTED OUT OF THE OLD TERNARY**, because both thunks below read them and a
-      // value built inside one of them is a value the other cannot see.
-      const lambdaLeg = { newestStep: leg.hist.newestStep, done: leg.done, status: leg.status }
-      const tmLeg = { newestStep: leg.hist.newestStep, status: leg.status }
-      const reading = sessions.entryOf(session).tmScratch
+      // value built inside one of them is a value the other cannot see. One value for every leg, as the copies
+      // menu's rows read it (`main.ts`'s `copyHolds`).
+      const copyLeg = copyLegOf(leg)
       switch (entry.slot.binding.leg) {
         case 'lambda':
           readout.show(null, {
-            segments: () => lambdaCopySegments(name, lambdaLeg),
-            rows: () => copyRows(lambdaCopyParts(name, lambdaLeg)),
+            segments: () => lambdaCopySegments(name, copyLeg),
+            rows: () => copyRows(lambdaCopyParts(name, copyLeg)),
           })
           break
-        case 'tm':
+        case 'tm': {
+          const reading = sessions.entryOf(session).tmScratch
           readout.show(null, {
-            segments: () => tmCopySegments(name, reading, tmLeg),
-            rows: () => copyRows(tmCopyParts(name, reading, tmLeg)),
+            segments: () => tmCopySegments(name, reading, copyLeg),
+            rows: () => copyRows(tmCopyParts(name, reading, copyLeg)),
           })
           break
+        }
         case 'asm': {
-          // NO COPY HAS AN ASM LEG UNTIL PART 5c (`legs.ts`'s `CopyLeg`), so an asm view is always on the program and
-          // the branch above answers it. Were one on another session, this is what it would say: whose, and how far.
-          const parts = [name, `${n(leg.hist.newestStep)} instructions`]
-          readout.show(null, { segments: () => [parts.join(' · ')], rows: () => copyRows(parts) })
+          const reading = sessions.entryOf(session).asmScratch
+          readout.show(null, {
+            segments: () => asmCopySegments(name, reading, copyLeg),
+            rows: () => copyRows(asmCopyParts(name, reading, copyLeg)),
+          })
           break
         }
         default:
@@ -423,5 +454,8 @@ export function createDraw(deps: {
     // thunks `main.ts` gave it, so this call is only "a frame has been painted, say what is true now" —
     // the same division `readout.show` above takes, and the reason `draw.ts` still needs no layout tree.
     stepBar.update()
+    // THE STAGE'S TABS, AFTER EVERY VIEW'S HEADER: a view rebound in place repaints its title on this frame, and its
+    // tab is the other place the stage names it (`layout-view.ts`'s `retitleStage`).
+    if (stage()) stageTabs.update()
   }
 }

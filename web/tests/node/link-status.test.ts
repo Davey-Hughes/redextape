@@ -99,8 +99,13 @@ describe('linkStatus', () => {
   })
 })
 
+/** A leg's entry in `detached`: how many views it has, and the title of each one showing a copy. */
+const views = (count: number, ...copies: string[]) => ({ views: count, copies })
+/** Every leg with one view, on the program. */
+const ON_PROGRAM = { lambda: views(1), asm: views(1), tm: views(1) }
+
 /**
- * Design §4.5's first surface: the line that already narrates the correspondence states which panes
+ * Design §4.5's first surface: the line that already narrates the correspondence states which views
  * are OUTSIDE it. The badge — the second surface — is `tests/browser/view-status.test.ts`, because
  * this module is pure logic and that one needs a DOM; §4.5's own note that the both-surfaces test
  * splits by runner.
@@ -110,13 +115,11 @@ describe('linkStatus', () => {
  * first `it` below is the one that fails such an implementation.
  */
 describe('linkStatus · detachment', () => {
-  // THE ABSENT-FIELD CASE IS NOT REDUNDANT WITH THE ALL-FALSE ONE. `detached` is optional so that
-  // `main.ts`'s three existing `linkStatus(...)` call sites keep compiling while the session registry
-  // (§3.2b) lands separately — this asserts that the default that silence rests on is "attached",
-  // not `undefined` leaking into the output.
-  it('says nothing about detachment when both panes are attached', () => {
+  // THE ABSENT-FIELD CASE IS NOT REDUNDANT WITH THE ALL-ON-THE-PROGRAM ONE. `detached` is optional, and this
+  // asserts that the default that silence rests on is "attached", not `undefined` leaking into the output.
+  it('says nothing about detachment when every view shows the program', () => {
     expect(linkStatus({ state: 'none' })).toBe('')
-    expect(linkStatus({ state: 'none', detached: { lambda: false, asm: false, tm: false } })).toBe('')
+    expect(linkStatus({ state: 'none', detached: ON_PROGRAM })).toBe('')
     expect(
       linkStatus({
         state: 'linked',
@@ -125,45 +128,76 @@ describe('linkStatus · detachment', () => {
         lambda: 'shown',
         focus: true,
         asmFocus: false,
-        detached: { lambda: false, asm: false, tm: false },
+        detached: ON_PROGRAM,
       }),
     ).toBe('the machine is here right now')
   })
 
-  // BOTH PANES DETACH INDEPENDENTLY (§4.3: detaching one pane leaves the source session running and
-  // the other pane bound to it), which is why `detached` is a record and not a boolean. A shape that
-  // could only say "something is detached" passes every other case here and fails these two.
-  it('names only the pane that is detached', () => {
-    expect(linkStatus({ state: 'none', detached: { lambda: true, asm: false, tm: false } })).toBe(
+  // VIEWS DETACH INDEPENDENTLY (§4.3: detaching one view leaves the program running and the others bound to
+  // it), which is why `detached` is a record and not a boolean. A shape that could only say "something is
+  // detached" passes every other case here and fails these two.
+  it('names only the leg whose view shows a copy', () => {
+    expect(linkStatus({ state: 'none', detached: { ...ON_PROGRAM, lambda: views(1, 'λ · copy 1') } })).toBe(
       'λ view shows a copy — not linked to the program',
     )
-    expect(linkStatus({ state: 'none', detached: { lambda: false, asm: false, tm: true } })).toBe(
+    expect(linkStatus({ state: 'none', detached: { ...ON_PROGRAM, tm: views(1, 'TM · copy 2') } })).toBe(
       'TM view shows a copy — not linked to the program',
     )
   })
 
   // ONE CLAUSE, NOT THE SAME SENTENCE TWICE. "not linked to source" is one fact about one
   // correspondence; repeating it verbatim either side of a `·` reads as two unrelated failures.
-  it('names both panes in one clause when both are detached', () => {
-    expect(linkStatus({ state: 'none', detached: { lambda: true, asm: false, tm: true } })).toBe(
-      'λ and TM views show copies — not linked to the program',
-    )
+  it('names both legs in one clause when both show copies', () => {
+    expect(
+      linkStatus({
+        state: 'none',
+        detached: { ...ON_PROGRAM, lambda: views(1, 'λ · copy 1'), tm: views(1, 'TM · copy 2') },
+      }),
+    ).toBe('λ and TM views show copies — not linked to the program')
   })
 
-  // ORDERED MOST-GLOBAL FIRST, the rule `draw.ts`'s `createDraw` follows for the λ state: a pane being
+  // THE CHECK BY HAND'S FIRST CASE: an asm view on the program and a second on a copy. The line read off each leg's
+  // view focused last, so with the program's view focused last it said "λ and TM views show copies" while
+  // `asm · copy 10` was on screen. Every view counts now, and a leg with more than one names its copy by title.
+  it('names a leg’s view on a copy by its title when the leg has more than one view', () => {
+    expect(
+      linkStatus({
+        state: 'none',
+        detached: { lambda: views(1, 'λ · copy 8'), asm: views(2, 'asm · copy 10'), tm: views(1, 'TM · copy 7') },
+      }),
+    ).toBe('λ, asm · copy 10 and TM views show copies — not linked to the program')
+  })
+
+  // THE SECOND CASE, THE REVERSE: with two asm views, one on a copy, "asm view shows a copy" did not say which.
+  it('says which of a leg’s views shows a copy, never the leg alone, when the leg has two', () => {
+    expect(linkStatus({ state: 'none', detached: { ...ON_PROGRAM, asm: views(2, 'asm · copy 1') } })).toBe(
+      'asm · copy 1 view shows a copy — not linked to the program',
+    )
+    expect(
+      linkStatus({ state: 'none', detached: { ...ON_PROGRAM, asm: views(3, 'asm · copy 1', 'asm · copy 2') } }),
+    ).toBe('asm · copy 1 and asm · copy 2 views show copies — not linked to the program')
+  })
+
+  it('says a copy two views show once', () => {
+    expect(
+      linkStatus({ state: 'none', detached: { ...ON_PROGRAM, asm: views(3, 'asm · copy 1', 'asm · copy 1') } }),
+    ).toBe('asm · copy 1 view shows a copy — not linked to the program')
+  })
+
+  // ORDERED MOST-GLOBAL FIRST, the rule `draw.ts`'s `createDraw` follows for the λ state: a view being
   // outside the correspondence entirely is a bigger fact than anything about what resolved inside it, and
-  // every clause after it is about the panes still inside.
+  // every clause after it is about the views still inside.
   it('reports detachment ahead of the pin narration', () => {
-    expect(linkStatus({ state: 'stale', detached: { lambda: true, asm: false, tm: false } })).toBe(
+    expect(linkStatus({ state: 'stale', detached: { ...ON_PROGRAM, lambda: views(1, 'λ · copy 1') } })).toBe(
       'λ view shows a copy — not linked to the program · linking resumes when this compiles',
     )
   })
 
   // §4.5's standard, applied to the clauses themselves: "a thing that provably cannot work should not
-  // be presented as though it might". A detached λ pane is showing a scratch term, so
+  // be presented as though it might". A λ view on a copy is showing a scratch term, so
   // `LAMBDA_TEXT['none-here']` would describe a term that is not on screen — while
-  // the TM clause, whose pane is still bound to the source session, stays.
-  it('suppresses the λ clause for a detached λ pane and keeps the TM one', () => {
+  // the TM clause, whose view is still bound to the program, stays.
+  it('suppresses the λ clause when the λ view shows a copy and keeps the TM one', () => {
     expect(
       linkStatus({
         state: 'linked',
@@ -172,15 +206,15 @@ describe('linkStatus · detachment', () => {
         lambda: 'none-here',
         focus: false,
         asmFocus: false,
-        detached: { lambda: true, asm: false, tm: false },
+        detached: { ...ON_PROGRAM, lambda: views(1, 'λ · copy 1') },
       }),
     ).toBe('λ view shows a copy — not linked to the program · this construct emits no machine states')
   })
 
   // The mirror, and `focus: true` is the load-bearing half: `TmState.source_node` is `None` for every
-  // state a `TmScratch` renders (§3.1), so "the machine is here right now" about a detached TM pane
+  // state a `TmScratch` renders (§3.1), so "the machine is here right now" about a TM view on a copy
   // is a claim no scratch can make. Suppressed rather than trusted from the caller.
-  it('suppresses the TM clauses for a detached TM pane and keeps the λ one', () => {
+  it('suppresses the TM clauses when the TM view shows a copy and keeps the λ one', () => {
     expect(
       linkStatus({
         state: 'linked',
@@ -189,14 +223,14 @@ describe('linkStatus · detachment', () => {
         lambda: 'none-here',
         focus: true,
         asmFocus: false,
-        detached: { lambda: false, asm: false, tm: true },
+        detached: { ...ON_PROGRAM, tm: views(1, 'TM · copy 2') },
       }),
     ).toBe('TM view shows a copy — not linked to the program · this construct has no node in the λ term at this step')
   })
 
-  // THE ASM LEG'S CLAUSES FOLLOW ITS OWN VIEW'S BINDING, as each leg's do: no asm view shows a copy until part 5c, but a
-  // detached one would be showing a copy's run, which no construct of the program's owns.
-  it('suppresses the asm clauses for a detached asm view and keeps the others', () => {
+  // THE ASM LEG'S CLAUSES FOLLOW ITS OWN VIEWS' BINDINGS, as each leg's do: an asm view on a copy is showing an asm
+  // copy's run, which no construct of the program's owns.
+  it('suppresses the asm clauses when the asm view shows a copy and keeps the others', () => {
     expect(
       linkStatus({
         state: 'linked',
@@ -205,12 +239,46 @@ describe('linkStatus · detachment', () => {
         lambda: 'shown',
         focus: true,
         asmFocus: true,
-        detached: { lambda: false, asm: true, tm: false },
+        detached: { ...ON_PROGRAM, asm: views(1, 'asm · copy 1') },
       }),
     ).toBe('asm view shows a copy — not linked to the program · the machine is here right now')
   })
 
-  it('leaves only the detachment clause when both panes are detached', () => {
+  // A LEG WITH A VIEW OF THE PROGRAM KEEPS ITS CLAUSES BESIDE ITS VIEW ON A COPY: `draw.ts` reads the running focus
+  // and the λ link state off a view of the program, so they are about that view. Every view on a copy suppresses them.
+  it('keeps a leg’s clauses while one of its views shows the program, and suppresses them when none does', () => {
+    const linked = {
+      state: 'linked',
+      tm: true,
+      instrs: false,
+      lambda: 'shown',
+      focus: false,
+      asmFocus: true,
+    } as const
+    expect(linkStatus({ ...linked, detached: { ...ON_PROGRAM, asm: views(2, 'asm · copy 1') } })).toBe(
+      'asm · copy 1 view shows a copy — not linked to the program · the asm run is here right now · this construct emits no instructions',
+    )
+    expect(linkStatus({ ...linked, detached: { ...ON_PROGRAM, asm: views(2, 'asm · copy 1', 'asm · copy 2') } })).toBe(
+      'asm · copy 1 and asm · copy 2 views show copies — not linked to the program',
+    )
+  })
+
+  // A LEG WITH NO VIEW IS NOT DETACHED: there is no binding to read, so its clauses stand as they did.
+  it('reads a leg with no view as attached', () => {
+    expect(
+      linkStatus({
+        state: 'linked',
+        tm: false,
+        instrs: true,
+        lambda: 'shown',
+        focus: false,
+        asmFocus: false,
+        detached: { ...ON_PROGRAM, tm: views(0) },
+      }),
+    ).toBe('this construct emits no machine states')
+  })
+
+  it('leaves only the detachment clause when both legs show copies', () => {
     expect(
       linkStatus({
         state: 'linked',
@@ -219,7 +287,7 @@ describe('linkStatus · detachment', () => {
         lambda: 'declined',
         focus: true,
         asmFocus: false,
-        detached: { lambda: true, asm: false, tm: true },
+        detached: { ...ON_PROGRAM, lambda: views(1, 'λ · copy 1'), tm: views(1, 'TM · copy 2') },
       }),
     ).toBe('λ and TM views show copies — not linked to the program')
   })

@@ -1,11 +1,16 @@
 import { describe, expect, it } from 'vitest'
 import {
+  asmCopyParts,
+  asmCopyRow,
+  asmCopySegments,
+  copyLegOf,
   copyRows,
   lambdaCopyParts,
   lambdaCopySegments,
   programRows,
   programSegments,
   tmCopyParts,
+  tmCopyRow,
   tmCopySegments,
 } from '../../src/readout'
 
@@ -83,6 +88,118 @@ describe('tmCopySegments', () => {
   it('counts transitions for a copy that has run but retains nothing yet', () => {
     expect(tmCopySegments('TM copy 1', null, { newestStep: 12, status: { available: true, reason: '' } })).toEqual([
       'TM copy 1 · 12 transitions',
+    ])
+  })
+})
+
+describe('asmCopySegments', () => {
+  const STATUS = { available: true, reason: '', run: 'Ended' as const, cap: null, total_steps: 3 }
+  const leg = (newestStep: number, done: 'ended' | 'capped' | 'stack-full' | null) => ({
+    newestStep,
+    done,
+    status: { available: true, reason: '' },
+  })
+
+  it('names the copy, counts its instructions, and reads its value as its view does', () => {
+    const reading = { status: STATUS, value: { Value: { text: '7' } } }
+    expect(asmCopySegments('asm copy 1', reading, leg(3, 'ended'))).toEqual(['asm copy 1 · 3 instructions · value: 7'])
+  })
+
+  it('says a count of one in the singular', () => {
+    const reading = { status: STATUS, value: { Value: { text: '0' } } }
+    expect(asmCopySegments('asm copy 1', reading, leg(1, 'ended'))).toEqual(['asm copy 1 · 1 instruction · value: 0'])
+  })
+
+  it('says why the recording stopped, and a fault as a fault', () => {
+    const fault = { status: STATUS, value: { Fault: { message: 'head of empty list at pc1' } } }
+    expect(asmCopyParts('asm copy 1', fault, leg(2, 'ended'))).toEqual([
+      'asm copy 1',
+      '2 instructions',
+      'fault: head of empty list at pc1',
+    ])
+    const full = { status: STATUS, value: 'Unfinished' as const }
+    expect(asmCopyParts('asm copy 1', full, leg(9, 'stack-full'))).toEqual([
+      'asm copy 1',
+      '9 instructions',
+      'the call stack is full',
+      'not finished',
+    ])
+  })
+
+  it('says only that it is building before its build lands', () => {
+    const building = { newestStep: 0, done: null, status: { available: false, reason: 'building…' } }
+    expect(asmCopySegments('asm copy 1', null, building)).toEqual(['asm copy 1 · building…'])
+  })
+})
+
+/**
+ * **A MACHINE COPY'S ROW IN THE COPIES MENU SAYS WHAT ITS READOUT SAYS OF ITS RUN** — the line under its name, which
+ * read `no term yet` for every TM and asm copy, halted ones included, because a machine copy has no term. It is the
+ * copy's readout line without the name, so each case is also checked against the strip's own segment.
+ */
+describe('a machine copy’s row in the copies menu', () => {
+  const STATUS = { available: true, reason: '', run: 'Ended' as const, cap: null, total_steps: 55 }
+  const asmLeg = (newestStep: number, done: 'ended' | 'capped' | null) => ({
+    newestStep,
+    done,
+    status: { available: true, reason: '' },
+  })
+  const tmLeg = (newestStep: number) => ({ newestStep, status: { available: true, reason: '' } })
+
+  it('reads an asm copy that halted with a value as its readout does', () => {
+    const reading = { status: STATUS, value: { Value: { text: '6' } } }
+    expect(asmCopyRow(reading, asmLeg(55, 'ended'))).toBe('55 instructions · value: 6')
+    expect(asmCopySegments('asm copy 1', reading, asmLeg(55, 'ended'))).toEqual([
+      `asm copy 1 · ${asmCopyRow(reading, asmLeg(55, 'ended'))}`,
+    ])
+  })
+
+  it('reads an asm copy that faulted as a fault', () => {
+    const reading = { status: STATUS, value: { Fault: { message: 'ran past end of program at pc0' } } }
+    expect(asmCopyRow(reading, asmLeg(0, 'ended'))).toBe('0 instructions · fault: ran past end of program at pc0')
+  })
+
+  it('says why an asm copy’s recording stopped at a cap, and that its run is unfinished', () => {
+    const reading = { status: STATUS, value: 'Unfinished' as const }
+    expect(asmCopyRow(reading, asmLeg(9, 'capped'))).toBe('9 instructions · spent its step budget · not finished')
+  })
+
+  it('reads a TM copy’s value, and a value run still going, as its readout does', () => {
+    const halted = {
+      status: { header: true, width: 8, reduction: null },
+      value: { run: { run: 'Ended', steps: 18574, cap: 1000000000 }, value: { Value: { text: '6' } } },
+    }
+    expect(tmCopyRow(halted as never, tmLeg(18574))).toBe('18,574 transitions · value: 6')
+    const running = {
+      status: { header: true, width: 8, reduction: null },
+      value: { run: { run: 'Running', steps: 12, cap: 1000 }, value: 'Unfinished' },
+    }
+    expect(tmCopyRow(running as never, tmLeg(12))).toBe('12 transitions · value: running · 12 of 1,000 steps')
+    expect(tmCopySegments('TM copy 2', running as never, tmLeg(12))).toEqual([
+      `TM copy 2 · ${tmCopyRow(running as never, tmLeg(12))}`,
+    ])
+  })
+
+  it('says a machine copy that has not built yet is building, as its readout does', () => {
+    const building = { newestStep: 0, done: null, status: { available: false, reason: 'building…' } }
+    expect(asmCopyRow(null, building)).toBe('building…')
+    expect(tmCopyRow(null, building)).toBe('building…')
+  })
+
+  it('reads a leg’s live state into the one shape every copy line takes', () => {
+    const leg = { hist: { newestStep: 3 }, done: 'ended' as const, status: { available: true, reason: '' } }
+    expect(copyLegOf(leg)).toEqual({ newestStep: 3, done: 'ended', status: { available: true, reason: '' } })
+  })
+})
+
+describe('a count of one, in every copy line', () => {
+  it('reads "1 reduction" and "1 transition"', () => {
+    expect(
+      lambdaCopyParts('λ copy 1', { newestStep: 1, done: 'ended', status: { available: true, reason: '' } }),
+    ).toEqual(['λ copy 1', '1 reduction'])
+    expect(tmCopyParts('TM copy 1', null, { newestStep: 1, status: { available: true, reason: '' } })).toEqual([
+      'TM copy 1',
+      '1 transition',
     ])
   })
 })

@@ -101,8 +101,8 @@
 #      breakdown before anyone noticed. A gate that cannot be cheap should not exist; a claim that
 #      cannot be gated should not be written in the present tense.
 # **ONE ROW'S DOCUMENT IS A SOURCE FILE, NOT A README, AND THAT IS A DELIBERATE WIDENING.**
-# `crates/redextape-wasm/src/lib.rs` calls `tapeNames()` "The NINTH export" in a doc comment, and
-# `README.md` states the same fact twice more — "nine exports" and "the ninth, `tapeNames()`". An
+# `crates/redextape-wasm/src/lib.rs` calls `tapeNames()` "The TENTH export" in a doc comment, and
+# `README.md` states the same fact twice more — "ten exports" and "the tenth, `tapeNames()`". An
 # ORDINAL that moves whenever any export is added, with no gate behind it, is the exact shape this
 # repository keeps retracting; `.pre-commit-config.yaml`'s hook comments and the `linear-history` CI
 # header each carry their own retraction of one. All three went false inside a single branch when Plan
@@ -116,7 +116,7 @@
 # deleting one export and appending another leaves the COUNT unchanged while moving the position, and a
 # single count-shaped derivation would report green through exactly that edit.
 #
-# **BOTH RETURN 9 AGAINST THE REAL TREE TODAY, SO THE REAL TREE CANNOT TELL THE TWO DERIVATIONS APART**
+# **BOTH RETURN 10 AGAINST THE REAL TREE TODAY, SO THE REAL TREE CANNOT TELL THE TWO DERIVATIONS APART**
 # — a position-shaped implementation that quietly became a count would still pass every check that
 # only ever runs against `wasm_export_names()`'s real output, because `tapeNames` happens to be last.
 # `--self-test` closes that hole with a SYNTHETIC export list carrying a name AFTER `tapeNames`, so the
@@ -286,7 +286,7 @@ derive_cmd() {
 # comparison loudly rather than silently reading as zero.
 #
 # **ORDINALS ARE HERE FOR THE `tapeNames()` ROWS, AND THEY READ AS THE POSITION THEY NAME.** Two
-# documents call that export "the ninth" and one of them capitalises it; there is no sentence in this
+# documents call that export "the tenth" and one of them capitalises it; there is no sentence in this
 # tree where an ordinal word means anything but its own number, so they share the table rather than
 # getting a second one. The row that uses them derives a POSITION — see this file's header.
 to_number() {

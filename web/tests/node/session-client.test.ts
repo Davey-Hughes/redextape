@@ -188,6 +188,8 @@ describe('SessionClient streaming', () => {
       tapeNames: [],
       linkIndex: null,
       tmText: null,
+      tmResultDecodable: true,
+      asmText: null,
     })
     deliver({ kind: 'lambda-frames', gen: 1, frames: [], done: null })
     deliver({ kind: 'lambda-frames', gen: 1, frames: [], done: 'ended' })
@@ -258,6 +260,8 @@ const compiled = (gen: number): RunReply => ({
   tapeNames: [],
   linkIndex: null,
   tmText: null,
+  tmResultDecodable: true,
+  asmText: null,
 })
 
 describe('tmScratch', () => {
@@ -281,6 +285,26 @@ describe('tmScratch', () => {
     c.supersede()
     sent.length = 0
     c.tmScratch(stale, 'tapes 1\n')
+    expect(sent).toEqual([])
+  })
+})
+
+describe('asmScratch', () => {
+  it('posts an asm-scratch request carrying only the text', () => {
+    const { port, sent } = fakePort()
+    const c = new SessionClient(port, () => {})
+    const gen = c.supersede()
+    c.asmScratch(gen, 'result Nat\n\thalt\n')
+    expect(sent).toEqual([{ kind: 'asm-scratch', gen, src: 'result Nat\n\thalt\n' }])
+  })
+
+  it('drops a request whose generation has been superseded', () => {
+    const { port, sent } = fakePort()
+    const c = new SessionClient(port, () => {})
+    const stale = c.supersede()
+    c.supersede()
+    sent.length = 0
+    c.asmScratch(stale, '\thalt\n')
     expect(sent).toEqual([])
   })
 })

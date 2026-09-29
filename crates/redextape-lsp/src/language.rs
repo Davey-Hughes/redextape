@@ -47,13 +47,24 @@ impl Language {
     ///
     /// Slice 1 adds no analysis. All four of these are already written, already tested, and
     /// already consumed by the CLI and the web UI; each returns the same spanned `Diagnostic`.
+    ///
+    /// **`.asm` ADDS ITS LABEL MARKS TO THE PARSE'S DIAGNOSTICS**: a jump to a label nothing
+    /// defines, a label defined twice, a label name the printer cannot write. The parser accepts
+    /// all three and `Program::validate` refuses all three, so `redextape run` refuses the file
+    /// and a web copy will not run it; `asm_label_diagnostics` is the same check with spans, and
+    /// the index it reads outlives a parse that fails, so both kinds show together.
     #[must_use]
     pub fn diagnostics(self, src: &str) -> Vec<Diagnostic> {
         match self {
             Language::Redextape => redextape_core::analyze(src).diagnostics,
             Language::Lambda => redextape_core::lambda::parse_lambda(src).1,
             Language::Tm => redextape_core::tm::parse_tm_full(src).diagnostics,
-            Language::Asm => redextape_core::tm::parse_asm_full(src).diagnostics,
+            Language::Asm => {
+                let (doc, nav) = redextape_core::tm::parse_asm_nav(src);
+                let mut all = doc.diagnostics;
+                all.extend(redextape_core::tm::asm_label_diagnostics(&nav));
+                all
+            }
         }
     }
 
@@ -190,6 +201,22 @@ mod tests {
         let asm = "li\n";
         assert_eq!(Language::Asm.diagnostics(asm), redextape_core::tm::parse_asm_full(asm).diagnostics);
         assert!(!Language::Asm.diagnostics(asm).is_empty());
+    }
+
+    /// asm's label marks join the parse's own, and a parse that fails does not hide them: the one line
+    /// that does not parse and the jump to nothing are both reported, in that order.
+    #[test]
+    fn asm_reports_its_label_marks_beside_its_parse_errors() {
+        let marked = |src: &str| {
+            Language::Asm
+                .diagnostics(src)
+                .into_iter()
+                .map(|d| src[d.span.start..d.span.end].to_string())
+                .collect::<Vec<_>>()
+        };
+        assert_eq!(marked("f:\n\tjmp\tnowhere\n\thalt\n"), ["nowhere"]);
+        assert_eq!(marked("f:\n\tjmp\tnowhere\n\tbogus\n"), ["\tbogus", "nowhere"]);
+        assert_eq!(marked("f:\n\tjmp\tf\n\thalt\n"), Vec::<String>::new());
     }
 
     /// Clean. 7 newlines, 116 bytes, so the document ends at line 7, character 0.

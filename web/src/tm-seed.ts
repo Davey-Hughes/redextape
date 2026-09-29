@@ -12,7 +12,11 @@ import type { TmPane } from './tm-pane'
  */
 export function seedTm(pane: TmPane, compiled: TmCompiled | null, reading: TmScratchReading | null): void {
   pane.setProgram(compiled?.program ?? null, compiled?.tapeNames ?? [])
-  pane.setForkAvailable(compiled?.tmText ?? null, compiled === null ? 0 : ruleCount(compiled.program))
+  pane.setForkAvailable(
+    compiled?.tmText ?? null,
+    compiled === null ? 0 : ruleCount(compiled.program),
+    compiled?.tmResultDecodable ?? true,
+  )
   pane.setScratchStatus(reading?.status ?? null)
   pane.setScratchValue(reading?.value ?? null)
 }

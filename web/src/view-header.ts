@@ -103,6 +103,7 @@ export function viewHeader(onPick: (choice: Binding<Leg>) => void): ViewHeader {
   button.setAttribute('aria-expanded', 'false')
   button.popoverTargetElement = menu
   const buttonText = document.createElement('span')
+  buttonText.className = 'view-title-text'
   const caret = icon('disclose')
   caret.classList.add('view-title-caret')
   button.append(buttonText, caret)
@@ -168,11 +169,15 @@ export function viewHeader(onPick: (choice: Binding<Leg>) => void): ViewHeader {
     const mine = current === null ? undefined : options.find((o) => o.leg === current?.leg && o.id === current.session)
     const text = mine === undefined ? '' : pairLabel(mine)
     const control = options.length < 2 ? plain : button
+    // THE FULL TITLE IN A `title` TOO, for the pointer user whose narrow view cuts it with an ellipsis (`style.css`'s
+    // `.view-title-text`); the text itself stays whole in the document, which is where the name comes from.
     if (control === button) {
       buttonText.textContent = text
+      buttonText.title = text
       if (current !== null) button.dataset.binding = bindingKey(current.leg, current.session)
     } else {
       plain.textContent = text
+      plain.title = text
     }
     const other = control === button ? plain : button
     other.remove()
@@ -239,8 +244,10 @@ export function sourceViewHeader(): { readonly el: HTMLElement; readonly actions
 
 /**
  * What `✎ edit a copy` can do right now: not offered (`null`), offered, or offered and disabled with its
- * reason — the one control that is disabled rather than removed, because the refusal is a size and not an
- * absence (`MAX_FORK_RULES`; umbrella §4 rule 4).
+ * reason — the one control that is disabled rather than removed, because the refusal (a machine or a text
+ * over its size cap, or a TM program whose result type has no header a copy can run) is not an absence: the
+ * program exists (umbrella §4 rule 4). `CopyEditor.#refreshDetach` is the one place that decides which of the
+ * three this is.
  */
 export type CopyState = null | 'ready' | { readonly reason: string }
 

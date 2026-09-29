@@ -13,12 +13,16 @@ import {
   wordText,
 } from './asm-view'
 import type { ControlState } from './controls'
+import { CopyEditor } from './copy-editor'
+import type { EditablePane } from './editor-custody'
 import { n } from './format'
 import type { Dir } from './layout'
 import type { PaneChoice, PaneEvents, SplitChoices } from './pane-chrome'
 import { createPanel, type Panel } from './panel'
 import type { Leg } from './protocol'
-import type { Binding, PaneOption } from './sessions'
+import { endedLine } from './results'
+import type { ScratchEditor } from './scratch-editor'
+import type { AsmScratchReading, Binding, PaneOption } from './sessions'
 import { stepControls } from './step-controls'
 import type { AsmProgram, AsmState } from './types'
 import { type ViewHeader, type ViewMenu, viewHeader, viewMenu } from './view-header'
@@ -33,6 +37,7 @@ export type AsmPanels = {
   readonly registers?: boolean
   readonly stack?: boolean
   readonly heap?: boolean
+  readonly outline?: boolean
 }
 
 /**
@@ -50,10 +55,16 @@ export type AsmPanels = {
  * arguments, 8 frames, 16 cells and 16 boxes, set in `protocol.ts`), so a frame's panels are at most a few hundred short
  * lines however long the run.
  *
+ * **ON A COPY IT HOLDS THE COPY'S EDITOR, AS THE TM VIEW HOLDS A TM COPY'S** (spec amendment 28): the text panel first,
+ * then the copy's value, the panels above, and the outline — its labels — last. The listing stays: it is the only
+ * place the instruction about to run is marked, since a copy's editor marks no running line (spec §10).
+ *
  * `AsmPane` SATISFIES `PaneView<AsmState>`, as the λ and TM views satisfy theirs, with no `implements` clause —
- * `sessions.ts`'s `PaneView` doc says why the parameterisation is the check.
+ * `sessions.ts`'s `PaneView` doc says why the parameterisation is the check. It implements `EditablePane`, as
+ * `TmPane` does, so custody can mount a copy's editor on it and destroy the one it leaves; its members hand off
+ * to `#copy`, the `CopyEditor` the two views share.
  */
-export class AsmPane {
+export class AsmPane implements EditablePane {
   #header: ViewHeader
   #steps: ReturnType<typeof stepControls>
   #menu: ViewMenu
@@ -81,6 +92,17 @@ export class AsmPane {
   #heapPanel: Panel
   #heap: HTMLElement
   #heapCount: HTMLElement
+  /**
+   * A copy's editor, its text panel and its outline — a copy's labels, as the server lists them — and the facts behind
+   * *format* and *edit a copy*: the part this view shares with the TM view (`copy-editor.ts`).
+   */
+  #copy: CopyEditor
+  /**
+   * A copy's value, `value: 42`, from the reading its build and any `[continue]` carried; empty on a view of the
+   * program, whose value the readout says. A `status` region, like `TmPane.#value`, though it changes per build, not
+   * per step.
+   */
+  #value: HTMLElement
 
   /**
    * `panels` is the view's stored panel state, read once here; each panel reports every later toggle through
@@ -89,15 +111,26 @@ export class AsmPane {
   constructor(host: HTMLElement, on: PaneEvents, panels: AsmPanels = {}) {
     this.#header = viewHeader(on.rebind)
     this.#steps = stepControls(on)
-    // NO `format` AND NO `edit a copy`: a view showing a running leg has no document to format, and a copy of the asm is
-    // part 5c's. Removed, not disabled — the umbrella's rule for a control that cannot apply here.
+    this.#value = document.createElement('div')
+    this.#value.className = 'asm-value'
+    this.#value.setAttribute('role', 'status')
+    // *FORMAT* IS REMOVED WHERE THERE IS NO EDITOR, *EDIT A COPY* WHERE THERE IS NO HANDLER OR NOTHING TO COPY, AND
+    // *MOVE THE EDITOR HERE* WHERE THERE IS NO EDITOR TO MOVE — `TmPane`'s menu, and its reasons: a control that
+    // cannot apply is removed (`CopyEditor`'s `#syncEditorControls`, `#refreshDetach` and `#refreshClaim`).
+    const detachAsm = on.detachAsm
     this.#menu = viewMenu(this.#header.actions, {
+      format: () => this.#copy.format(),
       ...(on.splitRow !== undefined && on.splitColumn !== undefined
         ? { split: (dir: Dir, c: PaneChoice) => (dir === 'row' ? on.splitRow?.(c) : on.splitColumn?.(c)) }
         : {}),
       ...(on.close !== undefined ? { close: on.close } : {}),
+      ...(detachAsm !== undefined ? { editCopy: { run: detachAsm, what: 'the whole program' } } : {}),
+      ...(on.showEditor !== undefined ? { claim: on.showEditor } : {}),
       choices: () => this.#choices,
     })
+    // THE COPY'S EDITOR, TEXT PANEL AND OUTLINE (`copy-editor.ts`). The outline is closed by default, as the TM view's
+    // is. No `onUnmount`: `setDetached`'s doc says why the copy's value is not cleared with the editor.
+    this.#copy = new CopyEditor(on, { menu: this.#menu, outlineOpen: panels.outline ?? false, noun: 'instructions' })
 
     // ADDED AND REMOVED, NEVER DISABLED — the rule table's `follow current rule`, for the same reason: a re-attach does
     // something only while the listing has stopped following. The grid's `beforeDraw` keeps `hidden` in step.
@@ -184,9 +217,18 @@ export class AsmPane {
     machine.className = 'asm-machine'
     machine.append(this.#registersPanel.el, this.#stackPanel.el)
 
+    // THE TEXT PANEL FIRST, THE OUTLINE LAST — the TM view's order (spec amendment 28). On a view of the program both
+    // start hidden and take no room, so this order is invisible until a copy's editor mounts.
     this.#body = document.createElement('div')
     this.#body.className = 'asm-pane'
-    this.#body.append(this.#listingPanel.el, machine, this.#heapPanel.el)
+    this.#body.append(
+      this.#copy.textPanel,
+      this.#value,
+      this.#listingPanel.el,
+      machine,
+      this.#heapPanel.el,
+      this.#copy.outline,
+    )
     this.#header.steps.append(this.#steps.el)
     host.replaceChildren(this.#header.el, this.#body)
   }
@@ -232,9 +274,66 @@ export class AsmPane {
     this.#focused = new Set(instrs)
   }
 
-  /** `copy · not linked`, in the title. The asm leg has no copies until part 5c, so today it is always `false`. */
+  /**
+   * `copy · not linked`, in the title. A view moved off a copy gives up its editor, whichever route moved it, and
+   * *edit a copy* follows the same fact — `CopyEditor.setDetached`, whose doc has the review findings behind both.
+   *
+   * **THE COPY'S VALUE IS NOT CLEARED HERE, WHERE `TmPane` CLEARS ITS SCRATCH READING AS A SECOND LINE.** Every route
+   * that moves a view onto a session but one seeds it through `seedAsm`, which sets the value that session has — none,
+   * for the program. The one is a fork, which moves a view of the program, whose value line is already empty, onto a
+   * copy that has built nothing yet, and the copy's first build sets its value (`replies.ts`'s `asm-scratch-compiled`
+   * arm). So a clear here would repeat one no route can skip, and nothing could tell whether it ran.
+   */
   setDetached(detached: boolean): void {
     this.#header.setDetached(detached)
+    this.#copy.setDetached(detached)
+  }
+
+  /** Mount a copy's editor seeded with `text`, or unmount it with `null` — `CopyEditor.setEditor`. */
+  setEditor(text: string | null, collapsed = false): void {
+    this.#copy.setEditor(text, collapsed)
+  }
+
+  /** Give up the mounted editor without destroying it — `CopyEditor.takeEditor`. */
+  takeEditor(): ScratchEditor | null {
+    return this.#copy.takeEditor()
+  }
+
+  /** Mount an editor this view did not build — `CopyEditor.receiveEditor`, for *move the editor here*. */
+  receiveEditor(editor: ScratchEditor, collapsed = false): void {
+    this.#copy.receiveEditor(editor, collapsed)
+  }
+
+  /** Whether this view is showing an editor — `CopyEditor.holdsEditor`. */
+  holdsEditor(): boolean {
+    return this.#copy.holdsEditor()
+  }
+
+  /** Whether another view holds this copy's editor, for *move the editor here* — `CopyEditor.setEditorAvailable`. */
+  setEditorAvailable(available: boolean): void {
+    this.#copy.setEditorAvailable(available)
+  }
+
+  /** Send the mounted editor's pending edit now — `CopyEditor.flushEditor`. */
+  flushEditor(): void {
+    this.#copy.flushEditor()
+  }
+
+  /** An asm copy's value, or `null` to clear it — set by its build, a `[continue]`, and a seed from what its session kept. */
+  setScratch(reading: AsmScratchReading | null): void {
+    this.#value.textContent = reading === null ? '' : endedLine(reading.value)
+  }
+
+  /**
+   * Whether this view can offer *edit a copy*: `text` is the program's asm, or `null` when there is none to copy; and
+   * `instructions` is how many instructions the program has, which words a refusal — `CopyEditor.setForkAvailable`,
+   * whose `#refreshDetach` gives its three answers: absent, disabled with its reason, or ready. NO THIRD ARGUMENT: the
+   * asm leg's header is optional, so a function-valued program still gets text (`AsmHeader::for_type`'s doc) and
+   * `text === null` here has only ever meant one thing — over `MAX_SCRATCH_ASM_BYTES` — which `#resultDecodable`'s own
+   * default answers for.
+   */
+  setForkAvailable(text: string | null, instructions: number): void {
+    this.#copy.setForkAvailable(text, instructions)
   }
 
   /** The `steps` switch, per `PaneView.setStepsShown` — the view's header owns the slot. */

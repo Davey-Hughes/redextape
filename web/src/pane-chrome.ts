@@ -12,7 +12,7 @@ export type PaneEvents = {
    * **A THUNK, BECAUSE A SLOT'S BINDING MOVES AND THE DOCUMENT FOLLOWS THE SESSION.** A pane is
    * constructed once and rebound many times; resolving the URI at construction would pin an
    * editor built later to whichever buffer the pane happened to show first. `transport.ts` reads
-   * `slot.binding` inside this, the same way `editScratch` does.
+   * `slot.binding` inside this, the same way `editSink` does.
    *
    * Optional for the same reason the two members below it are: a test builds a pane with only the
    * handlers it drives, and an editor with no document simply has no language features.
@@ -116,24 +116,31 @@ export type PaneEvents = {
    */
   detach?: (step: number) => void
   /**
-   * A genuine edit landed in a detached pane's own scratch buffer — design §4.3's second edit
-   * gesture, and `detach`'s counterpart: that one forks a new scratch from a source-derived view,
-   * this one recompiles the scratch that already exists. `ScratchEditor`'s debounced `onEdit` is the
-   * only caller, so it fires on a keystroke that survived the debounce — never on the seed that
-   * mounted the editor (`ScratchEditor#setText`'s `#seeding` guard is what keeps a seed from reaching
-   * here at all).
+   * Where the editor being built sends its edits — design §4.3's second edit gesture, and `detach`'s counterpart:
+   * that one forks a new copy from a view of the program, the sink this returns rebuilds a copy that already exists.
+   * The view calls this once per editor it BUILDS, and hands the sink to the `ScratchEditor` as its `onEdit`, whose
+   * debounce is the only caller — so it fires on a keystroke that survived the debounce, never on the seed that
+   * mounted the editor (`ScratchEditor#setText`'s `#seeding` guard keeps a seed from reaching it at all).
+   *
+   * **A THUNK THAT RETURNS A SINK, BOUND WHEN IT IS CALLED TO THE COPY THE VIEW SHOWS THEN, AND NOT A HANDLER THAT
+   * READS THE VIEW'S COPY WHEN IT FIRES.** It was the second, and a view that moved to another copy inside the
+   * debounce sent what was typed into the one it left to the one it moved to — confirmed on `main` for a λ view
+   * picking another copy through its title within 300 ms. An editor is one copy's for its life, wherever it is
+   * mounted (`ScratchEditorConfig.onEdit`), which is why a view that is handed an editor it did not build leaves
+   * the editor's sink alone. `lspDocument` above is resolved at the same moment for the same reason.
    *
    * OPTIONAL, FOR THE SAME REASON `detach` IS: an editor exists only on a pane whose slot owns a
    * scratch (§4.2), and this file declares the shape without deciding when a pane gets it — that is
    * `main.ts`'s wiring, same as `detach` above.
    */
-  editScratch?: (src: string) => void
+  editSink?(): (src: string) => void
   /**
    * This pane asks to hold its scratch session's editor — wave 3 (5d-ii-a)'s editor-moves rule.
    *
-   * OPTIONAL, FOR `detach`'s REASON: it exists only on a pane whose slot may be bound to a scratch,
-   * which today means the λ leg. IT CARRIES NOTHING, same as `close` below — the pane knows it was
-   * asked; it does not know its own `LeafId` or which session it is bound to.
+   * OPTIONAL, FOR `detach`'s REASON: it exists only on a pane whose slot may be bound to a scratch —
+   * every λ, TM and asm view, since a TM or asm view showing a copy whose editor another view holds
+   * offers it too (`CopyEditor.#refreshClaim`). IT CARRIES NOTHING, same as `close` below — the pane
+   * knows it was asked; it does not know its own `LeafId` or which session it is bound to.
    * `pane-host.ts`'s `paneEvents` holds both and is what makes the request into
    * `custody.claim(session, id)` followed by `applyLayout()`, which is where the actual DOM move happens
    * (`editor-custody.ts`'s `reconcileEditors`) — this handler only reports the click.
@@ -154,11 +161,12 @@ export type PaneEvents = {
    * **NOT WITHHELD ON A TM PANE, WHICH REVERSES WHAT THIS PARAGRAPH USED TO SAY.** It read "because a
    * TM pane has no editor to collapse and a handler it can never fire is a parameter pretending to be a
    * capability" — true before Task 8 (5d-iv), false after: `TmPane` also `implements EditablePane` and
-   * its constructor builds a `textPanel` that wraps `#editorHost` in the pane body exactly like
-   * `LambdaPane`'s, and calls `on.collapse?.(collapsed)` from it. `transport.ts`'s `events` provides
-   * this handler on both legs now — see its own doc for the review finding that caught the gap: left
-   * λ-only, every `TmPane` was built with `on.collapse === undefined`, so a TM collapse hid the host but
-   * never reached `scratchpad.setCollapsed`, and the buffer came back expanded on reload.
+   * its constructor builds a `textPanel` (in its `CopyEditor` now, as the asm view's does) that wraps the
+   * editor's host in the pane body exactly like `LambdaPane`'s, and calls `on.collapse?.(collapsed)` from it.
+   * `transport.ts`'s `events` provides this handler on every leg now — see its own doc for the review finding
+   * that caught the gap: left λ-only, every `TmPane` was built with `on.collapse === undefined`, so a TM
+   * collapse hid the host but never reached `scratchpad.setCollapsed`, and the buffer came back expanded on
+   * reload.
    *
    * IT REPORTS THE GESTURE AND DOES NOT PERFORM IT. The host is already hidden or shown by the time this
    * runs — `createPanel`'s own click handler (`panel.ts`) applies the new `hidden`/`aria-expanded` state
@@ -190,6 +198,11 @@ export type PaneEvents = {
    * the handler reports.
    */
   detachMachine?(): void
+  /**
+   * Copy this view's asm PROGRAM into an asm copy — Plan 7 part 5 spec §7. `detachMachine`'s shape and for its reason:
+   * the seed is the program's whole text, which the session keeps, so the handler needs nothing from the view.
+   */
+  detachAsm?(): void
   /** A state row was clicked. Absent on panes that have no table. */
   linkState?: (stateId: number) => void
   /** An instruction row in the asm view's listing was clicked, or Enter pressed on it; `pc` is its index. */

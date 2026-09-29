@@ -63,6 +63,7 @@ function lambdaSession(id: SessionId, label: string, text: string, detached: boo
     tmProgram: null,
     tmScratch: null,
     asmProgram: null,
+    asmScratch: null,
   }
 }
 
@@ -92,6 +93,7 @@ function bothLegs(id: SessionId, label: string, text: string): SessionEntry {
     tmProgram: null,
     tmScratch: null,
     asmProgram: null,
+    asmScratch: null,
   }
 }
 

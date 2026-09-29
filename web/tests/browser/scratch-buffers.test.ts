@@ -297,7 +297,7 @@ describe('the header buffer list', () => {
     // fix — unfocused invoker left `.cm-scroller`, focused invoker left `<body>`.
     button?.focus()
     button?.click()
-    expect(bufferRows()).toEqual([`${label} · not shown · running`])
+    expect(bufferRows()).toEqual([`${label} · not shown`])
 
     // STAGE 3 — delete it. The list is rebuilt around the delete (`buffer-list.ts`'s `handleDelete`), so a
     // row naming a copy that has gone is never left on screen; this was the LAST row, so the rebuild

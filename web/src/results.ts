@@ -1,6 +1,6 @@
-import { n } from './format'
+import { counted, n } from './format'
 import type { AsmLeg, LambdaLeg, TmLeg } from './protocol'
-import type { AsmCap, Diagnostic, RunStatus, ValueReading } from './types'
+import type { AsmCap, Decoded, Diagnostic, RunStatus, ValueReading } from './types'
 import { decodedText } from './types'
 
 export type Row = { leg: string; label: string; value: string; note?: string }
@@ -48,7 +48,7 @@ function lambdaRows(l: LambdaLeg): Row[] {
     if (l.state.cut === 'Bytes') row.note = '… truncated at 64 KiB'
     if (l.state.cut === 'Depth') row.note = '… too deep to show in full'
     rows.push(row)
-    rows.push({ leg: 'λ', label: 'steps', value: `${n(l.state.step)} reductions` })
+    rows.push({ leg: 'λ', label: 'steps', value: counted(l.state.step, 'reduction') })
   }
   const note = runNote(l.status.run)
   if (note) rows.push({ leg: 'λ', label: 'run', value: note })
@@ -76,8 +76,8 @@ function tmRows(t: TmLeg): Row[] {
       leg: 'TM',
       label: 'steps',
       value: finished
-        ? `${n(t.status.total_steps)} transitions`
-        : `stopped after ${n(t.status.total_steps)} transitions at a cap`,
+        ? counted(t.status.total_steps, 'transition')
+        : `stopped after ${counted(t.status.total_steps, 'transition')} at a cap`,
     })
   }
 
@@ -106,17 +106,17 @@ function asmRows(a: AsmLeg): Row[] {
   if (!a.status.available) return [{ leg: 'asm', label: 'declined', value: a.status.reason }]
   const rows: Row[] = []
   if (a.status.total_steps !== null) {
-    const steps = n(a.status.total_steps)
+    const steps = counted(a.status.total_steps, 'instruction')
     const finished = a.value !== null && a.value !== 'Unfinished'
     const cap = a.status.run === 'Capped' ? a.status.cap : null
     rows.push({
       leg: 'asm',
       label: 'steps',
       value: finished
-        ? `${steps} instructions`
+        ? steps
         : cap === null || cap === 'Steps'
-          ? `stopped after ${steps} instructions at a cap`
-          : `stopped after ${steps} instructions — ${FULL[cap]}`,
+          ? `stopped after ${steps} at a cap`
+          : `stopped after ${steps} — ${FULL[cap]}`,
     })
   }
   if (a.value) rows.push({ leg: 'asm', label: 'value', value: decodedText(a.value) })
@@ -149,6 +149,14 @@ export function valueLine(reading: ValueReading | null): string | null {
   if (reading === null) return null
   const { run, value } = reading
   if (run.run === 'Running') return `value: running · ${n(run.steps)} of ${n(run.cap)} steps`
+  return endedLine(value)
+}
+
+/**
+ * The line an ended run's value shows, by `valueLine`'s rule: a real value takes the `value: ` prefix, and every other
+ * ending already says what it is. An asm copy's value line is this, since its value arrives ended, with its build.
+ */
+export function endedLine(value: Decoded): string {
   if (typeof value === 'object' && 'Value' in value) return `value: ${value.Value.text}`
   return decodedText(value)
 }

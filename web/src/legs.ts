@@ -34,14 +34,6 @@ import type { Leg } from './protocol'
 export const LEG_NAME: Readonly<Record<Leg, string>> = { lambda: 'λ', asm: 'asm', tm: 'TM' }
 
 /**
- * A leg a copy can be made on: λ and TM. **ASM IS LEFT OUT UNTIL PART 5c**, which adds asm copies and widens this
- * (Plan 7 part 5 spec §7). Every place a copy's leg is held — a copy's record, the copies menu, the store — takes
- * this rather than `Leg`, so the switches over a copy's leg have no asm arm to write, and 5c's widening makes `tsc`
- * name each one it has to fill.
- */
-export type CopyLeg = Exclude<Leg, 'asm'>
-
-/**
  * Every leg, in the order the app lists them — the title-selector's groups (`SessionRegistry.pairs`) and the
  * detachment clause's names (`link-status.ts`'s `detachedText`).
  *
@@ -77,7 +69,7 @@ export function perLeg<T>(value: (leg: Leg) => T): Record<Leg, T> {
  * `never`, which is the only type this accepts; a member with no arm reaches it with its own type, and the call
  * is a type error at the `switch` that forgot it. A `switch` that returns a value needs none of this — unless
  * `undefined` is one of the values, since TS2366 polices only a function whose return type excludes it, and a
- * missing arm would then answer `undefined` with `tsc` green (`link-wiring.ts`'s `theSlot` is that case).
+ * missing arm would then answer `undefined` with `tsc` green — so such a `switch` ends in `unhandled` too.
  *
  * **IT DOES NOTHING WHEN CALLED, AND IT DOES NOT THROW.** The types say no value gets here. If one did — a
  * reply from a worker the page did not expect — the `switch` it ends did nothing for that value before this

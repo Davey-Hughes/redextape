@@ -15,6 +15,16 @@ import { pairLabel } from './view-header'
 import type { Speed } from './workspace'
 
 /**
+ * What `forkCopy` throws when a handler reaches it with no text — a wiring bug on every leg, named by the handler, so
+ * a leg added to `Leg` is a type error here until it says which handler forks it.
+ */
+const NO_TEXT: Record<Leg, string> = {
+  lambda: 'detach reached with no term text',
+  tm: 'detachMachine reached with no machine text',
+  asm: 'detachAsm reached with no asm text',
+}
+
+/**
  * `play`, WHICH HANDS A LEG TO THE PLAYER THAT WALKS RECORDED FRAMES, AND `events`, THE PER-PANE CLICK HANDLERS — moved
  * out of `main.ts` verbatim. See the doc comment on each below for what it does; this one is only
  * about the dependencies.
@@ -81,7 +91,7 @@ export function createTransport(deps: {
   /**
    * The colourer for one language — `main.ts`'s one grammar registry, curried.
    *
-   * **A FUNCTION OF THE LANGUAGE RATHER THAN A READY EXTENSION, BECAUSE THIS FACTORY SERVES BOTH LEGS.**
+   * **A FUNCTION OF THE LANGUAGE RATHER THAN A READY EXTENSION, BECAUSE THIS FACTORY SERVES EVERY LEG.**
    * `events` below is called once per pane and a pane's leg decides its language; handing the transport
    * a single extension would colour a TM copy with the λ grammar. It is not a thunk in `lspClient`'s
    * sense — `main.ts` builds the registry before this call, for the ordering reason `lspClient`'s own
@@ -146,6 +156,59 @@ export function createTransport(deps: {
    */
   const play = <T>(leg: LegState<T>) => {
     player.toggle(leg)
+    draw()
+  }
+
+  /**
+   * Make a copy on `slot`'s leg from `text` at `step`, move `slot`'s view onto it, and say what happened — the one body
+   * behind every *edit a copy*: `detach` on the λ leg, from the source's term at the step the view shows, and
+   * `detachMachine` and `detachAsm` on the TM and asm legs, from the program's whole text at step 0. Each handler
+   * resolves its own text and hands it here, so the three cannot drift apart in what follows.
+   *
+   * **`null` TEXT IS A WIRING BUG, NOT A USER ACTION — LOUD, NOT SWALLOWED.** Each view withdraws or disables its
+   * control whenever its handler would pass none (`CopyEditor.#refreshDetach` for the machine views), so a click that
+   * reaches here with none is a handler firing on a button that should never have been clickable — a defect in the
+   * wiring between the two, not a state a user chose. The λ handler returns before it can pass none (its own guard),
+   * so its entry in `NO_TEXT` names the rule rather than a route.
+   *
+   * **THE CAP'S REFUSAL IS AN ANSWER TO THE USER AND IS CAUGHT HERE** (design §4.5, and the Critical the λ fork's
+   * review raised). `ScratchBuffers.fork` refuses at `MAX_WARM_BUFFERS` rather than evicting, and a click listener is
+   * the last frame before the raw DOM dispatch (`view-header.ts`'s `viewMenu`) — there is no `window` error handler in
+   * `src/` behind it, so an uncaught throw here would reach the console and nothing else. A notice is where it goes
+   * instead (`notice.ts`, Plan 7 part 2 spec §11), as `replies.ts` does for the sibling refusal (a fork whose BUILD
+   * fails). `e.message` already carries its own prefix by the time it gets here — `scratch.ts`'s `fork` passes it to
+   * `#refuseAtCap` itself — so this hands the message through unchanged.
+   *
+   * **`BufferCapReached` AND NOT A BARE `catch`.** The other throws reachable from `fork` are `SessionRegistry.add`'s
+   * and `SessionPool.bind`'s guards over their own invariants; those are wiring bugs, and rendering one as a status
+   * line would swallow it. Anything else is re-thrown unchanged. `tests/node/sessions.test.ts` holds both arms, for
+   * the λ and TM handlers.
+   */
+  const forkCopy = (slot: PaneSlot<Leg>, text: string | null, step: number): void => {
+    // THE SLOT'S OWN LEG — a slot's leg has no writer (`PaneSlot`'s doc), so the copy is made on the leg the view
+    // shows.
+    const leg = slot.binding.leg
+    if (text === null) throw new Error(NO_TEXT[leg])
+    let id: SessionId
+    try {
+      id = scratchpad.fork(slot, text, step, leg)
+    } catch (e) {
+      if (!(e instanceof BufferCapReached)) throw e
+      notify(e.message)
+      // NO `onBuffersChanged()` ON THIS ARM — the header's count did not move, because that is the whole content of
+      // the refusal.
+      draw()
+      return
+    }
+    // SAY WHAT IT MADE — and that notice is what replaces any refusal still on screen.
+    notify(`${scratchpad.nameOf(id) ?? 'a copy'} created — this view shows it`)
+    // THE HEADER GAINED A BUFFER, AND ITS READOUT IS THE ONE SURFACE `draw()` BELOW DOES NOT REACH — `draw.ts` paints
+    // panes and pane chrome, and the buffer list is header chrome beside the workspace menu. See this dependency's own
+    // doc for why the count travels on a click rather than on the frame clock.
+    onBuffersChanged()
+    // IMMEDIATELY, NOT ON THE COPY'S FIRST REPLY. The rebind has already happened, so this view's `copy · not linked`
+    // status, its selector (which gains a second option the instant a second session is registered) and the status
+    // line are all stale until something paints — and the first frame is a worker round trip away.
     draw()
   }
 
@@ -260,7 +323,7 @@ export function createTransport(deps: {
     // **OMITTED ON THE TM LEG, AND THE REASON WRITTEN HERE UNTIL NOW WAS WRONG ON BOTH HALVES —
     // whole-branch review before merge.** It read "for the reason the two handlers below are, and one
     // more: §4.1's `TmScratch` is built from `.tm` text and nothing in this app holds any — see
-    // `scratch.ts`." `editScratch` and `collapse`, the two handlers below, are no longer λ-only either
+    // `scratch.ts`." `editSink` and `collapse`, the two handlers below, are no longer λ-only either
     // — each carries its own paragraph, dated to this same task, saying so in as many words. And this
     // app does hold `.tm` text: `detachMachine`, in the `leg === 'tm'` spread further down THIS file,
     // reads it straight off `sessions.entryOf(slot.binding.session).tmProgram?.tmText` — the field
@@ -313,55 +376,20 @@ export function createTransport(deps: {
           detach: (step: number) => {
             const wiring = linkWiring()
             if (wiring.index === null || wiring.index.lambdaText === '') return
-            // **THE CAP'S REFUSAL IS AN ANSWER TO THE USER AND IS CAUGHT HERE** (design §4.5, and the
-            // Critical this task's review raised). `ScratchBuffers.fork` refuses at `MAX_WARM_BUFFERS`
-            // rather than evicting, and this click listener is the last frame before the raw DOM
-            // dispatch (`view-header.ts`'s `viewMenu`) — there is no `window` error handler in
-            // `src/` behind it, so an uncaught throw here would reach the console and nothing else.
-            // A notice is where it goes instead (`notice.ts`, Plan 7 part 2 spec §11), as `replies.ts`
-            // does for the sibling refusal (a fork whose BUILD fails). `e.message` already carries its
-            // own prefix by the time it gets here — `scratch.ts`'s `fork` passes it to `#refuseAtCap`
-            // itself — so this handler hands the message through unchanged.
-            //
-            // **`BufferCapReached` AND NOT A BARE `catch`.** The other throws reachable from `fork` are
-            // `SessionRegistry.add`'s and `SessionPool.bind`'s guards over their own invariants; those
-            // are wiring bugs, and rendering one as a status line would swallow it. Anything else is
-            // re-thrown unchanged.
-            let id: SessionId
-            try {
-              id = scratchpad.fork(slot, wiring.index.lambdaText, step, 'lambda')
-            } catch (e) {
-              if (!(e instanceof BufferCapReached)) throw e
-              notify(e.message)
-              // NO `onBuffersChanged()` ON THIS ARM — the header's count did not move, because that is
-              // the whole content of the refusal.
-              draw()
-              return
-            }
-            // SAY WHAT IT MADE — and that notice is what replaces any refusal still on screen.
-            notify(`${scratchpad.nameOf(id) ?? 'a copy'} created — this view shows it`)
-            // THE HEADER GAINED A BUFFER, AND ITS READOUT IS THE ONE SURFACE `draw()` BELOW DOES NOT
-            // REACH — `draw.ts` paints panes and pane chrome, and the buffer list is header chrome
-            // beside the workspace menu. See this dependency's own doc for why the count travels on a click
-            // rather than on the frame clock.
-            onBuffersChanged()
-            // IMMEDIATELY, NOT ON THE SCRATCHPAD'S FIRST REPLY. The rebind has already happened, so
-            // this view's `copy · not linked` status, its selector (which gains a second option the instant a
-            // second session is registered) and the status line are all stale until something paints
-            // — and the first frame is a worker round trip away.
-            draw()
+            // THE CAP'S REFUSAL, THE NARROW CATCH AND WHAT IS SAID AND PAINTED AFTER: `forkCopy`, every leg's.
+            forkCopy(slot, wiring.index.lambdaText, step)
           },
         }
       : {}),
-    // THE EDIT PATH — design §4.3's second gesture, `ScratchEditor`'s debounced `onEdit` wired
-    // through both panes' own `setEditor` and `receiveEditor` (`receiveEditor` reassigns it when
-    // custody moves an editor). `recompile` REBUILDS
-    // THE BUFFER THIS PANE IS SHOWING rather than forking a second one, which is the whole of
-    // what this handler decides. It used to say "the singleton is `scratch.ts`'s to keep, not
-    // this handler's to re-derive", and there was no id to pass because there was one scratch;
-    // 5d-ii-c decision 1 makes buffers plural, so the pane's own binding is what says which term
-    // the keystrokes belong to. Reading it here rather than in the callee is the same rule
-    // `detach` above follows: this file is handed what it needs to name, it does not go looking.
+    // THE EDIT PATH — design §4.3's second gesture: the sink `editSink` returns is the `onEdit` of the editor a
+    // view builds (`LambdaPane.setEditor`, `CopyEditor.setEditor`), and it stays that editor's when custody or
+    // *move the editor here* moves the editor to another view. `recompile` REBUILDS THE BUFFER THE VIEW SHOWED
+    // WHEN IT BUILT THE EDITOR rather than forking a second one, which is the whole of what this handler decides.
+    // It used to say "the singleton is `scratch.ts`'s to keep, not this handler's to re-derive", and there was no
+    // id to pass because there was one scratch; 5d-ii-c decision 1 makes buffers plural, so the pane's own binding
+    // is what says which term the keystrokes belong to — read once, when the editor is built (the handler below).
+    // Reading it here rather than in the callee is the same rule `detach` above follows: this file is handed what
+    // it needs to name, it does not go looking.
     //
     // NO `draw()`, UNLIKE `detach` ABOVE, and the asymmetry is the point rather than an
     // oversight. `detach` draws because it REBINDS the slot synchronously — the badge, the
@@ -373,14 +401,14 @@ export function createTransport(deps: {
     // `ScratchBuffers.recompile` claims a generation with `client.supersede()`, and the pool's
     // `onSupersede` repaints through `draw()`, as it does for a source keystroke's compile.
     //
-    // **PROVIDED ON BOTH LEGS, NOT ONLY λ — WHICH REVERSES WHAT THIS PROPERTY USED TO SAY, Important
+    // **PROVIDED ON EVERY LEG, NOT ONLY λ — WHICH REVERSES WHAT THIS PROPERTY USED TO SAY, Important
     // finding, review of Task 8.** It used to sit inside the `leg === 'lambda'` spread above, beside
     // `detach` and `collapse`, on the reasoning that an editor exists only on a pane whose slot owns a
     // scratch and that "today means the λ leg". Task 8 made that false: `TmPane` also `implements
-    // EditablePane` and its constructor reads `on.editScratch` exactly the way `LambdaPane`'s does
-    // (`this.#onEdit = on.editScratch`), unconditional on leg. `slot.binding.session` resolves
-    // identically on either leg, so there is nothing leg-specific left in this handler's body — moving
-    // it out of the spread is the whole fix.
+    // EditablePane`, and the `CopyEditor` its constructor builds reads this handler exactly the way
+    // `LambdaPane` does, unconditional on leg. `slot.binding.session`
+    // resolves identically on any leg, so there is nothing leg-specific left in this handler's body —
+    // moving it out of the spread is the whole fix.
     // ONE EXTENSION PER EDITOR, BUILT FROM THE ONE REGISTRY — the grammar is fetched once for the page
     // however many editors ask for it (`colour.ts`'s `createGrammarRegistry` caches per language,
     // including a failure), so building a plugin here costs nothing beyond the plugin.
@@ -390,7 +418,7 @@ export function createTransport(deps: {
     keymap,
     // **THE DOCUMENT FOLLOWS THE SESSION, NOT THE SLOT.** `editor-custody.ts` holds editors under
     // `SessionId` and a session has exactly one leg, so this pair is the editor's identity even
-    // as it moves between panes. Read inside the thunk, like `editScratch` below, because a
+    // as it moves between panes. Read inside the thunk, like `editSink` below, because a
     // slot's binding changes under a pane that was constructed once.
     lspDocument: () => ({
       uri: documentUri(slot.binding.session, LANGUAGE_OF_PANE[slot.binding.leg]),
@@ -404,30 +432,36 @@ export function createTransport(deps: {
         label: sessions.has(slot.binding.session) ? sessions.entryOf(slot.binding.session).label : 'a copy',
       }),
     }),
-    editScratch: (src: string) => {
-      scratchpad.recompile(slot.binding.session, src)
+    // **THE SESSION IS READ WHEN THE EDITOR IS BUILT, NOT WHEN AN EDIT FIRES** — `PaneEvents.editSink`'s doc has
+    // the defect: read at fire time, typing a view had not yet sent when it moved to another copy rebuilt that copy.
+    editSink: () => {
+      const session = slot.binding.session
+      return (src: string) => {
+        scratchpad.recompile(session, src)
+      }
     },
     // THE COLLAPSE REPORT — 5d-ii-d T9, design §4.7.
     //
-    // **PROVIDED ON BOTH LEGS, NOT ONLY λ — WHICH REVERSES WHAT THIS PROPERTY USED TO SAY, Important
+    // **PROVIDED ON EVERY LEG, NOT ONLY λ — WHICH REVERSES WHAT THIS PROPERTY USED TO SAY, Important
     // finding, review of Task 8.** It used to read "LAMBDA-ONLY, LIKE `detach` AND `editScratch` BESIDE
     // IT: `PaneEvents.collapse`'s own doc states the rule ('a handler it can never fire is a parameter
     // pretending to be a capability'), and `TmPane` never builds a `collapseButton` to fire it" — both
-    // halves false as of Task 8: `TmPane`'s constructor builds a `textPanel` that wraps `#editorHost`
-    // in the pane body and calls `on.collapse?.(collapsed)` from it, exactly like `LambdaPane`'s. Left inside the
-    // λ-only spread, every `TmPane` was constructed with `on.collapse === undefined`, so a TM collapse
-    // toggled the class but never reached `scratchpad.setCollapsed` or `redextape.buffers` — collapse a
-    // TM scratch, reload, it comes back expanded, the exact screen-disagrees-with-storage defect the
-    // collapse-seeding rules exist to prevent. THE SESSION IS ALREADY IN SCOPE HERE, which is the whole
+    // halves false as of Task 8: `TmPane`'s constructor builds a `textPanel` (in its `CopyEditor` now) that
+    // wraps the editor's host in the pane body and calls `on.collapse?.(collapsed)` from it, exactly like
+    // `LambdaPane`'s. Left inside the λ-only spread, every `TmPane` was constructed with
+    // `on.collapse === undefined`, so a TM collapse toggled the class but never reached
+    // `scratchpad.setCollapsed` or `redextape.buffers` — collapse a TM scratch, reload, it comes back
+    // expanded, the exact screen-disagrees-with-storage defect the collapse-seeding rules exist to prevent.
+    // THE SESSION IS ALREADY IN SCOPE HERE, which is the whole
     // reason this lives in `transport.ts` rather than behind a callback threaded through `pane-host.ts`
     // the way `detach`/`showEditor` are — those two need a `LeafId` this file does not have (`editorOwner`
     // is keyed by one); this handler needs nothing beyond `slot.binding.session`, which every
-    // other handler above already resolves the same way, on either leg.
+    // other handler above already resolves the same way, on any leg.
     //
     // **`slot.binding.session` USED TO NOT BE SAFE THE WAY "EVERY OTHER HANDLER" IMPLIES — THE SAME
-    // GAP `editScratch` USED TO HAVE, NOW CLOSED AT ITS SOURCE.** `editor-custody.ts`'s
-    // `reconcileEditors` doc used to record a live gap: `pane-host.ts`'s same-leg `rebind` arm did
-    // not hand a scratch→scratch rebind's outgoing editor to custody, so a pane could go on showing
+    // GAP THE EDIT HANDLER (`editScratch`, as it was) USED TO HAVE, NOW CLOSED AT ITS SOURCE.**
+    // `editor-custody.ts`'s `reconcileEditors` doc used to record a live gap: `pane-host.ts`'s same-leg
+    // `rebind` arm did not hand a scratch→scratch rebind's outgoing editor to custody, so a pane could go on showing
     // buffer A's live editor above buffer B's frames once its binding had moved to B, and
     // `editScratch` — read at edit time, exactly as this handler reads at click time — would write
     // THROUGH that stale editor to B rather than to A. `collapse` resolves the buffer the identical
@@ -435,8 +469,10 @@ export function createTransport(deps: {
     // against B while the editor on screen was A's. **Fixed where this paragraph always said it
     // belonged** — `pane-host.ts`'s rebind wrapper now takes the outgoing editor into custody before
     // the binding moves, so by the time either handler here reads `slot.binding.session`, the
-    // editor actually mounted on the pane agrees with it. Neither handler needed to change; the
-    // stale binding they used to inherit is what stopped being possible.
+    // editor actually mounted on the pane agrees with it. Neither handler needed to change for that; the
+    // stale binding they used to inherit is what stopped being possible. The edit handler had a second
+    // gap this one does not: a debounce still pending when the binding moves fired after it, so it binds
+    // the session when the editor is built (`editSink` above). A collapse is a click, read when it lands.
     collapse: (collapsed: boolean) => {
       // NO `draw()`. The host is already hidden or shown by the time this runs — `createPanel`'s own
       // click handler (`panel.ts`) applies that state before calling `onToggle` — and nothing else on
@@ -458,13 +494,23 @@ export function createTransport(deps: {
     // decided from it at construction cannot go stale the way one decided from its session would.
     // THE ASM VIEW'S ROWS LINK THE SAME WAY, BY THE INSTRUCTION'S OWNER (Plan 7 part 5 spec §6.6) — an instruction
     // `defunc` minted has none, and `setLinkTo` says so on the status line rather than leaving it blank.
+    //
+    // **A ROW IN A COPY LINKS NOTHING AND SAYS NOTHING** (spec amendment 28), in either view that numbers its rows by
+    // the machine it shows. The link index describes the PROGRAM, so an instruction or state index read in a copy names
+    // whatever the program has at that index: an unedited copy lined up with the program and pinned its constructs,
+    // and an edited one pinned whatever the program happened to have there. `detached` is the session's own fact,
+    // read at click time since the view's binding moves.
     ...(slot.binding.leg === 'asm'
       ? {
           linkInstr: (pc: number) => {
             const wiring = linkWiring()
             if (!wiring.linkable || wiring.index === null) return
+            if (sessions.entryOf(slot.binding.session).detached) return
             wiring.setLinkTo(wiring.index.nodeForInstr(pc), 'asm')
           },
+          // `detachMachine`'s handler below, for an asm copy: the program's text, as its session kept it from the
+          // `compiled` reply (`replies.ts`'s `setAsmProgram`), `null` only where the control is withdrawn or disabled.
+          detachAsm: () => forkCopy(slot, sessions.entryOf(slot.binding.session).asmProgram?.asmText ?? null, 0),
         }
       : {}),
     ...(slot.binding.leg === 'tm'
@@ -472,6 +518,7 @@ export function createTransport(deps: {
           linkState: (stateId: number) => {
             const wiring = linkWiring()
             if (!wiring.linkable || wiring.index === null) return
+            if (sessions.entryOf(slot.binding.session).detached) return
             wiring.setLinkTo(wiring.index.nodeForState(stateId), 'tm')
           },
           // THE MACHINE FORK — design §4.3, `detach`'s counterpart for this leg. **NO STEP TO RESOLVE,
@@ -485,41 +532,14 @@ export function createTransport(deps: {
           // currently bound to is the one its fork control forks FROM, same as `detach` above resolves
           // `slot.binding.session` rather than assuming which session it is.
           //
-          // **`null` REACHING HERE IS A WIRING BUG, NOT A USER ACTION — LOUD, NOT SWALLOWED.** The
-          // control is withdrawn or disabled (`TmPane.#refreshDetach`) whenever this would be `null` —
+          // **`null` REACHING HERE IS A WIRING BUG, NOT A USER ACTION — `forkCopy` throws it.** The
+          // control is withdrawn or disabled (`CopyEditor.#refreshDetach`) whenever this would be `null` —
           // over the cap (`tmText === null` with a machine present, disabled) or on a pane already
-          // showing the scratch it would fork (`#detached`, removed entirely — Critical fix, fix round
-          // on Task 9: `setForkAvailable`'s own call site fans out over the SOURCE session only, so a
+          // showing the scratch it would fork (`#detached`, removed entirely — a Critical fix, in a review
+          // round of this fork: `setForkAvailable`'s own call site fans out over the SOURCE session only, so a
           // pane that has just rebound onto its own new scratch needs `#refreshDetach` driven from
-          // `setDetached`, not another `setForkAvailable` call it will never receive again) — so a
-          // click that reaches this handler with one is `detachMachine` firing on a button that should
-          // never have been clickable — a defect in the wiring between the two, not a state a user
-          // chose.
-          detachMachine: () => {
-            const text = sessions.entryOf(slot.binding.session).tmProgram?.tmText ?? null
-            if (text === null) throw new Error('detachMachine reached with no machine text')
-            // **`BufferCapReached` AND NOT A BARE `catch`**, for the reason the λ handler's own doc
-            // gives in full: the other throws reachable from `fork` are `SessionRegistry.add`'s and
-            // `SessionPool.bind`'s guards over their own invariants, and rendering one of those as a
-            // status line would swallow a wiring bug.
-            let id: SessionId
-            try {
-              id = scratchpad.fork(slot, text, 0, 'tm')
-            } catch (e) {
-              if (!(e instanceof BufferCapReached)) throw e
-              notify(e.message)
-              // NO `onBuffersChanged()` ON THIS ARM, `detach`'s OWN REASON: the header's count did not
-              // move, because that is the whole content of the refusal.
-              draw()
-              return
-            }
-            // SAME ORDER AS `detach` ABOVE, AND THE SAME REASON FOR EACH LINE: the header's buffer count is
-            // stale until this returns, and everything about this pane — its status, its title, its
-            // status line — is stale the instant the synchronous rebind above returns.
-            notify(`${scratchpad.nameOf(id) ?? 'a copy'} created — this view shows it`)
-            onBuffersChanged()
-            draw()
-          },
+          // `setDetached`, not another `setForkAvailable` call it will never receive again).
+          detachMachine: () => forkCopy(slot, sessions.entryOf(slot.binding.session).tmProgram?.tmText ?? null, 0),
         }
       : {}),
     // OMITTED ENTIRELY ON THE TM LEG, mirroring `linkState` above — `PaneEvents.linkLambda` is

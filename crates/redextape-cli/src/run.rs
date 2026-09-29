@@ -307,7 +307,7 @@ fn run_asm_artifact(
         )?;
         return Ok(Outcome::ToolFailed);
     };
-    match redextape_core::tm::run_asm(&program, redextape_core::tm::DEFAULT_CAPS) {
+    match redextape_core::tm::run_asm(&program, redextape_core::tm::asm::DEFAULT_CAPS) {
         redextape_core::tm::AsmRun::Ran(outcome) => report_asm_decode(
             redextape_core::tm::decode_asm_ty_reason(&outcome, &header.result),
             label,

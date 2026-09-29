@@ -54,6 +54,13 @@ ts = ["dep:ts-rs", "redextape-core/ts"]
 # there holds what it does instead, and `scripts/check-all.sh` gives it a clippy and test leg of its own so that
 # test runs. No wasm build a gate or the app loads enables it.
 probe-no-tm-scratch-ceiling = []
+# `probe-no-tm-scratch-ceiling`'s twin for asm copies, and one thing more. It switches off the size check in
+# `asm_scratch_with_caps` (`src/session.rs`), so an asm copy parses text of any length, for
+# `web/tests/browser/asm-copy-cost.test.ts`, which prices a build on both sides of `MAX_SCRATCH_ASM_BYTES`; and it
+# exports `asmScratchWithCaps`, so `web/tests/browser/asm-copy-memory.test.ts` can build a copy under `DEFAULT_CAPS`
+# and under `COPY_CAPS` and read the worker's memory after each. Built by `web`'s `test:probe:asm-copy` script into
+# `target/probe-asm-copy-wasm/`, never into `pkg/`; `scripts/check-all.sh` gives it a clippy and test leg.
+probe-asm-copy = []
 
 [dev-dependencies]
 wasm-bindgen-test = "0.3.76"

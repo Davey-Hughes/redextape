@@ -7,20 +7,23 @@ import type { SessionRegistry } from './sessions'
  * What custody needs a pane to be able to do — **a shape rather than a class, so both panes satisfy it
  * without either importing the other.**
  *
- * `LambdaPane` and `TmPane` both implement these four. A union of the two classes would make this module
- * import both, and a change to either's constructor would reach a file that only ever calls four methods.
+ * `LambdaPane`, `TmPane` and `AsmPane` implement it, the two machine views through the `CopyEditor` they share. A
+ * union of the classes would make this module import all of them, and a change to any one's constructor would reach a
+ * file that only ever calls these methods.
  *
  * `receiveEditor` TAKES THE SAME `collapsed` SECOND PARAMETER `setEditor` DOES, AND `holdsEditor` IS A
- * FOURTH MEMBER BESIDE THE THREE `hold`/`homeFor`'s OWN DOCS NAME. Both are load-bearing on the two
+ * MEMBER BESIDE THE THREE `hold`/`homeFor`'s OWN DOCS NAME. Both are load-bearing on the two
  * call sites below (`reconcileEditors`'s two `receiveEditor` calls thread `collapsedOf(session)` through
  * so a collapsed buffer remounts collapsed, and `hasEditor` below answers "is a pane already showing
- * one" without unmounting it to find out, which `holdsEditor` alone can do).
+ * one" without unmounting it to find out, which `holdsEditor` alone can do). `flushEditor` is `flush`'s, below.
  */
 export type EditablePane = {
   setEditor(text: string | null, collapsed?: boolean): void
   takeEditor(): ScratchEditor | null
   receiveEditor(editor: ScratchEditor, collapsed?: boolean): void
   holdsEditor(): boolean
+  /** Send the mounted editor's pending edit now — `ScratchEditor.flush` — and do nothing when none is mounted. */
+  flushEditor(): void
 }
 
 /**
@@ -48,10 +51,10 @@ export type EditablePane = {
  * keeps the tree, the DOM and `localStorage` from disagreeing when it fires. Both halves are unchanged
  * by the move.
  *
- * **ONE CUSTODY INSTANCE COVERS BOTH LEGS, NOT ONE PER LEG — T7's widening, and the reason it is a
+ * **ONE CUSTODY INSTANCE COVERS EVERY LEG, NOT ONE PER LEG — T7's widening, and the reason it is a
  * widening rather than a second module.** `hold`/`homeFor` used to be typed over `LambdaEditor`/
- * `LambdaPane` specifically; they now take and return `ScratchEditor`/`EditablePane`, the shapes both
- * panes satisfy (see `EditablePane`'s own doc above). What did not change is the key: `editorOwner` and
+ * `LambdaPane` specifically; they now take and return `ScratchEditor`/`EditablePane`, the shapes every
+ * editing pane satisfies (see `EditablePane`'s own doc above). What did not change is the key: `editorOwner` and
  * `heldEditors` are keyed by `SessionId`, and a session has exactly one leg — `SessionRegistry.legOf`
  * throws for the leg a session lacks, so no session can ever have two editors to keep straight. A
  * second instance, one per leg, would put that single fact in two containers for no session to ever
@@ -73,6 +76,15 @@ export type EditorCustody = {
   hasEditor(session: SessionId): boolean
   /** Move held editors onto their claimed homes and retire orphans. Throws as it does today. */
   reconcile(): void
+  /**
+   * Send the pending edit of `session`'s editor now, wherever it is — held here, or mounted on a view of the copy.
+   *
+   * **FOR A GESTURE THAT READS A COPY'S RECORD OR PUTS IT TO SLEEP BEFORE ANY EDITOR COMES DOWN.** An editor that
+   * comes down sends what it held (`ScratchEditor.destroy`), but a delete reads the record its undo restores before
+   * the delete takes the copy's views away, and a pause stores the copy before the frame that takes its editor down —
+   * so typing in the editor's debounce would miss both. `main.ts`'s copies-menu handlers call this first.
+   */
+  flush(session: SessionId): void
 }
 
 /**
@@ -143,7 +155,7 @@ export function createEditorCustody(deps: {
    *
    * **WITHOUT THIS, CLOSING THE HOLDER STRANDS THE EDITOR AND THE CONTROL TO RETRIEVE IT STAYS
    * OFFERED.** `applyLayout` drops a closed pane from `panes` before anything asks it for its editor,
-   * and `reconcileEditors` only ever iterates `panes.of('lambda')` — so the `ScratchEditor` would be left
+   * and `reconcileEditors` only ever iterates the views in `panes` — so the `ScratchEditor` would be left
    * mounted in a host no longer in the tree, with nothing holding a reference that could reach it.
    * Meanwhile the surviving pane, still bound to the scratch and still holding no editor, would go on
    * offering "move the editor here" (`LambdaPane.#refreshClaim`'s `#detached && #editor
@@ -214,11 +226,11 @@ export function createEditorCustody(deps: {
     // not be read as being only about `reset preset`'s re-minted ids.
     //
     // (2) USED TO CATCH IT ANYWAY, WHILE ONLY A λ SCRATCH COULD EVER BE CLAIMED — no longer the whole
-    // story since 5d-iv Task 9 gave a TM scratch an editor of its own: `pane-host.ts`'s `detachMachine`
-    // wrapper claims a TM scratch's session the same way `detach`'s wrapper claims a λ one's, so a key
-    // in `editorOwner` can now name a TM-legged scratch. `SessionRegistry.pairs()` DOES offer a TM pair
-    // for that session — it is this task's own fork gesture — so a `<select>` CAN produce a TM slot
-    // bound to exactly the session a claim names, and a pane under a claimed id that has become a
+    // story since a TM copy got an editor of its own: `pane-host.ts`'s `claiming` wraps `detachMachine`
+    // (and `detachAsm`) to claim a TM or asm copy's session the same way it wraps `detach` for a λ one's,
+    // so a key in `editorOwner` can now name a machine-legged scratch. `SessionRegistry.pairs()` DOES
+    // offer a TM pair for that session — the machine fork's own copy — so a `<select>` CAN produce a TM
+    // slot bound to exactly the session a claim names, and a pane under a claimed id that has become a
     // `TmPane` is no longer guaranteed to be bound to some OTHER session the way it was while every
     // claimed session was λ-only.
     //
@@ -227,7 +239,7 @@ export function createEditorCustody(deps: {
     //
     // NEITHER FACT MAKES THE CAST'S CONFORMANCE TRUE ON ITS OWN — THIS MODULE NEVER CHECKS IT. What
     // checks it is `implements EditablePane` on each pane class's own definition (`lambda-pane.ts`'s
-    // `LambdaPane`, and `TmPane` from Task 8): a `LambdaPane` missing one of the four members fails to
+    // `LambdaPane`, `TmPane` and `AsmPane`): a `LambdaPane` missing one of its members fails to
     // compile AT THAT CLASS, not here, because nothing in this file ever assigns a `LambdaPane` value to
     // an `EditablePane`-typed position except through this `unknown` cast and its sibling in
     // `reconcileEditors` below. That `implements` clause is the anchor a reader should trust this cast
@@ -265,10 +277,10 @@ export function createEditorCustody(deps: {
    * has to concatenate two sequences because neither reaches it alone.
    *
    * RUN ON EVERY `applyLayout()` CALL RATHER THAN ONLY WHEN `editorOwner` CHANGED. The sweep is cheap
-   * (`panes.of('lambda')` is at most a handful of entries, and there is at most one scratch session to
-   * iterate today) and self-correcting: a pane that already agrees with its owner costs one
-   * `takeEditor()` call that returns `null` and nothing more, so there is no separate "did anything
-   * change" flag for every caller that touches `editorOwner` to keep in step.
+   * (`panes.all()` is at most a handful of entries, and so is `editorOwner`) and self-correcting: a pane
+   * that already agrees with its owner costs one `takeEditor()` call that returns `null` and nothing
+   * more, so there is no separate "did anything change" flag for every caller that touches `editorOwner`
+   * to keep in step.
    *
    * A STALE OWNER RESOLVES TO NO HOME, NOT TO A FALLBACK PANE — `editorHomeFor`'s own doc has the two
    * ways it goes stale. Reassigning to some other pane bound to the session would be exactly the
@@ -380,7 +392,10 @@ export function createEditorCustody(deps: {
         continue
       }
       const home = editorHomeFor(session)
-      for (const p of panes.of('lambda')) {
+      // **EVERY VIEW, NOT ONLY THE λ ONES — *move the editor here* is offered on a TM or asm view too**, and this
+      // sweep is what moves the editor another view of the copy holds onto the view that asked (`pane-host.ts`'s
+      // `showEditor`). The predicates below are about a view's binding and which view is home, never its leg.
+      for (const p of panes.all()) {
         // **THE PANE'S OWN BINDING IS THE PREDICATE THAT SAYS WHOSE EDITOR IT COULD BE HOLDING, AND
         // WITHOUT IT THIS LOOP HANDED ONE BUFFER'S EDITOR TO ANOTHER BUFFER'S HOME** — Important
         // finding, review of tasks 1+2 as a unit. A `LambdaPane` does not record which session's editor
@@ -414,11 +429,9 @@ export function createEditorCustody(deps: {
         // Stated in full, with what closes it, in this function's own doc above.
         if (p.slot.binding.session !== session) continue
         // `as unknown as EditablePane`, THE SAME STEP AND FOR THE SAME REASON AS `editorHomeFor`'s OWN
-        // CAST ABOVE — `p.pane` here is `PaneView<LambdaState>`, which shares no member with
-        // `EditablePane` for TS to narrow through directly. Sound for the reason given two paragraphs
-        // above this loop: a pane only ever comes to hold an editor while bound to its session, and this
-        // loop is restricted to `panes.of('lambda')`, so every `p.pane` reaching this line is in fact a
-        // `LambdaPane` today.
+        // CAST ABOVE — `p.pane` here is a `PaneView`, which shares no member with `EditablePane` for TS to
+        // narrow through directly. Sound because every entry in `panes` is a λ, TM or asm view, and each
+        // `implements EditablePane` (the source view has no entry).
         const pane = p.pane as unknown as EditablePane
         if (pane === home) continue
         const held = pane.takeEditor()
@@ -461,7 +474,8 @@ export function createEditorCustody(deps: {
     homeFor: editorHomeFor,
     /**
      * Whether an editor for `session` EXISTS — the fact `LambdaPane.#refreshClaim` was missing, and the
-     * fix for deferred-a11y item 11. `draw()` fans it over every λ pane once a frame.
+     * fix for deferred-a11y item 11. `draw()` fans it over every view once a frame — a TM or asm view's
+     * *move the editor here* asks it too (`CopyEditor.#refreshClaim`).
      *
      * **`homeFor(session) !== undefined` IS NOT THIS QUESTION, AND ANSWERING IT THAT WAY WOULD HAVE LEFT
      * THE DEFECT EXACTLY WHERE IT WAS.** `editorOwner` is a map of CLAIMS, and the claim for a fork is
@@ -512,5 +526,13 @@ export function createEditorCustody(deps: {
       return heldEditors.has(session) || editorHomeFor(session)?.holdsEditor() === true
     },
     reconcile: reconcileEditors,
+    flush(session: SessionId): void {
+      heldEditors.get(session)?.flush()
+      // EVERY VIEW OF THE COPY, NOT ONLY ITS CLAIMED HOME: a view only holds an editor while it shows that editor's
+      // copy (`reconcileEditors`' own argument), so asking each of them is exact without trusting the claim.
+      for (const p of panes.all()) {
+        if (p.slot.binding.session === session) (p.pane as unknown as EditablePane).flushEditor()
+      }
+    },
   }
 }

@@ -109,6 +109,7 @@ function entry(
     tmProgram: null,
     tmScratch: null,
     asmProgram: null,
+    asmScratch: null,
   }
 }
 
@@ -316,7 +317,7 @@ describe('PaneSlot', () => {
     const transport = createTransport({
       sessions: reg,
       // NEITHER IS REACHED BY `rebind`, AND THE CASTS SAY SO RATHER THAN BUILDING TWO FAKES. The
-      // scratchpad is touched only by `detach`/`editScratch` and `linkWiring` only by
+      // scratchpad is touched only by `detach`/`editSink` and `linkWiring` only by
       // `detach`/`linkState`/`linkLambda`; a `rebind` that consulted either would fail here loudly,
       // which is the point of not supplying them.
       scratchpad: {} as ScratchBuffers,
@@ -507,7 +508,12 @@ describe('PaneSlot', () => {
       listing: [],
       labels: [],
     }
-    source.tmProgram = { program, tapeNames: ['TAPE'], tmText: 'tapes 1\nstart pc0\nstate pc0:\n' }
+    source.tmProgram = {
+      program,
+      tapeNames: ['TAPE'],
+      tmText: 'tapes 1\nstart pc0\nstate pc0:\n',
+      tmResultDecodable: true,
+    }
     reg.add(source)
 
     const notified: string[] = []

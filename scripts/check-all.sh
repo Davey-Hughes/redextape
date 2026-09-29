@@ -165,6 +165,9 @@ LEGS=(
   # so it is a config like `ts`, and a config no leg builds is one whose tests never run.
   "base|clippy|-p redextape-wasm --features probe-no-tm-scratch-ceiling --all-targets"
   "base|test|-p redextape-wasm --features probe-no-tm-scratch-ceiling"
+  # `probe-asm-copy` does the same for `MAX_SCRATCH_ASM_BYTES`, and adds an export; the same reason for a leg of its own.
+  "base|clippy|-p redextape-wasm --features probe-asm-copy --all-targets"
+  "base|test|-p redextape-wasm --features probe-asm-copy"
   # `redextape-lsp-wasm` is a `cdylib` the browser loads, so "does it build for wasm32" is a
   # different question from the one the `--workspace` rows above answer, which build natively.
   #

@@ -1328,7 +1328,7 @@ mod scratch_methods_that_must_not_exist {
     const _: fn(&redextape_wasm::LambdaScratch) -> (Absent, Absent, Absent) = lambda_scratch_has_none_of_them;
 
     /// `tmValue` reads `ty` + `final_tapes` + `kind`, none of which a `TmScratch` has — §3.3's row for
-    /// it. `sourceSpan`/`linkIndex` are off both scratch types for the same reason they are off the λ
+    /// it. `sourceSpan`/`linkIndex` are off every scratch type for the same reason they are off the λ
     /// one. `tmStatus` is NOT in this list: it exists here, with a different return type
     /// (`TmScratchStatus`), which is a reshape rather than an absence — checked at run time by
     /// `a_headerless_tm_scratch_runs_and_says_its_configuration_was_invented`, which asserts
@@ -1337,6 +1337,13 @@ mod scratch_methods_that_must_not_exist {
         (s.tm_value(), s.source_span(0), s.link_index(0))
     }
     const _: fn(&redextape_wasm::TmScratch) -> (Absent, Absent, Absent) = tm_scratch_has_none_of_them;
+
+    /// An asm copy has no `SourceMap`, so no `sourceSpan` or `linkIndex`; its value is `asmValue`, the leg's
+    /// own, so neither of the other legs' value methods is on it either.
+    fn asm_scratch_has_none_of_them(s: &redextape_wasm::AsmScratch) -> (Absent, Absent, Absent, Absent) {
+        (s.lambda_value(), s.tm_value(), s.source_span(0), s.link_index(0))
+    }
+    const _: fn(&redextape_wasm::AsmScratch) -> (Absent, Absent, Absent, Absent) = asm_scratch_has_none_of_them;
 }
 
 /// An `AsmWindow` as a renderer builds one: a plain JS object with five named counts.
@@ -1458,4 +1465,61 @@ fn a_declined_asm_leg_reports_why_and_its_methods_throw() {
         }
         assert!(Reflect::apply(&f, &session, &args).is_err(), "{method} must throw for an absent leg");
     }
+}
+
+/// A copy of the program's asm through the glue: `asmText` crosses as a string headed by the program's type,
+/// `asmScratch` builds a handle from it with no diagnostics, and every method a renderer calls answers as the
+/// session's does — the same status, listing and value — but for `source_node`, `null` on every frame of a
+/// copy. `raiseAsmCap` takes a plain number, as on the session.
+#[wasm_bindgen_test]
+fn an_asm_copy_crosses_the_boundary() {
+    let (_, session) = compile("let x = 40; x + 2");
+    let text = call(&session, "asmText", &[]).as_string().expect("asmText crosses as a string");
+    assert!(text.starts_with("result Nat\n"), "headed by the program's type: {text}");
+
+    let out = redextape_wasm::asm_scratch(&text).expect("asmScratch must not throw");
+    let diagnostics: Array = get(&out, "diagnostics").unchecked_into();
+    assert_eq!(diagnostics.length(), 0, "the program's own text has nothing to refuse");
+    let copy = get(&out, "scratch");
+    let json = |v: JsValue| JSON::stringify(&v).unwrap().as_string().unwrap();
+    for method in ["asmStatus", "asmProgram", "asmValue"] {
+        assert_eq!(json(call(&copy, method, &[])), json(call(&session, method, &[])), "{method}");
+    }
+    let window = asm_window(64, 16, 8, 16, 16);
+    let mut steps = 0;
+    loop {
+        let st = call(&copy, "asmState", std::slice::from_ref(&window));
+        assert!(get(&st, "source_node").is_null(), "a copy has no owners, and says so as null");
+        if call(&copy, "stepAsm", &[]) != JsValue::TRUE {
+            break;
+        }
+        steps += 1;
+        assert!(steps <= 100, "this program halts in 5 instructions");
+    }
+    assert_eq!(steps, 5);
+    call(&copy, "raiseAsmCap", &[JsValue::from_f64(1000.0)]);
+    let value = call(&copy, "asmValue", &[]);
+    assert_eq!(get(&get(&value, "Value"), "text").as_string().as_deref(), Some("42"), "got {value:?}");
+}
+
+/// Refused text crosses as diagnostics beside a `null` handle, as `tmScratch`'s does: here a jump to a label
+/// nothing defines, which parses and which `asm_label_diagnostics` refuses.
+#[wasm_bindgen_test]
+fn a_refused_asm_copy_crosses_as_diagnostics_and_a_null_handle() {
+    let out = redextape_wasm::asm_scratch("\tjmp\tnowhere\n").expect("asmScratch must not throw on bad input");
+    let diagnostics: Array = get(&out, "diagnostics").unchecked_into();
+    assert_eq!(diagnostics.length(), 1);
+    assert_eq!(get(&diagnostics.get(0), "message").as_string().as_deref(), Some("undefined label `nowhere`"));
+    assert_eq!(get(&out, "scratch"), JsValue::NULL, "no program, no handle — and `null`, not `undefined`");
+}
+
+/// A declined asm leg's `asmText` crosses as `null`, not `undefined` — `declined_tm_text_crosses_as_null_not
+/// _undefined`'s point, on the program `a_declined_asm_leg_reports_why_and_its_methods_throw` declines.
+#[wasm_bindgen_test]
+fn declined_asm_text_crosses_as_null_not_undefined() {
+    let src = format!("[{}]", (0..2048).map(|i| i.to_string()).collect::<Vec<_>>().join(", "));
+    let (_, session) = compile(&src);
+    assert_eq!(get(&call(&session, "asmStatus", &[]), "available"), JsValue::FALSE, "the premise");
+    let text = call(&session, "asmText", &[]);
+    assert!(text.is_null(), "a declined asm leg's asmText must cross as `null`, got {text:?}");
 }

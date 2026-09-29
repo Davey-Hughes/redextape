@@ -134,6 +134,7 @@ function sourceSession(pool: SessionPool, seen: RunReply[]): SessionEntry {
     tmProgram: null,
     tmScratch: null,
     asmProgram: null,
+    asmScratch: null,
   }
 }
 
@@ -629,6 +630,7 @@ describe('the no-session report for a failed fork', () => {
         draw: () => {
           drawn += 1
         },
+        viewTitle: () => '',
       })
       const notified: string[] = []
       const replies = createReplies({

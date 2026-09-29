@@ -321,9 +321,11 @@ describe('restoring buffers on both legs', () => {
     const row = second.bufferRows()[0]
     if (row === undefined) throw new Error('no buffer row on the restored page')
     // THE NAME LINE, NOT THE ROW: a warm row's own controls read `pause` then `delete`, which run together
-    // in the row's text as `pausedelete` and would match /paused/ on a running copy.
+    // in the row's text as `pausedelete` and would match /paused/ on a live copy.
     expect(row.querySelector('.buffer-row-name')?.textContent).not.toMatch(/paused/)
-    expect(row.querySelector('.buffer-row-name')?.textContent).toMatch(/· running$/)
+    // A LIVE ROW NAMES NO WORKER AT ALL (Plan 7 part 5 spec amendment 46) — its name line ends at its view
+    // count, not at a word about its worker.
+    expect(row.querySelector('.buffer-row-name')?.textContent).toMatch(/· not shown$/)
   })
 
   /**
