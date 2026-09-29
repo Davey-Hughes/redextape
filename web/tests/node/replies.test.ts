@@ -4,7 +4,7 @@ import { History } from '../../src/history'
 import { LambdaTrees } from '../../src/lambda-trees'
 import type { LinkWiring } from '../../src/link-wiring'
 import { PaneCollection, type PaneEntry } from '../../src/panes'
-import type { RunReply, RunRequest } from '../../src/protocol'
+import type { RecordEnd, RunReply, RunRequest } from '../../src/protocol'
 import { createReplies } from '../../src/replies'
 import { ScratchBuffers } from '../../src/scratch'
 import type { ClientPort, PoolPort, SessionId } from '../../src/session-client'
@@ -13,6 +13,7 @@ import type { LegState, SessionEntry } from '../../src/sessions'
 import { PaneSlot, SessionRegistry } from '../../src/sessions'
 import type {
   AsmProgram,
+  AsmState,
   AsmStatus,
   Decoded,
   Diagnostic,
@@ -82,14 +83,14 @@ function leg<T>(): LegState<T> {
   return { hist: new History<T>(1_000_000), status: { available: false, reason: '' }, done: null, playing: false }
 }
 
-/** A session with both legs and nothing compiled yet, exactly as `main.ts` registers the source one. */
+/** A session with every leg and nothing compiled yet, exactly as `main.ts` registers the source one. */
 function sourceEntry(): SessionEntry {
   return {
     id: SOURCE,
     label: 'source',
     detached: false,
     client: fakeClient(),
-    legs: { lambda: leg<LambdaState>(), tm: leg<TmState>() },
+    legs: { lambda: leg<LambdaState>(), asm: leg<AsmState>(), tm: leg<TmState>() },
     tmProgram: null,
     tmScratch: null,
     asmProgram: null,
@@ -124,8 +125,14 @@ const compiled = (tmProgram: TmProgram | null, tapeNames: string[]): RunReply =>
   asmText: null,
 })
 
-/** The switch under test, over a registry holding `entry`, with no pane in the collection. */
-function driver(entry: SessionEntry) {
+/**
+ * The switch under test, over a registry holding `entry`, with no pane in the collection.
+ *
+ * `frame` IS OVERRIDABLE FOR `scratchDriver`'s REASON, AND DEFAULTS TO ITS STAND-IN, a callback run straight. A
+ * recording chunk that does not end the recording schedules its redraw on `frame`, and `createReplies`' own default,
+ * `requestAnimationFrame`, is not defined in this tier: a `*-frames` reply sent here without a stand-in would throw.
+ */
+function driver(entry: SessionEntry, opts: { frame?: (cb: () => void) => void } = {}) {
   const reg = new SessionRegistry()
   reg.add(entry)
   const dispatched: unknown[] = []
@@ -146,9 +153,10 @@ function driver(entry: SessionEntry) {
     draw: () => {
       drawn += 1
     },
+    frame: opts.frame ?? ((cb: () => void) => cb()),
     editorHome: () => undefined,
-    // NO SCRATCH REPLY REACHES THIS DRIVER — every test built on it sends `compiled`, `error` or
-    // `worker-error` through `onReply`, and `onBuffersPersist` is called from the `scratch-compiled`
+    // NO SCRATCH REPLY REACHES THIS DRIVER — every test built on it sends `compiled` or a recording
+    // chunk through `onReply`, and `onBuffersPersist` is called from the `scratch-compiled`
     // arm of the OTHER switch. A no-op rather than a throw, because "this driver does not exercise
     // that arm" is a fact about the fixture and not a claim any test here is making.
     onBuffersPersist: () => undefined,
@@ -265,16 +273,16 @@ const noSession = (diagnostics: Diagnostic[]): RunReply => ({ kind: 'no-session'
  * tier's business (`tests/browser/scratch-edit.test.ts`).
  */
 /**
- * `draw` and `frame` are overridable for the one describe block below that asserts how often `draw()`
- * runs (`case 'tm-value'`'s frame coalescing) — every other caller takes the defaults, a no-op `draw` and
- * a `frame` that runs its callback synchronously. **THE DEFAULT `frame` MUST NOT BE
- * `createReplies`'s OWN DEFAULT**, which is `requestAnimationFrame` itself: this tier's `environment:
- * 'node'` has no such global (unlike jsdom or a real page), so a test that sends a `Running` tm-value
- * reply without overriding `frame` would throw `ReferenceError: requestAnimationFrame is not defined`
- * the moment `case 'tm-value'` schedules one. Running the callback synchronously instead keeps every
- * existing retention test's behaviour identical to `draw()` being called straight, since none of them
- * assert on `draw`'s call count or timing — only the coalescing describe block below does, and it passes
- * both overrides.
+ * `draw` and `frame` are overridable for the tests below that assert how often `draw()` runs —
+ * `case 'tm-value'`'s frame coalescing, and the recording chunks' — and every other caller takes the
+ * defaults, a no-op `draw` and a `frame` that runs its callback synchronously. **THE DEFAULT `frame` MUST
+ * NOT BE `createReplies`'s OWN DEFAULT**, which is `requestAnimationFrame` itself: this tier's
+ * `environment: 'node'` has no such global (unlike jsdom or a real page), so a test that sends a `Running`
+ * tm-value reply, or a recording chunk that does not end its recording, without overriding `frame` would
+ * throw `ReferenceError: requestAnimationFrame is not defined` the moment its arm schedules one. Running
+ * the callback synchronously instead keeps every existing retention test's behaviour identical to `draw()`
+ * being called straight, since none of them assert on `draw`'s call count or timing — only the coalescing
+ * tests do, and they pass both overrides.
  */
 function scratchDriver(opts: { draw?: () => void; frame?: (cb: () => void) => void } = {}) {
   const reg = new SessionRegistry()
@@ -551,6 +559,26 @@ describe('onScratchReply records a buffer’s text from its own scratch-compiled
   })
 })
 
+/**
+ * A hand-driven stand-in for `requestAnimationFrame`: `frame` queues a callback and `fire` runs one frame.
+ *
+ * A REAL `requestAnimationFrame` HANDS EACH QUEUED CALLBACK THE SAME FRAME — draining what is queued NOW, not what a
+ * callback queues while this drain runs, is what a fake stands in for here.
+ */
+function frameQueue() {
+  const pending: Array<() => void> = []
+  return {
+    pending,
+    frame: (cb: () => void): void => {
+      pending.push(cb)
+    },
+    fire: (): void => {
+      const due = pending.splice(0, pending.length)
+      for (const cb of due) cb()
+    },
+  }
+}
+
 describe('a TM buffer retains what its panes were last told', () => {
   const STATUS: TmScratchStatus = {
     available: true,
@@ -601,27 +629,18 @@ describe('a TM buffer retains what its panes were last told', () => {
    * so a `draw()` per chunk is a synchronous redraw the browser cannot skip. This test drives the fake
    * `frame` scheduler by hand instead of the default synchronous stand-in, so it can tell "several replies
    * landed before the frame fired" from "each reply drew on its own" — the default stand-in (`cb()` run
-   * straight) collapses that distinction, which is why every OTHER test in this file leaves `frame` at its
-   * default.
+   * straight) collapses that distinction, which is why only the tests that count draws — this one and the
+   * recording chunks' further down — replace it.
    */
   it('coalesces a burst of running replies to one draw per frame, and flushes the ending reply at once', () => {
     let drawn = 0
-    const pending: Array<() => void> = []
-    const frame = (cb: () => void): void => {
-      pending.push(cb)
-    }
-    const fireFrame = (): void => {
-      // A REAL `requestAnimationFrame` HANDS EACH QUEUED CALLBACK THE SAME FRAME — draining what is queued
-      // NOW, not what a callback queues while this drain runs, is what a fake stands in for here.
-      const due = pending.splice(0, pending.length)
-      for (const cb of due) cb()
-    }
+    const { pending, frame, fire: fireFrame } = frameQueue()
     const { buffers, reg, replies } = scratchDriver({ draw: () => (drawn += 1), frame })
     const id = buffers.forkBlank('tm')
     replies.onScratchReply(id, built(['REG']))
     // PRECONDITION: the build itself draws once, straight, exactly as `tm-scratch-compiled`'s own arm
-    // always has — only `tm-value`'s own redraw is coalesced. Reset the counter so the burst below is
-    // read against a known zero, not against this unrelated draw.
+    // always has — a build is not one of the streamed replies whose redraw is coalesced. Reset the counter
+    // so the burst below is read against a known zero, not against this unrelated draw.
     expect(drawn).toBe(1)
     drawn = 0
     const running = (steps: number) =>
@@ -701,6 +720,160 @@ describe('a TM buffer retains what its panes were last told', () => {
       run: { run: 'Ended', steps: 241_666, cap: 241_666 },
       value: { Value: { text: '2' } },
     })
+  })
+})
+
+/**
+ * **A RECORDING CHUNK'S REDRAW IS COALESCED TO ONE PER FRAME, AS A RUNNING VALUE'S IS** — the six `*-frames` arms,
+ * three in each switch. `record-loop.ts`'s `recordLeg` posts one chunk per `RECORD_CHUNK` steps while any leg records,
+ * far more often than a display paints, and each arm drew once per chunk. The arms now push the chunk's frames at once
+ * and leave only the paint for the next frame; the chunk that ends the recording paints at once, since a copy's run
+ * gets no `result` reply to paint its last frame.
+ *
+ * EVERY CASE RUNS FOR BOTH SWITCHES AND ALL THREE LEGS. The six arms are written out separately, so a case run against
+ * one of them says nothing about the other five.
+ */
+describe('a recording chunk redraws once per frame', () => {
+  const FRAMES_LEGS = ['lambda', 'tm', 'asm'] as const
+  type FramesLeg = (typeof FRAMES_LEGS)[number]
+  const CASES = (['onReply', 'onScratchReply'] as const).flatMap((sw) => FRAMES_LEGS.map((l) => [sw, l] as const))
+
+  const tmFrame = (step: number): TmState => ({
+    state: 0,
+    step,
+    heads: [0],
+    window_start: [0],
+    window: [['a']],
+    source_node: null,
+    rule: null,
+  })
+
+  /** A `*-frames` reply for `leg` carrying steps `from` to `from + 1`, and the frames it carries. */
+  const chunk = (leg: FramesLeg, from: number, done: RecordEnd | null): { reply: RunReply; frames: unknown[] } => {
+    const steps = [from, from + 1]
+    switch (leg) {
+      case 'lambda': {
+        const frames = steps.map((step) => ({ ...lambdaFrame(`t${step}`), step }))
+        return { reply: { kind: 'lambda-frames', gen: 1, frames, done }, frames }
+      }
+      case 'tm': {
+        const frames = steps.map(tmFrame)
+        return { reply: { kind: 'tm-frames', gen: 1, frames, done }, frames }
+      }
+      case 'asm': {
+        const frames = steps.map((step) => frameOf({ step }))
+        return { reply: { kind: 'asm-frames', gen: 1, frames, done }, frames }
+      }
+    }
+  }
+
+  /**
+   * `sw`'s switch over a session with a `leg` leg: the program's session through `driver`, or a blank copy through
+   * `scratchDriver`. Both take the same hand-driven frame queue, and `drawn` counts from zero.
+   */
+  const harness = (sw: 'onReply' | 'onScratchReply', leg: FramesLeg) => {
+    const q = frameQueue()
+    if (sw === 'onReply') {
+      const entry = sourceEntry()
+      const d = driver(entry, { frame: q.frame })
+      return {
+        q,
+        send: (r: RunReply) => d.replies.onReply(SOURCE, r),
+        leg: () => entry.legs[leg] as LegState<unknown>,
+        drawn: d.drawn,
+      }
+    }
+    let drawn = 0
+    const d = scratchDriver({ draw: () => (drawn += 1), frame: q.frame })
+    const id = d.buffers.forkBlank(leg)
+    return {
+      q,
+      send: (r: RunReply) => d.replies.onScratchReply(id, r),
+      leg: () => d.reg.legOf({ session: id, leg }) as LegState<unknown>,
+      drawn: () => drawn,
+    }
+  }
+
+  /**
+   * THE HISTORY IS ASSERTED FIRST, BEFORE ANY COUNT. Only the paint may wait for the frame: the step bar, the
+   * controls and the next chunk all read the leg straight, so every frame the burst carried must already be there.
+   */
+  it.each(CASES)('%s, %s: a burst of chunks draws once, on the frame, with the history already current', (sw, leg) => {
+    const h = harness(sw, leg)
+    const last = chunk(leg, 4, null)
+    h.send(chunk(leg, 0, null).reply)
+    h.send(chunk(leg, 2, null).reply)
+    h.send(last.reply)
+
+    expect({ length: h.leg().hist.length, current: h.leg().hist.current }).toEqual({
+      length: 6,
+      current: last.frames.at(-1),
+    })
+    expect(h.drawn()).toBe(0)
+    expect(h.q.pending.length).toBe(1)
+    h.q.fire()
+    expect(h.drawn()).toBe(1)
+  })
+
+  it.each(CASES)('%s, %s: the chunk that ends the recording draws at once', (sw, leg) => {
+    const h = harness(sw, leg)
+    h.send(chunk(leg, 0, 'budget').reply)
+
+    expect(h.leg().done).toBe('budget')
+    expect(h.drawn()).toBe(1)
+    expect(h.q.pending.length).toBe(0)
+  })
+
+  /**
+   * A BROWSER'S FRAME CANNOT BE UNCALLED, so the one a burst scheduled still fires after the ending chunk has drawn,
+   * and must find nothing left to draw.
+   */
+  it.each(CASES)('%s, %s: the frame left pending when the recording ends draws nothing', (sw, leg) => {
+    const h = harness(sw, leg)
+    h.send(chunk(leg, 0, null).reply)
+    expect(h.q.pending.length).toBe(1)
+    h.send(chunk(leg, 2, 'ended').reply)
+    expect(h.drawn()).toBe(1)
+
+    h.q.fire()
+    expect(h.drawn()).toBe(1)
+  })
+
+  /**
+   * **ONE PENDING FLAG FOR EVERY ARM, NOT ONE PER ARM.** `draw()` repaints the whole app from live state, so a frame
+   * scheduled by either reply paints what both brought. A TM copy's value run and its recording are the pair that
+   * really do land together.
+   */
+  it('a running TM value and a TM chunk landing before one frame share its one draw', () => {
+    const h = harness('onScratchReply', 'tm')
+    h.send({ kind: 'tm-value', gen: 1, run: { run: 'Running', steps: 500_000, cap: 2_000_000 }, value: 'Unfinished' })
+    h.send(chunk('tm', 0, null).reply)
+
+    expect(h.drawn()).toBe(0)
+    expect(h.q.pending.length).toBe(1)
+    h.q.fire()
+    expect(h.drawn()).toBe(1)
+  })
+
+  /**
+   * **AND ACROSS BOTH SWITCHES AND EVERY LEG.** The program's session records its three legs at once and a copy records
+   * beside it, so a flag kept per switch, or per leg, would give each of them a frame of its own; the pair above lands in
+   * one switch on one leg and cannot tell. One `createReplies` serves both switches here, as it does in the app.
+   */
+  it("the program's λ and TM chunks and a copy's asm chunk landing before one frame share its one draw", () => {
+    const q = frameQueue()
+    let drawn = 0
+    const d = scratchDriver({ draw: () => (drawn += 1), frame: q.frame })
+    d.reg.add(sourceEntry())
+    const copy = d.buffers.forkBlank('asm')
+    d.replies.onReply(SOURCE, chunk('lambda', 0, null).reply)
+    d.replies.onReply(SOURCE, chunk('tm', 0, null).reply)
+    d.replies.onScratchReply(copy, chunk('asm', 0, null).reply)
+
+    expect(drawn).toBe(0)
+    expect(q.pending.length).toBe(1)
+    q.fire()
+    expect(drawn).toBe(1)
   })
 })
 

@@ -90,8 +90,9 @@ export function createReplies(deps: {
   /**
    * Schedule a callback for the next paint — `requestAnimationFrame`, injectable so a node test can drive
    * the schedule by hand instead of waiting on a real display. Optional: the app passes none and gets the
-   * real one, `player.ts`'s own dependency, for the identical reason. Used only to coalesce `case
-   * 'tm-value'`'s redraw below — every other arm still calls `draw()` straight.
+   * real one, `player.ts`'s own dependency, for the identical reason. Used only to coalesce the redraws of
+   * the replies that arrive in a stream — `scheduleDraw` below names them and says why the rest still call
+   * `draw()` straight.
    */
   frame?: (cb: () => void) => void
   /**
@@ -232,6 +233,51 @@ export function createReplies(deps: {
   }
 
   /**
+   * Coalesce a redraw to at most one per animation frame, for the replies that arrive in a stream: a TM copy's
+   * `tm-value` while its run is `Running`, which the worker posts once per `VALUE_CHUNK`, and every `lambda-frames`,
+   * `tm-frames` and `asm-frames` chunk that does not end its recording, which `record-loop.ts`'s `recordLeg` posts
+   * once per `RECORD_CHUNK` while any leg records. Either comes far more often than a display paints, and a `draw()`
+   * per reply is a full, synchronous redraw the browser cannot skip, even behind a hidden tab.
+   *
+   * `drawPending` IS SHARED ACROSS EVERY ARM AND EVERY SESSION, not kept per arm or per copy: `draw()` repaints the
+   * whole app from live state, whichever reply asked for it, so one pending frame already covers every reply that
+   * lands before it fires — the same way one `draw()` call always has. Each reply applies its own state at once;
+   * only the paint waits.
+   *
+   * `scheduleDraw` is what such a reply calls: the first one in a burst schedules a frame and flips the flag, and
+   * every reply that lands before that frame fires is absorbed (the flag is already set, so the call is a no-op)
+   * rather than scheduling a second one. When the frame fires it checks the flag again before drawing, because
+   * `flushDraw` may have cleared it first — see below.
+   *
+   * `flushDraw` is what the reply that ends a value run or a recording calls: it clears the flag and draws right
+   * away, without waiting on whatever frame is already scheduled — a hidden tab may never paint one, and a copy's
+   * recording is followed by no `result` reply that would paint its last frame and its `ended` or `budget` instead.
+   * Clearing the flag first, rather than leaving it set, is what stops that earlier frame from drawing a second time
+   * once it fires — a browser's own `requestAnimationFrame` cannot be uncalled, so the guard is the flag, not the
+   * callback.
+   *
+   * **EVERY OTHER ARM STILL CALLS `draw()` STRAIGHT.** Each arrives once per build, gesture or step rather than in a
+   * stream, and several rely on painting in the same task: `result` flips `#results` to idle, and the readout must
+   * say the same thing at the same moment; `compiled`, `no-session` and `worker-error` dispatch the source editor's
+   * decorations, which must not appear half-updated beside the running focus `draw()` sets; and `lambda-tree`'s
+   * `draw()` is what asks the worker for the next tree a view wants.
+   */
+  let drawPending = false
+  const scheduleDraw = (): void => {
+    if (drawPending) return
+    drawPending = true
+    frame(() => {
+      if (!drawPending) return
+      drawPending = false
+      draw()
+    })
+  }
+  const flushDraw = (): void => {
+    drawPending = false
+    draw()
+  }
+
+  /**
    * One session's replies, applied to that session's legs.
    *
    * THE SESSION IS A PARAMETER, NOT A CLOSED-OVER CONST, even though exactly one exists. A reply
@@ -304,21 +350,24 @@ export function createReplies(deps: {
         const leg = sessions.legOf({ session, leg: 'lambda' })
         for (const f of reply.frames) leg.hist.push(f, lambdaFrameBytes(f))
         leg.done = reply.done
-        draw()
+        if (reply.done === null) scheduleDraw()
+        else flushDraw()
         return
       }
       case 'tm-frames': {
         const leg = sessions.legOf({ session, leg: 'tm' })
         for (const f of reply.frames) leg.hist.push(f, tmFrameBytes(f))
         leg.done = reply.done
-        draw()
+        if (reply.done === null) scheduleDraw()
+        else flushDraw()
         return
       }
       case 'asm-frames': {
         const leg = sessions.legOf({ session, leg: 'asm' })
         for (const f of reply.frames) leg.hist.push(f, asmFrameBytes(f))
         leg.done = reply.done
-        draw()
+        if (reply.done === null) scheduleDraw()
+        else flushDraw()
         return
       }
       case 'result':
@@ -409,38 +458,6 @@ export function createReplies(deps: {
    * traffic is not a compile and must not be seen as one finishing. The `worker-error` arm below was the
    * last exception and its own note says why it stopped.
    */
-
-  /**
-   * Coalesce `case 'tm-value'`'s redraw to at most one per animation frame while a value run is `Running` —
-   * that arm's own comment has the reason. `tmValueDrawPending` is shared across every session, not kept
-   * per-copy: `draw()` repaints the whole app regardless of which copy's chunk asked for it, so one pending
-   * frame already covers every copy chunking at once, the same way one `draw()` call always has.
-   *
-   * `scheduleTmValueDraw` is what a `Running` reply calls: the first one in a burst schedules a frame and
-   * flips the flag, and every reply that lands before that frame fires is absorbed (the flag is already
-   * set, so the call is a no-op) rather than scheduling a second one. When the frame fires it checks the
-   * flag again before drawing, because `flushTmValueDraw` may have cleared it first — see below.
-   *
-   * `flushTmValueDraw` is what the reply that ends the run calls: it clears the flag and draws right away,
-   * without waiting on whatever frame is already scheduled. Clearing the flag first, rather than leaving it
-   * set, is what stops that earlier frame from drawing a second time once it fires — a browser's own
-   * `requestAnimationFrame` cannot be uncalled, so the guard is the flag, not the callback.
-   */
-  let tmValueDrawPending = false
-  const scheduleTmValueDraw = (): void => {
-    if (tmValueDrawPending) return
-    tmValueDrawPending = true
-    frame(() => {
-      if (!tmValueDrawPending) return
-      tmValueDrawPending = false
-      draw()
-    })
-  }
-  const flushTmValueDraw = (): void => {
-    tmValueDrawPending = false
-    draw()
-  }
-
   const onScratchReply = (session: SessionId, reply: RunReply): void => {
     switch (reply.kind) {
       case 'lambda-tree':
@@ -598,16 +615,14 @@ export function createReplies(deps: {
         //
         // **COALESCED TO ONE DRAW PER FRAME WHILE THE RUN IS `Running`**, where this arm used to call `draw()`
         // unconditionally. The worker posts this once per `VALUE_CHUNK` (500,000 steps) while the run is
-        // `Running` (`session-worker.ts`'s `runValueLoop`), and `draw()` is not frame-coalesced anywhere else in
-        // `web/src` (the only `requestAnimationFrame` user is `player.ts`'s, for playback stepping) — so a
-        // `draw()` per chunk was a full, synchronous redraw the browser could not skip even behind a hidden
-        // tab, on a session that may be posting several chunks a second. `scheduleTmValueDraw` (above) is that
-        // coalescing: at most one redraw is pending at a time, and every `Running` reply that lands before it
-        // fires is absorbed into the one that is already scheduled. The reply that ends the run
-        // (`run.run !== 'Running'`) calls `flushTmValueDraw` instead, so the final value is drawn at once
-        // rather than left waiting on a frame a hidden tab may never paint.
-        if (reply.run.run === 'Running') scheduleTmValueDraw()
-        else flushTmValueDraw()
+        // `Running` (`session-worker.ts`'s `runValueLoop`), so a `draw()` per chunk was a full, synchronous
+        // redraw the browser could not skip even behind a hidden tab, on a session that may be posting several
+        // chunks a second. `scheduleDraw` (above) is that coalescing, shared with the `*-frames` arms: at most one
+        // redraw is pending at a time, and every reply that lands before it fires is absorbed into the one that
+        // is already scheduled. The reply that ends the run (`run.run !== 'Running'`) calls `flushDraw` instead,
+        // so the final value is drawn at once rather than left waiting on a frame a hidden tab may never paint.
+        if (reply.run.run === 'Running') scheduleDraw()
+        else flushDraw()
         return
       }
       case 'asm-scratch-compiled': {
@@ -641,7 +656,8 @@ export function createReplies(deps: {
         const leg = sessions.legOf({ session, leg: 'asm' })
         for (const f of reply.frames) leg.hist.push(f, asmFrameBytes(f))
         leg.done = reply.done
-        draw()
+        if (reply.done === null) scheduleDraw()
+        else flushDraw()
         return
       }
       case 'lambda-frames': {
@@ -652,7 +668,8 @@ export function createReplies(deps: {
         const leg = sessions.legOf({ session, leg: 'lambda' })
         for (const f of reply.frames) leg.hist.push(f, lambdaFrameBytes(f))
         leg.done = reply.done
-        draw()
+        if (reply.done === null) scheduleDraw()
+        else flushDraw()
         return
       }
       case 'tm-frames': {
@@ -661,7 +678,8 @@ export function createReplies(deps: {
         const leg = sessions.legOf({ session, leg: 'tm' })
         for (const f of reply.frames) leg.hist.push(f, tmFrameBytes(f))
         leg.done = reply.done
-        draw()
+        if (reply.done === null) scheduleDraw()
+        else flushDraw()
         return
       }
       case 'no-session': {

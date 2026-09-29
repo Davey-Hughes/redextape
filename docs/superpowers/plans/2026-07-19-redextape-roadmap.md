@@ -21483,3 +21483,119 @@ view of it had been used. No check by hand has run against fix round 3's or roun
 | 53 s; 174 files, 1,559 tests; 96.89, 90.45, 97.88, 98.39 against 95, 89, 97, 97 | the FINAL web CI sequence, at `2a3f15e` | `pnpm run build:wasm && pnpm run build:lsp-wasm && pnpm exec biome ci --error-on-warnings && pnpm run typecheck && pnpm run test:coverage && pnpm run build:app` |
 | 12 of 12; 46; 617, 0; 649 | the FINAL hygiene runs, at `2a3f15e`, exit 0: `check-doc-figures`' matched figures; `check-attributions`' sites and violations; `check-citations`' files | `scripts/check-{text-bytes,citations,attributions,doc-figures,shared-docs,lua}.sh`, each `--self-test` then alone |
 | 200; healthy; 8099; 51, 8 s | the FINAL image, at `2a3f15e`: status; health; port; build and run seconds | `docker build -t redextape-check .`, `docker run -d --name c -p 8099:80 redextape-check`, `curl -s -o /dev/null -w '%{http_code}' http://127.0.0.1:8099/`, `docker inspect --format '{{.State.Health.Status}}' c` |
+
+#### RECORDING CHUNKS REDRAW ONCE PER ANIMATION FRAME: THE SIX `*-frames` ARMS SHARE THE PENDING-FRAME FLAG `tm-value` ALREADY HAD, AND THE `map` RUN THAT FILLS THE TM HISTORY DRAWS 44 TO 47 TIMES WHERE IT DREW 300 — AND A `tm-grid.test.ts` CASE THAT REACHED ITS PRECONDITION BY CATCHING A COPY'S RECORDING MID-RUN NOW STEPS THE COPY THERE; AN INDEPENDENT REVIEW FOUND THE SHARED FLAG HELD FOR ONE PAIR OF REPLIES ONLY, AND THIS ENTRY'S LIST OF TEST STUBS INCOMPLETE (2026-09-29, branch `frames-repaint-coalescing`, `18f8225..d603f03`, 5 commits — four of code and `9019d13`, this entry's first version — plus this update)
+
+**A performance fix, in `web/` only, closing one of Plan 7 part 5c's leftovers.** That entry's WHAT THIS DID NOT CLOSE reads: "Every other `draw()`-calling arm of `onReply` and `onScratchReply` still repaints synchronously and unconditionally, including `lambda-frames`, `tm-frames` and `asm-frames`, which `record-loop.ts`'s shared `recordLeg` posts once per `RECORD_CHUNK` (256 steps) while any leg records — the same defect class the `tm-value` arm had before fix round 4's coalescing, on plumbing every session and copy leg shares". This closes the three arms it names, in both switches. The other arms that sentence covers stay synchronous by decision; WHAT CHANGED says why.
+
+##### WHAT WAS WRONG
+
+- **Each `*-frames` arm drew once per chunk.** The six arms, three in `onReply` and three in `onScratchReply`, pushed a chunk's frames into the leg's history and called `draw()`, which repaints every view, the readout and the step bar there and then. `recordLeg` posts a chunk per 256 steps and yields one macrotask between chunks, so a recording delivers chunks far faster than a display paints.
+- **Measured on `map`**, the program `app.test.ts`'s `records further once the TM leg spends its history budget` records until the TM history holds 75,025 frames: from its first chunk to the TM leg reading `history is full`, `draw()` ran 298 times in each of four runs, and the page ran 10 to 12 animation frames in 1,190 to 1,267 ms.
+
+##### WHAT CHANGED
+
+- **One pending-frame flag for every streamed reply.** `tm-value`'s flag and its two closures are renamed from `tmValueDrawPending`, `scheduleTmValueDraw` and `flushTmValueDraw` to `drawPending`, `scheduleDraw` and `flushDraw`, and moved ahead of `onReply`, which now uses them. One flag is enough because `draw()` is global: `createDraw` returns one closure that reads live state for every pane and view, the readout and the step bar, so a deferred draw paints every chunk pushed before it.
+- **The six arms push at once and paint on the next frame.** Each still pushes its frames and sets `leg.done` synchronously, then calls `scheduleDraw()` while `done` is `null` and `flushDraw()` for the chunk that ends the recording, with an `if`, as the `tm-value` arm chooses. The flush is needed: a copy's recording is followed by no `result` reply, so without it a λ or TM copy's last paint, with its `ended` or `budget`, would wait on a frame a hidden tab may never paint.
+- **Every other arm still draws straight**: `lambda-tree`, `no-session`, `compiled`, `result` and `worker-error` in `onReply`; `lambda-tree`, the three `*-scratch-compiled` arms, `asm-value`, `no-session` and `worker-error` in `onScratchReply`. Each arrives once per build, gesture or step rather than in a stream, and several need their paint in the same task: `result` flips `#results` to idle, and `app.test.ts`'s `settled` reads the readout straight after; `compiled`, `no-session` and `worker-error` pair an editor-decoration dispatch with the `setFocus` that `draw()` makes, which must never show half-updated for a frame; and `lambda-tree`'s `draw()` is what asks the worker for the next tree.
+- **The prose that said coalescing was `tm-value`'s alone** now names the frames arms: the `frame` dependency's doc, the helpers' doc, the `tm-value` arm's "not frame-coalesced anywhere else", and `replies.test.ts`'s `scratchDriver` doc and `tm-value` test doc.
+
+##### THE TESTS
+
+- **`replies.test.ts` gains 20 cases, `a recording chunk redraws once per frame`.** The first three are each run for both switches and all three legs. A burst of chunks leaves the history holding every frame pushed, draws nothing and holds one pending frame, and draws once when that frame fires. A chunk that ends the recording sets `done` and draws at once, with nothing pending. The frame a burst left pending draws nothing after an ending chunk has flushed. Then two cases for the flag being one: a TM copy's running `tm-value` and a `tm-frames` chunk landing before one frame share its one draw; and, in one `createReplies` serving both switches (the program's session registered beside a copy's), the program's λ and TM chunks and an asm copy's chunk landing before one frame share its one draw. `driver` takes a `frame` stand-in, since a chunk sent through it without one throws `ReferenceError: requestAnimationFrame is not defined`, and the program's session entry gains its asm leg. Node rose from 764 to 784 tests.
+- **Seventeen sabotages, each applied to `src/replies.ts` and run against the whole file of 42 cases; all seventeen fired.** "Burst", "ending", "leftover", "TM pair" and "across" are the five cases above, in order:
+
+  | Sabotage | Failed |
+  |---|---|
+  | one arm's schedule-or-flush replaced by a bare `draw()`, six runs, one per arm | that arm's burst case (3 draws where 0) and leftover case (no pending frame where 1), and none of the other arms' burst, ending or leftover cases; also the across case (1 draw where 0) for `onReply`'s λ and TM arms and `onScratchReply`'s asm arm, and the TM pair case for `onScratchReply`'s TM arm, the arms those two send through: 3, 3, 2, 2, 3 and 3 cases, for `onReply`'s λ, TM and asm arms and then `onScratchReply`'s |
+  | the ending chunk schedules instead of flushing | 12: the six ending cases and the six leftover cases (0 draws where 1) |
+  | `flushDraw` does not clear the flag | 7: the six leftover cases (2 draws where 1) and the `tm-value` test's leftover frame (3 where 2) |
+  | the frames arms keep a flag of their own | 1: the TM pair case (2 pending frames where 1) |
+  | a flag per switch | 1: the across case (2 pending frames where 1); against `9019d13`'s file, without that case, 0 of 41 |
+  | a flag per leg among the frames arms, TM's shared with `tm-value` | 1: the across case (3 pending frames where 1); against `9019d13`'s file, 0 of 41 |
+  | the push moved into the frame callback | 20, the six burst cases at their history assertion (0 frames where 6) among them |
+  | `done` set in the frame callback | 20, the six ending cases at `done` (`null` where `budget`) among them |
+  | the ending chunk schedules and then flushes | 6: the six ending cases (1 pending frame where 0) |
+  | `tm-value`'s ending reply schedules instead of flushing | 1: the `tm-value` test's flush (1 draw where 2) |
+  | a burst is not absorbed | 9: the six burst cases (3 pending frames where 1), the TM pair, the across case and the `tm-value` test |
+  | the frame never draws | 9: the six burst cases (0 draws where 1), the TM pair, the across case and the `tm-value` test |
+
+- **Fix round 4's `tm-value` test is now shown able to fail at its last two assertions**, which 5c's one sabotage never reached: the `tm-value` rows above fail its flush and its leftover frame.
+
+##### WHAT THE BROWSER SUITE FOUND
+
+- **`tm-grid.test.ts`'s `gives the outline one share beside them, and redraws the rows when its share changes` failed 8 of 13 runs at `2a09f5a`**, against 0 of 6 with `18f8225`'s `replies.ts`. It held `TmPane.render` as soon as the copy's table had rows, and its check on the rows drawn after the table shrinks holds only when the table is scrolled at least `OVERSCAN` rows, which following gives only when the copy's current state is below the table's top. Logging each `render` showed two ways the new timing broke that. The rows came from the build reply's own draw, the copy's first chunks were pushed with their paint pending, and the held `render` swallowed that paint a frame later, leaving the table with no frame at scroll 0. Or, with the test waiting for a painted frame, the recording had ended by the time it looked, in `halt`, at the table's top. It had passed by catching the recording mid-run, which a paint per chunk made reliable.
+- **The test now lets the copy finish recording, steps it to step 1 with `↺` and `▶`, and asserts the scroll its check needs** (`scrollTop` at least `OVERSCAN * ROW_HEIGHT`, 96 px) before holding anything. It passed 10 of 10 runs on `24947e0`'s tree, 10 of 10 at `d603f03`, and 5 of 5 with `18f8225`'s `replies.ts`; without the stepping it fails that assertion, 2 of 2.
+- **No other browser test stubs a paint path to a no-op.** The candidates are every spy, every implementation given to one, every `Object.assign` onto a prototype, every `defineProperty`, and every method on a prototype or an object assigned a function, an arrow or an `async` expression: 27 lines in `tests/browser`, comments excluded, by the command in the table below. An assignment of anything else is not matched, so `keystrokes-in-flight.test.ts`'s `Worker.prototype.postMessage = post`, which puts the saved original back, is not among them. Each was read and put in one of six groups. 17 call through to the original: 13 `vi.spyOn`s given no implementation (six on `localStorage.setItem` in `divider-drag.test.ts`, five in `hidden-views.test.ts`, two in `term-map.test.ts`), `lambda-tree-cost.test.ts`'s three implementations, each calling the original, and `keystrokes-in-flight.test.ts`'s `Worker.prototype.postMessage`, which posts first. 3 replace `localStorage.setItem`, refusing one key and passing every other write through (the three `buffers-quota` files). 1 installs `setup.ts`'s whole replacement `Storage`. 1 silences `console.error` (`lambda-display.test.ts`). 3 set `onmessage` on a `MessageChannel` the test itself made (the three cost probes). The remaining 2 are this test's own: the hold that makes `render`, `setLink` and `setProgram` no-ops, and the line that puts them back.
+
+##### THE REVIEW
+
+An independent review of `18f8225..9019d13` returned "with fixes". It found no lost draw, no stuck flag and no stale read, and judged the `tm-grid.test.ts` change a strengthening. Its findings, each fixed on top rather than by rewriting:
+
+- **Important: the shared flag was tested for one pair only.** The pair case sends a `tm-value` and a `tm-frames` chunk through `onScratchReply`, one switch and one leg, so a flag per switch, or a flag per leg among the frames arms, passed every case: both sabotaged, 0 of 41 failed. The across case (`d603f03`) fails both.
+- **Important: this entry's list of the browser tests' stubs was incomplete.** It named four files and missed `hidden-views.test.ts`'s five spies, `term-map.test.ts`'s two, `divider-drag.test.ts`'s six and `setup.ts`'s storage shim. Its conclusion held, since each calls through or stubs no paint path; the paragraph now states the property, the command that enumerates the candidates, their count and how each was classified.
+- **Minor:** two figures had no row in the table below, the fourteen files and the probe's 1.5 s, and now have one; the sabotage tally, whose fifteenth item sat in a later bullet, is now one table; and the six arms' `reply.done === null ? scheduleDraw() : flushDraw()`, ternaries written as statements, are `if`/`else`, as the `tm-value` arm is (`de76ab2`).
+
+##### THE MEASUREMENT
+
+A temporary patch, kept in scratch and never committed, wrapped `main.ts`'s `draw` to count each call on `window`, counted `*-frames` replies in the program session's reply callback, and had the `map` test log both, with the `requestAnimationFrame` callbacks it saw and the elapsed time, over two windows: from dispatching the program to the test seeing `history is full` ("to full"), and from the first `*-frames` reply to that moment ("the recording"). `git diff 18f8225 d603f03 -- web/src/main.ts` is empty. Four runs of each side under the browser lock, in two sets: the first at `18f8225` itself against `2a09f5a`; the second, which added the recording window, at `d603f03` with `18f8225`'s `replies.ts` swapped in against `d603f03`. (A second set run at `2a09f5a` the same way gave the same pattern and is superseded by this one.)
+
+| | before | after |
+|---|---|---|
+| `draw()` to full, first set | 300, 300, 300, 300 | 45, 44, 46, 44 |
+| `draw()` to full, second set | 300, 300, 300, 300 | 46, 47, 44, 45 |
+| `*-frames` replies to full, both sets | 296 in every run | 296 in every run |
+| `draw()` over the recording | 298, 298, 298, 298 | 44, 45, 42, 43 |
+| animation frames over the recording | 12, 12, 12, 10 | 39, 40, 36, 38 |
+| the recording, ms | 1,210; 1,252; 1,267; 1,190 | 666; 677; 620; 637 |
+| to full, ms, first set | 1,596; 1,673; 1,608; 1,546 | 1,027; 1,004; 1,037; 1,010 |
+| the test's duration, first set | 2,054; 2,031; 2,111; 2,520 ms | 1,916; 1,759; 1,748; 1,411 ms |
+| the test's duration, second set | 1,890; 1,990; 2,178; 2,062 ms | 1,791; 1,446; 1,776; 1,367 ms |
+
+The counts fell as the design predicted: one draw per chunk before, and after, a few more draws than animation frames, the rest being draws that are not coalesced (by reading, the ending chunks' flushes and the arms that draw straight; not counted per arm). The recording also took about half as long.
+
+##### WHAT THIS DID NOT CLOSE
+
+- **Playback while recording can draw twice in one frame, and does.** `player.ts`'s tick calls `draw()` when it steps, and a coalesced draw can land in the same frame. A temporary probe, not kept, wrapped `requestAnimationFrame` to attribute each `draw()` to the frame its callback ran in, started playback at the default 8 steps a second on `map`'s TM leg at step 0 while it was still recording, and counted for 1.5 s: at `d603f03`, 5 of 43 and 5 of 42 frames ran two draws, none more (5 of 43 and 4 of 44 at `2a09f5a`). With `18f8225`'s `replies.ts` it was 0 of 11, but there the recording's draws ran in message tasks outside any frame callback, which the probe did not count. The probe has to run alone (`-t`): run inside the whole file it starts on the previous test's session mid-recompile, never plays from step 0 while recording, and measures nothing. Routing the player's draw through the same flag would make it one draw.
+- **The arms that still draw straight** are a decision, not a gap (WHAT CHANGED). An arm that comes to stream needs the frames arms' treatment.
+- **`tm-grid.test.ts`'s check does not isolate the resize observer, and did not on `18f8225` either.** Its comment says the rows can follow the table only through the observer. With the observer's `draw()` removed from `VirtualGrid`, the fixed test passed 2 of 2, and the original test with `18f8225`'s `replies.ts` passed 3 of 4. A stack trace of each grid draw after the hold names an event listener on the grid's own element, not the observer; of the grid's listeners, the one that draws with no key or click is its `scroll` listener, which `virtual-grid.ts` already expects can fire before the observer when a panel beside the box closes. Not changed here.
+- **5c's other leftovers** are unchanged.
+
+##### VERIFICATION
+
+Run on 2026-09-29 at `d603f03`, from `web/`, after `pnpm run build:wasm` and `pnpm run build:lsp-wasm` built both packages from this tree. The coverage run is `flock <the lanes' browser lock> systemd-run --user --wait --collect --pipe -p MemoryMax=16G -p MemorySwapMax=0` with `PATH`, `HOME`, `CARGO_HOME` and `RUSTUP_HOME` passed through.
+
+```
+pnpm exec biome ci --error-on-warnings  → exit 0, 281 files (1 info: biome.json's deprecation notice)
+pnpm run typecheck                      → exit 0
+pnpm run test:coverage                  → exit 0, 174 files / 1,579 tests; 96.82 / 90.43 / 97.88 / 98.32 against 95 / 89 / 97 / 97
+pnpm run build:app                      → exit 0
+scripts/check-{text-bytes,citations,attributions,doc-figures,shared-docs,lua,colours}.sh, --self-test then alone, from the root → 14 of 14 exit 0
+```
+
+**At `d603f03` every gate passed on its first run. At `24947e0`, before the review, the coverage exit 0 came on the sixth run**, 174 files and 1,578 tests. The first, at `2a09f5a`, failed only the `tm-grid.test.ts` case above. Runs two to five failed no assertion: whole files failed to import (`Failed to fetch dynamically imported module`), or an iframe failed to connect and vitest ran no further files, leaving the floors short. The same run with `18f8225`'s three changed files swapped in failed the same way, and the fourteen files that failed in runs two and three passed when run together on their own, so the failures are put down to the machine, not shown to have one cause: other lanes were taking the lock between runs, swap stood at 61 to 62 of 66 GiB, and `/tmp`, a RAM tmpfs, at 86 to 88%. That round's first `build:app` exited 1 with no error in its output, and its second exited 0. The Rust gates, `check-slow.sh` and the Docker image were not run: the diff touches no Rust and adds no build output the web app imports.
+
+**Every count this entry quotes, with what produces it:**
+
+| Value | What | Produced by |
+|---|---|---|
+| 5; four and one | commits in the range; of code, and this entry's first version | `git rev-list --count 18f8225..d603f03`; `git show --stat` of each |
+| six, three in each switch | the `*-frames` arms that schedule or flush | `grep -c 'if (reply.done === null) scheduleDraw()' web/src/replies.ts`, and each hit's `case` and switch |
+| 256 | `RECORD_CHUNK` | `git grep -n 'export const RECORD_CHUNK' -- web/src/protocol.ts` |
+| 75,025 | TM frames `map` records before `history is full` | `grep -n '75,025' web/tests/browser/app.test.ts` |
+| 298; 10 to 12; 1,190 to 1,267 ms | draws, animation frames and time over `map`'s recording before the fix | the measurement's second set, below |
+| 20; 764, 784; 42 | the new cases; node tests before and after; the cases in `replies.test.ts` | `pnpm exec vitest run --project node` at `d603f03`, and with `18f8225`'s `src/replies.ts` and `tests/node/replies.test.ts` swapped in; `pnpm exec vitest run --project node tests/node/replies.test.ts` |
+| seventeen, and each count in the sabotage table | the sabotages and what each failed | each sabotage applied to a saved copy of `src/replies.ts` by a scratch script, then `pnpm exec vitest run --project node tests/node/replies.test.ts --reporter=json`, then the copy restored and compared with `cmp`; the per-switch and per-leg flags also against `git show 9019d13:web/tests/node/replies.test.ts` |
+| 8 of 13; 0 of 6 | `tm-grid.test.ts` failing at `2a09f5a`, and with `18f8225`'s `replies.ts` | `flock … pnpm exec vitest run --project browser tests/browser/tm-grid.test.ts`, repeated |
+| 10 of 10; 10 of 10; 5 of 5; 2 of 2 | the fixed test passing on `24947e0`'s tree, at `d603f03`, and with `18f8225`'s `replies.ts`; failing without the stepping | the same command |
+| 96 | `OVERSCAN * ROW_HEIGHT` | `expected 0 to be greater than or equal to 96`, the stepping's sabotage; `OVERSCAN` 4 in `web/src/virtual-grid.ts`, `ROW_HEIGHT` 24 in `web/src/state-table.ts` |
+| 27: 17, 3, 1, 1, 3 and 2 | candidate lines in `tests/browser`, as the stub paragraph defines them, and the six groups they were read into | `git grep -nE 'vi\.spyOn\|mockImplementation\|Object\.assign\([A-Za-z]+\.prototype\|defineProperty\(\|^\s*[A-Za-z_$][A-Za-z0-9_$.]*\.[A-Za-z_$]+ = (function\b\|async \|\([^)]*\)\s*(:[^=]*)?=>)' -- web/tests/browser \| grep -vE '^[^:]+:[0-9]+:\s*(//\|\*)'`, then each hit read; `git grep -nE '\.mock(Implementation\|ReturnValue\|ResolvedValue)' -- web/tests/browser` finds four implementations, each on its spy's own line, so none is given to a spy later |
+| 2 of 2; 3 of 4 | tests passing with the observer's `draw()` removed: the fixed test; the original with `18f8225`'s `replies.ts` | the same `tm-grid` command, with the `this.draw()` in `VirtualGrid`'s `ResizeObserver` callback deleted |
+| the measurement table | draws, replies, frames and times, four runs a side | the scratch patch applied, then `flock … pnpm exec vitest run --project browser --reporter=verbose tests/browser/app.test.ts`, its `MEASURE` line and the test's own time; the first set's before at a checkout of `18f8225`, the second's with `git show 18f8225:web/src/replies.ts` over `web/src/replies.ts` |
+| 8 | the default playback speed, steps a second | `git grep -n 'DEFAULT_SPEED: Speed =' -- web/src/workspace.ts` |
+| 1.5 s | how long the probe counted | the probe's `await new Promise((r) => setTimeout(r, 1500))`, in the scratch patch |
+| 5 of 43, 5 of 42; 5 of 43, 4 of 44; 0 of 11 | frames with two draws during playback while recording: at `d603f03`, at `2a09f5a`, and with `18f8225`'s `replies.ts` | the scratch patch's probe, a temporary test in `app.test.ts` with a per-frame counter in `main.ts`, run by the measurement's command with `-t 'PROBE play while recording'` |
+| 281; 174, 1,579 and the four coverage figures; 14 of 14 | Biome's files; the web suite; the hygiene runs, at `d603f03` | the block above |
+| six; 174, 1,578 | coverage runs at `24947e0`'s round to a clean one; that run's files and tests | the runs' logs (scratch) |
+| fourteen; 14 files, 50 tests | files that failed in runs two and three; the same files run together, all passing | the two logs' `FAIL` and `Failed to run the test` lines, de-duplicated by file; then `flock … pnpm exec vitest run --project browser` over those fourteen files |
+| 61 to 62 of 66 GiB; 86 to 88% | swap and `/tmp` between those runs | `free -g` and `df -h /tmp`, run between the runs |

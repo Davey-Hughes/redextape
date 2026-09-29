@@ -171,6 +171,18 @@ describe("the rule table's height is its view's (spec §9.1)", () => {
     const outline = pane().querySelector('[data-panel="outline"]') as HTMLElement
     await until(() => !outline.hidden, 'the outline to appear with the editor')
     await until(() => rows().length > 0, 'the copy to draw its table')
+    // **AT A STEP WHOSE ROW IS PAST THE TABLE'S TOP, CHOSEN RATHER THAN CAUGHT.** The check below needs the table
+    // scrolled at least `OVERSCAN` rows, or the window's first row is clamped at the top and its last runs further
+    // past the edge; following puts the table wherever the copy's current state is. That used to be whatever frame
+    // the copy's recording had painted when its rows appeared: a step mid-run while each chunk painted as it came,
+    // and as often as not the recording's end, `halt` at the table's top, once a chunk's paint waited for the next
+    // animation frame (`replies.ts`'s `scheduleDraw`). So the recording finishes, and the copy is stepped to step 1.
+    const stepText = () => pane().querySelector('.step')?.textContent ?? ''
+    await until(() => /^step [\d,]+ of [\d,]+$/.test(stepText()), 'the copy to finish recording')
+    stepButton('↺')?.click()
+    stepButton('▶')?.click()
+    await until(() => stepText().startsWith('step 1 of'), 'the copy to show step 1')
+    expect(grid().scrollTop).toBeGreaterThanOrEqual(OVERSCAN * ROW_HEIGHT)
     const tableBefore = grid().getBoundingClientRect().height
     const bottom = () => grid().getBoundingClientRect().bottom
     const lastRow = () => rows().at(-1)?.getBoundingClientRect().bottom ?? 0
