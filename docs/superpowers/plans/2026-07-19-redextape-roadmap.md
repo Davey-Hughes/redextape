@@ -22301,3 +22301,387 @@ The Rust gates, `check-slow.sh` and the Docker image were not run, because the d
 | 283 files, 1 info | Biome | the block above |
 | 176 files, 1,629 tests; 97.13, 90.77, 97.98, 98.63; 95, 89, 97, 97; 100 ×4; 7.4 GiB | the coverage run; statements, branches, functions and lines; the floors; `editor-prefs.ts`; its peak | the block above; `vite.config.ts`'s `thresholds`; `systemd-run`'s `Memory peak` |
 | 14 of 14 | the hygiene scripts | the block above |
+
+#### PLAN 7 PART 6b, BASE16 IMPORT: A PUBLISHED BASE16 OR BASE24 SCHEME PASTED INTO A DIALOG FROM THE SETTINGS MENU IS READ WITHOUT A YAML LIBRARY, HELD TO THE CONTRAST FLOORS AND THE BINDER RULE THE BUILT-IN PALETTES MEET — WHICH MOVE OUT OF A TEST INTO `contrast.ts` — AND APPLIED AS IT IS OR WITH EACH FAILING COLOUR'S OKLCH LIGHTNESS MOVED JUST FAR ENOUGH, AS A `custom` PALETTE STORED A HALF PER VARIANT, EACH HALF REMOVABLE WITH AN UNDO, AND PAINTED FROM THE PRE-PAINT CACHE ON THE NEXT LOAD; A TASK REVIEW FOUND THE PLAN'S 0.01 LIGHTNESS WALK CALLING A COLOUR UNFIXABLE WHOSE PASSING BAND WAS 0.0005 WIDE, AND THE FINE SCAN THAT NOW FINDS IT FIXES THREE MORE PUBLISHED BASE24 SCHEMES; THE GAP-FIX TASK THE REVIEWS' FINDINGS BECAME GAVE THE DIALOG A LIVE REGION OF ITS OWN, SAID A REFUSED UNDO, ENDED ONLY A REMOVAL'S OWN NOTICE AND WROTE THE STORE BEFORE THE CHOICE; AND ITS OWN REVIEW FOUND THE PRE-PAINT CACHE STILL WRITTEN FROM MEMORY BY THE NEXT GESTURE AFTER A REFUSED WRITE; THE WHOLE-BRANCH REVIEW FOUND NO CRITICAL ISSUE, AND `notify`'S RETURN SHARED WITH 6a IN ANOTHER SHAPE, WHICH 6a WILL ADOPT (2026-09-29 to 2026-09-30, branch `plan7-part6b-base16-import`, `f5ebfab..baa1a85`, 41 commits, three of them this entry's earlier versions, `b639737`, `f414905` and `baa1a85`, plus this revision)
+
+**Part 6b of Plan 7** ([design](../specs/2026-09-29-plan7-part6b-base16-import-design.md),
+[plan](2026-09-29-plan7-part6b-base16-import.md)), the umbrella's §2 row 4 and the base16 half of its part 6; 6a, the
+examples, the first-load example and share links, runs beside it. It touches `web/` alone: 28 files, +3,581/−104.
+Eight of the 41 commits touch only `docs/`: the spec (`dba6369`), its approval with a `remove` per half (`10baf02`),
+the plan (`3d3f335`, 4,222 lines), the spec's dated notes on what the gap-fix task changed (`8fdd45a`), the
+whole-branch review's correction to §11's note (`1d753ef`), and this entry's first three versions (`b639737`,
+`f414905`, `baa1a85`).
+
+**Rebased onto `e2a3a93` before verification.** The branch was built on `18f8225` and rebased onto `e2a3a93`, which
+carries #113 to #117, before this entry's gates ran: 29 commits of 29 kept their patch ids, and only `web/src/style.css`
+overlapped, merging cleanly. The SHAs here are the rebased ones. Every figure under VERIFICATION and every figure
+this entry says was measured "here" was measured on the rebased tree; the task and gap-fix figures come from their
+reports, which ran before the rebase, on `18f8225`, and name the commits as they were then.
+
+**The user's decisions**, all 2026-09-29: the spec's thirteen, §3, with row 5 revised after it was measured (a summary
+line, grouped details and `apply adjusted`, not a list of every failing pair) and row 13, a `remove` per half, added at
+approval; after Task 3's review, to fix its Important finding in a gap-fix task before verification rather than at
+once; and after the seven task reviews, that task's ten groups, A to J, among them splitting `base16.ts` (I) and, for
+a scheme that fills the half not on screen, to keep switching the choice to `custom` and say so (J).
+
+##### WHAT PART 6b BUILT
+
+- **One floor table** (Task 1, `87a3419`). `CONTRAST_FLOORS`, the 35 `[foreground, background, floor]` pairs, and the
+  binder rule, `binderClashes` at `BINDER_APART` 24, move from `palettes.test.ts` into `contrast.ts`, so the built-ins
+  and an import are held to the same rules. The built-ins' two cases keep their names and messages, and
+  `contrast.test.ts` plants a defect in each rule, since a rule no palette fails is one nothing checks.
+- **The reader** (Task 2, `36d69ad`). `readScheme` reads both published layouts line by line, with no YAML library:
+  colour keys at any indentation, `name` (or the legacy `scheme`) and `variant` at the top level only, quoted or bare
+  values, and a bare `#rrggbb` as a colour. Every error is collected and names its key. `detectVariant` takes
+  `variant:` when it says `light` or `dark`, and otherwise compares base00's luminance with base05's. `mapScheme` maps
+  the 16 scheme colours onto the 19 tokens by the spec's table. A base24 scheme is read, its eight extra colours
+  unused, and the check says so.
+- **`apply adjusted`** (Task 3, `ef13b0d`, and the gap-fix task's D, E and H3). `adjustVariant` moves each failing
+  foreground's OKLCH lightness, its hue kept, until it meets every floor it has: a walk of 0.01 each way, 16
+  bisections, and the nearer direction. Chroma is bisected back into sRGB where a new lightness leaves it. `on-accent`
+  follows `accent`, and `tok-binder` goes last, apart from every other token's final value. No surface is ever walked.
+  Since the gap-fix task, a check of luminance alone comes first, and a scan at every 1/10,000 of `L` comes before a
+  colour is called unfixable.
+- **The check** (Task 4, `af54f95`, moved into `base16-check.ts` by the gap-fix task's I). One summary line, the
+  adjustment's line, and a `details` panel grouping the failures by scheme-colour pair, in words, the furthest below
+  its floor first, with the colours the adjustment would move and a swatch of each value.
+- **The store and the choice** (Task 5, `60a369a`). `redextape.palette.custom`, version 1, holds a half per variant,
+  each `{name, colours, tokens, adjusted}`, validated as the other stores are and refused whole on any bad value.
+  `tokens` is stored, never recomputed. `custom` joins the palette choices while a half is stored, named by its
+  halves; a half not imported is the style's own palette and follows a style change.
+- **The dialog** (Task 6, `30fde47`). `import base16…`, the settings menu's last item, opens a native modal
+  `<dialog>`: a text area, `check`, the result, `apply`, `apply adjusted` and `cancel`, each apply disabled with its
+  reason in a visible line and as its `aria-description`. An apply stores the half, chooses `custom` and refreshes
+  the pre-paint cache, so `index.html`'s script, unchanged, paints the import on the next load. The controls gate
+  walks `input` and `textarea` too, and only an open modal's controls while one is open.
+- **Remove and undo** (Task 7, `9e5678c`). The dialog's `now` line names each stored half, with a `remove` beside it
+  and, for an adjusted half, a `changes` panel read off its stored colours and tokens. A `remove` closes the dialog,
+  deletes the half, and the key with the last, and offers `undo` on the notice line, which puts the half back exactly
+  as it was stored.
+
+##### THE PLAN WAS BUILT AND REPLAYED BEFORE IT WAS HANDED OUT
+
+Every task was built, gated and sabotaged in a scratch worktree off `6febe46`, the spec's head before the rebase
+(`10baf02` now), on the branch `plan7-part6b-proto`, whose seven commits, `8bf4994` to `946f631`, are the plan's seven
+tasks. The plan's code blocks are that prototype's patches. The plan was then rebuilt task by task from its own blocks
+on a fresh worktree at `6febe46`: **7 trees of 7 were identical to the prototype's**, `docs/` aside; every red and
+green step printed what the plan records; every commit passed the hook; and **80 of 80 sabotages fired**, one at a
+time, on the test each was aimed at: 6, 12, 10, 14, 11, 15 and 12, Tasks 1 to 7.
+
+Replaying found nothing to correct. It noted two things: Task 6's red browser run counts one test skipped, since
+`base16-prepaint.test.ts`'s `beforeAll` fails before the dialog exists; and the whole suite with coverage was
+OOM-killed at its 16G cap with the default workers and passed with `--maxWorkers=4`, peaking at 14.9G. #116 has since
+shown that flag never reached the browser project, and the run under VERIFICATION peaked at 7.3G with the default
+workers.
+
+What the prototype found, each answered in the plan's code before any task ran; the plan's Pre-flight status lists
+all twelve:
+
+1. **Its reader, mapping and adjustment gave the spec's probe's tokens**, token for token, for every published file
+   that needed adjusting: 297 of 297 in `schemes/base16`, 181 of 181 in `schemes/base24` and 222 of 222 in the legacy
+   set.
+2. **Two of the spec's §13 sabotages could not be written.** "Its predicate evaluated before rounding" cannot happen,
+   since `ok` takes a `#rrggbb` string; "the adjustment allowed to move a surface" has no one-line form, since no
+   surface is a foreground in the floors. Each was aimed instead at the property it protects.
+3. **A `close` handler focusing `#settings` changed nothing a test could see**, in Chromium, and was left out. The
+   gap-fix task put one in (H1), with a test that opens the menu as WebKit leaves it.
+4. **§11 and §13 left files out**: three the change needed, and three test files. §11 now has a note; §13 does not
+   (below).
+5. **Ratios are cut, not rounded, to two places**, so 4.497 reads `4.49:1`, and a group's floor is the highest it
+   fails.
+
+##### WHAT EXECUTING THE PLAN FOUND
+
+**Each task matched its blocks.** Tasks 1 to 7 ran one at a time in this worktree. Every patch applied with no drift,
+every red and green step printed the plan's *Expected*, every commit passed the hook, and the sabotages fired again,
+80 of 80, each failing exactly the tests its row names. The node suite went from 768 tests after Task 1 to 830 after
+Task 5, and the browser project from 799 tests in 122 files after Task 5 to 824 in 125 after Task 7.
+
+**Task 3's review: one Important, in the plan's own adjustment.** The 0.01 walk steps over a region where a colour
+passes that is narrower than one step, and then calls the colour unfixable. `NIGHT` on base00 `#000000` and base01
+`#aaaaaa`: `warn` meets 3:1 on all three surfaces only for `L` 0.4650 to 0.4655, where `#6f5600` keeps its hue, and
+the walk lands on 0.4731 and 0.4631, so `adjustVariant` listed `warn` and `focus-ring` as unfixed. The user sent it to
+the gap-fix task: a fine scan, a test that no unfixed token has a passing `L` on that scan, and the spec's figures
+measured again. The review's Minors: the gamut test did not pin the *largest* chroma inside sRGB; no fixture reached
+the binder's unfixed path or its "every other token's final value"; "no surface moves" held only through the floor
+table's data; and the sRGB decode was written twice, with `hexToOklch` validating nothing.
+
+**The other six reviews approved, with no Critical or Important finding**; five had Minors for the gap-fix task:
+
+- Task 2: no test fed `readScheme` CRLF line endings.
+- Task 4: `base16.ts` held both the reading and the check's presentation, and NEON's mixed-floor test used
+  `toContain`.
+- Task 5: a stored `tokens` array read as an empty half; no test picked `custom` from the select; `CustomPalette`
+  admitted `{}`.
+- Task 6: a refused write to the store still saved the `custom` choice and the pre-paint cache, so the reload
+  flashed the lost import or an older one; the dialog's doc named the wrong focus mechanism; and, a question for the
+  spec, applying the half not on screen still chose `custom`, which turned the half on screen into the style's own.
+- Task 7: beside the three gaps the plan's Task 8 already listed as open — the check's result unheard by a screen
+  reader, since the modal makes the app's live region inert; a refused `undo` silent; an apply ending whatever notice
+  was up — the focus after `undo` landing on the copies button, `undo` putting back a choice the removal had not
+  changed, and four test gaps.
+
+**The gap-fix task: ten groups, twelve commits** (`393ed23` to `fe898ad`), each through the hook, every new or
+changed test sabotaged over whole files and each file restored from a saved copy and checked with `cmp`:
+
+- **I** (`393ed23`): the check and its words move into `base16-check.ts`; only imports changed.
+- **H3** (`ad610fa`): one `#rrggbb` parser and one sRGB decode, in `contrast.ts`; `hexToOklch('#fff')` now throws.
+- **E** (`5934fc7`): `adjustVariant` holds the surfaces itself; tests pin a channel at `00` or `ff` after gamut
+  mapping, and two fixtures reach the binder's final-value rule, `CLOSING` and `BOXED`. A binder that fails its floors
+  and still clashes is named twice, pinned as it was.
+- **D** (`00e9947`): the fine scan. `NARROW`'s `warn` becomes `#6f5600`, and a property test over 20 schemes finds no
+  point on the scan passing for any token called unfixed.
+- **F1, F2, G3** (`f9034de`): a `tokens` array refuses the store; the store is written before the choice and the
+  cache.
+- **B** (`4f730b1`): a refused `undo` is said, over a removal that was saved.
+- **F3, F4** (`200cea8`): the palette's `undo` names `#settings` as its focus fallback, and puts back only a choice
+  the removal made.
+- **C** (`3d7f0f3`): `notify` returns a handle whose `dismiss` acts only while that notice is still up.
+- **H1, H2** (`b150683`): a `close` handler gives every close's focus to `#settings`; `CustomPalette` needs a half.
+- **A** (`54dee1f`): a `role="status"` inside the dialog says each check.
+- **J** (`fb84cba`): the other-appearance line says what the page will show, in one of two wordings.
+- **G** (`fe898ad`): the test gaps — CRLF, `custom` picked with `userEvent.selectOptions`, stored tokens that differ
+  from recomputed ones, the gate walking the `changes` toggle, and NEON held to full ordered equality.
+
+Three sabotages first failed nothing. Two became tests: D's "take the farthest passing colour", which `NARROW`'s bands,
+one colour each, could not see, and which a nearest-choice case now fails; and D's "a 1e-3 grid", which happens to land
+in `NARROW`'s band, and which `#0c0c0c` / `#b1b1b1`, a band 0.0002 wide holding no 1e-3 point, now fails. The third, E's
+"binder kept apart from imported values", missed `BOXED` because D's own bug masked it, and fired once D landed.
+Measured with the spec's probe calling the app's `adjustVariant`, D fixed three more base24 schemes, `builtin-light`,
+`clrs` and `terminal-basic` (198 of 209 pass after adjusting, 11 cannot be fixed, 1,066 tokens moved), left the base16
+and legacy counts at 346 of 352 and 243 of 251, and roughly doubled the CPU for the 352 base16 schemes, from 0.47–0.52 s
+to 0.99–1.08 s in that day's runs. The node suite went to 843 and the browser project to 835 tests in 125 files. The
+same probe here, at `e58f4c4`, gives the same counts.
+
+**The gap-fix task's review: one Important and five Minors, fixed in six commits** (`464fc1d` to `81c2774`):
+
+- **Important** (`c3d438c`): after a refused write to the imported palette, the next style change or palette pick in
+  the same load still wrote the pre-paint cache from memory, so the next load's first frame showed the palette storage
+  had refused — the residual the task's own report had flagged. `applyChosenSkin` now writes the cache from what a
+  reload reads: the style, the choice and the imported palette, read from storage as start-up reads them.
+- **Minor 1** (`81c2774`): the fine scan ran on every token no lightness could fix. A check of luminance alone now
+  skips the walk and the scan where no luminance meets the token's floors, which brought the 352's CPU from 0.89–0.92 s
+  to 0.39–0.43 s, beside 0.38–0.43 s for the code before the gap-fix task in the same runs, with the full
+  `adjustVariant` result for all 812 published files identical before and after. Here, at `e58f4c4`, it took 0.39 to
+  0.42 s, and at `79ace38`, whose adjustment is the same code, 0.39 to 0.45 s.
+- **Minor 2** (`7d615b1`): `Unfixed`'s doc said an unfixable token keeps its imported value, which a binder the floors
+  moved does not.
+- **Minor 3** (`a69705f`): `undo` compared the choice by value, so a pick landing back on the removal's own result
+  was overwritten; it now counts picks.
+- **Minor 4** (`464fc1d`): the reload and palette-pick helpers move into the browser harness.
+- **Minor 5** (`787069c`): a refused apply's notice was written while the modal still made the live region inert;
+  an apply now closes the dialog first.
+
+Two of Minor 1's sabotages failed nothing, both by design: asking the first bound of each floor instead of the second,
+which is equally correct and was replaced by "0 not asked", which fires; and removing the check altogether, a pure
+optimisation that only the timings can see. A re-review asked for four wordings (`e58f4c4`), and a second approved.
+The node suite ended at 847 tests and the browser project at 837 in 125 files. The round's first browser run exited 1
+on the machine, not a test: `view-title.test.ts` failed to load, `view-header.test.ts` could not connect to its iframe,
+and 17 files never ran, with 65 G of the machine's 66 G of swap in use. Both files passed alone, and the rerun passed.
+
+**The spec gained a dated note in eleven sections** (`8fdd45a`) for what the gap-fix task changed: §6.2, §6.4, §6.5,
+§7.1, §8.2, §8.3, §8.5, §9, §11, §12 and §16. The gap-fix report listed seven of them, §16 with §6.5. Its review round
+made §6.4, §8.3 and §9 stale after that list was written, and its split and `notice.ts`'s handle made §11 staler. The
+approved text above each note is unchanged.
+
+##### WHAT THE CHECK BY HAND FOUND
+
+The check (below, under VERIFICATION) found the dialog reading and acting as the spec and its notes say, in every style
+and appearance, and one thing that reads wrong:
+
+- **Instrument upper-cases a scheme's name in the `now` line's `changes` panel.** The sub-label naming the half,
+  `.base16-changes-label`, takes the style's label transform, so Instrument shows `DARK — EMBER` where the `now` line
+  above it reads `dark — Ember`. The transform is meant for labels; a pasted scheme's name is data. It went to the
+  whole-branch review, and is fixed (`14a700f`): at `79ace38` the sub-label reads `DARK — Ember`.
+
+Noted and not called a finding: Ember's adjusted text sits at its floor, 4.51:1 on the dialog's surface, and reads dim,
+which is what "just enough" means; and on a light page, after a dark scheme is applied, the select reads
+`custom — dark: Ember (adjusted)` while the page shows the style's own palette, as the other-appearance line said
+before the apply.
+
+##### WHAT THE WHOLE-BRANCH REVIEW FOUND
+
+The whole-branch review of `f5ebfab..b639737` found no Critical issue. It traced the refused-write paths end to end
+and found them coherent, and re-ran this entry's figures, all matching. It found one Important and seven Minors, each
+fixed on top of the entry's first version, in eight commits (`aee66e9` to `79ace38`) and its second, `f414905`:
+
+- **Important** (`aee66e9`): **`notify`'s return is shared with 6a in another shape.** 6a's branch has `notify`
+  return a function that withdraws its notice; this branch returns a `Notice`, `{ dismiss() }`. Both mean "end it,
+  but only while it is still the one on the line". The controller decided that 6b lands first and keeps
+  `{ dismiss() }`, and that 6a adopts it, with `NoticeAction`'s `fallback`, when it rebases onto 6b. `notice.ts` now
+  states the contract in full — `dismiss` ends the notice as its timer would, or does nothing once it has expired, been
+  drawn over or ended, however often it is called — and `notify` has a doc of its own; §11 has a note naming both
+  as shared.
+- **Minor 2** (`f51906b`): `apply adjusted` stayed enabled for a failing scheme it moves no colour of, and stored
+  `adjusted: true` over the tokens `apply` stores, with a `changes` panel in the `now` line that opened onto an empty
+  list. `STUCK` reaches that state, and of the 812 published files one, the legacy set's `papercolor-light`. It is now
+  disabled there, with `nothing to adjust — no lightness fixes what fails` in the visible line and as its
+  `aria-description`.
+- **Minor 3** (`14a700f`): the check by hand's finding. The scheme's name in the `changes` panel's sub-label sits in
+  a span of its own with `text-transform: none`; the half beside it is a label and keeps the style's case.
+- **Minor 4** (`33ac590`): `applySkin`'s return was dead code once the cache moved to storage. It returns `void`, and
+  `skin.test.ts` tests what `main.ts` caches, `paletteDeclarations(resolvePalette(…))`.
+- **Minor 5** (`384d865`): an action's own focus fallback was tested only where the line empties. Two cases reach the
+  ends that paint a sentence with no action: another notice drawn over it, and expiry onto a resting sentence.
+- **Minor 6** (`1d753ef`): §11's note said `main.ts` changes one comment outside its style-and-palette block. It
+  changes its imports too, four new and two widened, beside 6a's, where 6a's rebase meets it first.
+- **Minor 7** (`f414905`): the sourcing under VERIFICATION said the ledger records the Minors of five task
+  reviews. It records none under Task 7, whose line says its minors were collected into the gap-fix task; the row now
+  names the gap-fix brief as their source.
+- **Minor 8** (`079e807`, `79ace38`): the check's tests move from `base16.test.ts` into `base16-check.test.ts`; `rgb`,
+  written in four browser files, moves into the harness, where it needs no import; `reloaded` sets `<html>` back to
+  `index.html`'s own attributes before it runs the pre-paint script, as a load starts; and the dialog's live-region
+  case loses a `closest('[inert]')` assertion that could not fail, since a modal makes the rest of the page inert with
+  no attribute.
+
+Each new or changed test was sabotaged over whole files and failed where it was aimed: Minor 2's (left enabled;
+disabled for any failing scheme), Minor 3's (the name's rule emptied; the name outside its span), Minor 4's (a custom
+palette's light half drawn from its dark tokens; declarations without their `;`), Minor 5's (the ending notice's
+fallback swapped for the line's, and that swap on the painted-sentence path alone, which fails exactly the two new
+cases) and Minor 8's (no reset to the markup). The coverage run went from 182 files and 1,742 tests to 183 and 1,747:
+`base16-check.test.ts`, and five new cases, two for Minor 5 and one each for Minors 2, 4 and 8. The check by hand, run
+again at `79ace38`, logged every value it logged at `e58f4c4` but one, Instrument's sub-label.
+
+**The re-review**, of `b639737..baa1a85` after the rebase onto `f5ebfab` (the last paragraph), found each of the eight
+fixed as stated and no new defect, and #118's `storage-blocked.test.ts` passing with this branch's code in it. It found
+one Important and four Minors, all in the docs and all fixed in this revision. The spec's dated notes still named the
+commits from before that rebase; they now name the rebased ones, by the same map as this entry. This entry counted six
+docs-only commits of 39 where its table counted seven of 40; the table's shortstat row named `e2a3a93` as its base
+where its command uses `f5ebfab`; and "this revision" meant `baa1a85` in the heading and `f414905` in the body, which
+now names `f414905`. And §8.3 had no note for `f51906b`'s reason; it now has one, and the spec's head names both notes
+dated after the whole-branch review.
+
+##### WHAT THIS DID NOT CLOSE
+
+- **Closed since the plan was written, so not open:** the three the plan's Task 8 listed — the check's result
+  unheard (A), a refused `undo` silent (B), and an apply ending another gesture's notice (C) — §11's missing files,
+  which §11's note now names, and the check by hand's upper-cased scheme name (`14a700f`).
+- **`notice.ts` is shared with 6a in two places this branch changed**: `notify`'s return, a `Notice`, where 6a's
+  branch returns a function that withdraws its notice, and `NoticeAction`'s `fallback`. 6b lands first and keeps its
+  shape, and 6a adapts both when it rebases onto 6b, the controller's decision; §11's note says so.
+- **The controls gate's widening is shared with 6a** (§10), which has not landed: whichever PR lands second rebases
+  its gate change onto the other's.
+- **§13's test table still names the files the spec planned**, not the ones built: `remove` and `undo` are in
+  `base16-remove.test.ts`, not `base16-import.test.ts`, and it lists neither `custom-palette-load.test.ts` nor the
+  shared `base16-fixtures.ts`. The plan's Pre-flight status records the difference.
+- **Held by a measurement, not a test:** the luminance check before the walk (removing it fails nothing, and only the
+  812-file identity and the timings see it), and the fine scan's remaining cost where a narrow band exists, about
+  20 ms of CPU for `NIGHT` on `#000000` / `#aaaaaa`, measured in Node and not in the dialog.
+- **A parameter only a test uses:** `adjustVariant`'s `floors` exists so one test can hand it a floor table naming a
+  surface as a foreground, which shows the surfaces are held by the function and not by the table's data.
+- **Chromium only:** the `close` handler's focus rule is for WebKit and for Firefox on macOS, where a click does not
+  focus a button. The test holding it opens the menu with `showPopover()`, as those engines leave it, but the browser
+  project runs Chromium alone.
+
+##### VERIFICATION
+
+**The gates ran at `79ace38`**, the last commit before `f414905`, on 2026-09-30, from `web/`, after
+`pnpm install --frozen-lockfile`, which found it up to date. `pkg/` and `pkg-lsp/` were built at `18f8225`; no crate
+changed between it and `e2a3a93`, and the branch touches none. The coverage gate ran under
+`flock <the lanes' browser lock> systemd-run --user --wait --collect --pipe -p MemoryMax=16G -p MemorySwapMax=0`, with
+`PATH`, `HOME`, `CARGO_HOME` and `RUSTUP_HOME` passed through, at the default workers; it was not OOM-killed, so no
+second run with `VITEST_MAX_WORKERS=4` was needed.
+
+```
+pnpm exec biome ci --error-on-warnings  → exit 0, 296 files (1 info)
+pnpm run typecheck                      → exit 0
+pnpm run test:coverage                  → exit 0, 183 files / 1,747 tests; 97.22 / 91.05 / 98.17 / 98.64 against 95 / 89 / 97 / 97; peak 7.6G, no swap
+pnpm run build:app                      → exit 0
+scripts/check-{text-bytes,citations,attributions,doc-figures,shared-docs,lua,colours}.sh, --self-test then alone, from the root → 14 of 14 exit 0
+```
+
+The hygiene scans ran again with `f414905`'s change written, before it was committed: 14 of 14 exit 0, with the same
+counts. The entry's first version quoted the same gates at `e58f4c4`: 295 files; 182 files and 1,742 tests, 91.02 for
+branches and a 7.3G peak. The Rust gates, `check-slow.sh` and the Docker image were not run, because the diff touches no
+Rust and adds no build output the web app imports.
+
+**The check by hand ran at `e58f4c4`, and again at `79ace38`** by the same script, whose second log matched the first
+in every value but one, below. It ran in Playwright's Chromium from `web/node_modules`, by a script driving real
+clicks against `pnpm exec vite --port 5199` from this worktree, at 1280×800, in a fresh context for each style and
+appearance, the appearance emulated through `prefers-color-scheme` with the setting left at `system`. In each it opened
+`import base16…` from the settings menu, pasted `EMBER`, checked, opened `details` and used `apply adjusted`; reopened
+the dialog and opened the `now` line's `changes`; pasted `DAY` and checked; removed the dark half and used `undo` from
+the notice; and picked `match`, Paper, Terminal, Instrument and `custom` from the palette select.
+
+- **Paper, light.** `EMBER` read `Ember · dark, detected: 17 of 35 contrast checks below WCAG AA, worst 3.31:1`,
+  `apply adjusted moves 4 colours’ lightness, and every check then passes` and `fills the dark palette; the page is
+  light now, so its palette is the style’s own until you import a light scheme`; with `details` open the dialog was
+  768 px tall and scrolled within the window. `apply adjusted` left `<body>` on Paper's `#f7f4ef` with the select at
+  `custom — dark: Ember (adjusted)`. `DAY` read `every contrast check passes`, with no other-appearance line.
+- **Paper, dark.** No other-appearance line for `EMBER`; the dialog 761 px, not scrolling. `apply adjusted` painted
+  `<body>` `#1c1a22` with text `#958ca5`. `DAY` read `fills the light palette; the page is dark now, so its palette is
+  the dark import, Ember, until the appearance is light`. `remove` put Paper's `#191714` back, and `undo` Ember.
+- **Terminal, light.** As Paper light, on `#f4f6f2` throughout; the monospace wraps the other-appearance line.
+- **Terminal, dark.** As Paper dark, the dialog 768 px and scrolling; `remove` put `#0b0e14` back.
+- **Instrument, light.** As Paper light, on `#e9edf2` throughout; the `changes` panel's sub-label read `DARK — EMBER`
+  at `e58f4c4` and `DARK — Ember` at `79ace38`.
+- **Instrument, dark.** As Paper dark, the dialog 761 px; `remove` put `#101820` back.
+
+In all six the dialog opened with the focus in the text area; `apply adjusted`, `remove` and `undo` each left it on
+`#settings`; the reopened `now` line read `now: dark — Ember, adjusted` with its `remove`, and `changes` listed the
+same four colours as `details`; `remove` said `dark palette Ember removed` with `undo` and set the select to
+`match style`; `undo` put the stored JSON back byte for byte and the choice back to `custom`; each palette picked
+drew `<body>` in its own background, `custom` in Ember's on a dark page and in the style's own on a light one; and
+the console showed 0 errors. The 90 screenshots are untracked, in the session's scratch directory.
+
+**Every count this entry quotes, with what produces it:**
+
+| Value | What | Produced by |
+|---|---|---|
+| 41; eight | commits in the range; of them touching only `docs/`: `dba6369`, `10baf02`, `3d3f335`, `8fdd45a`, `b639737`, `1d753ef`, `f414905`, `baa1a85` | `git rev-list --count f5ebfab..baa1a85`; each commit's `git show --name-only` |
+| 28 files, +3,581/−104 | the branch against `f5ebfab` without `docs/` | `git diff --shortstat f5ebfab..79ace38 -- . ':!docs'` |
+| 4,222 | lines of the plan | `git show --stat 3d3f335` |
+| #113 to #117 | what `e2a3a93` carries beyond `18f8225` | `git log --format=%s 18f8225..e2a3a93 \| grep -o '(#[0-9]*)$'` |
+| 29 of 29 | commits whose patch id the rebase kept | `git patch-id --stable` over each commit of `18f8225..5dfdc2d` (the head before the rebase) and of `f5ebfab..e58f4c4`, compared in order |
+| `style.css` alone | the file the rebase overlapped | the ledger (`.superpowers/sdd/progress.md`, not tracked) |
+| thirteen | the spec's decisions | §3's table, rows 1 to 13 |
+| eight | base24's extra colours, `base10`–`base17`, which the check says are not used | `grep -n 'eight extra colours' web/src/base16-check.ts` |
+| 35; 24; 16; 19 | floor pairs; `BINDER_APART`; scheme colours read; colour tokens | `CONTRAST_FLOORS.length`, `BINDER_APART`, `BASE16_KEYS.length` and `COLOUR_TOKENS.length`, imported from `web/src` by `node --import ./hook.mjs consts.mts` (scratch, not tracked) |
+| 0.01; 16; 1/10,000 | the walk's step; its bisections; the fine scan's step | `grep -nE '^const (STEP\|BISECTIONS\|FINE) =' web/src/base16-adjust.ts` |
+| 7 of 7; 80 of 80: 6, 12, 10, 14, 11, 15, 12; one skipped; 14.9G | the replay's trees identical to the prototype's; its sabotages fired, Tasks 1 to 7; Task 6's red browser run; the replay's coverage peak with `--maxWorkers=4` | the plan's Pre-flight status |
+| twelve; 297 of 297, 181 of 181, 222 of 222; 4.497, `4.49:1` | what the prototype found; its adjustment against the spec's probe; a cut ratio | the plan's "What the prototype found", its items 1 and 11 |
+| 80 of 80; 768, 787, 799, 807, 830; 799 in 122, 814 in 124, 824 in 125 | the tasks' sabotages; the node suite after Tasks 1 to 5; the browser project after Tasks 5, 6 and 7 | the task reports (`.superpowers/sdd/task-{1..7}-report.md`, not tracked) |
+| seven; six; five | task reviews; those with no Critical or Important, Tasks 1, 2, 4, 5, 6 and 7; those of them with Minors, all but Task 1's | the ledger's "review clean" for each, and the Minors it records under Tasks 2 to 6; Task 7's line records none ("minors collected into Task 7b"), and they are in the gap-fix brief (`.superpowers/sdd/task-7b-brief.md`, not tracked) |
+| one Important; `#000000`, `#aaaaaa`; 0.4650 to 0.4655, `#6f5600`; 0.4731, 0.4631 | Task 3's review; `NIGHT`'s surfaces in its repro; `warn`'s band and its colour there; the walk's landings | the ledger; the gap-fix brief's group D (`.superpowers/sdd/task-7b-brief.md`, not tracked) |
+| ten, twelve; 20; 0.0002 | the gap-fix task's groups and commits; schemes in D's property test; the band `#0c0c0c` / `#b1b1b1` holds | `git rev-list --count 9e5678c..fe898ad`; the gap-fix report (`.superpowers/sdd/task-7b-report.md`, not tracked) |
+| 0.47–0.52 s, 0.99–1.08 s | the 352's CPU before and after D, in D's runs | the gap-fix report's D table |
+| six; 0.89–0.92 s, 0.39–0.43 s, 0.38–0.43 s; 812 | the review round's commits; the 352's CPU before and after Minor 1, and before the gap-fix task, in Minor 1's runs; files whose adjustment was identical before and after | `git rev-list --count fe898ad..81c2774`; the gap-fix report's Minor 1 section |
+| one Important, five Minors; four; two | the gap-fix task's review; the wordings its re-review asked for; the re-reviews | the ledger ("review + 2 re-reviews approved"); the gap-fix report's review-round and re-review sections |
+| 19–25 ms, "about 20 ms" | the fine scan's cost after Minor 1 for `NIGHT` on `#000000` / `#aaaaaa`, `adjustVariant` alone in Node | the gap-fix report's Minor 1 cost table |
+| seven | spec sections the gap-fix report listed as stale, §16 with §6.5 | the gap-fix report's "Not done as written", item 8 |
+| 843, 835 in 125; 847, 837 in 125 | node and browser after the gap-fix groups, and after the review round | the gap-fix report's two final-run tables |
+| 17; 65 G of 66 G | files that never ran in the round's first browser run; the swap then in use | the gap-fix report's review-round final runs |
+| eleven; 12 | spec sections given a dated note; the notes with the head's list | `grep -c 'Amended 2026-09-29, after the gap-fix task' docs/superpowers/specs/2026-09-29-plan7-part6b-base16-import-design.md` |
+| 346 of 352, 6; 198 of 209, 11; 243 of 251, 8 | published schemes passing after `apply adjusted`, and those that cannot be fixed: `schemes/base16`, `schemes/base24`, legacy, here | `node --import ./hook.mjs adjust7b.mts <worktree>/web/src ../../part6b/tinted-schemes/base16/*.y*ml`, then over `base24/*.y*ml` and `legacy-schemes/*.yaml`, in the gap-fix task's scratch directory (`adjust7b.mts` and `hook.mjs`, not tracked) |
+| 1,066; `builtin-light`, `clrs`, `terminal-basic` | base24 tokens moved; the three schemes the fine scan fixes | the same `base24` run; the same with `--show` over those three files |
+| 0.39 to 0.42 s; 0.39 to 0.45 s | the 352's CPU here, three runs, user and system, at `e58f4c4` and at `79ace38` | zsh's `time` around the `base16` run |
+| 296 files, 1 info; 295 | Biome at `79ace38`; at `e58f4c4` | the block above; the entry's first version |
+| 183 files, 1,747 tests; 97.22, 91.05, 98.17, 98.64; 95, 89, 97, 97; 7.6G | the coverage run at `79ace38`; its statements, branches, functions and lines; the floors; `systemd-run`'s `Memory peak` | the block above; `grep -n 'thresholds' web/vite.config.ts` |
+| 182 files, 1,742 tests; 91.02; 7.3G | the same run at `e58f4c4`; its branches; its peak | the entry's first version (`git show b639737`) |
+| five; two, one, one, one | cases the whole-branch review's fixes added; for Minors 5, 2, 4 and 8 | the coverage runs' test counts, 1,747 − 1,742; `git diff b639737..79ace38 -- web/tests` |
+| 14 of 14 | hygiene runs, exit 0, at `79ace38` and again with `f414905`'s change written | the block above: `check-citations.sh` 664 files, 0 violations; `check-attributions.sh` 626 sites, 6 excused, 0 violations; `check-doc-figures.sh` 46 figures; `check-shared-docs.sh` 12 regions in 4 files |
+| 1280×800; six; 90; 0 | the check by hand's window; styles and appearances; screenshots; console errors, at `e58f4c4` and again at `79ace38` | `OUT=<scratch>/shots node handcheck.mjs` against `pnpm exec vite --port 5199` (scratch, not tracked), its `handcheck.json`; `ls <scratch>/shots/*.png \| wc -l` |
+| `DARK — EMBER`, `DARK — Ember` | Instrument's `changes` sub-label at `e58f4c4` and at `79ace38`, the one thing the two logs differ in: their `now` field, at the two steps with the panel open, in Instrument light and dark | each run's `handcheck.json`, the two compared field by field, screenshot paths aside |
+| one Important, seven Minors; eight | the whole-branch review; the commits that fix it, `aee66e9` to `79ace38` | the gap-fix report's whole-branch section; `git rev-list --count b639737..79ace38` |
+| 1 of 812, `papercolor-light`: 0 of 352, 0 of 209, 1 of 251 | published files that fail a check and that `apply adjusted` moves no colour of | `node --import ./hook.mjs unmoved.mts <worktree>/web/src` over `tinted-schemes/base16/*.y*ml`, `base24/*.y*ml` and `legacy-schemes/*.yaml`, in the gap-fix task's scratch directory (not tracked) |
+| four new, two widened | `main.ts`'s imports outside its style-and-palette block | `git diff f5ebfab..79ace38 -- web/src/main.ts`: `base16`, `base16-dialog`, `custom-palette`, `palettes`; `notice`, `skin` |
+| four | browser files that each wrote `rgb` | `git grep -l 'const rgb = (hex' b639737 -- web/tests/browser` |
+| 2 | the spec's notes after the whole-branch review, §8.3's and §11's | `grep -c 'Amended 2026-09-29, after the whole-branch review' docs/superpowers/specs/2026-09-29-plan7-part6b-base16-import-design.md` |
+| one Important, four Minors | the re-review | its report, copied into the ledger (`.superpowers/sdd/progress.md`, not tracked) |
+| 17 of 35, 3.31:1; 4; 8 | `EMBER`'s check; colours `apply adjusted` moves; its `details` groups | the same `handcheck.json`, each run's `ember-details` step |
+| 768, 761 px | the dialog's height with `details` open | the same, each run's `dialogBox` |
+| `#f7f4ef`, `#191714`, `#f4f6f2`, `#0b0e14`, `#e9edf2`, `#101820`; `#1c1a22`, `#958ca5` | `<body>`'s background in each style's light and dark; Ember adjusted's page and text | the same, each step's `bodyBg` and `bodyFg` |
+| 4.51:1 | Ember's adjusted text on the dialog's surface, `#958ca5` on `#2c2833` (4.507) | `contrastRatio` from `web/src/contrast.ts`, by `node --import ./hook.mjs ratio.mts` (scratch, not tracked) |
+
+**REBASED AGAIN, ONTO `f5ebfab` AFTER #118, AND THE SHAs ABOVE ARE THE REBASED ONES.** #118, which lets the app
+start where this site's data is blocked, merged after this entry was written; its entry sits above this one. The
+rebase conflicted only in this file, where both branches appended an entry, and the resolution rebuilt it as
+`main`'s roadmap plus this entry: every rebased commit's copy of the file was checked equal to `f5ebfab`'s followed
+by that commit's own version of this entry. `web/tests/node/prepaint.test.ts`, which both branches extended, merged
+without conflict. Each of the 40 rebased commits' changes outside this file has the same patch id as the commit it
+replaces. The SHAs named above are the rebased ones; the commits this entry measured at map `01b3c92` → `e58f4c4`,
+`04650cb` → `b639737` and `ff76798` → `79ace38`, and the rest one for one in the same order. The gates, the check by
+hand and the scheme measurements above ran before this rebase, over a base without #118's change
+(`web/src/editor-prefs.ts` and its tests); the counts of commits and of the spec's notes, the shortstat, and the
+re-review's findings were taken on the rebased branch. The rebased commits carry this branch's same change over a base
+with #118's, and CI re-runs every gate on them.

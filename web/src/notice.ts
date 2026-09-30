@@ -19,10 +19,35 @@
 /** How long a notice stays, in milliseconds (spec §10's "8 s"). */
 export const NOTICE_MS = 8000
 
-export type NoticeAction = { readonly label: string; readonly run: () => void }
+export type NoticeAction = {
+  readonly label: string
+  readonly run: () => void
+  /**
+   * Where the focus goes when this action's notice ends while the focus is on it — the action run, the notice
+   * expired, or a notice with no action of its own drawn over it. `createNotices`'s own fallback when it names none.
+   */
+  readonly fallback?: () => HTMLElement | null
+}
+
+/**
+ * One notice, as `notify` drew it. **ITS `dismiss` ENDS IT EARLY, BUT ONLY WHILE IT IS STILL THE ONE ON THE LINE**,
+ * and ends it as its own timer would: the line goes back to its resting sentence, or empties, and a focus the notice
+ * held goes to its action's fallback. Once the notice has expired, been drawn over by another, or been ended by its
+ * own action or an earlier `dismiss`, `dismiss` does nothing — so a caller may keep one and call it at any time, as
+ * often as it likes, without ending what another gesture has said since. That is the whole contract: nothing else is
+ * on it, and nothing reports whether a call acted.
+ *
+ * `main.ts`'s base16 import keeps the one a palette removal drew, so the next import ends that removal's *undo*, and
+ * an undo never writes an old half over a newer import (Plan 7 part 6b spec §8.5).
+ */
+export type Notice = { dismiss(): void }
 
 export type Notices = {
-  notify(text: string, opts?: { readonly action?: NoticeAction }): void
+  /**
+   * Show `text` on the line, with `action`'s button if there is one, until `NOTICE_MS` passes or the next notice
+   * replaces it, and say it in the live region. Returns the `Notice`, for a caller that may need to end it early.
+   */
+  notify(text: string, opts?: { readonly action?: NoticeAction }): Notice
   announce(text: string): void
   /**
    * End the notice that is up now and put `rest` back under it.
@@ -33,7 +58,8 @@ export type Notices = {
    * Neither of those needs the member. It is on the type so that "end this one early" has a name a
    * caller can find, instead of `rest(null)`, which clears the RESTING condition and is a different
    * thing entirely. No other module in `src/` and no test drives it — which is worth one line, so the
-   * next reader does not go hunting for the caller.
+   * next reader does not go hunting for the caller. A caller ending ITS OWN notice holds the `Notice`
+   * `notify` returns.
    */
   dismiss(): void
   /**
@@ -68,21 +94,28 @@ export function createNotices(line: HTMLElement, live: HTMLElement, fallback?: (
   /** Every resting sentence announced on this page load — see `rest` for why once is the rule. */
   const said = new Set<string>()
 
+  /** The action on the line now, if any: its own `fallback` is where the focus goes when it goes. */
+  let shown: NoticeAction | undefined
+
   /**
    * Draw `text` as the line's whole contents, with an optional action, or empty it for `null`.
    *
    * **IT CAN BE HOLDING THE FOCUS, AND THEN IT OWES IT SOMEWHERE** — spec §11, and the accessibility
-   * list's item 1. The line's one action is *undo*, offered for eight seconds; a user who tabs to it and
-   * waits, or who is still on it when any other gesture makes a notice, has the button taken out from
-   * under them by the very next repaint. `fallback` is what the app hands over for that case — the
-   * control that lists the copies, which is where an undo that did not happen leaves the user.
+   * list's item 1. The line's actions are *undo*s — a copy's delete and an imported palette's removal —
+   * each offered for eight seconds; a user who tabs to one and waits, or uses it, or is still on it when
+   * any other gesture makes a notice, has the button taken out from under them by the very next repaint.
+   * The action's own `fallback` takes the focus then, where it names one — the palette's, the settings
+   * button its removal was made from — and `fallback` otherwise: what the app hands over, the control
+   * that lists the copies, which is where a copy's undo that did not happen leaves the user.
    */
   const paint = (text: string | null, action?: NoticeAction): void => {
     const held = line.contains(document.activeElement)
+    const leaving = shown?.fallback ?? fallback
+    shown = action
     if (text === null) {
       line.replaceChildren()
       line.hidden = true
-      if (held) fallback?.()?.focus()
+      if (held) leaving?.()?.focus()
       return
     }
     const t = document.createElement('span')
@@ -102,8 +135,11 @@ export function createNotices(line: HTMLElement, live: HTMLElement, fallback?: (
     }
     line.hidden = false
     // THE NEW LINE'S OWN ACTION IF IT HAS ONE, SO A KEYBOARD USER STAYS ON THE LINE THEY WERE ON.
-    if (held) (line.querySelector<HTMLElement>('button.notice-action') ?? fallback?.() ?? null)?.focus()
+    if (held) (line.querySelector<HTMLElement>('button.notice-action') ?? leaving?.() ?? null)?.focus()
   }
+
+  /** The notice on the line now, until it ends: the one whose own `dismiss` still acts. */
+  let current: Notice | null = null
 
   // THE TRANSIENT NOTICE ENDS AND THE RESTING ONE COMES BACK — silently: it is the same sentence the user
   // has already been told and already heard, so re-announcing it on every expiry would say it again and
@@ -111,6 +147,7 @@ export function createNotices(line: HTMLElement, live: HTMLElement, fallback?: (
   const dismiss = (): void => {
     if (timer !== null) clearTimeout(timer)
     timer = null
+    current = null
     paint(resting)
   }
 
@@ -121,6 +158,13 @@ export function createNotices(line: HTMLElement, live: HTMLElement, fallback?: (
       paint(text, opts.action)
       say(text)
       timer = setTimeout(dismiss, NOTICE_MS)
+      const notice: Notice = {
+        dismiss: () => {
+          if (current === notice) dismiss()
+        },
+      }
+      current = notice
+      return notice
     },
     announce: say,
     dismiss,

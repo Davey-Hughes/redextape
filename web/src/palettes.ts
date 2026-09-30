@@ -52,8 +52,9 @@ export const PALETTE_IDS = ['paper', 'terminal', 'instrument'] as const
 
 export type PaletteId = (typeof PALETTE_IDS)[number]
 
+/** A built-in palette, or the imported one (`skin.ts`'s `resolvePalette`), which is `custom`. */
 export type Palette = {
-  readonly id: PaletteId
+  readonly id: PaletteId | 'custom'
   readonly name: string
   readonly light: Variant
   readonly dark: Variant

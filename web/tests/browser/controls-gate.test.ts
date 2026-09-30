@@ -1,11 +1,13 @@
 import type { EditorView } from '@codemirror/view'
 import { computeAccessibleName } from 'dom-accessibility-api'
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
+import { DAY, EMBER, legacyLayout } from '../node/base16-fixtures'
 import { SHELL, until } from './harness'
 
 /**
  * **EVERY CONTROL, AS A CLASS** — umbrella §8.1, Plan 7 part 2 spec §14. Rather than one test per control,
- * this walks every button and select the page holds, with every menu opened in turn, and asserts three things
+ * this walks every button, select, input and text area the page holds, with every menu and dialog opened in turn,
+ * and asserts three things
  * of each: it has an accessible name that is not a bare glyph (rule 1), the name matches its visible label or
  * its tooltip (rule 1), and it is reachable by keyboard (rule 5). A control added later that breaks a rule
  * fails here without anyone having to remember to test it.
@@ -33,8 +35,9 @@ function nameOf(el: HTMLElement): string {
  * inside one is not a label the name has to match.
  */
 /**
- * What a sighted user reads beside a `<select>`: the text of the `<label>` wrapping it, if any, with the
- * select's own options left out.
+ * What a sighted user reads beside a form control — a `<select>`, an `<input>` or a `<textarea>`: the text of the
+ * `<label>` wrapping it, if any, with the control itself left out (Plan 7 part 6b spec §10). A select's options
+ * and a text area's text are the control's value, not its label.
  *
  * **WITHOUT THIS THE CHECK WAS A TAUTOLOGY.** It read the select's accessible NAME as its visible label
  * too, so `expect([visible, title]).toContain(name)` compared a value with itself and an `aria-label`
@@ -60,7 +63,7 @@ function selectLabel(el: HTMLElement): string {
   const label = el.closest('label')
   if (label === null) return el.title.trim()
   const copy = label.cloneNode(true) as HTMLElement
-  for (const control of copy.querySelectorAll('select, [aria-hidden="true"]')) control.remove()
+  for (const control of copy.querySelectorAll('select, input, textarea, [aria-hidden="true"]')) control.remove()
   return (copy.textContent ?? '').replace(/\s+/g, ' ').trim()
 }
 
@@ -104,6 +107,10 @@ const straySymbol = (s: string) => /[\p{So}\p{Sm}]/u.test(s.replaceAll('+', ''))
 /**
  * Every control a user can meet right now.
  *
+ * **WHILE A MODAL DIALOG IS OPEN, ONLY WHAT IS INSIDE IT** (Plan 7 part 6b spec §10). The platform makes everything
+ * outside a modal inert, so every control there would fail the focus check below for that reason alone; and a
+ * control inside a CLOSED dialog is as unreachable as one inside a closed popover.
+ *
  * **`closest('[hidden]')`, NOT `el.hidden` — the difference is a whole panel.** A collapsed or unmounted
  * panel hides its own element (`pane-chrome.ts`'s `textPanel` hides the panel until an editor is
  * mounted), and its toggle inside it reads `hidden === false` while being unreachable and unseen. The
@@ -112,8 +119,10 @@ const straySymbol = (s: string) => /[\p{So}\p{Sm}]/u.test(s.replaceAll('+', ''))
  * reachability check below mean what it says.
  */
 function controls(): HTMLElement[] {
-  return [...document.querySelectorAll<HTMLElement>('button, select')].filter((el) => {
+  const scope: ParentNode = document.querySelector('dialog:modal') ?? document
+  return [...scope.querySelectorAll<HTMLElement>('button, select, input, textarea')].filter((el) => {
     if (el.closest('[hidden]') !== null) return false
+    if (el.closest('dialog:not([open])') !== null) return false
     const popover = el.closest<HTMLElement>('[popover]')
     return popover === null || popover.matches(':popover-open')
   })
@@ -126,7 +135,7 @@ function check(where: string): void {
     expect(name, id).not.toBe('')
     expect(isGlyph(name), `${id} is a bare glyph`).toBe(false)
     expect(straySymbol(name), `${id} carries a symbol a reader would have to name aloud`).toBe(false)
-    const visible = el.tagName === 'SELECT' ? selectLabel(el) : visibleLabel(el)
+    const visible = el.matches('select, input, textarea') ? selectLabel(el) : visibleLabel(el)
     if (visible !== '' && !isGlyph(visible))
       expect([visible, el.title.trim()], `${id}: name ≠ label or tooltip`).toContain(name)
     else expect(el.title.trim(), `${id}: a glyph-only control's tooltip must be its name`).toBe(name)
@@ -318,5 +327,89 @@ describe('every control in Explorer, with the copies menu in each of its states'
     document.querySelector<HTMLButtonElement>('.buffer-list button[aria-label^="resume "]')?.click()
     const menu = document.querySelector<HTMLElement>('.buffer-list')
     if (menu?.matches(':popover-open')) menu.hidePopover()
+  })
+})
+
+/**
+ * **THE IMPORT DIALOG, IN EXPLORER ALONE**, for the copies menu's reason above: it is a modal no workspace switch
+ * touches (Plan 7 part 6b spec §10). It is walked open and empty, where both applies are disabled with a reason;
+ * after a failing scheme's check with its details open, where `apply adjusted` can act; and with both halves stored,
+ * where each `remove` in the now line is named by its half. While it is open the walk is the dialog's alone, and this
+ * asserts that rather than trusting it.
+ */
+describe('every control in Explorer, in the settings menu and the import dialog', () => {
+  const dialog = () => document.querySelector<HTMLDialogElement>('dialog.base16-dialog') as HTMLDialogElement
+  const open = () => {
+    document.querySelector<HTMLButtonElement>('#settings')?.click()
+    document.querySelector<HTMLButtonElement>('#import-base16')?.click()
+    expect(dialog().matches(':modal'), 'the import dialog did not open').toBe(true)
+  }
+  const paste = (scheme: string) => {
+    const text = dialog().querySelector('textarea') as HTMLTextAreaElement
+    text.value = scheme
+    text.dispatchEvent(new Event('input'))
+    dialog().querySelector<HTMLButtonElement>('button.base16-check')?.click()
+  }
+
+  // THE CHECKBOX THE GATE NEVER WALKED BEFORE IT TOOK INPUTS: `format on blur`, named by the label around it.
+  it("walks the settings menu's checkbox", () => {
+    document.querySelector<HTMLButtonElement>('#settings')?.click()
+    const box = document.querySelector<HTMLInputElement>('#format-on-blur') as HTMLInputElement
+    expect(controls()).toContain(box)
+    expect(nameOf(box)).toBe('format on blur')
+    check('#settings, its checkbox')
+    document.querySelector<HTMLElement>('#settings-menu')?.hidePopover()
+  })
+
+  it('open and empty, where neither apply can act', () => {
+    open()
+    const walked = controls()
+    expect(walked.map(nameOf)).toEqual(['base16 scheme (YAML)', 'check', 'apply', 'apply adjusted', 'cancel'])
+    check('the import dialog, empty')
+    dialog().close()
+  })
+
+  it("after a failing scheme's check, with its details open", () => {
+    open()
+    paste(legacyLayout('Ember', EMBER))
+    dialog().querySelector<HTMLButtonElement>('.panel[data-panel="base16-details"] button.panel-toggle')?.click()
+    expect(controls().map(nameOf)).toEqual([
+      'base16 scheme (YAML)',
+      'check',
+      'details',
+      'apply',
+      'apply adjusted',
+      'cancel',
+    ])
+    expect(dialog().querySelector<HTMLButtonElement>('button.base16-apply-adjusted')?.disabled).toBe(false)
+    check('the import dialog, checked')
+    dialog().close()
+  })
+
+  // THE DARK HALF IS APPLIED ADJUSTED, SO THE NOW LINE HAS ITS `changes` TOGGLE TOO, walked closed and open.
+  it('with both halves stored, each remove named by its half, and an adjusted half’s changes', () => {
+    open()
+    paste(legacyLayout('Day', DAY))
+    dialog().querySelector<HTMLButtonElement>('button.base16-apply')?.click()
+    open()
+    paste(legacyLayout('Ember', EMBER))
+    dialog().querySelector<HTMLButtonElement>('button.base16-apply-adjusted')?.click()
+    open()
+    const walked = [
+      'remove the light palette, Day',
+      'remove the dark palette, Ember',
+      'changes',
+      'base16 scheme (YAML)',
+      'check',
+      'apply',
+      'apply adjusted',
+      'cancel',
+    ]
+    expect(controls().map(nameOf)).toEqual(walked)
+    check('the import dialog, with both halves stored')
+    dialog().querySelector<HTMLButtonElement>('.panel[data-panel="base16-now-changes"] button.panel-toggle')?.click()
+    expect(controls().map(nameOf)).toEqual(walked)
+    check('the import dialog, with an adjusted half’s changes open')
+    dialog().close()
   })
 })

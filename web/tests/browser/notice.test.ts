@@ -71,6 +71,47 @@ describe('notices', () => {
       expect(document.activeElement).toBe(line.querySelector('button.notice-action'))
     })
 
+    // A PALETTE REMOVAL'S UNDO BELONGS TO THE SETTINGS, NOT THE COPIES: its action names where the focus goes instead.
+    it('goes to the action’s own fallback when it names one, whether the notice expires or its action runs', () => {
+      const own = document.createElement('button')
+      document.body.append(own)
+      const n = createNotices(line, live, fallbackEl)
+      const action = { label: 'undo', run: () => undefined, fallback: () => own }
+      n.notify('dark palette Night removed', { action })
+      line.querySelector<HTMLButtonElement>('button.notice-action')?.focus()
+      vi.advanceTimersByTime(NOTICE_MS)
+      expect(document.activeElement).toBe(own)
+      n.notify('dark palette Night removed', { action })
+      line.querySelector<HTMLButtonElement>('button.notice-action')?.focus()
+      line.querySelector<HTMLButtonElement>('button.notice-action')?.click()
+      expect(document.activeElement).toBe(own)
+    })
+
+    // THE OTHER TWO WAYS A NOTICE ENDS UNDER THE FOCUS: drawn over by a notice with no action of its own, and expired
+    // onto a resting sentence, which has none either. Each hands the focus to the ending notice's own fallback.
+    it('goes to the action’s own fallback when a notice with no action is drawn over it', () => {
+      const own = document.createElement('button')
+      document.body.append(own)
+      const n = createNotices(line, live, fallbackEl)
+      n.notify('dark palette Night removed', { action: { label: 'undo', run: () => undefined, fallback: () => own } })
+      line.querySelector<HTMLButtonElement>('button.notice-action')?.focus()
+      n.notify('Explorer reset — the default views are back')
+      expect(line.querySelector('.notice-text')?.textContent).toBe('Explorer reset — the default views are back')
+      expect(document.activeElement).toBe(own)
+    })
+
+    it('goes to the action’s own fallback when the notice expires onto a resting sentence', () => {
+      const own = document.createElement('button')
+      document.body.append(own)
+      const n = createNotices(line, live, fallbackEl)
+      n.rest('copies are not being saved')
+      n.notify('dark palette Night removed', { action: { label: 'undo', run: () => undefined, fallback: () => own } })
+      line.querySelector<HTMLButtonElement>('button.notice-action')?.focus()
+      vi.advanceTimersByTime(NOTICE_MS)
+      expect(line.querySelector('.notice-text')?.textContent).toBe('copies are not being saved')
+      expect(document.activeElement).toBe(own)
+    })
+
     it('leaves the focus alone when it is somewhere else entirely', () => {
       const n = createNotices(line, live, fallbackEl)
       n.notify('λ copy 1 deleted', { action: { label: 'undo', run: () => undefined } })
@@ -79,6 +120,26 @@ describe('notices', () => {
       n.notify('TM copy 2 created')
       expect(document.activeElement).toBe(elsewhere)
     })
+  })
+
+  /**
+   * **A NOTICE ENDED EARLY BY ITS OWN HANDLE, AND ONLY WHILE IT IS STILL THE ONE ON THE LINE.** Once it has expired
+   * or been drawn over, what the line says is another gesture's, and ending it would take that from under the user.
+   */
+  it('lets a caller end its own notice early, and only while that notice is still on the line', () => {
+    const n = createNotices(line, live)
+    const text = () => line.querySelector('.notice-text')?.textContent
+    const expired = n.notify('dark palette Night removed', { action: { label: 'undo', run: () => undefined } })
+    vi.advanceTimersByTime(NOTICE_MS)
+    n.notify('λ copy 1 deleted', { action: { label: 'undo', run: () => undefined } })
+    expired.dismiss()
+    expect(text()).toBe('λ copy 1 deleted')
+    const replaced = n.notify('dark palette Night removed', { action: { label: 'undo', run: () => undefined } })
+    const showing = n.notify('TM copy 2 created')
+    replaced.dismiss()
+    expect(text()).toBe('TM copy 2 created')
+    showing.dismiss()
+    expect(line.hidden).toBe(true)
   })
 
   it('runs its action once and clears', () => {

@@ -1,7 +1,11 @@
+import html from '../../index.html?raw'
+
 /**
  * Shared browser-tier fixtures: the app shell every test file mounts into, and the poll helper every
- * test file waits on. Both were duplicated — `SHELL` 29 times, `until` 23 times in 7 different bodies —
- * until this file replaced them.
+ * test file waits on; and, for the tests of what a reload draws first, the page's own pre-paint script,
+ * the palette picked from the settings menu, and a colour as `getComputedStyle` writes it. The shell and
+ * the poll helper were duplicated — `SHELL` 29 times, `until` 23 times in 7 different bodies — the reload's
+ * helpers twice, and `rgb` four times, until this file replaced them.
  *
  * **WHY THIS DOES NOT BREAK THE DIRECTORY'S STANDING IDIOM.** Files in this directory have long carried
  * a comment saying that each browser test file gets its own page — `main()` runs once per module load
@@ -46,6 +50,7 @@ export const SHELL = `
       <label class="skin">appearance <select id="appearance-choice"></select></label>
       <label class="skin">keymap <select id="keymap"></select></label>
         <label class="skin"><input type="checkbox" id="format-on-blur" /> format on blur</label>
+        <button type="button" id="import-base16">import base16…</button>
     </div>
   </header>
   <div id="notice" class="notice" hidden></div>
@@ -115,3 +120,62 @@ export async function until(predicate: () => boolean, what?: string, timeoutMs =
     await new Promise((r) => setTimeout(r, pollMs))
   }
 }
+
+/** The one classic script in `index.html`: the pre-paint script, which draws a load's first frame from storage. */
+export const PREPAINT = /<script>([\s\S]*?)<\/script>/.exec(html)?.[1] ?? ''
+
+/** `#rrggbb` as `getComputedStyle` writes a colour. */
+export const rgb = (hex: string): string =>
+  `rgb(${[1, 3, 5].map((i) => Number.parseInt(hex.slice(i, i + 2), 16)).join(', ')})`
+
+/** The attributes of `<html>` the pre-paint script sets from storage: the palette, the style and the appearance. */
+const PREPAINTED = ['style', 'data-style', 'data-theme'] as const
+
+/**
+ * `<body>`'s background on a reload's first frame: `PREPAINT` run alone, on `<html>` as `index.html`'s markup has it
+ * — no inline palette, the markup's `data-style`, no `data-theme` — so what the script finds in storage is all that
+ * differs, as on a load. **THE PAGE IS PUT BACK AS IT WAS AFTER**, those attributes included, so the file's next case
+ * meets the page this load drew, not the one a reload would.
+ */
+export function reloaded(): string {
+  if (PREPAINT === '') throw new Error('index.html has no pre-paint script')
+  const root = document.documentElement
+  const markup = new DOMParser().parseFromString(html, 'text/html').documentElement
+  const kept = PREPAINTED.map((name) => [name, root.getAttribute(name)] as const)
+  for (const name of PREPAINTED) {
+    const value = markup.getAttribute(name)
+    if (value === null) root.removeAttribute(name)
+    else root.setAttribute(name, value)
+  }
+  new Function(PREPAINT)()
+  const first = getComputedStyle(document.body).backgroundColor
+  for (const [name, value] of kept) {
+    if (value === null) root.removeAttribute(name)
+    else root.setAttribute(name, value)
+  }
+  return first
+}
+
+/**
+ * Pick `value` from the settings menu's select `id`, as a user does — the menu opened, the option chosen, the menu
+ * closed — so the select's own `change` is what reaches `main.ts`.
+ *
+ * **`vitest/browser` IS IMPORTED HERE, WHEN IT IS CALLED, NOT AT THE TOP OF THE FILE.** The node tier's
+ * `harness.test.ts` imports this file for `SHELL` and `until`, and `vitest/browser` refuses to load outside the
+ * browser tier, which a top-level import would make it do.
+ */
+async function chooseSetting(id: string, value: string): Promise<void> {
+  const { userEvent } = await import('vitest/browser')
+  const settings = document.querySelector<HTMLElement>('#settings') as HTMLElement
+  await userEvent.click(settings)
+  await userEvent.selectOptions(document.querySelector(id) as HTMLSelectElement, value)
+  await userEvent.click(settings)
+  if (document.querySelector('#settings-menu')?.matches(':popover-open'))
+    throw new Error('the settings menu stayed open')
+}
+
+/** Pick a palette from the settings menu, as `chooseSetting` does. */
+export const choosePalette = (value: string): Promise<void> => chooseSetting('#palette', value)
+
+/** Pick a style from the settings menu, as `chooseSetting` does. */
+export const chooseStyle = (value: string): Promise<void> => chooseSetting('#style', value)

@@ -1641,6 +1641,111 @@ main {
   border: 0;
 }
 
+/* THE BASE16 IMPORT DIALOG (Plan 7 part 6b spec §8), a native modal `<dialog>` appended to `<body>`. Its `display`
+   is set on `[open]` alone, for `.header-menu.settings`' reason: a closed dialog is hidden by a user-agent rule, and
+   any author `display` on the bare class beats it. EVERY COLOUR IS A TOKEN — the backdrop is the page's own colour
+   mixed with `transparent`, and a swatch's colour is set from the data, as `applySkin` sets a token. */
+.base16-dialog {
+  width: min(46rem, calc(100vw - 2 * var(--space-3)));
+  max-height: calc(100vh - 2 * var(--space-3));
+  overflow: auto;
+  padding: var(--space-3);
+  border: 1px solid var(--rule);
+  border-radius: var(--radius);
+  background: var(--bg-raised);
+  color: var(--fg);
+}
+.base16-dialog[open] {
+  display: grid;
+  gap: var(--space-2);
+}
+.base16-dialog::backdrop {
+  background: color-mix(in oklab, var(--bg) 70%, transparent);
+}
+.base16-heading {
+  margin: 0;
+  font-size: var(--step-1);
+  font-weight: 600;
+}
+.base16-field {
+  display: grid;
+  gap: var(--space-1);
+  color: var(--fg-dim);
+}
+.base16-text {
+  font: var(--step--1) / 1.4 var(--font-mono);
+  padding: var(--space-2);
+  border: 1px solid var(--rule);
+  border-radius: var(--radius);
+  background: var(--bg);
+  color: var(--fg);
+  resize: vertical;
+}
+.base16-check,
+.base16-remove,
+.base16-actions button {
+  justify-self: start;
+  font: inherit;
+  padding: 0.15em 0.6em;
+  border: 1px solid var(--fg-dim);
+  border-radius: var(--radius);
+  background: transparent;
+  color: inherit;
+  cursor: pointer;
+}
+.base16-check:disabled,
+.base16-actions button:disabled {
+  opacity: 0.55;
+  cursor: default;
+}
+.base16-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+}
+.base16-now p,
+.base16-result p,
+.base16-why {
+  margin: 0;
+}
+.base16-why,
+.base16-elsewhere {
+  color: var(--fg-dim);
+  font-size: var(--step--1);
+}
+.base16-errors {
+  margin: 0;
+  color: var(--error);
+}
+.base16-now-changes ul,
+.base16-details-body ul {
+  margin: var(--space-1) 0;
+  padding-inline-start: var(--space-3);
+  font-size: var(--step--1);
+}
+.base16-changes {
+  list-style: none;
+}
+.base16-changes-label {
+  color: var(--fg-dim);
+  font-size: var(--step--2);
+  text-transform: var(--label-transform);
+  letter-spacing: var(--label-tracking);
+}
+/* A SCHEME'S NAME IS DATA, NOT A LABEL: the label around it takes the style's case, and Instrument's would print
+   `Ember` as `EMBER`. `.view-title` sets `text-transform: none` for the same reason. */
+.base16-scheme-name {
+  text-transform: none;
+}
+.base16-swatch {
+  display: inline-block;
+  width: 0.9em;
+  height: 0.9em;
+  margin-inline-end: 0.3em;
+  border: 1px solid var(--rule);
+  vertical-align: -0.1em;
+}
+
 /* THE INSPECTOR (spec §9): a fixed-width right-hand column, collapsible to its header, scrolling its own
    rows. `panel.ts` builds the header; this decides the column. NOTHING HERE IS A NEW COLOUR. */
 .inspector {

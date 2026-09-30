@@ -2,7 +2,8 @@ import { readFileSync } from 'node:fs'
 import { fileURLToPath } from 'node:url'
 import { describe, expect, it } from 'vitest'
 import { PALETTE_CSS_PATTERN, PALETTES, paletteDeclarations } from '../../src/palettes'
-import { PALETTE_CSS_KEY, STYLE_IDS, STYLE_KEY } from '../../src/skin'
+import { PALETTE_CSS_KEY, resolvePalette, STYLE_IDS, STYLE_KEY } from '../../src/skin'
+import { DAY, NEON, storedHalf } from './base16-fixtures'
 
 const html = readFileSync(fileURLToPath(new URL('../../index.html', import.meta.url)), 'utf8')
 // The one classic script in the page — the module script has a `type`.
@@ -41,6 +42,16 @@ describe('the pre-paint script', () => {
     const attrs = run({ [STYLE_KEY]: 'paper', [PALETTE_CSS_KEY]: css })
     expect(attrs.get('data-style')).toBe('paper')
     expect(attrs.get('style')).toBe(css)
+  })
+
+  // The cache holds resolved declarations whatever produced them (Plan 7 part 6b spec §9), so an imported palette
+  // reaches first paint through the same key and the same pattern, the script unchanged.
+  it('applies a cached custom palette as it applies a built-in one', () => {
+    const css = paletteDeclarations(
+      resolvePalette('paper', 'custom', { light: storedHalf('Day', DAY), dark: storedHalf('Neon', NEON) }),
+    )
+    expect(PALETTE_CSS_PATTERN.test(css)).toBe(true)
+    expect(run({ [PALETTE_CSS_KEY]: css }).get('style')).toBe(css)
   })
 
   it('still applies a stored appearance', () => {

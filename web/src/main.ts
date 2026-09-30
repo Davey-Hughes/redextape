@@ -14,10 +14,20 @@ import {
 } from './appearance'
 import type { AsmPane } from './asm-pane'
 import { showBanner } from './banner'
+import { schemeName } from './base16'
+import { createBase16Dialog } from './base16-dialog'
 import { bufferList } from './buffer-list'
 import { BUFFERS_STORAGE_KEY, parseBuffers, serializeBuffers } from './buffers-store'
 import { type CaptureTable, classMapFrom, createGrammarRegistry, treeSitterColour } from './colour'
 import { createCompile } from './compile'
+import {
+  CUSTOM_PALETTE_KEY,
+  type CustomPalette,
+  parseCustomPalette,
+  serializeCustomPalette,
+  withHalf,
+  withoutHalf,
+} from './custom-palette'
 import { lspLintRanges } from './diagnostics'
 import { createDraw } from './draw'
 import { createEditorCustody } from './editor-custody'
@@ -37,8 +47,9 @@ import { navKeymap } from './lsp-nav'
 import type { LanguageId } from './lsp-protocol'
 import { documentUri, LANGUAGE_LABEL } from './lsp-protocol'
 import { applyEdits, revealRange } from './lsp-text'
-import { createNotices } from './notice'
+import { createNotices, type Notice } from './notice'
 import { createOutlinePanel } from './outline'
+import { paletteDeclarations } from './palettes'
 import type { PaneChoice } from './pane-chrome'
 import { createPaneHost, type LayoutEvent } from './pane-host'
 import { createPanel } from './panel'
@@ -52,12 +63,15 @@ import { type SessionId, SessionPool } from './session-client'
 import { legControlState, type SessionLegs, SessionRegistry } from './sessions'
 import {
   applySkin,
+  customPaletteLabel,
   PALETTE_CHOICE_LABELS,
   PALETTE_CHOICES,
   PALETTE_CSS_KEY,
   PALETTE_KEY,
+  type PaletteChoice,
   readPaletteChoice,
   readStyle,
+  resolvePalette,
   STYLE_IDS,
   STYLE_KEY,
   STYLE_LABELS,
@@ -236,8 +250,9 @@ async function main(): Promise<EditorView> {
 
   // THE NOTICE LINE AND THE LIVE REGION (Plan 7 part 2 spec §11) — built before `init()`, because it
   // touches nothing but the DOM, so every refusal from here on has somewhere to go.
-  // THE FALLBACK IS THE COPIES BUTTON: the line's one action is *undo*, and a user whose undo went away
-  // — expired, or replaced by another gesture's notice — is looking at the copies it was about.
+  // THE FALLBACK IS THE COPIES BUTTON: a copy's *undo* is the line's usual action, and a user whose undo
+  // went away — expired, or replaced by another gesture's notice — is looking at the copies it was about.
+  // An imported palette's *undo* names its own, the settings button (`NoticeAction`'s `fallback`).
   const notices = createNotices(noticeHost, liveHost, () => buffersButton)
 
   // Wired BEFORE `init()`, unlike everything below it. The toggle has nothing to do with wasm — it
@@ -369,14 +384,34 @@ async function main(): Promise<EditorView> {
     }
   }
   for (const id of STYLE_IDS) styleSelect.append(new Option(STYLE_LABELS[id], id))
-  for (const id of PALETTE_CHOICES) paletteSelect.append(new Option(PALETTE_CHOICE_LABELS[id], id))
   let style = readStyle(readSkinStorage(STYLE_KEY))
-  let paletteChoice = readPaletteChoice(readSkinStorage(PALETTE_KEY))
+  /** The imported palette (Plan 7 part 6b spec §7), or `null` when nothing is imported. */
+  let custom = parseCustomPalette(readSkinStorage(CUSTOM_PALETTE_KEY))
+  let paletteChoice = readPaletteChoice(readSkinStorage(PALETTE_KEY), custom)
+  // `custom` IS LISTED WHILE THE STORE HOLDS A HALF, after the built-in choices, under its halves' names (spec §7.2).
+  const listPalettes = (): void => {
+    paletteSelect.replaceChildren(
+      ...PALETTE_CHOICES.map((id) => new Option(PALETTE_CHOICE_LABELS[id], id)),
+      ...(custom === null ? [] : [new Option(customPaletteLabel(custom), 'custom')]),
+    )
+    paletteSelect.value = paletteChoice
+  }
   styleSelect.value = style
-  paletteSelect.value = paletteChoice
-  // Every apply refreshes the pre-paint cache, so the next load's first frame is this one.
+  listPalettes()
+  // EVERY APPLY REFRESHES THE PRE-PAINT CACHE — FROM WHAT A RELOAD READS, NOT FROM WHAT THIS LOAD DRAWS. The page is
+  // drawn from memory; the cache is the palette storage's style, choice and imported palette resolve to, read as
+  // start-up reads them above, so the next load's first frame is the one it goes on to draw. The two differ where
+  // storage refused a write: to the imported palette, which says so and lasts this load (spec §7.1), or, silently, to
+  // the style or the palette choice (§2.3).
   const applyChosenSkin = (): void => {
-    writeSkinStorage(PALETTE_CSS_KEY, applySkin(document.documentElement, style, paletteChoice))
+    applySkin(document.documentElement, style, paletteChoice, custom)
+    const stored = parseCustomPalette(readSkinStorage(CUSTOM_PALETTE_KEY))
+    const reload = resolvePalette(
+      readStyle(readSkinStorage(STYLE_KEY)),
+      readPaletteChoice(readSkinStorage(PALETTE_KEY), stored),
+      stored,
+    )
+    writeSkinStorage(PALETTE_CSS_KEY, paletteDeclarations(reload))
   }
   applyChosenSkin()
   styleSelect.addEventListener('change', () => {
@@ -384,10 +419,106 @@ async function main(): Promise<EditorView> {
     writeSkinStorage(STYLE_KEY, style)
     applyChosenSkin()
   })
+  /** How many palettes the user has picked from the select: a removal's *undo* leaves a choice picked since alone. */
+  let palettePicks = 0
   paletteSelect.addEventListener('change', () => {
-    paletteChoice = readPaletteChoice(paletteSelect.value)
+    palettePicks++
+    paletteChoice = readPaletteChoice(paletteSelect.value, custom)
     writeSkinStorage(PALETTE_KEY, paletteChoice)
     applyChosenSkin()
+  })
+  /**
+   * The imported palette's write, which says whether it held — and `null`, the last half removed, removes the key, so
+   * an empty store and no store are one state. **NOT SILENT, UNLIKE THE CHOICES'** (spec §7.1): a failed write here
+   * loses a scheme the user pasted in, or brings back one the user deleted, so the caller says so.
+   */
+  const writeCustom = (next: CustomPalette | null): boolean => {
+    try {
+      if (next === null) localStorage.removeItem(CUSTOM_PALETTE_KEY)
+      else localStorage.setItem(CUSTOM_PALETTE_KEY, serializeCustomPalette(next))
+      return true
+    } catch {
+      return false
+    }
+  }
+  /**
+   * Put `next` in force as the imported palette, with `choice` as the palette choice — **THE STORE FIRST, AND THE CHOICE
+   * ONLY WHEN IT HELD** (spec §7.1). A reload reads both, so a choice saved over a write that failed would read what
+   * the store lost: `custom` over a built-in choice with an older import behind it, or `match` over a half still
+   * stored. The page is drawn from memory either way, and the pre-paint cache, as every apply writes it, from what
+   * storage holds — so a refused write lasts this load and the reload finds everything as it was; the caller says so.
+   */
+  const commitCustom = (next: CustomPalette | null, choice: PaletteChoice): boolean => {
+    custom = next
+    paletteChoice = choice
+    const saved = writeCustom(next)
+    if (saved) writeSkinStorage(PALETTE_KEY, paletteChoice)
+    applyChosenSkin()
+    listPalettes()
+    return saved
+  }
+  /** The notice a palette removal drew, offering its *undo*; an apply ends it while it is still up (spec §8.5). */
+  let removal: Notice | null = null
+
+  // THE BASE16 IMPORT (Plan 7 part 6b spec §8): the settings menu's last item opens a modal dialog, appended to
+  // `<body>` here, closed. Queried here rather than with the mount points above, which the header's own buttons share.
+  const importButton = document.querySelector<HTMLButtonElement>('#import-base16')
+  if (importButton === null) throw new Error('the page is missing a mount point')
+  const base16 = createBase16Dialog({
+    settings: settingsButton,
+    stored: () => custom,
+    shown: () =>
+      appearance === 'system' ? (matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light') : appearance,
+    apply: (variant, half) => {
+      removal?.dismiss()
+      if (!commitCustom(withHalf(custom, variant, half), 'custom')) {
+        notices.notify('the imported palette could not be saved; it applies until the page is reloaded')
+      }
+    },
+    /**
+     * A REMOVE (spec §8.5): the half goes, and the choice with it only when it was `custom` and no half is left;
+     * the page and the pre-paint cache follow at once. The notice's *undo* puts the half back exactly as it was
+     * stored, and the choice as it was unless the user has picked a palette since, until the next change to the
+     * store ends the offer. A write storage refuses, the removal's or the undo's, lasts this load and says so (spec
+     * §7.1).
+     */
+    remove: (variant) => {
+      const half = custom?.[variant]
+      if (custom === null || half === undefined) return
+      const before = paletteChoice
+      const next = withoutHalf(custom, variant)
+      const saved = commitCustom(next, next === null && paletteChoice === 'custom' ? 'match' : paletteChoice)
+      const picks = palettePicks
+      removal = notices.notify(
+        saved
+          ? `${variant} palette ${schemeName(half.name)} removed`
+          : 'the removal could not be saved; the palette comes back when the page is reloaded',
+        {
+          action: {
+            label: 'undo',
+            // THE REMOVAL WAS MADE FROM THE SETTINGS, SO THE FOCUS GOES BACK THERE, not to the copies button the line
+            // falls back to for a copy's undo.
+            fallback: () => settingsButton,
+            run: () => {
+              // THE CHOICE COMES BACK ONLY IF NO PALETTE WAS PICKED SINCE, BY THE GESTURE AND NOT BY THE VALUE: one the
+              // removal did not change needs nothing, and one the user picked while the offer stood is theirs — the
+              // removal's own result, picked back, included.
+              const choice = palettePicks === picks ? before : paletteChoice
+              // A REFUSED UNDO IS SAID AS A REFUSED IMPORT IS, BUT ONLY OVER A REMOVAL THAT WAS SAVED: over one that
+              // was not, the store never lost the half, and a reload already brings back what the undo put back.
+              if (!commitCustom(withHalf(custom, variant, half), choice) && saved) {
+                notices.notify('the undo could not be saved; the palette goes again when the page is reloaded')
+              }
+            },
+          },
+        },
+      )
+    },
+  })
+  document.body.append(base16.el)
+  importButton.addEventListener('click', () => {
+    settingsMenu.hidePopover()
+    base16.open()
   })
 
   // THE ONE PLACE THE APP CAN FAIL TO START. `init()` fetches the wasm; a worker constructed against
