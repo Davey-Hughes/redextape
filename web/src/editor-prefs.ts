@@ -29,19 +29,25 @@ export const DEFAULT_FORMAT_ON_BLUR = false
  * **EVERY ACCESS IS WRAPPED, FOR `appearance.ts`'s REASON.** `localStorage` throws on access in a
  * private window and under blocked site data, and a preference read must never be what stops the app
  * starting.
+ *
+ * **"ACCESS" INCLUDES READING THE NAME `localStorage`, SO IT IS READ INSIDE THE `try`.** Where site data
+ * is blocked, the getter itself throws a `SecurityError` before any method is reached. This took the
+ * store as `store: Storage = localStorage`, and a default parameter is evaluated at the call, before the
+ * body and its `try` begin: `main()` rejected at this read and the app never started. `store` stays for
+ * the tests, which hand in a store of their own.
  */
-export function readFormatOnBlur(store: Storage = localStorage): boolean {
+export function readFormatOnBlur(store?: Storage): boolean {
   try {
-    return store.getItem(FORMAT_ON_BLUR_KEY) === 'true'
+    return (store ?? localStorage).getItem(FORMAT_ON_BLUR_KEY) === 'true'
   } catch {
     return DEFAULT_FORMAT_ON_BLUR
   }
 }
 
-/** Store the preference, or do nothing if storage refuses. */
-export function writeFormatOnBlur(on: boolean, store: Storage = localStorage): void {
+/** Store the preference, or do nothing if storage refuses — its getter included, as `readFormatOnBlur` says. */
+export function writeFormatOnBlur(on: boolean, store?: Storage): void {
   try {
-    store.setItem(FORMAT_ON_BLUR_KEY, String(on))
+    ;(store ?? localStorage).setItem(FORMAT_ON_BLUR_KEY, String(on))
   } catch {
     // A preference that cannot be remembered is still a preference for this page.
   }
@@ -112,24 +118,25 @@ export function parseKeymapMode(value: string): KeymapMode {
  * a previous version of this app, or the user's own devtools, last put there; `as KeymapMode` would
  * hand a typo straight to the compartment, which would install nothing and leave the control claiming
  * a mode no editor is in. The wrapping is `readFormatOnBlur`'s, for `appearance.ts`'s reason: storage
- * throws on access in a private window and under blocked site data.
+ * throws on access in a private window and under blocked site data, and the getter is read inside the
+ * `try` for `readFormatOnBlur`'s reason.
  *
  * **THE NARROWING IS `parseKeymapMode`'s AND NOT A SECOND `=== 'vim'` HERE**, which is what that
  * function's own doc had always claimed. A missing key reads as `null`, and `''` is in no mode's name,
  * so an absent preference takes the same fallback an unrecognised one does.
  */
-export function readKeymap(store: Storage = localStorage): KeymapMode {
+export function readKeymap(store?: Storage): KeymapMode {
   try {
-    return parseKeymapMode(store.getItem(KEYMAP_KEY) ?? '')
+    return parseKeymapMode((store ?? localStorage).getItem(KEYMAP_KEY) ?? '')
   } catch {
     return DEFAULT_KEYMAP
   }
 }
 
-/** Store the keymap, or do nothing if storage refuses. */
-export function writeKeymap(mode: KeymapMode, store: Storage = localStorage): void {
+/** Store the keymap, or do nothing if storage refuses — its getter included, as `readFormatOnBlur` says. */
+export function writeKeymap(mode: KeymapMode, store?: Storage): void {
   try {
-    store.setItem(KEYMAP_KEY, mode)
+    ;(store ?? localStorage).setItem(KEYMAP_KEY, mode)
   } catch {
     // A preference that cannot be remembered is still a preference for this page.
   }

@@ -57,6 +57,34 @@ describe('the pre-paint script', () => {
     expect(() => run({}, true)).not.toThrow()
   })
 
+  /**
+   * **WHERE READING `localStorage` ITSELF THROWS**, as Chrome's does when this site's data is blocked. The
+   * case above hands the script a store whose `getItem` throws, and a read of the name outside every `try`
+   * would still pass it. Here the script finds `localStorage` where the page's own script does, as a
+   * global, and the global's getter refuses.
+   */
+  it('does not throw when reading storage itself does', () => {
+    const saved = Object.getOwnPropertyDescriptor(globalThis, 'localStorage')
+    let reached = 0
+    Object.defineProperty(globalThis, 'localStorage', {
+      get: () => {
+        reached += 1
+        throw new DOMException('Access is denied for this document.', 'SecurityError')
+      },
+      configurable: true,
+    })
+    try {
+      const attrs = new Map<string, string>()
+      const documentElement = { setAttribute: (k: string, v: string) => attrs.set(k, v) }
+      expect(() => new Function('document', script)({ documentElement })).not.toThrow()
+      expect(reached, 'precondition: the script never read the global').toBeGreaterThan(0)
+      expect(attrs.size).toBe(0)
+    } finally {
+      if (saved === undefined) Reflect.deleteProperty(globalThis, 'localStorage')
+      else Object.defineProperty(globalThis, 'localStorage', saved)
+    }
+  })
+
   // The script cannot import, so it carries its own copies. These hold each copy to its source.
   it('carries the keys, the style ids and the cache pattern that skin.ts and palettes.ts define', () => {
     expect(script).toContain(`'${STYLE_KEY}'`)

@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import {
   DEFAULT_FORMAT_ON_BLUR,
   DEFAULT_KEYMAP,
@@ -130,5 +130,69 @@ describe('the keymap, stored', () => {
     expect(() => readKeymap(hostileStorage())).not.toThrow()
     expect(readKeymap(hostileStorage())).toBe(DEFAULT_KEYMAP)
     expect(() => writeKeymap('vim', hostileStorage())).not.toThrow()
+  })
+})
+
+/**
+ * **WHERE READING `localStorage` ITSELF THROWS**, which is what Chrome does when this site's data is
+ * blocked: the getter refuses before any method can. `hostileStorage` above cannot stand for that. It is
+ * handed in as an argument, so a default that read the global is never evaluated, and its methods throw
+ * only inside the `try`. These call each function the way the app does, with no store, so the global is
+ * the one read.
+ *
+ * **THE GLOBAL IS REPLACED AND PUT BACK, NOT STUBBED WITH A VALUE.** A value cannot throw on read; only a
+ * getter can, and Node has its own accessor for `localStorage` that this file must hand back unchanged.
+ */
+describe('the global store, when reading it throws', () => {
+  let saved: PropertyDescriptor | undefined
+  let reached = 0
+
+  const install = (get: () => Storage): void => {
+    Object.defineProperty(globalThis, 'localStorage', { get, configurable: true })
+  }
+
+  beforeEach(() => {
+    saved = Object.getOwnPropertyDescriptor(globalThis, 'localStorage')
+    reached = 0
+    install(() => {
+      reached += 1
+      throw new DOMException('Access is denied for this document.', 'SecurityError')
+    })
+  })
+
+  afterEach(() => {
+    if (saved === undefined) Reflect.deleteProperty(globalThis, 'localStorage')
+    else Object.defineProperty(globalThis, 'localStorage', saved)
+  })
+
+  it('reads format on blur as its default', () => {
+    expect(readFormatOnBlur()).toBe(DEFAULT_FORMAT_ON_BLUR)
+    expect(reached, 'precondition: the call never read the global').toBe(1)
+  })
+
+  it('writes format on blur without a throw', () => {
+    expect(() => writeFormatOnBlur(true)).not.toThrow()
+    expect(reached, 'precondition: the call never read the global').toBe(1)
+  })
+
+  it('reads the keymap as its default', () => {
+    expect(readKeymap()).toBe(DEFAULT_KEYMAP)
+    expect(reached, 'precondition: the call never read the global').toBe(1)
+  })
+
+  it('writes the keymap without a throw', () => {
+    expect(() => writeKeymap('vim')).not.toThrow()
+    expect(reached, 'precondition: the call never read the global').toBe(1)
+  })
+
+  it('still reads and writes the global store when it answers', () => {
+    const store = memoryStorage({ [FORMAT_ON_BLUR_KEY]: 'true', [KEYMAP_KEY]: 'vim' })
+    install(() => store)
+    expect(readFormatOnBlur()).toBe(true)
+    expect(readKeymap()).toBe('vim')
+    writeFormatOnBlur(false)
+    writeKeymap('default')
+    expect(store.getItem(FORMAT_ON_BLUR_KEY)).toBe('false')
+    expect(store.getItem(KEYMAP_KEY)).toBe('default')
   })
 })

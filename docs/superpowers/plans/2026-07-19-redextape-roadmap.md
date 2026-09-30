@@ -22164,3 +22164,140 @@ first rebase's own note, `eda0fb3`, is `ed9f856`; the scratch logs keep the name
 over a base without #114's and #116's changes; the rebased commits carry the same change over a base with them, and
 CI re-runs every gate on them. `fb1067d`'s `lambda-body.ts`, which the comparisons above name, is `main`'s as it
 stood before this branch, and neither #114 nor #116 changed it.
+
+#### THE APP STARTS WHERE THIS SITE'S DATA IS BLOCKED: FOUR OF THE FIFTEEN READS OF `localStorage` WERE DEFAULT PARAMETERS, EVALUATED BEFORE THEIR FUNCTIONS' `try` (2026-09-29, branch `blocked-storage-start`, `e2a3a93..a4a42f7`, 2 commits, plus this entry's first version, `9364207`, and this revision)
+
+**A fix, in `web/` only, to a bug on `main`.** Another lane's probe found it and left it for its own PR.
+
+##### THE BUG
+
+- **Where a browser blocks this site's data, reading `window.localStorage` itself throws a `SecurityError`.** This happens in Chrome with site data blocked and in some privacy modes, before any `getItem` or `setItem` is reached.
+- **`editor-prefs.ts` took its store as a default parameter.** `readFormatOnBlur`, `writeFormatOnBlur`, `readKeymap` and `writeKeymap` each had `store: Storage = localStorage`, and a default parameter is evaluated at the call, before the body and its `try` begin. Each body's `try` covered a store whose methods throw, which the node tests held, and not a getter that throws.
+- **So `main()` rejected at its first preference read.** `ready` rejected and the app never started. A stack recorded at the getter showed two calls: `readAppearanceStorage`, whose `try` caught its throw, and then `readFormatOnBlur`, from `main.ts`, whose throw escaped. Had the app started, the two writers would have thrown out of the keymap and format-on-blur controls' `change` handlers the same way, the keymap's before any editor was switched. Two of the sabotages below show both.
+
+##### THE SWEEP
+
+Every reference to `localStorage` or `sessionStorage` in `web/src` was listed by the compiler, not by a grep for the names. `@typescript/typescript-linux-x64`'s `lib/` directory, which holds both `tsc` and the `lib.*.d.ts` files it loads, was copied to scratch. In that copy's `lib.dom.d.ts` the declarations of `localStorage`, `sessionStorage`, `indexedDB`, `caches`, `cookieStore`, `Document.cookie` and `Navigator.storage` were deleted, and `Storage` was renamed. The copied `tsc` was then run over every file in `web/src`, with `@types/node` left out, since it declares `localStorage` and `sessionStorage` too:
+
+```
+T=web/node_modules/.pnpm/@typescript+typescript-linux-x64@7.0.2/node_modules/@typescript/typescript-linux-x64/lib
+cp -r "$T" <scratch>/tslib
+sed -i -E -e '/^\s*readonly (localStorage|sessionStorage|indexedDB|caches|cookieStore): /d' \
+  -e '/^declare var (localStorage|sessionStorage|indexedDB|caches|cookieStore): /d' \
+  -e '/^    cookie: string;$/d' -e '/^    readonly storage: StorageManager;$/d' \
+  -e 's/\bStorage\b/StorageREMOVED/g' <scratch>/tslib/lib.dom.d.ts
+cd web && <scratch>/tslib/tsc --ignoreConfig --noEmit --pretty false --target ES2023 --lib ES2023,DOM,DOM.Iterable \
+  --module ESNext --moduleResolution bundler --types vite/client --strict --noUncheckedIndexedAccess \
+  --exactOptionalPropertyTypes --verbatimModuleSyntax --isolatedModules --skipLibCheck src/**/*.ts    # zsh's **
+```
+
+The same command with the unmodified `$T/tsc` exits 0 with no output, so every error the modified one reports is a reference to a deleted or renamed declaration. It reports 16. Four are `Storage` in a parameter's type in `editor-prefs.ts`, which is a type and not a read. The other 12 are reads of `localStorage`. Nothing in `web/src` names `sessionStorage`, `indexedDB`, `caches`, `cookieStore`, `document.cookie` or `navigator.storage`.
+
+A grep for the ways the compiler could miss a read, `grep -nE 'as any|: any\b|<any>|as unknown as|globalThis\[|window\[|self\[|Reflect\.(get|has)|getOwnPropertyDescriptor' web/src/**/*.ts`, gives 25 lines. Seventeen are `as unknown as` casts to `EditablePane`, `TmPane`, `AsmPane`, `WorkerScope` or `LegState`, and eight are comments where `as any` matches prose ("has any"). None touches storage. `web/index.html` is the only tracked HTML file (`git ls-files | grep '\.html$'`). Its inline pre-paint script reads `localStorage` three times (`grep -n 'Storage' web/index.html`, lines 29, 33 and 35), each inside a `try`.
+
+**The built app, its dependencies included.** `pnpm run build:app`, at `9364207`, writes four scripts to `web/dist/assets/`: the main bundle `index-Dnz4FsKT.js`, the two workers and `__vite-browser-external`. A grep of the four for `localStorage`, `sessionStorage`, `indexedDB`, `document.cookie`, `navigator.storage`, `serviceWorker` and `BroadcastChannel` counts 12 `localStorage` in the main bundle and 0 of every other name in every file. Each of the 12 sits in one of the 12 accessors above, inside a `try`, so no bundled dependency touches storage.
+
+| Read | In | At `e2a3a93` | At `a4a42f7` |
+|---|---|---|---|
+| `editor-prefs.ts:33`, then `:41` | `readFormatOnBlur`, default parameter | **unguarded** | guarded |
+| `editor-prefs.ts:42`, then `:50` | `writeFormatOnBlur`, default parameter | **unguarded** | guarded |
+| `editor-prefs.ts:121`, then `:130` | `readKeymap`, default parameter | **unguarded** | guarded |
+| `editor-prefs.ts:130`, then `:139` | `writeKeymap`, default parameter | **unguarded** | guarded |
+| `main.ts:253`, `:260` | `readAppearanceStorage`, `writeAppearanceStorage` | guarded | unchanged |
+| `main.ts:359`, `:366` | `readSkinStorage`, `writeSkinStorage` | guarded | unchanged |
+| `main.ts:838`, `:845` | `readLayoutStorage`, `writeLayoutStorage` | guarded | unchanged |
+| `main.ts:856`, `:927` | `readBuffersStorage`, `writeBuffersStorage` | guarded | unchanged |
+| `index.html:29`, `:33`, `:35` | the pre-paint script | guarded | unchanged |
+
+"Guarded" means the name `localStorage` is read inside a `try` that catches what its getter throws. Four call sites reach storage only through `editor-prefs.ts`'s four functions: `main.ts`'s `readFormatOnBlur()` and `writeFormatOnBlur(formatOnBlur)`, and `editor-keymap.ts`'s `KeymapSetting` constructor, whose `mode` defaults to `readKeymap()`, and its `set`, which calls `writeKeymap(mode)`. None reads the global itself, which is why the compiler does not list them, and each is covered by the guard inside the function it calls.
+
+##### THE FIX
+
+- **Each of the four functions takes `store?: Storage` and reads `(store ?? localStorage)` inside its `try`.** A refused read returns the default and a refused write does nothing, as before. The `store` parameter stays because the node tests hand in stores of their own.
+- **No shared helper.** `main.ts`'s eight accessors were already guarded. Each is a closure beside its own documented policy: the appearance, skin and layout writers swallow a refusal, and the buffers writer reports it. A helper would have to take that policy as an argument, and those eight closures would change with no change in behaviour. The four functions in `editor-prefs.ts` already had their `try`. Only the getter was in the wrong place, and moving it inside is the smallest change in that file's own idiom. Where a write fails, the existing report applies unchanged: `writeBuffersStorage` still puts "copies are not being saved" on the notice line.
+
+##### THE TESTS
+
+- **`storage-blocked.test.ts` (new, 6 cases).** At module scope, before its one mount, it replaces `setup.ts`'s shim with `localStorage` and `sessionStorage` getters that throw a `DOMException` named `SecurityError`, and it records every window `error` and `unhandledrejection`. The record is emptied after each case, so each case fails for its own gesture. The cases, all with real keys and clicks:
+  - the app starts, the getter was reached, and the result strip is on screen and shows `42`;
+  - an edit typed with `userEvent.keyboard` compiles to `43`;
+  - the keymap select switches the source editor into vim and back;
+  - the style and appearance selects put `paper` and `dark` on `<html>` and change `<body>`'s computed background;
+  - format on blur is turned on and formats the program when the focus leaves;
+  - forking the λ view says "copies are not being saved…" in the live region.
+
+  Every settings case also asserts that its choice reached the getter. A probe that recorded the calling function at each getter call showed the file reaching all 12 `localStorage` reads in `web/src`.
+- **`editor-prefs.test.ts`, 10 → 15 cases.** Four cases call each function with no store under a throwing global getter, and assert that it was reached once. A fifth holds the global store's use when it answers.
+- **`prepaint.test.ts`, 6 → 7 cases.** The script's existing "does not throw when storage does" case hands it a store whose `getItem` throws, so a read of the name outside every `try` would still pass it. The new case runs the script against a throwing global getter.
+- **Red on `e2a3a93`.** The browser file, with `main`'s `editor-prefs.ts` swapped in: the file fails with `SecurityError: Access is denied for this document.` and all 6 cases skipped. The node file: 4 failed, 11 passed. The pre-paint case passes on `main`, whose script was already guarded, and is held by its sabotage below.
+- **Twelve sabotages, replayed at `a4a42f7`, each over the whole test file.** Each was restored from a saved copy and checked with `cmp`. All fired:
+
+| Sabotage | Failed |
+|---|---|
+| `readFormatOnBlur`'s default parameter put back | browser: the file, `SecurityError` at start-up, 6 skipped |
+| `readKeymap`'s put back | browser: the same |
+| `writeKeymap`'s put back | browser: the keymap case, "the source editor did not take vim" |
+| `writeFormatOnBlur`'s put back | browser: the format-on-blur case, on its error record (the checkbox and the formatting still worked) |
+| `main.ts`'s `readLayoutStorage` reads `localStorage` before its `try` | browser: the file, `SecurityError` at start-up, 6 skipped |
+| `main.ts`'s `writeAppearanceStorage` the same | browser: the style-and-appearance case, on its error record (2 errors) |
+| each of the four defaults put back, one at a time | node: that function's own getter case, 1 failed and 14 passed each time |
+| `readKeymap` reads `sessionStorage` instead | node: "reads the keymap as its default" (reached 0 times) and "still reads and writes the global store when it answers" |
+| `index.html`'s first block reads `localStorage` before its `try` | node: the new pre-paint case; the old "does not throw when storage does" passed |
+
+##### IN A REAL CHROMIUM WITH SITE DATA BLOCKED
+
+An independent review of `e2a3a93..9364207` wrote a script, `realchrome.mjs` (scratch, not tracked), and it was re-run here against `web/dist` built at `9364207`, whose `web/` is `a4a42f7`'s. It launches Playwright's Chromium, revision 1234 (151.0.7922.34), with `launchPersistentContext` and `channel: 'chromium'`. With `block`, it first writes the profile preference `default_content_setting_values.cookies: 2`, which blocks cookies and site data by default. The headless shell, which Playwright launches without `channel: 'chromium'`, ignores that preference: a copy of the script without `channel`, run here with `block` against the same build, found both getters readable. Each build was served by `python3 -m http.server`. The script reports what reading each storage property does, whether `#results` reaches `idle` showing `42` within 20 s, whether picking vim in the keymap select puts `cm-vimMode` on the editor, and every page error and console error.
+
+| Build | Site data | `localStorage` and `sessionStorage` | Started, `42` | vim | Page errors |
+|---|---|---|---|---|---|
+| `a4a42f7` | allowed | readable | yes | yes | none |
+| `a4a42f7` | blocked | both throw `SecurityError: Failed to read the 'localStorage' property from 'Window': Access is denied for this document.` (and the same for `'sessionStorage'`) | yes | yes | none |
+| the same build, `readFormatOnBlur(e)` edited back to `readFormatOnBlur(e=localStorage)` in the minified bundle | allowed | readable | yes | yes | none |
+| the same edited build | blocked | both throw, as above | **no**, `#results` empty | not reached | `SecurityError: Failed to read the 'localStorage' property from 'Window': Access is denied for this document.` |
+
+Every run also logged one console error, the server's 404 for `/favicon.ico`. `indexedDB`, `caches` and `document.cookie` stayed readable under the block.
+
+##### WHAT THIS DID NOT CLOSE
+
+- **The copies report says "full" for a blocked store.** On `main`, `reportStorageFailure` names a full store whatever the write's refusal was. The new case matches the sentence by its start for that reason. Part 6a's branch, not merged, adds a `blocked` cause.
+- **The real-Chromium check is a script, not a test.** It drove start-up, the first compile and the keymap only, and nothing re-runs it. The suite's browser tests imitate the blocked getter.
+- **Nothing stops a new unguarded read.** The browser file catches one on the paths it drives, which today reach all 12 reads. A read added on another gesture's path, or in a module the page does not load at start-up, would pass it. The sweep above is a command to re-run, not a gate.
+- **Vitest's browser mode never runs `index.html`.** The pre-paint script is held by the node test alone.
+
+##### VERIFICATION
+
+Run on 2026-09-29 at `a4a42f7`, from `web/`, in a worktree set up with `pnpm install --frozen-lockfile`. `pkg/` and `pkg-lsp/` there were built after `18f8225`, and no commit since has touched `crates/`, `Cargo.toml` or `Cargo.lock` (`git log --oneline 18f8225..e2a3a93 -- crates Cargo.toml Cargo.lock` is empty). The coverage gate ran under `flock <the lanes' browser lock> systemd-run --user --wait --collect --pipe -p MemoryMax=16G -p MemorySwapMax=0`, with `PATH`, `HOME`, `CARGO_HOME` and `RUSTUP_HOME` passed through. It was not OOM-killed, so the run with `VITEST_MAX_WORKERS=4` was not needed.
+
+```
+pnpm exec biome ci --error-on-warnings  → exit 0, 283 files (1 info, biome.json's deprecated `recommended`)
+pnpm run typecheck                      → exit 0
+pnpm run test:coverage                  → exit 0, 176 files / 1,629 tests; 97.13 / 90.77 / 97.98 / 98.63 against 95 / 89 / 97 / 97; editor-prefs.ts 100 / 100 / 100 / 100; peak 7.4 GiB
+pnpm run build:app                      → exit 0
+scripts/check-{text-bytes,citations,attributions,doc-figures,shared-docs,lua,colours}.sh, --self-test then alone, from the root → 14 of 14 exit 0
+```
+
+**For this revision**, which changes only this entry, every command in the table below was run again at `9364207` with the revision uncommitted, and `web/` there is `a4a42f7`'s. Each gave the figure the table quotes. The gates above gave the same results: Biome 283 files and 1 info, typecheck, coverage with 176 files, 1,629 tests, the same four percentages and a 7.4 GiB peak, `build:app`, and 14 of 14 hygiene runs, all exit 0.
+
+The Rust gates, `check-slow.sh` and the Docker image were not run, because the diff touches no Rust and adds no build output the web app imports.
+
+**Every count this entry quotes, with what produces it:**
+
+| Value | What | Produced by |
+|---|---|---|
+| 2; +18/−11, +177/−0, +65/−1, +28/−0 | commits in the range; `editor-prefs.ts`, `storage-blocked.test.ts`, `editor-prefs.test.ts`, `prepaint.test.ts` | `git rev-list --count e2a3a93..a4a42f7`; `git diff --numstat e2a3a93..a4a42f7 -- web` |
+| 16; 4; 12; the sweep table's `web/src` rows | the sweep's errors; `Storage` types; `localStorage` reads; their lines | the sweep's command above, at `e2a3a93` and at `a4a42f7`; the unmodified `tsc` exits 0 on both |
+| 25; 17; 8 | the escape-hatch grep's lines; its `as unknown as` lines; the rest | the grep above; `grep -nE 'as unknown as' web/src/**/*.ts \| wc -l` |
+| 15 = 12 + 3 | the heading's reads of `localStorage`: in `web/src`, and in `index.html` | the two rows below it |
+| 3; lines 29, 33, 35 | the pre-paint script's reads | `grep -n 'Storage' web/index.html` (line 24 is a comment); `git ls-files \| grep '\.html$'` lists `web/index.html` alone |
+| four | the call sites that reach storage only through `editor-prefs.ts` | `grep -nE '\b(read\|write)(FormatOnBlur\|Keymap)\(' web/src/**/*.ts \| grep -v 'export function'`: `editor-keymap.ts` 113 and 149, `main.ts` 271 and 308 |
+| four; 12, 0 | scripts in `web/dist/assets/`; `localStorage` in the main bundle, and every other name in every file | `pnpm run build:app` at `9364207`; `ls web/dist/assets/*.js`; then for each of `localStorage sessionStorage indexedDB document.cookie navigator.storage serviceWorker BroadcastChannel` and each `web/dist/assets/*.js`, `grep -o <name> <file> \| wc -l`; each `localStorage`'s context printed with 70 characters before it |
+| the real-Chromium table; 1234, 151.0.7922.34 | the four runs; the Chromium revision and version | `flock <lock> zsh -c '<two python3 -m http.server, one over web/dist and one over the edited copy>; node realchrome.mjs <url> <profile> allow\|block'` for each row (`real/real-chrome.log`, scratch); the version from Playwright 1.62.1's `playwright-core/browsers.json` |
+| both getters readable | the headless shell under the block | the same with `channel` removed from a copy of the script (`real/real-chrome-shell.log`, scratch) |
+| two calls, `readAppearanceStorage` then `readFormatOnBlur` | the getter's calls before `main()` rejected on `main` | a probe recording `new Error().stack` at each getter call in `storage-blocked.test.ts`, then removed (`red-browser-stack.log`, and `red-browser-stack2.log` for this revision, scratch) |
+| all 12 | reads the browser file reaches | a probe recording each getter call's calling function, then removed; it listed the 12 accessors in the table (`probe-callers.log`, and `probe-callers2.log` for this revision, scratch) |
+| 6; 10 → 15; 6 → 7 | cases in the new file, `editor-prefs.test.ts` and `prepaint.test.ts` | `grep -cE '^\s*it\(' <file>`, at `e2a3a93` and `a4a42f7` |
+| 6 skipped; 4 failed, 11 passed | the red runs | `pnpm exec vitest run --project browser tests/browser/storage-blocked.test.ts` and `pnpm exec vitest run --project node tests/node/editor-prefs.test.ts`, each with `git show e2a3a93:web/src/editor-prefs.ts` in place of `a4a42f7`'s (`sab-final-red-browser.log`, `sab-final-red-node.log`, and `sab-red2-*.log` for this revision, scratch) |
+| twelve; 2 errors; 1 failed and 14 passed | the sabotages and their results | a replay script (scratch, not tracked) applying each and running the whole file: `pnpm exec vitest run --project browser tests/browser/storage-blocked.test.ts` under the lock, or `--project node` over `tests/node/editor-prefs.test.ts` or `tests/node/prepaint.test.ts` (`replay.log`, and `replay2.log` for this revision, with `sab-r-*.log`) |
+| 283 files, 1 info | Biome | the block above |
+| 176 files, 1,629 tests; 97.13, 90.77, 97.98, 98.63; 95, 89, 97, 97; 100 ×4; 7.4 GiB | the coverage run; statements, branches, functions and lines; the floors; `editor-prefs.ts`; its peak | the block above; `vite.config.ts`'s `thresholds`; `systemd-run`'s `Memory peak` |
+| 14 of 14 | the hygiene scripts | the block above |
