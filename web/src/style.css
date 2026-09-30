@@ -12,10 +12,9 @@
    THE STYLE IS THIS FILE. The non-colour tokens here are Instrument's; the `[data-style]` blocks below
    override them for Paper and Terminal. A style never sets a colour and a palette never sets a font. */
 :root {
-  /* Not just a UA-drawn-widget hint anymore — the encoding `<select>` is the widget
-     `prefers-color-scheme` cannot reach inside, and
-     this is still what keeps a dark page from getting a light dropdown, but every token below now
-     resolves AGAINST this property via
+  /* Not just a UA-drawn-widget hint anymore. It is still what the browser draws its own parts by,
+     scrollbars and the highlighted row of a select's open list among them (the list's other rows take
+     the palette, the option rule below), but every token below now resolves AGAINST this property via
      `light-dark()`. It is the one switch: `system` (this default, tracking the OS), an explicit
      `:root[data-theme="light"]`, or `:root[data-theme="dark"]` below all just set `color-scheme`
      and every `light-dark()` value follows without a second copy of the palette. */
@@ -35,6 +34,15 @@
   --space-1: 0.25rem;
   --space-2: 0.5rem;
   --space-3: 1rem;
+
+  /* THE BODY'S LINE HEIGHT AND THE HEADER CONTROLS' BOX, ONE COPY EACH. `body`'s `font` reads `--leading`
+     and the header's buttons inherit `body`'s line height; they and the header's selects take their block
+     padding and border from the two below. A select's height is built from all three, because Chrome holds
+     a select's own `line-height` at `normal` — the font's, which differs from machine to machine for Paper's
+     and Terminal's system fonts. */
+  --leading: 1.5;
+  --control-pad-block: 0.15em;
+  --control-border: 1px;
 
   /* palette:fallback:begin */
   --bg: light-dark(#e9edf2, #101820);
@@ -144,7 +152,7 @@ body {
   margin: 0;
   background: var(--bg);
   color: var(--fg);
-  font: var(--step-0) / 1.5 var(--font-ui);
+  font: var(--step-0) / var(--leading) var(--font-ui);
   display: flex;
   flex-direction: column;
   min-height: 100vh;
@@ -172,6 +180,38 @@ body {
   align-items: center;
   gap: var(--space-2);
 }
+/* THE HEADER'S SELECTS: `#encoding` and the settings menu's four, in the header buttons' chrome. No rule
+   reached them before, so each drew in the browser's Arial at 13.33px on its own grey field, the same in
+   every style and palette. The native arrow stays (`appearance: auto`), as it does on `.speed`. `color` is
+   `--fg` and not inherited, because the label around each one is dim.
+
+   `block-size` IS THE BUTTONS' HEIGHT, BUILT FROM THEIR OWN NUMBERS: a button's line is `--leading` of its
+   font size, and a select's is the font's `normal`, which Chrome holds it to. Left to that, a select stood
+   0.5px short of the buttons in Paper and Terminal and 1.5px in Instrument with Noto, and those two 2.5px
+   short with DejaVu.
+   The universal `* { box-sizing: border-box }` rule makes the select `border-box`, so the height counts the
+   padding and the border. */
+.encoding select,
+.skin select {
+  font: inherit;
+  block-size: calc(var(--leading) * 1em + 2 * (var(--control-pad-block) + var(--control-border)));
+  padding: var(--control-pad-block) 0.6em;
+  border-radius: var(--radius);
+  border: var(--control-border) solid var(--fg-dim);
+  background: transparent;
+  color: var(--fg);
+}
+/* **EVERY SELECT'S OPEN LIST, IN THE PALETTE — ITS OWN RULE, OR A TRANSPARENT SELECT OPENS A WHITE ONE.**
+   Chrome paints the list in the select's own background, and a transparent select's came out WHITE, dark
+   mode or not, so the palette's light text sat on white; `.speed`'s did before this rule. Seen in Chromium
+   151, the build the browser tests run. Each option carries the page's own pair instead — `color` too,
+   though each select passes `--fg` down today, so the pair holds whatever a select wears. The highlighted
+   row's colour stays the browser's. `select option`, not a list of classes, so a select added later is
+   covered without anyone remembering this rule. */
+select option {
+  background-color: var(--bg);
+  color: var(--fg);
+}
 
 .bar-spacer {
   flex: 1 1 auto;
@@ -187,9 +227,9 @@ body {
   align-items: center;
   gap: 0.35em;
   font: inherit;
-  padding: 0.15em 0.6em;
+  padding: var(--control-pad-block) 0.6em;
   border-radius: var(--radius);
-  border: 1px solid var(--fg-dim);
+  border: var(--control-border) solid var(--fg-dim);
   background: transparent;
   color: inherit;
   cursor: pointer;

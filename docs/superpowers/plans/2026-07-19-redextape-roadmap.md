@@ -21745,3 +21745,209 @@ replaces. The commits map `63fd7c7` → `24d68a7`, `11ce751` → `5dddfc6`, `29a
 `e12402f` → `a3b7c8b` and `a4d31af` → `d1d7218`. Every figure above was measured before the rebase, on the commits
 left of each arrow, over a base without #113's change; the rebased commits carry the same change over a base with
 it, and CI re-runs every gate on them. The comparisons against `18f8225`'s files stand as written.
+
+#### THE HEADER'S FIVE SELECTS WEAR THE HEADER BUTTONS' CHROME AND HEIGHT, AND EVERY SELECT'S OPEN LIST IS IN THE PALETTE — WHICH ALSO FIXES THE STEP CONTROLS' SPEED LIST, WHITE WITH NEAR-INVISIBLE ROWS IN DARK MODE ON `main`; A REVIEW FOUND THE SELECTS' HEIGHT FOLLOWED THE MACHINE'S FONTS (2026-09-29, branch `header-select-styling`, `fb1067d..345f01e`, 9 commits, four of them this entry's earlier versions, plus this revision)
+
+**A follow-up the part 5c entry named and left.** One of its WHAT THIS DID NOT CLOSE bullets says, at line 21334
+of this file: "the header's encoding dropdown is a native `<select>`, unstyled like the new-copy buttons were before
+U4 styled them". It was five selects, not one: `#encoding` in the header and the settings menu's `#style`,
+`#palette`, `#appearance-choice` and `#keymap`. They are one class, reached by one rule, so all five are closed
+here. The code diff is `web/src/style.css` and one new browser test file; `main.ts`, `app-header.ts`, `index.html`,
+the test harness and every existing test are unchanged.
+
+**The user's decisions:** that the selects be transparent, like the header buttons, with each option carrying
+`--bg` and `--fg` (chosen over the design as first approved, for the reason under THE DESIGN CHANGED BEFORE ANY
+CODE); that the step controls' `.speed` select join the option rule in this PR, since its open list had the same
+defect on `main`; and, after the review, that the selects' height be fixed in CSS.
+
+##### WHAT THIS DID
+
+- **Before, measured in the browser the tests run** (Chromium 151.0.7922.34, headless): no rule reached any of the
+  five. Each drew in the browser's Arial at 13.3333px, 19px tall, with the browser's field colour
+  (`rgb(239, 239, 239)` light, `rgb(107, 107, 107)` dark), a 1px grey border and no radius — the same in all three
+  styles and every palette; only light and dark changed them, through `color-scheme`. The header buttons beside
+  them are 15px, 29px tall, in the style's font and radius with a `--fg-dim` border. The four settings selects
+  compute the same style whether the menu is open or shut; shut, their boxes are 0×0.
+- **`.encoding select, .skin select`**, placed after the `.encoding, .skin` label rule: `font: inherit`, the
+  buttons' padding, `var(--radius)`, their `--fg-dim` border, a transparent background and `color: var(--fg)`,
+  since the label around each is dim. `appearance` stays `auto`, so the native arrow stays, as it does on
+  `.speed`.
+- **The height is the buttons', built from their own numbers.** Chrome holds a select's `line-height` at
+  `normal`, the font's own, where a button's line is 1.5 of its font size. `:root` now holds `--leading: 1.5`,
+  `--control-pad-block: 0.15em` and `--control-border: 1px`, one copy each; `body`'s `font`, the header buttons'
+  padding and border, and the selects' all read them, and the selects' `block-size` is
+  `calc(var(--leading) * 1em + 2 * (var(--control-pad-block) + var(--control-border)))`, which counts the padding
+  and the border because the universal `* { box-sizing: border-box }` rule makes the select `border-box`. The
+  header buttons' selector list is untouched; two of their declarations now read the tokens.
+- **`select option`** carries `background-color: var(--bg)` and `color: var(--fg)`. It reaches every select on the
+  page: today those are the header's five and a view's `.speed`, whose open list on `main` is white with the
+  palette's light text in dark mode. `web/` creates no other select (the searches are in the table below).
+- **The `:root` comment on `color-scheme`** no longer says it is what keeps a dark page from getting a light
+  dropdown. It still sets what the browser draws itself, the highlighted row of an open list among them.
+- **`header-selects.test.ts`**, 12 tests, in each style in light and in dark, driven through the settings menu's own
+  `#style` and `#appearance-choice` with `userEvent`. The first holds each of the five to `#buffers`' computed
+  font-family, font-size, four paddings, all four borders' width, style and colour, border-radius and background,
+  to `<body>`'s `--fg` as its text colour, and to `#buffers`' height EXACTLY; and `#encoding`'s vertical centre to
+  within 1px of `#buffers`'. `#buffers` is the reference because it stands next to `#encoding` and every header
+  button shares its one rule. The second walks `document.querySelectorAll('select')` and holds every option of
+  every select it finds to `<body>`'s background and colour; it asserts computed style, not paint, and its title no
+  longer says "drawn". Preconditions asserted: the settings menu open; each select laid out; the label's colour
+  differing from `--fg`; the walk finding the header's five and more than five in all; a view's `.speed` present
+  and laid out; and every select holding more than one option.
+
+##### THE DESIGN CHANGED BEFORE ANY CODE
+
+The approved design set the chrome and `color: var(--fg)` and no background. Looked at in a headed Chromium
+151.0.7922.34 on X11 (a private rootful Xwayland inside `kwin_wayland --virtual`, so the native list is a window a
+root capture sees), two things were wrong, and nothing was committed until the user chose:
+
+- **Without a background,** a bordered select paints the browser's field: in dark mode a `#6b6b6b` block, and an
+  open list the same grey. `--fg` on it measured 4.33 (Paper), 3.79 (Terminal) and 4.21 (Instrument) to 1, each
+  under the 4.5 floor `palettes.test.ts` holds `--fg` to on every surface; the browser's own white on it measured
+  5.33. The design would have made dark mode worse.
+- **With `background: transparent`,** as the header buttons and `.speed` have, the closed select matched — but
+  Chrome takes an open list's background from the select's, and a transparent one came out white in dark mode,
+  with every row but the highlighted one near-invisible. `.speed` on `main` shows exactly that.
+- **`var(--bg-chrome)` as the background** fixed both in the header but showed, in light mode, as a tinted box
+  inside the settings menu, whose surface is `--bg`. The chosen design keeps the select transparent and colours
+  the options.
+
+##### WHAT THE REVIEW FOUND
+
+An independent review of `fb1067d..7256595` returned "with fixes"; each is its own commit on top.
+
+- **Critical: the height depended on the machine's fonts** (`c7356f1`). The first version left the selects'
+  height to the font and held it within 2px of the buttons'. With this machine's Noto the selects stood 28.5px in
+  Paper and Terminal and 27.5px in Instrument against the buttons' 29px. With `FONTCONFIG_FILE` pointed at a config
+  preferring DejaVu Sans and DejaVu Sans Mono, Paper and Terminal stood 26.5px, and 4 of the 12 tests failed. Paper
+  and Terminal draw in whatever system font the machine has. The height is now built from
+  the buttons' own numbers (above) and asserted equal: 12 of 12 pass under both font setups, and the stricter test
+  failed 6 of 12 on height alone under both before the rule, at 28.5/27.5px (Noto) and 26.5/27.5px (DejaVu).
+- **Important: "every select" was enforced by nothing** (`00c9857`). The option rule named three classes and its
+  test a list of six selects. The rule is now `select option` and the test walks every select on the page.
+- **Minor:** the chrome comparison read the top border only and now reads all four; the height check was
+  two-sided within 2px and is now exact; this entry said the 5c entry's WHAT THIS DID NOT CLOSE *ends* with the
+  sentence it quotes, where another bullet follows it; the `.speed` list was checked by hand in dark mode only, and
+  now in light too; and the `:root` comment named one selector of the option rule, and now names the rule.
+- **The re-review of `7256595..bb4472a`** found it ready after three wording fixes: two `style.css` comments, which
+  said `body` sets `--leading` and that every box here is `border-box` (`adebdb3`, re-wrapped in `9fa9097`), and
+  the same box claim and an uncited clause in this entry. It re-ran the test under DejaVu and Liberation, 12 of 12
+  each. Both commits change comments only, so every figure below taken at `00c9857` stands for `9fa9097`.
+
+##### THE CHECK BY HAND
+
+Umbrella §8's check, in the same headed Chromium against `pnpm exec vite`, at `00c9857`: the header, the header with
+`#encoding` focused from the keyboard (Tab from `#buffers`), the encoding list open, the settings menu, the style
+list open and a view's `.speed` list open, in each style in light and dark. In each, the select's box and text
+were measured against the `copies ▾` button's in the screenshot's pixels, and the native arrow against the
+select's box:
+
+- **Paper, light:** 29px, borders on the buttons' rows; the text 1px below theirs; the arrow 3px inside the right
+  border and within 0.5px of the box's centre, in `--fg`. List rows `--bg` with `--fg` text, Chrome's blue
+  highlight with white text; focus shows the app's 2px ring. The settings menu reads as one set of controls, and
+  the speed list as the encoding list does.
+- **Paper, dark:** as light; every list is the palette's dark `--bg` with light text, the highlight Chrome's light
+  blue with dark text, all rows readable.
+- **Terminal, light:** as Paper light, in the monospace font.
+- **Terminal, dark:** as Paper dark; the encoding, style and speed lists all readable.
+- **Instrument, light:** as Paper light, in Inter; its borders now on the buttons' rows, where the first version's
+  stood 1px inside them.
+- **Instrument, dark:** as Instrument light, with the lists as Paper dark; readable throughout.
+
+##### WHAT THIS DID NOT CLOSE
+
+- **The select's text sits 1 CSS px below the buttons' text** in every style: 1 device pixel at a device pixel
+  ratio of 1 and 2 at 2, with Noto and with DejaVu alike, so it is a layout offset inside Chrome's select and not
+  pixel snapping. The height fix did not move it. Measured and not taken: a padding of 1px less above and 1px more
+  below puts it level in all six, but it compensates for a Chromium-internal offset with a magic number and breaks
+  the padding equality with the buttons, so it is the user's call. The principled fix is `appearance:
+  base-select`, which the re-review measured putting the text's top level with the buttons' under Noto and
+  DejaVu; it costs the native arrow, which the design keeps.
+- **The open list's highlighted row and the native arrow stay the browser's.** The rows follow the palette; the
+  highlighted row's colour follows light and dark through `color-scheme` and nothing else. `appearance:
+  base-select`, which would put the whole list in the stylesheet's hands, was considered and not taken: the design
+  keeps `appearance: auto` and the native arrow, as `.speed` has, in the Chromium the browser tests run
+  (151.0.7922.34).
+- **Only Chromium on Linux was looked at.** How other platforms and Firefox draw a select's open list was not
+  checked; the browser tests run Chromium alone.
+- **Two declarations are held by the test only together with something else:** with the rule's `border` removed,
+  a select keeps the browser's own 1px solid border, so only the border colours fail (a 2px dashed one fails width
+  and style); and the option rule's `color` matches what each select already passes down, so its colour assertions
+  fail only when the select's `color` goes too. And narrowing `select option` back to the three classes fails
+  nothing, because every select on the page today is one of them: the walk is what catches the next one.
+- **The whole-suite gate as the lane rules write it is OOM-killed at its 16G cap, on `main` too.** At `00c9857` it
+  was killed three times running, and once at `18f8225` with no change of this branch in the tree. The same run
+  with `--maxWorkers=4`, under the same cap, passed. The cap, or the suite's peak, is a question outside this PR.
+
+##### VERIFICATION
+
+Every sabotage, at `00c9857`'s rule, ran the whole file (no `-t`) under the default fonts, and was restored from a
+saved copy and `cmp`-checked. The first version's 13 sabotages, against its rule, are superseded by these:
+
+| Sabotage in `style.css` | Tests failed | What failed |
+|---|---|---|
+| delete the select rule | 6 of 12 | every chrome, colour and height assertion but border width and style (the browser's own match), all five selects, all six combinations |
+| drop `block-size` | 6 of 12 | height only, all five; under the DejaVu config too, at 26.5 and 27.5px |
+| drop `font: inherit` | 6 of 12 | font-family, font-size, the four paddings (em-based) and height, all five |
+| drop `border-radius` | 6 of 12 | border-radius, all five |
+| drop `border` | 6 of 12 | the four border colours only, all five |
+| `border: 2px dashed` | 6 of 12 | the four borders' width and style, all five |
+| add `border-bottom-width: 2px` | 6 of 12 | border-bottom-width only |
+| add `border-left-style: dashed` | 6 of 12 | border-left-style only |
+| drop `padding` | 6 of 12 | the four paddings, all five (the height holds: it is `block-size`) |
+| drop `background` | 6 of 12 | background-color, all five |
+| drop `color` | 6 of 12 | color, all five |
+| scope the rule to `.encoding select` | 6 of 12 | as deleting the rule, on `#style`, `#palette`, `#appearance-choice`, `#keymap`; none on `#encoding` |
+| add `margin-top: 6px` | 6 of 12 | `#encoding`'s centre only |
+| delete the option rule | 6 of 12 | every option's background, all six selects; no option colour |
+| narrow it to `.encoding option, .skin option, .speed option` | 0 of 12 | nothing: every select today is one of those |
+| narrow it to `.encoding option, .skin option` | 6 of 12 | `.speed`'s options' background only |
+| delete the option rule and the select's `color` | 12 of 12 | option colour on the five header selects, besides the above |
+
+The controls gate, `controls-gate.test.ts`, which walks every `button, select`, passed unchanged, in a run of it
+with `app-header.test.ts`, `skin-switcher.test.ts`, `copy-header.test.ts`, `fonts.test.ts` and the new file, and in
+the full suite. The Rust gates, `check-slow.sh` and the Docker build were not run: the diff touches no Rust and
+adds no build output the web app imports.
+
+**Every count this entry quotes, with what produces it:**
+
+| Value | What | Produced by |
+|---|---|---|
+| 9 | commits before this revision, anchored to `345f01e`: `2119ee9`, `7256595` (this entry's first version), `c7356f1`, `00c9857`, `bb4472a` (its second), the re-review's two comment fixes `adebdb3`, `9fa9097`, `f2f1365` (its third) and `345f01e` (its fourth, the first rebase's note) | `git rev-list --count fb1067d..345f01e` |
+| 2 files, +178/−7 | the code diff | `git diff --shortstat fb1067d..9fa9097 -- . ':!docs'` |
+| identical | `style.css` at `00c9857` and `9fa9097` with every `/* … */` comment and run of whitespace removed; the tests unchanged between them | a scratch Python strip of both `git show <sha>:web/src/style.css` (not tracked); `git diff --quiet 00c9857 9fa9097 -- web/tests` |
+| 5 | the header's selects | `grep -c '<select' web/index.html` |
+| 1 | selects built in code: `.speed`, in `step-controls.ts`; the other search finds six `createElementNS(SVG, …)` calls, which make only SVG elements, and no `innerHTML`, `cloneNode` or `<select` outside comments | `git grep -n "createElement('select')" -- web/src`; `git grep -n -E "createElement\([^'\"]\|createElementNS\|cloneNode\|DOMParser\|innerHTML\|insertAdjacentHTML\|<select" -- web/src`, comment lines dropped |
+| 151.0.7922.34 | the Chromium the browser tests run, and the headed one the check used | `grep -A3 '"name": "chromium-headless-shell"' web/node_modules/.pnpm/playwright-core@1.62.1/node_modules/playwright-core/browsers.json`; `navigator.userAgent` in the probe below; `browser.version()` in `shoot.mjs` |
+| Arial, 13.3333px, 19px; `rgb(239, 239, 239)`, `rgb(107, 107, 107)`; 15px, 29px; 0×0 | the five before, their field light and dark, the buttons, the settings selects shut | the scratch probe `probe-selects.test.ts` (not tracked), copied into `web/tests/browser/` and run with `pnpm exec vitest run --project browser --silent=false --reporter=verbose` |
+| 28.5, 27.5 px; `normal` | the first version's heights with Noto, Paper and Terminal, Instrument; the select's computed `line-height` under an inline `30px` | the scratch probe `probe-height.test.ts` (not tracked), run the same way |
+| 26.5, 27.5 px; 4 of 12 | the first version's heights with DejaVu, Paper and Terminal, Instrument; its tests failing there (`expected 2.5 to be less than 2`) | the review's `fonts-dejavu.conf` and `run-dejavu.log` (scratch, not tracked); the heights from `FONTCONFIG_FILE=<fonts-dejavu.conf> pnpm exec vitest run --project browser tests/browser/header-selects.test.ts`, the stricter test against the first version's rule |
+| Noto Sans, Noto Sans Mono, Inter; DejaVu Sans, DejaVu Sans Mono, Inter; 29px | the fonts drawing `#encoding` in Paper, Terminal, Instrument, by default and under the DejaVu config; its height in all six | the scratch `fonts-used.mjs` (not tracked): CDP's `CSS.getPlatformFontsForNode`, bare and with `FONTCONFIG_FILE` |
+| 6 of 12, 6 of 12; 12 of 12, 12 of 12 | the stricter test before the height rule, under Noto and DejaVu; after it, under each | `cd web && pnpm exec vitest run --project browser tests/browser/header-selects.test.ts`, bare and with `FONTCONFIG_FILE=<fonts-dejavu.conf>` |
+| 4.33, 3.79, 4.21, 5.33 to 1; 4.5 | `--fg` on `#6b6b6b` in Paper, Terminal, Instrument dark, and white on it; the floor | the scratch `contrast.mjs` (not tracked), WCAG's relative-luminance ratio over the dark palettes' `fg` in `web/src/palettes.ts`; `tests/node/palettes.test.ts`'s `FLOORS` |
+| 12 | tests in `header-selects.test.ts` | the same command |
+| 17, and 1 under DejaVu | sabotages, table above | the same command, once per sabotage |
+| 6 files, 62 tests | the controls gate with its neighbours, green | `cd web && pnpm exec vitest run --project browser tests/browser/controls-gate.test.ts tests/browser/app-header.test.ts tests/browser/skin-switcher.test.ts tests/browser/copy-header.test.ts tests/browser/header-selects.test.ts tests/browser/fonts.test.ts` |
+| 36 | screenshots of the check by hand, six per style and mode | `ls final2 \| wc -l` in the lane's scratch directory, from `node shoot.mjs final2` (not tracked) |
+| 29px; 3px; 0.5px | the select's height in all six; the arrow inside the right border; the arrow's centre from the box's | `shoot.mjs`'s geometry log; the scratch `measure.py` over the six `*-header.png` |
+| 1 CSS px; 0 | the text offset at device pixel ratios 1 and 2, with Noto and DejaVu; with the asymmetric padding | the scratch `shoot-header.mjs` and `measure2.py` (not tracked) |
+| 0 | `biome ci` exit, 1 info (the deprecated `recommended` field in `biome.json`) | `cd web && pnpm exec biome ci --error-on-warnings` |
+| 0 | `typecheck` exit | `cd web && pnpm run typecheck` |
+| 3; 1 | OOM kills of the whole-suite gate at 16G: at `00c9857`; at `18f8225` | `pnpm run test:coverage` under `flock` and `systemd-run --user --wait --collect --pipe -p MemoryMax=16G -p MemorySwapMax=0 …`, its `Finished with result: oom-kill` |
+| 175 files, 1,571 tests; 96.91, 90.45, 97.96, 98.39 against 95, 89, 97, 97; 14.8G | the whole suite with coverage, green; statements, branches, functions, lines against their floors; its memory peak | the same, as `pnpm run test:coverage --maxWorkers=4` |
+| 0 | `build:app` exit | `cd web && pnpm run build:app` |
+| 14 of 14 | hygiene runs, exit 0 | `scripts/check-{text-bytes,citations,attributions,doc-figures,shared-docs,lua,colours}.sh`, each `--self-test` then alone |
+
+**REBASED ONTO `fb1067d` AFTER #113 AND #115, AND THE SHAs ABOVE ARE THE REBASED ONES.** #113, which coalesces the
+recording chunks' redraws, and #115, which moves the state diagram onto `VirtualGrid`, merged first, in that order;
+their entries sit above this one. The branch was rebased onto each squash as it landed. Each rebase conflicted only
+in this file, where the branches appended entries, and each resolution rebuilt it as `main`'s roadmap plus this
+entry: every rebased commit's copy of the file was checked equal to the new base's followed by that commit's own
+version of this entry. No source file conflicted, and each rebased commit's change outside this file has the same
+patch id as the commit it replaces. The commits map `781c9c4` → `2119ee9`, `e940cdb` → `7256595`, `8ee143a` →
+`c7356f1`, `76b1cea` → `00c9857`, `f05a9eb` → `bb4472a`, `7ee5de8` → `adebdb3`, `eb9aaec` → `9fa9097` and `de95439`
+→ `f2f1365`, and the first rebase's own note, `5b7975b`, is `345f01e`. Every figure above was measured before the
+rebases, on the commits left of each arrow, over a base without #113's and #115's changes; the rebased commits carry
+the same change over a base with them, and CI re-runs every gate on them. The first rebased head's CI run (481)
+failed only in `rust-browser`'s set-up, where the download of Chrome's apt signing key returned no key (`gpg: no
+valid OpenPGP data found`), before any test ran; `web` passed in that run.
