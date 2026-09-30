@@ -1,6 +1,7 @@
 import type { EditorView } from '@codemirror/view'
 import { afterEach, beforeAll, describe, expect, it } from 'vitest'
 import { userEvent } from 'vitest/browser'
+import { FIRST_LOAD } from '../../src/examples'
 import { SHELL, until } from './harness'
 
 /**
@@ -43,6 +44,18 @@ afterEach(() => {
   errors.length = 0
 })
 
+/**
+ * Every sentence the live region has said since the mount, as it stood each time its changes were delivered: a sentence
+ * replaced within the same task is not in it. A resting sentence is said once a page load, so a case that waits for one
+ * said by an earlier case's gesture has to have been listening since then.
+ */
+const said: string[] = []
+
+/** The resting line's sentences for a refusal here, whose cause is a getter that throws: `blocked`, not full. */
+const PROGRAM_LINE = 'the program is not being saved — this browser’s storage for this site is blocked'
+const COPIES_LINE = 'copies are not being saved — this browser’s storage for this site is blocked'
+const BOTH_LINE = 'the program and copies are not being saved — this browser’s storage for this site is blocked'
+
 /** The formatter rewrites this, which is how a blur that formatted can be told from one that did not. */
 const UNFORMATTED = 'fn fact(n) { if n == 0 { 1 } else { n * fact(n - 1) } }\nfact(3)\n'
 
@@ -75,6 +88,12 @@ async function closeSettings(): Promise<void> {
 
 beforeAll(async () => {
   document.body.innerHTML = SHELL
+  const live = byId('live')
+  new MutationObserver(() => said.push(live.textContent?.trim() ?? '')).observe(live, {
+    childList: true,
+    characterData: true,
+    subtree: true,
+  })
   view = await (await import('../../src/main')).ready
   await until(() => idle() && resultsText() !== '', 'the first compile')
 })
@@ -82,8 +101,9 @@ beforeAll(async () => {
 describe('with site data blocked', () => {
   it('starts, reads storage on the way, and compiles its program', () => {
     expect(reached, 'precondition: start-up never touched storage, so it never met the refusal').toBeGreaterThan(0)
+    expect(text(), 'a first visit opens on the first-load example').toBe(FIRST_LOAD.text)
     expect(resultsText()).toContain('reductions')
-    expect(resultsText()).toContain('42')
+    expect(resultsText()).toContain(`λ ${FIRST_LOAD.value} · `)
     const strip = byId('results').getBoundingClientRect()
     expect(strip.width, 'the result strip is not on screen').toBeGreaterThan(0)
     expect(strip.height, 'the result strip is not on screen').toBeGreaterThan(0)
@@ -91,12 +111,15 @@ describe('with site data blocked', () => {
   })
 
   it('accepts an edit typed with real keys, and compiles it', async () => {
+    // TYPED BEFORE THE TRAILING NEWLINE, SO IT JOINS THE PROGRAM'S LAST EXPRESSION.
+    expect(FIRST_LOAD.text.endsWith('\n'), 'precondition: the first load ends on a newline').toBe(true)
     view.focus()
-    view.dispatch({ selection: { anchor: view.state.doc.length } })
+    view.dispatch({ selection: { anchor: view.state.doc.length - 1 } })
     await until(() => view.hasFocus, 'the source editor to take focus')
     await userEvent.keyboard(' + 1')
-    expect(text()).toBe('let x = 40; x + 2 + 1')
-    await until(() => idle() && resultsText().includes('43'), 'the edited program to compile')
+    expect(text()).toBe(`${FIRST_LOAD.text.slice(0, -1)} + 1\n`)
+    const value = String(Number(FIRST_LOAD.value) + 1)
+    await until(() => idle() && resultsText().includes(`λ ${value} · `), 'the edited program to compile')
     expect(errors).toEqual([])
   })
 
@@ -151,15 +174,14 @@ describe('with site data blocked', () => {
   })
 
   /**
-   * **THE REFUSAL IS STILL REPORTED WHERE IT ALWAYS WAS.** A copy is work, and `main.ts`'s buffers writer
-   * says so when its write fails; a getter that throws is a write that fails. The sentence is matched by
-   * its start and not by the cause it ends on, because that cause is not what this file is about.
+   * **THE REFUSAL IS STILL REPORTED WHERE IT ALWAYS WAS**, beside the program's. A copy is work, and `main.ts`'s
+   * buffers writer says so when its write fails; a getter that throws is a write that fails. The program the cases
+   * above edited is refused the same way (Plan 7 part 6a spec §4.3), and its own sentence is waited for before the
+   * copy is made: otherwise the copy's refusal can land first, inside the pause before the program's write, and be
+   * said alone. After it, the one sentence the copy adds is the two stores' together.
    */
-  it('still says that copies are not being saved', async () => {
-    const said: string[] = []
-    const live = byId('live')
-    const observer = new MutationObserver(() => said.push(live.textContent?.trim() ?? ''))
-    observer.observe(live, { childList: true, characterData: true, subtree: true })
+  it('still says that copies are not being saved, beside the program', async () => {
+    await until(() => said.includes(PROGRAM_LINE), 'the program’s own refusal')
     await closeSettings()
     const more = document.querySelector<HTMLButtonElement>('[data-leaf="lambda-0"] button.view-more')
     const menu = document.getElementById(more?.getAttribute('aria-controls') ?? '')
@@ -170,8 +192,8 @@ describe('with site data blocked', () => {
     if (fork === null) throw new Error('no edit-a-copy control in the λ view’s menu')
     await userEvent.click(fork)
     await until(() => document.querySelector('[data-leaf="lambda-0"] .term-editor') !== null, 'the copy to open')
-    await until(() => said.some((t) => t.startsWith('copies are not being saved')), 'the copies report')
-    observer.disconnect()
+    await until(() => said.includes(BOTH_LINE), 'the copies report, beside the program’s')
+    expect(said).not.toContain(COPIES_LINE)
     expect(errors).toEqual([])
   })
 })

@@ -214,7 +214,7 @@ const tmStepText = () => document.querySelector('[data-leaf="tm-0"] .step')?.tex
 // in `tests/browser/setup.ts` before this file's own module body runs; see that file's doc for why.
 //
 // WAITS FOR THE FIRST COMPILE TO SETTLE, WHICH THE PLAN'S ILLUSTRATIVE SNIPPET DID NOT — found by
-// running it: the very first test's fork click landed while `main()`'s own `compile.schedule(SAMPLE)`
+// running it: the very first test's fork click landed while `main()`'s own start-up compile
 // was still mid-flight (`results.dataset.state === 'running'`), so `linkWiring.index` was still `null`
 // and `transport.ts`'s `detach` handler silently declined (`if (wiring.index === null || ...) return`)
 // — the click did nothing, and nothing else in the test waits or retries, so it timed out waiting for an

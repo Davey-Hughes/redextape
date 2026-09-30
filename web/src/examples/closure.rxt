@@ -1,0 +1,3 @@
+let n = 2;
+let add_n = |x| x + n;
+add_n(40)

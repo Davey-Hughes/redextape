@@ -1,11 +1,12 @@
+import type { Example } from './examples'
 import type { PaneChoice, SplitChoices } from './pane-chrome'
 import { bindingKey, pairLabel } from './view-header'
 import { PRESETS, type Preset, presetOf, type Switches } from './workspace'
 
 /**
- * THE APP HEADER'S MENUS — Plan 7 part 2 spec §6: the workspace menu, `+ view` and settings. Each is a native
- * popover beside the button that opens it, declared in `index.html` so the pre-paint script and the skin
- * selects need no change; this module wires what markup cannot.
+ * THE APP HEADER'S MENUS — Plan 7 part 2 spec §6: the workspace menu, `+ view` and settings, and `examples ▾` since
+ * part 6a. Each is a native popover beside the button that opens it, declared in `index.html` so the pre-paint script
+ * and the skin selects need no change; this module wires what markup cannot.
  */
 
 /**
@@ -59,6 +60,38 @@ export function addViewItems(menu: HTMLElement, choices: SplitChoices, pick: (c:
     items.push(b)
   }
   menu.replaceChildren(...items)
+}
+
+/**
+ * Fill `examples ▾`'s menu: one item per example, in the manifest's order, each its title over its one-line description
+ * (Plan 7 part 6a spec §4.2). Picking one closes the menu before `pick` runs, as every header menu's item does.
+ *
+ * **NAMED BY `aria-label`, AS THE VIEW MENU'S TWO-LINE ITEMS ARE** (`view-header.ts`'s `item`): built from the content,
+ * the name would join the two spans with a space only while they are not `display: inline`, which is a rule about the
+ * stylesheet rather than about the item.
+ */
+export function exampleItems(menu: HTMLElement, examples: readonly Example[], pick: (e: Example) => void): void {
+  menu.replaceChildren(
+    ...examples.map((example) => {
+      const b = document.createElement('button')
+      b.type = 'button'
+      b.className = 'example'
+      b.dataset.example = example.id
+      b.setAttribute('aria-label', `${example.title} ${example.description}`)
+      const title = document.createElement('span')
+      title.className = 'example-title'
+      title.textContent = example.title
+      const description = document.createElement('span')
+      description.className = 'example-description'
+      description.textContent = example.description
+      b.append(title, description)
+      b.addEventListener('click', () => {
+        menu.hidePopover()
+        pick(example)
+      })
+      return b
+    }),
+  )
 }
 
 /** One switch in the workspace menu: what it is called, and the words its two values go by (spec §4). */

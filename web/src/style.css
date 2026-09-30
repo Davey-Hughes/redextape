@@ -167,6 +167,15 @@ body {
   border-bottom: 1px solid var(--rule);
   background: var(--bg-chrome);
 }
+/* AT A PHONE'S WIDTH THE HEADER'S CONTROLS SIT CLOSER, so `examples ▾` does not cost the page a row. At 390px, in
+   Explorer and Debugger, it pushed the header from three rows to four, 136px to 181px, and half the gap between
+   controls puts it back to three, measured in Instrument and Paper. Terminal's monospace is wider: on a machine whose
+   `ui-monospace` is Noto Sans Mono it stays at four there, where without `examples ▾` it is three. */
+@media (max-width: 30rem) {
+  .bar {
+    column-gap: var(--space-2);
+  }
+}
 
 .wordmark {
   font-size: var(--step-1);
@@ -221,6 +230,7 @@ select option {
 #workspace,
 #new-view,
 #buffers,
+#examples,
 #appearance,
 #settings {
   display: inline-flex;
@@ -318,9 +328,58 @@ select option {
 .menu-group button[aria-current="true"] {
   border-color: var(--fg-dim);
 }
-/* The workspace menu is wider than the others, because a switch row is a label and two values. */
+/* The workspace menu is wider than the others, because a switch row is a label and two values.
+
+   **AT A PHONE'S WIDTH A ROW'S VALUES WRAP UNDER ITS LABEL**, and the menu is no wider than the page less a `1rem`
+   gutter each side, as `#examples-menu` below is. On one line its rows are 360.5px wide, measured, so without the
+   wrap the menu ran past a 320px and a 360px page; the gutter bounds the minimum too, since a minimum wins over a
+   maximum. At a desktop width nothing wraps and nothing here binds.
+
+   **THE MAXIMUM BINDS ONLY WHERE THE MENU IS NOT ANCHORED.** Anchored, its content is fitted to the room from its
+   button to the page's right edge, always narrower than the gutter allows; where that room is narrower than the
+   minimum, the minimum decides and the browser shifts the menu left onto the page. Either way the maximum never
+   binds, measured. A browser without `position-area` takes the `@supports` branch above and centres the menu on the
+   page, where without the maximum it spans the page's whole width. */
 #workspace-menu {
-  min-width: 20rem;
+  min-width: min(20rem, calc(100vw - 2rem));
+  max-width: calc(100vw - 2rem);
+}
+#workspace-menu .menu-group {
+  flex-wrap: wrap;
+}
+/* AN EXAMPLE IS ITS TITLE OVER ITS ONE-LINE DESCRIPTION (Plan 7 part 6a spec §4.2), the view menu's two-line item in
+   the header menu's chrome. Wide enough for a description on one line at a desktop width, and no wider than the page
+   at a phone's, where a description wraps under its title.
+
+   **THE GUTTER BOUNDS THE MINIMUM TOO.** A bare `20rem` beat the maximum below a 352px page, since a minimum wins
+   over a maximum, and the menu filled a 320px phone's width edge to edge. */
+#examples-menu {
+  min-width: min(20rem, calc(100vw - 2rem));
+  max-width: min(36rem, calc(100vw - 2rem));
+}
+/* **AND THE GUTTER ON THE PAGE'S EDGE, FOR THE TWO MENUS WIDE ENOUGH TO REACH IT.** Where the anchored placement
+   would run past the page's edge, the browser shifts the menu back inside, flush with that edge: both menus were, at
+   320, 360 and 390px. A margin on the end side is kept in that shift, so each stops `1rem` short; and where the
+   placement flips to open leftward the margin flips with it, so `examples ▾`'s menu stops `1rem` short of the left edge
+   at 600 and 700px, where it touched it. Measured, with 1280px unchanged. Not on `.header-menu`: settings opens
+   leftward from its button's right edge, and an end margin would move it off that edge at every width.
+
+   **ONLY WHERE THE MENU IS ANCHORED.** A browser without `position-area` takes the `@supports not` branch above,
+   whose `margin: auto` centres the menu on the page; an id's end margin would beat that class rule and put the menu
+   against the right edge instead, `1rem` short. */
+@supports (position-area: block-end) {
+  #examples-menu,
+  #workspace-menu {
+    margin-inline-end: 1rem;
+  }
+}
+#examples-menu .example-title,
+#examples-menu .example-description {
+  display: block;
+}
+#examples-menu .example-description {
+  font-size: var(--step--2);
+  color: var(--fg-dim);
 }
 
 /* Same treatment as `.controls button` — chrome, not a new visual language.

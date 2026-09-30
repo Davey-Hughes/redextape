@@ -749,8 +749,8 @@ describe('the no-session report for a failed fork', () => {
  * (777-2,095 bytes printed, nowhere near that budget) — truncated at the frame's own print, whole at
  * the readout's, exactly the pairing this test needs. `frame-cost.test.ts` uses the same source for
  * an unrelated reason (span cost, not truncation) and never checks `cut`; this file's own `BIG` was
- * picked for its TM leg's size and was never measured for λ truncation at all; `SAMPLE`-sized
- * programs (`scratch-app.test.ts`) never truncate at either budget. None of the existing fixtures
+ * picked for its TM leg's size and was never measured for λ truncation at all; programs the size
+ * of `let x = 40; x + 2` (`scratch-app.test.ts`) never truncate at either budget. None of the existing fixtures
  * would have proven anything here.
  */
 describe('the fork control forks a truncated frame, through the app', () => {

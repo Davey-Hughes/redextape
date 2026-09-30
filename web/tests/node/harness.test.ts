@@ -11,6 +11,8 @@ describe('SHELL', () => {
       '#reset-preset',
       '#new-view',
       '#buffers',
+      '#examples',
+      '#examples-menu',
       '#encoding',
       '#settings',
       '#style',

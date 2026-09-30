@@ -28,9 +28,9 @@ import { SHELL, until } from './harness'
 /**
  * Two lines, because `j` is a claim about the CURSOR and a one-line document cannot carry it.
  *
- * `main.ts`'s own `SAMPLE` is `let x = 40; x + 2` on a single line: vim's `j` there moves nothing and
- * inserts nothing, so "the cursor moved rather than a `j` being typed" and "vim is not installed at
- * all" would look identical.
+ * The program the page opens on, `let x = 40; x + 2` (`setup.ts` stores it for every browser test file), is one
+ * line: vim's `j` there moves nothing and inserts nothing, so "the cursor moved rather than a `j` being typed" and
+ * "vim is not installed at all" would look identical.
  */
 const TWO_LINES = 'let x = 40;\nx + 2'
 

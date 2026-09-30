@@ -3,8 +3,8 @@ import { beforeAll, describe, expect, it } from 'vitest'
 import { SHELL, until } from './harness'
 
 /**
- * `let x = 40; x + 2` — the app's own sample, and the only corpus program whose entire `Owner`
- * sequence is short enough to assert step by step.
+ * `let x = 40; x + 2` — the program `setup.ts` stores for every browser test file, and the only corpus program whose
+ * entire `Owner` sequence is short enough to assert step by step.
  *
  * MEASURED, NOT ASSUMED. Driving `trace::LambdaCursor` over this source and printing `last_owner()`
  * against `SourceMap::source_span` at every step (the same walk `owner_probe.rs` makes for M1/M2,

@@ -364,13 +364,30 @@ describe('what apply adjusted cannot fix', () => {
     }),
   ]
 
-  it('names only tokens no lightness on a fine scan fixes, and every other token passes on its stored value', () => {
-    let named = 0
-    for (const [label, colours] of schemes) {
+  /**
+   * Each scheme's variant and its adjustment, once: the cases below and the count after them share it. Keyed by the
+   * colours themselves, so two schemes under one label could not share an adjustment.
+   */
+  const adjustments = new Map<readonly string[], { readonly v: Variant } & ReturnType<typeof adjustVariant>>()
+  const adjusted = (colours: readonly string[]) => {
+    let seen = adjustments.get(colours)
+    if (seen === undefined) {
       const v = mapped(colours)
-      const { tokens, unfixed } = adjustVariant(v)
+      seen = { v, ...adjustVariant(v) }
+      adjustments.set(colours, seen)
+    }
+    return seen
+  }
+
+  /**
+   * **ONE CASE PER SCHEME**, since each token a scheme names is scanned at 10,001 lightnesses: every scheme in one case
+   * took 5.4 s on the slower CI runner, past vitest's 5 s default, where it takes under a second here.
+   */
+  it.each(schemes)(
+    'names only tokens no lightness on a fine scan fixes, and every other token passes on its stored value: %s',
+    (label, colours) => {
+      const { v, tokens, unfixed } = adjusted(colours)
       for (const { token, rule } of unfixed) {
-        named++
         const meets = (hex: string): boolean =>
           CONTRAST_FLOORS.every(([fg, bg, floor]) => fg !== token || contrastRatio(hex, tokens[bg]) >= floor)
         // EACH KEEPS THE VALUE ITS WALK BEGAN FROM: its own, or, for a binder held to the binder rule, the value its
@@ -383,7 +400,12 @@ describe('what apply adjusted cannot fix', () => {
       const unfixable = new Set(unfixed.map((u) => u.token))
       const passing = failing(tokens).filter((f) => !unfixable.has(f.split(' on ')[0] as ColourToken))
       expect(passing, label).toEqual([])
-    }
+    },
+  )
+
+  // THE CASES ABOVE SCAN ONLY WHAT IS NAMED, so a set of schemes that named nothing would pass them all.
+  it('names more than 100 tokens across the schemes', () => {
+    const named = schemes.reduce((n, [, colours]) => n + adjusted(colours).unfixed.length, 0)
     expect(named).toBeGreaterThan(100)
   })
 })

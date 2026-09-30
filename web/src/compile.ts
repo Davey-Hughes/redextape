@@ -67,8 +67,10 @@ export function createCompile(deps: {
   picker: HTMLSelectElement
   view: () => EditorView
   sourceSession: SessionId
+  /** Store the program as it is posted: its text, and the encoding the compile was given. */
+  persist: (text: string, encoding: string) => void
 }): { schedule(src: string): void } {
-  const { sessions, results, picker, view, sourceSession } = deps
+  const { sessions, results, picker, view, sourceSession, persist } = deps
 
   let timer: ReturnType<typeof setTimeout> | undefined
 
@@ -129,7 +131,14 @@ export function createCompile(deps: {
     // replies stop being current at the instant of dispatch; `request` drops the post if another
     // keystroke claimed a newer one during the debounce. See `SessionClient.supersede`.
     const gen = client.supersede()
-    timer = setTimeout(() => client.request(gen, src, picker.value), DEBOUNCE_MS)
+    timer = setTimeout(() => {
+      const encoding = picker.value
+      client.request(gen, src, encoding)
+      // **THE PROGRAM IS STORED WHERE IT IS POSTED — Plan 7 part 6a spec §4.3.** A keystroke, an encoding change, a
+      // picked example and the start-up program all arrive here, so this is the one write site and there is one write
+      // per pause. A keystroke in the last `DEBOUNCE_MS` before the tab closes is not stored, as a copy's is not.
+      persist(src, encoding)
+    }, DEBOUNCE_MS)
   }
 
   // The picker is otherwise inert: `schedule` only reads `picker.value` when a keystroke's update

@@ -142,6 +142,36 @@ describe('notices', () => {
     expect(line.hidden).toBe(true)
   })
 
+  /**
+   * **ENDED EARLY, IT LEAVES THE RESTING LINE UNDER IT, AS ITS OWN TIMER WOULD.** A pick's `undo` goes at the next edit
+   * (`main.ts`'s `openExample`), since putting back the text the pick replaced would throw that edit away; the line
+   * goes back to what it said before the pick.
+   */
+  it('ends its own notice early, action and all, and leaves the resting line under it', () => {
+    const n = createNotices(line, live)
+    n.rest('copies are not being saved')
+    const pick = n.notify('opened the example fact(4)', { action: { label: 'undo', run: () => undefined } })
+    pick.dismiss()
+    expect(line.querySelector('button.notice-action')).toBeNull()
+    expect(line.querySelector('.notice-text')?.textContent).toBe('copies are not being saved')
+  })
+
+  /**
+   * **AND NOTHING ONCE IT HAS RUN OUT, NOT EVEN A REPAINT.** A pick's notice is ended at every edit after the pick,
+   * which is every keystroke for as long as the page is open; each one redrawing the resting line under it would be
+   * work for a line that is not changing.
+   */
+  it('ends nothing once it has run out, and leaves the line as it is', () => {
+    const n = createNotices(line, live)
+    n.rest('copies are not being saved')
+    const expired = n.notify('opened the example fact(4)', { action: { label: 'undo', run: () => undefined } })
+    vi.advanceTimersByTime(NOTICE_MS)
+    const resting = line.querySelector('.notice-text')
+    expect(resting?.textContent).toBe('copies are not being saved')
+    expired.dismiss()
+    expect(line.querySelector('.notice-text')).toBe(resting)
+  })
+
   it('runs its action once and clears', () => {
     const n = createNotices(line, live)
     const run = vi.fn()

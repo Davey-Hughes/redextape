@@ -89,9 +89,9 @@ const isGlyph = (s: string) => !/[\p{L}\p{N}]/u.test(s)
  * A symbol a reader would have to name aloud, inside a name that otherwise reads as words — `◐system`,
  * where a decorative glyph sits in a text node beside the word instead of being hidden from the name.
  *
- * **`+` IS THE ONE EXCEPTION, AND IT IS THE DESIGN'S OWN**: `+ view` reads as "plus view", which is the
- * button. Every other symbol this app draws is an `icons.ts` SVG, which carries `aria-hidden` and so
- * never reaches a name at all.
+ * **`+` IS AN EXCEPTION, AND IT IS THE DESIGN'S OWN**: `+ view` reads as "plus view", which is the
+ * button. Every other symbol this app draws as decoration is an `icons.ts` SVG, which carries `aria-hidden`
+ * and so never reaches a name at all.
  *
  * **THE CHECK IS BOUNDED TO `\p{So}` AND `\p{Sm}`, AND NAMING WHAT THAT EXCLUDES IS THE POINT OF THIS
  * PARAGRAPH.** Those two are Unicode's symbol-other and symbol-math categories; `·` (U+00B7, `Po`) and
@@ -101,11 +101,16 @@ const isGlyph = (s: string) => !/[\p{L}\p{N}]/u.test(s)
  * markup — where they separate clauses a reader runs together rather than standing in for a word. So a
  * green run here says no SYMBOL reached a name. It says nothing about punctuation, and widening the
  * class to catch `·` would fail on names the design asked for rather than on a defect.
+ *
+ * **`=` IS THE SECOND EXCEPTION, AND IT IS PROGRAM TEXT (Plan 7 part 6a).** An example in `examples ▾` is named by its
+ * title, and one title is the program `let x = 40; x + 2`: its `=` is not a glyph standing in for a word but the
+ * program's own operator, which a reader says as "equals", as they say its `+`.
  */
-const straySymbol = (s: string) => /[\p{So}\p{Sm}]/u.test(s.replaceAll('+', ''))
+const straySymbol = (s: string) => /[\p{So}\p{Sm}]/u.test(s.replaceAll('+', '').replaceAll('=', ''))
 
 /**
- * Every control a user can meet right now.
+ * Every control a user can meet right now: every button, select, input and textarea but a hidden input, which no one
+ * meets (Plan 7 part 6a spec §6).
  *
  * **WHILE A MODAL DIALOG IS OPEN, ONLY WHAT IS INSIDE IT** (Plan 7 part 6b spec §10). The platform makes everything
  * outside a modal inert, so every control there would fail the focus check below for that reason alone; and a
@@ -121,6 +126,7 @@ const straySymbol = (s: string) => /[\p{So}\p{Sm}]/u.test(s.replaceAll('+', ''))
 function controls(): HTMLElement[] {
   const scope: ParentNode = document.querySelector('dialog:modal') ?? document
   return [...scope.querySelectorAll<HTMLElement>('button, select, input, textarea')].filter((el) => {
+    if (el.matches('input[type="hidden"]')) return false
     if (el.closest('[hidden]') !== null) return false
     if (el.closest('dialog:not([open])') !== null) return false
     const popover = el.closest<HTMLElement>('[popover]')
@@ -128,8 +134,10 @@ function controls(): HTMLElement[] {
   })
 }
 
-function check(where: string): void {
-  for (const el of controls()) {
+/** Hold every control on the page to the rules, and answer the ones it held. */
+function check(where: string): HTMLElement[] {
+  const walked = controls()
+  for (const el of walked) {
     const name = nameOf(el)
     const id = `${where}: <${el.tagName.toLowerCase()} class="${el.className}"> named ${JSON.stringify(name)}`
     expect(name, id).not.toBe('')
@@ -155,6 +163,7 @@ function check(where: string): void {
       expect(document.activeElement, `${id} cannot take the focus`).toBe(el)
     }
   }
+  return walked
 }
 
 beforeAll(async () => {
@@ -219,13 +228,28 @@ describe.each(STATES)('every control in $name', ({ name, picks, tiled }) => {
 
   it('on the page as it stands', () => check(`${name}: page`))
 
-  it.each([['#workspace'], ['#new-view'], ['#buffers'], ['#settings']])('with %s open', (selector) => {
-    const button = document.querySelector<HTMLButtonElement>(selector)
-    expect(button, selector).not.toBeNull()
-    button?.click()
-    check(`${name}: ${selector}`)
-    const menu = document.getElementById(button?.getAttribute('aria-controls') ?? '')
-    if (menu?.matches(':popover-open')) menu.hidePopover()
+  /**
+   * **EVERY HEADER MENU, READ OFF THE PAGE RATHER THAN LISTED** — `viewLeaves`' reason: a list of the menus there were
+   * is a list that misses the next one. This was `#workspace`, `#new-view`, `#buffers` and `#settings`, and
+   * `examples ▾` joined the header without joining it (Plan 7 part 6a spec §6). Every header menu there is now is
+   * asserted among the ones walked, so the loop cannot pass by walking fewer.
+   */
+  it('with each header menu open', () => {
+    const openers = [...document.querySelectorAll<HTMLButtonElement>('header.bar button[aria-controls]')]
+    expect(openers.map((b) => b.id)).toEqual(
+      expect.arrayContaining(['workspace', 'new-view', 'buffers', 'examples', 'settings']),
+    )
+    const walked: string[] = []
+    for (const button of openers) {
+      button.click()
+      const menu = document.getElementById(button.getAttribute('aria-controls') ?? '')
+      // A MENU THAT NEVER OPENED IS A MENU WHOSE CONTROLS WERE NEVER WALKED — and a header button that opens nothing.
+      expect(menu?.matches(':popover-open'), `${name}: #${button.id} opened nothing`).toBe(true)
+      walked.push(...check(`${name}: #${button.id}`).map((el) => el.id))
+      if (menu?.matches(':popover-open')) menu.hidePopover()
+    }
+    // A FORM CONTROL THAT IS NOT A SELECT IS WALKED: the settings menu's checkbox, which `button, select` never reached.
+    expect(walked).toContain('format-on-blur')
   })
 
   it("with every view's title and ⋯ menu open", () => {
@@ -411,5 +435,26 @@ describe('every control in Explorer, in the settings menu and the import dialog'
     expect(controls().map(nameOf)).toEqual(walked)
     check('the import dialog, with an adjusted half’s changes open')
     dialog().close()
+  })
+})
+
+/**
+ * **WHAT THE WALK LEAVES OUT, HELD WHERE THE PAGE CANNOT SHOW IT** — Plan 7 part 6a spec §6. The app has no hidden
+ * input, so nothing on it can say whether `controls()` skips one. One is put on the page for the case and taken off
+ * after it. A closed dialog's controls need no case of their own: the import dialog is on the page, closed, for every
+ * walk above but its own.
+ */
+describe('the walk itself', () => {
+  it('skips a hidden input', () => {
+    const hidden = document.createElement('input')
+    hidden.type = 'hidden'
+    hidden.id = 'gate-hidden'
+    document.body.append(hidden)
+    try {
+      expect(document.getElementById('gate-hidden')).toBe(hidden)
+      expect(controls().map((el) => el.id)).not.toContain('gate-hidden')
+    } finally {
+      hidden.remove()
+    }
   })
 })

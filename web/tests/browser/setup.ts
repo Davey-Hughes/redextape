@@ -17,6 +17,7 @@
  * and this is a test-harness gap, not an application one.
  */
 import '../../src/style.css'
+import { PROGRAM_STORAGE_KEY, serializeProgram } from '../../src/program-store'
 
 /**
  * Browser-tier setup, before the test file's own module body: collect the page the previous test file left
@@ -97,3 +98,14 @@ const shim: Storage = {
   },
 }
 Object.defineProperty(window, 'localStorage', { value: shim, configurable: true })
+
+/**
+ * Browser-tier setup, part three: every file starts on `let x = 40; x + 2`, the program it was written against.
+ *
+ * **A FIRST VISIT OPENS ON THE FIRST-LOAD EXAMPLE NOW** (Plan 7 part 6a spec §4.4), and every file's storage above
+ * starts empty, so every file that mounts the app would start on `sum_to(5)`: a longer first compile in all of them,
+ * and a different program in the ones that never type one of their own. The old start-up program is stored here
+ * instead, under the default encoding, as a returning visitor's would be. `first-load.test.ts` removes it before it
+ * mounts, and a file that clears storage before its mount starts on the example too.
+ */
+shim.setItem(PROGRAM_STORAGE_KEY, serializeProgram({ text: 'let x = 40; x + 2', encoding: 'unary' }))

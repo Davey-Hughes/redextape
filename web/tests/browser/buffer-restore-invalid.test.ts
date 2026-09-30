@@ -41,7 +41,7 @@ beforeAll(async () => {
  * reads the zero-buffer label, no `.view-status`) is vacuously true whenever nothing restores,
  * corrupt payload or none. The second (the stored value equals `{minted:0,buffers:[],bindings:{}}`) is
  * produced by `refreshBuffers()`'s ordinary, unconditional start-up write (`main.ts`'s start-up
- * `refreshBuffers()` call, made after `compile.schedule(SAMPLE)` — that call site's own comment is the
+ * `refreshBuffers()` call, made after the start-up compile — that call site's own comment is the
  * authoritative account of why it sits there), which fires on every
  * page load regardless of whether anything upstream of it ever looked at these bytes. So this file
  * cannot distinguish "read the corrupt payload and refused it" from "never read the key at all" — it

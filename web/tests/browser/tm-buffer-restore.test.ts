@@ -186,7 +186,7 @@ const detachedWithNoEditorYet = (pane: HTMLElement): boolean =>
  * Neither hazard applies here: this file dispatches exactly one program per mount and both `mountApp`
  * tests that touch two panes fork them in sequence, waiting between. Watching only one leg would miss
  * the OTHER leg still mid-flight — checked directly rather than reasoned about, since `lambda-0` and
- * `tm-0` while both still bound to the small `SAMPLE`-sized source settle in well under a second either
+ * `tm-0` while both still bound to a source the size of `let x = 40; x + 2` settle in well under a second either
  * way (measured with a throwaway probe against `'let x = 40; x + 2'` before this file was written).
  */
 async function settleOn(snapshot: () => string, timeoutMs = 60_000): Promise<void> {

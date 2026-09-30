@@ -3,7 +3,7 @@ import { lintGutter, setDiagnostics as setCmDiagnostics } from '@codemirror/lint
 import { EditorState } from '@codemirror/state'
 import { EditorView, highlightActiveLine, keymap, lineNumbers } from '@codemirror/view'
 import init, { captureClasses, encodings, tokenClasses } from '../../pkg/redextape_wasm.js'
-import { addViewItems, presetName, wireMenu, workspaceItems } from './app-header'
+import { addViewItems, exampleItems, presetName, wireMenu, workspaceItems } from './app-header'
 import {
   APPEARANCE_LABEL,
   type Appearance,
@@ -33,6 +33,7 @@ import { createDraw } from './draw'
 import { createEditorCustody } from './editor-custody'
 import { KeymapSetting, keymapSlot } from './editor-keymap'
 import { KEYMAP_LABEL, KEYMAP_MODES, parseKeymapMode, readFormatOnBlur, writeFormatOnBlur } from './editor-prefs'
+import { EXAMPLE_ENCODING, EXAMPLES, type Example, FIRST_LOAD } from './examples'
 import { declineMark, focusMark, linkMark } from './highlight'
 import { History } from './history'
 import { icon } from './icons'
@@ -54,6 +55,7 @@ import type { PaneChoice } from './pane-chrome'
 import { createPaneHost, type LayoutEvent } from './pane-host'
 import { createPanel } from './panel'
 import { type LeafId, legOfPane, PaneCollection } from './panes'
+import { PROGRAM_STORAGE_KEY, parseProgram, type StoredProgram, serializeProgram } from './program-store'
 import type { Leg, RunReply } from './protocol'
 import { HISTORY_BYTES } from './protocol'
 import { asmCopyRow, copyLegOf, createReadout, type ProgramResult, tmCopyRow } from './readout'
@@ -81,6 +83,7 @@ import type { TmPane } from './tm-pane'
 import { createTransport } from './transport'
 import type { AsmState, LambdaState, TmState } from './types'
 import { assertTokenClasses } from './types'
+import { createUnsaved, type Refusal, refusalOf } from './unsaved'
 import { pairLabel, sourceViewHeader, viewMenu } from './view-header'
 import {
   defaultFocus,
@@ -99,8 +102,6 @@ import {
   withPanel,
   withTmDisplay,
 } from './workspace'
-
-const SAMPLE = 'let x = 40; x + 2'
 
 /**
  * The counter behind every `LeafId` a split mints, shared across every leg — module-level rather than
@@ -211,6 +212,8 @@ async function main(): Promise<EditorView> {
    * opens something.
    */
   const buffersButton = document.querySelector<HTMLButtonElement>('#buffers')
+  const examplesButton = document.querySelector<HTMLButtonElement>('#examples')
+  const examplesMenu = document.querySelector<HTMLElement>('#examples-menu')
   const noticeHost = document.querySelector<HTMLElement>('#notice')
   const liveHost = document.querySelector<HTMLElement>('#live')
   // **`#views`, NOT `<main>` — spec §9.** `renderLayout` opens with `root.replaceChildren()`, so the
@@ -238,6 +241,8 @@ async function main(): Promise<EditorView> {
     !styleSelect ||
     !paletteSelect ||
     !buffersButton ||
+    !examplesButton ||
+    !examplesMenu ||
     !noticeHost ||
     !stepBarHost ||
     !inspectorHost ||
@@ -252,7 +257,8 @@ async function main(): Promise<EditorView> {
   // touches nothing but the DOM, so every refusal from here on has somewhere to go.
   // THE FALLBACK IS THE COPIES BUTTON: a copy's *undo* is the line's usual action, and a user whose undo
   // went away — expired, or replaced by another gesture's notice — is looking at the copies it was about.
-  // An imported palette's *undo* names its own, the settings button (`NoticeAction`'s `fallback`).
+  // An imported palette's *undo* names its own, the settings button, and a picked example's names `examples ▾`
+  // (`NoticeAction`'s `fallback`).
   const notices = createNotices(noticeHost, liveHost, () => buffersButton)
 
   // Wired BEFORE `init()`, unlike everything below it. The toggle has nothing to do with wasm — it
@@ -595,6 +601,30 @@ async function main(): Promise<EditorView> {
     opt.textContent = name
     picker.append(opt)
   }
+
+  /** The stored program's raw text, or `null` where storage refuses the read, guarded as the copies' read is. */
+  const readProgramStorage = (): string | null => {
+    try {
+      return localStorage.getItem(PROGRAM_STORAGE_KEY)
+    } catch {
+      return null
+    }
+  }
+  /**
+   * THE PROGRAM THE PAGE OPENS ON — Plan 7 part 6a spec §4.4: the stored one if `parseProgram` takes it, otherwise the
+   * first-load example under the default encoding. A refusal is silent, since it cannot be told from a first visit
+   * (`program-store.ts`'s own doc).
+   *
+   * **CHOSEN HERE, AFTER `init()`, BECAUSE AN ENCODING IS VALID ONLY IF `encodings()` LISTS IT**, and before anything
+   * reads it: the editor's document, the language server's first text and the start-up compile are its three uses.
+   * The picker is set from it now, since a compile reads `picker.value` when it posts, and the encoding is kept across
+   * reloads for the first time.
+   */
+  const loaded = parseProgram(readProgramStorage(), encodings() as string[]) ?? {
+    text: FIRST_LOAD.text,
+    encoding: EXAMPLE_ENCODING,
+  }
+  picker.value = loaded.encoding
 
   let view: EditorView
   /** The source editor's document. Per view, never fetched, never parsed — see `documentUri`. */
@@ -1006,6 +1036,9 @@ async function main(): Promise<EditorView> {
    * What is fixed is the pretence: this flag means "reported at most once", never "shown for as long as
    * it matters".
    */
+  /** The notice line's resting sentence about storage, in two halves: the copies' and the program's (`unsaved.ts`). */
+  const unsaved = createUnsaved((line) => notices.rest(line))
+
   /**
    * Say that copies are no longer being saved.
    *
@@ -1023,17 +1056,22 @@ async function main(): Promise<EditorView> {
    * user may have cleared storage or deleted copies since, and a warning that outlives its condition
    * teaches a reader to ignore the line. Setting it twice with the same words is a no-op, so the
    * once-per-page-load flag this used to keep is gone — "reported twice" is not a state this can reach.
-   * The wording says the CONSEQUENCE and not the cause: `QuotaExceededError` is true and useless, and
-   * what the user needs to know is that closing the tab now loses work.
+   * The wording leads with the CONSEQUENCE and not the exception: `QuotaExceededError` is true and useless,
+   * and what the user needs to know is that closing the tab now loses work. The cause follows in words —
+   * the storage is full, or blocked (`unsaved.ts`'s `refusalOf`) — because the remedies differ.
    *
    * **IT NEEDS ONLY `notices`, WHICH EXISTS BEFORE `init()`.** It used to write through `linkWiring` and
    * `draw()`, both `let`s that stay `undefined` until further down this function, so its callers had to
    * be ordered after both — an ordering that cost three attempts and two `TypeError`s, and that nothing
    * here depends on any more. `refreshBuffers`'s own start-up call, near the end of `main()`, carries
    * what is left of that argument.
+   *
+   * **HALF OF ONE SENTENCE SINCE PLAN 7 PART 6a** (spec §4.3): the program's writer below reports into the same
+   * resting line, and `unsaved.ts` words whichever of the two is failing. While only the copies fail, the line reads
+   * as it always did.
    */
-  const reportStorageFailure = (): void => {
-    notices.rest('copies are not being saved — this browser’s storage for this site is full')
+  const reportStorageFailure = (why: Refusal): void => {
+    unsaved.refused('copies', why)
   }
 
   /**
@@ -1056,11 +1094,11 @@ async function main(): Promise<EditorView> {
   const writeBuffersStorage = (raw: string, hasBuffers: boolean): void => {
     try {
       localStorage.setItem(BUFFERS_STORAGE_KEY, raw)
-      // THE CONDITION ENDED, SO THE WARNING DOES — `reportStorageFailure`'s own doc has the argument.
-      // `rest(null)` on a line that is not resting on anything costs a comparison.
-      notices.rest(null)
-    } catch {
-      if (hasBuffers) reportStorageFailure()
+      // THE CONDITION ENDED, SO THE WARNING DOES — its copies half: `reportStorageFailure`'s own doc has the
+      // argument, and a program that is still not being saved keeps its own half.
+      unsaved.saved('copies')
+    } catch (thrown) {
+      if (hasBuffers) reportStorageFailure(refusalOf(thrown))
     }
   }
 
@@ -1101,6 +1139,36 @@ async function main(): Promise<EditorView> {
     // `raw` inside the catch.
     const payload = scratchpad.snapshot(bindings)
     writeBuffersStorage(serializeBuffers(payload), payload.buffers.length > 0)
+  }
+
+  /**
+   * What a reload would open on: the last program a write stored, or the one the page loaded while none has been — the
+   * stored one, or the first-load example where nothing was stored or `parseProgram` refused what was.
+   */
+  let restorable: StoredProgram = loaded
+
+  /**
+   * Store the program — `compile.ts` calls this as each compile posts, with the text and the encoding it posted (Plan 7
+   * part 6a spec §4.3).
+   *
+   * **A REFUSED WRITE IS REPORTED ONLY WHILE THE PROGRAM DIFFERS FROM WHAT A RELOAD WOULD RESTORE** (spec row 17), as
+   * the copies' writer reports only when there are copies to lose (`hasBuffers`, above). A program a reload would not
+   * give back is work not yet saved; the first-load example, or a stored program only looked at, is not — so a visitor
+   * on blocked storage who only looks at the example sees no resting line, and one who edits it is told from their
+   * first edit's write on. **COMPARED AT EVERY WRITE RATHER THAN LATCHED**, so an edit undone before its write never
+   * counts, and a program edited away and back is taken back off the line: a reload would restore exactly what the page
+   * shows. That refines row 17's "changed from what was loaded", under which a change once made was reported for the
+   * rest of the page load.
+   */
+  const writeProgramStorage = (text: string, encoding: string): void => {
+    try {
+      localStorage.setItem(PROGRAM_STORAGE_KEY, serializeProgram({ text, encoding }))
+      restorable = { text, encoding }
+      unsaved.saved('program')
+    } catch (thrown) {
+      if (text !== restorable.text || encoding !== restorable.encoding) unsaved.refused('program', refusalOf(thrown))
+      else unsaved.saved('program')
+    }
   }
 
   /**
@@ -1544,6 +1612,72 @@ async function main(): Promise<EditorView> {
   )
 
   /**
+   * Put `program` in the source editor: its encoding into the picker, and its text in one dispatch, whose update
+   * listener clears the link state and schedules the compile as it does for any edit. The compile reads the picker
+   * when it posts, `DEBOUNCE_MS` later, so it posts the two together.
+   */
+  const replaceProgram = (program: StoredProgram): void => {
+    picker.value = program.encoding
+    view.dispatch({ changes: { from: 0, to: view.state.doc.length, insert: program.text } })
+  }
+
+  /**
+   * The last pick's notice, offering its `undo`. The source editor's update listener ends it at every edit that changes
+   * the program, and the picker at every encoding chosen in it, which does nothing once it is off the line.
+   */
+  let pick: Notice | null = null
+  // A CHOICE OF ENCODING IS HALF OF WHAT THE UNDO PUTS BACK, so it goes at one too. A pick and its undo set the picker
+  // by assignment, which fires no `change`, so neither ends its own notice.
+  picker.addEventListener('change', () => pick?.dismiss())
+
+  /**
+   * PICK AN EXAMPLE — Plan 7 part 6a spec §4.5. It replaces the program at once, under the default encoding, since the
+   * manifest's outcomes and descriptions are that encoding's; the workspace is untouched. The notice's `undo` puts back
+   * the text and the encoding it replaced, and so recompiles.
+   *
+   * **THE UNDO IS WITHDRAWN AT THE NEXT EDIT THAT CHANGES THE PROGRAM**, typed or otherwise, and by the next pick,
+   * whose own replacement is such an edit. It puts back the whole document the pick replaced, so offered past an edit
+   * it would throw that edit away with the example. An edit that leaves the document as it was — a format pass on text
+   * already formatted — has nothing to lose, and leaves the undo where it is. **AND AT THE NEXT ENCODING CHOSEN IN THE
+   * PICKER**, which the undo would take back with the encoding the pick replaced.
+   *
+   * **THE EDITOR'S OWN UNDO STEPS BACK THROUGH A PICK TOO, AND PUTS BACK THE TEXT ALONE**, leaving the encoding at
+   * `unary`. That is left as it is: the editor's history holds the text, and no encoding chosen in the picker has ever
+   * been in it — undoing in the editor after choosing `binary` by hand does not put `unary` back either — so a pick's
+   * encoding is the notice's `undo` to put back, and otherwise the picker's to change.
+   *
+   * **UNDO REMOVES THE CONTROL IT WAS ACTIVATED FROM, SO IT OWES THE FOCUS SOMEWHERE**, as a delete's undo does: the
+   * source editor, where the program came back — or, where no view shows the source and the editor is off the page,
+   * `examples ▾`, where the pick was made. An editor off the page takes no focus, and `examples ▾` takes it then
+   * whether or not the focus was on the undo. **AN UNDO THAT GOES UNUSED GIVES THE FOCUS THERE TOO**: one the focus is
+   * on when it runs out, or is drawn over by a notice with no action of its own, names `examples ▾` as its `fallback`,
+   * and not the copies button the notice line falls back to for a copy's undo, which has nothing to do with the program.
+   *
+   * **AND IT SAYS SO, ONCE THE FOCUS HAS MOVED**, on the notice line and in the live region, as a delete's undo says
+   * `… restored at step 0`: umbrella §4's rule that a gesture's result is said in the one live region. Said after the
+   * focus lands, so the sentence is not spoken over by the editor or the button taking it.
+   */
+  const openExample = (example: Example): void => {
+    const before: StoredProgram = { text: view.state.doc.toString(), encoding: picker.value }
+    replaceProgram({ text: example.text, encoding: EXAMPLE_ENCODING })
+    pick = notices.notify(`opened the example ${example.title}`, {
+      action: {
+        label: 'undo',
+        fallback: () => examplesButton,
+        run: () => {
+          replaceProgram(before)
+          view.focus()
+          if (!view.hasFocus) examplesButton.focus()
+          notices.notify('put back the program')
+        },
+      },
+    })
+  }
+
+  // `examples ▾` — spec §4.2: built on each open, as `+ view`'s menu is, from the manifest.
+  wireMenu(examplesButton, examplesMenu, () => exampleItems(examplesMenu, EXAMPLES, openExample))
+
+  /**
    * Undo a delete — spec §10. The copy comes back under its own id and name, COLD, and is warmed; a
    * refusal at the cap leaves it paused, which is still a copy restored. The views the delete moved to
    * the program move back if they still exist and still show the program, and the first of them mounts the
@@ -1853,7 +1987,7 @@ async function main(): Promise<EditorView> {
   // `linkWiring`/`draw`/`view` are all still `undefined` at this point in `main()` — a restored page's
   // first buffers write, refused, threw a bare `TypeError` out of `main()` and killed the page. The
   // call is still made, unconditionally, on every page load; it has just moved past all three
-  // assignments and past the app's own initial `compile.schedule(SAMPLE)`. That call site, near the end
+  // assignments and past the app's own initial `compile.schedule(loaded.text)`. That call site, near the end
   // of `main()`, carries the argument — including which of those constraints Plan 7 part 2 spent.
 
   /**
@@ -1871,7 +2005,7 @@ async function main(): Promise<EditorView> {
    * `paneHost.applyLayout()` has ever run once.
    *
    * **TWO MORE CALLS REACH `draw()` BEFORE `applyLayout()` DOES, NEITHER THROUGH
-   * `reportStorageFailure()`.** `compile.schedule(SAMPLE)` — this file's own start-up compile — is now
+   * `reportStorageFailure()`.** `compile.schedule(loaded.text)` — this file's own start-up compile — is now
    * the first `draw()` of the app's life, ahead of the one inside `paneHost.applyLayout()` itself,
    * reached through `client.supersede()`'s `onSupersede` callback. The restore's warming loop reaches
    * it the same way, once per warmed session: `scratchpad.warm(session)` spawns a worker, and the spawn
@@ -1977,6 +2111,7 @@ async function main(): Promise<EditorView> {
     picker,
     view: () => view,
     sourceSession: SOURCE_SESSION,
+    persist: writeProgramStorage,
   })
 
   /**
@@ -2032,7 +2167,7 @@ async function main(): Promise<EditorView> {
   view = new EditorView({
     parent: editorHost,
     state: EditorState.create({
-      doc: SAMPLE,
+      doc: loaded.text,
       extensions: [
         lineNumbers(),
         history(),
@@ -2108,6 +2243,11 @@ async function main(): Promise<EditorView> {
         EditorView.contentAttributes.of({ 'aria-label': 'source program editor' }),
         EditorView.updateListener.of((u) => {
           if (!u.docChanged) return
+          // A PICK'S UNDO WOULD THROW THIS EDIT AWAY, so it goes now — `openExample`'s own doc. **UNLESS THE EDIT LEFT
+          // THE DOCUMENT AS IT WAS**: the language server answers a format of text already formatted with one edit
+          // replacing the whole document by the same text, so with *format on blur* on, leaving the editor for the
+          // undo would otherwise end it on the way there, and nothing that edit did could be lost.
+          if (!u.startState.doc.eq(u.state.doc)) pick?.dismiss()
           const src = u.state.doc.toString()
           // NO HIGHLIGHTING DISPATCH HERE ANY MORE. `classifySource` used to be called synchronously on
           // this line, in the same frame as the keystroke; the colourer above is a `ViewPlugin` that
@@ -2189,7 +2329,7 @@ async function main(): Promise<EditorView> {
   // **THE SINK IS PART OF OPENING THE DOCUMENT**, so there is no router to keep in step and no way
   // for this editor to receive another document's diagnostics. Every copy's editor opens its own the
   // same way, from inside `ScratchEditor`.
-  lspClient.openDocument(SOURCE_URI, 'redextape', SAMPLE, {
+  lspClient.openDocument(SOURCE_URI, 'redextape', loaded.text, {
     diagnostics: (ds) => {
       view.dispatch(setCmDiagnostics(view.state, lspLintRanges(ds, view.state.doc)))
       // ONE SETTLED EDIT, ONE PUBLISH — so this is the cheapest signal that the server has caught
@@ -2199,13 +2339,13 @@ async function main(): Promise<EditorView> {
   })
   sourceMenu.setFormattable(true)
 
-  compile.schedule(SAMPLE)
+  compile.schedule(loaded.text)
 
-  // **THE START-UP CALL, AFTER `compile.schedule(SAMPLE)`, AND THE ORDERING THAT FORCED IT IS SPENT.**
+  // **THE START-UP CALL, AFTER `compile.schedule(loaded.text)`, AND THE ORDERING THAT FORCED IT IS SPENT.**
   // This call sat right after `refreshBuffers`'s own definition until 5d-ii-d, and moved three times:
   // `reportStorageFailure` wrote through `linkWiring` and `draw()`, both `let`s that stay `undefined`
   // until far below that definition, so an early call threw a `TypeError` and killed the page; and a
-  // call placed after `view = new EditorView(...)` was wiped by `compile.schedule(SAMPLE)`'s own
+  // call placed after `view = new EditorView(...)` was wiped by `compile.schedule(loaded.text)`'s own
   // unconditional clear of the fork-failure line before anyone could read it.
   //
   // **NEITHER CONSTRAINT SURVIVES PLAN 7 PART 2.** The report is the notice line's resting state
@@ -2278,10 +2418,10 @@ async function main(): Promise<EditorView> {
   // still "one call, at the very end of `main()`, after everything else is wired" (`view` included:
   // `linkWiring`/`draw`/`compile`/`replies` all close over it as a thunk; `draw()`'s own body reads
   // `view()` directly, and has already done so above this line — once from
-  // `compile.schedule(SAMPLE)`, and once per warmed session from the restore loop — both through
+  // `compile.schedule(loaded.text)`, and once per warmed session from the restore loop — both through
   // `client.supersede()`). **THE RESTORE'S WARMING LOOP NOW SITS ABOVE IT, AND WHAT SURVIVES IS
   // NARROWER THAN "READS NO PANE"**: each spawn's `client.supersede()` reaches `draw()` the same way
-  // `compile.schedule(SAMPLE)` does, so the loop reads `panes` now too. `applyLayout` remains the only
+  // `compile.schedule(loaded.text)` does, so the loop reads `panes` now too. `applyLayout` remains the only
   // thing that ever populates `panes` (`THE LINK STATE` comment above), so those reads run against a
   // collection that is genuinely empty, and it remains true that nothing before this line has BUILT
   // one.
