@@ -22076,3 +22076,91 @@ commits map `314e7a2` → `1fd42f4`, `2b31654` → `2dbf663`, `ad3f7f4` → `5b6
 figure above was measured before the rebase, on the commits left of each arrow, over a base without #114's change
 (`web/src/style.css` only); the rebased commits carry the same change over a base with it, and CI re-runs every gate
 on them. The measurements named at `fb1067d` are `main` as it stood then.
+
+#### THE λ BODY STAYS FOLLOWING WHEN THE WINDOW GROWS: A WINDOW RESIZE REPORTS THE CLAMP'S `scroll` BEFORE THE BODY'S RESIZE OBSERVER, THE PATH #115'S ENTRY SAID WAS NEVER FOUND, AND #115'S TEST RESIZED THE IFRAME IT RAN IN, NOT THE WINDOW (2026-09-29, branch `lambda-follow-window-grow`, `0ba1f7e..ed9f856`, 8 commits, four of them this entry's earlier versions, `2f7b088`, `66e4264`, `a963145` and `ed9f856`, plus this revision)
+
+**A fix, in `web/` only, to a finding against #115 on `main`.** #115's entry said of the λ body: "On a window resize the observer runs before the clamp's `scroll`, so its `onResize` is what records the clamp", and "The scroll handler's height check was not added. No path was found on which the body's clamp `scroll` comes before its observer." An independent review of `0ba1f7e..2f7b088` found no code bug; its findings on the test's docs, its restore and this entry were fixed in `2dd93b1` and `66e4264`, and its re-review's in `97d039a`, `23ecbac` and this revision.
+
+##### WHAT THE CHECK FOUND
+
+- **A combined pre-merge check of the built app, in headless Chromium,** grew the window from 900×600 to 900×1000 with a λ view following a redex at its term's end. The body grew from 360 to 600 px, its scroll was clamped from 400 to 160, and "follow redex" appeared: the clamp read as the user's scroll. The page's own log had the body's `scroll` before its resize report, in the same frame. Growing to 1600×1000 did the same. A width-only resize, to 1600×600, clamped nothing and stayed following. It happened on `main` with #115.
+- **Replayed here with the checker's script** against this worktree's build with `fb1067d`'s `lambda-body.ts`, and the same three results.
+- **Why #115's test missed it.** Under the Playwright provider, `page.viewport` sets the CSS size of the iframe vitest runs the test in, from vitest's page around it; it does not resize the window. #115's case grew that frame, and there, in every kept run, the observer came first. The window's order is the reverse.
+- **What "mostly" in `c365d54`'s commit message rests on.** Two early probe runs, not kept, had the clamp's `scroll` first for a frame resize: each time the first 900×1000 case of a new probe file, and the body detached. No kept run did: the frame sabotage below gave `['resize', 'scroll']` five runs of five, and #115's frame case passed eleven runs of eleven against `fb1067d`'s body. Unresolved: if a frame resize can deliver the `scroll` first, #115's frame case can fail on `main`.
+
+##### WHAT CHANGED
+
+- **The body does what `VirtualGrid`'s scroll handler does.** It records its height at each paint (`#drawnHeight`), and a `scroll` on a box whose height has changed since is first read as a possible clamp (`Follow.onResize`), then as a scroll. The zero-height guard #115 added stays ahead of it.
+- **Flat text records its height too**, in the paint that returns before a tree. Without that, the record stayed at the last tree's height, every scroll of flat text of another height read as a clamp, and the user could not take control of flat text as they can of a tree. The resize observer's repaint reaches that path after any change of the flat text's height.
+- **`lambda-follow.test.ts` resizes the window.** `inWindow` sizes the test's iframe to the top-level page's viewport and changes that viewport through CDP's `Emulation.setDeviceMetricsOverride`, the command Playwright's `setViewportSize` sends, then puts both back, whether or not the case failed: the frame's style first, which cannot throw, then the viewport, screen size, scale and orientation it read from the page before, the fields Playwright's own override sets for a desktop page, and it waits until the page reports all of them again. A restore that fails after the case has failed is reported with the case's own failure, in an `AggregateError`, rather than in its place. The new case grows the window from 600 to 1000 px and asserts the order it is about, the clamp's `scroll` before the resize report, before asserting that following held. Two flat-text cases hold the flat record: flat text taller than the tree before it, and flat text grown by the window.
+
+##### WHAT PROVING IT FOUND
+
+Every run below went over whole files, never with `-t`, and each touched file was restored from a saved copy and checked with `cmp`.
+
+- **Failing, then passing.** The window case fails on `fb1067d`'s `lambda-body.ts` with "the clamp was not the user scrolling: expected false to be true", in three runs of three. The order assertion before it passed each time. It passes at `c365d54`.
+- **In the built app,** the checker's script at `c365d54` stays following for 900×1000 and 1600×1000, with the same clamp from 400 to 160 and the same order, `scroll` then resize.
+- **Sabotages**, over `lambda-follow`, `lambda-body` and `term-map`:
+  - No height check: fails the window case.
+  - A tree's paint records no height: fails the two cases of a user's scroll detaching the view that #106 added (`ec79f21`).
+  - A flat paint records no height: fails both flat cases.
+  - The window case growing the frame instead of the window: fails its order assertion, `['resize', 'scroll']`.
+  - `inWindow`'s restore leaving the window a pixel short: times the case out, "waiting for the page to be as it was".
+- **The restore's two failure paths, once each** (`97d039a`). The window case failing with no height check reports its assertion. Failing with the restore also a pixel short, it reports the assertion first and the timeout after it. With `2dd93b1`'s `finally`, the same two failures reported only the timeout.
+- **Two parts were tried and taken out**, because no test could show them:
+  - A record of flat text's height in `showFlat`: removing it failed nothing, because the observer's repaint records it.
+  - `> 0` guards on the record, as the grid has: removing them failed nothing. A height of 0 recorded off the page is never compared, because the scroll handler returns first on a box of no height, and the observer's repaint records the height the box comes back at.
+- **A case written for `showFlat`'s record was not kept.** It seemed to fail only without the record; run with it, it failed as well. Scrolling in the same task as the flat text meets the known class below, where the observer's `onResize` reads a user's scroll as the clamp.
+- **Every browser file touching the λ body** passed three runs of three at `23ecbac`.
+
+##### WHAT THIS DID NOT CLOSE
+
+- **A user's scroll landing just after a clamp can still be read as the clamp's echo** (#115's entry). With the observer first, its `onResize` records where a user's scroll in the same frame left the box.
+- **#115's frame-resize cases still use `page.viewport`.** In every kept run they took the observer-first path, which `Follow.onResize` in the observer answers; the two unkept probe runs above did not, and whether a frame resize can deliver the `scroll` first is unresolved.
+- **The height check can read one user scroll as a clamp, at any distance.** A user's `scroll` that lands after the body's height changed and before the observer's repaint records the new height is read as the clamp, and the view follows the redex again once. The window is one rendering update, and the next scroll is compared against the recorded height, so it costs one snapped-back event and never locks the view. `VirtualGrid`'s scroll handler has the same exposure. It differs from #115's class above, which reads only a scroll within `ECHO_TOLERANCE` of the recorded clamp.
+
+##### VERIFICATION
+
+Run on 2026-09-29 at `23ecbac`, from `web/`, under the browser lock; `web/src` is the same there as at `c365d54`. The coverage runs were under `systemd-run --user --wait --collect --pipe -p MemoryMax=16G -p MemorySwapMax=0`.
+
+```
+pnpm exec biome ci --error-on-warnings  → exit 0, 281 files (1 info)
+pnpm run typecheck                      → exit 0
+pnpm run test:coverage                  → exit 0, 174 files / 1,605 tests; 97.06 / 90.76 / 97.9 / 98.56 against 95 / 89 / 97 / 97
+pnpm run build:app                      → exit 0
+scripts/check-{text-bytes,citations,attributions,doc-figures,shared-docs,lua,colours}.sh, each --self-test then alone → exit 0
+```
+
+The first coverage run at `c365d54` exited 1. `session-memory.test.ts`'s `measures three sessions at four legs against one session at two` measured a ratio of 2.999 against its bound of 2.5. The file passed alone two runs of two at `c365d54`, one run of one with `fb1067d`'s `lambda-body.ts`, and two runs of two at `23ecbac`, and the whole suite passed the next run at `c365d54`, the run at `2dd93b1` and the run at `23ecbac`. The failure's cause was not found.
+
+**Every count this entry quotes, with what produces it:**
+
+| Value | What | Produced by |
+|---|---|---|
+| 8 | commits in the range, `2f7b088`, `66e4264`, `a963145` and `ed9f856` among them | `git rev-list --count 0ba1f7e..ed9f856` |
+| +17/−2; +158/−3 | `lambda-body.ts`; `lambda-follow.test.ts` | `git diff --numstat 0ba1f7e..23ecbac -- web` |
+| 6 → 9 | cases in `lambda-follow.test.ts` | `git show <sha>:web/tests/browser/lambda-follow.test.ts \| grep -cE '^\s*it\('` at `fb1067d` and `23ecbac` |
+| 900×600 to 900×1000, 1600×1000, 1600×600; 360 to 600 px; 400 to 160 | the check's window sizes; the body's height; the clamp | the checker's `handcheck5.mjs` (scratch, not tracked), replayed with its `OUT` and Playwright path pointed at this worktree: `vite build` with `fb1067d`'s `lambda-body.ts`, `vite preview`, then `APP_URL=… TAG=main node handcheck5.mjs`; again with `c365d54`'s, `TAG=fix`; last run at `23ecbac` (`appcheck-main3.log`, `appcheck-fix3.log`) |
+| three of three | the window case failing on `fb1067d`'s `lambda-body.ts` | `pnpm exec vitest run --project browser tests/browser/lambda-follow.test.ts`, three runs before the fix, and three again at `23ecbac` with `fb1067d`'s `lambda-body.ts` swapped in (`replay6.log`) |
+| five | the sabotages, at `23ecbac` (`replay6.log`) | a replay script (scratch, not tracked) applying each and running `pnpm exec vitest run --project browser tests/browser/lambda-follow.test.ts tests/browser/lambda-body.test.ts tests/browser/term-map.test.ts`, or `lambda-follow` alone for the frame and restore sabotages |
+| 33 files, 252 tests; three of three | every browser file touching the λ body; runs at `23ecbac` (`lambda33-e55635a-{1,2,3}.log`) | `grep -rlE "LambdaBody\|LambdaPane\|lambda-body\|['\"\` ]\.term[ '\"\`\[.:]\|\.term'\|term-line\|term-reattach\|term-map\|follow redex" tests/browser/*.ts`, the helpers `lambda-deep.ts` and `lambda-text.ts` swapped for the tests that import them, less the probe `lambda-tree-cost.test.ts`; then `pnpm exec vitest run --project browser` over them |
+| 2.999 against 2.5; two of two, one of one, two of two | `session-memory`'s ratio in the first coverage run; its runs alone | the first coverage run's output; `pnpm exec vitest run --project browser tests/browser/session-memory.test.ts`, the last two at `23ecbac` (`session-memory-e55635a-{1,2}.log`) |
+| two; five of five; eleven of eleven | early probe runs with the frame's `scroll` first, not kept; the frame sabotage's `['resize', 'scroll']`; #115's frame case passing against `fb1067d`'s body | the probe runs' output was not saved; `replay2.log` to `replay6.log`, T1 once and R1–R3 one, one, three, three and three times |
+| the case's assertion alone; the assertion, then the timeout; the timeout alone | the window case failing with no height check; and with the restore a pixel short; the latter with `2dd93b1`'s `finally` | `pnpm exec vitest run --project browser tests/browser/lambda-follow.test.ts` under each sabotage (`paths-P1.log`, `paths-P2.log`, `paths-P2old.log`) |
+| 1280×720, screen 1280×720, scale 1, `landscape-primary` at 0 | what `inWindow` read from the page before changing it, and waits to read again | a probe throwing `was` from `inWindow`, at `23ecbac` (`was-probe-e55635a.log`), not tracked |
+| 281 files, 1 info | Biome | the block above |
+| 174 files, 1,605 tests; 97.06, 90.76, 97.9, 98.56; 95, 89, 97, 97 | the coverage run; its statements, branches, functions and lines; the floors | the block above; `vite.config.ts`'s `thresholds` |
+
+**REBASED ONTO `0ba1f7e` AFTER #114 AND #116, AND THE SHAs ABOVE ARE THE REBASED ONES.** #114, which styles the
+header's selects, and #116, which collects each finished browser-test file's page, merged first, in that order;
+their entries sit above this one. The branch was rebased onto each squash as it landed. Each rebase conflicted only
+in this file, where the branches appended entries, and each resolution rebuilt it as `main`'s roadmap plus this
+entry: every rebased commit's copy of the file was checked equal to the new base's followed by that commit's own
+version of this entry. No source file conflicted, and each rebased commit's change outside this file has the same
+patch id as the commit it replaces. The commits map `2a06236` → `c365d54`, `016013d` → `2f7b088`, `949be8e` →
+`2dd93b1`, `073fe47` → `66e4264`, `5414bc4` → `97d039a`, `e55635a` → `23ecbac` and `e327176` → `a963145`, and the
+first rebase's own note, `eda0fb3`, is `ed9f856`; the scratch logs keep the names they were written under, such as
+`lambda33-e55635a-1.log`. Every figure above was measured before the rebases, on the commits left of each arrow,
+over a base without #114's and #116's changes; the rebased commits carry the same change over a base with them, and
+CI re-runs every gate on them. `fb1067d`'s `lambda-body.ts`, which the comparisons above name, is `main`'s as it
+stood before this branch, and neither #114 nor #116 changed it.

@@ -193,6 +193,8 @@ export class LambdaBody {
   #outline = false
   #active = 0
   #painted = ''
+  /** The body's height at its last paint: how its `scroll` handler tells a clamp from a user's scroll. */
+  #drawnHeight = 0
 
   constructor(on: BodyEvents) {
     this.#on = on
@@ -215,6 +217,11 @@ export class LambdaBody {
       // nobody had touched, which came back at the top with "follow redex" offered. Nobody can scroll a body that is
       // not on the page, so there is nothing here to honour.
       if (this.el.clientHeight === 0) return
+      // A BOX THAT CHANGED HEIGHT SINCE ITS LAST PAINT MAY HAVE HAD ITS SCROLL CLAMPED, and a window resize reports
+      // that clamp's `scroll` BEFORE the resize observer below runs: measured in the built app, a window grown from
+      // 600 to 1000 px tall clamped a body following a redex at its term's end from 400 to 160, and the clamp read as
+      // the user's scroll detached it. The observer's own `onResize` cannot record a clamp it runs after.
+      if (this.el.clientHeight !== this.#drawnHeight) this.#follow.onResize(this.el.scrollTop)
       this.#follow.onScroll(this.el.scrollTop)
       this.#paint()
       this.#on.scrolled?.()
@@ -223,7 +230,8 @@ export class LambdaBody {
     this.el.addEventListener('keydown', (e) => this.#key(e))
     // THE BODY'S HEIGHT CHANGES WITH NOTHING THE VIEW DRAWS: `.term` is capped at `60vh`, so the window resizes it, and
     // a view put back on the page comes back from 0. A body following near the term's end then has its scroll clamped,
-    // whose `scroll` comes after this callback and must not read as the user's (`Follow.onResize`); one following
+    // and the clamp's `scroll` must not read as the user's: when it comes after this callback, `Follow.onResize` here
+    // records it, and when it comes before — a window resize — the scroll handler's height check does. One following
     // mid-term has rows to draw that the old window did not reach, and a redex to centre in the new height. The term
     // map is told too: a box that grew or shrank shows other lines with no `scroll` to say so.
     new ResizeObserver(() => {
@@ -366,11 +374,18 @@ export class LambdaBody {
   #paint(): void {
     this.#tell()
     const tree = this.#tree
-    if (tree === null) return
+    if (tree === null) {
+      // FLAT TEXT'S HEIGHT IS RECORDED AS IT STANDS: the browser lays it out, not this paint. Left at the last tree's,
+      // every scroll of flat text of another height read as a clamp, and the user could not take control of it as they
+      // can of a tree. A paint reaches here after any change of the flat text's height, from the resize observer.
+      this.#drawnHeight = this.el.clientHeight
+      return
+    }
     const total = this.#lines.length * LINE_HEIGHT
     this.#spacer.style.height = `${total}px`
     // READ AFTER THE RESIZE: `.term`'s height follows its content up to its cap.
     const viewport = this.el.clientHeight
+    this.#drawnHeight = viewport
     const redex = tree.wire.nextRedex
     if (redex !== null) {
       const at = lineOf(tree, this.#lines, redex)
