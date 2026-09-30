@@ -21951,3 +21951,128 @@ rebases, on the commits left of each arrow, over a base without #113's and #115'
 the same change over a base with them, and CI re-runs every gate on them. The first rebased head's CI run (481)
 failed only in `rust-browser`'s set-up, where the download of Chrome's apt signing key returned no key (`gpg: no
 valid OpenPGP data found`), before any test ran; `web` passed in that run.
+
+#### BROWSER TESTS COLLECT THE PREVIOUS FILE'S PAGE AS EACH FILE STARTS, AND THE WEB COVERAGE RUN'S PEAK FALLS FROM 14.6 AND 15.0 GiB TO 8.9 AND 7.4 GiB IN THE SAME WALL TIME — THE MEMORY WAS GARBAGE FROM FILES ALREADY FINISHED, NOT MEMORY IN USE, AND `--maxWorkers` NEVER REACHED THE BROWSER PROJECT (2026-09-29, branch `browser-tests-gc-per-file`, `52d4f00..c2279b7`, 4 commits — two of code and two of this entry's earlier versions, `2dbf663` and `c2279b7` — plus this update)
+
+**A test-harness fix, in `web/` only.** It closes the previous entry's leftover "The web suite under coverage peaks at the cap the lane's gate runs it under": that entry had three of nine runs killed at 16 GiB and the rest peaking at 15.2 to 15.9 GiB. The same gate now peaks at 7.5 GiB.
+
+##### THE MECHANISM
+
+- **A finished file's page is removed only when its tab starts the next file.** Vitest's browser orchestrator removes every iframe it holds at the top of `createTesters`, just before it builds the next one. Nothing collects the removed page while the tab stays busy: its heap, its app, and the handles of its workers (which do die with it). Each of the twelve tabs runs about ten files in a row.
+- **Chrome's shared memory went with it, into `/tmp`.** Playwright launches Chromium with `--disable-dev-shm-usage`, so those segments are files in `/tmp`, a RAM tmpfs on this machine. Before the fix, each run took 4.1 to 5.7 GiB of `/tmp`, and one left 0.27 GiB free.
+- **It shows once most tabs are idle.** In one 12-tab run at `696b2b2`, with nine of the twelve tabs idle, the renderers' memory fell from 8.2 to 5.1 GiB, and the unit's shared memory from 3.7 to 0.08 GiB, between two samples 2 s apart.
+- **The fix.** `tests/browser/setup.ts` calls `gc()` twice before the test file's own module body runs. A setup file runs after the previous page is removed, while a `gc()` in a finishing file's `afterAll` would run while its own page is still there. The calls sit below `setup.ts`'s stylesheet import, which runs first wherever it is written, since a static `import` is evaluated before any statement in its module (`5b67a38`, from the review; `1fd42f4`'s doc said "before anything else"). Two calls is what was measured; one call alone was not. If `gc` is missing, `setup.ts` throws an error that names `--js-flags=--expose-gc`, the flag `vite.config.ts` already passed for `frame-cost.test.ts` and the memory tests; its comment now says every file needs it.
+
+##### BEFORE AND AFTER
+
+Two runs a side, at `fb1067d` and at `1fd42f4`, alternating with other lanes' runs under the shared browser lock. Each ran under a 24 GiB cap with no swap, at the default twelve tabs, sampled once a second.
+
+| | before | after |
+|---|---|---|
+| `test:coverage` peak | 14.6, 15.0 GiB | 8.9, 7.4 GiB |
+| browser project peak | 13.3, 14.1 GiB | 6.9, 7.1 GiB |
+| shared memory at its most, all four runs a side | 4.07 to 5.60 GiB | 0.26 to 0.31 GiB |
+| `/tmp` taken at the run's most, all four runs a side | 4.12 to 5.68 GiB | 0.27 to 0.28 GiB |
+| `test:coverage` duration | 43.27, 37.63 s | 39.39, 37.59 s |
+| browser project duration | 34.70, 34.99 s | 35.50, 35.51 s |
+| `test:coverage` result | 174 files, 1,602 tests, each run | the same |
+| browser project result | 121 files, 818 tests, each run | the same |
+| coverage | 97.06 / 90.76 / 97.9 / 98.56; 96.98 / 90.7 / 97.9 / 98.49 | 97.06 / 90.76 / 97.9 / 98.56, twice |
+| load average as each run started | 10.09 to 14.24 | 6.45 to 11.28 |
+
+##### `--maxWorkers` NEVER REACHED THE BROWSER PROJECT
+
+- **How many tabs the browser pool opens.** Vitest 4.1.10's browser pool takes `maxWorkers` from the project's own config. Without it, it opens `min(12, cores − 1)` tabs: 12 on this 32-thread machine.
+- **The CLI flag is not passed to projects.** `--maxWorkers` is not in the list of CLI options vitest copies onto inline projects. `--maxWorkers=1` at `696b2b2` still opened 12 renderers.
+- **What does reach it.** `VITEST_MAX_WORKERS`, or `maxWorkers` in the browser project's `test` block. Runs with the variable at 1, 2 and 4 opened that many renderers.
+- **So the gate's earlier passes "with `--maxWorkers=4`" throttled only the node project.**
+
+##### WHAT GREW, AND WHEN
+
+The browser project's peak at earlier merges on `main`, two runs a point (three at `696b2b2`'s twelve tabs), each at twelve tabs and at four:
+
+| Commit | Files | 12 tabs: peak | 12 tabs: largest anonymous memory | 4 tabs: peak |
+|---|---|---|---|---|
+| `7d1ee20` (09-17) | 48 | 7.5, 10.5 | 6.91, 7.48 | 5.5, 4.6 |
+| `bc592b6` (part 2b) | 72 | 9.3, 10.1 | 6.99, 6.90 | 8.1, 6.1 |
+| `0bd07c5` (part 3b) | 83 | 9.8, 9.4 | 7.72, 7.72 | 6.1, 6.0 |
+| `ec79f21` (part 4a) | 95 | 9.2, 10.6 | 6.70, 7.12 | 5.1, 5.7 |
+| `899c8b2` (part 5a) | 104 | 11.7, 13.1 | 8.76, 8.86 | 6.5, 6.3 |
+| `18f8225` (part 5c) | 121 | 12.0, 14.3 | 8.88, 8.83 | 5.9, 6.8 |
+| `696b2b2` (#113) | 121 | 14.0, 11.9, 11.0 | 9.20, 8.80, 8.35 | 6.1, 7.3 |
+| `696b2b2` with this fix | 121 | 7.3, 7.2 | 6.95, 6.87 | 3.4, 3.4 |
+
+All figures are GiB.
+
+- **The cost of one mount barely moved.** `scratch-app.test.ts` alone drew 0.16 GiB in its renderer at `7d1ee20`, and 0.18 GiB at `0bd07c5` and at `696b2b2`, after the language server's worker and tree-sitter arrived.
+- **The growth came from:**
+  - the file count;
+  - heavier files, such as the state diagram's, which arrived between `ec79f21` and `899c8b2`;
+  - more files run in a row per tab, each leaving garbage;
+  - more short files churning through at the end of the run, which is when the shared-memory spike lands.
+- **The part 6a-i prototype, `c79f7c0`.** It peaked at 15.6 and 14.2 GiB, and at 8.3 and 8.2 GiB with this fix's two calls. The difference that remains against `696b2b2` with the fix, about 1 GiB, is most likely the live cost of its new files (`examples-menu.test.ts`'s renderer alone reached 0.61 and 0.63 GiB), but that was not isolated.
+
+##### THE TESTS
+
+- **The throw is the fix's own check.** Sabotaged by deleting `--js-flags=--expose-gc` from `vite.config.ts`, the browser project exited 1 in 3.63 s.
+  - 75 of 121 files failed with `Failed to import test file …/setup.ts`, caused by `BLOCKED: globalThis.gc is unavailable — launch Chromium with --js-flags=--expose-gc`, and no test ran.
+  - An unhandled `Cannot connect to the iframe` for `layout-restore.test.ts` then ended the run.
+  - The file was restored from a saved copy and checked with `cmp`.
+- **Removing the two calls fails nothing.** `fb1067d`'s tree, which has neither the calls nor the throw, is the "before" above, and every run of it passed. The memory this fix saves is held by the measurement above, not by any test.
+
+##### WHAT THIS DID NOT CLOSE
+
+- **The iframe-fetch flake.** Other lanes saw `Cannot connect to the iframe` or `Failed to fetch … setup.ts` 79 to 95 s into four-tab runs, after which the remaining files never ran. It did not reproduce here.
+  - **Suspected, unverified: a full `/tmp`.** Chrome's shared-memory segments come from `/tmp`, which every agent on this machine shares. The "before" runs above took up to 5.68 GiB of it and left as little as 0.27 GiB free. A failed shared-memory allocation could fail a fetch without killing anything.
+  - **That cannot be the only cause.** The sabotage above raised `Cannot connect to the iframe` in a run that lasted 3.63 s under no memory pressure, as 75 files failed within milliseconds of each other.
+- **`session-memory.test.ts`'s ratio assertions flake.** Two instances are known: `deltaRatio` 0.999 against its floor of 1.5, in one of this lane's 90 investigation runs (at `c79f7c0`, four tabs), and 2.999 against its ceiling of 2.5 in another lane's run. Neither was investigated.
+- **The tab count is unchanged.** CI's runners open `min(12, cores − 1)` tabs, however many cores they have; this fix works at any count. Nothing should rely on `--maxWorkers` to throttle the browser project.
+
+##### VERIFICATION
+
+Run on 2026-09-29 at `1fd42f4`, from `web/`, after `pnpm install --frozen-lockfile`, `pnpm run build:wasm`, `pnpm run build:lsp-wasm` and `pnpm run build:bindings` in this worktree. The coverage gate ran under `flock <the lanes' browser lock> systemd-run --user --wait --collect --pipe -p MemoryMax=16G -p MemorySwapMax=0` with `PATH`, `HOME`, `CARGO_HOME` and `RUSTUP_HOME` passed through.
+
+```
+pnpm exec biome ci --error-on-warnings  → exit 0, 281 files (1 info)
+pnpm run typecheck                      → exit 0
+pnpm run test:coverage                  → exit 0, 174 files / 1,602 tests; 97 / 90.7 / 97.98 / 98.51 against 95 / 89 / 97 / 97; peak 7.5 GiB
+pnpm run build:app                      → exit 0
+scripts/check-{text-bytes,citations,attributions,doc-figures,shared-docs,lua,colours}.sh, --self-test then alone, from the root → 14 of 14 exit 0
+```
+
+**At `5b67a38`, which changes only `setup.ts`'s doc**, Biome passed (281 files, 1 info), the hygiene scripts gave 14 of 14 exit 0 again, and the browser project, once under the harness below, passed 121 files and 818 tests in 35.56 s with a peak of 7.5 GiB.
+
+The Rust gates, `check-slow.sh` and the Docker image were not run, because the diff touches no Rust and adds no build output the web app imports.
+
+**The measurement harness** was a scratch script, not tracked. It ran a command under `flock <the lanes' browser lock> systemd-run --user --wait --collect --pipe -p MemoryMax=24G -p MemorySwapMax=0`, and a sampler read the unit's `memory.current`, `memory.stat`, each process's `smaps_rollup`, its renderers' `DedicatedWorker` threads and `/tmp`'s free space once a second. For the history and the tab counts, each commit got a worktree with the setup above (`build:lsp-wasm` from `0bd07c5` on), and the command was `pnpm exec vitest run --project browser --reporter=default --reporter=json --outputFile.json=<scratch>`. `18f8225` and `c79f7c0` reused `696b2b2`'s wasm, since no crate changed between them. A "with this fix" row ran the same command through an untracked config that added a second setup file, after `setup.ts`, making the same two calls.
+
+**Every count this entry quotes, with what produces it:**
+
+| Value | What | Produced by |
+|---|---|---|
+| 4; +30/−0, +3/−2 | commits in the range, `2dbf663` and `c2279b7` among them; `setup.ts`, `vite.config.ts` | `git rev-list --count 52d4f00..c2279b7`; `git diff --numstat 52d4f00..5b67a38 -- web` |
+| three of nine, 16 GiB, 15.2 to 15.9 GiB | the previous entry's coverage runs | that entry's WHAT THIS DID NOT CLOSE |
+| the before-and-after table | peaks, shared memory, `/tmp`, durations, results, coverage, load | the harness running `pnpm run test:coverage` and `pnpm exec vitest run --project browser`, twice each at `fb1067d` and twice each with `1fd42f4`'s two files; peaks from `systemd-run`'s `Memory peak`, durations, results and coverage from vitest's summary, shared memory from `memory.stat`, `/tmp` from the sampler's `statvfs`, load from `uptime` as the lock was taken |
+| 8.2 to 5.1 GiB; 3.7 to 0.08 GiB; 2 s; nine | renderers' memory and the unit's shared memory as the tabs went idle; the tabs idle | the harness's first 12-tab run at `696b2b2`, samples at 31 and 33 s, and the JSON report's file windows (three files running from 27 s) |
+| twelve; about ten | tabs; files per tab | `grep -n 'Math.min(12, numCpus - 1)' web/node_modules/vitest/dist/chunks/cli-api.*.js`, `nproc` (32); 121 files over 12 tabs |
+| `createTesters` removes every iframe | the orchestrator | `grep -n 'this.iframes.forEach((iframe) => iframe.remove());' web/node_modules/@vitest/browser/dist/client/__vitest_browser__/orchestrator-*.js` |
+| `--disable-dev-shm-usage` | Playwright's Chromium default | `grep -c '"--disable-dev-shm-usage"' web/node_modules/.pnpm/playwright-core@1.62.1/node_modules/playwright-core/lib/coreBundle.js` → 1, in `chromiumSwitches` |
+| not in the list; 12 renderers at `--maxWorkers=1`; 1, 2 and 4 | the CLI options copied onto projects; the renderers opened | `sed -n '/const cliOverrides = \[/,/\]/p' web/node_modules/vitest/dist/chunks/cli-api.*.js \| grep -c maxWorkers` → 0; the harness's renderer count, with `--maxWorkers=1` and with `VITEST_MAX_WORKERS` at 1, 2 and 4 |
+| the history table | peaks and largest anonymous memory per commit | the harness at each commit, at twelve tabs and with `VITEST_MAX_WORKERS=4`; files from `git ls-tree --name-only <sha> web/tests/browser/ \| grep -c '\.test\.ts$'` less the commit's `PROBE_FILES` |
+| 0.16, 0.18 GiB | `scratch-app.test.ts`'s renderer alone | the harness over `tests/browser/scratch-app.test.ts`, twice at each of the three commits |
+| 15.6, 14.2; 8.3, 8.2 GiB; 0.61, 0.63 GiB | `c79f7c0`, without and with the two calls; `examples-menu.test.ts`'s renderer alone | the harness at `c79f7c0`, over the whole project and over that file |
+| 3.63 s, 75 of 121, exit 1 | the sabotage | `flock … systemd-run … -p MemoryMax=16G … pnpm exec vitest run --project browser` with the flag deleted from `vite.config.ts` |
+| 79 to 95 s | when the flake struck in other lanes' runs | those lanes' logs, reported to this one; not reproduced here |
+| 0.999 against 1.5; 90; 2.999 against 2.5 | the ratio flake | this lane's run log (`session-memory.test.ts`'s `expect(deltaRatio).toBeGreaterThan(1.5)`); the investigation's run count, `ls runs/*.meta \| wc -l` in its scratch directory; another lane's log, reported to this one, not re-run |
+| 281 files, 1 info; 174, 1,602; 97, 90.7, 97.98, 98.51; 7.5 GiB; 14 of 14 | the gates at `1fd42f4` | the block above |
+| 281 files, 1 info; 14 of 14; 121, 818, 35.56 s, 7.5 GiB | Biome, the hygiene scripts and the browser project at `5b67a38` | `pnpm exec biome ci --error-on-warnings` on the tree just before the commit, and the pre-commit hook's; the same scripts; the harness running `pnpm exec vitest run --project browser` once |
+
+**REBASED ONTO `52d4f00` AFTER #114, AND THE SHAs ABOVE ARE THE REBASED ONES.** #114, which styles the header's
+selects, merged first; its entry sits above this one. The rebase conflicted only in this file, where both branches
+appended an entry, and the resolution rebuilt it as `main`'s roadmap plus this entry: every rebased commit's copy of
+the file was checked equal to `52d4f00`'s followed by that commit's own version of this entry. No source file
+conflicted, and each rebased commit's change outside this file has the same patch id as the commit it replaces. The
+commits map `314e7a2` → `1fd42f4`, `2b31654` → `2dbf663`, `ad3f7f4` → `5b67a38` and `d032ade` → `c2279b7`. Every
+figure above was measured before the rebase, on the commits left of each arrow, over a base without #114's change
+(`web/src/style.css` only); the rebased commits carry the same change over a base with it, and CI re-runs every gate
+on them. The measurements named at `fb1067d` are `main` as it stood then.

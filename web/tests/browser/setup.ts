@@ -19,6 +19,36 @@
 import '../../src/style.css'
 
 /**
+ * Browser-tier setup, before the test file's own module body: collect the page the previous test file left
+ * behind. IT SITS BELOW THE STYLESHEET'S IMPORT BECAUSE MOVING IT ABOVE WOULD CHANGE NOTHING: a static `import`
+ * is evaluated before any statement in its module, wherever it is written. What this frees does not depend on
+ * running first, only on running before the test file mounts anything of its own.
+ *
+ * A FINISHED FILE'S PAGE IS NOT REMOVED WHEN IT FINISHES, BUT WHEN ITS TAB STARTS THE NEXT FILE. Vitest's
+ * browser orchestrator removes every iframe it holds at the top of `createTesters`, just before it builds the
+ * next one, so by the time a setup file runs the previous file's page is gone. Its heap, its app, and the
+ * handles of the workers that died with it are garbage now and were not a moment ago. A `gc()` in a finishing
+ * file's `afterAll` runs while its own iframe is still in the page and can free none of it; only the START of
+ * the next file can.
+ *
+ * WITHOUT THIS, V8 LEFT THAT GARBAGE WHERE IT WAS WHILE THE TAB STAYED BUSY. Each tab runs about ten files in
+ * a row, and the renderers' memory fell by more than a third only once their tabs went idle at the end of the
+ * run. Chrome's shared memory went with it: Playwright launches Chromium with `--disable-dev-shm-usage`, so
+ * those segments are files in `/tmp`, a RAM tmpfs here, and every file loaded left more of them until a
+ * collection. The roadmap entry that added this has the measurement.
+ *
+ * TWICE, BECAUSE THAT IS WHAT WAS MEASURED; one call alone was not. A THROW, NOT A SKIP, WHEN `gc` IS MISSING:
+ * `--js-flags=--expose-gc` in `vite.config.ts` is what puts it there, and a guard that quietly did nothing
+ * would put the peak back with every test still green.
+ */
+const gc = (globalThis as typeof globalThis & { gc?: () => void }).gc
+if (typeof gc !== 'function') {
+  throw new Error('BLOCKED: globalThis.gc is unavailable — launch Chromium with --js-flags=--expose-gc')
+}
+gc()
+gc()
+
+/**
  * Browser-tier setup, part two: give every test file its own `Storage`, not the browser's real one.
  *
  * `localStorage` IS SCOPED TO AN ORIGIN, NOT TO A TEST FILE, AND VITEST RUNS BROWSER FILES CONCURRENTLY

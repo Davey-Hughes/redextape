@@ -391,8 +391,9 @@ export default defineConfig({
             enabled: true,
             provider: playwright({
               // TWO FLAGS, AND `frame-cost.test.ts` NEEDS BOTH — one to make the reading move at all,
-              // the other to make it mean something. Chromium-only, and harmless to every other browser
-              // test, which touch neither `performance.memory` nor `gc`.
+              // the other to make it mean something. Chromium-only. The second is no longer the probes'
+              // alone: `tests/browser/setup.ts` calls `gc` at the start of every browser file, to collect
+              // the page the file before it left, and throws if this flag is missing.
               //
               // `--enable-precise-memory-info` — `frame-cost.test.ts` reads
               // `performance.memory.usedJSHeapSize` to measure `SPAN_BYTES` for real. WITHOUT IT the
