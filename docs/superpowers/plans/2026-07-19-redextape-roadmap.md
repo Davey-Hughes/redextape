@@ -22887,3 +22887,61 @@ The 13 test files the branch adds hold 89 tests: 23 in the three node files and 
 | 19 of 20 | commits keeping their patch id through the first rebase | `git show <sha> \| git patch-id --stable` for each pair below |
 
 **REBASED TWICE, AND THE SHAs ABOVE ARE THE REBASED ONES.** First onto `e2a3a93` (#113 to #117), after 5b's re-review approved the branch: 20 commits to 20, nineteen keeping their patch id, and Task 3's differing only in context, its added and removed lines identical, since `tests/browser/setup.ts` now also holds #116's `gc()` calls. Then onto `d4d48e6` (#118 and #119), after the whole-branch review's fixes, as THE REBASE ONTO #118 AND PART 6b says. Each commit before the first rebase, after it, and now: `3ac7dd3` → `4544277` → `ca48a71`, `444c92c` → `382d91e` → `e878d1c`, `cc855a1` → `d1a47eb` → `15185dd`, `f175d18` → `0cc481b` → `209cf57`, `0f0e923` → `37ca9ab` → `80c3dc7`, `8a5d6b3` → `1d519a1` → `82bd13e`, `e4261e7` → `b2e2909` → `cf0e5e0`, `f0d7422` → `a95d120` → `9469650`, `54d8beb` → `b2d56a8` → `9dc7dca`, `a55b0ce` → `30a33fa` → `267cf6c`, `202e41a` → `4d9d83e` → `494ef44`, `cdcbc46` → `89f640f` → `e522e76`, `f4f8d88` → `014c94c` → `b6f2796`, `c96a44f` → `f03a38e` → `65e6c5f`, `0094177` → `64e6603` → `e26aff8`, `cec4010` → `0d1abd9` → `b973614`, `4fecfae` → `1e7ff86` → `d670590`, `c944fe0` → `91a5b87` → `1fff6b5`, `81204fc` → `bf5a3e3` → `040da91`, `c8f83c9` → `a5622c2` → `9d0b924`; and after the first rebase, this entry's first version, `4ab34e4` → `c0164b0`, and the whole-branch review's fixes, `ae8bf69` → `3d6fa60`, `4a21262` → `bb3926f`, `36978ca` → `764304c`, `f1b683a` → `0dae744`, `eeb6491` → `772f151`. The task reports, the 5b report and the plan name the commits left of the first arrows, and the whole-branch review and its fixes' report the ones between. The task and fix-round figures were measured on those; the check by hand ran on the tree after the first rebase, and the gates on the tree after the second.
+
+#### RUST 1.99's CLIPPY: THREE OF ITS LINTS FAIL `-D warnings` ON 23 LINES `main` HAD NOT CHANGED, AND EACH LINE TAKES THE CHANGE CLIPPY SUGGESTS (2026-10-01, branch `rust-1-99-clippy`, `f303fb9..9632b77`, 1 commit, plus this entry)
+
+`rust-toolchain.toml` tracks `stable`, and on 2026-10-01 rustup's stable channel moved from 1.98.1 to 1.99.0 (`b940084d7`, built 2026-09-28). Its clippy fails `-D warnings` on `f303fb9`, so `main` as it stands would fail CI's `rust` and `rust-llvm` jobs. One commit, `9632b77`, changes 23 lines in 9 files under `crates/`; no behaviour changes. #121 (share links), open now, will be rebased onto this; its roadmap entry was written before this one.
+
+##### WHAT FAILED, AND WHY
+
+- **#121's CI, run 505 on `ea23139` on 2026-10-01, installed 1.99.0.** Its `rust` and `rust-llvm` jobs failed at their first clippy leg, and `gate` failed on them; every other job that ran passed, and `rust-scoped` and `docker` were skipped. Run 504, `main`'s push of `f303fb9` on 2026-09-30, installed 1.98.1 and passed. Both failing logs name 4 errors, all in `redextape-core`'s lib: three `needless_borrows_for_generic_args` and one `manual_bit_width`.
+- **Those 4 were all CI could see, not all there were.** Once a crate fails clippy, no crate built on it is linted. Under 1.99.0, `cargo clippy --workspace --all-targets` on `f303fb9`, without `-D warnings`, reports 23: those 4, and 19 `assert_is_empty`, every one in a test module, 12 in `redextape-cli` and 7 in `redextape-lsp`.
+- **`assert_is_empty` and `manual_bit_width` come in through `clippy::pedantic`**, which the workspace `Cargo.toml` enables as written, and `needless_borrows_for_generic_args` through `clippy::all`. The comment on that `pedantic` line names this case: a new stable can add a pedantic lint that reddens CI with no code change.
+
+##### WHAT CHANGED
+
+Each of the 23 lines takes the change clippy's `help:` gives for it. No lint is allowed.
+
+- **`assert_is_empty`, 19 test assertions.** `assert!(x.is_empty())` becomes `assert_eq!(x, …)` and `assert!(!x.is_empty())` becomes `assert_ne!(x, …)`, against `""` for a `String` and `[] as [T; 0]` for a `Vec<T>`, so a failure prints the value. Each holds exactly when the old one did: a `String` equals `""`, and a `Vec` equals an empty array, exactly when it is empty.
+- **`needless_borrows_for_generic_args`, 3 sites in `lower_tm_all`.** `map_or(halt, &succ)` becomes `map_or(halt, succ)`. `succ` is a closure that captures only by shared reference, so it is `Copy`, and the same function is called.
+- **`manual_bit_width`, 1 site in `width_for`.** `usize::BITS - x.leading_zeros()` becomes `x.bit_width()`, which core defines as `Self::BITS - self.leading_zeros()`, returning the same `u32`; it has been stable since 1.97.0.
+
+##### WHAT THIS DID NOT CLOSE
+
+- **`rust-toolchain.toml` still tracks unpinned `stable`**, as its own comment chooses, so the next stable can do this again.
+- **The image does not build with the toolchain CI lints with.** Its wasm stage is `FROM rust:slim-bookworm`, also unpinned, and `docker build --pull` on 2026-10-01 resolved that tag to the digest run 504's `docker` job used, `ff521445…`, whose `rustc` is 1.98.1. The fix builds there because `bit_width` needs only 1.97.0. The image moves to 1.99 whenever that tag does, and no PR job builds it.
+
+##### VERIFICATION
+
+Run on 2026-10-01 at `9632b77`, under 1.99.0, from the worktree root, each Rust gate under `systemd-run --user --wait --collect --pipe -p MemoryMax=16G -p MemorySwapMax=0` with `PATH`, `HOME`, `CARGO_HOME` and `RUSTUP_HOME` passed through. `check-all` ran as two invocations, `--no-browser` and then `--browser-only` under `flock <the lanes' browser lock>`, so the lock was held only for the browser tier; `--list` shows the two select 30 and 3 rows, whose union is the 32 a bare run selects. LLVM was 22.1.8 at `/usr`, and tree-sitter the pinned 0.25.10, passed in `TREE_SITTER`. `cargo-llvm-cov` here is 0.9.1, where CI pins 0.8.7. The image was run with `--network host`, because the running kernel, 7.2.6-arch2-1, has no module tree until a reboot (only 7.2.7-arch1-1's is installed), so `veth` cannot load. The container and the image were removed afterwards. The seven scans ran again over this entry, before it was committed.
+
+```
+scripts/check-all.sh --no-browser            → exit 0; workspace leg 1,897 passed, 33 skipped; peak 10.3G
+flock … scripts/check-all.sh --browser-only  → exit 0; wasm-pack test, tests/browser.rs 33 passed
+cargo llvm-cov nextest --workspace --fail-under-lines 90 → exit 0; 1,897 passed, 33 skipped; lines 95.68% (1,409 of 32,607 missed); peak 8.9G
+scripts/check-slow.sh                        → exit 0; 33 passed, 0 failed; peak 7.4G
+scripts/check-{text-bytes,citations,attributions,doc-figures,shared-docs,lua,colours}.sh, --self-test then alone → 14 of 14 exit 0, at 9632b77 and over this entry
+docker build --pull --network=host, docker run -d --network host → exit 0; GET / 200, its two assets 200; health healthy; wasm stage rustc 1.98.1
+```
+
+**Every count this entry quotes, with what produces it:**
+
+| Value | What | Produced by |
+|---|---|---|
+| 1.98.1; 1.99.0, `b940084d7`, 2026-09-28; 2026-10-01 | run 504's toolchain; run 505's, its commit and build date; when the stable channel moved | the `info: latest update on …` line in each run's `rust` job log |
+| 504 on `f303fb9`, 2026-09-30; 505 on `ea23139`, 2026-10-01 | the two runs | each `rust` job log's first-line timestamp and checked-out SHA; #121's head-commit statuses |
+| 4; three and one; `redextape-core` (lib) | errors in each of run 505's failing jobs; borrows and `bit_width`; the crate | `grep -c` of each error message, and the `could not compile` line, in run 505's `rust` and `rust-llvm` job logs |
+| 23; 19, 3, 1; 12, 4, 7 | warnings on `f303fb9` under 1.99.0; per lint; in `redextape-cli`, `redextape-core`, `redextape-lsp` | `cargo clippy --workspace --all-targets --message-format=json` with `crates/` at `f303fb9`, each message's `code.code` and first span counted with `jq`; run twice, the same 23 both times |
+| 9 files, 23 lines | the fix | `git diff --shortstat f303fb9 9632b77` |
+| 1.97.0 | `bit_width` stable since | `#[stable(feature = "uint_bit_width", since = "1.97.0")]` in 1.99.0's `library/core/src/num/uint_macros.rs` |
+| 32; 30 and 3 | rows a bare `check-all` selects; those `--no-browser` and `--browser-only` select | `scripts/check-all.sh --list`, plain and with each flag, the union compared with `diff` |
+| 1,897, 33; 33 | the workspace nextest leg; the browser tier | `check-all`'s `Summary` line; `wasm-pack test`'s `test result` line |
+| 1,897, 33; 95.68%, 1,409, 32,607 | coverage's tests; its lines | `cargo llvm-cov nextest`'s `Summary` and `TOTAL` lines |
+| 33, 0 | the slow tier | `check-slow.sh`'s `test result` lines, summed |
+| 10.3G, 8.9G, 7.4G | peak memory of `check-all.sh --no-browser`, the coverage run and `check-slow.sh` | `systemd-run`'s `Memory peak` line for each run |
+| 14 of 14 | the scans | each script's exit status, at `9632b77` and over this entry |
+| 200, two assets 200; healthy | the image | `curl -s -o /dev/null -w '%{http_code}'` on `/` and on the two assets `/`'s HTML names; `docker inspect -f '{{.State.Health.Status}}'` |
+| 1.98.1; `ff521445…` | the image's wasm-stage `rustc`; the base digest | `docker build --network=host --target wasm`, every step cached, then `docker run --rm --network host <that stage> rustc --version`; the `FROM … rust:slim-bookworm@sha256:` line in this build's log and in run 504's `docker` job log |
+| 22.1.8; 0.25.10 | LLVM; tree-sitter | `/usr/bin/llvm-config --version`; `$TREE_SITTER --version` |
+| 0.9.1; 0.8.7 | `cargo-llvm-cov` here; CI's pin | `cargo llvm-cov --version`; the download URL in `.forgejo/workflows/ci.yml` |
+| 7.2.6-arch2-1; 7.2.7-arch1-1; `veth` | the running kernel; the only module tree installed; the module that cannot load | `uname -r`; `ls /lib/modules`; `modprobe -n -v veth`, which says `Module veth not found in directory /lib/modules/7.2.6-arch2-1` |

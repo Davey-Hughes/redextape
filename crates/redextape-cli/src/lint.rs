@@ -154,7 +154,7 @@ mod tests {
         let got = run(&[Input::from_arg(&p)], &mut out, &mut err, false).unwrap();
         assert!(matches!(got, Outcome::Failed), "got {got:?}");
         assert!(String::from_utf8(err).unwrap().contains("nope.rxt"), "the message must name the file");
-        assert!(out.is_empty());
+        assert_eq!(out, [] as [u8; 0]);
     }
 
     #[test]
@@ -206,7 +206,7 @@ mod tests {
         let (mut out, mut err) = (Vec::new(), Vec::new());
         let got = run(&[Input::from_arg(&warn), Input::from_arg(&error)], &mut out, &mut err, false).unwrap();
         assert!(matches!(got, Outcome::Errored), "the worst outcome wins: {got:?}");
-        assert!(out.is_empty());
+        assert_eq!(out, [] as [u8; 0]);
     }
 
     #[test]
@@ -219,7 +219,7 @@ mod tests {
         let (mut out, mut err) = (Vec::new(), Vec::new());
         let got = run(&[Input::from_arg(&error), Input::from_arg(&warn)], &mut out, &mut err, false).unwrap();
         assert!(matches!(got, Outcome::Errored), "order must not matter: {got:?}");
-        assert!(out.is_empty());
+        assert_eq!(out, [] as [u8; 0]);
     }
 
     // I1 (Task 6's real bug, same loop shape): a per-file read failure must not `?`-propagate out of
@@ -241,6 +241,6 @@ mod tests {
             text.contains("does not need to be mutable"),
             "THE FILE AFTER THE FAILING ONE MUST STILL BE CHECKED, not skipped: {text}"
         );
-        assert!(out.is_empty());
+        assert_eq!(out, [] as [u8; 0]);
     }
 }

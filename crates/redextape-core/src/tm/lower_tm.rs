@@ -300,11 +300,11 @@ fn lower_tm_all(prog: &Program, enc: &dyn Encoding) -> (Machine, Vec<Option<usiz
             }
             Instr::Halt => b.add_rule(pc[i], RuleSpec::new(), halt),
             Instr::Jmp(l) => {
-                let t = prog.label_index(l).map_or(halt, &succ);
+                let t = prog.label_index(l).map_or(halt, succ);
                 b.add_rule(pc[i], RuleSpec::new(), t);
             }
             Instr::Jz(r, l) => {
-                let t = prog.label_index(l).map_or(halt, &succ);
+                let t = prog.label_index(l).map_or(halt, succ);
                 // jz jumps to the label when the field is ZERO; otherwise falls through.
                 enc.jz(&mut b, pc[i], t, fall, sm.slot(*r));
             }
@@ -312,7 +312,7 @@ fn lower_tm_all(prog: &Program, enc: &dyn Encoding) -> (Machine, Vec<Option<usiz
                 // Push a frame tagged with this call's ordinal (saving the `Loc` bank), then jump to
                 // the target's entry (an unknown label defensively halts, matching `Jmp`/`Jz`).
                 let c = call_ordinal[i];
-                let target = prog.label_index(l).map_or(halt, &succ);
+                let target = prog.label_index(l).map_or(halt, succ);
                 let after = b.state(format!("call{i}.j"));
                 enc.push_frame(&mut b, pc[i], after, n_loc, c as u64);
                 b.add_rule(after, RuleSpec::new(), target);

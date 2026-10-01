@@ -162,7 +162,7 @@ mod tests {
     #[test]
     fn a_directory_is_an_error_and_not_a_panic() {
         let e = Input::from_arg(Path::new(".")).read().unwrap_err();
-        assert!(!e.to_string().is_empty());
+        assert_ne!(e.to_string(), "");
     }
 
     #[test]

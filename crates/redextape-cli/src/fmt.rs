@@ -284,7 +284,7 @@ mod tests {
         // M2: `!err.is_empty()` also passes for a one-byte stderr; require the message name the file,
         // the way the missing-file diagnostic below already is required to.
         assert!(String::from_utf8(err).unwrap().contains("bad.rxt"), "the diagnostic must name the file");
-        assert!(out.is_empty());
+        assert_eq!(out, [] as [u8; 0]);
     }
 
     #[test]
@@ -560,7 +560,7 @@ mod tests {
         .unwrap();
         assert!(matches!(got, Outcome::Failed), "got {got:?}");
         assert!(String::from_utf8(err).unwrap().contains("link.rxt"), "the failure must name the link the user passed");
-        assert!(out.is_empty());
+        assert_eq!(out, [] as [u8; 0]);
     }
 
     // C1: `--check` had zero coverage — every existing test above passes `check = false`. These three
@@ -612,7 +612,7 @@ mod tests {
         .unwrap();
         assert!(matches!(got, Outcome::Clean), "got {got:?}");
         assert_eq!(std::fs::read_to_string(&p).unwrap(), formatted);
-        assert!(out.is_empty());
+        assert_eq!(out, [] as [u8; 0]);
     }
 
     #[test]

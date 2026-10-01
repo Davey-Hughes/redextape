@@ -188,19 +188,19 @@ mod tests {
         // against a message string — the dispatch is what is under test, not the wording.
         let rxt = "1 + true";
         assert_eq!(Language::Redextape.diagnostics(rxt), redextape_core::analyze(rxt).diagnostics);
-        assert!(!Language::Redextape.diagnostics(rxt).is_empty());
+        assert_ne!(Language::Redextape.diagnostics(rxt), [] as [redextape_core::Diagnostic; 0]);
 
         let lam = "λx.";
         assert_eq!(Language::Lambda.diagnostics(lam), redextape_core::lambda::parse_lambda(lam).1);
-        assert!(!Language::Lambda.diagnostics(lam).is_empty());
+        assert_ne!(Language::Lambda.diagnostics(lam), [] as [redextape_core::Diagnostic; 0]);
 
         let tm = "tapes\n";
         assert_eq!(Language::Tm.diagnostics(tm), redextape_core::tm::parse_tm_full(tm).diagnostics);
-        assert!(!Language::Tm.diagnostics(tm).is_empty());
+        assert_ne!(Language::Tm.diagnostics(tm), [] as [redextape_core::Diagnostic; 0]);
 
         let asm = "li\n";
         assert_eq!(Language::Asm.diagnostics(asm), redextape_core::tm::parse_asm_full(asm).diagnostics);
-        assert!(!Language::Asm.diagnostics(asm).is_empty());
+        assert_ne!(Language::Asm.diagnostics(asm), [] as [redextape_core::Diagnostic; 0]);
     }
 
     /// asm's label marks join the parse's own, and a parse that fails does not hide them: the one line

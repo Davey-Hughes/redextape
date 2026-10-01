@@ -723,7 +723,7 @@ mod tests {
     fn a_type_error_is_the_programs_fault() {
         let (out, err, outcome) = emit_case("type-error", "1 + true", Lang::Tm, None);
         assert_eq!(out, "");
-        assert!(!err.is_empty());
+        assert_ne!(err, "");
         assert!(matches!(outcome, Outcome::ProgramFailed));
     }
 
@@ -770,7 +770,7 @@ mod tests {
     fn an_omitted_encoding_is_fine_off_the_tm_target() {
         let (out, err, outcome) = emit_case("enc-absent", "1 + 2", Lang::Asm, None);
         assert!(matches!(outcome, Outcome::Emitted), "stderr: {err}");
-        assert!(!out.is_empty());
+        assert_ne!(out, "");
     }
 
     /// A program whose values do not fit the widest tape field unary has. **THE FILE MUST NOT BE
@@ -997,7 +997,7 @@ mod tests {
         let (prog, header, ds) = (doc.program, doc.header, doc.diagnostics);
         assert!(ds.is_empty(), "the emitted file parses: {ds:?}");
         assert_eq!(header.map(|h| h.result), Some(redextape_core::ty::Ty::Nat));
-        assert!(!prog.expect("parses").code.is_empty());
+        assert_ne!(prog.expect("parses").code, [] as [redextape_core::tm::Instr; 0]);
     }
 
     /// **A FREE TYPE VARIABLE IS WRITTEN AS `Nat`.** `[]` is never constrained by anything else in the

@@ -257,7 +257,7 @@ fn guest_symbols(m: &Machine, inits: &[Vec<Symbol>]) -> Vec<Symbol> {
 
 /// Bits needed to write any of `n` values, and at least one.
 fn width_for(n: usize) -> usize {
-    let bits = usize::BITS - n.saturating_sub(1).leading_zeros();
+    let bits = n.saturating_sub(1).bit_width();
     usize::try_from(bits).unwrap_or(usize::MAX).max(1)
 }
 

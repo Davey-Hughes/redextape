@@ -739,8 +739,8 @@ state q1: accept
         assert!(r.is_ok());
         assert_eq!(r.id(), &Id::from(2i64));
 
-        assert!(server.handle(notification("initialized", &json!({}))).is_empty());
-        assert!(server.handle(notification("exit", &json!(null))).is_empty());
+        assert_eq!(server.handle(notification("initialized", &json!({}))), [] as [Outgoing; 0]);
+        assert_eq!(server.handle(notification("exit", &json!(null))), [] as [Outgoing; 0]);
     }
 
     #[test]
@@ -755,7 +755,7 @@ state q1: accept
         let [Outgoing::Response(r)] = out.as_slice() else { panic!("expected one response") };
         assert_eq!(r.error().map(|e| e.code), Some(ErrorCodes::MethodNotFound));
 
-        assert!(server.handle(notification("$/setTrace", &json!({ "value": "off" }))).is_empty());
+        assert_eq!(server.handle(notification("$/setTrace", &json!({ "value": "off" }))), [] as [Outgoing; 0]);
     }
 
     fn published(out: &[Outgoing]) -> PublishDiagnosticsParams {

@@ -676,7 +676,7 @@ mod tests {
     fn a_runtime_fault_is_also_the_programs_fault() {
         let (out, err, outcome) = run_case("fault", "p.rxt", "head(nil)", Backend::Reference);
         assert_eq!(out, "");
-        assert!(!err.is_empty());
+        assert_ne!(err, "");
         assert!(matches!(outcome, Outcome::ProgramFailed));
     }
 
