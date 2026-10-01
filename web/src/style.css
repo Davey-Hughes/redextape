@@ -1040,24 +1040,39 @@ button.view-title[aria-expanded="true"] {
 .step-bar[hidden] {
   display: none;
 }
+/* THE TITLE AND EVERY CONTROL ARE ONE LINE, AND IT WRAPS. A row that never wrapped widened a phone's page (to
+   356px at 320px) or kept the width and squeezed the step text into a column a few characters wide. Its
+   controls have no box of their own here (`.step-bar .controls` below), so each is an item of this row beside
+   the title, and the title costs the bar no row of its own: `λ · program ↺ ◀ ▶ ⏵` on a 320px page, then
+   the speed and the step text. A step text longer than the bar takes a row of its own and wraps inside it.
+   The row's gap is `.controls`' own `var(--space-2)`, which the controls keep between each other. */
 .step-bar-inner {
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
-  gap: var(--space-3);
+  row-gap: var(--space-1);
+  column-gap: var(--space-2);
 }
-/* The view it drives, in the title-selector's own spelling (`step-bar.ts`). */
+/* The view it drives, in the title-selector's own spelling (`step-bar.ts`). ITS END MARGIN KEEPS ITS GAP BEFORE
+   `↺` AT `var(--space-3)`, the gap it had when the controls were a box beside it: the row's own gap is the
+   controls' narrower one, and with the margin a desktop's bar draws every box where it did before the wrap. */
 .step-bar-title {
   font-family: var(--font-mono);
   font-size: var(--step--1);
   color: var(--fg-dim);
+  margin-inline-end: calc(var(--space-3) - var(--space-2));
 }
 .step-bar-title[hidden] {
   display: none;
 }
-/* In the bar the controls are on the title's line, so they lose `.controls`' own top margin — the same
-   override `.view-steps .controls` makes just above, and AFTER `.controls` for `noDescendingSpecificity`. */
+/* IN THE BAR THE CONTROLS HAVE NO BOX: their buttons, select, step text and continue button are items of
+   `.step-bar-inner`'s wrapping row, beside the title. A box-less element has no margin either, so `.controls`'
+   top margin needs none of the override `.view-steps .controls` makes above. **SAFE BECAUSE `.controls` CARRIES
+   NO ROLE AND NO ARIA ATTRIBUTE** (`step-controls.ts`' `stepControls` sets only its class): some browsers drop a
+   `display: contents` element's role from the accessibility tree, so a role given to it later would need this
+   rule rethought. AFTER `.controls` for `noDescendingSpecificity`. */
 .step-bar .controls {
-  margin-top: 0;
+  display: contents;
 }
 
 .view-more,

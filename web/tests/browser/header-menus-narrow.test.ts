@@ -44,15 +44,13 @@ async function openAt(id: string, width: number, height: number): Promise<DOMRec
  * **BOTH SIDES, NOT ONLY THE WIDTH.** A menu no wider than the gutter allows can still sit flush with the page's edge,
  * where the browser shifts an anchored menu that would run past it: the examples and workspace menus did, at 320, 360
  * and 390px, until each was given a `1rem` margin on its end side.
- *
- * **`pageWidth` IS WHAT THE PAGE'S OWN SCROLL WIDTH MAY BE**, the page's width unless a caller measured it wider with
- * the menu shut: the page's own layout, not the menu, is then what scrolls, and the menu is held not to add to it.
  */
-function expectWithinGutter(rect: DOMRect, width: number, pageWidth = width): void {
+function expectWithinGutter(rect: DOMRect, width: number): void {
   expect(innerWidth).toBe(width)
-  // THE PAGE'S OWN WIDTH, WHICH THE HEADER'S WRAP KEEPS: `scrollWidth` cannot see the menu, which is in the top layer.
-  // Measured: the workspace menu, 370.5px wide on a 320px page, left it at 320. The rect below is what holds the menu.
-  expect(document.documentElement.scrollWidth).toBeLessThanOrEqual(pageWidth)
+  // THE PAGE'S OWN WIDTH, WHICH THE HEADER'S WRAP KEEPS, AND IN DEBUGGER AND STAGE THE STEP BAR'S: `scrollWidth` cannot
+  // see the menu, which is in the top layer. Measured: the workspace menu, 370.5px wide on a 320px page, left it at 320.
+  // The rect below is what holds the menu.
+  expect(document.documentElement.scrollWidth).toBeLessThanOrEqual(width)
   expect(rect.left, 'the gutter on the left').toBeGreaterThanOrEqual(rem())
   expect(rect.right, 'the gutter on the right').toBeLessThanOrEqual(innerWidth - rem())
   expect(rect.width).toBeLessThanOrEqual(innerWidth - 2 * rem())
@@ -100,19 +98,18 @@ describe('share, open', () => {
   /**
    * **ITS BUTTON SITS NEAR THE HEADER'S RIGHT EDGE, SO THE POPOVER MEETS THAT EDGE.** Without its end margin it lay
    * flush with it at 480px, and at 390px in Debugger (`style.css`'s gutter block has the figures). **IN EACH PRESET**,
-   * since a preset changes the header's rows and with them where the button sits. **THE PAGE ITSELF SCROLLS SIDEWAYS
-   * AT 320px IN DEBUGGER AND STAGE**, with every menu shut and 36px wider than the page, so the popover is held not to
-   * widen it further and the rest of the gutter's checks are unchanged. That overflow is not `share`'s, and is open.
+   * since a preset changes the header's rows and with them where the button sits. **THE PAGE DOES NOT SCROLL SIDEWAYS
+   * IN ANY OF THEM.** At 320px in Debugger and Stage it did, 36px wider than the page with every menu shut, until the
+   * step bar wrapped (`step-bar-narrow.test.ts` holds the bar); these cases held then only that the popover did not
+   * widen it further.
    */
   describe.each(['explorer', 'debugger', 'stage'])('in %s', (preset) => {
     it.each(WIDTHS)(
-      'lies inside its gutter on a page %i px wide, and the popover does not widen the page',
+      'lies inside its gutter on a page %i px wide, on a page that does not scroll sideways',
       async (width, height) => {
         try {
           presetOf(preset)
-          await page.viewport(width, height)
-          const shut = document.documentElement.scrollWidth
-          expectWithinGutter(await openAt('share', width, height), width, Math.max(width, shut))
+          expectWithinGutter(await openAt('share', width, height), width)
         } finally {
           menuOf('share').hidePopover()
           presetOf('explorer')

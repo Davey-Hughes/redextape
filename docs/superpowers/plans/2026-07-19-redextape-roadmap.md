@@ -23143,3 +23143,147 @@ Every file passed at each quota it ran at. The slowest cases are `share-position
 | 405, 486; 15 and 96 px | the 390 Debugger page's width while the bar recompiles and on `fact(4)`; past the page | `handcheck.log`'s 390 `pasted` row; the scratch probe `handcheck3.mjs`, its log `handcheck3.log` |
 
 **REBASED ONTO `e143c38` AFTER #122, AND THE SHAs ABOVE ARE THE REBASED ONES**, except the two that say where the prototype and the replay ran. #122, which takes Rust 1.99's clippy suggestions in `crates/`, merged first, and its entry sits above this one: this branch's first CI run failed its `rust` and `rust-llvm` jobs on those lints alone, in crates the branch does not touch, while its `web` job passed on runner `450440e2`. The rebase conflicted only in this file, where both branches appended an entry, and the resolution rebuilt it as `main`'s roadmap followed by this entry: this commit's copy of the file is `e143c38`'s followed by this entry. No other file conflicted. Each rebased commit's change outside this file has the same patch id and subject as the commit it replaces; the rebased code head's files outside `crates/` and this file are `2567ccc`'s, and its `crates/` are `e143c38`'s. The commits map `8126f47` → `bb42183`, `90d181c` → `adaecb8`, `ce762dd` → `9c241de`, `b853248` → `45ac4d2`, `0d09634` → `46f2b3f`, `d82c4a9` → `9de9d66`, `0d45218` → `f5b52bc`, `41b08d8` → `f689a95`, `9340bfb` → `f353355`, `96acc9e` → `1e8d1e8`, `402a2bb` → `afa14d1`, `edaa237` → `c1e8b48`, `ad01279` → `596b69e`, `873184c` → `8a68304`, `399969b` → `92625d9`, `f6dd717` → `97036ee`, `680de6a` → `989fc92`, `5f10ddd` → `1d09b60`, `9eb5d80` → `5a56d64`, `748d4d5` → `53cf88a`, `f534e27` → `8d5875a`, `cf1e9db` → `912601b`, `b1b89db` → `ebf10aa`, `7b7e7b3` → `62a2099`, `19def9b` → `079d600`, `d5516ae` → `09b7227`, `7c1b698` → `c385fc9`, `2aa0a69` → `821976e`, `e629663` → `82b6e3a`, `aa5488a` → `b901689`, `03c87d7` → `389ce3a` and `2567ccc` → `52164d6`. The prototype branched off `90d181c`, the spec's head before the rebase, and the replay ran at it, so those two mentions keep the SHA they were made at, as the plan does. Every figure above was measured before the rebase, on the commits left of each arrow, over a base without #122's change, which touches only `crates/`; the rebased commits carry the same change over a base with it, and CI re-runs every gate on them.
+
+#### THE STEP BAR WRAPS INSTEAD OF WIDENING THE PAGE: ITS TITLE AND EVERY CONTROL ARE ONE LINE THAT WRAPS, SO AT 320 AND 390 PX IN DEBUGGER AND STAGE THE PAGE KEEPS ITS WIDTH, THE STEP TEXT IS NO LONGER A COLUMN A FEW CHARACTERS WIDE AND `keep recording` CAN BE CLICKED, WHILE AT 1280 PX EVERY BOX STAYS WHERE IT WAS (2026-10-01, branch `step-bar-wraps`, `d79a8d4..8a2e51b`, 7 commits, two of them this entry's earlier versions, `84e213c` and `bdbbd3e`, plus this revision)
+
+**A fix, in `web/` only, to a layout bug on `main`.** #121's entry left it open under WHAT THIS DID NOT CLOSE: the page scrolled sideways at 320 px in Debugger and Stage, and at 390 px in Debugger whenever the step bar's line was long. The layout is the one the user chose on 2026-10-01, "title joins the transport". There is no spec or plan file; this entry is the design. Five commits of code and tests: `9555807` the stylesheet and its test, `8ac7a69` a sibling test that allowed the old overflow, `f62e5dd` the new test's waits, and `115648b` and `8a2e51b` the new test's comments, after the whole-branch review and its re-review (REVISED, below). `84e213c` and `bdbbd3e` are this entry's earlier versions.
+
+##### THE BUG
+
+The one step bar (`step-bar.ts`, the `steps` switch at `bar`, which Debugger and Stage set) was `.step-bar-inner`, a flex row that never wrapped, holding the title `λ · program` and `.controls` (`step-controls.ts`: `↺ ◀ ▶ ⏵`, the speed select, the step text and the continue button), itself a flex row that never wrapped. A row like that is no narrower than its items' narrowest widths added together, so on a phone it widened the page, or kept the width by shrinking the one item that could shrink, the step text, to its longest word.
+
+Measured on `d79a8d4`'s stylesheet in the browser tier (Vitest's Chromium, the default style, Instrument), each example picked from `examples ▾`, the same in Debugger and Stage:
+
+| Page | Line on the bar | `scrollWidth` | Bar | Step text |
+|---|---|---|---|---|
+| 320 px | `sum_to(5)`'s `step 951 of 951` | 356 | 81 px | 28 px wide, 4 lines |
+| 390 px | the same | 390 | 81 px | 32.34 px wide, 4 lines |
+| 320 and 390 px | `fact(4)`'s `step 1,386 of 1,386 — history is full (oldest kept: step 1)`, with `keep recording` | 486 | 171 px | 49 px wide, 9 lines; `keep recording` ends at x = 486.19 |
+
+In every one of them the title is on 2 lines too. The lane's brief quoted 358, 489, and step columns 29 and 51 px wide, from a live page. #121's entry and the browser tier give 356 and 486, and this entry quotes the browser tier's.
+
+##### THE FIX
+
+Three rules in `style.css`'s `THE ONE STEP BAR` block, nothing else:
+
+- **`.step-bar-inner` wraps:** `flex-wrap: wrap`, `row-gap: var(--space-1)` and `column-gap: var(--space-2)`, in place of `gap: var(--space-3)`.
+- **`.step-bar .controls` is `display: contents`,** in place of `margin-top: 0`. Its buttons, its select, its step text and its continue button become items of `.step-bar-inner`'s row beside the title, so the title and every control flow as one line that wraps, and the title costs the bar no row of its own. An element with no box has no margin, so `.controls`' top margin needs no override there.
+- **`.step-bar-title` gains `margin-inline-end: calc(var(--space-3) - var(--space-2))`.** The row's gap is now the controls' own, `var(--space-2)`, and the title's gap before `↺` was `var(--space-3)`; the margin keeps it.
+
+**`display: contents` is safe on `.controls` because the element carries no role and no ARIA attribute.** `stepControls` in `step-controls.ts` creates it as a `div` and sets its class and nothing else. Some browsers drop a `display: contents` element's role from the accessibility tree, and the rule's comment says so, for whoever adds one. **The prototype's `min-width: 0` on `.step-bar-inner` is not in the fix:** every case passes without it.
+
+Measured the same way on `f62e5dd`, the same in Debugger and Stage:
+
+| Page | Line | `scrollWidth` | Bar | Rows |
+|---|---|---|---|---|
+| 320 px | `sum_to(5)` | 320 | 62.38 px | 2: the title and `↺ ◀ ▶ ⏵`; the speed and the step text |
+| 390 px | `sum_to(5)` | 390 | 60 px | 2: the title, the transport and the speed; the step text |
+| 320 px | `fact(4)` | 320 | 135.38 px | 4: the title and the transport; the speed; the step text, 288 px wide on 2 lines; `keep recording` |
+| 390 px | `fact(4)` | 390 | 111 px | 3: the title, the transport and the speed; the step text, 358 px wide on 2 lines; `keep recording` |
+
+**At 1280 px nothing moved.** In both presets and under both lines, each of the 30 boxes the bar draws (7 for `sum_to(5)`'s line and 8 for `fact(4)`'s, in each preset) has the same left, right, top and height as on `d79a8d4`, with a largest difference of 0 px, and the bar is 38 px tall on both.
+
+**Two lines no example reaches, set by hand on the bar's step text in Debugger.** `step 951 of 951 — recompiling`, which #121's entry measured widening a 390 px page to 405, with no continue button: 405 on `d79a8d4` at 320 and at 390 px; 320 and 390 on `f62e5dd`. A link's pending line, `step 1,386 of 1,386 — going to step 3,000 from the link (oldest kept: step 1)`, with `keep recording`: 486 on `d79a8d4` at both widths, the bar 243 px tall and the step text on 13 lines; 320 and 390 on `f62e5dd`.
+
+##### WHAT ELSE READS THE BAR
+
+- **Every `.ts` line in `web/src` and `web/tests` naming `step-bar`, `stepBar` or `StepBar`**, comments aside: `main.ts`, `step-bar.ts` and `draw.ts` build, show and redraw it. In the tests, `workspace-boot`, `share-open` and `share-open-hashchange` read `#step-bar`'s `hidden`, `workspace-restore` its speed select's value, `harness.ts` and the node tier's `harness.test.ts` its id, the node tier's `step-bar.test.ts` its pure `barTarget`, and the browser `step-bar.test.ts` reaches the title, the step text and the buttons by descendant selectors and presses them with `.click()`. None reads a box, and a descendant selector matches through `display: contents`.
+- **Every query of a `.controls` without a `[data-leaf]` or `.view-steps` in its selector**: 13 lines, each run inside a view's pane, through a `pane()`, `host()` or `asmHost()` helper or a `pane` argument that is a `[data-leaf]` element, or with `.pane` in the selector. None reaches the bar's.
+- **Every browser test file that reads geometry** (`getBoundingClientRect`, `getClientRects`, `offset*`, `elementFromPoint`, `scrollWidth`, `clientWidth` or `checkVisibility`, anywhere in the file): 32. Two of them name the bar, and the same two read the page's width: the new file, and `header-menus-narrow.test.ts` (the last bullet). Three more put Debugger or Stage, or the stage switch, on the page: `copy-header` measures view headers and views, `link-hold` grid rows inside a pane, and `share-popover` header buttons. None of the three measures the bar or the page's width. The first version of this bullet came from a grep that needed the geometry call and a word naming the bar on one line, so a read on another line than its target's name was invisible to it; the whole-branch review checked `tm-pane-editor`, `share-popover`, `link-hold`, `copy-header` and `header-menus-narrow` by hand and found the same.
+- **`focus-handoff.ts`'s `usable`**, through which the bar's continue button hands the focus on, reads `isConnected`, `:disabled`, a `[hidden]` ancestor and the tab order, and no box.
+- **One test read the width the bar gave the page.** `header-menus-narrow.test.ts`'s share cases let the page scroll sideways by as much as it did with every menu shut, and called the 36 px at 320 px in Debugger and Stage open. `8ac7a69` removes that allowance and its parameter, so those cases hold the page's own width as the examples and workspace cases do; on `d79a8d4`'s stylesheet its two 320 px cases in Debugger and Stage fail on it, `expected 356 to be less than or equal to 320`.
+
+##### THE TESTS
+
+- **`step-bar-narrow.test.ts` (new, 12 cases), one mount.** For each of `sum_to(5)`'s line and `fact(4)`'s, picked from `examples ▾`, it waits for the line on the bar and then for the run's result, in two waits. Each case first asserts what it means to measure: the page's width, the preset on the workspace button, the bar on the page and naming `λ · program`, the line (the short one's pattern and no continue button, or `history is full` and `keep recording` drawn), the page not scrolled sideways, and the bar in view after a vertical scroll only. Then:
+  - **at 320 and 390 px, in Debugger and Stage (8 cases):** the page's `scrollWidth` is no more than its width; every box the bar draws (the title, each button, the select, the step text) lies between 0 and the page's width; in `fact(4)`'s cases `elementFromPoint` at `keep recording`'s centre is the button; a step text on more than one line is as wide as the bar's content box, to 0.5 px; and `↺`'s vertical centre is the title's, to 1 px.
+  - **at 1280 px, in Debugger and Stage (4 cases):** every box on the title's vertical centre, to 1 px; the title at the bar's content edge; `↺` `var(--space-3)` after the title and each later box `var(--space-2)` after the one before, to 0.5 px, the two gaps of `d79a8d4`'s rules. **That is all they hold, not where each box is**: the 0 px comparison above is the probe's, measured once.
+- **Red on `d79a8d4`'s stylesheet: 8 failed, 4 passed** (the 1280 px cases): `the page’s scroll width: expected 356 to be less than or equal to 320` (`sum_to(5)`, 320 px), `expected 486 to be less than or equal to 320` and `... 390` (`fact(4)`), and `a wrapped step text’s width: expected 32.34375 to be greater than or equal to 357.5` (`sum_to(5)`, 390 px). None failed on a precondition.
+- **Eight sabotages, replayed at `f62e5dd`, each run over the whole file, restored from a saved copy and checked with `cmp`. All fired:**
+
+| Sabotage | Failed |
+|---|---|
+| `d79a8d4`'s stylesheet, whole | the new file: 8 of 12, as in the red run above |
+| the same, run over `header-menus-narrow.test.ts` | 2 of 29: share at 320 px in Debugger and Stage, `expected 356 to be less than or equal to 320` |
+| the wrap kept, `display: contents` replaced by `flex-wrap: wrap; margin-top: 0` (both containers wrap) | the 8 phone cases, each on `↺ on the title’s row: expected 28.25 to be less than 1`; every assertion before it passed |
+| everything kept but the title's margin | the 4 desktop cases, `the gap before back to the oldest kept step: 8px, not 16px` |
+| `display: contents` kept, `flex-wrap: wrap` removed | 8: the width at 320 px and under `fact(4)` at 390 px (356, 486); the wrapped step text at 390 px under `sum_to(5)` (45.81 px) |
+| `.step-bar .extend { pointer-events: none }` added | the 4 `fact(4)` phone cases, `what lies at keep recording’s centre: expected <div class="step-bar-inner">… to be <button …>` |
+| `d79a8d4`'s stylesheet with `overflow: hidden` on `.step-bar`, so the page keeps its width | 8, past the width check: `playback speed’s right: expected 320.1875 to be less than or equal to 320`, `keep recording’s right: expected 486.1875 ...` and the wrapped step text |
+| `.step-bar .step { flex-basis: 100% }` added | the 4 desktop cases, `the step text on the title’s row: expected 27.5 to be less than 1`; the phone cases passed |
+
+  **Three more, the whole-branch review's, do not fire, and say what the 1280 px cases cannot see.** `.step-bar-title { padding-inline-start: 12px }`, `.step-bar-title { font-size: var(--step-1) }` and `.step-bar { padding-inline-start: 40px }`, each added at `115648b` and run the same way: 12 of 12 passed each time. Each keeps the row, the title at the bar's content edge and the two gaps, which is all those cases hold. The 1280 px case's comment claimed each box where the old bar put it until `115648b`, which says this.
+
+  **Which property holds the user's layout.** The plain wrap on both containers keeps the page's width, every box inside it, `keep recording` clickable and the step text unsqueezed: only `↺ on the title’s row` tells it from the chosen layout, where the title costs no row of its own.
+- **Margin on a slow runner.** Each changed browser file passed alone under a 25% CPU quota at `f62e5dd`: `step-bar-narrow` 12 of 12, `header-menus-narrow` 29 of 29. The new file's longest wait is `fact(4)`'s result after its line: over three runs at that quota its line took 2,495 to 2,687 ms from before the pick's two clicks and its result 6,204 to 7,900 ms more, each against `until`'s 10,000 ms; unconstrained, 772 and 1,494 ms. **One wait for both, as `9555807` had it, fit inside its 10 s at that quota in one run and not in two.** In `timing-25%.log` it took 9.5 s. In `timing2-25%.log` `fact(4)`'s hook failed with `timed out after 10000ms waiting for idle`. In `timing3-25%.log`, a run that timed the two separately, the clicks took 301 ms, the line came 3.1 s after them and the result 10.2 s after them, past one wait's 10 s. `f62e5dd` split the wait in two. Its commit message gives 3.4 s and 10.5 s, timed from before the clicks; the test's comment said the same until `115648b`.
+
+##### CHECKED BY HAND
+
+The bar was screenshotted in Debugger at 320, 390 and 1280 px, under both lines, light and dark, on `d79a8d4`'s stylesheet and on `f62e5dd`'s: 24 images (scratch, not tracked). On `f62e5dd` the rows are the ones the table above lists, in both appearances. No step text breaks inside a number: at 320 px `fact(4)`'s line breaks as `step 1,386 of 1,386 — history is full` / `(oldest kept: step 1)`, and at 390 px as `... (oldest kept:` / `step 1)`. On `d79a8d4` the bar is cut off at the page's edge at 390 px under `fact(4)`, the title stands on 2 lines and the step text in a column one or two words wide. `sum_to(5)`'s 1280 px images show glyph fragments along the bar's top edge, on both stylesheets alike; they were not traced.
+
+##### WHAT THIS DID NOT CLOSE
+
+- **Explorer's per-view strip.** Explorer draws no bar; each view carries its own strip (`.view-steps .controls`) in a pane that scrolls sideways. At 390 px under `fact(4)` the λ view's pane is 189 px wide from x = 201, and its strip runs to x = 599.19, where `keep recording` ends, so the button sits outside the pane until the pane is scrolled; the pane's scroll width is 398. The same on `d79a8d4` and `f62e5dd`; the brief's 603 was the live page's. Out of this lane's scope, which left `.view-steps` alone.
+- **Held and measured in Instrument only**, the default style. Paper and Terminal were not measured.
+- **The `— recompiling` and link lines are held by no test.** They were measured once, by hand, above; the test holds `sum_to(5)`'s and `fact(4)`'s.
+- **The new file picks its examples under `unary`**, which a pick sets on `main`. Binary as the default encoding, the other lane of 2026-10-01, makes a pick set `binary`; its brief predicts `fact(4)`'s λ leg still fills its history there. If it does not, this file fails on its precondition, `the long line`, not on a measurement.
+- **The new file's wait for `fact(4)`'s result** took up to 7,900 ms against `until`'s 10,000 ms at a 25% CPU quota. At 50%, in one run at `115648b`, its line took 1,398 ms from before the pick's clicks and its result 2,825 ms more; `sum_to(5)`'s 1,393 and 1,422 ms (`timing-probe.py 50% 1`, scratch, under the lock and cap).
+- **The 1280 px cases hold one row and the old bar's two gaps, not each box's position** (THE TESTS): the review's three sabotages there, a padding or a larger font on the title and a wider padding on the bar, pass them. The positions against `d79a8d4` were measured once, by the probe.
+
+##### VERIFICATION
+
+Run on 2026-10-01 at `f62e5dd`, the last commit to touch code, from `web/`, in a worktree set up with `pnpm install` and its own `pkg/`, `pkg-lsp/` and `web/bindings/`. The branch changes no crate, no grammar, no `Cargo.toml` or `Cargo.lock`, and neither `web/package.json` nor `web/pnpm-lock.yaml`. Every browser run, the coverage gate's included, ran under `flock <the lanes' browser lock> systemd-run --user --scope -q -p MemoryMax=16G -p MemorySwapMax=0`; none was OOM-killed. The eight scans ran again with this entry staged, before it was committed.
+
+```
+pnpm exec biome ci --error-on-warnings  → exit 0, 336 files (1 info, biome.json's deprecated `recommended`)
+pnpm run typecheck                      → exit 0
+pnpm run test:coverage                  → exit 0, 217 files / 2,065 tests; 97.47 / 91.42 / 98.29 / 98.83 against 95 / 89 / 97 / 97
+pnpm run build:app                      → exit 0
+scripts/check-{text-bytes,citations,attributions,doc-figures,shared-docs,colours,grammar-wasm,lua}.sh, --self-test then alone, from the root → 16 of 16 exit 0
+step-bar-narrow and header-menus-narrow, each alone under -p CPUQuota=25% → exit 0, 12 of 12 and 29 of 29
+```
+
+The Rust gates, `check-slow.sh` and the Docker image were not run here: the diff touches no Rust, and the controller builds the image.
+
+**REVISED after the whole-branch review**, which found no Critical issue and two Important ones, both prose: the 1280 px case's comment claimed more than the case holds, and this entry quoted the one single-wait run at 25% that fit. Of its three Minor ones, the first revision, `bdbbd3e`, took two: a wider sweep for what reads the bar's geometry, and the waits at a 50% quota. `115648b` changes only comment lines in `step-bar-narrow.test.ts`, 12 added and 9 removed, none of them code; `bdbbd3e` changed only this entry. For both, run on 2026-10-01 at `115648b`, from `web/` unless stated, each exit 0, with the scans run again with `bdbbd3e`'s revision staged:
+
+```
+pnpm exec biome ci --error-on-warnings                      → exit 0, 336 files (1 info, the same)
+pnpm run typecheck                                          → exit 0
+flock … systemd-run … pnpm exec vitest run --project browser tests/browser/step-bar-narrow.test.ts → exit 0, 12 of 12
+the same under -p CPUQuota=25%                              → exit 0, 12 of 12
+scripts/check-{text-bytes,citations,attributions,doc-figures,shared-docs,colours,grammar-wasm,lua}.sh, --self-test then alone, from the root → 16 of 16 exit 0
+```
+
+The coverage run, `build:app` and `header-menus-narrow` were not run again: `115648b` changes no code and no other file. The eight sabotages were not replayed: their assertions are the same at `115648b` as at `f62e5dd`.
+
+**REVISED again after the re-review**, which found the branch ready and four Minor points, all wording. `8a2e51b` changes 9 comment lines in `step-bar-narrow.test.ts` and no code: its summary says each box lies inside the page at a phone's width, not where each box is; its 1280 px comment says a change to a box's width or to the bar's padding can leave every case passing; and its two-waits comment no longer describes the measuring copy. This revision says of the three single-wait runs at 25% only what their logs show. Run on 2026-10-01 at `8a2e51b`, each exit 0: Biome (336 files, 1 info), `typecheck`, the new file alone (12 of 12), and the eight scans (16 of 16), these again with this revision staged.
+
+**Every count this entry quotes, with what produces it:**
+
+| Value | What | Produced by |
+|---|---|---|
+| 7; `9555807`, `8ac7a69`, `f62e5dd`, `84e213c`, `115648b`, `bdbbd3e`, `8a2e51b`; +20/−5, +11/−14, +228/−0, +142/−0 | commits in the range; their SHAs; `style.css`, `header-menus-narrow.test.ts`, `step-bar-narrow.test.ts`, this file at its second version | `git rev-list --count d79a8d4..8a2e51b`; `git log --format='%h %s' d79a8d4..8a2e51b`; `git diff --numstat d79a8d4..8a2e51b` |
+| +12/−9; +9/−9; +13/−10, 0 | `115648b`'s change to `step-bar-narrow.test.ts`; `8a2e51b`'s; the two together, and their lines that are not comment lines | `git diff --numstat f62e5dd 115648b -- web/tests/browser`; `git diff --numstat bdbbd3e 8a2e51b`; `git diff --numstat f62e5dd 8a2e51b -- web/tests/browser`, and that diff's `+`/`-` lines not starting with `*`, `/**` or `*/` |
+| 356, 390, 486; 81, 171 px; 28, 32.34, 49 px; 4, 9 lines; 2 title lines; 486.19 | `d79a8d4`'s table and the sentence under it | a probe, `zz-step-bar-probe.test.ts` (scratch, not tracked), copied into `web/tests/browser/` and run as `pnpm exec vitest run --project browser --silent=false --reporter=verbose tests/browser/zz-step-bar-probe.test.ts` under the lock and cap, with `git show d79a8d4:web/src/style.css` in place of `f62e5dd`'s, then removed (`probe-main-final.log`, scratch); the title's lines from its box, 56 px wide at 320 px and under `fact(4)` at 390 px and 69.47 px under `sum_to(5)` at 390 px, against 88 px on one line at 1280 px, and from the screenshots |
+| 320, 390; 62.38, 60, 135.38, 111 px; 2, 2, 4, 3 rows; 288, 358 px, 2 lines | `f62e5dd`'s table | the same probe at `f62e5dd` (`probe-branch-final.log`, scratch); rows are distinct vertical centres among the bar's boxes |
+| 30 boxes; 7 and 8; 0 px; 38 px | the 1280 px comparison | the two probe logs compared by `summarise-probe.py` (scratch), which also asserts the boxes' names and the bar's heights equal |
+| 405, 320, 390; 486, 243 px, 13 lines, 320, 390 | the two lines set by hand | the same two probe runs, their `by-hand` rows (`sum-to` for `— recompiling`, `fact` for the link line) |
+| 189 px, 201, 599.19, 398 | Explorer's strip | the same two probe runs, their `fact explorer 390 strip` rows |
+| 36 px | what `header-menus-narrow.test.ts`'s share cases allowed | its share block's comment at `d79a8d4` (`git show d79a8d4:web/tests/browser/header-menus-narrow.test.ts`), and 356 − 320 |
+| 358, 489, 29, 51, 603 | the brief's figures | the lane's brief (scratch, not tracked) |
+| still fills its history | `fact(4)`'s λ leg under `binary`, predicted | the binary-default lane's brief (scratch, not tracked), its item 3: the five examples other than the closure and `fact(12)` predicted unchanged |
+| 37 = 8 + 29 | the two sibling files before the branch | `flock … pnpm exec vitest run --project browser tests/browser/step-bar.test.ts tests/browser/header-menus-narrow.test.ts` at `d79a8d4` (`baseline.log`, scratch) |
+| 12; 8 and 4 | the new file's cases; the red run | `pnpm exec vitest run --project browser tests/browser/step-bar-narrow.test.ts` at `f62e5dd`, and with `d79a8d4`'s stylesheet in place (`replay-sab1-main-rules-step-bar-narrow.log`, scratch) |
+| eight; every failure line in the sabotage table; 2 of 29 | the sabotages | `run-sab.py <name> [test file]` (scratch): it checks `style.css` equals a saved copy of `f62e5dd`'s, applies one sabotage, runs the whole file under the lock and cap, copies the saved file back and checks it with `cmp` (`replay-*.log`, scratch) |
+| 13 | `.controls` queries without a `[data-leaf]` or `.view-steps` | ``grep -rnE "querySelector(All)?[^(]*\(['\"\`][^'\"\`]*\.controls" web/tests web/src --include='*.ts' \| grep -vE "data-leaf\|\.view-steps" \| wc -l`` |
+| the `step-bar` files | what names the bar | `grep -rnE "step-bar\|stepBar\|StepBar" web/src web/tests --include='*.ts'`, comment lines aside |
+| 32; two; three | browser test files that read geometry; those naming the bar, and those reading the page's width; those naming Debugger, Stage or the stage switch besides | from `web/`, with `G='getBoundingClientRect\|getClientRects\|offset(Width\|Height\|Left\|Top)\|elementFromPoint\|scrollWidth\|clientWidth\|checkVisibility'`: `grep -lE "$G" tests/browser/*.ts \| wc -l`; that list against `grep -lE "step-bar\|stepBar" tests/browser/*.ts` with `comm -12`; `grep -lE "(documentElement\|body)\.(scrollWidth\|clientWidth)" tests/browser/*.ts`; the list against `grep -lE "'debugger'\|'stage'\|data-preset=\"(debugger\|stage)\|data-value=\"(bar\|stage)\"" tests/browser/*.ts`; then each of the three read |
+| 2,495 to 2,687 ms, 6,204 to 7,900 ms; 772, 1,494 ms | the waits at 25% over three runs; unconstrained, one run | `timing-probe.py 25% 3` and `timing-probe.py 100% 1` (scratch): a copy of the new file that logs the time from before the pick's clicks to the line, and from there to the result, run under the lock and cap, then removed (`timing-final-25-*.log`, `timing-final-100-1.log`, scratch) |
+| 1,398, 2,825; 1,393, 1,422 ms | the waits at 50%, one run at `115648b` | `timing-probe.py 50% 1` (`timing-final-50-1.log`, scratch) |
+| 9.5 s; `timed out after 10000ms waiting for idle`; 301 ms, 3.1 s, 10.2 s | the single wait at 25%, in three runs | three probe runs made before `f62e5dd`; the probe copies were not kept, and the logs are what remains (scratch): `timing-25%.log`, `TIMING fact 9510 ms`; `timing2-25%.log`, `Error: timed out after 10000ms waiting for idle` under the `fact(4)` suite's `FAIL`; `timing3-25%.log`, `TIMING fact click 301 line 3393 idle 10504 ms`, so 3,092 and 10,203 ms after the clicks |
+| three, 12 of 12 each | the review's sabotages | `run-sab.py sab8-title-padding`, `sab9-title-font` and `sab10-bar-padding` (scratch), at `115648b`'s test over `f62e5dd`'s stylesheet, which `115648b` leaves unchanged |
+| 24 images | the screenshots | the probe's `page.screenshot` of `#step-bar` in each run above (`shots/`, scratch) |
+| 336 files, 1 info | Biome | the block above |
+| 217 files, 2,065 tests; 97.47, 91.42, 98.29, 98.83; 95, 89, 97, 97 | the coverage run; statements, branches, functions and lines; the floors | the block above; `vite.config.ts`'s `thresholds` |
+| 16 of 16 | the scans | each script's exit status, at `f62e5dd` and with this entry staged, at `115648b` and with the first revision staged, and at `8a2e51b` and with this revision staged |
