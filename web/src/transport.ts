@@ -10,7 +10,7 @@ import { createPlayer } from './player'
 import type { Leg } from './protocol'
 import { BufferCapReached, type ScratchBuffers } from './scratch'
 import type { SessionId } from './session-client'
-import type { Binding, LegState, PaneSlot, SessionRegistry } from './sessions'
+import type { Binding, LegFrame, LegState, PaneSlot, SessionRegistry } from './sessions'
 import { pairLabel } from './view-header'
 import type { Speed } from './workspace'
 
@@ -213,6 +213,17 @@ export function createTransport(deps: {
   }
 
   /**
+   * The leg a step-control gesture acts on, taken from any shared link's position it was pending towards — Plan 7 part
+   * 6a spec §5.4: a user stepping, playing, restarting or continuing a leg has taken it from the link, and the link
+   * neither moves it nor continues it again.
+   */
+  const taken = <K extends Leg>(slot: PaneSlot<K>): LegState<LegFrame[K]> => {
+    const leg = slot.resolve(sessions)
+    delete leg.pending
+    return leg
+  }
+
+  /**
    * One pane's control handlers, resolved through its slot's binding on every click.
    *
    * TAKES THE SLOT, NOT THE BINDING AND NOT THE `LegState`. Both panes are constructed once, at mount,
@@ -232,13 +243,13 @@ export function createTransport(deps: {
     speed: deps.speed,
     setSpeed: deps.setSpeed,
     back: () => {
-      slot.resolve(sessions).hist.back()
+      taken(slot).hist.back()
       draw()
     },
     forward: () => {
       // At the frontier `▶` means "record one more", which is the same operation as `[continue]`.
       // `canRecordFurther` is `controls.ts`'s call, not re-derived here — see its doc comment.
-      const leg = slot.resolve(sessions)
+      const leg = taken(slot)
       const entry = sessions.entryOf(slot.binding.session)
       if (!leg.hist.forward() && canRecordFurther(leg.done, entry.client.awaitingRun)) {
         entry.client.extend(slot.binding.leg)
@@ -255,12 +266,15 @@ export function createTransport(deps: {
     // playback on rebind would let one pane's selector silently stop the other pane's playback. The
     // player stops at the frontier, so an unwatched run is bounded rather than forever. See
     // `PaneSlot.rebind` for the same decision stated where the rebind happens.
-    play: () => play(slot.resolve(sessions)),
+    play: () => play(taken(slot)),
     restart: () => {
-      slot.resolve(sessions).hist.seek(0)
+      taken(slot).hist.seek(0)
       draw()
     },
-    extend: () => sessions.entryOf(slot.binding.session).client.extend(slot.binding.leg),
+    extend: () => {
+      taken(slot)
+      sessions.entryOf(slot.binding.session).client.extend(slot.binding.leg)
+    },
     // THE SELECTOR'S PICK, ON THE SESSION AXIS. `PaneSlot.rebind` writes the session and nothing else —
     // the leg is fixed by `K` and has no writer anywhere in the app, which is what keeps `Binding<K>`'s
     // type property (see `PaneSlot`'s doc). `draw()` immediately afterwards because a rebind changes

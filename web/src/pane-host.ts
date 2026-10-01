@@ -97,6 +97,11 @@ export type PaneHost = {
    * it restores the default views. See the implementation.
    */
   resetViews(id: LeafId): void
+  /**
+   * `focusView`, with every view the tree keeps built again, on the program, from the workspace in force — an opened
+   * link's, or the one its *undo* puts back (Plan 7 part 6a spec §5.3, §5.5). See the implementation.
+   */
+  rebuildViews(id: LeafId): void
   /** Pre-seed the source pane's host, which `main.ts` owns the contents of. */
   seedHost(id: LeafId, host: HTMLElement): void
   /** Record the session a leaf should start on — see the implementation for who asks and when. */
@@ -110,6 +115,11 @@ export type PaneHost = {
    * Move each of `leaves` that still shows `from` onto `to`, reseeding a TM view first as `reseedingSlots`
    * does — undo's half of a delete (spec §10), which moves back the views the delete moved, if they still
    * exist and still show the program — and mount `to`'s editor on the first of them. Returns the leaves it moved.
+   *
+   * **AN OPENED LINK'S *UNDO* IS A SECOND CALLER** (spec §5.5): it moves back the views that showed a copy before the
+   * open rebuilt every view on the program. A λ copy's editor can be waiting in custody then, handed there by a view
+   * the rebuild dropped and claimed by none; where it is, the first view moved is made its home, so the copy's editor
+   * is where its view is and the view does not offer *move the editor here* for an editor that was there.
    */
   moveBack(leaves: readonly LeafId[], from: SessionId, to: SessionId): LeafId[]
   /**
@@ -1000,7 +1010,22 @@ export function createPaneHost(deps: {
    */
   const resetViews = (id: LeafId): void => {
     setFocused(id)
-    applyLayout(true)
+    applyLayout('copies')
+    focusPane(id)
+  }
+
+  /**
+   * An opened link's rebuild, and its *undo*'s: `focusView`, with every view the tree keeps dropped and built again on
+   * the program (Plan 7 part 6a spec §5.3, §5.5).
+   *
+   * **`resetViews` DROPS ONLY A VIEW SHOWING A COPY, AND A NEW WORKSPACE NEEDS EVERY ONE DROPPED.** A view reads the
+   * workspace when it is built — its display, and which of its panels are open — and never again, so a view kept under
+   * an id and a kind the new tree shares went on showing the opener's display and panels under the link's workspace:
+   * a λ view left drawn as code where the link's is an outline.
+   */
+  const rebuildViews = (id: LeafId): void => {
+    setFocused(id)
+    applyLayout('every')
     focusPane(id)
   }
 
@@ -1014,8 +1039,8 @@ export function createPaneHost(deps: {
    * predicate compares what the tree says a leaf renders against what the entry in hand renders, so a
    * leaf that is still present but has changed kind is removed exactly like one that left. That is
    * decision 1's whole mechanism: `setLeafKind` (called from `paneEvents`' `rebind`) keeps the leaf's id,
-   * its place and its size, and these two passes then replace the pane inside it. `resetViews` adds a third,
-   * `toProgram`: an entry showing a copy is dropped too, and built again on the program.
+   * its place and its size, and these two passes then replace the pane inside it. `rebuild` adds a third: an entry
+   * showing a copy is dropped too, and built again on the program (`resetViews`), or every entry is (`rebuildViews`).
    *
    * **THE TWO REASONS DIFFER IN EXACTLY ONE WAY, AND IT READS AS A CONTRADICTION UNTIL THE ORDER IS
    * NOTICED.** A close KEEPS the host's DOM — that is `hostFor`'s detach-not-destroy rule, and it is why
@@ -1055,7 +1080,7 @@ export function createPaneHost(deps: {
    *
    * For what this doc used to claim and why it changed, see the history note under `applyLayout`.
    */
-  const applyLayout = (toProgram = false): void => {
+  const applyLayout = (rebuild: 'none' | 'copies' | 'every' = 'none'): void => {
     // WHAT EACH LIVE LEAF RENDERS, NOT MERELY WHICH LEAVES ARE LIVE — a `Map` where this was a `Set`,
     // because there are two reasons to drop an entry now and the second one is about the VALUE.
     // `sourceLayout.update(live.size > 1, ...)` below is unaffected: a map's size is still the leaf count.
@@ -1063,8 +1088,9 @@ export function createPaneHost(deps: {
     // THE COPIES WHOSE EDITOR PASS 1 DESTROYS — mounted again on a view still showing each, after pass 2.
     const unmounted: SessionId[] = []
     for (const p of panes.all()) {
-      // `toProgram` IS `resetViews`' THIRD REASON: an entry kept by the two below is dropped when it shows a copy.
-      const onCopy = toProgram && p.slot.binding.session !== SOURCE_SESSION
+      // `rebuild` IS THE THIRD REASON: an entry kept by the two below is dropped when it shows a copy (`resetViews`), or
+      // whatever it shows (`rebuildViews`).
+      const dropped = rebuild === 'every' || (rebuild === 'copies' && p.slot.binding.session !== SOURCE_SESSION)
       // **TWO REASONS TO DROP AN ENTRY, AND THEY ARE ONE SITUATION FROM HERE.** The leaf left the tree
       // (a close), or the leaf is still there and no longer renders what this entry renders (a leg
       // change through the binding selector — `paneEvents`' `rebind` above). `PaneSlot<K>`'s leg has no
@@ -1072,7 +1098,7 @@ export function createPaneHost(deps: {
       // whole entry — slot, pane class and view — under an unchanged `LeafId`; the pane in hand is
       // about to stop existing either way, which is why the custody handover below covers both without
       // a branch. `live.get` answers `undefined` for a departed leaf, and no `PaneKind` equals that.
-      if (live.get(p.id) === p.kind && !onCopy) continue
+      if (live.get(p.id) === p.kind && !dropped) continue
       // THE CUSTODY HANDOVER, AND IT HAS TO BE ON THIS SIDE OF `panes.remove` — see this function's own
       // doc. `takeEditor()` returns `null` for every pane that was not holding one, which is all of
       // them on an ordinary close, so this costs a method call and a field read on the way out.
@@ -1376,6 +1402,7 @@ export function createPaneHost(deps: {
     focusPane,
     focusView,
     resetViews,
+    rebuildViews,
     seedHost(id: LeafId, host: HTMLElement): void {
       hosts.set(id, host)
     },
@@ -1472,6 +1499,16 @@ export function createPaneHost(deps: {
         // a claim, and a copy whose text does not build came back with no editor.
         mountScratchEditor(id, p.pane as unknown as EditablePane, to)
         moved.push(id)
+      }
+      // **AND A λ COPY'S EDITOR WAITING IN CUSTODY, ON THE FIRST OF THEM TOO** — an editor that exists (`hasEditor`)
+      // with no view claimed to hold it (`homeFor`): claimed there and swept onto it, since `mountScratchEditor` builds
+      // none while custody holds one. An opened link's `rebuildViews` drops every view, and a λ view it drops hands its
+      // copy's editor to custody as a close does, so the open's *undo* moved that view back onto the copy offering
+      // *move the editor here* where the editor had been.
+      const first = moved[0]
+      if (first !== undefined && custody.homeFor(to) === undefined && custody.hasEditor(to)) {
+        custody.claim(to, first)
+        custody.reconcile()
       }
       return moved
     },

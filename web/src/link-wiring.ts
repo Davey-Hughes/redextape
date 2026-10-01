@@ -55,6 +55,11 @@ export type LinkWiring = {
   drawLink(l: Link | null, focusCoincident: boolean, asmCoincident: boolean, lambda: LambdaLinkState): void
   setLinkTo(node: number | null, origin: Pin['origin']): void
   linkAtSourceOffset(byteOffset: number): void
+  /**
+   * Per leg, how many views it has and the title of each one showing a copy — what the status line's detachment clause
+   * reads, and what the share popover's copies line names (Plan 7 part 6a spec §5.2).
+   */
+  detachedPanes(): DetachedPanes
 }
 
 export function createLinkWiring(deps: {
@@ -283,5 +288,6 @@ export function createLinkWiring(deps: {
     drawLink,
     setLinkTo,
     linkAtSourceOffset,
+    detachedPanes,
   }
 }

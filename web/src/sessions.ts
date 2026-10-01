@@ -40,6 +40,12 @@ export type LegState<T> = {
    * `resetLegs` clears.
    */
   playing: boolean
+  /**
+   * The step a shared link's position is taking this leg to, while the frames have not reached it — Plan 7 part 6a
+   * spec §5.4: set and spent, and dropped at a recompile, by `share-positions.ts`'s `LinkPositions`; read by the step
+   * line; and taken away by a gesture on the leg's step controls. Absent on every leg no link is taking anywhere.
+   */
+  pending?: number
 }
 
 /**
@@ -595,6 +601,7 @@ export function legControlState<K extends Leg>(
     done: leg.done,
     awaitingRun: reg.entryOf(binding.session).client.awaitingRun,
     playing: leg.playing,
+    pending: leg.pending ?? null,
   })
 }
 

@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest'
+import { afterEach, describe, expect, it, vi } from 'vitest'
 import type { ControlState } from '../../src/controls'
 import type { KeymapSetting } from '../../src/editor-keymap'
 import { History } from '../../src/history'
@@ -789,5 +789,53 @@ describe('SessionRegistry.pairs', () => {
     reg.add(entry('a', { label: 'a', lambda: ['x'], tm: [0] }))
     reg.add(entry('b', { label: 'b', lambda: ['y'], tm: [1] }))
     expect(reg.pairs().map((p) => `${p.leg}:${p.id}`)).toEqual(['lambda:a', 'lambda:b', 'tm:a', 'tm:b'])
+  })
+})
+
+/**
+ * **A STEP GESTURE TAKES THE LEG FROM ITS LINK** — Plan 7 part 6a spec §5.4 names five: stepping back, stepping
+ * forward, play, restart and continue. Each resolves its leg through `transport.ts`'s `taken`, which deletes
+ * `LegState.pending`, so the link neither moves the leg nor continues it again. One case for each, through the
+ * production handlers, since a handler that resolved its leg some other way would leave the link's step in force.
+ * `tests/browser/share-positions.test.ts` holds the gesture a user makes; this holds that each of the five does it.
+ */
+describe('a step gesture on a leg with a position pending', () => {
+  afterEach(() => vi.unstubAllGlobals())
+
+  const GESTURES = [
+    ['back', 'back'],
+    ['forward', 'forward'],
+    ['play', 'play'],
+    ['restart', 'restart'],
+    ['continue', 'extend'],
+  ] as const
+
+  it.each(GESTURES)('is taken from the link by %s', (_, gesture) => {
+    // THE PLAYER SCHEDULES ITS LOOP ON ANIMATION FRAMES, which node has none of, and nothing here runs one.
+    vi.stubGlobal('requestAnimationFrame', () => 0)
+    const reg = new SessionRegistry()
+    reg.add(entry('source', { label: 'source', lambda: ['a', 'b', 'c'] }))
+    const transport = createTransport({
+      sessions: reg,
+      scratchpad: {} as ScratchBuffers,
+      draw: () => undefined,
+      speed: () => 8,
+      setSpeed: () => undefined,
+      lspClient: () => LSP_STUB,
+      colour: () => [],
+      formatOnBlur: () => false,
+      keymap: {} as KeymapSetting,
+      linkWiring: () => ({}) as LinkWiring,
+      notify: () => undefined,
+      onBuffersChanged: () => undefined,
+      onBuffersPersist: () => undefined,
+    })
+    const slot = new PaneSlot('lambda', 'source')
+    const lambda = slot.resolve(reg)
+    lambda.pending = 3000
+    expect(lambda.pending).toBe(3000)
+    transport.events(slot)[gesture]()
+    expect(lambda.pending).toBeUndefined()
+    expect('pending' in lambda).toBe(false)
   })
 })

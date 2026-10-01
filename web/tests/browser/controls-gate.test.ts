@@ -232,12 +232,14 @@ describe.each(STATES)('every control in $name', ({ name, picks, tiled }) => {
    * **EVERY HEADER MENU, READ OFF THE PAGE RATHER THAN LISTED** — `viewLeaves`' reason: a list of the menus there were
    * is a list that misses the next one. This was `#workspace`, `#new-view`, `#buffers` and `#settings`, and
    * `examples ▾` joined the header without joining it (Plan 7 part 6a spec §6). Every header menu there is now is
-   * asserted among the ones walked, so the loop cannot pass by walking fewer.
+   * asserted among the ones walked, so the loop cannot pass by walking fewer — and `share`'s popover since part 6a's
+   * second half, a disclosure and not a menu, but opened as one is by a header button naming it in `aria-controls`,
+   * and holding a field the walk reads by its label.
    */
   it('with each header menu open', () => {
     const openers = [...document.querySelectorAll<HTMLButtonElement>('header.bar button[aria-controls]')]
     expect(openers.map((b) => b.id)).toEqual(
-      expect.arrayContaining(['workspace', 'new-view', 'buffers', 'examples', 'settings']),
+      expect.arrayContaining(['workspace', 'new-view', 'buffers', 'examples', 'share', 'settings']),
     )
     const walked: string[] = []
     for (const button of openers) {
@@ -248,8 +250,10 @@ describe.each(STATES)('every control in $name', ({ name, picks, tiled }) => {
       walked.push(...check(`${name}: #${button.id}`).map((el) => el.id))
       if (menu?.matches(':popover-open')) menu.hidePopover()
     }
-    // A FORM CONTROL THAT IS NOT A SELECT IS WALKED: the settings menu's checkbox, which `button, select` never reached.
+    // A FORM CONTROL THAT IS NOT A SELECT IS WALKED: the settings menu's checkbox, which `button, select` never reached,
+    // and the share popover's field.
     expect(walked).toContain('format-on-blur')
+    expect(walked).toContain('share-link')
   })
 
   it("with every view's title and ⋯ menu open", () => {

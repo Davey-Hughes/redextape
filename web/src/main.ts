@@ -38,9 +38,17 @@ import { declineMark, focusMark, linkMark } from './highlight'
 import { History } from './history'
 import { icon } from './icons'
 import { LambdaTrees } from './lambda-trees'
-import { closeLeaf, defaultLayout, LAYOUT_STORAGE_KEY, type LayoutNode, leaves, SOURCE_LEAF } from './layout'
+import {
+  closeLeaf,
+  defaultLayout,
+  LAYOUT_STORAGE_KEY,
+  type LayoutNode,
+  leafNumber,
+  leaves,
+  SOURCE_LEAF,
+} from './layout'
 import { retitleStage } from './layout-view'
-import { LEG_NAME } from './legs'
+import { LEG_NAME, LEGS } from './legs'
 import { createLinkWiring, type LinkWiring } from './link-wiring'
 import { LspClient } from './lsp-client'
 import { lspHover } from './lsp-hover'
@@ -48,7 +56,7 @@ import { navKeymap } from './lsp-nav'
 import type { LanguageId } from './lsp-protocol'
 import { documentUri, LANGUAGE_LABEL } from './lsp-protocol'
 import { applyEdits, revealRange } from './lsp-text'
-import { createNotices, type Notice } from './notice'
+import { createNotices, type Notice, type NoticeAction } from './notice'
 import { createOutlinePanel } from './outline'
 import { paletteDeclarations } from './palettes'
 import type { PaneChoice } from './pane-chrome'
@@ -63,6 +71,9 @@ import { createReplies } from './replies'
 import { BufferCapReached, type BufferRecord, MAX_WARM_BUFFERS, ScratchBuffers } from './scratch'
 import { type SessionId, SessionPool } from './session-client'
 import { legControlState, type SessionLegs, SessionRegistry } from './sessions'
+import { decodeLink, isLink, type OpenedLink, type SharePayload } from './share-link'
+import { createShare } from './share-popover'
+import { LinkPositions, shortNotice } from './share-positions'
 import {
   applySkin,
   customPaletteLabel,
@@ -120,8 +131,9 @@ import {
 let leafCounter = 1
 
 /**
- * Advance `leafCounter` past every numeric suffix in `tree` — called once, on the tree `main()` starts
- * with, whether that came from storage or from `defaultLayout()`.
+ * Advance `leafCounter` past every numeric suffix in `tree` — called on the tree `main()` starts with, whether that
+ * came from storage or from `defaultLayout()`, and on the tree of each workspace an opened link puts in force
+ * (`showWorkspace`).
  *
  * FIX THE CALLER, NOT THE GUARD. `splitLeaf`'s refusal of an id already in the tree is deliberate and
  * correct (its own doc: a duplicate id would not error, it would silently make the second leaf
@@ -129,17 +141,19 @@ let leafCounter = 1
  *
  * MAX-PLUS-ONE OVER ALL LEAVES, NOT PER LEG, because the counter is shared across legs: a tree holding
  * `lambda-3` makes `tm-3` unmintable too, since the next `tm` split would take suffix 3 only if the
- * counter were still below it. A leaf id with no numeric suffix (`'source'`, or anything a hand-edited
- * `localStorage` entry carries — `parseLayout` accepts any non-empty string as an id) contributes
- * nothing rather than `NaN`: `Number('source')` is `NaN`, and `Number.isInteger` rejects it, so the
- * counter is left where it was. THIS DOES NOT GUARANTEE FREEDOM FROM COLLISION FOR AN ARBITRARY STORED
- * TREE — a hand-written id of `lambda-x` is not a suffix this can step past — but every id this app
- * itself mints is `${leg}-${n}`, and `splitLeaf`'s guard is still the backstop for the rest.
+ * counter were still below it. A leaf id with no number (`'source'`, or a hand-edited `lambda-x`) contributes
+ * nothing: `layout.ts`'s `leafNumber` reads `null` for it, so the counter is left where it was. THIS DOES NOT
+ * GUARANTEE FREEDOM FROM COLLISION FOR AN ARBITRARY STORED TREE — `lambda-x` is not a number this can step past —
+ * but every id `nextLeafId` mints is `pane-${n}`, and `splitLeaf`'s guard is still the backstop for the rest.
+ *
+ * **EVERY NUMBER IT READS IS ONE IT CAN STEP PAST**: `parseTree` refuses a tree holding a leaf number over a billion,
+ * read through the same `leafNumber` (Plan 7 part 6a spec §5.3, amended 2026-10-01). From 2^53 on, `+ 1` no longer
+ * moves the counter, so after a link carrying `pane-1e300` the second view added would mint a duplicate.
  */
 function seedLeafCounter(tree: LayoutNode): void {
   for (const leaf of leaves(tree)) {
-    const suffix = Number(leaf.id.slice(leaf.id.lastIndexOf('-') + 1))
-    if (Number.isInteger(suffix) && suffix >= leafCounter) leafCounter = suffix + 1
+    const n = leafNumber(leaf.id)
+    if (n !== null && n >= leafCounter) leafCounter = n + 1
   }
 }
 
@@ -214,6 +228,8 @@ async function main(): Promise<EditorView> {
   const buffersButton = document.querySelector<HTMLButtonElement>('#buffers')
   const examplesButton = document.querySelector<HTMLButtonElement>('#examples')
   const examplesMenu = document.querySelector<HTMLElement>('#examples-menu')
+  const shareButton = document.querySelector<HTMLButtonElement>('#share')
+  const shareMenu = document.querySelector<HTMLElement>('#share-menu')
   const noticeHost = document.querySelector<HTMLElement>('#notice')
   const liveHost = document.querySelector<HTMLElement>('#live')
   // **`#views`, NOT `<main>` — spec §9.** `renderLayout` opens with `root.replaceChildren()`, so the
@@ -243,6 +259,8 @@ async function main(): Promise<EditorView> {
     !buffersButton ||
     !examplesButton ||
     !examplesMenu ||
+    !shareButton ||
+    !shareMenu ||
     !noticeHost ||
     !stepBarHost ||
     !inspectorHost ||
@@ -611,19 +629,32 @@ async function main(): Promise<EditorView> {
     }
   }
   /**
-   * THE PROGRAM THE PAGE OPENS ON — Plan 7 part 6a spec §4.4: the stored one if `parseProgram` takes it, otherwise the
+   * THE PROGRAM STORAGE OPENS ON — Plan 7 part 6a spec §4.4: the stored one if `parseProgram` takes it, otherwise the
    * first-load example under the default encoding. A refusal is silent, since it cannot be told from a first visit
    * (`program-store.ts`'s own doc).
+   */
+  const storedProgram = parseProgram(readProgramStorage(), encodings() as string[]) ?? {
+    text: FIRST_LOAD.text,
+    encoding: EXAMPLE_ENCODING,
+  }
+  /**
+   * A LINK IN THE PAGE'S FRAGMENT — Plan 7 part 6a spec §5.3, read before either store is taken from, since a link
+   * takes precedence over both: what it opens, or `null` on a page with no link.
+   */
+  const startLink = isLink(location.hash) ? await decodeLink(location.hash, encodings() as string[]) : null
+  /**
+   * THE PROGRAM THE PAGE OPENS ON: a link's, whole or alone, under its own encoding or, where the link's is not one this
+   * build has, the one storage opens on (spec §5.3); otherwise `storedProgram`.
    *
    * **CHOSEN HERE, AFTER `init()`, BECAUSE AN ENCODING IS VALID ONLY IF `encodings()` LISTS IT**, and before anything
    * reads it: the editor's document, the language server's first text and the start-up compile are its three uses.
    * The picker is set from it now, since a compile reads `picker.value` when it posts, and the encoding is kept across
    * reloads for the first time.
    */
-  const loaded = parseProgram(readProgramStorage(), encodings() as string[]) ?? {
-    text: FIRST_LOAD.text,
-    encoding: EXAMPLE_ENCODING,
-  }
+  const loaded: StoredProgram =
+    startLink === null || startLink.kind === 'unreadable'
+      ? storedProgram
+      : { text: startLink.program, encoding: startLink.encoding ?? storedProgram.encoding }
   picker.value = loaded.encoding
 
   let view: EditorView
@@ -787,7 +818,11 @@ async function main(): Promise<EditorView> {
     id: SOURCE_SESSION,
     label: 'program',
     detached: false,
-    client: pool.bind(SOURCE_SESSION, (reply: RunReply) => replies.onReply(SOURCE_SESSION, reply)),
+    // A LINK'S POSITIONS HEAR EACH REPLY AFTER THE APP HAS TAKEN IT IN, so a frames reply's frames are in their ring.
+    client: pool.bind(SOURCE_SESSION, (reply: RunReply) => {
+      replies.onReply(SOURCE_SESSION, reply)
+      positions.onReply(reply)
+    }),
     // EVERY LEG, AND THE `satisfies` IS WHAT SAYS SO. `SessionLegs` makes each leg optional because a copy
     // has one (its own doc), so a leg left out of this literal would still typecheck, and the program would
     // have no such leg to record, to bind a view to, or to offer in a selector. `Required` makes a leg with no
@@ -1142,10 +1177,11 @@ async function main(): Promise<EditorView> {
   }
 
   /**
-   * What a reload would open on: the last program a write stored, or the one the page loaded while none has been — the
-   * stored one, or the first-load example where nothing was stored or `parseProgram` refused what was.
+   * What a reload would open on: the last program a write stored, or the one storage opened on while none has been —
+   * the stored one, or the first-load example where nothing was stored or `parseProgram` refused what was. A link's
+   * program is not it until a write stores it: its fragment is cleared once it opens (spec §5.3).
    */
-  let restorable: StoredProgram = loaded
+  let restorable: StoredProgram = storedProgram
 
   /**
    * Store the program — `compile.ts` calls this as each compile posts, with the text and the encoding it posted (Plan 7
@@ -1171,16 +1207,19 @@ async function main(): Promise<EditorView> {
     }
   }
 
+  /** The workspace storage opens on: the stored one if there is a usable value there, the default otherwise. */
+  const storedWorkspace = parseWorkspace(readLayoutStorage()) ?? defaultWorkspace()
   /**
-   * THE WORKSPACE — restored from `localStorage` if there is a usable value there (a version 1 layout is
-   * migrated: `workspace.ts`'s `parseWorkspace`), the default otherwise.
+   * THE WORKSPACE — a link's where one opens whole (Plan 7 part 6a spec §5.3), otherwise restored from `localStorage`
+   * if there is a usable value there (a version 1 layout is migrated: `workspace.ts`'s `parseWorkspace`), the default
+   * otherwise.
    *
    * **`tree` STAYS ITS OWN `let`, AND `ws` HOLDS THE REST.** `pane-host.ts` reads and writes the tree through
    * `getTree`/`setTree` on every gesture, and its doc argues why the tree has one owner; folding it into `ws`
    * would move that owner without changing anything a reader could see. `persistWorkspace` joins the two at
    * the one moment they are written.
    */
-  const restored = parseWorkspace(readLayoutStorage()) ?? defaultWorkspace()
+  const restored = startLink?.kind === 'whole' ? startLink.workspace : storedWorkspace
   let tree: LayoutNode = restored.tree
   let ws: Omit<Workspace, 'tree'> = {
     switches: restored.switches,
@@ -1227,10 +1266,11 @@ async function main(): Promise<EditorView> {
     writeLayoutStorage(serializeWorkspace({ tree, ...ws }))
   }
   // IMMEDIATELY, AND ON THE RESTORED TREE RATHER THAN ONLY THE DEFAULT ONE — see `seedLeafCounter`'s
-  // own doc. ONCE, HERE, NOT ON EVERY `applyLayout`: the counter only ever needs to learn about ids it
-  // did not mint itself, and this is the one moment such an id can enter the tree. (Re-seeding later
-  // would be harmless — the function only ever advances — but it would also be a second place to read
-  // as though the invariant needed maintaining.)
+  // own doc. HERE AND IN `showWorkspace`, NOT ON EVERY `applyLayout`: the counter only ever needs to learn about ids
+  // it did not mint itself, and the two moments such an id can enter the tree are this restore and an opened link's
+  // workspace, which seeds the counter as it writes the tree. (Re-seeding on every layout would be harmless — the
+  // function only ever advances — but it would also be a third place to read as though the invariant needed
+  // maintaining.)
   seedLeafCounter(tree)
 
   /**
@@ -1247,9 +1287,9 @@ async function main(): Promise<EditorView> {
    * not assigned until `createDraw` runs.
    *
    * `tree` STAYS A `let` IN THIS SCOPE AND CROSSES AS A GETTER/SETTER PAIR, not as a field over there and
-   * not as a mutable export. Two of its writers stay here — the restore just above and the `reset preset`
-   * item below — so a copy in that module would be a second place the current tree lives, and this
-   * file would be holding the stale one.
+   * not as a mutable export. Three of its writers stay here — the restore just above, the `reset preset`
+   * item below and `showWorkspace`, which an opened link's workspace goes through — so a copy in that module would
+   * be a second place the current tree lives, and this file would be holding the stale one.
    *
    * `nextLeafId` AND `neighbourOf` CROSS AS FUNCTIONS RATHER THAN MOVING WITH THEIR CALLERS. `leafCounter`
    * is deliberately per-module rather than per-`main()` call (see its own doc), and `seedLeafCounter` above
@@ -1317,8 +1357,9 @@ async function main(): Promise<EditorView> {
    * not assigned until much further down this function — see the warming loop's own comment, at the
    * end of `main()`.
    *
-   * HERE, BESIDE `seedLeafCounter`, FOR ITS REASON: this is the one moment ids the app did not mint
-   * itself can enter, and both restores are exactly that. It sits BELOW `createPaneHost` rather than
+   * HERE, BESIDE `seedLeafCounter`, FOR ITS REASON: a restore is a moment ids the app did not mint itself can
+   * enter, and both of these are exactly that. (An opened link's tree is the other, through `showWorkspace`, and it
+   * keeps no bindings.) It sits BELOW `createPaneHost` rather than
    * beside `seedLeafCounter` only because `seedBinding` is that object's method.
    *
    * **A NULL HERE IS EVERY FAILURE AT ONCE, AND THAT IS THE POINT** (`buffers-store.ts`'s
@@ -1366,10 +1407,15 @@ async function main(): Promise<EditorView> {
    * not here beside `seedBinding`, though both read this same list).
    */
   const restoredBindings: [LeafId, SessionId][] = []
+  /**
+   * The restored bindings a link opened whole at start-up dropped (Plan 7 part 6a spec §5.3, row 14): read against the
+   * stored tree they were written with, and seeded nowhere, so no copy is warmed. The open's *undo* moves them back.
+   */
+  const droppedBindings: [LeafId, SessionId][] = []
   if (restoredBuffers !== null) {
     scratchpad.restore(restoredBuffers)
     const legOfLeaf = new Map(
-      leaves(tree).flatMap((l) => {
+      leaves(storedWorkspace.tree).flatMap((l) => {
         const leg = legOfPane(l.pane)
         return leg === null ? [] : [[l.id, leg] as const]
       }),
@@ -1377,6 +1423,10 @@ async function main(): Promise<EditorView> {
     const legOfBuffer = new Map(restoredBuffers.buffers.map((b) => [b.id, b.leg] as const))
     for (const [leaf, session] of Object.entries(restoredBuffers.bindings)) {
       if (legOfLeaf.get(leaf) !== legOfBuffer.get(session)) continue
+      if (startLink?.kind === 'whole') {
+        droppedBindings.push([leaf, session])
+        continue
+      }
       restoredBindings.push([leaf, session])
       paneHost.seedBinding(leaf, session)
     }
@@ -1626,9 +1676,45 @@ async function main(): Promise<EditorView> {
    * the program, and the picker at every encoding chosen in it, which does nothing once it is off the line.
    */
   let pick: Notice | null = null
-  // A CHOICE OF ENCODING IS HALF OF WHAT THE UNDO PUTS BACK, so it goes at one too. A pick and its undo set the picker
-  // by assignment, which fires no `change`, so neither ends its own notice.
-  picker.addEventListener('change', () => pick?.dismiss())
+
+  /**
+   * THE LAST LINK'S OPEN, WHILE ITS `undo` IS OFFERED — Plan 7 part 6a spec §5.5: the action, and the notice carrying it
+   * now. **HELD APART FROM THE NOTICE, WHICH GOES IN `NOTICE_MS`**, because a later notice about the same open — a
+   * clamp, the tenth continue — offers the same `undo` again, however long after the open it comes. It is withdrawn as
+   * a pick's is, at the next edit that changes the program and at the next encoding chosen, since it puts back the
+   * whole document; and it ends when it is used, or when another link opens.
+   */
+  let offer: { readonly undo: NoticeAction; notice: Notice } | null = null
+  const withdrawOffer = (): void => {
+    offer?.notice.dismiss()
+    offer = null
+  }
+  /** Say `text` about the last open, with its `undo` while that is offered, however long after the open (spec §5.5). */
+  const sayAboutOpen = (text: string): void => {
+    const notice = notices.notify(text, offer === null ? {} : { action: offer.undo })
+    if (offer !== null) offer.notice = notice
+  }
+
+  /**
+   * A LINK'S POSITIONS — `share-positions.ts`'s `LinkPositions`, held from a whole open until the frames reach them
+   * (spec §5.4). **A LEG THAT STOPS SHORT IS SAID ABOUT THE OPEN**, carrying its `undo`: the run ended before the step,
+   * or `MAX_LINK_CONTINUES` continues did not reach it, and the step shown is the leg's last. Each one redraws the one
+   * notice, naming every leg stopped short so far (spec §5.4's note of 2026-10-01).
+   */
+  const positions = new LinkPositions({
+    legOf: (leg) => sessions.legOf({ session: SOURCE_SESSION, leg }),
+    extend: (leg) => sessions.entryOf(SOURCE_SESSION).client.extend(leg),
+    awaitingRun: () => sessions.entryOf(SOURCE_SESSION).client.awaitingRun,
+    short: (shorts) => sayAboutOpen(shortNotice(shorts)),
+    draw: () => draw(),
+  })
+
+  // A CHOICE OF ENCODING IS HALF OF WHAT THE UNDO PUTS BACK, so it goes at one too — a pick's and a link's. A pick, a
+  // link and their undos set the picker by assignment, which fires no `change`, so none ends its own notice.
+  picker.addEventListener('change', () => {
+    pick?.dismiss()
+    withdrawOffer()
+  })
 
   /**
    * PICK AN EXAMPLE — Plan 7 part 6a spec §4.5. It replaces the program at once, under the default encoding, since the
@@ -1676,6 +1762,192 @@ async function main(): Promise<EditorView> {
 
   // `examples ▾` — spec §4.2: built on each open, as `+ view`'s menu is, from the manifest.
   wireMenu(examplesButton, examplesMenu, () => exampleItems(examplesMenu, EXAMPLES, openExample))
+
+  /**
+   * WHAT A LINK CARRIES NOW — Plan 7 part 6a spec §5.1: the source editor's text, the encoding in the picker, the
+   * workspace as `serializeWorkspace` writes it, and the step of each program leg with frames.
+   *
+   * **A POSITION IS TAKEN ONLY WHILE THE PROGRAM SESSION IS NOT AWAITING A RUN** (`SessionClient.awaitingRun`).
+   * Positions describe the frames on screen, and while the editor's text is compiling those are the last program's, so
+   * a link made then carries none.
+   *
+   * **BUT A LEG STILL GOING TO ITS LINK'S STEP PASSES THAT STEP ON** — spec §5.1's note of 2026-10-01: in place of the
+   * step it shows, whether or not it has frames yet, and while the link's own compile runs, so a link shared while it
+   * is being reached is passed on unchanged. Only for the compile the session's generation names now: an edit claims
+   * the next generation at once, and a step pending then is the earlier program's (`LinkPositions.pendingFor`).
+   */
+  const sharePayload = (): SharePayload => {
+    const { client } = sessions.entryOf(SOURCE_SESSION)
+    const steps: { [L in Leg]?: number } = { ...positions.pendingFor(client.gen) }
+    if (!client.awaitingRun) {
+      for (const leg of LEGS) {
+        const { hist } = sessions.legOf({ session: SOURCE_SESSION, leg })
+        if (steps[leg] === undefined && hist.length > 0) steps[leg] = hist.currentStep
+      }
+    }
+    return {
+      program: view.state.doc.toString(),
+      encoding: picker.value,
+      workspace: serializeWorkspace({ tree, ...ws }),
+      positions: steps,
+    }
+  }
+
+  // `share` — spec §5.2: a popover built again on each open, so nothing keeps a link current (row 8).
+  wireMenu(
+    shareButton,
+    shareMenu,
+    createShare({
+      menu: shareMenu,
+      payload: sharePayload,
+      base: () => `${location.origin}${location.pathname}`,
+      copies: () => LEGS.flatMap((leg) => linkWiring.detachedPanes()[leg].copies),
+      // `undefined` OUTSIDE A SECURE CONTEXT, though the DOM's types say otherwise: the clipboard is exposed only there.
+      clipboard: () => navigator.clipboard as Clipboard | undefined,
+      notify: (text) => notices.notify(text),
+    }),
+  )
+
+  /**
+   * What an open replaced, for its *undo* to put back (spec §5.5): the program; and where the link opened whole, the
+   * workspace and each view that showed a copy, by leaf and copy.
+   */
+  type Replaced = {
+    readonly program: StoredProgram
+    readonly workspace: Workspace | null
+    readonly copies: readonly (readonly [LeafId, SessionId])[]
+  }
+
+  /**
+   * Put `next` in force as the workspace: the tree and the rest of it, its switches applied, the inspector and the
+   * source outline open or shut as it says, and every view built again from it on the program (`PaneHost.rebuildViews`,
+   * whose doc has why every view and not only those showing a copy). The copies stay in the copies menu (row 14).
+   */
+  const showWorkspace = (next: Workspace): void => {
+    const { tree: nextTree, ...rest } = next
+    tree = nextTree
+    ws = rest
+    seedLeafCounter(tree)
+    applySwitches()
+    inspectorPanel.setOpen(ws.inspector)
+    sourceOutline.panel.setOpen(ws.panels[SOURCE_LEAF]?.outline ?? false)
+    paneHost.rebuildViews(focusedLeaf())
+    refreshBuffers()
+  }
+
+  /**
+   * Undo an open — spec §5.5: the program's text and encoding, and where it opened whole the tree, the workspace and
+   * each view that showed a copy, moved back onto it as a delete's undo moves them (`PaneHost.moveBack`). A copy the
+   * open left cold, at start-up, is warmed first; one the cap refuses stays paused, and its views on the program.
+   *
+   * **USED, IT IS WITHDRAWN BY THE EDIT IT MAKES**, as any edit that changes the program withdraws it; one that changes
+   * nothing leaves nothing a later notice could offer it again for.
+   *
+   * **UNDO REMOVES THE CONTROL IT WAS ACTIVATED FROM, SO IT OWES THE FOCUS SOMEWHERE**, as a pick's does: the source
+   * editor, where the program came back, or `share` where no view shows the source. And it says so, once the focus
+   * has moved.
+   *
+   * **IT CLOSES `share`'S POPOVER**, as an open does (`openLink`): the link in it is to the program the undo replaces.
+   * Used from the keyboard, the popover can still be open; a press outside it would have closed it.
+   */
+  const undoOpen = (before: Replaced): void => {
+    shareMenu.hidePopover()
+    replaceProgram(before.program)
+    const paused: string[] = []
+    if (before.workspace !== null) {
+      showWorkspace(before.workspace)
+      for (const session of new Set(before.copies.map(([, s]) => s))) {
+        const name = scratchpad.nameOf(session)
+        // A COPY DELETED SINCE THE OPEN HAS NOTHING TO COME BACK TO.
+        if (name === null) continue
+        try {
+          scratchpad.warm(session)
+        } catch (e) {
+          if (!(e instanceof BufferCapReached)) throw e
+          paused.push(name)
+          continue
+        }
+        const leaves = before.copies.filter(([, s]) => s === session).map(([leaf]) => leaf)
+        paneHost.moveBack(leaves, SOURCE_SESSION, session)
+      }
+      refreshBuffers()
+      draw()
+    }
+    view.focus()
+    if (!view.hasFocus) shareButton.focus()
+    const put = before.workspace === null ? 'put back the program' : 'put back the program and the workspace'
+    notices.notify(
+      paused.length === 0 ? put : `${put} — ${paused.join(', ')} paused, ${MAX_WARM_BUFFERS} copies are running`,
+    )
+  }
+
+  /**
+   * Say what an open did, and clear the fragment — spec §5.3, §7. **THE FRAGMENT IS CLEARED WHATEVER THE LINK HELD**
+   * (row 5), with `history.replaceState`, which fires no `hashchange`: a reload then keeps the edits made since rather
+   * than opening the link again, and a link that could not be read is not read again. A link that opened offers its
+   * `undo` in place of any earlier open's.
+   */
+  const announceOpen = (opened: OpenedLink, before: Replaced): void => {
+    // `window.history`, SINCE `history` HERE IS CODEMIRROR'S: the editor's undo history, imported above.
+    window.history.replaceState(window.history.state, '', `${location.pathname}${location.search}`)
+    if (opened.kind === 'unreadable') {
+      notices.notify('this link could not be read — nothing was changed')
+      return
+    }
+    // A WHOLE LINK'S POSITIONS ARE HELD FOR THE COMPILE OF ITS PROGRAM, THE GENERATION CLAIMED NOW: a pasted link's
+    // `replaceProgram` claimed it, and at start-up `main()`'s own `compile.schedule(loaded.text)` did. **NOTHING MAY BE
+    // AWAITED BETWEEN THAT CLAIM AND THIS HOLD**: that compile's `compiled` reply gives each leg its position, and one
+    // heard first would leave them held for a reply already gone. An earlier link's go here (`hold`), and these go at
+    // any recompile's first reply (`LinkPositions.onReply`).
+    if (opened.kind === 'whole') positions.hold(sessions.entryOf(SOURCE_SESSION).client.gen, opened.positions)
+    // ANY EARLIER OPEN'S OFFER GOES WITH IT: this notice replaces its notice, and this offer takes its place.
+    const undo: NoticeAction = { label: 'undo', fallback: () => shareButton, run: () => undoOpen(before) }
+    const text =
+      opened.kind === 'whole'
+        ? 'opened a shared link'
+        : `opened a shared link's program — its ${opened.encoding === null ? 'encoding, ' : ''}workspace and step positions were left out`
+    offer = { undo, notice: notices.notify(text, { action: undo }) }
+  }
+
+  /**
+   * OPEN A LINK ON AN OPEN PAGE — spec §5.3: one pasted into the address bar, heard as `hashchange`. Whole, it replaces
+   * the program and the workspace and builds every view again on the program; alone, the program, under the link's
+   * encoding where this build has it and the picker's otherwise; unreadable, nothing.
+   *
+   * **THE LATEST LINK WINS.** A call whose read ends after a later call has begun does nothing at all, whatever its
+   * link held: it replaces nothing, says nothing, leaves the offer to the open that won and the fragment as that open
+   * left it. Otherwise a long link pasted before a short one would be read last and open over it, and the `undo` on
+   * the page would put back the short link's program. **IN CHROME THAT CANNOT HAPPEN**: a link's read never spans a
+   * task, so it ends in the microtask checkpoint after the `hashchange` listener that began it, before a later
+   * `hashchange` can be dispatched (spec §5.3's note has the measurement). The ticket holds the order wherever an engine
+   * schedules the stream's work as tasks. **IT ORDERS CALLS, SO IT CANNOT SEE A LINK WHOSE `hashchange` IS STILL
+   * QUEUED** when an earlier read ends: that open clears the fragment, and the queued `hashchange` then reads none.
+   *
+   * **AN OPEN THAT APPLIES CLOSES `share`'S POPOVER**, as its `undo` does: the link in it is to the program the open
+   * replaces, and `copy link` would copy that. Pasting into the address bar does not close it, as a click on the page
+   * would.
+   */
+  let linkTicket = 0
+  const openLink = async (fragment: string): Promise<void> => {
+    const ticket = ++linkTicket
+    const opened = await decodeLink(fragment, encodings() as string[])
+    // COMPARED AFTER THE READ, NOT BEFORE IT: before it, every call's ticket is the latest.
+    if (ticket !== linkTicket) return
+    if (opened.kind !== 'unreadable') shareMenu.hidePopover()
+    const program: StoredProgram = { text: view.state.doc.toString(), encoding: picker.value }
+    if (opened.kind === 'whole') {
+      const copies = panes
+        .all()
+        .flatMap((p) => (p.slot.binding.session === SOURCE_SESSION ? [] : [[p.id, p.slot.binding.session] as const]))
+      const before: Replaced = { program, workspace: { tree, ...ws }, copies }
+      replaceProgram({ text: opened.program, encoding: opened.encoding })
+      showWorkspace(opened.workspace)
+      announceOpen(opened, before)
+    } else {
+      if (opened.kind === 'program') replaceProgram({ text: opened.program, encoding: opened.encoding ?? picker.value })
+      announceOpen(opened, { program, workspace: null, copies: [] })
+    }
+  }
 
   /**
    * Undo a delete — spec §10. The copy comes back under its own id and name, COLD, and is warmed; a
@@ -2243,11 +2515,15 @@ async function main(): Promise<EditorView> {
         EditorView.contentAttributes.of({ 'aria-label': 'source program editor' }),
         EditorView.updateListener.of((u) => {
           if (!u.docChanged) return
-          // A PICK'S UNDO WOULD THROW THIS EDIT AWAY, so it goes now — `openExample`'s own doc. **UNLESS THE EDIT LEFT
+          // A PICK'S UNDO WOULD THROW THIS EDIT AWAY, so it goes now — `openExample`'s own doc, and `offer`'s. **UNLESS THE EDIT LEFT
           // THE DOCUMENT AS IT WAS**: the language server answers a format of text already formatted with one edit
           // replacing the whole document by the same text, so with *format on blur* on, leaving the editor for the
           // undo would otherwise end it on the way there, and nothing that edit did could be lost.
-          if (!u.startState.doc.eq(u.state.doc)) pick?.dismiss()
+          if (!u.startState.doc.eq(u.state.doc)) {
+            pick?.dismiss()
+            // A LINK'S UNDO PUTS BACK THE WHOLE DOCUMENT TOO (spec §5.5), so it goes on the same terms.
+            withdrawOffer()
+          }
           const src = u.state.doc.toString()
           // NO HIGHLIGHTING DISPATCH HERE ANY MORE. `classifySource` used to be called synchronously on
           // this line, in the same frame as the keystroke; the colourer above is a `ViewPlugin` that
@@ -2514,6 +2790,20 @@ async function main(): Promise<EditorView> {
    * "no repair pass" holds because the repair is one ordinary write of the ordinary payload.
    */
   persistBuffers()
+
+  // THE START-UP LINK'S NOTICE, NOW THAT EVERYTHING IT CAN UNDO EXISTS (spec §5.3): what it replaced is what storage
+  // would have opened on — the program, and where it opened whole the workspace and the bindings it dropped.
+  if (startLink !== null) {
+    announceOpen(startLink, {
+      program: storedProgram,
+      workspace: startLink.kind === 'whole' ? storedWorkspace : null,
+      copies: droppedBindings,
+    })
+  }
+  // A LINK PASTED INTO AN OPEN PAGE (spec §5.3). Any other fragment is left alone.
+  addEventListener('hashchange', () => {
+    if (isLink(location.hash)) void openLink(location.hash)
+  })
   return view
 }
 

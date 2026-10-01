@@ -10,9 +10,10 @@ import { PRESETS, type Preset, presetOf, type Switches } from './workspace'
  */
 
 /**
- * The popover wiring every header menu shares: the invoker relationship, `aria-expanded` kept true to the
- * popover's state, and an optional rebuild on open — the pattern the old split popovers established, which
- * `view-header.ts`'s `viewHeader` and `viewMenu` each kept.
+ * The popover wiring every header menu shares, and `share`'s popover too, which is a disclosure and not a menu (Plan 7
+ * part 6a spec §6): the invoker relationship, `aria-expanded` kept true to the popover's state, and an optional
+ * rebuild on open — the pattern the old split popovers established, which `view-header.ts`'s `viewHeader` and
+ * `viewMenu` each kept.
  */
 export function wireMenu(button: HTMLButtonElement, menu: HTMLElement, onOpen?: () => void): void {
   button.popoverTargetElement = menu

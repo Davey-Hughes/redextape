@@ -384,6 +384,51 @@ export const LAYOUT_VERSION = 1
 /** How far the sum of a split's sizes may drift from 1 before the tree is rejected. */
 const SIZE_EPSILON = 1e-6
 
+/**
+ * The most splits a tree may have on any path from its root to a leaf; `defaultLayout()` has 2 (Plan 7 part 6a spec
+ * §5.3, amended 2026-10-01).
+ *
+ * **WHAT IT BOUNDS IS THE READING, NOT WHICH TREES PARSE.** A split has two children or more, so a tree 64 splits deep
+ * has at least 65 leaves and `MAX_TREE_LEAVES` refuses it anyway. But `validate` reads a split's first child whole
+ * before its second, so a tree that nests down its first children reaches no leaf until its deepest split, and the
+ * leaf count cannot stop the reading. Unbounded, the recursion threw `RangeError` at 6,000 splits deep, on a link of
+ * 25,011 characters. This stops it at the 65th split.
+ */
+const MAX_TREE_DEPTH = 64
+
+/**
+ * The most leaves a tree may have; `defaultLayout()` has 4 (spec §5.3, amended 2026-10-01).
+ *
+ * **A LINK BROUGHT TREES THE STORE NEVER HAD.** A link of 2,034 characters held 400 λ views, which took 4.4 s to open
+ * and were stored, so every later load built them again. **THE APP DOES NOT STOP HERE**: `+ view` nests each view it
+ * adds one split deeper and puts no limit on how many, so its 61st press in a row from the default makes 65 leaves,
+ * and that layout falls back to the default at the next load.
+ */
+const MAX_TREE_LEAVES = 64
+
+/**
+ * The largest number a leaf id may carry, as `leafNumber` reads it (spec §5.3, amended 2026-10-01): a number the leaf
+ * counter can step past. `main.ts`'s `seedLeafCounter` sets the counter one past the largest number in the tree, and
+ * from 2^53 on adding one no longer moves it, so after `pane-1e300` or `pane-9007199254740991` the second view added
+ * would mint a duplicate id, and `insertBeside` would throw out of the click. The counter moves by one a view added, so
+ * a billion is a billion views added.
+ */
+const MAX_LEAF_NUMBER = 1_000_000_000
+
+/**
+ * The number a leaf id carries, or `null` for one that carries none: what follows its last `-`, or the whole id where
+ * it has none, where `Number` reads that as a whole number.
+ *
+ * **`main.ts`'s `seedLeafCounter` READS IT, AND `validate` BOUNDS IT, THROUGH THIS ONE FUNCTION**, so the number the
+ * bound holds is the number the counter steps past. Read through `Number`, not as decimal digits alone, because that is
+ * how the counter has always read it: `pane-0x1fffffffffffff` is 2^53 − 1 to it. Every id the app has minted carries
+ * one (`lambda-0`, `pane-3`) except `source`.
+ */
+export function leafNumber(id: LeafId): number | null {
+  const n = Number(id.slice(id.lastIndexOf('-') + 1))
+  return Number.isInteger(n) ? n : null
+}
+
 export function serializeLayout(root: LayoutNode): string {
   return JSON.stringify({ version: LAYOUT_VERSION, tree: root })
 }
@@ -408,13 +453,18 @@ const PANE_KINDS: readonly string[] = Object.keys({ source: 0, lambda: 0, asm: 0
  * or sizes summing to 1.4 parse perfectly as JSON and then render as a pane with wrong padding or a
  * gap where a divider should be — a crash would at least be reported. The hazard is a hand-edited
  * entry, so every rejection here is something a person could plausibly type.
+ *
+ * **AND A LINK, WHICH NO PERSON NEED HAVE TYPED** (Plan 7 part 6a spec §5.3, amended 2026-10-01): a link's workspace is
+ * read here too, so the tree is bounded as well as valid. `splitsAbove` counts the splits over `node`.
  */
-function validate(node: unknown, ids: Set<string>): node is LayoutNode {
+function validate(node: unknown, ids: Set<string>, splitsAbove: number): node is LayoutNode {
   if (typeof node !== 'object' || node === null) return false
   const n = node as Record<string, unknown>
 
   if (n.kind === 'leaf') {
     if (typeof n.id !== 'string' || n.id.length === 0) return false
+    const number = leafNumber(n.id)
+    if (number !== null && number > MAX_LEAF_NUMBER) return false
     if (typeof n.pane !== 'string' || !PANE_KINDS.includes(n.pane)) return false
     // THE SOURCE KIND AND `SOURCE_LEAF` IMPLY EACH OTHER, AND NEITHER DIRECTION IS DECORATION.
     // `parseLayout`'s `sources > 1` count below says at most one leaf renders the editor; it does NOT
@@ -437,10 +487,12 @@ function validate(node: unknown, ids: Set<string>): node is LayoutNode {
     if ((n.id === SOURCE_LEAF) !== (n.pane === 'source')) return false
     if (ids.has(n.id)) return false
     ids.add(n.id)
-    return true
+    return ids.size <= MAX_TREE_LEAVES
   }
 
   if (n.kind !== 'split') return false
+  // BEFORE ITS CHILDREN ARE READ, so a deeper tree costs no more to refuse than this split did.
+  if (splitsAbove === MAX_TREE_DEPTH) return false
   if (n.dir !== 'row' && n.dir !== 'column') return false
   if (!Array.isArray(n.children) || !Array.isArray(n.sizes)) return false
   if (n.children.length < 2) return false
@@ -448,7 +500,7 @@ function validate(node: unknown, ids: Set<string>): node is LayoutNode {
   if (!n.sizes.every((s: unknown) => typeof s === 'number' && Number.isFinite(s) && s > 0)) return false
   const total = (n.sizes as number[]).reduce((a, b) => a + b, 0)
   if (Math.abs(total - 1) > SIZE_EPSILON) return false
-  return n.children.every((c: unknown) => validate(c, ids))
+  return n.children.every((c: unknown) => validate(c, ids, splitsAbove + 1))
 }
 
 /**
@@ -457,10 +509,11 @@ function validate(node: unknown, ids: Set<string>): node is LayoutNode {
  *
  * THE SAME TWO RULES AND NO THIRD: every node passes `validate`, and at most one leaf is the source leaf.
  * Split out rather than duplicated because the envelope is the only thing the two formats disagree about.
+ * `validate` holds the bound on depth and leaves, so the `leaves` below, which recurses, walks only a tree within it.
  */
 export function parseTree(tree: unknown): LayoutNode | null {
   const ids = new Set<string>()
-  if (!validate(tree, ids)) return null
+  if (!validate(tree, ids, 0)) return null
   const sources = leaves(tree).filter((l) => l.pane === 'source').length
   if (sources > 1) return null
   return tree

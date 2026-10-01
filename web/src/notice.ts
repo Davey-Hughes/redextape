@@ -8,9 +8,9 @@
  * that silence, one control at a time).
  *
  * **A NEW NOTICE REPLACES THE OLD ONE, ACTION AND ALL.** A notice lasts `NOTICE_MS`, or until the next one;
- * an undo offered by a notice that has been replaced is gone with it (spec §10). A condition that LASTS is
- * not a notice at all — it is the line's resting state (`rest`), which every notice shows over and which
- * comes back when each one ends.
+ * an undo offered by a notice that has been replaced is gone with it (spec §10), unless the new one offers the
+ * same action, whose button it keeps (`paint`). A condition that LASTS is not a notice at all — it is the
+ * line's resting state (`rest`), which every notice shows over and which comes back when each one ends.
  *
  * **`announce` IS THE LIVE REGION ALONE**, for a sentence already on screen elsewhere: the readout's link
  * sentence, said when a link gesture changes it.
@@ -107,8 +107,20 @@ export function createNotices(line: HTMLElement, live: HTMLElement, fallback?: (
    * The action's own `fallback` takes the focus then, where it names one — the palette's, the settings
    * button its removal was made from — and `fallback` otherwise: what the app hands over, the control
    * that lists the copies, which is where a copy's undo that did not happen leaves the user.
+   *
+   * **THE SAME ACTION AGAIN KEEPS ITS BUTTON, AND ONLY THE WORDS CHANGE** — Plan 7 part 6a spec §5.5: a link's clamps
+   * redraw the open's notice with the open's `undo`, hundreds of milliseconds after the open, while a user may be
+   * pressing it. Chrome dispatches a `click` only where the press and the release land on the same element, measured
+   * by real input: a button replaced while pressed clicks nothing even drawn in the same place, and one kept but moved
+   * from under the pointer clicks the line. So the button stays the same element, the focus stays on it, and the
+   * stylesheet keeps it in place: at the line's end, on its first line, whatever the words' length.
    */
   const paint = (text: string | null, action?: NoticeAction): void => {
+    const words = line.querySelector<HTMLElement>('.notice-text')
+    if (text !== null && action !== undefined && action === shown && words !== null) {
+      words.textContent = text
+      return
+    }
     const held = line.contains(document.activeElement)
     const leaving = shown?.fallback ?? fallback
     shown = action

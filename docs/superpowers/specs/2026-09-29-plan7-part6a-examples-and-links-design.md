@@ -317,6 +317,12 @@ A position is the leg's `hist.currentStep` on the program session, for each leg 
 out. Positions describe the frames on screen, so they are taken only while the program session is not awaiting a run
 (`SessionClient.awaitingRun`): a link made while the editor's text is still compiling carries none.
 
+*Amended 2026-10-01, the user's decision after 6a-ii's whole-branch review: a leg whose link position is still pending
+(§5.4) for the program on screen shares that position, not the step it shows, whether or not the leg has frames yet, so
+a link shared while it is still being reached passes it on unchanged. Before, a share made during the catch-up carried
+the catch-up's head, and left out a leg that had no frames yet. A position pending for an earlier program is not
+shared.*
+
 **Sizes.** With the default workspace and every leg at the end of its first recording, under Chrome's
 `CompressionStream` (§A.1), the fragment is 418 characters for `let x = 40; x + 2`, 445 for the closure, 502 for
 `is_even(6)`, 474 for `fact(4)`, 583 for `map`/`fold`, 501 for `sum_to(5)` and 470 for `fact(12)`; the probe wrote
@@ -333,9 +339,9 @@ must open for as long as the format does, so `parseWorkspace` must go on reading
 
 ### §5.2 Sharing
 
-`share` sits after `examples ▾`: a button named `share`, without `▾`, as `settings` has none, opening a popover wired by
-`wireMenu`. On each open, as the workspace menu rebuilds on each open, the popover is built again; nothing keeps a link
-current (row 8).
+`share` sits after the bar's spacer, before `appearance`: a button named `share`, without `▾`, as `settings` has none,
+opening a popover wired by `wireMenu`. On each open, as the workspace menu rebuilds on each open, the popover is built
+again; nothing keeps a link current (row 8).
 
 - **The link** is the payload of §5.1 after `location.origin + location.pathname`. `CompressionStream` is asynchronous,
   so the field is filled when the encode resolves.
@@ -355,6 +361,15 @@ current (row 8).
   row 14).
 
 Both lines are `aria-describedby` on the field.
+
+*Amended 2026-09-30, the user's decision before 6a-ii's plan: `share` sat after `examples ▾`. At 390 px that took
+Instrument's debugger preset from three header rows to four, failing 6a-i's `header-menus-narrow.test.ts`, and it cost a
+row in Terminal's stage at 390 px and Paper's stage at 360 px. Before `appearance`, every preset in all three styles
+keeps today's row count at 390, 360 and 320 px.*
+
+*Noted 2026-09-30, from 6a-ii's plan (its finding 5): the field is not selected on `toggle`. The link arrives after the
+popover has shown, since `CompressionStream` is asynchronous, so a `toggle` handler selected an empty field. The field
+is selected as the link fills it, while it holds the focus the popover's showing gave it.*
 
 ### §5.3 Opening a link
 
@@ -376,6 +391,31 @@ opener's copies stay listed, and their stored bindings are dropped (row 14). At 
 all (`main.ts:1169`), so no copy is warmed. The positions are held as pending (§5.4). `history.replaceState` then
 removes the fragment (row 5) — the program and the workspace reach storage by their ordinary writes — and the notice
 `opened a shared link` offers `undo` (§5.5).
+
+*Noted 2026-09-30, from 6a-ii's plan (its finding 8): the views are built again through `PaneHost.rebuildViews`, not
+`resetViews`. `resetViews` goes through `pane-host.ts`'s `applyLayout`, which keeps a view whose leaf id and kind
+survive, and a view reads its display only when it is built, so a kept λ view drew the opener's display under the
+link's workspace.*
+*Noted 2026-09-30, from 6a-ii's fix task, the user's decision: the latest link wins. An open whose read ends after a
+later link's has begun is dropped unsaid: it changes nothing, says nothing, and leaves the `undo` and the fragment to
+the open that won. In Chrome a link's read did not yield to the event loop. Measured on 2026-09-30 in
+HeadlessChrome 151.0.7922.34, links whose payloads inflate to 1,000 to 8,388,608 bytes (`MAX_LINK_BYTES`) were read in
+0.5 to 14.6 ms, while 0 `MessageChannel` tasks and 0 `setTimeout(0)` callbacks ran. So a read ends before a later
+`hashchange` can be dispatched, and two reads cannot overlap there. The guard is a defence for an engine that schedules
+the stream's work as tasks. It orders reads that have begun, so a link whose `hashchange` is still queued when an
+earlier read ends is lost when that open clears the fragment.*
+*Amended 2026-10-01, the user's decision after 6a-ii's whole-branch review: a workspace's tree is bounded in
+`parseTree`, so a link's layout and a stored one are held alike. A tree is at most 64 splits deep (the default is 2) and
+has at most 64 leaves (the default has 4), and a minted leaf id's number is a small whole number that the leaf counter
+can step past. A link whose workspace breaks the bound opens its program alone (§7); a stored layout that breaks it
+falls back to the default. A tree is always shallower than it has leaves, so the leaf bound decides which trees are
+refused, and the depth bound stops reading a deeper one early. The app does not stop at the bound: `+ view` nests each
+view it adds one split deeper, so a tree built by it has two splits fewer than it has leaves, and the 61st press in a
+row from the default layout builds one the bound refuses. Reading a link cannot throw: whatever fails while it is read
+makes it unreadable, or opens its program alone, and either way the fragment is cleared. Before, only the inflate cap
+bounded a link, and that bounds bytes, not shape: a link of a few kilobytes with a deep or wide tree could take many
+seconds to open, store a layout that stopped every later load until the site's data was cleared, or throw out of the
+decoder before the fragment was cleared.*
 
 ### §5.4 Positions
 
@@ -428,20 +468,38 @@ The opener's run is the sharer's — the same program, encoding and build — so
 windows match. A link opened on a different build may land its positions elsewhere, and they continue and clamp as
 above.
 
+*Noted 2026-09-30, from 6a-ii's plan (its finding 9): `seek` stops following except where it lands on the newest
+frame. There `history.ts`'s `History.seek` goes on following, so a position that is the last frame of a chunk would be
+carried off by the next. A position applies once a frame past it has arrived, or once the recording has stopped with it
+as its last frame.*
+*Amended 2026-10-01, the user's decision after 6a-ii's whole-branch review: an open's clamps share one notice. Each
+clamp, and the tenth continue's stop, redraws that notice to name every leg stopped short so far, why it stopped, and
+the step shown for each, and it carries the open's `undo` as each one did (§5.5). Before, each made its own notice and
+the next replaced it, so when two legs stopped short the first was never seen or heard.*
+
 ### §5.5 Undo
 
-`opened a shared link` offers `undo` for `NOTICE_MS`. It restores the program's text and encoding, the tree and the
-workspace, and each binding the open dropped, warming the copy as the delete's undo does and moving its views back with
-`moveBack` (§2.5); a copy the cap refuses stays paused, and its view stays on the program. It drops every pending
-position. It does not restore the fragment.
+`opened a shared link` offers `undo`, withdrawn at the next edit that changes the program and at the next encoding
+chosen in the picker, as a pick's is (§4.5), since it puts back the whole document and would throw that edit or choice
+away. It restores the program's text and encoding, the tree and the workspace, and each binding the open dropped,
+warming the copy as the delete's undo does and moving its views back with `moveBack` (§2.5); a copy the cap refuses
+stays paused, and its view stays on the program. It drops every pending position. It does not restore the fragment.
 
 **A notice about the same open carries its undo forward.** A new notice replaces the old one, action and all (§2.5),
-and a clamp (§5.4) arrives hundreds of milliseconds after the open, so a clamp or program-alone notice made while the
-open's undo is live offers that same `undo`. So does the notice the tenth continue makes (row 16).
+and a clamp (§5.4) arrives hundreds of milliseconds after the open, so a clamp or program-alone notice made before the
+open's undo is withdrawn, used or replaced by another open's offers that same `undo`, withdrawn by the same edit or
+choice. So does the notice the tenth continue makes (row 16). That holds after the open's own notice has gone: a clamp
+or the tenth continue can come later than `NOTICE_MS`, and its notice offers the `undo` again.
 
 *Noted 2026-09-30, after 6a-i's whole-branch review: a pick's `undo` was offered for all of `NOTICE_MS` too, until the
 user's decision withdrew it at the next edit (§4.5), since it puts back the whole document. This `undo` puts back the
 whole document and more, so 6a-ii's plan has the same question to answer for it.*
+*Amended 2026-09-30, the user's decision before 6a-ii's plan: the `undo` was offered for all of `NOTICE_MS`, whatever
+the user did in that time.*
+*Amended 2026-09-30, the user's second decision before 6a-ii's plan: a later notice carried the `undo` "while the open's
+undo is live", which left open whether a notice made after the open's own had gone still counted. It does. Read the
+other way, §8's `fact(12)` case, whose ten continues took 4,381 ms here (§A.2), would find the `undo` on this machine
+and not on a CI runner two to six times slower, past `NOTICE_MS`.*
 
 ## §6 Accessibility, and the controls gate
 
@@ -473,6 +531,10 @@ Every new control follows umbrella §4's rules.
   *Amended 2026-09-30, at 6a-i's rebase onto 6b (#119), which landed first: the gate keeps 6b's rule for dialogs, only a
   modal dialog's controls while one is open and none in a closed one, and 6b's name for the label helper,
   `selectLabel`; 6a-i adds the hidden input, `=` and the header menus read off the page.*
+
+*Amended 2026-09-30, the user's decision in 6a-ii's fix task: `share` is a disclosure — `aria-controls` and
+`aria-expanded`, and no `aria-haspopup`, since its popover is a field and a button and not a menu. `settings` keeps its
+`aria-haspopup="menu"`, though its popover is not a menu either; that is recorded as open.*
 
 ## §7 When things fail
 
@@ -582,10 +644,11 @@ tests/browser/<file>`. The CLI is `target/release/redextape`, built by `cargo bu
 | 42, 42, true, 24, 9, 15, 479001600, and §2.7's three CLI differences | the CLI's values | `redextape --no-config run --backend {reference,lambda,tm} <file>`; `emit <file> --lang asm -o <f>.asm` then `run <f>.asm`; `emit <file> --lang tm --encoding {unary,binary} -o <f>.tm` then `run <f>.tm`; each file being §A.1's text; the λ run of `fact(12)` under `timeout 600`, exit 124 |
 | 85; 17 | browser test files that mount the app; of them, those containing no `insert:` | `grep -l "src/main'" web/tests/browser/*.test.ts \| wc -l`; `grep -L 'insert:' $(grep -l "src/main'" web/tests/browser/*.test.ts) \| wc -l` |
 | 46 | `FIRST_ORDER_DEMOS`' programs | `python3 extract_demos.py` (§A.4) |
+| 0.5 to 14.6 ms; 0 `MessageChannel` tasks and 0 `setTimeout(0)` callbacks; HeadlessChrome 151.0.7922.34 | a link's read, for payloads inflating to 1,000 to 8,388,608 bytes; what ran meanwhile; the browser (§5.3's note) | §A.5, placed in `web/tests/browser/` of 6a-ii's worktree at `402a2bb`, run once on 2026-09-30 as `cd web && flock <browser lock> pnpm exec vitest run --project browser --reporter=verbose --silent=false tests/browser/<file>`, and deleted: each size's line, and for the browser its first line, `navigator.userAgent` |
 
 ## §A Probe sources
 
-Four files, each run as §11 says. **None re-implements what it measures**: §A.1 and §A.2 post the app's own `run` and
+Each file below is run as §11 says. **None re-implements what it measures**: §A.1 and §A.2 post the app's own `run` and
 `extend` requests to the app's own `session-worker.ts`, and §A.2 pushes the frames into the app's own `History` with
 the app's own sizers, so the rings it reports are the rings a view walks.
 
@@ -900,4 +963,76 @@ for d in demos:
     out.append(p.stdout)
 json.dump(out, open('demos-fmt.json', 'w'))
 print(len(out), sum(len(o.encode()) for o in out))
+```
+
+### §A.5 `probe-decode-tasks.test.ts` — what runs while a link is read
+
+It decodes links through the app's own `decodeLink`, while a `MessageChannel` ping-pong and a `setTimeout(0)` chain
+count the tasks that run meanwhile; its first line is the browser's user agent. Each payload is the canonical one,
+padded with spaces after its `{`, and in the noisy rows its program carries a long comment.
+
+```ts
+import { expect, it } from 'vitest'
+import { EXAMPLES } from '../../src/examples'
+import { decodeLink, LINK_PREFIX, MAX_LINK_BYTES } from '../../src/share-link'
+import { defaultWorkspace, serializeWorkspace } from '../../src/workspace'
+
+const SUM_TO = EXAMPLES.find((e) => e.id === 'sum-to')?.text ?? ''
+
+async function deflated(bytes: Uint8Array<ArrayBuffer>): Promise<Uint8Array> {
+  const stream = new Blob([bytes]).stream().pipeThrough(new CompressionStream('deflate-raw'))
+  return new Uint8Array(await new Response(stream).arrayBuffer())
+}
+function base64url(bytes: Uint8Array): string {
+  let binary = ''
+  for (let i = 0; i < bytes.length; i += 0x8000) binary += String.fromCharCode(...bytes.subarray(i, i + 0x8000))
+  return btoa(binary).replaceAll('+', '-').replaceAll('/', '_').replace(/=+$/, '')
+}
+
+/** A seeded generator. */
+let seed = 7
+const next = () => {
+  seed = (seed * 1103515245 + 12345) % 2147483648
+  return seed / 2147483648
+}
+async function padded(bytes: number, noisy = false): Promise<string> {
+  const pad = (n: number) =>
+    noisy ? Array.from({ length: n }, () => 'abcdefghijklmnopqrstuvwxyz0123456789'[Math.floor(next() * 36)]).join('') : ''
+  const json = JSON.stringify({
+    version: 1,
+    program: `${SUM_TO}//${pad(noisy ? bytes - 2000 : 0)}`,
+    encoding: 'binary',
+    workspace: serializeWorkspace(defaultWorkspace()),
+    positions: {},
+  })
+  const text = `{${' '.repeat(bytes - json.length)}${json.slice(1)}`
+  return `${LINK_PREFIX}${base64url(await deflated(new TextEncoder().encode(text)))}`
+}
+
+it('counts tasks run while a large link decodes', async () => {
+  console.log(navigator.userAgent)
+  for (const [size, noisy] of [[1000, false], [MAX_LINK_BYTES / 4, false], [MAX_LINK_BYTES / 2, false], [MAX_LINK_BYTES, false], [MAX_LINK_BYTES / 2, true], [MAX_LINK_BYTES - 10, true]] as const) {
+    const link = await padded(size, noisy)
+    let tasks = 0
+    let done = false
+    const ch = new MessageChannel()
+    ch.port1.onmessage = () => {
+      tasks++
+      if (!done) ch.port2.postMessage(0)
+    }
+    ch.port2.postMessage(0)
+    let timeouts = 0
+    const t = () => {
+      timeouts++
+      if (!done) setTimeout(t, 0)
+    }
+    setTimeout(t, 0)
+    const started = performance.now()
+    const opened = await decodeLink(link, ['unary', 'binary'])
+    const took = performance.now() - started
+    done = true
+    console.log(`${noisy ? 'noisy' : 'spaces'} size ${size} link ${link.length} chars: kind ${opened.kind}, ${took.toFixed(1)} ms, ${tasks} message tasks, ${timeouts} timeouts`)
+    expect(opened.kind).toBe('whole')
+  }
+})
 ```

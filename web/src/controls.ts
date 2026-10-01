@@ -21,6 +21,8 @@ export type LegView = {
   awaitingRun: boolean
   /** Whether this leg's play button is on — `LegState.playing`. */
   playing: boolean
+  /** The step a shared link's position is taking this leg to, or `null` — `LegState.pending`. */
+  pending: number | null
 }
 
 export type ControlState = {
@@ -126,7 +128,15 @@ export function controlState(v: LegView): ControlState {
   const oldest = v.evicted ? ` (oldest kept: step ${n(v.oldestStep)})` : ''
   // THE READOUT SAYS WHAT THE USER DID; THE FIELD NAMES WHAT IS TRUE OF THE SESSION. They are the
   // same state from the two ends, and this is the existing narration rather than a second channel.
-  const tail = v.awaitingRun ? ' — recompiling' : v.done === null ? '' : doneText(v.done)
+  // **A LINK'S PENDING POSITION SAYS WHERE THE LEG IS GOING IN PLACE OF HOW ITS RECORDING STOPPED** (Plan 7 part 6a
+  // spec §5.4): a stop the link will continue past is not where the leg rests.
+  const tail = v.awaitingRun
+    ? ' — recompiling'
+    : v.pending !== null
+      ? ` — going to step ${n(v.pending)} from the link`
+      : v.done === null
+        ? ''
+        : doneText(v.done)
   const stepText = v.length === 0 ? 'not run' : `step ${n(v.currentStep)} of ${of}${tail}${oldest}`
 
   return {

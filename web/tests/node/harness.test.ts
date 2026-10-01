@@ -14,6 +14,8 @@ describe('SHELL', () => {
       '#examples',
       '#examples-menu',
       '#encoding',
+      '#share',
+      '#share-menu',
       '#settings',
       '#style',
       '#palette',

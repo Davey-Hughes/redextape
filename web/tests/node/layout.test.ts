@@ -533,3 +533,135 @@ describe('parseTree', () => {
     expect(parseTree('nope')).toBeNull()
   })
 })
+
+/**
+ * **A TREE IS AT MOST 64 SPLITS DEEP AND HAS AT MOST 64 LEAVES** (Plan 7 part 6a spec §5.3, amended 2026-10-01), so a
+ * link's tree and a stored one are held alike. Before, a link of a few kilobytes could carry a tree that threw out of
+ * `validate`'s recursion, or one that took many seconds to open and was then stored.
+ */
+describe('the bound on a tree', () => {
+  /** One split of `n` λ leaves, `pane-1` to `pane-n`: one split deep, so only the leaf bound is in play. */
+  const flat = (n: number): LayoutNode => ({
+    kind: 'split',
+    dir: 'row',
+    sizes: Array.from({ length: n }, () => 1 / n),
+    children: Array.from({ length: n }, (_, i) => leaf(`pane-${i + 1}`, 'lambda')),
+  })
+  /**
+   * A tree `depth` splits deep down each split's FIRST child, whose second child is a leaf. `validate` reads every
+   * split before any leaf, so the leaf bound cannot stop the reading and only the depth bound can.
+   */
+  const spine = (depth: number): LayoutNode => {
+    let node: LayoutNode = leaf('pane-0', 'lambda')
+    for (let i = 1; i <= depth; i++)
+      node = { kind: 'split', dir: 'row', sizes: [0.5, 0.5], children: [node, leaf(`pane-${i}`, 'lambda')] }
+    return node
+  }
+  /** A tree `depth` splits deep down each split's SECOND child, as `+ view` nests the views it adds. */
+  const trailing = (depth: number): LayoutNode => {
+    let node: LayoutNode = leaf(`pane-${depth}`, 'lambda')
+    for (let i = depth - 1; i >= 0; i--)
+      node = { kind: 'split', dir: 'row', sizes: [0.5, 0.5], children: [leaf(`pane-${i}`, 'lambda'), node] }
+    return node
+  }
+  /** Splits on the longest root-to-leaf path, and leaves. */
+  const shape = (node: LayoutNode): { depth: number; leaves: number } => {
+    if (node.kind === 'leaf') return { depth: 0, leaves: 1 }
+    const kids = node.children.map(shape)
+    return { depth: 1 + Math.max(...kids.map((k) => k.depth)), leaves: kids.reduce((n, k) => n + k.leaves, 0) }
+  }
+  /** `+ view` pressed `presses` times in a row: each adds a λ view beside the view the last one added and focused. */
+  const pressed = (presses: number): LayoutNode => {
+    let tree = defaultLayout()
+    let focused = 'lambda-0'
+    for (let k = 1; k <= presses; k++) {
+      tree = insertBeside(tree, focused, 'row', `pane-${k}`, 'lambda')
+      focused = `pane-${k}`
+    }
+    return tree
+  }
+
+  it('accepts 64 leaves and refuses 65', () => {
+    expect(parseTree(flat(64))).toEqual(flat(64))
+    expect(parseTree(flat(65))).toBeNull()
+  })
+
+  /** A split has two children or more, so a tree 64 splits deep has at least 65 leaves, and is over the leaf bound. */
+  it('accepts the deepest tree 64 leaves make, 63 splits deep, and refuses one 64 or 65 deep', () => {
+    expect(shape(spine(63))).toEqual({ depth: 63, leaves: 64 })
+    expect(parseTree(spine(63))).toEqual(spine(63))
+    expect(parseTree(spine(64))).toBeNull()
+    expect(parseTree(spine(65))).toBeNull()
+  })
+
+  it.each([
+    ['first', spine],
+    ['second', trailing],
+  ])('refuses a tree 10,000 and 40,000 splits deep down its %s children, without throwing', (_, deep) => {
+    expect(parseTree(deep(10_000))).toBeNull()
+    expect(parseTree(deep(40_000))).toBeNull()
+  })
+
+  /**
+   * **IT STOPS READING AT THE 65TH SPLIT**, so a hostile tree costs what 65 splits cost however deep it goes. Each split
+   * notes its depth when its `kind` is read.
+   */
+  it('reads a tree 10,000 splits deep no further than its 65th split', () => {
+    let deepest = 0
+    let node: unknown = leaf('pane-0', 'lambda')
+    for (let i = 10_000; i >= 1; i--) {
+      const split = { dir: 'row', sizes: [0.5, 0.5], children: [node, leaf(`pane-${i}`, 'lambda')] }
+      Object.defineProperty(split, 'kind', {
+        enumerable: true,
+        get: () => {
+          deepest = Math.max(deepest, i)
+          return 'split'
+        },
+      })
+      node = split
+    }
+    expect(parseTree(node)).toBeNull()
+    expect(deepest).toBe(65)
+  })
+
+  /**
+   * **`+ view` NESTS EACH VIEW IT ADDS ONE SPLIT DEEPER.** Pressed seven times in a row in the app on 2026-10-01, it
+   * stored this tree, 9 deep with 11 leaves. Such a tree is always two splits shallower than it has leaves, so the leaf
+   * bound is the one it meets: 60 presses parse, and the 61st makes 65 leaves.
+   */
+  it('accepts a tree built as `+ view` builds one, until its 65th leaf', () => {
+    expect(shape(pressed(7))).toEqual({ depth: 9, leaves: 11 })
+    expect(parseTree(pressed(7))).toEqual(pressed(7))
+    expect(shape(pressed(60))).toEqual({ depth: 62, leaves: 64 })
+    expect(parseTree(pressed(60))).toEqual(pressed(60))
+    expect(parseTree(pressed(61))).toBeNull()
+  })
+
+  /**
+   * **A LEAF ID'S NUMBER IS ONE THE LEAF COUNTER CAN STEP PAST.** `main.ts`'s `seedLeafCounter` sets the counter one past
+   * the largest number in the tree, as `leafNumber` reads it, and from 2^53 on adding one no longer moves it: the second
+   * view added after such a tree would mint a duplicate id. Every form the app has minted parses: `source`; the default's
+   * `lambda-0`, `asm-0` and `tm-0`; `${leg}-${n}`, minted by 5d-ii-a's `nextLeafId` until 5d-ii-b; and `pane-${n}`
+   * since. An id with no number cannot move the counter, and parses as before.
+   */
+  const beside = (id: string): LayoutNode => ({
+    kind: 'split',
+    dir: 'row',
+    sizes: [0.5, 0.5],
+    children: [leaf('source', 'source'), leaf(id, 'lambda')],
+  })
+
+  it.each(['lambda-0', 'asm-0', 'tm-0', 'lambda-3', 'tm-3', 'pane-1', 'pane-1000000000', 'a', 'lambda-x'])(
+    'accepts the leaf id %s',
+    (id) => {
+      expect(parseTree(beside(id))).toEqual(beside(id))
+    },
+  )
+
+  it.each(['pane-1000000001', 'pane-9007199254740991', 'pane-1e300', 'pane-0x1fffffffffffff', '1e300'])(
+    'refuses the leaf id %s',
+    (id) => {
+      expect(parseTree(beside(id))).toBeNull()
+    },
+  )
+})

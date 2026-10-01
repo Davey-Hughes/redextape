@@ -231,6 +231,7 @@ select option {
 #new-view,
 #buffers,
 #examples,
+#share,
 #appearance,
 #settings {
   display: inline-flex;
@@ -357,18 +358,24 @@ select option {
   min-width: min(20rem, calc(100vw - 2rem));
   max-width: min(36rem, calc(100vw - 2rem));
 }
-/* **AND THE GUTTER ON THE PAGE'S EDGE, FOR THE TWO MENUS WIDE ENOUGH TO REACH IT.** Where the anchored placement
-   would run past the page's edge, the browser shifts the menu back inside, flush with that edge: both menus were, at
-   320, 360 and 390px. A margin on the end side is kept in that shift, so each stops `1rem` short; and where the
-   placement flips to open leftward the margin flips with it, so `examples ▾`'s menu stops `1rem` short of the left edge
-   at 600 and 700px, where it touched it. Measured, with 1280px unchanged. Not on `.header-menu`: settings opens
+/* **AND THE GUTTER ON THE PAGE'S EDGE, FOR THE TWO MENUS AND THE POPOVER WIDE ENOUGH TO REACH IT.** Where the anchored
+   placement would run past the page's edge, the browser shifts the menu back inside, flush with that edge: both menus
+   were, at 320, 360 and 390px. A margin on the end side is kept in that shift, so each stops `1rem` short; and where
+   the placement flips to open leftward the margin flips with it, so `examples ▾`'s menu stops `1rem` short of the left
+   edge at 600 and 700px, where it touched it. Measured, with 1280px unchanged. Not on `.header-menu`: settings opens
    leftward from its button's right edge, and an end margin would move it off that edge at every width.
+
+   `share`'s popover (Plan 7 part 6a spec §5.2), a disclosure and not a menu, is the third. Without the margin it lay
+   flush with the page's right edge at 480, 600 and 700px, and at 390px in Debugger; with it, `1rem` short of either
+   edge at 320, 360, 390, 480, 600 and 700px in each preset. At 1280px it opens leftward from its button's right edge
+   either way, measured.
 
    **ONLY WHERE THE MENU IS ANCHORED.** A browser without `position-area` takes the `@supports not` branch above,
    whose `margin: auto` centres the menu on the page; an id's end margin would beat that class rule and put the menu
    against the right edge instead, `1rem` short. */
 @supports (position-area: block-end) {
   #examples-menu,
+  #share-menu,
   #workspace-menu {
     margin-inline-end: 1rem;
   }
@@ -379,6 +386,45 @@ select option {
 }
 #examples-menu .example-description {
   font-size: var(--step--2);
+  color: var(--fg-dim);
+}
+/* THE SHARE POPOVER (Plan 7 part 6a spec §5.2): the link in a read-only field, `copy link` under it, and up to two
+   lines under that. As wide as a link's start needs to be told from another's at a desktop width, and no wider than
+   the page less its gutter at a phone's. `:popover-open` for the grid, for `.header-menu.settings`' reason. */
+.header-menu.share {
+  padding: var(--space-2) var(--space-3);
+  width: min(32rem, calc(100vw - 2rem));
+}
+.header-menu.share:popover-open {
+  display: grid;
+  gap: var(--space-2);
+}
+/* THE FIELD WEARS THE HEADER'S SELECTS' CHROME, and its label is dim as theirs is. */
+.share-field {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  color: var(--fg-dim);
+}
+.share-field input {
+  flex: 1 1 auto;
+  min-width: 0;
+  font: inherit;
+  padding: var(--control-pad-block) 0.6em;
+  border-radius: var(--radius);
+  border: var(--control-border) solid var(--fg-dim);
+  background: transparent;
+  color: var(--fg);
+}
+/* A BUTTON, NOT A MENU ITEM: `.header-menu > button` draws an item a row wide with no border. */
+.header-menu.share > .share-copy {
+  justify-self: start;
+  width: auto;
+  border-color: var(--fg-dim);
+}
+.share-line {
+  margin: 0;
+  font-size: var(--step--1);
   color: var(--fg-dim);
 }
 
@@ -1665,10 +1711,12 @@ main {
   outline-offset: -2px;
 }
 
-/* THE NOTICE LINE (spec §11): one line under the header, the latest notice and at most one action. */
+/* THE NOTICE LINE (spec §11): one line under the header, the latest notice and at most one action. THE ACTION SITS AT
+   THE LINE'S END, ON ITS FIRST LINE, so no length of the words beside it moves it: a notice offering the same action
+   again keeps its button (`notice.ts`'s `paint`), and a press on it must still be on it at the release. */
 .notice {
   display: flex;
-  align-items: center;
+  align-items: baseline;
   gap: var(--space-3);
   padding: var(--space-1) var(--space-3);
   border-bottom: 1px solid var(--rule);
@@ -1679,6 +1727,7 @@ main {
   display: none;
 }
 .notice-action {
+  margin-inline-start: auto;
   font: inherit;
   padding: 0 0.5em;
   border: 1px solid var(--fg-dim);

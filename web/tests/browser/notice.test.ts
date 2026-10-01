@@ -123,6 +123,68 @@ describe('notices', () => {
   })
 
   /**
+   * **THE SAME ACTION OFFERED AGAIN KEEPS ITS BUTTON, WHERE IT WAS** — Plan 7 part 6a spec §5.5: a link's clamps
+   * redraw the open's notice with the open's `undo`, hundreds of milliseconds after the open, while a user may be
+   * pressing it. Chrome clicks nothing for a press whose button is replaced before the release, or moves from under
+   * the pointer, so the button is the same element, in the same place, and only the words change.
+   */
+  describe('the same action offered again', () => {
+    it('keeps its button and the focus on it, changes only the words, and runs the action once', () => {
+      const n = createNotices(line, live)
+      const run = vi.fn()
+      const action = { label: 'undo', run }
+      n.notify('opened a shared link', { action })
+      const button = line.querySelector<HTMLButtonElement>('button.notice-action') as HTMLButtonElement
+      button.focus()
+      n.notify("the link's λ step 100 is past the end of this run — showing step 7", { action })
+      expect(line.querySelector('button.notice-action')).toBe(button)
+      expect(document.activeElement).toBe(button)
+      expect(line.querySelector('.notice-text')?.textContent).toBe(
+        "the link's λ step 100 is past the end of this run — showing step 7",
+      )
+      expect(live.textContent).toBe("the link's λ step 100 is past the end of this run — showing step 7")
+      button.click()
+      expect(run).toHaveBeenCalledTimes(1)
+      expect(line.hidden).toBe(true)
+    })
+
+    it('replaces the button for another action under the same label', () => {
+      const n = createNotices(line, live)
+      n.notify('λ copy 1 deleted', { action: { label: 'undo', run: () => undefined } })
+      const first = line.querySelector('button.notice-action')
+      n.notify('TM copy 2 deleted', { action: { label: 'undo', run: () => undefined } })
+      expect(first).not.toBeNull()
+      expect(line.querySelector('button.notice-action')).not.toBe(first)
+    })
+
+    /**
+     * **IN THE APP'S OWN STYLES, AT A PHONE'S WIDTH, WHERE THE LONGER WORDS WRAP.** The button sits at the line's end
+     * and on its first line, so neither the words' length nor how many lines they take moves it.
+     */
+    it('stays where it was however long the words are, and however many lines they take', () => {
+      line.className = 'notice'
+      line.style.width = '390px'
+      const n = createNotices(line, live)
+      const action = { label: 'undo', run: () => undefined }
+      n.notify('opened a shared link', { action })
+      const text = () => line.querySelector('.notice-text') as HTMLElement
+      const button = line.querySelector('button.notice-action') as HTMLElement
+      const box = () => {
+        const r = button.getBoundingClientRect()
+        return [r.left, r.top, r.width, r.height]
+      }
+      const oneLine = text().getBoundingClientRect().height
+      const before = box()
+      n.notify(
+        "the link's λ step 100 and asm step 100 are past the end of this run — showing λ step 7 and asm step 5",
+        { action },
+      )
+      expect(text().getBoundingClientRect().height).toBeGreaterThan(oneLine)
+      expect(box()).toEqual(before)
+    })
+  })
+
+  /**
    * **A NOTICE ENDED EARLY BY ITS OWN HANDLE, AND ONLY WHILE IT IS STILL THE ONE ON THE LINE.** Once it has expired
    * or been drawn over, what the line says is another gesture's, and ending it would take that from under the user.
    */

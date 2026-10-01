@@ -13,6 +13,7 @@ const view = (over: Partial<LegView> = {}): LegView => ({
   done: null,
   awaitingRun: false,
   playing: false,
+  pending: null,
   ...over,
 })
 
@@ -146,6 +147,16 @@ describe('controlState', () => {
     const running = view({ done: null, length: 12, head: 4, currentStep: 4, newestStep: 11 })
     expect(controlState(running).stepText).toBe('step 4 of 11…')
     expect(controlState({ ...running, awaitingRun: true }).stepText).toBe('step 4 of 11 — recompiling')
+  })
+
+  // PLAN 7 PART 6a spec §5.4: a stop the link will continue past is not where the leg rests, so where it is going is
+  // said in its place; a recompile drops the position, and says so first.
+  it("says where a shared link's position is taking the leg, in place of how its recording stopped", () => {
+    const full = view({ done: 'budget', length: 1386, head: 1385, currentStep: 1386, newestStep: 1386, pending: 3000 })
+    expect(controlState(full).stepText).toBe('step 1,386 of 1,386 — going to step 3,000 from the link')
+    const recording = view({ done: null, length: 12, head: 11, currentStep: 11, newestStep: 11, pending: 3000 })
+    expect(controlState(recording).stepText).toBe('step 11 of 11… — going to step 3,000 from the link')
+    expect(controlState({ ...full, awaitingRun: true }).stepText).toBe('step 1,386 of 1,386 — recompiling')
   })
 
   it('leaves back, play and restart alone while awaiting a run', () => {
