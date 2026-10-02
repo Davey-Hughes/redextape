@@ -179,9 +179,16 @@ describe('with site data blocked', () => {
    * above edited is refused the same way (Plan 7 part 6a spec §4.3), and its own sentence is waited for before the
    * copy is made: otherwise the copy's refusal can land first, inside the pause before the program's write, and be
    * said alone. After it, the one sentence the copy adds is the two stores' together.
+   *
+   * **THE PROGRAM THE CASE ABOVE FORMATTED IS WAITED FOR TOO, BY ITS VALUE.** That case ends when the format
+   * lands, with the compile it starts still to run, and a λ view offers no copy between a compile's reply and the
+   * first frame drawn for it: there is no term to copy. The menu opened inside that time has no *edit a copy*. The
+   * strip turns to running at the edit and back to idle with the result, whose draw is in the same task, so idle
+   * with `fact(3)`'s value is the view holding a frame again.
    */
   it('still says that copies are not being saved, beside the program', async () => {
     await until(() => said.includes(PROGRAM_LINE), 'the program’s own refusal')
+    await until(() => idle() && resultsText().includes('λ 6 · '), 'the formatted program to compile')
     await closeSettings()
     const more = document.querySelector<HTMLButtonElement>('[data-leaf="lambda-0"] button.view-more')
     const menu = document.getElementById(more?.getAttribute('aria-controls') ?? '')

@@ -57,6 +57,12 @@ describe('a program write refused because storage is blocked', () => {
   })
 
   it('says the copies are not being saved for the same reason, once there is a copy to lose', async () => {
+    // THE EDIT ABOVE IS REFUSED WHEN ITS COMPILE IS POSTED, SO THAT COMPILE IS STILL RUNNING HERE, and a λ view
+    // offers no copy between a compile's reply and its first frame. Its result is waited for by its value.
+    await until(
+      () => idle() && (document.querySelector('#results')?.textContent ?? '').includes('λ 2 · '),
+      'the edited program to compile',
+    )
     document.querySelector<HTMLButtonElement>('[data-leaf="lambda-0"] button.detach')?.click()
     await until(() => document.querySelector('[data-leaf="lambda-0"] .term-editor') !== null, 'the copy')
     // SAID AT ONCE, UNDER THE COPY'S OWN NOTICE: the live region is where the new sentence is heard.

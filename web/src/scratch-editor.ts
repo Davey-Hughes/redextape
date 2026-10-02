@@ -158,6 +158,13 @@ export class ScratchEditor {
    * whole time a format is in flight. A delete or a pause reads a copy's record before any editor comes down
    * (`EditorCustody.flush`), which is BEFORE that closure can ever run; without this field the record was read
    * stale and undo restored text missing the keystrokes typed before *format*.
+   *
+   * **AND DROPPED BY `#send`, WHICH SENDS EVERYTHING THE EDITOR HOLDS.** Typing that overtakes the format sets a
+   * debounce of its own, and once that has sent the editor's text this field holds nothing the copy lacks: it
+   * holds an older text. Kept, `flush()` sent it after the newer one.
+   *
+   * **`setText` READS IT TOO**, as it reads `#timer`: while either holds an edit, the editor is ahead of whatever
+   * a build's reply carries.
    */
   #formatPending: string | null = null
   #ms: number
@@ -275,6 +282,11 @@ export class ScratchEditor {
   /** Send the editor's text as an edit — the debounce's body, and `flush`'s. */
   #send(): void {
     this.#timer = null
+    // WHATEVER `format()` TOOK IS SUPERSEDED BY THIS SEND, which carries the FULL current text, cumulative with
+    // everything typed — the keystrokes that field was holding included. Dropped here and not only in `flush()`,
+    // because the debounce reaches this on its own while a format is in flight; left set then, the next `flush()`
+    // sent the older text after this one.
+    this.#formatPending = null
     const text = this.#view.state.doc.toString()
     // TOLD TO THE SERVER ON THE SAME DEBOUNCE AS THE RECOMPILE, not on every keystroke. The
     // source editor posts per keystroke because nothing else there is debounced; here the
@@ -296,15 +308,13 @@ export class ScratchEditor {
    * `format()` clears `#timer` at its start and carries what it took off it inside its own async closure until the
    * server answers, in `#formatPending` — so a `flush()` that looked at `#timer` alone found nothing pending for the
    * whole time a format is in flight, and a delete's undo restored text missing the keystrokes typed before *format*.
-   * `#formatPending` is cleared here the same way `#timer` is, so `format()`'s own completion does not send it again.
+   * `#formatPending` is cleared when it is sent, here or by `#send`, so `format()`'s own completion does not send it
+   * again.
    */
   flush(): void {
     if (this.#timer !== null) {
       clearTimeout(this.#timer)
-      // A LATER DEBOUNCE ALREADY SUPERSEDES WHATEVER `format()` TOOK: `#send()` below sends the FULL current
-      // text, cumulative with everything typed — including the pre-format keystrokes this field was holding —
-      // so nothing is lost by discarding it unsent here rather than sending it as a second, stale call.
-      this.#formatPending = null
+      // A LATER DEBOUNCE SUPERSEDES WHATEVER `format()` TOOK, and `#send()` drops it: see there.
       this.#send()
       return
     }
@@ -326,9 +336,17 @@ export class ScratchEditor {
    * fired; whatever was typed after that is in the editor alone, with a debounce of its own still to
    * fire. Replacing it lost the typing, and that debounce then posted the older text as the user's.
    * Left alone, the pending build carries the typing, and its own reply re-seeds.
+   *
+   * **A FORMAT IN FLIGHT HOLDS A PENDING EDIT TOO, OUTSIDE `#timer`, AND THE SAME RULE COVERS IT.**
+   * `format()` takes the pending edit off `#timer` and owes it to `onEdit` in `#formatPending`, so
+   * while that is set the editor holds an edit no build has carried, and no timer runs until more is
+   * typed. The reply
+   * to the build posted BEFORE that edit, landing then, re-seeded the editor with the older text; the
+   * format's answer was refused as overtaken (`applyEdits`), and the older text is what `format()`
+   * then sent as the edit it owed. `flush()` had the same blind spot, and its doc names it.
    */
   setText(text: string): void {
-    if (this.#timer !== null) return
+    if (this.#timer !== null || this.#formatPending !== null) return
     if (this.#view.state.doc.toString() === text) return
     this.#seeding = true
     try {
@@ -415,9 +433,8 @@ export class ScratchEditor {
     // synchronously, from a delete or a pause that reads a copy's record before any editor comes down
     // (`EditorCustody.flush`), and from `destroy()` itself when a pick or a close is what ends the view.
     // `owed` is what is LEFT for this method to send once the server answers: `false` when `flush()`
-    // already sent it, `true` otherwise (destroyed with no intervening flush, or never destroyed at all).
-    // Typing that overtook the format and was sent by a LATER debounce clears it too (`flush()`'s own
-    // doc) — sending the same text twice would rebuild the copy once for nothing.
+    // already sent it, or when typing that overtook the format was sent by a LATER debounce (`#send`), or
+    // when a format started before this one answered first; `true` otherwise.
     const owed = this.#formatPending !== null
     this.#formatPending = null
     if (this.#destroyed) {

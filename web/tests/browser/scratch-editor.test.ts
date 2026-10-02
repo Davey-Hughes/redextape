@@ -184,6 +184,54 @@ describe('ScratchEditor', () => {
     expect(onEdit, 'format’s own continuation must not resend what flush already sent').toHaveBeenCalledTimes(1)
   })
 
+  /**
+   * **TYPING THAT OVERTOOK A FORMAT AND WAS SENT BY ITS OWN DEBOUNCE LEAVES THE FORMAT NOTHING OLDER TO SEND.**
+   * The text a format took off the timer is older than anything typed after it. Kept past the debounce that sent
+   * the newer text, a delete's or a pause's `flush()` sent the older text after it, and the copy's record went back
+   * to it: what was typed during the format was gone from the undo and from the pause. The format's continuation
+   * still sends once it is answered, since the text is not what it asked about; what it sends is the newer text.
+   */
+  it('sends nothing older from flush once a later debounce has sent what was typed during the format', async () => {
+    const { host, onEdit, ed, answer } = makeFormattable()
+    retype(host, '\\a. a')
+    const formatting = ed.format()
+    retype(host, '\\b. b')
+    vi.advanceTimersByTime(300)
+    expect(onEdit, 'precondition: the debounce sent the newer text').toHaveBeenCalledTimes(1)
+    expect(onEdit).toHaveBeenLastCalledWith('\\b. b')
+    ed.flush()
+    expect(onEdit, 'flush sent the text the format had taken, which is the older one').toHaveBeenCalledTimes(1)
+    answer([])
+    await formatting
+    expect(
+      onEdit.mock.calls.map((c) => c[0]),
+      'the text the format had taken was sent, after the newer one',
+    ).not.toContain('\\a. a')
+  })
+
+  /**
+   * **A SEED IS REFUSED WHILE A FORMAT HOLDS THE EDIT IT TOOK OFF THE TIMER**, as it is while the timer holds it:
+   * the reply to the build posted before that edit carries the older text, and no timer is running to say so.
+   * `keystrokes-in-flight.test.ts` places the same order in the app, for each kind of copy. Once the format is
+   * answered, here with no edits, and has sent what it owed, a seed is applied again.
+   */
+  it('is not re-seeded while a format holds the edit it took off the timer, and is after', async () => {
+    const { host, onEdit, ed, answer } = makeFormattable()
+    const text = (): string => EditorView.findFromDOM(host)?.state.doc.toString() ?? ''
+    retype(host, '\\a. a')
+    const formatting = ed.format()
+    vi.advanceTimersByTime(300)
+    expect(onEdit, 'precondition: the format left the edit on the timer, which sent it').not.toHaveBeenCalled()
+    ed.setText('\\x. x')
+    expect(text(), 'the seed replaced the edit the format holds').toBe('\\a. a')
+    answer([])
+    await formatting
+    expect(onEdit, 'the format did not send the edit it owed exactly once').toHaveBeenCalledTimes(1)
+    expect(onEdit, 'the format sent something other than the edit it owed').toHaveBeenCalledWith('\\a. a')
+    ed.setText('\\z. z')
+    expect(text(), 'a seed was refused with nothing pending').toBe('\\z. z')
+  })
+
   // Step 5's mutation (deleting the `#seeding` guard) predicted zero failures among the tests above,
   // on the grounds that none of them seeds a fresh editor and then checks for an absent recompile.
   // That prediction held here too, which per that same plan's own instruction means the mutation
