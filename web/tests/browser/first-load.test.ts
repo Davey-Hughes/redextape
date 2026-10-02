@@ -25,11 +25,11 @@ describe('a first visit', () => {
     expect(localStorage.getItem(LAYOUT_STORAGE_KEY)).toBeNull()
   })
 
-  it('opens on sum_to(5) under unary, in Explorer', async () => {
+  it('opens on sum_to(5) under binary, in Explorer', async () => {
     document.body.innerHTML = SHELL
     view = await (await import('../../src/main')).ready
     expect(view.state.doc.toString()).toBe(FIRST_LOAD.text)
-    expect(document.querySelector<HTMLSelectElement>('#encoding')?.value).toBe('unary')
+    expect(document.querySelector<HTMLSelectElement>('#encoding')?.value).toBe('binary')
     expect(document.querySelector('#workspace')?.textContent?.trim()).toBe('Explorer ▾')
     expect([...document.querySelectorAll<HTMLElement>('main [data-leaf]')].map((el) => el.dataset.leaf)).toEqual([
       'source',
@@ -48,9 +48,9 @@ describe('a first visit', () => {
   })
 
   it('stores it as its compile posts it', () => {
-    expect(parseProgram(localStorage.getItem(PROGRAM_STORAGE_KEY), ['unary'])).toEqual({
+    expect(parseProgram(localStorage.getItem(PROGRAM_STORAGE_KEY), ['binary'])).toEqual({
       text: FIRST_LOAD.text,
-      encoding: 'unary',
+      encoding: 'binary',
     })
   })
 })

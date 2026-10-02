@@ -8,7 +8,7 @@ import { SHELL, until } from './harness'
 /**
  * **`examples ▾`: THE MENU, A PICK AND ITS UNDO** — Plan 7 part 6a spec §4.2, §4.5 and §6. Driven by real pointer
  * clicks and by keys, because a synthetic `.click()` is not the gesture. The page opens on the program `setup.ts`
- * stores, `let x = 40; x + 2`. ONE MOUNT FOR THE FILE, for the reason every sibling gives.
+ * stores, `let x = 40; x + 2` under `unary`. ONE MOUNT FOR THE FILE, for the reason every sibling gives.
  */
 
 const example = (id: string): Example => EXAMPLES.find((e) => e.id === id) as Example
@@ -77,18 +77,17 @@ describe('examples ▾', () => {
     expect(getComputedStyle(description).color).not.toBe(getComputedStyle(title).color)
   })
 
-  it('opens a picked example under unary, and says so with an undo', async () => {
+  it('opens a picked example under binary, and says so with an undo', async () => {
     if (open()) menu().hidePopover()
-    // ANOTHER ENCODING FIRST, so the pick has one to replace and the undo one to put back.
-    await userEvent.selectOptions(picker(), 'binary')
-    await until(() => idle() && segments().length > 0, 'the compile under binary')
-    expect(picker().value).toBe('binary')
+    // ANOTHER ENCODING FIRST, so the pick has one to replace and the undo one to put back: the page opens under
+    // `unary`, the encoding `setup.ts` stores its program under.
+    expect(picker().value, 'precondition: the page is on another encoding').toBe('unary')
 
     await userEvent.click(button())
     await userEvent.click(item('fact'))
     expect(open()).toBe(false)
     expect(view.state.doc.toString()).toBe(example('fact').text)
-    expect(picker().value).toBe('unary')
+    expect(picker().value).toBe('binary')
     expect(noticeText()).toBe('opened the example fact(4)')
     expect(undoButton()?.textContent).toBe('undo')
     await until(() => idle() && (segments()[1] ?? '').startsWith('asm 24'), 'the example’s compile')
@@ -115,7 +114,7 @@ describe('examples ▾', () => {
       delete (live as { textContent?: unknown }).textContent
     }
     expect(view.state.doc.toString()).toBe('let x = 40; x + 2')
-    expect(picker().value).toBe('binary')
+    expect(picker().value).toBe('unary')
     expect(document.activeElement).toBe(view.contentDOM)
     expect(said.map((s) => s.text)).toEqual(['put back the program'])
     expect(said[0]?.focus, 'said once the focus is in the editor').toBe(view.contentDOM)
@@ -147,8 +146,8 @@ describe('examples ▾', () => {
     await userEvent.click(button())
     await userEvent.click(item('map-fold'))
     expect(undoButton()?.textContent).toBe('undo')
-    await userEvent.selectOptions(picker(), 'binary')
-    expect(picker().value).toBe('binary')
+    await userEvent.selectOptions(picker(), 'unary')
+    expect(picker().value).toBe('unary')
     expect(view.state.doc.toString()).toBe(example('map-fold').text)
     expect(undoButton()).toBeNull()
     expect(noticeText()).toBe('')

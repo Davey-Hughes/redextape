@@ -3,7 +3,7 @@ import { EditorView } from '@codemirror/view'
 import { beforeAll, describe, expect, it } from 'vitest'
 import { userEvent } from 'vitest/browser'
 import { FORMAT_ON_BLUR_KEY } from '../../src/editor-prefs'
-import { EXAMPLES, type Example } from '../../src/examples'
+import { EXAMPLE_ENCODING, EXAMPLES, type Example } from '../../src/examples'
 import { SHELL, until } from './harness'
 
 /**
@@ -52,8 +52,10 @@ describe('a pick, with format on blur', () => {
    */
   it('can still be undone once the focus has left the editor and its format pass has landed', async () => {
     expect(document.querySelector<HTMLInputElement>('#format-on-blur')?.checked).toBe(true)
-    await userEvent.selectOptions(picker(), 'binary')
-    await until(idle, 'the compile under binary')
+    // THE PICK HAS AN ENCODING TO REPLACE, AND THE UNDO ONE TO PUT BACK: the page opens under `unary`, the encoding
+    // `setup.ts` stores its program under, and a pick sets another.
+    expect(picker().value, 'precondition: the page is on unary').toBe('unary')
+    expect(EXAMPLE_ENCODING, 'precondition: a pick sets another encoding').not.toBe('unary')
 
     await userEvent.click(button())
     await userEvent.click(item('sum-to'))
@@ -71,7 +73,7 @@ describe('a pick, with format on blur', () => {
 
     await userEvent.click(undoButton() as HTMLButtonElement)
     expect(view.state.doc.toString()).toBe('let x = 40; x + 2')
-    expect(picker().value).toBe('binary')
+    expect(picker().value).toBe('unary')
   })
 
   /**
@@ -81,8 +83,11 @@ describe('a pick, with format on blur', () => {
   it('can still be undone by a click on undo, straight from the editor', async () => {
     // FORMATTED ALREADY, so the pass that leaving the editor for the menu asks for cannot change what the pick replaces.
     const formatted = 'let x = 40;\nx + 2\n'
+    // ON `unary` WHATEVER THE CASE ABOVE LEFT, so this case fails for its own undo and not for that one's.
+    if (picker().value !== 'unary') await userEvent.selectOptions(picker(), 'unary')
     view.dispatch({ changes: { from: 0, to: view.state.doc.length, insert: formatted } })
     await until(idle, 'the formatted program’s compile')
+    expect(picker().value, 'precondition: the page is on unary').toBe('unary')
 
     await userEvent.click(button())
     await userEvent.click(item('fact'))
@@ -92,6 +97,6 @@ describe('a pick, with format on blur', () => {
 
     await userEvent.click(undoButton() as HTMLButtonElement, { delay: 250 })
     expect(view.state.doc.toString()).toBe(formatted)
-    expect(picker().value).toBe('binary')
+    expect(picker().value).toBe('unary')
   })
 })

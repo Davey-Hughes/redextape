@@ -14,10 +14,11 @@ import type { Leg } from './protocol'
  * **EACH TEXT IS A FILE, IMPORTED WITH `?raw` AS `colour.ts` IMPORTS ITS QUERIES**, so a missing file fails the build
  * rather than the menu. Each is written as `redextape fmt` leaves it.
  *
- * **THE OUTCOMES ARE THE DEFAULT ENCODING'S, AND A PICK SETS IT** (spec §4.5, row 12). A description says where a leg
- * stops early, because that is what the user sees on picking it — and under `binary` several of them would say
- * something else: `fact(12)`'s TM leg is declined under `unary` and runs under `binary`. `examples.test.ts` in the
- * browser tier runs each example through the real session worker and holds every outcome and value declared here.
+ * **THE OUTCOMES ARE THE DEFAULT ENCODING'S, `binary`, AND A PICK SETS IT** (spec §4.5, row 12). A description says
+ * where a leg stops early, because that is what the user sees on picking it — and under `unary` two of them would say
+ * something else: `fact(12)`'s TM leg is declined under `unary`, which cannot fit its value, and the closure's TM leg
+ * fills its history there before it halts. `examples.test.ts` in the browser tier runs each example through the real
+ * session worker and holds every outcome and value declared here.
  */
 
 /**
@@ -38,8 +39,12 @@ export type Example = {
   readonly outcomes: Readonly<Record<Leg, Outcome>>
 }
 
-/** The encoding the outcomes are declared under, and the one a pick and a first visit set: the picker's first. */
-export const EXAMPLE_ENCODING = 'unary'
+/**
+ * The default encoding: the one the outcomes are declared under, and the one a pick, a first visit and a refused stored
+ * program set. **NOT THE PICKER'S FIRST**: the picker lists what `encodings()` returns, in the order Rust declares the
+ * encodings, and that is `unary` first. Only the selection defaults to this one.
+ */
+export const EXAMPLE_ENCODING = 'binary'
 
 const SUM_TO: Example = {
   id: 'sum-to',
@@ -62,10 +67,10 @@ export const EXAMPLES: readonly Example[] = [
   {
     id: 'closure',
     title: 'a closure',
-    description: 'a function that captures n; the TM’s history fills before it halts',
+    description: 'a function that captures n; every leg ends at 42',
     text: closure,
     value: '42',
-    outcomes: { lambda: 'ended', asm: 'ended', tm: 'history-full' },
+    outcomes: { lambda: 'ended', asm: 'ended', tm: 'ended' },
   },
   {
     id: 'is-even',
@@ -95,10 +100,10 @@ export const EXAMPLES: readonly Example[] = [
   {
     id: 'fact-12',
     title: 'fact(12)',
-    description: 'each leg stops differently: λ fills its history, the unary TM cannot fit the value, asm ends',
+    description: 'a value too wide for unary: λ and the TM fill their histories, asm ends',
     text: fact12,
     value: '479001600',
-    outcomes: { lambda: 'history-full', asm: 'ended', tm: 'declined' },
+    outcomes: { lambda: 'history-full', asm: 'ended', tm: 'history-full' },
   },
 ]
 

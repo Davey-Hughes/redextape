@@ -2,6 +2,7 @@ import type { EditorView } from '@codemirror/view'
 import { beforeAll, describe, expect, it } from 'vitest'
 import { userEvent } from 'vitest/browser'
 import { BUFFERS_STORAGE_KEY, parseBuffers } from '../../src/buffers-store'
+import { EXAMPLE_ENCODING } from '../../src/examples'
 import { defaultLayout, splitLeaf } from '../../src/layout'
 import { encodeLink, type SharePayload } from '../../src/share-link'
 import { bindingKey } from '../../src/view-header'
@@ -182,6 +183,27 @@ describe('a whole link pasted into an open page', () => {
     await userEvent.click(undoButton() as HTMLButtonElement)
     expect(view.state.doc.toString()).toBe(LINKED)
     expect(undoButton()).toBeNull()
+  })
+
+  /**
+   * **THE ENCODING IS THE LINK'S, NOT THE DEFAULT.** Every whole link above carries `binary`, which the page was not on
+   * and which is the default encoding too, so none of them can fail an open that took the default in place of the
+   * link's. This link carries `unary` onto a page on `binary`. Its `undo` leaves the page as the case above left it,
+   * which the cases below start from.
+   */
+  it('takes a whole link’s encoding where that is not the default', async () => {
+    expect(EXAMPLE_ENCODING, 'precondition: unary is not the default encoding').not.toBe('unary')
+    expect(picker().value, 'precondition: the page is on binary').toBe('binary')
+    expect(view.state.doc.toString()).toBe(LINKED)
+    await paste(
+      await encodeLink({ ...LINK, program: OTHER, encoding: 'unary' }),
+      () => noticeText() === 'opened a shared link' && view.state.doc.toString() === OTHER,
+      'the open',
+    )
+    expect(picker().value).toBe('unary')
+    await userEvent.click(undoButton() as HTMLButtonElement)
+    expect(view.state.doc.toString()).toBe(LINKED)
+    expect(picker().value, 'the page is back where the case above left it').toBe('binary')
   })
 })
 

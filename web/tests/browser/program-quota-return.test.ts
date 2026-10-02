@@ -80,14 +80,16 @@ describe('a program write refused by storage, with the program put back', () => 
 
   /** THE ENCODING IS HALF OF WHAT A RELOAD RESTORES, so a change of it alone is a change, and putting it back is too. */
   it('counts a change of encoding alone, and takes it back when the encoding is put back', async () => {
+    // THE PAGE OPENED UNDER THE DEFAULT ENCODING, so `unary` is the change and `binary` puts it back.
+    expect(picker().value, 'precondition: the page is on the encoding it opened under').toBe('binary')
     const seen = refused.length
-    await userEvent.selectOptions(picker(), 'binary')
-    await until(() => refused.length > seen && lastRefused()?.encoding === 'binary', 'the encoding, refused')
+    await userEvent.selectOptions(picker(), 'unary')
+    await until(() => refused.length > seen && lastRefused()?.encoding === 'unary', 'the encoding, refused')
     expect(lastRefused()?.text).toBe(A)
     expect(noticeText()).toBe(PROGRAM_LINE)
     const back = refused.length
-    await userEvent.selectOptions(picker(), 'unary')
-    await until(() => refused.length > back && lastRefused()?.encoding === 'unary', 'the encoding put back, refused')
+    await userEvent.selectOptions(picker(), 'binary')
+    await until(() => refused.length > back && lastRefused()?.encoding === 'binary', 'the encoding put back, refused')
     expect(notice().hidden).toBe(true)
   })
 

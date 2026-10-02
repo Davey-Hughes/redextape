@@ -105,7 +105,12 @@ Object.defineProperty(window, 'localStorage', { value: shim, configurable: true 
  * **A FIRST VISIT OPENS ON THE FIRST-LOAD EXAMPLE NOW** (Plan 7 part 6a spec §4.4), and every file's storage above
  * starts empty, so every file that mounts the app would start on `sum_to(5)`: a longer first compile in all of them,
  * and a different program in the ones that never type one of their own. The old start-up program is stored here
- * instead, under the default encoding, as a returning visitor's would be. `first-load.test.ts` removes it before it
- * mounts, and a file that clears storage before its mount starts on the example too.
+ * instead, as a returning visitor's would be. `first-load.test.ts` removes it before it mounts, and a file that clears
+ * storage before its mount starts on the example too.
+ *
+ * **IT IS STORED UNDER `unary` DELIBERATELY, AND THAT IS NOT THE DEFAULT ENCODING.** `unary` is the encoding these files
+ * were written and measured against, and it was the default until 2026-10-01, when `binary` became it. A stored
+ * program keeps its own encoding, so a file that keeps this one starts under `unary` as it always did; a file that
+ * removes it or clears storage starts on the example under the default.
  */
 shim.setItem(PROGRAM_STORAGE_KEY, serializeProgram({ text: 'let x = 40; x + 2', encoding: 'unary' }))

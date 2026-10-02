@@ -19,11 +19,11 @@ localStorage.setItem(
 const idle = () => document.querySelector<HTMLElement>('#results')?.dataset.state === 'idle'
 
 describe('a stored program under an encoding the build does not offer', () => {
-  it('is set aside for sum_to(5) under unary, with nothing said', async () => {
+  it('is set aside for sum_to(5) under binary, with nothing said', async () => {
     document.body.innerHTML = SHELL
     const view: EditorView = await (await import('../../src/main')).ready
     expect(view.state.doc.toString()).toBe(FIRST_LOAD.text)
-    expect(document.querySelector<HTMLSelectElement>('#encoding')?.value).toBe('unary')
+    expect(document.querySelector<HTMLSelectElement>('#encoding')?.value).toBe('binary')
     await until(idle, 'the first compile')
     expect(document.querySelector<HTMLElement>('#notice')?.hidden).toBe(true)
   })

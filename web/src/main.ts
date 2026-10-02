@@ -1728,9 +1728,10 @@ async function main(): Promise<EditorView> {
    * PICKER**, which the undo would take back with the encoding the pick replaced.
    *
    * **THE EDITOR'S OWN UNDO STEPS BACK THROUGH A PICK TOO, AND PUTS BACK THE TEXT ALONE**, leaving the encoding at
-   * `unary`. That is left as it is: the editor's history holds the text, and no encoding chosen in the picker has ever
-   * been in it — undoing in the editor after choosing `binary` by hand does not put `unary` back either — so a pick's
-   * encoding is the notice's `undo` to put back, and otherwise the picker's to change.
+   * `EXAMPLE_ENCODING`, the one the pick set. That is left as it is: the editor's history holds the text, and no
+   * encoding chosen in the picker has ever been in it — undoing in the editor after choosing another encoding by hand
+   * does not put the earlier one back either — so a pick's encoding is the notice's `undo` to put back, and otherwise
+   * the picker's to change.
    *
    * **UNDO REMOVES THE CONTROL IT WAS ACTIVATED FROM, SO IT OWES THE FOCUS SOMEWHERE**, as a delete's undo does: the
    * source editor, where the program came back — or, where no view shows the source and the editor is off the page,

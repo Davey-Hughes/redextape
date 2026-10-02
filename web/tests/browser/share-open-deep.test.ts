@@ -1,5 +1,7 @@
 import type { EditorView } from '@codemirror/view'
 import { beforeAll, describe, expect, it } from 'vitest'
+import { EXAMPLE_ENCODING } from '../../src/examples'
+import { PROGRAM_STORAGE_KEY, serializeProgram } from '../../src/program-store'
 import { encodeLink } from '../../src/share-link'
 import { defaultWorkspace, serializeWorkspace } from '../../src/workspace'
 import { SHELL, until } from './harness'
@@ -9,11 +11,19 @@ import { SHELL, until } from './harness'
  * bound on a tree, this link threw out of `decodeLink` before the fragment was cleared: `main()` rejected with no views,
  * no editor and nothing said, and every reload of the address did it again. Its program opens alone now, in the stored
  * workspace, and the fragment is cleared. ONE MOUNT FOR THE FILE, for the reason every sibling gives.
+ *
+ * **THE LINK CARRIES `unary` OVER A PROGRAM STORED UNDER `binary`, SO A START-UP THAT TOOK THE DEFAULT ENCODING, OR
+ * STORAGE'S, IN PLACE OF THE LINK'S FAILS THE FIRST CASE.** `binary` is both of those. It cannot fail a start-up that
+ * left the picker on its first option, which is `unary` too: with two encodings, one value differs from some wrong
+ * sources and equals another. `share-open.test.ts` is the other half, a link carrying `binary` over a program stored
+ * under `unary`, which fails that one and cannot fail a start-up that took the default.
  */
 
 const DEPTH = 6000
-/** Not the stored program every file starts on (`setup.ts`), so the one on the page is told apart from it. */
+/** Not the stored program, so the one on the page is told apart from it. */
 const PROGRAM = 'let y = 1; y + 2'
+/** The text `setup.ts` stores for every file, stored here under `binary`, the encoding the link does not carry. */
+const STORED = { text: 'let x = 40; x + 2', encoding: 'binary' }
 
 /** `depth` splits deep down each split's second child, whose first child is a λ leaf, as `+ view` nests views. */
 function deepTree(depth: number): unknown {
@@ -45,7 +55,8 @@ beforeAll(async () => {
     tree: deepTree(DEPTH),
     focused: 'pane-1',
   })
-  const fragment = await encodeLink({ program: PROGRAM, encoding: 'binary', workspace, positions: {} })
+  localStorage.setItem(PROGRAM_STORAGE_KEY, serializeProgram(STORED))
+  const fragment = await encodeLink({ program: PROGRAM, encoding: 'unary', workspace, positions: {} })
   history.replaceState(null, '', `${location.pathname}${location.search}${fragment}`)
   document.body.innerHTML = SHELL
   view = await (await import('../../src/main')).ready
@@ -55,7 +66,9 @@ beforeAll(async () => {
 describe('a link at start-up whose tree is 6,000 splits deep', () => {
   it('opens its program alone, under its encoding, in the default views', () => {
     expect(view.state.doc.toString()).toBe(PROGRAM)
-    expect(document.querySelector<HTMLSelectElement>('#encoding')?.value).toBe('binary')
+    // WHAT THE LINK'S ENCODING IS TOLD APART FROM: were `unary` the default encoding, this case would hold nothing.
+    expect(EXAMPLE_ENCODING, 'precondition: unary is not the default encoding').not.toBe('unary')
+    expect(document.querySelector<HTMLSelectElement>('#encoding')?.value).toBe('unary')
     expect(leafIds()).toEqual(['source', 'lambda-0', 'asm-0', 'tm-0'])
   })
 

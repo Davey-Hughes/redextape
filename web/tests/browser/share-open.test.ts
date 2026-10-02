@@ -16,6 +16,11 @@ import { SHELL, until } from './harness'
  * the copy listed, and clears the fragment; its `undo` puts back the stored program, workspace and the copy's view.
  * ONE MOUNT FOR THE FILE, for the reason every sibling gives.
  *
+ * **THE LINK CARRIES `binary` OVER A PROGRAM STORED UNDER `unary`, SO A START-UP THAT TOOK STORAGE'S ENCODING, OR THE
+ * PICKER'S FIRST OPTION, IN PLACE OF THE LINK'S FAILS HERE.** `unary` is both of those. It cannot fail a start-up that
+ * took the default encoding, which is `binary` too. `share-open-deep.test.ts` is the other half, a link carrying
+ * `unary` over a program stored under `binary`, which fails that one and cannot fail the picker's first option.
+ *
  * **THE LINK CARRIES A TWO-LINE PROGRAM, NOT AN EXAMPLE**: no case here is about a recording, and at a tenth of a core
  * an example's first compile outlasted the start-up notice, and the `undo` on it.
  */
@@ -76,6 +81,9 @@ describe('a link at start-up', () => {
 
   it("opens the link's program under its encoding", async () => {
     expect(view.state.doc.toString()).toBe(LINKED)
+    // WHAT THE LINK'S ENCODING IS TOLD APART FROM: were `binary` the picker's first option, this case could not fail a
+    // start-up that left the picker there.
+    expect(picker().options[0]?.value, 'precondition: binary is not the picker’s first option').not.toBe('binary')
     expect(picker().value).toBe('binary')
     expect(readout()).toContain('λ value = 15')
     expect(readout()).toContain('TM value = 15')

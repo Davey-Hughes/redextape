@@ -9,6 +9,12 @@ import { SHELL, until } from './harness'
  * §4.3 and §4.4. The program is stored at module scope, before `main()` runs, as a previous page load would have
  * stored it, over the one `setup.ts` stores for every file. It has a function so that the outline can say which text
  * the language server was given. ONE MOUNT FOR THE FILE, for the reason every sibling gives.
+ *
+ * **IT IS STORED UNDER `binary`, WHICH IS NOT THE PICKER'S FIRST OPTION, SO A START-UP THAT LEFT THE PICKER ON ITS FIRST
+ * OPTION FAILS THE FIRST CASE.** That case cannot fail a start-up that took the default encoding in place of the stored
+ * one, since `binary` is the default too: with two encodings, one stored value differs from one wrong source and equals
+ * the other. `share-open-unreadable.test.ts` is the other half. It opens on the program `setup.ts` stores, under
+ * `unary`, and holds the picker there, which fails that one and cannot fail this one.
  */
 
 const STORED = { text: 'fn times4(y) {\n    y * 4\n}\ntimes4(5)\n', encoding: 'binary' }
@@ -28,6 +34,8 @@ describe('a stored program', () => {
     document.body.innerHTML = SHELL
     view = await (await import('../../src/main')).ready
     expect(view.state.doc.toString()).toBe(STORED.text)
+    // WHAT THE STORED VALUE IS TOLD APART FROM: were `binary` the picker's first option, this case would hold nothing.
+    expect(picker().options[0]?.value, 'precondition: binary is not the picker’s first option').not.toBe('binary')
     expect(picker().value).toBe('binary')
     await until(() => idle() && segments().length > 0, 'the first compile')
     expect(segments()[0]).toMatch(/^λ 20 · /)

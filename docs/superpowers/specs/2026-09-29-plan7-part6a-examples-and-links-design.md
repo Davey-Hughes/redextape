@@ -169,6 +169,14 @@ decided when the user approved this spec**, each replacing a call its first vers
 | 16 | The automatic continue's bound | At most ten continues per leg per open. After the tenth, the leg stops at its furthest recorded step, and one notice says the link's step is further on and which step is shown; it carries the open's `undo` forward (§5.5), and *continue* stays one click away on the step controls. A hand-edited link with a huge position on a program that never ends would otherwise keep a tab busy indefinitely (§5.4) | no cap, a pending position being stopped only by a gesture, as this spec's first version had it |
 | 17 | Reporting a failed program write | Only once the program has changed from what was loaded: typed, a picked example, or an opened link. A visitor on blocked storage who only looks at the first-load example sees no resting line, mirroring the copies writer's guard that reports only when there are copies to lose (§4.3). *Refined 2026-09-29, §4.3: only while the program differs from what a reload would restore* | reporting the first failed write, even on an untouched example, as this spec's first version had it |
 
+*Amended 2026-10-01, the user's decision: rows 11 and 12 are amended. The default encoding is `binary`: a first visit
+opens under it, every pick sets it, and a stored program the app refuses falls back to it. Row 12's manifest is declared
+under `binary`. Row 11's `fact(12)` stays, under the line `a value too wide for unary: λ and the TM fill their
+histories, asm ends`: under `binary` its TM leg runs, and its history fills at step 75,850 of a 481,964-step run, while
+`unary` declines it. Row 3 holds under `binary`: every leg of `sum_to(5)` ends, its TM at step 12,976. The picker still
+lists `unary` first, and a stored program keeps its own encoding (§4.4's note). Measured by §A.6, run as §11's row of
+2026-10-01 says.*
+
 ## §4 6a-i — examples and the stored program
 
 ### §4.1 The examples and their manifest
@@ -196,6 +204,13 @@ the corpus's `count_down` adds 1 each turn. The closure is `let n = 2; let add_n
 A description says what the example shows and, where a leg stops early, says that, because it is what the user will
 see: `fact(4)`'s says λ fills its history before its value; `fact(12)`'s names all three stops (row 11). The plan words
 them, and §4.6's test holds the outcomes they describe. `FIRST_LOAD`, beside the manifest, names `sum-to` (row 3).
+*Amended 2026-10-01, the user's decision: the outcomes are declared under `binary`, the default encoding now (§3's
+note), and two rows of the table change. The closure's TM ends, at step 13,294, and its description is `a function that
+captures n; every leg ends at 42`. `fact(12)`'s TM fills its history at step 75,850 of a 481,964-step run, where `unary`
+declined it, and its description is `a value too wide for unary: λ and the TM fill their histories, asm ends`. The other
+five rows are unchanged, `map` and `fold`'s TM still filling its history, at step 69,008 of 91,785. Measured by §A.6,
+run as §11's row of 2026-10-01 says, whose steps and stops under both encodings are §2.7's, and held by §4.6's test
+under `binary`.*
 
 ### §4.2 The menu
 
@@ -249,6 +264,13 @@ workspace, once.
 (`web/tests/browser/setup.ts:55`), so each would now start on `sum_to(5)`: a longer first compile, and a different
 program in the 17 of them that contain no `insert:` (§11). The shim therefore starts every file with
 `redextape.program` holding `let x = 40; x + 2` under `unary`, and the first-load test removes it before it mounts.
+*Amended 2026-10-01, the user's decision: with nothing valid stored, the page opens on `FIRST_LOAD`'s text under
+`binary`, `EXAMPLE_ENCODING`, which is not the first encoding. The picker still lists what `encodings()` returns, in the
+order Rust declares the encodings, `unary` first; only its selection defaults to `binary`. A stored program keeps its
+own encoding, so a returning visitor whose program was stored under `unary` keeps it: nothing migrates it. The shim's
+program stays under `unary`, which is no longer the default, so a file that keeps it starts where it did, and a file
+that removes it before it mounts starts on `sum_to(5)` under `binary`. `first-load.test.ts` and
+`program-restore-invalid.test.ts` hold the picker at `binary`.*
 
 ### §4.5 Picking an example
 
@@ -266,6 +288,10 @@ nothing, and where the focus goes was not written here.*
 
 The pick sets the encoding because the manifest's outcomes and descriptions are the default encoding's (row 12):
 `fact(12)` under `binary` would contradict its own description.
+*Amended 2026-10-01, the user's decision: a pick sets the picker to `binary`, the default encoding now (§3's note), and
+it is under `unary` that `fact(12)` would contradict its own description, `unary` declining its TM leg. The `undo` puts
+back whichever encoding the pick replaced, as before; `examples-menu.test.ts` picks from `unary`, the encoding the
+browser tier's shim stores (§4.4), and holds the pick at `binary` and the `undo` at `unary`.*
 
 ### §4.6 The examples test — amending umbrella §5
 
@@ -293,6 +319,15 @@ real `session-worker.ts`, as `worker.test.ts`'s `askAll` does, until `result`, a
 The margins are narrow in places: the closure's unary TM records 73,958 of 79,307 steps before its history fills. A
 change in a TM frame's size can flip it to *ended*; the test then fails, and the manifest's outcome is changed, and
 the example's description with it, by hand. That is the test working.
+*Amended 2026-10-01, the user's decision: the test posts each `run` under `binary`, `EXAMPLE_ENCODING`. Under it no TM
+leg is declined; the TM legs that reach their value only through `compile`'s own run are `map` and `fold`'s, 9, and
+`fact(12)`'s, 479001600, and the closure's TM ends at step 13,294 with 42. The margins above are `unary`'s. Under
+`binary`, of the legs that end, `sum_to(5)`'s λ spends the most of its history, 22,004,386 bytes at step 951, 65.6% of
+`HISTORY_BYTES`, and `is_even(6)`'s λ the next most, 49.5%. Of the legs whose history fills, `map` and `fold`'s TM
+records 69,008 of its 91,785 steps (75.2%) and `fact(12)`'s TM 75,850 of 481,964 (15.7%); the two λ legs run far past
+their first recordings (§2.7). Under `unary`, which the test no longer runs, `fact(4)`'s TM ends at step 79,047 having
+spent 31,720,374 bytes, 94.5% of its history: a margin as narrow as the closure's, which this section did not name.
+Measured by §A.6, run as §11's row of 2026-10-01 says.*
 
 ## §5 6a-ii — share links
 
@@ -580,6 +615,8 @@ and building and running the Docker image, which no PR job builds.
 - **Base16 import** — 6b (row 1).
 - **Copies in links** (row 6), and the positions of views on copies.
 - **Declared outcomes under `binary`.** The test holds the default encoding; §2.7 records `binary`'s figures.
+  *Amended 2026-10-01, the user's decision: the default is `binary`, and the outcomes are declared under it (§3's
+  note).*
 - **A gate holding the example files to `redextape fmt`'s output.** No hook formats `.rxt` files today.
 - **Short links, or any storage on a server.** A link lives in its fragment.
 - **Keeping two tabs' programs apart** (§4.3).
@@ -645,6 +682,7 @@ tests/browser/<file>`. The CLI is `target/release/redextape`, built by `cargo bu
 | 85; 17 | browser test files that mount the app; of them, those containing no `insert:` | `grep -l "src/main'" web/tests/browser/*.test.ts \| wc -l`; `grep -L 'insert:' $(grep -l "src/main'" web/tests/browser/*.test.ts) \| wc -l` |
 | 46 | `FIRST_ORDER_DEMOS`' programs | `python3 extract_demos.py` (§A.4) |
 | 0.5 to 14.6 ms; 0 `MessageChannel` tasks and 0 `setTimeout(0)` callbacks; HeadlessChrome 151.0.7922.34 | a link's read, for payloads inflating to 1,000 to 8,388,608 bytes; what ran meanwhile; the browser (§5.3's note) | §A.5, placed in `web/tests/browser/` of 6a-ii's worktree at `402a2bb`, run once on 2026-09-30 as `cd web && flock <browser lock> pnpm exec vitest run --project browser --reporter=verbose --silent=false tests/browser/<file>`, and deleted: each size's line, and for the browser its first line, `navigator.userAgent` |
+| 2026-10-01's notes in §3, §4.1 and §4.6: 13,294; 12,976; 75,850 of 481,964, 15.7%; 69,008 of 91,785, 75.2%; 22,004,386 bytes at step 951, 65.6%; 49.5%; 79,047 and 31,720,374 bytes, 94.5%; and §2.7's steps, stops and values, again under both encodings | each example's last recorded step, stop, run length and value per leg and encoding, and the bytes each leg's first recording spent, by the app's own sizers, against `HISTORY_BYTES` | §A.6, placed in `web/tests/browser/` of the binary-default worktree and deleted after each run, run on 2026-10-01 at `0fed5f9` and re-run at later commits of the branch, each run printing the same 14 `RUN` rows, as `cd web && flock <browser lock> systemd-run --user --scope -q -p MemoryMax=16G -p MemorySwapMax=0 pnpm exec vitest run --project browser --reporter=verbose --silent=false tests/browser/examples-probe.test.ts`: its `RUN` rows' `steps`, `done`, `total`, `bytes` and `value`; each percentage is `bytes` ÷ 33,554,432, or `steps` ÷ `total` |
 
 ## §A Probe sources
 
@@ -1035,4 +1073,97 @@ it('counts tasks run while a large link decodes', async () => {
     expect(opened.kind).toBe('whole')
   }
 })
+```
+
+### §A.6 `examples-probe.test.ts`, 2026-10-01 — steps, stops and bytes under both encodings
+
+§A.1's `record` over the manifest's own `EXAMPLES`, rather than a copy of their texts, with each frame summed by the
+sizer the worker charges it with. Run for 2026-10-01's notes, when `binary` became the default encoding.
+
+```ts
+import { expect, it } from 'vitest'
+import { EXAMPLES } from '../../src/examples'
+import {
+  type AsmState,
+  asmFrameBytes,
+  HISTORY_BYTES,
+  type LambdaState,
+  lambdaFrameBytes,
+  type RecordEnd,
+  type RunReply,
+  type TmState,
+  tmFrameBytes,
+} from '../../src/protocol'
+
+/**
+ * Throwaway probe, adapted from the 6a spec's §A.1: per example and encoding, each leg's last step, stop, and bytes
+ * recorded by the app's own sizers against `HISTORY_BYTES`. Not committed.
+ */
+
+type LegTally = { frames: number; first: number | null; last: number | null; done: RecordEnd | null; bytes: number }
+
+function record(src: string, encoding: string, timeoutMs = 600_000) {
+  const worker = new Worker(new URL('../../src/session-worker.ts', import.meta.url), { type: 'module' })
+  const fresh = (): LegTally => ({ frames: 0, first: null, last: null, done: null, bytes: 0 })
+  const legs: Record<'lambda' | 'asm' | 'tm', LegTally> = { lambda: fresh(), asm: fresh(), tm: fresh() }
+  return new Promise<{ legs: typeof legs; compiled: RunReply | null; result: RunReply }>((resolve, reject) => {
+    let compiled: RunReply | null = null
+    const timer = setTimeout(() => {
+      worker.terminate()
+      reject(new Error('timed out'))
+    }, timeoutMs)
+    worker.addEventListener('message', (e: MessageEvent<RunReply>) => {
+      const r = e.data
+      if (r.kind === 'compiled') compiled = r
+      if (r.kind === 'lambda-frames' || r.kind === 'asm-frames' || r.kind === 'tm-frames') {
+        const leg = r.kind === 'lambda-frames' ? 'lambda' : r.kind === 'asm-frames' ? 'asm' : 'tm'
+        const t = legs[leg]
+        for (const f of r.frames) {
+          const step = Number((f as { step: number | string }).step)
+          if (t.first === null) t.first = step
+          t.last = step
+          t.frames += 1
+          t.bytes +=
+            leg === 'lambda'
+              ? lambdaFrameBytes(f as LambdaState)
+              : leg === 'tm'
+                ? tmFrameBytes(f as TmState)
+                : asmFrameBytes(f as AsmState)
+        }
+        t.done = r.done
+      }
+      if (r.kind === 'result' || r.kind === 'no-session' || r.kind === 'worker-error') {
+        clearTimeout(timer)
+        worker.terminate()
+        resolve({ legs, compiled, result: r })
+      }
+    })
+    worker.postMessage({ kind: 'run', gen: 1, src, encoding })
+  })
+}
+
+const pct = (b: number) => `${((100 * b) / HISTORY_BYTES).toFixed(1)}%`
+
+it('records every example on every leg, under unary and binary', async () => {
+  const rows: string[] = []
+  for (const example of EXAMPLES) {
+    for (const encoding of ['unary', 'binary']) {
+      const { legs, compiled, result } = await record(example.text, encoding)
+      const c = compiled as Extract<RunReply, { kind: 'compiled' }> | null
+      const r = result as Extract<RunReply, { kind: 'result' }>
+      rows.push(
+        [
+          'RUN',
+          example.id,
+          encoding,
+          `λ steps=${legs.lambda.first}..${legs.lambda.last} done=${legs.lambda.done} bytes=${legs.lambda.bytes} (${pct(legs.lambda.bytes)}) value=${JSON.stringify(r.lambda?.value)}`,
+          `asm total=${c?.asm.total_steps} steps=${legs.asm.first}..${legs.asm.last} done=${legs.asm.done} bytes=${legs.asm.bytes} (${pct(legs.asm.bytes)}) value=${JSON.stringify(r.asm?.value)}`,
+          `tm avail=${c?.tm.available} reason=${JSON.stringify(c?.tm.reason)} width=${c?.tm.width} total=${c?.tm.total_steps} steps=${legs.tm.first}..${legs.tm.last} done=${legs.tm.done} bytes=${legs.tm.bytes} (${pct(legs.tm.bytes)}) value=${JSON.stringify(r.tm?.value)}`,
+        ].join(' | '),
+      )
+    }
+  }
+  console.log(`\nHISTORY_BYTES=${HISTORY_BYTES}\n${rows.join('\n')}\n`)
+  expect(rows.length).toBe(14)
+}, 3_600_000)
 ```
