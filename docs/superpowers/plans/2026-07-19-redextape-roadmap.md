@@ -23522,3 +23522,94 @@ the image, built from `cafb6b9` and run → healthy; GET / and its four assets 2
 | `96d0086` | the tree before and after the two messages were reworded | `git rev-parse e2bc6ab^{tree} cafb6b9^{tree}`, `e2bc6ab` being the head before the reword, on a local backup branch until the merge |
 | 0 | lines of `scratch-editor.ts` that `deaea03` changes and that are not comments | `git diff -U0 cafb6b9..deaea03 -- web/src/scratch-editor.ts`, its `+` and `-` lines without those that open with `//` or `*` |
 | 337; 218, 2,072 and the four figures; 16; 7, 11, 6, 3, 7; healthy, 200, 7 | the gates | the block above; `replay3/summary.log` and the record's `docker-cafb6b9/gate-docker.log` |
+
+#### `copy-edit-leaving.test.ts` RUNS THE COPY EDITORS' DEBOUNCE AT 3 S: ITS PRECONDITION HELD A REAL CLICK TO WITHIN THE SHIPPED 300 MS OF THE LAST REAL KEY ACROSS THE DRIVER'S ROUND TRIPS, AND `main`'S PUSH RUN 517 MEASURED 309.8 MS ON THE SLOWER RUNNER; A SIXTH CASE HOLDS BOTH OF THE APP'S COPY EDITORS TO THE MOCKED WINDOW (2026-10-03, branch `copy-edit-leaving-window`, `a0f0c0c..33a2353`, 2 commits, plus this entry)
+
+**One test file, no product change.** `main`'s push run 517 for #125 (`a0f0c0c`) failed its `web` job on runner `450440e2` with one test, in a file #125 does not touch: `copy-edit-leaving.test.ts`'s `on λ, goes to the copy it was typed into, not to the copy the view moves to` failed its own precondition, `the view must leave before the debounce fires, or nothing is tested: expected 309.80000019073486 to be less than 300`, 1 failed and 2,071 passed. `docker` was skipped, so no image was built from `a0f0c0c` until the `web` job was re-run from the web UI. The re-run landed on the same runner and passed 2,072 of 2,072, and `docker` then passed.
+
+##### WHAT WAS WRONG
+
+- **The precondition timed the driver, not the product.** Each case that leaves types with `userEvent.keyboard` and leaves with `userEvent.click`, and `insideTheDebounce` asserts that the click landed within `EDITOR_DEBOUNCE_MS` of the last keydown, both read by capture-phase listeners. Between the two lie the keyboard command's reply to the page, the click command's trip through the Vitest server to Playwright, and Playwright's checks before it presses. Nothing in the test bounds those, and a machine short of CPU stretches each.
+- **A timeline probe placed the time.** A script in the lane's record derives it from `main`'s file; it logged when the page saw each input event and when each driver command was sent and returned. On an idle machine the gap was 36.5 to 59.3 ms in 15 cases. Under `CPUQuota=25%` it was over 300 ms in 4 of 20 cases, the longest 1,012 ms, and in those four 62 to 98 % of it lay between the test sending the click and the page seeing the press. At `CPUQuota=50%` none of 20 was over, the longest 179.1 ms. The quota reproduces the same assertion failing; the CI failure itself was not reproduced.
+
+##### WHAT CHANGED
+
+- **`vi.mock` replaces `editor-debounce.ts` for this file** (`65c8436`): `EDITOR_DEBOUNCE_MS` is 3000 for `lambda-pane.ts`'s and `copy-editor.ts`'s editors and for the precondition alike. Every key and click is still a real one, and the precondition is unchanged.
+- **A sixth case holds the app's editors to the mocked window.** A mock that reached the test's own import and missed an editor's would leave every precondition comparing against 3 s while the debounce fired at 300 ms, and passing. The case types into a λ copy and an asm copy, leaves neither, and asserts that each copy's text of record changes no sooner than the window after its key, a bound slowness can only help. It takes whichever views already hold an editor (`editing`), so it runs alone with `-t` as well. In the file's order the λ copy's editor is in the split view the first case made, and `lambda-0`, which shows the same copy without it, offers no *edit a copy*.
+- **The sixth case first asserts that the import reads 3000** (`33a2353`, from the review), so a file that lost its `vi.mock` fails rather than passing at 300 ms again.
+- **The header says why the window is 3 s**, with the measurements above and the next section's.
+- **Two cases now wait the window out**: the λ case, whose typing reaches its copy when the debounce fires rather than when the view moves, 979 ms in `main`'s file and 3,654 ms in this one in the same run; and the sixth case. The asm and TM cases' typing is sent as the view leaves, and their times did not move.
+
+##### WHY NOT A SHORTER GAP
+
+The same probe measured two ways of narrowing the gap, each 20 cases in 4 runs under `CPUQuota=25%`, and neither held it:
+
+- **`userEvent.click(target, { force: true })`**, which skips Playwright's waits for a stable and hit-testable target: 3 of 20 over 300 ms, the longest 999.7 ms.
+- **A press sent straight to the browser** with `cdp()`'s `Input.dispatchMouseEvent`, the pointer moved onto the target before the typing, the idiom `share-open-clamps.test.ts` uses: 2 of 20 over, the longest 507.7 ms. On an idle machine it took the gap to 20.1 to 36.1 ms in 10 cases.
+
+Under a quota every hop between the processes can wait out a throttled period, so the gaps come in steps of about 100 ms however few hops remain. A wider window does not depend on how many there are.
+
+##### THE SIBLING SEARCH
+
+- **Every browser test that names the debounce**: `grep -l DEBOUNCE_MS web/tests/browser/*.ts` lists four files, this one among them. `lsp-copy-diagnostics.test.ts`'s `keeps keystrokes made inside the debounce window` dispatches its edit and its blur in one synchronous run; `editor-custody.test.ts`'s case rebinds both views synchronously after its edit and then waits 600 ms, past the debounce; `app.test.ts` asserts with no `await` after its edit. None of the three puts a driver round trip inside the window. A test that relies on the window without naming the constant is outside this search.
+
+##### WHAT PROVING IT FOUND
+
+- **Seven sabotages, each run against `main`'s file and this one together.** The three aimed at the product fail the same cases in both files, on the same messages. An editor's `destroy()` cancelling its pending edit instead of sending it fails the asm title case and the TM case on `the typing to reach the copy’s text of record`. `EditorCustody.flush` sending nothing fails the delete and the pause cases. A λ editor whose edits go to the copy its view shows when it sends fails the λ case on `the copy the view moved to`, the misroute and not a timeout.
+- **The sixth case, the pin and the precondition each fail when their own premise is broken**, and `main`'s file passes all four runs. `lambda-pane.ts` passing 300 instead of the constant fails the sixth case on the λ copy's bound, 314.5 ms; `copy-editor.ts` doing so fails it on the asm copy's, 316.9 ms, after the λ bound passed. The `vi.mock` line deleted fails the pin, `expected 300 to be 3000`. A wait of the window and 100 ms before the asm title case's click fails its precondition, 3,129.8 ms.
+- **The mock stays in its file.** With one browser worker, this file and then a control derived from `main`'s file that times the app's debounce from a keystroke to the copy's text of record: the control read 313 ms in each of two runs, the shipped window.
+- **Under a quota** this file passed 5 runs of 5 at `CPUQuota=25%`, 6 of 6 each, and 2 of 2 at 50%. The λ case, the longest, took 6,223 to 6,424 ms at 25%, against Vitest's 15 s for a browser test.
+- **Once, `main`'s file failed its own precondition beside the sabotages**: in the first sabotage run, before this branch's first commit, during the pass that changes `lambda-pane.ts`'s window, with a typecheck and the node tier running alongside, its TM case read `expected 344.70000000018626 to be less than 300`. That sabotage touches nothing the TM case runs.
+
+##### THE REVIEW
+
+**One whole-branch review**, of `65c8436`, read from the code with nothing run. No Critical finding, one Important and two Minor.
+
+- **Important, at the review's own 40 %: whether the cases that now wait the window out stay inside Vitest's 15 s.** It could not measure it. The quota runs above did, and nothing changed for it.
+- **Minor, taken in `33a2353`**: nothing pinned the file to 3000, so a lost `vi.mock` would leave everything green at 300 ms. The seventh sabotage fails the pin.
+- **Minor, at its own 25 %, not changed**: `editing` takes the editor a view holds to belong to the copy the view shows. `EditorCustody`'s `flush` relies on the same, that a view holds an editor only while it shows that editor's copy (`reconcileEditors`).
+
+##### WHAT THIS DID NOT CLOSE
+
+- **The file no longer runs the debounce the app ships.** Anything that depends on 300 ms itself is outside it; `editor-custody.test.ts`'s case above runs the app's constant.
+- **A trailing space typed into a λ copy did not change its text of record within 10 s.** The sixth case's first version typed one and timed out; typing `\q. q` over the whole text instead, it passes. The asm copy's key was the same in both versions, so the λ copy is the one that did not change, by elimination. Not looked into.
+- **The coverage totals moved between the two replays**, 97.5 / 91.43 / 98.43 / 98.86 at `65c8436` and 97.49 / 91.43 / 98.36 / 98.85 at `33a2353`, which differ by one assertion in a test; #125's entry records the same run-to-run movement.
+
+##### VERIFICATION
+
+Run on 2026-10-03 at `33a2353`, from `web/` in the main checkout, by one script in the lane's record (`replay.sh`, not tracked; its logs are in `replay2/`, and `replay1/` holds the same run at `65c8436`), on packages built after the last change under `crates/`; the branch touches no Rust. Every browser run was under `systemd-run --user --scope -q -p MemoryMax=24G -p MemorySwapMax=0`.
+
+```
+pnpm exec biome ci --error-on-warnings  → exit 0, 337 files
+pnpm run typecheck                      → exit 0
+pnpm run test:coverage                  → exit 0, 218 files / 2,073 tests; 97.49 / 91.43 / 98.36 / 98.85 against 95 / 89 / 97 / 97
+pnpm run build:app                      → exit 0
+scripts/check-{text-bytes,citations,attributions,doc-figures,shared-docs,colours,grammar-wasm,lua}.sh, --self-test then alone, from the root → 16 of 16 exit 0
+scripts/check-scoped.sh main..HEAD, from the root → exit 0; it escalated to `check-all.sh --no-llvm --no-browser`, which reports green but partial, the LLVM and browser tiers skipped
+```
+
+The image was not built: the branch changes a test file only, which the image does not hold, and run 517's re-run built one from `a0f0c0c`. The probe figures are from runs on 2026-10-02 on `a0f0c0c`'s tree, by `make-probe.py` and `run-probe.sh` in the record, which write the probe into `web/tests/browser/`, run it and delete it. Each sabotage was restored from a copy and compared with it, and `git status` was empty after.
+
+**Every count this entry quotes, with what produces it:**
+
+| Value | What | Produced by |
+|---|---|---|
+| 2; 0 | commits in the range; those touching this file | `git log --oneline a0f0c0c..33a2353 \| wc -l`; the same with `-- docs` |
+| 517; 9617, 9618 | the run; its `web` and `docker` jobs | the forge's `GET /repos/davey/redextape/actions/runs/1870/jobs`, 1870 being run 517's API id |
+| `450440e2`; 309.80000019073486; 1 failed and 2,071 passed; 2,072 of 2,072 | the runner of both attempts; the gap; the failed attempt's totals; the re-run's | line 1 of each attempt's log, its error line and its `Tests` line: the earlier lane's `ci-web-9617-main.log` and this record's `ci-web-9617-rerun.log` |
+| 300; 3000 | the shipped window; this file's | `EDITOR_DEBOUNCE_MS` in `web/src/editor-debounce.ts`; the `vi.mock` factory |
+| 36.5 to 59.3 ms, 15 cases | the gap on an idle machine | `full-{1,2,3}.log`: `run-probe.sh full none 3` |
+| 4 of 20, 1,012 ms; 62 to 98 % | the gap at 25 %; the share between sending the click and the press, in the four | `q25-{1..4}.log`: `run-probe.sh q25 25% 4`; `click-sent` and `pointerdown` in each `PROBE` line |
+| 0 of 20, 179.1 ms | the gap at 50 % | `q50-{1..4}.log`: `run-probe.sh q50 50% 4` |
+| 3 of 20, 999.7 ms; 2 of 20, 507.7 ms; 20.1 to 36.1 ms in 10 | `force: true` at 25 %; the press through `cdp()` at 25 %; it on an idle machine | `v1q25-*.log`, `v2q25-*.log` and `v2full-*.log`: `run-probe.sh` with variants `v1` and `v2` |
+| 979 ms; 3,654 ms | the λ case in `main`'s file and in this one, one run | `replay2/sab-none.log` |
+| 4 | browser files naming the debounce | `grep -l DEBOUNCE_MS web/tests/browser/*.ts \| wc -l` |
+| 600 ms | `editor-custody.test.ts`'s wait | the `setTimeout` after its rebinds |
+| 4, 4 and 2 failed of 11; 1 each of 11 | the three product sabotages; the other four | `replay2/sab-*.log`; `sab.py` in the record has each replacement |
+| 314.5 ms; 316.9 ms; 300; 3,129.8 ms | the four premise sabotages' readings | the same logs' assertion lines |
+| 344.70000000018626 | `main`'s file, beside a typecheck and the node tier | `sab1/lambda-ships-300.log`, the first sabotage run, from `sab-run.sh` |
+| 313 ms, twice | the control after this file | `replay2/leak-{1,2}.log` |
+| 5 of 5, 6 of 6 each; 2 of 2; 6,223 to 6,424 ms | this file at 25 % and 50 %; the λ case at 25 % | `replay2/quota25-*.log` and `quota50-*.log` |
+| 0, 1 and 2 | the review's Critical, Important and Minor findings | its report, kept in the record's `review.md` |
+| 337; 218 and 2,073; the two sets of four figures; 16 | the gates | the block above; `replay1/summary.log` and `replay2/summary.log` |
+| 95 / 89 / 97 / 97 | the coverage floors | `thresholds` in `web/vite.config.ts` |

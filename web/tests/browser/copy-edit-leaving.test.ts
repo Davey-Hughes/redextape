@@ -1,5 +1,5 @@
 import { EditorView } from '@codemirror/view'
-import { beforeAll, describe, expect, it } from 'vitest'
+import { beforeAll, describe, expect, it, vi } from 'vitest'
 import { page, userEvent } from 'vitest/browser'
 import { BUFFERS_STORAGE_KEY, parseBuffers } from '../../src/buffers-store'
 import { EDITOR_DEBOUNCE_MS } from '../../src/editor-debounce'
@@ -12,11 +12,26 @@ import { SHELL, until } from './harness'
  * leaves one: a pick through the view's title, a change to another leg, and a delete undone.
  *
  * **THE WINDOW IS THE EDITOR'S DEBOUNCE** (`EDITOR_DEBOUNCE_MS`): a keystroke reaches its copy only when the debounce
- * fires, so a view that leaves its copy inside that window is leaving with typing no copy has seen. Each test measures
- * the gap from its last keystroke to the click that leaves, as the page saw both, and asserts it is inside the window,
- * since a click that landed after the debounce fired would pass whether or not anything is wrong. The debounce starts
- * at the keystroke and its timer cannot run inside the click's handler, so the two events' own times are the whole of
- * what decides the race — not how long the handler or the test's own round trips take.
+ * fires, so a view that leaves its copy inside that window is leaving with typing no copy has seen. Each case that
+ * leaves measures the gap from its last keystroke to the click that leaves, as the page saw both, and asserts it is
+ * inside the window, since a click that landed after the debounce fired would pass whether or not anything is wrong.
+ * The debounce starts at the keystroke and its timer cannot run inside the click's handler, so the two events' own
+ * times are the whole of what decides the race — not how long the handler or the test's own round trips take.
+ *
+ * **THE WINDOW IS 3 S IN THIS FILE, WHERE THE APP SHIPS 300 MS.** `vi.mock` below replaces the one-constant module
+ * `lambda-pane.ts` and `copy-editor.ts` take the debounce from, and this file's own import reads the replacement. The
+ * gap is not a test's to bound: it holds the keyboard's reply and the whole of the click's round trip, the checks
+ * Playwright makes before it presses among them, and a machine short of CPU stretches each. Measured 2026-10-02 under
+ * `CPUQuota=25%`, 4 of 20 gaps were over 300 ms and the longest was 1,012 ms; the CI run that failed here measured
+ * 309.8 ms. A press sent straight to the browser, with the pointer already on its target, still left 2 of 20 over, so
+ * it is the window that is widened and not the gap that is narrowed. The asm and TM cases take no longer for it, their
+ * typing being sent as the view leaves; the λ case's reaches its copy when the debounce fires, so that case and the
+ * last one each wait the window out.
+ *
+ * **THE LAST CASE IS WHAT MAKES THAT WINDOW THE APP'S AND NOT ONLY THIS FILE'S.** Were the replacement to reach this
+ * file's import and miss an editor's, every gap above would be held to 3 s while the debounce fired at 300 ms, and
+ * pass. So it types into a λ copy and an asm copy, leaves neither, and holds each copy's text of record to changing no
+ * sooner than the window after its key — a bound a slow machine can only help.
  *
  * Every gesture is a real one — `userEvent` keys into the editor, `userEvent` clicks on the title, the menus and the
  * notice — because the time between them is what the tests are about. **THE MENU THAT LEAVES IS OPENED BEFORE THE
@@ -26,6 +41,8 @@ import { SHELL, until } from './harness'
  *
  * ONE MOUNT FOR THE FILE, for the reason every sibling gives: `main()` runs once per page.
  */
+
+vi.mock('../../src/editor-debounce', () => ({ EDITOR_DEBOUNCE_MS: 3000 }))
 
 const SAMPLE = 'let x = 40; x + 2'
 
@@ -101,6 +118,16 @@ async function fork(pane: HTMLElement): Promise<string> {
   await until(() => editorOf(pane) !== null, 'the copy’s editor')
   const key = shows(pane)
   return key.slice(key.indexOf(':') + 1)
+}
+
+/** A view holding the editor of one of `leg`'s copies: one that already does, else `pane` after *edit a copy* there. */
+async function editing(leg: Leg, pane: HTMLElement): Promise<HTMLElement> {
+  const holder = [...document.querySelectorAll<HTMLElement>('.pane:has(button.view-title)')].find(
+    (p) => shows(p).startsWith(`${leg}:`) && editorOf(p) !== null,
+  )
+  if (holder !== undefined) return holder
+  await fork(pane)
+  return pane
 }
 
 /** When the page last saw a key go down, and a click land — recorded in the capture phase, before any handler. */
@@ -239,5 +266,41 @@ describe('typing not yet sent when a view leaves its copy', () => {
     expect(tm.dataset.kind).toBe('lambda')
 
     await until(() => stored(copy) === text, 'the typing to reach the copy’s text of record')
+  })
+
+  it('is sent no sooner than this file’s window after its key, in a λ copy’s editor and an asm copy’s', async () => {
+    // THE MOCK'S OWN NUMBER, so a file that lost its `vi.mock` fails here rather than passing at 300 ms again.
+    expect(EDITOR_DEBOUNCE_MS, 'the window `vi.mock` sets for this file').toBe(3000)
+    // WHICHEVER VIEWS HOLD AN EDITOR ALREADY, so this case asks nothing of the ones above and runs alone as well.
+    const lam = await editing('lambda', host('lambda-0'))
+    const asm = await editing('asm', host('asm-0'))
+    const lamCopy = shows(lam).slice('lambda:'.length)
+    const asmCopy = shows(asm).slice('asm:'.length)
+    await until(() => stored(lamCopy) !== null && stored(asmCopy) !== null, 'both copies to be stored')
+    const lamBefore = stored(lamCopy)
+    const asmBefore = stored(asmCopy)
+
+    const started = performance.now()
+    await typeInto(editorOf(lam) as EditorView, '\\q. q', 'all')
+    const lamKey = lastKey
+    await typeInto(editorOf(asm) as EditorView, '{Enter}', 'end')
+    const asmKey = lastKey
+    expect(lamKey, 'the page saw the λ copy’s key').toBeGreaterThan(started)
+    expect(asmKey, 'the page saw the asm copy’s key').toBeGreaterThan(lamKey)
+
+    // NEITHER VIEW LEAVES, so the debounce alone sends each copy its typing, and a copy's text of record changes after.
+    let lamSeen = 0
+    let asmSeen = 0
+    await until(() => {
+      if (lamSeen === 0 && stored(lamCopy) !== lamBefore) lamSeen = performance.now()
+      if (asmSeen === 0 && stored(asmCopy) !== asmBefore) asmSeen = performance.now()
+      return lamSeen !== 0 && asmSeen !== 0
+    }, 'both copies to be sent their typing')
+    expect(lamSeen - lamKey, 'a λ copy’s editor waits the window this file sets').toBeGreaterThanOrEqual(
+      EDITOR_DEBOUNCE_MS,
+    )
+    expect(asmSeen - asmKey, 'an asm copy’s editor waits the window this file sets').toBeGreaterThanOrEqual(
+      EDITOR_DEBOUNCE_MS,
+    )
   })
 })
