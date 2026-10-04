@@ -682,10 +682,11 @@ export class ScratchBuffers {
    * DURABILITY MOMENT, NOT BOTH, A CLAIM A PRIOR REVISION OF THIS DOC GOT WRONG.** `recompile` above
    * calls it with the user's own just-typed text, at the point a rebuild is POSTED, not answered —
    * nothing persists there, and `recompile`'s own doc has the argument in full. `replies.ts`'s
-   * `scratch-compiled` arm calls it with the worker's re-derived term — for a FORK, the first moment
-   * this app can know what a forked buffer holds at all, since `fork` posts the SOURCE session's step-0
-   * text plus a step and the worker replays between them; for a `recompile`'s own reply, the re-derived
-   * term replacing the raw text `recompile` wrote above — and, under the SAME `reply.text !== null`
+   * `scratch-compiled` arm calls it with its reply's text — for a FORK, the worker's re-derived term and
+   * the first moment this app can know what a forked buffer holds at all, since `fork` posts the SOURCE
+   * session's step-0 text plus a step and the worker replays between them; for a `recompile`'s own reply, the text
+   * `recompile` wrote above, answered back as it was typed (a build at step 0 is answered with the text
+   * it was given: `session.rs`'s `lambda_scratch_at`) — and, under the SAME `reply.text !== null`
    * guard, immediately calls `onBuffersPersist()` (both lines are in `replies.ts`'s `scratch-compiled`
    * arm, the `setText` and the persist directly below it). That PAIRING, not the call to this method
    * alone, is what makes it a durability moment; `recompile`'s call has no such pairing anywhere in its

@@ -174,7 +174,7 @@ describe('typing not yet sent when a view leaves its copy', () => {
     const aBefore = stored(a)
     const bBefore = stored(b)
     const bEditor = (editorOf(second) as EditorView).state.doc.toString()
-    expect(bBefore, 'the two copies must differ for a misroute to show').not.toBe('λp. p p')
+    expect(bBefore, 'the two copies must differ for a misroute to show').not.toBe('\\p. p p')
 
     const pickB = await titleItem(host('lambda-0'), bindingKey('lambda', b))
     await typeInto(editorOf(host('lambda-0')) as EditorView, '\\p. p p', 'all')
@@ -185,7 +185,7 @@ describe('typing not yet sent when a view leaves its copy', () => {
     await until(() => stored(a) !== aBefore || stored(b) !== bBefore, 'the typing to reach a copy')
     expect(stored(b), 'the copy the view moved to').toBe(bBefore)
     expect(editorOf(second)?.state.doc.toString(), 'the editor of the copy the view moved to').toBe(bEditor)
-    await until(() => stored(a) === 'λp. p p', 'the typing to reach the copy it was typed into')
+    await until(() => stored(a) === '\\p. p p', 'the typing to reach the copy it was typed into')
   })
 
   it('on asm, reaches the copy when the view moves to the program through its title', async () => {

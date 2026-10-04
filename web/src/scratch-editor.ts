@@ -328,8 +328,8 @@ export class ScratchEditor {
   /**
    * Replace the buffer without treating it as an edit — the fork's seed, and nothing else.
    *
-   * A NO-OP WHEN THE TEXT ALREADY MATCHES, because a re-seed would move the user's cursor to the end
-   * of a document they are working in.
+   * A NO-OP WHEN THE TEXT ALREADY MATCHES, because a re-seed replaces the whole document, and a caret
+   * inside the text they are working in goes to its start.
    *
    * **AND A NO-OP WHILE AN EDIT IS PENDING, because `text` is then older than the editor.** Every
    * build reply re-seeds through here, and a build carries what the editor held when its debounce

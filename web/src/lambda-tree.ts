@@ -164,9 +164,9 @@ export class Tree {
    * `λf. λx. x` are one term — and lowering always writes each with its own pair.
    *
    * **A HINT'S TRAILING DIGITS ARE IGNORED.** Freshening is print-time only, so a lowered term's hints never
-   * carry them — but a copy is built by re-parsing printed text, and there the printed, freshened names
-   * (`x0`) ARE the hints. Without this a numeral in any copy whose printer had freshened its binders would
-   * never read as a chip (found by the prototype's `scratch-app` run).
+   * carry them — but a copy made from the program is built by re-parsing printed text, and there the
+   * printed, freshened names (`x0`) ARE the hints. Without this a numeral in any copy whose printer had
+   * freshened its binders would never read as a chip (found by the prototype's `scratch-app` run).
    */
   chip(i: number): Chip | null {
     if (this.kind(i) !== KIND_ABS) return null

@@ -377,8 +377,8 @@ export function createPaneHost(deps: {
    * Design §4.5 weighs exactly that loss when it declines to auto-cool an orphan ("a close stays cheap"),
    * and paying it again on a rebind would re-introduce it at a gesture the design calls cheaper still.
    * Seeding directly is synchronous, costs no worker round trip, and reads the same string the reply arm
-   * would have re-derived: `scratch-compiled` writes the worker's own term through `setText`, so the text
-   * of record IS the last authoritative term (design §4.3).
+   * would have been answered with, since a build at step 0 is answered with the text it was given
+   * (`session.rs`'s `lambda_scratch_at`).
    *
    * **THE CLAIM IS RECORDED BEFORE THE MOUNT AND BOTH HAPPEN ON A PANE THAT ALREADY EXISTS**, which is
    * the same ordering rule `main.ts`'s restore sequence follows and states: a claim made for a leaf that

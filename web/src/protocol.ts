@@ -574,7 +574,10 @@ export type RunReply =
    *
    * **`text` IS THE STRING THAT BUILT THE SCRATCH.** The editor is seeded from it rather than from a
    * second print that could disagree, which is what keeps the box, the scratch's step 0 and the term
-   * the user forked one object instead of three that agree until they do not.
+   * the user forked one object instead of three that agree until they do not. For a build at step 0 —
+   * an edit, a paused copy resumed — that string is the request's own `src`, as it was typed, unless it
+   * is longer than the byte budget; past step 0, and for text over the budget, it is the worker's print
+   * of the term (`session.rs`'s `lambda_scratch_at`).
    *
    * **IT IS NULLABLE DEFENSIVELY AND IS NEVER `null` ON THIS REPLY, and the distinction is worth
    * stating because an earlier version of this comment got it wrong.** The type mirrors

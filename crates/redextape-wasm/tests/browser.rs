@@ -1133,8 +1133,9 @@ fn lambda_scratch_at_returns_a_handle_and_the_text_that_built_it() {
     let out = redextape_wasm::lambda_scratch_at("(\\x. x) (\\y. y)", 1, 65_536).expect("marshals");
     let text = get(&out, "text");
     // `λ`, NOT `\`. `lambda/syntax.rs`'s binder spelling is asymmetric on purpose — the parser
-    // accepts both, the printer emits only `λ` — and `text` is always a reparsed PRINT, never the
-    // caller's `src`. T1 found three of its five tests wrong this way before this note existed.
+    // accepts both, the printer emits only `λ` — and past step 0 `text` is a reparsed PRINT, never the
+    // caller's `src`; at step 0 it is `src` as given. T1 found three of its five tests wrong this way
+    // before this note existed.
     assert_eq!(text.as_string().as_deref(), Some("λy. y"));
     let scratch = get(&out, "scratch");
     assert!(!scratch.is_null(), "a term that parsed must yield a handle");

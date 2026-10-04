@@ -23613,3 +23613,110 @@ The image was not built: the branch changes a test file only, which the image do
 | 0, 1 and 2 | the review's Critical, Important and Minor findings | its report, kept in the record's `review.md` |
 | 337; 218 and 2,073; the two sets of four figures; 16 | the gates | the block above; `replay1/summary.log` and `replay2/summary.log` |
 | 95 / 89 / 97 / 97 | the coverage floors | `thresholds` in `web/vite.config.ts` |
+
+#### A λ COPY KEEPS THE TEXT TYPED INTO IT: A BUILD AT STEP 0 IS ANSWERED WITH THE TEXT IT WAS GIVEN, WHERE EVERY BUILD WAS ANSWERED WITH THE WORKER'S PRINT OF THE TERM AND THE APP PUT THAT IN THE EDITOR — A SPACE TYPED AT THE END WAS GONE BEFORE THE NEXT LETTER, AND A CARET INSIDE THE TEXT WENT TO THE START (2026-10-04, branch `lambda-copy-keeps-typed-text`, `4a5f6b5..28fcf1d`, 2 commits, plus this entry)
+
+**The leftover #126's entry named, and a typing defect behind it.** That entry's WHAT THIS DID NOT CLOSE records that a trailing space typed into a λ copy did not change its text of record within 10 s, by elimination and not looked into. It could not have: a λ copy's text of record was the worker's print of the term, and a trailing space prints as nothing. The same answer was written into the copy's editor, which is the defect a user meets.
+
+##### WHAT WAS WRONG
+
+- **Every build of a λ copy was answered with the print of its term.** `lambda_scratch_at` parsed the text, replayed to the step, printed the term, built the scratch from the print and returned the print as `text`. That is what a copy made from a later step needs, since no other text of that term exists. An edit is a build at step 0 (`ScratchBuffers.recompile`), and it got the same answer.
+- **The app puts the answer in two places.** `replies.ts`'s `scratch-compiled` arm passes `reply.text` to the editor (`setEditor`, so `ScratchEditor.setText`), and to the copy's text of record, which it then stores. `setText` replaces the whole document when the text differs and no edit is waiting to be sent, so each answered build replaced what was typed with the printer's spelling of it.
+- **A timeline probe placed it**, at the shipped 300 ms debounce on `main`'s tree: it logged each `lambda-scratch` request and each reply on the copy's worker, and sampled the editor's document every 5 ms. The figures are one run of each of its two scripts.
+  - A space at the end of the copy's text: the request carried it, the reply's `text` did not, and the editor was back to its text before the space 329 ms after first holding it. The stored text was unchanged after 2 s.
+  - `λp. p`, a space, 1.5 s, then `p`: the editor read `λp. pp`, and that build was answered `no-session`, `unbound variable `pp``.
+  - A caret at 3 in `λp. p p`, a space: after the reply the caret was at 0, and `q` typed next gave `qλp. p p`.
+  - `(\p. (p))` and `\p.` with `p` on the next line each became `λp. p`.
+  - A space and a letter typed inside one debounce were kept: `λq. q q` prints as itself.
+- **asm and TM copies never did this.** Their replies carry no text, and their arms seed the editor from the copy's own record, which is what was typed.
+
+##### WHAT CHANGED
+
+- **At step 0, `lambda_scratch_at` answers with the text it was given and the scratch that text built** (`ca0ebad`). Nothing is replayed at step 0, so the text that built the scratch is the caller's: an edit as typed, a paused copy's text of record, or the program's step-0 print for a copy made at step 0. Past step 0 nothing changed.
+- **Text longer than the byte budget is still answered with the print.** The text a build's answer put in a copy's record was never longer than a print that was not cut at `LAMBDA_BYTE_BUDGET`, the size `buffers-store.ts` reasons from; text padded past the budget whose term prints inside it would be. The cut's refusal still comes first at every step.
+- **Nothing in `web/src` changed but comments.** The arm, the editor and the record do what they did; the reply's text is now what the editor sent, so `setText` finds nothing to replace.
+- **Tidying a copy's text is *format*'s**, as it was: the menu item, and on blur where that is switched on.
+
+##### WHAT A USER SEES CHANGE
+
+- A λ copy's editor keeps `\`, line breaks, spacing and parentheses as typed, where each pause in typing used to rewrite them.
+- A reload brings a copy back as it was typed, where it came back as printed. `buffer-restore.test.ts` restores a copy stored as `(\b. b) (\c. c)`, and its editor now reads that.
+- At a later step, an edited copy's view writes its binders' names as they were typed, where a name the printer had freshened at step 0 stayed freshened (measured below).
+
+##### THE SIBLING SEARCH
+
+- **Every call that hands a copy's editor a text**: `grep -n "setEditor(" web/src/*.ts`, less comment lines, lists 14: four definitions and an interface's, two forwards (`asm-pane.ts`, `tm-pane.ts`), three that pass `null`, and four that pass a text. Of the four, `replies.ts`'s λ arm is the one that passes a reply's text; its TM and asm arms and `pane-host.ts`'s mount pass the copy's record.
+- **Every post of a λ build**: `grep -n "client.scratch(" web/src/*.ts` lists two, `#spawn` with the caller's step and `recompile` with 0.
+- **Every writer of a copy's text of record**: two, `recompile`, with what was typed, and the λ arm, with the reply's text. For an edit the two now write the same text.
+
+##### WHAT PROVING IT FOUND
+
+- **Each new case failed first, on its own assertion.** Against `main`'s package the four browser cases read `expected 'λp. pp' to be 'λp. p p'`, `expected 'λq. q' to be 'λq. q '`, `expected +0 to be 4` and `expected 'λt. t' to be '(\t.\n(t))'`, and the Rust case's `text` was `(λx. x) (λy. y)` where the text given was expected.
+- **Four sabotages of `lambda_scratch_at`, at `28fcf1d`**, each restored from a copy and compared. With the early return deleted, 2 of the 7 Rust cases fail, the two that expect a text answered as given, and 6 of the 18 cases in the three browser files whose expectations the change moved: the four new ones on the messages above, `buffer-restore.test.ts`'s on `expected '(λb. b) (λc. c)' to be '(\b. b) (\c. c)'`, and `copy-edit-leaving.test.ts`'s λ case on a timeout, `the typing to reach the copy it was typed into`, since the stored text never becomes `\p. p p`. With the length condition dropped, 1 of 7: the boundary case's second half, 65 bytes of text answered as given at a budget of 64. With `<` for `<=`, 1 of 7: its first half, 64 bytes answered with the print. With the early return moved above the cut's refusal, 1 of 7: the cut case.
+- **The full web suite found one expectation the sweep had not.** At the fix, before `ca0ebad` was committed, 1 of 2,077 failed: `buffer-restore.test.ts` expected a restored copy's editor to contain the printer's `λc` and it held `(\b. b) (\c. c)`, the text as stored. That is the reload a user makes, and the expectation now reads the whole stored text.
+- **The new file under a quota**: 4 runs of 4 at `CPUQuota=25%` and 2 of 2 at 50 % passed, 4 of 4 cases each. The quota bit: the runs at 25 % took 15.99 to 17.70 s, where one unthrottled run of the file took 8.02 s. The longest case was 992 ms.
+- **In the app itself**, on the dev server in a browser driven by Playwright: *edit a copy* on the λ view, `\p. p ` typed over the copy's text, 1.5 s, then `p`. The editor read `\p. p ` after the pause and `\p. p p` after the letter, the stored copy held the same, and the view drew `λp. p p`. After a reload the one editor on the page read `\p. p p` again.
+- **A later step of an edited copy prints the names as typed.** A copy's binder names used to be the printer's, freshened ones included, since its term was parsed from the print. A throwaway test, not kept, stepped `\a. (\x. \x. x) a` both ways: step 0 prints `λa. (λx. λx0. x0) a` either way, and step 1 prints `λa. λx. x` where it printed `λa. λx0. x0`. `(\f. \x. f (f x)) (\x. x)`, which shadows nothing as typed, printed the same at all four steps. `Tree.chip` ignores a hint's trailing digits either way.
+
+##### THE REVIEW
+
+**One whole-branch review**, of `ca0ebad`, read from the code with nothing run. No Critical finding, two Important and five Minor; all seven taken, six in `28fcf1d` and the seventh being this entry.
+
+- **Important: three sentences still said a λ copy's text is a print**, in `tests/browser.rs`, `keystrokes-in-flight.test.ts`'s second `describe` and `lambda-tree.ts`'s `chip`. The sweep before the review covered `crates/redextape-wasm/src` and not its `tests`, and matched neither `printed it` nor `re-parsing`.
+- **Important: the last new case could be handed a build of part of its text.** It types nine keys against the shipped 300 ms debounce and took the next λ build posted, whatever it carried; a gap between two keys longer than the debounce posts a build of a prefix. The review put the chance of that reddening CI at about 30 %, unmeasured. Each case now waits for the answer to the build carrying exactly its text, through `until`, which also gives the wait a bound and a name (one of the Minors).
+- **Minor: the doc said a print that is not cut keeps to the budget.** The printer checks the budget before each write, so the last one can pass it. The sentence now says only that a copy's text is no longer than a print could be, and `protocol.ts` names the text over the budget.
+- **Minor: two stated properties had no pin**, the `<=` and the cut's refusal coming first at step 0. Both are pinned, and each pin fails under its sabotage above.
+- **Minor: wording** in `scratch.ts`, `session.rs`, `lambda-text.ts` and `scratch-editor.ts`, whose `setText` said a re-seed moves the caret to the end; the probe measured a caret inside the text going to 0.
+- **What it confirmed by reading**: the scratch returned at step 0 is in the state a fresh one is, `lambda_state` and the printer taking the cursor by shared reference; no reader of a copy's text relied on the printer's spelling; and the test's listener runs after the app's on the same worker.
+
+##### WHAT THIS DID NOT CLOSE
+
+- **Text longer than the budget is still answered with the print**, so a λ copy over 65,536 bytes is still rewritten as it is typed.
+- **An edit that does not parse is still not stored**, as before: `ScratchBuffers.setText`'s doc has it.
+- **The LLVM tier was not run here.** `check-all.sh` needs LLVM 22 and this machine has 21 and 23; the branch does not touch `redextape-native`, and CI's `rust-llvm` job runs that tier.
+- **`copy-edit-leaving.test.ts`'s sixth case still types `\q. q` over the whole text.** A trailing space would now reach the copy's text of record; the case was left as it is. #126's entry's other leftover stands: the file does not run the debounce the app ships.
+- **The coverage totals differ between the two commits' runs**, 97.49 / 91.43 / 98.36 / 98.85 at `ca0ebad` and 97.42 / 91.38 / 98.36 / 98.79 at `28fcf1d`, which differ in `web/src` by comments only; #125's and #126's entries record the same movement from run to run.
+- **The probe's timeline on `main` is one run of each script.**
+
+##### VERIFICATION
+
+Run on 2026-10-04 at `28fcf1d`, in the main checkout, by one script in the lane's record (`replay.sh`, not tracked; its logs are in `replay1/`, and `gates1/` holds the gates alone at `ca0ebad`), on a package built from that tree after the last sabotage was restored. Every Vitest browser run was under `systemd-run --user --scope -q -p MemoryMax=16G -p MemorySwapMax=0`, and the script as a whole under the same with `MemoryMax=24G`.
+
+```
+pnpm run build:wasm                      → exit 0
+pnpm exec biome ci --error-on-warnings   → exit 0, 338 files
+pnpm run typecheck                       → exit 0
+pnpm run test:coverage                   → exit 0, 219 files / 2,077 tests; 97.42 / 91.38 / 98.36 / 98.79 against 95 / 89 / 97 / 97
+pnpm run build:app                       → exit 0
+scripts/check-{text-bytes,citations,attributions,doc-figures,shared-docs,colours,grammar-wasm,lua}.sh, --self-test then alone, from the root → 16 of 16 exit 0
+scripts/check-all.sh --no-llvm           → exit 0, green but partial, the LLVM tier skipped; its workspace leg 1,899 passed, its browser tier 33
+cargo llvm-cov nextest --workspace --fail-under-lines 90 → exit 0, 1,899 passed, 95.68 % of lines
+scripts/check-slow.sh                    → exit 0, 33 passed
+docker build, run, curl, inspect         → exit 0; 200; healthy; 7 asset names containing `wasm` in the image
+```
+
+The probe figures are from one run of each of two scripts on 2026-10-03 on `4a5f6b5`'s tree, kept in the record, which were copied into `web/tests/browser/`, run and deleted. Each sabotage was restored from a copy and compared with it, and `git status` was empty after. The app was driven on `vite`'s dev server at `ca0ebad`. The container and the image were removed after the check.
+
+**Every count this entry quotes, with what produces it:**
+
+| Value | What | Produced by |
+|---|---|---|
+| 2; 0 | commits in the range; those touching `docs/` | `git log --oneline 4a5f6b5..28fcf1d \| wc -l`; the same with `-- docs` |
+| 10 s | the wait #126's entry records | that entry's WHAT THIS DID NOT CLOSE |
+| 300; 65,536 | the shipped debounce; the byte budget | `EDITOR_DEBOUNCE_MS` in `web/src/editor-debounce.ts`; `LAMBDA_BYTE_BUDGET` in `web/src/protocol.ts` |
+| 5 ms; 329 ms; 2 s | the probe's sampling; the space's life in the editor; the wait before the stored text was read | `zz-probe-trailing-space.test.ts`'s `setInterval`; `probe-2.log`'s `editor  now` lines at 2,419 and 2,748 ms; its `sleep` |
+| 1.5 s; `λp. pp`; `unbound variable` | the pause, and what followed it | the same log's section B |
+| 3, 0; `qλp. p p`; `λp. p`, twice | the caret; the next key; the two respellings | `probe-scope-1.log`'s sections E, F and G |
+| `λq. q q` | a space and a letter inside one debounce | `probe-2.log`'s section D |
+| 14: 4, 1, 2, 3, 4 | `setEditor` in `web/src` | `grep -n "setEditor(" web/src/*.ts \| grep -vE ":[0-9]+:\s*(//\|\*)"` |
+| 2; 2 | posts of a λ build; writers of the text of record | `grep -n "client.scratch(" web/src/*.ts \| wc -l`; `grep -nE "(scratchpad\|this)\.setText\(" web/src/*.ts`, less comment lines |
+| the five messages | the new cases against `main`'s package | `red-browser.log` and `red-rust.log` |
+| 1 of 2,077 | the full suite at the fix | `web-full-1.log` |
+| 2 of 7, 6 of 18; 1 of 7, three times; 65 and 64 bytes | the four sabotages | `replay1/summary.log` and the logs it names; `sab.py` has each replacement; the boundary case's two texts |
+| 4 of 4, 2 of 2; 15.99 to 17.70 s; 8.02 s; 992 ms | the quota runs; their durations; an unthrottled run; the longest case | `replay1/quota25-{1..4}.log` and `quota50-{1,2}.log`; `review-browser-1.log`, from before `28fcf1d` was committed, on its tree |
+| `λa. λx. x`; `λa. λx0. x0`; 4 steps | a later step, both ways | the throwaway test's output, not kept |
+| 0, 2 and 5; about 30 % | the review's findings; its own estimate | its report, kept in the record's `review.md` |
+| nine | the keys the last case types | `(\t.{Enter}(t))` in `lambda-copy-typed-text.test.ts` |
+| 338; 219 and 2,077; the two sets of four figures; 16; 1,899; 33; 95.68 %; 33; 7 | the gates | the block above; `replay1/summary.log` and each step's log; `gates1/` for `ca0ebad`'s four |
+| 95 / 89 / 97 / 97 | the coverage floors | `thresholds` in `web/vite.config.ts` |
+| 22; 21 and 23 | the LLVM the gate needs; the ones here | `check-all.sh`'s `no LLVM 22 found`, in `gates1/check-all.log`; `ls /usr/lib \| grep llvm`, and `llvm-config --version` reading 23.1.1 |

@@ -680,10 +680,11 @@ async function onLambdaScratch(req: Extract<RunRequest, { kind: 'lambda-scratch'
   live = { gen: req.gen, kind: 'lambda-scratch', session: scratch }
 
   // DIAGNOSTICS ARE DROPPED ON THE SUCCESS PATH, and there is nothing to drop: `lambda_scratch_at`'s
-  // `diagnostics` on a non-null `scratch` come from REPARSING ITS OWN PRINTED OUTPUT
-  // (`lambda/syntax.rs`'s round-trip guarantee), so they are always empty there — the case that
-  // genuinely carries them is the `scratch: null` arm above. Posting an always-empty array on a
-  // message the app receives per fork would be a field with no reader.
+  // `diagnostics` on a non-null `scratch` come from a parse that built a term — of its own printed
+  // output past step 0 (`lambda/syntax.rs`'s round-trip guarantee), of `src` at step 0 — and
+  // `parse_lambda` answers a term with no diagnostic beside it, so they are always empty there. The
+  // case that genuinely carries them is the `scratch: null` arm above. Posting an always-empty array
+  // on a message the app receives per fork would be a field with no reader.
   ctx.postMessage({ kind: 'scratch-compiled', gen: req.gen, lambda: scratch.lambdaStatus(), text })
   await recordLambda(req.gen, true)
 }
@@ -708,7 +709,7 @@ async function onLambdaScratch(req: Extract<RunRequest, { kind: 'lambda-scratch'
  *
  * **DIAGNOSTICS ARE DROPPED ON THE SUCCESS PATH, LIKE `onLambdaScratch`'s — BUT CHECKED HERE RATHER
  * THAN ASSUMED, AND FOR A DIFFERENT REASON.** `onLambdaScratch`'s diagnostics on a non-null scratch are
- * always empty because they come from reparsing the worker's own printed output. This scratch's come
+ * always empty because `parse_lambda` answers a term with no diagnostic beside it. This scratch's come
  * from parsing text a USER typed, which looks like the ordinary case a `diagnostics` reply should ride
  * — except `redextape-core`'s `tm::parse_tm_full` pushes every diagnostic through one constructor that
  * hard-codes `Severity::Error`, and its own gate refuses to build a `Machine` at all once any diagnostic

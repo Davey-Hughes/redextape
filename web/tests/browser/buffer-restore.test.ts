@@ -290,10 +290,10 @@ describe('buffers restored from storage', () => {
     // buffer's editor had been built twice — the state `LambdaPane.receiveEditor` throws on and
     // `setEditor`'s re-seed branch would absorb silently.
     expect(document.querySelectorAll('.term-editor')).toHaveLength(1)
-    // AND IT HOLDS `scratch-2`'s OWN RESTORED TERM, read off CodeMirror rather than off the DOM's text
-    // nodes, which are virtualized. `\c` is `SEEDED`'s spelling and `λc` is the printer's, so this is the
-    // seeded string having been through a worker and back rather than a literal echoed from storage.
-    expect(editorDoc()).toContain('λc')
+    // AND IT HOLDS `scratch-2`'s OWN TEXT AS IT WAS STORED, read off CodeMirror rather than off the DOM's
+    // text nodes, which are virtualized: `\c` is `SEEDED`'s spelling, and a reload used to put the
+    // printer's `λc` in its place. The whole text and not a part of it, so it is not `scratch-1`'s either.
+    expect(editorDoc()).toBe('(\\b. b) (\\c. c)')
   })
 
   /**

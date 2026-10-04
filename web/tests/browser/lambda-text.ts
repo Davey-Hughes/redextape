@@ -25,8 +25,8 @@ export async function lambdaSettled(
 
 /**
  * How the λ view writes `printed` — the printer's text for a term — on one line: binders merged, numerals
- * and booleans as chips. A test that compares the view with printed text (an editor's text of record, a
- * copy's seed) compares it with this.
+ * and booleans as chips. A test that compares the view with printed text (a copy's seed, or the
+ * text of record of a copy nobody has typed into) compares it with this.
  */
 export function asShown(printed: string): string {
   const t = new Tree(wireOf(printed))

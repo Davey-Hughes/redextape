@@ -1600,13 +1600,24 @@ pub struct ForkedAt {
 
 /// Fork a λ scratchpad from **step `step`** of `src`, printing the forked term at `byte_budget`.
 ///
-/// **TWO REDUCTIONS IN ONE CALL, AND THE SECOND PARSE IS THE POINT RATHER THAN THE PRICE** (design
-/// §4.1). `lambda_scratch` builds from λ TEXT, so for the fork's step 0 to BE the term that was on
+/// **PAST STEP 0, TWO REDUCTIONS IN ONE CALL, AND THE SECOND PARSE IS THE POINT RATHER THAN THE PRICE**
+/// (design §4.1). `lambda_scratch` builds from λ TEXT, so for the fork's step 0 to BE the term that was on
 /// screen, that term's text has to exist. It does not: history frames print at 512 bytes and the
 /// full-fidelity print exists only at step 0, in the `compiled` reply. Re-deriving it here and then
 /// building the scratch from the derived string is what makes the editor's contents, the scratch's
 /// step 0, and the term the user was looking at one object instead of three that agree until they do
 /// not — and it puts the whole path through `lambda/syntax.rs`'s round-trip guarantee.
+///
+/// **AT STEP 0 THE TEXT IS `src` ITSELF, AND THE SCRATCH IS THE ONE `src` BUILT.** Nothing is replayed,
+/// so the text that built the scratch exists already and is the caller's: an edit as it was typed, a
+/// paused copy's text of record, or the program's step-0 print for a copy made at step 0. The app puts
+/// this answer in the copy's editor and in its text of record, and answered with the print, an edit had
+/// whatever the printer spells differently replaced under the caret each time a build was answered — a
+/// space typed at the end was gone before the next letter, and a caret inside the text went to its
+/// start. Tidying a copy's text is *format*'s. The cut's refusal below comes first at step 0 too.
+/// **TEXT LONGER THAN `byte_budget` IS ANSWERED WITH THE PRINT ALL THE SAME**, as every text was: a
+/// copy's text of record was never longer than a print that was not cut, and text padded past the
+/// budget would be.
 ///
 /// **`step` IS CLAMPED BY THE REDUCTION, NOT VALIDATED.** `step_lambda` answers `false` at the normal
 /// form, so a step past the end lands on the normal form. A history's step count and a fresh
@@ -1640,6 +1651,10 @@ pub fn lambda_scratch_at(src: &str, step: u32, byte_budget: usize) -> ForkedAt {
             scratch: None,
             text: None,
         };
+    }
+    // `tmp` WAS BUILT FROM `src` AND HAS NOT STEPPED, so it is the scratch and `src` is its text.
+    if step == 0 && src.len() <= byte_budget {
+        return ForkedAt { diagnostics, scratch: Some(tmp), text: Some(src.to_owned()) };
     }
     let Scratched { diagnostics: reparse_diagnostics, scratch } = lambda_scratch(&state.text);
     // `text` FOLLOWS `scratch`, never independently. The second parse can still fail — a printed term
@@ -2649,17 +2664,43 @@ mod tests {
     // --- the fork -------------------------------------------------------------------------------
 
     #[test]
-    fn lambda_scratch_at_step_zero_round_trips() {
-        // The identity case, and the free test of the whole path design §4.1 names: the replay is a
-        // no-op, so both `lambda_scratch` calls must produce the same term from the same text.
-        //
-        // The expected text is the PRINTER's spelling, `λ`, not the `\` the source used — `print_lambda`
-        // emits only `λ` (`lambda/syntax.rs`'s module doc), and `lambda_scratch_at`'s output is a
-        // reparse of a print, never the original source string.
-        let out = lambda_scratch_at("(\\x. x) (\\y. y)", 0, 65_536);
+    fn lambda_scratch_at_step_zero_keeps_the_text_it_was_given() {
+        // Nothing is replayed at step 0, so the text that built the scratch is the caller's own: spelled
+        // with `\`, with parentheses the printer does not write, a line break and a trailing space, and
+        // answered as given. The printer's spelling of it is what someone typing into a copy found
+        // their text replaced with each time a build was answered.
+        let src = "(\\x. (x))\n  (\\y. y) ";
+        let out = lambda_scratch_at(src, 0, 65_536);
         assert!(out.diagnostics.is_empty());
+        assert_eq!(out.text.as_deref(), Some(src));
+        // And the scratch holds that text's term at its step 0, which the printer spells its own way.
+        let state = out.scratch.expect("a scratch for a term that parsed").lambda_state(65_536);
+        assert_eq!(state.step, 0);
+        assert_eq!(state.text, "(λx. x) (λy. y)");
+    }
+
+    #[test]
+    fn lambda_scratch_at_step_zero_keeps_a_text_up_to_the_budget_and_prints_a_longer_one() {
+        // Text padded with spaces, whose term prints well inside the budget either way. At the budget's
+        // own length it is answered as given; one byte longer, with the print, as every later step is —
+        // so a copy's text of record is no longer than it could be when every answer was a print.
+        let at = format!("\\x. x{}", " ".repeat(59));
+        assert_eq!(at.len(), 64);
+        assert_eq!(lambda_scratch_at(&at, 0, 64).text.as_deref(), Some(at.as_str()));
+        let over = format!("{at} ");
+        let out = lambda_scratch_at(&over, 0, 64);
         assert!(out.scratch.is_some());
-        assert_eq!(out.text.as_deref(), Some("(λx. x) (λy. y)"));
+        assert_eq!(out.text.as_deref(), Some("λx. x"));
+    }
+
+    #[test]
+    fn lambda_scratch_at_step_zero_refuses_a_text_whose_print_is_cut() {
+        // The cut's refusal comes before a text is answered as given: these 4 bytes fit a 5-byte budget,
+        // and the print of their term, `λx. x`, does not. Refused, as it was when the print was the answer.
+        let out = lambda_scratch_at("\\x.x", 0, 5);
+        assert!(out.scratch.is_none());
+        assert!(out.text.is_none());
+        assert!(out.diagnostics[0].message.contains("too large to copy"));
     }
 
     #[test]

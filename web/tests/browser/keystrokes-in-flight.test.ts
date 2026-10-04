@@ -238,7 +238,7 @@ describe("a copy's build reply", () => {
       'scratch-compiled',
     )
     expect(overtaken, 'the reply has to land while the typing is still unsent').toBe(false)
-    // Not `λz. z`, the older build's text as the worker prints it.
+    // Not `\z. z`, the older build's text.
     expect(editor.state.doc.toString()).toBe('\\y. y y')
   })
 })
@@ -246,7 +246,7 @@ describe("a copy's build reply", () => {
 /**
  * **A FORMAT TAKES THE PENDING EDIT OFF THE DEBOUNCE, AND FOR THAT ROUND TRIP NO TIMER SAYS THE EDITOR IS
  * NEWER THAN ITS COPY.** The build posted before the edit is still out, and its reply re-seeds with the
- * text before the edit: a TM or an asm copy's record, a λ copy's term as that build printed it. It used to
+ * text before the edit: a TM or an asm copy's record, a λ copy's text as that build carried it. It used to
  * be applied, the format's own answer was then refused as overtaken, and the older text went back as the
  * edit the format owed.
  *
@@ -289,7 +289,7 @@ describe("a copy's build reply, landing while a format is in flight", () => {
       'scratch-compiled',
     )
     expect(overtaken, 'the reply has to land while the format holds the edit').toBe(false)
-    // Not `λz. z`, the older build's text as the worker prints it.
+    // Not `\z. z`, the older build's text.
     expect(atReply, 'the reply re-seeded the editor over the edit').toBe(typed)
     expect(editor.state.doc.toString()).toBe('λy. y y')
     expect(sent, 'the copy was not built from the formatted edit').toBe('λy. y y')
