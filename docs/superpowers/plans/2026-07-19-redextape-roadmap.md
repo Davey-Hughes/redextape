@@ -23720,3 +23720,116 @@ The probe figures are from one run of each of two scripts on 2026-10-03 on `4a5f
 | 338; 219 and 2,077; the two sets of four figures; 16; 1,899; 33; 95.68 %; 33; 7 | the gates | the block above; `replay1/summary.log` and each step's log; `gates1/` for `ca0ebad`'s four |
 | 95 / 89 / 97 / 97 | the coverage floors | `thresholds` in `web/vite.config.ts` |
 | 22; 21 and 23 | the LLVM the gate needs; the ones here | `check-all.sh`'s `no LLVM 22 found`, in `gates1/check-all.log`; `ls /usr/lib \| grep llvm`, and `llvm-config --version` reading 23.1.1 |
+
+#### A LINK PASTED WITH AN ENCODING THIS BUILD LACKS OPENS UNDER THE PAGE'S: TWO BROWSER FILES PASTE A `ternary` LINK INTO A PAGE STARTED ON `unary` AND INTO ONE STARTED ON `binary`, AGAIN ONCE THE OTHER ENCODING IS CHOSEN, AND AGAIN ONCE IT IS CHOSEN BACK WHILE STORAGE REFUSES THE PROGRAM'S WRITE, SO A FALLBACK TO THE DEFAULT, THE PICKER'S FIRST OPTION, THE PROGRAM STORAGE OPENED ON OR THE LAST PROGRAM STORED FAILS BOTH FILES; AND A PASTED LINK WHOSE WORKSPACE CANNOT BE READ IS HELD UNDER ITS OWN `binary`, WHICH #124 HAD HELD UNDER `unary` ALONE (2026-10-04, branch `link-unknown-encoding`, `047b0dd..4f72027`, 3 commits, plus this entry)
+
+**Two test files, no product change.** #124's entry left open that no browser test pastes a link whose encoding the build lacks: that open takes the page's encoding, `opened.encoding ?? picker.value` in `main.ts`'s `openLink`, and `ternary` was in a link only in the two start-up `share-open-alone` files and in `tests/node/share-link.test.ts`. The new files found nothing to change in `web/src`.
+
+##### WHAT THE PAIR HOLDS
+
+- **The `ternary` link is whole but for its encoding.** It carries the Debugger preset's workspace and no positions, and each file first asserts that the same link under an encoding the picker lists decodes `whole`. So the encoding alone is why its program opens alone. `decodeLink` never opens such a link whole, and `tests/node/share-link.test.ts` holds that for the decode; these files hold what the page does with it.
+- **`share-open-hashchange-encoding.test.ts` starts the page on `unary`, `share-open-hashchange-encoding-binary.test.ts` on `binary`.** Each doc names the other half.
+- **The first paste**, onto the page as it started and in Explorer: the editor holds the link's program, the picker the page's encoding, the one `run` request posted since carries the link's program under the page's encoding, the workspace is still `Explorer ▾`, and the fragment is empty. The notice reads `opened a shared link's program — its encoding, workspace and step positions were left out`, with an `undo`, which puts back the page's program under the page's encoding, leaves the workspace, says `put back the program`, gives the editor the focus, and the one `run` posted after it carries the page's program under the page's encoding.
+- **The second paste** comes once the other encoding is chosen with a real `selectOptions` on `#encoding` and that choice's compile has been posted: the editor, the picker and the one `run` posted since are on the chosen encoding, and the notice is the same.
+- **The third paste** comes once the start-up encoding is chosen back while storage refuses the program's write, and carries `let z = 3; z + 4`, so its compile is told from the choice's. The refusal replaces the storage shim's own `setItem` for the program's key alone, since `setup.ts` puts a plain object in `localStorage`'s place, which a `Storage.prototype` patch would not reach, and puts it back before the case ends. The case asserts that the choice's compile had its write refused once and that the program stored is still the one the second paste's compile stored, then holds the editor, the picker, the post and the notice as the second does.
+- **Each paste fails a fallback to two wrong encodings, and each case asserts them first**:
+
+| Paste | `unary` file fails | `binary` file fails |
+|---|---|---|
+| the first | the default, `EXAMPLE_ENCODING` | the picker's first option |
+| the second | the picker's first option; the program storage opened on, `storedProgram` | the default; `storedProgram` |
+| the third | the default; the last program stored, `restorable` | the picker's first option; `restorable` |
+
+  `storedProgram` is the program storage opened on, which the start-up open falls back to. `restorable` is what a reload would open on: the last program a write stored, or `storedProgram` while none has been. It is written as each compile's request is posted (`compile.ts`'s `schedule` calls `persist` right after `client.request`), so while writes go through it holds whatever the picker was last set to, by a choice, a pick, a link or an `undo`, once that compile has been posted, 300 ms after the setting.
+- **The `unary` file also pastes a link whose encoding this build has**, `binary`, with the workspace `not a workspace`: its program opens alone under `binary`, the workspace stays, the notice reads `opened a shared link's program — its workspace and step positions were left out`, and its `undo` puts back the page's program under `unary`, compiled so. THE SIBLING SEARCH has why.
+- **After each paste the picker and the post are soft assertions, and after each `undo` the picker is**, so a wrong encoding is reported in both places it shows.
+
+##### WHY THE POST
+
+- **A compile's request is read at `Worker.prototype.postMessage`**, as `keystrokes-in-flight.test.ts` reads it, and put back in `afterAll`: the `run` request names the encoding the worker compiles under, which is the property. The picker is what the compile reads when it posts.
+- **The readout tells the two encodings apart only by figures the compiler decides.** A throwaway probe compiled the link's program under each: `λ 15 · 7 reductions` and `asm 15 · 5 instructions` under both, `TM 15 · 818 transitions · width 16` under `unary` and `TM 15 · 233 transitions · width 4` under `binary`.
+- **The stored program says what the post says, one step removed**: `persist` is handed the same local `client.request` is, in the same callback.
+
+##### THE SIBLING SEARCH
+
+- **#124's table of what yields an encoding**, ten paths, of which three were held under one encoding when it was written. None of the eight files under `web/tests` changed between #124 and `047b0dd` is a share or an examples test, so the three stand at `047b0dd` as #124 left them.
+- **A pick**: none under `unary`. A pick always sets the default, so there is one value to hold.
+- **The undo of a pick**: `examples-menu.test.ts` and `examples-undo-format.test.ts` under `unary`, none under `binary`. It is the examples menu's, outside this path; WHAT THIS DID NOT CLOSE names it.
+- **A pasted link's program alone**: the links in `web/tests/browser` whose workspace is `not a workspace` or `'{}'` are five. Two open at start-up (the `share-open-alone` pair, whose encoding the build lacks), and three are pasted. `share-open-hashchange.test.ts`'s pastes `unary` onto a page on `binary` and reads the picker after; `share-through-open.test.ts`'s pastes `unary` and does not read it; `share-open-latest.test.ts`'s is the earlier of two links, which never opens. So an open that took the picker's first option, `unary`, in place of the link's own encoding passed every one of them. A link opened alone for another reason, a tree `parseWorkspace` refuses, a version or its positions, is outside this search. **The `unary` file now pastes `binary` onto a page on `unary`**, which fails that, and fails an open that took the page's encoding in place of the link's. A page on `binary` cannot hold it, so the `binary` file has no such case.
+- **A pasted link whose encoding the build lacks** was #124's WHAT THIS DID NOT CLOSE, and is this entry.
+
+##### WHAT PROVING IT FOUND
+
+Fourteen sabotages, each run against both files together at `4f72027`, each restored from a copy and compared with it; the same fourteen run on the tree before that commit, whose test files differed in comments, failed the same cases on the same lines. A case that fails leaves the page or the stored program elsewhere, so a later case in that file then fails a precondition, `the page is on …` or `the last program stored is under …`; those are counted below, and named as such. The cases, in each file's order: the first paste, its notice, its `undo`, the `binary` link with its own encoding (the `unary` file only), the second paste, the third.
+
+- **`?? picker.value` to `?? EXAMPLE_ENCODING`**: 4 of 11. The `unary` file's first paste and third, each on `expected 'binary' to be 'unary'` and on the post, `"encoding": "binary"` where `"unary"` was expected; the `binary` file's second, on `expected 'binary' to be 'unary'` and the post, and its third on a precondition.
+- **To the picker's first option, `?? (encodings() as string[])[0]`**: 4 of 11. The `binary` file's first and third, on `expected 'unary' to be 'binary'` and the post; the `unary` file's second on the same, and its third on a precondition.
+- **To `?? storedProgram.encoding`, as the start-up open falls back**: 4 of 11. Each file's second paste, the `unary` file's on `expected 'unary' to be 'binary'` and the post, the `binary` file's on `expected 'binary' to be 'unary'` and the post; each third on a precondition.
+- **To `?? restorable.encoding`**: 2 of 11, each file's third paste, the `unary` file's on `expected 'binary' to be 'unary'` and the post of `let z = 3; z + 4`, the `binary` file's on `expected 'unary' to be 'binary'` and that post.
+- **The `undo` putting back the text alone**, `undoOpen` dispatching `before.program.text` in place of `replaceProgram(before.program)`: 3 of 11, all in the `unary` file. The `binary` link's case, on the `undo`'s `expected 'binary' to be 'unary'` and its post; the second and third pastes on preconditions. The `binary` file passes: no open in it moves the picker, so the encoding its `undo`s put back is the one already there.
+- **The `undo` putting back the default, `replaceProgram({ text: before.program.text, encoding: EXAMPLE_ENCODING })`** (the review's): 4 of 11. The `unary` file's `undo` case, on `expected 'binary' to be 'unary'` and its post, and its next three cases on preconditions.
+- **The `undo` putting back the picker's first option** (the review's): 3 of 11. The `binary` file's `undo` case, on `expected 'unary' to be 'binary'` and its post, and its next two on preconditions.
+- **The text-alone `undo` with each wrong fallback**: 7 of 11 each. The first paste the fallback fails and the `undo` after it; with the default the `binary` file's second paste, with the first option the `unary` file's `binary` link; and the other four on preconditions.
+- **`openLink` ignoring a known encoding, `encoding: picker.value`**, and **taking the first option for one, `opened.encoding === null ? picker.value : (encodings() as string[])[0]`**: 1 of 11 each, the `binary` link's case, on `expected 'unary' to be 'binary'` and the post of `let z = 3; z + 4`.
+- **The notice dropping `encoding, `**: 6 of 11, each notice case and each second and third paste, on `Received: "opened a shared link's program — its workspace and step positions were left out"`.
+- **`decodeLink` opening a link whole when only its encoding is missing, under the first encoding it lists**: 10 of 11, all but the `binary` link's case. Each first paste on `expected 'Debugger ▾' to be 'Explorer ▾'`, each notice case, each second paste and the `binary` file's third on `expected 'opened a shared link'`, each `undo` case on `expected 'put back the program and the workspace'`, with the picker and the post where the first option is not the page's; and the `unary` file's third on a precondition.
+- **The fragment left on the page**: 4 of 11. Each first paste on `expected '#s=tZDL…' to be ''`; the `binary` file's second on `timed out after 10000ms waiting for the link’s compile`, since the same link set again on a fragment that still holds it fires no `hashchange`, and its third on a precondition. The `unary` file's second passes, since the `binary` link's paste between the two changed the fragment.
+
+Of the assertions that are not preconditions, none of the fourteen reached these failing: the editor holding each pasted link's program, the `undo` button's label, after the first `undo` the program, the workspace and the focus, the `binary` link's case's workspace and notice and its `undo`'s program and notice, and the posts of the second and third pastes' choices. Of the preconditions, only `the page is on …` and `the last program stored is under …` failed, each behind a failed case; none of the fourteen was aimed at one.
+
+- **Under a quota**, each file alone at `CPUQuota=25%` passed, 6 of 6 and 5 of 5. The slowest case was the `unary` file's `binary` link, 1,206 ms, and the `binary` file's second paste, 1,492 ms.
+- **In the page**, a throwaway probe pasted the `ternary` link into a page on `unary` and took a screenshot: the notice and its `undo` under the header, `encoding unary`, `Explorer ▾`, the editor on `let y = 10; y + 5`, and the readout ending `TM 15 · 818 transitions · width 16`.
+
+##### THE REVIEW
+
+**One independent whole-branch review**, of the branch at `3c997ac`, this entry's second version, whose test files are `3c5151c`'s. No Critical finding, three Important and six Minor; all nine taken, in `4f72027` and this entry.
+
+- **Important: the entry and the `unary` file's doc said the `undo`'s encoding cannot fail on its own, and it can.** An `undo` that put back a wrong encoding of its own failed one file's `undo` case: the default the `unary` file's, the picker's first option the `binary` file's. Both are in the sabotages above. What is true, and what the docs and this entry say now: an `undo` that leaves the encoding where it is passes the `undo` case after a `ternary` paste, since that open never moves the picker, and fails the `binary` link's case, whose open does.
+- **Important: the last program stored was recorded as a gap, and could be closed.** The review's probe refused the program's write before choosing the other encoding; the shipped code passed it and `?? restorable.encoding` failed it. Each file's third paste is that probe, and the sabotage fails both.
+- **Important: the entry had no SIBLING SEARCH and no REVIEW.** Both are here, and the search closed the program-alone path's `binary` half.
+- **Minor: the second paste's preconditions** were the start-up encoding's alone; each now asserts the default or the first option it fails as well.
+- **Minor: `restorable` is written when a compile's request is posted, not when it compiles, and the picker is set by a pick, a link or an `undo` as well as a choice.** The docs and this entry say so.
+- **Minor: the claim of where `ternary` was in a link had no producing command.** The count table has it.
+- **Minor: the list of assertions no sabotage reached** said nothing of the preconditions; it does now.
+- **Minor: the first paste did not assert the page was in Explorer before it.** It does.
+- **Minor: the docs called the programs two-line**, and each is on one line.
+
+##### WHAT THIS DID NOT CLOSE
+
+- **The undo of a pick under `binary`**, #124's table's last one-encoding row: the examples menu's, outside this path.
+- **The start-up open is not touched**; `share-open-alone.test.ts` and `share-open-alone-binary.test.ts` hold it.
+- **The coverage totals moved between the code commits' runs**, 97.49 / 91.45 / 98.36 / 98.85 at `e04be9b`, 97.42 / 91.38 / 98.36 / 98.79 at `3c5151c` and 97.42 / 91.4 / 98.36 / 98.79 at `4f72027`, where `web/src` did not change; #125's, #126's and #127's entries record the same movement from run to run.
+
+##### VERIFICATION
+
+Run on 2026-10-04 at `4f72027`, from `web/` in the lane's worktree unless stated, on `047b0dd`'s packages; the branch touches no Rust. Every browser run was under `systemd-run --user --scope -q -p MemoryMax=16G -p MemorySwapMax=0`, the quota runs with `-p CPUQuota=25%` as well.
+
+```
+pnpm exec biome ci --error-on-warnings  → exit 0, 340 files
+pnpm run typecheck                      → exit 0
+pnpm run test:coverage                  → exit 0, 221 files / 2,088 tests; 97.42 / 91.4 / 98.36 / 98.79 against 95 / 89 / 97 / 97
+pnpm run build:app                      → exit 0
+scripts/check-{text-bytes,citations,attributions,doc-figures,shared-docs,colours,grammar-wasm,lua}.sh, --self-test then alone, from the root → 16 of 16 exit 0
+```
+
+The image was not built here. The sabotages are in `sab5.py` in the lane's record, `/home/davey/temp/redextape-lanes-2026-10-04-record/c-link/`, with their logs in `sab5/`, the run before the commit in `sab4/`, and the review's own script, probe and logs in `review/`; the probes (`zz-probe-readout.test.ts`, `zz-probe-look.test.ts`) and the screenshot (`look-after-paste.png`) are there too. Each probe was copied into `web/tests/browser/`, run and deleted, and `git status` was empty after.
+
+**Every count this entry quotes, with what produces it:**
+
+| Value | What | Produced by |
+|---|---|---|
+| 3; 0 | commits in the range; those touching `docs/` | `git log --oneline 047b0dd..4f72027 \| wc -l`; the same with `-- docs` |
+| 11; 6 and 5 | the cases the sabotages ran; each new file's | `grep -cE "^\s*it\(" web/tests/browser/share-open-hashchange-encoding*.test.ts` |
+| the two `share-open-alone` files and `tests/node/share-link.test.ts` | where `ternary` was in a link | `git grep -n ternary 047b0dd -- web/tests web/src`: 8 lines, 3 of them in a link; `program-restore-invalid.test.ts` and `program-store.test.ts` store it as a program's encoding, and the other 3 are the conditional operator |
+| `λ 15 · 7 reductions`, `asm 15 · 5 instructions`; 818, 16; 233, 4 | the readout under both; the TM leg's transitions and width under `unary`, and under `binary` | the two `PROBE` lines of `probe-readout.log`, from `zz-probe-readout.test.ts` |
+| 300 ms | the debounce | `DEBOUNCE_MS` in `web/src/compile.ts` |
+| ten; three | #124's paths; those held under one encoding | #124's entry, THE TESTS |
+| eight | files under `web/tests` changed between #124 and `047b0dd` | `git diff --stat 4a9f7f8..047b0dd -- web/tests` |
+| five; two; three | links whose workspace is `not a workspace` or `'{}'`; at start-up; pasted | `git grep -n "not a workspace\|workspace: '{}'" 047b0dd -- web/tests/browser` |
+| fourteen; 4, 4, 4, 2, 3, 4, 3, 7, 7, 1, 1, 6, 10 and 4 of 11 | the sabotages, in this entry's order | the `Tests` line of each of `sab5/*.log`; `sab5.py` has each replacement |
+| once | the refused writes before the third paste | that case's precondition |
+| 6 of 6, 5 of 5; 1,206 ms; 1,492 ms | the quota runs; the slowest case in each | `cpu25-r3-share-open-hashchange-encoding.log` and `cpu25-r3-share-open-hashchange-encoding-binary.log` |
+| 0, 3 and 6 | the review's Critical, Important and Minor findings | the controller's summary of it; the review's files in `review/` |
+| 340; 221 and 2,088; 97.42 / 91.4 / 98.36 / 98.79; 16 | the gates | the block above; `gate-biome-3.log`, `gate-coverage-3.log`, `gate-hygiene-5.log` in the record |
+| 97.49 / 91.45 / 98.36 / 98.85; 97.42 / 91.38 / 98.36 / 98.79 | the coverage totals at `e04be9b` and `3c5151c` | `gate-coverage.log` and `gate-coverage-2.log` in the record |
+| 95 / 89 / 97 / 97 | the coverage floors | `thresholds` in `web/vite.config.ts` |
