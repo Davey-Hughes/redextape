@@ -84,6 +84,14 @@ const sourceOf = (predicate: () => boolean): string => {
  * **THE PREDICATE IS EVALUATED BEFORE THE FIRST SLEEP**, so `until(() => true)` waits for nothing. Every
  * one of the seven bodies this replaced had that property and several call sites rely on it.
  *
+ * **AND AFTER EVERY SLEEP IT IS EVALUATED BEFORE THE DEADLINE IS CHECKED**, so a state that arrived during a
+ * sleep resolves the wait even when that sleep ended past `timeoutMs`. A page whose main thread is held runs
+ * no timer, and the first poll after it can come seconds past the deadline: at `CPUQuota=25%`, *keep
+ * recording* in `readout-history-full.test.ts` and `readout-history-held.test.ts` each ran one wait for 10.8 to
+ * 13.5 s, its last poll after a gap of 7.2 to 12.9 s, and both pass because the recording had stopped by that
+ * poll. Checked the other way round, they would throw on a state that had arrived.
+ * `tests/node/harness.test.ts` holds this order.
+ *
  * **THE DEFAULT IS BOUNDED BELOW VITEST'S OWN, WHICH IS THE ENTIRE REASON IT IS ONE NUMBER.** Browser
  * mode raises `testTimeout` to 15,000 ms and `hookTimeout` to 30,000 — both measured against this
  * project's own config, which sets neither — so a wait bounded at or above the harness's own lets Vitest

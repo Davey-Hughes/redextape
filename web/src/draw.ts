@@ -406,9 +406,20 @@ export function createDraw(deps: {
     // (`panes.get('source')` is `undefined`) and shows the program, as does any view bound to it.
     const entry = panes.get(focused())
     if (entry === undefined || entry.slot.binding.session === sourceSession) {
+      // **THE PROGRAM'S MACHINE LEGS AS THEY ARE RECORDING, AND THE GENERATION THE CLIENT LAST CLAIMED**, which the
+      // legs record from its `compiled` reply on, beside the last result the program's session answered: the result
+      // counts a compile's whole run, and a leg's recording can fill its history before that run's end. Read on every
+      // frame, so the readout follows *keep recording* as the step line does. The result may be an earlier compile's,
+      // since it arrives once every leg has recorded; `readout.ts`'s `programResultRows` draws a recording's fact only
+      // beside a result of the generation the client last claimed.
+      const recording = {
+        gen: sessions.entryOf(sourceSession).client.gen,
+        asm: sessions.legOf({ session: sourceSession, leg: 'asm' }),
+        tm: sessions.legOf({ session: sourceSession, leg: 'tm' }),
+      }
       readout.show(program(), {
-        segments: () => programSegments(program()),
-        rows: () => programRows(program()),
+        segments: () => programSegments(program(), recording),
+        rows: () => programRows(program(), recording),
       })
     } else {
       const session = entry.slot.binding.session

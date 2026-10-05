@@ -23833,3 +23833,184 @@ The image was not built here. The sabotages are in `sab5.py` in the lane's recor
 | 340; 221 and 2,088; 97.42 / 91.4 / 98.36 / 98.79; 16 | the gates | the block above; `gate-biome-3.log`, `gate-coverage-3.log`, `gate-hygiene-5.log` in the record |
 | 97.49 / 91.45 / 98.36 / 98.85; 97.42 / 91.38 / 98.36 / 98.79 | the coverage totals at `e04be9b` and `3c5151c` | `gate-coverage.log` and `gate-coverage-2.log` in the record |
 | 95 / 89 / 97 / 97 | the coverage floors | `thresholds` in `web/vite.config.ts` |
+
+#### THE READOUT SAYS WHEN A MACHINE LEG'S HISTORY FILLED, AND AT WHICH STEP: THE STRIP'S TM SEGMENT READS `history is full at 75,850` AFTER ITS COUNT AND THE INSPECTOR HAS A `TM recording` ROW, READ OFF THE LEG'S RECORDING WHERE BOTH READ ONLY THE COMPILE'S RUN; A TM COPY'S LINE SAYS ITS HISTORY IS FULL, AS THE λ AND ASM COPIES' LINES DO; THE WHOLE-BRANCH REVIEW FOUND THE PREVIOUS PROGRAM'S RESULT DRAWN WITH THE NEW RECORDING'S FACT THROUGH A RECOMPILE, AND THE FACT SAID AT A STOP A LINK GOES ON PAST, SO THE FACT IS NOW DRAWN ONLY BESIDE A RESULT OF THE GENERATION THE CLIENT LAST CLAIMED AND NOT AT SUCH A STOP; A RE-REVIEW FOUND A WAIT IN EACH BROWSER FILE RUNNING PAST `until`'S 10 s AT A QUARTER OF A CORE, PASSING ON AN ORDER NOW PINNED (2026-10-04, branch `readout-history-full`, `a5b58e5..9b55d3c`, 8 commits, plus this entry)
+
+**The leftover #124's entry named, in `web/` only, in the words the user chose.** That entry's WHAT THIS DID NOT CLOSE records that the readout does not say that a TM leg's history filled, and calls it a follow-up of its own. The user picked the wording, `TM 479001600 · 481,964 transitions · history is full at 75,850 · width 32`: the run's count from the compile, then where the recording stopped.
+
+##### WHAT WAS WRONG
+
+- **The readout read only the compile's result.** `programSegments` and `programRows` (`readout.ts`) built the strip's segments and the inspector's rows from `ProgramResult`, and `compile` runs the asm and TM legs to their end, so the count is the whole run's. The recording the views step through stops on its history budget well before that end on two of the seven examples' TM legs, and only the leg's step line said so.
+- **Measured on `047b0dd`** in the browser tier (Vitest's Chromium, 1280 × 800, each example picked from `examples ▾` under `binary`), once the recordings settled:
+  - `fact(12)`: the TM step line `step 75,850 of 75,850 — history is full (oldest kept: step 1)`, and its segment `TM 479001600 · 481,964 transitions · width 32`.
+  - `map and fold`: `step 69,008 of 69,008 — history is full (oldest kept: step 3)`, and `TM 9 · 91,785 transitions · width 4`.
+- **A TM copy said nothing either, and the λ and asm copies did.** `tmCopyFacts` read every field of the leg but `done` (`copyLegOf`'s doc said so). *edit a copy* on `map and fold`'s TM view gave a copy whose step line read `step 69,008 of 69,008 — history is full (oldest kept: step 3)`, with *keep recording* offered, and whose line read `TM copy 1 · 69,008 transitions · value: 9`.
+
+##### WHAT CHANGED
+
+- **`programSegments` and `programRows` take the program's recording beside the result** (`1508167`, `ecd4ce0`). `draw.ts` hands over, on every frame, the session client's generation and the asm and TM legs of the program's session. For a leg whose `done` is `budget`, `programResultRows` adds a row after the leg's `steps` row reading `history is full at <hist.newestStep>`: `STOPPED.budget`'s words, and the step line's own `of N`, formatted with `n()`.
+- **The strip reads it after the count and before the width**, since `programSegments` puts the width last; **the inspector's row is labelled `TM recording`** (`asm recording` for asm), in its `${leg} ${label}` scheme, between the leg's `steps` and `value` rows, where λ's `run` row sits.
+- **Only beside a result of the generation the client last claimed** (`ecd4ce0`), which the legs record from its `compiled` reply on. A `result` now carries its reply's `gen` (`ProgramResult`), and the fact is drawn only when that is the client's generation. A generation and not a flag: the reply carries it and the client holds it, so nothing is kept in step across the reply arms that could change it, and the comparison sits in the pure function, where a node case holds it. It leaves no fact from a supersede to the first reply either, while the step line says `— recompiling`.
+- **Not while a link's position is pending** (`29fe067`): the step line says `— going to step N from the link` there in place of `— history is full` (`controls.ts`'s `controlState`), and the link continues the recording from that stop.
+- **`ProgramRecording` requires the generation and both machine legs** (`ecd4ce0`), so `{}` no longer type-checks for the production signature; `draw.ts` resolves the legs through `legOf`, the program's session having every leg.
+- **λ gets no such row**: its `run` row already says `recording stopped before the run did — the term is not finished reducing`, from the result (below).
+- **A TM copy's line reads `done`** (`eee1131`), as `lambdaCopyParts` and `asmCopyFacts` do: `STOPPED[done]` after the count, with no step named, since a copy's count already is the newest step its recording holds. The copies menu's row is built from the same facts (`tmCopyRow`).
+- **`until`'s order after a sleep is pinned** (`59fdf0c`): its doc says the predicate is read before the deadline after every sleep, and `harness.test.ts` holds that with a state arriving during a sleep longer than the timeout. Two of this branch's waits rely on it (THE RE-REVIEW).
+- **The two browser files say what was measured of their long waits, let what they hold go after each group, and wait on a step-line state that cannot be skipped** (`9b55d3c`).
+
+##### WHAT A USER SEES CHANGE
+
+Measured on the branch, the same way:
+
+- **`fact(12)`**: the strip reads `TM 479001600 · 481,964 transitions · history is full at 75,850 · width 32`, and the inspector `TM recording` `history is full at 75,850`. While one *keep recording* runs the TM leg on, its `done` is `null` and the fact is gone; the history fills again at `step 151,372 of 151,372 — history is full (oldest kept: step 75,852)`, and both readouts then say `at 151,372`.
+- **`map and fold`**: `TM 9 · 91,785 transitions · history is full at 69,008 · width 4`. One *keep recording* runs the TM to its halt, `step 91,785 of 91,785 (oldest kept: step 25,329)`, and both readouts drop the fact.
+- **`sum_to(10000)`**, `sum_to(5)` with one token changed: its asm history fills at 36,921 of its 140,014 instructions, `asm 50005000 · 140,014 instructions · history is full at 36,921`; under `binary` its TM history fills too, at 74,803.
+- **At 390 px the strip cuts the TM segment** to 358 px. On `map and fold` (504 px of text) the words fit and the step is behind the ellipsis, `TM 9 · 91,785 transitions · history is full…`; on `fact(12)` (584 px at 75,850) the words are cut too, `TM 479001600 · 481,964 transitions · histor…`. The segment's `title` carries the whole text either way.
+- **Through a recompile**, the previous program's result is drawn dimmed, as before, and with no fact until the new program's own result lands.
+- **A TM copy of `map and fold`**: `TM copy 1 · 69,008 transitions · history is full · value: 9` in the strip and `69,008 transitions · history is full · value: 9` under its name in `copies ▾`; after *keep recording*, `TM copy 1 · 91,785 transitions · value: 9`.
+- Screenshots of each, at 1280 and 390 px, before and after *keep recording*, are in the lane's record (`a-readout/shots/`), taken before the review's fixes.
+
+##### λ KEEPS ITS OWN LINE
+
+- **λ's `done` of `budget` and its `run` line come together once a recording stops.** On `047b0dd`: `fact(4)`'s λ step line `step 1,386 of 1,386 — history is full` beside `λ not finished · 1,386 reductions · recording stopped before the run did — …`; four presses of *keep recording* each filled it again, at 2,768, 4,144, 5,514 and 6,880, the segment's count following each time with the line kept; a fifth ended it at 7,398, and the segment read `λ 24 · 7,398 reductions`, without the line. `fact(12)`: 1,406 with the line, and 2,832 with it after one press.
+- **They are apart while a λ continue records.** The `run` line is the result's, and the worker posts `result` once every leg has recorded (`onRun`) and again once a continue of any leg has (`onExtend`): during `fact(12)`'s press the step line read `step 1,918 of 1,918…` while the segment still read `1,406 reductions · recording stopped before the run did`. Left as it is; no second sentence was added to λ.
+
+##### THE SIBLING SEARCH
+
+- **Every code line in `web/src` naming a leg's end** (`STOPPED`, `doneText`, `history is full`, `history-full`, `RecordEnd`), comments aside: 36 lines in 7 files. **Every code line reading a leg's `done` or calling `canRecordFurther`**: 30 lines in 6 files. Each surface, with its verdict, and one neither search finds:
+  - `controls.ts`'s `doneText`: the step line, in a view and on the step bar (through `legControlState`). Already said `— history is full`. Unchanged. Its two replacements, `— recompiling` and `— going to step N from the link`, are now mirrored in the readout (above).
+  - `readout.ts`'s `STOPPED`: the λ and asm copies' lines already printed it; the TM copy's line and the program's asm and TM rows now do.
+  - `results.ts`'s `runNote`, which reads the result's `run` and neither search finds: the program λ leg's `run` row. Unchanged, above.
+  - `share-positions.ts`'s `shortNotice`: reads `done` to clamp a link's position, and its words say where the link's step lies (`past the end of this run`, `further on than 10 continues went`), not how the recording stopped. Unchanged.
+  - `controls.ts`'s `canRecordFurther`, called there and in `transport.ts` and `share-positions.ts`: a gate, no words. `examples.ts`: the manifest's declared outcomes and its menu lines. `protocol.ts`, `record-loop.ts`, `session-worker.ts`, `replies.ts` and `sessions.ts`: where `done` is made, carried and stored.
+- **Every way the result and the legs can come from two generations**, by reading `replies.ts`: `program()` changes at `result`, `no-session` and `worker-error`; the legs reset at `compiled`, `no-session` and `worker-error`, and grow at each frames reply. Only the window from a `compiled` to its `result` holds a result and legs of two generations, and the client's generation moves at a supersede, before either.
+
+##### WHAT PROVING IT FOUND
+
+- **Each new case failed first, on its fact.** Against `047b0dd`'s `readout.ts` and `draw.ts`, with the first round's final tests: in the node file 5 of 31 failed, the five that expect a fact; in `readout-history-full.test.ts` 2 of 4, past their preconditions, on `expected 'TM 9 · 91,785 transitions · width 4' to contain 'history is full at 69,008'` and `expected undefined to be 'history is full at 69,008'`. **The review's I1, placed**: `readout-history-held.test.ts` against `06ab550`'s source failed 1 of 4, its strip reading `asm 42 · 5 instructions · history is full at 36,921` beside the previous program's result.
+- **Sixteen sabotages, at `9b55d3c`, each restored from a copy and compared**: the first round's eleven, rewritten for the final code, three for the review's findings and two for the re-review's. Each run is `readout.test.ts` and `harness.test.ts` (41 cases) and both browser files (9 cases):
+
+| Sabotage | Node cases failed | Browser cases failed, and a failure line |
+|---|---|---|
+| the fact dropped | 5 | 5: `expected 'TM 9 · 91,785 transitions · width 4' to contain 'history is full at 69,008'` |
+| N from the run's count, not the newest recorded step | 5 | 5: `expected 'history is full at 91,785' to be 'history is full at 69,008'` |
+| the inspector not handed the legs, in `draw.ts` | 0 | 1: the inspector case, `expected undefined to be 'history is full at 69,008'` |
+| `programRows` without the fact | 1 | 1: the same |
+| the TM copy's line without `done` | 2 | 0 |
+| the fact before the count | 5 | 4: `expected 'TM 9 · history is full at 69,008 · 91…' to match …` |
+| the fact after the width | 3 | 1: `expected 'TM 9 · 91,785 transitions · width 4 ·…' to match …` |
+| λ given the fact too | 1 | 0 |
+| the fact kept while `done` is `null` | 1 | 0 |
+| the fact for any end, `ended` included | 5 | 2, the halt in the strip and the inspector; in the held file the first two groups' hooks stop on their preconditions (`the previous program fills nothing`, `the asm history is full`) and their 4 cases are skipped |
+| a declined leg given the row | 1 | 0 |
+| the generation check removed (I1) | 1 | 1: the held recompile, `+ "asm 42 · 5 instructions · history is full at 36,921"` |
+| the legs taken once per result (the review's `sab-snapshot.diff`, I2) | 0 | 1: `expected 'asm 50005000 · 140,014 instructions · history is full at 36,921'` `to contain 'history is full at 73,835'` |
+| a link's pending step ignored (M1) | 1 | 1: `expected 'asm 50005000 · 140,014 instructions ·…' not to contain 'history is full'` |
+| `draw.ts` taking the generation from the result it draws (the re-review's) | 0 | 1: the held recompile, `expected [ 'λ 42 · 7 reductions', …(2) ] to deeply equal [ …(2) ]` |
+| `until` checking its deadline before its predicate after a sleep (I-1) | 1: `promise rejected "Error: timed out after 20ms waiting for t…" instead of resolving` | 0 |
+
+- **A case that read the strip half way through *keep recording* by polling was removed** (`06ab550`). It took the first poll after the click that saw the TM step move, and asserted it was still recording; in 1 of the 24 runs of the file at the time, that poll already saw the halt. `readout-history-held.test.ts` places a continue's window instead, by holding its `result` back.
+- **A stall measured, not explained.** During *keep recording* on `map and fold` at `CPUQuota=25%`, the same instrumented copy of `readout-history-full.test.ts` saw no poll for 12,894 ms on `047b0dd`'s source and 12,903 ms on the branch's, in its wait for the TM recording to be half way to the halt. The waits still pass: `until` evaluates its predicate before it checks its deadline, and the recording had ended by the next poll. The review's lead: `History`'s private `#evict` drops each frame with `Array.shift`, O(n) per eviction; its bench put 22,777 evicting pushes, the number this press records, at 215 ms with 69,000 kept and at 3 to 5 ms with 1,000 or 10,000 kept, at full speed. Four times 215 ms is about a fifteenth of the 12,903 ms gap, so the lead does not account for it alone. The mechanism is not known.
+- **Slow-runner margin, on the final tree**, each file alone at `CPUQuota=25%`: `readout-history-full.test.ts` 4 of 4 cases, the slowest 799 ms; `readout-history-held.test.ts` 5 of 5, the slowest 84 ms; `harness.test.ts` 8 of 8, the slowest 61 ms. Before `9b55d3c`, which changed no wait in the held file and one in the other, the held file's hooks took 5,397, 5,106, 14,200 and 5,512 ms in an instrumented copy (made before its link group lost its last case), against Vitest's 30,000 for a hook; its *keep recording* wait took 13,511 ms with no poll for 7,212 ms. After `4e164a4`, `readout-history-full.test.ts`'s three hooks took 5,499, 10,999 and 12,802 ms in a copy instrumented the same way, and its longest gap between polls was 8,002 ms.
+- **The Debugger page is 37,058 px tall on `fact(12)`** at 1280 px on the branch before the review, and 37,013 on `047b0dd`: the inspector prints the λ `term so far`, cut at 64 KiB, and the page grows with it. The 45 px are the new row.
+
+##### THE REVIEW
+
+**One whole-branch review**, of `c47ae9c`, the first entry's commit on `5d89618`, with probes run. No Critical finding, two Important and nine Minor; all eleven taken.
+
+- **Important I1, a defect this branch introduced: through a recompile the previous program's result was drawn with the new recording's fact.** Measured by the review: `map and fold` to `fact(12)` painted `TM 9 · 91,785 transitions · history is full at 75,850 · width 4`, and typing `sum_to(10000)` painted `asm 9 · 260 instructions · history is full at 36,921` for about 650 ms (8.5 s at 25 %). Fixed by the generation check (`ecd4ce0`), held by a node case and by the held file's recompile, whose sabotage is above.
+- **Important I2: no test held that the fact follows *keep recording*.** The review's sabotage, taking the legs once per result, passed every test. The held file now holds the continue's `result` back and asserts the strip already names the new fill, 73,835; the sabotage fails it.
+- **M1: the fact was said at a stop a link's position goes on past**, where the step line says `— going to step N from the link`. Fixed in `29fe067`, held by a node case and the held file's third group.
+- **M2: `tmCopyRow`'s doc** said only the asm copy's row names what stopped it. Corrected in `29fe067`.
+- **M3: when `result` is posted.** The doc and this entry said each time the λ recording stops; it is once every leg has recorded (`onRun`) and once a continue of any leg has (`onExtend`). Corrected in `ecd4ce0` and here.
+- **M4: "keep recording moves the step on"**: while it records, `done` is `null` and the row is gone, and it comes back, further on, only if the history fills again. Corrected in `ecd4ce0` and here.
+- **M5: at 390 px on `fact(12)` the words `history is full` are cut too**, not only the step. Corrected here.
+- **M6: the stall's mechanism was stated without a measurement**, in a commit subject and the test file's doc. Measured above on `047b0dd` and the branch; the mechanism is dropped everywhere. `5d89618`'s subject named it, and `5d89618` is not in the range: its change was recommitted as `06ab550` with a subject and doc that state only what was observed, by a soft reset of this branch's last two commits, the first entry's among them; no rebase.
+- **M7: two of the count table's commands did not print the figures they were quoted for.** Every command below is run and prints them.
+- **M8: what is held where.** The asm fact is now in a browser test (`sum_to(10000)`, the held file); the TM copy's line is held in node only, named below.
+- **M9: `ProgramRecording`'s fields were all optional, so `{}` type-checked.** It requires the generation and both machine legs now (`ecd4ce0`).
+- **From the fix round's own measurements, one more commit** (`4e164a4`): `readout-history-full.test.ts`'s first hook took 24,901 ms of Vitest's 30,000 at 25 % on a machine busy with other suites, so the mount and the pick are two hooks and the longest wait is split once more.
+
+##### THE RE-REVIEW
+
+**One re-review of the fix round**, of `b15d4fe`, with probes run: no defect in the source, every finding above closed, and one Important and five Minor, all taken.
+
+- **Important I-1: in each browser file one *keep recording* wait runs past `until`'s 10 s at 25 %, and passed only on an order nothing pinned.** The held file's wait for the asm recording to be half way to filling again took 12,411 ms, its polls at +798, +4,799 and +12,411 ms, and 22,805 ms at 15 %, with a gap of 16,897 ms; the other file's wait for the TM recording to be half way to the halt took 10,792 ms with one poll. Both pass because the recording had stopped by the poll after the gap and `until` evaluates its predicate before it checks its deadline, which its doc promised only before the first sleep. `59fdf0c` states the order in `until`'s doc and pins it with a node case, which fails when `until` checks its deadline first. `9b55d3c` replaces the files' claim that the split keeps each wait inside 10 s with what was measured. While the page is held the limit that can fire is Vitest's 30 s for the hook, which the held file's reached 24,795 ms of at 15 %: named below.
+- **Its option, a held continue that does not stall: tried and not taken.** Holding the continue's frames after its first kept the strip mid-recording by 607 ms at 25 %, and that variant failed the snapshot sabotage too; but it passed a sabotage the current case fails, a fact drawn only for the recording its result was drawn beside, which hides it through a continue until the continue's `result` lands: `expected 'asm 50005000 · 140,014 instructions' to contain 'history is full at 73,835'`. The current case is kept.
+- **m-1: THE REVIEW named the commit the first review read as `5d89618`**; it read `c47ae9c`, the first entry's commit, whose text its M5, M7 and M8 are about. Corrected above.
+- **m-2: the held file let held replies go only at its end**, so a group whose hook threw while holding could hand a stale `result` to the next group's wait. Each group now lets everything go after it, and asserts nothing is held before it holds (`9b55d3c`).
+- **m-3: the other file's first TM wait was on `…`, a state the line skips** when no poll lands while the TM records; it takes `history is full` too now (`9b55d3c`).
+- **m-4: two docs called the generation the one the legs record**; it is the one the client last claimed, which the legs record from its `compiled` reply on (`9b55d3c`).
+- **m-5: `4e164a4`'s subject says "a third wait on the TM recording"**: after it the hook has four waits on the step line, the added one at two thirds of the way. The subject is left as it is, since rewording it needs a rebase; the squash takes the PR body.
+
+##### WHAT THIS DID NOT CLOSE
+
+- **No test catches the readout half way through a recording by polling**, for the reason above; the held file places a continue's end instead, and node holds a recording still going to no fact.
+- **The link group does not follow the continue to the next fill.** A case that did took 12.9 s at 25 %, and its waits saw no poll for 11.5 s; node holds a leg with no pending step to its fact.
+- **The TM copy's line is held in node only.**
+- **λ's `run` line lags a λ continue**, as measured above.
+- **At 390 px the strip's ellipsis hides the step, and on `fact(12)` the words too.**
+- **The stall during *keep recording*** at `CPUQuota=25%`, on `047b0dd` and the branch alike: no poll for up to 12.9 s; the review's eviction lead is recorded above, not acted on.
+- **A wait in each browser file still runs past `until`'s 10 s on a slow runner** (THE RE-REVIEW) and passes because `until` reads its predicate before its deadline after every sleep, which `harness.test.ts` now holds. While the page is held, the limit that can fire is Vitest's 30 s for the hook: **the held file's *keep recording* hook took 24,795 ms of it at 15 %.**
+- **The Debugger page's height on `fact(12)`**, above.
+- **`doneText` and `STOPPED` still spell the same ends twice**, as before.
+- **The screenshots predate the review's fixes**; the fixes change no drawing outside a recompile or a pending link.
+- **The Docker image was not built here**; the controller builds and runs it.
+
+##### VERIFICATION
+
+Run on 2026-10-04 in the lane's worktree. Gates at `9b55d3c`, every Vitest browser run under `flock` on the lanes' shared lock and `systemd-run --user --scope -q -p MemoryMax=16G -p MemorySwapMax=0`, the quota runs adding `-p CPUQuota=25%`:
+
+```
+pnpm exec biome ci --error-on-warnings   → exit 0, 340 files
+pnpm run typecheck                       → exit 0
+pnpm run test:coverage                   → exit 0, 221 files / 2,097 tests; 97.49 / 91.48 / 98.36 / 98.85 against 95 / 89 / 97 / 97
+pnpm run build:app                       → exit 0
+scripts/check-{text-bytes,citations,attributions,doc-figures,shared-docs,colours,grammar-wasm,lua}.sh, --self-test then alone, from the root → 16 of 16 exit 0
+readout-history-full.test.ts alone at CPUQuota=25% → exit 0, 4 of 4 cases
+readout-history-held.test.ts alone at CPUQuota=25% → exit 0, 5 of 5 cases
+harness.test.ts alone at CPUQuota=25%              → exit 0, 8 of 8 cases
+```
+
+The figures measured on `047b0dd` come from throwaway browser tests run on `047b0dd`'s `readout.ts`, `draw.ts` and `replies.ts`, the three source files the branch changes, restored from `047b0dd` and put back from a copy, compared after; those on the branch before the review, from a run on the `readout.ts` and `draw.ts` that `eee1131` commits. The probes are kept in the lanes' record, `~/temp/redextape-lanes-2026-10-04-record/a-readout/` (not tracked; the fix round's in `fix/`, the review's in `review/`, the re-review's in `rereview/`, the third round's in `round3/`), with every log named below, and were deleted from the worktree. `git status` was empty after each sabotage.
+
+**Every count this entry quotes, with what produces it** (the logs are in the record named above; `round3/verify-entry.sh` runs every command in order):
+
+| Value | What | Produced by |
+|---|---|---|
+| 8; 0 | commits in the range; those touching `docs/` | `git log --oneline a5b58e5..9b55d3c \| wc -l`; the same with `-- docs` |
+| 7; 2 | the examples; those whose TM history fills | `grep -c "outcomes: {" web/src/examples.ts`; `grep -c "tm: 'history-full'" web/src/examples.ts` |
+| 36 in 7; 30 in 6 | the sibling search | `grep -rnE "STOPPED\|doneText\|history is full\|history-full\|RecordEnd" web/src \| grep -vE ":[0-9]+:\s*(//\|\*\|/\*\*)"`, then `wc -l`, and its files `cut -d: -f1 \| sort -u \| wc -l`; `grep -rnE "\.done\b\|canRecordFurther\(" web/src`, the same |
+| 75,850; 481,964; 1,406 | `fact(12)` on `047b0dd` | `grep -A5 "PROBE fact12 settled" probe-main-2.log \| grep -E "λ:\|TM:\|segs"` |
+| 69,008, step 3; 91,785, step 25,329 | `map and fold` on `047b0dd` | `grep -A5 "PROBE map-fold settled\|PROBE map-fold after keep recording" probe-main-2.log \| grep -E "TM:\|segs"` |
+| 1,918; 2,832 | `fact(12)`'s λ during and after a press | `grep -A4 "PROBE fact12 λ keep sample [0-5]\|PROBE fact12 after λ keep" probe-main-2.log \| grep "λ: step" \| grep -E "1,918\|2,832" \| sort -u` |
+| 1,386; 2,768; 4,144; 5,514; 6,880; 7,398 | `fact(4)`'s λ before and after each press | `grep -A4 "PROBE fact4 settled\|PROBE fact4 after λ keep" probe-main-2.log \| grep -E "λ: step\|segs"`, the step lines and the last segment |
+| `TM copy 1 · 69,008 transitions · value: 9` | the TM copy on `047b0dd` | `grep -A5 "TM copy settled" probe-main-2.log \| grep -E "TM:\|segs"` |
+| 151,372, step 75,852; 358 of 504 and 584; the copy's lines | the branch, by hand | `grep -v "\[vite\]" shots.log \| grep "TM: step 151\|CUT 358/5\|TM copy 1 ·\|SHOT copies menu"` |
+| 37,058; 37,013 | the Debugger page's height | `grep -h "HEIGHTS fact-12-1280-debugger-rows-before" shots-inspector.log shots-inspector-main.log` |
+| 36,921 of 140,014; 74,803 | `sum_to(10000)` under `unary` and `binary` | `grep -A4 "^FIX unary result\|^FIX binary result" fix/probe-1.log \| grep -E "asm step\|TM step\|segs"` |
+| `step 36,921 of 36,921 — going to step 40,000 from the link` beside `history is full at 36,921` | M1 before `29fe067` | `grep -A4 "^FIX result" fix/probe-1.log \| grep -E "asm step\|segs"` |
+| 5 of 31; 2 of 4; the two messages | the first round's RED | `red-node-final.log`; `red-browser-final.log` |
+| 1 of 4; `asm 42 · 5 instructions · history is full at 36,921` | I1's RED | `fix/red-held-i1.log`, its `Tests` line and its `+ "asm` line |
+| 16; the table | the sabotages | `round3/sabotage/replay.sh`, run as `round3/sabotage/replay-final.log`; `round3/sabotage/summary.sh` prints each |
+| 1 of 24 | the removed case's misses | `grep -l "precondition: caught while recording: expected"` over `sabotage/round1/*.browser.log`, `sabotage/s*.browser.log`, `green-browser-2.log`, `red-browser-2.log` and `cpu25-browser-2.log`, then `wc -l`; the same list through `ls \| wc -l` |
+| 3,210; 12,194 ms | polls during a press at 25 %, the first round | `grep "^POLL" cpu25-timing-2.log` |
+| 12,894; 12,903 ms | the longest gap between polls during a press at 25 %, `047b0dd` and the branch | `grep "half way to the halt" fix/stall-047b0dd-cpu25.log fix/stall-branch-cpu25.log` |
+| 24,901; 18,905; 8,299 ms | the old file's first hook at 25 %, branch and `047b0dd`; its fill wait on the branch | `grep -E "TIMING hook1\|history of map and fold to fill" fix/stall-branch-cpu25.log fix/stall-047b0dd-cpu25.log` |
+| 5,397, 5,106, 14,200, 5,512; 13,511 and 7,212 ms | the held file's hooks at 25 %; its *keep recording* wait | `grep -E "^TIMING (hook\|until .*half way to filling again)" fix/cpu25-held-timing-2.log \| head -5` |
+| 12.9 s; 11.5 s | the dropped continue case at 25 %; its hook's gap between polls | `grep -oE "filled again [0-9]+ms$" fix/cpu25-held-{1,2}.log`; `grep "half way to filling the history again" fix/cpu25-held-timing-2.log` |
+| 5,499, 10,999, 12,802; 8,002 ms | the old file's hooks at 25 % after `4e164a4`; its longest gap between polls | `grep -E "^TIMING (hook\|until .*half way to the halt)" fix/cpu25-full-split-timing.log` |
+| 4 of 4, 799 ms; 5 of 5, 84 ms; 8 of 8, 61 ms | the final quota runs, slowest cases | `round3/cpu25-{full,held,harness}.log`, each `Tests` line and `grep -oE "[0-9]+ms$" \| sort -n \| tail -1` |
+| 12,411, at +798, +4,799 and +12,411; 22,805 and 16,897; 24,795; 10,792 ms | the re-review's waits and hooks | `grep -oE "POLLS (hook [0-9]+ ms\|until [0-9]+ ms, max gap [0-9]+ ms: the (asm recording to be half way to filling again\|TM recording to be half way to the halt))"` over `rereview/cpu25-held-polls.log`, `rereview/cpu15-held-polls.log` and `rereview/cpu25-full-polls.log`, and the held one's `+…ms(gap …)` |
+| 1 and 5 | the re-review's findings | the controller's message for round three, kept as `round3/brief.md` |
+| 607 ms; the line the variant passed | option 4's evidence | `grep "^VARIANT moved" round3/variant-cpu25.log`; `grep -h "Tests \|AssertionError" round3/variant/*.log` |
+| 22,777; 215 ms; 69,000; 3 to 5 ms | the review's eviction bench | `review/evict-bench.log` |
+| 22,777; a fifteenth | the frames one press records on `map and fold`; 4 × 215 ms against 12,903 ms | 91,785 − 69,008, from the rows above; 860 ÷ 12,903 |
+| 0, 2, 9 | the review's findings | `review.md` in the record, which lists I1, I2 and M1 to M9 |
+| 650 ms; 8.5 s | I1's window as the review measured it | `grep -o "MIX C WRITE t=[0-9]*"` over `review/mix-1.log` (780 to 1,427) and `review/mix-cpu25.log` (6,184 to 14,698) |
+| 340; 221 and 2,097; the four figures; 16 | the gates | `round3/gate-biome.log`; `round3/gate-coverage.log`; `round3/gate-hygiene-exits.log` |
+| 95 / 89 / 97 / 97 | the coverage floors | `thresholds` in `web/vite.config.ts` |
+
+**REBASED ONTO `a5b58e5` AFTER #128, AND THE SHAs ABOVE ARE THE REBASED ONES**, except `047b0dd`, which stands wherever it names the `main` the branch was built, measured and sabotaged on, and `5d89618`, `c47ae9c` and `b15d4fe`, commits replaced before the rebase, which this entry names as such. #128, which adds two browser files for a link pasted with an encoding this build lacks, merged first, and its entry sits above this one. The rebase conflicted only in this file, where both branches appended an entry, and the resolution rebuilt it as `a5b58e5`'s roadmap followed by this entry. No other file conflicted. Each rebased commit has the same patch id and subject as the commit it replaces, and the rebased code head's files outside this file are the old code head's, `25e377c`'s, except #128's two new test files. The commits map `5aafe75` → `1508167`, `b20584c` → `eee1131`, `8a520bf` → `06ab550`, `88db0b5` → `ecd4ce0`, `48061bf` → `29fe067`, `1bc68fb` → `4e164a4`, `bfe1229` → `59fdf0c` and `25e377c` → `9b55d3c`, and this entry's commit, `f4ce439`, → this one.
+
+**Every figure above was measured before the rebase, on the commits these replace.** The counts that read git or the tree were run again over the rebased range and are unchanged: 8 commits, none touching `docs/`; 8 files, 719 insertions and 42 deletions; the 7 examples and 2 whose TM history fills; the sibling search's 36 lines in 7 files and 30 in 6. **The suite's totals are not unchanged, since #128's two test files are in the tree now.** Run on 2026-10-04 on the rebased code with this entry's first rebased version, from `web/`, each exit 0: `pnpm exec biome ci --error-on-warnings` (342 files), `pnpm run typecheck`, `pnpm run test:coverage` under the lock and the cap (223 files, 2,108 tests; statements 97.43, branches 91.45, functions 98.36, lines 98.79) and `pnpm run build:app`; and the eight hygiene scans from the root, `--self-test` then alone, 16 of 16. Where VERIFICATION above gives 340 files, and 221 files and 2,097 tests, those are the tree before the rebase. The image was built from that version and run: healthy after 4 polls, `/` and its four assets 200, 7 wasm assets, and the same hashed asset names as the build before the rebase.

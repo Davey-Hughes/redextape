@@ -94,6 +94,19 @@ describe('until', () => {
     expect(n).toBe(4)
   })
 
+  /**
+   * **A STATE THAT ARRIVED DURING A SLEEP OUTLASTING THE DEADLINE RESOLVES THE WAIT** — `until`'s doc: after every
+   * sleep the predicate is read before the deadline is checked. A held main thread makes that sleep seconds long in
+   * the browser tier; here the poll interval is simply longer than the timeout, and the state arrives within it.
+   */
+  it('resolves on a state that arrived during a sleep that outlasted the deadline', async () => {
+    let arrived = false
+    setTimeout(() => {
+      arrived = true
+    }, 5)
+    await expect(until(() => arrived, 'the state', 20, 60)).resolves.toBeUndefined()
+  })
+
   it('names the condition the call site described', async () => {
     await expect(until(() => false, 'the pane to mount', 30, 5)).rejects.toThrow(
       'timed out after 30ms waiting for the pane to mount',
