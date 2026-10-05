@@ -1021,9 +1021,18 @@ button.view-title[aria-expanded="true"] {
   background: transparent;
   color: var(--fg);
 }
-/* In a view's header the strip is on the title's line, so it loses `.controls`' own top margin. AFTER
-   `.controls` rather than beside `.view-steps`, for Biome's `noDescendingSpecificity`. */
+/* A VIEW'S STRIP WRAPS INSIDE THE VIEW. A strip that never wrapped kept one row however narrow its view was: at
+   390px Explorer's λ view is 189px wide and `fact(4)`'s strip was 398px, so `keep recording` lay at x = 498–599,
+   reached only by scrolling the view sideways, and the step text was a 49px column nine lines tall. Wrapping, the
+   strip takes the view's width, the step text a row of its own (three lines, 189px wide) and `keep recording` one
+   line at x = 201–347. (These are the browser tier's figures: headless, it draws no scrollbar.) At 1280px, measured
+   in Instrument, a short line still fits the title's row, every box where it was. The rows are `var(--space-1)`
+   apart, the step bar's own row gap (`.step-bar-inner`), where `.controls`' `gap` would set them `var(--space-2)`
+   apart. On the title's row or under it, the strip loses `.controls`' own top margin, the header's gap being what
+   sets it apart. AFTER `.controls` rather than beside `.view-steps`, for Biome's `noDescendingSpecificity`. */
 .view-steps .controls {
+  flex-wrap: wrap;
+  row-gap: var(--space-1);
   margin-top: 0;
 }
 
