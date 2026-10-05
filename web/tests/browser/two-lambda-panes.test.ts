@@ -1,5 +1,6 @@
 import { EditorView } from '@codemirror/view'
 import { beforeAll, beforeEach, describe, expect, it } from 'vitest'
+import { page } from 'vitest/browser'
 import { defaultLayout, LAYOUT_STORAGE_KEY, leaves } from '../../src/layout'
 import { bindingKey } from '../../src/view-header'
 import { parseWorkspace } from '../../src/workspace'
@@ -246,6 +247,9 @@ function splitVia(leaf: string, dir: 'row' | 'column', pick: string): void {
 let view: EditorView
 
 beforeAll(async () => {
+  // WIDE ENOUGH FOR ITS ADDS: at the runner's default 414 px a view is 201 px wide, and the app refuses a split or a
+  // `+ view` that leaves a view under `MIN_VIEW_PX` (`layout.ts`). The default's 896 px height is kept.
+  await page.viewport(1280, 896)
   document.body.innerHTML = SHELL
   view = await (await import('../../src/main')).ready
   await until(() => document.querySelector<HTMLElement>('#results')?.dataset.state === 'idle')

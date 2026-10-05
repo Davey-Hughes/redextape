@@ -3,8 +3,11 @@ import { seedAsm } from './asm-seed'
 import type { EditablePane, EditorCustody } from './editor-custody'
 import { LambdaPane } from './lambda-pane'
 import {
+  type AddRefusal,
+  addRefusal,
   closeLeaf,
   type Dir,
+  holdsMostLeaves,
   insertBeside,
   type LayoutNode,
   leaves,
@@ -13,7 +16,7 @@ import {
   setLeafKind,
   splitLeaf,
 } from './layout'
-import { renderLayout, renderStage, syncSizes } from './layout-view'
+import { DIVIDER_PX, renderLayout, renderStage, syncSizes } from './layout-view'
 import { unhandled } from './legs'
 import type { PaneChoice, PaneEvents } from './pane-chrome'
 import type { LeafId, PaneCollection, PaneKind } from './panes'
@@ -125,9 +128,10 @@ export type PaneHost = {
   /**
    * Add a view showing `choice` beside `beside` — `+ view` (spec §5, §6). `insertBeside`, not `splitLeaf`: the
    * view beside which it lands may be the source view. Records what the new leaf starts on, as `split` does,
-   * applies the layout, focuses what it created, and returns its id.
+   * applies the layout, focuses what it created, and returns its id — or, where `admit` refuses it, changes nothing,
+   * reports the refusal, and returns `null`.
    */
-  addView(choice: PaneChoice, beside: LeafId): LeafId
+  addView(choice: PaneChoice, beside: LeafId): LeafId | null
 }
 
 /**
@@ -189,6 +193,13 @@ export type PaneHost = {
 export type LayoutEvent =
   | { readonly kind: 'added' | 'switched'; readonly leaf: LeafId; readonly shows: PaneChoice }
   | { readonly kind: 'closed'; readonly leaf: LeafId; readonly showed: PaneChoice }
+
+/**
+ * An add the tree had no room for, or no leaf left for — `main.ts` words it on the notice line (the user's decision,
+ * 2026-10-04): `leaf` is the view `+ view` was pressed beside or the split was chosen on, `gesture` which add it was
+ * (`'view'`, or the split's direction), and `why` is `layout.ts`'s `addRefusal`.
+ */
+export type AddRefused = { readonly leaf: LeafId; readonly gesture: 'view' | Dir; readonly why: AddRefusal }
 
 /**
  * Whether a pane of `kind` can hold a copy's editor — what `rebind`'s same-leg arm asks before it hands an
@@ -260,6 +271,8 @@ export function createPaneHost(deps: {
   setTmDisplay(leaf: LeafId, d: TmDisplay): void
   /** A view was added, closed, or switched to show something else — `main.ts` says it as a notice (spec §11). */
   layoutChanged(e: LayoutEvent): void
+  /** An add was refused, and nothing changed — `main.ts` says why as a notice. */
+  refused(r: AddRefused): void
   draw(): void
   /**
    * The machine `session` last compiled, or `null` if it has not compiled one — what a freshly built
@@ -334,6 +347,7 @@ export function createPaneHost(deps: {
     tmDisplayOf,
     setTmDisplay,
     layoutChanged,
+    refused,
     draw,
     tmProgramOf,
     tmScratchOf,
@@ -587,6 +601,39 @@ export function createPaneHost(deps: {
   }
 
   /**
+   * Whether the add `build` makes may go ahead: `true`, or `false` with the refusal reported and nothing changed — the
+   * first statement of `split` and of `addView`.
+   *
+   * **ON THE STAGE ONLY THE LEAF BOUND HOLDS** (the user's decision, 2026-10-04): a view added there is a tab, and
+   * nothing on screen shrinks, so the floor has nothing to protect. `holdsMostLeaves` still refuses a 65th leaf, which
+   * the loader would refuse at the next load. Switching to tiles afterwards can show views under the floor.
+   *
+   * **IN TILES THE ONE PIXEL IS `root`'s BOX, AND NO VIEW IS MEASURED.** `layout.ts`'s `addRefusal` works the add out on
+   * the tree's fractions drawn into `#views`, with `DIVIDER_PX` between siblings. Every view is on the page in tiles, so
+   * measuring each would answer the same (a reviewer's probe found the model within 0.012 px of the page in nested
+   * layouts); the arithmetic is kept because it needs no element but one, and is a value a node test can hold.
+   *
+   * **EVERY ADD IS HELD TO THE FLOOR ON WIDTH, AND `'column'`, A SPLIT DOWN, ON HEIGHT TOO** (`addRefusal`'s doc): a
+   * split down makes a view as narrow as the one it halves, which the user's floor is about, and is the one add that
+   * makes a view shorter.
+   *
+   * **A REFUSAL CHANGES NOTHING BUT THE NOTICE LINE**: the tree, storage, the focused view and the leaf counter are as
+   * they were (`addRefusal` hands `build` an id of its own), and no `added` is said.
+   */
+  const admit = (leaf: LeafId, gesture: AddRefused['gesture'], build: (newId: LeafId) => LayoutNode): boolean => {
+    let why: AddRefusal | null
+    if (stage()) why = holdsMostLeaves(getTree()) ? 'full' : null
+    else {
+      const area = root.getBoundingClientRect()
+      const divides = gesture === 'column' ? 'height' : 'width'
+      why = addRefusal(getTree(), build, divides, { width: area.width, height: area.height }, DIVIDER_PX)
+    }
+    if (why === null) return true
+    refused({ leaf, gesture, why })
+    return false
+  }
+
+  /**
    * A pane's events, including the layout gestures the pane itself cannot answer.
    *
    * THE LEAF ID IS CLOSED OVER HERE RATHER THAN PASSED THROUGH THE PANE, which is why `PaneEvents`'s
@@ -657,6 +704,17 @@ export function createPaneHost(deps: {
      * For what this doc used to claim and why it changed, see the history note under `split`.
      */
     const split = (dir: Dir, choice: PaneChoice): void => {
+      // A HALF UNDER THE FLOOR, OR A 65TH LEAF, IS REFUSED BEFORE ANYTHING IS RECORDED — `admit`'s doc.
+      //
+      // **AND THE FOCUS GOES BACK INTO THE VIEW IT WAS CHOSEN ON, OR IT FALLS TO `<body>`** — measured with real
+      // clicks: the pair the focus is on leaves with the menu, and `hidePopover()` hands it back to nothing, so a
+      // successful split has only ever been saved by its own `focusPane(created)` below. A refused one creates nothing,
+      // and the view the user was working in is where it still is.
+      const kind = choice.kind
+      if (!admit(id, dir, (newId) => splitLeaf(getTree(), id, dir, newId, kind))) {
+        focusPane(id)
+        return
+      }
       let created: LeafId
       if (choice.kind === 'source') {
         created = SOURCE_LEAF
@@ -933,7 +991,8 @@ export function createPaneHost(deps: {
    * **EVERY CALLER NAMES A DIFFERENT LEAF, FOR THE SAME REASON.** `close` passes the neighbour that
    * GREW, because the pane the user clicked in is gone; `rebind`'s cross-leg arm passes the leaf ITSELF,
    * because that pane is still exactly where it was and only its contents were replaced; `split` passes
-   * what it CREATED, which is the thing the gesture was asking for. Each is "the place the user is
+   * what it CREATED, which is the thing the gesture was asking for — or, refused, the view it was chosen
+   * on, since nothing was created and that view did not move. Each is "the place the user is
    * looking", resolved from what the gesture did to the tree. (Stated without a count of callers,
    * deliberately, per this module's own rule above.)
    *
@@ -1512,10 +1571,13 @@ export function createPaneHost(deps: {
       }
       return moved
     },
-    addView(choice: PaneChoice, beside: LeafId): LeafId {
+    addView(choice: PaneChoice, beside: LeafId): LeafId | null {
+      const kind = choice.kind
+      // AN EQUAL SHARE UNDER THE FLOOR, OR A 65TH LEAF, IS REFUSED BEFORE AN ID IS MINTED — `admit`'s doc.
+      if (!admit(beside, 'view', (newId) => insertBeside(getTree(), beside, 'row', newId, kind))) return null
       const created = choice.kind === 'source' ? SOURCE_LEAF : nextLeafId()
       if (choice.kind !== 'source') pendingBinding.set(created, choice.session)
-      setTree(insertBeside(getTree(), beside, 'row', created, choice.kind === 'source' ? 'source' : choice.kind))
+      setTree(insertBeside(getTree(), beside, 'row', created, kind))
       focusView(created)
       layoutChanged({ kind: 'added', leaf: created, shows: choice })
       return created

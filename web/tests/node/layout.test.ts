@@ -1,21 +1,28 @@
 import { describe, expect, it } from 'vitest'
 import {
+  addRefusal,
   closeLeaf,
   defaultLayout,
   defaultLayout as dl,
+  holdsMostLeaves,
   insertBeside,
   LAYOUT_VERSION,
   type LayoutNode,
+  leafExtents,
   leaves,
+  MAX_TREE_LEAVES,
   MIN_PANE_FRACTION,
+  MIN_VIEW_PX,
   parseLayout,
   parseTree,
   resize,
+  SIZE_EPSILON,
   SOURCE_LEAF,
   serializeLayout,
   setLeafKind,
   splitLeaf,
 } from '../../src/layout'
+import { DIVIDER_PX } from '../../src/layout-view'
 import type { PaneKind } from '../../src/panes'
 
 /**
@@ -526,6 +533,233 @@ describe('insertBeside', () => {
   })
 })
 
+/** The sizes of the split holding the leaf `id`, and the ids of that split's children. */
+const rowOf = (root: LayoutNode, id: string): { sizes: number[]; ids: string[]; dir: string } | null => {
+  if (root.kind === 'leaf') return null
+  if (root.children.some((c) => c.kind === 'leaf' && c.id === id))
+    return { sizes: root.sizes, ids: root.children.map((c) => (c.kind === 'leaf' ? c.id : '(split)')), dir: root.dir }
+  for (const c of root.children) {
+    const found = rowOf(c, id)
+    if (found !== null) return found
+  }
+  return null
+}
+const sum = (xs: number[]) => xs.reduce((a, b) => a + b, 0)
+
+/**
+ * **`+ VIEW` TAKES AN EQUAL SHARE OF THE FOCUSED VIEW'S ROW** (the user's decision, 2026-10-04): the new view joins
+ * the row right after the view it is added beside, at `1/(n+1)`, and each of the `n` views already there keeps its
+ * proportion at `n/(n+1)` of its size. Where that view's parent is not a row, or it is the root, it is wrapped in a new
+ * row at `[0.5, 0.5]`.
+ */
+describe('insertBeside, `+ view`’s equal share', () => {
+  it('joins the row at an equal share, right after the view it is added beside', () => {
+    const next = insertBeside(defaultLayout(), 'lambda-0', 'row', 'pane-1', 'tm')
+    expect(rowOf(next, 'pane-1')).toEqual({
+      sizes: [1 / 3, 1 / 3, 1 / 3],
+      ids: ['source', 'lambda-0', 'pane-1'],
+      dir: 'row',
+    })
+    expect(leaves(next).map((l) => l.id)).toEqual(['source', 'lambda-0', 'pane-1', 'asm-0', 'tm-0'])
+  })
+
+  it('keeps the proportions of the views already in the row', () => {
+    const three: LayoutNode = {
+      kind: 'split',
+      dir: 'row',
+      sizes: [0.2, 0.3, 0.5],
+      children: [leaf('a', 'lambda'), leaf('b', 'lambda'), leaf('c', 'tm')],
+    }
+    const next = insertBeside(three, 'b', 'row', 'd', 'asm')
+    const row = rowOf(next, 'd')
+    expect(row?.ids).toEqual(['a', 'b', 'd', 'c'])
+    const [a, b, d, c] = row?.sizes ?? []
+    expect(a).toBeCloseTo(0.2 * 0.75, 12)
+    expect(b).toBeCloseTo(0.3 * 0.75, 12)
+    expect(d).toBeCloseTo(0.25, 12)
+    expect(c).toBeCloseTo(0.5 * 0.75, 12)
+    expect(Math.abs(sum(row?.sizes ?? []) - 1)).toBeLessThanOrEqual(SIZE_EPSILON)
+  })
+
+  it('pressed five times in a row gives one row of seven equal views, still summing to 1', () => {
+    let tree = defaultLayout()
+    let focused = 'lambda-0'
+    for (let k = 1; k <= 5; k++) {
+      tree = insertBeside(tree, focused, 'row', `pane-${k}`, 'lambda')
+      focused = `pane-${k}`
+    }
+    const row = rowOf(tree, 'pane-5')
+    expect(row?.ids).toEqual(['source', 'lambda-0', 'pane-1', 'pane-2', 'pane-3', 'pane-4', 'pane-5'])
+    for (const s of row?.sizes ?? []) expect(s).toBeCloseTo(1 / 7, 12)
+    expect(Math.abs(sum(row?.sizes ?? []) - 1)).toBeLessThanOrEqual(SIZE_EPSILON)
+    expect(parseTree(tree)).toEqual(tree)
+  })
+
+  it('wraps a view whose parent is a column in a new row at [0.5, 0.5]', () => {
+    const column = splitLeaf(defaultLayout(), 'tm-0', 'column', 'pane-1', 'tm')
+    const next = insertBeside(column, 'tm-0', 'row', 'pane-2', 'lambda')
+    expect(rowOf(next, 'pane-2')).toEqual({ sizes: [0.5, 0.5], ids: ['tm-0', 'pane-2'], dir: 'row' })
+    expect(rowOf(next, 'pane-1')).toEqual({ sizes: [0.5, 0.5], ids: ['(split)', 'pane-1'], dir: 'column' })
+  })
+
+  it('wraps a view that is the whole tree in a new row at [0.5, 0.5]', () => {
+    expect(insertBeside(leaf('a', 'lambda'), 'a', 'row', 'b', 'tm')).toEqual({
+      kind: 'split',
+      dir: 'row',
+      sizes: [0.5, 0.5],
+      children: [leaf('a', 'lambda'), leaf('b', 'tm')],
+    })
+  })
+})
+
+/**
+ * **NO ADD MAKES A VIEW SMALLER THAN `MIN_VIEW_PX`, AND NONE MAKES A TREE THE LOADER REFUSES.** Worked out from the
+ * tree's fractions and the tiled area, so it needs no element: 1280×725.5 is `#views` at 1280×800 with no notice up,
+ * where each default view is 634×356.75.
+ */
+describe('the floor on an add', () => {
+  const AREA = { width: 1280, height: 725.5 }
+  const view = (root: LayoutNode, beside: string) => (id: string) => insertBeside(root, beside, 'row', id, 'lambda')
+  const split = (root: LayoutNode, at: string, dir: 'row' | 'column') => (id: string) =>
+    splitLeaf(root, at, dir, id, 'lambda')
+
+  it('draws each view the size the stylesheet does', () => {
+    const sizes = leafExtents(defaultLayout(), AREA, DIVIDER_PX)
+    for (const id of ['source', 'lambda-0', 'asm-0', 'tm-0'])
+      expect(sizes.get(id)).toEqual({ width: 634, height: 356.75 })
+  })
+
+  it('lets + view add five views beside λ and refuses the sixth', () => {
+    let tree = defaultLayout()
+    let focused = 'lambda-0'
+    for (let k = 1; k <= 5; k++) {
+      expect(addRefusal(tree, view(tree, focused), 'width', AREA, DIVIDER_PX), `press ${k}`).toBeNull()
+      tree = insertBeside(tree, focused, 'row', `pane-${k}`, 'lambda')
+      focused = `pane-${k}`
+    }
+    expect(leafExtents(tree, AREA, DIVIDER_PX).get('pane-5')?.width).toBeCloseTo((1280 - 6 * 12) / 7, 9)
+    expect(addRefusal(tree, view(tree, focused), 'width', AREA, DIVIDER_PX)).toBe('narrow')
+  })
+
+  it('refuses split right on a view under 332 px wide, and allows it at 332', () => {
+    const narrow = insertBeside(
+      insertBeside(defaultLayout(), 'lambda-0', 'row', 'p1', 'lambda'),
+      'p1',
+      'row',
+      'p2',
+      'lambda',
+    )
+    expect(leafExtents(narrow, AREA, DIVIDER_PX).get('p2')?.width).toBe(311)
+    expect(addRefusal(narrow, split(narrow, 'p2', 'row'), 'width', AREA, DIVIDER_PX)).toBe('narrow')
+    const exact = { kind: 'leaf', id: 'a', pane: 'lambda' } as const
+    expect(addRefusal(exact, split(exact, 'a', 'row'), 'width', { width: 332, height: 100 }, DIVIDER_PX)).toBeNull()
+    expect(addRefusal(exact, split(exact, 'a', 'row'), 'width', { width: 331.9, height: 100 }, DIVIDER_PX)).toBe(
+      'narrow',
+    )
+  })
+
+  /**
+   * THE AXIS A SPLIT DIVIDES, ON TOP OF WIDTH: a view 200 px wide and 700 tall splits down and not right, and one 700
+   * wide and 200 tall splits right and not down.
+   */
+  it('holds split down to height as well as width, and split right to width', () => {
+    const one = { kind: 'leaf', id: 'a', pane: 'lambda' } as const
+    const tallNarrow = { width: 200, height: 700 }
+    const wideShort = { width: 700, height: 200 }
+    expect(addRefusal(one, split(one, 'a', 'column'), 'height', tallNarrow, DIVIDER_PX)).toBeNull()
+    expect(addRefusal(one, split(one, 'a', 'column'), 'height', wideShort, DIVIDER_PX)).toBe('short')
+    expect(addRefusal(one, split(one, 'a', 'row'), 'width', wideShort, DIVIDER_PX)).toBeNull()
+    expect(addRefusal(one, split(one, 'a', 'row'), 'width', tallNarrow, DIVIDER_PX)).toBe('narrow')
+  })
+
+  /**
+   * **A SPLIT DOWN IS HELD TO WIDTH TOO** (the user's decision 2, the re-review's finding): it makes a view as narrow
+   * as the one it halves. λ dragged to 0.12 of its row is 152.16 px wide; split down, its halves are 172.375 px tall,
+   * which passes the height floor, and 152.16 wide, which does not.
+   */
+  it('refuses a split down of a view already narrower than the floor', () => {
+    const tree = resize(defaultLayout(), [0], 0, 0.38)
+    expect(leafExtents(tree, AREA, DIVIDER_PX).get('lambda-0')?.width).toBeCloseTo(152.16, 9)
+    const down = split(tree, 'lambda-0', 'column')
+    expect(leafExtents(down('added'), AREA, DIVIDER_PX).get('added')).toEqual({ width: 152.16, height: 172.375 })
+    expect(addRefusal(tree, down, 'height', AREA, DIVIDER_PX)).toBe('narrow')
+  })
+
+  /**
+   * **A VIEW THE ADD SHRINKS COUNTS, NOT ONLY THE ONE IT MAKES** (the user's decision 2): in a row at `[0.85, 0.15]`,
+   * `+ view` beside the narrow view takes it from 190.2 px to 125.6 while the new view gets 418.67.
+   */
+  it('refuses an add whose new view has room when a view it shrinks would not', () => {
+    const row: LayoutNode = {
+      kind: 'split',
+      dir: 'row',
+      sizes: [0.85, 0.15],
+      children: [leaf('a', 'lambda'), leaf('b', 'lambda')],
+    }
+    expect(leafExtents(row, AREA, DIVIDER_PX).get('b')?.width).toBeCloseTo(190.2, 9)
+    const after = leafExtents(insertBeside(row, 'b', 'row', 'c', 'lambda'), AREA, DIVIDER_PX)
+    expect(after.get('b')?.width).toBeCloseTo(125.6, 9)
+    expect(after.get('c')?.width).toBeCloseTo((1280 - 2 * 12) / 3, 9)
+    expect(addRefusal(row, view(row, 'b'), 'width', AREA, DIVIDER_PX)).toBe('narrow')
+  })
+
+  /**
+   * **ANY VIEW IN THE ROW, NOT ONLY THE ONE BESIDE IT**: in a row at `[0.15, 0.85]`, `+ view` beside the wide view
+   * takes its narrow sibling from 190.2 px to 125.6, while the view it is beside keeps 711.73 and the new one gets
+   * 418.67.
+   */
+  it('refuses an add that would take another view in the row under the floor', () => {
+    const row: LayoutNode = {
+      kind: 'split',
+      dir: 'row',
+      sizes: [0.15, 0.85],
+      children: [leaf('a', 'lambda'), leaf('b', 'lambda')],
+    }
+    const after = leafExtents(insertBeside(row, 'b', 'row', 'c', 'lambda'), AREA, DIVIDER_PX)
+    expect(after.get('a')?.width).toBeCloseTo(125.6, 9)
+    expect(after.get('b')?.width).toBeGreaterThanOrEqual(MIN_VIEW_PX)
+    expect(after.get('c')?.width).toBeGreaterThanOrEqual(MIN_VIEW_PX)
+    expect(addRefusal(row, view(row, 'b'), 'width', AREA, DIVIDER_PX)).toBe('narrow')
+  })
+
+  it('does not count a view the add leaves alone, however narrow', () => {
+    const squeezed: LayoutNode = {
+      kind: 'split',
+      dir: 'column',
+      sizes: [0.5, 0.5],
+      children: [
+        leaf('a', 'lambda'),
+        { kind: 'split', dir: 'row', sizes: [0.9, 0.1], children: [leaf('b', 'tm'), leaf('c', 'tm')] },
+      ],
+    }
+    expect(leafExtents(squeezed, AREA, DIVIDER_PX).get('c')?.width).toBeLessThan(MIN_VIEW_PX)
+    expect(addRefusal(squeezed, view(squeezed, 'a'), 'width', AREA, DIVIDER_PX)).toBeNull()
+  })
+
+  it('refuses a 65th leaf as full, before room, and allows a 64th', () => {
+    const flat = (n: number): LayoutNode => ({
+      kind: 'split',
+      dir: 'row',
+      sizes: Array.from({ length: n }, () => 1 / n),
+      children: Array.from({ length: n }, (_, i) => leaf(`pane-${i + 1}`, 'lambda')),
+    })
+    const wide = { width: 64 * 200, height: 800 }
+    expect(MAX_TREE_LEAVES).toBe(64)
+    expect([holdsMostLeaves(flat(63)), holdsMostLeaves(flat(64))]).toEqual([false, true])
+    expect(addRefusal(flat(63), view(flat(63), 'pane-1'), 'width', wide, DIVIDER_PX)).toBeNull()
+    expect(addRefusal(flat(64), view(flat(64), 'pane-1'), 'width', wide, DIVIDER_PX)).toBe('full')
+    expect(addRefusal(flat(64), view(flat(64), 'pane-1'), 'width', AREA, DIVIDER_PX)).toBe('full')
+  })
+
+  it('changes nothing it was given', () => {
+    const before = defaultLayout()
+    const snapshot = structuredClone(before)
+    addRefusal(before, view(before, 'lambda-0'), 'width', AREA, DIVIDER_PX)
+    insertBeside(before, 'lambda-0', 'row', 'pane-1', 'lambda')
+    expect(before).toEqual(snapshot)
+  })
+})
+
 describe('parseTree', () => {
   it('validates a bare tree the way parseLayout validates an envelope', () => {
     expect(parseTree(defaultLayout())).toEqual(defaultLayout())
@@ -557,7 +791,9 @@ describe('the bound on a tree', () => {
       node = { kind: 'split', dir: 'row', sizes: [0.5, 0.5], children: [node, leaf(`pane-${i}`, 'lambda')] }
     return node
   }
-  /** A tree `depth` splits deep down each split's SECOND child, as `+ view` nests the views it adds. */
+  /**
+   * A tree `depth` splits deep down each split's SECOND child, as `+ view` nested the views it added until 2026-10-04.
+   */
   const trailing = (depth: number): LayoutNode => {
     let node: LayoutNode = leaf(`pane-${depth}`, 'lambda')
     for (let i = depth - 1; i >= 0; i--)
@@ -625,16 +861,21 @@ describe('the bound on a tree', () => {
   })
 
   /**
-   * **`+ view` NESTS EACH VIEW IT ADDS ONE SPLIT DEEPER.** Pressed seven times in a row in the app on 2026-10-01, it
-   * stored this tree, 9 deep with 11 leaves. Such a tree is always two splits shallower than it has leaves, so the leaf
-   * bound is the one it meets: 60 presses parse, and the 61st makes 65 leaves.
+   * **`+ view` PUTS EACH VIEW IT ADDS IN THE ROW, WHERE IT NESTED EACH ONE SPLIT DEEPER** (2026-10-04). Pressed seven
+   * times in a row in the app on 2026-10-01, it stored a tree 9 deep with 11 leaves; the same presses make one row now,
+   * 2 deep. The leaf bound is still the one it meets: 60 presses parse, the 61st would make 65 leaves, and `addRefusal`
+   * refuses it, however wide the window.
    */
-  it('accepts a tree built as `+ view` builds one, until its 65th leaf', () => {
-    expect(shape(pressed(7))).toEqual({ depth: 9, leaves: 11 })
+  it('accepts a tree built as `+ view` builds one, and refuses the press that would make its 65th leaf', () => {
+    expect(shape(pressed(7))).toEqual({ depth: 2, leaves: 11 })
     expect(parseTree(pressed(7))).toEqual(pressed(7))
-    expect(shape(pressed(60))).toEqual({ depth: 62, leaves: 64 })
+    expect(shape(pressed(60))).toEqual({ depth: 2, leaves: 64 })
     expect(parseTree(pressed(60))).toEqual(pressed(60))
     expect(parseTree(pressed(61))).toBeNull()
+    const sixtieth = pressed(60)
+    const huge = { width: 1_000_000, height: 1_000 }
+    const next = (id: string) => insertBeside(sixtieth, 'pane-60', 'row', id, 'lambda')
+    expect(addRefusal(sixtieth, next, 'width', huge, DIVIDER_PX)).toBe('full')
   })
 
   /**

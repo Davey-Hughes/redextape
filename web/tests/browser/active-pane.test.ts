@@ -1,6 +1,6 @@
 import type { EditorView } from '@codemirror/view'
 import { beforeAll, beforeEach, describe, expect, it } from 'vitest'
-import { userEvent } from 'vitest/browser'
+import { page, userEvent } from 'vitest/browser'
 import { LAYOUT_STORAGE_KEY } from '../../src/layout'
 import { bindingKey } from '../../src/view-header'
 import { SHELL, until } from './harness'
@@ -142,6 +142,9 @@ beforeAll(async () => {
   // Each browser test file gets its own in-memory `Storage` now, installed in `tests/browser/setup.ts`
   // before this file's own module body runs — see that file's doc for why clearing a shared key was not
   // enough. Neither key needs clearing here any more.
+  // WIDE ENOUGH FOR ITS ADDS: at the runner's default 414 px a view is 201 px wide, and the app refuses a split or a
+  // `+ view` that leaves a view under `MIN_VIEW_PX` (`layout.ts`). The default's 896 px height is kept.
+  await page.viewport(1280, 896)
   document.body.innerHTML = SHELL
   view = await (await import('../../src/main')).ready
   await until(() => document.querySelector<HTMLElement>('#results')?.dataset.state === 'idle', 'the first compile')

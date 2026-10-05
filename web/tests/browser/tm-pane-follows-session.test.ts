@@ -1,5 +1,6 @@
 import { EditorView } from '@codemirror/view'
 import { beforeAll, describe, expect, it, vi } from 'vitest'
+import { page } from 'vitest/browser'
 import FIXTURE from '../../../crates/redextape-core/tests/fixtures/five_minus_three_single_tape.tm?raw'
 import { LambdaTrees } from '../../src/lambda-trees'
 import type { LinkWiring } from '../../src/link-wiring'
@@ -313,6 +314,10 @@ function expectShowsSource(moved: string[], reference: string): void {
 
 describe('a TM pane rebound, cooled or retired off a reduced buffer', () => {
   beforeAll(async () => {
+    // WIDE ENOUGH FOR THREE SPLITS OF ONE VIEW: the app refuses a split that leaves a view under `MIN_VIEW_PX`
+    // (`layout.ts`), and `tm-0` split right three times is 176.25 px at 3000 and under the floor below 2740. The
+    // runner's default 896 px height is kept.
+    await page.viewport(3000, 896)
     document.body.innerHTML = SHELL
     const view: EditorView = await (await import('../../src/main')).ready
     view.dispatch({ changes: { from: 0, to: view.state.doc.length, insert: 'let x = 40; x + 2' } })

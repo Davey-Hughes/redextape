@@ -1,5 +1,6 @@
 import { EditorView } from '@codemirror/view'
 import { afterEach, beforeAll, beforeEach, describe, expect, it } from 'vitest'
+import { page } from 'vitest/browser'
 import FIXTURE from '../../../crates/redextape-core/tests/fixtures/five_minus_three_single_tape.tm?raw'
 import { VALUE_CHUNK } from '../../src/protocol'
 import { bindingKey } from '../../src/view-header'
@@ -80,6 +81,12 @@ function splitVia(leaf: string, dir: 'row' | 'column', pick: string): void {
 }
 
 beforeAll(async () => {
+  // WIDE ENOUGH FOR ITS ONE SPLIT, AND NO WIDER: the app refuses a split that leaves a view under `MIN_VIEW_PX`
+  // (`layout.ts`), and `tm-0` split right gives halves of ((W − 12) / 2 − 12) / 2 px — 160 at 676, 171 at 720. Close to
+  // that boundary because this file's value runs share 25 % of a CPU with the page in the quota runs, and the
+  // re-review's interleaved runs found their waits longer at 1280 than at 414 or 676. The runner's 896 px height is
+  // kept.
+  await page.viewport(720, 896)
   document.body.innerHTML = SHELL
   const view: EditorView = await (await import('../../src/main')).ready
   view.dispatch({ changes: { from: 0, to: view.state.doc.length, insert: 'let x = 40; x + 2' } })

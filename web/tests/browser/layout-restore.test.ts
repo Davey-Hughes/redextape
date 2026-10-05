@@ -1,4 +1,5 @@
 import { beforeAll, describe, expect, it } from 'vitest'
+import { page } from 'vitest/browser'
 import { LAYOUT_STORAGE_KEY, type LayoutNode, serializeLayout, splitLeaf } from '../../src/layout'
 import { parseWorkspace } from '../../src/workspace'
 import { SHELL } from './harness'
@@ -124,6 +125,11 @@ function splitVia(leaf: string, dir: 'row' | 'column', pick: string): void {
 
 beforeAll(async () => {
   localStorage.setItem(LAYOUT_STORAGE_KEY, STORED)
+  // WIDE ENOUGH TO SPLIT A VIEW THAT IS ITSELF HALF OF A SPLIT: the app refuses a split that leaves a view under
+  // `MIN_VIEW_PX` (`layout.ts`), and the stored tree's `lambda-0`, half of a split with `lambda-1`, split again makes
+  // two of 149.5 px at 1280 and 189.5 at 1600.
+  // The runner's default 896 px height is kept.
+  await page.viewport(1600, 896)
   document.body.innerHTML = SHELL
   await (await import('../../src/main')).ready
 })

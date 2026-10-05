@@ -25,7 +25,10 @@ const PROGRAM = 'let y = 1; y + 2'
 /** The text `setup.ts` stores for every file, stored here under `binary`, the encoding the link does not carry. */
 const STORED = { text: 'let x = 40; x + 2', encoding: 'binary' }
 
-/** `depth` splits deep down each split's second child, whose first child is a λ leaf, as `+ view` nests views. */
+/**
+ * `depth` splits deep down each split's second child, whose first child is a λ leaf, as `+ view` nested views until
+ * 2026-10-04.
+ */
 function deepTree(depth: number): unknown {
   let node: unknown = { kind: 'leaf', id: `pane-${depth}`, pane: 'lambda' }
   for (let i = depth - 1; i >= 1; i--)

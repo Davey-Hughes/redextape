@@ -1,4 +1,5 @@
 import { beforeAll, beforeEach, describe, expect, it } from 'vitest'
+import { page } from 'vitest/browser'
 import { LAYOUT_STORAGE_KEY } from '../../src/layout'
 import { SHELL } from './harness'
 
@@ -76,6 +77,9 @@ function splitVia(leaf: string, dir: 'row' | 'column', pick: string): void {
 // clearing before the mount any more — each browser test file gets its own in-memory `Storage`, installed
 // in `tests/browser/setup.ts` before this file's own module body runs; see that file's doc for why.
 beforeAll(async () => {
+  // WIDE ENOUGH FOR ITS ADDS: at the runner's default 414 px a view is 201 px wide, and the app refuses a split or a
+  // `+ view` that leaves a view under `MIN_VIEW_PX` (`layout.ts`). The default's 896 px height is kept.
+  await page.viewport(1280, 896)
   document.body.innerHTML = SHELL
   await (await import('../../src/main')).ready
 })

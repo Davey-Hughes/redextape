@@ -1,6 +1,6 @@
 import type { EditorView } from '@codemirror/view'
 import { beforeAll, describe, expect, it } from 'vitest'
-import { userEvent } from 'vitest/browser'
+import { page, userEvent } from 'vitest/browser'
 import { EXAMPLES } from '../../src/examples'
 import { encodeLink, type Positions } from '../../src/share-link'
 import { MAX_LINK_CONTINUES } from '../../src/share-positions'
@@ -106,6 +106,9 @@ async function open(
 }
 
 beforeAll(async () => {
+  // WIDE ENOUGH FOR ITS ADDS: at the runner's default 414 px a view is 201 px wide, and the app refuses a split or a
+  // `+ view` that leaves a view under `MIN_VIEW_PX` (`layout.ts`). The default's 896 px height is kept.
+  await page.viewport(1280, 896)
   document.body.innerHTML = SHELL
   view = await (await import('../../src/main')).ready
   await until(() => idle() && results() > 0, 'the first compile')

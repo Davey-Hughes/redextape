@@ -8,10 +8,12 @@ import { SHELL, until } from './harness'
  * most 64 splits deep and 64 leaves, held alike for a link's tree and a stored one. Before the bound, a stored tree
  * deep enough stopped every later load of the app until the site's data was cleared.
  *
- * The tree stored is the one `+ view` builds when pressed 61 times in a row, each press beside the view the last one
- * added: 65 leaves and 63 splits deep, so it is past the leaf bound and not the depth bound. The app does not stop at
- * the bound, so a user can build this layout and lose it at the next load. ONE MOUNT FOR THE FILE, for the reason every
- * sibling gives.
+ * The tree stored is the one `insertBeside` builds when called 61 times in a row from the default, each beside the
+ * view the last one added: 65 leaves, 63 of them in one row, 2 splits deep, so it is past the leaf bound and not the
+ * depth bound. **THE APP NEVER WROTE THIS TREE.** Until 2026-10-04 `+ view` nested each view a split deeper, so its
+ * 61st press stored a 65-leaf tree 63 splits deep, which a user lost at the next load; since then `layout.ts`'s
+ * `holdsMostLeaves` refuses that press. A 65-leaf tree in storage now comes from that older app, or from a hand.
+ * ONE MOUNT FOR THE FILE, for the reason every sibling gives.
  */
 
 function pressed(presses: number): LayoutNode {

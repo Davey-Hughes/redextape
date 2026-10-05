@@ -1,6 +1,6 @@
 import type { EditorView } from '@codemirror/view'
 import { beforeAll, describe, expect, it } from 'vitest'
-import { userEvent } from 'vitest/browser'
+import { page, userEvent } from 'vitest/browser'
 import { BUFFERS_STORAGE_KEY, parseBuffers } from '../../src/buffers-store'
 import { EXAMPLE_ENCODING } from '../../src/examples'
 import { defaultLayout, splitLeaf } from '../../src/layout'
@@ -69,6 +69,10 @@ async function paste(fragment: string, until_: () => boolean, what: string): Pro
 }
 
 beforeAll(async () => {
+  // WIDE ENOUGH TO ADD A THIRD VIEW TO HALF OF THE LINK'S ROW: the app refuses a `+ view` that leaves a view under
+  // `MIN_VIEW_PX` (`layout.ts`), and the link's λ shares half its row with `pane-2` beside the Debugger preset's
+  // inspector, where a third view was refused at 1280 and is not at 1600. The runner's default 896 px height is kept.
+  await page.viewport(1600, 896)
   document.body.innerHTML = SHELL
   view = await (await import('../../src/main')).ready
   await until(() => idle() && readout() === 3, 'the first compile')

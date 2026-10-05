@@ -13,6 +13,17 @@ import type { LeafId } from './panes'
 export const KEY_STEP = 0.02
 
 /**
+ * The width a divider takes along its split's axis, in CSS pixels: `style.css`'s `.layout-divider`, a 4 px line with a
+ * 4 px transparent border on each side.
+ *
+ * **WRITTEN DOWN, BECAUSE THE ARITHMETIC IS WORKED BEFORE ANYTHING IS DRAWN.** `pane-host.ts`'s `admit` works an add
+ * out in tiles on the tree's fractions (`layout.ts`'s `leafExtents`), for a tree that is not on the page yet, and a
+ * constant keeps that a value a node test can hold. `tests/browser/add-view-floor.test.ts` measures every divider of
+ * the tiled default against this number, so the stylesheet and it cannot part.
+ */
+export const DIVIDER_PX = 12
+
+/**
  * THE TREE, AS DOM — nested flex containers with a divider between every pair of siblings.
  *
  * FLEX RATHER THAN GRID, and the reason is the divider. A grid would need its track list rewritten on

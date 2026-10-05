@@ -169,8 +169,44 @@ function hasSource(root: LayoutNode): boolean {
 }
 
 /**
- * Put a new leaf of `kind` beside the leaf `id`, in a split of direction `dir` — `splitLeaf` without its
- * refusal of the source leaf as the SUBJECT.
+ * Put a new leaf of `kind` right after the leaf `id`: as an equal share of `id`'s split when `share` is set and that
+ * split runs `dir`, and otherwise in a new split of `dir` holding the two at `[0.5, 0.5]`.
+ *
+ * **`insertBeside`'s AND `splitLeaf`'s BODY, AND THE REFUSALS ARE THE TREE'S OWN INVARIANTS**: the leaf is in the
+ * tree, at most one source leaf, and no id twice (`splitLeaf`'s own doc has the arguments for the last two).
+ *
+ * **AN EQUAL SHARE KEEPS THE OTHERS' PROPORTIONS**: in a split of `n`, the new leaf takes `1/(n+1)` and each size
+ * already there is multiplied by `n/(n+1)`. Sizes that summed to `1 + e` sum to `1 + e·n/(n+1)`, so a drift from 1
+ * that `validate` allowed (`SIZE_EPSILON`) shrinks with each share and never grows.
+ */
+function insert(root: LayoutNode, id: LeafId, dir: Dir, newId: LeafId, kind: PaneKind, share: boolean): LayoutNode {
+  if (findLeaf(root, id) === null) throw new Error(`cannot insert beside a leaf that is not in the tree: ${id}`)
+  if (kind === 'source' && hasSource(root)) throw new Error('the tree already has a source leaf')
+  if (findLeaf(root, newId) !== null) throw new Error(`cannot split into an id already in the tree: ${newId}`)
+
+  const fresh: LayoutNode = { kind: 'leaf', id: newId, pane: kind }
+  const rewrite = (node: LayoutNode): LayoutNode => {
+    if (node.kind === 'leaf') {
+      if (node.id !== id) return node
+      return { kind: 'split', dir, sizes: [0.5, 0.5], children: [node, fresh] }
+    }
+    const at = share && node.dir === dir ? node.children.findIndex((c) => c.kind === 'leaf' && c.id === id) : -1
+    if (at === -1) return { ...node, children: node.children.map(rewrite) }
+    const n = node.children.length
+    const kept = node.sizes.map((s) => (s * n) / (n + 1))
+    return {
+      ...node,
+      children: [...node.children.slice(0, at + 1), fresh, ...node.children.slice(at + 1)],
+      sizes: [...kept.slice(0, at + 1), 1 / (n + 1), ...kept.slice(at + 1)],
+    }
+  }
+  return rewrite(root)
+}
+
+/**
+ * Put a new leaf of `kind` beside the leaf `id`: into `id`'s split as an equal share where that split runs `dir`, and
+ * otherwise in a new split of `dir` holding the two at `[0.5, 0.5]` — `splitLeaf` without its refusal of the source
+ * leaf as the SUBJECT, and without its halving.
  *
  * **`+ view` IS WHY THIS EXISTS** (Plan 7 part 2 spec §5). It adds the pick beside the focused view, and the
  * focused view can be the source view — or the only view, when every other has been closed. `splitLeaf`'s
@@ -178,25 +214,17 @@ function hasSource(root: LayoutNode): boolean {
  * is one editor, so the source view offers none; that argument says nothing about putting a DIFFERENT view
  * next to it. The other refusals are the tree's own invariants and stay: at most one source leaf, and no id
  * twice (`splitLeaf`'s own doc has both arguments).
+ *
+ * **IT TAKES AN EQUAL SHARE OF THE ROW, WHERE IT USED TO HALVE THE VIEW** (the user's decision, 2026-10-04). It
+ * wrapped the view in a new split at `[0.5, 0.5]` as a split does, and a new view takes the focus, so each press
+ * halved the view the last one made: at 1280×800 the newest λ view measured 311, 149.5, 68.8, 28.4, 8.2 and then 0
+ * px, and each press nested the tree one split deeper. The view joins the row now, right after the one it is added
+ * beside, and the views already there keep their proportions and shrink to make room — the source view too, when it
+ * shares the row. A view whose split is not a row, or that is the whole tree, is wrapped as before. `addRefusal`
+ * below is what stops a share going under `MIN_VIEW_PX`.
  */
 export function insertBeside(root: LayoutNode, id: LeafId, dir: Dir, newId: LeafId, kind: PaneKind): LayoutNode {
-  if (findLeaf(root, id) === null) throw new Error(`cannot insert beside a leaf that is not in the tree: ${id}`)
-  if (kind === 'source' && hasSource(root)) throw new Error('the tree already has a source leaf')
-  if (findLeaf(root, newId) !== null) throw new Error(`cannot split into an id already in the tree: ${newId}`)
-
-  const rewrite = (node: LayoutNode): LayoutNode => {
-    if (node.kind === 'leaf') {
-      if (node.id !== id) return node
-      return {
-        kind: 'split',
-        dir,
-        sizes: [0.5, 0.5],
-        children: [node, { kind: 'leaf', id: newId, pane: kind }],
-      }
-    }
-    return { ...node, children: node.children.map(rewrite) }
-  }
-  return rewrite(root)
+  return insert(root, id, dir, newId, kind, true)
 }
 
 /**
@@ -237,14 +265,18 @@ export function insertBeside(root: LayoutNode, id: LeafId, dir: Dir, newId: Leaf
  * refusal keeps the tree unable to reach that state in the first place rather than only detecting it
  * after the fact.
  *
- * **ITS LAST TWO REFUSALS ARE `insertBeside`'s**, to which it delegates once the subject passes; the table
+ * **ITS LAST TWO REFUSALS ARE `insertBeside`'s**, whose body it shares once the subject passes; the table
  * above still describes what a caller of either sees.
+ *
+ * **A SPLIT STILL HALVES THE VIEW IT IS CHOSEN ON, WHERE `+ view` NOW TAKES AN EQUAL SHARE OF THE ROW**: a split is
+ * this view in two, and its `⋯` menu says so. This function refuses nothing for size: `pane-host.ts`'s `admit` asks
+ * `addRefusal` first, on width for either direction and on height too for a column.
  */
 export function splitLeaf(root: LayoutNode, id: LeafId, dir: Dir, newId: LeafId, kind: PaneKind): LayoutNode {
   const target = findLeaf(root, id)
   if (target === null) throw new Error(`cannot split a leaf that is not in the tree: ${id}`)
   if (target.pane === 'source') throw new Error('the source pane cannot be split: there is one editor to duplicate')
-  return insertBeside(root, id, dir, newId, kind)
+  return insert(root, id, dir, newId, kind, false)
 }
 
 /**
@@ -382,7 +414,7 @@ export const LAYOUT_STORAGE_KEY = 'redextape.layout'
 export const LAYOUT_VERSION = 1
 
 /** How far the sum of a split's sizes may drift from 1 before the tree is rejected. */
-const SIZE_EPSILON = 1e-6
+export const SIZE_EPSILON = 1e-6
 
 /**
  * The most splits a tree may have on any path from its root to a leaf; `defaultLayout()` has 2 (Plan 7 part 6a spec
@@ -393,6 +425,9 @@ const SIZE_EPSILON = 1e-6
  * before its second, so a tree that nests down its first children reaches no leaf until its deepest split, and the
  * leaf count cannot stop the reading. Unbounded, the recursion threw `RangeError` at 6,000 splits deep, on a link of
  * 25,011 characters. This stops it at the 65th split.
+ *
+ * **NO ADD CAN REACH IT**: a tree of at most `MAX_TREE_LEAVES` leaves is at most 63 splits deep, so `holdsMostLeaves`,
+ * which holds every add to the leaf bound, holds it to this one too.
  */
 const MAX_TREE_DEPTH = 64
 
@@ -400,11 +435,135 @@ const MAX_TREE_DEPTH = 64
  * The most leaves a tree may have; `defaultLayout()` has 4 (spec §5.3, amended 2026-10-01).
  *
  * **A LINK BROUGHT TREES THE STORE NEVER HAD.** A link of 2,034 characters held 400 λ views, which took 4.4 s to open
- * and were stored, so every later load built them again. **THE APP DOES NOT STOP HERE**: `+ view` nests each view it
- * adds one split deeper and puts no limit on how many, so its 61st press in a row from the default makes 65 leaves,
- * and that layout falls back to the default at the next load.
+ * and were stored, so every later load built them again.
+ *
+ * **THE APP STOPS HERE NOW, WHERE IT USED TO BUILD PAST IT** (2026-10-04). `+ view` nested each view it added one
+ * split deeper and put no limit on how many, so its 61st press in a row from the default made 65 leaves, a layout that
+ * fell back to the default at the next load. `holdsMostLeaves` below refuses an add that would make a 65th leaf, from
+ * `+ view` and from a split, in tiles and on the Stage. Exported for `main.ts`, which says this number on the notice
+ * line, and for `tests/node/layout.test.ts`, so neither copies it.
  */
-const MAX_TREE_LEAVES = 64
+export const MAX_TREE_LEAVES = 64
+
+/**
+ * Whether `root` already holds `MAX_TREE_LEAVES` leaves, so an add would make a tree the loader refuses — the one
+ * refusal that holds on the Stage too (`pane-host.ts`'s `admit`), since there the 160 px floor does not.
+ */
+export function holdsMostLeaves(root: LayoutNode): boolean {
+  return leaves(root).length >= MAX_TREE_LEAVES
+}
+
+/**
+ * The narrowest a view an add makes, or shrinks, may be, in CSS pixels (the user's decision, 2026-10-04) — and, for a
+ * split down, the shortest (the controller's choice the same day: a split down divides height).
+ *
+ * **PIXELS, WHERE `MIN_PANE_FRACTION` IS A FRACTION, AND THIS MODULE STILL MEASURES NOTHING.** What a view can show
+ * is a matter of pixels and not of its share: `+ view` pressed in a row at 1280 wide took the newest view to 0 px, each
+ * press a half of the last, and no floor on a fraction of a split refuses a half. `addRefusal` is handed the tiled
+ * area's size and the dividers' width by its caller, which makes the one measurement (`pane-host.ts`'s `admit`), so the
+ * arithmetic here stays a value.
+ *
+ * **IT GATES THE ADD GESTURES ONLY, AND ONLY IN TILES**: a divider drag keeps `MIN_PANE_FRACTION`, and a window made
+ * smaller, a switch that opens the inspector (the Debugger and Stage presets, or the readout switch), a stored layout,
+ * a link's layout or an undo can still show a view under it. **THE STAGE IS EXEMPT** (the user's decision, 2026-10-04):
+ * a view added there is a tab and nothing on screen shrinks, so `pane-host.ts`'s `admit` holds it to the leaf bound
+ * alone, and switching from the Stage to tiles can show what it added under the floor.
+ */
+export const MIN_VIEW_PX = 160
+
+/** A box's two extents, in CSS pixels. */
+export type Extent = { readonly width: number; readonly height: number }
+
+/** Which extent an add divides: a row's width, a column's height. */
+export type Axis = keyof Extent
+
+/**
+ * The box each leaf of `root` gets when the tree is drawn into `area`, with `gap` pixels between siblings — what
+ * `layout-view.ts`'s flex boxes give it.
+ *
+ * **THE STYLESHEET'S ARITHMETIC, NOT A MEASUREMENT.** Each split's children have a `flex-grow` of their size, a basis
+ * of 0 and no minimum, and a divider of fixed width sits between each pair, so a child gets its size's share of the
+ * split's extent less its dividers — and nothing, when the dividers alone overrun it. Measured at 1280×800 with no
+ * notice up, `#views` is 1280×725.5 px and each default view 634×356.75, which is what this answers for that area.
+ * **IT DRAWS A TREE THAT IS NOT ON THE PAGE YET** — the one an add would build — which is why it is arithmetic: in
+ * tiles every view of the current tree measures what this says (the review's probe, within 0.012 px in nested layouts),
+ * and the Stage, which mounts one view, is not asked (`pane-host.ts`'s `admit`).
+ */
+export function leafExtents(root: LayoutNode, area: Extent, gap: number): Map<LeafId, Extent> {
+  const out = new Map<LeafId, Extent>()
+  const walk = (node: LayoutNode, box: Extent): void => {
+    if (node.kind === 'leaf') {
+      out.set(node.id, box)
+      return
+    }
+    const along = node.dir === 'row' ? box.width : box.height
+    const free = Math.max(0, along - gap * (node.children.length - 1))
+    node.children.forEach((child, i) => {
+      const share = (node.sizes[i] ?? 0) * free
+      walk(child, node.dir === 'row' ? { width: share, height: box.height } : { width: box.width, height: share })
+    })
+  }
+  walk(root, area)
+  return out
+}
+
+/**
+ * Why an add is refused: the tree holds `MAX_TREE_LEAVES` already (`'full'`), a view would come out narrower than
+ * `MIN_VIEW_PX` (`'narrow'`), or a split down would leave a half shorter than it (`'short'`). Narrow and short are
+ * apart because their remedies are: a wider window, or a taller one.
+ */
+export type AddRefusal = 'full' | 'narrow' | 'short'
+
+/**
+ * Why the add `build` makes to `root` would be refused, or `null` when it may go ahead, drawn into `area` with `gap`
+ * between siblings: `'full'` when the tree already holds `MAX_TREE_LEAVES`; `'narrow'` when the view it makes, or any
+ * view it makes narrower, would come out under `MIN_VIEW_PX` wide; and, where `divides` is `'height'` (a split down),
+ * `'short'` when either half would come out under it tall.
+ *
+ * **WIDTH IS HELD FOR EVERY ADD, WHATEVER IT DIVIDES** (the user's decision 2: "narrower than 160 px"). It was held
+ * only along the axis the add divides — the controller's brief said so, and that was the error — so a split down of a
+ * view already under 160 px wide made a second view as narrow, unrefused: a view dragged to 152.16 px, split down, gave
+ * two of 152.16 × 172.375 (the re-review's probe, 2026-10-04). **HEIGHT IS HELD FOR A SPLIT DOWN ALONE**, the
+ * controller's choice: it is the one add that makes a view shorter. Width is asked first, so a split down short of both
+ * is said as narrow.
+ *
+ * **`build` IS THE ADD ITSELF** — the caller's own `insertBeside` or `splitLeaf` call, handed the new leaf's id — so
+ * what is checked is what would be built, and an equal share and a halving are answered by the one function. It is
+ * handed an id the tree does not hold, so a refused add mints none.
+ *
+ * **ONLY A VIEW THE ADD MADE, OR MADE SMALLER ALONG THE AXIS ASKED, IS COUNTED** — any such view, not only the one the
+ * add is beside: `+ view` shrinks every view in the row. A view already under the floor that the add leaves alone —
+ * dragged there, or drawn there by a narrower window — does not stop it, so a small view somewhere else never blocks an
+ * add with room.
+ *
+ * **FULL BEFORE ROOM**: a wider window cannot make room under the leaf bound, so the notice names the remedy that
+ * works.
+ *
+ * **TILES ONLY**: on the Stage nothing on screen shrinks, and `pane-host.ts`'s `admit` asks `holdsMostLeaves` instead.
+ */
+export function addRefusal(
+  root: LayoutNode,
+  build: (newId: LeafId) => LayoutNode,
+  divides: Axis,
+  area: Extent,
+  gap: number,
+): AddRefusal | null {
+  if (holdsMostLeaves(root)) return 'full'
+  const taken = new Set(leaves(root).map((l) => l.id))
+  let probe = 'added'
+  while (taken.has(probe)) probe = `${probe}'`
+  const before = leafExtents(root, area, gap)
+  const after = leafExtents(build(probe), area, gap)
+  /** Whether a view the add made, or made smaller along `axis`, comes out under the floor along it. */
+  const under = (axis: Axis): boolean =>
+    [...after].some(([id, now]) => {
+      const was = before.get(id)
+      return (was === undefined || now[axis] < was[axis]) && now[axis] < MIN_VIEW_PX
+    })
+  if (under('width')) return 'narrow'
+  if (divides === 'height' && under('height')) return 'short'
+  return null
+}
 
 /**
  * The largest number a leaf id may carry, as `leafNumber` reads it (spec §5.3, amended 2026-10-01): a number the leaf

@@ -1,5 +1,6 @@
 import type { EditorView } from '@codemirror/view'
 import { beforeAll, describe, expect, it } from 'vitest'
+import { page } from 'vitest/browser'
 import { SHELL, until } from './harness'
 import { lambdaSettled } from './lambda-text'
 
@@ -29,6 +30,9 @@ describe('stage', () => {
   let treeBeforeStage: unknown
 
   beforeAll(async () => {
+    // WIDE ENOUGH FOR ITS ADDS: at the runner's default 414 px a view is 201 px wide, and the app refuses a split or a
+    // `+ view` that leaves a view under `MIN_VIEW_PX` (`layout.ts`). The default's 896 px height is kept.
+    await page.viewport(1280, 896)
     document.body.innerHTML = SHELL
     const view: EditorView = await (await import('../../src/main')).ready
     view.dispatch({ changes: { from: 0, to: view.state.doc.length, insert: 'let x = 40; x + 2' } })

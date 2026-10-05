@@ -427,8 +427,11 @@ function item(className: string, label: string, hint?: string, glyph?: IconName)
  * Closing the menu puts the main items back.
  *
  * **EVERY ITEM CLOSES THE MENU BEFORE IT RUNS**, so no item is left on screen describing a view the action
- * just changed, and focus returns to `⋯` — the popover's own behaviour on a light dismiss or a `hidePopover`
- * while focus is inside it. **A DISPLAY SETTING'S CHOICES ARE THE EXCEPTION:** a choice leaves the menu open
+ * just changed, and focus goes back to what held it before the menu opened — the popover's own behaviour on a
+ * light dismiss or a `hidePopover` while focus is inside it. **A SPLIT'S PAIR IS WHERE THAT FAILS:** measured with
+ * real clicks, the focus leaves with the pair list and nothing hands it back, so it falls to `<body>` unless the
+ * split puts it somewhere — which `pane-host.ts`'s `split` does, in the view it made or, refused, in its own.
+ * **A DISPLAY SETTING'S CHOICES ARE THE EXCEPTION:** a choice leaves the menu open
  * and the focus on it, because a setting is picked and then looked at, and the group itself says which
  * choice is now in force — the arrows would have nothing to move between in a menu that closed on each.
  * "reset folds" is an action, and closes it like the rest.

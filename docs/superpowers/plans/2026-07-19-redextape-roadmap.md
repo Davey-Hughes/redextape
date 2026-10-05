@@ -24205,3 +24205,173 @@ The Rust gates, `check-slow.sh` and the Docker image were not run here: the diff
 **REBASED ONTO `fdade0a` AFTER #128 AND #129, AND THE SHAs ABOVE ARE THE REBASED ONES**, except `047b0dd`, which stands wherever it names the `main` the branch was built, measured and sabotaged on. #128, which adds two browser files for a link pasted with an encoding this build lacks, and #129, which has the readout say when a machine leg's history filled, merged first, and their entries sit above this one. The rebase conflicted only in this file, where each branch appended an entry, and the resolution rebuilt it as `fdade0a`'s roadmap followed by this entry. No other file conflicted. Each rebased commit has the same patch id and subject as the commit it replaces, and the rebased code head's files outside this file are the old code head's, `1df1f65`'s, except the ten #128 and #129 changed, which are `fdade0a`'s. The commits map `d39e504` → `58779fb`, `f76209c` → `e61af01` and `1df1f65` → `9653ee7`, and this entry's commit, `8142466`, → this one.
 
 **Every figure above was measured before the rebase, on the commits these replace.** The counts that read git were run again over the rebased range and are unchanged: 3 commits; `style.css` +11/−2 and `view-strip-narrow.test.ts` +380/−0. **The suite's totals are not unchanged, since #128's and #129's files are in the tree now.** Run on 2026-10-04 on the rebased code with this entry's first rebased version, from `web/`, each exit 0: `pnpm exec biome ci --error-on-warnings` (343 files), `pnpm run typecheck`, `pnpm run test:coverage` under the lock and the cap (224 files, 2,114 tests; statements 97.49, branches 91.5, functions 98.36, lines 98.85), `pnpm run build:app`, and `view-strip-narrow.test.ts` alone under `-p CPUQuota=25%`, 6 of 6, its slowest case 791 ms; and the eight hygiene scans from the root, `--self-test` then alone, 16 of 16. Where VERIFICATION above gives 339 files, and 220 files and 2,083 tests, those are the tree before the rebase. The image was built from that version and run: healthy after 4 polls, `/` and its four assets 200, 7 wasm assets; its stylesheet asset has the hashed name the build before the rebase had, and its script asset a new one, since #129's code is in it.
+
+#### `+ view` TAKES AN EQUAL SHARE OF THE FOCUSED VIEW'S ROW, AND IN TILES NO ADD MAKES A VIEW, OR LEAVES ONE IT SHRINKS, UNDER 160 PX WIDE, NOR A SPLIT DOWN A HALF UNDER 160 PX TALL: EACH PRESS HALVED THE VIEW THE LAST ONE MADE, TO 0 PX BY THE SIXTH AT 1280, AND NOTHING HELD AN ADD TO THE LOADER'S 64 VIEWS; A REFUSED ADD SAYS WHY ON THE NOTICE LINE AND CHANGES NOTHING, THE STAGE HOLDS THE 64 VIEWS ALONE, AND SIXTEEN BROWSER FILES THAT SPLIT OR ADDED VIEWS AT THE TEST RUNNER'S DEFAULT 414 PX, AND ONE AT 1280, RUN WIDER (2026-10-04, branch `add-view-floor`, `705dd71..6d7542d`, 4 commits, plus this entry)
+
+**A leftover of the 2026-10-01 lanes, and four decisions the user made on 2026-10-04.** `layout.ts`'s `MAX_TREE_LEAVES` doc recorded that `+ view` nested each view it added one split deeper with no limit, so its 61st press in a row from the default made 65 leaves, a layout that falls back to the default at the next load. Measured, the views were unusable long before that.
+
+##### WHAT WAS WRONG
+
+- **Each `+ view` halved the view the last one made.** `pane-host.ts`'s `addView` called `insertBeside(…, 'row', …)`, which wrapped the focused view in a new split at `[0.5, 0.5]`, and a new view takes the focus. One run on `047b0dd` at 1280×800 in Explorer, where `#views` is 1280×725.5 and each default view 634×356.75, pressing `+ view` → `λ · program` seven times with λ focused:
+
+  | press | 1 | 2 | 3 | 4 | 5 | 6 | 7 |
+  |---|---|---|---|---|---|---|---|
+  | the newest view, px | 311 | 149.5 | 68.75 | 28.38 | 8.19 | 0 | 0 |
+
+  The page's `scrollWidth` was 1,284 after the sixth press and 1,296 after the seventh: the dividers alone overran the row.
+- **A split had no floor either.** The `⋯` menu's *split right* and *split down* (`splitLeaf`) halve the view they are chosen on, however small it is.
+- **Nothing held an add to the loader's leaf bound**, so the app could build a layout it would refuse at the next load.
+
+##### WHAT THE USER DECIDED
+
+1. **`+ view` takes an equal share of the focused view's row**: the new view joins the row right after the focused view at `1/(n+1)`, and each of the `n` views already there is multiplied by `n/(n+1)`. Where the focused view's parent is not a row, or it is the whole tree, it is wrapped in a new row at `[0.5, 0.5]`, as before. The source view shrinks too when it shares the row.
+2. **A floor of 160 px**: an add is refused when the view it creates, or any view it shrinks, would be narrower than 160 px.
+3. **A refused add says why on the notice line and adds nothing**, and the controls stay enabled: `no room for another view beside λ · program — close a view or widen the window`, the view named by its selector's title.
+4. **On the Stage the floor does not apply, only the 64-view bound** (decided after the first review): a view added there is a tab, and nothing on screen shrinks. Switching from the Stage to tiles can then show views under 160 px, which the user accepted.
+
+**A split down is held to height as well** — the controller's choice: it is the one add that makes a view shorter. The controller's brief said a split is held "along the axis it divides", which dropped the user's width rule for a split down until the re-review found it (THE REVIEWS).
+
+##### WHAT CHANGED
+
+- **`insertBeside` takes the equal share** (`layout.ts`). A private `insert` holds its body and `splitLeaf`'s, so **a split still halves** the view it is chosen on: a split is that view in two.
+- **`addRefusal` decides in tiles, before anything is recorded.** It builds the add with the caller's own `insertBeside` or `splitLeaf` call, under an id the tree does not hold, works out every view's box before and after with `leafExtents`, and answers `'narrow'` when the new view, or any view it made narrower, comes out under `MIN_VIEW_PX` (160) wide — whatever the add divides — and, for a split down, `'short'` when a half comes out under it tall. A view already under the floor that the add leaves alone does not count.
+- **The words name the axis that ran out** (`main.ts`'s `refused`): `no room to split λ · program — close a view or widen the window` for a split refused as narrow, *split down* of an already narrow view included, and `… or make the window taller` for one refused as short. Width is asked first, so a split down short of both reads as narrow.
+- **The sizes come from the tree, not the page.** `leafExtents` is the stylesheet's flex arithmetic: each child gets its size's share of its split's extent less that split's dividers, `DIVIDER_PX` (12) each, a constant in `layout-view.ts`. The one measurement is `#views`' box, in `pane-host.ts`'s `admit`; for 1280×725.5 the model gives each default view 634×356.75, the measured figure, and the first review's probe found it within 0.012 px of the page in nested layouts.
+- **The leaf bound comes first, in tiles and on the Stage**: `holdsMostLeaves` answers for a tree already holding `MAX_TREE_LEAVES`, now exported, and `main.ts` says `the workspace holds 64 views, the most it can keep — close one to add another` from that constant. `MAX_TREE_DEPTH` cannot be reached by an add: 64 leaves make at most 63 splits on a path.
+- **On the Stage `admit` asks `holdsMostLeaves` alone**, so `+ view` there is never refused for room.
+- **A refusal changes nothing but the notice line**: the tree, storage, the focused view and the leaf counter are as they were, and no `view added` is said. `addView` returns `null` for it.
+- **A refused split puts the focus back in its view.** With real clicks the focus fell to `<body>`: the pair it was on leaves with the menu, and `hidePopover()` gave it to nothing. A successful split never showed this, since it ends in `focusPane(created)`. A refused `+ view` leaves the focus where the closing menu puts it, on `+ view` (measured). `view-header.ts`'s `viewMenu` doc, which said every item returns the focus to `⋯`, now says the split's pair is where that fails.
+
+##### THE STAGE
+
+The Stage mounts the focused view's host alone under its tab strip, in `#views`, and every other host is off the page, measuring 0. Before the user's fourth decision the floor was worked out there on the tiled area, `#views`, 992 px wide at 1280×800 under the inspector the Stage preset opens (288 px), so the fourth view beside λ (155.3 px by arithmetic) was refused. Now nothing is refused there for room: from the default the Stage added that fourth view, and at 390×844, where `#views` is 102 px and every tile would be under the floor, it added another tab (light and dark, screenshots in the lane's record). The 65th view is still refused there in the bound's words.
+
+##### WHAT A USER SEES
+
+- At 1280×800 from the default with λ focused, five presses give λ's row 3, 4, 5, 6 and 7 views of 418.67, 311, 246.4, 203.33 and 172.57 px (each view within 0.02 px of the figure), and `scrollWidth` stays 1,280. The sixth, at 149.5 each, is refused with the words above.
+- At 390×844 in Explorer each default view is 189 px and the first press is refused; the notice wraps to two lines, 48 px tall.
+
+##### THE TESTS
+
+- **`add-view-floor.test.ts`, new, 9 cases with real clicks**, at 1280×800 but for one step at 390. It opens on a stored layout of 64 views (λ across the top, 63 asm views in one row below) for the bound's case, refused from `+ view`, from a split and on the Stage; then each case starts at 1280×800 under its own preset with *reset preset*, so a failure does not carry into the next: five presses at equal widths within 1 px, all at least 160, with every divider measured against `DIVIDER_PX`; the sixth refused; *split right* refused on a 311 px view, and a 634 px view still split into two of 311; *split down* refused on a view about 165 px tall and 634 wide; `+ view` refused beside λ dragged by keyboard to 177.52 px, where the new view would have 418.67 and λ would go to 117.23; `+ view` refused beside λ when source, dragged to 177.52, would go to 117.23; *split down* refused, in the width's words, on λ dragged to 152.16 px wide; and the Stage adding past the floor at 1280 and at 390. Every refusal is checked for its words on the line, a changed live region in the same words, the views, their widths, the stored workspace and the focused view unchanged, `+ view` enabled and the focus not on `<body>`. Each case asserts its preset and the focused view's title before its gesture, and the size the gesture turns on — a view's width or height, or `#views`' width for the sixth press and the Stage; the bound's case its 64 views too.
+- **`layout.test.ts`: 15 new node cases.** The equal share, the proportions kept, the sizes summing to 1 within the validator's `SIZE_EPSILON` (now exported), five presses as one row, and both wraps; `leafExtents` against the measured default; the floor for `+ view`, for *split right* (refused at 331.9 px, allowed at 332), *split down* on height and *split right* on width, a split down of a view already 152.16 px wide (`'narrow'` where its halves are 172.375 tall), the view an add is beside shrinking (`[0.85, 0.15]`: 190.2 px to 125.6) and another view in the row shrinking (`[0.15, 0.85]`, the same), a narrow view the add leaves alone, the bound before room, and no argument mutated.
+- **RED, against `main`'s behaviour with only the three constants the tests import added**, on the browser file's first six cases: each failed on its property, five as `expected 'view added — λ · program' to be` their refusal's words, the share case as `press 1: source: expected 215.33333333333331 to be less than 1`. Of the first 12 node cases, 3 failed on the share, 7 on `addRefusal is not a function` or `leafExtents is not a function`, and the 2 wraps passed, being what `main` already did. The reviews' additions were not run against `main`: they need `addRefusal`, or assert what `main` already did on the Stage; each is shown able to fail by its sabotage below.
+- **One assertion of the old placement changed**: `layout.test.ts`'s bound case read seven presses as `{ depth: 9, leaves: 11 }` and sixty as 62 deep; it reads 2 deep for both now, and that `addRefusal` answers `'full'` to the 61st press at any width. Four sentences saying `+ view` nests (`layout.test.ts`'s `trailing`, `workspace-bound.test.ts`'s doc, `share-open-deep.test.ts`'s and `share-link.test.ts`'s `deepTree`/`trailing`) now say it did until 2026-10-04.
+
+##### THE TESTS THAT RAN AT 414 PX
+
+**A finding, not a placement assertion.** Most of the browser tier runs at Vitest's default 414×896, where each default view is 201 px wide: splitting one, or a third view in its row, is refused now. The brief's grep, `grep -rln -E "new-view|split right|split down|splitRow|splitColumn|insertBeside|splitLeaf" web/tests` on `047b0dd`'s tree, names 16 browser test files, `harness.ts` and 3 node files; 12 more browser files split through `.view-split` and were missed by it. Baselined untouched on `main`, the 16 passed 136 of 136 and the 12 passed 72 of 72. With the change and nothing else, 10 of the 16 failed (23 tests, and `share-open-hashchange.test.ts`'s 12 skipped behind its `beforeAll`) and 7 of the 12 (23 tests). Sixteen of those 17 ran at 414 and now set a viewport before their mount: 1280×896 for 12; 720×896 for `tm-reduced-buffer`, whose one split needs 676 and gives 171 px halves at 720 (the re-review's choice, below); 1600×896 for `layout-restore` (it splits a view that is half of a split: two of 149.5 px at 1280, 189.5 at 1600) and `share-open-hashchange` (a third view in half of a link's row beside the Debugger preset's inspector, refused at 1280); and 3000×896 for `tm-pane-follows-session`, which splits `tm-0` three times (176.25 px at 3000, under the floor below 2,740). The seventeenth, `copy-editor-mount`, ran at 1280×1600 and splits a split; it is at 1600×1600. Each keeps its height, and nothing else in them changed.
+
+##### THE SIBLING SEARCH
+
+- **Every add goes through `admit`.** `grep -n -E "setTree\(|tree = " web/src/main.ts web/src/pane-host.ts` lists 11 lines: the setter's declaration and 10 writers, of which three put a leaf in — `split`'s two calls of `splitLeaf` and `addView`'s `insertBeside` — each after `admit`. The other seven close, resize, change a kind, reset, open a link, or are the setter itself.
+- **Every place a view is said to nest**: `git grep -n -i -E "nests|split deeper|61st" 047b0dd -- web/src web/tests` names, among unrelated hits, `layout.ts`'s `MAX_TREE_LEAVES` doc, `layout.test.ts`'s bound case and `trailing`, `share-open-deep.test.ts` and `share-link.test.ts`, and `workspace-bound.test.ts` said it in other words. Each now says it did until 2026-10-04. `share-link.test.ts`'s was missed until the first fix round ran this grep (`2078eb1`): the first sweep, a different pattern, had cut its output at 30 lines.
+- **Every browser file that adds a view** — the brief's grep, and `grep -rln -E "view-split|new-view|data-same|splitRow|splitColumn" web/tests/browser`, which found the 12 the brief's grep missed — was run before and after, above.
+- **Every doc that said `admit` works the Stage out too**: `grep -n -i stage web/src/layout.ts web/src/layout-view.ts web/src/pane-host.ts` found `DIVIDER_PX`'s and `leafExtents`' docs still saying it after the Stage exemption; both were rewritten in `6d7542d`.
+
+##### PROVING IT
+
+**Fourteen sabotages at `6d7542d`**, each applied by a script to a saved copy, run against `layout.test.ts` (85 cases) and `add-view-floor.test.ts` (9), restored from the copy and compared with `cmp`, 14 of 14 identical and `git status` showing nothing but this entry after; and the re-review's two, regenerated on the final file as copies with a `vi.mock`:
+
+| | sabotage | node | browser | the browser failures |
+|---|---|---|---|---|
+| S1 | no floor (`under` never true) | 6 | 6 | the sixth press, split right, both split downs and both shrink cases, each `expected 'view added — λ · program' to be` its refusal's words |
+| S2 | `+ view` halves (`share` false) | 9 | 4 | `press 1: source: expected 215.33333333333331 to be less than 1`; the sixth press and split right, `press 2: expected 'no room for another view beside λ · p…' to be 'view added — λ · program'`; the other-view case, refused no longer |
+| S3 | in tiles, each view's width measured on the page, scaled by its share | 0 | 0 | none: it does not fire (THE REVIEWS) |
+| S4 | no leaf bound (`holdsMostLeaves` false) | 2 | 1 | `expected 'view added — λ · program' to be 'the workspace holds 64 views, the mos…'` |
+| S5 | a split down not held to height | 0 | 1 | the shorter-than-332 case, `… to be 'no room to split λ · program — close …'` |
+| S6 | no `focusPane` on a refused split | 0 | 4 | `the focus fell to <body>`, in every case with a refused split |
+| S7 | `DIVIDER_PX` 4 | 6 | 1 | `expected 12 to be 4`, the stylesheet's divider |
+| S8 | the floor applied on the Stage | 0 | 1 | the Stage case, `press 4: expected 'no room for another view beside λ · p…' to be 'view added — λ · program'` |
+| S9 | only the new view counted (the first review's) | 2 | 2 | both shrink cases, `expected 'view added — λ · program' to be 'no room for another view beside λ · p…'` |
+| S10 | the bound's words not said for a split (the first review's) | 0 | 1 | `the refusal said nothing to the live region: expected 'the workspace holds 64 views, the mos…' not to be 'the workspace holds 64 views, the mos…'` |
+| S11 | width held only along the axis divided (the re-review's I-1) | 1 | 1 | the narrow split down, `expected 'view added — λ · program' to be 'no room to split λ · program — close …'`; node `expected null to be 'narrow'` |
+| S12 | only the view the add is beside, and the new one, counted | 1 | 1 | the other-view case, `expected 'view added — λ · program' to be 'no room for another view beside λ · p…'` |
+| S13 | a refusal that still builds the view | 0 | 7 | every refusal, `expected { ids: [ 'source', …(9) ], …(4) } to deeply equal { ids: [ 'source', …(8) ], …(4) }` and its like |
+| S14 | a refusal that disables `+ view` | 0 | 7 | the first refusal for room, `expected true to be false`; the cases after it, a click on the disabled `+ view` timing out |
+| SB1 | the Stage's `holdsMostLeaves` never true (the re-review's) | — | 1 | the bound's case, `expected 'view added — λ · program' to be 'the workspace holds 64 views, the mos…'`; 8 of 9 pass, where 6 of 7 failed before each case chose its own preset |
+| SB2 | the Stage refusing when its one tab is under the floor (the re-review's) | — | 1 | the Stage case, `press at 390: expected 'the workspace holds 64 views, the mos…' to be 'view added — λ · program'` |
+
+A sabotage stops at the first hard assertion. S13 shows the unchanged-state check able to fail and S14 the `+ view` check; that a refusal mints no leaf id is not observable to these tests, and is read from `addRefusal`.
+
+**At `CPUQuota=25%`, at `6d7542d`**, `add-view-floor.test.ts` passed 9 of 9, its slowest the bound's case at 8,610 ms; `tm-reduced-buffer.test.ts`, at 720×896, 5 of 5, its slowest 19,005 ms with its hooks; and `layout.test.ts` 85 of 85, its slowest 88 ms. In the first fix round, at `f31f293`, 18 of the 20 browser files the branch changes passed alone; `tm-reduced-buffer` (at 1280) and `tm-pane-follows-session` each failed on a 10 s wait for a TM value run, and the second then passed 3 of 3. **The re-review ran `tm-reduced-buffer` six times each at 1280, at 676 and at `main`'s 414, interleaved**: of 48 recording waits each, 2 timed out at 1280, 1 at 676 and 0 at 414; the waits after the first averaged 6,835, 6,219 and 5,980 ms; and the cold first recording took 7.6 to 10.2 s at every width, `main`'s included.
+
+**Checked by hand**, in throwaway tests copied into `web/tests/browser/`, run and deleted, with screenshots in the lane's record: after presses 1, 3 and 5 and of the refusal at 1280, of the refusal at 390, and of the Stage adding a tab at 390, light and dark. The runner scales each capture to 720 px tall.
+
+##### THE REVIEWS
+
+**A whole-branch review of `98576e4`**: no Critical, 1 Important and 9 Minor, all taken in `f31f293` and the entry; and the user's fourth decision, made on this entry's own first version, whose WHAT THIS DID NOT CLOSE recorded that the Stage refused every add at phone widths.
+
+- **Important: nothing tested the "or any view it shrinks" half of decision 2.** Counting only the new view passed 82 of 82 node cases and 6 of 6 browser cases. A node case and a browser case now hold it, and that sabotage (S9) fails both.
+- **Minor 1**: the bound case's second refusal could not tell its words from silence, since they were on the line already; a refusal now has to change the live region, and S10 fails.
+- **Minor 2**: three assertions held only the test's own arithmetic; removed. **Minor 3**: the heading said seventeen files ran at 414; one ran at 1280. **Minor 4**: the split cases did not assert all their preconditions. **Minor 5**: the brief's grep is quoted. **Minor 6**: THE SIBLING SEARCH and this section.
+- **Minor 7**: three leftovers — the Debugger preset at phone widths, a refused add replacing a pending *undo* notice, and the Important if it stayed unfixed (it was fixed). The controller added `tm-pane-follows-session`'s thin margin at 25 %.
+- **Minor 8**: doc claims that did not match the code, in `MIN_VIEW_PX`, `MAX_TREE_LEAVES`, `insert`, `splitLeaf`, `viewMenu`, `workspace-bound.test.ts` and the 1600 px viewport comments. **Minor 9**: the coverage figures are one run each, and the review's is quoted beside them.
+- **Sabotage (iii), sizes measured from the DOM, no longer has a separate effect**: only the Stage told it from the arithmetic. Applied to tiles alone (S3) it passes everything; the Stage's property is held by S8.
+
+**A re-review of the fix round**, `f31f293` and `2078eb1` with that round's entry (since replaced by this one): 1 Important and 9 Minor, all taken in `6d7542d` and this entry.
+
+- **Important: a split down could make a view narrower than 160 px.** `addRefusal` checked only the axis the add divides, so a view already under 160 px wide, split down, made a second one as narrow: λ dragged to 152.16 px wide gave two of 152.16 × 172.375, unrefused. That broke the user's decision 2, and the Stage made it easy to reach: eight tabs added on the Stage at 1280, then Explorer, gives ten views of 117 px, any of which could be split down. **The controller's brief caused it**: "the floor applies to splits too, along the axis the split divides" replaced the width rule for a split down where it should have added height to it. Width is now held for every add and height for a split down too; S11, the old axis-only check, fails the node case and the browser case added for it.
+- **Minor 1**: `DIVIDER_PX`'s and `leafExtents`' docs still said the arithmetic served the Stage. **Minor 2**: the bound case went to the Stage and came back only at its end, so a failure there failed the rest of the file (the re-review's SB1: 6 of 7); each case now starts from its own preset at 1280×800. **Minor 3**: three precondition asserts repeated what the step before them had just waited for, the Stage steps did not assert the title or, at 390, the preset, and THE TESTS said every case asserted its view count. **Minor 4**: only the view an add is beside was shown able to refuse it; another view in the row now is, in both tiers, and S12 fails both.
+- **Minor 5**: this section misattributed two things, corrected above. **Minor 6**: WHAT THIS DID NOT CLOSE named only one file's 25 % timeouts, and claimed the width was not the cause on one run per width. **Minor 7**: the round's width experiment ran one TM view at 414 against two at 1280 (the split refused at 414), and counted 2 of 12 against 4 of 15 where like for like is 4 of 12; it is replaced by the re-review's runs below, and `tm-reduced-buffer` runs at 720×896 on its advice.
+- **Minor 8: two commit subjects say more than is true, and stay**, since rewording them would take a rebase. `98576e4`'s "no add makes a view narrower than 160 px" is false on the Stage (the user's fourth decision) and was false for a split down of a narrow view until `6d7542d`. `f31f293`'s "a view an add shrinks counts as the one it makes" describes what `98576e4` already did; `f31f293` added the tests that hold it.
+- **Minor 9**: a refusal's later checks had not been shown able to fail; S13 and S14 now show two of them.
+
+##### WHAT THIS DID NOT CLOSE
+
+- **The floor gates the add gestures in tiles only.** A divider drag keeps `MIN_PANE_FRACTION`; a window made smaller, and a switch that opens the inspector, still show views under it: seven views of 172.57 px in Explorer measured 131.42 to 131.44 px under the Debugger preset, whose inspector takes 288 px. **Switching from the Stage to tiles** shows whatever the Stage added, under the floor or not (the user's fourth decision). A stored layout, a link's layout and an open's *undo* show what they carry.
+- **The inspector's cost at phone widths.** It keeps 288 px, so `#views` measured 126 px at 414 and 102 at 390 under the Debugger preset, each default tile 57 and 45 px wide, and every add there is refused: `+ view` in the floor's width words and *split down* in its words, both measured at both widths. On the Stage at 390 the tab is added, but the tab strip, 102 px wide, shows `source` and part of the next tab, and the new one is out of sight (the screenshots). This branch does not change the inspector.
+- **The notice line takes 28.5 px of height while it is up.** A split down is worked out on `#views` as it is when chosen, and the notice it raises shrinks the result: at 1280×775 with no notice up `#views` was 700.5 tall, the split passed, and both halves measured 159 px for as long as the notice held the line, then 166.13.
+- **A refused add replaces a pending *undo* notice**, as a successful add already did (`notice.ts`'s `notify`, read, not measured).
+- **A view at the floor still clips its header**: at 172.57 px a λ view's step controls are cut at the speed select (the press-5 screenshots).
+- **The leaf counter's bound is not the add's**: a stored tree holding `pane-1000000000` makes the next view `pane-1000000001`, which the loader refuses (`MAX_LEAF_NUMBER`); and that a refusal mints no leaf id is read from `addRefusal`, not shown by a test.
+- **Two TM files time out at 25 % on their value runs' 10 s waits.** `tm-reduced-buffer.test.ts`: its cold first recording took 7.6 to 10.2 s at every width the re-review ran, `main`'s 414 included, which is CI's known slow-runner flake on `main`; this lane's own 25 % run at 1280 timed out two cases once. It runs at 720 now. `tm-pane-follows-session.test.ts`: its value visit timed out once in the first review's run and once in this lane's, 1 of 4 runs that round, at 3000 px, where the re-review measured no cost from the width.
+- **The browser tier's default is still 414 px**, so a new test that adds views has to set a viewport as these 17 do.
+
+##### VERIFICATION
+
+Run on 2026-10-04 in the lane's worktree at `6d7542d`; `replay3.sh` in the lane's record ran the sabotages, the re-review's two, the quota runs and `test:coverage` at that commit. Every Vitest browser run was under `flock` on the lanes' shared lock and `systemd-run --user --scope -q -p MemoryMax=16G -p MemorySwapMax=0`, plus `-p CPUQuota=25%` for the quota runs.
+
+```
+pnpm exec biome ci --error-on-warnings   → exit 0, 339 files
+pnpm run typecheck                       → exit 0
+pnpm run test:coverage                   → exit 0, 220 files / 2,101 tests; 97.45 / 91.44 / 98.44 / 98.81 against 95 / 89 / 97 / 97
+pnpm run build:app                       → exit 0
+scripts/check-{text-bytes,citations,attributions,doc-figures,shared-docs,colours,grammar-wasm,lua}.sh, --self-test then alone, from the root → 16 of 16 exit 0
+```
+
+The coverage figures are one run each. At `98576e4` the first review's run read 97.43 / 91.43 / 98.37 / 98.8 where this lane's read 97.5 / 91.47 / 98.37 / 98.86, on the same 220 files and 2,095 tests. No Rust changed, so no Rust gate ran; the image was not built here.
+
+**Every count this entry quotes, with what produces it:**
+
+| Value | What | Produced by |
+|---|---|---|
+| 4; 0 | commits in the range; those touching `docs/` | `git log --oneline 705dd71..6d7542d \| wc -l`; the same with `-- docs` |
+| 1280×725.5; 634×356.75; 311 … 0; 1,284, 1,296; 288; 992 | `main`'s geometry | `probe-main-1.log`, a throwaway test on `047b0dd`'s tree |
+| 160; 64; 12; 0.02 | the floor; the leaf bound; a divider; a key step | `MIN_VIEW_PX` and `MAX_TREE_LEAVES` in `web/src/layout.ts`; `DIVIDER_PX` and `KEY_STEP` in `web/src/layout-view.ts` |
+| 155.3; 149.5; 176.25, 2,740; 676, 171; 117.23; 0.14, 177.52; 0.12, 152.16; 720.11; 190.2, 125.6, 418.67 | shares | `(w − 12 × (n − 1)) / n`, and `(v − 12) / 2` for each halving from `(w − 12) / 2`; a view at `0.5 ∓ k × 0.02` of 1,268; the node cases' `[0.85, 0.15]` and `[0.15, 0.85]` of 1,268, then two thirds of each of 1,256 |
+| 152.16 × 172.375 | I-1's halves | `rereview/probe-splitdown-width-numbers.log`; `layout.test.ts`'s split-down case |
+| 418.67, 311, 246.4, 203.33, 172.57; 0.02; 189; 48 | the presses, here | `shots.log` and `edges.log` |
+| 102; 126, 57; 45 | the Stage and the Debugger at phone widths | `fix/probe.log` |
+| 0.012 | the first review's model against the page | `review/probe-geometry-2.log`, its worst 0.01125 |
+| 9; 15 and 1 | the browser cases; the node cases added and changed | `r3/q25-add-view-floor.log`; `git diff 705dd71..6d7542d -- web/tests/node/layout.test.ts \| grep -cE "^\+\s+it\("`, 16, and the same with `^-`, 1 |
+| 6 of 6; 3, 7, 2 | RED | `red-browser-2.log`; `red-node.log` |
+| 20: 16, 1, 3 | the brief's grep on `047b0dd` | `git grep -l -E "new-view\|split right\|split down\|splitRow\|splitColumn\|insertBeside\|splitLeaf" 047b0dd -- web/tests` |
+| 12 | browser files it missed | `git grep -l -E "view-split\|new-view\|data-same\|splitRow\|splitColumn" 047b0dd -- web/tests/browser`, less the brief's list |
+| 16, 136; 12, 72 | the baselines | `baseline-browser.log`; `baseline-browser-extra.log`, run with the work stashed |
+| 10, 23, 12; 7, 23 | the files that failed at 414 | `green-baselined-browser-1.log`; `green-browser-extra-1.log` |
+| 12; 1; 2; 1; 1 | the viewports | `git grep -l "viewport(1280, 896)" 6d7542d -- web/tests/browser \| wc -l`, and the same for `720, 896`, `1600, 896`, `1600, 1600` and `3000, 896` |
+| 11; 3 | the tree's writers; those that add a leaf | `grep -n -E "setTree\(\|tree = " web/src/main.ts web/src/pane-host.ts` |
+| the sabotage table; 85, 9; 14 of 14 | the replay | `replay3-summary.txt`, `sabotage/S*.{node,browser}.log`, `r3/sb{1,2}.log` |
+| 82 of 82, 6 of 6; 6 of 7 | the first review's S1, and the re-review's SB1, before the fix round's and this round's tests | `review/sab/S1-node.log`, `review/sab/S1-browser.log`; `rereview/sab1.log` |
+| 9 of 9, 8,610; 5 of 5, 19,005; 85 of 85, 88 | this round's quota runs | `r3/q25-add-view-floor.log`, `r3/q25-tm-reduced-buffer.log`, `r3/q25-layout.log` |
+| 18 of 20; 3 of 3 | the first fix round's quota runs | `replay2-summary.txt`; `fix/width/tmfollow-3000-*.log` |
+| 2, 1, 0 of 48; 6,835, 6,219, 5,980; 7.6 to 10.2 s | the re-review's interleaved runs | `rereview/trb-width-parsed.txt` |
+| 131.42, 131.44; 28.5; 700.5; 159; 166.13 | the edges | `edges.log` |
+| 339; 220, 2,101; the four figures; 16 | the gates | the block above; `r3/gate-biome.log`; `r3/coverage.log`; `r3/gate-scan-*.log` |
+| 97.43 / 91.43 / 98.37 / 98.8; 97.5 / 91.47 / 98.37 / 98.86; 2,095 | coverage at `98576e4` | `review/coverage.log`; `coverage-final.log` |
+| 95 / 89 / 97 / 97 | the coverage floors | `thresholds` in `web/vite.config.ts` |
+
+**REBASED ONTO `705dd71` AFTER #128, #129 AND #130, AND THE SHAs ABOVE ARE THE REBASED ONES**, except `047b0dd`, which stands wherever it names the `main` the branch was built, measured and sabotaged on, and in the brief's grep, which ran there. #128 (two browser files for a link pasted with an encoding this build lacks), #129 (the readout says when a machine leg's history filled) and #130 (Explorer's step strip wraps inside its view) merged first, and their entries sit above this one. The rebase conflicted only in this file, where each branch appended an entry, and the resolution rebuilt it as `705dd71`'s roadmap followed by this entry. No other file conflicted. Each rebased commit has the same patch id and subject as the commit it replaces, and the rebased code head's files outside this file are the old code head's, `f2f966e`'s, except the twelve #128, #129 and #130 changed, which are `705dd71`'s. The commits map `29760c2` → `98576e4`, `f3f81ee` → `f31f293`, `352631b` → `2078eb1` and `f2f966e` → `6d7542d`, and this entry's commit, `f4b3055`, → this one.
+
+**Every figure above was measured before the rebase, on the commits these replace.** The counts that read git or the tree were run again over the rebased range and are unchanged: 4 commits, none touching `docs/`; 27 files, 1,023 insertions and 49 deletions; 16 `it(` lines added to `layout.test.ts` and 1 removed; the viewports, 12, 1, 2, 1 and 1; the tree's 11 writers; the brief's grep, 20. **The suite's totals are not unchanged, since #128's, #129's and #130's files are in the tree now**, and none of their new browser files adds a view or splits one. Run on 2026-10-05 on the rebased code with this entry's first rebased version, from `web/`, each exit 0: `pnpm exec biome ci --error-on-warnings` (344 files), `pnpm run typecheck`, `pnpm run test:coverage` under the lock and the cap (225 files, 2,138 tests; statements 97.44, branches 91.52, functions 98.38, lines 98.8), `pnpm run build:app`, and `add-view-floor.test.ts` alone under `-p CPUQuota=25%`, 9 of 9, its slowest case the 64-view one at 10,719 ms, where it was 8,610 ms before the rebase, against Vitest's 15,000; and the eight hygiene scans from the root, `--self-test` then alone, 16 of 16. Where VERIFICATION above gives 339 files, and 220 files and 2,101 tests, those are the tree before the rebase. The image was built from that version and run: healthy after 4 polls, `/` and its four assets 200, 7 wasm assets.

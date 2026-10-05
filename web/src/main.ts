@@ -45,6 +45,7 @@ import {
   type LayoutNode,
   leafNumber,
   leaves,
+  MAX_TREE_LEAVES,
   SOURCE_LEAF,
 } from './layout'
 import { retitleStage } from './layout-view'
@@ -60,7 +61,7 @@ import { createNotices, type Notice, type NoticeAction } from './notice'
 import { createOutlinePanel } from './outline'
 import { paletteDeclarations } from './palettes'
 import type { PaneChoice } from './pane-chrome'
-import { createPaneHost, type LayoutEvent } from './pane-host'
+import { type AddRefused, createPaneHost, type LayoutEvent } from './pane-host'
 import { createPanel } from './panel'
 import { type LeafId, legOfPane, PaneCollection } from './panes'
 import { PROGRAM_STORAGE_KEY, parseProgram, type StoredProgram, serializeProgram } from './program-store'
@@ -990,6 +991,23 @@ async function main(): Promise<EditorView> {
     else if (e.kind === 'closed') notices.notify(`view closed — ${say(e.showed)}`)
     else notices.notify(`view now shows ${say(e.shows)}`)
   }
+  /**
+   * AN ADD REFUSED, SAID AS A NOTICE AND NOTHING ELSE (the user's decision, 2026-10-04): what stopped it and what would
+   * let it through, naming the view by its title as its selector spells it (`viewTitle`, declared below and read only
+   * at a click). The controls stay enabled — a window widened or a view closed is the next try's room.
+   */
+  const refused = (r: AddRefused): void => {
+    if (r.why === 'full') {
+      notices.notify(`the workspace holds ${MAX_TREE_LEAVES} views, the most it can keep — close one to add another`)
+      return
+    }
+    const title = viewTitle(r.leaf)
+    // THE REMEDY NAMES THE AXIS THAT RAN OUT, NOT THE ONE THE ADD DIVIDES: a split down of a view under 160 px wide is
+    // refused as narrow, and only a wider window lets it through.
+    const remedy = r.why === 'short' ? 'make the window taller' : 'widen the window'
+    const what = r.gesture === 'view' ? `no room for another view beside ${title}` : `no room to split ${title}`
+    notices.notify(`${what} — close a view or ${remedy}`)
+  }
   const sourceMenu = viewMenu(sourceHeader.actions, {
     // The source view always has its editor, so unlike a copy's this never comes and goes —
     // `setFormattable(true)` is set once below rather than tracked.
@@ -1334,6 +1352,7 @@ async function main(): Promise<EditorView> {
       ws = { ...ws, tmDisplay: withTmDisplay(ws.tmDisplay, leaf, d) }
     },
     layoutChanged,
+    refused,
     draw: () => draw(),
     // THE ONE SESSION QUESTION `pane-host.ts` ASKS, ANSWERED HERE BECAUSE THIS FILE IS WHERE THE REGISTRY
     // IS — that module's own doc argues why it takes this rather than the registry it would otherwise

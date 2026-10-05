@@ -117,7 +117,9 @@ async function orphanCopy(leaf: string, leg: 'asm' | 'tm'): Promise<string> {
 const sessionOf = (key: string) => key.slice(key.indexOf(':') + 1)
 
 beforeAll(async () => {
-  await page.viewport(1280, 1600)
+  // WIDE ENOUGH FOR A SPLIT OF A SPLIT: the app refuses an add that leaves a view under `MIN_VIEW_PX` (`layout.ts`),
+  // and at 1280 the second split of a default view would leave two of 149.5 px.
+  await page.viewport(1600, 1600)
   document.body.innerHTML = SHELL
   view = await (await import('../../src/main')).ready
   view.dispatch({ changes: { from: 0, to: view.state.doc.length, insert: SAMPLE } })
