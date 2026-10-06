@@ -376,7 +376,8 @@ describe('+ view and the splits, at 1280×800', () => {
    * **ON THE STAGE ONLY THE LEAF BOUND HOLDS** (the user's decision, 2026-10-04): a view added there is a tab, and
    * nothing on screen shrinks. From the default at 1280, where the Stage's inspector leaves `#views` 992 px wide, the
    * fourth press is one tiles would refuse there (155.3 px each, by arithmetic) and the Stage adds it; at 390, where
-   * `#views` is 102 px and every tile would be under the floor, a press adds another tab.
+   * the inspector stacks under the views and `#views` is 390 px wide, a press tiles would refuse there too (seven views
+   * in λ's row, 45.4 px each, by arithmetic) adds another tab.
    */
   it('adds on the Stage past the floor tiles would hold, at 1280 and at 390', async () => {
     await resetPreset('stage')
@@ -391,7 +392,7 @@ describe('+ view and the splits, at 1280×800', () => {
     }
 
     await page.viewport(390, 844)
-    await until(() => width(views()) === 102, '#views at 390')
+    await until(() => width(views()) === 390, '#views at 390')
     expect(preset()).toBe('Stage')
     expect(tabs().length).toBe(8)
     await plusView()

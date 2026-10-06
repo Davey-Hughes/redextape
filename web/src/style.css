@@ -1950,6 +1950,47 @@ main {
   margin-inline-start: 0;
   padding: var(--space-1) 0 0;
 }
+/* **AT A PHONE'S WIDTH THE INSPECTOR STACKS UNDER THE VIEWS** (the user's decisions, 2026-10-05), at the header's own
+   breakpoint, and only while it is on the page: `:has()` leaves every layout without it, Explorer's or the Stage's with
+   the strip readout, as it was. Side by side the inspector kept its 18rem at every width, so at 390px in Debugger
+   `#views` was 102px wide and each default view 45px, under the 160px floor every add is held to. Here `main` is a
+   column: the views full width on top, the inspector full width under them. The DOM order is unchanged, so the
+   keyboard reaches the inspector after the views, as it does side by side. **ONE 1PX RULE BETWEEN THEM, THE HEADER'S**:
+   `.panel-header`'s own top border draws it, and the inspector draws no border of its own, which made the line 2px.
+
+   `max-height: 40%` IS THE CAP: `flex: none` sizes the inspector to what it holds, which closed is its header and open
+   at 390 by 1600 was 35.1% of `main`, and past the cap its rows scroll inside `.inspector-body`. **`main`'s
+   `flex-basis: 0` IS WHAT LETS THE 40% RESOLVE.** With `main`'s basis left `auto` the percentage resolved against
+   nothing, measured: an open inspector took 78.6% of `main` at 390 by 844, and at 320 by 568 its 518.75px set `main`'s
+   height and made the page 819px tall in Debugger and 869px on the Stage. With a basis of 0, `main` is what `body` has
+   left over, down to its minimum. `#views` needs nothing here: its `flex: 1 1 auto` takes whatever the inspector, which
+   does not shrink, leaves.
+
+   **`min-height: 15rem`, AND BELOW IT THE PAGE SCROLLS** (the user's decisions, 2026-10-05 and 2026-10-06), for a short
+   page to show more of its views than their headers, and to scroll, as it did side by side. 15rem is 240px. **WITH THE
+   DEFAULT PROGRAM** `main` is 267.63px at 320 by 568 with the preset's notice up, 27.63px over the minimum, so that
+   page is as it was. **NOT WITH EVERY PROGRAM**: the `fact` example's step line makes the step bar 135.38px tall at
+   320px wide, where the default program's is 62.38px, and at 320 by 568 with a notice up `main` is then at the minimum
+   and the page 613px tall, so it scrolls 45px; with the notice gone `main` is 242.63px and the page does not scroll.
+   The user saw those figures and kept 240px. A 200px minimum was weighed and not taken: it shows less on a short page,
+   and measured afterwards it scrolls that page as well, by 5px, `main` having 194.63px there with a notice up. Measured
+   at 320px wide with `main` at 240px: open, the inspector is 96px and the views 144px, so in Debugger each tile is 66px
+   tall and the source view shows a line of its content under its header, while λ's, asm's and TM's headers, on two
+   rows, leave 12.22px and no whole line; on the Stage the shown view has 71px under its header. Closed, the views have
+   212px, and Debugger's four show 3, 1, 1 and 1 lines. With no minimum, at 320 by 320 with the notice gone, a closed
+   inspector was cut to 27.05px and its header ran into the step bar. */
+@media (max-width: 30rem) {
+  main:has(> .inspector:not([hidden])) {
+    flex-direction: column;
+    flex-basis: 0;
+    min-height: 15rem;
+  }
+  .inspector {
+    flex: none;
+    max-height: 40%;
+    border-inline-start: 0;
+  }
+}
 
 /* THE OUTLINE — Plan 7 part 3a. One row per symbol the server reports, in the panel primitive part 1
    built. Nesting is rendered from `data-depth` rather than from markup structure, because the shape the

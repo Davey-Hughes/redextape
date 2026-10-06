@@ -145,6 +145,10 @@ describe('a view narrower than its title', () => {
    * **THE TITLE IS CUT, ON ONE LINE AND INSIDE THE VIEW**, where it used to wrap word by word. The view is made narrower
    * than its title's text by narrowing the page, which is asserted first; the program's view beside it is held to the
    * same rule.
+   *
+   * **320 PX, WHERE IT WAS 480**: at 480 px the Debugger inspector took 288 px beside the views, and each of the two
+   * split views was 39 px wide. It stacks under them there now, and they are 111 px wide, wider than either title (83.25
+   * and 95.77 px), and 88.5 px at 390; at 320 they are 71.
    */
   it('cuts the title with an ellipsis on one line, inside the view', async () => {
     const views = [...document.querySelectorAll<HTMLElement>('.pane[data-kind="asm"]')]
@@ -152,7 +156,7 @@ describe('a view narrower than its title', () => {
     const titled = (v: HTMLElement) => v.querySelector('.view-title-text') as HTMLElement
     // EACH TITLE'S WIDTH ON ONE LINE, READ WHILE THE VIEWS STILL HAVE ROOM FOR IT.
     const whole = views.map((v) => textWidth(titled(v)))
-    await page.viewport(480, 800)
+    await page.viewport(320, 800)
     await until(() => views.every((v, i) => rect(v).width < (whole[i] ?? 0)), 'the page to narrow the views')
     for (const v of views) {
       const text = titled(v)
