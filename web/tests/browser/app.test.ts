@@ -55,6 +55,9 @@ function retype(src: string): void {
   view.dispatch({ changes: { from: 0, to: view.state.doc.length, insert: src } })
 }
 
+/** About half of `BIG`'s TM recording, which stops with its history full at step 78,458. */
+const TM_HALF = 39_000
+
 /**
  * `retype`, but waits for the run it triggers to finish before returning.
  *
@@ -65,10 +68,29 @@ function retype(src: string): void {
  * already filtered by the time this starts polling. Until PR 5b the bump happened 300 ms later,
  * inside `request`, and a stale `result` landing in the gap resolved this against the OLD program —
  * two flakes on 5a-ii traced to exactly that.
+ *
+ * **THREE WAITS: THE TM LEG STARTING TO RECORD, ITS RECORDING HALF WAY, THEN THE RUN'S END.** `BIG`'s run ends only
+ * once its TM leg has recorded a full history, to step 78,458, and as one wait it took 7,583 to 8,601 ms at
+ * `CPUQuota=25%` (2026-10-05), against `until`'s 10 s; as two, the second took up to 7,400 ms. The TM leg records
+ * last, after λ and asm, and its step line reads `…` from its first frames until it stops and counts them, so the first
+ * wait ends where its recording begins and the second at `TM_HALF` steps; for a run with fewer TM frames, each ends at
+ * the result. The compile is claimed synchronously at the dispatch (`compile.ts`'s `schedule`), and a step line
+ * waiting on a compile drops its `…` (`controls.ts`): the first two assertions hold both, so no wait can pass on the
+ * previous program, and the third holds that the line the second wait counts is this run's.
  */
 async function settled(v: EditorView, src: string): Promise<void> {
+  const done = () => document.querySelector<HTMLElement>('#results')?.dataset.state === 'idle' && resultsText() !== ''
+  const tmStep = () => document.querySelector('[data-leaf="tm-0"] .step')?.textContent ?? ''
+  const tmRecorded = () => Number(/of ([\d,]+)/.exec(tmStep())?.[1]?.replaceAll(',', '') ?? 0)
   v.dispatch({ changes: { from: 0, to: v.state.doc.length, insert: src } })
-  await until(() => document.querySelector<HTMLElement>('#results')?.dataset.state === 'idle' && resultsText() !== '')
+  expect(document.querySelector<HTMLElement>('#results')?.dataset.state, 'precondition: the compile is claimed').toBe(
+    'running',
+  )
+  expect(tmStep(), 'precondition: no TM recording under way before the compile').not.toContain('…')
+  await until(() => tmStep().includes('…') || done(), 'the TM leg to start recording, or the run to end')
+  expect(tmStep(), 'precondition: the TM leg is past the recompile').not.toContain('— recompiling')
+  await until(() => tmRecorded() >= TM_HALF || done(), 'the TM leg to be half way to a full history, or the run to end')
+  await until(done, 'the run to end')
 }
 
 describe('the app, end to end', () => {
@@ -156,8 +178,9 @@ describe('the app, end to end', () => {
   })
 
   it('shows the λ refusal, marks where it happened, and still answers for TM', async () => {
-    retype(LAMBDA_DECLINES)
-    await until(() => resultsText().includes('declined'))
+    // THROUGH `settled`, FOR ITS THREE WAITS: this compile's one wait for the word took 7,705 ms at `CPUQuota=15%`.
+    await settled(view, LAMBDA_DECLINES)
+    expect(resultsText()).toContain('declined')
     // Measured, not guessed: this program's mutable capture is resolved as an unbound name during
     // lowering (`LowerError::Unsupported`), not as `LowerError::StatefulClosure` — so the reason reads
     // "the λ backend does not support unbound `n`" rather than anything naming "closure". See

@@ -24375,3 +24375,307 @@ The coverage figures are one run each. At `98576e4` the first review's run read 
 **REBASED ONTO `705dd71` AFTER #128, #129 AND #130, AND THE SHAs ABOVE ARE THE REBASED ONES**, except `047b0dd`, which stands wherever it names the `main` the branch was built, measured and sabotaged on, and in the brief's grep, which ran there. #128 (two browser files for a link pasted with an encoding this build lacks), #129 (the readout says when a machine leg's history filled) and #130 (Explorer's step strip wraps inside its view) merged first, and their entries sit above this one. The rebase conflicted only in this file, where each branch appended an entry, and the resolution rebuilt it as `705dd71`'s roadmap followed by this entry. No other file conflicted. Each rebased commit has the same patch id and subject as the commit it replaces, and the rebased code head's files outside this file are the old code head's, `f2f966e`'s, except the twelve #128, #129 and #130 changed, which are `705dd71`'s. The commits map `29760c2` → `98576e4`, `f3f81ee` → `f31f293`, `352631b` → `2078eb1` and `f2f966e` → `6d7542d`, and this entry's commit, `f4b3055`, → this one.
 
 **Every figure above was measured before the rebase, on the commits these replace.** The counts that read git or the tree were run again over the rebased range and are unchanged: 4 commits, none touching `docs/`; 27 files, 1,023 insertions and 49 deletions; 16 `it(` lines added to `layout.test.ts` and 1 removed; the viewports, 12, 1, 2, 1 and 1; the tree's 11 writers; the brief's grep, 20. **The suite's totals are not unchanged, since #128's, #129's and #130's files are in the tree now**, and none of their new browser files adds a view or splits one. Run on 2026-10-05 on the rebased code with this entry's first rebased version, from `web/`, each exit 0: `pnpm exec biome ci --error-on-warnings` (344 files), `pnpm run typecheck`, `pnpm run test:coverage` under the lock and the cap (225 files, 2,138 tests; statements 97.44, branches 91.52, functions 98.38, lines 98.8), `pnpm run build:app`, and `add-view-floor.test.ts` alone under `-p CPUQuota=25%`, 9 of 9, its slowest case the 64-view one at 10,719 ms, where it was 8,610 ms before the rebase, against Vitest's 15,000; and the eight hygiene scans from the root, `--self-test` then alone, 16 of 16. Where VERIFICATION above gives 339 files, and 220 files and 2,101 tests, those are the tree before the rebase. The image was built from that version and run: healthy after 4 polls, `/` and its four assets 200, 7 wasm assets.
+
+#### A FULL HISTORY EVICTS ITS OLDEST FRAME WITHOUT MOVING THE FRAMES IT KEEPS: `History` SHIFTED BOTH ITS ARRAYS AT EVERY EVICTION, AND DURING ONE *KEEP RECORDING* ON `map and fold` AT A QUARTER OF A CORE THAT WAS 67.9 AND 69.4 % OF THE PAGE'S MAIN THREAD AND NO TIMER RAN FOR UP TO 12.2 s; NOW THE PRESS'S POLLS COME AT MOST 601 ms APART, AND #129'S TWO WAITS THAT PASSED PAST `until`'S 10 s ONLY ON ITS ORDER TAKE 991 TO 2,204 ms; A FIRST TM RECORDING IS A DIFFERENT COST, AND EVERY WAIT ON ONE THAT RAN TO 7 s OR MORE IS SPLIT, IN SEVEN FILES: BY THE USER'S DECISION THE TWO TM FILES' IN TWO, THE BUILD ANSWERING AND THEN THE VALUE, AND BY THE CONTROLLER'S EXTENSION, AFTER THE RE-REVIEW SAW THE SECOND HALVES TIME OUT UNDER LOAD, IN THREE, WITH THE RECORDING'S HALF BETWEEN (2026-10-06, branch `keep-recording-stall`, `53ecbfa..ea52af0`, 8 commits, plus this entry)
+
+**A fix, in `web/` only, to a cost on `main` that #129's entry measured and could not explain** ("A stall measured, not explained"), with the TM files' thin margin #131's entry left open ("Two TM files time out at 25 %") measured beside it, found to be a different cost, and waited on in parts: two by the user's decision, three by the controller's extension of it. There is no spec or plan file; this entry is the design. Code commits: `a53528c`, `History` and its node cases; `e46cc2d`, comments in two browser files and `until`'s doc that said a wait still ran past 10 s; `dcc34f1`, the whole-branch review's seven Minor findings (THE REVIEWS); `587b74a`, the two TM files' first builds as two waits; `df9fbca`, five more files' waits on a first TM recording as two waits; `c88d399`, the re-review's two Important findings and four of its Minor, in the browser files: a third wait at the recording's half, and `tm-scratch-fork`'s source run on its worker's replies; `68a5265`, its Minor in `HISTORY_BYTES`'s doc; `ea52af0`, comments at those waits after the second re-review, and no code.
+
+##### THE STALL, MEASURED
+
+Every run here was a copy of a browser file in `web/tests/browser/`, instrumented and then deleted, or the file itself with `until` instrumented to log every wait, run under the lanes' lock, `systemd-run --user --scope -q -p MemoryMax=16G -p MemorySwapMax=0 -p CPUQuota=25%`, with the load average recorded before each run; the machine was shared with two other lanes and a VM, and the load read 2.04 to 137.88 across the timing runs. The dated figures from 2026-10-05 were taken before a reboot and the 2026-10-06 ones after it. A press is `readout-history-full.test.ts`'s: `map and fold` picked from `examples ▾`, its TM history full at step 69,008, then one *keep recording*, which records 22,777 frames to the halt at 91,785.
+
+- **The poll gap.** In four runs of a copy of `readout-history-full.test.ts` on `53ecbfa`, the longest gap between two polls during the press was 7,013, 7,896, 10,005 and 12,200 ms, and its wait for the recording to be half way to the halt took 7,013, 7,896, 15,109 and 12,200 ms. In three of a copy of `readout-history-held.test.ts`, whose *keep recording* is on the asm leg of `sum_to(10000)` under `unary`, the middle wait took 5,400, 17,306 and 17,608 ms.
+- **Where the main thread's time went.** A CPU profile of the page through `cdp()`'s `Profiler`, sampled every 500 µs from the click to the end of the recording, put 7,397.5 of 10,899 ms (67.9 %) and 9,347.7 of 13,467 ms (69.4 %) in `History`'s `#evict`, as self time, in two runs. Unconstrained, 2,017.2 of 2,282 ms (88.4 %). Of the rest, reading `clientHeight` took 608.7 and 1,121.5 ms and `scrollTop` 121.5 and 512.1 ms, both layout forced while drawing, and GC 183.3 and 281.4 ms.
+- **How a press holds the timers.** A log of every worker reply the app took in counted 89 `tm-frames` replies of up to 256 frames each, whose handlers took 7,664 and 9,351 ms in all, 86 and 105 ms apiece on average, while deserialising them took 213 and 293 ms. The page handled them back to back: the longest gap between two handled replies was 797 and 411 ms, where no poll ran for seconds. Unconstrained, the same 89 replies' handlers took 1,957 ms.
+- **The lead #129 named was the mechanism, and its bench under-measured it.** #129's review bench put 22,777 evicting pushes onto 69,000 frames at 215 ms unconstrained; the page's own profile put the same press's `#evict`, two `shift` calls a push, at 2,017 ms. Why the two differ was not measured. **`shift` costs that only on a large array**: the whole-branch review's bench put a push and a `shift` at 0.08 to 0.30 µs with 1,000 to 10,000 kept, where V8 trims the array in place, and at 1.76 to 46.95 µs from 16,000 up.
+
+##### RULED OUT, EACH BY ITS MEASUREMENT
+
+- **Deserialising the worker's replies**: 213 and 293 ms of the press at 25 % (the reply log).
+- **GC**: 183.3 and 281.4 ms of the press's samples, and the heap read 130 to 156 MB through it (the reply log's `performance.memory`).
+- **Message traffic**: 89 replies in 10.9 and 13.3 s; the same 22,777 frames reach the page on both sides of the fix (below).
+- **Drawing**: `requestAnimationFrame` callbacks took 2,002 and 2,167 ms of the press in 52 and 65 frames, and drawing is a cost the first recording pays too, where polls kept running: 2,914 and 2,736 ms of callbacks while its polls came at most 709 ms apart.
+
+**One instrument saw nothing.** A `PerformanceObserver` on `long-animation-frame` reported no frame over 50 ms during either press, while the reply log timed handlers of 86 and 105 ms on average. It is not evidence of anything here.
+
+##### THE FIX
+
+`History`'s `#evict` empties the evicted frame's place in `#frames` (so nothing keeps the frame alive) and moves a new `#start` past it, where it called `shift` on `#frames` and `#sizes`. Once the emptied places number the frames kept, both arrays are cut to the frames kept in one `slice`. A cut follows at least as many evictions as the frames it copies, so the copying averages at most one frame and one size per eviction; between calls each array holds fewer than twice as many places as frames kept. `length`, `current`, `seek`, `back`, `forward` and `clear` read the kept frames from `#start`. **What the class answers does not change**: the same frames are kept, at the same steps, with the same play head (the node cases below; the whole-branch review's model test ran 3,000 seeded sequences, 2,378,306 operations, against `53ecbfa`'s class and found every answer equal), and on both sides of the fix every press ended `step 91,785 of 91,785 (oldest kept: step 25,329)`, after 22,777 frames in 89 replies. **What the arrays cost between cuts** is up to twice the places, and 2.2 times the bytes at the peak: measured by the review in node for 69,008 frames kept, 1,208 to 2,708 KB over its base against 1,208 to 1,216 KB when they were shifted, against the 68.6 MB a full TM ring retains (`HISTORY_BYTES`'s doc says so now).
+
+##### AFTER, INTERLEAVED
+
+Three rounds, each running every file on `53ecbfa`'s `history.ts` (A) and then on the fix's (B), the file swapped in from a saved copy and checked with `cmp` before each run, at `CPUQuota=25%`. The press's longest gap is the longest between two polls over its three waits.
+
+| File | A: the press's longest gap | B | A: the wait | B |
+|---|---|---|---|---|
+| `readout-history-full`, half way to the halt | 5,109, 7,098, 7,988 ms | 300, 292, 396 ms | 5,109, 7,098, 7,988 ms | 1,296, 991, 1,095 ms |
+| `readout-history-held`, half way to filling again | 6,003, 7,497, 6,407 ms | 893, 306, 608 ms | 11,604, 11,614, 11,808 ms | 2,204, 2,098, 1,797 ms |
+| the press, probed (`map and fold`) | 8,288, 7,604, 8,116 ms | 402, 308, 601 ms | press 10,701, 11,599, 10,916 ms | 2,215, 2,606, 2,708 ms |
+
+The probed press's reply handlers took 8,136, 9,031 and 8,019 ms on A and 6, 94 and 7 ms on B. Profiled on B, twice, the press sampled 2,707 and 2,619 ms, with `#evict` at 0.0 and 0.6 ms of it.
+
+**#129's two waits now finish inside `until`'s 10 s at 25 %**, the slowest in 2,204 ms in these runs, where the held file's passed past it in all three A runs, on `until`'s order. That order stays, and `harness.test.ts` holds it; `e46cc2d` corrects the comments that said either wait still ran past 10 s.
+
+##### THE TM FILES' COLD FIRST RECORDING IS A DIFFERENT COST
+
+`tm-reduced-buffer.test.ts`'s first wait (`the value run to read 2`, at 720×896) and `tm-pane-follows-session.test.ts`'s (`the fixture to read 2 in scratch-1`, at 3000×896) each build a TM copy of the reduced `5 - 3` fixture and wait for its value: a build, a first recording of 145,904 frames, then a value run.
+
+- **Unchanged by the fix**: 7,809, 8,502 and 8,699 ms on A against 8,496, 7,722 and 8,623 on B (`tm-reduced-buffer`), and 8,196, 8,590 and 8,597 against 8,110, 8,195 and 8,619 (`tm-pane-follows-session`), at loads 2.54 to 7.37. On `53ecbfa` alone, earlier, 8,101, 10,207 (timed out) and 7,792 at loads 24.38, 30.17 and 22.09, and 9,092, 10,384 (timed out) and 7,100 at 24.00, 35.62 and 9.89: **both timeouts came at loads of 30.17 and 35.62.**
+- **Not `#evict`, and not a held main thread.** Two CPU profiles of the cold wait in a probe copied from `tm-reduced-buffer.test.ts` put 0.0 ms in `#evict` (a first recording fills the ring and stops; it evicts nothing), and the app's reply handlers at 204.5 and 390.5 ms of 7,801 and 7,989 ms sampled. Polls kept running through every cold wait, at most 403 to 800 ms apart.
+- **Where the time is**: the build answered 890 to 995 ms after the paste; the 570 `tm-frames` replies then arrived over 6.5 to 7.7 s; the value 3 to 96 ms after the last. On the main thread, deserialising those replies took 1,229 to 2,076 ms, drawing (`requestAnimationFrame` callbacks) 1,953 to 3,350 ms, and GC 866.8 and 1,143.1 ms of the two profiles; the worker that steps and serialises the frames shares the same quarter of a core. The same fixture pasted again after a spinner (warm) took 6,499 to 7,021 ms, its build answered 576 to 697 ms after the paste.
+
+**A cheaper first recording is left open**: drawing less or recording less while a copy first records, or a cheaper frame on the wire, would lower it, and none is this branch's to choose. The measurements above are what such a change would be measured against.
+
+##### THE WAITS ON A FIRST TM RECORDING, IN PARTS
+
+**The user decided item 5 on 2026-10-05**, in these words: "Split the waits: test-only. Each file's cold first-recording wait becomes two waits in one hook: the build answered, then the value." `587b74a` did that in `tm-reduced-buffer.test.ts` and `tm-pane-follows-session.test.ts`.
+
+- **The early state is the build answering**: the status line gains `reduced: single-tape · 241,666 steps` when `tm-scratch-compiled` lands, before any frame. A probe that logged every change of the status, step and value lines through one cold wait at 25 % saw the sentence at +1,395 ms, the first frames at +1,598 ms, the history full at +8,602 ms and the value at +8,622 ms.
+- **Where the waits sit.** `tm-reduced-buffer`'s first build moved out of its first case's body into a `beforeAll` (Vitest's 30 s, where the body had 15 s). `tm-pane-follows-session`'s `visitNewBuffer` holds the waits for both its buffers, and the second buffer is visited in a hook of its own, where it was inside the retire case's body. `tm-reduced-buffer`'s `afterEach`, which pastes the fixture back over a spinner, was split the same way.
+- **As two waits, at loads 3.95 to 14.08**, three runs of each file alone at 25 %: the build answered in 393 to 1,301 ms, and the value took 5,996 to 7,498 ms after it.
+
+**Two waits did not give margin under load.** The re-review ran both files alone at 25 % while other lanes' suites ran. `tm-pane-follows-session`, at a load of 33.74, timed out on its value wait at 10,094 ms; `tm-reduced-buffer`, at 21.41, on `the fixture to read 2 again` at 10,001 ms, its other second halves 7,889, 7,923 and 10,911 ms. The second wait still held the whole first recording. This entry's first version said no state between the build and the value was allowed by the decision; that misread it. The decision is to split, test-only, and it forbids no further split.
+
+**The controller's extension of the decision, after those timeouts: a third wait wherever two do not give margin.** Margin is the controller's reason; the user's words give none. `c88d399` adds the wait, test-only as the decision was.
+
+- **A copy's step line counts its frames**, from the first to `history is full`: the fixture's first recording stops at step 145,903, a spinner's at 409,200. Each build is now waited on in three: the build answering, the count at about half (72,000; 200,000 for a spinner), then the value, or for a spinner its value run's first report.
+- **Each wait starts from a state it asserts.** Before the paste, the caller asserts the page holds no sentence of the build to come. The build's answer puts its sentence on the status line, empties the value line and resets the step line in one task, and the value run starts only once the first recording has ended (`runValueLoop`), so after it there is no value and the count is short of half. The half-way wait also ends at a recording already over, a state its line cannot skip.
+- **The spinners in `tm-reduced-buffer` are split too.** They were one wait each, 5,088 to 6,199 ms in the first round's three runs at loads 4.49 to 6.85; in this round's first run, at a load of 30.15, they took 5,902 to 7,589 ms.
+
+Three runs of each file alone at each quota, interleaved, 2026-10-06, with `until` instrumented to log every wait. The round's brief took 15 % to stand in for 25 % on a loaded machine, where every timeout so far came. That is an assumption, and the second re-review read these same runs against it: `link-hold`'s mount chain took 13,680 ms at a load of 137.88, against 13,408 and 13,616 ms at 48.57 and 47.58. This round's own loads ran from 3.64 to 137.88, so several 25 % runs were under more load than the first re-review's. A chain is one split wait's parts in order; the parts are the build answering, the recording's half and the value:
+
+| Wait | Quota | Loads | Chains | Each part | Slowest part |
+|---|---|---|---|---|---|
+| `tm-reduced-buffer`, first build | 25 % | 51.08, 12.37, 8.98 | 3 | 1,091 to 1,393 / 3,602 to 4,909 / 3,015 to 5,100 ms | 5,100 ms |
+| `tm-reduced-buffer`, a spinner (`beforeEach`) | 25 % | 51.08, 12.37, 8.98 | 9 | 313 to 499 / 2,275 to 3,904 / 2,292 to 3,598 ms | 3,904 ms |
+| `tm-reduced-buffer`, the second spinner (a case’s body) | 25 % | 51.08, 12.37, 8.98 | 3 | 401 to 508 / 2,399 to 3,811 / 2,096 to 3,311 ms | 3,811 ms |
+| `tm-reduced-buffer`, the fixture back (`afterEach`) | 25 % | 51.08, 12.37, 8.98 | 9 | 490 to 796 / 3,102 to 5,393 / 3,200 to 5,110 ms | 5,393 ms |
+| `tm-reduced-buffer`, first build | 15 % | 11.55, 5.98, 55.14 | 3 | 1,506 to 2,601 / 5,500 to 9,100 / 5,602 to 6,497 ms | 9,100 ms |
+| `tm-reduced-buffer`, a spinner (`beforeEach`) | 15 % | 11.55, 5.98, 55.14 | 9 | 498 to 1,404 / 3,707 to 7,400 / 3,899 to 6,803 ms | 7,400 ms |
+| `tm-reduced-buffer`, the second spinner (a case’s body) | 15 % | 11.55, 5.98, 55.14 | 3 | 603 to 605 / 3,599 to 4,599 / 3,998 to 5,503 ms | 5,503 ms |
+| `tm-reduced-buffer`, the fixture back (`afterEach`) | 15 % | 11.55, 5.98, 55.14 | 9 | 590 to 2,797 / 5,400 to 10,698 / 5,107 to 8,521 ms | 10,698 ms |
+| `tm-pane-follows-session`, `scratch-1` and `scratch-2` | 25 % | 20.00, 7.15, 9.38 | 6 | 496 to 1,605 / 3,309 to 5,494 / 3,099 to 4,305 ms | 5,494 ms |
+| `tm-pane-follows-session`, `scratch-1` and `scratch-2` | 15 % | 6.44, 9.30, 58.17 | 6 | 706 to 2,400 / 6,502 to 9,604 / 6,200 to 8,798 ms | 9,604 ms |
+
+Both files passed all three runs at each quota. **At 25 % no part took more than 5,494 ms**, at loads up to 51.08, where the whole chains took up to 11,404 ms. At 15 % the slowest part was 7,005 ms (`tm-reduced-buffer`) and 8,597 ms (`tm-pane-follows-session`) at loads of 5.98 to 11.55, and 10,698 and 9,604 ms at loads of 55.14 and 58.17, the first of those passing on `until`'s order.
+
+##### THE SIBLINGS: EVERY WAIT IN THE BROWSER TIER, MEASURED
+
+**Found by what the files do, not by name.** `until` was instrumented, in a throwaway copy of `harness.ts`, to log every wait: its file, case, name, duration and longest gap between polls. The whole browser project ran once unconstrained under the lock and the cap: 161 files and 1,093 tests passed, logging 1,460 waits in 119 files. The 36 files with a wait of 400 ms or more then ran alone at 25 %, one locked run each; the other 83 never waited 400 ms. Both sweeps ran with the two TM files' first builds already split in two and the siblings not yet. Waits of 7 s or more at 25 %, 28 in 9 files:
+
+| File | Waits of 7 s or more at 25 % | What they span | Done |
+|---|---|---|---|
+| `app.test.ts` | 12, 7,583 to 8,601 ms, all `settled` | a program's compile, its TM leg filling | split |
+| `link-hold.test.ts` | 1, 9,506 ms, the mount's compile | the same | split |
+| `extend-during-recompile.test.ts` | 2, 7,504 and 8,590 ms | `BUDGET_SRC`'s TM history filling | split |
+| `extend-focus-probe.test.ts` | 4, 7,198 to 8,988 ms | the same | split |
+| `tm-scratch-fork.test.ts` | `compiled` on the 60-element list, 9,211 ms | a program's compile and recording | split |
+| | the source session's own run after a fork, 8,408 ms | the source's TM recording | split, on its worker's replies (`c88d399`) |
+| `tm-reduced-buffer.test.ts` | the `afterEach`, 7,405 ms | a TM copy's first recording | split (`587b74a`) |
+| `buffers-quota.test.ts` | 3, 7,720 to 8,025 ms | a storage warning's and a notice's timers | left: not a recording |
+| `examples-menu.test.ts` | 1, 7,830 ms | a notice's timer | left: not a recording |
+| `share-positions.test.ts` | 2, 7,697 and 7,800 ms, a λ continue, its polls up to 6,200 ms apart (load 24.39) | λ *keep recording* | left: not a first TM recording (WHAT THIS DID NOT CLOSE) |
+
+**The program splits**, in `df9fbca`, were two waits: the TM leg starting to record, its step line reading `…` (or the run ending, for a run with too few TM frames for a poll to see that), then the end. The TM leg records last, after λ and asm. Each asserts at the dispatch what the dispatch sets synchronously (`compile.ts`'s `schedule`, `controls.ts`), so no wait can pass on the run before. As two waits, three runs each at 25 % and loads 2.61 to 10.21: first halves 574 to 5,191 ms, second halves 2,802 to 7,513 ms.
+
+**`c88d399` gives each the same third wait as the copies, the TM leg's count at about half a full history**: 39,000 of `BIG`'s 78,458 steps (`app.test.ts`'s `settled`, `link-hold`'s mount), 37,000 of `BUDGET_SRC`'s 75,024 (both `extend-*` files' `historyFills`), 53,000 of the 60-element list's 107,166 (`tm-scratch-fork`'s `compiled`); before it, each asserts the line is past `— recompiling`, so the count is this run's. `app.test.ts`'s case for a λ refusal, which waited once for the word `declined`, 7,705 ms at 15 %, goes through `settled`.
+
+**Where the TM view is off the page, the worker's replies count the recording.** `share-positions.test.ts` and `readout-history-held.test.ts` already wrap `Worker`'s `addEventListener`; `link-hold` and `tm-scratch-fork` now do, counting the source worker's `tm-frames` replies since its last `compiled`, 307 for `BIG`.
+
+- **`link-hold`'s two recompiles in the Stage**, the TM view off the page: one wait each, 5,111 to 6,387 ms at 25 % and 9,296 and 10,009 ms at 15 %. Now three: the first `tm-frames` reply of this compile, half of the 307, then the result.
+- **`tm-scratch-fork`'s source run after a fork** (the re-review's I1). This entry's first version said no page state lies between the fork and the source's result. That is true of the DOM only: the source worker's replies still count its recording. As one wait it took 7,802 to 10,208 ms in six runs of the file at 25 %, failing once, at 10,104 ms under a load of 17.79. Now two: half way from the count at the fork to the 307th reply, then the result. **The halves are not even, and cannot be**: the page runs almost no poll through the fork's first seconds (WHAT THIS DID NOT CLOSE), so the first wait ends at the first poll after them, and where that is past 10 s it passes on `until`'s order. The comment at the wait and `until`'s doc say so (`ea52af0`).
+
+The same runs for the program files. The parts are the TM leg starting to record, its half, and the end; for the source run after a fork, the half and the end:
+
+| Wait | Quota | Loads | Chains | Each part | Slowest part |
+|---|---|---|---|---|---|
+| `app`, `settled` | 25 % | 55.85, 13.30, 9.42 | 45 | 699 to 3,000 / 2,801 to 5,398 / 0 to 6,211 ms | 6,211 ms |
+| `app`, `settled` | 15 % | 56.97, 3.64, 58.64 | 44 | 778 to 6,003 / 4,196 to 9,206 / 0 to 10,500 ms | 10,500 ms (6 timed out) |
+| `link-hold`, the mount | 25 % | 48.57, 137.88, 47.58 | 3 | 3,797 to 4,193 / 3,992 to 4,708 / 4,920 to 5,698 ms | 5,698 ms |
+| `link-hold`, a recompile off the page, on replies | 25 % | 48.57, 137.88, 47.58 | 6 | 1,587 to 2,295 / 2,716 to 3,477 / 2,819 to 3,628 ms | 3,628 ms |
+| `link-hold`, the mount | 15 % | 33.90, 7.96, 64.21 | 2 | 5,002 to 5,498 / 4,396 to 5,198 / 5,899 to 6,505 ms | 6,505 ms |
+| `link-hold`, a recompile off the page, on replies | 15 % | 33.90, 7.96, 64.21 | 4 | 2,094 to 2,194 / 3,098 to 5,600 / 3,401 to 3,820 ms | 5,600 ms |
+| `extend-during-recompile`, `historyFills` | 25 % | 11.81, 5.25, 49.52 | 6 | 1,405 to 2,604 / 2,896 to 4,604 / 3,206 to 4,914 ms | 4,914 ms |
+| `extend-during-recompile`, `historyFills` | 15 % | 6.88, 8.94, 60.79 | 6 | 2,094 to 3,892 / 4,498 to 5,999 / 5,600 to 7,100 ms | 7,100 ms |
+| `extend-focus-probe`, `historyFills` | 25 % | 10.67, 17.80, 52.49 | 12 | 1,003 to 2,606 / 2,706 to 4,910 / 3,401 to 5,713 ms | 5,713 ms |
+| `extend-focus-probe`, `historyFills` | 15 % | 5.67, 9.68, 39.80 | 12 | 1,600 to 4,096 / 4,299 to 8,096 / 5,399 to 7,297 ms | 8,096 ms |
+| `tm-scratch-fork`, `compiled`, the 60-element list | 25 % | 56.53, 11.60, 51.95 | 3 | 4,597 to 6,400 / 1,806 to 3,099 / 3,507 to 4,493 ms | 6,400 ms |
+| `tm-scratch-fork`, the source run after a fork, on replies | 25 % | 56.53, 11.60, 51.95 | 3 | 7,106 to 11,407 / 2,204 to 3,295 ms | 11,407 ms |
+| `tm-scratch-fork`, `compiled`, the 60-element list | 15 % | 17.08, 8.84, 38.00 | 3 | 7,596 to 10,597 / 3,597 to 5,100 / 4,605 to 8,200 ms | 10,597 ms |
+| `tm-scratch-fork`, the source run after a fork, on replies | 15 % | 17.08, 8.84, 38.00 | 3 | 14,606 to 18,096 / 1,292 to 4,800 ms | 18,096 ms |
+
+Every file passed all three runs at 25 %, at loads up to 137.88. **At 25 % no part of a program's wait on the page took more than 6,400 ms**; the source run's first part, counted on replies, took 7,106 to 11,407 ms, for the reason above. The parts add up inside a case's body, though: `app.test.ts`'s `settled` took 12,003 to 13,105 ms in all in 14 of its chains (WHAT THIS DID NOT CLOSE). At 15 % five files passed every run; the two that did not, and the parts over 7 s, are in WHAT THIS DID NOT CLOSE.
+
+**Every part's wait fails on its own message when its state never comes**, each sabotage restored from a saved copy and compared:
+
+| Sabotage | Failed |
+|---|---|
+| SP1 to SP12, on the two-wait splits (the first fix round): a first or second half waiting for a state that cannot come, and a first wait waiting on the value | each on its own wait's message, as `timed out after 10000ms waiting for the build to answer`, or, for the two first waits on the value, on the second wait's precondition |
+| T1: `tm-reduced-buffer`'s half-way wait never true | the first build's hook, `timed out after 10000ms waiting for the first recording to be half way`; 5 skipped |
+| T2, T2b, T2c: the same, for the fixture back, a spinner, the second spinner alone | `… waiting for the fixture’s recording to be half way` (3 failed), `… the spinner’s recording to be half way` (3), `… the second spinner’s recording to be half way` (1) |
+| T2d, T2e: a spinner's and the second spinner's build waiting for `reduced: never` | `… waiting for the spinner’s build to answer` (3 failed), `… the second spinner’s build to answer` (1) |
+| T3: `tm-reduced-buffer`'s first wait also waiting for half the recording | the half-way wait's precondition, `precondition: the recording is short of half way: expected 72704 to be less than 72000` |
+| T4: `tm-pane-follows-session`'s half-way wait never true | `… waiting for scratch-1's first recording to be half way`; 2 passed, 4 skipped |
+| T5: its first wait also waiting for half | `precondition: scratch-1's recording is short of half way: expected 72960 to be less than 72000` |
+| T6: `app.test.ts`'s `settled`, half-way never true | 39 of 45, `… waiting for the TM leg to be half way to a full history, or the run to end` |
+| T7: `link-hold`'s mount, half-way never true | the hook, `… waiting for the TM leg to be half way to a full history`; 9 skipped |
+| T8, T9: the two `extend-*` files' `historyFills`, half never true | 1 of 1 and 3 of 3, `… waiting for the TM history to be half full` |
+| T10: `tm-scratch-fork`'s `compiled`, half-way never true | 4 of 5, `… waiting for the TM leg of \`let x = 40; x + 2\` to be half way to a full history`, and of the list |
+| T11: its source run's first wait never true | 1 of 5, `… waiting for the source session's TM recording to be half way from the fork to its end` |
+| T12: its counter never hearing `compiled` | `precondition: the replies counted are this compile’s: expected null not to be null` |
+| T15, T16: `link-hold`'s recompile off the page, its first reply and its half never counted | `… waiting for the TM leg to start recording, by its worker’s replies`, `… to be half way to a full history, by its worker’s replies`; 3 failed each, the two cases after it in its wake |
+| T17: its counts not tied to this compile's `compiled` | `precondition: the replies counted are this compile’s: expected false to be true` |
+| T13: the re-review's, `extend-focus-probe`'s second case with its dispatch deleted (m2) | `precondition: the stop before is withdrawn: expected 'step 75,024 of 75,024 — history is fu…' not to contain 'history is full'` |
+| T14: the same in `extend-during-recompile`, its second dispatch deleted | the case's three own assertions after the dispatch, and `precondition: the stop before is withdrawn` |
+
+Not shown able to fail: each split's assertions before its dispatch or paste (no sentence of the build to come; no `…` on the TM line), and `precondition: the TM leg is past the recompile`, which the re-review's own sabotage fired.
+
+**Two files fail at 25 % on Vitest's own bounds, on both sides of the fix**: `state-diagram.test.ts`, one case past its 15 s, and `tm-pointer.test.ts`, a hook past its 30 s, each once on `53ecbfa`'s `history.ts` and once on the fix's, at loads 3.97 to 5.85; the re-review saw `tm-pointer` do the same at loads 8.12 and 10.04, its hook making 1,732 synchronous `▶` clicks. Neither is a recording wait, and neither is looked into here.
+
+##### THE TESTS
+
+Five node cases in `tests/node/history.test.ts`, now 16:
+
+- **`evicts without moving the frames it keeps, however many it keeps`.** `arrayWork` wraps the `Array` methods that move or copy elements (`shift`, `unshift`, `splice`, `slice`, `copyWithin`, `concat`, `filter`, `map`, `flat`, `toSpliced`, `toSorted`, `toReversed`, `with`, the array iterator, and `Array.from`) while a ring of 1,000 frames, and then one of 69,008, takes twice its size in evicting pushes, and charges each call the length of the array it reads. It holds at most four per eviction, more than none, and no array met longer than twice the frames kept. **Four is exact, with no slack**: 8,000 for 2,000 evictions at 1,000 kept, and 552,064 at 69,008 (a copy of the case asserting equality passed). **A copy written as a loop over the indices, or made by a method not listed, is charged nothing.**
+- **`keeps a parked head on its frame when one push evicts most of the ring`**: 100 frames of 10 fill 1,000, the head parked on step 95, then one of 900 evicts steps 0 to 89 and cuts, in one push.
+- **`keeps exactly the newest frames that fit, each at its own step, push after push`**: 5,000 pushes whose sizes evict none, one or many frames, with one over the whole budget; after each, the oldest kept is the one worked out from the sizes alone, and every kept frame is its own step.
+- **`lets go of each frame it evicts at once, before cutting its place off`**: two of twelve frames evicted, no cut yet, a full collection (`--expose-gc` set at run time), and `WeakRef`s show the two evicted collected and the ten kept alive; the ring is read after the collection.
+- **`clear forgets an eviction the ring has not yet cut off`**: three frames of 400 in 1,000 evict one, no cut, then `clear`; empty, and two pushes later two frames at steps 0 and 1.
+
+**Red on `53ecbfa`'s `history.ts`: 13 passed, 1 failed**, `elements moved evicting 2000 frames from 1000 kept: expected 4004000 to be less than or equal to 8000`, with the first three cases written; the behaviour cases pass there, as they must. The collection case and the `clear` case were written after that run.
+
+**Twelve sabotages of `history.ts`, run against the final node file, each restored from a saved copy and checked with `cmp`; eleven fired, and the twelfth was aimed at an equivalent:**
+
+| Sabotage | Failed |
+|---|---|
+| S1: `shift` both arrays again | 1 of 16: `elements moved evicting 2000 frames from 1000 kept: expected 4004000 to be less than or equal to 8000` |
+| S2: never cut | `the evicted places are cut off: expected 0 to be greater than 0` |
+| S3: cut at twice the frames kept | `the arrays never hold more than twice the frames kept: expected 3000 to be less than or equal to 2000` |
+| S4: cut one place early | 3: the parked head (`expected 12 to be 11`), push after push (`expected 605 to be 604`), the work case on its precondition |
+| S5: cut without resetting `#start` | 3: `expected -79 to be 11`, `expected undefined to be 604`, and the precondition |
+| S6: an evicted place not emptied | the collection case, `expected [ true, true, true, … ] to deeply equal [ Array(10) ]` |
+| S7: the evicted size read one place late | push after push, `expected 603 to be 604` |
+| S8: `Array.from` of the frames at every eviction (the review's bypass) | `expected 6010000 to be less than or equal to 8000` |
+| S9: a spread copy at every eviction | `expected 3009000 to be less than or equal to 8000` |
+| S10b: a `filter` copy at every eviction | `expected 3009000 to be less than or equal to 8000` |
+| S11: `clear` without `#start = 0` | the `clear` case, `expected -1 to be +0` |
+| S10: the cut's `slice` written as a `filter` | **none**: 16 of 16. A `filter` at the cut copies what the `slice` did, once per cut, so this is the same work, not a defect; S10b is the sabotage the counter has to catch |
+
+A sabotage stops at the first hard assertion: S4 shows the parked-head case able to fail on `length`, and its `current`, `currentStep` and `head` lines after it were not shown able to fail by S4.
+
+##### THE REVIEWS
+
+**A whole-branch review of `53ecbfa..6b2f6d5`** (the branch's first version): no Critical, no Important, 7 Minor, all taken. It found the fix correct: a model test of 3,000 seeded sequences, 2,378,306 operations, against `53ecbfa`'s class matched on every public member and on `back`'s and `forward`'s returns, through 2,119 sequences with cuts, and every count in the first entry reproduced.
+
+- **M1: `clear`'s `#start = 0` was held by no node case**; deleting it failed only `share-positions` in the browser. `dcc34f1` adds `clear forgets an eviction the ring has not yet cut off`, and S11 fails it.
+- **M2: the work case's doc overclaimed**: six methods were counted, and `Array.from` at every eviction passed at 1,000 and 10,000 frames. `dcc34f1` counts the copying methods too (the list above) and says what stays uncounted and that the bound has no slack; S8, S9 and S10b fail it. Extending the counter found it charging itself: destructuring the saved entries in its restore read them through the wrapped iterator, 28 elements; it restores through `Map.prototype.forEach` now.
+- **M3: "`shift` moves every frame kept" holds only for a large array.** `History`'s doc and the case's say so, with the review's bench (THE STALL).
+- **M4: `HISTORY_BYTES`'s doc** gives the arrays up to twice their places between cuts, 2.2 times the bytes at the peak, with the review's node measurement (THE FIX).
+- **M5: the collection case relied on V8 keeping an unread `ring` alive**; it reads the ring after the collection now.
+- **M6: the TM timeouts' loads**: 30.17 and 35.62, in THE TM FILES' section and in WHAT THIS DID NOT CLOSE.
+- **M7: three nits.** `readout-history-held.test.ts`'s note on the continue not followed now says the choice was not revisited when its cost went; `History`'s doc gives 7,397.5 and 9,347.7 alike; the quota runs' logs carry their quota in their first line (VERIFICATION). `a53528c`'s commit body still reads 7,397 and 9,348; rewording it would take a rebase.
+
+**A re-review of `53ecbfa..4b8c1a9`** (the first review's fixes and the two-wait splits), with runs of its own at loads 8 to 34: no Critical, 2 Important, 5 Minor, all taken. It confirmed the `History` fix and M1 to M7. Both Important findings are margin: three of the changed browser files failed alone at 25 % under its loads, each on a wait split in two or left whole.
+
+- **I1: `tm-scratch-fork`'s source run after a fork, left as one wait, timed out**: 10,104 ms at a load of 17.79, and 10,208 ms at 13.71 passing only on `until`'s order. The entry's "no page state lies between the fork and the source's result" was true of the DOM only. `c88d399` splits the wait on the source worker's `tm-frames` replies (THE SIBLINGS), and the poll gaps through the fork are in WHAT THIS DID NOT CLOSE with the re-review's profile.
+- **I2: the second of two waits still held the whole first recording, and timed out under load** (THE WAITS ON A FIRST TM RECORDING). The entry's "no state in between was allowed by the decision" misread the user's words; the controller extended the decision to a third wait, and `c88d399` adds it to every split wait where the page or the worker's replies count the recording.
+- **m1: "up to twice"** in `HISTORY_BYTES`'s doc, THE FIX and M4 above: the figures peak at 2.2 times. Each now says twice the places and 2.2 times the bytes (`68a5265`).
+- **m2: `historyFills`' first assertion could not fail for the reason it named**: `#results` often still read `running` from the run before, since the helper returns at the TM stop, before the result. Dropped; the doc names the two assertions that hold. Sabotaged as the re-review did, the dispatch deleted: `precondition: the stop before is withdrawn` catches it in both files (T13, T14 above).
+- **m3: `tm-reduced-buffer`'s first case** asserts the value in its body again.
+- **m4: the two new doc comments** give each file's own timeout and its load, 10,207 ms at 30.17 and 10,384 ms at 35.62.
+- **m5: WHAT THIS DID NOT CLOSE** gains `share-positions`' λ continues with their measured cause, and what remains of the split waits' parts.
+- **Commit bodies, not reworded** (a rebase): `587b74a` gives the 10.2 and 10.4 s timeouts without their loads, 30.17 and 35.62; `df9fbca`'s "each split asserts that the dispatch claimed the compile" is loose, since `link-hold` waits for it and `historyFills` no longer asserts it; `a53528c` reads 7,397 and 9,348.
+
+**A second re-review of `53ecbfa..7e98710`**, with runs of its own: no Critical, no Important, 6 Minor, all wording, all taken. It found the waits sound, each middle threshold 48.9 to 49.7 % of its recording, and the three files that failed in the first re-review's runs passing in its own.
+
+- **n1: the source did not say the fork's first wait still passes on `until`'s order.** `ea52af0` says so at the wait and in `until`'s doc, with its figures: 7,106 to 11,407 ms here at 25 %, and 7,503 and 9,905 ms in the second re-review's runs at loads of 8.28 and 12.01.
+- **n2: "`compiled`'s first part has no state to split it on" was wrong**: the compile's answer is one, and it comes late. WHAT THIS DID NOT CLOSE says so now; the part is not split.
+- **n3: WHAT THIS DID NOT CLOSE understated `app.test.ts`**: its chains of 12,003 to 13,105 ms at 25 %, inside bodies capped at 15 s, and its 9,206 and 10,500 ms parts with `until` timeouts at 15 %. Both are there now.
+- **n4: the reply counter's doc claimed more than it holds.** `ea52af0` narrows it to the flow of the case that reads it and names the two gaps: the debounce before a `run` is posted, and a superseded run's `compiled` heard after the newer `run`.
+- **n5: the "short of half" precondition can only fail falsely.** Kept, with its margin quoted in its doc from the second re-review's reads: at most 14,336 of 200,000 unconstrained and 2,048 at 25 %.
+- **n6: two phrases past their evidence.** "To restore margin" was not in the user's words, and is the controller's reason where it stands; and that 15 % stands in for 25 % under load is the brief's assumption, stated as one, with the second re-review's measurement against it.
+
+##### WHAT THIS DID NOT CLOSE
+
+- **`app.test.ts`'s case bodies at 25 %.** `settled`'s three waits took 12,003 to 13,105 ms in all in 14 chains, at loads of 9.42 to 55.85, inside case bodies Vitest caps at 15 s. Every case passed in all three runs and in the gate's; no part is long, and the sum is. Moving the compile of `BIG` into a hook would take it out of the body.
+- **Margin at 15 %.** In this round's runs at `CPUQuota=15%`, at loads of 3.64 to 64.21, five of the seven split files passed all three runs. `app.test.ts` failed 3, 11 and 13 of its 45 cases, at loads of 3.64, 56.97 and 58.64, on Vitest's own 15 s for a case (3, 11 and 11 of them; the third run's other two failed in a timed-out case's wake): each compiles `BIG` in its body, its three waits took up to 17,404 ms in all at the load of 3.64, and no split shortens a body; the compile would have to move into a hook. `link-hold.test.ts` failed once, at a load of 64.21, on Vitest's 30 s for its mount's hook, its waits passing. **Parts over 7 s at 15 %**: `tm-reduced-buffer`'s half-way waits, 9,100 and 10,698 ms, and a value wait, 8,521 ms, all at a load of 55.14 (7,005 ms at most at loads up to 11.55), and a spinner's half, 7,400 ms; `tm-pane-follows-session`'s half, 9,604 ms at 58.17 and 8,597 ms at 9.30, and its value, 8,798 ms; `app.test.ts`'s, 9,206 and 10,500 ms at loads of 56.97 and 58.64, where 7 of its waits timed out against `until`'s 10 s (4 and 3, six of them in the table's chains), and 7,296 ms at the load of 3.64; `extend-focus-probe`'s, 8,096 ms at 39.80; `extend-during-recompile`'s, 7,100 ms; `tm-scratch-fork`'s `compiled`, whose first part took 7,596 to 10,597 ms and its last up to 8,200 ms; that file's `the fork's own editor to mount`, one wait, 6,005 to 9,097 ms; and the source run after a fork (next item). `compiled`'s first part does hold a state, the compile's answer, which the file's counter hears, and it comes late: at 25 % the reply was taken in +2,388 ms after the dispatch and handled by +3,679 ms, in a part that ended at +4,582 ms. The part is not split on it. A fourth wait, a quarter of the recording apart, would halve the copies' and the programs' middle parts again; it was not asked for and is not taken.
+- **The page runs almost no poll for seconds after a TM fork.** In `tm-scratch-fork`'s source run the longest gap between polls was 3,501 to 4,002 ms in this lane's four runs at 25 % and 3,504 to 7,194 ms in the re-review's three. The re-review profiled it at a load of 17.86: of 12,607 ms sampled, tree-sitter 25.4 %, reading replies' data 20.3 %, GC 11.8 %, forced layout reads 10.7 %, idle 15.1 ms, and `History` 1.2 ms. It is a main-thread cost the `History` fix does not touch, and no wait can end inside a gap: as two waits the first took 7,106 to 11,407 ms at 25 % and 14,606 to 18,096 ms at 15 %, passing on `until`'s order wherever it ran past 10 s, and the second 2,204 to 3,295 ms and 1,292 to 4,800 ms.
+- **A λ continue holds the page too.** `share-positions.test.ts`'s waits for a continue of `fact(12)`'s λ took 7,697 and 7,800 ms at 25 % here (load 24.39, polls up to 6,200 ms apart) and 9,798 ms in the re-review's run (load 28.17, a gap of 4,400 ms). The re-review profiled four continues, 6,698 ms sampled: reading `lambda-frames` replies 40.1 %, GC 30.6 %, forced layout reads 13.0 %, idle 2.8 ms, `History` 0.6 ms. Not eviction: the cost of about 1,430 λ frames a continue. Left as one wait each.
+- **A cheaper first recording** (THE TM FILES' section): the splits buy margin for the waits, not a faster page. As one wait the two TM files' timed out on `53ecbfa` at loads of 30.17 and 35.62, and as two at 21.41 and 33.74; as three, no part took more than 5,494 ms at 25 %, at loads up to 51.08.
+- **`state-diagram.test.ts` and `tm-pointer.test.ts` fail at 25 %** on Vitest's own 15 s and 30 s, on `53ecbfa` as on the fix.
+- **Drawing during a recording costs the main thread seconds at 25 %**: 2,002 and 2,167 ms of `requestAnimationFrame` callbacks in the two profiled presses, much of it layout forced by `clientHeight` and `scrollTop` reads, and 2,914 and 2,736 ms in `map and fold`'s first recording.
+- **Why #129's bench put 22,777 evicting pushes at 215 ms where the page's profile put them at 2,017 ms**, unconstrained, was not measured.
+- **The LoAF observer saw nothing** in this setup; not looked into.
+- **The λ and asm rings evict through the same class.** The held file's asm press is measured above; a λ press was not.
+- **The first precondition of each copy's split** (no sentence of the build to come before the paste) was not shown able to fail.
+
+##### VERIFICATION
+
+Run on 2026-10-06 in the lane's worktree, from `web/` unless stated: Biome, the typecheck and the scans at `ea52af0`, and the coverage run, the build and the nine quota runs at `68a5265`, which `ea52af0` differs from in comments only (the block's last line). Set up with a real `pnpm install` and `pkg/`, `pkg-lsp/` and `web/bindings/` built from `53ecbfa`'s crates. The branch changes no crate, no `Cargo.toml` or `Cargo.lock`, and neither `web/package.json` nor `web/pnpm-lock.yaml`. Every browser run, the coverage gate's included, ran under `flock <the lanes' browser lock> systemd-run --user --scope -q -p MemoryMax=16G -p MemorySwapMax=0`, plus `-p CPUQuota=25%` or `15%` for the quota runs, whose logs say `quota=25` or `quota=15` in their first line.
+
+```
+pnpm exec biome ci --error-on-warnings  → exit 0, 344 files (1 info, biome.json's deprecated `recommended`)
+pnpm run typecheck                      → exit 0
+pnpm run test:coverage                  → exit 0, 225 files / 2,143 tests; 97.5 / 91.57 / 98.38 / 98.86 against 95 / 89 / 97 / 97
+pnpm run build:app                      → exit 0
+scripts/check-{text-bytes,citations,attributions,doc-figures,shared-docs,colours,grammar-wasm,lua}.sh, --self-test then alone, from the root → 16 of 16 exit 0
+each of the 9 browser files the branch changes, alone under -p CPUQuota=25%, at loads 11.08 to 18.13 → exit 0, every case passing:
+  app 45 of 45, slowest case 10,096 ms; extend-during-recompile 1 of 1, 16,295 ms; extend-focus-probe 3 of 3, 16,102 ms;
+  link-hold 9 of 9, 8,501 ms; readout-history-full 4 of 4, 401 ms; readout-history-held 5 of 5, 5 ms;
+  tm-pane-follows-session 6 of 6, 905 ms; tm-reduced-buffer 5 of 5, 17,284 ms with its two hooks; tm-scratch-fork 5 of 5, 14,078 ms
+`68a5265..ea52af0` is comments only → 4 files, 0 changed lines that are not whole-line comments; tsc --removeComments emits the same 37,450 bytes for the four before and after
+```
+
+The Rust gates, `check-slow.sh` and the Docker image were not run here: the diff touches no Rust, and the controller builds the image. The probes and the instrumented `harness.ts` were each put in `web/tests/browser/`, run and restored or deleted (the harness from a saved copy, compared with `cmp`), and `git status` showed only this entry after.
+
+**Every count this entry quotes, with what produces it.** `a-stall/` is the lane's record directory (scratch, not tracked), and each command runs from it unless it reads git or names another directory. `fix2/` holds the first fix round's runs, `fix3/` the second's, `review/` and `review2/` the two reviews' evidence.
+
+| Value | What | Produced by |
+|---|---|---|
+| 8; `a53528c`, `e46cc2d`, `dcc34f1`, `587b74a`, `df9fbca`, `c88d399`, `68a5265`, `ea52af0` | commits in the range; their SHAs | `git rev-list --count 53ecbfa..ea52af0`; `git log --format='%h %s' 53ecbfa..ea52af0` |
+| 69,008; 22,777 frames, 89 replies; `step 91,785 of 91,785 (oldest kept: step 25,329)` | the fill, the press and its end, on both sides | `grep -h -o "FULL at [0-9,]*" logs/ab-*-zz-stall-25-*.log \| sort \| uniq -c`; `grep -h -o "MSGS keep: tm-frames x[0-9]*, [0-9]* frames" logs/ab-*-zz-stall-25-*.log \| sort \| uniq -c`; `grep -h -o "step line .*" logs/ab-*-zz-stall-25-*.log logs/prof-stall-*.log \| sort \| uniq -c` |
+| 2.04 to 137.88, 166 runs | the load after taking the lock, over every timing run | `grep -h "uptime after lock" logs/base-*.log logs/ab-*.log logs/prof-stall-*.log logs/tmcold-*.log logs/tmstates-*.log logs/sib-*.log logs/split-*.log logs/vt-*.log fix3/logs/parts-*.log fix3/logs/spinner-*.log fix3/logs/stale-*.log fix3/logs/list60-25.log \| grep -o "load average: [0-9.]*" \| awk '{print $3}' \| sort -n \| sed -n '1p;$p'`, and `ls` of the same logs `\| wc -l` |
+| 7,013, 7,896, 10,005, 12,200; 15,109; 5,400, 17,306, 17,608; 8,101, 10,207, 7,792 at 24.38, 30.17, 22.09; 9,092, 10,384, 7,100 at 24.00, 35.62, 9.89 | `53ecbfa` before the A/B runs, with loads | `python3 parse.py 'logs/base-*.log'` |
+| 7,397.5 of 10,899, 9,347.7 of 13,467, 2,017.2 of 2,282; 183.3, 281.4; 0.0, 0.0, 204.5 and 390.5 of 7,801 and 7,989, 866.8, 1,143.1; 2,707, 2,619, 0.0, 0.6 | the profiles: the press at 25 % and unconstrained, its GC; the TM cold waits; the press on the fix | `python3 profsum.py profiles/prof-stall-25-*-keep.cpuprofile profiles/prof-full-keep.cpuprofile profiles/tmcold-prof-25-*-cold.cpuprofile profiles/prof-stall-fixed-25-*-keep.cpuprofile` |
+| 67.9 %, 69.4 %, 88.4 %; 608.7, 1,121.5, 121.5, 512.1 | the profiles' shares, as the probe printed them; `clientHeight` and `scrollTop` | `grep -h -o "PROFILE keep self .*\(#evict\|clientHeight\|scrollTop\).*" logs/prof-stall-25-1.log logs/prof-stall-25-2.log logs/prof-check-full.log \| sort -u` |
+| 89; 7,664, 9,351, 1,957; 213, 293; 797, 411; 2,002 in 52, 2,167 in 65; 2,914, 2,736; 0 frames; 10.9, 13.3 s | the press's replies, handlers, deserialising, longest gap between two, rAF; the first recording's rAF; LoAF and its windows | `grep -h -o "MSGS keep: tm-frames.*\|MSGS keep: [0-9]* messages.*\|RAF keep.*\|RAF first.*\|LOAF keep: [0-9]* frames.*" logs/prof-stall-25-1.log logs/prof-stall-25-2.log logs/probe-check-full.log` |
+| 86, 105 | handler ms per reply | 7,664 / 89 and 9,351 / 89 |
+| 709 | the first recording's longest gap between polls | `grep -h -o "WAIT ok .*map and fold to start\|WAIT ok .*map and fold to fill" logs/prof-stall-25-1.log logs/prof-stall-25-2.log` |
+| 130, 156 | the heap through the press, MB | `grep -h -o "MSGS keep per second.*" logs/prof-stall-25-1.log logs/prof-stall-25-2.log \| grep -o "heap[0-9]*MB" \| tr -d heapMB \| sort -n \| sed -n '1p;$p'` |
+| 215 ms | #129's bench | `/home/davey/temp/redextape-lanes-2026-10-04-record/a-readout/review/evict-bench.log` |
+| 0.08 to 0.30 µs, 1.76 to 46.95 µs | the review's `shift` bench | `review/shift-bench.log` (`review/shift-bench.mjs`) |
+| 1,208 to 2,708 KB, 1,208 to 1,216 KB; 2.2 | the review's heap measurement of the ring's arrays; 2,708 / 1,216 | `review/ring-heap.log` (`review/ring-heap.mts`) |
+| 3,000 sequences, 2,378,306 operations, 2,119 through cuts | the review's model test | `review/model.out` |
+| AFTER's table; 8,136, 9,031, 8,019 and 6, 94, 7; TM files A and B, loads 2.54 to 7.37 | the interleaved runs | `python3 abtable.py ab` (`logs/ab-table.txt`), reading `logs/ab-{A,B}-*-25-{1,2,3}.log` |
+| 145,904 frames, 570 replies; 890 to 995; 6.5 to 7.7 s; 3 to 96; 1,229 to 2,076; 1,953 to 3,350; 6,499 to 7,021; 576 to 697 | the TM cold and warm waits | `grep -h -o "PHASES.*\|MSGS \(cold\|warm\): tm-frames.*\|RAF \(cold\|warm\).*\|WAIT ok [0-9]* ms.*the fixture to read 2 again" logs/tmcold-*.log` |
+| 403 to 800 | the cold waits' longest gaps between polls | `python3 parse.py 'logs/base-*tm-*.log'`, `python3 abtable.py ab` and `grep -h -o "WAIT ok [0-9]* ms, max gap [0-9]* ms.*value run to read 2" logs/tmcold-*.log` |
+| +1,395, +1,598, +8,602, +8,622 ms | a cold wait's states | `grep -h -o "console.error\] \(STATE\|AFTER\).*" logs/tmstates-25-1.log` |
+| 393 to 1,301, 5,996 to 7,498, loads 3.95 to 14.08; 574 to 5,191, 2,802 to 7,513, loads 2.61 to 10.21; 5,088 to 6,199 at 4.49 to 6.85; 5,111 to 5,920 | the waits as two (the first fix round), and the spinners and `link-hold`'s Stage compiles as one | `python3 fix2/splitsummary.py` (`fix2/split-summary.txt`), reading `logs/split-*-25-{1,2,3}.log` |
+| 10,094 at 33.74; 10,001 at 21.41, 7,889, 7,923, 10,911; 10,104 at 17.79, 10,208 at 13.71; 7,802 to 10,208 in six runs | the re-review's runs of the two-wait files and the fork | `review2/untillog-tm-pane-follows-session-25-1.log`, `review2/untillog-tm-reduced-buffer-25-1.log`, `review2/untillog-tm-scratch-fork-25-{1,2}.log` (`grep UNTILLOG` and `load average`), with `fix2/split-summary.txt` and `fix2/sib-parsed-7000.txt` for this lane's four |
+| 145,903; 409,200; 78,458, 307; 75,024; 107,166 | where each recording stops, and `BIG`'s replies | `grep -h -o "STEP \(cold\|warm\) .*" logs/tmcold-*.log \| sort -u`; `grep -h -o "tm-frames x1599, 409201 frames" logs/base-tm-reduced-buffer-25-1.log \| sort -u`; `grep -h -o "console.error\] TOTALS.*" fix3/logs/totals-full.log` |
+| 5,902 to 7,589 at 30.15 | the spinners as one wait, this round | `grep -h -o "UNTILLOG.*spinner to report" fix3/logs/spinner-unsplit-tm-reduced-buffer-25.log`, and its `load average` |
+| 6,387; 9,296, 10,009; 7,705 | `link-hold`'s Stage compiles as one wait this round, at 25 % and 15 %; `app`'s `declined` wait at 15 % | `grep -h "UNTILLOG" fix3/logs/stale-link-hold-25-1-*.log fix3/logs/stale-link-hold-15-1-*.log \| grep "the compile to finish" \| grep -v "(hook)"`; `grep -h "UNTILLOG" fix3/logs/stale-app-15-1-*.log \| grep declined` |
+| both parts tables; 5,494, 11,404; 7,005, 8,597, 10,698, 9,604; 6,400; 7,106 to 11,407, 14,606 to 18,096; every figure of **Margin at 15 %** but the list's timeline; loads 3.64 to 137.88 | three runs of each split file at 25 % and at 15 % | `python3 fix3/partsmd.py` (`fix3/parts-tables.md`) and `python3 fix3/parts.py` (per part and per chain; `--runs` for each run), reading `fix3/logs/parts-*-{25,15}-{1,2,3}.log` |
+| 3, 11, 13 of 45, 15 s; 17,404; 9 skipped, 30 s | `app` and `link-hold` at 15 % | `grep -c "Error: Test timed out in 15000ms" fix3/logs/parts-app-15-{1,2,3}.log`; `python3 fix3/parts.py --runs` (the `app at 15 %` block, `r2`); `grep -E "Tests \|Hook timed out" fix3/logs/parts-link-hold-15-3.log` |
+| +2,388, +3,679, +4,582 ms | the 60-element list's `compiled` at 25 %, and its part's end | `grep -h -o "console.error\] LIST60.*" fix3/logs/list60-25.log` |
+| 161 files, 1,093 tests, 1,460 waits, 119 files; 36, 83 | the instrumented whole-tier run; files at or over 400 ms and under | `grep -E "Test Files\|Tests " fix2/suite-untillog-full.log`; `wc -l < fix2/suite-untillog-full.tsv`; `awk -F'\t' '{print $4}' fix2/suite-untillog-full.tsv \| sort -u \| wc -l`; `awk -F'\t' '$1 >= 400' fix2/suite-files-max.tsv \| wc -l` and `< 400` |
+| 28 waits in 9 files; the siblings' table | waits of 7 s or more, each file alone at 25 % | `python3 fix2/untilparse.py 7000 $(sed 's#.*-> ##' fix2/sib.out \| grep log)` (`fix2/sib-parsed-7000.txt`) |
+| 1 failed of 15, 15 s; 3 skipped, 30 s; loads 3.97 to 5.85; 8.12, 10.04, 1,732 | `state-diagram` and `tm-pointer` on both sides; the re-review's | `logs/vt-{A,B}-{state-diagram,tm-pointer}-25.log`; `review2/vt-{A,B}-tm-pointer-25.log` and `review2.md` |
+| 3,501 to 4,002; 3,504 to 7,194; 12,607 ms, 25.4 %, 20.3 %, 11.8 %, 10.7 %, 15.1, 1.2 | the poll gaps through the fork; the re-review's profile | `grep -h -o "UNTILLOG.*own run to finish.*" logs/split-tm-scratch-fork-25-*.log logs/sib-tm-scratch-fork-25.log \| awk -F'\t' '{print $2, $4}'`; `review2/untillog-tm-scratch-fork-25-{1,2}.log`, `review2/fork-probe-25-1.log`; `review2/fork-prof-25-1.summary.txt` |
+| 7,697, 7,800 at 24.39, 6,200; 9,798 at 28.17, 4,400; 6,698 ms, 40.1 %, 30.6 %, 13.0 %, 2.8, 0.6; 1,430 | `share-positions`' λ continues, and the re-review's profile of four | `fix2/sib-parsed-7000.txt`; `grep -n "continue 6" review2/share-prof-25-1.log`; `review2/share-prof-25-1.summary.txt` (the four profiles' categories summed), `review2.md` |
+| SP1 to SP12 | the two-wait splits' sabotages | `fix2/sabsplit.py` with `fix2/sabsplit-extra.json`, `fix2/sab-summary.txt` and `fix2/sab/SP*.log` |
+| the sabotage table of this section's parts, T1 to T17 | the three-wait splits', the reply counts' and m2's sabotages | `fix3/sabsplit.py` with `fix3/sab3.json` (each replacement asserted to match once, the file restored and compared), `fix3/sab-summary.txt` and `fix3/sab/T*.log` |
+| 16; 13 passed, 1 failed, its line | the node cases; RED | `pnpm exec vitest run --project node tests/node/history.test.ts` from `web/`; `logs/red-node-history.log` |
+| 8,000, 552,064, exact | the work case's bound | `fix2/moved-exact.log` (`fix2/zz-history-exact.test.ts`, the case with `toBe(4 * evicting)`), and `review/moved-exact.log` |
+| 28 | the counter charging its own restore | `fix2/movers-debug.txt` (14 iterator calls on arrays of 2) |
+| S1 to S11, S10b | the node sabotages | `sabotage/sab.py`, `fix2/node-sab-summary.txt` and `sabotage/S*.log` |
+| 344 files (1 info, biome.json's deprecated `recommended`); 225 files, 2,143 tests; 97.5, 91.57, 98.38, 98.86 | Biome; the coverage run; statements, branches, functions and lines | the block above (`fix4/gate-biome.log` at `ea52af0`, `fix3/gate-coverage.log` at `68a5265`) |
+| 95, 89, 97, 97 | the coverage floors | `thresholds` in `web/vite.config.ts` |
+| 16 of 16 | the scans | `fix4/gate-hygiene-exits.log` at `ea52af0` and `fix4/gate-hygiene-entry-exits.log` with this entry committed |
+| the 9 files at 25 %, their slowest cases and loads | gate 6, at `68a5265` | `fix3/logs/gate-q25-*.log` written by `fix3/gate-q25.sh`, `grep -E "Tests \|✓\|×"` |
+| 4 files, 0 lines, 37,450 bytes | `68a5265..ea52af0` is comments only | `fix4/comment-only.txt`: `git diff -U0 68a5265..ea52af0 \| grep -E '^[+-]' \| grep -vE '^(\+\+\+\|---)' \| grep -vE '^[+-]\s*(//\|\*\|/\*\*)' \| wc -l`, and `diff -r fix4/out-before fix4/out-after`, each the four files through `tsc --ignoreConfig --removeComments --noCheck`; against `df9fbca`'s `tm-scratch-fork.test.ts` the same comparison differs in 40 lines |
+| 7,503 at 8.28, 9,905 at 12.01; 5 of 5, 5 of 5, 6 of 6 | the second re-review's runs of the fork, and of the three files that had failed | `grep UNTILLOG review3/untillog-tm-scratch-fork-25-{1,2}.log`, their `load average` and `Tests`, with `review3/untillog-tm-reduced-buffer-25-1.log` and `review3/untillog-tm-pane-follows-session-25-1.log` |
+| 14,336 of 200,000 and 3,840 of 72,000 in 48 reads, 2,048 and 512 in 8; 1,536 in 12, 0 in 2 | the count read at the "short of half" assertion | the `HEADROOM` lines of `review3/headroom-{alone,suite}-*.log` (unconstrained) and `review3/headroom-{trb,tpfs}-25.log`: file, count, half |
+| 12,003 to 13,105 in 14 chains at loads 9.42 to 55.85; 13,408, 13,680, 13,616 at 48.57, 137.88, 47.58 | `app`'s chains and `link-hold`'s mount chains at 25 % | `python3 fix3/parts.py --runs`, the `app at 25 %` and `link-hold at 25 %` blocks |
+| 9,206, 10,500; 4 and 3 | `app`'s slowest parts and its `until` timeouts at 15 % | `fix3/parts-tables.md`; `grep -h UNTILLOG fix3/logs/parts-app-15-1.log \| grep client \| awk -F'\t' '$3=="timeout"' \| wc -l`, and the same for `-3` |
+| 48.9 to 49.7 % | the middle thresholds against their recordings | 72,000 / 145,903, 200,000 / 409,200, 39,000 / 78,458, 37,000 / 75,024, 53,000 / 107,166 |

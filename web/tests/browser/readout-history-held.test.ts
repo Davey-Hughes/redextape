@@ -169,11 +169,12 @@ describe('keep recording on the asm leg, its result held', () => {
     nothingHeld()
     holdingResults = true
     await userEvent.click(extend() as HTMLButtonElement)
-    // THREE WAITS, AND THE MIDDLE ONE STILL RUNS PAST `until`'S 10 s ON A SLOW RUNNER. At `CPUQuota=25%` it took 12,411
-    // ms in an instrumented copy, its polls at +798, +4,799 and +12,411 ms, and 22,805 ms at 15 %. It passes because
-    // the recording has stopped by the poll after the gap and `until` reads its predicate before its deadline after
-    // every sleep (`until`'s doc; `harness.test.ts` holds the order). While the page is held the limit that can fire
-    // is Vitest's 30 s for this hook, which took 24,795 ms at 15 %.
+    // THREE WAITS. The middle one ran past `until`'s 10 s on a slow runner while `History` moved every frame it kept at
+    // each eviction: at `CPUQuota=25%` it took 12,411 ms in an instrumented copy, its polls at +798, +4,799 and +12,411
+    // ms, and 22,805 ms at 15 %, passing only because `until` reads its predicate before its deadline after every sleep
+    // (`until`'s doc; `harness.test.ts` holds the order). Since that stopped, three runs of the copy at 25 %,
+    // interleaved with three on `53ecbfa`, took 1,797 to 2,204 ms against 11,604 to 11,808, and no two of the
+    // press's polls came more than 893 ms apart.
     await until(() => newest(asmStep()) !== first, 'the asm recording to move on')
     await until(
       () => count(newest(asmStep())) >= count(first) * 1.5 || asmStep().includes('— history is full'),
@@ -205,8 +206,9 @@ describe('keep recording on the asm leg, its result held', () => {
  * link is taking the leg in place of `— history is full`, and the strip must not say the history is full either.
  *
  * **THE CONTINUE IS NOT FOLLOWED TO THE NEXT FILL HERE.** A case that let it go and waited for the history to fill
- * again took 12.9 s at `CPUQuota=25%`, and as a hook its waits saw no poll for 11.5 s; `readout.test.ts` holds a leg
- * with no pending step to its fact.
+ * again took 12.9 s at `CPUQuota=25%`, while `History` moved every frame it kept at each eviction, and as a hook its
+ * waits saw no poll for 11.5 s. That cost is gone, and the choice was not revisited when it went: `readout.test.ts`
+ * still holds a leg with no pending step to its fact.
  */
 describe('a link taking the asm leg past where its history fills, its continue held', () => {
   afterAll(letAllGo)

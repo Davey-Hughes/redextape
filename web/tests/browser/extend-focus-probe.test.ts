@@ -22,6 +22,31 @@ const mustFind = <T extends Element>(selector: string): T => {
   return el
 }
 
+/** About half of `BUDGET_SRC`'s TM recording, which stops with its history full at step 75,024. */
+const BUDGET_HALF = 37_000
+
+/**
+ * **`BUDGET_SRC`'S TM HISTORY FILLING, IN THREE WAITS: THE TM LEG STARTING TO RECORD, ITS HISTORY HALF FULL, THEN THE
+ * FILL.** As one wait it took 7,198 to 8,988 ms at `CPUQuota=25%` (2026-10-05), against `until`'s 10 s; as two, the
+ * second took up to 7,513 ms. The TM leg records last, after λ and asm, and its step line reads `…` from its first
+ * frames until it stops, and counts them. Called right after a dispatch, which withdraws the stop before and drops the
+ * line's `…` (`compile.ts`'s `schedule`, `controls.ts`): the first two assertions hold both, so no wait can pass on the
+ * run before, and the third holds that the line the second wait counts is this run's.
+ */
+async function historyFills(): Promise<void> {
+  expect(stepText(), 'precondition: the stop before is withdrawn').not.toContain('history is full')
+  expect(stepText(), 'precondition: no TM recording under way').not.toContain('…')
+  await until(() => stepText().includes('…') || stepText().includes('history is full'), 'the TM leg to start recording')
+  expect(stepText(), 'precondition: the TM leg is past the recompile').not.toContain('— recompiling')
+  await until(
+    () =>
+      Number(/of ([\d,]+)/.exec(stepText())?.[1]?.replaceAll(',', '') ?? 0) >= BUDGET_HALF ||
+      stepText().includes('history is full'),
+    'the TM history to be half full',
+  )
+  await until(() => stepText().includes('history is full'), 'the TM history to fill')
+}
+
 describe('focus when a frontier control is withdrawn', () => {
   beforeAll(async () => {
     document.body.innerHTML = SHELL
@@ -33,7 +58,7 @@ describe('focus when a frontier control is withdrawn', () => {
   // below is a statement about reachability rather than about whether the hazard exists at all.
   it('hiding or disabling the focused frontier control strands focus on body', async () => {
     view.dispatch({ changes: { from: 0, to: view.state.doc.length, insert: BUDGET_SRC } })
-    await until(() => stepText().includes('history is full'))
+    await historyFills()
 
     const extend = mustFind<HTMLButtonElement>('[data-leaf="tm-0"] .controls .extend')
     extend.focus()
@@ -58,13 +83,13 @@ describe('focus when a frontier control is withdrawn', () => {
   // on the thing the user was touching and not on what was withdrawn.
   it('leaves focus on the gesture that opened the window, not on a withdrawn control', async () => {
     view.dispatch({ changes: { from: 0, to: view.state.doc.length, insert: BUDGET_SRC } })
-    await until(() => stepText().includes('history is full'))
+    await historyFills()
 
     view.contentDOM.focus()
     view.dispatch({ changes: { from: view.state.doc.length, insert: ' ' } })
     expect(stepText()).toContain('— recompiling')
     expect(document.activeElement).toBe(view.contentDOM)
-    await until(() => stepText().includes('history is full'))
+    await historyFills()
 
     const picker = mustFind<HTMLSelectElement>('#encoding')
     picker.focus()
@@ -93,7 +118,7 @@ describe('focus when a frontier control is withdrawn', () => {
   // nearest control that still works.
   it('hands focus to a working neighbour when a programmatic dispatch withdraws the focused continue button', async () => {
     view.dispatch({ changes: { from: 0, to: view.state.doc.length, insert: BUDGET_SRC } })
-    await until(() => stepText().includes('history is full'))
+    await historyFills()
 
     const extend = mustFind<HTMLButtonElement>('[data-leaf="tm-0"] .controls .extend')
     extend.focus()

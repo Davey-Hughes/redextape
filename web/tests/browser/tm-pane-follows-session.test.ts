@@ -168,6 +168,13 @@ const leaf = (id: string): HTMLElement => {
 }
 const statusOf = (id: string) => leaf(id).querySelector('.tm-status')?.textContent ?? ''
 const valueTextOf = (id: string) => leaf(id).querySelector('.tm-value')?.textContent ?? ''
+const stepLineOf = (id: string) => leaf(id).querySelector('.step')?.textContent ?? ''
+/** The newest step a step line counts, 0 while it counts none: 72,000 from `step 72,000 of 72,000…`. */
+const recorded = (line: string) => Number(/of ([\d,]+)/.exec(line)?.[1]?.replaceAll(',', '') ?? 0)
+/** Whether a step line says its recording has stopped: a count, and no `…` after it. */
+const recordingOver = (line: string) => line.startsWith('step ') && !line.includes('…')
+/** About half the fixture's first recording, which stops with its history full at step 145,903. */
+const FIXTURE_HALF = 72_000
 const labelsOf = (id: string) => [...leaf(id).querySelectorAll('.tape-label')].map((e) => e.textContent)
 /**
  * The δ table's scroll range, which is its row count times `ROW_HEIGHT`: a fact about the MACHINE the pane holds,
@@ -255,7 +262,24 @@ function clickBufferControl(label: string): void {
 
 /**
  * Mint a TM buffer, bind `tm-0` to it through its own selector, and paste the reduced fixture into the editor that
- * mounts there: the selector visit the review's flow starts from.
+ * mounts there: the selector visit the review's flow starts from. **CALLED ONLY FROM A HOOK**, for its waits below.
+ *
+ * **THE BUFFER'S FIRST BUILD IS THREE WAITS: ITS BUILD ANSWERING, ITS FIRST RECORDING HALF WAY, THEN ITS VALUE.** The
+ * paste is the buffer's first build, on a worker that has just started, and its value comes only after a whole first
+ * recording, 145,904 frames, and the value run after it. As one wait that took 7,100 to 10,384 ms in six runs of this
+ * file on `53ecbfa` at `CPUQuota=25%`, timing out once, at 10,384 ms under a load average of 35.62. As two, the build
+ * and then the value, the value's still held the whole recording and timed out at 10,094 ms under a load of 33.74. So
+ * the recording is waited on in two: the copy's step line counts its frames from the first to `history is full`.
+ *
+ * **EACH WAIT STARTS FROM A STATE IT ASSERTS.** Before the paste, no reduced sentence and no value. The build's answer
+ * puts the fixture's sentence on the status line and resets the step line in one task, and the value run starts only
+ * once the first recording has ended (`runValueLoop`), so after it there is no value and the count is short of half: a
+ * value or a count already there would mean a later wait measures nothing. The half-way wait also ends at a recording
+ * already over, a state its line cannot skip.
+ *
+ * **THE COUNT READ AT THAT ASSERTION IS FAR SHORT OF HALF**: at most 1,536 of the 72,000 in 12 reads of this file
+ * unconstrained, and 0 in 2 at `CPUQuota=25%` (2026-10-06); in `tm-reduced-buffer.test.ts`, whose helper asserts the
+ * same, at most 14,336 of a spinner's 200,000. It can fail only falsely, on a poll late by most of half a recording.
  */
 async function visitNewBuffer(session: string): Promise<void> {
   openBufferList()
@@ -266,7 +290,18 @@ async function visitNewBuffer(session: string): Promise<void> {
   const dom = leaf('tm-0').querySelector<HTMLElement>('.cm-editor')
   const editor = dom === null ? null : EditorView.findFromDOM(dom)
   if (editor === null) throw new Error(`the ${session} editor has no view`)
+  expect(statusOf('tm-0'), `precondition: ${session} has not built`).not.toContain('reduced:')
+  expect(valueTextOf('tm-0'), `precondition: ${session} has no value`).toBe('')
   editor.dispatch({ changes: { from: 0, to: editor.state.doc.length, insert: FIXTURE } })
+  await until(() => statusOf('tm-0').includes('reduced: single-tape · 241,666 steps'), `${session}'s build to answer`)
+  expect(valueTextOf('tm-0'), `precondition: no value in ${session} before its recording ends`).toBe('')
+  expect(recorded(stepLineOf('tm-0')), `precondition: ${session}'s recording is short of half way`).toBeLessThan(
+    FIXTURE_HALF,
+  )
+  await until(
+    () => recorded(stepLineOf('tm-0')) >= FIXTURE_HALF || recordingOver(stepLineOf('tm-0')),
+    `${session}'s first recording to be half way`,
+  )
   await until(() => valueTextOf('tm-0') === 'value: 2', `the fixture to read 2 in ${session}`)
   expect(tableHeightOf('tm-0')).not.toBe(sourceTable)
 }
@@ -369,16 +404,26 @@ describe('a TM pane rebound, cooled or retired off a reduced buffer', () => {
     close(reference)
   })
 
-  it('tells every pane a retire moves what source holds, as a cool does', async () => {
-    await visitNewBuffer('scratch-2')
-    const { moved, reference } = await panesOnBuffer('scratch-2')
-    clickBufferControl('delete TM copy 2')
-    await until(
-      () => moved.every((id) => selectOf(id) === bindingKey('tm', 'source')),
-      'the retire to move every pane to source',
-    )
-    expectShowsSource(moved, reference)
-    for (const id of moved.slice(1)) close(id)
-    close(reference)
+  /**
+   * **A SECOND BUFFER, VISITED IN A HOOK OF ITS OWN**: its first build is `visitNewBuffer`'s three waits, as long at
+   * `CPUQuota=25%` as the first buffer's (that function's doc), and a hook has Vitest's 30 s where this case's body
+   * had 15 s for them and everything after.
+   */
+  describe('and a second buffer', () => {
+    beforeAll(async () => {
+      await visitNewBuffer('scratch-2')
+    })
+
+    it('tells every pane a retire moves what source holds, as a cool does', async () => {
+      const { moved, reference } = await panesOnBuffer('scratch-2')
+      clickBufferControl('delete TM copy 2')
+      await until(
+        () => moved.every((id) => selectOf(id) === bindingKey('tm', 'source')),
+        'the retire to move every pane to source',
+      )
+      expectShowsSource(moved, reference)
+      for (const id of moved.slice(1)) close(id)
+      close(reference)
+    })
   })
 })

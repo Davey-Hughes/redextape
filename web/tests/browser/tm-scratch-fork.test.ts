@@ -1,5 +1,6 @@
 import { EditorView } from '@codemirror/view'
-import { describe, expect, it } from 'vitest'
+import { afterAll, describe, expect, it } from 'vitest'
+import { RECORD_CHUNK } from '../../src/protocol'
 import { bindingKey } from '../../src/view-header'
 import { SHELL, until } from './harness'
 
@@ -57,6 +58,59 @@ fn fold(xs, acc, f) { if is_empty(xs) { acc } else { fold(tail(xs), f(acc, head(
 fn add(a, b) { a + b }
 fn add1(x) { x + 1 }
 fold([3, 1, 2].map(add1), 0, add)`
+
+/**
+ * How many `tm-frames` replies the source worker posts for `BIG`: its TM leg records 78,459 frames before its history
+ * fills at step 78,458, `RECORD_CHUNK` to a reply. 307.
+ */
+const BIG_TM_REPLIES = Math.ceil(78_459 / RECORD_CHUNK)
+
+/**
+ * **THE SOURCE WORKER'S `tm-frames` REPLIES SINCE ITS LAST `compiled`, COUNTED**, by wrapping `Worker`'s own
+ * `addEventListener` and `postMessage` before the app mounts, as `share-positions.test.ts` and
+ * `readout-history-held.test.ts` do. Once the TM pane is forked away no view shows the source's TM leg, and its replies
+ * are what still counts its recording. Only the source session's worker posts `compiled`, which is what names it here;
+ * a reply is counted after the app's listener has taken it in.
+ *
+ * **`null` FROM A `run` POSTED UNTIL ITS `compiled` IS HEARD**, so in the flow of the one case that reads it, which
+ * reads it after this compile's fork control has come available, a count that is not `null` is this compile's. **TWO
+ * GAPS IT DOES NOT CLOSE**, neither reached by that case: between a dispatch and its `run`, which is posted after the
+ * debounce, the count is still the compile before's; and a superseded run's `compiled`, heard after the newer `run`
+ * was posted, would be counted as the newer's.
+ */
+let sourceWorker: Worker | null = null
+let sourceTmReplies: number | null = null
+const post = Worker.prototype.postMessage
+Worker.prototype.postMessage = function (this: Worker, message: unknown, ...rest: unknown[]): void {
+  if ((message as { kind?: unknown } | null)?.kind === 'run') sourceTmReplies = null
+  ;(post as (...args: unknown[]) => void).apply(this, [message, ...rest])
+}
+const listen = Worker.prototype.addEventListener
+Worker.prototype.addEventListener = function (
+  this: Worker,
+  type: string,
+  listener: EventListenerOrEventListenerObject,
+  options?: boolean | AddEventListenerOptions,
+): void {
+  const counted =
+    type === 'message' && typeof listener === 'function'
+      ? (e: Event) => {
+          listener.call(this, e)
+          const kind = ((e as MessageEvent).data as { kind?: unknown } | undefined)?.kind
+          if (kind === 'compiled') {
+            sourceWorker = this
+            sourceTmReplies = 0
+          } else if (kind === 'tm-frames' && this === sourceWorker && sourceTmReplies !== null) {
+            sourceTmReplies += 1
+          }
+        }
+      : listener
+  listen.call(this, type, counted, options)
+}
+afterAll(() => {
+  Worker.prototype.addEventListener = listen
+  Worker.prototype.postMessage = post
+})
 
 const resultsText = () => document.querySelector('#results')?.textContent ?? ''
 /** `scratch-app.test.ts`'s own `idle` — the source compile's own "finished" flag. */
@@ -135,6 +189,8 @@ type App = {
 
 let view: EditorView
 let mounted = false
+/** About half of the 60-element list's TM recording, which stops with its history full at step 107,166. */
+const TM_HALF = 53_000
 
 /**
  * Load `src` into the app's one source editor, mounting the app itself on the first call in this file
@@ -143,6 +199,14 @@ let mounted = false
  * THIS dispatch's own compile to finish (`schedule` flips `#results` off `'idle'` synchronously, at
  * dispatch, before the debounce — `compile.ts`'s own doc — so this cannot resolve against a stale idle
  * flag from a previous test).
+ *
+ * **`compiled` IS THREE WAITS: THE TM LEG STARTING TO RECORD, ITS RECORDING HALF WAY, THEN THE RUN'S END.** On the
+ * 60-element list's machine, as one wait it took 9,211 ms at `CPUQuota=25%` (2026-10-05), against `until`'s 10 s; as
+ * two, the second took up to 5,603 ms. The TM leg records last, after λ and asm, and its step line reads `…` from its
+ * first frames until it stops, and counts them: the list's history fills at step 107,166, and `TM_HALF` is about half
+ * of that. For a run with fewer TM frames, each wait ends at the result. The dispatch claims the compile and drops the
+ * line's `…` (`compile.ts`'s `schedule`, `controls.ts`), which the assertions after it hold, and the assertion before
+ * the second wait holds that the line it counts is this run's.
  */
 async function mountApp(src: string): Promise<App> {
   if (!mounted) {
@@ -152,10 +216,21 @@ async function mountApp(src: string): Promise<App> {
   } else {
     bringTmPaneHome()
   }
+  const tmStep = () => tmPaneHost().querySelector('.step')?.textContent ?? ''
+  const tmRecorded = () => Number(/of ([\d,]+)/.exec(tmStep())?.[1]?.replaceAll(',', '') ?? 0)
   view.dispatch({ changes: { from: 0, to: view.state.doc.length, insert: src } })
+  expect(document.querySelector<HTMLElement>('#results')?.dataset.state, 'precondition: the compile is claimed').toBe(
+    'running',
+  )
+  expect(tmStep(), 'precondition: no TM recording under way before the compile').not.toContain('…')
 
   return {
-    compiled: () => until(idle, `the app to settle on \`${src}\``),
+    compiled: async () => {
+      await until(() => tmStep().includes('…') || idle(), `the TM leg of \`${src}\` to start recording`)
+      expect(tmStep(), 'precondition: the TM leg is past the recompile').not.toContain('— recompiling')
+      await until(() => tmRecorded() >= TM_HALF || idle(), `the TM leg of \`${src}\` to be half way to a full history`)
+      await until(idle, `the app to settle on \`${src}\``)
+    },
     tmPane: tmPaneHost,
     editorText: (pane) => editorViewOf(pane).state.doc.toString(),
     typeInto: (pane, text) => {
@@ -240,6 +315,24 @@ describe('forking a TM pane', () => {
 
     // THE ASSERTION: the source's own run finishes despite the fork, rather than stalling forever —
     // see this test's own doc for why this axis and not a step comparison.
+    //
+    // **TWO WAITS, SPLIT ON THE SOURCE WORKER'S REPLIES.** No view shows the source's TM leg now, so the page has no
+    // state between the fork and the result; the worker's `tm-frames` replies still count its recording, 307 for
+    // `BIG`. As one wait this took 7,802 to 10,208 ms in six runs of this file at `CPUQuota=25%` (2026-10-05 and 06),
+    // failing once, at 10,104 ms under a load average of 17.79. The first wait ends half way from the count at the fork
+    // to the last reply, or at the result.
+    //
+    // **THE FIRST WAIT STILL RUNS PAST `until`'S 10 s, AND PASSES THEN ON `until`'S ORDER** (its doc): the page runs
+    // almost no poll through the fork's first seconds, so the wait ends at the first poll after them. It took 7,106 to
+    // 11,407 ms in three runs at `CPUQuota=25%`, and 7,503 and 9,905 ms in two more at load averages of 8.28 and 12.01
+    // (2026-10-06).
+    const atFork = sourceTmReplies
+    expect(atFork, 'precondition: the replies counted are this compile’s').not.toBeNull()
+    const halfWay = Math.ceil(((atFork ?? 0) + BIG_TM_REPLIES) / 2)
+    await until(
+      () => (sourceTmReplies ?? 0) >= halfWay || idle(),
+      "the source session's TM recording to be half way from the fork to its end",
+    )
     await until(idle, "the source session's own run to finish despite the fork")
   })
 

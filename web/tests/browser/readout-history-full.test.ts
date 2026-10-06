@@ -16,11 +16,13 @@ import { SHELL, until } from './harness'
  * ONE MOUNT FOR THE FILE, for the reason every sibling gives; the cases run in order, each from where the last left the
  * page, and each asserts the state it starts from before it measures anything.
  *
- * **EVERY LONG WAIT IS IN A HOOK, SPLIT, AND ONE STILL RUNS PAST `until`'S 10 s ON A SLOW RUNNER.** Each hook has
- * Vitest's 30 s to itself. At `CPUQuota=25%` the TM history filled about 7 s after its recording started; during *keep
- * recording*, the wait for the recording to be half way to the halt took 10,792 and 12,903 ms in two instrumented
- * runs, polled once, at the halt. It passes because `until` reads its predicate before its deadline after every
- * sleep (`until`'s doc; `harness.test.ts` holds the order), not because the split keeps it inside 10 s.
+ * **EVERY LONG WAIT IS IN A HOOK, SPLIT.** Each hook has Vitest's 30 s to itself. At `CPUQuota=25%` the TM history
+ * filled about 7 s after its recording started. During *keep recording* the wait for the recording to be half way to
+ * the halt took 10,792 and 12,903 ms in two instrumented runs, polled once, at the halt, and passed only because
+ * `until` reads its predicate before its deadline after every sleep (`until`'s doc; `harness.test.ts` holds the
+ * order): `History` moved every frame it kept at each eviction, and the page ran no timer. Since it stopped, three
+ * runs of an instrumented copy at 25 %, interleaved with three on `53ecbfa`, took 991 to 1,296 ms against 5,109 to
+ * 7,988, polled at most 396 ms apart.
  */
 
 const results = () => document.querySelector<HTMLElement>('#results') as HTMLElement
@@ -113,8 +115,9 @@ describe('the readout, when the TM history fills', () => {
  * `map and fold` it reaches the machine's halt, where the recording ENDED: neither readout says the history filled.
  *
  * **THE RECORDING IS NOT CAUGHT HALF WAY BY POLLING, AND THAT IS NOT AN OVERSIGHT.** A case read the strip at the first
- * poll that saw the step move, and in one run in 24 that poll already saw the halt; at `CPUQuota=25%` the poll after
- * one at 3,210 ms ran at 12,194 ms, at the halt. Whether a poll lands half way is timing, so no case here asserts it.
+ * poll that saw the step move, and in one run in 24 that poll already saw the halt; at `CPUQuota=25%`, while `History`
+ * moved every frame it kept at each eviction, the poll after one at 3,210 ms ran at 12,194 ms, at the halt. Whether a
+ * poll lands half way is timing, so no case here asserts it.
  * `readout.test.ts` holds a recording still going, `done: null`, to no fact, and `readout-history-held.test.ts` places
  * a continue's window by holding its `result` back.
  */

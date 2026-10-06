@@ -95,7 +95,12 @@ export const ASM_WINDOW: AsmWindow = { locals: 64, args: 16, frames: 8, cells: 1
  * `tmFrameBytes` (below) charges 2 bytes a cell for a `window: string[][]` whose cells are
  * one-character JS strings, and charges nothing for the per-tape array headers around them or for the
  * ring's own two parallel arrays — `History`'s `#frames` and `#sizes` are 8 bytes an entry each, about
- * 16 B/frame here by arithmetic rather than by separate measurement. **Left as is, and deliberately.**
+ * 16 B/frame here by arithmetic rather than by separate measurement, and more on a ring that evicts,
+ * whose arrays hold up to as many evicted places again as frames kept before each cut (`History`'s
+ * `#evict`): twice the places, and 2.2 times the bytes at the peak. Measured in node for 69,008 frames
+ * kept (2026-10-05), the two arrays held 1,208 to 2,708 KB through the evictions, against 1,208 to
+ * 1,216 KB when `History` shifted them: about 1.5 MB at most, against the 68.6 MB a full TM ring
+ * retains. **Left as is, and deliberately.**
  * Re-scaling the constant to make its units retained bytes would change every recording length in the
  * app on the strength of one fixture's cell geometry, and the number the design cares about — what
  * three sessions cost against one — is a RATIO, in which a per-leg accounting error that is the same

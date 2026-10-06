@@ -1,6 +1,7 @@
 import type { EditorView } from '@codemirror/view'
-import { beforeAll, describe, expect, it } from 'vitest'
+import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 import { page, userEvent } from 'vitest/browser'
+import { RECORD_CHUNK } from '../../src/protocol'
 import { SHELL, until } from './harness'
 
 /**
@@ -67,6 +68,70 @@ const control = (leaf: string, label: string) =>
 const stepOf = (leaf: string) => host(leaf)?.querySelector('.step')?.textContent ?? ''
 const linkedSource = () => document.querySelector('.cm-editor .linked')?.textContent ?? null
 const idle = () => document.querySelector<HTMLElement>('#results')?.dataset.state === 'idle'
+
+/**
+ * **THE SOURCE WORKER'S `compiled` REPLIES, AND ITS `tm-frames` REPLIES SINCE THE LAST, COUNTED**, by wrapping
+ * `Worker`'s own `addEventListener` before the app mounts, as `share-positions.test.ts` and
+ * `readout-history-held.test.ts` do. With the TM view off the page nothing on it shows the TM leg recording, and the
+ * worker's replies are what still counts it; this file makes no copy, so every worker reply is the program's. A reply
+ * is counted after the app's listener has taken it in.
+ */
+let compiles = 0
+let tmReplies = 0
+const listen = Worker.prototype.addEventListener
+Worker.prototype.addEventListener = function (
+  this: Worker,
+  type: string,
+  listener: EventListenerOrEventListenerObject,
+  options?: boolean | AddEventListenerOptions,
+): void {
+  const counted =
+    type === 'message' && typeof listener === 'function'
+      ? (e: Event) => {
+          listener.call(this, e)
+          const kind = ((e as MessageEvent).data as { kind?: unknown } | undefined)?.kind
+          if (kind === 'compiled') {
+            compiles += 1
+            tmReplies = 0
+          } else if (kind === 'tm-frames') {
+            tmReplies += 1
+          }
+        }
+      : listener
+  listen.call(this, type, counted, options)
+}
+afterAll(() => {
+  Worker.prototype.addEventListener = listen
+})
+
+/**
+ * How many `tm-frames` replies the worker posts for `BIG`: its TM leg records 78,459 frames before its history fills at
+ * step 78,458, `RECORD_CHUNK` to a reply. 307.
+ */
+const BIG_TM_REPLIES = Math.ceil(78_459 / RECORD_CHUNK)
+
+/**
+ * **A RECOMPILE OF `BIG` WITH ITS TM VIEW OFF THE PAGE, IN THREE WAITS COUNTED ON THE WORKER'S REPLIES**: the TM leg
+ * starting to record, its recording half way, then the run's end, as the mount's three on the TM step line. As one
+ * wait this took 5,111 to 6,387 ms at `CPUQuota=25%` and 9,296 and 10,009 ms at 15 % (2026-10-05 and 06), against
+ * `until`'s 10 s. `edit` is the dispatch. The compile is claimed at the dispatch and answers after a debounce, which
+ * the first two assertions hold, and each count is taken only once this compile's own `compiled` has been heard, which
+ * the third holds, so no wait can pass on the run before.
+ */
+async function recompilesOffPage(edit: () => void): Promise<void> {
+  const before = compiles
+  edit()
+  expect(idle(), 'precondition: the compile is claimed').toBe(false)
+  expect(compiles, 'precondition: the compile has not answered').toBe(before)
+  const recording = (replies: number) => (compiles > before && tmReplies >= replies) || idle()
+  await until(() => recording(1), 'the TM leg to start recording, by its worker’s replies')
+  expect(compiles > before || idle(), 'precondition: the replies counted are this compile’s').toBe(true)
+  await until(
+    () => recording(BIG_TM_REPLIES / 2),
+    'the TM leg to be half way to a full history, by its worker’s replies',
+  )
+  await until(idle, 'the compile to finish')
+}
 const tab = (leaf: string) => document.querySelector<HTMLElement>(`#views [role="tab"][data-leaf="${leaf}"]`)
 const pick = (sel: string): void => {
   document.querySelector<HTMLButtonElement>('#workspace')?.click()
@@ -132,6 +197,17 @@ beforeAll(async () => {
   view = await (await import('../../src/main')).ready
   view.dispatch({ changes: { from: 0, to: view.state.doc.length, insert: BIG } })
   await until(() => !idle(), 'the compile to start')
+  // THREE WAITS FOR ONE RUN: THE TM LEG STARTING TO RECORD, ITS RECORDING HALF WAY, THEN THE RUN'S END. `BIG`'s TM leg
+  // records last and fills its history at step 78,458, and as one wait this took 9,506 ms at `CPUQuota=25%`
+  // (2026-10-05), against `until`'s 10 s; as two, the second took up to 6,590 ms. Its step line reads `…` from its
+  // first frames until it stops, and counts them; a line waiting on a compile drops the `…` (`controls.ts`).
+  expect(stepOf('tm-0'), 'precondition: no TM recording under way before the compile').not.toContain('…')
+  await until(() => stepOf('tm-0').includes('…') || idle(), 'the TM leg to start recording')
+  expect(stepOf('tm-0'), 'precondition: the TM line counts this compile’s run').not.toContain('— recompiling')
+  await until(
+    () => Number(/of ([\d,]+)/.exec(stepOf('tm-0'))?.[1]?.replaceAll(',', '') ?? 0) >= 39_000 || idle(),
+    'the TM leg to be half way to a full history',
+  )
   await until(idle, 'the compile to finish')
   await until(() => box('asm-0')?.getAttribute('aria-rowcount') === '123', 'the asm listing')
   await until(() => box('tm-0')?.getAttribute('aria-rowcount') === '25852', 'the rule table')
@@ -320,9 +396,7 @@ describe('a view that missed the last compile', () => {
     pick('[data-switch="views"][data-value="stage"]')
     tab('source')?.click()
     await until(() => host('tm-0') === null && host('asm-0') === null, 'the TM and asm views to leave the page')
-    view.dispatch({ changes: { from: view.state.doc.length, insert: '\n' } })
-    await until(() => !idle(), 'the compile to start')
-    await until(idle, 'the compile to finish')
+    await recompilesOffPage(() => view.dispatch({ changes: { from: view.state.doc.length, insert: '\n' } }))
     expect(host('tm-0') ?? host('asm-0'), 'the precondition: the compile landed with both views off the page').toBe(
       null,
     )
@@ -383,9 +457,7 @@ describe('a pin made in a second view of the same leg', () => {
     await until(() => host('tm-0') === null && host(added) === null, 'both TM views to leave the page')
 
     // THE EDIT LANDS WITH BOTH TM VIEWS OFF THE PAGE, as the missed-compile cases above.
-    view.dispatch({ changes: { from: view.state.doc.length, insert: '\n' } })
-    await until(() => !idle(), 'the compile to start')
-    await until(idle, 'the compile to finish')
+    await recompilesOffPage(() => view.dispatch({ changes: { from: view.state.doc.length, insert: '\n' } }))
     expect(host('tm-0') ?? host(added), 'the precondition: the compile landed with both TM views off the page').toBe(
       null,
     )

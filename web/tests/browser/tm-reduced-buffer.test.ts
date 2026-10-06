@@ -44,6 +44,51 @@ const leaf = (id: string): HTMLElement => {
 }
 const statusOf = (id: string) => leaf(id).querySelector('.tm-status')?.textContent ?? ''
 const valueLineOf = (id: string) => leaf(id).querySelector<HTMLElement>('.tm-value')
+const stepLineOf = (id: string) => leaf(id).querySelector('.step')?.textContent ?? ''
+/** The newest step a step line counts, 0 while it counts none: 72,000 from `step 72,000 of 72,000…`. */
+const recorded = (line: string) => Number(/of ([\d,]+)/.exec(line)?.[1]?.replaceAll(',', '') ?? 0)
+/** Whether a step line says its recording has stopped: a count, and no `…` after it. */
+const recordingOver = (line: string) => line.startsWith('step ') && !line.includes('…')
+/** The sentence a build of the fixture puts on the status line. */
+const FIXTURE_SENTENCE = 'reduced: single-tape · 241,666 steps'
+/** About half the fixture's first recording, which stops with its history full at step 145,903. */
+const FIXTURE_HALF = 72_000
+/** About half a spinner's first recording, which stops with its history full at step 409,200. */
+const SPINNER_HALF = 200_000
+
+/**
+ * **A BUILD PASTED INTO THE BUFFER, AS FAR AS ITS FIRST RECORDING'S HALF: TWO OF THE THREE WAITS EVERY BUILD HERE IS
+ * WAITED ON IN.** A build's value, or its value run's first report, comes only after a whole first recording, 145,904
+ * frames for the fixture and 409,201 for a spinner, and the value run after it. As one wait the fixture's took 7,792 to
+ * 10,207 ms in six runs of this file on `53ecbfa` at `CPUQuota=25%`, timing out once, at 10,207 ms under a load average
+ * of 30.17. As two, the build and then the value, the value's still held the whole recording and timed out at 10,001
+ * ms under a load of 21.41, and a spinner's one wait took 7,589 ms under a load of 30.15. So the recording is waited on
+ * in two: the copy's step line counts its frames from the first to `history is full`. The caller waits for the value.
+ *
+ * **EACH WAIT STARTS FROM A STATE IT ASSERTS.** The caller asserts what is on the page before the paste. The build's
+ * answer puts its `sentence` on the status line, empties the value line and resets the step line in one task, and the
+ * value run starts only once the first recording has ended (`runValueLoop`), so after it there is no value and the
+ * count is short of half: a value or a count already there would mean a later wait measures nothing. The half-way wait
+ * also ends at a recording already over, a state its line cannot skip.
+ *
+ * **THE COUNT READ AT THAT ASSERTION IS FAR SHORT OF HALF**: at most 14,336 of a spinner's 200,000 and 3,840 of the
+ * fixture's 72,000 in 48 reads of this file unconstrained, and 2,048 and 512 in 8 at `CPUQuota=25%` (2026-10-06). The
+ * frames a build records before the poll that sees its sentence are all it can count, so it can fail only falsely, on
+ * a poll late by most of half a recording.
+ */
+async function recordsHalf(
+  text: string,
+  sentence: string,
+  half: number,
+  build: string,
+  halfWay: string,
+): Promise<void> {
+  paste('tm-0', text)
+  await until(() => statusOf('tm-0').includes(sentence), build)
+  expect(valueLineOf('tm-0')?.textContent, 'precondition: no value before the recording ends').toBe('')
+  expect(recorded(stepLineOf('tm-0')), 'precondition: the recording is short of half way').toBeLessThan(half)
+  await until(() => recorded(stepLineOf('tm-0')) >= half || recordingOver(stepLineOf('tm-0')), halfWay)
+}
 
 /** Replace the TM pane's editor text, the way a paste does. */
 function paste(id: string, text: string): void {
@@ -112,10 +157,26 @@ beforeAll(async () => {
 })
 
 describe('a reduced file in a TM buffer', () => {
-  it('says it is reduced, labels its one tape, and reads its value', async () => {
-    paste('tm-0', FIXTURE)
+  /**
+   * **THE BUFFER'S FIRST BUILD, IN A HOOK, IN THREE WAITS (`recordsHalf`)**: the paste is the buffer's first build, on
+   * a worker that has just started, and a hook has Vitest's 30 s where the first case's body had 15 s.
+   */
+  beforeAll(async () => {
+    expect(statusOf('tm-0'), 'precondition: the buffer has not built').not.toContain('reduced:')
+    expect(valueLineOf('tm-0')?.textContent, 'precondition: the buffer has no value').toBe('')
+    await recordsHalf(
+      FIXTURE,
+      FIXTURE_SENTENCE,
+      FIXTURE_HALF,
+      'the build to answer',
+      'the first recording to be half way',
+    )
     await until(() => valueLineOf('tm-0')?.textContent === 'value: 2', 'the value run to read 2')
+  })
+
+  it('says it is reduced, labels its one tape, and reads its value', () => {
     expect(statusOf('tm-0')).toContain('reduced: single-tape · 241,666 steps')
+    expect(valueLineOf('tm-0')?.textContent).toBe('value: 2')
     expect([...leaf('tm-0').querySelectorAll('.tape-label')].map((e) => e.textContent)).toEqual([
       '5 tapes, interleaved',
     ])
@@ -147,7 +208,14 @@ describe('a reduced file in a TM buffer', () => {
    */
   describe('over a spinner whose value run is still going', () => {
     beforeEach(async () => {
-      paste('tm-0', SPINNER)
+      expect(statusOf('tm-0'), 'precondition: no spinner is built').not.toContain('1,000,000,000 steps')
+      await recordsHalf(
+        SPINNER,
+        'reduced: single-tape · 1,000,000,000 steps',
+        SPINNER_HALF,
+        'the spinner’s build to answer',
+        'the spinner’s recording to be half way',
+      )
       await until(
         () => valueLineOf('tm-0')?.textContent?.endsWith('of 1,000,000,000 steps') ?? false,
         'the spinner to report',
@@ -155,9 +223,18 @@ describe('a reduced file in a TM buffer', () => {
     })
 
     // AND BACK TO THE FIXTURE, so no test ends with a value run still spinning. Every test here starts from a busy
-    // line, so every one is also held to a settled value clearing it.
+    // line, so every one is also held to a settled value clearing it. THREE WAITS (`recordsHalf`), as the first build's
+    // hook above: as one wait this took up to 7,405 ms at `CPUQuota=25%` (2026-10-05). No case leaves the fixture's
+    // sentence on the status line, which the first assertion holds.
     afterEach(async () => {
-      paste('tm-0', FIXTURE)
+      expect(statusOf('tm-0'), 'precondition: the fixture is not built').not.toContain('241,666 steps')
+      await recordsHalf(
+        FIXTURE,
+        FIXTURE_SENTENCE,
+        FIXTURE_HALF,
+        'the fixture’s build to answer',
+        'the fixture’s recording to be half way',
+      )
       await until(() => valueLineOf('tm-0')?.textContent === 'value: 2', 'the fixture to read 2 again')
       expect(valueLineOf('tm-0')?.hasAttribute('aria-busy')).toBe(false)
     })
@@ -192,7 +269,14 @@ describe('a reduced file in a TM buffer', () => {
           }
       })
       observer.observe(line, { childList: true })
-      paste('tm-0', SPINNER.replace('steps 1000000000', 'steps 999999999'))
+      expect(statusOf('tm-0'), 'precondition: the second spinner is not built').not.toContain('999,999,999 steps')
+      await recordsHalf(
+        SPINNER.replace('steps 1000000000', 'steps 999999999'),
+        'reduced: single-tape · 999,999,999 steps',
+        SPINNER_HALF,
+        'the second spinner’s build to answer',
+        'the second spinner’s recording to be half way',
+      )
       await until(() => counts.length > 0, 'the second spinner to report')
       observer.disconnect()
       expect(counts[0], "the new build's first report, after its own loop's first chunk and nothing else").toBe(

@@ -19,6 +19,31 @@ const forwardButton = () =>
     (b) => b.textContent === '▶',
   )
 
+/** About half of `BUDGET_SRC`'s TM recording, which stops with its history full at step 75,024. */
+const BUDGET_HALF = 37_000
+
+/**
+ * **`BUDGET_SRC`'S TM HISTORY FILLING, IN THREE WAITS: THE TM LEG STARTING TO RECORD, ITS HISTORY HALF FULL, THEN THE
+ * FILL.** As one wait it took 7,504 and 8,590 ms at `CPUQuota=25%` (2026-10-05), against `until`'s 10 s; as two, the
+ * second took up to 6,900 ms. The TM leg records last, after λ and asm, and its step line reads `…` from its first
+ * frames until it stops, and counts them. Called right after a dispatch, which withdraws the stop before and drops the
+ * line's `…` (`compile.ts`'s `schedule`, `controls.ts`): the first two assertions hold both, so no wait can pass on the
+ * run before, and the third holds that the line the second wait counts is this run's.
+ */
+async function historyFills(): Promise<void> {
+  expect(stepText(), 'precondition: the stop before is withdrawn').not.toContain('history is full')
+  expect(stepText(), 'precondition: no TM recording under way').not.toContain('…')
+  await until(() => stepText().includes('…') || stepText().includes('history is full'), 'the TM leg to start recording')
+  expect(stepText(), 'precondition: the TM leg is past the recompile').not.toContain('— recompiling')
+  await until(
+    () =>
+      Number(/of ([\d,]+)/.exec(stepText())?.[1]?.replaceAll(',', '') ?? 0) >= BUDGET_HALF ||
+      stepText().includes('history is full'),
+    'the TM history to be half full',
+  )
+  await until(() => stepText().includes('history is full'), 'the TM history to fill')
+}
+
 describe('the frontier controls during a recompile', () => {
   // ONE MOUNT FOR THE FILE, as every browser test file does: ES module imports are cached, so
   // `main()` runs once per page and Vitest gives each test file its own page.
@@ -29,7 +54,7 @@ describe('the frontier controls during a recompile', () => {
 
   it('withdraws [continue] and a frontier ▶ for the whole window, and restores them after', async () => {
     view.dispatch({ changes: { from: 0, to: view.state.doc.length, insert: BUDGET_SRC } })
-    await until(() => stepText().includes('history is full'))
+    await historyFills()
     expect(extendButton()?.hidden).toBe(false)
     expect(extendButton()?.textContent).toBe('keep recording')
     expect(forwardButton()?.disabled).toBe(false)
@@ -46,7 +71,7 @@ describe('the frontier controls during a recompile', () => {
 
     // A trailing space changes nothing the machine does, so the new run reaches the same stop and the
     // control comes back — which is what makes the withdrawal a window rather than a one-way door.
-    await until(() => stepText().includes('history is full'))
+    await historyFills()
     expect(extendButton()?.hidden).toBe(false)
     expect(forwardButton()?.disabled).toBe(false)
   }, 90_000)
