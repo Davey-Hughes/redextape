@@ -1,7 +1,7 @@
 import type { EditorView } from '@codemirror/view'
 import { beforeAll, describe, expect, it } from 'vitest'
 import { page, userEvent } from 'vitest/browser'
-import { SHELL, until } from './harness'
+import { intoCmpeq, SHELL, tmWalk, until, walkInParts } from './harness'
 
 /**
  * The state diagram's program level (Plan 7 part 4, spec §8 and amendments 9 and 11), on `fact(3)`: 21 instructions,
@@ -31,16 +31,13 @@ const control = (label: string) =>
  * From step 0 to the first step inside `cmpeq` — 1,732 steps forward, where stepping back from the frontier took
  * about 9,000, one redraw each, and ran past the test's time under a full suite's load.
  *
- * **IT RUNS IN A HOOK, NEVER IN A TEST'S BODY.** Each click is a full redraw, so the walk's time is the machine's,
- * and on the slower CI runner a body that walked here and then on to `sub` ran past Vitest's 15 s cap. A hook has
- * its own 30 s, so a body keeps only the steps its claim is about — the arrangement `state-diagram-local.test.ts`
- * and `tm-reduced-buffer.test.ts` already use.
+ * **IT RUNS IN HOOKS, THREE OF THEM, NEVER IN A TEST'S BODY.** Each click is a full redraw, so the walk's time is the
+ * machine's. On the slower CI runner a body that walked here and then on to `sub` ran past Vitest's 15 s cap, and the
+ * walk was moved to a hook, which has its own 30 s; on that runner's slower day the one hook ran past that too
+ * (2026-10-06), where under half a CPU it takes 15 s here. So it is three hooks, each with its own 30 s
+ * (`harness.ts`' `walkInParts`), and a body keeps only the steps its claim is about.
  */
-async function intoCmpeq(): Promise<void> {
-  control('↺')?.click()
-  for (let i = 0; i < 20_000 && !/^cmp/.test(status()); i += 1) control('▶')?.click()
-  await until(() => /^cmp/.test(status()), 'the machine to be inside cmpeq')
-}
+const cmpeqHooks = (): (() => Promise<void>)[] => intoCmpeq(pane)
 const counted = (el: Element) => Number.parseInt(el.querySelector('.program-count')?.textContent ?? '0', 10)
 const frame = () => new Promise<void>((r) => requestAnimationFrame(() => r()))
 const rulesToggle = () =>
@@ -130,7 +127,7 @@ describe('the program level, drawn as arcs', () => {
 
   describe('inside cmpeq', () => {
     // A step inside `cmpeq`, the first instruction whose gadget has named sub-steps.
-    beforeAll(intoCmpeq)
+    for (const part of cmpeqHooks()) beforeAll(part)
 
     it('opens the current instruction onto its sub-steps, and follows the run', () => {
       const current = diagram().querySelector('.program-row[aria-current="step"]')
@@ -226,21 +223,34 @@ describe('the program level through a moving run', () => {
   }
 
   describe('with the active row on pc10 and the run inside cmpeq', () => {
-    beforeAll(async () => {
-      await wholeListing()
-      await intoCmpeq()
+    /** The active row onto pc10, by the keyboard. */
+    const ontoPc10 = async (): Promise<void> => {
       grid().focus()
       await userEvent.keyboard('{Home}')
       for (let i = 0; i < 30 && named() !== 'pc10'; i += 1) await userEvent.keyboard('{ArrowDown}')
-    })
+    }
+    // A HOOK EACH, IN THIS ORDER: the whole listing, the walk's three parts, the active row. They were one hook.
+    for (const hook of [wholeListing, ...cmpeqHooks(), ontoPc10]) beforeAll(hook)
 
-    it('keeps the active row on its row when the sub-steps row moves past it', async () => {
+    it('starts with the active row on pc10 and the run in pc4’s gadget', () => {
       expect(named()).toBe('pc10')
       expect(diagram().querySelector('.program-row[aria-current="step"] .program-name')?.textContent).toBe('pc4')
-      // From pc4's gadget to pc11's: the sub-steps row moves from above pc10 to below it.
-      await stepUntil(/^sub/)
-      expect(diagram().querySelector('.program-row[aria-current="step"] .program-name')?.textContent).toBe('pc11')
-      expect(named()).toBe('pc10')
+    })
+
+    /**
+     * **THE WALK ON TO `sub` IS IN HOOKS TOO, TWO OF THEM**: 1,104 clicks, from pc4's gadget to pc11's, which as the
+     * middle of one case's body took 9.9 s of its 15 under half a CPU here, and 11.1 s on CI on the day the walk into
+     * `cmpeq` timed out there (2026-10-06). What the case held before the walk is the case above, and what it held
+     * after is the one below; the machine and the active row are where they were for each.
+     */
+    describe('once the run is inside sub', () => {
+      for (const part of walkInParts(tmWalk(pane, /^sub/, 'inside sub'), [552])) beforeAll(part)
+
+      it('keeps the active row on its row when the sub-steps row moves past it', () => {
+        // From pc4's gadget to pc11's: the sub-steps row moved from above pc10 to below it.
+        expect(diagram().querySelector('.program-row[aria-current="step"] .program-name')?.textContent).toBe('pc11')
+        expect(named()).toBe('pc10')
+      })
     })
   })
 

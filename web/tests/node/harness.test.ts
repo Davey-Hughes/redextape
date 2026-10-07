@@ -1,7 +1,7 @@
 import { readFileSync } from 'node:fs'
 import { fileURLToPath } from 'node:url'
 import { describe, expect, it } from 'vitest'
-import { SHELL, until } from '../browser/harness'
+import { SHELL, until, type Walk, walkInParts } from '../browser/harness'
 
 describe('SHELL', () => {
   it('carries the elements the app mounts into', () => {
@@ -123,5 +123,83 @@ describe('until', () => {
       'xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx'
         .length < 0
     await expect(until(predicate, undefined, 30, 5)).rejects.toThrow(/…`$/)
+  })
+})
+
+describe('walkInParts', () => {
+  /**
+   * A machine that arrives at step `end`, whose forward works until `stuckAt` and does nothing from there: what a
+   * part's own check is for.
+   */
+  const machine = (end: number, stuckAt = Number.POSITIVE_INFINITY) => {
+    let step = 0
+    let restarts = 0
+    let clicks = 0
+    const walk: Walk = {
+      to: 'inside cmpeq',
+      restart: () => {
+        step = 0
+        restarts += 1
+      },
+      forward: () => {
+        clicks += 1
+        if (step < stuckAt) step += 1
+      },
+      arrived: () => step >= end,
+      step: () => step,
+    }
+    return { walk, at: () => step, restarts: () => restarts, clicks: () => clicks }
+  }
+
+  it('walks each share in its own part and the rest in the last, and ends where one loop did', async () => {
+    const m = machine(1732)
+    const parts = walkInParts(m.walk, [578, 578])
+    expect(parts).toHaveLength(3)
+    const at: number[] = []
+    for (const part of parts) {
+      await part()
+      at.push(m.at())
+    }
+    expect(at).toEqual([578, 1156, 1732])
+    expect(m.clicks()).toBe(1732)
+    expect(m.restarts()).toBe(1)
+  })
+
+  it('stops clicking once the walk has arrived, in whichever part that is', async () => {
+    const m = machine(600)
+    const at: number[] = []
+    for (const part of walkInParts(m.walk, [578, 578])) {
+      await part()
+      at.push(m.at())
+    }
+    expect(at).toEqual([578, 600, 600])
+    expect(m.clicks()).toBe(600)
+  })
+
+  it('starts where the machine is when the walk has no restart', async () => {
+    const m = machine(40)
+    for (let i = 0; i < 10; i += 1) m.walk.forward()
+    const { restart: _, ...onward } = m.walk
+    for (const part of walkInParts(onward, [20])) await part()
+    expect(m.at()).toBe(40)
+    expect(m.restarts()).toBe(0)
+  })
+
+  it('fails in the part whose clicks did nothing, by its number and with its figures', async () => {
+    const m = machine(1732, 578)
+    const parts = walkInParts(m.walk, [578, 578])
+    await parts[0]?.()
+    await expect(parts[1]?.()).rejects.toThrow(
+      'part 2 of 3 of the walk to inside cmpeq clicked forward 578 times from step 578, and the machine is at step 578',
+    )
+  })
+
+  it('fails in a part that clicked nothing short of the walk’s end', async () => {
+    const m = machine(1732)
+    const parts = walkInParts(m.walk, [578, 0])
+    await parts[0]?.()
+    await expect(parts[1]?.()).rejects.toThrow(
+      'part 2 of 3 of the walk to inside cmpeq clicked nothing at step 578, short of it',
+    )
   })
 })

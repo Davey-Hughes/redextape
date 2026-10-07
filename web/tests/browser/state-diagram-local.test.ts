@@ -1,7 +1,7 @@
 import type { EditorView } from '@codemirror/view'
 import { beforeAll, describe, expect, it } from 'vitest'
 import { page, userEvent } from 'vitest/browser'
-import { SHELL, until } from './harness'
+import { intoCmpeq, SHELL, until } from './harness'
 
 /**
  * The state diagram's local level and its switch (Plan 7 part 4, spec §7, §8 and amendment 10): the current state
@@ -32,16 +32,6 @@ async function stepUntilStateChanges(): Promise<void> {
 }
 const control = (label: string) =>
   [...pane().querySelectorAll<HTMLButtonElement>('.controls button')].find((b) => b.textContent === label)
-/**
- * From step 0 to the first step inside `cmpeq` — 1,732 steps forward, where stepping back from the frontier took
- * about 9,000, one redraw each, and ran past the test's time under a full suite's load.
- */
-async function intoCmpeq(): Promise<void> {
-  control('↺')?.click()
-  for (let i = 0; i < 20_000 && !/^cmp/.test(status()); i += 1) control('▶')?.click()
-  await until(() => /^cmp/.test(status()), 'the machine to be inside cmpeq')
-}
-
 beforeAll(async () => {
   await page.viewport(1280, 2400)
   document.body.innerHTML = SHELL
@@ -60,9 +50,14 @@ beforeAll(async () => {
   view.dispatch({ changes: { from: 0, to: view.state.doc.length, insert: FACT3 } })
   await until(() => document.querySelector<HTMLElement>('#results')?.dataset.state === 'idle', 'the app to settle')
   pane().querySelector<HTMLButtonElement>('[data-panel="rules"] .panel-toggle')?.click()
-  // Inside `cmpeq`, where the current instruction opens onto its sub-steps and its states run in a line.
-  await intoCmpeq()
 })
+/**
+ * Inside `cmpeq`, where the current instruction opens onto its sub-steps and its states run in a line: from step 0,
+ * 1,732 steps forward, where stepping back from the frontier took about 9,000, one redraw each, and ran past the test's
+ * time under a full suite's load. **IN THREE HOOKS OF ITS OWN, AFTER THE MOUNT'S** (`harness.ts`' `walkInParts`): with
+ * the walk at its end, the mount's one hook took 14.9 s of its 30 under half a CPU here, and 32.7 s under a quarter.
+ */
+for (const part of intoCmpeq(pane)) beforeAll(part)
 
 describe('the local level (spec §8)', () => {
   it("is what the current instruction's show states opens, and the focus goes with it", async () => {

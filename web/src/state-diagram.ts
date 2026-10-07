@@ -561,9 +561,21 @@ export class StateDiagram {
           cell.append(box)
         }
         if (g.overflow) cell.append(warning())
+        // THE COUNT IS ITS NUMBER AND ITS UNIT, EACH IN A BOX OF ITS OWN, AND ITS TEXT IS STILL `53 states`: a row with
+        // too little room cuts the unit, never the number, which is drawn whole or not at all (`style.css`'
+        // `.program-count-number`). Cut as one text, `53 states` in a box of 9px read `5.`, another number.
         const count = document.createElement('span')
         count.className = 'program-count'
-        count.textContent = `${g.count} ${g.count === 1 ? 'state' : 'states'}`
+        const number = document.createElement('span')
+        number.className = 'program-count-number'
+        number.textContent = String(g.count)
+        const unit = document.createElement('span')
+        unit.className = 'program-count-unit'
+        const word = document.createElement('span')
+        word.className = 'program-count-word'
+        word.textContent = g.count === 1 ? ' state' : ' states'
+        unit.append(word)
+        count.append(number, unit)
         cell.append(count)
         return
       }

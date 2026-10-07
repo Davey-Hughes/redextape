@@ -138,6 +138,94 @@ export async function until(predicate: () => boolean, what?: string, timeoutMs =
   }
 }
 
+/**
+ * A walk forward by a step control's clicks: where it starts, how it takes a step, where it ends, and the step the page
+ * says the machine is at, which is how a part of it shows that its clicks landed.
+ */
+export type Walk = {
+  /** What the walk ends at, as a failure says it: `inside cmpeq`. */
+  readonly to: string
+  /** Put the machine where the walk starts. Called once, by the first part; absent, the walk starts where it is. */
+  readonly restart?: () => void
+  /** One step forward. */
+  readonly forward: () => void
+  /** Whether the machine is where the walk ends. */
+  readonly arrived: () => boolean
+  /** The step the machine is at, read off the page. */
+  readonly step: () => number
+}
+
+/** The clicks the last part of a walk may make before it waits: the bound the walks had as one loop. */
+const WALK_BOUND = 20_000
+
+/**
+ * **A LONG WALK IN PARTS, EACH TO BE A HOOK OF ITS OWN.** A walk of many clicks is as slow as the machine it runs on:
+ * each click is a step and a whole redraw, synchronously, and nothing in a test can make it faster. As one hook, the
+ * 1,732 clicks from step 0 into `cmpeq` that three files make ran past Vitest's 30 s on the slower CI runner, in two of
+ * the three files in one run (2026-10-06); the same runner had passed both 48 minutes before, the files at 60 s and
+ * 31 s. A hook's cap is its own, so the walk is cut into parts and each part is registered as a hook: `for (const part
+ * of walkInParts(...)) beforeAll(part)`. Hooks of one suite run in the order they are registered, one after another.
+ *
+ * **EACH PART CLICKS UP TO ITS SHARE, OR UNTIL THE WALK HAS ARRIVED, AND THEN CHECKS ITS OWN WORK**: the page's step
+ * count has moved by exactly the clicks it made, and it made some unless the walk had arrived. A part whose clicks did
+ * nothing fails there, by its number and with its figures, and not as a later hook's timeout. `shares` gives the clicks
+ * of every part but the last; the last walks until the walk has arrived, to the bound the walks had as one loop, and
+ * then waits for it as they did (`until`), so the machine ends where it did.
+ */
+export function walkInParts(walk: Walk, shares: readonly number[]): (() => Promise<void>)[] {
+  const parts = shares.length + 1
+  return Array.from({ length: parts }, (_, k) => async (): Promise<void> => {
+    if (k === 0) walk.restart?.()
+    const from = walk.step()
+    const most = shares[k] ?? WALK_BOUND
+    let clicks = 0
+    while (clicks < most && !walk.arrived()) {
+      walk.forward()
+      clicks += 1
+    }
+    const at = walk.step()
+    const part = `part ${k + 1} of ${parts} of the walk to ${walk.to}`
+    if (at !== from + clicks) {
+      throw new Error(`${part} clicked forward ${clicks} times from step ${from}, and the machine is at step ${at}`)
+    }
+    if (clicks === 0 && !walk.arrived()) throw new Error(`${part} clicked nothing at step ${from}, short of it`)
+    if (k === parts - 1) await until(walk.arrived, `the machine to be ${walk.to}`)
+  })
+}
+
+/**
+ * A walk of a TM view by its own controls, as `state-diagram.test.ts`, `state-diagram-local.test.ts` and
+ * `tm-pointer.test.ts` each read them: ▶ and ↺ among the view's `.controls` by their text, the state's name at the
+ * start of its status line, and the step in its strip's `step N of M`. The walk ends at the first state whose status
+ * matches `arrived`; `restart` starts it from ↺, the oldest kept step.
+ */
+export function tmWalk(pane: () => HTMLElement, arrived: RegExp, to: string, restart = false): Walk {
+  const control = (label: string) =>
+    [...pane().querySelectorAll<HTMLButtonElement>('.controls button')].find((b) => b.textContent === label)
+  const status = () => pane().querySelector('.tm-status')?.textContent ?? ''
+  return {
+    to,
+    ...(restart ? { restart: () => control('↺')?.click() } : {}),
+    forward: () => control('▶')?.click(),
+    arrived: () => arrived.test(status()),
+    step: () =>
+      Number(
+        (/^step ([\d,]+)/.exec(pane().querySelector('.view-steps .step')?.textContent ?? '')?.[1] ?? '').replaceAll(
+          ',',
+          '',
+        ),
+      ),
+  }
+}
+
+/**
+ * **`fact(3)` FROM STEP 0 INTO `cmpeq`, IN THREE PARTS**: 1,732 steps forward to the first step inside `cmpeq`, the
+ * first instruction whose gadget has named sub-steps, where stepping back from the frontier took about 9,000. The
+ * first two parts click 578 times each and the third the 576 left.
+ */
+export const intoCmpeq = (pane: () => HTMLElement): (() => Promise<void>)[] =>
+  walkInParts(tmWalk(pane, /^cmp/, 'inside cmpeq', true), [578, 578])
+
 /** The one classic script in `index.html`: the pre-paint script, which draws a load's first frame from storage. */
 export const PREPAINT = /<script>([\s\S]*?)<\/script>/.exec(html)?.[1] ?? ''
 

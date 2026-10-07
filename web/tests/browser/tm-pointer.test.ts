@@ -1,7 +1,7 @@
 import type { EditorView } from '@codemirror/view'
 import { beforeAll, describe, expect, it } from 'vitest'
 import { page, userEvent } from 'vitest/browser'
-import { SHELL, until } from './harness'
+import { intoCmpeq, SHELL, until } from './harness'
 
 /**
  * **A POINTER, NOT `HTMLElement.click()`** (spec amendment 18). The rule table's rows and the program level's rows
@@ -22,9 +22,6 @@ const pane = () => document.querySelector('[data-leaf="tm-0"]') as HTMLElement
 const table = () => pane().querySelector('.state-table') as HTMLElement
 const diagram = () => pane().querySelector('[data-panel="diagram"]') as HTMLElement
 const programGrid = () => diagram().querySelector('.program-scroll') as HTMLElement
-const status = () => pane().querySelector('.tm-status')?.textContent ?? ''
-const control = (label: string) =>
-  [...pane().querySelectorAll<HTMLButtonElement>('.controls button')].find((b) => b.textContent === label)
 /** Whether `el` lies wholly inside `box` on screen, so a pointer aimed at its centre lands on it. */
 const within = (el: Element, box: Element) => {
   const a = el.getBoundingClientRect()
@@ -93,14 +90,11 @@ describe('a pointer on the rows a draw rebuilds', () => {
   })
 
   describe('inside cmpeq', () => {
-    // Inside `cmpeq`, where the current instruction opens onto its sub-steps and so has a show states. REACHED IN A
-    // HOOK: 1,732 clicks, a full redraw each, whose time is the machine's, and on the slower CI runner a body that
-    // walked here came within a second or two of Vitest's 15 s cap. See `intoCmpeq` in `state-diagram.test.ts`.
-    beforeAll(async () => {
-      control('↺')?.click()
-      for (let i = 0; i < 20_000 && !/^cmp/.test(status()); i += 1) control('▶')?.click()
-      await until(() => /^cmp/.test(status()), 'the machine to be inside cmpeq')
-    })
+    // Inside `cmpeq`, where the current instruction opens onto its sub-steps and so has a show states. REACHED IN
+    // THREE HOOKS: 1,732 clicks, a full redraw each, whose time is the machine's. On the slower CI runner a body that
+    // walked here came within a second or two of Vitest's 15 s cap, and then the one hook it was moved to ran past
+    // its 30 s there (2026-10-06). See `walkInParts` in `harness.ts`.
+    for (const part of intoCmpeq(pane)) beforeAll(part)
 
     it('shows the local level on a click on show states, and hands the focus to it', async () => {
       // THE GRID TAKES THE FOCUS FROM ELSEWHERE, so the click below comes with the grid already focused. The button
