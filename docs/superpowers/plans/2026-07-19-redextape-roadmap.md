@@ -25408,3 +25408,261 @@ state-diagram, state-diagram-local and tm-pointer, each alone under -p CPUQuota=
 **REBASED ONTO `510d5b0` AFTER #132 AND #133, AND THE SHAs ABOVE ARE THE REBASED ONES**, except `53ecbfa`, which stands wherever it names the `main` the branch was built, measured and sabotaged on, and `b9fc0eb`, an earlier commit of this entry, since dropped. #132 (a full history evicts its oldest frame without moving the frames it keeps, and the waits on a first TM recording are in parts) and #133 (at a phone's width the inspector stacks under the views) merged first, and their entries sit above this one. The rebase conflicted only in this file, where each branch appended an entry, and the resolution rebuilt it as `510d5b0`'s roadmap followed by this entry. No other file conflicted. Each rebased commit has the same patch id and subject as the commit it replaces. Outside this file the rebased code head's files are the old code head's, `7354745`'s, except the sixteen that #132 and #133 changed and this branch did not, which are `510d5b0`'s, and `style.css`, which #133 and this branch both changed: there the old code head's file and the rebased one differ by #133's change to it, the two differences having one patch id. The commits map `452c57b` → `70bd1bb`, `601b791` → `b8e7f41`, `29b5c63` → `c5af9c0`, `6bb5f53` → `3ef3cf1`, `c4604fd` → `4f136f9`, `547d413` → `7d63f3e`, `b388860` → `3cc6582` and `7354745` → `e5ecda2`, and this entry's commit, `afcce54`, → this one. `092e1ce`, the test's fix after CI's first run, was written on the rebased branch and replaces nothing, and nor does `9a49e0d`, the hooks' split after its second.
 
 **Every figure above was measured before the rebase, on the commits these replace.** The counts that read git were run again over the rebased range and were unchanged, 8 commits and 3 files, 1,208 insertions and 5 deletions; `092e1ce` then makes them 9 commits and 1,362 insertions, by file +13/−1, +110/−4 and +1,239/−0, and `9a49e0d` 10 commits and 8 files, 1,573 insertions and 51 deletions. **The suite's totals are not unchanged, since #132's and #133's files are in the tree now.** Run on 2026-10-06 on the rebased code with this entry's first rebased version, from `web/`, each exit 0: `pnpm exec biome ci --error-on-warnings` (346 files), `pnpm run typecheck`, `pnpm run test:coverage` under the lock and the cap (227 files, 2,211 tests; statements 97.51, branches 91.57, functions 98.38, lines 98.86), `pnpm run build:app`, and two browser files alone under `-p CPUQuota=25%`: `tm-view-narrow.test.ts` 23 of 23, its slowest case 1,493 ms, at a load of 32.11, and #133's `inspector-phone.test.ts` 45 of 45, its slowest 1,090 ms, at 28.05, run because this branch's header rules reach the inspector's header, which #133 stacks under the views; and the eight hygiene scans from the root, `--self-test` then alone, 16 of 16. Where VERIFICATION above gives 345 files, and 226 files and 2,161 tests, those are the tree before the rebase. **`state-diagram.test.ts` fails at 25 % here as it does on `main`**, which #132's entry records: of four interleaved runs under the same quota, two on `510d5b0`'s tree and two on the rebased head, at loads of 4.14 to 12.44, each exited 1 with two hooks timed out at Vitest's 30 s. **Since `9a49e0d`, which makes each of those hooks three, it passes there**: 16 of 16 in three timed runs alone at that quota and in the gate's run at the commit (CI'S SECOND RUN). The image was built from that version and run: healthy after 4 polls, `/` and its four assets 200, 7 wasm assets. **That version then failed its first run on CI** (CI'S FIRST RUN); the gates at `092e1ce`, the test alone changed, are in VERIFICATION, and the image was not built again here. **`c95303e`, this entry on `092e1ce`, then failed its second run** (CI'S SECOND RUN); the gates at `9a49e0d`, tests alone changed again, are in VERIFICATION, and the image was not built for it either.
+
+#### AN EDITOR'S FIRST PARSE RUNS IN 8 ms SLICES, AND ITS FIRST SCREEN IS COLOURED FROM A PARSE OF ITS OWN LINES MEANWHILE: THE COPY OF A 7,353-STATE MACHINE HELD THE PAGE WHILE ITS 1,518,470 UNITS WERE PARSED IN ONE TASK, WITH NO TIMER FOR 232 TO 249 ms AND NO FRAME FOR 216 TO 232 ms, AND AT A QUARTER OF A CORE NO TIMER FOR 3.9 TO 5.2 s; NOW NO GAP BETWEEN TWO TIMERS OR TWO FRAMES REACHES 100 ms AND THE FIRST SCREEN IS COLOURED 190 TO 255 ms AFTER THE CLICK, WHERE IT WAS 377 TO 431; BY THE USER'S DECISION THE SLICES TAKE TURNS WITH THE PAGE'S OTHER WORK, SO AT A QUARTER OF A CORE THE WHOLE TREE HAD NOT LANDED WHEN THE RECORDINGS ENDED; A DOCUMENT THAT HAS A TREE IS REPARSED AS IT WAS, AND A *FORMAT* THAT CHANGES NOTHING IS NO LONGER REPARSED AT ALL (2026-10-06, branch `post-fork-freeze`, `79abcaa..16d6884`, 4 commits, plus this entry)
+
+**A fix, in `web/` only, to the first of the leftovers #132's entry named**: "The page runs almost no poll for seconds after a TM fork" (WHAT THIS DID NOT CLOSE, there). That entry measured the poll gap at a quarter of a core and profiled it without naming one cause. This entry names one, the copy editor's first tree-sitter parse, measures it at full speed, where a user meets it, and takes it out of the update it ran in. It does not close that entry's other half: `tm-scratch-fork`'s first wait still ends past `until`'s 10 s at a quarter of a core (WHAT THIS DID NOT CLOSE, here). There is no spec or plan file; this entry is the design. Code commits: `719b62d`, the slices and the first screen, with the node suite and the two browser files; `69cc298`, no parse of the first screen at an update that moved nothing, and the comments' ranges; `115a169`, the review's findings: a document that has a tree reparsed in its update again, and the same-text return; `16d6884`, the re-review's.
+
+##### THE HOLD, MEASURED
+
+Every run here is a throwaway browser file, `zz-fork-freeze.test.ts`, copied into `web/tests/browser/`, run and deleted. It mounts the app, loads `tm-scratch-fork.test.ts`'s `BIG` (`map` and `fold` over three elements), clicks *edit a copy* on the TM view once the control is offered, and from the click until 500 ms after both recordings have stopped it records: a chain of `setTimeout(…, 0)` and a chain of `requestAnimationFrame`, whose longest gaps are how long the page ran no timer and drew no frame; every call to `Parser.prototype.parse`, with its text's length and its duration; the first frame in which the copy's editor holds a coloured token; and every worker reply the app took in. Each run took the lane's browser lock and ran under `systemd-run --user --scope -q -p MemoryMax=16G -p MemorySwapMax=0`, with `-p CPUQuota=25%` for the quota runs, and recorded the load average after taking the lock: 2.50 to 11.53 across the 39 runs of the probe.
+
+- **The copy's text.** 1,518,470 UTF-16 units on 25,862 lines: 7,353 states and 18,499 rules, a line each, which together are the 25,852 that `tm-scratch-fork.test.ts`'s doc calls states (THE REVIEW, I4). That is the machine under `unary`, which the browser tier's setup stores; under `binary` the same program's machine is 1,906,914 units.
+- **One call to the parser holds the page.** In five runs on `79abcaa`'s colourer, taken in turn with five on the branch (AFTER, INTERLEAVED), the editor mounted 152 to 197 ms after the click; the plugin's grammar arrived and its `update` called `parser.parse` on the whole text, which took 194.3 to 207.8 ms; no timer ran for 232 to 249 ms and no frame was drawn for 216 to 232 ms, each gap starting at the mount; and the first coloured token was seen 377 to 431 ms after the click. A second gap followed each: 107 to 124 ms without a timer, 109 to 114 without a frame.
+- **With the program's run finished it is the same.** One run forked after the program's run had ended: the parse took 200.0 ms, with no timer for 229 ms and no frame for 219 ms. The hold does not need the two recordings.
+- **Where the main thread's time went.** A CPU profile of the page through `cdp()`'s `Profiler`, sampled every 200 µs from the click to 500 ms after the recordings: of 1,297 ms, 595.9 idle, 198.2 in tree-sitter's wasm, all of it under one stack, the plugin's grammar continuation, `dispatch`, `update`, `#rebuild`, `parse`; 176.6 reading the workers' replies' data; 103.0 in layout forced by `clientHeight` and `scrollTop` while drawing; 35.4 in GC.
+- **#132's profile, read again.** Its re-review's profile of the same gesture at a quarter of a core put 3,204.6 of 12,607 ms in tree-sitter and listed it first of four costs. As a call tree, 3,205.5 ms of that profile is under the same one `parse`, in one task.
+
+##### WHAT A QUARTER OF A CORE DOES TO IT
+
+`CPUQuota=25%` puts the browser's every process and thread on a quarter of one core: the page's main thread, the program's worker and the copy's worker, each recording.
+
+- **The parse takes seconds, and the gap around it more.** In three runs on `79abcaa`'s colourer taken in turn with three on the branch: the parse took 3,002 to 3,310 ms; from the mount, no timer ran for 3,901 to 5,193 ms and no frame was drawn for 3,404 to 4,296 ms; and the first coloured token was seen 8,105 to 9,298 ms after the click.
+- **Timers barely run at all there, with or without the parse.** In the same three runs the timer chain's gaps of 100 ms or more summed to 13,613, 14,326 and 12,890 ms, against windows of 13,813, 14,310 and 13,107 ms from the click (a gap under way at the click is counted whole). Replies are taken in through a gap: in a first run of this probe, no timer ran from 9,896 to 13,002 ms after the click, and the page took in 52, 83 and 98 replies in the three whole seconds inside that. This entry did not measure why a timer waits while replies are handled.
+- **So every figure at a quarter of a core here is of three threads sharing it**, the page's and two workers', and not of one thread on a slower machine.
+
+##### THE PARSER CAN STOP AND BE ASKED AGAIN
+
+`web-tree-sitter` 0.27.0's `parse` takes a `progressCallback`; a parse whose callback answers `true` returns `null` and keeps its place, the next `parse` on that parser carries on, and `reset()` drops the place. A second throwaway file, `zz-slice-parse.test.ts`, took the copy's text off a mounted app with its recordings stopped and parsed it on a parser of its own, five runs:
+
+- **In one go**, 1,518,470 units took 153.9 to 179.2 ms in 25 parses.
+- **In slices of 8 ms, stopped by the clock and resumed after a `setTimeout(…, 0)`**: 21 to 23 slices, 165.8 to 179.1 ms of parsing, the longest slice 8.1 ms, and 16,095 calls of the callback. The tree was walked beside the tree from one go, node by node: the same 787,756 nodes, in each of the five runs.
+- **The worst case under the colour ceiling.** The same machine's states four times over, 6,072,644 units against a ceiling of 6,100,000: 613.6 to 672.5 ms in one go in 25 parses, where `colour.ts`'s comment had extrapolated about 480; in slices, 676.1 and 688.4 ms over 84 and 85.
+- **A keystroke.** One character inserted and the text reparsed against the edited tree: 3.0 to 4.3 ms at 1,518,470 units in ten measurements, 13.4 to 15.1 ms at 6,072,644 in four. The comment's "the incremental path does not grow with the document" was measured at 103,028 units and does not hold past it.
+- **The first screen alone.** A third file parsed only the text's start: its first 6,048 units, 130 lines, in 0.70 ms (median of 21), its first 20,064 in 2.20 ms and its first 64,040 in 6.80 ms, each giving the captures the whole tree gives over those units.
+
+##### WHAT THE USER DECIDED
+
+Three ways to run the slices were put to the user with these measurements, two of them from uncommitted prototypes of the colourer on the probe above, at loads of 6.50 to 11.53:
+
+| | The page through the parse | First coloured token after the click | At a quarter of a core |
+|---|---|---|---|
+| **A.** Slices from `setTimeout`, taking turns | no gap of 100 ms in timers or frames, 3 runs of 3 | 757 to 969 ms: plain text until the whole tree | not coloured within the 13,318 and 14,606 ms measured, which ran to 500 ms past the recordings' end |
+| **B.** Slices from `scheduler.postTask` at `user-blocking`, ahead of other work | no frame for 117 to 127 ms, no timer for 221 to 250 ms and no reply taken in for 206 to 232 ms | 388 to 431 ms | no timer for 4,203 and 4,306 ms, as before |
+| **C.** A, with the first screen coloured from a parse of its own lines | as A | at the mount | as A past the first screen |
+
+**The user chose C.** Told with it: a screen scrolled past the first before the whole tree lands shows plain text; and none of the three makes `tm-scratch-fork`'s first wait fit in `until`'s 10 s at a quarter of a core.
+
+**Two things the controller told the user that did not hold, and what was done.** The options were described as also covering "the other full reparse (a multi-change edit such as a format)", and the first commit did slice those. The whole-branch review measured what that does to a document that is already coloured (THE REVIEW, I1), and the controller put those reparses back in one go rather than ask for a second decision: it is `main`'s behaviour, and the decision was about a mount. And the baseline's slow run was reported at a load of 9; it was at 6.23.
+
+##### THE FIX
+
+All in `web/src/colour.ts`, in the plugin `colourPluginClass` builds.
+
+- **Which parses are in slices: the ones with no tree before them, and so nothing on screen to lose.** An editor's first parse, the first after a document comes back under the colour ceiling, and the parse of whatever text a change leaves while one of those is pending. `#rebuild` starts one: it keeps the text in `#pending` and runs one slice, a `parse` whose `progressCallback` answers `true` once `PARSE_SLICE_MS`, 8, have passed. A document whose parse finishes in that slice is coloured in that update, as every document was. Otherwise the rest run from `#resume`, a slice to a `setTimeout(…, 0)`, and when one returns a tree the plugin dispatches one empty transaction, as it does when its grammar arrives, and `update` rebuilds.
+- **The first screen.** While a parse is pending, `#firstScreen` parses the document's start, up to the end of the last visible line, in one go on a second parser, and colours the visible ranges from that tree, when that end is at most `FIRST_SCREEN_UNITS`, 32,000, units in. Past it the screen is plain until the tree lands. The bound is what keeps this parse small: it runs inside an update.
+- **A change while a parse is pending abandons it.** `#abandon` resets the parser and clears the timer, and the new text's parse starts from its first unit. Without the reset the next `parse` resumes the abandoned one on the new text. `destroy` abandons too.
+- **A document that has a tree is reparsed in the update that changed it, as it was.** A single change edits the tree and reparses against it; a transaction of several changes parses the whole text in one go.
+- **A replacement by the same text is not a change.** `#reparse` returns first when the two documents are equal. *Format* dispatches the server's one edit over the whole buffer whether or not a character changed (`lsp-text.ts`'s `applyEdits`), so every format that changed nothing reparsed the whole text.
+- **An update that moved neither the text nor the screen rebuilds nothing while a parse is pending.** The first screen's marks are a parse of their own, and a caret moving would have parsed those lines again.
+
+`treeSitterColour` and its callers are unchanged. `colourPluginClass` takes the clock a slice is timed by as a second argument, which nothing in `src/` passes.
+
+##### AFTER, INTERLEAVED
+
+Five pairs at full speed and three at a quarter of a core (`ab.sh`): the probe on `79abcaa`'s `colour.ts` (A), then on the branch's (B), in turn, each a locked run of its own. A is `79abcaa`'s file byte for byte, and B's differs from `115a169`'s in comment lines only (VERIFICATION). Loads after the lock: 4.54 to 6.29 at full speed, 3.47 to 5.62 at the quota. Times are milliseconds from the click; a gap is the longest that starts at the editor's mount or after it.
+
+| | A, `79abcaa` | B, the branch |
+|---|---|---|
+| **Full speed, five runs each** | | |
+| the editor mounts | 152 to 197 | 150 to 172 |
+| calls to the parser on the copy's text | 1, of 194.3 to 207.8 ms | 24 or 25, of 178.6 to 188.0 ms in all, the longest 8.1 to 9.0 ms |
+| no timer for | 232 to 249 | no gap of 100 ms |
+| no frame for | 216 to 232 | no gap of 100 ms |
+| first coloured token | 377 to 431 | 190 to 255 |
+| the whole tree lands | with that token | 720 to 860 |
+| the program's run ends; the copy's stops | 494 to 593; 739 to 799 | 406 to 460; 744 to 801 |
+| the copy-build reply's handler | 19 to 31 | 18 to 31 |
+| **A quarter of a core, three runs each** | | |
+| the editor mounts | 3,199 to 4,297 | 4,598 to 5,699 |
+| calls to the parser on the copy's text | 1, of 3,002 to 3,310 ms | 11 to 26 by the window's end, the tree not landed |
+| no timer for | 3,901 to 5,193 | 1,704 to 2,499 |
+| no frame for | 3,404 to 4,296 | 504 to 1,002 |
+| first coloured token | 8,105 to 9,298 | 5,698 to 7,598 |
+| before the mount: no timer for; no frame for | 1,202 to 2,200; 999 to 1,102 | 1,494 to 2,702; 702 to 1,197 |
+| the copy-build reply: read, then handled | 100 to 399, then 408 to 799 | 99 to 399, then 594 to 602 |
+
+- **At full speed the hold is gone and the first screen is coloured sooner.** B's calls are the slices and the first screen's own parse.
+- **The whole tree lands later, by the user's decision**: 720 to 860 ms after the click, where the tree and the first token came together at 377 to 431. Until it lands a screen past the first is plain.
+- **At a quarter of a core the gaps from the mount are shorter and the tree does not land while the recordings run.** The slices ran 11 to 26 times in the 14,002 to 14,398 ms measured, 756 to 1,173 ms of parsing against the 3,002 to 3,310 the whole parse takes there.
+- **What holds the page before the mount is on both sides and is not the parse**: the copy-build reply, which took 693 to 1,001 ms to read and handle at the quota and 26 to 42 ms at full speed. It is the longest single task left on the gesture (WHAT THIS DID NOT CLOSE).
+
+##### WHAT A USER SEES
+
+- **Copying a large machine no longer stops the page.** Timers and frames keep coming through the copy's first second: no gap of 100 ms in either, where there was one of 232 to 249 ms and one of 216 to 232.
+- **The copy's first screen is coloured as the editor appears**, and the rest of its text when the whole parse lands: 720 to 860 ms after the click for the 1,518,470-unit machine here, with both recordings running.
+- **Scrolled past the first screen before then, the text is plain**, and turns coloured when the tree lands. The first screen's parse reaches 32,000 units in.
+- **Typing into a copy whose first parse has not landed starts that parse over at each key.** The review typed a key every 100 ms into 1,534,779 units whose parse was pending, shown at their end: the end was coloured after 0 of 30 keys, and about 200 ms after the last. The first screen is coloured throughout; this is text past it, in an editor that has not yet had a tree.
+- **A λ copy longer than 32,000 units has no first screen**: its text is one line, so the last visible line ends where the text does. It is plain until its whole parse lands. One of 65,045 units parsed in 7.1 ms here, inside its first slice; at half a core one parse of it took two.
+- **A document that is already coloured behaves as it did**, but for one thing: a *format* that changes nothing no longer reparses it.
+- **A small document behaves as it did.** Its parse finishes in the first slice, in the update that asked for it.
+
+##### THE TESTS
+
+**Node, `tests/node/colour.test.ts`: 34 cases, where there were 12.** One pins the two bounds' values. The other 21 are a new suite over the real TM grammar and a real `Parser`, with three stand-ins: the view is a stub whose `dispatch` calls the plugin's `update`, as a real view's does; the clock is a counter, one millisecond a reading, so a slice is nine progress callbacks whatever the machine; and `setTimeout` is Vitest's, so a case runs one continuation at a time. Its text is a 1,000-state machine of 91,779 units, which makes more than 600 callbacks.
+
+- **A first parse**: the first update reads the clock ten times, one slice, and one timer is left; a screen past the first is plain until the tree lands, and the view is then asked for one recompute, its second; the first screen's marks equal the whole tree's, for a screen that ends inside a word and after a scroll that stays in reach; the parser is handed the whole text once, with a callback, and without one only the text to the end of the screen's last line; a screen in two pieces is read to the end of the second; an update that moved nothing parses nothing; a line ending on unit 32,000 is in reach and the next is not.
+- **A change while it is pending**: one edit, and separately several, start one parse of the new text, in slices, and the marks at the end are the new text's; a replacement by the same text starts nothing over; a crossing of the ceiling leaves nothing scheduled, and the way back is parsed afresh.
+- **A document with a tree**: a keystroke, several changes and a replacement of the whole text are each reparsed in the update, with no timer and no reading of the clock, the screen coloured; a replacement by the same text calls the parser 0 times; a change that keeps the length and the lines and not the text is reparsed, for one character and for the whole text; an idle update queries nothing.
+- **The edges**: a document that parses inside one slice is coloured in the update with nothing scheduled; an editor with nothing visible draws nothing and still parses; a slice that throws from its timer is not tried again, and the next change parses afresh; a destroy mid-parse leaves nothing scheduled.
+
+RED, before `colour.ts` changed: 11 of the first 11 cases failed, on `PARSE_SLICE_MS` being undefined or on no timer being scheduled; the 12 older cases passed.
+
+**Browser, two new files, 4 cases.** Each wraps `Parser.prototype.parse` before anything mounts and records every call: its text's length, whether it carried a progress callback, whether it returned a tree. What an editor shows when its first slice returns is read in a microtask queued from the wrapper: after the update the slice ran in, before any timer.
+
+- **`colour-slices.test.ts`**, a bare `EditorView` on a 6,000-state machine of 566,779 units, its grammar held back until the editor shows what the case wants. Shown at its start: the parse is pending when the first slice's update returns and the screen is coloured, `tapes` first; the slices are one parse resumed, every one but the last returning `null`; nothing without a callback was longer than 32,000 units. Shown at its end: plain when the first slice's update returns, with no parse in one go; coloured once the tree lands, the last state's name as a `goto` target, with the case dispatching nothing; and still coloured in the task of a transaction of two changes.
+- **`colour-slices-fork.test.ts`**, the app: `BIG`, *edit a copy* on the TM view as soon as it is offered. When the copy's text first reaches the parser it is one call, a slice that did not finish, and the first screen is already coloured, `tapes` first; nothing longer than 32,000 units went to the parser without a callback. It waits for nothing after that: at a quarter of a core the tree does not land while the recordings run. Its three waits are in a hook and two cases: as one case it took 7,396 to 9,093 ms alone at `CPUQuota=25%`, of Vitest's 15 s.
+
+**The sabotages.** Each is one edit to `colour.ts`, made by a script that saves the file, asserts the edit's pattern matches once, runs the suite, restores from the copy and compares. Replayed at `16d6884`: 29 of 32 fail the node suite and 8 of 8 the browser files.
+
+| | `colour.ts`, node suite: what changes | Cases that fail, and the first | Its failure |
+|---|---|---|---|
+| S1 | `#abandon` does not reset the parser | 2: starts over on the new text when an edit arrives while the parse is pending | AssertionError: expected [ { from: +0, to: 5, …(1) }, …(474) ] to deeply equal [ { from: +0, to: 8, …(1) }, …(470) ] |
+| S2 | the first screen is cut at the visible range's end, not its line's | 6: colours the first screen from its own lines while the whole parse is pending | AssertionError: expected [ { from: +0, to: 5, …(1) }, …(473) ] to deeply equal [ { from: +0, to: 5, …(1) }, …(474) ] |
+| S3a | the first screen's bound is `>=` for `>` | 1: reaches a line that ends at `FIRST_SCREEN_UNITS` exactly, and not the line after it … | AssertionError: expected [] to deeply equal [ …(456) ] |
+| S3b | the first screen has no bound | 4: gives the first update one slice of the parse and leaves the rest to a timer | AssertionError: expected [ …(470) ] to deeply equal [] |
+| S4 | `#resume` does not set `#landed` | 5: colours text past the first screen once the whole parse lands, asking the view once … | AssertionError: expected [] to deeply equal [ …(470) ] |
+| S5 | `#resume` dispatches after every slice | 1: colours text past the first screen once the whole parse lands, asking the view once … | AssertionError: expected 73 to be 2 // Object.is equality |
+| S6 | `destroy` does not abandon | 1: leaves nothing scheduled once destroyed mid-parse | AssertionError: expected 1 to be +0 // Object.is equality |
+| S10a | the progress callback never stops the parse | 14: gives the first update one slice of the parse and leaves the rest to a timer | AssertionError: expected 652 to be 10 // Object.is equality |
+| S10b | the budget is `>=` for `>` | 2: gives the first update one slice of the parse and leaves the rest to a timer | AssertionError: expected 9 to be 10 // Object.is equality |
+| S11 | the first slice is left to the timer | 4: gives the first update one slice of the parse and leaves the rest to a timer | AssertionError: expected +0 to be 10 // Object.is equality |
+| S12 | nothing is drawn while a parse is pending | 7: colours the first screen from its own lines while the whole parse is pending | AssertionError: expected [] to deeply equal [ { from: +0, to: 5, …(1) }, …(474) ] |
+| S13 | `#abandon` does not clear the timer | 4: starts over on the new text when an edit arrives while the parse is pending | AssertionError: one parse is pending, not two: expected 2 to be 1 // Object.is equality |
+| S14 | the ceiling test comes before the abandon | 4: starts over on the new text when an edit arrives while the parse is pending | AssertionError: expected [ …(470) ] to deeply equal [ …(467) ] |
+| S15 | `update` does not read `#landed` | 5: colours text past the first screen once the whole parse lands, asking the view once … | AssertionError: expected [] to deeply equal [ …(470) ] |
+| S16 | `#slice` leaves `#pending` set when the tree lands | none: 34 passed (34) |  |
+| S17 | the first screen's parser is handed the whole text | 1: parses no more than the first screen’s lines in one go while the whole parse is pending … | AssertionError: expected [ 91779 ] to deeply equal [ 1234 ] |
+| S18 | no guard for an editor with no visible range | 1: draws nothing, and still parses, for an editor with nothing visible | TypeError: Cannot read properties of undefined (reading 'to') |
+| S19 | the next slice is scheduled before this one runs | 1: does not try again a slice that throws from its timer, and parses afresh on the next chang … | AssertionError: nothing is scheduled to throw again: expected 1 to be +0 // Object.is equality |
+| S20 | `#resume` throws when nothing is pending | none: 34 passed (34) |  |
+| S21 | `update` rebuilds at every update while a parse is pending | 1: does not parse the first screen again at an update that moved neither the text nor the scr … | AssertionError: expected 3 to be 2 // Object.is equality |
+| S22 | `update` does not rebuild when there is no tree and no parse | 21: gives the first update one slice of the parse and leaves the rest to a timer | AssertionError: expected +0 to be 10 // Object.is equality |
+| S23 | a replacement by the same text is reparsed | 2: does not reparse a replacement by the same text | AssertionError: expected 1 to be +0 // Object.is equality |
+| S24 | the same-text return comes after the abandon | 1: does not start a pending parse over for a replacement by the same text | AssertionError: no slice ran in that update: the pending parse is still the text’s: expected 10 to be +0 // Object.is equality |
+| S25 | a change with no tree parses the new text in one go | 2: starts over on the new text when an edit arrives while the parse is pending | AssertionError: one parse is pending, not two: expected +0 to be 1 // Object.is equality |
+| S26 | several changes against a tree drop it for a sliced parse | 1: reparses a transaction of several changes against a landed tree in that update, the screen … | AssertionError: nothing is left to a timer: expected 1 to be +0 // Object.is equality |
+| S27 | `#rebuild` does not clear `#landed` | 1: rebuilds nothing at an update that moved nothing, once its tree has landed | AssertionError: expected 2 to be +0 // Object.is equality |
+| S28 | the first visible range decides the first screen's end | 1: reads the first screen’s end off the last visible range when the screen is in pieces … | AssertionError: expected [ { from: +0, to: 5, …(1) }, …(179) ] to deeply equal [ { from: +0, to: 5, …(1) }, …(640) ] |
+| S29 | `PARSE_SLICE_MS` is 80 | 1: are a slice of 8 ms and a first screen of 32,000 units | AssertionError: expected 80 to be 8 // Object.is equality |
+| S30 | `FIRST_SCREEN_UNITS` is 64,000 | 4: are a slice of 8 ms and a first screen of 32,000 units | AssertionError: expected 64000 to be 32000 // Object.is equality |
+| S31 | `#resume` does not null `#timer` | none: 34 passed (34) |  |
+| S32 | same length and same lines taken for the same text | 1: reparses a change that keeps the text’s length and its lines and not the text | AssertionError: expected [ { from: +0, to: 5, …(1) }, …(474) ] to deeply equal [ { from: +0, to: 7, …(1) }, …(473) ] |
+| S33 | same length taken for the same text | 1: reparses a change that keeps the text’s length and its lines and not the text | AssertionError: expected [ { from: +0, to: 5, …(1) }, …(474) ] to deeply equal [ { from: +0, to: 7, …(1) }, …(473) ] |
+
+**Three do not fire, and each is a line nothing later reads.** S16: after a landing every reader of `#pending` is behind a test of `#tree`, or behind `#abandon`, where a stale value only resets a parser with nothing outstanding. S20: `#resume` cannot run with nothing pending, because the timer is cleared wherever `#pending` is; the guard is there for the type checker, and stops rather than reschedules. S31: a `#timer` left holding a fired id is only ever passed to `clearTimeout` or overwritten. The reviews' own sabotages found the same of four deletes of a tree or a parser and of the reset in `destroy`.
+
+| | `colour.ts`, the two browser files: what changes | Cases that fail, and the first | Its failure |
+|---|---|---|---|
+| B1 | the progress callback never stops the parse | 3: colour-slices-fork.test.ts > is coloured on its first screen when the first slice of its parse returns, and i … | AssertionError: expected [ { units: 1518470, …(2) } ] to deeply equal [ { units: 1518470, …(2) } ] |
+| B2 | nothing is drawn while a parse is pending | 2: colour-slices-fork.test.ts > is coloured on its first screen when the first slice of its parse returns, and i … | AssertionError: expected 0 to be greater than 0 |
+| B3 | `#resume` does not set `#landed` | 1: colour-slices.test.ts > shows the end of the text plain until the whole parse lands, colours it then, an … | Error: timed out after 10000ms waiting for the last state’s name to be coloured as a `goto` target |
+| B4 | the first screen has no bound | 1: colour-slices.test.ts > shows the end of the text plain until the whole parse lands, colours it then, an … | AssertionError: expected 118 to be +0 // Object.is equality |
+| B5 | `#resume` does not dispatch when the tree lands | 1: colour-slices.test.ts > shows the end of the text plain until the whole parse lands, colours it then, an … | Error: timed out after 10000ms waiting for the last state’s name to be coloured as a `goto` target |
+| B6 | the first screen's parser is handed the whole text | 2: colour-slices-fork.test.ts > is coloured on its first screen when the first slice of its parse returns, and i … | AssertionError: expected [ { units: 1518470, …(2) }, …(1) ] to deeply equal [ { units: 1518470, …(2) } ] |
+| B7 | the rest of the parse is never scheduled | 2: colour-slices.test.ts > colours the first screen in the update its first slice runs in, and resumes one … | Error: timed out after 10000ms waiting for the whole parse to land |
+| B8 | several changes against a tree drop it for a sliced parse | 1: colour-slices.test.ts > shows the end of the text plain until the whole parse lands, colours it then, an … | AssertionError: expected 0 to be greater than 0 |
+
+**A sabotage that did not fire, and what it found.** The first replay left a guard for an editor with no visible range removable: the case's only update ran inside the promise the grammar arrived on, whose `catch` took the `TypeError`. The case now makes a second update from its own stack (S18). The first-screen parse handed the whole text passed every case too, the marks being the same and the cost the defect; a case now reads the parser's own input (S17).
+
+##### A HAZARD IN `web-tree-sitter`, MET BY A PROBE
+
+**A `TreeCursor` left to the garbage collector corrupts the wasm heap in `web-tree-sitter` 0.27.0, and `web/src` makes none.** The slice probe compared two trees by walking each with `tree.walk()` and did not delete the two cursors. The next parse of the 6,072,644-unit text then trapped, `RuntimeError: table index is out of bounds` in one run and `null function` in two, three runs of three; with the cursors deleted in a `finally`, none of two. Five isolating cases had not trapped: sliced alone, sliced beside a live tree, in one go beside one, and four trees kept. The library's cursor finalizer calls `_ts_tree_cursor_delete_wasm` with the tree's address and without marshalling the cursor first, where `TreeCursor.delete` marshals it: the finalizer frees whatever the shared transfer buffer holds when it runs. The `Tree`, `Parser` and `Query` finalizers pass their own address. `grep -rn "\.walk(" web/src` prints nothing. The trap lands in whichever parse runs after the collector, which is how it first read as a fault of the sliced parse.
+
+##### THE REVIEW
+
+**A whole-branch review by a reviewer who had not seen the work, at the second commit: no Critical, four Important, eight Minor; then its re-review of the fixes, five small findings; all taken.** Its probes and logs are in the record's `review/`.
+
+- **I1, a coloured screen went plain.** The first commit also sliced a transaction of several changes and a replacement of the whole text against a landed tree, and dropped the tree to do it. Measured on a bare editor shown at its end, the whole text replaced by itself: at 139,279, 566,779 and 1,534,779 units the screen was plain for 31, 82 and 233 ms, 1 of 2, 5 of 5 and 14 of 15 frames, on an idle page; `79abcaa`'s colourer held the update for 19.6, 56.3 and 164.4 ms with the screen coloured. *Format*, its undo, `Alt-ArrowUp` and `Mod-]` over several lines reach it. **Put back**: a document that has a tree is reparsed in the update, as on `main` (`115a169`). The re-review drove 300 random transactions against a landed tree, 0 leaving marks unlike a fresh parse's and no timer scheduled, and measured the real editor again: same text 2.7 to 5.2 ms with no parse; another text 16.5, 59.3 and 150.3 ms; two changes 13.9, 51.2 and 133.2 ms; 0 frames plain.
+- **I2, typing keeps a pending parse from landing.** A key every 100 ms into 1,534,779 units: the end coloured after 0 of 30 keys. Kept, confined by I1's change to an editor that has not had a tree, and stated (WHAT A USER SEES). Re-measured on the first parse at `115a169`: 0 of 30, and coloured 93 ms after the last key's 100 ms wait.
+- **I3, lines no case held.** `#landed` never cleared, and the first of two visible ranges deciding the first screen's end, each passed the suite; so did a slice of 80 ms. Three cases (S27, S28, S29 and S30).
+- **I4, 7,353 states.** The comments and the first commit's subject said "25,852-state machine", from `tm-scratch-fork.test.ts`'s doc. That is the row count, 7,353 states and 18,499 rules, a correction `crates/redextape-lsp/src/lib.rs` already records. Reworded, the commit's subject with it.
+- **The Minor findings**: "about every 172 units" was in no log, and the logs say 16,095 callbacks over 1,518,470 units; two ranges were quoted as "both recording" with a run in them that was not; a resumed parse is the parse in one go only for text without errors; the first screen's parse and a slice are not bounded on text the grammars make more work of, or inside one token; a λ copy has no line end to cut at; the fork file pinned the `unary` text's length and asserted the program's run was still recording; the update that carries a slice is longer than the slice.
+- **The re-review's five.** The same-text rule had no opposite: with `eq` weakened to "same length" the suite passed, and a character typed over another would have kept the old tree; one case (S32, S33). `colour-slices.test.ts` could not fail by the name its header gave; it records the first slice whatever it returned. Three sentences said more than their logs: 11.1 to 18.8 ms was of the path I1 removed, "text made mostly of errors" was a mistake every 61 to 1,499 units, and "12 of 12" cut inside a bracket was 6 of 6, the reviewer's own overstatement (`16d6884`).
+- **What the reviews found sound**: the three invariants (a timer implies a pending parse, a pending parse implies no tree, a parse starts only with neither); `Text.eq` on every change, 0.000 to 0.017 ms for a keystroke and 1.8 ms for 1,518,470 units replaced by themselves; the vendored `parse`, `reset` and callbacks, read; a second parser run between slices changing neither result; CodeMirror's handling of the empty transaction, with both update listeners in `web/src` returning at `!u.docChanged`; and no second whole-text walk on the gesture.
+
+##### WHAT THIS DID NOT CLOSE
+
+- **`tm-scratch-fork`'s first wait for the source run after a fork still ends past `until`'s 10 s at a quarter of a core**, and passes on `until`'s order. The review ran the file twice there on the branch and twice with `79abcaa`'s `colour.ts`: `leaves the source session running` took 14,104 and 14,090 ms, and 14,592 and 13,590 ms. The parse was never what that wait waited on: the timer chain is held through the whole recording there (WHAT A QUARTER OF A CORE DOES TO IT), which is #132's second leftover, a cheaper first TM recording.
+- **The copy-build reply is the longest single task left on the gesture**: 26 to 42 ms to read and handle at full speed, and 693 to 1,001 ms at a quarter of a core, on both sides of the interleaved runs. It is not a walk over the text: the review timed each such walk on the 1,518,470 units, and the costliest, `EditorState.create`, averaged 1.83 ms in its run and 2.49 ms in a second.
+- **A document that has a tree is still reparsed in one go.** A transaction of several changes parses the whole text: `moveLine` and a multi-line indent are two or more changes, and at 1,534,779 units that held the update for 164.4 ms on `79abcaa`. A single change that replaces most of a large text costs the same. Two ways through, neither tried: edit the tree once per change, in the coordinates of the text as it stands after the changes before it, so that several changes reparse against the tree as one does; or keep drawing the old tree's marks while a sliced parse runs.
+- **A keystroke's reparse grows with the document**: 3.0 to 4.3 ms at 1,518,470 units and 13.4 to 15.1 ms at 6,072,644, inside the keystroke's update, plus the `doc.toString()` each one makes.
+- **Past the first screen, a first parse that never gets one parse's time never lands**: typing faster than that, or a quarter of a core with two recordings.
+- **A slice cannot stop inside a token.** One comment line of 3,000,000 units parsed in 57.2 ms with no callback.
+- **The first screen's parse is bounded in units, not in time.** 32,000 units of well-formed text took 2.5 to 3.6 ms in the four grammars; of one mnemonic repeated, 14.5 ms as asm.
+- **A resumed parse of text with many errors can recover differently from a parse in one go**, and differently again with where its slices end, in all four grammars. With one mistake in 0.55 to 1.5 million units, 0 of 8 sliced parses differed, in six cases. No test compares the plugin's marks with a parse in one go over text with errors, and none should.
+- **In a hidden tab the slices come once a second**, by Chromium's throttling of chained timers: a tree of 24 slices would take 24 s or more to land there. Not measured. Nothing but colour waits on the tree.
+- **The design's sentence is superseded and not edited**: `docs/superpowers/specs/2026-09-20-plan7-part3-editor-intelligence-design.md` says a full reparse "extrapolates to about 480 ms at the ceiling" and that "the incremental path does not grow with the document at all". Measured here: 613.6 to 672.5 ms, and 13.4 to 15.1 ms.
+- **`tm-scratch-fork.test.ts`'s doc still says "25,852 states"**, as it did on `main`; this branch does not touch that file.
+- **WebKit and Firefox are unmeasured.** Every figure is Chromium's.
+
+##### VERIFICATION
+
+Run on 2026-10-06 in the main checkout on branch `post-fork-freeze`, from `web/` unless stated, at `16d6884`, the last commit to change code; the scans again with this entry committed. `pkg/`, `pkg-lsp/` and `web/bindings/` are `79abcaa`'s builds: the branch changes no crate, no `Cargo.toml` or `Cargo.lock`, and neither `web/package.json` nor `web/pnpm-lock.yaml`. Every browser run, the coverage gate's included, ran under `flock <the lane's browser lock> systemd-run --user --scope -q -p MemoryMax=16G -p MemorySwapMax=0`, plus `-p CPUQuota=25%` for the quota runs.
+
+```
+pnpm exec biome ci --error-on-warnings  → exit 0, 348 files (1 info, biome.json's deprecated `recommended`)
+pnpm run typecheck                      → exit 0
+pnpm run test:coverage                  → exit 0, 229 files / 2,243 tests; 97.45 / 91.54 / 98.38 / 98.81 against 95 / 89 / 97 / 97
+pnpm run build:app                      → exit 0
+scripts/check-{text-bytes,citations,attributions,doc-figures,shared-docs,colours,grammar-wasm,lua}.sh, --self-test then alone, from the root → 16 of 16 exit 0
+five browser files, each alone under -p CPUQuota=25%, at loads 8.03 to 13.68 → exit 0, every case passing:
+  colour-slices 2 of 2, slowest case 1,122 ms; colour-slices-fork 2 of 2, 4,492 ms; tm-scratch-fork 5 of 5, 13,303 ms;
+  colour 5 of 5, 1,112 ms; colour-ceiling 1 of 1, 303 ms
+docker build --network=host, then run --network host, of the image built from the checkout at `16d6884` → build exit 0; healthy after 4 polls; GET / 200 and its 4 assets 200; 7 wasm in the image; the container and the image removed
+```
+
+The Rust gates and `check-slow.sh` were not run: the diff touches no Rust. Each probe was copied into `web/tests/browser/`, run and deleted; each sabotage and each A side of the interleaved runs was restored from a saved copy and compared with `cmp`; `git status` was empty after each.
+
+**Every count this entry quotes, with what produces it.** The lane's record directory is scratch, not tracked, and each command runs from it unless it reads git. `logs/` holds every locked run, `sab/` the sabotages, `review/` the two reviews' evidence, `probes/` the throwaway files.
+
+| Value | What | Produced by |
+|---|---|---|
+| 4; `719b62d`, `69cc298`, `115a169`, `16d6884` | commits in the range; their SHAs | `git rev-list --count 79abcaa..16d6884`; `git log --format='%h %s' 79abcaa..16d6884` |
+| 1,518,470 units, 25,862 lines | the copy's text | `grep -h -o "fork doc [0-9]* units, [0-9]* lines" logs/ab-*.log \| sort \| uniq -c` |
+| 7,353; 18,499; 25,852; 1,906,914 | states, rules, their sum; the `binary` machine's units | `node review/count-states.mjs` |
+| 2.50 to 11.53, 39 runs | the load after the lock, over every run of the fork probe | the first block of `python3 loads.py` |
+| every figure of THE HOLD's second bullet; AFTER's table; 107 to 124 and 109 to 114 | the ten runs at full speed and the six at the quota, taken in turn | `python3 abtable.py ab-full ab-q25` (one row a run), and `grep -h -o "timer gaps.*\|frame gaps.*" logs/ab-full-A-*.log` for each second gap |
+| 200.0, 229, 219 | the run forked with the program's run finished | `python3 abtable.py full-idle` |
+| 1,297; 595.9, 198.2, 176.6, 103.0, 35.4 | the profile at full speed | `python3 profcat.py profiles/fork-full-prof-1.cpuprofile` |
+| one stack | where the 198.2 ms is | `python3 proftree.py profiles/fork-full-prof-1.cpuprofile 12 22` |
+| 3,204.6 of 12,607; 3,205.5 | #132's profile | `/home/davey/temp/redextape-lanes-2026-10-05-record/a-stall/review2/fork-prof-25-1.summary.txt`; `python3 proftree.py` on `…/a-stall/review2/profiles/review2-fork-25.cpuprofile` with `150 30` |
+| 13,613, 14,326, 12,890 of 13,813, 14,310, 13,107 | the timer chain's gaps and the windows, A at the quota | `grep -h -o "timer gaps >=100 ms: [0-9]*, total [0-9]* ms\|window [0-9]* ms" logs/ab-q25-A-*.log` |
+| 9,896 to 13,002; 52, 83, 98 | a gap, and the replies taken in inside it | `grep -o "timer gaps.*" logs/q25-1.log` (`3106@+9896`); `grep -o "MSGS fork-q25-1 per second.*" logs/q25-1.log` (seconds 10 to 12) |
+| 153.9 to 179.2 in 25; 21 to 23, 165.8 to 179.1, 8.1, 16,095; 787,756 in five | the copy's text in one go and in slices | `grep -h -o "SLICE BIG (1518470 units) one-shot x5: [0-9. ]*\|SLICE BIG sliced budget 8 ms, clock every 1 calls: .*longest slice [0-9.]* ms\|SLICE BIG sliced vs one-shot.*" logs/slice-full-*.log` |
+| 6,072,644; 613.6 to 672.5 in 25; 676.1, 688.4, 84, 85 | the worst case under the ceiling | the same `grep` with `BIGx4 (6072644 units)` and `SLICE BIGx4 sliced budget 8 ms, clock every 1 calls` |
+| 3.0 to 4.3 in ten; 13.4 to 15.1 in four | a keystroke's reparse | `grep -h -o "SLICE BIG\(x4\)\? incremental reparse after one character at [0-9]*: [0-9.]* ms" logs/slice-full-*.log \| sort \| uniq -c` |
+| 6,048, 130 lines, 0.70; 20,064, 2.20; 64,040, 6.80 | the first screen alone | `grep -h -o "PREFIX first .*" logs/prefix-full-1.log` |
+| the decision's table; 6.50 to 11.53 | the two prototypes | `python3 abtable.py proto- proto2-`; `grep -h -o "[0-9]* messages, longest gap between two [0-9]* ms" logs/proto2-full-*.log`; the prototypes are `colour.ts.prototype1` and `colour.ts.prototype2` |
+| A is `79abcaa`'s file; comment lines only | the two sides of the interleaved runs | `cmp colour.ts.main <(git show 79abcaa:web/src/colour.ts)`; `diff <(grep -vE '^\s*(//\|\*\|/\*\*)' colour.ts.branch-ab) <(git show 115a169:web/src/colour.ts \| grep -vE '^\s*(//\|\*\|/\*\*)') \| wc -l` prints 0; `git diff 115a169 16d6884 -- web/src/colour.ts` changes comment lines only |
+| 26 to 42; 693 to 1,001 | the copy-build reply, read and handled, full speed and quota | `grep -h -o "tm-scratch-compiled x1, 0 frames, deserialise [0-9]* ms, handler [0-9]* ms" logs/ab-*.log`, the two figures of each line added |
+| 0 of 30, about 200 ms; 93 ms | typing into a pending parse | `grep -h -o "REVIEW F2.*" logs/review-probe-browser-1.log`; `grep -h -o "REVIEW2 G3.*" logs/review2-probe-browser-1.log` |
+| 65,045, 7.1 ms; two slices | a λ copy at the first slice's edge | `grep -h -o "REVIEW L 65045.*" logs/review-probe-lambda-1.log logs/review-probe-lambda-q50.log` |
+| 14,104, 14,090; 14,592, 13,590 | `tm-scratch-fork`'s case on the branch and on `79abcaa`'s colourer, at the quota | `grep -h "leaves the source session running" logs/review-q25-tmfork-*.log` |
+| 1.83; 2.49 | `EditorState.create` on the copy's text, in the review's run and in a second | `review/review1.md`, the siblings' block; `node review/sibling-costs.mjs`, a timing that differs from run to run |
+| 164.4; 19.6, 56.3; 31, 82, 233; 1 of 2, 5 of 5, 14 of 15 | I1, on `79abcaa`'s colourer and on the first two commits | `grep -h -o "REVIEW F1.*" logs/review-probe-browser-main.log logs/review-probe-browser-1.log` |
+| 300, 0; 2.7 to 5.2; 16.5, 59.3, 150.3; 13.9, 51.2, 133.2; 0 frames | the re-review's check of I1's fix | `grep -h -o "Q4 300 transactions.*" review/round2/probe2-plugin-1.log`; `grep -h -o "REVIEW2 G2.*" logs/review2-probe-browser-1.log` |
+| 8.3 to 12.0; 22.6 | the update that carries a first slice | `grep -h -o "REVIEW2 G1.*" logs/review2-probe-browser-1.log` |
+| 57.2; 2.5 to 3.6; 14.5, 9.6, 9.8 | one token, and 31,995-unit prefixes | `grep -h -o "PROBE E.*\|PROBE D.*" review/probe-ts-1.log` |
+| 61 to 1,499; 0 of 8 in six | a resumed parse on text with errors | the `corrupt(…)` periods in `review/zz-review-ts3.test.ts` and `review/review2.md`'s N3; `grep -h -o "PROBE F.*\|PROBE G.*" review/probe-ts-3.log` |
+| 6 of 6 | first screens cut inside a bracket | `node review/round2/p5-cuts.mjs` |
+| 0.000 to 0.017; 1.8 | `Text.eq`, a keystroke and the whole text by itself | `node review/round2/eq-cost.mjs`, its 1,518,470-unit block (1.818 ms in the review's run, 1.771 in a second) |
+| three runs of three; none of two; five cases | the cursor finalizer | `grep -h "RuntimeError" logs/slice-full-[123].log`; `grep -h "Tests " logs/slice-full-[45].log`; `grep -h "CRASH case . .*: ok" logs/crash-*.log` |
+| 34, 12; 11 failed, 12 passed | the node cases; RED | `pnpm exec vitest run --project node tests/node/colour.test.ts` from `web/`, and the same at `79abcaa`; the RED run is in this lane's session only, and its failures are S22's |
+| 91,779; more than 600; ten readings | the node suite's machine, its callbacks, a slice | `node density.mjs`; the suite's own assertions (`callbacks(BIG)`, `PARSE_SLICE_MS + 2`) |
+| 566,779 | the bare editor's machine | `colour-slices.test.ts`'s own assertion |
+| 7,396 to 9,093 | the fork file as one case, at the quota | `grep -h -o "✓.* [0-9]*ms" logs/q25-slices-fork-[123].log` |
+| the two sabotage tables; 29 of 32, 8 of 8 | every sabotage at `16d6884` | `python3 sabtable.py`, reading `sab/node-sab-final.out` and `sab/browser-sab-final.out`, written by `sab/run-node-sabs.py` and `sab/run-browser-sabs.py` |
+| 348 files; 229 files, 2,243 tests; 97.45, 91.54, 98.38, 98.81; 16 of 16; the five files at 25 % | the gates | the block above: `gates-16d6884/gates.log`, written by `gates.sh` |
+| 95, 89, 97, 97 | the coverage floors | `thresholds` in `web/vite.config.ts` |
+| healthy after 4 polls; 200, 4 assets; 7 wasm | the Docker gate | `docker/gate-docker.log`, written by `/home/davey/temp/redextape-lanes-2026-10-05-record/docker-gate.sh` |

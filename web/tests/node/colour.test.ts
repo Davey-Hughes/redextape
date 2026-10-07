@@ -3,7 +3,7 @@ import { fileURLToPath } from 'node:url'
 import { EditorState, RangeSetBuilder } from '@codemirror/state'
 import type { DecorationSet, EditorView, ViewUpdate } from '@codemirror/view'
 import { Decoration } from '@codemirror/view'
-import { beforeAll, describe, expect, it } from 'vitest'
+import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest'
 import { Language, Parser, Query } from 'web-tree-sitter'
 import {
   COLOUR_CEILING_UNITS,
@@ -12,7 +12,9 @@ import {
   colourPluginClass,
   colourSpans,
   createGrammarRegistry,
+  FIRST_SCREEN_UNITS,
   overCeiling,
+  PARSE_SLICE_MS,
 } from '../../src/colour'
 import { LANGUAGE_IDS, type LanguageId } from '../../src/lsp-protocol'
 import type { TokenClass } from '../../src/types'
@@ -44,6 +46,14 @@ describe('overCeiling', () => {
 
   it('has the larger copy ceiling, a TM copy’s, not a number of its own', () => {
     expect(COLOUR_CEILING_UNITS).toBe(6_100_000)
+  })
+})
+
+describe('the bounds on a parse in one go', () => {
+  it('are a slice of 8 ms and a first screen of 32,000 units', () => {
+    // THE VALUES, because every case below reads the names: 80 for 8 passed all of them.
+    expect(PARSE_SLICE_MS).toBe(8)
+    expect(FIRST_SCREEN_UNITS).toBe(32_000)
   })
 })
 
@@ -108,6 +118,15 @@ const REDEXTAPE_ROWS: readonly (readonly [string, TokenClass])[] = [
 ]
 
 const REDEXTAPE_CLASSES = classesFor(REDEXTAPE_ROWS)
+
+/** A `DecorationSet` as the `ColourSpan[]` that produced it, so it compares against `colourSpans`. */
+const marks = (set: DecorationSet): ColourSpan[] => {
+  const out: ColourSpan[] = []
+  for (const iter = set.iter(); iter.value !== null; iter.next()) {
+    out.push({ from: iter.from, to: iter.to, cls: (iter.value.spec as { class: string }).class })
+  }
+  return out
+}
 
 describe('colourSpans', () => {
   let lambda: Grammar
@@ -238,15 +257,6 @@ describe('the colourer across the ceiling', () => {
     redextape = await load('tree-sitter-redextape')
   })
 
-  /** A `DecorationSet` as the `ColourSpan[]` that produced it, so it compares against `colourSpans`. */
-  const marks = (set: DecorationSet): ColourSpan[] => {
-    const out: ColourSpan[] = []
-    for (const iter = set.iter(); iter.value !== null; iter.next()) {
-      out.push({ from: iter.from, to: iter.to, cls: (iter.value.spec as { class: string }).class })
-    }
-    return out
-  }
-
   it('drops the tree on the way over, so a document that comes back under is parsed afresh', async () => {
     // `let aaaaa = 1;` and `zzzzzzzzzzzzzz` are the SAME LENGTH and share no token structure, which is
     // what makes the stale-reuse visible. The over-ceiling document REPLACES the first one, so the tree
@@ -340,6 +350,538 @@ describe('the colourer across the ceiling', () => {
     // not per crossing, and a notice line that repeated itself on every update over a large document
     // would be the per-keystroke chatter `notice.ts` is built to refuse.
     expect(ceilings).toEqual(['redextape'])
+  })
+})
+
+/**
+ * **A FIRST PARSE THAT OUTLASTS ONE SLICE, WHICH RAN IN ONE TASK UNTIL THE COPY OF A 7,353-STATE MACHINE HELD THE PAGE.**
+ *
+ * The colourer parsed a document's whole text inside the update that first needed a tree, and a copy editor mounting on
+ * 1,518,470 units of machine text stopped the page for the length of that parse. These drive the plugin as the suite
+ * above does, over the real TM grammar and a real `Parser`, and hold what it does when an editor's first parse does
+ * not fit in `PARSE_SLICE_MS`: the update returns after one slice, the first screen is coloured from a parse of its
+ * own lines, the rest of the parse runs a slice to a timer, and an edit meanwhile starts it over. And what it does
+ * once there is a tree, which is what it did before.
+ *
+ * **THE CLOCK IS A COUNTER, AND THAT IS WHAT MAKES A SLICE A FIXED AMOUNT OF TEXT.** `colourPluginClass` takes the
+ * clock a slice is timed by as its second argument, which nothing in `src/` passes. Here each reading is one
+ * millisecond later than the last, so a slice ends at the parser's ninth progress callback whatever the machine: the
+ * 1,000-state machine below makes more than 600 of them, and so takes more than one slice by construction, where a
+ * wall clock would make that a property of the runner.
+ *
+ * **THE TIMERS ARE VITEST'S, SO A TEST RUNS ONE CONTINUATION AT A TIME.** Only `setTimeout` and `clearTimeout` are
+ * faked: the grammar reaches the plugin on a promise, and `settled` below flushes that with real microtasks.
+ *
+ * **THE VIEW'S `dispatch` CALLS THE PLUGIN'S `update`, AS A REAL VIEW'S DOES.** The plugin asks for a recompute with an
+ * empty transaction when its grammar arrives and when a sliced parse lands, and what it then does in `update` is half
+ * of each property here. The stub in the suite above ignores `dispatch` and calls `update` by hand, which cannot show
+ * an `update` the plugin itself provoked.
+ */
+describe('the colourer on a document whose parse outlasts one slice', () => {
+  let tm: Grammar
+
+  /** The rows for TM, as `redextape-core`'s `capture_map` has them. */
+  const TM_ROWS: readonly (readonly [string, TokenClass])[] = [
+    ['keyword', 'Keyword'],
+    ['number', 'Nat'],
+    ['label', 'Label'],
+    ['label.reference', 'StateName'],
+    ['variable', 'Ident'],
+    ['type', 'Ident'],
+    ['character', 'TapeSymbol'],
+    ['constant.builtin', 'Move'],
+    ['comment', 'Comment'],
+    ['punctuation.bracket', 'Punct'],
+    ['punctuation.delimiter', 'Punct'],
+  ]
+  const TM_CLASSES = classesFor(TM_ROWS)
+  const TM_BY_LANGUAGE = classMapFrom([['redextape_tm', TM_ROWS]])
+
+  beforeAll(async () => {
+    await Parser.init({ locateFile: () => repoFile('../../node_modules/web-tree-sitter/web-tree-sitter.wasm') })
+    tm = await load('tree-sitter-redextape-tm')
+  })
+  beforeEach(() => {
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] })
+  })
+  afterEach(() => {
+    vi.useRealTimers()
+  })
+
+  /** A one-tape machine of `states` states in the TM text form: three lines to a state, every line a whole item. */
+  const machine = (states: number): string => {
+    let out =
+      'tapes 1\nstart s0\nversion 1\nencoding unary\nwidth 8\nslots 1\nresult Nat\ntape 0 #________#\n\nstate halt: accept\n'
+    for (let i = 0; i < states; i++) {
+      const next = i + 1 < states ? `s${i + 1}` : 'halt'
+      out += `state s${i}:\n  [1] -> write [_], move [R], goto ${next}\n  [_] -> write [1], move [L], goto s${i}\n`
+    }
+    return out
+  }
+
+  /** 91,779 units, past `FIRST_SCREEN_UNITS`, and more than 600 progress callbacks to parse. */
+  const BIG = machine(1000)
+  /** 539 units and 3 progress callbacks: a parse the counter clock cannot stop. */
+  const SMALL = machine(5)
+
+  /** What a parse of the whole of `src` in one go colours in `ranges`. */
+  const whole = (src: string, ranges: readonly Visible[]): ColourSpan[] => {
+    const tree = tm.parser.parse(src)
+    if (!tree) throw new Error('the parser returned no tree')
+    try {
+      expect(tree.rootNode.hasError, 'precondition: the text is a well-formed machine').toBe(false)
+      return colourSpans(tm.query, tree.rootNode, ranges, TM_CLASSES)
+    } finally {
+      tree.delete()
+    }
+  }
+
+  /** How many progress callbacks a parse of `src` in one go makes: what the counter clock divides into slices. */
+  const callbacks = (src: string): number => {
+    let n = 0
+    tm.parser
+      .parse(src, null, {
+        progressCallback: () => {
+          n += 1
+          return false
+        },
+      })
+      ?.delete()
+    return n
+  }
+
+  /** The promise the grammar arrives on, and its continuation, run to their end. No timer is needed for either. */
+  const settled = async (): Promise<void> => {
+    for (let i = 0; i < 10; i++) await Promise.resolve()
+  }
+
+  type Mounted = {
+    plugin: { decorations: DecorationSet; update(u: ViewUpdate): void; destroy(): void }
+    /** How many times the plugin has asked the view for a recompute. */
+    dispatches(): number
+    /** How many times the plugin has read its clock. */
+    reads(): number
+    /** Move the viewport without changing the document, as a scroll does. */
+    show(ranges: readonly Visible[]): void
+    /** An update that changes neither the document nor the viewport, as a caret moving does. */
+    idle(): void
+    /** One transaction of `changes` through the plugin; afterwards `ranges` is what is visible. */
+    change(
+      changes: { from: number; to: number; insert: string } | { from: number; to: number; insert: string }[],
+      ranges: readonly Visible[],
+    ): void
+    text(): string
+    ceilings: LanguageId[]
+  }
+
+  /** A TM editor over `src` showing `ranges`, with its grammar already arrived and its first update run. */
+  const mount = async (src: string, ranges: readonly Visible[]): Promise<Mounted> => {
+    let reads = 0
+    let dispatches = 0
+    const ceilings: LanguageId[] = []
+    const view = {
+      state: EditorState.create({ doc: src }),
+      visibleRanges: ranges,
+      dispatch: (): void => {
+        dispatches += 1
+        plugin.update({
+          view,
+          state: view.state,
+          startState: view.state,
+          docChanged: false,
+          viewportChanged: false,
+        } as unknown as ViewUpdate)
+      },
+    }
+    const plugin = new (colourPluginClass(
+      {
+        languageId: 'redextape_tm',
+        registry: { load: async () => ({ language: tm.language, query: tm.query }) },
+        classes: () => TM_BY_LANGUAGE,
+        onCeiling: (id) => ceilings.push(id),
+      },
+      () => {
+        reads += 1
+        return reads
+      },
+    ))(view as unknown as EditorView)
+    await settled()
+    expect(dispatches, 'precondition: the grammar arrived and the plugin asked for its first recompute').toBe(1)
+    return {
+      plugin,
+      dispatches: () => dispatches,
+      reads: () => reads,
+      idle: () => {
+        plugin.update({
+          view,
+          state: view.state,
+          startState: view.state,
+          docChanged: false,
+          viewportChanged: false,
+        } as unknown as ViewUpdate)
+      },
+      show: (next) => {
+        view.visibleRanges = next
+        plugin.update({
+          view,
+          state: view.state,
+          startState: view.state,
+          docChanged: false,
+          viewportChanged: true,
+        } as unknown as ViewUpdate)
+      },
+      change: (changes, next) => {
+        const startState = view.state
+        const tr = startState.update({ changes })
+        view.state = tr.state
+        view.visibleRanges = next
+        plugin.update({
+          view,
+          state: tr.state,
+          startState,
+          changes: tr.changes,
+          docChanged: true,
+          viewportChanged: true,
+        } as unknown as ViewUpdate)
+      },
+      text: () => view.state.doc.toString(),
+      ceilings,
+    }
+  }
+
+  /** A range well past `FIRST_SCREEN_UNITS`, ending inside a `goto`: a screen a long way down the machine. */
+  const FAR: readonly Visible[] = [{ from: 60_000, to: BIG.indexOf('goto', 61_200) + 2 }]
+  /** Where `TOP` ends: inside a `goto`, so that a first screen cut at the range's end would show. */
+  const TOP_END = BIG.indexOf('goto', 1_200) + 2
+  /** The top of the machine. */
+  const TOP: readonly Visible[] = [{ from: 0, to: TOP_END }]
+
+  it('gives the first update one slice of the parse and leaves the rest to a timer', async () => {
+    expect(callbacks(BIG), 'precondition: the parse makes far more callbacks than one slice has').toBeGreaterThan(600)
+    const m = await mount(BIG, FAR)
+    // ONE SLICE: the reading that starts it, then one a callback until one is past the budget.
+    expect(m.reads()).toBe(PARSE_SLICE_MS + 2)
+    expect(vi.getTimerCount(), 'the rest of the parse is scheduled').toBe(1)
+    // AND NOTHING FROM A TREE THAT IS NOT THERE YET: this far down is past the first screen, so the text is plain.
+    expect(marks(m.plugin.decorations)).toEqual([])
+  })
+
+  it('colours text past the first screen once the whole parse lands, asking the view once', async () => {
+    const m = await mount(BIG, FAR)
+    vi.runOnlyPendingTimers()
+    expect(marks(m.plugin.decorations), 'one more slice is not the parse').toEqual([])
+    expect(vi.getTimerCount(), 'and the next is scheduled').toBe(1)
+    vi.runAllTimers()
+    expect(marks(m.plugin.decorations)).toEqual(whole(BIG, FAR))
+    expect(marks(m.plugin.decorations).length, 'precondition: there is something to colour there').toBeGreaterThan(100)
+    // ONE RECOMPUTE FOR THE LANDING, after the grammar's own: a slice that did not finish the parse asks for nothing.
+    expect(m.dispatches()).toBe(2)
+    expect(vi.getTimerCount()).toBe(0)
+  })
+
+  it('colours the first screen from its own lines while the whole parse is pending', async () => {
+    const m = await mount(BIG, TOP)
+    expect(vi.getTimerCount(), 'precondition: the whole parse is pending').toBe(1)
+    expect(marks(m.plugin.decorations)).toEqual(whole(BIG, TOP))
+    expect(marks(m.plugin.decorations).length, 'precondition: there is something to colour there').toBeGreaterThan(100)
+    // AND AFTER A SCROLL THAT STAYS INSIDE THE FIRST SCREEN'S REACH, still with no whole tree.
+    const lower: readonly Visible[] = [{ from: 20_000, to: BIG.indexOf('goto', 21_200) + 2 }]
+    m.show(lower)
+    expect(vi.getTimerCount(), 'precondition: the whole parse is still pending').toBe(1)
+    expect(marks(m.plugin.decorations)).toEqual(whole(BIG, lower))
+  })
+
+  it('parses no more than the first screen’s lines in one go while the whole parse is pending', async () => {
+    // WHAT THE BOUND IS FOR, HELD ON THE PARSER'S OWN INPUT: a first screen parsed from the whole text colours the
+    // same and holds the update for the whole parse, which is the defect. Every `parse` the plugin makes is seen here;
+    // one with a progress callback is a slice, and one without runs to its end inside the update.
+    const parse = vi.spyOn(Parser.prototype, 'parse')
+    try {
+      const m = await mount(BIG, TOP)
+      expect(vi.getTimerCount(), 'precondition: the whole parse is pending').toBe(1)
+      expect(marks(m.plugin.decorations).length, 'precondition: the first screen is coloured').toBeGreaterThan(100)
+      const inOneGo = parse.mock.calls.filter(([, , options]) => options?.progressCallback === undefined)
+      const sliced = parse.mock.calls.filter(([, , options]) => options?.progressCallback !== undefined)
+      expect(sliced.map(([text]) => (text as string).length)).toEqual([BIG.length])
+      // To the end of the line the screen ends in, and not a unit of the 91,779 past it.
+      expect(inOneGo.map(([text]) => (text as string).length)).toEqual([BIG.indexOf('\n', TOP_END)])
+    } finally {
+      parse.mockRestore()
+    }
+  })
+
+  it('reads the first screen’s end off the last visible range when the screen is in pieces', async () => {
+    // TWO RANGES, AS A FOLD IN THE MIDDLE OF THE SCREEN LEAVES: the parse has to reach the end of the second.
+    const pieces: readonly Visible[] = [
+      { from: 0, to: 500 },
+      { from: 20_000, to: BIG.indexOf('goto', 21_200) + 2 },
+    ]
+    const m = await mount(BIG, pieces)
+    expect(vi.getTimerCount(), 'precondition: the whole parse is pending').toBe(1)
+    expect(marks(m.plugin.decorations)).toEqual(whole(BIG, pieces))
+    expect(marks(m.plugin.decorations).filter((s) => s.from >= 20_000).length).toBeGreaterThan(100)
+  })
+
+  it('does not parse the first screen again at an update that moved neither the text nor the screen', async () => {
+    // A CARET MOVING IN AN EDITOR WHOSE PARSE IS PENDING: its first screen's marks are for this text and this screen
+    // already, and every such update parsed those lines again.
+    const parse = vi.spyOn(Parser.prototype, 'parse')
+    try {
+      const m = await mount(BIG, TOP)
+      expect(vi.getTimerCount(), 'precondition: the whole parse is pending').toBe(1)
+      const drawn = marks(m.plugin.decorations)
+      const calls = parse.mock.calls.length
+      m.idle()
+      expect(parse.mock.calls.length).toBe(calls)
+      expect(marks(m.plugin.decorations)).toEqual(drawn)
+      expect(drawn.length, 'precondition: the first screen is coloured').toBeGreaterThan(100)
+    } finally {
+      parse.mockRestore()
+    }
+  })
+
+  it('reaches a line that ends at `FIRST_SCREEN_UNITS` exactly, and not the line after it', async () => {
+    // A COMMENT LINE AHEAD OF THE MACHINE, AS LONG AS IT TAKES TO PUT ONE OF ITS LINE ENDS ON THE BOUND ITSELF. `>=`
+    // for `>` in the bound refuses that line, and no bound at all colours the next one.
+    const lineEnd = BIG.lastIndexOf('\n', FIRST_SCREEN_UNITS - 1_000)
+    const src = `; ${'x'.repeat(FIRST_SCREEN_UNITS - lineEnd - 3)}\n${BIG}`
+    expect(src[FIRST_SCREEN_UNITS], 'precondition: a line ends at the bound').toBe('\n')
+    const inside: readonly Visible[] = [{ from: FIRST_SCREEN_UNITS - 1_200, to: FIRST_SCREEN_UNITS - 3 }]
+    const m = await mount(src, inside)
+    expect(vi.getTimerCount(), 'precondition: the whole parse is pending').toBe(1)
+    expect(marks(m.plugin.decorations)).toEqual(whole(src, inside))
+    expect(marks(m.plugin.decorations).length, 'precondition: there is something to colour there').toBeGreaterThan(100)
+    m.show([{ from: FIRST_SCREEN_UNITS - 1_200, to: FIRST_SCREEN_UNITS + 3 }])
+    expect(vi.getTimerCount(), 'precondition: the whole parse is still pending').toBe(1)
+    expect(marks(m.plugin.decorations)).toEqual([])
+  })
+
+  it('starts over on the new text when an edit arrives while the parse is pending', async () => {
+    const m = await mount(BIG, TOP)
+    vi.runOnlyPendingTimers()
+    expect(vi.getTimerCount(), 'precondition: the parse is some slices in and still pending').toBe(1)
+    // A COMMENT LINE AT THE VERY TOP, which is text the abandoned parse had already been over.
+    m.change({ from: 0, to: 0, insert: '; a note\n' }, TOP)
+    expect(vi.getTimerCount(), 'one parse is pending, not two').toBe(1)
+    expect(marks(m.plugin.decorations), 'the first screen is the new text’s').toEqual(whole(m.text(), TOP))
+    vi.runAllTimers()
+    m.show(FAR)
+    expect(marks(m.plugin.decorations)).toEqual(whole(m.text(), FAR))
+    m.show(TOP)
+    expect(marks(m.plugin.decorations)).toEqual(whole(m.text(), TOP))
+    expect(marks(m.plugin.decorations)[0]).toEqual({ from: 0, to: 8, cls: 'tok-comment' })
+  })
+
+  /**
+   * **A DOCUMENT THAT HAS A TREE IS REPARSED AS IT WAS, IN THE UPDATE THAT CHANGED IT.** The three cases below are what
+   * a coloured editor does on a keystroke, on a transaction of several changes and on a replacement of its whole text.
+   * This branch first put the last two in slices, and its whole-branch review measured what that cost: the tree was
+   * dropped, so a screen past the first went plain, for 14 of 15 frames at 1,534,779 units on an idle page, where the
+   * parse in one go held the update for 164.4 ms and the screen stayed coloured.
+   */
+  it('reparses a keystroke against a landed tree at once, as before', async () => {
+    const m = await mount(BIG, FAR)
+    vi.runAllTimers()
+    const dispatched = m.dispatches()
+    // ONE DIGIT ON THE END OF A `goto`'S TARGET: the machine still parses, and the tree under the screen changes.
+    const at = BIG.indexOf('\n', BIG.indexOf('goto s', 60_100))
+    m.change({ from: at, to: at, insert: '9' }, FAR)
+    expect(vi.getTimerCount(), 'nothing is left to a timer').toBe(0)
+    expect(m.dispatches()).toBe(dispatched)
+    expect(marks(m.plugin.decorations)).toEqual(whole(m.text(), FAR))
+  })
+
+  it('reparses a transaction of several changes against a landed tree in that update, the screen still coloured', async () => {
+    const m = await mount(BIG, FAR)
+    vi.runAllTimers()
+    const before = m.reads()
+    const middle = BIG.indexOf('\nstate ', 70_000) + 1
+    m.change(
+      [
+        { from: 0, to: 0, insert: '; first\n' },
+        { from: middle, to: middle, insert: '; middle\n' },
+        { from: BIG.length, to: BIG.length, insert: '; last\n' },
+      ],
+      FAR,
+    )
+    expect(vi.getTimerCount(), 'nothing is left to a timer').toBe(0)
+    expect(m.reads() - before, 'no slice was timed').toBe(0)
+    expect(marks(m.plugin.decorations)).toEqual(whole(m.text(), FAR))
+    expect(marks(m.plugin.decorations).length, 'precondition: there is something to colour there').toBeGreaterThan(100)
+  })
+
+  it('reparses a replacement of the whole text against a landed tree in that update, the screen still coloured', async () => {
+    const m = await mount(BIG, FAR)
+    vi.runAllTimers()
+    const next = `; replaced\n${BIG}`
+    const before = m.reads()
+    m.change({ from: 0, to: BIG.length, insert: next }, FAR)
+    expect(vi.getTimerCount(), 'nothing is left to a timer').toBe(0)
+    expect(m.reads() - before, 'no slice was timed').toBe(0)
+    expect(marks(m.plugin.decorations)).toEqual(whole(next, FAR))
+    expect(marks(m.plugin.decorations).length, 'precondition: there is something to colour there').toBeGreaterThan(100)
+  })
+
+  it('parses several changes in slices when they arrive with the first parse still pending', async () => {
+    // NO TREE YET, SO NOTHING ON SCREEN TO LOSE: the new text's parse starts over as the first one did.
+    const m = await mount(BIG, FAR)
+    vi.runOnlyPendingTimers()
+    expect(vi.getTimerCount(), 'precondition: the parse is some slices in and still pending').toBe(1)
+    const before = m.reads()
+    m.change(
+      [
+        { from: 0, to: 0, insert: '; first\n' },
+        { from: BIG.length, to: BIG.length, insert: '; last\n' },
+      ],
+      FAR,
+    )
+    expect(m.reads() - before, 'one slice').toBe(PARSE_SLICE_MS + 2)
+    expect(vi.getTimerCount(), 'one parse is pending, not two').toBe(1)
+    expect(marks(m.plugin.decorations), 'plain past the first screen until it lands').toEqual([])
+    vi.runAllTimers()
+    expect(marks(m.plugin.decorations)).toEqual(whole(m.text(), FAR))
+  })
+
+  /**
+   * **A REPLACEMENT BY THE SAME TEXT IS NOT A CHANGE TO REPARSE.** *Format* answers with one edit over the whole
+   * buffer and the editor dispatches it whether or not it changed a character (`lsp-text.ts`'s `applyEdits`), so
+   * every format of a text that parses, changed by it or not, reparsed the whole of it: 164.4 ms inside the update at
+   * 1,534,779 units, measured by this branch's review on `main`'s colourer.
+   */
+  it('does not reparse a replacement by the same text', async () => {
+    const m = await mount(BIG, FAR)
+    vi.runAllTimers()
+    const drawn = marks(m.plugin.decorations)
+    const parse = vi.spyOn(Parser.prototype, 'parse')
+    try {
+      m.change({ from: 0, to: BIG.length, insert: BIG }, FAR)
+      expect(parse.mock.calls.length).toBe(0)
+    } finally {
+      parse.mockRestore()
+    }
+    expect(vi.getTimerCount()).toBe(0)
+    expect(marks(m.plugin.decorations)).toEqual(drawn)
+    expect(drawn.length, 'precondition: there is something to colour there').toBeGreaterThan(100)
+  })
+
+  it('reparses a change that keeps the text’s length and its lines and not the text', async () => {
+    // THE SAME-TEXT RULE'S OTHER SIDE: one character typed over another, and the whole text replaced by one of its
+    // length, are changes. Taken for the same text, each would leave the tree of the text before.
+    const m = await mount(BIG, TOP)
+    vi.runAllTimers()
+    expect(marks(m.plugin.decorations)[0], 'precondition: the text opens on a keyword').toEqual({
+      from: 0,
+      to: 5,
+      cls: 'tok-keyword',
+    })
+    // `tapes 1` TO `;apes 1`: the first line is a comment now, one unit for one.
+    m.change({ from: 0, to: 1, insert: ';' }, TOP)
+    expect(m.text().length).toBe(BIG.length)
+    expect(marks(m.plugin.decorations)).toEqual(whole(m.text(), TOP))
+    expect(marks(m.plugin.decorations)[0]).toEqual({ from: 0, to: 7, cls: 'tok-comment' })
+    // AND THE WHOLE TEXT BY ANOTHER OF ITS LENGTH AND ITS LINES: the comment is the second line's this time.
+    const other = `tapes 1\n;${BIG.slice(9)}`
+    expect(other.length).toBe(BIG.length)
+    m.change({ from: 0, to: BIG.length, insert: other }, TOP)
+    expect(marks(m.plugin.decorations)).toEqual(whole(other, TOP))
+    expect(marks(m.plugin.decorations)[1]).toEqual({ from: 6, to: 7, cls: 'tok-nat' })
+    expect(marks(m.plugin.decorations)[2]).toEqual({ from: 8, to: 16, cls: 'tok-comment' })
+  })
+
+  it('does not start a pending parse over for a replacement by the same text', async () => {
+    const m = await mount(BIG, FAR)
+    vi.runOnlyPendingTimers()
+    expect(vi.getTimerCount(), 'precondition: the parse is some slices in and still pending').toBe(1)
+    const before = m.reads()
+    m.change({ from: 0, to: BIG.length, insert: BIG }, FAR)
+    expect(m.reads() - before, 'no slice ran in that update: the pending parse is still the text’s').toBe(0)
+    expect(vi.getTimerCount()).toBe(1)
+    vi.runAllTimers()
+    expect(marks(m.plugin.decorations)).toEqual(whole(BIG, FAR))
+  })
+
+  it('rebuilds nothing at an update that moved nothing, once its tree has landed', async () => {
+    const m = await mount(BIG, FAR)
+    vi.runAllTimers()
+    expect(
+      marks(m.plugin.decorations).length,
+      'precondition: the tree landed and the screen is coloured',
+    ).toBeGreaterThan(100)
+    // THE QUERY IS WHAT A REBUILD COSTS ONCE THERE IS A TREE, so its calls are what is counted.
+    const captures = vi.spyOn(Query.prototype, 'captures')
+    try {
+      m.idle()
+      m.idle()
+      expect(captures.mock.calls.length).toBe(0)
+    } finally {
+      captures.mockRestore()
+    }
+  })
+
+  it('colours a document that parses inside one slice in the same update, with nothing scheduled', async () => {
+    expect(callbacks(SMALL), 'precondition: fewer callbacks than a slice has').toBeLessThan(PARSE_SLICE_MS)
+    const all: readonly Visible[] = [{ from: 0, to: SMALL.length }]
+    const m = await mount(SMALL, all)
+    expect(vi.getTimerCount()).toBe(0)
+    expect(m.dispatches()).toBe(1)
+    expect(marks(m.plugin.decorations)).toEqual(whole(SMALL, all))
+  })
+
+  it('draws nothing, and still parses, for an editor with nothing visible', async () => {
+    // AN EDITOR WITH NO HEIGHT YET HAS NO VISIBLE RANGE AT ALL, and the first screen's rule reads the last one.
+    const m = await mount(BIG, [])
+    expect(vi.getTimerCount(), 'precondition: the whole parse is pending').toBe(1)
+    // A SECOND UPDATE, MADE FROM HERE: the first ran inside the promise the grammar arrived on, whose own `catch`
+    // would have taken a throw from it, and this one's would reach the test.
+    m.show([])
+    expect(marks(m.plugin.decorations)).toEqual([])
+    vi.runAllTimers()
+    m.show(FAR)
+    expect(marks(m.plugin.decorations)).toEqual(whole(BIG, FAR))
+  })
+
+  it('does not try again a slice that throws from its timer, and parses afresh on the next change', async () => {
+    const m = await mount(BIG, TOP)
+    expect(vi.getTimerCount(), 'precondition: the whole parse is pending').toBe(1)
+    const parse = vi.spyOn(Parser.prototype, 'parse').mockImplementationOnce(() => {
+      throw new Error('the parser fell over')
+    })
+    try {
+      expect(() => vi.runOnlyPendingTimers()).toThrow('the parser fell over')
+    } finally {
+      parse.mockRestore()
+    }
+    expect(vi.getTimerCount(), 'nothing is scheduled to throw again').toBe(0)
+    expect(marks(m.plugin.decorations), 'the first screen keeps its marks').toEqual(whole(BIG, TOP))
+    m.change({ from: 0, to: 0, insert: '; a note\n' }, TOP)
+    vi.runAllTimers()
+    m.show(FAR)
+    expect(marks(m.plugin.decorations)).toEqual(whole(m.text(), FAR))
+  })
+
+  it('leaves nothing scheduled once destroyed mid-parse', async () => {
+    // NOTHING SCHEDULED IS THE WHOLE PROPERTY: a slice that ran after this would ask a destroyed view for a recompute.
+    const m = await mount(BIG, FAR)
+    expect(vi.getTimerCount(), 'precondition: the whole parse is pending').toBe(1)
+    m.plugin.destroy()
+    expect(vi.getTimerCount()).toBe(0)
+  })
+
+  it('abandons a pending parse when the document crosses the ceiling, and parses afresh when it comes back', async () => {
+    const m = await mount(BIG, TOP)
+    vi.runOnlyPendingTimers()
+    expect(vi.getTimerCount(), 'precondition: the parse is some slices in and still pending').toBe(1)
+    const over = 'z'.repeat(COLOUR_CEILING_UNITS + 1)
+    m.change({ from: 0, to: BIG.length, insert: over }, [{ from: 0, to: 100 }])
+    expect(m.ceilings).toEqual(['redextape_tm'])
+    expect(vi.getTimerCount(), 'nothing is parsing a document too large to colour').toBe(0)
+    expect(marks(m.plugin.decorations)).toEqual([])
+    // BACK UNDER, to text the abandoned parse never saw: resumed on it, the parser would answer with the top of `BIG`.
+    const back = 'state halt: accept\n'
+    m.change({ from: 0, to: over.length, insert: back }, [{ from: 0, to: back.length }])
+    vi.runAllTimers()
+    expect(marks(m.plugin.decorations)).toEqual(whole(back, [{ from: 0, to: back.length }]))
+    expect(marks(m.plugin.decorations)[0]).toEqual({ from: 0, to: 5, cls: 'tok-keyword' })
   })
 })
 

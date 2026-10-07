@@ -35,8 +35,10 @@ import type { TokenClass } from './types'
  * **TWO CLOCKS, AND CONFLATING THEM IS THE OBVIOUS FIRST IMPLEMENTATION.** The tree is reparsed when
  * the document changes; the decorations are rebuilt when the document changes OR the viewport moves.
  * Measured in Chromium on a 103,028-unit TM: a full reparse is 8.1 ms and an incremental one is
- * 0.4 ms, so reparsing on every scroll would cost twenty times what it buys and would grow with the
- * document where the incremental path does not.
+ * 0.4 ms, so reparsing on every scroll would cost twenty times what it buys. **BOTH GROW WITH THE
+ * DOCUMENT**: at 1,518,470 units a parse of the whole text measured 154 to 179 ms and a reparse after
+ * one character 3.0 to 4.3 ms (2026-10-06). `PARSE_SLICE_MS` has what an editor's first parse does
+ * about that.
  *
  * **THE QUERY IS SCOPED TO THE VIEWPORT AND THAT IS A REQUIREMENT, NOT AN OPTIMISATION.** The same
  * document yields 32,591 captures whole and 293 for one viewport, and a 229,181-unit TM yields 82,464
@@ -68,8 +70,9 @@ export function classMapFrom(tables: readonly CaptureTable[]): Map<string, Map<s
  *
  * THE LARGER OF THE SESSION'S TWO COPY CEILINGS, NOT A NUMBER OF THIS MODULE'S OWN: a TM copy's,
  * `MAX_SCRATCH_TM_BYTES` at 6,100,000, where an asm copy's, `MAX_SCRATCH_ASM_BYTES`, is 5,200,000. A
- * document no copy will hold is not one worth parsing on the main thread: a full reparse extrapolates to
- * about 480 ms there, a visible stall on every keystroke.
+ * document no copy will hold is not one worth parsing on the main thread: a parse of a whole text of
+ * 6,072,644 units measured 614 to 673 ms, in slices 676 and 688 ms, and a reparse after one character
+ * typed 13.4 to 15.1 ms, in one go inside the keystroke's update (2026-10-06).
  *
  * **ONE CEILING FOR EVERY EDITOR, SO AN ASM DOCUMENT BETWEEN THE TWO IS STILL COLOURED**, though no asm copy
  * builds it: refusing a document is the session's to say, and this gate only refuses the absurd. A ceiling
@@ -294,6 +297,70 @@ export function colourSpans(
   return [...byRange.values()].sort((a, b) => a.from - b.from || a.to - b.to)
 }
 
+/**
+ * How long one slice of an editor's first parse may run before it stops for a timer, in milliseconds.
+ *
+ * **AN EDITOR'S FIRST PARSE RUNS IN SLICES OF THIS LENGTH, AND IT RAN IN ONE TASK UNTIL THE COPY OF A 7,353-STATE
+ * MACHINE HELD THE PAGE FOR IT.** That machine's text is 1,518,470 units: 7,353 states and 18,499 rules, a line each.
+ * Measured in Chromium on 2026-10-06, the machine copied while its program's run and then the copy's both record,
+ * five runs on each side taken in turn: in one go the parse took 194 to 208 ms, and from the editor's mount the page
+ * ran no timer for 232 to 249 ms and drew no frame for 216 to 232 ms; in slices no gap between two timers or two
+ * frames reached 100 ms, the parser's calls took 179 to 188 ms in all and the longest 8.1 to 9.0 ms, and the tree
+ * landed 720 to 860 ms after the click.
+ *
+ * **THE BOUND IS ON ONE CALL TO THE PARSER, IN ONE EDITOR.** The update that carries a first slice measured 8.3 to
+ * 12.0 ms in five editors, the slice and the rest of the update, and 22.6 ms in the first editor a page mounted;
+ * editors that mount together each queue a slice of their own; and a slice cannot stop inside a token, so one
+ * comment line of 3,000,000 units parsed in 57.2 ms without a callback.
+ *
+ * **THE PARSER STOPS ITSELF AND IS ASKED AGAIN.** `web-tree-sitter` calls a parse's `progressCallback` as it goes,
+ * 16,095 times over that machine's text, and a parse whose callback answers `true` returns `null` with its state
+ * kept: the next `parse` on that parser with the same text carries on from there, and `reset()` drops the state.
+ * **THE SAME TREE AS A PARSE IN ONE GO FOR A TEXT WITHOUT ERRORS, AND NOT ALWAYS FOR ONE WITH MANY.** That machine's
+ * two trees were compared node for node, 787,756 nodes, and were the same. On text with a mistake every 61 to 1,499
+ * units a resumed parse recovered differently from a parse in one go, in each of the four grammars, and differently
+ * again with where its slices ended; with one mistake in a text of 0.55 to 1.5 million units, 0 of 8 sliced parses
+ * differed, in each of six cases.
+ */
+export const PARSE_SLICE_MS = 8
+
+/**
+ * How far into a document the first screen's own parse reaches, in UTF-16 code units.
+ *
+ * **WHILE A SLICED PARSE IS PENDING, THE SCREEN IS COLOURED FROM A PARSE OF THE DOCUMENT'S START, UP TO THE END OF THE
+ * LAST VISIBLE LINE, WHEN THAT IS AT MOST THIS FAR IN.** A copy's editor mounts showing its first lines, and without
+ * this they stood plain until the whole parse landed, 757 to 969 ms after the click in three runs. With it they are
+ * coloured 190 to 255 ms after the click, where the parse in one go coloured them at 377 to 431 ms, in five runs of
+ * each taken in turn (2026-10-06). The first 6,048 units of the 1,518,470-unit machine, 130 lines, parsed in 0.70 ms,
+ * and gave the captures the whole tree gives over those units.
+ *
+ * **A BOUND, BECAUSE THIS PARSE RUNS IN ONE GO INSIDE AN UPDATE.** A screen further down than this shows plain text
+ * until the whole parse lands. Of that machine, the first 20,064 units parsed in 2.20 ms and the first 64,040 in
+ * 6.80 ms. Text the grammars make more work of costs more: 31,995 units of one mnemonic repeated took 14.5 ms as asm,
+ * and of one bracket repeated 9.6 ms as TM and 9.8 ms as λ.
+ *
+ * **EXACT WHERE A LINE END IS A PLACE THE GRAMMAR CAN STOP.** That is the TM text form, measured, and every item of an
+ * asm text is a line too. A program cut at a line end may be cut inside a bracket, and the parser then recovers as it
+ * can; in 6 of 6 programs and λ terms cut so, the marks were the whole tree's. **A λ COPY'S TEXT IS ONE LINE**, so
+ * its last visible line ends where it does: one longer than this bound has no first screen and is plain until its
+ * whole parse lands.
+ */
+export const FIRST_SCREEN_UNITS = 32_000
+
+/** The marks for `ranges`, as the decorations one editor draws. */
+function marksOf(
+  query: TsQuery,
+  root: TsNode,
+  ranges: readonly { readonly from: number; readonly to: number }[],
+  byCapture: ReadonlyMap<string, string>,
+): DecorationSet {
+  const b = new RangeSetBuilder<Decoration>()
+  for (const s of colourSpans(query, root, ranges, byCapture)) {
+    b.add(s.from, s.to, Decoration.mark({ class: s.cls }))
+  }
+  return b.finish()
+}
+
 /** What one editor's colourer needs: which language it holds, where grammars come from, and the map. */
 export type ColourOptions = {
   languageId: LanguageId
@@ -324,13 +391,44 @@ export type ColourOptions = {
  * not as an error. Exporting the class lets `tests/node/colour.test.ts` construct one over a real
  * parser and a stubbed view and drive the three transactions directly, in the tier that runs on every
  * push. Nothing in `src/` calls this; `treeSitterColour` below is the only consumer.
+ *
+ * **`now` IS THE CLOCK A SLICE IS TIMED BY, AND NOTHING IN `src/` PASSES IT.** A test passes a counter, so that a slice
+ * is a fixed number of the parser's progress callbacks and a document takes more than one slice by its size alone.
+ *
+ * **WHICH PARSES RUN IN SLICES: THE ONES WITH NO TREE BEFORE THEM, AND SO NOTHING ON SCREEN TO LOSE.** An editor's
+ * first, the first after a document comes back under the ceiling, and the parse of whatever text a change leaves
+ * while one of those is still pending: that change abandons the pending parse, the parser is reset, and the new text
+ * is parsed from its start. The first slice runs inside the update that asked for it, so a document that parses
+ * within `PARSE_SLICE_MS` is coloured in that update, as every document was; the rest run one to a timer, and the
+ * plugin asks the view for one recompute when the tree lands. Until then the screen is coloured as
+ * `FIRST_SCREEN_UNITS` says. **SO TEXT PAST THE FIRST SCREEN STAYS PLAIN FOR AS LONG AS KEYS ARRIVE FASTER THAN ONE
+ * PARSE TAKES**: with a key every 100 ms into 1,534,779 units whose parse was pending, the end of the text was
+ * coloured after 0 of 30 keys, and about 200 ms after the last.
+ *
+ * **A DOCUMENT THAT HAS A TREE IS REPARSED IN THE UPDATE THAT CHANGED IT, IN ONE GO, AS IT WAS.** A single change
+ * edits the tree and reparses against it: after one character typed that measured 3.0 to 4.3 ms at 1,518,470 units
+ * and 13.4 to 15.1 ms at 6,072,644 (2026-10-06). A change that replaces most of a large document costs about what a
+ * parse of that much text does, and so does a transaction of several changes, which cannot edit the tree (`editFor`)
+ * and parses the whole text. **THIS BRANCH PUT THOSE TWO IN SLICES AT FIRST, AND ITS REVIEW MEASURED WHY NOT TO**:
+ * the tree is gone while the slices run, and a screen past the first went plain, for 14 of 15 frames at 1,534,779
+ * units on an idle page, where the parse in one go held the update for 164.4 ms with the screen coloured throughout.
+ * A replacement by the same text, which is what a *format* that changes nothing dispatches, is not reparsed at all.
  */
-export function colourPluginClass(opts: ColourOptions) {
+export function colourPluginClass(opts: ColourOptions, now: () => number = () => performance.now()) {
   return class {
     decorations: DecorationSet = Decoration.none
+    #view: EditorView
     #grammar: LoadedGrammar | null = null
     #parser: Parser | null = null
     #tree: Tree | null = null
+    /** The text a sliced parse is part of the way through, or `null` when none is. While it is set, `#tree` is `null`. */
+    #pending: string | null = null
+    /** The timer the pending parse's next slice waits on. */
+    #timer: ReturnType<typeof setTimeout> | null = null
+    /** Set when a tree lands from a timer, so that the update it then asks for rebuilds though nothing else changed. */
+    #landed = false
+    /** The parser for the first screen's own parse, made when one is first wanted: `#parser` is part-way through another. */
+    #front: Parser | null = null
     #ceilingReported = false
     // NOT `#dead`, AND THE GATE IS WHY. `scripts/check-colours.sh` reads a private member named
     // only in hex letters as a hex colour — a false positive it documents and tells you to fix by
@@ -338,6 +436,7 @@ export function colourPluginClass(opts: ColourOptions) {
     #destroyed = false
 
     constructor(view: EditorView) {
+      this.#view = view
       opts.registry
         .load(opts.languageId)
         .then((g) => {
@@ -366,18 +465,90 @@ export function colourPluginClass(opts: ColourOptions) {
 
     update(u: ViewUpdate) {
       if (u.docChanged) this.#reparse(u)
-      if (u.docChanged || u.viewportChanged || this.#tree === null) this.#rebuild(u.view)
+      // WITH NO TREE AND NO PARSE PENDING, every update asks again: that is an editor whose grammar has only now
+      // arrived. WITH A PARSE PENDING, only a change to the text or the screen does: the first screen's marks are a
+      // parse of their own, and an update that moved neither would parse those lines again for the same marks.
+      const waiting = this.#tree === null && this.#pending === null
+      if (u.docChanged || u.viewportChanged || waiting || this.#landed) this.#rebuild(u.view)
     }
 
     destroy() {
       this.#destroyed = true
+      this.#abandon()
       this.#tree?.delete()
       this.#parser?.delete()
+      this.#front?.delete()
       this.#tree = null
       this.#parser = null
+      this.#front = null
+    }
+
+    /**
+     * Give up a pending parse: its text is gone, or the editor is.
+     *
+     * **THE PARSER IS RESET, AND WITHOUT THAT THE NEXT PARSE WOULD CARRY ON WITH THIS ONE.** A parser whose callback
+     * stopped it keeps its place, and its next `parse` resumes from there whatever text it is handed: the tree would
+     * be the abandoned text's as far as that parse had got, and the new text's after.
+     */
+    #abandon() {
+      if (this.#pending === null) return
+      this.#parser?.reset()
+      this.#pending = null
+      if (this.#timer !== null) clearTimeout(this.#timer)
+      this.#timer = null
+    }
+
+    /**
+     * One slice of the pending parse. Whether it finished the parse, in which case the tree is in `#tree`.
+     *
+     * **A SLICE ALWAYS GETS SOMEWHERE**: the parser consults the callback only every so many of its own steps, so a
+     * slice whose clock has already run out still parses up to the next one.
+     */
+    #slice(parser: Parser, text: string): boolean {
+      const started = now()
+      const tree = parser.parse(text, null, { progressCallback: () => now() - started > PARSE_SLICE_MS })
+      if (tree === null) return false
+      this.#tree = tree
+      this.#pending = null
+      return true
+    }
+
+    /**
+     * The pending parse's next slice, from a timer.
+     *
+     * **A TIMER, SO THAT A SLICE TAKES ITS TURN WITH EVERYTHING ELSE THE PAGE HAS QUEUED.** The alternative measured
+     * was a task that runs ahead of other work: it landed the tree as soon as a parse in one go does, and through
+     * the parse no timer ran for 221 to 250 ms and no worker's reply was taken in for 206 to 232 ms, in three runs.
+     *
+     * **NEVER FOR AN EDITOR THAT IS GONE OR A TEXT THAT IS**: `#abandon` clears the timer, and `destroy` and
+     * `#reparse` both abandon.
+     *
+     * **A SLICE THAT THROWS HERE IS NOT TRIED AGAIN.** The timer is cleared before the slice runs and set again only
+     * when one returns, so the error is reported once, as any error thrown from a timer is, and the editor keeps its
+     * first screen's marks. The next change to the document abandons that parse and starts one on the new text.
+     */
+    #resume = (): void => {
+      this.#timer = null
+      const parser = this.#parser
+      const text = this.#pending
+      if (!parser || text === null) return
+      if (!this.#slice(parser, text)) {
+        this.#timer = setTimeout(this.#resume, 0)
+        return
+      }
+      // The tree landed outside any update, and nothing else will provoke a recompute: ask for one, as the
+      // grammar's arrival does.
+      this.#landed = true
+      this.#view.dispatch({})
     }
 
     #reparse(u: ViewUpdate) {
+      // **A REPLACEMENT BY THE SAME TEXT LEAVES EVERYTHING AS IT IS**: the tree, or the parse that is pending, is
+      // this text's already. *Format* is one edit over the whole buffer, dispatched whether or not it changed a
+      // character (`lsp-text.ts`'s `applyEdits`), and reparsed the whole text at every one.
+      if (u.startState.doc.eq(u.state.doc)) return
+      // WHATEVER FOLLOWS, the text a pending parse was reading is no longer the document.
+      this.#abandon()
       if (overCeiling(u.state.doc.length)) {
         // **DROPPED, NOT MERELY LEFT UNPARSED, AND THE ROUND TRIP IS WHY.** Returning with `#tree`
         // intact leaves a tree describing text that no longer exists, and nothing downstream can
@@ -391,12 +562,13 @@ export function colourPluginClass(opts: ColourOptions) {
         return
       }
       const parser = this.#parser
-      if (!parser) return
+      const old = this.#tree
+      // NO TREE TO REPARSE AGAINST, AND SO NOTHING ON SCREEN FROM ONE: `#rebuild` parses the new text, in slices.
+      if (!parser || !old) return
       const changes: { fromA: number; toA: number; toB: number }[] = []
       u.changes.iterChanges((fromA, toA, _fromB, toB) => changes.push({ fromA, toA, toB }))
       const only = changes.length === 1 ? changes[0] : undefined
-      const old = this.#tree
-      if (only && old) {
+      if (only) {
         old.edit(editFor(u.startState.doc, u.state.doc, only.fromA, only.toA, only.toB))
         // **`parse` RETURNS A NEW `Tree` AND FREES NOTHING**, so the old one has to be deleted here
         // or a wasm tree leaks per keystroke — GC-bounded through `FinalizationRegistry` rather than
@@ -409,11 +581,15 @@ export function colourPluginClass(opts: ColourOptions) {
         this.#tree = next
         return
       }
-      old?.delete()
+      // **SEVERAL CHANGES AGAINST A TREE ARE A WHOLE PARSE, IN ONE GO, AS THEY WERE.** In slices the tree would be
+      // gone while they ran, and with it the colour of every screen past the first: `colourPluginClass`'s doc has
+      // the measurement that put this back.
+      old.delete()
       this.#tree = parser.parse(u.state.doc.toString())
     }
 
     #rebuild(view: EditorView) {
+      this.#landed = false
       const g = this.#grammar
       const parser = this.#parser
       if (!g || !parser) return
@@ -425,16 +601,36 @@ export function colourPluginClass(opts: ColourOptions) {
         this.decorations = Decoration.none
         return
       }
-      this.#tree ??= parser.parse(view.state.doc.toString())
-      const tree = this.#tree
-      if (!tree) return
+      if (this.#tree === null && this.#pending === null) {
+        const text = view.state.doc.toString()
+        this.#pending = text
+        if (!this.#slice(parser, text)) this.#timer = setTimeout(this.#resume, 0)
+      }
       const byCapture = opts.classes().get(opts.languageId)
       if (!byCapture) return
-      const b = new RangeSetBuilder<Decoration>()
-      for (const s of colourSpans(g.query, tree.rootNode, view.visibleRanges, byCapture)) {
-        b.add(s.from, s.to, Decoration.mark({ class: s.cls }))
+      const tree = this.#tree
+      this.decorations = tree
+        ? marksOf(g.query, tree.rootNode, view.visibleRanges, byCapture)
+        : this.#firstScreen(g, view, byCapture)
+    }
+
+    /** What to draw while the whole parse is pending: `FIRST_SCREEN_UNITS` has the rule and its reasons. */
+    #firstScreen(g: LoadedGrammar, view: EditorView, byCapture: ReadonlyMap<string, string>): DecorationSet {
+      const last = view.visibleRanges[view.visibleRanges.length - 1]
+      if (last === undefined) return Decoration.none
+      const cut = view.state.doc.lineAt(last.to).to
+      if (cut > FIRST_SCREEN_UNITS) return Decoration.none
+      if (this.#front === null) {
+        this.#front = new Parser()
+        this.#front.setLanguage(g.language)
       }
-      this.decorations = b.finish()
+      const tree = this.#front.parse(view.state.doc.sliceString(0, cut))
+      if (!tree) return Decoration.none
+      try {
+        return marksOf(g.query, tree.rootNode, view.visibleRanges, byCapture)
+      } finally {
+        tree.delete()
+      }
     }
   }
 }
