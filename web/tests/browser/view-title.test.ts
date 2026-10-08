@@ -52,7 +52,7 @@ function fakeClient(): SessionClient {
 /** A λ-only session whose single recorded frame prints `text`. The text is the discriminator. */
 function lambdaSession(id: SessionId, label: string, text: string, detached: boolean): SessionEntry {
   const hist = new History<LambdaState>(1_000_000)
-  hist.push({ text, spans: [], cut: null, step: 0, redex_span: null, owner: 'None' }, 1)
+  hist.push({ text, spans: new Uint8Array(), cut: null, step: 0, redex_span: null, owner: 'None' }, 1)
   const leg: LegState<LambdaState> = { hist, status: { available: true, reason: '' }, done: null, playing: false }
   return {
     id,
@@ -74,7 +74,7 @@ function lambdaSession(id: SessionId, label: string, text: string, detached: boo
  */
 function bothLegs(id: SessionId, label: string, text: string): SessionEntry {
   const lambdaHist = new History<LambdaState>(1_000_000)
-  lambdaHist.push({ text, spans: [], cut: null, step: 0, redex_span: null, owner: 'None' }, 1)
+  lambdaHist.push({ text, spans: new Uint8Array(), cut: null, step: 0, redex_span: null, owner: 'None' }, 1)
   const tmHist = new History<TmState>(1_000_000)
   tmHist.push({ state: 0, step: 0, heads: [0], window_start: [0], window: ['_'], source_node: null, rule: null }, 1)
   const ok = { available: true, reason: '' }

@@ -1,6 +1,8 @@
 import { describe, expect, it } from 'vitest'
 import init, { compile, tapeNames } from '../../../pkg/redextape_wasm.js'
-import type { TmProgram, TmState } from '../../src/types'
+import { FRAME_BYTES, SPAN_WIRE_BYTES } from '../../src/protocol'
+import { decorationRanges } from '../../src/spans'
+import type { LambdaState, TmProgram, TmState } from '../../src/types'
 
 /**
  * EVERY SHAPE IN `types.ts` IS MEASURED HERE, NOT DESIGNED. `pkg`'s generated declarations type each
@@ -8,6 +10,7 @@ import type { TmProgram, TmState } from '../../src/types'
  * surprise is a test that reads the value out of a real browser.
  */
 type Session = {
+  lambdaState(byteBudget: number): LambdaState
   tmProgram(): TmProgram
   tmState(radius: number): TmState
   stepTm(): boolean
@@ -19,6 +22,23 @@ describe('wire shapes', () => {
     await init()
     const names = tapeNames() as string[]
     expect(names).toEqual(['REG', 'WORK', 'STACK', 'HEAP', 'BOX'])
+  })
+
+  // A λ FRAME'S SPANS ARE ONE BYTE STRING, `SPAN_WIRE_BYTES` A SPAN (`viewmodel.rs`'s `LambdaState.spans`). An array of
+  // `[Span, TokenClass]` tuples would fail the type; bytes of the wrong layout would fail the read.
+  it('a λ frame’s spans arrive as one byte string that reads back as ranges', async () => {
+    await init()
+    const { session } = compile('let x = 40; x + 2', 'unary') as { session: Session | null }
+    expect(session).not.toBeNull()
+    if (!session) return
+    const frame = session.lambdaState(FRAME_BYTES)
+    expect(frame.spans).toBeInstanceOf(Uint8Array)
+    expect(frame.spans.byteLength % SPAN_WIRE_BYTES).toBe(0)
+    const ranges = decorationRanges(frame.spans, frame.text)
+    expect(ranges.length, 'every span reads back as a range').toBe(frame.spans.byteLength / SPAN_WIRE_BYTES)
+    expect(ranges.length).toBeGreaterThan(3)
+    for (const r of ranges) expect(r.to).toBeLessThanOrEqual(frame.text.length)
+    session.free()
   })
 
   it('tmProgram and tmState arrive in the shapes types.ts declares', async () => {

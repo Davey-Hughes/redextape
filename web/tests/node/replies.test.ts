@@ -366,7 +366,7 @@ function scratchDriver(opts: { draw?: () => void; frame?: (cb: () => void) => vo
 
 const lambdaFrame = (text: string): LambdaState => ({
   text,
-  spans: [],
+  spans: new Uint8Array(),
   cut: null,
   step: 0,
   redex_span: null,

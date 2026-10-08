@@ -31,7 +31,7 @@ const events = (over: Partial<PaneEvents> = {}): PaneEvents => ({
   ...over,
 })
 
-const frame: LambdaState = { text: 'x', spans: [], cut: null, step: 0, redex_span: null, owner: 'None' }
+const frame: LambdaState = { text: 'x', spans: new Uint8Array(), cut: null, step: 0, redex_span: null, owner: 'None' }
 const CONTROLS = {
   canRestart: true,
   canBack: false,

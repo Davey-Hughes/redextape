@@ -383,6 +383,32 @@ fn every_view_model_round_trips_through_json() {
     assert_eq!(ts, back);
 }
 
+/// **A λ FRAME PUTS ITS SPANS ON THE WIRE AS ONE BYTE STRING, THREE LITTLE-ENDIAN `u32`S A SPAN, AND READS THEM BACK.**
+/// A span's start, its end, and its class's index in `token_class_names`. As `[{start, end}, "Class"]` tuples, about
+/// 300 a frame, they were most of what a λ frame cost to build in the worker and to copy across to the page.
+///
+/// `serde_json` writes the bytes as an array of numbers; `serde-wasm-bindgen`, what the app uses, as a `Uint8Array`.
+#[cfg(feature = "serde")]
+#[test]
+fn a_lambda_frame_puts_its_spans_on_the_wire_as_one_byte_string() {
+    let (term, _map) = lambda_fixture("let x = 40; x + 2");
+    let cursor = redextape_core::trace::LambdaCursor::new(&term, 1_000);
+    let ls = LambdaState::render(&cursor, usize::MAX, MAX_TERM_DEPTH);
+    assert!(ls.spans.len() > 3, "precondition: a frame with spans to carry");
+
+    let wire = serde_json::to_value(&ls).expect("serialize");
+    let bytes: Vec<u8> = serde_json::from_value(wire["spans"].clone()).expect("an array of bytes");
+    let word = |i: usize| u32::from_le_bytes(bytes[i..i + 4].try_into().expect("four bytes"));
+    let words: Vec<(u32, u32, u32)> =
+        (0..bytes.len()).step_by(12).map(|i| (word(i), word(i + 4), word(i + 8))).collect();
+    let expected: Vec<(u32, u32, u32)> =
+        ls.spans.iter().map(|(span, class)| (span.start as u32, span.end as u32, *class as u32)).collect();
+    assert_eq!(bytes.len(), 12 * ls.spans.len());
+    assert_eq!(words, expected);
+    let back: LambdaState = serde_json::from_str(&serde_json::to_string(&ls).expect("serialize")).expect("deserialize");
+    assert_eq!(back, ls);
+}
+
 /// **A TM FRAME PUTS EACH TAPE'S WINDOW ON THE WIRE AS ONE STRING, AND READS ONE BACK AS CELLS.** The web app records a
 /// TM leg a frame a step, and `window` as an array of one-character strings a tape was most of what a frame cost to
 /// build in the worker and to copy across to the page. The Rust type keeps a cell a `Symbol`; only what serde writes

@@ -124,7 +124,7 @@ function harness(): {
 
 const lambdaFrame = (text: string, step = 0): LambdaState => ({
   text,
-  spans: [],
+  spans: new Uint8Array(),
   cut: null,
   step,
   redex_span: null,

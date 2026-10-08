@@ -25818,3 +25818,169 @@ docker build --network=host, then run --network host, at `251f231` → healthy a
 | R1 to R3, T1, T2, B1 | the sabotages | `python3 sab/run-sabs.py` (`sab/sab-summary.txt`, `sab/*.log`); `logs/sab-B1-shapes-on-main-wasm.log` |
 | the gates block | the gates | `rust-gates-77a0c1a/gates.log` (`rust-gates-77a0c1a.sh`), `gates-final/gates.log` (`gates.sh`), `docker-final/gate-docker.log` |
 | 95, 89, 97, 97 | the coverage floors | `thresholds` in `web/vite.config.ts` |
+
+#### A λ FRAME'S SPANS CROSS FROM THE WORKER AS ONE BYTE STRING, THREE LITTLE-ENDIAN WORDS A SPAN: AS `[Span, TokenClass]` TUPLES THEY WERE MOST OF WHAT A FRAME COST, AND `share-positions`' λ CONTINUES TOOK 72.0 TO 76.2 s AT A QUARTER OF A CORE; NOW 46.9 TO 48.6 s, AND A λ RING FOR `map` HOLDS 1.23 MB OF HEAP WHERE IT HELD 6.80 (2026-10-07, branch `lambda-spans`, `406676e..5683077`, 3 commits, plus this entry)
+
+**A fix, across `crates/redextape-core`, `crates/redextape-wasm`'s browser tests and `web/`, to the first thing #136's entry did not close**: "λ frames cross the same way, and their spans are the cost" (WHAT THIS DID NOT CLOSE). There is no spec or plan file; this entry is the design. The user asked "should we try it now" of that line; the shape of the fix was the controller's, and two decisions it raised were the user's (DECISIONS). Code commits: `6d5d83b`, the wire shape, its readers, its tests and the memory figures it changed; `fa50113`, the wasm crate's browser test, which still read the spans as pairs and failed `check-all.sh`'s browser leg; `5683077`, the re-review's three Minors, comment lines only.
+
+##### WHAT A FRAME COST, MEASURED
+
+`LambdaState.spans` is `Vec<(Span, TokenClass)>`, and it crossed the worker boundary as serde wrote it: an array of `[{ start, end }, "Class"]` tuples, 298.0 a frame for `fact`, each a two-element array around a two-field object and a string. A throwaway node script, `probes/span-shapes.mjs`, loads a wasm build, steps a program's λ leg to the end of a history building each frame with `lambdaState`, as the worker's record loop does, and puts each 256-frame batch through `v8.serialize` and `v8.deserialize`, the format of the structured clone `postMessage` uses. It tried the spans as two flat arrays, one numeric array and a typed array on frames already built; one byte string a frame, built in the wasm, is what was then measured, in a throwaway build of the wasm crate, and then in this branch's.
+
+Three runs each of `main`'s release wasm (A, `406676e`'s, built at `da86c18`, whose tree `406676e` is) and this branch's (B), taken in turn, at loads 5.76 to 5.90, two batches through the clone a run:
+
+| `fact`, every frame of a full history: 7,399 frames, 298.0 spans a frame | A, `main` | B, the branch |
+|---|---|---|
+| stepping alone | 16 to 17 ms | 16 to 18 ms |
+| building the frames | 530 to 552 ms | 97 to 109 ms |
+| writing them to a clone | 460 to 541 ms | 14 to 20 ms |
+| reading them back | 734 to 843 ms | 9 to 15 ms |
+| on the wire | 80.46 MB | 33.91 MB |
+
+**Stepping took the same on both sides; the frames took the rest.**
+
+**Node's `v8.deserialize` hands a `Uint8Array` back as a view into its batch's buffer** (the review measured a `byteOffset` of 939), so the reading figure is node's, not a browser's. The browser figures are AFTER's.
+
+##### THE FIX
+
+- **In `redextape-core`, `LambdaState.spans` keeps its type and changes what serde writes.** A field attribute, `serde(with = "span_words")`, writes one byte string, three little-endian `u32`s a span: its start, its end and its class's index in `token_class_names`; `ts(type = "Uint8Array")` says so to the generated TypeScript. `serde-wasm-bindgen` writes bytes as a `Uint8Array` of exactly their length. A span offset past `u32::MAX` is a serializer error, not a wrap. Reading bytes back refuses a length that is not whole spans, a class index with no class, and a start past its end, which `Span::new` asserts against in a debug build.
+- **`TokenClass::ALL` and `TokenClass::from_index`** read a class back from its index; `token_class_names`' test now holds both directions, and that `from_index` of the count is `None`.
+- **On the page, `decorationRanges` reads the bytes with a `DataView`**, little-endian, honouring the view's `byteOffset`, and drops a span whose class index names no class and any trailing part of a span. `TOKEN_CLASSES` is read by index again, so `assertTokenClasses`, which compares its order with the wasm's at startup, guards a reader again; its doc and `TOKEN_CLASSES`' say so.
+- **`lambdaFrameBytes` counts a frame's spans as `byteLength / SPAN_WIRE_BYTES`**, 12, and charges each `SPAN_BYTES`, 80, as before, so a history holds as many λ frames as it did.
+- **The three tests that measure memory with `usedJSHeapSize` take every λ reading after two forced collections**, and their figures and the docs that quote them are re-measured (WHAT A λ RING HOLDS).
+
+##### AFTER, INTERLEAVED
+
+`share-positions.test.ts` opens share links that land on λ steps past a first recording, so its cases wait on λ continues: up to ten for `fact(12)` at step 17,000. `ab.sh` ran it on `main` (A: `406676e`'s wasm, built at `da86c18`, whose tree `406676e` is, and its `spans.ts` and `protocol.ts`) and on the branch (B), in turn, three runs each at full speed and three at a quarter of a core, each a locked run under `systemd-run --user --scope -q -p MemoryMax=16G -p MemorySwapMax=0`, with `-p CPUQuota=25%` at the quota, restoring the branch's files from saved copies and comparing them after every run. Every case passed in every run. Milliseconds a case, the range over three runs:
+
+| | A, `main` | B, the branch |
+|---|---|---|
+| **Full speed, loads 2.59 to 3.46** | | |
+| the whole file | 10.58 to 10.85 s | 8.04 to 8.09 s |
+| reaches `fact(4)`'s λ step 3,000 after two continues | 980 to 1,041 | 550 to 590 |
+| opens `fact(12)` with λ going to step 17,000 | 608 to 640 | 469 to 482 |
+| posts the next continue once continue 3 has recorded | 712 to 796 | 572 to 599 |
+| **A quarter of a core, loads 2.14 to 3.84** | | |
+| the whole file | 72.01 to 76.20 s | 46.89 to 48.60 s |
+| reaches `fact(4)`'s λ step 3,000 after two continues | 8,503 to 8,698 | 3,202 to 3,504 |
+| lands `fact(4)`'s λ step 1,387 on 1,388 | 5,193 to 5,302 | 2,790 to 2,804 |
+| opens `fact(12)` with λ going to step 17,000 | 2,600 to 4,795 | 1,404 to 1,490 |
+| posts the next continue once continue 3 has recorded | 4,703 to 5,197 | 3,590 to 3,692 |
+| stops at 15,695 after the tenth continue | 3,604 to 7,800 | 2,103 to 2,297 |
+
+The file's slowest case at the quota took 8,503 to 8,698 ms on A, `fact(4)`'s two continues, and 3,590 to 3,692 on B, `fact(12)`'s third.
+
+##### WHAT A λ RING HOLDS
+
+**`usedJSHeapSize` counts a typed array's bytes while it is retained, and for one forced collection after it is dropped.** Measured in the browser tier: 36,000,000 bytes of `Uint8Array`s, retained, read +37,162,032; dropped, +36,002,008 after one `gc()` and +2,008 after two. This branch's first cut got that backwards. `frame-cost.test.ts` read 0.56 bytes a span with one collection before each reading, because its arm B drops every frame's spans and its reading still counted them; the first cut took the 0.56 for the heap's share, called the spans' 12 bytes invisible to it, and added them to all three instruments, counting them twice in two. The whole-branch review measured it (THE REVIEW, C2). Every λ reading in the three files now follows two collections, and every figure below but 74.08 was taken that way, on both sides.
+
+| | A, `main` | B, the branch |
+|---|---|---|
+| a span, `frame-cost.test.ts`'s heap differential | 74.08 bytes (`SPAN_BYTES`' doc, 2026-08) | 12.56 in two runs |
+| `map`'s λ ring, 253 frames, 6,343,013 bytes charged, `session-memory.test.ts` | 6,798,725.33 bytes, 1.0718447736640826 a charged byte, in two runs | 1,233,805.33, 0.19451407924488462, in five |
+| one session at two legs, mean resident heap | 53,789,385 and 53,793,529 | 48,235,642.67 to 48,241,576.33 |
+| three sessions at four legs against one, resident | 1.6713366335691915 and 1.6716232456149727 | 1.633412027325337 to 1.6335864044580173 |
+| the same, baseline-free | 1.9993872469182312 and 1.9997134462760306 | 1.9994881568813339 to 1.9997022744737865 |
+| the warm-buffer probe's λ ring at exhaustion | 35,939,896 and 35,953,988 | 7,898,504 in two runs |
+| its marginal, a λ copy | 44,458,449.33 and 44,465,050.67 | 16,420,493.33 and 16,421,534.67 |
+| its derived caps, readings (a) and (b) | 11 and 9 | 30 and 28 |
+
+- **`DROP_HISTORY_ON_UNFOCUS` stays `false`**: three sessions are under twice one on both readings.
+- **`SPAN_BYTES` stays 80, and charges a span 6.37 times what it holds**: the λ ring is charged 5.14 bytes for each byte it holds. `buffer-affordability.test.ts`'s `LAMBDA_LEG_RETENTION_RATIO` is the new 0.1945; its own n=1 ring reads 0.2354 of its charge, 21.016% from it, where the two agreed to 1.0710 to 1.0715 against 1.0719 before.
+- **The floors.** `frame-cost`'s is half of `SPAN_WIRE_BYTES`, 6 bytes a span, where it was 16: a differential that kept no spans reads 0.56. Half, not all, for the margin: at 12 it would be 0.56 a span, 74 KB over the file's 132,882 spans, and at 6 it is 871 KB. `session-memory`'s λ floor is 0.1 where it was 0.5; a ring keeping its frames without their spans read 0.048. Its TM floor stays 0.5.
+
+##### DECISIONS
+
+- **`SPAN_BYTES` stays 80.** Lowering it toward 12.56 would let a λ history hold more frames in the same `HISTORY_BYTES`: a change to how far back a λ view scrubs, and a change to every λ test that lands on a ring's edge. The controller recommended keeping it, and the user said "sure let's do your recommendations".
+- **`MAX_WARM_BUFFERS` stays 11 here, and drops to 9 in its own pull request after this one.** The probe derives 30 for a page of λ copies, but it prices λ copies only, and `warmCount()` counts every kind. Measured with a TM arm added to the probe (one collection a reading, kept out of this branch), a TM copy of `tm-scratch-fork`'s `BIG` costs 52.79 MB, its wasm 22,151,168 bytes and its ring about 30.64 MB, and eleven of them came to 592.2 to 592.4 MiB against the 512 MiB budget; nine came to 491.6. The user chose "Lower to 9": one cap for every kind, set by the costliest. That pull request re-takes those readings after two collections.
+
+##### THE TESTS
+
+- **Rust, `viewmodel_contract.rs`**: `a_lambda_frame_puts_its_spans_on_the_wire_as_one_byte_string` renders a λ frame of `let x = 40; x + 2` and holds its `spans` as `serde_json` writes them, twelve bytes a span, a span's start, end and class discriminant a little-endian word each, and the frame read back equal to itself. RED before `span_words`. The round trip of every view model passes through the same module.
+- **Rust, `viewmodel.rs`**: `span_words_reads_bytes_and_refuses_what_is_not_spans` drives the reader through `visit_bytes`, which `serde_json` never calls, and holds each refusal; RED before the start-past-end check, on `Span::new`'s debug assertion. `span_words_refuses_an_offset_past_u32_max` holds the serializer's. `analysis.rs`'s names test holds `from_index` against every discriminant.
+- **`redextape-wasm`'s browser test** `compile_step_and_read_both_legs` reads `spans` as a `Uint8Array`: a whole number of spans, the first in bounds, a class index that names a class.
+- **Node**: `spans.test.ts` reads a span from its three little-endian words, drops one whose class index names no class and a trailing partial span, through `tests/node/span-bytes.ts`, a test-side encoder every fixture that builds a frame now uses; `protocol.test.ts` holds that 50 spans are charged 50 times `SPAN_BYTES`, 4,000 bytes, where counting their 600 bytes as spans would charge 48,000.
+- **Browser**: `shapes.test.ts` holds that a λ frame's spans arrive as a `Uint8Array` that reads back as ranges; on `main`'s wasm it fails.
+
+**The sabotages**, each one edit: R and T by `sab/run-sabs.py`, which saves the file, asserts the edit matches once, runs the tier that holds it, restores from the copy and compares; M by `sab/run-mem-sabs.py`, which edits a throwaway copy of a browser file and deletes it. R1 to R4, T1 to T5, M1 and M2 were run again at `f5e999d`, whose tree `5683077` is, M1 and M2 against the committed floor of 6, and each failed as in the table.
+
+| | What changes | What fails |
+|---|---|---|
+| R1 | the spans serialised as tuples again | the contract case |
+| R2 | the words written big-endian | the contract case and the round trip of every view model |
+| R3 | the class read from the end word | the same two |
+| R4 | `from_index` off by one | the names test |
+| T1 | `decorationRanges` reads big-endian | four `spans.test.ts` cases |
+| T2 | a span with an unknown class kept | the words case: `Cannot read properties of undefined` |
+| T3 | a trailing partial span read | the words case: `Offset is outside the bounds of the DataView` |
+| T4 | `lambdaFrameBytes` counts bytes, not spans | the frame-size case: 48,000 for 4,000 |
+| T5 | a span's start read as its end | six `spans.test.ts` cases |
+| B1 | `shapes.test.ts` run on `main`'s wasm | the new case |
+| M1 | `frame-cost`'s arm A keeps frames without spans | the floor: 0.558 a span |
+| M2 | `frame-cost` collects once, not twice | the floor: 0.556 a span |
+| M3 | `session-memory`'s rings keep frames without spans | the λ floor: 0.0479 |
+| M5 | the warm-buffer probe's heap reading zeroed | its ring bound: 0 against 1,000,000 |
+
+**Two edits that change no outcome, kept as measurements**: one collection in `session-memory` (M4) read the λ ring at 1,248,021.33 bytes where two read 1,233,805.33, and in the warm-buffer probe (M6) a marginal of 16,420,936, inside the two-collection runs'. Neither file's fixture leaves enough dropped spans for the second collection to matter; each comment says so with its figure.
+
+##### THE REVIEW
+
+**A whole-branch review by a reviewer who had not seen the work, at the first commit: two Critical, two Important, six Minor; then its re-review of the fixes, READY with three Minor: two comment paragraphs past 120 columns (seven, on a search), `frame-cost`'s floor giving its margin at 12 where it is 6, and `MAX_WARM_BUFFERS`' doc still giving a λ buffer's figures from before this branch with no date; all taken in `5683077`.** Its probes and logs are in the record's `review/`.
+
+- **C1, the wasm crate's browser test** read the spans as an array of pairs; `check-all.sh`'s browser leg failed on it, and so did this branch's own first gate run. Fixed in `fa50113`.
+- **C2, the premise of the memory changes was false** (WHAT A λ RING HOLDS). The reviewer measured retained typed arrays counted by `usedJSHeapSize`, posted ones too, and dropped ones counted for one collection; the controller re-measured it before changing anything. The additions are gone, every λ reading follows two collections, and every figure in this entry and in the docs was re-taken.
+- **I1, the three instruments could not fail on a broken reading**: the reviewer's sabotages all passed. The floors above and M1 to M5 are the answer.
+- **I2, `scratch.ts`' `MAX_WARM_BUFFERS` doc said the budget now allowed raising the cap**, true for λ copies only. The paragraph is gone; DECISIONS says what happens to the cap.
+- **Minors**: `TOKEN_CLASSES`' and `assertTokenClasses`' docs said nothing read a class by index; the commit message named the inflated figures and called `v8.serialize` "a structured clone" without its caveat; `LAMBDA_LEG_RETENTION_RATIO`'s doc quoted a probe run taken on the old constant; `span_words` panicked in a debug build on a start past its end, and its refusals had no test; two preconditions sat inside a reading; `frame_cost_probe.rs`' `json_b` now spells a span as twelve JSON numbers, which its doc now says. All taken.
+- **What the review found sound**: the wire format, its endianness and stride; `serde-wasm-bindgen` 0.6.5 writing bytes into a fresh, exactly sized `Uint8Array` with `serialize_bytes_as_arrays` off; `decorationRanges` honouring `byteOffset`; the ts-rs override; `lambdaFrameBytes`' charge, recomputed for `map`'s 253 frames as 6,343,013; and no other reader of a frame's spans in `web/src`, the worker, persistence, share links, the LSP or the CLI.
+
+##### WHAT THIS DID NOT CLOSE
+
+- **`MAX_WARM_BUFFERS`**, 11, does not fit a page of TM copies: DECISIONS. Its own pull request, next.
+- **`SPAN_BYTES`, 80, charges a span 6.37 times what it holds**, so a λ history holds fewer frames than `HISTORY_BYTES` of heap would allow. Kept, by decision.
+- **A λ copy's first recording was not timed in the browser**: `share-positions`' continues are this branch's browser measurement.
+- **`frame_cost_probe.rs`' `json_b` for a λ row is not comparable with one taken before this branch**: it spells a span as twelve JSON numbers.
+
+##### VERIFICATION
+
+Run on 2026-10-07 in the main checkout on branch `lambda-spans`. The Rust and web gates ran at `ccc0d47`, whose tree `fa50113` is: the first commit's message was reworded afterwards, and `git diff ccc0d47 fa50113` is empty. The sabotages, the node timings and the Docker image ran at `f5e999d`, whose tree `5683077` is for the same reason. `5683077` differs from `fa50113` in comment lines only. The scans ran again with this entry committed. `pkg/` was rebuilt from `f5e999d` with `pnpm run build:wasm` and is byte-identical to the build every gate and every B-side run used; `pkg-lsp/` and `web/bindings/` are this tree's. The branch changes no `Cargo.toml` or `Cargo.lock`, and neither `web/package.json` nor `web/pnpm-lock.yaml`. Every browser run, the coverage gate's included, ran under `flock <the lane's browser lock> systemd-run --user --scope -q -p MemoryMax=16G -p MemorySwapMax=0`, plus `-p CPUQuota=25%` for the quota runs.
+
+```
+scripts/check-all.sh --no-llvm, from the root                 → exit 0 (every leg but LLVM; `wasm-pack test --headless --chrome crates/redextape-wasm` 33 passed)
+cargo llvm-cov nextest --workspace --fail-under-lines 90         → exit 0, 95.68 % of lines
+scripts/check-slow.sh                                            → exit 0
+pnpm exec biome ci --error-on-warnings                           → exit 0, 349 files
+pnpm run typecheck                                               → exit 0
+pnpm run test:coverage                                           → exit 0, 229 files / 2,247 tests; 97.51 / 91.62 / 98.38 / 98.87 against 95 / 89 / 97 / 97
+pnpm run build:app                                               → exit 0
+scripts/check-{text-bytes,citations,attributions,doc-figures,shared-docs,colours,grammar-wasm,lua}.sh, --self-test then alone → 16 of 16 exit 0
+nine browser files the branch changes and share-positions, each alone under -p CPUQuota=25%, at loads 4.23 to 13.95 → exit 0, every case passing:
+  shapes 3 of 3, slowest 98 ms; frame-cost 3 of 3, 6,604 ms; session-memory 3 of 3, 45,001 ms; lambda-body 21 of 21, 133 ms;
+  lambda-display 10 of 10, 482 ms; lambda-follow 9 of 9, 399 ms; lambda-pane-editor 4 of 4, 195 ms; term-map 12 of 12, 301 ms;
+  view-title 7 of 7, 305 ms; share-positions 17 of 17, 4,191 ms
+docker build --network=host, then run --network host, at `f5e999d` → healthy after 2 polls; GET / 200 and its 4 assets 200; 7 wasm; container and image removed
+```
+
+`check-all.sh`'s LLVM leg was not run here: this machine has LLVM 21 and 23, and the leg needs 22; CI's `rust-llvm` runs it. `buffer-affordability.test.ts`, the tenth browser file the branch changes, is on the browser project's exclude list, a probe run on demand; it ran as a copy, in AFTER's and WHAT A λ RING HOLDS' runs. Each probe was copied into `web/tests/browser/`, run and deleted; `pkg/`, `web/src/spans.ts` and `web/src/protocol.ts` were restored from saved copies and compared with `cmp` after every swap; `git status` was empty after each.
+
+**Every count this entry quotes, with what produces it.** The lane's record directory is scratch, not tracked, and each command runs from it unless it reads git. `logs/` holds every locked run, `sab/` the sabotages, `review/` the reviews' evidence, `probes/` the throwaway files.
+
+| Value | What | Produced by |
+|---|---|---|
+| 3; `6d5d83b`, `fa50113`, `5683077` | commits in the range | `git rev-list --count 406676e..5683077`; `git log --format='%h %s' 406676e..5683077` |
+| 0; 0; 0 | `ccc0d47` against `fa50113`, `f5e999d` against `5683077`, and `fa50113..5683077` outside comments | `git diff ccc0d47 fa50113 \| wc -l`; `git diff f5e999d 5683077 \| wc -l`; `git diff -U0 fa50113 5683077 \| grep -E '^[+-]' \| grep -vE '^(\+\+\+\|---)' \| grep -vE '^[+-]\s*(//\|\*\|/\*\*)' \| wc -l` |
+| 7,399, 298.0; the node table; 5.76 to 5.90 | the frame costs in node | `grep -E "^==\|from\|as built" logs/node-ab-f5e999d.log`, written by `review/node-ab.sh` (`node probes/span-shapes.mjs fact.rxt <pkg dir>`) |
+| 939 | a cloned frame's `byteOffset` | `grep byteOffset review/span-totals.log` |
+| AFTER's table, its loads and file times | the interleaved `share-positions` runs | `python3 sp-table.py full`; `python3 sp-table.py q25` |
+| 37,162,032; 36,002,008; 2,008 | typed arrays retained and dropped | `grep TYPED logs/typed-heap-1.log` |
+| 12.56; 132,882 | a span, and the file's spans | `grep -h "bytes/span\|total spans" logs/frame-cost-fix-1.log logs/fix1-frame-cost-1.log` |
+| 74.08 | a span as a tuple | `SPAN_BYTES`' doc in `web/src/protocol.ts` |
+| the session-memory rows | `map`'s λ ring and three sessions | `grep -h -o "lambda leg: real.*\|mean resident.*\|mean delta.*" logs/fix1-session-memory-*.log logs/ab-fix1-zz-session-memory-*.log`, written by a copy of `session-memory.test.ts` with `console.error` (`remeasure.sh`, `ab.sh`) |
+| the probe rows; 0.2354, 21.016 %; 1.0710 to 1.0715 | the warm-buffer probe on both sides | `grep -h -o "console.error\] \(n=1 \|source λ ring\|λ retention\|marginal\|derived cap\).*" logs/ab-fix1-zz-buffer-affordability-*.log` |
+| 5.14; 6.37; 74 KB, 871 KB | ratios | 6,343,013 / 1,233,805.33; 80 / 12.56; 0.5558 and 6.5558 times 132,882 |
+| 0.558, 0.556, 0.0479, 0 against 1,000,000; 1,248,021.33, 16,420,936 | M1 to M6 | `grep -h "bytes/span\|lambda leg\|marginal\|AssertionError" logs/sab-M*.log`, written by `sab/run-mem-sabs.py` |
+| R1 to R4, T1 to T5 | the Rust and node sabotages | `python3 sab/run-sabs.py` (`logs/sabs-rerun-f5e999d.log`, `sab/sab-summary.txt`) |
+| B1 | `shapes.test.ts` on `main`'s wasm | `logs/sab-shapes-on-old-wasm.log` |
+| 52.79 MB, 22,151,168, 30.64 MB; 592.24 and 592.40 MiB; 475,062,616 and 40,388,757, 491.6 MiB | a TM copy, with the TM arm kept out of this branch | `grep -h "TM n=\|TM copy" logs/probe-affordability-tm-1.log logs/probe-affordability-tm-9.log`; the arm is `~/temp/redextape-warm-copy-cap-record/tm-arm.patch` |
+| the gates block | the gates | `rust-gates-ccc0d47/gates.log` (`rust-gates-arg.sh`), `gates-ccc0d47/gates.log` (`gates.sh`), `docker-final/gate-docker.log` (`docker-gate.sh`) |
+| 95, 89, 97, 97 | the coverage floors | `thresholds` in `web/vite.config.ts` |

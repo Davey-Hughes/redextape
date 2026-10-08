@@ -309,6 +309,11 @@ async function round(
   const ringFrames = results.map((r) => r.frames.length)
   const { rings: builtRings, charged: ringCharged } = buildRings(results.map((r) => r.frames))
 
+  // TWICE, NOT ONCE, SINCE A λ FRAME'S SPANS ARE A `Uint8Array` (2026-10-07): `session-memory.test.ts`'s `round` gives
+  // the measurement. A frame a ring evicted leaves its spans as garbage that one forced collection still counts. A
+  // ring here evicts one frame, and with one collection the probe printed a marginal of 16,420,936 bytes, inside the
+  // two-collection runs' 16,420,493.33 to 16,421,534.67, in one run.
+  collect()
   collect()
   const after = heapNow()
   // HELD ACROSS THE READING (the array reference keeps every ring — and therefore every frame it
@@ -389,8 +394,19 @@ const SOURCE_SESSION_ARENA_BYTES = 3_538_944
  */
 const MAIN_THREAD_WASM_MODULE_BASELINE_BYTES = SOURCE_WASM_MODULE_BASELINE_BYTES
 
-/** The λ leg's real-retained-heap-per-charged-byte ratio, measured by `protocol.ts`'s `HISTORY_BYTES` doc (its λ-leg row). */
-const LAMBDA_LEG_RETENTION_RATIO = 1.071921708710566
+/**
+ * The λ leg's real-retained-heap-per-charged-byte ratio, measured by `protocol.ts`'s `HISTORY_BYTES` doc (its λ-leg
+ * rows): the one since a λ frame's spans cross as one byte string.
+ *
+ * **IT WAS 1.071921708710566 UNTIL THEN.** In two runs on this one, taken in turn with two on `406676e`, before that
+ * change, the probe printed a λ ring at exhaustion of 7,898,504 bytes, where it printed 35,939,896 and 35,953,988; a
+ * marginal of 16,420,493.33 and 16,421,534.67 bytes a buffer, where it printed 44,458,449.33 and 44,465,050.67; and
+ * derived caps of 30 for reading (a) and 28 for reading (b), where it derived 11 and 9 (2026-10-07). Its own n=1 ring
+ * read 0.2354 of its charge, 21.016% from this constant, where before the two read 1.0710 to 1.0715 and 1.0719; the
+ * intercept uses the probe's own reading, not this. `MAX_WARM_BUFFERS` is not moved by these figures: the probe prices
+ * λ copies only.
+ */
+const LAMBDA_LEG_RETENTION_RATIO = 0.19451407924488462
 /**
  * The TM leg's equivalent, from the same doc's TM rows: the one since a TM frame's tapes cross as one string each.
  *

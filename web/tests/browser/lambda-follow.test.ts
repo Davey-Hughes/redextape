@@ -30,7 +30,14 @@ const events = (): PaneEvents => ({
   rebind: vi.fn(),
 })
 
-const frame: LambdaState = { text: 'λx. x', spans: [], cut: null, step: 0, redex_span: null, owner: 'None' }
+const frame: LambdaState = {
+  text: 'λx. x',
+  spans: new Uint8Array(),
+  cut: null,
+  step: 0,
+  redex_span: null,
+  owner: 'None',
+}
 const CONTROLS = {
   canRestart: true,
   canBack: false,

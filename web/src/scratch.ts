@@ -137,6 +137,11 @@ type BufferState = {
  *     retained 68.6 MB (`protocol.ts`'s `HISTORY_BYTES`), and one run of the probe on the new ratio printed
  *     an intercept of 103,566,047.88 bytes and a derived cap (b) of 9. Reading (a) printed 11 as before.
  *
+ * **SINCE A λ FRAME'S SPANS CROSS AS ONE BYTE STRING (2026-10-07) THE λ FIGURES ABOVE ARE THOSE BEFORE IT.** A full
+ * λ ring retains 7.9 MB where it retained ~35.94, and two runs of the probe priced a buffer at 16.42 MB and derived 30
+ * for reading (a) and 28 for (b) (`buffer-affordability.test.ts`'s `LAMBDA_LEG_RETENTION_RATIO`). The probe prices λ
+ * buffers only, and a TM buffer measured 52.79 MB, so this cap is not moved on those figures.
+ *
  * **BOTH NUMBERS ARE UPPER BOUNDS, NEVER MEASURED CEILINGS.** `pageBaseline` (17,825,792 bytes) is a
  * FLOOR — a byte-conversion of `session-memory.test.ts`'s own prose figure for the real app's baseline
  * (CodeMirror, the DOM), not a reading either probe ever took of the real app, and that file says

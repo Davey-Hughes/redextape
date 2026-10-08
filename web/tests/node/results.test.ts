@@ -5,7 +5,7 @@ import type { Diagnostic, LambdaState } from '../../src/types'
 
 const okState: LambdaState = {
   text: 'λf. λx. f (f x)',
-  spans: [],
+  spans: new Uint8Array(),
   cut: null,
   step: 7,
   redex_span: null,

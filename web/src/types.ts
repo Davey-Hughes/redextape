@@ -15,7 +15,8 @@
 //
 // WHAT IS STILL DECLARED BELOW IS EVERYTHING THAT HAS NO RUST DECLARATION TO GENERATE FROM, and that
 // is now the whole of it — there is no remaining migration and no later PR to wait for. `Classified`
-// is a structural alias over two generated types, with no derive site to attach a `#[derive(TS)]` to.
+// is a structural alias over two generated types, with no derive site to attach a `#[derive(TS)]` to; since
+// a λ frame's spans cross as bytes, only the tests that build a frame use it, to write them (`span-bytes.ts`).
 // `TOKEN_CLASSES` is a runtime array, which a generated *type* cannot supply; the pin below it is what
 // holds the two together. `ownerNode`, `decodedText` and `assertTokenClasses` are consumers, not
 // shapes.
@@ -60,15 +61,14 @@ export type { Decoded, Owner, Span, TokenClass, ValueRun }
 /**
  * Every `TokenClass` variant, in the Rust enum's declaration order.
  *
- * THE UNION NO LONGER DERIVES FROM THIS ARRAY. Before generation, `TokenClass` was
- * `(typeof TOKEN_CLASSES)[number]`, so a name missing from the array could not be used anywhere in the
- * app — the array was the source. `TokenClass` is now generated from the Rust enum
- * (`../bindings/TokenClass`), and this array is an independent runtime value: a generated *type*
- * cannot supply an array. Until Plan 7 part 4a this one turned the step-0 link window's `Uint8Array`
- * discriminants into class names; nothing reads a discriminant that way now, and it stays for
- * `assertTokenClasses` below. Written as a standalone array with a separately-sourced union
- * beside it, the two drift the moment a variant is added on the Rust side and not here — which is
- * exactly the shape the pin below exists to close, now that neither derives from the other.
+ * THE UNION NO LONGER DERIVES FROM THIS ARRAY. Before generation, `TokenClass` was `(typeof TOKEN_CLASSES)[number]`, so
+ * a name missing from the array could not be used anywhere in the app — the array was the source. `TokenClass` is now
+ * generated from the Rust enum (`../bindings/TokenClass`), and this array is an independent runtime value: a generated
+ * *type* cannot supply an array. Until Plan 7 part 4a this one turned the step-0 link window's `Uint8Array`
+ * discriminants into class names, and since a λ frame's spans cross as bytes (2026-10-07) it turns theirs: `spans.ts`'s
+ * `decorationRanges` reads a span's class as an index into it. Written as a standalone array with a separately-sourced
+ * union beside it, the two drift the moment a variant is added on the Rust side and not here — which is exactly the
+ * shape the pin below exists to close, now that neither derives from the other.
  *
  * THE PIN BELOW FIRES AT `pnpm typecheck` AND AT CI'S `web` JOB, in both directions: a name this array
  * is missing, and a name this array has that the union does not. See the pin's own comment for the
@@ -166,8 +166,8 @@ export function decodedText(d: Decoded): string {
  * above `TOKEN_CLASSES`, which is set-based (`Exclude<...>`) and typechecks clean if two names swap
  * places. It mattered from Plan 5b until Plan 7 part 4a, while the step-0 link window read `LinkIndex`'s
  * span classes — a `Uint8Array` of DISCRIMINANTS — through this array, where a reordering mis-coloured
- * silently. NOTHING READS A DISCRIMINANT THAT WAY NOW, so this check guards no reader today; it stays so
- * the next one inherits it rather than rediscovering the drift.
+ * silently. **IT MATTERS AGAIN SINCE 2026-10-07**: a λ frame's spans carry their classes as indices into
+ * this array (`spans.ts`'s `decorationRanges`), so a reorder this check missed would mis-colour λ text.
  */
 export function assertTokenClasses(fromWasm: string[]): void {
   const ours = TOKEN_CLASSES.join(',')

@@ -95,8 +95,14 @@ export const ASM_WINDOW: AsmWindow = { locals: 64, args: 16, frames: 8, cells: 1
  *     bytes against the same 33,554,840 for the same 75,023 frames, in two runs of the same file taken
  *     in turn with two on `08977f6`, before that change, which read 68,637,886.67 and 2.0455435539751248
  *     (2026-10-07).
- *     A full TM ring now retains 29.3 MB, against the 35.95 MB `buffer-affordability.test.ts` measured
- *     for a full λ ring.
+ *     A full TM ring now retains 29.3 MB, against the 35.95 MB `buffer-affordability.test.ts` then
+ *     measured for a full λ ring (7.9 MB since the row below).
+ *   * **λ leg since a frame's spans cross as one byte string — 0.19451407924488462**: 1,233,805.33 bytes
+ *     against the same 6,343,013 for the same 253 frames, in five runs of the same file, two of them taken in
+ *     turn with two on `406676e`, before that change, which read 6,798,725.33 and 1.0718447736640826
+ *     (2026-10-07). Every reading in those runs follows two forced collections, where the rows above follow
+ *     one: a `Uint8Array` that has become garbage is still counted after one (`session-memory.test.ts`'s
+ *     `round`). The ring is charged 5.14 bytes for each byte it holds, because `SPAN_BYTES` is (its doc).
  *
  * `tmFrameBytes` (below) charged 2 bytes a cell for a `window: string[][]` whose cells were
  * one-character JS strings, and nothing for the per-tape array headers around them; a tape's window is
@@ -140,7 +146,13 @@ export const HISTORY_BYTES = 32 * 1024 * 1024
  * 1.8103337899122949 and 1.8103213050142515; after it 53,797,982.33 and 53,802,203.67 against
  * 89,918,997.67 and 89,904,097.67, ratios 1.6714195173626927 and 1.6710114370718063. Baseline-free, the
  * ratio read 1.9998919540045792 and 1.999850460283213 before and 1.9990624867469862 and
- * 1.9985581174246312 after. Every other figure in this doc is the 2026-08-11 measurement's.
+ * 1.9985581174246312 after. **AND AGAIN WHEN A λ FRAME'S SPANS BEGAN TO CROSS AS ONE BYTE STRING, STILL MET**, every
+ * reading after two forced collections (`HISTORY_BYTES`'s λ row says why): two runs on `406676e`, before the change,
+ * taken in turn with two after it, and three more after it. Mean resident heap 53,789,385 and 53,793,529 bytes for one
+ * session against 89,915,586.33 and 89,907,095.67 for three before, ratios 1.6716232456149727 and 1.6713366335691915;
+ * after it 48,235,642.67 to 48,241,576.33 against 78,791,848 to 78,799,288.33, ratios 1.633412027325337 to
+ * 1.6335864044580173. Baseline-free, 1.9997134462760306 and 1.9993872469182312 before and 1.9994881568813339 to
+ * 1.9997022744737865 after (2026-10-07). Every other figure in this doc is the 2026-08-11 measurement's.
  *
  * THE PLAN'S ARITHMETIC HELD ON THE HISTORIES, AND THE MEASUREMENT IS WHY THAT IS NOW A FACT RATHER
  * THAN A COUNT. Stripping the harness page's ~17.0 MB baseline leaves what the session machinery
@@ -223,8 +235,20 @@ export const RECORD_CHUNK = 256
  * each, where JSON re-writes the literal in full every time. The sharing is real; it is just smaller
  * than the structural cost of the pair around it — a two-element array with its backing store,
  * wrapping a two-field `Span` object.
+ *
+ * **SINCE 2026-10-07 A SPAN CROSSES AS `SPAN_WIRE_BYTES` BYTES, AND HOLDS 12.56** (`frame-cost.test.ts`): the spans of
+ * a frame are one `Uint8Array`. **80 IS KEPT, AND CHARGES A SPAN 6.37 TIMES WHAT IT HOLDS**: it is what decides how
+ * many λ frames a history holds, and keeping it keeps that number where it was. A smaller charge would hold more frames
+ * in the same `HISTORY_BYTES`; that is a change to how far back a λ view can scrub, not to what a frame costs, and it
+ * was not made here.
  */
 export const SPAN_BYTES = 80
+
+/**
+ * The bytes one span takes on the wire: its start, its end and its class's index in `TOKEN_CLASSES`, a little-endian
+ * `u32` each (`viewmodel.rs`'s `LambdaState.spans`). `spans.ts`'s `decorationRanges` reads them.
+ */
+export const SPAN_WIRE_BYTES = 12
 
 /**
  * One `redex_span`: a `Span` object, `{ start, end }`, and charged only by a frame that has one.
@@ -325,12 +349,16 @@ export type RecordEnd = 'ended' | 'capped' | 'depth-refused' | 'budget' | 'stack
  * SPANS ARE ~95% OF IT, at every text budget — `frame_cost_probe` measured 261 bytes of text
  * serializing to 5,621. `LAMBDA_BYTE_BUDGET` bounds `text` and bounds `spans` not at all, which is
  * why the design's first draft was wrong about a frame's maximum size by a factor of twelve.
+ *
+ * **A SPAN IS CHARGED `SPAN_BYTES` WHATEVER IT CROSSES AS**: the spans arrive as one byte string, `SPAN_WIRE_BYTES` a
+ * span (`spans.ts`), and are counted in spans, so a history holds as many λ frames as it did when they crossed as
+ * tuples. A charge, not what the bytes occupy.
  */
 export function lambdaFrameBytes(f: LambdaState): number {
   return (
     FRAME_OVERHEAD_BYTES +
     f.text.length +
-    f.spans.length * SPAN_BYTES +
+    Math.floor(f.spans.byteLength / SPAN_WIRE_BYTES) * SPAN_BYTES +
     (f.redex_span === null ? 0 : REDEX_SPAN_BYTES) +
     OWNER_BYTES
   )

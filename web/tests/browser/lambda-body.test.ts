@@ -3,6 +3,7 @@ import { LambdaBody, LINE_HEIGHT } from '../../src/lambda-body'
 import { codeLines, type LayoutOptions, outlineLines } from '../../src/lambda-layout'
 import { Tree } from '../../src/lambda-tree'
 import type { LambdaState } from '../../src/types'
+import { spanBytes } from '../node/span-bytes'
 import { wireOf } from '../node/tree-fixture'
 
 const opts = (width: number): LayoutOptions => ({ width, vars: 'names', open: () => true })
@@ -112,7 +113,14 @@ describe('LambdaBody', () => {
 
   it('falls back to the frame’s flat text, with a note when there is one', () => {
     const { body } = mount()
-    const frame: LambdaState = { text: 'λx. x', spans: [], cut: null, step: 3, redex_span: null, owner: 'None' }
+    const frame: LambdaState = {
+      text: 'λx. x',
+      spans: new Uint8Array(),
+      cut: null,
+      step: 3,
+      redex_span: null,
+      owner: 'None',
+    }
     body.showText(frame, 'this step’s term has 40,000 nodes — shown as text')
     expect(body.el.getAttribute('role')).toBe('region')
     expect(body.el.dataset.layout).toBe('flat')
@@ -127,7 +135,7 @@ describe('LambdaBody', () => {
     const text = 'λf. (λx0. f (f x0))'
     const frame: LambdaState = {
       text,
-      spans: [
+      spans: spanBytes([
         [{ start: 0, end: 2 }, 'Binder'],
         [{ start: 2, end: 3 }, 'Binder'],
         [{ start: 5, end: 6 }, 'Punct'],
@@ -139,7 +147,7 @@ describe('LambdaBody', () => {
         [{ start: 15, end: 16 }, 'Ident'],
         [{ start: 17, end: 19 }, 'Ident'],
         [{ start: 19, end: 21 }, 'Punct'],
-      ],
+      ]),
       cut: null,
       step: 6,
       redex_span: { start: 5, end: 21 },
@@ -409,7 +417,14 @@ describe('LambdaBody', () => {
     await frames()
     const followed = body.el.scrollTop
     expect(followed).toBeGreaterThan(0)
-    const frame: LambdaState = { text: 'λx. x', spans: [], cut: null, step: 3, redex_span: null, owner: 'None' }
+    const frame: LambdaState = {
+      text: 'λx. x',
+      spans: new Uint8Array(),
+      cut: null,
+      step: 3,
+      redex_span: null,
+      owner: 'None',
+    }
     body.showText(frame, null)
     await frames()
     expect(body.el.scrollTop, 'the flat text is one line, so the browser clamped').toBe(0)

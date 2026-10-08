@@ -1,6 +1,10 @@
 import { describe, expect, it } from 'vitest'
-import { byteToIndex, decorationRanges } from '../../src/spans'
+import { byteToIndex, decorationRanges as fromBytes } from '../../src/spans'
 import type { Classified } from '../../src/types'
+import { spanBytes } from './span-bytes'
+
+/** `decorationRanges` over the spans a frame would carry for `spans`, on the wire as the worker writes them. */
+const decorationRanges = (spans: Classified, text: string) => fromBytes(spanBytes(spans), text)
 
 const at = (start: number, end: number, cls: Classified[number][1]): Classified[number] => [{ start, end }, cls]
 
@@ -15,6 +19,28 @@ describe('decorationRanges', () => {
       { from: 0, to: 3, className: 'tok-keyword' },
       { from: 4, to: 5, className: 'tok-ident' },
     ])
+  })
+
+  // THE WIRE IS THREE LITTLE-ENDIAN u32s A SPAN, AND A BYTE STRING THAT DOES NOT FIT IT IS READ AS FAR AS IT DOES.
+  it('reads a span from its three little-endian words, and drops one whose class index names no class', () => {
+    const bytes = new Uint8Array(36)
+    const view = new DataView(bytes.buffer)
+    // 0..3 Keyword (index 3); 4..5 an index past the last class; 6..9 Ident (index 0)
+    for (const [i, [start, end, cls]] of [
+      [0, 3, 3],
+      [4, 5, 99],
+      [6, 9, 0],
+    ].entries()) {
+      view.setUint32(i * 12, start as number, true)
+      view.setUint32(i * 12 + 4, end as number, true)
+      view.setUint32(i * 12 + 8, cls as number, true)
+    }
+    expect(fromBytes(bytes, ascii20)).toEqual([
+      { from: 0, to: 3, className: 'tok-keyword' },
+      { from: 6, to: 9, className: 'tok-ident' },
+    ])
+    // A TRAILING PART OF A SPAN, eleven bytes of the third, is not a span.
+    expect(fromBytes(bytes.slice(0, 35), ascii20)).toEqual([{ from: 0, to: 3, className: 'tok-keyword' }])
   })
 
   it('returns nothing for an empty document', () => {

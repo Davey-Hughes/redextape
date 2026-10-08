@@ -14,12 +14,13 @@ import {
   SPAN_BYTES,
   tmFrameBytes,
 } from '../../src/protocol'
-import type { LambdaState, TmProgram, TmState } from '../../src/types'
+import type { Classified, LambdaState, TmProgram, TmState } from '../../src/types'
 import { frameOf } from './asm-fixtures'
+import { spanBytes } from './span-bytes'
 
 const lam = (text: string, spans: number): LambdaState => ({
   text,
-  spans: Array.from({ length: spans }, (_, i) => [{ start: i, end: i + 1 }, 'Ident'] as const) as LambdaState['spans'],
+  spans: spanBytes(Array.from({ length: spans }, (_, i) => [{ start: i, end: i + 1 }, 'Ident'] as Classified[number])),
   cut: null,
   step: 0,
   redex_span: null,
@@ -76,7 +77,7 @@ describe('frame sizers', () => {
 })
 
 describe('lambdaFrameBytes', () => {
-  const base: LambdaState = { text: 'ab', spans: [], cut: null, step: 1, redex_span: null, owner: 'None' }
+  const base: LambdaState = { text: 'ab', spans: new Uint8Array(), cut: null, step: 1, redex_span: null, owner: 'None' }
 
   // This alone cannot tell OWNER_BYTES from a dropped term: the surcharge is flat, so both sides move
   // together and a missing `+ OWNER_BYTES` would still pass. See the computed-total test below for
@@ -119,7 +120,7 @@ describe('lambdaFrameBytes', () => {
   it('charges every component, so a dropped term is visible', () => {
     const f: LambdaState = {
       text: 'ab',
-      spans: [],
+      spans: new Uint8Array(),
       cut: null,
       step: 1,
       redex_span: { start: 0, end: 2 },

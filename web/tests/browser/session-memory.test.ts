@@ -318,6 +318,11 @@ describe('session memory', () => {
       const loaded = await load(slots)
       const ms = performance.now() - t0
       held = loaded
+      // TWICE, NOT ONCE, SINCE A λ FRAME'S SPANS ARE A `Uint8Array` (2026-10-07). `usedJSHeapSize` counts a typed
+      // array's bytes while it is retained, and still counts them after one forced collection once it is not:
+      // 36,000,000 bytes of dropped arrays read +36,002,008 after one `gc()` and +2,008 after two. Spans the page has
+      // dropped by the reading would read as resident after one.
+      collect()
       collect()
       const resident = heapNow()
       // READ AFTER THE READING, DELIBERATELY. This is the keepalive `frame-cost.test.ts` performs
@@ -451,6 +456,9 @@ describe('session memory', () => {
       const base = heapNow()
       const loaded = await load(slots)
       held = loaded
+      // Twice, for `round`'s reason in the test above. With one, the λ ring read 1,248,021.33 bytes where it reads
+      // 1,233,805.33, in one run (2026-10-07).
+      collect()
       collect()
       const real = heapNow() - base
       const ring = loaded.rings[0]
@@ -487,11 +495,13 @@ describe('session memory', () => {
 
     // Sanity only: a ratio at or near zero means nothing was retained, and one past 5 means the
     // sizers are not measuring the same objects the heap is. The figures themselves are the output,
-    // and `HISTORY_BYTES`'s doc in `protocol.ts` is where they are written down.
-    for (const ratio of [lamReal / lamAcc, tmReal / tmAcc]) {
-      expect(ratio).toBeGreaterThan(0.5)
-      expect(ratio).toBeLessThan(5)
-    }
+    // and `HISTORY_BYTES`'s doc in `protocol.ts` is where they are written down. **THE λ FLOOR IS 0.1, WHERE IT WAS
+    // 0.5, SINCE A λ FRAME'S SPANS CROSS AS BYTES (2026-10-07)**: `SPAN_BYTES` still charges a span 80 and it holds
+    // 12.56 (`frame-cost.test.ts`), so the λ ring reads 0.1945 of its charge; a ring keeping its frames without
+    // their spans read 0.048.
+    expect(lamReal / lamAcc).toBeGreaterThan(0.1)
+    expect(tmReal / tmAcc).toBeGreaterThan(0.5)
+    for (const ratio of [lamReal / lamAcc, tmReal / tmAcc]) expect(ratio).toBeLessThan(5)
     releaseHeld()
   })
 

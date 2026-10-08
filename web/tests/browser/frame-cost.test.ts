@@ -1,12 +1,24 @@
 import { describe, expect, it } from 'vitest'
 import init, { compile } from '../../../pkg/redextape_wasm.js'
-import { ASM_WINDOW, ASM_WORD_BYTES, FRAME_BYTES, lambdaFrameBytes, SPAN_BYTES } from '../../src/protocol'
+import {
+  ASM_WINDOW,
+  ASM_WORD_BYTES,
+  FRAME_BYTES,
+  lambdaFrameBytes,
+  SPAN_BYTES,
+  SPAN_WIRE_BYTES,
+} from '../../src/protocol'
 import type { AsmState, AsmWindow, Cut, LambdaState } from '../../src/types'
 
 /**
  * `SPAN_BYTES` in `protocol.ts` used to be an estimate — ~76 bytes/span AS JSON, rounded up. The real
- * path is not JSON: `serde_wasm_bindgen` builds a JS object per span, which costs more than its JSON
- * serialization. This file measures THAT cost, in a real browser, the only place it can be measured.
+ * path is not JSON: `serde_wasm_bindgen` built a JS object per span, which cost more than its JSON
+ * serialization. This file measures what a span costs, in a real browser, the only place it can be measured.
+ *
+ * **SINCE 2026-10-07 A FRAME'S SPANS ARE ONE BYTE STRING** (`viewmodel.rs`'s `LambdaState.spans`), a `Uint8Array`,
+ * which `usedJSHeapSize` counts while it is retained and for one forced collection after it is not; every λ reading
+ * here is taken after two (`settle`). A span measured 74.08 bytes as a `[Span, TokenClass]` tuple and 12.56 as
+ * bytes.
  *
  * `pkg`'s generated declarations type every method's return as `any` — same reason `shapes.test.ts`
  * declares `Session` structurally rather than trusting the import.
@@ -68,7 +80,7 @@ function stepAll<T>(pick: (st: LambdaState) => T): { frames: T[]; totalSpans: nu
   let totalSpans = 0
   let st = session.lambdaState(FRAME_BYTES)
   for (;;) {
-    totalSpans += st.spans.length
+    totalSpans += st.spans.byteLength / SPAN_WIRE_BYTES
     frames.push(pick(st))
     if (!session.stepLambda()) break
     st = session.lambdaState(FRAME_BYTES)
@@ -78,7 +90,7 @@ function stepAll<T>(pick: (st: LambdaState) => T): { frames: T[]; totalSpans: nu
 }
 
 describe('frame cost', () => {
-  it('measures bytes per (Span, TokenClass) entry by heap differential, not JSON size', async () => {
+  it('measures bytes per span by heap differential, not JSON size', async () => {
     await init()
 
     const memory = (performance as MemoryPerformance).memory
@@ -130,21 +142,30 @@ describe('frame cost', () => {
     let totalSpansA = 0
     let totalSpansB = 0
 
-    const roundA = (): number => {
+    // **TWO COLLECTIONS, NOT ONE, AROUND EVERY λ READING, SINCE A FRAME'S SPANS ARE A `Uint8Array`.** A typed array
+    // that has become garbage is still counted after one forced collection and gone after a second (measured
+    // 2026-10-07: 36,000,000 bytes of dropped arrays read +36,002,008 after one `gc()` and +2,008 after two). Arm B
+    // drops every frame's spans, so with one collection its reading kept them and the differential read 0.56 bytes a
+    // span where the spans hold 12.
+    const settle = (): void => {
       collect()
+      collect()
+    }
+    const roundA = (): number => {
+      settle()
       const before = heapNow()
       const a = stepAll<LambdaState>((st) => st)
-      collect()
+      settle()
       const after = heapNow()
       retainedFull.push(a.frames)
       totalSpansA = a.totalSpans
       return after - before
     }
     const roundB = (): number => {
-      collect()
+      settle()
       const before = heapNow()
       const b = stepAll<SlimFrame>((st) => ({ step: st.step, text: st.text, cut: st.cut }))
-      collect()
+      settle()
       const after = heapNow()
       retainedSlim.push(b.frames)
       totalSpansB = b.totalSpans
@@ -183,24 +204,21 @@ describe('frame cost', () => {
     const bytesPerSpan = (meanA - meanB) / totalSpansA
     console.log('mean(A):', meanA, 'mean(B):', meanB, 'bytes/span:', bytesPerSpan)
 
-    // A LOOSE SANITY FLOOR, NOT THE MEASURED FIGURE. Pinning this assertion to the number this
-    // machine produced would make the test flaky on any other machine; this only catches a broken
-    // measurement (a zero or negative delta, a reading in the wrong units). The console output above,
-    // not this assertion, is what `SPAN_BYTES` in `protocol.ts` is set from.
-    expect(bytesPerSpan).toBeGreaterThan(16)
+    // A LOOSE SANITY FLOOR, NOT THE MEASURED FIGURE: it catches a broken measurement, and the console output above, not
+    // this assertion, is what `SPAN_BYTES` in `protocol.ts` is set from. **IT IS HALF OF `SPAN_WIRE_BYTES`, WHERE IT
+    // WAS 16, SINCE A SPAN CROSSES AS BYTES**: arm A keeps those bytes, so a differential far under them measured
+    // something other than the spans. Arm A keeping no spans read 0.56 a span, and so did one collection in place of
+    // `settle`'s two (2026-10-07). Half, not all: the spans measure 12.56, so at 12 the margin was 0.56 a span, 74 KB
+    // over this file's 132,882 spans, and at 6 it is 6.56, 871 KB.
+    expect(bytesPerSpan).toBeGreaterThanOrEqual(SPAN_WIRE_BYTES / 2)
     expect(bytesPerSpan).toBeLessThan(2000)
 
-    // THE ONE DIRECTION WITH A CONSEQUENCE, AND IT IS GATED RATHER THAN LEFT TO THE CONSOLE. The two
-    // bounds above are symmetric sanity; this one is not. `SPAN_BYTES` is what `lambdaFrameBytes`
-    // charges the ring per span, so a real cost ABOVE it means the sizer UNDER-reports and the ring
-    // retains more than `HISTORY_BYTES` claims — the failure `protocol.ts`'s "IT WAS 60, AND 60
-    // UNDER-REPORTED THE RING BY ~19%" records as having actually happened. Over-reporting merely
-    // evicts early, which is why there is no matching floor at `SPAN_BYTES`.
-    //
-    // NO MORE MACHINE-FRAGILE THAN THE BOUNDS ABOVE. `SPAN_BYTES` is 80 against a measurement of
-    // 74.08289058462897, reproducible to the byte across browser restarts under the two Chromium
-    // flags `vite.config.ts` sets — an ~8% margin, wider than either the reproducibility of the
-    // reading or the rounding that produced the constant.
+    // THE ONE DIRECTION WITH A CONSEQUENCE, AND IT IS GATED RATHER THAN LEFT TO THE CONSOLE. `SPAN_BYTES` is what
+    // `lambdaFrameBytes` charges the ring per span, so a real cost ABOVE it means the sizer UNDER-reports and the ring
+    // retains more than `HISTORY_BYTES` claims — the failure `protocol.ts`'s "IT WAS 60, AND 60 UNDER-REPORTED THE RING
+    // BY ~19%" records as having actually happened. Over-reporting merely evicts early, which is why there is no
+    // matching floor at `SPAN_BYTES`. As `[Span, TokenClass]` tuples a span measured 74.08 bytes against `SPAN_BYTES`'
+    // 80; as bytes, 12.56 (2026-10-07).
     expect(bytesPerSpan).toBeLessThanOrEqual(SPAN_BYTES)
   })
 })

@@ -52,7 +52,7 @@ function leg<T>(): LegState<T> {
 /** A λ frame whose only distinguishing feature is its text — which is the whole discriminator here. */
 const lambdaFrame = (text: string, step = 0): LambdaState => ({
   text,
-  spans: [],
+  spans: new Uint8Array(),
   cut: null,
   step,
   redex_span: null,

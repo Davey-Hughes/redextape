@@ -91,6 +91,33 @@ pub fn token_class_names() -> &'static [&'static str] {
     ]
 }
 
+impl TokenClass {
+    /// Every variant in declaration order, so `ALL[c as usize] == c`: the inverse of `c as usize`, for a reader of a
+    /// class that crossed a boundary as its index (`LinkIndex`'s classes, a λ frame's spans).
+    pub const ALL: [TokenClass; 14] = [
+        TokenClass::Ident,
+        TokenClass::Nat,
+        TokenClass::Bool,
+        TokenClass::Keyword,
+        TokenClass::Operator,
+        TokenClass::Punct,
+        TokenClass::Comment,
+        TokenClass::Binder,
+        TokenClass::Mnemonic,
+        TokenClass::Register,
+        TokenClass::Label,
+        TokenClass::StateName,
+        TokenClass::TapeSymbol,
+        TokenClass::Move,
+    ];
+
+    /// The class whose discriminant is `index`, or `None` past the last.
+    #[must_use]
+    pub fn from_index(index: usize) -> Option<TokenClass> {
+        Self::ALL.get(index).copied()
+    }
+}
+
 pub type Classified = Vec<(Span, TokenClass)>;
 
 /// Append `text` to `out` and record the span it just occupied as `class`. The whole point of the
@@ -316,6 +343,10 @@ mod tests {
         assert_eq!(names.len(), expected.len(), "a variant was added or removed without updating either list");
         for (class, spelling) in expected {
             assert_eq!(names[class as usize], spelling, "{spelling} is not at its own discriminant");
+            // AND BACK: the index a class crosses a boundary as reads as that class again.
+            assert_eq!(TokenClass::from_index(class as usize), Some(class), "{spelling} does not read back");
         }
+        assert_eq!(TokenClass::ALL.len(), expected.len(), "`ALL` is missing a variant or has one twice");
+        assert_eq!(TokenClass::from_index(expected.len()), None, "an index past the last variant is no class");
     }
 }

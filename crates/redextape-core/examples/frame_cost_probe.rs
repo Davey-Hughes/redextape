@@ -49,7 +49,9 @@
 //!
 //! Likewise **`json_b` is a proxy for the JS heap cost, not the cost itself.** It is a stable,
 //! re-runnable number in the units the ring buffer will budget in; `text_b` beside it is the part that
-//! is really `LAMBDA_BYTE_BUDGET`'s doing.
+//! is really `LAMBDA_BYTE_BUDGET`'s doing. **SINCE A λ FRAME'S SPANS CROSS AS ONE BYTE STRING (2026-10-07) A λ ROW'S
+//! `json_b` SPELLS A SPAN AS TWELVE JSON NUMBERS**, one a byte, so it no longer proxies what a span holds in the
+//! browser, 12.56 bytes (`frame-cost.test.ts`), and it is not comparable with a λ row taken before then.
 #![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic, clippy::pedantic)]
 
 use std::io::Write;

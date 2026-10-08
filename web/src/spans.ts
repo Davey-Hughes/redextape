@@ -1,5 +1,6 @@
+import { SPAN_WIRE_BYTES } from './protocol'
 import { tokenClassName } from './theme'
-import type { Classified } from './types'
+import { TOKEN_CLASSES } from './types'
 
 export type DecorationRange = { from: number; to: number; className: string }
 
@@ -60,18 +61,26 @@ export function byteIndexAt(map: Uint32Array, byteOffset: number): number {
  * view's flat text (`lambda-body.ts`'s `flatText`, shown until a step's tree arrives), whose spans the
  * worker computes per frame from a term it holds, in bytes.
  *
+ * **THE SPANS ARRIVE AS ONE BYTE STRING, THREE LITTLE-ENDIAN `u32`S A SPAN** (`viewmodel.rs`'s `LambdaState.spans`):
+ * its start and end, byte offsets into `text`, and its class's index in `TOKEN_CLASSES`. Read with a `DataView`, so
+ * the byte order is the wire's and not the platform's. A class index past the last class is dropped rather than
+ * coloured, and a trailing part of a span is not read.
+ *
  * TWO RULES THAT LOOK LIKE PARANOIA AND ARE NOT. `RangeSetBuilder` throws on an out-of-order add, and
  * the lexer's ordering is an assumption this module cannot verify — so it sorts. And the document the
  * spans were computed from can be one keystroke behind the document CodeMirror holds, so a span past
  * the end is dropped or clamped rather than trusted — clamped against the byte-to-index map's own
  * length, not `text.length`, since those two lengths disagree the moment the text is non-ASCII.
  */
-export function decorationRanges(spans: Classified, text: string): DecorationRange[] {
+export function decorationRanges(spans: Uint8Array, text: string): DecorationRange[] {
   const map = byteToIndex(text)
   const out: DecorationRange[] = []
-  for (const [span, cls] of spans) {
-    const from = byteIndexAt(map, span.start)
-    const to = byteIndexAt(map, span.end)
+  const words = new DataView(spans.buffer, spans.byteOffset, spans.byteLength)
+  for (let i = 0; i + SPAN_WIRE_BYTES <= spans.byteLength; i += SPAN_WIRE_BYTES) {
+    const cls = TOKEN_CLASSES[words.getUint32(i + 8, true)]
+    if (cls === undefined) continue
+    const from = byteIndexAt(map, words.getUint32(i, true))
+    const to = byteIndexAt(map, words.getUint32(i + 4, true))
     if (from >= to) continue
     out.push({ from, to, className: tokenClassName(cls) })
   }

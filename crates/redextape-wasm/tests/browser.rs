@@ -39,7 +39,7 @@
 // free helpers below. Stated per target, the same way `viewmodel_contract.rs` does.
 #![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic, clippy::pedantic)]
 
-use js_sys::{Array, Function, JSON, Object, Reflect};
+use js_sys::{Array, Function, JSON, Object, Reflect, Uint8Array};
 use redextape_core::tm::EncodingKind;
 use wasm_bindgen::{JsCast, JsValue};
 use wasm_bindgen_test::*;
@@ -136,12 +136,16 @@ fn compile_step_and_read_both_legs() {
     assert!(text.starts_with("λf. λx. f "), "the normal form is Church 42, got {text:?}");
     assert_eq!(text.matches("f (").count() + 1, 42, "Church 42 applies `f` 42 times, got {text:?}");
 
-    // `spans` is a Vec<(Span, TokenClass)> — a tuple inside a Vec is the shape most likely to be
-    // mangled by a serializer, so its arity is checked rather than only its presence.
-    let spans: Array = get(&state, "spans").unchecked_into();
-    assert!(spans.length() > 0, "a rendered term has token spans");
-    let first: Array = spans.get(0).unchecked_into();
-    assert_eq!(first.length(), 2, "each span entry is a (Span, TokenClass) pair");
+    // `spans` CROSSES AS ONE BYTE STRING, three little-endian `u32`s a span (`LambdaState.spans`'s doc in
+    // `redextape-core`): a `Uint8Array`, a whole number of spans, and its first span read back in bounds of the text
+    // with a class index `token_class_names` has.
+    let spans: Uint8Array = get(&state, "spans").dyn_into().expect("spans cross as a Uint8Array");
+    let bytes = spans.to_vec();
+    assert!(!bytes.is_empty(), "a rendered term has token spans");
+    assert_eq!(bytes.len() % 12, 0, "a whole number of twelve-byte spans");
+    let word = |i: usize| u32::from_le_bytes([bytes[i], bytes[i + 1], bytes[i + 2], bytes[i + 3]]) as usize;
+    assert!(word(0) < word(4) && word(4) <= text.len(), "the first span lies inside the text's bytes");
+    assert!(word(8) < redextape_core::analysis::token_class_names().len(), "the first span's class is a class");
 
     // `owner` AT A NON-ZERO STEP, DELIBERATELY: at step 0 a `None`-shaped bug and a correct answer
     // are indistinguishable (both are the literal `"None"`), which is why `lambda_state_owner_and_

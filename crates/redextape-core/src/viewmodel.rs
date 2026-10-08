@@ -74,6 +74,13 @@ pub use tree::{LambdaTree, TreeAnswer};
 #[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export))]
 pub struct LambdaState {
     pub text: String,
+    /// The classified spans of `text`, byte offsets into it.
+    ///
+    /// **ON THE WIRE THEY ARE ONE BYTE STRING, THREE LITTLE-ENDIAN `u32`S A SPAN** (`span_words`): its start, its end
+    /// and its class's index in `token_class_names`, which `serde-wasm-bindgen` puts on the page as a `Uint8Array`. As
+    /// `[{start, end}, "Class"]` tuples, about 300 a frame, they were most of what a λ frame cost to build and to copy.
+    #[cfg_attr(feature = "serde", serde(with = "span_words"))]
+    #[cfg_attr(feature = "ts", ts(type = "Uint8Array"))]
     pub spans: Vec<(Span, TokenClass)>,
     pub cut: Option<Cut>,
     #[cfg_attr(feature = "ts", ts(type = "number"))]
@@ -659,6 +666,76 @@ impl TmState {
     }
 }
 
+/// `LambdaState::spans` on the wire: one byte string, three little-endian `u32`s a span (start, end, class index), and
+/// back.
+///
+/// **A SPAN PAST `u32::MAX` IS AN ERROR, NOT A WRAP.** A frame's text is bounded by the byte budget its renderer
+/// passes, so no frame the app builds comes near; a caller rendering with `usize::MAX` on a text of 4 GiB gets an error
+/// from the serializer rather than offsets that point somewhere else. On the way back, a length that is not a whole
+/// number of spans, a class index `TokenClass::from_index` has no class for, and a start past its end are errors too.
+#[cfg(feature = "serde")]
+mod span_words {
+    use serde::de::Error as _;
+    use serde::ser::Error as _;
+    use serde::{Deserializer, Serializer};
+
+    use crate::analysis::TokenClass;
+    use crate::span::Span;
+
+    pub(super) fn serialize<S: Serializer>(spans: &[(Span, TokenClass)], s: S) -> Result<S::Ok, S::Error> {
+        let mut out = Vec::with_capacity(spans.len() * 12);
+        for (span, class) in spans {
+            for word in [span.start, span.end, *class as usize] {
+                let word = u32::try_from(word).map_err(|_| S::Error::custom("a span offset past u32::MAX"))?;
+                out.extend_from_slice(&word.to_le_bytes());
+            }
+        }
+        s.serialize_bytes(&out)
+    }
+
+    pub(super) fn deserialize<'de, D: Deserializer<'de>>(d: D) -> Result<Vec<(Span, TokenClass)>, D::Error> {
+        let bytes = serde_bytes_or_seq(d)?;
+        if bytes.len() % 12 != 0 {
+            return Err(D::Error::custom("span bytes are not a whole number of spans"));
+        }
+        let word = |i: usize| u32::from_le_bytes([bytes[i], bytes[i + 1], bytes[i + 2], bytes[i + 3]]) as usize;
+        (0..bytes.len())
+            .step_by(12)
+            .map(|i| {
+                let class =
+                    TokenClass::from_index(word(i + 8)).ok_or_else(|| D::Error::custom("no such token class"))?;
+                let (start, end) = (word(i), word(i + 4));
+                if start > end {
+                    return Err(D::Error::custom("a span whose start is past its end"));
+                }
+                Ok((Span::new(start, end), class))
+            })
+            .collect()
+    }
+
+    /// The bytes, whichever way the format wrote them: `serde_json` as an array of numbers, a binary format as bytes.
+    fn serde_bytes_or_seq<'de, D: Deserializer<'de>>(d: D) -> Result<Vec<u8>, D::Error> {
+        struct Bytes;
+        impl<'de> serde::de::Visitor<'de> for Bytes {
+            type Value = Vec<u8>;
+            fn expecting(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+                f.write_str("span bytes")
+            }
+            fn visit_bytes<E: serde::de::Error>(self, v: &[u8]) -> Result<Self::Value, E> {
+                Ok(v.to_vec())
+            }
+            fn visit_seq<A: serde::de::SeqAccess<'de>>(self, mut seq: A) -> Result<Self::Value, A::Error> {
+                let mut out = Vec::with_capacity(seq.size_hint().unwrap_or(0));
+                while let Some(b) = seq.next_element::<u8>()? {
+                    out.push(b);
+                }
+                Ok(out)
+            }
+        }
+        d.deserialize_bytes(Bytes)
+    }
+}
+
 /// `TmState::window` on the wire: one string a tape, a cell a character, and back.
 #[cfg(feature = "serde")]
 mod tape_windows {
@@ -1028,5 +1105,33 @@ mod tests {
         assert_eq!(shown(3, 1, [0, 2, 4, u64::MAX]), BTreeSet::from([1, 2]));
         assert_eq!((slot(3, 3), slot(4, 3), slot(0, 3)), (Some(2), None, None));
         assert!(shown(0, 16, [1]).is_empty(), "an empty heap shows nothing, whatever a register says");
+    }
+
+    /// `span_words` READ AS A BINARY FORMAT READS IT, through `visit_bytes`, which `serde_json` never calls; and every
+    /// way a byte string can fail to be spans is an error rather than a span. A start past its end among them:
+    /// `Span::new` asserts against it in a debug build, so a decoder that handed it on would panic where it should
+    /// refuse.
+    #[cfg(feature = "serde")]
+    #[test]
+    fn span_words_reads_bytes_and_refuses_what_is_not_spans() {
+        use serde::de::value::{BytesDeserializer, Error};
+        let words = |w: [u32; 3]| w.iter().flat_map(|w| w.to_le_bytes()).collect::<Vec<u8>>();
+        let read = |b: &[u8]| span_words::deserialize(BytesDeserializer::<Error>::new(b)).map_err(|e| e.to_string());
+
+        assert_eq!(read(&words([0, 3, 3])), Ok(vec![(Span::new(0, 3), TokenClass::Keyword)]));
+        assert_eq!(read(&[]), Ok(vec![]));
+        let refused = |b: &[u8], why: &str| assert!(read(b).is_err_and(|e| e.contains(why)), "{b:?}: {:?}", read(b));
+        refused(&words([0, 3, 3])[..11], "not a whole number of spans");
+        refused(&words([0, 3, 14]), "no such token class");
+        refused(&words([5, 3, 0]), "a span whose start is past its end");
+    }
+
+    /// The other direction's one refusal: an offset that does not fit the `u32` a span is written in.
+    #[cfg(all(feature = "serde", target_pointer_width = "64"))]
+    #[test]
+    fn span_words_refuses_an_offset_past_u32_max() {
+        let past = usize::try_from(u64::from(u32::MAX) + 1).expect("a 64-bit usize");
+        let wrote = span_words::serialize(&[(Span::new(0, past), TokenClass::Ident)], serde_json::value::Serializer);
+        assert!(wrote.is_err_and(|e| e.to_string().contains("a span offset past u32::MAX")));
     }
 }
