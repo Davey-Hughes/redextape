@@ -14,8 +14,8 @@ export type Appearance = 'light' | 'dark' | 'system'
  * that port can read or overwrite — observed in practice, with an unrelated app's preferences
  * sitting alongside ours in the same origin.
  *
- * `index.html`'s inline script duplicates this string rather than importing it, and has to: it runs
- * before the module graph loads, which is the whole reason it exists. Change one and change both.
+ * `prepaint.ts`'s `PREPAINT` duplicates this string rather than importing it, and has to: every page inlines it to run
+ * before the module graph loads, which is the whole reason it exists. `prepaint.test.ts` holds the two equal.
  */
 export const STORAGE_KEY = 'redextape.appearance'
 

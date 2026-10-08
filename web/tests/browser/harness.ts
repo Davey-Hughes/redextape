@@ -1,4 +1,5 @@
 import html from '../../index.html?raw'
+import { PREPAINT } from '../../src/prepaint'
 
 /**
  * Shared browser-tier fixtures: the app shell every test file mounts into, and the poll helper every
@@ -47,6 +48,16 @@ export const SHELL = `
     <button type="button" id="share" aria-controls="share-menu" aria-expanded="false">share</button>
     <div id="share-menu" class="header-menu share" popover></div>
     <button type="button" id="appearance"></button>
+    <button type="button" id="about" aria-controls="about-menu" aria-expanded="false">about <span aria-hidden="true">▾</span></button>
+    <div id="about-menu" class="header-menu about" popover>
+      <a href="/about.html" target="_blank" rel="noopener" aria-describedby="about-new-tab">about</a>
+      <a href="/help.html" target="_blank" rel="noopener" aria-describedby="about-new-tab">help</a>
+      <a href="/licences.html" target="_blank" rel="noopener" aria-describedby="about-new-tab">licences</a>
+      <a href="/privacy.html" target="_blank" rel="noopener" aria-describedby="about-new-tab">privacy</a>
+      <a id="about-source" href="https://github.com/Davey-Hughes/redextape" target="_blank" rel="noopener" aria-describedby="about-new-tab">source <span aria-hidden="true">↗</span></a>
+      <p id="about-build" class="about-build"></p>
+      <span id="about-new-tab" class="visually-hidden">opens in a new tab</span>
+    </div>
     <button type="button" id="settings" aria-haspopup="menu" aria-controls="settings-menu" aria-expanded="false">settings</button>
     <div id="settings-menu" class="header-menu settings" popover>
       <label class="skin">style <select id="style"></select></label>
@@ -227,8 +238,8 @@ export function tmWalk(pane: () => HTMLElement, arrived: RegExp, to: string, res
 export const intoCmpeq = (pane: () => HTMLElement): (() => Promise<void>)[] =>
   walkInParts(tmWalk(pane, /^cmp/, 'inside cmpeq', true), [578, 578])
 
-/** The one classic script in `index.html`: the pre-paint script, which draws a load's first frame from storage. */
-export const PREPAINT = /<script>([\s\S]*?)<\/script>/.exec(html)?.[1] ?? ''
+/** The pre-paint script every page's `<head>` carries, which draws a load's first frame from storage. */
+export { PREPAINT }
 
 /** `#rrggbb` as `getComputedStyle` writes a colour. */
 export const rgb = (hex: string): string =>
@@ -244,7 +255,6 @@ const PREPAINTED = ['style', 'data-style', 'data-theme'] as const
  * meets the page this load drew, not the one a reload would.
  */
 export function reloaded(): string {
-  if (PREPAINT === '') throw new Error('index.html has no pre-paint script')
   const root = document.documentElement
   const markup = new DOMParser().parseFromString(html, 'text/html').documentElement
   const kept = PREPAINTED.map((name) => [name, root.getAttribute(name)] as const)

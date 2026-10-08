@@ -58,7 +58,7 @@ describe('palettes', () => {
     }
   })
 
-  // The pre-paint script in `index.html` applies a cached declaration string only if it matches this
+  // The pre-paint script (`prepaint.ts`) applies a cached declaration string only if it matches this
   // pattern (Task 4); every string `paletteDeclarations` produces must therefore pass it.
   it('produces text the pre-paint script accepts', () => {
     for (const id of PALETTE_IDS) expect(PALETTE_CSS_PATTERN.test(paletteDeclarations(PALETTES[id]))).toBe(true)

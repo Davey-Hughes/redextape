@@ -303,29 +303,35 @@ nextest is missing rather than falling back, so the gate behaves the same everyw
 `scripts/setup-dev.sh` installs it. Because nextest does not run doctests, the script pairs every
 config with an explicit `cargo test --doc` at the same feature flags.
 
-There are **twelve** pre-commit hooks. A Rust change runs `cargo fmt` and `cargo clippy` and nothing
+There are **thirteen** pre-commit hooks. A Rust change runs `cargo fmt` and `cargo clippy` and nothing
 heavier; a `web/` change runs `biome ci` and `tsc --noEmit`; a Lua or `parser.c` change runs
 `check-lua`, which parses the tracked Lua and asserts `plugin/redextape.lua`'s parser names still
 equal the `tree_sitter_*` symbols the committed parsers export — a mismatch there loads the wrong
 language in an editor rather than failing, so nothing else in this tree could see it. The other
-seven — `check-text-bytes`, `check-citations`, `check-attributions`, `check-doc-figures`,
-`check-shared-docs`, `check-colours` and `check-grammar-wasm` — are unscoped and run on every commit
-whatever is staged, because all seven catch things that arrive in a path nobody thought to list; the
-first three walk `git ls-files`, the fourth reads four READMEs, the fifth holds every marked region
-in a document to the single copy under `grammars/shared/`, the sixth scans tracked `.css` and `.ts`
-files under `web/src/` for colour literals outside the palette, skipping `palettes.ts` itself and the
-marked fallback block in `style.css`, and the seventh hashes each grammar's `src/parser.c` and its
-`.wasm` against `grammars/wasm-manifest.json` — unscoped because the file that goes stale is the
-`.wasm`, and the file being committed is `grammar.js` or `src/parser.c`, on the other side of the
-same input set `check-lua`'s own scoping already names. `check-grammar-wasm` is the newest of the
-seven and `check-attributions` the slowest, at ~3.2 s against the next slowest's ~1.25 s (each
-hook's `--self-test` and scan, measured 2026-09-18), because it strips comments and string literals
-out of every cited file rather than matching patterns line by line — the price of being able to tell
-a file that OWNS a symbol from one that merely talks about it. All **twelve** are fast enough for
-every commit: measured interleaved in one session (2026-09-21, five rounds, alternating which set
-went first, after one untimed warm-up of each), the unscoped six ran 5.867-5.955 s and the same six
-plus `check-grammar-wasm` ran 6.042-6.084 s — the ranges do not overlap, so the ~0.09-0.22 s gap is
-the seventh hook's own cost and not run-to-run noise. Run `scripts/check-all.sh` before merging.
+eight — `check-text-bytes`, `check-citations`, `check-attributions`, `check-doc-figures`,
+`check-shared-docs`, `check-colours`, `check-grammar-wasm` and `check-licences` — are unscoped and run
+on every commit whatever is staged, because all eight catch things that arrive in a path nobody thought
+to list; the first three walk `git ls-files`, the fourth reads four READMEs, the fifth holds every
+marked region in a document to the single copy under `grammars/shared/`, the sixth scans tracked
+`.css` and `.ts` files under `web/src/` for colour literals outside the palette, skipping
+`palettes.ts` itself and the marked fallback block in `style.css`, and the seventh hashes each
+grammar's `src/parser.c` and its `.wasm` against `grammars/wasm-manifest.json` — unscoped because the
+file that goes stale is the `.wasm`, and the file being committed is `grammar.js` or `src/parser.c`,
+on the other side of the same input set `check-lua`'s own scoping already names. The eighth
+regenerates `web/src/third-party-licences.json`, the list the site's licences page draws, from the
+installed npm packages, `cargo tree` and the toolchain texts under `web/scripts/toolchain-licences/`,
+and compares it with the committed copy — unscoped because what makes it stale is a lockfile, an
+import or a dependency's own licence file, not the file being committed; it needs `web/node_modules`
+in step with `web/pnpm-lock.yaml`, and `cargo`, and took 0.51-0.78 s with its self-test over five
+runs (2026-10-08). `check-licences` is the newest of the eight and `check-attributions` the slowest,
+at ~3.2 s against the next slowest's ~1.25 s (each hook's `--self-test` and scan, measured
+2026-09-18), because it strips comments and string literals out of every cited file rather than
+matching patterns line by line — the price of being able to tell a file that OWNS a symbol from one
+that merely talks about it. All **thirteen** are fast enough for every commit: measured interleaved
+in one session (2026-09-21, five rounds, alternating which set went first, after one untimed warm-up
+of each), the unscoped six ran 5.867-5.955 s and the same six plus `check-grammar-wasm` ran
+6.042-6.084 s — the ranges do not overlap, so the ~0.09-0.22 s gap is the seventh hook's own cost and
+not run-to-run noise. Run `scripts/check-all.sh` before merging.
 
 `scripts/check-slow.sh` runs the **slow test tier**: exhaustive sweeps marked
 `#[ignore = "slow tier: ..."]` — nine of them today — which `cargo test` skips by default and CI

@@ -62,8 +62,8 @@ export function lengthLine(link: string): string | null {
 /**
  * Wire the popover's content, answering what `wireMenu` runs on each open.
  *
- * **THE FIELD IS `autofocus`, AND ITS TEXT IS SELECTED WHEN THE LINK ARRIVES.** `wireMenu` autofocuses a button or a
- * select, and `copy link` is disabled while the link is made, so the field is marked here, and the popover's showing
+ * **THE FIELD IS `autofocus`, AND ITS TEXT IS SELECTED WHEN THE LINK ARRIVES.** `wireMenu` autofocuses a link, a button
+ * or a select, and `copy link` is disabled while the link is made, so the field is marked here, and the popover's showing
  * puts the focus in it. The link is made asynchronously, since `CompressionStream` is, so it always arrives after the
  * popover has shown: selecting it on `toggle`, where the spec put it, would select an empty field. It is selected as it
  * is filled instead, while the field still holds the focus.

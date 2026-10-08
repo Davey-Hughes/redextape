@@ -3,12 +3,13 @@
 #
 # CI invokes this same script (.forgejo/workflows/ci.yml), so the local and CI gates cannot drift.
 # The pre-commit hooks deliberately do NOT run it — they stay fast: fmt and clippy on a Rust change,
-# biome and tsc on a web/ one, the Lua/parser check on a grammar one, plus seven `always_run` tree-wide
+# biome and tsc on a web/ one, the Lua/parser check on a grammar one, plus eight `always_run` tree-wide
 # gates (control bytes, `file:line` citations, symbol-citation attributions, documented figures, shared
-# doc regions, colour literals, grammar `.wasm`) on every commit. **This comment read "four" and named
-# only the first four** — check-colours and check-grammar-wasm were added later and never counted here;
-# recount is `.pre-commit-config.yaml`'s `always_run: true` entries, not this comment.
-# Twelve hooks; this is the before-a-merge check.
+# doc regions, colour literals, grammar `.wasm`, third-party licences) on every commit. **This comment
+# read "four" and named only the first four** — check-colours and check-grammar-wasm were added later
+# and never counted here; recount is `.pre-commit-config.yaml`'s `always_run: true` entries, not this
+# comment.
+# Thirteen hooks; this is the before-a-merge check.
 #
 #   scripts/check-all.sh                  # everything: base, LLVM and browser configs
 #   scripts/check-all.sh --no-llvm        # skip LLVM (no toolchain installed)

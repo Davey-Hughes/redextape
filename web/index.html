@@ -14,28 +14,7 @@
     <link rel="preload" as="font" type="font/woff2" crossorigin href="/node_modules/@fontsource/inter/files/inter-latin-400-normal.woff2" />
     <title>redextape</title>
     <link rel="stylesheet" href="/src/style.css" />
-    <script>
-      // Applies the stored appearance, style and palette BEFORE first paint. `main.ts` does this too
-      // (`appearance.ts`'s `applyAppearance`, `skin.ts`'s `applySkin`), but a module script always runs
-      // after the page has already painted once — waiting for it would show the wrong theme for one frame
-      // on every load, then snap to the right one. This inline copy is deliberately tiny and duplicated
-      // rather than imported, since importing a module here would reintroduce exactly the delay it exists
-      // to avoid; `prepaint.test.ts` holds its keys, style ids and pattern to `skin.ts`/`palettes.ts`.
-      // `try/catch` because `localStorage` throws in some privacy modes, and a thrown error here must not
-      // block the rest of the page from loading. The cached palette is applied only if every declaration
-      // in it sets a custom property to a `light-dark(#hex, #hex)` pair (`palettes.ts`'s
-      // `PALETTE_CSS_PATTERN`), so nothing else in storage can reach the `style` attribute.
-      try {
-        var v = localStorage.getItem('redextape.appearance')
-        if (v === 'light' || v === 'dark') document.documentElement.setAttribute('data-theme', v)
-      } catch {}
-      try {
-        var s = localStorage.getItem('redextape.style')
-        if (s === 'paper' || s === 'terminal' || s === 'instrument') document.documentElement.setAttribute('data-style', s)
-        var c = localStorage.getItem('redextape.palette.css')
-        if (c && /^(--[a-z0-9-]+: light-dark\(#[0-9a-f]{6}, #[0-9a-f]{6}\); ?)+$/.test(c)) document.documentElement.setAttribute('style', c)
-      } catch {}
-    </script>
+    <!-- prepaint -->
   </head>
   <body>
     <header class="bar">
@@ -57,6 +36,16 @@
       <button type="button" id="share" aria-controls="share-menu" aria-expanded="false">share</button>
       <div id="share-menu" class="header-menu share" popover></div>
       <button type="button" id="appearance"></button>
+      <button type="button" id="about" aria-controls="about-menu" aria-expanded="false">about <span aria-hidden="true">▾</span></button>
+      <div id="about-menu" class="header-menu about" popover>
+        <a href="/about.html" target="_blank" rel="noopener" aria-describedby="about-new-tab">about</a>
+        <a href="/help.html" target="_blank" rel="noopener" aria-describedby="about-new-tab">help</a>
+        <a href="/licences.html" target="_blank" rel="noopener" aria-describedby="about-new-tab">licences</a>
+        <a href="/privacy.html" target="_blank" rel="noopener" aria-describedby="about-new-tab">privacy</a>
+        <a id="about-source" href="https://github.com/Davey-Hughes/redextape" target="_blank" rel="noopener" aria-describedby="about-new-tab">source <span aria-hidden="true">↗</span></a>
+        <p id="about-build" class="about-build"></p>
+        <span id="about-new-tab" class="visually-hidden">opens in a new tab</span>
+      </div>
       <button type="button" id="settings" aria-haspopup="menu" aria-controls="settings-menu" aria-expanded="false">settings</button>
       <div id="settings-menu" class="header-menu settings" popover>
         <label class="skin">style <select id="style"></select></label>

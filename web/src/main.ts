@@ -18,6 +18,7 @@ import { schemeName } from './base16'
 import { createBase16Dialog } from './base16-dialog'
 import { bufferList } from './buffer-list'
 import { BUFFERS_STORAGE_KEY, parseBuffers, serializeBuffers } from './buffers-store'
+import { BUILD } from './build-info'
 import { type CaptureTable, classMapFrom, createGrammarRegistry, treeSitterColour } from './colour'
 import { createCompile } from './compile'
 import {
@@ -50,7 +51,7 @@ import {
 } from './layout'
 import { retitleStage } from './layout-view'
 import { LEG_NAME, LEGS } from './legs'
-import { createLinkWiring, type LinkWiring } from './link-wiring'
+import { createLinkWiring, LINK_KEY, type LinkWiring } from './link-wiring'
 import { LspClient } from './lsp-client'
 import { lspHover } from './lsp-hover'
 import { navKeymap } from './lsp-nav'
@@ -231,6 +232,10 @@ async function main(): Promise<EditorView> {
   const examplesMenu = document.querySelector<HTMLElement>('#examples-menu')
   const shareButton = document.querySelector<HTMLButtonElement>('#share')
   const shareMenu = document.querySelector<HTMLElement>('#share-menu')
+  const aboutButton = document.querySelector<HTMLButtonElement>('#about')
+  const aboutMenu = document.querySelector<HTMLElement>('#about-menu')
+  const aboutSource = document.querySelector<HTMLAnchorElement>('#about-source')
+  const aboutBuild = document.querySelector<HTMLElement>('#about-build')
   const noticeHost = document.querySelector<HTMLElement>('#notice')
   const liveHost = document.querySelector<HTMLElement>('#live')
   // **`#views`, NOT `<main>` — spec §9.** `renderLayout` opens with `root.replaceChildren()`, so the
@@ -262,6 +267,10 @@ async function main(): Promise<EditorView> {
     !examplesMenu ||
     !shareButton ||
     !shareMenu ||
+    !aboutButton ||
+    !aboutMenu ||
+    !aboutSource ||
+    !aboutBuild ||
     !noticeHost ||
     !stepBarHost ||
     !inspectorHost ||
@@ -284,7 +293,7 @@ async function main(): Promise<EditorView> {
   // reads and writes `localStorage` and flips an attribute on `<html>` — so it stays live even on the
   // one failure path (`showBanner` below) that replaces `<main>` and leaves the header bar standing.
   //
-  // `localStorage` ACCESS IS GUARDED, same as `index.html`'s inline script and for the same reason:
+  // `localStorage` ACCESS IS GUARDED, same as `prepaint.ts`'s `PREPAINT` and for the same reason:
   // it throws in some privacy modes. Unguarded here it would be worse than in that script, not the
   // same — this runs before the `init()` try/catch below, so an uncaught throw would reject `ready`
   // itself and blank the page before any banner could report why.
@@ -300,7 +309,7 @@ async function main(): Promise<EditorView> {
       localStorage.setItem(STORAGE_KEY, a)
     } catch {
       // Nothing to do — the toggle still works for the rest of this page load, it just will not
-      // survive a reload. The same tradeoff the inline script in `index.html` makes.
+      // survive a reload. The same tradeoff the pre-paint script (`prepaint.ts`) makes.
     }
   }
 
@@ -390,6 +399,17 @@ async function main(): Promise<EditorView> {
   // THE SETTINGS MENU, wired before `init()` with the toggle, for the toggle's own reason.
   wireMenu(settingsButton, settingsMenu)
   settingsButton.replaceChildren(icon('settings'), document.createTextNode('settings'))
+  // THE ABOUT MENU (about pages design §5), wired here for the settings menu's reason: its links need no wasm, so a
+  // page whose startup failed still reaches the help, the licences and the source. The build line and the source link
+  // are this build's (`build-info.ts`), as on every page's footer.
+  wireMenu(aboutButton, aboutMenu)
+  // PICKING ONE CLOSES THE MENU, as every header menu's item does (`app-header.ts`'s `exampleItems`): the page opens
+  // in a new tab, and the app is left as it was, the menu shut and the focus back on its button.
+  aboutMenu.addEventListener('click', (e) => {
+    if (e.target instanceof Element && e.target.closest('a[href]') !== null) aboutMenu.hidePopover()
+  })
+  aboutSource.href = BUILD.source
+  aboutBuild.textContent = BUILD.label
 
   // THE STYLE AND PALETTE (Plan 7 part 1, spec §6), wired before `init()` for the appearance toggle's
   // reason: they touch nothing but storage and `<html>`, so they stay live on the startup-failure path.
@@ -2511,14 +2531,13 @@ async function main(): Promise<EditorView> {
             return false
           },
         }),
-        // The keyboard route to the same thing. `Mod-'` is unbound in `defaultKeymap` and in
-        // `historyKeymap`; verify that before changing it. Reachability without a mouse is the whole
+        // The keyboard route to the same thing, `LINK_KEY`. Reachability without a mouse is the whole
         // point — the roadmap defers the rest of accessibility to one pass at the end of Plan 5, but a
         // mouse-only primary interaction would have to be retrofitted by that pass rather than
         // adjusted.
         keymap.of([
           {
-            key: "Mod-'",
+            key: LINK_KEY,
             run: (v) => {
               const pos = v.state.selection.main.head
               linkWiring.linkAtSourceOffset(new TextEncoder().encode(v.state.doc.sliceString(0, pos)).length)

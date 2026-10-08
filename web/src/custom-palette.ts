@@ -38,7 +38,7 @@ export type CustomPalette =
   | { readonly light?: CustomHalf; readonly dark: CustomHalf }
 
 /**
- * The one form a stored colour may take: every token reaches `index.html`'s pre-paint cache, whose pattern
+ * The one form a stored colour may take: every token reaches the pre-paint script's cache, whose pattern
  * (`palettes.ts`'s `PALETTE_CSS_PATTERN`) admits nothing else.
  */
 const HEX = /^#[0-9a-f]{6}$/

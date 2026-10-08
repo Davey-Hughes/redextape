@@ -179,6 +179,15 @@ repos:
         language: system
         always_run: true
         pass_filenames: false
+      # UNSCOPED FOR THE SIBLINGS' REASON: what makes `web/src/third-party-licences.json` stale is a lockfile, an
+      # import or a dependency's own licence file, not the file being committed. It needs `web/node_modules` and
+      # `cargo`, as the generator does. Self-test first, then the check.
+      - id: check-licences
+        name: third-party licences match what the site ships
+        entry: bash -c 'scripts/check-licences.sh --self-test && scripts/check-licences.sh'
+        language: system
+        always_run: true
+        pass_filenames: false
       - id: check-lua
         name: lua parses and parser names agree
         entry: bash -c 'scripts/check-lua.sh --self-test && scripts/check-lua.sh'

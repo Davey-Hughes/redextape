@@ -7,10 +7,10 @@ import { currentLayout, NIGHT } from '../node/base16-fixtures'
 import { PREPAINT, reloaded, rgb, SHELL } from './harness'
 
 /**
- * **AN IMPORTED PALETTE IS THE NEXT LOAD'S FIRST FRAME** (Plan 7 part 6b spec §9), with `index.html`'s pre-paint
- * script unchanged: `apply` writes the resolved palette's declarations to the cache that script reads. Here the
- * import is made through the dialog, the palette `main.ts` wrote onto `<html>` is taken off, and the script itself —
- * the page's own, through `?raw` — is run in this page, as a load runs it before any module.
+ * **AN IMPORTED PALETTE IS THE NEXT LOAD'S FIRST FRAME** (Plan 7 part 6b spec §9), with the pre-paint script
+ * unchanged: `apply` writes the resolved palette's declarations to the cache that script reads. Here the import is
+ * made through the dialog, the palette `main.ts` wrote onto `<html>` is taken off, and the script itself — the
+ * string every page inlines, `prepaint.ts`'s `PREPAINT` — is run in this page, as a load runs it before any module.
  */
 
 beforeAll(async () => {
@@ -32,7 +32,6 @@ describe('an imported palette, at first paint', () => {
     // `style.css`'s fallback, Instrument.
     document.documentElement.removeAttribute('style')
     expect(getComputedStyle(document.body).backgroundColor).toBe(rgb(PALETTES.instrument.dark.bg))
-    expect(PREPAINT).not.toBe('')
     new Function(PREPAINT)()
     expect(getComputedStyle(document.body).backgroundColor).toBe(rgb(NIGHT[0]))
   })

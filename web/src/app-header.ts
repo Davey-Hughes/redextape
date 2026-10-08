@@ -4,9 +4,9 @@ import { bindingKey, pairLabel } from './view-header'
 import { PRESETS, type Preset, presetOf, type Switches } from './workspace'
 
 /**
- * THE APP HEADER'S MENUS — Plan 7 part 2 spec §6: the workspace menu, `+ view` and settings, and `examples ▾` since
- * part 6a. Each is a native popover beside the button that opens it, declared in `index.html` so the pre-paint script
- * and the skin selects need no change; this module wires what markup cannot.
+ * THE APP HEADER'S MENUS — Plan 7 part 2 spec §6: the workspace menu, `+ view` and settings, `examples ▾` since
+ * part 6a, and `about ▾` since the about pages. Each is a native popover beside the button that opens it, declared in
+ * `index.html` so the pre-paint script and the skin selects need no change; this module wires what markup cannot.
  */
 
 /**
@@ -22,7 +22,7 @@ export function wireMenu(button: HTMLButtonElement, menu: HTMLElement, onOpen?: 
     button.setAttribute('aria-expanded', String(open))
     if (!open) return
     onOpen?.()
-    const first = menu.querySelector<HTMLElement>('button:not([disabled]), select')
+    const first = menu.querySelector<HTMLElement>('a[href], button:not([disabled]), select')
     if (first !== null) first.autofocus = true
   })
 }

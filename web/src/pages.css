@@ -1,0 +1,119 @@
+/* THE FOUR PAGES BESIDE THE APP (about pages design §4): a document in the app's own palette and type, under
+   `style.css`, which every page loads first so the tokens, the header's `.bar` and the focus ring are the app's.
+   Everything here is scoped to `.page` or to an element only these pages have, so the app is untouched. */
+
+/* `style.css` lays `main` out as the app's row of views; a page's `main` is a column of prose. */
+.page main {
+  display: block;
+  flex: 1 0 auto;
+  width: 100%;
+  max-width: 44rem;
+  margin: 0 auto;
+  padding: var(--space-3);
+}
+
+/* Links in the page's own colour; the header's and the footer's below are the chrome's. */
+.page a {
+  color: var(--accent);
+}
+.page .bar a {
+  color: inherit;
+}
+.page .bar .wordmark {
+  text-decoration: none;
+}
+.page-nav {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2) var(--space-3);
+}
+/* THE CURRENT PAGE IN THE CHROME'S TEXT COLOUR, NOT THE ACCENT: every palette holds accent on chrome only to 3:1
+   (`contrast.ts`'s `CONTRAST_FLOORS`), which is not a text floor. Bold and unlinked-looking marks it instead. */
+.page-nav a[aria-current="page"] {
+  text-decoration: none;
+  font-weight: 600;
+}
+
+.page h1 {
+  font-size: var(--step-1);
+  margin: var(--space-3) 0;
+}
+.page h2 {
+  font-size: var(--step-0);
+  margin: calc(2 * var(--space-3)) 0 var(--space-2);
+}
+.page p,
+.page li {
+  max-width: 40rem;
+}
+.page code,
+.page kbd,
+.page pre {
+  font-family: var(--font-mono);
+  font-size: var(--step--1);
+}
+.page kbd {
+  border: 1px solid var(--rule);
+  border-radius: var(--radius);
+  padding: 0 0.3em;
+  background: var(--bg-raised);
+  white-space: nowrap;
+}
+.page .tagline {
+  color: var(--fg-dim);
+}
+
+/* THE KEY TABLES (help) AND THE STORAGE TABLE (privacy): one rule under each row. A cell wraps; a key does not
+   (`kbd` above), so a phone's narrow column breaks between keys and never inside one. A storage key is one unbroken
+   word, so it may break anywhere rather than widen the page. */
+.page table {
+  border-collapse: collapse;
+  width: 100%;
+}
+.page th,
+.page td {
+  text-align: left;
+  vertical-align: top;
+  padding: var(--space-1) var(--space-2);
+  border-bottom: 1px solid var(--rule);
+}
+.page th {
+  color: var(--fg-dim);
+  font-weight: 600;
+}
+.page td code {
+  overflow-wrap: anywhere;
+}
+
+/* THE LICENCE TEXTS: each in a `<details>`, whose text keeps its own line breaks and scrolls inside itself rather
+   than widening the page at a phone's width. */
+.page details {
+  border-bottom: 1px solid var(--rule);
+  padding: var(--space-1) 0;
+}
+.page summary {
+  cursor: pointer;
+}
+.page details pre {
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  max-height: 24rem;
+  overflow: auto;
+  padding: var(--space-2);
+  background: var(--bg-raised);
+  border: 1px solid var(--rule);
+}
+.page .meta {
+  color: var(--fg-dim);
+}
+
+.page-foot {
+  border-top: 1px solid var(--rule);
+  background: var(--bg-chrome);
+  color: var(--fg-dim);
+  padding: var(--space-2) var(--space-3);
+  font-size: var(--step--1);
+}
+.page .page-foot a {
+  color: inherit;
+}

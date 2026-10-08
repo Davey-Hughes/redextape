@@ -1,0 +1,62 @@
+<!doctype html>
+<html lang="en" data-style="instrument">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>about — redextape</title>
+    <link rel="stylesheet" href="/src/style.css" />
+    <link rel="stylesheet" href="/src/pages.css" />
+    <!-- prepaint -->
+  </head>
+  <body class="page">
+    <header class="bar">
+      <a class="wordmark" href="/">redextape</a>
+      <nav class="page-nav" aria-label="pages">
+        <a href="/about.html" aria-current="page">about</a>
+        <a href="/help.html">help</a>
+        <a href="/licences.html">licences</a>
+        <a href="/privacy.html">privacy</a>
+      </nav>
+    </header>
+    <main>
+      <h1>About redextape</h1>
+      <p class="tagline">Watch the Church–Turing thesis happen.</p>
+      <p>
+        redextape compiles one small program, written in a little imperative and functional language, into
+        <strong>both</strong> a lambda-calculus term and a Turing machine, and runs the two side by side. The λ view
+        reduces the term one redex at a time; the Turing-machine view steps the machine across its tapes; an assembly
+        view shows the register-assembly program the machine is lowered from. Every leg steps forwards and backwards,
+        and a position in one can be linked to the same point of the program in the others.
+      </p>
+      <p>
+        Nothing is simulated for show. The reducer and the machine are real, and each answer is decoded from the
+        model's own final state — so what you watch is the computation itself, not a native run with an animation laid
+        over it. The test suite holds every backend to the others on every commit.
+      </p>
+      <h2>The name</h2>
+      <p>
+        <em>redex</em> — a reducible expression, the atom of lambda-calculus reduction — plus <em>tape</em>, the
+        Turing machine's. Read aloud it is “red tape”.
+      </p>
+      <h2>This build</h2>
+      <p>
+        <span data-build>dev build</span>, from the source at
+        <a data-source href="https://github.com/Davey-Hughes/redextape">github.com/Davey-Hughes/redextape</a>.
+      </p>
+      <h2>Licence</h2>
+      <p>
+        redextape is free software under the
+        <a href="/licences.html#redextape">GNU General Public License, version 3 only</a>. The libraries and fonts it
+        ships keep their own licences, listed on the <a href="/licences.html">licences</a> page.
+      </p>
+    </main>
+    <footer class="page-foot">
+      <span data-copyright>© 2026 Davey Hughes</span> · <span data-build>dev build</span> ·
+      <a data-source href="https://github.com/Davey-Hughes/redextape">source</a>
+    </footer>
+    <script type="module">
+      import { initPage } from '/src/pages.ts'
+      initPage()
+    </script>
+  </body>
+</html>

@@ -233,7 +233,8 @@ select option {
 #examples,
 #share,
 #appearance,
-#settings {
+#settings,
+#about {
   display: inline-flex;
   align-items: center;
   gap: 0.35em;
@@ -265,7 +266,8 @@ select option {
     margin: auto;
   }
 }
-.header-menu > button {
+.header-menu > button,
+.header-menu > a {
   display: block;
   width: 100%;
   text-align: left;
@@ -276,6 +278,22 @@ select option {
   background: transparent;
   color: inherit;
   cursor: pointer;
+}
+/* THE ABOUT MENU (about pages design §5): links, drawn as the other menus' items, and the build beneath a rule. It
+   sits just before settings, which stays the header's last control so a Tab from it still reaches the notice line's
+   action, and opens leftward as settings does. */
+.header-menu > a {
+  text-decoration: none;
+}
+.header-menu.about {
+  position-area: block-end span-inline-start;
+}
+.about-build {
+  margin: var(--space-1) 0 0;
+  padding: var(--space-1) 0.6em 0;
+  border-top: 1px solid var(--rule);
+  color: var(--fg-dim);
+  font-size: var(--step--1);
 }
 /* **`:popover-open`, NOT THE BARE CLASS — A CLOSED POPOVER IS HIDDEN BY A UA RULE AN AUTHOR RULE BEATS.**
    `[popover]:not(:popover-open) { display: none }` comes from the user-agent stylesheet, and any author

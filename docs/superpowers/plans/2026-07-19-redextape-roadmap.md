@@ -26102,3 +26102,81 @@ At `ee5a762` the same `test:coverage` failed one test, `copy-editor-mount`'s (TH
 | the timed-out case | the gate at `ee5a762` | `grep -A1 "FAIL" gates-ee5a762/gate-coverage.log` |
 | the gates block | the gates | `gates-9799c5e/gates.log` (`gates.sh`), `docker-9799c5e/gate-docker.log` (`docker-gate.sh`), `gates-entry/scans.log` |
 | 95, 89, 97, 97 | the coverage floors | `thresholds` in `web/vite.config.ts` |
+
+#### ABOUT, HELP, LICENCES AND PRIVACY PAGES BESIDE THE APP, REACHED FROM AN `about ▾` MENU BEFORE `settings`, NAMING THE BUILD'S COMMIT AND A COPYRIGHT YEAR FROM THE VIEWER'S CLOCK; THE SITE SHIPPED NO THIRD-PARTY LICENCE NOTICE AT ALL, AND NOW LISTS 18 npm PACKAGES OF CODE, 24 CRATES, 5 TOOLCHAIN RUNTIMES AND 2 FONTS WITH THEIR OWN TEXTS, HELD TO THE LOCKFILES BY A THIRTEENTH PRE-COMMIT HOOK (2026-10-08, branch `about-pages`, `8dc603d..fa93c45`, 15 commits, plus this entry)
+
+**The user asked for an about page and a licence page "and anything else like that you recommend".** Help and privacy were the two recommendations taken. The design is `docs/superpowers/specs/2026-10-07-about-pages-design.md`, whose dated notes record what the prototype and the reviews changed; the plan is `docs/superpowers/plans/2026-10-08-about-pages.md`, whose code is the pre-review replay.
+
+##### WHAT EXISTED
+
+The workspace is GPL-3.0-only and nothing in `web/` said so. The built site's four JavaScript chunks held no licence notice (spec §2.2), though it bundles CodeMirror, the vim keymap and `web-tree-sitter` under MIT, whose notice must travel with every copy, and two dozen crates under MIT or Apache-2.0. The two font licences were served under `/licenses/` and linked from nowhere. CI passed `COMMIT_HASH` into the image and nothing read it. The forge sends every anonymous visitor to its login page, so the source link is the public GitHub mirror, which the forge pushes on every commit.
+
+##### THE PAGES
+
+`about.html`, `help.html`, `licences.html` and `privacy.html` sit beside `index.html` as Vite inputs and share `style.css`, a small `pages.css`, a nav, and a footer that `pages.ts`'s `initPage` fills with the copyright line, the build and its source link. The about menu's links open each in a new tab, so the app keeps its stepping position, which a reload loses. The pre-paint script moved out of `index.html` into `prepaint.ts`, and a Vite plugin inlines it wherever a page writes `<!-- prepaint -->`, so every page paints in the stored theme from one copy. `build-info.ts` names the build `build <short hash>` with a link to the mirror's tree at that commit, or `dev build` and `main`; the copyright line is `© 2026 Davey Hughes`, widening to `© 2026–YYYY` on the viewer's clock and never written into a file.
+
+The help page's prose was checked against each `keydown` handler and the step controls' labels; the privacy page's against the measured hosting (Cloudflare in front, no cookie, one same-origin script) and the ten `redextape.*` storage keys. Tests hold the help page's editor-key table to `navKeymap` and `LINK_KEY`, row by row and key by key, and the privacy page's key table to every key literal in `src/`, in any quotes, refusing one built in a template.
+
+##### THE NOTICES
+
+`web/scripts/licences.ts`, run by Node directly, writes the committed `web/src/third-party-licences.json`: redextape's own `LICENSE.md`, then every npm package `src/`, its CSS and the pages import or load, walked along dependencies, with `vite` and `rolldown` by name for the helpers they put in the chunk; every crate `cargo tree` names for each wasm build; and the toolchains' runtimes no package manager reports — the Rust standard library, `compiler-builtins`, `dlmalloc`, `hashbrown`, and Emscripten's runtime inside `web-tree-sitter` — from texts committed under `web/scripts/toolchain-licences/` at the versions that built the shipped files. Each text is stored once; the output sorts by code unit. `scripts/check-licences.sh` regenerates it and fails on any difference, with a self-test, in pre-commit and in CI's `web` job; it says to run `pnpm install` when `node_modules` is not the lockfile's. `licences-page.ts` draws it, every text through `textContent`.
+
+##### DECISIONS
+
+The user's, in order: all four pages; static pages opened in a new tab; the GitHub mirror as the source; Davey Hughes as the holder, the year a range from 2026; notices generated into a committed file and checked, over generating them at build time or adopting `cargo-about`; the menu **before** `settings`, after the prototype found that after it a Tab from `settings` reached `about ▾` and not the notice line's *undo* — 12 of `base16-remove.test.ts`'s 15 cases failed; and, after Task 4's review, listing the toolchains' runtimes rather than narrowing the page's claim.
+
+##### THE REVIEW
+
+A prototype passed the whole suite and an image, was replayed task by task, and the five replayed commits were cherry-picked. Each task then had a fresh review, a whole-branch review followed, and a review of that fix round; every finding was fixed with a sabotage showing its test can fail. What they found that nothing had:
+
+- **The plugin was untested.** Deleting it from `vite.config.ts` left every test green while every page shipped without the script; each page now runs through a server built from the config, and the page list is held to the build's inputs.
+- **The notices under-listed.** A licence file was matched only at the start of its name, which missed rolldown's `THIRD-PARTY-LICENSE`, the esbuild and Rollup notices behind the very helpers rolldown is listed for. The standard library's `hashbrown` and `compiler-builtins` and its allocator ship in both builds and no tool names them. Conversely `cargo metadata`'s workspace feature union listed the workspace's own `indexmap`, `hashbrown`, `equivalent` and `foldhash`, copies no build compiles: 24 crates, not 28.
+- **The check depended on the machine.** `localeCompare` made the file's bytes differ under Danish and Estonian collation, so pre-commit would fail on an untouched tree there.
+- **Several tests could not fail.** `BUILD`'s passed with its key misspelt; the storage-key scan missed any key with a digit or a dash; the controls gate never walked a link.
+- **The pages said things the code does not do.** F12 and F2 in a λ copy's editor; a "standard" keymap; a menu that stayed open after a pick, against every header menu's convention.
+- **The fix rounds' own text.** The final review found three false statements in the previous fix commit — a test header misstating its blind spot, a comment, a spec note — as this repository's correction rounds keep doing.
+
+##### WHAT THIS DID NOT CLOSE
+
+- **No favicon.** Every page load still 404s `/favicon.ico`, as before this branch.
+- **A crate the standard library links that never panics** leaves no path in a stripped `.wasm`, so the toolchain test cannot see it; `compiler-builtins` was found by name in an unstripped build. A new Rust release should be checked the same way.
+- **The help page's views table** is checked by reading the handlers, not by a test; only the editor table is held.
+- **Without JavaScript** a deployed page's footer says `dev build`, the HTML's default.
+- **`/about` without `.html`** falls back to the app, as every unknown path does.
+- **`aria-haspopup` on `settings`** is still the open question it was; `about ▾` carries none, as `share` does not.
+
+##### VERIFICATION
+
+Run on 2026-10-08 in the main checkout on branch `about-pages`, at `fa93c45`, the last code commit; this entry changes only this file.
+
+```
+pnpm exec biome ci --error-on-warnings                    → exit 0, 361 files
+pnpm run typecheck                                        → exit 0
+pnpm run test:coverage                                    → exit 0, 234 files / 2,425 tests; 97.54 / 91.63 / 98.47 / 98.9 against 95 / 89 / 97 / 97
+pnpm run build:app                                        → exit 0
+scripts/check-{text-bytes,citations,attributions,doc-figures,shared-docs,colours,grammar-wasm,lua,licences}.sh,
+  --self-test then alone                                  → 18 of 18 exit 0
+docker build --build-arg COMMIT_HASH=fa93c45…, then run   → healthy after 1 poll; /, the four pages and both /licenses/ texts 200;
+                                                            the pre-paint script once in each of the five pages; their 25 assets 200;
+                                                            the full commit in the about page's bundle; container stopped
+```
+
+Earlier in the branch, the same `test:coverage` passed at `47737be` (234 files / 2,412 tests) and at `8b0236d` (2,415), and at prototype `b7b2645` failed the 12 cases of DECISIONS.
+
+**Every count this entry quotes, with what produces it.** Scratch commands run from the repository root unless they `cd`.
+
+| Value | What | Produced by |
+|---|---|---|
+| 15 | commits in the range | `git rev-list --count 8dc603d..fa93c45` |
+| 18, 24, 5, 2 | packages by group | `cd web && node -e "const d=require('./src/third-party-licences.json'); const c={}; for (const p of d.packages) c[p.group]=(c[p.group]??0)+1; console.log(c)"` |
+| 0 | licence notices in the built chunks before | `for f in web/dist/assets/*.js; do grep -c -E "Permission is hereby granted\|@license\|Copyright \(c\)\|MIT License" $f; done` on the 2026-10-07 build (spec §12) |
+| 13, 8 | hooks, of them `always_run` | `grep -c '^      - id: ' .pre-commit-config.yaml`; `grep -c 'always_run: true' .pre-commit-config.yaml` |
+| 0.51-0.78 s | the new hook, self-test and check, five runs | `for i in 1 2 3 4 5; do s=$(date +%s.%N); scripts/check-licences.sh --self-test >/dev/null && scripts/check-licences.sh >/dev/null; e=$(date +%s.%N); printf '%.2f ' $(( e - s )); done` |
+| 12 of 15 | `base16-remove.test.ts` with the menu after `settings` | `pnpm run test:coverage` at prototype `b7b2645`, its `Tests  12 failed \| 2274 passed (2286)` line |
+| 554 px | `help.html`'s width at a 390 px viewport before its tables could wrap | `document.documentElement.scrollWidth` on the dev server, prototype `35e3de2` |
+| 28; 24 | crates by `cargo metadata`'s walk; by `cargo tree` per build | `git show "${c}:web/src/third-party-licences.json"` for `c` in `9ff4e39`, `fa93c45`, counting `group: wasm` with the node line above |
+| `/rust/deps/dlmalloc-0.2.14`, `/rust/deps/hashbrown-0.17.1`; `alloc`, `core`, `std` | the standard library's crates in both builds | `grep -a -o -E "/rust/deps/[a-zA-Z0-9_.-]+" pkg/*_bg.wasm pkg-lsp/*_bg.wasm \| sort -u`; `grep -a -o -E "/rustc/[0-9a-f]{40}/library/[a-z_-]+/" …` |
+| `__multi3`, `memcmp` | `compiler-builtins` in both builds | the unmangled names in the name section of `target/wasm32-unknown-unknown/release/redextape{,_lsp}_wasm.wasm`, parsed by a scratch script |
+| differs under `da_DK`, `et_EE` | the generator before the code-unit sort | `cd web && LC_ALL=da_DK.UTF-8 node scripts/licences.ts --stdout \| cmp -s - src/third-party-licences.json` in a worktree at the replay's `b3e25cd`, and `et_EE`; `C.UTF-8` and `en_US.UTF-8` match |
+| the gates block | the gates and the image | a scratch script running each line in turn at `fa93c45` |
+| 95, 89, 97, 97 | the coverage floors | `thresholds` in `web/vite.config.ts` |

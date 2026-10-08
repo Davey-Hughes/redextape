@@ -9,6 +9,13 @@ import type { SessionRegistry } from './sessions'
 import type { TmPane } from './tm-pane'
 
 /**
+ * The source editor's key for linking at the caret, the keyboard route to a click. `main.ts` binds it and the help
+ * page's key table names it; `tests/node/pages.test.ts` holds the two together. It is unbound in `defaultKeymap` and in
+ * `historyKeymap`; verify that before changing it.
+ */
+export const LINK_KEY = "Mod-'"
+
+/**
  * THE LINK STATE AND EVERYTHING THAT READS IT — the cluster `main.ts` held as four `let`s visible to a
  * thousand lines.
  *

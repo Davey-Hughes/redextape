@@ -13,6 +13,7 @@ import { playwright } from '@vitest/browser-playwright'
 // TS2769 because the `test` property is invisible to the checker. `vitest/config` re-exports the
 // same Vite `defineConfig` plus that import path.
 import { configDefaults, defineConfig } from 'vitest/config'
+import { inlinePrepaint } from './src/prepaint.ts'
 
 // `pkg/` is built to the REPO ROOT, one level above this Vite root, because the Dockerfile places
 // stage 1's output at /app/pkg beside /app/web. Vite's dev server refuses to serve outside its root
@@ -24,6 +25,9 @@ import { configDefaults, defineConfig } from 'vitest/config'
 // somewhere else and the wasm fetch dies with "outside of Vite serving allow list" — while the same
 // config serves the same file correctly under a plain `vite dev`.
 const REPO_ROOT = fileURLToPath(new URL('..', import.meta.url))
+
+/** The site's pages: the app, and the four beside it (about pages design §4). */
+const PAGES = ['index', 'about', 'help', 'licences', 'privacy']
 
 /**
  * The probes' own files, excluded from the browser project's default set unless `REDEXTAPE_PROBE` is
@@ -75,6 +79,8 @@ const PROBE_EXCLUDE = process.env.REDEXTAPE_PROBE === undefined ? PROBE_FILES : 
 
 export default defineConfig({
   server: { fs: { allow: [REPO_ROOT] } },
+  plugins: [{ name: 'redextape-prepaint', transformIndexHtml: { order: 'pre', handler: inlinePrepaint } }],
+  define: { 'import.meta.env.VITE_COMMIT_HASH': JSON.stringify(process.env.COMMIT_HASH ?? '') },
   worker: { format: 'es' },
   // `assetsInlineLimit` — WITHOUT THIS, ONE OF FOUR GRAMMAR `.wasm` FILES INLINES AND THE OTHER
   // THREE DO NOT, FOR A REASON THAT HAS NOTHING TO DO WITH THE GRAMMARS THEMSELVES.
@@ -111,6 +117,9 @@ export default defineConfig({
   // `.wasm`.
   build: {
     assetsInlineLimit: (filePath) => (filePath.endsWith('.wasm') ? false : undefined),
+    rolldownOptions: {
+      input: Object.fromEntries(PAGES.map((p) => [p, fileURLToPath(new URL(`${p}.html`, import.meta.url))])),
+    },
   },
   test: {
     // No `passWithNoTests`. It was set while the scaffold had no tests yet; now that both projects

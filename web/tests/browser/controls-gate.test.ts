@@ -125,7 +125,7 @@ const straySymbol = (s: string) => /[\p{So}\p{Sm}]/u.test(s.replaceAll('+', '').
  */
 function controls(): HTMLElement[] {
   const scope: ParentNode = document.querySelector('dialog:modal') ?? document
-  return [...scope.querySelectorAll<HTMLElement>('button, select, input, textarea')].filter((el) => {
+  return [...scope.querySelectorAll<HTMLElement>('button, select, input, textarea, a[href]')].filter((el) => {
     if (el.matches('input[type="hidden"]')) return false
     if (el.closest('[hidden]') !== null) return false
     if (el.closest('dialog:not([open])') !== null) return false
@@ -254,6 +254,8 @@ describe.each(STATES)('every control in $name', ({ name, picks, tiled }) => {
     // and the share popover's field.
     expect(walked).toContain('format-on-blur')
     expect(walked).toContain('share-link')
+    // A LINK IS WALKED: the about menu's, which `button, select, input, textarea` never reached.
+    expect(walked).toContain('about-source')
   })
 
   it("with every view's title and ⋯ menu open", () => {

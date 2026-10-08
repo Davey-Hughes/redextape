@@ -1,0 +1,129 @@
+<!doctype html>
+<html lang="en" data-style="instrument">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>help — redextape</title>
+    <link rel="stylesheet" href="/src/style.css" />
+    <link rel="stylesheet" href="/src/pages.css" />
+    <!-- prepaint -->
+  </head>
+  <body class="page">
+    <header class="bar">
+      <a class="wordmark" href="/">redextape</a>
+      <nav class="page-nav" aria-label="pages">
+        <a href="/about.html">about</a>
+        <a href="/help.html" aria-current="page">help</a>
+        <a href="/licences.html">licences</a>
+        <a href="/privacy.html">privacy</a>
+      </nav>
+    </header>
+    <main>
+      <h1>Help</h1>
+      <h2>Getting around</h2>
+      <ol>
+        <li>
+          Type a program in the source view, or open one from <strong>examples ▾</strong>. It compiles as you type,
+          and an error is marked where it is.
+        </li>
+        <li>
+          Step it with the step controls: <strong>▶</strong> one step forward, <strong>◀</strong> one step back,
+          <strong>↺</strong> back to the oldest kept step, play and pause at the chosen speed. A long run records as
+          much as its budget allows, then offers to <strong>keep recording</strong> or to <strong>continue</strong>
+          past its step cap.
+        </li>
+        <li>
+          Click a token in the source, a λ token, an assembly instruction or a machine rule, and the other views show
+          the same point of the program.
+        </li>
+        <li>
+          A view's <strong>⋯</strong> menu has <strong>edit a copy</strong>: the term, the machine or the assembly as
+          text you can change and run on its own. <strong>copies ▾</strong> lists them.
+        </li>
+        <li>
+          <strong>share</strong> makes a link to the program, the views and where each one stands; the workspace
+          menu (<strong>Explorer ▾</strong> at first) switches between the Explorer, Debugger and Stage presets; and
+          <strong>settings</strong> holds the style, palette, appearance, keymap and format-on-blur choices.
+        </li>
+      </ol>
+
+      <h2>Keys in the editors</h2>
+      <table id="editor-keys">
+        <thead>
+          <tr><th scope="col">Key</th><th scope="col">Does</th><th scope="col">Where</th></tr>
+        </thead>
+        <tbody>
+          <tr data-key="F12"><td><kbd>F12</kbd></td><td>go to the definition of the name at the caret</td><td>the source, and machine and assembly copies</td></tr>
+          <tr data-key="Shift-F12"><td><kbd>Shift</kbd>+<kbd>F12</kbd></td><td>go to the next reference to it</td><td>the source, and machine and assembly copies</td></tr>
+          <tr data-key="F2"><td><kbd>F2</kbd></td><td>show what the editor knows about the name at the caret</td><td>the source, and machine and assembly copies</td></tr>
+          <tr data-key="Mod-'"><td><kbd>Ctrl</kbd>+<kbd>'</kbd> (<kbd>⌘</kbd>+<kbd>'</kbd> on a Mac)</td><td>link the caret's position to the other views</td><td>the source editor</td></tr>
+        </tbody>
+      </table>
+      <p>
+        A λ copy's editor has no definitions or references to go to, so these three do nothing there. Everything else
+        is the editor's default keymap, or vim's when <strong>settings</strong> sets the keymap to vim.
+      </p>
+
+      <h2>Keys in the views</h2>
+      <table>
+        <thead>
+          <tr><th scope="col">Where</th><th scope="col">Keys</th></tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td>the λ term</td>
+            <td>
+              <kbd>↑</kbd> <kbd>↓</kbd> <kbd>PgUp</kbd> <kbd>PgDn</kbd> <kbd>Home</kbd> <kbd>End</kbd> move between rows;
+              <kbd>→</kbd> opens what is folded on the row and <kbd>←</kbd> folds it again; <kbd>Enter</kbd> opens a
+              fold, or links the row when nothing on it is folded
+            </td>
+          </tr>
+          <tr>
+            <td>the machine's rules, the assembly listing</td>
+            <td>
+              <kbd>↑</kbd> <kbd>↓</kbd> <kbd>PgUp</kbd> <kbd>PgDn</kbd> <kbd>Home</kbd> <kbd>End</kbd> move between rows;
+              <kbd>Enter</kbd> links the row
+            </td>
+          </tr>
+          <tr>
+            <td>the state diagram, program level</td>
+            <td>
+              the same keys move between rows; <kbd>Enter</kbd> links the row, or on a row of sub-steps shows its states;
+              <kbd>↑</kbd> <kbd>↓</kbd> move between the runtime boxes, and <kbd>Enter</kbd> or <kbd>Space</kbd> links one
+            </td>
+          </tr>
+          <tr>
+            <td>the state diagram, local level</td>
+            <td>
+              <kbd>↑</kbd> <kbd>↓</kbd> <kbd>←</kbd> <kbd>→</kbd> move between states; <kbd>Enter</kbd> or
+              <kbd>Space</kbd> links one
+            </td>
+          </tr>
+          <tr>
+            <td>the divider between two views</td>
+            <td><kbd>←</kbd> <kbd>→</kbd>, or <kbd>↑</kbd> <kbd>↓</kbd> when the views are stacked, resize them</td>
+          </tr>
+          <tr>
+            <td>the Stage layout's tabs</td>
+            <td>
+              arrow keys, <kbd>Home</kbd> and <kbd>End</kbd> move between tabs; <kbd>Enter</kbd> or <kbd>Space</kbd>
+              shows the view
+            </td>
+          </tr>
+          <tr>
+            <td>a choice in a view's ⋯ menu or a panel's header</td>
+            <td>arrow keys move the choice — the term map's mode, the state diagram's level and edges, and the like</td>
+          </tr>
+        </tbody>
+      </table>
+    </main>
+    <footer class="page-foot">
+      <span data-copyright>© 2026 Davey Hughes</span> · <span data-build>dev build</span> ·
+      <a data-source href="https://github.com/Davey-Hughes/redextape">source</a>
+    </footer>
+    <script type="module">
+      import { initPage } from '/src/pages.ts'
+      initPage()
+    </script>
+  </body>
+</html>

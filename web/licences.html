@@ -1,0 +1,66 @@
+<!doctype html>
+<html lang="en" data-style="instrument">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>licences — redextape</title>
+    <link rel="stylesheet" href="/src/style.css" />
+    <link rel="stylesheet" href="/src/pages.css" />
+    <!-- prepaint -->
+  </head>
+  <body class="page">
+    <header class="bar">
+      <a class="wordmark" href="/">redextape</a>
+      <nav class="page-nav" aria-label="pages">
+        <a href="/about.html">about</a>
+        <a href="/help.html">help</a>
+        <a href="/licences.html" aria-current="page">licences</a>
+        <a href="/privacy.html">privacy</a>
+      </nav>
+    </header>
+    <main>
+      <h1>Licences</h1>
+      <section id="redextape">
+        <h2>redextape</h2>
+        <p>
+          <span data-copyright>© 2026 Davey Hughes</span>. redextape is free software: you can redistribute it and/or
+          modify it under the terms of the GNU General Public License as published by the Free Software Foundation,
+          version 3 only. It is distributed in the hope that it will be useful, but WITHOUT ANY WARRANTY; without even
+          the implied warranty of MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the licence below for more
+          details.
+        </p>
+        <p>
+          The source of this build is at
+          <a data-source href="https://github.com/Davey-Hughes/redextape">github.com/Davey-Hughes/redextape</a>.
+        </p>
+        <div id="own-licence">
+          <p>
+            The licence text is the <a href="https://www.gnu.org/licenses/gpl-3.0.html">GNU General Public License,
+            version 3</a>.
+          </p>
+        </div>
+      </section>
+      <section>
+        <h2>What it ships from others</h2>
+        <p>
+          The page's code, its WebAssembly and its fonts include the work of others, each under its own licence, and so
+          do the runtimes the Rust and Emscripten toolchains compile into them. Every one is listed here with the
+          licence texts it carries.
+        </p>
+        <div id="notices">
+          <p>This list needs JavaScript to draw.</p>
+        </div>
+      </section>
+    </main>
+    <footer class="page-foot">
+      <span data-copyright>© 2026 Davey Hughes</span> · <span data-build>dev build</span> ·
+      <a data-source href="https://github.com/Davey-Hughes/redextape">source</a>
+    </footer>
+    <script type="module">
+      import { renderLicences } from '/src/licences-page.ts'
+      import { initPage } from '/src/pages.ts'
+      initPage()
+      renderLicences()
+    </script>
+  </body>
+</html>

@@ -31,7 +31,7 @@ export const STYLE_KEY = 'redextape.style'
 export const PALETTE_KEY = 'redextape.palette'
 
 /**
- * The resolved declarations of the palette last applied, for `index.html`'s pre-paint script — which runs
+ * The resolved declarations of the palette last applied, for the pre-paint script (`prepaint.ts`) — which runs
  * before any module and so cannot resolve a choice itself. Written by `main.ts` whenever a palette is
  * applied.
  */

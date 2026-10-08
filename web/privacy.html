@@ -1,0 +1,72 @@
+<!doctype html>
+<html lang="en" data-style="instrument">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>privacy — redextape</title>
+    <link rel="stylesheet" href="/src/style.css" />
+    <link rel="stylesheet" href="/src/pages.css" />
+    <!-- prepaint -->
+  </head>
+  <body class="page">
+    <header class="bar">
+      <a class="wordmark" href="/">redextape</a>
+      <nav class="page-nav" aria-label="pages">
+        <a href="/about.html">about</a>
+        <a href="/help.html">help</a>
+        <a href="/licences.html">licences</a>
+        <a href="/privacy.html" aria-current="page">privacy</a>
+      </nav>
+    </header>
+    <main>
+      <h1>Privacy</h1>
+      <p>
+        redextape runs in your browser. The compiler, the λ reducer, the Turing machine and the editors' language
+        server all run on this page, so nothing you type is sent anywhere.
+      </p>
+      <ul>
+        <li>The site sets no cookies and runs no analytics.</li>
+        <li>Everything it loads — the code, the WebAssembly and the fonts — comes from this site; nothing comes from another host.</li>
+        <li>
+          A share link carries the program in the part of the address after <code>#</code>, which a browser never
+          sends to a server. Whoever you give the link to can read the program in it.
+        </li>
+        <li>
+          Like any website, the server and Cloudflare, which sits in front of it, receive each request: your IP
+          address, the page asked for and your browser's user agent.
+        </li>
+      </ul>
+
+      <h2>What the app keeps in your browser</h2>
+      <p>
+        So that a reload finds things as you left them, the app keeps these in your browser's local storage, on this
+        device only. Clearing the site's data removes them.
+      </p>
+      <table id="storage-keys">
+        <thead>
+          <tr><th scope="col">Key</th><th scope="col">Holds</th></tr>
+        </thead>
+        <tbody>
+          <tr data-key="redextape.program"><td><code>redextape.program</code></td><td>the program's text and the encoding it compiles under</td></tr>
+          <tr data-key="redextape.buffers"><td><code>redextape.buffers</code></td><td>your copies' text</td></tr>
+          <tr data-key="redextape.layout"><td><code>redextape.layout</code></td><td>the views, how they are arranged, and the layout's choices</td></tr>
+          <tr data-key="redextape.appearance"><td><code>redextape.appearance</code></td><td>light, dark, or following the system</td></tr>
+          <tr data-key="redextape.style"><td><code>redextape.style</code></td><td>the style: Paper, Terminal or Instrument</td></tr>
+          <tr data-key="redextape.palette"><td><code>redextape.palette</code></td><td>which palette is chosen</td></tr>
+          <tr data-key="redextape.palette.css"><td><code>redextape.palette.css</code></td><td>that palette's colours, so the next load draws in them from its first frame</td></tr>
+          <tr data-key="redextape.palette.custom"><td><code>redextape.palette.custom</code></td><td>a palette imported from a base16 scheme</td></tr>
+          <tr data-key="redextape.keymap"><td><code>redextape.keymap</code></td><td>the editors' keymap: default or vim</td></tr>
+          <tr data-key="redextape.formatOnBlur"><td><code>redextape.formatOnBlur</code></td><td>whether an editor's text is formatted when it loses focus</td></tr>
+        </tbody>
+      </table>
+    </main>
+    <footer class="page-foot">
+      <span data-copyright>© 2026 Davey Hughes</span> · <span data-build>dev build</span> ·
+      <a data-source href="https://github.com/Davey-Hughes/redextape">source</a>
+    </footer>
+    <script type="module">
+      import { initPage } from '/src/pages.ts'
+      initPage()
+    </script>
+  </body>
+</html>

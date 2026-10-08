@@ -910,6 +910,12 @@ jobs:
         run: pnpm run build:lsp-wasm
       - name: Generate the wire-type bindings (web/bindings is gitignored; typecheck resolves against it)
         run: pnpm run build:bindings
+      # THE LICENCES PAGE'S LIST, REGENERATED AND COMPARED. In this job and not with the hygiene scans in
+      # `linear-history`, because this is the job with both `node_modules` and cargo, which the generator reads.
+      - name: Third-party licences match what the site ships (self-test)
+        run: ../scripts/check-licences.sh --self-test
+      - name: Third-party licences match what the site ships
+        run: ../scripts/check-licences.sh
       - name: Install the Chromium Playwright needs
         run: pnpm exec playwright install --with-deps chromium
       - name: Lint + format check

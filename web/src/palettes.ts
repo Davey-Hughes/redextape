@@ -204,8 +204,8 @@ export const PALETTES: Readonly<Record<PaletteId, Palette>> = {
 /**
  * A palette as CSS declarations — `--bg: light-dark(#…, #…); …`, one per token, in token order.
  *
- * This is the text the app caches after applying a palette, and the text the pre-paint script in
- * `index.html` writes onto `<html>` as the `style` attribute before first paint.
+ * This is the text the app caches after applying a palette, and the text the pre-paint script
+ * (`prepaint.ts`) writes onto `<html>` as the `style` attribute before first paint.
  */
 export function paletteDeclarations(p: Palette): string {
   return COLOUR_TOKENS.map((t) => `--${t}: light-dark(${p.light[t]}, ${p.dark[t]});`).join(' ')
@@ -217,7 +217,7 @@ export function paletteDeclarations(p: Palette): string {
  * to `COLOUR_TOKENS` or reject a repeated one; what it guarantees is that nothing but a custom property set
  * to a pair of hex colours can pass.
  *
- * `index.html`'s pre-paint script carries this pattern as a literal — it runs before any module, so it
+ * `prepaint.ts`'s `PREPAINT` carries this pattern as a literal — it runs before any module, so it
  * cannot import it — and applies a cached string to `<html>`'s `style` attribute only if the string
  * matches. `prepaint.test.ts` holds the literal equal to this `source`. A cache in any other form — corrupt,
  * stale in format, or written by anything else — is therefore ignored rather than injected.

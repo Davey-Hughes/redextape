@@ -1,13 +1,28 @@
-import { readFileSync } from 'node:fs'
+import { readdirSync, readFileSync } from 'node:fs'
 import { fileURLToPath } from 'node:url'
-import { describe, expect, it } from 'vitest'
+import { createServer, type ViteDevServer } from 'vite'
+import { afterAll, beforeAll, describe, expect, it } from 'vitest'
+import { STORAGE_KEY } from '../../src/appearance'
 import { PALETTE_CSS_PATTERN, PALETTES, paletteDeclarations } from '../../src/palettes'
+import { inlinePrepaint, PREPAINT, PREPAINT_SLOT } from '../../src/prepaint'
 import { PALETTE_CSS_KEY, resolvePalette, STYLE_IDS, STYLE_KEY } from '../../src/skin'
 import { DAY, NEON, storedHalf } from './base16-fixtures'
 
-const html = readFileSync(fileURLToPath(new URL('../../index.html', import.meta.url)), 'utf8')
-// The one classic script in the page — the module script has a `type`.
-const script = /<script>([\s\S]*?)<\/script>/.exec(html)?.[1] ?? ''
+const script = PREPAINT
+const WEB = fileURLToPath(new URL('../../', import.meta.url))
+const page = (name: string): string => readFileSync(`${WEB}${name}`, 'utf8')
+
+/**
+ * Every HTML file beside `index.html` — the app and the four pages beside it (about pages design §4) — read from the
+ * directory rather than listed, so a sixth page is held to the script without anyone remembering to add it here.
+ * `the build` below holds this list equal to the build's inputs.
+ */
+const PAGES = readdirSync(WEB)
+  .filter((f) => f.endsWith('.html'))
+  .sort()
+
+/** A classic script: any `<script` that is not `type="module"`. */
+const CLASSIC_SCRIPT = /<script(?![^>]*\btype="module")[^>]*>/
 
 /**
  * Run the inline script against a fake `localStorage` and `<html>`, and return what it set.
@@ -33,10 +48,6 @@ function run(store: Record<string, string>, throws = false): Map<string, string>
 }
 
 describe('the pre-paint script', () => {
-  it('exists', () => {
-    expect(script).not.toBe('')
-  })
-
   it('applies a stored style and a cached palette before first paint', () => {
     const css = paletteDeclarations(PALETTES.paper)
     const attrs = run({ [STYLE_KEY]: 'paper', [PALETTE_CSS_KEY]: css })
@@ -55,7 +66,7 @@ describe('the pre-paint script', () => {
   })
 
   it('still applies a stored appearance', () => {
-    expect(run({ 'redextape.appearance': 'dark' }).get('data-theme')).toBe('dark')
+    expect(run({ [STORAGE_KEY]: 'dark' }).get('data-theme')).toBe('dark')
   })
 
   it('ignores an unknown style and a cache that is not palette declarations', () => {
@@ -96,11 +107,66 @@ describe('the pre-paint script', () => {
     }
   })
 
+  /**
+   * **EVERY PAGE PAINTS IN THE STORED THEME**, and from one copy of the script: each carries the slot once, in its
+   * `<head>`, and carries no inline script of its own that could be a second, drifting copy.
+   */
+  it.each(PAGES)('is inlined into %s, which carries the slot once in its head and no other classic script', (name) => {
+    const html = page(name)
+    const head = /<head>([\s\S]*?)<\/head>/.exec(html)?.[1] ?? ''
+    expect(head.split(PREPAINT_SLOT).length - 1).toBe(1)
+    expect(html.split(PREPAINT_SLOT).length - 1).toBe(1)
+    expect(html).not.toMatch(CLASSIC_SCRIPT)
+    expect(inlinePrepaint(html)).toContain(`<script>${PREPAINT}</script>`)
+    expect(inlinePrepaint(html)).not.toContain(PREPAINT_SLOT)
+  })
+
+  it('leaves a page without the slot as it is', () => {
+    expect(inlinePrepaint('<head></head>')).toBe('<head></head>')
+  })
+
   // The script cannot import, so it carries its own copies. These hold each copy to its source.
-  it('carries the keys, the style ids and the cache pattern that skin.ts and palettes.ts define', () => {
+  it('carries the keys, the style ids and the cache pattern that appearance.ts, skin.ts and palettes.ts define', () => {
+    expect(script).toContain(`'${STORAGE_KEY}'`)
     expect(script).toContain(`'${STYLE_KEY}'`)
     expect(script).toContain(`'${PALETTE_CSS_KEY}'`)
     for (const s of STYLE_IDS) expect(script).toContain(`'${s}'`)
     expect(script).toContain(`/${PALETTE_CSS_PATTERN.source}/`)
+  })
+})
+
+/**
+ * **THE BUILD INLINES IT, NOT ONLY THE FUNCTION**: each page run through the configured server — `vite.config.ts` as
+ * the dev server and the build load it — comes out with the script in place of its slot. Without this, deleting the
+ * plugin from the config left every case above green while every page shipped without the script.
+ */
+describe('the build', () => {
+  let server: ViteDevServer
+  beforeAll(async () => {
+    server = await createServer({
+      root: WEB,
+      configFile: `${WEB}vite.config.ts`,
+      logLevel: 'silent',
+      server: { middlewareMode: true, hmr: false, watch: null },
+      optimizeDeps: { noDiscovery: true, include: [] },
+    })
+  })
+  afterAll(async () => {
+    await server.close()
+  })
+
+  it('takes every page as an input, and no other', () => {
+    const input = server.config.build.rolldownOptions.input as Record<string, string>
+    expect(
+      Object.values(input)
+        .map((path) => path.slice(WEB.length))
+        .sort(),
+    ).toEqual(PAGES)
+  })
+
+  it.each(PAGES)('serves %s with the script in place of its slot', async (name) => {
+    const out = await server.transformIndexHtml(`/${name}`, page(name))
+    expect(out).toContain(`<script>${PREPAINT}</script>`)
+    expect(out).not.toContain(PREPAINT_SLOT)
   })
 })
