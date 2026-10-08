@@ -406,6 +406,7 @@ describe('the no-session report for a failed fork', () => {
       const pane = new LambdaPane(host, {
         back: () => undefined,
         forward: () => undefined,
+        toNewest: () => undefined,
         play: () => undefined,
         restart: () => undefined,
         extend: () => undefined,
@@ -598,6 +599,7 @@ describe('the no-session report for a failed fork', () => {
       const pane = new LambdaPane(host, {
         back: () => undefined,
         forward: () => undefined,
+        toNewest: () => undefined,
         play: () => undefined,
         restart: () => undefined,
         extend: () => undefined,
@@ -786,7 +788,7 @@ describe('the fork control forks a truncated frame, through the app', () => {
   }, 60_000)
 
   it('forks a TRUNCATED frame and seeds the editor with the whole term', async () => {
-    // `↺` FIRST: a settled pane sits at the frontier, not step 0 (`scratch-app.test.ts`'s own note).
+    // `↺` FIRST, so the walk starts at step 0 (`scratch-app.test.ts`'s own note).
     // Two steps forward from there is not the free `step === 0` case §4.1a calls out — the worker has
     // to do the replay, not skip it.
     clickLambda('↺')

@@ -26,6 +26,7 @@ describe('barTarget', () => {
     expect(NO_TARGET.stepText).toBe('no view can step')
     expect(NO_TARGET.canBack).toBe(false)
     expect(NO_TARGET.canForward).toBe(false)
+    expect(NO_TARGET.canToNewest).toBe(false)
     expect(NO_TARGET.canPlay).toBe(false)
     expect(NO_TARGET.canRestart).toBe(false)
     expect(NO_TARGET.playing).toBe(false)

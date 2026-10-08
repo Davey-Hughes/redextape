@@ -20,6 +20,7 @@ export type IconName =
   | 'edit'
   | 'play'
   | 'pause'
+  | 'to-newest'
   | 'sun'
   | 'moon'
   | 'settings'
@@ -42,6 +43,9 @@ const PATHS: Readonly<Record<IconName, string>> = {
   // `⏵`: Hack lacks it (part 1's roadmap entry), and `⏸` joins it so the play toggle's two faces match.
   play: 'M5 3.5 L12.5 8 L5 12.5 Z',
   pause: 'M5.5 3.5 V12.5 M10.5 3.5 V12.5',
+  // `⏭`, to the newest recorded step: Hack lacks it (`hack-regular.woff2`'s cmap, 2026-10-08). `play`'s triangle, moved
+  // left, against a bar.
+  'to-newest': 'M3.5 3.5 L10 8 L3.5 12.5 Z M12.5 3.5 V12.5',
   // `☀` and `☾`: Hack lacks both (part 1's roadmap entry); `⚙` is drawn to match. `◐` stays text — Hack
   // draws it.
   sun: 'M8 5 A3 3 0 1 0 8 11 A3 3 0 1 0 8 5 M8 1.5 V3 M8 13 V14.5 M1.5 8 H3 M13 8 H14.5 M3.4 3.4 L4.5 4.5 M11.5 11.5 L12.6 12.6 M3.4 12.6 L4.5 11.5 M11.5 4.5 L12.6 3.4',

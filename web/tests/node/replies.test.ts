@@ -800,19 +800,21 @@ describe('a recording chunk redraws once per frame', () => {
    */
   it.each(CASES)('%s, %s: a burst of chunks draws once, on the frame, with the history already current', (sw, leg) => {
     const h = harness(sw, leg)
+    const first = chunk(leg, 0, null)
     const last = chunk(leg, 4, null)
-    h.send(chunk(leg, 0, null).reply)
+    h.send(first.reply)
     h.send(chunk(leg, 2, null).reply)
     h.send(last.reply)
 
-    expect({ length: h.leg().hist.length, current: h.leg().hist.current }).toEqual({
-      length: 6,
-      current: last.frames.at(-1),
-    })
+    // THE RUN OPENS ON ITS FIRST FRAME, with the burst's last already behind it.
+    const { hist } = h.leg()
+    expect({ length: hist.length, current: hist.current }).toEqual({ length: 6, current: first.frames[0] })
     expect(h.drawn()).toBe(0)
     expect(h.q.pending.length).toBe(1)
     h.q.fire()
     expect(h.drawn()).toBe(1)
+    hist.seek(hist.length - 1)
+    expect(hist.current).toEqual(last.frames.at(-1))
   })
 
   it.each(CASES)('%s, %s: the chunk that ends the recording draws at once', (sw, leg) => {
@@ -910,7 +912,8 @@ describe('an asm copy retains what its views were last told', () => {
     replies.onScratchReply(id, built('Unfinished'))
     replies.onScratchReply(id, { kind: 'asm-frames', gen: 1, frames: [frameOf(), frameOf({ step: 1 })], done: 'ended' })
     const leg = reg.legOf({ session: id, leg: 'asm' })
-    expect(leg.hist.current?.step).toBe(1)
+    expect(leg.hist.length).toBe(2)
+    expect(leg.hist.current?.step).toBe(0)
     expect(leg.done).toBe('ended')
   })
 

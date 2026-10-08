@@ -400,8 +400,8 @@ describe('a pane changes which leg it renders', () => {
 
       // A SECOND FRAME, WHICH IS THE WHOLE POINT OF THE STAGE — the Critical's signature was that EVERY
       // later frame threw. **NOT `◀` ON THE SWITCHED PANE, WHICH IS WHAT THIS WAS UNTIL IT WAS RUN**:
-      // the fork seeds the buffer from the λ pane's CURRENT step, and that pane was at the frontier, so
-      // the buffer's own run is a single frame — `canBack` is false and the click is a silent no-op.
+      // the buffer's run opens on its step 0 (`History`), so `canBack` is false and the click is a silent
+      // no-op.
       //
       // **AND NOT A SOURCE KEYSTROKE EITHER, WHICH IS WHAT IT WAS UNTIL 5d-ii-c DECISION 2.** That
       // keystroke used to retire the buffer, so the switched pane was rebound to `source` and repainted

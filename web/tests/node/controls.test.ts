@@ -22,6 +22,7 @@ describe('controlState', () => {
     const c = controlState(view({ available: false, reason: 'the λ backend does not support unbound `n`', length: 0 }))
     expect(c.canBack).toBe(false)
     expect(c.canForward).toBe(false)
+    expect(c.canToNewest).toBe(false)
     expect(c.canPlay).toBe(false)
     expect(c.continueLabel).toBeNull()
     expect(c.stepText).toBe('the λ backend does not support unbound `n`')
@@ -38,6 +39,16 @@ describe('controlState', () => {
   it('offers forward while frames remain ahead of the head', () => {
     expect(controlState(view({ length: 3, head: 1 })).canForward).toBe(true)
     expect(controlState(view({ length: 3, head: 2 })).canForward).toBe(false)
+  })
+
+  // **RECORDED, NOT RECORDABLE**: `⏭` never asks the worker for more, so at the frontier it is off whatever the stop.
+  it('offers ⏭ while recorded frames remain ahead of the head, and not at the frontier', () => {
+    expect(controlState(view({ length: 3, head: 0 })).canToNewest).toBe(true)
+    expect(controlState(view({ length: 3, head: 1 })).canToNewest).toBe(true)
+    expect(controlState(view({ length: 3, head: 2 })).canToNewest).toBe(false)
+    expect(controlState(view({ length: 3, head: 2, done: 'budget' })).canToNewest).toBe(false)
+    expect(controlState(view({ length: 3, head: 2, done: 'capped' })).canToNewest).toBe(false)
+    expect(controlState(view({ length: 0, head: 0 })).canToNewest).toBe(false)
   })
 
   it('keeps forward live at the frontier when there is more to record', () => {
@@ -159,9 +170,10 @@ describe('controlState', () => {
     expect(controlState({ ...full, awaitingRun: true }).stepText).toBe('step 1,386 of 1,386 — recompiling')
   })
 
-  it('leaves back, play and restart alone while awaiting a run', () => {
+  it('leaves back, ⏭, play and restart alone while awaiting a run', () => {
     const c = controlState(view({ length: 3, head: 1, done: 'budget', awaitingRun: true }))
     expect(c.canBack).toBe(true)
+    expect(c.canToNewest).toBe(true)
     expect(c.canPlay).toBe(true)
     expect(c.canRestart).toBe(true)
   })

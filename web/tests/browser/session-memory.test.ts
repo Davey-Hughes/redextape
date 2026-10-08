@@ -416,14 +416,15 @@ describe('session memory', () => {
     expect(deltaRatio).toBeGreaterThan(1.5)
     expect(deltaRatio).toBeLessThan(2.5)
 
-    // The rounds must actually have recorded, and the TM ring must actually have FILLED — an evicting
-    // ring is the only proof that `HISTORY_BYTES` was reached rather than merely allocated, and a
-    // measurement of an unfilled budget answers a different question from the one asked.
+    // The rounds must actually have recorded, and the TM ring must actually have FILLED — a measurement
+    // of an unfilled budget answers a different question from the one asked. **THE BYTES PUSHED SAY SO,
+    // NOT AN EVICTION**: a ring keeps the whole of the recording that fills it, which passes the budget
+    // by its last frame (`History`'s `#evict`), so that recording evicts nothing.
     expect(deltaOne).toBeGreaterThan(20_000_000)
     for (const r of one) expect(r.kept).toBeGreaterThan(10_000)
     for (const r of three) expect(r.kept).toBeGreaterThan(20_000)
     expect(lastShape).toHaveLength(3)
-    expect(lastShape[0]?.tmEvicted ?? 0).toBeGreaterThan(0)
+    expect(lastShape[0]?.accounted.tm ?? 0).toBeGreaterThanOrEqual(HISTORY_BYTES)
     releaseHeld()
   })
 

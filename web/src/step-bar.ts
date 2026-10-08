@@ -27,7 +27,7 @@ export type BarTarget = {
 }
 
 /** The subset of a view's handlers the bar drives. It picks no pair and closes no view. */
-export type BarEvents = Pick<PaneEvents, 'back' | 'forward' | 'play' | 'restart' | 'extend'>
+export type BarEvents = Pick<PaneEvents, 'back' | 'forward' | 'toNewest' | 'play' | 'restart' | 'extend'>
 
 /**
  * The state the bar shows when no view on the page can step (spec §8).
@@ -39,6 +39,7 @@ export type BarEvents = Pick<PaneEvents, 'back' | 'forward' | 'play' | 'restart'
 export const NO_TARGET: ControlState = {
   canBack: false,
   canForward: false,
+  canToNewest: false,
   canPlay: false,
   canRestart: false,
   playing: false,
@@ -95,6 +96,7 @@ export function createStepBar(deps: {
     setSpeed: deps.setSpeed,
     back: () => run((e) => e.back()),
     forward: () => run((e) => e.forward()),
+    toNewest: () => run((e) => e.toNewest()),
     play: () => run((e) => e.play()),
     restart: () => run((e) => e.restart()),
     extend: () => run((e) => e.extend()),

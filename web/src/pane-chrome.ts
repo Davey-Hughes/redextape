@@ -47,6 +47,8 @@ export type PaneEvents = {
 
   back(): void
   forward(): void
+  /** `⏭`: to the newest recorded step, the end of what the worker has recorded — never asking it for more. */
+  toNewest(): void
   play(): void
   restart(): void
   extend(): void

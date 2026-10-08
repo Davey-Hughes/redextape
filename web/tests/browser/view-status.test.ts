@@ -27,6 +27,7 @@ const noop = () => undefined
 const EVENTS: PaneEvents = {
   back: noop,
   forward: noop,
+  toNewest: noop,
   play: noop,
   restart: noop,
   extend: noop,

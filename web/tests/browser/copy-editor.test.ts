@@ -21,6 +21,7 @@ import type { CopyState } from '../../src/view-header'
 const events = (): PaneEvents => ({
   back: vi.fn(),
   forward: vi.fn(),
+  toNewest: vi.fn(),
   play: vi.fn(),
   restart: vi.fn(),
   extend: vi.fn(),

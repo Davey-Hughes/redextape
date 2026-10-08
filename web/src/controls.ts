@@ -28,6 +28,11 @@ export type LegView = {
 export type ControlState = {
   canBack: boolean
   canForward: boolean
+  /**
+   * Whether `⏭` has a newer recorded step to go to. **RECORDED, NOT RECORDABLE**, unlike `canForward`: it never asks
+   * the worker for more, so at the frontier it has nothing to do.
+   */
+  canToNewest: boolean
   canPlay: boolean
   canRestart: boolean
   /** Whether playback is running, so the play button shows ⏸ and is named "pause" (spec §8, umbrella rule 3). */
@@ -104,6 +109,7 @@ export function controlState(v: LegView): ControlState {
     return {
       canBack: false,
       canForward: false,
+      canToNewest: false,
       canPlay: false,
       canRestart: false,
       playing: false,
@@ -146,6 +152,7 @@ export function controlState(v: LegView): ControlState {
     // `extend` request `[continue]` sends. Gating this on recorded frames alone left that branch unreachable:
     // the button was disabled at exactly the moment it had something to do.
     canForward: v.head < v.length - 1 || canRecordFurther(v.done, v.awaitingRun),
+    canToNewest: v.head < v.length - 1,
     canPlay: v.length > 1,
     canRestart: v.length > 0,
     playing: v.playing,

@@ -39,7 +39,8 @@ const checked = (value: string) =>
 
 describe('a λ view restored from a stored workspace', () => {
   it('draws with the layout and the variables the workspace stored for it', async () => {
-    // STEP 0, WHERE THE TERM STILL HAS BINDERS TO PRINT — the page opens on the last step, a numeral chip.
+    // STEP 0, WHERE THE TERM STILL HAS BINDERS TO PRINT — where a run opens (`History`); the last step is a numeral
+    // chip.
     ;[...document.querySelectorAll<HTMLButtonElement>('[data-leaf="lambda-0"] .controls button')]
       .find((b) => b.textContent === '↺')
       ?.click()

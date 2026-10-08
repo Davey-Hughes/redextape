@@ -93,8 +93,10 @@ type Line = { readonly example: string; readonly name: string; readonly long: bo
 
 /**
  * **THE TWO LINES THE BAR CARRIES.** `sum_to(5)` ends, so its line is the step count alone and the continue button is
- * gone. `fact(4)` fills the λ leg's history, so its line names that and its oldest kept step, and `keep recording` is
- * on the bar.
+ * gone. `fact(4)` fills the λ leg's history, and once `keep recording` has filled it again the ring has dropped its
+ * oldest steps, so its line names both, and `keep recording` is on the bar. **THE ONE `keep recording` IS WHAT MAKES
+ * THE LINE LONG**: a ring keeps the whole of its first recording (`History`'s `#evict`), whose line names no oldest
+ * kept step.
  */
 const LINES: readonly Line[] = [
   {
@@ -111,7 +113,7 @@ const LINES: readonly Line[] = [
     name: 'fact(4)’s long line',
     long: true,
     holds: () => {
-      expect(stepText(), 'precondition: the long line').toContain('history is full')
+      expect(stepText(), 'precondition: the long line').toMatch(/history is full \(oldest kept: /)
       expect(extend().textContent, 'precondition: the continue button').toBe('keep recording')
       expect(shown(extend()), 'precondition: the continue button is drawn').toBe(true)
     },
@@ -150,6 +152,9 @@ describe.each(LINES)('the step bar, under $name', (line) => {
       `${line.name} on the bar`,
     )
     await until(idle, `${line.name}’s run to its result`)
+    if (!line.long) return
+    extend().click()
+    await until(() => /history is full \(oldest kept: /.test(stepText()), `${line.name}, kept recording`)
   })
 
   /**

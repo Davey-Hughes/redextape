@@ -1,6 +1,7 @@
 import type { EditorView } from '@codemirror/view'
 import { beforeAll, describe, expect, it } from 'vitest'
 import { SHELL, until } from './harness'
+import { lambdaSettled } from './lambda-text'
 
 /**
  * THE STRIP (Plan 7 part 2 spec §9) — the readout and the link sentence on one line, the readout showing the
@@ -16,11 +17,23 @@ const state = () => document.querySelector<HTMLElement>('#results')?.dataset.sta
 const linkStatus = () => document.querySelector('#link-status')?.textContent ?? ''
 const live = () => document.querySelector('#live')?.textContent ?? ''
 
+/**
+ * The λ view on its newest step, step 7, with that step's tree drawn. **THE LINK GESTURES BELOW NEED IT TO HAVE A
+ * SENTENCE TO SAY**: `x` has no node in step 7's λ term, which the line says, and step 0's term, where a run opens
+ * (`History`), still holds it, which leaves the line empty.
+ */
+async function lambdaAtNewest(): Promise<void> {
+  document.querySelector<HTMLButtonElement>('[data-leaf="lambda-0"] .controls button.to-newest')?.click()
+  await until(() => document.querySelector('[data-leaf="lambda-0"] .step')?.textContent === 'step 7 of 7', 'step 7')
+  await lambdaSettled()
+}
+
 beforeAll(async () => {
   document.body.innerHTML = SHELL
   view = await (await import('../../src/main')).ready
   view.dispatch({ changes: { from: 0, to: view.state.doc.length, insert: PROGRAM } })
   await until(() => state() === 'idle' && resultsText().startsWith('λ 42'), 'the first compile')
+  await lambdaAtNewest()
 })
 
 // **`show` TAKES A THUNK PAIR SINCE PART 2b** (`readout.ts`'s `Lines`): the strip and the inspector draw
@@ -59,6 +72,7 @@ describe('the strip', () => {
 
     view.dispatch({ changes: { from: view.state.doc.length, insert: ' ' } })
     await until(() => state() === 'idle', 'the recompile')
+    await lambdaAtNewest()
 
     // THE RAW TEXT, NOT THE TRIMMED ONE: the live region already held this sentence from the gesture in
     // the test above, so "it says the same words" is true whether or not anything was announced. What

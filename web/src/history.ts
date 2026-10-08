@@ -37,7 +37,11 @@ export class History<T> {
   #firstStep = 0
   /** The play head, counted from the oldest kept frame. */
   #head = 0
-  #following = true
+  /**
+   * Whether `push` carries the head to the newest frame. **OFF UNTIL THE USER TAKES THE HEAD TO THE FRONTIER**, so a
+   * run opens on step 0, ready to step from its start, however far the worker records behind it.
+   */
+  #following = false
 
   constructor(budgetBytes: number) {
     this.#budget = budgetBytes
@@ -77,8 +81,8 @@ export class History<T> {
   }
 
   /**
-   * Append a frame. The head FOLLOWS the frontier only while it was already there — a user who has
-   * scrubbed back is not yanked forward by frames still arriving behind them.
+   * Append a frame. The head FOLLOWS the frontier only once the user has taken it there — a run opens on
+   * its first step, and a user who has scrubbed back is not yanked forward by frames still arriving behind them.
    */
   push(frame: T, bytes: number): void {
     this.#frames.push(frame)
@@ -89,16 +93,23 @@ export class History<T> {
   }
 
   /**
-   * Drop oldest-first until the budget holds. NEVER DOWN TO ZERO: one frame larger than the whole
-   * budget is still the frame the user is looking at, and an empty pane is a worse answer than an
-   * over-budget one.
+   * Drop oldest-first until the frames BEFORE THE NEWEST fit the budget, so the newest is never dropped: one frame
+   * larger than the whole budget is still the frame the user is looking at, and an empty pane is a worse answer than
+   * an over-budget one.
+   *
+   * **THE NEWEST FRAME MAY PASS THE BUDGET BECAUSE THE WORKER'S RECORDING DOES.** `record-loop.ts` checks a leg's
+   * allowance before each step, so a recording that spends its allowance posts up to one frame past it, and the
+   * allowance is this budget (`HISTORY_BYTES`). A ring that held only the budget dropped the first frames of the very
+   * recording that filled it — two of the 75,025 a TM leg recorded (`HISTORY_BYTES`'s doc) — so a run that opens on
+   * step 0 would have opened on step 2.
    *
    * **THE EMPTIED PLACES ARE CUT OFF ONCE THEY ARE AS MANY AS THE FRAMES KEPT**, by one copy of the frames kept and
    * their sizes. A cut follows at least as many evictions as the frames it copies, so the copying averages at most one
    * frame and one size per eviction, and between calls each array holds fewer than twice as many places as frames kept.
    */
   #evict(): void {
-    while (this.#bytes > this.#budget && this.length > 1) {
+    const newest = this.#sizes[this.#sizes.length - 1] ?? 0
+    while (this.#bytes - newest > this.#budget) {
       this.#bytes -= this.#sizes[this.#start] ?? 0
       this.#frames[this.#start] = undefined
       this.#start += 1
@@ -130,7 +141,13 @@ export class History<T> {
   }
 
   forward(): boolean {
-    if (this.#head >= this.length - 1) return false
+    if (this.#head >= this.length - 1) {
+      // AT THE FRONTIER, `▶` ASKS THE WORKER FOR MORE (`transport.ts`), and the frames it brings must carry the head:
+      // set on the clamped no-op, as `back` sets the opposite. A run that opened on its only frame never got here by
+      // stepping, and its head would otherwise stay behind them.
+      if (this.length > 0) this.#following = true
+      return false
+    }
     this.#head += 1
     this.#following = this.#head === this.length - 1
     return true
@@ -143,6 +160,6 @@ export class History<T> {
     this.#bytes = 0
     this.#firstStep = 0
     this.#head = 0
-    this.#following = true
+    this.#following = false
   }
 }

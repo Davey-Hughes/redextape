@@ -53,7 +53,10 @@ export function deepTermSteppedBack(layout: 'code' | 'outline'): void {
       }
       view.dispatch({ changes: { from: 0, to: view.state.doc.length, insert: `${N} + 0` } })
       await until(() => document.querySelector<HTMLElement>('#results')?.dataset.state === 'idle', 'the compile')
-      await until(() => /^step ([\d,]+) of \1$/.test(stepText()), 'the λ leg to record its last step and show it')
+      await until(() => /^step [\d,]+ of [\d,]+$/.test(stepText()), 'the λ leg to record its last step')
+      // `⏭`, SINCE A RUN OPENS ON STEP 0 (`History`).
+      document.querySelector<HTMLButtonElement>('[data-leaf="lambda-0"] .controls button.to-newest')?.click()
+      await until(() => /^step ([\d,]+) of \1$/.test(stepText()), 'the λ view on its last step')
       await until(drawn, 'the last step drawn, as a tree or as text')
       const end = stepNumber()
       back()

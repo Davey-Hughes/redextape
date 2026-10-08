@@ -98,17 +98,37 @@ describe('History', () => {
     expect(h.newestStep).toBe(1)
   })
 
-  it('follows the frontier as frames arrive', () => {
+  it('opens on step 0 however many frames arrive', () => {
     h.push('a', 10)
     h.push('b', 10)
-    expect(h.current).toBe('b')
+    h.push('c', 10)
+    expect(h.current).toBe('a')
+    expect(h.head).toBe(0)
+    expect(h.currentStep).toBe(0)
+  })
+
+  it('follows the frontier once stepped to it', () => {
+    h.push('a', 10)
+    h.push('b', 10)
+    expect(h.forward()).toBe(true)
+    h.push('c', 10)
+    expect(h.current).toBe('c')
     expect(h.head).toBe(h.length - 1) // at the frontier — the newest frame is the current one
-    expect(h.currentStep).toBe(1) // firstStep 0, head 1 — no eviction yet
+    expect(h.currentStep).toBe(2) // firstStep 0, head 2 — no eviction yet
+  })
+
+  it('follows the frontier once sought to it', () => {
+    h.push('a', 10)
+    h.push('b', 10)
+    h.seek(1)
+    h.push('c', 10)
+    expect(h.current).toBe('c')
   })
 
   it('does not move the head off a scrubbed-back position when new frames arrive', () => {
     h.push('a', 10)
     h.push('b', 10)
+    h.seek(1)
     h.back()
     expect(h.current).toBe('a')
     h.push('c', 10)
@@ -118,38 +138,69 @@ describe('History', () => {
 
   it('clamps back at the oldest and forward at the frontier', () => {
     h.push('a', 10)
-    expect(h.back()).toBe(false)
-    expect(h.forward()).toBe(false)
     h.push('b', 10)
+    expect(h.back()).toBe(false)
     expect(h.forward()).toBe(true)
     expect(h.forward()).toBe(false)
+  })
+
+  /**
+   * **`▶` AT THE FRONTIER ASKS FOR MORE, AND WHAT ARRIVES CARRIES THE HEAD** (`transport.ts`'s `forward`). A run that
+   * opened on its only frame has a head at the frontier that never stepped there.
+   */
+  it('carries the head into the frames a forward at the frontier asked for', () => {
+    h.push('a', 10)
+    expect(h.forward()).toBe(false)
+    h.push('b', 10)
+    expect(h.current).toBe('b')
+  })
+
+  it('does not follow from a forward with no frames to stand on', () => {
+    expect(h.forward()).toBe(false)
+    h.push('a', 10)
+    h.push('b', 10)
+    expect(h.current).toBe('a')
   })
 
   // The ring caps BYTES, not frames. `frame_cost_probe` measured λ frames ranging from 5 KB to
   // 781 KB depending only on the program, so a frame count is a memory policy spanning three orders
   // of magnitude.
-  it('evicts oldest-first when the byte budget is exceeded', () => {
+  it('evicts oldest-first when the frames before the newest pass the byte budget', () => {
     for (let i = 0; i < 5; i++) h.push(`f${i}`, 300)
-    // Budget is 1,000; each frame costs 300, so the ring holds 3 (900 bytes) before a 4th push would
-    // exceed it — evict down to where the newest fits, oldest-first.
-    expect(h.length).toBe(3)
+    // Budget is 1,000; each frame costs 300, so the frames before the newest fit three to a ring (900 bytes), and a
+    // 5th push puts four (1,200) before it — evict down to where they fit, oldest-first.
+    expect(h.length).toBe(4)
     expect(h.evicted).toBe(true)
-    expect(h.oldestStep).toBe(2)
+    expect(h.oldestStep).toBe(1)
     expect(h.newestStep).toBe(4)
-    expect(h.current).toBe('f4')
+    expect(h.current).toBe('f1')
+  })
+
+  /**
+   * **A RECORDING THAT SPENDS ITS ALLOWANCE PASSES IT BY UP TO ONE FRAME** (`record-loop.ts` checks before each step),
+   * and the allowance is the ring's budget, so the ring keeps that whole recording and the run still opens on step 0.
+   */
+  it('keeps a recording that passes its budget by its newest frame whole', () => {
+    for (let i = 0; i < 4; i++) h.push(`f${i}`, 300)
+    expect(h.length).toBe(4)
+    expect(h.evicted).toBe(false)
+    expect(h.current).toBe('f0')
   })
 
   it('keeps at least one frame however large it is', () => {
     h.push('huge', 10_000)
     expect(h.length).toBe(1)
     expect(h.current).toBe('huge')
+    h.push('next', 10)
+    expect(h.length).toBe(1)
+    expect(h.current).toBe('next')
   })
 
   it('clamps the head to the new oldest when the frame it was on is evicted', () => {
-    for (let i = 0; i < 3; i++) h.push(`f${i}`, 300)
+    for (let i = 0; i < 4; i++) h.push(`f${i}`, 300)
     h.seek(0)
     const oldest = h.current
-    h.push('f3', 300)
+    h.push('f4', 300)
     // f0 is gone; the head cannot still point at it, so it clamps to the new oldest and SAYS so.
     expect(h.current).not.toBe(oldest)
     expect(h.head).toBe(0)
@@ -159,53 +210,57 @@ describe('History', () => {
   it('keeps the head on the same frame when an older one is evicted', () => {
     // Head parked at 2 (not the frontier, and not 1) so a single eviction's correct decrement — to
     // 1 — is distinguishable from a mutant that merely zeroes the head or leaves it untouched.
-    for (let i = 0; i < 4; i++) h.push(`f${i}`, 200)
+    for (let i = 0; i < 5; i++) h.push(`f${i}`, 210)
     h.seek(2)
     const kept = h.current
-    h.push('f4', 300) // evicts only f0; every surviving index drops by exactly one
+    h.push('f5', 210) // evicts only f0; every surviving index drops by exactly one
+    expect(h.oldestStep).toBe(1)
     expect(h.current).toBe(kept)
     expect(h.head).toBe(1)
     expect(h.currentStep).toBe(2) // firstStep 1, head 1 — the frame kept its own step number
   })
 
   it('keeps a parked head on its frame when one push evicts most of the ring', () => {
-    // A HUNDRED FRAMES OF 10 FILL THE 1,000, AND ONE OF 900 THEN EVICTS STEPS 0 TO 89 IN ONE PUSH: ninety evicted
-    // places against eleven frames kept, so the ring cuts its evicted places off inside this one push, with the head
-    // parked on step 95 across the cut.
+    // A HUNDRED FRAMES OF 10 FILL THE 1,000, ONE OF 900 PASSES IT AS THE NEWEST, AND ONE MORE OF 10 THEN EVICTS STEPS 0
+    // TO 89 IN ONE PUSH: ninety evicted places against twelve frames kept, so the ring cuts its evicted places off
+    // inside this one push, with the head parked on step 95 across the cut.
     for (let step = 0; step < 100; step++) h.push(`f${step}`, 10)
-    h.seek(95)
     h.push('f100', 900)
+    expect(h.oldestStep, 'precondition: nothing evicted before the last push').toBe(0)
+    h.seek(95)
+    h.push('f101', 10)
     expect(h.oldestStep).toBe(90)
-    expect(h.length).toBe(11)
+    expect(h.length).toBe(12)
     expect(h.current).toBe('f95')
     expect(h.currentStep).toBe(95)
     expect(h.head).toBe(5)
     h.seek(0)
     expect(h.current).toBe('f90')
     h.seek(99)
-    expect(h.current).toBe('f100')
+    expect(h.current).toBe('f101')
   })
 
   it('keeps exactly the newest frames that fit, each at its own step, push after push', () => {
     // SIZES THAT EVICT NO FRAME, ONE OR MANY IN A PUSH, AND ONE FRAME OVER THE WHOLE BUDGET, after a run of small frames
     // that fills the ring with hundreds: the ring cuts its evicted places off at many different lengths. Each frame is
-    // its own step number, so every frame kept says where it is.
+    // its own step number, so every frame kept says where it is. THE HEAD IS LEFT WHERE IT OPENED, so it is always on
+    // the oldest frame kept.
     const ring = new History<number>(1_000)
     const sizes = [...Array.from({ length: 600 }, () => 1), 7, 300, 2, 50, 999, 3, 1_200, 40, 5]
     const size = (step: number) => sizes[step % sizes.length] ?? 0
     for (let step = 0; step < 5_000; step++) {
       ring.push(step, size(step))
-      // THE OLDEST KEPT, WORKED OUT FROM THE SIZES ALONE: the furthest back the frames to the newest still fit the budget,
-      // and the newest itself whatever it costs.
+      // THE OLDEST KEPT, WORKED OUT FROM THE SIZES ALONE: the furthest back the frames before the newest still fit the
+      // budget, and the newest itself whatever it costs.
       let oldest = step
-      let bytes = size(step)
+      let bytes = 0
       while (oldest > 0 && bytes + size(oldest - 1) <= 1_000) {
         oldest -= 1
         bytes += size(oldest)
       }
       expect(ring.oldestStep).toBe(oldest)
       expect(ring.newestStep).toBe(step)
-      expect(ring.current).toBe(step)
+      expect(ring.current).toBe(oldest)
     }
     for (let i = 0; i < ring.length; i++) {
       ring.seek(i)
@@ -227,7 +282,8 @@ describe('History', () => {
    */
   it('evicts without moving the frames it keeps, however many it keeps', () => {
     for (const kept of [1_000, 69_008]) {
-      const ring = new History<number>(kept)
+      // ONE BYTE A FRAME, AND THE FRAMES BEFORE THE NEWEST FIT THE BUDGET, so a budget of `kept - 1` keeps `kept`.
+      const ring = new History<number>(kept - 1)
       for (let step = 0; step < kept; step++) ring.push(step, 1)
       const evicting = 2 * kept
       const { moved, longest } = arrayWork(() => {
@@ -252,7 +308,8 @@ describe('History', () => {
    */
   it('lets go of each frame it evicts at once, before cutting its place off', async () => {
     const gc = collector()
-    const ring = new History<object>(1_000)
+    // A HUNDRED BYTES A FRAME, AND THE NINE BEFORE THE NEWEST FIT THE 900, so the ring keeps ten.
+    const ring = new History<object>(900)
     const refs: WeakRef<object>[] = []
     for (let step = 0; step < 10; step++) {
       const frame = { step }
@@ -271,7 +328,7 @@ describe('History', () => {
     ).toEqual([false, false, true, true, true, true, true, true, true, true])
     // THE RING IS READ AFTER THE COLLECTION, so it is alive through it by this case's own code and not by whatever the
     // engine happens to keep of a local nothing reads again.
-    expect(ring.current).toEqual({ step: 11 })
+    expect(ring.current).toEqual({ step: 2 })
     expect(ring.length).toBe(10)
   })
 
@@ -303,13 +360,14 @@ describe('History', () => {
   })
 
   it('clear forgets an eviction the ring has not yet cut off', () => {
-    // THREE FRAMES OF 400 IN 1,000 EVICT THE FIRST, and one evicted place against two kept is no cut, so the evicted
+    // FOUR FRAMES OF 400 IN 1,000 EVICT THE FIRST, and one evicted place against three kept is no cut, so the evicted
     // place is still in the arrays when `clear` runs.
     h.push('a', 400)
     h.push('b', 400)
     h.push('c', 400)
+    h.push('d', 400)
     expect(h.oldestStep, 'precondition: one frame evicted').toBe(1)
-    expect(h.length, 'precondition: two kept').toBe(2)
+    expect(h.length, 'precondition: three kept').toBe(3)
     h.clear()
     expect(h.length).toBe(0)
     expect(h.oldestStep).toBe(0)
@@ -318,8 +376,18 @@ describe('History', () => {
     h.push('y', 200)
     expect(h.length).toBe(2)
     expect(h.newestStep).toBe(1)
+    expect(h.current).toBe('x')
+    h.seek(1)
     expect(h.current).toBe('y')
-    h.seek(0)
+  })
+
+  it('clear forgets that the head was following', () => {
+    h.push('a', 10)
+    h.push('b', 10)
+    h.seek(1)
+    h.clear()
+    h.push('x', 10)
+    h.push('y', 10)
     expect(h.current).toBe('x')
   })
 })

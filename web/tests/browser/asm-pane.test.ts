@@ -17,6 +17,7 @@ const CONTROLS = {
   canRestart: true,
   canBack: true,
   canForward: true,
+  canToNewest: true,
   canPlay: true,
   playing: false,
   stepText: 'step 3 of 55',
@@ -31,6 +32,7 @@ function events(over: Partial<PaneEvents> = {}): PaneEvents {
   return {
     back: vi.fn(),
     forward: vi.fn(),
+    toNewest: vi.fn(),
     play: vi.fn(),
     restart: vi.fn(),
     extend: vi.fn(),

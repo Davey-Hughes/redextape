@@ -6,6 +6,7 @@ import type { Speed } from '../../src/workspace'
 const STATE: ControlState = {
   canBack: true,
   canForward: true,
+  canToNewest: true,
   canPlay: true,
   canRestart: true,
   playing: false,
@@ -23,6 +24,7 @@ const build = () => {
   const s = stepControls({
     back: () => log.push('back'),
     forward: () => log.push('forward'),
+    toNewest: () => log.push('toNewest'),
     play: () => log.push('play'),
     restart: () => log.push('restart'),
     extend: () => log.push('extend'),
@@ -42,7 +44,14 @@ describe('the step controls', () => {
   it('names every button in words, and shows the step', () => {
     const { s } = build()
     s.update(STATE)
-    for (const name of ['back to the oldest kept step', 'one step back', 'one step forward', 'play', 'playback speed'])
+    for (const name of [
+      'back to the oldest kept step',
+      'one step back',
+      'one step forward',
+      'to the newest recorded step',
+      'play',
+      'playback speed',
+    ])
       expect(byName(s.el, name)).not.toBeNull()
     expect(s.el.querySelector('.step')?.textContent).toBe('step 3 of 12')
   })
@@ -103,6 +112,7 @@ describe('the step controls', () => {
     s.update({
       canBack: false,
       canForward: false,
+      canToNewest: false,
       canPlay: false,
       canRestart: false,
       playing: false,
@@ -111,6 +121,21 @@ describe('the step controls', () => {
     })
     expect(document.activeElement).not.toBe(document.body)
     expect(document.activeElement).toBe(s.el.querySelector('select.speed'))
+  })
+
+  /**
+   * **`⏭` DISABLES ITSELF WHEN IT IS PRESSED**, and a focused button that is disabled drops the focus to `<body>`
+   * (`extend-focus-probe.test.ts`). The update its press causes hands the focus to `◀` first.
+   */
+  it('hands the focus to ◀ when ⏭ goes off under it', () => {
+    const { s } = build()
+    s.update(STATE)
+    const newest = s.el.querySelector<HTMLButtonElement>('button.to-newest')
+    newest?.focus()
+    expect(document.activeElement, 'precondition: ⏭ holds the focus').toBe(newest)
+    s.update({ ...STATE, canForward: false, canToNewest: false })
+    expect(newest?.disabled).toBe(true)
+    expect(document.activeElement).toBe(s.el.querySelector('[aria-label="one step back"]'))
   })
 
   it('moves focus to a neighbour when the continue button it sits on goes away', () => {

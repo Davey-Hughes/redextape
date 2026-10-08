@@ -245,7 +245,7 @@ describe('the app-wide surfaces beside a λ view on a copy', () => {
     const [scratchPane, sourcePane] = await twoDisagreeingLambdaPanes()
 
     // The two views are on two sessions, so this moves the PROGRAM's play head and leaves the copy's where it is.
-    // `↺` first because the settled leg is parked at its frontier.
+    // `↺` first, whatever an earlier gesture left the leg on.
     transportClick(sourcePane, '↺')
     transportClick(sourcePane, '▶')
     expect(stepTextOf(sourcePane)).toContain('step 1')

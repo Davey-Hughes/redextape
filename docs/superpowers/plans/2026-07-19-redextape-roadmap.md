@@ -26180,3 +26180,134 @@ Earlier in the branch, the same `test:coverage` passed at `47737be` (234 files /
 | differs under `da_DK`, `et_EE` | the generator before the code-unit sort | `cd web && LC_ALL=da_DK.UTF-8 node scripts/licences.ts --stdout \| cmp -s - src/third-party-licences.json` in a worktree at the replay's `b3e25cd`, and `et_EE`; `C.UTF-8` and `en_US.UTF-8` match |
 | the gates block | the gates and the image | a scratch script running each line in turn at `fa93c45` |
 | 95, 89, 97, 97 | the coverage floors | `thresholds` in `web/vite.config.ts` |
+
+#### A RUN OPENS ON STEP 0, READY TO STEP FROM ITS START, WHERE IT OPENED ON THE LAST STEP ITS RECORDING REACHED; `⏭` AFTER `▶` GOES TO THE NEWEST RECORDED STEP, AND A RING KEEPS THE WHOLE OF THE RECORDING THAT FILLS IT, WHERE IT DROPPED THAT RECORDING'S FIRST FRAMES (2026-10-08, branch `start-at-step-zero`, `8f954d9..0fe3ad5`, 2 commits, plus this entry)
+
+**The user asked for it, "a quick thing before other things":** "the asm, tm, and lambda programs all start with the
+execution of them at the end — can we make them so they're ready to be executed from the program start?" Every view of
+a run, the program's or a copy's, opened on its newest frame, because `History`'s play head followed the frontier from
+the first frame on, and a recompile cleared it back to following.
+
+##### WHAT CHANGED
+
+- **`History` starts not following, and `clear` resets it so.** A run, a recompile and a copy open on step 0 however far
+  the worker records behind them. The head follows again once the user takes it to the frontier — `▶` onto the newest
+  frame, `seek` to it, or `⏭` — as before. `forward` on the newest frame also turns following on, so the frames a
+  frontier `▶` asks for carry the head, which a run that opened on its only frame would otherwise never do.
+- **A ring keeps the frames before its newest within its budget**, where it kept every frame within it.
+  `record-loop.ts` checks a leg's allowance before each step, so a recording that spends it posts up to one frame past
+  it, and the allowance is the ring's budget. The old rule dropped the first frames of the very recording that filled
+  the ring — two of the 75,025 `session-memory.test.ts`'s TM leg pushed (`HISTORY_BYTES`' doc) — so that run would
+  have opened on step 2. A ring now holds up to one frame past `HISTORY_BYTES`.
+- **`⏭`, "to the newest recorded step", after `▶` in every strip and in the step bar**, live while the head is behind
+  the newest frame (`ControlState.canToNewest`), never asking the worker for more. Hack has no `⏭`, so it is an
+  `icons.ts` icon, as `⏵` is. When `keep recording` goes away under the focus, `⏭` is next after `▶` to take it.
+  **`⏭` is disabled by its own press**, and a focused button that is disabled drops the focus to `<body>`
+  (`extend-focus-probe.test.ts`), so the strip hands the focus on before it disables `⏭`: to `◀`, then `↺`, `▶`, play
+  and the speed select (`0fe3ad5`, from the review).
+- **The two icon buttons are as wide as the glyph buttons**, 29 px at 15 px where they were 35: `⏭` and its gap took
+  43 px from the title's row, and at 1280 px in Explorer the TM view's strip at `step 12,976 of 12,976` needed 430.2 px
+  of the 424.1 its row had, so the header wrapped and the view's panels dropped 31 px. A playing run's would have
+  dropped once its count gained a digit. At 29 px it needs 418.2.
+- **`LinkPositions.#stop` puts the head on the leg's last step itself**, which following used to have done.
+
+##### DECISIONS
+
+The user's: the request, and `⏭` after `▶` over no new control, offered once it was clear that nothing else reaches a
+run's end: playing `session-memory.test.ts`'s 75,025 TM frames takes 15.0 s at the fastest speed and 2.6 hours at
+the default.
+
+Mine, each stated in the code or a test: the icon buttons' width above; a link's pending position waits on step 0
+until the frames reach it, rather than riding the frontier; *edit a copy* forks the step on screen, so step 0 unless
+the user moves; and the controls gate holds the TM diagram's *show states* to its name alone (below).
+
+##### THE TESTS
+
+Before any test moved, the change failed 83 browser tests in 26 files, and 96 in 27 with `⏭` in the strips. Nearly
+every one waited for `step N of N` at open, stepped back from the end, or pinned a figure the ring's new rule moves.
+They press `⏭`, step forward where they stepped back, or read step 0. **Some still passed and checked nothing**, and
+were changed with the rest: `app.test.ts`' *stops following once the user scrolls* set `scrollTop = 0` on a rule table
+already at 0 and clicked a disabled `◀`, and the on-demand `lambda-tree-cost.test.ts` would have clicked it 300 times a
+program and timed nothing.
+
+Where a fixture's premise was the run's end, the fixture moved there by `⏭`: `tm-view-narrow.test.ts` measures the TM
+view at `sum_to(5)`'s end, and `buffer-cool-warm.test.ts` forks a normal form. Some figures moved because the ring keeps
+more: `fact(4)`'s λ line was long in part because its first recording lost frames and the line named the oldest it
+kept, which it no longer does, so `view-strip-narrow` and `step-bar-narrow` press `keep recording` once to make it long
+again; `share-positions.test.ts`' oldest kept steps
+are 2,769 and 14,272 where they were 2,770 and 14,273, and its `1,387` case lands on 1,387, which the ring now keeps.
+`session-memory.test.ts` asks that the TM leg pushed `HISTORY_BYTES`, where it asked for an eviction.
+
+At 481 px in Debugger and Stage the step bar's row no longer holds its step text, which takes a second row: 22 px off
+`main`'s height, re-pinned in `inspector-phone.test.ts`. **The controls gate holds *show states* to its name alone**:
+it is out of the tab order, its row's Enter does what it does, and focusing it redraws its row, so the focus lands on
+`<body>`, with or without `preventScroll`. The gate first met it on step 0, whose group has its row.
+
+Every new behaviour was sabotaged and its tests went red: following on from the start (8 node cases red), `clear`
+leaving it on (2), the old eviction rule (10, across `history` and `share-positions`), no following from a frontier
+`forward` (1), following from an empty one (1), `#stop` not seeking (5), `canToNewest` live at the frontier (1), `⏭`
+landing one short (4 browser), the icon buttons at 35 px (1 browser), and `⏭` disabling with no hand-off (2 browser:
+the strip's own case and a real `Enter` in the app).
+
+##### THE REVIEW
+
+One whole-branch review of `0b3fdb3`, by a fresh agent reading the code, told the goal and not my conclusions; it ran
+nothing, since the gates held the browser. It found no Critical or Important finding. Its first Minor was real and is
+fixed in `0fe3ad5`: every keyboard press of `⏭` dropped the focus to `<body>`, as above. It also named `[continue]`
+from a head parked on step 0, below; that a shared link now carries step 0 for every leg the user has not moved, which
+is the step on screen, as a link always carried; and that `↺` on a one-frame ring turns following on, as it did before.
+
+##### WHAT THIS DID NOT CLOSE
+
+- **`keep recording` from a head parked on step 0** leaves it parked, and as the ring drops old frames the head lands
+  on the oldest kept step, not on the new frames. That is the parked head's existing rule; before this branch a head
+  at rest was at the frontier and followed.
+- **The TM header at 1280 px in Explorer has 5.9 px to spare** at `step 12,976 of 12,976`, under one character of the
+  step text's 7.0 px (147 px for its 21).
+- **The step bar at 481 px** takes two rows in Debugger and Stage.
+- **The TM diagram's *show states* cannot hold the focus**, as above; nothing a user does focuses it, so it is not fixed
+  here.
+- **`◀` pressed onto step 0, and `▶` pressed onto an ended run's last step, still drop the focus to `<body>`**, as they
+  did before this branch; only `⏭`, which does it on every press, hands it on.
+
+##### VERIFICATION
+
+Run on 2026-10-08 in the main checkout on branch `start-at-step-zero`, at `0fe3ad5`, the last code commit, by
+`gates.sh` in `~/temp/redextape-start-at-step-zero-record/`; this entry changes only this file. The same script passed
+at `0b3fdb3` before the review's fix, with 2,432 tests. No Rust file changed (`git diff --stat 8f954d9 0fe3ad5 --
+crates Cargo.toml Cargo.lock` prints nothing), so the Rust gates were left to CI.
+
+```
+pnpm exec biome ci --error-on-warnings                    → exit 0, 361 files
+pnpm run typecheck                                        → exit 0
+pnpm run test:coverage                                    → exit 0, 234 files / 2,434 tests; 97.49 / 91.56 / 98.54 / 98.84 against 95 / 89 / 97 / 97
+pnpm run build:app                                        → exit 0
+scripts/check-{text-bytes,citations,attributions,doc-figures,shared-docs,colours,grammar-wasm,lua,licences}.sh,
+  --self-test then alone                                  → 18 of 18 exit 0
+docker build --build-arg COMMIT_HASH=0fe3ad5…, then run   → healthy after 3 polls; / 200; 7 .wasm assets; the full commit in 1 chunk;
+                                                            container removed
+```
+
+Before the first commit, on its code: `pnpm run test:probe:lambda-tree` timed 300 samples a program, and `pnpm exec
+vitest run --project browser` passed 167 files / 1,184 tests.
+
+**Every count this entry quotes, with what produces it.** Commands run from the repository root unless they `cd`.
+
+| Value | What | Produced by |
+|---|---|---|
+| 2; 63 | commits in the range; files it changes | `git rev-list --count 8f954d9..0fe3ad5`; `git diff --shortstat 8f954d9 0fe3ad5` |
+| 2 of 75,025 | frames the old rule dropped from the recording that filled a TM ring | `HISTORY_BYTES`' doc in `web/src/protocol.ts` (its 2026-08-11 measurement) |
+| 15.0 s, 2.6 hours | playing 75,025 frames at 5,000/s and at 8/s | `SPEEDS` and `DEFAULT_SPEED` in `web/src/workspace.ts`, divided |
+| 35, 29 px; 15 px | an icon button before and after, a glyph button; the strip's font size | `probe-strip.test.ts` in the record directory, copied into `web/tests/browser/` and run with `pnpm exec vitest run --project browser` |
+| 43 px | what `⏭` took from the title's row | 35 px and `.controls`' 8 px gap, from the same probe |
+| 430.2, 424.1, 418.2 px | the TM strip's need at `step 12,976 of 12,976` with 35 px icon buttons, its row's room, its need with 29 px | the same probe's `nowrap` line; the room is the header's 634 less the heading's 118.9, the actions' 59 and two 16 px gaps |
+| 31 px | the TM panels' drop when the header wrapped | `tm-view-narrow.test.ts` at 1280 px, `expected 31 to be less than or equal to 0.5`, with 35 px icon buttons |
+| 5.9 px; 7.0 px, 147 px, 21 | the spare at 29 px; the step text's width per character, its width, its length | 424.1 − 418.2; the probe's `step:147.0` for `step 12,976 of 12,976` |
+| 83 in 26; 96 in 27 | browser tests failed before any test moved, without and with `⏭` | `cd web && pnpm exec vitest run --project browser`, with `history.ts` and `share-positions.ts` changed, then with `⏭` too |
+| 22 px | `main`'s height lost at 481 px | `inspector-phone.test.ts`' soft assertions, `588.5` against `566.5` |
+| 2,769, 14,272, 1,387 | `share-positions.test.ts`' pins | that file's browser run before its edit, `expected … to be …` |
+| 8, 2, 10, 1, 1, 5, 1; 4, 1, 2 | the node and browser cases each sabotage turned red | `sabotage.sh` in the record directory, one line each; it restores the file and `cmp`s it |
+| 300 | `lambda-tree-cost`'s samples a program | `pnpm run test:probe:lambda-tree`, its `round trip n=300` lines |
+| 167 / 1,184 | the browser project before the first commit | `cd web && pnpm exec vitest run --project browser` |
+| the gates block | the gates and the image | `gates.sh` in the record directory, at `0fe3ad5`, and at `0b3fdb3` |
+| 95, 89, 97, 97 | the coverage floors | `thresholds` in `web/vite.config.ts` |

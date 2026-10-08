@@ -14,8 +14,8 @@ import {
  * A link's positions against the replies a session worker sends (Plan 7 part 6a spec §5.4): held until the link's
  * compile says which legs exist, applied as the frames reach them, continued after the run's `result` one leg at a
  * time, and clamped where the run ends or the continues run out, every leg stopped short so far named in one notice.
- * Each leg is a real `History`, a frame a byte against a budget of `RING` bytes, so a ring holds `RING` steps and drops
- * its oldest past them.
+ * Each leg is a real `History`, a frame a byte against a budget of `RING - 1` bytes, so a ring holds `RING` steps — the
+ * frames before its newest fit its budget — and drops its oldest past them.
  */
 
 const RING = 5
@@ -30,7 +30,7 @@ let positions: LinkPositions
 
 beforeEach(() => {
   const leg = (): LegState<number> => ({
-    hist: new History<number>(RING),
+    hist: new History<number>(RING - 1),
     status: { available: true, reason: '' },
     done: null,
     playing: false,
@@ -77,7 +77,7 @@ describe('LinkPositions', () => {
     positions.hold(GEN, { lambda: 3 })
     positions.onReply(compiled())
     record('lambda', 0, 1, null)
-    expect(legs.lambda.hist.currentStep).toBe(1)
+    expect(legs.lambda.hist.currentStep).toBe(0)
     expect(legs.lambda.pending).toBe(3)
     // THE POSITION IS THE NEWEST FRAME OF A RECORDING STILL GOING: a seek onto it would go on following the frontier.
     record('lambda', 2, 3, null)
@@ -187,7 +187,8 @@ describe('LinkPositions', () => {
     record('lambda', 0, 1, null, GEN + 1)
     expect(legs.lambda.pending).toBeUndefined()
     record('lambda', 2, 4, null)
-    expect(legs.lambda.hist.currentStep).toBe(4)
+    // WHERE THE RUN OPENED, NOT THE DROPPED POSITION'S STEP 3.
+    expect(legs.lambda.hist.currentStep).toBe(0)
   })
 
   it('drops every position when the compile answers with no run, or the worker fails', () => {

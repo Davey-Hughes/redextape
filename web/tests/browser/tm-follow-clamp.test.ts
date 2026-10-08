@@ -19,6 +19,7 @@ import { SHELL, until } from './harness'
 const events = (): PaneEvents => ({
   back: vi.fn(),
   forward: vi.fn(),
+  toNewest: vi.fn(),
   play: vi.fn(),
   restart: vi.fn(),
   extend: vi.fn(),
@@ -59,6 +60,7 @@ const CONTROLS = {
   canRestart: true,
   canBack: true,
   canForward: false,
+  canToNewest: false,
   canPlay: false,
   playing: false,
   stepText: `${STATES - 1}`,
@@ -130,6 +132,8 @@ describe('a following state diagram, in arcs, under the whole app', () => {
     view.dispatch({ changes: { from: 0, to: view.state.doc.length, insert: FACT3 } })
     await until(() => document.querySelector<HTMLElement>('#results')?.dataset.state === 'idle', 'the app to settle')
     await until(() => rows().length > 0, 'the diagram to draw')
+    // ON THE LAST STEP, inside `halt`, by `⏭`: a run opens on step 0 (`History`).
+    pane().querySelector<HTMLButtonElement>('.controls button.to-newest')?.click()
   })
 
   it('stays following crossing from pc20 into the halt runtime box', async () => {
@@ -137,7 +141,7 @@ describe('a following state diagram, in arcs, under the whole app', () => {
     expect(reattach.hidden).toBe(true)
     // Somewhere to scroll to, without closing the rules panel: the reproduction, not the other suite's shortcut.
     await until(() => grid().scrollHeight > grid().clientHeight, 'the diagram to need scrolling')
-    // THE PAGE OPENS ON THE LAST STEP, already inside `halt` — too slow to reach by stepping forward from 0.
+    // `⏭` PUT THE PAGE ON THE LAST STEP, already inside `halt` — too slow to reach by stepping forward from 0.
     expect(boxes()[0]?.getAttribute('aria-current')).toBe('step')
     control('◀')?.click()
     await until(() => currentRowName() === 'pc20', 'the machine to step back onto pc20')

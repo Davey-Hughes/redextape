@@ -116,17 +116,23 @@ describe('share', () => {
       program: 'let x = 40; x + 2',
       encoding: 'unary',
       workspace: parseWorkspace(localStorage.getItem(LAYOUT_STORAGE_KEY)),
-      positions: { lambda: 7, asm: 5, tm: 2870 },
+      // STEP 0 IN EVERY LEG, where a run opens (`History`), and where each head is.
+      positions: { lambda: 0, asm: 0, tm: 0 },
     })
   })
 
   it('takes a leg’s step where its head is, not where its recording ends', async () => {
     menu().hidePopover()
     await userEvent.click(
+      document.querySelector(
+        '[data-leaf="lambda-0"] button[aria-label="to the newest recorded step"]',
+      ) as HTMLButtonElement,
+    )
+    await userEvent.click(
       document.querySelector('[data-leaf="lambda-0"] button[aria-label="one step back"]') as HTMLButtonElement,
     )
     const opened = await decodeLink(fragmentOf(await openShare()), ENCODINGS)
-    expect(opened.kind === 'whole' && opened.positions).toEqual({ lambda: 6, asm: 5, tm: 2870 })
+    expect(opened.kind === 'whole' && opened.positions).toEqual({ lambda: 6, asm: 0, tm: 0 })
   })
 
   it('carries no positions while the program is compiling', async () => {

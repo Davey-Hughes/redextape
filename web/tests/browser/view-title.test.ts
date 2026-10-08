@@ -149,6 +149,7 @@ function offered(pane: HTMLElement): [string, string][] {
 const events = (slot: PaneSlot<'lambda'>, after: () => void): PaneEvents => ({
   back: () => undefined,
   forward: () => undefined,
+  toNewest: () => undefined,
   play: () => undefined,
   restart: () => undefined,
   extend: () => undefined,

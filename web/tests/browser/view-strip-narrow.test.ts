@@ -67,6 +67,7 @@ const boxesFor = (line: Line, leaf: Leaf): string[] => [
   'back to the oldest kept step',
   'one step back',
   'one step forward',
+  'to the newest recorded step',
   'play',
   'playback speed',
   'the step text',
@@ -160,8 +161,10 @@ type Line = {
 
 /**
  * **THE TWO LINES.** `sum_to(5)` ends in every leg, so each view's line is the step count alone and no view has a
- * continue button. `fact(4)` fills the λ leg's history, so the λ view's line names that and its oldest kept step and
- * its strip carries `keep recording`; the asm and TM legs end, so their lines are short.
+ * continue button. `fact(4)` fills the λ leg's history, and once `keep recording` has filled it again the ring has
+ * dropped its oldest steps, so the λ view's line names both, and its strip carries `keep recording`; the asm and TM
+ * legs end, so their lines are short. **THE ONE `keep recording` IS WHAT MAKES THE LINE LONG**: a ring keeps the
+ * whole of its first recording (`History`'s `#evict`), whose line names no oldest kept step.
  */
 const LINES: readonly Line[] = [
   {
@@ -180,7 +183,7 @@ const LINES: readonly Line[] = [
     name: 'fact(4)’s long λ line',
     long: 'lambda-0',
     holds: () => {
-      expect(stepText('lambda-0'), 'precondition: the λ view’s long line').toContain('history is full')
+      expect(stepText('lambda-0'), 'precondition: the λ view’s long line').toMatch(/history is full \(oldest kept: /)
       expect(extendOf('lambda-0').textContent, 'precondition: the λ view’s continue button').toBe('keep recording')
       expect(shown(extendOf('lambda-0')), 'precondition: the continue button is drawn').toBe(true)
       for (const leaf of ['asm-0', 'tm-0'] as const) {
@@ -245,6 +248,9 @@ describe.each(LINES)('Explorer’s step strips, under $name', (line) => {
       `${line.name} in the λ view`,
     )
     await until(idle, `${line.name}’s run to its result`)
+    if (line.long === null) return
+    extendOf(line.long).click()
+    await until(() => /history is full \(oldest kept: /.test(stepText('lambda-0')), `${line.name}, kept recording`)
   })
 
   /**
@@ -338,7 +344,14 @@ describe.each(LINES)('Explorer’s step strips, under $name', (line) => {
       hidesNothing(leaf)
       if (leaf === line.long) {
         expect.soft(rowNamesOf(leaf), `${leaf}’s rows`).toEqual([
-          ['back to the oldest kept step', 'one step back', 'one step forward', 'play', 'playback speed'],
+          [
+            'back to the oldest kept step',
+            'one step back',
+            'one step forward',
+            'to the newest recorded step',
+            'play',
+            'playback speed',
+          ],
           ['the step text', 'keep recording'],
         ])
         expect.soft(linesOf(stepOf(leaf)), `${leaf}’s long step text’s lines`).toBe(1)

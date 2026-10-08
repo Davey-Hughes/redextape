@@ -16,6 +16,9 @@ const term = () => document.querySelector<HTMLElement>('[data-leaf="lambda-0"] .
 const rows = () => [...document.querySelectorAll<HTMLElement>('[data-leaf="lambda-0"] .term-line')]
 const stepText = () => document.querySelector('[data-leaf="lambda-0"] .step')?.textContent ?? ''
 const stepNumber = () => Number((stepText().match(/step ([\d,]+)/)?.[1] ?? '').replaceAll(',', ''))
+/** `⏭`: the λ view to its newest recorded step. A run opens on step 0 (`History`). */
+const toNewest = () =>
+  document.querySelector<HTMLButtonElement>('[data-leaf="lambda-0"] .controls button.to-newest')?.click()
 const click = (label: string) =>
   [...document.querySelectorAll<HTMLButtonElement>('[data-leaf="lambda-0"] .controls button')]
     .find((b) => b.textContent === label)
@@ -42,6 +45,11 @@ describe('the λ view draws the tree for the step it shows', () => {
   })
 
   it('draws step 0 when the play head returns there, with the next redex marked', async () => {
+    toNewest()
+    await until(
+      () => stepNumber() > 0 && term()?.dataset.step === String(stepNumber()) && term()?.dataset.stale === undefined,
+      'the newest step’s tree',
+    )
     click('↺')
     await until(() => term()?.dataset.step === '0' && term()?.dataset.stale === undefined, 'step 0’s tree')
     expect(stepNumber()).toBe(0)
@@ -88,10 +96,13 @@ describe('the λ view draws the tree for the step it shows', () => {
     const drawn = () =>
       rows().length > 0 && Number(term()?.dataset.step) === stepNumber() && term()?.dataset.stale === undefined
     await settled('let y = 1; y')
+    // THE NORMAL FORM'S CHIP, AT THE NEWEST STEP.
+    toNewest()
     await until(() => drawn() && chip()?.textContent === '1', 'the chip 1')
     chip()?.click()
     await until(() => chip() === null, 'the chip opened by hand')
     await settled('let x = 40; x + 2')
+    toNewest()
     await until(() => drawn() && chip()?.textContent === '42', 'the next program’s chip, closed again')
   })
 
@@ -105,7 +116,9 @@ describe('the λ view draws the tree for the step it shows', () => {
   it('lays out the deepest term a 600-element list reaches, the path to its redex open', async () => {
     const elems = Array(600).fill('0').join(', ')
     await settled(`[${elems}]`)
-    await until(() => /^step ([\d,]+) of \1$/.test(stepText()), 'the run to record its last step and show it')
+    await until(() => /^step [\d,]+ of [\d,]+$/.test(stepText()), 'the run to record its last step')
+    toNewest()
+    await until(() => /^step ([\d,]+) of \1$/.test(stepText()), 'the run’s last step shown')
     await lambdaSettled()
     const end = stepNumber()
     click('◀')

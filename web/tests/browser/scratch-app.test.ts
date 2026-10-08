@@ -248,10 +248,9 @@ describe('the fork control, end to end', () => {
     // indistinguishable from the source's own λ leg — the whole claim would render identically either
     // way, which is the trap the plan names for the singleton test and it applies here too.
     //
-    // `↺` FIRST, BECAUSE A SETTLED PANE IS AT THE FRONTIER AND NOT AT THE START. Recording pushes the
-    // play head along with it, so `let x = 40; x + 2` finishes at `step 7 of 7` and `▶` there means
-    // "record one more" — which for an `ended` leg is nothing at all. `restart` seeks to the oldest
-    // retained frame, which is step 0 exactly until eviction has happened (`stepControls`' own note).
+    // `↺` FIRST, so the walk starts at step 0 whatever an earlier gesture left the pane on. A run opens
+    // there too (`History`). `restart` seeks to the oldest retained frame, which is step 0 exactly until
+    // eviction has happened (`stepControls`' own note).
     clickLambda('↺')
     clickLambda('▶')
     clickLambda('▶')
@@ -314,7 +313,8 @@ describe('the fork control, end to end', () => {
     // trailing `…` is `controls.ts`'s "more can still be recorded", so waiting for its absence is
     // waiting for the reduction to finish rather than for a frame to exist.
     await until(() => step().startsWith('step') && !step().endsWith('…'), 'the scratchpad to finish reducing')
-    expect(step()).toBe('step 5 of 5')
+    // ON ITS STEP 0, where a run opens (`History`), with all five recorded.
+    expect(step()).toBe('step 0 of 5')
 
     // And its step 0 is the (alpha-equivalent) term the pane was showing when the button was clicked
     // — not `seed` byte-for-byte, and that is §4.1 rather than a slip: the scratch's step 0 is
@@ -369,7 +369,7 @@ describe('the fork control, end to end', () => {
 
     expect(heading()).toBe('λ · program')
     expect(statusLine()).not.toContain('shows a copy')
-    // The pane is showing the SOURCE session's newly recorded leg — at its frontier, with no trailing
+    // The pane is showing the SOURCE session's newly recorded leg — on its step 0, with no trailing
     // `…`, which is a leg that ran to its end rather than the buffer's leftovers. The fork control is
     // back for the same reason it went away: this pane is attached again.
     expect(forkButton()).not.toBeNull()

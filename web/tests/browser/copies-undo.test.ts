@@ -70,9 +70,9 @@ describe('deleting a copy', () => {
     // the claim the reply mounts nothing, the frames come back and the text can never be edited — the
     // state `mountScratchEditor`'s own doc prices, reached here by a different road.
     await until(() => document.querySelector('[data-leaf="lambda-0"] .term-editor') !== null, "the copy's editor")
-    // "AT STEP 0" IS WHERE THE RUN RESTARTS, NOT WHERE THE READOUT ENDS: recording pushes the play head
-    // to the frontier, so the view settles on `step 7 of 7`. What proves a fresh run is that its oldest
-    // kept step is 0 — `↺` goes back to the oldest kept step.
+    // "AT STEP 0" IS WHERE THE RUN RESTARTS, and where a run opens (`History`), so the readout's own step
+    // proves nothing. What proves a fresh run is that its oldest kept step is 0 — `↺` goes back to the
+    // oldest kept step.
     await until(() => /^step [\d,]+ of [\d,]+$/.test(stepText()), 'the copy to run again')
     leaf('lambda-0')?.querySelector<HTMLButtonElement>('[aria-label="back to the oldest kept step"]')?.click()
     expect(stepText()).toMatch(/^step 0 of /)

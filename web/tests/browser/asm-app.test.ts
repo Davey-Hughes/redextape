@@ -89,7 +89,8 @@ describe('the asm leg in the app', () => {
   })
 
   it('records every instruction, and the readout counts them in its own segment', () => {
-    expect(stepOf('asm-0')).toBe('step 5 of 5')
+    // ALL FIVE RECORDED, AND THE RUN OPENS ON STEP 0, ready to step from its start.
+    expect(stepOf('asm-0')).toBe('step 0 of 5')
     expect(segments()).toContain('asm 42 · 5 instructions')
     expect(segments().map((s) => s.split(' ')[0])).toEqual(['λ', 'asm', 'TM'])
   })
@@ -108,7 +109,7 @@ describe('the asm leg in the app', () => {
 
   it('runs a program the TM refuses to build, and says why the TM declined', async () => {
     await compile(TOO_LARGE_FOR_TM)
-    await until(() => stepOf('asm-0') === 'step 68 of 68', 'the asm leg to record its 68 instructions')
+    await until(() => stepOf('asm-0') === 'step 0 of 68', 'the asm leg to record its 68 instructions')
     expect(stepOf('tm-0')).toBe('the machine this program needs is too large to build')
     expect(segments()).toContain('asm 1 · 68 instructions')
   })

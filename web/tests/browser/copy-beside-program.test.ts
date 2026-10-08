@@ -167,6 +167,8 @@ describe('a TM view of the program beside a TM view of a copy', () => {
     await until(() => editorOf(tmHost) !== null && copyShown(tmHost), 'the TM copy in the first view')
     await until(() => tmHost.querySelectorAll('.state-row').length > 3, 'the TM copy’s rules')
     program = await splitToProgram(tmHost, 'tm')
+    // BY `⏭`: a run opens on step 0 (`History`).
+    await userEvent.click(program.querySelector('.controls button.to-newest') as HTMLButtonElement)
     await until(() => /step 2,870 of 2,870/.test(stepOf(program)), 'the program’s view at the frontier')
 
     // ONE STEP BACK FROM THE FRONTIER THE MACHINE STANDS IN `pc4`, WHICH IS THE FOCUS — `running-focus.test.ts`

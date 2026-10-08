@@ -125,6 +125,10 @@ const focusReading = () => {
   return `${claim}:${el.textContent ?? ''}`
 }
 
+/** `⏭` on a view's strip: its leg to the newest recorded step. A run opens on step 0 (`History`). */
+const toNewest = (leaf: string) =>
+  document.querySelector<HTMLButtonElement>(`[data-leaf="${leaf}"] .controls button.to-newest`)?.click()
+
 /** Press a step control by its accessible name — `play` is an icon now, so it has no text to find it by. */
 const clickByName = (name: string) =>
   document.querySelector<HTMLButtonElement>(`[data-leaf="lambda-0"] .controls [aria-label="${name}"]`)?.click()
@@ -278,12 +282,13 @@ describe('the running focus', () => {
   }, 30_000)
 
   // `owner` IS PER-FRAME, WHICH IS WHAT MAKES SCRUBBING FREE (design §4.3). The test that a single
-  // remembered "current owner" would fail: `settled` leaves the head at step 7, whose owner is `None`,
+  // remembered "current owner" would fail: `⏭` puts the head on step 7, whose owner is `None`,
   // so an implementation reading anything other than the frame under the head answers "nothing
   // focused" at every position below — including steps 1-3, where the run demonstrably named a
   // construct on the way past.
   it('shows the answer that was true at the scrubbed-to step, not the one at the frontier', async () => {
     await settled(view, SAMPLE)
+    toNewest('lambda-0')
     expect(stepText()).toContain('step 7')
     expect(focusReading(), 'the frontier’s own step owns nothing').toBe('')
 
@@ -395,12 +400,13 @@ describe('the running focus', () => {
   //   step 2,868   add5.d.w.wkh    focus = the `add5.d.*` block's headers, six of them in the window
   // ```
   //
-  // WALKED BACKWARD FROM THE FRONTIER, for the reason `app.test.ts`'s δ-table tests give: `settled`
-  // leaves the head at the frontier, where `▶` is a no-op, so `◀` is the only direction that moves. It
+  // WALKED BACKWARD FROM THE FRONTIER, for the reason `app.test.ts`'s δ-table tests give: `⏭` puts the
+  // head at the frontier, where `▶` is a no-op, so `◀` is the only direction that moves. It
   // also puts the ABSENCE first — an accept state no construct owns — so "nothing is ever painted"
   // cannot satisfy what follows.
   it('lights the δ-table block the machine is running inside, and nothing when it is inside none', async () => {
     await settled(view, SAMPLE)
+    toNewest('tm-0')
     expect(tmStepText()).toContain('step 2,870 of 2,870')
     expect(tmCurrentRow()?.textContent).toBe('halt')
     expect(tmFocusNames(), '`halt` belongs to no source construct, so nothing may be focused').toEqual([])
@@ -452,6 +458,7 @@ describe('the running focus', () => {
   // `app.test.ts`'s own clears-on-an-edit case is, for the same reason.
   it('clears the δ-table focus on the keystroke that edits the program', async () => {
     await settled(view, SAMPLE)
+    toNewest('tm-0')
     tmClick('◀')
     tmClick('◀')
     expect(tmStepText()).toContain('step 2,868')

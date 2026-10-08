@@ -56,10 +56,10 @@ describe('the step bar', () => {
     expect(barStep()).not.toBe('no view can step')
   })
 
-  // `one step back`, NOT `one step forward`: a compiled `let x = 40; x + 2` sits AT its recorded
-  // frontier, where `▶` means "record one more" and the readout does not move. Stepping back from the
-  // frontier is the unambiguous gesture, and it is still evidence the bar drives the view it names —
-  // the readout it moves is the one the title belongs to.
+  // `one step forward`, NOT `one step back`: a compiled `let x = 40; x + 2` opens on step 0 (`History`),
+  // where `◀` has nothing to go back to and the readout does not move. Stepping forward from there is
+  // the unambiguous gesture, and it is still evidence the bar drives the view it names — the readout it
+  // moves is the one the title belongs to.
   it('steps the view it names', async () => {
     focusView('lambda-0')
     const before = barStep()
@@ -67,7 +67,7 @@ describe('the step bar', () => {
     await lambdaSettled('lambda-0', barStep)
     const termBefore = document.querySelector('[data-leaf="lambda-0"] .term')?.textContent ?? ''
     expect(termBefore, 'the λ view renders no term, so a change in it would prove nothing').not.toBe('')
-    bar().querySelector<HTMLButtonElement>('button[aria-label="one step back"]')?.click()
+    bar().querySelector<HTMLButtonElement>('button[aria-label="one step forward"]')?.click()
     expect(barStep()).not.toBe(before)
     await lambdaSettled('lambda-0', barStep)
     // **THE VIEW ITSELF MOVED, WHICH IS THE HALF THE BAR'S OWN READOUT CANNOT SHOW.** This line used to
@@ -79,7 +79,7 @@ describe('the step bar', () => {
   /**
    * **EVERY BUTTON ON THE BAR, NOT ONLY ONE.** The case above proves the bar drives the view it names by
    * stepping back once; coverage then showed `step-bar.ts` at 42.85% of its functions, because each of
-   * the five handlers is a separate closure and four of them had never been clicked. A bar whose `↺` or
+   * the five handlers (six since `⏭`) is a separate closure and four of them had never been clicked. A bar whose `↺` or
    * `⏵` went to the wrong view — or nowhere — would have shipped.
    *
    * `[continue]` IS THE ONE THAT IS NOT HERE: it exists only on a recording that stopped with more to
@@ -100,6 +100,10 @@ describe('the step bar', () => {
     barButton('one step forward').click()
     expect(step()).toContain('step 1 ')
     barButton('one step back').click()
+    expect(step()).toContain('step 0 ')
+    barButton('to the newest recorded step').click()
+    expect(step()).toMatch(/^step ([\d,]+) of \1$/)
+    barButton('back to the oldest kept step').click()
     expect(step()).toContain('step 0 ')
 
     barButton('play').click()

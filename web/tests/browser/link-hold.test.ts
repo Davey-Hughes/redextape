@@ -181,9 +181,12 @@ const stateBox = (leaf: string) => host(leaf)?.querySelector<HTMLElement>('.stat
 
 /**
  * Put both runs where one step moves the row each grid follows well away from the pin: the TM head one step back from
- * where recording left it, so `▶` walks the history rather than asking for more, and the asm run at its start.
+ * where recording left it, so `▶` walks the history rather than asking for more, and the asm run at its start. **THE
+ * TM HEAD GETS THERE BY `⏭` THEN `◀`**: a run opens on step 0 (`History`).
  */
 async function park(): Promise<void> {
+  host('tm-0')?.querySelector<HTMLButtonElement>('.controls button.to-newest')?.click()
+  await until(() => /^step ([\d,]+) of \1 /.test(stepOf('tm-0')), 'the TM view on its newest step')
   const tmStep = stepOf('tm-0')
   control('tm-0', '◀')?.click()
   await until(() => stepOf('tm-0') !== tmStep, 'the TM view to step back')
@@ -409,9 +412,9 @@ describe('a view that missed the last compile', () => {
     expect(reattach('tm-0')?.hidden, 'following is still on').toBe(true)
     expect(inView('tm-0', CURRENT['tm-0']), 'the precondition: the current state is off screen').toBe(false)
 
-    // A STEP BACK: recording left the machine at its newest step, where `▶` asks for more history.
+    // A STEP FORWARD: the recompiled run opens on step 0 (`History`), and `▶` walks the history it recorded.
     const at = stepOf('tm-0')
-    control('tm-0', '◀')?.click()
+    control('tm-0', '▶')?.click()
     await until(() => stepOf('tm-0') !== at, 'one step')
     expect(inView('tm-0', CURRENT['tm-0']), 'the table follows the machine again').toBe(true)
   })
@@ -425,9 +428,9 @@ describe('a view that missed the last compile', () => {
       false,
     )
 
-    // A STEP BACK: the run ended where recording left it, and `▶` has nothing further to run.
+    // A STEP FORWARD: the recompiled run opens on step 0 (`History`).
     const at = stepOf('asm-0')
-    control('asm-0', '◀')?.click()
+    control('asm-0', '▶')?.click()
     await until(() => stepOf('asm-0') !== at, 'one step')
     expect(inView('asm-0', CURRENT['asm-0']), 'the listing follows the run again').toBe(true)
     pick('[data-switch="views"][data-value="tiles"]')

@@ -26,6 +26,7 @@ const host = (): HTMLElement => {
 const events = (): PaneEvents => ({
   back: vi.fn(),
   forward: vi.fn(),
+  toNewest: vi.fn(),
   play: vi.fn(),
   restart: vi.fn(),
   extend: vi.fn(),
@@ -71,6 +72,7 @@ const CONTROLS = {
   canRestart: true,
   canBack: false,
   canForward: true,
+  canToNewest: true,
   canPlay: true,
   playing: false,
   stepText: '0',

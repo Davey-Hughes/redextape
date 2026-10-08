@@ -14,6 +14,9 @@ let view: EditorView
 
 const stepText = () => document.querySelector('[data-leaf="tm-0"] .step')?.textContent ?? ''
 const extendButton = () => document.querySelector<HTMLButtonElement>('[data-leaf="tm-0"] .controls .extend')
+/** `⏭`: the head to the frontier, where `▶` asks for more. A run opens on step 0 (`History`), where `▶` steps. */
+const toNewest = () =>
+  document.querySelector<HTMLButtonElement>('[data-leaf="tm-0"] .controls button.to-newest')?.click()
 const forwardButton = () =>
   [...document.querySelectorAll<HTMLButtonElement>('[data-leaf="tm-0"] .controls button')].find(
     (b) => b.textContent === '▶',
@@ -55,6 +58,8 @@ describe('the frontier controls during a recompile', () => {
   it('withdraws [continue] and a frontier ▶ for the whole window, and restores them after', async () => {
     view.dispatch({ changes: { from: 0, to: view.state.doc.length, insert: BUDGET_SRC } })
     await historyFills()
+    toNewest()
+    expect(stepText(), 'precondition: the head at the frontier').toMatch(/^step ([\d,]+) of \1 /)
     expect(extendButton()?.hidden).toBe(false)
     expect(extendButton()?.textContent).toBe('keep recording')
     expect(forwardButton()?.disabled).toBe(false)
@@ -72,6 +77,8 @@ describe('the frontier controls during a recompile', () => {
     // A trailing space changes nothing the machine does, so the new run reaches the same stop and the
     // control comes back — which is what makes the withdrawal a window rather than a one-way door.
     await historyFills()
+    toNewest()
+    expect(stepText(), 'precondition: the head at the frontier').toMatch(/^step ([\d,]+) of \1 /)
     expect(extendButton()?.hidden).toBe(false)
     expect(forwardButton()?.disabled).toBe(false)
   }, 90_000)

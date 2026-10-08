@@ -67,7 +67,7 @@ describe('editing the scratch, through the app', () => {
 
   it('edits recompile the scratch, leave the source result untouched, report bad text without losing the last good frames, and survive a source recompile', async () => {
     // STAGE 0 — settled on the sample program, which never truncates at either budget, so the fork
-    // control is available at the frontier with no scrubbing needed.
+    // control is available at every step.
     view.dispatch({ changes: { from: 0, to: view.state.doc.length, insert: SAMPLE } })
     await until(idle, 'the sample program to compile')
     focusProgram()

@@ -1025,9 +1025,16 @@ button.view-title[aria-expanded="true"] {
   font-size: var(--step--2);
   color: var(--fg-dim);
 }
-.controls .play {
+/* AN ICON BUTTON IS AS WIDE AS A GLYPH BUTTON: 29px at 15px, where `.controls button`'s padding made it 35. Its icon is
+   1em and a Hack glyph 0.6em, so the padding gives back the 0.4em between them. `⏭` joining the strip took 43px from
+   the title's row, and at 1280px in Explorer the TM view's strip at `step 12,976 of 12,976` needed 430.2px of the
+   424.1 the row had: it wrapped, and a playing run's panels would drop a row once its count gained a digit. With the
+   two icon buttons at 29px it needs 418.2. */
+.controls .play,
+.controls .to-newest {
   display: inline-flex;
   align-items: center;
+  padding-inline: 0.4em;
 }
 .controls .speed {
   font: inherit;

@@ -1,5 +1,6 @@
 import type { EditorView } from '@codemirror/view'
 import { beforeAll, describe, expect, it } from 'vitest'
+import { userEvent } from 'vitest/browser'
 import { STORAGE_KEY } from '../../src/appearance'
 import { OVERSCAN, ROW_HEIGHT } from '../../src/tm-pane'
 import { SHELL, until } from './harness'
@@ -91,6 +92,16 @@ async function settled(v: EditorView, src: string): Promise<void> {
   expect(tmStep(), 'precondition: the TM leg is past the recompile').not.toContain('— recompiling')
   await until(() => tmRecorded() >= TM_HALF || done(), 'the TM leg to be half way to a full history, or the run to end')
   await until(done, 'the run to end')
+}
+
+/**
+ * `⏭` on a view's strip: its leg to the newest recorded step, once it is live. **A RUN OPENS ON STEP 0** (`History`),
+ * and the cases that call this were written against the newest step, where a run opened before.
+ */
+async function toNewest(leg: 'lambda' | 'asm' | 'tm'): Promise<void> {
+  const button = () => document.querySelector<HTMLButtonElement>(`[data-leaf="${leg}-0"] .controls button.to-newest`)
+  await until(() => button()?.disabled === false, `${leg}'s ⏭ to be live`)
+  button()?.click()
 }
 
 describe('the app, end to end', () => {
@@ -519,7 +530,8 @@ describe('the app, end to end', () => {
 
     it('steps the λ pane back and shows the same text it showed before', async () => {
       await settled(view, 'let x = 40; x + 2')
-      // Recording finished, so the head sits on step 7.
+      // Recording finished, and ⏭ puts the head on its newest step, 7.
+      await toNewest('lambda')
       expect(stepText('lambda')).toContain('step 7')
       // EVERY READ WAITS FOR THE STEP'S OWN TREE: the view draws the last step's tree, marked stale, for the
       // one worker round trip until this step's arrives (Plan 7 part 4a's `lambdaSettled`).
@@ -577,6 +589,7 @@ describe('the app, end to end', () => {
     it('marks the contractum the step produced, and nothing at step 0', async () => {
       await settled(view, 'let x = 40; x + 2')
       await until(() => !stepText('lambda').includes('not run'))
+      await toNewest('lambda')
       expect(stepText('lambda')).toContain('step 7')
 
       // Step 6, one back from the frontier, once the view has that step's tree.
@@ -629,14 +642,14 @@ describe('the app, end to end', () => {
       await settled(view, LAMBDA_DECLINES)
       expect(stepText('lambda')).toContain('does not support')
       expect(document.querySelectorAll('[data-leaf="tm-0"] .tape').length).toBe(5)
-      expect(click('tm', '◀')?.disabled).toBe(false)
+      expect(click('tm', '▶')?.disabled).toBe(false)
     })
 
     it('leaves the λ pane steppable when the TM backend declines', async () => {
       await settled(view, 'let x = 200; x + 1')
       expect(document.querySelectorAll('[data-leaf="tm-0"] .tape').length).toBe(0)
       expect(paneText('lambda')).not.toBe('')
-      expect(click('lambda', '◀')?.disabled).toBe(false)
+      expect(click('lambda', '▶')?.disabled).toBe(false)
     })
 
     // THE `'declined'` λ LINK STATE, NEVER EXERCISED END TO END BEFORE THIS.
@@ -699,6 +712,7 @@ describe('the app, end to end', () => {
     // worker for anything: the step readout must not move and the extend button must stay hidden.
     it('does nothing when ▶ is pressed at the frontier of a run that already ended', async () => {
       await settled(view, 'let x = 40; x + 2')
+      await toNewest('lambda')
       const before = stepText('lambda')
       expect(before).toContain('step 7')
       const extend = document.querySelector<HTMLButtonElement>('[data-leaf="lambda-0"] .controls .extend')
@@ -722,6 +736,7 @@ describe('the app, end to end', () => {
         'fn map(xs, f) { if is_empty(xs) { nil } else { cons(f(head(xs)), map(tail(xs), f)) } } fn add1(x) { x + 1 } [3, 1, 2, 4].map(add1)'
       await settled(view, src)
       await until(() => stepText('tm').includes('history is full'), 'the TM history to fill')
+      await toNewest('tm')
 
       const stoppedStep = stepNumber(stepText('tm'))
       expect(stoppedStep).toBeGreaterThan(0)
@@ -738,6 +753,21 @@ describe('the app, end to end', () => {
       await until(() => stepNumber(stepText('tm')) > stoppedStep, 'the frontier to advance past the stop')
       expect(stepNumber(stepText('tm'))).toBeGreaterThan(stoppedStep)
     }, 60_000)
+
+    // **A REAL `Enter` ON `⏭`**, which disables it: the step-controls case drives the update by hand, and this is the
+    // gesture that causes it.
+    it('keeps the keyboard on the strip when ⏭ takes the head to the newest step', async () => {
+      await settled(view, 'let x = 40; x + 2')
+      const newest = document.querySelector<HTMLButtonElement>('[data-leaf="lambda-0"] .controls button.to-newest')
+      await until(() => newest?.disabled === false, 'the λ view’s ⏭ to be live')
+      newest?.focus()
+      expect(document.activeElement, 'precondition: ⏭ holds the focus').toBe(newest)
+      await userEvent.keyboard('{Enter}')
+      expect(stepText('lambda')).toBe('step 7 of 7')
+      expect(document.activeElement).toBe(
+        document.querySelector('[data-leaf="lambda-0"] .controls [aria-label="one step back"]'),
+      )
+    })
 
     it('restart returns to step 0 and forward walks out again', async () => {
       await settled(view, 'let x = 40; x + 2')
@@ -782,8 +812,8 @@ describe('the app, end to end', () => {
     // SOURCE-originated link actually paints the λ window and the δ table, not only the source echo.
     it('a source-originated link lights both the λ view and the δ table', async () => {
       await settled(view, 'let x = 40; x + 2')
-      // STEP 0, WHERE EVERY CONSTRUCT HAS A NODE: `settled` leaves the head at the frontier, the chip `42`,
-      // which carries none.
+      // STEP 0, WHERE EVERY CONSTRUCT HAS A NODE, and where a run opens (`History`): the frontier, the chip `42`,
+      // carries none.
       click('lambda', '↺')
       expect(stepText('lambda')).toContain('step 0')
       await lambdaSettled()
@@ -965,6 +995,7 @@ describe('the app, end to end', () => {
     // on, which is the default a user hits on every fresh compile.
     it('a source-originated link scrolls the table into view even while it is still following the machine', async () => {
       await settled(view, BIG)
+      await toNewest('tm')
       const followedTop = table().scrollTop
       // Sanity: following put the table somewhere real — if this were 0, the assertion below could not
       // tell "the link moved it" from "nothing here ever moves".
@@ -1115,6 +1146,7 @@ describe('the app, end to end', () => {
 
     it('highlights the current state and outlines the rule about to fire', async () => {
       await settled(view, 'let x = 40; x + 2')
+      await toNewest('tm')
       // By the time `settled` resolves, the TM leg is fully recorded and its head sits at the
       // frontier, which is `halt` — `frame.rule` is `null` there (`types.ts`'s doc: "at an accept
       // state, at `halt`, or at a stuck configuration"), so `is-next` would be empty at this exact
@@ -1127,6 +1159,7 @@ describe('the app, end to end', () => {
 
     it('moves the highlight as the machine steps', async () => {
       await settled(view, 'let x = 40; x + 2')
+      await toNewest('tm')
       // Same frontier fact as above: `▶` is a no-op here (`transport.ts`'s `forward`, mirroring the λ
       // leg's already-tested "does nothing at the frontier of a run that already ended"), so stepping
       // must go backward to move at all.
@@ -1144,12 +1177,14 @@ describe('the app, end to end', () => {
     // `.is-current` inside the rendered window at all.
     it('follows the machine into view with no user scroll at all', async () => {
       await settled(view, BIG)
+      await toNewest('tm')
       expect(table().scrollTop).toBeGreaterThan(0)
       expect(document.querySelector('[data-leaf="tm-0"] .state-row.is-current')).not.toBeNull()
     })
 
     it('stops following once the user scrolls', async () => {
       await settled(view, BIG)
+      await toNewest('tm')
       // `▶` at this frontier would be `client.extend()` — an async worker round trip — and asserting
       // right after the click loop with no `await` would pass whether or not detach worked, since no
       // redraw happens before the assertion runs. `◀` moves the head and redraws synchronously
@@ -1170,6 +1205,7 @@ describe('the app, end to end', () => {
     // present only while detached, and clicking it must redraw immediately rather than wait for a step.
     it('reattaches through its own control, which exists only while detached', async () => {
       await settled(view, BIG)
+      await toNewest('tm')
       const reattach = document.querySelector('[data-leaf="tm-0"] .table-reattach') as HTMLButtonElement
       expect(reattach).not.toBeNull()
       expect(reattach.hidden).toBe(true)
@@ -1207,6 +1243,7 @@ describe('the app, end to end', () => {
     // fails whenever the guard is removed instead of whenever the timing happens to line up.
     it('ignores a scroll that arrives while the table is hidden', async () => {
       await settled(view, BIG)
+      await toNewest('tm')
       const toggle = document.querySelector(
         '[data-leaf="tm-0"] [data-panel="rules"] .panel-toggle',
       ) as HTMLButtonElement
@@ -1229,6 +1266,7 @@ describe('the app, end to end', () => {
     // where it is evaluated, did not run on the way down.
     it('takes the reattach control away with the table it belongs to', async () => {
       await settled(view, BIG)
+      await toNewest('tm')
       const toggle = document.querySelector(
         '[data-leaf="tm-0"] [data-panel="rules"] .panel-toggle',
       ) as HTMLButtonElement
@@ -1255,6 +1293,7 @@ describe('the app, end to end', () => {
     // zero-viewport movement rather than a clamped one.
     it('still detaches on a user scroll after the table has been hidden and shown', async () => {
       await settled(view, BIG)
+      await toNewest('tm')
       const toggle = document.querySelector(
         '[data-leaf="tm-0"] [data-panel="rules"] .panel-toggle',
       ) as HTMLButtonElement
@@ -1290,6 +1329,7 @@ describe('the app, end to end', () => {
 
       toggle.click()
       await settled(view, BIG)
+      await toNewest('tm')
       toggle.click()
       await until(() => spacer().style.height === BIG_SPACER)
 
@@ -1301,6 +1341,7 @@ describe('the app, end to end', () => {
 
     it('hides and shows the table without losing the play head', async () => {
       await settled(view, 'let x = 40; x + 2')
+      await toNewest('tm')
       for (let i = 0; i < 4; i += 1) click('tm', '◀')
       const step = stepText('tm')
       const toggle = document.querySelector(
@@ -1328,6 +1369,7 @@ describe('the app, end to end', () => {
     // would leave the play head intact and still be wrong, which `stepText` alone cannot see.
     it('keeps the highlight across a hide and show', async () => {
       await settled(view, 'let x = 40; x + 2')
+      await toNewest('tm')
       click('tm', '◀')
       const current = document.querySelector('[data-leaf="tm-0"] .state-row.is-current')?.textContent
       expect(current).toBeDefined()

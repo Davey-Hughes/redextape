@@ -78,7 +78,8 @@ export const ASM_WINDOW: AsmWindow = { locals: 64, args: 16, frames: 8, cells: 1
  * it is `main.ts`'s rings and not the worker's `allowance` that make it true. The two come apart on
  * `[continue]`: `onExtend` (`session-worker.ts`) raises the allowance to `recorded + HISTORY_BYTES`
  * every click, so production is unbounded across clicks — while the ring's budget never moves, so
- * retention stays at one `HISTORY_BYTES` per leg however many times the user continues.
+ * retention stays at one `HISTORY_BYTES` per leg, and the newest frame past it (`History`'s `#evict`),
+ * however many times the user continues.
  *
  * **THE UNITS ARE THE RING'S ACCOUNTING AND NOT RETAINED HEAP, AND THE TWO LEGS TRADE AT DIFFERENT
  * RATES.** Measured 2026-08-11 by `tests/browser/session-memory.test.ts`, real Chromium, forced
@@ -88,7 +89,8 @@ export const ASM_WINDOW: AsmWindow = { locals: 64, args: 16, frames: 8, cells: 1
  *     `lambdaFrameBytes` charged for the same 253 frames. `SPAN_BYTES` being rounded up (80 against a
  *     measured 74.08) is most of what keeps this honest.
  *   * TM leg — **2.045480413555839**: 68,635,768 bytes of retained heap against the 33,554,840
- *     `tmFrameBytes` charged for 75,023 retained frames of 75,025 pushed. So a TM leg that actually
+ *     `tmFrameBytes` charged for 75,023 retained frames of 75,025 pushed — two dropped by a ring that
+ *     then held only its budget, where it now keeps the newest frame past it. So a TM leg that actually
  *     spends this budget cost ~68.6 MB of heap for a 33.55 MB allowance. The TM figure reproduced to
  *     the byte across four runs; the λ one varied by ~6,600 bytes in 6.8 million.
  *   * **TM leg since a frame's tapes cross as one string each — 0.8744705880483015**: 29,342,720.67

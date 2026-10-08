@@ -139,7 +139,10 @@ describe('the readout, once keep recording carries the TM on', () => {
   })
 
   it('says nothing of a full history once the recording ends at the halt', () => {
-    expect(tmStep(), 'precondition: the recording ended').toMatch(/^step ([\d,]+) of \1 \(oldest kept: step [\d,]+\)$/)
+    // NO `…` AND NO STOP REASON: ended. The head is wherever the ring left it, not on the halt (`History`).
+    expect(tmStep(), 'precondition: the recording ended').toMatch(
+      /^step [\d,]+ of [\d,]+ \(oldest kept: step [\d,]+\)$/,
+    )
     expect(tmSegment()?.title).toMatch(PLAIN)
   })
 

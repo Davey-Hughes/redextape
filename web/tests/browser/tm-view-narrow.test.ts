@@ -330,6 +330,12 @@ beforeAll(async () => {
     'sum_to(5)’s lines in the λ and TM views',
   )
   await until(idle, 'sum_to(5)’s run to its result')
+  // **EVERY VIEW TO ITS NEWEST STEP, BY ITS `⏭`**: a run opens on step 0 (`History`), and these cases measure the page
+  // at the run's end, where they were written to.
+  for (const leaf of ['lambda-0', 'asm-0', 'tm-0']) {
+    await userEvent.click(paneOf(leaf).querySelector('.view-steps button.to-newest') as HTMLElement)
+  }
+  await until(() => /^step ([\d,]+) of \1$/.test(stepOf('tm-0')), 'the TM view on its newest step')
 })
 
 /** The TM view's width at each page width: half of Explorer's two columns, less the gap between them. */

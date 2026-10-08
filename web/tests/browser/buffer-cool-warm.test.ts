@@ -36,7 +36,7 @@ import { asShown } from './lambda-text'
  */
 
 /** `scratch-edit.test.ts`'s program, for its reason: it truncates at neither budget, so `✎ edit a copy` is
- * offered at the frontier with no scrubbing needed. */
+ * offered at every step. */
 const SAMPLE = 'let x = 40; x + 2'
 
 /** The title-selector of `leaf`'s view — the pair in force is its `data-binding`. */
@@ -134,6 +134,13 @@ describe('a cooled buffer warmed and bound to a pane again', () => {
     // against — captured rather than spelled, so this file asserts a round trip rather than a literal.
     view.dispatch({ changes: { from: 0, to: view.state.doc.length, insert: SAMPLE } })
     await until(idle, 'the sample program to compile')
+    // FORKED FROM THE NORMAL FORM, BY `⏭` FIRST: a run opens on step 0 (`History`), and STAGE 4 needs the copy's step 0
+    // to be a normal form already.
+    document.querySelector<HTMLButtonElement>('[data-leaf="lambda-0"] .controls button.to-newest')?.click()
+    await until(
+      () => /^step ([\d,]+) of \1$/.test(document.querySelector('[data-leaf="lambda-0"] .step')?.textContent ?? ''),
+      'the λ view on its newest step',
+    )
     document.querySelector<HTMLButtonElement>('[data-leaf="lambda-0"] button.detach')?.click()
     await until(() => editorHost() !== null, 'the fork to mount its editor')
     await until(() => term() !== '', 'the forked buffer to produce its first frame')

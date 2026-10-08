@@ -230,7 +230,8 @@ describe('a link taking the asm leg past where its history fills, its continue h
 
   it('says nothing of a full history at the stop the link goes on past', () => {
     expect(asmStep(), 'precondition: stopped where it filled, the link going further').toMatch(
-      /^step ([\d,]+) of \1 — going to step 40,000 from the link/,
+      // NO `…` AFTER THE COUNT: stopped. The head waits where the run opened until the frames reach the link's step.
+      /^step [\d,]+ of [\d,]+ — going to step 40,000 from the link/,
     )
     expect(idle(), 'precondition: the link’s run has its result').toBe(true)
     expect(segments()[1]).not.toContain('history is full')

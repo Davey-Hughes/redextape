@@ -60,6 +60,8 @@ describe('the cost of the λ tree', () => {
       view.dispatch({ changes: { from: 0, to: view.state.doc.length, insert: src } })
       await until(() => document.querySelector<HTMLElement>('#results')?.dataset.state === 'idle', `${name} to compile`)
       await until(() => /ended|history is full/.test(stepText()) || !stepText().endsWith('…'), `${name} to record`)
+      // FROM THE FRONTIER, BY `⏭`: a run opens on step 0 (`History`), where `◀` has nowhere to go.
+      document.querySelector<HTMLButtonElement>('[data-leaf="lambda-0"] .controls button.to-newest')?.click()
       await lambdaSettled()
       const asked = new Map<number, number>()
       const trips: number[] = []

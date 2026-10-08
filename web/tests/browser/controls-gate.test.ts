@@ -158,6 +158,13 @@ function check(where: string): HTMLElement[] {
       // rule 4 is about, and `view-menu.test.ts` pins that it states its reason. What this gate still
       // holds a disabled control to is its NAME, asserted above — a control a reader cannot act on is
       // still a control they will hear.
+    } else if (el.tabIndex === -1 && el.closest('[role="row"]') !== null) {
+      // **A CONTROL OUT OF THE TAB ORDER IN A GRID'S ROW IS NEVER FOCUSED BY A USER, SO IT IS HELD TO ITS NAME
+      // ALONE.** The grid is its level's one tab stop, a mousedown on its rows is cancelled (`VirtualGrid`), and
+      // the row's Enter does what the control does: the TM view's *show states* (`state-diagram.ts`). Focusing
+      // one here redraws its rows: after `focus()`, with or without `preventScroll`, it was no longer in the
+      // document and the focus was on `<body>` (2026-10-08). This gate first met one when a run began opening on
+      // step 0, whose group has a *show states* row.
     } else {
       el.focus()
       expect(document.activeElement, `${id} cannot take the focus`).toBe(el)

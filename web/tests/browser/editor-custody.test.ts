@@ -122,6 +122,7 @@ function addPane(
   const pane = new LambdaPane(host, {
     back: () => undefined,
     forward: () => undefined,
+    toNewest: () => undefined,
     play: () => undefined,
     restart: () => undefined,
     extend: () => undefined,

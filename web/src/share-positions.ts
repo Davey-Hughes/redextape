@@ -223,12 +223,13 @@ export class LinkPositions {
    * STOPPED SHORT BEFORE IT IN THIS OPEN**, since the open's clamps share one notice (spec §5.4's note of 2026-10-01),
    * and a later one would otherwise draw over the earlier unseen and unheard.
    *
-   * **THE HEAD IS ON THE LEG'S LAST STEP ALREADY**, which is where the spec puts it: a ring's head follows its frontier
-   * until something moves it, and what could — this position, reached, or a gesture on the leg's step controls — would
-   * have spent it or taken it away.
+   * **THE HEAD GOES TO THE LEG'S LAST STEP**, which is where the spec puts it: a run opens on step 0, and the head has
+   * stayed there or on the oldest step kept, since what else could move it — this position, reached, or a gesture on
+   * the leg's step controls — would have spent it or taken it away.
    */
   #stop(leg: Leg, wanted: number, why: ShortOf): void {
     const state = this.#deps.legOf(leg)
+    state.hist.seek(state.hist.length - 1)
     delete state.pending
     this.#deps.draw()
     this.#shorts.push({ leg, wanted, shown: state.hist.currentStep, why })

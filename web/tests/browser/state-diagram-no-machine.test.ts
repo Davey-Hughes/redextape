@@ -50,6 +50,8 @@ beforeAll(async () => {
   view = await (await import('../../src/main')).ready
   await compile(FACT3)
   await until(() => rows().length > 0, 'the diagram to draw fact(3)')
+  // ON THE LAST STEP, inside `halt`, by `⏭`: a run opens on step 0 (`History`), and these cases step back from the end.
+  pane().querySelector<HTMLButtonElement>('.controls button.to-newest')?.click()
 })
 
 describe('the state diagram with no machine to draw', () => {

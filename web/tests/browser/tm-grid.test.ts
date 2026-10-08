@@ -69,8 +69,8 @@ describe('the rule table as a grid', () => {
   })
 
   it('says which state is current and which rule fires next', async () => {
-    // At the frontier the machine sits in `halt`, where no rule fires; one step back is the rule into it.
-    stepButton('◀')?.click()
+    // At step 0, where a run opens (`History`), a rule fires next; at the frontier the machine sits in `halt`, where
+    // none does.
     await until(() => pane().querySelector('.state-row.is-next') !== null, 'a rule to be about to fire')
     const current = grid().querySelectorAll('[aria-current="step"]')
     expect(current).toHaveLength(1)

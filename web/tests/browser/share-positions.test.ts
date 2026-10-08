@@ -123,15 +123,21 @@ describe("a link's positions", () => {
     await resultsReach(before.results + 2, 'the first continue')
     await resultsReach(before.results + 3, 'the second continue')
     expect(lambdaExtends() - before.extends).toBe(2)
-    expect(stepOf('lambda-0')).toBe('step 3,000 of 4,144 — history is full (oldest kept: step 2,770)')
+    expect(stepOf('lambda-0')).toBe('step 3,000 of 4,144 — history is full (oldest kept: step 2,769)')
   })
 
-  it("lands fact(4)'s λ step 1,387, which its continue's ring drops, on 1,388", async () => {
+  /**
+   * **THE FIRST STEP PAST THE RUN'S OWN RECORDING, WHICH IS THE OLDEST ITS CONTINUE'S RING KEEPS.** This case was
+   * `1,387 … on 1,388`, a position the continue's ring had dropped, while a ring dropped the first frames of the
+   * recording that filled it. It keeps that recording whole now (`History`'s `#evict`), and 1,387 is kept;
+   * `tests/node/share-positions.test.ts` holds a position a ring has dropped.
+   */
+  it("lands fact(4)'s λ step 1,387, the first its continue records, on the oldest step its ring keeps", async () => {
     const before = await open(FACT, { lambda: 1387 })
     await resultsReach(before.results + 1, 'the run')
     await resultsReach(before.results + 2, 'the continue')
     expect(lambdaExtends() - before.extends).toBe(1)
-    expect(stepOf('lambda-0')).toBe('step 1,388 of 2,768 — history is full (oldest kept: step 1,388)')
+    expect(stepOf('lambda-0')).toBe('step 1,387 of 2,768 — history is full (oldest kept: step 1,387)')
   })
 
   it("clamps sum_to(5)'s λ step 5,000 to its last, 951, and says so with the open's undo", async () => {
@@ -145,9 +151,9 @@ describe("a link's positions", () => {
   })
 })
 
-const backButton = () =>
+const forwardButton = () =>
   document.querySelector<HTMLButtonElement>(
-    '[data-leaf="lambda-0"] button[aria-label="one step back"]',
+    '[data-leaf="lambda-0"] button[aria-label="one step forward"]',
   ) as HTMLButtonElement
 
 /**
@@ -163,11 +169,12 @@ describe('a step gesture before the first continue', () => {
   it('takes the leg from its link', async () => {
     holdingResults = true
     before = await open(FACT, { lambda: 3000 })
+    // FORWARD: the head waits on step 0, where a run opens (`History`), until the frames reach the link's step.
     await until(
-      () => stepOf('lambda-0').includes('— going to step 3,000 from the link') && !backButton().disabled,
-      'the pending position, with a step to go back to',
+      () => stepOf('lambda-0').includes('— going to step 3,000 from the link') && !forwardButton().disabled,
+      'the pending position, with a step to take',
     )
-    await userEvent.click(backButton())
+    await userEvent.click(forwardButton())
     expect(stepOf('lambda-0')).not.toContain('going to')
   })
 
@@ -217,7 +224,7 @@ describe("fact(12)'s λ at 17,000", () => {
     await continued(MAX_LINK_CONTINUES)
     expect(lambdaExtends() - before.extends).toBe(MAX_LINK_CONTINUES)
     expect(noticeText()).toBe("the link's λ step 17,000 is further on than 10 continues went — showing step 15,695")
-    expect(stepOf('lambda-0')).toBe('step 15,695 of 15,695 — history is full (oldest kept: step 14,273)')
+    expect(stepOf('lambda-0')).toBe('step 15,695 of 15,695 — history is full (oldest kept: step 14,272)')
     expect(undoButton()?.textContent).toBe('undo')
   })
 

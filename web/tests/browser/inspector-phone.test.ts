@@ -305,6 +305,10 @@ describe('at a phone’s width the inspector stacks under the views', () => {
  * Every box `53ecbfa` drew, as `[left, top, width, height]`, measured there before the change with the preset's
  * notice up: `main`, `#views`, the inspector, its header and (open) its body, the Stage's tab strip, and each view on
  * the page.
+ *
+ * **BUT AT 481 PX, WHERE `⏭` MOVED THEM** (2026-10-08): the step bar's row, `λ · program ↺ ◀ ▶ ⏭ ⏵ 8/s ▾ step 0 of 7`,
+ * no longer fits 481 px, and its step text takes a second row, 22 px off `main`'s height and everything in it. Measured
+ * on the branch that added `⏭`; the inspector's own boxes, its width and every left edge are `53ecbfa`'s.
  */
 const BEFORE: Readonly<Record<string, Readonly<Record<string, Box>>>> = {
   'debugger@1280x800 open': {
@@ -329,25 +333,25 @@ const BEFORE: Readonly<Record<string, Readonly<Record<string, Box>>>> = {
     'tm-0': [502, 419.75, 490, 333.25],
   },
   'debugger@481x800 open': {
-    main: [0, 164.5, 481, 588.5],
-    views: [0, 164.5, 193, 588.5],
-    inspector: [193, 164.5, 288, 588.5],
+    main: [0, 164.5, 481, 566.5],
+    views: [0, 164.5, 193, 566.5],
+    inspector: [193, 164.5, 288, 566.5],
     header: [194, 164.5, 287, 28],
-    body: [194, 192.5, 287, 560.5],
-    source: [0, 164.5, 90.5, 288.25],
-    'lambda-0': [102.5, 164.5, 90.5, 288.25],
-    'asm-0': [0, 464.75, 90.5, 288.25],
-    'tm-0': [102.5, 464.75, 90.5, 288.25],
+    body: [194, 192.5, 287, 538.5],
+    source: [0, 164.5, 90.5, 277.25],
+    'lambda-0': [102.5, 164.5, 90.5, 277.25],
+    'asm-0': [0, 453.75, 90.5, 277.25],
+    'tm-0': [102.5, 453.75, 90.5, 277.25],
   },
   'debugger@481x800 closed': {
-    main: [0, 164.5, 481, 588.5],
-    views: [0, 164.5, 193, 588.5],
-    inspector: [193, 164.5, 288, 588.5],
+    main: [0, 164.5, 481, 566.5],
+    views: [0, 164.5, 193, 566.5],
+    inspector: [193, 164.5, 288, 566.5],
     header: [194, 164.5, 287, 28],
-    source: [0, 164.5, 90.5, 288.25],
-    'lambda-0': [102.5, 164.5, 90.5, 288.25],
-    'asm-0': [0, 464.75, 90.5, 288.25],
-    'tm-0': [102.5, 464.75, 90.5, 288.25],
+    source: [0, 164.5, 90.5, 277.25],
+    'lambda-0': [102.5, 164.5, 90.5, 277.25],
+    'asm-0': [0, 453.75, 90.5, 277.25],
+    'tm-0': [102.5, 453.75, 90.5, 277.25],
   },
   'stage@1280x800 open': {
     main: [0, 74.5, 1280, 678.5],
@@ -367,21 +371,21 @@ const BEFORE: Readonly<Record<string, Readonly<Record<string, Box>>>> = {
     'lambda-0': [0, 105, 992, 648],
   },
   'stage@481x800 open': {
-    main: [0, 164.5, 481, 588.5],
-    views: [0, 164.5, 193, 588.5],
-    inspector: [193, 164.5, 288, 588.5],
+    main: [0, 164.5, 481, 566.5],
+    views: [0, 164.5, 193, 566.5],
+    inspector: [193, 164.5, 288, 566.5],
     header: [194, 164.5, 287, 28],
-    body: [194, 192.5, 287, 560.5],
+    body: [194, 192.5, 287, 538.5],
     tabs: [0, 164.5, 193, 50],
-    'lambda-0': [0, 214.5, 193, 538.5],
+    'lambda-0': [0, 214.5, 193, 516.5],
   },
   'stage@481x800 closed': {
-    main: [0, 164.5, 481, 588.5],
-    views: [0, 164.5, 193, 588.5],
-    inspector: [193, 164.5, 288, 588.5],
+    main: [0, 164.5, 481, 566.5],
+    views: [0, 164.5, 193, 566.5],
+    inspector: [193, 164.5, 288, 566.5],
     header: [194, 164.5, 287, 28],
     tabs: [0, 164.5, 193, 50],
-    'lambda-0': [0, 214.5, 193, 538.5],
+    'lambda-0': [0, 214.5, 193, 516.5],
   },
   'explorer@390x844': {
     main: [0, 164.5, 390, 610.25],
@@ -432,7 +436,7 @@ describe('nothing moves where the inspector does not stack: at 481 px and wider,
       [1280, 800, 'closed'],
       [481, 800, 'open'],
       [481, 800, 'closed'],
-    ] as const)('at %i×%i px, %s, every box is where 53ecbfa drew it', async (width, height, state) => {
+    ] as const)('at %i×%i px, %s, every box is where BEFORE has it', async (width, height, state) => {
       await at(p, width, height, state === 'open')
       holdBoxes(boxesNow(state === 'open'), BEFORE[`${p}@${width}x${height} ${state}`] ?? {})
     })

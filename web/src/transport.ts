@@ -256,6 +256,12 @@ export function createTransport(deps: {
       }
       draw()
     },
+    // ONTO THE NEWEST FRAME, WHICH IS ALSO WHAT FOLLOWING IS: frames still arriving carry the head on (`History.seek`).
+    toNewest: () => {
+      const { hist } = taken(slot)
+      hist.seek(hist.length - 1)
+      draw()
+    },
     // RESOLVED AT THE CLICK LIKE EVERY OTHER HANDLER HERE, AND THE PLAYER THEN HOLDS THE LEG IT
     // RESOLVED TO — `play` sets the flag ON that `LegState` (`LegState.playing`), which is what makes a
     // second click a stop rather than a second run.

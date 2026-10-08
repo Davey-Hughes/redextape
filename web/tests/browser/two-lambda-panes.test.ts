@@ -364,9 +364,9 @@ describe('two λ panes on two λ sessions', () => {
     // one in the race above. The split pane being non-empty keeps a mid-rebind empty render from passing,
     // which would race the source-pane assertion below the same way. Text rather than the fork control the
     // other rebinds in this file wait for, because what the snapshot needs settled is the TERM.
-    // BOTH NON-EMPTY, AND NOT YET DIFFERENT. The copy is forked from the program's frontier, so before the edit
-    // both views show one term — and since Plan 7 part 4a both draw it the same way, as the chip `42`, where
-    // the flat views used to differ. The edit below is what makes the two sessions' terms differ.
+    // BOTH NON-EMPTY, AND NOT YET DIFFERENT. The copy is forked from the program's step 0, where a run opens
+    // (`History`), so before the edit both views show one term. The edit below is what makes the two
+    // sessions' terms differ.
     await lambdaSettled(first ?? '')
     await lambdaSettled(second ?? '')
     await until(() => textOf(first ?? '') !== '' && textOf(second ?? '') !== '')
@@ -568,13 +568,12 @@ describe('two λ panes on two λ sessions', () => {
 
       // THE PER-FRAME PATH, DRIVEN ON PURPOSE AND ASSERTED ON ITS OUTPUT. Scrubbing the δ leg runs
       // `draw()` — the function that threw — and `.step` is painted by that same pass, so a changed
-      // step text is evidence the repaint happened rather than evidence nothing crashed. `◀` RATHER
-      // THAN `▶`: a finished run leaves the play head at the LAST step (`running-focus.test.ts` asserts
-      // `step 2,870 of 2,870` for its own fixture), so forward is disabled and clicking it is a silent
-      // no-op — found by writing this with `▶` and watching it time out on a green app.
+      // step text is evidence the repaint happened rather than evidence nothing crashed. `▶` RATHER
+      // THAN `◀`: a run opens on step 0 (`History`), so back is disabled and clicking it is a silent
+      // no-op — found by writing this with `◀` and watching it time out on a green app.
       const before = tmStepText()
       expect(before).not.toBe('')
-      tmClick('◀')
+      tmClick('▶')
       await until(() => tmStepText() !== before)
 
       // THE KEYSTROKE PATH, which reaches `link-wiring.ts` without going through `draw.ts` first.

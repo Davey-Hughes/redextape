@@ -59,6 +59,8 @@ beforeAll(async () => {
   view = await (await import('../../src/main')).ready
   view.dispatch({ changes: { from: 0, to: view.state.doc.length, insert: FACT3 } })
   await until(() => document.querySelector<HTMLElement>('#results')?.dataset.state === 'idle', 'the app to settle')
+  // ON THE LAST STEP, inside `halt`, by `⏭`: a run opens on step 0 (`History`), and these cases start at the frontier.
+  pane().querySelector<HTMLButtonElement>('.controls button.to-newest')?.click()
   // The diagram grows into the rules' share and redraws on the resize that follows: every row, once it has.
   await wholeListing()
 })

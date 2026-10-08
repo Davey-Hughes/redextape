@@ -166,6 +166,8 @@ describe('a view on the page showing a copy, beside a view of the program', () =
     const program = await splitToProgram(tm(), 'tm')
     // ONE STEP BACK FROM THE FRONTIER, WHERE THE MACHINE STANDS IN `pc4` AND THE FOCUS IS `pc4`'S CONSTRUCT —
     // `running-focus.test.ts` measured the tail.
+    // BY `⏭`: a run opens on step 0 (`History`).
+    await userEvent.click(program.querySelector('.controls button.to-newest') as HTMLButtonElement)
     await until(() => /step 2,870 of 2,870/.test(stepOf(program)), 'the program’s view at the frontier')
     await userEvent.click(control(program, '◀') as HTMLButtonElement)
     await until(() => program.querySelector('.state-row.is-focus') !== null, 'the program’s view to mark the focus')
