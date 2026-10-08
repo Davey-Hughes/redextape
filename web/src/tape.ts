@@ -25,7 +25,11 @@ export type TapeRow = {
  * place, which is the failure mode this codebase's conventions treat as worse than a visible gap.
  */
 export function tapeRows(state: TmState, names: string[]): TapeRow[] {
-  return state.window.map((cells, i) => {
+  return state.window.map((tape, i) => {
+    // A TAPE'S WINDOW ARRIVES AS ONE STRING, A CELL A CHARACTER (`viewmodel.rs`'s `TmState.window`), AND IS TAKEN APART
+    // BY CHARACTER, NOT BY UTF-16 UNIT: a symbol outside the basic plane is one cell and two units. Once a frame drawn,
+    // not once a frame recorded, which is why the string is what crosses from the worker.
+    const cells = Array.from(tape)
     const headIndex = (state.heads[i] ?? 0) - (state.window_start[i] ?? 0)
     return {
       label: names[i] ?? `tape ${i}`,

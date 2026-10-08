@@ -64,7 +64,7 @@ const tmFrame = (state: number): TmState => ({
   step: 0,
   heads: [0],
   window_start: [0],
-  window: [['_']],
+  window: ['_'],
   source_node: null,
   rule: null,
 })

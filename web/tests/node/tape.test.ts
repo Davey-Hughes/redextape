@@ -9,7 +9,7 @@ const state = (over: Partial<TmState> = {}): TmState => ({
   step: 0,
   heads: [5],
   window_start: [3],
-  window: [['a', 'b', 'c', 'd', 'e']],
+  window: ['abcde'],
   source_node: null,
   rule: null,
   ...over,
@@ -25,6 +25,18 @@ describe('tapeRows', () => {
     expect(row?.headIndex).toBe(2)
     expect(row?.cells[row.headIndex]).toBe('c')
     expect(row?.headInWindow).toBe(true)
+  })
+
+  // A TAPE'S WINDOW ARRIVES AS ONE STRING, A CELL A CHARACTER, AND A CHARACTER IS NOT A UTF-16 UNIT. `𝟙` is one
+  // symbol of a hand-written machine and two units of the string: indexed by unit, the window would have one cell too
+  // many and the head would read half of it.
+  it('takes a tape’s cells by character, so a symbol outside the basic plane is one cell', () => {
+    const [row] = tapeRows(state({ heads: [4], window_start: [3], window: ['a𝟙c'] }), NAMES)
+    expect(row?.cells).toEqual(['a', '𝟙', 'c'])
+    expect(row?.cells[row.headIndex]).toBe('𝟙')
+    expect(row?.headInWindow).toBe(true)
+    const [past] = tapeRows(state({ heads: [6], window_start: [3], window: ['a𝟙c'] }), NAMES)
+    expect(past?.headInWindow, 'three cells, so a head three past the start is outside').toBe(false)
   })
 
   it('places the head at 0 when the window starts at the head', () => {
@@ -51,7 +63,7 @@ describe('tapeRows', () => {
     const s = state({
       heads: [0, 0, 0, 0, 0],
       window_start: [0, 0, 0, 0, 0],
-      window: [['a'], ['b'], ['c'], ['d'], ['e']],
+      window: ['a', 'b', 'c', 'd', 'e'],
     })
     expect(tapeRows(s, NAMES).map((r) => r.label)).toEqual(NAMES)
   })
@@ -59,7 +71,7 @@ describe('tapeRows', () => {
   // `tapeNames()` describes machines THIS compiler produced. A hand-written machine (Plan 5d) may
   // declare up to MAX_TAPES, and a positional label is the honest answer past the array's end.
   it('falls back to a positional label past the end of the names', () => {
-    const s = state({ heads: [0, 0], window_start: [0, 0], window: [['a'], ['b']] })
+    const s = state({ heads: [0, 0], window_start: [0, 0], window: ['a', 'b'] })
     expect(tapeRows(s, ['ONLY']).map((r) => r.label)).toEqual(['ONLY', 'tape 1'])
   })
 
@@ -76,7 +88,7 @@ describe('tapeLabel', () => {
   })
 
   it('says the blank symbol as a word', () => {
-    const [row] = tapeRows(state({ window: [['a', 'b', '_', 'd', 'e']] }), NAMES)
+    const [row] = tapeRows(state({ window: ['ab_de'] }), NAMES)
     expect(row === undefined ? '' : tapeLabel(row)).toBe('tape REG, head at cell 5, reading blank')
   })
 

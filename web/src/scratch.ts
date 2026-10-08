@@ -132,7 +132,10 @@ type BufferState = {
  *     is, which the threshold's words do not require, since the source session's legs are not
  *     "buffers". **Derived cap: 8** — the same number as the old provisional eight, and coincidence
  *     rather than agreement: the old eight was arithmetic over a budget nobody had measured, and this
- *     eight is what the stricter reading of a now-measured budget happens to also allow.
+ *     eight is what the stricter reading of a now-measured budget happens to also allow. **9 SINCE A TM
+ *     FRAME'S TAPES CROSS AS ONE STRING EACH** (2026-10-07): a full source TM ring retains 29.3 MB where it
+ *     retained 68.6 MB (`protocol.ts`'s `HISTORY_BYTES`), and one run of the probe on the new ratio printed
+ *     an intercept of 103,566,047.88 bytes and a derived cap (b) of 9. Reading (a) printed 11 as before.
  *
  * **BOTH NUMBERS ARE UPPER BOUNDS, NEVER MEASURED CEILINGS.** `pageBaseline` (17,825,792 bytes) is a
  * FLOOR — a byte-conversion of `session-memory.test.ts`'s own prose figure for the real app's baseline

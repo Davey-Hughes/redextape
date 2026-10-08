@@ -25666,3 +25666,155 @@ The Rust gates and `check-slow.sh` were not run: the diff touches no Rust. Each 
 | 348 files; 229 files, 2,243 tests; 97.45, 91.54, 98.38, 98.81; 16 of 16; the five files at 25 % | the gates | the block above: `gates-16d6884/gates.log`, written by `gates.sh` |
 | 95, 89, 97, 97 | the coverage floors | `thresholds` in `web/vite.config.ts` |
 | healthy after 4 polls; 200, 4 assets; 7 wasm | the Docker gate | `docker/gate-docker.log`, written by `/home/davey/temp/redextape-lanes-2026-10-05-record/docker-gate.sh` |
+
+#### A TM FRAME'S TAPES CROSS FROM THE WORKER AS ONE STRING EACH: AS ARRAYS OF ONE-CHARACTER STRINGS THEY WERE MOST OF WHAT A FRAME COST, AND A TM COPY'S FIRST RECORDING, 145,904 FRAMES, TOOK THE PAGE 949 TO 1,013 ms AT FULL SPEED AND 8.1 TO 8.7 s AT A QUARTER OF A CORE, ONCE TIMING OUT; NOW 531 TO 587 ms AND 3.7 TO 5.6 s, AND `tm-scratch-fork`'S FIRST WAIT AFTER A FORK, WHICH PASSED PAST `until`'S 10 s ONLY ON ITS ORDER, TAKES 1.0 TO 2.4 s THERE (2026-10-07, branch `cheaper-tm-recording`, `08977f6..251f231`, 3 commits, plus this entry)
+
+**A fix, across `crates/redextape-core` and `web/`, to the second of the leftovers the 2026-10-05 lanes named**: "a cheaper first TM recording" (#132's entry, WHAT THIS DID NOT CLOSE), which #135's entry named as the reason `tm-scratch-fork`'s first wait still ran past `until`'s 10 s at a quarter of a core. There is no spec or plan file; this entry is the design. The user said "please continue" once #135 had merged, and "continue" again; which leftover to take, and the shape of the fix, were the controller's, told to the user with the result. Code commits: `9121605`, the wire shape, its readers and its tests; `77a0c1a`, the review's findings: the retention figures a full TM ring changed, and the warm-buffer budget's stricter reading; `251f231`, the re-review's wording, comment lines only.
+
+##### WHAT A FRAME COST, MEASURED
+
+`TmState.window` was `Vec<Vec<Symbol>>`, `Symbol` being a `char`, and it crossed the worker boundary as serde wrote it: an array per tape of one-character strings. The session worker records a TM leg a frame a step and posts them `RECORD_CHUNK`, 256, to a reply; the page takes each reply in and pushes its frames into the leg's `History`.
+
+A throwaway node script, `probes/frame-cost.mjs`, loaded the release wasm, compiled `tm-scratch-fork.test.ts`'s `BIG` (`map` and `fold` over three elements) and stepped its TM leg to the end of a history, timing three things: stepping alone; stepping and building each frame with `tmState(40)`, as the worker's record loop does; and each 256-frame batch through `v8.serialize` and `v8.deserialize`, the structured clone `postMessage` uses. A frame there is 5 tapes and 85 cells under `unary`, 94 under `binary`.
+
+| `BIG`, every frame of a full history | `unary`, 78,459 frames, 307 replies | `binary`, 91,786 frames, 359 replies |
+|---|---|---|
+| stepping alone | 5 to 11 ms | 7 ms |
+| building the frames | 501 to 519 ms | 738 ms |
+| writing them to a clone | 227 to 235 ms | 306 to 310 ms |
+| reading them back | 199 to 208 ms | 264 to 268 ms |
+| on the wire | 44.1 MB | 60.2 MB |
+
+**The machine is a rounding error and the frame is the cost.** Building, writing and reading the frames took 933 to 959 ms a run under `unary`, against 5 to 11 ms of stepping. The same script tried three shapes for the window on the frames already built: one string a tape, one string a tape turned back into cells on the page, and one string a frame; one string a tape built in the wasm is what was then measured, in a throwaway build of the wasm crate (`lib.rs.prototype-string-a-tape`).
+
+| `BIG`, `unary` | as on `main` | one string a tape |
+|---|---|---|
+| building the frames | 501 to 519 ms | 185 to 203 ms |
+| writing them to a clone | 227 to 235 ms | 49 to 55 ms |
+| reading them back | 199 to 208 ms | 58 to 59 ms |
+| on the wire | 44.1 MB | 20.7 MB |
+
+Under `binary` the same change took building from 738 to 233 ms, writing from 306 to 310 to 62 to 63, and reading from 264 to 268 to 73 to 75; 60.2 MB to 27.1.
+
+##### THE FIX
+
+- **In `redextape-core`, `TmState.window` keeps its type and changes what serde writes.** A field attribute, `serde(with = "tape_windows")`, writes each tape as one string, a cell a character, and reads one back as cells; `ts(type = "Array<string>")` says so to the generated TypeScript. The Rust API, `tapeSlice`, the δ-matcher and every Rust caller of the field are unchanged; `serde_json` and `serde-wasm-bindgen` both go through the module.
+- **A cell is a `char`, not a UTF-16 unit.** The TM text form takes any symbol that is not whitespace or one of `* ; [ ] :` (`symbol_representable`), so a copy's machine can write `𝟙`, one cell and two units of the string. `tape.ts`'s `tapeRows` takes a tape's cells with `Array.from`, by code point; it runs once a frame drawn, not once a frame recorded.
+- **`tmFrameBytes` counts a tape by its string's length**, two bytes a unit: for every symbol in the basic plane the count it gave before, so a history holds as many frames as it did, and for a symbol outside it four bytes, which is what the string costs.
+- **`tm-scratch-fork.test.ts`'s comment and `until`'s doc** said the fork's first wait still ran past 10 s at a quarter of a core. They now give both measurements (AFTER, INTERLEAVED).
+- **A full TM ring retains less, and the docs that measured it say so** (THE REVIEW, I1): `HISTORY_BYTES`, `DROP_HISTORY_ON_UNFOCUS`, `tmFrameBytes`, `buffer-affordability.test.ts`'s TM ratio and `MAX_WARM_BUFFERS`'s reading (b).
+
+##### AFTER, INTERLEAVED
+
+Two throwaway browser files, each copied into `web/tests/browser/`, run and deleted: `zz-fork-freeze.test.ts`, #135's, which clicks *edit a copy* on `BIG`'s TM view once it is offered and times what follows; and `zz-tm-cold.test.ts`, #132's, which pastes the reduced `5 - 3` fixture into a TM copy and times its first recording, 145,904 frames in 570 replies, to its value. `ab.sh` ran each on `main` (A: `08977f6`'s wasm, from a build byte-identical to `pkg/` on `main`, and `08977f6`'s `tape.ts`) and on the branch (B), in turn, each a locked run under `systemd-run --user --scope -q -p MemoryMax=16G -p MemorySwapMax=0`, with `-p CPUQuota=25%` at the quota, restoring the branch's files from saved copies and comparing them after every run. Times are milliseconds from the click or the paste.
+
+| | A, `main` | B, the branch |
+|---|---|---|
+| **Full speed, five runs each, loads 5.75 to 8.93** | | |
+| a TM copy's first recording: paste to value | 949 to 1,013 | 531 to 587 |
+| its 570 replies arrive over | 613 to 671 | 200 to 233 |
+| reading their data on the page | 129 to 163 | 59 to 65 |
+| after *edit a copy*: the program's own run ends | 427 to 508 | 143 to 154 |
+| the copy's recording stops | 734 to 859 | 347 to 381 |
+| the copy's editor has its whole tree | 744 to 906 | 500 to 563 |
+| **A quarter of a core, five attempts each, loads 4.56 to 29.43** | | |
+| a TM copy's first recording: paste to value | 8,101 to 8,696 in three; a fourth timed out at 10,087; a fifth did not load (`Failed to fetch dynamically imported module`) | 3,700 to 5,598 in five |
+| its 570 replies arrive over | 6,905 to 7,207 | 2,301 to 3,715 |
+| reading their data on the page | 1,516 to 2,321 | 808 to 1,172 |
+| after *edit a copy*: the program's own run ends | 11,599 to 14,301 in five | 3,695 to 5,295 in four |
+| the copy's recording stops | 12,808 to 16,610 | 6,407 to 8,896 |
+| no timer, from the copy's mount | 1,595 to 2,504 | 693 to 1,106 |
+| no frame, from the copy's mount | 597 to 1,500 | 404 to 1,006 |
+
+**B's fifth fork run did not finish as a measurement**: at the quota the program's run ended 3,790 ms after the click, at the copy's mount, and the probe stopped before the copy's text reached the parser, failing its own precondition that it saw that parse. It is out of B's four.
+
+**The test files themselves, three pairs at the quota, loads 1.23 to 5.06**: `tm-scratch-fork`'s `leaves the source session running` took 13,089 to 14,590 ms on A and 6,102 to 7,697 on B; `tm-pane-follows-session`'s whole file 28.49 to 30.88 s and 19.10 to 21.99 s; `tm-reduced-buffer`'s slowest case 17,301 to 17,907 ms and 15,789 to 16,403, its file 62.29 to 63.79 s and 49.99 to 51.20 s. Every case passed on both sides.
+
+**`tm-scratch-fork`'s waits, one by one.** `harness.ts`'s `until` instrumented to log each wait (`harness.ts.instrumented`, restored from its saved copy and compared afterwards), three pairs at the quota, loads 1.38 to 2.13: the first wait for the source run after a fork took 4,405 to 4,902 ms on A and 1,001 to 2,399 on B; the second 2,998 to 4,494 and 607 to 1,099; the copy's editor mounting 3,999 to 4,695 and 3,802 to 4,003. #132's entry quoted 7,106 to 11,407 ms for the first wait at loads of 11.60 to 56.53, and #135's 14,104 and 14,090 ms for the whole case: on a quiet machine the first wait fitted in 10 s on `main` too.
+
+- **At full speed a TM copy's first recording took the page 531 to 587 ms where it took 949 to 1,013**, its replies arriving over 200 to 233 ms where they took 613 to 671. In node, building a full history's frames took 185 to 203 ms where it took 501 to 519, and writing them 49 to 55 ms where it took 227 to 235: the worker builds and writes every frame the page waits on.
+- **The program's own run after a copy ended 143 to 154 ms after the click where it ended at 427 to 508**, and at the quota 3,695 to 5,295 where it ended at 11,599 to 14,301: it is the same kind of recording, sharing the page and the core with the copy's.
+- **The copy's editor had its whole tree 500 to 563 ms after the click where it had it at 744 to 906**: #135's slices take turns with the replies, and the replies take less.
+
+##### THE TESTS
+
+- **Rust, `viewmodel_contract.rs`**: `a_tm_frame_puts_each_tapes_window_on_the_wire_as_one_string` parses a two-tape machine whose rule writes `𝟙`, steps it three times, and holds the frame's `window` as `serde_json` writes it, `["𝟙𝟙𝟙_", "ab"]`, and as it reads back, equal to the frame. RED before `tape_windows`: the wire held `[["𝟙","𝟙","𝟙","_"],["a","b"]]`. The existing round trip of every view model passes through the same module.
+- **`redextape-wasm`'s browser tests**: the two that read a frame's `window` across the boundary read a tape as a string, a cell a character, and still check it against `tapeSlice` cell by cell.
+- **Node**: `tape.test.ts` holds a tape `'a𝟙c'` as three cells, the head on `𝟙` reading `𝟙`, and a head three past the start as outside; RED before `Array.from`, the row's cells were the string. `protocol.test.ts` holds `tmFrameBytes` of `'1𝟙'` four bytes over `'1'`.
+- **Browser**: `shapes.test.ts` holds that `tmState`'s five tapes arrive as five strings, where it checked a cell at a time, which an array of one-character strings and a string both pass.
+- **Every fixture that builds a frame** (six node files, three browser files) builds one string a tape.
+
+**The sabotages**, each one edit made by `sab/run-sabs.py`, which saves the file, asserts the edit matches once, runs the tier that holds it, restores from the copy and compares:
+
+| | What changes | What fails |
+|---|---|---|
+| R1 | `serde(with = "tape_windows")` deleted | the contract case, on the wire shape |
+| R2 | read back a byte a cell | the contract case, on the round trip |
+| R3 | cells joined with a comma | the contract case and the round trip of every view model |
+| T1 | `tapeRows` takes cells with `split('')` | the tape case: `[ 'a', '�', '�', 'c' ]` |
+| T2 | `tmFrameBytes` counts code points | the frame-size case: 2 for 4 |
+| B1 | `shapes.test.ts` run on `main`'s wasm | `expected [ 'object', … ] to deeply equal [ 'string', … ]` |
+
+##### THE REVIEW
+
+**A whole-branch review by a reviewer who had not seen the work, at the first commit: no Critical, one Important, four Minor; then its re-review of the fixes, READY with five wording nits; all taken.** Its probes and logs are in the record's `review/`.
+
+- **I1, the docs that measured a TM ring.** `HISTORY_BYTES`'s doc said a full TM ring retained 68,635,768 bytes, 2.0455 per charged byte; `DROP_HISTORY_ON_UNFOCUS`'s gave three-sessions ratios on that ring; `buffer-affordability.test.ts` used 2.0455 for the source TM ring in reading (b) of `MAX_WARM_BUFFERS`. Re-measured with `session-memory.test.ts`, two runs on each side taken in turn: the ring retained 68,637,886.67 bytes before and 29,342,720.67 after, 0.8744705880483015 per charged byte; the resident ratio for three sessions against one read 1.8103 before and 1.6710 to 1.6714 after, the baseline-free ratio 1.9999 before and 1.9986 to 1.9991, so `false` still holds. On the new ratio one run of the warm-buffer probe derived 9 for reading (b), where the doc said 8, and 11 for reading (a), which ships, as before. The re-review recomputed reading (b) on that run with the old ratio, 8.86, and the new, 9.75. All of it is in `77a0c1a`.
+- **M1**: the serde module took `&Vec` under a comment saying `with` required it, with a clippy `allow`; it takes a slice. **M2**: `until`'s doc set a 2026-10-06 figure at loads of 11.60 to 56.53 against the branch's at 1.38 to 2.13; it now gives `main`'s run at the same loads, 4,405 to 4,902 ms, and says the wait under load was not measured. **M3**: the first commit's subject said the old shape was "most of a first recording's cost", which a drop from 949 to 531 does not show; it names the values. **M4**: the frame-cost figures mixed a throwaway build's runs with this one's under one date; they say which.
+- **The re-review's nits** (`251f231`, comment lines only): a relative "the commit before" for `08977f6`, `main`'s runs given the six runs' load range, a run count, and two lines out of wrap.
+- **What the reviews found sound**: every reader of a frame's `window` in `web/src` (`tape.ts` and `tmFrameBytes`, and no store, share link or test fixture left building an array); `main`'s wasm and the branch's stepped in lockstep over the seven shipped examples under both encodings, 13 pairs with a TM leg (`fact-12` has none under `unary`), up to 400,000 frames each, every tape string equal to `main`'s cells joined and every `tmFrameBytes` equal; `𝟙` through serde-wasm-bindgen, a structured clone and `tapeRows` as one cell; ts-rs refusing `serde(with)` without `ts(type)`; and a node rerun of the frame costs within noise of this entry's.
+
+##### WHAT THIS DID NOT CLOSE
+
+- **λ frames cross the same way, and their spans are the cost.** The review measured them in node on the branch's wasm, 256 frames a reply: `fact`'s 7,399 frames carry 2,205,201 `[Span, TokenClass]` tuples, 298.0 a frame, and were 80.46 MB, 436 to 462 ms to write and 739 to 894 ms to read, in two rounds of one run; with the spans as two flat arrays, 49.24 MB, 147 ms and 286 to 298 ms. Not tried in the wasm, so what building a frame's spans costs is not measured. The λ continue pause in `share-positions`, named beside this leftover in #132's entry, was not measured against it.
+- **`tapeSlice` still answers an array of one-character strings** on a `Session` and a `TmScratch`, where a frame's window is now a string: two shapes for the same cells. Nothing in `web/src` calls it.
+- **The wait under load.** `tm-scratch-fork`'s first wait after a fork passed past 10 s on `until`'s order at loads of 11.60 to 56.53 (#132's entry). This branch measured it at 1.38 to 2.13, on both sides; at loads like those it was not measured.
+- **A first TM recording still stops the page in places at a quarter of a core**: no timer for 693 to 1,106 ms from the copy's mount and no frame for 404 to 1,006 ms, in four runs. What fills those gaps was not profiled.
+- **The copy-build reply is unchanged**: the fork's mount wait took 3,999 to 4,695 ms on `main` and 3,802 to 4,003 here, at the quota (#135's entry, WHAT THIS DID NOT CLOSE).
+- **`binary`, the app's default encoding, was measured in node only**: 738 to 233 ms to build `BIG`'s frames, 306 to 310 to 62 to 63 to write, 264 to 268 to 73 to 75 to read. Every browser figure here is under `unary`, which the browser tier's setup stores.
+
+##### VERIFICATION
+
+Run on 2026-10-07 in the main checkout on branch `cheaper-tm-recording`, the Rust gates at `77a0c1a` and the web gates and the Docker image at `251f231`, the last commit to change code, which differs from `77a0c1a` in comment lines only; the scans again with this entry committed. `pkg/` was built from this branch with `pnpm run build:wasm`; `pkg-lsp/` and `web/bindings/` are this tree's. The branch changes no `Cargo.toml` or `Cargo.lock`, and neither `web/package.json` nor `web/pnpm-lock.yaml`. Every browser run, the coverage gate's included, ran under `flock <the lane's browser lock> systemd-run --user --scope -q -p MemoryMax=16G -p MemorySwapMax=0`, plus `-p CPUQuota=25%` for the quota runs; the Rust gates in a `systemd-run --user` unit with `MemoryMax=16G`.
+
+```
+scripts/check-all.sh --no-llvm, from the root                 → exit 0 (every leg but LLVM; `wasm-pack test --headless --chrome crates/redextape-wasm` 33 passed)
+cargo llvm-cov nextest --workspace --fail-under-lines 90         → exit 0, 95.68 % of lines
+scripts/check-slow.sh                                            → exit 0
+pnpm exec biome ci --error-on-warnings                           → exit 0, 348 files (1 info, biome.json's deprecated `recommended`)
+pnpm run typecheck                                               → exit 0
+pnpm run test:coverage                                           → exit 0, 229 files / 2,245 tests; 97.51 / 91.61 / 98.38 / 98.87 against 95 / 89 / 97 / 97
+pnpm run build:app                                               → exit 0
+scripts/check-{text-bytes,citations,attributions,doc-figures,shared-docs,colours,grammar-wasm,lua}.sh, --self-test then alone → 16 of 16 exit 0
+the seven browser files the branch changes, each alone under -p CPUQuota=25%, at loads 2.38 to 8.90 → exit 0, every case passing:
+  shapes 2 of 2, slowest 101 ms; tm-scratch-fork 5 of 5, 7,500 ms; tm-reduced-buffer 5 of 5, 16,000 ms (a case with its `beforeEach`);
+  tm-pane-follows-session 6 of 6, 1,296 ms; tm-pane-editor 12 of 12, 208 ms; tm-follow-clamp 5 of 5, 308 ms; view-title 7 of 7, 306 ms
+docker build --network=host, then run --network host, at `251f231` → healthy after 4 polls; GET / 200 and its 4 assets 200; 7 wasm; container and image removed
+```
+
+`check-all.sh`'s LLVM leg was not run here: this machine has LLVM 21 and 23, and the leg needs 22; CI's `rust-llvm` runs it. Each probe was copied into `web/tests/browser/`, run and deleted; `pkg/`'s wasm, `web/src/tape.ts` and `harness.ts` were each restored from a saved copy and compared with `cmp` after every swap; `git status` was empty after each.
+
+**Every count this entry quotes, with what produces it.** The lane's record directory is scratch, not tracked, and each command runs from it unless it reads git. `logs/` holds every locked run, `sab/` the sabotages, `review/` the reviews' evidence, `probes/` the throwaway files.
+
+| Value | What | Produced by |
+|---|---|---|
+| 3; `9121605`, `77a0c1a`, `251f231` | commits in the range | `git rev-list --count 08977f6..251f231`; `git log --format='%h %s' 08977f6..251f231` |
+| 0 | `77a0c1a..251f231` outside comments | `git diff -U0 77a0c1a 251f231 \| grep -E '^[+-]' \| grep -vE '^(\+\+\+\|---)' \| grep -vE '^[+-]\s*(//\|\*\|/\*\*)' \| wc -l` |
+| 5 tapes, 85 and 94 cells; 78,459 and 91,786 frames, 307 and 359 replies; 5 to 11, 7; 501 to 519, 738; 227 to 235, 306 to 310; 199 to 208, 264 to 268; 44.1, 60.2 MB | `main`'s frame costs in node | `grep -h "frames\|step alone\|as built" logs/frame-cost-unary-1.log logs/frame-cost-AB-unary.log logs/frame-cost-AB-binary.log` (the `probe-frame-A` blocks), written by `node probes/frame-cost.mjs <encoding> <frames> <pkg dir>` |
+| 933 to 959 | building, writing and reading `main`'s frames, a run | the per-run sums of those blocks' three figures |
+| 185 to 203 in five; 49 to 55 and 58 to 59 in three; 20.7 MB; 233, 62 to 63, 73 to 75, 27.1 MB | one string a tape | the `probe-frame-B` blocks of `logs/frame-cost-AB-unary.log`, `logs/frame-cost-B-unary.log` and `logs/frame-cost-AB-binary.log`, and `logs/frame-cost-branch-unary-1.log` |
+| AFTER's table, full speed and quota | the interleaved probe runs | `python3 abtable.py ab-full-fork-freeze ab-q25-fork-freeze ab-q25b-fork-freeze`, and `grep -h -o "PHASES cold.*\|MSGS cold: tm-frames.*" logs/ab-*-tm-cold-*.log` (the arrival span is `last` less `first`) |
+| 5.75 to 8.93; 4.56 to 29.43; 1.23 to 5.06; 1.38 to 2.13; 1.52 to 1.68 | loads after the lock | `python3 loads.py` |
+| the timeout at 10,087; the failure to load; B's fifth fork run | the quota's failed attempts | `grep -h "WAIT timeout" logs/ab-q25b-tm-cold-A-1.log`; `grep -h "Failed to fetch" logs/ab-q25-tm-cold-A-3.log`; `grep -h "AssertionError" logs/ab-q25-fork-freeze-B-1.log` |
+| 13,089 to 14,590 and 6,102 to 7,697; 28.49 to 30.88 s and 19.10 to 21.99 s; 17,301 to 17,907 and 15,789 to 16,403 ms, 62.29 to 63.79 s and 49.99 to 51.20 s | the test files at the quota | `grep -h -o "leaves the source session running [0-9]*ms\|lets an edit supersede a value run that is still going [0-9]*ms\|Duration *[0-9.]*s" logs/ab-q25files-*.log` |
+| 4,405 to 4,902 and 1,001 to 2,399; 2,998 to 4,494 and 607 to 1,099; 3,999 to 4,695 and 3,802 to 4,003 | `tm-scratch-fork`'s waits | `for f in logs/ab-q25until-tm-scratch-fork-*.log; do grep -o "UNTILLOG.*leaves the source.*" $f \| sort -u; done`, written with `harness.ts.instrumented` in place |
+| 7,106 to 11,407 at 11.60 to 56.53; 14,104 and 14,090 | #132's and #135's figures | those entries' tables, in this file |
+| 68,637,886.67, 2.0455435539751248; 29,342,720.67, 0.8744705880483015; 93,080,893.67 to 168,514,131 and 1.8103; 53,797,982.33 to 89,918,997.67 and 1.6710 to 1.6714; 1.9999, 1.9986 to 1.9991 | the TM ring and three sessions, two runs a side | `grep -h -o "tm *leg: real.*\|mean resident.*\|mean delta.*" logs/ab-mem-session-memory-*.log`, written by `probes/zz-session-memory.test.ts` (`session-memory.test.ts` with `console.error`) |
+| 35.95 MB; 29,342,363.88; 103,566,047.88, 9; 38,273,024, 11 | the warm-buffer probe on the new ratio | `grep -h -o "console.error\] .*\(ring at exhaustion\|derived cap\).*" logs/probe-buffer-affordability-branch.log`, written by `probes/zz-buffer-affordability.test.ts` |
+| 8.86, 9.75 | reading (b) on that run with the old and new ratio | `review/review2.md` |
+| 2,205,201, 298.0; 80.46 MB, 436 to 462, 739 to 894; 49.24 MB, 147, 286 to 298 | λ frames | `grep -A3 "^fact.rxt lambda" review/logs/sibling-cost.log` |
+| 13 pairs, 0 frames differing, 400,000 | the lockstep comparison | `grep -c "frames differing 0" review/logs/wire-equiv.log`; `grep "TM not available\|capped" review/logs/wire-equiv.log` |
+| `["𝟙𝟙𝟙_","_"]` | `𝟙` through the real serializer and a clone | `review/logs/nonbmp.log` |
+| R1 to R3, T1, T2, B1 | the sabotages | `python3 sab/run-sabs.py` (`sab/sab-summary.txt`, `sab/*.log`); `logs/sab-B1-shapes-on-main-wasm.log` |
+| the gates block | the gates | `rust-gates-77a0c1a/gates.log` (`rust-gates-77a0c1a.sh`), `gates-final/gates.log` (`gates.sh`), `docker-final/gate-docker.log` |
+| 95, 89, 97, 97 | the coverage floors | `thresholds` in `web/vite.config.ts` |

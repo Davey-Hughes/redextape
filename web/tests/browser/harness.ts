@@ -91,11 +91,12 @@ const sourceOf = (predicate: () => boolean): string => {
  * `readout-history-held.test.ts` each ran one wait for 10.8 to 13.5 s, its last poll after a gap of 7.2 to
  * 12.9 s, and both passed because the recording had stopped by that poll. Checked the other way round, they
  * would have thrown on a state that had arrived. Those two waits took 991 to 2,204 ms there once it stopped,
- * in three interleaved runs each (each file's own comment). **ONE WAIT STILL PASSES ON THIS ORDER**: the first
- * of `tm-scratch-fork.test.ts`'s two for the source run after a fork, where the page runs almost no poll
- * through the fork's first seconds. It took 7,106 to 11,407 ms in three runs at `CPUQuota=25%`, and 7,503 and
- * 9,905 ms in two more at load averages of 8.28 and 12.01 (2026-10-06). `tests/node/harness.test.ts` holds
- * the order.
+ * in three interleaved runs each (each file's own comment). The first of `tm-scratch-fork.test.ts`'s two waits for
+ * the source run after a fork passed on this order too, at 7,106 to 11,407 ms in three runs at `CPUQuota=25%` and
+ * load averages of 11.60 to 56.53 (2026-10-06). On a quiet machine it fits: at that quota it took 4,405 to 4,902 ms
+ * in three runs at load averages of 1.52 to 1.68, and 1,001 to 2,399 ms in three taken in turn with them, at 1.38 to
+ * 2.13, once a TM frame's tapes crossed from the worker as one string each (2026-10-07; that file's comment). Whether it still passes
+ * on this order under load was not measured. `tests/node/harness.test.ts` holds the order.
  *
  * **THE DEFAULT IS BOUNDED BELOW VITEST'S OWN, WHICH IS THE ENTIRE REASON IT IS ONE NUMBER.** Browser
  * mode raises `testTimeout` to 15,000 ms and `hookTimeout` to 30,000 — both measured against this

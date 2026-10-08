@@ -89,17 +89,24 @@ export const ASM_WINDOW: AsmWindow = { locals: 64, args: 16, frames: 8, cells: 1
  *     measured 74.08) is most of what keeps this honest.
  *   * TM leg — **2.045480413555839**: 68,635,768 bytes of retained heap against the 33,554,840
  *     `tmFrameBytes` charged for 75,023 retained frames of 75,025 pushed. So a TM leg that actually
- *     spends this budget costs ~68.6 MB of heap for a 33.55 MB allowance. The TM figure reproduced to
+ *     spends this budget cost ~68.6 MB of heap for a 33.55 MB allowance. The TM figure reproduced to
  *     the byte across four runs; the λ one varied by ~6,600 bytes in 6.8 million.
+ *   * **TM leg since a frame's tapes cross as one string each — 0.8744705880483015**: 29,342,720.67
+ *     bytes against the same 33,554,840 for the same 75,023 frames, in two runs of the same file taken
+ *     in turn with two on `08977f6`, before that change, which read 68,637,886.67 and 2.0455435539751248
+ *     (2026-10-07).
+ *     A full TM ring now retains 29.3 MB, against the 35.95 MB `buffer-affordability.test.ts` measured
+ *     for a full λ ring.
  *
- * `tmFrameBytes` (below) charges 2 bytes a cell for a `window: string[][]` whose cells are
- * one-character JS strings, and charges nothing for the per-tape array headers around them or for the
- * ring's own two parallel arrays — `History`'s `#frames` and `#sizes` are 8 bytes an entry each, about
+ * `tmFrameBytes` (below) charged 2 bytes a cell for a `window: string[][]` whose cells were
+ * one-character JS strings, and nothing for the per-tape array headers around them; a tape's window is
+ * now one string, charged 2 bytes a UTF-16 unit, which V8 holds in one byte a character when every
+ * character is Latin-1. It charges nothing for the ring's own two parallel arrays — `History`'s `#frames` and `#sizes` are 8 bytes an entry each, about
  * 16 B/frame here by arithmetic rather than by separate measurement, and more on a ring that evicts,
  * whose arrays hold up to as many evicted places again as frames kept before each cut (`History`'s
  * `#evict`): twice the places, and 2.2 times the bytes at the peak. Measured in node for 69,008 frames
  * kept (2026-10-05), the two arrays held 1,208 to 2,708 KB through the evictions, against 1,208 to
- * 1,216 KB when `History` shifted them: about 1.5 MB at most, against the 68.6 MB a full TM ring
+ * 1,216 KB when `History` shifted them: about 1.5 MB at most, against the 29.3 MB a full TM ring
  * retains. **Left as is, and deliberately.**
  * Re-scaling the constant to make its units retained bytes would change every recording length in the
  * app on the strength of one fixture's cell geometry, and the number the design cares about — what
@@ -126,6 +133,14 @@ export const HISTORY_BYTES = 32 * 1024 * 1024
  * 92,414,610 / 167,854,526, then 92,441,666 / 167,875,654, then 92,450,718 / 167,864,574. An earlier
  * run of the same file read 1.816478530039582 on a page baseline 46,565 bytes lower — the ratio moves
  * with that baseline and the next paragraph says why.
+ *
+ * **RE-MEASURED 2026-10-07, WHEN A TM FRAME'S TAPES BEGAN TO CROSS AS ONE STRING EACH, AND STILL MET.**
+ * The same file, two runs on each side taken in turn: mean resident heap 93,080,893.67 and 93,085,205.67
+ * bytes for one session against 168,507,487 and 168,514,131 for three before the change, ratios
+ * 1.8103337899122949 and 1.8103213050142515; after it 53,797,982.33 and 53,802,203.67 against
+ * 89,918,997.67 and 89,904,097.67, ratios 1.6714195173626927 and 1.6710114370718063. Baseline-free, the
+ * ratio read 1.9998919540045792 and 1.999850460283213 before and 1.9990624867469862 and
+ * 1.9985581174246312 after. Every other figure in this doc is the 2026-08-11 measurement's.
  *
  * THE PLAN'S ARITHMETIC HELD ON THE HISTORIES, AND THE MEASUREMENT IS WHY THAT IS NOW A FACT RATHER
  * THAN A COUNT. Stripping the harness page's ~17.0 MB baseline leaves what the session machinery
@@ -321,7 +336,15 @@ export function lambdaFrameBytes(f: LambdaState): number {
   )
 }
 
-/** A TM frame's size in bytes. Cells dominate; the two index arrays are `heads` and `window_start`, one number per tape. */
+/**
+ * A TM frame's size in bytes. Cells dominate; the two index arrays are `heads` and `window_start`, one number per tape.
+ *
+ * **A TAPE'S WINDOW IS ONE STRING, CHARGED TWO BYTES A UTF-16 UNIT**, so a symbol outside the basic plane is charged
+ * four: counted in the string's own length, rather than in cells. A charge, not what the string occupies: V8 holds a
+ * Latin-1 string in one byte a character, and a full TM ring retains less than it is charged (`HISTORY_BYTES`). For
+ * every symbol in the basic plane the count is the one this function gave when a window was an array of
+ * one-character strings, so a history holds as many frames as it did.
+ */
 export function tmFrameBytes(f: TmState): number {
   let cells = 0
   for (const tape of f.window) cells += tape.length

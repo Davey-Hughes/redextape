@@ -95,11 +95,11 @@ describe('wire shapes', () => {
       session.stepTm()
       expect(session.tmState(40).state).toBe(expected)
     }
-    // A cell is a one-character string — `Symbol` is `char` in Rust.
-    for (const cell of second.window[0] ?? []) {
-      expect(typeof cell).toBe('string')
-      expect(cell.length).toBe(1)
-    }
+    // A TAPE'S WINDOW IS ONE STRING, A CELL A CHARACTER (`viewmodel.rs`'s `TmState.window`; `Symbol` is `char` in
+    // Rust). Iterating an array of one-character strings would pass a check made cell by cell, so the type is the
+    // check.
+    expect(second.window.map((tape) => typeof tape)).toEqual(['string', 'string', 'string', 'string', 'string'])
+    expect(second.window[0]?.length).toBeGreaterThan(0)
 
     session.free()
   })

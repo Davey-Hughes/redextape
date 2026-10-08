@@ -322,10 +322,12 @@ describe('forking a TM pane', () => {
     // failing once, at 10,104 ms under a load average of 17.79. The first wait ends half way from the count at the fork
     // to the last reply, or at the result.
     //
-    // **THE FIRST WAIT STILL RUNS PAST `until`'S 10 s, AND PASSES THEN ON `until`'S ORDER** (its doc): the page runs
-    // almost no poll through the fork's first seconds, so the wait ends at the first poll after them. It took 7,106 to
-    // 11,407 ms in three runs at `CPUQuota=25%`, and 7,503 and 9,905 ms in two more at load averages of 8.28 and 12.01
-    // (2026-10-06).
+    // **THE FIRST WAIT RAN PAST `until`'S 10 s, AND PASSED THEN ON `until`'S ORDER** (its doc), at 7,106 to 11,407 ms
+    // in three runs at `CPUQuota=25%` and 7,503 and 9,905 ms in two more at load averages of 8.28 and 12.01
+    // (2026-10-06): the page ran almost no poll while the two workers' frames came in. **A TM FRAME'S TAPES NOW CROSS
+    // AS ONE STRING EACH** (`viewmodel.rs`'s `TmState.window`), and in three runs at that quota, at load averages of
+    // 1.38 to 2.13, the two waits took 1,001 to 2,399 ms and 607 to 1,099 ms, where three runs taken in turn with
+    // them before that change took 4,405 to 4,902 ms and 2,998 to 4,494 ms (2026-10-07).
     const atFork = sourceTmReplies
     expect(atFork, 'precondition: the replies counted are this compile’s').not.toBeNull()
     const halfWay = Math.ceil(((atFork ?? 0) + BIG_TM_REPLIES) / 2)

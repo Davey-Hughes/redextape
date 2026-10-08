@@ -391,8 +391,14 @@ const MAIN_THREAD_WASM_MODULE_BASELINE_BYTES = SOURCE_WASM_MODULE_BASELINE_BYTES
 
 /** The λ leg's real-retained-heap-per-charged-byte ratio, measured by `protocol.ts`'s `HISTORY_BYTES` doc (its λ-leg row). */
 const LAMBDA_LEG_RETENTION_RATIO = 1.071921708710566
-/** The TM leg's equivalent, from the same doc's TM row. */
-const TM_LEG_RETENTION_RATIO = 2.045480413555839
+/**
+ * The TM leg's equivalent, from the same doc's TM rows: the one since a TM frame's tapes cross as one string each.
+ *
+ * **IT WAS 2.045480413555839 UNTIL THEN**, and reading (b)'s derived cap was 8 on it. With this one the probe printed
+ * a source TM ring at exhaustion of 29,342,363.88 bytes and a derived cap (b) of 9, in one run (2026-10-07); reading
+ * (a), which counts no source ring, printed 11 as before.
+ */
+const TM_LEG_RETENTION_RATIO = 0.8744705880483015
 
 describe('worker affordability', () => {
   it('measures what a warm buffer costs, and derives the cap from the pre-registered budget', {

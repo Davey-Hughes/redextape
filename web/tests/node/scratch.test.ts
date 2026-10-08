@@ -840,7 +840,7 @@ describe('ScratchBuffers.noSessionReply, on the copy’s own leg', () => {
     step: 0,
     heads: [0],
     window_start: [0],
-    window: [['_']],
+    window: ['_'],
     source_node: null,
     rule: null,
   }

@@ -31,7 +31,7 @@ const tm = (tapes: number, cells: number): TmState => ({
   step: 0,
   heads: Array.from({ length: tapes }, () => 0),
   window_start: Array.from({ length: tapes }, () => 0),
-  window: Array.from({ length: tapes }, () => Array.from({ length: cells }, () => '_')),
+  window: Array.from({ length: tapes }, () => '_'.repeat(cells)),
   source_node: null,
   rule: null,
 })
@@ -60,6 +60,13 @@ describe('frame sizers', () => {
     // Pin the per-cell weight, not just monotonicity: `cells * 1` instead of `cells * 2` would pass
     // a bigger-input-bigger-number check and silently halve every TM frame's budgeted size.
     expect(tmFrameBytes(tm(5, 20)) - tmFrameBytes(tm(5, 10))).toBe(5 * 10 * 2)
+  })
+
+  it('counts a tape’s window in UTF-16 units, so a symbol outside the basic plane is four bytes', () => {
+    // A TAPE IS ONE STRING NOW, AND ITS LENGTH IS ITS COST: `𝟙` is one cell and two units. Counting cells instead would
+    // give the same answer for every symbol in the basic plane and under-count this one.
+    const one = (tape: string): TmState => ({ ...tm(1, 0), window: [tape] })
+    expect(tmFrameBytes(one('1𝟙')) - tmFrameBytes(one('1'))).toBe(4)
   })
 
   it('never reports a frame as free', () => {

@@ -383,6 +383,32 @@ fn every_view_model_round_trips_through_json() {
     assert_eq!(ts, back);
 }
 
+/// **A TM FRAME PUTS EACH TAPE'S WINDOW ON THE WIRE AS ONE STRING, AND READS ONE BACK AS CELLS.** The web app records a
+/// TM leg a frame a step, and `window` as an array of one-character strings a tape was most of what a frame cost to
+/// build in the worker and to copy across to the page. The Rust type keeps a cell a `Symbol`; only what serde writes
+/// changes.
+///
+/// A SYMBOL OUTSIDE THE BASIC PLANE, ON PURPOSE: `𝟙` is one `char` and two UTF-16 units, so a reader that indexed the
+/// string by unit would find two cells where the tape has one. The text form accepts it (`symbol_representable`), so a
+/// copy's machine can write it.
+#[cfg(feature = "serde")]
+#[test]
+fn a_tm_frame_puts_each_tapes_window_on_the_wire_as_one_string() {
+    let (machine, ds) =
+        redextape_core::tm::parse_tm("tapes 2\nstart s\n\nstate s:\n  [_ *] -> write [𝟙 *], move [R S], goto s\n");
+    assert!(ds.is_empty(), "the fixture parses: {ds:?}");
+    let machine = machine.expect("a machine");
+    let mut c = redextape_core::trace::TmCursor::new(&machine, &[vec![], vec!['a', 'b']], tm_caps());
+    c.by_ref().take(3).count();
+    let ts = TmState::window(&c, None, 4);
+    assert_eq!(ts.window[0], vec!['𝟙', '𝟙', '𝟙', '_'], "precondition: three marks written and the head past them");
+
+    let wire = serde_json::to_value(&ts).expect("serialize");
+    assert_eq!(wire["window"], serde_json::json!(["𝟙𝟙𝟙_", "ab"]));
+    let back: TmState = serde_json::from_value(wire).expect("deserialize");
+    assert_eq!(back, ts);
+}
+
 /// A flat 200-element list, then `head` of it — a sizeable first-order term with no recursion, big
 /// enough for a byte or node budget to bite and small enough for an unreachable one not to.
 ///

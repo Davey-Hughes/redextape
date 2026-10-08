@@ -743,7 +743,7 @@ describe('a recording chunk redraws once per frame', () => {
     step,
     heads: [0],
     window_start: [0],
-    window: [['a']],
+    window: ['a'],
     source_node: null,
     rule: null,
   })

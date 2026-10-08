@@ -221,8 +221,9 @@ fn compile_step_and_read_both_legs() {
     assert_eq!(num(&tm_state, "step"), 2870.0);
     let window: Array = get(&tm_state, "window").unchecked_into();
     assert_eq!(window.length(), 5, "one window per tape");
-    let tape0: Array = window.get(0).unchecked_into();
-    assert!(tape0.length() <= 7, "radius 3 yields at most 7 cells, got {}", tape0.length());
+    // A TAPE'S WINDOW CROSSES AS ONE STRING, A CELL A CHARACTER (`TmState.window`'s doc in `redextape-core`).
+    let tape0: Vec<char> = window.get(0).as_string().expect("a tape's window is one string").chars().collect();
+    assert!(tape0.len() <= 7, "radius 3 yields at most 7 cells, got {}", tape0.len());
 
     // `rule` crosses as a number or null, never as a bigint — the failure `TermNode`'s `u32` note was
     // guarding against, checked here rather than assumed because `usize` is what this field uses.
@@ -236,12 +237,12 @@ fn compile_step_and_read_both_legs() {
     let slice: Array = call(
         &session,
         "tapeSlice",
-        &[JsValue::from_f64(0.0), JsValue::from_f64(from), JsValue::from_f64(from + tape0.length() as f64)],
+        &[JsValue::from_f64(0.0), JsValue::from_f64(from), JsValue::from_f64(from + tape0.len() as f64)],
     )
     .unchecked_into();
-    assert_eq!(slice.length(), tape0.length(), "slice and window must agree in the same space");
-    for i in 0..slice.length() {
-        assert_eq!(slice.get(i), tape0.get(i), "cell {i} differs between slice and window");
+    assert_eq!(slice.length() as usize, tape0.len(), "slice and window must agree in the same space");
+    for (i, cell) in (0u32..).zip(&tape0) {
+        assert_eq!(slice.get(i).as_string(), Some(cell.to_string()), "cell {i} differs between slice and window");
     }
 
     // Both raises take a plain JS `number`, not a `bigint`. The shell narrows to `u32` and widens
@@ -1174,11 +1175,10 @@ fn a_headerless_tm_scratch_runs_and_says_its_configuration_was_invented() {
         "a scratch is stepped, never described-run — there is no whole-run length for it to report"
     );
 
-    // Blank tape, then the mark the one rule writes. `window` is a Vec<Vec<Symbol>> and a `Symbol` is a
-    // `char`, so each cell crosses as a one-character string.
+    // Blank tape, then the mark the one rule writes. A tape's window crosses as one string, a cell a character.
     let before = call(&scratch, "tmState", &[JsValue::from_f64(3.0)]);
-    let tape0: Array = Array::from(&get(&before, "window")).get(0).unchecked_into();
-    assert_eq!(tape0.get(0).as_string().as_deref(), Some("_"), "a headerless machine starts on blank tape");
+    let tape0 = Array::from(&get(&before, "window")).get(0).as_string().expect("a tape's window is one string");
+    assert_eq!(tape0.chars().next(), Some('_'), "a headerless machine starts on blank tape");
     assert_eq!(get(&before, "source_node"), JsValue::NULL, "a scratch has no lowering, so no owner");
 
     assert_eq!(call(&scratch, "stepTm", &[]), JsValue::TRUE, "the wildcard rule fires on the blank");

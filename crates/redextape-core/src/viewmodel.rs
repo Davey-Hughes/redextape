@@ -215,8 +215,8 @@ pub struct TmProgram {
 ///
 /// `heads` AND `window_start` ARE BOTH MATERIALIZED-TAPE COORDINATES, not window-relative ones:
 /// `heads[i]` is tape `i`'s head index against the tape as currently materialized
-/// (`sim::Tape::head_index`, i.e. `left.len()`), and `window_start[i]` is the index of `window[i][0]`
-/// in that same space. A marker's position inside the window is therefore `heads[i] -
+/// (`sim::Tape::head_index`, i.e. `left.len()`), and `window_start[i]` is the index of tape `i`'s first
+/// window cell in that same space. A marker's position inside the window is therefore `heads[i] -
 /// window_start[i]`, and a scrolling call that addresses the tape directly — the planned
 /// `tapeSlice(tape, from, to)` — has these as a coordinate space to speak in, rather than only a
 /// window-relative index with nothing to scroll against. See `TmState::window`'s doc for the one
@@ -230,8 +230,21 @@ pub struct TmState {
     pub step: u64,
     /// Each tape's head index in materialized-tape coordinates (see the struct doc).
     pub heads: Vec<usize>,
-    /// Each tape's `window[i][0]` index, in the same materialized-tape coordinates as `heads`.
+    /// The index of each tape's first window cell, in the same materialized-tape coordinates as `heads`.
     pub window_start: Vec<usize>,
+    /// Each tape's cells from `window_start[i]`, at most `radius` either side of its head.
+    ///
+    /// **ON THE WIRE A TAPE'S WINDOW IS ONE STRING, A CELL A CHARACTER** (`tape_windows`). The web app records a TM leg
+    /// a frame a step, and as an array of one-character strings a tape this field was most of what a frame cost. For
+    /// `map`/`fold` over three elements, 78,459 frames of 85 cells, measured in node on the release wasm: building them
+    /// took 501 to 519 ms, and the structured clone that carries them from the worker to the page 227 to 235 ms to
+    /// write and 199 to 208 ms to read, 44.1 MB in all (2026-10-06). As a string a tape, from a throwaway build that
+    /// wrote the same shape and from this one: building 185 to 203 ms in five runs, writing 49 to 55 ms and reading 58
+    /// to 59 ms in three, 20.7 MB (2026-10-06 and 07). A full TM history in Chromium retained 68,637,886.67 bytes of heap, and retains
+    /// 29,342,720.67 (`HISTORY_BYTES`'s doc). **A CELL IS A `char`, NOT A UTF-16 UNIT**: a symbol outside the basic
+    /// plane is two units of the string, so a reader takes the cells by code point.
+    #[cfg_attr(feature = "serde", serde(with = "tape_windows"))]
+    #[cfg_attr(feature = "ts", ts(type = "Array<string>"))]
     pub window: Vec<Vec<Symbol>>,
     pub source_node: Option<NodeId>,
     /// The index into `states[state].rules` of the rule ABOUT TO FIRE, or `None` when nothing matches.
@@ -643,6 +656,22 @@ impl TmState {
         let source_node = entry.and_then(|s| map.and_then(|m| m.tm_owner(&s.name)));
         let rule = entry.and_then(|s| s.rules.iter().position(|r| crate::tm::sim::rule_matches(&r.read, c.tapes())));
         TmState { state, step: c.steps_taken(), heads, window_start, window, source_node, rule }
+    }
+}
+
+/// `TmState::window` on the wire: one string a tape, a cell a character, and back.
+#[cfg(feature = "serde")]
+mod tape_windows {
+    use serde::{Deserialize, Deserializer, Serializer};
+
+    use crate::tm::Symbol;
+
+    pub(super) fn serialize<S: Serializer>(windows: &[Vec<Symbol>], s: S) -> Result<S::Ok, S::Error> {
+        s.collect_seq(windows.iter().map(|tape| tape.iter().collect::<String>()))
+    }
+
+    pub(super) fn deserialize<'de, D: Deserializer<'de>>(d: D) -> Result<Vec<Vec<Symbol>>, D::Error> {
+        Ok(Vec::<String>::deserialize(d)?.into_iter().map(|tape| tape.chars().collect()).collect())
     }
 }
 
