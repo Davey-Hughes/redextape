@@ -25984,3 +25984,121 @@ docker build --network=host, then run --network host, at `f5e999d` → healthy a
 | 52.79 MB, 22,151,168, 30.64 MB; 592.24 and 592.40 MiB; 475,062,616 and 40,388,757, 491.6 MiB | a TM copy, with the TM arm kept out of this branch | `grep -h "TM n=\|TM copy" logs/probe-affordability-tm-1.log logs/probe-affordability-tm-9.log`; the arm is `~/temp/redextape-warm-copy-cap-record/tm-arm.patch` |
 | the gates block | the gates | `rust-gates-ccc0d47/gates.log` (`rust-gates-arg.sh`), `gates-ccc0d47/gates.log` (`gates.sh`), `docker-final/gate-docker.log` (`docker-gate.sh`) |
 | 95, 89, 97, 97 | the coverage floors | `thresholds` in `web/vite.config.ts` |
+
+#### `MAX_WARM_BUFFERS` IS 8, WHERE IT WAS 11: A λ COPY SET IT, AND SINCE #136 AND #137 A TM COPY COSTS MORE; EIGHT TM COPIES OF `map-fold` UNDER `binary`, THE COSTLIEST COPY OF A SHIPPED EXAMPLE, WITH THE MACHINE THE PAGE KEEPS FOR EACH, COME TO 485.70 MiB WITH THE PAGE AND NINE TO 541.53, AGAINST THE 512 MiB BUDGET (2026-10-07, branch `warm-copy-cap`, `ab0950d..db09ca5`, 5 commits, plus this entry)
+
+**A follow-up to #137, and two decisions of the user's.** #137's entry (DECISIONS) recorded the first: the warm-buffer probe priced λ copies only, a TM copy measured more, and the user chose "Lower to 9": one cap for every copy kind, set by the costliest, in a pull request of its own. The whole-branch review then found that nine copies are over the budget once the page's own copy of each machine is priced (THE REVIEW, C1), and the user chose "Cap 8 (Recommended)", the same rule priced with it. There is no spec or plan file; this entry is the design. Code commits: `c18b38e`, a cap of 9 and the probe's TM case; `3ccf65e`, comment lines only, what the cap covers and what it cannot; `ee5a762`, the review's findings, among them the cap of 8; `9799c5e`, a test file that needed room for nine copies; `db09ca5`, the re-review's Minors.
+
+##### WHAT SET THE CAP, AND WHAT CHANGED
+
+`MAX_WARM_BUFFERS` is how many copies may hold a worker at once. Its doc's threshold, pre-registered in 5d-ii-d: a page at the cap, every warm copy holding a real term with its ring driven to exhaustion, must sit at or below 512 MiB of main-thread heap and summed per-thread wasm memory, and the cap is the largest count that satisfies it. 5d-ii-d set 11 from λ copies, then the costliest: about 44.5 MB each. Since a TM frame's tapes and a λ frame's spans cross from the worker as one string and one byte string (#136, #137), a full TM ring holds 29.3 MB and a full λ ring 7.9, and a λ copy costs 16.42 MB in the probe. A TM copy's worker also holds more wasm: 25,362,432 bytes for `map-fold` under `binary`, where a λ copy's held 8,519,680.
+
+##### WHAT A COPY COSTS, EVERY KIND
+
+Throwaway browser files, each a copy of `buffer-affordability.test.ts` with its cases skipped and one added, priced one copy at a time, as a worker builds it, records it once to `HISTORY_BYTES` charged and holds it, the ring rebuilt on the page and read after two forced collections. One run each, and none of them held the page's copy of a TM machine, which only the TM case below does.
+
+| A TM copy, n = 1 (bytes) | `unary` | `binary` |
+|---|---|---|
+| `map-fold` | 52,794,396 | **54,334,652** (wasm 25,362,432, ring 28,972,220) |
+| `fact-12` | no machine | 51,585,008 |
+| `closure` | 42,067,500 | 19,966,696 |
+| `fact` | 39,449,656 | 24,120,648 |
+| `sum-to` | 24,648,116 | 16,035,040 |
+| `is-even` | 19,167,908 | 16,538,020 |
+| `arithmetic` | 9,588,652 | 8,830,616 |
+
+- **With the machine the page keeps counted**, through the TM case's `tmRound`, the review's run kept the order: `map-fold` under `binary` 58,545,848 bytes, under `unary` 56,119,708, `fact-12` under `binary` 55,037,816.
+- **A λ copy at rest**, its worker and ring only: 16,444,164 bytes at most of the fork steps this lane tried, `fact-12`'s at step 0, and 17,241,868 at step 200 in the review's run; from step 250 the fork is refused, the term too large to print at `LAMBDA_BYTE_BUDGET`.
+- **An asm copy**, its worker and ring only: 9,454,688 bytes at most, `map-fold`'s; its run ends in 260 steps.
+
+So the copy that sets the cap is a TM copy of `map-fold` under `binary`, the app's default encoding.
+
+##### THE CHANGE
+
+- **`MAX_WARM_BUFFERS` is 8.** Every test that exercises the cap imports the constant; none spells a number.
+- **The probe gains a TM case.** `affordability-tm-worker.ts` builds a `TmScratch` from the copy's machine text, makes the three calls a copy's first reply is made from, records its TM leg to `HISTORY_BYTES` charged, runs its value run to the end in `VALUE_CHUNK` chunks and holds the scratch, as `session-worker.ts`'s `onTmScratch` does, and answers what a copy's `tm-scratch-compiled` and last `tm-value` replies hand the page. The case compiles `map-fold` under `binary` on the page for its machine text and prices n of those copies at n = 1, 2, 4, the cap and one past it: each ring, and beside it the machine, tape names, status and value `replies.ts` keeps on the copy's session entry whether or not a view shows it, read after two collections with the replies' frame arrays dropped, and refuses a copy whose machine has no states. It derives the cap from reading (a)'s intercept as the λ case does, and prints the page at the cap and one past it against the budget.
+- **`MAX_WARM_BUFFERS`' doc** says what set 8, what "at rest" means, that a copy a view shows holds more that was not measured, and the two copies no count prices.
+- **`vite.config.ts`** no longer says the probe runs eleven workers.
+- **`MAX_WARM_BUFFERS`' doc names a floor of 7 for the tests**: `copy-edit-leaving.test.ts` keeps seven copies on its page by its end and `stage-tab-titles.test.ts` six, their copies outliving their tests, counted before every test of every browser file in the re-review's sweep.
+- **`copy-editor-mount.test.ts` deletes each test's copies after it.** It made nine copies on its one page and never deleted one, so its ninth fork waited on the cap: at 8, `offers move the editor here on TM, and the view that gives it up keeps its copy's value` timed out "waiting for the copy's editor", the one failure in the gate's 2,247 tests at `ee5a762`. An `afterEach` deletes every copy through the copies menu, the loop `two-lambda-panes.test.ts` uses for the same reason; the file passes 9 of 9 at full speed and at a quarter of a core.
+
+| The TM case, four runs | n = 8 | n = 9 |
+|---|---|---|
+| copies' wasm | 202,899,456 | 228,261,888 |
+| copies' rings, with what the page keeps for each | 265,402,000 | 298,575,856 |
+| with reading (a)'s intercept, 40,993,517 to 40,997,888 | 485.70 to 485.71 MiB, fits | 541.53 MiB, does not |
+
+Its marginal, from n = 1 and n = 4, read 58,535,454.67 and 58,537,982.67 bytes in the first two runs, and reading (a) derived 8 in all four. In the same runs the λ case derives 30 and 28 for readings (a) and (b).
+
+##### WHAT NO COUNT PRICES
+
+Both of these were past any count's reach at 11 as well.
+
+- **A λ copy grows each time its recording is continued.** Through the probe's λ worker, stepped 200,000 times, `fact-12`'s λ copy held 69,206,016 bytes of wasm and 75,754,024 in all, in one run; at rest it holds 16,444,164. Each `[continue]` records another `HISTORY_BYTES` and the ring keeps one, while the worker's wasm memory, which never shrinks, grows with the run; the review's session stepped 600,000 times held 208,863,232 bytes of wasm.
+- **A copy a user writes can be larger than any shipped one**: an asm copy's worker reached 168.4 MiB under `COPY_CAPS` (Plan 7 part 5's entry, `asm-copy-memory.test.ts`).
+
+A TM copy continued to its end gains no wasm, in the review's runs on three machines, and neither does one rebuilt five times by edits.
+
+##### THE TESTS
+
+- **The probe's TM case is the measurement of the number.** The probe is on `vite.config.ts`'s probe list, run on demand as a copy. Its file's header says it pins no measured figure and asserts nothing about the budget, so the case prints its two fit lines and the derived cap, which `MAX_WARM_BUFFERS`' doc reads. What it asserts: each copy's ring evicted, so its history filled; each holds at least a tenth of `HISTORY_BYTES`; each value run ended; each copy's machine has states; and the machine text is over a million units.
+- **The sabotages** (`sab/run-cap-sabs.py`), copies of the probe, run while the case still asserted its fit lines. With the cap read as 11, eleven copies needed 608.51 MiB without the machine held; read as 9, nine needed 540.99 MiB; read as 8 before the machine was held, nine fit at 504.87; read as 7, eight fit at 485.16; and with the page's copy of each machine and value dropped from the case, it derived 9 and nine fit at 503.04 MiB. Each failed the assertion it aimed at; each printed fit line is the same with the assertions gone. A worker answering no machine, the last, fails the case: "BLOCKED: a TM probe worker answered no machine".
+- **Every test that exercises the cap** follows the constant: `scratch-cap`, `tm-blank-buffer-cap`, `share-open-cap` and `two-lambda-panes` in the browser tier, `scratch` and `sessions` in node. One that did not exercise it needed its room, `copy-editor-mount` (THE CHANGE), and its failure at `ee5a762` is its RED.
+
+##### THE REVIEW
+
+**A whole-branch review by a reviewer who had not seen the work, at `3ccf65e`: one Critical, one Important, eight Minor; then its re-review of the fixes at `9799c5e`: no Critical or Important, six Minor, all taken in `db09ca5`.** Its probes are in the record's `review/probes/`.
+
+- **C1, the page's copy of each machine.** `replies.ts`'s `tm-scratch-compiled` arm keeps a copy's machine, tape names and status on its session entry whether or not a view shows it, 4,485,864 and 4,483,346.67 bytes a copy for `map-fold` under `binary`, and the probe's worker dropped them. With them held, nine copies came to 543.77 MiB and the cap derived 8. The controller confirmed the store in the code and the reviewer's probe against the worker, and put the decision to the user.
+- **I1, the case contradicted its file's header**: two budget assertions and a pinned length. Resolved toward the header.
+- **Minors**: the λ copy at rest quoted at 16.44 MB where step 200 costs 17.24; the replies' frame arrays held through the reading, 0.28 MB a copy; an assertion that could not fail; a frame count given as the step count; "lists" for a doc naming three; the cap given as eleven in `vite.config.ts` and a 5d-ii-d paragraph; the page baseline unprinted; a worker field nothing read. All taken.
+- **The re-review's Minors**: two checks in `tmRound` that could not fail, now one that can; the floor of 7 the tests need; the λ and asm copies' figures counted without what the page keeps, against a TM figure counted with it; the order of the shipped TM copies argued from machine-text length, which does not order them; "over half a gigabyte" unmeasured; a ring figure rounded. Its first review had judged the tests' need for room from the highest copy number any test spells, which could not see `copy-editor-mount.test.ts`, whose labels are interpolated; its count before every test replaced it.
+- **What the review found sound**: the TM worker does what `onTmScratch` and `recordLeg` do, in the same order; every consumer of the cap uses the constant, and the suite passed at 9; reading the TM case's page baseline after its compile can only lower the cap; the sabotages do not depend on timing.
+
+##### WHAT THIS DID NOT CLOSE
+
+- **A byte budget.** A continued λ copy and a hand-written copy cost more than any count can allow for (WHAT NO COUNT PRICES). Pricing them needs the page to know what each copy holds, not how many there are.
+- **A copy a view shows** also holds its view's tables and an editor with its text; a page of those was not measured.
+- **Two test files keep copies across tests** and need a cap of 7 or more; only `copy-editor-mount.test.ts` was changed to delete them.
+- **Dated specs** still give the cap as 11: Plan 7 part 2's and 5d-iv's design documents, as written at the time.
+
+##### VERIFICATION
+
+Run on 2026-10-07 in the main checkout on branch `warm-copy-cap`. The web gates and the Docker image ran at `9799c5e`; `db09ca5` changes the on-demand probe and its worker, which no gate runs, and comment lines elsewhere. Its biome and typecheck ran on it, and the scans again with this entry committed. No Rust file changed (`git diff --stat ab0950d db09ca5 -- crates Cargo.toml Cargo.lock` prints nothing), so the Rust gates were not run here: CI's run 1948 passed every Rust job at `ab0950d`. `pkg/` is #137's build. Every browser run, the coverage gate's included, ran under `flock <the lane's browser lock> systemd-run --user --scope -q -p MemoryMax=16G -p MemorySwapMax=0`, plus `-p CPUQuota=25%` for the quota runs.
+
+```
+pnpm exec biome ci --error-on-warnings                           → exit 0, 350 files
+pnpm run typecheck                                               → exit 0
+pnpm run test:coverage                                           → exit 0, 229 files / 2,247 tests; 97.51 / 91.62 / 98.38 / 98.87 against 95 / 89 / 97 / 97
+pnpm run build:app                                               → exit 0
+scripts/check-{text-bytes,citations,attributions,doc-figures,shared-docs,colours,grammar-wasm,lua}.sh, --self-test then alone → 16 of 16 exit 0
+the five browser files that fill the cap or fork past it on their page, each alone under -p CPUQuota=25%, at loads 5.72 to 8.42 → exit 0, every case passing:
+  scratch-cap 1 of 1, 1,098 ms; tm-blank-buffer-cap 1 of 1, 495 ms; share-open-cap 2 of 2, 2,391 ms; two-lambda-panes 11 of 11, 2,595 ms;
+  copy-editor-mount 9 of 9, 3,600 ms
+docker build --network=host, then run --network host, at `9799c5e` → healthy after 2 polls; GET / 200 and its 4 assets 200; 7 wasm; container and image removed
+```
+
+At `ee5a762` the same `test:coverage` failed one test, `copy-editor-mount`'s (THE CHANGE). Each probe was copied into `web/tests/browser/`, run and deleted; `git status` was empty after each.
+
+**Every count this entry quotes, with what produces it.** The lane's record directory is scratch, not tracked, and each command runs from it unless it reads git. `logs/` holds every locked run, `sab/` the sabotages, `probes/` this lane's throwaway generators, `review/` the reviews and their probes.
+
+| Value | What | Produced by |
+|---|---|---|
+| 5; `c18b38e`, `3ccf65e`, `ee5a762`, `9799c5e`, `db09ca5` | commits in the range | `git rev-list --count ab0950d..db09ca5`; `git log --format='%h %s' ab0950d..db09ca5` |
+| 0 | `3ccf65e` outside comments; `db09ca5` outside the probe, its worker and comments | `git diff -U0 c18b38e 3ccf65e \| grep -E '^[+-]' \| grep -vE '^(\+\+\+\|---)' \| grep -vE '^[+-]\s*(//\|\*\|/\*\*)' \| wc -l`; the same over `9799c5e db09ca5 -- . ':!web/tests/browser/buffer-affordability.test.ts' ':!web/tests/browser/affordability-tm-worker.ts'` |
+| the per-example TM table | one TM copy of each example, without the page's machine | `grep PER-EXAMPLE logs/tm-copy-per-example-1.log` (`probes/make-per-example.py`) |
+| 58,545,848; 56,119,708; 55,037,816 | the same with it | `grep -o "REVIEW4.*" logs/review4-per-example-1.log` |
+| 16,444,164; 17,241,868, from 250 refused | λ copies at rest | `grep LAMBDA-REST logs/lambda-rest-2.log` (`probes/make-lambda-rest.py`); `grep "REVIEW2 fork" logs/review2-1.log` |
+| 9,454,688 | asm copies | `grep ASM-PER-EXAMPLE logs/asm-copy-per-example-1.log` (`probes/make-asm-per-example.py`) |
+| 69,206,016, 75,754,024 | a λ copy stepped 200,000 times | `grep "LAMBDA-PER-EXAMPLE fact-12" logs/lambda-copy-per-example-1.log` (`probes/make-lambda-per-example.py`) |
+| 208,863,232 | a session stepped 600,000 times | `review/review1.md`, from `logs/review-late-1.log` |
+| 4,485,864, 4,483,346.67; 279,644, 279,412; 543.77 MiB | the page's machine a copy, the replies' frame arrays, nine copies with the machine | `grep -h -o "REVIEW.*" logs/review-pdc-1.log logs/review3-1.log logs/review3-2.log` |
+| the TM case's table and marginals; 30, 28 | the TM case at a cap of 8 | `grep -h -o "console.error\] \(TM\|derived\|marginal\).*" logs/cap8-1.log logs/cap8-2.log logs/cap8-final-1.log logs/sab-green.log` (`remeasure.sh`, `sab/run-cap-sabs.py green`) |
+| 505.41 MiB, 557.22 MiB; 54,333,444, 54,333,596 | the first cut at a cap of 9, no machine held | `grep -h -o "console.error\] TM.*" logs/cap9-1.log logs/cap9-2.log` |
+| 608.51; 540.99; 504.87; 485.16; 503.04 MiB, 9; the BLOCKED line | the sabotages | `grep -h -o "TM copy n=.*\|TM copy derived.*\|AssertionError.*\|Error: BLOCKED.*" logs/sab-C*.log` (`sab/run-cap-sabs.py`) |
+| 25,362,432; 8,519,680 | a TM and a λ copy's wasm | `logs/cap8-1.log`'s `TM n=1` line; `logs/cap8-1.log`'s λ `n=1` line |
+| 526,837,744 | the TM case's largest round | `logs/cap8-1.log`'s `TM n=9` line, `total` |
+| 7, 6 | copies before each test | `grep -E "copy-edit-leaving\|stage-tab-titles" review/logs/review6-zzcap-lines.txt` |
+| the timed-out case | the gate at `ee5a762` | `grep -A1 "FAIL" gates-ee5a762/gate-coverage.log` |
+| the gates block | the gates | `gates-9799c5e/gates.log` (`gates.sh`), `docker-9799c5e/gate-docker.log` (`docker-gate.sh`), `gates-entry/scans.log` |
+| 95, 89, 97, 97 | the coverage floors | `thresholds` in `web/vite.config.ts` |

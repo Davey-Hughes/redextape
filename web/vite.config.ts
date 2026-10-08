@@ -30,9 +30,10 @@ const REPO_ROOT = fileURLToPath(new URL('..', import.meta.url))
  * set — the `pnpm test:probe*` scripts are what set it.
  *
  * **IT IS A MEASUREMENT WHOSE CONSOLE OUTPUT IS THE DELIVERABLE (each file's own header says so), AND A
- * DELIVERABLE NOBODY READS ON EVERY PUSH IS PURE COST.** Design §4.6's probe runs eleven real wasm
- * workers and builds eleven 32 MiB rings, deserialising every frame onto the main thread — the peak is
- * roughly half a gigabyte inside one page, which is the threshold it exists to measure. The browser
+ * DELIVERABLE NOBODY READS ON EVERY PUSH IS PURE COST.** Design §4.6's probe runs `MAX_WARM_BUFFERS` real wasm
+ * workers and builds as many 32 MiB rings, and its TM case one more of each, deserialising every frame onto the main
+ * thread — 526,837,744 bytes of wasm and heap at the TM case's largest round (2026-10-07), about the half gigabyte
+ * it exists to measure. The browser
  * project has no `fileParallelism: false`, so under the default `include` that peak could land
  * concurrently with `session-memory.test.ts`'s and `frame-cost.test.ts`'s, in one origin, on every
  * push. This repo's history already records a λ probe taking 60 GiB of RAM and all of swap. 5d-iv T2's

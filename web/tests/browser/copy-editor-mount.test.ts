@@ -1,5 +1,5 @@
 import { EditorView } from '@codemirror/view'
-import { beforeAll, describe, expect, it } from 'vitest'
+import { afterEach, beforeAll, describe, expect, it } from 'vitest'
 import { page, userEvent } from 'vitest/browser'
 import { BUFFERS_STORAGE_KEY, parseBuffers } from '../../src/buffers-store'
 import { bindingKey } from '../../src/view-header'
@@ -15,6 +15,9 @@ import { SHELL, until } from './harness'
  *
  * ONE MOUNT FOR THE FILE, for the reason every sibling gives: `main()` runs once per page. Each test makes the copies
  * it needs from the program, so none depends on what the one before it left beyond the default views.
+ *
+ * **AND EACH TEST'S COPIES ARE DELETED AFTER IT** (`afterEach` below): the file makes nine copies, and the ninth waited
+ * on a fork the cap refuses once `MAX_WARM_BUFFERS` was 8 (2026-10-07).
  */
 
 const SAMPLE = 'let x = 40; x + 2'
@@ -115,6 +118,25 @@ async function orphanCopy(leaf: string, leg: 'asm' | 'tm'): Promise<string> {
   return key
 }
 const sessionOf = (key: string) => key.slice(key.indexOf(':') + 1)
+
+/**
+ * Delete every copy on the page through the copies menu, a row at a time, and leave the menu closed — a loop for
+ * `two-lambda-panes.test.ts`'s `retireEveryBuffer` reason: the app has no call that ends them all, and the list is
+ * rebuilt around every delete.
+ */
+afterEach(() => {
+  const button = document.querySelector<HTMLButtonElement>('#buffers')
+  if (button === null) throw new Error('no copies menu in the header')
+  for (let guard = 0; ; guard++) {
+    if (guard > 32) throw new Error('the copies menu will not empty after 32 deletes')
+    if (button.getAttribute('aria-expanded') !== 'true') button.click()
+    if (document.querySelectorAll('.buffer-list .buffer-row').length === 0) break
+    const row = document.querySelector<HTMLButtonElement>('.buffer-list button[aria-label^="delete "]')
+    if (row === null) throw new Error('the open menu has rows but no delete control on any of them')
+    row.click()
+  }
+  if (button.getAttribute('aria-expanded') === 'true') button.click()
+})
 
 beforeAll(async () => {
   // WIDE ENOUGH FOR A SPLIT OF A SPLIT: the app refuses an add that leaves a view under `MIN_VIEW_PX` (`layout.ts`),

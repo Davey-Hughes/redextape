@@ -1,8 +1,10 @@
 import { describe, expect, it } from 'vitest'
+import init, { compile } from '../../../pkg/redextape_wasm.js'
+import { EXAMPLES } from '../../src/examples'
 import { History } from '../../src/history'
-import { FRAME_BYTES, HISTORY_BYTES, lambdaFrameBytes } from '../../src/protocol'
+import { FRAME_BYTES, HISTORY_BYTES, lambdaFrameBytes, tmFrameBytes } from '../../src/protocol'
 import { MAX_WARM_BUFFERS } from '../../src/scratch'
-import type { LambdaState } from '../../src/types'
+import type { LambdaState, TmProgram, TmState } from '../../src/types'
 
 /**
  * 5d-ii-d — THE WORKER-AFFORDABILITY PROBE. Design §4.6.
@@ -403,8 +405,8 @@ const MAIN_THREAD_WASM_MODULE_BASELINE_BYTES = SOURCE_WASM_MODULE_BASELINE_BYTES
  * marginal of 16,420,493.33 and 16,421,534.67 bytes a buffer, where it printed 44,458,449.33 and 44,465,050.67; and
  * derived caps of 30 for reading (a) and 28 for reading (b), where it derived 11 and 9 (2026-10-07). Its own n=1 ring
  * read 0.2354 of its charge, 21.016% from this constant, where before the two read 1.0710 to 1.0715 and 1.0719; the
- * intercept uses the probe's own reading, not this. `MAX_WARM_BUFFERS` is not moved by these figures: the probe prices
- * λ copies only.
+ * intercept uses the probe's own reading, not this. These figures price λ copies only; the TM case below prices the
+ * copy that sets `MAX_WARM_BUFFERS`.
  */
 const LAMBDA_LEG_RETENTION_RATIO = 0.19451407924488462
 /**
@@ -696,4 +698,186 @@ describe('worker affordability', () => {
     // decouples the reply from the assignment stays visible in the console output instead of silently
     // reverting to an assertion that cannot fail either way.
   })
+
+  /**
+   * **THE COSTLIEST COPY IS A TM COPY NOW, AND THE CASE ABOVE PRICES ONLY λ COPIES** (2026-10-07). Since a λ frame's
+   * spans cross as bytes a full λ ring holds 7.9 MB, and a full TM ring 29.3 MB (`protocol.ts`'s `HISTORY_BYTES`), so
+   * the marginal above under-prices a page of TM copies. This case prices one the same way: `n` workers, each building
+   * a TM copy of `map-fold`'s machine and recording it as `affordability-tm-worker.ts` says, then `n` TM rings from
+   * their frames, the wasm and ring readings summed as above, a marginal from n=1 and n=4, the cap reading (a) derives,
+   * and the page at `MAX_WARM_BUFFERS` and at one past it printed against the budget. **PRINTED, NOT ASSERTED**, for
+   * this file's header's reason: `MAX_WARM_BUFFERS`' doc reads those two lines and the derived cap.
+   *
+   * **`map-fold` UNDER `binary`, THE COSTLIEST TM COPY OF THE SHIPPED EXAMPLES.** One copy of each example under each
+   * encoding, 13 with a machine (`fact-12` has none under `unary`), priced one at a time through `tmRound` in one run
+   * (2026-10-07): `map-fold` under `binary` 54,334,652 bytes, its wasm 25,362,432 and its ring 28,972,220; under
+   * `unary` 52,794,396; `fact-12` under `binary` 51,585,008; every other copy 42,067,500 or less. Those were priced
+   * before this case held the page's copy of each machine. Through this case's `tmRound`, which holds it, the
+   * whole-branch review's run read `map-fold` under `binary` at 58,545,848 bytes, under `unary` 56,119,708, and
+   * `fact-12` under `binary` 55,037,816, the same order (2026-10-07). Its copy records 69,009 frames, 69,008 steps,
+   * fills a TM history and runs its value run to the end. A copy of a user's own larger machine could cost more: the
+   * cap is set by the shipped examples' costliest, and says so.
+   */
+  it('measures what a warm TM copy costs, and the cap a page of them affords', { timeout: 600_000 }, async () => {
+    const collect = requireHeapHarness()
+    await init()
+    const mapFold = EXAMPLES.find((e) => e.id === 'map-fold')
+    if (mapFold === undefined) throw new Error('BLOCKED: no `map-fold` example')
+    const made = compile(mapFold.text, 'binary') as { session: { tmText(): string | null; free(): void } | null }
+    const src = made.session?.tmText() ?? null
+    made.session?.free()
+    if (src === null) throw new Error('BLOCKED: the program has no machine text to copy')
+    expect(src.length, "precondition: `map-fold`'s machine under `binary`, 1,906,914 units").toBeGreaterThan(1_000_000)
+
+    await new Promise((r) => setTimeout(r, 100))
+    collect()
+    collect()
+    const tmHarnessBaseline = heapNow()
+    const pageBaseline = Math.max(tmHarnessBaseline, APP_PAGE_BASELINE_FLOOR_BYTES)
+    console.log(
+      `TM copy page baseline — this harness after compiling the machine: ${tmHarnessBaseline}, shipped-app floor: ${APP_PAGE_BASELINE_FLOOR_BYTES}, used: ${pageBaseline}`,
+    )
+    console.log('TM copy warm-up (n=1), discarded:', JSON.stringify(await tmRound(1, collect, src)))
+    const points: TmPoint[] = []
+    for (const n of [1, 2, 4, MAX_WARM_BUFFERS, MAX_WARM_BUFFERS + 1]) {
+      const point = await tmRound(n, collect, src)
+      points.push(point)
+      console.log(
+        `TM n=${n}  wasm=${point.wasm}  rings=${point.rings}  total=${point.total}  steps=${JSON.stringify(point.steps)}  valueRun=${JSON.stringify(point.valueRun)}  valueSteps=${JSON.stringify(point.valueSteps)}  ringRetained=${JSON.stringify(point.ringRetained)}`,
+      )
+    }
+    const first = points.find((p) => p.n === 1)
+    const fourth = points.find((p) => p.n === 4)
+    const atCap = points.find((p) => p.n === MAX_WARM_BUFFERS)
+    const pastCap = points.find((p) => p.n === MAX_WARM_BUFFERS + 1)
+    if (first === undefined || fourth === undefined || atCap === undefined || pastCap === undefined) {
+      throw new Error('BLOCKED: no points')
+    }
+    const marginal = (fourth.total - first.total) / (fourth.n - first.n)
+    const intercept =
+      pageBaseline +
+      MAIN_THREAD_WASM_MODULE_BASELINE_BYTES +
+      SOURCE_WASM_MODULE_BASELINE_BYTES +
+      SOURCE_SESSION_ARENA_BYTES
+    const derived = Math.floor((BUDGET_BYTES - intercept) / marginal)
+    console.log(`TM copy marginal: ${marginal}`)
+    console.log(`TM copy derived cap (a) [UPPER BOUND — pageBaseline is a floor] — intercept=${intercept}: ${derived}`)
+    for (const p of [atCap, pastCap]) {
+      const total = intercept + p.total
+      console.log(
+        `TM copy n=${p.n} — intercept (a) + measured total: ${total} bytes (${(total / (1024 * 1024)).toFixed(2)} MiB), budget: ${BUDGET_BYTES} bytes (512 MiB), fits: ${total <= BUDGET_BYTES}`,
+      )
+    }
+
+    // LOOSE SANITY BOUNDS ONLY, for the case above's reasons: a run that did not happen fails them, a correct one of
+    // any size passes. A TM copy's ring is a full one: it evicted, so it kept fewer frames than its copy recorded, and
+    // it holds at least a tenth of `HISTORY_BYTES`. Its value run ended.
+    expect(marginal).toBeGreaterThan(0)
+    expect(derived).toBeGreaterThan(0)
+    for (const p of points) {
+      expect(p.rings).toBeGreaterThan((p.n * HISTORY_BYTES) / 10)
+      for (const [i, kept] of p.ringRetained.entries()) expect(kept).toBeLessThan((p.steps[i] ?? 0) + 1)
+      for (const r of p.valueRun) expect(r).toBe('Ended')
+    }
+  })
 })
+
+type TmPoint = {
+  n: number
+  wasm: number
+  rings: number
+  total: number
+  steps: number[]
+  valueRun: string[]
+  valueSteps: number[]
+  ringRetained: number[]
+}
+
+/**
+ * One TM round: `n` TM-copy workers driven to their end and terminated, then `n` TM rings built from their frames,
+ * read the way `round` reads λ rings, after two collections.
+ *
+ * **WITH WHAT THE PAGE KEEPS FOR EACH COPY BESIDE ITS RING**: `replies.ts`'s `tm-scratch-compiled` arm stores the
+ * copy's machine and tape names, and its `tm-value` arm the value run's end, on the copy's session entry, whether or
+ * not a view shows it. A `map-fold` machine under `binary` held that way read 4,485,864 and 4,483,346.67 bytes a copy
+ * in the whole-branch review's probe (2026-10-07), which the first cut of this case left out and so derived 9 where the
+ * page affords 8. **THE REPLIES' FRAME ARRAYS ARE DROPPED BEFORE THE READING**: the page pushes a reply's frames into
+ * the ring and keeps no array of them, and holding them read 279,644 and 279,412 bytes a copy more.
+ */
+async function tmRound(n: number, collect: () => void, src: string): Promise<TmPoint> {
+  await new Promise((r) => setTimeout(r, 100))
+  collect()
+  collect()
+  const before = heapNow()
+  const workers = Array.from(
+    { length: n },
+    () => new Worker(new URL('./affordability-tm-worker.ts', import.meta.url), { type: 'module' }),
+  )
+  type Reply = {
+    outcome: string
+    message?: string
+    wasmBytes: number
+    steps: number
+    valueRun: string
+    valueSteps: number
+    frames: TmState[] | null
+    tmProgram: unknown
+    tm: unknown
+    tapeNames: unknown
+    value: unknown
+  }
+  let replies: Reply[]
+  try {
+    replies = await Promise.all(
+      workers.map(
+        (w) =>
+          new Promise<Reply>((resolve, reject) => {
+            w.addEventListener('message', (e: MessageEvent<Reply>) =>
+              e.data.outcome === 'ok'
+                ? resolve(e.data)
+                : reject(new Error(`BLOCKED: TM probe worker answered ${e.data.outcome}: ${e.data.message ?? ''}`)),
+            )
+            w.addEventListener('error', () => reject(new Error('BLOCKED: TM probe worker failed to load')))
+            w.addEventListener('messageerror', () =>
+              reject(new Error('BLOCKED: TM probe worker reply failed to clone')),
+            )
+            w.postMessage({ src })
+          }),
+      ),
+    )
+  } finally {
+    for (const w of workers) w.terminate()
+  }
+  const rings = replies.map((r) => {
+    const ring = new History<TmState>(HISTORY_BYTES)
+    for (const f of r.frames ?? []) ring.push(f, tmFrameBytes(f))
+    r.frames = null
+    return ring
+  })
+  // The copy's `SessionEntry` fields `replies.ts` sets: `tmProgram` (a `TmCompiled`) and `tmScratch`.
+  const entries = replies.map((r) => ({
+    tmProgram: { program: r.tmProgram, tapeNames: r.tapeNames, tmText: null, tmResultDecodable: true },
+    tmScratch: { status: r.tm, value: r.value },
+  }))
+  collect()
+  collect()
+  const after = heapNow()
+  // Read after the reading, as `round`'s `ringRetained` is, so neither the rings nor the entries are dead before it.
+  const ringRetained = rings.map((r) => r.length)
+  // A worker that stopped answering the machine would price a copy without what the page keeps for it, and every
+  // other figure here would still read as a copy's.
+  if (!entries.every((e) => ((e.tmProgram.program as TmProgram | null)?.states.length ?? 0) > 0)) {
+    throw new Error('BLOCKED: a TM probe worker answered no machine')
+  }
+  const wasm = replies.reduce((a, r) => a + r.wasmBytes, 0)
+  return {
+    n,
+    wasm,
+    rings: after - before,
+    total: wasm + after - before,
+    steps: replies.map((r) => r.steps),
+    valueRun: replies.map((r) => r.valueRun),
+    valueSteps: replies.map((r) => r.valueSteps),
+    ringRetained,
+  }
+}

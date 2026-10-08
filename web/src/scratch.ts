@@ -104,10 +104,33 @@ type BufferState = {
  * sit at or below 512 MiB — main-thread resident heap plus summed per-thread wasm linear memory. The
  * cap is the largest count that satisfies it. The threshold does not move.*
  *
- * **MEASURED BY `tests/browser/buffer-affordability.test.ts`** (5d-ii-d T7/T8) — a real-Chromium probe
- * that spawns 1, 2, 4 and 11 wasm workers, each stepping a genuinely divergent term 20,000 times and
- * each driving a real λ ring to exhaustion, heap read via forced `gc()` around a task boundary
- * (`session-memory.test.ts`'s own discipline, cited by name in that file's header).
+ * **8 SINCE 2026-10-07, SET BY A TM COPY, WHERE IT WAS 11, SET BY A λ COPY.** Until a TM frame's tapes and a λ frame's
+ * spans began to cross from the worker as one string and one byte string, a λ copy was the costliest, and the
+ * measurements below, to the verification at n = 11, are of λ copies. Since then a TM copy is:
+ * `buffer-affordability.test.ts`'s TM case prices one of `map-fold` under `binary`, the costliest of the shipped
+ * examples' 13 TM copies (that case's doc names the costliest three), at a marginal of 58,535,454.67 and 58,537,982.67
+ * bytes in two runs: its wasm 25,362,432, and on the page its ring with the machine, status and value the page keeps on
+ * the copy's session entry, 33,188,960 and 33,181,304 bytes at n = 1. Reading (a)'s intercept on that probe page,
+ * 40,993,517 and 40,993,537 bytes, derives 8; eight copies came to 485.70 MiB with it and nine to 541.53 MiB, against
+ * 512, in both runs. A first cut of the case priced no machine on the page and derived 9; nine copies are over the
+ * budget. So 8 is the largest count a page of the costliest copy the app ships fits in, AT REST: each copy built and
+ * recorded once, to `HISTORY_BYTES` charged, as a copy stops by itself, and shown in no view. Copies of the other kinds
+ * cost less there, in one run each, counting their worker and ring only, where the TM copy's figure also counts what
+ * the page keeps: a λ copy of a shipped example 17,241,868 bytes at the most of the fork steps tried (`fact-12` forked
+ * at step 200; from step 250 the fork is refused, too large to print), an asm copy 9,454,688 at most, each over 41 MB
+ * less.
+ *
+ * **A COPY A VIEW SHOWS ALSO HOLDS ITS VIEW'S TABLES AND ITS EDITOR, WHICH WERE NOT MEASURED.**
+ *
+ * **TWO COPIES COST MORE, AND NO COUNT PRICES THEM; BOTH DID AT 11 AS WELL.** A λ copy grows each time its recording
+ * is continued: `fact-12`'s, stepped 200,000 times, held 69,206,016 bytes of wasm, 75.75 MB in all, in one run. And a
+ * copy a user writes can be larger than any shipped one: an asm copy's worker reached 168.4 MiB under `COPY_CAPS`
+ * (`asm-copy-memory.test.ts`).
+ *
+ * **MEASURED BY `tests/browser/buffer-affordability.test.ts`** (5d-ii-d T7/T8) — a real-Chromium probe that spawns 1,
+ * 2, 4 and `MAX_WARM_BUFFERS` (11 then) wasm workers, each stepping a genuinely divergent term 20,000 times and each
+ * driving a real λ ring to exhaustion, heap read via forced `gc()` around a task boundary (`session-memory.test.ts`'s
+ * own discipline, cited by name in that file's header).
  *
  * **MARGINAL COST PER BUFFER: ~44.53 MB** (44,522,565–44,528,023 bytes across Task 7's three FIX
  * ROUND 2 runs — the superseding pass, not fix round 1's own now-superseded figures — spread
@@ -139,14 +162,14 @@ type BufferState = {
  *
  * **SINCE A λ FRAME'S SPANS CROSS AS ONE BYTE STRING (2026-10-07) THE λ FIGURES ABOVE ARE THOSE BEFORE IT.** A full
  * λ ring retains 7.9 MB where it retained ~35.94, and two runs of the probe priced a buffer at 16.42 MB and derived 30
- * for reading (a) and 28 for (b) (`buffer-affordability.test.ts`'s `LAMBDA_LEG_RETENTION_RATIO`). The probe prices λ
- * buffers only, and a TM buffer measured 52.79 MB, so this cap is not moved on those figures.
+ * for reading (a) and 28 for (b) (`buffer-affordability.test.ts`'s `LAMBDA_LEG_RETENTION_RATIO`). Those figures price
+ * λ buffers only; the cap is set by a TM copy (the first measured paragraph above).
  *
  * **BOTH NUMBERS ARE UPPER BOUNDS, NEVER MEASURED CEILINGS.** `pageBaseline` (17,825,792 bytes) is a
  * FLOOR — a byte-conversion of `session-memory.test.ts`'s own prose figure for the real app's baseline
  * (CodeMirror, the DOM), not a reading either probe ever took of the real app, and that file says
  * outright the true figure "is larger still". A floor on one intercept component can only push the
- * TRUE intercept UP and the true safe cap DOWN from what is derived here — never the reverse. 11 is the
+ * TRUE intercept UP and the true safe cap DOWN from what is derived here — never the reverse. The cap is the
  * most this budget can be SHOWN to afford, not a guarantee that it affords exactly that many.
  *
  * **VERIFIED AT n = 11 DIRECTLY, NOT ONLY EXTRAPOLATED — 5d-ii-d T8.** The probe's sweep grew a fourth
@@ -181,22 +204,24 @@ type BufferState = {
  * `#refuseAtCap`'s message reads "all `MAX_WARM_BUFFERS` copies are running" — true of every WARM
  * buffer, the only kind this constant prices, but readable as a claim about every buffer on the page.
  * A page can hold more buffers than that: a cold buffer costs nothing (the paragraph above), so a page
- * with, say, 15 buffers total and 11 of them warm sits exactly at the cap, and `warm` below (asking for
- * one of the four cold ones back) refuses with the identical sentence a `fork` would, on a page whose
- * copies menu visibly lists four that are paused. `BufferCapReached` is out of scope for 5d-ii-d —
+ * with, say, 15 buffers total and 8 of them warm sits exactly at the cap, and `warm` below (asking for
+ * one of the seven cold ones back) refuses with the identical sentence a `fork` would, on a page whose
+ * copies menu visibly lists seven that are paused. `BufferCapReached` is out of scope for 5d-ii-d —
  * design §4.4 keeps it "unchanged in kind" — so this is noted rather than reworded.
  *
- * **WHAT RIDES ON THE FIGURE.** The tests that exercise the cap import this constant rather than
- * spelling a number, so they follow it wherever it goes. `tests/browser/two-lambda-panes.test.ts`
- * needs the cap to be **at least two** — several of its tests fork twice inside a single test, and its
- * reset reclaims buffers between tests (`retireEveryBuffer`) precisely so it needs no more than that;
- * 11 satisfies it with room to spare. `tests/browser/scratch-cap.test.ts` exercises the refusal AT the
- * cap, so moving from 8 to 11 means it now forks 11 times where it forked 8 — slower by a few real
- * worker spin-ups per run, not by an order of magnitude; see that file's own measured runtime.
+ * **WHAT RIDES ON THE FIGURE.** The tests that exercise the cap import this constant rather than spelling a number, so
+ * they follow it wherever it goes. `tests/browser/two-lambda-panes.test.ts` needs the cap to be **at least two** —
+ * several of its tests fork twice inside a single test, and its reset reclaims buffers between tests
+ * (`retireEveryBuffer`) precisely so it needs no more than that; 8 satisfies it with room to spare. **TWO FILES NEED
+ * MORE, THOUGH NONE EXERCISES THE CAP**: their copies outlive their tests, so `copy-edit-leaving.test.ts` has seven on
+ * its page by its end and `stage-tab-titles.test.ts` six, counted before each test of every browser file in the
+ * whole-branch review's sweep (2026-10-07). A cap under 7 fails them the way 8 failed `copy-editor-mount.test.ts`,
+ * whose copies are now deleted after each test. `tests/browser/scratch-cap.test.ts` exercises the refusal AT the cap,
+ * so it forks as many times as the cap: 8 since 2026-10-07, 11 before then and 8 before that.
  *
  * For what this doc used to claim and why it changed, see the history note under `MAX_WARM_BUFFERS`.
  */
-export const MAX_WARM_BUFFERS = 11
+export const MAX_WARM_BUFFERS = 8
 
 /**
  * The refusal `fork` and `warm` raise at `MAX_WARM_BUFFERS` — design §4.5's "refused with a diagnostic
