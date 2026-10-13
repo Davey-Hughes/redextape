@@ -1,6 +1,7 @@
 import type { Dir, LayoutNode } from './layout'
 import { leaves, MIN_PANE_FRACTION } from './layout'
 import type { LeafId } from './panes'
+import { separatorGesture } from './separator'
 
 /**
  * How far one arrow-key press moves a divider, as a fraction of its split.
@@ -240,122 +241,16 @@ function divider(
 
   const extent = () => (dir === 'row' ? box.getBoundingClientRect().width : box.getBoundingClientRect().height)
 
-  let dragging = false
-  let moved = false
-  let last = 0
-
-  el.addEventListener('pointerdown', (e) => {
-    dragging = true
-    moved = false
-    last = dir === 'row' ? e.clientX : e.clientY
-    // BEFORE `setPointerCapture`, NOT AFTER. Capture throws `NotFoundError` for a synthetic
-    // `PointerEvent` whose `pointerId` is anything other than `1` — measured directly (ids `0` and `2`
-    // both throw, `1` never does) — because `1` is the reserved mouse-pointer id and is always active,
-    // even on a page's very first `pointerdown`. Every synthetic pointer event this suite dispatches
-    // uses `pointerId: 1` for exactly that reason, so nothing here throws today — but if a future test
-    // ever used a different id, `preventDefault` is what stops a drag from selecting text across the
-    // panes, so it must not be the thing a throw skips.
-    e.preventDefault()
-    el.setPointerCapture(e.pointerId)
+  // THE GESTURE IS `separator.ts`'s, shared with the boundaries between a view's panels: a drag under pointer
+  // capture, a held arrow key as frames and one commit, and the `blur` that a rebuild fires on a detached divider
+  // refused. What is this divider's own is what a pixel and a step are worth: a pixel is a fraction of the split
+  // box's extent, measured at each frame (the denominator's note above), and a step is `KEY_STEP`.
+  separatorGesture(el, dir === 'row' ? 'x' : 'y', {
+    ready: () => extent() > 0,
+    drag: (px) => handlers.resize(path, index, px / extent()),
+    step: (sign) => handlers.resize(path, index, sign * KEY_STEP),
+    commit: () => handlers.commit(),
   })
-
-  el.addEventListener('pointermove', (e) => {
-    if (!dragging) return
-    const now = dir === 'row' ? e.clientX : e.clientY
-    const span = extent()
-    // `now !== last` — A ZERO-DISPLACEMENT MOVE DOES NOT ARM THE COMMIT. Browsers do emit `pointermove`
-    // at an unchanged coordinate, and without this guard such an event would call `handlers.resize` with
-    // delta 0, set `moved`, and make `pointerup` run a full reconcile-and-write for a gesture that
-    // changed nothing — exactly the no-op `stop` below says it avoids.
-    if (span > 0 && now !== last) {
-      // `moved` IS SET BEFORE `handlers.resize` RUNS, NOT AFTER. `handlers.resize` (in practice,
-      // `pane-host.ts`'s frame handler) advances the tree before it calls `syncSizes`, which has throw
-      // paths of its own — so if it throws, setting `moved` only after return would leave the tree
-      // advanced but the gesture uncommittable, and `pointerup` would commit nothing. That is the same
-      // three-way disagreement between tree, DOM and storage that `applyLayout` was fixed to avoid;
-      // arming first keeps this gesture committable even when the frame handler throws.
-      moved = true
-      handlers.resize(path, index, (now - last) / span)
-    }
-    last = now
-  })
-
-  // THE END OF THE GESTURE IS WHERE THE LAYOUT IS COMMITTED — see `ResizeHandlers`. A press and
-  // release that never moved commits nothing rather than firing a full reconcile-and-write for a no-op.
-  const stop = (e: PointerEvent) => {
-    if (!dragging) return
-    dragging = false
-    if (el.hasPointerCapture(e.pointerId)) el.releasePointerCapture(e.pointerId)
-    if (moved) handlers.commit()
-    moved = false
-  }
-  el.addEventListener('pointerup', stop)
-  el.addEventListener('pointercancel', stop)
-
-  // THE KEYBOARD PATH — design §6.2's first exception. `Home`/`End` are deliberately absent: they
-  // would mean "collapse this pane to its floor", which is a thing the close control already says
-  // better and unambiguously.
-  //
-  // IT IS A GESTURE, EXACTLY LIKE A DRAG. Auto-repeat sends many `keydown`s and one `keyup`, so a held
-  // arrow key is N cheap frames and one storage write rather than N full rebuilds — the same shape the
-  // pointer path takes above, for the same reason.
-  let armedKey: string | null = null
-
-  el.addEventListener('keydown', (e) => {
-    const forward = dir === 'row' ? 'ArrowRight' : 'ArrowDown'
-    const back = dir === 'row' ? 'ArrowLeft' : 'ArrowUp'
-    let delta: number
-    if (e.key === forward) delta = KEY_STEP
-    else if (e.key === back) delta = -KEY_STEP
-    else return
-    // `armedKey` IS SET BEFORE `handlers.resize` RUNS, NOT AFTER — the same ordering `pointermove`
-    // uses above and for the same reason: if the frame handler throws, `keyup`/`blur` must still find
-    // the gesture committable rather than silently discarding a model that already advanced.
-    armedKey = e.key
-    handlers.resize(path, index, delta)
-    e.preventDefault()
-  })
-
-  // `blur` COMMITS TOO, AND IT IS NOT BELT-AND-BRACES. `keyup` never arrives if focus leaves while the
-  // key is down — a click into a pane, a `Tab` chord, the window losing focus — and the frames already
-  // moved the model, so without this the tree on screen and the tree in storage disagree until the next
-  // unrelated `applyLayout` happens to reconcile them.
-  //
-  // `keyup` COMMITS ONLY WHEN THE RELEASED KEY IS THE ONE THAT ARMED THE GESTURE — Important finding,
-  // review of this task. A held arrow key's own `keyup` is not the only `keyup` this divider can see
-  // while it holds focus: the user can press and release an UNRELATED key — a modifier, a stray
-  // keystroke — without ever releasing the arrow. `armedKey` records WHICH key armed the current gesture
-  // rather than merely THAT some key did, so an unrelated key's `keyup` finds no match, calls nothing,
-  // and leaves the gesture armed; auto-repeat then keeps re-arming it with the arrow key itself, and the
-  // arrow's own eventual `keyup` is what actually commits. Without this the unrelated `keyup` mid-hold
-  // consumed the arming and wrote to storage early, and the arrow's later `keyup` — re-armed by
-  // auto-repeat in between — committed a SECOND time: two writes for one continuous gesture, against the
-  // one-write-per-gesture invariant this path exists to establish. `blur` has no released key to compare
-  // against — focus can leave from a click or a `Tab` with no `keyup` involved at all — so it stays
-  // unconditional on anything but arming: any armed gesture commits when focus goes, exactly as before.
-  const commitKeys = (): void => {
-    // A `blur` FIRED BY THE VERY REBUILD WE ARE INSIDE MUST NOT COMMIT. `renderLayout`'s
-    // `root.replaceChildren()` removes a focused divider mid-rebuild, and Chromium fires `blur` on an
-    // element the instant it is removed while focused — so this handler can be reached from INSIDE
-    // `applyLayout`'s own `renderLayout` call, not only from a user releasing focus. Letting that
-    // `blur` reach `handlers.commit()` would re-enter `applyLayout` from inside its own `renderLayout`:
-    // the outer call would go on to append a second tree box, and `syncSizes`'s anchor
-    // (`root.firstElementChild`) would then point at a stale one. `el.isConnected` is what tells the
-    // two cases apart — false exactly when this divider has already been detached by the rebuild we are
-    // inside — so bailing here makes the ordering below safe by design rather than merely by the
-    // set-before-call ordering that happens to prevent re-entrancy today.
-    if (!el.isConnected) {
-      armedKey = null
-      return
-    }
-    if (armedKey === null) return
-    armedKey = null
-    handlers.commit()
-  }
-  el.addEventListener('keyup', (e) => {
-    if (e.key === armedKey) commitKeys()
-  })
-  el.addEventListener('blur', commitKeys)
 
   return el
 }

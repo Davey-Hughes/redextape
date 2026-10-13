@@ -25,6 +25,7 @@ export type IconName =
   | 'moon'
   | 'settings'
   | 'format'
+  | 'maximise'
 
 /** Stroke paths on a 16×16 grid. Drawn for this app; no icon set is vendored. */
 const PATHS: Readonly<Record<IconName, string>> = {
@@ -54,6 +55,8 @@ const PATHS: Readonly<Record<IconName, string>> = {
   // is what the action does. Deliberately NOT a wand or a brush: the operation is deterministic
   // (`print ∘ parse`) and a magic glyph would suggest otherwise.
   format: 'M3 4.5 H13 M3 8 H10 M3 11.5 H12',
+  // Four corners pulled apart: the panel takes the room. Its pressed state is the button's, not a second glyph.
+  maximise: 'M3 6.5 V3 H6.5 M9.5 3 H13 V6.5 M13 9.5 V13 H9.5 M6.5 13 H3 V9.5',
   settings:
     'M8 5.75 A2.25 2.25 0 1 0 8 10.25 A2.25 2.25 0 1 0 8 5.75 M8 1.5 V3.5 M8 12.5 V14.5 M1.5 8 H3.5 M12.5 8 H14.5 M3.4 3.4 L4.8 4.8 M11.2 11.2 L12.6 12.6 M3.4 12.6 L4.8 11.2 M11.2 4.8 L12.6 3.4',
 }

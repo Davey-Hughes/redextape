@@ -85,6 +85,12 @@ export const DEFAULT_TM_DISPLAY: TmDisplay = { level: 'program', edges: 'arcs' }
 /** Each TM view's display settings, by leaf — a view with none stored draws with `DEFAULT_TM_DISPLAY`. */
 export type TmDisplays = Readonly<Record<LeafId, TmDisplay>>
 
+/**
+ * Per view, per region name, the share of the view's height the region takes (the view layouts spec §11.4). A region
+ * with no entry has the share it is built with, and a view with none looks as it did before a boundary could move.
+ */
+export type PanelSizes = Readonly<Record<LeafId, Readonly<Record<string, number>>>>
+
 export type Workspace = {
   readonly tree: LayoutNode
   readonly switches: Switches
@@ -92,6 +98,8 @@ export type Workspace = {
   /** The view the user is in — any leaf, the source view included. It drives the readout (spec §9). */
   readonly focused: LeafId
   readonly panels: Panels
+  /** Beside `panels`, and kept and dropped with it: a parked view keeps its sizes, a closed view's are dropped. */
+  readonly panelSizes: PanelSizes
   /**
    * Whether the inspector is open — spec §9, and the one field that is NOT a view's panel.
    *
@@ -140,6 +148,7 @@ export function defaultWorkspace(shape: Shape): Workspace {
     speed: DEFAULT_SPEED,
     focused: defaultFocus(tree),
     panels: {},
+    panelSizes: {},
     inspector: true,
     display: {},
     tmDisplay: {},
@@ -155,6 +164,12 @@ export function withDisplay(display: Displays, leaf: LeafId, d: LambdaDisplay): 
 /** `tmDisplay` with one TM view's settings recorded — `withDisplay`'s twin. */
 export function withTmDisplay(tmDisplay: TmDisplays, leaf: LeafId, d: TmDisplay): TmDisplays {
   return { ...tmDisplay, [leaf]: d }
+}
+
+/** `panelSizes` with one view's shares recorded, or with the view left out where it holds none. */
+export function withPanelSizes(sizes: PanelSizes, leaf: LeafId, own: Readonly<Record<string, number>>): PanelSizes {
+  const { [leaf]: _, ...rest } = sizes
+  return Object.keys(own).length === 0 ? rest : { ...rest, [leaf]: own }
 }
 
 /** `panels` with one panel of one view recorded — a new object, as every operation in `layout.ts` returns. */
@@ -185,6 +200,8 @@ export function serializeWorkspace(ws: Workspace): string {
   const onScreen = new Set(leaves(ws.tree).map((l) => l.id))
   const panels: Record<LeafId, Record<string, boolean>> = {}
   for (const [leaf, open] of Object.entries(ws.panels)) if (live.has(leaf)) panels[leaf] = { ...open }
+  const panelSizes: Record<LeafId, Record<string, number>> = {}
+  for (const [leaf, sizes] of Object.entries(ws.panelSizes)) if (live.has(leaf)) panelSizes[leaf] = { ...sizes }
   const display: Record<LeafId, LambdaDisplay> = {}
   for (const [leaf, d] of Object.entries(ws.display)) if (live.has(leaf)) display[leaf] = d
   const tmDisplay: Record<LeafId, TmDisplay> = {}
@@ -199,6 +216,7 @@ export function serializeWorkspace(ws: Workspace): string {
     inspector: ws.inspector,
     display,
     tmDisplay,
+    ...(Object.keys(panelSizes).length === 0 ? {} : { panelSizes }),
     ...(Object.keys(ws.arrangements).length === 0 ? {} : { arrangements: ws.arrangements }),
   })
 }
@@ -290,6 +308,23 @@ function parsePanels(v: unknown, ids: ReadonlySet<string>): Panels | null {
   return out
 }
 
+/** `parsePanels`' rules, for shares: an entry names a live view, and a share is a finite number above 0. */
+function parsePanelSizes(v: unknown, ids: ReadonlySet<string>): PanelSizes | null {
+  if (typeof v !== 'object' || v === null || Array.isArray(v)) return null
+  const out: Record<LeafId, Record<string, number>> = {}
+  for (const [leaf, sizes] of Object.entries(v as Record<string, unknown>)) {
+    if (!ids.has(leaf)) return null
+    if (typeof sizes !== 'object' || sizes === null || Array.isArray(sizes)) return null
+    const own: Record<string, number> = {}
+    for (const [name, share] of Object.entries(sizes as Record<string, unknown>)) {
+      if (typeof share !== 'number' || !Number.isFinite(share) || share <= 0) return null
+      own[name] = share
+    }
+    out[leaf] = own
+  }
+  return out
+}
+
 /**
  * The stored workspace, or `null` if there is nothing usable there.
  *
@@ -318,6 +353,7 @@ export function parseWorkspace(raw: string | null): Workspace | null {
       speed: DEFAULT_SPEED,
       focused: defaultFocus(tree),
       panels: {},
+      panelSizes: {},
       inspector: true,
       display: {},
       tmDisplay: {},
@@ -340,6 +376,9 @@ export function parseWorkspace(raw: string | null): Workspace | null {
   const ids = new Set(liveLeaves(tree, arrangements).keys())
   const panels = parsePanels(e.panels, ids)
   if (panels === null) return null
+  // A MISSING `panelSizes` IS NOT AN INVALID ONE, for `inspector`'s reason below.
+  const panelSizes = e.panelSizes === undefined ? {} : parsePanelSizes(e.panelSizes, ids)
+  if (panelSizes === null) return null
   // **A MISSING `inspector` IS NOT AN INVALID ONE.** Version 2 shipped in part 2a without this field, so
   // every workspace stored before part 2b has none — refusing them would reset the layout of exactly the
   // users the version 2 envelope was built to carry across. A field that IS there and is not a boolean is
@@ -355,6 +394,7 @@ export function parseWorkspace(raw: string | null): Workspace | null {
     speed: e.speed,
     focused: e.focused,
     panels,
+    panelSizes,
     inspector: e.inspector ?? true,
     display,
     tmDisplay,

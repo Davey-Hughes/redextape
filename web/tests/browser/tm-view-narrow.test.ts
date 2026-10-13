@@ -517,8 +517,14 @@ describe('the TM view, on sum_to(5)', () => {
    * level, its grid, its runtime column and each of the column's boxes — at its left, top, width and height against the
    * view's top-left corner, to 0.5px, as a throwaway probe measured them on `53ecbfa` (2026-10-05). The view is
    * 634px wide at x = 646. The figures are the web fonts', which the browser tier loads.
+   *
+   * **BUT FOR THE MAXIMISE BUTTON EACH HEADER GAINED** (the view layouts spec §11.3), 24.78px wide at the right end of
+   * its actions with the 8px gap before it: the diagram's actions and the radio groups in them are 32.78px further
+   * left than `53ecbfa` drew them and the box of the actions that much wider, and the rules' header has a box of
+   * actions where it had none (measured on the panel-resizing prototype, 2026-10-12). No panel, header, toggle, name
+   * or body moved: the boundary between the two panels is as tall as the gap it took the place of.
    */
-  it('at 1280 px, the TM view’s panels are where 53ecbfa drew them', async () => {
+  it('at 1280 px, the TM view’s panels are where 53ecbfa drew them, but for each header’s maximise button', async () => {
     await at(1280, 800, false)
     expect(tm().scrollTop, 'precondition: the TM view is not scrolled').toBe(0)
     const origin = tm().getBoundingClientRect()
@@ -531,18 +537,21 @@ describe('the TM view, on sum_to(5)', () => {
       ['its header', rules.querySelector('.panel-header'), [0, 226, 634, 28]],
       ['its toggle', rules.querySelector('.panel-toggle'), [8, 227, 57.41, 26]],
       ['its name', rules.querySelector('.panel-name'), [24, 231, 41.41, 18]],
+      ['the rules’ actions', rules.querySelector('.panel-actions'), [601.22, 228.8, 24.78, 22.39]],
+      ['the rules’ maximise', rules.querySelector('.panel-maximise'), [601.22, 228.8, 24.78, 22.39]],
       ['the rule table', table(), [0, 254, 634, 120]],
       ['the diagram panel', d, [0, 382, 634, 148]],
       ['its header', d.querySelector('.panel-header'), [0, 382, 634, 28]],
       ['its toggle', d.querySelector('.panel-toggle'), [8, 383, 118.25, 26]],
       ['its name', d.querySelector('.panel-name'), [24, 387, 102.25, 18]],
-      ['its actions', d.querySelector('.panel-actions'), [419.88, 384.81, 206.13, 22.38]],
-      ['program | local', d.querySelector('[role="radiogroup"][aria-label="level"]'), [419.88, 384.81, 109.56, 22.38]],
-      ['program', choice('program'), [419.88, 384.81, 61.78, 22.38]],
-      ['local', choice('local'), [481.66, 384.81, 47.78, 22.38]],
-      ['arcs | chips', d.querySelector('[role="radiogroup"][aria-label="edges"]'), [537.44, 384.81, 88.56, 22.38]],
-      ['arcs', choice('arcs'), [537.44, 384.81, 40.78, 22.38]],
-      ['chips', choice('chips'), [578.22, 384.81, 47.78, 22.38]],
+      ['its actions', d.querySelector('.panel-actions'), [387.09, 384.81, 238.91, 22.38]],
+      ['program | local', d.querySelector('[role="radiogroup"][aria-label="level"]'), [387.09, 384.81, 109.56, 22.38]],
+      ['program', choice('program'), [387.09, 384.81, 61.78, 22.38]],
+      ['local', choice('local'), [448.88, 384.81, 47.78, 22.38]],
+      ['arcs | chips', d.querySelector('[role="radiogroup"][aria-label="edges"]'), [504.66, 384.81, 88.56, 22.38]],
+      ['arcs', choice('arcs'), [504.66, 384.81, 40.78, 22.38]],
+      ['chips', choice('chips'), [545.44, 384.81, 47.78, 22.38]],
+      ['the diagram’s maximise', d.querySelector('.panel-maximise'), [601.22, 384.8, 24.78, 22.39]],
       ['the diagram', d.querySelector('.state-diagram'), [0, 410, 634, 120]],
       ['the program level', d.querySelector('.program-level'), [0, 410, 634, 120]],
       ['its grid', programScroll(), [0, 410, 458, 120]],

@@ -5,6 +5,7 @@ import { n } from './format'
 import type { Dir } from './layout'
 import type { PaneChoice, PaneEvents, SplitChoices } from './pane-chrome'
 import { createPanel, type Panel } from './panel'
+import { PanelStack, type Shares } from './panel-stack'
 import type { Leg } from './protocol'
 import { valueLine } from './results'
 import type { ScratchEditor } from './scratch-editor'
@@ -173,6 +174,7 @@ export class TmPane implements EditablePane {
     on: PaneEvents,
     panels: { readonly rules?: boolean; readonly diagram?: boolean; readonly outline?: boolean } = {},
     display: TmDisplay = DEFAULT_TM_DISPLAY,
+    sizes: Shares = {},
   ) {
     this.#display = display
     this.#onDisplay = on.tmDisplay
@@ -281,6 +283,7 @@ export class TmPane implements EditablePane {
         this.#drawTable()
         on.panel?.('rules', open)
       },
+      onDrawn: () => this.#drawTable(),
     })
     this.#rulesPanel.actions.append(this.#reattach)
 
@@ -351,6 +354,10 @@ export class TmPane implements EditablePane {
         this.#syncDiagramReattach()
         on.panel?.('diagram', open)
       },
+      onDrawn: () => {
+        this.#diagram.redraw()
+        this.#syncDiagramReattach()
+      },
     })
     this.#diagramPanel.actions.append(this.#diagramReattach, this.#levelChoice.el, this.#edgesChoice.el)
 
@@ -371,6 +378,48 @@ export class TmPane implements EditablePane {
     )
     this.#header.steps.append(this.#steps.el)
     host.replaceChildren(this.#header.el, this.#body)
+    // THE REGIONS THAT SHARE THE VIEW'S HEIGHT (the view layouts spec §11.1), top to bottom. The rules take two
+    // shares and the diagram and the outline one each, as `style.css` fixed them before a boundary could be dragged;
+    // a copy's text keeps its own height until one is.
+    // IT KEEPS ITSELF: its listeners are on the regions and their headers, and nothing here reads it again.
+    new PanelStack(
+      [
+        {
+          name: 'text',
+          label: 'text',
+          el: this.#copy.text.el,
+          share: null,
+          panels: [this.#copy.text],
+          bodies: () => [this.#copy.text.body],
+        },
+        {
+          name: 'rules',
+          label: 'rules',
+          el: this.#rulesPanel.el,
+          share: 2,
+          panels: [this.#rulesPanel],
+          bodies: () => [this.#rulesPanel.body],
+        },
+        {
+          name: 'diagram',
+          label: 'state diagram',
+          el: this.#diagramPanel.el,
+          share: 1,
+          panels: [this.#diagramPanel],
+          bodies: () => [this.#diagramPanel.body],
+        },
+        {
+          name: 'outline',
+          label: 'outline',
+          el: this.#copy.outlinePanel.el,
+          share: 1,
+          panels: [this.#copy.outlinePanel],
+          bodies: () => [this.#copy.outlinePanel.body],
+        },
+      ],
+      sizes,
+      (next) => on.panelSizes?.(next),
+    )
   }
 
   /**

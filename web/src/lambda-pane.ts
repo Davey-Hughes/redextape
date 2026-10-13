@@ -10,6 +10,7 @@ import type { Dir } from './layout'
 import type { LambdaLinkState } from './link-status'
 import { type PaneChoice, type PaneEvents, type SplitChoices, textPanel } from './pane-chrome'
 import { createPanel, type Panel } from './panel'
+import { PanelStack, type Shares } from './panel-stack'
 import type { LambdaTreeWire, Leg } from './protocol'
 import type { ScratchEditorConfig } from './scratch-editor'
 import { ScratchEditor } from './scratch-editor'
@@ -193,7 +194,7 @@ export class LambdaPane implements EditablePane {
   constructor(
     host: HTMLElement,
     on: PaneEvents,
-    opts: { readonly display?: LambdaDisplay; readonly map?: boolean } = {},
+    opts: { readonly display?: LambdaDisplay; readonly map?: boolean; readonly sizes?: Shares } = {},
   ) {
     this.#display = opts.display ?? DEFAULT_DISPLAY
     this.#onDisplay = on.display
@@ -220,6 +221,18 @@ export class LambdaPane implements EditablePane {
         this.#drawMap()
       },
     })
+    // THE MAP IS DRAWN FOR THE HEIGHT ITS CANVAS HAS, AND THAT HEIGHT IS NO LONGER THE STYLESHEET'S 120px ALONE (the
+    // view layouts spec §11.1): the map has a share of its view once its boundary is dragged, and takes the view's
+    // spare height while it is maximised. The term's own change of size draws it again (`scrolled`, above), which
+    // covers a drag and a view that changes height. It does not cover a canvas that changes with the term as it was:
+    // a maximise of another panel hides the canvas and shows it again, and in a view too short for its floors the
+    // term is at its floor before, under and after. So the canvas's own box is watched. A draw that changes nothing
+    // is skipped by `term-map.ts`'s `TermMap.draw`, so the frame of a drag that the term also reports costs one draw.
+    // **NOT FOR A CANVAS WITH NO HEIGHT**, which is one that has left the page or been hidden: there is nothing to
+    // draw it for, and `lambda-body.ts`'s own observer holds the same line for the term.
+    new ResizeObserver(() => {
+      if (this.#map.el.clientHeight > 0) this.#drawMap()
+    }).observe(this.#map.el)
     this.#mapMode = radioGroup(
       {
         label: 'map mode',
@@ -319,6 +332,33 @@ export class LambdaPane implements EditablePane {
     this.#collapse = textPanel(this.#editorHost, (collapsed) => on.collapse?.(collapsed))
     this.#header.steps.append(this.#steps.el)
     host.replaceChildren(this.#header.el, this.#collapse.el, this.#body.el, this.#mapPanel.el)
+    // THE REGIONS THAT SHARE THE VIEW'S HEIGHT (the view layouts spec §11.1), top to bottom. The term takes what the
+    // view has spare; a copy's text and the term map keep their own heights until a boundary beside one is dragged.
+    // The term has no header: it is a region no maximise draws closed, and it keeps its floor under one.
+    // IT KEEPS ITSELF: its listeners are on the regions and their headers, and nothing here reads it again.
+    new PanelStack(
+      [
+        {
+          name: 'text',
+          label: 'text',
+          el: this.#collapse.el,
+          share: null,
+          panels: [this.#collapse.panel],
+          bodies: () => [this.#collapse.panel.body],
+        },
+        { name: 'term', label: 'term', el: this.#body.el, share: 1, panels: [], bodies: () => [this.#body.el] },
+        {
+          name: 'map',
+          label: 'term map',
+          el: this.#mapPanel.el,
+          share: null,
+          panels: [this.#mapPanel],
+          bodies: () => [mapHost],
+        },
+      ],
+      opts.sizes ?? {},
+      (next) => on.panelSizes?.(next),
+    )
 
     // λ -> SOURCE, the third direction: a click on any token links from the construct its node belongs to
     // (`LambdaBody`'s `link` event, `#linkFrom`), at whatever step is on screen (Plan 7 part 4a).

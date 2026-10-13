@@ -20,6 +20,7 @@ import {
 import { DIVIDER_PX, renderLayout, renderStage, syncSizes } from './layout-view'
 import { unhandled } from './legs'
 import type { PaneChoice, PaneEvents } from './pane-chrome'
+import type { Shares } from './panel-stack'
 import type { LeafId, PaneCollection, PaneKind } from './panes'
 import type { Leg } from './protocol'
 import type { Detachable } from './scratch'
@@ -293,6 +294,10 @@ export function createPaneHost(deps: {
   panelOpen(leaf: LeafId, name: string): boolean | undefined
   /** Record a view's panel state; `persist` is the caller's to make. */
   setPanel(leaf: LeafId, name: string, open: boolean): void
+  /** A view's stored shares for its regions, or `undefined` for none (the view layouts spec §11.4). */
+  panelSizesOf(leaf: LeafId): Shares | undefined
+  /** Record a view's shares; `persist` is the caller's to make. */
+  setPanelSizes(leaf: LeafId, sizes: Shares): void
   /** A λ view's stored display settings, or `undefined` for none (Plan 7 part 4a). */
   displayOf(leaf: LeafId): LambdaDisplay | undefined
   /** Record a λ view's display settings; `persist` is the caller's to make. */
@@ -378,6 +383,8 @@ export function createPaneHost(deps: {
     setFocused,
     panelOpen,
     setPanel,
+    panelSizesOf,
+    setPanelSizes,
     displayOf,
     setDisplay,
     tmDisplayOf,
@@ -1035,6 +1042,10 @@ export function createPaneHost(deps: {
         setPanel(id, name, open)
         persist()
       },
+      panelSizes: (sizes: Shares) => {
+        setPanelSizes(id, sizes)
+        persist()
+      },
       display: (d: LambdaDisplay) => {
         setDisplay(id, d)
         persist()
@@ -1366,6 +1377,29 @@ export function createPaneHost(deps: {
       }
     }
   }
+  /**
+   * Tell the editors of the views built in this rebuild that they are at their start.
+   *
+   * **AN EDITOR REMEMBERS WHERE IT WAS SCROLLED TO, AND PUTS ITSELF BACK THERE WHEN IT IS FOCUSED AT 0**
+   * (`@codemirror/view` 6.43.8, `observers.focus`: "When focusing reset the scroll position, move it back to where it
+   * was"). It learns its position from the `scroll` events of its own scroll box. For a view that is kept that is
+   * harmless, since `giveScrollBack` writes the position it remembers. For one that starts at its top it is not,
+   * where a focus reaches the editor before any event has told it of its new position: the source editor is one
+   * editor for the page's life, it scrolls a long program inside its own box since it took a share of its view (the
+   * view layouts spec §11.1), and a link's *undo* builds every view again and focuses it in the same task.
+   *
+   * Measured before this existed (2026-10-12), with a program of 61 lines under an opened link and the editor at
+   * 120 px: the *undo* left it at 120, under a program that had never been scrolled, its `focus` having found it at 0
+   * with 120 remembered. With this, 0. An opened link was not seen to do the same: the editor remembered 0 by the time
+   * the link's notice was up, and a press in it then moved nothing. `tests/browser/focus-scroll.test.ts` has the
+   * undo. The event is what the editor listens for, so it is the one way to tell it that needs none of its internals.
+   */
+  const startEditorsAtTop = (fresh: ReadonlySet<HTMLElement>): void => {
+    for (const host of fresh) {
+      if (!host.isConnected) continue
+      for (const box of host.querySelectorAll('.cm-scroller')) box.dispatchEvent(new Event('scroll'))
+    }
+  }
 
   /**
    * The leaves of the tree `applyLayout` last put on the page — what tells a view that has come back from a remembered
@@ -1627,6 +1661,7 @@ export function createPaneHost(deps: {
           const pane = new LambdaPane(host, paneEvents(l.id, slot), {
             display: displayOf(l.id) ?? DEFAULT_DISPLAY,
             ...(map === undefined ? {} : { map }),
+            sizes: panelSizesOf(l.id) ?? {},
           })
           // **A NEW λ PANE IS SEEDED FROM ITS SESSION FOR THE IDENTICAL REASON THE TM ARM BELOW IS**,
           // and this line is the λ half of a repair that shipped with only its TM half. `scratch-compiled`
@@ -1665,6 +1700,7 @@ export function createPaneHost(deps: {
               ...(outline === undefined ? {} : { outline }),
             },
             tmDisplayOf(l.id) ?? DEFAULT_TM_DISPLAY,
+            panelSizesOf(l.id) ?? {},
           )
           // **A NEW TM PANE IS SEEDED FROM ITS SESSION, BECAUSE THE REPLY THAT WOULD HAVE TOLD IT HAS
           // ALREADY BEEN AND GONE.** `TmPane.setProgram` was called from `replies.ts` and from nowhere
@@ -1728,13 +1764,18 @@ export function createPaneHost(deps: {
           const stack = panelOpen(l.id, 'stack')
           const heap = panelOpen(l.id, 'heap')
           const outline = panelOpen(l.id, 'outline')
-          const pane = new AsmPane(host, paneEvents(l.id, slot), {
-            ...(listing === undefined ? {} : { listing }),
-            ...(registers === undefined ? {} : { registers }),
-            ...(stack === undefined ? {} : { stack }),
-            ...(heap === undefined ? {} : { heap }),
-            ...(outline === undefined ? {} : { outline }),
-          })
+          const pane = new AsmPane(
+            host,
+            paneEvents(l.id, slot),
+            {
+              ...(listing === undefined ? {} : { listing }),
+              ...(registers === undefined ? {} : { registers }),
+              ...(stack === undefined ? {} : { stack }),
+              ...(heap === undefined ? {} : { heap }),
+              ...(outline === undefined ? {} : { outline }),
+            },
+            panelSizesOf(l.id) ?? {},
+          )
           // SEEDED FROM ITS SESSION, for the TM arm's reason just above: the `compiled` reply that told the other
           // asm views has already been and gone for a view built by a split, a pick or a views toggle.
           seedAsmPane(pane, session)
@@ -1806,6 +1847,7 @@ export function createPaneHost(deps: {
         })
       }
       giveScrollBack()
+      startEditorsAtTop(fresh)
       applied()
       persist()
       // **WHICH VIEW SHOWS WHICH COPY IS STORED WITH THE TREE IT IS TRUE OF.** The stored bindings are read off `panes`

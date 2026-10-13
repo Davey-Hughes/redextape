@@ -1509,6 +1509,51 @@ button.view-title[aria-expanded="true"] {
   margin-inline-start: auto;
   font-size: var(--step--2);
 }
+/* THE BOUNDARY BETWEEN TWO REGIONS OF A VIEW (`panel-stack.ts`, the view layouts spec §11.2): a strip as tall as the
+   gap a panel keeps above itself, which it takes the place of. IT DRAWS NOTHING AT REST AND NOTHING UNDER THE POINTER:
+   the pointer is what says a thing here can be held, an open hand over it and a closed one from the press to the
+   release (`data-dragging`, `separator.ts`'s). A line across the view is drawn for the keyboard's focus alone, which
+   has no pointer to say it. `touch-action` leaves a finger's drag to the gesture. */
+.panel-boundary {
+  position: relative;
+  flex: none;
+  height: var(--space-2);
+  cursor: grab;
+  touch-action: none;
+}
+.panel-boundary:focus-visible::before {
+  content: "";
+  position: absolute;
+  inset-inline: 0;
+  top: calc(50% - 1px);
+  height: 2px;
+  background: var(--accent);
+}
+.panel-boundary:focus-visible {
+  outline-offset: -2px;
+}
+/* A HEADER THAT IS A HANDLE FOR THE BOUNDARY ABOVE IT SAYS SO WITH THE POINTER (`panel-stack.ts`): the boundary's
+   two hands over the bar, and each control on it keeps its own pointer. */
+.panel-header[data-resizes] {
+  cursor: grab;
+}
+.panel-boundary[data-dragging],
+.panel-header[data-resizes][data-dragging] {
+  cursor: grabbing;
+}
+/* MAXIMISE (spec §11.3): a toggle, drawn pressed as a checked choice is, without relying on colour. */
+/* AS TALL AS A BUTTON WITH A WORD ON IT, which a button holding only an icon is not: a line, the shared control
+   rule's padding and its border. Alone in a header it was 16px beside the 22px it has next to a radio group. */
+.panel-maximise {
+  display: inline-flex;
+  align-items: center;
+  box-sizing: border-box;
+  min-height: calc(1lh + 0.2em + 2px);
+}
+.panel-maximise[aria-pressed="true"] {
+  border-color: var(--accent);
+  box-shadow: inset 0 -2px 0 var(--accent);
+}
 /* A PANEL WITH NO ACTIONS DRAWS NO ACTIONS BOX: an empty one still took a place in the wrapping header, so a header
    narrower than its name and the gap after it put the empty box on a second row, 4px lower. */
 .panel-actions:empty {
@@ -2552,12 +2597,31 @@ main {
   display: flex;
   flex-direction: column;
 }
-.tm-pane > .panel[data-panel="rules"][data-open="true"] {
-  flex: 2 1 0;
-}
+/* THE SHARE IS `panel-stack.ts`'s TO WRITE (the view layouts spec §11): the one a region is built with, the rules
+   two and the others one each, or the one a dragged boundary left. */
+.tm-pane > .panel[data-panel="rules"][data-open="true"],
 .tm-pane > .panel[data-panel="diagram"][data-open="true"],
 .tm-pane > .panel[data-panel="outline"][data-open="true"] {
+  flex: var(--share, 1) 1 0;
+}
+/* THE BOUNDARY UNDER A COPY'S TEXT TAKES THE PLACE OF THE GAP ITS EDITOR KEPT UNDER ITSELF, as a boundary over a panel
+   takes the gap that panel kept above: with both, what lies under the text sat 8px lower than it did before a boundary
+   could be drawn there. */
+.panel[data-panel="text"]:has(+ .panel-boundary) > .term-editor {
+  margin-bottom: 0;
+}
+/* A COPY'S TEXT KEEPS ITS OWN HEIGHT UNTIL A BOUNDARY BESIDE IT IS DRAGGED, and is `data-sized` from then on: a
+   region of the stack like the others, its editor scrolling inside the share it has. */
+.tm-pane > .panel[data-panel="text"][data-open="true"][data-sized]:not([hidden]),
+.asm-pane > .panel[data-panel="text"][data-open="true"][data-sized]:not([hidden]) {
+  display: flex;
+  flex-direction: column;
+  flex: var(--share, 1) 1 0;
+}
+.panel[data-panel="text"][data-open="true"][data-sized] > .term-editor {
   flex: 1 1 0;
+  max-height: none;
+  min-height: 2lh;
 }
 /* THE FLOORS ARE THE BODIES', so a panel's own minimum is its header and a floor, whatever the header's height.
    Five rows each: the table's are `ROW_HEIGHT`, the outline's a line of its own. */
@@ -2610,13 +2674,13 @@ main {
   display: flex;
   flex-direction: column;
 }
-.asm-pane > .panel[data-panel="listing"][data-open="true"] {
-  flex: 2 1 0;
-}
+/* THE SHARES ARE `panel-stack.ts`'s TO WRITE, as the TM view's are: the listing's two and the others' one each, or
+   what a dragged boundary left. */
+.asm-pane > .panel[data-panel="listing"][data-open="true"],
 .asm-pane > .panel[data-panel="heap"][data-open="true"],
 .asm-pane > .panel[data-panel="outline"][data-open="true"],
 .asm-pane > .asm-machine:has(> .panel[data-open="true"]) {
-  flex: 1 1 0;
+  flex: var(--share, 1) 1 0;
 }
 .asm-pane > .panel[data-open="true"] > .outline {
   flex: 1 1 0;
@@ -2735,4 +2799,90 @@ main {
 .asm-ret,
 .asm-refs {
   color: var(--fg-dim);
+}
+
+/* THE BOUNDARY TAKES THE PLACE OF THE GAP THE REGION UNDER IT KEEPS ABOVE ITSELF. Here, after the rules that set
+   those gaps, with the source and λ views' regions below: Biome's `noDescendingSpecificity` rejects a selector that
+   follows a more specific one for the same element, and each of these narrows a rule far above it. */
+.panel-boundary + .panel,
+.panel-boundary + .asm-machine {
+  margin-block-start: 0;
+}
+
+/* THE SOURCE VIEW IS A COLUMN OF TWO REGIONS (the view layouts spec §11.1): the outline over the editor. The editor
+   takes what the view has spare and scrolls inside it, where the view scrolled it and its header away; the outline
+   keeps its own height, what it lists up to four tenths of the view, until the boundary between the two is dragged,
+   and has the share `panel-stack.ts` writes from then on. Each keeps a floor of five lines, and under both the view
+   scrolls. */
+.pane[data-kind="source"] {
+  display: flex;
+  flex-direction: column;
+}
+.pane[data-kind="source"] > * {
+  flex: none;
+}
+.pane[data-kind="source"] > #editor {
+  display: flex;
+  flex-direction: column;
+  flex: var(--share, 1) 1 0;
+  min-height: 5lh;
+}
+.pane[data-kind="source"] > #editor > .cm-editor {
+  flex: 1 1 0;
+  min-height: 0;
+}
+.pane[data-kind="source"] > .panel[data-panel="outline"][data-open="true"] {
+  display: flex;
+  flex-direction: column;
+  flex: 0 1 auto;
+  max-height: 40%;
+}
+.pane[data-kind="source"] > .panel[data-panel="outline"][data-open="true"][data-sized] {
+  flex: var(--share, 1) 1 0;
+  max-height: none;
+}
+.pane[data-kind="source"] > .panel[data-panel="outline"][data-open="true"] > .outline {
+  flex: 1 1 auto;
+  min-height: 0;
+  max-height: none;
+}
+/* TWO LINES, NOT FIVE: the floor is met the moment a drag gives the outline a share, and an outline of two rows
+   that jumped to five as its boundary was pressed would move the boundary out from under the pointer. */
+.pane[data-kind="source"] > .panel[data-panel="outline"][data-open="true"][data-sized] > .outline {
+  flex: 1 1 0;
+  min-height: 2lh;
+}
+
+/* IN A λ VIEW THE TERM TAKES WHAT THE VIEW HAS SPARE (the view layouts spec §11.1), where it was capped at `60vh` of
+   the window whatever the view's own height. The view is a flex column, as the TM and asm views are, and everything
+   in it but the regions `panel-stack.ts` gives a share keeps its own height. Below the floors the view scrolls. */
+.pane[data-kind="lambda"] {
+  display: flex;
+  flex-direction: column;
+}
+.pane[data-kind="lambda"] > * {
+  flex: none;
+}
+.pane[data-kind="lambda"] > .term {
+  flex: var(--share, 1) 1 0;
+  max-height: none;
+}
+.pane[data-kind="lambda"] > .panel[data-panel="text"][data-open="true"][data-sized]:not([hidden]),
+.pane[data-kind="lambda"] > .panel[data-panel="map"][data-open="true"][data-sized] {
+  display: flex;
+  flex-direction: column;
+  flex: var(--share, 1) 1 0;
+}
+/* THE TERM MAP KEEPS ITS 120px UNTIL ITS BOUNDARY IS DRAGGED, and from then on its canvas fills the share its panel
+   has, down to half of that. `term-map.ts` reads the canvas's height when it draws. */
+.panel[data-panel="map"][data-sized] > .term-map-host {
+  display: flex;
+  flex-direction: column;
+  flex: 1 1 0;
+  min-height: 60px;
+}
+.panel[data-panel="map"][data-sized] > .term-map-host > .term-map {
+  flex: 1 1 0;
+  min-height: 0;
+  height: auto;
 }

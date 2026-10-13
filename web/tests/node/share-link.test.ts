@@ -152,6 +152,7 @@ describe('the frozen link from version 1', () => {
         speed: 8,
         focused: 'lambda-0',
         panels: {},
+        panelSizes: {},
         inspector: true,
         display: {},
         tmDisplay: {},

@@ -13,6 +13,9 @@ pull request changed after the approval at `fed6e37`. Five points are still the 
 answered. They are gathered in §16.3, and the first and the third are marked **OPEN** where they stand; §16.4 has
 what he decided with the pull request open.
 
+**§11 is as amended on 2026-10-12 too**, after its own prototype was built and the user tried it: §18 lists what he
+decided with it open, what it found, and which of its rulings are the design's own and not his.
+
 ## §1 Scope
 
 In:
@@ -24,7 +27,8 @@ In:
 - A first load on the source and the TM view (§8).
 - *Move view left*, *right*, *up* and *down*, in a view's `⋯` menu and on the view keys (§9).
 - Dragging a view by its header onto an edge of another view, or of the workspace (§10).
-- Boundaries between the panels inside a view that can be dragged, and a maximise button on each panel (§11).
+- Boundaries between the panels inside a view that can be dragged, by a panel's own header among other ways, and a
+  maximise button on each panel (§11).
 
 Out:
 
@@ -761,30 +765,58 @@ Every boundary between two regions of a view that share its height:
 | λ | a copy's text, the term, the term map | the status line |
 | source | the outline, the editor | — |
 
-Two of those views do not share their height today (§2.11), so they are made to, first:
+Two of those views did not share their height (§2.11), so they are made to, first:
 
-- **The λ term loses its cap of `60vh` and takes the view's spare height.** The term map starts at the 120 px it has
-  now and becomes a region with a share like any other. Its canvas reads its height when it draws, so it draws again
-  when its boundary moves.
-- **The source outline loses its cap of `40vh`** and shares the view with the editor.
-- **A copy's text panel joins the stack** in the three views that have one. Today it keeps its own height above the
-  panels, so an editor cannot be given room that the rules have.
+- **The λ term loses its cap of `60vh` and takes the view's spare height.**
+- **The source editor takes the source view's spare height and scrolls inside it**, where the view's own box scrolled
+  a long program and its header with it. The header stays where it is.
+- **A copy's text panel joins the stack** in the three views that have one, so an editor can be given room that the
+  rules have.
 
-The registers and the call stack, side by side in one row of the asm view, stay an even split: they wrap one under the
+**Three regions start at the height they have today and take a share only once a boundary beside them is dragged**:
+a copy's text, as tall as what it holds up to eight lines; the term map, 120 px; and the source outline, as tall as
+what it lists, up to four tenths of its view where the cap was `40vh`. With a share of one beside the editor's two,
+an outline of two rows would have a third of its view. From the first drag each is a region with a share like any other,
+and a reset (§11.2) gives it back its own height. The term map's canvas reads its height when it draws, and is drawn
+again when the term changes size, which a drag always is, and when its own box does (§18.3).
+
+The registers and the call stack, side by side in one row of the asm view, are one region: they wrap one under the
 other in a narrow view, and a boundary between them would have no place there.
 
 ### §11.2 The boundary
 
-A boundary is drawn between two regions of the stack that are both open, where no open region lies between them. It is
-the layout divider's gesture, in one implementation: a `role="separator"` that takes the focus, dragged with a pointer
-under capture, moved by `ArrowUp` and `ArrowDown` in steps, and named for the two regions it parts, as "resize rules
-and state diagram".
+A boundary is drawn between two regions of the stack that are both open, where no open region lies between them,
+directly under the upper of the two. A closed region's header, or a part of the view that keeps its own height, can
+lie between them and moves with it: in a TM view of a copy the boundary under the text is above the tapes. It is the
+layout divider's gesture, in one implementation: a `role="separator"` that takes the focus, dragged with a pointer
+under capture, moved by `ArrowUp` and `ArrowDown` in steps of a fiftieth of the height the open regions share, and
+named for the two regions it parts, as "resize rules and state diagram".
 
+- **A panel's header is the handle for the boundary above it.** A press on the bar's own part, outside its controls,
+  drags that boundary, and a double click there resets it. A header with no boundary above it is not a handle: the
+  first open region's, a closed region's, and that of a panel that has wrapped under the one beside it. A finger's
+  press on a header is left alone, since a header is most of what a narrow view offers to scroll by, and the boundary
+  itself takes a finger.
+- **Nothing is drawn for a boundary at rest or under the pointer.** The pointer says a thing can be held: an open
+  hand over a boundary and over a header that is a handle, and a closed one from the press to the release. The
+  boundary itself is a strip as tall as the gap a region keeps above itself, which it takes the place of, so no
+  region moves for it. It is the keyboard's separator, for which it draws a line while it has a key's focus, and the
+  one handle over a region that has no header: the λ term and the source editor.
 - Dragging it gives one region more of the view and the other less. No other region changes, and the view does not
   grow, so nothing new scrolls.
 - **A drag stops at a floor.** Each region's body keeps the floor it has today, five rows, and the boundary does not
-  pass the point where either neighbour would go under its own.
-- A double click, or `Enter` on the focused boundary, puts both regions back to their default shares.
+  pass the point where either neighbour would go under its own. The regions that had no floor have one: the source
+  editor five lines, a copy's text and the source outline two, and the term map 60 px. Two and not five for the two
+  that start at their own height, since the floor is met the moment a drag gives one a share, and a region shorter
+  than its floor would jump as its boundary was pressed.
+- A double click, or `Enter` on the focused boundary, puts both regions back as they are built: to their shares, or
+  to their own height for the three that start with one.
+- **A boundary says how much of the two its upper region is drawn at** (`aria-valuenow`), measured where the value is
+  wanted: as it is drawn, at its focus, at each frame of a gesture and at its end. The shares say it only while both
+  regions are over their floors, and a region that keeps its own height has none.
+- **A gesture ends at its pointer's release wherever that lands, and a gesture on another handle ends the one before
+  it.** A view taken off the page under a press loses the pointer's capture, and an arrow key held on one boundary is
+  a gesture until its release.
 - A closed region keeps only its header and takes no share, as today. The boundary beside it is not drawn while it is
   closed.
 
@@ -793,28 +825,50 @@ and state diagram".
 Each panel's header has a button, after its other actions, named for its panel: "maximise rules". It is a toggle, and
 `aria-pressed` carries its state.
 
-- Pressed, its panel takes all of the view's spare height, and every other region of the stack is drawn as closed is:
-  its header alone. Their stored open states are not changed.
+- Pressed, its panel takes all of the view's spare height, and every other panel of the stack is drawn as closed is:
+  its header alone, with its disclosure saying so. Their stored open states are not changed. A panel that is stored
+  closed is drawn open for as long as it is maximised.
+- **A region with no header cannot be drawn closed, and keeps its floor**: the λ term under a maximised term map, and
+  the source editor under a maximised outline.
+- The registers and the call stack are two panels of one region, and maximising either draws the other closed.
+- No boundary is drawn while a panel is maximised.
 - Pressed again, the regions are drawn as they are stored.
-- Opening another region by its own disclosure ends it, and so does closing the maximised panel.
+- Opening another panel by its own disclosure ends it, and that panel stores that it is open; so does closing the
+  maximised panel. It ends too when its panel leaves the view, as a copy's text does when its editor is taken down.
+- An outline that a maximise draws open, or shows again when one ends, asks for its document's symbols then.
 - **It is not stored.** A reload shows the panels as the workspace has them.
 
 ### §11.4 What is stored
 
 `Workspace` gains `panelSizes`: for a view, by leaf id, a share for each of its regions by name. It is a field that
 may be absent, read by `parsePanels`' rules: an entry names a live view, and a share is a finite number above 0. A
-region with no entry has its default share, the one `style.css` fixes today. A view built with no entry looks as it
-does now.
+region with no entry is as it is built. A view built with no entry looks as it did before a boundary could be dragged,
+but for the maximise button in each header.
 
-It follows the panel state it sits beside: a parked view keeps its sizes, a closed view's are dropped, and a link
-carries the sizes of the views on screen.
+A gesture is written once, when it ends, with a share for each of the two regions its boundary parts and for no
+other. Every region that has a share is given its measured height as its share at the gesture's first frame, which is
+what lets two heights move and no other; when it ends, the two regions' heights are made shares by what a pixel was
+worth to the regions that were over their floors, and every other region has the share it had. A region on its floor
+is as tall as its floor whatever its share, so stored as measured it came back taller in the next view with room to
+show it. A gesture that ends with its boundary where it began writes nothing. A share is stored to six figures.
+
+A share is a ratio. What is written to the page is the open regions' shares scaled so that the least of them is 1:
+they go to `flex-grow`, and factors that add up to less than 1 leave part of the view empty.
+
+It follows the panel state it sits beside: a parked view keeps its sizes, a closed view's are dropped, *reset preset*
+keeps those of a view it keeps, and a link carries the sizes of the views on screen. The source view's elements are
+the page's for its life, where any other view is built again: its `✕` puts them back as they are built, the outline
+closed and no share held, which is what the workspace then stores for it.
 
 ### §11.5 Settled before its plan
 
-- Whether the λ term's rows, which are drawn for the part of the term in view, are drawn right when the term's height
-  comes from the view and changes under a drag.
-- What the term map costs to draw again on each frame of a drag, and whether it is drawn on each or at the drag's end.
-- The default share the outline has beside the source editor.
+Each was measured on the prototype (§18.3 has the figures):
+
+- **The λ term's rows are drawn right under a drag.** `lambda-body.ts` already drew again when its box changed size,
+  before the frame is shown, for the window's sake.
+- **The term map is drawn again on each frame of a drag.** It is told by the term's own change of size, and by its
+  own canvas's.
+- **The outline has no default share beside the source editor**: it starts at its own height (§11.1).
 
 ## §12 The other surfaces
 
@@ -927,6 +981,14 @@ A visual check in the three presets, light and dark, as each part's roadmap entr
 | 69 and 1,327; 172 and 1,222 | node and browser test files and tests passing on the prototype at `1a0ca47` | `pnpm exec vitest run --project node` and `--project browser` in `web/` |
 | 8 of 10 | cases failing at `9e98431`: a box that follows the run, returning by its view's toggle and by its Stage tab | in `web/`: `pnpm exec vitest run --project browser tests/browser/follow-kept.test.ts`, with the file as first written, before `38d9dfa`'s fix |
 | 1,227.1 to 1,254.1 px; 46 px and 46 | what Terminal's header needs at 1280 px at half the gap; its height in the markup alone and with the app up | the plan's `zz-probe-header.test.ts` and a probe of the header's height before the mount and after, at `8fcc4e3`, neither kept |
+| 23 of 1,433; 4 of 204 | browser tests and test files failing on the prototype of §11 before any was changed | in `web/`: `pnpm exec vitest run --project browser`, on the prototype's first build with boundaries in all four views (2026-10-12) |
+| 19,997 | nodes of the term the drag was measured on, `g` applied to 4,999 arguments `(a b)` | `wireOf(BIG).kind.length` in `web/tests/browser/panel-regions.test.ts`, which holds it to `LAMBDA_TREE_NODES - 3` |
+| 0 and 0 px, at 75 frames | how far the term's drawn rows fell short of its box, top and bottom, as its boundary was dragged | a probe test on the prototype, since made `panel-regions.test.ts`'s last two cases: a λ view 640 × 700, the term at 40,000 px, the boundary moved 10 px a frame, 30 frames up and 45 down, in each map mode |
+| 2.9 and 2.6 ms; 3.8 and 3.7 ms | the median and the longest of 67 draws of the icicle map in that drag, in two runs | the same probe, with `performance.now()` around `TermMap.prototype.draw`, at full speed; the minimap's were 0.9 and 0.8, and 3.6 and 1.9 |
+| 8.2 and 7.7 ms; 9.8 and 10.1 ms | the median and the longest of a frame's work in that drag, icicle map, in two runs | the same probe: from a frame's animation callback to the first task after it; the minimap's were 2.8 and 2.4, and 9.1 and 4.6 |
+| 94 px to 141 | the source outline of two rows, as its boundary was pressed while its floor was five lines | a script run in the page of the prototype, in a window 1,025 px wide: the outline's box before a drag of 40 px and after |
+| 32.78 px | how far the state diagram header's actions moved left for the maximise button, at 1280 px | `tm-view-narrow.test.ts`'s case at 1280 px, failing on the prototype: 419.88 less 387.09 |
+| 120 px, and 0 | the source editor after a link's *undo*, before `startEditorsAtTop` and after | `focus-scroll.test.ts`'s case of an opened link's undo, failing on the prototype and passing with the fix |
 | 46 px to 91; 181 px to 136 | the header's height before `main.ts` has run and after: in Terminal at 1280 px; at 390 px with the toggles in the markup and no media rule | a probe test in the fix round at `6048473`, not kept: the header's box read before the wasm had loaded and again once the page was mounted |
 
 ## §16 What changed after the approval at `ba4514b`
@@ -1027,3 +1089,71 @@ A last review read the source those 27 commits changed (`33e42e0..faddece`).
 |---|---|---|---|
 | §4.5 | the flag that stops a format at a rebuild's blur was set by `switchTo`, for a switch alone | `keepingFocus` sets it, through one dependency, for every rebuild that gives the focus back | the last review: a divider's drag sent one format request and took the caret to the start of the text, in the source editor, a machine copy's and a λ copy's |
 | §4.5 | an editor given the focus back by the DOM's `focus()` | by its own, which writes its caret back from its state | the last review: with a frame of 250 ms after the focus, six drags lost the caret |
+
+## §18 What changed in §11 after its prototype (2026-10-12)
+
+The second pull request's prototype put boundaries and a maximise button in all four views, and the user tried it
+running. This is what changed in §11 from the version approved at `fed6e37`.
+
+### §18.1 The user's decisions, made with the prototype open
+
+| Section | Was | Is | In the user's words |
+|---|---|---|---|
+| §11.2 | the boundary is the one thing a pointer drags | a panel's header is the handle for the boundary above it | "the grip is ok, but I think I would prefer the actual grip mouse icon on the status bar for that section" |
+| §11.2 | a short line drawn on each boundary at rest and a line across the view under the pointer, with the resize cursor | nothing drawn at rest or under the pointer; an open hand over a handle, and a closed one while it is held | "I think we should remove the little indicator bar since it's visual noise and just use the mouse style for a hand and a gripped hand for this" |
+| §11.1, §11.5 | the term map "a region with a share like any other", a copy's text joining the stack, and the outline's default share to be settled | each of the three starts at the height it has today and takes a share at the first drag beside it | "the choices are fine", of five put to him |
+| §11.3 | every other region of the stack is drawn as closed is | a region with no header, the λ term and the source editor, keeps its floor | the same answer |
+| §11.1 | the source outline "shares the view with the editor", with how the editor then scrolls unsaid | the editor scrolls inside its share, and the view's header stays put | the same answer |
+| §11.3 | unsaid for the two panels of the asm view's one row | maximising the registers or the call stack draws the other closed | the same answer |
+
+The fifth of the five was the look of the grip, which his second sentence above then replaced.
+
+### §18.2 The design's own rulings
+
+Each was built into the prototype he tried, and none was put to him by itself:
+
+- A boundary is drawn directly under the upper of its two regions, so the one under a copy's text in a TM view is
+  above the tapes (§11.2).
+- No boundary is drawn while a panel is maximised, and a panel stored closed is drawn open while it is (§11.3).
+- The floors of the regions that had none: the source editor five lines, a copy's text and the source outline two,
+  the term map 60 px (§11.2).
+- An arrow key moves a boundary a fiftieth of the height the open regions share (§11.2).
+- A finger's press on a header is not a drag (§11.2).
+- A boundary draws a line for a key's focus, which has no pointer to say it (§11.2).
+- The term map is drawn at each frame of a drag (§11.5).
+- *Reset preset* keeps the shares of a view it keeps, as it keeps the panels that view has open (§11.4).
+
+### §18.3 What the prototype found
+
+| Section | Was | Is | Found by |
+|---|---|---|---|
+| §11.5 | whether the λ term's rows are drawn right as its height changes under a drag | they are, with nothing built: its drawn rows covered its box at each of 75 frames | a probe on a term of 19,997 nodes, kept as two cases |
+| §11.5 | what the term map costs to draw again, and whether at each frame or at the drag's end | at each frame: 3.8 ms at most for the icicle on that term, in a frame of 10.1 ms at most, at full speed and under no CPU quota | the same probe |
+| §11.2 | a drag's position kept as one number, held to the floors | the pointer's travel and the boundary's are kept apart, so a pointer that overshoots a floor has to come back before the boundary follows | a scripted drag: a pointer taken 2,000 px up and brought back to 100 px above its press left the boundary at the opposite floor |
+| §11.2 | a floor of five lines for every region | two for a copy's text and the source outline | the same script: an outline of two rows went from 94 px to 141 as its boundary was pressed |
+| §11.1 | a copy's text keeps the gap under its editor | the boundary under it takes that gap's place | `panel-regions.test.ts`: the text panel's box ended 8 px under its editor, with the boundary's 8 px after it |
+| §5.2 | a view built again starts at its top, since its host left the page | the source editor is told so too: it remembers where it was scrolled to, and puts itself back there when a focus reaches it before it has heard of its new position, as a link's *undo* focuses it | the case of a link's *undo* in `focus-scroll.test.ts`, re-aimed at the editor's own box: 120 px where it held 0 |
+| §4.5, §14 item 22 | the source view's own box scrolls a long program, and a key's focus on its first control puts the view at its top | the editor's box scrolls it; a focus on the header is in sight already and moves nothing; the key's half is held by the TM view in a window 420 px tall | 22 cases in three files failing on the prototype, each on the source view's own box, which no longer scrolled |
+| §11.1 | the map drawn again when the term changes size | and when its own canvas does: a maximise of another panel hides the canvas and shows it again, and in a view too short for its floors the term is at its floor throughout | two sabotages of the replay that failed nothing: the map's panel told of a maximise, and a λ view built without its shares. The second's test, read between a change of the view's height and the frame that draws the map again, held a drawing 363 px tall in a canvas 360 tall; the view's height settles as the page's fonts arrive (824, 828, then 822 px), and the case waits two frames |
+| §11.4 | a gesture is written when it ends | one that leaves its boundary where it was writes nothing | the built image, in a window 580 px tall: a press and a move on the boundary between the rules and the state diagram, each on its floor of 148 px, moved nothing and stored 1.5 and 1.5 where the two are built with 2 and 1 |
+| §11.3 | the maximise button as tall as its icon | as tall as a button with a word on it | `tm-view-narrow.test.ts` at 1280 px: 16.4 px in the rules' header and 22.4 in the state diagram's |
+
+## §19 What the review found (2026-10-13)
+
+One review read the second pull request's branch at `2abe33b` without running it and reported ten findings. Each was
+given a test before anything was changed, and the first run of those tests failed nine of eleven. Of the two that
+passed, one finding's road does not exist in the tests' browser and was reproduced by another, and the other had no
+cost to observe; and two of the nine failed on their own setup first, and on the finding once that was right.
+
+| Section | Was | Is | Found by |
+|---|---|---|---|
+| §11.4 | a share written to the page as stored | the open regions' shares written scaled, the least as 1 | the review: a share goes to `flex-grow`. A listing with a share of a half, alone once its neighbours were closed, ended 391.5 px short of its view's bottom, and a maximised map with a quarter 403.5 px short |
+| §11.4 | a gesture stores a share for every open region, each its measured height | for the two regions its boundary parts; the rest have the shares they had | the review, of the fix for a gesture that moves nothing: it held for that one case. A drag between two regions stored the floor of a third as its share |
+| §11.4 | a share rounded to a ten-thousandth | stored to six figures | the review: a share that rounds to 0 is refused with the whole stored workspace. Of three regions stored at 0.0001 each, the one dragged to its floor was stored a share of 0 |
+| §11.2 | a gesture ends at the release its handle hears | at the pointer's release wherever it lands; a gesture whose handle is neither held nor focused is over | the review, by a key's road that the tests' browser does not take: it blurs a separator before it leaves the page. A pointer's does: with a view taken off the page under a press and put back, a panel closed after left its boundary drawn |
+| §11.2 | a second gesture was given the first's measurements | a gesture on another handle ends the one before it | the review: an arrow key held on one boundary and another boundary dragged 30 px moved the first one's upper region those 30 px |
+| §11.2 | `aria-valuenow` from the shares, 50 for a region with none | how much of the two the upper region is drawn at | the review: an outline of two rows over the editor said 50 where it was 9 |
+| §11.3 | a maximise ends by its button or a disclosure | and when its panel leaves the view | the review: a copy's text maximised and its editor taken down left every other panel drawn closed |
+| §11.3 | an outline asks for its symbols at its disclosure and at an edit | and when a maximise draws it open or shows it again | the review: a closed outline, maximised, listed the program it last showed |
+| §11.4 | the source view's `✕` drops what is stored for it | and puts its elements back as they are built | the review, of a leftover the roadmap entry had listed: the outline stayed open and its boundary where it was dragged, and the next drag wrote the dropped shares back |
+| §11.2 | the headers' handles and every share written again at each change of a two-panel region's size | the handles alone, and a share only where it changes | the review. No cost was found to measure: two changes of a view's width wrote no region's style before the change or after it |

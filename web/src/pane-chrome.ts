@@ -1,4 +1,5 @@
-import { createPanel } from './panel'
+import { createPanel, type Panel } from './panel'
+import type { Shares } from './panel-stack'
 import type { Leg } from './protocol'
 import type { ScratchEditorConfig } from './scratch-editor'
 import type { SessionId } from './session-client'
@@ -182,6 +183,8 @@ export type PaneEvents = {
    * and the text panel reports through `collapse` instead, because its state belongs to the copy.
    */
   panel?: (name: string, open: boolean) => void
+  /** A boundary between this view's regions was moved, or put back: every share the view now holds (spec §11.4). */
+  panelSizes?: (sizes: Shares) => void
   /** A λ view's display settings changed — recorded per view, as `panel` is (Plan 7 part 4a). */
   display?: (d: LambdaDisplay) => void
   /** A TM view's display settings changed — `display`'s twin (Plan 7 part 4b). */
@@ -269,12 +272,13 @@ export type PaneEvents = {
 export function textPanel(
   body: HTMLElement,
   onToggle: (collapsed: boolean) => void,
-): { readonly el: HTMLElement; update(available: boolean, initial?: boolean): void } {
+): { readonly el: HTMLElement; readonly panel: Panel; update(available: boolean, initial?: boolean): void } {
   const panel = createPanel({ name: 'text', label: 'text', body, onToggle: (open) => onToggle(!open) })
   panel.el.hidden = true
   let on = false
   return {
     el: panel.el,
+    panel,
     update(available: boolean, initial = false) {
       if (available === on) return
       on = available

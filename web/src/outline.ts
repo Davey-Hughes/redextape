@@ -122,6 +122,9 @@ export function createOutlinePanel(opts: {
       opts.onToggle(open)
       if (open) refresh()
     },
+    // DRAWN OPEN BY A MAXIMISE, OR OPEN AGAIN WHEN ONE ENDS (`panel.ts`'s `drawOver`): no disclosure was pressed,
+    // and no edit was heard while its panel was drawn closed, so it asks now. `refresh` asks only while it is drawn.
+    onDrawn: () => refresh(),
   })
 
   if (opts.open) refresh()

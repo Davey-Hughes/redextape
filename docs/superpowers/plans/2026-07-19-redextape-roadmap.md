@@ -26564,3 +26564,217 @@ since, only the header's rule.
 | 85rem; 2 | where the half gap ends; cases of `terminal-header-gap.test.ts` failing with the full gap put back | the rule beside `.bar` in `web/src/style.css`; that file run with the rule's `--space-2` made `--space-3` |
 | 34 px | a view's `⋯` menu moved by a compile | the second whole-branch fix pass's notes, `reviews/fixes-w2/notes.md` in the record directory |
 | 11; 20 | equal views in a row from which two cannot both hold the least share; from which `resize` wrote a tree the loader refuses | `MIN_PANE_FRACTION` in `web/src/layout.ts`, 0.1: 2/11 is under 0.2, and at 20 the second share is 0.05 + 0.05 − 0.1; `web/tests/node/layout.test.ts` holds rows of 11 and 21 |
+
+#### THE REGIONS INSIDE A VIEW CAN BE RESIZED: A BOUNDARY BETWEEN TWO IS DRAGGED BY THE HEADER OF THE PANEL UNDER IT OR MOVED WITH THE ARROW KEYS, EACH PANEL HAS A MAXIMISE BUTTON, AND THE WORKSPACE KEEPS THE SIZES, WHERE EACH PANEL HAD THE SHARE THE STYLESHEET FIXED (2026-10-13, branch `panel-resizing`, `91bc3ba..60a33b4`, 8 commits, plus this entry; then `5bae683`, `47a4f59`, `b38a863` and `e2617e4`, which answer a review, and the commit that brings this entry up to date)
+
+**The user asked for it** with the first pull request's prototype open: "we need to be able to resize things like
+rules, state diagram, etc. they can't just be fixed in place". This is the second of four pull requests of
+`docs/superpowers/specs/2026-10-11-view-layouts-design.md`, its §11; moving a view (§9) and drag and drop (§10)
+follow. A prototype of all four views was built first and he tried it running: what he said changed it twice, and
+the design's §11 is rewritten as built, with §18 listing each change and what caused it and §19 what a review of the
+branch then found.
+
+##### WHAT CHANGED
+
+- **A boundary between two regions of a view, in all four views.** `panel-stack.ts` gives each open region a share of
+  its view's height, written as one custom property, `--share`, which the stylesheet's `flex` reads; it draws a
+  `role="separator"` under each open region that has an open region below it, named for the two ("resize rules and
+  state diagram"). Dragging it gives one region more of the view and the other less: no other region changes and the
+  view does not grow. A drag stops where either neighbour would go under its floor. `↑` and `↓` move a focused
+  boundary a fiftieth of what the open regions share, and `Enter` or a double click puts both regions back as they
+  are built.
+- **A panel's header is the handle for the boundary above it.** A press on the bar's own part, outside its controls,
+  drags that boundary. Nothing is drawn for a boundary at rest or under the pointer: the pointer is an open hand over
+  a handle and a closed one from the press to the release. A line is drawn for a key's focus alone.
+- **A maximise button on each panel**, after its other actions, named for its panel and carrying `aria-pressed`.
+  Pressed, its panel takes the view's spare height and every other panel is drawn closed (`panel.ts`'s `drawOver`),
+  with what each stores left alone. Pressing it again, opening another panel by its disclosure, or closing the
+  maximised one ends it. It is not stored.
+- **The λ view and the source view share their height.** The λ term was capped at six tenths of the window whatever
+  its view's height, and takes its view's spare height. The source editor takes its view's and scrolls a long program
+  inside its own box, so the source view's header stays where it is; the outline's cap is four tenths of its view,
+  where it was `40vh`.
+- **Three regions start at the height they have today**, and take a share only at the first drag beside them: a
+  copy's text, the term map (120 px) and the source outline. A copy's text joins its view's regions, so its editor can
+  be given room the rules have.
+- **`Workspace.panelSizes`** holds a view's shares, in a field that may be absent: written once a gesture, for the two
+  regions its boundary parts and no other, kept for a view a switch takes off the page, dropped with a view a `✕` or
+  *reset preset* closes, and carried by a link for the views on screen. A gesture that ends with its boundary where
+  it began writes nothing. A share is a ratio: what the page is given is the open regions' shares with the least of
+  them as 1, so that the regions left open fill their view.
+- **`separator.ts` is the layout divider's gesture**, taken out of `layout-view.ts`, which now calls it: one
+  implementation for a divider between views and a boundary between panels.
+- **`help.html`** lists the boundary's keys and the header's drag.
+
+**One defect the move exposed is fixed.** CodeMirror puts its own scroll position back when it is focused at 0
+(`@codemirror/view` 6.43.8's `observers.focus`), and a link's *undo* builds every view again and focuses the source
+editor in the same task. With the editor scrolling inside its own box, the editor at 120 px under a link's program
+stayed at 120 under the program the undo put back. `pane-host.ts`'s `startEditorsAtTop` tells the editors of a view
+built again that they are at their start. An opened link was not seen to do the same.
+
+##### DECISIONS
+
+The user's, each in the design's §18.1, with the prototype open: a panel's header as the handle, after "I think I
+would prefer the actual grip mouse icon on the status bar for that section"; nothing drawn for a boundary and the
+pointer's two hands, after "I think we should remove the little indicator bar since it's visual noise and just use
+the mouse style for a hand and a gripped hand for this"; and, of five choices put to him, "the choices are fine": the
+three regions that start at their own height, the λ term and the source editor keeping their floor under a maximise,
+the source editor scrolling inside its share, and the registers and the call stack as one region whose two panels
+close each other under a maximise.
+
+Mine, each stated in the code and listed in the design's §18.2: a boundary directly under the upper of its two
+regions; no boundary while a panel is maximised, and a panel stored closed drawn open while it is; the floors of the
+regions that had none; the arrow key's step; a finger's press on a header left alone; the line for a key's focus; the
+term map drawn at each frame of a drag; *reset preset* keeping the shares of a view it keeps; a gesture that moves
+nothing writing nothing; and, answering the review, a gesture storing the two regions it parts in the measure of the
+regions that were over their floors, the source view's `✕` putting its own elements back as they are built, and a
+gesture ending at its pointer's release wherever that lands.
+
+##### THE TESTS
+
+Six new browser files and two new node cases. `panel-boundaries.test.ts` holds the gesture on an asm view built
+directly, which has three regions, so a drag has one that must not move: the boundaries drawn and named, a drag, the
+floor, a pointer that overshoots a floor and comes back, the header as a handle, a press on a control, a finger, the
+two hands, the keys and the reset. `panel-maximise.test.ts` holds the button and its three ways out, by the view's own
+`panel` event, the one thing that writes a panel's state. `panel-regions.test.ts` holds the regions that start at
+their own height, and the λ term's rows over its box at each of 75 frames of a drag on a term of 19,997 nodes.
+`panel-sizes-stored.test.ts`, `panel-sizes-restore.test.ts` and `panel-sizes-restore-lambda.test.ts` hold the
+workspace through the real app: one write a gesture, a view parked, a view closed, *reset preset*, and a load.
+
+**Every drag is the driver's own where one move is enough.** Three kinds of case need more and make their own pointer
+events, and each says so: a pointer that overshoots and returns, a finger, and a press that is held.
+
+**Twenty-two cases held the source view's own box to its scroll and hold the editor's now**, in
+`focus-scroll.test.ts`, `scroll-kept.test.ts` and `divider-drag-focus.test.ts`. Two changed what they hold and not
+only where: a key's focus on the source view's first control is in sight wherever the editor is scrolled to, and
+moves nothing. The half of that rule that moves a view is held by a new case on a TM view in a window 420 px tall.
+`tm-view-narrow.test.ts`'s case at 1280 px is re-pinned for the maximise buttons, 32.78 px.
+
+**54 sabotages on the branch, each one edit, each seen to fail the test meant for it**: 42 on the replay the plan was
+cut from, one for the fix made after it, and 11 for the review's. Getting to the first 43 took three rounds. The prototype's first round had 36, of
+which two failed nothing and a third failed one of the two tests meant for it; the replay's first pass had three more
+that failed nothing. Four were gaps, each closed by a test: nothing held `normaliseWorkspace`'s drop of a closed
+view's shares, which is *reset preset*'s road; nor a panel that a maximise hides withdrawing its offer to follow;
+nor a λ view built with the shares its leaf holds; nor the term map drawn again when a maximise ends in a view too
+short for its floors, which the canvas's own resize observer now does. One was a sabotage in the wrong task: with
+every region of an asm view a panel, a maximise leaves no two regions open to draw a boundary between. And one was a
+case that could not fail, a press in the editor after an opened link, which was removed: only a link's *undo* reaches
+that defect.
+
+**One test read a canvas between a change and its redraw.** `panel-sizes-restore-lambda.test.ts` found the term map
+360 px tall holding a drawing 363 tall, once in a whole-suite run. A probe found the view's own height settling as
+the page's fonts arrive, with the map drawn again at each change; the case waits for the fonts and two frames, and
+the commit that first explained it otherwise says so in the one after it.
+
+##### THE REVIEW
+
+The user asked for "a medium review", and one reviewer read the branch at `2abe33b` without running it. It reported
+ten findings, shown to him as reported; he said "fix all". Each was given a test before anything was changed, and the
+first run of those tests failed nine of eleven. The design's §19 has a row for each.
+
+- **A region with a share under 1 did not fill its view.** A share goes to `flex-grow`, and factors that add up to
+  less than 1 leave the rest of the view empty: a listing dragged to a share of a half, alone once its neighbours
+  were closed, ended 391.5 px short of its view's bottom, and a maximised term map with a quarter 403.5 px short.
+- **A gesture stored every open region's height as its share**, a region on its floor among them, which is as tall
+  as its floor whatever its share. The fix for a gesture that moves nothing had held for that one case. A gesture
+  now stores the two regions its boundary parts, in the measure of the regions that were over their floors, to six
+  figures where a ten-thousandth lost a small share's ratio.
+- **Three things were left held.** A maximise, when its panel left the view: a copy's text maximised and its editor
+  taken down left every other panel drawn closed. A gesture, when another began on another handle or when its view
+  left the page under the press, since no release reached the handle and a stack that holds a gesture draws no
+  boundary. And the source view's own elements, at its `✕`, which the entry before this change listed as left open.
+- **A closed outline, maximised, listed the program it last showed**, and a boundary said 50 where its upper region
+  was drawn at 9 of the two's hundred.
+
+**Two findings did not reproduce as written.** The road given for a gesture held for good was a key held as its view
+leaves the page, where `separator.ts` commits nothing for a separator off the page. The tests' Chromium blurs a
+separator while it is still on the page, for a removal, a `replaceChildren` and a move to another parent, so that
+branch is not reached in it; the same hazard was reproduced by a pointer's road and fixed there, and the stack now
+ends a gesture whose handle is neither held nor focused. And the tenth, the cost of writing every share at each
+change of a two-panel region's size, had nothing to measure: two changes of a view's width wrote no region's style.
+The work was taken out all the same.
+
+**One of the eleven sabotages of these fixes failed nothing at first**: what a pixel is worth taken from every region
+with a share, one on its floor among them. A case with a region on its floor beside one over its own holds it.
+
+##### WHAT THIS DID NOT CLOSE
+
+- **One review has read this branch, and it did not run it.** The first pull request had eight reviews and three
+  rounds of fixes (the design's §17). The fixes for this one's findings have been read by their author alone.
+- A gesture whose handle is neither held nor focused is ended by the stack (`panel-stack.ts`'s `#alive`), for a
+  browser that blurs a separator after it has left the page. No test runs that branch: the tests' browser blurs
+  first.
+- WebKit is unmeasured, as before. A finger's drag of a boundary was made with the tests' own pointer events and on
+  no phone.
+- Above the λ term and the source editor there is no header, so the 8 px strip is the one handle there and the
+  pointer's shape the one sign of it.
+- The row of registers and call stack takes the lesser of its two bodies' room as its own, so with one wrapped under
+  the other its drag stops short of its floor.
+- **The TM view builds every tape row again at each step** (`tm-pane.ts`'s `render`), so a tape scrolled sideways
+  goes back to its start and its scroll bar is drawn again, which is the flash the user noted on 2026-10-12. Measured
+  on this branch, which does not change that code: after one step the row's scroll box was another element and its
+  `scrollLeft` had gone from 40 to 0.
+- The design's five open points (§16.3) are as they were.
+
+##### VERIFICATION
+
+Run on 2026-10-13 in the worktree `~/temp/redextape-panel-resizing-work` on branch `panel-resizing`, at `b38a863`, by
+`gates.sh` in `~/temp/redextape-panel-resizing-record/gates/`. `e2617e4`, after it, changes one comment and the
+design, and `biome ci` and the typecheck passed on it; the commit that brings this entry up to date changes only this
+file. The same script passed at `8e02a61`, before the review, with 280 files and 2,895 tests. No Rust file changed
+(`git diff --stat 91bc3ba e2617e4 -- crates Cargo.toml Cargo.lock` prints nothing). Nothing has run in CI: the branch
+has not been pushed.
+
+```
+pnpm exec biome ci --error-on-warnings                    → exit 0, 411 files
+pnpm run typecheck                                        → exit 0
+pnpm run test:coverage                                    → exit 0, 280 files / 2,906 tests; 97.59 / 92.19 / 98.39 / 98.92 against 95 / 89 / 97 / 97
+pnpm run build:app                                        → exit 0
+scripts/check-{text-bytes,citations,attributions,doc-figures,shared-docs,colours,grammar-wasm,lua,licences}.sh,
+  --self-test then alone                                  → 18 of 18 exit 0
+docker build --build-arg COMMIT_HASH=b38a863…, then run → healthy after 3 polls; / and /help.html 200; 7 .wasm assets;
+                                                            the full commit in 1 chunk; `panel-boundary` in 2 assets;
+                                                            the help page's row for the boundary once
+```
+
+The image of `b38a863` was opened in a browser context with no stored site data, in a window 1,671 by 580 px. It
+opened on the source beside the TM view, a maximise button at the right of each panel's header and nothing drawn
+between the panels. A script in the page read the header of *state diagram* as `cursor: grab`, and `grabbing` from a
+press; made a press and a move on that header, both panels being on their floors of 148 px, which stored nothing;
+closed the state diagram, which left the rules 244 px and no gap under the last panel of a view that did not scroll;
+pressed the maximise button of the source view's outline, closed and never opened, which listed the program's two
+rows over an editor at its floor, and pressed it again, which drew it closed; and focused the boundary between the
+rules and the state diagram, which said 50, the two being 148 px each. The image of `01557e3`, before the fix for a
+gesture that moves nothing, had stored 1.5 and 1.5 for the same press and move. **No drag was made on any image by
+hand, and none in a window tall enough for a boundary to move**: the browser's window is the window manager's to
+size. The drags that move are the tests'.
+
+**Every count this entry quotes, with what produces it.** Commands run from the repository root unless they `cd`;
+"the record" is `~/temp/redextape-panel-resizing-record/`.
+
+| Value | What | Produced by |
+|---|---|---|
+| 8; 4; 31 | commits in the range; commits answering the review; files the branch changes | `git rev-list --count 91bc3ba..60a33b4`; `git rev-list --count 2abe33b..e2617e4`; `git diff --shortstat 91bc3ba e2617e4` |
+| 211 to 217; 70 and 70 | browser and node test files, base to branch | `git ls-tree -r --name-only <commit> -- web/tests/browser \| grep -c '\.test\.ts$'`, and `web/tests/node`, at `91bc3ba` and `b38a863` |
+| 280 and 2,906; 97.59 / 92.19 / 98.39 / 98.92 against 95 / 89 / 97 / 97 | test files and tests in the default run; coverage against the floors | `pnpm run test:coverage` in `gates.sh` at `b38a863` (the record's `gates/gates.txt`); `thresholds` in `web/vite.config.ts` |
+| 2,895 | tests in the same run before the review, at `8e02a61` | the roadmap entry as first committed, `2abe33b` |
+| 2 | new node cases | `git diff 91bc3ba b38a863 -- web/tests/node \| grep -c "^+  it("` |
+| 10; 11; 9 | findings of the review; cases written for them, one more being a later sabotage's; those that failed on the branch as reviewed | the review's report, in the session's log; `git diff 2abe33b b38a863 -- web/tests \| grep -cE '^\+\s+it\('`; the record's `review-red.log`, its `Tests` line, of the first eleven written (two were then replaced or removed, and one added) |
+| 54; 42; 4, 6, 21 and 11; 1; 11 | sabotages on the branch; on the replay; a task; for the fix after it; for the review's fixes | `grep -c ': FIRED'` over the record's `replay/sab-task1.txt` to `sab-task4.txt`, `replay/sab-task5.txt` and `replay/sab-task6.txt` |
+| 36; 34 and 2 | sabotages in the prototype's first round; those that failed a test and those that failed none | `grep -c ': FIRED'` and `grep -c 'DID NOT'` over the record's `sabotage-run-2.log` |
+| 23 of 1,433; 4 of 204 | tests and files failing on the prototype's first build | the last lines of the record's `proto-browser-1.txt`, `pnpm exec vitest run --project browser` on 2026-10-12 |
+| 22; 10, 7 and 5 | of those, cases on the source view's own box; in `focus-scroll`, `scroll-kept` and `divider-drag-focus` | `grep -E "^ FAIL " proto-browser-1.txt`, counted a file |
+| 32.78 px | how far the state diagram header's actions moved left for the maximise button, at 1280 px | `tm-view-narrow.test.ts`'s case at 1280 px, failing on the prototype: 419.88 less 387.09 |
+| 120 px | the source editor after a link's *undo*, without `startEditorsAtTop` | the record's `replay/sab-S4c.log`: `expected 120 to be +0` |
+| 19,997; 75; 37; 66 | nodes of the term a drag was measured on; frames of the drag; heights the term had in them; frames at which the map was drawn | the record's `probe-drag-full.log`, from `probes/zz-probe-panel-drag.test.ts` (the plan's Task 5, step 2) copied into `web/tests/browser/` at the replay's last commit, whose `web/` is `01557e3`'s, run with `pnpm exec vitest run --project browser`, and deleted |
+| 2.2 to 4.0 ms, median 2.7; up to 11.3 ms, median 7.8 | the icicle map's draw, and a frame's work, in that drag at full speed | the same log |
+| 0.4 to 1.4 ms, median 0.7; up to 4.2 ms, median 2.3 | the minimap's draw, and a frame's work | the same log |
+| 2.3 to 88.8 ms, median 2.8; up to 176.7 ms, median 8.5 | the icicle map's draw and a frame's work at a quarter of a core | the record's `probe-drag-q25.log`: the same probe under `systemd-run --user --scope -q -p MemoryMax=16G -p MemorySwapMax=0 -p CPUQuota=25%` |
+| 0.4 to 88.9 ms, median 0.7; up to 91.7 ms, median 2.2 | the minimap's, at a quarter of a core | the same log |
+| 0 and 0 px | how far the term's rows fell short of its box, at every frame of those four runs | the two logs' `worst gap` lines |
+| 148 px; 1.5 and 1.5; 244 px; 0 to 2; 50 | each panel's floor in the image's window; the shares the image of `01557e3` stored for a drag that moved nothing; the rules with the state diagram closed; the rows of the outline before its maximise and under it; what the boundary said | a script run in each image's page, its output in this session's log and in no file |
+| 391.5 and 403.5 px; 9 and 50; 30 px | how far short of its view a region with a share under 1 ended, alone and maximised; what a boundary's upper region was drawn at and what it said; how far a second gesture moved the first's region | the record's `review-red.log`, the failing lines of the cases written for the review's findings |
+| 0 | the share stored for a region dragged to its floor, with shares rounded to a ten-thousandth | the record's `replay/sab-R8.log`: the two stored shares' ratio read `Infinity` |
+| 40 to 0 | a tape row's `scrollLeft` across one step | a script run in the page of the prototype's dev server, the TM view narrowed to 300 px so that a row overflowed; in no file |
+| 5,959 | lines of the plan | `wc -l docs/superpowers/plans/2026-10-13-view-layouts-part2.md` |
+| 6.43.8 | the `@codemirror/view` whose `observers.focus` puts the scroll back | `web/node_modules/@codemirror/view/package.json` |

@@ -19,6 +19,7 @@ import { n } from './format'
 import type { Dir } from './layout'
 import type { PaneChoice, PaneEvents, SplitChoices } from './pane-chrome'
 import { createPanel, type Panel } from './panel'
+import { PanelStack, type Shares } from './panel-stack'
 import type { Leg } from './protocol'
 import { endedLine } from './results'
 import type { ScratchEditor } from './scratch-editor'
@@ -108,7 +109,7 @@ export class AsmPane implements EditablePane {
    * `panels` is the view's stored panel state, read once here; each panel reports every later toggle through
    * `on.panel`. Every panel opens by default.
    */
-  constructor(host: HTMLElement, on: PaneEvents, panels: AsmPanels = {}) {
+  constructor(host: HTMLElement, on: PaneEvents, panels: AsmPanels = {}, sizes: Shares = {}) {
     this.#header = viewHeader(on.rebind)
     this.#steps = stepControls(on)
     this.#value = document.createElement('div')
@@ -172,6 +173,7 @@ export class AsmPane implements EditablePane {
         this.#grid.draw()
         on.panel?.('listing', open)
       },
+      onDrawn: () => this.#grid.draw(),
     })
     this.#listingPanel.actions.append(this.#reattach)
 
@@ -231,6 +233,56 @@ export class AsmPane implements EditablePane {
     )
     this.#header.steps.append(this.#steps.el)
     host.replaceChildren(this.#header.el, this.#body)
+    // THE REGIONS THAT SHARE THE VIEW'S HEIGHT (the view layouts spec §11.1), top to bottom, with the shares
+    // `style.css` fixed before a boundary could be dragged. The registers and the call stack are one region, the row
+    // they share: no boundary parts the two (they wrap one under the other in a narrow view).
+    // IT KEEPS ITSELF: its listeners are on the regions and their headers, and nothing here reads it again.
+    new PanelStack(
+      [
+        {
+          name: 'text',
+          label: 'text',
+          el: this.#copy.text.el,
+          share: null,
+          panels: [this.#copy.text],
+          bodies: () => [this.#copy.text.body],
+        },
+        {
+          name: 'listing',
+          label: 'listing',
+          el: this.#listingPanel.el,
+          share: 2,
+          panels: [this.#listingPanel],
+          bodies: () => [this.#listingPanel.body],
+        },
+        {
+          name: 'machine',
+          label: 'registers and call stack',
+          el: machine,
+          share: 1,
+          panels: [this.#registersPanel, this.#stackPanel],
+          bodies: () => [this.#registersPanel, this.#stackPanel].filter((p) => p.isOpen()).map((p) => p.body),
+        },
+        {
+          name: 'heap',
+          label: 'heap',
+          el: this.#heapPanel.el,
+          share: 1,
+          panels: [this.#heapPanel],
+          bodies: () => [this.#heapPanel.body],
+        },
+        {
+          name: 'outline',
+          label: 'outline',
+          el: this.#copy.outlinePanel.el,
+          share: 1,
+          panels: [this.#copy.outlinePanel],
+          bodies: () => [this.#copy.outlinePanel.body],
+        },
+      ],
+      sizes,
+      (next) => on.panelSizes?.(next),
+    )
   }
 
   /**

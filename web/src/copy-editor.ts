@@ -3,6 +3,7 @@ import { EDITOR_DEBOUNCE_MS } from './editor-debounce'
 import { n } from './format'
 import { createOutlinePanel } from './outline'
 import { type PaneEvents, textPanel } from './pane-chrome'
+import type { Panel } from './panel'
 import type { ScratchEditorConfig } from './scratch-editor'
 import { ScratchEditor } from './scratch-editor'
 import type { ViewMenu } from './view-header'
@@ -46,6 +47,9 @@ export class CopyEditor implements EditablePane {
   readonly textPanel: HTMLElement
   /** The outline panel — last in the view's body, and shown only while an editor is mounted. */
   readonly outline: HTMLElement
+  /** The two panels themselves, for the view's stack of regions (`panel-stack.ts`). */
+  readonly text: Panel
+  readonly outlinePanel: Panel
   /**
    * The upper half of design §4.2's split body, ported to the machine views — a stable parent that outlives any
    * editor mounted or unmounted inside it, so `setEditor` can do both without touching the view's own child order.
@@ -132,6 +136,7 @@ export class CopyEditor implements EditablePane {
     // gesture, for the copy's record.
     this.#collapse = textPanel(this.#editorHost, (collapsed) => on.collapse?.(collapsed))
     this.textPanel = this.#collapse.el
+    this.text = this.#collapse.panel
     // THE OUTLINE IS WHAT THE SERVER LISTS FOR THE COPY'S DOCUMENT — a TM copy's states, an asm copy's labels; each
     // view's constructor says why its own starts closed.
     this.#outline = createOutlinePanel({
@@ -144,6 +149,7 @@ export class CopyEditor implements EditablePane {
       reveal: (range) => this.#editor?.reveal(range),
     })
     this.outline = this.#outline.panel.el
+    this.outlinePanel = this.#outline.panel
     // The view starts on the program, with no editor — so the controls that need one start withdrawn rather than
     // waiting for the first assignment to withdraw them.
     this.#syncEditorControls()

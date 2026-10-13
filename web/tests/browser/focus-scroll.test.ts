@@ -11,15 +11,20 @@ import { drawn, resetToFirstLoad, SHELL, showWideDefault, until } from './harnes
  * `pane-host.ts`'s `moveFocus`: a focus the app moves as the consequence of a gesture scrolls nothing where the
  * gesture was a pointer's, and brings what it focused into sight where it was a key's.
  *
- * **A VIEW'S FIRST CONTROL IS IN ITS HEADER, WHICH SCROLLS WITH THE VIEW.** So the two halves cannot both keep a
- * scrolled view where it was: a pointer press leaves it there with its first control out of sight and no ring drawn
- * on it, and a key press brings the control into sight, which for a control in the header is the view at its top.
- * Each case says which half it is.
+ * **A VIEW'S FIRST CONTROL IS IN ITS HEADER, WHICH SCROLLS WITH THE VIEW WHERE THE VIEW'S OWN BOX SCROLLS.** There the
+ * two halves cannot both keep a scrolled view where it was: a pointer press leaves it there with its first control
+ * out of sight and no ring drawn on it, and a key press brings the control into sight, which for a control in the
+ * header is the view at its top. Each case says which half it is.
+ *
+ * **THE SOURCE VIEW'S OWN BOX DOES NOT SCROLL A LONG PROGRAM ANY LONGER** (the view layouts spec §11.1): its editor
+ * takes a share of the view and scrolls inside it, under a header that stays put. So a focus given to the source
+ * view's first control is in sight wherever the editor is scrolled to, and both halves leave the editor where it
+ * was; the key's half is held to moving a view by the TM view, in a window short enough that its own box scrolls.
  *
  * **ON THE VIEWS A VISITOR GETS, NOT THE FOUR `setup.ts` STORES**: the source beside the TM view, and all four as two
- * columns. In both the source view is the neighbour a `✕` gives the focus to, and it is the one view whose own box is
- * what scrolls a long program. On the stored four, in two rows, the view `scroll-kept.test.ts` closes has the λ view
- * for its neighbour, and that file passed while a `✕` beside the source view put the source view at 0.
+ * columns. In both the source view is the neighbour a `✕` gives the focus to. On the stored four, in two rows, the
+ * view `scroll-kept.test.ts` closes has the λ view for its neighbour, and that file passed while a `✕` beside the
+ * source view put the source view at 0.
  *
  * `scroll-kept.test.ts` holds a scroll position across a rebuild made from ANOTHER view; this file holds it for the
  * view the rebuild's focus lands in.
@@ -44,6 +49,10 @@ const mounted = (): string[] =>
 const toggle = (kind: string): HTMLButtonElement =>
   document.querySelector(`#views-shown button[data-shows="${kind}"]`) as HTMLButtonElement
 const source = (): HTMLElement => host('source')
+/** The box that scrolls a long program: the source editor's own, inside the share of the view it has. */
+const editor = (): HTMLElement => source().querySelector('.cm-scroller') as HTMLElement
+/** What scrolls `leaf`'s content: the editor's box in the source view, and the view's own box in any other. */
+const scroller = (leaf: string): HTMLElement => (leaf === 'source' ? editor() : host(leaf))
 const notice = (): string => (document.querySelector('#notice .notice-text')?.textContent ?? '').trim()
 const idle = (): boolean => document.querySelector<HTMLElement>('#results')?.dataset.state === 'idle'
 /** How far `el` can scroll down: a box that cannot is at 0 whatever it was given. */
@@ -73,11 +82,17 @@ async function focusedOn(leaf: string, what: string): Promise<HTMLElement> {
   return first(leaf)
 }
 
-/** Scroll `leaf`'s own box to `top`, and assert it is there. */
+/** Scroll `leaf`'s scroller to `top`, and assert it is there. */
 async function scrolled(leaf: string, top: number): Promise<void> {
-  expect(range(host(leaf)), `precondition: the ${leaf} view’s own box scrolls past ${top}`).toBeGreaterThan(top)
-  host(leaf).scrollTop = top
-  await until(() => host(leaf).scrollTop === top, `the ${leaf} view to hold its scroll`)
+  expect(range(scroller(leaf)), `precondition: the ${leaf} view scrolls past ${top}`).toBeGreaterThan(top)
+  scroller(leaf).scrollTop = top
+  await until(() => scroller(leaf).scrollTop === top, `the ${leaf} view to hold its scroll`)
+}
+
+/** Whether all of `inner` shows in the source editor's box. */
+const inEditor = (inner: { top: number; bottom: number }): boolean => {
+  const box = editor().getBoundingClientRect()
+  return inner.top >= box.top - 0.5 && inner.bottom <= box.top + editor().clientHeight + 0.5
 }
 
 /** The prefix, then `key`. */
@@ -123,7 +138,7 @@ describe('the scroll of the view a gesture gives the focus to', () => {
       expect(mounted()).toEqual(['source'])
       const focused = await focusedOn('source', 'after the ✕')
       expect(focused.matches(':focus-visible'), 'a pointer press drew a focus ring').toBe(false)
-      expect(source().scrollTop, 'the ✕ on the TM view reset the source view’s own scroll box').toBe(120)
+      expect(editor().scrollTop, 'the ✕ on the TM view reset the source editor').toBe(120)
     })
 
     /** The same, with the view's `⋯` menu open when the `✕` is pressed: the press closes the menu and lands. */
@@ -137,17 +152,17 @@ describe('the scroll of the view a gesture gives the focus to', () => {
       expect(mounted()).toEqual(['source'])
       const focused = await focusedOn('source', 'after the ✕')
       expect(focused.matches(':focus-visible')).toBe(false)
-      expect(source().scrollTop).toBe(120)
+      expect(editor().scrollTop).toBe(120)
     })
 
     /**
      * THE KEY'S HALF, BY THE ROAD A KEYBOARD USER TAKES TO A `✕`: `Tab` from the view's `⋯`, then `Enter`. The focus
-     * is on the source view's `⋯` with its ring drawn, and it has to be in sight.
+     * is on the source view's first control with its ring drawn, and it has to be in sight.
      *
-     * **THE SOURCE VIEW IS AT ITS TOP AFTERWARDS, AND THAT IS THE RULE, NOT A LOSS IT MISSED**: its `⋯` is the first
-     * thing in its header, flush with the view's top, so there is one scroll position that shows it.
+     * **THE EDITOR STAYS WHERE IT WAS, SINCE THE CONTROL IS IN SIGHT ALREADY**: the source view's header does not
+     * scroll with its editor. The view at its top was the rule's outcome while the header did.
      */
-    it('gives way to the focused control when the ✕ is pressed with Enter', async () => {
+    it('shows the focused control and keeps the editor when the ✕ is pressed with Enter', async () => {
       await resetToFirstLoad()
       await scrolled('source', 120)
       ;(host('tm-0').querySelector('button.view-more') as HTMLElement).focus()
@@ -160,11 +175,38 @@ describe('the scroll of the view a gesture gives the focus to', () => {
       const focused = await focusedOn('source', 'after Enter on the ✕')
       expect(focused.matches(':focus-visible'), 'a key press drew no focus ring').toBe(true)
       expect(inSight(focused.getBoundingClientRect(), 'source'), 'the focused control is out of sight').toBe(true)
-      expect(source().scrollTop, 'the source view is not at its top, where its first control is').toBe(0)
+      expect(editor().scrollTop, 'a focus that was in sight already moved the source editor').toBe(120)
+    })
+
+    /**
+     * THE KEY'S HALF WHERE IT HAS TO MOVE A VIEW: in a window 420 px tall the TM view is taller than its tile, its
+     * own box scrolls, and its header scrolls with it. `Enter` on the source view's `✕` gives the TM view the focus,
+     * on its first control, which is in its header.
+     *
+     * **THE TM VIEW IS NEAR ITS TOP AFTERWARDS, AND THAT IS THE RULE, NOT A LOSS IT MISSED**: the control is in the
+     * view's header, 3 px under the view's top, so the view is scrolled by that and no more (measured 2026-10-12).
+     * What is held is that the control is in sight where it was not, and that the view moved up for it.
+     */
+    it('gives way to the focused control when the ✕ beside a view whose own box scrolls is pressed with Enter', async () => {
+      await resetToFirstLoad()
+      await page.viewport(1280, 420)
+      await until(() => range(host('tm-0')) > 60, 'a TM view taller than its tile')
+      await scrolled('tm-0', 60)
+      expect(
+        inSight(first('tm-0').getBoundingClientRect(), 'tm-0'),
+        'precondition: the TM view’s first control is out of sight at 60 px',
+      ).toBe(false)
+      ;(host('source').querySelector('button.view-close') as HTMLElement).focus()
+      await userEvent.keyboard('{Enter}')
+      expect(mounted()).toEqual(['tm-0'])
+      const focused = await focusedOn('tm-0', 'after Enter on the source view’s ✕')
+      expect(focused.matches(':focus-visible'), 'a key press drew no focus ring').toBe(true)
+      expect(inSight(focused.getBoundingClientRect(), 'tm-0'), 'the focused control is out of sight').toBe(true)
+      expect(host('tm-0').scrollTop, 'the TM view did not move up to its first control').toBeLessThan(10)
     })
 
     /** The key's half again, for a view key: `4` hides the TM view, which has the focus, and the source view takes it. */
-    it('gives way to the focused control when a view key hides the view that had the focus', async () => {
+    it('shows the focused control and keeps the editor when a view key hides the view that had the focus', async () => {
       await resetToFirstLoad()
       await userEvent.click(host('tm-0').querySelector('.state-table') as HTMLElement)
       expect(document.activeElement?.closest('[data-leaf]'), 'precondition: the focus is in the TM view').toBe(
@@ -176,7 +218,7 @@ describe('the scroll of the view a gesture gives the focus to', () => {
       const focused = await focusedOn('source', 'after the view key')
       expect(focused.matches(':focus-visible')).toBe(true)
       expect(inSight(focused.getBoundingClientRect(), 'source'), 'the focused control is out of sight').toBe(true)
-      expect(source().scrollTop).toBe(0)
+      expect(editor().scrollTop, 'a focus that was in sight already moved the source editor').toBe(120)
     })
 
     /**
@@ -189,39 +231,39 @@ describe('the scroll of the view a gesture gives the focus to', () => {
       await userEvent.click(toggle('tm'))
       expect(mounted()).toEqual(['source'])
       expect(document.activeElement, 'the toggle lost the focus when it hid the TM view').toBe(toggle('tm'))
-      expect(source().scrollTop, 'hiding the TM view reset the source view').toBe(120)
+      expect(editor().scrollTop, 'hiding the TM view reset the source view').toBe(120)
       await userEvent.click(toggle('tm'))
       expect(mounted()).toEqual(['source', 'tm-0'])
       expect(document.activeElement).toBe(toggle('tm'))
-      expect(source().scrollTop, 'showing the TM view reset the source view').toBe(120)
+      expect(editor().scrollTop, 'showing the TM view reset the source view').toBe(120)
     })
 
     /**
-     * **A VIEW KEY PRESSED FROM AN EDITOR GIVES THE FOCUS BACK TO IT, AND THE VIEW STAYS WHERE IT WAS WHILE THE CARET
-     * SHOWS.** The editor is taller than its view, so it is asked for its caret and not for its box: at 120 px a bare
-     * `focus()` put the view at 0, and at 0 `scrollIntoView` on the editor's box put it at 59, the editor's top
-     * brought to the view's.
+     * **A VIEW KEY PRESSED FROM AN EDITOR GIVES THE FOCUS BACK TO IT, AND THE EDITOR STAYS WHERE IT WAS WHILE THE CARET
+     * SHOWS.** It is asked for its caret and not for its box. While the source view's own box was what scrolled, the
+     * editor was taller than its view: at 120 px a bare `focus()` put the view at 0, and at 0 `scrollIntoView` on
+     * the editor's box put it at 59, the editor's top brought to the view's.
      */
     it('is kept when a view key is pressed from the source editor, at 120 px and at the top', async () => {
       await resetToFirstLoad()
       await scrolled('source', 120)
       await caretAt(300)
-      expect(source().scrollTop, 'precondition: the click in the editor left the view at 120').toBe(120)
+      expect(editor().scrollTop, 'precondition: the click in the editor left the view at 120').toBe(120)
       await viewKey('3')
       expect(mounted()).toEqual(['source', 'lambda-0', 'tm-0'])
       await frames()
       expect(view.hasFocus, 'the source editor lost the focus').toBe(true)
-      expect(source().scrollTop, 'a view key reset the view its editor was pressed in').toBe(120)
-      expect(inSight(caret(), 'source'), 'the caret is out of sight').toBe(true)
+      expect(editor().scrollTop, 'a view key reset the editor it was pressed in').toBe(120)
+      expect(inEditor(caret()), 'the caret is out of sight').toBe(true)
 
       await scrolled('source', 0)
       await caretAt(60)
-      expect(source().scrollTop, 'precondition: the click in the editor left the view at its top').toBe(0)
+      expect(editor().scrollTop, 'precondition: the click in the editor left the view at its top').toBe(0)
       await viewKey('3')
       expect(mounted()).toEqual(['source', 'tm-0'])
       await frames()
       expect(view.hasFocus).toBe(true)
-      expect(source().scrollTop, 'a view key moved a view at its top').toBe(0)
+      expect(editor().scrollTop, 'a view key moved a view at its top').toBe(0)
     })
 
     /**
@@ -241,7 +283,7 @@ describe('the scroll of the view a gesture gives the focus to', () => {
       const focused = await focusedOn('tm-0', 'after reset preset')
       expect(focused.matches(':focus-visible')).toBe(false)
       expect(host('tm-0').scrollTop, 'reset preset reset the TM view it gave the focus to').toBe(60)
-      expect(source().scrollTop, 'reset preset reset the source view').toBe(120)
+      expect(editor().scrollTop, 'reset preset reset the source view').toBe(120)
     })
 
     /**
@@ -263,8 +305,8 @@ describe('the scroll of the view a gesture gives the focus to', () => {
       await userEvent.click(document.querySelector('#notice button.notice-action') as HTMLElement)
       await until(() => notice() === 'put back the program and the workspace', 'the undo')
       expect(view.state.doc.toString()).toBe(PROGRAM)
-      expect(range(source()), 'precondition: the program put back could be scrolled as far').toBeGreaterThan(120)
-      expect(source().scrollTop, 'the program put back opened where the link’s was scrolled to').toBe(0)
+      expect(range(editor()), 'precondition: the program put back could be scrolled as far').toBeGreaterThan(120)
+      expect(editor().scrollTop, 'the program put back opened where the link’s was scrolled to').toBe(0)
       await frames()
       expect(view.hasFocus, 'the undo did not leave the focus in the source editor').toBe(true)
       await until(idle, 'the program put back to compile')
@@ -280,7 +322,7 @@ describe('the scroll of the view a gesture gives the focus to', () => {
       expect(drawn()).toBe('row[50](source column[50](lambda-0 tm-0))')
       const focused = await focusedOn('source', 'after the ✕')
       expect(focused.matches(':focus-visible')).toBe(false)
-      expect(source().scrollTop, 'the ✕ on the asm view reset the source view over it').toBe(120)
+      expect(editor().scrollTop, 'the ✕ on the asm view reset the source view over it').toBe(120)
     })
 
     /**
@@ -295,15 +337,15 @@ describe('the scroll of the view a gesture gives the focus to', () => {
       const tall = source().clientHeight
       await caretAt(tall - 80)
       const down = caret().top - source().getBoundingClientRect().top
-      const before = source().scrollTop
+      const before = editor().scrollTop
       await viewKey('2')
       expect(drawn()).toBe('row[50](column[50](source asm-0) column[50](lambda-0 tm-0))')
       await frames()
       expect(source().clientHeight, 'precondition: the source view was made shorter').toBeLessThan(tall - 100)
       expect(down, 'precondition: the caret was lower than the view is now tall').toBeGreaterThan(source().clientHeight)
       expect(view.hasFocus, 'the source editor lost the focus').toBe(true)
-      expect(inSight(caret(), 'source'), 'the caret is out of sight in the view the key made shorter').toBe(true)
-      expect(source().scrollTop, 'the view did not move').toBeGreaterThan(before)
+      expect(inEditor(caret()), 'the caret is out of sight in the view the key made shorter').toBe(true)
+      expect(editor().scrollTop, 'the view did not move').toBeGreaterThan(before)
     })
   })
 })

@@ -87,6 +87,7 @@ import { paletteDeclarations } from './palettes'
 import type { PaneChoice } from './pane-chrome'
 import { type AddRefused, createPaneHost, type LayoutEvent } from './pane-host'
 import { createPanel } from './panel'
+import { PanelStack, type Shares } from './panel-stack'
 import { type LeafId, legOfPane, PaneCollection, type PaneKind } from './panes'
 import { PROGRAM_STORAGE_KEY, parseProgram, type StoredProgram, serializeProgram } from './program-store'
 import type { Leg, RunReply } from './protocol'
@@ -137,6 +138,7 @@ import {
   type Workspace,
   withDisplay,
   withPanel,
+  withPanelSizes,
   withTmDisplay,
 } from './workspace'
 
@@ -1360,6 +1362,7 @@ async function main(): Promise<EditorView> {
     speed: restored.speed,
     focused: restored.focused,
     panels: restored.panels,
+    panelSizes: restored.panelSizes,
     inspector: restored.inspector,
     display: restored.display,
     tmDisplay: restored.tmDisplay,
@@ -1386,6 +1389,16 @@ async function main(): Promise<EditorView> {
    * closed view's id is still a live one by `liveLeaves`' test and `normaliseWorkspace` would keep its state for the
    * view built there next; `tests/browser/workspace-restore.test.ts` has that view inheriting a closed panel.
    */
+  /**
+   * Put the source view's own elements back as they are built: its outline closed, its regions at the heights they
+   * start with, no panel maximised. Set once those exist, further down.
+   *
+   * **THE SOURCE VIEW IS THE ONE VIEW THE PAGE KEEPS.** A `✕` drops what the workspace stores for a view, and any
+   * other view is built again for the leaf its toggle shows next. The source view's elements are the page's for its
+   * life, so they kept the outline open and the boundary where it was dragged for a workspace that stored neither,
+   * and the next drag wrote the dropped shares back.
+   */
+  let sourceClosed: () => void = () => {}
   const enterTree = (next: LayoutNode, parks = false): void => {
     const entered = enter({ tree, arrangements: ws.arrangements }, next)
     if (!parks) {
@@ -1398,7 +1411,14 @@ async function main(): Promise<EditorView> {
       if (closed.size > 0) {
         const without = <T>(by: Readonly<Record<LeafId, T>>): Record<LeafId, T> =>
           Object.fromEntries(Object.entries(by).filter(([leaf]) => !closed.has(leaf)))
-        ws = { ...ws, panels: without(ws.panels), display: without(ws.display), tmDisplay: without(ws.tmDisplay) }
+        ws = {
+          ...ws,
+          panels: without(ws.panels),
+          panelSizes: without(ws.panelSizes),
+          display: without(ws.display),
+          tmDisplay: without(ws.tmDisplay),
+        }
+        if (closed.has(SOURCE_LEAF)) sourceClosed()
       }
     }
     tree = entered.tree
@@ -1433,7 +1453,8 @@ async function main(): Promise<EditorView> {
     const panels = Object.fromEntries(Object.entries(ws.panels).filter(([leaf]) => live.has(leaf)))
     const display = Object.fromEntries(Object.entries(ws.display).filter(([leaf]) => live.has(leaf)))
     const tmDisplay = Object.fromEntries(Object.entries(ws.tmDisplay).filter(([leaf]) => live.has(leaf)))
-    ws = { ...ws, focused: focusedLeaf(), panels, display, tmDisplay }
+    const panelSizes = Object.fromEntries(Object.entries(ws.panelSizes).filter(([leaf]) => live.has(leaf)))
+    ws = { ...ws, focused: focusedLeaf(), panels, panelSizes, display, tmDisplay }
   }
 
   const persistWorkspace = (): void => {
@@ -1516,6 +1537,10 @@ async function main(): Promise<EditorView> {
     panelOpen: (leaf: LeafId, name: string) => ws.panels[leaf]?.[name],
     setPanel: (leaf: LeafId, name: string, open: boolean) => {
       ws = { ...ws, panels: withPanel(ws.panels, leaf, name, open) }
+    },
+    panelSizesOf: (leaf: LeafId) => ws.panelSizes[leaf],
+    setPanelSizes: (leaf: LeafId, sizes: Shares) => {
+      ws = { ...ws, panelSizes: withPanelSizes(ws.panelSizes, leaf, sizes) }
     },
     displayOf: (leaf: LeafId) => ws.display[leaf],
     setDisplay: (leaf: LeafId, d: LambdaDisplay) => {
@@ -2191,6 +2216,8 @@ async function main(): Promise<EditorView> {
     applySwitches()
     inspectorPanel.setOpen(ws.inspector)
     sourceOutline.panel.setOpen(ws.panels[SOURCE_LEAF]?.outline ?? false)
+    sourceRegions.unmaximise()
+    sourceRegions.setSizes(ws.panelSizes[SOURCE_LEAF] ?? {})
     paneHost.rebuildViews(focusedLeaf())
     refreshBuffers()
   }
@@ -2963,6 +2990,32 @@ async function main(): Promise<EditorView> {
   // it is built here — after `ws`, `persistWorkspace` and `view` all exist — rather than where
   // the rest of the source view is assembled.
   sourceHost.insertBefore(sourceOutline.panel.el, editorHost)
+  // THE SOURCE VIEW'S TWO REGIONS (the view layouts spec §11.1): the outline over the editor. The editor takes what
+  // the view has spare and scrolls inside it; the outline keeps its own height, what it lists up to a cap, until the
+  // boundary between the two is dragged. The editor has no header, so a maximised outline leaves it its floor.
+  const sourceRegions = new PanelStack(
+    [
+      {
+        name: 'outline',
+        label: 'outline',
+        el: sourceOutline.panel.el,
+        share: null,
+        panels: [sourceOutline.panel],
+        bodies: () => [sourceOutline.panel.body],
+      },
+      { name: 'editor', label: 'editor', el: editorHost, share: 1, panels: [], bodies: () => [editorHost] },
+    ],
+    ws.panelSizes[SOURCE_LEAF] ?? {},
+    (sizes) => {
+      ws = { ...ws, panelSizes: withPanelSizes(ws.panelSizes, SOURCE_LEAF, sizes) }
+      persistWorkspace()
+    },
+  )
+  sourceClosed = () => {
+    sourceRegions.unmaximise()
+    sourceOutline.panel.setOpen(false)
+    sourceRegions.setSizes({})
+  }
 
   // **BUILT AFTER `view`, AND THE FACTORY IS WHERE THE FAILURE POLICY LIVES** — the reason
   // `SessionPool` takes one too: a notice needs the app's DOM, and this module is the one that

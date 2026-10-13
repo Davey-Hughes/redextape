@@ -22,6 +22,7 @@ import {
   WORKSPACE_VERSION,
   withDisplay,
   withPanel,
+  withPanelSizes,
   withTmDisplay,
 } from '../../src/workspace'
 import { fourViews, fourViewWorkspace } from '../browser/harness'
@@ -89,6 +90,7 @@ describe('parseWorkspace', () => {
       speed: 250 as const,
       focused: 'pane-1',
       panels: { 'tm-0': { rules: false } },
+      panelSizes: { 'tm-0': { rules: 2.5, diagram: 0.5 } },
       inspector: false,
       display: { 'pane-1': { layout: 'outline' as const, vars: 'debruijn' as const, map: 'minimap' as const } },
       tmDisplay: { 'tm-0': { level: 'local' as const, edges: 'chips' as const } },
@@ -210,6 +212,36 @@ describe('parseWorkspace', () => {
     }
   })
 
+  // **AND FOR A VIEW'S SHARES** (the view layouts spec §11.4): absent in every workspace stored before a boundary
+  // could be dragged, and held to `parsePanels`' rules where present. A share is a finite number above 0.
+  it('defaults missing panel sizes to none stored, and refuses a malformed one', () => {
+    const base = { version: 2, tree: SPLIT, switches: PRESETS.explorer, speed: 8, focused: 'lambda-0', panels: {} }
+    expect(parseWorkspace(JSON.stringify(base))?.panelSizes).toEqual({})
+    const good = { 'lambda-0': { term: 1.25, map: 0.75 }, 'pane-1': {} }
+    expect(parseWorkspace(JSON.stringify({ ...base, panelSizes: good }))?.panelSizes).toEqual(good)
+    for (const bad of [
+      { 'lambda-0': { term: 0 } },
+      { 'lambda-0': { term: -1 } },
+      { 'lambda-0': { term: '1' } },
+      { 'lambda-0': { term: null } },
+      { 'lambda-0': { term: true } },
+      { 'nowhere-9': { term: 1 } },
+      { 'lambda-0': null },
+      { 'lambda-0': [1, 2] },
+      [],
+      null,
+      1,
+    ]) {
+      expect(parseWorkspace(JSON.stringify({ ...base, panelSizes: bad })), JSON.stringify(bad)).toBeNull()
+    }
+    // NOT FINITE: JSON has no way to write one but a number too large to hold, which reads as `Infinity`.
+    const raw = JSON.stringify({ ...base, panelSizes: { 'lambda-0': { term: 1 } } }).replace('"term":1', '"term":1e999')
+    expect(JSON.parse(raw).panelSizes['lambda-0'].term, 'precondition: the share reads as Infinity').toBe(
+      Number.POSITIVE_INFINITY,
+    )
+    expect(parseWorkspace(raw), 'a share that is not finite').toBeNull()
+  })
+
   it('opens the inspector for a migrated version 1 layout', () => {
     expect(parseWorkspace(serializeLayout(SPLIT))?.inspector).toBe(true)
   })
@@ -229,6 +261,13 @@ describe('serializeWorkspace', () => {
       },
     }
     const back = JSON.parse(serializeWorkspace(ws))
+    expect(back.panelSizes, 'no field while no view holds a share').toBeUndefined()
+    const sized = { ...ws, panelSizes: { 'pane-9': { rules: 3 }, 'tm-0': { rules: 2.5, diagram: 0.5 } } }
+    expect(JSON.parse(serializeWorkspace(sized)).panelSizes).toEqual({ 'tm-0': { rules: 2.5, diagram: 0.5 } })
+    expect(
+      JSON.parse(serializeWorkspace({ ...ws, panelSizes: { 'pane-9': { rules: 3 } } })).panelSizes,
+      'no field where the one view that held a share has left the tree',
+    ).toBeUndefined()
     expect(back.panels).toEqual({ 'tm-0': { rules: false } })
     expect(back.display).toEqual({ 'lambda-0': outline })
     expect(back.tmDisplay).toEqual({ 'tm-0': { level: 'program', edges: 'chips' } })
@@ -258,6 +297,16 @@ describe('withPanel', () => {
   it('records one panel of one view without touching the others', () => {
     const next = withPanel({ 'tm-0': { rules: false } }, 'pane-1', 'rules', true)
     expect(next).toEqual({ 'tm-0': { rules: false }, 'pane-1': { rules: true } })
+  })
+})
+
+describe('withPanelSizes', () => {
+  it('records one view’s shares without touching the others, and leaves out a view that holds none', () => {
+    const next = withPanelSizes({ 'tm-0': { rules: 2.5 } }, 'pane-1', { term: 1.5, map: 0.5 })
+    expect(next).toEqual({ 'tm-0': { rules: 2.5 }, 'pane-1': { term: 1.5, map: 0.5 } })
+    expect(withPanelSizes(next, 'pane-1', { term: 2 })).toEqual({ 'tm-0': { rules: 2.5 }, 'pane-1': { term: 2 } })
+    expect(withPanelSizes(next, 'tm-0', {})).toEqual({ 'pane-1': { term: 1.5, map: 0.5 } })
+    expect(withPanelSizes({}, 'tm-0', {})).toEqual({})
   })
 })
 
@@ -345,16 +394,20 @@ describe('the remembered arrangements', () => {
       focused: 'tm-0',
       arrangements: { [treeKey(FOUR)]: FOUR },
       panels: { 'lambda-0': { map: false } },
+      panelSizes: { 'lambda-0': { term: 1.5, map: 0.5 } },
       display: { 'lambda-0': { layout: 'outline', vars: 'names', map: 'icicle' } },
       tmDisplay: { 'tm-0': { level: 'local', edges: 'chips' } },
     }
     const ws = parseWorkspace(JSON.stringify(stored))
     expect(ws?.panels).toEqual(stored.panels)
+    expect(ws?.panelSizes).toEqual(stored.panelSizes)
     expect(ws?.display).toEqual(stored.display)
     if (ws === null || ws === undefined) throw new Error('unreachable')
     expect(JSON.parse(serializeWorkspace(ws)).panels).toEqual(stored.panels)
+    expect(JSON.parse(serializeWorkspace(ws)).panelSizes).toEqual(stored.panelSizes)
     expect(JSON.parse(serializeWorkspace(ws)).display).toEqual(stored.display)
     expect(parseWorkspace(JSON.stringify({ ...stored, panels: { 'pane-9': { map: false } } }))).toBeNull()
+    expect(parseWorkspace(JSON.stringify({ ...stored, panelSizes: { 'pane-9': { map: 1 } } }))).toBeNull()
   })
 
   /**
