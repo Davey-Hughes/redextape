@@ -122,6 +122,12 @@ export default defineConfig({
     },
   },
   test: {
+    // SETUP FILES IN THE ORDER LISTED, ONE AFTER ANOTHER, WHERE VITEST'S DEFAULT IMPORTS THEM ALL AT
+    // ONCE. Only the browser project has any, and its first, `tests/browser/collect.ts`, stops and
+    // restarts V8's precise coverage: a module `setup.ts` imports, compiled while that is under way,
+    // would be counted at function granularity for the rest of its file. A root option and not the
+    // project's own, because Vitest reads this one from the root config alone.
+    sequence: { setupFiles: 'list' },
     // No `passWithNoTests`. It was set while the scaffold had no tests yet; now that both projects
     // have them, a project reporting no test files means a broken `include` glob, and that should
     // fail rather than pass quietly.
@@ -395,14 +401,18 @@ export default defineConfig({
           // Vitest serves its own tester HTML, so this project's `index.html` — and therefore its
           // `<link>` to `style.css` — never reaches the page. See `tests/browser/setup.ts`: without it
           // the state table's `max-height: 40vh` never applies and the browser tier measures a
-          // different geometry than the app ships.
-          setupFiles: ['tests/browser/setup.ts'],
+          // different geometry than the app ships. `tests/browser/collect.ts` comes FIRST: it collects
+          // the pages of the files before, and restarts coverage, before any module of `src` is
+          // compiled in this one (`sequence.setupFiles` above).
+          setupFiles: ['tests/browser/collect.ts', 'tests/browser/setup.ts'],
+          // Whether coverage is on, for `collect.ts`, which cannot read the run's settings itself.
+          globalSetup: ['tests/browser/global-setup.ts'],
           browser: {
             enabled: true,
             provider: playwright({
               // TWO FLAGS, AND `frame-cost.test.ts` NEEDS BOTH — one to make the reading move at all,
               // the other to make it mean something. Chromium-only. The second is no longer the probes'
-              // alone: `tests/browser/setup.ts` calls `gc` at the start of every browser file, to collect
+              // alone: `tests/browser/collect.ts` calls `gc` at the start of every browser file, to collect
               // the page the file before it left, and throws if this flag is missing.
               //
               // `--enable-precise-memory-info` — `frame-cost.test.ts` reads

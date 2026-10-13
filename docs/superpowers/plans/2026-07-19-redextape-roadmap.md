@@ -26778,3 +26778,137 @@ size. The drags that move are the tests'.
 | 40 to 0 | a tape row's `scrollLeft` across one step | a script run in the page of the prototype's dev server, the TM view narrowed to 300 px so that a row overflowed; in no file |
 | 5,959 | lines of the plan | `wc -l docs/superpowers/plans/2026-10-13-view-layouts-part2.md` |
 | 6.43.8 | the `@codemirror/view` whose `observers.focus` puts the scroll back | `web/node_modules/@codemirror/view/package.json` |
+
+#### UNDER `--coverage` A BROWSER TEST FILE'S PAGE IS COLLECTED WHEN THE NEXT FILE STARTS, WHERE V8'S PRECISE COVERAGE KEPT EVERY PAGE A TAB HAD RUN, WITH ITS WEBASSEMBLY MEMORIES, UNTIL THE SLOWER CI RUNNER'S TABS HAD NO ROOM LEFT FOR ONE (2026-10-13, branch `coverage-collects-pages`, `ef4c9df..276b7ad`, 2 commits, plus this entry)
+
+**`main` was red after #142's merge.** Run 569, `ef4c9df`, failed its `web` job twice on CI's slower runner
+(`450440e2`), and `docker` needs `web`, so no image was published for it. The first attempt failed
+`lambda-deep-outline.test.ts` and two cases of `share-open-start-clamp.test.ts`, the second
+`lambda-deep-code.test.ts`; each deep-term case printed what its page read, by the diagnostic #141 added: `redextape
+hit a problem and recovered: WebAssembly.instantiate(): Out of memory: Cannot allocate Wasm memory for new instance`.
+The pull request's own run of the same tree, 568, had passed on the faster runner (`4360ddec`). Run 563, on #141, had
+failed `lambda-deep-outline.test.ts` on the slower runner too, before the diagnostic existed; that it was the same
+cause is an inference.
+
+##### THE CAUSE
+
+- **One renderer process has room for 123 or 124 WebAssembly memories, and a worker's count against its page's.** A
+  probe page made one-page memories until one was refused: 123. A worker then made none while the page held them,
+  and the page none while a worker held 123. The app, mounted and compiled, holds four.
+- **CI runs `pnpm run test:coverage`, and under coverage no finished page was ever collected.** Vitest starts V8's
+  precise coverage once in each tab and never stops it (`@vitest/coverage-v8`'s browser module: "Browser mode should
+  not stop coverage as same V8 instance is shared between tests"), and while it is on V8 holds every feedback vector
+  as a root (`Coverage::SelectMode` in V8's `debug-coverage.cc`: "Root all feedback vectors to avoid early
+  collection"). #116's `gc()` at each file's start freed nothing. Eight files in one tab: the earlier pages alive at
+  each start 0, 1 … 7, the JS heap 15.5 MiB to 83.6, the room for memories 124 to 112, every page after the first
+  keeping two.
+- **The slower runner runs three files at once, about seventy to a tab; the faster runs eleven, about nineteen.**
+  Counted from the job logs' finishing times and durations. The browser suite grew from 174 files at `7cbac7d` to 211
+  and 217 over the two view-layouts pull requests, and the last slower-runner run to pass whole was 566, at 274 files.
+- **Reproduced here in two tabs.** Stock `main`, the whole coverage gate in two tabs: 55 of 280 files and 37 tests
+  failed, the message among their errors. The same without coverage passed every file, with at least 119 of the room
+  left at every file's start.
+
+##### WHAT CHANGED
+
+- **`tests/browser/collect.ts`, the browser project's first setup file**, takes #116's collection and its doc out of
+  `setup.ts`, and under coverage stops precise coverage before it and starts it again after, with the settings Vitest
+  uses. Vitest takes each file's coverage as that file finishes, before the next file's setup, so nothing counted is
+  lost.
+- **A last-resort collection before coverage starts again.** Stopping precise coverage takes the block counters off
+  every compiled function (`Coverage::SelectMode`: "any following coverage recording (without reloads) will be at
+  function granularity"), and the next page compiling the same module took those functions from V8's compilation
+  cache: the report fell from 97.59 / 92.19 / 98.39 / 98.92 to 96.01 / 89.00 / 98.39 / 97.45 in one run, which the
+  floors passed, and to 94.95 / 86.84 / 98.39 / 96.64 in another, which they failed. A last-resort `gc`
+  (`Heap::CollectAllAvailableGarbage`, which clears the compilation cache) gives back the stock report, file by file.
+- **`sequence.setupFiles: 'list'`** at the config's root, so `collect.ts` finishes before `setup.ts`'s imports from
+  `src` begin; Vitest's default imports every setup file at once, and reads this option from the root alone.
+- **`tests/browser/global-setup.ts`** hands the pages `coverageOn`, the resolved config's answer, since a page cannot
+  read the run's settings and starting precise coverage in a run without it would put the leak back.
+- **A guard: a file fails when more than eight pages of earlier files in its tab are still alive after the
+  collection**, naming them. Weak references on the orchestrator's page, made with that page's constructors.
+
+##### DECISIONS
+
+Mine:
+
+- **The harness, not CI's settings.** More tabs on the slower runner, or fewer files, would move the point where a tab
+  runs out and leave every page alive.
+- **A last-resort collection, not `--js-flags=--no-compilation-cache`**, which also gave the stock report: the flag
+  would apply to every run, the probes' heap measurements among them, and the collection only to runs with coverage.
+- **Eight pages.** At most three were alive at any of 1,260 file starts with the fix's collection; the leak adds one
+  a file, so eight trips at a tab's tenth file, on either runner.
+- **The guard's list is made with the orchestrator's constructors**, measured: a `WeakRef` of the page's own realm,
+  held by the orchestrator, kept every page alive without coverage, and the guard failed files 10 to 12 of 12.
+
+##### THE TESTS
+
+No test file changes; the guard is the check, and three sabotages of the final `collect.ts`, each one edit, fired.
+With the restart taken out, a whole coverage run in twelve tabs failed 104 browser files on the guard, every file from
+a tab's tenth on. With the last-resort collection taken out, the coverage gate failed at 94.95 / 86.84 / 98.39 /
+96.64. With the guard's `WeakRef` made by the page itself, twelve files in one tab without coverage kept every page,
+and the guard failed the last three.
+
+**With the fix, the whole coverage gate passed in one tab, with all 210 browser files in a row (607.50 s), in two
+(300.65 s), and in three under a CPU quota of one and a half cores (401.07 s)**, each with the stock report, file by
+file.
+
+##### WHAT THIS DID NOT CLOSE
+
+- **Nothing has run on the slower runner.** That needs a push. `ef4c9df` has no image, and a rerun of its run would
+  meet the same leak.
+- **Why three tabs ran out on CI and not here.** Stock `main` in three tabs under coverage passed here, with 6, 10 and
+  14 of the room left at the tabs' last files; the runner's own room was not measured.
+- **The order of the setup files is held by nothing.** Three runs of the collection with Vitest's default order gave
+  the stock report too; `'list'` is what keeps that from resting on timing.
+- **A coverage report that falls and stays above the floors would pass.** One run without the last-resort collection
+  did.
+- **The room for 123 memories was measured on this machine's Chromium**, the one Playwright installs here and on both
+  runners.
+
+##### VERIFICATION
+
+Run on 2026-10-13 in the main checkout on branch `coverage-collects-pages` at `276b7ad`, by `gates.sh` in
+`~/temp/redextape-ci-wasm-oom-record/gates/`; the commit that adds this entry changes only this file. No Rust file
+changed (`git diff --stat ef4c9df 276b7ad -- crates Cargo.toml Cargo.lock` prints nothing), and no image was built:
+nothing the image ships changes (`git diff --stat ef4c9df 276b7ad` names four files under `web/tests/browser/`, two
+of them new, and `web/vite.config.ts`, whose change is to its `test` block). Nothing has run in CI: the branch has
+not been pushed.
+
+```
+pnpm exec biome ci --error-on-warnings                    → exit 0, 413 files
+pnpm run typecheck                                        → exit 0
+pnpm run test:coverage                                    → exit 0, 280 files / 2,906 tests; 97.59 / 92.19 / 98.39 / 98.92 against 95 / 89 / 97 / 97
+pnpm run build:app                                        → exit 0
+scripts/check-{text-bytes,citations,attributions,doc-figures,shared-docs,colours,grammar-wasm,lua,licences}.sh,
+  --self-test then alone                                  → 18 of 18 exit 0
+```
+
+**Every count this entry quotes, with what produces it.** Commands run from `web/` unless they say otherwise; "the
+record" is `~/temp/redextape-ci-wasm-oom-record/`, and its `verify-counts.sh` prints each row's value from its logs,
+but for the last row's premise. "N tabs" is `VITEST_MAX_WORKERS=N`, and "under the quota" is `systemd-run --user
+--scope -q -p MemoryMax=24G -p MemorySwapMax=0 -p CPUQuota=150%`.
+
+| Value | What | Produced by |
+|---|---|---|
+| 569, 568, 563; `450440e2`, `4360ddec` | the runs and their runners | the `web` jobs' logs, line 1: the record's `logs/` by its `scan-web-jobs.sh 40`, and run 569's first attempt in `~/temp/redextape-panel-resizing-record/ci-main-web-job.txt` |
+| 2 and 2; 0 | lines naming the allocation failure in run 569's two attempts; in run 563's | `grep -c 'Cannot allocate Wasm memory'` over those logs |
+| 123; 0 and 0; 119 | memories a page held before a refusal; a worker's beside them, and the page's beside a worker's 123; the page's room with the app mounted and compiled | the record's `probe-cap-1.log`, from `probes/zz-probe-wasm-cap.test.ts` copied into the scratch worktree's `tests/browser/`, run with `pnpm exec vitest run --project browser`, and deleted |
+| 0 … 7; 15.5 to 83.6 MiB; 124 to 112 | pages alive, the JS heap and the room at each start of eight files in one tab, stock collection, under coverage | the record's `smoke-collect-leak+room.log`, by `rooms2.sh`: `PROBE_COLLECT=leak+room VITEST_MAX_WORKERS=1 pnpm exec vitest run --coverage --project browser` and eight files, on the prototype |
+| 3; 11 | files at once on the slower runner (runs 569, 566 and 563) and on the faster (568) | the record's `overlap.py` over each job's log |
+| 174, 211, 217 | browser test files at `7cbac7d`, `91bc3ba` and `ef4c9df` | `git ls-tree -r --name-only <commit> -- web/tests/browser \| grep -c '\.test\.ts$'`, from the root |
+| 566; 274 | the last slower-runner run whose `web` job passed; its test files | the record's `scan-1.txt` |
+| 55 of 280; 37 | files and tests failing, stock `main`, the whole coverage gate in two tabs | the record's `stock-2tabs-coverage-full-1.log`: `pnpm exec vitest run --coverage` in the scratch worktree at `ef4c9df` |
+| 119 | the least room at a file's start, stock `main` in two tabs without coverage | the record's `room-2tabs-fullspeed-1.log`, by `rooms.sh`: a room reading added to `setup.ts` in the scratch worktree, `pnpm exec vitest run --project browser` |
+| 6, 10 and 14 | the room at each tab's last file, stock `main` in three tabs under coverage, every file passing | the record's `room-3tabs-coverage-fullspeed-1.log`, the same reading, `pnpm exec vitest run --coverage --project browser` |
+| 97.59 / 92.19 / 98.39 / 98.92 | the stock report | the record's `cov-stock-main-2.log`, `pnpm run test:coverage` at `ef4c9df`; its `cov-stock-main-1.log` differs from it in `main.ts` alone |
+| 96.01 / 89.00 / 98.39 / 97.45 | the report with coverage restarted and no last-resort collection, on the prototype | the record's `ages-default-coverage-1.log`, `pnpm exec vitest run --coverage` |
+| 94.95 / 86.84 / 98.39 / 96.64 | the same on the final `collect.ts`: the second sabotage | the record's `sab-no-last-resort.log`, by `sab-final.sh` |
+| 0 | lines by which each report with the last-resort collection, or with `--js-flags=--no-compilation-cache`, differs from the stock one | `diff` of each run's table against `cov-stock-main-2.table`, by `covtable.sh`: ten runs, listed in `verify-counts.sh` |
+| 3; 1,260 | the most pages of earlier files alive at a file's start with the fix's collection; the starts counted | the record's `final-default-coverage-{1,2,3}.log` (the final `collect.ts` with a print), `ages-default-coverage-v3-{1,2}.log` and `ages-3tabs-coverage-v3-q150.log` (the prototype's, the same collection), by `ages.sh`: 2, 2, 2, 2, 3 and 3 |
+| 12; 3 | tabs in the whole runs here; in the quota's run | the same logs: each tab's session id |
+| 1 | the most alive without coverage, three tabs under the quota | the record's `ages-3tabs-nocoverage-q150.log` |
+| 104 | browser files the guard failed with the restart taken out: the first sabotage | the record's `sab-no-restart.log`, by `sab-final.sh`; 104 starts read nine pages alive |
+| 3 of 12 | files the guard failed with its `WeakRef` made by the page: the third sabotage | the record's `sab-own-realm-weakref.log`: `VITEST_MAX_WORKERS=1 pnpm exec vitest run --project browser` and twelve files |
+| 607.50, 300.65 and 401.07 s | the whole coverage gate with the fix, in one tab, two, and three under the quota | the record's `fix-1tab-coverage-1.log` and `fix-2tabs-coverage-1.log` (the main checkout before the commits; the one-tab run's `collect.ts` had comments edited during it) and `ages-3tabs-coverage-v3-q150.log` |
+| 3 | runs with Vitest's default order of setup files that gave the stock report | `ages-default-coverage-v3-{1,2}.log` and `ages-3tabs-coverage-v3-q150.log`: the prototype's `vite.config.ts` had no `sequence` (the session's log) |
