@@ -2,10 +2,12 @@ import { describe, expect, it } from 'vitest'
 import {
   addRefusal,
   closeLeaf,
+  defaultArrangement,
   defaultLayout,
-  defaultLayout as dl,
+  HEADER_ORDER,
   holdsMostLeaves,
   insertBeside,
+  KIND_ORDER,
   LAYOUT_VERSION,
   type LayoutNode,
   leafExtents,
@@ -24,6 +26,7 @@ import {
 } from '../../src/layout'
 import { DIVIDER_PX } from '../../src/layout-view'
 import type { PaneKind } from '../../src/panes'
+import { fourViews } from '../browser/harness'
 
 /**
  * THE TREE MODEL, WITH NO DOM ANYWHERE — every invariant design §4.1 states, asserted as a value.
@@ -35,9 +38,62 @@ import type { PaneKind } from '../../src/panes'
 
 const leaf = (id: string, pane: PaneKind): LayoutNode => ({ kind: 'leaf', id, pane })
 
-describe('defaultLayout', () => {
-  it('puts source and λ above asm and TM, two rows of two', () => {
-    expect(defaultLayout()).toEqual({
+describe('defaultArrangement', () => {
+  it('is the leaf for one kind, under its default id', () => {
+    expect(defaultArrangement(['tm'], 'wide')).toEqual(leaf('tm-0', 'tm'))
+    expect(defaultArrangement(['source'], 'tall')).toEqual(leaf('source', 'source'))
+  })
+
+  it('puts a pair side by side in a wide area and one above the other in a tall one', () => {
+    const pair = (dir: 'row' | 'column'): LayoutNode => ({
+      kind: 'split',
+      dir,
+      sizes: [0.5, 0.5],
+      children: [leaf('source', 'source'), leaf('asm-0', 'asm')],
+    })
+    expect(defaultArrangement(['source', 'asm'], 'wide')).toEqual(pair('row'))
+    expect(defaultArrangement(['source', 'asm'], 'tall')).toEqual(pair('column'))
+  })
+
+  it('puts the first of three beside a column of the other two, and over a row of them in a tall area', () => {
+    const three = (outer: 'row' | 'column', inner: 'row' | 'column'): LayoutNode => ({
+      kind: 'split',
+      dir: outer,
+      sizes: [0.5, 0.5],
+      children: [
+        leaf('source', 'source'),
+        { kind: 'split', dir: inner, sizes: [0.5, 0.5], children: [leaf('lambda-0', 'lambda'), leaf('tm-0', 'tm')] },
+      ],
+    })
+    expect(defaultArrangement(['source', 'lambda', 'tm'], 'wide')).toEqual(three('row', 'column'))
+    expect(defaultArrangement(['source', 'lambda', 'tm'], 'tall')).toEqual(three('column', 'row'))
+  })
+
+  it('puts all four in two columns of two in a wide area: source over asm, beside λ over TM', () => {
+    expect(defaultArrangement(KIND_ORDER, 'wide')).toEqual({
+      kind: 'split',
+      dir: 'row',
+      sizes: [0.5, 0.5],
+      children: [
+        {
+          kind: 'split',
+          dir: 'column',
+          sizes: [0.5, 0.5],
+          children: [leaf('source', 'source'), leaf('asm-0', 'asm')],
+        },
+        {
+          kind: 'split',
+          dir: 'column',
+          sizes: [0.5, 0.5],
+          children: [leaf('lambda-0', 'lambda'), leaf('tm-0', 'tm')],
+        },
+      ],
+    })
+  })
+
+  it('puts all four in two rows of two in a tall area, the tree a fresh page built until the view layouts', () => {
+    expect(defaultArrangement(KIND_ORDER, 'tall')).toEqual(fourViews())
+    expect(fourViews()).toEqual({
       kind: 'split',
       dir: 'column',
       sizes: [0.5, 0.5],
@@ -57,6 +113,88 @@ describe('defaultLayout', () => {
       ],
     })
   })
+
+  /**
+   * THE USER'S RULE FOR A WIDE AREA, AS A PROPERTY (2026-10-11): no divider and no view runs the whole width. A tree's
+   * root is then a row, or a single leaf, for every combination of more than one kind.
+   */
+  it('makes no tree whose root is a column in a wide area, and none whose root is a row in a tall one', () => {
+    for (let mask = 1; mask < 1 << KIND_ORDER.length; mask++) {
+      const kinds = KIND_ORDER.filter((_, i) => (mask & (1 << i)) !== 0)
+      if (kinds.length === 1) continue
+      const wide = defaultArrangement(kinds, 'wide')
+      const tall = defaultArrangement(kinds, 'tall')
+      expect(wide.kind === 'split' && wide.dir, kinds.join('+')).toBe('row')
+      expect(tall.kind === 'split' && tall.dir, kinds.join('+')).toBe('column')
+    }
+  })
+
+  it('puts the same view in the same corner in both shapes', () => {
+    // FOUR CORNERS, READ OFF EACH TREE'S OWN NESTING: [top left, top right, bottom left, bottom right].
+    const wide = defaultArrangement(KIND_ORDER, 'wide')
+    const tall = defaultArrangement(KIND_ORDER, 'tall')
+    const at = (t: LayoutNode, i: number, j: number): string => {
+      const outer = t.kind === 'split' ? t.children[i] : undefined
+      const inner = outer?.kind === 'split' ? outer.children[j] : undefined
+      return inner?.kind === 'leaf' ? inner.id : ''
+    }
+    expect([at(wide, 0, 0), at(wide, 1, 0), at(wide, 0, 1), at(wide, 1, 1)]).toEqual([
+      'source',
+      'lambda-0',
+      'asm-0',
+      'tm-0',
+    ])
+    expect([at(tall, 0, 0), at(tall, 0, 1), at(tall, 1, 0), at(tall, 1, 1)]).toEqual([
+      'source',
+      'lambda-0',
+      'asm-0',
+      'tm-0',
+    ])
+  })
+
+  it('lays the kinds out from KIND_ORDER whatever order they are handed in', () => {
+    expect(defaultArrangement(['tm', 'source'], 'wide')).toEqual(defaultArrangement(['source', 'tm'], 'wide'))
+    expect(defaultArrangement(['tm', 'asm', 'lambda', 'source'], 'wide')).toEqual(
+      defaultArrangement(KIND_ORDER, 'wide'),
+    )
+    // A WIDE AREA'S LEAVES COME IN THE HEADER'S ORDER, down each column in turn, and a tall one's in `KIND_ORDER`.
+    expect(leaves(defaultArrangement(KIND_ORDER, 'wide')).map((l) => l.pane)).toEqual([...HEADER_ORDER])
+    expect(leaves(defaultArrangement(KIND_ORDER, 'tall')).map((l) => l.pane)).toEqual([...KIND_ORDER])
+  })
+
+  it('makes a tree parseTree takes, holding the kinds asked, for every combination and both shapes', () => {
+    let combinations = 0
+    for (let mask = 1; mask < 1 << KIND_ORDER.length; mask++) {
+      const kinds = KIND_ORDER.filter((_, i) => (mask & (1 << i)) !== 0)
+      combinations++
+      for (const shape of ['wide', 'tall'] as const) {
+        const tree = defaultArrangement(kinds, shape)
+        expect(parseTree(JSON.parse(JSON.stringify(tree)))).toEqual(tree)
+        expect(
+          leaves(tree)
+            .map((l) => l.pane)
+            .sort(),
+        ).toEqual([...kinds].sort())
+      }
+    }
+    expect(combinations).toBe(15)
+  })
+
+  it('refuses no kinds, since a tree has a leaf or more', () => {
+    expect(() => defaultArrangement([], 'wide')).toThrow(/a kind or more/)
+  })
+})
+
+describe('defaultLayout', () => {
+  it('is the source beside the TM view, and one above the other in a tall area', () => {
+    expect(defaultLayout('wide')).toEqual({
+      kind: 'split',
+      dir: 'row',
+      sizes: [0.5, 0.5],
+      children: [leaf('source', 'source'), leaf('tm-0', 'tm')],
+    })
+    expect(defaultLayout('tall')).toEqual(defaultArrangement(['source', 'tm'], 'tall'))
+  })
 })
 
 describe('splitLeaf', () => {
@@ -71,26 +209,26 @@ describe('splitLeaf', () => {
   })
 
   it('splits a nested leaf without disturbing its siblings', () => {
-    const tree = splitLeaf(defaultLayout(), 'tm-0', 'column', 'tm-1', 'tm')
+    const tree = splitLeaf(fourViews(), 'tm-0', 'column', 'tm-1', 'tm')
     expect(leaves(tree).map((l) => l.id)).toEqual(['source', 'lambda-0', 'asm-0', 'tm-0', 'tm-1'])
   })
 
   it('refuses to split the source leaf, because there is no second editor to duplicate', () => {
-    expect(() => splitLeaf(defaultLayout(), 'source', 'row', 'source-1', 'lambda')).toThrow(/source/)
+    expect(() => splitLeaf(fourViews(), 'source', 'row', 'source-1', 'lambda')).toThrow(/source/)
   })
 
   it('throws on an unknown leaf rather than returning the tree unchanged', () => {
-    expect(() => splitLeaf(defaultLayout(), 'nope', 'row', 'x', 'lambda')).toThrow(/nope/)
+    expect(() => splitLeaf(fourViews(), 'nope', 'row', 'x', 'lambda')).toThrow(/nope/)
   })
 
   it('refuses a newId already in the tree, because the duplicate would be unreachable', () => {
     // findLeaf uses .find(), so a duplicate id would silently hide the second leaf behind the first
     // rather than surface as a tree parseLayout could also reject on load.
-    expect(() => splitLeaf(defaultLayout(), 'lambda-0', 'row', 'tm-0', 'lambda')).toThrow(/tm-0/)
+    expect(() => splitLeaf(fourViews(), 'lambda-0', 'row', 'tm-0', 'lambda')).toThrow(/tm-0/)
   })
 
   it('still refuses the source leaf as its subject', () => {
-    expect(() => splitLeaf(defaultLayout(), 'source', 'row', 'pane-1', 'lambda')).toThrow(/source pane cannot be split/)
+    expect(() => splitLeaf(fourViews(), 'source', 'row', 'pane-1', 'lambda')).toThrow(/source pane cannot be split/)
   })
 })
 
@@ -108,7 +246,7 @@ describe('closeLeaf', () => {
       sizes: [0.5, 0.5],
       children: [leaf('asm-0', 'asm'), leaf('tm-0', 'tm')],
     }
-    const afterSource = closeLeaf(defaultLayout(), 'source')
+    const afterSource = closeLeaf(fourViews(), 'source')
     expect(afterSource).toEqual({
       kind: 'split',
       dir: 'column',
@@ -165,8 +303,52 @@ describe('resize', () => {
     expect(after.sizes[0]).toBeCloseTo(MIN_PANE_FRACTION, 10)
   })
 
+  /**
+   * **TWO NEIGHBOURS THAT CANNOT BOTH HOLD THE FLOOR ARE LEFT AS THEY ARE.** In a row of 21 equal views each has a
+   * share of 1/21, under `MIN_PANE_FRACTION`, and the clamp's bounds cross: the least it may move is more than the
+   * most. It took the first to the floor and the second below nothing, a tree `parseTree` refuses, so one arrow key on
+   * such a divider stored a workspace the next load threw away (measured in the browser on a stored row of 21,
+   * 2026-10-12: shares 0.1 and −0.0048).
+   *
+   * **THE BOUNDS CROSS FROM A ROW OF 11, WHERE TWO SHARES TOGETHER ARE FIRST UNDER TWO FLOORS.** There the clamp took
+   * the first to the floor whichever way it was asked to move, shares of 0.1 and 0.0818, a tree the loader takes, and
+   * moved neither again. A guard that began at a row of 20, where the loader first refuses, would not stop that.
+   */
+  it.each([11, 21])(
+    'leaves two neighbours alone where both cannot hold the minimum, in either direction: a row of %i',
+    (views) => {
+      const crowd: LayoutNode = {
+        kind: 'split',
+        dir: 'row',
+        sizes: Array.from({ length: views }, () => 1 / views),
+        children: [
+          leaf('source', 'source'),
+          ...Array.from({ length: views - 1 }, (_, i) => leaf(`pane-${i + 1}`, 'lambda')),
+        ],
+      }
+      expect(parseTree(crowd), `precondition: the row of ${views} is a tree the loader takes`).not.toBeNull()
+      expect(1 / views + 1 / views, 'precondition: the two together are under two floors').toBeLessThan(
+        2 * MIN_PANE_FRACTION,
+      )
+      for (const delta of [0.1, -0.1, 0.001]) {
+        const after = resize(crowd, [], 0, delta)
+        if (after.kind !== 'split') throw new Error('unreachable')
+        expect(after.sizes, `moved by ${delta}`).toEqual(crowd.sizes)
+        expect(parseTree(after), `moved by ${delta}: the loader takes the tree`).not.toBeNull()
+      }
+    },
+  )
+
+  it('still brings a neighbour under the minimum up to it where the two together can hold it', () => {
+    const lopsided: LayoutNode = { ...pair, sizes: [0.05, 0.95] }
+    const after = resize(lopsided, [], 0, -0.5)
+    if (after.kind !== 'split') throw new Error('unreachable')
+    expect(after.sizes[0]).toBeCloseTo(MIN_PANE_FRACTION, 10)
+    expect(after.sizes[1]).toBeCloseTo(1 - MIN_PANE_FRACTION, 10)
+  })
+
   it('resizes a nested split addressed by path', () => {
-    const after = resize(defaultLayout(), [0], 0, 0.1)
+    const after = resize(fourViews(), [0], 0, 0.1)
     if (after.kind !== 'split') throw new Error('unreachable')
     const inner = after.children[0]
     if (inner?.kind !== 'split') throw new Error('unreachable')
@@ -185,18 +367,18 @@ describe('resize', () => {
    * but still trips either guard inside `rewrite`.
    */
   it('throws when the path runs through a leaf on the way down', () => {
-    // defaultLayout()'s [0] is a split, but [0, 0] is the source leaf — [0, 0, 0] tries to step
+    // fourViews()'s [0] is a split, but [0, 0] is the source leaf — [0, 0, 0] tries to step
     // past it.
-    expect(() => resize(defaultLayout(), [0, 0, 0], 0, 0.1)).toThrow(/layout path leaves the tree at index 0/)
+    expect(() => resize(fourViews(), [0, 0, 0], 0, 0.1)).toThrow(/layout path leaves the tree at index 0/)
   })
 
   it('throws when a path index has no child there', () => {
-    expect(() => resize(defaultLayout(), [5], 0, 0.1)).toThrow(/layout path leaves the tree at index 5/)
+    expect(() => resize(fourViews(), [5], 0, 0.1)).toThrow(/layout path leaves the tree at index 5/)
   })
 
   it('throws when the path addresses a leaf directly', () => {
     // [0, 0] resolves to the source leaf itself, not a split to resize.
-    expect(() => resize(defaultLayout(), [0, 0], 0, 0.1)).toThrow(/resize addressed a leaf/)
+    expect(() => resize(fourViews(), [0, 0], 0, 0.1)).toThrow(/resize addressed a leaf/)
   })
 
   it('throws when there is no divider at the given index', () => {
@@ -206,7 +388,7 @@ describe('resize', () => {
 
 describe('immutability', () => {
   it('never mutates the tree it was given', () => {
-    const before = defaultLayout()
+    const before = fourViews()
     const snapshot = structuredClone(before)
     splitLeaf(before, 'tm-0', 'row', 'tm-1', 'tm')
     closeLeaf(before, 'source')
@@ -227,7 +409,7 @@ describe('parseLayout', () => {
   const wrap = (tree: unknown) => JSON.stringify({ version: LAYOUT_VERSION, tree })
 
   it('round-trips a tree it serialized', () => {
-    expect(parseLayout(serializeLayout(dl()))).toEqual(dl())
+    expect(parseLayout(serializeLayout(fourViews()))).toEqual(fourViews())
   })
 
   it('returns null for absent storage', () => {
@@ -239,11 +421,11 @@ describe('parseLayout', () => {
   })
 
   it('returns null for a wrong version', () => {
-    expect(parseLayout(JSON.stringify({ version: 99, tree: dl() }))).toBeNull()
+    expect(parseLayout(JSON.stringify({ version: 99, tree: fourViews() }))).toBeNull()
   })
 
   it('returns null for a missing version', () => {
-    expect(parseLayout(JSON.stringify({ tree: dl() }))).toBeNull()
+    expect(parseLayout(JSON.stringify({ tree: fourViews() }))).toBeNull()
   })
 
   it('returns null for an unknown pane kind', () => {
@@ -522,14 +704,14 @@ describe('insertBeside', () => {
   })
 
   it('puts the new leaf after its subject in leaves() order', () => {
-    const next = insertBeside(defaultLayout(), 'lambda-0', 'row', 'pane-1', 'tm')
+    const next = insertBeside(fourViews(), 'lambda-0', 'row', 'pane-1', 'tm')
     expect(leaves(next).map((l) => l.id)).toEqual(['source', 'lambda-0', 'pane-1', 'asm-0', 'tm-0'])
   })
 
   it('still refuses a second source leaf and a duplicate id', () => {
-    expect(() => insertBeside(defaultLayout(), 'tm-0', 'row', 'source', 'source')).toThrow(/already has a source leaf/)
-    expect(() => insertBeside(defaultLayout(), 'tm-0', 'row', 'lambda-0', 'lambda')).toThrow(/already in the tree/)
-    expect(() => insertBeside(defaultLayout(), 'pane-9', 'row', 'pane-1', 'lambda')).toThrow(/not in the tree/)
+    expect(() => insertBeside(fourViews(), 'tm-0', 'row', 'source', 'source')).toThrow(/already has a source leaf/)
+    expect(() => insertBeside(fourViews(), 'tm-0', 'row', 'lambda-0', 'lambda')).toThrow(/already in the tree/)
+    expect(() => insertBeside(fourViews(), 'pane-9', 'row', 'pane-1', 'lambda')).toThrow(/not in the tree/)
   })
 })
 
@@ -554,7 +736,7 @@ const sum = (xs: number[]) => xs.reduce((a, b) => a + b, 0)
  */
 describe('insertBeside, `+ view`’s equal share', () => {
   it('joins the row at an equal share, right after the view it is added beside', () => {
-    const next = insertBeside(defaultLayout(), 'lambda-0', 'row', 'pane-1', 'tm')
+    const next = insertBeside(fourViews(), 'lambda-0', 'row', 'pane-1', 'tm')
     expect(rowOf(next, 'pane-1')).toEqual({
       sizes: [1 / 3, 1 / 3, 1 / 3],
       ids: ['source', 'lambda-0', 'pane-1'],
@@ -582,7 +764,7 @@ describe('insertBeside, `+ view`’s equal share', () => {
   })
 
   it('pressed five times in a row gives one row of seven equal views, still summing to 1', () => {
-    let tree = defaultLayout()
+    let tree = fourViews()
     let focused = 'lambda-0'
     for (let k = 1; k <= 5; k++) {
       tree = insertBeside(tree, focused, 'row', `pane-${k}`, 'lambda')
@@ -596,7 +778,7 @@ describe('insertBeside, `+ view`’s equal share', () => {
   })
 
   it('wraps a view whose parent is a column in a new row at [0.5, 0.5]', () => {
-    const column = splitLeaf(defaultLayout(), 'tm-0', 'column', 'pane-1', 'tm')
+    const column = splitLeaf(fourViews(), 'tm-0', 'column', 'pane-1', 'tm')
     const next = insertBeside(column, 'tm-0', 'row', 'pane-2', 'lambda')
     expect(rowOf(next, 'pane-2')).toEqual({ sizes: [0.5, 0.5], ids: ['tm-0', 'pane-2'], dir: 'row' })
     expect(rowOf(next, 'pane-1')).toEqual({ sizes: [0.5, 0.5], ids: ['(split)', 'pane-1'], dir: 'column' })
@@ -624,13 +806,13 @@ describe('the floor on an add', () => {
     splitLeaf(root, at, dir, id, 'lambda')
 
   it('draws each view the size the stylesheet does', () => {
-    const sizes = leafExtents(defaultLayout(), AREA, DIVIDER_PX)
+    const sizes = leafExtents(fourViews(), AREA, DIVIDER_PX)
     for (const id of ['source', 'lambda-0', 'asm-0', 'tm-0'])
       expect(sizes.get(id)).toEqual({ width: 634, height: 356.75 })
   })
 
   it('lets + view add five views beside λ and refuses the sixth', () => {
-    let tree = defaultLayout()
+    let tree = fourViews()
     let focused = 'lambda-0'
     for (let k = 1; k <= 5; k++) {
       expect(addRefusal(tree, view(tree, focused), 'width', AREA, DIVIDER_PX), `press ${k}`).toBeNull()
@@ -643,7 +825,7 @@ describe('the floor on an add', () => {
 
   it('refuses split right on a view under 332 px wide, and allows it at 332', () => {
     const narrow = insertBeside(
-      insertBeside(defaultLayout(), 'lambda-0', 'row', 'p1', 'lambda'),
+      insertBeside(fourViews(), 'lambda-0', 'row', 'p1', 'lambda'),
       'p1',
       'row',
       'p2',
@@ -678,7 +860,7 @@ describe('the floor on an add', () => {
    * which passes the height floor, and 152.16 wide, which does not.
    */
   it('refuses a split down of a view already narrower than the floor', () => {
-    const tree = resize(defaultLayout(), [0], 0, 0.38)
+    const tree = resize(fourViews(), [0], 0, 0.38)
     expect(leafExtents(tree, AREA, DIVIDER_PX).get('lambda-0')?.width).toBeCloseTo(152.16, 9)
     const down = split(tree, 'lambda-0', 'column')
     expect(leafExtents(down('added'), AREA, DIVIDER_PX).get('added')).toEqual({ width: 152.16, height: 172.375 })
@@ -752,7 +934,7 @@ describe('the floor on an add', () => {
   })
 
   it('changes nothing it was given', () => {
-    const before = defaultLayout()
+    const before = fourViews()
     const snapshot = structuredClone(before)
     addRefusal(before, view(before, 'lambda-0'), 'width', AREA, DIVIDER_PX)
     insertBeside(before, 'lambda-0', 'row', 'pane-1', 'lambda')
@@ -762,7 +944,7 @@ describe('the floor on an add', () => {
 
 describe('parseTree', () => {
   it('validates a bare tree the way parseLayout validates an envelope', () => {
-    expect(parseTree(defaultLayout())).toEqual(defaultLayout())
+    expect(parseTree(fourViews())).toEqual(fourViews())
     expect(parseTree({ kind: 'leaf', id: 'x', pane: 'source' })).toBeNull()
     expect(parseTree('nope')).toBeNull()
   })
@@ -808,7 +990,7 @@ describe('the bound on a tree', () => {
   }
   /** `+ view` pressed `presses` times in a row: each adds a λ view beside the view the last one added and focused. */
   const pressed = (presses: number): LayoutNode => {
-    let tree = defaultLayout()
+    let tree = fourViews()
     let focused = 'lambda-0'
     for (let k = 1; k <= presses; k++) {
       tree = insertBeside(tree, focused, 'row', `pane-${k}`, 'lambda')
@@ -881,9 +1063,9 @@ describe('the bound on a tree', () => {
   /**
    * **A LEAF ID'S NUMBER IS ONE THE LEAF COUNTER CAN STEP PAST.** `main.ts`'s `seedLeafCounter` sets the counter one past
    * the largest number in the tree, as `leafNumber` reads it, and from 2^53 on adding one no longer moves it: the second
-   * view added after such a tree would mint a duplicate id. Every form the app has minted parses: `source`; the default's
-   * `lambda-0`, `asm-0` and `tm-0`; `${leg}-${n}`, minted by 5d-ii-a's `nextLeafId` until 5d-ii-b; and `pane-${n}`
-   * since. An id with no number cannot move the counter, and parses as before.
+   * view added after such a tree would mint a duplicate id. Every form the app has minted parses: `source`; a default
+   * arrangement's `lambda-0`, `asm-0` and `tm-0`; `${leg}-${n}`, minted by 5d-ii-a's `nextLeafId` until 5d-ii-b; and
+   * `pane-${n}` since. An id with no number cannot move the counter, and parses as before.
    */
   const beside = (id: string): LayoutNode => ({
     kind: 'split',

@@ -115,7 +115,7 @@ export function createTransport(deps: {
   /**
    * A pane has moved between sessions — the stored `bindings` are stale until this returns.
    *
-   * **THE ONE MOMENT THE PAYLOAD CHANGES WITHOUT ANY BUFFER CHANGING**, which is why it is a second
+   * **THE PAYLOAD CHANGES HERE WITHOUT ANY BUFFER CHANGING**, which is why it is a second
    * dependency and not a second caller of `onBuffersChanged` above. That one is about the header's
    * COUNT, and a rebind moves no count: it takes a pane off one session and puts it on another, so the
    * `bindings` half of `PersistedBuffers` is different and the `buffers` half is identical. Routing a

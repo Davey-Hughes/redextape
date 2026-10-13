@@ -254,3 +254,43 @@ export class Follow {
     return centredScrollTop(stateRow, rowHeight, viewportHeight, totalHeight)
   }
 }
+
+/**
+ * The `Follow` that owns each box's scroll — a `VirtualGrid`'s box, the λ view's body — for a write made from outside
+ * the box's own class. Held weakly, so a box that is dropped takes its entry with it.
+ */
+const owners = new WeakMap<Element, Follow>()
+
+/** Record that `follow` owns `box`'s scroll, so `restoreScroll` tells it of a write there. */
+export function ownScroll(box: Element, follow: Follow): void {
+  owners.set(box, follow)
+}
+
+/**
+ * Put `box` back at a scroll position it held before, telling the `Follow` that owns it first — what `pane-host.ts`
+ * does for every scroller in a view after a rebuild of the layout. A box no `Follow` owns is only written.
+ *
+ * **A WRITE FROM OUTSIDE IS A PROGRAMMATIC SCROLL LIKE THE BOX'S OWN, AND `Follow` MUST HEAR OF IT BEFORE ITS EVENT.**
+ * The write is reported as a `scroll` at the next rendering update. Unannounced, it read as the user taking control:
+ * a following box whose view left the page and came back — a Stage tab left and selected again, a view toggled off
+ * and on — had stopped following, with its control to follow again offered and nobody having scrolled.
+ *
+ * **TOLD HERE, NOT LEFT TO THE DRAW THAT FOLLOWS THE REBUILD.** That draw writes, and so announces, only when
+ * following has a row to centre and the box is not on it. A box following a run with no row this frame is written
+ * by nothing but this: the state diagram on a run's last step, in `halt`, came back with its control offered when
+ * only the draw announced.
+ *
+ * **AND TOLD AGAIN WHERE THE BROWSER CLAMPED THE WRITE.** A view can come back at another size, in another
+ * combination of views, and a box that grew cannot scroll as far as it had. Measured on a state diagram with no row
+ * to centre, at 480 px in a box of 120: back in a box of 168 it landed on 432, 48 px from what `Follow` had been told,
+ * and its `scroll` read as the user's. Reading `scrollTop` back forces the layout that clamps.
+ *
+ * `Follow`'s flag is not touched: a box the user scrolled comes back where they left it, still not following.
+ */
+export function restoreScroll(box: Element, top: number, left: number): void {
+  const follow = owners.get(box)
+  follow?.onProgrammaticScroll(top)
+  box.scrollTop = top
+  box.scrollLeft = left
+  if (follow !== undefined && box.scrollTop !== top) follow.onProgrammaticScroll(box.scrollTop)
+}

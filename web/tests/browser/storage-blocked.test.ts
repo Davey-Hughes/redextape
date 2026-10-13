@@ -2,7 +2,7 @@ import type { EditorView } from '@codemirror/view'
 import { afterEach, beforeAll, describe, expect, it } from 'vitest'
 import { userEvent } from 'vitest/browser'
 import { FIRST_LOAD } from '../../src/examples'
-import { SHELL, until } from './harness'
+import { SHELL, showFourViews, until } from './harness'
 
 /**
  * **THE APP WHERE THIS SITE'S DATA IS BLOCKED** — Chrome with site data blocked, and the privacy modes that
@@ -190,6 +190,12 @@ describe('with site data blocked', () => {
     await until(() => said.includes(PROGRAM_LINE), 'the program’s own refusal')
     await until(() => idle() && resultsText().includes('λ 6 · '), 'the formatted program to compile')
     await closeSettings()
+    // WITH NOTHING READABLE IN STORAGE THE PAGE OPENED ON THE SOURCE AND THE TM VIEW, so the λ view is asked for.
+    expect(
+      [...document.querySelectorAll<HTMLElement>('#views [data-leaf]')].map((el) => el.dataset.leaf),
+      'a page whose storage cannot be read did not open on the first-load views',
+    ).toEqual(['source', 'tm-0'])
+    await showFourViews()
     const more = document.querySelector<HTMLButtonElement>('[data-leaf="lambda-0"] button.view-more')
     const menu = document.getElementById(more?.getAttribute('aria-controls') ?? '')
     if (more === null || menu === null) throw new Error('no view menu on the λ view')

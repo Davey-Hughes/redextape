@@ -633,6 +633,7 @@ describe('the no-session report for a failed fork', () => {
           drawn += 1
         },
         viewTitle: () => '',
+        arranged: () => true,
       })
       const notified: string[] = []
       const replies = createReplies({

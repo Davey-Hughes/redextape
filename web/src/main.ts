@@ -3,7 +3,17 @@ import { lintGutter, setDiagnostics as setCmDiagnostics } from '@codemirror/lint
 import { EditorState } from '@codemirror/state'
 import { EditorView, highlightActiveLine, keymap, lineNumbers } from '@codemirror/view'
 import init, { captureClasses, encodings, tokenClasses } from '../../pkg/redextape_wasm.js'
-import { addViewItems, exampleItems, presetName, wireMenu, workspaceItems } from './app-header'
+import {
+  addViewItems,
+  exampleItems,
+  NARROW_WINDOW,
+  presetName,
+  shownSentence,
+  toggleSentence,
+  viewToggles,
+  wireMenu,
+  workspaceItems,
+} from './app-header'
 import {
   APPEARANCE_LABEL,
   type Appearance,
@@ -12,6 +22,17 @@ import {
   readStored,
   STORAGE_KEY,
 } from './appearance'
+import {
+  type Combination,
+  combinationOf,
+  cycleFrom,
+  enter,
+  keyOf,
+  liveLeaves,
+  reidentified,
+  shapeOf,
+  toggled,
+} from './arrangements'
 import type { AsmPane } from './asm-pane'
 import { showBanner } from './banner'
 import { schemeName } from './base16'
@@ -35,12 +56,14 @@ import { createEditorCustody } from './editor-custody'
 import { KeymapSetting, keymapSlot } from './editor-keymap'
 import { KEYMAP_LABEL, KEYMAP_MODES, parseKeymapMode, readFormatOnBlur, writeFormatOnBlur } from './editor-prefs'
 import { EXAMPLE_ENCODING, EXAMPLES, type Example, FIRST_LOAD } from './examples'
+import { handOff, nearest } from './focus-handoff'
 import { declineMark, focusMark, linkMark } from './highlight'
 import { History } from './history'
 import { icon } from './icons'
 import { LambdaTrees } from './lambda-trees'
 import {
   closeLeaf,
+  defaultArrangement,
   defaultLayout,
   LAYOUT_STORAGE_KEY,
   type LayoutNode,
@@ -64,7 +87,7 @@ import { paletteDeclarations } from './palettes'
 import type { PaneChoice } from './pane-chrome'
 import { type AddRefused, createPaneHost, type LayoutEvent } from './pane-host'
 import { createPanel } from './panel'
-import { type LeafId, legOfPane, PaneCollection } from './panes'
+import { type LeafId, legOfPane, PaneCollection, type PaneKind } from './panes'
 import { PROGRAM_STORAGE_KEY, parseProgram, type StoredProgram, serializeProgram } from './program-store'
 import type { Leg, RunReply } from './protocol'
 import { HISTORY_BYTES } from './protocol'
@@ -98,6 +121,7 @@ import type { AsmState, LambdaState, TmState } from './types'
 import { assertTokenClasses } from './types'
 import { createUnsaved, type Refusal, refusalOf } from './unsaved'
 import { pairLabel, sourceViewHeader, viewMenu } from './view-header'
+import { HINT_ROWS, HINT_SENTENCE, type ViewKeyAction, wireViewKeys } from './view-keys'
 import {
   defaultFocus,
   defaultWorkspace,
@@ -120,8 +144,8 @@ import {
  * The counter behind every `LeafId` a split mints, shared across every leg — module-level rather than
  * per call to `main()`, though `main()` only ever runs once (`ready` below is computed on import).
  *
- * STARTS AT 1 ONLY FOR THE TREE A FRESH PAGE SHIPS, whose leaves are already `lambda-0`, `asm-0` and `tm-0`.
- * **REASONING ONLY ABOUT `defaultLayout()` COSTS THE FIRST SPLIT AFTER EVERY RELOAD**: `main()` restores a
+ * STARTS AT 1 ONLY FOR THE TREES A DEFAULT ARRANGEMENT BUILDS, whose leaves are `lambda-0`, `asm-0` and `tm-0`.
+ * **REASONING ONLY ABOUT THOSE COSTS THE FIRST SPLIT AFTER EVERY RELOAD**: `main()` restores a
  * tree from `localStorage` when there is one, that tree can already contain `pane-1` from a split in an
  * earlier page load, and `splitLeaf`'s collision guard then refuses the id `nextLeafId` mints — an uncaught
  * throw out of the click handler, no new pane, and nothing on screen to say why. `seedLeafCounter` below is
@@ -133,9 +157,12 @@ import {
 let leafCounter = 1
 
 /**
- * Advance `leafCounter` past every numeric suffix in `tree` — called on the tree `main()` starts with, whether that
- * came from storage or from `defaultLayout()`, and on the tree of each workspace an opened link puts in force
+ * Advance `leafCounter` past every numeric suffix in `ids` — called on the views `main()` starts with, whether they
+ * came from storage or from `defaultLayout()`, and on those of each workspace an opened link puts in force
  * (`showWorkspace`).
+ *
+ * **EVERY LIVE VIEW'S ID, NOT THE TREE ON SCREEN'S ALONE** (the view layouts spec §5.1): `arrangements.ts`'s
+ * `liveLeaves`, so an id minted in one arrangement cannot be one a remembered arrangement holds for another view.
  *
  * FIX THE CALLER, NOT THE GUARD. `splitLeaf`'s refusal of an id already in the tree is deliberate and
  * correct (its own doc: a duplicate id would not error, it would silently make the second leaf
@@ -152,15 +179,16 @@ let leafCounter = 1
  * read through the same `leafNumber` (Plan 7 part 6a spec §5.3, amended 2026-10-01). From 2^53 on, `+ 1` no longer
  * moves the counter, so after a link carrying `pane-1e300` the second view added would mint a duplicate.
  */
-function seedLeafCounter(tree: LayoutNode): void {
-  for (const leaf of leaves(tree)) {
-    const n = leafNumber(leaf.id)
+function seedLeafCounter(ids: Iterable<LeafId>): void {
+  for (const id of ids) {
+    const n = leafNumber(id)
     if (n !== null && n >= leafCounter) leafCounter = n + 1
   }
 }
 
 /**
- * The id a split mints for the new leaf it creates.
+ * The id minted for a new leaf: by a split, by `+ view`, and by a switch for a leaf it enters under a new id
+ * (`arrangements.ts`'s `reidentified`).
  *
  * `pane-${n}`, NOT `${leg}-${n}`, AND THE OLD SPELLING WAS A LIE THIS SLICE MADE VISIBLE. A leaf
  * minted as `lambda-3` that later renders a δ-table carries a name describing something it is not —
@@ -168,8 +196,8 @@ function seedLeafCounter(tree: LayoutNode): void {
  * `LeafId` already declares the id opaque ("a leaf's stable identity"), so the prefix was a convenience rather
  * than a fact, and a pane that can change leg is what falsifies it.
  *
- * `defaultLayout()`'s LITERAL `lambda-0` / `asm-0` / `tm-0` ARE LEFT ALONE, for three reasons and none of them
- * is inertia: browser tests select on them, `reset preset`'s re-minting of exactly those ids is what
+ * `layout.ts`'s `defaultArrangement`'s LITERAL `lambda-0` / `asm-0` / `tm-0` ARE LEFT ALONE, for three reasons and
+ * none of them is inertia: browser tests select on them, a default's re-minting of exactly those ids is what
  * `applyLayout`'s claim-dropping line reasons about, and `seedLeafCounter` reads the digits after the
  * last `-` and does not care which word precedes them. `dataset.kind` is the truthful statement of
  * what a leaf renders.
@@ -179,11 +207,20 @@ function nextLeafId(): LeafId {
 }
 
 /**
- * The `LeafId` of the sibling that absorbs a closed leaf's space.
+ * The view a `✕` on the leaf `id` gives the focus to: the leaf before `id` in `leaves(tree)` order, or the one after
+ * it where `id` is the first. `null` where the tree does not hold `id`, or holds no other leaf.
  *
- * THE PREVIOUS LEAF IN `leaves(tree)` ORDER, OR THE NEXT IF THE CLOSED ONE WAS FIRST — the same
- * left-to-right, depth-first order `leaves` itself promises (and tab order follows), so this is "the
- * pane now sitting where the closed one used to be" rather than an arbitrary sibling.
+ * `leaves` goes left to right and depth first, the order the views are in the document and so the order `Tab` goes
+ * through them: the answer is the view before the closed one there.
+ *
+ * **IT IS NOT ALWAYS THE VIEW THAT TAKES THE CLOSED ONE'S SPACE.** `layout.ts`'s `closeLeaf` gives the space to what
+ * is left of the closed leaf's own split, and the leaf before it in the tree's order is in that split only where the
+ * closed leaf is not the split's first. On all four views as a wide window's default arranges them,
+ * `row(column(source asm-0) column(lambda-0 tm-0))`, the leaves are `source`, `asm-0`, `lambda-0`, `tm-0`: closing the
+ * λ view, the first of the second column, names `asm-0`, the last of the first column and diagonally across from it,
+ * while the TM view under the closed one takes the column (measured 2026-10-12;
+ * `tests/browser/default-views-gestures.test.ts` holds each view's). This doc said the answer is "the pane now
+ * sitting where the closed one used to be", which is so where the two share a split.
  */
 function neighbourOf(tree: LayoutNode, id: LeafId): LeafId | null {
   const ids = leaves(tree).map((l) => l.id)
@@ -238,6 +275,8 @@ async function main(): Promise<EditorView> {
   const aboutBuild = document.querySelector<HTMLElement>('#about-build')
   const noticeHost = document.querySelector<HTMLElement>('#notice')
   const liveHost = document.querySelector<HTMLElement>('#live')
+  const viewsShown = document.querySelector<HTMLElement>('#views-shown')
+  const viewKeysHint = document.querySelector<HTMLElement>('#view-keys')
   // **`#views`, NOT `<main>` — spec §9.** `renderLayout` opens with `root.replaceChildren()`, so the
   // layout tree needed a root of its own the moment the inspector column came to live in `<main>` beside
   // it: an inspector directly under `<main>` would be destroyed on the first layout commit.
@@ -276,6 +315,8 @@ async function main(): Promise<EditorView> {
     !inspectorHost ||
     !strip ||
     !liveHost ||
+    !viewsShown ||
+    !viewKeysHint ||
     !root
   ) {
     throw new Error('the page is missing a mount point')
@@ -318,6 +359,29 @@ async function main(): Promise<EditorView> {
   let lspClient: LspClient
   /** The settings menu's `format on blur`, read at every blur. */
   let formatOnBlur = readFormatOnBlur()
+  /**
+   * Whether a rebuild that gives the keyboard focus back is under way now, which is when a blur is not the user's:
+   * `pane-host.ts`'s `keepingFocus` runs each one through `rebuilding`, below, which sets this for its length.
+   *
+   * **SUCH A REBUILD TAKES EVERY VIEW OFF THE PAGE AND PUTS BACK THE ONES ITS TREE NAMES, AND AN EDITOR THAT HAD THE
+   * FOCUS IS SENT A `blur` ON THE WAY OUT**, though the focus is back in it when the rebuild returns. A switch of views
+   * is one (`pane-host.ts`'s `switchViews`). With *format on blur* on, a view key pressed from an editor formatted text
+   * the user had not left: measured (2026-10-12), `let   x   =   40;` in the source editor was `let x = 40;` once
+   * `Ctrl+.` `2` had hidden the asm view, with the caret moved from 7 to 0, and a machine copy's editor was formatted
+   * the same way. So an editor asked whether to format at a blur is told no while this is set. The editor is still in
+   * the document when that `blur` arrives (measured), so it cannot tell the rebuild's from a user's by asking that, as
+   * `layout-view.ts`'s divider does. **A VIEW KEY THAT HIDES THE EDITOR'S OWN VIEW FORMATS NOTHING EITHER**: its text
+   * is as it was typed until the editor is next left.
+   *
+   * **A DIVIDER'S DRAG IS THE OTHER** (`pane-host.ts`'s `resized`), **AND THIS WAS SET FOR A SWITCH ALONE.** Measured
+   * (2026-10-12), on the source beside the TM view, with the caret at 34 of the 44 characters of `let   x   =   40;`,
+   * `let   y   =   2;` and `x   +   y` on three lines: the divider dragged 80 px with the pointer sent one request to
+   * format as it was let go, the text was formatted and the caret at 0 two frames on, and a `Z` typed next was the
+   * text's first character. A machine copy's editor and a λ copy's lost the caret the same way with text the
+   * formatter leaves as it is, since its answer replaces the whole document. So it is set where the focus is kept,
+   * for every rebuild that keeps it, and no gesture sets it for itself.
+   */
+  let focusKept = false
   // THE TOGGLE SHOWS ITS STATE IN A WORD, BESIDE THE GLYPH (Plan 7 part 2 spec §6) — the word is its
   // accessible name, and `aria-label` is removed so the two cannot disagree. `☀`/`☾` are drawn (Hack lacks
   // them); `◐` stays text.
@@ -385,7 +449,7 @@ async function main(): Promise<EditorView> {
    * Built after the editor instead — which is where this sat, because the source document's
    * diagnostics sink needs `view` — it was still `undefined` at that moment, and the page threw
    * `Cannot read properties of undefined (reading 'documentSymbols')` before it finished loading. No
-   * test saw it: every one of them starts with empty storage, so no panel is ever restored open.
+   * test saw it: every one of them started with empty storage, so no panel was ever restored open.
    * Found by reloading the built app after clicking around in it.
    *
    * Only `openDocument` needs `view`, and it stays below where `view` exists.
@@ -586,7 +650,7 @@ async function main(): Promise<EditorView> {
    * still being CONSTRUCTED — with a restored workspace whose outline panel was left open, on the first
    * frame of the page. `lspClient` shipped exactly that defect one task ago: it was a `let` assigned
    * after the editor was built, and a restored panel reached the thunk before the value existed, so the
-   * page threw before it finished loading and no test saw it (every test starts with empty storage).
+   * page threw before it finished loading and no test saw it (every test started with empty storage).
    * These are `const`s above every construction site instead, which is the same fix stated as an
    * ordering rather than as a repair.
    *
@@ -890,8 +954,9 @@ async function main(): Promise<EditorView> {
   const transport = createTransport({
     // A THUNK: `lspClient` is not assigned until after the editor is built, far below this call.
     lspClient: () => lspClient,
-    // READ AT BLUR, not captured, so toggling the setting takes effect without remounting an editor.
-    formatOnBlur: () => formatOnBlur,
+    // READ AT BLUR, not captured, so toggling the setting takes effect without remounting an editor. Not while a
+    // rebuild that gives the focus back is under way: that blur is not the user's (`focusKept`'s doc).
+    formatOnBlur: () => formatOnBlur && !focusKept,
     // A VALUE, NOT A THUNK — an editor JOINS the setting rather than reading it. Its own doc says why.
     keymap: keymapSetting,
     // A VALUE, NOT A THUNK — built above `transport` for the ordering reason its own doc gives.
@@ -979,11 +1044,11 @@ async function main(): Promise<EditorView> {
    * THE SOURCE VIEW'S OWN `✕` — `splitLeaf`'s doc records why source is refused a SPLIT
    * and not a close: there is one editor, so there is nothing to duplicate into, but closing the source
    * pane is exactly `hostFor`'s detach-not-destroy rule doing its job — the editor and its text wait in
-   * `hosts` and come back intact the moment the leaf does. Two gestures bring it back now, and the
-   * second is the one this control was always waiting for: `reset preset`
+   * `hosts` and come back intact the moment the leaf does. Two gestures brought it back when this was
+   * written, and the second is the one this control was always waiting for: `reset preset`
    * (`tests/browser/two-lambda-panes.test.ts`'s "keeps the program" test), which costs every other pane
    * on the page, and any other pane's split picker (`tests/browser/pane-picker.test.ts`), which costs
-   * nothing.
+   * nothing. `+ view` and the header's `source` toggle bring it back too now.
    *
    * A SEPARATE `viewMenu` INSTANCE, NOT ROUTED THROUGH `paneEvents`, BECAUSE THE SOURCE PANE HAS
    * NO `PaneSlot`. `paneEvents` is built for a `(LeafId, PaneSlot<K>)` pair — `applyLayout`'s own `if
@@ -1012,13 +1077,36 @@ async function main(): Promise<EditorView> {
     else notices.notify(`view now shows ${say(e.shows)}`)
   }
   /**
+   * Whether the workspace is *custom*: its switches match no preset. **ITS MENU HAS NO *RESET PRESET* THEN**
+   * (`app-header.ts`'s `workspaceItems` leaves the item out until a preset is chosen), so a notice that names the
+   * reset as the way to make room names that step first, where it would have sent a reader to an item that is not
+   * there.
+   */
+  const customWorkspace = (): boolean => presetOf(ws.switches) === null
+  /**
    * AN ADD REFUSED, SAID AS A NOTICE AND NOTHING ELSE (the user's decision, 2026-10-04): what stopped it and what would
    * let it through, naming the view by its title as its selector spells it (`viewTitle`, declared below and read only
    * at a click). The controls stay enabled — a window widened or a view closed is the next try's room.
+   *
+   * **A FULL WORKSPACE'S NOTICE DOES NOT PROMISE THAT A CLOSE MAKES ROOM.** The bound is on every live view (the view
+   * layouts spec §5.6), and a `✕` does not always take one away: on a kind's last view it leaves the tree before it
+   * remembered, with the closed view's leaf in it, and a view another arrangement holds stays live too. Told only to
+   * "close one to add another", with four views on screen and 60 more remembered, a user who closed the TM view was
+   * refused the next add in the same words (measured 2026-10-12). So the notice counts the views that are not on
+   * screen, and names *reset preset* for a close that makes no room: it forgets every arrangement, and so always
+   * makes some.
+   *
+   * **A CUSTOM WORKSPACE IS TOLD TO CHOOSE A PRESET FIRST**: its menu has no *reset preset* (`customWorkspace`'s
+   * doc).
    */
   const refused = (r: AddRefused): void => {
     if (r.why === 'full') {
-      notices.notify(`the workspace holds ${MAX_TREE_LEAVES} views, the most it can keep — close one to add another`)
+      const live = liveLeaves(tree, ws.arrangements).size
+      const off = live - leaves(tree).length
+      const holds = off === 0 ? `${live} views` : `${live} views, ${off} of them not on screen`
+      const reset = customWorkspace() ? 'choose a preset and reset preset' : 'reset preset'
+      const remedy = `close one to add another, or ${reset} if that makes no room`
+      notices.notify(`the workspace holds ${holds}, the most it can keep — ${remedy}`)
       return
     }
     const title = viewTitle(r.leaf)
@@ -1041,13 +1129,13 @@ async function main(): Promise<EditorView> {
         })
     },
     close: () => {
-      const grew = neighbourOf(tree, SOURCE_LEAF)
-      tree = closeLeaf(tree, SOURCE_LEAF)
+      const neighbour = neighbourOf(tree, SOURCE_LEAF)
+      enterTree(closeLeaf(tree, SOURCE_LEAF))
       // `focusView`, NOT `applyLayout` THEN `focusPane` — its own doc has why the order matters on the
-      // stage. Safe here by arithmetic too (`source` is always `leaves()[0]`, so the neighbour that grows
-      // and the view that becomes focused are the same leaf), and that is exactly the kind of accident
-      // the other three sites were relying on when one of them broke.
-      paneHost.focusView(grew)
+      // stage. The other order is safe only while the leaf `neighbourOf` names and the view that becomes
+      // focused are the same leaf, and that is exactly the kind of accident the other three sites were
+      // relying on when one of them broke.
+      paneHost.focusView(neighbour)
       layoutChanged({ kind: 'closed', leaf: SOURCE_LEAF, showed: { kind: 'source' } })
     },
   })
@@ -1176,9 +1264,12 @@ async function main(): Promise<EditorView> {
   }
 
   /**
-   * Write the buffers to storage — called at every moment the payload would say something different,
-   * and at no others: a fork, a retire, a recorded term, a rebind, and the first `applyLayout()` that
-   * turns restored bindings into real panes.
+   * Write the buffers to storage — called at every moment the payload would say something different:
+   * a fork, a retire, a recorded term, a rebind, and each `applyLayout()` (`pane-host.ts`), which is
+   * where a view is built or dropped, the first of them turning restored bindings into real panes.
+   *
+   * **`applyLayout()` WRITES WHETHER OR NOT IT BUILT OR DROPPED A VIEW**, as it writes the workspace: once
+   * a gesture, a Stage tab's and a divider's included.
    *
    * A WARM AND A COOL REACH IT TOO AND CHANGE NOTHING IT WRITES, which is a fact about the FORMAT
    * rather than a redundant call: `snapshot` does not carry `warm`, because a buffer's temperature on
@@ -1245,8 +1336,13 @@ async function main(): Promise<EditorView> {
     }
   }
 
+  /**
+   * The views area's shape, which decides how a combination's first two views sit (`layout.ts`'s `defaultArrangement`):
+   * measured each time a default is built and never stored, since the tree it gave is.
+   */
+  const viewsShape = () => shapeOf(root.getBoundingClientRect())
   /** The workspace storage opens on: the stored one if there is a usable value there, the default otherwise. */
-  const storedWorkspace = parseWorkspace(readLayoutStorage()) ?? defaultWorkspace()
+  const storedWorkspace = parseWorkspace(readLayoutStorage()) ?? defaultWorkspace(viewsShape())
   /**
    * THE WORKSPACE — a link's where one opens whole (Plan 7 part 6a spec §5.3), otherwise restored from `localStorage`
    * if there is a usable value there (a version 1 layout is migrated: `workspace.ts`'s `parseWorkspace`), the default
@@ -1267,6 +1363,46 @@ async function main(): Promise<EditorView> {
     inspector: restored.inspector,
     display: restored.display,
     tmDisplay: restored.tmDisplay,
+    arrangements: restored.arrangements,
+  }
+  /**
+   * Whether the tree on screen holds the view `id` — false for a view kept alive in an arrangement the workspace
+   * remembers. The surfaces the views share ask it: the step bar, the link status line and the running focuses each
+   * describe what is arranged on screen, in tiles or as Stage's tabs, and never a view no one can reach.
+   * `pane-host.ts`'s `laidOut` asks it of the tree `applyLayout` last drew.
+   */
+  const arranged = (id: LeafId): boolean => leaves(tree).some((l) => l.id === id)
+  /**
+   * PUT `next` ON SCREEN — the one place a gesture writes the tree (the view layouts spec §4.3): `arrangements.ts`'s
+   * `enter`, which remembers the tree left under its own combination where `next` shows another. A divider, a
+   * split, `+ view`, a title pick and `✕` reach it through `pane-host.ts`'s `setTree`; the source view's own `✕` and
+   * a switch call it here.
+   *
+   * **NOT *RESET PRESET* AND NOT AN OPENED LINK**: each replaces the workspace whole, what it remembers included, and
+   * writes `tree` and `ws` together.
+   *
+   * **A VIEW AN EDIT TAKES OUT OF THE TREE IS CLOSED, AND ITS PANEL STATE AND DISPLAY GO WITH IT** — unless the write
+   * is a switch's (`parks`), whose views are only off the screen. The tree a `✕` left is remembered, so the
+   * closed view's id is still a live one by `liveLeaves`' test and `normaliseWorkspace` would keep its state for the
+   * view built there next; `tests/browser/workspace-restore.test.ts` has that view inheriting a closed panel.
+   */
+  const enterTree = (next: LayoutNode, parks = false): void => {
+    const entered = enter({ tree, arrangements: ws.arrangements }, next)
+    if (!parks) {
+      const kept = new Set(leaves(next).map((l) => l.id))
+      const closed = new Set(
+        leaves(tree)
+          .map((l) => l.id)
+          .filter((id) => !kept.has(id)),
+      )
+      if (closed.size > 0) {
+        const without = <T>(by: Readonly<Record<LeafId, T>>): Record<LeafId, T> =>
+          Object.fromEntries(Object.entries(by).filter(([leaf]) => !closed.has(leaf)))
+        ws = { ...ws, panels: without(ws.panels), display: without(ws.display), tmDisplay: without(ws.tmDisplay) }
+      }
+    }
+    tree = entered.tree
+    if (entered.arrangements !== ws.arrangements) ws = { ...ws, arrangements: entered.arrangements }
   }
   /**
    * The focused view, repaired against the tree it names a leaf of.
@@ -1280,10 +1416,11 @@ async function main(): Promise<EditorView> {
   const focusedLeaf = (): LeafId => (leaves(tree).some((l) => l.id === ws.focused) ? ws.focused : defaultFocus(tree))
 
   /**
-   * Drop what the tree no longer holds — the panel state and the display of a closed view, and a focus
-   * on one.
+   * Drop what no arrangement holds any longer — the panel state and the display of a closed view — and a focus on a
+   * view that is not on screen. A view a remembered arrangement holds is live and keeps both (the view layouts spec
+   * §5.1).
    *
-   * **`defaultLayout()` RE-MINTS `source`, `lambda-0`, `asm-0` AND `tm-0` AS LITERALS**, so a leaf id genuinely
+   * **A DEFAULT ARRANGEMENT RE-MINTS `source`, `lambda-0`, `asm-0` AND `tm-0` AS LITERALS**, so a leaf id genuinely
    * comes back: close the TM view with its rules panel shut, then *reset preset*, and the new `tm-0`
    * would inherit the closed view's panel state — from memory, since the write had already dropped it.
    * The same clicks then behaved differently depending on whether the page had been reloaded in
@@ -1292,7 +1429,7 @@ async function main(): Promise<EditorView> {
    * the same way, in `applyLayout`'s creation pass.
    */
   const normaliseWorkspace = (): void => {
-    const live = new Set(leaves(tree).map((l) => l.id))
+    const live = liveLeaves(tree, ws.arrangements)
     const panels = Object.fromEntries(Object.entries(ws.panels).filter(([leaf]) => live.has(leaf)))
     const display = Object.fromEntries(Object.entries(ws.display).filter(([leaf]) => live.has(leaf)))
     const tmDisplay = Object.fromEntries(Object.entries(ws.tmDisplay).filter(([leaf]) => live.has(leaf)))
@@ -1309,7 +1446,7 @@ async function main(): Promise<EditorView> {
   // workspace, which seeds the counter as it writes the tree. (Re-seeding on every layout would be harmless — the
   // function only ever advances — but it would also be a third place to read as though the invariant needed
   // maintaining.)
-  seedLeafCounter(tree)
+  seedLeafCounter(liveLeaves(tree, ws.arrangements).keys())
 
   /**
    * THE PANE LIFECYCLE — `pane-host.ts`'s own doc has the argument for why `hosts` and `pendingBinding`,
@@ -1344,8 +1481,24 @@ async function main(): Promise<EditorView> {
     nextLeafId,
     neighbourOf,
     getTree: () => tree,
-    setTree: (next) => {
-      tree = next
+    setTree: enterTree,
+    liveLeaves: () => liveLeaves(tree, ws.arrangements),
+    applied: () => {
+      viewsToggles.sync(combinationOf(tree), viewsOfKind)
+      // **`+ view`'S MENU, OPEN WHILE THE TREE CHANGES UNDER IT, IS FILLED AGAIN**, as the workspace menu is at a pick
+      // (`applySwitches`). It lists `source` while no view shows it, and a menu opened then stays open while the source
+      // view comes back by another road: its toggle, reached with `Shift+Tab` and pressed with `Enter`. Measured
+      // before this (2026-10-12): the item was still there, and choosing it threw `the tree already has a source leaf`.
+      if (addViewMenu.matches(':popover-open')) fillAddViewMenu()
+    },
+    // NO EDITOR FORMATS AT THE BLUR THIS REBUILD SENDS IT (`focusKept`'s doc).
+    rebuilding: (rebuild) => {
+      focusKept = true
+      try {
+        rebuild()
+      } finally {
+        focusKept = false
+      }
     },
     stage: () => ws.switches.views === 'stage',
     focusedLeaf,
@@ -1354,6 +1507,7 @@ async function main(): Promise<EditorView> {
     // `draw: () => draw()` above already takes for the same reason.
     viewTitle: (id) => viewTitle(id),
     persist: persistWorkspace,
+    persistBindings: persistBuffers,
     setFocused: (id: LeafId) => {
       if (ws.focused === id) return
       ws = { ...ws, focused: id }
@@ -1418,13 +1572,15 @@ async function main(): Promise<EditorView> {
    * exactly that binding and the whole page died at `main()` (`session scratch-1 has no tm leg`), which
    * is the same Critical `transport.ts`'s `rebind` records from the other direction.
    *
-   * **AND IT IS REACHABLE WITHOUT A HAND-EDITED KEY.** A λ pane bound to a buffer, then switched to TM
-   * through the pane picker, changes the leaf's KIND through `pane-host.ts`'s `applyLayout` — which
-   * persists the tree and does not persist the buffers. Nothing writes the buffers key again until the
-   * next fork, retire, rebind or scratch build, so a reload in that window restores a binding the tree
-   * disagrees with. This guard is what makes that window harmless rather than fatal; the write-back at
-   * the end of `main()` then drops the binding from storage, because the pane it named is on the source
-   * session.
+   * **AND IT WAS REACHABLE WITHOUT A HAND-EDITED KEY, UNTIL `applyLayout` STORED THE BINDINGS.** A λ pane
+   * bound to a buffer, then switched to TM through the pane picker, changes the leaf's KIND through
+   * `pane-host.ts`'s `applyLayout`, which stored the tree and not the buffers. Nothing wrote the buffers
+   * key again until the next fork, retire, rebind or scratch build, so a reload in that window restored a
+   * binding the tree disagreed with. `applyLayout` writes both now (`tests/browser/bindings-stored.test.ts`
+   * has the pick). The guard stays for a payload that disagrees with its tree all the same — a
+   * hand-edited one, or one a build from before that stored — and it is what makes one harmless rather
+   * than fatal; the first `applyLayout()` then drops the binding from storage, because the pane it named
+   * is on the source session.
    *
    * **THE LEAF AND THE NAMED BUFFER MUST AGREE ON A LEG, WHICH IS THE INVARIANT AND NOT `l.pane ===
    * 'lambda'` — 5d-iv T11.** `ScratchBuffers` mints a `tm` buffer now (`fork`/`forkBlank`, given `'tm'`),
@@ -1568,6 +1724,147 @@ async function main(): Promise<EditorView> {
   wireMenu(workspaceButton, workspaceMenu, fillWorkspaceMenu)
 
   /**
+   * A SWITCH TO ANOTHER COMBINATION OF VIEWS — the view layouts spec §4.5. A `views` toggle and a view key both end
+   * here: the combination's remembered arrangement, or its default the first time it is visited.
+   *
+   * **A LEAF WHOSE ID IS LIVE AS A VIEW OF ANOTHER KIND IS ENTERED UNDER A NEW ID** (§5.4; `arrangements.ts`'s
+   * `reidentified` has why): the view that holds the id stays parked, and the switch builds a new view beside it.
+   * So the focused view is the one that was focused only where the tree entered still holds its id, and whatever the
+   * workspace stores under an id stays with the view that holds it.
+   *
+   * **REFUSED WHERE ITS VIEWS WOULD TAKE THE LIVE ONES PAST THE BOUND** (§5.6): a default arrangement's views are new
+   * ones where the workspace has closed its own, and so is each leaf entered under a new id. **THE BOUND IS ASKED OF
+   * THE TREE AS IT WOULD BE ENTERED, WITH IDS THAT ARE NOT MINTED**, so a refused switch leaves the leaf counter where
+   * it was, as a refused add does.
+   *
+   * **ITS NOTICE SAYS THE THREE NUMBERS, AND IS NOT AN ADD'S.** A switch can be refused short of the bound: with 63
+   * live views, a default that needs two new ones. It was given the add's words then, "the workspace holds 64
+   * views" (measured 2026-10-12). So it says how many the workspace holds, how many the switch would take it to and
+   * how many it can keep, and names *reset preset*, which always makes room, after the preset a custom workspace has
+   * to choose to be offered it (`customWorkspace`'s doc).
+   *
+   * **NOT HELD TO THE 160 PX FLOOR**: it shows a remembered tree, and a stored tree is not held to it either.
+   *
+   * **`switchViews`, NOT `focusView`**: the keyboard focus stays on the toggle that was pressed, or in the editor a
+   * view key was pressed from, unless its view left the page (`pane-host.ts` has the argument).
+   */
+  const switchTo = (target: Combination): void => {
+    const key = keyOf(target)
+    if (target.length === 0 || key === keyOf(combinationOf(tree))) return
+    const now = { tree, arrangements: ws.arrangements }
+    const held = ws.arrangements[key] ?? defaultArrangement(target, viewsShape())
+    const live = liveLeaves(tree, ws.arrangements)
+    // IDS NO TREE HOLDS, FOR THE COUNT ALONE: `reidentified` asks for one a leaf it gives a new id.
+    let unminted = 0
+    const trial = (): LeafId => {
+      let id = `unminted-${unminted++}`
+      while (live.has(id)) id = `unminted-${unminted++}`
+      return id
+    }
+    const entered = enter(now, reidentified(held, live, trial))
+    const after = liveLeaves(entered.tree, entered.arrangements).size
+    if (after > MAX_TREE_LEAVES) {
+      const counts = `from ${live.size} views to ${after}, and it can keep ${MAX_TREE_LEAVES}`
+      const reset = customWorkspace() ? 'choose a preset, then reset preset makes room' : 'reset preset makes room'
+      notices.notify(`${shownSentence(target)} would take the workspace ${counts} — ${reset}`)
+      return
+    }
+    enterTree(reidentified(held, live, nextLeafId), true)
+    paneHost.switchViews(focusedLeaf())
+    notices.announce(shownSentence(combinationOf(tree)))
+  }
+
+  /**
+   * How many views of `kind` its toggle stands for: the ones on screen where the kind is shown, and the ones a press
+   * would show where it is not. A press shows the arrangement its combination remembers, which holds as many views
+   * of the kind as it was left with, or the combination's default, which holds one of each (`layout.ts`'s
+   * `defaultArrangement`).
+   */
+  const viewsOfKind = (kind: PaneKind): number => {
+    const of = (t: LayoutNode): number => leaves(t).filter((l) => l.pane === kind).length
+    const shown = combinationOf(tree)
+    if (shown.includes(kind)) return of(tree)
+    const held = ws.arrangements[keyOf(toggled(shown, kind))]
+    return held === undefined ? 1 : of(held)
+  }
+
+  /**
+   * Show `kind`'s views or hide them: what a `views` toggle's press and a toggle key both ask.
+   *
+   * **THE ONLY KIND SHOWN STAYS, AND THE NOTICE LINE SAYS WHY**, in the words of its toggle's tooltip
+   * (`app-header.ts`'s `toggleSentence`). The toggle is disabled then and still takes a press (`viewToggles`), so the
+   * press is answered as the key is.
+   */
+  const toggleView = (kind: PaneKind): void => {
+    const next = toggled(combinationOf(tree), kind)
+    if (next.length === 0) notices.notify(toggleSentence(kind, viewsOfKind(kind), 'only'))
+    else switchTo(next)
+  }
+
+  // THE `views` TOGGLES — spec §6. `pane-host.ts`'s `applied` brings them up to the tree each time one is rendered,
+  // so a `✕`, a `+ view` and an opened link move them as a press does.
+  const viewsToggles = viewToggles(viewsShown, toggleView)
+  // **HIDDEN IN A WINDOW 40rem WIDE OR NARROWER**, which is `app-header.ts`'s `NARROW_WINDOW` (`style.css` has what
+  // they cost the header there, and a rule of the same width). A view key, a view's `✕` and `+ view` still choose the
+  // views; what a narrow window goes without is the header's one press.
+  //
+  // **A TOGGLE WITH THE FOCUS HANDS IT ON BEFORE IT IS HIDDEN**, to the nearest control left in the header, which is
+  // `+ view` (`focus-handoff.ts`). Measured without (2026-10-12): the λ toggle focused, the window narrowed to 600 px,
+  // and `document.activeElement` was `<body>`, and stayed there when the window was widened again. A hidden toggle
+  // holds no focus, so the same call does nothing where the window is widened.
+  const narrowWindow = matchMedia(NARROW_WINDOW)
+  const placeToggles = (): void => {
+    const header = viewsShown.parentElement
+    if (header !== null) handOff(viewsShown, nearest(header, viewsShown))
+    viewsShown.hidden = narrowWindow.matches
+  }
+  narrowWindow.addEventListener('change', placeToggles)
+  placeToggles()
+
+  /**
+   * VIEW KEYS — spec §7: the prefix, then one key. The hint is built once from `view-keys.ts`'s own table, so what it
+   * lists is what the machine answers, and the live region is told the same rows as one sentence when the mode is
+   * armed (`HINT_SENTENCE`). Nothing is said when it is left.
+   *
+   * **A TOGGLE KEY FOR THE ONLY VIEW SHOWN SAYS WHY NOTHING HAPPENED**, on the notice line, where the header's button
+   * for it is disabled with the same words in its tooltip (`toggleView`).
+   *
+   * **A VIEW KEY CLOSES EVERY OPEN POPOVER BEFORE IT ACTS**, as a pointer press on the page behind one does: the key
+   * acts on that page, and a menu left open over it describes the page as it was. `hidePopover` closes each with its
+   * events, so its button's `aria-expanded` follows, and hands the focus back to that button where the focus was
+   * inside. Measured before this, each from `Ctrl+.` then a toggle key (2026-10-12): `share` stayed open on a link
+   * to the arrangement no longer on screen; `+ view`, opened with no source view, still offered `source` once the key
+   * had shown one, and choosing it threw; and a view's `⋯` menu and its title's left the page with their view's host
+   * and came back shut with `aria-expanded="true"`, the focus on `<body>` where the view stayed. The other choice was
+   * to leave the mode unarmed while a popover is open, as it is under a modal dialog; the keys would then do nothing
+   * from inside a menu, with nothing to say so.
+   */
+  const hintTitle = document.createElement('span')
+  hintTitle.className = 'view-keys-title'
+  hintTitle.textContent = 'view keys'
+  const hintRow = (key: string, does: string): HTMLElement => {
+    const row = document.createElement('span')
+    const kbd = document.createElement('kbd')
+    kbd.textContent = key
+    row.append(kbd, ` ${does}`)
+    return row
+  }
+  viewKeysHint.replaceChildren(hintTitle, ...HINT_ROWS.map((row) => hintRow(row.key, row.does)))
+  const actOnViewKey = (action: ViewKeyAction): void => {
+    for (const open of document.querySelectorAll<HTMLElement>(':popover-open')) open.hidePopover()
+    if (action.kind === 'cycle') switchTo(cycleFrom(combinationOf(tree), action.step))
+    else toggleView(action.pane)
+  }
+  wireViewKeys(window, {
+    act: actOnViewKey,
+    armed: (now) => {
+      viewKeysHint.hidden = !now
+      if (now) notices.announce(HINT_SENTENCE)
+    },
+    blocked: () => document.querySelector('dialog:modal') !== null,
+  })
+
+  /**
    * A view's title, in the title-selector's own spelling — the bar's prefix (spec §8) and, from part 2b's
    * Stage task, a tab's label (§5).
    *
@@ -1596,9 +1893,15 @@ async function main(): Promise<EditorView> {
     // so from the other side), so this list is already "every λ or TM view in the layout" — in Stage,
     // views off the page too. That is spec §8's rule, not an oversight: with the focused view unable to
     // step, the bar keeps "the last view that could", and in Stage the source tab is that case.
+    //
+    // **OF THE TREE ON SCREEN** (the view layouts spec §5): a view kept alive in a remembered arrangement has no tab
+    // and no place on the page, so the bar never drives one. A Stage tab off the page is in the tree, and still can.
     const id = barTarget(
       focusedLeaf(),
-      panes.all().map((p) => p.id),
+      panes
+        .all()
+        .filter((p) => arranged(p.id))
+        .map((p) => p.id),
       lastSteppable,
     )
     if (id === null) return null
@@ -1657,8 +1960,10 @@ async function main(): Promise<EditorView> {
     // only preset that can reach this line is a real one — the `??` is what holds if a caller ever gets
     // here another way, which is the same standing `layout.ts`'s refusals take against their own UI.
     const preset = presetOf(ws.switches) ?? 'explorer'
-    tree = defaultLayout()
-    ws = { ...ws, switches: PRESETS[preset] }
+    // **EVERY REMEMBERED ARRANGEMENT GOES WITH IT** (the view layouts spec §4.6): the default views are back, and a
+    // toggle pressed next shows that combination's default, not what it was left as.
+    tree = defaultLayout(viewsShape())
+    ws = { ...ws, switches: PRESETS[preset], arrangements: {} }
     // **THE FOCUS GOES INTO THE NEW ARRANGEMENT — whole-branch review follow-up, the sibling search
     // C1's fix asked for.** `hidePopover()` above hands focus back to whatever held it before the menu
     // opened, which for a user reaching this item is a control inside one of the views. Rebuilding the
@@ -1679,7 +1984,7 @@ async function main(): Promise<EditorView> {
     // `defaultFocus` rather than `focusedLeaf()` because the leaf the user was in may not exist in
     // `defaultLayout()`'s tree at all.
     //
-    // **`resetViews`, WHICH IS `focusView` IN THAT ORDER, AND MORE — THE NOTICE IS WHY.** `defaultLayout()` re-mints the
+    // **`resetViews`, WHICH IS `focusView` IN THAT ORDER, AND MORE — THE NOTICE IS WHY.** `defaultLayout()` re-mints
     // leaf ids a view on a copy may already hold, and `applyLayout` keeps a pane whose id and kind survive — so views
     // stayed on their copies while the notice said the default views were back. `resetViews` rebuilds each of them on
     // the program, as a fresh preset's views are; the copies themselves stay in the copies menu.
@@ -1687,8 +1992,9 @@ async function main(): Promise<EditorView> {
     notices.notify(`${presetName(preset)} reset — the default views are back`)
   })
 
-  // `+ view` — spec §5, §6: beside the focused view, which may be the source view.
-  wireMenu(addViewButton, addViewMenu, () =>
+  // `+ view` — spec §5, §6: beside the focused view, which may be the source view. Filled on each open, and again
+  // where the tree changes while it is open (`applied`, above).
+  const fillAddViewMenu = (): void =>
     addViewItems(
       addViewMenu,
       { options: sessions.pairs(), sourceAvailable: !leaves(tree).some((l) => l.pane === 'source'), current: null },
@@ -1697,8 +2003,8 @@ async function main(): Promise<EditorView> {
         // SAID BY `layoutChanged`'s `added` event, which `addView` reports.
         paneHost.addView(choice, beside)
       },
-    ),
-  )
+    )
+  wireMenu(addViewButton, addViewMenu, fillAddViewMenu)
 
   /**
    * Put `program` in the source editor: its encoding into the picker, and its text in one dispatch, whose update
@@ -1739,12 +2045,23 @@ async function main(): Promise<EditorView> {
    * (spec §5.4). **A LEG THAT STOPS SHORT IS SAID ABOUT THE OPEN**, carrying its `undo`: the run ended before the step,
    * or `MAX_LINK_CONTINUES` continues did not reach it, and the step shown is the leg's last. Each one redraws the one
    * notice, naming every leg stopped short so far (spec §5.4's note of 2026-10-01).
+   *
+   * **ONLY OF A LEG THE TREE HAS A VIEW OF.** A link carries a step for every leg with frames, whichever views its page
+   * showed, and the notice ends *showing step …*. Measured before this (2026-10-12): a link made of the source and TM
+   * views, its λ and asm steps past the end of the run, opened on those two views saying `the link's λ step 100 and
+   * asm step 100 are past the end of this run — showing λ step 7 and asm step 5`. The leg still goes to its last step,
+   * and its view shows that step if a toggle brings it back. **AND A LEG NO VIEW SHOWS DRAWS NOTHING OVER THE LINE**:
+   * said again for it, the notice would repeat the legs already named.
    */
   const positions = new LinkPositions({
     legOf: (leg) => sessions.legOf({ session: SOURCE_SESSION, leg }),
     extend: (leg) => sessions.entryOf(SOURCE_SESSION).client.extend(leg),
     awaitingRun: () => sessions.entryOf(SOURCE_SESSION).client.awaitingRun,
-    short: (shorts) => sayAboutOpen(shortNotice(shorts)),
+    short: (shorts) => {
+      const viewed = shorts.filter((short) => combinationOf(tree).includes(short.leg))
+      // THE LEG THAT STOPPED NOW IS THE LAST OF `shorts`: where no view shows it, there is nothing new to say.
+      if (viewed.at(-1) === shorts.at(-1)) sayAboutOpen(shortNotice(viewed))
+    },
     draw: () => draw(),
   })
 
@@ -1828,7 +2145,10 @@ async function main(): Promise<EditorView> {
     return {
       program: view.state.doc.toString(),
       encoding: picker.value,
-      workspace: serializeWorkspace({ tree, ...ws }),
+      // **THE ARRANGEMENT ON SCREEN AND NO OTHER** (the view layouts spec §4.7): a reader needs what the sender saw, and
+      // a link has a size to keep down. Emptied here, `serializeWorkspace` writes no `arrangements` and no state of a
+      // view only a remembered arrangement held.
+      workspace: serializeWorkspace({ tree, ...ws, arrangements: {} }),
       positions: steps,
     }
   }
@@ -1867,7 +2187,7 @@ async function main(): Promise<EditorView> {
     const { tree: nextTree, ...rest } = next
     tree = nextTree
     ws = rest
-    seedLeafCounter(tree)
+    seedLeafCounter(liveLeaves(tree, ws.arrangements).keys())
     applySwitches()
     inspectorPanel.setOpen(ws.inspector)
     sourceOutline.panel.setOpen(ws.panels[SOURCE_LEAF]?.outline ?? false)
@@ -2020,7 +2340,9 @@ async function main(): Promise<EditorView> {
     // the accessibility list's item 1 in the control this whole gesture exists for.** `notice.ts` tears
     // the action button down before running this (it must: a second undo would throw), and a module that
     // knows nothing about views cannot say where focus should land. The view the copy came back to is
-    // where the user's attention is; with no view to come back to, the control that lists the copies is.
+    // where the user's attention is; with no view to come back to, or only a parked one, the control that
+    // lists the copies is. `moveBack` answers a view of the tree on screen first, so `home` is a parked view
+    // only where no other shows the copy.
     // AFTER `draw()`, because the view's title is rebuilt from the new binding by the frame above.
     const back = home === undefined ? null : document.querySelector<HTMLElement>(`[data-leaf="${home}"] .view-title`)
     if (back !== null) back.focus()
@@ -2070,7 +2392,8 @@ async function main(): Promise<EditorView> {
    * A THUNK BUILT PER OPEN, NOT A VALUE: `bufferList` calls this on `beforetoggle` (its own doc), so
    * the `ofSession` scan runs once per gesture rather than on every frame that repaints the header.
    *
-   * `paneHost.reseedingSlots()` HANDS OVER EVERY SLOT ON THE PAGE, NOT THE λ ONES, and each one tells its TM pane what
+   * `paneHost.reseedingSlots()` HANDS OVER EVERY PANE'S SLOT, NOT THE λ ONES AND NOT ONLY THOSE ON THE PAGE — a Stage
+   * tab that is not selected and a view a switch parked have a slot each — and each one tells its TM pane what
    * the session it moves onto holds (that member's doc has the finding). `retire` rebinds only the
    * slots whose binding names the buffer it is ending (`scratch.ts`'s own rule, and
    * `tests/node/scratch.test.ts` pins it against a TM slot that must not be dragged home), so filtering
@@ -2177,7 +2500,7 @@ async function main(): Promise<EditorView> {
           // **THE SLOTS ARGUMENT IS WHAT MAKES THE INVARIANT TRUE, AND THIS IS ITS ONLY REAL CALL
           // SITE.** `cool` rebinds every pane on the buffer it sleeps, so "a cold buffer has no panes
           // bound to it" is a property of what this line passes, not of `ScratchBuffers`. Hand it the
-          // same set the retire handler above hands `retire` — every slot on the page —
+          // same set the retire handler above hands `retire` — every pane's slot, on the page or off it —
           // because a partial set strands exactly the panes it omits: `entryOf` throws for a session the
           // registry no longer holds, and `draw()` resolves through it on the next frame.
           scratchpad.cool(id, SOURCE_SESSION, paneHost.reseedingSlots())
@@ -2269,9 +2592,9 @@ async function main(): Promise<EditorView> {
      * **THE PERSIST RIDES ON THIS FUNCTION BECAUSE ITS CALLERS ARE ALREADY THE RIGHT SET.** The doc
      * above spends four paragraphs establishing exactly when this runs — a fork, a retire, and a
      * warm/cool that cannot move the count but is called anyway for uniformity — and the first two of
-     * those are two of the five moments the stored payload would say something different (the other
-     * three reach `persistBuffers` directly: a recorded term, a rebind, and the write-back at the end of
-     * `main()`). A `persistBuffers()` in the fork and retire handlers instead would be two copies of a
+     * those are two of the moments the stored payload would say something different (the others reach
+     * `persistBuffers` directly: a recorded term, a rebind, and each `applyLayout()`, which is
+     * `pane-host.ts`'s). A `persistBuffers()` in the fork and retire handlers instead would be two copies of a
      * rule this function already states once, and a third in the temperature handler that writes the
      * same bytes back.
      *
@@ -2279,8 +2602,9 @@ async function main(): Promise<EditorView> {
      * during start-up, before `applyLayout()` has built a single pane, so the `bindings` it writes are
      * empty by construction — correct for a fresh page and WRONG for a restored one, which would then
      * persist a payload naming buffers but no panes and lose every binding at the next reload. The
-     * write after the first `applyLayout()` at the end of `main()` is what corrects it, and nothing can
-     * observe the intermediate: there is no `await` between here and there.
+     * first `applyLayout()`, at the end of `main()`, writes them from the panes it has just built, which is
+     * what corrects it, and nothing can observe the intermediate: there is no `await` between here and
+     * there.
      *
      * **THIS CALL IS UNCONDITIONAL — EVERY PAGE LOAD, EVERY USER, INCLUDING ONE WHO HAS NEVER FORKED —
      * AND THE WRITE STILL IS.** `refreshBuffers()`'s own call below runs once at start-up with no guard
@@ -2348,6 +2672,7 @@ async function main(): Promise<EditorView> {
     draw: () => draw(),
     announce: (t: string) => notices.announce(t),
     viewTitle,
+    arranged,
   })
 
   // ASSIGNED HERE, NOT DECLARED HERE — see the `let draw` comment above for why the split is forced
@@ -2376,6 +2701,7 @@ async function main(): Promise<EditorView> {
     unseen,
     leaves: () => leaves(tree).length,
     sourceAvailable: () => !leaves(tree).some((l) => l.pane === 'source'),
+    arranged,
     // WRAPPED RATHER THAN PASSED AS `custody.hasEditor`, the same shape `editorHome` below uses for
     // `custody.homeFor`: the methods read `panes`, `sessions` and the two custody maps through the
     // closure `createEditorCustody` returns, and handing the reference over bare would work today only
@@ -2511,7 +2837,7 @@ async function main(): Promise<EditorView> {
           // NO FLUSH HERE, UNLIKE A COPY'S. This editor posts `changeDocument` on every keystroke
           // rather than on a debounce, so the server's copy is never behind what is on screen.
           blur: () => {
-            if (!formatOnBlur) return false
+            if (!formatOnBlur || focusKept) return false
             const asked = view.state.doc
             lspClient
               .format(SOURCE_URI)
@@ -2668,7 +2994,7 @@ async function main(): Promise<EditorView> {
   // neither `linkWiring`, `draw` nor `view`; and nothing clears the notice line on a keystroke. What
   // still holds is the thing this position was always really about: `persistBuffers` reads its bindings
   // off `panes`, which `applyLayout()` — at the end of `main()` — is the only thing that fills, so the
-  // payload written here is provisional, and the write-back after that call is what corrects it. See
+  // payload written here is provisional, and that call's own write is what corrects it. See
   // `refreshBuffers`'s own doc.
   refreshBuffers()
 
@@ -2728,7 +3054,7 @@ async function main(): Promise<EditorView> {
   }
 
   // THE FIRST RECONCILE, REPLACING THE BARE `draw()` THIS USED TO BE. `applyLayout()` builds the
-  // lambda-0/asm-0/tm-0 panes the default tree names, attaches every host (including `sourceHost`, built
+  // panes the tree in force names, attaches every host (including `sourceHost`, built
   // above) into `<main>`, persists the tree, and calls `draw()` itself at its own end — so this is
   // still "one call, at the very end of `main()`, after everything else is wired" (`view` included:
   // `linkWiring`/`draw`/`compile`/`replies` all close over it as a thunk; `draw()`'s own body reads
@@ -2740,6 +3066,20 @@ async function main(): Promise<EditorView> {
   // thing that ever populates `panes` (`THE LINK STATE` comment above), so those reads run against a
   // collection that is genuinely empty, and it remains true that nothing before this line has BUILT
   // one.
+  //
+  // **IT IS ALSO THE RESTORE'S OWN WRITE OF THE BINDINGS, WHICH NO GESTURE MAKES.** `persistBuffers` reads
+  // `bindings` off `panes.all()`, and until this call there were no panes — so the `refreshBuffers()`
+  // earlier in this function wrote a payload with an EMPTY `bindings` map. On a fresh page that is correct
+  // and this call rewrites the same bytes; on a restored page it would silently lose every binding at the
+  // next reload, which is the feature failing on its second use. `applyLayout` stores the bindings once it
+  // has built the panes (`pane-host.ts`); a `persistBuffers()` at the end of this function did, while
+  // `applyLayout` stored the tree alone.
+  //
+  // **IT IS ALSO WHAT MAKES STORAGE SELF-CORRECTING, WHICH IS WORTH MORE THAN THE FIX.** A binding naming a
+  // leaf the restored tree no longer holds is never consumed, and a buffer the cap refused to warm had its
+  // pane put back on the source session above — in both cases the pane that exists now disagrees with what
+  // was stored, and this write settles it in favour of the panes. Design §4.1's "no repair pass" holds
+  // because the repair is one ordinary write of the ordinary payload.
   paneHost.applyLayout()
   // **THE SWITCHES ARE APPLIED AFTER THE FIRST LAYOUT, NOT BEFORE IT** (spec §4). A restored workspace can
   // carry any of the eight combinations, and each of part 2b's three consumers reads the tree or the panes
@@ -2813,22 +3153,6 @@ async function main(): Promise<EditorView> {
    * fourth field in `redextape.buffers` and is not added here.
    */
   for (const [leaf, session] of restoredBindings) if (!custody.hasEditor(session)) custody.claim(session, leaf)
-
-  /**
-   * **THE RESTORE'S OWN WRITE-BACK, AND THE ONE PERSIST SITE THAT IS NOT A USER GESTURE.** Every other
-   * one runs because something changed; this one runs because the panes only just came into existence.
-   * `persistBuffers` reads `bindings` off `panes.all()`, and until the line above there were no panes —
-   * so the `refreshBuffers()` earlier in this function wrote a payload with an EMPTY `bindings` map. On
-   * a fresh page that is correct and this call rewrites the same bytes; on a restored page it would
-   * silently lose every binding at the next reload, which is the feature failing on its second use.
-   *
-   * **IT IS ALSO WHAT MAKES STORAGE SELF-CORRECTING, WHICH IS WORTH MORE THAN THE FIX.** A binding
-   * naming a leaf the restored tree no longer holds is never consumed, and a buffer the cap refused to
-   * warm had its pane put back on the source session above — in both cases the pane that exists now
-   * disagrees with what was stored, and this write settles it in favour of the panes. Design §4.1's
-   * "no repair pass" holds because the repair is one ordinary write of the ordinary payload.
-   */
-  persistBuffers()
 
   // THE START-UP LINK'S NOTICE, NOW THAT EVERYTHING IT CAN UNDO EXISTS (spec §5.3): what it replaced is what storage
   // would have opened on — the program, and where it opened whole the workspace and the bindings it dropped.

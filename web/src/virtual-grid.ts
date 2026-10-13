@@ -1,4 +1,4 @@
-import { centredScrollTop, Follow, ROW_HEIGHT } from './state-table'
+import { centredScrollTop, Follow, ownScroll, ROW_HEIGHT } from './state-table'
 import { type VisibleWindow, visibleWindow } from './virtual-list'
 
 /** Rows drawn beyond the viewport on each side, so a fast scroll does not show blank space. */
@@ -138,6 +138,9 @@ export class VirtualGrid {
     this.el = document.createElement('div')
     this.el.className = opts.classes.box
     this.el.append(this.#spacer)
+    // A WRITE TO THE BOX'S SCROLL FROM OUTSIDE THIS CLASS REACHES `Follow` THROUGH THIS — `state-table.ts`'s
+    // `restoreScroll`.
+    ownScroll(this.el, this.#follow)
     // THE BOX IS THE GRID (spec §9.2, accessibility item 3). A `createPanel` given this box as its body makes it a
     // labelled region; setting the role afterwards keeps the panel toggle's label and makes it the grid instead.
     // The two wrappers between it and the rows are layout, so they say so to the accessibility tree.

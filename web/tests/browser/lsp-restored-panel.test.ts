@@ -43,7 +43,7 @@ describe('a workspace restored with a panel already open', () => {
     // that — `CopyEditor`'s `#syncEditorControls` refreshes the outline when `#editor` is non-null. A restored
     // buffer is what gives a pane an editor at construction. With the panel open but no copy, the
     // old order does not crash and this file was green against it.
-    const ws = defaultWorkspace()
+    const ws = defaultWorkspace('wide')
     localStorage.setItem(
       LAYOUT_STORAGE_KEY,
       serializeWorkspace({ ...ws, panels: { ...ws.panels, source: { outline: true }, 'tm-0': { outline: true } } }),

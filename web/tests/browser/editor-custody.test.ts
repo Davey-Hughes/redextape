@@ -27,7 +27,7 @@ import type { LambdaState } from '../../src/types'
  * again, and this file is what executes them.
  *
  * **DRIVEN DIRECTLY RATHER THAN THROUGH `main()`, AND THE THIRD ARM IS WHY.** The app's retire hands
- * `ScratchBuffers.retire` every slot on the page, so every pane bound to the buffer is rebound home
+ * `ScratchBuffers.retire` every pane's slot, on the page or off it, so every pane bound to the buffer is rebound home
  * before the sweep runs — which means the app can reach the claim drop and the custody destroy, and
  * cannot reach the sweep's own `held.destroy()` at all: that one needs a λ pane still BOUND to a session
  * whose claim resolves to no home. `tests/browser/scratch-buffers.test.ts` drives the app's two through

@@ -22,7 +22,7 @@ const LINK = `${LINK_PREFIX}${deflateRawSync(
       version: 1,
       program: 'let x = 40; x + 2',
       encoding: 'binary',
-      workspace: serializeWorkspace(defaultWorkspace()),
+      workspace: serializeWorkspace(defaultWorkspace('wide')),
       positions: {},
     }),
   ),

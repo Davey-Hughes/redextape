@@ -4,7 +4,7 @@ import { page } from 'vitest/browser'
 import { LAYOUT_STORAGE_KEY, type LayoutNode, setLeafKind } from '../../src/layout'
 import { bindingKey } from '../../src/view-header'
 import { parseWorkspace } from '../../src/workspace'
-import { SHELL, until } from './harness'
+import { resetToFourViews, SHELL, until } from './harness'
 
 /**
  * **A PANE CHANGES WHAT IT SHOWS, IN PLACE** — decision 1's headline capability, driven entirely
@@ -20,7 +20,7 @@ import { SHELL, until } from './harness'
  * THE HARNESS IS `two-lambda-panes.test.ts`'s, DELIBERATELY UNMODIFIED — the same shell, the same
  * one-mount-per-file `beforeAll` (ES module imports are cached, so `main()` runs once per page and
  * Vitest gives each test FILE its own page), and a `beforeEach` that undoes the tree shape through
- * `reset preset` and puts the source program back. Its own doc has the argument for each, including why
+ * `resetToFourViews` and puts the source program back. Its own doc has the argument for each, including why
  * the first compile has to be waited for before any fork click can land. **THE SECOND HALF OF THAT
  * SENTENCE USED TO READ "a live scratchpad, through a source recompile"**, which stopped being true
  * with 5d-ii-c decision 2: a keystroke ends no buffer, so a buffer a test forks outlives it. Only the
@@ -132,15 +132,15 @@ beforeAll(async () => {
 
 beforeEach(async () => {
   localStorage.removeItem(LAYOUT_STORAGE_KEY)
-  document.querySelector<HTMLButtonElement>('#reset-preset')?.click()
+  await resetToFourViews()
   view.dispatch({ changes: { from: 0, to: view.state.doc.length, insert: 'let x = 40; x + 2' } })
   await until(
     () =>
       document.querySelector<HTMLElement>('#results')?.dataset.state === 'idle' &&
-      // THE DEFAULT TREE'S FOUR VIEWS: source, λ, asm and TM.
+      // ALL FOUR VIEWS: source, λ, asm and TM.
       leafIds().length === 4 &&
       lambdaLeaves().length === 1,
-    'the default layout on a settled source program',
+    'all four views on a settled source program',
   )
 })
 
@@ -316,9 +316,9 @@ describe('a pane changes which leg it renders', () => {
    * COMMIT THAT ADDED THE CROSS-LEG ARM.** `applyLayout` reaches the incoming pane's
    * `host.replaceChildren(…)`, which takes the title-selector the user is operating with it, and nothing
    * put focus anywhere afterwards: a keyboard user who arrowed to a TM pair and pressed Enter was left
-   * on `<body>`, one Tab away from the top of the document. `close` answered exactly this with
-   * `focusPane(grew)`; this arm answers it with `focusPane(id)`, the same leaf, because the pane did
-   * not go anywhere — only its contents changed.
+   * on `<body>`, one Tab away from the top of the document. `close` answered exactly this with a
+   * `focusPane` on the view next to the closed one; this arm answers it with `focusPane(id)`, the same
+   * leaf, because the pane did not go anywhere — only its contents changed.
    *
    * IT FOCUSES THE TITLE-SELECTOR FIRST, WHICH IS THE HALF THAT MAKES THIS A TEST RATHER THAN A GESTURE.
    * `document.activeElement` is `<body>` on a page nobody has clicked, so an assertion that focus is

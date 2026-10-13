@@ -36,7 +36,7 @@ beforeAll(async () => {
   await page.viewport(1280, 2400)
   document.body.innerHTML = SHELL
   view = await (await import('../../src/main')).ready
-  // **THE TM VIEW TAKES THE WHOLE ROW, AS IT DID WHEN EVERY WIDTH IN THIS FILE WAS CHOSEN.** The default tree
+  // **THE TM VIEW TAKES THE WHOLE ROW, AS IT DID WHEN EVERY WIDTH IN THIS FILE WAS CHOSEN.** The four-view tree
   // puts asm beside TM (Plan 7 part 5 spec §3, row 4), which halves the view at any viewport: at 1280px the
   // program row's sub-steps no longer fit, and the local level is already under its 750px floor, so narrowing
   // to 1000px cannot shrink it — neither the fits-case nor the narrows-case would be the case it names. Closed

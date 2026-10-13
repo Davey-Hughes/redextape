@@ -26311,3 +26311,256 @@ vitest run --project browser` passed 167 files / 1,184 tests.
 | 167 / 1,184 | the browser project before the first commit | `cd web && pnpm exec vitest run --project browser` |
 | the gates block | the gates and the image | `gates.sh` in the record directory, at `0fe3ad5`, and at `0b3fdb3` |
 | 95, 89, 97, 97 | the coverage floors | `thresholds` in `web/vite.config.ts` |
+
+#### EACH COMBINATION OF VIEWS KEEPS ITS OWN ARRANGEMENT, THE HEADER'S TOGGLES AND THE VIEW KEYS CHOOSE IT, AND A FRESH PAGE OPENS ON THE SOURCE BESIDE THE TM VIEW, WHERE IT OPENED ON ALL FOUR (2026-10-12, branch `view-layouts`, `7cbac7d..ad45a3f`, 88 commits, plus this entry and `05828bc`, the user's answer on the toggle keys; then `8fcc4e3`, `babb610` and `b64120d`, made with the pull request open, and this entry brought up to them twice)
+
+**The user asked for it:** the default layout "is interesting but it's cluttered. I want to make it easy to cycle
+through some layouts and/or customize exactly what windows you're seeing", most often the source beside one of the TM,
+λ and asm views. This is the first of four pull requests of
+`docs/superpowers/specs/2026-10-11-view-layouts-design.md`, its §4 to §8; panel resizing (§11), moving a view (§9) and
+drag and drop (§10) follow, and views in windows of their own after those. The design was approved, amended after a
+prototype the user tried, and amended again as the reviews of this branch changed it: its §16 and §17 list each
+change with what caused it.
+
+##### WHAT CHANGED
+
+- **A combination of views has an arrangement, and the workspace remembers one for each.** A combination is the kinds
+  the tree on screen holds. `Workspace.arrangements` keeps the tree last shown for every other combination, under a
+  key that spells its kinds in `KIND_ORDER`, and `arrangements.ts`'s `enter` is what a gesture's write of the tree
+  goes through. So a switch away and back shows the tree that was left, and a `✕` on a kind's last view followed by
+  that kind's toggle shows the tree before the `✕`. A combination's first visit shows `layout.ts`'s
+  `defaultArrangement`: in a wide area, columns side by side, so the one divider that spans the area is the vertical
+  one; in a tall area the same trees on their side.
+- **Four toggles in the header, `source`, `asm`, `λ`, `TM`** (`#views-shown`), each pressed where the tree on screen
+  holds a view of its kind. They are `index.html`'s own markup, so they hold their place from the first paint. The
+  last pressed one is `aria-disabled`, keeps the focus, and says why on its tooltip and on the notice line; a tooltip
+  says what a press does and counts the views where a kind has several. In a window 40rem wide or narrower they are
+  hidden, and a view's `✕`, `+ view` and the view keys still choose the views. Terminal's header has half the column
+  gap in a window 85rem wide or narrower, so that the toggles do not cost it a second row at 1280 px.
+- **A switch parks a view, and a `✕` closes one.** A parked view keeps its pane off the page, as a Stage tab that is
+  not selected keeps its own: the copy it shows, that copy's editor, what it had open, and where it was scrolled to.
+  The surfaces the views share — the step bar's target, the link status line, the running focuses — read the views of
+  the tree on screen and never a parked one. `MAX_TREE_LEAVES` bounds every live view, on screen or remembered, and an
+  add or a switch past it is refused with a notice that counts them.
+- **One id is one view, of one kind.** A pick in a view's title changes its kind and keeps its id, so two trees can
+  name an id as two kinds. A switch enters such a leaf under a new id (`arrangements.ts`'s `reidentified`) and both
+  views are kept. The design as approved rebuilt the view in place, which destroyed a parked view of a copy.
+- **View keys: `Ctrl+.`, then one key.** `]` and `[` go round four stops (the source beside asm, beside λ, beside TM,
+  then all four); `1` to `4` are the toggles; `Escape` or the prefix again leaves. `Ctrl` may be held through the
+  second key or not. `view-keys.ts` is a two-state machine with no DOM in it and one capture-phase listener on
+  `window`; a hint lists the keys over the foot of the page and the live region says them; `help.html`'s table is
+  held to the machine's own. A key held down is one press, and a view key closes every open popover before it acts.
+- **A fresh page opens on the source beside the TM view**, a row in a wide area and a column in a tall one, and *reset
+  preset* goes back to it. A workspace stored with four views is kept as it is.
+- **A focus the app moves scrolls nothing after a pointer's gesture, and shows the focused control after a key's**
+  (`pane-host.ts`'s `moveFocus`): an editor is shown by its caret. A bare `focus()` on a view's first control put the
+  source view back at its top when the `✕` of the view beside it was pressed.
+
+**Six defects older than this branch are fixed in it**, the first two because the toggles lean on what they broke,
+the rest because the reviews reached them:
+
+1. **Every rebuild of the layout reset every scroll position**, in the views that stayed as well: the TM rule table
+   at 120 px was at 0 after another view's toggle. `pane-host.ts` holds each view's scrollers, its own scroll box
+   among them, across every rebuild, through `state-table.ts`'s `restoreScroll`, so a box that follows the run comes
+   back following.
+2. **A view off the page went on holding the editor of a copy it no longer showed.** With the older view of a copy a
+   Stage tab that was not selected, a delete and its *undo* threw `a λ pane was handed a second editor while still
+   holding one`.
+3. **Which view shows which copy was stored only at a fork, a pause and a delete**, so a copy's view closed with `✕`
+   left its binding behind and a reload gave the copy to the view built in its place. It is stored each time the
+   layout is applied.
+4. **A divider dragged with the pointer left the focus on `<body>`**, and a key typed after it went nowhere. The focus
+   is given back to what had it.
+5. **`layout.ts`'s `resize` answered a share of nothing or less** where the two views beside a divider could not both
+   hold the least share: from a row of 20 equal views, one arrow key on such a divider stored a workspace the next
+   load threw away. A divider between two such views does not move, which is so from a row of 11.
+6. **An opened link's notice named legs no view showed**: the λ and asm legs' steps, on a page of the source and the
+   TM view. A leg stopping short is said only where the tree has a view of it.
+
+##### DECISIONS
+
+The user's, each in the design's §3 and §16.1: toggles and a cycle key; a pair side by side, and rearrangeable; one
+arrangement for each combination; the first load on the source beside the TM view; a prefix chord and then one key;
+the toggles in the order source, asm, λ, TM; in a wide window columns side by side, so that no divider and no view
+runs the whole width; and the cycle keys `]` and `[` with `Ctrl` held or not, after "ctrl+n opens a new window for
+me". With the pull request open (the design's §16.4): a workspace stored with four views is kept as it is; the keys
+on a layout that types `.` with Shift or `[` and `]` with Option or AltGr stay as built, the change wanted "later
+on, but not anytime soon"; and Terminal's header is fixed here.
+
+Mine, each stated in the code or the design, and the design's §16.3 lists the ones that are the user's to overrule:
+the toggles hidden in a narrow window, where the other choice moves them into the workspace menu; a switch that
+parks and a `✕` that closes, after the prototype that parked both failed `scratch-buffers.test.ts` and
+`workspace-restore.test.ts`; a leaf entered under a new id where its id is live as another kind; a pointer's gesture
+scrolling nothing and a key's showing the focused control; a view key closing open popovers, where the other choice
+leaves the mode unarmed under one; the last toggle `aria-disabled`; an opened link keeping no scroll position; the
+words of the two notices at the bound; and a divider that does not move where its two views cannot both hold the
+least share.
+
+##### THE TESTS
+
+**The tests keep starting where they were written.** `web/tests/browser/setup.ts` stores a workspace of four views
+for every file, spelled out in the harness as `fourViews()`, and a file that tests the first load removes it before
+it mounts. `showFourViews` and `resetToFourViews` put a page back on that tree with real presses and throw unless it
+ends there. `defaultLayout` and `defaultWorkspace` take the area's shape as a required argument, so a test that means
+the default says for which area.
+
+**A seed is how a test goes on passing while it checks nothing**, and the reviews found that it had: a case that
+asked for no step controls in a view the page did not have, a case whose *reset preset* did the work its `✕` was
+there to show, titles that said "the default" of the seeded tree, and a defect (the scroll lost to a focus move)
+that only the first-load tree shows. So `default-views-gestures.test.ts` and `focus-scroll.test.ts` run the
+gestures whose outcome depends on the tree's shape on the two trees a visitor is given.
+
+`tests/node/arrangements.test.ts` holds `enter`'s two properties over 24 generated sequences of 60 gestures —
+toggles, cycle keys, closes, adds, kind-changing picks and drags — twelve from the first load's two views and twelve
+from a workspace of 60 live views, where switches and adds are refused at the bound; after every gesture the
+workspace reads back through `parseWorkspace`. `harness.ts`'s `focusInPage` holds the focus to an element inside the
+page after each gesture; one fails it, a pointer press on a part of the page that takes no focus, which the browser
+leaves on `<body>`.
+
+Every new mechanism was sabotaged by one edit and its test seen to fail, and each edit a review predicted would pass
+every test was run: where it passed, an assertion was added and the edit run again. The edits, the failing lines and
+the logs are in the fix groups' notes in `~/temp/redextape-view-layouts-record/reviews/`.
+
+##### THE REVIEW
+
+The code was written as a prototype, replayed as five task commits whose tree equals the prototype's, and then
+reviewed in three rounds by fresh agents told the goal and not my conclusions. Each read the code and ran no browser
+test, so every finding was run before it was acted on.
+
+- **Five reviews, one for each task, at `9e98431`.** None found a Critical defect. What they found is the design's
+  §17: a box that follows the run stopped following after its view left the page and came back, which was a
+  regression of this branch's own scroll hold (8 of 10 cases failed, and none with the hold removed); a parked view
+  of a copy destroyed by a switch; a held key typing into the editor; a view key acting under an open popover; and
+  tests that passed with their target line deleted. Answered in 41 commits, `9e98431..cd43836`.
+- **Two reviews of the whole branch at `65c6ff9`**, one of the source against the design and one of the tests. The 41
+  commits had been read by nobody but their authors. No Critical finding; the scroll lost to a focus move and the
+  source view's own `✕`, a write of the tree no test held, were the two that mattered. Answered in 27 commits,
+  `33e42e0..0f2905e`, which also found defects 4 and 5 above.
+- **A last review of the source those 27 commits changed**, `33e42e0..faddece`. One finding mattered: a divider's
+  drag, which now gave the focus back, formatted the editor it gave it to where *format on blur* was on, and took the
+  caret to the start of the text. Reproduced, and fixed by the guard a switch already had, raised in one place for
+  both. The smaller ones were a caret kept only by a timing window of CodeMirror's, a give-back a throw skipped, and
+  doc comments. Answered in 5 commits, `9746829..cb4f078`, whose code I read myself in place of a fourth round.
+
+##### AFTER THE PULL REQUEST WAS OPENED
+
+The pull request, #141, was opened at `05828bc`, and its CI run passed in all eight jobs. Just before it the user
+answered one of the design's seven open points, and with it open he answered another and asked for one fix:
+
+- **`Ctrl+.` then `Ctrl+2` does not switch the browser's tabs** (`05828bc`). With three tabs open and the page in the
+  first, the asm view toggled and his browser stayed on the page's tab.
+- **The keys on other keyboard layouts stay as built**, the change wanted later and not soon (`babb610`).
+- **Terminal's header is one row at 1280 px again** (`8fcc4e3`). The toggles had taken it past the window: it needed
+  1,315.1 to 1,342.1 px across the presets, `settings` went to a second row, and the header went from 46 px to 91 as
+  the page loaded, where `main`'s was one row. Terminal's face is the machine's monospace, wider than the other two
+  styles' faces, so the fix is in that style alone: half the column gap in a window 85rem wide or narrower. It needs
+  1,227.1 to 1,254.1 px there, and is 46 px in the markup alone and with the app up. `terminal-header-gap.test.ts`
+  holds the gap and not the row it buys, since the pixels are this machine's; with the rule's gap put back to the
+  full one, both its cases fail.
+
+The gates below were run again at `babb610`, the last of those three.
+
+**CI then failed at `46c25f1`, in one test this branch does not change**, and the failure is not explained.
+`lambda-deep-outline.test.ts` timed out after 10 s waiting for the λ run of `2000 + 0` to end, on the slower runner,
+as the last file of the run with no other file running; the other 273 files passed. That run is 6 reductions, and
+the whole case had taken 0.8 s on the same runner at `05828bc`, so it was not slowness. It did not time out in 27
+runs here, 26 of them under a CPU quota: the two deep files alone, one after the other in one tab, and in the whole
+suite. Of the 150 most recent CI runs 16 failed, and this is the one of them that failed in a `lambda-deep` file.
+The wait accepts only a run that ended plainly, so the step line read something else for those 10 s: a run still
+recording, one that stopped short, or none. Which was not recorded, so the wait now says what the page read when it
+times out (`b64120d`): forced to time out here, it reads `step line [step 0 of 6], notice [], results [λ 2000 · 6
+reductions…]`. The worker's stack margin on deep terms is the known leftover this file's own doc describes; nothing
+shows that it is the cause.
+
+##### WHAT THIS DID NOT CLOSE
+
+- **Five points of the design's §16.3**, which are the user's: the toggles in a narrow window; `+ view` halving the
+  focused view in a layout of columns; the new id for a leaf live as another kind; the pointer's and the key's halves
+  of the focus rule; and the view that takes the focus after a `✕`, which for the first view of a second column is
+  the one diagonally across.
+- **The keys on a layout that types `.` with Shift, or `[` and `]` with Option or AltGr**, are refused: read from the
+  layouts and run on none. The user wants the change later, and not soon.
+- **The timeout of `lambda-deep-outline.test.ts` on CI at `46c25f1`**, above: seen once, not reproduced, its cause
+  not known. The next one will say what the page read.
+- **The TM tapes' scroll bar flashes on every step**, the user noted on 2026-10-12, to be avoided. Not looked into:
+  neither its cause nor whether `main` does it.
+- **Everything here was measured in the browser tests' Chromium.** Firefox and WebKit are unmeasured, the prefix
+  chord and `:focus-visible` after a pointer press among what they may do differently.
+- **A parked view that showed a copy comes back on the program after a reload**, and after an opened link's undo; the
+  copy is in the copies menu.
+- **A workspace stored with four views is not migrated**, so a returning visitor sees the new first load only after
+  *reset preset*.
+- **A build before this one refuses a workspace that stores panel state or a display for a parked view**, resets to
+  its default and overwrites what was stored. A rollback loses the remembered arrangements.
+- **`main.ts` fills the `encoding` select and `#appearance` late**, as on `main`, so `share`, `about` and `settings`
+  move left as the page loads, and in a window narrow enough the header gains a row then. Terminal's header takes a
+  second row under about 1,254 px, on this machine's monospace.
+- **On the Stage, a delete's undo can still mount a copy's editor on a tab that is not selected**, as on `main`.
+- **A phone in Debugger with the inspector open has a views area wider than it is tall**, so a first load or a reset
+  there puts two narrow views side by side; and a page first laid out with no size stores a row.
+- **The view keys' hint sits below the top layer**, so a popover reaching the foot of the page would cover it;
+  `Ctrl+[`, vim's Escape, is the previous layout while the mode is armed.
+- **`reseedingSlots` takes a copy's editor down only for a view off the page**, and no test can hold that condition:
+  with it dropped every test passes, and `copy-edit-leaving.test.ts`'s pause case then passes with its flush removed.
+- **A view's `⋯` menu moves 34 px when a compile lands under it.**
+- **A divider in a row of 11 equal views or more does not move**: the least share is a tenth of the split, which two
+  of them cannot both hold. Before this branch such a divider moved once, the same way whichever way it was dragged,
+  and then never again.
+- **Two probes outside the default run fail as they do on `main`**: `pnpm run test:probe` and `test:probe:tm`.
+- **Panel resizing, moving a view, drag and drop**: the design's §11, §9 and §10, the next three pull requests.
+
+##### VERIFICATION
+
+Run on 2026-10-12 in the worktree `~/temp/redextape-view-layouts-work` on branch `view-layouts`, at `babb610`, by
+`gates.sh` in `~/temp/redextape-view-layouts-record/gates/`; the commit that brings this entry up to date changes
+only this file. The same script passed at `ad45a3f`, before the pull request was opened, with 273 files and 2,833
+tests, and at `faddece` with 272 and 2,829. No Rust file changed (`git diff --stat 7cbac7d babb610 -- crates
+Cargo.toml Cargo.lock` prints nothing); CI's Rust jobs passed on the pull request at `05828bc`.
+
+```
+pnpm exec biome ci --error-on-warnings                    → exit 0, 403 files
+pnpm run typecheck                                        → exit 0
+pnpm run test:coverage                                    → exit 0, 274 files / 2,835 tests; 97.68 / 92.26 / 98.69 / 98.99 against 95 / 89 / 97 / 97
+pnpm run build:app                                        → exit 0
+scripts/check-{text-bytes,citations,attributions,doc-figures,shared-docs,colours,grammar-wasm,lua,licences}.sh,
+  --self-test then alone                                  → 18 of 18 exit 0
+docker build --build-arg COMMIT_HASH=babb610…, then run → healthy after 3 polls; / and /help.html 200; 7 .wasm assets;
+                                                            the full commit in 1 chunk; `#views-shown`, `#view-keys`
+                                                            and the help page's `<table id="view-keys">` each once
+```
+
+The image of `babb610` was then opened in a browser context with no stored site data, at 1280 × 800, in Terminal:
+its header was one row, `settings` on it. The image of `ad45a3f` had been opened the same way at 1440 × 900. It
+opened on the source beside the TM view with those two toggles pressed, and `Ctrl+.` then `]` from the source editor
+showed all four, the caret still in the editor and the program unchanged: the vertical divider ran the height of the
+views area, and each column's horizontal one the width of its column. The image of `faddece`, seven commits before
+that one, was looked at more closely the same way: the hint on `Ctrl+.`; `]` four times going to all four views, the
+source beside asm, beside λ and back beside TM; and, in each of the three styles, light and dark, a pressed toggle
+with a solid border and a shadow where one not pressed was dashed and dim. Between those two, no style or markup
+changed (`git diff --stat faddece..ad45a3f -- web/src/style.css web/index.html web/help.html` prints nothing);
+since, only the header's rule.
+
+**Every count this entry quotes, with what produces it.** Commands run from the repository root unless they `cd`.
+
+| Value | What | Produced by |
+|---|---|---|
+| 88; 131 | commits in the range; files it changes | `git rev-list --count 7cbac7d..ad45a3f`; `git diff --shortstat 7cbac7d ad45a3f` |
+| 41; 27; 5 | commits answering the task reviews; the whole-branch reviews; the last review | `git rev-list --count 9e98431..cd43836`; `git rev-list --count 33e42e0..0f2905e`; `git rev-list --count 9746829..cb4f078` |
+| 7 | commits from `faddece` to `ad45a3f` | `git rev-list --count faddece..ad45a3f` |
+| 2; 8 | commits from `05828bc` to `babb610`; jobs of the CI run at `05828bc` | `git rev-list --count 05828bc..babb610`; the run's job list on the forge, each `success` |
+| 273 of 274; 10 s; 0.8 s; 6 | files passing in the CI run at `46c25f1`; the wait that timed out; the same case's time in the run at `05828bc`; reductions in the λ run of `2000 + 0` | the `web` job's log of run 563, its `Test Files` line and the `timed out after 10000ms` line; the `web` job's log of run 561, `lambda-deep-outline.test.ts (1 test) 820ms`; the results line the forced timeout printed |
+| 27, 26; 150, 16, 1 | runs of the deep files here, those under a quota; CI runs listed, those that failed, those that failed in a `lambda-deep` file | the logs `deep-*.log` (4), `loop-50-*.log` (12), `full-q150-*.log` (3) and `seq-*.log` (8) in `reviews/fixes-w5/` of the record directory; `pr/scan-failed-runs.sh 3 lambda-deep` there |
+| 174 to 211; 67 to 70 | browser and node test files, base to branch | `git ls-tree -r --name-only <commit> -- web/tests/browser \| grep -c '\.test\.ts$'`, and `web/tests/node`, at `7cbac7d` and `babb610` |
+| 274 and 2,835; 97.68 / 92.26 / 98.69 / 98.99 against 95 / 89 / 97 / 97 | test files and tests in the default run; coverage against the floors | `pnpm run test:coverage` in `gates.sh` at `babb610`; `thresholds` in `web/vite.config.ts` |
+| 40rem | the width that hides the toggles | `NARROW_WINDOW_REM` in `web/src/app-header.ts` |
+| 24, 60; 60 | generated sequences and gestures in each; live views twelve of them start on | `cd web && pnpm exec vitest run --project node tests/node/arrangements.test.ts --reporter=verbose \| grep -c "generated from seed"`; the case titles |
+| 120 px to 0 | the TM rule table across another view's toggle, before the hold | the design's §15, a probe on the prototype |
+| 8 of 10 | cases of a following box failing at `9e98431` | the design's §15: `follow-kept.test.ts` as first written, before `38d9dfa` |
+| 7.9 to 9.2 ms, median 8.3; 6.1 to 7.1, median 6.5 | a switch to all four and back to the source and TM, on `map-fold` with its TM history full at 69,008 steps, ten each | the plan's `zz-probe-switch.test.ts` (Task 6, step 2), copied into `web/tests/browser/` at `ad45a3f`, run with `pnpm exec vitest run --project browser`, and deleted |
+| 8.7 to 302.5 ms, median 45.1; 6.1 to 91.9, median 76.3 | the same at a quarter of a core | the same probe under `systemd-run --user --scope -q -p CPUQuota=25%` |
+| 147.5, 149.1, 154.0 px | the toggles' width in Paper, Terminal, Instrument | the plan's `zz-probe-header.test.ts` (Task 6, step 3), run the same way at `ad45a3f` |
+| 1,226.9 to 1,258.1; 1,315.1 to 1,342.1; 1,244.0 to 1,274.0 px | what the header needs of 1,280 px across the presets, in Paper (one row, 46 px), Terminal at the full gap (two rows, 91 px) and Instrument (one row, 46 px) | the same probe's `needs=` and `bar.height=`, at `ad45a3f` |
+| 1,227.1 to 1,254.1 px; 46 px and 46 | what Terminal's header needs at half the gap (one row); its height in the markup alone and with the app up | the same probe at `8fcc4e3`'s tree; a probe of the header's height before the mount and after, run and deleted the same way |
+| 85rem; 2 | where the half gap ends; cases of `terminal-header-gap.test.ts` failing with the full gap put back | the rule beside `.bar` in `web/src/style.css`; that file run with the rule's `--space-2` made `--space-3` |
+| 34 px | a view's `⋯` menu moved by a compile | the second whole-branch fix pass's notes, `reviews/fixes-w2/notes.md` in the record directory |
+| 11; 20 | equal views in a row from which two cannot both hold the least share; from which `resize` wrote a tree the loader refuses | `MIN_PANE_FRACTION` in `web/src/layout.ts`, 0.1: 2/11 is under 0.2, and at 20 the second share is 0.05 + 0.05 − 0.1; `web/tests/node/layout.test.ts` holds rows of 11 and 21 |

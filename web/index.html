@@ -23,6 +23,12 @@
       <div id="workspace-menu" class="header-menu" popover>
         <button type="button" id="reset-preset">reset preset — restores the default views</button>
       </div>
+      <div id="views-shown" class="views-shown" role="group" aria-label="views">
+        <button type="button" class="view-toggle" data-shows="source" aria-pressed="false">source</button>
+        <button type="button" class="view-toggle" data-shows="asm" aria-pressed="false">asm</button>
+        <button type="button" class="view-toggle" data-shows="lambda" aria-pressed="false">λ</button>
+        <button type="button" class="view-toggle" data-shows="tm" aria-pressed="false">TM</button>
+      </div>
       <button type="button" id="new-view" aria-haspopup="menu" aria-controls="new-view-menu" aria-expanded="false">+ view</button>
       <div id="new-view-menu" class="header-menu" popover></div>
       <button type="button" id="buffers">copies <span aria-hidden="true">▾</span></button>
@@ -58,6 +64,7 @@
     </header>
     <div id="notice" class="notice" hidden></div>
     <div id="live" class="visually-hidden" role="status"></div>
+    <div id="view-keys" class="view-keys" hidden></div>
     <main>
       <div id="views"></div>
       <aside id="inspector" class="inspector" hidden></aside>

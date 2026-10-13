@@ -80,6 +80,11 @@ export function createDraw(deps: {
   unseen: WeakSet<TmPane | AsmPane>
   leaves: () => number
   sourceAvailable: () => boolean
+  /**
+   * Whether the tree on screen holds this view — false for a view kept alive in an arrangement the workspace
+   * remembers (the view layouts spec §5). A hidden Stage tab is in the tree, so it answers true as it always has.
+   */
+  arranged: (id: LeafId) => boolean
   hasEditor: (session: SessionId) => boolean
   /** The view the user is in — the readout describes its session (spec §9). */
   focused: () => LeafId
@@ -110,6 +115,7 @@ export function createDraw(deps: {
     unseen,
     leaves,
     sourceAvailable,
+    arranged,
     hasEditor,
     focused,
     sourceSession,
@@ -127,7 +133,7 @@ export function createDraw(deps: {
     // on the strength of "`main.ts` always registers one pane of each leg before `draw` can be called".
     // That was true while panes were two consts and false from the moment `applyLayout` began deriving
     // them from the layout tree: `closeLeaf` refuses only the last leaf in the TREE, so `leaves() > 1`
-    // offers `close` on the single λ pane a fresh page ships, and clicking it left this throwing on
+    // offered `close` on the single λ pane a fresh page then shipped, and clicking it left this throwing on
     // every subsequent frame. Worse, `applyLayout` persists the new tree BEFORE calling `draw()`, so
     // the λ-less arrangement was already committed to `localStorage` and the dead app came back on
     // reload — only `reset preset` escaped it. `PaneCollection.active` is now the one place that
@@ -154,10 +160,18 @@ export function createDraw(deps: {
     // keeps the step bar on "the last view that could" step, so a hidden view's leg can still move. The λ link
     // clause at the end of this function asks `shown` instead, because it reads a view's own pin and tree, which
     // only a view on the page has fresh (`PaneCollection.shown`'s doc).
+    //
+    // **AND NEVER A VIEW THE TREE ON SCREEN DOES NOT HOLD** (the view layouts spec §5): a view kept alive in a
+    // remembered arrangement is no one's to watch, where a hidden Stage tab has a tab that names it. With the λ view
+    // toggled off, the source editor carries no running focus of a term no view shows.
     const onProgram = (e: { readonly slot: { readonly binding: { readonly session: SessionId } } }): boolean =>
       !sessions.entryOf(e.slot.binding.session).detached
-    const lam = panes.active('lambda', onProgram)?.slot.resolve(sessions)
-    const tm = panes.active('tm', onProgram)?.slot.resolve(sessions)
+    const watched = (e: {
+      readonly id: LeafId
+      readonly slot: { readonly binding: { readonly session: SessionId } }
+    }): boolean => arranged(e.id) && onProgram(e)
+    const lam = panes.active('lambda', watched)?.slot.resolve(sessions)
+    const tm = panes.active('tm', watched)?.slot.resolve(sessions)
     // THE TM LEG'S OWN RUNNING FOCUS — `TmState.source_node`, NOT `lam.hist.current?.owner` below.
     // Design table (`2026-08-10-plan5c-dual-focus-design.md` §4.2): "TM: TmState.source_node,
     // resolved through SourceMap::tm_owner ... none; shipped 2026-07-30." Each pane reports what ITS
@@ -186,7 +200,7 @@ export function createDraw(deps: {
     // of the instruction about to run, read off the asm view of the program the user focused most recently, and
     // nothing when no asm view of the program is asking. It marks the program's asm views' rows and feeds the status
     // line's coincidence; the source editor's focus mark stays λ's, as Plan 5c's dual-focus design settled.
-    const asm = panes.active('asm', onProgram)?.slot.resolve(sessions)
+    const asm = panes.active('asm', watched)?.slot.resolve(sessions)
     const asmFocus =
       linkWiring.linkable && linkWiring.index !== null && asm !== undefined
         ? runningFocus(linkWiring.index, sourceNodeOwner(asm.hist.current?.source_node ?? null))

@@ -1,12 +1,12 @@
 import { beforeAll, describe, expect, it } from 'vitest'
 import { userEvent } from 'vitest/browser'
 import { BUFFERS_STORAGE_KEY, serializeBuffers } from '../../src/buffers-store'
-import { defaultLayout, LAYOUT_STORAGE_KEY, type LayoutNode, setLeafKind, splitLeaf } from '../../src/layout'
+import { LAYOUT_STORAGE_KEY, type LayoutNode, setLeafKind, splitLeaf } from '../../src/layout'
 import { MAX_WARM_BUFFERS } from '../../src/scratch'
 import { encodeLink } from '../../src/share-link'
 import { bindingKey } from '../../src/view-header'
-import { defaultWorkspace, serializeWorkspace } from '../../src/workspace'
-import { SHELL, until } from './harness'
+import { serializeWorkspace } from '../../src/workspace'
+import { fourViews, fourViewWorkspace, SHELL, until } from './harness'
 
 /**
  * **AN OPEN'S UNDO, PAST THE COPIES CAP** — Plan 7 part 6a spec §5.5: "a copy the cap refuses stays paused, and its
@@ -18,7 +18,7 @@ import { SHELL, until } from './harness'
 
 /** A tree of `n` λ views beside the source view, split in halves so none goes under the pane floor. */
 function lambdaViews(n: number): { tree: LayoutNode; leaves: string[] } {
-  let tree = setLeafKind(setLeafKind(defaultLayout(), 'asm-0', 'lambda'), 'tm-0', 'lambda')
+  let tree = setLeafKind(setLeafKind(fourViews(), 'asm-0', 'lambda'), 'tm-0', 'lambda')
   const leaves = ['lambda-0', 'asm-0', 'tm-0']
   for (let i = 0; leaves.length < n; i++) {
     const id = `pane-${i + 1}`
@@ -37,7 +37,7 @@ const shows = (leaf: string) =>
   document.querySelector<HTMLElement>(`[data-leaf="${leaf}"] .view-title`)?.dataset.binding ?? ''
 
 beforeAll(async () => {
-  localStorage.setItem(LAYOUT_STORAGE_KEY, serializeWorkspace({ ...defaultWorkspace(), tree, focused: 'lambda-0' }))
+  localStorage.setItem(LAYOUT_STORAGE_KEY, serializeWorkspace({ ...fourViewWorkspace(), tree, focused: 'lambda-0' }))
   localStorage.setItem(
     BUFFERS_STORAGE_KEY,
     serializeBuffers({
@@ -55,7 +55,7 @@ beforeAll(async () => {
   const fragment = await encodeLink({
     program: 'let x = 40; x + 2',
     encoding: 'unary',
-    workspace: serializeWorkspace(defaultWorkspace()),
+    workspace: serializeWorkspace(fourViewWorkspace()),
     positions: {},
   })
   history.replaceState(null, '', `${location.pathname}${location.search}${fragment}`)

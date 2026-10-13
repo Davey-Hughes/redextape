@@ -30,7 +30,7 @@ beforeAll(async () => {
 describe('layout notices', () => {
   it('says a view was added', async () => {
     splitVia('lambda-0', 'row', bindingKey('tm', 'source'))
-    // THE DEFAULT'S FOUR VIEWS AND THE ONE THE SPLIT ADDED.
+    // THE FOUR VIEWS `setup.ts` STORES AND THE ONE THE SPLIT ADDED.
     await until(() => leafIds().length === 5, 'the split')
     expect(noticeText()).toBe('view added — TM · program')
   })

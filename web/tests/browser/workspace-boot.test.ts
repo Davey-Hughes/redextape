@@ -1,13 +1,13 @@
 import { beforeAll, describe, expect, it } from 'vitest'
 import { LAYOUT_STORAGE_KEY } from '../../src/layout'
-import { defaultWorkspace, PRESETS, serializeWorkspace } from '../../src/workspace'
-import { SHELL, until } from './harness'
+import { PRESETS, serializeWorkspace } from '../../src/workspace'
+import { fourViewWorkspace, SHELL, until } from './harness'
 
 /**
  * **A WORKSPACE THAT IS NOT EXPLORER'S, AT FIRST PAINT.**
  *
  * `main.ts` calls `applySwitches()` once after the first `applyLayout()`, and its comment says a restored
- * workspace "can carry any of the eight combinations". Nothing tested it: every other browser file seeds
+ * workspace "can carry any of the eight combinations". Nothing tested it: every other browser file seeded
  * through `defaultWorkspace()` or `PRESETS.explorer`, and `index.html` already ships `#step-bar` and
  * `#inspector` hidden with `#results` in the strip — so **deleting that call left the whole tier green**
  * while a user who left in Debugger came back to an Explorer-shaped page under a button reading
@@ -18,7 +18,7 @@ import { SHELL, until } from './harness'
  */
 
 beforeAll(async () => {
-  localStorage.setItem(LAYOUT_STORAGE_KEY, serializeWorkspace({ ...defaultWorkspace(), switches: PRESETS.debugger }))
+  localStorage.setItem(LAYOUT_STORAGE_KEY, serializeWorkspace({ ...fourViewWorkspace(), switches: PRESETS.debugger }))
   document.body.innerHTML = SHELL
   await (await import('../../src/main')).ready
   await until(() => document.querySelector<HTMLElement>('#results')?.dataset.state === 'idle', 'the first compile')
@@ -35,10 +35,13 @@ describe('a workspace stored in Debugger', () => {
       document.querySelector('#inspector')?.contains(document.querySelector('#results')),
       'the readout is still in the strip',
     ).toBe(true)
-    expect(
-      document.querySelector('[data-leaf="lambda-0"] .view-steps .controls'),
-      'a view still draws its own step controls',
-    ).toBeNull()
+    // EVERY VIEW THAT STEPS, AND EACH FOUND ON THE PAGE FIRST: a view that is not there draws no step controls
+    // either, and this read `lambda-0` on a page that had none, with `draw.ts` showing every view's.
+    for (const leaf of ['lambda-0', 'asm-0', 'tm-0']) {
+      const view = document.querySelector(`#views [data-leaf="${leaf}"]`)
+      expect(view, `no ${leaf} view on the page`).not.toBeNull()
+      expect(view?.querySelector('.view-steps .controls'), `${leaf} still draws its own step controls`).toBeNull()
+    }
     // Debugger keeps the tiles, which is what separates it from Stage.
     expect(document.querySelectorAll('#views [role="tab"]').length, 'Debugger is drawing a stage').toBe(0)
   })

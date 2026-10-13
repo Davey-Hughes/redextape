@@ -44,7 +44,7 @@ const OTHER = 'let z = 3; z + 4'
 const LINK: SharePayload = {
   program: LINKED,
   encoding: 'ternary',
-  workspace: serializeWorkspace({ ...defaultWorkspace(), switches: PRESETS.debugger }),
+  workspace: serializeWorkspace({ ...defaultWorkspace('wide'), switches: PRESETS.debugger }),
   positions: {},
 }
 const LEFT_OUT = "opened a shared link's program — its encoding, workspace and step positions were left out"

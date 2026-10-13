@@ -12,7 +12,7 @@ import { BUFFERS_STORAGE_KEY, parseBuffers, serializeBuffers } from '../../src/b
 import type { Leg } from '../../src/protocol'
 import type { SessionId } from '../../src/session-client'
 import { bindingKey } from '../../src/view-header'
-import { SHELL, until } from './harness'
+import { SHELL, storeFourViews, until } from './harness'
 
 /**
  * **BOTH LEGS SURVIVE A RELOAD, END TO END — 5d-iv Task 11, the composition check.** Task 6 pinned the
@@ -245,9 +245,14 @@ async function freshMain(): Promise<{ ready: Promise<EditorView> }> {
   return import(/* @vite-ignore */ spec)
 }
 
-/** Mount a fresh app on a fresh page with an empty store, and load `src` into its one source editor. */
+/**
+ * Mount a fresh app on a fresh page whose store holds the four views alone, and load `src` into its one source
+ * editor.
+ */
 async function mountApp(src: string): Promise<App> {
   localStorage.clear()
+  // ALL FOUR VIEWS, WHICH AN EMPTY STORE OPENED ON WHEN THIS WAS WRITTEN: it opens on the source and TM now.
+  storeFourViews()
   document.body.innerHTML = SHELL
   const view = await (await freshMain()).ready
   view.dispatch({ changes: { from: 0, to: view.state.doc.length, insert: src } })
@@ -347,8 +352,8 @@ describe('restoring buffers on both legs', () => {
    * guard has to live where the tree and the buffer's own `leg` are both in scope at once, which is
    * exactly the restore loop in `main.ts` this test is aimed at.
    *
-   * `LAYOUT_STORAGE_KEY` IS NOT SEEDED HERE — the first `mountApp` call already wrote the default tree
-   * to it (every `applyLayout()` call persists, `buffers-store.ts`'s own doc on why buffers get a
+   * `LAYOUT_STORAGE_KEY` IS NOT SEEDED HERE — the first `mountApp` call already wrote the four-view tree
+   * to it (`storeFourViews`, and every `applyLayout()` call persists, `buffers-store.ts`'s own doc on why buffers get a
    * SEPARATE key states the same call chain), so `lambda-0` and `tm-0` are already the ids on record by
    * the time this test overwrites `BUFFERS_STORAGE_KEY` and remounts.
    */

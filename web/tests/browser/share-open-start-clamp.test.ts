@@ -2,8 +2,8 @@ import type { EditorView } from '@codemirror/view'
 import { beforeAll, describe, expect, it } from 'vitest'
 import { userEvent } from 'vitest/browser'
 import { encodeLink } from '../../src/share-link'
-import { defaultWorkspace, serializeWorkspace } from '../../src/workspace'
-import { SHELL, until } from './harness'
+import { serializeWorkspace } from '../../src/workspace'
+import { fourViewWorkspace, SHELL, until } from './harness'
 
 /**
  * **A LINK WITH POSITIONS, OPENED AT START-UP** — Plan 7 part 6a spec §5.3, §5.4 and §5.5, through `main()`'s own path,
@@ -27,7 +27,7 @@ beforeAll(async () => {
   const fragment = await encodeLink({
     program: LINKED,
     encoding: 'unary',
-    workspace: serializeWorkspace(defaultWorkspace()),
+    workspace: serializeWorkspace(fourViewWorkspace()),
     positions: { lambda: 100 },
   })
   history.replaceState(null, '', `${location.pathname}${location.search}${fragment}`)

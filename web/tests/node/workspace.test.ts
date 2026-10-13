@@ -1,5 +1,13 @@
 import { describe, expect, it } from 'vitest'
-import { defaultLayout, leaves, serializeLayout, splitLeaf } from '../../src/layout'
+import { treeKey } from '../../src/arrangements'
+import {
+  defaultArrangement,
+  defaultLayout,
+  type LayoutNode,
+  leaves,
+  serializeLayout,
+  splitLeaf,
+} from '../../src/layout'
 import {
   DEFAULT_SPEED,
   defaultFocus,
@@ -16,8 +24,11 @@ import {
   withPanel,
   withTmDisplay,
 } from '../../src/workspace'
+import { fourViews, fourViewWorkspace } from '../browser/harness'
 
-const SPLIT = splitLeaf(defaultLayout(), 'lambda-0', 'row', 'pane-1', 'tm')
+/** All four views, two rows of two — the tree these cases were written against; `defaultLayout()` is two views now. */
+const FOUR = fourViews()
+const SPLIT = splitLeaf(FOUR, 'lambda-0', 'row', 'pane-1', 'tm')
 
 describe('presetOf', () => {
   it('names the three presets and calls the other five combinations custom', () => {
@@ -46,9 +57,17 @@ describe('the speed ladder', () => {
 })
 
 describe('defaultFocus', () => {
-  it('is the first λ or TM leaf, and the source leaf only when there is no other', () => {
-    expect(defaultFocus(defaultLayout())).toBe('lambda-0')
+  it('is the first leaf that is not the source, and the source leaf only when there is no other', () => {
+    expect(defaultFocus(FOUR)).toBe('lambda-0')
+    expect(defaultFocus(defaultLayout('wide'))).toBe('tm-0')
     expect(defaultFocus({ kind: 'leaf', id: 'source', pane: 'source' })).toBe('source')
+  })
+
+  /** An asm view is a view like the others: it was passed over while this took the first λ or TM leaf. */
+  it('is the asm leaf where that is the first leaf that is not the source', () => {
+    expect(defaultFocus(defaultArrangement(['source', 'asm'], 'wide'))).toBe('asm-0')
+    expect(defaultFocus(defaultArrangement(['asm', 'tm'], 'wide'))).toBe('asm-0')
+    expect(defaultFocus({ kind: 'leaf', id: 'asm-0', pane: 'asm' })).toBe('asm-0')
   })
 })
 
@@ -73,6 +92,7 @@ describe('parseWorkspace', () => {
       inspector: false,
       display: { 'pane-1': { layout: 'outline' as const, vars: 'debruijn' as const, map: 'minimap' as const } },
       tmDisplay: { 'tm-0': { level: 'local' as const, edges: 'chips' as const } },
+      arrangements: { 'source+tm': defaultLayout('tall') },
     }
     const raw = serializeWorkspace(ws)
     expect(JSON.parse(raw).version).toBe(WORKSPACE_VERSION)
@@ -82,13 +102,13 @@ describe('parseWorkspace', () => {
   it.each([
     ['nothing stored', null],
     ['not JSON', '{'],
-    ['an unknown version', JSON.stringify({ version: 3, tree: defaultLayout() })],
+    ['an unknown version', JSON.stringify({ version: 3, tree: defaultLayout('wide') })],
     ['an invalid tree', JSON.stringify({ version: 1, tree: { kind: 'split', dir: 'row', children: [], sizes: [] } })],
   ])('returns null for %s', (_what, raw) => {
     expect(parseWorkspace(raw)).toBeNull()
   })
 
-  const valid = (): Record<string, unknown> => JSON.parse(serializeWorkspace(defaultWorkspace()))
+  const valid = (): Record<string, unknown> => JSON.parse(serializeWorkspace(defaultWorkspace('wide')))
   it.each([
     [
       'an unknown switch value',
@@ -199,7 +219,7 @@ describe('serializeWorkspace', () => {
   it('drops the panel state and the display of a leaf that has left the tree, and a focus on one', () => {
     const outline = { layout: 'outline' as const, vars: 'names' as const, map: 'icicle' as const }
     const ws = {
-      ...defaultWorkspace(),
+      ...fourViewWorkspace(),
       focused: 'pane-9',
       panels: { 'pane-9': { rules: false }, 'tm-0': { rules: false } },
       display: { 'pane-9': outline, 'lambda-0': outline },
@@ -242,12 +262,131 @@ describe('withPanel', () => {
 })
 
 describe('defaultWorkspace', () => {
-  it('is the default tree, Explorer, speed 8, focused on the λ view', () => {
-    const ws = defaultWorkspace()
-    expect(leaves(ws.tree).map((l) => l.id)).toEqual(['source', 'lambda-0', 'asm-0', 'tm-0'])
+  it('is the source beside the TM view, Explorer, speed 8, focused on the TM view, nothing remembered', () => {
+    const ws = defaultWorkspace('wide')
+    expect(ws.tree).toEqual(defaultLayout('wide'))
+    expect(leaves(ws.tree).map((l) => l.id)).toEqual(['source', 'tm-0'])
     expect(ws.switches).toEqual(PRESETS.explorer)
     expect(ws.speed).toBe(8)
-    expect(ws.focused).toBe('lambda-0')
+    expect(ws.focused).toBe('tm-0')
     expect(ws.inspector).toBe(true)
+    expect(ws.arrangements).toEqual({})
+  })
+
+  it('puts the two views one above the other for a tall area', () => {
+    expect(defaultWorkspace('tall').tree).toEqual(defaultLayout('tall'))
+  })
+})
+
+describe('the remembered arrangements', () => {
+  const PAIR = defaultLayout('wide')
+  const base = (): Record<string, unknown> => ({
+    version: 2,
+    tree: FOUR,
+    switches: PRESETS.explorer,
+    speed: 8,
+    focused: 'lambda-0',
+    panels: {},
+  })
+  const parsed = (arrangements: unknown) => parseWorkspace(JSON.stringify({ ...base(), arrangements }))
+
+  it('reads a workspace stored before them as remembering nothing', () => {
+    expect(parseWorkspace(JSON.stringify(base()))?.arrangements).toEqual({})
+    expect(parseWorkspace(serializeLayout(SPLIT))?.arrangements).toEqual({})
+  })
+
+  it('writes no field while nothing is remembered, and the trees by key once something is', () => {
+    const empty = fourViewWorkspace()
+    expect('arrangements' in JSON.parse(serializeWorkspace(empty))).toBe(false)
+    const held = { ...empty, arrangements: { 'source+tm': PAIR } }
+    expect(JSON.parse(serializeWorkspace(held)).arrangements).toEqual({ 'source+tm': PAIR })
+    expect(parseWorkspace(serializeWorkspace(held))).toEqual(held)
+  })
+
+  it('takes a tree under its own combination’s key', () => {
+    expect(parsed({ 'source+tm': PAIR })?.arrangements).toEqual({ 'source+tm': PAIR })
+    expect(parsed({})?.arrangements).toEqual({})
+  })
+
+  const one = (id: string): LayoutNode => ({ kind: 'leaf', id, pane: 'lambda' })
+  it.each([
+    ['a list', [PAIR]],
+    ['a string', 'source+tm'],
+    ['null', null],
+    ['a key that is no combination', { 'source+lisp': PAIR }],
+    ['a key out of KIND_ORDER', { 'tm+source': PAIR }],
+    ['a tree under another combination’s key', { 'source+lambda': PAIR }],
+    ['an entry under the key of the tree on screen', { [treeKey(FOUR)]: FOUR }],
+    ['a tree parseTree refuses', { 'source+tm': { kind: 'split', dir: 'row', children: [PAIR], sizes: [1] } }],
+    ['a value that is no tree', { 'source+tm': 'row' }],
+  ])('refuses %s', (_what, arrangements) => {
+    expect(parsed(arrangements)).toBeNull()
+  })
+
+  it('bounds the views of every tree together at 64, where each tree alone may hold 64', () => {
+    const numbered = (count: number): string[] => Array.from({ length: count }, (_, i) => `pane-${i + 1}`)
+    const row = (ids: string[]): LayoutNode => ({
+      kind: 'split',
+      dir: 'row',
+      sizes: ids.map(() => 1 / ids.length),
+      children: ids.map(one),
+    })
+    // 4 on screen and 60 remembered is 64; 61 remembered is 65, in a tree `parseTree` takes alone.
+    expect(parsed({ lambda: row(numbered(60)) })).not.toBeNull()
+    expect(parsed({ lambda: row(numbered(61)) })).toBeNull()
+    // AN ID TWO TREES HOLD IS ONE VIEW: 61 remembered leaves, one of them the λ view on screen, is 64 views.
+    expect(parsed({ lambda: row(['lambda-0', ...numbered(60)]) })).not.toBeNull()
+  })
+
+  it('keeps the panel state and the display of a view only a remembered tree holds, and refuses one no tree holds', () => {
+    const stored = {
+      ...base(),
+      tree: PAIR,
+      focused: 'tm-0',
+      arrangements: { [treeKey(FOUR)]: FOUR },
+      panels: { 'lambda-0': { map: false } },
+      display: { 'lambda-0': { layout: 'outline', vars: 'names', map: 'icicle' } },
+      tmDisplay: { 'tm-0': { level: 'local', edges: 'chips' } },
+    }
+    const ws = parseWorkspace(JSON.stringify(stored))
+    expect(ws?.panels).toEqual(stored.panels)
+    expect(ws?.display).toEqual(stored.display)
+    if (ws === null || ws === undefined) throw new Error('unreachable')
+    expect(JSON.parse(serializeWorkspace(ws)).panels).toEqual(stored.panels)
+    expect(JSON.parse(serializeWorkspace(ws)).display).toEqual(stored.display)
+    expect(parseWorkspace(JSON.stringify({ ...stored, panels: { 'pane-9': { map: false } } }))).toBeNull()
+  })
+
+  /**
+   * The case above stores a TM display too, for `tm-0`, which its tree on screen holds. Here the TM view is in the
+   * remembered arrangement alone, so this is the one case in which the bound on a TM display's leaf is every live
+   * view and not the views on screen, on the way in and on the way out.
+   */
+  it('keeps the TM display of a view only a remembered tree holds, and refuses one no tree holds', () => {
+    const onScreen = defaultArrangement(['source', 'lambda'], 'wide')
+    expect(
+      leaves(onScreen).map((l) => l.id),
+      'precondition: the tree on screen has no TM view',
+    ).toEqual(['source', 'lambda-0'])
+    const stored = {
+      ...base(),
+      tree: onScreen,
+      arrangements: { [treeKey(FOUR)]: FOUR },
+      tmDisplay: { 'tm-0': { level: 'local', edges: 'chips' } },
+    }
+    const ws = parseWorkspace(JSON.stringify(stored))
+    if (ws === null) throw new Error('a TM display for a view a remembered tree holds was refused')
+    expect(ws.tmDisplay).toEqual(stored.tmDisplay)
+    expect(JSON.parse(serializeWorkspace(ws)).tmDisplay, 'the write dropped it').toEqual(stored.tmDisplay)
+    expect(parseWorkspace(serializeWorkspace(ws))).toEqual(ws)
+    const unheld = { ...stored, tmDisplay: { 'pane-9': { level: 'local', edges: 'chips' } } }
+    expect(parseWorkspace(JSON.stringify(unheld))).toBeNull()
+  })
+
+  it('holds the focus to the tree on screen: a view only a remembered tree holds is refused, and not written', () => {
+    const stored = { ...base(), tree: PAIR, focused: 'lambda-0', arrangements: { [treeKey(FOUR)]: FOUR } }
+    expect(parseWorkspace(JSON.stringify(stored))).toBeNull()
+    const ws = { ...defaultWorkspace('wide'), focused: 'lambda-0', arrangements: { [treeKey(FOUR)]: FOUR } }
+    expect(JSON.parse(serializeWorkspace(ws)).focused).toBe('tm-0')
   })
 })

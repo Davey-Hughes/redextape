@@ -1,6 +1,7 @@
 import { readFileSync } from 'node:fs'
 import { fileURLToPath } from 'node:url'
 import { describe, expect, it } from 'vitest'
+import { HEADER_ORDER, KIND_WORD } from '../../src/layout'
 import { SHELL, until, type Walk, walkInParts } from '../browser/harness'
 
 describe('SHELL', () => {
@@ -75,6 +76,25 @@ describe('SHELL against index.html', () => {
     const body = /<body>([\s\S]*?)<\/body>/.exec(html)?.[1]
     expect(body, 'index.html has no <body> to compare against').toBeDefined()
     expect(shape(SHELL)).toBe(shape(body as string))
+  })
+
+  /**
+   * **THE `views` TOGGLES ARE MARKUP, SO THE MARKUP IS HELD TO THE TABLES.** `app-header.ts`'s `viewToggles` adopts
+   * the four buttons the page ships, where it used to build them from `HEADER_ORDER` and `KIND_WORD`; a kind added
+   * to those, or a word changed, is asked for here. Read from `index.html`, which the case above holds `SHELL` to.
+   */
+  it('ships the four views toggles in the header’s order, each named by its kind’s word and not pressed', () => {
+    const group = /<div id="views-shown"[^>]*>([\s\S]*?)<\/div>/.exec(html)?.[1] ?? ''
+    const toggles = [...group.matchAll(/<button ([^>]*)>([^<]*)<\/button>/g)].map(([, attributes, word]) => [
+      attributes,
+      word,
+    ])
+    expect(toggles).toEqual(
+      HEADER_ORDER.map((kind) => [
+        `type="button" class="view-toggle" data-shows="${kind}" aria-pressed="false"`,
+        KIND_WORD[kind],
+      ]),
+    )
   })
 })
 

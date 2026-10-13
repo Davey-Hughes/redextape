@@ -58,7 +58,7 @@ describe('stage', () => {
   })
 
   // §5: arrow keys move with a roving tabindex; Enter or Space selects. The tab after λ's is asm's in the
-  // default tree (Plan 7 part 5 spec §3, row 4).
+  // four-view tree (Plan 7 part 5 spec §3, row 4).
   it('moves between tabs with the arrow keys and selects with Enter, keeping the focus', () => {
     expect(tab('lambda-0').tabIndex).toBe(0)
     expect(tab('asm-0').tabIndex).toBe(-1)

@@ -41,7 +41,8 @@ export type LambdaLinkState =
   /**
    * THERE IS NO λ PANE ON SCREEN AT ALL — not an absence of a link, an absence of the surface every
    * other member describes. Reachable since the layout tree: `closeLeaf` refuses only the last leaf in
-   * the tree, so closing the one λ pane a fresh page ships is an ordinary gesture. And in Stage, whenever
+   * the tree, so closing a page's one λ pane is an ordinary gesture; and since the view layouts a fresh page
+   * opens with none (`layout.ts`'s `defaultLayout`). And in Stage, whenever
    * the view it shows is not a λ view: the others are off the page, and a view off the page drew no tree
    * this frame (`draw.ts`'s `createDraw`).
    *

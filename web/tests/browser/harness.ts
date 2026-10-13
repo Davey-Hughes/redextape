@@ -1,5 +1,7 @@
 import html from '../../index.html?raw'
+import { LAYOUT_STORAGE_KEY, type LayoutNode, leaves } from '../../src/layout'
 import { PREPAINT } from '../../src/prepaint'
+import { defaultWorkspace, serializeWorkspace, type Workspace } from '../../src/workspace'
 
 /**
  * Shared browser-tier fixtures: the app shell every test file mounts into, and the poll helper every
@@ -34,6 +36,12 @@ export const SHELL = `
     <button type="button" id="workspace" aria-haspopup="menu" aria-controls="workspace-menu" aria-expanded="false">Explorer <span aria-hidden="true">▾</span></button>
     <div id="workspace-menu" class="header-menu" popover>
       <button type="button" id="reset-preset">reset preset — restores the default views</button>
+    </div>
+    <div id="views-shown" class="views-shown" role="group" aria-label="views">
+      <button type="button" class="view-toggle" data-shows="source" aria-pressed="false">source</button>
+      <button type="button" class="view-toggle" data-shows="asm" aria-pressed="false">asm</button>
+      <button type="button" class="view-toggle" data-shows="lambda" aria-pressed="false">λ</button>
+      <button type="button" class="view-toggle" data-shows="tm" aria-pressed="false">TM</button>
     </div>
     <button type="button" id="new-view" aria-haspopup="menu" aria-controls="new-view-menu" aria-expanded="false">+ view</button>
     <div id="new-view-menu" class="header-menu" popover></div>
@@ -70,6 +78,7 @@ export const SHELL = `
   </header>
   <div id="notice" class="notice" hidden></div>
   <div id="live" class="visually-hidden" role="status"></div>
+  <div id="view-keys" class="view-keys" hidden></div>
   <main>
     <div id="views"></div>
     <aside id="inspector" class="inspector" hidden></aside>
@@ -295,3 +304,238 @@ export const choosePalette = (value: string): Promise<void> => chooseSetting('#p
 
 /** Pick a style from the settings menu, as `chooseSetting` does. */
 export const chooseStyle = (value: string): Promise<void> => chooseSetting('#style', value)
+
+/**
+ * The host of the view `leaf`, or `null` where the page shows none.
+ *
+ * **NEVER ITS STAGE TAB.** A tab carries its view's `data-leaf` and comes before every host in the document, so on
+ * the Stage a selector without `:not([role="tab"])` answers the tab, for the view that is shown as for the others
+ * (read off the page, 2026-10-12): six of the files the view layouts added spelled it without, three as `host` and
+ * three inside a `box`. None of them enters the Stage, so none read a tab; they use this now.
+ */
+export const host = (leaf: string): HTMLElement | null =>
+  document.querySelector<HTMLElement>(`#views [data-leaf="${leaf}"]:not([role="tab"])`)
+
+/**
+ * The notice line's words, without the label of the action beside them: `#notice`'s own text ends in `undo` where the
+ * notice offers one, which is what one file read.
+ */
+export const notice = (): string => (document.querySelector('#notice .notice-text')?.textContent ?? '').trim()
+
+/** What the live region says, without the space a sentence said twice is written with (`notice.ts`'s `createNotices`). */
+export const live = (): string => (document.querySelector('#live')?.textContent ?? '').trim()
+
+/**
+ * **AFTER A GESTURE THE FOCUS IS ON AN ELEMENT INSIDE `<body>`, AND NOT ON `<body>`** — the view layouts spec §14
+ * item 19. A rebuild takes every view's host off the page and puts it back, and a control that is hidden or removed
+ * gives the focus up, so a gesture that hands it nowhere leaves it on `<body>`: the next `Tab` starts from the top of
+ * the page, and a key typed goes to no editor. Called after a gesture, with words for it, this throws saying where
+ * the focus was.
+ *
+ * **AT ONCE, AND TWO FRAMES ON**: a control that can no longer hold the focus gives it up when it is made so or at
+ * the next frame, and a focus handed on from a frame's callback has landed by the second.
+ *
+ * **IT SAYS NOTHING OF WHICH ELEMENT**: a case that knows where the focus belongs asserts that beside this.
+ */
+export async function focusInPage(gesture: string): Promise<void> {
+  const check = (when: string): void => {
+    const el = document.activeElement
+    if (el !== null && el !== document.body && document.body.contains(el)) return
+    const where = el === null ? 'nothing' : `<${el.tagName.toLowerCase()}>`
+    throw new Error(`${gesture} left the focus on ${where}, ${when}`)
+  }
+  check('at once')
+  await new Promise<void>((r) => requestAnimationFrame(() => requestAnimationFrame(() => r())))
+  check('two frames on')
+}
+
+/**
+ * All four views in two rows of two: source and λ over asm and TM. A fresh page built this tree until the view
+ * layouts, and most files here were written against it; `layout.ts`'s `defaultLayout()` is the source beside the TM
+ * view now. A file that wants four views says so with this, where it used to say `defaultLayout()`.
+ *
+ * **SPELLED OUT, NOT TAKEN FROM `defaultArrangement`**: all four views' default there is two COLUMNS of two now, with
+ * the same views in the same corners, and what these files measure is this tree — its row dividers, its paths, and
+ * the order its leaves come in.
+ */
+export const fourViews = (): LayoutNode => ({
+  kind: 'split',
+  dir: 'column',
+  sizes: [0.5, 0.5],
+  children: [
+    {
+      kind: 'split',
+      dir: 'row',
+      sizes: [0.5, 0.5],
+      children: [
+        { kind: 'leaf', id: 'source', pane: 'source' },
+        { kind: 'leaf', id: 'lambda-0', pane: 'lambda' },
+      ],
+    },
+    {
+      kind: 'split',
+      dir: 'row',
+      sizes: [0.5, 0.5],
+      children: [
+        { kind: 'leaf', id: 'asm-0', pane: 'asm' },
+        { kind: 'leaf', id: 'tm-0', pane: 'tm' },
+      ],
+    },
+  ],
+})
+
+/**
+ * The workspace a four-view page stored: `fourViews()`, Explorer, the focus on the λ view, nothing remembered. It is
+ * what `defaultWorkspace()` answered until the view layouts, and what `setup.ts` stores for every file.
+ */
+export const fourViewWorkspace = (): Workspace => ({
+  ...defaultWorkspace('wide'),
+  tree: fourViews(),
+  focused: 'lambda-0',
+})
+
+/** Store `fourViewWorkspace()` — for a file that clears storage before its mount and was written against four views. */
+export const storeFourViews = (): void => {
+  localStorage.setItem(LAYOUT_STORAGE_KEY, serializeWorkspace(fourViewWorkspace()))
+}
+
+/**
+ * An arrangement as one line, each split by its direction, its dividers' shares in hundredths and its children:
+ * `column[50](row[50](source lambda-0) row[50](asm-0 tm-0))`. In Stage it is the tabs in their order, which is all the
+ * page draws of a tree there.
+ */
+const described = (tree: LayoutNode, stage: boolean): string => {
+  if (stage)
+    return `stage(${leaves(tree)
+      .map((l) => l.id)
+      .join(' ')})`
+  if (tree.kind === 'leaf') return tree.id
+  const shares = tree.sizes.slice(0, -1).map((size) => Math.round(size * 100))
+  return `${tree.dir}[${shares.join(' ')}](${tree.children.map((child) => described(child, false)).join(' ')})`
+}
+
+/** The arrangement `#views` draws, read off the page as `described` writes one. */
+export const drawn = (): string => {
+  const read = (el: Element): string => {
+    if (!el.classList.contains('layout-split')) return (el as HTMLElement).dataset.leaf ?? el.tagName.toLowerCase()
+    const parts = [...el.children]
+    const shares = parts
+      .filter((c) => c.classList.contains('layout-divider'))
+      .map((d) => d.getAttribute('aria-valuenow'))
+    const children = parts.filter((c) => !c.classList.contains('layout-divider')).map(read)
+    return `${(el as HTMLElement).dataset.dir}[${shares.join(' ')}](${children.join(' ')})`
+  }
+  const views = document.querySelector('#views') as HTMLElement
+  const tabs = [...views.querySelectorAll<HTMLElement>('[role="tab"]')]
+  if (tabs.length > 0) return `stage(${tabs.map((t) => t.dataset.leaf).join(' ')})`
+  return [...views.children].map(read).join(' ')
+}
+
+/**
+ * Put a mounted page back on all four views, each on the program, as `fourViews()` arranges them: *reset preset*,
+ * which leaves the source beside the TM view and forgets every other arrangement, then `showFourViews`.
+ *
+ * **A FIXTURE, NOT A GESTURE UNDER TEST**: files that reset between cases did it with *reset preset* alone while that
+ * restored four views. `.click()` and no `userEvent`, as those files' own reset was.
+ *
+ * **THE PAGE IT LEAVES IS NOT THE ONE *RESET PRESET* ALONE LEFT WHILE THAT GAVE FOUR VIEWS.** What it adds to a
+ * reset, each held by `four-views-fixture.test.ts`:
+ *
+ * - Two arrangements remembered in the stored workspace, the two the toggles pass through: the source beside the TM
+ *   view, and those two with the λ view. The reset alone remembers none.
+ * - The live region on `showing source, asm, λ and TM`, the last switch's sentence.
+ * - A λ and an asm view built new, and the TM view kept where it showed the program: the reset closes the first two,
+ *   which its tree does not hold, and their toggles build others under their ids.
+ * - The focus in the λ view, on its first control, and `lambda-0` as the workspace's focused view. The reset alone
+ *   leaves both on the TM view.
+ * - The window resized twice, to 320 px wide and back (`showFourViews`).
+ */
+export async function resetToFourViews(): Promise<void> {
+  document.querySelector<HTMLButtonElement>('#reset-preset')?.click()
+  await showFourViews()
+}
+
+/**
+ * `resetToFourViews`' second half, for a file that performs the reset itself: the λ and the asm toggle pressed where
+ * they are not, and the focus in the λ view.
+ *
+ * **THE TOGGLES ARE PRESSED IN A WINDOW TALLER THAN IT IS WIDE, WHICH IS THEN PUT BACK.** A combination's first visit
+ * shows its default, and the default of all four in a wide window is two COLUMNS of two (`layout.ts`'s
+ * `defaultArrangement`, the user's decision of 2026-10-11); in a tall one it is two rows of two, which is
+ * `fourViews()`, the tree these files measure. The arrangement is remembered once it is on screen, so the window's
+ * size afterwards does not change it. The toggles are hidden in a window this narrow and `.click()` reaches them
+ * all the same.
+ *
+ * **IT THROWS UNLESS THE PAGE ENDS ON `fourViews()`**, naming the arrangement it found, read off the page: a
+ * combination visited before shows the arrangement it remembers and not its default, so on a page that remembers one
+ * for a combination the toggles pass through, the presses end on some other tree. It asserted the tall window it
+ * needs and not what came of it, and a miss went on to the caller as four views in another tree. *Reset preset*
+ * first forgets them all, which is what `resetToFourViews` does. **IN STAGE THE PAGE DRAWS NO TREE**, and what is
+ * held there is the tabs' order.
+ *
+ * **NOTHING HERE WAITS AFTER THE SECOND RESIZE, AND NOTHING WAS SEEN TO ARRIVE LATE.** `page.viewport` resolves a
+ * frame after the tester's frame is resized (Vitest 4.1.10's `setIframeViewport`), and the app's `ResizeObserver`s
+ * and its narrow-window listener had run by then: a probe read the views area's and the rule table's observed sizes,
+ * the toggles' `hidden`, the rule table's rows and the term's lines as `resetToFourViews` returned, two frames later
+ * and 200 ms after that, and the three readings agreed in 40 rounds of 40, and in 40 of 40 at `CPUQuota=50%`
+ * (2026-10-12).
+ *
+ * **THE FOCUS ENDS IN THE λ VIEW**, on its first control, where *reset preset* put it while λ was the first view of
+ * the default: several files' cases start from "the λ view is the focused view", and `+ view` adds beside it.
+ */
+export async function showFourViews(): Promise<void> {
+  const { page } = await import('vitest/browser')
+  const [width, height] = [window.innerWidth, window.innerHeight]
+  // 320 × 1400, NOT THE RUNNER'S 414 × 896: with the inspector stacked under the views, as Debugger and Stage have
+  // it in a narrow window, the views area there is about as wide as it is tall, and the default built was a wide one.
+  await page.viewport(320, 1400)
+  const area = (document.querySelector('#views') as HTMLElement).getBoundingClientRect()
+  if (area.height <= area.width)
+    throw new Error(`the views area is not taller than wide: ${area.width} × ${area.height}`)
+  for (const kind of ['lambda', 'asm'])
+    document
+      .querySelector<HTMLButtonElement>(`#views-shown button[data-shows="${kind}"][aria-pressed="false"]`)
+      ?.click()
+  await page.viewport(width, height)
+  const [found, wanted] = [drawn(), described(fourViews(), document.querySelector('#views [role="tab"]') !== null)]
+  if (found !== wanted) throw new Error(`showFourViews left the page on ${found}, and not on ${wanted}`)
+  // IN STAGE THE λ VIEW IS A TAB UNTIL IT IS SELECTED, and only a view on the page can take the focus.
+  document.querySelector<HTMLElement>('#views [role="tab"][data-leaf="lambda-0"]')?.click()
+  document
+    .querySelector<HTMLElement>(
+      '#views [data-leaf="lambda-0"] button:not([disabled]):not([hidden]), #views [data-leaf="lambda-0"] select, #views [data-leaf="lambda-0"] [tabindex]',
+    )
+    ?.focus()
+}
+
+/**
+ * Put a mounted page on the views a first load shows in a wide window, the source beside the TM view, each on the
+ * program: *reset preset*, which forgets every remembered arrangement too.
+ *
+ * **A FIXTURE, NOT A GESTURE UNDER TEST**, as `resetToFourViews` is: `.click()` and no `userEvent`. The focus ends
+ * in the TM view, on its first control, where the reset puts it.
+ *
+ * **IT THROWS UNLESS THE PAGE ENDS ON THAT ROW**, naming what it found: in a window taller than it is wide the reset
+ * builds a column, and in Stage the page draws no tree.
+ */
+export async function resetToFirstLoad(): Promise<void> {
+  document.querySelector<HTMLButtonElement>('#reset-preset')?.click()
+  const [found, wanted] = [drawn(), 'row[50](source tm-0)']
+  if (found !== wanted) throw new Error(`resetToFirstLoad left the page on ${found}, and not on ${wanted}`)
+}
+
+/**
+ * Put a mounted page on all four views as a wide window's default arranges them, two columns of two with the source
+ * over the asm view and the λ over the TM view: `resetToFirstLoad`, then the asm and the λ toggle, which is each
+ * combination's first visit. `showFourViews` leaves the two ROWS these files' stored start has, which no default
+ * builds in a wide window.
+ *
+ * **IT THROWS UNLESS THE PAGE ENDS ON THOSE COLUMNS**, as `resetToFirstLoad` does for its row.
+ */
+export async function showWideDefault(): Promise<void> {
+  await resetToFirstLoad()
+  for (const kind of ['asm', 'lambda'])
+    document.querySelector<HTMLButtonElement>(`#views-shown button[data-shows="${kind}"]`)?.click()
+  const [found, wanted] = [drawn(), 'row[50](column[50](source asm-0) column[50](lambda-0 tm-0))']
+  if (found !== wanted) throw new Error(`showWideDefault left the page on ${found}, and not on ${wanted}`)
+}

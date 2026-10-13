@@ -5,8 +5,8 @@ import { BUFFERS_STORAGE_KEY, parseBuffers, serializeBuffers } from '../../src/b
 import { LAYOUT_STORAGE_KEY } from '../../src/layout'
 import { encodeLink } from '../../src/share-link'
 import { bindingKey } from '../../src/view-header'
-import { defaultWorkspace, PRESETS, parseWorkspace, serializeWorkspace } from '../../src/workspace'
-import { SHELL, until } from './harness'
+import { PRESETS, parseWorkspace, serializeWorkspace } from '../../src/workspace'
+import { fourViewWorkspace, SHELL, until } from './harness'
 
 /**
  * **A LINK OPENED AT START-UP, WHOLE, AND ITS UNDO** — Plan 7 part 6a spec §5.3 and §5.5. The page is a returning
@@ -28,7 +28,7 @@ import { SHELL, until } from './harness'
 const LINKED = 'let y = 10; y + 5'
 const COPY = 'scratch-1'
 const LINK_WORKSPACE = {
-  ...defaultWorkspace(),
+  ...fourViewWorkspace(),
   switches: PRESETS.debugger,
   display: { 'lambda-0': { layout: 'outline', vars: 'names', map: 'icicle' } },
 } as const
@@ -53,7 +53,7 @@ const storedBindings = () => parseBuffers(localStorage.getItem(BUFFERS_STORAGE_K
 let view: EditorView
 
 beforeAll(async () => {
-  localStorage.setItem(LAYOUT_STORAGE_KEY, serializeWorkspace(defaultWorkspace()))
+  localStorage.setItem(LAYOUT_STORAGE_KEY, serializeWorkspace(fourViewWorkspace()))
   localStorage.setItem(
     BUFFERS_STORAGE_KEY,
     serializeBuffers({

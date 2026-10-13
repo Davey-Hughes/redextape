@@ -2,8 +2,8 @@ import type { EditorView } from '@codemirror/view'
 import { beforeAll, describe, expect, it } from 'vitest'
 import { cdp, page } from 'vitest/browser'
 import { encodeLink, type Positions } from '../../src/share-link'
-import { defaultWorkspace, serializeWorkspace } from '../../src/workspace'
-import { SHELL, until } from './harness'
+import { serializeWorkspace } from '../../src/workspace'
+import { fourViewWorkspace, SHELL, until } from './harness'
 
 /**
  * **AN OPEN'S CLAMPS, AND A REAL PRESS ON ITS `undo` ACROSS ONE** — Plan 7 part 6a spec §5.5, and §5.4's note of
@@ -43,9 +43,13 @@ const undoButton = () => document.querySelector<HTMLButtonElement>('#notice butt
 const live = () => document.querySelector('#live')?.textContent ?? ''
 const idle = () => document.querySelector<HTMLElement>('#results')?.dataset.state === 'idle'
 
-/** A link to `program` under `unary`, in the default workspace, with `positions`. */
+/**
+ * A link to `program` under `unary`, in the four-view workspace, with `positions`. **FOUR VIEWS, SO EVERY LEG A CASE
+ * CLAMPS HAS A VIEW**: a clamp is said only of a leg the tree shows (`share-open-clamps-unseen.test.ts`), and the
+ * default workspace, the source beside the TM view, has none for the λ and asm legs these cases clamp.
+ */
 const link = (positions: Positions, program = LINKED): Promise<string> =>
-  encodeLink({ program, encoding: 'unary', workspace: serializeWorkspace(defaultWorkspace()), positions })
+  encodeLink({ program, encoding: 'unary', workspace: serializeWorkspace(fourViewWorkspace()), positions })
 
 /** The centre of `el` in the top-level page's CSS pixels, where CDP's input lands: the tests run in a scaled frame. */
 function centre(el: HTMLElement): { x: number; y: number } {

@@ -18,7 +18,7 @@ import { KEY_STEP, type ResizeHandlers, renderLayout, syncSizes } from '../../sr
  * case asks what `renderLayout` and `syncSizes` do with a tree — how many dividers, which path a nested one
  * answers to, which flex a resize moves — and the numbers below are facts about this particular nesting. Borrowed
  * from the preset, they changed meaning the day the preset gained a leaf, with nothing about the machinery
- * having moved. The preset itself is `layout-app.test.ts`'s to check, through the app.
+ * having moved. The preset itself is `first-load-views.test.ts`'s to check, through the app.
  */
 const tree = (): LayoutNode => ({
   kind: 'split',

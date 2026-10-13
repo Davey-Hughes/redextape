@@ -3,8 +3,8 @@ import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 import { page, userEvent } from 'vitest/browser'
 import { EXAMPLES } from '../../src/examples'
 import { encodeLink } from '../../src/share-link'
-import { defaultWorkspace, serializeWorkspace } from '../../src/workspace'
-import { SHELL, until } from './harness'
+import { serializeWorkspace } from '../../src/workspace'
+import { fourViewWorkspace, SHELL, until } from './harness'
 
 /**
  * **THE READOUT'S FULL HISTORY AT THE MOMENTS A POLL CANNOT PLACE, PLACED BY HOLDING A REPLY BACK.** The strip draws
@@ -220,7 +220,7 @@ describe('a link taking the asm leg past where its history fills, its continue h
     location.hash = await encodeLink({
       program: SUM_TO_10000,
       encoding: 'unary',
-      workspace: serializeWorkspace(defaultWorkspace()),
+      workspace: serializeWorkspace(fourViewWorkspace()),
       positions: { asm: 40_000 },
     })
     await until(() => location.hash === '' && noticeText() === 'opened a shared link', 'the open')

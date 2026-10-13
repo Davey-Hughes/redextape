@@ -3,8 +3,8 @@ import { beforeAll, describe, expect, it } from 'vitest'
 import { userEvent } from 'vitest/browser'
 import { EXAMPLES } from '../../src/examples'
 import { decodeLink, encodeLink, type Positions } from '../../src/share-link'
-import { defaultWorkspace, serializeWorkspace } from '../../src/workspace'
-import { SHELL, until } from './harness'
+import { serializeWorkspace } from '../../src/workspace'
+import { fourViewWorkspace, SHELL, until } from './harness'
 
 /**
  * **`share` THROUGH AN OPEN** — Plan 7 part 6a spec §5.1's note of 2026-10-01, §5.2 and §5.3. `share`'s popover closes
@@ -47,9 +47,9 @@ const undoButton = () => document.querySelector<HTMLButtonElement>('#notice butt
 const stepOf = (leaf: string) => document.querySelector(`[data-leaf="${leaf}"] .step`)?.textContent ?? ''
 const idle = () => document.querySelector<HTMLElement>('#results')?.dataset.state === 'idle'
 
-/** A link to `program` under `encoding`, in the default workspace, with `positions`. */
+/** A link to `program` under `encoding`, in the four-view workspace, with `positions`. */
 const link = (program: string, positions: Positions, encoding = 'unary'): Promise<string> =>
-  encodeLink({ program, encoding, workspace: serializeWorkspace(defaultWorkspace()), positions })
+  encodeLink({ program, encoding, workspace: serializeWorkspace(fourViewWorkspace()), positions })
 
 /** Open `share` with a click, and answer once its link is made. */
 async function openShare(): Promise<void> {

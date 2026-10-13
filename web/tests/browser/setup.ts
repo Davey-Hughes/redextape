@@ -17,7 +17,10 @@
  * and this is a test-harness gap, not an application one.
  */
 import '../../src/style.css'
+import { LAYOUT_STORAGE_KEY } from '../../src/layout'
 import { PROGRAM_STORAGE_KEY, serializeProgram } from '../../src/program-store'
+import { serializeWorkspace } from '../../src/workspace'
+import { fourViewWorkspace } from './harness'
 
 /**
  * Browser-tier setup, before the test file's own module body: collect the page the previous test file left
@@ -114,3 +117,20 @@ Object.defineProperty(window, 'localStorage', { value: shim, configurable: true 
  * removes it or clears storage starts on the example under the default.
  */
 shim.setItem(PROGRAM_STORAGE_KEY, serializeProgram({ text: 'let x = 40; x + 2', encoding: 'unary' }))
+
+/**
+ * Browser-tier setup, part four: every file starts on all four views, the arrangement it was written against.
+ *
+ * **A FIRST VISIT OPENS ON THE SOURCE BESIDE THE TM VIEW NOW** (the view layouts spec §8), and every file's storage
+ * above starts empty, so every file that mounts the app would start on two views, and a file that names `lambda-0` or
+ * `asm-0` names a view that page does not hold. The workspace a four-view page stored is stored here instead, as a
+ * returning visitor's would be: all four views in two rows, Explorer, the focus on the λ view, which is what a fresh
+ * page was until the view layouts. A file about what a first visit shows removes it before it mounts, as
+ * `first-load-views.test.ts` does, and a file that clears storage before its mount starts on the two views too.
+ *
+ * **THIS IS PART THREE'S MOVE, AND IT HAS PART THREE'S COST**: a file kept green by a stored start says nothing about
+ * the start a visitor gets, and a case that says "the default" while it reads these four views is true of this seed
+ * and of nothing a visitor meets. The files that assert on the default itself — what *reset preset* restores, what a
+ * fresh workspace holds — were read and rewritten against the new default when this was added.
+ */
+shim.setItem(LAYOUT_STORAGE_KEY, serializeWorkspace(fourViewWorkspace()))

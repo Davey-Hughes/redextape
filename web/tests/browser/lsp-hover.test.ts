@@ -316,7 +316,7 @@ describe('hover, through the app', () => {
 
   /**
    * **THE TM VIEW GETS THE WHOLE ROW, AND THE HOVER'S TARGET IS ASSERTED ON SCREEN BEFORE THE POINTER MOVES.**
-   * The default tree puts asm beside TM (Plan 7 part 5 spec §3, row 4), and in half of this suite's 414px viewport
+   * The four-view tree puts asm beside TM (Plan 7 part 5 spec §3, row 4), and in half of this suite's 414px viewport
    * `MACHINE`'s first rule runs past the copy's editor: `q1` sat at x 556–574, right of the viewport, where
    * nothing answers a hit test. `userEvent.hover` then scrolls it into view as part of the gesture — the editor
    * scrolled 162px sideways and the span moved up a line with it — and the pointer landed on the second rule, whose

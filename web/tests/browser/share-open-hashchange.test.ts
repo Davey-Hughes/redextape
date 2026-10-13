@@ -3,11 +3,11 @@ import { beforeAll, describe, expect, it } from 'vitest'
 import { page, userEvent } from 'vitest/browser'
 import { BUFFERS_STORAGE_KEY, parseBuffers } from '../../src/buffers-store'
 import { EXAMPLE_ENCODING } from '../../src/examples'
-import { defaultLayout, splitLeaf } from '../../src/layout'
+import { splitLeaf } from '../../src/layout'
 import { encodeLink, type SharePayload } from '../../src/share-link'
 import { bindingKey } from '../../src/view-header'
-import { defaultWorkspace, PRESETS, serializeWorkspace } from '../../src/workspace'
-import { SHELL, until } from './harness'
+import { PRESETS, serializeWorkspace } from '../../src/workspace'
+import { fourViews, fourViewWorkspace, SHELL, until } from './harness'
 
 /**
  * **A LINK PASTED INTO AN OPEN PAGE, AND ITS UNDO** — Plan 7 part 6a spec §5.3 and §5.5, heard as `hashchange`. The
@@ -33,8 +33,8 @@ const LINK: SharePayload = {
   program: LINKED,
   encoding: 'binary',
   workspace: serializeWorkspace({
-    ...defaultWorkspace(),
-    tree: splitLeaf(defaultLayout(), 'lambda-0', 'row', 'pane-2', 'lambda'),
+    ...fourViewWorkspace(),
+    tree: splitLeaf(fourViews(), 'lambda-0', 'row', 'pane-2', 'lambda'),
     switches: PRESETS.debugger,
     display: { 'lambda-0': { layout: 'outline', vars: 'names', map: 'icicle' } },
     inspector: false,

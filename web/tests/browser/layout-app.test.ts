@@ -89,8 +89,9 @@ beforeEach(() => {
 })
 
 describe('the layout tree in the app', () => {
-  // (source | λ) above (asm | TM) since the asm view (Plan 7 part 5 spec §3, row 4).
-  it('starts in the default arrangement', () => {
+  // (source | λ) above (asm | TM): `harness.ts`'s `fourViews()`, the workspace `setup.ts` stores for every file. What
+  // a page with nothing stored opens on is `first-load-views.test.ts`'s.
+  it('starts on the four views the stored workspace holds', () => {
     expect(panes()).toEqual(['source', 'lambda-0', 'asm-0', 'tm-0'])
     expect($('#results')).not.toBeNull()
   })
@@ -195,7 +196,8 @@ describe('the layout tree in the app', () => {
   // `parseLayout` directly — which is Task 9's fourteen cases, restated in a file that cannot reach
   // the wiring it claims to cover. A test that re-asserts another tier's unit is a test that passes
   // for a reason unrelated to its name. The fallback expression itself
-  // (`parseLayout(...) ?? defaultLayout()`) is one line and is reviewed, not tested.
+  // (`parseWorkspace(...) ?? defaultWorkspace(viewsShape())` now) has files of its own, since a file mounts once:
+  // `first-load-views.test.ts` with nothing stored, and `workspace-bound.test.ts` with a workspace the loader refuses.
 
   // THE PANE AREA HAS A REAL HEIGHT, WHICH NO OTHER TEST WOULD NOTICE LOSING. `<main>` once computed to
   // `height: 0px` on the real page — header and `#results` rendered, but the entire layout tree between

@@ -10,9 +10,13 @@ import { SHELL, until } from './harness'
  * row 3, where every load before opened on `let x = 40; x + 2`. `setup.ts` stores that program for every file, so this
  * one removes it at module scope, before `main()` runs: nothing stored is what a first visit has. ONE MOUNT FOR THE
  * FILE, for the reason every sibling gives.
+ *
+ * **AND ON THE SOURCE AND THE TM VIEW** (the view layouts spec §8). `setup.ts` stores a four-view workspace for every
+ * file too, so that goes with the program; `first-load-views.test.ts` has what the two views look like.
  */
 
 localStorage.removeItem(PROGRAM_STORAGE_KEY)
+localStorage.removeItem(LAYOUT_STORAGE_KEY)
 
 const segments = () => [...document.querySelectorAll('#results .segment')].map((s) => s.textContent ?? '')
 const idle = () => document.querySelector<HTMLElement>('#results')?.dataset.state === 'idle'
@@ -33,8 +37,6 @@ describe('a first visit', () => {
     expect(document.querySelector('#workspace')?.textContent?.trim()).toBe('Explorer ▾')
     expect([...document.querySelectorAll<HTMLElement>('main [data-leaf]')].map((el) => el.dataset.leaf)).toEqual([
       'source',
-      'lambda-0',
-      'asm-0',
       'tm-0',
     ])
   })

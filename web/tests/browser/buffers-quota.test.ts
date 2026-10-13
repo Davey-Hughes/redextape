@@ -53,8 +53,8 @@ function pickBinding(leaf: string, key: string): void {
 
 /**
  * Whether the next `localStorage.setItem` for `BUFFERS_STORAGE_KEY` throws — `false` until a test turns
- * it on, so the app's own start-up writes (the two unconditional persists in `main()`, both empty on a
- * page with no restored buffers) go through untouched.
+ * it on, so the app's own start-up writes (each of them empty on a page with no restored buffers) go
+ * through untouched.
  */
 let refuseWrites = false
 const passthroughSetItem = localStorage.setItem.bind(localStorage)
@@ -89,7 +89,7 @@ describe('a full store', () => {
    *
    * **THE FORK'S OWN REPLY IS A SECOND WRITE FOR FREE.** `replies.ts`'s `onScratchReply` calls
    * `onBuffersPersist()` on the `scratch-compiled` reply the copy's worker sends back (`main.ts`'s own
-   * doc on `refreshBuffers`: "a recorded term" is one of the three moments that reach `persistBuffers`
+   * doc on `refreshBuffers`: "a recorded term" is one of the moments that reach `persistBuffers`
    * directly) — after the SAME gesture, on the SAME view. Waiting for it is the same signal
    * `scratch-fork.test.ts`'s truncated-frame test uses: `.term-editor` mounts in the SAME handler,
    * synchronously before `onBuffersPersist()` runs — the `scratch-compiled` arm's own `setEditor` call,

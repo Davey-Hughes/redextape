@@ -1,4 +1,5 @@
-import { defaultLayout, type LayoutNode, leaves, parseTree, SOURCE_LEAF } from './layout'
+import { type Arrangements, liveLeaves, parseKey, treeKey } from './arrangements'
+import { defaultLayout, type LayoutNode, leaves, MAX_TREE_LEAVES, parseTree, type Shape, SOURCE_LEAF } from './layout'
 import type { LeafId } from './panes'
 
 /**
@@ -9,6 +10,9 @@ import type { LeafId } from './panes'
  * it holds `{ version: 2, tree, switches, speed, focused, panels }` now, and `parseWorkspace` still reads
  * version 1 — the tree shape did not change, so a stored layout is migrated rather than reset. Any other
  * version is `null`, and the caller uses `defaultWorkspace()`, as `parseLayout`'s callers always have.
+ *
+ * **`arrangements` CAME LATER STILL, AS A FIELD THAT MAY BE ABSENT** (the view layouts spec §4.2): the tree each
+ * combination of views was last seen in, except the one on screen, which is `tree`. The version stays 2.
  *
  * **THE PRESET IS NOT STORED.** `presetOf` derives it from the switches, because a stored preset would be
  * a second copy of three values that could disagree with them.
@@ -104,21 +108,32 @@ export type Workspace = {
    * own rather than a second shape in `display`, so neither leg's parser has to tell the other's entries apart.
    */
   readonly tmDisplay: TmDisplays
+  /**
+   * The arrangement each combination of views remembers, by `arrangements.ts`'s key — every combination visited but
+   * the one `tree` shows (the view layouts spec §4.2). Absent in a workspace stored before it, and not written
+   * while it is empty, so a workspace that has remembered nothing is stored as it always was.
+   */
+  readonly arrangements: Arrangements
 }
 
 export const WORKSPACE_VERSION = 2
 
 /**
- * The view a workspace focuses when nothing says otherwise: the first λ or TM leaf in `leaves()` order, or
- * the source leaf when the tree holds nothing else. On a fresh page that is the λ view.
+ * The view a workspace focuses when nothing says otherwise: the first leaf in `leaves()` order that is not the
+ * source, or the source leaf when the tree holds nothing else. On a fresh page that is the TM view.
  */
 export function defaultFocus(tree: LayoutNode): LeafId {
   const all = leaves(tree)
   return (all.find((l) => l.pane !== 'source') ?? all[0])?.id ?? SOURCE_LEAF
 }
 
-export function defaultWorkspace(): Workspace {
-  const tree = defaultLayout()
+/**
+ * The workspace a fresh page opens on. `shape` is the views area's, which decides whether the first load's two views
+ * sit side by side or one above the other (`layout.ts`'s `defaultArrangement`); a caller with no area to measure
+ * says `wide`, which is what an area of no size reads as (`arrangements.ts`'s `shapeOf`).
+ */
+export function defaultWorkspace(shape: Shape): Workspace {
+  const tree = defaultLayout(shape)
   return {
     tree,
     switches: PRESETS.explorer,
@@ -128,6 +143,7 @@ export function defaultWorkspace(): Workspace {
     inspector: true,
     display: {},
     tmDisplay: {},
+    arrangements: {},
   }
 }
 
@@ -149,13 +165,24 @@ export function withPanel(panels: Panels, leaf: LeafId, name: string, open: bool
 /**
  * The stored form.
  *
- * **A VIEW THAT HAS LEFT THE TREE LEAVES NO TRACE.** Its panel state and its display are dropped and a focus
- * on it falls back to `defaultFocus`, here rather than at every close, because the close does not need to
- * know this module exists — and `parseWorkspace` refuses all three, so writing them would make the next
- * load fall back to the default workspace entirely.
+ * **A VIEW NO ARRANGEMENT HOLDS LEAVES NO TRACE.** Its panel state and its display are left out of what is written:
+ * `parseWorkspace` refuses both, so writing them would make the next load fall back to the default workspace
+ * entirely. A view a remembered arrangement holds is live (`arrangements.ts`'s `liveLeaves`) and keeps both, so it
+ * comes back as it was left.
+ *
+ * **A CLOSE DROPS THEM TOO, BEFORE THIS IS ASKED** (`main.ts`'s `enterTree`), and has to: the tree a `✕` left is
+ * remembered, so the closed view's id is still live by the test here, and its state would be kept for the view
+ * built under that id next.
+ *
+ * **THE FOCUS IS HELD TO THE TREE ON SCREEN ALONE**: a focus on a view off the page falls back to `defaultFocus`.
+ *
+ * **`arrangements` IS WRITTEN ONLY WHILE IT HOLDS ONE**, last, so a workspace that remembers nothing is the string it
+ * was before the field existed. A share link is written from a workspace whose `arrangements` the caller has emptied
+ * (spec §4.7), and so carries none.
  */
 export function serializeWorkspace(ws: Workspace): string {
-  const live = new Set(leaves(ws.tree).map((l) => l.id))
+  const live = liveLeaves(ws.tree, ws.arrangements)
+  const onScreen = new Set(leaves(ws.tree).map((l) => l.id))
   const panels: Record<LeafId, Record<string, boolean>> = {}
   for (const [leaf, open] of Object.entries(ws.panels)) if (live.has(leaf)) panels[leaf] = { ...open }
   const display: Record<LeafId, LambdaDisplay> = {}
@@ -167,11 +194,12 @@ export function serializeWorkspace(ws: Workspace): string {
     tree: ws.tree,
     switches: ws.switches,
     speed: ws.speed,
-    focused: live.has(ws.focused) ? ws.focused : defaultFocus(ws.tree),
+    focused: onScreen.has(ws.focused) ? ws.focused : defaultFocus(ws.tree),
     panels,
     inspector: ws.inspector,
     display,
     tmDisplay,
+    ...(Object.keys(ws.arrangements).length === 0 ? {} : { arrangements: ws.arrangements }),
   })
 }
 
@@ -224,6 +252,28 @@ function parseTmDisplay(v: unknown, ids: ReadonlySet<string>): TmDisplays | null
   return out
 }
 
+/**
+ * A stored `arrangements`, or `null` for a malformed one — the view layouts spec §4.2, each rule something a person
+ * could type: a key `arrangements.ts`'s `keyOf` would not write, a tree `parseTree` refuses, a tree filed under
+ * another combination's key, an entry under the key of the tree on screen, and more ids between them all than one
+ * tree may hold.
+ *
+ * **THE BOUND IS ON EVERY LIVE VIEW** (§5.6): `MAX_TREE_LEAVES` bounded what a link or a stored layout could make the
+ * app build, and a view a remembered arrangement holds is built when it is entered.
+ */
+function parseArrangements(v: unknown, tree: LayoutNode): Arrangements | null {
+  if (typeof v !== 'object' || v === null || Array.isArray(v)) return null
+  const onScreen = treeKey(tree)
+  const out: Record<string, LayoutNode> = {}
+  for (const [key, stored] of Object.entries(v as Record<string, unknown>)) {
+    if (parseKey(key) === null || key === onScreen) return null
+    const remembered = parseTree(stored)
+    if (remembered === null || treeKey(remembered) !== key) return null
+    out[key] = remembered
+  }
+  return liveLeaves(tree, out).size > MAX_TREE_LEAVES ? null : out
+}
+
 function parsePanels(v: unknown, ids: ReadonlySet<string>): Panels | null {
   if (typeof v !== 'object' || v === null || Array.isArray(v)) return null
   const out: Record<LeafId, Record<string, boolean>> = {}
@@ -271,6 +321,7 @@ export function parseWorkspace(raw: string | null): Workspace | null {
       inspector: true,
       display: {},
       tmDisplay: {},
+      arrangements: {},
     }
   }
   if (e.version !== WORKSPACE_VERSION) return null
@@ -280,8 +331,13 @@ export function parseWorkspace(raw: string | null): Workspace | null {
   const switches = parseSwitches(e.switches)
   if (switches === null) return null
   if (!isSpeed(e.speed)) return null
-  const ids = new Set(leaves(tree).map((l) => l.id))
-  if (typeof e.focused !== 'string' || !ids.has(e.focused)) return null
+  // **A MISSING `arrangements` IS NOT AN INVALID ONE**, for `inspector`'s reason below: every workspace stored before
+  // the view layouts has none. It is read before the per-view fields, which may name any live view (spec §4.2).
+  const arrangements = e.arrangements === undefined ? {} : parseArrangements(e.arrangements, tree)
+  if (arrangements === null) return null
+  const onScreen = new Set(leaves(tree).map((l) => l.id))
+  if (typeof e.focused !== 'string' || !onScreen.has(e.focused)) return null
+  const ids = new Set(liveLeaves(tree, arrangements).keys())
   const panels = parsePanels(e.panels, ids)
   if (panels === null) return null
   // **A MISSING `inspector` IS NOT AN INVALID ONE.** Version 2 shipped in part 2a without this field, so
@@ -302,5 +358,6 @@ export function parseWorkspace(raw: string | null): Workspace | null {
     inspector: e.inspector ?? true,
     display,
     tmDisplay,
+    arrangements,
   }
 }

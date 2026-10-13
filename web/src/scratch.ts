@@ -541,7 +541,7 @@ export class ScratchBuffers {
    * **DEFERRING THIS PERSIST WAS CONSIDERED AND IS NOT A FIX, WHICH IS WHY THIS IS DOCUMENTED RATHER THAN
    * CHANGED.** Moving the write to the `scratch-compiled` arm that already persists would only narrow the
    * window: the RECORD carries `text: src` from this line either way, and four other sites persist the
-   * whole collection (a recorded term, a rebind, a collapse, and `main()`'s own write-back), so any later
+   * whole collection (a recorded term, a rebind, a collapse, and `pane-host.ts`'s `applyLayout`), so any later
    * gesture writes the same seed out. Actually removing the consequence means not seeding `text` with
    * `src` at all — and the honest alternative, an empty seed, makes a failed fork restore as an EMPTY
    * buffer, which trades a wrong term for lost work and is a design decision rather than a repair. The
@@ -642,11 +642,12 @@ export class ScratchBuffers {
    * **AND THAT REBIND USED TO ARRIVE AT A BUFFER THAT COULD NEVER BE EDITED AGAIN, WHICH MADE THIS
    * METHOD'S OWN "NON-DESTRUCTIVE" DESTRUCTIVE OF EDITABILITY — whole-branch review before merge, fixed
    * rather than filed.** The rebind above is what takes the editor down (`draw()` reaches
-   * `LambdaPane.setDetached(false)`, whose teardown calls `setEditor(null)`). `pane-host.ts`'s
-   * `mountScratchEditor` restores editability, seeding from `editorSeed` below;
-   * `tests/browser/buffer-cool-warm.test.ts` drives the whole round trip and is what fails without it.
-   * WHAT THIS METHOD DOES IS UNCHANGED — the editor still comes down here, and it is the ARRIVING side
-   * that now builds a new one.
+   * `LambdaPane.setDetached(false)`, whose teardown calls `setEditor(null)`; a view that is not on the
+   * page is not drawn, and the slot `pane-host.ts`'s `reseedingSlots` hands this method makes that call
+   * as it rebinds). `pane-host.ts`'s `mountScratchEditor` restores editability, seeding from `editorSeed`
+   * below; `tests/browser/buffer-cool-warm.test.ts` drives the whole round trip and is what fails
+   * without it. WHAT THIS METHOD DOES IS UNCHANGED — the editor still comes down here, and it is the
+   * ARRIVING side that now builds a new one.
    *
    * **THE INVARIANT THIS BUYS: A COLD BUFFER HAS NO PANES BOUND TO IT.** That is what turns every other
    * cold-buffer hazard unreachable rather than merely handled. `recompile`'s `this.#reg.entryOf(id)`

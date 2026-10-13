@@ -3,7 +3,7 @@ import { beforeAll, beforeEach, describe, expect, it } from 'vitest'
 import { page, userEvent } from 'vitest/browser'
 import { LAYOUT_STORAGE_KEY } from '../../src/layout'
 import { bindingKey } from '../../src/view-header'
-import { SHELL, until } from './harness'
+import { resetToFourViews, SHELL, until } from './harness'
 
 /**
  * **THE SHARED SURFACES AND THE λ LEG'S TWO VIEWS** — what the ONE status line and the ONE source editor decoration
@@ -152,15 +152,15 @@ beforeAll(async () => {
 
 beforeEach(async () => {
   localStorage.removeItem(LAYOUT_STORAGE_KEY)
-  document.querySelector<HTMLButtonElement>('#reset-preset')?.click()
+  await resetToFourViews()
   view.dispatch({ changes: { from: 0, to: view.state.doc.length, insert: 'let x = 40; x + 2' } })
   await until(
     () =>
       document.querySelector<HTMLElement>('#results')?.dataset.state === 'idle' &&
-      // THE DEFAULT TREE'S FOUR VIEWS: source, λ, asm and TM.
+      // ALL FOUR VIEWS: source, λ, asm and TM.
       leafIds().length === 4 &&
       lambdaLeaves().length === 1,
-    'the default layout on a settled source program',
+    'all four views on a settled source program',
   )
 })
 

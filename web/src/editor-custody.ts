@@ -170,12 +170,12 @@ export function createEditorCustody(deps: {
    * session. Keying by the closed leaf would be keying by something no claim ever mentions.
    *
    * **A LEAF ID IS A WEAKER KEY THAN A SESSION, NOT MERELY A DIFFERENTLY-SHAPED ONE.** `nextLeafId`
-   * only counts up, but it is not the only source of ids: `defaultLayout()` writes `source`, `lambda-0`,
-   * `asm-0` and `tm-0` down as literals and `reset preset` re-mints all four, so a closed `lambda-0` comes
-   * back — and `parseLayout` can restore any id a stored tree holds. A leaf id can therefore be
-   * inherited by a pane that has nothing to do with the one that claimed the editor. `applyLayout`'s
-   * pane-creation loop drops exactly that inheritance for `editorOwner` (which IS keyed by leaf) where
-   * it happens.
+   * only counts up, but it is not the only source of ids: `layout.ts`'s `defaultArrangement` writes `source`,
+   * `lambda-0`, `asm-0` and `tm-0` down as literals, and `reset preset` and a combination's first visit mint
+   * them again, so a closed `lambda-0` comes back — and `parseLayout` can restore any id a stored tree holds. A
+   * leaf id can therefore be inherited by a pane that has nothing to do with the one that claimed the editor.
+   * `applyLayout`'s pane-creation loop drops exactly that inheritance for `editorOwner` (which IS keyed by leaf)
+   * where it happens.
    *
    * NOT A SECOND HOME. Nothing renders from here and nothing reads through it — it is exactly the "one
    * instance, unmounted, not destroyed" state design §4.3 describes, made addressable. An entry lives
@@ -271,8 +271,8 @@ export function createEditorCustody(deps: {
    * about an editor with nowhere to be, so it iterates `heldEditors`. A single loop over
    * `editorOwner.keys()` would make this function's opening sentence — a claim about EVERY editor —
    * false of any held editor whose session holds no claim, and that is not a hypothetical state:
-   * `applyLayout`'s pane-creation loop DROPS the claim recorded against an arriving leaf id, and `reset
-   * preset` re-mints `defaultLayout()`'s literal ids, so dropping it is exactly what `reset preset` does
+   * `applyLayout`'s pane-creation loop DROPS the claim recorded against an arriving leaf id, and a default
+   * arrangement re-mints its literal ids, so dropping it is exactly what `reset preset` and a views toggle do
    * after a close. `tests/browser/two-lambda-panes.test.ts` is the test that reaches that state, and it
    * has to concatenate two sequences because neither reaches it alone.
    *
@@ -291,7 +291,10 @@ export function createEditorCustody(deps: {
    * **IT IS NOT THE `held.destroy()` BELOW THAT PERFORMS THAT DESTRUCTION.** A rebound-away pane no
    * longer names the session, so the binding predicate on the loop skips it. `LambdaPane.setDetached`'s
    * own teardown is what tears that editor down — it fires from `PaneSlot.render` on the very next
-   * `draw()`, which is the same tick, and `scratch-rebind-editor.test.ts` is the test that pins it. The
+   * `draw()`, which is the same tick, and `scratch-rebind-editor.test.ts` is the test that pins it. **A
+   * VIEW THAT IS NOT ON THE PAGE IS NOT DRAWN**, a Stage tab that is not selected and a view a switch
+   * parked: `pane-host.ts`'s `reseedingSlots` calls that teardown itself as a pause or a delete moves such
+   * a view onto the program, and `stage-copy-editor.test.ts` and `parked-copy-editor.test.ts` pin it. The
    * branch below answers a different case: a pane that IS on the session while the session holds no home
    * for it, which is what a claim pointing at a closed leaf leaves behind.
    *
@@ -321,7 +324,7 @@ export function createEditorCustody(deps: {
    * (`main.ts`), which calls `ScratchBuffers.retire` and then this function; the gesture that drives it
    * is the list's retire control. **The second half of that clause is not a detail**: a body that ran
    * both passes over one loop over `editorOwner.keys()` could not see an entry no claim named, and one
-   * exists after every `reset preset`. (2) `receiveEditor` THROWS rather than overwriting, so if the two
+   * exists once a closed view's id is minted again. (2) `receiveEditor` THROWS rather than overwriting, so if the two
    * ever do both fire, the app says so at the moment of the mistake instead of silently orphaning a live
    * view — and the throw costs the caller its gesture and nothing more (see `applyLayout`'s
    * `try`/`finally`). (3) The order below then means that even a case satisfying both — a session with
@@ -377,7 +380,8 @@ export function createEditorCustody(deps: {
       // RATHER THAN MERELY NARROWER: `ScratchBuffers.retire` rebinds the panes on that buffer — and no
       // others, which is its rule rather than the singleton's arithmetic — back to `home`, and the
       // `draw()` that follows drives `PaneSlot.render` -> `LambdaPane.setDetached(false)`, whose own
-      // teardown calls `setEditor(null)`.
+      // teardown calls `setEditor(null)`. That draw passes over a view that is not on the page, and for
+      // one the rebind itself makes the call (`pane-host.ts`'s `reseedingSlots`).
       //
       // **THE RETIRE SITE IS WHAT CALLS THIS FUNCTION, AND THIS SENTENCE USED TO READ AS THOUGH
       // SOMETHING ELSE DID.** There is one retire in the app: `main.ts`'s header-list handler, which

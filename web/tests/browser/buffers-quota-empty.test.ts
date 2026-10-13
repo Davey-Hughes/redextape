@@ -40,14 +40,14 @@ describe('a fresh page, never forked, with a refusing writer', () => {
    * **THE PAGE COMES UP AND STAYS SILENT ON `#link-status` — NOT "REPORTS AND THEN CLEARS", SILENT
    * FROM THE START.** `writeBuffersStorage`'s `hasBuffers` parameter is `payload.buffers.length > 0`;
    * a page that has never forked restores nothing (`localStorage` under this key is untouched by this
-   * file) and mints nothing, so every write this page load makes — the start-up call and the
-   * write-back after the first `applyLayout()` — carries an empty `buffers` array and never reaches
+   * file) and mints nothing, so every write this page load makes — the start-up call, and each
+   * `applyLayout()`'s after it — carries an empty `buffers` array and never reaches
    * `reportStorageFailure`.
    *
    * WAITING FOR THE FIRST COMPILE RATHER THAN ASSERTING IMMEDIATELY is what makes this a test of
    * ABSENCE across the app's own start-up sequence and not just a snapshot taken before enough of
-   * `main()` has run to say anything. Both buffers writes (`refreshBuffers()`'s start-up call and the
-   * write-back after `applyLayout()`) happen synchronously before `main()` returns — before this
+   * `main()` has run to say anything. Start-up's buffers writes (`refreshBuffers()`'s own call, and
+   * `applyLayout()`'s after it) happen synchronously before `main()` returns — before this
    * `await` even begins — so this bound is generous, not load-bearing; it exists to let the source
    * compile settle before the assertion, the same signal every sibling in this directory uses.
    */

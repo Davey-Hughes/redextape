@@ -125,7 +125,7 @@ async function at(
       hosts().map((h) => h.dataset.leaf),
       'precondition: the Stage shows λ',
     ).toEqual(['lambda-0'])
-  else expect(hosts().length, 'precondition: the default four views').toBe(4)
+  else expect(hosts().length, 'precondition: the four views').toBe(4)
 }
 
 /**
@@ -290,7 +290,7 @@ describe('at a phone’s width the inspector stacks under the views', () => {
 
   /**
    * **THE READOUT SWITCH STACKS IT TOO**: Explorer with the readout at `inspector` puts the inspector on the page as
-   * the two presets do, and at 390 px it stacks under Explorer's four views.
+   * the two presets do, and at 390 px it stacks under the four views.
    */
   it.each(['open', 'closed'] as const)(
     'in explorer with the readout switch at inspector, %s, at 390×844 px',

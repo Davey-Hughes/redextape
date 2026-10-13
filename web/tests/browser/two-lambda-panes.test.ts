@@ -1,10 +1,10 @@
 import { EditorView } from '@codemirror/view'
 import { beforeAll, beforeEach, describe, expect, it } from 'vitest'
 import { page } from 'vitest/browser'
-import { defaultLayout, LAYOUT_STORAGE_KEY, leaves } from '../../src/layout'
+import { LAYOUT_STORAGE_KEY, leaves } from '../../src/layout'
 import { bindingKey } from '../../src/view-header'
 import { parseWorkspace } from '../../src/workspace'
-import { SHELL, until } from './harness'
+import { fourViews, resetToFourViews, SHELL, until } from './harness'
 import { lambdaSettled } from './lambda-text'
 
 /**
@@ -261,19 +261,22 @@ beforeAll(async () => {
  * the ONE app this file mounts (`layout-app.test.ts`'s own multi-`it`-one-`beforeAll` idiom, carried
  * through here), so a test that assumes "exactly one λ leaf" or "this pane is attached" is assuming
  * state only the FIRST test in the file actually starts in. Three facts drift independently, so three
- * are undone independently: the TREE shape, through `reset preset`; each surviving λ pane's BINDING,
+ * are undone independently: the TREE shape, through `resetToFourViews`; each surviving λ pane's BINDING,
  * through its own selector; and the source PROGRAM, through a dispatch on `view`.
  *
  * **THE MIDDLE ONE USED TO BE A SIDE EFFECT OF THE LAST, AND 5d-ii-c DECISION 2 ENDED THAT.** This
  * block dispatched the source program and relied on `compile.ts`'s `schedule` retiring the newest
  * buffer on the keystroke — which rebound every pane pointed at it back to `source` (`scratch.ts`'s
  * `retire`) and, incidentally, gave the next test an attached λ pane. A keystroke ends no buffer now
- * (design §4.3's table), so `reset preset` alone leaves a surviving `lambda-0` exactly where the
+ * (design §4.3's table), so `reset preset` alone left a surviving `lambda-0` exactly where the
  * previous test put it: still `copy · not linked`, still holding that buffer's editor, and offering no fork
- * control at all — under which the next test's `?.click()` on `button.detach` is a silent no-op and
- * its first `until` waits on an editor that is already there. Rebinding through the selector is the
+ * control at all — under which the next test's `?.click()` on `button.detach` was a silent no-op and
+ * its first `until` waited on an editor that was already there. Rebinding through the selector is the
  * gesture that still means "put this pane back on the source session", so this asks for it directly
  * rather than as a consequence of something else.
+ *
+ * **NO λ VIEW SURVIVES THE RESET NOW** (the view layouts): *reset preset* leaves the source beside the TM view, and
+ * `resetToFourViews`' λ toggle builds `lambda-0` again, on the program. The loop below finds it there and skips it.
  *
  * **THE BUFFERS ARE RECLAIMED TOO, AND THIS PARAGRAPH USED TO REFUSE TO DO THAT.** It read: *"THE
  * BUFFERS THEMSELVES ARE NOT CLEANED UP, AND THAT IS NOW A CHOICE RATHER THAN A LIMIT... The header
@@ -296,8 +299,8 @@ beforeAll(async () => {
  * a leftover buffer adds beyond those is an extra entry in every selector and an extra worker, and no
  * failure this file guards was found by either.
  *
- * `reset preset` FIRST, THEN THE REBIND, THEN THE RETIRE. The reset drops the extra leaves a split
- * left behind, so the loop below only ever has the surviving default panes to put back — and a pane the
+ * `resetToFourViews` FIRST, THEN THE REBIND, THEN THE RETIRE. The reset drops the extra leaves a split
+ * left behind, so the loop below only ever has the four views' panes to put back — and a pane the
  * reset re-minted is already on `source` (`pane-host.ts`'s creation loop), so it is skipped rather than
  * rebound twice. The retire goes LAST of the three because by then every buffer is an orphan: no pane
  * is on one, so `ScratchBuffers.retire` moves nothing, and the reclamation cannot be the thing that put
@@ -306,7 +309,7 @@ beforeAll(async () => {
  */
 beforeEach(async () => {
   localStorage.removeItem(LAYOUT_STORAGE_KEY)
-  document.querySelector<HTMLButtonElement>('#reset-preset')?.click()
+  await resetToFourViews()
   for (const leaf of lambdaLeaves()) {
     const sel = selectOf(leaf)
     if (sel === null || sel.value === bindingKey('lambda', 'source')) continue
@@ -317,7 +320,7 @@ beforeEach(async () => {
   await until(
     () =>
       document.querySelector<HTMLElement>('#results')?.dataset.state === 'idle' &&
-      // THE DEFAULT TREE'S FOUR VIEWS: source, λ, asm and TM.
+      // ALL FOUR VIEWS: source, λ, asm and TM.
       leafIds().length === 4 &&
       lambdaLeaves().length === 1 &&
       // THE λ PANE IS ATTACHED AGAIN, which is the precondition every test's first click depends on and
@@ -541,7 +544,7 @@ describe('two λ panes on two λ sessions', () => {
    * CRITICAL FINDING, WHOLE-BRANCH REVIEW BEFORE MERGE — A LEG WITH NO PANE IS A LEGAL STATE.
    *
    * `closeLeaf` refuses only the last leaf in the TREE, and `draw()` offers `close` on `leaves() > 1`,
-   * so `close` is on the single λ pane a fresh page ships from the first frame — four leaves, nothing
+   * so `close` was on the single λ pane a fresh page then shipped, from the first frame — four leaves, nothing
    * to click through to reach it. `draw.ts` and `link-wiring.ts` nonetheless threw on an empty λ or TM
    * leg, each justifying it with "`main.ts` always registers one pane of each leg before this can be
    * called" — true through wave 1, false from the moment `applyLayout` began deriving panes from the
@@ -753,16 +756,17 @@ describe('two λ panes on two λ sessions', () => {
   })
 
   /**
-   * MINOR FINDING, SAME RE-REVIEW — `reset preset` RE-MINTS `defaultLayout()`'s LITERAL IDS, so a closed
-   * `lambda-0` does come back, and `editorOwner` still named it.
+   * MINOR FINDING, SAME RE-REVIEW — A DEFAULT ARRANGEMENT'S LITERAL IDS ARE MINTED AGAIN, so a closed
+   * `lambda-0` does come back, and `editorOwner` still named it. *Reset preset* brought it back when this was found;
+   * the reset's tree has no λ view now, and it is `resetToFourViews`' λ toggle that mints the id again.
    *
    * The two docs that justified keying custody by session argued from "the closed leaf's id is never
    * reused (`nextLeafId` only counts up)" — the history note under `heldEditors` and under `applyLayout`
    * holds that premise now, since both docs state the corrected one — and it is true of the ids
-   * `nextLeafId` mints and false of the four `defaultLayout` writes down. A pane that merely INHERITED the id was resolved as the editor's
-   * home the moment it was rebound to the scratch, and the next layout gesture delivered the held editor
-   * onto it — the silent relocation §4.2 and §4.3 both refuse, with the claim control withdrawing itself
-   * as the editor appeared where nobody had asked for it.
+   * `nextLeafId` mints and false of the four `defaultArrangement` writes down. A pane that merely INHERITED the id
+   * was resolved as the editor's home the moment it was rebound to the scratch, and the next layout gesture
+   * delivered the held editor onto it — the silent relocation §4.2 and §4.3 both refuse, with the claim control
+   * withdrawing itself as the editor appeared where nobody had asked for it.
    */
   it('does not deliver a held editor to a pane that merely inherited the owner leaf id', async () => {
     document.querySelector<HTMLButtonElement>('[data-leaf="lambda-0"] button.detach')?.click()
@@ -775,8 +779,8 @@ describe('two λ panes on two λ sessions', () => {
     btn('lambda-0', 'close this view')?.click()
     await until(() => lambdaLeaves().length === 0)
 
-    // `reset preset` mints a FRESH `lambda-0`, the same literal id the custody entry's owner names.
-    document.querySelector<HTMLButtonElement>('#reset-preset')?.click()
+    // `resetToFourViews`' λ toggle mints a FRESH `lambda-0`, the same literal id the custody entry's owner names.
+    await resetToFourViews()
     await until(() => lambdaLeaves().length === 1)
     expect(lambdaLeaves()).toEqual(['lambda-0'])
 
@@ -793,7 +797,7 @@ describe('two λ panes on two λ sessions', () => {
     // THE REBIND TOOK — asserted rather than assumed, because every assertion below would otherwise
     // pass on a pane that never went near the buffer. `select.value` silently stays `''` for an option
     // the list does not hold, so the first line is a real check that the buffer outlived the close and
-    // the reset; the other two say the pane MOVED off the session `reset preset` restored it on, and
+    // the reset; the other two say the pane MOVED off the session the new view was built on, and
     // `copy · not linked` is `SessionEntry.detached` for the session it actually ended up on, which only a
     // buffer sets.
     expect(sel.value).toBe(buffer)
@@ -822,12 +826,12 @@ describe('two λ panes on two λ sessions', () => {
    * The custody-sweep fix (the test above, when it was `destroys a held editor when its session
    * retires`) made every retire call `reconcileEditors`. The claim fix (`does not deliver a held editor
    * to a pane that merely inherited the owner leaf id`, above) makes `applyLayout` drop an `editorOwner`
-   * claim when its leaf id arrives fresh — which is what `reset preset` does to a closed pane's claim.
+   * claim when its leaf id arrives fresh — which is what minting a closed pane's id again does to its claim.
    * But `reconcileEditors` ran both of its passes over `editorOwner.keys()`, so dropping the claim
    * removed the custody entry from the only domain either pass could see: the entry became unreachable
    * from the function that owns both of its endings.
    *
-   * NEITHER TEST ABOVE REACHES THIS. The custody one never calls `reset preset`, so its claim survives;
+   * NEITHER TEST ABOVE REACHES THIS. The custody one never mints the closed pane's id again, so its claim survives;
    * the claim one never puts a second buffer's editor on the pane afterwards. Six clicks with both
    * halves in one sequence do — and what was measured in the running app before the fix is three
    * separate failures from one cause: E1 survived; the sixth step threw `a λ pane was handed a second
@@ -863,7 +867,7 @@ describe('two λ panes on two λ sessions', () => {
    * to break; each surviving editor is checked by IDENTITY against the view its own fork mounted,
    * because a count is also what "the wrong view won" looks like.
    */
-  it('keeps a held editor whose claim was dropped by reset preset reachable, rather than losing or resurrecting it', async () => {
+  it('keeps a held editor whose claim was dropped when its view’s id was minted again reachable, rather than losing or resurrecting it', async () => {
     const errors: string[] = []
     const onError = (e: ErrorEvent) => errors.push(e.message)
     window.addEventListener('error', onError)
@@ -887,7 +891,7 @@ describe('two λ panes on two λ sessions', () => {
       btn('lambda-0', 'close this view')?.click()
       await until(() => lambdaLeaves().length === 0)
 
-      // 3. `reset preset` re-mints the literal `lambda-0`, which DROPS the claim. The buffer is
+      // 3. `resetToFourViews`' λ toggle re-mints the literal `lambda-0`, which DROPS the claim. The buffer is
       // untouched by any of this — no pane's death retires one — and the pane selector is how that is
       // observed from the DOM: a session offering a λ leg is an entry in the λ group.
       //
@@ -900,7 +904,7 @@ describe('two λ panes on two λ sessions', () => {
       // `toContain`, NOT `toEqual(['source', forked])`: decision 2 keeps every earlier test's buffer
       // alive on this one page, so the group is as long as this file's fork count. What this step needs
       // is that THIS buffer is in it, which is what naming it says.
-      document.querySelector<HTMLButtonElement>('#reset-preset')?.click()
+      await resetToFourViews()
       await until(() => lambdaLeaves().length === 1)
       expect(lambdaOptionsOf('lambda-0')).toContain(labelA)
 
@@ -945,7 +949,7 @@ describe('two λ panes on two λ sessions', () => {
       const stored = parseWorkspace(localStorage.getItem(LAYOUT_STORAGE_KEY))?.tree ?? null
       expect(stored).not.toBeNull()
       expect(
-        leaves(stored ?? defaultLayout())
+        leaves(stored ?? fourViews())
           .map((l) => l.id)
           .sort(),
       ).toEqual([...leafIds()].sort())
@@ -996,7 +1000,7 @@ describe('two λ panes on two λ sessions', () => {
     btn('source', 'close this view')?.click()
     await until(() => !leafIds().includes('source'))
 
-    document.querySelector<HTMLButtonElement>('#reset-preset')?.click()
+    await resetToFourViews()
     await until(() => leafIds().includes('source'))
 
     expect(document.querySelector('[data-leaf="source"] .cm-content')?.textContent).toBe(before)

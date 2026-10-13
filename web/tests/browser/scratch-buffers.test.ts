@@ -140,7 +140,7 @@ function typeIntoBufferEditor(text: string): void {
  *
  * TWO MEASURED INCIDENTS ARE WORTH KEEPING ON RECORD, BOTH FOUND THROUGH THIS FILE. First: the retire
  * test below closes `lambda-0`, so this was the first file in the tier to persist a layout tree with one
- * of `defaultLayout()`'s own leaves MISSING — it left `link-truncated.test.ts`'s `↺` lookup answering
+ * of `fourViews()`'s own leaves MISSING — it left `link-truncated.test.ts`'s `↺` lookup answering
  * `undefined` (a silent no-op `?.click()`), which then waited out its whole timeout for a step readout
  * nothing was ever going to change. Second: `redextape.buffers` survives a reload, so a page that forks —
  * this file does — leaves the next file's `main()` RESTORING those buffers; it broke

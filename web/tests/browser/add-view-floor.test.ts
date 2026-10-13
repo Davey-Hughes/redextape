@@ -2,12 +2,12 @@ import { beforeAll, describe, expect, it } from 'vitest'
 import { page, userEvent } from 'vitest/browser'
 import { LAYOUT_STORAGE_KEY, type LayoutNode, MIN_VIEW_PX } from '../../src/layout'
 import { DIVIDER_PX } from '../../src/layout-view'
-import { defaultWorkspace, parseWorkspace, serializeWorkspace } from '../../src/workspace'
-import { SHELL, until } from './harness'
+import { parseWorkspace, serializeWorkspace } from '../../src/workspace'
+import { fourViewWorkspace, SHELL, showFourViews, until } from './harness'
 
 /**
  * **`+ VIEW` TAKES AN EQUAL SHARE OF THE FOCUSED VIEW'S ROW, AND NO ADD MAKES A VIEW NARROWER THAN 160 PX** — the
- * user's decisions of 2026-10-04. At 1280×800 in Explorer the four default views are 634 px wide; `+ view` beside λ
+ * user's decisions of 2026-10-04. At 1280×800 in Explorer the four views are 634 px wide; `+ view` beside λ
  * pressed five times gives the top row 3, 4, 5, 6 and 7 equal views, and a sixth press, which would leave each 149.5
  * px, is refused on the notice line and changes nothing; so is an add whose new view has room when a view it shrinks
  * would not. A split still halves the view it is chosen on, refused where a half would be under the floor along the
@@ -61,7 +61,8 @@ const ROOM_BESIDE = (title: string) => `no room for another view beside ${title}
 /** A split refused for width — split right, or split down of a view already narrow — and one refused for height. */
 const ROOM_SPLIT_NARROW = (title: string) => `no room to split ${title} — close a view or widen the window`
 const ROOM_SPLIT_SHORT = (title: string) => `no room to split ${title} — close a view or make the window taller`
-const FULL = 'the workspace holds 64 views, the most it can keep — close one to add another'
+const FULL =
+  'the workspace holds 64 views, the most it can keep — close one to add another, or reset preset if that makes no room'
 
 /** Press `+ view` and pick `label`, with the pointer. */
 async function plusView(label = 'λ · program'): Promise<void> {
@@ -113,8 +114,8 @@ async function choosePreset(p: 'explorer' | 'stage'): Promise<void> {
 }
 
 /**
- * Each case's start: the window at 1280×800, preset `p` chosen and *reset preset* pressed, with the pointer — the
- * preset's default views, focused on λ.
+ * Each case's start: the window at 1280×800, preset `p` chosen and *reset preset* pressed, with the pointer, and then
+ * all four views, focused on λ (`showFourViews`).
  */
 async function resetPreset(p: 'explorer' | 'stage' = 'explorer'): Promise<void> {
   await page.viewport(1280, 800)
@@ -122,7 +123,13 @@ async function resetPreset(p: 'explorer' | 'stage' = 'explorer'): Promise<void> 
   await openWorkspace()
   await userEvent.click(document.querySelector('#reset-preset') as HTMLElement)
   await until(() => noticeText().endsWith('reset — the default views are back'), 'the reset')
+  // THE RESET'S OWN FOCUS, READ BEFORE THE FIXTURE MOVES IT: the first view of the tree it builds, the TM view.
+  expect(focused()).toBe('tm-0')
+  // ALL FOUR VIEWS, WHICH THE RESET GAVE WHEN THESE CASES WERE WRITTEN: it leaves the source beside the TM view now.
+  await showFourViews()
   expect(tabs().length > 0 ? tabs() : ids()).toEqual(['source', 'lambda-0', 'asm-0', 'tm-0'])
+  // WHERE `showFourViews` PUTS THE FOCUS, AND WHERE EACH CASE'S `+ view` ADDS: the cases' start, and no longer the
+  // reset's doing, which the line above the fixture holds.
   expect(focused()).toBe('lambda-0')
 }
 
@@ -175,7 +182,7 @@ beforeAll(async () => {
   await page.viewport(1280, 800)
   localStorage.setItem(
     LAYOUT_STORAGE_KEY,
-    serializeWorkspace({ ...defaultWorkspace(), tree: SIXTY_FOUR, focused: 'lambda-0' }),
+    serializeWorkspace({ ...fourViewWorkspace(), tree: SIXTY_FOUR, focused: 'lambda-0' }),
   )
   document.body.innerHTML = SHELL
   await (await import('../../src/main')).ready

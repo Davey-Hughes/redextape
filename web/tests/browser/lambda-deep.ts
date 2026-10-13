@@ -34,6 +34,11 @@ export function deepTermSteppedBack(layout: 'code' | 'outline'): void {
     [...document.querySelectorAll<HTMLButtonElement>('[data-leaf="lambda-0"] .controls button')]
       .find((b) => b.textContent === '◀')
       ?.click()
+  /** What the page reads, for a wait that timed out: the λ view's step line, the notice line and the results line. */
+  const page = () => {
+    const text = (sel: string) => (document.querySelector(sel)?.textContent ?? '(absent)').trim().slice(0, 200)
+    return `step line [${stepText()}], notice [${text('#notice')}], results [${text('#results')}]`
+  }
   /** The view has drawn the step its controls show: as that step's tree, or as its text with a note. */
   const drawn = () =>
     (term()?.dataset.stale === undefined && term()?.dataset.step === String(stepNumber())) ||
@@ -53,7 +58,16 @@ export function deepTermSteppedBack(layout: 'code' | 'outline'): void {
       }
       view.dispatch({ changes: { from: 0, to: view.state.doc.length, insert: `${N} + 0` } })
       await until(() => document.querySelector<HTMLElement>('#results')?.dataset.state === 'idle', 'the compile')
-      await until(() => /^step [\d,]+ of [\d,]+$/.test(stepText()), 'the λ leg to record its last step')
+      // **A TIMEOUT HERE SAYS WHAT THE PAGE READ.** The wait is for a run that ended, `step N of M` and nothing after:
+      // a run still recording ends in `…`, one that stopped short names why, and one that never started reads `not
+      // run`. It timed out once, in the outline file, on CI's slower runner (run 563, 2026-10-12), where the whole
+      // case had taken 0.8 s a run before and nothing else was running; 27 runs here, 26 of them under a CPU quota,
+      // alone, in pairs and in the whole suite, did not time out. Which of those the page read was not recorded, so it is now.
+      await until(() => /^step [\d,]+ of [\d,]+$/.test(stepText()), 'the λ leg to record its last step').catch(
+        (e: unknown) => {
+          throw new Error(`${e instanceof Error ? e.message : String(e)}; the page read: ${page()}`)
+        },
+      )
       // `⏭`, SINCE A RUN OPENS ON STEP 0 (`History`).
       document.querySelector<HTMLButtonElement>('[data-leaf="lambda-0"] .controls button.to-newest')?.click()
       await until(() => /^step ([\d,]+) of \1$/.test(stepText()), 'the λ view on its last step')

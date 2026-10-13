@@ -473,6 +473,34 @@ describe('LambdaBody', () => {
     expect(active()?.dataset.line).toBe('1')
   })
 
+  /**
+   * **A SCROLL OF THE USER'S THAT A PAINT COMES BEFORE IS STILL THE USER'S, WHERE THE PAINT RESIZED NOTHING.** A
+   * scroll made on the main thread is reported with the next rendering update, and any draw of the page before then
+   * paints this body. `#paint` records the position it finds as a clamp of its own only when it changed the spacer's
+   * height; recorded at every paint, the `scroll` that followed read as the body's own, and a body the user had
+   * scrolled went on following.
+   *
+   * **A TERM WITH NO REDEX, SINCE A PAINT WITH ONE TO CENTRE WRITES THE POSITION ITSELF** and the scroll is lost
+   * either way. With none, as on a run's last step, nothing writes, and the scroll's own event is what is left to say
+   * whose it was. The scroll is `scrollTop`, set as a key or a scrollbar sets it; its event is the browser's own.
+   */
+  it('lets a scroll take control when a paint that resized nothing comes before its event', async () => {
+    const { body } = mount()
+    const still = `f ${Array.from({ length: 400 }, (_, i) => `a${i}`).join(' ')}`
+    const t = new Tree(wireOf(still))
+    expect(t.wire.nextRedex, 'precondition: the term has no redex').toBeNull()
+    const lines = codeLines(t, opts(20))
+    body.showTree(t, lines, false, [], false)
+    await frames()
+    expect(body.el.scrollHeight - body.el.clientHeight, 'precondition: the body scrolls').toBeGreaterThan(200)
+    expect(body.following, 'precondition: the body is following').toBe(true)
+    body.el.scrollTop = 200
+    body.showTree(t, lines, false, [], false)
+    await frames()
+    expect(body.el.scrollTop, 'precondition: the scroll stood').toBe(200)
+    expect(body.following, 'the paint took the user’s scroll for its own').toBe(false)
+  })
+
   it('draws only the rows in view, and follows the next redex until the user scrolls away', () => {
     const { body } = mount()
     const t = new Tree(wireOf(long(400)))

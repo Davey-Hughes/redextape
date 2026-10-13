@@ -99,7 +99,7 @@ export const MIN_PANE_FRACTION = 0.1
  * gesture through. A source leaf that came back under a fresh id would be a different leaf as far as
  * every one of those is concerned — an empty pane beside a detached editor.
  *
- * EXPORTED NOW THAT A SECOND MODULE MINTS ONE. It was a literal in `defaultLayout()` below and three
+ * EXPORTED NOW THAT A SECOND MODULE MINTS ONE. It was a literal in the default tree below and three
  * more in `main.ts` while the only source leaf was the one a fresh page shipped; `pane-host.ts`'s split
  * handler creating one through the picker is what made "the id is the same id" a claim two files have to
  * agree on rather than a spelling.
@@ -107,43 +107,116 @@ export const MIN_PANE_FRACTION = 0.1
 export const SOURCE_LEAF: LeafId = 'source'
 
 /**
- * The arrangement a first load and `reset preset` build, as a tree — design §4.1.
+ * The four kinds, in the order a combination's key spells them and a default arrangement places them: source, λ, asm,
+ * TM (the view layouts spec §4.1) — the order all four views have had on the page since the asm view joined them.
  *
- * **SOURCE AND λ ABOVE, ASM AND TM BELOW** (Plan 7 part 5 spec §3, row 4, and amendment 12): two rows of two, the
- * program's two lowerings side by side under the program and its λ term. It was source and λ above TM alone until the
- * asm view existed. The shape comes entirely from this tree's nesting and its `sizes`, which `layout-view.ts` turns into
- * each host's `flex-grow`; nothing in `style.css` names it.
+ * **KEYED BY `PaneKind` AND THEN LISTED**, as `PANE_KINDS` below was before it read this: a kind left out is a type
+ * error here, and the keys are the list.
  *
- * **λ STAYS THE FIRST VIEW LEAF**, so a first load still focuses it: `workspace.ts`'s `defaultFocus` takes the first
- * leaf that is not the source. **A STORED LAYOUT IS NOT MIGRATED** — it is still valid, keeps its arrangement, and
- * reaches the asm view through `+ view`, a split or a view's title (spec §3), so `LAYOUT_VERSION` does not move.
+ * **NOT THE HEADER'S ORDER**, which is `HEADER_ORDER` below: where a view sits in the default grid and where its
+ * toggle sits in the header are two decisions, and the user made the second one differently.
  */
-export function defaultLayout(): LayoutNode {
-  return {
+export const KIND_ORDER: readonly PaneKind[] = Object.keys({
+  source: 0,
+  lambda: 0,
+  asm: 0,
+  tm: 0,
+} satisfies Record<PaneKind, 0>) as PaneKind[]
+
+/**
+ * The four kinds in the order the header's `views` toggles have them: source, asm, λ, TM (the user's decision,
+ * 2026-10-11). The toggle keys `1` to `4`, the cycle and the sentence the live region reads follow it, so what is said
+ * and pressed runs left to right across the header.
+ *
+ * **A SECOND LIST, SO IT IS HELD TO THE FIRST**: `tests/node/arrangements.test.ts` asserts it is `KIND_ORDER`'s kinds,
+ * each once. A kind added to `PaneKind` is a type error in `KIND_ORDER`, and that test is what then asks for it here.
+ */
+export const HEADER_ORDER: readonly PaneKind[] = ['source', 'asm', 'lambda', 'tm']
+
+/**
+ * A kind's word where the app says it to a reader: in what its `views` toggle says in its tooltip and on the notice
+ * line, in the view keys' hint, and in the sentence the live region reads after a switch, each of which reads this
+ * table.
+ *
+ * **THE TOGGLES' LABELS ARE `index.html`'S MARKUP, WHICH READS NOTHING.** `tests/node/harness.test.ts` holds each
+ * label to its word here, and `tests/node/pages.test.ts` the help page's list of the layouts the cycle keys step
+ * through, so a kind spelled another way in either fails a test.
+ */
+export const KIND_WORD: Readonly<Record<PaneKind, string>> = { source: 'source', lambda: 'λ', asm: 'asm', tm: 'TM' }
+
+/** Whether the views area is wider than it is tall (`wide`) or taller than it is wide (`tall`) — spec §4.4. */
+export type Shape = 'wide' | 'tall'
+
+/**
+ * The id a kind's view has in a default arrangement — the four `defaultLayout()` minted as literals while it was all
+ * four views.
+ */
+const DEFAULT_LEAF: Readonly<Record<PaneKind, LeafId>> = {
+  source: SOURCE_LEAF,
+  lambda: 'lambda-0',
+  asm: 'asm-0',
+  tm: 'tm-0',
+}
+
+/**
+ * The tree a combination of kinds shows the first time it is visited — the view layouts spec §4.4. Its leaves are
+ * `kinds` in `KIND_ORDER`, whatever order they are handed in, under the default ids.
+ *
+ * | kinds | `wide` | `tall` |
+ * | --- | --- | --- |
+ * | 1 | the leaf | the leaf |
+ * | 2 | a row of the two | a column of the two |
+ * | 3 | a row: the first, beside a column of the other two | a column: the first, over a row of the other two |
+ * | 4 | a row of two columns: source over asm, beside λ over TM | a column of two rows: source and λ, over asm and TM |
+ *
+ * **IN A WIDE AREA NO DIVIDER AND NO VIEW RUNS THE WHOLE WIDTH** (the user's decision, 2026-10-11): the views are
+ * columns side by side, each with its own stack, so the one divider that spans the area is the vertical one and each
+ * side's views are resized on their own. It was a column of rows, whose one horizontal divider moved both sides
+ * together, and whose third view lay across the whole width. A tall area gets the same trees turned on their side,
+ * since there a view across the width is the only view wide enough to read.
+ *
+ * **ALL FOUR SIT IN THE SAME CORNERS IN BOTH**: source top left, λ top right, asm bottom left, TM bottom right — where
+ * they have been since the asm view joined them. What differs is which pairs share a divider.
+ *
+ * **IT THROWS FOR NO KINDS**: a tree has a leaf or more, and every caller holds a combination, which is not empty.
+ */
+export function defaultArrangement(kinds: readonly PaneKind[], shape: Shape): LayoutNode {
+  const pair = (dir: Dir, a: LayoutNode, b: LayoutNode): LayoutNode => ({
     kind: 'split',
-    dir: 'column',
+    dir,
     sizes: [0.5, 0.5],
-    children: [
-      {
-        kind: 'split',
-        dir: 'row',
-        sizes: [0.5, 0.5],
-        children: [
-          { kind: 'leaf', id: SOURCE_LEAF, pane: 'source' },
-          { kind: 'leaf', id: 'lambda-0', pane: 'lambda' },
-        ],
-      },
-      {
-        kind: 'split',
-        dir: 'row',
-        sizes: [0.5, 0.5],
-        children: [
-          { kind: 'leaf', id: 'asm-0', pane: 'asm' },
-          { kind: 'leaf', id: 'tm-0', pane: 'tm' },
-        ],
-      },
-    ],
-  }
+    children: [a, b],
+  })
+  const [a, b, c, d] = KIND_ORDER.filter((k) => kinds.includes(k)).map(
+    (k): LayoutNode => ({ kind: 'leaf', id: DEFAULT_LEAF[k], pane: k }),
+  )
+  // ACROSS THE AREA'S LONG SIDE FIRST, THEN ALONG ITS SHORT ONE.
+  const [outer, inner]: [Dir, Dir] = shape === 'tall' ? ['column', 'row'] : ['row', 'column']
+  if (a === undefined) throw new Error('a default arrangement needs a kind or more')
+  if (b === undefined) return a
+  if (c === undefined) return pair(outer, a, b)
+  if (d === undefined) return pair(outer, a, pair(inner, b, c))
+  return shape === 'tall'
+    ? pair('column', pair('row', a, b), pair('row', c, d))
+    : pair('row', pair('column', a, c), pair('column', b, d))
+}
+
+/**
+ * The arrangement a first load and `reset preset` build: the source beside the TM view (the user's decision,
+ * 2026-10-11; the view layouts spec §8). It is `defaultArrangement` of those two kinds, so the two cannot disagree.
+ *
+ * **IT WAS ALL FOUR VIEWS** — source and λ above, asm and TM below — until the header's `views` toggles could show any
+ * combination; all four are `defaultArrangement(KIND_ORDER, …)` now, in the same corners.
+ *
+ * **THE TM VIEW IS THE FIRST VIEW LEAF**, so a first load focuses it: `workspace.ts`'s `defaultFocus` takes the first
+ * leaf that is not the source. **A STORED LAYOUT IS NOT MIGRATED** — it is still valid and keeps its arrangement, so
+ * `LAYOUT_VERSION` does not move.
+ *
+ * **`shape` HAS NO DEFAULT**, so a caller that leaves the area's shape out does not compile. While it defaulted to
+ * `wide`, *reset preset* with its measurement dropped built a row in a tall window and every test passed.
+ */
+export function defaultLayout(shape: Shape): LayoutNode {
+  return defaultArrangement(['source', 'tm'], shape)
 }
 
 /** Every leaf, left to right, depth first — the order panes are created and tab order follows. */
@@ -374,6 +447,14 @@ function at(root: LayoutNode, path: number[]): LayoutNode {
  *
  * ONLY THE TWO NEIGHBOURS MOVE. Everything else in the split keeps its size, which is what makes a
  * divider a divider rather than a re-layout.
+ *
+ * **TWO NEIGHBOURS THAT CANNOT BOTH HOLD THE FLOOR DO NOT MOVE.** Where their shares together are under two floors the
+ * clamp's bounds cross: the least it may move is more than the most. That is so from a row of 11 equal views, which
+ * tiles can build in an area 1,880 px wide, the Stage at any width, and a stored layout can hold. In a row of 11 to
+ * 19 the clamp took the first neighbour to the floor whichever way the divider was dragged, shares of 0.1 and 0.0818
+ * in a row of 11, and then moved neither again. In a row of 20 that left the second a share of nothing, and in one of
+ * 21 less than nothing, 0.1 and −0.0048: each a tree `parseTree` refuses, so the next load threw the workspace away.
+ * The tree is answered as it was given.
  */
 export function resize(root: LayoutNode, path: number[], index: number, delta: number): LayoutNode {
   const split = at(root, path)
@@ -381,6 +462,7 @@ export function resize(root: LayoutNode, path: number[], index: number, delta: n
   const a = split.sizes[index]
   const b = split.sizes[index + 1]
   if (a === undefined || b === undefined) throw new Error(`no divider at index ${index}`)
+  if (a + b < 2 * MIN_PANE_FRACTION) return root
 
   const clamped = Math.max(MIN_PANE_FRACTION - a, Math.min(delta, b - MIN_PANE_FRACTION))
   const sizes = [...split.sizes]
@@ -417,8 +499,8 @@ export const LAYOUT_VERSION = 1
 export const SIZE_EPSILON = 1e-6
 
 /**
- * The most splits a tree may have on any path from its root to a leaf; `defaultLayout()` has 2 (Plan 7 part 6a spec
- * §5.3, amended 2026-10-01).
+ * The most splits a tree may have on any path from its root to a leaf; all four views' default arrangement has 2
+ * (Plan 7 part 6a spec §5.3, amended 2026-10-01).
  *
  * **WHAT IT BOUNDS IS THE READING, NOT WHICH TREES PARSE.** A split has two children or more, so a tree 64 splits deep
  * has at least 65 leaves and `MAX_TREE_LEAVES` refuses it anyway. But `validate` reads a split's first child whole
@@ -426,28 +508,34 @@ export const SIZE_EPSILON = 1e-6
  * leaf count cannot stop the reading. Unbounded, the recursion threw `RangeError` at 6,000 splits deep, on a link of
  * 25,011 characters. This stops it at the 65th split.
  *
- * **NO ADD CAN REACH IT**: a tree of at most `MAX_TREE_LEAVES` leaves is at most 63 splits deep, so `holdsMostLeaves`,
- * which holds every add to the leaf bound, holds it to this one too.
+ * **NO ADD CAN REACH IT**: a tree of at most `MAX_TREE_LEAVES` leaves is at most 63 splits deep, so the bound on live
+ * views, which holds every add's tree to that many leaves (`pane-host.ts`'s `admit`), holds it to this one too.
  */
 const MAX_TREE_DEPTH = 64
 
 /**
- * The most leaves a tree may have; `defaultLayout()` has 4 (spec §5.3, amended 2026-10-01).
+ * The most leaves a tree may have; all four views' default arrangement has 4 (spec §5.3, amended 2026-10-01).
  *
  * **A LINK BROUGHT TREES THE STORE NEVER HAD.** A link of 2,034 characters held 400 λ views, which took 4.4 s to open
  * and were stored, so every later load built them again.
  *
  * **THE APP STOPS HERE NOW, WHERE IT USED TO BUILD PAST IT** (2026-10-04). `+ view` nested each view it added one
  * split deeper and put no limit on how many, so its 61st press in a row from the default made 65 leaves, a layout that
- * fell back to the default at the next load. `holdsMostLeaves` below refuses an add that would make a 65th leaf, from
- * `+ view` and from a split, in tiles and on the Stage. Exported for `main.ts`, which says this number on the notice
- * line, and for `tests/node/layout.test.ts`, so neither copies it.
+ * fell back to the default at the next load. `pane-host.ts`'s `admit` refuses an add that would make a 65th live view,
+ * from `+ view` and from a split, in tiles and on the Stage: the views of the tree on screen, and with them the ones
+ * a remembered arrangement keeps off it (`arrangements.ts`'s `liveLeaves`). Exported so that nothing which holds the
+ * bound or says the number copies it.
  */
 export const MAX_TREE_LEAVES = 64
 
 /**
- * Whether `root` already holds `MAX_TREE_LEAVES` leaves, so an add would make a tree the loader refuses — the one
- * refusal that holds on the Stage too (`pane-host.ts`'s `admit`), since there the 160 px floor does not.
+ * Whether `root` already holds `MAX_TREE_LEAVES` leaves, so an add would make a tree the loader refuses —
+ * `addRefusal`'s first question.
+ *
+ * **IT IS THIS MODULE'S OWN REFUSAL, AND NOT WHAT HOLDS THE APP'S ADDS TO THE BOUND.** `pane-host.ts`'s `admit` counts
+ * every live view, refuses at the bound, and only then asks `addRefusal`; a tree's leaves are all live views, so a
+ * tree this is true of has been refused by then, in tiles and on the Stage. It answers for a caller that hands
+ * `addRefusal` a tree and nothing else, which `tests/node/layout.test.ts` does.
  */
 export function holdsMostLeaves(root: LayoutNode): boolean {
   return leaves(root).length >= MAX_TREE_LEAVES
@@ -466,8 +554,8 @@ export function holdsMostLeaves(root: LayoutNode): boolean {
  * **IT GATES THE ADD GESTURES ONLY, AND ONLY IN TILES**: a divider drag keeps `MIN_PANE_FRACTION`, and a window made
  * smaller, a switch that opens the inspector (the Debugger and Stage presets, or the readout switch), a stored layout,
  * a link's layout or an undo can still show a view under it. **THE STAGE IS EXEMPT** (the user's decision, 2026-10-04):
- * a view added there is a tab and nothing on screen shrinks, so `pane-host.ts`'s `admit` holds it to the leaf bound
- * alone, and switching from the Stage to tiles can show what it added under the floor.
+ * a view added there is a tab and nothing on screen shrinks, so `pane-host.ts`'s `admit` holds it to the bound on live
+ * views alone, and switching from the Stage to tiles can show what it added under the floor.
  */
 export const MIN_VIEW_PX = 160
 
@@ -537,9 +625,9 @@ export type AddRefusal = 'full' | 'narrow' | 'short'
  * add with room.
  *
  * **FULL BEFORE ROOM**: a wider window cannot make room under the leaf bound, so the notice names the remedy that
- * works.
+ * works. `'full'` is `holdsMostLeaves`' answer, whose doc has why no add the app makes is given it here.
  *
- * **TILES ONLY**: on the Stage nothing on screen shrinks, and `pane-host.ts`'s `admit` asks `holdsMostLeaves` instead.
+ * **TILES ONLY**: on the Stage nothing on screen shrinks, and `pane-host.ts`'s `admit` does not ask this.
  */
 export function addRefusal(
   root: LayoutNode,
@@ -601,9 +689,10 @@ export function serializeLayout(root: LayoutNode): string {
  * kind is an entry. A kind left out here would fail `validate` for every stored layout that shows one, and a
  * layout that fails is replaced by the default without a word (`parseLayout`'s own doc), so a view of the new
  * kind would be lost on every reload with `tsc` green. The `satisfies` makes a missing kind a type error, and
- * the keys are the list (`legs.ts` has the class of bug).
+ * the keys are the list (`legs.ts` has the class of bug). **THE LIST IS `KIND_ORDER`'s**, which is where the
+ * `satisfies` is written now: one keyed record, read here as strings and there as kinds.
  */
-const PANE_KINDS: readonly string[] = Object.keys({ source: 0, lambda: 0, asm: 0, tm: 0 } satisfies Record<PaneKind, 0>)
+const PANE_KINDS: readonly string[] = KIND_ORDER
 
 /**
  * Validate one node and collect its leaf ids, returning `false` on the first violation.

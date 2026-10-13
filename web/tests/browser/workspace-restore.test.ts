@@ -1,7 +1,7 @@
 import { beforeAll, describe, expect, it } from 'vitest'
 import { LAYOUT_STORAGE_KEY } from '../../src/layout'
-import { defaultWorkspace, PRESETS, parseWorkspace, serializeWorkspace } from '../../src/workspace'
-import { SHELL, until } from './harness'
+import { PRESETS, parseWorkspace, serializeWorkspace } from '../../src/workspace'
+import { fourViewWorkspace, SHELL, showFourViews, until } from './harness'
 
 /**
  * **A STORED VERSION 2 WORKSPACE, THROUGH THE REAL APP** — Plan 7 part 2 spec §3. Seeded before `main.ts`
@@ -13,7 +13,7 @@ beforeAll(async () => {
   localStorage.setItem(
     LAYOUT_STORAGE_KEY,
     serializeWorkspace({
-      ...defaultWorkspace(),
+      ...fourViewWorkspace(),
       speed: 250,
       focused: 'tm-0',
       panels: { 'tm-0': { rules: false }, 'asm-0': { heap: false } },
@@ -96,7 +96,7 @@ describe('a restored workspace', () => {
   })
 
   /**
-   * **A LEAF ID COMES BACK, AND ITS OLD PANEL STATE MUST NOT COME WITH IT.** `defaultLayout()` re-mints
+   * **A LEAF ID COMES BACK, AND ITS OLD PANEL STATE MUST NOT COME WITH IT.** A default arrangement re-mints
    * `source`, `lambda-0`, `asm-0` and `tm-0` as literals, so *reset preset* after closing the TM view hands the
    * id to a new view. Until `main.ts` normalised the workspace against the live tree, the write dropped
    * the closed view's panel state and MEMORY kept it — so this same sequence opened the rules panel
@@ -123,13 +123,21 @@ describe('a restored workspace', () => {
     document.querySelector<HTMLButtonElement>('#reset-preset')?.click()
     await until(() => document.querySelector('[data-leaf="tm-0"]') !== null, 'the TM view to come back')
     expect(rulesToggle()?.getAttribute('aria-expanded'), 'the re-minted view inherited a closed panel').toBe('true')
-    // The asm view never closed, so the reset kept it, and its stored heap panel with it — in storage and on the page
-    // alike, which is the agreement this case is about.
-    expect(parseWorkspace(localStorage.getItem(LAYOUT_STORAGE_KEY))?.panels).toEqual({ 'asm-0': { heap: false } })
-    expect(asmToggle('heap')?.getAttribute('aria-expanded'), "the asm view's heap panel is still closed").toBe('false')
+    // THE ASM VIEW LEFT WITH THE RESET, WHICH PUTS THE SOURCE BESIDE THE TM VIEW (the view layouts spec §4.6), and its
+    // stored heap panel went with it — from storage and from memory alike, which is the agreement this case is about:
+    // the view its toggle brings back is a new one, with its heap panel open as a new view's is.
+    expect(document.querySelector('[data-leaf="asm-0"]'), 'the reset kept the asm view').toBeNull()
+    expect(parseWorkspace(localStorage.getItem(LAYOUT_STORAGE_KEY))?.panels).toEqual({})
+    await showFourViews()
+    await until(() => document.querySelector('[data-leaf="asm-0"]') !== null, 'the asm view to come back')
+    expect(asmToggle('heap')?.getAttribute('aria-expanded'), 'the new asm view inherited a closed panel').toBe('true')
   })
 
   it('records which view has focus', () => {
+    // THE TM VIEW FIRST, SINCE THE CASE ABOVE LEFT THE FOCUS IN THE λ VIEW (`showFourViews`): from there, the λ view
+    // was on record as focused before this case focused it, and the line below passed with its gesture taken out.
+    document.querySelector<HTMLElement>('[data-leaf="tm-0"] .controls button:not([disabled])')?.focus()
+    expect(parseWorkspace(localStorage.getItem(LAYOUT_STORAGE_KEY))?.focused).toBe('tm-0')
     document.querySelector<HTMLElement>('[data-leaf="lambda-0"] .controls button:not([disabled])')?.focus()
     expect(parseWorkspace(localStorage.getItem(LAYOUT_STORAGE_KEY))?.focused).toBe('lambda-0')
     document.querySelector<HTMLElement>('[data-leaf="source"] .cm-content')?.focus()

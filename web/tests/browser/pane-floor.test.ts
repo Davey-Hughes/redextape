@@ -1,7 +1,7 @@
 import type { EditorView } from '@codemirror/view'
 import { describe, expect, it } from 'vitest'
 import { MIN_PANE_FRACTION } from '../../src/layout'
-import { SHELL } from './harness'
+import { SHELL, storeFourViews } from './harness'
 
 /**
  * WHAT A PANE LOOKS LIKE AT THE FLOOR — the measurement `MIN_PANE_FRACTION`'s own doc asks for and no
@@ -17,11 +17,15 @@ import { SHELL } from './harness'
  * INDEPENDENT VARIABLE. A fraction floor yields a different pixel floor at every size; that
  * relationship is what is being measured, on both axes.
  *
- * TWO DIVIDERS, BECAUSE THE DEFAULT TREE HAS TWO KINDS OF SQUEEZE. `defaultLayout()` nests a `row`
- * split (source | λ, a WIDTH constraint) inside a `column` split (that row above the `tm` leaf, a
+ * TWO DIVIDERS, BECAUSE THE FOUR-VIEW TREE HAS TWO KINDS OF SQUEEZE. `harness.ts`'s `fourViews()` nests a `row`
+ * split (source | λ, a WIDTH constraint) inside a `column` split (that row above the asm | TM row, a
  * HEIGHT constraint). Each divider is dragged hard past the floor in its own axis — `clientX` for the
  * vertical (row) divider, `clientY` for the horizontal (column) one — so every pane kind's OWN floor
  * gets measured rather than TM's height being inferred from source's width by analogy.
+ *
+ * THAT TREE IS STORED BEFORE EACH MOUNT (`storeFourViews`), SINCE IT IS NO LONGER WHAT EMPTY STORAGE OPENS ON: a
+ * fresh page is the source beside the TM view, with one divider and no λ view, and this threw `no horizontal divider`
+ * there.
  */
 
 let remountSeq = 0
@@ -93,6 +97,7 @@ describe('a pane at the floor', () => {
 
     for (const { width, height } of SIZES) {
       localStorage.clear()
+      storeFourViews()
       document.body.innerHTML = SHELL
       document.body.style.width = `${width}px`
       // `body`'s own rule sets `min-height: 100vh`. Left alone, that floor — not the height imposed
@@ -133,13 +138,13 @@ describe('a pane at the floor', () => {
       const sourceOverflow = overflowRatio(source, '.cm-scroller')
       const lambdaWidth = px(lambda)
       const lambdaOverflow = overflowRatio(lambda, '.cm-scroller')
-      // `tm` sits in the outer COLUMN split, untouched by the row divider above — this is its ordinary
-      // full width at this window size, not a floor reading. The height drag below is what measures
+      // `tm` sits in the outer COLUMN split's second row, untouched by the row divider above — this is its
+      // ordinary width at this window size, not a floor reading. The height drag below is what measures
       // TM's own floor.
       const tmWidth = px(tmAtWidthFloor)
       const tmWidthOverflow = overflowRatio(tmAtWidthFloor, '.cells')
 
-      // --- HEIGHT: drag the column split's divider (row | tm) hard down, past the floor ---
+      // --- HEIGHT: drag the column split's divider (row | row) hard down, past the floor ---
       // The commit above (`pointerup`) rebuilt the tree (`renderLayout` replaces every divider on
       // every commit — see `layout-view.ts`), so the horizontal divider is queried fresh rather than
       // reused from before the width drag.
@@ -148,8 +153,8 @@ describe('a pane at the floor', () => {
       const colSpan = hDivider.parentElement?.getBoundingClientRect().height ?? 0
 
       // Dragging DOWN (increasing `clientY`) grows the split's FIRST child (the source/λ row) and
-      // shrinks its SECOND (`tm`) — the mirror image of "drag hard left" above, which shrinks the row
-      // split's FIRST child (`source`). `tm` is the row|tm split's second neighbour, so the sign that
+      // shrinks its SECOND (the asm/`tm` row) — the mirror image of "drag hard left" above, which shrinks the row
+      // split's FIRST child (`source`). `tm` is in the column split's second neighbour, so the sign that
       // drives it to the floor flips accordingly.
       //
       // `pointerId: 1` AGAIN, NOT A FRESH ID — matching `divider-drag.test.ts`'s own convention.

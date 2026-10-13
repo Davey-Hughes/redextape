@@ -2,8 +2,11 @@ import { readdirSync, readFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { describe, expect, it } from 'vitest'
+import { CYCLE } from '../../src/arrangements'
+import { KIND_ORDER, KIND_WORD } from '../../src/layout'
 import { LINK_KEY } from '../../src/link-wiring'
 import { navKeymap } from '../../src/lsp-nav'
+import { HINT_ROWS, PREFIX, PREFIX_LABEL, VIEW_KEYS } from '../../src/view-keys'
 
 const read = (rel: string): string => readFileSync(fileURLToPath(new URL(rel, import.meta.url)), 'utf8')
 
@@ -11,11 +14,22 @@ const read = (rel: string): string => readFileSync(fileURLToPath(new URL(rel, im
 const PAGES = ['about', 'help', 'licences', 'privacy'] as const
 const html = (name: string): string => read(`../../${name}.html`)
 
-/** The `data-key` of every row in `#id`'s table on `page`. */
+/**
+ * The `data-key` of every row in `#id`'s table on `page`.
+ *
+ * **EVERY ROW OF THE BODY HAS ONE, OR THIS THROWS.** The tests below hold a table to a list by its rows' keys, and a
+ * row written with no `data-key` was a row none of them read: the page could list a key the app does not have.
+ */
 function tableKeys(page: string, id: string): string[] {
   const table = new RegExp(`<table id="${id}">([\\s\\S]*?)</table>`).exec(html(page))?.[1]
   if (table === undefined) throw new Error(`${page}.html has no table #${id}`)
-  return [...table.matchAll(/<tr data-key="([^"]+)">/g)].map((m) => m[1] ?? '')
+  const body = /<tbody>([\s\S]*?)<\/tbody>/.exec(table)?.[1]
+  if (body === undefined) throw new Error(`${page}.html's table #${id} has no body`)
+  const keys = [...body.matchAll(/<tr data-key="([^"]+)">/g)].map((m) => m[1] ?? '')
+  const rows = [...body.matchAll(/<tr[\s>]/g)].length
+  if (rows !== keys.length)
+    throw new Error(`${page}.html's table #${id} has ${rows} rows, and ${keys.length} of them have a data-key`)
+  return keys
 }
 
 describe('the pages beside the app', () => {
@@ -62,6 +76,66 @@ describe('the help page', () => {
       const shown = [...before.matchAll(/<kbd>([^<]+)<\/kbd>/g)].map((m) => m[1]).join('-')
       expect(shown, key).toBe((key ?? '').replace(/^Mod-/, 'Ctrl-'))
     }
+  })
+})
+
+describe('the help page’s view keys', () => {
+  /**
+   * **THE TABLE IS `view-keys.ts`'s OWN**: every key an armed machine answers, with the words the page's hint gives
+   * it, in the hint's order. A key added to the machine without a row, a row left behind, or a row whose words have
+   * drifted from the hint's, fails here.
+   */
+  it('lists exactly the keys the machine answers, each with the hint’s words', () => {
+    const table = /<table id="view-keys">([\s\S]*?)<\/table>/.exec(html('help'))?.[1] ?? ''
+    const rows = [...table.matchAll(/<tr data-key="([^"]+)"><td><kbd>([^<]+)<\/kbd><\/td><td>([^<]+)<\/td><\/tr>/g)]
+    expect(rows.map(([, key, shown, does]) => [key, shown, does])).toEqual(VIEW_KEYS.map((r) => [r.key, r.key, r.does]))
+    // AND NO ROW THE PATTERN ABOVE DOES NOT READ: `tableKeys` throws on one with no `data-key`.
+    expect(tableKeys('help', 'view-keys')).toEqual(VIEW_KEYS.map((r) => r.key))
+  })
+
+  it('names the prefix as the machine has it', () => {
+    const says = /<p id="view-keys-prefix">([\s\S]*?)<\/p>/.exec(html('help'))?.[1] ?? ''
+    const shown = [...(says.split(' and then')[0] ?? '').matchAll(/<kbd>([^<]+)<\/kbd>/g)].map((m) => m[1]).join('+')
+    expect(shown).toBe(PREFIX_LABEL)
+    expect(PREFIX_LABEL).toBe(`${PREFIX.ctrl ? 'Ctrl+' : ''}${PREFIX.key}`)
+  })
+
+  /** A paragraph of the help page as a reader has it: its tags gone, and each run of white space one space. */
+  const prose = (id: string): string =>
+    (new RegExp(`<p id="${id}">([\\s\\S]*?)</p>`).exec(html('help'))?.[1] ?? '')
+      .replace(/<[^>]+>/g, '')
+      .replace(/\s+/g, ' ')
+      .trim()
+
+  /**
+   * **BOTH WAYS OUT, AS THE HINT LISTS THEM**: the hint's last row is `Esc`, *or `Ctrl+.` leave*, and the page said
+   * `Esc` alone. The machine's own row for them is `tests/node/view-keys.test.ts`'s.
+   */
+  it('says both ways out of the mode: the hint’s key, and the prefix again', () => {
+    expect(HINT_ROWS.at(-1)?.does).toBe(`or ${PREFIX_LABEL} leave`)
+    expect(prose('view-keys-prefix')).toMatch(
+      new RegExp(
+        ` and ${HINT_ROWS.at(-1)?.key}, or ${PREFIX_LABEL.replace(/[+.]/g, '\\$&')} again, leaves without doing anything\\.$`,
+      ),
+    )
+  })
+
+  /**
+   * **THE STOPS ARE `arrangements.ts`'s `CYCLE`, IN ITS ORDER**: the source beside each other kind, by the kind's own
+   * word, and then every kind.
+   */
+  it('lists the layouts the cycle keys step through, in the cycle’s order', () => {
+    expect(KIND_ORDER).toHaveLength(4)
+    const stops = CYCLE.map((stop) =>
+      stop.length === KIND_ORDER.length ? 'all four' : stop.map((kind) => KIND_WORD[kind]).join(' beside '),
+    )
+    expect(stops.slice(0, -1).every((stop) => stop.startsWith('source beside '))).toBe(true)
+    expect(prose('view-keys-cycle')).toBe(
+      `The layouts ] and [ step through are ${stops
+        .slice(0, -1)
+        .map((stop) => `the ${stop}`)
+        .join(', ')}, and ${stops.at(-1)}.`,
+    )
   })
 })
 

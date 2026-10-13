@@ -7,10 +7,14 @@ import { SHELL, until } from './harness'
  * *RESET PRESET* RESTORES THE DEFAULT VIEWS, AND A DEFAULT VIEW SHOWS THE PROGRAM (Plan 7 part 2 spec §4, §6).
  *
  * The check by hand's finding 5: with views on copies of all three legs, *reset preset* said "Explorer reset — the
- * default views are back" while every view stayed on its copy. `defaultLayout()` re-mints `lambda-0`, `asm-0` and
+ * default views are back" while every view stayed on its copy. The default tree re-minted `lambda-0`, `asm-0` and
  * `tm-0`, and `applyLayout` kept a pane whose id and kind survived, binding and all. `pane-host.ts`'s `resetViews` now
  * rebuilds each such view on the program, as a fresh preset's are, and the copies stay: in the copies menu, and with
  * their editors when a view shows them again.
+ *
+ * **THE DEFAULT IS THE SOURCE BESIDE THE TM VIEW NOW** (the view layouts spec §8), so the reset keeps one of the three
+ * views, `tm-0`, and that is the one a kept binding would show. The λ and asm views leave the page with the reset and
+ * every remembered arrangement is forgotten, so the views their toggles bring back are new ones.
  *
  * Every gesture is a `userEvent` one. ONE MOUNT FOR THE FILE, for the reason every sibling gives.
  */
@@ -61,6 +65,17 @@ describe('reset preset', () => {
     await userEvent.click(document.querySelector<HTMLButtonElement>('#reset-preset') as HTMLButtonElement)
 
     expect(notice()).toBe('Explorer reset — the default views are back')
+    expect([...document.querySelectorAll<HTMLElement>('.pane[data-leaf]')].map((el) => el.dataset.leaf)).toEqual([
+      'source',
+      'tm-0',
+    ])
+    expect(title('tm-0'), 'the view the reset kept is still on its copy').toBe('TM · program')
+    expect(document.querySelectorAll('.pane .view-status')).toHaveLength(0)
+    expect(status()).not.toContain('copy')
+
+    // AND THE TWO VIEWS THE RESET TOOK OFF THE PAGE COME BACK ON THE PROGRAM, as new views: nothing remembers them.
+    for (const kind of ['lambda', 'asm'])
+      await userEvent.click(document.querySelector(`#views-shown button[data-shows="${kind}"]`) as HTMLElement)
     expect(LEAVES.map(title)).toEqual(['λ · program', 'asm · program', 'TM · program'])
     expect(document.querySelectorAll('.pane .view-status')).toHaveLength(0)
     expect(status()).not.toContain('copy')

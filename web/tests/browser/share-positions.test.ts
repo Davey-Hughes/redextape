@@ -5,8 +5,8 @@ import { EXAMPLES } from '../../src/examples'
 import { encodeLink, type Positions } from '../../src/share-link'
 import { MAX_LINK_CONTINUES } from '../../src/share-positions'
 import { bindingKey } from '../../src/view-header'
-import { defaultWorkspace, serializeWorkspace } from '../../src/workspace'
-import { SHELL, until } from './harness'
+import { serializeWorkspace } from '../../src/workspace'
+import { fourViewWorkspace, SHELL, until } from './harness'
 
 /**
  * **A LINK'S POSITIONS, IN THE APP** — Plan 7 part 6a spec §5.4 and §8's positions row, on the real session worker:
@@ -97,7 +97,7 @@ async function open(
   const fragment = await encodeLink({
     program,
     encoding,
-    workspace: serializeWorkspace(defaultWorkspace()),
+    workspace: serializeWorkspace(fourViewWorkspace()),
     positions,
   })
   location.hash = fragment

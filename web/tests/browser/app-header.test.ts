@@ -4,7 +4,7 @@ import { beforeAll, describe, expect, it } from 'vitest'
 import { page } from 'vitest/browser'
 import { LAYOUT_STORAGE_KEY } from '../../src/layout'
 import { parseWorkspace } from '../../src/workspace'
-import { SHELL, until } from './harness'
+import { SHELL, showFourViews, until } from './harness'
 
 const leafIds = () => [...document.querySelectorAll<HTMLElement>('main [data-leaf]')].map((el) => el.dataset.leaf ?? '')
 
@@ -46,9 +46,11 @@ describe('the app header', () => {
   })
 
   it('resets the preset: the default views back, and says so', async () => {
+    // THE PRECONDITION, SINCE THE DEFAULT IS A SUBSET OF WHAT IS HERE: more views than the default's two.
+    expect(leafIds().length).toBeGreaterThan(2)
     document.querySelector<HTMLButtonElement>('#reset-preset')?.click()
-    await until(() => leafIds().length === 4, 'the default views')
-    expect(leafIds()).toEqual(['source', 'lambda-0', 'asm-0', 'tm-0'])
+    await until(() => leafIds().length === 2, 'the default views')
+    expect(leafIds()).toEqual(['source', 'tm-0'])
     expect(document.querySelector('#notice .notice-text')?.textContent).toBe(
       'Explorer reset — the default views are back',
     )
@@ -61,7 +63,10 @@ describe('the app header', () => {
     // workspace menu moves them, `workspace-switches.test.ts` drives that, and a *reset preset* that
     // dropped the assignment would leave this button reading whatever the last pick made it.
     expect(document.querySelector('#workspace')?.textContent?.trim()).toBe('Explorer ▾')
-    expect(parseWorkspace(localStorage.getItem(LAYOUT_STORAGE_KEY))?.focused).toBe('lambda-0')
+    expect(parseWorkspace(localStorage.getItem(LAYOUT_STORAGE_KEY))?.focused).toBe('tm-0')
+    // THE FOUR VIEWS THE CASES BELOW WERE WRITTEN AGAINST, which this reset gave until the view layouts.
+    await showFourViews()
+    await until(() => leafIds().length === 4, 'all four views')
   })
 
   it('offers source to + view only while no view shows it', async () => {
@@ -69,7 +74,7 @@ describe('the app header', () => {
     await until(() => !leafIds().includes('source'), 'the source view to close')
     document.querySelector<HTMLButtonElement>('#new-view')?.click()
     expect([...document.querySelectorAll('#new-view-menu button')].map((b) => b.textContent)).toContain('source')
-    // **AND IT BRINGS IT BACK** — the only route to a closed source view besides *reset preset*, and the
+    // **AND IT BRINGS IT BACK** — a route to a closed source view besides its toggle and *reset preset*, and the
     // one `addView` path that reuses a literal leaf id rather than minting one, so the editor returns to
     // the host `main.ts` seeded rather than to an empty section.
     const source = [...document.querySelectorAll<HTMLButtonElement>('#new-view-menu button')].find(

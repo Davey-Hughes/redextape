@@ -1,7 +1,7 @@
 import { EditorView } from '@codemirror/view'
 import { describe, expect, it } from 'vitest'
 import { BUFFERS_STORAGE_KEY, BUFFERS_VERSION, parseBuffers, serializeBuffers } from '../../src/buffers-store'
-import { SHELL, until } from './harness'
+import { SHELL, storeFourViews, until } from './harness'
 
 /**
  * An asm copy survives a reload (Plan 7 part 5 spec §7, amendment 23): stored at `BUFFERS_VERSION` 2 with its leg,
@@ -30,6 +30,8 @@ const idle = () => document.querySelector<HTMLElement>('#results')?.dataset.stat
 describe('restoring an asm copy', () => {
   it('stores it on its leg at version 2, and brings it back in its view with its text', async () => {
     localStorage.clear()
+    // ALL FOUR VIEWS, WHICH AN EMPTY STORE OPENED ON WHEN THIS WAS WRITTEN: it opens on the source and TM now.
+    storeFourViews()
     const view = await mount()
     view.dispatch({ changes: { from: 0, to: view.state.doc.length, insert: 'let x = 40; x + 2' } })
     await until(() => !idle(), 'the compile to start')
@@ -61,6 +63,8 @@ describe('restoring an asm copy', () => {
    */
   it('brings back a copy that does not build in its editor, with the label that names nothing marked', async () => {
     localStorage.clear()
+    // ALL FOUR VIEWS, WHICH AN EMPTY STORE OPENED ON WHEN THIS WAS WRITTEN: it opens on the source and TM now.
+    storeFourViews()
     const text = 'result Nat\n\n    jmp\tnowhere\n'
     localStorage.setItem(
       BUFFERS_STORAGE_KEY,

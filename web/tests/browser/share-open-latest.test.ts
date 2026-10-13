@@ -29,7 +29,7 @@ const BEFORE = 'let x = 40; x + 2'
 const LINK_B = {
   program: SUM_TO,
   encoding: 'binary',
-  workspace: serializeWorkspace({ ...defaultWorkspace(), switches: PRESETS.debugger }),
+  workspace: serializeWorkspace({ ...defaultWorkspace('wide'), switches: PRESETS.debugger }),
   positions: {},
 }
 
@@ -56,7 +56,7 @@ const KINDS = [
       encodeLink({
         program: FACT,
         encoding: 'binary',
-        workspace: serializeWorkspace({ ...defaultWorkspace(), switches: PRESETS.stage }),
+        workspace: serializeWorkspace({ ...defaultWorkspace('wide'), switches: PRESETS.stage }),
         positions: {},
       }),
   ],

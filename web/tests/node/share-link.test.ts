@@ -1,5 +1,6 @@
 import { deflateRawSync } from 'node:zlib'
 import { describe, expect, it } from 'vitest'
+import { defaultArrangement, KIND_ORDER } from '../../src/layout'
 import { LEGS } from '../../src/legs'
 import {
   decodeLink,
@@ -22,7 +23,7 @@ import { defaultWorkspace, PRESETS, type Preset, parseWorkspace, SPEEDS, seriali
 /** The encodings `main.ts` hands in, as `encodings()` lists them today. */
 const ENCODINGS = ['unary', 'binary']
 
-const WORKSPACE = serializeWorkspace(defaultWorkspace())
+const WORKSPACE = serializeWorkspace(defaultWorkspace('wide'))
 
 /** A link carrying `text` as its payload's JSON, deflated by node's own encoder: any payload, valid or not. */
 const linkOf = (text: string | Uint8Array): string =>
@@ -58,7 +59,11 @@ describe('encodeLink and decodeLink', () => {
     const pick = <T>(xs: readonly T[]): T => xs[Math.floor(next() * xs.length)] as T
     const program = Array.from({ length: Math.floor(next() * 400) }, () => pick(PIECES)).join('')
     const preset = pick(Object.keys(PRESETS) as Preset[])
-    const workspace = serializeWorkspace({ ...defaultWorkspace(), switches: PRESETS[preset], speed: pick(SPEEDS) })
+    const workspace = serializeWorkspace({
+      ...defaultWorkspace('wide'),
+      switches: PRESETS[preset],
+      speed: pick(SPEEDS),
+    })
     const positions: { [L in (typeof LEGS)[number]]?: number } = {}
     for (const leg of LEGS) {
       if (next() < 0.5) continue
@@ -150,6 +155,9 @@ describe('the frozen link from version 1', () => {
         inspector: true,
         display: {},
         tmDisplay: {},
+        // WRITTEN BEFORE THE VIEW LAYOUTS, SO IT CARRIES NONE, AND READS AS REMEMBERING NOTHING: its four views are
+        // the arrangement on screen, as they were.
+        arrangements: {},
       },
       positions: { lambda: 500, asm: 40, tm: 9000 },
     })
@@ -252,6 +260,47 @@ describe('a link that opens the program alone', () => {
  * **A LINK'S TREE IS HELD TO THE BOUND A STORED ONE IS** (spec §5.3, amended 2026-10-01): at most 64 splits deep and 64
  * leaves, and leaf ids whose numbers the leaf counter can step past. A workspace past it opens the program alone.
  */
+/**
+ * **A LINK CARRIES THE ARRANGEMENT ON SCREEN AND NO OTHER** (the view layouts spec §4.7). `main.ts` writes one from a
+ * workspace it has emptied of them, and `decodeLink` drops them from one that carries them all the same: a link
+ * written by hand, or by a build that sent them. Opened in the page, such a link put its arrangements into force and
+ * into the reader's storage (measured 2026-10-12, by a `hashchange`: `source+lambda+asm+tm` and the panel state of a
+ * λ view only it held were both stored).
+ */
+describe('a link whose workspace carries remembered arrangements', () => {
+  const FOUR = defaultArrangement(KIND_ORDER, 'wide')
+  const carried = {
+    ...defaultWorkspace('wide'),
+    arrangements: { 'source+lambda+asm+tm': FOUR },
+    // A VIEW ON SCREEN AND A VIEW ONLY THE REMEMBERED ARRANGEMENT HOLDS, each with something stored for it.
+    panels: { 'tm-0': { rules: false }, 'lambda-0': { map: true } },
+    display: { 'lambda-0': { layout: 'outline', vars: 'names', map: 'icicle' } },
+    tmDisplay: { 'tm-0': { level: 'local', edges: 'chips' } },
+  } as const
+
+  it('opens whole, with none of them and nothing stored for the views only they held', async () => {
+    const workspace = serializeWorkspace(carried)
+    expect(parseWorkspace(workspace)?.arrangements, 'precondition: the workspace parses, and carries one').toEqual(
+      carried.arrangements,
+    )
+    expect(parseWorkspace(workspace)?.panels, 'precondition: and the panel state of a view only it holds').toEqual(
+      carried.panels,
+    )
+    const opened = await decodeLink(payloadLink({ workspace }), ENCODINGS)
+    if (opened.kind !== 'whole') throw new Error(`the link opened as ${opened.kind}`)
+    expect(opened.workspace.arrangements, 'the link’s arrangements were read').toEqual({})
+    expect(opened.workspace.panels, 'the state of a view only they held was read').toEqual({ 'tm-0': { rules: false } })
+    expect(opened.workspace.display).toEqual({})
+    expect(opened.workspace.tmDisplay, 'the state of a view on screen was dropped').toEqual(carried.tmDisplay)
+    expect(opened.workspace).toEqual({
+      ...carried,
+      arrangements: {},
+      panels: { 'tm-0': { rules: false } },
+      display: {},
+    })
+  })
+})
+
 describe("a link whose workspace's tree is past the bound", () => {
   const alone = { kind: 'program', program: 'let x = 40; x + 2', encoding: 'binary' }
   /** The default workspace's string with `tree` in place of its tree, and `pane-1` focused. */

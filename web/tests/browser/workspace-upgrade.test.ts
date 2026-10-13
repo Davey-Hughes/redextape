@@ -44,8 +44,8 @@ beforeAll(async () => {
 })
 
 describe('a workspace stored by part 2a', () => {
-  // THE WHOLE POINT: the stored tree is TWO leaves, not the default three. If the envelope had been
-  // refused, the app would have fallen back to `defaultLayout()` and this would read three.
+  // THE WHOLE POINT: the stored tree is the source beside a λ view, not the default's source beside the TM view. If
+  // the envelope had been refused, the app would have fallen back to `defaultLayout()` and this would read `tm-0`.
   it('keeps the tree it was stored with, rather than resetting to the default', () => {
     expect([...document.querySelectorAll('#views [data-leaf]')].map((el) => (el as HTMLElement).dataset.leaf)).toEqual([
       'source',

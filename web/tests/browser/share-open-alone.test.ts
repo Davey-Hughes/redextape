@@ -35,7 +35,10 @@ let view: EditorView
 
 beforeAll(async () => {
   localStorage.setItem(PROGRAM_STORAGE_KEY, serializeProgram({ text: 'let x = 40; x + 2', encoding: 'unary' }))
-  localStorage.setItem(LAYOUT_STORAGE_KEY, serializeWorkspace({ ...defaultWorkspace(), switches: PRESETS.debugger }))
+  localStorage.setItem(
+    LAYOUT_STORAGE_KEY,
+    serializeWorkspace({ ...defaultWorkspace('wide'), switches: PRESETS.debugger }),
+  )
   const fragment = await encodeLink({ program: LINKED, encoding: 'ternary', workspace: '{}', positions: {} })
   history.replaceState(null, '', `${location.pathname}${location.search}${fragment}`)
   document.body.innerHTML = SHELL

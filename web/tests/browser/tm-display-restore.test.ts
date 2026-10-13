@@ -1,8 +1,8 @@
 import { beforeAll, describe, expect, it } from 'vitest'
 import { page } from 'vitest/browser'
 import { LAYOUT_STORAGE_KEY } from '../../src/layout'
-import { defaultWorkspace, serializeWorkspace } from '../../src/workspace'
-import { SHELL, until } from './harness'
+import { serializeWorkspace } from '../../src/workspace'
+import { fourViewWorkspace, SHELL, until } from './harness'
 
 /**
  * **A TM VIEW IS BUILT WITH THE DISPLAY ITS WORKSPACE STORED** (Plan 7 part 4, spec §8 and §11). Seeded before
@@ -18,7 +18,7 @@ beforeAll(async () => {
   await page.viewport(1280, 2400)
   localStorage.setItem(
     LAYOUT_STORAGE_KEY,
-    serializeWorkspace({ ...defaultWorkspace(), tmDisplay: { 'tm-0': { level: 'local', edges: 'chips' } } }),
+    serializeWorkspace({ ...fourViewWorkspace(), tmDisplay: { 'tm-0': { level: 'local', edges: 'chips' } } }),
   )
   document.body.innerHTML = SHELL
   await (await import('../../src/main')).ready

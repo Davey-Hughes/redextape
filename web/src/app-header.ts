@@ -1,5 +1,7 @@
 import type { Example } from './examples'
+import { HEADER_ORDER, KIND_WORD } from './layout'
 import type { PaneChoice, SplitChoices } from './pane-chrome'
+import type { PaneKind } from './panes'
 import { bindingKey, pairLabel } from './view-header'
 import { PRESETS, type Preset, presetOf, type Switches } from './workspace'
 
@@ -7,6 +9,7 @@ import { PRESETS, type Preset, presetOf, type Switches } from './workspace'
  * THE APP HEADER'S MENUS — Plan 7 part 2 spec §6: the workspace menu, `+ view` and settings, `examples ▾` since
  * part 6a, and `about ▾` since the about pages. Each is a native popover beside the button that opens it, declared in
  * `index.html` so the pre-paint script and the skin selects need no change; this module wires what markup cannot.
+ * The `views` toggles (the view layouts spec §6) are the header's one group that is not a menu.
  */
 
 /**
@@ -243,4 +246,119 @@ export function workspaceItems(
           : menu.querySelector<HTMLElement>(`#${identity.id}`)
   if (back !== null) back.focus()
   else menu.querySelector<HTMLElement>('button:not([disabled])')?.focus()
+}
+
+/**
+ * The window too narrow for the `views` toggles, as the media query that says so: 40rem wide or narrower, which is
+ * 640 px at a browser's default text size (the view layouts spec §6.1).
+ *
+ * **THREE PLACES SAY THIS WIDTH, AND NONE CAN READ ANOTHER.** `main.ts` sets the group's `hidden` attribute from this
+ * query. `style.css` has a media rule of the same width, for the paint before `main.ts` runs, and a stylesheet
+ * imports nothing. `help.html` tells a reader the width in pixels. `tests/node/app-header.test.ts` reads the rule
+ * and the page and holds each to this, and `tests/browser/view-toggles-narrow.test.ts` holds the attribute and the
+ * rule to the same last pixel. With the rule at 30rem, or the query at 38rem, every test passed before those two.
+ */
+export const NARROW_WINDOW_REM = 40
+export const NARROW_WINDOW = `(max-width: ${NARROW_WINDOW_REM}rem)`
+
+/**
+ * The header's `views` toggles — the view layouts spec §6: one button a kind, in `HEADER_ORDER`, pressed where the tree
+ * on screen holds a view of that kind. `pick` is handed the kind a press asks to add or remove; `sync` is called with
+ * the kinds on screen whenever they may have changed.
+ *
+ * **THE FOUR BUTTONS ARE THE PAGE'S OWN MARKUP, AND THIS ADOPTS THEM.** They were built here, which is after the
+ * wasm has loaded, so they arrived in a header already painted. Measured at 1280 px in each style (2026-10-12): `+
+ * view`, `copies`, `examples` and `encoding` each moved right by the group's width, 147.5 px in Paper, 149.1 in
+ * Terminal and 154.0 in Instrument, and in Terminal the header went from one row to two, 46 px to 91. In `index.html`
+ * they hold their place from the first paint, as not pressed, which is true of a page with no view built yet.
+ * `tests/node/harness.test.ts` holds that markup to `HEADER_ORDER` and `KIND_WORD`, so the page cannot spell a kind
+ * another way than the tables do.
+ *
+ * **THE NAME IS THE LABEL, AND THE TOOLTIP SAYS WHAT A PRESS DOES** (umbrella §4 rule 1). `source`, `λ`, `asm` and
+ * `TM` are words a reader says, so each button is named by its own text, in a group named `views`, and `aria-pressed`
+ * carries its state. The tooltip is the sentence, which is `toggleSentence`'s: *hide the TM view*, *show the TM view*,
+ * and with `count` saying two views of the kind, *hide the 2 TM views*.
+ *
+ * **THE LAST PRESSED BUTTON IS DISABLED, AND ITS TOOLTIP IS THE REASON** (rule 4): it could apply and cannot now,
+ * since one view stays, or one kind of view where it stands for several (`toggleSentence`). `aria-description` says
+ * the same to a reader who does not hover, as *edit a copy* says its own reason.
+ *
+ * **`sync` IS HANDED HOW MANY VIEWS EACH TOGGLE STANDS FOR**, since the kinds on screen do not say: `count(kind)` is
+ * the views of the kind a press would hide, or would show (`main.ts`'s `viewsOfKind`).
+ *
+ * **DISABLED BY `aria-disabled`, AND NOT BY THE `disabled` ATTRIBUTE, SO IT KEEPS THE FOCUS IT HAS.** A view key hides
+ * views while the focus is on a toggle, and the toggle left pressed alone is that one or another. Measured with the
+ * attribute (2026-10-12): the λ toggle focused, then the keys that hide the source, asm and TM views, and
+ * `document.activeElement` was `<body>` as the third key returned. A button that says it is disabled this way still
+ * takes a press, so `pick` is handed the press like any other and answers it: `main.ts` says the tooltip's words on
+ * the notice line, as it does for the toggle key.
+ *
+ * **UPDATED IN PLACE**: a press must not cost the button its focus, and a rebuild would.
+ */
+export function viewToggles(
+  group: HTMLElement,
+  pick: (kind: PaneKind) => void,
+): { sync(shown: readonly PaneKind[], count: (kind: PaneKind) => number): void } {
+  const buttons = HEADER_ORDER.map((kind) => {
+    // `data-shows`, NOT `data-kind`: that one is a view host's (`pane-host.ts`), and `[data-kind="lambda"]` is how the
+    // page's λ views are counted.
+    const b = group.querySelector<HTMLButtonElement>(`button.view-toggle[data-shows="${kind}"]`)
+    if (b === null) throw new Error(`the page has no views toggle for ${kind}`)
+    b.addEventListener('click', () => pick(kind))
+    return b
+  })
+  return {
+    sync(shown: readonly PaneKind[], count: (kind: PaneKind) => number): void {
+      for (const b of buttons) {
+        const kind = b.dataset.shows as PaneKind
+        const pressed = shown.includes(kind)
+        const only = pressed && shown.length === 1
+        b.setAttribute('aria-pressed', String(pressed))
+        if (only) b.setAttribute('aria-disabled', 'true')
+        else b.removeAttribute('aria-disabled')
+        const says = toggleSentence(kind, count(kind), only ? 'only' : pressed ? 'shown' : 'hidden')
+        if (b.title !== says) b.title = says
+        if (only) b.setAttribute('aria-description', says)
+        else b.removeAttribute('aria-description')
+      }
+    },
+  }
+}
+
+/**
+ * What a `views` toggle says of the `count` views of `kind` it stands for — the view layouts spec §6: what a press
+ * does where the kind is `shown` or `hidden`, and where it is the `only` kind shown, why a press does nothing.
+ *
+ * | `count` | `shown` | `hidden` | `only` |
+ * | --- | --- | --- | --- |
+ * | 1 | hide the TM view | show the TM view | the TM view is the only one shown — one view stays |
+ * | 2 | hide the 2 TM views | show the 2 TM views | the 2 TM views are the only ones shown — one kind of view stays |
+ *
+ * **A TOGGLE ACTS ON EVERY VIEW OF ITS KIND, SO ITS SENTENCE COUNTS THEM.** Written for one view, it said *hide the
+ * TM view* of a press that hid two, and *the TM view is the only one shown* with two TM views on screen and no other:
+ * a first load, `+ view` and *TM · program*, then the source view's `✕` (measured 2026-10-12). **AND WHAT STAYS IS
+ * ONE VIEW OF ONE, AND ONE KIND OF VIEW OF SEVERAL** (decided 2026-10-12): the several kept the one's reason
+ * at first, *one view stays*, of two views that both stay.
+ *
+ * **THE ONE PLACE THE SENTENCE IS BUILT.** The tooltip (`viewToggles`) and the notice line's answer to a refused press
+ * or key (`main.ts`'s `toggleView`) are the same words, and were two template strings.
+ */
+export function toggleSentence(kind: PaneKind, count: number, state: 'shown' | 'hidden' | 'only'): string {
+  const several = count > 1
+  const views = several ? `the ${count} ${KIND_WORD[kind]} views` : `the ${KIND_WORD[kind]} view`
+  if (state === 'only')
+    return several
+      ? `${views} are the only ones shown — one kind of view stays`
+      : `${views} is the only one shown — one view stays`
+  return `${state === 'shown' ? 'hide' : 'show'} ${views}`
+}
+
+/**
+ * The kinds on screen as a sentence for the live region, in the header's order whatever order they are handed in:
+ * `showing source and TM`, `showing source, asm, λ and TM`.
+ */
+export function shownSentence(shown: readonly PaneKind[]): string {
+  const words = HEADER_ORDER.filter((k) => shown.includes(k)).map((k) => KIND_WORD[k])
+  const last = words.pop()
+  return words.length === 0 ? `showing ${last}` : `showing ${words.join(', ')} and ${last}`
 }

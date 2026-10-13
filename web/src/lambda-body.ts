@@ -1,7 +1,7 @@
 import { type Line, lineOf, type Token } from './lambda-layout'
 import type { Tree } from './lambda-tree'
 import { byteIndexAt, byteToIndex, decorationRanges } from './spans'
-import { Follow } from './state-table'
+import { Follow, ownScroll } from './state-table'
 import { tokenClassName } from './theme'
 import type { LambdaState } from './types'
 import { visibleWindow } from './virtual-list'
@@ -202,6 +202,9 @@ export class LambdaBody {
     this.el.className = 'term'
     this.el.tabIndex = 0
     this.el.setAttribute('aria-label', 'λ term')
+    // A WRITE TO THE BODY'S SCROLL FROM OUTSIDE THIS CLASS REACHES `Follow` THROUGH THIS — `state-table.ts`'s
+    // `restoreScroll`.
+    ownScroll(this.el, this.#follow)
     this.#flat = document.createElement('div')
     this.#flat.className = 'term-flat'
     this.#spacer = document.createElement('div')
@@ -382,10 +385,20 @@ export class LambdaBody {
       return
     }
     const total = this.#lines.length * LINE_HEIGHT
-    this.#spacer.style.height = `${total}px`
+    const height = `${total}px`
+    const resized = this.#spacer.style.height !== height
+    this.#spacer.style.height = height
     // READ AFTER THE RESIZE: `.term`'s height follows its content up to its cap.
     const viewport = this.el.clientHeight
     this.#drawnHeight = viewport
+    // **A SPACER THAT SHRINKS UNDER THE SCROLL CLAMPS IT HERE WHEN NO ROW HOLDS THE RANGE UP**, and not at the
+    // replacement below, which records the clamp it sees. The rows of a body that was off the page were last drawn at
+    // its top, by the resize observer's paint; `pane-host.ts` then puts the body's scroll back where it was, and a
+    // term laid out shorter for the width it returns at clamps that position on the read above. Where the clamp lands
+    // on the redex's own position nothing below writes, so nothing announces it: a body following at 602 px came back
+    // to a Stage tab at 162, the redex's place, and its `scroll` read as the user's. Recorded as a resize's clamp is,
+    // and only when the spacer's height changed, so a scroll of the user's that no paint resized is still theirs.
+    if (resized) this.#follow.onResize(this.el.scrollTop)
     const redex = tree.wire.nextRedex
     if (redex !== null) {
       const at = lineOf(tree, this.#lines, redex)

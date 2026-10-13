@@ -54,7 +54,7 @@ let view: EditorView
 
 beforeAll(async () => {
   const workspace = JSON.stringify({
-    ...JSON.parse(serializeWorkspace(defaultWorkspace())),
+    ...JSON.parse(serializeWorkspace(defaultWorkspace('wide'))),
     tree: deepTree(DEPTH),
     focused: 'pane-1',
   })
@@ -67,11 +67,12 @@ beforeAll(async () => {
 })
 
 describe('a link at start-up whose tree is 6,000 splits deep', () => {
-  it('opens its program alone, under its encoding, in the default views', () => {
+  it('opens its program alone, under its encoding, in the stored workspace’s views', () => {
     expect(view.state.doc.toString()).toBe(PROGRAM)
     // WHAT THE LINK'S ENCODING IS TOLD APART FROM: were `unary` the default encoding, this case would hold nothing.
     expect(EXAMPLE_ENCODING, 'precondition: unary is not the default encoding').not.toBe('unary')
     expect(document.querySelector<HTMLSelectElement>('#encoding')?.value).toBe('unary')
+    // THE FOUR `setup.ts` STORES, and not the two a page with nothing stored opens on.
     expect(leafIds()).toEqual(['source', 'lambda-0', 'asm-0', 'tm-0'])
   })
 

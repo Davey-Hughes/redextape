@@ -1,6 +1,6 @@
 import { LEGS } from './legs'
 import type { Leg } from './protocol'
-import { parseWorkspace, type Workspace } from './workspace'
+import { parseWorkspace, serializeWorkspace, type Workspace } from './workspace'
 
 /**
  * SHARE LINKS — Plan 7 part 6a spec §5.1 and §5.3: the program, its encoding, the workspace and where each leg stands,
@@ -186,10 +186,19 @@ export async function decodeLink(fragment: string, encodings: readonly string[])
   }
 }
 
-/** `raw` as `parseWorkspace` reads it, with a throw read as a refusal: `decodeLink`'s doc has why. */
+/**
+ * `raw` as `parseWorkspace` reads it, with a throw read as a refusal: `decodeLink`'s doc has why.
+ *
+ * **A LINK CARRIES THE ARRANGEMENT ON SCREEN AND NO OTHER** (the view layouts spec §4.7), and that is held where one is
+ * read as well as where one is made. `parseWorkspace` takes a workspace's `arrangements`, so a link written by hand,
+ * or by a build that sent them, opened with them: they went into force and into the reader's storage, with what the
+ * link stored for the views only they held. So what is read is written again without them, as `main.ts` writes a
+ * link's workspace, and read back: `serializeWorkspace` drops what is stored for a view no tree holds.
+ */
 function readWorkspace(raw: string): Workspace | null {
   try {
-    return parseWorkspace(raw)
+    const read = parseWorkspace(raw)
+    return read === null ? null : parseWorkspace(serializeWorkspace({ ...read, arrangements: {} }))
   } catch {
     return null
   }

@@ -247,7 +247,8 @@ describe('share', () => {
 
   /**
    * **THE PAYLOAD IS WHAT THE PAGE HOLDS, NOT WHAT THE PAGE OPENED ON**: the cases above share from `unary` and the
-   * default workspace, which a payload that wrote either down would pass. Last in the file, since it leaves both moved.
+   * workspace the page opened on, which a payload that wrote either down would pass. Last in the file, since it leaves
+   * both moved.
    */
   it('links to the encoding and the workspace the user chose, not the ones the page opened on', async () => {
     await userEvent.selectOptions(document.querySelector('#encoding') as HTMLSelectElement, 'binary')

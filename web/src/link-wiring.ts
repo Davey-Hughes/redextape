@@ -82,8 +82,10 @@ export function createLinkWiring(deps: {
   announce: (text: string) => void
   /** A view's title as its header reads it — how the detachment clause names a view showing a copy. */
   viewTitle: (id: LeafId) => string
+  /** Whether the tree on screen holds this view — `draw.ts`'s dep of the same name has what it excludes. */
+  arranged: (id: LeafId) => boolean
 }): LinkWiring {
-  const { view, sessions, panes, draw, announce, viewTitle } = deps
+  const { view, sessions, panes, draw, announce, viewTitle, arranged } = deps
   const linkStatusHost = deps.statusHost
 
   /**
@@ -100,6 +102,9 @@ export function createLinkWiring(deps: {
    * more recently, and a leg's views could not be told apart in the sentence. `linkStatus` names each view showing a
    * copy, by its title where its leg has more than one view, and suppresses a leg's own clauses only when every view
    * of it shows a copy. A view OFF the page, in Stage, is counted too: it is still a view, and its tab names it.
+   * **A VIEW THE TREE ON SCREEN DOES NOT HOLD IS NOT COUNTED** (the view layouts spec §5): it is kept alive in an
+   * arrangement the workspace remembers, nothing on the page names it, and a share link, whose popover reads this
+   * too, does not carry it.
    *
    * A LEG WITH NO VIEW HAS NOTHING TO SAY, WHICH IS THE HONEST ANSWER RATHER THAN A CONVENIENT ONE.
    * Detachment is a property of the SESSION a view is BOUND to, so with no view there is no binding to
@@ -109,7 +114,7 @@ export function createLinkWiring(deps: {
    */
   const detachedPanes = (): DetachedPanes =>
     perLeg((leg) => {
-      const views = panes.of(leg)
+      const views = panes.of(leg).filter((p) => arranged(p.id))
       return {
         views: views.length,
         copies: views.filter((p) => sessions.entryOf(p.slot.binding.session).detached).map((p) => viewTitle(p.id)),

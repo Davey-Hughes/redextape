@@ -4,8 +4,8 @@ import { userEvent } from 'vitest/browser'
 import { EXAMPLES } from '../../src/examples'
 import { encodeLink } from '../../src/share-link'
 import { bindingKey } from '../../src/view-header'
-import { defaultWorkspace, serializeWorkspace } from '../../src/workspace'
-import { SHELL, until } from './harness'
+import { serializeWorkspace } from '../../src/workspace'
+import { fourViewWorkspace, SHELL, until } from './harness'
 
 /**
  * **A PASTED LINK'S UNDO, AND THE λ COPY'S EDITOR** — Plan 7 part 6a spec §5.5: the `undo` puts back each copy's view,
@@ -84,7 +84,7 @@ describe('a whole link pasted over a λ view holding its copy’s editor', () =>
     location.hash = await encodeLink({
       program: SUM_TO,
       encoding: 'binary',
-      workspace: serializeWorkspace(defaultWorkspace()),
+      workspace: serializeWorkspace(fourViewWorkspace()),
       positions: {},
     })
     // ONLY THE OPEN PUTS `sum_to(5)` IN THE EDITOR, which was on `let x = 40; x + 2`.

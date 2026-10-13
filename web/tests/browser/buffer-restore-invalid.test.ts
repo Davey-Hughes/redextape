@@ -1,7 +1,7 @@
 import { beforeAll, describe, expect, it } from 'vitest'
 import { BUFFERS_STORAGE_KEY, BUFFERS_VERSION, parseBuffers } from '../../src/buffers-store'
-import { defaultLayout, LAYOUT_STORAGE_KEY, serializeLayout } from '../../src/layout'
-import { SHELL } from './harness'
+import { LAYOUT_STORAGE_KEY, serializeLayout } from '../../src/layout'
+import { fourViews, SHELL } from './harness'
 
 /**
  * **A CORRUPT `redextape.buffers` DEGRADES TO A FRESH PAGE** — design §4.1's whole argument for
@@ -28,7 +28,7 @@ import { SHELL } from './harness'
  */
 
 beforeAll(async () => {
-  localStorage.setItem(LAYOUT_STORAGE_KEY, serializeLayout(defaultLayout()))
+  localStorage.setItem(LAYOUT_STORAGE_KEY, serializeLayout(fourViews()))
   localStorage.setItem(BUFFERS_STORAGE_KEY, `{"version":${BUFFERS_VERSION},"minted":"lots"}`)
   document.body.innerHTML = SHELL
   await (await import('../../src/main')).ready
@@ -75,9 +75,9 @@ describe('a corrupt buffers payload', () => {
    * bytes are already cleared before `applyLayout()` runs. `refreshBuffers()`'s unconditional start-up
    * call fires during initialization and includes `persistBuffers()`, which
    * unconditionally writes `{minted:0,buffers:[],bindings:{}}` regardless of whether anything upstream
-   * ever read or refused the corrupt payload. The write-back — `main()`'s last `persistBuffers()`, after
-   * the first `applyLayout()` — corrects the bindings map (which start-up's write left empty by
-   * necessity), not the failed restore itself.
+   * ever read or refused the corrupt payload. The write the first `applyLayout()` makes — `main()`'s own
+   * last `persistBuffers()` when this was written, `pane-host.ts`'s now — corrects the bindings map (which
+   * start-up's write left empty by necessity), not the failed restore itself.
    *
    * BOTH CITED BY SYMBOL RATHER THAN BY LINE. This file used to name the same two call sites by number,
    * as lines 947 and 1249 of `main.ts`, while its sibling `buffer-restore.test.ts` named the same two

@@ -37,6 +37,13 @@
           the same point of the program.
         </li>
         <li>
+          The <strong>views</strong> buttons in the header choose which views are shown: <strong>source</strong>,
+          <strong>asm</strong>, <strong>λ</strong> and <strong>TM</strong>. Each combination of them keeps its own
+          arrangement, so views come back where they were left. A window about 640 px wide or narrower, at the
+          browser's usual text size, has no room for the buttons; a view's <strong>✕</strong>,
+          <strong>+ view</strong> and the view keys below do the same there.
+        </li>
+        <li>
           A view's <strong>⋯</strong> menu has <strong>edit a copy</strong>: the term, the machine or the assembly as
           text you can change and run on its own. <strong>copies ▾</strong> lists them.
         </li>
@@ -62,6 +69,30 @@
       <p>
         A λ copy's editor has no definitions or references to go to, so these three do nothing there. Everything else
         is the editor's default keymap, or vim's when <strong>settings</strong> sets the keymap to vim.
+      </p>
+
+      <h2>View keys</h2>
+      <p id="view-keys-prefix">
+        Press <kbd>Ctrl</kbd>+<kbd>.</kbd> and then one of these keys, from anywhere on the page, an editor included.
+        <kbd>Ctrl</kbd> may stay held for the second key or not. The key after the prefix acts once; any other key is
+        typed as usual, and <kbd>Esc</kbd>, or <kbd>Ctrl</kbd>+<kbd>.</kbd> again, leaves without doing anything.
+      </p>
+      <table id="view-keys">
+        <thead>
+          <tr><th scope="col">Key</th><th scope="col">Does</th></tr>
+        </thead>
+        <tbody>
+          <tr data-key="]"><td><kbd>]</kbd></td><td>the next layout</td></tr>
+          <tr data-key="["><td><kbd>[</kbd></td><td>the previous layout</td></tr>
+          <tr data-key="1"><td><kbd>1</kbd></td><td>show or hide source</td></tr>
+          <tr data-key="2"><td><kbd>2</kbd></td><td>show or hide asm</td></tr>
+          <tr data-key="3"><td><kbd>3</kbd></td><td>show or hide λ</td></tr>
+          <tr data-key="4"><td><kbd>4</kbd></td><td>show or hide TM</td></tr>
+        </tbody>
+      </table>
+      <p id="view-keys-cycle">
+        The layouts <kbd>]</kbd> and <kbd>[</kbd> step through are the source beside asm, the source beside λ, the
+        source beside TM, and all four.
       </p>
 
       <h2>Keys in the views</h2>

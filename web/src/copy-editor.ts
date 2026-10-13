@@ -295,7 +295,9 @@ export class CopyEditor implements EditablePane {
    * a browser, picking `source` in a forked view's selector dropped the `[detached]` badge and repainted the body from
    * the newly-bound leg, but left a live `contenteditable` editor mounted on the copy the view had just left.
    * `PaneSlot.render` calls the view's `setDetached` on every frame, so the invariant lives here rather than waiting
-   * for whichever route first leaves a copy.
+   * for whichever route first leaves a copy. **ON EVERY FRAME, FOR A VIEW ON THE PAGE**: a view that is off it is not
+   * drawn, and `pane-host.ts`'s `reseedingSlots` calls this as a pause or a delete moves one onto the program
+   * (`LambdaPane.setDetached`'s doc has what that left behind).
    *
    * **THE FORK CONTROL IS THE OTHER THING THAT MOVES WHEN `#detached` DOES — a Critical fix, in a review round of
    * the TM view's fork.** `LambdaPane.setDetached`'s own call to `#refreshDetach` is the model: this is what makes the

@@ -7,10 +7,10 @@ import { SHELL } from './harness'
 /**
  * THE RESTORE-FROM-STORAGE PATH, THROUGH `main()` — the branch's only exercise of it.
  *
- * `main()` resolves its tree with `parseWorkspace(readLayoutStorage()) ?? defaultWorkspace()` (a version 1
- * layout is migrated), and until this
+ * `main()` resolves its tree with `parseWorkspace(readLayoutStorage()) ?? defaultWorkspace(viewsShape())` (a
+ * version 1 layout is migrated), and until this
  * file that expression had only ever taken the fallback: `layout-app.test.ts` and
- * `two-lambda-panes.test.ts` both mount onto an empty `Storage`, by design, so every browser test in the
+ * `two-lambda-panes.test.ts` both mounted onto an empty `Storage` then, by design, so every browser test in the
  * suite booted from `defaultLayout()`. Everything a restored tree can carry that a default one cannot was
  * therefore untested wiring.
  *
@@ -33,7 +33,7 @@ import { SHELL } from './harness'
  * The tree `defaultLayout()` returned before the asm view joined it (Plan 7 part 5 spec §3, row 4): source and
  * λ side by side above TM.
  *
- * **SPELLED OUT RATHER THAN TAKEN FROM `defaultLayout()`, BECAUSE THE ENTRY IT STANDS IN FOR IS OLDER THAN THE
+ * **SPELLED OUT RATHER THAN TAKEN FROM A DEFAULT, BECAUSE THE ENTRY IT STANDS IN FOR IS OLDER THAN THE
  * ASM VIEW.** `STORED` below is a version 1 layout, which only a build from before the version 2 workspace could
  * have written, and no such build had an asm leaf to write. Built from today's default, the fixture would be a
  * stored tree no real page ever held. Spelled this way it also carries the spec's own claim about stored
@@ -136,7 +136,7 @@ beforeAll(async () => {
 
 describe('a layout restored from storage', () => {
   it('mounts the stored arrangement rather than falling back to the default', () => {
-    // NO `asm-0`: the default has one and the stored tree does not, so a fallback would show here too.
+    // NOT THE DEFAULT'S TWO: a fallback would show the source and `tm-0` alone.
     expect(leafIds()).toEqual(['source', 'lambda-0', 'lambda-1', 'tm-0'])
   })
 

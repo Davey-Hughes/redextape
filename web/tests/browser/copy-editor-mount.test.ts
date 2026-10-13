@@ -14,7 +14,7 @@ import { SHELL, until } from './harness'
  * Every gesture is a real one: `userEvent` clicks on the title, the `⋯` menu, the `+ view` menu and `✕`.
  *
  * ONE MOUNT FOR THE FILE, for the reason every sibling gives: `main()` runs once per page. Each test makes the copies
- * it needs from the program, so none depends on what the one before it left beyond the default views.
+ * it needs from the program, so none depends on what the one before it left beyond the four views.
  *
  * **AND EACH TEST'S COPIES ARE DELETED AFTER IT** (`afterEach` below): the file makes nine copies, and the ninth waited
  * on a fork the cap refuses once `MAX_WARM_BUFFERS` was 8 (2026-10-07).
@@ -191,7 +191,7 @@ describe('a TM or asm view that comes to show a copy whose editor is mounted now
   it('mounts one in the view still showing the copy when the one holding it closes', async () => {
     const asm = host('asm-0')
     if (shows(asm) !== bindingKey('asm', 'source')) await choose(asm, bindingKey('asm', 'source'))
-    // THE HOLDER IS A VIEW OF ITS OWN, so closing it leaves the default views as they were.
+    // THE HOLDER IS A VIEW OF ITS OWN, so closing it leaves the four views as they were.
     const holder = await split(asm, bindingKey('asm', 'source'))
     await pick(holder, 'detach')
     await until(() => editorOf(holder) !== null, 'the copy’s editor')

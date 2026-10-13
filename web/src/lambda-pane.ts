@@ -461,11 +461,11 @@ export class LambdaPane implements EditablePane {
    * A RE-SEED WITH THE SAME TEXT IS A NO-OP INSIDE `ScratchEditor.setText`, so this is safe on the
    * per-frame path — which, since the whole-branch review before merge, it genuinely sits on:
    * `setDetached` below now calls `setEditor(null)` itself whenever the pane it reports for stops
-   * being detached, and `setDetached` is driven every frame by `PaneSlot.render`. `replies.ts` still
-   * calls this method directly for the two things only a caller outside this class can know — the
-   * text a freshly-built scratch replied with (`scratch-compiled`) and a scratch whose worker just
-   * died with nothing left to recompile against (`worker-error`). **IT ALSO SAID "and still explicitly
-   * at retire, ahead of the draw", AND THAT CALL SITE IS GONE**: it was `compile.ts`'s
+   * being detached, and `setDetached` is driven every frame by `PaneSlot.render`, for a view on the
+   * page. `replies.ts` still calls this method directly for the two things only a caller outside this
+   * class can know — the text a freshly-built scratch replied with (`scratch-compiled`) and a scratch
+   * whose worker just died with nothing left to recompile against (`worker-error`). **IT ALSO SAID "and
+   * still explicitly at retire, ahead of the draw", AND THAT CALL SITE IS GONE**: it was `compile.ts`'s
    * `editorHome()?.setEditor(null)`, already a no-op on every path that reached it (a retire rebinds
    * its panes first, so nothing resolves), and 5d-ii-c decision 2 deleted the branch around it. A
    * retire's editors come down through the sweep instead (`editor-custody.ts`'s `reconcileEditors`).
@@ -771,6 +771,12 @@ export class LambdaPane implements EditablePane {
    * every future exit — the fix the review rejected — the invariant lives here instead: an editor can
    * only be showing while its pane is detached, so the one setter that reports `#detached` is the one
    * place that tears it down, and no future way of leaving `#detached` needs its own reminder.
+   *
+   * **ONE DID: A VIEW THAT IS NOT ON THE PAGE.** `PaneSlot.render` calls this every frame for a view that
+   * is drawn, and `draw()` passes over a Stage tab that is not selected and a view a switch parked. One
+   * that a pause or a delete moved onto the program was told nothing, and went on holding the editor of
+   * a copy it no longer showed. `pane-host.ts`'s `reseedingSlots` calls this as it moves such a view (the
+   * view layouts spec §5.5).
    *
    * GUARDED ON `#editor !== null` RATHER THAN CALLING `setEditor(null)` UNCONDITIONALLY, for the
    * no-op-cost reason every control in this file and `pane-chrome.ts` states: an ATTACHED pane is the

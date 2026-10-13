@@ -1,9 +1,9 @@
 import { EditorView } from '@codemirror/view'
 import { beforeAll, describe, expect, it } from 'vitest'
 import { BUFFERS_STORAGE_KEY, parseBuffers, serializeBuffers } from '../../src/buffers-store'
-import { defaultLayout, LAYOUT_STORAGE_KEY, serializeLayout } from '../../src/layout'
+import { LAYOUT_STORAGE_KEY, serializeLayout } from '../../src/layout'
 import { bindingKey } from '../../src/view-header'
-import { SHELL, until } from './harness'
+import { fourViews, SHELL, until } from './harness'
 
 /**
  * **BUFFERS SURVIVING A RELOAD, THROUGH `main()`** — design §4.9, and the only exercise of that path.
@@ -39,16 +39,17 @@ import { SHELL, until } from './harness'
  * something about the app rather than about this file's spelling of an envelope.
  *
  * **THE THIRD BINDING IS A BINDING THE TREE MUST REFUSE, AND IT IS HERE BECAUSE IT KILLED THE PAGE.**
- * `tm-0` is a TM leaf in `defaultLayout()`, and a scratch buffer has exactly one leg — `lambda`. Seeded
+ * `tm-0` is a TM leaf in `fourViews()`, and a scratch buffer has exactly one leg — `lambda`. Seeded
  * without `main.ts`'s leaf-kind guard, `applyLayout` built a `PaneSlot('tm', 'scratch-1')` and the first
  * `draw()` threw `session scratch-1 has no tm leg` out of `main()` itself: every test in this file
  * reported as a SKIP under one failed suite, which is what a whole page dying looks like from here.
  * `parseBuffers` cannot catch it — the payload carries no leg (design §4.1) — so the tree is the only
  * thing that can, and this line is what makes it answer.
  *
- * **IT IS REACHABLE WITHOUT A HAND-EDITED KEY**: bind a λ pane to a buffer, switch that pane to TM
- * through the picker (which persists the TREE and not the buffers), and reload before anything else
- * writes the buffers key. The assertions below pin both halves of the answer — `tm-0` gets no pane
+ * **IT WAS REACHABLE WITHOUT A HAND-EDITED KEY, UNTIL `pane-host.ts`'s `applyLayout` STORED THE BINDINGS**:
+ * bind a λ pane to a buffer, switch that pane to TM through the picker (which stored the TREE and not the
+ * buffers), and reload before anything else wrote the buffers key. `bindings-stored.test.ts` holds that
+ * pick to writing them now. The assertions below pin both halves of the answer — `tm-0` gets no pane
  * binding, and `scratch-1` is therefore still an orphan and still asleep.
  *
  * **`scratch-2` CARRIES `collapsed: true` — 5d-ii-d T9, design §4.7's fixture.** It is the ONE bound
@@ -89,7 +90,7 @@ function pickBinding(leaf: string, key: string): void {
 }
 
 beforeAll(async () => {
-  localStorage.setItem(LAYOUT_STORAGE_KEY, serializeLayout(defaultLayout()))
+  localStorage.setItem(LAYOUT_STORAGE_KEY, serializeLayout(fourViews()))
   localStorage.setItem(BUFFERS_STORAGE_KEY, SEEDED)
   document.body.innerHTML = SHELL
   await (await import('../../src/main')).ready
@@ -159,19 +160,19 @@ describe('buffers restored from storage', () => {
    * a cold buffer at all.
    */
   it('restores both buffers and warms only the one a pane names', async () => {
-    // **THE WRITE-BACK AT THE END OF `main()` — the `persistBuffers()` immediately after the restore's
-    // own `custody.claim` loop — PINNED HERE BECAUSE HERE IS BEFORE ANY REPLY CAN LAND.**
-    // `main()`'s only `await` is `init()`, so everything from the restore block through that write-back
+    // **THE RESTORE'S OWN WRITE OF THE BINDINGS — the one `main()`'s first `applyLayout()` makes, through
+    // `pane-host.ts`'s `persistBindings()` — PINNED HERE BECAUSE HERE IS BEFORE ANY REPLY CAN LAND.**
+    // `main()`'s only `await` is `init()`, so everything from the restore block through that write
     // runs in one synchronous continuation — no worker `message` event (a
     // macrotask) is processed until `main()` returns, and the `beforeAll` above awaits exactly that
     // return. Reading `stored()` here, before this test's own first `await`, therefore reads the
-    // bindings `persistBuffers()` wrote from `panes.all()` AFTER the first `applyLayout()` — a write
+    // bindings `persistBuffers()` wrote from `panes.all()` once `applyLayout()` had built the panes — a write
     // `refreshBuffers()`'s own start-up call cannot have made, since that one runs before a
-    // single pane exists and always writes `bindings: {}`. Delete that final `persistBuffers()` and this
-    // line sees `{}` instead of the binding below; the later test with a similar-looking assertion
-    // (`writes a payload naming both restored buffers…`) cannot tell the two apart, because by the time
-    // IT runs a `scratch-compiled` reply has already landed and persisted through that arm's own
-    // `onBuffersPersist()` call to the same `persistBuffers`.
+    // single pane exists and always writes `bindings: {}`. Take `persistBindings()` out of `applyLayout` and
+    // this line sees `{}` instead of the binding below (measured, 2026-10-12); the later test with a
+    // similar-looking assertion (`writes a payload naming both restored buffers…`) cannot tell the two
+    // apart, because by the time IT runs a `scratch-compiled` reply has already landed and persisted
+    // through that arm's own `onBuffersPersist()` call to the same `persistBuffers`.
     //
     // CITED BY SYMBOL RATHER THAN BY LINE — the whole-branch review before merge found seven `file:line`
     // citations in this file and all seven had drifted, every one of them undershooting because the file
@@ -215,12 +216,12 @@ describe('buffers restored from storage', () => {
 
   /**
    * **THE FULL SHAPE OF THE PERSISTED PAYLOAD, NOT THE TIMING PROOF.** This used to claim to be "the
-   * state under test" for the write-back at the end of `main()`, on the reasoning that "nothing here
+   * state under test" for the restore's own write of the bindings, on the reasoning that "nothing here
    * clicks anything, deliberately". That reasoning was false: by the point THIS test runs, the test
    * above it has already awaited a `scratch-compiled` reply, which persists on its own (that arm's
-   * `onBuffersPersist()`, through the very same `persistBuffers` closure `main()`'s write-back calls) —
-   * so this assertion would pass whether or not that write-back exists, and a click was never what made the
-   * difference. The timing claim — that the write-back, not a later reply, is what put the binding in
+   * `onBuffersPersist()`, through the very same `persistBuffers` closure the restore's write calls) —
+   * so this assertion would pass whether or not that write exists, and a click was never what made the
+   * difference. The timing claim — that the restore's write, not a later reply, is what put the binding in
    * storage — is pinned in the FIRST test above instead, which reads `stored()` before its own first
    * `await` and so before any reply-driven persist could have run. What this test still earns its keep
    * on is the payload's OTHER fields: both restored buffer ids survive, in order, and `minted` comes
@@ -340,7 +341,7 @@ describe('buffers restored from storage', () => {
   })
 
   /**
-   * **THE FOURTH PERSIST SITE, WHICH IS THE ONLY ONE THAT CHANGES THE PAYLOAD WITHOUT CHANGING A
+   * **THE FOURTH PERSIST SITE, WHICH CHANGES THE PAYLOAD WITHOUT CHANGING A
    * BUFFER** — `transport.ts`'s `rebind` handler, through the binding selector a user actually aims at.
    * Without it the stored `bindings` keep naming the session this pane was on BEFORE the pick, and the
    * next reload undoes the gesture with nothing on screen to say why.

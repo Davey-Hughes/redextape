@@ -1,7 +1,7 @@
 import { beforeAll, describe, expect, it } from 'vitest'
 import { LAYOUT_STORAGE_KEY } from '../../src/layout'
-import { defaultWorkspace, serializeWorkspace } from '../../src/workspace'
-import { SHELL, until } from './harness'
+import { serializeWorkspace } from '../../src/workspace'
+import { fourViewWorkspace, SHELL, until } from './harness'
 
 /**
  * **A λ VIEW IS BUILT WITH THE DISPLAY ITS WORKSPACE STORED** (Plan 7 part 4a, spec §5.1). Seeded before
@@ -19,7 +19,7 @@ beforeAll(async () => {
   localStorage.setItem(
     LAYOUT_STORAGE_KEY,
     serializeWorkspace({
-      ...defaultWorkspace(),
+      ...fourViewWorkspace(),
       display: { 'lambda-0': STORED },
       // ITS TERM MAP LEFT OPEN: a λ view's panel state comes back as a TM view's does.
       panels: { 'lambda-0': { map: true } },
@@ -68,15 +68,21 @@ describe('a λ view restored from a stored workspace', () => {
 
   /**
    * **A LEAF ID COMES BACK, AND ITS OLD DISPLAY MUST NOT COME WITH IT** — `workspace-restore.test.ts`'s rule
-   * for panel state, held for the display. `defaultLayout()` re-mints `lambda-0`, so *reset preset* after
-   * closing the λ view hands its id to a new view. The write already dropped the closed view's display; the
-   * workspace in memory has to drop it too, or the new view is built from it and a reload would draw it
-   * differently from the same clicks.
+   * for panel state, held for the display. The tree a `✕` leaves is remembered and still names `lambda-0`, so the λ
+   * toggle after closing the λ view hands its id to a new view, and the id is a live one all the while: nothing but
+   * the close itself (`main.ts`'s `enterTree`) drops the closed view's display, from memory and so from the write.
+   *
+   * **THE λ TOGGLE ALONE, WITH NO *RESET PRESET* BEFORE IT.** A reset forgets the remembered tree, the id is no longer
+   * live, and the display is dropped whatever the close did: this case passed with the close dropping nothing while
+   * it reset first.
    */
   it('does not give a re-minted view the display of the one that closed', async () => {
+    expect(term()?.dataset.layout, 'the view to close draws as a new one would').toBe('outline')
+    const toggle = document.querySelector<HTMLButtonElement>('#views-shown button[data-shows="lambda"]')
     document.querySelector<HTMLButtonElement>('[data-leaf="lambda-0"] button.view-close')?.click()
     await until(() => document.querySelector('[data-leaf="lambda-0"]') === null, 'the λ view to close')
-    document.querySelector<HTMLButtonElement>('#reset-preset')?.click()
+    expect(toggle?.getAttribute('aria-pressed')).toBe('false')
+    toggle?.click()
     await until(() => rows() > 0 && term()?.dataset.stale === undefined, 'the re-minted view’s tree')
     expect(term()?.dataset.layout).toBe('code')
     expect(checked('code')).toBe('true')

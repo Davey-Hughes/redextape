@@ -52,15 +52,15 @@ describe('the stage, under the gestures that add and remove views', () => {
    * Spec §11 is categorical — "Focus never falls to `<body>`" — and names this gesture outright: "closing a
    * view moves focus to the title of the view that becomes `focused`".
    *
-   * **THE DEFAULT ARRANGEMENT IS THE ONE THAT BREAKS IT, WHICH IS WHY THE PRECONDITIONS ARE ASSERTED.**
+   * **THE FOUR-VIEW ARRANGEMENT IS THE ONE THAT BREAKS IT, WHICH IS WHY THE PRECONDITIONS ARE ASSERTED.**
    * `close` targets the neighbour that GREW and the stage mounts the view that becomes FOCUSED, and on
-   * `defaultLayout()` those are two different leaves: closing `lambda-0` grows `source` and focuses
+   * `harness.ts`'s `fourViews()` those are two different leaves: closing `lambda-0` grows `source` and focuses
    * `asm-0`. Closing `asm-0` instead makes them agree — both are `lambda-0`, the leaf before it and the first
    * view left — so a version of this case that picked that view would pass against the same bug.
    */
   it('does not strand the focus when the shown view is closed', () => {
     pick('[data-preset="stage"]')
-    expect(tabs(), 'the stage is not showing the default four views').toEqual(['source', 'lambda-0', 'asm-0', 'tm-0'])
+    expect(tabs(), 'the stage is not showing the four views').toEqual(['source', 'lambda-0', 'asm-0', 'tm-0'])
     expect(shown(), 'the precondition is that lambda-0 is the shown view').toBe('lambda-0')
 
     const close = document.querySelector<HTMLButtonElement>('[data-leaf="lambda-0"] button.view-close')

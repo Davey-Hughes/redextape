@@ -5,7 +5,7 @@ import { bindingKey } from '../../src/view-header'
 import { SHELL, until } from './harness'
 
 /**
- * The asm leg through the whole app (Plan 7 part 5 spec §5–§6): a compile reaches the asm view in the default tree,
+ * The asm leg through the whole app (Plan 7 part 5 spec §5–§6): a compile reaches the asm view of a four-view page,
  * the step controls drive it, the readout carries its segment, and a program one backend declines is still run by the
  * others. `asm-pane.test.ts` holds the view on its own; this holds the wiring that feeds it.
  */
@@ -75,7 +75,7 @@ beforeAll(async () => {
 })
 
 describe('the asm leg in the app', () => {
-  it('is a view of its own in the default tree, showing the program’s listing', async () => {
+  it('is a view of its own, showing the program’s listing', async () => {
     await until(() => rows().length > 0, 'the asm listing to draw')
     expect(host('asm-0').dataset.kind).toBe('asm')
     expect(host('asm-0').querySelector('.view-title')?.textContent).toBe('asm · program')

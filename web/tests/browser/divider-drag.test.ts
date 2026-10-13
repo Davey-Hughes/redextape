@@ -3,7 +3,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { LAYOUT_STORAGE_KEY } from '../../src/layout'
 import { KEY_STEP } from '../../src/layout-view'
 import { parseWorkspace } from '../../src/workspace'
-import { SHELL } from './harness'
+import { SHELL, storeFourViews } from './harness'
 
 /**
  * A DIVIDER DRAG, THROUGH `main()` — the test 5d-ii-a said did not exist, and the reason a broken drag
@@ -37,6 +37,8 @@ async function freshMain(): Promise<{ ready: Promise<EditorView> }> {
 
 async function mountApp(): Promise<void> {
   localStorage.clear()
+  // ALL FOUR VIEWS, WHICH AN EMPTY STORE OPENED ON WHEN THIS WAS WRITTEN: it opens on the source and TM now.
+  storeFourViews()
   document.body.innerHTML = SHELL
   await (await freshMain()).ready
 }

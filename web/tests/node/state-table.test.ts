@@ -5,7 +5,9 @@ import {
   focusedRows,
   highlight,
   linkedRows,
+  ownScroll,
   ROW_HEIGHT,
+  restoreScroll,
   StateIndex,
 } from '../../src/state-table'
 import type { RuleView, StateView, TmProgram, TmState } from '../../src/types'
@@ -328,5 +330,70 @@ describe('focusedRows', () => {
   it('ignores a state id past the end rather than throwing or marking row 0', () => {
     const i = new StateIndex(program())
     expect(focusedRows(i, [99]).size).toBe(0)
+  })
+})
+
+/**
+ * A WRITE TO A BOX'S SCROLL FROM OUTSIDE THE BOX — `pane-host.ts` puts a view's scroll positions back after a rebuild
+ * of the layout. The box here is a stand-in with the two properties the write touches, and `limit` is how far its
+ * content lets it scroll, as a browser clamps a write. `tests/browser/follow-kept.test.ts` has the real boxes.
+ */
+describe('restoreScroll', () => {
+  const boxOf = (limit: number): Element => {
+    let top = 0
+    return {
+      scrollLeft: 0,
+      get scrollTop() {
+        return top
+      },
+      set scrollTop(v: number) {
+        top = Math.min(v, limit)
+      },
+    } as unknown as Element
+  }
+
+  it('writes both positions', () => {
+    const box = boxOf(10_000)
+    restoreScroll(box, 300, 7)
+    expect(box.scrollTop).toBe(300)
+    expect(box.scrollLeft).toBe(7)
+  })
+
+  it('tells the box’s Follow of the write, so the scroll it causes does not detach it', () => {
+    const box = boxOf(10_000)
+    const f = new Follow()
+    ownScroll(box, f)
+    restoreScroll(box, 300, 0)
+    f.onScroll(300)
+    expect(f.following).toBe(true)
+  })
+
+  // WHAT THE CASE ABOVE WOULD PASS WITHOUT: a `Follow` that is told nothing reads the same scroll as the user's.
+  it('tells no Follow that does not own the box', () => {
+    const f = new Follow()
+    restoreScroll(boxOf(10_000), 300, 0)
+    f.onScroll(300)
+    expect(f.following).toBe(false)
+  })
+
+  it('tells the Follow where a clamped write landed', () => {
+    const box = boxOf(250)
+    const f = new Follow()
+    ownScroll(box, f)
+    restoreScroll(box, 300, 0)
+    expect(box.scrollTop, 'precondition: the write was clamped by more than the echo’s tolerance').toBe(250)
+    f.onScroll(250)
+    expect(f.following).toBe(true)
+  })
+
+  it('leaves a box the user scrolled not following', () => {
+    const box = boxOf(10_000)
+    const f = new Follow()
+    ownScroll(box, f)
+    f.onScroll(120)
+    expect(f.following, 'precondition: the user’s scroll detached it').toBe(false)
+    restoreScroll(box, 120, 0)
+    f.onScroll(120)
+    expect(f.following).toBe(false)
   })
 })

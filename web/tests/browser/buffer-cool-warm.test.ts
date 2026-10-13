@@ -30,9 +30,9 @@ import { asShown } from './lambda-text'
  * three separate `it`s would each depend on the previous having actually run. Every stage asserts before
  * it acts.
  *
- * IT SEEDS NO STORAGE. Every browser test file gets its own in-memory `Storage` from
- * `tests/browser/setup.ts` before this module body runs, so this page starts with no layout and no
- * buffers — the default tree, and a fork that mints `scratch 1`.
+ * IT SEEDS NO STORAGE OF ITS OWN. Every browser test file gets its own in-memory `Storage` from
+ * `tests/browser/setup.ts` before this module body runs, holding the program and the four-view workspace that file
+ * stores, so this page starts with no buffers — the four views, and a fork that mints `scratch 1`.
  */
 
 /** `scratch-edit.test.ts`'s program, for its reason: it truncates at neither budget, so `✎ edit a copy` is

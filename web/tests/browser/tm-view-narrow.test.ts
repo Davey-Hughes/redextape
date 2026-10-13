@@ -2,7 +2,7 @@ import type { EditorView } from '@codemirror/view'
 import { beforeAll, describe, expect, it } from 'vitest'
 import { page, userEvent } from 'vitest/browser'
 import { EXAMPLES } from '../../src/examples'
-import { SHELL, until } from './harness'
+import { resetToFourViews, SHELL, until } from './harness'
 
 /**
  * **THE TM VIEW ON A PHONE'S SCREEN** — Explorer at 320px and 390px, on `sum_to(5)`, the example a first visit opens,
@@ -242,10 +242,11 @@ const presetOf = (preset: string): void => {
   if (menuOf('workspace').matches(':popover-open')) menuOf('workspace').hidePopover()
 }
 const explorer = (): void => presetOf('explorer')
-/** The workspace menu's *reset preset*: the preset's default views, one TM view among them. */
-const resetPreset = (): void => {
+/** The workspace menu's *reset preset*, and then all four views, one TM view among them. */
+const resetPreset = async (): Promise<void> => {
   buttonOf('workspace').click()
-  buttonOf('reset-preset').click()
+  // ALL FOUR VIEWS, AS *RESET PRESET* GAVE WHEN THIS WAS WRITTEN: it leaves the source beside the TM view now.
+  await resetToFourViews()
   if (menuOf('workspace').matches(':popover-open')) menuOf('workspace').hidePopover()
 }
 /** Split the TM view right into a second view of the same kind, by its `⋯` menu, with the pointer. */
@@ -659,7 +660,7 @@ describe('the TM view, on sum_to(5)', () => {
       presetOf(layout.preset)
       await page.viewport(layout.width, layout.height)
       if (layout.split) {
-        resetPreset()
+        await resetPreset()
         await frame()
         await splitTm()
       }
@@ -711,7 +712,7 @@ describe('the TM view, on sum_to(5)', () => {
       }
     } finally {
       if (layout.split) {
-        resetPreset()
+        await resetPreset()
         await until(() => tmViews().length === 1, 'one TM view again')
       }
       home()
@@ -1081,7 +1082,7 @@ describe.each(COUNTED)('the program level’s counts, on $title', ({ id, marks, 
         presetOf(layout.preset)
         await page.viewport(layout.width, layout.height)
         if (layout.split) {
-          resetPreset()
+          await resetPreset()
           await frame()
           await splitTm()
         }
@@ -1235,7 +1236,7 @@ describe.each(COUNTED)('the program level’s counts, on $title', ({ id, marks, 
         await until(() => choice('arcs').getAttribute('aria-checked') === 'true', 'the diagram drawn as arcs again')
         if (shown(diagramReattach())) diagramReattach().click()
         if (layout.split) {
-          resetPreset()
+          await resetPreset()
           await until(() => tmViews().length === 1, 'one TM view again')
         }
         home()

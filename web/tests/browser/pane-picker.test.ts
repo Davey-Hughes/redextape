@@ -3,7 +3,7 @@ import { beforeAll, beforeEach, describe, expect, it } from 'vitest'
 import { page } from 'vitest/browser'
 import { LAYOUT_STORAGE_KEY } from '../../src/layout'
 import { bindingKey } from '../../src/view-header'
-import { SHELL, until } from './harness'
+import { resetToFourViews, SHELL, until } from './harness'
 
 /**
  * **THE PICKER, ACTING** — a split creates what it was asked to create, and the closed source pane has a
@@ -101,15 +101,15 @@ beforeAll(async () => {
 
 beforeEach(async () => {
   localStorage.removeItem(LAYOUT_STORAGE_KEY)
-  document.querySelector<HTMLButtonElement>('#reset-preset')?.click()
+  await resetToFourViews()
   view.dispatch({ changes: { from: 0, to: view.state.doc.length, insert: 'let x = 40; x + 2' } })
   await until(
     () =>
       document.querySelector<HTMLElement>('#results')?.dataset.state === 'idle' &&
-      // THE DEFAULT TREE'S FOUR VIEWS: source, λ, asm and TM.
+      // ALL FOUR VIEWS: source, λ, asm and TM.
       leafIds().length === 4 &&
       lambdaLeaves().length === 1,
-    'the default layout on a settled source program',
+    'all four views on a settled source program',
   )
 })
 
@@ -321,7 +321,7 @@ describe('the closed source pane comes back through the picker', () => {
       expect(document.querySelector('[data-leaf="source"] #editor')).not.toBeNull()
       expect(document.querySelector('[data-leaf="source"] .cm-content')?.textContent).toContain('let z = 9')
       // WHERE IT CAME BACK, AND THAT NOTHING ELSE MOVED: `reset preset` would answer
-      // `['source', 'lambda-0', 'asm-0', 'tm-0']` here, which is what this line is chosen to fail against.
+      // `['source', 'tm-0']` here, which is what this line is chosen to fail against.
       expect(leafIds()).toEqual(['lambda-0', 'source', 'asm-0', 'tm-0', extra])
       expect(places().find((p) => p.startsWith(`${extra}@`))).toBe(extraPlace)
       expect(errors).toEqual([])

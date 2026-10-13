@@ -1,6 +1,7 @@
 import type { EditorView } from '@codemirror/view'
 import { computeAccessibleName } from 'dom-accessibility-api'
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
+import { page } from 'vitest/browser'
 import { DAY, EMBER, legacyLayout } from '../node/base16-fixtures'
 import { SHELL, until } from './harness'
 
@@ -268,7 +269,7 @@ describe.each(STATES)('every control in $name', ({ name, picks, tiled }) => {
   it("with every view's title and ⋯ menu open", () => {
     const leaves = viewLeaves(tiled)
     expect(leaves.length, `${name}: no view to walk`).toBeGreaterThan(0)
-    // THE WALK REACHES EVERY KIND OF VIEW THE DEFAULT TREE HAS: a tiled state shows all of them, the asm view included.
+    // THE WALK REACHES EVERY KIND OF VIEW THE FOUR-VIEW PAGE HAS: a tiled state shows all of them, the asm view too.
     if (tiled) expect(leaves, `${name}: the views walked`).toEqual(['lambda-0', 'asm-0', 'tm-0'])
     for (const leaf of leaves) {
       for (const sel of [`[data-leaf="${leaf}"] button.view-title`, `[data-leaf="${leaf}"] button.view-more`]) {
@@ -457,6 +458,39 @@ describe('every control in Explorer, in the settings menu and the import dialog'
  * after it. A closed dialog's controls need no case of their own: the import dialog is on the page, closed, for every
  * walk above but its own.
  */
+/**
+ * THE `views` TOGGLES, WHICH THE WALKS ABOVE NEVER MEET (the view layouts spec §6): this file runs in the runner's
+ * 414 px window, and `main.ts` hides the toggles in a window 40rem wide or narrower. So the window is widened for
+ * this one group, and **THE TOGGLES ARE ASSERTED TO BE AMONG WHAT WAS WALKED**, since a walk that skipped them would
+ * pass as the ones above do.
+ */
+describe('every control in Explorer, in a window wide enough for the views toggles', () => {
+  const toggles = (): HTMLButtonElement[] => [...document.querySelectorAll<HTMLButtonElement>('#views-shown button')]
+  beforeAll(async () => {
+    await page.viewport(1280, 896)
+  })
+  afterAll(async () => {
+    for (const b of toggles()) if (b.getAttribute('aria-pressed') === 'false') b.click()
+    await page.viewport(414, 896)
+  })
+
+  it('walks the four toggles, each named by its own word', () => {
+    const walked = check('wide: page')
+    expect(toggles()).toHaveLength(4)
+    for (const b of toggles()) expect(walked, `the walk skipped the ${b.textContent} toggle`).toContain(b)
+    expect(toggles().map(nameOf)).toEqual(['source', 'asm', 'λ', 'TM'])
+  })
+
+  // DISABLED BY `aria-disabled` (`app-header.ts`'s `viewToggles`), so the walk holds it to taking the focus too.
+  it('walks them with one view left, where the last toggle is disabled and still named', () => {
+    for (const b of toggles().slice(1)) b.click()
+    expect(toggles().map((b) => b.getAttribute('aria-disabled'))).toEqual(['true', null, null, null])
+    const walked = check('wide: one view')
+    expect(walked).toContain(toggles()[0])
+    expect(nameOf(toggles()[0] as HTMLButtonElement)).toBe('source')
+  })
+})
+
 describe('the walk itself', () => {
   it('skips a hidden input', () => {
     const hidden = document.createElement('input')

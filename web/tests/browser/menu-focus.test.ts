@@ -1,7 +1,7 @@
 import type { EditorView } from '@codemirror/view'
 import { beforeAll, beforeEach, describe, expect, it } from 'vitest'
 import { page } from 'vitest/browser'
-import { SHELL, until } from './harness'
+import { resetToFourViews, SHELL, until } from './harness'
 
 /**
  * **A MENU ITEM NEVER LEAVES THE FOCUS ON `<body>`** — spec §11's categorical rule, accessibility item 1,
@@ -87,15 +87,15 @@ beforeAll(async () => {
   await until(() => document.querySelector<HTMLElement>('#results')?.dataset.state === 'idle', 'the first compile')
 })
 
-// Back to the default four views before each gesture, since several of these change the tree.
+// Back to the four views before each gesture, since several of these change the tree.
 beforeEach(async () => {
-  document.querySelector<HTMLButtonElement>('#reset-preset')?.click()
+  await resetToFourViews()
   view.dispatch({ changes: { from: 0, to: view.state.doc.length, insert: 'let x = 40; x + 2' } })
   await until(
     () =>
       document.querySelectorAll('[data-leaf]').length === 4 &&
       document.querySelector<HTMLElement>('#results')?.dataset.state === 'idle',
-    'the default views',
+    'the four views',
   )
   // **A KNOWN STARTING POINT INSIDE A VIEW — the file doc has the argument, and both of the other two
   // choices were tried and measured useless.** `<body>` (what the reset above leaves when its own fix is

@@ -1,7 +1,7 @@
 import type { EditorView } from '@codemirror/view'
 import { describe, expect, it } from 'vitest'
 import { PROGRAM_STORAGE_KEY } from '../../src/program-store'
-import { SHELL, until } from './harness'
+import { SHELL, showFourViews, until } from './harness'
 
 /**
  * **BLOCKED STORAGE IS NOT FULL STORAGE** — Plan 7 part 6a spec §4.3 and §7. Where this browser blocks site data,
@@ -63,6 +63,12 @@ describe('a program write refused because storage is blocked', () => {
       () => idle() && (document.querySelector('#results')?.textContent ?? '').includes('λ 2 · '),
       'the edited program to compile',
     )
+    // WITH NOTHING READABLE IN STORAGE THE PAGE OPENED ON THE SOURCE AND THE TM VIEW, so the λ view is asked for.
+    expect(
+      [...document.querySelectorAll<HTMLElement>('#views [data-leaf]')].map((el) => el.dataset.leaf),
+      'a page whose storage cannot be read did not open on the first-load views',
+    ).toEqual(['source', 'tm-0'])
+    await showFourViews()
     document.querySelector<HTMLButtonElement>('[data-leaf="lambda-0"] button.detach')?.click()
     await until(() => document.querySelector('[data-leaf="lambda-0"] .term-editor') !== null, 'the copy')
     // SAID AT ONCE, UNDER THE COPY'S OWN NOTICE: the live region is where the new sentence is heard.
