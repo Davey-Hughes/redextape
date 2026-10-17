@@ -228,15 +228,18 @@
 // only the pedantic exemption, for the same reason `clippy.toml` exempts test/example code generally.
 #![allow(clippy::pedantic)]
 
-#[cfg(not(target_arch = "wasm32"))]
-#[global_allocator]
-static ALLOC: mimalloc::MiMalloc = mimalloc::MiMalloc;
-
 use std::collections::{HashMap, HashSet};
 use std::io::Write;
 
 use redextape_core::lambda::lower;
 use redextape_core::lambda::term::{Dir, LambdaTerm, Node, logical_size, shift, subst};
+
+#[path = "common/allocator.rs"]
+mod allocator;
+#[path = "common/nested_groups.rs"]
+mod nested_groups;
+
+use nested_groups::nested_groups_src;
 
 fn line(s: &str) {
     println!("{s}");
@@ -246,15 +249,6 @@ fn line(s: &str) {
 fn core_of(src: &str) -> Option<redextape_core::core::Core> {
     let a = redextape_core::analyze(src);
     a.core
-}
-
-fn nested_groups_src(m: u32) -> String {
-    let mut body = format!("n + g{m}(n)");
-    for k in (0..m).rev() {
-        let j = k + 1;
-        body = format!("fn f{j}(n) {{ {body} }} fn g{j}(n) {{ f{j}(n) }} g{j}(n) + g{k}(n)");
-    }
-    format!("fn f0(n) {{ {body} }} fn g0(n) {{ f0(n) }} g0(1)")
 }
 
 /// Post-order over the DAG, memoized by allocation identity — O(physical).

@@ -54,7 +54,6 @@
 //! browser, 12.56 bytes (`frame-cost.test.ts`), and it is not comparable with a λ row taken before then.
 #![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic, clippy::pedantic)]
 
-use std::io::Write;
 use std::rc::Rc;
 use std::time::{Duration, Instant};
 
@@ -66,21 +65,13 @@ use redextape_core::trace::{LambdaCursor, TmCursor};
 use redextape_core::viewmodel::{LambdaState, TmProgram, TmState};
 use redextape_core::{parser, typeck};
 
-/// `protocol.ts`'s `LAMBDA_BYTE_BUDGET`, and the reason §3.2 of the design caps the ring buffer in
-/// bytes rather than frames: one frame is allowed to be this large.
-///
-/// THAT POINTER READ `protocol.ts` line 10 UNTIL THIS COMMIT, AND IT WAS WRONG AT BIRTH AND RIGHT
-/// AGAIN BY ACCIDENT — invalidated by its own commit, then restored by an unrelated one. Line 10 held
-/// that constant in the PARENT of the commit that wrote this doc, Plan 5a-i (#17); that same commit
-/// rewrote `protocol.ts`, splitting the constant's one-line doc into a block and lifting the constant
-/// one line, so the pointer landed on the blank line immediately below the constant.
-/// Static click-linking (#23) later added a `LinkIndexWire` import at the top of the file, which
-/// pushed the constant back down by exactly the line it had lost. Net drift over the whole history:
-/// zero. A pointer that was wrong when written, is right now, and was made right by an import line
-/// nobody connected to it is the whole argument for naming the symbol instead. `link_index_probe.rs`
-/// cites the SAME constant one line the other way, for the mirror-image reason — see its
-/// `WEB_BYTE_BUDGET`.
-const WEB_BYTE_BUDGET: usize = 65_536;
+#[path = "common/text_underlined.rs"]
+mod text_underlined;
+#[path = "common/web_budget.rs"]
+mod web_budget;
+
+use text_underlined::{head, line};
+use web_budget::WEB_BYTE_BUDGET;
 
 /// Candidate smaller budgets for FRAME history, which is a different job from the one term a user
 /// reads. §3.2 leaves the choice to this measurement.
@@ -93,17 +84,6 @@ const RADIUS_SWEEP: &[usize] = &[10, 20, 40, 80];
 /// per-step cost, and a few thousand steps establishes it. A program that hits this is reported as
 /// hitting it, never silently truncated.
 const STEP_LIMIT: u64 = 20_000;
-
-fn line(s: &str) {
-    println!("{s}");
-    let _ = std::io::stdout().flush();
-}
-
-fn head(s: &str) {
-    line("");
-    line(s);
-    line(&"-".repeat(s.len()));
-}
 
 fn us(d: Duration) -> f64 {
     d.as_secs_f64() * 1e6

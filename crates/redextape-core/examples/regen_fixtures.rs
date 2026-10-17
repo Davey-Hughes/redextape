@@ -18,16 +18,15 @@
 // deliberate here. The `allow-*-in-tests` keys in `clippy.toml` do not reach example targets at all.
 #![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic, clippy::pedantic)]
 
-#[cfg(not(target_arch = "wasm32"))]
-#[global_allocator]
-static ALLOC: mimalloc::MiMalloc = mimalloc::MiMalloc;
-
 use redextape_core::core::Core;
 use redextape_core::desugar::desugar;
 use redextape_core::parser::parse;
 use redextape_core::tm::{DescribedRun, EncodingKind, TM_DEFAULT_CAPS, print_tm_with, run_tm_described};
 use redextape_core::ty::Ty;
 use redextape_core::typeck::result_type;
+
+#[path = "common/allocator.rs"]
+mod allocator;
 
 /// Parse, typecheck and desugar `src`, returning the `Core` and its top-level type together. The
 /// integration tests share one copy in `tests/common/mod.rs`; this example keeps its own.

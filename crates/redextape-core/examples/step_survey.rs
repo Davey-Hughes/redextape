@@ -15,13 +15,11 @@
 //! which is outside this survey's scope (every program here must complete under `DEFAULT_CAPS`).
 //! This copy (and `redextape-native/tests/native_oracle.rs`'s) drifted from `FIRST_ORDER_DEMOS` twice
 //! across two slices despite the "verbatim" claim above, so hand-checking is no longer enough:
-//! `three_way_oracle.rs::first_order_demos_stay_synced_across_all_seven_copies` now asserts all seven
-//! copies — this one, `native_oracle.rs`'s, `examples/list_reduction_probe.rs`'s,
-//! `examples/lambda_sharing_probe.rs`'s, `examples/concurrency_probe.rs`'s,
-//! `examples/state_cost_probe.rs`'s and the canonical — are textually identical, so a future drift
-//! fails a test instead of silently stale-ing this report's corpus count. It said "four" until the
-//! whole-branch review found the fifth; the enumeration is `grep -rn FIRST_ORDER_DEMOS` over the tree,
-//! not a count anyone maintains from memory.
+//! `three_way_oracle.rs::first_order_demos_stay_synced_across_every_copy` now asserts all four
+//! copies — this one, `native_oracle.rs`'s, `examples/common/demos.rs`'s and the canonical — are
+//! textually identical, so a future drift fails a test instead of silently stale-ing this report's
+//! corpus count. The enumeration is `grep -rn FIRST_ORDER_DEMOS` over the tree, not a count anyone
+//! maintains from memory.
 //!
 //! THE SURVEY'S OWN BIGGEST LIMITATION, stated up front because it bounds every number below: that
 //! corpus is an ORACLE suite, built to exercise BACKEND FEATURES (arithmetic, lists, recursion,
@@ -58,10 +56,6 @@
 // deliberate here. The `allow-*-in-tests` keys in `clippy.toml` do not reach example targets at all.
 #![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic, clippy::pedantic)]
 
-#[cfg(not(target_arch = "wasm32"))]
-#[global_allocator]
-static ALLOC: mimalloc::MiMalloc = mimalloc::MiMalloc;
-
 use std::collections::BTreeMap;
 
 use redextape_core::core::{BinOp, Core, NodeId};
@@ -73,6 +67,9 @@ use redextape_core::tm::{
     Binary, Encoding, LowerError, MIN_FIELD_WIDTH, Program, REG, TAPES, TM_DEFAULT_CAPS, TmRun, TmStatus, Unary, WORK,
     defunc, lower_asm, lower_tm_guarded, n_slots_of, run_tm_fitted, simulate_counts, simulate_final,
 };
+
+#[path = "common/allocator.rs"]
+mod allocator;
 
 // ================================================================================================
 // Part A's corpus — copied verbatim, see the module doc comment above for why and from where.
@@ -549,9 +546,7 @@ struct Measured {
 }
 
 /// Fit `family` to `src`, run once at the fitted width, and report width + steps + final REG length.
-/// Mirrors `width_report.rs`'s `measure`/`steps_at`/`ended_in_guard` — duplicated rather than shared
-/// because an example is a separate binary crate that cannot `use` another example's module (the same
-/// reason this file already hand-copies `FIRST_ORDER_DEMOS`, see the module doc above).
+/// Mirrors `width_report.rs`'s `measure`/`steps_at`/`ended_in_guard` — duplicated rather than shared.
 fn measure(src: &str, family: &dyn Encoding) -> Measured {
     let (prog, ds) = parse(src);
     assert!(ds.is_empty(), "parse errors in `{src}`: {ds:?}");

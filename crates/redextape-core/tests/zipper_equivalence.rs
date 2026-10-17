@@ -21,7 +21,7 @@
 //! target and has been hand-copied five times with a sync test holding the copies together; a sixth
 //! copy is the drift this tree has fought twice. Generated programs are stronger evidence for an
 //! equivalence property anyway. The corpus-wide check lives in `examples/lambda_sharing_probe.rs`,
-//! which already owns a checked copy, and is reported rather than gated.
+//! which already uses a checked copy, and is reported rather than gated.
 
 // Test target: `clippy.toml`'s `allow-*-in-tests` keys do not reach free helpers in a `tests/` target,
 // so the exemption is stated per target — same idiom as `lambda_sharing.rs`.

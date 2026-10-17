@@ -32,16 +32,17 @@
 //! | F | the balanced tree, which no depth guard bounds | the live OOM, pre-guard (see below) |
 //!
 //! Section G hand-copies every entry of `native_oracle.rs`'s `FIRST_ORDER_DEMOS`
-//! (`crates/redextape-native/tests/native_oracle.rs`) as this file's own `FIRST_ORDER_DEMOS` const —
-//! `redextape-core` cannot depend on `redextape-native` (the dependency runs the other way), so this
-//! file cannot import that array. **That explains why this is a copy, not why the copy could drift
-//! unnoticed**: `tests/three_way_oracle.rs`'s `first_order_demos_stay_synced_across_all_seven_copies`
-//! is a TEXTUAL, path-based check, not an import — it `read_to_string`s this file and asserts its array
-//! is byte-identical to the canonical one, so a drifted copy fails the test suite rather than going
-//! quiet. Keep the binding a module-level `const` named `FIRST_ORDER_DEMOS`, exactly as every other
-//! copy is shaped: that is both what the sync test's extractor looks for and what `grep -rn
-//! FIRST_ORDER_DEMOS` — the audit method that test's own doc names — finds. If `FIRST_ORDER_DEMOS`
-//! grows a new entry, re-copy the array from that file into this one and re-run this probe; its
+//! (`crates/redextape-native/tests/native_oracle.rs`) as the `FIRST_ORDER_DEMOS` const in
+//! `examples/common/demos.rs` — `redextape-core` cannot depend on `redextape-native` (the dependency
+//! runs the other way), so this file cannot import that array. **That explains why this is a copy, not
+//! why the copy could drift unnoticed**: `tests/three_way_oracle.rs`'s
+//! `first_order_demos_stay_synced_across_every_copy` is a TEXTUAL, path-based check, not an import — it
+//! `read_to_string`s `examples/common/demos.rs` and asserts its array is byte-identical to the
+//! canonical one, so a drifted copy fails the test suite rather than going quiet. Keep the binding a
+//! module-level `const` named `FIRST_ORDER_DEMOS`, exactly as every other copy is shaped: that is both
+//! what the sync test's extractor looks for and what `grep -rn FIRST_ORDER_DEMOS` — the audit method
+//! that test's own doc names — finds. If `FIRST_ORDER_DEMOS` grows a new entry, re-copy the array from
+//! that file into `examples/common/demos.rs` and re-run this probe; its
 //! `WORST SHIPPED DEMO` line is what `tm/build.rs`'s `MAX_MACHINE_STATES` doc,
 //! `guard_counterexamples.rs`'s `WORST_SHIPPED_DEMO` and `reduction.rs`'s `worst_shipped_demo` need to
 //! match if the maximum moves. G is what
@@ -79,6 +80,11 @@ use redextape_core::parser::{MAX_TOKENS, parse};
 use redextape_core::tm::asm::{Instr, Program, Reg};
 use redextape_core::tm::build::MAX_MACHINE_STATES;
 use redextape_core::tm::{Binary, Encoding, Machine, State, Unary, lower_asm, lower_tm_guarded, n_slots_of};
+
+#[path = "common/demos.rs"]
+mod demos;
+
+use demos::FIRST_ORDER_DEMOS;
 
 /// A named source generator: `(label, n -> source)`.
 type Gen = (&'static str, fn(usize) -> String);
@@ -408,83 +414,6 @@ fn part_f() {
         );
     }
 }
-
-/// Verbatim copy of `tests/three_way_oracle.rs::FIRST_ORDER_DEMOS` — THAT array is the canonical one
-/// this copy is checked against, not `crates/redextape-native/tests/native_oracle.rs`, which carries
-/// the same array but is just another row in `three_way_oracle.rs`'s own `copies` table (true of this
-/// file's copy only by transitivity, through the shared canonical). `redextape-core` cannot depend on
-/// `redextape-native` — the dependency runs the other way — so this is a copy, not an import.
-///
-/// THIS COPY IS COVERED. `three_way_oracle.rs`'s `first_order_demos_stay_synced_across_all_seven_copies`
-/// reads this file as text and asserts this array's literals are byte-for-byte equal to the canonical
-/// one's — the same protocol every other copy uses (see that test's own doc for why a `read_to_string`
-/// check needs no import). THIS WAS NOT ALWAYS TRUE: this array shipped in this same branch as a
-/// `part_g` local named `demos`, which neither the sync test nor a `grep -rn FIRST_ORDER_DEMOS` audit
-/// could find — see that test's doc for the fix. Nothing here needs a by-hand diff before it is
-/// trusted; if `FIRST_ORDER_DEMOS` gains an entry, re-copy it here and re-run this probe, and the sync
-/// test's own count (`copies.len() + 1`) is what catches a copy dropped instead of updated.
-const FIRST_ORDER_DEMOS: &[&str] = &[
-    "1 + 2 * 3",
-    "3 - 5",
-    "if 2 > 1 { 10 } else { 20 }",
-    "if 1 == 2 { 10 } else { 20 }",
-    "let x = 40; x + 2",
-    "let x = 1; let y = x + x; y * 3",
-    "let mut x = 1; x = x + 10; x = x * 2; x",
-    "let mut n = 4; let mut acc = 0; while n > 0 { acc = acc + 1; n = n - 1; } acc",
-    "let add1 = |x| x + 1; add1(41)",
-    "fn sum(n) { if n == 0 { 0 } else { n + sum(n - 1) } } sum(5)",
-    "fn count_down(n) { let mut acc = 0; while n > 0 { acc = acc + 1; n = n - 1; } acc } count_down(4)",
-    "fn add1(x) { x + 1 } fn pair_sum(a, b) { a + b } pair_sum(1, add1(2))",
-    "is_empty(nil)",
-    "is_empty(cons(1, nil))",
-    "[1, 2, 3]",
-    "cons(1, cons(2, nil))",
-    "head(cons(7, nil))",
-    "tail(cons(7, nil))",
-    "head(cons(1, cons(2, nil)))",
-    "tail(cons(1, cons(2, nil)))",
-    "head(tail(cons(1, cons(2, nil))))",
-    "head([1, 2, 3])",
-    "tail([1, 2, 3])",
-    "fn apply2(f, x) { f(x) } fn add1(x) { x + 1 } apply2(add1, 5)",
-    "fn map(xs, f) { if is_empty(xs) { nil } else { cons(f(head(xs)), map(tail(xs), f)) } } fn add1(x) { x + 1 } [3, 1, 2].map(add1)",
-    "let n = 5; fn map(xs, f) { if is_empty(xs) { nil } else { cons(f(head(xs)), map(tail(xs), f)) } } [1, 2, 3].map(|x| x + n)",
-    "\
-        fn map(xs, f) { if is_empty(xs) { nil } else { cons(f(head(xs)), map(tail(xs), f)) } }\n\
-        fn fold(xs, acc, f) { if is_empty(xs) { acc } else { fold(tail(xs), f(acc, head(xs)), f) } }\n\
-        fn add(a, b) { a + b }\n\
-        fn add1(x) { x + 1 }\n\
-        fold([3, 1, 2].map(add1), 0, add)",
-    "fn ap(f, x) { f(x) } let add = |y| |z| y + z; ap(ap(add, 4), 5)",
-    "fn is_even(n){ if n == 0 { true } else { is_odd(n - 1) } } \
-     fn is_odd(n){ if n == 0 { false } else { is_even(n - 1) } } is_even(4)",
-    "fn is_even(n){ if n == 0 { true } else { is_odd(n - 1) } } \
-     fn is_odd(n){ if n == 0 { false } else { is_even(n - 1) } } is_even(5)",
-    "fn a(n){ b(n) + 1 } fn b(n){ n * 2 } a(3)",
-    "fn s0(n){ if n == 0 { 0 } else { 1 + s1(n - 1) } } \
-     fn s1(n){ if n == 0 { 0 } else { 2 + s2(n - 1) } } \
-     fn s2(n){ if n == 0 { 0 } else { 4 + s0(n - 1) } } s0(4)",
-    "fn ev(n,k){ if n == 0 { k(1) } else { od(n - 1, k) } } \
-     fn od(n,k){ if n == 0 { k(0) } else { ev(n - 1, k) } } fn id(x){ x } ev(4, id)",
-    "fn ev(n,k){ if n == 0 { k(1) } else { od(n - 1, k) } } \
-     fn od(n,k){ if n == 0 { k(0) } else { ev(n - 1, k) } } fn id(x){ x } ev(3, id)",
-    "fn ap(h,x){ h(x) } fn f(n){ ap(g, n) } fn g(n){ n + 1 } f(3)",
-    "fn sub(a, b) { a - b } fn ap2(g, a, b) { g(a, b) } sub(9, 4) + ap2(sub, 10, 3)",
-    "fn sum(n) { if n == 0 { 0 } else { n + sum(n - 1) } } fn ap(g, x) { g(x) } ap(sum, 4) + sum(2)",
-    "fn map(xs, f) { if is_empty(xs) { nil } else { cons(f(head(xs)), map(tail(xs), f)) } }\n\
-     fn add1(x) { x + 1 }\n\
-     fn ap2(g, a, b) { g(a, b) }\n\
-     head(map([1, 2], add1)) + head(ap2(map, [5, 6], add1))",
-    "fn v(x) { x * 10 } fn b(x) { x + 1 } fn ap(g, x) { g(x) } ap(v, 1) + ap(b, 1) + b(5)",
-    "fn b(x) { x + 1 } fn v(x) { x * 10 } fn ap(g, x) { g(x) } ap(v, 1) + ap(b, 1) + b(5)",
-    "fn head(x) { x + 1 } fn ap(g, x) { g(x) } fn add1(y) { y + 1 } head(1) + ap(add1, 2)",
-    "fn head(x) { x + 1 } fn ap(g, x) { g(x) } head(1) + ap(head, 2)",
-    "let n = 7; fn tail(x) { x + 1 } fn ap(g, y) { g(y) } tail(3) + ap(tail, 2) + ap(|y| y + n, 5)",
-    "fn nil(x) { x + 5 } fn ap(g, x) { g(x) } ap(nil, 0)",
-    "fn nil(x) { x + 1 } fn ap(g, x) { g(x) } fn add1(y) { y + 1 } nil(1) + ap(add1, 2)",
-    "fn cons(a, b) { a + b } fn ap2(g, a, b) { g(a, b) } cons(1, 2) + ap2(cons, 3, 4)",
-];
 
 /// THE ACTUAL FLOOR: what the programs this project ships as demos cost. A cap must clear the
 /// largest of these by a wide margin, or it rejects the product's own examples.

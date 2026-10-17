@@ -33,23 +33,18 @@
 //! That verdict is not renegotiated here even if a number lands close to the line.
 #![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic, clippy::pedantic)]
 
-use std::io::Write;
-
 use redextape_core::lambda::{self, MAX_REDUCTION_STEPS, Owner};
 use redextape_core::sourcemap::SourceMap;
 use redextape_core::tm::{self, EncodingKind};
 use redextape_core::{parser, trace};
 
-fn line(s: &str) {
-    println!("{s}");
-    let _ = std::io::stdout().flush();
-}
+#[path = "common/nearest_rank.rs"]
+mod nearest_rank;
+#[path = "common/text_underlined.rs"]
+mod text_underlined;
 
-fn head(s: &str) {
-    line("");
-    line(s);
-    line(&"-".repeat(s.len()));
-}
+use nearest_rank::{median, percentile};
+use text_underlined::{head, line};
 
 /// The corpus, copied verbatim from `frame_cost_probe.rs`'s `programs()`, minus `while40`, which that
 /// file adds only for its own section F. Reusing it keeps this probe's columns comparable with every
@@ -166,25 +161,6 @@ fn measure(src: &str) -> Census {
         within_widths.len(),
     );
     Census { exact, within, none, within_widths }
-}
-
-/// Median of an unsorted slice, nearest-rank (see `percentile`) — for an EVEN-length slice this is
-/// the lower of the two middle values, NOT their average. `None` on an empty slice — a program with
-/// zero `Within` steps has no span width to report, and that is different from a width of zero.
-fn median(xs: &[f64]) -> Option<f64> {
-    percentile(xs, 0.5)
-}
-
-/// The value at rank `q` (0.0..=1.0) of an unsorted slice, nearest-rank: always one of `xs`'s actual
-/// elements, never an interpolated value between two of them. `None` on an empty slice.
-fn percentile(xs: &[f64], q: f64) -> Option<f64> {
-    if xs.is_empty() {
-        return None;
-    }
-    let mut s = xs.to_vec();
-    s.sort_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
-    let rank = ((q * s.len() as f64).ceil() as usize).clamp(1, s.len()) - 1;
-    Some(s[rank])
 }
 
 fn fmt_pct(v: Option<f64>) -> String {

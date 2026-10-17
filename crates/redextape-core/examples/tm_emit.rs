@@ -18,10 +18,6 @@
 // deliberate here. The `allow-*-in-tests` keys in `clippy.toml` do not reach example targets at all.
 #![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic, clippy::pedantic)]
 
-#[cfg(not(target_arch = "wasm32"))]
-#[global_allocator]
-static ALLOC: mimalloc::MiMalloc = mimalloc::MiMalloc;
-
 use redextape_core::Diagnostic;
 use redextape_core::desugar::desugar;
 use redextape_core::parser::parse;
@@ -32,6 +28,9 @@ use redextape_core::tm::{
 use redextape_core::ty::show as show_ty;
 use redextape_core::typeck::result_type;
 use redextape_core::value::format_value;
+
+#[path = "common/allocator.rs"]
+mod allocator;
 
 fn main() {
     let args: Vec<String> = std::env::args().skip(1).collect();

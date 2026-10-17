@@ -158,13 +158,8 @@
 
 #![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic, clippy::pedantic)]
 
-#[cfg(not(target_arch = "wasm32"))]
-#[global_allocator]
-static ALLOC: mimalloc::MiMalloc = mimalloc::MiMalloc;
-
-use std::collections::{HashMap, HashSet};
+use std::collections::HashSet;
 use std::hint::black_box;
-use std::io::Write;
 use std::time::Instant;
 
 use redextape_core::core::Core;
@@ -175,6 +170,19 @@ use redextape_core::lambda::{MAX_REDUCTION_STEPS, lower, parse_lambda, print_lam
 use redextape_core::parser::parse;
 use redextape_core::tm::{LowerError, TM_DEFAULT_CAPS, TmCaps, TmRun, Unary, defunc, lower_asm, n_slots_of, run_tm};
 use redextape_core::trace::LambdaCursor;
+
+#[path = "common/allocator.rs"]
+mod allocator;
+#[path = "common/depth.rs"]
+mod depth;
+#[path = "common/nested_groups.rs"]
+mod nested_groups;
+#[path = "common/text.rs"]
+mod text;
+
+use depth::depth;
+use nested_groups::nested_groups_src;
+use text::{head, line};
 
 /// Per-size wall-clock budget. A ramp stops at the FIRST size that exceeds it — the next size would
 /// double the work, so "one more, to be sure" is exactly the step that does not return.
@@ -194,17 +202,7 @@ const MAX_N: u32 = 64;
 /// so the next size is twice this and nothing here may be allowed to reach for a gigabyte.
 const MAX_PRINT_BYTES: usize = 1 << 20;
 
-fn line(s: &str) {
-    println!("{s}");
-    let _ = std::io::stdout().flush();
-}
-
-fn head(s: &str) {
-    line("");
-    line(&format!("=== {s} ==="));
-}
-
-// --- measurement primitives (both O(one visit per allocation), neither walks the logical tree) ---
+// --- measurement primitives (`physical` and `depth`: O(one visit per allocation), neither walks the logical tree) ---
 
 /// Distinct `Rc` allocations reachable from `t`. `t` is borrowed for the whole walk, so every
 /// `alloc_id()` compared here belongs to a live allocation (see `LambdaTerm::alloc_id`'s doc).
@@ -225,41 +223,6 @@ fn physical(t: &LambdaTerm) -> usize {
         }
     }
     seen.len()
-}
-
-/// Maximum nesting depth, memoized over the DAG the same way. This is what `MAX_TERM_DEPTH` bounds —
-/// and the point of measuring it here is that it is a DIFFERENT quantity from logical size, so a term
-/// can sit far under the depth limit while its logical size is astronomical.
-fn depth(t: &LambdaTerm) -> u32 {
-    let mut memo: HashMap<usize, u32> = HashMap::new();
-    let mut stack: Vec<(&LambdaTerm, bool)> = vec![(t, false)];
-    while let Some((n, folded)) = stack.pop() {
-        let id = n.alloc_id();
-        if memo.contains_key(&id) {
-            continue;
-        }
-        if !folded {
-            stack.push((n, true));
-            match n.node() {
-                Node::Var(_) => {}
-                Node::Abs(_, b) => stack.push((b, false)),
-                Node::App(f, a, _) => {
-                    stack.push((f, false));
-                    stack.push((a, false));
-                }
-            }
-            continue;
-        }
-        let d = match n.node() {
-            Node::Var(_) => 0,
-            Node::Abs(_, b) => 1 + memo.get(&b.alloc_id()).copied().unwrap_or(0),
-            Node::App(f, a, _) => {
-                1 + memo.get(&f.alloc_id()).copied().unwrap_or(0).max(memo.get(&a.alloc_id()).copied().unwrap_or(0))
-            }
-        };
-        memo.insert(id, d);
-    }
-    memo.get(&t.alloc_id()).copied().unwrap_or(0)
 }
 
 /// A TRANSCRIPTION of `lambda::reduce::depth_exceeds`, which is `pub(crate)` and so unreachable from
@@ -485,18 +448,6 @@ fn report(label: &str, t: &LambdaTerm) {
         fmt_count(l),
         fmt_ratio(l, p)
     ));
-}
-
-/// `m+1` nested groups of two mutually recursive functions. Each level's pair is declared INSIDE the
-/// previous level's `f`, which is what makes the nesting compose: `lower_group` clones `group` once
-/// per member, and `group` contains every member's lowered value.
-fn nested_groups_src(m: u32) -> String {
-    let mut body = format!("n + g{m}(n)");
-    for k in (0..m).rev() {
-        let j = k + 1;
-        body = format!("fn f{j}(n) {{ {body} }} fn g{j}(n) {{ f{j}(n) }} g{j}(n) + g{k}(n)");
-    }
-    format!("fn f0(n) {{ {body} }} fn g0(n) {{ f0(n) }} g0(1)")
 }
 
 fn part2() {

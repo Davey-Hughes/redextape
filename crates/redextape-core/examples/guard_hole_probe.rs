@@ -144,8 +144,8 @@
 //!
 //! **This file deliberately does NOT carry a copy of `FIRST_ORDER_DEMOS`.** `curve`'s rows are six
 //! hand-picked programs chosen for their `max_shared` band, not a corpus sweep, so there is nothing for
-//! `three_way_oracle.rs::first_order_demos_stay_synced_across_all_seven_copies` to keep in sync. Keep it
-//! that way: an eighth copy would have to be added to that test, and the roadmap's standing lesson is
+//! `three_way_oracle.rs::first_order_demos_stay_synced_across_every_copy` to keep in sync. Keep it
+//! that way: another copy would have to be added to that test, and the roadmap's standing lesson is
 //! about copies that do not receive corrections.
 //!
 //! # ALLOCATOR — READ THIS BEFORE TRUSTING ANY TIMING ABOVE
@@ -168,12 +168,7 @@
 
 #![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic, clippy::pedantic)]
 
-#[cfg(not(target_arch = "wasm32"))]
-#[global_allocator]
-static ALLOC: mimalloc::MiMalloc = mimalloc::MiMalloc;
-
-use std::collections::{HashMap, HashSet};
-use std::io::Write;
+use std::collections::HashMap;
 use std::time::Instant;
 
 use redextape_core::desugar::desugar;
@@ -183,6 +178,19 @@ use redextape_core::lambda::lower;
 use redextape_core::lambda::term::{LambdaTerm, Node, abs, app, logical_size, max_shared_logical_size};
 use redextape_core::parser::parse;
 use redextape_core::trace::LambdaCursor;
+
+#[path = "common/allocator.rs"]
+mod allocator;
+#[path = "common/footprint.rs"]
+mod footprint;
+#[path = "common/nested_groups.rs"]
+mod nested_groups;
+#[path = "common/text.rs"]
+mod text;
+
+use footprint::{lower_src, peak_rss_kb, physical};
+use nested_groups::nested_groups_src;
+use text::{head, line};
 
 /// Per-row wall-clock budget. A ramp stops at the first row over this. 20 s rather than
 /// `list_reduction_probe.rs`'s 10 s because the rows here are SINGLE STEPS: the interesting reading is
@@ -195,52 +203,8 @@ const BUDGET_S: f64 = 20.0;
 /// 10,000 is the whole falsification in one line.
 const MAX_SHARED_LOGICAL_NODES: u64 = 10_000;
 
-fn line(s: &str) {
-    println!("{s}");
-    let _ = std::io::stdout().flush();
-}
-
-fn head(s: &str) {
-    line("");
-    line(&format!("=== {s} ==="));
-}
-
-/// Peak resident-set size so far, from `/proc/self/status`'s `VmHWM`. Cumulative across the run (one
-/// process, many rows), so read consecutive rows' deltas rather than a row's value in isolation.
-/// Copied from `list_reduction_probe.rs`, which is not importable from another example target.
-fn peak_rss_kb() -> Option<u64> {
-    let status = std::fs::read_to_string("/proc/self/status").ok()?;
-    for l in status.lines() {
-        if let Some(rest) = l.strip_prefix("VmHWM:") {
-            return rest.split_whitespace().next()?.parse().ok();
-        }
-    }
-    None
-}
-
 fn rss_str() -> String {
     peak_rss_kb().map_or_else(|| "?".to_string(), |kb| format!("{:.1} MB", kb as f64 / 1024.0))
-}
-
-/// Distinct `Rc` allocations reachable from `t` — the physical size, against which `logical_size` is
-/// the denoted one. Copied from `list_reduction_probe.rs`/`blowup_probe.rs` (not `pub` in either).
-fn physical(t: &LambdaTerm) -> usize {
-    let mut seen: HashSet<usize> = HashSet::new();
-    let mut stack: Vec<&LambdaTerm> = vec![t];
-    while let Some(n) = stack.pop() {
-        if !seen.insert(n.alloc_id()) {
-            continue;
-        }
-        match n.node() {
-            Node::Var(_) => {}
-            Node::Abs(_, b) => stack.push(b),
-            Node::App(f, a, _) => {
-                stack.push(f);
-                stack.push(a);
-            }
-        }
-    }
-    seen.len()
 }
 
 /// `Abs` nodes in the tree this term DENOTES — the multiplier on `|arg|` in the cost model above,
@@ -284,23 +248,6 @@ fn logical_abs_count(t: &LambdaTerm) -> u64 {
 
 fn fmt_count(v: u64) -> String {
     if v == u64::MAX { ">=2^64 (SAT)".to_string() } else { format!("{v}") }
-}
-
-/// `None` when `lower` refuses, printing the error rather than aborting. Since the shared-subterm guard
-/// was reverted only `TooDeep` and the two `Unsupported` cases can fire here, and none of these sources
-/// trips them — but a ramp that panics reports nothing after the panic, and that defect is exactly what
-/// took `list_reduction_probe`'s documented invocation down when the guard landed.
-fn lower_src(src: &str) -> Option<LambdaTerm> {
-    let (prog, ds) = parse(src);
-    assert!(ds.is_empty(), "parse errors: {ds:?}");
-    let core = desugar(&prog.expect("parses"));
-    match lower(&core) {
-        Ok(t) => Some(t),
-        Err(e) => {
-            line(&format!("  lower error: {e:?}"));
-            None
-        }
-    }
 }
 
 /// The λ term for `[0, 1, …, n-1]`, built with the same `pub` combinators `lower` uses. Alias-free by
@@ -572,18 +519,6 @@ fn ceiling(v: u64) {
 }
 
 // --- curve: does max_shared hold while the term reduces? --------------------------------------------
-
-/// `m+1` nested groups of two mutually recursive functions — the family whose `max_shared` sets the
-/// reverted guard's bound (9,453 at 6 groups; `lower` admits every level again). COPIED from
-/// `list_reduction_probe.rs`, which copied it from `blowup_probe.rs` (not `pub` in either).
-fn nested_groups_src(m: u32) -> String {
-    let mut body = format!("n + g{m}(n)");
-    for k in (0..m).rev() {
-        let j = k + 1;
-        body = format!("fn f{j}(n) {{ {body} }} fn g{j}(n) {{ f{j}(n) }} g{j}(n) + g{k}(n)");
-    }
-    format!("fn f0(n) {{ {body} }} fn g0(n) {{ f0(n) }} g0(1)")
-}
 
 /// Reduce `t` with a `LambdaCursor`, sampling `max_shared_logical_size` of the CURRENT term every
 /// `every` steps. Holds one term (the cursor's) and one sample line at a time.

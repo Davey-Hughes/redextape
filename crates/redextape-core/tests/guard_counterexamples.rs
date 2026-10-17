@@ -89,8 +89,8 @@ fn lower_src(src: &str) -> LambdaTerm {
 /// below are pinned at 1.000x: they are trees, not DAGs.
 ///
 /// Not a re-implementation of `logical_size`, which counts the denoted tree and is `pub`; this counts
-/// storage and has no public equivalent. The same fold appears in `blowup_probe.rs`,
-/// `list_reduction_probe.rs` and `guard_hole_probe.rs`, none of which can export it — an `examples/`
+/// storage and has no public equivalent. The same fold appears in `blowup_probe.rs` and
+/// `examples/common/footprint.rs`, neither of which can export it — an `examples/`
 /// target is not importable. Iterative because a 699-element list is ~1,400 levels deep and a
 /// recursive walk over it would overflow the stack this test exists to reason about.
 ///
@@ -290,8 +290,9 @@ fn asm_of(src: &str) -> redextape_core::tm::asm::Program {
 /// entries and this file only ever hand-copies one of them, so nothing here re-checks that the
 /// hand-copy is still the true maximum. THAT is a different question from whether the SOURCE array
 /// has drifted, which `tests/three_way_oracle.rs`'s
-/// `first_order_demos_stay_synced_across_all_seven_copies` now checks —
-/// `crates/redextape-core/examples/state_cost_probe.rs`'s section G is one of its seven tracked
+/// `first_order_demos_stay_synced_across_every_copy` now checks —
+/// `crates/redextape-core/examples/common/demos.rs`, the array
+/// `crates/redextape-core/examples/state_cost_probe.rs`'s section G reads, is one of its four tracked
 /// copies, so section G's own array cannot silently go stale. Whether `WORST_SHIPPED_DEMO` here is
 /// still that array's max is still a manual step: section G lowers the whole array and prints every
 /// member's state count sorted descending — re-run it after `FIRST_ORDER_DEMOS` changes and update

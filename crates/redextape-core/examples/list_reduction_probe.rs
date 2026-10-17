@@ -154,105 +154,37 @@
 
 #![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic, clippy::pedantic)]
 
-#[cfg(not(target_arch = "wasm32"))]
-#[global_allocator]
-static ALLOC: mimalloc::MiMalloc = mimalloc::MiMalloc;
-
-use std::collections::{HashMap, HashSet};
-use std::io::Write;
 use std::time::Instant;
 
 use redextape_core::desugar::desugar;
 use redextape_core::lambda::encode;
 use redextape_core::lambda::lower;
-use redextape_core::lambda::term::{LambdaTerm, Node, app, logical_size, max_shared_logical_size};
+use redextape_core::lambda::term::{LambdaTerm, app, logical_size, max_shared_logical_size};
 use redextape_core::lambda::{MAX_REDUCTION_STEPS, Status};
 use redextape_core::parser::parse;
 use redextape_core::trace::LambdaCursor;
 
+#[path = "common/allocator.rs"]
+mod allocator;
+#[path = "common/demos.rs"]
+mod demos;
+#[path = "common/depth.rs"]
+mod depth;
+#[path = "common/footprint.rs"]
+mod footprint;
+#[path = "common/nested_groups.rs"]
+mod nested_groups;
+#[path = "common/text.rs"]
+mod text;
+
+use demos::FIRST_ORDER_DEMOS;
+use depth::depth;
+use footprint::{lower_src, peak_rss_kb, physical};
+use nested_groups::nested_groups_src;
+use text::{head, line};
+
 /// Per-row wall-clock budget. A ramp stops at the first row over this.
 const BUDGET_S: f64 = 10.0;
-
-fn line(s: &str) {
-    println!("{s}");
-    let _ = std::io::stdout().flush();
-}
-
-fn head(s: &str) {
-    line("");
-    line(&format!("=== {s} ==="));
-}
-
-/// Peak resident-set size recorded for this process so far, from `/proc/self/status`'s `VmHWM`
-/// (kernel-maintained high-water mark, not a value this probe computes). Cumulative across the whole
-/// run, not per-row — since every row runs in this same process, later rows fold in earlier ones — so
-/// read consecutive rows' deltas, not each row's value in isolation.
-fn peak_rss_kb() -> Option<u64> {
-    let status = std::fs::read_to_string("/proc/self/status").ok()?;
-    for l in status.lines() {
-        if let Some(rest) = l.strip_prefix("VmHWM:") {
-            return rest.split_whitespace().next()?.parse().ok();
-        }
-    }
-    None
-}
-
-/// Distinct `Rc` allocations reachable from `t`. Copied from `blowup_probe.rs::physical` (not `pub`
-/// there, so not importable) — the standard O(one-visit-per-allocation) walk over the DAG.
-fn physical(t: &LambdaTerm) -> usize {
-    let mut seen: HashSet<usize> = HashSet::new();
-    let mut stack: Vec<&LambdaTerm> = vec![t];
-    while let Some(n) = stack.pop() {
-        if !seen.insert(n.alloc_id()) {
-            continue;
-        }
-        match n.node() {
-            Node::Var(_) => {}
-            Node::Abs(_, b) => stack.push(b),
-            Node::App(f, a, _) => {
-                stack.push(f);
-                stack.push(a);
-            }
-        }
-    }
-    seen.len()
-}
-
-/// Maximum nesting depth, memoized over the DAG — copied from `blowup_probe.rs::depth` (not `pub`
-/// there either). This is the quantity `MAX_TERM_DEPTH` (reduce.rs, 3,000) bounds; added after Q2's
-/// ramp showed `HitCap` appear at n=800 with fewer steps than a full normalization needs, which is
-/// `LambdaCursor`'s depth guard firing mid-run, not the step cap.
-fn depth(t: &LambdaTerm) -> u32 {
-    let mut memo: HashMap<usize, u32> = HashMap::new();
-    let mut stack: Vec<(&LambdaTerm, bool)> = vec![(t, false)];
-    while let Some((n, folded)) = stack.pop() {
-        let id = n.alloc_id();
-        if memo.contains_key(&id) {
-            continue;
-        }
-        if !folded {
-            stack.push((n, true));
-            match n.node() {
-                Node::Var(_) => {}
-                Node::Abs(_, b) => stack.push((b, false)),
-                Node::App(f, a, _) => {
-                    stack.push((f, false));
-                    stack.push((a, false));
-                }
-            }
-            continue;
-        }
-        let d = match n.node() {
-            Node::Var(_) => 0,
-            Node::Abs(_, b) => 1 + memo.get(&b.alloc_id()).copied().unwrap_or(0),
-            Node::App(f, a, _) => {
-                1 + memo.get(&f.alloc_id()).copied().unwrap_or(0).max(memo.get(&a.alloc_id()).copied().unwrap_or(0))
-            }
-        };
-        memo.insert(id, d);
-    }
-    memo.get(&t.alloc_id()).copied().unwrap_or(0)
-}
 
 fn fmt_count(v: u64) -> String {
     if v == u64::MAX { ">=2^64 (SATURATED)".to_string() } else { format!("{v}") }
@@ -322,38 +254,6 @@ fn verify_direct_construction_matches_lower() {
 // slower copy besides. That function's own doc carries what this comment used to argue — in-degree
 // rather than `Rc::strong_count`, because a caller retaining snapshots would inflate the count and a
 // measurement whose value changes with observers cannot gate anything.
-
-/// `m+1` nested groups of two mutually recursive functions. COPIED from `blowup_probe.rs` (not `pub`
-/// there, so not importable) — do not fork this definition; if it ever needs to change, change both
-/// copies or delete this one and hand-embed the two literals this file actually needs.
-fn nested_groups_src(m: u32) -> String {
-    let mut body = format!("n + g{m}(n)");
-    for k in (0..m).rev() {
-        let j = k + 1;
-        body = format!("fn f{j}(n) {{ {body} }} fn g{j}(n) {{ f{j}(n) }} g{j}(n) + g{k}(n)");
-    }
-    format!("fn f0(n) {{ {body} }} fn g0(n) {{ f0(n) }} g0(1)")
-}
-
-/// `None` when `lower` REFUSES the program, printing the error rather than aborting the process — the
-/// same shape as `blowup_probe.rs::lower_src`, and for the same reason. While `1652e09`'s shared-subterm
-/// guard was in the tree this file's own nesting family was refused from seven groups on, and a `panic!`
-/// here made the documented no-argument invocation die at `q3` before `corpus` or `family` ever ran.
-/// That guard has been reverted and nothing refuses these programs today, but the shape stays: a ramp
-/// that reports a refusal still reports every level below it, and a ramp that panics reports nothing
-/// after it.
-fn lower_src(src: &str) -> Option<LambdaTerm> {
-    let (prog, ds) = parse(src);
-    assert!(ds.is_empty(), "parse errors: {ds:?}");
-    let core = desugar(&prog.expect("parses"));
-    match lower(&core) {
-        Ok(t) => Some(t),
-        Err(e) => {
-            line(&format!("  lower error: {e:?}"));
-            None
-        }
-    }
-}
 
 // --- question 1 & 2: does the list reduce, and where does it stop being fine? ----------------------
 
@@ -503,83 +403,6 @@ fn depth_probe() {
 // reporting the levels before it — the same "flush before the next size" discipline as the rest of this
 // file, just enforced by the process boundary instead of by a between-rows flush, because a single
 // β-step cannot be interrupted from inside this process (see `blowup_probe.rs`'s `part_oom` doc).
-
-/// Verbatim copy of `tests/three_way_oracle.rs::FIRST_ORDER_DEMOS`, itself copied into
-/// `examples/step_survey.rs` and `redextape-native/tests/native_oracle.rs` — copied from
-/// `step_survey.rs`'s verified-synced copy rather than retyped from the canonical file, so this is a
-/// copy of a copy known equal to the canonical, not a fresh transcription.
-///
-/// THIS COPY IS COVERED, and was not when it was committed. `three_way_oracle.rs`'s
-/// `first_order_demos_stay_synced_across_all_seven_copies` reads this file as text and asserts its
-/// literals are byte-for-byte equal to the canonical array's; the test previously covered three copies
-/// and this comment claimed it covered this one. The claim was made true rather than softened — the
-/// check is textual and path-based, so a probe that CI never runs is as checkable as a test target.
-/// Nothing here needs a by-hand diff before it is trusted.
-///
-/// FIVE, NOT FOUR: extending that test to cover this file left `examples/lambda_sharing_probe.rs`'s
-/// copy still uncovered, found by the whole-branch review. See the test's own doc for the count.
-const FIRST_ORDER_DEMOS: &[&str] = &[
-    "1 + 2 * 3",
-    "3 - 5",
-    "if 2 > 1 { 10 } else { 20 }",
-    "if 1 == 2 { 10 } else { 20 }",
-    "let x = 40; x + 2",
-    "let x = 1; let y = x + x; y * 3",
-    "let mut x = 1; x = x + 10; x = x * 2; x",
-    "let mut n = 4; let mut acc = 0; while n > 0 { acc = acc + 1; n = n - 1; } acc",
-    "let add1 = |x| x + 1; add1(41)",
-    "fn sum(n) { if n == 0 { 0 } else { n + sum(n - 1) } } sum(5)",
-    "fn count_down(n) { let mut acc = 0; while n > 0 { acc = acc + 1; n = n - 1; } acc } count_down(4)",
-    "fn add1(x) { x + 1 } fn pair_sum(a, b) { a + b } pair_sum(1, add1(2))",
-    "is_empty(nil)",
-    "is_empty(cons(1, nil))",
-    "[1, 2, 3]",
-    "cons(1, cons(2, nil))",
-    "head(cons(7, nil))",
-    "tail(cons(7, nil))",
-    "head(cons(1, cons(2, nil)))",
-    "tail(cons(1, cons(2, nil)))",
-    "head(tail(cons(1, cons(2, nil))))",
-    "head([1, 2, 3])",
-    "tail([1, 2, 3])",
-    "fn apply2(f, x) { f(x) } fn add1(x) { x + 1 } apply2(add1, 5)",
-    "fn map(xs, f) { if is_empty(xs) { nil } else { cons(f(head(xs)), map(tail(xs), f)) } } fn add1(x) { x + 1 } [3, 1, 2].map(add1)",
-    "let n = 5; fn map(xs, f) { if is_empty(xs) { nil } else { cons(f(head(xs)), map(tail(xs), f)) } } [1, 2, 3].map(|x| x + n)",
-    "\
-        fn map(xs, f) { if is_empty(xs) { nil } else { cons(f(head(xs)), map(tail(xs), f)) } }\n\
-        fn fold(xs, acc, f) { if is_empty(xs) { acc } else { fold(tail(xs), f(acc, head(xs)), f) } }\n\
-        fn add(a, b) { a + b }\n\
-        fn add1(x) { x + 1 }\n\
-        fold([3, 1, 2].map(add1), 0, add)",
-    "fn ap(f, x) { f(x) } let add = |y| |z| y + z; ap(ap(add, 4), 5)",
-    "fn is_even(n){ if n == 0 { true } else { is_odd(n - 1) } } \
-     fn is_odd(n){ if n == 0 { false } else { is_even(n - 1) } } is_even(4)",
-    "fn is_even(n){ if n == 0 { true } else { is_odd(n - 1) } } \
-     fn is_odd(n){ if n == 0 { false } else { is_even(n - 1) } } is_even(5)",
-    "fn a(n){ b(n) + 1 } fn b(n){ n * 2 } a(3)",
-    "fn s0(n){ if n == 0 { 0 } else { 1 + s1(n - 1) } } \
-     fn s1(n){ if n == 0 { 0 } else { 2 + s2(n - 1) } } \
-     fn s2(n){ if n == 0 { 0 } else { 4 + s0(n - 1) } } s0(4)",
-    "fn ev(n,k){ if n == 0 { k(1) } else { od(n - 1, k) } } \
-     fn od(n,k){ if n == 0 { k(0) } else { ev(n - 1, k) } } fn id(x){ x } ev(4, id)",
-    "fn ev(n,k){ if n == 0 { k(1) } else { od(n - 1, k) } } \
-     fn od(n,k){ if n == 0 { k(0) } else { ev(n - 1, k) } } fn id(x){ x } ev(3, id)",
-    "fn ap(h,x){ h(x) } fn f(n){ ap(g, n) } fn g(n){ n + 1 } f(3)",
-    "fn sub(a, b) { a - b } fn ap2(g, a, b) { g(a, b) } sub(9, 4) + ap2(sub, 10, 3)",
-    "fn sum(n) { if n == 0 { 0 } else { n + sum(n - 1) } } fn ap(g, x) { g(x) } ap(sum, 4) + sum(2)",
-    "fn map(xs, f) { if is_empty(xs) { nil } else { cons(f(head(xs)), map(tail(xs), f)) } }\n\
-     fn add1(x) { x + 1 }\n\
-     fn ap2(g, a, b) { g(a, b) }\n\
-     head(map([1, 2], add1)) + head(ap2(map, [5, 6], add1))",
-    "fn v(x) { x * 10 } fn b(x) { x + 1 } fn ap(g, x) { g(x) } ap(v, 1) + ap(b, 1) + b(5)",
-    "fn b(x) { x + 1 } fn v(x) { x * 10 } fn ap(g, x) { g(x) } ap(v, 1) + ap(b, 1) + b(5)",
-    "fn head(x) { x + 1 } fn ap(g, x) { g(x) } fn add1(y) { y + 1 } head(1) + ap(add1, 2)",
-    "fn head(x) { x + 1 } fn ap(g, x) { g(x) } head(1) + ap(head, 2)",
-    "let n = 7; fn tail(x) { x + 1 } fn ap(g, y) { g(y) } tail(3) + ap(tail, 2) + ap(|y| y + n, 5)",
-    "fn nil(x) { x + 5 } fn ap(g, x) { g(x) } ap(nil, 0)",
-    "fn nil(x) { x + 1 } fn ap(g, x) { g(x) } fn add1(y) { y + 1 } nil(1) + ap(add1, 2)",
-    "fn cons(a, b) { a + b } fn ap2(g, a, b) { g(a, b) } cons(1, 2) + ap2(cons, 3, 4)",
-];
 
 /// Question A — the corpus sharing profile that sets the bound: `max_shared` and total `logical_size`
 /// for every program in `FIRST_ORDER_DEMOS`. All 46 are small (the whole sweep is seconds), so this

@@ -39,8 +39,7 @@
 //! -mechanism-design.md`.
 #![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic, clippy::pedantic)]
 
-use std::collections::{HashMap, HashSet};
-use std::io::Write;
+use std::collections::HashMap;
 use std::rc::Rc;
 
 use redextape_core::core::NodeId;
@@ -50,73 +49,16 @@ use redextape_core::sourcemap::SourceMap;
 use redextape_core::tm::{self, EncodingKind};
 use redextape_core::{parser, trace};
 
-fn line(s: &str) {
-    println!("{s}");
-    let _ = std::io::stdout().flush();
-}
+#[path = "common/nearest_rank.rs"]
+mod nearest_rank;
+#[path = "common/tag_census.rs"]
+mod tag_census;
+#[path = "common/text_underlined.rs"]
+mod text_underlined;
 
-fn head(s: &str) {
-    line("");
-    line(s);
-    line(&"-".repeat(s.len()));
-}
-
-fn fmt_pct(n: u64, of: u64) -> String {
-    if of == 0 { "-".to_string() } else { format!("{:.1}%", 100.0 * n as f64 / of as f64) }
-}
-
-/// The four programs, **copied VERBATIM from `none_probe.rs`'s `programs()`** so the source strings
-/// cannot drift between the two probes and every row here is comparable to a row already recorded.
-/// `none_probe` copied them from `owner_probe` for the same reason. Examples are separate crates and
-/// cannot share a helper; verbatim duplication with this note is the convention in this tree.
-fn programs() -> Vec<(&'static str, &'static str)> {
-    vec![
-        ("while4", "let mut n = 4; let mut acc = 0; while n > 0 { acc = acc + 1; n = n - 1; } acc"),
-        (
-            "countdown4",
-            "fn count_down(n) { let mut acc = 0; while n > 0 { acc = acc + 1; n = n - 1; } acc } count_down(4)",
-        ),
-        ("sum5", "fn sum(n) { if n == 0 { 0 } else { n + sum(n - 1) } } sum(5)"),
-        (
-            "map_fold",
-            "fn map(xs, f) { if is_empty(xs) { nil } else { cons(f(head(xs)), map(tail(xs), f)) } }\n\
-             fn fold(xs, acc, f) { if is_empty(xs) { acc } else { fold(tail(xs), f(acc, head(xs)), f) } }\n\
-             fn add(a, b) { a + b }\n\
-             fn add1(x) { x + 1 }\n\
-             fold([3, 1, 2].map(add1), 0, add)",
-        ),
-    ]
-}
-
-/// Number of DISTINCT allocations reachable from `t` that are a tagged `App`. **Copied verbatim from
-/// `none_probe.rs`** — see `programs()` for why duplication rather than sharing.
-///
-/// **Physical, not logical** — deduped by `alloc_id` over an explicit worklist, the same convention
-/// `term.rs`'s `max_shared_logical_size` uses: under structural sharing a term can denote an
-/// astronomical logical tree from a small number of allocations, so a walk that revisits shared
-/// subterms would be a hang, not a measurement. Iterative over an explicit stack, never recursive.
-fn count_tagged_apps(t: &LambdaTerm) -> u64 {
-    let mut seen: HashSet<usize> = HashSet::new();
-    let mut stack: Vec<&LambdaTerm> = vec![t];
-    let mut count = 0u64;
-    while let Some(node) = stack.pop() {
-        if !seen.insert(node.alloc_id()) {
-            continue; // already visited this allocation; do not recount or re-walk its children
-        }
-        match node.node() {
-            Node::Var(_) => {}
-            Node::Abs(_, b) => stack.push(b),
-            Node::App(f, a, _) => {
-                if node.owner().is_some() {
-                    count += 1;
-                }
-                stack.push(f);
-                stack.push(a);
-            }
-        }
-    }
-    count
-}
+use nearest_rank::median;
+use tag_census::{count_tagged_apps, fmt_pct, programs};
+use text_underlined::{head, line};
 
 /// The subterm of `t` at `path`. Panics if the path does not match the term's shape, which is a bug
 /// in the caller and not a condition to tolerate: a `Path` produced by the reducer for a term always
@@ -356,27 +298,6 @@ struct VariantStats {
     /// — so a `source_span` miss here fails loudly instead of silently dropping a span from the M2
     /// population, exactly as it would in `owner_probe`.
     within_widths: Vec<f64>,
-}
-
-/// The value at rank `q` (0.0..=1.0) of an unsorted slice, nearest-rank: always one of `xs`'s actual
-/// elements, never an interpolated value between two of them. `None` on an empty slice — a program
-/// with no `Within` step has no width to report, which is a different fact from a width of zero. Same
-/// convention as `owner_probe.rs`'s pair of the same name, so the two probes' medians mean the same
-/// thing and are comparable.
-fn percentile(xs: &[f64], q: f64) -> Option<f64> {
-    if xs.is_empty() {
-        return None;
-    }
-    let mut s = xs.to_vec();
-    s.sort_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
-    let rank = ((q * s.len() as f64).ceil() as usize).clamp(1, s.len()) - 1;
-    Some(s[rank])
-}
-
-/// Median of an unsorted slice, nearest-rank (see `percentile`) — for an EVEN-length slice this is
-/// the lower of the two middle values, NOT their average. `None` on an empty slice.
-fn median(xs: &[f64]) -> Option<f64> {
-    percentile(xs, 0.5)
 }
 
 /// One program's V1 tagged rate, by name. `None` when that program produced no row at all — which

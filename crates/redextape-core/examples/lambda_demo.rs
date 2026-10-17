@@ -7,15 +7,14 @@
 // deliberate here. The `allow-*-in-tests` keys in `clippy.toml` do not reach example targets at all.
 #![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic, clippy::pedantic)]
 
-#[cfg(not(target_arch = "wasm32"))]
-#[global_allocator]
-static ALLOC: mimalloc::MiMalloc = mimalloc::MiMalloc;
-
 use redextape_core::desugar::desugar;
 use redextape_core::lambda::{MAX_REDUCTION_STEPS, decode, lower, parse_lambda, print_lambda, reduce_trace};
 use redextape_core::parser::parse;
 use redextape_core::run;
 use redextape_core::value::format_value;
+
+#[path = "common/allocator.rs"]
+mod allocator;
 
 // The header rows pass column-aligned string literals as `{:<56}` args on purpose.
 #[allow(clippy::print_literal)]

@@ -25,10 +25,6 @@
 // deliberate here. The `allow-*-in-tests` keys in `clippy.toml` do not reach example targets at all.
 #![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic, clippy::pedantic)]
 
-#[cfg(not(target_arch = "wasm32"))]
-#[global_allocator]
-static ALLOC: mimalloc::MiMalloc = mimalloc::MiMalloc;
-
 use redextape_core::desugar::desugar;
 use redextape_core::parser::parse;
 use redextape_core::run;
@@ -37,6 +33,9 @@ use redextape_core::tm::{
     WORK, decode_tape, defunc, lower_asm, lower_tm_guarded, n_slots_of, run_tm_fitted, simulate_counts, simulate_final,
 };
 use redextape_core::value::format_value;
+
+#[path = "common/allocator.rs"]
+mod allocator;
 
 /// The corpus, kept in step with `tests/tm_bank_invariant.rs`.
 const CORPUS: &[(&str, &str)] = &[

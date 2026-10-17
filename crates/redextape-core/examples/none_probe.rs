@@ -38,79 +38,18 @@
 //! it decays monotonically).
 #![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic, clippy::pedantic)]
 
-use std::collections::HashSet;
-use std::io::Write;
-
-use redextape_core::lambda::{self, LambdaTerm, MAX_REDUCTION_STEPS, Node, Owner};
+use redextape_core::lambda::{self, MAX_REDUCTION_STEPS, Owner};
 use redextape_core::sourcemap::SourceMap;
 use redextape_core::tm::{self, EncodingKind};
 use redextape_core::{parser, trace};
 
-fn line(s: &str) {
-    println!("{s}");
-    let _ = std::io::stdout().flush();
-}
+#[path = "common/tag_census.rs"]
+mod tag_census;
+#[path = "common/text_underlined.rs"]
+mod text_underlined;
 
-fn head(s: &str) {
-    line("");
-    line(s);
-    line(&"-".repeat(s.len()));
-}
-
-/// The four programs to contrast: two loop programs (`while4`, `countdown4` — the pair `owner_probe.rs`
-/// measured at 397 `None` each) against two from the recursive family, which
-/// `2026-08-10-region-path-tagging-design.md` calls "already well covered" in the same sentence that
-/// calls the loop programs "an order of magnitude worse". `sum5` and `map_fold` are copied VERBATIM
-/// from `owner_probe.rs`'s `programs()` so the source strings cannot drift between the two probes.
-fn programs() -> Vec<(&'static str, &'static str)> {
-    vec![
-        ("while4", "let mut n = 4; let mut acc = 0; while n > 0 { acc = acc + 1; n = n - 1; } acc"),
-        (
-            "countdown4",
-            "fn count_down(n) { let mut acc = 0; while n > 0 { acc = acc + 1; n = n - 1; } acc } count_down(4)",
-        ),
-        ("sum5", "fn sum(n) { if n == 0 { 0 } else { n + sum(n - 1) } } sum(5)"),
-        (
-            "map_fold",
-            "fn map(xs, f) { if is_empty(xs) { nil } else { cons(f(head(xs)), map(tail(xs), f)) } }\n\
-             fn fold(xs, acc, f) { if is_empty(xs) { acc } else { fold(tail(xs), f(acc, head(xs)), f) } }\n\
-             fn add(a, b) { a + b }\n\
-             fn add1(x) { x + 1 }\n\
-             fold([3, 1, 2].map(add1), 0, add)",
-        ),
-    ]
-}
-
-/// Number of DISTINCT allocations reachable from `t` that are a tagged `App` (`owner().is_some()`).
-/// **Physical, not logical** — deduped by `alloc_id` over an explicit worklist, the same convention
-/// `term.rs`'s `max_shared_logical_size` uses for exactly this reason: under structural sharing a term
-/// can denote an astronomical logical tree from a small number of allocations, so a walk that revisits
-/// shared subterms would be the hang this file's module doc warns about, not a measurement of one.
-///
-/// Iterative over an explicit stack, never recursive — a walk added to a probe whose whole reason to
-/// exist is capped-memory safety must not itself risk a native stack overflow on a deep term.
-fn count_tagged_apps(t: &LambdaTerm) -> u64 {
-    let mut seen: HashSet<usize> = HashSet::new();
-    let mut stack: Vec<&LambdaTerm> = vec![t];
-    let mut count = 0u64;
-    while let Some(node) = stack.pop() {
-        if !seen.insert(node.alloc_id()) {
-            continue; // already visited this allocation; do not recount or re-walk its children
-        }
-        match node.node() {
-            Node::Var(_) => {}
-            Node::Abs(_, b) => stack.push(b),
-            Node::App(f, a, _) => {
-                if node.owner().is_some() {
-                    count += 1;
-                }
-                stack.push(f);
-                stack.push(a);
-            }
-        }
-    }
-    count
-}
+use tag_census::{count_tagged_apps, fmt_pct, programs};
+use text_underlined::{head, line};
 
 /// One program's full census: `Owner` totals, the headroom split over every `None` step, and the
 /// tagged-App trajectory needed to read that split.
@@ -206,7 +145,7 @@ fn measure(src: &str) -> Census {
 }
 
 /// The tagged-App count entering the step at percentile `q` (0.0..=1.0) OF THE RUN — i.e. indexing
-/// `counts` by STEP POSITION, not by sorted value. `owner_probe.rs`'s `percentile` sorts and ranks
+/// `counts` by STEP POSITION, not by sorted value. `common/nearest_rank.rs`'s `percentile` sorts and ranks
 /// VALUES (span widths, which have no inherent order); this instead reads a fixed position along an
 /// already-step-ordered sequence, so sorting it would destroy the thing being asked for: whether the
 /// count decays monotonically as the run proceeds.
@@ -226,10 +165,6 @@ fn tagged_count_at_pct(counts: &[u64], q: f64) -> u64 {
 /// look, not an expected outcome).
 fn is_monotonic_non_increasing(counts: &[u64]) -> bool {
     counts.windows(2).all(|w| w[1] <= w[0])
-}
-
-fn fmt_pct(n: u64, of: u64) -> String {
-    if of == 0 { "-".to_string() } else { format!("{:.1}%", 100.0 * n as f64 / of as f64) }
 }
 
 fn main() {

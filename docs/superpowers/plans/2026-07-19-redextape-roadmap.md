@@ -26912,3 +26912,105 @@ but for the last row's premise. "N tabs" is `VITEST_MAX_WORKERS=N`, and "under t
 | 3 of 12 | files the guard failed with its `WeakRef` made by the page: the third sabotage | the record's `sab-own-realm-weakref.log`: `VITEST_MAX_WORKERS=1 pnpm exec vitest run --project browser` and twelve files |
 | 607.50, 300.65 and 401.07 s | the whole coverage gate with the fix, in one tab, two, and three under the quota | the record's `fix-1tab-coverage-1.log` and `fix-2tabs-coverage-1.log` (the main checkout before the commits; the one-tab run's `collect.ts` had comments edited during it) and `ages-3tabs-coverage-v3-q150.log` |
 | 3 | runs with Vitest's default order of setup files that gave the stock report | `ages-default-coverage-v3-{1,2}.log` and `ages-3tabs-coverage-v3-q150.log`: the prototype's `vite.config.ts` had no `sequence` (the session's log) |
+
+#### THE PROBE BINARIES SHARE ONE COPY OF MOST HELPERS WHOSE CODE THEY CARRIED IDENTICALLY, UNDER `examples/common/`, WHERE EACH CARRIED ITS OWN, AND THE `FIRST_ORDER_DEMOS` SYNC TEST READS THAT ONE FILE (2026-10-17, branch `probe-support`, `82dc507..a7ae64a`, 6 commits, plus this entry and the two commits that correct it)
+
+**This is PR A of the comments-and-repeats plan.** The probe binaries under `crates/redextape-core/examples/` each
+carried their own copies of small helpers. Ten shared files under `examples/common/` now hold one copy of each, and
+the probes include them with `#[path = "common/<name>.rs"] mod <name>;` and, except for `allocator.rs`
+(nothing names `ALLOC`), a `use` naming the items the probe calls (`inherit_probe.rs` names `median` and reaches
+`percentile` through it). No probe was run.
+
+##### WHAT MOVED, AND THE RULE THAT MOVED IT
+
+- **The plan's rule was byte-identical, comments included; the user's rulings changed it to code-identical.** The
+  first dispatch found only `line` and `head` byte-identical, so it stopped. The user ruled that identical CODE is one
+  copy and doc comments may differ (ruling 1), and after the whole-branch review that the rule covers EVERY
+  code-identical top-level item under `examples/`, not only the plan table's rows (ruling 6).
+- **`common/demos.rs`**: `FIRST_ORDER_DEMOS`, for concurrency, lambda_sharing, list_reduction and state_cost.
+- **`common/text.rs` and `common/text_underlined.rs`**: `line` plus its own `head` each (the `=== s ===` variant for
+  blowup, guard_hole and list_reduction; the dash-rule variant for frame_cost, inherit, none and owner). `line` stays
+  defined in both, by ruling 4.
+- **`common/footprint.rs`** (`peak_rss_kb`, `physical`, `lower_src`), **`common/depth.rs`**,
+  **`common/nested_groups.rs`**, **`common/web_budget.rs`**, **`common/tag_census.rs`** (`programs`,
+  `count_tagged_apps`, `fmt_pct`), **`common/nearest_rank.rs`** (`percentile`, `median`) and
+  **`common/allocator.rs`** (the three-line global allocator, in 12 examples).
+- **The doc rule.** The shared file keeps the one doc comment that gives the why. History and measurements from the
+  deleted copies' docs moved word for word to `docs/superpowers/notes/2026-10-17-code-history-probes.md`, naming the
+  file and line each sat above before the move; docs that only said "COPIED from" were dropped.
+- **The sync test.** `tests/three_way_oracle.rs`'s four probe rows became one `examples/common/demos.rs` row, and the
+  test is renamed `first_order_demos_stay_synced_across_every_copy`, with every citation outside `docs/` updated.
+- **Comments the move left pointing at nothing** got the smallest wording change that names what they meant, adding no
+  fact: a prose list of probe files in `guard_counterexamples.rs`, and others found by two sibling searches. Three
+  "examples cannot share" claims the move made false were deleted, not reworded: two in `inherit_probe.rs`, which went
+  to the notes with their docs, and one in `step_survey.rs`.
+
+##### HOW EACH MOVE WAS PROVEN
+
+- **Identical code.** For every moved item a script extracted the code of every copy (definition line to closing
+  line, doc comments excluded, `pub(crate) ` stripped) and compared it with the shared file's; all matched. A later
+  enumeration of every top-level item under `examples/` (516 items) found no remaining code-identical group but the
+  `mod` include lines, `beta_allocs_fused` and `line`.
+- **Each shared file is used in full and is load-bearing.** Renaming one item in each shared file broke the build of
+  exactly that file's includers and no other example, with `cargo build -p redextape-core --examples --keep-going`.
+  Renaming `ALLOC` built cleanly, since nothing names it, so the allocator was checked another way: the release
+  binaries of exactly the 12 includers contain mimalloc's strings and the other 7 contain none. An unused item
+  appended to a shared file made clippy fail all its includers.
+- **The sync test fires.** A one-character defect in `FIRST_ORDER_DEMOS` in `common/demos.rs` made
+  `first_order_demos_stay_synced_across_every_copy` fail; restored, it passes.
+- Both results are the implementer's report's, not rerun for this entry.
+
+##### WHAT THIS DID NOT CLOSE
+
+- **Among the items left in place because the code differs** (the report's enumeration table lists the rest): `beta_allocs_fused` (its callee `shift_allocs` differs by an inline
+  comment, and its doc names `subst_allocs_today` in one copy); `shift_cost_probe.rs`'s `line` (`.ok()` where the
+  shared one has `let _ =`); blowup's `physical` (an inline comment on `continue`); `fmt_count` (each of three prints a
+  saturated count differently); `steps_at` and `measure` in step_survey (an expect message, an inline comment,
+  different fields); and step_survey's own `FIRST_ORDER_DEMOS` (same literals, plus inline comments, held by the sync
+  test). `line` is defined twice under `examples/`, once in each text file, by ruling 4.
+- **Comments left for Part C.** step_survey's history sentence about "four" and "the fifth" was moved to the notes;
+  `zipper_equivalence.rs`'s "hand-copied five times" is stale from before this branch; `three_way_oracle.rs`'s
+  "`copies.len() + 1 == 6`", "six hand-written" and "sixth and seventh" are stale from before it too; `text.rs` and
+  `text_underlined.rs` have no why-comment for being two near-duplicates; `footprint.rs` is named for two of its three
+  items.
+- **For Part B.** `viewmodel_contract.rs` claims twice that integration tests cannot import one another's helpers;
+  `tests/common/mod.rs` already contradicts it, before this branch.
+- **`check-scoped.sh` does not run the sync test for an edit to `examples/common/demos.rs` alone**: an `examples/`
+  path selects no test target ("examples/benches only"), and clippy `--all-targets` only builds them. A drifting
+  edit there is caught by `check-all.sh` and CI, not by the scoped check.
+- **The LLVM tier was not run.** This machine has no LLVM 22, so `check-all.sh --no-llvm` ran, and CI's `rust-llvm`
+  job runs the tier.
+
+##### VERIFICATION
+
+Run on 2026-10-17 in the main checkout on branch `probe-support` at `a7ae64a`, by `run.sh`, logs in `~/temp/redextape-comment-pass-record/gate/`. The commit that adds this
+entry changes only this file. No image was built, and nothing has run in CI: the branch has not been pushed.
+
+```
+scripts/check-all.sh --no-llvm                  → exit 0, "green, but PARTIAL — these tiers were SKIPPED: LLVM"; nextest 1,903 passed, 33 skipped
+cargo llvm-cov nextest --workspace --fail-under-lines 90
+                                                → exit 0, 1,903 passed, 33 skipped; lines 95.25%
+scripts/check-slow.sh                           → exit 0, "slow tier green"
+scripts/check-{text-bytes,citations,attributions,doc-figures,shared-docs,colours,grammar-wasm,lua}.sh,
+  --self-test then alone                        → 16 of 16 exit 0 (attributions: 808 sites, 6 excused, 0 violations)
+```
+
+**Every count this entry quotes, with what produces it.** Commands run from the repository root, `B=82dc507` and
+`H=a7ae64a`. Rows marked "report" are the implementer's results in `~/temp/redextape-comment-pass-record/task-A1-report.md`,
+not commands run for this entry.
+
+| Value | What | Produced by |
+|---|---|---|
+| 6 | commits in the range | `git rev-list --count $B..$H` |
+| 33 files, +835 −886 | the whole range | `git diff --shortstat $B $H` |
+| 28 files, +447 −858; 3 files, +25 −28; 2 files, +363 | the range under `examples`, under `tests`, under `docs` | `git diff --stat $B $H -- crates/redextape-core/examples` (and `.../tests`, `docs`), last line |
+| 10 | files under `examples/common/` | `ls crates/redextape-core/examples/common \| wc -l` |
+| 483 and 407 | definitions (`const`, `fn`, `static`, `struct`) under `examples/` at `$B` and now | `git grep -hnE '^\s*(pub(\(crate\))? )?(const\|fn\|static\|struct) ' $B -- crates/redextape-core/examples \| wc -l`, and the same with `rg -n … crates/redextape-core/examples \| wc -l` |
+| 18; 37 | example files with an include of a `common/` file; the include lines | `rg -l '#\[path = "common/' crates/redextape-core/examples \| wc -l`; `rg -c … --no-filename … \| paste -sd+ \| bc` |
+| 0 | `#[allow(dead_code)]` under `examples/` | `rg -n 'allow\(dead_code\)' crates/redextape-core/examples \| wc -l` |
+| 14 | entries in the notes file | `grep -c '^## ' docs/superpowers/notes/2026-10-17-code-history-probes.md` |
+| 12; 7; 516; the include-line groups, `beta_allocs_fused`, `line` | allocator includers and non-includers; items enumerated; the groups left | report |
+| exactly the includers, no other example | what failed with each shared file broken | report |
+| 1 failed | the sync test under the one-character defect | report |
+| 1,903 passed, 33 skipped; 95.25% | the nextest total in `check-all.sh` and in llvm-cov; lines | `grep 'tests run' check-all.log llvm-cov.log`; `grep '^TOTAL' llvm-cov.log` in the gate directory |
+| 808, 6, 0 | attribution sites, excused, violations | `grep sites scan-attributions.log` in the gate directory |
