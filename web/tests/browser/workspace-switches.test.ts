@@ -1,12 +1,8 @@
 import type { EditorView } from '@codemirror/view'
 import { computeAccessibleName } from 'dom-accessibility-api'
 import { beforeAll, describe, expect, it } from 'vitest'
-import { SHELL, until } from './harness'
+import { openWorkspaceMenu, SHELL, stateIdle, storedLayoutOrEmpty, until } from './harness'
 
-const open = (): HTMLElement => {
-  document.querySelector<HTMLButtonElement>('#workspace')?.click()
-  return document.querySelector<HTMLElement>('#workspace-menu') as HTMLElement
-}
 const shut = (): void => {
   const menu = document.querySelector<HTMLElement>('#workspace-menu')
   if (menu?.matches(':popover-open')) menu.hidePopover()
@@ -15,15 +11,13 @@ const item = (menu: HTMLElement, sel: string): HTMLButtonElement =>
   menu.querySelector<HTMLButtonElement>(sel) as HTMLButtonElement
 const name = (): string => document.querySelector<HTMLElement>('#workspace')?.textContent?.trim() ?? ''
 const live = (): string => document.querySelector<HTMLElement>('#live')?.textContent?.trim() ?? ''
-const stored = (): { switches?: unknown; version?: unknown } =>
-  JSON.parse(localStorage.getItem('redextape.layout') ?? '{}')
 
 describe('the workspace menu', () => {
   beforeAll(async () => {
     document.body.innerHTML = SHELL
     const view: EditorView = await (await import('../../src/main')).ready
     view.dispatch({ changes: { from: 0, to: view.state.doc.length, insert: 'let x = 40; x + 2' } })
-    await until(() => document.querySelector<HTMLElement>('#results')?.dataset.state === 'idle', 'the first compile')
+    await until(stateIdle, 'the first compile')
   })
 
   // **THE GLYPH IS NOT IN THE NAME.** `copies 2 ▾` already does this; the workspace button did not, and
@@ -36,7 +30,7 @@ describe('the workspace menu', () => {
   })
 
   it('offers the three presets and the three switches, with the values in force marked', () => {
-    const menu = open()
+    const menu = openWorkspaceMenu()
     expect([...menu.querySelectorAll('[data-preset]')].map((b) => b.textContent)).toEqual([
       'Explorer',
       'Debugger',
@@ -52,21 +46,21 @@ describe('the workspace menu', () => {
   })
 
   it('names itself after the preset a pick makes, persists it, and says so', () => {
-    const menu = open()
+    const menu = openWorkspaceMenu()
     item(menu, '[data-preset="debugger"]').click()
     expect(name()).toBe('Debugger ▾')
-    expect(stored().switches).toEqual({ steps: 'bar', views: 'tiles', readout: 'inspector' })
+    expect(storedLayoutOrEmpty().switches).toEqual({ steps: 'bar', views: 'tiles', readout: 'inspector' })
     expect(live()).toContain('Debugger')
     shut()
   })
 
   // §4: any combination matching no row is *custom*, it persists as it is, and the menu names it.
   it('is custom when the switches match no preset, and offers no reset while it is', () => {
-    const menu = open()
+    const menu = openWorkspaceMenu()
     item(menu, '[data-preset="explorer"]').click()
     item(menu, '[data-switch="views"][data-value="stage"]').click()
     expect(name()).toBe('custom ▾')
-    expect(stored().switches).toEqual({ steps: 'view', views: 'stage', readout: 'strip' })
+    expect(storedLayoutOrEmpty().switches).toEqual({ steps: 'view', views: 'stage', readout: 'strip' })
     expect(menu.querySelector('#reset-preset')).toBeNull()
     // Choosing a preset is the way back, and the item returns with it.
     item(menu, '[data-preset="explorer"]').click()
@@ -76,7 +70,7 @@ describe('the workspace menu', () => {
 
   // Spec §11's fourth rule, third instance: the menu rebuilds under the button that was just clicked.
   it('keeps the focus on the switch that was picked, and hands it off when reset preset goes', () => {
-    const menu = open()
+    const menu = openWorkspaceMenu()
     item(menu, '[data-preset="explorer"]').click()
     const stage = item(menu, '[data-switch="views"][data-value="stage"]')
     stage.focus()
@@ -98,13 +92,13 @@ describe('the workspace menu', () => {
   // reads `localStorage` in the same page. The restore direction is `workspace-boot.test.ts`, which seeds
   // a Debugger envelope before `main` is imported and asserts the page comes up in it.
   it('writes the whole switch triple to storage, under version 2', () => {
-    const menu = open()
+    const menu = openWorkspaceMenu()
     item(menu, '[data-preset="stage"]').click()
     shut()
-    expect(stored().switches).toEqual({ steps: 'bar', views: 'stage', readout: 'inspector' })
-    expect(stored().version).toBe(2)
+    expect(storedLayoutOrEmpty().switches).toEqual({ steps: 'bar', views: 'stage', readout: 'inspector' })
+    expect(storedLayoutOrEmpty().version).toBe(2)
     // Back to Explorer so the shared page is where the other cases expect it.
-    const again = open()
+    const again = openWorkspaceMenu()
     item(again, '[data-preset="explorer"]').click()
     shut()
   })

@@ -1,31 +1,13 @@
-import { afterEach, describe, expect, it, vi } from 'vitest'
+import { afterEach, describe, expect, it } from 'vitest'
 import { LambdaPane } from '../../src/lambda-pane'
-import type { PaneEvents } from '../../src/pane-chrome'
 import { wireOf } from '../node/tree-fixture'
+import { fixtureHost, inertEvents } from './harness'
 
 /**
  * What a λ view says about the pinned construct — `LambdaPane.linkState`, the λ half of the link status
  * (spec §5.4). The pane is built directly, as `lambda-follow`'s are: nothing here needs `main()`.
  */
-const host = (): HTMLElement => {
-  const el = document.createElement('section')
-  el.className = 'pane lambda-link-state-fixture'
-  el.style.width = '640px'
-  document.body.append(el)
-  return el
-}
-
-const events = (): PaneEvents => ({
-  back: vi.fn(),
-  forward: vi.fn(),
-  toNewest: vi.fn(),
-  play: vi.fn(),
-  restart: vi.fn(),
-  extend: vi.fn(),
-  speed: () => 8,
-  setSpeed: vi.fn(),
-  rebind: vi.fn(),
-})
+const host = (): HTMLElement => fixtureHost('lambda-link-state-fixture')
 
 afterEach(() => {
   for (const el of document.querySelectorAll('.lambda-link-state-fixture')) el.remove()
@@ -38,7 +20,7 @@ describe('a λ view’s link state', () => {
    * names. The node 0 of `(\x. x) y` carries construct 7, and nothing carries 8.
    */
   it('answers from the tree for this step, and waits while it shows another step’s', () => {
-    const pane = new LambdaPane(host(), events())
+    const pane = new LambdaPane(host(), inertEvents())
     const wire = wireOf('(\\x. x) y', { links: { 0: 7 } })
 
     pane.renderTree({ kind: 'tree', tree: wire }, 7)

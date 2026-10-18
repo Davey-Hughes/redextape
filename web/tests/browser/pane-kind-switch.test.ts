@@ -4,7 +4,23 @@ import { page } from 'vitest/browser'
 import { LAYOUT_STORAGE_KEY, type LayoutNode, setLeafKind } from '../../src/layout'
 import { bindingKey } from '../../src/view-header'
 import { parseWorkspace } from '../../src/workspace'
-import { resetToFourViews, SHELL, until } from './harness'
+import {
+  editorsInLeaf,
+  lambdaLeaves,
+  leafIds,
+  leafKind,
+  pickBinding,
+  places,
+  resetToFourViews,
+  SHELL,
+  showing,
+  splitSame,
+  stateIdle,
+  stepTextOf,
+  termOf,
+  titleOf,
+  until,
+} from './harness'
 
 /**
  * **A PANE CHANGES WHAT IT SHOWS, IN PLACE** — decision 1's headline capability, driven entirely
@@ -35,86 +51,7 @@ import { resetToFourViews, SHELL, until } from './harness'
  * from its leaf id would be reading a string `nextLeafId` stopped spelling for exactly this reason.
  */
 
-const leafIds = () => [...document.querySelectorAll<HTMLElement>('[data-leaf]')].map((e) => e.dataset.leaf ?? '')
-const lambdaLeaves = () =>
-  [...document.querySelectorAll<HTMLElement>('[data-kind="lambda"]')].map((e) => e.dataset.leaf ?? '')
-const kindOf = (leaf: string) => document.querySelector<HTMLElement>(`[data-leaf="${leaf}"]`)?.dataset.kind ?? ''
-/**
- * Every leaf's id paired with the `flex` `layout-view.ts` gave it, in document order — "where each pane
- * is and how big it is", as one comparable value.
- *
- * THE ID IS IN IT BECAUSE THE ORDER IS HALF THE CLAIM. `renderLayout` only ever appends, so a pane
- * rebuilt as a fresh leaf rather than changed in place would arrive at the END of its parent split with
- * a size the divider positions no longer describe; comparing bare sizes would call that arrangement
- * equal to this one whenever the sizes happen to match.
- */
-const places = () =>
-  [...document.querySelectorAll<HTMLElement>('[data-leaf]')].map((e) => `${e.dataset.leaf}@${e.style.flex}`)
-/**
- * Split `leaf` into a second pane of the same kind on the same session — `two-lambda-panes.test.ts`'s
- * `splitSame`, verbatim, and its doc carries the argument: the split control opens a picker now, whose
- * first entry is the pane's own pair labelled "another view of this", so the gesture that used to be one click is two
- * and still means what it meant. Both splits below exist to give the switched pane a NEIGHBOUR, which is
- * what makes the tree uneven enough for "kept its place and its size" to be a claim — what the neighbour
- * shows is not what either test is about, so the duplicate case is the right entry here.
- */
-const splitSame = (leaf: string, dir: 'row' | 'column'): void => splitVia(leaf, dir, 'same')
-/** The title-selector of `leaf`'s view — the pair in force is its `data-binding`. */
-const titleOf = (leaf: string) => document.querySelector<HTMLButtonElement>(`[data-leaf="${leaf}"] button.view-title`)
-const editorsIn = (leaf: string) => document.querySelectorAll(`[data-leaf="${leaf}"] .cm-editor`).length
-const termOf = (leaf: string) => document.querySelector(`[data-leaf="${leaf}"] .term`)?.textContent ?? ''
-/**
- * What a TM pane is actually showing — `pane-picker.test.ts`'s `showing`, verbatim, and its doc carries
- * the argument for the three readings and for counting `.cell` rather than `.tape`.
- */
-const showing = (leaf: string) => ({
-  tapes: [...document.querySelectorAll(`[data-leaf="${leaf}"] .tape .cell`)].map((e) => e.textContent).join(''),
-  rows: document.querySelectorAll(`[data-leaf="${leaf}"] .state-row`).length,
-  status: document.querySelector(`[data-leaf="${leaf}"] .tm-status`)?.textContent ?? '',
-})
-const stepOf = (leaf: string) => document.querySelector(`[data-leaf="${leaf}"] .step`)?.textContent ?? ''
 const storedTree = (): LayoutNode | null => parseWorkspace(localStorage.getItem(LAYOUT_STORAGE_KEY))?.tree ?? null
-
-/**
- * Pick `key` (`bindingKey(leg, session)`) through `leaf`'s title menu, as a user does.
- *
- * **IT ASSERTS THE ITEM WAS THERE, WHICH IS NOT PEDANTRY** — a pick that never happened would leave every
- * assertion in every test below passing against the pane's old pair.
- */
-const pick = (leaf: string, key: string): void => {
-  const title = titleOf(leaf)
-  if (title === null) throw new Error(`no title-selector on [data-leaf="${leaf}"]`)
-  title.click()
-  const menu = document.getElementById(title.getAttribute('aria-controls') ?? '')
-  const item = menu?.querySelector<HTMLButtonElement>(`button[data-binding="${key}"]`)
-  if (item == null) {
-    const offered = [...(menu?.querySelectorAll<HTMLButtonElement>('button') ?? [])].map((b) => b.dataset.binding)
-    throw new Error(`[data-leaf="${leaf}"] offers no ${JSON.stringify(key)} — offered: ${JSON.stringify(offered)}`)
-  }
-  item.click()
-}
-
-/**
- * Split `leaf` through its `⋯` menu, as a user does: `pick` is `'same'` (another view of this), `'source'`,
- * or a `bindingKey(leg, session)`.
- */
-function splitVia(leaf: string, dir: 'row' | 'column', pick: string): void {
-  const more = document.querySelector<HTMLButtonElement>(`[data-leaf="${leaf}"] button.view-more`)
-  if (more === null) throw new Error(`no view menu on [data-leaf="${leaf}"]`)
-  more.click()
-  const menu = document.getElementById(more.getAttribute('aria-controls') ?? '')
-  menu?.querySelector<HTMLButtonElement>(`button.view-split[data-dir="${dir}"]`)?.click()
-  const selector =
-    pick === 'same' ? 'button[data-same]' : pick === 'source' ? 'button[data-source]' : `button[data-binding="${pick}"]`
-  const item = menu?.querySelector<HTMLButtonElement>(`.view-menu-pairs ${selector}`)
-  if (item == null) {
-    const offered = [...(menu?.querySelectorAll<HTMLButtonElement>('.view-menu-pairs button') ?? [])].map(
-      (b) => b.textContent,
-    )
-    throw new Error(`[data-leaf="${leaf}"] offers no ${pick} to split into — offered: ${offered.join(' | ')}`)
-  }
-  item.click()
-}
 
 let view: EditorView
 
@@ -127,7 +64,7 @@ beforeAll(async () => {
   await page.viewport(1280, 896)
   document.body.innerHTML = SHELL
   view = await (await import('../../src/main')).ready
-  await until(() => document.querySelector<HTMLElement>('#results')?.dataset.state === 'idle', 'the first compile')
+  await until(stateIdle, 'the first compile')
 })
 
 beforeEach(async () => {
@@ -171,22 +108,25 @@ describe('a pane changes which leg it renders', () => {
     const onError = (e: ErrorEvent) => errors.push(e.message)
     window.addEventListener('error', onError)
     try {
+      // Both splits below exist to give the switched pane a NEIGHBOUR, which is what makes the tree uneven enough
+      // for "kept its place and its size" to be a claim — what the neighbour shows is not what either test is about,
+      // so the duplicate case is the right entry here.
       splitSame('lambda-0', 'row')
       await until(() => lambdaLeaves().length === 2, 'the split to produce a second λ pane')
 
       const placesBefore = places()
       const treeBefore = storedTree()
-      const lambdaStep = stepOf('lambda-0')
+      const lambdaStep = stepTextOf('lambda-0')
       // THROWN AT THE SITE RATHER THAN CAST AWAY BELOW. `setLeafKind` needs a `LayoutNode`, and a
       // `?? ({} as LayoutNode)` fallback would be dead code whose deadness depended on an `expect` three
       // lines up — the reader has to prove the assertion runs first to know the cast never does.
       if (treeBefore === null) throw new Error('applyLayout persisted no tree before the switch')
-      expect(kindOf('lambda-0')).toBe('lambda')
+      expect(leafKind('lambda-0')).toBe('lambda')
       expect(termOf('lambda-0')).not.toBe('')
       expect(lambdaStep).not.toBe('')
 
-      pick('lambda-0', bindingKey('tm', 'source'))
-      await until(() => kindOf('lambda-0') === 'tm', 'the λ pane to become a TM pane')
+      pickBinding('lambda-0', bindingKey('tm', 'source'))
+      await until(() => leafKind('lambda-0') === 'tm', 'the λ pane to become a TM pane')
 
       // THE HOST WAS REBUILT, NOT RELABELLED. `.state-table` is `TmPane`'s and `.term` is
       // `LambdaPane`'s, so the two together say the contents changed with the attribute.
@@ -199,8 +139,8 @@ describe('a pane changes which leg it renders', () => {
 
       // AND IT IS SHOWING THE PAIR THAT WAS PICKED, RESOLVED.
       expect(titleOf('lambda-0')?.dataset.binding).toBe(bindingKey('tm', 'source'))
-      expect(stepOf('lambda-0')).toBe(stepOf('tm-0'))
-      expect(stepOf('lambda-0')).not.toBe(lambdaStep)
+      expect(stepTextOf('lambda-0')).toBe(stepTextOf('tm-0'))
+      expect(stepTextOf('lambda-0')).not.toBe(lambdaStep)
       expect(errors).toEqual([])
     } finally {
       window.removeEventListener('error', onError)
@@ -227,8 +167,8 @@ describe('a pane changes which leg it renders', () => {
     try {
       expect(showing('tm-0').rows).toBeGreaterThan(0)
 
-      pick('lambda-0', bindingKey('tm', 'source'))
-      await until(() => kindOf('lambda-0') === 'tm', 'the λ pane to become a TM pane')
+      pickBinding('lambda-0', bindingKey('tm', 'source'))
+      await until(() => leafKind('lambda-0') === 'tm', 'the λ pane to become a TM pane')
 
       const shown = showing('lambda-0')
       expect(shown.tapes).not.toBe('')
@@ -267,13 +207,13 @@ describe('a pane changes which leg it renders', () => {
     window.addEventListener('error', onError)
     try {
       document.querySelector<HTMLButtonElement>('[data-leaf="lambda-0"] button.detach')?.click()
-      await until(() => editorsIn('lambda-0') > 0, 'the fork to mount an editor')
+      await until(() => editorsInLeaf('lambda-0') > 0, 'the fork to mount an editor')
       splitSame('lambda-0', 'row')
       await until(() => lambdaLeaves().length === 2, 'the split to produce a second λ pane')
       const survivor = lambdaLeaves().find((id) => id !== 'lambda-0') ?? ''
       expect(survivor).not.toBe('')
-      expect(editorsIn('lambda-0')).toBe(1)
-      expect(editorsIn(survivor)).toBe(0)
+      expect(editorsInLeaf('lambda-0')).toBe(1)
+      expect(editorsInLeaf(survivor)).toBe(0)
 
       const hostBefore = document.querySelector<HTMLElement>('[data-leaf="lambda-0"] .cm-content')
       if (hostBefore === null) throw new Error('the forked pane has no editor host')
@@ -283,8 +223,8 @@ describe('a pane changes which leg it renders', () => {
       viewBefore.dispatch({ selection: { anchor: cursorAt } })
 
       // THE SWITCH, ON THE PANE THAT IS HOLDING THE EDITOR.
-      pick('lambda-0', bindingKey('tm', 'source'))
-      await until(() => kindOf('lambda-0') === 'tm', 'the editor-holding λ pane to become a TM pane')
+      pickBinding('lambda-0', bindingKey('tm', 'source'))
+      await until(() => leafKind('lambda-0') === 'tm', 'the editor-holding λ pane to become a TM pane')
 
       // MOUNTED NOWHERE, DESTROYED NOWHERE — in custody, which no surface shows directly. The
       // observable is that the page holds no mounted scratch editor at all while the source editor is
@@ -295,7 +235,7 @@ describe('a pane changes which leg it renders', () => {
       const claim = document.querySelector<HTMLButtonElement>(`[data-leaf="${survivor}"] button.claim-editor`)
       expect(claim).not.toBeNull()
       claim?.click()
-      await until(() => editorsIn(survivor) === 1, 'the survivor to claim the held editor')
+      await until(() => editorsInLeaf(survivor) === 1, 'the survivor to claim the held editor')
 
       const hostAfter = document.querySelector<HTMLElement>(`[data-leaf="${survivor}"] .cm-content`)
       if (hostAfter === null) throw new Error('the claiming pane has no editor host')
@@ -337,8 +277,8 @@ describe('a pane changes which leg it renders', () => {
     title.focus()
     expect(document.activeElement).toBe(title)
 
-    pick('lambda-0', bindingKey('tm', 'source'))
-    await until(() => kindOf('lambda-0') === 'tm', 'the λ pane to become a TM pane')
+    pickBinding('lambda-0', bindingKey('tm', 'source'))
+    await until(() => leafKind('lambda-0') === 'tm', 'the λ pane to become a TM pane')
 
     expect(document.activeElement).not.toBe(document.body)
     const landed = (document.activeElement as HTMLElement | null)?.closest('[data-leaf]')
@@ -375,20 +315,20 @@ describe('a pane changes which leg it renders', () => {
     window.addEventListener('error', onError)
     try {
       document.querySelector<HTMLButtonElement>('[data-leaf="lambda-0"] button.detach')?.click()
-      await until(() => editorsIn('lambda-0') > 0, 'the fork to register a scratch buffer')
-      expect(kindOf('tm-0')).toBe('tm')
+      await until(() => editorsInLeaf('lambda-0') > 0, 'the fork to register a scratch buffer')
+      expect(leafKind('tm-0')).toBe('tm')
 
       // THE PAIR THE FORK PRODUCED, READ OFF THE PANE THAT PERFORMED IT. This test picked the literal
       // `bindingKey('lambda', 'lambda-scratch')` — 5d-i's one fixed scratch id — and 5d-ii-c decision 1
       // mints `scratch-N` per fork instead. The number depends on how many forks this FILE ran before
       // this test (one `main()` per page), so it cannot be written down; the pane that just forked is
-      // where the app itself records it. `pick` throws if the value it is handed is not in the target
+      // where the app itself records it. `pickBinding` throws if the value it is handed is not in the target
       // selector, which is what keeps this from silently picking nothing.
       const buffer = titleOf('lambda-0')?.dataset.binding ?? ''
       expect(buffer).not.toBe(bindingKey('lambda', 'source'))
 
-      pick('tm-0', buffer)
-      await until(() => kindOf('tm-0') === 'lambda', 'the TM pane to become a λ pane on the buffer')
+      pickBinding('tm-0', buffer)
+      await until(() => leafKind('tm-0') === 'lambda', 'the TM pane to become a λ pane on the buffer')
 
       expect(titleOf('tm-0')?.dataset.binding).toBe(buffer)
       expect(document.querySelector('[data-leaf="tm-0"] h2')?.textContent).toContain('copy · not linked')
@@ -412,7 +352,7 @@ describe('a pane changes which leg it renders', () => {
       // retire could not: the switched pane follows the buffer's OWN later frames, on a binding it
       // acquired through a cross-leg pick.
       const scratchTerm = termOf('tm-0')
-      expect(stepOf('tm-0')).not.toBe('')
+      expect(stepTextOf('tm-0')).not.toBe('')
       const editorHost = document.querySelector<HTMLElement>('[data-leaf="lambda-0"] .cm-content')
       if (editorHost === null) throw new Error('the forked pane has no editor host')
       const bufferView = EditorView.findFromDOM(editorHost)
@@ -432,10 +372,7 @@ describe('a pane changes which leg it renders', () => {
       // reached from. The switched pane is still on the buffer afterwards, which is decision 2 read on
       // the pane the Critical was about.
       view.dispatch({ changes: { from: view.state.doc.length, insert: ' + 0' } })
-      await until(
-        () => document.querySelector<HTMLElement>('#results')?.dataset.state === 'idle',
-        'the source recompile to settle',
-      )
+      await until(stateIdle, 'the source recompile to settle')
       expect(titleOf('tm-0')?.dataset.binding).toBe(buffer)
       expect(document.querySelector('[data-leaf="tm-0"] h2')?.textContent).toContain('copy · not linked')
       expect(termOf('tm-0')).toBe(termOf('lambda-0'))

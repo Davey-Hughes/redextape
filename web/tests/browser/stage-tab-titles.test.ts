@@ -1,7 +1,8 @@
 import type { EditorView } from '@codemirror/view'
 import { beforeAll, describe, expect, it } from 'vitest'
 import { page, userEvent } from 'vitest/browser'
-import { SHELL, until } from './harness'
+import { controlledMenu, paneByLeaf, SHELL, stageTab, stateIdle, until } from './harness'
+import { chooseFromWorkspace } from './user-event-fixture'
 
 /**
  * IN STAGE, A TAB NAMES WHAT ITS VIEW SHOWS, AS THE VIEW'S TITLE DOES (Plan 7 part 2 spec §5, §7).
@@ -17,43 +18,29 @@ import { SHELL, until } from './harness'
 
 const SAMPLE = 'let x = 40; x + 2'
 
-const idle = () => document.querySelector<HTMLElement>('#results')?.dataset.state === 'idle'
-const host = (leaf: string) => document.querySelector<HTMLElement>(`.pane[data-leaf="${leaf}"]`) as HTMLElement
-const tab = (leaf: string) =>
-  document.querySelector<HTMLElement>(`#views [role="tab"][data-leaf="${leaf}"]`) as HTMLElement
 const titleButton = (leaf: string) =>
-  host(leaf).querySelector<HTMLButtonElement>('button.view-title') as HTMLButtonElement
+  paneByLeaf(leaf).querySelector<HTMLButtonElement>('button.view-title') as HTMLButtonElement
 const title = (leaf: string) => titleButton(leaf).textContent?.trim() ?? ''
-const label = (leaf: string) => tab(leaf).textContent ?? ''
-const menuOf = (button: HTMLElement): HTMLElement =>
-  document.getElementById(button.getAttribute('aria-controls') ?? '') as HTMLElement
-
-/** Pick from the workspace menu with the pointer, and close it if the pick left it open. */
-async function workspace(selector: string): Promise<void> {
-  const button = document.querySelector<HTMLButtonElement>('#workspace') as HTMLButtonElement
-  await userEvent.click(button)
-  await userEvent.click(document.querySelector<HTMLElement>(`#workspace-menu ${selector}`) as HTMLElement)
-  if (menuOf(button).matches(':popover-open')) await userEvent.keyboard('{Escape}')
-}
+const label = (leaf: string) => stageTab(leaf).textContent ?? ''
 
 /** Select `leaf`'s tab with the pointer, and wait for its view to be the one on the page. */
 async function show(leaf: string): Promise<void> {
-  await userEvent.click(tab(leaf))
-  await until(() => host(leaf).isConnected, `${leaf}’s view on the stage`)
+  await userEvent.click(stageTab(leaf))
+  await until(() => paneByLeaf(leaf).isConnected, `${leaf}’s view on the stage`)
 }
 
 /** *Edit a copy* through the view's `⋯` menu, with the pointer. */
 async function editACopy(leaf: string): Promise<void> {
-  const more = host(leaf).querySelector<HTMLButtonElement>('button.view-more') as HTMLButtonElement
+  const more = paneByLeaf(leaf).querySelector<HTMLButtonElement>('button.view-more') as HTMLButtonElement
   await userEvent.click(more)
-  await until(() => menuOf(more).matches(':popover-open'), 'the view menu to open')
-  await userEvent.click(menuOf(more).querySelector<HTMLButtonElement>('button.detach') as HTMLButtonElement)
+  await until(() => controlledMenu(more).matches(':popover-open'), 'the view menu to open')
+  await userEvent.click(controlledMenu(more).querySelector<HTMLButtonElement>('button.detach') as HTMLButtonElement)
 }
 
 /** Pick, in `leaf`'s title menu, the first pair `which` accepts, with the pointer; returns the label picked. */
 async function pickTitle(leaf: string, which: (b: HTMLButtonElement) => boolean): Promise<string> {
   await userEvent.click(titleButton(leaf))
-  const menu = menuOf(titleButton(leaf))
+  const menu = controlledMenu(titleButton(leaf))
   await until(() => menu.matches(':popover-open'), 'the title’s menu to open')
   const item = [...menu.querySelectorAll<HTMLButtonElement>('button[data-binding]')].find(which)
   if (item === undefined) throw new Error(`${leaf}’s title offers no such pair`)
@@ -73,10 +60,10 @@ beforeAll(async () => {
   document.body.innerHTML = SHELL
   const view: EditorView = await (await import('../../src/main')).ready
   view.dispatch({ changes: { from: 0, to: view.state.doc.length, insert: SAMPLE } })
-  await until(() => !idle(), 'the compile to start')
-  await until(idle, 'the compile to finish')
-  await workspace('[data-switch="views"][data-value="stage"]')
-  await until(() => tab('asm-0') !== null, 'the stage’s tabs')
+  await until(() => !stateIdle(), 'the compile to start')
+  await until(stateIdle, 'the compile to finish')
+  await chooseFromWorkspace('[data-switch="views"][data-value="stage"]')
+  await until(() => stageTab('asm-0') !== null, 'the stage’s tabs')
 })
 
 describe('a Stage tab', () => {

@@ -2,10 +2,22 @@ import type { EditorView } from '@codemirror/view'
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 import { userEvent } from 'vitest/browser'
 import { EXAMPLE_ENCODING } from '../../src/examples'
-import { PROGRAM_STORAGE_KEY, parseProgram, serializeProgram } from '../../src/program-store'
-import { decodeLink, encodeLink, type SharePayload } from '../../src/share-link'
-import { defaultWorkspace, PRESETS, serializeWorkspace } from '../../src/workspace'
-import { SHELL, until } from './harness'
+import { PROGRAM_STORAGE_KEY } from '../../src/program-store'
+import { decodeLink, encodeLink } from '../../src/share-link'
+import { noticeText, picker, undoButton } from './harness'
+import {
+  LEFT_OUT,
+  LINK,
+  LINKED,
+  mountOn,
+  OTHER,
+  PAGE,
+  postedSince,
+  runs,
+  stored,
+  unwrapPost,
+  workspaceName,
+} from './share-open-hashchange-fixture'
 
 /**
  * **A LINK PASTED INTO AN OPEN PAGE, WHOSE ENCODING THIS BUILD DOES NOT HAVE, WITH THE PAGE STARTED ON `binary`** —
@@ -35,55 +47,13 @@ import { SHELL, until } from './harness'
  * programs, each for the reason the other half gives.
  */
 
-/** The program the page is on before the first paste. */
-const PAGE = 'let x = 40; x + 2'
-const LINKED = 'let y = 10; y + 5'
-/** A program no paste before the one carrying it put in the editor. */
-const OTHER = 'let z = 3; z + 4'
-/** The link: `ternary`, which this build lacks, and the Debugger preset's workspace, which the page is not in. */
-const LINK: SharePayload = {
-  program: LINKED,
-  encoding: 'ternary',
-  workspace: serializeWorkspace({ ...defaultWorkspace('wide'), switches: PRESETS.debugger }),
-  positions: {},
-}
-const LEFT_OUT = "opened a shared link's program — its encoding, workspace and step positions were left out"
-
-const picker = () => document.querySelector<HTMLSelectElement>('#encoding') as HTMLSelectElement
-const noticeText = () => document.querySelector('#notice .notice-text')?.textContent ?? ''
-const undoButton = () => document.querySelector<HTMLButtonElement>('#notice button.notice-action')
-const idle = () => document.querySelector<HTMLElement>('#results')?.dataset.state === 'idle'
-const readout = () => [...document.querySelectorAll('#results .segment, #results .row')].length
-const workspaceName = () => document.querySelector('#workspace')?.textContent
-/** The program storage holds: the last write that went through. */
-const stored = () => parseProgram(localStorage.getItem(PROGRAM_STORAGE_KEY), ['unary', 'binary'])
-
-/** Every compile the page has posted, in order: the text and the encoding of each `run` request. */
-const runs: { src: string; encoding: string }[] = []
-const post = Worker.prototype.postMessage
-/** The compiles posted since `from` was `runs.length`, once one carrying `src` is among them. */
-async function postedSince(from: number, src: string, what: string): Promise<{ src: string; encoding: string }[]> {
-  await until(() => runs.slice(from).some((r) => r.src === src), what)
-  return runs.slice(from)
-}
-
 let view: EditorView
 
 beforeAll(async () => {
-  Worker.prototype.postMessage = function (this: Worker, message: unknown, options?: unknown) {
-    const m = message as { kind?: string; src?: string; encoding?: string } | null
-    if (m?.kind === 'run') runs.push({ src: m.src ?? '', encoding: m.encoding ?? '' })
-    ;(post as (this: Worker, m: unknown, o?: unknown) => void).call(this, message, options)
-  }
-  localStorage.setItem(PROGRAM_STORAGE_KEY, serializeProgram({ text: PAGE, encoding: 'binary' }))
-  document.body.innerHTML = SHELL
-  view = await (await import('../../src/main')).ready
-  await until(() => idle() && readout() > 0, 'the first compile')
+  view = await mountOn('binary')
 })
 
-afterAll(() => {
-  Worker.prototype.postMessage = post
-})
+afterAll(unwrapPost)
 
 describe('a link pasted into a page that started on binary, whose encoding this build does not have', () => {
   it('opens its program alone under the page’s encoding, compiles it under that, and clears the fragment', async () => {

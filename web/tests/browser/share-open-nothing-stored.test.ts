@@ -4,7 +4,18 @@ import { page, userEvent } from 'vitest/browser'
 import { LAYOUT_STORAGE_KEY } from '../../src/layout'
 import { encodeLink } from '../../src/share-link'
 import { serializeWorkspace } from '../../src/workspace'
-import { fourViewWorkspace, host, SHELL, until } from './harness'
+import {
+  box,
+  fourViewWorkspace,
+  mounted,
+  noticeText,
+  readout,
+  SHELL,
+  stateIdle,
+  storedLayout,
+  undoButton,
+  until,
+} from './harness'
 
 /**
  * **A LINK OPENED AT START-UP, WHOLE, ON A PAGE WITH NO WORKSPACE STORED, AND ITS UNDO** — Plan 7 part 6a spec §5.5 and
@@ -23,17 +34,6 @@ localStorage.removeItem(LAYOUT_STORAGE_KEY)
 
 const LINKED = 'let y = 10; y + 5'
 
-const mounted = (): string[] =>
-  [...document.querySelectorAll<HTMLElement>('#views [data-leaf]')]
-    .filter((el) => el.getAttribute('role') !== 'tab')
-    .map((el) => el.dataset.leaf as string)
-const box = (leaf: string): DOMRect => (host(leaf) as HTMLElement).getBoundingClientRect()
-const noticeText = () => document.querySelector('#notice .notice-text')?.textContent ?? ''
-const undoButton = () => document.querySelector<HTMLButtonElement>('#notice button.notice-action')
-const idle = () => document.querySelector<HTMLElement>('#results')?.dataset.state === 'idle'
-const readout = () => [...document.querySelectorAll('#results .segment, #results .row')].length
-const stored = (): Record<string, unknown> => JSON.parse(localStorage.getItem(LAYOUT_STORAGE_KEY) ?? 'null')
-
 let view: EditorView
 
 beforeAll(async () => {
@@ -47,7 +47,7 @@ beforeAll(async () => {
   history.replaceState(null, '', `${location.pathname}${location.search}${fragment}`)
   document.body.innerHTML = SHELL
   view = await (await import('../../src/main')).ready
-  await until(() => idle() && readout() > 0, 'the first compile')
+  await until(() => stateIdle() && readout() > 0, 'the first compile')
 })
 
 describe('a link at start-up, whole, with no workspace stored', () => {
@@ -64,7 +64,7 @@ describe('a link at start-up, whole, with no workspace stored', () => {
     expect(noticeText()).toBe('put back the program and the workspace')
     expect(view.state.doc.toString()).toBe('let x = 40; x + 2')
     expect(mounted()).toEqual(['source', 'tm-0'])
-    expect(stored().tree).toEqual({
+    expect(storedLayout().tree).toEqual({
       kind: 'split',
       dir: 'column',
       sizes: [0.5, 0.5],

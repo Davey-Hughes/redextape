@@ -447,6 +447,7 @@ mod tests {
     use crate::tm::encoding::{Binary, Unary};
     use crate::tm::lower_asm::lower_asm;
     use crate::tm::sim::{Caps, DEFAULT_CAPS as CAPS, Status, simulate, simulate_trace};
+    use crate::tm::test_fixtures::{arithmetic_program, branch_program, head_of_tail_program};
 
     /// `lower_tm_guarded` hands the overflow state back as an ARTIFACT (like `lower_tm_mapped`'s origin
     /// map), and it is billed to no instruction — it is scaffolding, allocated alongside `halt`.
@@ -589,18 +590,7 @@ mod tests {
 
     #[test]
     fn straight_line_arithmetic() {
-        // rr = (2 + 3) * 4 = 20  (identical to asm.rs's evaluates_straight_line_arithmetic)
-        let prog = Program {
-            code: vec![
-                Instr::Li(Reg::Loc(0), 2),
-                Instr::Li(Reg::Loc(1), 3),
-                Instr::Bin(BinOp::Add, Reg::Loc(2), Reg::Loc(0), Reg::Loc(1)),
-                Instr::Li(Reg::Loc(3), 4),
-                Instr::Bin(BinOp::Mul, Reg::Rr, Reg::Loc(2), Reg::Loc(3)),
-                Instr::Halt,
-            ],
-            labels: vec![],
-        };
+        let prog = arithmetic_program();
         assert_eq!(run_nat(&prog), Some(20));
     }
 
@@ -636,20 +626,7 @@ mod tests {
 
     #[test]
     fn jz_and_jmp_branch() {
-        // if (1 == 2) rr=10 else rr=20  ->  20 (mirrors asm.rs's jz_and_jmp_branch)
-        let prog = Program {
-            code: vec![
-                Instr::Li(Reg::Loc(0), 1),
-                Instr::Li(Reg::Loc(1), 2),
-                Instr::Bin(BinOp::Eq, Reg::Loc(2), Reg::Loc(0), Reg::Loc(1)), // 0 (false)
-                Instr::Jz(Reg::Loc(2), "else".to_string()),
-                Instr::Li(Reg::Rr, 10),
-                Instr::Jmp("end".to_string()),
-                Instr::Li(Reg::Rr, 20), // else:
-                Instr::Halt,            // end:
-            ],
-            labels: vec![("else".to_string(), 6), ("end".to_string(), 7)],
-        };
+        let prog = branch_program();
         assert_eq!(run_nat(&prog), Some(20));
     }
 
@@ -775,20 +752,7 @@ mod tests {
 
     #[test]
     fn head_tail_deref_reads_a_nested_element() {
-        // rr = head(tail(cons(1, cons(2, nil)))) == 2. Identical to asm.rs's head_tail_deref.
-        let prog = Program {
-            code: vec![
-                Instr::Nil(Reg::Loc(0)), // r0 = nil
-                Instr::Li(Reg::Loc(1), 2),
-                Instr::Cons(Reg::Loc(2), Reg::Loc(1), Reg::Loc(0)), // r2 = cons(2, nil)
-                Instr::Li(Reg::Loc(3), 1),
-                Instr::Cons(Reg::Loc(4), Reg::Loc(3), Reg::Loc(2)), // r4 = cons(1, r2)
-                Instr::Tail(Reg::Loc(5), Reg::Loc(4)),              // r5 = tail(r4) -> ptr to (2,nil)
-                Instr::Head(Reg::Rr, Reg::Loc(5)),                  // rr = head(r5) = 2
-                Instr::Halt,
-            ],
-            labels: vec![],
-        };
+        let prog = head_of_tail_program();
         assert_eq!(run_nat(&prog), Some(2));
     }
 

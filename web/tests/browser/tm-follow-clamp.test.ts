@@ -1,11 +1,25 @@
 import type { EditorView } from '@codemirror/view'
-import { beforeAll, describe, expect, it, vi } from 'vitest'
+import { beforeAll, describe, expect, it } from 'vitest'
 import { page } from 'vitest/browser'
-import type { PaneEvents } from '../../src/pane-chrome'
 import { ROW_HEIGHT } from '../../src/state-table'
 import { TmPane } from '../../src/tm-pane'
 import type { TmProgram, TmState } from '../../src/types'
-import { SHELL, until } from './harness'
+import {
+  control,
+  controlState,
+  currentRowName,
+  diagram,
+  diagramBoxes,
+  diagramChoice,
+  frame,
+  inertEvents,
+  programRows,
+  programScroll,
+  SHELL,
+  stateIdle,
+  tmPane,
+  until,
+} from './harness'
 
 /**
  * **A FOLLOWING TABLE THAT GROWS STAYS FOLLOWING** (Plan 7 part 4, spec §9.1). Its height is the view's now, so a
@@ -15,18 +29,6 @@ import { SHELL, until } from './harness'
  * handler answers by comparing heights — was seen in the state diagram (`state-diagram.test.ts`) and could not be
  * produced for the table.
  */
-
-const events = (): PaneEvents => ({
-  back: vi.fn(),
-  forward: vi.fn(),
-  toNewest: vi.fn(),
-  play: vi.fn(),
-  restart: vi.fn(),
-  extend: vi.fn(),
-  speed: () => 8,
-  setSpeed: vi.fn(),
-  rebind: vi.fn(),
-})
 
 const STATES = 200
 /** A chain of states, each with one rule to the next — a table of 400 rows. */
@@ -56,18 +58,7 @@ const FRAME: TmState = {
   rule: null,
 }
 
-const CONTROLS = {
-  canRestart: true,
-  canBack: true,
-  canForward: false,
-  canToNewest: false,
-  canPlay: false,
-  playing: false,
-  stepText: `${STATES - 1}`,
-  continueLabel: null,
-}
-
-const frame = () => new Promise<void>((r) => requestAnimationFrame(() => r()))
+const CONTROLS = controlState(true, `${STATES - 1}`, false, false, false)
 
 describe('a following rule table that grows', () => {
   it('is still following once a panel beside it closes and its scroll is clamped', async () => {
@@ -77,7 +68,7 @@ describe('a following rule table that grows', () => {
     host.dataset.kind = 'tm'
     host.style.height = '600px'
     document.body.append(host)
-    const pane = new TmPane(host, events())
+    const pane = new TmPane(host, inertEvents())
     pane.setProgram(PROGRAM, ['t'])
     pane.render(FRAME, CONTROLS)
     await frame()
@@ -116,42 +107,36 @@ describe('a following state diagram, in arcs, under the whole app', () => {
 
   const FACT3 = 'fn fact(n) { if n == 0 { 1 } else { n * fact(n - 1) } } fact(3)'
 
-  const pane = () => document.querySelector('[data-leaf="tm-0"]') as HTMLElement
-  const diagram = () => pane().querySelector('[data-panel="diagram"]') as HTMLElement
-  const grid = () => diagram().querySelector('.program-scroll') as HTMLElement
-  const rows = () => [...diagram().querySelectorAll<HTMLElement>('.program-row')]
-  const boxes = () => [...diagram().querySelectorAll<HTMLElement>('.program-box')]
-  const control = (label: string) =>
-    [...pane().querySelectorAll<HTMLButtonElement>('.controls button')].find((b) => b.textContent === label)
-  const currentRowName = () => diagram().querySelector('.program-row[aria-current="step"] .program-name')?.textContent
-
   beforeAll(async () => {
     await page.viewport(1280, 900)
     document.body.innerHTML = SHELL
     view = await (await import('../../src/main')).ready
     view.dispatch({ changes: { from: 0, to: view.state.doc.length, insert: FACT3 } })
-    await until(() => document.querySelector<HTMLElement>('#results')?.dataset.state === 'idle', 'the app to settle')
-    await until(() => rows().length > 0, 'the diagram to draw')
+    await until(stateIdle, 'the app to settle')
+    await until(() => programRows().length > 0, 'the diagram to draw')
     // ON THE LAST STEP, inside `halt`, by `⏭`: a run opens on step 0 (`History`).
-    pane().querySelector<HTMLButtonElement>('.controls button.to-newest')?.click()
+    tmPane().querySelector<HTMLButtonElement>('.controls button.to-newest')?.click()
   })
 
   it('stays following crossing from pc20 into the halt runtime box', async () => {
     const reattach = diagram().querySelector('.diagram-reattach') as HTMLElement
     expect(reattach.hidden).toBe(true)
     // Somewhere to scroll to, without closing the rules panel: the reproduction, not the other suite's shortcut.
-    await until(() => grid().scrollHeight > grid().clientHeight, 'the diagram to need scrolling')
+    await until(() => programScroll().scrollHeight > programScroll().clientHeight, 'the diagram to need scrolling')
     // `⏭` PUT THE PAGE ON THE LAST STEP, already inside `halt` — too slow to reach by stepping forward from 0.
-    expect(boxes()[0]?.getAttribute('aria-current')).toBe('step')
+    expect(diagramBoxes()[0]?.getAttribute('aria-current')).toBe('step')
     control('◀')?.click()
     await until(() => currentRowName() === 'pc20', 'the machine to step back onto pc20')
-    const before = grid().scrollTop
+    const before = programScroll().scrollTop
     control('▶')?.click()
-    await until(() => boxes()[0]?.getAttribute('aria-current') === 'step', 'the machine to step forward into halt')
+    await until(
+      () => diagramBoxes()[0]?.getAttribute('aria-current') === 'step',
+      'the machine to step forward into halt',
+    )
     await frame()
     await frame()
     // The listing shrank under the scroll position, so the browser clamped it — that was not the user scrolling.
-    expect(grid().scrollTop).toBeLessThan(before)
+    expect(programScroll().scrollTop).toBeLessThan(before)
     expect(reattach.hidden).toBe(true)
   })
 
@@ -177,19 +162,21 @@ describe('a following state diagram, in arcs, under the whole app', () => {
     // Following, and at the end: `pc20` and its sub-steps row are the listing's last two rows, so following scrolled
     // as far as the listing's rows reach.
     expect(reattach.hidden, 'following before the window grows').toBe(true)
-    expect(grid().scrollTop).toBe(Number(grid().getAttribute('aria-rowcount')) * ROW_HEIGHT - grid().clientHeight)
-    const before = { top: grid().scrollTop, height: grid().clientHeight }
-    const clamp = new Promise<void>((r) => grid().addEventListener('scroll', () => r(), { once: true }))
+    expect(programScroll().scrollTop).toBe(
+      Number(programScroll().getAttribute('aria-rowcount')) * ROW_HEIGHT - programScroll().clientHeight,
+    )
+    const before = { top: programScroll().scrollTop, height: programScroll().clientHeight }
+    const clamp = new Promise<void>((r) => programScroll().addEventListener('scroll', () => r(), { once: true }))
     await page.viewport(1280, 1600)
-    await until(() => grid().clientHeight > before.height, 'the diagram to grow with the window')
+    await until(() => programScroll().clientHeight > before.height, 'the diagram to grow with the window')
     // THE PRECONDITION: the scroll was clamped, so the browser has a `scroll` of its own to report.
-    expect(grid().scrollTop).toBeLessThan(before.top)
+    expect(programScroll().scrollTop).toBeLessThan(before.top)
     await clamp
     await frame()
     await frame()
     expect(reattach.hidden, 'the clamp was not the user scrolling').toBe(true)
     const row = diagram().querySelector('.program-row[aria-current="step"]') as HTMLElement
-    const box = grid().getBoundingClientRect()
+    const box = programScroll().getBoundingClientRect()
     expect(row.getBoundingClientRect().top).toBeGreaterThanOrEqual(box.top)
     expect(row.getBoundingClientRect().bottom).toBeLessThanOrEqual(box.bottom)
   })
@@ -203,22 +190,20 @@ describe('a following state diagram, in arcs, under the whole app', () => {
    */
   it('comes back following when the local level hides it before its scroll is reported', async () => {
     const reattach = diagram().querySelector('.diagram-reattach') as HTMLElement
-    const choice = (value: string) =>
-      [...diagram().querySelectorAll<HTMLButtonElement>('.diagram-mode')].find((b) => b.dataset.value === value)
     expect(currentRowName(), 'a row to follow').toBe('pc20')
     // Detached by a scroll of the user's, so the re-attach below writes a new position.
-    grid().scrollTop = 0
+    programScroll().scrollTop = 0
     await until(() => !reattach.hidden, 'following to detach')
-    const echo = new Promise<void>((r) => grid().addEventListener('scroll', () => r(), { once: true }))
+    const echo = new Promise<void>((r) => programScroll().addEventListener('scroll', () => r(), { once: true }))
     reattach.click()
-    choice('local')?.click()
+    diagramChoice('local')?.click()
     await echo
-    choice('program')?.click()
+    diagramChoice('program')?.click()
     await frame()
     await frame()
     expect(reattach.hidden, 'the scroll was not the user scrolling').toBe(true)
     const row = diagram().querySelector('.program-row[aria-current="step"]') as HTMLElement
-    const box = grid().getBoundingClientRect()
+    const box = programScroll().getBoundingClientRect()
     expect(row.getBoundingClientRect().top).toBeGreaterThanOrEqual(box.top)
     expect(row.getBoundingClientRect().bottom).toBeLessThanOrEqual(box.bottom)
   })
@@ -232,9 +217,9 @@ describe('a following state diagram, in arcs, under the whole app', () => {
     const reattach = diagram().querySelector('.diagram-reattach') as HTMLElement
     if (!reattach.hidden) reattach.click()
     expect(reattach.hidden, 'following before the key').toBe(true)
-    expect(grid().scrollTop, 'somewhere for Home to scroll from').toBeGreaterThan(0)
-    grid().dispatchEvent(new KeyboardEvent('keydown', { key: 'Home', bubbles: true, cancelable: true }))
-    expect(grid().scrollTop).toBe(0)
+    expect(programScroll().scrollTop, 'somewhere for Home to scroll from').toBeGreaterThan(0)
+    programScroll().dispatchEvent(new KeyboardEvent('keydown', { key: 'Home', bubbles: true, cancelable: true }))
+    expect(programScroll().scrollTop).toBe(0)
     expect(reattach.hidden, 'offered with the key').toBe(false)
     reattach.click()
   })

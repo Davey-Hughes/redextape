@@ -2,7 +2,7 @@ import { beforeAll, describe, expect, it } from 'vitest'
 import { page } from 'vitest/browser'
 import { LAYOUT_STORAGE_KEY } from '../../src/layout'
 import { defaultWorkspace, serializeWorkspace } from '../../src/workspace'
-import { drawn, host, SHELL, until } from './harness'
+import { drawn, heightOf, host, SHELL, stateIdle, until } from './harness'
 
 /**
  * **STORED SHARES, THROUGH THE REAL APP'S LOAD** — the view layouts spec §11.4. Seeded before `main.ts` is imported,
@@ -16,7 +16,6 @@ import { drawn, host, SHELL, until } from './harness'
 
 const SIZES = { 'tm-0': { rules: 1, diagram: 2 }, source: { outline: 1, editor: 1 } }
 
-const heightOf = (el: Element): number => el.getBoundingClientRect().height
 const region = (leaf: string, name: string): HTMLElement =>
   (host(leaf) as HTMLElement).querySelector(`[data-region="${name}"]`) as HTMLElement
 
@@ -28,7 +27,7 @@ beforeAll(async () => {
   )
   document.body.innerHTML = SHELL
   await (await import('../../src/main')).ready
-  await until(() => document.querySelector<HTMLElement>('#results')?.dataset.state === 'idle', 'the first compile')
+  await until(stateIdle, 'the first compile')
   await until(() => host('tm-0')?.querySelector('.state-table .state-row') != null, 'the rule table to draw')
   expect(drawn(), 'precondition: the page opened on the stored tree').toBe('row[50](source tm-0)')
   // THE PAGE'S FONTS FIRST: a line's height is the font's, and a floor of five lines, a header and the view's own

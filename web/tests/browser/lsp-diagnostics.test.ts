@@ -1,13 +1,8 @@
 import type { EditorView } from '@codemirror/view'
 import { beforeAll, describe, expect, it } from 'vitest'
-import { SHELL, until } from './harness'
+import { retype, SHELL, until } from './harness'
 
 let view: EditorView
-
-/** Replace the whole buffer, exactly as a user retyping it would. */
-function retype(src: string): void {
-  view.dispatch({ changes: { from: 0, to: view.state.doc.length, insert: src } })
-}
 
 const errorMarkers = () => document.querySelectorAll('.cm-editor .cm-lintRange-error').length
 const gutterMarkers = () => document.querySelectorAll('.cm-editor .cm-lint-marker-error').length
@@ -36,7 +31,7 @@ describe('source diagnostics, served by the LSP worker', () => {
   })
 
   it('marks a broken program, in the text and in the gutter', async () => {
-    retype('let x = ;')
+    retype(view, 'let x = ;')
 
     // ASYNCHRONOUS, UNLIKE THE PATH THIS REPLACED. `lintFromAnalyze` ran in the same frame as the
     // keystroke; this is a worker round trip, so the marker cannot be asserted synchronously.
@@ -54,7 +49,7 @@ describe('source diagnostics, served by the LSP worker', () => {
    * widening can be driven directly; this asserts it reaches the screen.
    */
   it('renders a zero-width diagnostic, which CodeMirror would otherwise draw as nothing', async () => {
-    retype('let x = ')
+    retype(view, 'let x = ')
     await until(() => errorMarkers() > 0, 'a marker for a genuinely zero-width range')
 
     // CodeMirror renders NOTHING for `from === to`, so a zero-width diagnostic that was not widened
@@ -65,10 +60,10 @@ describe('source diagnostics, served by the LSP worker', () => {
   })
 
   it('clears the markers when the program becomes valid again', async () => {
-    retype('let x = ;')
+    retype(view, 'let x = ;')
     await until(() => errorMarkers() > 0, 'a marker before clearing')
 
-    retype('let x = 40; x + 2')
+    retype(view, 'let x = 40; x + 2')
     // Nothing clears these except a fresh `publishDiagnostics`, so this is the assertion that
     // `didChange` is posted on every keystroke rather than only on the first.
     //
@@ -83,7 +78,7 @@ describe('source diagnostics, served by the LSP worker', () => {
   })
 
   it('puts the marker on the right line of a multi-line program', async () => {
-    retype('let a = 1;\nlet b = 2;\nlet c = ;')
+    retype(view, 'let a = 1;\nlet b = 2;\nlet c = ;')
     await until(() => errorMarkers() > 0, 'a marker on the third line')
 
     // The offsets arrive as UTF-16 line/character and are converted against the document. A

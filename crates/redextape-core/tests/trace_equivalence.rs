@@ -16,6 +16,9 @@ use redextape_core::tm::{
 };
 use redextape_core::trace::{LambdaCursor, StepEvent, TmCursor};
 
+mod common;
+use common::one_rule_machine;
+
 const CORPUS: &[&str] = &["1 + 2 * 3", "3 - 5", "if 2 > 1 { 10 } else { 20 }", "[1, 2, 3]"];
 
 fn machine_and_init(src: &str) -> (Machine, Vec<Vec<Symbol>>) {
@@ -280,20 +283,10 @@ fn raise_cap_does_not_resurrect_the_absurd_tape_count_refusal() {
     // Non-accepting, with a rule that reads as many symbols as the machine declares tapes: this is
     // what makes the "stuck == halt" path below actually run through `rule_matches`, rather than
     // returning `Halted` from the accepting-state check before rule search is ever reached.
-    let m = Machine {
-        tapes: 2,
-        start: 0,
-        states: vec![State {
-            name: "s".into(),
-            accept: false,
-            rules: vec![Rule {
-                read: vec![None, None],
-                write: vec![None, None],
-                moves: vec![Move::S, Move::S],
-                next: 0,
-            }],
-        }],
-    };
+    let m = one_rule_machine(
+        "s",
+        Rule { read: vec![None, None], write: vec![None, None], moves: vec![Move::S, Move::S], next: 0 },
+    );
     // `cells: 1` makes the constructor's refusal trip on `tapes: 2` (`machine.tapes as u64 > caps.cells`).
     let caps = TmCaps { cells: 1, ..TM_DEFAULT_CAPS };
     let mut c = TmCursor::new(&m, &[], caps);
@@ -330,15 +323,7 @@ fn borrowed_and_owned_cursors_emit_identical_event_sequences() {
 /// step, exactly as `run` skips its `record.push` on that path.
 #[test]
 fn a_malformed_rule_halts_the_cursor_without_emitting_a_step() {
-    let m = Machine {
-        tapes: 1,
-        start: 0,
-        states: vec![State {
-            name: "s".into(),
-            accept: false,
-            rules: vec![Rule { read: vec![None], write: vec![None], moves: vec![Move::S], next: 99 }],
-        }],
-    };
+    let m = one_rule_machine("s", Rule { read: vec![None], write: vec![None], moves: vec![Move::S], next: 99 });
     let oracle = simulate_trace(&m, &[], TM_DEFAULT_CAPS);
     assert_eq!(oracle.status, TmStatus::Halted);
     assert!(oracle.steps.is_empty(), "the simulator must not record the malformed step");

@@ -1,6 +1,6 @@
 import { beforeAll, describe, expect, it } from 'vitest'
 import { page, userEvent } from 'vitest/browser'
-import { SHELL, until } from './harness'
+import { buttonOf, menuOfId, presetOf, rem, SHELL, stateIdle, until } from './harness'
 
 /**
  * **THE HEADER'S WIDE MENUS ON A PHONE'S SCREEN** — Plan 7 part 6a spec §4.2, §5.2 and §8's phone-width row, for
@@ -12,30 +12,18 @@ import { SHELL, until } from './harness'
  * for the reason every sibling gives.
  */
 
-const idle = () => document.querySelector<HTMLElement>('#results')?.dataset.state === 'idle'
-const rem = () => Number.parseFloat(getComputedStyle(document.documentElement).fontSize)
-const buttonOf = (id: string) => document.querySelector<HTMLButtonElement>(`#${id}`) as HTMLButtonElement
-const menuOf = (id: string) => document.getElementById(buttonOf(id).getAttribute('aria-controls') ?? '') as HTMLElement
-
 beforeAll(async () => {
   document.body.innerHTML = SHELL
   await (await import('../../src/main')).ready
-  await until(idle, 'the first compile')
+  await until(stateIdle, 'the first compile')
 })
-
-/** Put the workspace on `preset`, by the menu's own buttons. */
-const presetOf = (preset: string): void => {
-  buttonOf('workspace').click()
-  menuOf('workspace').querySelector<HTMLButtonElement>(`[data-preset="${preset}"]`)?.click()
-  if (menuOf('workspace').matches(':popover-open')) menuOf('workspace').hidePopover()
-}
 
 /** Open `id`'s menu with a click on a page `width` by `height`, and answer where it lies. */
 async function openAt(id: string, width: number, height: number): Promise<DOMRect> {
   await page.viewport(width, height)
   await userEvent.click(buttonOf(id))
-  expect(menuOf(id).matches(':popover-open')).toBe(true)
-  return menuOf(id).getBoundingClientRect()
+  expect(menuOfId(id).matches(':popover-open')).toBe(true)
+  return menuOfId(id).getBoundingClientRect()
 }
 
 /**
@@ -75,7 +63,7 @@ describe('examples ▾, open', () => {
       try {
         expectWithinGutter(await openAt('examples', width, height), width)
       } finally {
-        menuOf('examples').hidePopover()
+        menuOfId('examples').hidePopover()
       }
     },
   )
@@ -89,7 +77,7 @@ describe('examples ▾, open', () => {
       expect(rect.width).toBeGreaterThanOrEqual(20 * rem())
       expect(rect.width).toBeLessThanOrEqual(36 * rem())
     } finally {
-      menuOf('examples').hidePopover()
+      menuOfId('examples').hidePopover()
     }
   })
 })
@@ -111,7 +99,7 @@ describe('share, open', () => {
           presetOf(preset)
           expectWithinGutter(await openAt('share', width, height), width)
         } finally {
-          menuOf('share').hidePopover()
+          menuOfId('share').hidePopover()
           presetOf('explorer')
         }
       },
@@ -126,15 +114,15 @@ describe('share, open', () => {
       expect(rect.top).toBeCloseTo(anchor.bottom, 1)
       expect(rect.width).toBeCloseTo(32 * rem(), 1)
     } finally {
-      menuOf('share').hidePopover()
+      menuOfId('share').hidePopover()
     }
   })
 })
 
 describe('the workspace menu, open', () => {
   /** Every control in the menu, and the rows that hold the switches' values. */
-  const controls = () => [...menuOf('workspace').querySelectorAll<HTMLButtonElement>('button')]
-  const rows = () => [...menuOf('workspace').querySelectorAll<HTMLElement>('.menu-group')]
+  const controls = () => [...menuOfId('workspace').querySelectorAll<HTMLButtonElement>('button')]
+  const rows = () => [...menuOfId('workspace').querySelectorAll<HTMLElement>('.menu-group')]
 
   /**
    * **A ROW'S VALUES WRAP UNDER ITS LABEL RATHER THAN RUN PAST THE MENU'S EDGE.** Its rows are 360.5px wide on one
@@ -154,7 +142,7 @@ describe('the workspace menu, open', () => {
           expect(box.right, `${name}'s right`).toBeLessThanOrEqual(rect.right)
         }
       } finally {
-        menuOf('workspace').hidePopover()
+        menuOfId('workspace').hidePopover()
       }
     },
   )
@@ -181,7 +169,7 @@ describe('the workspace menu, open', () => {
       try {
         expectWithinGutter(await openAt('workspace', width, height), width)
       } finally {
-        menuOf('workspace').hidePopover()
+        menuOfId('workspace').hidePopover()
         unanchored.remove()
       }
     },
@@ -200,7 +188,7 @@ describe('the workspace menu, open', () => {
         expect(new Set(tops).size, `${row.getAttribute('aria-label')}'s values on one line`).toBe(1)
       }
     } finally {
-      menuOf('workspace').hidePopover()
+      menuOfId('workspace').hidePopover()
     }
   })
 })

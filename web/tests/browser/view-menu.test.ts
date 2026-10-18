@@ -4,6 +4,7 @@ import { icon } from '../../src/icons'
 import type { Dir } from '../../src/layout'
 import type { PaneChoice, SplitChoices } from '../../src/pane-chrome'
 import { bindingKey, viewMenu } from '../../src/view-header'
+import { moreOf } from './harness'
 
 const CHOICES: SplitChoices = {
   options: [
@@ -35,7 +36,6 @@ const build = (over: Partial<Parameters<typeof viewMenu>[1]> = {}) => {
   return { actions, menu, log }
 }
 
-const more = (a: HTMLElement) => a.querySelector<HTMLButtonElement>('button.view-more')
 const items = (a: HTMLElement) =>
   [...a.querySelectorAll<HTMLButtonElement>('.view-menu-main button')].map(
     (b) => b.querySelector('.view-menu-label')?.textContent,
@@ -45,7 +45,7 @@ describe('the view menu', () => {
   it('offers only what applies, and no ⋯ at all when nothing does', () => {
     const { actions, menu } = build()
     menu.setLayout(false, false)
-    expect(more(actions)).toBeNull()
+    expect(moreOf(actions)).toBeNull()
     expect(actions.querySelector('button.view-close')).toBeNull()
     menu.setLayout(true, true)
     menu.setCopy('ready')
@@ -58,22 +58,22 @@ describe('the view menu', () => {
     // on the state it already holds, so a menu that has never had an item has never been synced at all.
     menu.setLayout(false, false)
     menu.setClaim(false)
-    expect(more(actions)).toBeNull()
+    expect(moreOf(actions)).toBeNull()
     expect(actions.querySelector('button.view-close')).toBeNull()
   })
 
   it('names ⋯ and ✕ in words, and states ⋯ opens a menu', () => {
     const { actions, menu } = build()
     menu.setLayout(true, true)
-    expect(more(actions)?.getAttribute('aria-label')).toBe('view actions')
-    expect(more(actions)?.getAttribute('aria-haspopup')).toBe('menu')
-    expect(more(actions)?.getAttribute('aria-expanded')).toBe('false')
+    expect(moreOf(actions)?.getAttribute('aria-label')).toBe('view actions')
+    expect(moreOf(actions)?.getAttribute('aria-haspopup')).toBe('menu')
+    expect(moreOf(actions)?.getAttribute('aria-expanded')).toBe('false')
   })
 
   it('asks which view to split into, the view itself first as "another view of this"', () => {
     const { actions, menu, log } = build()
     menu.setLayout(true, true)
-    more(actions)?.click()
+    moreOf(actions)?.click()
     actions.querySelector<HTMLButtonElement>('button.view-split[data-dir="row"]')?.click()
     const pairs = [...actions.querySelectorAll<HTMLButtonElement>('.view-menu-pairs button')]
     expect(pairs.map((b) => b.textContent)).toEqual(['another view of this', 'TM · program', 'λ · copy 1', 'source'])
@@ -94,7 +94,7 @@ describe('the view menu', () => {
   it('does not offer source to split into when the tree already has one', () => {
     const { actions, menu } = build({ choices: () => ({ ...CHOICES, sourceAvailable: false }) })
     menu.setLayout(true, true)
-    more(actions)?.click()
+    moreOf(actions)?.click()
     actions.querySelector<HTMLButtonElement>('button.view-split[data-dir="row"]')?.click()
     const pairs = [...actions.querySelectorAll<HTMLButtonElement>('.view-menu-pairs button')]
     expect(pairs.map((b) => b.textContent)).toEqual(['another view of this', 'TM · program', 'λ · copy 1'])
@@ -135,7 +135,7 @@ describe('the view menu', () => {
     menu.setLayout(true, true)
     menu.setCopy('ready')
     menu.setClaim(true)
-    more(actions)?.click()
+    moreOf(actions)?.click()
     actions.querySelector<HTMLButtonElement>('button.detach')?.click()
     expect(actions.querySelector('.view-menu')?.matches(':popover-open')).toBe(false)
     actions.querySelector<HTMLButtonElement>('button.claim-editor')?.click()
@@ -221,7 +221,7 @@ const menuAt = (x: number, y: number): HTMLElement => {
 describe('where the view menu opens', () => {
   it('opens against the button that opened it, not at the viewport origin', () => {
     const actions = menuAt(200, 150)
-    const b = more(actions)
+    const b = moreOf(actions)
     b?.click()
     const menu = rect(actions.querySelector('.view-menu'))
     const button = rect(b)
@@ -242,17 +242,17 @@ describe('where the view menu opens', () => {
     const left = menuAt(200, 150)
     const right = menuAt(330, 150)
 
-    more(left)?.click()
+    moreOf(left)?.click()
     const leftMenu = rect(left.querySelector('.view-menu'))
     left.querySelector<HTMLElement>('.view-menu')?.hidePopover()
 
-    more(right)?.click()
+    moreOf(right)?.click()
     const rightMenu = rect(right.querySelector('.view-menu'))
 
     const sharesEdge = (menu: DOMRect, button: DOMRect) =>
       Math.abs(menu.left - button.left) < 2 || Math.abs(menu.right - button.right) < 2
-    expect(sharesEdge(leftMenu, rect(more(left)))).toBe(true)
-    expect(sharesEdge(rightMenu, rect(more(right)))).toBe(true)
+    expect(sharesEdge(leftMenu, rect(moreOf(left)))).toBe(true)
+    expect(sharesEdge(rightMenu, rect(moreOf(right)))).toBe(true)
     // Two controls, two places — the failure a shared anchor would produce.
     expect(Math.abs(rightMenu.left - leftMenu.left)).toBeGreaterThan(2)
     // And both on screen, which is what the fallbacks are for.
@@ -262,7 +262,7 @@ describe('where the view menu opens', () => {
 
   it('flips above the button rather than off-screen at the viewport bottom edge', () => {
     const actions = menuAt(200, window.innerHeight - 30)
-    const b = more(actions)
+    const b = moreOf(actions)
     b?.click()
     const menu = rect(actions.querySelector('.view-menu'))
 

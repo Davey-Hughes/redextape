@@ -3,22 +3,17 @@ import { userEvent } from 'vitest/browser'
 import { LambdaPane } from '../../src/lambda-pane'
 import type { PaneEvents } from '../../src/pane-chrome'
 import type { PaneOption } from '../../src/sessions'
-import type { LambdaState } from '../../src/types'
 import { DEFAULT_DISPLAY } from '../../src/workspace'
+import { lambdaFrame } from '../node/session-fixtures'
 import { wireOf } from '../node/tree-fixture'
+import { controlState, fixtureHost } from './harness'
 
 /**
  * A λ view's display settings (Plan 7 part 4a): the layout and the variables, chosen from its `⋯` menu,
  * reported so the app can keep them, "reset folds", and the reset a new binding makes. Panes are built
  * directly, as `lambda-pane-editor`'s are — nothing here needs `main()`.
  */
-const host = (): HTMLElement => {
-  const el = document.createElement('section')
-  el.className = 'pane lambda-display-fixture'
-  el.style.width = '640px'
-  document.body.append(el)
-  return el
-}
+const host = (): HTMLElement => fixtureHost('lambda-display-fixture')
 
 const events = (display = vi.fn()): PaneEvents => ({
   back: vi.fn(),
@@ -33,24 +28,8 @@ const events = (display = vi.fn()): PaneEvents => ({
   display,
 })
 
-const frame: LambdaState = {
-  text: 'λx. λy. x',
-  spans: new Uint8Array(),
-  cut: null,
-  step: 0,
-  redex_span: null,
-  owner: 'None',
-}
-const CONTROLS = {
-  canRestart: true,
-  canBack: false,
-  canForward: true,
-  canToNewest: true,
-  canPlay: true,
-  playing: false,
-  stepText: '0',
-  continueLabel: null,
-}
+const frame = lambdaFrame('λx. λy. x')
+const CONTROLS = controlState(false, '0')
 
 const option = (id: string): PaneOption => ({ leg: 'lambda', id, label: id })
 const WIDE = `g ${Array.from({ length: 40 }, (_, i) => `(a${i} b${i})`).join(' ')}`

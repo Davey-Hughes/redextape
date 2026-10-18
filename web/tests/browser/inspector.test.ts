@@ -1,17 +1,8 @@
 import type { EditorView } from '@codemirror/view'
 import { beforeAll, describe, expect, it } from 'vitest'
-import { SHELL, until } from './harness'
+import { clickWorkspaceItem, inspector, results, SHELL, storedLayoutOrEmpty, until } from './harness'
 
-const pick = (sel: string): void => {
-  document.querySelector<HTMLButtonElement>('#workspace')?.click()
-  document.querySelector<HTMLButtonElement>(`#workspace-menu ${sel}`)?.click()
-  const m = document.querySelector<HTMLElement>('#workspace-menu')
-  if (m?.matches(':popover-open')) m.hidePopover()
-}
-const results = (): HTMLElement => document.querySelector<HTMLElement>('#results') as HTMLElement
-const inspector = (): HTMLElement => document.querySelector<HTMLElement>('#inspector') as HTMLElement
 const strip = (): HTMLElement => document.querySelector<HTMLElement>('footer.strip') as HTMLElement
-const stored = (): { inspector?: unknown } => JSON.parse(localStorage.getItem('redextape.layout') ?? '{}')
 
 describe('the inspector', () => {
   beforeAll(async () => {
@@ -30,7 +21,7 @@ describe('the inspector', () => {
   // §9, and the constraint behind it: 24 browser test files wait on `#results[data-state]`, so the
   // readout's hosts MOVE rather than being duplicated — one element writes that attribute, in both modes.
   it('takes #results and #link-status with it, ids and compile state intact', () => {
-    pick('[data-switch="readout"][data-value="inspector"]')
+    clickWorkspaceItem('[data-switch="readout"][data-value="inspector"]')
     expect(inspector().hidden).toBe(false)
     expect(inspector().contains(results())).toBe(true)
     expect(inspector().contains(document.querySelector('#link-status'))).toBe(true)
@@ -78,13 +69,13 @@ describe('the inspector', () => {
     expect(toggle.getAttribute('aria-expanded')).toBe('true')
     toggle.click()
     expect(toggle.getAttribute('aria-expanded')).toBe('false')
-    expect(stored().inspector).toBe(false)
+    expect(storedLayoutOrEmpty().inspector).toBe(false)
     toggle.click()
-    expect(stored().inspector).toBe(true)
+    expect(storedLayoutOrEmpty().inspector).toBe(true)
   })
 
   it('gives #results back to the strip when the switch goes back', () => {
-    pick('[data-preset="explorer"]')
+    clickWorkspaceItem('[data-preset="explorer"]')
     expect(strip().contains(results())).toBe(true)
     expect(inspector().hidden).toBe(true)
     expect(strip().hidden).toBe(false)

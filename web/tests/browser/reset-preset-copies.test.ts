@@ -1,7 +1,7 @@
 import type { EditorView } from '@codemirror/view'
 import { beforeAll, describe, expect, it } from 'vitest'
 import { page, userEvent } from 'vitest/browser'
-import { SHELL, until } from './harness'
+import { controlledMenu, linkStatus, noticeText, paneByLeaf, SHELL, stateIdle, until } from './harness'
 
 /**
  * *RESET PRESET* RESTORES THE DEFAULT VIEWS, AND A DEFAULT VIEW SHOWS THE PROGRAM (Plan 7 part 2 spec §4, §6).
@@ -23,30 +23,24 @@ const SAMPLE = 'let x = 40; x + 2'
 const LEAVES = ['lambda-0', 'asm-0', 'tm-0'] as const
 const LEG: Record<(typeof LEAVES)[number], string> = { 'lambda-0': 'lambda', 'asm-0': 'asm', 'tm-0': 'tm' }
 
-const idle = () => document.querySelector<HTMLElement>('#results')?.dataset.state === 'idle'
-const host = (leaf: string) => document.querySelector<HTMLElement>(`.pane[data-leaf="${leaf}"]`) as HTMLElement
-const title = (leaf: string) => host(leaf).querySelector('button.view-title')?.textContent?.trim() ?? ''
-const notice = () => document.querySelector('#notice .notice-text')?.textContent ?? ''
-const status = () => document.querySelector('#link-status')?.textContent ?? ''
-const menuOf = (button: HTMLElement): HTMLElement =>
-  document.getElementById(button.getAttribute('aria-controls') ?? '') as HTMLElement
+const title = (leaf: string) => paneByLeaf(leaf).querySelector('button.view-title')?.textContent?.trim() ?? ''
 
 beforeAll(async () => {
   await page.viewport(1280, 1000)
   document.body.innerHTML = SHELL
   const view: EditorView = await (await import('../../src/main')).ready
   view.dispatch({ changes: { from: 0, to: view.state.doc.length, insert: SAMPLE } })
-  await until(() => !idle(), 'the compile to start')
-  await until(idle, 'the compile to finish')
+  await until(() => !stateIdle(), 'the compile to start')
+  await until(stateIdle, 'the compile to finish')
 })
 
 describe('reset preset', () => {
   it('puts every view back on the program, and says so truly', async () => {
     for (const leaf of LEAVES) {
-      const more = host(leaf).querySelector<HTMLButtonElement>('button.view-more') as HTMLButtonElement
+      const more = paneByLeaf(leaf).querySelector<HTMLButtonElement>('button.view-more') as HTMLButtonElement
       await userEvent.click(more)
-      await until(() => menuOf(more).matches(':popover-open'), `${leaf}’s menu to open`)
-      await userEvent.click(menuOf(more).querySelector<HTMLButtonElement>('button.detach') as HTMLButtonElement)
+      await until(() => controlledMenu(more).matches(':popover-open'), `${leaf}’s menu to open`)
+      await userEvent.click(controlledMenu(more).querySelector<HTMLButtonElement>('button.detach') as HTMLButtonElement)
       await until(() => / · copy \d+$/.test(title(leaf)), `${leaf} to show its copy`)
       // THE FORK'S BUILD REPLY, NOT JUST ITS TITLE: `detach` rebinds the slot (and so the title)
       // synchronously, before the worker answers, but the copy's editor only mounts once
@@ -55,30 +49,30 @@ describe('reset preset', () => {
       // hand to custody — `editor-custody.ts`'s `dropClaimsOn` then erases the claim the late reply
       // needed, and the copy's editor mounts FRESH on the next pick instead of waiting in custody for
       // *move the editor here*, which is the failure this wait keeps out of reach.
-      await until(() => host(leaf).querySelector('.cm-editor') !== null, `${leaf}’s copy’s editor to mount`)
+      await until(() => paneByLeaf(leaf).querySelector('.cm-editor') !== null, `${leaf}’s copy’s editor to mount`)
     }
     // THE PRECONDITION: a view of every leg shows a copy.
-    expect(LEAVES.map((leaf) => host(leaf).querySelector('.view-status') !== null)).toEqual([true, true, true])
-    expect(status()).toContain('views show copies')
+    expect(LEAVES.map((leaf) => paneByLeaf(leaf).querySelector('.view-status') !== null)).toEqual([true, true, true])
+    expect(linkStatus()).toContain('views show copies')
 
     await userEvent.click(document.querySelector<HTMLButtonElement>('#workspace') as HTMLButtonElement)
     await userEvent.click(document.querySelector<HTMLButtonElement>('#reset-preset') as HTMLButtonElement)
 
-    expect(notice()).toBe('Explorer reset — the default views are back')
+    expect(noticeText()).toBe('Explorer reset — the default views are back')
     expect([...document.querySelectorAll<HTMLElement>('.pane[data-leaf]')].map((el) => el.dataset.leaf)).toEqual([
       'source',
       'tm-0',
     ])
     expect(title('tm-0'), 'the view the reset kept is still on its copy').toBe('TM · program')
     expect(document.querySelectorAll('.pane .view-status')).toHaveLength(0)
-    expect(status()).not.toContain('copy')
+    expect(linkStatus()).not.toContain('copy')
 
     // AND THE TWO VIEWS THE RESET TOOK OFF THE PAGE COME BACK ON THE PROGRAM, as new views: nothing remembers them.
     for (const kind of ['lambda', 'asm'])
       await userEvent.click(document.querySelector(`#views-shown button[data-shows="${kind}"]`) as HTMLElement)
     expect(LEAVES.map(title)).toEqual(['λ · program', 'asm · program', 'TM · program'])
     expect(document.querySelectorAll('.pane .view-status')).toHaveLength(0)
-    expect(status()).not.toContain('copy')
+    expect(linkStatus()).not.toContain('copy')
   })
 
   it('keeps the copies, each with its text when a view shows it again', async () => {
@@ -92,21 +86,23 @@ describe('reset preset', () => {
     // EACH COPY IS PICKED AGAIN THROUGH ITS VIEW'S TITLE, AND ITS EDITOR COMES BACK WITH IT: the machine copies' is
     // mounted again from their text, and the λ copy's waited in custody, as after a close, for *move the editor here*.
     for (const leaf of LEAVES) {
-      const button = host(leaf).querySelector<HTMLButtonElement>('button.view-title') as HTMLButtonElement
+      const button = paneByLeaf(leaf).querySelector<HTMLButtonElement>('button.view-title') as HTMLButtonElement
       await userEvent.click(button)
-      const menu = menuOf(button)
+      const menu = controlledMenu(button)
       await until(() => menu.matches(':popover-open'), `${leaf}’s title menu`)
       const item = [...menu.querySelectorAll<HTMLButtonElement>('button[data-binding]')].find(
         (b) => b.dataset.binding?.startsWith(`${LEG[leaf]}:`) === true && / · copy \d+$/.test(b.textContent ?? ''),
       )
       await userEvent.click(item as HTMLButtonElement)
       if (leaf === 'lambda-0') {
-        const more = host(leaf).querySelector<HTMLButtonElement>('button.view-more') as HTMLButtonElement
+        const more = paneByLeaf(leaf).querySelector<HTMLButtonElement>('button.view-more') as HTMLButtonElement
         await userEvent.click(more)
-        await until(() => menuOf(more).matches(':popover-open'), 'the λ view’s menu')
-        await userEvent.click(menuOf(more).querySelector<HTMLButtonElement>('button.claim-editor') as HTMLButtonElement)
+        await until(() => controlledMenu(more).matches(':popover-open'), 'the λ view’s menu')
+        await userEvent.click(
+          controlledMenu(more).querySelector<HTMLButtonElement>('button.claim-editor') as HTMLButtonElement,
+        )
       }
-      await until(() => host(leaf).querySelector('.cm-editor') !== null, `${leaf}’s copy’s editor`)
+      await until(() => paneByLeaf(leaf).querySelector('.cm-editor') !== null, `${leaf}’s copy’s editor`)
       expect(title(leaf)).toMatch(/ · copy \d+$/)
     }
   })

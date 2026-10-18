@@ -1,7 +1,20 @@
 import type { EditorView } from '@codemirror/view'
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest'
-import { page, userEvent } from 'vitest/browser'
-import { resetToFourViews, SHELL, until } from './harness'
+import { page } from 'vitest/browser'
+import {
+  deleteEveryCopy,
+  editorsOf,
+  host,
+  mounted,
+  press,
+  pressShownToggle,
+  resetToFourViews,
+  SHELL,
+  stateIdle,
+  termEditorsIn,
+  titleText,
+  until,
+} from './harness'
 
 /**
  * A COPY DELETED AND RESTORED WHILE A PARKED VIEW SHOWS IT: WHERE ITS EDITOR, AND THE FOCUS, COME BACK.
@@ -41,43 +54,6 @@ const LEGS: readonly Leg[] = [
   { name: 'asm', view: 'asm-0', kind: 'asm' },
 ]
 
-const leaf = (id: string): HTMLElement | null =>
-  document.querySelector<HTMLElement>(`#views [data-leaf="${id}"]:not([role="tab"])`)
-const titleText = (id: string): string => leaf(id)?.querySelector('.view-title')?.textContent ?? ''
-const mounted = (): string[] =>
-  [...document.querySelectorAll<HTMLElement>('#views [data-leaf]')]
-    .filter((el) => el.getAttribute('role') !== 'tab')
-    .map((el) => el.dataset.leaf as string)
-/** A press with the pointer on the one element `sel` names, which throws where there is none. */
-const press = async (sel: string): Promise<void> => {
-  const el = document.querySelector<HTMLElement>(sel)
-  if (el === null) throw new Error(`nothing to press at ${sel}`)
-  await userEvent.click(el)
-}
-const toggle = (kind: string): Promise<void> => press(`#views-shown button[data-shows="${kind}"]`)
-/** The copy editors a view's host holds, on the page or off it. */
-const editorsIn = (host: HTMLElement | null): number => host?.querySelectorAll('.term-editor .cm-editor').length ?? 0
-const editors = (id: string): number => editorsIn(leaf(id))
-const copiesMenu = (): HTMLElement | null => document.querySelector<HTMLElement>('.buffer-list')
-const shutCopiesMenu = (): void => {
-  if (copiesMenu()?.matches(':popover-open') === true) copiesMenu()?.hidePopover()
-}
-
-/** Delete every copy, which leaves every view on the program — what each case starts from. */
-function deleteEveryCopy(): void {
-  for (let n = 0; n < 16; n += 1) {
-    shutCopiesMenu()
-    document.querySelector<HTMLButtonElement>('#buffers')?.click()
-    const del = document.querySelector<HTMLButtonElement>('.buffer-list button[aria-label^="delete "]')
-    if (del === null) {
-      shutCopiesMenu()
-      return
-    }
-    del.click()
-  }
-  throw new Error('the copies menu still lists a copy after 16 deletes')
-}
-
 /** What a case holds once `leg`'s view shows a copy of its own. */
 type Copied = {
   /** The copy's name in the copies menu, and its key in a title menu and in `+ view`'s. */
@@ -93,10 +69,10 @@ type Copied = {
 async function copyIn(leg: Leg): Promise<Copied> {
   expect(mounted(), 'precondition: all four views').toEqual(FOUR)
   expect(titleText(leg.view), 'precondition: the view starts on the program').toBe(`${leg.name} · program`)
-  const first = leaf(leg.view)
+  const first = host(leg.view)
   if (first === null) throw new Error('the leg’s view has no host')
   first.querySelector<HTMLButtonElement>('button.detach')?.click()
-  await until(() => / · copy \d+$/.test(titleText(leg.view)) && editors(leg.view) === 1, 'the copy and its editor')
+  await until(() => / · copy \d+$/.test(titleText(leg.view)) && editorsOf(leg.view) === 1, 'the copy and its editor')
   const binding = first.querySelector<HTMLElement>('button.view-title')?.dataset.binding ?? ''
   const number = /^[a-z]+:scratch-(\d+)$/.exec(binding)?.[1]
   if (number === undefined) throw new Error(`the view’s title does not name a copy: ${JSON.stringify(binding)}`)
@@ -119,7 +95,7 @@ beforeAll(async () => {
   document.body.innerHTML = SHELL
   const view: EditorView = await (await import('../../src/main')).ready
   view.dispatch({ changes: { from: 0, to: view.state.doc.length, insert: 'let x = 40; x + 2' } })
-  await until(() => document.querySelector<HTMLElement>('#results')?.dataset.state === 'idle', 'the first compile')
+  await until(stateIdle, 'the first compile')
 })
 afterAll(() => window.removeEventListener('error', onError))
 
@@ -139,8 +115,8 @@ for (const leg of LEGS) {
       const { copy, binding, onCopy, first } = await copyIn(leg)
       // ONE OTHER VIEW OFF, THEN THE COPY'S: the copy's view is parked, and all four views are remembered with it.
       // The view added next makes an arrangement of three kinds, which is not the one that holds the parked view.
-      await toggle(other.kind)
-      await toggle(leg.kind)
+      await pressShownToggle(other.kind)
+      await pressShownToggle(leg.kind)
       expect(mounted(), 'precondition: the source beside one view, the copy’s view parked').toEqual([
         'source',
         kept.view,
@@ -151,42 +127,42 @@ for (const leg of LEGS) {
       const second = mounted().find((id) => !before.has(id))
       if (second === undefined) throw new Error('+ view added no second view of the copy')
       await until(() => titleText(second) === onCopy, 'the second view of the copy')
-      leaf(second)?.querySelector<HTMLButtonElement>('button.claim-editor')?.click()
-      await until(() => editors(second) === 1, 'the editor to move to the view on screen')
+      host(second)?.querySelector<HTMLButtonElement>('button.claim-editor')?.click()
+      await until(() => editorsOf(second) === 1, 'the editor to move to the view on screen')
       expect(first.isConnected, 'precondition: the first view of the copy is off the page').toBe(false)
-      expect(editorsIn(first), 'precondition: the parked view gave the editor up').toBe(0)
+      expect(termEditorsIn(first), 'precondition: the parked view gave the editor up').toBe(0)
 
       await deleteAndUndo(copy)
       expect(titleText(second), 'precondition: the view on screen shows the copy again').toBe(onCopy)
-      expect(editorsIn(first), 'the copy’s editor came back in the parked view').toBe(0)
-      expect(editors(second), 'the view of the copy on screen has no editor').toBe(1)
+      expect(termEditorsIn(first), 'the copy’s editor came back in the parked view').toBe(0)
+      expect(editorsOf(second), 'the view of the copy on screen has no editor').toBe(1)
       expect(document.activeElement, 'the focus is not in the view the copy came back to').toBe(
-        leaf(second)?.querySelector('.view-title'),
+        host(second)?.querySelector('.view-title'),
       )
 
       // ALL FOUR AGAIN, WHICH BRINGS THE PARKED VIEW BACK: on the copy, as the undo left it, with no second editor.
-      await toggle(other.kind)
+      await pressShownToggle(other.kind)
       expect(mounted(), 'precondition: all four views again').toEqual(FOUR)
       expect(titleText(leg.view), 'the parked view was not moved back onto the copy').toBe(onCopy)
-      expect(editors(leg.view)).toBe(0)
+      expect(editorsOf(leg.view)).toBe(0)
       expect(errors, 'a handler threw').toEqual([])
     })
 
     it('comes back with its editor in the parked view where no view on screen shows it', async () => {
       const { copy, onCopy, first } = await copyIn(leg)
-      await toggle(leg.kind)
+      await pressShownToggle(leg.kind)
       expect(mounted(), 'precondition: the copy’s view is parked').toEqual(FOUR.filter((id) => id !== leg.view))
       expect(first.isConnected, 'precondition: its host is out of the document').toBe(false)
-      expect(editorsIn(first), 'precondition: the parked view holds the copy’s editor').toBe(1)
+      expect(termEditorsIn(first), 'precondition: the parked view holds the copy’s editor').toBe(1)
 
       await deleteAndUndo(copy)
-      expect(editorsIn(first), 'the copy came back with no editor').toBe(1)
+      expect(termEditorsIn(first), 'the copy came back with no editor').toBe(1)
       expect(document.activeElement, 'the focus is not on the copies button').toBe(document.querySelector('#buffers'))
 
-      await toggle(leg.kind)
+      await pressShownToggle(leg.kind)
       expect(mounted(), 'precondition: all four views again').toEqual(FOUR)
       expect(titleText(leg.view), 'the parked view was not moved back onto the copy').toBe(onCopy)
-      expect(editors(leg.view)).toBe(1)
+      expect(editorsOf(leg.view)).toBe(1)
       expect(errors, 'a handler threw').toEqual([])
     })
   })

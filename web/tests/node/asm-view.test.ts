@@ -12,12 +12,8 @@ import {
   unwrittenMeaning,
   wordText,
 } from '../../src/asm-view'
-import type { AsmProgram, AsmState, AsmWord } from '../../src/types'
-import { FACT3, frameOf } from './asm-fixtures'
-
-const v = (word: string): AsmWord => ({ word, tag: 'Value' })
-const l = (word: string): AsmWord => ({ word, tag: 'List' })
-const b = (word: string): AsmWord => ({ word, tag: 'Box' })
+import type { AsmProgram, AsmState } from '../../src/types'
+import { boxWord, FACT3, frameOf, listWord, valueWord } from './asm-fixtures'
 
 describe('the listing', () => {
   it('puts each instruction under its labels, as print_asm prints them', () => {
@@ -70,14 +66,14 @@ describe('the listing', () => {
 
 describe('a word', () => {
   it('reads by its tag: a value in decimal, a list as its cell or nil, a box as its handle', () => {
-    expect(wordText(v('42'))).toBe('42')
-    expect(wordText(l('3'))).toBe('#3')
-    expect(wordText(l('0'))).toBe('nil')
-    expect(wordText(b('2'))).toBe('box #2')
+    expect(wordText(valueWord('42'))).toBe('42')
+    expect(wordText(listWord('3'))).toBe('#3')
+    expect(wordText(listWord('0'))).toBe('nil')
+    expect(wordText(boxWord('2'))).toBe('box #2')
   })
 
   it('keeps a saturated value exact, as the decimal string it came as', () => {
-    expect(wordText(v('18446744073709551615'))).toBe('18446744073709551615')
+    expect(wordText(valueWord('18446744073709551615'))).toBe('18446744073709551615')
   })
 })
 
@@ -96,7 +92,13 @@ describe('a call frame', () => {
 
 describe('the registers', () => {
   it('list pc, rr, the arguments and the locals in that order, each read by its tag', () => {
-    const s = frameOf({ pc: 7, rr: l('2'), args: [v('3')], locals: [v('1'), b('1')], written: [true, true] })
+    const s = frameOf({
+      pc: 7,
+      rr: listWord('2'),
+      args: [valueWord('3')],
+      locals: [valueWord('1'), boxWord('1')],
+      written: [true, true],
+    })
     expect(registerRows(s).map((r) => [r.name, r.text])).toEqual([
       ['pc', '7'],
       ['rr', '#2'],
@@ -107,7 +109,12 @@ describe('the registers', () => {
   })
 
   it('mark the register the last instruction wrote, and only that one', () => {
-    const s = frameOf({ locals: [v('1'), v('2')], written: [true, true], args: [v('0')], wrote: 'r1' })
+    const s = frameOf({
+      locals: [valueWord('1'), valueWord('2')],
+      written: [true, true],
+      args: [valueWord('0')],
+      wrote: 'r1',
+    })
     expect(
       registerRows(s)
         .filter((r) => r.changed)
@@ -119,14 +126,19 @@ describe('the registers', () => {
         .map((r) => r.name),
     ).toEqual(['rr'])
     expect(
-      registerRows(frameOf({ args: [v('0')], wrote: 'a0' }))
+      registerRows(frameOf({ args: [valueWord('0')], wrote: 'a0' }))
         .filter((r) => r.changed)
         .map((r) => r.name),
     ).toEqual(['a0'])
   })
 
   it('mark a local the current call has not written, and never an argument or rr', () => {
-    const s = frameOf({ depth: 1, args: [v('2')], locals: [v('5'), v('6')], written: [true, false] })
+    const s = frameOf({
+      depth: 1,
+      args: [valueWord('2')],
+      locals: [valueWord('5'), valueWord('6')],
+      written: [true, false],
+    })
     expect(
       registerRows(s)
         .filter((r) => r.unwritten)
@@ -135,13 +147,13 @@ describe('the registers', () => {
   })
 
   it('say an unwritten local is left over from the caller only inside a call', () => {
-    const inside = frameOf({ depth: 2, locals: [v('5')], written: [false] })
-    const top = frameOf({ depth: 0, locals: [v('0')], written: [false] })
+    const inside = frameOf({ depth: 2, locals: [valueWord('5')], written: [false] })
+    const top = frameOf({ depth: 0, locals: [valueWord('0')], written: [false] })
     expect(unwrittenMeaning(inside)).toBe('left over from caller')
     expect(unwrittenLegend(inside, registerRows(inside))).toBe('· left over from caller')
     expect(unwrittenMeaning(top)).toBe('not written yet')
     expect(unwrittenLegend(top, registerRows(top))).toBe('· not written yet')
-    const written = frameOf({ depth: 2, locals: [v('5')], written: [true] })
+    const written = frameOf({ depth: 2, locals: [valueWord('5')], written: [true] })
     expect(unwrittenLegend(written, registerRows(written))).toBeNull()
   })
 })
@@ -149,9 +161,9 @@ describe('the registers', () => {
 describe('the heap', () => {
   it("names the registers of a cell's own tag whose word is that cell", () => {
     const s: AsmState = frameOf({
-      rr: l('3'),
-      args: [l('3')],
-      locals: [v('3'), l('3'), l('2')],
+      rr: listWord('3'),
+      args: [listWord('3')],
+      locals: [valueWord('3'), listWord('3'), listWord('2')],
       written: [true, true, true],
     })
     expect(backRefs(s, 3, 'List')).toEqual(['rr', 'a0', 'r1'])

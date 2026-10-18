@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import { BUFFERS_STORAGE_KEY } from '../../src/buffers-store'
-import { SHELL, until } from './harness'
+import { idle, linkStatus, SHELL, until } from './harness'
 
 /**
  * **THE NEGATIVE CASE `writeBuffersStorage`'s `hasBuffers` GUARD EXISTS FOR, EXERCISED HERE FOR THE
@@ -32,9 +32,6 @@ localStorage.setItem = (key: string, value: string): void => {
   passthroughSetItem(key, value)
 }
 
-const linkStatus = (): string => document.querySelector('#link-status')?.textContent ?? ''
-const resultsText = (): string => document.querySelector('#results')?.textContent ?? ''
-
 describe('a fresh page, never forked, with a refusing writer', () => {
   /**
    * **THE PAGE COMES UP AND STAYS SILENT ON `#link-status` — NOT "REPORTS AND THEN CLEARS", SILENT
@@ -54,10 +51,7 @@ describe('a fresh page, never forked, with a refusing writer', () => {
   it('never reports, because there is nothing to lose', async () => {
     document.body.innerHTML = SHELL
     await (await import('../../src/main')).ready
-    await until(
-      () => document.querySelector<HTMLElement>('#results')?.dataset.state === 'idle' && resultsText() !== '',
-      'the first compile',
-    )
+    await until(idle, 'the first compile')
     // **THE POSITIVE CONTROL IS THE ELEMENT'S EXISTENCE, AND IT USED TO BE THE THING THIS PAIR COULD NOT
     // CHECK — whole-branch review before merge, finding 3b.** The two lines here read
     // `expect(linkStatus()).toBe('')` followed by `expect(linkStatus()).not.toContain('not being
@@ -66,7 +60,7 @@ describe('a fresh page, never forked, with a refusing writer', () => {
     // `querySelector('#link-status')?.textContent ?? ''`, so a REMOVED element answers `''` and passes
     // the exact-string check — the regression the control was supposed to catch is the one it hides —
     // and the second assertion could not fail at all once the first had passed, since `''` contains
-    // nothing. (That comment also cited `app.test.ts`'s `until(() => linkStatusText() !== '')` as proof
+    // nothing. (That comment also cited `app.test.ts`'s `until(() => linkStatus() !== '')` as proof
     // of what such a page reads. That wait is for the NON-EMPTY case, on different fixtures, and proves
     // the opposite of what it was cited for.)
     //

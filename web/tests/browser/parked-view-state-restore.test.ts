@@ -1,8 +1,9 @@
 import { beforeAll, describe, expect, it } from 'vitest'
-import { page, userEvent } from 'vitest/browser'
+import { page } from 'vitest/browser'
 import { LAYOUT_STORAGE_KEY, type LayoutNode } from '../../src/layout'
 import { serializeWorkspace, type Workspace } from '../../src/workspace'
-import { fourViews, fourViewWorkspace, SHELL, until } from './harness'
+import { fourViews, fourViewWorkspace, host, mounted, SHELL, stateIdle, storedLayout, until } from './harness'
+import { clickToggle } from './user-event-fixture'
 
 /**
  * A RELOAD BUILDS A VIEW THAT WAS OFF THE SCREEN FROM WHAT THE WORKSPACE STORED FOR IT — the view layouts spec §5.2.
@@ -34,16 +35,7 @@ const PANELS = { 'tm-0': { rules: false } }
 const DISPLAY = { 'lambda-0': { layout: 'outline', vars: 'debruijn', map: 'icicle' } } as const
 const TM_DISPLAY = { 'tm-0': { level: 'program', edges: 'chips' } } as const
 
-const leaf = (id: string): HTMLElement | null =>
-  document.querySelector<HTMLElement>(`#views [data-leaf="${id}"]:not([role="tab"])`)
-const mounted = (): string[] =>
-  [...document.querySelectorAll<HTMLElement>('#views [data-leaf]')]
-    .filter((el) => el.getAttribute('role') !== 'tab')
-    .map((el) => el.dataset.leaf as string)
-const press = (kind: string): Promise<void> =>
-  userEvent.click(document.querySelector<HTMLButtonElement>(`#views-shown button[data-shows="${kind}"]`) as HTMLElement)
-const stored = (): Pick<Workspace, 'panels' | 'display' | 'tmDisplay' | 'arrangements'> =>
-  JSON.parse(localStorage.getItem(LAYOUT_STORAGE_KEY) ?? 'null')
+type Stored = Pick<Workspace, 'panels' | 'display' | 'tmDisplay' | 'arrangements'>
 
 beforeAll(async () => {
   await page.viewport(1280, 896)
@@ -61,25 +53,25 @@ beforeAll(async () => {
   )
   document.body.innerHTML = SHELL
   await (await import('../../src/main')).ready
-  await until(() => document.querySelector<HTMLElement>('#results')?.dataset.state === 'idle', 'the first compile')
+  await until(stateIdle, 'the first compile')
 })
 
 describe('a stored workspace that keeps panel state and displays for views off the screen', () => {
   it('still stores them once the page has loaded and written its workspace back', () => {
     // A WORKSPACE THE LOADER REFUSED WOULD HAVE OPENED ON THE DEFAULT, the source beside the TM view.
     expect(mounted(), 'precondition: the page opened on the stored tree').toEqual(['source', 'asm-0'])
-    expect(Object.keys(stored().arrangements), 'precondition: all four views are remembered').toEqual([
+    expect(Object.keys(storedLayout<Stored>().arrangements), 'precondition: all four views are remembered').toEqual([
       'source+lambda+asm+tm',
     ])
-    expect.soft(stored().panels, 'the load dropped a parked view’s panel state').toEqual(PANELS)
-    expect.soft(stored().display, 'the load dropped a parked view’s display').toEqual(DISPLAY)
-    expect.soft(stored().tmDisplay, 'the load dropped a parked view’s display').toEqual(TM_DISPLAY)
+    expect.soft(storedLayout<Stored>().panels, 'the load dropped a parked view’s panel state').toEqual(PANELS)
+    expect.soft(storedLayout<Stored>().display, 'the load dropped a parked view’s display').toEqual(DISPLAY)
+    expect.soft(storedLayout<Stored>().tmDisplay, 'the load dropped a parked view’s display').toEqual(TM_DISPLAY)
   })
 
   it('builds each view from them when its toggle is pressed', async () => {
-    await press('tm')
+    await clickToggle('tm')
     expect(mounted(), 'precondition: the TM view is built').toEqual(['source', 'asm-0', 'tm-0'])
-    const tm = leaf('tm-0') as HTMLElement
+    const tm = host('tm-0') as HTMLElement
     expect(
       tm.querySelector('[data-panel="rules"] .panel-toggle')?.getAttribute('aria-expanded'),
       'the TM view was built with its rules panel open',
@@ -89,10 +81,10 @@ describe('a stored workspace that keeps panel state and displays for views off t
     )
     expect(chips?.getAttribute('aria-checked'), 'the TM view was built drawing arcs').toBe('true')
 
-    await press('lambda')
+    await clickToggle('lambda')
     expect(mounted(), 'precondition: all four views, as remembered').toEqual(['source', 'lambda-0', 'asm-0', 'tm-0'])
     const choice = (value: string): string | null | undefined =>
-      leaf('lambda-0')?.querySelector(`.view-menu-choice[data-value="${value}"]`)?.getAttribute('aria-checked')
+      host('lambda-0')?.querySelector(`.view-menu-choice[data-value="${value}"]`)?.getAttribute('aria-checked')
     expect(choice('outline'), 'the λ view was built drawing code').toBe('true')
     expect(choice('debruijn'), 'the λ view was built showing names').toBe('true')
   })

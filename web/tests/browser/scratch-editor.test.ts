@@ -2,6 +2,7 @@ import { EditorView } from '@codemirror/view'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { ScratchEditorConfig } from '../../src/scratch-editor'
 import { ScratchEditor } from '../../src/scratch-editor'
+import { typeIn } from './editor-view-fixture'
 
 /**
  * **A MISMATCH FOUND AGAINST `2026-08-11-plan5d-iii-editable-lambda.md`, AND HOW THIS FILE RESOLVES
@@ -20,7 +21,7 @@ import { ScratchEditor } from '../../src/scratch-editor'
  * a seed and a keystroke must be told apart, and `setText` is named and documented as the seed side
  * of that split. This file simulates a real edit instead, via `EditorView.findFromDOM(host)` —
  * CodeMirror's own public API for recovering the view instance mounted under a DOM node — and
- * dispatches a change transaction directly to it, exactly as `tests/browser/app.test.ts`'s `retype`
+ * dispatches a change transaction directly to it, exactly as `tests/browser/harness.ts`'s `retype`
  * treats a direct `view.dispatch` of a buffer replacement as standing in for a user retyping the
  * whole document. No private field of `ScratchEditor` is touched.
  */
@@ -37,13 +38,6 @@ describe('ScratchEditor', () => {
     return { host, onEdit, ed: new ScratchEditor({ host, initial: '\\x. x', debounceMs: 300, onEdit }) }
   }
 
-  /** A real keystroke — as against `setText`'s seed, see the file doc above. */
-  const retype = (host: HTMLElement, text: string): void => {
-    const view = EditorView.findFromDOM(host)
-    if (view === null) throw new Error('no CodeMirror view mounted under host')
-    view.dispatch({ changes: { from: 0, to: view.state.doc.length, insert: text } })
-  }
-
   it('seeds the buffer with the term it was given', () => {
     const { host } = make()
     expect(host.textContent).toContain('\\x. x')
@@ -51,9 +45,9 @@ describe('ScratchEditor', () => {
 
   it('coalesces a burst of keystrokes into ONE recompile', () => {
     const { host, onEdit } = make()
-    retype(host, '\\a. a')
-    retype(host, '\\ab. ab')
-    retype(host, '\\abc. abc')
+    typeIn(host, '\\a. a')
+    typeIn(host, '\\ab. ab')
+    typeIn(host, '\\abc. abc')
     vi.advanceTimersByTime(300)
     expect(onEdit).toHaveBeenCalledTimes(1)
     expect(onEdit).toHaveBeenCalledWith('\\abc. abc')
@@ -61,7 +55,7 @@ describe('ScratchEditor', () => {
 
   it('does not fire before the debounce elapses', () => {
     const { host, onEdit } = make()
-    retype(host, '\\a. a')
+    typeIn(host, '\\a. a')
     vi.advanceTimersByTime(299)
     expect(onEdit).not.toHaveBeenCalled()
   })
@@ -73,7 +67,7 @@ describe('ScratchEditor', () => {
    */
   it('sends a pending edit when it is destroyed, once, and nothing after', () => {
     const { host, onEdit, ed } = make()
-    retype(host, '\\a. a')
+    typeIn(host, '\\a. a')
     ed.destroy()
     expect(onEdit).toHaveBeenCalledTimes(1)
     expect(onEdit).toHaveBeenCalledWith('\\a. a')
@@ -84,7 +78,7 @@ describe('ScratchEditor', () => {
 
   it('sends nothing when it is destroyed with no edit pending', () => {
     const { host, onEdit, ed } = make()
-    retype(host, '\\a. a')
+    typeIn(host, '\\a. a')
     vi.advanceTimersByTime(300)
     ed.destroy()
     vi.advanceTimersByTime(1000)
@@ -94,7 +88,7 @@ describe('ScratchEditor', () => {
   /** `flush` — what `EditorCustody.flush` asks of an editor before a delete reads its copy's record. */
   it('flushes a pending edit at once, and then has nothing left for the timer', () => {
     const { host, onEdit, ed } = make()
-    retype(host, '\\a. a')
+    typeIn(host, '\\a. a')
     ed.flush()
     expect(onEdit).toHaveBeenCalledWith('\\a. a')
     ed.flush()
@@ -153,7 +147,7 @@ describe('ScratchEditor', () => {
    */
   it('sends the edit a format owed at once when the editor comes down before the format is answered', async () => {
     const { host, onEdit, ed, answer } = makeFormattable()
-    retype(host, '\\a. a')
+    typeIn(host, '\\a. a')
     const formatting = ed.format()
     ed.destroy()
     expect(onEdit, 'destroy flushes, and flush now reaches a format’s own pending text').toHaveBeenCalledTimes(1)
@@ -174,7 +168,7 @@ describe('ScratchEditor', () => {
    */
   it('sends the edit a format owed when flush is called, before the format is answered', async () => {
     const { host, onEdit, ed, answer } = makeFormattable()
-    retype(host, '\\a. a')
+    typeIn(host, '\\a. a')
     const formatting = ed.format()
     ed.flush()
     expect(onEdit, 'a delete reads the record right after this, with no destroy in between').toHaveBeenCalledTimes(1)
@@ -193,9 +187,9 @@ describe('ScratchEditor', () => {
    */
   it('sends nothing older from flush once a later debounce has sent what was typed during the format', async () => {
     const { host, onEdit, ed, answer } = makeFormattable()
-    retype(host, '\\a. a')
+    typeIn(host, '\\a. a')
     const formatting = ed.format()
-    retype(host, '\\b. b')
+    typeIn(host, '\\b. b')
     vi.advanceTimersByTime(300)
     expect(onEdit, 'precondition: the debounce sent the newer text').toHaveBeenCalledTimes(1)
     expect(onEdit).toHaveBeenLastCalledWith('\\b. b')
@@ -218,7 +212,7 @@ describe('ScratchEditor', () => {
   it('is not re-seeded while a format holds the edit it took off the timer, and is after', async () => {
     const { host, onEdit, ed, answer } = makeFormattable()
     const text = (): string => EditorView.findFromDOM(host)?.state.doc.toString() ?? ''
-    retype(host, '\\a. a')
+    typeIn(host, '\\a. a')
     const formatting = ed.format()
     vi.advanceTimersByTime(300)
     expect(onEdit, 'precondition: the format left the edit on the timer, which sent it').not.toHaveBeenCalled()

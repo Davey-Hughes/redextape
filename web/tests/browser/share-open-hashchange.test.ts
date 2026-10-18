@@ -1,13 +1,26 @@
 import type { EditorView } from '@codemirror/view'
 import { beforeAll, describe, expect, it } from 'vitest'
 import { page, userEvent } from 'vitest/browser'
-import { BUFFERS_STORAGE_KEY, parseBuffers } from '../../src/buffers-store'
 import { EXAMPLE_ENCODING } from '../../src/examples'
 import { splitLeaf } from '../../src/layout'
 import { encodeLink, type SharePayload } from '../../src/share-link'
 import { bindingKey } from '../../src/view-header'
 import { PRESETS, serializeWorkspace } from '../../src/workspace'
-import { fourViews, fourViewWorkspace, SHELL, until } from './harness'
+import { storedBindings } from './copy-text-fixture'
+import {
+  fourViews,
+  fourViewWorkspace,
+  lambdaLayout,
+  noticeText,
+  picker,
+  readout,
+  SHELL,
+  shows,
+  stateIdle,
+  undoButton,
+  until,
+} from './harness'
+import { workspaceName } from './share-open-hashchange-fixture'
 
 /**
  * **A LINK PASTED INTO AN OPEN PAGE, AND ITS UNDO** — Plan 7 part 6a spec §5.3 and §5.5, heard as `hashchange`. The
@@ -43,18 +56,8 @@ const LINK: SharePayload = {
   positions: {},
 }
 
-const picker = () => document.querySelector<HTMLSelectElement>('#encoding') as HTMLSelectElement
-const noticeText = () => document.querySelector('#notice .notice-text')?.textContent ?? ''
-const undoButton = () => document.querySelector<HTMLButtonElement>('#notice button.notice-action')
-const idle = () => document.querySelector<HTMLElement>('#results')?.dataset.state === 'idle'
-const readout = () => [...document.querySelectorAll('#results .segment, #results .row')].length
-const shows = (leaf: string) =>
-  document.querySelector<HTMLElement>(`[data-leaf="${leaf}"] .view-title`)?.dataset.binding ?? ''
-const lambdaLayout = () => document.querySelector<HTMLElement>('[data-leaf="lambda-0"] .term')?.dataset.layout
 /** The views on the page, by leaf. */
 const leaves = () => [...document.querySelectorAll<HTMLElement>('.pane[data-leaf]')].map((p) => p.dataset.leaf ?? '')
-const storedBindings = () => parseBuffers(localStorage.getItem(BUFFERS_STORAGE_KEY))?.bindings
-const workspaceName = () => document.querySelector('#workspace')?.textContent
 const panelOpen = (where: string) => document.querySelector<HTMLElement>(`${where} .panel`)?.dataset.open
 
 let view: EditorView
@@ -75,7 +78,7 @@ beforeAll(async () => {
   await page.viewport(1600, 896)
   document.body.innerHTML = SHELL
   view = await (await import('../../src/main')).ready
-  await until(() => idle() && readout() === 3, 'the first compile')
+  await until(() => stateIdle() && readout() === 3, 'the first compile')
   // A COPY, THEN A VIEW OF IT, THEN THE λ VIEW BACK ON THE PROGRAM: the copy's view is one the link's tree lacks.
   document.querySelector<HTMLButtonElement>('[data-leaf="lambda-0"] button.detach')?.click()
   await until(() => shows('lambda-0') !== bindingKey('lambda', 'source'), 'the copy')
@@ -141,7 +144,7 @@ describe('a whole link pasted into an open page', () => {
     expect(document.activeElement).toBe(view.contentDOM)
     await until(() => lambdaLayout() !== 'flat', 'the λ tree')
     expect(lambdaLayout()).toBe('code')
-    await until(() => idle() && readout() === 3, 'the program’s compile')
+    await until(() => stateIdle() && readout() === 3, 'the program’s compile')
   })
 
   it('withdraws the undo at the next edit that changes the program', async () => {
@@ -154,7 +157,7 @@ describe('a whole link pasted into an open page', () => {
     await paste(await encodeLink({ ...LINK, program: OTHER }), () => undoButton() !== null, 'the open')
     await userEvent.selectOptions(picker(), 'unary')
     expect(undoButton()).toBeNull()
-    await until(() => idle() && readout() > 0, 'the compile under unary')
+    await until(() => stateIdle() && readout() > 0, 'the compile under unary')
   })
 
   // THE LINK'S TREE HOLDS `pane-2`, THE ID THE OPENER'S NEXT VIEW WOULD HAVE TAKEN: the next is minted past it.
@@ -213,7 +216,7 @@ describe('a whole link pasted into an open page', () => {
 
 describe('any other link pasted into an open page', () => {
   it('opens the program alone when the workspace cannot be read, and undo puts back the program alone', async () => {
-    await until(() => idle() && readout() > 0, 'the compile')
+    await until(() => stateIdle() && readout() > 0, 'the compile')
     const before = view.state.doc.toString()
     const workspace = workspaceName()
     // **THE PAGE IS ON `binary` AND THE LINK IS ON `unary`**, so the encoding on the page after the open is the link's

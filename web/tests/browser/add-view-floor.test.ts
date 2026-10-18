@@ -3,7 +3,22 @@ import { page, userEvent } from 'vitest/browser'
 import { LAYOUT_STORAGE_KEY, type LayoutNode, MIN_VIEW_PX } from '../../src/layout'
 import { DIVIDER_PX } from '../../src/layout-view'
 import { parseWorkspace, serializeWorkspace } from '../../src/workspace'
-import { fourViewWorkspace, SHELL, showFourViews, until } from './harness'
+import {
+  fourViewWorkspace,
+  heightOf,
+  hosts,
+  liveText,
+  noticeText,
+  SHELL,
+  showFourViews,
+  stateIdle,
+  storedLayoutText,
+  tabLeaves,
+  until,
+  views,
+  workspaceMenu,
+} from './harness'
+import { plusView } from './user-event-fixture'
 
 /**
  * **`+ VIEW` TAKES AN EQUAL SHARE OF THE FOCUSED VIEW'S ROW, AND NO ADD MAKES A VIEW NARROWER THAN 160 PX** — the
@@ -35,20 +50,12 @@ const SIXTY_FOUR: LayoutNode = {
   ],
 }
 
-const views = () => document.querySelector<HTMLElement>('#views') as HTMLElement
-/** The view hosts on the page — every `[data-leaf]` under `#views` but a Stage's tabs, which carry one too. */
-const hosts = (): HTMLElement[] =>
-  [...document.querySelectorAll<HTMLElement>('#views [data-leaf]')].filter((el) => el.getAttribute('role') !== 'tab')
 const ids = () => hosts().map((h) => h.dataset.leaf as string)
 const host = (leaf: string) => hosts().find((h) => h.dataset.leaf === leaf) as HTMLElement
-const tabs = () => [...document.querySelectorAll<HTMLElement>('#views [role="tab"]')].map((t) => t.dataset.leaf)
-const stored = () => localStorage.getItem(LAYOUT_STORAGE_KEY)
-const focused = () => parseWorkspace(stored())?.focused
+const focused = () => parseWorkspace(storedLayoutText())?.focused
 const titleOf = (leaf: string) =>
   (host(leaf).querySelector('.view-title-text') ?? host(leaf).querySelector('.view-title'))?.textContent
-const noticeText = () => document.querySelector('#notice .notice-text')?.textContent ?? ''
 const width = (el: Element) => el.getBoundingClientRect().width
-const height = (el: Element) => el.getBoundingClientRect().height
 /** The views level with λ's top edge — the top row however the tree nests it. */
 const topRow = () =>
   hosts().filter((h) => h.getBoundingClientRect().top === host('lambda-0').getBoundingClientRect().top)
@@ -63,15 +70,6 @@ const ROOM_SPLIT_NARROW = (title: string) => `no room to split ${title} — clos
 const ROOM_SPLIT_SHORT = (title: string) => `no room to split ${title} — close a view or make the window taller`
 const FULL =
   'the workspace holds 64 views, the most it can keep — close one to add another, or reset preset if that makes no room'
-
-/** Press `+ view` and pick `label`, with the pointer. */
-async function plusView(label = 'λ · program'): Promise<void> {
-  await userEvent.click(document.querySelector('#new-view') as HTMLElement)
-  const item = () =>
-    [...document.querySelectorAll<HTMLButtonElement>('#new-view-menu button')].find((b) => b.textContent === label)
-  await until(() => item() !== undefined, `+ view's ${label}`)
-  await userEvent.click(item() as HTMLButtonElement)
-}
 
 /**
  * The press just made added a λ view, and `count` reaches `n`. **THE NOTICE FIRST**: a press refused says so on the
@@ -96,8 +94,6 @@ async function openSplit(leaf: string, dir: 'row' | 'column'): Promise<HTMLButto
   await until(() => menu.querySelector('button[data-same]') !== null, `${leaf}'s split pairs`)
   return menu.querySelector('button[data-same]') as HTMLButtonElement
 }
-
-const workspaceMenu = () => document.querySelector<HTMLElement>('#workspace-menu') as HTMLElement
 
 /** Open the workspace menu with the pointer — from shut, since a click on its button while it is open shuts it. */
 async function openWorkspace(): Promise<void> {
@@ -127,13 +123,11 @@ async function resetPreset(p: 'explorer' | 'stage' = 'explorer'): Promise<void> 
   expect(focused()).toBe('tm-0')
   // ALL FOUR VIEWS, WHICH THE RESET GAVE WHEN THESE CASES WERE WRITTEN: it leaves the source beside the TM view now.
   await showFourViews()
-  expect(tabs().length > 0 ? tabs() : ids()).toEqual(['source', 'lambda-0', 'asm-0', 'tm-0'])
+  expect(tabLeaves().length > 0 ? tabLeaves() : ids()).toEqual(['source', 'lambda-0', 'asm-0', 'tm-0'])
   // WHERE `showFourViews` PUTS THE FOCUS, AND WHERE EACH CASE'S `+ view` ADDS: the cases' start, and no longer the
   // reset's doing, which the line above the fixture holds.
   expect(focused()).toBe('lambda-0')
 }
-
-const live = () => document.querySelector('#live')?.textContent ?? ''
 
 /**
  * Move the top row's divider, between source and λ, `n` key steps with real keys: `ArrowRight` grows source, and
@@ -156,8 +150,14 @@ async function dragTopDivider(key: 'ArrowRight' | 'ArrowLeft', n: number): Promi
  */
 function snapshot() {
   return {
-    state: { ids: ids(), tabs: tabs(), widths: hosts().map(width), stored: stored(), focused: focused() },
-    live: live(),
+    state: {
+      ids: ids(),
+      tabs: tabLeaves(),
+      widths: hosts().map(width),
+      stored: storedLayoutText(),
+      focused: focused(),
+    },
+    live: liveText(),
   }
 }
 
@@ -171,8 +171,8 @@ function snapshot() {
  */
 function refused(words: string, before: ReturnType<typeof snapshot>): void {
   expect(noticeText()).toBe(words)
-  expect(live(), 'the refusal said nothing to the live region').not.toBe(before.live)
-  expect(live().trim()).toBe(words)
+  expect(liveText(), 'the refusal said nothing to the live region').not.toBe(before.live)
+  expect(liveText().trim()).toBe(words)
   expect(snapshot().state).toEqual(before.state)
   expect(document.querySelector<HTMLButtonElement>('#new-view')?.disabled).toBe(false)
   expect(document.activeElement, 'the focus fell to <body>').not.toBe(document.body)
@@ -186,7 +186,7 @@ beforeAll(async () => {
   )
   document.body.innerHTML = SHELL
   await (await import('../../src/main')).ready
-  await until(() => document.querySelector<HTMLElement>('#results')?.dataset.state === 'idle', 'the first compile')
+  await until(stateIdle, 'the first compile')
 })
 
 describe('+ view and the splits, at 1280×800', () => {
@@ -215,7 +215,7 @@ describe('+ view and the splits, at 1280×800', () => {
     )
 
     await choosePreset('stage')
-    await until(() => tabs().length === 64, 'the stage')
+    await until(() => tabLeaves().length === 64, 'the stage')
     expect(preset()).toBe('Stage')
     expect(focused()).toBe('lambda-0')
     expect(titleOf('lambda-0')).toBe('λ · program')
@@ -235,7 +235,7 @@ describe('+ view and the splits, at 1280×800', () => {
     const columns = [...document.querySelectorAll('.layout-split[data-dir="column"] > .layout-divider')]
     expect([rows.length, columns.length]).toEqual([2, 1])
     for (const d of rows) expect(width(d)).toBe(DIVIDER_PX)
-    for (const d of columns) expect(height(d)).toBe(DIVIDER_PX)
+    for (const d of columns) expect(heightOf(d)).toBe(DIVIDER_PX)
 
     for (let press = 1; press <= 5; press++) {
       await plusView()
@@ -304,16 +304,16 @@ describe('+ view and the splits, at 1280×800', () => {
     await resetPreset()
     expect(preset()).toBe('Explorer')
     expect(titleOf('lambda-0')).toBe('λ · program')
-    const tall = height(host('lambda-0'))
+    const tall = heightOf(host('lambda-0'))
     expect(tall).toBeGreaterThanOrEqual(2 * MIN_VIEW_PX + DIVIDER_PX)
     await userEvent.click(await openSplit('lambda-0', 'column'))
     await until(() => ids().length === 5, 'the split')
     const at = focused() as string
     expect(at).not.toBe('lambda-0')
     expect(titleOf(at)).toBe('λ · program')
-    expect(Math.abs(height(host(at)) - height(host('lambda-0')))).toBeLessThan(1)
-    expect(height(host(at))).toBeGreaterThanOrEqual(MIN_VIEW_PX)
-    expect(height(host(at))).toBeLessThan(320)
+    expect(Math.abs(heightOf(host(at)) - heightOf(host('lambda-0')))).toBeLessThan(1)
+    expect(heightOf(host(at))).toBeGreaterThanOrEqual(MIN_VIEW_PX)
+    expect(heightOf(host(at))).toBeLessThan(320)
     expect(width(host(at))).toBe(634)
 
     const pick = await openSplit(at, 'column')
@@ -371,7 +371,7 @@ describe('+ view and the splits, at 1280×800', () => {
     expect(titleOf('lambda-0')).toBe('λ · program')
     await dragTopDivider('ArrowRight', 19)
     await until(() => Math.abs(width(host('lambda-0')) - 152.16) < 1, 'λ at 0.12 of its row')
-    expect(height(host('lambda-0'))).toBeGreaterThanOrEqual(2 * MIN_VIEW_PX + DIVIDER_PX)
+    expect(heightOf(host('lambda-0'))).toBeGreaterThanOrEqual(2 * MIN_VIEW_PX + DIVIDER_PX)
 
     const pick = await openSplit('lambda-0', 'column')
     const before = snapshot()
@@ -395,15 +395,15 @@ describe('+ view and the splits, at 1280×800', () => {
 
     for (let press = 1; press <= 4; press++) {
       await plusView()
-      await added(`press ${press}`, () => tabs().length, 4 + press)
+      await added(`press ${press}`, () => tabLeaves().length, 4 + press)
     }
 
     await page.viewport(390, 844)
     await until(() => width(views()) === 390, '#views at 390')
     expect(preset()).toBe('Stage')
-    expect(tabs().length).toBe(8)
+    expect(tabLeaves().length).toBe(8)
     await plusView()
-    await added('press at 390', () => tabs().length, 9)
+    await added('press at 390', () => tabLeaves().length, 9)
     expect(ids().length, 'the Stage shows one view').toBe(1)
   })
 })

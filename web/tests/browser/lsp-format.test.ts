@@ -1,16 +1,11 @@
 import type { EditorView } from '@codemirror/view'
 import { beforeAll, describe, expect, it } from 'vitest'
 import { FORMAT_ON_BLUR_KEY } from '../../src/editor-prefs'
-import { SHELL, until } from './harness'
+import { retype, SHELL, text, until } from './harness'
 
 let view: EditorView
 
 const UNFORMATTED = 'fn fact(n) { if n == 0 { 1 } else { n * fact(n - 1) } }\nfact(3)\n'
-
-const retype = (src: string): void => {
-  view.dispatch({ changes: { from: 0, to: view.state.doc.length, insert: src } })
-}
-const text = () => view.state.doc.toString()
 
 /** Click `format` in a view's `⋯` menu, the control a user has. */
 function formatVia(leaf: string): void {
@@ -35,13 +30,13 @@ beforeAll(async () => {
 
 describe('format', () => {
   it('reformats the source document from the view menu', async () => {
-    retype(UNFORMATTED)
+    retype(view, UNFORMATTED)
     formatVia('source')
 
     // `print ∘ parse`, so the body is laid out over lines rather than kept on one.
-    await until(() => text() !== UNFORMATTED, 'the formatted text to replace the buffer')
-    expect(text()).toContain('fn fact(n) {\n')
-    expect(text()).toContain('fact(3)')
+    await until(() => text(view) !== UNFORMATTED, 'the formatted text to replace the buffer')
+    expect(text(view)).toContain('fn fact(n) {\n')
+    expect(text(view)).toContain('fact(3)')
   })
 
   /**
@@ -51,17 +46,17 @@ describe('format', () => {
    * typed into — and this is what makes *format on blur* safe to leave on.
    */
   it('leaves an unparseable buffer alone, and raises nothing', async () => {
-    retype('let x = ;')
+    retype(view, 'let x = ;')
     formatVia('source')
 
     // Nothing to wait for, so wait for a round trip that would have landed by now: a format of a
     // VALID document, which proves the server answered in between rather than that time passed.
     await new Promise((r) => setTimeout(r, 50))
-    expect(text()).toBe('let x = ;')
+    expect(text(view)).toBe('let x = ;')
 
-    retype('let  x  =  1;')
+    retype(view, 'let  x  =  1;')
     formatVia('source')
-    await until(() => text() !== 'let  x  =  1;', 'the valid document to format, proving the server was reachable')
+    await until(() => text(view) !== 'let  x  =  1;', 'the valid document to format, proving the server was reachable')
   })
 
   it('is offered on a view that has an editor', () => {
@@ -81,17 +76,17 @@ describe('format on blur', () => {
     if (box === null) throw new Error('no `format on blur` setting in the settings menu')
     expect(box.checked, 'off on a first visit').toBe(false)
 
-    retype(UNFORMATTED)
+    retype(view, UNFORMATTED)
     view.contentDOM.dispatchEvent(new FocusEvent('blur'))
     await new Promise((r) => setTimeout(r, 50))
-    expect(text(), 'blur must do nothing while the setting is off').toBe(UNFORMATTED)
+    expect(text(view), 'blur must do nothing while the setting is off').toBe(UNFORMATTED)
 
     box.checked = true
     box.dispatchEvent(new Event('change'))
     expect(localStorage.getItem(FORMAT_ON_BLUR_KEY)).toBe('true')
 
     view.contentDOM.dispatchEvent(new FocusEvent('blur'))
-    await until(() => text() !== UNFORMATTED, 'the buffer to format when focus leaves')
-    expect(text()).toContain('fn fact(n) {\n')
+    await until(() => text(view) !== UNFORMATTED, 'the buffer to format when focus leaves')
+    expect(text(view)).toContain('fn fact(n) {\n')
   })
 })

@@ -1,6 +1,6 @@
 import type { EditorView } from '@codemirror/view'
 import { expect, it } from 'vitest'
-import { SHELL, until } from './harness'
+import { SHELL, stateIdle, until } from './harness'
 
 /**
  * **`hidden` HIDES.** The browser's own `[hidden] { display: none }` loses to any author rule that sets `display`,
@@ -22,7 +22,7 @@ it('leaves nothing on screen that is hidden, through every panel and a copy of e
   document.body.innerHTML = SHELL
   const view: EditorView = await (await import('../../src/main')).ready
   view.dispatch({ changes: { from: 0, to: view.state.doc.length, insert: 'fn f(x) { x + 1 }\nf(2)\n' } })
-  await until(() => document.querySelector<HTMLElement>('#results')?.dataset.state === 'idle', 'the app to settle')
+  await until(stateIdle, 'the app to settle')
   const seen = new Set(shownWhileHidden())
   // Each panel opened and closed, before and after both views fork a copy — a copy is what shows a TM view's
   // outline, and what gives the λ view an editor.

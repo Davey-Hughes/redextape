@@ -32,34 +32,12 @@ use redextape_core::tm::{
 };
 
 mod common;
-use common::box_tape_is_well_formed;
-
-/// Every width auto-fit can choose.
-///
-/// **A DELIBERATE INDEPENDENT MODEL OF `tm.rs`'s `search_width`, NOT A DUPLICATE TO BE FOLDED.** This
-/// file asserts things ABOUT the ladder; routing it through the library's own definition would make it
-/// walk whatever that definition says and stop it being able to disagree. Leave the copy.
-fn widths() -> Vec<usize> {
-    let mut w = vec![MIN_FIELD_WIDTH];
-    while *w.last().unwrap() < MAX_FIELD_WIDTH {
-        w.push(w.last().unwrap() * 2);
-    }
-    w
-}
-
-/// EVERY encoding. This file's properties must hold for each, tested at its OWN default (`MAX_FIELD_WIDTH`)
-/// width — the width `run_tm_at`/`run_tm` pin to when no explicit width is given.
-fn encodings() -> Vec<(&'static str, Box<dyn Encoding>)> {
-    // `at(MAX_FIELD_WIDTH)`, not a default: identical to `{Unary,Binary}::default()` today, and stated
-    // explicitly so a future encoding whose default differs cannot silently re-width this test.
-    EncodingKind::ALL.iter().map(|&k| (k.name(), k.at(MAX_FIELD_WIDTH))).collect()
-}
-
-/// EVERY encoding at a given width — used where the property is checked at every rung of `widths()`
-/// rather than only at the default.
-fn encodings_at(width: usize) -> Vec<(&'static str, Box<dyn Encoding>)> {
-    EncodingKind::ALL.iter().map(|&k| (k.name(), k.at(width))).collect()
-}
+// `encodings`: EVERY encoding. This file's properties must hold for each, tested at its OWN default
+// (`MAX_FIELD_WIDTH`) width — the width `run_tm_at`/`run_tm` pin to when no explicit width is given.
+//
+// `encodings_at`: EVERY encoding at a given width — used where the property is checked at every rung of
+// `widths()` rather than only at the default.
+use common::{box_tape_is_well_formed, encodings, encodings_at, widths};
 
 // ================================================================================================
 // 1. Auto-fit is answer-preserving
@@ -68,7 +46,7 @@ fn encodings_at(width: usize) -> Vec<(&'static str, Box<dyn Encoding>)> {
 /// Arithmetic whose values SPAN the representable range rather than staying tiny, so that auto-fit
 /// actually exercises its retry loop at every width — and sometimes runs off the ceiling entirely.
 ///
-/// `arb_tm_safe_expr` in `three_way_oracle.rs` is deliberately bounded so every value stays « 64; that
+/// `arb_expr_below(8)` in `three_way_oracle.rs` is deliberately bounded so every value stays « 64; that
 /// makes it a poor test of a search whose whole job is to find the right width, because every program
 /// would fit at 8 on the first attempt. Leaves here reach 70, above `MAX_FIELD_WIDTH`, so `Overflow` is
 /// a reachable outcome and must be reported identically by both entry points.

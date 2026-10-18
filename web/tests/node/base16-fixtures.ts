@@ -1,11 +1,12 @@
-import { mapScheme, type Scheme } from '../../src/base16'
+import { mapScheme, readScheme, type Scheme } from '../../src/base16'
 import { checkScheme } from '../../src/base16-check'
-import type { CustomHalf } from '../../src/custom-palette'
+import { CUSTOM_PALETTE_KEY, type CustomHalf } from '../../src/custom-palette'
 
 /**
  * base16 schemes written for these tests (Plan 7 part 6b spec §13): no published scheme, and no licence, enters the
  * repo. Each is its sixteen colours, base00 first; `currentLayout` and `legacyLayout` write one out as the YAML the
- * two published layouts use. What each one measures is asserted where it is used, not here.
+ * two published layouts use. What each one measures is asserted where it is used, not here. The other functions here
+ * are helpers these tests share.
  */
 
 /** Passes every floor and the binder rule, as it is. Dark. */
@@ -164,4 +165,14 @@ export function adjustedHalf(name: string, colours: readonly string[], variant: 
   const own = keyed(colours) as Scheme['colours']
   const check = checkScheme({ name, colours: own, variant, variantFrom: 'file', base24: false })
   return { name, colours: own, tokens: check.adjustment.tokens, adjusted: true }
+}
+
+/** The imported palette as stored, under `CUSTOM_PALETTE_KEY`, or `null` where none is. */
+export const storedPalette = () => localStorage.getItem(CUSTOM_PALETTE_KEY)
+
+/** The scheme `text` reads as, or a failure naming its errors. */
+export function readSchemeOk(text: string): Scheme {
+  const r = readScheme(text)
+  if (!r.ok) throw new Error(`did not read: ${r.errors.join('; ')}`)
+  return r.scheme
 }

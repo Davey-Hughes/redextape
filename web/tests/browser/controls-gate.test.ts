@@ -3,7 +3,7 @@ import { computeAccessibleName } from 'dom-accessibility-api'
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 import { page } from 'vitest/browser'
 import { DAY, EMBER, legacyLayout } from '../node/base16-fixtures'
-import { SHELL, until } from './harness'
+import { base16Dialog, SHELL, stateIdle, until } from './harness'
 
 /**
  * **EVERY CONTROL, AS A CLASS** — umbrella §8.1, Plan 7 part 2 spec §14. Rather than one test per control,
@@ -178,7 +178,7 @@ beforeAll(async () => {
   document.body.innerHTML = SHELL
   const view: EditorView = await (await import('../../src/main')).ready
   view.dispatch({ changes: { from: 0, to: view.state.doc.length, insert: 'let x = 40; x + 2' } })
-  await until(() => document.querySelector<HTMLElement>('#results')?.dataset.state === 'idle', 'the first compile')
+  await until(stateIdle, 'the first compile')
   // A copy, so the copies menu has rows and a view shows a copy's controls.
   document.querySelector<HTMLButtonElement>('[data-leaf="lambda-0"] button.detach')?.click()
   await until(
@@ -376,17 +376,16 @@ describe('every control in Explorer, with the copies menu in each of its states'
  * asserts that rather than trusting it.
  */
 describe('every control in Explorer, in the settings menu and the import dialog', () => {
-  const dialog = () => document.querySelector<HTMLDialogElement>('dialog.base16-dialog') as HTMLDialogElement
   const open = () => {
     document.querySelector<HTMLButtonElement>('#settings')?.click()
     document.querySelector<HTMLButtonElement>('#import-base16')?.click()
-    expect(dialog().matches(':modal'), 'the import dialog did not open').toBe(true)
+    expect(base16Dialog().matches(':modal'), 'the import dialog did not open').toBe(true)
   }
   const paste = (scheme: string) => {
-    const text = dialog().querySelector('textarea') as HTMLTextAreaElement
+    const text = base16Dialog().querySelector('textarea') as HTMLTextAreaElement
     text.value = scheme
     text.dispatchEvent(new Event('input'))
-    dialog().querySelector<HTMLButtonElement>('button.base16-check')?.click()
+    base16Dialog().querySelector<HTMLButtonElement>('button.base16-check')?.click()
   }
 
   // THE CHECKBOX THE GATE NEVER WALKED BEFORE IT TOOK INPUTS: `format on blur`, named by the label around it.
@@ -404,13 +403,13 @@ describe('every control in Explorer, in the settings menu and the import dialog'
     const walked = controls()
     expect(walked.map(nameOf)).toEqual(['base16 scheme (YAML)', 'check', 'apply', 'apply adjusted', 'cancel'])
     check('the import dialog, empty')
-    dialog().close()
+    base16Dialog().close()
   })
 
   it("after a failing scheme's check, with its details open", () => {
     open()
     paste(legacyLayout('Ember', EMBER))
-    dialog().querySelector<HTMLButtonElement>('.panel[data-panel="base16-details"] button.panel-toggle')?.click()
+    base16Dialog().querySelector<HTMLButtonElement>('.panel[data-panel="base16-details"] button.panel-toggle')?.click()
     expect(controls().map(nameOf)).toEqual([
       'base16 scheme (YAML)',
       'check',
@@ -419,19 +418,19 @@ describe('every control in Explorer, in the settings menu and the import dialog'
       'apply adjusted',
       'cancel',
     ])
-    expect(dialog().querySelector<HTMLButtonElement>('button.base16-apply-adjusted')?.disabled).toBe(false)
+    expect(base16Dialog().querySelector<HTMLButtonElement>('button.base16-apply-adjusted')?.disabled).toBe(false)
     check('the import dialog, checked')
-    dialog().close()
+    base16Dialog().close()
   })
 
   // THE DARK HALF IS APPLIED ADJUSTED, SO THE NOW LINE HAS ITS `changes` TOGGLE TOO, walked closed and open.
   it('with both halves stored, each remove named by its half, and an adjusted half’s changes', () => {
     open()
     paste(legacyLayout('Day', DAY))
-    dialog().querySelector<HTMLButtonElement>('button.base16-apply')?.click()
+    base16Dialog().querySelector<HTMLButtonElement>('button.base16-apply')?.click()
     open()
     paste(legacyLayout('Ember', EMBER))
-    dialog().querySelector<HTMLButtonElement>('button.base16-apply-adjusted')?.click()
+    base16Dialog().querySelector<HTMLButtonElement>('button.base16-apply-adjusted')?.click()
     open()
     const walked = [
       'remove the light palette, Day',
@@ -445,10 +444,12 @@ describe('every control in Explorer, in the settings menu and the import dialog'
     ]
     expect(controls().map(nameOf)).toEqual(walked)
     check('the import dialog, with both halves stored')
-    dialog().querySelector<HTMLButtonElement>('.panel[data-panel="base16-now-changes"] button.panel-toggle')?.click()
+    base16Dialog()
+      .querySelector<HTMLButtonElement>('.panel[data-panel="base16-now-changes"] button.panel-toggle')
+      ?.click()
     expect(controls().map(nameOf)).toEqual(walked)
     check('the import dialog, with an adjusted half’s changes open')
-    dialog().close()
+    base16Dialog().close()
   })
 })
 

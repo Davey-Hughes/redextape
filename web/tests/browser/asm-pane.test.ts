@@ -3,9 +3,9 @@ import { page, userEvent } from 'vitest/browser'
 import type { AsmPanels } from '../../src/asm-pane'
 import { AsmPane } from '../../src/asm-pane'
 import type { PaneEvents } from '../../src/pane-chrome'
-import type { AsmProgram, AsmWord } from '../../src/types'
-import { FACT3, frameOf } from '../node/asm-fixtures'
-import { until } from './harness'
+import type { AsmProgram } from '../../src/types'
+import { boxWord, FACT3, frameOf, listWord, valueWord } from '../node/asm-fixtures'
+import { controlState, inertEvents, panelOf, until } from './harness'
 
 /**
  * The asm view on its own (Plan 7 part 5 spec §6), built as `tm-follow-clamp.test.ts` builds a TM view: a host sized by
@@ -13,40 +13,12 @@ import { until } from './harness'
  * suite drives the same view from a real compile.
  */
 
-const CONTROLS = {
-  canRestart: true,
-  canBack: true,
-  canForward: true,
-  canToNewest: true,
-  canPlay: true,
-  playing: false,
-  stepText: 'step 3 of 55',
-  continueLabel: null,
-}
-
-const v = (word: string): AsmWord => ({ word, tag: 'Value' })
-const l = (word: string): AsmWord => ({ word, tag: 'List' })
-const b = (word: string): AsmWord => ({ word, tag: 'Box' })
-
-function events(over: Partial<PaneEvents> = {}): PaneEvents {
-  return {
-    back: vi.fn(),
-    forward: vi.fn(),
-    toNewest: vi.fn(),
-    play: vi.fn(),
-    restart: vi.fn(),
-    extend: vi.fn(),
-    speed: () => 8,
-    setSpeed: vi.fn(),
-    rebind: vi.fn(),
-    ...over,
-  }
-}
+const CONTROLS = controlState(true, 'step 3 of 55')
 
 /** A view in a host `height` pixels tall and `width` wide, attached to the page, with `program` set. */
 function mount(
   program: AsmProgram | null,
-  on: PaneEvents = events(),
+  on: PaneEvents = inertEvents(),
   height = 900,
   width = 1000,
   panels: AsmPanels = {},
@@ -67,7 +39,6 @@ const rows = (host: HTMLElement) => [...host.querySelectorAll<HTMLElement>('.asm
 const rowText = (r: HTMLElement) => (r.querySelector('.asm-cell') as HTMLElement).textContent
 /** The drawn row showing instruction `pc`, found by its text since rows are rebuilt on every draw. */
 const rowOfPc = (host: HTMLElement, pc: number) => rows(host).find((r) => rowText(r)?.startsWith(`pc${pc}`) === true)
-const panel = (host: HTMLElement, name: string) => host.querySelector(`[data-panel="${name}"]`) as HTMLElement
 const registers = (host: HTMLElement) =>
   [...host.querySelectorAll<HTMLElement>('.asm-register')].map((r) => ({
     name: r.querySelector('dt')?.textContent,
@@ -125,7 +96,7 @@ describe('the asm listing', () => {
 
   it('follows the instruction about to run, stops at a user scroll, and follows again on "follow current instruction"', async () => {
     const { host, pane } = mount(LONG)
-    const reattach = () => panel(host, 'listing').querySelector('.table-reattach') as HTMLButtonElement
+    const reattach = () => panelOf(host, 'listing').querySelector('.table-reattach') as HTMLButtonElement
     pane.render(frameOf({ pc: 300, next: 300 }), CONTROLS)
     expect(rowOfPc(host, 300)).toBeDefined()
     expect(reattach().hidden).toBe(true)
@@ -140,7 +111,7 @@ describe('the asm listing', () => {
 
   it('links the instruction a real click lands on, from the focus elsewhere, and a label row links nothing', async () => {
     const linkInstr = vi.fn()
-    const { host, pane } = mount(FACT3, events({ linkInstr }))
+    const { host, pane } = mount(FACT3, inertEvents({ linkInstr }))
     pane.render(frameOf({ pc: 0, next: 0 }), CONTROLS)
     const elsewhere = document.createElement('button')
     document.body.prepend(elsewhere)
@@ -155,7 +126,7 @@ describe('the asm listing', () => {
 
   it('links the active instruction on Enter', async () => {
     const linkInstr = vi.fn()
-    const { host } = mount(FACT3, events({ linkInstr }))
+    const { host } = mount(FACT3, inertEvents({ linkInstr }))
     listing(host).focus()
     // Row 2 is pc1, under `fact.0`.
     await userEvent.keyboard('{ArrowDown}{ArrowDown}{Enter}')
@@ -206,9 +177,9 @@ describe('the registers', () => {
     pane.render(
       frameOf({
         pc: 7,
-        rr: l('2'),
-        args: [v('18446744073709551615')],
-        locals: [l('0'), b('1')],
+        rr: listWord('2'),
+        args: [valueWord('18446744073709551615')],
+        locals: [listWord('0'), boxWord('1')],
         written: [true, true],
       }),
       CONTROLS,
@@ -224,7 +195,7 @@ describe('the registers', () => {
 
   it('mark the register the last instruction wrote, in words as well as by shape', () => {
     const { host, pane } = mount(FACT3)
-    pane.render(frameOf({ locals: [v('1'), v('2')], written: [true, true], wrote: 'r1' }), CONTROLS)
+    pane.render(frameOf({ locals: [valueWord('1'), valueWord('2')], written: [true, true], wrote: 'r1' }), CONTROLS)
     const r1 = registers(host).find((r) => r.name === 'r1')
     expect(r1).toMatchObject({ changed: true, said: 'changed by the last instruction' })
     expect(registers(host).filter((r) => r.changed)).toHaveLength(1)
@@ -232,7 +203,7 @@ describe('the registers', () => {
 
   it('dim a local the call has not written, mark it ·, and say it is left over from the caller', () => {
     const { host, pane } = mount(FACT3)
-    pane.render(frameOf({ depth: 1, locals: [v('3'), v('9')], written: [true, false] }), CONTROLS)
+    pane.render(frameOf({ depth: 1, locals: [valueWord('3'), valueWord('9')], written: [true, false] }), CONTROLS)
     const r1 = registers(host).find((r) => r.name === '· r1')
     expect(r1).toMatchObject({ unwritten: true, said: 'left over from caller' })
     expect(host.querySelector('.asm-legend')?.textContent).toBe('· left over from caller')
@@ -242,8 +213,11 @@ describe('the registers', () => {
 
   it('say how many registers are past the window', () => {
     const { host, pane } = mount(FACT3)
-    pane.render(frameOf({ locals: [v('1')], written: [true], locals_len: 70, args: [v('1')], args_len: 17 }), CONTROLS)
-    const notes = [...panel(host, 'registers').querySelectorAll('.asm-note')].map((n) => n.textContent)
+    pane.render(
+      frameOf({ locals: [valueWord('1')], written: [true], locals_len: 70, args: [valueWord('1')], args_len: 17 }),
+      CONTROLS,
+    )
+    const notes = [...panelOf(host, 'registers').querySelectorAll('.asm-note')].map((n) => n.textContent)
     expect(notes).toContain('+69 more locals')
     expect(notes).toContain('+16 more arguments')
   })
@@ -256,13 +230,13 @@ describe('the call stack', () => {
       frameOf({
         depth: 2,
         frames: [
-          { ret_pc: 14, saved: [v('2'), v('0')], saved_len: 2 },
-          { ret_pc: 20, saved: [v('3')], saved_len: 1 },
+          { ret_pc: 14, saved: [valueWord('2'), valueWord('0')], saved_len: 2 },
+          { ret_pc: 20, saved: [valueWord('3')], saved_len: 1 },
         ],
       }),
       CONTROLS,
     )
-    expect(panel(host, 'stack').querySelector('.panel-note')?.textContent).toBe('2 frames')
+    expect(panelOf(host, 'stack').querySelector('.panel-note')?.textContent).toBe('2 frames')
     expect(lines(host, '.asm-stack')).toEqual(['fact.0 → pc14 r0 2 · r1 0', 'fact.0 → pc20 r0 3'])
   })
 
@@ -272,7 +246,7 @@ describe('the call stack', () => {
     expect(lines(host, '.asm-stack').at(-1)).toBe('+11 more')
     pane.render(frameOf({ depth: 0 }), CONTROLS)
     expect(lines(host, '.asm-stack')).toEqual(['not inside a call'])
-    expect(panel(host, 'stack').querySelector('.panel-note')?.textContent).toBe('0 frames')
+    expect(panelOf(host, 'stack').querySelector('.panel-note')?.textContent).toBe('0 frames')
   })
 })
 
@@ -281,19 +255,19 @@ describe('the heap', () => {
     const { host, pane } = mount(FACT3)
     pane.render(
       frameOf({
-        locals: [l('3'), b('1')],
+        locals: [listWord('3'), boxWord('1')],
         written: [true, true],
         heap_len: 3,
         cells: [
-          { cell: 3, head: v('1'), tail: l('2') },
-          { cell: 2, head: v('2'), tail: l('0') },
+          { cell: 3, head: valueWord('1'), tail: listWord('2') },
+          { cell: 2, head: valueWord('2'), tail: listWord('0') },
         ],
         box_len: 1,
-        boxes: [{ handle: 1, content: v('7') }],
+        boxes: [{ handle: 1, content: valueWord('7') }],
       }),
       CONTROLS,
     )
-    expect(panel(host, 'heap').querySelector('.panel-note')?.textContent).toBe('3 cells · 1 box')
+    expect(panelOf(host, 'heap').querySelector('.panel-note')?.textContent).toBe('3 cells · 1 box')
     expect(lines(host, '.asm-heap')).toEqual(['#3 1 → #2 ← r0', '#2 2 → nil', '+1 older', 'box #1 7 ← r1'])
   })
 
@@ -308,17 +282,17 @@ describe('the panels', () => {
   it('share the view: the listing two shares, the registers and call stack one side by side, the heap one', () => {
     const { host, pane } = mount(FACT3)
     pane.render(frameOf(), CONTROLS)
-    const h = (name: string) => panel(host, name).getBoundingClientRect()
+    const h = (name: string) => panelOf(host, name).getBoundingClientRect()
     expect(h('listing').height / h('heap').height).toBeCloseTo(2, 0)
     expect(h('registers').top).toBe(h('stack').top)
     expect(h('registers').height).toBe(h('heap').height)
   })
 
   it('stack the registers and the call stack when the view is too narrow for both', () => {
-    const { host, pane } = mount(FACT3, events(), 900, 400)
+    const { host, pane } = mount(FACT3, inertEvents(), 900, 400)
     pane.render(frameOf(), CONTROLS)
-    expect(panel(host, 'stack').getBoundingClientRect().top).toBeGreaterThan(
-      panel(host, 'registers').getBoundingClientRect().top,
+    expect(panelOf(host, 'stack').getBoundingClientRect().top).toBeGreaterThan(
+      panelOf(host, 'registers').getBoundingClientRect().top,
     )
   })
 
@@ -329,20 +303,20 @@ describe('the panels', () => {
     host.dataset.kind = 'asm'
     host.style.height = '900px'
     document.body.append(host)
-    new AsmPane(host, events({ panel: panelEvent }), { heap: false })
-    expect(panel(host, 'heap').dataset.open).toBe('false')
-    expect(panel(host, 'listing').dataset.open).toBe('true')
-    await userEvent.click(panel(host, 'registers').querySelector('.panel-toggle') as HTMLElement)
+    new AsmPane(host, inertEvents({ panel: panelEvent }), { heap: false })
+    expect(panelOf(host, 'heap').dataset.open).toBe('false')
+    expect(panelOf(host, 'listing').dataset.open).toBe('true')
+    await userEvent.click(panelOf(host, 'registers').querySelector('.panel-toggle') as HTMLElement)
     expect(panelEvent).toHaveBeenCalledExactlyOnceWith('registers', false)
   })
 })
 
 describe('a closed machine panel', () => {
   it('shrinks to its header and lets the open call stack panel take the row', () => {
-    const { host, pane } = mount(FACT3, events(), 900, 1000, { registers: false })
+    const { host, pane } = mount(FACT3, inertEvents(), 900, 1000, { registers: false })
     pane.render(frameOf(), CONTROLS)
-    const registersPanel = panel(host, 'registers')
-    const stackPanel = panel(host, 'stack')
+    const registersPanel = panelOf(host, 'registers')
+    const stackPanel = panelOf(host, 'stack')
     // Precondition: registers closed, call stack open.
     expect(registersPanel.dataset.open).toBe('false')
     expect(stackPanel.dataset.open).toBe('true')
@@ -355,12 +329,12 @@ describe('a closed machine panel', () => {
   it('leaves the machine row no taller than the two headers when both panels are closed, and grows the listing', () => {
     const { host: openHost, pane: openPane } = mount(FACT3)
     openPane.render(frameOf(), CONTROLS)
-    const openListingHeight = panel(openHost, 'listing').getBoundingClientRect().height
+    const openListingHeight = panelOf(openHost, 'listing').getBoundingClientRect().height
 
-    const { host, pane } = mount(FACT3, events(), 900, 1000, { registers: false, stack: false })
+    const { host, pane } = mount(FACT3, inertEvents(), 900, 1000, { registers: false, stack: false })
     pane.render(frameOf(), CONTROLS)
-    const registersPanel = panel(host, 'registers')
-    const stackPanel = panel(host, 'stack')
+    const registersPanel = panelOf(host, 'registers')
+    const stackPanel = panelOf(host, 'stack')
     // Precondition: both machine panels closed.
     expect(registersPanel.dataset.open).toBe('false')
     expect(stackPanel.dataset.open).toBe('false')
@@ -374,18 +348,18 @@ describe('a closed machine panel', () => {
     const machineWidth = machine.getBoundingClientRect().width
     expect(registersPanel.getBoundingClientRect().width).toBeLessThan(machineWidth * 0.3)
     expect(stackPanel.getBoundingClientRect().width).toBeLessThan(machineWidth * 0.3)
-    expect(panel(host, 'listing').getBoundingClientRect().height).toBeGreaterThan(openListingHeight)
+    expect(panelOf(host, 'listing').getBoundingClientRect().height).toBeGreaterThan(openListingHeight)
   })
 
   it('restores the side-by-side split on re-opening', async () => {
-    const { host, pane } = mount(FACT3, events(), 900, 1000, { registers: false })
+    const { host, pane } = mount(FACT3, inertEvents(), 900, 1000, { registers: false })
     pane.render(frameOf(), CONTROLS)
-    const registersPanel = panel(host, 'registers')
+    const registersPanel = panelOf(host, 'registers')
     // Precondition: registers starts closed.
     expect(registersPanel.dataset.open).toBe('false')
     await userEvent.click(registersPanel.querySelector('.panel-toggle') as HTMLElement)
     expect(registersPanel.dataset.open).toBe('true')
-    const stackPanel = panel(host, 'stack')
+    const stackPanel = panelOf(host, 'stack')
     expect(registersPanel.getBoundingClientRect().top).toBe(stackPanel.getBoundingClientRect().top)
     expect(registersPanel.getBoundingClientRect().height).toBe(stackPanel.getBoundingClientRect().height)
   })
@@ -394,8 +368,11 @@ describe('a closed machine panel', () => {
 describe('at the width of a real view', () => {
   it('lays out at 1280 by 800 without a horizontal scroll', async () => {
     await page.viewport(1280, 800)
-    const { host, pane } = mount(FACT3, events(), 780, 620)
-    pane.render(frameOf({ depth: 1, locals: [v('1'), v('2')], written: [true, false], pc: 4, next: 4 }), CONTROLS)
+    const { host, pane } = mount(FACT3, inertEvents(), 780, 620)
+    pane.render(
+      frameOf({ depth: 1, locals: [valueWord('1'), valueWord('2')], written: [true, false], pc: 4, next: 4 }),
+      CONTROLS,
+    )
     expect(host.scrollWidth).toBeLessThanOrEqual(host.clientWidth)
   })
 })
@@ -404,7 +381,7 @@ describe('edit a copy', () => {
   const item = (host: HTMLElement) => host.querySelector<HTMLButtonElement>('button.detach')
 
   it('is offered for the program, disabled with a reason where its text is withheld, and absent with nothing to copy', () => {
-    const { host, pane } = mount(FACT3, events({ detachAsm: vi.fn() }))
+    const { host, pane } = mount(FACT3, inertEvents({ detachAsm: vi.fn() }))
     pane.setForkAvailable('result Nat\n\n    halt\n', 21)
     expect(item(host)?.disabled).toBe(false)
     // A PROGRAM WHOSE TEXT WAS WITHHELD HAS NO TEXT TO POST, AND THE REFUSAL SAYS HOW LARGE IT IS.
@@ -416,7 +393,7 @@ describe('edit a copy', () => {
   })
 
   it('is withdrawn from a view on a copy', () => {
-    const { host, pane } = mount(FACT3, events({ detachAsm: vi.fn() }))
+    const { host, pane } = mount(FACT3, inertEvents({ detachAsm: vi.fn() }))
     pane.setForkAvailable('result Nat\n\n    halt\n', 21)
     pane.setDetached(true)
     expect(item(host)).toBeNull()

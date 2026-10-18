@@ -6,7 +6,7 @@ import { LAYOUT_STORAGE_KEY } from '../../src/layout'
 import { PROGRAM_STORAGE_KEY, serializeProgram } from '../../src/program-store'
 import { encodeLink } from '../../src/share-link'
 import { defaultWorkspace, PRESETS, serializeWorkspace } from '../../src/workspace'
-import { SHELL, until } from './harness'
+import { noticeText, picker, readout, SHELL, stateIdle, undoButton, until } from './harness'
 
 /**
  * **A LINK OPENED AT START-UP, THE PROGRAM ALONE** — Plan 7 part 6a spec §5.3 and §7. The link's encoding is not one
@@ -25,11 +25,6 @@ import { SHELL, until } from './harness'
  */
 
 const LINKED = 'let y = 10; y + 5'
-const picker = () => document.querySelector<HTMLSelectElement>('#encoding') as HTMLSelectElement
-const noticeText = () => document.querySelector('#notice .notice-text')?.textContent ?? ''
-const undoButton = () => document.querySelector<HTMLButtonElement>('#notice button.notice-action')
-const idle = () => document.querySelector<HTMLElement>('#results')?.dataset.state === 'idle'
-const readout = () => [...document.querySelectorAll('#results .segment, #results .row')].length
 
 let view: EditorView
 
@@ -43,7 +38,7 @@ beforeAll(async () => {
   history.replaceState(null, '', `${location.pathname}${location.search}${fragment}`)
   document.body.innerHTML = SHELL
   view = await (await import('../../src/main')).ready
-  await until(() => idle() && readout() > 0, 'the first compile')
+  await until(() => stateIdle() && readout() > 0, 'the first compile')
 })
 
 describe('a link at start-up whose encoding and workspace cannot be taken', () => {

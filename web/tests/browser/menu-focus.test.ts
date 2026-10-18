@@ -1,7 +1,7 @@
 import type { EditorView } from '@codemirror/view'
 import { beforeAll, beforeEach, describe, expect, it } from 'vitest'
 import { page } from 'vitest/browser'
-import { resetToFourViews, SHELL, until } from './harness'
+import { frames, resetToFourViews, SHELL, stateIdle, until } from './harness'
 
 /**
  * **A MENU ITEM NEVER LEAVES THE FOCUS ON `<body>`** — spec §11's categorical rule, accessibility item 1,
@@ -42,10 +42,6 @@ const where = (): string => {
   return `${a.tagName.toLowerCase()}${a.id === '' ? '' : `#${a.id}`}${cls}`
 }
 
-/** Two frames — one for the style recalc that hides the menu, one for the blur that follows it. */
-const settled = (): Promise<void> =>
-  new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(() => resolve())))
-
 /**
  * Drive one menu the way a user does: open it, check the open put the focus inside it, activate an item.
  *
@@ -71,7 +67,7 @@ async function throughMenu(
   }
   expect(menu.contains(document.activeElement), `${what}: opening the menu did not put focus in it`).toBe(true)
   item.click()
-  await settled()
+  await frames()
 }
 
 const label = (b: HTMLButtonElement): string => (b.textContent ?? '').replace(/\s+/g, ' ').trim()
@@ -84,7 +80,7 @@ beforeAll(async () => {
   await page.viewport(1280, 896)
   document.body.innerHTML = SHELL
   view = await (await import('../../src/main')).ready
-  await until(() => document.querySelector<HTMLElement>('#results')?.dataset.state === 'idle', 'the first compile')
+  await until(stateIdle, 'the first compile')
 })
 
 // Back to the four views before each gesture, since several of these change the tree.

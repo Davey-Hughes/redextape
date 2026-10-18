@@ -28,6 +28,7 @@ import {
 } from '../../src/layout'
 import type { LeafId, PaneKind } from '../../src/panes'
 import { defaultFocus, defaultWorkspace, parseWorkspace, serializeWorkspace } from '../../src/workspace'
+import { seededRandom } from './seeded-random'
 
 /**
  * WHICH VIEWS ARE ON SCREEN AND WHAT EACH COMBINATION REMEMBERS, AS VALUES — the view layouts spec §4.
@@ -229,15 +230,6 @@ describe('enter, over generated sequences of switches and edits', () => {
   type Gesture = (typeof GESTURES)[number]
   const VIEW_KINDS = KIND_ORDER.filter((k) => k !== 'source')
 
-  /** A seeded generator, so a failure names a sequence that stays the same. */
-  const random = (seed: number): (() => number) => {
-    let s = seed
-    return () => {
-      s = (s * 1103515245 + 12345) % 2147483648
-      return s / 2147483648
-    }
-  }
-
   /**
    * The workspace a switch to `target` enters and how many live views it holds, or `null` where there is no switch
    * to make: the combination on screen, or none.
@@ -369,7 +361,7 @@ describe('enter, over generated sequences of switches and edits', () => {
     const done = ran.get(name)
     if (done !== undefined) return done
     const reached = nothing()
-    const next = random(seed)
+    const next = seededRandom(seed)
     const pick = <T>(xs: readonly T[]): T => xs[Math.floor(next() * xs.length)] as T
     let minted = STARTS[start].minted
     const mint = (): LeafId => `pane-${++minted}`

@@ -15,6 +15,9 @@ use redextape_core::tm::asm::{Instr, Program, Reg, print_instr};
 use redextape_core::trace::{AsmCursor, AsmStatus, WordTag};
 use redextape_core::viewmodel::{AsmProgram, AsmState, AsmWindow, AsmWord, LambdaState, LinkIndex, TmProgram, TmState};
 
+mod common;
+use common::one_rule_machine;
+
 /// Counts bytes requested through the global allocator, so a test can measure what a call actually
 /// allocates instead of timing it. Scoped to this one integration test binary: each file under
 /// `tests/` is its own crate and its own process image, and cargo-nextest — this repository's
@@ -150,19 +153,11 @@ fn the_window_costs_the_same_regardless_of_how_large_the_tape_has_grown() {
     // simplest way to materialize a tape of a controlled, large size without going through the
     // compiler pipeline. Mirrors `sim`'s own `spin` test fixture, which this file cannot import:
     // integration tests are separate crates and cannot see one another's `#[cfg(test)]` items.
-    use redextape_core::tm::{Machine, Move, Rule, State, TmCaps};
+    use redextape_core::tm::{Machine, Move, Rule, TmCaps};
     use redextape_core::trace::TmCursor;
 
     fn spin_right() -> Machine {
-        Machine {
-            tapes: 1,
-            start: 0,
-            states: vec![State {
-                name: "go".into(),
-                accept: false,
-                rules: vec![Rule { read: vec![None], write: vec![None], moves: vec![Move::R], next: 0 }],
-            }],
-        }
+        one_rule_machine("go", Rule { read: vec![None], write: vec![None], moves: vec![Move::R], next: 0 })
     }
 
     let caps = TmCaps { steps: u64::MAX, cells: u64::MAX };
@@ -455,8 +450,7 @@ fn lambda_fixture(src: &str) -> (redextape_core::lambda::LambdaTerm, redextape_c
 }
 
 /// Mirrors `trace_equivalence.rs`'s `machine_and_init` deliberately, rather than inventing a second
-/// lowering path: integration tests are separate crates and cannot import one another's helpers, so
-/// this four-line body is copied, not reinvented.
+/// lowering path.
 fn tm_fixture(src: &str) -> (redextape_core::tm::Machine, Vec<Vec<redextape_core::tm::Symbol>>) {
     let (_, _, _, m, init) = tm_fixture_with_map(src);
     (m, init)

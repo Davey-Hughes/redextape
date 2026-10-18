@@ -4,7 +4,7 @@ import { LambdaPane } from '../../src/lambda-pane'
 import { LambdaTrees } from '../../src/lambda-trees'
 import type { LambdaTreeWire } from '../../src/protocol'
 import { SessionClient } from '../../src/session-client'
-import { SHELL, until } from './harness'
+import { lambdaStepText, SHELL, stateIdle, until } from './harness'
 import { lambdaSettled } from './lambda-text'
 
 /**
@@ -37,7 +37,6 @@ const SAMPLES = 300
 
 let view: EditorView
 
-const stepText = () => document.querySelector('[data-leaf="lambda-0"] .step')?.textContent ?? ''
 const back = () =>
   [...document.querySelectorAll<HTMLButtonElement>('[data-leaf="lambda-0"] .controls button')]
     .find((b) => b.textContent === '◀')
@@ -58,8 +57,11 @@ describe('the cost of the λ tree', () => {
   it('times the round trip from a step to its drawn tree', async () => {
     for (const [name, src] of PROGRAMS) {
       view.dispatch({ changes: { from: 0, to: view.state.doc.length, insert: src } })
-      await until(() => document.querySelector<HTMLElement>('#results')?.dataset.state === 'idle', `${name} to compile`)
-      await until(() => /ended|history is full/.test(stepText()) || !stepText().endsWith('…'), `${name} to record`)
+      await until(stateIdle, `${name} to compile`)
+      await until(
+        () => /ended|history is full/.test(lambdaStepText()) || !lambdaStepText().endsWith('…'),
+        `${name} to record`,
+      )
       // FROM THE FRONTIER, BY `⏭`: a run opens on step 0 (`History`), where `◀` has nowhere to go.
       document.querySelector<HTMLButtonElement>('[data-leaf="lambda-0"] .controls button.to-newest')?.click()
       await lambdaSettled()

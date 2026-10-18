@@ -64,7 +64,7 @@ use proptest::prelude::*;
 /// records a rate or a fire count against them. `binary_tm_agrees_while_unary_tm_is_never_wrong_on_
 /// random_programs` (in `redextape-native`) documents a measured 60.4% unary fire rate that is a
 /// property of THIS shape combined with its leaf strategy. The stronger stake is `redextape-core`'s
-/// `three_way_oracle.rs` (`arb_tm_safe_expr`'s doc): its whole `MAX_FIELD_WIDTH`-safety argument — every
+/// `three_way_oracle.rs` (the comment on its `arb_expr_below(8)`): its whole `MAX_FIELD_WIDTH`-safety argument — every
 /// generated value staying under the TM's fixed-width unary fields — rests on `depth=3` (this
 /// function's `prop_recursive` first argument, not `desired_size`) bounding the worst case, measured at
 /// a max of 27 over 2M samples. Raising the depth here silently raises that worst case too.
@@ -79,6 +79,12 @@ pub fn arb_expr_over(leaf: impl Strategy<Value = String> + 'static) -> impl Stra
             (inner.clone(), inner.clone(), inner).prop_map(|(c, a, b)| format!("if {c} > 0 {{ {a} }} else {{ {b} }}")),
         ]
     })
+}
+
+/// `arb_expr_over` with integer leaves drawn from `0..upper`.
+#[cfg(feature = "proptest")]
+pub fn arb_expr_below(upper: u64) -> impl Strategy<Value = String> {
+    arb_expr_over((0u64..upper).prop_map(|n| n.to_string()))
 }
 
 /// A uniquely-named directory under the system temp directory, removed on [`Drop`] — but only when the

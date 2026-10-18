@@ -2,7 +2,7 @@ import { beforeAll, describe, expect, it } from 'vitest'
 import { page } from 'vitest/browser'
 import { LAYOUT_STORAGE_KEY, type LayoutNode, serializeLayout, splitLeaf } from '../../src/layout'
 import { parseWorkspace } from '../../src/workspace'
-import { SHELL } from './harness'
+import { lambdaLeaves, leafIds, SHELL, splitRow } from './harness'
 
 /**
  * THE RESTORE-FROM-STORAGE PATH, THROUGH `main()` — the branch's only exercise of it.
@@ -77,52 +77,9 @@ const PRE_ASM_DEFAULT: LayoutNode = {
  */
 const STORED = serializeLayout(splitLeaf(PRE_ASM_DEFAULT, 'lambda-0', 'row', 'lambda-1', 'lambda'))
 
-const leafIds = () => [...document.querySelectorAll('[data-leaf]')].map((e) => (e as HTMLElement).dataset.leaf ?? '')
-/**
- * The ids of every λ pane — by `data-kind`, NOT by an `id` prefix. `nextLeafId` now mints `pane-${n}`
- * regardless of which leg the split came from (`main.ts`'s own doc on `nextLeafId`: a pane can change
- * which leg it renders, so an id like `lambda-3` would describe something the pane is not), so
- * `dataset.kind` is the only truthful statement of what a leaf renders left to select on. This matters
- * MORE in this file than in its siblings: `STORED` below deliberately seeds a leaf spelled the OLD way
- * (`lambda-1`), so an id-prefix filter would still find it by luck while silently missing a freshly
- * split leaf spelled the new way (`pane-N`) — the exact mismatch this file exists to restore correctly.
- */
-const lambdaLeaves = () =>
-  [...document.querySelectorAll<HTMLElement>('[data-kind="lambda"]')].map((e) => e.dataset.leaf ?? '')
-/**
- * Split `leaf` into a second pane of the same kind on the same session — `layout-app.test.ts`'s
- * `splitRow`, verbatim, and its doc carries the argument: the control opens a picker now, whose first
- * entry is the pane's own pair labelled "another view of this", so the gesture that used to be one click is two and
- * still means what it meant. The label is checked rather than assumed, because a silent no-op here would
- * leave the test below asserting a split that never happened.
- */
-const splitRow = (leaf: string): void => splitVia(leaf, 'row', 'same')
-
 // SEEDED BEFORE THE MOUNT, not in a `beforeEach` — `main()` reads the key exactly once, synchronously,
 // while resolving `let tree`, so anything written after that read is never seen. Same reason every
 // sibling file gives for clearing it here rather than there.
-/**
- * Split `leaf` through its `⋯` menu, as a user does: `pick` is `'same'` (another view of this), `'source'`,
- * or a `bindingKey(leg, session)`.
- */
-function splitVia(leaf: string, dir: 'row' | 'column', pick: string): void {
-  const more = document.querySelector<HTMLButtonElement>(`[data-leaf="${leaf}"] button.view-more`)
-  if (more === null) throw new Error(`no view menu on [data-leaf="${leaf}"]`)
-  more.click()
-  const menu = document.getElementById(more.getAttribute('aria-controls') ?? '')
-  menu?.querySelector<HTMLButtonElement>(`button.view-split[data-dir="${dir}"]`)?.click()
-  const selector =
-    pick === 'same' ? 'button[data-same]' : pick === 'source' ? 'button[data-source]' : `button[data-binding="${pick}"]`
-  const item = menu?.querySelector<HTMLButtonElement>(`.view-menu-pairs ${selector}`)
-  if (item == null) {
-    const offered = [...(menu?.querySelectorAll<HTMLButtonElement>('.view-menu-pairs button') ?? [])].map(
-      (b) => b.textContent,
-    )
-    throw new Error(`[data-leaf="${leaf}"] offers no ${pick} to split into — offered: ${offered.join(' | ')}`)
-  }
-  item.click()
-}
-
 beforeAll(async () => {
   localStorage.setItem(LAYOUT_STORAGE_KEY, STORED)
   // WIDE ENOUGH TO SPLIT A VIEW THAT IS ITSELF HALF OF A SPLIT: the app refuses a split that leaves a view under

@@ -5,6 +5,7 @@ import { History } from '../../src/history'
 import { FRAME_BYTES, HISTORY_BYTES, lambdaFrameBytes, tmFrameBytes } from '../../src/protocol'
 import { MAX_WARM_BUFFERS } from '../../src/scratch'
 import type { LambdaState, TmProgram, TmState } from '../../src/types'
+import { heapNow, requireHeapHarness } from './probe-fixture'
 
 /**
  * 5d-ii-d — THE WORKER-AFFORDABILITY PROBE. Design §4.6.
@@ -118,27 +119,6 @@ import type { LambdaState, TmProgram, TmState } from '../../src/types'
  * constant — that is what Task 8 did, and it is the only thing that keeps the cap a measurement.
  */
 const BUDGET_BYTES = 512 * 1024 * 1024
-
-/** See `frame-cost.test.ts`'s type of the same name for why this is local and not in `types.ts`. */
-type MemoryPerformance = Performance & { memory?: { usedJSHeapSize: number } }
-type GlobalWithGc = typeof globalThis & { gc?: () => void }
-
-const heapNow = (): number => (performance as MemoryPerformance).memory?.usedJSHeapSize ?? 0
-
-/** `session-memory.test.ts`'s guard, verbatim in intent: a probe that silently reads zeros is worse than no probe. */
-function requireHeapHarness(): () => void {
-  if (!(performance as MemoryPerformance).memory) {
-    throw new Error('BLOCKED: performance.memory is unavailable in this browser — cannot measure heap size')
-  }
-  if (heapNow() === 0) {
-    throw new Error('BLOCKED: performance.memory.usedJSHeapSize reads 0 — cannot measure heap size')
-  }
-  const collect = (globalThis as GlobalWithGc).gc
-  if (typeof collect !== 'function') {
-    throw new Error('BLOCKED: globalThis.gc is unavailable — launch Chromium with --js-flags=--expose-gc')
-  }
-  return collect
-}
 
 /** A term that reduces for a long time — the ring is what is being priced, so it has to be spent. */
 const TERM = '(\\f. (\\x. f (x x)) (\\x. f (x x))) (\\g. \\n. g n)'

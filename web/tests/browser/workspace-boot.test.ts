@@ -1,7 +1,7 @@
 import { beforeAll, describe, expect, it } from 'vitest'
 import { LAYOUT_STORAGE_KEY } from '../../src/layout'
 import { PRESETS, serializeWorkspace } from '../../src/workspace'
-import { fourViewWorkspace, SHELL, until } from './harness'
+import { fourViewWorkspace, SHELL, stateIdle, until } from './harness'
 
 /**
  * **A WORKSPACE THAT IS NOT EXPLORER'S, AT FIRST PAINT.**
@@ -21,7 +21,7 @@ beforeAll(async () => {
   localStorage.setItem(LAYOUT_STORAGE_KEY, serializeWorkspace({ ...fourViewWorkspace(), switches: PRESETS.debugger }))
   document.body.innerHTML = SHELL
   await (await import('../../src/main')).ready
-  await until(() => document.querySelector<HTMLElement>('#results')?.dataset.state === 'idle', 'the first compile')
+  await until(stateIdle, 'the first compile')
 })
 
 describe('a workspace stored in Debugger', () => {

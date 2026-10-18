@@ -1,14 +1,8 @@
 import type { EditorView } from '@codemirror/view'
 import { beforeAll, describe, expect, it } from 'vitest'
-import { SHELL, until } from './harness'
+import { idle, noticeText, SHELL, until } from './harness'
 
 let view: EditorView
-
-const idle = () =>
-  document.querySelector<HTMLElement>('#results')?.dataset.state === 'idle' &&
-  (document.querySelector('#results')?.textContent ?? '') !== ''
-
-const noticeText = () => document.querySelector('#notice .notice-text')?.textContent ?? ''
 
 /** The word the caret is sitting on, which is what a jump is asserted against. */
 const selected = () => {

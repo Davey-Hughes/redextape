@@ -1,9 +1,10 @@
-import { EditorView } from '@codemirror/view'
+import type { EditorView } from '@codemirror/view'
 import { afterEach, beforeAll, describe, expect, it } from 'vitest'
 import { page, userEvent } from 'vitest/browser'
-import { BUFFERS_STORAGE_KEY, parseBuffers } from '../../src/buffers-store'
 import { bindingKey } from '../../src/view-header'
-import { SHELL, until } from './harness'
+import { stored } from './copy-text-fixture'
+import { editorOf } from './editor-view-fixture'
+import { menuOf, moreOf, paneByLeaf, pick, SHELL, stateIdle, until, viewTitleOf } from './harness'
 
 /**
  * A TM or asm view showing a copy has the copy's editor, or a way to it: one editor per copy, in one view (spec
@@ -24,44 +25,19 @@ const SAMPLE = 'let x = 40; x + 2'
 
 let view: EditorView
 
-const host = (leaf: string) => document.querySelector<HTMLElement>(`.pane[data-leaf="${leaf}"]`) as HTMLElement
-const idle = () => document.querySelector<HTMLElement>('#results')?.dataset.state === 'idle'
-const editorOf = (pane: HTMLElement): EditorView | null => {
-  const el = pane.querySelector<HTMLElement>('.term-editor')
-  return el === null ? null : EditorView.findFromDOM(el)
-}
-const titleOf = (pane: HTMLElement) => pane.querySelector<HTMLButtonElement>('button.view-title') as HTMLButtonElement
 /** The binding a view shows, as its title records it — `bindingKey(leg, session)`; empty for the source view. */
 const shows = (pane: HTMLElement) => pane.querySelector<HTMLButtonElement>('button.view-title')?.dataset.binding ?? ''
 /** Every view on the page showing `key`. */
 const viewsOf = (key: string) => [...document.querySelectorAll<HTMLElement>('.pane')].filter((p) => shows(p) === key)
-/** A copy's text of record, as stored. */
-const stored = (id: string): string | null =>
-  parseBuffers(localStorage.getItem(BUFFERS_STORAGE_KEY))?.buffers.find((b) => b.id === id)?.text ?? null
-const menuOf = (button: HTMLButtonElement): HTMLElement => {
-  const menu = document.getElementById(button.getAttribute('aria-controls') ?? '')
-  if (menu === null) throw new Error('the button controls no menu')
-  return menu
-}
-const moreOf = (pane: HTMLElement) => pane.querySelector<HTMLButtonElement>('button.view-more') as HTMLButtonElement
 /** `pane`'s `⋯` item of class `cls`, whether or not the menu is open; `null` when the menu does not offer it. */
 const menuItem = (pane: HTMLElement, cls: string) =>
   moreOf(pane) === null ? null : menuOf(moreOf(pane)).querySelector<HTMLButtonElement>(`button.${cls}`)
 
-/** Open `pane`'s `⋯` menu with the pointer and pick `cls`'s item with it, as a user does. */
-async function pick(pane: HTMLElement, cls: string): Promise<void> {
-  await userEvent.click(moreOf(pane))
-  await until(() => menuOf(moreOf(pane)).matches(':popover-open'), 'the view menu to open')
-  const item = menuOf(moreOf(pane)).querySelector<HTMLButtonElement>(`button.${cls}`)
-  if (item === null) throw new Error(`the menu offers no ${cls}`)
-  await userEvent.click(item)
-}
-
 /** Choose `key` in `pane`'s title menu with the pointer, as a user does. */
 async function choose(pane: HTMLElement, key: string): Promise<void> {
-  await userEvent.click(titleOf(pane))
-  await until(() => menuOf(titleOf(pane)).matches(':popover-open'), 'the title menu to open')
-  const item = menuOf(titleOf(pane)).querySelector<HTMLButtonElement>(`button[data-binding="${key}"]`)
+  await userEvent.click(viewTitleOf(pane))
+  await until(() => menuOf(viewTitleOf(pane)).matches(':popover-open'), 'the title menu to open')
+  const item = menuOf(viewTitleOf(pane)).querySelector<HTMLButtonElement>(`button[data-binding="${key}"]`)
   if (item === null) throw new Error(`the title menu offers no ${key}`)
   await userEvent.click(item)
   await until(() => shows(pane) === key, `the view to show ${key}`)
@@ -107,7 +83,7 @@ async function close(pane: HTMLElement): Promise<void> {
  * mounted nowhere — asserted, since that is the state every test below starts from. Returns the copy's key.
  */
 async function orphanCopy(leaf: string, leg: 'asm' | 'tm'): Promise<string> {
-  const pane = host(leaf)
+  const pane = paneByLeaf(leaf)
   if (shows(pane) !== bindingKey(leg, 'source')) await choose(pane, bindingKey(leg, 'source'))
   await pick(pane, 'detach')
   await until(() => editorOf(pane) !== null, 'the copy’s editor')
@@ -145,16 +121,16 @@ beforeAll(async () => {
   document.body.innerHTML = SHELL
   view = await (await import('../../src/main')).ready
   view.dispatch({ changes: { from: 0, to: view.state.doc.length, insert: SAMPLE } })
-  await until(() => !idle(), 'the compile to start')
-  await until(idle, 'the compile to finish')
-  await until(() => host('asm-0').querySelectorAll('.asm-row').length === 5, 'the program’s listing')
-  await until(() => host('tm-0').querySelectorAll('.state-row').length > 3, 'the program’s rules')
+  await until(() => !stateIdle(), 'the compile to start')
+  await until(stateIdle, 'the compile to finish')
+  await until(() => paneByLeaf('asm-0').querySelectorAll('.asm-row').length === 5, 'the program’s listing')
+  await until(() => paneByLeaf('tm-0').querySelectorAll('.state-row').length > 3, 'the program’s rules')
 })
 
 describe('a TM or asm view that comes to show a copy whose editor is mounted nowhere', () => {
   it('mounts one when a view on another leg is picked onto an asm copy', async () => {
     const key = await orphanCopy('asm-0', 'asm')
-    const tm = host('tm-0')
+    const tm = paneByLeaf('tm-0')
     await choose(tm, key)
     expect(tm.dataset.kind).toBe('asm')
     await until(() => editorOf(tm) !== null, 'the copy’s editor in the view that changed leg')
@@ -164,7 +140,7 @@ describe('a TM or asm view that comes to show a copy whose editor is mounted now
 
   it('mounts one when a view on another leg is picked onto a TM copy', async () => {
     const key = await orphanCopy('tm-0', 'tm')
-    const asm = host('asm-0')
+    const asm = paneByLeaf('asm-0')
     await choose(asm, key)
     expect(asm.dataset.kind).toBe('tm')
     await until(() => editorOf(asm) !== null, 'the copy’s editor in the view that changed leg')
@@ -174,7 +150,7 @@ describe('a TM or asm view that comes to show a copy whose editor is mounted now
 
   it('mounts one in a view split onto the copy', async () => {
     const key = await orphanCopy('asm-0', 'asm')
-    const other = await split(host('asm-0'), key)
+    const other = await split(paneByLeaf('asm-0'), key)
     await until(() => editorOf(other) !== null, 'the copy’s editor in the split')
     expect(editorOf(other)?.state.doc.toString()).toBe(stored(sessionOf(key)))
     await close(other)
@@ -189,7 +165,7 @@ describe('a TM or asm view that comes to show a copy whose editor is mounted now
   })
 
   it('mounts one in the view still showing the copy when the one holding it closes', async () => {
-    const asm = host('asm-0')
+    const asm = paneByLeaf('asm-0')
     if (shows(asm) !== bindingKey('asm', 'source')) await choose(asm, bindingKey('asm', 'source'))
     // THE HOLDER IS A VIEW OF ITS OWN, so closing it leaves the four views as they were.
     const holder = await split(asm, bindingKey('asm', 'source'))
@@ -207,7 +183,7 @@ describe('a TM or asm view that comes to show a copy whose editor is mounted now
 
   it('mounts one in the view still showing the copy when the one holding it moves to the program', async () => {
     const key = await orphanCopy('tm-0', 'tm')
-    const tm = host('tm-0')
+    const tm = paneByLeaf('tm-0')
     await choose(tm, key)
     await until(() => editorOf(tm) !== null, 'the copy’s editor')
     const survivor = await split(tm, key)
@@ -227,7 +203,7 @@ describe('a view an undone delete moves back onto its copy', () => {
    * amendment 22), and the copy keeps its last run while its text of record is what was typed.
    */
   it('mounts the copy’s editor there, whether or not the copy builds', async () => {
-    const asm = host('asm-0')
+    const asm = paneByLeaf('asm-0')
     if (shows(asm) !== bindingKey('asm', 'source')) await choose(asm, bindingKey('asm', 'source'))
     await pick(asm, 'detach')
     await until(() => editorOf(asm) !== null, 'the copy’s editor')
@@ -257,7 +233,7 @@ describe('a view an undone delete moves back onto its copy', () => {
 
 describe('a TM or asm view showing a copy whose editor another view holds', () => {
   it('offers move the editor here, which moves that editor, on asm', async () => {
-    const asm = host('asm-0')
+    const asm = paneByLeaf('asm-0')
     if (shows(asm) !== bindingKey('asm', 'source')) await choose(asm, bindingKey('asm', 'source'))
     await pick(asm, 'detach')
     await until(() => editorOf(asm) !== null, 'the copy’s editor')
@@ -291,7 +267,7 @@ describe('a TM or asm view showing a copy whose editor another view holds', () =
 
   it('offers move the editor here on TM, and the view that gives it up keeps its copy’s value', async () => {
     const key = await orphanCopy('tm-0', 'tm')
-    const tm = host('tm-0')
+    const tm = paneByLeaf('tm-0')
     await choose(tm, key)
     await until(() => editorOf(tm) !== null, 'the copy’s editor')
     const valueLine = (pane: HTMLElement) => pane.querySelector('.tm-value')?.textContent ?? ''

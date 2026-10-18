@@ -2,7 +2,22 @@ import type { EditorView } from '@codemirror/view'
 import { beforeAll, describe, expect, it } from 'vitest'
 import { page, userEvent } from 'vitest/browser'
 import { EXAMPLES } from '../../src/examples'
-import { resetToFourViews, SHELL, until } from './harness'
+import {
+  buttonOf,
+  centreOf,
+  frame,
+  innerOf,
+  isShown,
+  leafEl,
+  linesOf,
+  menuOfId,
+  presetOf,
+  rect,
+  resetToFourViews,
+  SHELL,
+  stateIdle,
+  until,
+} from './harness'
 
 /**
  * **THE TM VIEW ON A PHONE'S SCREEN** — Explorer at 320px and 390px, on `sum_to(5)`, the example a first visit opens,
@@ -31,14 +46,9 @@ import { resetToFourViews, SHELL, until } from './harness'
  */
 
 let view: EditorView
-const idle = () => document.querySelector<HTMLElement>('#results')?.dataset.state === 'idle'
-const buttonOf = (id: string) => document.querySelector<HTMLButtonElement>(`#${id}`) as HTMLButtonElement
-const menuOf = (id: string) => document.getElementById(buttonOf(id).getAttribute('aria-controls') ?? '') as HTMLElement
-const shown = (el: Element) => el.getClientRects().length > 0
-const paneOf = (leaf: string) => document.querySelector<HTMLElement>(`[data-leaf="${leaf}"]`) as HTMLElement
-const tm = () => paneOf('tm-0')
+const tm = () => leafEl('tm-0')
 const panelOf = (leaf: string, name: string) =>
-  paneOf(leaf).querySelector<HTMLElement>(`.panel[data-panel="${name}"]`) as HTMLElement
+  leafEl(leaf).querySelector<HTMLElement>(`.panel[data-panel="${name}"]`) as HTMLElement
 const diagram = () => panelOf('tm-0', 'diagram')
 const level = () => diagram().querySelector<HTMLElement>('.program-level') as HTMLElement
 const programScroll = () => diagram().querySelector<HTMLElement>('.program-scroll') as HTMLElement
@@ -52,7 +62,6 @@ const choice = (value: string) =>
 /** The TM view's own step control labelled `label` (`step-controls.ts`), in its strip. */
 const control = (label: string) =>
   tm().querySelector<HTMLButtonElement>(`.view-steps .controls button[aria-label="${label}"]`) as HTMLButtonElement
-const frame = () => new Promise<void>((r) => requestAnimationFrame(() => r()))
 /** Every TM view on the page, in its order. */
 const tmViews = () => [...document.querySelectorAll<HTMLElement>('.pane[data-kind="tm"]')]
 
@@ -102,12 +111,6 @@ function nameOf(el: Element): string {
   return `${el.tagName.toLowerCase()}${cls === undefined ? '' : `.${cls}`}${value}${text === '' ? '' : ` “${text}”`}`
 }
 
-/** The pane's padding box across: where its content may lie without the pane scrolling sideways. */
-const innerOf = (pane: HTMLElement): { readonly left: number; readonly right: number } => {
-  const left = pane.getBoundingClientRect().left + pane.clientLeft
-  return { left, right: left + pane.clientWidth }
-}
-
 /**
  * **EVERY BOX OF A VIEW, AND WHERE EACH STANDS**: `held`, each box drawn outside every box that clips or scrolls,
  * which must lie inside the view, and `strays`, each box inside a clipping box that does not scroll by design
@@ -117,7 +120,7 @@ function boxesOf(pane: HTMLElement): { held: Element[]; strays: Element[] } {
   const held: Element[] = []
   const strays: Element[] = []
   for (const el of pane.querySelectorAll('*')) {
-    if (!shown(el)) continue
+    if (!isShown(el)) continue
     const clip = clipOf(el, pane)
     if (clip === null) held.push(el)
     else if (!clip.matches(SCROLLS)) strays.push(el)
@@ -133,7 +136,7 @@ function headerBoxes(panel: HTMLElement): HTMLElement[] {
     ...header.querySelectorAll<HTMLElement>('.panel-toggle, .panel-name, .panel-actions, .panel-actions *'),
   ]
     .filter((el) => el instanceof HTMLElement)
-    .filter(shown)
+    .filter(isShown)
 }
 
 /**
@@ -148,16 +151,6 @@ function hidesNothing(leaf: string, name: string): void {
   }
 }
 
-/** How many lines a box's text is set on: one per distinct top among its text's line boxes. */
-const linesOf = (el: Element): number => {
-  const range = document.createRange()
-  range.selectNodeContents(el)
-  return new Set([...range.getClientRects()].map((r) => Math.round(r.top))).size
-}
-const centreOf = (el: Element): number => {
-  const box = el.getBoundingClientRect()
-  return (box.top + box.bottom) / 2
-}
 /** The width a panel's header gives a row of its own: its content box, measured from the header, not the row. */
 const roomOf = (panel: HTMLElement): number => {
   const header = panel.querySelector<HTMLElement>(':scope > .panel-header') as HTMLElement
@@ -173,7 +166,7 @@ const roomOf = (panel: HTMLElement): number => {
  */
 function drawingsInside(tag: string): void {
   for (const svg of diagram().querySelectorAll<SVGSVGElement>('svg.program-links, svg.program-gutter')) {
-    if (!shown(svg)) continue
+    if (!isShown(svg)) continue
     const box = svg.getBoundingClientRect()
     const name = `${tag}: ${svg.getAttribute('class')}`
     for (const path of svg.querySelectorAll<SVGGraphicsElement>('path')) {
@@ -230,24 +223,18 @@ async function steady(read: () => number): Promise<number> {
  * scroll, the wheel at 320px scrolled the TM view 55px sideways, and the 390px case stopped on its precondition.
  */
 function home(): void {
-  for (const [leaf] of PANELS) paneOf(leaf).scrollTo(0, 0)
+  for (const [leaf] of PANELS) leafEl(leaf).scrollTo(0, 0)
   level().scrollTo(0, 0)
   scrollTo(0, 0)
 }
 
-/** Put the workspace on `preset`, by the menu's own buttons. */
-const presetOf = (preset: string): void => {
-  buttonOf('workspace').click()
-  menuOf('workspace').querySelector<HTMLButtonElement>(`[data-preset="${preset}"]`)?.click()
-  if (menuOf('workspace').matches(':popover-open')) menuOf('workspace').hidePopover()
-}
 const explorer = (): void => presetOf('explorer')
 /** The workspace menu's *reset preset*, and then all four views, one TM view among them. */
 const resetPreset = async (): Promise<void> => {
   buttonOf('workspace').click()
   // ALL FOUR VIEWS, AS *RESET PRESET* GAVE WHEN THIS WAS WRITTEN: it leaves the source beside the TM view now.
   await resetToFourViews()
-  if (menuOf('workspace').matches(':popover-open')) menuOf('workspace').hidePopover()
+  if (menuOfId('workspace').matches(':popover-open')) menuOfId('workspace').hidePopover()
 }
 /** Split the TM view right into a second view of the same kind, by its `⋯` menu, with the pointer. */
 async function splitTm(): Promise<void> {
@@ -285,12 +272,12 @@ async function pick(id: string, marks: readonly number[]): Promise<void> {
   const text = EXAMPLES.find((e) => e.id === id)?.text ?? ''
   const before = { lambda: stepOf('lambda-0'), tm: stepOf('tm-0') }
   await userEvent.click(buttonOf('examples'))
-  await userEvent.click(menuOf('examples').querySelector(`button[data-example="${id}"]`) as HTMLElement)
+  await userEvent.click(menuOfId('examples').querySelector(`button[data-example="${id}"]`) as HTMLElement)
   await until(() => view.state.doc.toString() === text, `${id}’s text in the editor`)
   await until(() => stepOf('lambda-0') !== before.lambda && stepOf('tm-0') !== before.tm, `${id}’s lines`)
-  await until(() => idle() || recorded() >= 0, `${id}’s TM leg recording`)
-  for (const mark of marks) await until(() => idle() || recorded() >= mark, `${id}’s TM leg past step ${mark}`)
-  await until(idle, `${id}’s run to its result`)
+  await until(() => stateIdle() || recorded() >= 0, `${id}’s TM leg recording`)
+  for (const mark of marks) await until(() => stateIdle() || recorded() >= mark, `${id}’s TM leg past step ${mark}`)
+  await until(stateIdle, `${id}’s run to its result`)
 }
 
 /**
@@ -300,16 +287,16 @@ async function pick(id: string, marks: readonly number[]): Promise<void> {
 async function following(detached: boolean): Promise<void> {
   if (detached) {
     for (const box of [programScroll(), table()]) box.scrollTop = box.scrollTop === 0 ? box.scrollHeight : 0
-    await until(() => shown(diagramReattach()) && shown(tableReattach()), 'both grids to detach')
+    await until(() => isShown(diagramReattach()) && isShown(tableReattach()), 'both grids to detach')
   } else {
-    if (shown(diagramReattach())) diagramReattach().click()
-    if (shown(tableReattach())) tableReattach().click()
-    await until(() => !shown(diagramReattach()) && !shown(tableReattach()), 'both grids to follow again')
+    if (isShown(diagramReattach())) diagramReattach().click()
+    if (isShown(tableReattach())) tableReattach().click()
+    await until(() => !isShown(diagramReattach()) && !isShown(tableReattach()), 'both grids to follow again')
   }
 }
 
 const SUM_TO = EXAMPLES.find((e) => e.id === 'sum-to')?.text ?? ''
-const stepOf = (leaf: string) => paneOf(leaf).querySelector('.view-steps .step')?.textContent ?? ''
+const stepOf = (leaf: string) => leafEl(leaf).querySelector('.view-steps .step')?.textContent ?? ''
 
 /**
  * Mount, and pick `sum_to(5)` from `examples ▾`; wait for its text in the editor, then for the λ and TM views' lines
@@ -321,20 +308,20 @@ beforeAll(async () => {
   await page.viewport(1280, 800)
   document.body.innerHTML = SHELL
   view = await (await import('../../src/main')).ready
-  await until(idle, 'the first compile')
+  await until(stateIdle, 'the first compile')
   const before = { lambda: stepOf('lambda-0'), tm: stepOf('tm-0') }
   await userEvent.click(buttonOf('examples'))
-  await userEvent.click(menuOf('examples').querySelector('button[data-example="sum-to"]') as HTMLElement)
+  await userEvent.click(menuOfId('examples').querySelector('button[data-example="sum-to"]') as HTMLElement)
   await until(() => view.state.doc.toString() === SUM_TO, 'sum_to(5)’s text in the editor')
   await until(
     () => stepOf('lambda-0') !== before.lambda && stepOf('tm-0') !== before.tm,
     'sum_to(5)’s lines in the λ and TM views',
   )
-  await until(idle, 'sum_to(5)’s run to its result')
+  await until(stateIdle, 'sum_to(5)’s run to its result')
   // **EVERY VIEW TO ITS NEWEST STEP, BY ITS `⏭`**: a run opens on step 0 (`History`), and these cases measure the page
   // at the run's end, where they were written to.
   for (const leaf of ['lambda-0', 'asm-0', 'tm-0']) {
-    await userEvent.click(paneOf(leaf).querySelector('.view-steps button.to-newest') as HTMLElement)
+    await userEvent.click(leafEl(leaf).querySelector('.view-steps button.to-newest') as HTMLElement)
   }
   await until(() => /^step ([\d,]+) of \1$/.test(stepOf('tm-0')), 'the TM view on its newest step')
 })
@@ -361,23 +348,23 @@ async function at(width: number, height: number, detached: boolean): Promise<voi
   const ended = /^step ([\d,]+) of ([\d,]+)$/.exec(stepOf('tm-0'))
   expect(ended, `precondition: the TM view’s line, ${stepOf('tm-0')}`).not.toBeNull()
   expect(ended?.[1], `precondition: the TM run ended, ${stepOf('tm-0')}`).toBe(ended?.[2])
-  expect(idle(), 'precondition: the run has its result').toBe(true)
+  expect(stateIdle(), 'precondition: the run has its result').toBe(true)
   expect(
     [...document.querySelectorAll<HTMLElement>('.panel')]
-      .filter(shown)
+      .filter(isShown)
       .map((p) => [p.closest<HTMLElement>('[data-leaf]')?.dataset.leaf, p.dataset.panel]),
     'precondition: the panels Explorer draws',
   ).toEqual(PANELS.map(([leaf, name]) => [leaf, name]))
   expect(tm().clientWidth, 'precondition: the TM view’s width').toBe(VIEW[width])
-  for (const [leaf] of PANELS) expect(paneOf(leaf).scrollLeft, `precondition: ${leaf} not scrolled sideways`).toBe(0)
+  for (const [leaf] of PANELS) expect(leafEl(leaf).scrollLeft, `precondition: ${leaf} not scrolled sideways`).toBe(0)
   expect(diagram().dataset.open, 'precondition: the state diagram is open').toBe('true')
   expect(choice('program').getAttribute('aria-checked'), 'precondition: its program level').toBe('true')
   expect(choice('arcs').getAttribute('aria-checked'), 'precondition: drawn as arcs').toBe('true')
   expect(level().scrollLeft, 'precondition: the program level not scrolled sideways').toBe(0)
-  expect(shown(side()), 'precondition: the runtime column is drawn').toBe(true)
+  expect(isShown(side()), 'precondition: the runtime column is drawn').toBe(true)
   expect(side().querySelectorAll('.program-box').length, 'precondition: the runtime column’s boxes').toBe(5)
-  expect(shown(diagramReattach()), `precondition: follow current state ${detached ? '' : 'not '}drawn`).toBe(detached)
-  expect(shown(tableReattach()), `precondition: follow current rule ${detached ? '' : 'not '}drawn`).toBe(detached)
+  expect(isShown(diagramReattach()), `precondition: follow current state ${detached ? '' : 'not '}drawn`).toBe(detached)
+  expect(isShown(tableReattach()), `precondition: follow current rule ${detached ? '' : 'not '}drawn`).toBe(detached)
 }
 
 const PHONES = [
@@ -440,7 +427,7 @@ describe('the TM view, on sum_to(5)', () => {
         }
         for (const [leaf, name] of PANELS) {
           const panel = panelOf(leaf, name)
-          const viewInner = innerOf(paneOf(leaf))
+          const viewInner = innerOf(leafEl(leaf))
           hidesNothing(leaf, name)
           for (const el of headerBoxes(panel)) {
             const box = el.getBoundingClientRect()
@@ -457,16 +444,16 @@ describe('the TM view, on sum_to(5)', () => {
           for (const action of panel.querySelectorAll<HTMLElement>(
             '.panel-actions button, .panel-actions .panel-note',
           )) {
-            if (!shown(action)) continue
+            if (!isShown(action)) continue
             const wide = action.getBoundingClientRect().width
             const said = `${nameOf(action)} on ${linesOf(action)} lines, ${wide}px wide in a ${roomOf(panel)}px row`
             expect.soft(linesOf(action) === 1 || wide >= roomOf(panel) - 0.5, `${leaf} ${name}: ${said}`).toBe(true)
           }
         }
         for (const [leaf, name] of PANELS) {
-          const pane = paneOf(leaf)
+          const pane = leafEl(leaf)
           for (const control of panelOf(leaf, name).querySelectorAll<HTMLElement>('.panel-header button')) {
-            if (!shown(control)) continue
+            if (!isShown(control)) continue
             // VERTICALLY ONLY, the view and then the page: `elementFromPoint` sees only what is in the viewport.
             const below = control.getBoundingClientRect().bottom - (pane.getBoundingClientRect().top + pane.clientTop)
             if (below > pane.clientHeight) pane.scrollTop += below - pane.clientHeight
@@ -700,22 +687,21 @@ describe('the TM view, on sum_to(5)', () => {
         const header = panel.querySelector(':scope > .panel-header') as HTMLElement
         const left = pane.getBoundingClientRect().left + pane.clientLeft
         const room = pane.clientWidth - 176
-        const at = (el: Element) => el.getBoundingClientRect()
-        expect.soft(at(box).left - left, `${name}: the level’s left`).toBe(0)
+        expect.soft(rect(box).left - left, `${name}: the level’s left`).toBe(0)
         expect.soft(box.clientWidth, `${name}: the level’s width`).toBe(pane.clientWidth)
         expect.soft(box.scrollWidth, `${name}: the level’s scroll width`).toBeLessThanOrEqual(box.clientWidth)
         expect.soft(getComputedStyle(box).overflowX, `${name}: the level’s overflow-x`).toBe('visible')
-        expect.soft(at(box).top - at(header).bottom, `${name}: the level under its header`).toBe(0)
-        expect.soft(at(box).height, `${name}: the level’s height`).toBe(120)
+        expect.soft(rect(box).top - rect(header).bottom, `${name}: the level under its header`).toBe(0)
+        expect.soft(rect(box).height, `${name}: the level’s height`).toBe(120)
         const rows = pane.querySelector('.program-scroll') as HTMLElement
         const column = pane.querySelector('.program-side') as HTMLElement
-        expect.soft([at(rows).left - left, at(rows).width], `${name}: the rows, left and width`).toEqual([0, room])
+        expect.soft([rect(rows).left - left, rect(rows).width], `${name}: the rows, left and width`).toEqual([0, room])
         expect
-          .soft([at(column).left - left, at(column).width], `${name}: the column, left and width`)
+          .soft([rect(column).left - left, rect(column).width], `${name}: the column, left and width`)
           .toEqual([room, 176])
         for (const [k, b] of [...column.querySelectorAll('.program-box')].entries()) {
           expect
-            .soft([at(b).left - left, at(b).width, at(b).top - at(box).top], `${name}: runtime box ${k}`)
+            .soft([rect(b).left - left, rect(b).width, rect(b).top - rect(box).top], `${name}: runtime box ${k}`)
             .toEqual([room + 47, 104, 1 + 24 * k])
         }
       }
@@ -752,7 +738,7 @@ describe('the TM view, on sum_to(5)', () => {
       const current = () =>
         programScroll().querySelector('.program-row[aria-current="step"] .program-name')?.textContent
       expect(current(), 'precondition: the current row').toBe('pc23')
-      expect(shown(diagramReattach()), 'precondition: the grid follows').toBe(false)
+      expect(isShown(diagramReattach()), 'precondition: the grid follows').toBe(false)
       const wide = { links: linksOf(), scroll: programScroll().scrollTop, height: programScroll().clientHeight }
       expect(wide.links, 'precondition: the connectors at 1280px').toEqual([
         'pc23 → a routine',
@@ -1105,7 +1091,7 @@ describe.each(COUNTED)('the program level’s counts, on $title', ({ id, marks, 
         expect(innerWidth, 'precondition: the page’s width').toBe(layout.width)
         expect(buttonOf('workspace').textContent?.toLowerCase(), 'precondition: the preset').toContain(layout.preset)
         expect(view.state.doc.toString(), 'precondition: the example').toBe(EXAMPLES.find((e) => e.id === id)?.text)
-        expect(idle(), 'precondition: the run has its result').toBe(true)
+        expect(stateIdle(), 'precondition: the run has its result').toBe(true)
         expect(
           tmViews().map((pane) => [Math.round(pane.getBoundingClientRect().left), pane.clientWidth]),
           'precondition: the TM views, left and width',
@@ -1243,7 +1229,7 @@ describe.each(COUNTED)('the program level’s counts, on $title', ({ id, marks, 
         programScroll().scrollTop = 0
         choice('arcs').click()
         await until(() => choice('arcs').getAttribute('aria-checked') === 'true', 'the diagram drawn as arcs again')
-        if (shown(diagramReattach())) diagramReattach().click()
+        if (isShown(diagramReattach())) diagramReattach().click()
         if (layout.split) {
           await resetPreset()
           await until(() => tmViews().length === 1, 'one TM view again')

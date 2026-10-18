@@ -1,8 +1,20 @@
-import { EditorView } from '@codemirror/view'
+import type { EditorView } from '@codemirror/view'
 import { beforeAll, describe, expect, it } from 'vitest'
 import { page, userEvent } from 'vitest/browser'
 import { BUFFERS_STORAGE_KEY } from '../../src/buffers-store'
-import { SHELL, until } from './harness'
+import { editorOf } from './editor-view-fixture'
+import {
+  controlIn,
+  copyShown,
+  paneStepText,
+  pickInViewMenu,
+  retype,
+  SHELL,
+  stageTab,
+  stateIdle,
+  until,
+  viewMenu,
+} from './harness'
 
 /**
  * A view showing a copy marks nothing, whatever is pinned (Plan 7 part 5 spec §4.5, amendment 32 in the inbound
@@ -34,36 +46,11 @@ let asmHost: HTMLElement
 let tmHost: HTMLElement
 const asm = () => asmHost
 const tm = () => tmHost
-const idle = () => document.querySelector<HTMLElement>('#results')?.dataset.state === 'idle'
-const editorOf = (pane: HTMLElement): EditorView | null => {
-  const el = pane.querySelector<HTMLElement>('.term-editor')
-  return el === null ? null : EditorView.findFromDOM(el)
-}
-const replace = (v: EditorView, text: string) =>
-  v.dispatch({ changes: { from: 0, to: v.state.doc.length, insert: text } })
 const pcs = () => [...asm().querySelectorAll<HTMLElement>('.asm-row .asm-pc')].map((e) => e.textContent)
 const value = () => asm().querySelector('.asm-value')?.textContent ?? ''
 const sourceLinked = () => view.dom.querySelector('.linked')?.textContent ?? null
-const copyShown = (pane: HTMLElement) => /copy · not linked/.test(pane.textContent ?? '')
 const stored = () => localStorage.getItem(BUFFERS_STORAGE_KEY) ?? ''
-const tab = (leaf: string) =>
-  document.querySelector<HTMLElement>(`#views [role="tab"][data-leaf="${leaf}"]`) as HTMLElement
-const menuOf = (pane: HTMLElement): HTMLElement => {
-  const more = pane.querySelector<HTMLButtonElement>('button.view-more')
-  const menu = document.getElementById(more?.getAttribute('aria-controls') ?? '')
-  if (more === null || menu === null) throw new Error('no view menu')
-  return menu
-}
 const frame = () => new Promise((r) => requestAnimationFrame(() => r(undefined)))
-
-/** Open `pane`'s `⋯` menu with the pointer and pick `cls`'s item with it, as a user does. */
-async function pick(pane: HTMLElement, cls: string): Promise<void> {
-  await userEvent.click(pane.querySelector<HTMLButtonElement>('button.view-more') as HTMLButtonElement)
-  await until(() => menuOf(pane).matches(':popover-open'), 'the view menu to open')
-  const item = menuOf(pane).querySelector<HTMLButtonElement>(`button.${cls}`)
-  if (item === null) throw new Error(`the menu offers no ${cls}`)
-  await userEvent.click(item)
-}
 
 /** Pin `PINNED` in the source with `Mod-'`, the keyboard's link gesture, and wait for the source to show it. */
 async function pin(): Promise<void> {
@@ -81,18 +68,18 @@ beforeAll(async () => {
   view = await (await import('../../src/main')).ready
   asmHost = document.querySelector<HTMLElement>('.pane[data-leaf="asm-0"]') as HTMLElement
   tmHost = document.querySelector<HTMLElement>('.pane[data-leaf="tm-0"]') as HTMLElement
-  replace(view, SAMPLE)
-  await until(() => !idle(), 'the compile to start')
-  await until(idle, 'the compile to finish')
+  retype(view, SAMPLE)
+  await until(() => !stateIdle(), 'the compile to start')
+  await until(stateIdle, 'the compile to finish')
   await until(() => pcs().length === 5, 'the program’s listing')
   await until(() => tm().querySelectorAll('.state-row').length > 3, 'the program’s rules')
 })
 
 describe('a view on the page showing a copy', () => {
   it('marks no instruction of an edited asm copy, where a view of the program marks the pin', async () => {
-    await pick(asm(), 'detach')
+    await pickInViewMenu(asm(), 'detach')
     await until(() => editorOf(asm()) !== null, 'the asm copy’s editor')
-    replace(editorOf(asm()) as EditorView, EDITED)
+    retype(editorOf(asm()) as EditorView, EDITED)
     await until(() => value() === 'value: 8', 'the edited copy to build')
     expect(pcs()).toEqual(['pc0', 'pc1', 'pc2', 'pc3', 'pc4'])
 
@@ -102,16 +89,16 @@ describe('a view on the page showing a copy', () => {
   })
 
   it('marks no state of a TM copy', async () => {
-    await pick(tm(), 'detach')
+    await pickInViewMenu(tm(), 'detach')
     await until(() => editorOf(tm()) !== null, 'the TM copy’s editor')
     await until(() => copyShown(tm()) && tm().querySelectorAll('.state-row').length > 3, 'the TM copy’s rules')
 
     // THE PIN THE TEST ABOVE MADE IS CLEARED FIRST — an edit to the source clears it, and the recompile repaints the
     // source without it — so the pin below is this test's own keypress, and `pin`'s wait for the source's mark is a
     // positive control rather than the mark the test above left.
-    replace(view, SAMPLE)
-    await until(() => !idle(), 'the recompile to start')
-    await until(idle, 'the recompile to finish')
+    retype(view, SAMPLE)
+    await until(() => !stateIdle(), 'the recompile to start')
+    await until(stateIdle, 'the recompile to finish')
     await until(() => sourceLinked() === null, 'the earlier pin to clear')
     await pin()
     expect(tm().querySelector('.state-row.is-linked')).toBeNull()
@@ -124,10 +111,10 @@ describe('a view on the page showing a copy, beside a view of the program', () =
   async function splitToProgram(pane: HTMLElement, leg: 'asm' | 'tm'): Promise<HTMLElement> {
     const before = new Set([...document.querySelectorAll<HTMLElement>(`.pane[data-kind="${leg}"]`)])
     await userEvent.click(pane.querySelector<HTMLButtonElement>('button.view-more') as HTMLButtonElement)
-    await until(() => menuOf(pane).matches(':popover-open'), 'the view menu to open')
-    const split = menuOf(pane).querySelector<HTMLButtonElement>('button.view-split[data-dir="row"]')
+    await until(() => viewMenu(pane).matches(':popover-open'), 'the view menu to open')
+    const split = viewMenu(pane).querySelector<HTMLButtonElement>('button.view-split[data-dir="row"]')
     await userEvent.click(split as HTMLButtonElement)
-    const pair = () => menuOf(pane).querySelector<HTMLButtonElement>(`button[data-binding="${leg}:source"]`)
+    const pair = () => viewMenu(pane).querySelector<HTMLButtonElement>(`button[data-binding="${leg}:source"]`)
     await until(() => pair() !== null, 'the split’s pairs')
     await userEvent.click(pair() as HTMLButtonElement)
     const made = () =>
@@ -135,9 +122,6 @@ describe('a view on the page showing a copy, beside a view of the program', () =
     await until(() => made() !== undefined, 'the split view')
     return made() as HTMLElement
   }
-  const control = (pane: HTMLElement, label: string) =>
-    [...pane.querySelectorAll<HTMLButtonElement>('.controls button')].find((b) => b.textContent === label)
-  const stepOf = (pane: HTMLElement) => pane.querySelector('.step')?.textContent ?? ''
 
   /** Walk `pane`'s whole virtualized rule table and report whether any row is painted as the running focus. */
   async function anyFocusedRow(pane: HTMLElement): Promise<boolean> {
@@ -155,8 +139,8 @@ describe('a view on the page showing a copy, beside a view of the program', () =
   it('marks no instruction of an asm copy for the program’s running focus', async () => {
     const program = await splitToProgram(asm(), 'asm')
     // STEP 0, WHERE `pc0` — `li r0, #40`, the literal `40`'s — RUNS NEXT, AND THE FOCUS IS ITS CONSTRUCT.
-    await userEvent.click(control(program, '↺') as HTMLButtonElement)
-    await until(() => stepOf(program).startsWith('step 0 of'), 'the program’s view to restart')
+    await userEvent.click(controlIn(program, '↺') as HTMLButtonElement)
+    await until(() => paneStepText(program).startsWith('step 0 of'), 'the program’s view to restart')
     await until(() => program.querySelector('.asm-row.is-focus') !== null, 'the program’s view to mark the focus')
     expect(copyShown(asm()), 'the first view still shows its copy').toBe(true)
     expect(asm().querySelector('.asm-row.is-focus')).toBeNull()
@@ -168,8 +152,8 @@ describe('a view on the page showing a copy, beside a view of the program', () =
     // `running-focus.test.ts` measured the tail.
     // BY `⏭`: a run opens on step 0 (`History`).
     await userEvent.click(program.querySelector('.controls button.to-newest') as HTMLButtonElement)
-    await until(() => /step 2,870 of 2,870/.test(stepOf(program)), 'the program’s view at the frontier')
-    await userEvent.click(control(program, '◀') as HTMLButtonElement)
+    await until(() => /step 2,870 of 2,870/.test(paneStepText(program)), 'the program’s view at the frontier')
+    await userEvent.click(controlIn(program, '◀') as HTMLButtonElement)
     await until(() => program.querySelector('.state-row.is-focus') !== null, 'the program’s view to mark the focus')
     expect(copyShown(tm()), 'the first view still shows its copy').toBe(true)
     expect(await anyFocusedRow(tm())).toBe(false)
@@ -187,28 +171,28 @@ describe('a view off the page when its copy rebuilt, and shown after the pin', (
     await userEvent.click(stage)
     const menu = document.querySelector<HTMLElement>('#workspace-menu')
     if (menu?.matches(':popover-open')) await userEvent.keyboard('{Escape}')
-    await until(() => tab('source') !== null, 'the stage’s tabs')
-    await userEvent.click(tab('source'))
+    await until(() => stageTab('source') !== null, 'the stage’s tabs')
+    await userEvent.click(stageTab('source'))
     await until(() => !asm().isConnected && !tm().isConnected, 'both copies’ views to be off the page')
 
     // EACH COPY REBUILDS OFF THE PAGE, which puts its view in `replies.ts`'s `unseen`. A rebuild is stored when it
     // lands (`onBuffersPersist`) and not when it is typed, so the stored copies changing is the build having landed.
     let before = stored()
-    replace(asmEditor, EDITED_AGAIN)
+    retype(asmEditor, EDITED_AGAIN)
     await until(() => stored() !== before, 'the asm copy’s rebuild to land off the page')
     before = stored()
-    replace(tmEditor, `${tmEditor.state.doc.toString()}\n`)
+    retype(tmEditor, `${tmEditor.state.doc.toString()}\n`)
     await until(() => stored() !== before, 'the TM copy’s rebuild to land off the page')
 
     await pin()
 
-    await userEvent.click(tab('asm-0'))
+    await userEvent.click(stageTab('asm-0'))
     await until(() => asm().isConnected && value() === 'value: 9', 'the asm view, seeded with its rebuilt copy')
     await frame()
     expect(pcs()).toEqual(['pc0', 'pc1', 'pc2', 'pc3', 'pc4'])
     expect(asm().querySelector('.asm-row.is-linked')).toBeNull()
 
-    await userEvent.click(tab('tm-0'))
+    await userEvent.click(stageTab('tm-0'))
     await until(() => tm().isConnected && tm().querySelectorAll('.state-row').length > 3, 'the TM view’s rules')
     await frame()
     expect(tm().querySelector('.state-row.is-linked')).toBeNull()

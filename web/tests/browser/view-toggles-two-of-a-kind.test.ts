@@ -1,7 +1,7 @@
 import { beforeAll, describe, expect, it } from 'vitest'
-import { page, userEvent } from 'vitest/browser'
+import { userEvent } from 'vitest/browser'
 import { LAYOUT_STORAGE_KEY } from '../../src/layout'
-import { drawn, focusInPage, SHELL, until } from './harness'
+import { drawn, focusInPage, live, mountAt, notice, sourcePane, toggle } from './harness'
 
 /**
  * WHAT A `views` TOGGLE SAYS WHERE THE PAGE SHOWS TWO VIEWS OF ITS KIND — the view layouts spec §6. A toggle shows or
@@ -20,23 +20,14 @@ localStorage.removeItem(LAYOUT_STORAGE_KEY)
 
 const ONLY_TWO = 'the 2 TM views are the only ones shown — one kind of view stays'
 
-const host = (leaf: string): HTMLElement =>
-  document.querySelector<HTMLElement>(`#views [data-leaf="${leaf}"]:not([role="tab"])`) as HTMLElement
 const kinds = (): string[] =>
   [...document.querySelectorAll<HTMLElement>('#views [data-leaf]')]
     .filter((el) => el.getAttribute('role') !== 'tab')
     .map((el) => el.dataset.kind as string)
-const toggle = (kind: string): HTMLButtonElement =>
-  document.querySelector(`#views-shown button[data-shows="${kind}"]`) as HTMLButtonElement
-const notice = (): string => (document.querySelector('#notice .notice-text')?.textContent ?? '').trim()
-const live = (): string => (document.querySelector('#live')?.textContent ?? '').trim()
 
 describe('the views toggles, with two views of one kind on screen', () => {
   beforeAll(async () => {
-    await page.viewport(1280, 896)
-    document.body.innerHTML = SHELL
-    await (await import('../../src/main')).ready
-    await until(() => document.querySelector<HTMLElement>('#results')?.dataset.state === 'idle', 'the first compile')
+    await mountAt(1280, 896)
     expect(drawn(), 'precondition: the page opened on the first load’s views').toBe('row[50](source tm-0)')
   })
 
@@ -54,7 +45,7 @@ describe('the views toggles, with two views of one kind on screen', () => {
   })
 
   it('says the 2 TM views are the only ones shown once the source view is closed, in the tooltip and on a press', async () => {
-    await userEvent.click(host('source').querySelector('button.view-close') as HTMLElement)
+    await userEvent.click(sourcePane().querySelector('button.view-close') as HTMLElement)
     expect(kinds()).toEqual(['tm', 'tm'])
     const tm = toggle('tm')
     expect(tm.getAttribute('aria-disabled'), 'the toggle of the only kind shown is not disabled').toBe('true')

@@ -1,12 +1,23 @@
 import type { EditorView } from '@codemirror/view'
 import { beforeAll, describe, expect, it } from 'vitest'
 import { userEvent } from 'vitest/browser'
-import { BUFFERS_STORAGE_KEY, parseBuffers, serializeBuffers } from '../../src/buffers-store'
+import { BUFFERS_STORAGE_KEY, serializeBuffers } from '../../src/buffers-store'
 import { LAYOUT_STORAGE_KEY } from '../../src/layout'
 import { encodeLink } from '../../src/share-link'
 import { bindingKey } from '../../src/view-header'
 import { PRESETS, parseWorkspace, serializeWorkspace } from '../../src/workspace'
-import { fourViewWorkspace, SHELL, until } from './harness'
+import { storedBindings } from './copy-text-fixture'
+import {
+  fourViewWorkspace,
+  lambdaLayout,
+  noticeText,
+  picker,
+  SHELL,
+  segments,
+  stateIdle,
+  undoButton,
+  until,
+} from './harness'
 
 /**
  * **A LINK OPENED AT START-UP, WHOLE, AND ITS UNDO** — Plan 7 part 6a spec §5.3 and §5.5. The page is a returning
@@ -33,11 +44,6 @@ const LINK_WORKSPACE = {
   display: { 'lambda-0': { layout: 'outline', vars: 'names', map: 'icicle' } },
 } as const
 
-const picker = () => document.querySelector<HTMLSelectElement>('#encoding') as HTMLSelectElement
-const noticeText = () => document.querySelector('#notice .notice-text')?.textContent ?? ''
-const undoButton = () => document.querySelector<HTMLButtonElement>('#notice button.notice-action')
-const idle = () => document.querySelector<HTMLElement>('#results')?.dataset.state === 'idle'
-const segments = () => [...document.querySelectorAll('#results .segment')].map((s) => s.textContent ?? '')
 /** The readout's lines in either mode: the strip's segments, or the inspector's rows, each its label and value. */
 const readout = () =>
   [...document.querySelectorAll('#results .segment, #results .row')].map((el) =>
@@ -47,8 +53,6 @@ const readout = () =>
   )
 const lambdaShows = () =>
   document.querySelector<HTMLElement>('[data-leaf="lambda-0"] .view-title')?.dataset.binding ?? ''
-const lambdaLayout = () => document.querySelector<HTMLElement>('[data-leaf="lambda-0"] .term')?.dataset.layout
-const storedBindings = () => parseBuffers(localStorage.getItem(BUFFERS_STORAGE_KEY))?.bindings
 
 let view: EditorView
 
@@ -71,7 +75,7 @@ beforeAll(async () => {
   history.replaceState(null, '', `${location.pathname}${location.search}${fragment}`)
   document.body.innerHTML = SHELL
   view = await (await import('../../src/main')).ready
-  await until(() => idle() && readout().length > 0, 'the first compile')
+  await until(() => stateIdle() && readout().length > 0, 'the first compile')
 })
 
 describe('a link at start-up', () => {
@@ -121,6 +125,6 @@ describe('a link at start-up', () => {
     expect(storedBindings()).toEqual({ 'lambda-0': COPY })
     // THE COPY WAS COLD, AND UNDO WARMED IT: its view draws its term.
     await until(() => lambdaLayout() === 'code', 'the copy’s term')
-    await until(() => idle() && (segments()[0] ?? '').startsWith('λ 42'), 'the program’s compile')
+    await until(() => stateIdle() && (segments()[0] ?? '').startsWith('λ 42'), 'the program’s compile')
   })
 })

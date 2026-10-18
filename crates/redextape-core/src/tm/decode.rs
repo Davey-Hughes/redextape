@@ -90,6 +90,21 @@ mod tests {
     use crate::tm::lower_tm::{SlotMap, lower_tm};
     use crate::tm::sim::{DEFAULT_CAPS as CAPS, simulate};
 
+    /// Build [1, 2] on the TM: nil; cons(2, nil)->p1; cons(1, p1)->rr.
+    fn list_one_two() -> Program {
+        Program {
+            code: vec![
+                Instr::Nil(Reg::Loc(0)),
+                Instr::Li(Reg::Loc(1), 2),
+                Instr::Cons(Reg::Loc(2), Reg::Loc(1), Reg::Loc(0)), // cons(2, nil)
+                Instr::Li(Reg::Loc(3), 1),
+                Instr::Cons(Reg::Rr, Reg::Loc(3), Reg::Loc(2)), // cons(1, p1) -> rr
+                Instr::Halt,
+            ],
+            labels: vec![],
+        }
+    }
+
     fn run_to_tapes(prog: &Program) -> Vec<Tape> {
         let enc = Unary::default();
         let m = lower_tm(prog, &enc);
@@ -143,18 +158,8 @@ mod tests {
 
     #[test]
     fn decodes_a_constructed_list() {
-        // Build [1, 2] on the TM: nil; cons(2, nil)->p1; cons(1, p1)->rr. Decode guided by a list shape.
-        let prog = Program {
-            code: vec![
-                Instr::Nil(Reg::Loc(0)),
-                Instr::Li(Reg::Loc(1), 2),
-                Instr::Cons(Reg::Loc(2), Reg::Loc(1), Reg::Loc(0)), // cons(2, nil)
-                Instr::Li(Reg::Loc(3), 1),
-                Instr::Cons(Reg::Rr, Reg::Loc(3), Reg::Loc(2)), // cons(1, p1) -> rr
-                Instr::Halt,
-            ],
-            labels: vec![],
-        };
+        // Decode guided by a list shape.
+        let prog = list_one_two();
         let tapes = run_to_tapes(&prog);
         assert_eq!(
             decode_tape(&tapes, &Value::list_of_nats(&[1, 2]), &Unary::default()),
@@ -243,17 +248,7 @@ mod tests {
         let t = run_to_tapes(&prog);
         assert_eq!(decode_tape(&t, &Value::Bool(false), &enc), decode_tape_ty(&t, &Ty::Bool, &enc));
 
-        let prog = Program {
-            code: vec![
-                Instr::Nil(Reg::Loc(0)),
-                Instr::Li(Reg::Loc(1), 2),
-                Instr::Cons(Reg::Loc(2), Reg::Loc(1), Reg::Loc(0)),
-                Instr::Li(Reg::Loc(3), 1),
-                Instr::Cons(Reg::Rr, Reg::Loc(3), Reg::Loc(2)),
-                Instr::Halt,
-            ],
-            labels: vec![],
-        };
+        let prog = list_one_two();
         let t = run_to_tapes(&prog);
         let ty = Ty::List(Box::new(Ty::Nat));
         assert_eq!(decode_tape(&t, &Value::list_of_nats(&[1, 2]), &enc), decode_tape_ty(&t, &ty, &enc));

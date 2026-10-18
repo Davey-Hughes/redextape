@@ -1,5 +1,5 @@
 import { beforeAll, describe, expect, it } from 'vitest'
-import { SHELL, until } from './harness'
+import { idle, paneOrThrow, SHELL, until } from './harness'
 
 /**
  * **THE COLOURER, INSTALLED — design §11.2's colour row, over the running app rather than over a stub.**
@@ -55,15 +55,6 @@ import { SHELL, until } from './harness'
  * `RangeSet` is a cost Task 7 measures; nothing below implies coverage of it.
  */
 
-const resultsText = () => document.querySelector('#results')?.textContent ?? ''
-const idle = () => document.querySelector<HTMLElement>('#results')?.dataset.state === 'idle' && resultsText() !== ''
-
-const paneOf = (leaf: string): HTMLElement => {
-  const el = document.querySelector<HTMLElement>(`[data-leaf="${leaf}"]`)
-  if (el === null) throw new Error(`no pane mounted at [data-leaf="${leaf}"]`)
-  return el
-}
-
 /**
  * The editable surface of the one editor in `pane`, or `null` while none is mounted.
  *
@@ -103,23 +94,23 @@ describe('the editors colour from their grammars', () => {
   })
 
   it('colours the source editor from the mini-language grammar, in the palette', async () => {
-    const op = await colouredIn(paneOf('source'), '.tok-operator', 'the source editor to colour an operator')
+    const op = await colouredIn(paneOrThrow('source'), '.tok-operator', 'the source editor to colour an operator')
     // `let x = 40; x + 2` carries two: `=` and `+`, both in the mini-language's `@operator` set. The
     // first in document order is the one `querySelector` returns.
     expect(op.textContent).toBe('=')
   })
 
   it('colours a λ copy from the λ grammar, in the palette', async () => {
-    fork(paneOf('lambda-0'))
-    const binder = await colouredIn(paneOf('lambda-0'), '.tok-binder', 'the λ copy’s editor to colour a binder')
+    fork(paneOrThrow('lambda-0'))
+    const binder = await colouredIn(paneOrThrow('lambda-0'), '.tok-binder', 'the λ copy’s editor to colour a binder')
     // The binder head and the name it binds are both `Binder` (the λ grammar's own comment), and the
     // head is the first of the two, so this is the glyph rather than the name.
     expect(binder.textContent).toBe('λ')
   })
 
   it('colours a TM copy from the TM grammar, in the palette', async () => {
-    fork(paneOf('tm-0'))
-    const state = await colouredIn(paneOf('tm-0'), '.tok-statename', 'the TM copy’s editor to colour a state name')
+    fork(paneOrThrow('tm-0'))
+    const state = await colouredIn(paneOrThrow('tm-0'), '.tok-statename', 'the TM copy’s editor to colour a state name')
     // A state name is one identifier token; asserting it is non-empty rather than naming one keeps this
     // off the lowering's choice of state names, which is not what the colourer is being asked about.
     // `@label.reference` reaches it — a `start` or `goto` TARGET, never a defining position, which the
@@ -128,8 +119,12 @@ describe('the editors colour from their grammars', () => {
   })
 
   it('colours an asm copy from the asm grammar, in the palette', async () => {
-    fork(paneOf('asm-0'))
-    const mnemonic = await colouredIn(paneOf('asm-0'), '.tok-mnemonic', 'the asm copy’s editor to colour a mnemonic')
+    fork(paneOrThrow('asm-0'))
+    const mnemonic = await colouredIn(
+      paneOrThrow('asm-0'),
+      '.tok-mnemonic',
+      'the asm copy’s editor to colour a mnemonic',
+    )
     // The program's first instruction is `li r0, #40`, the literal's load, and its mnemonic is the first in the text.
     expect(mnemonic.textContent).toBe('li')
   })
@@ -145,10 +140,10 @@ describe('the editors colour from their grammars', () => {
    * Both panes are already forked and coloured by the tests above; this adds no gesture of its own.
    */
   it('finds tok-keyword in two editors at once, which is why it is nobody’s witness', () => {
-    expect(contentOf(paneOf('source'))?.querySelector('.tok-keyword')?.textContent).toBe('let')
+    expect(contentOf(paneOrThrow('source'))?.querySelector('.tok-keyword')?.textContent).toBe('let')
     // NOT A NAMED WORD, for the reason the state name above is not one: which of the TM form's
     // keywords lands first in the viewport is the lowering's business. That one does is not.
-    const tmKeyword = contentOf(paneOf('tm-0'))?.querySelector('.tok-keyword')?.textContent ?? ''
+    const tmKeyword = contentOf(paneOrThrow('tm-0'))?.querySelector('.tok-keyword')?.textContent ?? ''
     expect(tmKeyword, 'the TM editor colours keywords of its own, from its own table’s @keyword row').not.toBe('')
   })
 })

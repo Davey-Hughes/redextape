@@ -40,16 +40,10 @@
 
 use redextape_core::desugar::desugar;
 use redextape_core::parser::parse;
-use redextape_core::tm::{BLANK, BOX, Encoding, EncodingKind, MARK, REG, SEP, defunc, lower_asm, lower_tm_guarded};
+use redextape_core::tm::{BLANK, BOX, MARK, REG, SEP, defunc, lower_asm, lower_tm_guarded};
 
 mod common;
-use common::{assert_delimiter_safe, unsafe_rules};
-
-/// EVERY encoding. Each has its own bank with its own write sites (REG, BOX, and for some encodings
-/// like `Binary`, also WORK), so a corpus that only exercises one encoding verifies nothing about the others.
-fn encodings_at(width: usize) -> Vec<(&'static str, Box<dyn Encoding>)> {
-    EncodingKind::ALL.iter().map(|&k| (k.name(), k.at(width))).collect()
-}
+use common::{assert_delimiter_safe, encodings_at, unsafe_rules};
 
 /// The corpus, spanning every gadget family. Kept in step with `tm_bank_invariant.rs`.
 const CORPUS: &[&str] = &[

@@ -6,7 +6,7 @@ import { encodeLink, type Positions } from '../../src/share-link'
 import { MAX_LINK_CONTINUES } from '../../src/share-positions'
 import { bindingKey } from '../../src/view-header'
 import { serializeWorkspace } from '../../src/workspace'
-import { fourViewWorkspace, SHELL, until } from './harness'
+import { fourViewWorkspace, noticeText, SHELL, stateIdle, stepTextOf, undoButton, until } from './harness'
 
 /**
  * **A LINK'S POSITIONS, IN THE APP** — Plan 7 part 6a spec §5.4 and §8's positions row, on the real session worker:
@@ -77,10 +77,6 @@ async function resultsReach(n: number, what: string): Promise<void> {
   await until(() => results() >= n, what)
   expect(results(), what).toBe(n)
 }
-const stepOf = (leaf: string) => document.querySelector(`[data-leaf="${leaf}"] .step`)?.textContent ?? ''
-const noticeText = () => document.querySelector('#notice .notice-text')?.textContent ?? ''
-const undoButton = () => document.querySelector<HTMLButtonElement>('#notice button.notice-action')
-const idle = () => document.querySelector<HTMLElement>('#results')?.dataset.state === 'idle'
 
 let view: EditorView
 
@@ -111,19 +107,19 @@ beforeAll(async () => {
   await page.viewport(1280, 896)
   document.body.innerHTML = SHELL
   view = await (await import('../../src/main')).ready
-  await until(() => idle() && results() > 0, 'the first compile')
+  await until(() => stateIdle() && results() > 0, 'the first compile')
 })
 
 describe("a link's positions", () => {
   it("reaches fact(4)'s λ step 3,000 after two continues, saying where it is going meanwhile", async () => {
     const before = await open(FACT, { lambda: 3000 })
-    await until(() => stepOf('lambda-0').includes('— going to step 3,000 from the link'), 'the pending position')
+    await until(() => stepTextOf('lambda-0').includes('— going to step 3,000 from the link'), 'the pending position')
     // ONE WAIT A RESULT, so no one wait holds three recordings on a slow runner.
     await resultsReach(before.results + 1, 'the run')
     await resultsReach(before.results + 2, 'the first continue')
     await resultsReach(before.results + 3, 'the second continue')
     expect(lambdaExtends() - before.extends).toBe(2)
-    expect(stepOf('lambda-0')).toBe('step 3,000 of 4,144 — history is full (oldest kept: step 2,769)')
+    expect(stepTextOf('lambda-0')).toBe('step 3,000 of 4,144 — history is full (oldest kept: step 2,769)')
   })
 
   /**
@@ -137,7 +133,7 @@ describe("a link's positions", () => {
     await resultsReach(before.results + 1, 'the run')
     await resultsReach(before.results + 2, 'the continue')
     expect(lambdaExtends() - before.extends).toBe(1)
-    expect(stepOf('lambda-0')).toBe('step 1,387 of 2,768 — history is full (oldest kept: step 1,387)')
+    expect(stepTextOf('lambda-0')).toBe('step 1,387 of 2,768 — history is full (oldest kept: step 1,387)')
   })
 
   it("clamps sum_to(5)'s λ step 5,000 to its last, 951, and says so with the open's undo", async () => {
@@ -145,7 +141,7 @@ describe("a link's positions", () => {
     await until(() => noticeText().startsWith("the link's λ step"), 'the clamp')
     expect(noticeText()).toBe("the link's λ step 5,000 is past the end of this run — showing step 951")
     expect(undoButton()?.textContent).toBe('undo')
-    expect(stepOf('lambda-0')).toBe('step 951 of 951')
+    expect(stepTextOf('lambda-0')).toBe('step 951 of 951')
     await resultsReach(before.results + 1, 'the run')
     expect(lambdaExtends()).toBe(before.extends)
   })
@@ -171,11 +167,11 @@ describe('a step gesture before the first continue', () => {
     before = await open(FACT, { lambda: 3000 })
     // FORWARD: the head waits on step 0, where a run opens (`History`), until the frames reach the link's step.
     await until(
-      () => stepOf('lambda-0').includes('— going to step 3,000 from the link') && !forwardButton().disabled,
+      () => stepTextOf('lambda-0').includes('— going to step 3,000 from the link') && !forwardButton().disabled,
       'the pending position, with a step to take',
     )
     await userEvent.click(forwardButton())
-    expect(stepOf('lambda-0')).not.toContain('going to')
+    expect(stepTextOf('lambda-0')).not.toContain('going to')
   })
 
   it('continues it no further once the run has recorded', async () => {
@@ -200,13 +196,13 @@ describe("fact(12)'s λ at 17,000", () => {
     before = await open(FACT_12, { lambda: 17000 }, 'unary')
     await resultsReach(before.results + 1, 'the run')
     expect(lambdaExtends() - before.extends).toBe(1)
-    expect(stepOf('lambda-0')).toContain('— going to step 17,000 from the link')
+    expect(stepTextOf('lambda-0')).toContain('— going to step 17,000 from the link')
   })
 
   it.each([1, 2, 3, 4, 5, 6, 7, 8, 9])('posts the next continue once continue %i has recorded', async (n) => {
     await continued(n)
     expect(lambdaExtends() - before.extends).toBe(n + 1)
-    expect(stepOf('lambda-0')).toContain('— going to step 17,000 from the link')
+    expect(stepTextOf('lambda-0')).toContain('— going to step 17,000 from the link')
     // ANOTHER GESTURE'S NOTICE TAKES THE OPEN'S OFF THE LINE, WITHDRAWING NOTHING.
     if (n === 3) {
       await userEvent.click(document.querySelector<HTMLButtonElement>('#new-view') as HTMLButtonElement)
@@ -224,7 +220,7 @@ describe("fact(12)'s λ at 17,000", () => {
     await continued(MAX_LINK_CONTINUES)
     expect(lambdaExtends() - before.extends).toBe(MAX_LINK_CONTINUES)
     expect(noticeText()).toBe("the link's λ step 17,000 is further on than 10 continues went — showing step 15,695")
-    expect(stepOf('lambda-0')).toBe('step 15,695 of 15,695 — history is full (oldest kept: step 14,272)')
+    expect(stepTextOf('lambda-0')).toBe('step 15,695 of 15,695 — history is full (oldest kept: step 14,272)')
     expect(undoButton()?.textContent).toBe('undo')
   })
 

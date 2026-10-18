@@ -1,7 +1,21 @@
 import type { EditorView } from '@codemirror/view'
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest'
-import { page, userEvent } from 'vitest/browser'
-import { focusInPage, resetToFourViews, SHELL, until } from './harness'
+import { page } from 'vitest/browser'
+import {
+  deleteEveryCopy,
+  editorsOf,
+  focusInPage,
+  host,
+  inCopiesMenu,
+  mounted,
+  press,
+  resetToFourViews,
+  SHELL,
+  stateIdle,
+  termEditorsIn,
+  titleText,
+  until,
+} from './harness'
 
 /**
  * A COPY DELETED, OR PAUSED, WHILE THE VIEW HOLDING ITS EDITOR IS OFF THE PAGE — the view layouts spec §5.5.
@@ -39,49 +53,9 @@ const LEGS: readonly Leg[] = [
   { name: 'asm', view: 'asm-0', kind: 'asm' },
 ]
 
-const leaf = (id: string): HTMLElement | null =>
-  document.querySelector<HTMLElement>(`#views [data-leaf="${id}"]:not([role="tab"])`)
-const titleText = (id: string): string => leaf(id)?.querySelector('.view-title')?.textContent ?? ''
-const mounted = (): string[] =>
-  [...document.querySelectorAll<HTMLElement>('#views [data-leaf]')]
-    .filter((el) => el.getAttribute('role') !== 'tab')
-    .map((el) => el.dataset.leaf as string)
-/** A press with the pointer on the one element `sel` names, which throws where there is none. */
-const press = async (sel: string): Promise<void> => {
-  const el = document.querySelector<HTMLElement>(sel)
-  if (el === null) throw new Error(`nothing to press at ${sel}`)
-  await userEvent.click(el)
-}
 /** Press the toggle of each leg but `leg`'s: from all four views to the source beside `leg`'s, and back. */
 const toggleTheOthers = async (leg: Leg): Promise<void> => {
   for (const other of LEGS) if (other !== leg) await press(`#views-shown button[data-shows="${other.kind}"]`)
-}
-/** The copy editors a view's host holds, on the page or off it. */
-const editorsIn = (host: HTMLElement | null): number => host?.querySelectorAll('.term-editor .cm-editor').length ?? 0
-const editors = (id: string): number => editorsIn(leaf(id))
-const copiesMenu = (): HTMLElement | null => document.querySelector<HTMLElement>('.buffer-list')
-/** Press a control of the copies menu by its name, opening the menu with a press where it is shut. */
-const inCopiesMenu = async (label: string): Promise<void> => {
-  if (copiesMenu()?.matches(':popover-open') !== true) await press('#buffers')
-  await press(`.buffer-list button[aria-label="${label}"]`)
-}
-const shutCopiesMenu = (): void => {
-  if (copiesMenu()?.matches(':popover-open') === true) copiesMenu()?.hidePopover()
-}
-
-/** Delete every copy, which leaves every view on the program — what each case starts from. */
-function deleteEveryCopy(): void {
-  for (let n = 0; n < 16; n += 1) {
-    shutCopiesMenu()
-    document.querySelector<HTMLButtonElement>('#buffers')?.click()
-    const del = document.querySelector<HTMLButtonElement>('.buffer-list button[aria-label^="delete "]')
-    if (del === null) {
-      shutCopiesMenu()
-      return
-    }
-    del.click()
-  }
-  throw new Error('the copies menu still lists a copy after 16 deletes')
 }
 
 /** What a case holds once its copy's editor is in a parked view. */
@@ -107,32 +81,32 @@ async function parkTheHolder(leg: Leg): Promise<Parked> {
   await toggleTheOthers(leg)
   expect(mounted(), 'precondition: the source beside the leg’s view').toEqual(['source', leg.view])
   expect(titleText(leg.view), 'precondition: the view starts on the program').toBe(`${leg.name} · program`)
-  leaf(leg.view)?.querySelector<HTMLButtonElement>('button.detach')?.click()
-  await until(() => / · copy \d+$/.test(titleText(leg.view)) && editors(leg.view) === 1, 'the copy and its editor')
-  const binding = leaf(leg.view)?.querySelector<HTMLElement>('button.view-title')?.dataset.binding ?? ''
+  host(leg.view)?.querySelector<HTMLButtonElement>('button.detach')?.click()
+  await until(() => / · copy \d+$/.test(titleText(leg.view)) && editorsOf(leg.view) === 1, 'the copy and its editor')
+  const binding = host(leg.view)?.querySelector<HTMLElement>('button.view-title')?.dataset.binding ?? ''
   const number = /^[a-z]+:scratch-(\d+)$/.exec(binding)?.[1]
   if (number === undefined) throw new Error(`the view’s title does not name a copy: ${JSON.stringify(binding)}`)
   const onCopy = `${leg.name} · copy ${number}`
   expect(titleText(leg.view), 'precondition: the view shows the copy its title names').toBe(onCopy)
 
-  leaf(leg.view)?.querySelector<HTMLElement>('button.view-title')?.focus()
+  host(leg.view)?.querySelector<HTMLElement>('button.view-title')?.focus()
   const before = new Set(mounted())
   document.querySelector<HTMLButtonElement>('#new-view')?.click()
   document.querySelector<HTMLButtonElement>(`#new-view-menu button[data-binding="${binding}"]`)?.click()
   const second = mounted().find((id) => !before.has(id))
   if (second === undefined) throw new Error('+ view added no second view of the copy')
   await until(() => titleText(second) === onCopy, 'the second view of the copy')
-  const holder = leaf(second)
+  const holder = host(second)
   if (holder === null) throw new Error('the second view has no host')
   holder.querySelector<HTMLButtonElement>('button.claim-editor')?.click()
-  await until(() => editorsIn(holder) === 1 && editors(leg.view) === 0, 'the editor to move to the second view')
+  await until(() => termEditorsIn(holder) === 1 && editorsOf(leg.view) === 0, 'the editor to move to the second view')
 
   await toggleTheOthers(leg)
   expect(mounted(), 'precondition: the second view is off the page').toEqual(FOUR)
   expect(holder.isConnected, 'precondition: the holder’s host is out of the document').toBe(false)
-  expect(editorsIn(holder), 'precondition: the parked view holds the copy’s editor').toBe(1)
+  expect(termEditorsIn(holder), 'precondition: the parked view holds the copy’s editor').toBe(1)
   expect(titleText(leg.view), 'precondition: the view on the page shows the copy').toBe(onCopy)
-  expect(editors(leg.view), 'precondition: the editor is not on the page').toBe(0)
+  expect(editorsOf(leg.view), 'precondition: the editor is not on the page').toBe(0)
   return { copy: `${leg.name} copy ${number}`, onCopy, onProgram: `${leg.name} · program`, second, holder }
 }
 
@@ -142,7 +116,7 @@ beforeAll(async () => {
   document.body.innerHTML = SHELL
   const view: EditorView = await (await import('../../src/main')).ready
   view.dispatch({ changes: { from: 0, to: view.state.doc.length, insert: 'let x = 40; x + 2' } })
-  await until(() => document.querySelector<HTMLElement>('#results')?.dataset.state === 'idle', 'the first compile')
+  await until(stateIdle, 'the first compile')
 })
 afterAll(() => window.removeEventListener('error', onError))
 
@@ -163,20 +137,20 @@ for (const leg of LEGS) {
       await focusInPage(`delete ${copy}, pressed in the copies menu`)
       await until(() => titleText(leg.view) === onProgram, 'the view on the page to move to the program')
       // BEFORE THE UNDO, AND BEFORE ANYTHING CAN THROW: the parked view shows the program now, and holds no editor.
-      expect(editorsIn(holder), 'the parked view still holds the editor of the copy it left').toBe(0)
+      expect(termEditorsIn(holder), 'the parked view still holds the editor of the copy it left').toBe(0)
 
       // THE DELETE OF THE LAST COPY SHUT THE MENU, and the pointer goes on to the notice.
       await press('#notice button.notice-action')
       await focusInPage(`the undo of ${copy}’s delete`)
-      await until(() => titleText(leg.view) === onCopy && editors(leg.view) === 1, 'the copy and an editor back')
+      await until(() => titleText(leg.view) === onCopy && editorsOf(leg.view) === 1, 'the copy and an editor back')
 
       // BACK TO THE ARRANGEMENT THAT HOLDS THE PARKED VIEW.
       await toggleTheOthers(leg)
       expect(mounted()).toEqual(['source', leg.view, second])
       expect(errors, 'a handler threw').toEqual([])
       expect(titleText(second)).toBe(onCopy)
-      expect(editors(leg.view), 'the view the copy came back to lost its editor').toBe(1)
-      expect(editors(second), 'the copy has an editor in each of its views').toBe(0)
+      expect(editorsOf(leg.view), 'the view the copy came back to lost its editor').toBe(1)
+      expect(editorsOf(second), 'the copy has an editor in each of its views').toBe(0)
     })
 
     it('is paused and resumed, and the parked view gives up the editor at the pause', async () => {
@@ -186,7 +160,7 @@ for (const leg of LEGS) {
       await focusInPage(`pause ${copy}, pressed in the copies menu`)
       await until(() => titleText(leg.view) === onProgram, 'the view on the page to move to the program')
       // A PAUSE THROWS NOTHING WITH THE STALE EDITOR LEFT IN PLACE, so this is the whole of what holds it.
-      expect(editorsIn(holder), 'the parked view still holds the editor of the copy it left').toBe(0)
+      expect(termEditorsIn(holder), 'the parked view still holds the editor of the copy it left').toBe(0)
 
       await inCopiesMenu(`resume ${copy} — restarts at step 0`)
       await focusInPage(`resume ${copy}, pressed in the copies menu`)
@@ -194,7 +168,7 @@ for (const leg of LEGS) {
       expect(mounted()).toEqual(['source', leg.view, second])
       expect(errors, 'a handler threw').toEqual([])
       expect(titleText(second), 'a resumed copy’s views stay on the program').toBe(onProgram)
-      expect(editors(second)).toBe(0)
+      expect(editorsOf(second)).toBe(0)
     })
   })
 }

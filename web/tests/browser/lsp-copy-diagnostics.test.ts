@@ -1,45 +1,11 @@
-import { EditorView } from '@codemirror/view'
+import type { EditorView } from '@codemirror/view'
 import { beforeAll, describe, expect, it } from 'vitest'
-import { SHELL, until } from './harness'
+import { editorViewOf, makeCopy } from './editor-view-fixture'
+import { idle, markersIn, paneOrThrow, retype, SHELL, until } from './harness'
 
 let view: EditorView
 
-const idle = () =>
-  document.querySelector<HTMLElement>('#results')?.dataset.state === 'idle' &&
-  (document.querySelector('#results')?.textContent ?? '') !== ''
-
-const paneHost = (leaf: string): HTMLElement => {
-  const el = document.querySelector<HTMLElement>(`[data-leaf="${leaf}"]`)
-  if (el === null) throw new Error(`no pane mounted at [data-leaf="${leaf}"]`)
-  return el
-}
-
-const editorViewOf = (pane: HTMLElement): EditorView => {
-  const host = pane.querySelector<HTMLElement>('.term-editor')
-  if (host === null) throw new Error('this pane has no mounted editor')
-  const v = EditorView.findFromDOM(host)
-  if (v === null) throw new Error('no CodeMirror view under the editor host')
-  return v
-}
-
-/** Error markers inside ONE pane's editor, so a source-editor marker cannot be mistaken for a copy's. */
-const markersIn = (pane: HTMLElement) => pane.querySelectorAll('.cm-editor .cm-lintRange-error').length
 const guttersIn = (pane: HTMLElement) => pane.querySelectorAll('.cm-editor .cm-lint-marker-error').length
-
-/** Make a copy of what this pane shows, through the control a user has. */
-async function makeCopy(pane: HTMLElement): Promise<EditorView> {
-  const button = pane.querySelector<HTMLButtonElement>('button.detach')
-  if (button === null) throw new Error('this view offers no `edit a copy` control')
-  expect(button.disabled, 'the fork control should be available on this machine').toBe(false)
-  button.click()
-  await until(() => pane.querySelector('.term-editor') !== null, 'the copy to mount its editor')
-  return editorViewOf(pane)
-}
-
-/** Replace a copy's text and wait past the edit debounce, which is what posts `didChange`. */
-function retype(v: EditorView, text: string): void {
-  v.dispatch({ changes: { from: 0, to: v.state.doc.length, insert: text } })
-}
 
 /** Click `format` in a view's `⋯` menu, the control a user has. */
 function formatVia(leaf: string): void {
@@ -69,7 +35,7 @@ describe('diagnostics in a copy', () => {
   })
 
   it('marks a broken machine in a TM copy, where nothing was ever marked before', async () => {
-    const pane = paneHost('tm-0')
+    const pane = paneOrThrow('tm-0')
     const editor = await makeCopy(pane)
 
     // A duplicate `tapes` line: one diagnostic, `duplicate \`tapes\` line`, measured against the
@@ -81,7 +47,7 @@ describe('diagnostics in a copy', () => {
   })
 
   it('clears them when the machine parses again', async () => {
-    const pane = paneHost('tm-0')
+    const pane = paneOrThrow('tm-0')
     const editor = editorViewOf(pane)
     retype(editor, 'tapes 1\ntapes 2\nstart s\nstate s: accept\n')
     await until(() => markersIn(pane) > 0, 'a marker before clearing')
@@ -91,7 +57,7 @@ describe('diagnostics in a copy', () => {
   })
 
   it('marks a broken term in a λ copy too', async () => {
-    const pane = paneHost('lambda-0')
+    const pane = paneOrThrow('lambda-0')
     const editor = await makeCopy(pane)
 
     retype(editor, '(\\x. x')
@@ -120,7 +86,7 @@ describe('format in a copy', () => {
    * holds the previous text.
    */
   it('reformats a copy without losing an edit made inside the debounce window', async () => {
-    const pane = paneHost('tm-0')
+    const pane = paneOrThrow('tm-0')
     const editor = editorViewOf(pane)
     // Settled first, so the server holds THIS text when the edit below lands.
     retype(editor, 'tapes 1\nstart s\n\nstate s: accept\n')
@@ -139,7 +105,7 @@ describe('format in a copy', () => {
   })
 
   it('leaves an unparseable copy alone', async () => {
-    const pane = paneHost('tm-0')
+    const pane = paneOrThrow('tm-0')
     const editor = editorViewOf(pane)
     retype(editor, 'tapes 1\ntapes 2\nstart s\nstate s: accept\n')
     await until(() => markersIn(pane) > 0, 'the copy to be broken')
@@ -165,7 +131,7 @@ describe('format on blur in a copy', () => {
     box.checked = true
     box.dispatchEvent(new Event('change'))
 
-    const pane = paneHost('tm-0')
+    const pane = paneOrThrow('tm-0')
     const editor = editorViewOf(pane)
     // A machine whose LAST edit is the accept state's name. If the flush did not happen, the server
     // would format the text as it was before this dispatch and `s_final` would vanish.
@@ -191,7 +157,7 @@ describe('navigation in a copy', () => {
    * own `navKeymap` with its own document, and reveals into itself rather than into `main.ts`'s view.
    */
   it('jumps to a state definition with F12 inside a TM copy', async () => {
-    const pane = paneHost('tm-0')
+    const pane = paneOrThrow('tm-0')
     const editor = editorViewOf(pane)
     retype(editor, 'tapes 1\nstart s\n\nstate s:\n  [_] -> write [_], move [R], goto t\n\nstate t: accept\n')
     await new Promise((r) => setTimeout(r, 400))

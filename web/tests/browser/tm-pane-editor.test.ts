@@ -1,8 +1,9 @@
 import { EditorView } from '@codemirror/view'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import type { PaneEvents } from '../../src/pane-chrome'
 import { TmPane } from '../../src/tm-pane'
-import type { TmProgram, TmState } from '../../src/types'
+import type { TmState } from '../../src/types'
+import { ONE_RULE_PROGRAM } from '../node/tm-machines'
+import { controlState, newPaneHost, paneEvents } from './harness'
 
 /**
  * Design §4.2/§4.1's split body, ported to the TM leg (5d-iv, Task 8): the editor mounted (or not)
@@ -14,50 +15,14 @@ import type { TmProgram, TmState } from '../../src/types'
  * body wiring built in the constructor and moved by `setEditor` directly, with nothing on the path to
  * it that needs `main()`.
  */
-const host = (): HTMLElement => {
-  const el = document.createElement('section')
-  el.className = 'pane'
-  document.body.append(el)
-  return el
-}
-
-/** `PaneEvents`'s members this pane's constructor reads, all inert — no test here clicks a transport
- * control. */
-const events = (): PaneEvents => ({
-  back: vi.fn(),
-  forward: vi.fn(),
-  toNewest: vi.fn(),
-  play: vi.fn(),
-  restart: vi.fn(),
-  extend: vi.fn(),
-  speed: () => 8,
-  setSpeed: vi.fn(),
-  rebind: vi.fn(),
-  editSink: () => vi.fn(),
-  collapse: vi.fn(),
-})
 
 const mountPane = (): { pane: TmPane; host: HTMLElement } => {
-  const el = host()
-  const pane = new TmPane(el, events())
+  const el = newPaneHost()
+  const pane = new TmPane(el, paneEvents())
   return { pane, host: el }
 }
 
-/**
- * A machine small enough to compare by identity, modelled on `tests/node/replies.test.ts`'s own
- * `PROGRAM` fixture — one state, one rule, one tape.
- */
-const PROGRAM: TmProgram = {
-  states: [{ name: 'pc0', accept: false, rules: [{ read: ['a'], write: ['b'], moves: ['R'], next: 0 }], instr: null }],
-  alphabet: ['a', 'b'],
-  tapes: 1,
-  width: 8,
-  start: 0,
-  listing: [],
-  labels: [],
-}
-
-/** One configuration over `PROGRAM`'s single tape, modelled on `tests/node/tape.test.ts`'s `state` helper. */
+/** One configuration over `ONE_RULE_PROGRAM`'s single tape, modelled on `tests/node/tape.test.ts`'s `state` helper. */
 const FRAME: TmState = {
   state: 0,
   step: 0,
@@ -68,16 +33,7 @@ const FRAME: TmState = {
   rule: 0,
 }
 
-const CONTROLS = {
-  canRestart: true,
-  canBack: false,
-  canForward: true,
-  canToNewest: true,
-  canPlay: true,
-  playing: false,
-  stepText: '0',
-  continueLabel: null,
-}
+const CONTROLS = controlState(false, '0')
 
 describe('the TM pane editor region', () => {
   beforeEach(() => {
@@ -121,7 +77,7 @@ describe('the TM pane editor region', () => {
   it('collapses the text panel and leaves the table renderer alone', () => {
     const { pane, host } = mountPane()
     pane.setEditor('tapes 1\n')
-    pane.setProgram(PROGRAM, ['TAPE'])
+    pane.setProgram(ONE_RULE_PROGRAM, ['TAPE'])
     pane.render(FRAME, CONTROLS)
     const rowsBefore = host.querySelectorAll('.state-row').length
     expect(rowsBefore).toBeGreaterThan(0)
@@ -158,17 +114,17 @@ describe('the TM pane editor region', () => {
     // 2. THE ASSERTION THAT FAILS ON THE COMMITTED CODE. Once a program and a frame exist, `render`'s
     // OTHER branch used to overwrite `#status` with only the per-frame line, dropping the sentence the
     // instant a tape moved. Both facts must be on screen together.
-    pane.setProgram(PROGRAM, ['TAPE'])
+    pane.setProgram(ONE_RULE_PROGRAM, ['TAPE'])
     pane.render(FRAME, CONTROLS)
     expect(host.textContent).toMatch(/no header/i)
-    expect(host.textContent).toContain(PROGRAM.states[0]?.name)
-    expect(host.textContent).toContain(`width ${PROGRAM.width}`)
+    expect(host.textContent).toContain(ONE_RULE_PROGRAM.states[0]?.name)
+    expect(host.textContent).toContain(`width ${ONE_RULE_PROGRAM.width}`)
 
     // 3. A later reply that fixes the header must clear the sentence, and the per-frame line survives.
     pane.setScratchStatus({ available: true, reason: '', width: 64, run: 'Running', header: true, reduction: null })
     pane.render(FRAME, CONTROLS)
     expect(host.textContent).not.toMatch(/no header/i)
-    expect(host.textContent).toContain(PROGRAM.states[0]?.name)
+    expect(host.textContent).toContain(ONE_RULE_PROGRAM.states[0]?.name)
 
     // 4. A pane that gives its editor up must stop narrating a scratch it no longer shows — the same
     // fabricated-state defect `LambdaPane.setDetached`'s own doc records, pointed the other way.
@@ -240,7 +196,7 @@ describe('the TM pane editor region', () => {
    */
   it('takes no vertical space with an empty value line', () => {
     const { pane, host } = mountPane()
-    pane.setProgram(PROGRAM, ['TAPE'])
+    pane.setProgram(ONE_RULE_PROGRAM, ['TAPE'])
     pane.setScratchStatus({ available: true, reason: '', width: 8, run: 'Running', header: true, reduction: null })
     pane.render(FRAME, CONTROLS)
     const at = (selector: string) => host.querySelector<HTMLElement>(selector)?.getBoundingClientRect()
@@ -318,15 +274,15 @@ describe('the TM pane editor region', () => {
       try {
         const heard: string[] = []
         let builtFor = 'copy 1'
-        const hostB = host()
-        const a = new TmPane(host(), {
-          ...events(),
+        const hostB = newPaneHost()
+        const a = new TmPane(newPaneHost(), {
+          ...paneEvents(),
           editSink: () => {
             const copy = builtFor
             return (src) => heard.push(`${copy}:${src}`)
           },
         })
-        const b = new TmPane(hostB, { ...events(), editSink: () => (src) => heard.push(`b:${src}`) })
+        const b = new TmPane(hostB, { ...paneEvents(), editSink: () => (src) => heard.push(`b:${src}`) })
         a.setEditor('tapes 1\n')
         const editor = a.takeEditor()
         if (editor === null) throw new Error('takeEditor returned null for a pane holding an editor')
@@ -372,8 +328,8 @@ describe('the TM pane editor region', () => {
 
     it('reports a debounced keystroke through the sink PaneEvents.editSink returned', () => {
       const onEdit = vi.fn()
-      const el = host()
-      const pane = new TmPane(el, { ...events(), editSink: () => onEdit })
+      const el = newPaneHost()
+      const pane = new TmPane(el, { ...paneEvents(), editSink: () => onEdit })
       pane.setEditor('tapes 1\n')
       const editorHost = el.querySelector<HTMLElement>('.term-editor')
       if (editorHost === null) throw new Error('the editor region was not mounted')

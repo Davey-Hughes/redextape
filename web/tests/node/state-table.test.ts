@@ -11,6 +11,7 @@ import {
   StateIndex,
 } from '../../src/state-table'
 import type { RuleView, StateView, TmProgram, TmState } from '../../src/types'
+import { tmStateOf } from './tm-machines'
 
 const rule = (next: number): RuleView => ({
   read: [null, 'a', null, null, null],
@@ -41,16 +42,7 @@ const program = (): TmProgram => ({
   labels: [],
 })
 
-const frame = (over: Partial<TmState> = {}): TmState => ({
-  state: 0,
-  step: 0,
-  heads: [0],
-  window_start: [0],
-  window: ['a'],
-  source_node: null,
-  rule: null,
-  ...over,
-})
+const frame = (over: Partial<TmState> = {}): TmState => tmStateOf(0, 0, 'a', over)
 
 describe('StateIndex', () => {
   it('counts one row per state plus one per rule', () => {

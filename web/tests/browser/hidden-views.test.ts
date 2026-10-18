@@ -4,7 +4,7 @@ import { LambdaTrees } from '../../src/lambda-trees'
 import { ruleCount } from '../../src/protocol'
 import { StateDiagram } from '../../src/state-diagram'
 import { TmPane } from '../../src/tm-pane'
-import { SHELL, until } from './harness'
+import { clickWorkspaceItem, compile, linkAt, SHELL, stageTab, tick, until } from './harness'
 
 /**
  * A view off the page costs nothing (Plan 7 part 4a, closing part 2b's "`replies.ts` paints disconnected
@@ -14,27 +14,6 @@ import { SHELL, until } from './harness'
 let view: EditorView
 /** The machine `beforeAll`'s own compile seeded a TM view with, before any view was hidden. */
 let baselineRules = -1
-
-const pick = (sel: string): void => {
-  document.querySelector<HTMLButtonElement>('#workspace')?.click()
-  document.querySelector<HTMLButtonElement>(`#workspace-menu ${sel}`)?.click()
-  const m = document.querySelector<HTMLElement>('#workspace-menu')
-  if (m?.matches(':popover-open')) m.hidePopover()
-}
-const tab = (leaf: string) => document.querySelector<HTMLElement>(`#views [role="tab"][data-leaf="${leaf}"]`)
-const idle = () => document.querySelector<HTMLElement>('#results')?.dataset.state === 'idle'
-const tick = () => new Promise((r) => setTimeout(r, 0))
-
-async function compile(src: string): Promise<void> {
-  view.dispatch({ changes: { from: 0, to: view.state.doc.length, insert: src } })
-  await until(() => !idle(), 'the compile to start')
-  await until(idle, 'the compile to finish')
-}
-
-function linkAt(pos: number): void {
-  view.dispatch({ selection: { anchor: pos } })
-  view.contentDOM.dispatchEvent(new KeyboardEvent('keydown', { key: "'", ctrlKey: true, cancelable: true }))
-}
 
 /** Walk the whole virtualized δ table and report whether any row is painted linked. */
 async function anyLinkedRow(): Promise<boolean> {
@@ -69,23 +48,23 @@ describe('views off the page', () => {
     document.body.innerHTML = SHELL
     view = await (await import('../../src/main')).ready
     const setProgram = vi.spyOn(TmPane.prototype, 'setProgram')
-    await compile('let x = 40; x + 2')
+    await compile(view, 'let x = 40; x + 2')
     const seeded = setProgram.mock.calls.at(-1)?.[0] ?? null
     baselineRules = seeded === null ? -1 : ruleCount(seeded)
     setProgram.mockRestore()
-    pick('[data-preset="stage"]')
-    tab('lambda-0')?.click()
+    clickWorkspaceItem('[data-preset="stage"]')
+    stageTab('lambda-0')?.click()
   })
 
   afterEach(() => vi.restoreAllMocks())
 
   it('does not hand a hidden TM view each compile, and seeds it when it is shown', async () => {
-    tab('lambda-0')?.click()
+    stageTab('lambda-0')?.click()
     await tick()
     const setProgram = vi.spyOn(TmPane.prototype, 'setProgram')
-    await compile('let y = 1; y + 1')
+    await compile(view, 'let y = 1; y + 1')
     expect(setProgram, 'the TM view is off the page').not.toHaveBeenCalled()
-    tab('tm-0')?.click()
+    stageTab('tm-0')?.click()
     await until(() => setProgram.mock.calls.length > 0, 'the shown TM view to be seeded')
     expect(document.querySelector('[data-leaf="tm-0"] .state-row')).not.toBeNull()
     const seeded = setProgram.mock.calls.at(-1)?.[0] ?? null
@@ -100,35 +79,35 @@ describe('views off the page', () => {
   // and drawn when its view is painted, and a view off the page is neither — so it costs nothing either, per compile
   // or per frame, until its tab is shown.
   it('groups and draws no state diagram for a hidden TM view, and does both once it is shown', async () => {
-    tab('lambda-0')?.click()
+    stageTab('lambda-0')?.click()
     await tick()
     const group = vi.spyOn(StateDiagram.prototype, 'setProgram')
     const paint = vi.spyOn(StateDiagram.prototype, 'render')
-    await compile('let z = 2; z + 3')
+    await compile(view, 'let z = 2; z + 3')
     expect(group, 'no grouping off the page').not.toHaveBeenCalled()
     expect(paint, 'no drawing off the page').not.toHaveBeenCalled()
-    tab('tm-0')?.click()
+    stageTab('tm-0')?.click()
     await until(() => group.mock.calls.length > 0, 'the shown view to group its states')
     await until(() => document.querySelector('[data-leaf="tm-0"] .program-row') !== null, 'the diagram to draw')
     expect(paint).toHaveBeenCalled()
   })
 
   it('asks for no λ tree for a hidden λ view', async () => {
-    tab('tm-0')?.click()
+    stageTab('tm-0')?.click()
     const want = vi.spyOn(LambdaTrees.prototype, 'want')
-    await compile('let z = 2; z + 2')
+    await compile(view, 'let z = 2; z + 2')
     expect(want, 'the λ view is off the page').not.toHaveBeenCalled()
-    tab('lambda-0')?.click()
+    stageTab('lambda-0')?.click()
     await until(() => want.mock.calls.length > 0, 'the shown λ view to ask for its tree')
   })
 
   it('reapplies a link made while it was hidden across the compile, once it is shown', async () => {
-    tab('lambda-0')?.click()
+    stageTab('lambda-0')?.click()
     await tick()
-    await compile('let w = 3; w + 2')
-    linkAt('let w = 3; w + 2'.indexOf('w + 2'))
+    await compile(view, 'let w = 3; w + 2')
+    linkAt(view, 'let w = 3; w + 2'.indexOf('w + 2'))
     await tick()
-    tab('tm-0')?.click()
+    stageTab('tm-0')?.click()
     await until(
       () => document.querySelector('[data-leaf="tm-0"] .state-row') !== null,
       'the shown TM view to draw rows',
@@ -141,14 +120,14 @@ describe('views off the page', () => {
     // itself, right after, finds it hidden. It is not in `unseen`, so `draw()`'s seed block never
     // runs for it; the fan-out in `setLinkTo` is what has to reach it, same as a view that was never
     // hidden at all.
-    tab('tm-0')?.click()
+    stageTab('tm-0')?.click()
     await tick()
-    await compile('let v = 41; v + 2')
-    tab('lambda-0')?.click()
+    await compile(view, 'let v = 41; v + 2')
+    stageTab('lambda-0')?.click()
     await tick()
-    linkAt('let v = 41; v + 2'.indexOf('v + 2'))
+    linkAt(view, 'let v = 41; v + 2'.indexOf('v + 2'))
     await tick()
-    tab('tm-0')?.click()
+    stageTab('tm-0')?.click()
     await tick()
     expect(await anyLinkedRow(), 'linked rows present in the shown TM view').toBe(true)
   })
@@ -157,23 +136,23 @@ describe('views off the page', () => {
     const src = 'let u = 43; u + 2'
     const p1 = src.indexOf('43')
     const p2 = src.indexOf('u + 2')
-    tab('tm-0')?.click()
+    stageTab('tm-0')?.click()
     await tick()
-    await compile(src)
+    await compile(view, src)
     // Pin `43` while the view is on the page, then hide it and move the pin to `u + 2` while it
     // cannot see the change — the view saw the compile, so it is not in `unseen` and `draw()`'s seed
     // block does not run for it either; only the fan-out reaches it, on both links.
-    linkAt(p1)
+    linkAt(view, p1)
     await tick()
     const before = await linkedSet()
-    tab('lambda-0')?.click()
+    stageTab('lambda-0')?.click()
     await tick()
-    linkAt(p2)
+    linkAt(view, p2)
     await tick()
-    tab('tm-0')?.click()
+    stageTab('tm-0')?.click()
     await tick()
     const shown = await linkedSet()
-    linkAt(p2)
+    linkAt(view, p2)
     await tick()
     const expected = await linkedSet()
     // NOT VACUOUS: two empty sets are equal, and so are two pins that mark the same rows.

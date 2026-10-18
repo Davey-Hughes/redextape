@@ -2,7 +2,7 @@ import { beforeAll, describe, expect, it } from 'vitest'
 import { page, userEvent } from 'vitest/browser'
 import { HEADER_ORDER } from '../../src/layout'
 import { STYLE_IDS } from '../../src/skin'
-import { chooseStyle, SHELL, until } from './harness'
+import { chooseStyle, frames, mountAt, pressed, toggle } from './harness'
 
 /**
  * THE FOCUS RING OF A `views` TOGGLE IS WHOLE, WHATEVER IS BESIDE IT — read off the page's own pixels.
@@ -22,14 +22,6 @@ import { chooseStyle, SHELL, until } from './harness'
  *
  * **THE KEYBOARD MOVES THE FOCUS**, so that `:focus-visible` matches: Tab, from the control before the group.
  */
-
-const toggle = (kind: string): HTMLButtonElement =>
-  document.querySelector<HTMLButtonElement>(`#views-shown button[data-shows="${kind}"]`) as HTMLButtonElement
-const pressed = (): string[] =>
-  [...document.querySelectorAll<HTMLButtonElement>('#views-shown button[aria-pressed="true"]')].map(
-    (b) => b.dataset.shows as string,
-  )
-const frame = (): Promise<void> => new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(() => r())))
 
 /** The header's pixels: a reader of the colour at a point of the page, as `r, g, b`. */
 async function headerPixels(): Promise<(x: number, y: number) => string> {
@@ -87,15 +79,10 @@ async function tabTo(button: HTMLElement): Promise<void> {
   for (let n = 0; n < 6 && document.activeElement !== button; n += 1) await userEvent.keyboard('{Tab}')
   expect(document.activeElement, 'precondition: Tab reached the toggle').toBe(button)
   expect(button.matches(':focus-visible'), 'precondition: the focus came by the keyboard').toBe(true)
-  await frame()
+  await frames()
 }
 
-beforeAll(async () => {
-  await page.viewport(1000, 700)
-  document.body.innerHTML = SHELL
-  await (await import('../../src/main')).ready
-  await until(() => document.querySelector<HTMLElement>('#results')?.dataset.state === 'idle', 'the first compile')
-})
+beforeAll(() => mountAt(1000, 700))
 
 describe('the focus ring of a views toggle', () => {
   it.each(STYLE_IDS)(

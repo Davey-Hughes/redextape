@@ -2,7 +2,7 @@ import { computeAccessibleDescription, computeAccessibleName } from 'dom-accessi
 import { beforeAll, describe, expect, it } from 'vitest'
 import { page, userEvent } from 'vitest/browser'
 import { BUILD } from '../../src/build-info'
-import { SHELL, until } from './harness'
+import { SHELL, stateIdle, until } from './harness'
 
 /**
  * **THE ABOUT MENU** — about pages design §5: just before settings, a popover of links to the four pages and the
@@ -17,7 +17,7 @@ const links = () => [...menu().querySelectorAll<HTMLAnchorElement>('a')]
 beforeAll(async () => {
   document.body.innerHTML = SHELL
   await (await import('../../src/main')).ready
-  await until(() => document.querySelector<HTMLElement>('#results')?.dataset.state === 'idle', 'the first compile')
+  await until(stateIdle, 'the first compile')
 })
 
 describe('the about menu', () => {

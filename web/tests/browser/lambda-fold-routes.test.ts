@@ -1,8 +1,10 @@
-import { afterEach, describe, expect, it, vi } from 'vitest'
-import { LambdaBody } from '../../src/lambda-body'
+import { afterEach, describe, expect, it } from 'vitest'
+import type { LambdaBody } from '../../src/lambda-body'
 import { codeLines, type Line, outlineLines } from '../../src/lambda-layout'
 import { KIND_APP, Tree } from '../../src/lambda-tree'
 import { wireOf } from '../node/tree-fixture'
+import { keyOnBody } from './harness'
+import { mountLambdaBody } from './lambda-body-fixture'
 
 /**
  * EVERYTHING A KEY OR A CLICK OPENS IN THE λ VIEW, ← FOLDS AGAIN — enumerated over the row shapes the two
@@ -22,26 +24,14 @@ import { wireOf } from '../node/tree-fixture'
  * token once claimed a chip it only ended.
  */
 
-function mount() {
-  const toggle = vi.fn()
-  const link = vi.fn()
-  const body = new LambdaBody({ toggle, link })
-  const host = document.createElement('section')
-  host.className = 'pane lambda-fold-routes-fixture'
-  host.style.width = '640px'
-  host.append(body.el)
-  document.body.append(host)
-  return { body, toggle, link }
-}
+const mount = () => mountLambdaBody('lambda-fold-routes-fixture')
 
 const rowAt = (i: number) =>
   document.querySelector<HTMLElement>(`.lambda-fold-routes-fixture .term-line[data-line="${i}"]`)
-const press = (body: LambdaBody, key: string) =>
-  body.el.dispatchEvent(new KeyboardEvent('keydown', { key, bubbles: true }))
 /** Put the active row on `row`, from the top, as a keyboard user would. */
 const moveTo = (body: LambdaBody, row: number) => {
-  press(body, 'Home')
-  for (let k = 0; k < row; k += 1) press(body, 'ArrowDown')
+  keyOnBody(body, 'Home')
+  for (let k = 0; k < row; k += 1) keyOnBody(body, 'ArrowDown')
 }
 
 /** The Church numeral `n` in `f` and `x`, which reads as the chip `n`. */
@@ -169,12 +159,12 @@ describe('everything a key or a click opens in the λ view, ← folds again', ()
       const strays = (lines: readonly Line[], state: string): string[] => {
         const start = (n: number) => lines.findIndex((l) => l.disclose === n || l.tokens.some((k) => k.node === n))
         const out: string[] = []
-        press(body, 'Home')
+        keyOnBody(body, 'Home')
         for (let r = 0; r < lines.length; r += 1) {
-          if (r > 0) press(body, 'ArrowDown')
+          if (r > 0) keyOnBody(body, 'ArrowDown')
           const gutter = rowAt(r)?.querySelector<HTMLElement>('.term-gutter[data-node]')
           toggle.mockClear()
-          press(body, 'ArrowLeft')
+          keyOnBody(body, 'ArrowLeft')
           const named: [string, number | undefined][] = [
             ['▸/▾', gutter ? Number(gutter.dataset.node) : undefined],
             ['←', toggle.mock.calls[0]?.[0]],
@@ -196,12 +186,12 @@ describe('everything a key or a click opens in the λ view, ← folds again', ()
       for (let r = 0; r < before.length; r += 1) {
         toggle.mockClear()
         moveTo(body, r)
-        press(body, 'ArrowRight')
+        keyOnBody(body, 'ArrowRight')
         const arrow = toggle.mock.calls[0]?.[0]
         toggle.mockClear()
         link.mockClear()
         moveTo(body, r)
-        press(body, 'Enter')
+        keyOnBody(body, 'Enter')
         const enter = toggle.mock.calls[0]?.[0]
         const linked = link.mock.calls.length > 0
         if (enter !== arrow || linked !== (arrow === undefined)) {
@@ -220,11 +210,11 @@ describe('everything a key or a click opens in the λ view, ← folds again', ()
       for (let r = 0; r < before.length; r += 1) {
         take(`row ${r} →`, () => {
           moveTo(body, r)
-          press(body, 'ArrowRight')
+          keyOnBody(body, 'ArrowRight')
         })
         take(`row ${r} Enter`, () => {
           moveTo(body, r)
-          press(body, 'Enter')
+          keyOnBody(body, 'Enter')
         })
         for (const tok of rowAt(r)?.querySelectorAll<HTMLElement>('.term-chip, .term-fold') ?? []) {
           take(`row ${r} click ${tok.textContent}`, () => tok.click())
@@ -245,7 +235,7 @@ describe('everything a key or a click opens in the λ view, ← folds again', ()
         const row = after.findIndex((l) => l.disclose === o.node || l.tokens.some((k) => k.node === o.node))
         toggle.mockClear()
         moveTo(body, row)
-        press(body, 'ArrowLeft')
+        keyOnBody(body, 'ArrowLeft')
         const key = toggle.mock.calls[0]?.[0] === o.node
         toggle.mockClear()
         rowAt(row)?.querySelector<HTMLElement>('.term-gutter[data-open="true"]')?.click()

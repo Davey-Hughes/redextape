@@ -2,7 +2,7 @@ import type { EditorView } from '@codemirror/view'
 import { afterEach, beforeAll, describe, expect, it } from 'vitest'
 import { userEvent } from 'vitest/browser'
 import { FIRST_LOAD } from '../../src/examples'
-import { SHELL, showFourViews, until } from './harness'
+import { bodyBackground, inNormalMode, resultsText, SHELL, showFourViews, stateIdle, text, until } from './harness'
 
 /**
  * **THE APP WHERE THIS SITE'S DATA IS BLOCKED** — Chrome with site data blocked, and the privacy modes that
@@ -66,11 +66,6 @@ const byId = <T extends HTMLElement>(id: string): T => {
   if (el === null) throw new Error(`no #${id} in the page`)
   return el as T
 }
-const resultsText = (): string => document.querySelector('#results')?.textContent ?? ''
-const idle = (): boolean => document.querySelector<HTMLElement>('#results')?.dataset.state === 'idle'
-const text = (): string => view.state.doc.toString()
-/** `@replit/codemirror-vim` marks the scroller while vim is installed and in normal mode. */
-const inNormalMode = (v: EditorView): boolean => v.scrollDOM.classList.contains('cm-vimMode')
 
 /** Open the settings menu with the pointer, if it is not open already. */
 async function openSettings(): Promise<void> {
@@ -95,13 +90,13 @@ beforeAll(async () => {
     subtree: true,
   })
   view = await (await import('../../src/main')).ready
-  await until(() => idle() && resultsText() !== '', 'the first compile')
+  await until(() => stateIdle() && resultsText() !== '', 'the first compile')
 })
 
 describe('with site data blocked', () => {
   it('starts, reads storage on the way, and compiles its program', () => {
     expect(reached, 'precondition: start-up never touched storage, so it never met the refusal').toBeGreaterThan(0)
-    expect(text(), 'a first visit opens on the first-load example').toBe(FIRST_LOAD.text)
+    expect(text(view), 'a first visit opens on the first-load example').toBe(FIRST_LOAD.text)
     expect(resultsText()).toContain('reductions')
     expect(resultsText()).toContain(`λ ${FIRST_LOAD.value} · `)
     const strip = byId('results').getBoundingClientRect()
@@ -117,9 +112,9 @@ describe('with site data blocked', () => {
     view.dispatch({ selection: { anchor: view.state.doc.length - 1 } })
     await until(() => view.hasFocus, 'the source editor to take focus')
     await userEvent.keyboard(' + 1')
-    expect(text()).toBe(`${FIRST_LOAD.text.slice(0, -1)} + 1\n`)
+    expect(text(view)).toBe(`${FIRST_LOAD.text.slice(0, -1)} + 1\n`)
     const value = String(Number(FIRST_LOAD.value) + 1)
-    await until(() => idle() && resultsText().includes(`λ ${value} · `), 'the edited program to compile')
+    await until(() => stateIdle() && resultsText().includes(`λ ${value} · `), 'the edited program to compile')
     expect(errors).toEqual([])
   })
 
@@ -143,15 +138,14 @@ describe('with site data blocked', () => {
   it('lets the style and the appearance be changed, and the page wears them', async () => {
     await openSettings()
     const root = document.documentElement
-    const background = () => getComputedStyle(document.body).backgroundColor
     const before = reached
     await userEvent.selectOptions(byId<HTMLSelectElement>('style'), 'paper')
     await userEvent.selectOptions(byId<HTMLSelectElement>('appearance-choice'), 'light')
     await until(() => root.dataset.style === 'paper' && root.dataset.theme === 'light', 'paper, light')
-    const light = background()
+    const light = bodyBackground()
     await userEvent.selectOptions(byId<HTMLSelectElement>('appearance-choice'), 'dark')
     await until(() => root.dataset.theme === 'dark', 'dark')
-    expect(background(), 'the page did not change colour').not.toBe(light)
+    expect(bodyBackground(), 'the page did not change colour').not.toBe(light)
     expect(reached, 'the choices never tried to reach storage').toBeGreaterThan(before)
     expect(errors).toEqual([])
   })
@@ -168,8 +162,8 @@ describe('with site data blocked', () => {
     view.focus()
     await until(() => view.hasFocus, 'the source editor to take focus')
     view.contentDOM.blur()
-    await until(() => text() !== UNFORMATTED, 'the program to format when the focus left')
-    expect(text()).toContain('fn fact(n) {\n')
+    await until(() => text(view) !== UNFORMATTED, 'the program to format when the focus left')
+    expect(text(view)).toContain('fn fact(n) {\n')
     expect(errors).toEqual([])
   })
 
@@ -188,7 +182,7 @@ describe('with site data blocked', () => {
    */
   it('still says that copies are not being saved, beside the program', async () => {
     await until(() => said.includes(PROGRAM_LINE), 'the program’s own refusal')
-    await until(() => idle() && resultsText().includes('λ 6 · '), 'the formatted program to compile')
+    await until(() => stateIdle() && resultsText().includes('λ 6 · '), 'the formatted program to compile')
     await closeSettings()
     // WITH NOTHING READABLE IN STORAGE THE PAGE OPENED ON THE SOURCE AND THE TM VIEW, so the λ view is asked for.
     expect(

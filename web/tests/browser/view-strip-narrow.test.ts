@@ -1,6 +1,19 @@
 import { beforeAll, describe, expect, it } from 'vitest'
 import { page, userEvent } from 'vitest/browser'
-import { SHELL, until } from './harness'
+import {
+  buttonOf,
+  centreOf,
+  innerOf,
+  isShown,
+  leafEl,
+  linesOf,
+  menuOfId,
+  presetOf,
+  SHELL,
+  space,
+  stateIdle,
+  until,
+} from './harness'
 
 /**
  * **EXPLORER'S STEP STRIPS ON A PHONE'S SCREEN** — each view's own step controls (`view-header.ts`'s `.view-steps`,
@@ -15,19 +28,13 @@ import { SHELL, until } from './harness'
  * it draws no scrollbar.) ONE MOUNT FOR THE FILE, for the reason every sibling gives.
  */
 
-const idle = () => document.querySelector<HTMLElement>('#results')?.dataset.state === 'idle'
-const buttonOf = (id: string) => document.querySelector<HTMLButtonElement>(`#${id}`) as HTMLButtonElement
-const menuOf = (id: string) => document.getElementById(buttonOf(id).getAttribute('aria-controls') ?? '') as HTMLElement
-const shown = (el: Element) => el.getClientRects().length > 0
-
 /** Explorer's three views that step, in the order the page draws them. The source view has no strip. */
 const STEPPED = ['lambda-0', 'asm-0', 'tm-0'] as const
 type Leaf = (typeof STEPPED)[number]
 
-const paneOf = (leaf: Leaf) => document.querySelector<HTMLElement>(`[data-leaf="${leaf}"]`) as HTMLElement
-const headerOf = (leaf: Leaf) => paneOf(leaf).querySelector<HTMLElement>('.view-header') as HTMLElement
+const headerOf = (leaf: Leaf) => leafEl(leaf).querySelector<HTMLElement>('.view-header') as HTMLElement
 const headingOf = (leaf: Leaf) => headerOf(leaf).querySelector<HTMLElement>('.view-title-heading') as HTMLElement
-const stripOf = (leaf: Leaf) => paneOf(leaf).querySelector<HTMLElement>('.view-steps') as HTMLElement
+const stripOf = (leaf: Leaf) => leafEl(leaf).querySelector<HTMLElement>('.view-steps') as HTMLElement
 const controlsOf = (leaf: Leaf) => stripOf(leaf).querySelector<HTMLElement>('.controls') as HTMLElement
 const stepOf = (leaf: Leaf) => controlsOf(leaf).querySelector<HTMLElement>('.step') as HTMLElement
 const extendOf = (leaf: Leaf) => controlsOf(leaf).querySelector<HTMLButtonElement>('.extend') as HTMLButtonElement
@@ -36,18 +43,9 @@ const SHORT = /^step [\d,]+ of [\d,]+$/
 
 /** Every box a view's strip draws, in the order it draws them: each control, the step text, the continue button. */
 const drawn = (leaf: Leaf): HTMLElement[] =>
-  [...controlsOf(leaf).querySelectorAll<HTMLElement>('button, select, .step')].filter(shown)
+  [...controlsOf(leaf).querySelectorAll<HTMLElement>('button, select, .step')].filter(isShown)
 const nameOf = (leaf: Leaf, el: HTMLElement): string =>
   `${leaf}’s ${el === stepOf(leaf) ? 'step text' : (el.getAttribute('aria-label') ?? el.textContent ?? '')}`
-const centreOf = (el: Element): number => {
-  const box = el.getBoundingClientRect()
-  return (box.top + box.bottom) / 2
-}
-/** The pane's padding box across: where its content may lie without the pane scrolling sideways. */
-const innerOf = (pane: HTMLElement): { readonly left: number; readonly right: number } => {
-  const left = pane.getBoundingClientRect().left + pane.clientLeft
-  return { left, right: left + pane.clientWidth }
-}
 /**
  * The width a view's header gives a row of its own: its content box. **MEASURED FROM THE HEADER, NOT FROM THE STRIP**:
  * a strip that gave up some of that row (a margin, a narrower box) would measure its own step text against its own
@@ -96,21 +94,6 @@ const hidesNothing = (leaf: Leaf): void => {
     expect.soft(el.scrollHeight, `${name}’s scroll height`).toBeLessThanOrEqual(el.clientHeight)
   }
 }
-/** A spacing token in pixels, as the page resolves it. */
-const space = (token: string): number => {
-  const probe = document.createElement('div')
-  probe.style.width = `var(${token})`
-  document.body.append(probe)
-  const width = probe.getBoundingClientRect().width
-  probe.remove()
-  return width
-}
-/** How many lines a box's text is set on: one per distinct top among its text's line boxes. */
-const linesOf = (el: Element): number => {
-  const range = document.createRange()
-  range.selectNodeContents(el)
-  return new Set([...range.getClientRects()].map((r) => Math.round(r.top))).size
-}
 type Row = { centre: number; top: number; bottom: number; readonly boxes: HTMLElement[] }
 /**
  * The rows a strip's boxes are set on, top to bottom, each from its first box's top to its last box's bottom, with
@@ -137,18 +120,11 @@ const rowGapsOf = (leaf: Leaf): number[] =>
 /** What each row of a strip holds, by each box's name (`boxNameOf`). */
 const rowNamesOf = (leaf: Leaf): string[][] => rowsOf(leaf).map((row) => row.boxes.map((el) => boxNameOf(leaf, el)))
 
-/** Put the workspace on `preset`, by the menu's own buttons. */
-const presetOf = (preset: string): void => {
-  buttonOf('workspace').click()
-  menuOf('workspace').querySelector<HTMLButtonElement>(`[data-preset="${preset}"]`)?.click()
-  if (menuOf('workspace').matches(':popover-open')) menuOf('workspace').hidePopover()
-}
-
 beforeAll(async () => {
   await page.viewport(1280, 800)
   document.body.innerHTML = SHELL
   await (await import('../../src/main')).ready
-  await until(idle, 'the first compile')
+  await until(stateIdle, 'the first compile')
 })
 
 type Line = {
@@ -174,7 +150,7 @@ const LINES: readonly Line[] = [
     holds: () => {
       for (const leaf of STEPPED) {
         expect(stepText(leaf), `precondition: ${leaf}’s short line`).toMatch(SHORT)
-        expect(shown(extendOf(leaf)), `precondition: no continue button in ${leaf}`).toBe(false)
+        expect(isShown(extendOf(leaf)), `precondition: no continue button in ${leaf}`).toBe(false)
       }
     },
   },
@@ -185,10 +161,10 @@ const LINES: readonly Line[] = [
     holds: () => {
       expect(stepText('lambda-0'), 'precondition: the λ view’s long line').toMatch(/history is full \(oldest kept: /)
       expect(extendOf('lambda-0').textContent, 'precondition: the λ view’s continue button').toBe('keep recording')
-      expect(shown(extendOf('lambda-0')), 'precondition: the continue button is drawn').toBe(true)
+      expect(isShown(extendOf('lambda-0')), 'precondition: the continue button is drawn').toBe(true)
       for (const leaf of ['asm-0', 'tm-0'] as const) {
         expect(stepText(leaf), `precondition: ${leaf}’s short line`).toMatch(SHORT)
-        expect(shown(extendOf(leaf)), `precondition: no continue button in ${leaf}`).toBe(false)
+        expect(isShown(extendOf(leaf)), `precondition: no continue button in ${leaf}`).toBe(false)
       }
     },
   },
@@ -211,9 +187,9 @@ async function at(line: Line, width: number, height: number): Promise<void> {
     'precondition: the views that draw a strip',
   ).toEqual([...STEPPED])
   for (const leaf of STEPPED) {
-    expect(shown(controlsOf(leaf)), `precondition: ${leaf}’s strip is drawn`).toBe(true)
+    expect(isShown(controlsOf(leaf)), `precondition: ${leaf}’s strip is drawn`).toBe(true)
     // A SIDEWAYS SCROLL WOULD BRING A CONTROL PAST THE VIEW'S EDGE BACK INTO VIEW, which is the defect this file holds.
-    expect(paneOf(leaf).scrollLeft, `precondition: ${leaf} is not scrolled sideways`).toBe(0)
+    expect(leafEl(leaf).scrollLeft, `precondition: ${leaf} is not scrolled sideways`).toBe(0)
   }
   line.holds()
 }
@@ -238,7 +214,7 @@ describe.each(LINES)('Explorer’s step strips, under $name', (line) => {
     presetOf('explorer')
     const before = stepText('lambda-0')
     await userEvent.click(buttonOf('examples'))
-    await userEvent.click(menuOf('examples').querySelector(`button[data-example="${line.example}"]`) as HTMLElement)
+    await userEvent.click(menuOfId('examples').querySelector(`button[data-example="${line.example}"]`) as HTMLElement)
     // THE LINE BEFORE THE PICK IS EXCLUDED BY NAME: the program it replaced also ends, in a line the short one's
     // pattern matches.
     await until(
@@ -247,7 +223,7 @@ describe.each(LINES)('Explorer’s step strips, under $name', (line) => {
         (line.long === null ? SHORT.test(stepText('lambda-0')) : stepText('lambda-0').includes('history is full')),
       `${line.name} in the λ view`,
     )
-    await until(idle, `${line.name}’s run to its result`)
+    await until(stateIdle, `${line.name}’s run to its result`)
     if (line.long === null) return
     extendOf(line.long).click()
     await until(() => /history is full \(oldest kept: /.test(stepText('lambda-0')), `${line.name}, kept recording`)
@@ -279,7 +255,7 @@ describe.each(LINES)('Explorer’s step strips, under $name', (line) => {
       for (const leaf of STEPPED) {
         expect.soft(namesOf(leaf), `${leaf}’s boxes`).toEqual(boxesFor(line, leaf))
         hidesNothing(leaf)
-        const inner = innerOf(paneOf(leaf))
+        const inner = innerOf(leafEl(leaf))
         const strip = stripOf(leaf).getBoundingClientRect()
         expect.soft(strip.left, `${leaf}’s strip’s left`).toBeGreaterThanOrEqual(inner.left)
         expect.soft(strip.right, `${leaf}’s strip’s right`).toBeLessThanOrEqual(inner.right)
@@ -300,7 +276,7 @@ describe.each(LINES)('Explorer’s step strips, under $name', (line) => {
         }
       }
       if (line.long !== null) {
-        const pane = paneOf(line.long)
+        const pane = leafEl(line.long)
         const extend = extendOf(line.long)
         expect.soft(linesOf(stepOf(line.long)), `${line.long}’s long step text’s lines`).toBeGreaterThan(1)
         expect.soft(linesOf(extend), 'keep recording’s lines').toBe(1)
@@ -316,7 +292,7 @@ describe.each(LINES)('Explorer’s step strips, under $name', (line) => {
         expect.soft(hit, 'what lies at keep recording’s centre').toBe(extend)
       }
     } finally {
-      for (const leaf of STEPPED) paneOf(leaf).scrollTop = 0
+      for (const leaf of STEPPED) leafEl(leaf).scrollTop = 0
       scrollTo(0, 0)
     }
   })
@@ -361,7 +337,7 @@ describe.each(LINES)('Explorer’s step strips, under $name', (line) => {
             .soft(Math.abs(gap - space('--space-1')), `${leaf}: a gap between rows, ${gap}px`)
             .toBeLessThanOrEqual(0.5)
         }
-        const inner = innerOf(paneOf(leaf))
+        const inner = innerOf(leafEl(leaf))
         expect
           .soft(stripOf(leaf).getBoundingClientRect().right, `${leaf}’s strip’s right`)
           .toBeLessThanOrEqual(inner.right)
@@ -369,7 +345,7 @@ describe.each(LINES)('Explorer’s step strips, under $name', (line) => {
       }
       const title = headingOf(leaf)
       const header = [...headerOf(leaf).querySelectorAll<HTMLElement>('.view-title, button, select, .step')].filter(
-        shown,
+        isShown,
       )
       for (const el of header) {
         expect.soft(Math.abs(centreOf(el) - centreOf(title)), `${nameOf(leaf, el)} on the title’s row`).toBeLessThan(1)

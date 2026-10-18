@@ -1,10 +1,23 @@
 import { EditorView } from '@codemirror/view'
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest'
-import { page, userEvent } from 'vitest/browser'
+import { userEvent } from 'vitest/browser'
 import { LAYOUT_STORAGE_KEY, type LayoutNode, leaves } from '../../src/layout'
 import { bindingKey } from '../../src/view-header'
 import { parseWorkspace } from '../../src/workspace'
-import { focusInPage, resetToFourViews, SHELL, until } from './harness'
+import {
+  copyNames,
+  deleteEveryCopyInline,
+  editorsOf,
+  focusInPage,
+  host,
+  hostKind,
+  mountAt,
+  mounted,
+  newLambdaViewItem,
+  resetToFourViews,
+  titleText,
+  until,
+} from './harness'
 
 /**
  * A SWITCH DOES NOT DESTROY THE VIEW THAT HOLDS AN ID ANOTHER TREE NAMES AS ANOTHER KIND — the view layouts spec §5.4.
@@ -40,31 +53,15 @@ const FOUR = ['source', 'lambda-0', 'asm-0', 'tm-0']
 const ALL = 'source+lambda+asm+tm'
 const PICKED = 'source+lambda+tm'
 
-const leaf = (id: string): HTMLElement | null =>
-  document.querySelector<HTMLElement>(`#views [data-leaf="${id}"]:not([role="tab"])`)
-const titleText = (id: string): string => leaf(id)?.querySelector('.view-title')?.textContent ?? ''
-const kindOf = (id: string): string => leaf(id)?.dataset.kind ?? ''
-const mounted = (): string[] =>
-  [...document.querySelectorAll<HTMLElement>('#views [data-leaf]')]
-    .filter((el) => el.getAttribute('role') !== 'tab')
-    .map((el) => el.dataset.leaf as string)
 /** A press on `kind`'s toggle with the pointer, after which the focus is somewhere in the page (spec §14 item 19). */
 const press = async (kind: string): Promise<void> => {
   await userEvent.click(document.querySelector(`#views-shown button[data-shows="${kind}"]`) as HTMLElement)
   await focusInPage(`a press on the ${kind} toggle`)
 }
 const editorOf = (id: string): HTMLElement | null =>
-  leaf(id)?.querySelector<HTMLElement>('.term-editor .cm-editor') ?? null
-const editors = (id: string): number => leaf(id)?.querySelectorAll('.term-editor .cm-editor').length ?? 0
+  host(id)?.querySelector<HTMLElement>('.term-editor .cm-editor') ?? null
 const textOf = (editor: HTMLElement | null): string | null =>
   editor === null ? null : (EditorView.findFromDOM(editor)?.state.doc.toString() ?? null)
-/** The copies menu's rows, read with the menu opened and shut again. */
-const copies = (): (string | null)[] => {
-  document.querySelector<HTMLButtonElement>('#buffers')?.click()
-  const rows = [...document.querySelectorAll<HTMLElement>('.buffer-list .buffer-row-name')].map((e) => e.textContent)
-  document.querySelector<HTMLElement>('.buffer-list')?.hidePopover()
-  return rows
-}
 
 /** The stored trees by key, the one on screen under `screen`, each as its leaves: `asm-0:tm`. */
 const storedTrees = (): Record<string, string[]> => {
@@ -92,28 +89,9 @@ const underTwoKinds = (): string[] => {
 /** Every view on the page is the kind the stored tree on screen says its leaf is. */
 const pageIsTheStoredTree = (): void => {
   expect(
-    mounted().map((id) => `${id}:${kindOf(id)}`),
+    mounted().map((id) => `${id}:${hostKind(id)}`),
     'the page is not the stored tree',
   ).toEqual(storedTrees().screen)
-}
-
-/** Delete every copy, which leaves every view on the program. */
-function deleteEveryCopy(): void {
-  const menu = (): HTMLElement | null => document.querySelector<HTMLElement>('.buffer-list')
-  const shut = (): void => {
-    if (menu()?.matches(':popover-open') === true) menu()?.hidePopover()
-  }
-  for (let n = 0; n < 16; n += 1) {
-    shut()
-    document.querySelector<HTMLButtonElement>('#buffers')?.click()
-    const del = document.querySelector<HTMLButtonElement>('.buffer-list button[aria-label^="delete "]')
-    if (del === null) {
-      shut()
-      return
-    }
-    del.click()
-  }
-  throw new Error('the copies menu still lists a copy after 16 deletes')
 }
 
 /**
@@ -125,13 +103,13 @@ function deleteEveryCopy(): void {
  */
 type CopysView = { title: string; row: string; editor: HTMLElement; inner: Element; text: string }
 async function pickThenCopy(): Promise<CopysView> {
-  const picker = leaf('asm-0')?.querySelector<HTMLButtonElement>('button.view-title')
+  const picker = host('asm-0')?.querySelector<HTMLButtonElement>('button.view-title')
   picker?.click()
   document
     .getElementById(picker?.getAttribute('aria-controls') ?? '')
     ?.querySelector<HTMLButtonElement>(`button[data-binding="${bindingKey('tm', 'source')}"]`)
     ?.click()
-  expect(kindOf('asm-0'), 'precondition: the pick made the asm view a TM view under its own id').toBe('tm')
+  expect(hostKind('asm-0'), 'precondition: the pick made the asm view a TM view under its own id').toBe('tm')
   expect(titleText('asm-0')).toBe('TM · program')
   expect(storedTrees()[ALL], 'precondition: the tree before the pick is remembered, with asm-0 an asm view').toEqual([
     'source:source',
@@ -141,36 +119,33 @@ async function pickThenCopy(): Promise<CopysView> {
   ])
   expect(underTwoKinds(), 'precondition: the pick left asm-0 under two kinds').toEqual(['asm-0'])
 
-  leaf('asm-0')?.querySelector<HTMLButtonElement>('button.detach')?.click()
-  await until(() => /^TM · copy \d+$/.test(titleText('asm-0')) && editors('asm-0') === 1, 'the copy and its editor')
+  host('asm-0')?.querySelector<HTMLButtonElement>('button.detach')?.click()
+  await until(() => /^TM · copy \d+$/.test(titleText('asm-0')) && editorsOf('asm-0') === 1, 'the copy and its editor')
   const title = titleText('asm-0')
   const row = `${title.replace(' · ', ' ')} · 1 view`
   const editor = editorOf('asm-0')
-  const inner = leaf('asm-0')?.firstElementChild
+  const inner = host('asm-0')?.firstElementChild
   const text = textOf(editor)
   if (editor === null || inner === null || inner === undefined || text === null)
     throw new Error('the copy’s view has no editor to recognise it by')
   expect(text.length, 'precondition: the copy’s editor holds the machine’s text').toBeGreaterThan(100)
-  expect(copies(), 'precondition: one view shows the copy').toEqual([row])
+  expect(copyNames(), 'precondition: one view shows the copy').toEqual([row])
   return { title, row, editor, inner, text }
 }
 
 /** The copy's view is on the page as it was left: its title, its elements, its text, and the copies menu's count. */
 function expectTheCopysView(was: CopysView, when: string): void {
   expect(titleText('asm-0'), `${when}: the view under asm-0 does not show the copy`).toBe(was.title)
-  expect(kindOf('asm-0'), when).toBe('tm')
-  expect(leaf('asm-0')?.firstElementChild, `${when}: the copy’s view was built again`).toBe(was.inner)
+  expect(hostKind('asm-0'), when).toBe('tm')
+  expect(host('asm-0')?.firstElementChild, `${when}: the copy’s view was built again`).toBe(was.inner)
   expect(editorOf('asm-0'), `${when}: the copy’s editor is another one`).toBe(was.editor)
   expect(textOf(editorOf('asm-0')), `${when}: the editor’s text`).toBe(was.text)
-  expect(copies(), when).toEqual([was.row])
+  expect(copyNames(), when).toEqual([was.row])
 }
 
 beforeAll(async () => {
   window.addEventListener('error', onError)
-  await page.viewport(1280, 896)
-  document.body.innerHTML = SHELL
-  await (await import('../../src/main')).ready
-  await until(() => document.querySelector<HTMLElement>('#results')?.dataset.state === 'idle', 'the first compile')
+  await mountAt(1280, 896)
 })
 afterAll(() => window.removeEventListener('error', onError))
 
@@ -178,11 +153,11 @@ afterAll(() => window.removeEventListener('error', onError))
 // default ids, and nothing remembered that names a view a case before it made.
 beforeEach(async () => {
   errors.length = 0
-  deleteEveryCopy()
+  deleteEveryCopyInline()
   await resetToFourViews()
   expect(mounted(), 'precondition: all four views').toEqual(FOUR)
-  expect(FOUR.map(kindOf), 'precondition: each view is its default kind').toEqual(['source', 'lambda', 'asm', 'tm'])
-  expect(copies(), 'precondition: no copies').toEqual([])
+  expect(FOUR.map(hostKind), 'precondition: each view is its default kind').toEqual(['source', 'lambda', 'asm', 'tm'])
+  expect(copyNames(), 'precondition: no copies').toEqual([])
   expect(underTwoKinds(), 'precondition: no id is under two kinds').toEqual([])
 })
 
@@ -193,7 +168,7 @@ describe('a TM view picked in the asm view’s title, showing a copy', () => {
     // THE λ TOGGLE: the source beside TM, which holds neither id. The copy's view is parked.
     await press('lambda')
     expect(mounted(), 'precondition: the source beside the TM view').toEqual(['source', 'tm-0'])
-    expect(copies(), 'the parked view stopped counting as a view of its copy').toEqual([was.row])
+    expect(copyNames(), 'the parked view stopped counting as a view of its copy').toEqual([was.row])
     expect(storedTrees()[PICKED], 'precondition: the picked tree is remembered, left last').toContain('asm-0:tm')
     expect(Object.keys(storedTrees()).at(-1), 'precondition: the picked tree is the last entry').toBe(PICKED)
     expect(underTwoKinds(), 'neither tree that names asm-0 was entered').toEqual(['asm-0'])
@@ -201,7 +176,7 @@ describe('a TM view picked in the asm view’s title, showing a copy', () => {
     // THE asm TOGGLE: the first visit of source, asm and TM, whose default names asm-0 as an asm view. SOFT, SO A
     // SWITCH THAT BUILT THAT VIEW OVER THE PARKED ONE IS REPORTED BY BOTH: the copy lost its view, and no id was new.
     await press('asm')
-    expect.soft(copies(), 'the switch destroyed the parked view of the copy').toEqual([was.row])
+    expect.soft(copyNames(), 'the switch destroyed the parked view of the copy').toEqual([was.row])
     const built = mounted().filter((id) => !FOUR.includes(id))
     expect.soft(built, 'the default’s asm view was not built under an id of its own').toHaveLength(1)
     const fresh = built[0] as string
@@ -232,9 +207,9 @@ describe('a TM view picked in the asm view’s title, showing a copy', () => {
     expect(second, 'the remembered tree’s asm view was not built under an id of its own').toHaveLength(1)
     expect(second[0], 'the two new views share an id').not.toBe(fresh)
     expect(mounted()).toEqual(['source', 'lambda-0', second[0], 'tm-0'])
-    expect(kindOf(second[0] as string)).toBe('asm')
+    expect(hostKind(second[0] as string)).toBe('asm')
     pageIsTheStoredTree()
-    expect(copies(), 'the switch destroyed the parked view of the copy').toEqual([was.row])
+    expect(copyNames(), 'the switch destroyed the parked view of the copy').toEqual([was.row])
     expect(underTwoKinds(), 'the tree that named asm-0 as an asm view was entered under that id').toEqual([])
 
     await press('asm')
@@ -249,7 +224,7 @@ describe('a TM view picked in the asm view’s title, showing a copy', () => {
     // THE asm TOGGLE: all four, remembered as the tree before the pick, which names asm-0 as an asm view. SOFT, AS
     // IN THE CASE ABOVE.
     await press('asm')
-    expect.soft(copies(), 'the switch destroyed the view of the copy it parked').toEqual([was.row])
+    expect.soft(copyNames(), 'the switch destroyed the view of the copy it parked').toEqual([was.row])
     const built = mounted().filter((id) => !FOUR.includes(id))
     expect.soft(built, 'the remembered tree’s asm view was not built under an id of its own').toHaveLength(1)
     const fresh = built[0] as string
@@ -274,7 +249,7 @@ describe('a TM view picked in the asm view’s title, showing a copy', () => {
     // A THIRD PRESS SHOWS THE ASM VIEW THE FIRST ONE BUILT, and mints nothing.
     await press('asm')
     expect(mounted()).toEqual(['source', 'lambda-0', fresh, 'tm-0'])
-    expect(copies()).toEqual([was.row])
+    expect(copyNames()).toEqual([was.row])
     expect(errors, 'a handler threw').toEqual([])
   })
 
@@ -289,16 +264,12 @@ describe('a TM view picked in the asm view’s title, showing a copy', () => {
     const was = await pickThenCopy()
     await press('lambda')
     expect(mounted(), 'precondition: the source beside the TM view').toEqual(['source', 'tm-0'])
-    expect(copies(), 'precondition: the parked view counts as a view of its copy').toEqual([was.row])
+    expect(copyNames(), 'precondition: the parked view counts as a view of its copy').toEqual([was.row])
 
-    leaf('tm-0')?.querySelector<HTMLElement>('button.view-title')?.focus()
+    host('tm-0')?.querySelector<HTMLElement>('button.view-title')?.focus()
     await userEvent.click(document.querySelector<HTMLButtonElement>('#new-view') as HTMLButtonElement)
-    const item = (): HTMLButtonElement | undefined =>
-      [...document.querySelectorAll<HTMLButtonElement>('#new-view-menu button')].find(
-        (b) => b.textContent === 'λ · program',
-      )
-    await until(() => item() !== undefined, '+ view’s λ · program')
-    await userEvent.click(item() as HTMLButtonElement)
+    await until(() => newLambdaViewItem() !== undefined, '+ view’s λ · program')
+    await userEvent.click(newLambdaViewItem() as HTMLButtonElement)
 
     const trees = storedTrees()
     expect(
@@ -309,7 +280,7 @@ describe('a TM view picked in the asm view’s title, showing a copy', () => {
       PICKED,
     )
     expect(trees[ALL], 'precondition: the tree for all four still names asm-0, as an asm view').toContain('asm-0:asm')
-    expect(copies(), 'a view no tree holds still counts as a view of its copy').toEqual([
+    expect(copyNames(), 'a view no tree holds still counts as a view of its copy').toEqual([
       was.row.replace('1 view', 'not shown'),
     ])
     expect(errors, 'a handler threw').toEqual([])

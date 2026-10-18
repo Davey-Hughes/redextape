@@ -1,7 +1,7 @@
 import { beforeAll, describe, expect, it } from 'vitest'
 import { LAYOUT_STORAGE_KEY } from '../../src/layout'
 import { PRESETS, parseWorkspace, serializeWorkspace } from '../../src/workspace'
-import { fourViewWorkspace, SHELL, showFourViews, until } from './harness'
+import { fourViewWorkspace, SHELL, showFourViews, stateIdle, until } from './harness'
 
 /**
  * **A STORED VERSION 2 WORKSPACE, THROUGH THE REAL APP** — Plan 7 part 2 spec §3. Seeded before `main.ts`
@@ -21,7 +21,7 @@ beforeAll(async () => {
   )
   document.body.innerHTML = SHELL
   await (await import('../../src/main')).ready
-  await until(() => document.querySelector<HTMLElement>('#results')?.dataset.state === 'idle', 'the first compile')
+  await until(stateIdle, 'the first compile')
 })
 
 const rulesToggle = (): HTMLButtonElement | null =>

@@ -1,8 +1,22 @@
 import { EditorView } from '@codemirror/view'
 import { beforeAll, describe, expect, it } from 'vitest'
 import { bindingKey } from '../../src/view-header'
-import { SHELL, until } from './harness'
+import {
+  buffersControl,
+  editorHost,
+  focusProgram,
+  idle,
+  lambdaHeading,
+  lambdaTermText,
+  lambdaTitle,
+  resultsText,
+  SHELL,
+  settled,
+  titleOf,
+  until,
+} from './harness'
 import { lambdaSettled } from './lambda-text'
+import { typeIntoScratchEditor } from './scratch-editor-fixture'
 
 /**
  * **WHAT ENDS A BUFFER, DRIVEN THROUGH THE APP** — design §4.3's table, and the row this task changes:
@@ -33,20 +47,6 @@ import { lambdaSettled } from './lambda-text'
  */
 
 let view: EditorView
-
-const resultsText = () => document.querySelector('#results')?.textContent ?? ''
-/**
- * `#results` READS THE FOCUSED VIEW'S SESSION (Plan 7 part 2 spec §9), so a read of the PROGRAM'S result
- * after a copy's view took the focus puts the focus on the program first.
- */
-const focusProgram = () => document.querySelector<HTMLElement>('[data-leaf="source"] .cm-content')?.focus()
-const term = () => document.querySelector('[data-leaf="lambda-0"] .term')?.textContent ?? ''
-const heading = () => document.querySelector('[data-leaf="lambda-0"] h2')?.textContent ?? ''
-const editorHost = () => document.querySelector<HTMLElement>('[data-leaf="lambda-0"] .term-editor')
-/** The title-selector of `leaf`'s view — the pair in force is its `data-binding`. */
-const titleOf = (leaf: string) => document.querySelector<HTMLButtonElement>(`[data-leaf="${leaf}"] button.view-title`)
-const selector = () => titleOf('lambda-0')
-const idle = () => document.querySelector<HTMLElement>('#results')?.dataset.state === 'idle' && resultsText() !== ''
 
 /** Every item `leaf`'s title menu offers, as `{ key, text }` — opens and closes the menu to read it. */
 function offered(leaf: string): { key: string; text: string }[] {
@@ -87,8 +87,6 @@ const bufferOption = (): { key: string; text: string } => {
   return only
 }
 
-const buffersButton = () => document.querySelector<HTMLButtonElement>('#buffers')
-
 /**
  * WHETHER THE HEADER IS ACTUALLY OFFERING THE CONTROL — computed `display`, not the `hidden` IDL
  * property.
@@ -100,7 +98,7 @@ const buffersButton = () => document.querySelector<HTMLButtonElement>('#buffers'
  * tester page, so this reads the rules the app ships rather than UA defaults.
  */
 const buffersDisplay = () => {
-  const button = buffersButton()
+  const button = buffersControl()
   if (button === null) throw new Error('no #buffers control in the header')
   return getComputedStyle(button).display
 }
@@ -111,25 +109,6 @@ const bufferRows = () => [...document.querySelectorAll<HTMLElement>('.buffer-row
 /** A row's retire control, reached by the accessible name that names ITS buffer rather than by index. */
 const retireControl = (name: string) =>
   document.querySelector<HTMLButtonElement>(`.buffer-list button[aria-label="delete ${name}"]`)
-
-/** `scratch-app.test.ts`'s own `settled`, and the same invariant argument applies — see its doc there. */
-async function settled(src: string): Promise<void> {
-  view.dispatch({ changes: { from: 0, to: view.state.doc.length, insert: src } })
-  await until(idle, `the app to settle on \`${src}\``)
-}
-
-/**
- * A real keystroke into the buffer's own editor — `scratch-edit.test.ts`'s helper, and its reason:
- * `ScratchEditor#setText` sets a `#seeding` flag for the duration of its dispatch so a fork's seed is
- * never mistaken for a keystroke, so calling it here would fire no recompile at all.
- */
-function typeIntoBufferEditor(text: string): void {
-  const host = editorHost()
-  if (host === null) throw new Error('no buffer editor mounted under [data-leaf="lambda-0"]')
-  const cmView = EditorView.findFromDOM(host)
-  if (cmView === null) throw new Error('no CodeMirror view mounted under the editor host')
-  cmView.dispatch({ changes: { from: 0, to: cmView.state.doc.length, insert: text } })
-}
 
 /**
  * **THIS FILE USED TO GUARD THE SHARED-ORIGIN RACE ITSELF, WITH A `beforeAll` CLEAR ON ENTRY AND AN
@@ -167,29 +146,29 @@ describe('a scratch buffer across a recompile of the source', () => {
    */
   it('keeps the pane on its buffer, still showing the term typed into it, and keeps the editor mounted', async () => {
     // STAGE 0 — a settled source program, and the λ pane on it.
-    await settled('let x = 40; x + 2')
-    expect(heading()).toBe('λ · program')
+    await settled(view, 'let x = 40; x + 2')
+    expect(lambdaHeading()).toBe('λ · program')
 
     // STAGE 1 — fork. The pane moves onto a minted buffer and an editor arrives over the wire.
     document.querySelector<HTMLButtonElement>('[data-leaf="lambda-0"] button.detach')?.click()
-    expect(heading()).toContain('copy · not linked')
+    expect(lambdaHeading()).toContain('copy · not linked')
     await until(() => editorHost() !== null, 'the editor to mount')
-    await until(() => term() !== '', 'the buffer to produce its first frame')
+    await until(() => lambdaTermText() !== '', 'the buffer to produce its first frame')
     const buffer = bufferOption()
     const label = buffer.text
     expect(label).toMatch(/^λ · copy \d+$/)
-    expect(selector()?.dataset.binding).toBe(buffer.key)
+    expect(lambdaTitle()?.dataset.binding).toBe(buffer.key)
 
     // STAGE 2 — TYPE A TERM NO SOURCE PROGRAM IN THIS TEST COULD PRODUCE. This is what makes the
     // assertion after the recompile mean "the buffer's own work is still there" rather than "a λ
     // session is still bound": `(λa. a a) (λb. b)` is the user's text, reduced on the buffer's own
     // thread, and it is neither the source's old program nor its new one.
     await lambdaSettled()
-    const seeded = term()
-    typeIntoBufferEditor('(λa. a a) (λb. b)')
-    await until(() => term() !== seeded, 'the edited buffer to recompile')
+    const seeded = lambdaTermText()
+    typeIntoScratchEditor('(λa. a a) (λb. b)', 'no buffer editor mounted under [data-leaf="lambda-0"]')
+    await until(() => lambdaTermText() !== seeded, 'the edited buffer to recompile')
     await lambdaSettled()
-    const edited = term()
+    const edited = lambdaTermText()
     expect(edited).not.toBe('')
     expect(edited).toContain('λ')
 
@@ -200,8 +179,8 @@ describe('a scratch buffer across a recompile of the source', () => {
     // first synchronously and then again once the source has actually finished compiling.
     view.dispatch({ changes: { from: 0, to: view.state.doc.length, insert: 'let z = 9; z * 3' } })
 
-    expect(heading()).toContain('copy · not linked')
-    expect(selector()?.dataset.binding).toBe(buffer.key)
+    expect(lambdaHeading()).toContain('copy · not linked')
+    expect(lambdaTitle()?.dataset.binding).toBe(buffer.key)
     expect(editorHost()).not.toBeNull()
 
     // AND THE SOURCE REALLY DID RECOMPILE — 27, from a program the pane is not showing. Without this
@@ -212,11 +191,11 @@ describe('a scratch buffer across a recompile of the source', () => {
     // THE ASSERTION. The pane is still on its buffer, the buffer is still in the λ group under the name
     // it was minted with, and the term is the one the user typed — not the source's new λ leg, and not
     // a re-seed of the buffer from it.
-    expect(heading()).toContain('copy · not linked')
+    expect(lambdaHeading()).toContain('copy · not linked')
     expect(bufferOption().text).toBe(label)
-    expect(selector()?.dataset.binding).toBe(buffer.key)
-    expect(selector()?.dataset.binding).not.toBe(bindingKey('lambda', 'source'))
-    expect(term()).toBe(edited)
+    expect(lambdaTitle()?.dataset.binding).toBe(buffer.key)
+    expect(lambdaTitle()?.dataset.binding).not.toBe(bindingKey('lambda', 'source'))
+    expect(lambdaTermText()).toBe(edited)
     // AND THE EDITOR IS STILL THERE TO GO ON TYPING IN — the retire took it down with the session
     // (`§4.3`: "the text in the box is lost"), and nothing takes it down now.
     expect(editorHost()).not.toBeNull()
@@ -262,7 +241,7 @@ describe('the header buffer list', () => {
     const buffer = bufferOption()
     const label = buffer.text.replace(/^λ · /, 'λ ')
     expect(label).toMatch(/^λ copy \d+$/)
-    const button = buffersButton()
+    const button = buffersControl()
     expect(buffersDisplay()).not.toBe('none')
     expect(button?.textContent).toBe('copies 1 ▾')
 

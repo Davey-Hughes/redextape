@@ -8,6 +8,7 @@ import { TmPane } from '../../src/tm-pane'
 import type { LambdaState, TmProgram, TmState } from '../../src/types'
 import { DEFAULT_DISPLAY } from '../../src/workspace'
 import { wireOf } from '../node/tree-fixture'
+import { boundary, controlState, drag, frame, heightOf, region } from './harness'
 
 /**
  * THE REGIONS THAT DO NOT START WITH A SHARE, AND THE ONE THAT TAKES THE REST — the view layouts spec §11.1.
@@ -19,16 +20,7 @@ import { wireOf } from '../node/tree-fixture'
  * height, takes what its view has spare.
  */
 
-const CONTROLS = {
-  canRestart: true,
-  canBack: false,
-  canForward: true,
-  canToNewest: true,
-  canPlay: true,
-  playing: false,
-  stepText: '0',
-  continueLabel: null,
-}
+const CONTROLS = controlState(false, '0')
 
 const events = (over: Partial<PaneEvents> = {}): PaneEvents => ({
   back: vi.fn(),
@@ -53,20 +45,6 @@ const hostOf = (kind: string, height: number, width = 640): HTMLElement => {
   el.style.width = `${width}px`
   document.body.append(el)
   return el
-}
-const heightOf = (el: Element): number => el.getBoundingClientRect().height
-const frame = (): Promise<void> => new Promise((r) => requestAnimationFrame(() => r()))
-const region = (host: HTMLElement, name: string) => host.querySelector(`[data-region="${name}"]`) as HTMLElement
-const boundary = (host: HTMLElement, above: string, below: string) =>
-  host.querySelector(`.panel-boundary[data-above="${above}"][data-below="${below}"]`) as HTMLElement
-
-/** A real drag of `handle` by `dy` pixels, both ends aimed inside `host`. */
-async function drag(host: HTMLElement, handle: HTMLElement, dy: number): Promise<void> {
-  const [h, area] = [handle.getBoundingClientRect(), host.getBoundingClientRect()]
-  const x = h.left - area.left + h.width / 2
-  const y = h.top - area.top + h.height / 2
-  await userEvent.dragAndDrop(host, host, { sourcePosition: { x, y }, targetPosition: { x, y: y + dy } })
-  await frame()
 }
 
 beforeAll(async () => {

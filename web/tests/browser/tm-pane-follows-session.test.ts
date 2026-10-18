@@ -1,10 +1,9 @@
 import { EditorView } from '@codemirror/view'
-import { beforeAll, describe, expect, it, vi } from 'vitest'
+import { beforeAll, describe, expect, it } from 'vitest'
 import { page } from 'vitest/browser'
 import FIXTURE from '../../../crates/redextape-core/tests/fixtures/five_minus_three_single_tape.tm?raw'
 import { LambdaTrees } from '../../src/lambda-trees'
 import type { LinkWiring } from '../../src/link-wiring'
-import type { PaneEvents } from '../../src/pane-chrome'
 import { PaneCollection } from '../../src/panes'
 import type { RunReply, RunRequest } from '../../src/protocol'
 import { createReplies } from '../../src/replies'
@@ -12,9 +11,21 @@ import { ScratchBuffers } from '../../src/scratch'
 import { type PoolPort, SessionPool } from '../../src/session-client'
 import { PaneSlot, SessionRegistry } from '../../src/sessions'
 import { TmPane } from '../../src/tm-pane'
-import type { TmProgram, TmScratchStatus } from '../../src/types'
+import type { TmScratchStatus } from '../../src/types'
 import { bindingKey } from '../../src/view-header'
-import { SHELL, until } from './harness'
+import { ONE_RULE_PROGRAM } from '../node/tm-machines'
+import {
+  paneEvents,
+  paneOrThrow,
+  recorded,
+  recordingOver,
+  SHELL,
+  stateIdle,
+  statusOf,
+  stepLineOf,
+  tmLeaves,
+  until,
+} from './harness'
 
 /**
  * **A TM PANE SHOWS WHAT ITS SESSION HOLDS, WHETHER OR NOT IT HOLDS THE EDITOR** — Important finding, whole-branch
@@ -40,16 +51,6 @@ import { SHELL, until } from './harness'
  * `tests/node/replies.test.ts`'s `scratchDriver` uses. It runs first, before the app is mounted over the page.
  */
 
-const PROGRAM: TmProgram = {
-  states: [{ name: 'pc0', accept: false, rules: [{ read: ['a'], write: ['b'], moves: ['R'], next: 0 }], instr: null }],
-  alphabet: ['a', 'b'],
-  tapes: 1,
-  width: 8,
-  start: 0,
-  listing: [],
-  labels: [],
-}
-
 const REDUCED: TmScratchStatus = {
   available: true,
   reason: '',
@@ -58,21 +59,6 @@ const REDUCED: TmScratchStatus = {
   header: true,
   reduction: { stages: ['single-tape'], steps: 241_666 },
 }
-
-/** `PaneEvents`'s members a `TmPane`'s constructor reads, all inert — `tm-pane-editor.test.ts`'s `events`. */
-const inertEvents = (): PaneEvents => ({
-  back: vi.fn(),
-  forward: vi.fn(),
-  toNewest: vi.fn(),
-  play: vi.fn(),
-  restart: vi.fn(),
-  extend: vi.fn(),
-  speed: () => 8,
-  setSpeed: vi.fn(),
-  rebind: vi.fn(),
-  editSink: () => vi.fn(),
-  collapse: vi.fn(),
-})
 
 describe('a TM buffer whose worker died', () => {
   it('tells every TM pane on the buffer, not only the one holding the editor', () => {
@@ -93,7 +79,7 @@ describe('a TM buffer whose worker died', () => {
     const made = ['held', 'split'].map((leaf) => {
       const host = document.createElement('section')
       document.body.append(host)
-      const pane = new TmPane(host, inertEvents())
+      const pane = new TmPane(host, paneEvents())
       panes.add({ id: leaf, kind: 'tm', slot: new PaneSlot('tm', id), pane, host })
       return { pane, host }
     })
@@ -115,7 +101,13 @@ describe('a TM buffer whose worker died', () => {
       notify: () => undefined,
     })
 
-    replies.onScratchReply(id, { kind: 'tm-scratch-compiled', gen: 1, tm: REDUCED, tmProgram: PROGRAM, tapeNames: [] })
+    replies.onScratchReply(id, {
+      kind: 'tm-scratch-compiled',
+      gen: 1,
+      tm: REDUCED,
+      tmProgram: ONE_RULE_PROGRAM,
+      tapeNames: [],
+    })
     replies.onScratchReply(id, {
       kind: 'tm-value',
       gen: 1,
@@ -146,7 +138,7 @@ describe('a TM pane told it is attached', () => {
   it('forgets a buffer’s sentence and value', () => {
     const host = document.createElement('section')
     document.body.append(host)
-    const pane = new TmPane(host, inertEvents())
+    const pane = new TmPane(host, paneEvents())
     pane.setDetached(true)
     pane.setScratchStatus(REDUCED)
     pane.setScratchValue({ run: { run: 'Ended', steps: 241_666, cap: 241_666 }, value: { Value: { text: '2' } } })
@@ -162,35 +154,27 @@ describe('a TM pane told it is attached', () => {
   })
 })
 
-const leaf = (id: string): HTMLElement => {
-  const el = document.querySelector<HTMLElement>(`[data-leaf="${id}"]`)
-  if (el === null) throw new Error(`no pane at [data-leaf="${id}"]`)
-  return el
-}
-const statusOf = (id: string) => leaf(id).querySelector('.tm-status')?.textContent ?? ''
-const valueTextOf = (id: string) => leaf(id).querySelector('.tm-value')?.textContent ?? ''
-const stepLineOf = (id: string) => leaf(id).querySelector('.step')?.textContent ?? ''
-/** The newest step a step line counts, 0 while it counts none: 72,000 from `step 72,000 of 72,000…`. */
-const recorded = (line: string) => Number(/of ([\d,]+)/.exec(line)?.[1]?.replaceAll(',', '') ?? 0)
-/** Whether a step line says its recording has stopped: a count, and no `…` after it. */
-const recordingOver = (line: string) => line.startsWith('step ') && !line.includes('…')
+const valueTextOf = (id: string) => paneOrThrow(id, 'no pane at').querySelector('.tm-value')?.textContent ?? ''
 /** About half the fixture's first recording, which stops with its history full at step 145,903. */
 const FIXTURE_HALF = 72_000
-const labelsOf = (id: string) => [...leaf(id).querySelectorAll('.tape-label')].map((e) => e.textContent)
+const labelsOf = (id: string) =>
+  [...paneOrThrow(id, 'no pane at').querySelectorAll('.tape-label')].map((e) => e.textContent)
 /**
  * The δ table's scroll range, which is its row count times `ROW_HEIGHT`: a fact about the MACHINE the pane holds,
  * unlike the rows themselves, which are a window that moves with the running state.
  */
-const tableHeightOf = (id: string) => leaf(id).querySelector<HTMLElement>('.state-spacer')?.style.height ?? ''
+const tableHeightOf = (id: string) =>
+  paneOrThrow(id, 'no pane at').querySelector<HTMLElement>('.state-spacer')?.style.height ?? ''
 /** The fork control as `CopyEditor.#refreshDetach` leaves it: `absent`, `disabled: <its reason>`, or `enabled`. */
 const forkOf = (id: string) => {
-  const button = leaf(id).querySelector<HTMLButtonElement>('button.detach')
+  const button = paneOrThrow(id, 'no pane at').querySelector<HTMLButtonElement>('button.detach')
   return button === null ? 'absent' : button.disabled ? `disabled: ${button.title}` : 'enabled'
 }
-const selectOf = (id: string) => leaf(id).querySelector<HTMLButtonElement>('button.view-title')?.dataset.binding
+const selectOf = (id: string) =>
+  paneOrThrow(id, 'no pane at').querySelector<HTMLButtonElement>('button.view-title')?.dataset.binding
 /** Every pair `id`'s title menu offers, as keys — opens and closes the menu to read it. */
 function offered(id: string): string[] {
-  const title = leaf(id).querySelector<HTMLButtonElement>('button.view-title')
+  const title = paneOrThrow(id, 'no pane at').querySelector<HTMLButtonElement>('button.view-title')
   if (title === null) return []
   title.click()
   const menu = document.getElementById(title.getAttribute('aria-controls') ?? '')
@@ -198,8 +182,6 @@ function offered(id: string): string[] {
   menu?.hidePopover()
   return keys
 }
-const tmLeaves = () =>
-  [...document.querySelectorAll<HTMLElement>('[data-kind="tm"]')].map((el) => el.dataset.leaf ?? '')
 
 /**
  * Split `id` to the right through its `⋯` menu and answer the leaf it created — `pick` is `'same'`
@@ -207,7 +189,7 @@ const tmLeaves = () =>
  */
 async function split(id: string, pick: string): Promise<string> {
   const before = tmLeaves()
-  const more = leaf(id).querySelector<HTMLButtonElement>('button.view-more')
+  const more = paneOrThrow(id, 'no pane at').querySelector<HTMLButtonElement>('button.view-more')
   if (more === null) throw new Error(`no view menu on [data-leaf="${id}"]`)
   more.click()
   const menu = document.getElementById(more.getAttribute('aria-controls') ?? '')
@@ -230,7 +212,7 @@ async function split(id: string, pick: string): Promise<string> {
 
 /** Pick `(tm, session)` in a view's own title menu, the gesture a user makes. */
 function rebind(id: string, session: string): void {
-  const title = leaf(id).querySelector<HTMLButtonElement>('button.view-title')
+  const title = paneOrThrow(id, 'no pane at').querySelector<HTMLButtonElement>('button.view-title')
   if (title === null) throw new Error(`no title-selector on [data-leaf="${id}"]`)
   title.click()
   const menu = document.getElementById(title.getAttribute('aria-controls') ?? '')
@@ -240,7 +222,7 @@ function rebind(id: string, session: string): void {
 }
 
 function close(id: string): void {
-  leaf(id).querySelector<HTMLButtonElement>('button[aria-label="close this view"]')?.click()
+  paneOrThrow(id, 'no pane at').querySelector<HTMLButtonElement>('button[aria-label="close this view"]')?.click()
 }
 
 /** The source program's δ table height, read off `tm-0` before it is bound to the buffer. */
@@ -287,8 +269,11 @@ async function visitNewBuffer(session: string): Promise<void> {
   document.querySelector<HTMLButtonElement>('.buffer-list button.new-tm')?.click()
   await until(() => offered('tm-0').includes(bindingKey('tm', session)), `${session} to be offered`)
   rebind('tm-0', session)
-  await until(() => leaf('tm-0').querySelector('.cm-editor') !== null, `the ${session} editor to mount`)
-  const dom = leaf('tm-0').querySelector<HTMLElement>('.cm-editor')
+  await until(
+    () => paneOrThrow('tm-0', 'no pane at').querySelector('.cm-editor') !== null,
+    `the ${session} editor to mount`,
+  )
+  const dom = paneOrThrow('tm-0', 'no pane at').querySelector<HTMLElement>('.cm-editor')
   const editor = dom === null ? null : EditorView.findFromDOM(dom)
   if (editor === null) throw new Error(`the ${session} editor has no view`)
   expect(statusOf('tm-0'), `precondition: ${session} has not built`).not.toContain('reduced:')
@@ -357,7 +342,7 @@ describe('a TM pane rebound, cooled or retired off a reduced buffer', () => {
     document.body.innerHTML = SHELL
     const view: EditorView = await (await import('../../src/main')).ready
     view.dispatch({ changes: { from: 0, to: view.state.doc.length, insert: 'let x = 40; x + 2' } })
-    await until(() => document.querySelector<HTMLElement>('#results')?.dataset.state === 'idle', 'the first compile')
+    await until(stateIdle, 'the first compile')
     await until(() => tableHeightOf('tm-0') !== '' && tableHeightOf('tm-0') !== '0px', 'the source machine to draw')
     sourceTable = tableHeightOf('tm-0')
     await visitNewBuffer('scratch-1')

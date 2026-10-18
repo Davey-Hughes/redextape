@@ -2,59 +2,22 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { cdp, page } from 'vitest/browser'
 import { LINE_HEIGHT } from '../../src/lambda-body'
 import { LambdaPane } from '../../src/lambda-pane'
-import type { PaneEvents } from '../../src/pane-chrome'
 import type { LambdaState } from '../../src/types'
+import { lambdaFrame } from '../node/session-fixtures'
 import { wireOf } from '../node/tree-fixture'
-import { until } from './harness'
+import { controlState, fixtureHost, frames, inertEvents, scrolled, until } from './harness'
 
 /**
  * The λ view's `follow redex` header action (spec §5.3). The pane is built directly, as `lambda-display`'s
  * are — nothing here needs `main()`.
  */
-const host = (): HTMLElement => {
-  const el = document.createElement('section')
-  el.className = 'pane lambda-follow-fixture'
-  el.style.width = '640px'
-  document.body.append(el)
-  return el
-}
+const host = (): HTMLElement => fixtureHost('lambda-follow-fixture')
 
-const events = (): PaneEvents => ({
-  back: vi.fn(),
-  forward: vi.fn(),
-  toNewest: vi.fn(),
-  play: vi.fn(),
-  restart: vi.fn(),
-  extend: vi.fn(),
-  speed: () => 8,
-  setSpeed: vi.fn(),
-  rebind: vi.fn(),
-})
-
-const frame: LambdaState = {
-  text: 'λx. x',
-  spans: new Uint8Array(),
-  cut: null,
-  step: 0,
-  redex_span: null,
-  owner: 'None',
-}
-const CONTROLS = {
-  canRestart: true,
-  canBack: false,
-  canForward: true,
-  canToNewest: true,
-  canPlay: true,
-  playing: false,
-  stepText: '0',
-  continueLabel: null,
-}
+const frame = lambdaFrame('λx. x')
+const CONTROLS = controlState(false, '0')
 
 /** `f a0 … a399`, then a redex last: a spine of one argument per line, far taller than the view. */
 const TALL = `f ${Array.from({ length: 400 }, (_, i) => `a${i}`).join(' ')} ((\\y. y) z)`
-
-/** Two animation frames: long enough for the browser to deliver a scroll's own event. */
-const frames = () => new Promise<void>((r) => requestAnimationFrame(() => requestAnimationFrame(() => r())))
 
 afterEach(() => {
   for (const el of document.querySelectorAll('.lambda-follow-fixture')) el.remove()
@@ -68,7 +31,7 @@ describe('a λ view’s follow redex action', () => {
    */
   it('appears once a user scroll detaches the view, and re-attaches it', async () => {
     const el = host()
-    const pane = new LambdaPane(el, events())
+    const pane = new LambdaPane(el, inertEvents())
     pane.render(frame, CONTROLS)
     pane.renderTree({ kind: 'tree', tree: wireOf(TALL) })
     await frames()
@@ -98,7 +61,7 @@ describe('a λ view’s follow redex action', () => {
    */
   it('is not offered while the view shows flat text', async () => {
     const el = host()
-    const pane = new LambdaPane(el, events())
+    const pane = new LambdaPane(el, inertEvents())
     const long: LambdaState = { ...frame, text: `λx. ${'x '.repeat(6000)}` }
     pane.render(long, CONTROLS)
     pane.renderTree({ kind: 'none' })
@@ -117,7 +80,7 @@ describe('a λ view’s follow redex action', () => {
   /** The umbrella's header order: a view's own actions, then `⋯`, then `✕` — however often those two come and go. */
   it('sits before ⋯ and ✕ in the header', () => {
     const el = host()
-    const pane = new LambdaPane(el, { ...events(), close: vi.fn(), splitRow: vi.fn(), splitColumn: vi.fn() })
+    const pane = new LambdaPane(el, { ...inertEvents(), close: vi.fn(), splitRow: vi.fn(), splitColumn: vi.fn() })
     const choices = { options: [], sourceAvailable: false, current: null }
     const order = () =>
       [...(el.querySelector('.view-actions')?.children ?? [])]
@@ -151,12 +114,10 @@ describe('a λ view whose box changes size under it', () => {
   /** `f a0 … a199`, the redex, then `a200 … a399`: the redex in the middle of a term far taller than the view. */
   const args = (from: number) => Array.from({ length: 200 }, (_, i) => `a${from + i}`).join(' ')
   const MIDDLE = `f ${args(0)} ((\\y. y) z) ${args(200)}`
-  const scrolled = (el: HTMLElement) =>
-    new Promise<void>((r) => el.addEventListener('scroll', () => r(), { once: true }))
 
   function mount(term: string): { body: HTMLElement; follow: HTMLButtonElement } {
     const el = host()
-    const pane = new LambdaPane(el, events())
+    const pane = new LambdaPane(el, inertEvents())
     pane.render(frame, CONTROLS)
     pane.renderTree({ kind: 'tree', tree: wireOf(term) })
     const body = el.querySelector('.term') as HTMLElement
@@ -303,7 +264,7 @@ describe('a λ view whose box changes size under it', () => {
 
     function flatAfter(term: string): { pane: LambdaPane; body: HTMLElement; follow: HTMLButtonElement } {
       const el = host()
-      const pane = new LambdaPane(el, events())
+      const pane = new LambdaPane(el, inertEvents())
       pane.render(LONG, CONTROLS)
       pane.renderTree({ kind: 'tree', tree: wireOf(TALL) })
       if (term !== TALL) pane.renderTree({ kind: 'tree', tree: wireOf(term) })
@@ -363,7 +324,7 @@ describe('a λ view whose box changes size under it', () => {
 
   it('comes back following, on its redex, when it is taken off the page before its scroll is reported', async () => {
     const el = host()
-    const pane = new LambdaPane(el, events())
+    const pane = new LambdaPane(el, inertEvents())
     pane.render(frame, CONTROLS)
     await frames()
     const body = el.querySelector('.term') as HTMLElement

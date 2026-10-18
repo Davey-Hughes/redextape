@@ -1,19 +1,11 @@
 import { describe, expect, it } from 'vitest'
 import { tapeLabel, tapeRows } from '../../src/tape'
 import type { TmState } from '../../src/types'
+import { tmStateOf } from './tm-machines'
 
 const NAMES = ['REG', 'WORK', 'STACK', 'HEAP', 'BOX']
 
-const state = (over: Partial<TmState> = {}): TmState => ({
-  state: 0,
-  step: 0,
-  heads: [5],
-  window_start: [3],
-  window: ['abcde'],
-  source_node: null,
-  rule: null,
-  ...over,
-})
+const state = (over: Partial<TmState> = {}): TmState => tmStateOf(5, 3, 'abcde', over)
 
 describe('tapeRows', () => {
   // THE ONE PIECE OF ARITHMETIC IN THE TM PANE. `heads` and `window_start` are both

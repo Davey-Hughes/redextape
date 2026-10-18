@@ -3,6 +3,7 @@ import type { LambdaLeg, LambdaTreeWire, RunReply, RunRequest, TmLeg } from '../
 import type { ClientPort } from '../../src/session-client'
 import { SessionClient } from '../../src/session-client'
 import type { LambdaStatus, TmStatus } from '../../src/types'
+import { noSessionReply } from './session-fixtures'
 
 function fakePort() {
   const sent: RunRequest[] = []
@@ -15,8 +16,6 @@ function fakePort() {
   }
   return { port, sent, deliver: (data: RunReply) => handler?.({ data }) }
 }
-
-const reply = (gen: number): RunReply => ({ kind: 'no-session', gen, diagnostics: [] })
 
 /** A one-node `LambdaTreeWire` — what a `lambda-tree` reply carries. */
 const TREE: LambdaTreeWire = {
@@ -40,7 +39,7 @@ describe('SessionClient', () => {
     const gen = c.supersede()
     deliver({ kind: 'lambda-tree', gen, tree: TREE })
     expect(c.awaitingRun).toBe(true)
-    deliver(reply(gen))
+    deliver(noSessionReply(gen))
     expect(c.awaitingRun).toBe(false)
   })
 
@@ -69,7 +68,7 @@ describe('SessionClient', () => {
     const onReply = vi.fn()
     const c = new SessionClient(port, onReply)
     c.request(c.supersede(), 'a', 'unary')
-    deliver(reply(1))
+    deliver(noSessionReply(1))
     expect(onReply).toHaveBeenCalledTimes(1)
   })
 
@@ -79,9 +78,9 @@ describe('SessionClient', () => {
     const c = new SessionClient(port, onReply)
     c.request(c.supersede(), 'a', 'unary')
     c.request(c.supersede(), 'b', 'unary')
-    deliver(reply(1))
+    deliver(noSessionReply(1))
     expect(onReply).not.toHaveBeenCalled()
-    deliver(reply(2))
+    deliver(noSessionReply(2))
     expect(onReply).toHaveBeenCalledTimes(1)
   })
 
@@ -93,17 +92,17 @@ describe('SessionClient', () => {
     const c = new SessionClient(port, onReply)
     c.request(c.supersede(), 'a', 'unary')
     c.request(c.supersede(), 'b', 'unary')
-    deliver(reply(2))
-    deliver(reply(1))
+    deliver(noSessionReply(2))
+    deliver(noSessionReply(1))
     expect(onReply).toHaveBeenCalledTimes(1)
-    expect(onReply.mock.calls[0]?.[0]).toEqual(reply(2))
+    expect(onReply.mock.calls[0]?.[0]).toEqual(noSessionReply(2))
   })
 
   it('ignores a reply that arrives before any request', () => {
     const { port, deliver } = fakePort()
     const onReply = vi.fn()
     new SessionClient(port, onReply)
-    deliver(reply(0))
+    deliver(noSessionReply(0))
     expect(onReply).not.toHaveBeenCalled()
   })
 
@@ -124,7 +123,7 @@ describe('SessionClient', () => {
     const { port, deliver } = fakePort()
     const c = new SessionClient(port, () => {})
     c.request(c.supersede(), 'a', 'unary')
-    deliver(reply(1))
+    deliver(noSessionReply(1))
     expect(c.awaitingRun).toBe(false)
   })
 
@@ -136,7 +135,7 @@ describe('SessionClient', () => {
     const c = new SessionClient(port, () => {})
     c.request(c.supersede(), 'a', 'unary')
     c.supersede()
-    deliver(reply(1))
+    deliver(noSessionReply(1))
     expect(c.awaitingRun).toBe(true)
   })
 
@@ -147,7 +146,7 @@ describe('SessionClient', () => {
     const seen: boolean[] = []
     const c = new SessionClient(port, () => seen.push(c.awaitingRun))
     c.request(c.supersede(), 'a', 'unary')
-    deliver(reply(1))
+    deliver(noSessionReply(1))
     expect(seen).toEqual([false])
   })
 

@@ -3,7 +3,22 @@ import { afterEach, beforeAll, describe, expect, it } from 'vitest'
 import { page, userEvent } from 'vitest/browser'
 import { LAYOUT_STORAGE_KEY } from '../../src/layout'
 import { parseWorkspace } from '../../src/workspace'
-import { drawn, resetToFirstLoad, SHELL, showWideDefault, until } from './harness'
+import {
+  drawn,
+  firstButton,
+  frames,
+  host,
+  mounted,
+  PREFIX,
+  resetToFirstLoad,
+  SHELL,
+  scrollRange,
+  showWideDefault,
+  stateIdle,
+  storedLayoutText,
+  until,
+  viewOfFocus,
+} from './harness'
 
 /**
  * THE GESTURES THAT DEPEND ON A TREE'S SHAPE, ON THE TWO TREES A VISITOR IS GIVEN — the view layouts spec §4.4 and
@@ -28,24 +43,8 @@ import { drawn, resetToFirstLoad, SHELL, showWideDefault, until } from './harnes
 localStorage.removeItem(LAYOUT_STORAGE_KEY)
 
 const PROGRAM = `let x = 40;${'\n'.repeat(60)}x + 2`
-const PREFIX = '{Control>}.{/Control}'
 
 let view: EditorView
-
-const host = (leaf: string): HTMLElement =>
-  document.querySelector<HTMLElement>(`#views [data-leaf="${leaf}"]:not([role="tab"])`) as HTMLElement
-const mounted = (): string[] =>
-  [...document.querySelectorAll<HTMLElement>('#views [data-leaf]')]
-    .filter((el) => el.getAttribute('role') !== 'tab')
-    .map((el) => el.dataset.leaf as string)
-const idle = (): boolean => document.querySelector<HTMLElement>('#results')?.dataset.state === 'idle'
-const range = (el: HTMLElement): number => el.scrollHeight - el.clientHeight
-const first = (leaf: string): HTMLElement => host(leaf).querySelector('button') as HTMLElement
-const frames = (): Promise<void> => new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(() => r())))
-const stored = (): string | null => localStorage.getItem(LAYOUT_STORAGE_KEY)
-/** The view the focus is in, by its leaf: `undefined` for a focus on the header, a divider or `<body>`. */
-const viewOfFocus = (): string | undefined =>
-  document.activeElement?.closest<HTMLElement>('#views [data-leaf]:not([role="tab"])')?.dataset.leaf
 
 /** A place in each view that takes the focus when it is pressed and opens nothing. */
 const INSIDE: Readonly<Record<string, string>> = {
@@ -58,11 +57,12 @@ const INSIDE: Readonly<Record<string, string>> = {
 type Held = ReadonlyMap<string, { top: number; width: number; height: number }>
 /** Scroll every view that can be scrolled 40 px to 40 px, and answer where each view is and how big. */
 async function arm(): Promise<Held> {
-  for (const leaf of mounted()) if (range(host(leaf)) >= 40) host(leaf).scrollTop = 40
+  for (const leaf of mounted())
+    if (scrollRange(host(leaf) as HTMLElement) >= 40) (host(leaf) as HTMLElement).scrollTop = 40
   await frames()
   return new Map(
     mounted().map((leaf) => {
-      const el = host(leaf)
+      const el = host(leaf) as HTMLElement
       return [leaf, { top: el.scrollTop, width: el.clientWidth, height: el.clientHeight }]
     }),
   )
@@ -79,10 +79,10 @@ async function settled(what: string, tree: string, focused: string, before: Held
   expect(viewOfFocus(), `${what}: the view the focus is in`).toBe(focused)
   for (const leaf of mounted()) {
     const was = before.get(leaf)
-    const el = host(leaf)
+    const el = host(leaf) as HTMLElement
     if (was === undefined) continue
     if (leaf === byKey) {
-      const [box, control] = [el.getBoundingClientRect(), first(leaf).getBoundingClientRect()]
+      const [box, control] = [el.getBoundingClientRect(), firstButton(leaf).getBoundingClientRect()]
       expect(
         control.top >= box.top - 0.5 && control.bottom <= box.top + el.clientHeight + 0.5,
         `${what}: the ${leaf} view’s first control is out of sight`,
@@ -90,10 +90,10 @@ async function settled(what: string, tree: string, focused: string, before: Held
     } else if (was.width === el.clientWidth && was.height === el.clientHeight) {
       expect(el.scrollTop, `${what}: the ${leaf} view, whose box did not change`).toBe(was.top)
     } else if (leaf === focused) {
-      expect(el.scrollTop, `${what}: the ${leaf} view, which took the focus`).toBe(Math.min(was.top, range(el)))
+      expect(el.scrollTop, `${what}: the ${leaf} view, which took the focus`).toBe(Math.min(was.top, scrollRange(el)))
     }
   }
-  expect(parseWorkspace(stored()), `${what}: the stored workspace does not parse`).not.toBeNull()
+  expect(parseWorkspace(storedLayoutText()), `${what}: the stored workspace does not parse`).not.toBeNull()
 }
 
 /** The first view of `tree` that is not the source, or the source: where the focus goes when its view is hidden. */
@@ -167,7 +167,7 @@ describe.each([FIRST_LOAD, WIDE_FOUR])('on $name', (layout) => {
     document.body.innerHTML = SHELL
     view = await (await import('../../src/main')).ready
     view.dispatch({ changes: { from: 0, to: view.state.doc.length, insert: PROGRAM } })
-    await until(idle, 'the first compile')
+    await until(stateIdle, 'the first compile')
     await until(() => host('tm-0')?.querySelector('.state-table .state-row') != null, 'the rule table to draw')
     expect(drawn(), 'precondition: the page opened on the first load’s views').toBe('row[50](source tm-0)')
   })
@@ -180,23 +180,23 @@ describe.each([FIRST_LOAD, WIDE_FOUR])('on $name', (layout) => {
     await layout.make()
     const before = await arm()
     const [tree, focused] = layout.closed[leaf] as readonly [string, string]
-    await userEvent.click(host(leaf).querySelector('button.view-close') as HTMLElement)
+    await userEvent.click((host(leaf) as HTMLElement).querySelector('button.view-close') as HTMLElement)
     await settled(`✕ on ${leaf}`, tree, focused, before)
     expect(document.activeElement, 'the focus is not on the first control of the view that took it').toBe(
-      first(focused),
+      firstButton(focused),
     )
     expect(document.activeElement?.matches(':focus-visible'), 'a pointer press drew a focus ring').toBe(false)
   })
 
   it.each(layout.views)('reset preset, pressed with the pointer from the %s view', async (leaf) => {
     await layout.make()
-    await userEvent.click(host(leaf).querySelector(INSIDE[leaf] as string) as HTMLElement)
+    await userEvent.click((host(leaf) as HTMLElement).querySelector(INSIDE[leaf] as string) as HTMLElement)
     expect(viewOfFocus(), 'precondition: the focus is in the view').toBe(leaf)
     const before = await arm()
     await userEvent.click(document.querySelector('#workspace') as HTMLElement)
     await userEvent.click(document.querySelector('#reset-preset') as HTMLElement)
     await settled(`reset preset from ${leaf}`, 'row[50](source tm-0)', 'tm-0', before)
-    expect(document.activeElement).toBe(first('tm-0'))
+    expect(document.activeElement).toBe(firstButton('tm-0'))
   })
 
   /**
@@ -206,7 +206,7 @@ describe.each([FIRST_LOAD, WIDE_FOUR])('on $name', (layout) => {
   it.each(layout.views)('each view key, pressed from the %s view', async (leaf) => {
     for (const [key, tree] of Object.entries(layout.keyed)) {
       await layout.make()
-      await userEvent.click(host(leaf).querySelector(INSIDE[leaf] as string) as HTMLElement)
+      await userEvent.click((host(leaf) as HTMLElement).querySelector(INSIDE[leaf] as string) as HTMLElement)
       const held = document.activeElement
       expect(viewOfFocus(), `precondition: the focus is in the view, before ${key}`).toBe(leaf)
       const before = await arm()
@@ -216,7 +216,7 @@ describe.each([FIRST_LOAD, WIDE_FOUR])('on $name', (layout) => {
       const focused = stays ? leaf : firstView(tree)
       await settled(`${key} from ${leaf}`, tree, focused, before, stays ? undefined : focused)
       if (stays) expect(document.activeElement, `${key} from ${leaf} moved the focus`).toBe(held)
-      else expect(document.activeElement, `${key} from ${leaf}`).toBe(first(focused))
+      else expect(document.activeElement, `${key} from ${leaf}`).toBe(firstButton(focused))
     }
   })
 
@@ -252,7 +252,7 @@ describe.each([FIRST_LOAD, WIDE_FOUR])('on $name', (layout) => {
     expect(others.map((d) => d.getAttribute('aria-valuenow'))).toEqual(others.map(() => '50'))
     expect(drawn().replace(/\[\d+\]/g, '[50]'), 'the drag changed the tree’s shape').toBe(was)
     for (const leaf of mounted()) {
-      const [el, held] = [host(leaf), before.get(leaf)]
+      const [el, held] = [host(leaf) as HTMLElement, before.get(leaf)]
       if (held === undefined) throw new Error(`the drag added the ${leaf} view`)
       const same = held.width === el.clientWidth && held.height === el.clientHeight
       expect(same, `the ${leaf} view’s box ${sides.includes(leaf) ? 'did not change' : 'changed'}`).toBe(
@@ -260,6 +260,6 @@ describe.each([FIRST_LOAD, WIDE_FOUR])('on $name', (layout) => {
       )
       if (same) expect(el.scrollTop, `the drag reset the ${leaf} view, whose box did not change`).toBe(held.top)
     }
-    expect(parseWorkspace(stored())).not.toBeNull()
+    expect(parseWorkspace(storedLayoutText())).not.toBeNull()
   })
 })

@@ -3,7 +3,7 @@ import { page, userEvent } from 'vitest/browser'
 import { LAYOUT_STORAGE_KEY } from '../../src/layout'
 import { DIVIDER_PX } from '../../src/layout-view'
 import { parseWorkspace } from '../../src/workspace'
-import { SHELL, until } from './harness'
+import { hosts, inspector, noticeText, queryEl, SHELL, stepBar, until, views, workspaceMenu } from './harness'
 
 /**
  * **AT A PHONE'S WIDTH THE INSPECTOR STACKS UNDER THE VIEWS** — the user's decisions of 2026-10-05. At the header's
@@ -29,25 +29,16 @@ type Workspace = Preset | 'stage-strip' | 'explorer-inspector'
 /** A box as `[left, top, width, height]`, in CSS pixels. */
 type Box = readonly [number, number, number, number]
 
-const q = (sel: string) => document.querySelector<HTMLElement>(sel) as HTMLElement
 const box = (el: Element): Box => {
   const r = el.getBoundingClientRect()
   return [r.left, r.top, r.width, r.height]
 }
 const bottom = (el: Element) => el.getBoundingClientRect().bottom
-const main = () => q('main')
-const views = () => q('#views')
-const inspector = () => q('#inspector')
-const header = () => q('#inspector .panel-header')
-const body = () => q('#inspector .inspector-body')
-const toggle = () => q('#inspector .panel-toggle') as HTMLButtonElement
-const stepBar = () => q('#step-bar')
+const main = () => queryEl('main')
+const header = () => queryEl('#inspector .panel-header')
+const body = () => queryEl('#inspector .inspector-body')
+const toggle = () => queryEl('#inspector .panel-toggle') as HTMLButtonElement
 const isOpen = () => toggle().getAttribute('aria-expanded') === 'true'
-/** The view hosts on the page — every `[data-leaf]` under `#views` but a Stage's tabs, which carry one too. */
-const hosts = (): HTMLElement[] =>
-  [...document.querySelectorAll<HTMLElement>('#views [data-leaf]')].filter((el) => el.getAttribute('role') !== 'tab')
-const workspaceMenu = () => q('#workspace-menu')
-const noticeText = () => document.querySelector('#notice .notice-text')?.textContent ?? ''
 const stored = () => parseWorkspace(localStorage.getItem(LAYOUT_STORAGE_KEY))
 /** `main`'s minimum height, as the page resolves it. */
 const minimum = () => Number.parseFloat(getComputedStyle(main()).minHeight)
@@ -67,7 +58,7 @@ const WORKSPACES: Readonly<
 /** Pick `selector` from the workspace menu with the pointer, and shut the menu, which a pick leaves open. */
 async function pick(selector: string): Promise<void> {
   if (workspaceMenu().matches(':popover-open')) await userEvent.keyboard('{Escape}')
-  await userEvent.click(q('#workspace'))
+  await userEvent.click(queryEl('#workspace'))
   await until(() => workspaceMenu().matches(':popover-open'), 'the workspace menu')
   await userEvent.click(workspaceMenu().querySelector(selector) as HTMLElement)
   if (workspaceMenu().matches(':popover-open')) await userEvent.keyboard('{Escape}')
@@ -88,7 +79,7 @@ async function choose(w: Workspace): Promise<void> {
 /** Put the page in workspace `w` and wait the notice line out, in a hook: what a user sees 8 s after the pick. */
 async function settle(w: Workspace): Promise<void> {
   await choose(w)
-  await until(() => q('#notice').hidden === true, 'the notice line to go')
+  await until(() => queryEl('#notice').hidden === true, 'the notice line to go')
 }
 
 /** Press the inspector's toggle with the pointer until it is `open`. */
@@ -114,10 +105,10 @@ async function at(
   expect(innerWidth, 'precondition: the page’s width').toBe(width)
   expect(innerHeight, 'precondition: the page’s height').toBe(height)
   const { name: called, inspector: shown } = WORKSPACES[w]
-  expect(q('#workspace').textContent?.replace('▾', '').trim(), 'precondition: the workspace').toBe(called)
+  expect(queryEl('#workspace').textContent?.replace('▾', '').trim(), 'precondition: the workspace').toBe(called)
   if (notice === 'up')
     expect(noticeText().startsWith(`${called} — `), `precondition: the pick’s notice is up: ${noticeText()}`).toBe(true)
-  else expect(q('#notice').hidden, 'precondition: the notice line is gone').toBe(true)
+  else expect(queryEl('#notice').hidden, 'precondition: the notice line is gone').toBe(true)
   expect(inspector().hidden, `precondition: the inspector is ${shown ? '' : 'not '}on the page`).toBe(!shown)
   if (open !== null) await setOpen(open)
   if (WORKSPACES[w].preset === 'stage')
@@ -155,7 +146,7 @@ function rulesBetween(): [string, number][] {
     if (r.height > 0 && Math.abs(r.bottom - edge) <= 0.5 && drawn(el, 'Bottom') > 0)
       out.push([name(el), drawn(el, 'Bottom')])
   }
-  for (const el of [inspector(), q('#inspector > .panel'), header()])
+  for (const el of [inspector(), queryEl('#inspector > .panel'), header()])
     if (Math.abs(el.getBoundingClientRect().top - edge) <= 0.5 && drawn(el, 'Top') > 0)
       out.push([name(el), drawn(el, 'Top')])
   return out
@@ -183,7 +174,7 @@ beforeAll(async () => {
   await page.viewport(1280, 800)
   document.body.innerHTML = SHELL
   await (await import('../../src/main')).ready
-  await until(() => q('#results').dataset.state === 'idle', 'the first compile')
+  await until(() => queryEl('#results').dataset.state === 'idle', 'the first compile')
 })
 
 /** The phone sizes the stacked cases run at, and 480 px, the breakpoint's own width, where the rule still holds. */
@@ -218,7 +209,7 @@ async function holdStacked(w: Workspace, width: number, height: number, open: bo
   expect.soft(document.documentElement.scrollWidth, 'the page’s scroll width').toBeLessThanOrEqual(width)
   expect.soft(document.documentElement.scrollHeight, 'the page’s scroll height').toBeLessThanOrEqual(height)
   if (WORKSPACES[w].preset === 'stage')
-    expect.soft(Math.abs(box(q('.stage-tabs'))[2] - mw), 'the tab strip’s width').toBeLessThanOrEqual(1)
+    expect.soft(Math.abs(box(queryEl('.stage-tabs'))[2] - mw), 'the tab strip’s width').toBeLessThanOrEqual(1)
   else
     for (const h of hosts())
       expect
@@ -540,7 +531,7 @@ function holdShort(p: 'debugger' | 'stage', open: boolean, atMinimum: boolean): 
 function pageBoxes(): Record<string, Box> {
   const now = boxesNow(null)
   if (!stepBar().hidden) now.step = box(stepBar())
-  const strip = q('footer.strip')
+  const strip = queryEl('footer.strip')
   if (!strip.hidden) now.strip = box(strip)
   now.page = [0, 0, document.documentElement.scrollWidth, document.documentElement.scrollHeight]
   return now
@@ -647,7 +638,7 @@ async function shortCase(
   await at(p, width, 844, false, notice)
   await page.viewport(width, height)
   expect(innerHeight, 'precondition: the page’s height').toBe(height)
-  expect(q('#notice').hidden, `precondition: the notice line ${notice}`).toBe(notice === 'gone')
+  expect(queryEl('#notice').hidden, `precondition: the notice line ${notice}`).toBe(notice === 'gone')
   holdShort(p, false, atMinimum)
   toggle().scrollIntoView({ block: 'nearest' })
   const t = toggle().getBoundingClientRect()
@@ -657,7 +648,9 @@ async function shortCase(
     .toBe(true)
   await userEvent.click(toggle())
   expect(isOpen(), 'the toggle opened it').toBe(true)
-  expect(q('#notice').hidden, `precondition: the notice line still ${notice} after the press`).toBe(notice === 'gone')
+  expect(queryEl('#notice').hidden, `precondition: the notice line still ${notice} after the press`).toBe(
+    notice === 'gone',
+  )
   holdShort(p, true, atMinimum)
 }
 

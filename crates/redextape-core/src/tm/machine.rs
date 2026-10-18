@@ -134,25 +134,7 @@ fn symbol_representable(c: Symbol) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    /// A 1-tape "increment unary" machine: scan right over `1`s, write a `1` in the first blank, halt.
-    fn increment() -> Machine {
-        Machine {
-            tapes: 1,
-            start: 0,
-            states: vec![
-                State {
-                    name: "scan".into(),
-                    accept: false,
-                    rules: vec![
-                        Rule { read: vec![Some('1')], write: vec![None], moves: vec![Move::R], next: 0 },
-                        Rule { read: vec![None], write: vec![Some('1')], moves: vec![Move::S], next: 1 },
-                    ],
-                },
-                State { name: "halt".into(), accept: true, rules: vec![] },
-            ],
-        }
-    }
+    use crate::tm::test_fixtures::{increment, one_rule_machine};
 
     #[test]
     fn valid_machine_has_no_validation_errors() {
@@ -239,15 +221,10 @@ mod tests {
     #[test]
     fn validate_allows_identifier_names_and_blank_symbol() {
         // Identifier-ish names (`.`, digits, letters, `_`, `-`) and `_` data symbols are fine.
-        let m = Machine {
-            tapes: 1,
-            start: 0,
-            states: vec![State {
-                name: "sum.rec".into(),
-                accept: false,
-                rules: vec![Rule { read: vec![Some('_')], write: vec![Some('1')], moves: vec![Move::S], next: 0 }],
-            }],
-        };
+        let m = one_rule_machine(
+            "sum.rec",
+            Rule { read: vec![Some('_')], write: vec![Some('1')], moves: vec![Move::S], next: 0 },
+        );
         assert!(m.validate().is_empty(), "unexpected: {:?}", m.validate());
     }
 }

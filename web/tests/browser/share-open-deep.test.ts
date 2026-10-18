@@ -4,7 +4,7 @@ import { EXAMPLE_ENCODING } from '../../src/examples'
 import { PROGRAM_STORAGE_KEY, serializeProgram } from '../../src/program-store'
 import { encodeLink } from '../../src/share-link'
 import { defaultWorkspace, serializeWorkspace } from '../../src/workspace'
-import { SHELL, until } from './harness'
+import { mainLeafIds, readout, SHELL, stateIdle, until } from './harness'
 
 /**
  * **A LINK AT START-UP WHOSE TREE IS 6,000 SPLITS DEEP** — Plan 7 part 6a spec §5.3, amended 2026-10-01. Before the
@@ -46,10 +46,6 @@ function deepTree(depth: number): unknown {
   }
 }
 
-const leafIds = () => [...document.querySelectorAll<HTMLElement>('main [data-leaf]')].map((el) => el.dataset.leaf ?? '')
-const idle = () => document.querySelector<HTMLElement>('#results')?.dataset.state === 'idle'
-const readout = () => [...document.querySelectorAll('#results .segment, #results .row')].length
-
 let view: EditorView
 
 beforeAll(async () => {
@@ -63,7 +59,7 @@ beforeAll(async () => {
   history.replaceState(null, '', `${location.pathname}${location.search}${fragment}`)
   document.body.innerHTML = SHELL
   view = await (await import('../../src/main')).ready
-  await until(() => idle() && readout() > 0, 'the first compile')
+  await until(() => stateIdle() && readout() > 0, 'the first compile')
 })
 
 describe('a link at start-up whose tree is 6,000 splits deep', () => {
@@ -73,7 +69,7 @@ describe('a link at start-up whose tree is 6,000 splits deep', () => {
     expect(EXAMPLE_ENCODING, 'precondition: unary is not the default encoding').not.toBe('unary')
     expect(document.querySelector<HTMLSelectElement>('#encoding')?.value).toBe('unary')
     // THE FOUR `setup.ts` STORES, and not the two a page with nothing stored opens on.
-    expect(leafIds()).toEqual(['source', 'lambda-0', 'asm-0', 'tm-0'])
+    expect(mainLeafIds()).toEqual(['source', 'lambda-0', 'asm-0', 'tm-0'])
   })
 
   it('says what was left out, with an undo, and clears the fragment', () => {

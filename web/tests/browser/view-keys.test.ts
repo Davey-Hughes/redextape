@@ -2,7 +2,19 @@ import { EditorView } from '@codemirror/view'
 import { afterEach, beforeAll, describe, expect, it } from 'vitest'
 import { cdp, page, userEvent } from 'vitest/browser'
 import { HINT_ROWS, HINT_SENTENCE } from '../../src/view-keys'
-import { focusInPage, host, live, notice, SHELL, until } from './harness'
+import {
+  armed,
+  chooseOption,
+  focusInPage,
+  host,
+  live,
+  mounted,
+  notice,
+  PREFIX,
+  SHELL,
+  stateIdle,
+  until,
+} from './harness'
 
 /**
  * VIEW KEYS, THROUGH THE PAGE — the view layouts spec §7: the prefix chord arms a mode from wherever the focus is, the
@@ -24,7 +36,6 @@ import { focusInPage, host, live, notice, SHELL, until } from './harness'
  * expected at `CARET` (`typed`).
  */
 
-const PREFIX = '{Control>}.{/Control}'
 /** `[`, as `userEvent.keyboard` spells it: a single `[` opens a key code, as in `[KeyA]`. */
 const PREVIOUS = '[['
 const SOURCE = 'let x = 40;\nx + 2'
@@ -38,19 +49,13 @@ const cut = (count: number): string => `${SOURCE.slice(0, CARET)}${SOURCE.slice(
 let view: EditorView
 
 const hint = (): HTMLElement => document.querySelector('#view-keys') as HTMLElement
-const armed = (): boolean => !hint().hidden
-const mounted = (): string[] =>
-  [...document.querySelectorAll<HTMLElement>('#views [data-leaf]')]
-    .filter((el) => el.getAttribute('role') !== 'tab')
-    .map((el) => el.dataset.leaf as string)
-const idle = (): boolean => document.querySelector<HTMLElement>('#results')?.dataset.state === 'idle'
 
 /** All four views, the program as this file wrote it, and the caret in the source editor at `CARET`. */
 async function start(): Promise<void> {
   for (const b of document.querySelectorAll<HTMLButtonElement>('#views-shown button[aria-pressed="false"]')) b.click()
   if (view.state.doc.toString() !== SOURCE) {
     view.dispatch({ changes: { from: 0, to: view.state.doc.length, insert: SOURCE } })
-    await until(idle, 'the program to compile again')
+    await until(stateIdle, 'the program to compile again')
   }
   view.focus()
   view.dispatch({ selection: { anchor: CARET } })
@@ -75,19 +80,16 @@ const caretKept = (): void => {
   expect(view.state.selection.main.head, 'the caret is not where it was').toBe(CARET)
 }
 
-const setKeymap = (mode: 'default' | 'vim'): void => {
-  const choice = document.querySelector<HTMLSelectElement>('#keymap') as HTMLSelectElement
-  choice.value = mode
-  choice.dispatchEvent(new Event('change'))
-}
-
 describe('view keys', () => {
   beforeAll(async () => {
     await page.viewport(1280, 896)
     document.body.innerHTML = SHELL
     view = await (await import('../../src/main')).ready
     view.dispatch({ changes: { from: 0, to: view.state.doc.length, insert: SOURCE } })
-    await until(() => idle() && (document.querySelector('#results')?.textContent ?? '').includes('λ 42'), 'the compile')
+    await until(
+      () => stateIdle() && (document.querySelector('#results')?.textContent ?? '').includes('λ 42'),
+      'the compile',
+    )
   })
 
   afterEach(async () => {
@@ -392,7 +394,7 @@ describe('view keys', () => {
      */
     it('leaves vim no count from the repeats of a table key, and no command from the prefix’s', async () => {
       await start()
-      setKeymap('vim')
+      chooseOption('#keymap', 'vim')
       try {
         await until(() => view.scrollDOM.classList.contains('cm-vimMode'), 'vim’s normal mode')
         view.focus()
@@ -410,7 +412,7 @@ describe('view keys', () => {
           await userEvent.keyboard('{/.}')
         }
       } finally {
-        setKeymap('default')
+        chooseOption('#keymap', 'default')
       }
     })
   })
@@ -622,7 +624,7 @@ describe('view keys', () => {
    */
   it('runs ahead of vim: 2 after the prefix is the mode’s and no count of vim’s, and x after a prefix is vim’s', async () => {
     await start()
-    setKeymap('vim')
+    chooseOption('#keymap', 'vim')
     try {
       await until(() => view.scrollDOM.classList.contains('cm-vimMode'), 'vim’s normal mode')
       view.focus()
@@ -637,7 +639,7 @@ describe('view keys', () => {
       await userEvent.keyboard('x')
       expect(view.state.doc.toString(), 'x after the prefix did not reach vim').toBe(cut(2))
     } finally {
-      setKeymap('default')
+      chooseOption('#keymap', 'default')
     }
   })
 

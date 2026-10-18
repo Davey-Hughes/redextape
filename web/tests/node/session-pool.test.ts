@@ -1,34 +1,6 @@
 import { describe, expect, it, vi } from 'vitest'
-import type { RunReply, RunRequest } from '../../src/protocol'
-import type { PoolPort } from '../../src/session-client'
 import { SessionPool } from '../../src/session-client'
-
-/**
- * A `PoolPort` with no thread behind it.
- *
- * THE WHOLE POINT OF `ClientPort` BEING STRUCTURAL (`session-client.ts`), one type up: the pool
- * is a map, a spawn on first bind and a `terminate` on unbind, and none of that needs a worker to
- * exercise. `terminated` is a COUNT rather than a boolean so a double-terminate is visible — the
- * failure a `has`-then-`delete` written in the wrong order would produce.
- */
-type FakePort = PoolPort & { sent: RunRequest[]; terminated: number; deliver: (r: RunReply) => void }
-
-function fakePort(): FakePort {
-  let handler: ((e: { data: RunReply }) => void) | null = null
-  const p: FakePort = {
-    sent: [],
-    terminated: 0,
-    postMessage: (m: RunRequest) => p.sent.push(m),
-    addEventListener: (_t: 'message', h: (e: { data: RunReply }) => void) => {
-      handler = h
-    },
-    terminate: () => {
-      p.terminated += 1
-    },
-    deliver: (r: RunReply) => handler?.({ data: r }),
-  }
-  return p
-}
+import { type FakePort, fakePort, noSessionReply } from './session-fixtures'
 
 /**
  * A pool over recording fakes, plus every port it has ever spawned IN SPAWN ORDER.
@@ -49,8 +21,6 @@ function harness(): { pool: SessionPool; ports: FakePort[] } {
   )
   return { pool, ports }
 }
-
-const reply = (gen: number): RunReply => ({ kind: 'no-session', gen, diagnostics: [] })
 
 describe('SessionPool', () => {
   it('spawns nothing until the first bind', () => {
@@ -94,7 +64,7 @@ describe('SessionPool', () => {
     source.request(source.supersede(), 'a', 'unary')
     scratch.request(scratch.supersede(), 'b', 'unary')
 
-    ports[1]?.deliver(reply(1))
+    ports[1]?.deliver(noSessionReply(1))
     expect(onScratch).toHaveBeenCalledTimes(1)
     expect(onSource).not.toHaveBeenCalled()
   })
@@ -226,7 +196,7 @@ describe('SessionPool', () => {
     expect(pool.has('source')).toBe(false)
     // The handle the caller still holds is not revoked — nothing can revoke a JS reference — so this
     // documents the boundary rather than asserting silence: the POOL forgot it, the closure did not.
-    ports[0]?.deliver(reply(1))
+    ports[0]?.deliver(noSessionReply(1))
     expect(onSource).toHaveBeenCalledTimes(1)
   })
 })

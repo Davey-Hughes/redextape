@@ -3,12 +3,13 @@ import { History } from '../../src/history'
 import { LambdaPane } from '../../src/lambda-pane'
 import type { PaneEvents } from '../../src/pane-chrome'
 import type { Leg } from '../../src/protocol'
-import type { ClientPort, SessionId } from '../../src/session-client'
-import { SessionClient } from '../../src/session-client'
+import type { SessionId } from '../../src/session-client'
 import type { Binding, LegState, SessionEntry } from '../../src/sessions'
 import { PaneSlot, SessionRegistry } from '../../src/sessions'
 import type { LambdaState, TmState } from '../../src/types'
 import { bindingKey } from '../../src/view-header'
+import { fakeClient, paint } from '../node/session-fixtures'
+import { newPaneHost, viewTitleOf } from './harness'
 
 /**
  * TWO PANES BOUND TO TWO DIFFERENT λ SESSIONS, RENDERING TWO DIFFERENT TERMS AT THE SAME TIME — plan
@@ -42,12 +43,6 @@ import { bindingKey } from '../../src/view-header'
 
 const SOURCE: SessionId = 'source'
 const SCRATCH: SessionId = 'lambda-scratch'
-
-/** A `ClientPort` with no thread behind it — a `SessionEntry` needs a client and nothing here posts. */
-function fakeClient(): SessionClient {
-  const port: ClientPort = { postMessage: () => undefined, addEventListener: () => undefined }
-  return new SessionClient(port, () => undefined)
-}
 
 /** A λ-only session whose single recorded frame prints `text`. The text is the discriminator. */
 function lambdaSession(id: SessionId, label: string, text: string, detached: boolean): SessionEntry {
@@ -97,29 +92,15 @@ function bothLegs(id: SessionId, label: string, text: string): SessionEntry {
   }
 }
 
-const host = () => {
-  const el = document.createElement('section')
-  el.className = 'pane'
-  document.body.append(el)
-  return el
-}
-
-/** What `main.ts`'s `draw()` does for one λ pane, and nothing else. */
-const paint = (reg: SessionRegistry, slot: PaneSlot<'lambda'>, pane: LambdaPane) =>
-  slot.render(reg, pane, slot.resolve(reg))
-
 /** The term the pane is showing, read the way a user reads it. */
 const term = (pane: HTMLElement) => pane.querySelector('.term')?.textContent ?? ''
 
-/** The title-selector of the view in `pane` — the pair in force is its `data-binding`. */
-const titleOf = (pane: HTMLElement) => pane.querySelector<HTMLButtonElement>('button.view-title')
-
 /** The title's menu. */
-const menuOf = (pane: HTMLElement) => document.getElementById(titleOf(pane)?.getAttribute('aria-controls') ?? '')
+const menuOf = (pane: HTMLElement) => document.getElementById(viewTitleOf(pane)?.getAttribute('aria-controls') ?? '')
 
 /** Pick `key` (`bindingKey(leg, session)`) through the view's title menu, as a user does. */
 function pickBinding(pane: HTMLElement, key: string): void {
-  const title = titleOf(pane)
+  const title = viewTitleOf(pane)
   if (title === null) throw new Error('no title-selector on this view')
   title.click()
   const item = menuOf(pane)?.querySelector<HTMLButtonElement>(`button[data-binding="${key}"]`)
@@ -134,7 +115,7 @@ function pickBinding(pane: HTMLElement, key: string): void {
 
 /** Every pair the view's title menu offers, as `[key, text]` — opens and closes the menu to read it. */
 function offered(pane: HTMLElement): [string, string][] {
-  const title = titleOf(pane)
+  const title = viewTitleOf(pane)
   if (title === null) return []
   title.click()
   const items = [...(menuOf(pane)?.querySelectorAll<HTMLButtonElement>('button') ?? [])].map((b): [string, string] => [
@@ -189,8 +170,8 @@ describe('the title-selector', () => {
     reg.add(lambdaSession(SOURCE, 'program', '(λx. x) 1', false))
     reg.add(lambdaSession(SCRATCH, 'λ scratchpad', '(λy. y y) 2', true))
 
-    const leftHost = host()
-    const rightHost = host()
+    const leftHost = newPaneHost()
+    const rightHost = newPaneHost()
     const left = new PaneSlot('lambda', SOURCE)
     const right = new PaneSlot('lambda', SCRATCH)
     const leftPane = new LambdaPane(
@@ -226,8 +207,8 @@ describe('the title-selector', () => {
     reg.add(lambdaSession(SOURCE, 'program', 'a', false))
     reg.add(lambdaSession(SCRATCH, 'λ scratchpad', 'b', true))
 
-    const attachedHost = host()
-    const detachedHost = host()
+    const attachedHost = newPaneHost()
+    const detachedHost = newPaneHost()
     const attached = new PaneSlot('lambda', SOURCE)
     const detached = new PaneSlot('lambda', SCRATCH)
     const attachedPane = new LambdaPane(
@@ -274,7 +255,7 @@ describe('the title-selector', () => {
     const reg = new SessionRegistry()
     reg.add(lambdaSession(SOURCE, 'program', 'a', false))
 
-    const el = host()
+    const el = newPaneHost()
     const slot = new PaneSlot('lambda', SOURCE)
     const pane = new LambdaPane(
       el,
@@ -282,24 +263,24 @@ describe('the title-selector', () => {
     )
 
     paint(reg, slot, pane)
-    expect(titleOf(el)).toBeNull()
+    expect(viewTitleOf(el)).toBeNull()
     expect(el.querySelector('h2 span.view-title')?.textContent).toBe('λ · program')
 
     reg.add(lambdaSession(SCRATCH, 'λ scratchpad', 'b', true))
     paint(reg, slot, pane)
-    expect(titleOf(el)).not.toBeNull()
+    expect(viewTitleOf(el)).not.toBeNull()
     // NAMED BY TEXT, NOT BY COLOUR OR POSITION. §6 forbids this slice adding a colour-carried state,
     // and the sessions are told apart by their labels — which is also what a screen reader gets. An
     // implementation that distinguished them any other way would leave these strings unset.
     expect(offered(el).map(([, text]) => text)).toEqual(['λ · program', 'λ · λ scratchpad'])
-    expect(titleOf(el)?.dataset.binding).toBe(bindingKey('lambda', SOURCE))
+    expect(viewTitleOf(el)?.dataset.binding).toBe(bindingKey('lambda', SOURCE))
     // THE TITLE SAYS IT OPENS A MENU — the `shows` caption it replaced was a `<label>` naming a
     // `<select>`; a button that opens something states it with `aria-haspopup`.
-    expect(titleOf(el)?.getAttribute('aria-haspopup')).toBe('menu')
+    expect(viewTitleOf(el)?.getAttribute('aria-haspopup')).toBe('menu')
 
     reg.remove(SCRATCH)
     paint(reg, slot, pane)
-    expect(titleOf(el)).toBeNull()
+    expect(viewTitleOf(el)).toBeNull()
   })
 
   /**
@@ -313,7 +294,7 @@ describe('the title-selector', () => {
     reg.add(lambdaSession(SOURCE, 'program', 'from source', false))
     reg.add(lambdaSession(SCRATCH, 'λ scratchpad', 'from scratch', true))
 
-    const el = host()
+    const el = newPaneHost()
     const slot = new PaneSlot('lambda', SOURCE)
     const pane = new LambdaPane(
       el,
@@ -327,7 +308,7 @@ describe('the title-selector', () => {
     expect(slot.binding).toEqual({ session: SCRATCH, leg: 'lambda' })
     expect(term(el)).toBe('from scratch')
     expect(el.querySelector('h2')?.textContent).toContain('copy · not linked')
-    expect(titleOf(el)?.dataset.binding).toBe(bindingKey('lambda', SCRATCH))
+    expect(viewTitleOf(el)?.dataset.binding).toBe(bindingKey('lambda', SCRATCH))
 
     pickBinding(el, bindingKey('lambda', SOURCE))
     expect(term(el)).toBe('from source')
@@ -349,7 +330,7 @@ describe('the title-selector', () => {
     reg.add(lambdaSession(SOURCE, 'program', 'from source', false))
     reg.add(lambdaSession(SCRATCH, 'copy 1', 'from scratch', true))
 
-    const el = host()
+    const el = newPaneHost()
     const slot = new PaneSlot('lambda', SOURCE)
     const pane = new LambdaPane(
       el,
@@ -377,7 +358,7 @@ describe('the title-selector', () => {
     reg.add(lambdaSession(SOURCE, 'program', 'a', false))
     reg.add(lambdaSession(SCRATCH, 'λ scratchpad', 'b', true))
 
-    const el = host()
+    const el = newPaneHost()
     const slot = new PaneSlot('lambda', SOURCE)
     const pane = new LambdaPane(
       el,
@@ -385,7 +366,7 @@ describe('the title-selector', () => {
     )
 
     paint(reg, slot, pane)
-    titleOf(el)?.click()
+    viewTitleOf(el)?.click()
     const first = menuOf(el)?.querySelector('button')
     paint(reg, slot, pane)
     paint(reg, slot, pane)
@@ -414,7 +395,7 @@ describe('the title-selector', () => {
     reg.add(bothLegs(SOURCE, 'program', 'a'))
     reg.add(lambdaSession(SCRATCH, 'λ scratchpad', 'b', true))
 
-    const el = host()
+    const el = newPaneHost()
     const slot = new PaneSlot('lambda', SOURCE)
     const pane = new LambdaPane(
       el,

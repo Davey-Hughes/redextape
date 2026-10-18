@@ -1,9 +1,19 @@
-import { EditorView } from '@codemirror/view'
 import { beforeAll, describe, expect, it } from 'vitest'
-import { BUFFERS_STORAGE_KEY, parseBuffers, serializeBuffers } from '../../src/buffers-store'
+import { BUFFERS_STORAGE_KEY, serializeBuffers } from '../../src/buffers-store'
 import { LAYOUT_STORAGE_KEY, serializeLayout } from '../../src/layout'
 import { bindingKey } from '../../src/view-header'
-import { fourViews, SHELL, until } from './harness'
+import { storedBuffers } from './copy-text-fixture'
+import { lambdaEditorDoc } from './editor-view-fixture'
+import {
+  buffersControl,
+  fourViews,
+  lambdaHeading,
+  lambdaTermText,
+  pickBinding,
+  rowNames,
+  SHELL,
+  until,
+} from './harness'
 
 /**
  * **BUFFERS SURVIVING A RELOAD, THROUGH `main()`** — design §4.9, and the only exercise of that path.
@@ -72,23 +82,6 @@ const SEEDED = serializeBuffers({
 // while resolving `let tree` and the restore beside it, so anything written after that read is never
 // seen. The layout key is seeded rather than merely cleared so that `lambda-0` is a leaf this file can
 // count on: the bindings above name it, and a tree left over from a sibling would not have it.
-/** The title-selector of `leaf`'s view — the pair in force is its `data-binding`. */
-const titleOf = (leaf: string) => document.querySelector<HTMLButtonElement>(`[data-leaf="${leaf}"] button.view-title`)
-
-/** Pick `key` (`bindingKey(leg, session)`) through `leaf`'s title menu, as a user does. */
-function pickBinding(leaf: string, key: string): void {
-  const title = titleOf(leaf)
-  if (title === null) throw new Error(`no title-selector on [data-leaf="${leaf}"]`)
-  title.click()
-  const menu = document.getElementById(title.getAttribute('aria-controls') ?? '')
-  const item = menu?.querySelector<HTMLButtonElement>(`button[data-binding="${key}"]`)
-  if (item == null) {
-    const offered = [...(menu?.querySelectorAll<HTMLButtonElement>('button') ?? [])].map((b) => b.dataset.binding)
-    throw new Error(`[data-leaf="${leaf}"] offers no ${JSON.stringify(key)} — offered: ${JSON.stringify(offered)}`)
-  }
-  item.click()
-}
-
 beforeAll(async () => {
   localStorage.setItem(LAYOUT_STORAGE_KEY, serializeLayout(fourViews()))
   localStorage.setItem(BUFFERS_STORAGE_KEY, SEEDED)
@@ -96,24 +89,7 @@ beforeAll(async () => {
   await (await import('../../src/main')).ready
 })
 
-const buffersButton = () => document.querySelector<HTMLButtonElement>('#buffers')
 const rows = (): HTMLElement[] => [...document.querySelectorAll<HTMLElement>('.buffer-list .buffer-row')]
-/** What each row READS, which is what §5 requires an assertion about a buffer to be made against. */
-const rowNames = (): (string | null)[] =>
-  [...document.querySelectorAll<HTMLElement>('.buffer-list .buffer-row-name')].map((e) => e.textContent)
-const term = () => document.querySelector('[data-leaf="lambda-0"] .term')?.textContent ?? ''
-const heading = () => document.querySelector('[data-leaf="lambda-0"] h2')?.textContent ?? ''
-const stored = () => parseBuffers(localStorage.getItem(BUFFERS_STORAGE_KEY))
-
-/** What the mounted editor actually holds. Read off CodeMirror rather than off the DOM, whose text
- * nodes are virtualized and would answer only the visible lines. */
-function editorDoc(): string {
-  const host = document.querySelector<HTMLElement>('[data-leaf="lambda-0"] .term-editor')
-  if (host === null) throw new Error('no scratch editor mounted under [data-leaf="lambda-0"]')
-  const cmView = EditorView.findFromDOM(host)
-  if (cmView === null) throw new Error('no CodeMirror view mounted under the editor host')
-  return cmView.state.doc.toString()
-}
 
 /**
  * Open the header's buffer list, leaving it open if it already is.
@@ -123,7 +99,7 @@ function editorDoc(): string {
  * failure that reads like a missing buffer rather than like a closed menu.
  */
 async function openList(): Promise<HTMLElement[]> {
-  const button = buffersButton()
+  const button = buffersControl()
   if (button === null) throw new Error('no #buffers button in the header')
   if (button.getAttribute('aria-expanded') !== 'true') button.click()
   await until(() => rows().length > 0, 'the buffer list to open')
@@ -141,7 +117,7 @@ async function openList(): Promise<HTMLElement[]> {
  * the term readable.
  */
 const termsAfterReopen = (): (string | null)[] => {
-  const button = buffersButton()
+  const button = buffersControl()
   if (button === null) throw new Error('no #buffers button in the header')
   if (button.getAttribute('aria-expanded') === 'true') button.click()
   button.click()
@@ -165,7 +141,7 @@ describe('buffers restored from storage', () => {
     // `main()`'s only `await` is `init()`, so everything from the restore block through that write
     // runs in one synchronous continuation — no worker `message` event (a
     // macrotask) is processed until `main()` returns, and the `beforeAll` above awaits exactly that
-    // return. Reading `stored()` here, before this test's own first `await`, therefore reads the
+    // return. Reading `storedBuffers()` here, before this test's own first `await`, therefore reads the
     // bindings `persistBuffers()` wrote from `panes.all()` once `applyLayout()` had built the panes — a write
     // `refreshBuffers()`'s own start-up call cannot have made, since that one runs before a
     // single pane exists and always writes `bindings: {}`. Take `persistBindings()` out of `applyLayout` and
@@ -177,7 +153,7 @@ describe('buffers restored from storage', () => {
     // CITED BY SYMBOL RATHER THAN BY LINE — the whole-branch review before merge found seven `file:line`
     // citations in this file and all seven had drifted, every one of them undershooting because the file
     // they name grew above the line they name. A symbol moves with its code; a number does not.
-    expect(stored()?.bindings).toEqual({ 'lambda-0': 'scratch-2' })
+    expect(storedBuffers()?.bindings).toEqual({ 'lambda-0': 'scratch-2' })
 
     const list = await openList()
     expect(list).toHaveLength(2)
@@ -206,12 +182,12 @@ describe('buffers restored from storage', () => {
    * keeps the ASCII spelling because that is what a user types.
    */
   it('the bound pane shows the restored term rather than the sample program', async () => {
-    await until(() => term() !== '', 'the restored buffer to rebuild and produce a frame')
+    await until(() => lambdaTermText() !== '', 'the restored buffer to rebuild and produce a frame')
     // A SCRATCH SESSION, NOT THE SOURCE ONE — `copy · not linked` is the view's status for a view bound to a
     // session that can never take part in the link (design §4.5), which every buffer is and the source
     // session never is. Without this the assertion below would be satisfied by any λ term at all.
-    expect(heading()).toContain('copy · not linked')
-    expect(term()).toContain('λc')
+    expect(lambdaHeading()).toContain('copy · not linked')
+    expect(lambdaTermText()).toContain('λc')
   })
 
   /**
@@ -222,17 +198,17 @@ describe('buffers restored from storage', () => {
    * `onBuffersPersist()`, through the very same `persistBuffers` closure the restore's write calls) —
    * so this assertion would pass whether or not that write exists, and a click was never what made the
    * difference. The timing claim — that the restore's write, not a later reply, is what put the binding in
-   * storage — is pinned in the FIRST test above instead, which reads `stored()` before its own first
+   * storage — is pinned in the FIRST test above instead, which reads `storedBuffers()` before its own first
    * `await` and so before any reply-driven persist could have run. What this test still earns its keep
    * on is the payload's OTHER fields: both restored buffer ids survive, in order, and `minted` comes
    * back as the counter rather than the count.
    */
   it('writes a payload naming both restored buffers, with the binding read off the pane', () => {
-    expect(stored()?.buffers.map((b) => b.id)).toEqual(['scratch-1', 'scratch-2'])
+    expect(storedBuffers()?.buffers.map((b) => b.id)).toEqual(['scratch-1', 'scratch-2'])
     // THE COUNTER, NOT THE COUNT — a page that restores two buffers and mints its next one as
     // `scratch 2` would put two different terms under one name across a reload.
-    expect(stored()?.minted).toBe(2)
-    expect(stored()?.bindings['lambda-0']).toBe('scratch-2')
+    expect(storedBuffers()?.minted).toBe(2)
+    expect(storedBuffers()?.bindings['lambda-0']).toBe('scratch-2')
   })
 
   /**
@@ -261,7 +237,7 @@ describe('buffers restored from storage', () => {
     expect(termsAfterReopen()[0]).toContain('λa')
     // NOTHING WAS CREATED OR ENDED BY A WARM (`refreshBuffers`'s own doc: temperature cannot move the
     // count), and the stored payload says so — a warm that had forked instead would read three here.
-    expect(stored()?.buffers.map((b) => b.id)).toEqual(['scratch-1', 'scratch-2'])
+    expect(storedBuffers()?.buffers.map((b) => b.id)).toEqual(['scratch-1', 'scratch-2'])
   })
 
   /**
@@ -294,7 +270,7 @@ describe('buffers restored from storage', () => {
     // AND IT HOLDS `scratch-2`'s OWN TEXT AS IT WAS STORED, read off CodeMirror rather than off the DOM's
     // text nodes, which are virtualized: `\c` is `SEEDED`'s spelling, and a reload used to put the
     // printer's `λc` in its place. The whole text and not a part of it, so it is not `scratch-1`'s either.
-    expect(editorDoc()).toBe('(\\b. b) (\\c. c)')
+    expect(lambdaEditorDoc()).toBe('(\\b. b) (\\c. c)')
   })
 
   /**
@@ -334,9 +310,9 @@ describe('buffers restored from storage', () => {
   it('expanding it writes the new state back', async () => {
     document.querySelector<HTMLButtonElement>('[data-leaf="lambda-0"] [data-panel="text"] .panel-toggle')?.click()
 
-    await until(() => stored()?.buffers[1]?.collapsed === false, 'the store to record the expand')
+    await until(() => storedBuffers()?.buffers[1]?.collapsed === false, 'the store to record the expand')
 
-    expect(stored()?.buffers[1]?.id).toBe('scratch-2')
+    expect(storedBuffers()?.buffers[1]?.id).toBe('scratch-2')
     expect(document.querySelector<HTMLElement>('[data-leaf="lambda-0"] .term-editor')?.hidden).toBe(false)
   })
 
@@ -352,9 +328,9 @@ describe('buffers restored from storage', () => {
   it('a rebind moves the stored binding with the pane', async () => {
     pickBinding('lambda-0', bindingKey('lambda', 'source'))
 
-    await until(() => stored()?.bindings['lambda-0'] === undefined, 'the stored binding to follow the pane')
+    await until(() => storedBuffers()?.bindings['lambda-0'] === undefined, 'the stored binding to follow the pane')
     // AND THE BUFFER IS STILL THERE. Nothing ends a buffer implicitly (5d-ii-c decision 2), so a rebind
     // that dropped `scratch-2` from the payload would be an eviction wearing the name of a write.
-    expect(stored()?.buffers.map((b) => b.id)).toEqual(['scratch-1', 'scratch-2'])
+    expect(storedBuffers()?.buffers.map((b) => b.id)).toEqual(['scratch-1', 'scratch-2'])
   })
 })

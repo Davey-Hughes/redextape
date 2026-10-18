@@ -556,6 +556,7 @@ mod tests {
     use super::*;
     use crate::tm::machine::{Move, Rule, State};
     use crate::tm::sim::{DEFAULT_CAPS, Status, simulate_final};
+    use crate::tm::test_fixtures::{demo_machine, one_rule_machine};
     use proptest::prelude::*;
 
     /// A machine whose rules mention exactly `syms`, so `Code::new` sees a known alphabet.
@@ -619,15 +620,7 @@ mod tests {
     /// arrives on an initial tape.
     #[test]
     fn a_symbol_reaching_a_tape_only_through_inits_still_gets_a_code() {
-        let m = Machine {
-            states: vec![State {
-                name: "q".into(),
-                accept: false,
-                rules: vec![Rule { read: vec![None], write: vec![None], moves: vec![Move::R], next: 0 }],
-            }],
-            start: 0,
-            tapes: 1,
-        };
+        let m = one_rule_machine("q", Rule { read: vec![None], write: vec![None], moves: vec![Move::R], next: 0 });
         assert!(m.alphabet().is_empty(), "the only rule is an unconditional wildcard");
         let inits = vec![vec!['x', 'y']];
         assert_eq!(Code::new(&m, &[]).pattern('x'), None, "a code built from the rules alone cannot encode it");
@@ -1040,18 +1033,6 @@ mod tests {
         }
     }
 
-    fn demo_machine(src: &str, enc: crate::tm::EncodingKind) -> (Machine, Vec<Vec<Symbol>>) {
-        let (prog, ds) = crate::parser::parse(src);
-        assert!(ds.is_empty(), "parse errors for {src}: {ds:?}");
-        let prog = prog.expect("a program");
-        let ty = crate::typeck::result_type(&prog).unwrap_or_else(|e| panic!("type errors for {src}: {e:?}"));
-        let core = crate::desugar::desugar(&prog);
-        let d = crate::tm::run_tm_described(&core, enc, ty, crate::tm::TM_DEFAULT_CAPS)
-            .unwrap_or_else(|r| panic!("{src} did not run: {r:?}"));
-        let init = d.header.init(d.machine.tapes);
-        (d.machine, init)
-    }
-
     /// The ratio the construction may not exceed, as a PROPERTY rather than a restated measurement.
     /// **A gate on an exact figure is a gate that a one-state change trips**, which stage 1 learned
     /// by putting a program with a 0.062% margin inside its gated set — a PERCENT margin, which does
@@ -1148,20 +1129,10 @@ mod tests {
     /// which stays fixed regardless of `m.tapes` — `to_two_symbol`'s doc names this test for it.
     #[test]
     fn a_code_built_for_a_different_machine_is_refused() {
-        let m = Machine {
-            states: vec![State {
-                name: "q".into(),
-                accept: false,
-                rules: vec![Rule {
-                    read: vec![Some('a'), None],
-                    write: vec![Some('a'), None],
-                    moves: vec![Move::S, Move::S],
-                    next: 0,
-                }],
-            }],
-            start: 0,
-            tapes: 2,
-        };
+        let m = one_rule_machine(
+            "q",
+            Rule { read: vec![Some('a'), None], write: vec![Some('a'), None], moves: vec![Move::S, Move::S], next: 0 },
+        );
         let other = machine_over(&['x', 'y']);
         let code = Code::new(&other, &[]);
         assert!(

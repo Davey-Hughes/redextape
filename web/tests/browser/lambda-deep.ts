@@ -1,6 +1,6 @@
 import type { EditorView } from '@codemirror/view'
 import { beforeAll, describe, expect, it } from 'vitest'
-import { SHELL, until } from './harness'
+import { SHELL, stateIdle, until } from './harness'
 
 /** The program's numeral — see `deepTermSteppedBack`'s doc for why it is this and not nearer the depth guard. */
 const N = 2_000
@@ -57,7 +57,7 @@ export function deepTermSteppedBack(layout: 'code' | 'outline'): void {
           ?.click()
       }
       view.dispatch({ changes: { from: 0, to: view.state.doc.length, insert: `${N} + 0` } })
-      await until(() => document.querySelector<HTMLElement>('#results')?.dataset.state === 'idle', 'the compile')
+      await until(stateIdle, 'the compile')
       // **A TIMEOUT HERE SAYS WHAT THE PAGE READ.** The wait is for a run that ended, `step N of M` and nothing after:
       // a run still recording ends in `…`, one that stopped short names why, and one that never started reads `not
       // run`. It timed out once, in the outline file, on CI's slower runner (run 563, 2026-10-12), where the whole

@@ -3,7 +3,7 @@ import { beforeAll, describe, expect, it } from 'vitest'
 import { page, userEvent } from 'vitest/browser'
 import init, { compile as compileInPage } from '../../../pkg/redextape_wasm.js'
 import type { LinkIndexWire } from '../../src/link'
-import { SHELL, until } from './harness'
+import { asmPane, linkAt, linkStatus, pickPreset, SHELL, sourceLinked, stageTab, stateIdle, until } from './harness'
 
 /**
  * Linking through the asm view (Plan 7 part 5 spec §6.6): an instruction pins the construct its lowering came from,
@@ -18,34 +18,24 @@ const MAP =
 
 let view: EditorView
 
-const asmHost = () => document.querySelector<HTMLElement>('.pane[data-leaf="asm-0"]') as HTMLElement
-const listing = () => asmHost().querySelector<HTMLElement>('.asm-listing') as HTMLElement
+const listing = () => asmPane().querySelector<HTMLElement>('.asm-listing') as HTMLElement
 const rowOf = (pc: number) =>
-  [...asmHost().querySelectorAll<HTMLElement>('.asm-row')].find(
+  [...asmPane().querySelectorAll<HTMLElement>('.asm-row')].find(
     (r) => r.querySelector('.asm-pc')?.textContent === `pc${pc}`,
   )
 const linkedPcs = () =>
-  [...asmHost().querySelectorAll<HTMLElement>('.asm-row.is-linked .asm-pc')].map((e) => e.textContent)
+  [...asmPane().querySelectorAll<HTMLElement>('.asm-row.is-linked .asm-pc')].map((e) => e.textContent)
 const focusPcs = () =>
-  [...asmHost().querySelectorAll<HTMLElement>('.asm-row.is-focus .asm-pc')].map((e) => e.textContent)
-const sourceLinked = () => document.querySelector('.cm-editor .linked')?.textContent ?? null
-const linkStatus = () => document.querySelector('#link-status')?.textContent ?? ''
-const stepOf = () => asmHost().querySelector('.step')?.textContent ?? ''
+  [...asmPane().querySelectorAll<HTMLElement>('.asm-row.is-focus .asm-pc')].map((e) => e.textContent)
+const stepOf = () => asmPane().querySelector('.step')?.textContent ?? ''
 const control = (label: string) =>
-  [...asmHost().querySelectorAll<HTMLButtonElement>('.controls button')].find((b) => b.textContent === label)
-const idle = () => document.querySelector<HTMLElement>('#results')?.dataset.state === 'idle'
+  [...asmPane().querySelectorAll<HTMLButtonElement>('.controls button')].find((b) => b.textContent === label)
 
 async function compile(src: string): Promise<void> {
   view.dispatch({ changes: { from: 0, to: view.state.doc.length, insert: src } })
-  await until(() => !idle(), 'the compile to start')
-  await until(idle, 'the compile to finish')
+  await until(() => !stateIdle(), 'the compile to start')
+  await until(stateIdle, 'the compile to finish')
   await until(() => rowOf(0) !== undefined, 'the asm listing to draw')
-}
-
-/** Link the source construct at `pos`, as `Mod-'` does. */
-function linkAt(pos: number): void {
-  view.dispatch({ selection: { anchor: pos } })
-  view.contentDOM.dispatchEvent(new KeyboardEvent('keydown', { key: "'", ctrlKey: true, cancelable: true }))
 }
 
 beforeAll(async () => {
@@ -71,7 +61,7 @@ describe('linking through the asm view', () => {
   })
 
   it('marks the instructions a construct pinned in the source was lowered to', async () => {
-    linkAt(SAMPLE.indexOf('40'))
+    linkAt(view, SAMPLE.indexOf('40'))
     await until(() => linkedPcs().length > 0, 'the asm view to mark the pin')
     expect(linkedPcs()).toEqual(['pc0'])
   })
@@ -164,13 +154,13 @@ describe('a following listing', () => {
     control('↺')?.click()
     await until(() => stepOf().startsWith('step 0 of'), 'the asm view to restart')
     // The case above scrolled the listing by hand, which stopped following.
-    asmHost().querySelector<HTMLButtonElement>('.table-reattach')?.click()
+    asmPane().querySelector<HTMLButtonElement>('.table-reattach')?.click()
     await until(() => listing().scrollTop === 0, 'the listing to follow pc0')
     const echo = new Promise<void>((r) => listing().addEventListener('scroll', () => r(), { once: true }))
     const late = new Promise<never>((_, reject) =>
       setTimeout(() => reject(new Error('the pin needed no scroll, so this case cannot see the hold')), 5_000),
     )
-    linkAt(MAP.indexOf('[3') + 1)
+    linkAt(view, MAP.indexOf('[3') + 1)
     await Promise.race([echo, late])
     expect(listing().scrollTop, 'the listing is still where the link scrolled it').toBeGreaterThan(0)
     expect(linkedPcs().length, "the pin's instructions are on screen").toBeGreaterThan(0)
@@ -178,35 +168,26 @@ describe('a following listing', () => {
 })
 
 describe('an asm view off the page', () => {
-  /** Choose a workspace preset through the workspace menu, as `hidden-views.test.ts` does. */
-  function preset(name: 'explorer' | 'stage'): void {
-    document.querySelector<HTMLButtonElement>('#workspace')?.click()
-    document.querySelector<HTMLButtonElement>(`#workspace-menu [data-preset="${name}"]`)?.click()
-    const m = document.querySelector<HTMLElement>('#workspace-menu')
-    if (m?.matches(':popover-open')) m.hidePopover()
-  }
-  const tab = (leaf: string) => document.querySelector<HTMLElement>(`#views [role="tab"][data-leaf="${leaf}"]`)
-
   /**
    * THE LISTING IT MISSED CLEARS ITS PIN, SO THE SEED PUTS THE PIN BACK. A view off the page for a compile is seeded
    * with the new listing when it is shown, and `setProgram` drops every instruction a link named; the pin made while
    * it was away is resolved against the index that listing came with.
    */
   it('takes the pin it missed with the listing, once the stage shows it', async () => {
-    preset('stage')
-    tab('lambda-0')?.click()
+    pickPreset('stage')
+    stageTab('lambda-0')?.click()
     await until(() => document.querySelector('.pane[data-leaf="asm-0"]') === null, 'the asm view to leave the page')
     view.dispatch({ changes: { from: 0, to: view.state.doc.length, insert: SAMPLE } })
-    await until(() => !idle(), 'the compile to start')
-    await until(idle, 'the compile to finish')
+    await until(() => !stateIdle(), 'the compile to start')
+    await until(stateIdle, 'the compile to finish')
     // The source editor is off the page in the stage too, so the pin is read off the status line.
     expect(linkStatus(), 'no pin before the gesture').toBe('')
-    linkAt(SAMPLE.indexOf('40'))
+    linkAt(view, SAMPLE.indexOf('40'))
     await until(() => linkStatus() !== '', 'the pin to be made')
-    tab('asm-0')?.click()
+    stageTab('asm-0')?.click()
     await until(() => rowOf(0) !== undefined, 'the shown asm view to draw its listing')
     await until(() => linkedPcs().length > 0, 'the shown asm view to mark the pin')
     expect(linkedPcs()).toEqual(['pc0'])
-    preset('explorer')
+    pickPreset('explorer')
   })
 })

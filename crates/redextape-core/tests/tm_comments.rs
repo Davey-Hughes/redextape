@@ -306,57 +306,16 @@ fn an_authored_comment_takes_the_tape_line_over_the_generated_name() {
     assert_eq!(tape_line.matches(';').count(), 1, "two comments on one line: {tape_line}");
 }
 
-use std::fmt::Write as _;
-
 use proptest::prelude::*;
 
-/// A comment body that survives a round trip: no newline (impossible from a line-based parser
-/// anyway) and no leading or trailing whitespace, since the printer writes `; ` and the parser
-/// trims. Everything else is fair game, `;` included.
-fn body() -> impl Strategy<Value = String> {
-    "[^\n]{0,40}".prop_map(|s| s.trim().to_string())
-}
+#[path = "common/comment_slots.rs"]
+mod comment_slots;
 
-/// The own-line comments (0..=2, each printed above the construct it belongs to) and the optional
-/// trailing comment (printed on the construct's own line) a single candidate position gets. Every
-/// anchor `print_tm_inner` can write to is exactly one of these positions, and every position below
-/// draws its `Slot` INDEPENDENTLY of every other — which is what makes a typical generated document
-/// exercise many anchors, and both `own_line` values on most of them, in one case, rather than
-/// requiring a separate case per (anchor, `own_line`) combination to ever touch it at all.
-#[derive(Clone, Debug)]
-struct Slot {
-    own: Vec<String>,
-    trailing: Option<String>,
-}
-
-fn slot() -> impl Strategy<Value = Slot> {
-    (proptest::collection::vec(body(), 0..=2), proptest::option::weighted(0.7, body()))
-        .prop_map(|(own, trailing)| Slot { own, trailing })
-}
-
-/// Write `slot`'s own-line comments, each on its own line at `indent`, immediately above the
-/// construct line the caller writes next.
-fn write_own(out: &mut String, slot: &Slot, indent: &str) {
-    for line in &slot.own {
-        let _ = writeln!(out, "{indent}; {line}");
-    }
-}
-
-/// `slot`'s trailing comment, formatted to append directly after a construct's own content on the
-/// same line — empty when there isn't one.
-fn trailing_of(slot: &Slot) -> String {
-    match &slot.trailing {
-        Some(t) => format!(" ; {t}"),
-        None => String::new(),
-    }
-}
-
-/// Write one construct line, preceded by `slot`'s own-line comments and followed by its trailing
-/// comment, both at `indent`.
-fn emit(out: &mut String, slot: &Slot, indent: &str, line: &str) {
-    write_own(out, slot, indent);
-    let _ = writeln!(out, "{indent}{line}{}", trailing_of(slot));
-}
+// Every anchor `print_tm_inner` can write to is exactly one of the positions below, and every
+// position below draws its `Slot` INDEPENDENTLY of every other — which is what makes a typical
+// generated document exercise many anchors, and both `own_line` values on most of them, in one case,
+// rather than requiring a separate case per (anchor, `own_line`) combination to ever touch it at all.
+use comment_slots::{Slot, body, emit, slot, write_own};
 
 /// A data symbol safe against every reserved character (`; * : [ ]` and whitespace) and against the
 /// wildcard marker itself, so every generated symbol is exactly one `Symbol` on a round trip.

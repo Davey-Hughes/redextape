@@ -12,6 +12,7 @@ import {
   type SharePayload,
 } from '../../src/share-link'
 import { defaultWorkspace, PRESETS, type Preset, parseWorkspace, SPEEDS, serializeWorkspace } from '../../src/workspace'
+import { seededRandom } from './seeded-random'
 
 /**
  * The share link's codec (Plan 7 part 6a spec §5.1, §5.3, §8's node row): what `encodeLink` writes `decodeLink` reads
@@ -43,19 +44,11 @@ const payloadLink = (fields: Record<string, unknown>): string =>
   )
 
 describe('encodeLink and decodeLink', () => {
-  /** A seeded generator, so a failure names a payload that stays the same. */
-  const random = (seed: number): (() => number) => {
-    let s = seed
-    return () => {
-      s = (s * 1103515245 + 12345) % 2147483648
-      return s / 2147483648
-    }
-  }
   /** What a program's text can hold that JSON or UTF-8 treats specially: quotes, escapes, λ, a surrogate pair, U+2028. */
   const PIECES = ['let x = 40;', '\n', '\t', '"', '\\', 'λx. x', '🦀', ' ', ' ', '{}', 'fn f(n) {', '}', '0']
 
   const generated = (seed: number): SharePayload => {
-    const next = random(seed)
+    const next = seededRandom(seed)
     const pick = <T>(xs: readonly T[]): T => xs[Math.floor(next() * xs.length)] as T
     const program = Array.from({ length: Math.floor(next() * 400) }, () => pick(PIECES)).join('')
     const preset = pick(Object.keys(PRESETS) as Preset[])

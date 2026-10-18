@@ -1,16 +1,11 @@
 import { describe, expect, it } from 'vitest'
 import type { AsmLeg, LambdaLeg, TmLeg } from '../../src/protocol'
 import { noSessionRows, resultRows, valueLine } from '../../src/results'
-import type { Diagnostic, LambdaState } from '../../src/types'
+import type { Diagnostic } from '../../src/types'
+import { asmSnapshot } from './asm-fixtures'
+import { lambdaFrame } from './session-fixtures'
 
-const okState: LambdaState = {
-  text: 'λf. λx. f (f x)',
-  spans: new Uint8Array(),
-  cut: null,
-  step: 7,
-  redex_span: null,
-  owner: 'None',
-}
+const okState = lambdaFrame('λf. λx. f (f x)', 7)
 
 const lambdaOk: LambdaLeg = {
   status: { available: true, reason: '', node: null, run: 'Ended' },
@@ -19,10 +14,7 @@ const lambdaOk: LambdaLeg = {
   declinedSpan: null,
 }
 
-const asmOk: AsmLeg = {
-  status: { available: true, reason: '', run: 'Running', cap: null, total_steps: 55 },
-  value: { Value: { text: '42' } },
-}
+const asmOk = asmSnapshot('Running')
 
 const tmOk: TmLeg = {
   status: { available: true, reason: '', width: 8, run: 'Running', total_steps: 2870 },

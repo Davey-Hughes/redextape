@@ -1,14 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import { BASE16_MAPPING, detectVariant, mapScheme, readScheme, type Scheme } from '../../src/base16'
 import { COLOUR_TOKENS } from '../../src/palettes'
-import { currentLayout, DAY, keyed, legacyLayout, NIGHT } from './base16-fixtures'
-
-/** The scheme `text` reads as, or a failure naming its errors. */
-function read(text: string): Scheme {
-  const r = readScheme(text)
-  if (!r.ok) throw new Error(`did not read: ${r.errors.join('; ')}`)
-  return r.scheme
-}
+import { currentLayout, DAY, keyed, legacyLayout, NIGHT, readSchemeOk } from './base16-fixtures'
 
 /** The errors `text` reads as, or a failure if it reads. */
 function errors(text: string): readonly string[] {
@@ -26,12 +19,12 @@ const withLine = (key: string, line: string | null): string =>
 
 describe('readScheme — the two published layouts (Plan 7 part 6b spec §4.1)', () => {
   it('reads the current layout: name, variant, and the colours under palette:', () => {
-    const s = read(currentLayout('Night', NIGHT, 'dark'))
+    const s = readSchemeOk(currentLayout('Night', NIGHT, 'dark'))
     expect(s).toEqual({ name: 'Night', colours: keyed(NIGHT), variant: 'dark', variantFrom: 'file', base24: false })
   })
 
   it('reads the legacy layout: scheme, and the colours at the top level as bare hex', () => {
-    const s = read(legacyLayout('Day', DAY))
+    const s = readSchemeOk(legacyLayout('Day', DAY))
     expect(s).toEqual({ name: 'Day', colours: keyed(DAY), variant: 'light', variantFrom: 'detected', base24: false })
   })
 
@@ -44,21 +37,21 @@ describe('readScheme — the two published layouts (Plan 7 part 6b spec §4.1)',
       '  base03: 5b5670',
       ...NIGHT.slice(4).map((c, i) => `  base0${(i + 4).toString(16).toUpperCase()}: "${c}"`),
     ].join('\n')
-    expect(read(text).colours).toEqual(keyed(NIGHT))
+    expect(readSchemeOk(text).colours).toEqual(keyed(NIGHT))
   })
 
   it('reads a bare #rrggbb as that colour, where YAML reads a comment', () => {
-    expect(read(withLine('00', 'base00: #1f1d2b')).colours.base00).toBe('#1f1d2b')
+    expect(readSchemeOk(withLine('00', 'base00: #1f1d2b')).colours.base00).toBe('#1f1d2b')
   })
 
   it('reads either layout with CRLF line endings as with LF', () => {
     for (const text of [currentLayout('Night', NIGHT, 'dark'), legacyLayout('Day', DAY)]) {
-      expect(read(text.replaceAll('\n', '\r\n'))).toEqual(read(text))
+      expect(readSchemeOk(text.replaceAll('\n', '\r\n'))).toEqual(readSchemeOk(text))
     }
   })
 
   it('reads the last digit of a key in either case', () => {
-    expect(read(withLine('0F', 'base0f: "d0a080"')).colours.base0F).toBe('#d0a080')
+    expect(readSchemeOk(withLine('0F', 'base0f: "d0a080"')).colours.base0F).toBe('#d0a080')
   })
 
   it('skips full-line, tab-led and trailing comments', () => {
@@ -67,27 +60,29 @@ describe('readScheme — the two published layouts (Plan 7 part 6b spec §4.1)',
       '\t# base00: "ffffff" — a comment, not a colour',
       withLine('00', 'base00: "1f1d2b" # the page').replace('base01: "2b2838"', 'base01: 2b2838 # panels'),
     ].join('\n')
-    const s = read(text)
+    const s = readSchemeOk(text)
     expect(s.colours.base00).toBe('#1f1d2b')
     expect(s.colours.base01).toBe('#2b2838')
   })
 
   it('reads name over scheme, and unescapes a quoted one', () => {
-    expect(read(`name: "Say \\"when\\" \\\\ now"\n${legacyLayout('Night', NIGHT)}`).name).toBe('Say "when" \\ now')
-    expect(read(`name: 'It''s night'\n${legacyLayout('Night', NIGHT)}`).name).toBe("It's night")
-    expect(read(legacyLayout('Night', NIGHT).replace('scheme: "Night"', 'author: "x"')).name).toBe('')
+    expect(readSchemeOk(`name: "Say \\"when\\" \\\\ now"\n${legacyLayout('Night', NIGHT)}`).name).toBe(
+      'Say "when" \\ now',
+    )
+    expect(readSchemeOk(`name: 'It''s night'\n${legacyLayout('Night', NIGHT)}`).name).toBe("It's night")
+    expect(readSchemeOk(legacyLayout('Night', NIGHT).replace('scheme: "Night"', 'author: "x"')).name).toBe('')
   })
 
   it('reads name and variant at the top level only', () => {
     const text = `${currentLayout('Night', NIGHT)}  name: "nested"\n  variant: "light"\n`
-    const s = read(text)
+    const s = readSchemeOk(text)
     expect(s.name).toBe('Night')
     expect(s.variantFrom).toBe('detected')
   })
 
   it('marks a scheme base24 when it carries base10–base17, and reads its first sixteen as base16', () => {
     const extra = ['10', '11', '12', '13', '14', '15', '16', '17'].map((k) => `  base${k}: "#000000"`)
-    const s = read(`${currentLayout('Night', NIGHT, 'dark')}${extra.join('\n')}\n`)
+    const s = readSchemeOk(`${currentLayout('Night', NIGHT, 'dark')}${extra.join('\n')}\n`)
     expect(s.base24).toBe(true)
     expect(s.colours).toEqual(keyed(NIGHT))
   })
@@ -129,17 +124,17 @@ describe('the variant (spec §4.4)', () => {
   it('is dark when base00 is darker than base05, and light otherwise', () => {
     expect(detectVariant(keyed(NIGHT) as Scheme['colours'])).toBe('dark')
     expect(detectVariant(keyed(DAY) as Scheme['colours'])).toBe('light')
-    expect(read(legacyLayout('Night', NIGHT)).variant).toBe('dark')
+    expect(readSchemeOk(legacyLayout('Night', NIGHT)).variant).toBe('dark')
   })
 
   it('is what the file says when that is light or dark, in any case, over what the colours say', () => {
-    const s = read(currentLayout('Night', NIGHT, 'Light'))
+    const s = readSchemeOk(currentLayout('Night', NIGHT, 'Light'))
     expect(s.variant).toBe('light')
     expect(s.variantFrom).toBe('file')
   })
 
   it('is detected when the file says anything else', () => {
-    const s = read(currentLayout('Day', DAY, 'dim'))
+    const s = readSchemeOk(currentLayout('Day', DAY, 'dim'))
     expect(s.variant).toBe('light')
     expect(s.variantFrom).toBe('detected')
   })
@@ -171,7 +166,7 @@ describe('the mapping (spec §5.1)', () => {
   })
 
   it('maps a scheme onto every token', () => {
-    const v = mapScheme(read(legacyLayout('Night', NIGHT)).colours)
+    const v = mapScheme(readSchemeOk(legacyLayout('Night', NIGHT)).colours)
     expect(Object.keys(v).sort()).toEqual([...COLOUR_TOKENS].sort())
     expect([v.bg, v['bg-raised'], v.fg, v.error, v['tok-binder']]).toEqual([
       '#1f1d2b',

@@ -1,21 +1,11 @@
 import { EditorView } from '@codemirror/view'
 import { beforeAll, describe, expect, it } from 'vitest'
-import { SHELL, until } from './harness'
+import { idle, paneOrThrow, SHELL, until } from './harness'
 
 let view: EditorView
 
-const idle = () =>
-  document.querySelector<HTMLElement>('#results')?.dataset.state === 'idle' &&
-  (document.querySelector('#results')?.textContent ?? '') !== ''
-
-const paneHost = (leaf: string): HTMLElement => {
-  const el = document.querySelector<HTMLElement>(`[data-leaf="${leaf}"]`)
-  if (el === null) throw new Error(`no pane mounted at [data-leaf="${leaf}"]`)
-  return el
-}
-
-const outlineOf = (leaf: string) => paneHost(leaf).querySelector<HTMLElement>('[data-panel="outline"]')
-const rowsIn = (leaf: string) => [...paneHost(leaf).querySelectorAll<HTMLElement>('.outline-row')]
+const outlineOf = (leaf: string) => paneOrThrow(leaf).querySelector<HTMLElement>('[data-panel="outline"]')
+const rowsIn = (leaf: string) => [...paneOrThrow(leaf).querySelectorAll<HTMLElement>('.outline-row')]
 
 /** Open a panel through its disclosure button, the control a user has. */
 function openPanel(leaf: string): void {
@@ -89,10 +79,10 @@ describe('the outline', () => {
     // binds nothing and defines nothing.
     view.dispatch({ changes: { from: 0, to: view.state.doc.length, insert: '42\n' } })
     await until(
-      () => paneHost('source').querySelector('.outline-empty') !== null,
+      () => paneOrThrow('source').querySelector('.outline-empty') !== null,
       'the outline to say there is nothing to show',
     )
-    expect(paneHost('source').querySelector('.outline-empty')?.textContent).toBe('nothing to show')
+    expect(paneOrThrow('source').querySelector('.outline-empty')?.textContent).toBe('nothing to show')
     expect(rowsIn('source')).toHaveLength(0)
   })
 
@@ -114,7 +104,7 @@ describe('the outline', () => {
     expect(panel, 'a TM view has an outline panel in its DOM').not.toBeNull()
     expect(panel?.hidden, 'and it is withdrawn while the view shows the program').toBe(true)
 
-    const pane = paneHost('tm-0')
+    const pane = paneOrThrow('tm-0')
     pane.querySelector<HTMLButtonElement>('button.detach')?.click()
     await until(() => pane.querySelector('.term-editor') !== null, 'the copy to mount its editor')
     await until(() => outlineOf('tm-0')?.hidden === false, 'the outline to appear with the editor')
@@ -132,7 +122,7 @@ describe('the outline', () => {
    * editor is a `ScratchEditor` that reveals into itself rather than into `main.ts`'s view.
    */
   it("moves a copy's caret when one of its rows is clicked", async () => {
-    const pane = paneHost('tm-0')
+    const pane = paneOrThrow('tm-0')
     const editorHost = pane.querySelector<HTMLElement>('.term-editor')
     const editor = EditorView.findFromDOM(editorHost as HTMLElement)
     if (editor == null) throw new Error('the TM copy has no editor')

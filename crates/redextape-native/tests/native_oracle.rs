@@ -83,14 +83,10 @@ use redextape_core::tm::{
 use redextape_core::value::Value;
 use redextape_core::{RunError, run};
 use redextape_native::{NativeRun, run_native};
-use redextape_test_support::arb_expr_over;
+use redextape_test_support::{arb_expr_below, arb_expr_over};
 
-/// Parse + desugar `src` to Core, panicking on a parse error (every demo string here is known-good).
-fn core_of(src: &str) -> Core {
-    let (prog, ds) = parse(src);
-    assert!(ds.is_empty(), "parse errors for `{src}`: {ds:?}");
-    desugar(&prog.unwrap())
-}
+mod common;
+use common::core_of;
 
 /// Mirrors `redextape_core::tm`'s own `lower_program` template exactly: try `lower_asm` first
 /// (first-order Core unchanged); only retry through `defunc` when it rejects the program as higher-order
@@ -606,22 +602,19 @@ fn faults_diverge_on_native() {
     }
 }
 
-/// A first-order expression generator whose value stays `< 8`-leaf-rooted arithmetic/comparison/if,
-/// shape supplied by `redextape-test-support`'s `arb_expr_over`, shared with `redextape-core`'s
-/// `arb_tm_safe_expr` in `three_way_oracle.rs` rather than reused from it. Unlike that generator native
-/// has NO `MAX_FIELD_WIDTH` bound, so leaves are widened to `0..1000` — native compiles to real 64-bit
-/// registers and never needs to stay under 64.
-///
-/// `arb_tm_mixed_range_expr` (below) is this generator's STRUCTURAL TWIN — same `prop_recursive(3, 8,
-/// 3, ..)` parameters and operator set, a different leaf strategy. That was once a claim nothing
-/// enforced, and a future edit to either could silently desync them. It is now ENFORCED: both call
-/// `arb_expr_over` from `redextape-test-support`, so the shape exists once and the leaf is the only
-/// thing either supplies. Changing the recursion parameters or the arm set is a single edit there that
-/// necessarily reaches both — there is no longer a second copy to fall out of step.
-fn arb_native_safe_expr() -> impl Strategy<Value = String> {
-    arb_expr_over((0u64..1000).prop_map(|n| n.to_string()))
-}
-
+// `arb_expr_below(1000)`:
+// A first-order expression generator whose value stays `< 8`-leaf-rooted arithmetic/comparison/if,
+// shape supplied by `redextape-test-support`'s `arb_expr_over`, shared with `redextape-core`'s
+// `arb_expr_below(8)` in `three_way_oracle.rs` rather than reused from it. Unlike that generator native
+// has NO `MAX_FIELD_WIDTH` bound, so leaves are widened to `0..1000` — native compiles to real 64-bit
+// registers and never needs to stay under 64.
+//
+// `arb_tm_mixed_range_expr` (below) is this generator's STRUCTURAL TWIN — same `prop_recursive(3, 8,
+// 3, ..)` parameters and operator set, a different leaf strategy. That was once a claim nothing
+// enforced, and a future edit to either could silently desync them. It is now ENFORCED: both call
+// `arb_expr_over` from `redextape-test-support`, so the shape exists once and the leaf is the only
+// thing either supplies. Changing the recursion parameters or the arm set is a single edit there that
+// necessarily reaches both — there is no longer a second copy to fall out of step.
 proptest! {
     #![proptest_config(ProptestConfig { cases: 64, ..ProptestConfig::default() })]
 
@@ -629,7 +622,7 @@ proptest! {
     /// reference` AND `native == asm-interp`. The generator produces no loops/functions/faults, so a
     /// `HitCap`/`LowerError`/`Fault` would itself be a bug and trips the catch-all.
     #[test]
-    fn native_agrees_with_reference_and_asm_on_random_programs(src in arb_native_safe_expr()) {
+    fn native_agrees_with_reference_and_asm_on_random_programs(src in arb_expr_below(1000)) {
         let reference = run(&src);
         let (prog, ds) = parse(&src);
         prop_assume!(ds.is_empty()); // skip anything that does not parse/type-check
@@ -651,25 +644,25 @@ proptest! {
     }
 }
 
-/// Same shape as `arb_native_safe_expr` — both get it from `arb_expr_over`, whose own doc is the one
+/// Same shape as `arb_expr_below(1000)` — both get it from `arb_expr_over`, whose own doc is the one
 /// place the recursion parameters and arm set are written down. Restating them here would recreate, at
 /// the doc layer, exactly the duplication that crate exists to remove: a copy that goes stale the day
 /// the real parameters change in another crate.
 ///
 /// What differs, and all this generator supplies, is a MIXED leaf: `prop_oneof!` over a small range
 /// unary can represent (`0..8`, reused verbatim from
-/// `redextape-core`'s `arb_tm_safe_expr` in `three_way_oracle.rs` — that generator uses these exact
-/// recursion parameters and its doc comment records a measured max value of 27 over 2M samples, well
+/// `redextape-core`'s `arb_expr_below(8)` in `three_way_oracle.rs` — that generator uses these exact
+/// recursion parameters and its comment records a measured max value of 27 over 2M samples, well
 /// under the 64-cell ceiling) and the existing wide `0..1000` range, weighted 4:1 toward the small range.
 ///
-/// `arb_native_safe_expr` itself is UNTOUCHED (`native_agrees_with_reference_and_asm_on_random_programs`
+/// `arb_expr_below(1000)` itself is UNTOUCHED (`native_agrees_with_reference_and_asm_on_random_programs`
 /// depends on its pure `0..1000` leaves); this is a separate generator for the TM-legs proptest only.
 ///
 /// Do not read `0..8` as "sitting at 64 minus a little room" — it is nowhere near the ceiling. The
 /// headroom is the point: `+` on two leaves can exceed a bound either leaf alone satisfies, so the small
 /// range has to stay far enough below 64 that a handful of small leaves summed together (this
 /// generator's recursion can sum several) still lands under it. `0..8` is the same range
-/// `arb_tm_safe_expr` already proved safe under IDENTICAL recursion parameters, so reusing it verbatim
+/// `arb_expr_below(8)` already proved safe under IDENTICAL recursion parameters, so reusing it verbatim
 /// carries that proof over rather than re-deriving a new bound.
 fn arb_tm_mixed_range_expr() -> impl Strategy<Value = String> {
     let small = 0u64..8;

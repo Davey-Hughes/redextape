@@ -58,7 +58,7 @@ use redextape_core::ty::Ty;
 use redextape_core::typeck::result_type;
 use redextape_core::value::Value;
 use redextape_core::{RunError, run};
-use redextape_test_support::arb_expr_over;
+use redextape_test_support::arb_expr_below;
 
 /// reference == λ == unary-TM == binary-TM, guided by the reference value's type. All four must run
 /// to a value that decodes equal.
@@ -607,26 +607,23 @@ fn latent_traps_agree_reference_and_tm_while_lambda_refuses() {
     }
 }
 
-/// A first-order expression generator whose value — AND every intermediate — stays under MAX_FIELD_WIDTH
-/// (64), so the TM's fixed-width unary fields never overflow. This function only supplies the LEAF
-/// range (`< 8`); the recursion cap and the arm set that make the bound hold both live in
-/// `redextape-test-support`'s `arb_expr_over`, which this function calls — see that function's doc for
-/// where the safety lever actually is. Summarized here because it is why this generator is safe to use
-/// on the TM at all: the `depth=3` recursion cap plus value-non-growing ops keep every value under the
-/// bound (measured max 27 over 2M samples); the node budget keeps the total leaf-sum small; and the arm
-/// set emits only value-non-growing ops — `+` (bounded by the leaf-sum), monus `-` (shrinks),
-/// comparisons and `if` (yield 0/1 or select one branch) — deliberately OMITTING `*` (blows values up)
-/// and value-reusing `let` (`let q = v; q + q` doubles); the curated demos cover `*`/`let`/`while`/
-/// calls/lists, so this property stresses the arithmetic / comparison / if structure three ways. Every
-/// generated program terminates to a value (no loops, no functions, no faults), so the value arm always
-/// fires. SAFETY LEVER: it is `depth=3` (`arb_expr_over`'s `prop_recursive` first argument, the
-/// recursion-depth cap — NOT set here), not `desired_size` (the second argument), that bounds the worst
-/// case — a future editor raising the leaf range below (`0u64..8`) must keep `arb_expr_over`'s depth cap
-/// to preserve this bound.
-fn arb_tm_safe_expr() -> impl Strategy<Value = String> {
-    arb_expr_over((0u64..8).prop_map(|n| n.to_string()))
-}
-
+// `arb_expr_below(8)`:
+// A first-order expression generator whose value — AND every intermediate — stays under MAX_FIELD_WIDTH
+// (64), so the TM's fixed-width unary fields never overflow. It only supplies the LEAF
+// range (`< 8`); the recursion cap and the arm set that make the bound hold both live in
+// `redextape-test-support`'s `arb_expr_over`, which it calls — see that function's doc for
+// where the safety lever actually is. Summarized here because it is why this generator is safe to use
+// on the TM at all: the `depth=3` recursion cap plus value-non-growing ops keep every value under the
+// bound (measured max 27 over 2M samples); the node budget keeps the total leaf-sum small; and the arm
+// set emits only value-non-growing ops — `+` (bounded by the leaf-sum), monus `-` (shrinks),
+// comparisons and `if` (yield 0/1 or select one branch) — deliberately OMITTING `*` (blows values up)
+// and value-reusing `let` (`let q = v; q + q` doubles); the curated demos cover `*`/`let`/`while`/
+// calls/lists, so this property stresses the arithmetic / comparison / if structure three ways. Every
+// generated program terminates to a value (no loops, no functions, no faults), so the value arm always
+// fires. SAFETY LEVER: it is `depth=3` (`arb_expr_over`'s `prop_recursive` first argument, the
+// recursion-depth cap — NOT set here), not `desired_size` (the second argument), that bounds the worst
+// case — a future editor raising the leaf range below (`arb_expr_below(8)`) must keep `arb_expr_over`'s depth cap
+// to preserve this bound.
 proptest! {
     #![proptest_config(ProptestConfig { cases: 200, ..ProptestConfig::default() })]
 
@@ -634,7 +631,7 @@ proptest! {
     /// λ and TM. (The generator produces no loops/functions/faults, so a shared cap/fault never arises
     /// here — a `HitCap`/`LowerError` would itself be a bug and trips the catch-all.)
     #[test]
-    fn three_way_agrees_on_random_first_order_programs(src in arb_tm_safe_expr()) {
+    fn three_way_agrees_on_random_first_order_programs(src in arb_expr_below(8)) {
         let reference = run(&src);
         let (prog, ds) = parse(&src);
         prop_assume!(ds.is_empty()); // skip anything that does not parse/type-check
@@ -654,7 +651,7 @@ proptest! {
 // ============================================================================================
 // Broadened property-based oracle (correctness hardening, 2026-07-23)
 //
-// `arb_tm_safe_expr` above randomizes ONLY arithmetic/comparison/if. These generators extend the
+// `arb_expr_below(8)` above randomizes ONLY arithmetic/comparison/if. These generators extend the
 // oracle to the features that were previously covered by curated demos alone — the hardest, most
 // bug-prone code: mutable capture (boxing, Plan 3b-2), higher-order (defunc, Plan 3b-1), lists +
 // access, bounded recursion, and bounded imperative loops. Every operand is `< 8` and every

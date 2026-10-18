@@ -9,6 +9,7 @@ import {
   SPAN_WIRE_BYTES,
 } from '../../src/protocol'
 import type { AsmState, AsmWindow, Cut, LambdaState } from '../../src/types'
+import { heapNow, mean } from './probe-fixture'
 
 /**
  * `SPAN_BYTES` in `protocol.ts` used to be an estimate — ~76 bytes/span AS JSON, rounded up. The real
@@ -97,7 +98,6 @@ describe('frame cost', () => {
     if (!memory) {
       throw new Error('BLOCKED: performance.memory is unavailable in this browser — cannot measure heap size')
     }
-    const heapNow = () => (performance as MemoryPerformance).memory?.usedJSHeapSize ?? 0
     if (heapNow() === 0) {
       throw new Error('BLOCKED: performance.memory.usedJSHeapSize reads 0 — cannot measure heap size')
     }
@@ -198,7 +198,6 @@ describe('frame cost', () => {
     console.log('run B (spans dropped) heap deltas, bytes:', readingsB)
     console.log('total spans per run:', totalSpansA)
 
-    const mean = (xs: number[]) => xs.reduce((s, x) => s + x, 0) / xs.length
     const meanA = mean(readingsA)
     const meanB = mean(readingsB)
     const bytesPerSpan = (meanA - meanB) / totalSpansA
@@ -268,7 +267,6 @@ describe('asm frame cost', () => {
    */
   it('measures bytes per asm word by heap differential, and the ring charges at least that', async () => {
     await init()
-    const heapNow = () => (performance as MemoryPerformance).memory?.usedJSHeapSize ?? 0
     if (heapNow() === 0)
       throw new Error('BLOCKED: performance.memory.usedJSHeapSize reads 0 — cannot measure heap size')
     const collect = (globalThis as GlobalWithGc).gc
@@ -312,7 +310,6 @@ describe('asm frame cost', () => {
     console.log('asm run A (full AsmState) heap deltas, bytes:', readingsA)
     console.log('asm run B (words dropped) heap deltas, bytes:', readingsB)
     console.log('asm words per run:', totalWords, 'frames per run:', retainedFull[0]?.length)
-    const mean = (xs: number[]) => xs.reduce((sum, x) => sum + x, 0) / xs.length
     const bytesPerWord = (mean(readingsA) - mean(readingsB)) / totalWords
     console.log('asm bytes/word:', bytesPerWord)
 

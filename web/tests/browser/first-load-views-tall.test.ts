@@ -1,7 +1,7 @@
 import { beforeAll, describe, expect, it } from 'vitest'
-import { page, userEvent } from 'vitest/browser'
+import { userEvent } from 'vitest/browser'
 import { LAYOUT_STORAGE_KEY } from '../../src/layout'
-import { focusInPage, host, SHELL, until } from './harness'
+import { box, focusInPage, mountAt, until } from './harness'
 
 /**
  * A FIRST VISIT IN A WINDOW TALLER THAN IT IS WIDE — the view layouts spec §4.4: the source above the TM view, where
@@ -11,15 +11,8 @@ import { focusInPage, host, SHELL, until } from './harness'
 
 localStorage.removeItem(LAYOUT_STORAGE_KEY)
 
-const box = (leaf: string): DOMRect => (host(leaf) as HTMLElement).getBoundingClientRect()
-
 describe('a first load, in a window taller than it is wide', () => {
-  beforeAll(async () => {
-    await page.viewport(414, 896)
-    document.body.innerHTML = SHELL
-    await (await import('../../src/main')).ready
-    await until(() => document.querySelector<HTMLElement>('#results')?.dataset.state === 'idle', 'the first compile')
-  })
+  beforeAll(() => mountAt(414, 896))
 
   it('measured a views area taller than it is wide: the precondition', () => {
     const area = (document.querySelector('#views') as HTMLElement).getBoundingClientRect()

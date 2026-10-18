@@ -1,7 +1,7 @@
 import { beforeAll, describe, expect, it } from 'vitest'
 import { page } from 'vitest/browser'
 import { STYLE_IDS } from '../../src/skin'
-import { chooseStyle, SHELL, until } from './harness'
+import { chooseStyle, mountAt, rem } from './harness'
 
 /**
  * TERMINAL'S HEADER SITS CLOSER IN A WINDOW 85rem WIDE OR NARROWER — `style.css`'s rule beside `.bar`'s.
@@ -19,14 +19,8 @@ import { chooseStyle, SHELL, until } from './harness'
 
 const gap = (): number =>
   Number.parseFloat(getComputedStyle(document.querySelector<HTMLElement>('header.bar') as HTMLElement).columnGap)
-const rem = (): number => Number.parseFloat(getComputedStyle(document.documentElement).fontSize)
 
-beforeAll(async () => {
-  await page.viewport(1280, 896)
-  document.body.innerHTML = SHELL
-  await (await import('../../src/main')).ready
-  await until(() => document.querySelector<HTMLElement>('#results')?.dataset.state === 'idle', 'the first compile')
-}, 30_000)
+beforeAll(() => mountAt(1280, 896), 30_000)
 
 describe('the gap between the header’s controls', () => {
   it('is half a rem in Terminal at 1280 px, and a rem in the other two styles', async () => {

@@ -18,6 +18,7 @@ import {
 } from '../../src/colour'
 import { LANGUAGE_IDS, type LanguageId } from '../../src/lsp-protocol'
 import type { TokenClass } from '../../src/types'
+import { machine } from './tm-text-fixture'
 
 describe('classMapFrom', () => {
   it('keeps the four tables apart, because three captures mean different things per language', () => {
@@ -407,17 +408,6 @@ describe('the colourer on a document whose parse outlasts one slice', () => {
   afterEach(() => {
     vi.useRealTimers()
   })
-
-  /** A one-tape machine of `states` states in the TM text form: three lines to a state, every line a whole item. */
-  const machine = (states: number): string => {
-    let out =
-      'tapes 1\nstart s0\nversion 1\nencoding unary\nwidth 8\nslots 1\nresult Nat\ntape 0 #________#\n\nstate halt: accept\n'
-    for (let i = 0; i < states; i++) {
-      const next = i + 1 < states ? `s${i + 1}` : 'halt'
-      out += `state s${i}:\n  [1] -> write [_], move [R], goto ${next}\n  [_] -> write [1], move [L], goto s${i}\n`
-    }
-    return out
-  }
 
   /** 91,779 units, past `FIRST_SCREEN_UNITS`, and more than 600 progress callbacks to parse. */
   const BIG = machine(1000)

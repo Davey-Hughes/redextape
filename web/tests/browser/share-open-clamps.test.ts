@@ -3,7 +3,7 @@ import { beforeAll, describe, expect, it } from 'vitest'
 import { cdp, page } from 'vitest/browser'
 import { encodeLink, type Positions } from '../../src/share-link'
 import { serializeWorkspace } from '../../src/workspace'
-import { fourViewWorkspace, SHELL, until } from './harness'
+import { fourViewWorkspace, liveText, noticeText, SHELL, stateIdle, undoButton, until } from './harness'
 
 /**
  * **AN OPEN'S CLAMPS, AND A REAL PRESS ON ITS `undo` ACROSS ONE** — Plan 7 part 6a spec §5.5, and §5.4's note of
@@ -38,11 +38,6 @@ const letGo = (): void => {
 const OPENER = 'let x = 40; x + 2'
 const LINKED = 'let y = 10; y + 5'
 
-const noticeText = () => document.querySelector('#notice .notice-text')?.textContent ?? ''
-const undoButton = () => document.querySelector<HTMLButtonElement>('#notice button.notice-action')
-const live = () => document.querySelector('#live')?.textContent ?? ''
-const idle = () => document.querySelector<HTMLElement>('#results')?.dataset.state === 'idle'
-
 /**
  * A link to `program` under `unary`, in the four-view workspace, with `positions`. **FOUR VIEWS, SO EVERY LEG A CASE
  * CLAMPS HAS A VIEW**: a clamp is said only of a leg the tree shows (`share-open-clamps-unseen.test.ts`), and the
@@ -72,7 +67,7 @@ beforeAll(async () => {
   await page.viewport(390, 844)
   document.body.innerHTML = SHELL
   view = await (await import('../../src/main')).ready
-  await until(() => idle() && view.state.doc.toString() === OPENER, 'the first compile')
+  await until(() => stateIdle() && view.state.doc.toString() === OPENER, 'the first compile')
 })
 
 describe("an open's clamps", () => {
@@ -105,7 +100,7 @@ describe("an open's clamps", () => {
     await until(() => noticeText().includes('asm step 100'), 'the second clamp')
     const said = "the link's λ step 100 and asm step 100 are past the end of this run — showing λ step 7 and asm step 5"
     expect(noticeText()).toBe(said)
-    expect(live().trimEnd()).toBe(said)
+    expect(liveText().trimEnd()).toBe(said)
     expect(undoButton()?.textContent).toBe('undo')
   })
 

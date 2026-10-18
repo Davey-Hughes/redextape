@@ -2,7 +2,26 @@ import { beforeAll, describe, expect, it } from 'vitest'
 import { page, userEvent } from 'vitest/browser'
 import { LAYOUT_STORAGE_KEY, type LayoutNode, leaves, MAX_TREE_LEAVES } from '../../src/layout'
 import { parseWorkspace, serializeWorkspace } from '../../src/workspace'
-import { focusInPage, fourViewWorkspace, SHELL, until } from './harness'
+import {
+  copyNames,
+  editorsOf,
+  focusInPage,
+  fourViewWorkspace,
+  host,
+  hostKind,
+  leafOf,
+  mounted,
+  newLambdaViewItem,
+  noticeText,
+  pressed,
+  rowOfLeaves,
+  SHELL,
+  stateIdle,
+  storedLayoutText,
+  titleText,
+  toggle,
+  until,
+} from './harness'
 
 /**
  * A STORED WORKSPACE THAT ALREADY HOLDS ONE ID UNDER TWO KINDS — the view layouts spec §5.4. A pick in a view's title
@@ -25,7 +44,6 @@ import { focusInPage, fourViewWorkspace, SHELL, until } from './harness'
  * RUN IN ORDER ON ONE PAGE**, each from the state the one before left, and each asserts that state first.
  */
 
-const leafOf = (id: string, pane: 'source' | 'asm' | 'tm'): LayoutNode => ({ kind: 'leaf', id, pane })
 const pair = (a: LayoutNode, b: LayoutNode): LayoutNode => ({
   kind: 'split',
   dir: 'row',
@@ -33,12 +51,7 @@ const pair = (a: LayoutNode, b: LayoutNode): LayoutNode => ({
   children: [a, b],
 })
 /** 60 λ views in one row. */
-const SIXTY: LayoutNode = {
-  kind: 'split',
-  dir: 'row',
-  sizes: Array.from({ length: 60 }, () => 1 / 60),
-  children: Array.from({ length: 60 }, (_, i) => ({ kind: 'leaf', id: `pane-${i + 1}`, pane: 'lambda' }) as const),
-}
+const SIXTY = rowOfLeaves(60)
 const ON_SCREEN: LayoutNode = {
   kind: 'split',
   dir: 'row',
@@ -58,32 +71,9 @@ const SEEDED = serializeWorkspace({
 const REFUSED =
   'showing source and asm would take the workspace from 64 views to 65, and it can keep 64 — reset preset makes room'
 
-const leaf = (id: string): HTMLElement | null =>
-  document.querySelector<HTMLElement>(`#views [data-leaf="${id}"]:not([role="tab"])`)
-const titleText = (id: string): string => leaf(id)?.querySelector('.view-title')?.textContent ?? ''
-const kindOf = (id: string): string => leaf(id)?.dataset.kind ?? ''
-const mounted = (): string[] =>
-  [...document.querySelectorAll<HTMLElement>('#views [data-leaf]')]
-    .filter((el) => el.getAttribute('role') !== 'tab')
-    .map((el) => el.dataset.leaf as string)
-const toggle = (kind: string): HTMLButtonElement =>
-  document.querySelector<HTMLButtonElement>(`#views-shown button[data-shows="${kind}"]`) as HTMLButtonElement
-const pressed = (): string[] =>
-  [...document.querySelectorAll<HTMLButtonElement>('#views-shown button[aria-pressed="true"]')].map(
-    (b) => b.dataset.shows as string,
-  )
-const editors = (id: string): number => leaf(id)?.querySelectorAll('.term-editor .cm-editor').length ?? 0
-const noticeText = (): string => document.querySelector('#notice .notice-text')?.textContent ?? ''
-const stored = (): string | null => localStorage.getItem(LAYOUT_STORAGE_KEY)
-const copies = (): (string | null)[] => {
-  document.querySelector<HTMLButtonElement>('#buffers')?.click()
-  const rows = [...document.querySelectorAll<HTMLElement>('.buffer-list .buffer-row-name')].map((e) => e.textContent)
-  document.querySelector<HTMLElement>('.buffer-list')?.hidePopover()
-  return rows
-}
 /** The stored workspace's trees, and how many ids they name between them; a throw where it does not parse. */
 const storedTrees = (): { live: number; twoKinds: string[]; screen: string[] } => {
-  const ws = parseWorkspace(stored())
+  const ws = parseWorkspace(storedLayoutText())
   if (ws === null) throw new Error('the stored workspace does not parse')
   const kinds = new Map<string, Set<string>>()
   for (const tree of [ws.tree, ...Object.values(ws.arrangements)])
@@ -103,7 +93,7 @@ beforeAll(async () => {
   localStorage.setItem(LAYOUT_STORAGE_KEY, SEEDED)
   document.body.innerHTML = SHELL
   await (await import('../../src/main')).ready
-  await until(() => document.querySelector<HTMLElement>('#results')?.dataset.state === 'idle', 'the first compile')
+  await until(stateIdle, 'the first compile')
 })
 
 describe('a stored workspace with asm-0 and tm-0 each under two kinds', () => {
@@ -112,32 +102,34 @@ describe('a stored workspace with asm-0 and tm-0 each under two kinds', () => {
   it('opens as it was stored', () => {
     // A WORKSPACE THE LOADER REFUSED WOULD HAVE OPENED ON THE DEFAULT, the source beside the TM view.
     expect(mounted()).toEqual(['source', 'asm-0', 'tm-0'])
-    expect(['asm-0', 'tm-0'].map(kindOf)).toEqual(['asm', 'tm'])
+    expect(['asm-0', 'tm-0'].map(hostKind)).toEqual(['asm', 'tm'])
     const opened = storedTrees()
     expect(opened.twoKinds, 'precondition: two ids are stored under two kinds').toEqual(['asm-0', 'tm-0'])
     expect(opened.live, 'precondition: one short of the bound').toBe(MAX_TREE_LEAVES - 1)
   })
 
   it('enters the tree that names the asm view’s id as a TM view under a new id, and parks the asm view', async () => {
-    leaf('asm-0')?.querySelector<HTMLButtonElement>('button.detach')?.click()
-    await until(() => titleText('asm-0') === 'asm · copy 1' && editors('asm-0') === 1, 'the copy and its editor')
-    const inner = leaf('asm-0')?.firstElementChild
-    const editor = leaf('asm-0')?.querySelector('.term-editor .cm-editor')
+    host('asm-0')?.querySelector<HTMLButtonElement>('button.detach')?.click()
+    await until(() => titleText('asm-0') === 'asm · copy 1' && editorsOf('asm-0') === 1, 'the copy and its editor')
+    const inner = host('asm-0')?.firstElementChild
+    const editor = host('asm-0')?.querySelector('.term-editor .cm-editor')
     if (inner === null || inner === undefined || editor === null || editor === undefined)
       throw new Error('the copy’s view has nothing to recognise it by')
     asmView = { inner, editor }
-    expect(copies(), 'precondition: one view shows the copy').toEqual(['asm copy 1 · 1 view'])
+    expect(copyNames(), 'precondition: one view shows the copy').toEqual(['asm copy 1 · 1 view'])
 
     await userEvent.click(toggle('asm'))
     await focusInPage('a press on the asm toggle, which parks the asm view')
-    expect.soft(copies(), 'the switch built a TM view over the asm view of the copy').toEqual(['asm copy 1 · 1 view'])
+    expect
+      .soft(copyNames(), 'the switch built a TM view over the asm view of the copy')
+      .toEqual(['asm copy 1 · 1 view'])
     const built = mounted().filter((id) => id !== 'source')
     expect.soft(built, 'the TM view was built under the asm view’s id').not.toEqual(['asm-0'])
     expect(built).toHaveLength(1)
     const fresh = built[0] as string
     // THE LEAF COUNTER STEPPED PAST EVERY LIVE ID AT THE LOAD, the 60 off the screen included.
     expect(fresh).toBe('pane-61')
-    expect(kindOf(fresh)).toBe('tm')
+    expect(hostKind(fresh)).toBe('tm')
     expect(titleText(fresh)).toBe('TM · program')
     const now = storedTrees()
     expect(now.screen).toEqual(['source:source', `${fresh}:tm`])
@@ -151,11 +143,11 @@ describe('a stored workspace with asm-0 and tm-0 each under two kinds', () => {
     await focusInPage('a press on the asm toggle, which shows the asm view again')
     expect(mounted()).toEqual(['source', 'asm-0', 'tm-0'])
     expect(titleText('asm-0')).toBe('asm · copy 1')
-    expect(leaf('asm-0')?.firstElementChild, 'the asm view was built again').toBe(asmView.inner)
-    expect(leaf('asm-0')?.querySelector('.term-editor .cm-editor'), 'the copy’s editor is another one').toBe(
+    expect(host('asm-0')?.firstElementChild, 'the asm view was built again').toBe(asmView.inner)
+    expect(host('asm-0')?.querySelector('.term-editor .cm-editor'), 'the copy’s editor is another one').toBe(
       asmView.editor,
     )
-    expect(copies()).toEqual(['asm copy 1 · 1 view'])
+    expect(copyNames()).toEqual(['asm copy 1 · 1 view'])
   })
 
   /**
@@ -167,15 +159,15 @@ describe('a stored workspace with asm-0 and tm-0 each under two kinds', () => {
     expect(mounted(), 'precondition: the source, the asm view and the TM view').toEqual(['source', 'asm-0', 'tm-0'])
     expect(storedTrees().live, 'precondition: the workspace is at the bound').toBe(MAX_TREE_LEAVES)
     expect(toggle('tm').getAttribute('aria-disabled'), 'precondition: the TM toggle can be pressed').toBeNull()
-    const before = { mounted: mounted(), pressed: pressed(), stored: stored() }
+    const before = { mounted: mounted(), pressed: pressed(), stored: storedLayoutText() }
 
     await userEvent.click(toggle('tm'))
     await focusInPage('a press on the TM toggle, whose switch is refused')
     expect.soft(noticeText(), 'the switch was not refused').toBe(REFUSED)
     expect.soft(pressed(), 'the refused switch moved the toggles').toEqual(before.pressed)
     expect.soft(mounted(), 'the refused switch changed the views on the page').toEqual(before.mounted)
-    expect.soft(stored() === before.stored, 'the refused switch stored another workspace').toBe(true)
-    expect.soft(parseWorkspace(stored()), 'the stored workspace is one the loader refuses').not.toBeNull()
+    expect.soft(storedLayoutText() === before.stored, 'the refused switch stored another workspace').toBe(true)
+    expect.soft(parseWorkspace(storedLayoutText()), 'the stored workspace is one the loader refuses').not.toBeNull()
   })
 
   /**
@@ -188,12 +180,8 @@ describe('a stored workspace with asm-0 and tm-0 each under two kinds', () => {
     expect(mounted(), 'precondition: the reset shows the source beside the TM view').toEqual(['source', 'tm-0'])
     expect(storedTrees().live, 'precondition: the reset forgot every arrangement').toBe(2)
     await userEvent.click(document.querySelector<HTMLButtonElement>('#new-view') as HTMLButtonElement)
-    const item = (): HTMLButtonElement | undefined =>
-      [...document.querySelectorAll<HTMLButtonElement>('#new-view-menu button')].find(
-        (b) => b.textContent === 'λ · program',
-      )
-    await until(() => item() !== undefined, '+ view’s λ · program')
-    await userEvent.click(item() as HTMLButtonElement)
+    await until(() => newLambdaViewItem() !== undefined, '+ view’s λ · program')
+    await userEvent.click(newLambdaViewItem() as HTMLButtonElement)
     expect(
       mounted().filter((id) => id !== 'source' && id !== 'tm-0'),
       'the refused switch minted an id',

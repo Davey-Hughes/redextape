@@ -1,24 +1,16 @@
-import { afterEach, describe, expect, it, vi } from 'vitest'
-import { LambdaBody, LINE_HEIGHT } from '../../src/lambda-body'
+import { afterEach, describe, expect, it } from 'vitest'
+import { LINE_HEIGHT } from '../../src/lambda-body'
 import { codeLines, type LayoutOptions, outlineLines } from '../../src/lambda-layout'
 import { Tree } from '../../src/lambda-tree'
 import type { LambdaState } from '../../src/types'
 import { spanBytes } from '../node/span-bytes'
 import { wireOf } from '../node/tree-fixture'
+import { frames, keyOnBody } from './harness'
+import { mountLambdaBody } from './lambda-body-fixture'
 
 const opts = (width: number): LayoutOptions => ({ width, vars: 'names', open: () => true })
 
-function mount() {
-  const toggle = vi.fn()
-  const link = vi.fn()
-  const body = new LambdaBody({ toggle, link })
-  const host = document.createElement('section')
-  host.className = 'pane lambda-body-fixture'
-  host.style.width = '640px'
-  host.append(body.el)
-  document.body.append(host)
-  return { body, toggle, link }
-}
+const mount = () => mountLambdaBody('lambda-body-fixture')
 
 const rows = () => [...document.querySelectorAll<HTMLElement>('.lambda-body-fixture .term-line')]
 /** A row's text: its tokens — the gutter and the marks' words are CSS, not text. */
@@ -26,12 +18,6 @@ const shown = (row: HTMLElement) => row.textContent ?? ''
 
 /** `f a0 a1 … a{n-1}`, then a redex last — a spine that breaks one argument per line at a narrow width. */
 const long = (n: number) => `f ${Array.from({ length: n }, (_, i) => `a${i}`).join(' ')} ((\\y. y) z)`
-
-/** Two animation frames: long enough for the browser to lay out, clamp and deliver its own `scroll` events. */
-const frames = () => new Promise<void>((r) => requestAnimationFrame(() => requestAnimationFrame(() => r())))
-
-const press = (body: LambdaBody, key: string) =>
-  body.el.dispatchEvent(new KeyboardEvent('keydown', { key, bubbles: true }))
 
 afterEach(() => {
   for (const el of document.querySelectorAll('.lambda-body-fixture')) el.remove()
@@ -223,10 +209,10 @@ describe('LambdaBody', () => {
     expect(first.querySelector<HTMLElement>('.term-gutter')?.dataset.open).toBe('true')
     expect(first.getAttribute('aria-expanded')).toBe('true')
     body.el.focus()
-    press(body, 'Home')
-    press(body, 'ArrowRight')
+    keyOnBody(body, 'Home')
+    keyOnBody(body, 'ArrowRight')
     expect(toggle.mock.calls, '→ opens only what is closed').toEqual([[head]])
-    press(body, 'ArrowLeft')
+    keyOnBody(body, 'ArrowLeft')
     expect(toggle).toHaveBeenLastCalledWith(0)
   })
 
@@ -241,22 +227,22 @@ describe('LambdaBody', () => {
     const head = app.left(0)
     body.showTree(app, codeLines(app, { width: 12, vars: 'names', open: (i) => i !== head }), false, [], false)
     body.el.focus()
-    press(body, 'Home')
-    press(body, 'Enter')
+    keyOnBody(body, 'Home')
+    keyOnBody(body, 'Enter')
     expect(toggle.mock.calls, 'the folded head on its application’s row').toEqual([[head]])
 
     toggle.mockClear()
     const abs = new Tree(wireOf('\\x. f x x x x'))
     body.showTree(abs, codeLines(abs, { width: 8, vars: 'names', open: (i) => i !== 0 }), false, [], false)
-    press(body, 'Home')
-    press(body, 'Enter')
+    keyOnBody(body, 'Home')
+    keyOnBody(body, 'Enter')
     expect(toggle.mock.calls, 'a folded abstraction').toEqual([[0]])
     expect(link, 'a row with something closed on it').not.toHaveBeenCalled()
 
     toggle.mockClear()
     body.showTree(abs, codeLines(abs, opts(8)), false, [], false)
-    press(body, 'Home')
-    press(body, 'Enter')
+    keyOnBody(body, 'Home')
+    keyOnBody(body, 'Enter')
     expect(toggle, 'the same row, opened').not.toHaveBeenCalled()
     expect(link).toHaveBeenCalledWith(0)
   })
@@ -276,11 +262,11 @@ describe('LambdaBody', () => {
     expect(row().querySelector<HTMLElement>('.term-gutter')?.dataset.open).toBe('false')
     expect(row().querySelector<HTMLElement>('.term-gutter')?.title, 'what the glyph does').toBe('open')
     body.el.focus()
-    press(body, 'ArrowLeft')
+    keyOnBody(body, 'ArrowLeft')
     expect(toggle, '← on a closed chip').not.toHaveBeenCalled()
-    press(body, 'ArrowRight')
+    keyOnBody(body, 'ArrowRight')
     expect(toggle.mock.calls).toEqual([[0]])
-    press(body, 'Enter')
+    keyOnBody(body, 'Enter')
     expect(toggle.mock.calls).toEqual([[0], [0]])
     expect(link, 'Enter on a chip opens it').not.toHaveBeenCalled()
 
@@ -290,11 +276,11 @@ describe('LambdaBody', () => {
     expect(row().getAttribute('aria-expanded')).toBe('true')
     expect(row().querySelector<HTMLElement>('.term-gutter')?.dataset.open).toBe('true')
     expect(row().querySelector<HTMLElement>('.term-gutter')?.title).toBe('fold')
-    press(body, 'ArrowRight')
+    keyOnBody(body, 'ArrowRight')
     expect(toggle, '→ with nothing closed').not.toHaveBeenCalled()
-    press(body, 'ArrowLeft')
+    keyOnBody(body, 'ArrowLeft')
     expect(toggle.mock.calls).toEqual([[0]])
-    press(body, 'Enter')
+    keyOnBody(body, 'Enter')
     expect(link, 'Enter on an open λ row links').toHaveBeenCalledWith(0)
     row().querySelector<HTMLElement>('.term-gutter')?.click()
     expect(toggle.mock.calls, 'and a pointer can fold it back too').toEqual([[0], [0]])
@@ -316,8 +302,8 @@ describe('LambdaBody', () => {
     expect(row().getAttribute('aria-expanded')).toBe('false')
     expect(gutter()?.dataset.node).toBe(String(chip))
     body.el.focus()
-    press(body, 'ArrowRight')
-    press(body, 'Enter')
+    keyOnBody(body, 'ArrowRight')
+    keyOnBody(body, 'Enter')
     expect(toggle.mock.calls).toEqual([[chip], [chip]])
     expect(link).not.toHaveBeenCalled()
 
@@ -326,10 +312,10 @@ describe('LambdaBody', () => {
     expect(rows().map(shown)).toEqual(['g (λf x. f (f x))'])
     expect(row().getAttribute('aria-expanded')).toBe('true')
     expect(gutter()?.dataset.open).toBe('true')
-    press(body, 'ArrowLeft')
+    keyOnBody(body, 'ArrowLeft')
     gutter()?.click()
     expect(toggle.mock.calls).toEqual([[chip], [chip]])
-    press(body, 'Enter')
+    keyOnBody(body, 'Enter')
     expect(link, 'Enter on a row with no closed chip links').toHaveBeenCalledWith(t.left(0))
   })
 
@@ -343,8 +329,8 @@ describe('LambdaBody', () => {
     expect(rows().map(shown)).toEqual(['g 1 (λf x. f (f x))'])
     expect(rows()[0]?.querySelector<HTMLElement>('.term-gutter')?.dataset.node).toBe(String(two))
     body.el.focus()
-    press(body, 'ArrowLeft')
-    press(body, 'ArrowRight')
+    keyOnBody(body, 'ArrowLeft')
+    keyOnBody(body, 'ArrowRight')
     expect(toggle.mock.calls).toEqual([[two], [one]])
   })
 
@@ -362,13 +348,13 @@ describe('LambdaBody', () => {
     expect(shown(rows()[0] as HTMLElement)).toBe('2')
     expect(rows()[0]?.querySelector<HTMLElement>('.term-gutter')?.dataset.node).toBe('0')
     body.el.focus()
-    press(body, 'ArrowRight')
+    keyOnBody(body, 'ArrowRight')
     expect(toggle.mock.calls).toEqual([[chip]])
 
     toggle.mockClear()
     body.showTree(t, codeLines(t, { width: 12, vars: 'names', open: () => true }), false, [], false)
     expect(shown(rows()[0] as HTMLElement)).toBe('(λf x. ')
-    press(body, 'ArrowLeft')
+    keyOnBody(body, 'ArrowLeft')
     expect(toggle.mock.calls, 'the chip, not the application').toEqual([[chip]])
   })
 
@@ -386,8 +372,8 @@ describe('LambdaBody', () => {
     expect(rows().map(shown)).toEqual(['(λx. ', 'x', 'a', 'b', 'c', 'd', 'e', 'f', 'g', 'h)', 'z'])
     expect(rows()[0]?.querySelector<HTMLElement>('.term-gutter')?.dataset.node, 'the application’s').toBe('0')
     body.el.focus()
-    press(body, 'Home')
-    press(body, 'ArrowLeft')
+    keyOnBody(body, 'Home')
+    keyOnBody(body, 'ArrowLeft')
     expect(toggle.mock.calls, 'the head, not the application').toEqual([[head]])
   })
 

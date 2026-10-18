@@ -1,8 +1,9 @@
-import { EditorView } from '@codemirror/view'
+import type { EditorView } from '@codemirror/view'
 import { afterAll, describe, expect, it } from 'vitest'
 import { RECORD_CHUNK } from '../../src/protocol'
 import { bindingKey } from '../../src/view-header'
-import { SHELL, until } from './harness'
+import { editorViewOf } from './editor-view-fixture'
+import { editedToHaltImmediately, idle, SHELL, startStateGoesToHalt, tmPaneHost, until } from './harness'
 
 /**
  * **THE FORK GESTURE FOR THE TM LEG, DRIVEN THROUGH THE APP — 5d-iv Task 9, the headline task.**
@@ -25,7 +26,7 @@ import { SHELL, until } from './harness'
  * **ONE MOUNT FOR THE FILE, FOR THOSE FILES' OWN REASON: ES module imports are cached, so `main()` runs
  * once per page and Vitest gives each test FILE its own page.** `mountApp` below only imports `../../src/main`
  * on its first call in this file; every later call reuses the already-mounted app and simply loads a new
- * program into it — the same "dispatch into the live editor" idiom `settled(src)` uses in those two
+ * program into it — the same "dispatch into the live editor" idiom `settled(view, src)` uses in those two
  * files, generalised into a small per-test entry point because this file's four tests are independent
  * claims (a control's presence, its disabled reason, the source surviving a fork, an edit reaching the
  * tapes) rather than stages of one sequence.
@@ -111,28 +112,6 @@ afterAll(() => {
   Worker.prototype.addEventListener = listen
   Worker.prototype.postMessage = post
 })
-
-const resultsText = () => document.querySelector('#results')?.textContent ?? ''
-/** `scratch-app.test.ts`'s own `idle` — the source compile's own "finished" flag. */
-const idle = () => document.querySelector<HTMLElement>('#results')?.dataset.state === 'idle' && resultsText() !== ''
-
-const tmPaneHost = (): HTMLElement => {
-  const el = document.querySelector<HTMLElement>('[data-leaf="tm-0"]')
-  if (el === null) throw new Error('no TM pane mounted at [data-leaf="tm-0"]')
-  return el
-}
-
-const editorHostOf = (pane: HTMLElement): HTMLElement => {
-  const host = pane.querySelector<HTMLElement>('.term-editor')
-  if (host === null) throw new Error('no editor mounted in this pane')
-  return host
-}
-
-const editorViewOf = (pane: HTMLElement): EditorView => {
-  const view = EditorView.findFromDOM(editorHostOf(pane))
-  if (view === null) throw new Error('no CodeMirror view mounted under the editor host')
-  return view
-}
 
 /**
  * Whether the fork's own editor is mounted in `pane` — the fact the three fork gestures below wait on,
@@ -390,65 +369,3 @@ describe('forking a TM pane', () => {
     expect(startStateGoesToHalt(app.tmPane(), start)).toBe(true)
   })
 })
-
-/**
- * Rewrite the start state's rule list to a single unconditional jump to `halt`, and hand back the
- * name that state was edited under — `runs the edited machine`'s own assertion reads it back rather
- * than hard-coding it a second time (Important 3, fix round: the assertion has to name the SAME state
- * this function edited, derived from the SAME text, or a future change to the lowering's naming could
- * silently desynchronize the two).
- *
- * **DERIVED FROM THE REAL TEXT, NOT HARD-CODED.** The state names are the lowering's (`pc0`,
- * `wl1s2.s.sk0`, …) and it is free to change them; a machine typed into this file would keep passing
- * after such a change while no longer being the machine the pane forked. This reads the `start`
- * directive out of the emitted header and edits the state it names.
- *
- * **`halt` ITSELF IS NOT DERIVED, AND THAT IS SAFE RATHER THAN A SECOND HARD-CODE — `redextape-core`'s
- * `tm/lower_tm.rs`, `tm/build.rs`, `tm/encoding/unary.rs` ALL BUILD THE ACCEPT STATE WITH THE LITERAL
- * `"halt"`.** It is the lowering's own fixed name for the machine's one accept state, not a fact this
- * function reads off the source program the way `start`'s target is — every encoding path in
- * `redextape-core` calls `b.accept("halt")`, and `crates/redextape-core/tests/fixtures/list_1_2.tm`
- * (`state halt: accept`) is a committed instance of exactly that convention.
- */
-function editedToHaltImmediately(text: string): { text: string; start: string } {
-  const start = /^start (\S+)$/m.exec(text)?.[1]
-  if (start === undefined) throw new Error('emitted text has no `start` directive')
-  const tapes = Number(/^tapes (\d+)$/m.exec(text)?.[1])
-  if (!Number.isInteger(tapes)) throw new Error('emitted text has no `tapes` directive')
-  const wild = Array.from({ length: tapes }, () => '*').join(' ')
-  const stay = Array.from({ length: tapes }, () => 'S').join(' ')
-  const rule = `  [${wild}] -> write [${wild}], move [${stay}], goto halt`
-
-  // Replace every rule line under `state <start>:` with the one above. A state block runs from its
-  // header to the next line that is not indented.
-  const lines = text.split('\n')
-  const at = lines.indexOf(`state ${start}:`)
-  if (at < 0) throw new Error(`no block for the start state \`${start}\``)
-  let end = at + 1
-  while ((lines[end] ?? '').startsWith('  ')) end++
-  return { text: [...lines.slice(0, at + 1), rule, ...lines.slice(end)].join('\n'), start }
-}
-
-/**
- * Whether the δ-table's rendered rows show `state`'s own header immediately followed by exactly the
- * one rule `editedToHaltImmediately` wrote — the fact worth waiting for and asserting, in place of
- * both the vacuous `/halt/i` this replaces (Important 3: `state halt: accept` is always somewhere in
- * the δ-table, forked or not, edited or not — the reviewer measured this true before the fork and
- * before the edit alike) and plain content quiescence (Important 4: `typeInto` changes the editor's
- * own text synchronously, well before the 300 ms debounce ever posts a recompile, so a quiescence
- * poll can settle in the gap before the worker answers at all — polling for this fact instead is
- * immune to that race by construction, since it can only become true once the reply that recompiled
- * the edited text has actually landed and repainted).
- *
- * READS THE RENDERED TABLE, NOT THE EDITOR'S OWN TEXT. The editor shows whatever was typed the
- * instant `typeInto` runs, which proves a keystroke reached the document and nothing about whether
- * the worker ever recompiled it — `TmPane.setProgram` is the one thing that can move what this reads,
- * and it runs only from a `tm-scratch-compiled` reply.
- */
-function startStateGoesToHalt(pane: HTMLElement, start: string): boolean {
-  const rows = [...pane.querySelectorAll<HTMLElement>('.state-row')]
-  const at = rows.findIndex((el) => el.classList.contains('is-state') && el.textContent === start)
-  const rule = at < 0 ? undefined : rows[at + 1]
-  if (rule === undefined || !rule.classList.contains('is-rule')) return false
-  return /→ halt$/.test(rule.textContent ?? '')
-}

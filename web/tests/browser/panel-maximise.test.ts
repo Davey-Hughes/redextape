@@ -3,11 +3,11 @@ import { page, userEvent } from 'vitest/browser'
 import type { AsmPanels } from '../../src/asm-pane'
 import { AsmPane } from '../../src/asm-pane'
 import { LambdaPane } from '../../src/lambda-pane'
-import type { PaneEvents } from '../../src/pane-chrome'
 import type { Shares } from '../../src/panel-stack'
 import type { LambdaState } from '../../src/types'
 import { FACT3, frameOf } from '../node/asm-fixtures'
 import { wireOf } from '../node/tree-fixture'
+import { controlState, frame, heightOf, inertEvents, panelOf, panelToggle } from './harness'
 
 /**
  * THE MAXIMISE BUTTON ON EACH PANEL — the view layouts spec §11.3, `panel-stack.ts` and `panel.ts`'s `drawOver`.
@@ -18,31 +18,7 @@ import { wireOf } from '../node/tree-fixture'
  * regions, and on a λ view for the region that has no header to be drawn closed as.
  */
 
-const CONTROLS = {
-  canRestart: true,
-  canBack: true,
-  canForward: true,
-  canToNewest: true,
-  canPlay: true,
-  playing: false,
-  stepText: 'step 3 of 55',
-  continueLabel: null,
-}
-
-function events(over: Partial<PaneEvents> = {}): PaneEvents {
-  return {
-    back: vi.fn(),
-    forward: vi.fn(),
-    toNewest: vi.fn(),
-    play: vi.fn(),
-    restart: vi.fn(),
-    extend: vi.fn(),
-    speed: () => 8,
-    setSpeed: vi.fn(),
-    rebind: vi.fn(),
-    ...over,
-  }
-}
+const CONTROLS = controlState(true, 'step 3 of 55')
 
 function mount(panels: AsmPanels = {}) {
   const sizes = vi.fn<(s: Shares) => void>()
@@ -53,15 +29,13 @@ function mount(panels: AsmPanels = {}) {
   host.style.height = '900px'
   host.style.width = '1000px'
   document.body.append(host)
-  const pane = new AsmPane(host, events({ panelSizes: sizes, panel }), panels)
+  const pane = new AsmPane(host, inertEvents({ panelSizes: sizes, panel }), panels)
   pane.setProgram(FACT3)
   pane.render(frameOf({ pc: 3, next: 3 }), CONTROLS)
   return { host, pane, sizes, panel }
 }
 
 const NAMES = ['listing', 'registers', 'stack', 'heap'] as const
-const panelOf = (host: HTMLElement, name: string) => host.querySelector(`[data-panel="${name}"]`) as HTMLElement
-const toggle = (host: HTMLElement, name: string) => panelOf(host, name).querySelector('.panel-toggle') as HTMLElement
 const maximise = (host: HTMLElement, name: string) =>
   panelOf(host, name).querySelector('.panel-maximise') as HTMLButtonElement
 const body = (host: HTMLElement, name: string) =>
@@ -70,16 +44,14 @@ const body = (host: HTMLElement, name: string) =>
 const drawn = (host: HTMLElement): Record<string, boolean> =>
   Object.fromEntries(
     NAMES.map((n) => {
-      const open = toggle(host, n).getAttribute('aria-expanded') === 'true'
+      const open = panelToggle(host, n).getAttribute('aria-expanded') === 'true'
       if (body(host, n).hidden === open) throw new Error(`${n}: aria-expanded and hidden disagree`)
       return [n, open]
     }),
   )
 const pressed = (host: HTMLElement): string[] =>
   NAMES.filter((n) => maximise(host, n).getAttribute('aria-pressed') === 'true')
-const heightOf = (el: Element) => el.getBoundingClientRect().height
 const boundaries = (host: HTMLElement) => host.querySelectorAll('.panel-boundary').length
-const frame = (): Promise<void> => new Promise((r) => requestAnimationFrame(() => r()))
 
 beforeAll(async () => {
   await page.viewport(1280, 1000)
@@ -187,7 +159,7 @@ describe('a panel’s maximise button', () => {
     await userEvent.click(maximise(host, 'heap'))
     await frame()
     // THE LISTING IS STORED OPEN AND DRAWN CLOSED: a press on its disclosure opens what is drawn.
-    await userEvent.click(toggle(host, 'listing'))
+    await userEvent.click(panelToggle(host, 'listing'))
     await frame()
     expect(pressed(host), 'the maximise did not end').toEqual([])
     expect(panel).toHaveBeenCalledExactlyOnceWith('listing', true)
@@ -199,7 +171,7 @@ describe('a panel’s maximise button', () => {
   it('opens a panel that was stored closed when its disclosure is pressed under a maximise', async () => {
     const { host, panel } = mount({ stack: false })
     await userEvent.click(maximise(host, 'heap'))
-    await userEvent.click(toggle(host, 'stack'))
+    await userEvent.click(panelToggle(host, 'stack'))
     await frame()
     expect(panel).toHaveBeenCalledExactlyOnceWith('stack', true)
     expect(drawn(host)).toEqual({ listing: true, registers: true, stack: true, heap: true })
@@ -209,7 +181,7 @@ describe('a panel’s maximise button', () => {
   it('ends when the maximised panel is closed by its own disclosure', async () => {
     const { host, panel } = mount()
     await userEvent.click(maximise(host, 'heap'))
-    await userEvent.click(toggle(host, 'heap'))
+    await userEvent.click(panelToggle(host, 'heap'))
     await frame()
     expect(panel).toHaveBeenCalledExactlyOnceWith('heap', false)
     expect(pressed(host)).toEqual([])
@@ -264,7 +236,7 @@ describe('a maximise in a view with a region that has no header', () => {
     host.style.height = '700px'
     host.style.width = '640px'
     document.body.append(host)
-    const pane = new LambdaPane(host, events(), { map: true })
+    const pane = new LambdaPane(host, inertEvents(), { map: true })
     pane.render(frameState, CONTROLS)
     pane.renderTree({ kind: 'tree', tree: wireOf(WIDE) })
     await frame()
@@ -306,7 +278,7 @@ describe('a maximise in a view with a region that has no header', () => {
     host.style.height = '700px'
     host.style.width = '640px'
     document.body.append(host)
-    const pane = new LambdaPane(host, events(), { map: true, sizes: { term: 1.75, map: 0.25 } })
+    const pane = new LambdaPane(host, inertEvents(), { map: true, sizes: { term: 1.75, map: 0.25 } })
     pane.render(frameState, CONTROLS)
     pane.renderTree({ kind: 'tree', tree: wireOf(WIDE) })
     await frame()
@@ -337,7 +309,7 @@ describe('a maximise in a view with a region that has no header', () => {
     host.style.height = '260px'
     host.style.width = '640px'
     document.body.append(host)
-    const pane = new LambdaPane(host, events({ editSink: () => vi.fn(), collapse: vi.fn() }), { map: true })
+    const pane = new LambdaPane(host, inertEvents({ editSink: () => vi.fn(), collapse: vi.fn() }), { map: true })
     pane.render(frameState, CONTROLS)
     const first = wireOf(WIDE)
     pane.renderTree({ kind: 'tree', tree: first })

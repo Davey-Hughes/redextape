@@ -1,7 +1,7 @@
 import { beforeAll, describe, expect, it } from 'vitest'
-import { page, userEvent } from 'vitest/browser'
+import { userEvent } from 'vitest/browser'
 import { bindingKey } from '../../src/view-header'
-import { SHELL, until } from './harness'
+import { claim, host, mountAt, toggle, until } from './harness'
 
 /**
  * A VIEW THAT COMES BACK TO THE PAGE SCROLLS ONLY WHAT IT STILL HOLDS — the view layouts spec §5.2.
@@ -15,8 +15,6 @@ import { SHELL, until } from './harness'
  * the combination without the asm view, visited for the first time, has the first λ view and not the second.
  */
 
-const host = (leaf: string): HTMLElement | null =>
-  document.querySelector<HTMLElement>(`#views [data-leaf="${leaf}"]:not([role="tab"])`)
 const leaves = (): string[] =>
   [...document.querySelectorAll<HTMLElement>('#views .pane[data-leaf]')].map((p) => p.dataset.leaf ?? '')
 const shows = (leaf: string): string | undefined =>
@@ -24,18 +22,9 @@ const shows = (leaf: string): string | undefined =>
 /** The sideways scroller of the copy's editor, where `leaf`'s view holds it: CodeMirror's own, which moves with it. */
 const editorIn = (leaf: string): HTMLElement | null =>
   host(leaf)?.querySelector<HTMLElement>('.term-editor .cm-scroller') ?? null
-const toggle = (kind: string): HTMLElement =>
-  document.querySelector<HTMLElement>(`#views-shown button[data-shows="${kind}"]`) as HTMLElement
-const claim = (leaf: string): HTMLButtonElement | null =>
-  host(leaf)?.querySelector<HTMLButtonElement>('button.claim-editor') ?? null
 
 describe('a copy’s editor that another view took while its view was off the page', () => {
-  beforeAll(async () => {
-    await page.viewport(1280, 896)
-    document.body.innerHTML = SHELL
-    await (await import('../../src/main')).ready
-    await until(() => document.querySelector<HTMLElement>('#results')?.dataset.state === 'idle', 'the first compile')
-  })
+  beforeAll(() => mountAt(1280, 896))
 
   it('is not scrolled by the return of the view that used to hold it', async () => {
     // A COPY IN THE λ VIEW, AND A SECOND VIEW OF IT, which takes the editor.

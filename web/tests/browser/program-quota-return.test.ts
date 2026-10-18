@@ -3,7 +3,8 @@ import { describe, expect, it } from 'vitest'
 import { userEvent } from 'vitest/browser'
 import { FIRST_LOAD } from '../../src/examples'
 import { PROGRAM_STORAGE_KEY, parseProgram, type StoredProgram } from '../../src/program-store'
-import { SHELL, until } from './harness'
+import { noticeEl, noticeElText, picker, retype, SHELL, stateIdle, until } from './harness'
+import { stored } from './share-open-hashchange-fixture'
 
 /**
  * **A REFUSED PROGRAM WRITE IS REPORTED ONLY WHILE THE PAGE SHOWS A PROGRAM A RELOAD WOULD NOT RESTORE** — Plan 7 part
@@ -37,20 +38,14 @@ const A = FIRST_LOAD.text
 const B = 'let x = 1;\nx + 1\n'
 const C = 'let x = 3;\nx + 1\n'
 const D = 'let x = 2;\nx + 1\n'
-const notice = () => document.querySelector<HTMLElement>('#notice') as HTMLElement
-const noticeText = () => notice().querySelector('.notice-text')?.textContent ?? ''
-const idle = () => document.querySelector<HTMLElement>('#results')?.dataset.state === 'idle'
-const picker = () => document.querySelector<HTMLSelectElement>('#encoding') as HTMLSelectElement
 const lastRefused = (): StoredProgram | undefined => refused.at(-1)
-const stored = () => parseProgram(localStorage.getItem(PROGRAM_STORAGE_KEY), ['unary', 'binary'])
 
 let view: EditorView
-const type = (text: string): void => view.dispatch({ changes: { from: 0, to: view.state.doc.length, insert: text } })
 
 /** Put `text` in the editor and wait for its write to be refused — a new refusal, not one recorded before it. */
 async function typeRefused(text: string, what: string): Promise<void> {
   const seen = refused.length
-  type(text)
+  retype(view, text)
   await until(() => refused.length > seen && lastRefused()?.text === text, what)
 }
 
@@ -58,24 +53,24 @@ describe('a program write refused by storage, with the program put back', () => 
   it('says nothing while the page shows the program it opened on', async () => {
     document.body.innerHTML = SHELL
     view = await (await import('../../src/main')).ready
-    await until(() => idle() && lastRefused()?.text === A, 'the first compile’s refused write')
-    expect(notice().hidden).toBe(true)
+    await until(() => stateIdle() && lastRefused()?.text === A, 'the first compile’s refused write')
+    expect(noticeEl().hidden).toBe(true)
   })
 
   it('says so once the program differs from what a reload restores', async () => {
-    type(B)
-    await until(() => noticeText() === PROGRAM_LINE, 'the resting line')
+    retype(view, B)
+    await until(() => noticeElText() === PROGRAM_LINE, 'the resting line')
   })
 
   it('keeps saying so while it still differs', async () => {
     await typeRefused(C, 'the next write, refused')
-    expect(noticeText()).toBe(PROGRAM_LINE)
+    expect(noticeElText()).toBe(PROGRAM_LINE)
   })
 
   it('takes it back once the page shows what a reload restores again', async () => {
     await typeRefused(A, 'the program put back, refused')
-    expect(notice().hidden).toBe(true)
-    expect(noticeText()).toBe('')
+    expect(noticeEl().hidden).toBe(true)
+    expect(noticeElText()).toBe('')
   })
 
   /** THE ENCODING IS HALF OF WHAT A RELOAD RESTORES, so a change of it alone is a change, and putting it back is too. */
@@ -86,22 +81,22 @@ describe('a program write refused by storage, with the program put back', () => 
     await userEvent.selectOptions(picker(), 'unary')
     await until(() => refused.length > seen && lastRefused()?.encoding === 'unary', 'the encoding, refused')
     expect(lastRefused()?.text).toBe(A)
-    expect(noticeText()).toBe(PROGRAM_LINE)
+    expect(noticeElText()).toBe(PROGRAM_LINE)
     const back = refused.length
     await userEvent.selectOptions(picker(), 'binary')
     await until(() => refused.length > back && lastRefused()?.encoding === 'binary', 'the encoding put back, refused')
-    expect(notice().hidden).toBe(true)
+    expect(noticeEl().hidden).toBe(true)
   })
 
   it('compares with the last program stored, once one has been', async () => {
     refuse = false
-    type(D)
+    retype(view, D)
     await until(() => stored()?.text === D, 'the program, stored')
     refuse = true
     // THE PROGRAM THE PAGE LOADED IS NOT WHAT A RELOAD RESTORES NOW, SO GOING BACK TO IT IS A CHANGE.
     await typeRefused(A, 'the loaded program, refused')
-    expect(noticeText()).toBe(PROGRAM_LINE)
+    expect(noticeElText()).toBe(PROGRAM_LINE)
     await typeRefused(D, 'the stored program, refused')
-    expect(notice().hidden).toBe(true)
+    expect(noticeEl().hidden).toBe(true)
   })
 })

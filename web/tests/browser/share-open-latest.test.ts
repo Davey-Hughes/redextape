@@ -4,7 +4,8 @@ import { userEvent } from 'vitest/browser'
 import { EXAMPLES } from '../../src/examples'
 import { encodeLink, LINK_PREFIX } from '../../src/share-link'
 import { defaultWorkspace, PRESETS, serializeWorkspace } from '../../src/workspace'
-import { SHELL, until } from './harness'
+import { noticeText, picker, readout, SHELL, stateIdle, undoButton, until } from './harness'
+import { workspaceName } from './share-open-hashchange-fixture'
 
 /**
  * **THE LATEST LINK WINS** — Plan 7 part 6a spec §5.3: a link whose read ends after a later link has opened is dropped
@@ -32,13 +33,6 @@ const LINK_B = {
   workspace: serializeWorkspace({ ...defaultWorkspace('wide'), switches: PRESETS.debugger }),
   positions: {},
 }
-
-const picker = () => document.querySelector<HTMLSelectElement>('#encoding') as HTMLSelectElement
-const noticeText = () => document.querySelector('#notice .notice-text')?.textContent ?? ''
-const undoButton = () => document.querySelector<HTMLButtonElement>('#notice button.notice-action')
-const idle = () => document.querySelector<HTMLElement>('#results')?.dataset.state === 'idle'
-const readout = () => [...document.querySelectorAll('#results .segment, #results .row')].length
-const workspaceName = () => document.querySelector('#workspace')?.textContent
 
 /** `#s=` and `text`, deflated: a link that inflates whole, to anything. */
 async function linkOf(text: string): Promise<string> {
@@ -144,7 +138,7 @@ let view: EditorView
 beforeAll(async () => {
   document.body.innerHTML = SHELL
   view = await (await import('../../src/main')).ready
-  await until(() => idle() && readout() === 3, 'the first compile')
+  await until(() => stateIdle() && readout() === 3, 'the first compile')
 })
 
 /**
@@ -160,7 +154,7 @@ beforeEach(async () => {
     document.querySelector<HTMLButtonElement>('#workspace-menu [data-preset="explorer"]')?.click()
     document.querySelector<HTMLElement>('#workspace-menu')?.hidePopover()
   }
-  await until(() => idle() && readout() === 3, 'the compile of the program the case starts on')
+  await until(() => stateIdle() && readout() === 3, 'the compile of the program the case starts on')
 })
 
 /**

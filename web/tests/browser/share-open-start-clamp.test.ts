@@ -3,7 +3,7 @@ import { beforeAll, describe, expect, it } from 'vitest'
 import { userEvent } from 'vitest/browser'
 import { encodeLink } from '../../src/share-link'
 import { serializeWorkspace } from '../../src/workspace'
-import { fourViewWorkspace, SHELL, until } from './harness'
+import { fourViewWorkspace, noticeText, SHELL, stepTextOf, undoButton, until } from './harness'
 
 /**
  * **A LINK WITH POSITIONS, OPENED AT START-UP** — Plan 7 part 6a spec §5.3, §5.4 and §5.5, through `main()`'s own path,
@@ -16,10 +16,6 @@ import { fourViewWorkspace, SHELL, until } from './harness'
 
 const STORED = 'let x = 40; x + 2'
 const LINKED = 'let y = 10; y + 5'
-
-const noticeText = () => document.querySelector('#notice .notice-text')?.textContent ?? ''
-const undoButton = () => document.querySelector<HTMLButtonElement>('#notice button.notice-action')
-const stepOf = (leaf: string) => document.querySelector(`[data-leaf="${leaf}"] .step`)?.textContent ?? ''
 
 let view: EditorView
 
@@ -42,7 +38,7 @@ describe('a link with positions at start-up', () => {
     const said = "the link's λ step 100 is past the end of this run — showing step 7"
     await until(() => noticeText() === said, "the clamp's notice")
     expect(undoButton()?.textContent).toBe('undo')
-    expect(stepOf('lambda-0')).toBe('step 7 of 7')
+    expect(stepTextOf('lambda-0')).toBe('step 7 of 7')
   })
 
   it('puts back the stored program on that undo', async () => {

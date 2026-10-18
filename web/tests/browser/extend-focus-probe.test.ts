@@ -1,6 +1,6 @@
 import type { EditorView } from '@codemirror/view'
 import { beforeAll, describe, expect, it } from 'vitest'
-import { SHELL, until } from './harness'
+import { forwardButton, historyFills, SHELL, tmStepText } from './harness'
 
 /** The fixture that reaches a `budget` stop on the TM leg — see Task 3's file for the measurement. */
 const BUDGET_SRC =
@@ -8,43 +8,10 @@ const BUDGET_SRC =
 
 let view: EditorView
 
-const stepText = () => document.querySelector('[data-leaf="tm-0"] .step')?.textContent ?? ''
-
-/** The `▶` specifically. The strip's first button is `↺`, so a positional lookup would name the wrong one. */
-const forwardButton = () =>
-  [...document.querySelectorAll<HTMLButtonElement>('[data-leaf="tm-0"] .controls button')].find(
-    (b) => b.textContent === '▶',
-  )
-
 const mustFind = <T extends Element>(selector: string): T => {
   const el = document.querySelector<T>(selector)
   if (el === null) throw new Error(`no element for ${selector}`)
   return el
-}
-
-/** About half of `BUDGET_SRC`'s TM recording, which stops with its history full at step 75,024. */
-const BUDGET_HALF = 37_000
-
-/**
- * **`BUDGET_SRC`'S TM HISTORY FILLING, IN THREE WAITS: THE TM LEG STARTING TO RECORD, ITS HISTORY HALF FULL, THEN THE
- * FILL.** As one wait it took 7,198 to 8,988 ms at `CPUQuota=25%` (2026-10-05), against `until`'s 10 s; as two, the
- * second took up to 7,513 ms. The TM leg records last, after λ and asm, and its step line reads `…` from its first
- * frames until it stops, and counts them. Called right after a dispatch, which withdraws the stop before and drops the
- * line's `…` (`compile.ts`'s `schedule`, `controls.ts`): the first two assertions hold both, so no wait can pass on the
- * run before, and the third holds that the line the second wait counts is this run's.
- */
-async function historyFills(): Promise<void> {
-  expect(stepText(), 'precondition: the stop before is withdrawn').not.toContain('history is full')
-  expect(stepText(), 'precondition: no TM recording under way').not.toContain('…')
-  await until(() => stepText().includes('…') || stepText().includes('history is full'), 'the TM leg to start recording')
-  expect(stepText(), 'precondition: the TM leg is past the recompile').not.toContain('— recompiling')
-  await until(
-    () =>
-      Number(/of ([\d,]+)/.exec(stepText())?.[1]?.replaceAll(',', '') ?? 0) >= BUDGET_HALF ||
-      stepText().includes('history is full'),
-    'the TM history to be half full',
-  )
-  await until(() => stepText().includes('history is full'), 'the TM history to fill')
 }
 
 describe('focus when a frontier control is withdrawn', () => {
@@ -87,7 +54,7 @@ describe('focus when a frontier control is withdrawn', () => {
 
     view.contentDOM.focus()
     view.dispatch({ changes: { from: view.state.doc.length, insert: ' ' } })
-    expect(stepText()).toContain('— recompiling')
+    expect(tmStepText()).toContain('— recompiling')
     expect(document.activeElement).toBe(view.contentDOM)
     await historyFills()
 
@@ -102,7 +69,7 @@ describe('focus when a frontier control is withdrawn', () => {
     picker.dispatchEvent(new Event('change'))
     // Defends the focus assertion below: it is only evidence about the hazard if this gesture
     // genuinely opened the withdrawal window, same as the typing sub-case's check above.
-    expect(stepText()).toContain('— recompiling')
+    expect(tmStepText()).toContain('— recompiling')
     expect(document.activeElement).toBe(picker)
     // `compile.ts`'s `schedule` reads `picker.value` only when its debounce timer fires, well after
     // this synchronous block, so restoring here — before the next test runs — keeps the encoding

@@ -31,7 +31,8 @@ use redextape_core::tm::machine::{Move, Rule, State, StateId};
 use redextape_core::tm::one_way::OriginSnapshot;
 use redextape_core::tm::sim::{Caps, Status, simulate_origins};
 use redextape_core::tm::{
-    AT, BLANK, BOX, Encoding, EncodingKind, Machine, REG, SEP, Symbol, TM_DEFAULT_CAPS, TmRun, WORK, run_tm_described,
+    AT, BLANK, BOX, Encoding, EncodingKind, MAX_FIELD_WIDTH, MIN_FIELD_WIDTH, Machine, REG, SEP, Symbol,
+    TM_DEFAULT_CAPS, TmRun, WORK, run_tm_described,
 };
 use redextape_core::ty::Ty;
 use redextape_core::typeck::result_type;
@@ -69,6 +70,32 @@ pub fn build_machine(src: &str, enc: EncodingKind) -> (Machine, Vec<Vec<Symbol>>
     assert!(matches!(d.run, TmRun::Ran { .. }), "the source machine must complete for {src:?}");
     let init = d.header.init(d.machine.tapes);
     (d.machine, init)
+}
+
+/// EVERY encoding. Each has its own bank with its own write sites (REG, BOX, and for some encodings
+/// like `Binary`, also WORK), so a corpus that only exercises one encoding verifies nothing about the others.
+pub fn encodings_at(width: usize) -> Vec<(&'static str, Box<dyn Encoding>)> {
+    EncodingKind::ALL.iter().map(|&k| (k.name(), k.at(width))).collect()
+}
+
+/// EVERY encoding.
+pub fn encodings() -> Vec<(&'static str, Box<dyn Encoding>)> {
+    // `at(MAX_FIELD_WIDTH)`, not a default: identical to `{Unary,Binary}::default()` today, and stated
+    // explicitly so a future encoding whose default differs cannot silently re-width this test.
+    EncodingKind::ALL.iter().map(|&k| (k.name(), k.at(MAX_FIELD_WIDTH))).collect()
+}
+
+/// Every width auto-fit can choose.
+///
+/// **A DELIBERATE INDEPENDENT MODEL OF `tm.rs`'s `search_width`, NOT A DUPLICATE TO BE FOLDED.** Its
+/// callers assert things ABOUT the ladder; routing it through the library's own definition would make it
+/// walk whatever that definition says and stop it being able to disagree. Leave the copy.
+pub fn widths() -> Vec<usize> {
+    let mut w = vec![MIN_FIELD_WIDTH];
+    while *w.last().unwrap() < MAX_FIELD_WIDTH {
+        w.push(w.last().unwrap() * 2);
+    }
+    w
 }
 
 /// The width every generic checker measures against. A bounded encoding reports its field width; an
@@ -404,4 +431,14 @@ pub fn acyclic_machine() -> impl Strategy<Value = (Machine, Vec<Vec<Symbol>>)> {
             (Machine { states: built, start: 0, tapes }, inits)
         })
     })
+}
+
+/// A machine of one non-accepting state, `name`, whose only rule is `rule`, with as many tapes as
+/// `rule` reads.
+pub fn one_rule_machine(name: &str, rule: Rule) -> Machine {
+    Machine {
+        tapes: rule.read.len(),
+        start: 0,
+        states: vec![State { name: name.into(), accept: false, rules: vec![rule] }],
+    }
 }

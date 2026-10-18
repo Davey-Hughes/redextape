@@ -2,7 +2,17 @@ import type { EditorView } from '@codemirror/view'
 import { beforeAll, describe, expect, it } from 'vitest'
 import { MAX_WARM_BUFFERS } from '../../src/scratch'
 import { bindingKey } from '../../src/view-header'
-import { SHELL, until } from './harness'
+import {
+  buffersControl,
+  forkButton,
+  idle,
+  lambdaHeading,
+  pickBinding,
+  SHELL,
+  shownNoticeText,
+  titleOf,
+  until,
+} from './harness'
 
 /**
  * **THE CAP'S REFUSAL, ON THE SURFACE A USER READS IT FROM** — design §4.5's second clause, which is
@@ -29,34 +39,9 @@ import { SHELL, until } from './harness'
  * tier's job.
  */
 
-/** The title-selector of `leaf`'s view — the pair in force is its `data-binding`. */
-const titleOf = (leaf: string) => document.querySelector<HTMLButtonElement>(`[data-leaf="${leaf}"] button.view-title`)
-
-/** Pick `key` (`bindingKey(leg, session)`) through `leaf`'s title menu, as a user does. */
-function pickBinding(leaf: string, key: string): void {
-  const title = titleOf(leaf)
-  if (title === null) throw new Error(`no title-selector on [data-leaf="${leaf}"]`)
-  title.click()
-  const menu = document.getElementById(title.getAttribute('aria-controls') ?? '')
-  const item = menu?.querySelector<HTMLButtonElement>(`button[data-binding="${key}"]`)
-  if (item == null) {
-    const offered = [...(menu?.querySelectorAll<HTMLButtonElement>('button') ?? [])].map((b) => b.dataset.binding)
-    throw new Error(`[data-leaf="${leaf}"] offers no ${JSON.stringify(key)} — offered: ${JSON.stringify(offered)}`)
-  }
-  item.click()
-}
-
 let view: EditorView
 
-/** The notice line's text — where a refusal is said since Plan 7 part 2 (spec §11) — or `''` while it is hidden. */
-const noticeText = () => {
-  const notice = document.querySelector<HTMLElement>('#notice')
-  return notice === null || notice.hidden ? '' : (notice.querySelector('.notice-text')?.textContent ?? '')
-}
 const noticeHidden = () => document.querySelector<HTMLElement>('#notice')?.hidden === true
-const heading = () => document.querySelector('[data-leaf="lambda-0"] h2')?.textContent ?? ''
-const forkButton = () => document.querySelector<HTMLButtonElement>('[data-leaf="lambda-0"] button.detach')
-const buffersButton = () => document.querySelector<HTMLButtonElement>('#buffers')
 /**
  * Put the λ pane back on the source session, which is what makes it forkable again.
  *
@@ -82,12 +67,7 @@ describe('the buffer cap, from the control that hits it', () => {
     document.body.innerHTML = SHELL
     view = await (await import('../../src/main')).ready
     view.dispatch({ changes: { from: 0, to: view.state.doc.length, insert: 'let x = 40; x + 2' } })
-    await until(
-      () =>
-        document.querySelector<HTMLElement>('#results')?.dataset.state === 'idle' &&
-        (document.querySelector('#results')?.textContent ?? '') !== '',
-      'the first compile',
-    )
+    await until(idle, 'the first compile')
   })
 
   /**
@@ -102,8 +82,8 @@ describe('the buffer cap, from the control that hits it', () => {
     // used to read `buffers 0 ▾`; `buffer-list.ts`'s `update` drops the digit at zero now, because the
     // menu this button opens is never empty any more (it offers "new TM copy"), so `main.ts` also no
     // longer sets `hidden` at zero — the previous comment here named that as the zero-count treatment.
-    expect(buffersButton()?.textContent).toBe('copies ▾')
-    expect(noticeText()).not.toContain('cannot make a copy')
+    expect(buffersControl()?.textContent).toBe('copies ▾')
+    expect(shownNoticeText()).not.toContain('cannot make a copy')
     expect(noticeHidden()).toBe(true)
 
     // STAGE 1 — fill to the cap through the control, alternating with the selector that makes the pane
@@ -111,12 +91,12 @@ describe('the buffer cap, from the control that hits it', () => {
     // nothing would leave the loop asserting against a page it never changed.
     for (let n = 1; n <= MAX_WARM_BUFFERS; n++) {
       forkButton()?.click()
-      expect(buffersButton()?.textContent).toBe(`copies ${n} ▾`)
-      expect(heading()).toContain('copy · not linked')
+      expect(buffersControl()?.textContent).toBe(`copies ${n} ▾`)
+      expect(lambdaHeading()).toContain('copy · not linked')
       await backToSource()
     }
-    expect(heading()).not.toContain('not linked')
-    expect(heading()).toBe('λ · program')
+    expect(lambdaHeading()).not.toContain('not linked')
+    expect(lambdaHeading()).toBe('λ · program')
 
     // STAGE 2 — THE REFUSAL, AND IT IS ON SCREEN. This is the assertion the first commit could not have
     // passed: the message existed as a string and nothing rendered it. `cannot make a copy — ` is
@@ -124,9 +104,9 @@ describe('the buffer cap, from the control that hits it', () => {
     // *pause* and *delete* in the copies menu are the way out the sentence promises.
     forkButton()?.click()
 
-    expect(noticeText()).toContain('cannot make a copy — ')
-    expect(noticeText()).toContain(`all ${MAX_WARM_BUFFERS} copies are running`)
-    expect(noticeText()).toContain('pause or delete one from the copies menu')
+    expect(shownNoticeText()).toContain('cannot make a copy — ')
+    expect(shownNoticeText()).toContain(`all ${MAX_WARM_BUFFERS} copies are running`)
+    expect(shownNoticeText()).toContain('pause or delete one from the copies menu')
     // **AND IT DOES NOT ENUMERATE THE BUFFERS, WHICH IS A REVERSAL — these two lines read
     // `toContain('scratch 1')` and ``toContain(`scratch ${MAX_WARM_BUFFERS}`)``.** The message named all eight
     // on the argument that it should give "an account of what is using the room". Read on a real page,
@@ -138,22 +118,22 @@ describe('the buffer cap, from the control that hits it', () => {
     //
     // ASSERTED AS AN ABSENCE, because a message that merely reordered its clauses would satisfy the
     // three lines above and leave the noise exactly where it was.
-    expect(noticeText()).not.toContain('copy 1')
-    expect(noticeText()).not.toContain(`copy ${MAX_WARM_BUFFERS}`)
+    expect(shownNoticeText()).not.toContain('copy 1')
+    expect(shownNoticeText()).not.toContain(`copy ${MAX_WARM_BUFFERS}`)
 
     // STAGE 3 — NOTHING WAS EVICTED AND THE PANE DID NOT MOVE, read off the two surfaces a user has.
     // An implementation that made room by retiring the oldest buffer would satisfy STAGE 2 exactly and
     // fail here, which is the discriminator design §4.5 turns on: an eviction is decision 2's rule
     // broken under the name of a limit.
-    expect(buffersButton()?.textContent).toBe(`copies ${MAX_WARM_BUFFERS} ▾`)
-    expect(heading()).not.toContain('not linked')
-    expect(heading()).toBe('λ · program')
+    expect(buffersControl()?.textContent).toBe(`copies ${MAX_WARM_BUFFERS} ▾`)
+    expect(lambdaHeading()).not.toContain('not linked')
+    expect(lambdaHeading()).toBe('λ · program')
     expect(forkButton()).not.toBeNull()
 
     // STAGE 4 — take the message's own advice. A diagnostic that names a way out and does not have one
     // is worse than no diagnostic, so the gesture it names is performed here: open the header list and
     // retire the row it named first.
-    buffersButton()?.click()
+    buffersControl()?.click()
     // **THE ROWS ARE TOLD APART BY THEIR TERMS, WHICH IS WHAT MAKES "AIM AT ONE ROW" A CHOICE.** Every
     // row here is `λ scratch N — orphan` on its first line and identical to its neighbours; the second
     // line is the buffer's own term, and it is the only thing on this surface a user could pick BY.
@@ -166,18 +146,18 @@ describe('the buffer cap, from the control that hits it', () => {
     const row = document.querySelector<HTMLButtonElement>('.buffer-list button[aria-label="delete λ copy 1"]')
     if (row === null) throw new Error('the buffer the refusal named has no row in the header list')
     row.click()
-    expect(buffersButton()?.textContent).toBe(`copies ${MAX_WARM_BUFFERS - 1} ▾`)
+    expect(buffersControl()?.textContent).toBe(`copies ${MAX_WARM_BUFFERS - 1} ▾`)
     // **AND THE REFUSAL IS GONE THE MOMENT ITS ADVICE IS TAKEN** — replaced by the delete's own notice
     // (spec §10), so the page no longer says "all 11 … running" beside a header reading 10.
-    expect(noticeText()).toBe('λ copy 1 deleted')
-    expect(noticeText()).not.toContain('cannot make a copy')
+    expect(shownNoticeText()).toBe('λ copy 1 deleted')
+    expect(shownNoticeText()).not.toContain('cannot make a copy')
 
     // STAGE 5 — the fork the cap refused now works, and says what it made.
     forkButton()?.click()
-    expect(noticeText()).toBe(`λ copy ${MAX_WARM_BUFFERS + 1} created — this view shows it`)
+    expect(shownNoticeText()).toBe(`λ copy ${MAX_WARM_BUFFERS + 1} created — this view shows it`)
 
-    expect(heading()).toContain('copy · not linked')
-    expect(buffersButton()?.textContent).toBe(`copies ${MAX_WARM_BUFFERS} ▾`)
+    expect(lambdaHeading()).toContain('copy · not linked')
+    expect(buffersControl()?.textContent).toBe(`copies ${MAX_WARM_BUFFERS} ▾`)
     // THE NAME IS NOT REISSUED — `λ scratch 1` was retired and this is `λ scratch ${MAX_WARM_BUFFERS + 1}`, which is
     // `ScratchBuffers.#minted`'s contract seen from the app. The λ group is where a buffer's label
     // becomes user-visible text.
@@ -205,8 +185,8 @@ describe('the buffer cap, from the control that hits it', () => {
     expect(forkButton()).not.toBeNull()
     forkButton()?.click()
 
-    expect(noticeText()).toContain('cannot make a copy — ')
-    expect(noticeText()).toContain(`all ${MAX_WARM_BUFFERS} copies are running`)
-    expect(buffersButton()?.textContent).toBe(`copies ${MAX_WARM_BUFFERS} ▾`)
+    expect(shownNoticeText()).toContain('cannot make a copy — ')
+    expect(shownNoticeText()).toContain(`all ${MAX_WARM_BUFFERS} copies are running`)
+    expect(buffersControl()?.textContent).toBe(`copies ${MAX_WARM_BUFFERS} ▾`)
   })
 })

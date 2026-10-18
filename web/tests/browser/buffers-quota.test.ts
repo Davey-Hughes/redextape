@@ -1,7 +1,7 @@
 import { beforeAll, describe, expect, it } from 'vitest'
 import { BUFFERS_STORAGE_KEY } from '../../src/buffers-store'
 import { bindingKey } from '../../src/view-header'
-import { SHELL, until } from './harness'
+import { idle, noticeText, pickBinding, SHELL, until } from './harness'
 
 /**
  * **THE QUOTA REPORT — design §4.8, the one place this slice breaks symmetry with the layout writer.**
@@ -29,27 +29,7 @@ import { SHELL, until } from './harness'
  * has storage for everything else, not about a browser with none at all.
  */
 
-/** The notice line's text — where the storage report rests since Plan 7 part 2 (spec §11). */
-const noticeText = (): string => document.querySelector('#notice .notice-text')?.textContent ?? ''
-const resultsText = (): string => document.querySelector('#results')?.textContent ?? ''
 const forkButton = () => document.querySelector<HTMLButtonElement>('[data-leaf="lambda-0"] .detach')
-
-/** The title-selector of `leaf`'s view — the pair in force is its `data-binding`. */
-const titleOf = (leaf: string) => document.querySelector<HTMLButtonElement>(`[data-leaf="${leaf}"] button.view-title`)
-
-/** Pick `key` (`bindingKey(leg, session)`) through `leaf`'s title menu, as a user does. */
-function pickBinding(leaf: string, key: string): void {
-  const title = titleOf(leaf)
-  if (title === null) throw new Error(`no title-selector on [data-leaf="${leaf}"]`)
-  title.click()
-  const menu = document.getElementById(title.getAttribute('aria-controls') ?? '')
-  const item = menu?.querySelector<HTMLButtonElement>(`button[data-binding="${key}"]`)
-  if (item == null) {
-    const offered = [...(menu?.querySelectorAll<HTMLButtonElement>('button') ?? [])].map((b) => b.dataset.binding)
-    throw new Error(`[data-leaf="${leaf}"] offers no ${JSON.stringify(key)} — offered: ${JSON.stringify(offered)}`)
-  }
-  item.click()
-}
 
 /**
  * Whether the next `localStorage.setItem` for `BUFFERS_STORAGE_KEY` throws — `false` until a test turns
@@ -72,10 +52,7 @@ beforeAll(async () => {
   // used to carry a local `30_000` for that reason; `harness.ts`'s shared default covers it, and that
   // was measured rather than assumed — the whole tier passes with that default lowered to 2,000 ms,
   // this wait included.
-  await until(
-    () => document.querySelector<HTMLElement>('#results')?.dataset.state === 'idle' && resultsText() !== '',
-    'the first compile',
-  )
+  await until(idle, 'the first compile')
 })
 
 describe('a full store', () => {

@@ -1,7 +1,9 @@
 import { EditorView } from '@codemirror/view'
 import { afterEach, beforeAll, describe, expect, it } from 'vitest'
 import { page, userEvent } from 'vitest/browser'
-import { host, SHELL, until } from './harness'
+import { formats, formatsOnALeave, recordFormats } from './format-on-leave-fixture'
+import { armed, host, mounted, SHELL, stateIdle, until } from './harness'
+import { viewKey } from './user-event-fixture'
 
 /**
  * A VIEW KEY PRESSED FROM AN EDITOR DOES NOT FORMAT IT — the settings menu's *format on blur*, and the view layouts
@@ -17,55 +19,11 @@ import { host, SHELL, until } from './harness'
  * the text formatted: the setting is on, the server answers, and the count reads what a blur does.
  */
 
-/**
- * The document of each format request posted to a worker, in order. The language server is sent each message as
- * `{ kind: 'msg', json }` (`lsp-protocol.ts`'s `LspRequestMessage`), the JSON-RPC message already a string.
- */
-const formats: string[] = []
-const post = Worker.prototype.postMessage
-Worker.prototype.postMessage = function (this: Worker, message: unknown, ...rest: unknown[]): void {
-  const sent = message as { kind?: unknown; json?: unknown } | null
-  if (sent?.kind === 'msg' && typeof sent.json === 'string') {
-    const rpc = JSON.parse(sent.json) as { method?: string; params?: { textDocument?: { uri?: string } } }
-    if (rpc.method === 'textDocument/formatting') formats.push(rpc.params?.textDocument?.uri ?? '')
-  }
-  ;(post as (...args: unknown[]) => void).apply(this, [message, ...rest])
-}
+recordFormats()
 
-const PREFIX = '{Control>}.{/Control}'
 const UNFORMATTED = 'let   x   =   40;\nx   +   2'
 
 let view: EditorView
-
-const armed = (): boolean => !(document.querySelector('#view-keys') as HTMLElement).hidden
-const mounted = (): string[] =>
-  [...document.querySelectorAll<HTMLElement>('#views [data-leaf]')]
-    .filter((el) => el.getAttribute('role') !== 'tab')
-    .map((el) => el.dataset.leaf as string)
-const idle = (): boolean => document.querySelector<HTMLElement>('#results')?.dataset.state === 'idle'
-
-/** The prefix and then `key`, with the mode asserted armed between them. */
-async function viewKey(key: string): Promise<void> {
-  await userEvent.keyboard(PREFIX)
-  expect(armed(), 'the prefix did not arm the mode').toBe(true)
-  await userEvent.keyboard(key)
-  expect(armed()).toBe(false)
-}
-
-/**
- * Put `messy` in `editor` with the focus in it, leave it with a pointer press on the wordmark, and hold that the
- * leave asked for a format and the text changed. Answers the text the server left.
- */
-async function formatsOnALeave(editor: EditorView, messy: string): Promise<string> {
-  editor.dispatch({ changes: { from: 0, to: editor.state.doc.length, insert: messy } })
-  editor.focus()
-  await until(() => editor.hasFocus, 'the editor to take the focus')
-  const before = formats.length
-  await userEvent.click(document.querySelector('.wordmark') as HTMLElement)
-  expect(formats.length, 'precondition: a real leave asks for a format').toBe(before + 1)
-  await until(() => editor.state.doc.toString() !== messy, 'the text to be formatted when the editor is left')
-  return editor.state.doc.toString()
-}
 
 /**
  * Put `messy` in `editor` with the focus in it and the caret at `caret`, press the view key that hides the asm view,
@@ -90,7 +48,7 @@ describe('a view key from an editor, with format on blur on', () => {
     await page.viewport(1280, 896)
     document.body.innerHTML = SHELL
     view = await (await import('../../src/main')).ready
-    await until(idle, 'the first compile')
+    await until(stateIdle, 'the first compile')
     // THE SETTING, TURNED ON AS A USER DOES: `settings`, then its checkbox.
     const settings = document.querySelector('#settings') as HTMLElement
     const box = document.querySelector('#format-on-blur') as HTMLInputElement
@@ -122,7 +80,7 @@ describe('a view key from an editor, with format on blur on', () => {
    * of 25 files at `CPUQuota=25%`.
    */
   it('leaves a machine copy’s editor’s text as it was typed', async () => {
-    await until(idle, 'the compile the case before started')
+    await until(stateIdle, 'the compile the case before started')
     const more = host('tm-0')?.querySelector('button.view-more') as HTMLElement
     await userEvent.click(more)
     const menu = document.getElementById(more.getAttribute('aria-controls') ?? '') as HTMLElement

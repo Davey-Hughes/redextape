@@ -2,12 +2,13 @@ import { describe, expect, it } from 'vitest'
 import { History } from '../../src/history'
 import type { RunReply, RunRequest } from '../../src/protocol'
 import { BufferCapReached, MAX_WARM_BUFFERS, ScratchBuffers } from '../../src/scratch'
-import type { ClientPort, PoolPort, SessionId } from '../../src/session-client'
-import { SessionClient, SessionPool } from '../../src/session-client'
+import type { SessionId } from '../../src/session-client'
+import { SessionPool } from '../../src/session-client'
 import type { LegState, SessionEntry } from '../../src/sessions'
 import { PaneSlot, SessionRegistry } from '../../src/sessions'
 import type { LambdaState, TmState } from '../../src/types'
 import { frameOf } from './asm-fixtures'
+import { type FakePort, fakeClient, fakePort, lambdaFrame } from './session-fixtures'
 
 /**
  * **A FORK MINTS A BUFFER** — 5d-ii-c design decision 1, at the level where the rule is decided rather
@@ -28,31 +29,6 @@ import { frameOf } from './asm-fixtures'
  */
 
 const SOURCE: SessionId = 'source'
-
-/**
- * A `PoolPort` with no thread behind it, recording what was posted and how often it was killed.
- *
- * `terminated` IS A COUNT, NOT A BOOLEAN, for `session-pool.test.ts`'s reason: a double-terminate is
- * a real failure mode and a boolean cannot see one.
- */
-type FakePort = PoolPort & { sent: RunRequest[]; terminated: number; deliver: (r: RunReply) => void }
-
-function fakePort(): FakePort {
-  let handler: ((e: { data: RunReply }) => void) | null = null
-  const p: FakePort = {
-    sent: [],
-    terminated: 0,
-    postMessage: (m: RunRequest) => p.sent.push(m),
-    addEventListener: (_t: 'message', h: (e: { data: RunReply }) => void) => {
-      handler = h
-    },
-    terminate: () => {
-      p.terminated += 1
-    },
-    deliver: (r: RunReply) => handler?.({ data: r }),
-  }
-  return p
-}
 
 /**
  * The app's own objects over fake threads, plus every port spawned, in spawn order.
@@ -120,21 +96,6 @@ function harness(): {
   }
   const postedTo = (id: SessionId): RunRequest[] => portsById.get(id)?.sent ?? []
   return { reg, pool, buffers, ports, replies, lastScratchPost, slotOf, postedTo }
-}
-
-const lambdaFrame = (text: string, step = 0): LambdaState => ({
-  text,
-  spans: new Uint8Array(),
-  cut: null,
-  step,
-  redex_span: null,
-  owner: 'None',
-})
-
-/** A `ClientPort` with no thread behind it — the source entry needs a client and nothing posts to it. */
-function fakeClient(): SessionClient {
-  const port: ClientPort = { postMessage: () => undefined, addEventListener: () => undefined }
-  return new SessionClient(port, () => undefined)
 }
 
 /**

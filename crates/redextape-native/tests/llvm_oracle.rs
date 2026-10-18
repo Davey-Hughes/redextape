@@ -26,25 +26,20 @@
 //! `Program` lowering included) the way an external caller — or the other oracle files — would.
 
 use proptest::prelude::*;
-use redextape_core::core::Core;
 use redextape_core::desugar::desugar;
 use redextape_core::parser::parse;
 use redextape_core::tm::{DEFAULT_CAPS, decode_asm_reason};
 use redextape_core::value::Value;
 use redextape_core::{RunError, run};
 use redextape_native::{Codegen, NativeRun, OptLevel, run_native_with};
-use redextape_test_support::arb_expr_over;
+use redextape_test_support::arb_expr_below;
+
+mod common;
+use common::core_of;
 
 /// Every level `OptLevel` offers, the size-oriented ones (`Os`/`Oz`) included, swept rather than
 /// spot-checking `O3` and hoping.
 const OPT_LEVELS: [OptLevel; 6] = [OptLevel::O0, OptLevel::O1, OptLevel::O2, OptLevel::O3, OptLevel::Os, OptLevel::Oz];
-
-/// Parse + desugar `src` to Core, panicking on a parse error (every demo string here is known-good).
-fn core_of(src: &str) -> Core {
-    let (prog, ds) = parse(src);
-    assert!(ds.is_empty(), "parse errors for `{src}`: {ds:?}");
-    desugar(&prog.unwrap())
-}
 
 /// Decode a `NativeRun` that must have produced a value, panicking with `label` for context
 /// otherwise -- every call site here expects `Ran`, so a `Fault`/`HitCap`/`LowerError` is itself the
@@ -144,15 +139,12 @@ fn llvm_faults_and_caps_match() {
     }
 }
 
-/// A small first-order expression generator (arithmetic/comparison/if only; shape supplied by
-/// `redextape-test-support`'s `arb_expr_over`, shared with `native_oracle.rs`'s generators rather than
-/// copied from them) for a randomized cross-backend differential. Kept deliberately SMALL: each
-/// generated program here compiles SEVEN times (Cranelift once, plus LLVM at all six opt levels),
-/// unlike the single-backend suite whose generator this one shares.
-fn arb_first_order_expr() -> impl Strategy<Value = String> {
-    arb_expr_over((0u64..1000).prop_map(|n| n.to_string()))
-}
-
+// `arb_expr_below(1000)`:
+// A small first-order expression generator (arithmetic/comparison/if only; shape supplied by
+// `redextape-test-support`'s `arb_expr_over`, shared with `native_oracle.rs`'s generators rather than
+// copied from them) for a randomized cross-backend differential. Kept deliberately SMALL: each
+// generated program here compiles SEVEN times (Cranelift once, plus LLVM at all six opt levels),
+// unlike the single-backend suite whose generator this one shares.
 proptest! {
     #![proptest_config(ProptestConfig { cases: 12, ..ProptestConfig::default() })]
 
@@ -162,7 +154,7 @@ proptest! {
     /// thirteen times: one Cranelift pivot run (which establishes the reference/native outcome
     /// pairing the match below is built on), then BOTH backends at all six opt levels.
     #[test]
-    fn cranelift_and_llvm_agree_on_random_first_order_programs(src in arb_first_order_expr()) {
+    fn cranelift_and_llvm_agree_on_random_first_order_programs(src in arb_expr_below(1000)) {
         let (prog, ds) = parse(&src);
         prop_assume!(ds.is_empty()); // skip anything that does not parse/type-check
         let core = desugar(&prog.unwrap());
@@ -190,7 +182,7 @@ proptest! {
                     }
                 }
             }
-            // Unreachable with THIS generator, and deliberately strict about it: `arb_first_order_expr`
+            // Unreachable with THIS generator, and deliberately strict about it: `arb_expr_below(1000)`
             // emits only `+`, monus `-`, comparisons and `if` over `0..1000` literals, none of which
             // can error in the reference or fault/cap natively, so `(Ok, Ran)` is the only legitimate
             // pairing. If the generator ever gains a PARTIAL operation (`head`/`tail`, division, a

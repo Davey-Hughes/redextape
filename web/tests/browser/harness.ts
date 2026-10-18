@@ -1,14 +1,20 @@
+import type { EditorView } from '@codemirror/view'
+import { expect, vi } from 'vitest'
 import html from '../../index.html?raw'
-import { LAYOUT_STORAGE_KEY, type LayoutNode, leaves } from '../../src/layout'
+import type { ControlState } from '../../src/controls'
+import type { LambdaBody } from '../../src/lambda-body'
+import { insertBeside, LAYOUT_STORAGE_KEY, type LayoutNode, leaves } from '../../src/layout'
+import type { PaneEvents } from '../../src/pane-chrome'
+import type { PaneKind } from '../../src/panes'
 import { PREPAINT } from '../../src/prepaint'
-import { defaultWorkspace, serializeWorkspace, type Workspace } from '../../src/workspace'
+import { defaultWorkspace, parseWorkspace, serializeWorkspace, type Workspace } from '../../src/workspace'
 
 /**
- * Shared browser-tier fixtures: the app shell every test file mounts into, and the poll helper every
- * test file waits on; and, for the tests of what a reload draws first, the page's own pre-paint script,
- * the palette picked from the settings menu, and a colour as `getComputedStyle` writes it. The shell and
- * the poll helper were duplicated — `SHELL` 29 times, `until` 23 times in 7 different bodies — the reload's
- * helpers twice, and `rgb` four times, until this file replaced them.
+ * Shared browser-tier fixtures: the app shell every test file mounts into, and the poll helper every test
+ * file waits on; for the tests of what a reload draws first, the page's own pre-paint script, the palette
+ * picked from the settings menu, and a colour as `getComputedStyle` writes it; and the other helpers the
+ * test files share. The shell and the poll helper were duplicated — `SHELL` 29 times, `until` 23 times in 7
+ * different bodies — the reload's helpers twice, and `rgb` four times, until this file replaced them.
  *
  * **WHY THIS DOES NOT BREAK THE DIRECTORY'S STANDING IDIOM.** Files in this directory have long carried
  * a comment saying that each browser test file gets its own page — `main()` runs once per module load
@@ -254,6 +260,76 @@ export { PREPAINT }
 export const rgb = (hex: string): string =>
   `rgb(${[1, 3, 5].map((i) => Number.parseInt(hex.slice(i, i + 2), 16)).join(', ')})`
 
+/** A spacing token in pixels, as the page resolves it. */
+export const space = (token: string): number => {
+  const probe = document.createElement('div')
+  probe.style.width = `var(${token})`
+  document.body.append(probe)
+  const width = probe.getBoundingClientRect().width
+  probe.remove()
+  return width
+}
+
+/** How many lines a box's text is set on: one per distinct top among its text's line boxes. */
+export const linesOf = (el: Element): number => {
+  const range = document.createRange()
+  range.selectNodeContents(el)
+  return new Set([...range.getClientRects()].map((r) => Math.round(r.top))).size
+}
+
+/** The vertical middle of `el`'s box, as `getBoundingClientRect` measures it. */
+export const centreOf = (el: Element): number => {
+  const box = el.getBoundingClientRect()
+  return (box.top + box.bottom) / 2
+}
+
+/** `el`'s box, as `getBoundingClientRect` measures it. */
+export const rect = (el: Element | null): DOMRect => (el as Element).getBoundingClientRect()
+
+/** The root element's font size in pixels: what `1rem` is. */
+export const rem = (): number => Number.parseFloat(getComputedStyle(document.documentElement).fontSize)
+
+/** `el`'s height, as `getBoundingClientRect` measures it. */
+export const heightOf = (el: Element): number => el.getBoundingClientRect().height
+
+/** The region `name` of the view in `host`, its `[data-region]`. */
+export const region = (host: HTMLElement, name: string) => host.querySelector(`[data-region="${name}"]`) as HTMLElement
+
+/** The boundary in `host` between the regions `above` and `below`. */
+export const boundary = (host: HTMLElement, above: string, below: string) =>
+  host.querySelector(`.panel-boundary[data-above="${above}"][data-below="${below}"]`) as HTMLElement
+
+/** The panel `name` of the view in `host`, its `[data-panel]`. */
+export const panelOf = (host: HTMLElement, name: string) => host.querySelector(`[data-panel="${name}"]`) as HTMLElement
+
+/** The disclosure in the header of `host`'s panel `name`. */
+export const panelToggle = (host: HTMLElement, name: string) =>
+  panelOf(host, name).querySelector('.panel-toggle') as HTMLElement
+
+/** Whether `el` has a box on the page: `getClientRects` lists one or more. */
+export const isShown = (el: Element) => el.getClientRects().length > 0
+
+/** The pane's padding box across: where its content may lie without the pane scrolling sideways. */
+export const innerOf = (pane: HTMLElement): { readonly left: number; readonly right: number } => {
+  const left = pane.getBoundingClientRect().left + pane.clientLeft
+  return { left, right: left + pane.clientWidth }
+}
+
+/** The milliseconds from posting `payload` on a `MessageChannel` to its arrival at the other port: its structured clone. */
+export const cloneMs = (payload: unknown) =>
+  new Promise<number>((resolve) => {
+    const ch = new MessageChannel()
+    const start = performance.now()
+    ch.port2.onmessage = () => resolve(performance.now() - start)
+    ch.port1.postMessage(payload)
+  })
+
+/** The median of `xs`, the upper of the two middles for an even count, and `NaN` for none. */
+export const median = (xs: number[]) => [...xs].sort((a, b) => a - b)[Math.floor(xs.length / 2)] ?? Number.NaN
+
+/** `x` milliseconds to one decimal, padded to seven characters. */
+export const ms = (x: number) => x.toFixed(1).padStart(7)
+
 /** The attributes of `<html>` the pre-paint script sets from storage: the palette, the style and the appearance. */
 const PREPAINTED = ['style', 'data-style', 'data-theme'] as const
 
@@ -299,6 +375,20 @@ async function chooseSetting(id: string, value: string): Promise<void> {
     throw new Error('the settings menu stayed open')
 }
 
+/** The base16 import dialog. */
+export const base16Dialog = (): HTMLDialogElement =>
+  document.querySelector<HTMLDialogElement>('dialog.base16-dialog') as HTMLDialogElement
+
+/** The palette select, `#palette`. */
+export const paletteSelect = (): HTMLSelectElement =>
+  document.querySelector<HTMLSelectElement>('#palette') as HTMLSelectElement
+
+/** The computed style of `<body>`. */
+export const bodyStyle = () => getComputedStyle(document.body)
+
+/** The background colour of `<body>`, as `getComputedStyle` writes it. */
+export const bodyBackground = () => getComputedStyle(document.body).backgroundColor
+
 /** Pick a palette from the settings menu, as `chooseSetting` does. */
 export const choosePalette = (value: string): Promise<void> => chooseSetting('#palette', value)
 
@@ -311,10 +401,330 @@ export const chooseStyle = (value: string): Promise<void> => chooseSetting('#sty
  * **NEVER ITS STAGE TAB.** A tab carries its view's `data-leaf` and comes before every host in the document, so on
  * the Stage a selector without `:not([role="tab"])` answers the tab, for the view that is shown as for the others
  * (read off the page, 2026-10-12): six of the files the view layouts added spelled it without, three as `host` and
- * three inside a `box`. None of them enters the Stage, so none read a tab; they use this now.
+ * three inside a `box`. None of them enters the Stage, so none read a tab; they use this now. A tab contains no
+ * controls, so a `contains(document.activeElement)` against it reads false no matter where the focus is.
  */
 export const host = (leaf: string): HTMLElement | null =>
   document.querySelector<HTMLElement>(`#views [data-leaf="${leaf}"]:not([role="tab"])`)
+
+/** The first element whose `data-leaf` is `leaf`: in the Stage, unlike `host`, the view's tab. */
+export const leafEl = (leaf: string) => document.querySelector<HTMLElement>(`[data-leaf="${leaf}"]`) as HTMLElement
+
+/** The first element `sel` matches, cast to `T` as found: `null` where none does, whatever the type says. */
+export const queryEl = <T extends Element = HTMLElement>(sel: string) => document.querySelector<T>(sel) as T
+
+/** The box of the view `leaf`'s host, as `getBoundingClientRect` measures it. */
+export const box = (leaf: string): DOMRect => (host(leaf) as HTMLElement).getBoundingClientRect()
+
+/** The text of the title on the view `leaf`'s host, or `''` where the page shows none. */
+export const titleText = (leaf: string): string => host(leaf)?.querySelector('.view-title')?.textContent ?? ''
+
+/** The binding the title on the view `leaf` names, its `data-binding`, or `''` where it names none. */
+export const shows = (leaf: string) =>
+  document.querySelector<HTMLElement>(`[data-leaf="${leaf}"] .view-title`)?.dataset.binding ?? ''
+
+/** The text of the view `leaf`'s step readout, or `''` where it shows none. */
+export const stepTextOf = (leaf: string) => document.querySelector(`[data-leaf="${leaf}"] .step`)?.textContent ?? ''
+
+/** The kind of the view `leaf`, its `data-kind`, or `''` where it has none. */
+export const leafKind = (leaf: string) =>
+  document.querySelector<HTMLElement>(`[data-leaf="${leaf}"]`)?.dataset.kind ?? ''
+
+/** The kind of the view `leaf`'s host, its `data-kind`, or `''` where there is none. */
+export const hostKind = (leaf: string): string => host(leaf)?.dataset.kind ?? ''
+
+/** A view's *move the editor here*, which its menu holds only while it is offered. */
+export const claim = (leaf: string): HTMLButtonElement | null =>
+  host(leaf)?.querySelector<HTMLButtonElement>('button.claim-editor') ?? null
+
+/** The copy editors a view's host holds, on the page or off it. */
+export const termEditorsIn = (host: HTMLElement | null): number =>
+  host?.querySelectorAll('.term-editor .cm-editor').length ?? 0
+
+/** The copy editors the view `id`'s host holds, counted by `termEditorsIn`. */
+export const editorsOf = (id: string): number => termEditorsIn(host(id))
+
+/** The CodeMirror editors under the elements whose `data-leaf` is `leaf`, counted. */
+export const editorsInLeaf = (leaf: string) => document.querySelectorAll(`[data-leaf="${leaf}"] .cm-editor`).length
+
+/** The layout the λ view `lambda-0`'s term is drawn in, its `data-layout`. */
+export const lambdaLayout = () => document.querySelector<HTMLElement>('[data-leaf="lambda-0"] .term')?.dataset.layout
+
+/** The text of the λ view `lambda-0`'s step readout, or `''` where it shows none. */
+export const lambdaStepText = () => stepTextOf('lambda-0')
+
+/** The λ view `lambda-0`'s term, or `null` where it shows none. */
+export const lambdaTerm = () => document.querySelector<HTMLElement>('[data-leaf="lambda-0"] .term')
+
+/** The text of the λ view `lambda-0`'s term, or `''` where it shows none. */
+export const lambdaTermText = () => document.querySelector('[data-leaf="lambda-0"] .term')?.textContent ?? ''
+
+/** The text of the view `leaf`'s term, or `''` where it shows none. */
+export const termOf = (leaf: string) => document.querySelector(`[data-leaf="${leaf}"] .term`)?.textContent ?? ''
+
+/** The text of the λ view `lambda-0`'s `h2`, or `''` where it has none. */
+export const lambdaHeading = () => document.querySelector('[data-leaf="lambda-0"] h2')?.textContent ?? ''
+
+/** The λ view `lambda-0`'s `button.detach`, or `null` where it has none. */
+export const forkButton = () => document.querySelector<HTMLButtonElement>('[data-leaf="lambda-0"] button.detach')
+
+/** Click the λ view `lambda-0`'s control labelled `label`; nothing happens where it has none. */
+export const lambdaControl = (label: string) =>
+  [...document.querySelectorAll<HTMLButtonElement>('[data-leaf="lambda-0"] .controls button')]
+    .find((b) => b.textContent === label)
+    ?.click()
+
+/** Click the λ view `lambda-0`'s control labelled `label`; it throws where it has none. */
+export const clickLambda = (label: string) => {
+  const b = [...document.querySelectorAll<HTMLButtonElement>('[data-leaf="lambda-0"] .controls button')].find(
+    (x) => x.textContent === label,
+  )
+  if (b === undefined) throw new Error(`no \`${label}\` button in the λ pane`)
+  b.click()
+}
+
+/** The view hosts actually in the document — every `[data-leaf]` under `#views` that is not a tab. */
+export const mounted = (): string[] =>
+  [...document.querySelectorAll<HTMLElement>('#views [data-leaf]')]
+    .filter((el) => el.getAttribute('role') !== 'tab')
+    .map((el) => el.dataset.leaf as string)
+
+/** The toggle in `#views-shown` that shows and hides the `kind` views. */
+export const toggle = (kind: string): HTMLButtonElement =>
+  document.querySelector<HTMLButtonElement>(`#views-shown button[data-shows="${kind}"]`) as HTMLButtonElement
+
+/** The kinds whose toggles in `#views-shown` are pressed. */
+export const pressed = (): string[] =>
+  [...document.querySelectorAll<HTMLButtonElement>('#views-shown button[aria-pressed="true"]')].map(
+    (b) => b.dataset.shows as string,
+  )
+
+/** The first control of a view, which is where a gesture that gives the view the focus puts it. */
+export const firstButton = (leaf: string): HTMLElement =>
+  (host(leaf) as HTMLElement).querySelector('button') as HTMLElement
+
+/** The view the focus is in, by its leaf; none for a focus on a tab, a divider, the header or `<body>`. */
+export const viewOfFocus = (): string | undefined =>
+  document.activeElement?.closest<HTMLElement>('#views [data-leaf]:not([role="tab"])')?.dataset.leaf
+
+/** The source view's host. */
+export const sourcePane = (): HTMLElement => host('source') as HTMLElement
+
+/**
+ * `#results` READS THE FOCUSED VIEW'S SESSION (Plan 7 part 2 spec §9), so a read of the PROGRAM'S result
+ * after a copy's view took the focus puts the focus on the program first.
+ */
+export const focusProgram = () => document.querySelector<HTMLElement>('[data-leaf="source"] .cm-content')?.focus()
+
+/** The box that scrolls a long program: the source editor's own, in the share of its view it has (spec §11.1). */
+export const sourceScroller = (): HTMLElement => sourcePane().querySelector('.cm-scroller') as HTMLElement
+
+/** The λ view `lambda-0`'s host. */
+export const lambdaHost = (): HTMLElement => host('lambda-0') as HTMLElement
+
+/** The λ view `lambda-0`'s pane, `.pane[data-leaf="lambda-0"]`. */
+export const lambdaPane = (): HTMLElement =>
+  document.querySelector<HTMLElement>('.pane[data-leaf="lambda-0"]') as HTMLElement
+
+/** A view's host — `.pane`, since in the stage each tab carries the leaf id too. */
+export const paneByLeaf = (leaf: string) =>
+  document.querySelector<HTMLElement>(`.pane[data-leaf="${leaf}"]`) as HTMLElement
+
+/** `leaf`'s view, `[data-leaf="…"]`, thrown on where there is none; `missing` begins the message. */
+export const paneOrThrow = (leaf: string, missing = 'no pane mounted at'): HTMLElement => {
+  const el = document.querySelector<HTMLElement>(`[data-leaf="${leaf}"]`)
+  if (el === null) throw new Error(`${missing} [data-leaf="${leaf}"]`)
+  return el
+}
+
+/** Every `data-leaf` under `<main>`, in document order. */
+export const mainLeafIds = () =>
+  [...document.querySelectorAll<HTMLElement>('main [data-leaf]')].map((el) => el.dataset.leaf ?? '')
+
+/** The leaf ids of the views whose kind is `tm`. */
+export const tmLeaves = () =>
+  [...document.querySelectorAll<HTMLElement>('[data-kind="tm"]')].map((el) => el.dataset.leaf ?? '')
+
+/** Every `data-leaf` on the page, in document order. */
+export const leafIds = () => [...document.querySelectorAll<HTMLElement>('[data-leaf]')].map((e) => e.dataset.leaf ?? '')
+
+/**
+ * The ids of every λ pane — by `data-kind`, NOT by an `id` prefix. `nextLeafId` now mints `pane-${n}`
+ * regardless of which leg the split came from (`main.ts`'s own doc on `nextLeafId`: a pane can change
+ * which leg it renders, so an id like `lambda-3` would describe something the pane is not), so
+ * `dataset.kind` is the only truthful statement of what a leaf renders left to select on. This matters
+ * MORE in `layout-restore.test.ts` than in its siblings: its `STORED` deliberately seeds a leaf spelled the OLD way
+ * (`lambda-1`), so an id-prefix filter would still find it by luck while silently missing a freshly
+ * split leaf spelled the new way (`pane-N`) — the exact mismatch that file exists to restore correctly.
+ */
+export const lambdaLeaves = () =>
+  [...document.querySelectorAll<HTMLElement>('[data-kind="lambda"]')].map((e) => e.dataset.leaf ?? '')
+
+/**
+ * Every leaf's id paired with the `flex` `layout-view.ts` gave it, in document order — "where each pane
+ * is and how big it is", as one comparable value.
+ *
+ * THE ID IS IN IT BECAUSE THE ORDER IS HALF THE CLAIM. `renderLayout` only ever appends, so a pane
+ * rebuilt as a fresh leaf rather than changed in place would arrive at the END of its parent split with
+ * a size the divider positions no longer describe; comparing bare sizes would call that arrangement
+ * equal to this one whenever the sizes happen to match.
+ */
+export const places = () =>
+  [...document.querySelectorAll<HTMLElement>('[data-leaf]')].map((e) => `${e.dataset.leaf}@${e.style.flex}`)
+
+/** The text of `id`'s TM status line, or `''` where it shows none. */
+export const statusOf = (id: string) => paneOrThrow(id, 'no pane at').querySelector('.tm-status')?.textContent ?? ''
+
+/** The text of `id`'s step line, or `''` where it shows none. */
+export const stepLineOf = (id: string) => paneOrThrow(id, 'no pane at').querySelector('.step')?.textContent ?? ''
+
+/** The newest step a step line counts, 0 while it counts none: 72,000 from `step 72,000 of 72,000…`. */
+export const recorded = (line: string) => Number(/of ([\d,]+)/.exec(line)?.[1]?.replaceAll(',', '') ?? 0)
+
+/** Whether a step line says its recording has stopped: a count, and no `…` after it. */
+export const recordingOver = (line: string) => line.startsWith('step ') && !line.includes('…')
+
+/** The newest step a step line names — its `of N` — as the line prints it: `69,008` from `step 69,008 of 69,008 — …`. */
+export const newest = (line: string) => /of ([\d,]+)/.exec(line)?.[1] ?? ''
+
+/** The number `printed` writes, without its thousands separators. */
+export const countOf = (printed: string) => Number(printed.replaceAll(',', ''))
+
+/** The asm view `asm-0`'s pane. */
+export const asmPane = () => paneByLeaf('asm-0')
+
+/** The text of the asm view's value readout, or `''` where it shows none. */
+export const asmValue = () => asmPane().querySelector('.asm-value')?.textContent ?? ''
+
+/** The text of `pane`'s step readout, or `''` where it shows none. */
+export const paneStepText = (pane: HTMLElement) => pane.querySelector('.step')?.textContent ?? ''
+
+/** The control labelled `label` among `pane`'s controls, or `undefined` where there is none. */
+export const controlIn = (pane: HTMLElement, label: string) =>
+  [...pane.querySelectorAll<HTMLButtonElement>('.controls button')].find((b) => b.textContent === label)
+
+/** Whether `pane` says it shows a copy that is not linked. */
+export const copyShown = (pane: HTMLElement) => /copy · not linked/.test(pane.textContent ?? '')
+
+/** The TM view `tm-0`'s host. */
+export const tmViewHost = (): HTMLElement => host('tm-0') as HTMLElement
+
+/** The state table under the TM view `tm-0`'s `host`, where `stateTable` looks under `tmPane`. */
+export const tmStateTable = (): HTMLElement => host('tm-0')?.querySelector('.state-table') as HTMLElement
+
+/** The TM view `tm-0`'s element, `[data-leaf="tm-0"]`; unlike `tmPaneHost`, it does not throw where none is mounted. */
+export const tmPane = () => document.querySelector('[data-leaf="tm-0"]') as HTMLElement
+
+/** The text of `tmPane`'s status line, or `''` where it shows none. */
+export const tmStatus = () => tmPane().querySelector('.tm-status')?.textContent ?? ''
+
+/**
+ * What a TM pane is actually showing, as three readings a blank pane cannot fake.
+ *
+ * ALL THREE ARE PAINTED FROM `TmPane`'s `#program`, AND THEY FAIL IN DIFFERENT DIRECTIONS. `render`
+ * returns early — clearing the status line and the tape rows — when either the frame or the program is
+ * `null`, so `tapes` and `status` say the pane has BOTH; `rows` is drawn from the `StateIndex` the
+ * program builds and is painted whether or not a frame ever lands, so it says the machine reached the
+ * pane even when the legs are empty. Counting `.cell` rather than `.tape` is deliberate: an empty tape
+ * row is markup, a cell is a symbol read off a frame.
+ */
+export const showing = (leaf: string) => ({
+  tapes: [...document.querySelectorAll(`[data-leaf="${leaf}"] .tape .cell`)].map((e) => e.textContent).join(''),
+  rows: document.querySelectorAll(`[data-leaf="${leaf}"] .state-row`).length,
+  status: document.querySelector(`[data-leaf="${leaf}"] .tm-status`)?.textContent ?? '',
+})
+
+/** The control labelled `label` among `tmPane`'s controls, or `undefined` where there is none. */
+export const control = (label: string) => controlIn(tmPane(), label)
+
+/** The text of the TM view `tm-0`'s step readout, or `''` where it shows none. */
+export const tmStepText = () => document.querySelector('[data-leaf="tm-0"] .step')?.textContent ?? ''
+
+/** The TM view `tm-0`'s `.extend` control, or `null` where it has none. */
+export const extendButton = () => document.querySelector<HTMLButtonElement>('[data-leaf="tm-0"] .controls .extend')
+
+/** The `▶` specifically. The strip's first button is `↺`, so a positional lookup would name the wrong one. */
+export const forwardButton = () =>
+  [...document.querySelectorAll<HTMLButtonElement>('[data-leaf="tm-0"] .controls button')].find(
+    (b) => b.textContent === '▶',
+  )
+
+/** About half of the callers' `BUDGET_SRC`'s TM recording, which stops with its history full at step 75,024. */
+const BUDGET_HALF = 37_000
+
+/**
+ * **THE CALLERS' `BUDGET_SRC`'S TM HISTORY FILLING, IN THREE WAITS: THE TM LEG STARTING TO RECORD, ITS HISTORY HALF FULL, THEN THE
+ * FILL.** As one wait it took 7,504 and 8,590 ms at `CPUQuota=25%` (2026-10-05), against `until`'s 10 s; as two, the
+ * second took up to 6,900 ms. The TM leg records last, after λ and asm, and its step line reads `…` from its first
+ * frames until it stops, and counts them. Called right after a dispatch, which withdraws the stop before and drops the
+ * line's `…` (`compile.ts`'s `schedule`, `controls.ts`): the first two assertions hold both, so no wait can pass on the
+ * run before, and the third holds that the line the second wait counts is this run's.
+ */
+export async function historyFills(): Promise<void> {
+  expect(tmStepText(), 'precondition: the stop before is withdrawn').not.toContain('history is full')
+  expect(tmStepText(), 'precondition: no TM recording under way').not.toContain('…')
+  await until(
+    () => tmStepText().includes('…') || tmStepText().includes('history is full'),
+    'the TM leg to start recording',
+  )
+  expect(tmStepText(), 'precondition: the TM leg is past the recompile').not.toContain('— recompiling')
+  await until(
+    () =>
+      Number(/of ([\d,]+)/.exec(tmStepText())?.[1]?.replaceAll(',', '') ?? 0) >= BUDGET_HALF ||
+      tmStepText().includes('history is full'),
+    'the TM history to be half full',
+  )
+  await until(() => tmStepText().includes('history is full'), 'the TM history to fill')
+}
+
+/** `tmPane`'s state table. */
+export const stateTable = () => tmPane().querySelector('.state-table') as HTMLElement
+
+/** `tmPane`'s state diagram panel. */
+export const diagram = () => tmPane().querySelector('[data-panel="diagram"]') as HTMLElement
+
+/** The scroller of `diagram`'s program level. */
+export const programScroll = () => diagram().querySelector('.program-scroll') as HTMLElement
+
+/** The rows `diagram`'s program level draws. */
+export const programRows = () => [...diagram().querySelectorAll<HTMLElement>('.program-row')]
+
+/** The boxes `diagram`'s program level draws. */
+export const diagramBoxes = () => [...diagram().querySelectorAll<HTMLElement>('.program-box')]
+
+/** The name on the row `diagram`'s program level marks as the current step; `undefined` where it marks none. */
+export const currentRowName = () =>
+  diagram().querySelector('.program-row[aria-current="step"] .program-name')?.textContent
+
+/** The mode button of `diagram` whose `data-value` is `value`, or `undefined` where there is none. */
+export const diagramChoice = (value: string) =>
+  [...diagram().querySelectorAll<HTMLButtonElement>('.diagram-mode')].find((b) => b.dataset.value === value)
+
+/** Whether an element is drawn: `hidden` is not enough, since an author `display` can outrank it. */
+export const diagramShows = (sel: string) =>
+  getComputedStyle(diagram().querySelector(sel) as HTMLElement).display !== 'none'
+
+/** The name on the program row that holds `programScroll`'s `aria-activedescendant`. */
+export const activeProgramName = () =>
+  document
+    .getElementById(programScroll().getAttribute('aria-activedescendant') ?? '')
+    ?.closest('.program-row')
+    ?.querySelector('.program-name')?.textContent
+
+/** How far `el` can scroll down: a box that cannot is at 0 whatever it was given. */
+export const scrollRange = (el: HTMLElement): number => el.scrollHeight - el.clientHeight
+
+/**
+ * Mount the app on this file's page in a window `width` × `height`: the shell, `main()`, and its first compile
+ * settled.
+ */
+export async function mountAt(width: number, height: number): Promise<void> {
+  const { page } = await import('vitest/browser')
+  await page.viewport(width, height)
+  document.body.innerHTML = SHELL
+  await (await import('../../src/main')).ready
+  await until(stateIdle, 'the first compile')
+}
 
 /**
  * The notice line's words, without the label of the action beside them: `#notice`'s own text ends in `undo` where the
@@ -324,6 +734,188 @@ export const notice = (): string => (document.querySelector('#notice .notice-tex
 
 /** What the live region says, without the space a sentence said twice is written with (`notice.ts`'s `createNotices`). */
 export const live = (): string => (document.querySelector('#live')?.textContent ?? '').trim()
+
+/** What the live region says, as it is written: unlike `live`, not trimmed. */
+export const liveText = () => document.querySelector('#live')?.textContent ?? ''
+
+/** The notice, `#notice`. */
+export const noticeEl = (): HTMLElement => document.querySelector<HTMLElement>('#notice') as HTMLElement
+
+/** The notice's text, as it is written: unlike `notice`, not trimmed. */
+export const noticeElText = () => noticeEl().querySelector('.notice-text')?.textContent ?? ''
+
+/** What the notice line says, or `''` while it says nothing: unlike `notice`, not trimmed. */
+export const noticeText = () => document.querySelector('#notice .notice-text')?.textContent ?? ''
+
+/** The notice line's text — where a refusal is said since Plan 7 part 2 (spec §11) — or `''` while it is hidden. */
+export const shownNoticeText = () => {
+  const notice = document.querySelector<HTMLElement>('#notice')
+  return notice === null || notice.hidden ? '' : (notice.querySelector('.notice-text')?.textContent ?? '')
+}
+
+/** The notice line's action button, or `null` where the notice offers none. */
+export const undoButton = () => document.querySelector<HTMLButtonElement>('#notice button.notice-action')
+
+/** The encoding picker, `#encoding`. */
+export const picker = () => document.querySelector<HTMLSelectElement>('#encoding') as HTMLSelectElement
+
+/** The text of each segment of the results line, in order. */
+export const segments = () => [...document.querySelectorAll('#results .segment')].map((s) => s.textContent ?? '')
+
+/** How many segments and rows the results line holds. */
+export const readout = () => [...document.querySelectorAll('#results .segment, #results .row')].length
+
+/** The link status line's text, `#link-status`, or `''` where the page has none. */
+export const linkStatus = () => document.querySelector('#link-status')?.textContent ?? ''
+
+/** The text of whichever source construct is currently marked `.linked`, or `''` if none is. */
+export const linkedSource = () => document.querySelector('.cm-editor .linked')?.textContent ?? ''
+
+/**
+ * The text of whichever source construct is currently marked `.linked`, or `null` if none is, where `linkedSource`
+ * reads `''`.
+ */
+export const sourceLinked = () => document.querySelector('.cm-editor .linked')?.textContent ?? null
+
+/**
+ * Link the source construct at `pos` (a UTF-16 doc position) in `v`, via the keyboard route `main.ts` binds
+ * to `Mod-'` rather than synthesizing a `mouseup` at a computed pixel — real Chromium under Playwright
+ * would make that work too, but the keyboard path resolves against the caret alone and needs no
+ * `posAtCoords` layout to line up. `Mod` is `Ctrl` on this platform (`@codemirror/view`'s
+ * `normalizeKeyName`: `mac ? meta : ctrl`), and the callers' fixtures are ASCII, so a UTF-16 position and
+ * a byte offset coincide for them — the conversion `main.ts` itself does is not what their tests are for.
+ */
+export function linkAt(v: EditorView, pos: number): void {
+  v.dispatch({ selection: { anchor: pos } })
+  v.contentDOM.dispatchEvent(new KeyboardEvent('keydown', { key: "'", ctrlKey: true, cancelable: true }))
+}
+
+/** Replace `v`'s text and wait past the edit debounce, which is what posts `didChange`. */
+export function retype(v: EditorView, text: string): void {
+  v.dispatch({ changes: { from: 0, to: v.state.doc.length, insert: text } })
+}
+
+/** `v`'s document, as a string. */
+export const text = (v: EditorView): string => v.state.doc.toString()
+
+/**
+ * Error markers inside ONE pane's editor, so a source-editor marker cannot be mistaken for a copy's — the settle
+ * signal for "this pane's edit reached the server".
+ */
+export const markersIn = (pane: HTMLElement) => pane.querySelectorAll('.cm-editor .cm-lintRange-error').length
+
+/** The examples menu's button, `#examples`. */
+export const examplesButton = () => document.querySelector<HTMLButtonElement>('#examples') as HTMLButtonElement
+
+/** The share button, `#share`. */
+export const shareButton = () => document.querySelector<HTMLButtonElement>('#share') as HTMLButtonElement
+
+/** The share menu, `#share-menu`. */
+export const shareMenu = () => document.querySelector<HTMLElement>('#share-menu') as HTMLElement
+
+/** Whether the share menu is open. */
+export const shareMenuOpen = () => shareMenu().matches(':popover-open')
+
+/** The share menu's link field, `#share-link`. */
+export const shareLinkField = () => shareMenu().querySelector<HTMLInputElement>('#share-link') as HTMLInputElement
+
+/** Whether the view keys are armed: their hint, `#view-keys`, is shown. */
+export const armed = (): boolean => !(document.querySelector('#view-keys') as HTMLElement).hidden
+
+/** The prefix chord that arms the view keys, as `userEvent.keyboard` writes it. */
+export const PREFIX = '{Control>}.{/Control}'
+
+/**
+ * Split `leaf` through its `⋯` menu, as a user does: `dir` is the direction, and `pick` is `'same'`
+ * (another view of this), `'source'`, or a `bindingKey(leg, session)`.
+ *
+ * **THE MENU IS REACHED THROUGH THE INVOKER'S `aria-controls`, NOT THROUGH `[data-leaf] .view-menu`.**
+ * A view has ONE menu now, where a pane used to carry a picker per split control, so the scoped query
+ * would find the right element too — but `aria-controls` is the relationship `view-header.ts`'s `viewMenu`
+ * builds `⋯` for, and going through it means a header that ever stopped naming its own menu fails this helper
+ * loudly (the `item == null` throw below) instead of every split here quietly turning into a no-op.
+ *
+ * IT THROWS WHEN THE ENTRY IS ABSENT, NAMING WHAT WAS ON OFFER. `find(...)?.click()` on a missing item is
+ * a silent no-op, and every assertion after it would then describe a page nothing happened on — the same
+ * hazard `pickBinding` records.
+ */
+export function splitVia(leaf: string, dir: 'row' | 'column', pick: string): void {
+  const more = document.querySelector<HTMLButtonElement>(`[data-leaf="${leaf}"] button.view-more`)
+  if (more === null) throw new Error(`no view menu on [data-leaf="${leaf}"]`)
+  more.click()
+  const menu = document.getElementById(more.getAttribute('aria-controls') ?? '')
+  menu?.querySelector<HTMLButtonElement>(`button.view-split[data-dir="${dir}"]`)?.click()
+  const selector =
+    pick === 'same' ? 'button[data-same]' : pick === 'source' ? 'button[data-source]' : `button[data-binding="${pick}"]`
+  const item = menu?.querySelector<HTMLButtonElement>(`.view-menu-pairs ${selector}`)
+  if (item == null) {
+    const offered = [...(menu?.querySelectorAll<HTMLButtonElement>('.view-menu-pairs button') ?? [])].map(
+      (b) => b.textContent,
+    )
+    throw new Error(`[data-leaf="${leaf}"] offers no ${pick} to split into — offered: ${offered.join(' | ')}`)
+  }
+  item.click()
+}
+
+/**
+ * Split `leaf` through `control` into a second pane of the same kind on the same session — the gesture
+ * every test in `two-lambda-panes.test.ts` reached with a single `btn(leaf, 'split …')?.click()`.
+ *
+ * **A SPLIT IS TWO CLICKS NOW, AND THE FIRST MENU ENTRY IS WHY IT IS STILL ONE GESTURE.** The control
+ * opens a picker (`view-header.ts`'s `viewMenu`), whose first item is the pane's own `(leg, session)`
+ * pair labelled "another view of this" — put there precisely so the case that WAS the whole gesture stays one click
+ * away. That is what keeps every test that calls it testing what it always tested: the same pane, duplicated,
+ * on the same session, which is how `two-lambda-panes.test.ts` reaches two λ panes on one scratch without a rebind.
+ *
+ * THE MENU IS REACHED THROUGH `aria-controls`, AND THE LABEL IS CHECKED. A pane has two pickers and each
+ * keeps the entries it was last opened with, so `[data-leaf] .view-menu button` could click an item in
+ * a popover that is not open; and a missing entry clicked through `?.` is a silent no-op that would
+ * leave every assertion after it describing a page nothing happened on.
+ */
+export const splitSame = (leaf: string, dir: 'row' | 'column'): void => splitVia(leaf, dir, 'same')
+
+/**
+ * Split `leaf` into a second pane of the same kind on the same session — the gesture every test in
+ * `layout-app.test.ts` used to reach with one click on the control its `splitRowOn` finds.
+ *
+ * **A SPLIT IS TWO CLICKS NOW, AND THE FIRST ENTRY IS WHY IT IS STILL ONE GESTURE.** The control opens a
+ * picker (`view-header.ts`'s `viewMenu`), whose first item is the pane's own `(leg, session)` pair
+ * labelled "another view of this" — put there precisely so the case that WAS the whole gesture stays one click away.
+ * The label is checked rather than assumed: `find(...)?.click()` on a missing entry is a silent no-op,
+ * and taking the first item of a menu that had reordered would quietly make every test that calls it a test of a
+ * different split. `pane-picker.test.ts` is where the other entries are exercised.
+ */
+export const splitRow = (leaf: string): void => splitVia(leaf, 'row', 'same')
+
+/** The title-selector of `leaf`'s view — the pair in force is its `data-binding`. */
+export const titleOf = (leaf: string) =>
+  document.querySelector<HTMLButtonElement>(`[data-leaf="${leaf}"] button.view-title`)
+
+/** The title-selector of the λ view `lambda-0`, as `titleOf` finds it. */
+export const lambdaTitle = () => titleOf('lambda-0')
+
+/** The title-selector of the view in `pane` — the pair in force is its `data-binding`. */
+export const viewTitleOf = (pane: HTMLElement) =>
+  pane.querySelector<HTMLButtonElement>('button.view-title') as HTMLButtonElement
+
+/**
+ * Pick `key` (`bindingKey(leg, session)`) through `leaf`'s title menu, as a user does.
+ *
+ * **IT ASSERTS THE ITEM WAS THERE, WHICH IS NOT PEDANTRY** — a pick that never happened would leave every
+ * assertion after it passing against the pane's old pair.
+ */
+export function pickBinding(leaf: string, key: string): void {
+  const title = titleOf(leaf)
+  if (title === null) throw new Error(`no title-selector on [data-leaf="${leaf}"]`)
+  title.click()
+  const menu = document.getElementById(title.getAttribute('aria-controls') ?? '')
+  const item = menu?.querySelector<HTMLButtonElement>(`button[data-binding="${key}"]`)
+  if (item == null) {
+    const offered = [...(menu?.querySelectorAll<HTMLButtonElement>('button') ?? [])].map((b) => b.dataset.binding)
+    throw new Error(`[data-leaf="${leaf}"] offers no ${JSON.stringify(key)} — offered: ${JSON.stringify(offered)}`)
+  }
+  item.click()
+}
 
 /**
  * **AFTER A GESTURE THE FOCUS IS ON AN ELEMENT INSIDE `<body>`, AND NOT ON `<body>`** — the view layouts spec §14
@@ -348,6 +940,191 @@ export async function focusInPage(gesture: string): Promise<void> {
   await new Promise<void>((r) => requestAnimationFrame(() => requestAnimationFrame(() => r())))
   check('two frames on')
 }
+
+/**
+ * Two animation frames: the one the page draws next, and one more. Long enough for the browser to lay out, clamp and
+ * deliver its own `scroll` events and a resize observer's, for a control that cannot hold the focus to have lost it,
+ * and for the style recalc that hides a menu and the blur that follows it.
+ */
+export const frames = (): Promise<void> =>
+  new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(() => r())))
+
+/** One animation frame: the one the page draws next. */
+export const frame = (): Promise<void> => new Promise((r) => requestAnimationFrame(() => r()))
+
+/**
+ * The next `scroll` event on `el`, once a listener registered before it, as `VirtualGrid`'s is in its constructor,
+ * has run. **AWAITED RATHER THAN COUNTING FRAMES**: a scroll's event came later than two frames when
+ * `virtual-grid.test.ts` ran whole, so an assertion after two frames could run before the event it was about, and
+ * pass whatever the handler would have done.
+ */
+export const scrolled = (el: HTMLElement) =>
+  new Promise<void>((r) => el.addEventListener('scroll', () => r(), { once: true }))
+
+/** Dispatch a bubbling `keydown` of `key` on `body`'s element. */
+export const keyOnBody = (body: LambdaBody, key: string) =>
+  body.el.dispatchEvent(new KeyboardEvent('keydown', { key, bubbles: true }))
+
+/** `el` has the focus now, and still has it two frames on. */
+export async function holdsFocus(el: Element, what: string): Promise<void> {
+  expect(document.activeElement, `${what}, at once`).toBe(el)
+  await frames()
+  expect(document.activeElement, `${what}, two frames on`).toBe(el)
+}
+
+/**
+ * Yield to the event loop once.
+ *
+ * NOT `until(() => true)`, WHICH WAITS FOR NOTHING. `until` evaluates its predicate before its first
+ * sleep, so a predicate that is already true returns synchronously — an `await` on it is a no-op that
+ * reads like a wait. Places that need the DOM to settle after a synchronous click use this;
+ * places that need a specific condition use `until` with that condition instead.
+ */
+export const tick = () => new Promise((r) => setTimeout(r, 0))
+
+/**
+ * A press on a toggle with the pointer, after which the focus is somewhere in the page (spec §14 item 19).
+ * `vitest/browser` is imported when it is called, as `chooseSetting` says why.
+ */
+export const pressToggle = async (kind: string): Promise<void> => {
+  const { userEvent } = await import('vitest/browser')
+  await userEvent.click(toggle(kind))
+  await focusInPage(`a press on the ${kind} toggle`)
+}
+
+/** And one on a Stage tab. */
+export const pressTab = async (leaf: string): Promise<void> => {
+  const { userEvent } = await import('vitest/browser')
+  await userEvent.click(document.querySelector<HTMLElement>(`#views [role="tab"][data-leaf="${leaf}"]`) as HTMLElement)
+  await focusInPage(`a press on the Stage tab of ${leaf}`)
+}
+
+/** The Stage tab of the view `leaf`. */
+export const stageTab = (leaf: string): HTMLElement =>
+  document.querySelector<HTMLElement>(`#views [role="tab"][data-leaf="${leaf}"]`) as HTMLElement
+
+/** The leaves of the Stage's tabs, in the order they come. */
+export const tabLeaves = (): string[] =>
+  [...document.querySelectorAll<HTMLElement>('#views [role="tab"]')].map((t) => t.dataset.leaf as string)
+
+/** The leaf of the Stage tab that is selected. */
+export const selectedTab = (): string | undefined =>
+  document.querySelector<HTMLElement>('#views [role="tab"][aria-selected="true"]')?.dataset.leaf
+
+/** Choose the item `sel` from the workspace menu, and close the menu where it is still open. */
+export const clickWorkspaceItem = (sel: string): void => {
+  document.querySelector<HTMLButtonElement>('#workspace')?.click()
+  document.querySelector<HTMLButtonElement>(`#workspace-menu ${sel}`)?.click()
+  const menu = document.querySelector<HTMLElement>('#workspace-menu')
+  if (menu?.matches(':popover-open')) menu.hidePopover()
+}
+
+/** The workspace button's words: the preset's name, or `custom`. */
+export const workspaceNameText = (): string => document.querySelector('#workspace')?.textContent ?? ''
+
+/** Choose a workspace preset through the workspace menu. */
+export const pickPreset = (name: 'explorer' | 'stage'): void => clickWorkspaceItem(`[data-preset="${name}"]`)
+
+/** The workspace menu, `#workspace-menu`. */
+export const workspaceMenu = (): HTMLElement => document.querySelector<HTMLElement>('#workspace-menu') as HTMLElement
+
+/** Open the workspace menu with a click on its button, and return the menu. */
+export const openWorkspaceMenu = (): HTMLElement => {
+  document.querySelector<HTMLButtonElement>('#workspace')?.click()
+  return document.querySelector<HTMLElement>('#workspace-menu') as HTMLElement
+}
+
+/** The views' container, `#views`. */
+export const views = (): HTMLElement => document.querySelector<HTMLElement>('#views') as HTMLElement
+
+/** The inspector, `#inspector`. */
+export const inspector = (): HTMLElement => document.querySelector<HTMLElement>('#inspector') as HTMLElement
+
+/** Set the `<select>` that `sel` finds to `value`, and dispatch a `change` event on it. */
+export function chooseOption(sel: string, value: string): void {
+  const select = document.querySelector<HTMLSelectElement>(sel) as HTMLSelectElement
+  select.value = value
+  select.dispatchEvent(new Event('change'))
+}
+
+/** The view hosts on the page — every `[data-leaf]` under `#views` but a Stage's tabs, which carry one too. */
+export const hosts = (): HTMLElement[] =>
+  [...document.querySelectorAll<HTMLElement>('#views [data-leaf]')].filter((el) => el.getAttribute('role') !== 'tab')
+
+/** The layout storage holds, as written, or `null` where it holds none. */
+export const storedLayoutText = (): string | null => localStorage.getItem(LAYOUT_STORAGE_KEY)
+
+/** The stored layout, parsed, as the type `T` the caller reads it as; `null` where storage holds none. */
+export const storedLayout = <T = Record<string, unknown>>(): T =>
+  JSON.parse(localStorage.getItem(LAYOUT_STORAGE_KEY) ?? 'null')
+
+/** The stored layout, parsed, or `{}` where storage holds none. */
+export const storedLayoutOrEmpty = (): Record<string, unknown> =>
+  JSON.parse(localStorage.getItem('redextape.layout') ?? '{}')
+
+/** How many ids the stored workspace's trees name between them; a throw where the loader would refuse it. */
+export const liveViewCount = (): number => {
+  const ws = parseWorkspace(storedLayoutText())
+  if (ws === null) throw new Error('the stored workspace does not parse')
+  return new Set([ws.tree, ...Object.values(ws.arrangements)].flatMap((t) => leaves(t)).map((l) => l.id)).size
+}
+
+/** A layout leaf: the view `id`, of the kind `pane`. */
+export const leafOf = (id: string, pane: PaneKind): LayoutNode => ({ kind: 'leaf', id, pane })
+
+/** The *λ · program* item of the `+ view` menu, or `undefined` where the menu holds none. */
+export const newLambdaViewItem = (): HTMLButtonElement | undefined =>
+  [...document.querySelectorAll<HTMLButtonElement>('#new-view-menu button')].find(
+    (b) => b.textContent === 'λ · program',
+  )
+
+/**
+ * `n` λ views in one row, `pane-1` to `pane-n`, each an equal share of it: one split deep, so only the leaf bound is in
+ * play.
+ */
+export const rowOfLeaves = (n: number): LayoutNode => ({
+  kind: 'split',
+  dir: 'row',
+  sizes: Array.from({ length: n }, () => 1 / n),
+  children: Array.from({ length: n }, (_, i) => ({ kind: 'leaf', id: `pane-${i + 1}`, pane: 'lambda' }) as const),
+})
+
+/** `+ view` pressed `presses` times in a row: each adds a λ view beside the view the last one added and focused. */
+export const pressedLayout = (presses: number): LayoutNode => {
+  let tree = fourViews()
+  let focused = 'lambda-0'
+  for (let k = 1; k <= presses; k++) {
+    tree = insertBeside(tree, focused, 'row', `pane-${k}`, 'lambda')
+    focused = `pane-${k}`
+  }
+  return tree
+}
+
+/** The source beside one other view, the view `id` of the kind `pane`: a split in `dir`, sized `sizes`. */
+export const sourceBeside = (
+  id: string,
+  pane: PaneKind,
+  dir: 'row' | 'column' = 'row',
+  sizes: [number, number] = [0.5, 0.5],
+): LayoutNode => ({
+  kind: 'split',
+  dir,
+  sizes,
+  children: [leafOf('source', 'source'), leafOf(id, pane)],
+})
+
+/** The step bar, `#step-bar`. */
+export const stepBar = (): HTMLElement => document.querySelector<HTMLElement>('#step-bar') as HTMLElement
+
+/** The title of the view the bar drives, which `step-bar.ts` writes in front of its controls; `''` for none. */
+export const barTitle = (): string => stepBar().querySelector('.step-bar-title')?.textContent?.trim() ?? ''
+
+/** The step bar's own step readout, trimmed; `''` for none. */
+export const barStep = (): string => stepBar().querySelector('.step-bar-inner .step')?.textContent?.trim() ?? ''
+
+/** The step bar's button named `name`. */
+export const barButton = (name: string): HTMLButtonElement =>
+  stepBar().querySelector<HTMLButtonElement>(`button[aria-label="${name}"]`) as HTMLButtonElement
 
 /**
  * All four views in two rows of two: source and λ over asm and TM. A fresh page built this tree until the view
@@ -538,4 +1315,390 @@ export async function showWideDefault(): Promise<void> {
     document.querySelector<HTMLButtonElement>(`#views-shown button[data-shows="${kind}"]`)?.click()
   const [found, wanted] = [drawn(), 'row[50](column[50](source asm-0) column[50](lambda-0 tm-0))']
   if (found !== wanted) throw new Error(`showWideDefault left the page on ${found}, and not on ${wanted}`)
+}
+
+/**
+ * The events of a pane built by hand: every transport control a `vi.fn()` that does nothing, a speed of 8, and
+ * `over`'s members on top.
+ */
+export const inertEvents = (over: Partial<PaneEvents> = {}): PaneEvents => ({
+  back: vi.fn(),
+  forward: vi.fn(),
+  toNewest: vi.fn(),
+  play: vi.fn(),
+  restart: vi.fn(),
+  extend: vi.fn(),
+  speed: () => 8,
+  setSpeed: vi.fn(),
+  rebind: vi.fn(),
+  ...over,
+})
+
+/**
+ * `PaneEvents`'s members, all inert — no test that calls this clicks a transport control. Unlike `inertEvents`, it
+ * gives `editSink` and `collapse` too, and takes no `over`.
+ */
+export const paneEvents = (): PaneEvents => ({
+  back: vi.fn(),
+  forward: vi.fn(),
+  toNewest: vi.fn(),
+  play: vi.fn(),
+  restart: vi.fn(),
+  extend: vi.fn(),
+  speed: () => 8,
+  setSpeed: vi.fn(),
+  rebind: vi.fn(),
+  editSink: () => vi.fn(),
+  collapse: vi.fn(),
+})
+
+/** A new `section.pane` at the end of `<body>`, to build a pane in by hand. */
+export const newPaneHost = (): HTMLElement => {
+  const el = document.createElement('section')
+  el.className = 'pane'
+  document.body.append(el)
+  return el
+}
+
+/**
+ * A real drag: a press at the middle of `handle`'s empty part and a release `dy` pixels down from it (up, for a
+ * negative `dy`), measured against the host so the driver has one element to aim both ends at. `vitest/browser` is
+ * imported when it is called, as `chooseSetting` says why.
+ */
+export async function drag(host: HTMLElement, handle: HTMLElement, dy: number): Promise<void> {
+  const { userEvent } = await import('vitest/browser')
+  const [h, area] = [handle.getBoundingClientRect(), host.getBoundingClientRect()]
+  const x = h.left - area.left + h.width / 2
+  const y = h.top - area.top + h.height / 2
+  await userEvent.dragAndDrop(host, host, { sourcePosition: { x, y }, targetPosition: { x, y: y + dy } })
+  await new Promise<void>((r) => requestAnimationFrame(() => r()))
+}
+
+/**
+ * A transport strip's state for a pane rendered by hand: restart enabled, back, forward, to-newest and play as
+ * `canBack`, `canForward`, `canToNewest` and `canPlay` (the last three enabled unless passed `false`), nothing
+ * playing, no continue button, and `stepText` on the step line.
+ */
+export const controlState = (
+  canBack: boolean,
+  stepText: string,
+  canForward = true,
+  canToNewest = true,
+  canPlay = true,
+): ControlState => ({
+  canRestart: true,
+  canBack,
+  canForward,
+  canToNewest,
+  canPlay,
+  playing: false,
+  stepText,
+  continueLabel: null,
+})
+
+/** What the results line says. */
+export const resultsText = () => document.querySelector('#results')?.textContent ?? ''
+
+/** `#results` idle, on its state alone: unlike `idle`, it does not ask for text in it. */
+export const stateIdle = () => document.querySelector<HTMLElement>('#results')?.dataset.state === 'idle'
+
+/** The source compile's own "finished" flag: `#results` idle, with something in it. */
+export const idle = () => stateIdle() && resultsText() !== ''
+
+/** The same invariant argument as `app.test.ts`'s `settled` applies — see its doc there. */
+export async function settled(v: EditorView, src: string): Promise<void> {
+  v.dispatch({ changes: { from: 0, to: v.state.doc.length, insert: src } })
+  await until(idle, `the app to settle on \`${src}\``)
+}
+
+/** The results line, `#results`. */
+export const results = () => document.querySelector<HTMLElement>('#results') as HTMLElement
+
+/** Whether `results`' `data-state` is `idle`: `stateIdle`'s question, asked through `results`. */
+export const resultsIdle = () => results().dataset.state === 'idle'
+
+/**
+ * Put `src` in the editor and wait for its compile to finish recording. It waits on `#results`'s state alone, not on
+ * `idle`, which also asks for text in it.
+ */
+export async function compile(view: EditorView, src: string): Promise<void> {
+  view.dispatch({ changes: { from: 0, to: view.state.doc.length, insert: src } })
+  await until(() => !stateIdle(), 'the compile to start')
+  await until(stateIdle, 'the compile to finish')
+}
+
+/**
+ * A 640 px wide `section` of classes `pane` and `fixture` at the end of `<body>`, for a view a file builds directly;
+ * each file names its own `fixture` class.
+ */
+export const fixtureHost = (fixture: string): HTMLElement => {
+  const el = document.createElement('section')
+  el.className = `pane ${fixture}`
+  el.style.width = '640px'
+  document.body.append(el)
+  return el
+}
+
+/** The TM view `tm-0`'s host, thrown on where none is mounted. */
+export const tmPaneHost = (): HTMLElement => {
+  const el = document.querySelector<HTMLElement>('[data-leaf="tm-0"]')
+  if (el === null) throw new Error('no TM pane mounted at [data-leaf="tm-0"]')
+  return el
+}
+
+/**
+ * Rewrite the start state's rule list to a single unconditional jump to `halt`, and hand back the
+ * name that state was edited under — `tm-scratch-fork.test.ts`'s `runs the edited machine` reads it back rather
+ * than hard-coding it a second time (Important 3, fix round: the assertion has to name the SAME state
+ * this function edited, derived from the SAME text, or a future change to the lowering's naming could
+ * silently desynchronize the two).
+ *
+ * **DERIVED FROM THE REAL TEXT, NOT HARD-CODED.** The state names are the lowering's (`pc0`,
+ * `wl1s2.s.sk0`, …) and it is free to change them; a machine typed into this file would keep passing
+ * after such a change while no longer being the machine the pane forked. This reads the `start`
+ * directive out of the emitted header and edits the state it names.
+ *
+ * **`halt` ITSELF IS NOT DERIVED, AND THAT IS SAFE RATHER THAN A SECOND HARD-CODE — `redextape-core`'s
+ * `tm/lower_tm.rs`, `tm/build.rs`, `tm/encoding/unary.rs` ALL BUILD THE ACCEPT STATE WITH THE LITERAL
+ * `"halt"`.** It is the lowering's own fixed name for the machine's one accept state, not a fact this
+ * function reads off the source program the way `start`'s target is — every encoding path in
+ * `redextape-core` calls `b.accept("halt")`, and `crates/redextape-core/tests/fixtures/list_1_2.tm`
+ * (`state halt: accept`) is a committed instance of exactly that convention.
+ */
+export function editedToHaltImmediately(text: string): { text: string; start: string } {
+  const start = /^start (\S+)$/m.exec(text)?.[1]
+  if (start === undefined) throw new Error('emitted text has no `start` directive')
+  const tapes = Number(/^tapes (\d+)$/m.exec(text)?.[1])
+  if (!Number.isInteger(tapes)) throw new Error('emitted text has no `tapes` directive')
+  const wild = Array.from({ length: tapes }, () => '*').join(' ')
+  const stay = Array.from({ length: tapes }, () => 'S').join(' ')
+  const rule = `  [${wild}] -> write [${wild}], move [${stay}], goto halt`
+
+  // Replace every rule line under `state <start>:` with the one above. A state block runs from its
+  // header to the next line that is not indented.
+  const lines = text.split('\n')
+  const at = lines.indexOf(`state ${start}:`)
+  if (at < 0) throw new Error(`no block for the start state \`${start}\``)
+  let end = at + 1
+  while ((lines[end] ?? '').startsWith('  ')) end++
+  return { text: [...lines.slice(0, at + 1), rule, ...lines.slice(end)].join('\n'), start }
+}
+
+/**
+ * Whether the δ-table's rendered rows show `state`'s own header immediately followed by exactly the
+ * one rule `editedToHaltImmediately` wrote — the fact worth waiting for and asserting, in place of
+ * both the vacuous `/halt/i` this replaces (Important 3: `state halt: accept` is always somewhere in
+ * the δ-table, forked or not, edited or not — the reviewer measured this true before the fork and
+ * before the edit alike) and plain content quiescence (Important 4: `tm-scratch-fork.test.ts`'s `typeInto` changes
+ * the editor's own text synchronously, well before the 300 ms debounce ever posts a recompile, so a quiescence
+ * poll can settle in the gap before the worker answers at all — polling for this fact instead is
+ * immune to that race by construction, since it can only become true once the reply that recompiled
+ * the edited text has actually landed and repainted).
+ *
+ * READS THE RENDERED TABLE, NOT THE EDITOR'S OWN TEXT. The editor shows whatever was typed the
+ * instant `typeInto` runs, which proves a keystroke reached the document and nothing about whether
+ * the worker ever recompiled it — `TmPane.setProgram` is the one thing that can move what this reads,
+ * and it runs only from a `tm-scratch-compiled` reply.
+ */
+export function startStateGoesToHalt(pane: HTMLElement, start: string): boolean {
+  const rows = [...pane.querySelectorAll<HTMLElement>('.state-row')]
+  const at = rows.findIndex((el) => el.classList.contains('is-state') && el.textContent === start)
+  const rule = at < 0 ? undefined : rows[at + 1]
+  if (rule === undefined || !rule.classList.contains('is-rule')) return false
+  return /→ halt$/.test(rule.textContent ?? '')
+}
+
+/**
+ * Whether `v` is in vim's NORMAL mode, asked of the DOM rather than of the package.
+ *
+ * `@replit/codemirror-vim`'s plugin puts `cm-vimMode` on the scroller whenever vim is installed and
+ * not in insert mode, and removes it in `destroy()` — so this one class answers "is vim here" and
+ * "which mode is it in" together, and it answers them about the element the user is looking at.
+ */
+export const inNormalMode = (v: EditorView): boolean => v.scrollDOM.classList.contains('cm-vimMode')
+
+/** The host of the scratch editor in the λ view `lambda-0`, or `null` where none is mounted. */
+export const editorHost = () => document.querySelector<HTMLElement>('[data-leaf="lambda-0"] .term-editor')
+
+/**
+ * The header's buffers button — thrown rather than optional-chained past, the same standard
+ * `tmPaneHost` sets: every caller needs the real element to act on, and a silent `null` here would
+ * turn a missing mount point into a `TypeError` several lines away from where the mount actually failed.
+ */
+export const buffersButton = (): HTMLButtonElement => {
+  const el = document.querySelector<HTMLButtonElement>('#buffers')
+  if (el === null) throw new Error('no #buffers control in the header')
+  return el
+}
+
+/** The header's buffers button, or `null` where there is none: `buffersButton` throws instead. */
+export const buffersControl = () => document.querySelector<HTMLButtonElement>('#buffers')
+
+/**
+ * The popover `bufferList` appends beside `#buffers` — present once `bufferList` has run at all
+ * (`main.ts` constructs it unconditionally now, per this task: the button is never withheld), whether or
+ * not it is currently open.
+ */
+export const buffersMenu = (): HTMLElement => {
+  const el = document.querySelector<HTMLElement>('.buffer-list')
+  if (el === null) throw new Error('no .buffer-list popover beside #buffers')
+  return el
+}
+
+/**
+ * Every row the list currently holds — elements rather than text, since `it('mints a warm TM
+ * buffer...')` in `tm-blank-buffer.test.ts` claims only the COUNT.
+ *
+ * **FORCES THE LIST OPEN FIRST, THE WAY `buffer-restore.test.ts`'s OWN `openList` DOES, AND FOR THE
+ * SAME REASON.** `bufferList`'s rows are built on `beforetoggle` — a closed list keeps whatever it last
+ * rendered, which can predate a mint that happened while it was shut (`buffer-list.ts`'s own doc: "A
+ * closed list has no state to keep fresh"). The *new TM copy* control dismisses the popover before it
+ * mints (`buffer-list.ts`'s own click handler, the one gesture in that menu that still does), so every mint leaves
+ * the list closed on stale rows; reading it without reopening would answer what the list showed BEFORE
+ * the mint, not what it holds now.
+ */
+export const bufferRows = (): HTMLElement[] => {
+  const button = buffersButton()
+  if (button.getAttribute('aria-expanded') !== 'true') button.click()
+  return [...document.querySelectorAll<HTMLElement>('.buffer-list .buffer-row')]
+}
+
+/** What each row READS, which is what §5 requires an assertion about a buffer to be made against. */
+export const rowNames = (): (string | null)[] =>
+  [...document.querySelectorAll<HTMLElement>('.buffer-list .buffer-row-name')].map((e) => e.textContent)
+
+/**
+ * A press with the pointer on the one element `sel` names, which throws where there is none. `vitest/browser` is
+ * imported when it is called, as `chooseSetting` says why.
+ */
+export const press = async (sel: string): Promise<void> => {
+  const el = document.querySelector<HTMLElement>(sel)
+  if (el === null) throw new Error(`nothing to press at ${sel}`)
+  const { userEvent } = await import('vitest/browser')
+  await userEvent.click(el)
+}
+
+/** A `press` on the toggle in `#views-shown` that shows and hides the `kind` views. */
+export const pressShownToggle = (kind: string): Promise<void> => press(`#views-shown button[data-shows="${kind}"]`)
+
+/** The copies menu beside `#buffers`, or `null` where the page has none. */
+export const copiesMenu = (): HTMLElement | null => document.querySelector<HTMLElement>('.buffer-list')
+
+/** Press a control of the copies menu by its name, opening the menu with a press where it is shut. */
+export const inCopiesMenu = async (label: string): Promise<void> => {
+  if (copiesMenu()?.matches(':popover-open') !== true) await press('#buffers')
+  await press(`.buffer-list button[aria-label="${label}"]`)
+}
+
+/** Close the copies menu where it is open. */
+export const shutCopiesMenu = (): void => {
+  if (copiesMenu()?.matches(':popover-open') === true) copiesMenu()?.hidePopover()
+}
+
+/** Delete every copy, which leaves every view on the program. */
+export function deleteEveryCopy(): void {
+  for (let n = 0; n < 16; n += 1) {
+    shutCopiesMenu()
+    document.querySelector<HTMLButtonElement>('#buffers')?.click()
+    const del = document.querySelector<HTMLButtonElement>('.buffer-list button[aria-label^="delete "]')
+    if (del === null) {
+      shutCopiesMenu()
+      return
+    }
+    del.click()
+  }
+  throw new Error('the copies menu still lists a copy after 16 deletes')
+}
+
+/**
+ * Delete every copy, which leaves every view on the program. Unlike `deleteEveryCopy`, it finds and shuts the copies
+ * menu itself rather than through `shutCopiesMenu`.
+ */
+export function deleteEveryCopyInline(): void {
+  const menu = (): HTMLElement | null => document.querySelector<HTMLElement>('.buffer-list')
+  const shut = (): void => {
+    if (menu()?.matches(':popover-open') === true) menu()?.hidePopover()
+  }
+  for (let n = 0; n < 16; n += 1) {
+    shut()
+    document.querySelector<HTMLButtonElement>('#buffers')?.click()
+    const del = document.querySelector<HTMLButtonElement>('.buffer-list button[aria-label^="delete "]')
+    if (del === null) {
+      shut()
+      return
+    }
+    del.click()
+  }
+  throw new Error('the copies menu still lists a copy after 16 deletes')
+}
+
+/** The copies menu's rows, read with the menu opened and shut again. */
+export const copyNames = (): (string | null)[] => {
+  document.querySelector<HTMLButtonElement>('#buffers')?.click()
+  const rows = [...document.querySelectorAll<HTMLElement>('.buffer-list .buffer-row-name')].map((e) => e.textContent)
+  document.querySelector<HTMLElement>('.buffer-list')?.hidePopover()
+  return rows
+}
+
+/** The menu `button` controls, thrown where it controls none. */
+export const menuOf = (button: HTMLButtonElement): HTMLElement => {
+  const menu = document.getElementById(button.getAttribute('aria-controls') ?? '')
+  if (menu === null) throw new Error('the button controls no menu')
+  return menu
+}
+
+/** The menu `button` controls, by its `aria-controls`; unlike `menuOf`, it does not throw where there is none. */
+export const controlledMenu = (button: HTMLElement): HTMLElement =>
+  document.getElementById(button.getAttribute('aria-controls') ?? '') as HTMLElement
+
+/** The button `#id`. */
+export const buttonOf = (id: string) => document.querySelector<HTMLButtonElement>(`#${id}`) as HTMLButtonElement
+
+/** The menu the button `#id` controls, as `controlledMenu` finds it. */
+export const menuOfId = (id: string): HTMLElement => controlledMenu(buttonOf(id))
+
+/** Put the workspace on `preset`, by the menu's own buttons. */
+export const presetOf = (preset: string): void => {
+  buttonOf('workspace').click()
+  menuOfId('workspace').querySelector<HTMLButtonElement>(`[data-preset="${preset}"]`)?.click()
+  if (menuOfId('workspace').matches(':popover-open')) menuOfId('workspace').hidePopover()
+}
+
+/** `pane`'s `⋯` button. */
+export const moreOf = (pane: HTMLElement) =>
+  pane.querySelector<HTMLButtonElement>('button.view-more') as HTMLButtonElement
+
+/**
+ * Open `pane`'s `⋯` menu with the pointer and pick `cls`'s item with it, as a user does. It finds the menu through
+ * `moreOf` and `menuOf`, where `pickInViewMenu` finds it through `viewMenu`, and the two throw differently where there
+ * is none. `vitest/browser` is imported when it is called, as `chooseSetting` says why.
+ */
+export async function pick(pane: HTMLElement, cls: string): Promise<void> {
+  const { userEvent } = await import('vitest/browser')
+  await userEvent.click(moreOf(pane))
+  await until(() => menuOf(moreOf(pane)).matches(':popover-open'), 'the view menu to open')
+  const item = menuOf(moreOf(pane)).querySelector<HTMLButtonElement>(`button.${cls}`)
+  if (item === null) throw new Error(`the menu offers no ${cls}`)
+  await userEvent.click(item)
+}
+
+/** The `⋯` menu of `pane`, thrown where `pane` has no `⋯` or it controls no menu. */
+export const viewMenu = (pane: HTMLElement): HTMLElement => {
+  const more = pane.querySelector<HTMLButtonElement>('button.view-more')
+  const menu = document.getElementById(more?.getAttribute('aria-controls') ?? '')
+  if (more === null || menu === null) throw new Error('no view menu')
+  return menu
+}
+
+/**
+ * Open `pane`'s `⋯` menu with the pointer and pick `cls`'s item with it, as a user does. `vitest/browser` is imported
+ * when it is called, as `chooseSetting` says why.
+ */
+export async function pickInViewMenu(pane: HTMLElement, cls: string): Promise<void> {
+  const { userEvent } = await import('vitest/browser')
+  await userEvent.click(pane.querySelector<HTMLButtonElement>('button.view-more') as HTMLButtonElement)
+  await until(() => viewMenu(pane).matches(':popover-open'), 'the view menu to open')
+  const item = viewMenu(pane).querySelector<HTMLButtonElement>(`button.${cls}`)
+  if (item === null) throw new Error(`the menu offers no ${cls}`)
+  await userEvent.click(item)
 }

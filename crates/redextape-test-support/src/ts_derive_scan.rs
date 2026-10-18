@@ -564,6 +564,41 @@ pub fn without_doc_comments(ts: &str) -> String {
     kept
 }
 
+/// Panics naming the first type in `generated` (a type's name, and the file `export_to_string`
+/// returns for it) whose declaration, outside the JSDoc [`without_doc_comments`] removes, carries
+/// `bigint`.
+pub fn assert_no_generated_type_carries_bigint(generated: &[(&str, String)]) {
+    for (name, ts) in generated {
+        assert!(
+            !without_doc_comments(ts).contains("bigint"),
+            "{name} generates `bigint`. A `u64`/`i64` field crosses this boundary as a JS number, so \
+             it needs an override — `#[cfg_attr(feature = \"ts\", ts(type = \"number\"))]` for a bare \
+             field, or `ts(type = \"number | null\")` for one behind an `Option`, because \
+             `ts(type = ...)` replaces the WHOLE field type rather than the integer inside it. \
+             Generated:\n{ts}"
+        );
+    }
+}
+
+/// Panics unless the names in `generated` are exactly the types [`ts_deriving_type_names_in_crate`]
+/// finds deriving `ts_rs::TS` under `crate_root`, whose gate file is `tests/ts_bindings.rs`: a name
+/// missing from either side is named in the message.
+pub fn assert_generated_covers_every_derive_site(crate_root: &Path, generated: &[(&str, String)]) {
+    let in_src = ts_deriving_type_names_in_crate(crate_root, &crate_root.join("tests").join("ts_bindings.rs"));
+    let in_gate: BTreeSet<String> = generated.iter().map(|(name, _)| name.to_string()).collect();
+
+    let missing_from_gate: Vec<&String> = in_src.difference(&in_gate).collect();
+    let stale_in_gate: Vec<&String> = in_gate.difference(&in_src).collect();
+
+    assert!(
+        missing_from_gate.is_empty() && stale_in_gate.is_empty(),
+        "`generated()` and this crate's `ts_rs::TS` derive sites disagree. Carry the derive but are \
+         missing from `generated()`: {missing_from_gate:?}. Listed in `generated()` but no longer carry \
+         the derive: {stale_in_gate:?}. Add the new type to `generated()`, or remove the stale entry — \
+         or, if the derive was written in some other form, make the two agree."
+    );
+}
+
 /// Refuse any ts-rs field override whose replacement disagrees with whether the Rust field is an
 /// `Option`, in either direction.
 ///
@@ -1063,6 +1098,32 @@ mod tests {
         check_source(Path::new("fixture.rs"), src);
     }
 
+    /// Two `Option<u64>` fields, `A::a` overridden to the TypeScript type `a_type` and `B::b` to
+    /// `b_type`, through `check`.
+    fn check_two_overrides(a_type: &str, b_type: &str) {
+        check(&format!(
+            r#"
+pub struct A {{
+    #[cfg_attr(feature = "ts", ts(type = "{a_type}"))]
+    pub a: Option<u64>,
+}}
+
+pub struct B {{
+    #[cfg_attr(feature = "ts", ts(type = "{b_type}"))]
+    pub b: Option<u64>,
+}}
+"#
+        ));
+    }
+
+    /// The guard run on `src` written to a real `gate.rs` in a fresh scratch directory named `name`.
+    fn guard(name: &str, src: &str) {
+        let dir = crate::ScratchDir::new(name).unwrap();
+        let file = dir.join("gate.rs");
+        std::fs::write(&file, src).unwrap();
+        assert_scanner_file_declares_no_types(&file);
+    }
+
     #[test]
     fn an_option_field_whose_override_keeps_the_null_passes() {
         check(
@@ -1466,19 +1527,7 @@ pub struct TmStatus {
     /// normalise either into the one spelling the old rule accepted.
     #[test]
     fn null_in_any_union_position_or_spacing_is_accepted() {
-        check(
-            r#"
-pub struct A {
-    #[cfg_attr(feature = "ts", ts(type = "null | number"))]
-    pub a: Option<u64>,
-}
-
-pub struct B {
-    #[cfg_attr(feature = "ts", ts(type = "number|null"))]
-    pub b: Option<u64>,
-}
-"#,
-        );
+        check_two_overrides("null | number", "number|null");
     }
 
     /// Still not a search for the bytes `null`: a string-literal type spelled `'null'` is a member
@@ -1686,18 +1735,12 @@ pub struct Handlers {
     #[test]
     #[should_panic(expected = "declares a `struct`")]
     fn the_guard_refuses_a_type_at_any_visibility() {
-        let dir = crate::ScratchDir::new("ts-derive-scan-guard").unwrap();
-        let file = dir.join("gate.rs");
-        std::fs::write(&file, "pub(crate) struct HiddenHere {\n    pub total_steps: Option<u64>,\n}\n").unwrap();
-        assert_scanner_file_declares_no_types(&file);
+        guard("ts-derive-scan-guard", "pub(crate) struct HiddenHere {\n    pub total_steps: Option<u64>,\n}\n");
     }
 
     #[test]
     fn the_guard_accepts_a_gate_file_that_declares_nothing() {
-        let dir = crate::ScratchDir::new("ts-derive-scan-guard-ok").unwrap();
-        let file = dir.join("gate.rs");
-        std::fs::write(&file, "use ts_rs::TS;\n\n#[test]\nfn a_gate() {}\n").unwrap();
-        assert_scanner_file_declares_no_types(&file);
+        guard("ts-derive-scan-guard-ok", "use ts_rs::TS;\n\n#[test]\nfn a_gate() {}\n");
     }
 
     /// CRITICAL REGRESSION, sixth review: replacing the line-prefix guard with a parse traded a
@@ -1707,18 +1750,14 @@ pub struct Handlers {
     #[test]
     #[should_panic(expected = "item-position macro")]
     fn the_guard_refuses_a_type_declared_through_a_macro_body_in_the_same_file() {
-        let dir = crate::ScratchDir::new("ts-derive-scan-guard-macro").unwrap();
-        let file = dir.join("gate.rs");
-        std::fs::write(
-            &file,
+        guard(
+            "ts-derive-scan-guard-macro",
             concat!(
                 "macro_rules! declare_it { ($($t:tt)*) => { $($t)* }; }\n",
                 "declare_it! {\n    pub struct SneakyViaMacro {\n",
                 "        pub total_steps: Option<u64>,\n    }\n}\n",
             ),
-        )
-        .unwrap();
-        assert_scanner_file_declares_no_types(&file);
+        );
     }
 
     /// What removing the skip bought: a bad override on a type declared IN a gate file is now caught
@@ -1757,19 +1796,13 @@ pub fn a_gate() {
     /// Edition 2024 requires `#[unsafe(no_mangle)]`; refusing it named a construct nobody wrote.
     #[test]
     fn the_guard_reads_through_an_unsafe_attribute_wrapper() {
-        let dir = crate::ScratchDir::new("ts-derive-scan-guard-unsafe-attr").unwrap();
-        let file = dir.join("gate.rs");
-        std::fs::write(&file, "#[unsafe(no_mangle)]\npub extern \"C\" fn helper() {}\n").unwrap();
-        assert_scanner_file_declares_no_types(&file);
+        guard("ts-derive-scan-guard-unsafe-attr", "#[unsafe(no_mangle)]\npub extern \"C\" fn helper() {}\n");
     }
 
     #[test]
     #[should_panic(expected = "emit_a_type")]
     fn the_guard_still_refuses_a_proc_macro_inside_an_unsafe_wrapper() {
-        let dir = crate::ScratchDir::new("ts-derive-scan-guard-unsafe-evil").unwrap();
-        let file = dir.join("gate.rs");
-        std::fs::write(&file, "#[unsafe(emit_a_type)]\npub fn helper() {}\n").unwrap();
-        assert_scanner_file_declares_no_types(&file);
+        guard("ts-derive-scan-guard-unsafe-evil", "#[unsafe(emit_a_type)]\npub fn helper() {}\n");
     }
 
     /// **THE LAYER THIS REPLACES WAS DELETED, AND THIS PINS WHY.** A round added checks for macros
@@ -1779,10 +1812,8 @@ pub fn a_gate() {
     /// reaches module scope. A gate file may invoke whatever expression macros it likes.
     #[test]
     fn the_guard_accepts_macros_outside_item_position() {
-        let dir = crate::ScratchDir::new("ts-derive-scan-guard-stmt-macros").unwrap();
-        let file = dir.join("gate.rs");
-        std::fs::write(
-            &file,
+        guard(
+            "ts-derive-scan-guard-stmt-macros",
             concat!(
                 "#![forbid(unsafe_code)]\n\n#[test]\nfn a_gate() {\n",
                 "    let root = env!(\"CARGO_MANIFEST_DIR\");\n",
@@ -1792,9 +1823,7 @@ pub fn a_gate() {
                 "    some_crate::anything! { whatever }\n",
                 "    assert!(!root.is_empty(), \"a struct or enum in prose\");\n}\n",
             ),
-        )
-        .unwrap();
-        assert_scanner_file_declares_no_types(&file);
+        );
     }
 
     /// CRITICAL, ninth review: `syn::Meta` cannot parse the keyword `true`, so parsing a `cfg_attr`'s
@@ -1803,28 +1832,16 @@ pub fn a_gate() {
     #[test]
     #[should_panic(expected = "wasm_bindgen")]
     fn the_guard_reads_a_cfg_attr_with_a_boolean_predicate() {
-        let dir = crate::ScratchDir::new("ts-derive-scan-guard-cfg-true").unwrap();
-        let file = dir.join("gate.rs");
-        std::fs::write(&file, "#[cfg_attr(true, wasm_bindgen::prelude::wasm_bindgen)]\npub fn helper() {}\n").unwrap();
-        assert_scanner_file_declares_no_types(&file);
+        guard(
+            "ts-derive-scan-guard-cfg-true",
+            "#[cfg_attr(true, wasm_bindgen::prelude::wasm_bindgen)]\npub fn helper() {}\n",
+        );
     }
 
     /// A whole union may be parenthesised, and then nothing splits at depth zero.
     #[test]
     fn a_union_parenthesised_as_a_whole_is_still_a_union() {
-        check(
-            r#"
-pub struct A {
-    #[cfg_attr(feature = "ts", ts(type = "(number | null)"))]
-    pub a: Option<u64>,
-}
-
-pub struct B {
-    #[cfg_attr(feature = "ts", ts(type = "number | (null | undefined)"))]
-    pub b: Option<u64>,
-}
-"#,
-        );
+        check_two_overrides("(number | null)", "number | (null | undefined)");
     }
 
     /// One layer of unwrapping let this through; the reasoning applies at every depth.
@@ -1861,20 +1878,17 @@ pub struct TmStatus {
     #[test]
     #[should_panic(expected = "wasm_bindgen")]
     fn the_guard_descends_into_cfg_attr_when_checking_attributes() {
-        let dir = crate::ScratchDir::new("ts-derive-scan-guard-nested-attr").unwrap();
-        let file = dir.join("gate.rs");
-        std::fs::write(&file, "#[cfg_attr(all(), wasm_bindgen::prelude::wasm_bindgen)]\npub fn helper() {}\n").unwrap();
-        assert_scanner_file_declares_no_types(&file);
+        guard(
+            "ts-derive-scan-guard-nested-attr",
+            "#[cfg_attr(all(), wasm_bindgen::prelude::wasm_bindgen)]\npub fn helper() {}\n",
+        );
     }
 
     /// Matching the LAST path segment let `#[tokio::test]` answer to `test`.
     #[test]
     #[should_panic(expected = "tokio::test")]
     fn the_guard_refuses_a_qualified_attribute_whose_tail_is_inert() {
-        let dir = crate::ScratchDir::new("ts-derive-scan-guard-qualified-attr").unwrap();
-        let file = dir.join("gate.rs");
-        std::fs::write(&file, "#[tokio::test]\nfn a_gate() {}\n").unwrap();
-        assert_scanner_file_declares_no_types(&file);
+        guard("ts-derive-scan-guard-qualified-attr", "#[tokio::test]\nfn a_gate() {}\n");
     }
 
     /// `(Option<u64>)` is the same type, and `rustfmt` keeps the parens: a silent pass on the field
@@ -1923,10 +1937,7 @@ pub struct TmStatus {
     #[test]
     #[should_panic(expected = "declares a `mod`")]
     fn the_guard_refuses_a_module_declaration() {
-        let dir = crate::ScratchDir::new("ts-derive-scan-guard-mod").unwrap();
-        let file = dir.join("gate.rs");
-        std::fs::write(&file, "#[path = \"../../sneaky_probe.rs\"]\nmod sneaky_probe;\n").unwrap();
-        assert_scanner_file_declares_no_types(&file);
+        guard("ts-derive-scan-guard-mod", "#[path = \"../../sneaky_probe.rs\"]\nmod sneaky_probe;\n");
     }
 
     /// The same class one step further out: an attribute proc-macro is reported by `syn` as an
@@ -1935,27 +1946,20 @@ pub struct TmStatus {
     #[test]
     #[should_panic(expected = "not on this scan's list")]
     fn the_guard_refuses_an_unknown_item_attribute() {
-        let dir = crate::ScratchDir::new("ts-derive-scan-guard-attr").unwrap();
-        let file = dir.join("gate.rs");
-        std::fs::write(&file, "#[emit_a_type]\nfn helper() {}\n").unwrap();
-        assert_scanner_file_declares_no_types(&file);
+        guard("ts-derive-scan-guard-attr", "#[emit_a_type]\nfn helper() {}\n");
     }
 
     /// The attributes the real gate files carry must NOT trip the whitelist.
     #[test]
     fn the_guard_accepts_the_attributes_a_real_gate_file_uses() {
-        let dir = crate::ScratchDir::new("ts-derive-scan-guard-inert").unwrap();
-        let file = dir.join("gate.rs");
-        std::fs::write(
-            &file,
+        guard(
+            "ts-derive-scan-guard-inert",
             concat!(
                 "#![allow(clippy::pedantic)]\n#![cfg(feature = \"ts\")]\n\n",
                 "/// A doc comment.\n#[test]\nfn a_gate() {\n",
                 "    assert!(true, \"a struct or enum mentioned in prose\");\n}\n",
             ),
-        )
-        .unwrap();
-        assert_scanner_file_declares_no_types(&file);
+        );
     }
 
     /// The route neither a parse NOR a text scan can see: the macro's body lives elsewhere, so the
@@ -1963,20 +1967,14 @@ pub struct TmStatus {
     #[test]
     #[should_panic(expected = "item-position macro")]
     fn the_guard_refuses_an_item_macro_whose_body_lives_elsewhere() {
-        let dir = crate::ScratchDir::new("ts-derive-scan-guard-extern-macro").unwrap();
-        let file = dir.join("gate.rs");
-        std::fs::write(&file, "crate::declare_a_type!();\n").unwrap();
-        assert_scanner_file_declares_no_types(&file);
+        guard("ts-derive-scan-guard-extern-macro", "crate::declare_a_type!();\n");
     }
 
     /// FAIL CLOSED. This used to leave the flag false and re-bless the whole-file skip in silence.
     #[test]
     #[should_panic(expected = "does not parse as Rust")]
     fn the_guard_refuses_a_gate_file_it_cannot_parse() {
-        let dir = crate::ScratchDir::new("ts-derive-scan-guard-unparseable").unwrap();
-        let file = dir.join("gate.rs");
-        std::fs::write(&file, "pub struct Thing { pub a: u64, }\nfn broken( {\n").unwrap();
-        assert_scanner_file_declares_no_types(&file);
+        guard("ts-derive-scan-guard-unparseable", "pub struct Thing { pub a: u64, }\nfn broken( {\n");
     }
 
     /// A TypeScript string-literal type may contain any character. Both of these were `true` before
@@ -1984,19 +1982,7 @@ pub struct TmStatus {
     /// source.
     #[test]
     fn a_quoted_arrow_or_angle_bracket_does_not_end_the_union_scan() {
-        check(
-            r#"
-pub struct A {
-    #[cfg_attr(feature = "ts", ts(type = "'=>' | null"))]
-    pub a: Option<u64>,
-}
-
-pub struct B {
-    #[cfg_attr(feature = "ts", ts(type = "'>' | null"))]
-    pub b: Option<u64>,
-}
-"#,
-        );
+        check_two_overrides("'=>' | null", "'>' | null");
     }
 
     /// A NAMED BOUNDARY, PINNED RATHER THAN CLAIMED CLOSED. `ts-rs-macros`'s `VariantAttr` carries

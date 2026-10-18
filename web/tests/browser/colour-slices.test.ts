@@ -2,6 +2,7 @@ import { EditorView } from '@codemirror/view'
 import { afterAll, describe, expect, it } from 'vitest'
 import { Parser } from 'web-tree-sitter'
 import { classMapFrom, createGrammarRegistry, FIRST_SCREEN_UNITS, treeSitterColour } from '../../src/colour'
+import { machine } from '../node/tm-text-fixture'
 import { until } from './harness'
 
 /**
@@ -51,16 +52,6 @@ afterAll(() => {
   Parser.prototype.parse = parse
 })
 
-/** A one-tape machine of `states` states in the TM text form: three lines to a state, every line a whole item. */
-const machine = (states: number): string => {
-  let out =
-    'tapes 1\nstart s0\nversion 1\nencoding unary\nwidth 8\nslots 1\nresult Nat\ntape 0 #________#\n\nstate halt: accept\n'
-  for (let i = 0; i < states; i++) {
-    const next = i + 1 < states ? `s${i + 1}` : 'halt'
-    out += `state s${i}:\n  [1] -> write [_], move [R], goto ${next}\n  [_] -> write [1], move [L], goto s${i}\n`
-  }
-  return out
-}
 const STATES = 6_000
 const MACHINE = machine(STATES)
 

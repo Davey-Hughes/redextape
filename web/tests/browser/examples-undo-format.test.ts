@@ -3,8 +3,9 @@ import { EditorView } from '@codemirror/view'
 import { beforeAll, describe, expect, it } from 'vitest'
 import { userEvent } from 'vitest/browser'
 import { FORMAT_ON_BLUR_KEY } from '../../src/editor-prefs'
-import { EXAMPLE_ENCODING, EXAMPLES, type Example } from '../../src/examples'
-import { SHELL, until } from './harness'
+import { EXAMPLE_ENCODING } from '../../src/examples'
+import { example } from './examples-fixture'
+import { examplesButton, picker, SHELL, stateIdle, undoButton, until } from './harness'
 
 /**
  * **A PICK'S UNDO OUTLIVES A FORMAT ON BLUR THAT CHANGES NOTHING** — Plan 7 part 6a spec §4.5. The undo is withdrawn
@@ -17,13 +18,8 @@ import { SHELL, until } from './harness'
 
 localStorage.setItem(FORMAT_ON_BLUR_KEY, 'true')
 
-const example = (id: string): Example => EXAMPLES.find((e) => e.id === id) as Example
-const button = () => document.querySelector<HTMLButtonElement>('#examples') as HTMLButtonElement
 const item = (id: string) =>
   document.querySelector<HTMLButtonElement>(`#examples-menu button[data-example="${id}"]`) as HTMLButtonElement
-const picker = () => document.querySelector<HTMLSelectElement>('#encoding') as HTMLSelectElement
-const undoButton = () => document.querySelector<HTMLButtonElement>('#notice button.notice-action')
-const idle = () => document.querySelector<HTMLElement>('#results')?.dataset.state === 'idle'
 
 let view: EditorView
 
@@ -33,7 +29,7 @@ let unchangedPasses = 0
 beforeAll(async () => {
   document.body.innerHTML = SHELL
   view = await (await import('../../src/main')).ready
-  await until(idle, 'the first compile')
+  await until(stateIdle, 'the first compile')
   view.dispatch({
     effects: StateEffect.appendConfig.of(
       EditorView.updateListener.of((u) => {
@@ -57,7 +53,7 @@ describe('a pick, with format on blur', () => {
     expect(picker().value, 'precondition: the page is on unary').toBe('unary')
     expect(EXAMPLE_ENCODING, 'precondition: a pick sets another encoding').not.toBe('unary')
 
-    await userEvent.click(button())
+    await userEvent.click(examplesButton())
     await userEvent.click(item('sum-to'))
     expect(view.state.doc.toString()).toBe(example('sum-to').text)
     await userEvent.click(view.contentDOM)
@@ -86,10 +82,10 @@ describe('a pick, with format on blur', () => {
     // ON `unary` WHATEVER THE CASE ABOVE LEFT, so this case fails for its own undo and not for that one's.
     if (picker().value !== 'unary') await userEvent.selectOptions(picker(), 'unary')
     view.dispatch({ changes: { from: 0, to: view.state.doc.length, insert: formatted } })
-    await until(idle, 'the formatted program’s compile')
+    await until(stateIdle, 'the formatted program’s compile')
     expect(picker().value, 'precondition: the page is on unary').toBe('unary')
 
-    await userEvent.click(button())
+    await userEvent.click(examplesButton())
     await userEvent.click(item('fact'))
     expect(view.state.doc.toString()).toBe(example('fact').text)
     await userEvent.click(view.contentDOM)

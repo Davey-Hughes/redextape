@@ -1,4 +1,5 @@
-import type { AsmProgram, AsmState } from '../../src/types'
+import type { AsmLeg } from '../../src/protocol'
+import type { AsmProgram, AsmState, AsmStatus, AsmWord } from '../../src/types'
 
 /**
  * `fact(3)`'s asm listing and labels, as `redextape --no-config emit fact.rxt --lang asm` prints them for
@@ -68,3 +69,18 @@ export function frameOf(over: Partial<AsmState> = {}): AsmState {
     boxes,
   }
 }
+
+/** An `AsmWord` holding `word`, tagged `Value`. */
+export const valueWord = (word: string): AsmWord => ({ word, tag: 'Value' })
+
+/** An `AsmWord` holding `word`, tagged `List`. */
+export const listWord = (word: string): AsmWord => ({ word, tag: 'List' })
+
+/** An `AsmWord` holding `word`, tagged `Box`. */
+export const boxWord = (word: string): AsmWord => ({ word, tag: 'Box' })
+
+/** An available asm leg whose run is `run`, at 55 steps with no cap, reading the value `42`. */
+export const asmSnapshot = (run: AsmStatus['run']): AsmLeg => ({
+  status: { available: true, reason: '', run, cap: null, total_steps: 55 },
+  value: { Value: { text: '42' } },
+})

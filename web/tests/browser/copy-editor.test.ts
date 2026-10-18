@@ -1,7 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { CopyEditor } from '../../src/copy-editor'
-import type { PaneEvents } from '../../src/pane-chrome'
 import type { CopyState } from '../../src/view-header'
+import { paneEvents } from './harness'
 
 /**
  * `CopyEditor`, the copy-editing part the TM and asm views share, built on its own for behaviours no view's test
@@ -18,19 +18,6 @@ import type { CopyState } from '../../src/view-header'
  * right (disabled with the function reason, not absent, regardless of `count`) is asked directly here too, through
  * `setForkAvailable` rather than a live compile.
  */
-const events = (): PaneEvents => ({
-  back: vi.fn(),
-  forward: vi.fn(),
-  toNewest: vi.fn(),
-  play: vi.fn(),
-  restart: vi.fn(),
-  extend: vi.fn(),
-  speed: () => 8,
-  setSpeed: vi.fn(),
-  rebind: vi.fn(),
-  editSink: () => vi.fn(),
-  collapse: vi.fn(),
-})
 
 /** A part in the page, with a menu that records what it was told and an unmount hook that counts. */
 function build(): {
@@ -44,7 +31,7 @@ function build(): {
   const claimable: boolean[] = []
   const copyState: CopyState[] = []
   const onUnmount = vi.fn()
-  const copy = new CopyEditor(events(), {
+  const copy = new CopyEditor(paneEvents(), {
     menu: {
       setFormattable: (f) => formattable.push(f),
       setCopy: (s) => copyState.push(s),

@@ -3,7 +3,19 @@ import { beforeAll, describe, expect, it } from 'vitest'
 import { userEvent } from 'vitest/browser'
 import { STORAGE_KEY } from '../../src/appearance'
 import { OVERSCAN, ROW_HEIGHT } from '../../src/tm-pane'
-import { SHELL, until } from './harness'
+import {
+  frames,
+  idle,
+  linkAt,
+  linkedSource,
+  linkStatus,
+  resultsText,
+  retype,
+  SHELL,
+  stateIdle,
+  tick,
+  until,
+} from './harness'
 import { lambdaSettled } from './lambda-text'
 
 const LAMBDA_DECLINES = 'let mut n = 1; fn apply0(g) { g(0) } let f = |x| x + n; n = 10; apply0(f)'
@@ -21,40 +33,8 @@ fold([3, 1, 2].map(add1), 0, add)`
 
 let view: EditorView
 
-const resultsText = () => document.querySelector('#results')?.textContent ?? ''
-const linkStatusText = () => document.querySelector('#link-status')?.textContent ?? ''
-/** The text of whichever source construct is currently marked `.linked`, or `''` if none is. */
-const linkedSource = () => document.querySelector('.cm-editor .linked')?.textContent ?? ''
 /** How many δ-table rows are currently painted `.is-linked`. Zero is a real answer, not an absence. */
 const linkedRowCount = () => document.querySelectorAll('[data-leaf="tm-0"] .state-row.is-linked').length
-
-/**
- * Yield to the event loop once.
- *
- * NOT `until(() => true)`, WHICH WAITS FOR NOTHING. `until` evaluates its predicate before its first
- * sleep, so a predicate that is already true returns synchronously — an `await` on it is a no-op that
- * reads like a wait. Places below that need the DOM to settle after a synchronous click use this;
- * places that need a specific condition use `until` with that condition instead.
- */
-const tick = () => new Promise((r) => setTimeout(r, 0))
-
-/**
- * Link the source construct at `pos` (a UTF-16 doc position), via the keyboard route `main.ts` binds
- * to `Mod-'` rather than synthesizing a `mouseup` at a computed pixel — real Chromium under Playwright
- * would make that work too, but the keyboard path resolves against the caret alone and needs no
- * `posAtCoords` layout to line up. `Mod` is `Ctrl` on this platform (`@codemirror/view`'s
- * `normalizeKeyName`: `mac ? meta : ctrl`), and the sample fixtures are ASCII, so a UTF-16 position and
- * a byte offset coincide here — the conversion `main.ts` itself does is not what this test is for.
- */
-function linkAt(v: EditorView, pos: number): void {
-  v.dispatch({ selection: { anchor: pos } })
-  v.contentDOM.dispatchEvent(new KeyboardEvent('keydown', { key: "'", ctrlKey: true, cancelable: true }))
-}
-
-/** Replace the whole buffer, exactly as a user retyping it would. */
-function retype(src: string): void {
-  view.dispatch({ changes: { from: 0, to: view.state.doc.length, insert: src } })
-}
 
 /** About half of `BIG`'s TM recording, which stops with its history full at step 78,458. */
 const TM_HALF = 39_000
@@ -80,7 +60,6 @@ const TM_HALF = 39_000
  * previous program, and the third holds that the line the second wait counts is this run's.
  */
 async function settled(v: EditorView, src: string): Promise<void> {
-  const done = () => document.querySelector<HTMLElement>('#results')?.dataset.state === 'idle' && resultsText() !== ''
   const tmStep = () => document.querySelector('[data-leaf="tm-0"] .step')?.textContent ?? ''
   const tmRecorded = () => Number(/of ([\d,]+)/.exec(tmStep())?.[1]?.replaceAll(',', '') ?? 0)
   v.dispatch({ changes: { from: 0, to: v.state.doc.length, insert: src } })
@@ -88,10 +67,10 @@ async function settled(v: EditorView, src: string): Promise<void> {
     'running',
   )
   expect(tmStep(), 'precondition: no TM recording under way before the compile').not.toContain('…')
-  await until(() => tmStep().includes('…') || done(), 'the TM leg to start recording, or the run to end')
+  await until(() => tmStep().includes('…') || idle(), 'the TM leg to start recording, or the run to end')
   expect(tmStep(), 'precondition: the TM leg is past the recompile').not.toContain('— recompiling')
-  await until(() => tmRecorded() >= TM_HALF || done(), 'the TM leg to be half way to a full history, or the run to end')
-  await until(done, 'the run to end')
+  await until(() => tmRecorded() >= TM_HALF || idle(), 'the TM leg to be half way to a full history, or the run to end')
+  await until(idle, 'the run to end')
 }
 
 /**
@@ -131,7 +110,7 @@ describe('the app, end to end', () => {
    * this test has always been about.
    */
   it('colours keywords once the grammar lands, and reports all three legs', async () => {
-    retype('let x = 40; x + 2')
+    retype(view, 'let x = 40; x + 2')
 
     await until(() => document.querySelector('.tok-keyword') !== null, 'the source editor to colour `let`')
     expect(document.querySelector('.tok-keyword')?.textContent).toBe('let')
@@ -167,7 +146,7 @@ describe('the app, end to end', () => {
   })
 
   it('lints a broken program and says it did not compile', async () => {
-    retype('let x = ;')
+    retype(view, 'let x = ;')
     await until(() => resultsText().includes('not compiled'))
     // **THE WAIT IS THE ASSERTION, AND THIS LINE USED TO RESTATE THE WAIT'S OWN PREDICATE.** It read
     // `expect(resultsText()).toContain('not compiled')` directly under a wait for that same substring, so
@@ -209,7 +188,7 @@ describe('the app, end to end', () => {
     // was never set, and one that only checked the appearance would pass against a mark that never
     // clears — the worker sends `declinedSpan: null` for an available λ leg, but nothing here proved
     // `main.ts` ever dispatches it.
-    retype(LAMBDA_DECLINES)
+    retype(view, LAMBDA_DECLINES)
     await until(() => document.querySelectorAll('.decline').length > 0)
 
     // NOT A FULL `retype` HERE. `declineMark`'s own `update` maps the decoration through any change via
@@ -246,7 +225,7 @@ describe('the app, end to end', () => {
     expect(resultsText()).not.toContain('declined')
 
     // Leave the buffer as the other tests found it, in case one is ever added after this.
-    retype('let x = 40; x + 2')
+    retype(view, 'let x = 40; x + 2')
     await until(() => resultsText().includes('reductions'))
   })
 
@@ -284,7 +263,7 @@ describe('the app, end to end', () => {
     // a compile. Restore a real encoding first — the picker itself is not what this branch is about.
     picker.value = 'unary'
     bogus.remove()
-    retype('let x = 40; x + 2')
+    retype(view, 'let x = 40; x + 2')
     await until(() => resultsText().includes('reductions'))
     expect(resultsText()).toContain('7 reductions')
   })
@@ -316,7 +295,7 @@ describe('the app, end to end', () => {
     // The recompile itself, NOT a document edit — `settled` dispatches a change to the buffer, which
     // would trigger the very `docChanged` clear this test exists to bypass and prove nothing. Wait on
     // the same idle signal `settled` uses instead.
-    await until(() => document.querySelector<HTMLElement>('#results')?.dataset.state === 'idle')
+    await until(stateIdle)
 
     expect(document.querySelector('.cm-editor .linked')).toBeNull()
 
@@ -334,10 +313,10 @@ describe('the app, end to end', () => {
   it('reports the absence when a construct emits no instructions or machine states', async () => {
     await settled(view, BIG)
     linkAt(view, 0)
-    await until(() => linkStatusText() !== '')
+    await until(() => linkStatus() !== '')
     // A construct the machine bills no state to is one the asm lowering bills no instruction to — the machine is built
     // from those instructions — and the line says both in one clause (Plan 7 part 5).
-    expect(linkStatusText()).toContain('no instructions or machine states')
+    expect(linkStatus()).toContain('no instructions or machine states')
     // No block can light for a construct that owns none.
     expect(linkedRowCount()).toBe(0)
 
@@ -662,8 +641,8 @@ describe('the app, end to end', () => {
     it('reports the declined state when linking a construct under a λ-declining program', async () => {
       await settled(view, LAMBDA_DECLINES)
       linkAt(view, 0)
-      await until(() => linkStatusText() !== '')
-      expect(linkStatusText()).toContain('this program has no λ lowering, so no construct has a λ link')
+      await until(() => linkStatus() !== '')
+      expect(linkStatus()).toContain('this program has no λ lowering, so no construct has a λ link')
 
       await settled(view, 'let x = 40; x + 2')
     })
@@ -793,14 +772,14 @@ describe('the app, end to end', () => {
       await lambdaSettled()
       linkAt(view, 'let x = 40; x + 2'.indexOf('+'))
       await until(() => document.querySelector('[data-leaf="lambda-0"] .term .is-linked') !== null, 'x + 2 at step 1')
-      expect(linkStatusText()).not.toContain('no node in the λ term')
+      expect(linkStatus()).not.toContain('no node in the λ term')
 
       // THE FRONTIER IS THE NORMAL FORM — the chip `42` — and nothing the source wrote survives into it.
       for (let s = 1; s < 7; s += 1) click('lambda', '▶')
       expect(stepText('lambda')).toContain('step 7')
       await lambdaSettled()
       expect(document.querySelector('[data-leaf="lambda-0"] .term .is-linked')).toBeNull()
-      expect(linkStatusText()).toContain('this construct has no node in the λ term at this step')
+      expect(linkStatus()).toContain('this construct has no node in the λ term at this step')
     })
 
     // FIX 2's PRIMARY-DIRECTION PROOF: design decision 3's "source -> both", the primary direction of
@@ -882,7 +861,7 @@ describe('the app, end to end', () => {
 
       view.dispatch({ changes: { from: view.state.doc.length, insert: ' ' } })
       expect(linkedSource()).toBe('')
-      expect(linkStatusText()).toContain('resumes')
+      expect(linkStatus()).toContain('resumes')
       // THE FIX: before it, both of these still held their PREVIOUS values here.
       expect(document.querySelector('.term .is-linked')).toBeNull()
       expect(linkedRowCount()).toBe(0)
@@ -920,7 +899,6 @@ describe('the app, end to end', () => {
     // A NEW PIN SCROLLS THE λ VIEW ONCE, TO THE PIN'S FIRST NODE — WHEN THE PIN CAME FROM ANOTHER VIEW. At
     // step 1, with the `40` chip opened, the numeral is a column of `(f` rows taller than the view, and
     // `x + 2`'s node is the root application: its first row is row 0 and its closing parens end the numeral.
-    const frames = () => new Promise<void>((r) => requestAnimationFrame(() => requestAnimationFrame(() => r())))
     /** Whether row `line` of the λ view is drawn inside the view's visible box. */
     const rowShown = (term: HTMLElement, line: number): boolean => {
       const row = term.querySelector<HTMLElement>(`.term-line[data-line="${line}"]`)

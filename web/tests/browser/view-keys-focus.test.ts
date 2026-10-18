@@ -1,7 +1,21 @@
 import { EditorView } from '@codemirror/view'
 import { afterEach, beforeAll, describe, expect, it } from 'vitest'
 import { page, userEvent } from 'vitest/browser'
-import { focusInPage, SHELL, until } from './harness'
+import {
+  armed,
+  focusInPage,
+  holdsFocus,
+  host,
+  mounted,
+  notice,
+  SHELL,
+  stageTab,
+  stateIdle,
+  toggle,
+  until,
+  viewOfFocus,
+} from './harness'
+import { viewKey } from './user-event-fixture'
 
 /**
  * WHERE THE FOCUS IS AFTER A VIEW KEY — the view layouts spec §4.5 step 5: a switch leaves the keyboard focus where it
@@ -15,44 +29,12 @@ import { focusInPage, SHELL, until } from './harness'
  * which `start` puts back and asserts. So the source view is the focused view when a case begins.
  */
 
-const PREFIX = '{Control>}.{/Control}'
 const SOURCE = 'let x = 40;\nx + 2'
 
 let view: EditorView
 
-const armed = (): boolean => !(document.querySelector('#view-keys') as HTMLElement).hidden
-const notice = (): string => (document.querySelector('#notice .notice-text')?.textContent ?? '').trim()
-const mounted = (): string[] =>
-  [...document.querySelectorAll<HTMLElement>('#views [data-leaf]')]
-    .filter((el) => el.getAttribute('role') !== 'tab')
-    .map((el) => el.dataset.leaf as string)
-const host = (leaf: string): HTMLElement =>
-  document.querySelector(`#views [data-leaf="${leaf}"]:not([role="tab"])`) as HTMLElement
-const idle = (): boolean => document.querySelector<HTMLElement>('#results')?.dataset.state === 'idle'
-/** The view the focus is in, by its leaf; none for a focus on a tab, a divider, the header or `<body>`. */
-const viewOfFocus = (): string | undefined =>
-  document.activeElement?.closest<HTMLElement>('#views [data-leaf]:not([role="tab"])')?.dataset.leaf
-const toggle = (kind: string): HTMLButtonElement =>
-  document.querySelector(`#views-shown button[data-shows="${kind}"]`) as HTMLButtonElement
 /** Whether the header's `views` group is hidden, as `main.ts` hides it in a narrow window. */
 const togglesHidden = (): boolean => (document.querySelector('#views-shown') as HTMLElement).hidden === true
-/** Two frames: the one the page draws next, and one more, by which a control that cannot hold the focus has lost it. */
-const frames = (): Promise<void> => new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(() => r())))
-
-/** The prefix and then `key`, with the mode asserted armed between them. */
-async function viewKey(key: string): Promise<void> {
-  await userEvent.keyboard(PREFIX)
-  expect(armed(), 'the prefix did not arm the mode').toBe(true)
-  await userEvent.keyboard(key)
-  expect(armed()).toBe(false)
-}
-
-/** `el` has the focus now, and still has it two frames on. */
-async function holdsFocus(el: HTMLElement, what: string): Promise<void> {
-  expect(document.activeElement, `${what}, at once`).toBe(el)
-  await frames()
-  expect(document.activeElement, `${what}, two frames on`).toBe(el)
-}
 
 /** Choose a preset in the workspace menu, as a user does. */
 async function preset(name: 'explorer' | 'stage'): Promise<void> {
@@ -79,7 +61,10 @@ describe('the focus after a view key', () => {
     document.body.innerHTML = SHELL
     view = await (await import('../../src/main')).ready
     view.dispatch({ changes: { from: 0, to: view.state.doc.length, insert: SOURCE } })
-    await until(() => idle() && (document.querySelector('#results')?.textContent ?? '').includes('λ 42'), 'the compile')
+    await until(
+      () => stateIdle() && (document.querySelector('#results')?.textContent ?? '').includes('λ 42'),
+      'the compile',
+    )
   })
 
   afterEach(async () => {
@@ -260,8 +245,6 @@ describe('the focus after a view key', () => {
       [...document.querySelectorAll<HTMLElement>('#views [role="tab"]')].map(
         (t) => `${t.dataset.leaf}${t.getAttribute('aria-selected') === 'true' ? ', selected' : ''}`,
       )
-    const tab = (leaf: string): HTMLElement =>
-      document.querySelector(`#views [role="tab"][data-leaf="${leaf}"]`) as HTMLElement
 
     /** Stage, with the source view the one on the page: it was the focused view when the preset was chosen. */
     async function stage(): Promise<void> {
@@ -278,32 +261,32 @@ describe('the focus after a view key', () => {
 
     it('stays on the selected tab', async () => {
       await stage()
-      const old = tab('source')
+      const old = stageTab('source')
       old.focus()
       await viewKey('4')
       expect(tabs(), 'the key did not take the TM view’s tab away').toEqual(['source, selected', 'lambda-0', 'asm-0'])
       expect(old.isConnected, 'precondition: the tab was built again').toBe(false)
-      await holdsFocus(tab('source'), 'the focus is not on the tab built in its place')
+      await holdsFocus(stageTab('source'), 'the focus is not on the tab built in its place')
     })
 
     it('stays on a tab reached with an arrow and not selected', async () => {
       await stage()
-      tab('source').focus()
+      stageTab('source').focus()
       await userEvent.keyboard('{ArrowRight}')
       expect(document.activeElement, 'precondition: the arrow moved the focus to the λ view’s tab').toBe(
-        tab('lambda-0'),
+        stageTab('lambda-0'),
       )
       await viewKey('4')
       expect(tabs()).toEqual(['source, selected', 'lambda-0', 'asm-0'])
-      await holdsFocus(tab('lambda-0'), 'the focus is not on the λ view’s tab')
+      await holdsFocus(stageTab('lambda-0'), 'the focus is not on the λ view’s tab')
       expect(mounted(), 'the key selected a tab').toEqual(['source'])
     })
 
     it('goes to the view on the page from the tab of the view the key hides', async () => {
       await stage()
-      tab('source').focus()
+      stageTab('source').focus()
       await userEvent.keyboard('{End}')
-      expect(document.activeElement, 'precondition: End moved the focus to the TM view’s tab').toBe(tab('tm-0'))
+      expect(document.activeElement, 'precondition: End moved the focus to the TM view’s tab').toBe(stageTab('tm-0'))
       await viewKey('4')
       expect(tabs()).toEqual(['source, selected', 'lambda-0', 'asm-0'])
       expect(document.activeElement, 'the focus fell to <body>').not.toBe(document.body)
@@ -333,13 +316,15 @@ describe('the focus after a view key', () => {
       ['a machine copy', 'tm-0', '.cm-editor', '4'],
     ])('stays in the editor of %s with its caret, and leaves with its view', async (_what, leaf, editor, own) => {
       await start()
-      const more = host(leaf).querySelector('button.view-more') as HTMLElement
+      const more = (host(leaf) as HTMLElement).querySelector('button.view-more') as HTMLElement
       await userEvent.click(more)
       const menu = document.getElementById(more.getAttribute('aria-controls') ?? '') as HTMLElement
       await until(() => menu.matches(':popover-open'), 'the view’s menu')
       await userEvent.click(menu.querySelector('button.detach') as HTMLElement)
-      await until(() => host(leaf).querySelector(editor) !== null, 'the copy’s editor')
-      const copy = EditorView.findFromDOM(host(leaf).querySelector(editor) as HTMLElement) as EditorView
+      await until(() => (host(leaf) as HTMLElement).querySelector(editor) !== null, 'the copy’s editor')
+      const copy = EditorView.findFromDOM(
+        (host(leaf) as HTMLElement).querySelector(editor) as HTMLElement,
+      ) as EditorView
       const text = copy.state.doc.toString()
       expect(text.length, 'precondition: the copy has text to put a caret in').toBeGreaterThan(5)
       copy.focus()
@@ -360,7 +345,7 @@ describe('the focus after a view key', () => {
       expect(viewOfFocus(), 'the focus is not in the focused view').toBe(mounted().find((l) => l !== 'source'))
       await viewKey(own)
       expect(mounted()).toEqual(['source', 'lambda-0', 'asm-0', 'tm-0'])
-      const back = EditorView.findFromDOM(host(leaf).querySelector(editor) as HTMLElement)
+      const back = EditorView.findFromDOM((host(leaf) as HTMLElement).querySelector(editor) as HTMLElement)
       expect(back?.state.doc.toString(), 'the copy’s editor did not come back with its text').toBe(text)
     })
   })

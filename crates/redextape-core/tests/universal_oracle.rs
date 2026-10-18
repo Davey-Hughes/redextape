@@ -21,7 +21,7 @@ use redextape_core::tm::universal::{GuestStatus, STATE, TABLE, decode_guest, enc
 use redextape_core::tm::{EncodingKind, TM_DEFAULT_CAPS, TmRun, decode_tape_ty, run_tm_described, run_tm_described_at};
 
 mod common;
-use common::{acyclic_machine, core_and_ty, run_with_origins};
+use common::{acyclic_machine, core_and_ty, one_rule_machine, run_with_origins};
 
 /// The slow tier's caps: enough steps for its largest row, `sum(5)` under unary, which the UTM runs in
 /// 7,315,621,686; the cells cap stays the default's, far above the 204,401 cells the largest row uses. The fast
@@ -171,15 +171,8 @@ fn one_tape_guests_agree() {
     let tapes = assert_utm_agrees("two cells left", &left, &[vec!['x']], DEFAULT_CAPS);
     assert_eq!(tapes[0].origin, 2, "the fixture must reach cell -2");
 
-    let stuck = Machine {
-        tapes: 1,
-        start: 0,
-        states: vec![State {
-            name: "skip-a".into(),
-            accept: false,
-            rules: vec![Rule { read: vec![Some('a')], write: vec![None], moves: vec![Move::R], next: 0 }],
-        }],
-    };
+    let stuck =
+        one_rule_machine("skip-a", Rule { read: vec![Some('a')], write: vec![None], moves: vec![Move::R], next: 0 });
     let tapes = assert_utm_agrees("stuck on b", &stuck, &[vec!['a', 'a', 'b']], DEFAULT_CAPS);
     assert_eq!(tapes[0].head, 2, "stuck on the `b`");
 }

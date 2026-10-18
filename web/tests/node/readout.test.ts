@@ -14,16 +14,14 @@ import {
   tmCopyRow,
   tmCopySegments,
 } from '../../src/readout'
+import { asmSnapshot } from './asm-fixtures'
 
 const LAMBDA = {
   status: { available: true, reason: '', run: 'Ended' as const, node: null },
   state: { text: '42', step: 7, cut: null, owner: 'None' as const },
   value: { Value: { text: '42' } },
 }
-const ASM = {
-  status: { available: true, reason: '', run: 'Ended' as const, cap: null, total_steps: 55 },
-  value: { Value: { text: '42' } },
-}
+const ASM = asmSnapshot('Ended')
 const TM = {
   status: { available: true, reason: '', width: 8, total_steps: 2870, run: 'Halted' as const, node: null },
   value: { Value: { text: '42' } },

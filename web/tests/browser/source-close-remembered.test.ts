@@ -1,8 +1,8 @@
 import { beforeAll, describe, expect, it } from 'vitest'
-import { page, userEvent } from 'vitest/browser'
+import { userEvent } from 'vitest/browser'
 import { LAYOUT_STORAGE_KEY } from '../../src/layout'
 import { parseWorkspace, type Workspace } from '../../src/workspace'
-import { drawn, SHELL, until } from './harness'
+import { drawn, mountAt, sourcePane, toggle } from './harness'
 
 /**
  * THE SOURCE VIEW'S OWN `✕` IS A WRITE OF THE TREE LIKE ANY OTHER — the view layouts spec §4.3: it goes through
@@ -22,10 +22,6 @@ import { drawn, SHELL, until } from './harness'
 // BEFORE THE MOUNT, AT MODULE SCOPE: `main()` reads storage once, when it is imported below.
 localStorage.removeItem(LAYOUT_STORAGE_KEY)
 
-const host = (leaf: string): HTMLElement =>
-  document.querySelector<HTMLElement>(`#views [data-leaf="${leaf}"]:not([role="tab"])`) as HTMLElement
-const toggle = (kind: string): HTMLButtonElement =>
-  document.querySelector(`#views-shown button[data-shows="${kind}"]`) as HTMLButtonElement
 /** The stored workspace, parsed as a load would parse it: a throw where the loader would refuse it. */
 const stored = (when: string): Workspace => {
   const ws = parseWorkspace(localStorage.getItem(LAYOUT_STORAGE_KEY))
@@ -37,10 +33,7 @@ const remembered = (when: string): string[] => Object.keys(stored(when).arrangem
 
 describe('the source view’s own ✕', () => {
   beforeAll(async () => {
-    await page.viewport(1280, 896)
-    document.body.innerHTML = SHELL
-    await (await import('../../src/main')).ready
-    await until(() => document.querySelector<HTMLElement>('#results')?.dataset.state === 'idle', 'the first compile')
+    await mountAt(1280, 896)
     expect(drawn(), 'precondition: the page opened on the first load’s views').toBe('row[50](source tm-0)')
   })
 
@@ -64,7 +57,7 @@ describe('the source view’s own ✕', () => {
     expect(remembered('precondition')).toEqual(['lambda+tm', 'source+tm'])
     const tree = stored('before the ✕').tree
 
-    await userEvent.click(host('source').querySelector('button.view-close') as HTMLElement)
+    await userEvent.click(sourcePane().querySelector('button.view-close') as HTMLElement)
     expect(drawn()).toBe('row[50](tm-0 pane-1)')
     const after = stored('after the ✕')
     expect(Object.keys(after.arrangements).sort(), 'the ✕ did not go through enter').toEqual([

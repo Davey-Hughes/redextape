@@ -7,11 +7,12 @@ import type { LeafId } from '../../src/panes'
 import { PaneCollection } from '../../src/panes'
 import type { ScratchEditorConfig } from '../../src/scratch-editor'
 import { ScratchEditor } from '../../src/scratch-editor'
-import type { ClientPort, SessionId } from '../../src/session-client'
-import { SessionClient } from '../../src/session-client'
+import type { SessionId } from '../../src/session-client'
 import type { LegState, SessionEntry } from '../../src/sessions'
 import { PaneSlot, SessionRegistry } from '../../src/sessions'
 import type { LambdaState } from '../../src/types'
+import { fakeClient } from '../node/session-fixtures'
+import { typeIn } from './editor-view-fixture'
 
 /**
  * **`reconcileEditors`' THREE UNCOVERED ARMS, DRIVEN AGAINST THE REAL CUSTODY OBJECT — the debt 5d-ii-c
@@ -44,12 +45,6 @@ const S: SessionId = 'scratch-1'
 const OTHER: SessionId = 'scratch-2'
 /** A leaf with no pane in the collection — what a claim points at after the pane that made it closed. */
 const GHOST: LeafId = 'pane-gone'
-
-/** A `ClientPort` with no thread behind it — `view-title.test.ts`'s helper, and its reason. */
-function fakeClient(): SessionClient {
-  const port: ClientPort = { postMessage: () => undefined, addEventListener: () => undefined }
-  return new SessionClient(port, () => undefined)
-}
 
 /**
  * A λ-only session. Custody reads nothing but `sessions.has`, so the legs are the minimum a
@@ -167,7 +162,7 @@ function makeEditor(initial: string, onEdit: (src: string) => void = () => undef
   return new ScratchEditor({ host, initial, debounceMs: 20, onEdit })
 }
 
-/** A real keystroke — `scratch-editor.test.ts`'s `retype`, and its reason: `setText` is the seed path. */
+/** A real keystroke — `editor-view-fixture.ts`'s `typeIn`, and its reason: `setText` is the seed path. */
 function retype(editor: ScratchEditor, text: string): void {
   const view = EditorView.findFromDOM(editor.dom)
   if (view === null) throw new Error('no CodeMirror view under the editor dom')
@@ -496,12 +491,6 @@ describe('receiveEditor: where a moved editor sends its edits', () => {
  * editor would leave its edit to a timer this test never waits for.
  */
 describe('flush: a copy’s pending edit, sent wherever its editor is', () => {
-  const typeIn = (host: HTMLElement, text: string): void => {
-    const view = EditorView.findFromDOM(host)
-    if (view === null) throw new Error('no CodeMirror view in the pane')
-    view.dispatch({ changes: { from: 0, to: view.state.doc.length, insert: text } })
-  }
-
   it('sends the pending edit of an editor waiting in custody', () => {
     sessions.add(lambdaSession(S))
     const heard: string[] = []
@@ -523,8 +512,8 @@ describe('flush: a copy’s pending edit, sent wherever its editor is', () => {
     const theirs = addPane('pane-2', OTHER, undefined, record)
     mine.pane.setEditor('\\x. x')
     theirs.pane.setEditor('\\y. y')
-    typeIn(mine.host, '\\a. a')
-    typeIn(theirs.host, '\\b. b')
+    typeIn(mine.host, '\\a. a', 'no CodeMirror view in the pane')
+    typeIn(theirs.host, '\\b. b', 'no CodeMirror view in the pane')
 
     custody.flush(S)
 

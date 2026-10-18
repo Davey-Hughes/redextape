@@ -1,10 +1,11 @@
 import { beforeAll, describe, expect, it } from 'vitest'
 import { page, userEvent } from 'vitest/browser'
 import { treeKey } from '../../src/arrangements'
-import { BUFFERS_STORAGE_KEY, parseBuffers, serializeBuffers } from '../../src/buffers-store'
+import { BUFFERS_STORAGE_KEY, serializeBuffers } from '../../src/buffers-store'
 import { LAYOUT_STORAGE_KEY, type LayoutNode } from '../../src/layout'
 import { serializeWorkspace } from '../../src/workspace'
-import { fourViews, fourViewWorkspace, SHELL, until } from './harness'
+import { storedBuffers } from './copy-text-fixture'
+import { fourViews, fourViewWorkspace, mounted, rowNames, SHELL, stateIdle, titleText, until } from './harness'
 
 /**
  * A RELOAD WHILE A PARKED VIEW SHOWS A COPY — the view layouts spec §5.2: the view comes back on the program, and the
@@ -58,35 +59,24 @@ const SEEDED_WORKSPACE = serializeWorkspace({
   arrangements: { [treeKey(fourViews())]: fourViews() },
 })
 
-const leaf = (id: string): HTMLElement | null =>
-  document.querySelector<HTMLElement>(`#views [data-leaf="${id}"]:not([role="tab"])`)
-const titleText = (id: string): string => leaf(id)?.querySelector('.view-title')?.textContent ?? ''
-const mounted = (): string[] =>
-  [...document.querySelectorAll<HTMLElement>('#views [data-leaf]')]
-    .filter((el) => el.getAttribute('role') !== 'tab')
-    .map((el) => el.dataset.leaf as string)
-const stored = () => parseBuffers(localStorage.getItem(BUFFERS_STORAGE_KEY))
-const rowNames = (): (string | null)[] =>
-  [...document.querySelectorAll<HTMLElement>('.buffer-list .buffer-row-name')].map((e) => e.textContent)
-
 beforeAll(async () => {
   await page.viewport(1280, 896)
   localStorage.setItem(LAYOUT_STORAGE_KEY, SEEDED_WORKSPACE)
   localStorage.setItem(BUFFERS_STORAGE_KEY, SEEDED_BUFFERS)
   document.body.innerHTML = SHELL
   await (await import('../../src/main')).ready
-  await until(() => document.querySelector<HTMLElement>('#results')?.dataset.state === 'idle', 'the first compile')
+  await until(stateIdle, 'the first compile')
 })
 
 describe('a reload while a parked view shows a copy', () => {
   it('opens on the stored tree, with the copy kept and shown by no view', () => {
     expect(mounted(), 'precondition: the stored tree, which has no λ view').toEqual(['source', 'asm-0', 'tm-0'])
     expect(
-      stored()?.buffers.map((b) => b.id),
+      storedBuffers()?.buffers.map((b) => b.id),
       'the copy is kept',
     ).toEqual(['scratch-1'])
     // WHAT THE MOUNT LEAVES IN STORAGE, WHICH IS EMPTY WITH THE BINDING SEEDED TOO (the file's doc).
-    expect(stored()?.bindings, 'the parked view’s binding outlived the view').toEqual({})
+    expect(storedBuffers()?.bindings, 'the parked view’s binding outlived the view').toEqual({})
     // THIS IS WHAT A SEEDED BINDING CHANGES: the copy is warmed for the view it is bound to, and its row says so.
     document.querySelector<HTMLButtonElement>('#buffers')?.click()
     expect(rowNames(), 'a copy no view shows is not given a worker').toEqual(['λ copy 1 · not shown · paused'])
@@ -105,6 +95,6 @@ describe('a reload while a parked view shows a copy', () => {
     expect(titleText('lambda-0'), 'the view built under the parked view’s id took its stored binding').toBe(
       'λ · program',
     )
-    expect(stored()?.bindings).toEqual({})
+    expect(storedBuffers()?.bindings).toEqual({})
   })
 })

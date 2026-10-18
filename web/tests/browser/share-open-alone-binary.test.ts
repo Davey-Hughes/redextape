@@ -2,7 +2,7 @@ import type { EditorView } from '@codemirror/view'
 import { beforeAll, describe, expect, it } from 'vitest'
 import { PROGRAM_STORAGE_KEY, serializeProgram } from '../../src/program-store'
 import { encodeLink } from '../../src/share-link'
-import { SHELL, until } from './harness'
+import { picker, readout, SHELL, stateIdle, until } from './harness'
 
 /**
  * **A LINK OPENED AT START-UP, THE PROGRAM ALONE, WITH `binary` STORED** — Plan 7 part 6a spec §5.3: a link whose
@@ -19,9 +19,6 @@ import { SHELL, until } from './harness'
  */
 
 const LINKED = 'let y = 10; y + 5'
-const picker = () => document.querySelector<HTMLSelectElement>('#encoding') as HTMLSelectElement
-const idle = () => document.querySelector<HTMLElement>('#results')?.dataset.state === 'idle'
-const readout = () => [...document.querySelectorAll('#results .segment, #results .row')].length
 
 let view: EditorView
 
@@ -31,7 +28,7 @@ beforeAll(async () => {
   history.replaceState(null, '', `${location.pathname}${location.search}${fragment}`)
   document.body.innerHTML = SHELL
   view = await (await import('../../src/main')).ready
-  await until(() => idle() && readout() > 0, 'the first compile')
+  await until(() => stateIdle() && readout() > 0, 'the first compile')
 })
 
 describe('a link at start-up whose encoding cannot be taken, with binary stored', () => {

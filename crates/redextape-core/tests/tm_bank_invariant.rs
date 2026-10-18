@@ -23,18 +23,11 @@ use redextape_core::desugar::desugar;
 use redextape_core::parser::parse;
 
 mod common;
-use common::{box_tape_is_well_formed, heap_tape_is_well_formed, reg_bank_is_well_formed};
+use common::{box_tape_is_well_formed, encodings_at, heap_tape_is_well_formed, reg_bank_is_well_formed, widths};
 use redextape_core::tm::{
-    AT, BLANK, Binary, Builder, Encoding, EncodingKind, MARK, MAX_FIELD_WIDTH, MIN_FIELD_WIDTH, Move, REG, RuleSpec,
-    SEP, TAPES, TM_DEFAULT_CAPS, Tape, TmCaps, TmRun, TmStatus, Unary, WORK, ZERO, defunc, lower_asm, lower_tm_guarded,
-    n_slots_of, run_tm_at, simulate_watched,
+    AT, BLANK, Binary, Builder, Encoding, MARK, Move, REG, RuleSpec, SEP, TAPES, TM_DEFAULT_CAPS, Tape, TmCaps, TmRun,
+    TmStatus, Unary, WORK, ZERO, defunc, lower_asm, lower_tm_guarded, n_slots_of, run_tm_at, simulate_watched,
 };
-
-/// EVERY encoding. Each has its own bank with its own write sites, so a corpus that only exercises
-/// one encoding verifies nothing about the others.
-fn encodings_at(width: usize) -> Vec<(&'static str, Box<dyn Encoding>)> {
-    EncodingKind::ALL.iter().map(|&k| (k.name(), k.at(width))).collect()
-}
 
 /// A representative spread of the survey corpus: arithmetic, monus, comparison, `if`, `let`/assign,
 /// `while`, recursion, list construction and access, defunctionalized higher-order, mutual recursion,
@@ -60,19 +53,6 @@ const CORPUS: &[&str] = &[
     "fn sub(a, b) { a - b } fn ap2(g, a, b) { g(a, b) } sub(9, 4) + ap2(sub, 10, 3)",
     "let mut c = 0; fn ap(f, x) { f(x) } ap(|x| { c = c + x; c }, 5) + c",
 ];
-
-/// Every width auto-fit can choose.
-///
-/// **A DELIBERATE INDEPENDENT MODEL OF `tm.rs`'s `search_width`, NOT A DUPLICATE TO BE FOLDED.** This
-/// file asserts things ABOUT the ladder; routing it through the library's own definition would make it
-/// walk whatever that definition says and stop it being able to disagree. Leave the copy.
-fn widths() -> Vec<usize> {
-    let mut w = vec![MIN_FIELD_WIDTH];
-    while *w.last().unwrap() < MAX_FIELD_WIDTH {
-        w.push(w.last().unwrap() * 2);
-    }
-    w
-}
 
 /// One (program, width, encoding) unit of the corpus invariant: lower, simulate, and check the REG
 /// bank after EVERY step. Extracted verbatim from the single test this file used to have, so the split

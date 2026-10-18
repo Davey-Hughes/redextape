@@ -2,24 +2,22 @@ import { EditorView } from '@codemirror/view'
 import { beforeAll, describe, expect, it } from 'vitest'
 import { BUFFERS_STORAGE_KEY } from '../../src/buffers-store'
 import { bindingKey } from '../../src/view-header'
-import { SHELL, until } from './harness'
+import { leafEl, noticeText, SHELL, stateIdle, until } from './harness'
 
 /**
  * **DELETE AND UNDO, THROUGH THE REAL APP** — Plan 7 part 2 spec §10. One copy, deleted from the copies menu
  * while a view shows it; the notice's undo brings it back under its name, at step 0, on the view it left.
  */
 
-const leaf = (id: string) => document.querySelector<HTMLElement>(`[data-leaf="${id}"]`)
-const noticeText = () => document.querySelector('#notice .notice-text')?.textContent ?? ''
-const titleText = (id: string) => leaf(id)?.querySelector('.view-title')?.textContent ?? ''
-const stepText = () => leaf('lambda-0')?.querySelector('.step')?.textContent ?? ''
+const titleText = (id: string) => leafEl(id)?.querySelector('.view-title')?.textContent ?? ''
+const stepText = () => leafEl('lambda-0')?.querySelector('.step')?.textContent ?? ''
 
 beforeAll(async () => {
   document.body.innerHTML = SHELL
   const view: EditorView = await (await import('../../src/main')).ready
   view.dispatch({ changes: { from: 0, to: view.state.doc.length, insert: 'let x = 40; x + 2' } })
-  await until(() => document.querySelector<HTMLElement>('#results')?.dataset.state === 'idle', 'the first compile')
-  leaf('lambda-0')?.querySelector<HTMLButtonElement>('button.detach')?.click()
+  await until(stateIdle, 'the first compile')
+  leafEl('lambda-0')?.querySelector<HTMLButtonElement>('button.detach')?.click()
   await until(() => titleText('lambda-0') === 'λ · copy 1', 'the λ view to show its copy')
 })
 
@@ -37,7 +35,7 @@ describe('pausing a copy', () => {
     document.querySelector<HTMLElement>('.buffer-list')?.hidePopover()
 
     // BACK ON THE COPY THROUGH THE TITLE MENU, which the delete test below starts from.
-    const title = leaf('lambda-0')?.querySelector<HTMLButtonElement>('button.view-title')
+    const title = leafEl('lambda-0')?.querySelector<HTMLButtonElement>('button.view-title')
     title?.click()
     document
       .getElementById(title?.getAttribute('aria-controls') ?? '')
@@ -74,7 +72,7 @@ describe('deleting a copy', () => {
     // proves nothing. What proves a fresh run is that its oldest kept step is 0 — `↺` goes back to the
     // oldest kept step.
     await until(() => /^step [\d,]+ of [\d,]+$/.test(stepText()), 'the copy to run again')
-    leaf('lambda-0')?.querySelector<HTMLButtonElement>('[aria-label="back to the oldest kept step"]')?.click()
+    leafEl('lambda-0')?.querySelector<HTMLButtonElement>('[aria-label="back to the oldest kept step"]')?.click()
     expect(stepText()).toMatch(/^step 0 of /)
   })
 })

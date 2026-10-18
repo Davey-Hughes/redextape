@@ -1,7 +1,7 @@
 import { beforeAll, describe, expect, it } from 'vitest'
 import { page } from 'vitest/browser'
 import { NARROW_WINDOW, NARROW_WINDOW_REM } from '../../src/app-header'
-import { SHELL, until } from './harness'
+import { mountAt, until } from './harness'
 
 /**
  * THE WIDTH AT WHICH THE `views` TOGGLES ARE HIDDEN, TO THE PIXEL — the view layouts spec §6.1. Two things hide
@@ -29,12 +29,7 @@ describe('the views toggles, at the width that hides them', () => {
   // A REM IS 16 PX HERE, AS AT A BROWSER'S DEFAULT TEXT SIZE, which the first case holds before it reads a width.
   const edge = NARROW_WINDOW_REM * 16
 
-  beforeAll(async () => {
-    await page.viewport(1280, 896)
-    document.body.innerHTML = SHELL
-    await (await import('../../src/main')).ready
-    await until(() => document.querySelector<HTMLElement>('#results')?.dataset.state === 'idle', 'the first compile')
-  })
+  beforeAll(() => mountAt(1280, 896))
 
   it.each([
     [edge + 1, false],

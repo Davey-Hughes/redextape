@@ -3,7 +3,21 @@ import { beforeAll, beforeEach, describe, expect, it } from 'vitest'
 import { page } from 'vitest/browser'
 import { LAYOUT_STORAGE_KEY } from '../../src/layout'
 import { bindingKey } from '../../src/view-header'
-import { resetToFourViews, SHELL, until } from './harness'
+import {
+  editorsInLeaf,
+  lambdaLeaves,
+  leafIds,
+  leafKind,
+  places,
+  resetToFourViews,
+  SHELL,
+  showing,
+  splitVia,
+  stateIdle,
+  stepTextOf,
+  titleOf,
+  until,
+} from './harness'
 
 /**
  * **THE PICKER, ACTING** — a split creates what it was asked to create, and the closed source pane has a
@@ -26,65 +40,6 @@ import { resetToFourViews, SHELL, until } from './harness'
  * `data-binding` (`bindingKey(leg, session)`) for the pair a view shows.
  */
 
-const leafIds = () => [...document.querySelectorAll<HTMLElement>('[data-leaf]')].map((e) => e.dataset.leaf ?? '')
-const lambdaLeaves = () =>
-  [...document.querySelectorAll<HTMLElement>('[data-kind="lambda"]')].map((e) => e.dataset.leaf ?? '')
-const kindOf = (leaf: string) => document.querySelector<HTMLElement>(`[data-leaf="${leaf}"]`)?.dataset.kind ?? ''
-/** Every leaf's id paired with the `flex` `layout-view.ts` gave it — `pane-kind-switch.test.ts`'s `places`. */
-const places = () =>
-  [...document.querySelectorAll<HTMLElement>('[data-leaf]')].map((e) => `${e.dataset.leaf}@${e.style.flex}`)
-/** The title-selector of `leaf`'s view — the pair in force is its `data-binding`. */
-const titleOf = (leaf: string) => document.querySelector<HTMLButtonElement>(`[data-leaf="${leaf}"] button.view-title`)
-const editorsIn = (leaf: string) => document.querySelectorAll(`[data-leaf="${leaf}"] .cm-editor`).length
-const stepOf = (leaf: string) => document.querySelector(`[data-leaf="${leaf}"] .step`)?.textContent ?? ''
-/**
- * What a TM pane is actually showing, as three readings a blank pane cannot fake.
- *
- * ALL THREE ARE PAINTED FROM `TmPane`'s `#program`, AND THEY FAIL IN DIFFERENT DIRECTIONS. `render`
- * returns early — clearing the status line and the tape rows — when either the frame or the program is
- * `null`, so `tapes` and `status` say the pane has BOTH; `rows` is drawn from the `StateIndex` the
- * program builds and is painted whether or not a frame ever lands, so it says the machine reached the
- * pane even when the legs are empty. Counting `.cell` rather than `.tape` is deliberate: an empty tape
- * row is markup, a cell is a symbol read off a frame.
- */
-const showing = (leaf: string) => ({
-  tapes: [...document.querySelectorAll(`[data-leaf="${leaf}"] .tape .cell`)].map((e) => e.textContent).join(''),
-  rows: document.querySelectorAll(`[data-leaf="${leaf}"] .state-row`).length,
-  status: document.querySelector(`[data-leaf="${leaf}"] .tm-status`)?.textContent ?? '',
-})
-
-/**
- * Split `leaf` through its `⋯` menu, as a user does: `dir` is the direction, and `pick` is `'same'`
- * (another view of this), `'source'`, or a `bindingKey(leg, session)`.
- *
- * **THE MENU IS REACHED THROUGH THE INVOKER'S `aria-controls`, NOT THROUGH `[data-leaf] .view-menu`.**
- * A view has ONE menu now, where a pane used to carry a picker per split control, so the scoped query
- * would find the right element too — but `aria-controls` is the relationship `viewMenu` builds `⋯` for,
- * and going through it means a header that ever stopped naming its own menu fails this helper loudly
- * (the `item == null` throw below) instead of every split here quietly turning into a no-op.
- *
- * IT THROWS WHEN THE ENTRY IS ABSENT, NAMING WHAT WAS ON OFFER. `find(...)?.click()` on a missing item is
- * a silent no-op, and every assertion after it would then describe a page nothing happened on — the same
- * hazard `pane-kind-switch.test.ts`'s `pick` records for `select.value = x`.
- */
-function splitVia(leaf: string, dir: 'row' | 'column', pick: string): void {
-  const more = document.querySelector<HTMLButtonElement>(`[data-leaf="${leaf}"] button.view-more`)
-  if (more === null) throw new Error(`no view menu on [data-leaf="${leaf}"]`)
-  more.click()
-  const menu = document.getElementById(more.getAttribute('aria-controls') ?? '')
-  menu?.querySelector<HTMLButtonElement>(`button.view-split[data-dir="${dir}"]`)?.click()
-  const selector =
-    pick === 'same' ? 'button[data-same]' : pick === 'source' ? 'button[data-source]' : `button[data-binding="${pick}"]`
-  const item = menu?.querySelector<HTMLButtonElement>(`.view-menu-pairs ${selector}`)
-  if (item == null) {
-    const offered = [...(menu?.querySelectorAll<HTMLButtonElement>('.view-menu-pairs button') ?? [])].map(
-      (b) => b.textContent,
-    )
-    throw new Error(`[data-leaf="${leaf}"] offers no ${pick} to split into — offered: ${offered.join(' | ')}`)
-  }
-  item.click()
-}
-
 let view: EditorView
 
 beforeAll(async () => {
@@ -96,7 +51,7 @@ beforeAll(async () => {
   await page.viewport(1280, 896)
   document.body.innerHTML = SHELL
   view = await (await import('../../src/main')).ready
-  await until(() => document.querySelector<HTMLElement>('#results')?.dataset.state === 'idle', 'the first compile')
+  await until(stateIdle, 'the first compile')
 })
 
 beforeEach(async () => {
@@ -136,13 +91,13 @@ describe('a split creates what the picker was asked for', () => {
 
       const created = leafIds().find((id) => !before.includes(id)) ?? ''
       expect(created).not.toBe('')
-      expect(kindOf(created)).toBe('tm')
+      expect(leafKind(created)).toBe('tm')
       expect(document.querySelector(`[data-leaf="${created}"] .state-table`)).not.toBeNull()
       // THE λ PANE WAS NOT DUPLICATED, which is what the split did before the picker existed.
       expect(lambdaLeaves()).toEqual(['lambda-0'])
       expect(titleOf(created)?.dataset.binding).toBe(bindingKey('tm', 'source'))
-      expect(stepOf(created)).toBe(stepOf('tm-0'))
-      expect(stepOf(created)).not.toBe('')
+      expect(stepTextOf(created)).toBe(stepTextOf('tm-0'))
+      expect(stepTextOf(created)).not.toBe('')
       expect(errors).toEqual([])
     } finally {
       window.removeEventListener('error', onError)
@@ -179,7 +134,7 @@ describe('a split creates what the picker was asked for', () => {
 
       const created = leafIds().find((id) => !before.includes(id)) ?? ''
       expect(created).not.toBe('')
-      expect(kindOf(created)).toBe('tm')
+      expect(leafKind(created)).toBe('tm')
 
       const shown = showing(created)
       expect(shown.tapes).not.toBe('')
@@ -220,7 +175,7 @@ describe('a split creates what the picker was asked for', () => {
     await until(() => leafIds().length === before.length + 1, 'the split to add a leaf')
     const created = leafIds().find((id) => !before.includes(id)) ?? ''
     expect(created).not.toBe('')
-    expect(kindOf(created)).toBe('tm')
+    expect(leafKind(created)).toBe('tm')
     expect(showing(created)).toEqual({ tapes: '', rows: 0, status: '' })
 
     view.dispatch({ changes: { from: 0, to: view.state.doc.length, insert: 'let y = 7; y + 1' } })
@@ -246,7 +201,7 @@ describe('a split creates what the picker was asked for', () => {
    */
   it('starts the new pane on the session that was picked, not on the one that was split', async () => {
     document.querySelector<HTMLButtonElement>('[data-leaf="lambda-0"] button.detach')?.click()
-    await until(() => editorsIn('lambda-0') > 0, 'the fork to mount an editor')
+    await until(() => editorsInLeaf('lambda-0') > 0, 'the fork to mount an editor')
     // THE PAIR THIS FORK LANDED ON, CAPTURED BEFORE THE SPLIT. The last assertion below named
     // `bindingKey('lambda', 'lambda-scratch')` — 5d-i's one fixed scratch id, which 5d-ii-c decision 1
     // replaces with a name minted per fork; the number depends on how many forks ran earlier in this
@@ -262,7 +217,7 @@ describe('a split creates what the picker was asked for', () => {
 
     const created = leafIds().find((id) => !before.includes(id)) ?? ''
     expect(created).not.toBe('')
-    expect(kindOf(created)).toBe('lambda')
+    expect(leafKind(created)).toBe('lambda')
     expect(titleOf(created)?.dataset.binding).toBe(bindingKey('lambda', 'source'))
     expect(document.querySelector(`[data-leaf="${created}"] h2`)?.textContent).not.toContain('not linked')
     expect(document.querySelector(`[data-leaf="${created}"] h2`)?.textContent).toBe('λ · program')
@@ -302,10 +257,7 @@ describe('the closed source pane comes back through the picker', () => {
       expect(extra).not.toBe('')
 
       view.dispatch({ changes: { from: 0, to: view.state.doc.length, insert: 'let z = 9; z' } })
-      await until(
-        () => document.querySelector<HTMLElement>('#results')?.dataset.state === 'idle',
-        'the edited program to compile',
-      )
+      await until(stateIdle, 'the edited program to compile')
       const extraPlace = places().find((p) => p.startsWith(`${extra}@`)) ?? ''
       expect(extraPlace).not.toBe('')
 
@@ -317,7 +269,7 @@ describe('the closed source pane comes back through the picker', () => {
       splitVia('lambda-0', 'column', 'source')
       await until(() => leafIds().includes('source'), 'the source pane to come back')
 
-      expect(kindOf('source')).toBe('source')
+      expect(leafKind('source')).toBe('source')
       expect(document.querySelector('[data-leaf="source"] #editor')).not.toBeNull()
       expect(document.querySelector('[data-leaf="source"] .cm-content')?.textContent).toContain('let z = 9')
       // WHERE IT CAME BACK, AND THAT NOTHING ELSE MOVED: `reset preset` would answer

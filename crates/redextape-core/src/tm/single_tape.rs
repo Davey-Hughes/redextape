@@ -494,6 +494,19 @@ mod tests {
     use super::*;
     use proptest::prelude::*;
 
+    /// A machine whose `go` state takes `rule` to the accepting `done`, with as many tapes as `rule`
+    /// reads.
+    fn go_then_done(rule: Rule) -> Machine {
+        Machine {
+            tapes: rule.read.len(),
+            start: 0,
+            states: vec![
+                State { name: "go".into(), accept: false, rules: vec![rule] },
+                State { name: "done".into(), accept: true, rules: vec![] },
+            ],
+        }
+    }
+
     /// The largest machine the shipped demo corpus builds, per `state_cost_probe` section G — the
     /// floor both budget tests below divide `MAX_MACHINE_STATES` by, so they cannot drift apart on
     /// what "the ceiling" means.
@@ -575,23 +588,7 @@ mod tests {
     /// A two-tape machine whose one rule reads nothing, writes nothing and moves nothing, then
     /// accepts. Its single-tape image must halt with both tapes unchanged.
     fn wildcard_only() -> Machine {
-        Machine {
-            tapes: 2,
-            start: 0,
-            states: vec![
-                State {
-                    name: "go".into(),
-                    accept: false,
-                    rules: vec![Rule {
-                        read: vec![None, None],
-                        write: vec![None, None],
-                        moves: vec![Move::S, Move::S],
-                        next: 1,
-                    }],
-                },
-                State { name: "done".into(), accept: true, rules: vec![] },
-            ],
-        }
+        go_then_done(Rule { read: vec![None, None], write: vec![None, None], moves: vec![Move::S, Move::S], next: 1 })
     }
 
     #[test]
@@ -680,18 +677,7 @@ mod tests {
     /// last-candidate-mismatch branch needs. Fed an input that does not match, this is the one
     /// hand-written machine whose only candidate can miss.
     fn one_candidate_no_wildcard() -> Machine {
-        Machine {
-            tapes: 1,
-            start: 0,
-            states: vec![
-                State {
-                    name: "go".into(),
-                    accept: false,
-                    rules: vec![Rule { read: vec![Some('1')], write: vec![None], moves: vec![Move::S], next: 1 }],
-                },
-                State { name: "done".into(), accept: true, rules: vec![] },
-            ],
-        }
+        go_then_done(Rule { read: vec![Some('1')], write: vec![None], moves: vec![Move::S], next: 1 })
     }
 
     /// `emit_candidate`'s last-candidate-mismatch -> `q{sid}.stuck` branch, otherwise untested: a stuck
@@ -715,21 +701,7 @@ mod tests {
     /// Tape 0 walks right over `1`s writing `@`, and halts on the first blank. Exercises a concrete
     /// read, a concrete write and an `R` move in one machine.
     fn rewrite_ones() -> Machine {
-        Machine {
-            tapes: 1,
-            start: 0,
-            states: vec![
-                State {
-                    name: "scan".into(),
-                    accept: false,
-                    rules: vec![
-                        Rule { read: vec![Some('1')], write: vec![Some('@')], moves: vec![Move::R], next: 0 },
-                        Rule { read: vec![None], write: vec![None], moves: vec![Move::S], next: 1 },
-                    ],
-                },
-                State { name: "halt".into(), accept: true, rules: vec![] },
-            ],
-        }
+        crate::tm::test_fixtures::scan_ones(Some('@'), None)
     }
 
     #[test]
@@ -775,23 +747,12 @@ mod tests {
     #[test]
     fn a_data_symbol_colliding_with_a_marker_is_refused_not_silently_corrupted() {
         use crate::tm::sim::{DEFAULT_CAPS, simulate_final};
-        let m = Machine {
-            tapes: 1,
-            start: 0,
-            states: vec![
-                State {
-                    name: "go".into(),
-                    accept: false,
-                    rules: vec![Rule {
-                        read: vec![Some('1')],
-                        write: vec![Some('a')], // collides with head_away(0)
-                        moves: vec![Move::R],
-                        next: 1,
-                    }],
-                },
-                State { name: "done".into(), accept: true, rules: vec![] },
-            ],
-        };
+        let m = go_then_done(Rule {
+            read: vec![Some('1')],
+            write: vec![Some('a')], // collides with head_away(0)
+            moves: vec![Move::R],
+            next: 1,
+        });
         let inits = vec![vec!['1', '1']];
         let single = to_single_tape(&m);
         assert_eq!(crate::tm::reduction::refusal(&single), Some(ALPHABET_COLLISION));
@@ -818,18 +779,7 @@ mod tests {
     /// `layout_collision` sees the initial tape too, and refuses what `to_single_tape` alone cannot see.
     #[test]
     fn layout_collision_sees_a_symbol_only_the_initial_tape_carries() {
-        let m = Machine {
-            tapes: 1,
-            start: 0,
-            states: vec![
-                State {
-                    name: "go".into(),
-                    accept: false,
-                    rules: vec![Rule { read: vec![None], write: vec![None], moves: vec![Move::S], next: 1 }],
-                },
-                State { name: "done".into(), accept: true, rules: vec![] },
-            ],
-        };
+        let m = go_then_done(Rule { read: vec![None], write: vec![None], moves: vec![Move::S], next: 1 });
         assert!(m.alphabet().is_empty(), "the only rule is an unconditional wildcard");
         let inits = vec![vec!['1', head_away(0)]];
         assert_eq!(layout_collision(&m, &inits), Some(head_away(0)));
@@ -847,23 +797,12 @@ mod tests {
     /// never appear in any emitted rule, and `i` is the only tape whose marker actually reaches the
     /// transition table.
     fn machine_touching_only_tape(tapes: usize, i: usize) -> Machine {
-        Machine {
-            tapes,
-            start: 0,
-            states: vec![
-                State {
-                    name: "go".into(),
-                    accept: false,
-                    rules: vec![Rule {
-                        read: (0..tapes).map(|t| if t == i { Some('1') } else { None }).collect(),
-                        write: (0..tapes).map(|t| if t == i { Some('2') } else { None }).collect(),
-                        moves: vec![Move::S; tapes],
-                        next: 1,
-                    }],
-                },
-                State { name: "done".into(), accept: true, rules: vec![] },
-            ],
-        }
+        go_then_done(Rule {
+            read: (0..tapes).map(|t| if t == i { Some('1') } else { None }).collect(),
+            write: (0..tapes).map(|t| if t == i { Some('2') } else { None }).collect(),
+            moves: vec![Move::S; tapes],
+            next: 1,
+        })
     }
 
     /// The real safety gap `to_single_tape`'s tape-count refusal closes: past `MAX_ENCODABLE_TAPES`,
@@ -907,23 +846,12 @@ mod tests {
     /// pass would then search for and clear tape 0's marker instead of its own, corrupting both tapes
     /// while the machine still reports ACCEPT.
     fn multi_tape_rule() -> Machine {
-        Machine {
-            tapes: 3,
-            start: 0,
-            states: vec![
-                State {
-                    name: "go".into(),
-                    accept: false,
-                    rules: vec![Rule {
-                        read: vec![None, None, None],
-                        write: vec![Some('x'), Some('y'), None],
-                        moves: vec![Move::R, Move::L, Move::S],
-                        next: 1,
-                    }],
-                },
-                State { name: "done".into(), accept: true, rules: vec![] },
-            ],
-        }
+        go_then_done(Rule {
+            read: vec![None, None, None],
+            write: vec![Some('x'), Some('y'), None],
+            moves: vec![Move::R, Move::L, Move::S],
+            next: 1,
+        })
     }
 
     #[test]
@@ -1000,23 +928,12 @@ mod tests {
     /// head left on a neighbouring block's cell) rather than raising an error, so only a differential
     /// check against the multi-tape simulator — not a status code — can catch it.
     fn moves_without_writing_and_writes_without_moving() -> Machine {
-        Machine {
-            tapes: 2,
-            start: 0,
-            states: vec![
-                State {
-                    name: "go".into(),
-                    accept: false,
-                    rules: vec![Rule {
-                        read: vec![None, None],
-                        write: vec![None, Some('z')],
-                        moves: vec![Move::R, Move::S],
-                        next: 1,
-                    }],
-                },
-                State { name: "done".into(), accept: true, rules: vec![] },
-            ],
-        }
+        go_then_done(Rule {
+            read: vec![None, None],
+            write: vec![None, Some('z')],
+            moves: vec![Move::R, Move::S],
+            next: 1,
+        })
     }
 
     #[test]

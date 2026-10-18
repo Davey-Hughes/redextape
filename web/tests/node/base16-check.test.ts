@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { readScheme, type Scheme } from '../../src/base16'
+import type { Scheme } from '../../src/base16'
 import {
   adjustLine,
   checkScheme,
@@ -9,22 +9,15 @@ import {
   passes,
   summaryLines,
 } from '../../src/base16-check'
-import { currentLayout, EMBER, keyed, legacyLayout, NEON, NIGHT, STUCK, TWINS } from './base16-fixtures'
+import { currentLayout, EMBER, keyed, legacyLayout, NEON, NIGHT, readSchemeOk, STUCK, TWINS } from './base16-fixtures'
 
 /**
  * The check (Plan 7 part 6b spec §5.3), `base16-check.ts`'s, on schemes read from the fixtures: its summary, what
  * `apply adjusted` does, the failures grouped by scheme colour and the colours an adjustment moved, in words.
  */
 
-/** The scheme `text` reads as, or a failure naming its errors. */
-function read(text: string): Scheme {
-  const r = readScheme(text)
-  if (!r.ok) throw new Error(`did not read: ${r.errors.join('; ')}`)
-  return r.scheme
-}
-
 describe('the check (spec §5.3)', () => {
-  const check = (text: string) => checkScheme(read(text))
+  const check = (text: string) => checkScheme(readSchemeOk(text))
 
   it('says a scheme that passes passes, and offers nothing to adjust', () => {
     const c = check(currentLayout('Night', NIGHT, 'dark'))
@@ -109,7 +102,7 @@ describe('the check (spec §5.3)', () => {
 
   it('reads what changed off a scheme’s own colours and the tokens applied, a token left out included', () => {
     const colours = keyed(EMBER) as Scheme['colours']
-    const { tokens } = checkScheme(read(legacyLayout('Ember', EMBER))).adjustment
+    const { tokens } = checkScheme(readSchemeOk(legacyLayout('Ember', EMBER))).adjustment
     const { fg, error, 'focus-ring': ring } = tokens
     expect(movedColours(colours, { fg, error, 'focus-ring': ring }).map(movedLine)).toEqual([
       'base05 #8a829a → #958ca5, as text',

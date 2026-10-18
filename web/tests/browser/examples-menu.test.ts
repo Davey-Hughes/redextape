@@ -2,8 +2,9 @@ import type { EditorView } from '@codemirror/view'
 import { computeAccessibleName } from 'dom-accessibility-api'
 import { beforeAll, describe, expect, it } from 'vitest'
 import { page, userEvent } from 'vitest/browser'
-import { EXAMPLES, type Example } from '../../src/examples'
-import { SHELL, until } from './harness'
+import { EXAMPLES } from '../../src/examples'
+import { example } from './examples-fixture'
+import { examplesButton, noticeText, picker, SHELL, segments, stateIdle, undoButton, until } from './harness'
 
 /**
  * **`examples ▾`: THE MENU, A PICK AND ITS UNDO** — Plan 7 part 6a spec §4.2, §4.5 and §6. Driven by real pointer
@@ -11,18 +12,11 @@ import { SHELL, until } from './harness'
  * stores, `let x = 40; x + 2` under `unary`. ONE MOUNT FOR THE FILE, for the reason every sibling gives.
  */
 
-const example = (id: string): Example => EXAMPLES.find((e) => e.id === id) as Example
-const button = () => document.querySelector<HTMLButtonElement>('#examples') as HTMLButtonElement
 const menu = () => document.querySelector<HTMLElement>('#examples-menu') as HTMLElement
 const open = () => menu().matches(':popover-open')
 const items = () => [...menu().querySelectorAll<HTMLButtonElement>('button.example')]
 const item = (id: string) =>
   menu().querySelector<HTMLButtonElement>(`button[data-example="${id}"]`) as HTMLButtonElement
-const picker = () => document.querySelector<HTMLSelectElement>('#encoding') as HTMLSelectElement
-const noticeText = () => document.querySelector('#notice .notice-text')?.textContent ?? ''
-const undoButton = () => document.querySelector<HTMLButtonElement>('#notice button.notice-action')
-const segments = () => [...document.querySelectorAll('#results .segment')].map((s) => s.textContent ?? '')
-const idle = () => document.querySelector<HTMLElement>('#results')?.dataset.state === 'idle'
 
 let view: EditorView
 
@@ -30,17 +24,17 @@ beforeAll(async () => {
   await page.viewport(1280, 800)
   document.body.innerHTML = SHELL
   view = await (await import('../../src/main')).ready
-  await until(() => idle() && segments().length > 0, 'the first compile')
+  await until(() => stateIdle() && segments().length > 0, 'the first compile')
 })
 
 describe('examples ▾', () => {
   it('sits after copies ▾, in the chrome of the header’s other buttons', () => {
     const buffers = document.querySelector<HTMLButtonElement>('#buffers') as HTMLButtonElement
-    expect(buffers.compareDocumentPosition(button()) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
-    const [a, b] = [buffers, button()].map((el) => el.getBoundingClientRect())
+    expect(buffers.compareDocumentPosition(examplesButton()) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
+    const [a, b] = [buffers, examplesButton()].map((el) => el.getBoundingClientRect())
     expect(b?.left).toBeGreaterThan(a?.right ?? Number.POSITIVE_INFINITY)
     expect(b?.height).toBe(a?.height)
-    const [x, y] = [buffers, button()].map((el) => getComputedStyle(el))
+    const [x, y] = [buffers, examplesButton()].map((el) => getComputedStyle(el))
     for (const property of [
       'borderTopStyle',
       'borderTopWidth',
@@ -52,11 +46,11 @@ describe('examples ▾', () => {
   })
 
   it('opens on a click, with every example in the manifest’s order and the focus on the first', async () => {
-    expect(computeAccessibleName(button())).toBe('examples')
-    expect(button().getAttribute('aria-expanded')).toBe('false')
-    await userEvent.click(button())
+    expect(computeAccessibleName(examplesButton())).toBe('examples')
+    expect(examplesButton().getAttribute('aria-expanded')).toBe('false')
+    await userEvent.click(examplesButton())
     expect(open()).toBe(true)
-    expect(button().getAttribute('aria-expanded')).toBe('true')
+    expect(examplesButton().getAttribute('aria-expanded')).toBe('true')
     expect(items().map((b) => b.dataset.example)).toEqual(EXAMPLES.map((e) => e.id))
     // NAMED BY `aria-label`, SO THE NAME DOES NOT HANG ON THE TWO SPANS' `display` (spec §4.2).
     const names = EXAMPLES.map((e) => `${e.title} ${e.description}`)
@@ -83,14 +77,14 @@ describe('examples ▾', () => {
     // `unary`, the encoding `setup.ts` stores its program under.
     expect(picker().value, 'precondition: the page is on another encoding').toBe('unary')
 
-    await userEvent.click(button())
+    await userEvent.click(examplesButton())
     await userEvent.click(item('fact'))
     expect(open()).toBe(false)
     expect(view.state.doc.toString()).toBe(example('fact').text)
     expect(picker().value).toBe('binary')
     expect(noticeText()).toBe('opened the example fact(4)')
     expect(undoButton()?.textContent).toBe('undo')
-    await until(() => idle() && (segments()[1] ?? '').startsWith('asm 24'), 'the example’s compile')
+    await until(() => stateIdle() && (segments()[1] ?? '').startsWith('asm 24'), 'the example’s compile')
   })
 
   it('puts back the text and the encoding it replaced on undo, with the focus in the editor, and says so', async () => {
@@ -119,7 +113,7 @@ describe('examples ▾', () => {
     expect(said.map((s) => s.text)).toEqual(['put back the program'])
     expect(said[0]?.focus, 'said once the focus is in the editor').toBe(view.contentDOM)
     expect(noticeText()).toBe('put back the program')
-    await until(() => idle() && (segments()[0] ?? '').startsWith('λ 42'), 'the program’s compile')
+    await until(() => stateIdle() && (segments()[0] ?? '').startsWith('λ 42'), 'the program’s compile')
   })
 
   /**
@@ -127,7 +121,7 @@ describe('examples ▾', () => {
    * it would throw that edit away with the example. Typed with real keys, as a user types.
    */
   it('withdraws its undo at the next edit, which the undo would throw away', async () => {
-    await userEvent.click(button())
+    await userEvent.click(examplesButton())
     await userEvent.click(item('is-even'))
     expect(undoButton()?.textContent).toBe('undo')
     view.dispatch({ selection: { anchor: view.state.doc.length } })
@@ -143,7 +137,7 @@ describe('examples ▾', () => {
    * text, so offered past a choice of encoding it would take that choice back.
    */
   it('withdraws its undo when an encoding is chosen, which the undo would take back', async () => {
-    await userEvent.click(button())
+    await userEvent.click(examplesButton())
     await userEvent.click(item('map-fold'))
     expect(undoButton()?.textContent).toBe('undo')
     await userEvent.selectOptions(picker(), 'unary')
@@ -154,7 +148,7 @@ describe('examples ▾', () => {
   })
 
   it('opens and picks by keys: Enter opens it, Tab moves on, Enter picks', async () => {
-    button().focus()
+    examplesButton().focus()
     await userEvent.keyboard('{Enter}')
     expect(open()).toBe(true)
     expect(document.activeElement).toBe(items()[0])
@@ -164,17 +158,17 @@ describe('examples ▾', () => {
     expect(open()).toBe(false)
     expect(view.state.doc.toString()).toBe(example('closure').text)
     expect(noticeText()).toBe('opened the example a closure')
-    expect(document.activeElement).toBe(button())
+    expect(document.activeElement).toBe(examplesButton())
   })
 
   it('closes on Escape, with the focus back on its button', async () => {
-    button().focus()
+    examplesButton().focus()
     await userEvent.keyboard('{Enter}')
     expect(open()).toBe(true)
     await userEvent.keyboard('{Escape}')
     expect(open()).toBe(false)
-    expect(button().getAttribute('aria-expanded')).toBe('false')
-    expect(document.activeElement).toBe(button())
+    expect(examplesButton().getAttribute('aria-expanded')).toBe('false')
+    expect(document.activeElement).toBe(examplesButton())
   })
 
   /**
@@ -184,14 +178,14 @@ describe('examples ▾', () => {
    * which fake timers installed now could not reach.
    */
   it('gives the focus back to its button when the undo the focus is on runs out', async () => {
-    await userEvent.click(button())
+    await userEvent.click(examplesButton())
     await userEvent.click(item('arithmetic'))
     const undo = undoButton() as HTMLButtonElement
     expect(undo.textContent).toBe('undo')
     undo.focus()
     expect(document.activeElement, 'precondition: the focus is on the undo').toBe(undo)
     await until(() => undoButton() === null, 'the pick’s notice to run out')
-    expect(document.activeElement).toBe(button())
+    expect(document.activeElement).toBe(examplesButton())
   })
 
   /**
@@ -207,20 +201,20 @@ describe('examples ▾', () => {
     )
     await until(() => document.querySelector('[data-leaf="source"]') === null, 'the source view to close')
     const before = view.state.doc.toString()
-    await userEvent.click(button())
+    await userEvent.click(examplesButton())
     await userEvent.click(item('sum-to'))
     expect(view.state.doc.toString()).toBe(example('sum-to').text)
     await userEvent.click(undoButton() as HTMLButtonElement)
     expect(view.state.doc.toString()).toBe(before)
-    expect(document.activeElement).toBe(button())
+    expect(document.activeElement).toBe(examplesButton())
 
     // ACTIVATED WITHOUT THE FOCUS ON IT: a synthetic click, which moves no focus, stands for that activation here.
-    await userEvent.click(button())
+    await userEvent.click(examplesButton())
     await userEvent.click(item('sum-to'))
     ;(document.activeElement as HTMLElement | null)?.blur()
     expect(document.activeElement, 'precondition: the focus is on no control').toBe(document.body)
     undoButton()?.click()
     expect(view.state.doc.toString()).toBe(before)
-    expect(document.activeElement).toBe(button())
+    expect(document.activeElement).toBe(examplesButton())
   })
 })

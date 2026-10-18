@@ -1,7 +1,7 @@
 import type { EditorView } from '@codemirror/view'
 import { beforeAll, describe, expect, it } from 'vitest'
 import { page, userEvent } from 'vitest/browser'
-import { SHELL, until } from './harness'
+import { countOf, extendButton, newest, results, resultsIdle, SHELL, tmStepText, until } from './harness'
 
 /**
  * **THE READOUT SAYS WHEN THE TM LEG'S HISTORY FILLED, AT THE STEP IT FILLED AT** — the strip in Explorer, the
@@ -25,9 +25,6 @@ import { SHELL, until } from './harness'
  * 7,988, polled at most 396 ms apart.
  */
 
-const results = () => document.querySelector<HTMLElement>('#results') as HTMLElement
-const idle = () => results().dataset.state === 'idle'
-const tmStep = () => document.querySelector('[data-leaf="tm-0"] .step')?.textContent ?? ''
 /** The TM segment of the strip — the third, in `LEGS`' order — or `undefined` while the readout is not the strip. */
 const tmSegment = () => results().querySelectorAll<HTMLElement>('.segment')[2]
 /** What the inspector's row labelled `label` says, or `undefined` for no such row. */
@@ -35,10 +32,6 @@ const row = (label: string) =>
   [...results().querySelectorAll('.row')]
     .find((r) => r.querySelector('.row-label')?.textContent === label)
     ?.querySelector('.row-value')?.textContent ?? undefined
-/** The newest step a step line names — its `of N` — as the line prints it: `69,008` from `step 69,008 of 69,008 — …`. */
-const newest = (line: string) => /of ([\d,]+)/.exec(line)?.[1] ?? ''
-const count = (printed: string) => Number(printed.replaceAll(',', ''))
-const extend = () => document.querySelector<HTMLButtonElement>('[data-leaf="tm-0"] .controls .extend')
 /** What the strip's TM segment reads with no full history in it: the value, the run's count and the width. */
 const PLAIN = /^TM 9 · [\d,]+ transitions · width \d+$/
 
@@ -59,7 +52,7 @@ beforeAll(async () => {
   await page.viewport(1280, 800)
   document.body.innerHTML = SHELL
   const view: EditorView = await (await import('../../src/main')).ready
-  await until(() => idle() && view.state.doc.length > 0 && tmSegment() !== undefined, 'the first compile')
+  await until(() => resultsIdle() && view.state.doc.length > 0 && tmSegment() !== undefined, 'the first compile')
 })
 
 describe('the readout, when the TM history fills', () => {
@@ -72,26 +65,26 @@ describe('the readout, when the TM history fills', () => {
     // middle waits stop at a third and two thirds of that way, or at the fill if it comes first.
     // A STATE THE LINE CANNOT SKIP: no poll may land while the TM records, and the line then goes straight to full.
     await until(
-      () => tmStep().includes('…') || tmStep().includes('history is full'),
+      () => tmStepText().includes('…') || tmStepText().includes('history is full'),
       'the TM recording of map and fold to start',
     )
     await until(
-      () => count(newest(tmStep())) >= 23_000 || tmStep().includes('history is full'),
+      () => countOf(newest(tmStepText())) >= 23_000 || tmStepText().includes('history is full'),
       'the TM recording of map and fold to be under way',
     )
     await until(
-      () => count(newest(tmStep())) >= 46_000 || tmStep().includes('history is full'),
+      () => countOf(newest(tmStepText())) >= 46_000 || tmStepText().includes('history is full'),
       'the TM recording of map and fold to be two thirds of the way',
     )
-    await until(() => tmStep().includes('history is full'), 'the TM history of map and fold to fill')
-    await until(() => idle() && tmSegment()?.title.startsWith('TM 9 · ') === true, 'map and fold’s result')
+    await until(() => tmStepText().includes('history is full'), 'the TM history of map and fold to fill')
+    await until(() => resultsIdle() && tmSegment()?.title.startsWith('TM 9 · ') === true, 'map and fold’s result')
   })
 
   it('says in the strip that the TM history is full, at the step its step line stopped at', () => {
     // PRECONDITION: the TM view's step line says the recording filled, and the strip is reading the program.
-    expect(tmStep(), 'precondition: the TM step line').toMatch(/^step [\d,]+ of [\d,]+ — history is full/)
+    expect(tmStepText(), 'precondition: the TM step line').toMatch(/^step [\d,]+ of [\d,]+ — history is full/)
     expect(results().dataset.describes, 'precondition: the strip reads the program').toBe('program')
-    full = newest(tmStep())
+    full = newest(tmStepText())
     const segment = tmSegment() as HTMLElement
     // THE STEP LINE'S OWN NUMBER, not the run's count beside it; and AFTER THE COUNT AND BEFORE THE WIDTH.
     expect(segment.title).toContain(`history is full at ${full}`)
@@ -126,21 +119,21 @@ describe('the readout, once keep recording carries the TM on', () => {
     await workspace('[data-preset="explorer"]')
     await until(() => tmSegment() !== undefined, 'the strip')
     // PRECONDITION: the recording is still stopped where it filled, and offers to go on.
-    expect(tmStep(), 'precondition: still stopped where it filled').toContain(`of ${full} — history is full`)
-    expect(extend()?.textContent, 'precondition: the TM view offers keep recording').toBe('keep recording')
-    const total = count(/^TM 9 · ([\d,]+) transitions/.exec(tmSegment()?.title ?? '')?.[1] ?? '')
-    await userEvent.click(extend() as HTMLButtonElement)
-    await until(() => newest(tmStep()) !== full, 'the TM recording to move on')
+    expect(tmStepText(), 'precondition: still stopped where it filled').toContain(`of ${full} — history is full`)
+    expect(extendButton()?.textContent, 'precondition: the TM view offers keep recording').toBe('keep recording')
+    const total = countOf(/^TM 9 · ([\d,]+) transitions/.exec(tmSegment()?.title ?? '')?.[1] ?? '')
+    await userEvent.click(extendButton() as HTMLButtonElement)
+    await until(() => newest(tmStepText()) !== full, 'the TM recording to move on')
     await until(
-      () => count(newest(tmStep())) >= (count(full) + total) / 2 || !tmStep().includes('…'),
+      () => countOf(newest(tmStepText())) >= (countOf(full) + total) / 2 || !tmStepText().includes('…'),
       'the TM recording to be half way to the halt',
     )
-    await until(() => !tmStep().includes('…') && idle(), 'the TM recording to stop again')
+    await until(() => !tmStepText().includes('…') && resultsIdle(), 'the TM recording to stop again')
   })
 
   it('says nothing of a full history once the recording ends at the halt', () => {
     // NO `…` AND NO STOP REASON: ended. The head is wherever the ring left it, not on the halt (`History`).
-    expect(tmStep(), 'precondition: the recording ended').toMatch(
+    expect(tmStepText(), 'precondition: the recording ended').toMatch(
       /^step [\d,]+ of [\d,]+ \(oldest kept: step [\d,]+\)$/,
     )
     expect(tmSegment()?.title).toMatch(PLAIN)

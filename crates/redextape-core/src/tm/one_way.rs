@@ -419,6 +419,7 @@ mod tests {
     use crate::tm::machine::State;
     use crate::tm::sim::{DEFAULT_CAPS, Status, simulate_final};
     use crate::tm::single_tape::normalize;
+    use crate::tm::test_fixtures::demo_machine;
     use proptest::prelude::*;
 
     fn rule1(read: Option<Symbol>, write: Option<Symbol>, mv: Move, next: StateId) -> Rule {
@@ -691,18 +692,6 @@ mod tests {
                 prop_assert_eq!(back.trimmed(), OriginSnapshot { cells: tape.clone(), head: 0, origin: 0 }.trimmed());
             }
         }
-    }
-
-    fn demo_machine(src: &str, enc: crate::tm::EncodingKind) -> (Machine, Vec<Vec<Symbol>>) {
-        let (prog, ds) = crate::parser::parse(src);
-        assert!(ds.is_empty(), "parse errors for {src}: {ds:?}");
-        let prog = prog.expect("a program");
-        let ty = crate::typeck::result_type(&prog).unwrap_or_else(|e| panic!("type errors for {src}: {e:?}"));
-        let core = crate::desugar::desugar(&prog);
-        let d = crate::tm::run_tm_described(&core, enc, ty, crate::tm::TM_DEFAULT_CAPS)
-            .unwrap_or_else(|r| panic!("{src} did not run: {r:?}"));
-        let init = d.header.init(d.machine.tapes);
-        (d.machine, init)
     }
 
     /// The ratio [`to_one_way`] may not exceed on the corpus below, as a PROPERTY rather than a restated

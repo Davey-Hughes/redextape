@@ -3,6 +3,7 @@ import type * as Wasm from '../../../pkg/redextape_wasm.js'
 import { VALUE_CHUNK } from '../../src/protocol'
 import { ScratchEditor } from '../../src/scratch-editor'
 import type { Decoded, Diagnostic, TmProgram, TmScratchStatus, ValueRun } from '../../src/types'
+import { cloneMs, median, ms } from './harness'
 
 /**
  * **THE TM-BUFFER-COST PROBE** — what a TM buffer pays to build a reduced `.tm` file, and how fast its value run
@@ -99,16 +100,6 @@ const BUILD_RUN = import.meta.glob<string>('../../../target/probe-tm-buffer-wasm
 const BUDGET_MS = 250
 const REPS = 7
 
-const cloneMs = (payload: unknown) =>
-  new Promise<number>((resolve) => {
-    const ch = new MessageChannel()
-    const start = performance.now()
-    ch.port2.onmessage = () => resolve(performance.now() - start)
-    ch.port1.postMessage(payload)
-  })
-
-const median = (xs: number[]) => [...xs].sort((a, b) => a - b)[Math.floor(xs.length / 2)] ?? Number.NaN
-const ms = (x: number) => x.toFixed(1).padStart(7)
 const collect = () => (globalThis as { gc?: () => void }).gc?.()
 
 describe('TM buffer cost', () => {

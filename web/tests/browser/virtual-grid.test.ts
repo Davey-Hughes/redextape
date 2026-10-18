@@ -3,7 +3,7 @@ import { userEvent } from 'vitest/browser'
 import { ROW_HEIGHT } from '../../src/state-table'
 import { type GridOptions, type GridRows, OVERSCAN, VirtualGrid } from '../../src/virtual-grid'
 import type { VisibleWindow } from '../../src/virtual-list'
-import { until } from './harness'
+import { frame, scrolled, until } from './harness'
 
 /**
  * `VirtualGrid` on its own, with nothing of a view around it: the contract the TM rule table and the asm listing both
@@ -14,13 +14,6 @@ import { until } from './harness'
  * applies here as it does there. The box's height is set inline: no view's flex layout bounds it.
  */
 
-const frame = () => new Promise<void>((r) => requestAnimationFrame(() => r()))
-/**
- * The next `scroll` event on `el`, once the grid's own listener — registered first, in its constructor — has run.
- * **AWAITED RATHER THAN COUNTING FRAMES**: a scroll's event came later than two frames when the whole file ran, so an
- * assertion after two frames could run before the event it was about, and pass whatever the handler would have done.
- */
-const scrolled = (el: HTMLElement) => new Promise<void>((r) => el.addEventListener('scroll', () => r(), { once: true }))
 /**
  * The next report of `el`'s size, and a frame after it, so every observer's callback in that delivery has run — the
  * grid's own among them. **NOT A FRAME COUNT**: a delivery comes after the frame's animation callbacks, so an await on

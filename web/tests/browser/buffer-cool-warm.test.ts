@@ -1,8 +1,10 @@
-import { EditorView } from '@codemirror/view'
+import type { EditorView } from '@codemirror/view'
 import { beforeAll, describe, expect, it } from 'vitest'
 import { bindingKey } from '../../src/view-header'
-import { SHELL, until } from './harness'
+import { lambdaEditorDoc } from './editor-view-fixture'
+import { editorHost, idle, lambdaHeading, lambdaTermText, pickBinding, rowNames, SHELL, until } from './harness'
 import { asShown } from './lambda-text'
+import { typeIntoScratchEditor } from './scratch-editor-fixture'
 
 /**
  * **THE COOL → WARM → BIND ROUND TRIP, AND THE DEFECT IT USED TO END IN** — design §4.5's stated flow
@@ -39,33 +41,9 @@ import { asShown } from './lambda-text'
  * offered at every step. */
 const SAMPLE = 'let x = 40; x + 2'
 
-/** The title-selector of `leaf`'s view — the pair in force is its `data-binding`. */
-const titleOf = (leaf: string) => document.querySelector<HTMLButtonElement>(`[data-leaf="${leaf}"] button.view-title`)
-
-/** Pick `key` (`bindingKey(leg, session)`) through `leaf`'s title menu, as a user does. */
-function pickBinding(leaf: string, key: string): void {
-  const title = titleOf(leaf)
-  if (title === null) throw new Error(`no title-selector on [data-leaf="${leaf}"]`)
-  title.click()
-  const menu = document.getElementById(title.getAttribute('aria-controls') ?? '')
-  const item = menu?.querySelector<HTMLButtonElement>(`button[data-binding="${key}"]`)
-  if (item == null) {
-    const offered = [...(menu?.querySelectorAll<HTMLButtonElement>('button') ?? [])].map((b) => b.dataset.binding)
-    throw new Error(`[data-leaf="${leaf}"] offers no ${JSON.stringify(key)} — offered: ${JSON.stringify(offered)}`)
-  }
-  item.click()
-}
-
 let view: EditorView
 
-const resultsText = () => document.querySelector('#results')?.textContent ?? ''
-const idle = () => document.querySelector<HTMLElement>('#results')?.dataset.state === 'idle' && resultsText() !== ''
-const term = () => document.querySelector('[data-leaf="lambda-0"] .term')?.textContent ?? ''
-const heading = () => document.querySelector('[data-leaf="lambda-0"] h2')?.textContent ?? ''
-const editorHost = () => document.querySelector<HTMLElement>('[data-leaf="lambda-0"] .term-editor')
 const everyEditorHost = () => [...document.querySelectorAll('.term-editor')]
-const rowNames = () =>
-  [...document.querySelectorAll<HTMLElement>('.buffer-list .buffer-row-name')].map((e) => e.textContent)
 
 /**
  * Open the header's buffer list, leaving it open if it already is — `buffer-restore.test.ts`'s helper
@@ -100,26 +78,6 @@ const clickRowControl = (name: string) => {
   b.click()
 }
 
-/** What the mounted editor actually holds, read off CodeMirror rather than off the DOM's text nodes,
- * which are virtualized and would answer only the visible lines. */
-function editorDoc(): string {
-  const host = editorHost()
-  if (host === null) throw new Error('no scratch editor mounted under [data-leaf="lambda-0"]')
-  const cmView = EditorView.findFromDOM(host)
-  if (cmView === null) throw new Error('no CodeMirror view mounted under the editor host')
-  return cmView.state.doc.toString()
-}
-
-/** A real keystroke into the scratch's own editor — `scratch-edit.test.ts`'s helper and its reason:
- * `ScratchEditor#setText` sets a `#seeding` flag for its dispatch, so it reports no edit at all. */
-function typeIntoScratchEditor(text: string): void {
-  const host = editorHost()
-  if (host === null) throw new Error('no scratch editor mounted under [data-leaf="lambda-0"]')
-  const cmView = EditorView.findFromDOM(host)
-  if (cmView === null) throw new Error('no CodeMirror view mounted under the editor host')
-  cmView.dispatch({ changes: { from: 0, to: cmView.state.doc.length, insert: text } })
-}
-
 describe('a cooled buffer warmed and bound to a pane again', () => {
   beforeAll(async () => {
     document.body.innerHTML = SHELL
@@ -143,8 +101,8 @@ describe('a cooled buffer warmed and bound to a pane again', () => {
     )
     document.querySelector<HTMLButtonElement>('[data-leaf="lambda-0"] button.detach')?.click()
     await until(() => editorHost() !== null, 'the fork to mount its editor')
-    await until(() => term() !== '', 'the forked buffer to produce its first frame')
-    const forked = editorDoc()
+    await until(() => lambdaTermText() !== '', 'the forked buffer to produce its first frame')
+    const forked = lambdaEditorDoc()
     expect(forked).not.toBe('')
 
     // STAGE 1 — COOL. The pane goes back to the source session and the editor comes down with it, which
@@ -153,8 +111,8 @@ describe('a cooled buffer warmed and bound to a pane again', () => {
     // between them — a buffer that survives while its editor does not.
     await openList()
     clickRowControl('pause λ copy 1')
-    expect(heading()).not.toContain('not linked')
-    expect(heading()).toContain('λ · program')
+    expect(lambdaHeading()).not.toContain('not linked')
+    expect(lambdaHeading()).toContain('λ · program')
     expect(editorHost()).toBeNull()
     expect(rowNames()).toEqual(['λ copy 1 · not shown · paused'])
 
@@ -172,7 +130,7 @@ describe('a cooled buffer warmed and bound to a pane again', () => {
     // buffer's frames with no editor and no control able to summon one, and the wait below is what
     // timed out.
     pickBinding('lambda-0', bindingKey('lambda', 'scratch-1'))
-    expect(heading()).toContain('copy · not linked')
+    expect(lambdaHeading()).toContain('copy · not linked')
 
     // THE MOUNT IS SYNCHRONOUS WITH THE `change` EVENT, so anything past a frame or two is the absence
     // rather than a slow machine — which is why this wait is worth naming. The bound itself is
@@ -186,7 +144,7 @@ describe('a cooled buffer warmed and bound to a pane again', () => {
     // second mount is the failure `LambdaPane.receiveEditor` throws on and `setEditor`'s re-seed branch
     // would absorb silently, so the count is the assertion that catches it.
     expect(everyEditorHost()).toHaveLength(1)
-    expect(editorDoc()).toBe(forked)
+    expect(lambdaEditorDoc()).toBe(forked)
 
     // STAGE 4 — AND IT IS A LIVE EDITOR OVER A LIVE WORKER, which a mounted `.term-editor` cannot show
     // on its own: the box would look identical over a session `pool.unbind` had terminated, and over one
@@ -198,13 +156,16 @@ describe('a cooled buffer warmed and bound to a pane again', () => {
     // pane was on the source session until the `change` event two statements up, so its frames region is
     // empty until this buffer's worker answers — and what it answers with is the text of record at step
     // 0, which is already a normal form here, so the pane ends up showing exactly the string the editor
-    // is holding. Without this wait the `term() !== beforeEdit` below would fire on the REBUILD rather
-    // than on the keystroke, and the edit would go unmeasured.
-    await until(() => term() === asShown(forked), "the warmed buffer's own rebuild to reach its newly bound pane")
-    const beforeEdit = term()
+    // is holding. Without this wait the `lambdaTermText() !== beforeEdit` below would fire on the REBUILD
+    // rather than on the keystroke, and the edit would go unmeasured.
+    await until(
+      () => lambdaTermText() === asShown(forked),
+      "the warmed buffer's own rebuild to reach its newly bound pane",
+    )
+    const beforeEdit = lambdaTermText()
     typeIntoScratchEditor('(λa. a a) (λb. b)')
-    await until(() => term() !== beforeEdit, 'the re-bound buffer to recompile from a keystroke')
-    expect(term()).toContain('b')
+    await until(() => lambdaTermText() !== beforeEdit, 'the re-bound buffer to recompile from a keystroke')
+    expect(lambdaTermText()).toContain('b')
     // AND NOTHING FORKED A SECOND BUFFER TO GET HERE. A fix that answered the mount by forking would
     // satisfy every assertion above and read two rows here. Reopened first, per `closeList`'s doc: the
     // rebind two stages up changed this row's pane count and no repaint reaches a list already open.

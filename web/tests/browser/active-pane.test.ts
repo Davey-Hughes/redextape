@@ -3,7 +3,20 @@ import { beforeAll, beforeEach, describe, expect, it } from 'vitest'
 import { page, userEvent } from 'vitest/browser'
 import { LAYOUT_STORAGE_KEY } from '../../src/layout'
 import { bindingKey } from '../../src/view-header'
-import { resetToFourViews, SHELL, until } from './harness'
+import {
+  editorsInLeaf,
+  lambdaLeaves,
+  leafIds,
+  linkStatus,
+  pickBinding,
+  resetToFourViews,
+  SHELL,
+  splitSame,
+  stateIdle,
+  stepTextOf,
+  titleOf,
+  until,
+} from './harness'
 
 /**
  * **THE SHARED SURFACES AND THE λ LEG'S TWO VIEWS** — what the ONE status line and the ONE source editor decoration
@@ -35,29 +48,6 @@ const lambdaDetached = (title: string) => `${title} view shows a copy — not li
 /** `link-status.ts`'s λ clause for a pin with no node in the term at this step. */
 const NO_NODE = 'this construct has no node in the λ term at this step'
 
-const leafIds = () => [...document.querySelectorAll<HTMLElement>('[data-leaf]')].map((e) => e.dataset.leaf ?? '')
-const lambdaLeaves = () =>
-  [...document.querySelectorAll<HTMLElement>('[data-kind="lambda"]')].map((e) => e.dataset.leaf ?? '')
-/** The title-selector of `leaf`'s view — the pair in force is its `data-binding`. */
-const titleOf = (leaf: string) => document.querySelector<HTMLButtonElement>(`[data-leaf="${leaf}"] button.view-title`)
-
-/** Pick `key` (`bindingKey(leg, session)`) through `leaf`'s title menu, as a user does. */
-function pickBinding(leaf: string, key: string): void {
-  const title = titleOf(leaf)
-  if (title === null) throw new Error(`no title-selector on [data-leaf="${leaf}"]`)
-  title.click()
-  const menu = document.getElementById(title.getAttribute('aria-controls') ?? '')
-  const item = menu?.querySelector<HTMLButtonElement>(`button[data-binding="${key}"]`)
-  if (item == null) {
-    const offered = [...(menu?.querySelectorAll<HTMLButtonElement>('button') ?? [])].map((b) => b.dataset.binding)
-    throw new Error(`[data-leaf="${leaf}"] offers no ${JSON.stringify(key)} — offered: ${JSON.stringify(offered)}`)
-  }
-  item.click()
-}
-
-const editorsIn = (leaf: string) => document.querySelectorAll(`[data-leaf="${leaf}"] .cm-editor`).length
-const status = () => document.querySelector('#link-status')?.textContent ?? ''
-
 /**
  * The construct the SOURCE editor's running-focus decoration is currently over, or `''` for none —
  * `running-focus.test.ts`'s reading, with two differences this file's fixture forces.
@@ -84,8 +74,6 @@ const transportClick = (leaf: string, label: string): void => {
   b.click()
 }
 
-const stepTextOf = (leaf: string) => document.querySelector(`[data-leaf="${leaf}"] .step`)?.textContent ?? ''
-
 /**
  * Put focus inside `leaf` and report what the pane's own chrome says its binding is.
  *
@@ -108,34 +96,6 @@ const focusPane = (leaf: string): void => {
   if (document.activeElement !== title) throw new Error(`focus did not land on [data-leaf="${leaf}"]`)
 }
 
-/**
- * Split `leaf` through `control` into a second pane of the same kind on the same session — the
- * "another view of this" entry, first in every menu. `two-lambda-panes.test.ts`'s `splitSame`, label check and all.
- */
-const splitSame = (leaf: string, dir: 'row' | 'column'): void => splitVia(leaf, dir, 'same')
-
-/**
- * Split `leaf` through its `⋯` menu, as a user does: `pick` is `'same'` (another view of this), `'source'`,
- * or a `bindingKey(leg, session)`.
- */
-function splitVia(leaf: string, dir: 'row' | 'column', pick: string): void {
-  const more = document.querySelector<HTMLButtonElement>(`[data-leaf="${leaf}"] button.view-more`)
-  if (more === null) throw new Error(`no view menu on [data-leaf="${leaf}"]`)
-  more.click()
-  const menu = document.getElementById(more.getAttribute('aria-controls') ?? '')
-  menu?.querySelector<HTMLButtonElement>(`button.view-split[data-dir="${dir}"]`)?.click()
-  const selector =
-    pick === 'same' ? 'button[data-same]' : pick === 'source' ? 'button[data-source]' : `button[data-binding="${pick}"]`
-  const item = menu?.querySelector<HTMLButtonElement>(`.view-menu-pairs ${selector}`)
-  if (item == null) {
-    const offered = [...(menu?.querySelectorAll<HTMLButtonElement>('.view-menu-pairs button') ?? [])].map(
-      (b) => b.textContent,
-    )
-    throw new Error(`[data-leaf="${leaf}"] offers no ${pick} to split into — offered: ${offered.join(' | ')}`)
-  }
-  item.click()
-}
-
 let view: EditorView
 
 beforeAll(async () => {
@@ -147,7 +107,7 @@ beforeAll(async () => {
   await page.viewport(1280, 896)
   document.body.innerHTML = SHELL
   view = await (await import('../../src/main')).ready
-  await until(() => document.querySelector<HTMLElement>('#results')?.dataset.state === 'idle', 'the first compile')
+  await until(stateIdle, 'the first compile')
 })
 
 beforeEach(async () => {
@@ -182,7 +142,7 @@ beforeEach(async () => {
 async function twoDisagreeingLambdaPanes(): Promise<[string, string]> {
   // 1. Fork `lambda-0` onto a scratch buffer — the pane that IS outside the correspondence.
   document.querySelector<HTMLButtonElement>('[data-leaf="lambda-0"] button.detach')?.click()
-  await until(() => editorsIn('lambda-0') > 0, 'the fork to mount an editor')
+  await until(() => editorsInLeaf('lambda-0') > 0, 'the fork to mount an editor')
   // THE BUFFER'S OWN PAIR, READ OFF THE PANE THAT WAS JUST FORKED — where step 3 below used to write
   // `('lambda', 'lambda-scratch')`, the fixed id every fork produced under 5d-i's singleton.
   // 5d-ii-c decision 1 mints `scratch-N` per fork and `main()` runs once per test FILE, so the number
@@ -219,10 +179,10 @@ describe('the app-wide surfaces beside a λ view on a copy', () => {
     expect(title).toMatch(/^λ · copy \d+$/)
 
     focusPane(sourcePane)
-    expect(status()).toBe(lambdaDetached(title))
+    expect(linkStatus()).toBe(lambdaDetached(title))
 
     focusPane(scratchPane)
-    expect(status()).toBe(lambdaDetached(title))
+    expect(linkStatus()).toBe(lambdaDetached(title))
   })
 
   /**
@@ -279,12 +239,12 @@ describe('the app-wide surfaces beside a λ view on a copy', () => {
     view.dispatch({ selection: { anchor: src.indexOf('40') } })
     view.focus()
     await userEvent.keyboard("{Control>}'{/Control}")
-    await until(() => status().includes(NO_NODE), 'the program’s λ view to say `40` has no node at step 1')
-    expect(status().startsWith(lambdaDetached(title))).toBe(true)
+    await until(() => linkStatus().includes(NO_NODE), 'the program’s λ view to say `40` has no node at step 1')
+    expect(linkStatus().startsWith(lambdaDetached(title))).toBe(true)
 
     focusPane(scratchPane)
-    expect(status(), 'the copy’s view answered for the program’s term').toContain(NO_NODE)
+    expect(linkStatus(), 'the copy’s view answered for the program’s term').toContain(NO_NODE)
     focusPane(sourcePane)
-    expect(status()).toContain(NO_NODE)
+    expect(linkStatus()).toContain(NO_NODE)
   })
 })

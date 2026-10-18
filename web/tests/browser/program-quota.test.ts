@@ -2,7 +2,7 @@ import { EditorView } from '@codemirror/view'
 import { describe, expect, it } from 'vitest'
 import { BUFFERS_STORAGE_KEY, parseBuffers, serializeBuffers } from '../../src/buffers-store'
 import { PROGRAM_STORAGE_KEY } from '../../src/program-store'
-import { SHELL, until } from './harness'
+import { noticeEl, noticeElText, SHELL, stateIdle, until } from './harness'
 
 /**
  * **A REFUSED PROGRAM WRITE IS REPORTED ONLY WHILE THE PROGRAM DIFFERS FROM WHAT A RELOAD WOULD RESTORE** — Plan 7 part
@@ -41,9 +41,6 @@ localStorage.setItem = (key: string, value: string): void => {
 }
 
 const PROGRAM_LINE = 'the program is not being saved — this browser’s storage for this site is full'
-const notice = () => document.querySelector<HTMLElement>('#notice') as HTMLElement
-const noticeText = () => notice().querySelector('.notice-text')?.textContent ?? ''
-const idle = () => document.querySelector<HTMLElement>('#results')?.dataset.state === 'idle'
 const copyEditor = (): EditorView | null => {
   const el = document.querySelector<HTMLElement>('[data-leaf="lambda-0"] .term-editor')
   return el === null ? null : EditorView.findFromDOM(el)
@@ -69,17 +66,17 @@ describe('a program write refused by storage', () => {
       subtree: true,
     })
     view = await (await import('../../src/main')).ready
-    await until(() => idle() && copyEditor() !== null, 'the first compile and the copy')
+    await until(() => stateIdle() && copyEditor() !== null, 'the first compile and the copy')
     // THE WRITE UNDER TEST HAPPENED, AND WAS REFUSED: silence after no write would prove nothing.
     expect(refused).toBeGreaterThan(0)
-    expect(notice().hidden).toBe(true)
+    expect(noticeEl().hidden).toBe(true)
     expect(saidAboutStorage()).toEqual([])
   })
 
   it('says the program is not being saved once an edit is refused', async () => {
     view.dispatch({ changes: { from: 0, to: view.state.doc.length, insert: 'let x = 1;\nx + 1\n' } })
-    await until(() => noticeText() === PROGRAM_LINE, 'the resting line')
-    expect(notice().hidden).toBe(false)
+    await until(() => noticeElText() === PROGRAM_LINE, 'the resting line')
+    expect(noticeEl().hidden).toBe(false)
     // SAID IN THE LIVE REGION, ONCE, AS WELL AS SHOWN.
     expect(saidAboutStorage()).toEqual([PROGRAM_LINE])
   })
@@ -93,13 +90,13 @@ describe('a program write refused by storage', () => {
       () => parseBuffers(localStorage.getItem(BUFFERS_STORAGE_KEY))?.buffers[0]?.text === edited,
       'the copy, stored',
     )
-    expect(noticeText()).toBe(PROGRAM_LINE)
+    expect(noticeElText()).toBe(PROGRAM_LINE)
   })
 
   it('takes it back once a write of the program goes through', async () => {
     refuse = false
     view.dispatch({ changes: { from: 0, to: view.state.doc.length, insert: 'let x = 2;\nx + 1\n' } })
-    await until(() => notice().hidden === true, 'the resting line to go')
-    expect(noticeText()).toBe('')
+    await until(() => noticeEl().hidden === true, 'the resting line to go')
+    expect(noticeElText()).toBe('')
   })
 })

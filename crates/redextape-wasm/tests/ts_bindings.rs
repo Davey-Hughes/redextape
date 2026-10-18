@@ -18,11 +18,11 @@
 #![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic, clippy::pedantic)]
 #![cfg(feature = "ts")]
 
-use std::collections::BTreeSet;
 use std::path::Path;
 
 use redextape_test_support::ts_derive_scan::{
-    assert_overrides_match_field_nullability, ts_deriving_type_names_in_crate, without_doc_comments,
+    assert_generated_covers_every_derive_site, assert_no_generated_type_carries_bigint,
+    assert_overrides_match_field_nullability,
 };
 use redextape_wasm::{
     AsmStatus, Decoded, LambdaStatus, ReductionStatus, RunStatus, TmScratchStatus, TmStatus, ValueRun,
@@ -67,16 +67,7 @@ fn generated() -> Vec<(&'static str, String)> {
 /// having nothing to do with the generated type.
 #[test]
 fn no_generated_type_carries_bigint() {
-    for (name, ts) in generated() {
-        assert!(
-            !without_doc_comments(&ts).contains("bigint"),
-            "{name} generates `bigint`. A `u64`/`i64` field crosses this boundary as a JS number, so \
-             it needs an override — `#[cfg_attr(feature = \"ts\", ts(type = \"number\"))]` for a bare \
-             field, or `ts(type = \"number | null\")` for one behind an `Option`, because \
-             `ts(type = ...)` replaces the WHOLE field type rather than the integer inside it. \
-             Generated:\n{ts}"
-        );
-    }
+    assert_no_generated_type_carries_bigint(&generated());
 }
 
 /// The list above covers every type in this crate that derives `ts_rs::TS` — by name, not merely by
@@ -97,20 +88,7 @@ fn no_generated_type_carries_bigint() {
 /// close rather than denying them.
 #[test]
 fn the_gate_covers_every_exported_type() {
-    let crate_root = Path::new(env!("CARGO_MANIFEST_DIR"));
-    let in_src = ts_deriving_type_names_in_crate(crate_root, &crate_root.join("tests").join("ts_bindings.rs"));
-    let in_gate: BTreeSet<String> = generated().into_iter().map(|(name, _)| name.to_string()).collect();
-
-    let missing_from_gate: Vec<&String> = in_src.difference(&in_gate).collect();
-    let stale_in_gate: Vec<&String> = in_gate.difference(&in_src).collect();
-
-    assert!(
-        missing_from_gate.is_empty() && stale_in_gate.is_empty(),
-        "`generated()` and this crate's `ts_rs::TS` derive sites disagree. Carry the derive but are \
-         missing from `generated()`: {missing_from_gate:?}. Listed in `generated()` but no longer carry \
-         the derive: {stale_in_gate:?}. Add the new type to `generated()`, or remove the stale entry — \
-         or, if the derive was written in some other form, make the two agree."
-    );
+    assert_generated_covers_every_derive_site(Path::new(env!("CARGO_MANIFEST_DIR")), &generated());
 }
 
 /// No field override may misstate whether the field can be null.

@@ -4,9 +4,7 @@ import { beforeAll, describe, expect, it } from 'vitest'
 import { page } from 'vitest/browser'
 import { LAYOUT_STORAGE_KEY } from '../../src/layout'
 import { parseWorkspace } from '../../src/workspace'
-import { SHELL, showFourViews, until } from './harness'
-
-const leafIds = () => [...document.querySelectorAll<HTMLElement>('main [data-leaf]')].map((el) => el.dataset.leaf ?? '')
+import { mainLeafIds, SHELL, showFourViews, stateIdle, until } from './harness'
 
 beforeAll(async () => {
   // WIDE ENOUGH FOR ITS ADDS: at the runner's default 414 px a view is 201 px wide, and the app refuses a split or a
@@ -15,7 +13,7 @@ beforeAll(async () => {
   document.body.innerHTML = SHELL
   const view: EditorView = await (await import('../../src/main')).ready
   view.dispatch({ changes: { from: 0, to: view.state.doc.length, insert: 'let x = 40; x + 2' } })
-  await until(() => document.querySelector<HTMLElement>('#results')?.dataset.state === 'idle', 'the first compile')
+  await until(stateIdle, 'the first compile')
 })
 
 describe('the app header', () => {
@@ -34,8 +32,8 @@ describe('the app header', () => {
     expect(items.map((b) => b.textContent)).toEqual(['λ · program', 'asm · program', 'TM · program'])
     // BY ITS LABEL, NOT ITS INDEX: the asm pair sits between the other two now, so `items[1]` adds an asm view.
     items.find((b) => b.textContent === 'TM · program')?.click()
-    await until(() => leafIds().length === 5, 'a fifth view')
-    expect(leafIds()).toEqual(['source', 'lambda-0', 'pane-1', 'asm-0', 'tm-0'])
+    await until(() => mainLeafIds().length === 5, 'a fifth view')
+    expect(mainLeafIds()).toEqual(['source', 'lambda-0', 'pane-1', 'asm-0', 'tm-0'])
     expect(document.querySelector('[data-leaf="pane-1"]')?.contains(document.activeElement)).toBe(true)
     expect(document.querySelector('#notice .notice-text')?.textContent).toBe('view added — TM · program')
     // **BESIDE MEANS TO ITS RIGHT** (spec §5). `leaves()` walks a row split and a column split in the
@@ -47,10 +45,10 @@ describe('the app header', () => {
 
   it('resets the preset: the default views back, and says so', async () => {
     // THE PRECONDITION, SINCE THE DEFAULT IS A SUBSET OF WHAT IS HERE: more views than the default's two.
-    expect(leafIds().length).toBeGreaterThan(2)
+    expect(mainLeafIds().length).toBeGreaterThan(2)
     document.querySelector<HTMLButtonElement>('#reset-preset')?.click()
-    await until(() => leafIds().length === 2, 'the default views')
-    expect(leafIds()).toEqual(['source', 'tm-0'])
+    await until(() => mainLeafIds().length === 2, 'the default views')
+    expect(mainLeafIds()).toEqual(['source', 'tm-0'])
     expect(document.querySelector('#notice .notice-text')?.textContent).toBe(
       'Explorer reset — the default views are back',
     )
@@ -66,12 +64,12 @@ describe('the app header', () => {
     expect(parseWorkspace(localStorage.getItem(LAYOUT_STORAGE_KEY))?.focused).toBe('tm-0')
     // THE FOUR VIEWS THE CASES BELOW WERE WRITTEN AGAINST, which this reset gave until the view layouts.
     await showFourViews()
-    await until(() => leafIds().length === 4, 'all four views')
+    await until(() => mainLeafIds().length === 4, 'all four views')
   })
 
   it('offers source to + view only while no view shows it', async () => {
     document.querySelector<HTMLButtonElement>('[data-leaf="source"] button.view-close')?.click()
-    await until(() => !leafIds().includes('source'), 'the source view to close')
+    await until(() => !mainLeafIds().includes('source'), 'the source view to close')
     document.querySelector<HTMLButtonElement>('#new-view')?.click()
     expect([...document.querySelectorAll('#new-view-menu button')].map((b) => b.textContent)).toContain('source')
     // **AND IT BRINGS IT BACK** — a route to a closed source view besides its toggle and *reset preset*, and the

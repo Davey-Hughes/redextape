@@ -1,12 +1,8 @@
 import type { EditorView } from '@codemirror/view'
 import { beforeAll, describe, expect, it } from 'vitest'
-import { SHELL, until } from './harness'
+import { idle, SHELL, until } from './harness'
 
 let view: EditorView
-
-const idle = () =>
-  document.querySelector<HTMLElement>('#results')?.dataset.state === 'idle' &&
-  (document.querySelector('#results')?.textContent ?? '') !== ''
 
 /** Every editable text region on the page, as a screen reader finds them. */
 const textboxes = () => [...document.querySelectorAll<HTMLElement>('.cm-content[contenteditable="true"]')]

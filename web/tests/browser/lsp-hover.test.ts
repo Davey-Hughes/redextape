@@ -1,7 +1,8 @@
-import { EditorView } from '@codemirror/view'
+import type { EditorView } from '@codemirror/view'
 import { beforeAll, describe, expect, it } from 'vitest'
 import { userEvent } from 'vitest/browser'
-import { SHELL, until } from './harness'
+import { makeCopy } from './editor-view-fixture'
+import { idle, markersIn, paneOrThrow, retype, SHELL, until } from './harness'
 
 /**
  * **HOVER, THROUGH THE APP** — Plan 7 part 3c, design §8.6 and §11.2.
@@ -38,10 +39,6 @@ import { SHELL, until } from './harness'
  */
 
 let view: EditorView
-
-const idle = () =>
-  document.querySelector<HTMLElement>('#results')?.dataset.state === 'idle' &&
-  (document.querySelector('#results')?.textContent ?? '') !== ''
 
 /**
  * The exact fixture and offset `redextape-lsp`'s own
@@ -219,38 +216,6 @@ async function assertNeverOpens(v: EditorView, gesture: () => Promise<void>, att
   }
 }
 
-const paneHost = (leaf: string): HTMLElement => {
-  const el = document.querySelector<HTMLElement>(`[data-leaf="${leaf}"]`)
-  if (el === null) throw new Error(`no pane mounted at [data-leaf="${leaf}"]`)
-  return el
-}
-
-const editorViewOf = (pane: HTMLElement): EditorView => {
-  const host = pane.querySelector<HTMLElement>('.term-editor')
-  if (host === null) throw new Error('this pane has no mounted editor')
-  const v = EditorView.findFromDOM(host)
-  if (v === null) throw new Error('no CodeMirror view under the editor host')
-  return v
-}
-
-/** Make a copy of what this pane shows, through the control a user has — `lsp-copy-diagnostics.test.ts`'s idiom. */
-async function makeCopy(pane: HTMLElement): Promise<EditorView> {
-  const button = pane.querySelector<HTMLButtonElement>('button.detach')
-  if (button === null) throw new Error('this view offers no `edit a copy` control')
-  expect(button.disabled, 'the fork control should be available on this machine').toBe(false)
-  button.click()
-  await until(() => pane.querySelector('.term-editor') !== null, 'the copy to mount its editor')
-  return editorViewOf(pane)
-}
-
-/** Replace a copy's text and wait past the edit debounce, which is what posts `didChange`. */
-function retype(v: EditorView, text: string): void {
-  v.dispatch({ changes: { from: 0, to: v.state.doc.length, insert: text } })
-}
-
-/** Error markers inside ONE pane's editor — the settle signal for "this pane's edit reached the server". */
-const markersIn = (pane: HTMLElement) => pane.querySelectorAll('.cm-editor .cm-lintRange-error').length
-
 describe('hover, through the app', () => {
   beforeAll(async () => {
     document.body.innerHTML = SHELL
@@ -327,7 +292,7 @@ describe('hover, through the app', () => {
   it('pointer hover over a TM rule names the goto target', async () => {
     document.querySelector<HTMLButtonElement>('[data-leaf="asm-0"] button.view-close')?.click()
     await until(() => document.querySelector('[data-leaf="asm-0"]') === null, 'the asm view to close')
-    const pane = paneHost('tm-0')
+    const pane = paneOrThrow('tm-0')
     const editor = await makeCopy(pane)
     retype(editor, MACHINE)
 
@@ -370,7 +335,7 @@ describe('hover, through the app', () => {
    * see `LAMBDA_WOULD_ANSWER_UNDER_THE_FALLBACK`'s own doc for the measurement.
    */
   it('shows no tooltip anywhere in a λ copy, by pointer or by F2', async () => {
-    const pane = paneHost('lambda-0')
+    const pane = paneOrThrow('lambda-0')
     const editor = await makeCopy(pane)
     retype(editor, LAMBDA_WOULD_ANSWER_UNDER_THE_FALLBACK)
     await until(() => markersIn(pane) > 0, "the λ copy's edit to reach the server")

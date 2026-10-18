@@ -1,7 +1,7 @@
 import { EditorView } from '@codemirror/view'
 import { describe, expect, it } from 'vitest'
 import { BUFFERS_STORAGE_KEY, BUFFERS_VERSION, parseBuffers, serializeBuffers } from '../../src/buffers-store'
-import { SHELL, storeFourViews, until } from './harness'
+import { asmPane, asmValue, SHELL, stateIdle, storeFourViews, until } from './harness'
 
 /**
  * An asm copy survives a reload (Plan 7 part 5 spec §7, amendment 23): stored at `BUFFERS_VERSION` 2 with its leg,
@@ -19,13 +19,10 @@ async function mount(): Promise<EditorView> {
   return (await import(/* @vite-ignore */ spec)).ready
 }
 
-const asm = () => document.querySelector<HTMLElement>('.pane[data-leaf="asm-0"]') as HTMLElement
 const editorText = () => {
-  const el = asm().querySelector<HTMLElement>('.term-editor')
+  const el = asmPane().querySelector<HTMLElement>('.term-editor')
   return el === null ? null : (EditorView.findFromDOM(el)?.state.doc.toString() ?? null)
 }
-const value = () => asm().querySelector('.asm-value')?.textContent ?? ''
-const idle = () => document.querySelector<HTMLElement>('#results')?.dataset.state === 'idle'
 
 describe('restoring an asm copy', () => {
   it('stores it on its leg at version 2, and brings it back in its view with its text', async () => {
@@ -34,15 +31,15 @@ describe('restoring an asm copy', () => {
     storeFourViews()
     const view = await mount()
     view.dispatch({ changes: { from: 0, to: view.state.doc.length, insert: 'let x = 40; x + 2' } })
-    await until(() => !idle(), 'the compile to start')
-    await until(idle, 'the compile to finish')
-    await until(() => asm().querySelector('.asm-row') !== null, 'the program’s listing')
-    asm().querySelector<HTMLButtonElement>('button.detach')?.click()
+    await until(() => !stateIdle(), 'the compile to start')
+    await until(stateIdle, 'the compile to finish')
+    await until(() => asmPane().querySelector('.asm-row') !== null, 'the program’s listing')
+    asmPane().querySelector<HTMLButtonElement>('button.detach')?.click()
     await until(() => editorText() !== null, 'the copy’s editor')
     const typed = 'result Nat\n\n    li\trr, #9\n    halt\n'
-    const v = EditorView.findFromDOM(asm().querySelector<HTMLElement>('.term-editor') as HTMLElement) as EditorView
+    const v = EditorView.findFromDOM(asmPane().querySelector<HTMLElement>('.term-editor') as HTMLElement) as EditorView
     v.dispatch({ changes: { from: 0, to: v.state.doc.length, insert: typed } })
-    await until(() => value() === 'value: 9', 'the edit to build')
+    await until(() => asmValue() === 'value: 9', 'the edit to build')
 
     const raw = localStorage.getItem(BUFFERS_STORAGE_KEY)
     expect(JSON.parse(raw ?? '{}').version).toBe(BUFFERS_VERSION)
@@ -51,8 +48,8 @@ describe('restoring an asm copy', () => {
 
     await mount()
     await until(() => editorText() === typed, 'the restored copy’s editor')
-    await until(() => value() === 'value: 9', 'the restored copy’s value')
-    expect(asm().textContent).toMatch(/copy · not linked/)
+    await until(() => asmValue() === 'value: 9', 'the restored copy’s value')
+    expect(asmPane().textContent).toMatch(/copy · not linked/)
   })
 
   /**
@@ -75,9 +72,9 @@ describe('restoring an asm copy', () => {
       }),
     )
     await mount()
-    await until(() => asm().textContent?.includes('copy · not linked') === true, 'the view to show the stored copy')
+    await until(() => asmPane().textContent?.includes('copy · not linked') === true, 'the view to show the stored copy')
     await until(() => editorText() === text, 'the stored copy’s editor')
-    const mark = () => asm().querySelector('.cm-editor .cm-lintRange-error')?.textContent ?? null
+    const mark = () => asmPane().querySelector('.cm-editor .cm-lintRange-error')?.textContent ?? null
     await until(() => mark() === 'nowhere', 'the editor to mark the label that names nothing')
   })
 })

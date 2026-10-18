@@ -109,7 +109,7 @@ fn ended_in_guard(program: &Program, enc: &dyn Encoding) -> bool {
 ///
 /// **A DELIBERATE INDEPENDENT MODEL OF `tm.rs`'s `search_width`, NOT A DUPLICATE TO BE FOLDED.** This
 /// file carries no assertion about the ladder — it is a PROBE, and its only `assert!`s are parse
-/// checks — so the reason here is not the two test copies' reason. It exists to WALK the ladder
+/// checks — so the reason here is not the test copy's reason. It exists to WALK the ladder
 /// independently and print what each width does; routing it through the library's own definition would
 /// make it report whatever that definition says, and a report that cannot disagree with the thing it
 /// reports on measures nothing. Leave the copy.

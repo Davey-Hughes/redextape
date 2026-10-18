@@ -3,46 +3,17 @@ import { page } from 'vitest/browser'
 import { LINE_HEIGHT } from '../../src/lambda-body'
 import { LambdaPane } from '../../src/lambda-pane'
 import { Tree } from '../../src/lambda-tree'
-import type { PaneEvents } from '../../src/pane-chrome'
 import { icicleRect, TermMap } from '../../src/term-map'
-import type { LambdaState } from '../../src/types'
 import { DEFAULT_DISPLAY } from '../../src/workspace'
+import { lambdaFrame } from '../node/session-fixtures'
 import { wireOf } from '../node/tree-fixture'
-import { until } from './harness'
+import { controlState, fixtureHost, frames, inertEvents, until } from './harness'
 
 /** The term map panel on a λ view built directly (Plan 7 part 4a, spec §6). */
-const host = (): HTMLElement => {
-  const el = document.createElement('section')
-  el.className = 'pane term-map-fixture'
-  el.style.width = '640px'
-  document.body.append(el)
-  return el
-}
+const host = (): HTMLElement => fixtureHost('term-map-fixture')
 
-const events = (over: Partial<PaneEvents> = {}): PaneEvents => ({
-  back: vi.fn(),
-  forward: vi.fn(),
-  toNewest: vi.fn(),
-  play: vi.fn(),
-  restart: vi.fn(),
-  extend: vi.fn(),
-  speed: () => 8,
-  setSpeed: vi.fn(),
-  rebind: vi.fn(),
-  ...over,
-})
-
-const frame: LambdaState = { text: 'x', spans: new Uint8Array(), cut: null, step: 0, redex_span: null, owner: 'None' }
-const CONTROLS = {
-  canRestart: true,
-  canBack: false,
-  canForward: true,
-  canToNewest: true,
-  canPlay: true,
-  playing: false,
-  stepText: '0',
-  continueLabel: null,
-}
+const frame = lambdaFrame('x')
+const CONTROLS = controlState(false, '0')
 
 /** 300 short arguments, one line each: nothing folded, and far taller than the view. */
 const WIDE = `g ${Array.from({ length: 300 }, (_, i) => `(a${i} b${i})`).join(' ')}`
@@ -56,9 +27,6 @@ const MID = `g ${args(0, 150)} ((\\x. x) y) ${args(150, 300)}`
 
 /** A λ view's display with its term map in minimap mode. */
 const MINIMAP = { ...DEFAULT_DISPLAY, map: 'minimap' } as const
-
-/** Two animation frames: long enough for the browser to deliver a scroll's own event. */
-const frames = () => new Promise<void>((r) => requestAnimationFrame(() => requestAnimationFrame(() => r())))
 
 /** Click the middle of node `node`'s icicle box. */
 const clickIcicle = (canvas: HTMLCanvasElement, t: Tree, node: number) => {
@@ -85,7 +53,7 @@ describe('the term map', () => {
     const draw = vi.spyOn(TermMap.prototype, 'draw')
     const clear = vi.spyOn(TermMap.prototype, 'clear')
     try {
-      const pane = new LambdaPane(el, events({ panel }))
+      const pane = new LambdaPane(el, inertEvents({ panel }))
       pane.render(frame, CONTROLS)
       pane.renderTree({ kind: 'refused', nodes: 30_000 })
       pane.renderTree({ kind: 'tree', tree: wireOf(WIDE) })
@@ -111,7 +79,7 @@ describe('the term map', () => {
   it('switches between icicle and minimap from its header, and reports the display', () => {
     const el = host()
     const display = vi.fn()
-    const pane = new LambdaPane(el, events({ display }), { map: true })
+    const pane = new LambdaPane(el, inertEvents({ display }), { map: true })
     pane.render(frame, CONTROLS)
     pane.renderTree({ kind: 'tree', tree: wireOf(WIDE) })
     const mode = (m: string) => el.querySelector<HTMLButtonElement>(`.map-mode[data-value="${m}"]`)
@@ -129,7 +97,7 @@ describe('the term map', () => {
    */
   it('opens the folds on the path of a node picked on the icicle, and scrolls its row on screen', async () => {
     const el = host()
-    const pane = new LambdaPane(el, events(), { map: true })
+    const pane = new LambdaPane(el, inertEvents(), { map: true })
     pane.render(frame, CONTROLS)
     const wire = wireOf(`g (h ${args(0, 150)}) z`, { nextRedex: null })
     const t = new Tree(wire)
@@ -158,7 +126,7 @@ describe('the term map', () => {
    */
   it('keeps the view where a pick put it, though a tree is drawn before the pick’s scroll reports itself', async () => {
     const el = host()
-    const pane = new LambdaPane(el, events(), { map: true })
+    const pane = new LambdaPane(el, inertEvents(), { map: true })
     pane.render(frame, CONTROLS)
     const wire = wireOf(MID)
     const t = new Tree(wire)
@@ -182,7 +150,7 @@ describe('the term map', () => {
    */
   it('empties, and says why, when the view falls back to flat text', () => {
     const el = host()
-    const pane = new LambdaPane(el, events(), { map: true })
+    const pane = new LambdaPane(el, inertEvents(), { map: true })
     pane.render(frame, CONTROLS)
     pane.renderTree({ kind: 'tree', tree: wireOf(WIDE) })
     const canvas = el.querySelector<HTMLCanvasElement>('.term-map') as HTMLCanvasElement
@@ -206,7 +174,7 @@ describe('the term map', () => {
    */
   it('draws each line of a short term 2 px tall, from the top of the minimap', () => {
     const el = host()
-    const pane = new LambdaPane(el, events(), { map: true, display: MINIMAP })
+    const pane = new LambdaPane(el, inertEvents(), { map: true, display: MINIMAP })
     pane.render(frame, CONTROLS)
     pane.renderTree({ kind: 'tree', tree: wireOf(`g ${args(0, 30)}`, { nextRedex: null }) })
     const canvas = el.querySelector<HTMLCanvasElement>('.term-map') as HTMLCanvasElement
@@ -228,7 +196,7 @@ describe('the term map', () => {
    */
   it('scrolls a tall term’s minimap with the view, so the view’s window stays in sight', async () => {
     const el = host()
-    const pane = new LambdaPane(el, events(), { map: true, display: MINIMAP })
+    const pane = new LambdaPane(el, inertEvents(), { map: true, display: MINIMAP })
     pane.render(frame, CONTROLS)
     pane.renderTree({ kind: 'tree', tree: wireOf(MID) })
     await frames()
@@ -263,7 +231,7 @@ describe('the term map', () => {
   /** A click names the line drawn under it, through however far the minimap is scrolled. */
   it('picks the line clicked on a scrolled minimap', async () => {
     const el = host()
-    const pane = new LambdaPane(el, events(), { map: true, display: MINIMAP })
+    const pane = new LambdaPane(el, inertEvents(), { map: true, display: MINIMAP })
     pane.render(frame, CONTROLS)
     pane.renderTree({ kind: 'tree', tree: wireOf(MID) })
     await frames()
@@ -294,7 +262,7 @@ describe('the term map', () => {
     const t = new Tree(wireOf(src))
     let spine = 0
     for (let k = 29; k > 10; k -= 1) spine = t.left(spine)
-    const pane = new LambdaPane(el, events(), { map: true, display: MINIMAP })
+    const pane = new LambdaPane(el, inertEvents(), { map: true, display: MINIMAP })
     pane.render(frame, CONTROLS)
     pane.renderTree({ kind: 'tree', tree: wireOf(src, { nextRedex: null, contractum: t.right(spine) }) })
     const canvas = el.querySelector<HTMLCanvasElement>('.term-map') as HTMLCanvasElement
@@ -320,7 +288,7 @@ describe('the term map', () => {
     const root = document.documentElement
     root.dataset.theme = 'light'
     try {
-      const pane = new LambdaPane(el, events(), { map: true })
+      const pane = new LambdaPane(el, inertEvents(), { map: true })
       pane.render(frame, CONTROLS)
       // `y`, a variable: drawn in `--rule`, and no mark crosses the middle of its box.
       const wire = wireOf('(\\x. x) y', { nextRedex: null })
@@ -357,7 +325,7 @@ describe('the term map beside a body whose box changes size', () => {
   it('outlines the lines a grown body shows, with no scroll to report them', async () => {
     await page.viewport(1280, 600)
     const el = host()
-    const pane = new LambdaPane(el, events(), { map: true, display: MINIMAP })
+    const pane = new LambdaPane(el, inertEvents(), { map: true, display: MINIMAP })
     pane.render(frame, CONTROLS)
     pane.renderTree({ kind: 'tree', tree: wireOf(WIDE, { nextRedex: null }) })
     await frames()
@@ -389,7 +357,7 @@ describe('the term map beside a body whose box changes size', () => {
   /** A body taken off the page — another Stage tab — is resized to nothing, and its map, off the page too, is not drawn. */
   it('draws nothing when the body leaves the page', async () => {
     const el = host()
-    const pane = new LambdaPane(el, events(), { map: true, display: MINIMAP })
+    const pane = new LambdaPane(el, inertEvents(), { map: true, display: MINIMAP })
     pane.render(frame, CONTROLS)
     pane.renderTree({ kind: 'tree', tree: wireOf(WIDE, { nextRedex: null }) })
     await frames()

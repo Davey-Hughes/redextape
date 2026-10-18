@@ -2,8 +2,8 @@ import type { EditorView } from '@codemirror/view'
 import { describe, expect, it } from 'vitest'
 import type { Leg } from '../../src/protocol'
 import type { SessionId } from '../../src/session-client'
-import { bindingKey } from '../../src/view-header'
-import { SHELL, until } from './harness'
+import { pickSessionBinding } from './binding-fixture'
+import { bufferRows, buffersButton, buffersMenu, idle, SHELL, tmPaneHost, until } from './harness'
 
 /**
  * **THE SECOND GESTURE — 5d-iv Task 10, design §4.7.** Task 9 wired the fork, which detaches a pane onto
@@ -36,55 +36,6 @@ import { SHELL, until } from './harness'
  * focus, which holds regardless of how many buffers remain after the click.
  */
 
-const resultsText = () => document.querySelector('#results')?.textContent ?? ''
-const idle = () => document.querySelector<HTMLElement>('#results')?.dataset.state === 'idle' && resultsText() !== ''
-
-const tmPaneHost = (): HTMLElement => {
-  const el = document.querySelector<HTMLElement>('[data-leaf="tm-0"]')
-  if (el === null) throw new Error('no TM pane mounted at [data-leaf="tm-0"]')
-  return el
-}
-
-/**
- * The header's buffers button — thrown rather than optional-chained past, the same standard
- * `tmPaneHost` sets: every test below needs the real element to act on, and a silent `null` here would
- * turn a missing mount point into a `TypeError` several lines away from where the mount actually failed.
- */
-const buffersButton = (): HTMLButtonElement => {
-  const el = document.querySelector<HTMLButtonElement>('#buffers')
-  if (el === null) throw new Error('no #buffers control in the header')
-  return el
-}
-
-/**
- * The popover `bufferList` appends beside `#buffers` — present once `bufferList` has run at all
- * (`main.ts` constructs it unconditionally now, per this task: the button is never withheld), whether or
- * not it is currently open.
- */
-const buffersMenu = (): HTMLElement => {
-  const el = document.querySelector<HTMLElement>('.buffer-list')
-  if (el === null) throw new Error('no .buffer-list popover beside #buffers')
-  return el
-}
-
-/**
- * Every row the list currently holds — elements rather than text, since `it('mints a warm TM
- * buffer...')`'s only claim is the COUNT.
- *
- * **FORCES THE LIST OPEN FIRST, THE WAY `buffer-restore.test.ts`'s OWN `openList` DOES, AND FOR THE
- * SAME REASON.** `bufferList`'s rows are built on `beforetoggle` — a closed list keeps whatever it last
- * rendered, which can predate a mint that happened while it was shut (`buffer-list.ts`'s own doc: "A
- * closed list has no state to keep fresh"). The *new TM copy* control dismisses the popover before it
- * mints (`buffer-list.ts`'s own click handler, the one gesture in that menu that still does), so every mint in this file leaves
- * the list closed on stale rows; reading it without reopening would answer what the list showed BEFORE
- * the mint, not what it holds now.
- */
-const bufferRows = (): HTMLElement[] => {
-  const button = buffersButton()
-  if (button.getAttribute('aria-expanded') !== 'true') button.click()
-  return [...document.querySelectorAll<HTMLElement>('.buffer-list .buffer-row')]
-}
-
 /**
  * Every mounted view's current binding, keyed by leaf id — read off the title-selector's own
  * `data-binding` rather than tracked separately, so `it('mints a warm TM buffer...')`'s "nothing
@@ -101,20 +52,6 @@ const paneBindings = (): Record<string, string> => {
     if (leaf !== undefined && title !== null) bindings[leaf] = title.dataset.binding ?? ''
   }
   return bindings
-}
-
-/** Rebind `pane` to `(leg, session)` through its title menu — the gesture a user makes through the
- * control, not a direct write to whatever `main.ts` holds underneath it. */
-const pickBinding = (pane: HTMLElement, target: { leg: Leg; session: SessionId }): void => {
-  const title = pane.querySelector<HTMLButtonElement>('button.view-title')
-  if (title === null) throw new Error('no title-selector on this view')
-  title.click()
-  const menu = document.getElementById(title.getAttribute('aria-controls') ?? '')
-  const item = menu?.querySelector<HTMLButtonElement>(
-    `button[data-binding="${bindingKey(target.leg, target.session)}"]`,
-  )
-  if (item == null) throw new Error(`this view offers no ${bindingKey(target.leg, target.session)}`)
-  item.click()
 }
 
 /** Wait until the TM pane's own text stops changing — `tm-scratch-fork.test.ts`'s own `settleOn`,
@@ -170,7 +107,7 @@ async function mountApp(src: string): Promise<App> {
     buffersMenu,
     bufferRows,
     paneBindings,
-    pickBinding,
+    pickBinding: pickSessionBinding,
   }
 }
 

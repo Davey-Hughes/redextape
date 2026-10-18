@@ -4,6 +4,7 @@ import type { PaneEvents } from '../../src/pane-chrome'
 import type { Leg } from '../../src/protocol'
 import type { PaneOption } from '../../src/sessions'
 import { TmPane } from '../../src/tm-pane'
+import { newPaneHost } from './harness'
 
 /**
  * Design §4.5's SECOND surface: the view is self-describing when the status line is off-screen or the
@@ -38,13 +39,6 @@ const EVENTS: PaneEvents = {
 
 const program = (leg: Leg): PaneOption => ({ leg, id: 'source', label: 'program' })
 
-const host = () => {
-  const el = document.createElement('section')
-  el.className = 'pane'
-  document.body.append(el)
-  return el
-}
-
 /**
  * THE ASSERTION IS ON TEXT, WHICH IS THE WHOLE POINT (§5). Reading the heading's `textContent` — not a
  * class, not a computed colour — is what makes an implementation that satisfies §4.5 with a sixth hue
@@ -63,7 +57,7 @@ describe('the copy · not linked status', () => {
   // THE ATTACHED HALF IS THE HALF THAT CATCHES A BROKEN IMPLEMENTATION (§5): a status that is appended
   // and never removed passes the middle assertion and fails the last.
   it('appears on the λ view when detached and is gone when reattached', () => {
-    const el = host()
+    const el = newPaneHost()
     const pane = new LambdaPane(el, EVENTS)
     pane.setBindings([program('lambda')], { leg: 'lambda', session: 'source' })
     expect(title(el)).toBe('λ · program')
@@ -77,7 +71,7 @@ describe('the copy · not linked status', () => {
   })
 
   it('appears on the TM view when detached and is gone when reattached', () => {
-    const el = host()
+    const el = newPaneHost()
     const pane = new TmPane(el, EVENTS)
     pane.setBindings([program('tm')], { leg: 'tm', session: 'source' })
     expect(title(el)).toBe('TM · program')
@@ -94,8 +88,8 @@ describe('the copy · not linked status', () => {
   // the other view stays on it. A status owned by shared chrome, or driven off one app-wide boolean,
   // would light both.
   it('marks only the view that detached', () => {
-    const lambdaHost = host()
-    const tmHost = host()
+    const lambdaHost = newPaneHost()
+    const tmHost = newPaneHost()
     const lambda = new LambdaPane(lambdaHost, EVENTS)
     const tm = new TmPane(tmHost, EVENTS)
     lambda.setBindings([program('lambda')], { leg: 'lambda', session: 'source' })
@@ -114,7 +108,7 @@ describe('the copy · not linked status', () => {
   // The setter is on the per-frame path (`PaneSlot.render` calls it for every view on every recorded
   // frame during playback), so repeating the current value must not append a second status.
   it('does not stack statuses when set twice', () => {
-    const el = host()
+    const el = newPaneHost()
     const pane = new LambdaPane(el, EVENTS)
     pane.setBindings([program('lambda')], { leg: 'lambda', session: 'source' })
 
@@ -137,7 +131,7 @@ describe('the copy · not linked status', () => {
    * reaching the page at all — the same gap that file exists for.
    */
   it('is drawn with a non-colour carrier', () => {
-    const el = host()
+    const el = newPaneHost()
     const pane = new LambdaPane(el, EVENTS)
     pane.setBindings([program('lambda')], { leg: 'lambda', session: 'source' })
     pane.setDetached(true)

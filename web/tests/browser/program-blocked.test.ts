@@ -1,7 +1,7 @@
 import type { EditorView } from '@codemirror/view'
 import { describe, expect, it } from 'vitest'
 import { PROGRAM_STORAGE_KEY } from '../../src/program-store'
-import { SHELL, showFourViews, until } from './harness'
+import { noticeEl, noticeElText, SHELL, showFourViews, stateIdle, until } from './harness'
 
 /**
  * **BLOCKED STORAGE IS NOT FULL STORAGE** — Plan 7 part 6a spec §4.3 and §7. Where this browser blocks site data,
@@ -25,9 +25,6 @@ localStorage.getItem = blocked
 localStorage.setItem = blocked
 
 const LINE = 'not being saved — this browser’s storage for this site is blocked'
-const notice = () => document.querySelector<HTMLElement>('#notice') as HTMLElement
-const noticeText = () => notice().querySelector('.notice-text')?.textContent ?? ''
-const idle = () => document.querySelector<HTMLElement>('#results')?.dataset.state === 'idle'
 
 /** Every sentence the live region carries, in order: one read of `#live` holds only the latest. */
 const said: string[] = []
@@ -44,15 +41,15 @@ describe('a program write refused because storage is blocked', () => {
       subtree: true,
     })
     view = await (await import('../../src/main')).ready
-    await until(() => idle() && view.state.doc.length > 0, 'the first compile')
-    expect(notice().hidden).toBe(true)
+    await until(() => stateIdle() && view.state.doc.length > 0, 'the first compile')
+    expect(noticeEl().hidden).toBe(true)
     expect(said.filter((t) => t.includes('not being saved'))).toEqual([])
   })
 
   it('says the program is not being saved because storage is blocked, once an edit is refused', async () => {
     view.dispatch({ changes: { from: 0, to: view.state.doc.length, insert: 'let x = 1;\nx + 1\n' } })
-    await until(() => noticeText() === `the program is ${LINE}`, 'the resting line')
-    expect(notice().hidden).toBe(false)
+    await until(() => noticeElText() === `the program is ${LINE}`, 'the resting line')
+    expect(noticeEl().hidden).toBe(false)
     expect(said.filter((t) => t.includes('not being saved'))).toEqual([`the program is ${LINE}`])
   })
 
@@ -60,7 +57,7 @@ describe('a program write refused because storage is blocked', () => {
     // THE EDIT ABOVE IS REFUSED WHEN ITS COMPILE IS POSTED, SO THAT COMPILE IS STILL RUNNING HERE, and a λ view
     // offers no copy between a compile's reply and its first frame. Its result is waited for by its value.
     await until(
-      () => idle() && (document.querySelector('#results')?.textContent ?? '').includes('λ 2 · '),
+      () => stateIdle() && (document.querySelector('#results')?.textContent ?? '').includes('λ 2 · '),
       'the edited program to compile',
     )
     // WITH NOTHING READABLE IN STORAGE THE PAGE OPENED ON THE SOURCE AND THE TM VIEW, so the λ view is asked for.

@@ -1,7 +1,7 @@
 import { beforeAll, describe, expect, it } from 'vitest'
 import { page, userEvent } from 'vitest/browser'
 import { STYLE_IDS, type StyleId } from '../../src/skin'
-import { SHELL, until } from './harness'
+import { rect, SHELL, until } from './harness'
 
 /**
  * THE HEADER'S SELECTS WEAR THE HEADER BUTTONS' CHROME, AND EVERY SELECT'S OPEN LIST IS IN THE PALETTE.
@@ -47,7 +47,6 @@ const CHROME = [
 ]
 
 const byId = (id: string) => document.getElementById(id) as HTMLElement
-const rect = (el: Element) => el.getBoundingClientRect()
 const menu = () => byId('settings-menu')
 const speed = () => document.querySelector<HTMLSelectElement>('.pane .controls select.speed')
 

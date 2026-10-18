@@ -7,12 +7,11 @@ import { KIND_ORDER, KIND_WORD } from '../../src/layout'
 import { LINK_KEY } from '../../src/link-wiring'
 import { navKeymap } from '../../src/lsp-nav'
 import { HINT_ROWS, PREFIX, PREFIX_LABEL, VIEW_KEYS } from '../../src/view-keys'
-
-const read = (rel: string): string => readFileSync(fileURLToPath(new URL(rel, import.meta.url)), 'utf8')
+import { readRelative } from './read-fixture'
 
 /** The four pages beside the app (about pages design §4), each as the build reads it. */
 const PAGES = ['about', 'help', 'licences', 'privacy'] as const
-const html = (name: string): string => read(`../../${name}.html`)
+const html = (name: string): string => readRelative(`../../${name}.html`)
 
 /**
  * The `data-key` of every row in `#id`'s table on `page`.

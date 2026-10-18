@@ -765,25 +765,8 @@ mod tests {
     use crate::tm::lower_asm::lower_asm;
     use crate::tm::lower_tm::lower_tm;
     use crate::tm::machine::{Rule, State};
+    use crate::tm::test_fixtures::increment;
     use crate::{desugar::desugar, parser::parse};
-
-    fn increment() -> Machine {
-        Machine {
-            tapes: 1,
-            start: 0,
-            states: vec![
-                State {
-                    name: "scan".into(),
-                    accept: false,
-                    rules: vec![
-                        Rule { read: vec![Some('1')], write: vec![None], moves: vec![Move::R], next: 0 },
-                        Rule { read: vec![None], write: vec![Some('1')], moves: vec![Move::S], next: 1 },
-                    ],
-                },
-                State { name: "halt".into(), accept: true, rules: vec![] },
-            ],
-        }
-    }
 
     #[test]
     fn print_tm_is_a_stable_readable_listing() {

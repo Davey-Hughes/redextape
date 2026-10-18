@@ -1,8 +1,9 @@
 //! The tag survives β. Design §2.1 asserts that reduction creates no node ex nihilo; this file is
 //! that assertion made executable, because the whole coordinate system rests on it.
 
-// This file carries no unwrap/expect/panic allow because it never trips those lints — it needs
-// only the pedantic exemption, for the same reason `clippy.toml` exempts test/example code generally.
+// This file carries no file-wide unwrap/expect/panic allow because only `lower_with_map` trips those
+// lints, and it is allowed there — the file needs only the pedantic exemption, for the same reason
+// `clippy.toml` exempts test/example code generally.
 #![allow(clippy::pedantic)]
 
 use redextape_core::lambda::reduce::Owner;
@@ -138,12 +139,7 @@ fn lowering_tags_each_core_construct_at_its_own_root() {
     // root App, not merely somewhere in the term (`owners()` alone cannot tell "wrong node" from
     // "right node": `core.id()` resolves through the source map identically wherever it lands).
     let src = "let x = 40; x + 2";
-    let (program, diags) = redextape_core::parser::parse(src);
-    assert!(diags.is_empty(), "the sample program must parse cleanly: {diags:?}");
-    let program = program.expect("parsed");
-    let enc = redextape_core::tm::EncodingKind::Unary.at(redextape_core::tm::MIN_FIELD_WIDTH);
-    let (core, map) = redextape_core::sourcemap::SourceMap::build_from_program(&program, &*enc);
-    let term = redextape_core::lambda::lower(&core).expect("the sample program lowers");
+    let (core, map, term) = lower_with_map(src);
 
     // The two constructs' own ids, read off the parsed Core rather than hardcoded — so this test
     // tracks whatever the parser actually assigned instead of a number that could silently drift.
@@ -432,12 +428,7 @@ fn the_zippers_normal_form_keeps_the_tags_the_plain_loop_keeps() {
 #[test]
 fn region_constructs_tag_their_own_roots_without_duplicating() {
     let src = "let mut n = 2; while n > 0 { n = n - 1; } n";
-    let (program, diags) = redextape_core::parser::parse(src);
-    assert!(diags.is_empty(), "the fixture must parse cleanly: {diags:?}");
-    let program = program.expect("parsed");
-    let enc = redextape_core::tm::EncodingKind::Unary.at(redextape_core::tm::MIN_FIELD_WIDTH);
-    let (core, map) = redextape_core::sourcemap::SourceMap::build_from_program(&program, &*enc);
-    let term = redextape_core::lambda::lower(&core).expect("the fixture lowers");
+    let (core, map, term) = lower_with_map(src);
 
     let tags: Vec<u32> = owners(&term).into_iter().flatten().collect();
     let unique: std::collections::BTreeSet<u32> = tags.iter().copied().collect();
@@ -508,12 +499,7 @@ fn region_constructs_tag_their_own_roots_without_duplicating() {
 #[test]
 fn region_immutable_let_is_tagged_at_its_own_root() {
     let src = "let mut n = 0; let k = 1; n = k; n";
-    let (program, diags) = redextape_core::parser::parse(src);
-    assert!(diags.is_empty(), "the fixture must parse cleanly: {diags:?}");
-    let program = program.expect("parsed");
-    let enc = redextape_core::tm::EncodingKind::Unary.at(redextape_core::tm::MIN_FIELD_WIDTH);
-    let (core, map) = redextape_core::sourcemap::SourceMap::build_from_program(&program, &*enc);
-    let term = redextape_core::lambda::lower(&core).expect("the fixture lowers");
+    let (core, map, term) = lower_with_map(src);
 
     let let_id = find_id(&core, &|c| matches!(c, redextape_core::core::Core::Let { mutable: false, .. }))
         .expect("the fixture contains an immutable let");
@@ -541,12 +527,7 @@ fn region_immutable_let_is_tagged_at_its_own_root() {
 #[test]
 fn a_region_ifs_tag_sits_on_its_outer_application() {
     let src = "let mut n = 0; if true { n = 1; } else { n = 2; }; n";
-    let (program, diags) = redextape_core::parser::parse(src);
-    assert!(diags.is_empty(), "the fixture must parse cleanly: {diags:?}");
-    let program = program.expect("parsed");
-    let enc = redextape_core::tm::EncodingKind::Unary.at(redextape_core::tm::MIN_FIELD_WIDTH);
-    let (core, _map) = redextape_core::sourcemap::SourceMap::build_from_program(&program, &*enc);
-    let term = redextape_core::lambda::lower(&core).expect("the fixture lowers");
+    let (core, _, term) = lower_with_map(src);
 
     let if_id =
         find_id(&core, &|c| matches!(c, redextape_core::core::Core::If(..))).expect("the fixture contains an if");
@@ -582,6 +563,22 @@ fn app_tagged_with(t: &LambdaTerm, id: u32) -> Option<LambdaTerm> {
     }
     assert!(found.len() <= 1, "tag {id} sits on {} Apps; it must sit on exactly its own root", found.len());
     found.pop()
+}
+
+/// `src`, which must parse clean, as its `Core`, the source map built beside it at the unary encoding's
+/// minimum field width, and the lowered term.
+///
+/// Not a `#[test]` fn, so `clippy.toml`'s `allow-expect-in-tests` does not reach it: allowed here
+/// rather than file-wide.
+#[allow(clippy::expect_used)]
+fn lower_with_map(src: &str) -> (redextape_core::core::Core, redextape_core::sourcemap::SourceMap, LambdaTerm) {
+    let (program, diags) = redextape_core::parser::parse(src);
+    assert!(diags.is_empty(), "the fixture must parse cleanly: {diags:?}");
+    let program = program.expect("parsed");
+    let enc = redextape_core::tm::EncodingKind::Unary.at(redextape_core::tm::MIN_FIELD_WIDTH);
+    let (core, map) = redextape_core::sourcemap::SourceMap::build_from_program(&program, &*enc);
+    let term = redextape_core::lambda::lower(&core).expect("the fixture lowers");
+    (core, map, term)
 }
 
 /// The `NodeId` of the first `Core` node in a pre-order walk satisfying `pred`. Read off the parsed
@@ -623,12 +620,7 @@ fn find_id(core: &redextape_core::core::Core, pred: &impl Fn(&redextape_core::co
 #[test]
 fn a_whiles_tag_names_the_loop_and_not_the_whole_program() {
     let src = "let mut n = 2; while n > 0 { n = n - 1; } n";
-    let (program, diags) = redextape_core::parser::parse(src);
-    assert!(diags.is_empty(), "the fixture must parse cleanly: {diags:?}");
-    let program = program.expect("parsed");
-    let enc = redextape_core::tm::EncodingKind::Unary.at(redextape_core::tm::MIN_FIELD_WIDTH);
-    let (core, map) = redextape_core::sourcemap::SourceMap::build_from_program(&program, &*enc);
-    let term = redextape_core::lambda::lower(&core).expect("the fixture lowers");
+    let (core, map, term) = lower_with_map(src);
 
     let while_id =
         find_id(&core, &|c| matches!(c, redextape_core::core::Core::While(..))).expect("the fixture contains a while");
@@ -669,12 +661,7 @@ fn a_whiles_tag_names_the_loop_and_not_the_whole_program() {
 #[test]
 fn a_whiles_tag_sits_on_its_outer_application() {
     let src = "let mut n = 2; while n > 0 { n = n - 1; } n";
-    let (program, diags) = redextape_core::parser::parse(src);
-    assert!(diags.is_empty(), "the fixture must parse cleanly: {diags:?}");
-    let program = program.expect("parsed");
-    let enc = redextape_core::tm::EncodingKind::Unary.at(redextape_core::tm::MIN_FIELD_WIDTH);
-    let (core, _map) = redextape_core::sourcemap::SourceMap::build_from_program(&program, &*enc);
-    let term = redextape_core::lambda::lower(&core).expect("the fixture lowers");
+    let (core, _, term) = lower_with_map(src);
 
     let while_id =
         find_id(&core, &|c| matches!(c, redextape_core::core::Core::While(..))).expect("the fixture contains a while");

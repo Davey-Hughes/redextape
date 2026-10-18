@@ -370,6 +370,7 @@ pub fn simulate_counts(m: &Machine, init: &[Vec<Symbol>], caps: Caps) -> (Vec<u6
 mod tests {
     use super::*;
     use crate::tm::machine::State;
+    use crate::tm::test_fixtures::{increment, one_rule_machine};
 
     #[test]
     fn from_snapshot_inverts_snapshot_at_every_head() {
@@ -383,24 +384,6 @@ mod tests {
     #[test]
     fn from_snapshot_past_the_end_fills_blanks_up_to_the_head() {
         assert_eq!(Tape::from_snapshot(&['a'], 3).snapshot(), (vec!['a', BLANK, BLANK, BLANK], 3));
-    }
-
-    fn increment() -> Machine {
-        Machine {
-            tapes: 1,
-            start: 0,
-            states: vec![
-                State {
-                    name: "scan".into(),
-                    accept: false,
-                    rules: vec![
-                        Rule { read: vec![Some('1')], write: vec![None], moves: vec![Move::R], next: 0 },
-                        Rule { read: vec![None], write: vec![Some('1')], moves: vec![Move::S], next: 1 },
-                    ],
-                },
-                State { name: "halt".into(), accept: true, rules: vec![] },
-            ],
-        }
     }
 
     /// A 1-tape machine that spends a *different, nonzero* number of steps in each of two non-accept
@@ -440,15 +423,7 @@ mod tests {
 
     /// A 1-tape machine that never halts: move right forever.
     fn spin() -> Machine {
-        Machine {
-            tapes: 1,
-            start: 0,
-            states: vec![State {
-                name: "go".into(),
-                accept: false,
-                rules: vec![Rule { read: vec![None], write: vec![None], moves: vec![Move::R], next: 0 }],
-            }],
-        }
+        one_rule_machine("go", Rule { read: vec![None], write: vec![None], moves: vec![Move::R], next: 0 })
     }
 
     #[test]
@@ -568,15 +543,7 @@ mod tests {
     #[test]
     fn a_malformed_machine_halts_rather_than_panicking() {
         // A rule whose `next` is out of range must halt defensively, not index-panic.
-        let m = Machine {
-            tapes: 1,
-            start: 0,
-            states: vec![State {
-                name: "s".into(),
-                accept: false,
-                rules: vec![Rule { read: vec![None], write: vec![None], moves: vec![Move::S], next: 99 }],
-            }],
-        };
+        let m = one_rule_machine("s", Rule { read: vec![None], write: vec![None], moves: vec![Move::S], next: 99 });
         let (_t, status) = simulate(&m, &[], DEFAULT_CAPS);
         assert_eq!(status, Status::Halted);
     }

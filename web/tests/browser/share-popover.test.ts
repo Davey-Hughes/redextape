@@ -5,7 +5,17 @@ import { cdp, page, userEvent } from 'vitest/browser'
 import { LAYOUT_STORAGE_KEY } from '../../src/layout'
 import { decodeLink } from '../../src/share-link'
 import { PRESETS, parseWorkspace } from '../../src/workspace'
-import { SHELL, until } from './harness'
+import {
+  noticeText,
+  SHELL,
+  segments,
+  shareButton,
+  shareLinkField,
+  shareMenu,
+  shareMenuOpen,
+  stateIdle,
+  until,
+} from './harness'
 
 /**
  * **`share`: THE POPOVER, ITS LINK AND ITS COPY** — Plan 7 part 6a spec §5.1, §5.2 and §6. Driven by real pointer
@@ -16,14 +26,7 @@ import { SHELL, until } from './harness'
  */
 
 const ENCODINGS = ['unary', 'binary']
-const button = () => document.querySelector<HTMLButtonElement>('#share') as HTMLButtonElement
-const menu = () => document.querySelector<HTMLElement>('#share-menu') as HTMLElement
-const open = () => menu().matches(':popover-open')
-const field = () => menu().querySelector<HTMLInputElement>('#share-link') as HTMLInputElement
-const copyButton = () => menu().querySelector<HTMLButtonElement>('button.share-copy')
-const noticeText = () => document.querySelector('#notice .notice-text')?.textContent ?? ''
-const idle = () => document.querySelector<HTMLElement>('#results')?.dataset.state === 'idle'
-const segments = () => [...document.querySelectorAll('#results .segment')].map((s) => s.textContent ?? '')
+const copyButton = () => shareMenu().querySelector<HTMLButtonElement>('button.share-copy')
 const fragmentOf = (link: string): string => link.slice(link.indexOf('#'))
 
 let view: EditorView
@@ -32,7 +35,7 @@ beforeAll(async () => {
   await page.viewport(1280, 800)
   document.body.innerHTML = SHELL
   view = await (await import('../../src/main')).ready
-  await until(() => idle() && segments().length === 3, 'the first compile')
+  await until(() => stateIdle() && segments().length === 3, 'the first compile')
 })
 
 /**
@@ -51,21 +54,21 @@ afterAll(async () => {
 
 /** Open the popover with a click, and answer its link once it is made. */
 async function openShare(): Promise<string> {
-  if (open()) menu().hidePopover()
-  await userEvent.click(button())
-  expect(open()).toBe(true)
-  await until(() => field().value !== '', 'the link')
-  return field().value
+  if (shareMenuOpen()) shareMenu().hidePopover()
+  await userEvent.click(shareButton())
+  expect(shareMenuOpen()).toBe(true)
+  await until(() => shareLinkField().value !== '', 'the link')
+  return shareLinkField().value
 }
 
 describe('share', () => {
   it('sits after the spacer and before appearance, in the chrome of the header’s other buttons', () => {
     const spacer = document.querySelector('header.bar .bar-spacer') as HTMLElement
     const appearance = document.querySelector<HTMLButtonElement>('#appearance') as HTMLButtonElement
-    expect(spacer.compareDocumentPosition(button()) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
-    expect(button().compareDocumentPosition(appearance) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
-    expect(computeAccessibleName(button())).toBe('share')
-    const [x, y] = [appearance, button()].map((el) => getComputedStyle(el))
+    expect(spacer.compareDocumentPosition(shareButton()) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
+    expect(shareButton().compareDocumentPosition(appearance) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
+    expect(computeAccessibleName(shareButton())).toBe('share')
+    const [x, y] = [appearance, shareButton()].map((el) => getComputedStyle(el))
     for (const property of [
       'borderTopStyle',
       'borderTopWidth',
@@ -74,7 +77,7 @@ describe('share', () => {
       'fontFamily',
     ] as const)
       expect(y?.[property], property).toBe(x?.[property])
-    expect(button().getBoundingClientRect().height).toBe(appearance.getBoundingClientRect().height)
+    expect(shareButton().getBoundingClientRect().height).toBe(appearance.getBoundingClientRect().height)
   })
 
   /**
@@ -83,30 +86,30 @@ describe('share', () => {
    * whose arrow-key navigation the popover does not have.
    */
   it('is a disclosure: it names its popover, says whether it is open, and claims no menu', async () => {
-    expect(open()).toBe(false)
-    expect(button().getAttribute('aria-expanded')).toBe('false')
-    expect(button().getAttribute('aria-controls')).toBe('share-menu')
-    expect(button().hasAttribute('aria-haspopup')).toBe(false)
+    expect(shareMenuOpen()).toBe(false)
+    expect(shareButton().getAttribute('aria-expanded')).toBe('false')
+    expect(shareButton().getAttribute('aria-controls')).toBe('share-menu')
+    expect(shareButton().hasAttribute('aria-haspopup')).toBe(false)
     await openShare()
-    expect(button().getAttribute('aria-expanded')).toBe('true')
+    expect(shareButton().getAttribute('aria-expanded')).toBe('true')
     await userEvent.keyboard('{Escape}')
-    expect(open()).toBe(false)
-    expect(button().getAttribute('aria-expanded')).toBe('false')
+    expect(shareMenuOpen()).toBe(false)
+    expect(shareButton().getAttribute('aria-expanded')).toBe('false')
   })
 
   it('opens on a click, with the link in its field, focused and selected', async () => {
-    expect(button().getAttribute('aria-expanded')).toBe('false')
+    expect(shareButton().getAttribute('aria-expanded')).toBe('false')
     const link = await openShare()
-    expect(button().getAttribute('aria-expanded')).toBe('true')
+    expect(shareButton().getAttribute('aria-expanded')).toBe('true')
     expect(link.startsWith(`${location.origin}${location.pathname}#s=`)).toBe(true)
-    expect(document.activeElement).toBe(field())
-    expect([field().selectionStart, field().selectionEnd]).toEqual([0, link.length])
-    expect(field().readOnly).toBe(true)
+    expect(document.activeElement).toBe(shareLinkField())
+    expect([shareLinkField().selectionStart, shareLinkField().selectionEnd]).toEqual([0, link.length])
+    expect(shareLinkField().readOnly).toBe(true)
     // NAMED BY ITS LABEL, `link`, and not by the link it holds.
-    expect(computeAccessibleName(field())).toBe('link')
+    expect(computeAccessibleName(shareLinkField())).toBe('link')
     // A SHORT LINK AND NO COPY ON THE PAGE: neither line, and nothing describing the field.
-    expect(menu().querySelector('.share-line')).toBeNull()
-    expect(field().hasAttribute('aria-describedby')).toBe(false)
+    expect(shareMenu().querySelector('.share-line')).toBeNull()
+    expect(shareLinkField().hasAttribute('aria-describedby')).toBe(false)
   })
 
   it('links to what is on the page: the program, its encoding, the workspace, and each leg’s step', async () => {
@@ -122,7 +125,7 @@ describe('share', () => {
   })
 
   it('takes a leg’s step where its head is, not where its recording ends', async () => {
-    menu().hidePopover()
+    shareMenu().hidePopover()
     await userEvent.click(
       document.querySelector(
         '[data-leaf="lambda-0"] button[aria-label="to the newest recorded step"]',
@@ -136,27 +139,27 @@ describe('share', () => {
   })
 
   it('carries no positions while the program is compiling', async () => {
-    menu().hidePopover()
+    shareMenu().hidePopover()
     view.dispatch({ changes: { from: 0, to: view.state.doc.length, insert: 'let y = 1; y + 2' } })
     // SYNCHRONOUSLY, SO THE POPOVER IS BUILT WHILE THE COMPILE IS STILL PENDING — a click that awaits the browser
     // could land after it answers.
-    button().click()
-    await until(() => field().value !== '', 'the link')
-    const opened = await decodeLink(fragmentOf(field().value), ENCODINGS)
+    shareButton().click()
+    await until(() => shareLinkField().value !== '', 'the link')
+    const opened = await decodeLink(fragmentOf(shareLinkField().value), ENCODINGS)
     // `toEqual` ON THE POSITIONS THEMSELVES: `toMatchObject` would take `{}` as a subset every positions object has.
     expect(opened.kind === 'whole' && opened.program).toBe('let y = 1; y + 2')
     expect(opened.kind === 'whole' && opened.positions).toEqual({})
-    menu().hidePopover()
+    shareMenu().hidePopover()
     view.dispatch({ changes: { from: 0, to: view.state.doc.length, insert: 'let x = 40; x + 2' } })
-    await until(() => idle() && (segments()[0] ?? '').startsWith('λ 42'), 'the program’s compile')
+    await until(() => stateIdle() && (segments()[0] ?? '').startsWith('λ 42'), 'the program’s compile')
   })
 
   it('offers copy link disabled, with its reason, until the link is made', async () => {
-    if (open()) menu().hidePopover()
-    button().click()
+    if (shareMenuOpen()) shareMenu().hidePopover()
+    shareButton().click()
     expect(copyButton()?.disabled).toBe(true)
     expect(copyButton()?.title).toBe('the link is being made')
-    expect(field().value).toBe('')
+    expect(shareLinkField().value).toBe('')
     await until(() => copyButton()?.disabled === false, 'the link')
     expect(copyButton()?.hasAttribute('title')).toBe(false)
     expect(computeAccessibleName(copyButton() as HTMLButtonElement)).toBe('copy link')
@@ -183,8 +186,8 @@ describe('share', () => {
     const link = await openShare()
     await userEvent.click(copyButton() as HTMLButtonElement)
     await until(() => noticeText() === 'the link could not be copied — it is selected in the field', 'the refusal')
-    expect(document.activeElement).toBe(field())
-    expect([field().selectionStart, field().selectionEnd]).toEqual([0, link.length])
+    expect(document.activeElement).toBe(shareLinkField())
+    expect([shareLinkField().selectionStart, shareLinkField().selectionEnd]).toEqual([0, link.length])
   })
 
   it('has no copy link where the page has no clipboard, and the field is still selected', async () => {
@@ -192,9 +195,9 @@ describe('share', () => {
     try {
       const link = await openShare()
       // NO BUTTON AT ALL, not merely none named `copy link`: the field is the whole of the way to copy here.
-      expect(menu().querySelector('button')).toBeNull()
-      expect(document.activeElement).toBe(field())
-      expect([field().selectionStart, field().selectionEnd]).toEqual([0, link.length])
+      expect(shareMenu().querySelector('button')).toBeNull()
+      expect(document.activeElement).toBe(shareLinkField())
+      expect([shareLinkField().selectionStart, shareLinkField().selectionEnd]).toEqual([0, link.length])
     } finally {
       delete (navigator as { clipboard?: Clipboard }).clipboard
     }
@@ -204,11 +207,11 @@ describe('share', () => {
   it('closes on Escape, with the focus back on share', async () => {
     await openShare()
     // THE FOCUS IS ON THE FIELD BEFORE THE KEY, or `share` would hold it already and the case could not tell.
-    expect(document.activeElement).toBe(field())
+    expect(document.activeElement).toBe(shareLinkField())
     await userEvent.keyboard('{Escape}')
-    expect(open()).toBe(false)
-    expect(button().getAttribute('aria-expanded')).toBe('false')
-    expect(document.activeElement).toBe(button())
+    expect(shareMenuOpen()).toBe(false)
+    expect(shareButton().getAttribute('aria-expanded')).toBe('false')
+    expect(document.activeElement).toBe(shareButton())
   })
 
   it('says how long a link is past 2,000 characters, and that some apps cut it', async () => {
@@ -219,17 +222,17 @@ describe('share', () => {
       return `// ${s.toString(36)}`
     }).join('\n')
     view.dispatch({ changes: { from: 0, to: view.state.doc.length, insert: `${noise}\nlet x = 40; x + 2` } })
-    await until(() => idle() && (segments()[0] ?? '').startsWith('λ 42'), 'the long program’s compile')
+    await until(() => stateIdle() && (segments()[0] ?? '').startsWith('λ 42'), 'the long program’s compile')
     const link = await openShare()
     expect(link.length).toBeGreaterThan(2000)
-    const line = menu().querySelector('#share-length')
+    const line = shareMenu().querySelector('#share-length')
     expect(line?.textContent).toBe(
       `this link is ${link.length.toLocaleString('en-US')} characters long — some chat and mail apps cut links past 2,000`,
     )
-    expect(field().getAttribute('aria-describedby')).toBe('share-length')
-    menu().hidePopover()
+    expect(shareLinkField().getAttribute('aria-describedby')).toBe('share-length')
+    shareMenu().hidePopover()
     view.dispatch({ changes: { from: 0, to: view.state.doc.length, insert: 'let x = 40; x + 2' } })
-    await until(() => idle() && (segments()[0] ?? '').startsWith('λ 42'), 'the program’s compile')
+    await until(() => stateIdle() && (segments()[0] ?? '').startsWith('λ 42'), 'the program’s compile')
   })
 
   it('names the views that will open on the program, when a view shows a copy', async () => {
@@ -239,10 +242,10 @@ describe('share', () => {
       'the copy',
     )
     await openShare()
-    expect(menu().querySelector('#share-copies')?.textContent).toBe(
+    expect(shareMenu().querySelector('#share-copies')?.textContent).toBe(
       'copies are not included — the λ · copy 1 view will open on the program',
     )
-    expect(field().getAttribute('aria-describedby')).toBe('share-copies')
+    expect(shareLinkField().getAttribute('aria-describedby')).toBe('share-copies')
   })
 
   /**
@@ -256,7 +259,10 @@ describe('share', () => {
     await userEvent.click(document.querySelector('#workspace-menu [data-preset="debugger"]') as HTMLButtonElement)
     if (document.querySelector('#workspace-menu')?.matches(':popover-open'))
       (document.querySelector('#workspace-menu') as HTMLElement).hidePopover()
-    await until(() => idle() && document.querySelectorAll('#results .segment, #results .row').length > 0, 'the compile')
+    await until(
+      () => stateIdle() && document.querySelectorAll('#results .segment, #results .row').length > 0,
+      'the compile',
+    )
     expect(document.querySelector('#workspace')?.textContent).toBe('Debugger ▾')
     const opened = await decodeLink(fragmentOf(await openShare()), ENCODINGS)
     expect(opened.kind).toBe('whole')

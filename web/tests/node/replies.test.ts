@@ -1,14 +1,13 @@
 import type { EditorView } from '@codemirror/view'
 import { describe, expect, it } from 'vitest'
-import { History } from '../../src/history'
 import { LambdaTrees } from '../../src/lambda-trees'
 import type { LinkWiring } from '../../src/link-wiring'
 import { PaneCollection, type PaneEntry } from '../../src/panes'
 import type { RecordEnd, RunReply, RunRequest } from '../../src/protocol'
 import { createReplies } from '../../src/replies'
 import { ScratchBuffers } from '../../src/scratch'
-import type { ClientPort, PoolPort, SessionId } from '../../src/session-client'
-import { SessionClient, SessionPool } from '../../src/session-client'
+import type { PoolPort, SessionId } from '../../src/session-client'
+import { SessionPool } from '../../src/session-client'
 import type { LegState, SessionEntry } from '../../src/sessions'
 import { PaneSlot, SessionRegistry } from '../../src/sessions'
 import type {
@@ -23,6 +22,9 @@ import type {
   TmState,
 } from '../../src/types'
 import { frameOf } from './asm-fixtures'
+import { legState } from './leg-fixture'
+import { fakeClient, lambdaFrame } from './session-fixtures'
+import { ONE_RULE_PROGRAM, tmFrame } from './tm-machines'
 
 /**
  * **WHAT A SESSION KEEPS FROM ITS OWN `compiled` REPLY** — the retention a TM pane created later is
@@ -70,19 +72,6 @@ import { frameOf } from './asm-fixtures'
 
 const SOURCE: SessionId = 'source'
 
-/** A `ClientPort` with no thread behind it — `SessionEntry` needs a client and nothing here posts. */
-function fakeClient(): SessionClient {
-  const port: ClientPort = {
-    postMessage: (_m: RunRequest) => undefined,
-    addEventListener: (_t: 'message', _h: (e: { data: RunReply }) => void) => undefined,
-  }
-  return new SessionClient(port, () => undefined)
-}
-
-function leg<T>(): LegState<T> {
-  return { hist: new History<T>(1_000_000), status: { available: false, reason: '' }, done: null, playing: false }
-}
-
 /** A session with every leg and nothing compiled yet, exactly as `main.ts` registers the source one. */
 function sourceEntry(): SessionEntry {
   return {
@@ -90,23 +79,16 @@ function sourceEntry(): SessionEntry {
     label: 'source',
     detached: false,
     client: fakeClient(),
-    legs: { lambda: leg<LambdaState>(), asm: leg<AsmState>(), tm: leg<TmState>() },
+    legs: {
+      lambda: legState<LambdaState>(false, 1_000_000),
+      asm: legState<AsmState>(false, 1_000_000),
+      tm: legState<TmState>(false, 1_000_000),
+    },
     tmProgram: null,
     tmScratch: null,
     asmProgram: null,
     asmScratch: null,
   }
-}
-
-/** A machine small enough to compare by identity, with a state so a `StateIndex` over it is non-empty. */
-const PROGRAM: TmProgram = {
-  states: [{ name: 'pc0', accept: false, rules: [{ read: ['a'], write: ['b'], moves: ['R'], next: 0 }], instr: null }],
-  alphabet: ['a', 'b'],
-  tapes: 1,
-  width: 8,
-  start: 0,
-  listing: [],
-  labels: [],
 }
 
 const compiled = (tmProgram: TmProgram | null, tapeNames: string[]): RunReply => ({
@@ -175,9 +157,9 @@ describe('a session retains its last compiled machine', () => {
     const { replies, dispatched, indexed, drawn } = driver(entry)
 
     expect(entry.tmProgram).toBeNull()
-    replies.onReply(SOURCE, compiled(PROGRAM, ['TAPE', 'STACK']))
+    replies.onReply(SOURCE, compiled(ONE_RULE_PROGRAM, ['TAPE', 'STACK']))
 
-    expect(entry.tmProgram?.program).toBe(PROGRAM)
+    expect(entry.tmProgram?.program).toBe(ONE_RULE_PROGRAM)
     expect(entry.tmProgram?.tapeNames).toEqual(['TAPE', 'STACK'])
     // AND THE REST OF THE ARM RAN — see this file's doc: the two reached stubs are what say so.
     expect(dispatched.length).toBe(1)
@@ -197,7 +179,7 @@ describe('a session retains its last compiled machine', () => {
     const entry = sourceEntry()
     const { replies } = driver(entry)
 
-    replies.onReply(SOURCE, compiled(PROGRAM, ['TAPE']))
+    replies.onReply(SOURCE, compiled(ONE_RULE_PROGRAM, ['TAPE']))
     expect(entry.tmProgram).not.toBeNull()
 
     replies.onReply(SOURCE, compiled(null, []))
@@ -214,9 +196,9 @@ describe('a session retains its last compiled machine', () => {
   it('holds the machine from the latest compile, not the first', () => {
     const entry = sourceEntry()
     const { replies } = driver(entry)
-    const second: TmProgram = { ...PROGRAM, states: [{ name: 'pc1', accept: true, rules: [], instr: null }] }
+    const second: TmProgram = { ...ONE_RULE_PROGRAM, states: [{ name: 'pc1', accept: true, rules: [], instr: null }] }
 
-    replies.onReply(SOURCE, compiled(PROGRAM, ['TAPE']))
+    replies.onReply(SOURCE, compiled(ONE_RULE_PROGRAM, ['TAPE']))
     replies.onReply(SOURCE, compiled(second, ['REG']))
 
     expect(entry.tmProgram?.program).toBe(second)
@@ -228,9 +210,9 @@ describe('a session retains its last compiled machine', () => {
  * A `PoolPort` with no thread behind it, recording what was posted and what a `retire` would have done
  * to it.
  *
- * `sent` ARRIVED WITH TASK 3, matching `scratch.test.ts`'s own `FakePort` rather than inventing a
+ * `sent` ARRIVED WITH TASK 3, matching `session-fixtures.ts`'s `FakePort` rather than inventing a
  * second shape for the same recording — this file's `scratch-compiled` test needs to read back a
- * post the same way that file's `warm posts the buffer text at step 0` does.
+ * post the same way `scratch.test.ts`'s `warm posts the buffer text at step 0` does.
  */
 function fakePort(): PoolPort & { sent: RunRequest[]; terminated: number } {
   const p: PoolPort & { sent: RunRequest[]; terminated: number } = {
@@ -363,15 +345,6 @@ function scratchDriver(opts: { draw?: () => void; frame?: (cb: () => void) => vo
     persists: () => persists,
   }
 }
-
-const lambdaFrame = (text: string): LambdaState => ({
-  text,
-  spans: new Uint8Array(),
-  cut: null,
-  step: 0,
-  redex_span: null,
-  owner: 'None',
-})
 
 /**
  * **A BUFFER THAT FAILED TO BUILD IS STILL A BUFFER** — 5d-ii-c decision 2, design §4.3's row for
@@ -593,7 +566,7 @@ describe('a TM buffer retains what its panes were last told', () => {
     kind: 'tm-scratch-compiled',
     gen: 1,
     tm: STATUS,
-    tmProgram: PROGRAM,
+    tmProgram: ONE_RULE_PROGRAM,
     tapeNames,
   })
 
@@ -738,16 +711,6 @@ describe('a recording chunk redraws once per frame', () => {
   type FramesLeg = (typeof FRAMES_LEGS)[number]
   const CASES = (['onReply', 'onScratchReply'] as const).flatMap((sw) => FRAMES_LEGS.map((l) => [sw, l] as const))
 
-  const tmFrame = (step: number): TmState => ({
-    state: 0,
-    step,
-    heads: [0],
-    window_start: [0],
-    window: ['a'],
-    source_node: null,
-    rule: null,
-  })
-
   /** A `*-frames` reply for `leg` carrying steps `from` to `from + 1`, and the frames it carries. */
   const chunk = (leg: FramesLeg, from: number, done: RecordEnd | null): { reply: RunReply; frames: unknown[] } => {
     const steps = [from, from + 1]
@@ -757,7 +720,7 @@ describe('a recording chunk redraws once per frame', () => {
         return { reply: { kind: 'lambda-frames', gen: 1, frames, done }, frames }
       }
       case 'tm': {
-        const frames = steps.map(tmFrame)
+        const frames = steps.map((step) => tmFrame(0, step, 'a'))
         return { reply: { kind: 'tm-frames', gen: 1, frames, done }, frames }
       }
       case 'asm': {
@@ -960,10 +923,15 @@ describe('a session retains its asm text beside its listing', () => {
     const { replies } = driver(entry)
     const asm: AsmStatus = { available: true, reason: '', run: 'Running', cap: null, total_steps: 2 }
     const text = 'result Nat\n\n    li\trr, #1\n    halt\n'
-    replies.onReply(SOURCE, { ...compiled(PROGRAM, ['TAPE']), asm, asmProgram: LISTING, asmText: text } as RunReply)
+    replies.onReply(SOURCE, {
+      ...compiled(ONE_RULE_PROGRAM, ['TAPE']),
+      asm,
+      asmProgram: LISTING,
+      asmText: text,
+    } as RunReply)
     expect(entry.asmProgram).toEqual({ program: LISTING, asmText: text })
 
-    replies.onReply(SOURCE, compiled(PROGRAM, ['TAPE']))
+    replies.onReply(SOURCE, compiled(ONE_RULE_PROGRAM, ['TAPE']))
     expect(entry.asmProgram).toBeNull()
   })
 })

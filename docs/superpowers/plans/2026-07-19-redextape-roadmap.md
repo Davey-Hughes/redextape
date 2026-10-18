@@ -27014,3 +27014,443 @@ not commands run for this entry.
 | 1 failed | the sync test under the one-character defect | report |
 | 1,903 passed, 33 skipped; 95.25% | the nextest total in `check-all.sh` and in llvm-cov; lines | `grep 'tests run' check-all.log llvm-cov.log`; `grep '^TOTAL' llvm-cov.log` in the gate directory |
 | 808, 6, 0 | attribution sites, excused, violations | `grep sites scan-attributions.log` in the gate directory |
+
+#### THE TESTS TAKE A HELPER THEY REPEATED FROM ONE SHARED COPY, IN `harness.ts`, 24 OTHER SHARED TEST MODULES OR THE TEST MODULE THAT HELD THE COPIES, WHERE EACH CARRIED ITS OWN, WHEN THE COPIES ARE THE SAME CODE OR DIFFER IN LITERAL VALUES THAT ARE NOT THE WHOLE HELPER; A COPY OF ANOTHER SHAPE, A COPY THAT READS STATE ITS FILE OR TEST OWNS, A COPY INSIDE ANOTHER HELPER AND A COPY THAT WOULD NEED A PRODUCTION ITEM MADE PUBLIC STAY WHERE THEY WERE (2026-10-18, branch `test-helpers`, `1abfdd9..195cf8b`, 109 commits, plus this entry)
+
+**This is PR B of the comments-and-repeats plan.** The browser and node tests under `web/tests/`, the Rust integration
+tests and the `#[cfg(test)]` modules each carried their own copies of small helpers. They now take one shared copy
+from `web/tests/browser/harness.ts`, from 24 other shared test modules (18 of them new), or from the test module that
+held the copies. Outside test code the branch changes two comments, by the user's ruling of 2026-10-18, and adds one
+notes file. B4 was run again at `195cf8b`: it lists the same 1,903 Rust and 2,906 web tests as `main` at `1abfdd9`,
+and the 93 Rust and 98 web production files `coverage_diff.py` compares on both sides cover the same lines, with
+`tm.rs`'s lines 25-460 compared by a separate check (below). The lane record is
+`~/temp/redextape-comment-pass-record/` (`R` below); its ledger is `progress-part-b.md`.
+
+##### THE RULINGS THAT SET WHAT COUNTS AS ONE COPY
+
+- **The user's rulings of 2026-10-17** (`b-constraints.md` in the lane record):
+  - **Scope (1):** the plan's two tables (B2's 11 Rust clusters, B3's 8 browser clusters) plus every extra helper in
+    the lane's list E01-E29, literal differences parameterised.
+  - **One copy (2):** the same code is one copy and doc comments may differ; copies that differ in literal values
+    share one helper with those values as parameters; a copy whose shape differs stays and is named.
+  - **Shape (2, after B3b):** an extra or missing member in an object literal, or an extra statement, is a shape
+    difference. Such a copy keeps its own local copy rather than sharing through an override or spread parameter.
+  - **Copies against each other (2, after the shape fix wave's re-review):** copies identical to their siblings stay
+    shared even where the helper spells out a file-local function every copy called (`drag`, `pressTab`, `compile`),
+    copies with `inertEvents`' members share it although they never had its `over` parameter, and a local variable
+    against a computed number of the same value is a value difference.
+  - **Docs (3):** the shared helper keeps the one doc that gives the why; history and measurements from the other
+    copies' docs move word for word to the area's notes file (this branch needed only
+    `docs/superpowers/notes/2026-10-17-code-history-web-tests.md`); "copied from" docs are dropped.
+  - **Comments the move left false (4)** get the smallest wording change that names what they mean now. All other
+    comment trimming waits for Part C.
+  - **No production code change (5).** A share that would need a production item made `pub` does not happen, and the
+    copy stays.
+  - **Proof (6):** a hand-applied defect in each shared helper must fail at least one test from each former copy's
+    file. A defect that fails none is a finding to report.
+  - **Counts, commits, citations (7-9):** each cluster's test counts equal the baseline's; commits per cluster or file
+    with the hooks run; no `file:line` in tracked source.
+- **The user's later rulings of 2026-10-17:** share the 39 state-only `idle` copies in this PR; then, for the
+  identical helpers a crude script still found in two or more test files, "Sweep them all in this PR". On the first
+  enumeration's nine clusters that read file or test state: share T188 `retype`, T189 `linkAt`, T191 `text` and T194
+  `settled` as helpers that take the view, and leave T190 `freshMain`, T192 `onError` (6 files), T193 `letResultsGo`
+  and its two siblings, T195 `onError` (12 nested copies) and T196 `send`.
+- **The user's ruling of 2026-10-18 (I3):** fix the two `widths()` copy counts the sweep made false, in
+  `search_width`'s doc in `crates/redextape-core/src/tm.rs` and in `crates/redextape-core/examples/width_report.rs`,
+  in this PR and comment-only, although both files are outside ruling 5's list.
+- **Calls the controller made that the user has not ruled on:**
+  - **`add` and `plusView` are shared.** Their bodies were the same but for the wait message's apostrophe;
+    `plusView`'s `label` had a default and `add`'s had none. A parameter default was read as a signature difference,
+    like `inertEvents`' unused `over`. The shared `plusView` takes the message as a parameter, and
+    `live-views-bound.test.ts` passes its own `’` text at its 7 calls.
+  - **Nested scope is the sweep Method's:** helpers declared in top-level `describe`, `test` and `beforeAll` callbacks
+    are in scope, and a helper declared inside another helper is out. The dispatches for S5-S7 said "helpers nested
+    inside a function are outside the Method", which was too broad; S8 onward and the re-enumeration used the Method's
+    wording. For the nested Rust fns (below) the controller drew the same line: a fn declared inside a `#[test]` fn is
+    in scope, one inside a non-test helper is out.
+  - **Three history quotes keep the old names** (`38f535c`): two in `buffer-restore.test.ts` and one in
+    `scratch-rebind-editor.test.ts` quote what a line used to read, so they stay true as written; they are left for
+    Part D to move out of the comments.
+  - **`unary.rs`'s nested `cmp` is shared with its test module's `cmp`** (`195cf8b`). The two copies sit in one file,
+    and the user's "Sweep them all in this PR" was about helpers in two or more test files. The share rests on
+    precedent: ruling 1's list held a same-file pair (E01), and B2a shared same-file copies.
+  - **`tm/reduced_file.rs`'s inline `let looping = Machine {…}` stays.** It is a value, not a helper: the Rust Method
+    compares fns, where the TypeScript Method also compares object literals declared in a `test` callback. Its fields
+    are `one_rule_machine`'s in another order. It is left as S1 left four inline twins.
+
+##### WHAT MOVED
+
+- **Rust.** `crates/redextape-core/src/tm/test_fixtures.rs` is new, declared
+  `#[cfg(test)] pub(crate) mod test_fixtures;` in `tm.rs`: `increment`, `scan_ones`, `one_rule_machine`,
+  `arithmetic_program`, `branch_program`, `head_of_tail_program`, `demo_machine` and `core_of`. Core's
+  `tests/common/mod.rs` gains `encodings_at`, `encodings`, `widths` and `one_rule_machine`;
+  `tests/common/comment_slots.rs` is new (`body`, `Slot`, `slot`, `write_own`, `trailing_of`, `emit`), included with
+  `#[path]` because `common/mod.rs` fails `clippy::pedantic` in the two files that enforce it.
+  `crates/redextape-native/tests/common/mod.rs` is new (`core_of`). `redextape-test-support` gains `arb_expr_below`,
+  which takes the leaf bound and replaces `arb_tm_safe_expr`, `arb_native_safe_expr` and `arb_first_order_expr`, and
+  `ts_derive_scan.rs` gains the two assertions core's and wasm's `tests/ts_bindings.rs` each carried. Inside one file:
+  `run_to_halt` (`unary.rs`), `go_then_done` (`single_tape.rs`), `lowered` (`lambda/syntax.rs`), `list_one_two`
+  (`decode.rs`), `run_fmt` (cli `fmt.rs`), `guard` and `check_two_overrides` (`ts_derive_scan.rs`) and
+  `lower_with_map` (`lambda_provenance.rs`). The nested-fn follow-up (below) shares two more:
+  `viewmodel_contract.rs`'s `spin_right`, declared inside a test, is now a one-call wrapper of `tests/common`'s
+  `one_rule_machine`, as `sim.rs`'s `spin` is of `test_fixtures`' (`e4984f1`, which gives the file `mod common;`); and
+  `unary.rs`'s `comparison_trichotomy_sweep` calls its test module's `cmp` in place of its own nested copy
+  (`195cf8b`).
+- **Web.** `harness.ts` goes from 23 `export` lines to 215 and from 541 lines to 1,704. Ten browser modules are new
+  (`binding-fixture.ts`, `copy-text-fixture.ts`, `editor-view-fixture.ts`, `examples-fixture.ts`,
+  `format-on-leave-fixture.ts`, `lambda-body-fixture.ts`, `probe-fixture.ts`, `scratch-editor-fixture.ts`,
+  `share-open-hashchange-fixture.ts`, `user-event-fixture.ts`) and five node modules (`leg-fixture.ts`,
+  `read-fixture.ts`, `seeded-random.ts`, `session-fixtures.ts`, `tm-text-fixture.ts`); `asm-fixtures.ts`,
+  `base16-fixtures.ts` and `tm-machines.ts` gain helpers. A helper goes to a fixture module, not `harness.ts`, where
+  it needs a run-time import `harness.ts` lacks: `@codemirror/view` would then load in each browser file that imports
+  `harness.ts`, and `vitest/browser` would break the node tier, which loads `harness.ts` too.
+- **How the work ran.** 56 commits did the plan's tables, the extras and three fix waves (B2a, B2b, B3a-B3c, the shape
+  ruling's reverts, and the whole-branch review's two waves); 40 the sweep, S1-S9 with the fixes `b99a0bb` and
+  `38f535c`; 7 the sweep's fix wave; 4 the whole-sweep review's fixes; 2 the nested Rust follow-up (`e4984f1`,
+  `195cf8b`). The lane record holds 22 read-only reviews of this work.
+- **Helpers this branch made and then deleted.**
+  - By the shape ruling: `interceptWorkerMessages` (the plan's B3 table row 4; each file's listener body is different
+    code, so its 4 copies went back), `stage_two_cells`, `slotEvents` and `splitToProgram`. That wave put 29 copies
+    back: 26 for their shape and 3 whose helper was left with one caller.
+  - By the sweep: `replaceDoc` (its callers call `retype`, the same body), `clickShowToggle` (its 4 files call
+    `clickToggle`, which goes through `toggle(kind)` where it spelled `toggle`'s selector out) and `termEditorCount`
+    (its 6 files call `editorsOf`, which goes through `termEditorsIn`).
+- **The notes file** has 8 entries, each naming the file and the code line the comment sat above before the move.
+- **Comments the move made false** were reworded (ruling 4), for example: `two-lambda-panes.test.ts`'s four pointers
+  to `scratch-editor.test.ts`'s own `retype` and `scratch-app.test.ts`'s own `forkButton` now name
+  `editor-view-fixture.ts`'s `typeIn` and `harness.ts`'s `forkButton`; `replies.test.ts`'s `FakePort` pointer names
+  `session-fixtures.ts`; the file docs of `share-open-hashchange-fixture.ts`, `copy-text-fixture.ts`,
+  `tm-machines.ts`, `harness.ts`, `editor-view-fixture.ts` and `base16-fixtures.ts` were brought up to what each file
+  now holds; and the `widths()` counts in `tm.rs` and `width_report.rs` say two copies, one in `tests/`.
+- **Part A's item for Part B.** `viewmodel_contract.rs` no longer says integration tests cannot import one another's
+  helpers (`44ea42d`). Its other "cannot import" comment is about `sim`'s `#[cfg(test)]` `spin` fixture, and holds.
+
+##### HOW THE COPIES WERE FOUND, AND THE ENUMERATOR'S KEY FIX
+
+- **The enumerator** (its Method is in `$R/sweep-list.md`; scripts in `$R/sweep-scratch/`) parses every
+  `web/tests/**/*.ts` with `@babel/parser` and keys each helper four ways: `exact`; `strip`, without type annotations;
+  `id`, with parameters and locals renamed; and `lit`, with literal values abstracted and object keys kept. A free
+  name is keyed by what it resolves to. A lexer walks the module-level fns of the Rust `tests/` trees, the
+  `#[cfg(test)]` modules and the shared modules. At `00e7970` it listed 193 shareable clusters (187 TypeScript, 6
+  Rust) in 9 batches, 9 clusters that read file or test state for a ruling, and 52 families where the literal is the
+  whole helper.
+- **The key fix.** S8 found that the `id` key never equated a block-body arrow with a `function`, as the Method said
+  it did. A `const f = …` helper counted its own name as local `$L0`, so its parameters and locals numbered one higher
+  than the same `function`'s; and an expression body keyed as `{ return v.dispatch(…) }` where the statement form
+  keyed as `{ v.dispatch(…) }`. That is why `replaceDoc` and `retype` became two exports, and why lsp-format's
+  `retype` and parked-view-surfaces' `pinAt` were missed. The fixed key is built from the function node, renames
+  locals by first appearance, and counts a final `return call` as `call;`. It adds a call of a `web/tests` helper
+  spelled out as its body, `{ a }` as `{ a: a }`, a `lift` key (a file `let` the helper reads becomes a leading
+  parameter), an `arg` key (a parameter or constant where a sibling has a literal) and an exported-twin check.
+- **The fix was proven before its output was used.** It found 8 of 8 known misses at the commits where each existed,
+  and the original key's 21 `id` groups and 91 `lit` groups stay whole under it. At `41cb3a7` it found 20 more
+  clusters (33 copies in 20 files), one exported TypeScript twin (`clickShowToggle`), and confirmed the 8 shape
+  differences listed below by key.
+- **What the twin check missed.** The whole-sweep review found `termEditorCount`, which is `editorsOf` with
+  `termEditorsIn`'s body written out; `5872270` deleted it.
+- **Nested Rust fns.** The Rust walker read module-level fns only, so a fn declared inside a test was in no list;
+  fact-check B found the hole through `viewmodel_contract.rs`'s nested `spin_right`, which B2a had left. A follow-up
+  enumerator (`$R/rust-nested-scratch/rust_nested.py`, a copy of the walker) also reads the items declared inside each
+  module-level fn of a test file or shared module, and the test fns of each `proptest!` block. At `ae67509` it found
+  35 nested non-test fns: 31 in scope, inside a `#[test]` or `#[wasm_bindgen_test]` fn, and 4 out, inside a non-test
+  helper. It adds an `id` key, which renames bound names as the TypeScript `id` key renames parameters and locals, and
+  `idlit`, which is `id` with literals abstracted. Groups holding a nested fn: none by `exact` or `lit`, and 1 by
+  `id`, `unary.rs`'s nested `cmp` with its test module's `cmp`, which `idlit` also groups and to which it adds none.
+  At module level `id` joins no rows that `exact` splits, so it finds nothing there the sweep missed. A similarity
+  ranking and a hand comparison found the second share: `spin_right` differs from `one_rule_machine` in values alone
+  under ruling 2 (`tapes: 1` against `rule.read.len()`, which is 1 here; `"go"` against `name`; the `Rule` literal
+  against `rule`), which no Rust key abstracts.
+- **How the follow-up was proven.** Its 522 module-level rows are byte-identical to the old walker's output at
+  `ae67509`. A completeness check accounts for the `fn` tokens in test-context files, with 11 left over, none in test
+  code. In a scratch copy of the tree, a pasted verbatim copy of `one_rule_machine` grouped by `exact` with both of
+  its homes, and a copy of `core_of` with its locals renamed and one literal changed grouped by `idlit`. After the two
+  shares, core's 1,319 tests with `--features serde` match the baseline per binary, and a defect in each shared helper
+  fails a test in the file that newly calls it: `viewmodel_contract.rs`'s
+  `the_window_costs_the_same_regardless_of_how_large_the_tape_has_grown` and `unary.rs`'s
+  `comparison_trichotomy_sweep`. These are the follow-up's report, not rerun for this entry.
+- **The old walker's other blind spot.** Its test-attribute pattern misses `#[wasm_bindgen_test]`, so it counted the
+  33 wasm tests in `redextape-wasm/tests/browser.rs` as helpers. None shares an `exact` or `lit` key with another row,
+  so the sweep's list did not change.
+
+##### HOW EACH MOVE WAS PROVEN
+
+- **A defect per helper (ruling 6).** For each shared helper the implementer saved the file, broke the helper, ran the
+  former copies' files (nextest with `--no-fail-fast`, or vitest), restored from the saved copy and compared it with
+  `cmp`. Every former copy's file failed under at least one defect, except where the next section says otherwise.
+  These are the implementers' results, recorded in their reports in the lane record, and were not rerun for this
+  entry.
+- **Test counts.** After each cluster the changed crates' nextest lists and the changed files' vitest counts equalled
+  the baseline's.
+- **B4 at `195cf8b`.** The full suite ran again with coverage. Both inventories match the baseline line for line:
+  1,903 and 1,903 nextest lines, 2,906 and 2,906 vitest lines, 0 diff lines each. `coverage_diff.py`, Rust: 93
+  production files before and 94 after, 1 differing, `tm/test_fixtures.rs`, "only in after"; exit 1.
+  `tm/test_fixtures.rs` is "only in after" by construction: its `#[cfg(test)]` sits on its `mod` line in `tm.rs`,
+  which the tool's path rule cannot see. Run from `web/`: 98 production files before and after, 0 differing; exit 0.
+- **A gap in `coverage_diff.py`, closed for this branch by a separate check.** The tool cuts both lcov files at the
+  first `#[cfg(test)]` of the file on disk, which is HEAD's version. In `tm.rs` that line moved from 461 to 25, the
+  new `mod test_fixtures`, so baseline lines 25-460 went uncompared. Above `mod run_tm_tests` the branch changes
+  `tm.rs` by the 2-line insertion at line 25 and a doc rewrite that keeps its line count, so baseline line n is line
+  n+2 now. `$R/b4-tm_rs_remap.py`, run with shift 2 on `195cf8b`'s lcov, finds 97 instrumented and 96 covered
+  lines on both sides, the same sets, and exits 0; given the wrong shift, 0, it exits 1. In the other production
+  `.rs` files the branch changed, the first `#[cfg(test)]` is on the same line at both commits and every hunk falls
+  below it (B4 report at `ae67509`; the follow-up's `unary.rs` hunk sits inside that file's `mod tests`). The tool is
+  unchanged.
+- **The LLVM tier, a history run at `41cb3a7`.** It ran in a local container of CI's runner image
+  (`catthehacker/ubuntu:act-latest`, digest `sha256:c58e2b36…`) with LLVM 22.1.8, by `$R/llvm-gate/run-gate.sh`. The
+  job's `scripts/check-all.sh --llvm-only` exited 0, with clippy clean for both feature sets and
+  `nextest -p redextape-native --features llvm` at 104 passed, `llvm_oracle`'s 3 among them, and 45 passed without
+  default features; the `opt_report` example exited 0. Since `41cb3a7` the branch changes 4 `.rs` files: `tm.rs` and
+  `width_report.rs` in comment lines, and `viewmodel_contract.rs` and `unary.rs`'s test module in code (`e4984f1`,
+  `195cf8b`). The tier ran again the same way at `195cf8b`, with LLVM 22.1.8 in the image at the same digest: the
+  setup, `scripts/check-all.sh --llvm-only` and `opt_report` steps and the container each exited 0, and `nextest`
+  passed 104 with `--features llvm`, `llvm_oracle`'s 3 among them, and 45 without default features.
+- **The reviews.** A whole-branch review at `7147230`, and a whole-sweep review of `00e7970..97a78b1`. The second
+  checked the 712 copies the two lists name against its HEAD and flagged 0. It token-diffed 190 changed test files and
+  found no added or dropped `await`, `until`, `expect` or timeout and no moved call. It found no production hunk. Its
+  findings were fixed in `97a78b1..ae67509` and re-reviewed. The nested follow-up had its own review of
+  `ae67509..195cf8b`, which approved it.
+
+##### DEFECTS THE TESTS DO NOT NOTICE
+
+Each is from the implementer's report named. "Cruder" is the second defect, aimed at the callers the first missed;
+B2a's second defects were other value changes.
+
+- **Where no test failed, short of a throwing body:**
+  - `demo_machine` (B2a): the tests in `one_way.rs` and `two_symbol.rs` that call it pass with the first state alone,
+    with empty initial tapes and with an empty machine.
+  - `encodings_at` (S9): `tm_static_delimiter_safety.rs` notices none of `.skip(1)`, `k.at(width * 2)` and
+    `k.at(width * 0)`.
+  - `encodings` (S9): `tm_heap_stack_shape.rs` notices neither `k.at(MIN_FIELD_WIDTH)` nor `.skip(1)` with `k.at(0)`.
+  - `go_then_done` (B2a): in `single_tape.rs` the tests on four of its seven fixtures (layout_collision's machine,
+    `machine_touching_only_tape`, `multi_tape_rule`, `moves_without_writing_and_writes_without_moving`) fail under
+    none of three defects.
+  - `run_fmt` (B2b): three clean-file tests in cli `fmt.rs` fail under none of three defects. B2b named a fourth,
+    `the_diff_names_the_real_path_and_never_the_temporary`, which the shape ruling put back on its own `run` call.
+  - `lower_with_map` (B2b): a third defect, building the map at `Binary` and `MIN_FIELD_WIDTH + 3`, fails no test in
+    `lambda_provenance.rs`; each former copy fails under at least one of the other two.
+  - `lowered` (B2a): `when_both_limits_fire_the_byte_cause_is_the_one_reported` passes on church(1), so it does not
+    check the precondition its doc states.
+  - `one_rule_machine` (B2a): two_symbol's `a_code_built_for_a_different_machine_is_refused` and trace_equivalence's
+    `raise_cap_does_not_resurrect_the_absurd_tape_count_refusal` fail under none of the defects tried.
+  - `countOf` (S8): readout-history-full and readout-history-held notice neither `+ 1` nor `Number(printed)`; a
+    throwing body fails both, in hooks.
+  - `settled`, the view-taking one (S8): scratch-buffers and scratch-rebind-editor notice neither the wait dropped nor
+    the dispatch removed.
+  - `lambdaFrame` (S1): term-map notices neither altered text and step nor `null`; it never reads the frame.
+  - `median` (B3c): a defect that makes every median NaN fails neither asm-copy-cost nor tm-buffer-cost; a throwing
+    defect fails both.
+  - `legState` (sweep fix wave): scratch-fork notices neither `new History<T>(64)` nor `available: !available`; a
+    throw fails 5.
+  - `tmFrame` (sweep fix wave): replies and sessions notice neither `state + 1` nor `step + 1`; a throw fails replies
+    8 and sessions 22.
+- **First defect silent in the files named, a cruder defect fired there** (helper: files; cruder defect):
+  - B2a: `increment`: machine.rs; the blank rule reading `'*'`. `one_rule_machine` with tapes + 1: two_symbol,
+    trace_equivalence; writes forced to `'z'` in two_symbol, the rule's `next` forced to 0 in trace_equivalence.
+  - B3a: `titleOf`: buffers-quota, buffer-cool-warm, buffer-restore, scratch-cap, scratch-app, scratch-buffers;
+    `button.view-more`. `controlState`: its 7 files; state `null`. `tmPaneHost`: tm-blank-buffer, tm-scratch-fork;
+    `tm-9`. `mountAt`: scroll-kept-moved-editor; no first-compile wait.
+  - B3b: `host`: stage-gestures; `:not([role="tab"])` dropped. `mounted`: view-keys-format-on-blur; every host named
+    `asm-0`. `copiesMenu`: parked-copy-undo; a throw. `shutCopiesMenu`: parked-copy-editor, parked-copy-undo,
+    stage-copy-editor; a throw. `newPaneHost`: lambda-pane-editor; a throw.
+  - B3c: `compile` without its start wait: its 4 files; prepend in place of replace. `pressToggle` with a synthetic
+    `.click()`: scroll-kept; the `source` toggle always. `pressTab` likewise: follow-kept, scroll-kept; the `source`
+    tab always. `fakeClient` returning `null`: replies, scratch, editor-custody; a throw. `lambdaFrame` text: replies;
+    a throw.
+  - Final fix waves: `controlState`'s new flags ignored: lambda-follow, lambda-display, tm-follow-clamp; `null`.
+    `mountAt`'s viewport swapped: one-id-two-kinds, parked-copy-editor-mount, parked-view-replaced, parked-view-state,
+    terminal-header-gap, view-toggles-narrow; `main()` never started. `editorHostOf` searching the page:
+    tm-scratch-fork, tm-buffer-restore; a class no editor has. `editorHostOf` searching `document`: lsp-hover;
+    `editorViewOf` throwing.
+  - S1: `frames` resolving at once: default-views-gestures, divider-drag-focus, divider-drag-format-on-blur,
+    focus-scroll, follow-kept, menu-focus, panel-sizes-restore-lambda, term-map, view-keys-focus,
+    view-toggle-focus-ring, view-toggles-first-paint; a rejection. `tick`: app, hidden-views; a rejection.
+    `scrollRange`: focus-scroll, scroll-kept; `0`. `notice`: view-keys-focus, view-toggles-two-of-a-kind; `''`.
+    `stageTab`: follow-kept, scroll-kept; no tab. `fixtureHost`: lambda-link-state; `null`. `lambdaFrame`:
+    lambda-follow; `null`.
+  - S2: `seededRandom`: share-link; values outside [0, 1). `mean`: session-memory; `* 0`. `bodyBackground`:
+    storage-blocked; `<html>`'s background.
+  - S3: `noticeText`: buffers-quota-restored; `() => ''`. `stepTextOf`: pane-kind-switch, pane-picker; `''`.
+  - S4: `linkStatus`: buffers-quota-empty; `() => 'x'`. `sourceLinked`: asm-copy; `?? ''`. `asmPane`: asm-blank-copy;
+    `paneByLeaf('asm-x')`. `editorOf`: copy-beside-program; always `null`. `lambdaStepText`: lambda-tree-cost;
+    `'step …'`.
+  - S5: `tmStateOf`: state-table; `...over` dropped. `asmSnapshot`: readout, results; `available: false`. `legState`:
+    replies; `new History<T>(1)`. `ONE_RULE_PROGRAM`: tm-pane-follows-session, replies; a throwing `states` getter.
+    `tmLeaves`: tm-pane-follows-session, tm-reduced-buffer; a selector nothing has. `stepLineOf`, `recorded` and
+    `recordingOver`: tm-pane-follows-session, tm-reduced-buffer; a selector nothing has, `+ 1_000_000` and a throw,
+    each failing a hook. `markersIn`: lsp-hover; `* 0`.
+  - S6: `box`: first-load-views-tall, share-open-nothing-stored; `DOMRect(0, 0, 0, 1)`. `lambdaTermText`:
+    buffer-restore, scratch-app, scratch-buffers, scratch-edit; `() => ''`. `lambdaHeading`: buffer-restore;
+    `() => ''`.
+  - S7: `frame`: panel-boundaries, panel-maximise, panel-sizes-stored, state-diagram-local, tm-follow-clamp; a
+    rejection. `heightOf`: panel-sizes-restore-lambda; `.top`. `programRows`: state-diagram-no-machine,
+    tm-follow-clamp; `[]`. `presetOf`: header-menus-narrow, view-strip-narrow; a throw.
+  - S8: `lambdaLeaves`: pane-picker; `.slice(0, 0)`. `termOf`: pane-kind-switch, two-lambda-panes; a constant.
+    `places`: pane-kind-switch; a random suffix. `splitRow`: layout-app, layout-restore; a no-op. `tmStepText`:
+    two-lambda-panes; a constant.
+  - Sweep fix wave: `legState`'s budget: sessions; `available: !available`. Whole-sweep fix: `editorsOf` `+ 1`:
+    bindings-stored, parked-view-replaced, parked-view-surfaces, each using it inside an `=== 1` wait; `* 0`.
+- Defects on helpers the shape ruling later deleted or reverted (`interceptWorkerMessages`, `slotEvents`,
+  `inertEvents`' added members) are left out.
+
+##### WHAT THIS DID NOT CLOSE
+
+- **The plan's B3 table row 4 is not done.** Its helper, `interceptWorkerMessages`, was deleted by the shape ruling,
+  and link-hold, readout-history-held, share-positions and tm-scratch-fork keep their own listeners.
+- **Copies left, with the reason:**
+  - **Rust.** E01 `steps` in `lower_tm.rs` (the unary copy lacks the `init[WORK]` line); E19 `arb_expr` in
+    `asm_oracle.rs` and `tm_bank_invariant.rs` (their shapes differ); E20 `walk` in `one_way.rs` and
+    `one_way_oracle.rs` (ruling 5); `one_rule_machine` in `tm/test_fixtures.rs` and `tests/common/mod.rs`, the same
+    tokens (ruling 5); `core_of` in `tm/test_fixtures.rs` and native's `tests/common/mod.rs`, which differ in a
+    message across a unit-test module and another crate (ruling 5); `sourcemap.rs`'s `core_of`, whose `assert!`
+    message also formats `src`; `label` and `asm_label` (ruling 5); `tmpdir` in cli `fmt.rs` and `lint.rs`, and
+    `tm_symbol` and `arb_symbol`, where the literal is the whole helper; `run_gadget`, `run_jz` and `run_box`, four
+    stagings in `unary.rs` and three `run` calls in two `fmt.rs` tests (the shape ruling); the nested fns the
+    follow-up left for their shape or for having no sibling, among them `lower_tm.rs`'s four nested `steps` (E01's two
+    among them), `check`, `dispatch`, `run_cons`, `run_ie` and `run_op` in `unary.rs`, `lower_asm.rs`'s
+    `lower_and_run` and `lower_and_fault`, and `tm.rs`'s `fitted` (the table is in `$R/rust-nested-report.md`); four
+    nested fns inside non-test helpers, out of scope; `viewmodel_contract.rs`'s `spin_right` and `sim.rs`'s `spin`,
+    now the same one-call wrapper of `one_rule_machine` from two homes (ruling 5, and the arguments are the helper);
+    and `tm/reduced_file.rs`'s inline `let looping = Machine {…}`, a value rather than a helper (a controller call,
+    above).
+  - **Web, by the user's ruling** (state the file or test owns): T190 `freshMain` (3 files), T192 `onError` (6 files),
+    T193 `letResultsGo`, `letExtendsGo` and `letGo` (3 files), T195 `onError` (12 nested copies in 3 files) and T196
+    `send` (3 nested copies).
+  - **Web, the literal is the whole helper:** T197 (`lambdaPaneHost`, `rootEl`, `tmPane`), T198 (`close`, `press`),
+    T199 (`copyEditor`), T200 (`PROGRAM`, `STORED`), two new rows under the same rules (`LINK_B` in share-open-latest;
+    `editorHostOf` and `toggleOf`), and the 50 families G01-G50 of `$R/sweep-list-2.md` (180 copies in 98 files at
+    `41cb3a7`), whose identical subgroups were shared.
+  - **Web, inside another helper:** lambda-deep's `deepTermSteppedBack`'s `term` and `stepText`; `harness.ts`'s
+    `tmWalk`'s `control` and `status`; app's `tmStep` inside its `settled`; the `item` inside `plusView`. stage.test's
+    `linkAt` stays for another reason than the list gives: it sits in an `it` callback and reads that test's own
+    `view`, T195 and T196's rule.
+  - **Web, a different shape:** running-focus's `settled(v, src)` (its `until` has no message); link-hold's `splitRow`
+    and `leafIds`; tm-view-narrow's `panelOf`, `control`, `diagram`, `programScroll` and `choice`; 15 mounts that
+    write storage or set no viewport (add-view-floor, live-views-bound, live-views-bound-switch,
+    one-id-two-kinds-stored, panel-sizes-restore, panel-sizes-restore-lambda, parked-copy-restore,
+    parked-view-state-restore, tm-display-restore; lambda-display-restore, workspace-boot, workspace-bound,
+    workspace-restore, workspace-upgrade; about-menu); layout-notices' `splitVia`; scratch-app's `pickBinding` (E14);
+    and the shape ruling's web reverts (`interceptWorkerMessages` 4, `slotEvents` 2, `deleteEveryCopy` 2,
+    `inertEvents` 6, asm-copy's `pick`, copy-pin's `splitToProgram`).
+  - **Wrappers left as written:** `tmStepText`, `lambdaTermText`, `tmPane` and `lambdaPane` spell out
+    `stepTextOf('tm-0')`, `termOf('lambda-0')`, `leafEl('tm-0')` and `paneByLeaf('lambda-0')`; the Method makes each
+    its own cluster.
+- **Left for Parts C and D** (the controller's call where the comment was false before this branch):
+  - Docs on shared helpers that hold history, a measurement or a false claim: `retype`'s "and wait past the edit
+    debounce" (false before the branch); `editedToHaltImmediately`'s "Important 3, fix round";
+    `startStateGoesToHalt`'s "the reviewer measured"; `requireHeapHarness`'s "measured 2026-08-10"; `historyFills`'s
+    "7,504 and 8,590 ms … (2026-10-05)" and `BUDGET_HALF`'s "step 75,024"; `rowNames`' "§5"; `shownNoticeText`'s
+    "since Plan 7 part 2".
+  - Rust comments that name removed generators, all history: `zipper_equivalence.rs` (four lines) and
+    `native_oracle.rs` (one); and `lambda/lower.rs`'s "`redextape-test-support` exports only `arb_expr_over`", false
+    before the branch and more so now.
+  - Four pointers false at `1abfdd9` already: session-memory's "`frame-cost.test.ts`'s `while4`"; tm-blank-buffer's
+    and tm-buffer-restore's "`tm-scratch-fork.test.ts`'s own `settleOn`"; scratch-buffers' "`link-truncated.test.ts`'s
+    `↺`".
+  - `replies.test.ts`'s "ARRIVED WITH TASK 3", and the three history quotes the controller kept.
+- **A probe fails on `main`.** `buffer-affordability.test.ts`'s warm-TM-copy case fails with "expected 69009 to be
+  less than 69009" at `1abfdd9` on two runs, in a scratch worktree with its own target directory, and at `97a78b1` on
+  one (`$R/probe-main-report.md`). The TM points n = 1, 2, 4, 8 and 9 print `steps=69008` and `ringRetained=69009`, so
+  the bound `kept < steps + 1` fails when the ring keeps the 69,009 frames the copy records. This branch does not
+  change it.
+- **`coverage_diff.py` still cuts at HEAD's first `#[cfg(test)]`.** The remap check closes the one file this branch
+  moved that line in; the tool is unchanged.
+- **Not pushed.** Nothing has run in CI.
+
+##### VERIFICATION
+
+Run on 2026-10-18 in the main checkout on branch `test-helpers` at `195cf8b`. B4 ran as `$R/b1/run.sh b-after` in the
+user unit `rxt-b4-after4` (logs `$R/b1/*-b-after.log`, outputs `.superpowers/sdd/comment-pass/b-after/`); the gate ran
+as `$R/gate-b/run.sh` in the user unit `rxt-gate-b2` (`$R/gate-b/HEAD`; logs in `$R/gate-b/`), 28 of its 28 steps
+exiting 0; the LLVM tier ran by `$R/llvm-gate/run-gate.sh` in a container on an export of `195cf8b` (logs in
+`$R/llvm-gate/logs/195cf8b/`). The commit that adds this entry changes only this file. No image was built, and
+nothing has run in CI: the branch has not been pushed.
+
+```
+scripts/check-all.sh --no-llvm                  → exit 0, "green, but PARTIAL — these tiers were SKIPPED: LLVM"; nextest 1,903 passed, 33 skipped
+cargo llvm-cov nextest --workspace --fail-under-lines 90
+                                                → exit 0, 1,903 passed, 33 skipped; lines 95.59% (32,280, 1,424 missed)
+scripts/check-slow.sh                           → exit 0, "slow tier green"
+scripts/check-{text-bytes,citations,attributions,doc-figures,shared-docs,colours,grammar-wasm,lua,licences}.sh,
+  --self-test then alone                        → 18 of 18 exit 0 (attributions: 801 sites, 6 excused, 0 violations)
+web: build:wasm, build:lsp-wasm, build:bindings, biome ci --error-on-warnings, typecheck, build:app
+                                                → 6 of 6 exit 0
+web: pnpm run test:coverage                     → exit 0, 280 of 280 test files and 2,906 of 2,906 tests passed
+```
+
+```
+B4, $R/b1/run.sh b-after                        → install, lists, Rust and web coverage exit 0; nextest 1,903 passed, 33 skipped; vitest 280 files, 2,906 tests passed
+diff of the nextest inventories                 → 0 lines (1,903 and 1,903)
+diff of the vitest inventories                  → 0 lines (2,906 and 2,906)
+coverage_diff.py, Rust, from the root           → exit 1: "crates/redextape-core/src/tm/test_fixtures.rs: only in after"; "93 production files before, 94 after; 1 differ"
+coverage_diff.py, web, from web/                → exit 0: "98 production files before, 98 after; 0 differ"
+b4-tm_rs_remap.py, tm.rs 25-460, shift 2        → exit 0: instrumented 97 and 97, same set; covered 96 and 96, lost [] gained []
+  the same, shift 0                             → exit 1: same set False
+LLVM tier at 41cb3a7 (history), LLVM 22.1.8     → check-all --llvm-only, opt_report and the container each exit 0; 104 passed; 45 passed
+LLVM tier at 195cf8b, CI's image, LLVM 22.1.8   → setup, check-all --llvm-only, opt_report and the container each exit 0; 104 passed; 45 passed
+```
+
+**Every count this entry quotes, with what produces it.** Commands run from the repository root, `B=1abfdd9`,
+`H=195cf8b`, `W=.superpowers/sdd/comment-pass` and `R=~/temp/redextape-comment-pass-record`. Rows marked "report" or
+"list" are results recorded in the lane record, not commands run for this entry.
+
+| Value | What | Produced by |
+|---|---|---|
+| 109 | commits in the range | `git rev-list --count $B..$H` |
+| 56; 40; 7; 4; 2 | commits before the sweep, the sweep S1-S9, its fix wave, the whole-sweep fixes, the nested Rust follow-up | `git rev-list --count $B..00e7970`, and `00e7970..41cb3a7`, `41cb3a7..97a78b1`, `97a78b1..ae67509`, `ae67509..$H` |
+| 263 files, +6,161 −7,737 | the whole range | `git diff --shortstat $B $H` |
+| 224 files, +5,468 −6,487; 38 files, +646 −1,250; 1 file, +47 | the range under `web/tests`, under `crates`, under `docs` | `git diff --shortstat $B $H -- web/tests` (and `crates`, `docs`) |
+| 19 (3 Rust, 15 web, the notes file); 0 | files added; files deleted | `git diff --name-status --diff-filter=A $B $H`; the same with `--diff-filter=D \| wc -l` |
+| 7 | existing modules that gained a shared helper; with the 18 new test modules, the 25 in the title | `for f in $(git diff --name-only --diff-filter=M $B $H -- web/tests crates \| grep -v '\.test\.ts$'); do git diff $B $H -- $f \| grep -qE '^\+(export \|pub fn )' && echo $f; done` |
+| 11; 8 | rows in the plan's B2 and B3 tables | `sed -n '/^### Task B2/,/^### Task B3/p' docs/superpowers/plans/2026-10-17-comments-and-repeats.md \| grep -c '^\| [^C\|-]'` (and `Task B3` to `Task B4`) |
+| 29 | extra helpers E01-E29 | `grep -oE '\bE[0-9]{2}\b' $R/b-extras.md \| sort -u \| wc -l` |
+| 10; 5 | new browser and node test modules | `git diff --name-only --diff-filter=A $B $H -- web/tests/browser \| wc -l` (and `web/tests/node`) |
+| 4; 6 | test files that called `clickShowToggle`; `termEditorCount` | `git show --stat --format= 7d70523` and `5872270`, less the fixture and `harness.ts` |
+| 23 and 215; 541 and 1,704 | `export` lines in `harness.ts` at `$B` and now; its lines | `git show ${B}:web/tests/browser/harness.ts \| grep -c '^export '` and `grep -c '^export ' web/tests/browser/harness.ts`; `wc -l` of each |
+| 8 | entries in the notes file | `grep -c '^## ' docs/superpowers/notes/2026-10-17-code-history-web-tests.md` |
+| 0 | `allow(dead_code)` lines the range adds | `git diff $B $H \| grep -c '^+.*allow(dead_code)'` |
+| 0 | occurrences at `$H` of `interceptWorkerMessages`, `stage_two_cells`, `slotEvents`, `replaceDoc`, `clickShowToggle`, `termEditorCount` | `git grep -n -w <name> $H -- web crates \| wc -l`, per name |
+| 0 | exports of `splitToProgram` at `$H` | `git grep -n 'export.*splitToProgram' $H -- web \| wc -l` |
+| 7 | `live-views-bound.test.ts`'s `plusView` calls with its own `’` message | `grep -c "plusView(.*’" web/tests/browser/live-views-bound.test.ts` |
+| 4; 18 (15 and 3) | `.rs` files changed since `41cb3a7`; changed lines in them that are not `//` comments (in `viewmodel_contract.rs` and `unary.rs`) | `git diff --name-only 41cb3a7 $H -- '*.rs'`; `git diff -U0 41cb3a7 $H -- '*.rs' \| awk '/^\+\+\+ /{f=$2;next} /^--- /{next} /^[+-]/ && !/^[+-][ \t]*\/\//{c[f]++} END{for(k in c) print k, c[k]}'` |
+| 461 and 25 | `tm.rs`'s first `#[cfg(test)]` line at `$B` and now | `git show ${B}:crates/redextape-core/src/tm.rs \| grep -n -m1 '#\[cfg(test)\]'`; the same `grep` on the file |
+| +2 at line 25; 4 lines for 4 at line 270 | `tm.rs`'s hunks above `mod run_tm_tests` | `git diff -U0 $B $H -- crates/redextape-core/src/tm.rs \| grep '^@@'` |
+| 1,903 and 1,903; 0 | nextest inventory lines, baseline and after; diff lines | `wc -l < $W/b-baseline/nextest.txt` and `$W/b-after/nextest.txt`; `diff $W/b-baseline/nextest.txt $W/b-after/nextest.txt \| wc -l` |
+| 2,906 and 2,906; 0 | vitest inventory lines, baseline and after; diff lines | the same with `vitest.txt` |
+| 1,903 passed, 33 skipped | B4's nextest run at `$H` | `grep 'tests run' $R/b1/rust-cov-b-after.log` |
+| 280 of 280 files; 2,906 of 2,906 tests | B4's vitest run at `$H`, passed | `grep -E 'Test Files\|Tests ' $R/b1/web-cov-b-after.log` |
+| 93 and 94 files, 1 differ, exit 1 | `coverage_diff.py`, Rust | `python3 $W/coverage_diff.py $W/b-baseline/rust.lcov . $W/b-after/rust.lcov .` |
+| 98 and 98 files, 0 differ, exit 0 | `coverage_diff.py`, web | from `web/`: `python3 ../$W/coverage_diff.py ../$W/b-baseline/web/lcov.info . ../$W/b-after/web/lcov.info .` |
+| 97 and 97; 96 and 96; exit 0, and exit 1 at shift 0 | `tm.rs` lines 25-460 instrumented and covered, mapped by +2 | `python3 $R/b4-tm_rs_remap.py $W/b-baseline/rust.lcov $W/b-after/rust.lcov 25 460 2` (and `… 0`) |
+| 104 passed; 3; 45 passed; exit 0 three times | the LLVM tier at `41cb3a7` (history): with `--features llvm`; `llvm_oracle`'s tests among them; without default features; the steps | `grep 'tests run' $R/llvm-gate/logs/41cb3a7/check-all.log`; `grep -c 'PASS .*llvm_oracle'` on that log; `cat $R/llvm-gate/logs/41cb3a7/status.txt` |
+| 22.1.8; `sha256:c58e2b36…` | the LLVM version; the image digest, at `41cb3a7` (history) | `grep 'libllvm22 ' $R/llvm-gate/logs/41cb3a7/setup.log`; `grep Digest $R/llvm-gate/pull.log` |
+| 104 passed; 3; 45 passed; exit 0 three times; exit 0; 22.1.8; `sha256:c58e2b36…` | the LLVM tier at `$H`: with `--features llvm`; `llvm_oracle`'s tests among them; without default features; the steps; the container; the LLVM version; the image digest | `grep 'tests run' $R/llvm-gate/logs/195cf8b/check-all.log`; `grep -c 'PASS .*llvm_oracle'` on that log; `cat $R/llvm-gate/logs/195cf8b/status.txt`; `tail -1 $R/llvm-gate/logs/195cf8b/docker.log`; `grep 'Unpacking libllvm22' $R/llvm-gate/logs/195cf8b/setup.log`; `grep -o 'ubuntu@sha256:[0-9a-f]*' $R/llvm-gate/llvm-host.sh` (the host command that ran it) |
+| 3 of 3 runs | the probe's "expected 69009 to be less than 69009" on `main` twice and the branch once | `grep -c 'expected 69009 to be less than 69009' $R/probe-main/{main-run1,main-run2,head-run1}.log` (2 lines each) |
+| 193 (187, 6); 9; 9; 52 | the first enumeration at `00e7970`: shareable clusters (TypeScript, Rust); batches; clusters for a ruling; families left | list: `$R/sweep-list.md`, Totals |
+| 8 of 8; 21 and 91 | known misses the fixed key found; the original key's `id` and `lit` groups kept whole | list: `$R/sweep-list-2.md`, "Proof on the known misses" and "What was wrong with the key" |
+| 20, 33, 20; 1; 8; 50, 180, 98 | the re-enumeration at `41cb3a7`: clusters, copies, files; TypeScript exported twins; shape differences; families, copies, files left | list: `$R/sweep-list-2.md`, Totals and its sections |
+| 39; 3 | `idle` copies the user's ruling shared; history quotes the controller kept | ledger: `$R/progress-part-b.md` |
+| 3, 6, 3, 12 in 3, 3 | files or copies of T190, T192, T193, T195 (copies in files), T196 | list: `$R/sweep-list-2.md`, "Already ruled left" |
+| 4 | `interceptWorkerMessages` copies put back | report: `$R/fix-shape-report.md` |
+| 15 (9, 5, 1) | mounts left for their shape | report: `$R/fix-final-report.md` |
+| n = 1, 2, 4, 8, 9; 69008 and 69009 | the probe's TM points; steps and frames kept | report: `$R/probe-main-report.md` |
+| 4 and 1; 4 | removed-generator comment lines in `zipper_equivalence.rs` and `native_oracle.rs`; pointers false at `1abfdd9` | report: `$R/whole-sweep-review.md` Minor 8; `$R/whole-fix-report.md` |
+| 29 (26 and 3) | copies the shape fix wave put back | report: `$R/fix-shape-report.md` |
+| 3; 4; 3 in 2 | Rust copies of the 26: `run_*` helpers; `unary.rs` stagings; `run` calls in `fmt.rs` tests | report: `$R/fix-shape-report.md` |
+| 4 | `two-lambda-panes.test.ts` pointers `e7a9dce` renamed | `git show e7a9dce -- web/tests/browser/two-lambda-panes.test.ts \| grep -cE '^-.*own .(retype\|forkButton)'` |
+| 22 | review reports in the lane record | `ls $R \| grep -cE 'review\.md$'` |
+| 712, 0; 190 | copies of both lists checked, flagged; changed test files token-diffed | report: `$R/whole-sweep-review.md`, checks 1 and 2 |
+| the defects and files above | each silent defect and the cruder one that fired | report: `$R/task-B2a-report.md`, `task-B2b-report.md`, `task-B3a-report.md` to `task-B3c-report.md`, `fix-final-report.md`, `fix-idle-report.md`, `sweep-S1-report.md` to `sweep-S9-report.md`, `sweep-fix-report.md`, `whole-fix-report.md` |
+| 2 files, +5 −13 | the nested follow-up | `git diff --shortstat ae67509 $H` |
+| 35; 31; 4; 2 | nested non-test fns at `ae67509`; in scope; out of scope, inside a non-test helper; shared | report: `$R/rust-nested-report.md` |
+| 0, 0, 1, 0 | groups holding a nested fn, by `exact`, `lit`, `id`, `idlit`, each counting only groups the stricter key (`exact` for `lit` and `id`, `id` for `idlit`) did not already form | report: `$R/rust-nested-report.md` |
+| 522; 11; 33 | module-level rows, byte-identical in both walkers; `fn` tokens the completeness check left over; wasm tests the old walker counted as helpers | report: `$R/rust-nested-report.md` |
+| 4 | `lower_tm.rs`'s nested `steps` | report: `$R/rust-nested-report.md` |
+| 1,319 | core's tests with `--features serde` after the follow-up | report: `$R/rust-nested-report.md` |
+| 4 | inline twins S1 left | report: `$R/sweep-S1-report.md` |
+| 28 of 28 | gate steps exiting 0 at `$H` | `$R/gate-b/run.sh` (unit `rxt-gate-b2`); `ls $R/gate-b/*.log \| wc -l` and `grep -h '^exit=0$' $R/gate-b/*.log \| wc -l` |
+| 1,903 passed, 33 skipped; exit 0 | `scripts/check-all.sh --no-llvm`, the workspace nextest run | run.sh's `check-all` step into `$R/gate-b/check-all.log`; `grep -m1 'tests run'` and `grep exit=` on that log |
+| 1,903 passed, 33 skipped; 95.59% of 32,280 lines, 1,424 missed | `cargo llvm-cov nextest --workspace --fail-under-lines 90` | run.sh's `llvm-cov` step into `$R/gate-b/llvm-cov.log`; `grep 'tests run'` and `grep '^TOTAL'` on that log |
+| 18 of 18 | the nine `scripts/check-<name>.sh` scans, `--self-test` then alone | run.sh's `scan-*` loop; `grep -h exit= $R/gate-b/scan-*.log` |
+| 801, 6, 0 | attribution sites, excused, violations | `scripts/check-attributions.sh`; `grep sites $R/gate-b/scan-attributions.log` |
+| 6 of 6 | web `build:wasm`, `build:lsp-wasm`, `build:bindings`, `biome ci --error-on-warnings`, `typecheck`, `build:app` exiting 0 | run.sh's `web-*` steps; `grep exit= $R/gate-b/web-{build-wasm,build-lsp-wasm,build-bindings,biome,typecheck,build-app}.log` |
+| 280 of 280 files; 2,906 of 2,906 tests | web `pnpm run test:coverage`, passed | run.sh's `web-test-coverage` step; `grep -E 'Test Files\|Tests ' $R/gate-b/web-test-coverage.log` |

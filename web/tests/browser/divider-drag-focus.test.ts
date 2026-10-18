@@ -2,7 +2,19 @@ import type { EditorView } from '@codemirror/view'
 import { beforeAll, beforeEach, describe, expect, it } from 'vitest'
 import { page, userEvent } from 'vitest/browser'
 import { LAYOUT_STORAGE_KEY } from '../../src/layout'
-import { focusInPage, host, resetToFirstLoad, SHELL, showWideDefault, until } from './harness'
+import {
+  focusInPage,
+  frames,
+  holdsFocus,
+  host,
+  resetToFirstLoad,
+  SHELL,
+  showWideDefault,
+  sourcePane,
+  sourceScroller,
+  stateIdle,
+  until,
+} from './harness'
 
 /**
  * A DIVIDER'S GESTURE LEAVES THE KEYBOARD FOCUS WHERE IT WAS — `pane-host.ts`'s `resized`.
@@ -32,10 +44,6 @@ const PROGRAM = `let x = 40;${'\n'.repeat(60)}x + 2`
 
 let view: EditorView
 
-const frames = (): Promise<void> => new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(() => r())))
-const source = (): HTMLElement => host('source') as HTMLElement
-/** The box that scrolls a long program: the source editor's own, in the share of its view it has (spec §11.1). */
-const editor = (): HTMLElement => source().querySelector('.cm-scroller') as HTMLElement
 const dividerAt = (path: string): HTMLElement =>
   document.querySelector<HTMLElement>(`#views .layout-divider[data-path="${path}"]`) as HTMLElement
 const share = (path: string): number => Number(dividerAt(path).getAttribute('aria-valuenow'))
@@ -56,13 +64,6 @@ async function drag(path: string): Promise<void> {
   expect(share(path), 'precondition: the drag moved its divider').toBeGreaterThan(before)
 }
 
-/** `el` has the focus now, and still has it two frames on. */
-async function holdsFocus(el: Element, what: string): Promise<void> {
-  expect(document.activeElement, `${what}, at once`).toBe(el)
-  await frames()
-  expect(document.activeElement, `${what}, two frames on`).toBe(el)
-}
-
 /** Put the caret at the start of line `line` of the source editor, with the focus in it. */
 async function caretOn(line: number): Promise<number> {
   view.focus()
@@ -81,36 +82,37 @@ beforeAll(async () => {
 beforeEach(async () => {
   if (view.state.doc.toString() !== PROGRAM)
     view.dispatch({ changes: { from: 0, to: view.state.doc.length, insert: PROGRAM } })
-  await until(() => document.querySelector<HTMLElement>('#results')?.dataset.state === 'idle', 'the compile')
+  await until(stateIdle, 'the compile')
 })
 
 describe('a divider dragged with the pointer, on the source beside the TM view', () => {
   beforeEach(async () => {
     await resetToFirstLoad()
-    expect(editor().scrollHeight - editor().clientHeight, 'precondition: the source editor scrolls').toBeGreaterThan(
-      500,
-    )
+    expect(
+      sourceScroller().scrollHeight - sourceScroller().clientHeight,
+      'precondition: the source editor scrolls',
+    ).toBeGreaterThan(500)
   })
 
   it('leaves the caret in the editor it was in, and a key typed next lands at it', async () => {
-    editor().scrollTop = 120
+    sourceScroller().scrollTop = 120
     // A CLICK OF THE DRIVER'S IN A LINE THAT IS IN SIGHT, which is how the caret comes to be mid-document.
-    const line = [...source().querySelectorAll<HTMLElement>('.cm-line')].find(
-      (l) => l.getBoundingClientRect().top > source().getBoundingClientRect().top + 200,
+    const line = [...sourcePane().querySelectorAll<HTMLElement>('.cm-line')].find(
+      (l) => l.getBoundingClientRect().top > sourcePane().getBoundingClientRect().top + 200,
     )
     await userEvent.click(line as HTMLElement)
     const caret = view.state.selection.main.head
     expect(view.hasFocus, 'precondition: the click put the focus in the editor').toBe(true)
     expect(caret, 'precondition: the caret is past the first line').toBeGreaterThan(PROGRAM.indexOf('\n'))
     expect(caret, 'precondition: and short of the last').toBeLessThan(PROGRAM.lastIndexOf('\n'))
-    const scrolled = editor().scrollTop
+    const scrolled = sourceScroller().scrollTop
     expect(scrolled, 'precondition: the source view is scrolled').toBeGreaterThan(0)
 
     await drag('[]')
     await holdsFocus(view.contentDOM, 'the drag took the focus out of the editor')
     expect(view.hasFocus).toBe(true)
     expect(view.state.selection.main.head, 'the drag moved the caret').toBe(caret)
-    expect(editor().scrollTop, 'the drag scrolled the view').toBe(scrolled)
+    expect(sourceScroller().scrollTop, 'the drag scrolled the view').toBe(scrolled)
 
     await userEvent.keyboard('Z')
     expect(view.state.doc.toString(), 'the key typed after the drag did not land at the caret').toBe(
@@ -149,13 +151,13 @@ describe('a divider dragged with the pointer, on the source beside the TM view',
 
   it('does not scroll the view to a caret that is out of sight', async () => {
     await caretOn(2)
-    editor().scrollTop = 500
+    sourceScroller().scrollTop = 500
     await frames()
-    expect(editor().scrollTop, 'precondition: the view is scrolled past the caret').toBe(500)
+    expect(sourceScroller().scrollTop, 'precondition: the view is scrolled past the caret').toBe(500)
 
     await drag('[]')
     await holdsFocus(view.contentDOM, 'the drag took the focus out of the editor')
-    expect(editor().scrollTop, 'the focus given back after a pointer’s drag scrolled the view').toBe(500)
+    expect(sourceScroller().scrollTop, 'the focus given back after a pointer’s drag scrolled the view').toBe(500)
   })
 
   it('leaves the focus on what had it in the other view', async () => {

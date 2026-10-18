@@ -1,7 +1,19 @@
-import { EditorView } from '@codemirror/view'
+import type { EditorView } from '@codemirror/view'
 import { beforeAll, describe, expect, it } from 'vitest'
 import { page, userEvent } from 'vitest/browser'
-import { SHELL, until } from './harness'
+import { editorOf } from './editor-view-fixture'
+import {
+  controlIn,
+  copyShown,
+  linkStatus,
+  paneStepText,
+  pickInViewMenu,
+  resultsText,
+  SHELL,
+  stateIdle,
+  until,
+  viewMenu,
+} from './harness'
 
 /**
  * A view of the program beside a view of a copy on the same leg, with the copy's view focused last.
@@ -26,23 +38,7 @@ const NOT_LINKED = 'not linked to the program'
 let view: EditorView
 let asmHost: HTMLElement
 let tmHost: HTMLElement
-const idle = () => document.querySelector<HTMLElement>('#results')?.dataset.state === 'idle'
-const editorOf = (pane: HTMLElement): EditorView | null => {
-  const el = pane.querySelector<HTMLElement>('.term-editor')
-  return el === null ? null : EditorView.findFromDOM(el)
-}
-const copyShown = (pane: HTMLElement) => /copy · not linked/.test(pane.textContent ?? '')
-const status = () => document.querySelector('#link-status')?.textContent ?? ''
 const titleOf = (pane: HTMLElement) => pane.querySelector('button.view-title')?.textContent?.trim() ?? ''
-const stepOf = (pane: HTMLElement) => pane.querySelector('.step')?.textContent ?? ''
-const control = (pane: HTMLElement, label: string) =>
-  [...pane.querySelectorAll<HTMLButtonElement>('.controls button')].find((b) => b.textContent === label)
-const menuOf = (pane: HTMLElement): HTMLElement => {
-  const more = pane.querySelector<HTMLButtonElement>('button.view-more')
-  const menu = document.getElementById(more?.getAttribute('aria-controls') ?? '')
-  if (more === null || menu === null) throw new Error('no view menu')
-  return menu
-}
 /** The pcs of `pane`'s listing rows painted as the running focus. */
 const asmFocus = (pane: HTMLElement) =>
   [...pane.querySelectorAll<HTMLElement>('.asm-row.is-focus .asm-pc')].map((e) => e.textContent ?? '')
@@ -50,24 +46,15 @@ const asmFocus = (pane: HTMLElement) =>
 const tmFocus = (pane: HTMLElement) =>
   [...pane.querySelectorAll<HTMLElement>('.state-row.is-focus')].map((e) => e.textContent ?? '')
 
-/** Open `pane`'s `⋯` menu with the pointer and pick `cls`'s item with it, as a user does. */
-async function pick(pane: HTMLElement, cls: string): Promise<void> {
-  await userEvent.click(pane.querySelector<HTMLButtonElement>('button.view-more') as HTMLButtonElement)
-  await until(() => menuOf(pane).matches(':popover-open'), 'the view menu to open')
-  const item = menuOf(pane).querySelector<HTMLButtonElement>(`button.${cls}`)
-  if (item === null) throw new Error(`the menu offers no ${cls}`)
-  await userEvent.click(item)
-}
-
 /** Split `pane` with the program's pair on `leg`, through its menu with the pointer; returns the new view. */
 async function splitToProgram(pane: HTMLElement, leg: 'asm' | 'tm'): Promise<HTMLElement> {
   const before = new Set([...document.querySelectorAll<HTMLElement>(`.pane[data-kind="${leg}"]`)])
   await userEvent.click(pane.querySelector<HTMLButtonElement>('button.view-more') as HTMLButtonElement)
-  await until(() => menuOf(pane).matches(':popover-open'), 'the view menu to open')
+  await until(() => viewMenu(pane).matches(':popover-open'), 'the view menu to open')
   await userEvent.click(
-    menuOf(pane).querySelector<HTMLButtonElement>('button.view-split[data-dir="row"]') as HTMLButtonElement,
+    viewMenu(pane).querySelector<HTMLButtonElement>('button.view-split[data-dir="row"]') as HTMLButtonElement,
   )
-  const pair = () => menuOf(pane).querySelector<HTMLButtonElement>(`button[data-binding="${leg}:source"]`)
+  const pair = () => viewMenu(pane).querySelector<HTMLButtonElement>(`button[data-binding="${leg}:source"]`)
   await until(() => pair() !== null, 'the split’s pairs')
   await userEvent.click(pair() as HTMLButtonElement)
   const made = () =>
@@ -107,8 +94,8 @@ beforeAll(async () => {
   asmHost = document.querySelector<HTMLElement>('.pane[data-leaf="asm-0"]') as HTMLElement
   tmHost = document.querySelector<HTMLElement>('.pane[data-leaf="tm-0"]') as HTMLElement
   view.dispatch({ changes: { from: 0, to: view.state.doc.length, insert: SAMPLE } })
-  await until(() => !idle(), 'the compile to start')
-  await until(idle, 'the compile to finish')
+  await until(() => !stateIdle(), 'the compile to start')
+  await until(stateIdle, 'the compile to finish')
   await until(() => asmHost.querySelectorAll('.asm-row').length === 5, 'the program’s listing')
   await until(() => tmHost.querySelectorAll('.state-row').length > 3, 'the program’s rules')
 })
@@ -117,14 +104,14 @@ describe('an asm view of the program beside an asm view of a copy', () => {
   let program: HTMLElement
 
   it('keeps marking the program’s running focus when the copy’s view is focused last', async () => {
-    await pick(asmHost, 'detach')
+    await pickInViewMenu(asmHost, 'detach')
     await until(() => editorOf(asmHost) !== null && copyShown(asmHost), 'the asm copy in the first view')
     program = await splitToProgram(asmHost, 'asm')
     await until(() => program.querySelectorAll('.asm-row').length === 5, 'the program’s listing in the split')
 
     // STEP 0: `pc0`, `li r0, #40`, runs next, and the focus is the literal `40`'s.
-    await userEvent.click(control(program, '↺') as HTMLButtonElement)
-    await until(() => stepOf(program).startsWith('step 0 of'), 'the program’s view to restart')
+    await userEvent.click(controlIn(program, '↺') as HTMLButtonElement)
+    await until(() => paneStepText(program).startsWith('step 0 of'), 'the program’s view to restart')
     await until(() => asmFocus(program).length > 0, 'the program’s view to mark the focus')
     const atZero = asmFocus(program)
     expect(atZero).toEqual(['pc0'])
@@ -138,7 +125,7 @@ describe('an asm view of the program beside an asm view of a copy', () => {
     const atZero = asmFocus(program)
     // STEPPED UNTIL THE FOCUS NAMES ANOTHER CONSTRUCT, then the copy's view is focused again.
     for (let i = 0; i < 4 && asmFocus(program).join() === atZero.join(); i += 1) {
-      await userEvent.click(control(program, '▶') as HTMLButtonElement)
+      await userEvent.click(controlIn(program, '▶') as HTMLButtonElement)
     }
     const moved = asmFocus(program)
     expect(moved.length, 'a later step’s construct is marked').toBeGreaterThan(0)
@@ -152,10 +139,10 @@ describe('an asm view of the program beside an asm view of a copy', () => {
     const said = `${titleOf(asmHost)} view shows a copy — ${NOT_LINKED}`
     expect(titleOf(asmHost)).toMatch(/^asm · copy \d+$/)
     // THE COPY'S VIEW WAS FOCUSED LAST: "asm view shows a copy" would not say which of the two.
-    expect(status()).toBe(said)
+    expect(linkStatus()).toBe(said)
     // THE PROGRAM'S VIEW FOCUSED LAST: the line said nothing of the asm copy on screen.
     await focusTitle(program)
-    expect(status()).toBe(said)
+    expect(linkStatus()).toBe(said)
   })
 })
 
@@ -163,17 +150,17 @@ describe('a TM view of the program beside a TM view of a copy', () => {
   let program: HTMLElement
 
   it('keeps marking the program’s running focus when the copy’s view is focused last', async () => {
-    await pick(tmHost, 'detach')
+    await pickInViewMenu(tmHost, 'detach')
     await until(() => editorOf(tmHost) !== null && copyShown(tmHost), 'the TM copy in the first view')
     await until(() => tmHost.querySelectorAll('.state-row').length > 3, 'the TM copy’s rules')
     program = await splitToProgram(tmHost, 'tm')
     // BY `⏭`: a run opens on step 0 (`History`).
     await userEvent.click(program.querySelector('.controls button.to-newest') as HTMLButtonElement)
-    await until(() => /step 2,870 of 2,870/.test(stepOf(program)), 'the program’s view at the frontier')
+    await until(() => /step 2,870 of 2,870/.test(paneStepText(program)), 'the program’s view at the frontier')
 
     // ONE STEP BACK FROM THE FRONTIER THE MACHINE STANDS IN `pc4`, WHICH IS THE FOCUS — `running-focus.test.ts`
     // measured the tail.
-    await userEvent.click(control(program, '◀') as HTMLButtonElement)
+    await userEvent.click(controlIn(program, '◀') as HTMLButtonElement)
     await until(() => tmFocus(program).length > 0, 'the program’s view to mark the focus')
     expect(tmFocus(program)).toEqual(['pc4'])
 
@@ -183,8 +170,8 @@ describe('a TM view of the program beside a TM view of a copy', () => {
 
   it('moves the program’s marks when the program steps, with the copy’s view focused last again', async () => {
     // ONE MORE STEP BACK AND THE FOCUS IS `x + 2`'S `add5.d.*` BLOCK, several state headers.
-    await userEvent.click(control(program, '◀') as HTMLButtonElement)
-    await until(() => stepOf(program).includes('step 2,868'), 'the program’s view one step further back')
+    await userEvent.click(controlIn(program, '◀') as HTMLButtonElement)
+    await until(() => paneStepText(program).includes('step 2,868'), 'the program’s view one step further back')
     const block = tmFocus(program)
     expect(block.length, 'a construct’s whole block is marked').toBeGreaterThan(1)
 
@@ -196,9 +183,9 @@ describe('a TM view of the program beside a TM view of a copy', () => {
     const asmTitle = titleOf(asmHost)
     const tmTitle = titleOf(tmHost)
     expect(tmTitle).toMatch(/^TM · copy \d+$/)
-    expect(status()).toBe(`${asmTitle} and ${tmTitle} views show copies — ${NOT_LINKED}`)
+    expect(linkStatus()).toBe(`${asmTitle} and ${tmTitle} views show copies — ${NOT_LINKED}`)
     await focusTitle(program)
-    expect(status()).toBe(`${asmTitle} and ${tmTitle} views show copies — ${NOT_LINKED}`)
+    expect(linkStatus()).toBe(`${asmTitle} and ${tmTitle} views show copies — ${NOT_LINKED}`)
   })
 })
 
@@ -208,7 +195,6 @@ describe('a TM view of the program beside a TM view of a copy', () => {
  * focused in turn: the row is the strip's line for the copy, without the name.
  */
 describe('the copies menu, beside both copies', () => {
-  const strip = () => document.querySelector('#results')?.textContent ?? ''
   const rowOf = (name: string) =>
     [...document.querySelectorAll<HTMLElement>('.buffer-list .buffer-row')]
       .find((r) => r.querySelector('.buffer-row-name')?.textContent?.startsWith(`${name} ·`))
@@ -222,8 +208,8 @@ describe('the copies menu, beside both copies', () => {
     ] as const) {
       await focusInto(pane, row)
       const name = titleOf(pane).replace(' · ', ' ')
-      await until(() => strip().startsWith(`${name} · `), `the strip to read ${name}`)
-      lines.push([name, strip().slice(name.length + 3)])
+      await until(() => resultsText().startsWith(`${name} · `), `the strip to read ${name}`)
+      lines.push([name, resultsText().slice(name.length + 3)])
     }
     expect(lines.map(([, line]) => line)).toEqual(['5 instructions · value: 42', '2,870 transitions · value: 42'])
 

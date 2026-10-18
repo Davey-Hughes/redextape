@@ -1,7 +1,19 @@
 import type { EditorView } from '@codemirror/view'
 import { beforeAll, describe, expect, it } from 'vitest'
 import { page } from 'vitest/browser'
-import { SHELL, until } from './harness'
+import {
+  compile,
+  control,
+  currentRowName,
+  diagram,
+  diagramChoice,
+  diagramShows,
+  programRows,
+  programScroll,
+  SHELL,
+  tmPane,
+  until,
+} from './harness'
 
 /**
  * **A COMPILE WITH NO MACHINE DRAWS NOTHING OVER THE EMPTY DIAGRAM.** `StateDiagram.setProgram(null)`
@@ -23,35 +35,17 @@ let view: EditorView
 const FACT3 = 'fn fact(n) { if n == 0 { 1 } else { n * fact(n - 1) } } fact(3)'
 const HALF_TYPED = 'fn fact(n) { if n == '
 
-const pane = () => document.querySelector('[data-leaf="tm-0"]') as HTMLElement
-const diagram = () => pane().querySelector('[data-panel="diagram"]') as HTMLElement
-const grid = () => diagram().querySelector('.program-scroll') as HTMLElement
 const gutter = () => diagram().querySelector('.program-gutter') as HTMLElement
-const rows = () => [...diagram().querySelectorAll<HTMLElement>('.program-row')]
-const control = (label: string) =>
-  [...pane().querySelectorAll<HTMLButtonElement>('.controls button')].find((b) => b.textContent === label)
-const currentRowName = () => diagram().querySelector('.program-row[aria-current="step"] .program-name')?.textContent
 const gutterTop = () => Number.parseFloat(gutter().style.top || '0')
-const idle = () => document.querySelector<HTMLElement>('#results')?.dataset.state === 'idle'
-const choice = (value: string) =>
-  [...diagram().querySelectorAll<HTMLButtonElement>('.diagram-mode')].find((b) => b.dataset.value === value)
-/** Whether an element is drawn: `hidden` is not enough, since an author `display` can outrank it. */
-const drawn = (sel: string) => getComputedStyle(diagram().querySelector(sel) as HTMLElement).display !== 'none'
-
-async function compile(src: string): Promise<void> {
-  view.dispatch({ changes: { from: 0, to: view.state.doc.length, insert: src } })
-  await until(() => !idle(), 'the compile to start')
-  await until(idle, 'the compile to finish')
-}
 
 beforeAll(async () => {
   await page.viewport(1280, 900)
   document.body.innerHTML = SHELL
   view = await (await import('../../src/main')).ready
-  await compile(FACT3)
-  await until(() => rows().length > 0, 'the diagram to draw fact(3)')
+  await compile(view, FACT3)
+  await until(() => programRows().length > 0, 'the diagram to draw fact(3)')
   // ON THE LAST STEP, inside `halt`, by `⏭`: a run opens on step 0 (`History`), and these cases step back from the end.
-  pane().querySelector<HTMLButtonElement>('.controls button.to-newest')?.click()
+  tmPane().querySelector<HTMLButtonElement>('.controls button.to-newest')?.click()
 })
 
 describe('the state diagram with no machine to draw', () => {
@@ -61,22 +55,22 @@ describe('the state diagram with no machine to draw', () => {
     // THE PRECONDITION: the window is scrolled, so a leftover box positioned at its old offset has
     // somewhere to extend the scroll range to, if it is not itself sized to nothing.
     expect(gutterTop()).toBeGreaterThan(0)
-    await compile(HALF_TYPED)
-    await until(() => rows().length === 0, 'the diagram to clear its rows')
+    await compile(view, HALF_TYPED)
+    await until(() => programRows().length === 0, 'the diagram to clear its rows')
     // A SECOND PRECONDITION: the program level is what the assertions below name, so it has to be the one
     // actually drawn — a machine with no program to group by is not what "no machine at all" means (spec
     // §7 and §8), and the level shown with neither is whichever was stored, not forced to `local`.
-    expect(drawn('.program-level')).toBe(true)
+    expect(diagramShows('.program-level')).toBe(true)
     expect(diagram().querySelectorAll('.program-gutter path')).toHaveLength(0)
-    expect(grid().scrollHeight).toBeLessThanOrEqual(grid().clientHeight)
+    expect(programScroll().scrollHeight).toBeLessThanOrEqual(programScroll().clientHeight)
   })
 
   it('says its grid has no rows, rather than that there is no grid', () => {
     // Still on `HALF_TYPED`: the program level is drawn, empty, and a screen reader is told it holds no rows.
-    expect(drawn('.program-level')).toBe(true)
-    expect(grid().getAttribute('role')).toBe('grid')
-    expect(grid().getAttribute('aria-rowcount')).toBe('0')
-    expect(grid().hasAttribute('aria-activedescendant')).toBe(false)
+    expect(diagramShows('.program-level')).toBe(true)
+    expect(programScroll().getAttribute('role')).toBe('grid')
+    expect(programScroll().getAttribute('aria-rowcount')).toBe('0')
+    expect(programScroll().hasAttribute('aria-activedescendant')).toBe(false)
   })
 
   it('keeps the stored level shown, and arcs | chips enabled, with no machine to disable them for', async () => {
@@ -84,27 +78,27 @@ describe('the state diagram with no machine to draw', () => {
     // tier, which is a machine that has one. `program` was never disabled for `tm-0`, since its source
     // failing to compile is not a machine with no program level either — `tm-0` is the view bound to
     // that source, not a copy of anything.
-    expect(choice('program')?.getAttribute('aria-checked')).toBe('true')
-    expect(choice('program')?.disabled).toBe(false)
-    expect(choice('arcs')?.disabled).toBe(false)
-    choice('local')?.click()
-    expect(choice('local')?.getAttribute('aria-checked')).toBe('true')
-    choice('program')?.click()
-    expect(choice('program')?.getAttribute('aria-checked')).toBe('true')
-    expect(drawn('.program-level')).toBe(true)
+    expect(diagramChoice('program')?.getAttribute('aria-checked')).toBe('true')
+    expect(diagramChoice('program')?.disabled).toBe(false)
+    expect(diagramChoice('arcs')?.disabled).toBe(false)
+    diagramChoice('local')?.click()
+    expect(diagramChoice('local')?.getAttribute('aria-checked')).toBe('true')
+    diagramChoice('program')?.click()
+    expect(diagramChoice('program')?.getAttribute('aria-checked')).toBe('true')
+    expect(diagramShows('.program-level')).toBe(true)
   })
 
   it('hands the focus to the local level itself when a compile empties it while a node held it', async () => {
     // A real machine this time, so there is a node to focus.
-    await compile(FACT3)
-    await until(() => rows().length > 0, 'the diagram to redraw fact(3)')
+    await compile(view, FACT3)
+    await until(() => programRows().length > 0, 'the diagram to redraw fact(3)')
     control('↺')?.click()
-    choice('local')?.click()
+    diagramChoice('local')?.click()
     await until(() => diagram().querySelectorAll('.local-node').length > 0, 'the local level to draw')
     const node = diagram().querySelector<HTMLElement>('.local-node[tabindex="0"]') as HTMLElement
     node.focus()
     expect(document.activeElement).toBe(node)
-    await compile(HALF_TYPED)
+    await compile(view, HALF_TYPED)
     await until(() => diagram().querySelectorAll('.local-node').length === 0, 'the local level to empty')
     // NOT DROPPED TO THE PAGE: the node that held the tab stop is gone, so `#focusShown`'s local branch
     // falls back to the level's own container, which is focusable for exactly this.
@@ -113,28 +107,28 @@ describe('the state diagram with no machine to draw', () => {
   })
 
   it('hands the focus to the grid when a recompile builds again the runtime box that held it', async () => {
-    choice('program')?.click()
-    await compile(FACT3)
-    await until(() => rows().length > 0, 'the diagram to redraw fact(3)')
+    diagramChoice('program')?.click()
+    await compile(view, FACT3)
+    await until(() => programRows().length > 0, 'the diagram to redraw fact(3)')
     const box = diagram().querySelector<HTMLElement>('.program-box[tabindex="0"]') as HTMLElement
     box.focus()
     expect(document.activeElement).toBe(box)
     // A recompile the focus did not come from: an edit that arrived while the reader was in the diagram.
-    await compile(FACT3.replace('fact(3)', 'fact(2)'))
+    await compile(view, FACT3.replace('fact(3)', 'fact(2)'))
     await until(
       () => !box.isConnected && diagram().querySelector('.program-box') !== null,
       'the boxes to be built again',
     )
-    expect(document.activeElement).toBe(grid())
+    expect(document.activeElement).toBe(programScroll())
   })
 
   it('follows the new machine after a recompile, though the old one was scrolled away from', async () => {
     const reattach = diagram().querySelector('.diagram-reattach') as HTMLElement
-    await until(() => grid().scrollHeight > grid().clientHeight, 'the listing to outgrow the diagram')
-    grid().scrollTop = grid().scrollTop === 0 ? grid().scrollHeight : 0
+    await until(() => programScroll().scrollHeight > programScroll().clientHeight, 'the listing to outgrow the diagram')
+    programScroll().scrollTop = programScroll().scrollTop === 0 ? programScroll().scrollHeight : 0
     await until(() => !reattach.hidden, 'following to detach')
-    await compile(FACT3)
-    await until(() => rows().length > 0, 'the diagram to draw fact(3) again')
+    await compile(view, FACT3)
+    await until(() => programRows().length > 0, 'the diagram to draw fact(3) again')
     expect(reattach.hidden, 'following the new machine').toBe(true)
   })
 
@@ -144,14 +138,14 @@ describe('the state diagram with no machine to draw', () => {
    * last machine's rows, with the grid's `aria-activedescendant` naming one of them.
    */
   it('leaves no rows behind the local level once the source no longer compiles', async () => {
-    choice('program')?.click()
-    await until(() => rows().length > 0, 'the program level to draw fact(3)')
-    expect(grid().hasAttribute('aria-activedescendant'), 'a row named before').toBe(true)
-    choice('local')?.click()
-    expect(drawn('.program-level')).toBe(false)
-    await compile(HALF_TYPED)
-    expect(rows()).toHaveLength(0)
-    expect(grid().hasAttribute('aria-activedescendant')).toBe(false)
-    choice('program')?.click()
+    diagramChoice('program')?.click()
+    await until(() => programRows().length > 0, 'the program level to draw fact(3)')
+    expect(programScroll().hasAttribute('aria-activedescendant'), 'a row named before').toBe(true)
+    diagramChoice('local')?.click()
+    expect(diagramShows('.program-level')).toBe(false)
+    await compile(view, HALF_TYPED)
+    expect(programRows()).toHaveLength(0)
+    expect(programScroll().hasAttribute('aria-activedescendant')).toBe(false)
+    diagramChoice('program')?.click()
   })
 })

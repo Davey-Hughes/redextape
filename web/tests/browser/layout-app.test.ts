@@ -1,7 +1,7 @@
 import { beforeAll, beforeEach, describe, expect, it } from 'vitest'
 import { page } from 'vitest/browser'
 import { LAYOUT_STORAGE_KEY } from '../../src/layout'
-import { SHELL } from './harness'
+import { queryEl, SHELL, splitRow } from './harness'
 
 /**
  * THE TREE, DRIVEN THROUGH THE APP — the state `main()` could not reach before this slice.
@@ -25,7 +25,6 @@ import { SHELL } from './harness'
  * it replaces.
  */
 
-const $ = <T extends Element>(sel: string) => document.querySelector<T>(sel)
 const panes = () => [...document.querySelectorAll('[data-leaf]')].map((e) => (e as HTMLElement).dataset.leaf)
 /**
  * The ids of every λ pane — by `data-kind`, NOT by an `id` prefix. `nextLeafId` now mints `pane-${n}`
@@ -36,41 +35,6 @@ const panes = () => [...document.querySelectorAll('[data-leaf]')].map((e) => (e 
 const lambdaPanes = () => [...document.querySelectorAll<HTMLElement>('[data-kind="lambda"]')].map((e) => e.dataset.leaf)
 const splitRowOn = (leaf: string) =>
   document.querySelector<HTMLButtonElement>(`[data-leaf="${leaf}"] .view-menu button.view-split[data-dir="row"]`)
-
-/**
- * Split `leaf` into a second pane of the same kind on the same session — the gesture every test here
- * used to reach with one click on the control `splitRowOn` finds.
- *
- * **A SPLIT IS TWO CLICKS NOW, AND THE FIRST ENTRY IS WHY IT IS STILL ONE GESTURE.** The control opens a
- * picker (`view-header.ts`'s `viewMenu`), whose first item is the pane's own `(leg, session)` pair
- * labelled "another view of this" — put there precisely so the case that WAS the whole gesture stays one click away.
- * The label is checked rather than assumed: `find(...)?.click()` on a missing entry is a silent no-op,
- * and taking the first item of a menu that had reordered would quietly make every test below a test of a
- * different split. `pane-picker.test.ts` is where the other entries are exercised.
- */
-const splitRow = (leaf: string): void => splitVia(leaf, 'row', 'same')
-
-/**
- * Split `leaf` through its `⋯` menu, as a user does: `pick` is `'same'` (another view of this), `'source'`,
- * or a `bindingKey(leg, session)`.
- */
-function splitVia(leaf: string, dir: 'row' | 'column', pick: string): void {
-  const more = document.querySelector<HTMLButtonElement>(`[data-leaf="${leaf}"] button.view-more`)
-  if (more === null) throw new Error(`no view menu on [data-leaf="${leaf}"]`)
-  more.click()
-  const menu = document.getElementById(more.getAttribute('aria-controls') ?? '')
-  menu?.querySelector<HTMLButtonElement>(`button.view-split[data-dir="${dir}"]`)?.click()
-  const selector =
-    pick === 'same' ? 'button[data-same]' : pick === 'source' ? 'button[data-source]' : `button[data-binding="${pick}"]`
-  const item = menu?.querySelector<HTMLButtonElement>(`.view-menu-pairs ${selector}`)
-  if (item == null) {
-    const offered = [...(menu?.querySelectorAll<HTMLButtonElement>('.view-menu-pairs button') ?? [])].map(
-      (b) => b.textContent,
-    )
-    throw new Error(`[data-leaf="${leaf}"] offers no ${pick} to split into — offered: ${offered.join(' | ')}`)
-  }
-  item.click()
-}
 
 // ONE MOUNT FOR THE FILE, THE SAME REASON EVERY SIBLING FILE GIVES: ES module imports are cached, so
 // `main()` runs once per page and Vitest gives each test FILE its own page. Neither storage key needs
@@ -93,11 +57,11 @@ describe('the layout tree in the app', () => {
   // a page with nothing stored opens on is `first-load-views.test.ts`'s.
   it('starts on the four views the stored workspace holds', () => {
     expect(panes()).toEqual(['source', 'lambda-0', 'asm-0', 'tm-0'])
-    expect($('#results')).not.toBeNull()
+    expect(queryEl('#results')).not.toBeNull()
   })
 
   it('keeps the results pane outside the tree', () => {
-    expect($('#results')?.closest('[data-leaf]')).toBeNull()
+    expect(queryEl('#results')?.closest('[data-leaf]')).toBeNull()
   })
 
   it('splitting a λ pane produces a second λ pane', () => {

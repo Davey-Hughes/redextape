@@ -1,17 +1,18 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import type { ControlState } from '../../src/controls'
 import type { KeymapSetting } from '../../src/editor-keymap'
-import { History } from '../../src/history'
 import type { LinkWiring } from '../../src/link-wiring'
-import type { Leg, RunReply, RunRequest } from '../../src/protocol'
+import type { Leg } from '../../src/protocol'
 import { BufferCapReached, MAX_WARM_BUFFERS, type ScratchBuffers } from '../../src/scratch'
-import type { ClientPort, SessionId } from '../../src/session-client'
-import { SessionClient } from '../../src/session-client'
+import type { SessionId } from '../../src/session-client'
 import type { Binding, LegState, PaneOption, PaneView, SessionEntry } from '../../src/sessions'
 import { PaneSlot, resetLegs, SessionRegistry } from '../../src/sessions'
 import { createTransport } from '../../src/transport'
 import type { AsmState, LambdaState, TmProgram, TmState } from '../../src/types'
 import { frameOf } from './asm-fixtures'
+import { legState } from './leg-fixture'
+import { fakeClient, lambdaFrame, paint } from './session-fixtures'
+import { tmFrame } from './tm-machines'
 
 /**
  * THE BINDING MODEL, DRIVEN WITHOUT A BROWSER — plan T7's claim at the level where it is decided.
@@ -36,39 +37,6 @@ import { frameOf } from './asm-fixtures'
  * registry below is still built here and for the same reason.
  */
 
-/** A `ClientPort` with no thread behind it — `SessionEntry` needs a client and no test here posts. */
-function fakeClient(): SessionClient {
-  const port: ClientPort = {
-    postMessage: (_m: RunRequest) => undefined,
-    addEventListener: (_t: 'message', _h: (e: { data: RunReply }) => void) => undefined,
-  }
-  return new SessionClient(port, () => undefined)
-}
-
-function leg<T>(): LegState<T> {
-  return { hist: new History<T>(1_000_000), status: { available: true, reason: '' }, done: null, playing: false }
-}
-
-/** A λ frame whose only distinguishing feature is its text — which is the whole discriminator here. */
-const lambdaFrame = (text: string, step = 0): LambdaState => ({
-  text,
-  spans: new Uint8Array(),
-  cut: null,
-  step,
-  redex_span: null,
-  owner: 'None',
-})
-
-const tmFrame = (state: number): TmState => ({
-  state,
-  step: 0,
-  heads: [0],
-  window_start: [0],
-  window: ['_'],
-  source_node: null,
-  rule: null,
-})
-
 /**
  * One session, its legs seeded with the frames given.
  *
@@ -83,18 +51,18 @@ function entry(
 ): SessionEntry {
   const legs: { lambda?: LegState<LambdaState>; asm?: LegState<AsmState>; tm?: LegState<TmState> } = {}
   if (opts.lambda !== undefined) {
-    const l = leg<LambdaState>()
+    const l = legState<LambdaState>(true, 1_000_000)
     for (const [i, text] of opts.lambda.entries()) l.hist.push(lambdaFrame(text, i), 1)
     legs.lambda = l
   }
   if (opts.asm !== undefined) {
-    const a = leg<AsmState>()
+    const a = legState<AsmState>(true, 1_000_000)
     for (const [i, pc] of opts.asm.entries()) a.hist.push(frameOf({ step: i, pc }), 1)
     legs.asm = a
   }
   if (opts.tm !== undefined) {
-    const t = leg<TmState>()
-    for (const s of opts.tm) t.hist.push(tmFrame(s), 1)
+    const t = legState<TmState>(true, 1_000_000)
+    for (const s of opts.tm) t.hist.push(tmFrame(s, 0, '_'), 1)
     legs.tm = t
   }
   // NO MACHINE ON ANY OF THEM. `SessionEntry.tmProgram` is retained from a `compiled` reply, and this
@@ -131,21 +99,6 @@ function recorder<T>() {
   }
   return { view, frames, controls, bindings, detached }
 }
-
-/**
- * `main.ts`'s `draw()`, for one slot: resolve once, then paint from what was resolved.
- *
- * TWO MONOMORPHIC HELPERS RATHER THAN ONE GENERIC IN `K`, mirroring `draw()`, which also has exactly
- * two call sites and no loop over legs. A helper generic over `K` needs the correlation between the
- * leg's frame type and the pane's frame type — which is what `PaneSlot.render`'s own signature
- * carries — restated in the helper, and the only spellings that compile go through `any`. Two lines
- * are cheaper than a cast, and they are the two lines the app actually runs.
- */
-const paintLambda = (reg: SessionRegistry, slot: PaneSlot<'lambda'>, pane: PaneView<LambdaState>) =>
-  slot.render(reg, pane, slot.resolve(reg))
-
-const paintTm = (reg: SessionRegistry, slot: PaneSlot<'tm'>, pane: PaneView<TmState>) =>
-  slot.render(reg, pane, slot.resolve(reg))
 
 /**
  * Inert language-server handle for the transport fixtures below, which drive stepping and binding
@@ -237,8 +190,8 @@ describe('PaneSlot', () => {
     const paneA = recorder<LambdaState>()
     const paneB = recorder<LambdaState>()
 
-    paintLambda(reg, a, paneA.view)
-    paintLambda(reg, b, paneB.view)
+    paint(reg, a, paneA.view)
+    paint(reg, b, paneB.view)
 
     expect(paneA.frames.at(-1)?.text).toBe('(λx. x) 1')
     expect(paneB.frames.at(-1)?.text).toBe('(λy. y y) 2')
@@ -267,8 +220,8 @@ describe('PaneSlot', () => {
     // `SessionId` and there is no writer for `leg` anywhere.
     expect(a.binding).toEqual({ session: 'source', leg: 'lambda' })
 
-    paintLambda(reg, a, paneA.view)
-    paintLambda(reg, b, paneB.view)
+    paint(reg, a, paneA.view)
+    paint(reg, b, paneB.view)
     expect(paneA.frames.at(-1)?.text).toBe('from source')
     expect(paneB.frames.at(-1)?.text).toBe('from scratch')
   })
@@ -628,11 +581,11 @@ describe('PaneSlot', () => {
     const slot = new PaneSlot('lambda', 'lambda-scratch')
     const pane = recorder<LambdaState>()
 
-    paintLambda(reg, slot, pane.view)
+    paint(reg, slot, pane.view)
     expect(pane.detached.at(-1)).toBe(true)
 
     slot.rebind('source')
-    paintLambda(reg, slot, pane.view)
+    paint(reg, slot, pane.view)
     expect(pane.detached.at(-1)).toBe(false)
   })
 
@@ -655,7 +608,7 @@ describe('PaneSlot', () => {
     const slot = new PaneSlot('tm', 'source')
     const pane = recorder<TmState>()
 
-    paintTm(reg, slot, pane.view)
+    paint(reg, slot, pane.view)
     expect(pane.bindings.at(-1)).toEqual({
       options: [
         { leg: 'lambda', id: 'source', label: 'source' },
@@ -665,7 +618,7 @@ describe('PaneSlot', () => {
     })
 
     reg.add(entry('tm-scratch', { label: 'TM scratchpad', detached: true, tm: [7] }))
-    paintTm(reg, slot, pane.view)
+    paint(reg, slot, pane.view)
     expect(pane.bindings.at(-1)).toEqual({
       options: [
         { leg: 'lambda', id: 'source', label: 'source' },
@@ -689,8 +642,8 @@ describe('PaneSlot', () => {
     const paneB = recorder<LambdaState>()
 
     reg.legOf(a.binding).hist.seek(1)
-    paintLambda(reg, a, paneA.view)
-    paintLambda(reg, b, paneB.view)
+    paint(reg, a, paneA.view)
+    paint(reg, b, paneB.view)
 
     expect(paneA.controls.at(-1)?.stepText).toBe('step 1 of 2…')
     expect(paneB.controls.at(-1)?.stepText).toBe('step 0 of 0…')

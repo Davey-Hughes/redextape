@@ -5,6 +5,7 @@ import { AsmPane } from '../../src/asm-pane'
 import type { PaneEvents } from '../../src/pane-chrome'
 import { BOUNDARY_KEY_STEP, type Shares } from '../../src/panel-stack'
 import { FACT3, frameOf } from '../node/asm-fixtures'
+import { boundary, controlState, drag, frame, inertEvents, panelOf, panelToggle, region } from './harness'
 
 /**
  * THE BOUNDARIES BETWEEN A VIEW'S REGIONS, AND THE HEADER THAT IS A HANDLE FOR ONE — the view layouts spec §11.2,
@@ -17,31 +18,7 @@ import { FACT3, frameOf } from '../node/asm-fixtures'
  * overshoots a floor and comes back, a finger, and a press that is held.
  */
 
-const CONTROLS = {
-  canRestart: true,
-  canBack: true,
-  canForward: true,
-  canToNewest: true,
-  canPlay: true,
-  playing: false,
-  stepText: 'step 3 of 55',
-  continueLabel: null,
-}
-
-function events(over: Partial<PaneEvents> = {}): PaneEvents {
-  return {
-    back: vi.fn(),
-    forward: vi.fn(),
-    toNewest: vi.fn(),
-    play: vi.fn(),
-    restart: vi.fn(),
-    extend: vi.fn(),
-    speed: () => 8,
-    setSpeed: vi.fn(),
-    rebind: vi.fn(),
-    ...over,
-  }
-}
+const CONTROLS = controlState(true, 'step 3 of 55')
 
 /** A view of `FACT3` in a host `height` by `width`, on the page, with a frame drawn. */
 function mount(
@@ -55,13 +32,12 @@ function mount(
   host.style.height = `${o.height ?? 900}px`
   host.style.width = `${o.width ?? 1000}px`
   document.body.append(host)
-  const pane = new AsmPane(host, events({ panelSizes: sizes, panel, ...o.on }), o.panels ?? {}, o.sizes ?? {})
+  const pane = new AsmPane(host, inertEvents({ panelSizes: sizes, panel, ...o.on }), o.panels ?? {}, o.sizes ?? {})
   pane.setProgram(FACT3)
   pane.render(frameOf({ pc: 3, next: 3 }), CONTROLS)
   return { host, pane, sizes, panel }
 }
 
-const region = (host: HTMLElement, name: string) => host.querySelector(`[data-region="${name}"]`) as HTMLElement
 const height = (host: HTMLElement, name: string) => region(host, name).getBoundingClientRect().height
 const heights = (host: HTMLElement) => ({
   listing: height(host, 'listing'),
@@ -69,26 +45,9 @@ const heights = (host: HTMLElement) => ({
   heap: height(host, 'heap'),
 })
 const boundaries = (host: HTMLElement) => [...host.querySelectorAll<HTMLElement>('.panel-boundary')]
-const boundary = (host: HTMLElement, above: string, below: string) =>
-  host.querySelector(`.panel-boundary[data-above="${above}"][data-below="${below}"]`) as HTMLElement
-const panelOf = (host: HTMLElement, name: string) => host.querySelector(`[data-panel="${name}"]`) as HTMLElement
 const header = (host: HTMLElement, name: string) => panelOf(host, name).querySelector('.panel-header') as HTMLElement
-const toggle = (host: HTMLElement, name: string) => panelOf(host, name).querySelector('.panel-toggle') as HTMLElement
-const frame = (): Promise<void> => new Promise((r) => requestAnimationFrame(() => r()))
 /** The last shares a gesture reported. */
 const last = (sizes: ReturnType<typeof vi.fn>): Shares => sizes.mock.calls.at(-1)?.[0] as Shares
-
-/**
- * A real drag: a press at the middle of `handle`'s empty part and a release `dy` pixels down from it (up, for a
- * negative `dy`), measured against the host so the driver has one element to aim both ends at.
- */
-async function drag(host: HTMLElement, handle: HTMLElement, dy: number): Promise<void> {
-  const [h, area] = [handle.getBoundingClientRect(), host.getBoundingClientRect()]
-  const x = h.left - area.left + h.width / 2
-  const y = h.top - area.top + h.height / 2
-  await userEvent.dragAndDrop(host, host, { sourcePosition: { x, y }, targetPosition: { x, y: y + dy } })
-  await frame()
-}
 
 /** A pointer event of this file's own making on `el`, at `y`, for what the driver's one-move drag cannot do. */
 const fire = (el: HTMLElement, type: string, y: number, pointerType = 'mouse'): void => {
@@ -158,19 +117,19 @@ describe('the boundaries of a view', () => {
 
   it('skip a closed region, and are drawn beside it again once it is open', async () => {
     const { host } = mount()
-    await userEvent.click(toggle(host, 'registers'))
+    await userEvent.click(panelToggle(host, 'registers'))
     expect(boundaries(host), 'one of the row’s two panels is still open').toHaveLength(2)
-    await userEvent.click(toggle(host, 'stack'))
+    await userEvent.click(panelToggle(host, 'stack'))
     await frame()
     expect(boundaries(host).map((b) => b.getAttribute('aria-label'))).toEqual(['resize listing and heap'])
     expect(boundary(host, 'listing', 'heap').previousElementSibling, 'under the upper of the two').toBe(
       region(host, 'listing'),
     )
-    await userEvent.click(toggle(host, 'heap'))
+    await userEvent.click(panelToggle(host, 'heap'))
     await frame()
     expect(boundaries(host), 'one open region has nothing to be parted from').toHaveLength(0)
-    await userEvent.click(toggle(host, 'heap'))
-    await userEvent.click(toggle(host, 'stack'))
+    await userEvent.click(panelToggle(host, 'heap'))
+    await userEvent.click(panelToggle(host, 'stack'))
     await frame()
     expect(boundaries(host)).toHaveLength(2)
   })
@@ -182,7 +141,7 @@ describe('the boundaries of a view', () => {
     await userEvent.hover(b)
     expect(getComputedStyle(b, '::before').content, 'under the pointer').toBe('none')
     expect(getComputedStyle(b).cursor, 'the pointer is what says it can be held').toBe('grab')
-    toggle(host, 'listing').focus()
+    panelToggle(host, 'listing').focus()
     // `Tab` FROM THE LISTING'S LAST CONTROL: its maximise button, the last thing in its header.
     ;(panelOf(host, 'listing').querySelector('.panel-maximise') as HTMLElement).focus()
     await userEvent.keyboard('{Tab}')
@@ -417,7 +376,7 @@ describe('a drag of a boundary', () => {
       new PointerEvent('pointerup', { pointerId: 1, bubbles: true, isPrimary: true, button: 0, pointerType: 'mouse' }),
     )
     await frame()
-    await userEvent.click(toggle(host, 'heap'))
+    await userEvent.click(panelToggle(host, 'heap'))
     await frame()
     expect(
       boundaries(host).map((x) => x.getAttribute('aria-label')),
@@ -469,10 +428,10 @@ describe('a panel’s header, as the handle for the boundary above it', () => {
       expect(header(host, name).dataset.resizes, name).toBe('true')
       expect(getComputedStyle(header(host, name)).cursor, name).toBe('grab')
       // EACH CONTROL ON THE BAR KEEPS ITS OWN POINTER.
-      expect(getComputedStyle(toggle(host, name)).cursor, `${name}’s disclosure`).toBe('pointer')
+      expect(getComputedStyle(panelToggle(host, name)).cursor, `${name}’s disclosure`).toBe('pointer')
     }
     // CLOSED, THE HEAP TAKES NO SHARE AND HAS NO BOUNDARY ABOVE IT.
-    await userEvent.click(toggle(host, 'heap'))
+    await userEvent.click(panelToggle(host, 'heap'))
     await frame()
     expect(header(host, 'heap').dataset.resizes, 'a closed region’s header').toBeUndefined()
   })
@@ -492,13 +451,13 @@ describe('a panel’s header, as the handle for the boundary above it', () => {
     const { host, sizes, panel } = mount()
     const before = heights(host)
     // A REAL CLICK ON THE DISCLOSURE: the panel closes, and nothing was dragged.
-    await userEvent.click(toggle(host, 'heap'))
+    await userEvent.click(panelToggle(host, 'heap'))
     expect(panel).toHaveBeenCalledExactlyOnceWith('heap', false)
-    await userEvent.click(toggle(host, 'heap'))
+    await userEvent.click(panelToggle(host, 'heap'))
     await frame()
     expect(heights(host), 'a click on the disclosure moved a boundary').toEqual(before)
     // AND A REAL DRAG THAT STARTS ON IT moves nothing: the press was the button's.
-    const [t, area] = [toggle(host, 'heap').getBoundingClientRect(), host.getBoundingClientRect()]
+    const [t, area] = [panelToggle(host, 'heap').getBoundingClientRect(), host.getBoundingClientRect()]
     const at = { x: t.left - area.left + t.width / 2, y: t.top - area.top + t.height / 2 }
     await userEvent.dragAndDrop(host, host, { sourcePosition: { ...at }, targetPosition: { x: at.x, y: at.y - 60 } })
     await frame()
@@ -631,9 +590,9 @@ describe('a view built with shares', () => {
    */
   it('fills the view with the one region left open, where its share is under 1', async () => {
     const { host } = mount({ sizes: { listing: 0.5, machine: 2.5 } })
-    await userEvent.click(toggle(host, 'registers'))
-    await userEvent.click(toggle(host, 'stack'))
-    await userEvent.click(toggle(host, 'heap'))
+    await userEvent.click(panelToggle(host, 'registers'))
+    await userEvent.click(panelToggle(host, 'stack'))
+    await userEvent.click(panelToggle(host, 'heap'))
     await frame()
     expect(boundaries(host), 'precondition: the listing is the one open region').toHaveLength(0)
     const [heap, view] = [panelOf(host, 'heap').getBoundingClientRect(), host.getBoundingClientRect()]

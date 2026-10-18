@@ -1,8 +1,9 @@
 import type { EditorView } from '@codemirror/view'
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest'
-import { page, userEvent } from 'vitest/browser'
-import { focusInPage, SHELL, until } from './harness'
+import { page } from 'vitest/browser'
+import { frames, host, pressTab, pressToggle, SHELL, stageTab, stateIdle, toggle, until } from './harness'
 import { lambdaSettled } from './lambda-text'
+import { userPickWorkspace } from './user-event-fixture'
 
 /**
  * A BOX THAT FOLLOWS THE RUN IS STILL FOLLOWING IT WHEN ITS VIEW COMES BACK TO THE PAGE — the view layouts spec §5.2.
@@ -41,34 +42,12 @@ const BOXES: readonly Box[] = [
   { name: 'the λ body', leaf: 'lambda-0', kind: 'lambda', box: '.term', again: '.term-reattach' },
 ]
 
-const host = (leaf: string): HTMLElement | null =>
-  document.querySelector<HTMLElement>(`#views [data-leaf="${leaf}"]:not([role="tab"])`)
 const box = (b: Box): HTMLElement => host(b.leaf)?.querySelector(b.box) as HTMLElement
 /** `b`'s control to follow again, which is offered exactly while the box does not follow. */
 const again = (b: Box): HTMLElement => host(b.leaf)?.querySelector(b.again) as HTMLElement
 const offered = (b: Box): boolean => !again(b).hidden
-const toggle = (kind: string): HTMLElement =>
-  document.querySelector<HTMLElement>(`#views-shown button[data-shows="${kind}"]`) as HTMLElement
-const tab = (leaf: string): HTMLElement =>
-  document.querySelector<HTMLElement>(`#views [role="tab"][data-leaf="${leaf}"]`) as HTMLElement
-/** A press on a toggle with the pointer, after which the focus is somewhere in the page (spec §14 item 19). */
-const pressToggle = async (kind: string): Promise<void> => {
-  await userEvent.click(toggle(kind))
-  await focusInPage(`a press on the ${kind} toggle`)
-}
-/** And one on a Stage tab. */
-const pressTab = async (leaf: string): Promise<void> => {
-  await userEvent.click(tab(leaf))
-  await focusInPage(`a press on the Stage tab of ${leaf}`)
-}
 const control = (leaf: string, label: string): HTMLButtonElement | undefined =>
   [...(host(leaf)?.querySelectorAll<HTMLButtonElement>('.controls button') ?? [])].find((b) => b.textContent === label)
-const pick = async (sel: string): Promise<void> => {
-  await userEvent.click(document.querySelector('#workspace') as HTMLElement)
-  await userEvent.click(document.querySelector(`#workspace-menu ${sel}`) as HTMLElement)
-  const menu = document.querySelector<HTMLElement>('#workspace-menu')
-  if (menu?.matches(':popover-open')) menu.hidePopover()
-}
 /**
  * Put the page where a case starts, whatever the one before left: every kind's toggle pressed, which shows the four
  * views in the arrangement the page opened on, and the workspace in tiles (`explorer`) or on the `stage`. An
@@ -88,8 +67,6 @@ const startOn = (preset: 'explorer' | 'stage'): void => {
   const found = [...document.querySelectorAll<HTMLElement>(sel)].map((el) => el.dataset.leaf).join(' ')
   if (found !== 'source lambda-0 asm-0 tm-0') throw new Error(`startOn(${preset}) left the page on ${found}`)
 }
-/** Two animation frames: long enough for the browser to deliver a scroll's own event, and a resize observer's. */
-const frames = () => new Promise<void>((r) => requestAnimationFrame(() => requestAnimationFrame(() => r())))
 /**
  * Have each of `boxes` follow from here, whatever the case before left, and assert that it does: a case that fails
  * must not fail the next one's precondition and be read as failing that one's claim.
@@ -111,7 +88,7 @@ describe('a box that follows the run, across a rebuild of the layout', () => {
     document.body.innerHTML = SHELL
     const view: EditorView = await (await import('../../src/main')).ready
     view.dispatch({ changes: { from: 0, to: view.state.doc.length, insert: PROGRAM } })
-    await until(() => document.querySelector<HTMLElement>('#results')?.dataset.state === 'idle', 'the first compile')
+    await until(stateIdle, 'the first compile')
     host('lambda-0')?.querySelector<HTMLButtonElement>('.view-menu-choice[data-value="outline"]')?.click()
     // ONE STEP SHORT OF THE LAST, on every leg: `⏭`, then `◀`.
     for (const leaf of ['tm-0', 'asm-0', 'lambda-0']) {
@@ -253,7 +230,7 @@ describe('a box that follows the run, across a rebuild of the layout', () => {
    */
   it('is still following when the Stage is entered and its tab selected', async () => {
     await follow(...BOXES)
-    await pick('[data-preset="stage"]')
+    await userPickWorkspace('[data-preset="stage"]')
     const lost: string[] = []
     for (const b of BOXES) {
       await pressTab(b.leaf)
@@ -268,7 +245,7 @@ describe('a box that follows the run, across a rebuild of the layout', () => {
     beforeEach(() => startOn('stage'))
 
     it.for(BOXES)('is still following when its Stage tab is left and selected again: $name', async (b) => {
-      expect(tab(b.leaf), 'precondition: the Stage is drawn').not.toBeNull()
+      expect(stageTab(b.leaf), 'precondition: the Stage is drawn').not.toBeNull()
       await pressTab(b.leaf)
       await follow(b)
       const before = box(b).scrollTop

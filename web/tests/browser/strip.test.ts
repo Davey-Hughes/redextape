@@ -1,6 +1,6 @@
 import type { EditorView } from '@codemirror/view'
 import { beforeAll, describe, expect, it } from 'vitest'
-import { SHELL, until } from './harness'
+import { linkStatus, liveText, resultsText, SHELL, segments, until } from './harness'
 import { lambdaSettled } from './lambda-text'
 
 /**
@@ -11,11 +11,7 @@ import { lambdaSettled } from './lambda-text'
 const PROGRAM = 'let x = 40; x + 2'
 let view: EditorView
 
-const segments = () => [...document.querySelectorAll('#results .segment')].map((s) => s.textContent ?? '')
-const resultsText = () => document.querySelector('#results')?.textContent ?? ''
 const state = () => document.querySelector<HTMLElement>('#results')?.dataset.state
-const linkStatus = () => document.querySelector('#link-status')?.textContent ?? ''
-const live = () => document.querySelector('#live')?.textContent ?? ''
 
 /**
  * The λ view on its newest step, step 7, with that step's tree drawn. **THE LINK GESTURES BELOW NEED IT TO HAVE A
@@ -55,7 +51,7 @@ describe('the strip', () => {
     view.dispatch({ selection: { anchor: PROGRAM.indexOf('x + 2') } })
     view.contentDOM.dispatchEvent(new KeyboardEvent('keydown', { key: "'", ctrlKey: true, cancelable: true }))
     expect(linkStatus()).not.toBe('')
-    expect(live().trimEnd()).toBe(linkStatus())
+    expect(liveText().trimEnd()).toBe(linkStatus())
     expect(document.querySelector<HTMLElement>('#notice')?.hidden).toBe(true)
   })
 
@@ -67,7 +63,7 @@ describe('the strip', () => {
    * cannot see that, and one was there: `link-wiring.ts` compares the line before and after instead.
    */
   it('announces it again after an edit, though the sentence is the same one', async () => {
-    const said = live().trimEnd()
+    const said = liveText().trimEnd()
     expect(said).not.toBe('')
 
     view.dispatch({ changes: { from: view.state.doc.length, insert: ' ' } })
@@ -78,12 +74,12 @@ describe('the strip', () => {
     // the test above, so "it says the same words" is true whether or not anything was announced. What
     // says it was announced AGAIN is that the region's text changed at all — `notice.ts`'s `say` toggles
     // a trailing space precisely so a repeated sentence is a change a screen reader reads out.
-    const raw = live()
+    const raw = liveText()
     view.dispatch({ selection: { anchor: PROGRAM.indexOf('x + 2') } })
     view.contentDOM.dispatchEvent(new KeyboardEvent('keydown', { key: "'", ctrlKey: true, cancelable: true }))
     expect(linkStatus()).toBe(said)
-    expect(live()).not.toBe(raw)
-    expect(live().trimEnd()).toBe(said)
+    expect(liveText()).not.toBe(raw)
+    expect(liveText().trimEnd()).toBe(said)
   })
 
   /**

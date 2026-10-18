@@ -1,7 +1,7 @@
 import { beforeAll, describe, expect, it } from 'vitest'
 import { LAYOUT_STORAGE_KEY } from '../../src/layout'
 import { serializeWorkspace } from '../../src/workspace'
-import { fourViewWorkspace, SHELL, until } from './harness'
+import { fourViewWorkspace, lambdaTerm, SHELL, stateIdle, until } from './harness'
 
 /**
  * **A λ VIEW IS BUILT WITH THE DISPLAY ITS WORKSPACE STORED** (Plan 7 part 4a, spec §5.1). Seeded before
@@ -27,10 +27,9 @@ beforeAll(async () => {
   )
   document.body.innerHTML = SHELL
   await (await import('../../src/main')).ready
-  await until(() => document.querySelector<HTMLElement>('#results')?.dataset.state === 'idle', 'the first compile')
+  await until(stateIdle, 'the first compile')
 })
 
-const term = () => document.querySelector<HTMLElement>('[data-leaf="lambda-0"] .term')
 const rows = () => document.querySelectorAll('[data-leaf="lambda-0"] .term-line').length
 const checked = (value: string) =>
   document
@@ -45,13 +44,13 @@ describe('a λ view restored from a stored workspace', () => {
       .find((b) => b.textContent === '↺')
       ?.click()
     await until(
-      () => term()?.dataset.step === '0' && term()?.dataset.stale === undefined && rows() > 0,
+      () => lambdaTerm()?.dataset.step === '0' && lambdaTerm()?.dataset.stale === undefined && rows() > 0,
       'step 0’s tree',
     )
-    expect(term()?.dataset.layout).toBe('outline')
+    expect(lambdaTerm()?.dataset.layout).toBe('outline')
     // A BINDER BY NAME READS `λx`; BY INDEX, `λ.` — so no letter directly after a `λ` is the de Bruijn mode.
-    expect(term()?.textContent).toMatch(/λ\./)
-    expect(term()?.textContent).not.toMatch(/λ\p{L}/u)
+    expect(lambdaTerm()?.textContent).toMatch(/λ\./)
+    expect(lambdaTerm()?.textContent).not.toMatch(/λ\p{L}/u)
     expect(checked('outline')).toBe('true')
     expect(checked('debruijn')).toBe('true')
   })
@@ -77,14 +76,14 @@ describe('a λ view restored from a stored workspace', () => {
    * it reset first.
    */
   it('does not give a re-minted view the display of the one that closed', async () => {
-    expect(term()?.dataset.layout, 'the view to close draws as a new one would').toBe('outline')
+    expect(lambdaTerm()?.dataset.layout, 'the view to close draws as a new one would').toBe('outline')
     const toggle = document.querySelector<HTMLButtonElement>('#views-shown button[data-shows="lambda"]')
     document.querySelector<HTMLButtonElement>('[data-leaf="lambda-0"] button.view-close')?.click()
     await until(() => document.querySelector('[data-leaf="lambda-0"]') === null, 'the λ view to close')
     expect(toggle?.getAttribute('aria-pressed')).toBe('false')
     toggle?.click()
-    await until(() => rows() > 0 && term()?.dataset.stale === undefined, 'the re-minted view’s tree')
-    expect(term()?.dataset.layout).toBe('code')
+    await until(() => rows() > 0 && lambdaTerm()?.dataset.stale === undefined, 'the re-minted view’s tree')
+    expect(lambdaTerm()?.dataset.layout).toBe('code')
     expect(checked('code')).toBe('true')
     expect(checked('names')).toBe('true')
     expect(

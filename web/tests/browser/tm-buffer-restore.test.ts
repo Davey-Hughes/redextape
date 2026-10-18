@@ -1,4 +1,4 @@
-import { EditorView } from '@codemirror/view'
+import type { EditorView } from '@codemirror/view'
 import { describe, expect, it } from 'vitest'
 // THE SECOND REPRO'S OWN PASTE — CRITICAL 1, whole-branch review before merge. `?raw` is Vite's own
 // text-import suffix (`node_modules/vite/client.d.ts` declares `'*?raw'` as a default-exported
@@ -9,10 +9,20 @@ import { describe, expect, it } from 'vitest'
 // `REPO_ROOT`) already covers it.
 import list_1_2 from '../../../crates/redextape-core/tests/fixtures/list_1_2.tm?raw'
 import { BUFFERS_STORAGE_KEY, parseBuffers, serializeBuffers } from '../../src/buffers-store'
-import type { Leg } from '../../src/protocol'
-import type { SessionId } from '../../src/session-client'
-import { bindingKey } from '../../src/view-header'
-import { SHELL, storeFourViews, until } from './harness'
+import { pickSessionBinding } from './binding-fixture'
+import { editorViewOf } from './editor-view-fixture'
+import {
+  bufferRows,
+  buffersButton,
+  buffersMenu,
+  editedToHaltImmediately,
+  idle,
+  SHELL,
+  startStateGoesToHalt,
+  storeFourViews,
+  tmPaneHost,
+  until,
+} from './harness'
 
 /**
  * **BOTH LEGS SURVIVE A RELOAD, END TO END — 5d-iv Task 11, the composition check.** Task 6 pinned the
@@ -50,111 +60,19 @@ import { SHELL, storeFourViews, until } from './harness'
  * **DUPLICATING THE PANE/BUFFER HELPERS RATHER THAN IMPORTING THEM FROM A SIBLING IS DELIBERATE FOR
  * `mountApp`/`remountApp`, THE SAME REASON `tm-blank-buffer.test.ts` GIVES FOR ITS OWN MOUNT.** Each
  * browser test file gets its own page, so a shared mount would be a shared page two files could not
- * both own — that argument reaches `mountApp`/`remountApp` and stops there. `tmPaneHost`/`lambdaPaneHost`
+ * both own — that argument reaches `mountApp`/`remountApp` and stops there. `lambdaPaneHost`
  * and the rest are pure DOM queries, duplicated because nothing here is exported for another file to
  * import, not because a shared page forbids it; they mirror `tm-scratch-fork.test.ts`'s and
- * `tm-blank-buffer.test.ts`'s own. `SHELL` and `until` are no longer part of either duplication — both
- * are imported from `tests/browser/harness.ts`.
+ * `tm-blank-buffer.test.ts`'s own. `SHELL`, `until`, `tmPaneHost`, `idle`, `buffersButton`, `buffersMenu`,
+ * `bufferRows`, `editedToHaltImmediately` and `startStateGoesToHalt` are no longer part of either duplication — all
+ * are imported from `tests/browser/harness.ts` — and neither are `editorViewOf` and `pickSessionBinding`, imported
+ * from `tests/browser/editor-view-fixture.ts` and `tests/browser/binding-fixture.ts`.
  */
-
-const resultsText = () => document.querySelector('#results')?.textContent ?? ''
-const idle = () => document.querySelector<HTMLElement>('#results')?.dataset.state === 'idle' && resultsText() !== ''
-
-const tmPaneHost = (): HTMLElement => {
-  const el = document.querySelector<HTMLElement>('[data-leaf="tm-0"]')
-  if (el === null) throw new Error('no TM pane mounted at [data-leaf="tm-0"]')
-  return el
-}
 
 const lambdaPaneHost = (): HTMLElement => {
   const el = document.querySelector<HTMLElement>('[data-leaf="lambda-0"]')
   if (el === null) throw new Error('no λ pane mounted at [data-leaf="lambda-0"]')
   return el
-}
-
-const editorHostOf = (pane: HTMLElement): HTMLElement => {
-  const host = pane.querySelector<HTMLElement>('.term-editor')
-  if (host === null) throw new Error('no editor mounted in this pane')
-  return host
-}
-
-const editorViewOf = (pane: HTMLElement): EditorView => {
-  const view = EditorView.findFromDOM(editorHostOf(pane))
-  if (view === null) throw new Error('no CodeMirror view mounted under the editor host')
-  return view
-}
-
-const buffersButton = (): HTMLButtonElement => {
-  const el = document.querySelector<HTMLButtonElement>('#buffers')
-  if (el === null) throw new Error('no #buffers control in the header')
-  return el
-}
-
-const buffersMenu = (): HTMLElement => {
-  const el = document.querySelector<HTMLElement>('.buffer-list')
-  if (el === null) throw new Error('no .buffer-list popover beside #buffers')
-  return el
-}
-
-/** Every row the list currently holds, forcing the list open first — `tm-blank-buffer.test.ts`'s own
- * `bufferRows` and its own reason: a closed list keeps whatever it last rendered. */
-const bufferRows = (): HTMLElement[] => {
-  const button = buffersButton()
-  if (button.getAttribute('aria-expanded') !== 'true') button.click()
-  return [...document.querySelectorAll<HTMLElement>('.buffer-list .buffer-row')]
-}
-
-/** Rebind `pane` to `(leg, session)` through its title menu, the control a user has, not a direct write
- * to whatever `main.ts` holds underneath it — `tm-blank-buffer.test.ts`'s own `pickBinding`. */
-const pickBinding = (pane: HTMLElement, target: { leg: Leg; session: SessionId }): void => {
-  const title = pane.querySelector<HTMLButtonElement>('button.view-title')
-  if (title === null) throw new Error('no title-selector on this view')
-  title.click()
-  const menu = document.getElementById(title.getAttribute('aria-controls') ?? '')
-  const item = menu?.querySelector<HTMLButtonElement>(
-    `button[data-binding="${bindingKey(target.leg, target.session)}"]`,
-  )
-  if (item == null) throw new Error(`this view offers no ${bindingKey(target.leg, target.session)}`)
-  item.click()
-}
-
-/**
- * Rewrite the start state's rule list to a single unconditional jump to `halt`, and hand back the name
- * that state was edited under — `tm-scratch-fork.test.ts`'s own `editedToHaltImmediately`, duplicated
- * rather than imported (this file's own doc on why every page helper here is its own copy). Reused for
- * the SECOND composition this file's Task 11 fix round adds: an edit surviving a reload needs a real
- * edit, not merely a reload of what a fork already seeded, and this is the smallest one already proven
- * to reach a running machine.
- */
-function editedToHaltImmediately(text: string): { text: string; start: string } {
-  const start = /^start (\S+)$/m.exec(text)?.[1]
-  if (start === undefined) throw new Error('emitted text has no `start` directive')
-  const tapes = Number(/^tapes (\d+)$/m.exec(text)?.[1])
-  if (!Number.isInteger(tapes)) throw new Error('emitted text has no `tapes` directive')
-  const wild = Array.from({ length: tapes }, () => '*').join(' ')
-  const stay = Array.from({ length: tapes }, () => 'S').join(' ')
-  const rule = `  [${wild}] -> write [${wild}], move [${stay}], goto halt`
-  const lines = text.split('\n')
-  const at = lines.indexOf(`state ${start}:`)
-  if (at < 0) throw new Error(`no block for the start state \`${start}\``)
-  let end = at + 1
-  while ((lines[end] ?? '').startsWith('  ')) end++
-  return { text: [...lines.slice(0, at + 1), rule, ...lines.slice(end)].join('\n'), start }
-}
-
-/**
- * Whether the δ-table's rendered rows show `state`'s own header immediately followed by exactly the
- * rule `editedToHaltImmediately` wrote — `tm-scratch-fork.test.ts`'s own `startStateGoesToHalt`,
- * duplicated for the reason its own doc gives: the fact worth waiting on and asserting, immune to both
- * the always-true `/halt/i` (`state halt: accept` is in the δ-table regardless of the edit) and to
- * content quiescence racing the debounced recompile.
- */
-function startStateGoesToHalt(pane: HTMLElement, start: string): boolean {
-  const rows = [...pane.querySelectorAll<HTMLElement>('.state-row')]
-  const at = rows.findIndex((el) => el.classList.contains('is-state') && el.textContent === start)
-  const rule = at < 0 ? undefined : rows[at + 1]
-  if (rule === undefined || !rule.classList.contains('is-rule')) return false
-  return /→ halt$/.test(rule.textContent ?? '')
 }
 
 /**
@@ -413,9 +331,9 @@ describe('restoring buffers on both legs', () => {
    *
    * **THIS IS `tm-scratch-fork.test.ts`'s `runs the edited machine`, CONTINUED PAST THE POINT THAT FILE
    * STOPS.** That file proves the edit reaches the running machine; it never reloads, so it cannot see
-   * whether the edit reaches storage. `editedToHaltImmediately`/`startStateGoesToHalt` are its own
-   * helpers, duplicated here per this file's stated idiom, reused rather than re-invented because the
-   * edit and the wait for it to land are already proven correct there.
+   * whether the edit reaches storage. `editedToHaltImmediately`/`startStateGoesToHalt` are the helpers it
+   * uses, imported from `harness.ts`, reused rather than re-invented because the edit and the wait for it to
+   * land are already proven correct there.
    */
   it("keeps a forked TM buffer's edited text after a reload", async () => {
     const first = await mountApp('let x = 40; x + 2')
@@ -467,7 +385,7 @@ describe('restoring buffers on both legs', () => {
     first.buffersButton().click()
     first.buffersMenu().querySelector<HTMLButtonElement>('button.new-tm')?.click()
     await first.settled()
-    pickBinding(first.tmPane(), { leg: 'tm', session: 'scratch-1' })
+    pickSessionBinding(first.tmPane(), { leg: 'tm', session: 'scratch-1' })
     await first.settled()
 
     const view = editorViewOf(first.tmPane())
@@ -496,10 +414,10 @@ describe('restoring buffers on both legs', () => {
       'the pasted machine to reach localStorage',
     )
 
-    // NO SECOND `pickBinding` HERE — this pane's binding was already recorded in the persisted layout
+    // NO SECOND `pickSessionBinding` HERE — this pane's binding was already recorded in the persisted layout
     // by the call above, so `main.ts`'s restore loop warms this buffer and rebinds `tm-0` to it on its
     // own (the SAME auto-rebind `brings a λ buffer and a TM buffer back on their own legs`, above,
-    // already relies on for a forked pane, with no `pickBinding` call of its own after `remountApp`).
+    // already relies on for a forked pane, with no `pickSessionBinding` call of its own after `remountApp`).
     const second = await remountApp()
     await until(() => second.tmPane().querySelector('.term-editor') !== null, 'the restored buffer to mount its editor')
     expect(second.editorText(second.tmPane())).toBe(list_1_2)

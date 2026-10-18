@@ -684,13 +684,7 @@ fn lower_expr_at(g: &mut NodeGen, expr: &Expr, spans: &mut Vec<(NodeId, Span)>) 
 mod tests {
     use super::*;
     use crate::core::NodeId;
-    use crate::parser::parse;
-
-    fn core(src: &str) -> Core {
-        let (prog, ds) = parse(src);
-        assert!(ds.is_empty(), "parse errors: {ds:?}");
-        desugar(&prog.unwrap())
-    }
+    use crate::tm::test_fixtures::core_of;
 
     /// Count nodes of a shape matching `pred` in the tree.
     fn count(node: &Core, pred: &dyn Fn(&Core) -> bool) -> usize {
@@ -743,7 +737,7 @@ mod tests {
     #[test]
     fn method_chain_desugars_to_nested_applies() {
         // xs.map(f) -> map(xs, f)
-        let c = core("fn map(xs, f) { xs } fn f(x) { x } map(nil, f).map(f)");
+        let c = core_of("fn map(xs, f) { xs } fn f(x) { x } map(nil, f).map(f)");
         // The tail `map(nil, f).map(f)` becomes map(map(nil, f), f): two Applies of `map`.
         let applies_of_map = count(
             &c,
@@ -754,7 +748,7 @@ mod tests {
 
     #[test]
     fn list_literal_desugars_to_cons_nil() {
-        let c = core("[1, 2]");
+        let c = core_of("[1, 2]");
         // Expect cons(1, cons(2, nil)): two `cons` applications and one `nil` var.
         let conses = count(
             &c,
@@ -766,7 +760,7 @@ mod tests {
 
     #[test]
     fn fn_becomes_letrec_and_let_becomes_let() {
-        let c = core("fn f(x) { x } let y = 1; f(y)");
+        let c = core_of("fn f(x) { x } let y = 1; f(y)");
         assert!(matches!(&c, Core::LetRec { name, .. } if name == "f"));
         if let Core::LetRec { body, .. } = &c {
             assert!(matches!(body.as_ref(), Core::Let { name, .. } if name == "y"));
@@ -775,8 +769,9 @@ mod tests {
 
     #[test]
     fn node_ids_are_unique() {
-        let c =
-            core("fn count_down(n) { let mut acc = 0; while n > 0 { acc = acc + 1; n = n - 1; } acc } count_down(3)");
+        let c = core_of(
+            "fn count_down(n) { let mut acc = 0; while n > 0 { acc = acc + 1; n = n - 1; } acc } count_down(3)",
+        );
         let mut ids = Vec::new();
         collect_ids(&c, &mut ids);
         let mut sorted = ids.clone();
@@ -788,7 +783,7 @@ mod tests {
     #[test]
     fn expr_statement_lowers_to_seq_with_unique_ids() {
         // `f(1);` is a non-tail expression statement -> Seq(apply f, tail).
-        let c = core("fn f(x) { x } f(1); f(2)");
+        let c = core_of("fn f(x) { x } f(1); f(2)");
         // The LetRec body is a Seq: first the discarded `f(1)`, then the tail `f(2)`.
         if let Core::LetRec { body, .. } = &c {
             assert!(matches!(body.as_ref(), Core::Seq(..)), "expected Seq body, got {:?}", body);
@@ -844,7 +839,7 @@ mod tests {
     fn a_mutual_pair_lowers_to_one_group_holding_both_names() {
         // The other side of the guarantee: a genuine cycle DOES become one `LetRecGroup`, with its
         // members in source order — not two nested `LetRec`s (which could never see each other).
-        let c = core(
+        let c = core_of(
             "fn is_even(n){ if n == 0 { true } else { is_odd(n - 1) } } \
                       fn is_odd(n){ if n == 0 { false } else { is_even(n - 1) } } is_even(10)",
         );
@@ -863,7 +858,7 @@ mod tests {
         // still rejected (statically, by the typechecker) rather than silently grouped.
         assert!(crate::run("fn a(n){ b(n) } let k = 1; fn b(n){ n } a(3)").is_err());
         // Split by a `let`, each run lowers on its own — and each is a singleton, so no group.
-        let c = core("fn a(x){ x } let k = 1; fn b(y){ a(y) + k } b(2)");
+        let c = core_of("fn a(x){ x } let k = 1; fn b(y){ a(y) + k } b(2)");
         assert!(!contains_group(&c));
     }
 
@@ -879,7 +874,7 @@ mod tests {
         // reader (and any consumer that resolves names the way `TyEnv::lookup` does, last-wins)
         // still finds the second. Reading the first definition's self-call as a reference to the
         // second turns a dropped self-edge into a cross-edge and inverts exactly that.
-        let c = core("fn a(n){ if n == 0 { 99 } else { a(n - 1) } } fn a(n){ n + 1 } a(3)");
+        let c = core_of("fn a(n){ if n == 0 { 99 } else { a(n - 1) } } fn a(n){ n + 1 } a(3)");
         let Core::LetRec { name: outer, value: outer_value, body, .. } = &c else {
             panic!("expected a LetRec at the root, got {c:?}");
         };
@@ -897,8 +892,8 @@ mod tests {
             "the INNER binding must be the SECOND definition (`n + 1`), the one a last-wins lookup finds"
         );
         // A self-call must never pull a same-named sibling into the same component.
-        assert!(!contains_group(&core("fn a(x){ a(x) } fn a(x){ x } a(1)")));
-        assert!(!contains_group(&core("fn a(x){ a(x) } fn a(x){ x } fn b(x){ a(x) } b(1)")));
+        assert!(!contains_group(&core_of("fn a(x){ a(x) } fn a(x){ x } a(1)")));
+        assert!(!contains_group(&core_of("fn a(x){ a(x) } fn a(x){ x } fn b(x){ a(x) } b(1)")));
     }
 
     #[test]
@@ -934,7 +929,7 @@ mod tests {
     fn a_shadowed_member_name_is_not_a_dependency() {
         // `f` mentions `g`, but as its own local — the later `fn g` is NOT a dependency, so the two
         // stay independent singletons and lower exactly as they did before grouping existed.
-        let c = core("fn f(x){ let g = 1; g + x } fn g(y){ y } f(1)");
+        let c = core_of("fn f(x){ let g = 1; g + x } fn g(y){ y } f(1)");
         assert!(!contains_group(&c), "a shadowed name must not create an edge");
         assert!(matches!(&c, Core::LetRec { name, .. } if name == "f"), "source order must be preserved: {c:?}");
     }
@@ -955,7 +950,7 @@ mod tests {
             }
         }
         src.push_str("f0(1)");
-        let c = core(&src);
+        let c = core_of(&src);
         assert!(!contains_group(&c), "a chain has no cycle, so every component is a singleton");
         assert!(
             matches!(&c, Core::LetRec { name, .. } if *name == format!("f{}", N - 1)),
@@ -1050,7 +1045,7 @@ mod tests {
         // desugar cleanly into a deeply right-nested Seq chain with unique NodeIds.
         let stmts: Vec<String> = (0..20_000).map(|i| format!("{i};")).collect();
         let src = stmts.join("");
-        let c = core(&src);
+        let c = core_of(&src);
         assert!(matches!(&c, Core::Seq(..)), "expected a Seq chain, got {c:?}");
         let mut ids = Vec::new();
         collect_ids(&c, &mut ids);

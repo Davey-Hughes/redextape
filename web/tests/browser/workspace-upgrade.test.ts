@@ -1,7 +1,7 @@
 import { beforeAll, describe, expect, it } from 'vitest'
 import { LAYOUT_STORAGE_KEY } from '../../src/layout'
 import { PRESETS } from '../../src/workspace'
-import { SHELL, until } from './harness'
+import { SHELL, stateIdle, until } from './harness'
 
 /**
  * **A WORKSPACE STORED BY PART 2a, BOOTED BY PART 2b** — spec §3's `inspector` rule, through the real app.
@@ -40,7 +40,7 @@ beforeAll(async () => {
   localStorage.setItem(LAYOUT_STORAGE_KEY, AS_2A)
   document.body.innerHTML = SHELL
   await (await import('../../src/main')).ready
-  await until(() => document.querySelector<HTMLElement>('#results')?.dataset.state === 'idle', 'the first compile')
+  await until(stateIdle, 'the first compile')
 })
 
 describe('a workspace stored by part 2a', () => {

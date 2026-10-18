@@ -1,20 +1,13 @@
 import type { EditorView } from '@codemirror/view'
 import { beforeAll, describe, expect, it } from 'vitest'
-import { SHELL, until } from './harness'
+import { barButton, barStep, barTitle, openWorkspaceMenu, SHELL, stateIdle, stepBar, until } from './harness'
 import { lambdaSettled } from './lambda-text'
 
-const menu = (): HTMLElement => {
-  document.querySelector<HTMLButtonElement>('#workspace')?.click()
-  return document.querySelector<HTMLElement>('#workspace-menu') as HTMLElement
-}
 const pick = (sel: string): void => {
-  menu().querySelector<HTMLButtonElement>(sel)?.click()
+  openWorkspaceMenu().querySelector<HTMLButtonElement>(sel)?.click()
   const m = document.querySelector<HTMLElement>('#workspace-menu')
   if (m?.matches(':popover-open')) m.hidePopover()
 }
-const bar = (): HTMLElement => document.querySelector<HTMLElement>('#step-bar') as HTMLElement
-const barTitle = (): string => bar().querySelector('.step-bar-title')?.textContent?.trim() ?? ''
-const barStep = (): string => bar().querySelector('.step-bar-inner .step')?.textContent?.trim() ?? ''
 const viewControls = (leaf: string): Element | null =>
   document.querySelector(`[data-leaf="${leaf}"] .view-steps .controls`)
 const focusView = (leaf: string): void => {
@@ -28,17 +21,17 @@ describe('the step bar', () => {
     document.body.innerHTML = SHELL
     const view: EditorView = await (await import('../../src/main')).ready
     view.dispatch({ changes: { from: 0, to: view.state.doc.length, insert: 'let x = 40; x + 2' } })
-    await until(() => document.querySelector<HTMLElement>('#results')?.dataset.state === 'idle', 'the first compile')
+    await until(stateIdle, 'the first compile')
   })
 
   it('is not on the page while the step controls are in each view', () => {
-    expect(bar().hidden).toBe(true)
+    expect(stepBar().hidden).toBe(true)
     expect(viewControls('lambda-0')).not.toBeNull()
   })
 
   it('takes the controls out of every view when the switch moves to one bar, and names what it drives', () => {
     pick('[data-switch="steps"][data-value="bar"]')
-    expect(bar().hidden).toBe(false)
+    expect(stepBar().hidden).toBe(false)
     expect(viewControls('lambda-0')).toBeNull()
     expect(viewControls('tm-0')).toBeNull()
     expect(barTitle()).toBe('λ · program')
@@ -67,7 +60,7 @@ describe('the step bar', () => {
     await lambdaSettled('lambda-0', barStep)
     const termBefore = document.querySelector('[data-leaf="lambda-0"] .term')?.textContent ?? ''
     expect(termBefore, 'the λ view renders no term, so a change in it would prove nothing').not.toBe('')
-    bar().querySelector<HTMLButtonElement>('button[aria-label="one step forward"]')?.click()
+    stepBar().querySelector<HTMLButtonElement>('button[aria-label="one step forward"]')?.click()
     expect(barStep()).not.toBe(before)
     await lambdaSettled('lambda-0', barStep)
     // **THE VIEW ITSELF MOVED, WHICH IS THE HALF THE BAR'S OWN READOUT CANNOT SHOW.** This line used to
@@ -88,8 +81,6 @@ describe('the step bar', () => {
    * as the other four.
    */
   it('drives the target with every one of its buttons', async () => {
-    const barButton = (name: string): HTMLButtonElement =>
-      bar().querySelector<HTMLButtonElement>(`button[aria-label="${name}"]`) as HTMLButtonElement
     // THE BAR'S OWN READOUT, NOT THE VIEW'S — with the `steps` switch at `bar` the view has no step
     // slot at all, so a read of `[data-leaf=...] .step` comes back empty and every assertion below
     // would be comparing against nothing.

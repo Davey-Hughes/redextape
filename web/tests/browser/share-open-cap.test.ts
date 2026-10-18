@@ -6,7 +6,7 @@ import { MAX_WARM_BUFFERS } from '../../src/scratch'
 import { encodeLink } from '../../src/share-link'
 import { bindingKey } from '../../src/view-header'
 import { serializeWorkspace } from '../../src/workspace'
-import { fourViews, fourViewWorkspace, SHELL, until } from './harness'
+import { fourViews, fourViewWorkspace, noticeText, SHELL, shows, stateIdle, undoButton, until } from './harness'
 
 /**
  * **AN OPEN'S UNDO, PAST THE COPIES CAP** — Plan 7 part 6a spec §5.5: "a copy the cap refuses stays paused, and its
@@ -30,11 +30,6 @@ function lambdaViews(n: number): { tree: LayoutNode; leaves: string[] } {
 
 const { tree, leaves } = lambdaViews(MAX_WARM_BUFFERS + 1)
 const copies = leaves.map((_, i) => `scratch-${i + 1}`)
-const noticeText = () => document.querySelector('#notice .notice-text')?.textContent ?? ''
-const undoButton = () => document.querySelector<HTMLButtonElement>('#notice button.notice-action')
-const idle = () => document.querySelector<HTMLElement>('#results')?.dataset.state === 'idle'
-const shows = (leaf: string) =>
-  document.querySelector<HTMLElement>(`[data-leaf="${leaf}"] .view-title`)?.dataset.binding ?? ''
 
 beforeAll(async () => {
   localStorage.setItem(LAYOUT_STORAGE_KEY, serializeWorkspace({ ...fourViewWorkspace(), tree, focused: 'lambda-0' }))
@@ -61,7 +56,7 @@ beforeAll(async () => {
   history.replaceState(null, '', `${location.pathname}${location.search}${fragment}`)
   document.body.innerHTML = SHELL
   await (await import('../../src/main')).ready
-  await until(() => idle() && noticeText() === 'opened a shared link', 'the open')
+  await until(() => stateIdle() && noticeText() === 'opened a shared link', 'the open')
 })
 
 describe("an open's undo past the copies cap", () => {

@@ -4,7 +4,7 @@ import { page } from 'vitest/browser'
 import type { LayoutNode } from '../../src/layout'
 import { encodeLink, type Positions } from '../../src/share-link'
 import { defaultWorkspace, serializeWorkspace } from '../../src/workspace'
-import { live, SHELL, until } from './harness'
+import { live, mounted, noticeText, SHELL, sourceBeside, stateIdle, stepTextOf, undoButton, until } from './harness'
 
 /**
  * **A CLAMP IS SAID ONLY OF A LEG THE PAGE HAS A VIEW OF** — Plan 7 part 6a spec §5.4, on a page of the view layouts,
@@ -23,28 +23,9 @@ import { live, SHELL, until } from './harness'
 const OPENER = 'let x = 40; x + 2'
 const OTHER = 'let y = 10; y + 5'
 
-const noticeText = (): string => document.querySelector('#notice .notice-text')?.textContent ?? ''
-const undoButton = (): HTMLButtonElement | null => document.querySelector('#notice button.notice-action')
-const idle = (): boolean => document.querySelector<HTMLElement>('#results')?.dataset.state === 'idle'
-const mounted = (): string[] =>
-  [...document.querySelectorAll<HTMLElement>('#views [data-leaf]')]
-    .filter((el) => el.getAttribute('role') !== 'tab')
-    .map((el) => el.dataset.leaf as string)
-const stepOf = (leaf: string): string => document.querySelector(`[data-leaf="${leaf}"] .step`)?.textContent ?? ''
 /** Whether the run of the program on the page is over with `value`: every leg has stopped by then. */
 const runOver = (value: number): boolean =>
-  idle() && (document.querySelector('#results')?.textContent ?? '').includes(`λ ${value}`)
-
-/** The source beside one other view, as a link's tree. */
-const beside = (id: string, pane: 'lambda' | 'tm'): LayoutNode => ({
-  kind: 'split',
-  dir: 'row',
-  sizes: [0.5, 0.5],
-  children: [
-    { kind: 'leaf', id: 'source', pane: 'source' },
-    { kind: 'leaf', id, pane },
-  ],
-})
+  stateIdle() && (document.querySelector('#results')?.textContent ?? '').includes(`λ ${value}`)
 
 /** A link to `program` whose workspace shows `tree`, with `positions`. */
 const link = (program: string, tree: LayoutNode, positions: Positions): Promise<string> =>
@@ -66,7 +47,7 @@ beforeAll(async () => {
 
 describe('a clamp of a leg no view shows', () => {
   it('says the TM leg’s clamp alone on a page of the source and TM views, in one leg’s words', async () => {
-    location.hash = await link(OPENER, beside('tm-0', 'tm'), { lambda: 100, asm: 100, tm: 1_000_000 })
+    location.hash = await link(OPENER, sourceBeside('tm-0', 'tm'), { lambda: 100, asm: 100, tm: 1_000_000 })
     // THE TM LEG STOPS LAST: its notice is on the line once the λ and asm legs have stopped, unsaid.
     await until(() => noticeText().includes('TM step'), 'the TM leg’s clamp')
     expect(mounted(), 'precondition: the page shows the source and TM views').toEqual(['source', 'tm-0'])
@@ -74,12 +55,12 @@ describe('a clamp of a leg no view shows', () => {
     expect(noticeText()).toBe(said)
     expect(live()).toBe(said)
     expect(undoButton()?.textContent, 'the clamp’s notice lost the open’s undo').toBe('undo')
-    expect(stepOf('tm-0'), 'the TM view is not on the step the notice names').toBe('step 2,870 of 2,870')
+    expect(stepTextOf('tm-0'), 'the TM view is not on the step the notice names').toBe('step 2,870 of 2,870')
   })
 
   it('says nothing of clamps where no clamped leg has a view, and keeps the open’s notice and its undo', async () => {
     expect(runOver(15), 'precondition: the page is not on the link’s value already').toBe(false)
-    location.hash = await link(OTHER, beside('tm-0', 'tm'), { lambda: 100, asm: 100 })
+    location.hash = await link(OTHER, sourceBeside('tm-0', 'tm'), { lambda: 100, asm: 100 })
     await until(
       () => view.state.doc.toString() === OTHER && runOver(15),
       'the link’s run to be over, both legs stopped',
@@ -107,7 +88,7 @@ describe('a clamp of a leg no view shows', () => {
       await until(() => runOver(15), 'the other program’s run to be over')
       writes.length = 0
       expect(runOver(42), 'precondition: the page is not on the link’s value already').toBe(false)
-      location.hash = await link(OPENER, beside('lambda-0', 'lambda'), { lambda: 100, asm: 100 })
+      location.hash = await link(OPENER, sourceBeside('lambda-0', 'lambda'), { lambda: 100, asm: 100 })
       const said = "the link's λ step 100 is past the end of this run — showing step 7"
       await until(() => noticeText() === said, 'the λ leg’s clamp')
       await until(() => runOver(42), 'the link’s run to be over, the asm leg stopped')
@@ -119,7 +100,7 @@ describe('a clamp of a leg no view shows', () => {
         writes.filter((text) => text === said),
         'the λ leg’s clamp was said again',
       ).toHaveLength(1)
-      expect(stepOf('lambda-0')).toBe('step 7 of 7')
+      expect(stepTextOf('lambda-0')).toBe('step 7 of 7')
     } finally {
       watch.disconnect()
     }

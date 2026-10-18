@@ -3,6 +3,7 @@ import type * as Wasm from '../../../pkg/redextape_wasm.js'
 import { ScratchEditor } from '../../src/scratch-editor'
 import type { AsmProgram, AsmStatus, Decoded, Diagnostic } from '../../src/types'
 import { both, CASES, COPY_CAPS_HEAP } from './asm-copy-corpus'
+import { cloneMs, median, ms } from './harness'
 
 /**
  * **A PROBE, NOT A GATE** (`vite.config.ts`'s `PROBE_FILES`): what an asm copy's build costs before its first frame,
@@ -55,16 +56,6 @@ function corpus(bytes: number): string {
   }
   return parts.join('')
 }
-
-const cloneMs = (payload: unknown) =>
-  new Promise<number>((resolve) => {
-    const ch = new MessageChannel()
-    const start = performance.now()
-    ch.port2.onmessage = () => resolve(performance.now() - start)
-    ch.port1.postMessage(payload)
-  })
-const median = (xs: number[]) => [...xs].sort((a, b) => a - b)[Math.floor(xs.length / 2)] ?? Number.NaN
-const ms = (x: number) => x.toFixed(1).padStart(7)
 
 describe('asm copy cost', () => {
   it('prices a build by the size of its text, and every run the memory probe knows', async () => {

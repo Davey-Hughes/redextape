@@ -3,7 +3,21 @@ import { beforeAll, beforeEach, describe, expect, it } from 'vitest'
 import { page, userEvent } from 'vitest/browser'
 import { encodeLink } from '../../src/share-link'
 import { defaultWorkspace, serializeWorkspace } from '../../src/workspace'
-import { focusInPage, resetToFourViews, SHELL, until } from './harness'
+import {
+  host,
+  pressTab,
+  pressToggle,
+  resetToFourViews,
+  SHELL,
+  scrollRange,
+  stageTab,
+  stateIdle,
+  tmStateTable,
+  tmViewHost,
+  until,
+  workspaceNameText,
+} from './harness'
+import { userPickWorkspace } from './user-event-fixture'
 
 /**
  * A REBUILD OF THE LAYOUT KEEPS WHERE EVERY VIEW WAS SCROLLED TO — the view layouts spec §5.2.
@@ -40,37 +54,11 @@ const PROGRAM = `let x = 40;${'\n'.repeat(60)}x + 2${' '.repeat(400)}`
 /** A program a link carries: as long and as wide as `PROGRAM`, so the source view could be scrolled as far under it. */
 const LINKED = `let y = 10;${'\n'.repeat(60)}y + 5${' '.repeat(400)}`
 
-const host = (leaf: string): HTMLElement | null =>
-  document.querySelector<HTMLElement>(`#views [data-leaf="${leaf}"]:not([role="tab"])`)
-const table = (): HTMLElement => host('tm-0')?.querySelector('.state-table') as HTMLElement
-const tm = (): HTMLElement => host('tm-0') as HTMLElement
 const editor = (): HTMLElement => host('source')?.querySelector('.cm-scroller') as HTMLElement
-const tab = (leaf: string): HTMLElement =>
-  document.querySelector<HTMLElement>(`#views [role="tab"][data-leaf="${leaf}"]`) as HTMLElement
-const toggle = (kind: string): HTMLElement =>
-  document.querySelector<HTMLElement>(`#views-shown button[data-shows="${kind}"]`) as HTMLElement
-const workspace = (): string => document.querySelector('#workspace')?.textContent ?? ''
-const pick = async (sel: string): Promise<void> => {
-  await userEvent.click(document.querySelector('#workspace') as HTMLElement)
-  await userEvent.click(document.querySelector(`#workspace-menu ${sel}`) as HTMLElement)
-  const menu = document.querySelector<HTMLElement>('#workspace-menu')
-  if (menu?.matches(':popover-open')) menu.hidePopover()
-}
-/** A press on a toggle with the pointer, after which the focus is somewhere in the page (spec §14 item 19). */
-const pressToggle = async (kind: string): Promise<void> => {
-  await userEvent.click(toggle(kind))
-  await focusInPage(`a press on the ${kind} toggle`)
-}
-/** And one on a Stage tab. */
-const pressTab = async (leaf: string): Promise<void> => {
-  await userEvent.click(tab(leaf))
-  await focusInPage(`a press on the Stage tab of ${leaf}`)
-}
-/** How far `el` can scroll down: a box that cannot is at 0 whatever it was given. */
-const range = (el: HTMLElement): number => el.scrollHeight - el.clientHeight
 
 /** The rule table's active row, the one its arrow keys move: an index into the whole table, or -1 for none. */
-const activeRow = (): number => Number(/-(\d+)$/.exec(table().getAttribute('aria-activedescendant') ?? '')?.[1] ?? -1)
+const activeRow = (): number =>
+  Number(/-(\d+)$/.exec(tmStateTable().getAttribute('aria-activedescendant') ?? '')?.[1] ?? -1)
 /**
  * Scroll the rule table as a user does — the table follows the run until a `scroll` of the user's reaches it — and
  * put its active row two rows into what it then shows, with the keys.
@@ -80,13 +68,13 @@ const activeRow = (): number => Number(/-(\d+)$/.exec(table().getAttribute('aria
  * has had it carried to the top of the table and back to the first row in view, which is not the row the user left.
  */
 const armTable = async (): Promise<void> => {
-  table().scrollTop = 120
-  table().dispatchEvent(new Event('scroll'))
-  await until(() => table().scrollTop === 120, 'the table to hold its scroll')
+  tmStateTable().scrollTop = 120
+  tmStateTable().dispatchEvent(new Event('scroll'))
+  await until(() => tmStateTable().scrollTop === 120, 'the table to hold its scroll')
   for (let press = 0; press < 2 && activeRow() < 7; press += 1)
-    table().dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowDown', bubbles: true, cancelable: true }))
+    tmStateTable().dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowDown', bubbles: true, cancelable: true }))
   expect(activeRow(), 'precondition: the active row is two rows into the rows in view').toBe(7)
-  expect(table().scrollTop, 'precondition: the keys did not scroll the table').toBe(120)
+  expect(tmStateTable().scrollTop, 'precondition: the keys did not scroll the table').toBe(120)
 }
 const armSource = async (): Promise<void> => {
   editor().scrollTop = 120
@@ -95,9 +83,9 @@ const armSource = async (): Promise<void> => {
 }
 /** The TM view's own box, where its tile is shorter than the view: a case in tiles alone, since a Stage's is not. */
 const armHost = async (): Promise<void> => {
-  expect(range(tm()), 'precondition: the TM view’s own box scrolls').toBeGreaterThan(40)
-  tm().scrollTop = 40
-  await until(() => tm().scrollTop === 40, 'the TM view to hold its scroll')
+  expect(scrollRange(tmViewHost()), 'precondition: the TM view’s own box scrolls').toBeGreaterThan(40)
+  tmViewHost().scrollTop = 40
+  await until(() => tmViewHost().scrollTop === 40, 'the TM view to hold its scroll')
 }
 /** Put the table and the editor where a case starts from. */
 const arm = async (): Promise<void> => {
@@ -110,11 +98,11 @@ const armTiles = async (): Promise<void> => {
   await arm()
 }
 const heldTable = (gesture: string): void => {
-  expect(table().scrollTop, `${gesture} reset the TM view’s rule table`).toBe(120)
+  expect(tmStateTable().scrollTop, `${gesture} reset the TM view’s rule table`).toBe(120)
   expect(activeRow(), `${gesture} moved the rule table’s active row`).toBe(7)
 }
 const heldHost = (gesture: string): void => {
-  expect(tm().scrollTop, `${gesture} reset the TM view’s own scroll box`).toBe(40)
+  expect(tmViewHost().scrollTop, `${gesture} reset the TM view’s own scroll box`).toBe(40)
 }
 const heldSource = (gesture: string): void => {
   expect(editor().scrollTop, `${gesture} reset the source editor`).toBe(120)
@@ -144,16 +132,16 @@ describe('a view’s scroll position, across a rebuild made by another view', ()
     if (view.state.doc.toString() !== PROGRAM)
       view.dispatch({ changes: { from: 0, to: view.state.doc.length, insert: PROGRAM } })
     // `running` FROM THE DISPATCH ITSELF (`compile.ts`'s `createCompile`), so this is the compile of what it wrote.
-    await until(() => document.querySelector<HTMLElement>('#results')?.dataset.state === 'idle', 'the compile')
-    if (!workspace().includes('Explorer')) {
+    await until(stateIdle, 'the compile')
+    if (!workspaceNameText().includes('Explorer')) {
       document.querySelector<HTMLElement>('#workspace')?.click()
       document.querySelector<HTMLElement>('#workspace-menu [data-preset="explorer"]')?.click()
       document.querySelector<HTMLElement>('#workspace-menu')?.hidePopover()
     }
     await resetToFourViews()
     await until(() => host('tm-0')?.querySelector('.state-table .state-row') != null, 'the rule table to draw')
-    expect(range(table()), 'precondition: the rule table scrolls').toBeGreaterThan(200)
-    expect(range(editor()), 'precondition: the source editor scrolls').toBeGreaterThan(200)
+    expect(scrollRange(tmStateTable()), 'precondition: the rule table scrolls').toBeGreaterThan(200)
+    expect(scrollRange(editor()), 'precondition: the source editor scrolls').toBeGreaterThan(200)
     expect(editor().scrollWidth - editor().clientWidth, 'precondition: the editor scrolls sideways').toBeGreaterThan(
       400,
     )
@@ -179,12 +167,12 @@ describe('a view’s scroll position, across a rebuild made by another view', ()
   // box then has 34 px to scroll where it had more than 40, so a position it held would be clamped, not kept.
   it('is kept when the preset changes how the views are drawn, and when it changes back', async () => {
     await arm()
-    await pick('[data-preset="debugger"]')
-    expect(workspace(), 'the Debugger preset was not chosen').toContain('Debugger')
+    await userPickWorkspace('[data-preset="debugger"]')
+    expect(workspaceNameText(), 'the Debugger preset was not chosen').toContain('Debugger')
     expect(document.querySelector<HTMLElement>('#step-bar')?.hidden, 'the Debugger preset drew no step bar').toBe(false)
     held('the Debugger preset')
-    await pick('[data-preset="explorer"]')
-    expect(workspace(), 'the Explorer preset was not chosen').toContain('Explorer')
+    await userPickWorkspace('[data-preset="explorer"]')
+    expect(workspaceNameText(), 'the Explorer preset was not chosen').toContain('Explorer')
     expect(document.querySelector<HTMLElement>('#step-bar')?.hidden, 'the Explorer preset kept the step bar').toBe(true)
     held('the Explorer preset')
   })
@@ -195,7 +183,7 @@ describe('a view’s scroll position, across a rebuild made by another view', ()
    */
   it('is kept when the Stage is entered, by each view when its tab is selected', async () => {
     await arm()
-    await pick('[data-preset="stage"]')
+    await userPickWorkspace('[data-preset="stage"]')
     expect(document.querySelectorAll('#views [role="tab"]').length, 'the Stage drew no tabs').toBeGreaterThan(1)
     await pressTab('tm-0')
     expect(host('source'), 'the Stage has two views on the page').toBeNull()
@@ -206,8 +194,8 @@ describe('a view’s scroll position, across a rebuild made by another view', ()
   })
 
   it('is kept when a Stage tab is left and selected again, and when tiles come back', async () => {
-    await pick('[data-preset="stage"]')
-    expect(tab('tm-0'), 'precondition: the Stage is drawn').not.toBeNull()
+    await userPickWorkspace('[data-preset="stage"]')
+    expect(stageTab('tm-0'), 'precondition: the Stage is drawn').not.toBeNull()
     await pressTab('tm-0')
     await armTable()
     await pressTab('source')
@@ -216,7 +204,7 @@ describe('a view’s scroll position, across a rebuild made by another view', ()
     heldTable('a Stage tab left and selected again')
     await pressTab('source')
     heldSource('a Stage tab left and selected again')
-    await pick('[data-preset="explorer"]')
+    await userPickWorkspace('[data-preset="explorer"]')
     expect(document.querySelector('#views [role="tab"]'), 'the Stage is still drawn').toBeNull()
     held('leaving the Stage')
   })
@@ -239,10 +227,10 @@ describe('a view’s scroll position, across a rebuild made by another view', ()
     // AFTER THE HOOK ABOVE, which has put the page in tiles and the window back: three views in a short window.
     beforeEach(async () => {
       await page.viewport(1280, 500)
-      await pick('#reset-preset')
+      await userPickWorkspace('#reset-preset')
       await until(() => host('lambda-0') === null && host('tm-0') !== null, 'the default views')
       await pressToggle('asm')
-      await until(() => host('asm-0') !== null && range(asm()) > 60, 'an asm view taller than its tile')
+      await until(() => host('asm-0') !== null && scrollRange(asm()) > 60, 'an asm view taller than its tile')
     })
 
     /**
@@ -256,11 +244,11 @@ describe('a view’s scroll position, across a rebuild made by another view', ()
       asm().scrollTop = 60
       expect(asm().scrollTop, 'precondition: the asm view’s own box is scrolled').toBe(60)
       const closed = asm()
-      await pick('#reset-preset')
+      await userPickWorkspace('#reset-preset')
       expect(host('asm-0'), 'the asm view is still on the page').toBeNull()
       await pressToggle('asm')
       expect(host('asm-0'), 'the new view is not in the host the closed one had').toBe(closed)
-      expect(range(asm()), 'precondition: the new view could be scrolled').toBeGreaterThan(60)
+      expect(scrollRange(asm()), 'precondition: the new view could be scrolled').toBeGreaterThan(60)
       expect(asm().scrollTop, 'the new view was given the closed one’s scroll').toBe(0)
     })
 
@@ -277,7 +265,7 @@ describe('a view’s scroll position, across a rebuild made by another view', ()
         () => document.querySelector('#notice .notice-text')?.textContent === 'opened a shared link',
         'the link to open',
       )
-      expect(range(editor()), 'precondition: the link’s program could be scrolled as far').toBeGreaterThan(200)
+      expect(scrollRange(editor()), 'precondition: the link’s program could be scrolled as far').toBeGreaterThan(200)
       expect(editor().scrollWidth - editor().clientWidth, 'precondition: and as far sideways').toBeGreaterThan(400)
       // ONE ASSERTION ON BOTH, so a failure shows each and neither hides behind the other.
       expect(

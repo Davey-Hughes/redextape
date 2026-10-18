@@ -2,7 +2,7 @@ import type { EditorView } from '@codemirror/view'
 import { beforeAll, describe, expect, it } from 'vitest'
 import { page } from 'vitest/browser'
 import { bindingKey } from '../../src/view-header'
-import { SHELL, until } from './harness'
+import { compile, paneByLeaf, pickPreset, SHELL, segments, stageTab, until } from './harness'
 
 /**
  * The asm leg through the whole app (Plan 7 part 5 spec §5–§6): a compile reaches the asm view of a four-view page,
@@ -26,31 +26,20 @@ const UPTO = 'fn upto(n) { if n == 0 { nil } else { cons(n, upto(n - 1)) } } upt
 
 let view: EditorView
 
-/** A view's host — `.pane`, since in the stage each tab carries the leaf id too. */
-const host = (leaf: string) => document.querySelector<HTMLElement>(`.pane[data-leaf="${leaf}"]`) as HTMLElement
-const rows = (leaf = 'asm-0') => [...host(leaf).querySelectorAll<HTMLElement>('.asm-row')]
+const rows = (leaf = 'asm-0') => [...paneByLeaf(leaf).querySelectorAll<HTMLElement>('.asm-row')]
 const rowText = (r: HTMLElement) => r.querySelector('.asm-cell')?.textContent ?? ''
-const listing = (leaf = 'asm-0') => host(leaf).querySelector<HTMLElement>('.asm-listing') as HTMLElement
-const stepOf = (leaf: string) => host(leaf).querySelector('.step')?.textContent ?? ''
+const listing = (leaf = 'asm-0') => paneByLeaf(leaf).querySelector<HTMLElement>('.asm-listing') as HTMLElement
+const stepOf = (leaf: string) => paneByLeaf(leaf).querySelector('.step')?.textContent ?? ''
 const control = (label: string, leaf = 'asm-0') =>
-  [...host(leaf).querySelectorAll<HTMLButtonElement>('.controls button')].find((b) => b.textContent === label)
+  [...paneByLeaf(leaf).querySelectorAll<HTMLButtonElement>('.controls button')].find((b) => b.textContent === label)
 const register = (name: string) =>
-  [...host('asm-0').querySelectorAll<HTMLElement>('.asm-register')].find(
+  [...paneByLeaf('asm-0').querySelectorAll<HTMLElement>('.asm-register')].find(
     (r) => r.querySelector('dt')?.textContent === name,
   )
-const segments = () => [...document.querySelectorAll('#results .segment')].map((s) => s.textContent ?? '')
-const idle = () => document.querySelector<HTMLElement>('#results')?.dataset.state === 'idle'
 
-/** Put `src` in the editor and wait for its compile to finish recording. */
-async function compile(src: string): Promise<void> {
-  view.dispatch({ changes: { from: 0, to: view.state.doc.length, insert: src } })
-  await until(() => !idle(), 'the compile to start')
-  await until(idle, 'the compile to finish')
-}
-
-/** Pick `key` (`bindingKey(leg, session)`) through `leaf`'s title menu, as `pane-kind-switch.test.ts`'s `pick` does. */
+/** Pick `key` (`bindingKey(leg, session)`) through `leaf`'s title menu, as `harness.ts`'s `pickBinding` does. */
 function pick(leaf: string, key: string): void {
-  const title = host(leaf).querySelector<HTMLButtonElement>('button.view-title')
+  const title = paneByLeaf(leaf).querySelector<HTMLButtonElement>('button.view-title')
   if (title === null) throw new Error(`no title-selector on [data-leaf="${leaf}"]`)
   title.click()
   const menu = document.getElementById(title.getAttribute('aria-controls') ?? '')
@@ -59,26 +48,18 @@ function pick(leaf: string, key: string): void {
   item.click()
 }
 
-/** Choose a workspace preset through the workspace menu, as `hidden-views.test.ts` does. */
-function preset(name: 'explorer' | 'stage'): void {
-  document.querySelector<HTMLButtonElement>('#workspace')?.click()
-  document.querySelector<HTMLButtonElement>(`#workspace-menu [data-preset="${name}"]`)?.click()
-  const m = document.querySelector<HTMLElement>('#workspace-menu')
-  if (m?.matches(':popover-open')) m.hidePopover()
-}
-
 beforeAll(async () => {
   await page.viewport(1280, 1600)
   document.body.innerHTML = SHELL
   view = await (await import('../../src/main')).ready
-  await compile(SAMPLE)
+  await compile(view, SAMPLE)
 })
 
 describe('the asm leg in the app', () => {
   it('is a view of its own, showing the program’s listing', async () => {
     await until(() => rows().length > 0, 'the asm listing to draw')
-    expect(host('asm-0').dataset.kind).toBe('asm')
-    expect(host('asm-0').querySelector('.view-title')?.textContent).toBe('asm · program')
+    expect(paneByLeaf('asm-0').dataset.kind).toBe('asm')
+    expect(paneByLeaf('asm-0').querySelector('.view-title')?.textContent).toBe('asm · program')
     expect(rows().map(rowText)).toEqual([
       'pc0li r0, #40',
       'pc1mov r1, r0',
@@ -108,14 +89,14 @@ describe('the asm leg in the app', () => {
   })
 
   it('runs a program the TM refuses to build, and says why the TM declined', async () => {
-    await compile(TOO_LARGE_FOR_TM)
+    await compile(view, TOO_LARGE_FOR_TM)
     await until(() => stepOf('asm-0') === 'step 0 of 68', 'the asm leg to record its 68 instructions')
     expect(stepOf('tm-0')).toBe('the machine this program needs is too large to build')
     expect(segments()).toContain('asm 1 · 68 instructions')
   })
 
   it('declines a program asm cannot lower, with the reason, while λ runs it', async () => {
-    await compile(HIGHER_ORDER)
+    await compile(view, HIGHER_ORDER)
     await until(() => stepOf('asm-0').startsWith('the asm backend does not support'), 'the asm leg to decline')
     expect(rows()).toHaveLength(0)
     const asm = segments().find((s) => s.startsWith('asm '))
@@ -126,25 +107,24 @@ describe('the asm leg in the app', () => {
 
 describe('an asm view made after the compile', () => {
   it('is told the listing the session kept, when a view is picked onto asm from its title', async () => {
-    await compile(SAMPLE)
+    await compile(view, SAMPLE)
     pick('lambda-0', bindingKey('asm', 'source'))
-    await until(() => host('lambda-0').dataset.kind === 'asm', 'the λ view to become an asm view')
+    await until(() => paneByLeaf('lambda-0').dataset.kind === 'asm', 'the λ view to become an asm view')
     await until(() => rows('lambda-0').length > 0, 'the new asm view to draw')
     expect(rows('lambda-0').map(rowText)).toEqual(rows('asm-0').map(rowText))
     pick('lambda-0', bindingKey('lambda', 'source'))
-    await until(() => host('lambda-0').dataset.kind === 'lambda', 'the view to go back to λ')
+    await until(() => paneByLeaf('lambda-0').dataset.kind === 'lambda', 'the view to go back to λ')
   })
 
   it('is told the listing it missed while off the page, when the stage shows it', async () => {
-    preset('stage')
-    const tab = (leaf: string) => document.querySelector<HTMLElement>(`#views [role="tab"][data-leaf="${leaf}"]`)
-    tab('lambda-0')?.click()
+    pickPreset('stage')
+    stageTab('lambda-0')?.click()
     await until(() => document.querySelector('.pane[data-leaf="asm-0"]') === null, 'the asm view to leave the page')
-    await compile(FACT3)
-    tab('asm-0')?.click()
+    await compile(view, FACT3)
+    stageTab('asm-0')?.click()
     // fact(3): 21 instructions under 4 labels.
     await until(() => listing().getAttribute('aria-rowcount') === '25', 'the asm view to show the new listing')
-    preset('explorer')
+    pickPreset('explorer')
   })
 })
 
@@ -161,11 +141,11 @@ describe('an asm run that fills its history', () => {
    * allowance from where it stopped (`session-worker.ts`'s `onExtend`).
    */
   it('keeps recording when asked, and the count recorded grows past where it stopped', async () => {
-    await compile(UPTO)
+    await compile(view, UPTO)
     await until(() => stepOf('asm-0').includes('history is full'), 'the asm history to fill')
     const stopped = newest(stepOf('asm-0'))
     expect(stopped, 'the run stopped short of its 8,413 instructions').toBeLessThan(8_413)
-    const extend = host('asm-0').querySelector<HTMLButtonElement>('.controls .extend')
+    const extend = paneByLeaf('asm-0').querySelector<HTMLButtonElement>('.controls .extend')
     expect(extend?.hidden).toBe(false)
     expect(extend?.textContent).toBe('keep recording')
     extend?.click()

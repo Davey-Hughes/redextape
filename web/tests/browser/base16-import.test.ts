@@ -7,8 +7,18 @@ import { checkScheme } from '../../src/base16-check'
 import { CUSTOM_PALETTE_KEY } from '../../src/custom-palette'
 import { PALETTES } from '../../src/palettes'
 import { PALETTE_CSS_KEY, PALETTE_KEY } from '../../src/skin'
-import { currentLayout, DAY, EMBER, legacyLayout, NIGHT, STUCK } from '../node/base16-fixtures'
-import { choosePalette, chooseStyle, reloaded, rgb, SHELL, until } from './harness'
+import { currentLayout, DAY, EMBER, legacyLayout, NIGHT, STUCK, storedPalette } from '../node/base16-fixtures'
+import {
+  base16Dialog,
+  bodyStyle,
+  choosePalette,
+  chooseStyle,
+  paletteSelect,
+  reloaded,
+  rgb,
+  SHELL,
+  until,
+} from './harness'
 
 /**
  * THE BASE16 IMPORT, THROUGH ITS DIALOG (Plan 7 part 6b spec §8): opened from the settings menu, a scheme pasted,
@@ -17,17 +27,13 @@ import { choosePalette, chooseStyle, reloaded, rgb, SHELL, until } from './harne
  * each applies onto what the one before left.
  */
 
-const dialog = () => document.querySelector<HTMLDialogElement>('dialog.base16-dialog') as HTMLDialogElement
-const inDialog = <T extends HTMLElement>(selector: string): T => dialog().querySelector<T>(selector) as T
+const inDialog = <T extends HTMLElement>(selector: string): T => base16Dialog().querySelector<T>(selector) as T
 const text = () => inDialog<HTMLTextAreaElement>('textarea')
 const applyButton = () => inDialog<HTMLButtonElement>('button.base16-apply')
 const adjustedButton = () => inDialog<HTMLButtonElement>('button.base16-apply-adjusted')
-const said = (selector: string) => [...dialog().querySelectorAll(selector)].map((el) => el.textContent)
-const palette = () => document.querySelector<HTMLSelectElement>('#palette') as HTMLSelectElement
+const said = (selector: string) => [...base16Dialog().querySelectorAll(selector)].map((el) => el.textContent)
 /** The dialog's own live region: what a screen reader hears of a check. */
-const heard = () => dialog().querySelector('[role="status"]')?.textContent
-const stored = () => localStorage.getItem(CUSTOM_PALETTE_KEY)
-const body = () => getComputedStyle(document.body)
+const heard = () => base16Dialog().querySelector('[role="status"]')?.textContent
 
 /**
  * Every sentence written to the app's live region, `#live`, from now until `stop`, each with whether a modal dialog
@@ -54,7 +60,7 @@ function listenToLive(): { readonly said: { readonly text: string; readonly unde
 async function openWith(scheme: string): Promise<void> {
   await userEvent.click(document.querySelector('#settings') as HTMLElement)
   await userEvent.click(document.querySelector('#import-base16') as HTMLElement)
-  expect(dialog().open).toBe(true)
+  expect(base16Dialog().open).toBe(true)
   await userEvent.fill(text(), scheme)
 }
 
@@ -67,17 +73,17 @@ beforeAll(async () => {
 
 describe('the base16 import dialog', () => {
   it('is on no surface while closed', () => {
-    expect(dialog().open).toBe(false)
-    expect(getComputedStyle(dialog()).display).toBe('none')
-    expect(dialog().getBoundingClientRect().height).toBe(0)
+    expect(base16Dialog().open).toBe(false)
+    expect(getComputedStyle(base16Dialog()).display).toBe('none')
+    expect(base16Dialog().getBoundingClientRect().height).toBe(0)
   })
 
   it('opens from the settings menu by a real click, modal, named by its heading, with the text focused', async () => {
     await userEvent.click(document.querySelector('#settings') as HTMLElement)
     await userEvent.click(document.querySelector('#import-base16') as HTMLElement)
-    expect(dialog().matches(':modal')).toBe(true)
+    expect(base16Dialog().matches(':modal')).toBe(true)
     expect(document.querySelector('#settings-menu')?.matches(':popover-open')).toBe(false)
-    expect(computeAccessibleName(dialog())).toBe('import a base16 scheme')
+    expect(computeAccessibleName(base16Dialog())).toBe('import a base16 scheme')
     expect(document.activeElement).toBe(text())
     expect(text().spellcheck).toBe(false)
   })
@@ -104,8 +110,8 @@ describe('the base16 import dialog', () => {
    * everything outside it inert, so a screen reader hears nothing there while the dialog is open.
    */
   it('says the check in a live region of its own, inside the dialog, and says a second check again', async () => {
-    const region = dialog().querySelector('[role="status"]') as HTMLElement
-    expect(dialog().contains(region)).toBe(true)
+    const region = base16Dialog().querySelector('[role="status"]') as HTMLElement
+    expect(base16Dialog().contains(region)).toBe(true)
     expect(document.querySelector('#live')?.textContent).not.toContain('cyan')
     const first = heard()
     await userEvent.click(inDialog('button.base16-check'))
@@ -147,7 +153,7 @@ describe('the base16 import dialog', () => {
    */
   it('says, before a half the page is not showing is applied, that the page will be in the style’s own palette', async () => {
     await choosePalette('paper')
-    expect(body().backgroundColor).toBe(rgb(PALETTES.paper.dark.bg))
+    expect(bodyStyle().backgroundColor).toBe(rgb(PALETTES.paper.dark.bg))
     await openWith(legacyLayout('Day', DAY))
     await userEvent.click(inDialog('button.base16-check'))
     expect(said('.base16-elsewhere')).toEqual([
@@ -155,9 +161,9 @@ describe('the base16 import dialog', () => {
     ])
     await userEvent.click(applyButton())
     expect(document.documentElement.getAttribute('data-theme')).toBe('dark')
-    expect(palette().selectedOptions[0]?.textContent).toBe('custom — light: Day')
+    expect(paletteSelect().selectedOptions[0]?.textContent).toBe('custom — light: Day')
     expect(PALETTES.instrument.dark.bg).not.toBe(PALETTES.paper.dark.bg)
-    expect(body().backgroundColor).toBe(rgb(PALETTES.instrument.dark.bg))
+    expect(bodyStyle().backgroundColor).toBe(rgb(PALETTES.instrument.dark.bg))
   })
 
   it('applies a passing scheme: the page is drawn in it, and the palette select names it', async () => {
@@ -165,14 +171,14 @@ describe('the base16 import dialog', () => {
     await userEvent.click(inDialog('button.base16-check'))
     expect(said('.base16-result p')).toEqual(['Night · dark, from the file: every contrast check passes'])
     expect(adjustedButton().getAttribute('aria-description')).toBe('nothing to adjust — every check passes')
-    expect(dialog().querySelector('.panel')).toBeNull()
+    expect(base16Dialog().querySelector('.panel')).toBeNull()
     await userEvent.click(applyButton())
-    expect(dialog().open).toBe(false)
+    expect(base16Dialog().open).toBe(false)
     expect(document.activeElement).toBe(document.querySelector('#settings'))
-    expect(body().backgroundColor).toBe(rgb(NIGHT[0]))
-    expect(palette().value).toBe('custom')
-    expect(palette().selectedOptions[0]?.textContent).toBe('custom — light: Day · dark: Night')
-    expect(JSON.parse(stored() ?? '{}').dark.adjusted).toBe(false)
+    expect(bodyStyle().backgroundColor).toBe(rgb(NIGHT[0]))
+    expect(paletteSelect().value).toBe('custom')
+    expect(paletteSelect().selectedOptions[0]?.textContent).toBe('custom — light: Day · dark: Night')
+    expect(JSON.parse(storedPalette() ?? '{}').dark.adjusted).toBe(false)
   })
 
   it("shows a failing scheme's summary, and its failures grouped by scheme colour behind details", async () => {
@@ -194,7 +200,7 @@ describe('the base16 import dialog', () => {
     )
     expect(said('.base16-changes li')).toHaveLength(4)
     // EACH CHANGE CARRIES A SWATCH OF EACH VALUE, DRAWN IN IT, and hidden from the name: the hex text says it.
-    const swatches = [...dialog().querySelectorAll<HTMLElement>('.base16-changes li:first-child .base16-swatch')]
+    const swatches = [...base16Dialog().querySelectorAll<HTMLElement>('.base16-changes li:first-child .base16-swatch')]
     expect(swatches.map((s) => getComputedStyle(s).backgroundColor)).toEqual([rgb(EMBER[4]), rgb('#958ca7')])
     expect(swatches.every((s) => s.getAttribute('aria-hidden') === 'true')).toBe(true)
     expect(swatches[0]?.getBoundingClientRect().width).toBeGreaterThan(0)
@@ -206,26 +212,26 @@ describe('the base16 import dialog', () => {
     const fg = checkScheme(reading.scheme).adjustment.tokens.fg
     expect(fg).not.toBe(EMBER[5])
     await userEvent.click(adjustedButton())
-    expect(body().color).toBe(rgb(fg))
-    expect(body().backgroundColor).toBe(rgb(EMBER[0]))
-    expect(palette().selectedOptions[0]?.textContent).toBe('custom — light: Day · dark: Ember (adjusted)')
-    expect(JSON.parse(stored() ?? '{}').dark.adjusted).toBe(true)
+    expect(bodyStyle().color).toBe(rgb(fg))
+    expect(bodyStyle().backgroundColor).toBe(rgb(EMBER[0]))
+    expect(paletteSelect().selectedOptions[0]?.textContent).toBe('custom — light: Day · dark: Ember (adjusted)')
+    expect(JSON.parse(storedPalette() ?? '{}').dark.adjusted).toBe(true)
   })
 
   it('changes nothing on cancel or Esc, and gives the focus back to settings', async () => {
-    const before = stored()
+    const before = storedPalette()
     await openWith(legacyLayout('Day', DAY))
     await userEvent.click(inDialog('button.base16-check'))
     await userEvent.click(inDialog('button.base16-cancel'))
-    expect(dialog().open).toBe(false)
+    expect(base16Dialog().open).toBe(false)
     expect(document.activeElement).toBe(document.querySelector('#settings'))
     await openWith(legacyLayout('Day', DAY))
     await userEvent.click(inDialog('button.base16-check'))
     await userEvent.keyboard('{Escape}')
-    expect(dialog().open).toBe(false)
+    expect(base16Dialog().open).toBe(false)
     expect(document.activeElement).toBe(document.querySelector('#settings'))
-    expect(stored()).toBe(before)
-    expect(body().backgroundColor).toBe(rgb(EMBER[0]))
+    expect(storedPalette()).toBe(before)
+    expect(bodyStyle().backgroundColor).toBe(rgb(EMBER[0]))
   })
 
   /**
@@ -240,7 +246,7 @@ describe('the base16 import dialog', () => {
     elsewhere.focus()
     document.querySelector<HTMLElement>('#settings-menu')?.showPopover()
     await userEvent.click(document.querySelector('#import-base16') as HTMLElement)
-    expect(dialog().open).toBe(true)
+    expect(base16Dialog().open).toBe(true)
     await userEvent.click(inDialog('button.base16-cancel'))
     await until(() => document.activeElement === settings, `the focus on settings, not ${document.activeElement?.id}`)
   })
@@ -253,8 +259,8 @@ describe('the base16 import dialog', () => {
     ])
     await userEvent.click(applyButton())
     expect(document.documentElement.getAttribute('data-theme')).toBe('dark')
-    expect(body().backgroundColor).toBe(rgb(EMBER[0]))
-    expect(palette().selectedOptions[0]?.textContent).toBe('custom — light: Day · dark: Ember (adjusted)')
+    expect(bodyStyle().backgroundColor).toBe(rgb(EMBER[0]))
+    expect(paletteSelect().selectedOptions[0]?.textContent).toBe('custom — light: Day · dark: Ember (adjusted)')
   })
 
   /**
@@ -267,8 +273,8 @@ describe('the base16 import dialog', () => {
    */
   it('applies a palette storage refuses for this page load, says so, and saves neither the choice nor the first paint', async () => {
     await choosePalette('terminal')
-    expect(body().backgroundColor).toBe(rgb(PALETTES.terminal.dark.bg))
-    const before = stored()
+    expect(bodyStyle().backgroundColor).toBe(rgb(PALETTES.terminal.dark.bg))
+    const before = storedPalette()
     const cache = localStorage.getItem(PALETTE_CSS_KEY)
     const setItem = localStorage.setItem
     localStorage.setItem = (key: string, value: string) => {
@@ -284,15 +290,15 @@ describe('the base16 import dialog', () => {
       await until(() => document.querySelector('#notice .notice-text')?.textContent === refused, 'the notice')
       expect(document.querySelector('#live')?.textContent?.trim()).toBe(refused)
       expect(live.said).toEqual([{ text: refused, underModal: false }])
-      expect(body().backgroundColor).toBe(rgb(NIGHT[0]))
-      expect(stored()).toBe(before)
+      expect(bodyStyle().backgroundColor).toBe(rgb(NIGHT[0]))
+      expect(storedPalette()).toBe(before)
       expect(localStorage.getItem(PALETTE_KEY)).toBe('terminal')
       expect(localStorage.getItem(PALETTE_CSS_KEY)).toBe(cache)
       expect(reloaded()).toBe(rgb(PALETTES.terminal.dark.bg))
       // A LATER GESTURE REWRITES THE CACHE FROM WHAT STORAGE HOLDS, NOT FROM THIS LOAD'S MEMORY: after a style change the
       // page is still in the import storage lost, and a reload still starts in Terminal.
       await chooseStyle('paper')
-      expect(body().backgroundColor).toBe(rgb(NIGHT[0]))
+      expect(bodyStyle().backgroundColor).toBe(rgb(NIGHT[0]))
       expect(reloaded()).toBe(rgb(PALETTES.terminal.dark.bg))
     } finally {
       live.stop()

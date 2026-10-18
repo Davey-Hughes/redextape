@@ -1164,7 +1164,18 @@ impl Encoding for Unary {
 mod tests {
     use super::*;
     use crate::tm::build::TAPES;
-    use crate::tm::sim::{DEFAULT_CAPS as TM_DEFAULT_CAPS, Status, simulate};
+    use crate::tm::sim::{DEFAULT_CAPS as TM_DEFAULT_CAPS, Status, Tape, simulate};
+
+    /// Finish `b` at `start`, check the machine is well formed, and run it to a halt.
+    fn run_to_halt(enc: &Unary, b: Builder, start: StateId, slots: u32) -> Vec<Tape> {
+        let mut init = vec![Vec::new(); TAPES];
+        init[REG] = enc.init_reg(slots);
+        let m = b.finish(start);
+        assert!(m.validate().is_empty(), "{:?}", m.validate());
+        let (tapes, status) = simulate(&m, &init, TM_DEFAULT_CAPS);
+        assert_eq!(status, Status::Halted);
+        tapes
+    }
 
     /// Build a machine over a `slots`-field register bank: `write_literal` each `(slot, value)`, run
     /// `body(entry, exit)` to wire the gadget under test, and halt. Returns the decoded `result` slot.
@@ -1393,12 +1404,7 @@ mod tests {
         let pop2 = stack_pop_work(&mut b, w1, "pop2"); // WORK <- 4
         let w2 = append_work_to_field(&mut b, pop2, 1, "w2"); // REG slot1 <- 4
         b.add_rule(w2, RuleSpec::new(), halt);
-        let mut init = vec![Vec::new(); TAPES];
-        init[REG] = enc.init_reg(2);
-        let m = b.finish(p0);
-        assert!(m.validate().is_empty(), "{:?}", m.validate());
-        let (tapes, status) = simulate(&m, &init, TM_DEFAULT_CAPS);
-        assert_eq!(status, Status::Halted);
+        let tapes = run_to_halt(&enc, b, p0, 2);
         let reg = tapes[REG].snapshot().0;
         assert_eq!(enc.decode_nat(&reg, 0), Some(2), "first pop must be the last pushed (LIFO)");
         assert_eq!(enc.decode_nat(&reg, 1), Some(4));
@@ -1419,12 +1425,7 @@ mod tests {
         let pf = b.state("pf");
         enc.write_literal(&mut b, s2, pf, 2, 2);
         enc.push_frame(&mut b, pf, halt, 2, 1);
-        let mut init = vec![Vec::new(); TAPES];
-        init[REG] = enc.init_reg(3);
-        let m = b.finish(s1);
-        assert!(m.validate().is_empty(), "{:?}", m.validate());
-        let (tapes, status) = simulate(&m, &init, TM_DEFAULT_CAPS);
-        assert_eq!(status, Status::Halted);
+        let tapes = run_to_halt(&enc, b, s1, 3);
         let st = tapes[STACK].snapshot().0;
         assert_eq!(stack_field(&st, 0), Some(1), "tag at frame bottom");
         assert_eq!(stack_field(&st, 1), Some(4), "Loc0");
@@ -1452,12 +1453,7 @@ mod tests {
         let rf = b.state("rf");
         enc.write_literal(&mut b, c2, rf, 9, 2); // clobber Loc1 <- 9
         enc.pop_frame_restore(&mut b, rf, halt, 2); // restore Loc0=4, Loc1=2
-        let mut init = vec![Vec::new(); TAPES];
-        init[REG] = enc.init_reg(3);
-        let m = b.finish(s1);
-        assert!(m.validate().is_empty(), "{:?}", m.validate());
-        let (tapes, status) = simulate(&m, &init, TM_DEFAULT_CAPS);
-        assert_eq!(status, Status::Halted);
+        let tapes = run_to_halt(&enc, b, s1, 3);
         let reg = tapes[REG].snapshot().0;
         assert_eq!(enc.decode_nat(&reg, 1), Some(4), "Loc0 restored");
         assert_eq!(enc.decode_nat(&reg, 2), Some(2), "Loc1 restored");
@@ -1480,12 +1476,7 @@ mod tests {
             // Optionally push one literal, then branch on empty.
             let after_push = if pushes > 0 { stack_push_literal(&mut b, start, 1, "pp") } else { start };
             stack_is_empty(&mut b, after_push, e7, e9);
-            let mut init = vec![Vec::new(); TAPES];
-            init[REG] = enc.init_reg(1);
-            let m = b.finish(start);
-            assert!(m.validate().is_empty(), "{:?}", m.validate());
-            let (tapes, status) = simulate(&m, &init, TM_DEFAULT_CAPS);
-            assert_eq!(status, Status::Halted);
+            let tapes = run_to_halt(&enc, b, start, 1);
             enc.decode_nat(&tapes[REG].snapshot().0, 0)
         }
         assert_eq!(check(0), Some(7), "empty stack -> if_empty");
@@ -1508,12 +1499,7 @@ mod tests {
             let start = b.state("start");
             let after_push = stack_push_literal(&mut b, start, c, "tag"); // tag is the only/top field
             enc.dispatch_tag(&mut b, after_push, &[x0, x1, x2]);
-            let mut init = vec![Vec::new(); TAPES];
-            init[REG] = enc.init_reg(1);
-            let m = b.finish(start);
-            assert!(m.validate().is_empty(), "{:?}", m.validate());
-            let (tapes, status) = simulate(&m, &init, TM_DEFAULT_CAPS);
-            assert_eq!(status, Status::Halted);
+            let tapes = run_to_halt(&enc, b, start, 1);
             // The dispatched exit wrote 10/11/12; also assert the tag field was erased (STACK has no marks).
             assert!(!tapes[STACK].snapshot().0.contains(&MARK), "tag field must be erased after dispatch");
             enc.decode_nat(&tapes[REG].snapshot().0, 0)
@@ -1596,12 +1582,7 @@ mod tests {
         let cc = heap_count_cells_to_work(&mut b, a1, "cc");
         let wc = append_work_to_field(&mut b, cc, 4, "wc");
         b.add_rule(wc, RuleSpec::new(), halt);
-        let mut init = vec![Vec::new(); TAPES];
-        init[REG] = enc.init_reg(5);
-        let m = b.finish(start);
-        assert!(m.validate().is_empty(), "{:?}", m.validate());
-        let (tapes, status) = simulate(&m, &init, TM_DEFAULT_CAPS);
-        assert_eq!(status, Status::Halted);
+        let tapes = run_to_halt(&enc, b, start, 5);
         assert_eq!(enc.parse_heap_cells(&tapes[HEAP].snapshot().0), vec![(3, 0), (2, 1)], "two cells built in order");
         assert_eq!(enc.decode_nat(&tapes[REG].snapshot().0, 4), Some(2), "cell count == 2");
     }
@@ -1619,12 +1600,7 @@ mod tests {
             let cn = b.state("cn");
             enc.write_literal(&mut b, s1, cn, tail, 1);
             enc.cons(&mut b, cn, halt, 0, 1, 2);
-            let mut init = vec![Vec::new(); TAPES];
-            init[REG] = enc.init_reg(3);
-            let m = b.finish(s0);
-            assert!(m.validate().is_empty(), "{:?}", m.validate());
-            let (tapes, status) = simulate(&m, &init, TM_DEFAULT_CAPS);
-            assert_eq!(status, Status::Halted);
+            let tapes = run_to_halt(&enc, b, s0, 3);
             (enc.parse_heap_cells(&tapes[HEAP].snapshot().0), enc.decode_nat(&tapes[REG].snapshot().0, 2))
         }
         // cons(7, nil=0): one cell (7,0), pointer 1.
@@ -1644,12 +1620,7 @@ mod tests {
             let ie = b.state("ie");
             enc.write_literal(&mut b, s0, ie, v, 0); // slot0 <- v, flow into is_empty_op
             enc.is_empty_op(&mut b, ie, halt, 0, 1); // slot1 <- (slot0 == 0)
-            let mut init = vec![Vec::new(); TAPES];
-            init[REG] = enc.init_reg(2);
-            let m = b.finish(s0);
-            assert!(m.validate().is_empty(), "{:?}", m.validate());
-            let (tapes, status) = simulate(&m, &init, TM_DEFAULT_CAPS);
-            assert_eq!(status, Status::Halted);
+            let tapes = run_to_halt(&enc, b, s0, 2);
             enc.decode_nat(&tapes[REG].snapshot().0, 1)
         }
         assert_eq!(run_ie(0), Some(1));
@@ -1673,12 +1644,7 @@ mod tests {
         let s3 = b.state("s3");
         enc.write_literal(&mut b, after0, s3, 2, 3);
         enc.cons(&mut b, s3, halt, 3, 2, 4); // slot4 = ptr to (2, slot2) = 2
-        let mut init = vec![Vec::new(); TAPES];
-        init[REG] = enc.init_reg(5);
-        let m = b.finish(s0);
-        assert!(m.validate().is_empty(), "{:?}", m.validate());
-        let (tapes, status) = simulate(&m, &init, TM_DEFAULT_CAPS);
-        assert_eq!(status, Status::Halted);
+        let tapes = run_to_halt(&enc, b, s0, 5);
         assert_eq!(enc.parse_heap_cells(&tapes[HEAP].snapshot().0), vec![(3, 0), (2, 1)]);
         assert_eq!(enc.decode_nat(&tapes[REG].snapshot().0, 2), Some(1));
         assert_eq!(enc.decode_nat(&tapes[REG].snapshot().0, 4), Some(2));
@@ -1719,12 +1685,7 @@ mod tests {
         b.add_rule(wr, RuleSpec::new(), halt);
         // missing -> sentinel 9 -> slot 6 -> halt (9 is distinct from every real head/tail here and < MAX_FIELD_WIDTH).
         enc.write_literal(&mut b, missing, halt, 9, 6);
-        let mut init = vec![Vec::new(); TAPES];
-        init[REG] = enc.init_reg(7);
-        let m = b.finish(s0);
-        assert!(m.validate().is_empty(), "{:?}", m.validate());
-        let (tapes, status) = simulate(&m, &init, TM_DEFAULT_CAPS);
-        assert_eq!(status, Status::Halted);
+        let tapes = run_to_halt(&enc, b, s0, 7);
         enc.decode_nat(&tapes[REG].snapshot().0, 6)
     }
 
@@ -1764,12 +1725,7 @@ mod tests {
             } else {
                 enc.head_op(&mut b, op, halt, ptr_slot, 5);
             }
-            let mut init = vec![Vec::new(); TAPES];
-            init[REG] = enc.init_reg(6);
-            let m = b.finish(s0);
-            assert!(m.validate().is_empty(), "{:?}", m.validate());
-            let (tapes, status) = simulate(&m, &init, TM_DEFAULT_CAPS);
-            assert_eq!(status, Status::Halted);
+            let tapes = run_to_halt(&enc, b, s0, 6);
             enc.decode_nat(&tapes[REG].snapshot().0, 5)
         }
         // ptr in slot 4 = 2 -> cell 2 = (3, 1).
@@ -1796,9 +1752,6 @@ mod tests {
     #[test]
     fn comparison_trichotomy_sweep() {
         // For a < b, a == b, a > b, every one of the six comparisons must give the right 0/1.
-        fn cmp(op: BinOp, a: u64, bb: u64) -> Option<u64> {
-            run_gadget(3, &[(0, a), (1, bb)], 2, move |b, e, x| Unary::default().compare(b, e, x, op, 0, 1, 2))
-        }
         for (a, bb, lt, le, gt, ge, eq, ne) in
             [(2u64, 5u64, 1, 1, 0, 0, 0, 1), (5, 5, 0, 1, 0, 1, 1, 0), (5, 2, 0, 0, 1, 1, 0, 1)]
         {
@@ -1836,12 +1789,7 @@ mod tests {
         let s7 = b.state("s7");
         enc.cons(&mut b, s6, s7, 5, 1, 6); // p3 = (9,0)  (tail nil)
         enc.tail_op(&mut b, s7, halt, 4, 7); // tail(p2) -> slot 7
-        let mut init = vec![Vec::new(); TAPES];
-        init[REG] = enc.init_reg(8);
-        let m = b.finish(s0);
-        assert!(m.validate().is_empty(), "{:?}", m.validate());
-        let (tapes, status) = simulate(&m, &init, TM_DEFAULT_CAPS);
-        assert_eq!(status, Status::Halted);
+        let tapes = run_to_halt(&enc, b, s0, 8);
         assert_eq!(enc.decode_nat(&tapes[REG].snapshot().0, 7), Some(1));
     }
 
@@ -1872,12 +1820,7 @@ mod tests {
         let s8 = b.state("s8");
         enc.cons(&mut b, s7, s8, 6, 5, 7); // p_new = cons(9, p_inner)
         enc.head_op(&mut b, s8, halt, 7, 8); // slot8 = head(p_new) = 9
-        let mut init = vec![Vec::new(); TAPES];
-        init[REG] = enc.init_reg(9);
-        let m = b.finish(s0);
-        assert!(m.validate().is_empty(), "{:?}", m.validate());
-        let (tapes, status) = simulate(&m, &init, TM_DEFAULT_CAPS);
-        assert_eq!(status, Status::Halted);
+        let tapes = run_to_halt(&enc, b, s0, 9);
         assert_eq!(enc.decode_nat(&tapes[REG].snapshot().0, 8), Some(9));
     }
 

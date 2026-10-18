@@ -1,18 +1,9 @@
 import { afterEach, describe, expect, it } from 'vitest'
-import type { ControlState } from '../../src/controls'
 import { stepControls } from '../../src/step-controls'
 import type { Speed } from '../../src/workspace'
+import { controlState } from './harness'
 
-const STATE: ControlState = {
-  canBack: true,
-  canForward: true,
-  canToNewest: true,
-  canPlay: true,
-  canRestart: true,
-  playing: false,
-  continueLabel: null,
-  stepText: 'step 3 of 12',
-}
+const STATE = controlState(true, 'step 3 of 12')
 
 afterEach(() => {
   document.body.replaceChildren()

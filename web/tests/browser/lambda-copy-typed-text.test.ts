@@ -1,8 +1,8 @@
 import { EditorView } from '@codemirror/view'
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 import { userEvent } from 'vitest/browser'
-import { BUFFERS_STORAGE_KEY, parseBuffers } from '../../src/buffers-store'
-import { SHELL, until } from './harness'
+import { stored } from './copy-text-fixture'
+import { lambdaPane, SHELL, stateIdle, until } from './harness'
 
 /**
  * **A λ COPY KEEPS THE TEXT TYPED INTO IT.** A build of a copy is answered with the copy's text, and the app puts
@@ -30,13 +30,9 @@ const answered: { src: string; reply: string }[] = []
 
 let copy = ''
 
-const pane = () => document.querySelector<HTMLElement>('.pane[data-leaf="lambda-0"]') as HTMLElement
-const editor = () => EditorView.findFromDOM(pane().querySelector('.term-editor') as HTMLElement) as EditorView
+const editor = () => EditorView.findFromDOM(lambdaPane().querySelector('.term-editor') as HTMLElement) as EditorView
 const text = () => editor().state.doc.toString()
 const caret = () => editor().state.selection.main.head
-/** The copy's text of record, as stored — what a reload rebuilds it from. */
-const stored = (): string | null =>
-  parseBuffers(localStorage.getItem(BUFFERS_STORAGE_KEY))?.buffers.find((b) => b.id === copy)?.text ?? null
 
 /** Wait until the app has handled the answer to the build carrying exactly `src`, and return that answer's kind. */
 async function built(src: string): Promise<string> {
@@ -78,14 +74,14 @@ beforeAll(async () => {
   document.body.innerHTML = SHELL
   const source = await (await import('../../src/main')).ready
   source.dispatch({ changes: { from: 0, to: source.state.doc.length, insert: 'let x = 40; x + 2' } })
-  await until(() => document.querySelector<HTMLElement>('#results')?.dataset.state === 'idle', 'the app to settle')
-  const detach = pane().querySelector<HTMLButtonElement>('button.detach') as HTMLButtonElement
+  await until(stateIdle, 'the app to settle')
+  const detach = lambdaPane().querySelector<HTMLButtonElement>('button.detach') as HTMLButtonElement
   expect(detach.disabled).toBe(false)
   detach.click()
-  await until(() => pane().querySelector('.term-editor') !== null, 'the copy’s editor')
-  const binding = pane().querySelector<HTMLButtonElement>('button.view-title')?.dataset.binding ?? ''
+  await until(() => lambdaPane().querySelector('.term-editor') !== null, 'the copy’s editor')
+  const binding = lambdaPane().querySelector<HTMLButtonElement>('button.view-title')?.dataset.binding ?? ''
   copy = binding.slice(binding.indexOf(':') + 1)
-  await until(() => stored() !== null, 'the copy to be stored')
+  await until(() => stored(copy) !== null, 'the copy to be stored')
 })
 
 afterAll(() => {
@@ -104,10 +100,10 @@ describe('a λ copy keeps the text typed into it', () => {
 
   it('stores a space typed at its end in the copy’s text of record', async () => {
     await holding('λq. q')
-    expect(stored()).toBe('λq. q')
+    expect(stored(copy)).toBe('λq. q')
     await typeAt(5, 5, ' ')
     expect(await built('λq. q ')).toBe('scratch-compiled')
-    expect(stored()).toBe('λq. q ')
+    expect(stored(copy)).toBe('λq. q ')
   })
 
   it('leaves the caret where a key inside the text put it', async () => {

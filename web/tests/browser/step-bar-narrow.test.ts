@@ -1,6 +1,18 @@
 import { beforeAll, describe, expect, it } from 'vitest'
 import { page, userEvent } from 'vitest/browser'
-import { SHELL, until } from './harness'
+import {
+  buttonOf,
+  centreOf,
+  isShown,
+  linesOf,
+  menuOfId,
+  presetOf,
+  SHELL,
+  space,
+  stateIdle,
+  stepBar,
+  until,
+} from './harness'
 
 /**
  * **THE ONE STEP BAR ON A PHONE'S SCREEN** — the `steps` switch at `bar` (`step-bar.ts`), in the two presets that put
@@ -13,58 +25,27 @@ import { SHELL, until } from './harness'
 
 type Preset = 'debugger' | 'stage'
 
-const idle = () => document.querySelector<HTMLElement>('#results')?.dataset.state === 'idle'
-const buttonOf = (id: string) => document.querySelector<HTMLButtonElement>(`#${id}`) as HTMLButtonElement
-const menuOf = (id: string) => document.getElementById(buttonOf(id).getAttribute('aria-controls') ?? '') as HTMLElement
-const bar = () => document.querySelector<HTMLElement>('#step-bar') as HTMLElement
-const title = () => bar().querySelector<HTMLElement>('.step-bar-title') as HTMLElement
-const step = () => bar().querySelector<HTMLElement>('.step') as HTMLElement
-const extend = () => bar().querySelector<HTMLButtonElement>('.extend') as HTMLButtonElement
-const restart = () => bar().querySelector<HTMLButtonElement>('button[aria-label="back to the oldest kept step"]')
+const title = () => stepBar().querySelector<HTMLElement>('.step-bar-title') as HTMLElement
+const step = () => stepBar().querySelector<HTMLElement>('.step') as HTMLElement
+const extend = () => stepBar().querySelector<HTMLButtonElement>('.extend') as HTMLButtonElement
+const restart = () => stepBar().querySelector<HTMLButtonElement>('button[aria-label="back to the oldest kept step"]')
 const stepText = () => step().textContent ?? ''
-const shown = (el: Element) => el.getClientRects().length > 0
 
 /** Every box the bar draws, in the order it draws them: the title, each control, and the step text. */
 const drawn = (): HTMLElement[] =>
-  [...bar().querySelectorAll<HTMLElement>('.step-bar-title, button, select, .step')].filter(shown)
+  [...stepBar().querySelectorAll<HTMLElement>('.step-bar-title, button, select, .step')].filter(isShown)
 const nameOf = (el: HTMLElement): string =>
   el === title()
     ? 'the title'
     : el === step()
       ? 'the step text'
       : (el.getAttribute('aria-label') ?? el.textContent ?? '')
-const centreOf = (el: Element): number => {
-  const box = el.getBoundingClientRect()
-  return (box.top + box.bottom) / 2
-}
-/** A spacing token in pixels, as the page resolves it. */
-const space = (token: string): number => {
-  const probe = document.createElement('div')
-  probe.style.width = `var(${token})`
-  document.body.append(probe)
-  const width = probe.getBoundingClientRect().width
-  probe.remove()
-  return width
-}
-/** How many lines a box's text is set on: one per distinct top among its text's line boxes. */
-const linesOf = (el: Element): number => {
-  const range = document.createRange()
-  range.selectNodeContents(el)
-  return new Set([...range.getClientRects()].map((r) => Math.round(r.top))).size
-}
-
-/** Put the workspace on `preset`, by the menu's own buttons. */
-const presetOf = (preset: string): void => {
-  buttonOf('workspace').click()
-  menuOf('workspace').querySelector<HTMLButtonElement>(`[data-preset="${preset}"]`)?.click()
-  if (menuOf('workspace').matches(':popover-open')) menuOf('workspace').hidePopover()
-}
 
 beforeAll(async () => {
   await page.viewport(1280, 800)
   document.body.innerHTML = SHELL
   await (await import('../../src/main')).ready
-  await until(idle, 'the first compile')
+  await until(stateIdle, 'the first compile')
 })
 
 /**
@@ -77,14 +58,14 @@ async function at(preset: Preset, line: Line, width: number, height: number): Pr
   await page.viewport(width, height)
   expect(innerWidth, 'precondition: the page’s width').toBe(width)
   expect(buttonOf('workspace').textContent, 'precondition: the preset').toMatch(new RegExp(`^${preset}`, 'i'))
-  expect(bar().hidden, 'precondition: the bar is on the page').toBe(false)
+  expect(stepBar().hidden, 'precondition: the bar is on the page').toBe(false)
   expect(title().textContent, 'precondition: the bar drives the λ view').toBe('λ · program')
   line.holds()
   // VERTICALLY ONLY: a sideways scroll would bring a control past the page's edge back into view, which is the
   // defect this file holds, and `elementFromPoint` sees only what is in the viewport.
-  scrollTo(0, scrollY + bar().getBoundingClientRect().top)
+  scrollTo(0, scrollY + stepBar().getBoundingClientRect().top)
   expect(scrollX, 'precondition: the page is not scrolled sideways').toBe(0)
-  const box = bar().getBoundingClientRect()
+  const box = stepBar().getBoundingClientRect()
   expect(box.top, 'precondition: the bar’s top is in view').toBeGreaterThanOrEqual(0)
   expect(box.bottom, 'precondition: the bar’s bottom is in view').toBeLessThanOrEqual(innerHeight)
 }
@@ -105,7 +86,7 @@ const LINES: readonly Line[] = [
     long: false,
     holds: () => {
       expect(stepText(), 'precondition: the short line').toMatch(/^step [\d,]+ of [\d,]+$/)
-      expect(shown(extend()), 'precondition: no continue button').toBe(false)
+      expect(isShown(extend()), 'precondition: no continue button').toBe(false)
     },
   },
   {
@@ -115,7 +96,7 @@ const LINES: readonly Line[] = [
     holds: () => {
       expect(stepText(), 'precondition: the long line').toMatch(/history is full \(oldest kept: /)
       expect(extend().textContent, 'precondition: the continue button').toBe('keep recording')
-      expect(shown(extend()), 'precondition: the continue button is drawn').toBe(true)
+      expect(isShown(extend()), 'precondition: the continue button is drawn').toBe(true)
     },
   },
 ]
@@ -142,7 +123,7 @@ describe.each(LINES)('the step bar, under $name', (line) => {
     presetOf('debugger')
     const before = stepText()
     await userEvent.click(buttonOf('examples'))
-    await userEvent.click(menuOf('examples').querySelector(`button[data-example="${line.example}"]`) as HTMLElement)
+    await userEvent.click(menuOfId('examples').querySelector(`button[data-example="${line.example}"]`) as HTMLElement)
     // THE LINE BEFORE THE PICK IS EXCLUDED BY NAME: the program it replaced also ends, in a line the short one's
     // pattern matches.
     await until(
@@ -151,7 +132,7 @@ describe.each(LINES)('the step bar, under $name', (line) => {
         (line.long ? stepText().includes('history is full') : /^step [\d,]+ of [\d,]+$/.test(stepText())),
       `${line.name} on the bar`,
     )
-    await until(idle, `${line.name}’s run to its result`)
+    await until(stateIdle, `${line.name}’s run to its result`)
     if (!line.long) return
     extend().click()
     await until(() => /history is full \(oldest kept: /.test(stepText()), `${line.name}, kept recording`)
@@ -184,9 +165,9 @@ describe.each(LINES)('the step bar, under $name', (line) => {
         const hit = document.elementFromPoint((box.left + box.right) / 2, (box.top + box.bottom) / 2)
         expect(hit, 'what lies at keep recording’s centre').toBe(extend())
       }
-      const padding = getComputedStyle(bar())
+      const padding = getComputedStyle(stepBar())
       const room =
-        bar().getBoundingClientRect().width -
+        stepBar().getBoundingClientRect().width -
         Number.parseFloat(padding.paddingLeft) -
         Number.parseFloat(padding.paddingRight)
       if (linesOf(step()) > 1) {
@@ -216,7 +197,7 @@ describe.each(LINES)('the step bar, under $name', (line) => {
       for (const el of boxes) {
         expect(Math.abs(centreOf(el) - centreOf(title())), `${nameOf(el)} on the title’s row`).toBeLessThan(1)
       }
-      const start = bar().getBoundingClientRect().left + Number.parseFloat(getComputedStyle(bar()).paddingLeft)
+      const start = stepBar().getBoundingClientRect().left + Number.parseFloat(getComputedStyle(stepBar()).paddingLeft)
       expect(title().getBoundingClientRect().left, 'the title at the bar’s start').toBeCloseTo(start, 1)
       const [first, ...rest] = boxes
       let before = first as HTMLElement

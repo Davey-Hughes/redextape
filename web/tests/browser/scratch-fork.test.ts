@@ -1,7 +1,6 @@
 import { EditorView } from '@codemirror/view'
 import { beforeAll, describe, expect, it } from 'vitest'
 import { createEditorCustody } from '../../src/editor-custody'
-import { History } from '../../src/history'
 import { LambdaPane } from '../../src/lambda-pane'
 import { LambdaTrees } from '../../src/lambda-trees'
 import { createLinkWiring } from '../../src/link-wiring'
@@ -12,10 +11,11 @@ import { createReplies } from '../../src/replies'
 import { ScratchBuffers } from '../../src/scratch'
 import type { PoolPort, SessionId } from '../../src/session-client'
 import { SessionPool } from '../../src/session-client'
-import type { LegState, SessionEntry } from '../../src/sessions'
+import type { SessionEntry } from '../../src/sessions'
 import { PaneSlot, SessionRegistry } from '../../src/sessions'
 import type { LambdaState, TmState } from '../../src/types'
-import { SHELL, until } from './harness'
+import { legState } from '../node/leg-fixture'
+import { clickLambda, idle, lambdaStepText, SHELL, until } from './harness'
 import { lambdaSettled } from './lambda-text'
 
 /**
@@ -103,10 +103,6 @@ function realPool(): { pool: SessionPool; spawned: Spawned[] } {
   return { pool, spawned }
 }
 
-function leg<T>(): LegState<T> {
-  return { hist: new History<T>(HISTORY_BYTES), status: { available: false, reason: '' }, done: null, playing: false }
-}
-
 /**
  * The source session, wired to a real thread, with `main.ts`'s own frame-landing rules.
  *
@@ -116,7 +112,7 @@ function leg<T>(): LegState<T> {
  * `tests/node/sessions.test.ts` avoids by sharing `PaneSlot.render` instead.
  */
 function sourceSession(pool: SessionPool, seen: RunReply[]): SessionEntry {
-  const legs = { lambda: leg<LambdaState>(), tm: leg<TmState>() }
+  const legs = { lambda: legState<LambdaState>(false, HISTORY_BYTES), tm: legState<TmState>(false, HISTORY_BYTES) }
   const client = pool.bind(SOURCE, (reply) => {
     seen.push(reply)
     if (reply.kind === 'lambda-frames') {
@@ -761,19 +757,6 @@ describe('the fork control forks a truncated frame, through the app', () => {
 
   let view: EditorView
 
-  const resultsText = () => document.querySelector('#results')?.textContent ?? ''
-  const stepText = () => document.querySelector('[data-leaf="lambda-0"] .step')?.textContent ?? ''
-
-  const idle = () => document.querySelector<HTMLElement>('#results')?.dataset.state === 'idle' && resultsText() !== ''
-
-  const clickLambda = (label: string) => {
-    const b = [...document.querySelectorAll<HTMLButtonElement>('[data-leaf="lambda-0"] .controls button')].find(
-      (x) => x.textContent === label,
-    )
-    if (b === undefined) throw new Error(`no \`${label}\` button in the λ pane`)
-    b.click()
-  }
-
   // ONE MOUNT FOR THE FILE — `scratch-app.test.ts`'s own reason: ES module imports are cached, so
   // `main()` runs once per page. The three `describe` blocks above never import `../../src/main` at
   // all, so this is the first and only mount in this file; nothing above shares a page with it.
@@ -795,7 +778,7 @@ describe('the fork control forks a truncated frame, through the app', () => {
     clickLambda('↺')
     clickLambda('▶')
     clickLambda('▶')
-    expect(stepText()).toContain('step 2 of')
+    expect(lambdaStepText()).toContain('step 2 of')
 
     // THE CAPABILITY THIS SLICE EXISTS FOR. Before T8's fix to `#refreshDetach`, a frame this
     // truncated hid the fork control outright — `lambda-pane.ts`'s own module doc calls this shape

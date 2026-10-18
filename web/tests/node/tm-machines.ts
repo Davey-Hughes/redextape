@@ -1,6 +1,9 @@
-import type { RuleView, StateView, TmProgram } from '../../src/types'
+import type { RuleView, StateView, TmProgram, TmState } from '../../src/types'
 
-/** Machines for the state diagram's pure modules: `state-groups.test.ts`, `program-level.test.ts`, `local-level.test.ts`. */
+/**
+ * Machines for the state diagram's pure modules: `state-groups.test.ts`, `program-level.test.ts`,
+ * `local-level.test.ts`; and `ONE_RULE_PROGRAM`, `tmStateOf` and `tmFrame` for other test files.
+ */
 
 /** A rule that touches no tape and goes to state `next`. */
 export const go = (next: number): RuleView => ({ read: [null], write: [null], moves: ['S'], next })
@@ -78,3 +81,43 @@ export const COPY: TmProgram = {
   listing: [],
   labels: [],
 }
+
+/** A machine small enough to compare by identity, with a state so a `StateIndex` over it is non-empty. */
+export const ONE_RULE_PROGRAM: TmProgram = {
+  states: [{ name: 'pc0', accept: false, rules: [{ read: ['a'], write: ['b'], moves: ['R'], next: 0 }], instr: null }],
+  alphabet: ['a', 'b'],
+  tapes: 1,
+  width: 8,
+  start: 0,
+  listing: [],
+  labels: [],
+}
+
+/**
+ * A one-tape frame in state 0 at step 0, its head at `head` and its window `window` from `windowStart`, with no
+ * rule and no source node, and `over`'s members on top.
+ */
+export const tmStateOf = (head: number, windowStart: number, window: string, over: Partial<TmState> = {}): TmState => ({
+  state: 0,
+  step: 0,
+  heads: [head],
+  window_start: [windowStart],
+  window: [window],
+  source_node: null,
+  rule: null,
+  ...over,
+})
+
+/**
+ * A one-tape frame in state `state` at step `step`, its head at 0 and its window `symbol` from 0, with no rule and no
+ * source node.
+ */
+export const tmFrame = (state: number, step: number, symbol: string): TmState => ({
+  state,
+  step,
+  heads: [0],
+  window_start: [0],
+  window: [symbol],
+  source_node: null,
+  rule: null,
+})

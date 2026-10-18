@@ -3,7 +3,7 @@ import { describe, expect, it } from 'vitest'
 import { FIRST_LOAD } from '../../src/examples'
 import { LAYOUT_STORAGE_KEY } from '../../src/layout'
 import { PROGRAM_STORAGE_KEY, parseProgram } from '../../src/program-store'
-import { SHELL, until } from './harness'
+import { SHELL, segments, stateIdle, until } from './harness'
 
 /**
  * **A FIRST VISIT OPENS ON `sum_to(5)`, UNDER THE DEFAULT ENCODING, IN EXPLORER** — Plan 7 part 6a spec §4.4 and
@@ -17,9 +17,6 @@ import { SHELL, until } from './harness'
 
 localStorage.removeItem(PROGRAM_STORAGE_KEY)
 localStorage.removeItem(LAYOUT_STORAGE_KEY)
-
-const segments = () => [...document.querySelectorAll('#results .segment')].map((s) => s.textContent ?? '')
-const idle = () => document.querySelector<HTMLElement>('#results')?.dataset.state === 'idle'
 
 let view: EditorView
 
@@ -42,7 +39,7 @@ describe('a first visit', () => {
   })
 
   it('compiles it, and every leg ends at 15', async () => {
-    await until(() => idle() && segments().length > 0, 'the first compile')
+    await until(() => stateIdle() && segments().length > 0, 'the first compile')
     const [lambda, asm, tm] = segments()
     expect(lambda).toMatch(/^λ 15 · /)
     expect(asm).toMatch(/^asm 15 · /)

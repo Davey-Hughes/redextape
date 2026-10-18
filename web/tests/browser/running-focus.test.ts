@@ -1,6 +1,16 @@
 import type { EditorView } from '@codemirror/view'
 import { beforeAll, describe, expect, it } from 'vitest'
-import { SHELL, until } from './harness'
+import {
+  idle,
+  lambdaStepText,
+  linkAt,
+  linkedSource,
+  linkStatus,
+  resultsText,
+  SHELL,
+  tmStepText,
+  until,
+} from './harness'
 
 /**
  * `let x = 40; x + 2` — the program `setup.ts` stores for every browser test file, and the only corpus program whose
@@ -105,11 +115,6 @@ let view: EditorView
  * it. */
 const pageErrors: string[] = []
 
-const resultsText = () => document.querySelector('#results')?.textContent ?? ''
-const stepText = () => document.querySelector('[data-leaf="lambda-0"] .step')?.textContent ?? ''
-/** The text of whichever source construct is currently pinned by a click — `app.test.ts`'s own helper. */
-const linkedSource = () => document.querySelector('.cm-editor .linked')?.textContent ?? ''
-
 /** Every element carrying a running-focus class, whichever claim it is. */
 const focusEls = () => [
   ...document.querySelectorAll(
@@ -149,36 +154,23 @@ const tmClick = (label: string) => {
   return b
 }
 
-const tmStepText = () => document.querySelector('[data-leaf="tm-0"] .step')?.textContent ?? ''
-const linkStatusText = () => document.querySelector('#link-status')?.textContent ?? ''
 /** The δ-table rows carrying the TM leg's running focus. `focusedRows` marks state HEADERS only. */
 const tmFocusRows = () => [...document.querySelectorAll<HTMLElement>('[data-leaf="tm-0"] .state-row.is-focus')]
 const tmFocusNames = () => tmFocusRows().map((e) => e.textContent ?? '')
 /** The row the machine is standing on, which `#drawTable` also scrolls into view. */
 const tmCurrentRow = () => document.querySelector<HTMLElement>('[data-leaf="tm-0"] .state-row.is-current')
 
-/**
- * Link the source construct at `pos`, via the keyboard route `main.ts` binds to `Mod-'`. Same helper
- * and same reasoning as `app.test.ts`'s: the keyboard path resolves against the caret alone and needs
- * no `posAtCoords` layout to line up, and these fixtures are ASCII so a UTF-16 position and a byte
- * offset coincide.
- */
-function linkAt(v: EditorView, pos: number): void {
-  v.dispatch({ selection: { anchor: pos } })
-  v.contentDOM.dispatchEvent(new KeyboardEvent('keydown', { key: "'", ctrlKey: true, cancelable: true }))
-}
-
 /** Replace the whole buffer and wait for the run it triggers to finish. Same invariant as `app.test.ts`'s. */
 async function settled(v: EditorView, src: string): Promise<void> {
   v.dispatch({ changes: { from: 0, to: v.state.doc.length, insert: src } })
-  await until(() => document.querySelector<HTMLElement>('#results')?.dataset.state === 'idle' && resultsText() !== '')
+  await until(idle)
 }
 
 /** `settled`, then the play head parked at step 0 — where every test below starts walking from. */
 async function settledAtZero(src: string): Promise<void> {
   await settled(view, src)
   click('↺')
-  expect(stepText()).toContain('step 0')
+  expect(lambdaStepText()).toContain('step 0')
 }
 
 describe('the running focus', () => {
@@ -207,24 +199,24 @@ describe('the running focus', () => {
     expect(focusReading(), 'step 0 has taken no step, so it owns nothing').toBe('')
 
     click('▶')
-    expect(stepText()).toContain('step 1')
+    expect(lambdaStepText()).toContain('step 1')
     expect(focusReading()).toBe('exact:let x = 40;')
 
     // THE SPAN DOES NOT CHANGE HERE AND THE CLAIM DOES. See `SAMPLE`'s doc: step 2 contracts inside
     // the `BinOp` without contracting the `BinOp`'s own `App`, step 3 contracts the `App` itself.
     click('▶')
-    expect(stepText()).toContain('step 2')
+    expect(lambdaStepText()).toContain('step 2')
     expect(focusReading()).toBe('within:x + 2')
 
     click('▶')
-    expect(stepText()).toContain('step 3')
+    expect(lambdaStepText()).toContain('step 3')
     expect(focusReading()).toBe('exact:x + 2')
 
     // AND IT GOES DARK AGAIN RATHER THAN STICKING. Steps 4-7 are inside `plus` and inside two Church
     // numerals — design §5.1's "most β-steps have no source construct" — and `None` must CLEAR the
     // previous step's mark, not leave it standing.
     click('▶')
-    expect(stepText()).toContain('step 4')
+    expect(lambdaStepText()).toContain('step 4')
     expect(focusReading(), 'a None step must clear the previous step’s mark').toBe('')
   }, 30_000)
 
@@ -267,7 +259,7 @@ describe('the running focus', () => {
     clickByName('pause')
     expect(document.querySelector('[data-leaf="lambda-0"] button.play')?.getAttribute('aria-label')).toBe('play')
     clickByName('play')
-    await until(() => stepText().includes('step 7'))
+    await until(() => lambdaStepText().includes('step 7'))
     observer.disconnect()
     record()
 
@@ -289,28 +281,28 @@ describe('the running focus', () => {
   it('shows the answer that was true at the scrubbed-to step, not the one at the frontier', async () => {
     await settled(view, SAMPLE)
     toNewest('lambda-0')
-    expect(stepText()).toContain('step 7')
+    expect(lambdaStepText()).toContain('step 7')
     expect(focusReading(), 'the frontier’s own step owns nothing').toBe('')
 
     click('◀')
     click('◀')
     click('◀')
     click('◀')
-    expect(stepText()).toContain('step 3')
+    expect(lambdaStepText()).toContain('step 3')
     expect(focusReading()).toBe('exact:x + 2')
 
     // ONE STEP FURTHER BACK, SAME TEXT, DIFFERENT CLAIM — the assertion a "remember the last non-None
     // owner" implementation cannot pass, since it would still be holding step 3's `Exact` here.
     click('◀')
-    expect(stepText()).toContain('step 2')
+    expect(lambdaStepText()).toContain('step 2')
     expect(focusReading()).toBe('within:x + 2')
 
     click('◀')
-    expect(stepText()).toContain('step 1')
+    expect(lambdaStepText()).toContain('step 1')
     expect(focusReading()).toBe('exact:let x = 40;')
 
     click('◀')
-    expect(stepText()).toContain('step 0')
+    expect(lambdaStepText()).toContain('step 0')
     expect(focusReading()).toBe('')
   }, 30_000)
 
@@ -328,7 +320,7 @@ describe('the running focus', () => {
     // gets its own class (the test below). Step 1 is the only step of this program where the pin and
     // the focus name genuinely different constructs.
     click('▶')
-    expect(stepText()).toContain('step 1')
+    expect(lambdaStepText()).toContain('step 1')
     expect(linkedSource(), 'a β-step must not clear a pin').toBe('x + 2')
     expect(focusReading(), 'a pin must not suppress the focus').toBe('exact:let x = 40;')
     // Two marks, two spans — not one span that happens to satisfy both queries.
@@ -350,11 +342,11 @@ describe('the running focus', () => {
 
     click('▶')
     click('▶')
-    expect(stepText()).toContain('step 2')
+    expect(lambdaStepText()).toContain('step 2')
     expect(focusReading(), 'a Within focus on the pinned node is still coincidence').toBe('coincident:x + 2')
 
     click('▶')
-    expect(stepText()).toContain('step 3')
+    expect(lambdaStepText()).toContain('step 3')
     expect(focusReading()).toBe('coincident:x + 2')
     expect(document.querySelector('.cm-editor .is-focus-exact'), 'coincidence replaces the claim class').toBeNull()
     expect(document.querySelector('.cm-editor .is-focus-within')).toBeNull()
@@ -450,7 +442,7 @@ describe('the running focus', () => {
     // focused-only one (`link-status.ts`'s `focus` doc). Nothing in the δ table says "the run reached
     // what you pinned"; `#link-status` is the whole signal, so it is asserted here.
     expect(tmFocusRows()[0]?.classList.contains('is-linked'), 'one row, both classes').toBe(true)
-    expect(linkStatusText()).toContain('the machine is here right now')
+    expect(linkStatus()).toContain('the machine is here right now')
   }, 30_000)
 
   // AN EDIT CLEARS THE δ TABLE'S FOCUS ON ITS OWN KEYSTROKE, not when the next compile lands: the machine it
@@ -494,11 +486,11 @@ describe('the running focus', () => {
     const expected = ['', 'exact:let mut n = 1;', 'exact:n = 2;', '', '']
     for (let i = 1; i <= 5; i += 1) {
       click('▶')
-      expect(stepText()).toContain(`step ${i}`)
+      expect(lambdaStepText()).toContain(`step ${i}`)
       expect(focusReading(), `step ${i} of ${JSON.stringify(SPARSELY_TAGGED)}`).toBe(expected[i - 1])
     }
     // Walked to the end, not stopped short of it: 5 β-steps is this program's whole run.
-    expect(stepText()).toContain('step 5 of 5')
+    expect(lambdaStepText()).toContain('step 5 of 5')
     expect(pageErrors.slice(before), 'no uncaught error or rejection while walking it').toEqual([])
 
     // The λ pane is still rendering frames throughout, on both the tagged and the untagged steps, so

@@ -1,7 +1,7 @@
 import type { EditorView } from '@codemirror/view'
 import { beforeAll, describe, expect, it } from 'vitest'
-import { page, userEvent } from 'vitest/browser'
-import { SHELL, until } from './harness'
+import { page } from 'vitest/browser'
+import { copyShown, pickInViewMenu, resultsText, SHELL, stateIdle, until } from './harness'
 
 /**
  * **A TM COPY'S VALUE NEVER REACHED THE FOOTER READOUT UNTIL SOME OTHER EVENT REDREW IT, ON `main` TOO.**
@@ -18,35 +18,16 @@ import { SHELL, until } from './harness'
  * `.tm-value` alone would pass whether or not the footer ever moved, which is exactly the gap `f9c2eb5` shipped with.
  *
  * **NO GESTURE AFTER THE FORK.** The test's whole claim is that the readout follows the copy's OWN value run with
- * nothing else prompting it, so nothing after `pick(tmHost, 'detach')` clicks, types or steps anything — a second
- * gesture would redraw the footer for an unrelated reason and the assertion below would pass at `f9c2eb5` too.
+ * nothing else prompting it, so nothing after `pickInViewMenu(tmHost, 'detach')` clicks, types or steps anything — a
+ * second gesture would redraw the footer for an unrelated reason and the assertion below would pass at `f9c2eb5` too.
  */
 
 const SAMPLE = 'let x = 40; x + 2'
 
 let tmHost: HTMLElement
-const idle = () => document.querySelector<HTMLElement>('#results')?.dataset.state === 'idle'
 const describesCopy = () => document.querySelector<HTMLElement>('#results')?.dataset.describes === 'copy'
-const strip = () => document.querySelector('#results')?.textContent ?? ''
 const tmValueText = () => tmHost.querySelector('.tm-value')?.textContent ?? ''
-const copyShown = (pane: HTMLElement) => /copy · not linked/.test(pane.textContent ?? '')
 const editorMounted = (pane: HTMLElement) => pane.querySelector('.term-editor .cm-editor') !== null
-
-const menuOf = (pane: HTMLElement): HTMLElement => {
-  const more = pane.querySelector<HTMLButtonElement>('button.view-more')
-  const menu = document.getElementById(more?.getAttribute('aria-controls') ?? '')
-  if (more === null || menu === null) throw new Error('no view menu')
-  return menu
-}
-
-/** Open `pane`'s `⋯` menu with the pointer and pick *edit a copy* with it, as a user does. */
-async function detach(pane: HTMLElement): Promise<void> {
-  await userEvent.click(pane.querySelector<HTMLButtonElement>('button.view-more') as HTMLButtonElement)
-  await until(() => menuOf(pane).matches(':popover-open'), 'the view menu to open')
-  const item = menuOf(pane).querySelector<HTMLButtonElement>('button.detach')
-  if (item === null) throw new Error('the menu offers no detach')
-  await userEvent.click(item)
-}
 
 beforeAll(async () => {
   await page.viewport(1280, 1600)
@@ -54,8 +35,8 @@ beforeAll(async () => {
   const view: EditorView = await (await import('../../src/main')).ready
   tmHost = document.querySelector<HTMLElement>('.pane[data-leaf="tm-0"]') as HTMLElement
   view.dispatch({ changes: { from: 0, to: view.state.doc.length, insert: SAMPLE } })
-  await until(() => !idle(), 'the compile to start')
-  await until(idle, 'the compile to finish')
+  await until(() => !stateIdle(), 'the compile to start')
+  await until(stateIdle, 'the compile to finish')
 })
 
 describe('the footer readout following a TM copy’s value', () => {
@@ -66,17 +47,17 @@ describe('the footer readout following a TM copy’s value', () => {
     expect(tmValueText()).toBe('')
     expect(describesCopy()).toBe(false)
 
-    await detach(tmHost)
+    await pickInViewMenu(tmHost, 'detach')
     await until(() => editorMounted(tmHost) && copyShown(tmHost), 'the TM copy’s build to land')
 
-    // NO FURTHER GESTURE FROM HERE — see this file's own doc for why. `tmValueText` and `strip` are read
+    // NO FURTHER GESTURE FROM HERE — see this file's own doc for why. `tmValueText` and `resultsText` are read
     // from the SAME reply's handler, so the combined predicate below is false forever at `f9c2eb5` (the
     // in-pane line reaches `value: 42` and the footer never follows) and true the instant both do.
     await until(
-      () => tmValueText() === 'value: 42' && strip().includes('value: 42'),
+      () => tmValueText() === 'value: 42' && resultsText().includes('value: 42'),
       'the footer to follow the TM copy’s value with nothing else redrawing it',
     )
     expect(describesCopy()).toBe(true)
-    expect(strip()).toMatch(/^TM copy \d+ · [\d,]+ transitions · value: 42$/)
+    expect(resultsText()).toMatch(/^TM copy \d+ · [\d,]+ transitions · value: 42$/)
   })
 })

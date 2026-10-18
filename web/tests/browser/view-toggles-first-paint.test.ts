@@ -1,7 +1,7 @@
 import { beforeAll, describe, expect, it } from 'vitest'
 import { page } from 'vitest/browser'
 import { STYLE_IDS, type StyleId } from '../../src/skin'
-import { chooseStyle, SHELL, until } from './harness'
+import { chooseStyle, frames, pressed, queryEl, SHELL, until } from './harness'
 
 /**
  * THE `views` TOGGLES HOLD THEIR PLACE FROM THE FIRST PAINT — the view layouts spec §6. They are `index.html`'s own
@@ -38,25 +38,19 @@ import { chooseStyle, SHELL, until } from './harness'
  * of it at `CPUQuota=25%` (2026-10-12).
  */
 
-const frame = (): Promise<void> => new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(() => r())))
-const el = (sel: string): HTMLElement => document.querySelector<HTMLElement>(sel) as HTMLElement
 const tenth = (n: number): number => Math.round(n * 10) / 10
 /** Where the group and the three controls after it start, and how wide the group and each of its buttons is. */
 const places = (): Record<string, number | number[]> => ({
-  group: tenth(el('#views-shown').getBoundingClientRect().left),
-  groupWidth: tenth(el('#views-shown').getBoundingClientRect().width),
+  group: tenth(queryEl('#views-shown').getBoundingClientRect().left),
+  groupWidth: tenth(queryEl('#views-shown').getBoundingClientRect().width),
   toggles: [...document.querySelectorAll<HTMLElement>('#views-shown button')].map((b) =>
     tenth(b.getBoundingClientRect().width),
   ),
-  newView: tenth(el('#new-view').getBoundingClientRect().left),
-  copies: tenth(el('#buffers').getBoundingClientRect().left),
-  examples: tenth(el('#examples').getBoundingClientRect().left),
-  encoding: tenth(el('label.encoding').getBoundingClientRect().left),
+  newView: tenth(queryEl('#new-view').getBoundingClientRect().left),
+  copies: tenth(queryEl('#buffers').getBoundingClientRect().left),
+  examples: tenth(queryEl('#examples').getBoundingClientRect().left),
+  encoding: tenth(queryEl('label.encoding').getBoundingClientRect().left),
 })
-const pressed = (): string[] =>
-  [...document.querySelectorAll<HTMLButtonElement>('#views-shown button[aria-pressed="true"]')].map(
-    (b) => b.dataset.shows as string,
-  )
 
 const FOUR = ['source', 'asm', 'lambda', 'tm']
 
@@ -76,17 +70,17 @@ beforeAll(async () => {
   // 390 px, THE MARKUP ALONE: no attribute hides the group yet.
   await page.viewport(390, 844)
   document.body.innerHTML = SHELL
-  await frame()
+  await frames()
   markup.narrow = {
-    hidden: el('#views-shown').hasAttribute('hidden'),
-    display: getComputedStyle(el('#views-shown')).display,
+    hidden: queryEl('#views-shown').hasAttribute('hidden'),
+    display: getComputedStyle(queryEl('#views-shown')).display,
   }
   // 1280 px, THE MARKUP ALONE, IN EACH STYLE: `data-style` is what the pre-paint script sets from storage.
   await page.viewport(1280, 896)
   for (const style of STYLE_IDS) {
     root.setAttribute('data-style', style)
     await document.fonts.ready
-    await frame()
+    await frames()
     markup.wide.set(style, places())
   }
   if (shipped === null) root.removeAttribute('data-style')
@@ -96,7 +90,7 @@ beforeAll(async () => {
 
 beforeAll(async () => {
   await (await import('../../src/main')).ready
-  await until(() => el('#results').dataset.state === 'idle', 'the first compile')
+  await until(() => queryEl('#results').dataset.state === 'idle', 'the first compile')
 })
 
 describe('the views toggles, in the page’s markup before the app is up', () => {
@@ -118,13 +112,13 @@ describe('the views toggles, once the app is up', () => {
     expect(pressed(), 'precondition: the app pressed the toggles of the views it shows').toEqual(FOUR)
     await chooseStyle(style)
     await document.fonts.ready
-    await frame()
+    await frames()
     expect(places(), 'the app moved or resized what the markup had placed').toEqual(markup.wide.get(style))
   })
 
   it('are hidden by the attribute in a narrow window', async () => {
     await page.viewport(390, 844)
-    await until(() => el('#views-shown').hasAttribute('hidden'), 'the attribute to follow the window to 390 px')
-    expect(el('#views-shown').hidden).toBe(true)
+    await until(() => queryEl('#views-shown').hasAttribute('hidden'), 'the attribute to follow the window to 390 px')
+    expect(queryEl('#views-shown').hidden).toBe(true)
   })
 })

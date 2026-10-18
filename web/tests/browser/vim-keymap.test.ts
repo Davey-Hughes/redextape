@@ -2,7 +2,7 @@ import { EditorView } from '@codemirror/view'
 import { beforeAll, describe, expect, it } from 'vitest'
 import { userEvent } from 'vitest/browser'
 import { KEYMAP_KEY } from '../../src/editor-prefs'
-import { SHELL, until } from './harness'
+import { editorHost, idle, inNormalMode, SHELL, until } from './harness'
 
 /**
  * **THE KEYMAP SETTING, THROUGH THE APP** — Plan 7 part 3b task 6, design §9.
@@ -36,19 +36,7 @@ const TWO_LINES = 'let x = 40;\nx + 2'
 
 let view: EditorView
 
-const resultsText = () => document.querySelector('#results')?.textContent ?? ''
-const idle = () => document.querySelector<HTMLElement>('#results')?.dataset.state === 'idle' && resultsText() !== ''
 const keymapChoice = () => document.querySelector<HTMLSelectElement>('#keymap')
-const editorHost = () => document.querySelector<HTMLElement>('[data-leaf="lambda-0"] .term-editor')
-
-/**
- * Whether `v` is in vim's NORMAL mode, asked of the DOM rather than of the package.
- *
- * `@replit/codemirror-vim`'s plugin puts `cm-vimMode` on the scroller whenever vim is installed and
- * not in insert mode, and removes it in `destroy()` — so this one class answers "is vim here" and
- * "which mode is it in" together, and it answers them about the element the user is looking at.
- */
-const inNormalMode = (v: EditorView): boolean => v.scrollDOM.classList.contains('cm-vimMode')
 
 /** The copy's own CodeMirror view, once a fork has mounted one under the λ pane. */
 function copyView(): EditorView {

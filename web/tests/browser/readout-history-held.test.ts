@@ -4,7 +4,7 @@ import { page, userEvent } from 'vitest/browser'
 import { EXAMPLES } from '../../src/examples'
 import { encodeLink } from '../../src/share-link'
 import { serializeWorkspace } from '../../src/workspace'
-import { fourViewWorkspace, SHELL, until } from './harness'
+import { countOf, fourViewWorkspace, newest, noticeText, results, resultsIdle, SHELL, until } from './harness'
 
 /**
  * **THE READOUT'S FULL HISTORY AT THE MOMENTS A POLL CANNOT PLACE, PLACED BY HOLDING A REPLY BACK.** The strip draws
@@ -84,14 +84,8 @@ const nothingHeld = (): void => {
 
 const SUM_TO_10000 = (EXAMPLES.find((e) => e.id === 'sum-to')?.text ?? '').replace('sum_to(5)', 'sum_to(10000)')
 
-const results = () => document.querySelector<HTMLElement>('#results') as HTMLElement
-const noticeText = () => document.querySelector('#notice .notice-text')?.textContent ?? ''
-const idle = () => results().dataset.state === 'idle'
 const segments = () => [...results().querySelectorAll<HTMLElement>('.segment')].map((s) => s.title)
 const asmStep = () => document.querySelector('[data-leaf="asm-0"] .step')?.textContent ?? ''
-/** The newest step a step line names — its `of N` — as the line prints it. */
-const newest = (line: string) => /of ([\d,]+)/.exec(line)?.[1] ?? ''
-const count = (printed: string) => Number(printed.replaceAll(',', ''))
 const extend = () => document.querySelector<HTMLButtonElement>('[data-leaf="asm-0"] .controls .extend')
 
 let view: EditorView
@@ -100,7 +94,7 @@ beforeAll(async () => {
   await page.viewport(1280, 800)
   document.body.innerHTML = SHELL
   view = await (await import('../../src/main')).ready
-  await until(() => idle() && resultsTaken > 0 && segments().length === 3, 'the first compile')
+  await until(() => resultsIdle() && resultsTaken > 0 && segments().length === 3, 'the first compile')
 })
 
 afterAll(() => {
@@ -142,7 +136,7 @@ describe('a recompile whose result is held while its recording fills', () => {
 
   it('draws the new program’s own fact once its result lands', async () => {
     letResultsGo()
-    await until(() => idle() && segments()[1]?.startsWith('asm 50005000 ') === true, 'the new program’s result')
+    await until(() => resultsIdle() && segments()[1]?.startsWith('asm 50005000 ') === true, 'the new program’s result')
     expect(segments()[1]).toMatch(
       new RegExp(`^asm 50005000 · [\\d,]+ instructions · history is full at ${newest(asmStep())}$`),
     )
@@ -177,7 +171,7 @@ describe('keep recording on the asm leg, its result held', () => {
     // press's polls came more than 893 ms apart.
     await until(() => newest(asmStep()) !== first, 'the asm recording to move on')
     await until(
-      () => count(newest(asmStep())) >= count(first) * 1.5 || asmStep().includes('— history is full'),
+      () => countOf(newest(asmStep())) >= countOf(first) * 1.5 || asmStep().includes('— history is full'),
       'the asm recording to be half way to filling again',
     )
     await until(() => asmStep().includes('— history is full'), 'the asm history to fill again')
@@ -233,7 +227,7 @@ describe('a link taking the asm leg past where its history fills, its continue h
       // NO `…` AFTER THE COUNT: stopped. The head waits where the run opened until the frames reach the link's step.
       /^step [\d,]+ of [\d,]+ — going to step 40,000 from the link/,
     )
-    expect(idle(), 'precondition: the link’s run has its result').toBe(true)
+    expect(resultsIdle(), 'precondition: the link’s run has its result').toBe(true)
     expect(segments()[1]).not.toContain('history is full')
     expect(segments()[1]).toMatch(/^asm 50005000 · [\d,]+ instructions$/)
   })

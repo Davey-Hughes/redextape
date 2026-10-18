@@ -1,7 +1,7 @@
 import type { EditorView } from '@codemirror/view'
 import { beforeAll, describe, expect, it } from 'vitest'
 import { EXAMPLE_ENCODING } from '../../src/examples'
-import { SHELL, until } from './harness'
+import { SHELL, segments, stateIdle, until } from './harness'
 
 /**
  * **A LINK AT START-UP THAT CANNOT BE READ** — Plan 7 part 6a spec §5.3 and §7: `#s=` and characters base64url does not
@@ -15,16 +15,13 @@ import { SHELL, until } from './harness'
  * which fails that one and cannot fail this one.
  */
 
-const idle = () => document.querySelector<HTMLElement>('#results')?.dataset.state === 'idle'
-const segments = () => [...document.querySelectorAll('#results .segment')].map((s) => s.textContent ?? '')
-
 let view: EditorView
 
 beforeAll(async () => {
   history.replaceState(null, '', `${location.pathname}${location.search}#s=not*a*link`)
   document.body.innerHTML = SHELL
   view = await (await import('../../src/main')).ready
-  await until(() => idle() && segments().length === 3, 'the first compile')
+  await until(() => stateIdle() && segments().length === 3, 'the first compile')
 })
 
 describe('a link at start-up that cannot be read', () => {

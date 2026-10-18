@@ -1,7 +1,8 @@
 import type { EditorView } from '@codemirror/view'
 import { afterEach, beforeAll, describe, expect, it } from 'vitest'
 import { page, userEvent } from 'vitest/browser'
-import { host, notice, SHELL, until } from './harness'
+import { armed, host, mounted, notice, PREFIX, SHELL, stateIdle, toggle, until } from './harness'
+import { viewKey } from './user-event-fixture'
 
 /**
  * VIEW KEYS UNDER AN OPEN POPOVER — the view layouts spec §7: a view key closes every open popover, as a pointer
@@ -21,21 +22,13 @@ import { host, notice, SHELL, until } from './harness'
  * **EVERY CASE STARTS FROM ALL FOUR VIEWS WITH NOTHING OPEN**, which `start` puts back and asserts.
  */
 
-const PREFIX = '{Control>}.{/Control}'
+const UNARMED = 'the prefix did not arm the mode with a popover open'
 const SOURCE = 'let x = 40;\nx + 2'
 
 let view: EditorView
 /** Every uncaught error since the case began: a stale menu item's press threw one. */
 const errors: string[] = []
 
-const armed = (): boolean => !(document.querySelector('#view-keys') as HTMLElement).hidden
-const mounted = (): string[] =>
-  [...document.querySelectorAll<HTMLElement>('#views [data-leaf]')]
-    .filter((el) => el.getAttribute('role') !== 'tab')
-    .map((el) => el.dataset.leaf as string)
-const idle = (): boolean => document.querySelector<HTMLElement>('#results')?.dataset.state === 'idle'
-const toggle = (kind: string): HTMLButtonElement =>
-  document.querySelector(`#views-shown button[data-shows="${kind}"]`) as HTMLButtonElement
 /** The popovers that are open, each by its id. */
 const open = (): string[] => [...document.querySelectorAll<HTMLElement>(':popover-open')].map((p) => p.id)
 const menuOf = (button: HTMLElement): HTMLElement => (button as HTMLButtonElement).popoverTargetElement as HTMLElement
@@ -48,14 +41,6 @@ async function press(button: HTMLElement): Promise<HTMLElement> {
   expect(open(), 'precondition: the one popover is open').toEqual([menu.id])
   expect(button.getAttribute('aria-expanded'), 'precondition: its button says it is open').toBe('true')
   return menu
-}
-
-/** The prefix and then `key`, with the mode asserted armed between them. */
-async function viewKey(key: string): Promise<void> {
-  await userEvent.keyboard(PREFIX)
-  expect(armed(), 'the prefix did not arm the mode with a popover open').toBe(true)
-  await userEvent.keyboard(key)
-  expect(armed()).toBe(false)
 }
 
 async function start(): Promise<void> {
@@ -75,7 +60,10 @@ describe('view keys under an open popover', () => {
     document.body.innerHTML = SHELL
     view = await (await import('../../src/main')).ready
     view.dispatch({ changes: { from: 0, to: view.state.doc.length, insert: SOURCE } })
-    await until(() => idle() && (document.querySelector('#results')?.textContent ?? '').includes('λ 42'), 'the compile')
+    await until(
+      () => stateIdle() && (document.querySelector('#results')?.textContent ?? '').includes('λ 42'),
+      'the compile',
+    )
     window.addEventListener('error', (e) => errors.push(e.message))
   })
 
@@ -100,7 +88,7 @@ describe('view keys under an open popover', () => {
     // copy leaves it on its button, where this case passed with nothing handed anywhere, and `Tab` goes into it.
     if (!menu.contains(document.activeElement)) await userEvent.keyboard('{Tab}')
     expect(menu.contains(document.activeElement), 'precondition: the focus is inside the popover').toBe(true)
-    await viewKey('2')
+    await viewKey('2', UNARMED)
     expect(open(), 'the popover stayed open over a page the key changed').toEqual([])
     expect(button.getAttribute('aria-expanded')).toBe('false')
     expect(document.activeElement, 'the focus is not on the popover’s button').toBe(button)
@@ -115,7 +103,7 @@ describe('view keys under an open popover', () => {
     await press(share)
     await until(() => link() !== '', 'the link to four views')
     const four = link()
-    await viewKey('2')
+    await viewKey('2', UNARMED)
     expect(open()).toEqual([])
     await press(share)
     await until(() => link() !== '', 'the link to three views')
@@ -128,7 +116,7 @@ describe('view keys under an open popover', () => {
     expect(mounted()).toEqual(['source'])
     const settings = document.querySelector('#settings') as HTMLElement
     await press(settings)
-    await viewKey('1')
+    await viewKey('1', UNARMED)
     expect(open()).toEqual([])
     expect(document.activeElement).toBe(settings)
     expect(mounted()).toEqual(['source'])
@@ -161,13 +149,13 @@ describe('view keys under an open popover', () => {
       const button = more('tm-0')
       const menu = await press(button)
       expect(menu.contains(document.activeElement), 'precondition: the focus is on an item of the menu').toBe(true)
-      await viewKey('4')
+      await viewKey('4', UNARMED)
       expect(mounted()).toEqual(['source', 'lambda-0', 'asm-0'])
       expect(open()).toEqual([])
       expect(button.getAttribute('aria-expanded'), 'the ⋯ left the page saying its menu is open').toBe('false')
       expect(document.activeElement, 'the focus fell to <body>').not.toBe(document.body)
       expect(document.querySelector('#views')?.contains(document.activeElement)).toBe(true)
-      await viewKey('4')
+      await viewKey('4', UNARMED)
       expect(mounted()).toEqual(['source', 'lambda-0', 'asm-0', 'tm-0'])
       expect(more('tm-0').getAttribute('aria-expanded'), 'the ⋯ came back saying its menu is open').toBe('false')
       expect(open()).toEqual([])
@@ -181,7 +169,7 @@ describe('view keys under an open popover', () => {
       const button = host('tm-0')?.querySelector(selector) as HTMLElement
       const menu = await press(button)
       expect(menu.contains(document.activeElement), 'precondition: the focus is on an item of the menu').toBe(true)
-      await viewKey('2')
+      await viewKey('2', UNARMED)
       expect(mounted()).toEqual(['source', 'lambda-0', 'tm-0'])
       expect(open()).toEqual([])
       expect(button.getAttribute('aria-expanded'), 'the button says its menu is open').toBe('false')
@@ -201,7 +189,7 @@ describe('view keys under an open popover', () => {
       const add = document.querySelector('#new-view') as HTMLElement
       const menu = await press(add)
       expect(sourceItem(menu), 'precondition: + view offers source').not.toBeNull()
-      await viewKey('1')
+      await viewKey('1', UNARMED)
       expect(mounted()).toEqual(['source', 'lambda-0', 'asm-0', 'tm-0'])
       expect(open(), '+ view stayed open').toEqual([])
       await press(add)

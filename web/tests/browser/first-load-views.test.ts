@@ -1,7 +1,6 @@
 import { beforeAll, describe, expect, it } from 'vitest'
-import { page } from 'vitest/browser'
 import { LAYOUT_STORAGE_KEY } from '../../src/layout'
-import { host, SHELL, until } from './harness'
+import { box, mountAt, mounted, pressed, storedLayout, until } from './harness'
 
 /**
  * WHAT A FIRST VISIT SHOWS — the view layouts spec §8: the source beside the TM view, the focus on the TM view, and
@@ -15,30 +14,16 @@ import { host, SHELL, until } from './harness'
 // BEFORE THE MOUNT, AT MODULE SCOPE: `main()` reads storage once, when it is imported below.
 localStorage.removeItem(LAYOUT_STORAGE_KEY)
 
-const mounted = (): string[] =>
-  [...document.querySelectorAll<HTMLElement>('#views [data-leaf]')]
-    .filter((el) => el.getAttribute('role') !== 'tab')
-    .map((el) => el.dataset.leaf as string)
-const box = (leaf: string): DOMRect => (host(leaf) as HTMLElement).getBoundingClientRect()
-const pressed = (): string[] =>
-  [...document.querySelectorAll<HTMLButtonElement>('#views-shown button[aria-pressed="true"]')].map(
-    (b) => b.dataset.shows as string,
-  )
-const stored = (): Record<string, unknown> => JSON.parse(localStorage.getItem(LAYOUT_STORAGE_KEY) ?? 'null')
-
 describe('a first load, in a window wider than it is tall', () => {
   beforeAll(async () => {
     // WIDER THAN TALL, SO THE PAIR IS A ROW: at the runner's default 414 × 896 the views area is taller than it is
     // wide and the same first load is a column (`first-load-views-tall.test.ts`).
-    await page.viewport(1280, 896)
-    document.body.innerHTML = SHELL
-    await (await import('../../src/main')).ready
-    await until(() => document.querySelector<HTMLElement>('#results')?.dataset.state === 'idle', 'the first compile')
+    await mountAt(1280, 896)
   })
 
   it('starts from nothing stored: the precondition every case below rests on', () => {
     // WRITTEN BY THE MOUNT, NOT FOUND BY IT: the app stores the workspace it opened on.
-    expect(stored().tree, 'the stored tree is not the first-load tree').toEqual({
+    expect(storedLayout().tree, 'the stored tree is not the first-load tree').toEqual({
       kind: 'split',
       dir: 'row',
       sizes: [0.5, 0.5],
@@ -101,8 +86,8 @@ describe('a first load, in a window wider than it is tall', () => {
   })
 
   it('records the TM view as the focused one, and remembers no other arrangement', () => {
-    expect(stored().focused).toBe('tm-0')
-    expect('arrangements' in stored(), 'a fresh page stored an arrangements field').toBe(false)
+    expect(storedLayout().focused).toBe('tm-0')
+    expect('arrangements' in storedLayout(), 'a fresh page stored an arrangements field').toBe(false)
   })
 
   /**

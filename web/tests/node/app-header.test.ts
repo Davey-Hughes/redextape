@@ -1,7 +1,6 @@
-import { readFileSync } from 'node:fs'
-import { fileURLToPath } from 'node:url'
 import { describe, expect, it } from 'vitest'
 import { NARROW_WINDOW, NARROW_WINDOW_REM, shownSentence, toggleSentence } from '../../src/app-header'
+import { readRelative } from './read-fixture'
 
 /**
  * THE HEADER'S TWO SENTENCES ABOUT THE VIEWS — the view layouts spec §6: what a `views` toggle says of the views it
@@ -42,19 +41,19 @@ describe('shownSentence', () => {
  * the last two can import the first (`NARROW_WINDOW`'s doc). Each is read as text here.
  */
 describe('the window too narrow for the views toggles', () => {
-  const read = (path: string): string => readFileSync(fileURLToPath(new URL(path, import.meta.url)), 'utf8')
-
   it('is one query in main.ts’s attribute and in the stylesheet’s rule', () => {
     expect(NARROW_WINDOW).toBe(`(max-width: ${NARROW_WINDOW_REM}rem)`)
     const rules = [
-      ...read('../../src/style.css').matchAll(/@media ([^{]+?) \{\s*\.views-shown \{\s*display: none;\s*\}\s*\}/g),
+      ...readRelative('../../src/style.css').matchAll(
+        /@media ([^{]+?) \{\s*\.views-shown \{\s*display: none;\s*\}\s*\}/g,
+      ),
     ].map(([, query]) => query)
     expect(rules, 'the media rule that hides .views-shown').toEqual([NARROW_WINDOW])
   })
 
   /** A rem is 16 px at a browser's default text size, which is the size the page gives the width at. */
   it('is the width the help page gives a reader, in pixels', () => {
-    expect(read('../../help.html').replace(/\s+/g, ' ')).toContain(
+    expect(readRelative('../../help.html').replace(/\s+/g, ' ')).toContain(
       `A window about ${NARROW_WINDOW_REM * 16} px wide or narrower, at the browser's usual text size, has no room for the buttons;`,
     )
   })

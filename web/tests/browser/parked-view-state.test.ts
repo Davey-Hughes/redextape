@@ -1,8 +1,7 @@
 import { beforeAll, describe, expect, it } from 'vitest'
-import { page, userEvent } from 'vitest/browser'
-import { LAYOUT_STORAGE_KEY } from '../../src/layout'
 import type { Workspace } from '../../src/workspace'
-import { SHELL, until } from './harness'
+import { host, mountAt, mounted, storedLayout } from './harness'
+import { clickToggle } from './user-event-fixture'
 
 /**
  * WHAT THE WORKSPACE STORES FOR A VIEW IS KEPT THROUGH THE SWITCH THAT PARKS IT — the view layouts spec §5.1 and §5.2:
@@ -26,31 +25,17 @@ import { SHELL, until } from './harness'
 
 const FOUR = ['source', 'lambda-0', 'asm-0', 'tm-0']
 
-const leaf = (id: string): HTMLElement | null =>
-  document.querySelector<HTMLElement>(`#views [data-leaf="${id}"]:not([role="tab"])`)
-const mounted = (): string[] =>
-  [...document.querySelectorAll<HTMLElement>('#views [data-leaf]')]
-    .filter((el) => el.getAttribute('role') !== 'tab')
-    .map((el) => el.dataset.leaf as string)
-const press = (kind: string): Promise<void> =>
-  userEvent.click(document.querySelector<HTMLButtonElement>(`#views-shown button[data-shows="${kind}"]`) as HTMLElement)
-const stored = (): Pick<Workspace, 'panels' | 'display' | 'tmDisplay'> =>
-  JSON.parse(localStorage.getItem(LAYOUT_STORAGE_KEY) ?? 'null')
+type Stored = Pick<Workspace, 'panels' | 'display' | 'tmDisplay'>
 const rulesToggle = (): HTMLButtonElement | null =>
-  leaf('tm-0')?.querySelector<HTMLButtonElement>('[data-panel="rules"] .panel-toggle') ?? null
+  host('tm-0')?.querySelector<HTMLButtonElement>('[data-panel="rules"] .panel-toggle') ?? null
 const edges = (value: string): HTMLButtonElement | undefined =>
-  [...(leaf('tm-0')?.querySelectorAll<HTMLButtonElement>('[data-panel="diagram"] .diagram-mode') ?? [])].find(
+  [...(host('tm-0')?.querySelectorAll<HTMLButtonElement>('[data-panel="diagram"] .diagram-mode') ?? [])].find(
     (b) => b.dataset.value === value,
   )
 const layoutChoice = (value: string): HTMLElement | null =>
-  leaf('lambda-0')?.querySelector<HTMLElement>(`.view-menu-choice[data-value="${value}"]`) ?? null
+  host('lambda-0')?.querySelector<HTMLElement>(`.view-menu-choice[data-value="${value}"]`) ?? null
 
-beforeAll(async () => {
-  await page.viewport(1280, 896)
-  document.body.innerHTML = SHELL
-  await (await import('../../src/main')).ready
-  await until(() => document.querySelector<HTMLElement>('#results')?.dataset.state === 'idle', 'the first compile')
-})
+beforeAll(() => mountAt(1280, 896))
 
 // THE CASES RUN IN ORDER ON ONE PAGE, and each asserts the state it starts from.
 describe('what the workspace stores for a view a switch takes off the screen', () => {
@@ -60,44 +45,46 @@ describe('what the workspace stores for a view a switch takes off the screen', (
     expect(rulesToggle()?.getAttribute('aria-expanded'), 'precondition: the rules panel shut').toBe('false')
     edges('chips')?.click()
     expect(edges('chips')?.getAttribute('aria-checked'), 'precondition: the diagram draws chips').toBe('true')
-    const before = stored()
+    const before = storedLayout<Stored>()
     expect(before.panels['tm-0'], 'precondition: the shut panel is stored').toEqual({ rules: false })
     expect(before.tmDisplay['tm-0'], 'precondition: the display is stored').toEqual({
       level: 'program',
       edges: 'chips',
     })
 
-    await press('tm')
+    await clickToggle('tm')
     expect(mounted(), 'precondition: the TM view is off the screen').toEqual(['source', 'lambda-0', 'asm-0'])
-    expect.soft(stored().panels['tm-0'], 'the switch dropped the parked view’s panel state').toEqual({ rules: false })
     expect
-      .soft(stored().tmDisplay['tm-0'], 'the switch dropped the parked view’s display')
+      .soft(storedLayout<Stored>().panels['tm-0'], 'the switch dropped the parked view’s panel state')
+      .toEqual({ rules: false })
+    expect
+      .soft(storedLayout<Stored>().tmDisplay['tm-0'], 'the switch dropped the parked view’s display')
       .toEqual({ level: 'program', edges: 'chips' })
 
-    await press('tm')
+    await clickToggle('tm')
     expect(mounted()).toEqual(FOUR)
     expect(rulesToggle()?.getAttribute('aria-expanded'), 'the rules panel came back open').toBe('false')
     expect(edges('chips')?.getAttribute('aria-checked')).toBe('true')
-    expect.soft(stored().panels['tm-0'], 'storage and the page disagree once the view is back').toEqual({
+    expect.soft(storedLayout<Stored>().panels['tm-0'], 'storage and the page disagree once the view is back').toEqual({
       rules: false,
     })
-    expect.soft(stored().tmDisplay['tm-0']).toEqual({ level: 'program', edges: 'chips' })
+    expect.soft(storedLayout<Stored>().tmDisplay['tm-0']).toEqual({ level: 'program', edges: 'chips' })
   })
 
   it('keeps a λ view’s display while the view is parked', async () => {
     expect(mounted(), 'precondition: all four views').toEqual(FOUR)
     layoutChoice('outline')?.click()
     expect(layoutChoice('outline')?.getAttribute('aria-checked'), 'precondition: the term as an outline').toBe('true')
-    const display = stored().display['lambda-0']
+    const display = storedLayout<Stored>().display['lambda-0']
     expect(display?.layout, 'precondition: the display is stored').toBe('outline')
 
-    await press('lambda')
+    await clickToggle('lambda')
     expect(mounted(), 'precondition: the λ view is off the screen').toEqual(['source', 'asm-0', 'tm-0'])
-    expect(stored().display['lambda-0'], 'the switch dropped the parked view’s display').toEqual(display)
+    expect(storedLayout<Stored>().display['lambda-0'], 'the switch dropped the parked view’s display').toEqual(display)
 
-    await press('lambda')
+    await clickToggle('lambda')
     expect(mounted()).toEqual(FOUR)
     expect(layoutChoice('outline')?.getAttribute('aria-checked')).toBe('true')
-    expect(stored().display['lambda-0']).toEqual(display)
+    expect(storedLayout<Stored>().display['lambda-0']).toEqual(display)
   })
 })

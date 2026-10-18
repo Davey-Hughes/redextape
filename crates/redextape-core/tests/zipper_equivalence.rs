@@ -81,7 +81,7 @@ fn ids_where(core: &Core, pred: &dyn Fn(&Core) -> bool) -> BTreeSet<NodeId> {
 
 /// **NOT `MAX_REDUCTION_STEPS`, and not because the generated programs need it.** `arb_expr_over`
 /// generates only `+`, monus `-`, `>`, `==` and `if` over integer leaves — no recursion, no functions,
-/// no loops (`three_way_oracle.rs`'s `arb_tm_safe_expr`, whose doc covers this same generator: "every
+/// no loops (`arb_expr_below(8)` in `three_way_oracle.rs`, whose comment covers this same generator: "every
 /// generated program terminates to a value"). Verified directly: raising this cap to 5,000,000 still
 /// runs the proptest below in 0.22 s with 0 of 262 generated programs capping. **This cap exists for
 /// the four CURATED capping cases in `curated_shapes_agree_step_for_step` below** — terms and programs
@@ -411,12 +411,12 @@ proptest! {
     /// = String>`, so it takes a leaf *strategy* and yields source text directly.
     ///
     /// **The leaf range (`0u64..8`) was chosen by measurement, not to mirror any call site — it does
-    /// NOT mirror `llvm_oracle.rs`'s `arb_first_order_expr` and its `(0u64..1000)`.** Arithmetic here
+    /// NOT mirror `arb_expr_below(1000)` in `llvm_oracle.rs`.** Arithmetic here
     /// runs on CHURCH NUMERALS, so cost scales with the numeral's VALUE; which redex normal order picks
     /// next depends only on the term's structure, never on the magnitude of a leaf, so a narrower range
     /// changes nothing about what this test exercises. Measured in release: `0u64..8` runs this
     /// proptest in 0.22 s; `0u64..64` takes >110 s; `0u64..1000` takes >5 min. This range in fact
-    /// mirrors `three_way_oracle.rs`'s `arb_tm_safe_expr`, which lands on the same bound for an
+    /// mirrors `arb_expr_below(8)` in `three_way_oracle.rs`, which lands on the same bound for an
     /// unrelated reason — TM fixed-width-field safety — irrelevant to this file. A future editor
     /// "restoring" a wider range on the belief that it should match `llvm_oracle.rs` will hang this
     /// suite. See the generator's doc in `redextape-test-support` for why the recursion parameters must
@@ -425,7 +425,7 @@ proptest! {
     /// THE `three_way_oracle.rs` POINTER READ line 535 UNTIL THIS COMMIT, AND IT HAD DRIFTED. It was
     /// `arb_tm_safe_expr`'s own `arb_expr_over((0u64..8)..)` — the bound this range is said to mirror —
     /// when the zipper slice (#5) wrote it; the node-count bound (#32) moved that function down eight
-    /// lines, so that bound is now `arb_tm_safe_expr`'s own one-line body, and this conversion found
+    /// lines, so that bound was then `arb_tm_safe_expr`'s own one-line body, and this conversion found
     /// 535 holding a line of that function's DOC, about the operators the generator omits. Still inside
     /// the same item, which is why it read as confirmation. The `llvm_oracle.rs` pointer beside it had
     /// NOT drifted: line 153 still held `arb_first_order_expr`'s `(0u64..1000)`, unmoved since #5 wrote

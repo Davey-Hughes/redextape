@@ -2,6 +2,7 @@ import { describe, expect, it, vi } from 'vitest'
 import { LambdaPane } from '../../src/lambda-pane'
 import type { PaneEvents } from '../../src/pane-chrome'
 import type { LambdaState } from '../../src/types'
+import { controlState, newPaneHost } from './harness'
 
 /**
  * Design §4.2's split body: the editor mounted (or not) above the existing frame renderer, and when
@@ -11,12 +12,6 @@ import type { LambdaState } from '../../src/types'
  * wiring built in the constructor and moved by `setEditor`/`render` directly, with
  * nothing on the path to it that needs `main()`.
  */
-const host = (): HTMLElement => {
-  const el = document.createElement('section')
-  el.className = 'pane'
-  document.body.append(el)
-  return el
-}
 
 /** `PaneEvents`'s members, all inert — no test here clicks a control. */
 const events = (): PaneEvents => ({
@@ -50,26 +45,17 @@ const lambdaState = (over: Partial<LambdaState> = {}): LambdaState => ({
   ...over,
 })
 
-const CONTROLS = {
-  canRestart: true,
-  canBack: false,
-  canForward: true,
-  canToNewest: true,
-  canPlay: true,
-  playing: false,
-  stepText: '0',
-  continueLabel: null,
-}
+const CONTROLS = controlState(false, '0')
 
 describe('LambdaPane editor region', () => {
   it('has no editor region until one is set', () => {
-    const el = host()
+    const el = newPaneHost()
     new LambdaPane(el, events())
     expect(el.querySelector('.term-editor')).toBeNull()
   })
 
   it('mounts the editor when set and REMOVES it when cleared, never hides it', () => {
-    const el = host()
+    const el = newPaneHost()
     const pane = new LambdaPane(el, events())
     pane.setEditor('\\x. x')
     expect(el.querySelector('.term-editor')).not.toBeNull()
@@ -83,7 +69,7 @@ describe('LambdaPane editor region', () => {
     // The reviewer's repro for the stale-state defect, carried over from the collapse button this panel
     // replaced: mount, collapse, unmount, remount. A remounted editor starts where its buffer's record
     // says (open, here), so the control that names its state has to say so too.
-    const el = host()
+    const el = newPaneHost()
     const pane = new LambdaPane(el, events())
     pane.setEditor('\\x. x')
 
@@ -105,7 +91,7 @@ describe('LambdaPane editor region', () => {
   // THE REFUSAL THIS FILE USED TO PIN IS GONE WITH THE LINK WINDOW (Plan 7 part 4a): the view shows the
   // frame's own step, as a tree or as text, and there is no second body a fork could be taken from.
   it('offers a fork once a frame is on screen, and not before', () => {
-    const el = host()
+    const el = newPaneHost()
     const pane = new LambdaPane(el, events())
     expect(el.querySelector('button.detach')).toBeNull()
     pane.render(lambdaState(), CONTROLS)

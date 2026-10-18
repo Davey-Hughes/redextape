@@ -634,25 +634,7 @@ mod tests {
     use super::*;
     use crate::tm::machine::{Rule, State};
     use crate::tm::sim::{DEFAULT_CAPS, Status, simulate_final};
-
-    /// A one-tape unary incrementer: skip the `1`s, write a `1` on the first blank, accept.
-    fn increment() -> Machine {
-        Machine {
-            tapes: 1,
-            start: 0,
-            states: vec![
-                State {
-                    name: "scan".into(),
-                    accept: false,
-                    rules: vec![
-                        Rule { read: vec![Some('1')], write: vec![None], moves: vec![Move::R], next: 0 },
-                        Rule { read: vec![None], write: vec![Some('1')], moves: vec![Move::S], next: 1 },
-                    ],
-                },
-                State { name: "halt".into(), accept: true, rules: vec![] },
-            ],
-        }
-    }
+    use crate::tm::test_fixtures::{increment, one_rule_machine};
 
     fn text(cells: &[Symbol]) -> String {
         cells.iter().collect()
@@ -679,20 +661,15 @@ mod tests {
     /// with every head and the origin on cell 0.
     #[test]
     fn freshly_encoded_tapes_decode_to_the_initial_tapes() {
-        let m = Machine {
-            tapes: 3,
-            start: 0,
-            states: vec![State {
-                name: "s".into(),
-                accept: false,
-                rules: vec![Rule {
-                    read: vec![Some('a'), None, Some('b')],
-                    write: vec![None, Some('c'), None],
-                    moves: vec![Move::S; 3],
-                    next: 0,
-                }],
-            }],
-        };
+        let m = one_rule_machine(
+            "s",
+            Rule {
+                read: vec![Some('a'), None, Some('b')],
+                write: vec![None, Some('c'), None],
+                moves: vec![Move::S; 3],
+                next: 0,
+            },
+        );
         let inits = [vec!['a', 'b'], vec![], vec!['b']];
         let run = decode_guest(&tapes_of(&encode_guest(&m, &inits).expect("an encodable guest"))).expect("well formed");
         assert_eq!(run.status, GuestStatus::Running);

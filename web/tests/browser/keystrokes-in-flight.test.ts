@@ -1,6 +1,6 @@
 import { EditorView } from '@codemirror/view'
 import { afterAll, afterEach, beforeAll, describe, expect, it } from 'vitest'
-import { SHELL, until } from './harness'
+import { leafEl, retype, SHELL, stateIdle, until } from './harness'
 
 /**
  * **AN ANSWER COMPUTED FROM OLDER TEXT MUST NOT OVERWRITE WHAT WAS TYPED WHILE IT WAS IN FLIGHT.**
@@ -36,12 +36,9 @@ const holds: Hold[] = []
 
 let source: EditorView
 
-const paneHost = (leaf: string) => document.querySelector(`[data-leaf="${leaf}"]`) as HTMLElement
 const editorIn = (leaf: string) =>
-  EditorView.findFromDOM(paneHost(leaf).querySelector('.term-editor') as HTMLElement) as EditorView
-const markersIn = (leaf: string) => paneHost(leaf).querySelectorAll('.cm-editor .cm-lintRange-error').length
-const retype = (v: EditorView, text: string) =>
-  v.dispatch({ changes: { from: 0, to: v.state.doc.length, insert: text } })
+  EditorView.findFromDOM(leafEl(leaf).querySelector('.term-editor') as HTMLElement) as EditorView
+const markersIn = (leaf: string) => leafEl(leaf).querySelectorAll('.cm-editor .cm-lintRange-error').length
 const kindOf = (m: unknown) => (m as { kind?: string } | null)?.kind
 const isFormatting = (m: unknown) =>
   kindOf(m) === 'msg' && JSON.parse((m as { json: string }).json).method === 'textDocument/formatting'
@@ -114,7 +111,7 @@ function answerTo(worker: Worker, m: unknown): Promise<void> {
 
 /** Click `format` in `leaf`'s `⋯` menu, the control a user has. */
 function clickFormat(leaf: string): void {
-  const more = paneHost(leaf).querySelector<HTMLButtonElement>('button.view-more') as HTMLButtonElement
+  const more = leafEl(leaf).querySelector<HTMLButtonElement>('button.view-more') as HTMLButtonElement
   more.click()
   const item = document.getElementById(more.getAttribute('aria-controls') ?? '')?.querySelector('button.format-doc')
   ;(item as HTMLButtonElement).click()
@@ -172,10 +169,10 @@ async function formatWhileBuilding(leaf: string, next: string, typed: string, bu
 }
 
 async function fork(leaf: string): Promise<void> {
-  const button = paneHost(leaf).querySelector<HTMLButtonElement>('button.detach') as HTMLButtonElement
+  const button = leafEl(leaf).querySelector<HTMLButtonElement>('button.detach') as HTMLButtonElement
   expect(button.disabled).toBe(false)
   button.click()
-  await until(() => paneHost(leaf).querySelector('.term-editor') !== null, `a copy's editor in ${leaf}`)
+  await until(() => leafEl(leaf).querySelector('.term-editor') !== null, `a copy's editor in ${leaf}`)
 }
 
 beforeAll(async () => {
@@ -194,7 +191,7 @@ beforeAll(async () => {
   document.body.innerHTML = SHELL
   source = await (await import('../../src/main')).ready
   source.dispatch({ changes: { from: 0, to: source.state.doc.length, insert: 'let x = 40; x + 2' } })
-  await until(() => document.querySelector<HTMLElement>('#results')?.dataset.state === 'idle', 'the app to settle')
+  await until(stateIdle, 'the app to settle')
   await fork('tm-0')
   await fork('lambda-0')
   await fork('asm-0')

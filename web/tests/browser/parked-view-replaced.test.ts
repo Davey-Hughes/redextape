@@ -1,8 +1,9 @@
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
-import { page, userEvent } from 'vitest/browser'
+import { userEvent } from 'vitest/browser'
 import { LAYOUT_STORAGE_KEY, type LayoutNode, leaves } from '../../src/layout'
 import { parseWorkspace } from '../../src/workspace'
-import { SHELL, until } from './harness'
+import { copyNames, editorsOf, host, mountAt, mounted, newLambdaViewItem, titleText, until } from './harness'
+import { clickToggle } from './user-event-fixture'
 
 /**
  * AN EDIT THAT REPLACES THE ARRANGEMENT A PARKED VIEW IS IN CLOSES THE VIEW — the view layouts spec §4.3 and §5.1.
@@ -33,22 +34,6 @@ const onError = (e: ErrorEvent): void => {
 const FOUR = ['source', 'lambda-0', 'asm-0', 'tm-0']
 const THREE = 'source+lambda+asm'
 
-const leaf = (id: string): HTMLElement | null =>
-  document.querySelector<HTMLElement>(`#views [data-leaf="${id}"]:not([role="tab"])`)
-const titleText = (id: string): string => leaf(id)?.querySelector('.view-title')?.textContent ?? ''
-const mounted = (): string[] =>
-  [...document.querySelectorAll<HTMLElement>('#views [data-leaf]')]
-    .filter((el) => el.getAttribute('role') !== 'tab')
-    .map((el) => el.dataset.leaf as string)
-const press = (kind: string): Promise<void> =>
-  userEvent.click(document.querySelector<HTMLButtonElement>(`#views-shown button[data-shows="${kind}"]`) as HTMLElement)
-const editors = (id: string): number => leaf(id)?.querySelectorAll('.term-editor .cm-editor').length ?? 0
-const copies = (): (string | null)[] => {
-  document.querySelector<HTMLButtonElement>('#buffers')?.click()
-  const rows = [...document.querySelectorAll<HTMLElement>('.buffer-list .buffer-row-name')].map((e) => e.textContent)
-  document.querySelector<HTMLElement>('.buffer-list')?.hidePopover()
-  return rows
-}
 /** The ids each stored tree holds, the one on screen under `screen`. */
 const storedIds = (): Record<string, string[]> => {
   const ws = parseWorkspace(localStorage.getItem(LAYOUT_STORAGE_KEY))
@@ -62,10 +47,7 @@ const storedIds = (): Record<string, string[]> => {
 
 beforeAll(async () => {
   window.addEventListener('error', onError)
-  await page.viewport(1280, 896)
-  document.body.innerHTML = SHELL
-  await (await import('../../src/main')).ready
-  await until(() => document.querySelector<HTMLElement>('#results')?.dataset.state === 'idle', 'the first compile')
+  await mountAt(1280, 896)
 })
 afterAll(() => window.removeEventListener('error', onError))
 
@@ -74,37 +56,33 @@ describe('a parked view of a copy, in an arrangement an edit then replaces', () 
     expect(mounted(), 'precondition: all four views').toEqual(FOUR)
 
     // SOURCE, λ AND ASM, WITH A SECOND λ VIEW ONLY THIS ARRANGEMENT HOLDS, on a copy only that view shows.
-    await press('tm')
+    await clickToggle('tm')
     expect(mounted(), 'precondition: source, λ and asm').toEqual(['source', 'lambda-0', 'asm-0'])
-    leaf('lambda-0')?.querySelector<HTMLElement>('button.view-title')?.focus()
+    host('lambda-0')?.querySelector<HTMLElement>('button.view-title')?.focus()
     await userEvent.click(document.querySelector<HTMLButtonElement>('#new-view') as HTMLButtonElement)
-    const item = (): HTMLButtonElement | undefined =>
-      [...document.querySelectorAll<HTMLButtonElement>('#new-view-menu button')].find(
-        (b) => b.textContent === 'λ · program',
-      )
-    await until(() => item() !== undefined, '+ view’s λ · program')
-    await userEvent.click(item() as HTMLButtonElement)
+    await until(() => newLambdaViewItem() !== undefined, '+ view’s λ · program')
+    await userEvent.click(newLambdaViewItem() as HTMLButtonElement)
     const second = mounted().find((id) => !FOUR.includes(id))
     if (second === undefined) throw new Error('+ view added no second λ view')
-    leaf(second)?.querySelector<HTMLButtonElement>('button.detach')?.click()
-    await until(() => titleText(second) === 'λ · copy 1' && editors(second) === 1, 'the copy and its editor')
-    expect(copies(), 'precondition: one view shows the copy').toEqual(['λ copy 1 · 1 view'])
+    host(second)?.querySelector<HTMLButtonElement>('button.detach')?.click()
+    await until(() => titleText(second) === 'λ · copy 1' && editorsOf(second) === 1, 'the copy and its editor')
+    expect(copyNames(), 'precondition: one view shows the copy').toEqual(['λ copy 1 · 1 view'])
 
     // ALL FOUR: neither tree on the way names the second λ view but the one left, so it is parked.
-    await press('tm')
+    await clickToggle('tm')
     expect(mounted(), 'precondition: all four views, the second λ view off the page').toEqual(FOUR)
     expect(storedIds()[THREE], 'precondition: the arrangement left holds the second λ view').toContain(second)
-    expect(copies(), 'precondition: the parked view counts as a view of its copy').toEqual(['λ copy 1 · 1 view'])
+    expect(copyNames(), 'precondition: the parked view counts as a view of its copy').toEqual(['λ copy 1 · 1 view'])
 
     // THE ✕ LANDS IN SOURCE, λ AND ASM, and what that combination remembered is replaced by all four less TM.
-    await userEvent.click(leaf('tm-0')?.querySelector<HTMLButtonElement>('button.view-close') as HTMLButtonElement)
+    await userEvent.click(host('tm-0')?.querySelector<HTMLButtonElement>('button.view-close') as HTMLButtonElement)
     expect(mounted(), 'precondition: the TM view is closed').toEqual(['source', 'lambda-0', 'asm-0'])
     const trees = storedIds()
     expect(Object.keys(trees), 'precondition: source, λ and asm is on screen, and remembered no longer').not.toContain(
       THREE,
     )
     expect(Object.values(trees).flat(), 'precondition: no tree holds the second λ view').not.toContain(second)
-    expect(copies(), 'a view no tree holds still counts as a view of its copy').toEqual(['λ copy 1 · not shown'])
+    expect(copyNames(), 'a view no tree holds still counts as a view of its copy').toEqual(['λ copy 1 · not shown'])
     expect(errors, 'a handler threw').toEqual([])
   })
 })

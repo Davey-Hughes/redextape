@@ -2,7 +2,8 @@ import { EditorView } from '@codemirror/view'
 import { beforeAll, beforeEach, describe, expect, it } from 'vitest'
 import { page, userEvent } from 'vitest/browser'
 import { LAYOUT_STORAGE_KEY } from '../../src/layout'
-import { drawn, host, SHELL, until } from './harness'
+import { formats, formatsOnALeave, recordFormats } from './format-on-leave-fixture'
+import { drawn, frames, host, SHELL, stateIdle, until } from './harness'
 
 /**
  * A DIVIDER DRAGGED WHILE AN EDITOR HAS THE FOCUS DOES NOT FORMAT IT — the settings menu's *format on blur*, and
@@ -25,20 +26,7 @@ import { drawn, host, SHELL, until } from './harness'
  * a λ copy's editor lost its caret to a drag as the machine copy's did.
  */
 
-/**
- * The document of each format request posted to a worker, in order, read off `Worker`'s own `postMessage` before the
- * app mounts, as `view-keys-format-on-blur.test.ts` reads it.
- */
-const formats: string[] = []
-const post = Worker.prototype.postMessage
-Worker.prototype.postMessage = function (this: Worker, message: unknown, ...rest: unknown[]): void {
-  const sent = message as { kind?: unknown; json?: unknown } | null
-  if (sent?.kind === 'msg' && typeof sent.json === 'string') {
-    const rpc = JSON.parse(sent.json) as { method?: string; params?: { textDocument?: { uri?: string } } }
-    if (rpc.method === 'textDocument/formatting') formats.push(rpc.params?.textDocument?.uri ?? '')
-  }
-  ;(post as (...args: unknown[]) => void).apply(this, [message, ...rest])
-}
+recordFormats()
 
 // BEFORE THE MOUNT, AT MODULE SCOPE: `main()` reads storage once, when it is imported below.
 localStorage.removeItem(LAYOUT_STORAGE_KEY)
@@ -48,8 +36,6 @@ const UNFORMATTED = 'let   x   =   40;\nlet   y   =   2;\nx   +   y'
 
 let view: EditorView
 
-const frames = (): Promise<void> => new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(() => r())))
-const idle = (): boolean => document.querySelector<HTMLElement>('#results')?.dataset.state === 'idle'
 const divider = (): HTMLElement => document.querySelector<HTMLElement>('#views .layout-divider') as HTMLElement
 const share = (): number => Number(divider().getAttribute('aria-valuenow'))
 
@@ -65,21 +51,6 @@ async function drag(): Promise<void> {
 }
 
 /**
- * Put `messy` in `editor` with the focus in it, leave it with a pointer press on the wordmark, and hold that the
- * leave asked for a format and the text changed. Answers the text the server left.
- */
-async function formatsOnALeave(editor: EditorView, messy: string): Promise<string> {
-  editor.dispatch({ changes: { from: 0, to: editor.state.doc.length, insert: messy } })
-  editor.focus()
-  await until(() => editor.hasFocus, 'the editor to take the focus')
-  const before = formats.length
-  await userEvent.click(document.querySelector('.wordmark') as HTMLElement)
-  expect(formats.length, 'precondition: a real leave asks for a format').toBe(before + 1)
-  await until(() => editor.state.doc.toString() !== messy, 'the text to be formatted when the editor is left')
-  return editor.state.doc.toString()
-}
-
-/**
  * Put `messy` in `editor`, put the caret inside it with a click of the driver's on its second line, drag the divider,
  * and hold that nothing asked for a format, that the editor is as it was two frames on, and that a key typed next
  * lands at the caret.
@@ -91,7 +62,7 @@ async function staysAsTypedAcrossADrag(editor: EditorView, messy: string): Promi
   editor.dispatch({ changes: { from: 0, to: editor.state.doc.length, insert: messy } })
   // THE COMPILE THE TEXT STARTED, WHERE THE EDITOR IS THE PROGRAM'S: the page is laid out again when it lands
   // (`view-keys-format-on-blur.test.ts` has the measurement), and a press aimed before that can land elsewhere.
-  await until(idle, 'the compile the text started')
+  await until(stateIdle, 'the compile the text started')
   await userEvent.click(editor.contentDOM.querySelectorAll('.cm-line')[1] as HTMLElement)
   const caret = editor.state.selection.main.head
   expect(editor.hasFocus, 'precondition: the click put the focus in the editor').toBe(true)
@@ -115,7 +86,7 @@ beforeAll(async () => {
   await page.viewport(1280, 896)
   document.body.innerHTML = SHELL
   view = await (await import('../../src/main')).ready
-  await until(idle, 'the first compile')
+  await until(stateIdle, 'the first compile')
   expect(drawn(), 'precondition: a first load’s views, one divider beside both').toBe('row[50](source tm-0)')
   // THE SETTING, TURNED ON AS A USER DOES: `settings`, then its checkbox.
   const settings = document.querySelector('#settings') as HTMLElement
@@ -132,7 +103,7 @@ beforeAll(async () => {
 // typed, and a press on anything then is a leave whose format and compile land while the case is under way.
 beforeEach(async () => {
   expect(await formatsOnALeave(view, UNFORMATTED)).toContain('let x = 40;')
-  await until(idle, 'the compile the format started')
+  await until(stateIdle, 'the compile the format started')
 })
 
 describe('a divider dragged with the pointer from an editor, with format on blur on', () => {

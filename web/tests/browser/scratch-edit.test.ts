@@ -1,7 +1,8 @@
-import { EditorView } from '@codemirror/view'
+import type { EditorView } from '@codemirror/view'
 import { beforeAll, describe, expect, it } from 'vitest'
-import { SHELL, until } from './harness'
+import { editorHost, focusProgram, idle, lambdaTermText, resultsText, SHELL, until } from './harness'
 import { lambdaSettled } from './lambda-text'
+import { typeIntoScratchEditor } from './scratch-editor-fixture'
 
 /**
  * **THE SECOND EDIT GESTURE, DRIVEN THROUGH THE APP** — design §4.3's edit path (`editSink`), plan T8's last
@@ -28,32 +29,13 @@ import { lambdaSettled } from './lambda-text'
  * **`EditorView.findFromDOM` PLUS A REAL CHANGE TRANSACTION, NOT `ScratchEditor#setText`.**
  * `scratch-editor.test.ts`'s own file doc records why: `setText` sets a `#seeding` flag for the
  * duration of its dispatch so a fork's seed is never mistaken for a keystroke, which means calling it
- * here would report zero recompiles instead of one. This file's `type` helper is that file's, aimed
- * at the pane's editor host instead of a bare one.
+ * here would report zero recompiles instead of one. The `typeIntoScratchEditor` this file calls is that file's,
+ * aimed at the pane's editor host instead of a bare one; it lives in `scratch-editor-fixture.ts`.
  */
 
 const SAMPLE = 'let x = 40; x + 2'
 
 let view: EditorView
-
-const resultsText = () => document.querySelector('#results')?.textContent ?? ''
-/**
- * `#results` READS THE FOCUSED VIEW'S SESSION (Plan 7 part 2 spec §9), so a read of the PROGRAM'S result
- * after a copy's view took the focus puts the focus on the program first.
- */
-const focusProgram = () => document.querySelector<HTMLElement>('[data-leaf="source"] .cm-content')?.focus()
-const term = () => document.querySelector('[data-leaf="lambda-0"] .term')?.textContent ?? ''
-const editorHost = () => document.querySelector<HTMLElement>('[data-leaf="lambda-0"] .term-editor')
-const idle = () => document.querySelector<HTMLElement>('#results')?.dataset.state === 'idle' && resultsText() !== ''
-
-/** A real keystroke into the scratch's own editor — see the file doc for why not `setText`. */
-function typeIntoScratchEditor(text: string): void {
-  const host = editorHost()
-  if (host === null) throw new Error('no scratch editor mounted under [data-leaf="lambda-0"]')
-  const cmView = EditorView.findFromDOM(host)
-  if (cmView === null) throw new Error('no CodeMirror view mounted under the editor host')
-  cmView.dispatch({ changes: { from: 0, to: cmView.state.doc.length, insert: text } })
-}
 
 describe('editing the scratch, through the app', () => {
   beforeAll(async () => {
@@ -78,18 +60,18 @@ describe('editing the scratch, through the app', () => {
     document.querySelector<HTMLButtonElement>('[data-leaf="lambda-0"] button.detach')?.click()
     expect(document.querySelector('[data-leaf="lambda-0"] h2')?.textContent).toContain('copy · not linked')
     await until(() => editorHost() !== null, 'the editor to mount')
-    await until(() => term() !== '', 'the scratchpad to produce its first frame')
+    await until(() => lambdaTermText() !== '', 'the scratchpad to produce its first frame')
     await lambdaSettled()
 
     // STAGE 2 — a genuine edit changes the frames region, and the SOURCE's own result is untouched.
     // `onScratchReply` never writes `#results` (its own doc: "never touches `results.dataset.state`
     // at all") — the scratch and the source are two sessions, not one mutable one, which
     // is the whole reason three sessions exist (design §4.3).
-    const beforeEdit = term()
+    const beforeEdit = lambdaTermText()
     typeIntoScratchEditor('(λa. a a) (λb. b)')
-    await until(() => term() !== beforeEdit, 'the edited scratch to recompile')
+    await until(() => lambdaTermText() !== beforeEdit, 'the edited scratch to recompile')
     await lambdaSettled()
-    expect(term()).toContain('b')
+    expect(lambdaTermText()).toContain('b')
     focusProgram()
     expect(resultsText()).toBe(resultsBefore)
 
@@ -98,7 +80,7 @@ describe('editing the scratch, through the app', () => {
     // does to its own panes (`onReply`'s `no-session`: "stale frames must not survive a broken
     // program"), and deliberately so: a scratch mid-edit still has the term it had a keystroke ago.
     await lambdaSettled()
-    const lastGood = term()
+    const lastGood = lambdaTermText()
     typeIntoScratchEditor('(λa.')
     await until(
       () =>
@@ -106,7 +88,7 @@ describe('editing the scratch, through the app', () => {
           .length > 0,
       'the scratch editor to mark the parse error',
     )
-    expect(term()).toBe(lastGood)
+    expect(lambdaTermText()).toBe(lastGood)
 
     // STAGE 4 — RECOMPILING FROM SOURCE LEAVES BOTH THE BUFFER AND THE BOX ALONE, WHERE THIS STAGE
     // USED TO ASSERT THAT IT "retires the scratchpad and takes the editor with it" (5d-i design §4.3:
@@ -121,22 +103,22 @@ describe('editing the scratch, through the app', () => {
     view.dispatch({ changes: { from: 0, to: view.state.doc.length, insert: 'let y = 1; y + 1' } })
     expect(editorHost()).not.toBeNull()
     expect(document.querySelector('[data-leaf="lambda-0"] h2')?.textContent).toContain('copy · not linked')
-    expect(term()).toBe(lastGood)
+    expect(lambdaTermText()).toBe(lastGood)
     // AND THE SOURCE REALLY DID RECOMPILE, so none of the four lines above passed on a keystroke that
     // never reached `schedule`.
     focusProgram()
     await until(() => idle() && resultsText().includes('2'), 'the recompile from source')
     expect(editorHost()).not.toBeNull()
-    expect(term()).toBe(lastGood)
+    expect(lambdaTermText()).toBe(lastGood)
 
     // STAGE 5 — THE BUFFER'S OWN THREAD IS STILL ANSWERING, which is the half a mounted `.term-editor`
     // cannot show: the box would look identical over a session `pool.unbind` had terminated. A real
     // keystroke into it recompiles the SAME buffer (`ScratchBuffers.recompile`), and the frames region
     // moving to the new term is that worker replying after the source recompile that used to kill it.
     typeIntoScratchEditor('(λm. m) (λn. n)')
-    await until(() => term() !== lastGood, 'the buffer to recompile after the source did')
+    await until(() => lambdaTermText() !== lastGood, 'the buffer to recompile after the source did')
     await lambdaSettled()
-    expect(term()).toContain('n')
+    expect(lambdaTermText()).toContain('n')
     expect(document.querySelector('[data-leaf="lambda-0"] h2')?.textContent).toContain('copy · not linked')
   })
 })

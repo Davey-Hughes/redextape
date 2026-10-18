@@ -545,6 +545,13 @@ mod tests {
         t.expect("expected a term")
     }
 
+    /// Parse, desugar and lower `src`, which must be clean.
+    fn lowered(src: &str) -> LambdaTerm {
+        let (program, ds) = crate::parser::parse(src);
+        assert!(ds.is_empty(), "parse errors: {ds:?}");
+        crate::lambda::lower::lower(&crate::desugar::desugar(&program.expect("parsed"))).expect("lowers")
+    }
+
     #[test]
     fn parses_identity_and_application() {
         assert_eq!(parse_ok("\\x. x"), abs("x", var(0)));
@@ -788,13 +795,7 @@ mod tests {
     /// enough to be a hazard in its own right.
     #[test]
     fn the_depth_cap_is_the_callers_number() {
-        use crate::desugar::desugar;
-        use crate::lambda::lower::lower;
-        use crate::parser::parse;
-
-        let (program, ds) = parse("10");
-        assert!(ds.is_empty(), "parse errors: {ds:?}");
-        let t = lower(&desugar(&program.expect("parsed"))).expect("a numeral lowers");
+        let t = lowered("10");
 
         let (_, _, uncapped) = print_lambda_capped(&t, usize::MAX, MAX_TERM_DEPTH);
         assert!(uncapped.is_none(), "an unreachable budget and an unreachable depth must not report truncation");
@@ -806,19 +807,13 @@ mod tests {
 
     #[test]
     fn capped_printing_stops_at_the_budget_and_says_so() {
-        use crate::desugar::desugar;
-        use crate::lambda::lower::lower;
-        use crate::parser::parse;
-
         // A flat 200-element list, then `head` of it. There is no `0..200` range-literal syntax in this
         // parser (list literals are only comma-separated `[a, b, c]`), so this builds the same shape —
         // a sizeable first-order term with no recursion — the way `printed_lowering_of_every_demo_reparses`
-        // builds every other term here: `parse` -> `desugar` -> `lower`, inline.
+        // builds every other term here: `parse` -> `desugar` -> `lower`.
         let items = (0..200).map(|i| i.to_string()).collect::<Vec<_>>().join(", ");
         let src = format!("let xs = [{items}]; head(xs)");
-        let (program, ds) = parse(&src);
-        assert!(ds.is_empty(), "parse errors: {ds:?}");
-        let t = lower(&desugar(&program.expect("parsed"))).expect("first-order demo lowers");
+        let t = lowered(&src);
 
         let (full, _, full_truncated) = print_lambda_capped(&t, usize::MAX, MAX_TERM_DEPTH);
         assert!(full_truncated.is_none(), "an unreachable budget must not report truncation");
@@ -833,18 +828,12 @@ mod tests {
     /// whose full printing is enormous must not first build the enormous string.
     #[test]
     fn the_budget_bounds_the_allocation_not_just_the_result() {
-        use crate::desugar::desugar;
-        use crate::lambda::lower::lower;
-        use crate::parser::parse;
-
         // A single large Church numeral. `MAX_LAMBDA_LOWER_DEPTH` bounds Core AST depth, not numeral
         // magnitude — a bare `Nat` literal has depth 1 regardless of its value — so this lowers to a
         // half-million-node application chain (`encode::church` loops, it does not recurse) from a
         // one-line, depth-1 source program. Its full printing would be megabytes; this test never
         // builds it, only the 128-byte-capped walk runs.
-        let (program, ds) = parse("500000");
-        assert!(ds.is_empty(), "parse errors: {ds:?}");
-        let t = lower(&desugar(&program.expect("parsed"))).expect("large numeral lowers");
+        let t = lowered("500000");
 
         let (short, _, truncated) = print_lambda_capped(&t, 128, MAX_TERM_DEPTH);
         assert_eq!(truncated, Some(Cut::Bytes));
@@ -866,15 +855,9 @@ mod tests {
     /// reported a genuinely cut walk as complete. Only the walk knows, so the walk reports it.
     #[test]
     fn a_term_printing_to_exactly_the_budget_is_not_truncated() {
-        use crate::desugar::desugar;
-        use crate::lambda::lower::lower;
-        use crate::parser::parse;
-
         // A small first-order term, built the same way the neighbouring tests build one: parse ->
-        // desugar -> lower, inline. Small enough that `exact - 1` is a meaningful, distinct budget.
-        let (program, ds) = parse("[1, 2, 3]");
-        assert!(ds.is_empty(), "parse errors: {ds:?}");
-        let t = lower(&desugar(&program.expect("parsed"))).expect("small list demo lowers");
+        // desugar -> lower. Small enough that `exact - 1` is a meaningful, distinct budget.
+        let t = lowered("[1, 2, 3]");
 
         let (full, _, full_truncated) = print_lambda_capped(&t, usize::MAX, MAX_TERM_DEPTH);
         assert!(full_truncated.is_none(), "an unreachable budget must not report truncation");
@@ -917,18 +900,12 @@ mod tests {
     /// frame pushes another space as the stack unwinds and overshoot grows with the argument count.
     #[test]
     fn a_left_nested_application_chain_overshoots_by_at_most_one_token() {
-        use crate::desugar::desugar;
-        use crate::lambda::lower::lower;
-        use crate::parser::parse;
-
         // A user `fn` with eight parameters called with eight arguments, built the way the neighbouring
-        // tests build one: parse -> desugar -> lower, inline. `Core::Apply` lowers the call to a chain
+        // tests build one: parse -> desugar -> lower. `Core::Apply` lowers the call to a chain
         // App(App(App(...App(Var f, 1)...), 8) eight levels deep — the natural shape for "several
         // arguments", not a contrived one.
         let src = "fn f(a, b, c, d, e, g, h, i) { a } f(1, 2, 3, 4, 5, 6, 7, 8)";
-        let (program, ds) = parse(src);
-        assert!(ds.is_empty(), "parse errors: {ds:?}");
-        let t = lower(&desugar(&program.expect("parsed"))).expect("multi-arg call lowers");
+        let t = lowered(src);
 
         // 8 bytes lands the walk exactly at the end of "(λf. f " — the chain's innermost spine leaf plus
         // its trailing separator — so the budget fires right as the stack begins unwinding through all
@@ -1219,13 +1196,7 @@ mod tests {
     /// shorter term. `trace.rs`'s `depth_capped` draws exactly this distinction for `HitCap`.
     #[test]
     fn a_cut_names_the_limit_that_fired() {
-        use crate::desugar::desugar;
-        use crate::lambda::lower::lower;
-        use crate::parser::parse;
-
-        let (program, ds) = parse("10");
-        assert!(ds.is_empty(), "parse errors: {ds:?}");
-        let t = lower(&desugar(&program.expect("parsed"))).expect("a numeral lowers");
+        let t = lowered("10");
 
         let (_, _, none) = print_lambda_capped(&t, usize::MAX, MAX_TERM_DEPTH);
         assert_eq!(none, None, "a walk that ran to completion was not cut");
@@ -1252,13 +1223,7 @@ mod tests {
     /// depth, so bytes is the answer.
     #[test]
     fn when_both_limits_fire_the_byte_cause_is_the_one_reported() {
-        use crate::desugar::desugar;
-        use crate::lambda::lower::lower;
-        use crate::parser::parse;
-
-        let (program, ds) = parse("10");
-        assert!(ds.is_empty(), "parse errors: {ds:?}");
-        let t = lower(&desugar(&program.expect("parsed"))).expect("a numeral lowers");
+        let t = lowered("10");
 
         // Both true at the same bail() call: see the doc comment above for the byte/depth trace.
         let (_, _, both) = print_lambda_capped(&t, 8, 1);

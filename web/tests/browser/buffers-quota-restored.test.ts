@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import { BUFFERS_STORAGE_KEY, serializeBuffers } from '../../src/buffers-store'
-import { SHELL } from './harness'
+import { noticeText, SHELL } from './harness'
 
 /**
  * **THE REGRESSION TEST FOR THE CRITICAL THIS SLICE'S OWN SELF-REVIEW FOUND AND DID NOT FIX ON FIRST
@@ -66,9 +66,6 @@ localStorage.setItem = (key: string, value: string): void => {
   if (key === BUFFERS_STORAGE_KEY) throw new DOMException('quota', 'QuotaExceededError')
   passthroughSetItem(key, value)
 }
-
-/** The notice line's text — where the storage report is said since Plan 7 part 2 (spec §11). */
-const noticeText = (): string => document.querySelector('#notice .notice-text')?.textContent ?? ''
 
 describe('a restored page with a refusing writer', () => {
   /**

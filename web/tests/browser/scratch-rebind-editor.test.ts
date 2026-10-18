@@ -2,7 +2,18 @@ import { EditorView } from '@codemirror/view'
 import { beforeAll, describe, expect, it } from 'vitest'
 import { page } from 'vitest/browser'
 import { bindingKey } from '../../src/view-header'
-import { SHELL, until } from './harness'
+import {
+  editorHost,
+  forkButton,
+  idle,
+  lambdaHeading,
+  lambdaTitle,
+  pickBinding,
+  SHELL,
+  settled,
+  titleOf,
+  until,
+} from './harness'
 
 /**
  * **THE BINDING SELECTOR UNMOUNTS THE EDITOR TOO — regression for the Important finding from the
@@ -33,23 +44,6 @@ import { SHELL, until } from './harness'
  * which is the assertion this file exists for and the reason it is not folded into that one.
  */
 
-/** The title-selector of `leaf`'s view — the pair in force is its `data-binding`. */
-const titleOf = (leaf: string) => document.querySelector<HTMLButtonElement>(`[data-leaf="${leaf}"] button.view-title`)
-
-/** Pick `key` (`bindingKey(leg, session)`) through `leaf`'s title menu, as a user does. */
-function pickBinding(leaf: string, key: string): void {
-  const title = titleOf(leaf)
-  if (title === null) throw new Error(`no title-selector on [data-leaf="${leaf}"]`)
-  title.click()
-  const menu = document.getElementById(title.getAttribute('aria-controls') ?? '')
-  const item = menu?.querySelector<HTMLButtonElement>(`button[data-binding="${key}"]`)
-  if (item == null) {
-    const offered = [...(menu?.querySelectorAll<HTMLButtonElement>('button') ?? [])].map((b) => b.dataset.binding)
-    throw new Error(`[data-leaf="${leaf}"] offers no ${JSON.stringify(key)} — offered: ${JSON.stringify(offered)}`)
-  }
-  item.click()
-}
-
 /** Every pair `leaf`'s title menu offers, as keys — opens and closes the menu to read it. */
 function offered(leaf: string): string[] {
   const title = titleOf(leaf)
@@ -63,10 +57,6 @@ function offered(leaf: string): string[] {
 
 let view: EditorView
 
-const resultsText = () => document.querySelector('#results')?.textContent ?? ''
-const heading = () => document.querySelector('[data-leaf="lambda-0"] h2')?.textContent ?? ''
-const forkButton = () => document.querySelector<HTMLButtonElement>('[data-leaf="lambda-0"] button.detach')
-const selector = () => titleOf('lambda-0')
 /**
  * The λ item's key for the one scratch buffer the λ view's title menu offers — BY ELIMINATION, since the
  * source session is the only λ session whose id `main.ts` writes down.
@@ -85,16 +75,6 @@ const bufferOption = (): string => {
   }
   return only
 }
-const editor = () => document.querySelector('[data-leaf="lambda-0"] .term-editor')
-
-/** `scratch-app.test.ts`'s own `settled`, and the same invariant argument applies — see its doc there. */
-async function settled(src: string): Promise<void> {
-  view.dispatch({ changes: { from: 0, to: view.state.doc.length, insert: src } })
-  await until(
-    () => document.querySelector<HTMLElement>('#results')?.dataset.state === 'idle' && resultsText() !== '',
-    `the app to settle on \`${src}\``,
-  )
-}
 
 // **THE NAME LOST "back to source", WHICH IS THE WHOLE OF WHAT THE SECOND TEST ADDS.** This `describe`
 // read "rebinding a forked λ pane back to source through the binding selector", and two doc comments in
@@ -112,39 +92,36 @@ describe('rebinding a forked λ pane through the binding selector', () => {
     await page.viewport(1280, 896)
     document.body.innerHTML = SHELL
     view = await (await import('../../src/main')).ready
-    await until(
-      () => document.querySelector<HTMLElement>('#results')?.dataset.state === 'idle' && resultsText() !== '',
-      'the first compile',
-    )
+    await until(idle, 'the first compile')
   })
 
   it('removes .term-editor from the DOM — it does not merely drop the "copy · not linked" status', async () => {
-    await settled('let x = 40; x + 2')
+    await settled(view, 'let x = 40; x + 2')
 
     const fork = forkButton()
     if (fork === null) throw new Error('the λ pane should offer a fork on a settled, attached pane')
     fork.click()
-    expect(heading()).toContain('copy · not linked')
+    expect(lambdaHeading()).toContain('copy · not linked')
 
-    await until(() => editor() !== null, 'the editor to mount')
+    await until(() => editorHost() !== null, 'the editor to mount')
     // **THE WAIT IS THE ASSERTION, AND THIS LINE USED TO RESTATE THE WAIT'S OWN PREDICATE.** It read
     // `expect(editor()).not.toBeNull()` — green on every run forever, because `until` had already proved
     // the one thing it checked, and a line that cannot fail is green in exactly the same way as a line
     // that passes.
     //
     // WHAT THE WAIT CANNOT SAY IS THAT ANYTHING LIVE IS UNDER THE HOST, and that is precisely what makes
-    // this test's closing `expect(editor()).toBeNull()` mean something. `.term-editor` is a CLASS that
+    // this test's closing `expect(editorHost()).toBeNull()` mean something. `.term-editor` is a CLASS that
     // `setEditor` writes onto a host which always exists — `LambdaPane`'s own doc: "an empty class means
     // `.term-editor` selects nothing". So a bare classed host with no view inside would satisfy the wait
     // above AND the teardown below, and the file would still report the regression fixed while nothing
     // had ever been mounted or destroyed. `.cm-editor` IS the `EditorView`'s `dom`, which is how
     // `scratch-buffers.test.ts` reads the same fact, and `findFromDOM` returning null over a node that is
     // still in the document is exactly the "destroyed but left behind" state this cannot afford to miss.
-    const mounted = editor()?.querySelector<HTMLElement>('.cm-editor') ?? null
+    const mounted = editorHost()?.querySelector<HTMLElement>('.cm-editor') ?? null
     if (mounted === null) throw new Error('the fork left .term-editor on the pane with no CodeMirror in it')
     expect(EditorView.findFromDOM(mounted)).not.toBeNull()
 
-    const select = selector()
+    const select = lambdaTitle()
     // NOT "a second λ session should have produced a selector", which this message used to say: the
     // control lists `(leg, session)` pairs, and the source session's two legs put it on screen before
     // any fork. What the fork produced is the BUFFER's option, which is what the next line reads.
@@ -161,11 +138,11 @@ describe('rebinding a forked λ pane through the binding selector', () => {
 
     // THE OLD SURFACES STILL PASS: the badge is gone and the selector agrees. Neither of these two
     // assertions is what this test exists for — the one below is.
-    expect(heading()).toBe('λ · program')
+    expect(lambdaHeading()).toBe('λ · program')
     expect(select.dataset.binding).toBe(bindingKey('lambda', 'source'))
     // THE REGRESSION. Without `LambdaPane.setDetached`'s teardown, this stayed non-null: the scratch's
     // editor, still mounted, still listening, over a body now showing the source's term.
-    expect(editor()).toBeNull()
+    expect(editorHost()).toBeNull()
   })
 
   /**
@@ -198,11 +175,10 @@ describe('rebinding a forked λ pane through the binding selector', () => {
   it('hands the editor to custody on a scratch→scratch rebind rather than leaving it over the wrong buffer', async () => {
     // 1. BACK TO A FORKABLE PANE. The test above left `lambda-0` on source with its buffer still live
     //    (nothing ends a buffer implicitly), which is exactly the state a fork needs.
-    await settled('let y = 1; y + y')
-    const p = () => titleOf('lambda-0')
+    await settled(view, 'let y = 1; y + y')
     forkButton()?.click()
-    await until(() => editor() !== null, "the first pane's editor to mount")
-    const bufferA = p()?.dataset.binding ?? ''
+    await until(() => editorHost() !== null, "the first pane's editor to mount")
+    const bufferA = lambdaTitle()?.dataset.binding ?? ''
     expect(bufferA).not.toBe(bindingKey('lambda', 'source'))
 
     // 2. A SECOND λ VIEW ON THE SAME BUFFER, through the real `⋯` menu's "another view of this" entry —
@@ -231,20 +207,20 @@ describe('rebinding a forked λ pane through the binding selector', () => {
     expect(bufferB).not.toBe(bufferA)
     // AND `lambda-0` STILL HOLDS A's EDITOR — asserted, because everything below is about what happens
     // to this exact view and a test that had already lost it would pass vacuously.
-    expect(editor()).not.toBeNull()
+    expect(editorHost()).not.toBeNull()
 
     // 4. THE GESTURE. `lambda-0` goes from buffer A straight to buffer B: detached on both sides, which
     //    is the whole of why the teardown the first test pins does not fire.
-    const first = p()
+    const first = lambdaTitle()
     if (first === null) throw new Error('no title-selector on the first λ view')
     pickBinding('lambda-0', bufferB)
 
     // THE REGRESSION. Without the handover this stayed non-null: buffer A's live CodeMirror, mounted
     // over buffer B's frames, with the edit handler of the time ready to route its keystrokes to B.
-    expect(editor()).toBeNull()
-    expect(p()?.dataset.binding).toBe(bufferB)
+    expect(editorHost()).toBeNull()
+    expect(lambdaTitle()?.dataset.binding).toBe(bufferB)
     // **AND THE NODE IS GONE, NOT MERELY THE CLASS — this line is the one the fix's first version
-    // passed while still shipping the defect.** `editor()` reads `.term-editor`, which is a class on the
+    // passed while still shipping the defect.** `editorHost()` reads `.term-editor`, which is a class on the
     // pane's editor HOST; `takeEditor` stripped it and left `editor.dom` parented underneath, so the
     // view stayed visible and `contenteditable` in a pane bound to another buffer, and a keystroke in
     // it still reached `recompile` — painting a parse error on a different pane's editor. Found by
@@ -257,10 +233,10 @@ describe('rebinding a forked λ pane through the binding selector', () => {
     //    state deferred-a11y item 11's control exists for: `hasEditor(A)` is true because custody has
     //    it, so the control is offered, and clicking it runs the sweep that mounts the SAME view here.
     pickBinding('lambda-0', bufferA)
-    expect(editor()).toBeNull()
+    expect(editorHost()).toBeNull()
     const claim = document.querySelector<HTMLButtonElement>('[data-leaf="lambda-0"] button.claim-editor')
     expect(claim).not.toBeNull()
     claim?.click()
-    await until(() => editor() !== null, "A's editor to come back out of custody")
+    await until(() => editorHost() !== null, "A's editor to come back out of custody")
   })
 })

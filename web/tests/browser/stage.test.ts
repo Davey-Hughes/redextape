@@ -1,25 +1,22 @@
 import type { EditorView } from '@codemirror/view'
 import { beforeAll, describe, expect, it } from 'vitest'
 import { page } from 'vitest/browser'
-import { SHELL, until } from './harness'
+import {
+  clickWorkspaceItem,
+  lambdaControl,
+  lambdaStepText,
+  linkedSource,
+  linkStatus,
+  mounted,
+  SHELL,
+  selectedTab,
+  stageTab,
+  stateIdle,
+  until,
+} from './harness'
 import { lambdaSettled } from './lambda-text'
 
-const pick = (sel: string): void => {
-  document.querySelector<HTMLButtonElement>('#workspace')?.click()
-  document.querySelector<HTMLButtonElement>(`#workspace-menu ${sel}`)?.click()
-  const m = document.querySelector<HTMLElement>('#workspace-menu')
-  if (m?.matches(':popover-open')) m.hidePopover()
-}
 const tabs = (): HTMLElement[] => [...document.querySelectorAll<HTMLElement>('#views [role="tab"]')]
-const tab = (leaf: string): HTMLElement =>
-  document.querySelector<HTMLElement>(`#views [role="tab"][data-leaf="${leaf}"]`) as HTMLElement
-const selected = (): string | undefined =>
-  document.querySelector<HTMLElement>('#views [role="tab"][aria-selected="true"]')?.dataset.leaf
-/** The view hosts on the page — every `[data-leaf]` that is not itself a tab. */
-const mounted = (): string[] =>
-  [...document.querySelectorAll<HTMLElement>('#views [data-leaf]')]
-    .filter((el) => el.getAttribute('role') !== 'tab')
-    .map((el) => el.dataset.leaf as string)
 
 describe('stage', () => {
   /**
@@ -36,14 +33,14 @@ describe('stage', () => {
     document.body.innerHTML = SHELL
     const view: EditorView = await (await import('../../src/main')).ready
     view.dispatch({ changes: { from: 0, to: view.state.doc.length, insert: 'let x = 40; x + 2' } })
-    await until(() => document.querySelector<HTMLElement>('#results')?.dataset.state === 'idle', 'the first compile')
+    await until(stateIdle, 'the first compile')
     treeBeforeStage = JSON.parse(localStorage.getItem('redextape.layout') ?? '{}').tree
     expect(treeBeforeStage, 'no stored tree to compare the arrangement against').toBeDefined()
   })
 
   it('draws one tab per leaf, in leaves() order, over the focused view alone', () => {
     expect(mounted()).toEqual(['source', 'lambda-0', 'asm-0', 'tm-0'])
-    pick('[data-switch="views"][data-value="stage"]')
+    clickWorkspaceItem('[data-switch="views"][data-value="stage"]')
     expect(tabs().map((t) => t.dataset.leaf)).toEqual(['source', 'lambda-0', 'asm-0', 'tm-0'])
     expect(tabs().map((t) => t.textContent)).toEqual(['source', 'λ · program', 'asm · program', 'TM · program'])
     // EXACTLY ONE HOST IS ON THE PAGE; the others are in `pane-host.ts`'s map, off it.
@@ -60,39 +57,39 @@ describe('stage', () => {
   // §5: arrow keys move with a roving tabindex; Enter or Space selects. The tab after λ's is asm's in the
   // four-view tree (Plan 7 part 5 spec §3, row 4).
   it('moves between tabs with the arrow keys and selects with Enter, keeping the focus', () => {
-    expect(tab('lambda-0').tabIndex).toBe(0)
-    expect(tab('asm-0').tabIndex).toBe(-1)
-    tab('lambda-0').focus()
-    tab('lambda-0').dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowRight', bubbles: true }))
-    expect(document.activeElement).toBe(tab('asm-0'))
+    expect(stageTab('lambda-0').tabIndex).toBe(0)
+    expect(stageTab('asm-0').tabIndex).toBe(-1)
+    stageTab('lambda-0').focus()
+    stageTab('lambda-0').dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowRight', bubbles: true }))
+    expect(document.activeElement).toBe(stageTab('asm-0'))
     // **THE TAB STOP MOVES WITH THE FOCUS — a roving `tabindex` that does not rove is not one.** Without
     // this, `Tab` out of the strip and `Shift+Tab` back returns to the SELECTED tab rather than the one
     // the user arrowed to. Selection is manual here, so the stop follows focus, not selection.
-    expect(tab('asm-0').tabIndex, 'the arrowed-to tab is not the tab stop').toBe(0)
-    expect(tab('lambda-0').tabIndex, 'the tab stop was left behind on the selected tab').toBe(-1)
+    expect(stageTab('asm-0').tabIndex, 'the arrowed-to tab is not the tab stop').toBe(0)
+    expect(stageTab('lambda-0').tabIndex, 'the tab stop was left behind on the selected tab').toBe(-1)
     // MOVING IS NOT SELECTING — manual activation, which is what §5's "Enter or Space selects" means.
-    expect(selected()).toBe('lambda-0')
+    expect(selectedTab()).toBe('lambda-0')
     ;(document.activeElement as HTMLElement).dispatchEvent(
       new KeyboardEvent('keydown', { key: 'Enter', bubbles: true }),
     )
-    expect(selected()).toBe('asm-0')
+    expect(selectedTab()).toBe('asm-0')
     expect(mounted()).toEqual(['asm-0'])
     // THE REBUILD DOES NOT DROP THE FOCUS: `renderStage` restores it by `data-leaf`, as `renderLayout`
     // restores a divider by `data-path`/`data-index`.
-    expect(document.activeElement).toBe(tab('asm-0'))
+    expect(document.activeElement).toBe(stageTab('asm-0'))
   })
 
   // §5: "In Stage the ⋯ menu's split items are removed" (umbrella §4 rule 4 — they can never apply
   // there, so they go rather than being disabled).
   it('removes the split items when the stage is chosen', () => {
-    pick('[data-switch="views"][data-value="tiles"]')
+    clickWorkspaceItem('[data-switch="views"][data-value="tiles"]')
     const more = document.querySelector<HTMLButtonElement>('[data-leaf="tm-0"] button.view-more') as HTMLButtonElement
     more.click()
     expect(
       document.querySelector('[data-leaf="tm-0"] button.view-split[data-dir="row"]'),
       'tiles offers no split to remove, so this proves nothing',
     ).not.toBeNull()
-    pick('[data-switch="views"][data-value="stage"]')
+    clickWorkspaceItem('[data-switch="views"][data-value="stage"]')
     // **THE VIEW HAS TO BE ON THE PAGE FOR ITS ABSENT SPLIT ITEMS TO MEAN ANYTHING.** In Stage only the
     // focused leaf's host is in the document, so this selector returns null for a view the stage merely
     // is not showing — a reason that has nothing to do with split items.
@@ -110,7 +107,7 @@ describe('stage', () => {
    * HALF ONE — IS THE MECHANISM REAL? Removing a focused menu item strands the focus on `<body>`.
    */
   it('removing a focused split item would strand the focus on body', () => {
-    pick('[data-switch="views"][data-value="tiles"]')
+    clickWorkspaceItem('[data-switch="views"][data-value="tiles"]')
     const more = document.querySelector<HTMLButtonElement>('[data-leaf="tm-0"] button.view-more') as HTMLButtonElement
     more.click()
     const split = document.querySelector<HTMLButtonElement>(
@@ -138,7 +135,7 @@ describe('stage', () => {
    * way**, which is a fact about the rule rather than about any one of them.
    */
   it('leaves the focus on the gesture that chose the stage, not on a removed split item', () => {
-    pick('[data-switch="views"][data-value="tiles"]')
+    clickWorkspaceItem('[data-switch="views"][data-value="tiles"]')
     const more = document.querySelector<HTMLButtonElement>('[data-leaf="tm-0"] button.view-more') as HTMLButtonElement
     more.click()
     const split = document.querySelector<HTMLButtonElement>(
@@ -146,7 +143,7 @@ describe('stage', () => {
     ) as HTMLButtonElement
     split.focus()
     expect(document.activeElement).toBe(split)
-    pick('[data-switch="views"][data-value="stage"]')
+    clickWorkspaceItem('[data-switch="views"][data-value="stage"]')
     expect(mounted(), 'tm-0 is not the shown view, so its missing split items prove nothing').toEqual(['tm-0'])
     expect(document.querySelector('[data-leaf="tm-0"] button.view-split'), 'nothing was removed').toBeNull()
     expect(document.activeElement).not.toBe(document.body)
@@ -157,7 +154,7 @@ describe('stage', () => {
 
   // §5: "Flipping back to `tiles` shows the arrangement the user left."
   it('gives back the arrangement when the switch goes to tiles', () => {
-    pick('[data-switch="views"][data-value="tiles"]')
+    clickWorkspaceItem('[data-switch="views"][data-value="tiles"]')
     expect(tabs()).toHaveLength(0)
     expect(mounted()).toEqual(['source', 'lambda-0', 'asm-0', 'tm-0'])
     expect(document.querySelectorAll('#views .layout-divider').length).toBeGreaterThan(0)
@@ -184,34 +181,34 @@ describe('stage', () => {
    * selection is.
    */
   it('skips a hidden view, and brings it up to date when its tab is selected', () => {
-    pick('[data-switch="views"][data-value="tiles"]')
+    clickWorkspaceItem('[data-switch="views"][data-value="tiles"]')
     // THE HOST REFERENCE IS TAKEN IN TILES: a detached host is not reachable by `document.querySelector`,
     // and `[data-leaf="tm-0"]` would match the tm-0 TAB instead, which is connected.
     const host = document.querySelector<HTMLElement>('[data-leaf="tm-0"]') as HTMLElement
     expect(host.getAttribute('role'), 'that is a tab, not a host').not.toBe('tab')
     expect(host.querySelector('.view-steps .controls'), 'the TM view has no step controls to lose').not.toBeNull()
 
-    pick('[data-switch="views"][data-value="stage"]')
-    tab('lambda-0').click()
+    clickWorkspaceItem('[data-switch="views"][data-value="stage"]')
+    stageTab('lambda-0').click()
     expect(host.isConnected, 'the TM host is on the page, so this proves nothing').toBe(false)
 
     // HALF ONE — `draw()` SKIPPED IT. The switch is now `bar`, so every view that `draw()` reached has had
     // its step slot taken away; this one is off the page and still has its own.
-    pick('[data-switch="steps"][data-value="bar"]')
+    clickWorkspaceItem('[data-switch="steps"][data-value="bar"]')
     expect(
       host.querySelector('.view-steps .controls'),
       'the hidden view was painted: its step controls were taken away while it was off the page',
     ).not.toBeNull()
 
     // HALF TWO — SELECTING ITS TAB BRINGS IT CURRENT, in one `draw()`.
-    tab('tm-0').click()
+    stageTab('tm-0').click()
     expect(host.isConnected).toBe(true)
     expect(
       host.querySelector('.view-steps .controls'),
       'selecting the tab did not bring the view up to date',
     ).toBeNull()
 
-    pick('[data-preset="explorer"]')
+    clickWorkspaceItem('[data-preset="explorer"]')
   })
 
   /**
@@ -227,45 +224,38 @@ describe('stage', () => {
     const view: EditorView = await (await import('../../src/main')).ready
     const src = view.state.doc.toString()
     expect(src).toBe('let x = 40; x + 2')
-    const linkStatus = () => document.querySelector('#link-status')?.textContent ?? ''
-    const linkedSource = () => document.querySelector('.cm-editor .linked')?.textContent ?? ''
     const linkAt = (pos: number): void => {
       view.dispatch({ selection: { anchor: pos } })
       view.contentDOM.dispatchEvent(new KeyboardEvent('keydown', { key: "'", ctrlKey: true, cancelable: true }))
     }
-    const stepText = () => document.querySelector('[data-leaf="lambda-0"] .step')?.textContent ?? ''
-    const control = (label: string) =>
-      [...document.querySelectorAll<HTMLButtonElement>('[data-leaf="lambda-0"] .controls button')]
-        .find((b) => b.textContent === label)
-        ?.click()
     const NO_NODE = 'this construct has no node in the λ term at this step'
 
-    pick('[data-switch="views"][data-value="stage"]')
-    pick('[data-switch="steps"][data-value="view"]')
-    tab('lambda-0').click()
+    clickWorkspaceItem('[data-switch="views"][data-value="stage"]')
+    clickWorkspaceItem('[data-switch="steps"][data-value="view"]')
+    stageTab('lambda-0').click()
     expect(mounted()).toEqual(['lambda-0'])
-    await until(() => stepText() !== '' && !stepText().includes('not run'), 'the λ leg to run')
-    control('↺')
-    control('▶')
-    expect(stepText()).toContain('step 1')
+    await until(() => lambdaStepText() !== '' && !lambdaStepText().includes('not run'), 'the λ leg to run')
+    lambdaControl('↺')
+    lambdaControl('▶')
+    expect(lambdaStepText()).toContain('step 1')
     await lambdaSettled()
 
     // `40` HAS NO NODE AT STEP 1, and the view on the page says so; off the page, nothing is said.
-    tab('source').click()
+    stageTab('source').click()
     expect(mounted()).toEqual(['source'])
     linkAt(src.indexOf('40'))
     await until(() => linkedSource() === '40', '40 to be linked')
     expect(linkStatus(), 'no λ view is on the page to say anything about').not.toContain('λ')
-    tab('lambda-0').click()
+    stageTab('lambda-0').click()
     await lambdaSettled()
     expect(linkStatus()).toContain(NO_NODE)
 
     // `x + 2` HAS ONE, and the hidden view must not answer for the `40` it last drew.
-    tab('source').click()
+    stageTab('source').click()
     linkAt(src.indexOf('+'))
     await until(() => linkedSource() === 'x + 2', 'x + 2 to be linked')
     expect(linkStatus(), 'the hidden λ view answered for the pin it last drew').not.toContain('λ')
-    tab('lambda-0').click()
+    stageTab('lambda-0').click()
     await until(() => document.querySelector('[data-leaf="lambda-0"] .term .is-linked') !== null, 'x + 2 marked')
     expect(linkStatus()).not.toContain('λ')
 
@@ -289,14 +279,14 @@ describe('stage', () => {
       'the focus is not in the created view, so nothing marked it active',
     ).toBe(true)
 
-    tab('source').click()
+    stageTab('source').click()
     linkAt(src.indexOf('40'))
     await until(() => linkedSource() === '40', '40 to be linked again')
-    tab('lambda-0').click()
+    stageTab('lambda-0').click()
     expect(mounted()).toEqual(['lambda-0'])
     await lambdaSettled()
     expect(linkStatus(), 'the λ view on the page did not answer').toContain(NO_NODE)
 
-    pick('[data-preset="explorer"]')
+    clickWorkspaceItem('[data-preset="explorer"]')
   })
 })

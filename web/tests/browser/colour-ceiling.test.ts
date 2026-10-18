@@ -1,7 +1,7 @@
 import type { EditorView } from '@codemirror/view'
 import { beforeAll, describe, expect, it } from 'vitest'
 import { COLOUR_CEILING_UNITS } from '../../src/colour'
-import { SHELL, until } from './harness'
+import { noticeText, SHELL, until } from './harness'
 
 /**
  * **THE OVER-THE-CEILING NOTICE — design §10's fourth row, over the running app.**
@@ -48,9 +48,6 @@ const LINE = `// ${'z'.repeat(96)}\n`
 const OVER = LINE.repeat(Math.ceil((COLOUR_CEILING_UNITS + 1) / LINE.length))
 
 const sourceContent = () => document.querySelector<HTMLElement>('[data-leaf="source"] .cm-content')
-
-/** What the notice line says, or `''` while it says nothing. */
-const noticeText = () => document.querySelector('#notice .notice-text')?.textContent ?? ''
 
 describe('a document past the colour ceiling', () => {
   let view: EditorView

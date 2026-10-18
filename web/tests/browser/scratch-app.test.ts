@@ -1,7 +1,22 @@
 import type { EditorView } from '@codemirror/view'
 import { beforeAll, describe, expect, it } from 'vitest'
 import { bindingKey } from '../../src/view-header'
-import { SHELL, until } from './harness'
+import {
+  clickLambda,
+  focusProgram,
+  forkButton,
+  idle,
+  lambdaHeading,
+  lambdaStepText,
+  lambdaTermText,
+  lambdaTitle,
+  linkStatus,
+  resultsText,
+  SHELL,
+  settled,
+  titleOf,
+  until,
+} from './harness'
 import { lambdaSettled } from './lambda-text'
 
 /**
@@ -30,19 +45,6 @@ import { lambdaSettled } from './lambda-text'
 
 let view: EditorView
 
-const resultsText = () => document.querySelector('#results')?.textContent ?? ''
-/**
- * `#results` READS THE FOCUSED VIEW'S SESSION (Plan 7 part 2 spec §9), so a read of the PROGRAM'S result
- * after a copy's view took the focus puts the focus on the program first.
- */
-const focusProgram = () => document.querySelector<HTMLElement>('[data-leaf="source"] .cm-content')?.focus()
-const term = () => document.querySelector('[data-leaf="lambda-0"] .term')?.textContent ?? ''
-const step = () => document.querySelector('[data-leaf="lambda-0"] .step')?.textContent ?? ''
-const heading = () => document.querySelector('[data-leaf="lambda-0"] h2')?.textContent ?? ''
-const forkButton = () => document.querySelector<HTMLButtonElement>('[data-leaf="lambda-0"] button.detach')
-/** The title-selector of the λ view — the pair in force is its `data-binding`. */
-const titleOf = (leaf: string) => document.querySelector<HTMLButtonElement>(`[data-leaf="${leaf}"] button.view-title`)
-const selector = () => titleOf('lambda-0')
 /**
  * The title menu's λ items, as `{ key, text }` — WHICH SESSIONS OFFER A λ LEG, which is the question every
  * assertion in this file was really asking of the selector before it listed both legs. Opens and closes
@@ -53,7 +55,7 @@ const selector = () => titleOf('lambda-0')
  * about λ.
  */
 const lambdaOptionElements = (): { key: string; text: string }[] => {
-  const title = selector()
+  const title = lambdaTitle()
   if (title === null) return []
   title.click()
   const menu = document.getElementById(title.getAttribute('aria-controls') ?? '')
@@ -74,31 +76,13 @@ function pickBinding(leaf: string, key: string): void {
   if (item == null) throw new Error(`[data-leaf="${leaf}"] offers no ${JSON.stringify(key)}`)
   item.click()
 }
-const statusLine = () => document.querySelector('#link-status')?.textContent ?? ''
-
-/** `app.test.ts`'s `settled`, and the same invariant argument applies — see its doc there. */
-async function settled(src: string): Promise<void> {
-  view.dispatch({ changes: { from: 0, to: view.state.doc.length, insert: src } })
-  await until(
-    () => document.querySelector<HTMLElement>('#results')?.dataset.state === 'idle' && resultsText() !== '',
-    `the app to settle on \`${src}\``,
-  )
-}
-
-const clickLambda = (label: string) => {
-  const b = [...document.querySelectorAll<HTMLButtonElement>('[data-leaf="lambda-0"] .controls button')].find(
-    (x) => x.textContent === label,
-  )
-  if (b === undefined) throw new Error(`no \`${label}\` button in the λ pane`)
-  b.click()
-}
 
 /**
  * Rewrite every BINDER-INTRODUCED name to a canonical `v<depth>`, leaving every other identifier
  * exactly as printed, so two prints of ALPHA-EQUIVALENT terms compare equal regardless of which
  * concrete fresh names the printer chose for their binders.
  *
- * **ADDED BY T8, AND THE FINDING IT RECORDS IS WORTH KEEPING.** This test used to compare `term()`
+ * **ADDED BY T8, AND THE FINDING IT RECORDS IS WORTH KEEPING.** This test used to compare `lambdaTermText()`
  * against `seed` with plain string equality — correct while the seed WAS the pane's own frame text
  * reparsed at `step: 0` (5d-i's stopgap), because that path never gave the printer's name generator a
  * reason to walk differently. Design §4.1 replaced that seed: the scratch's step 0 is now derived from
@@ -151,7 +135,7 @@ const clickLambda = (label: string) => {
  * **WHAT THIS DOES NOT HANDLE, SAID PLAINLY.** It trusts the input to be `print_lambda`'s own grammar —
  * adversarial text with, say, redundant parens around a bare variable would not necessarily scope the
  * way this function assumes. That is not the same claim as "every caller feeds it real printer output":
- * the `describe('alphaCanonical', …)` tests below feed hand-typed literals, not a `term()` read off the
+ * the `describe('alphaCanonical', …)` tests below feed hand-typed literals, not a `lambdaTermText()` read off the
  * DOM — but every one of them is still valid instances of that grammar (properly paired parens, no
  * padding around a bare variable), so the assumption holds for them regardless of where the string came
  * from. `?<N>`-spelled genuinely free de Bruijn references (`syntax.rs`'s `write`,
@@ -209,10 +193,7 @@ describe('the fork control, end to end', () => {
     // not enough. Neither key needs clearing here any more.
     document.body.innerHTML = SHELL
     view = await (await import('../../src/main')).ready
-    await until(
-      () => document.querySelector<HTMLElement>('#results')?.dataset.state === 'idle' && resultsText() !== '',
-      'the first compile',
-    )
+    await until(idle, 'the first compile')
   })
 
   /**
@@ -224,7 +205,7 @@ describe('the fork control, end to end', () => {
    * acts.
    */
   it('forks the λ pane onto a buffer seeded with the term it was showing, keeps it across a recompile, and comes home through the selector', async () => {
-    await settled('let x = 40; x + 2')
+    await settled(view, 'let x = 40; x + 2')
 
     // STAGE 1 — attached, and the app looks exactly as T7 left it, modulo one gate T8 removed and one
     // control T7's own successor widened. The fork control is present because the pane is attached —
@@ -239,7 +220,7 @@ describe('the fork control, end to end', () => {
     // session offers λ until a fork happens — is what the λ group's own contents say, and that is what
     // is asserted instead. `main.ts`'s note on registering the source session carries the same
     // correction.
-    expect(heading()).toBe('λ · program')
+    expect(lambdaHeading()).toBe('λ · program')
     expect(lambdaOptions()).toEqual(['λ · program'])
     expect(forkButton()).not.toBeNull()
 
@@ -255,26 +236,26 @@ describe('the fork control, end to end', () => {
     clickLambda('▶')
     clickLambda('▶')
     await lambdaSettled()
-    const seed = term()
-    expect(step()).toContain('step 2 of')
+    const seed = lambdaTermText()
+    expect(lambdaStepText()).toContain('step 2 of')
     expect(seed).not.toBe('')
 
     // STAGE 2 — the fork. Everything up to the first reply is synchronous, so this is asserted
     // without a wait: the pane is on the scratchpad, says so, and has a selector to come back with.
     document.querySelector<HTMLButtonElement>('[data-leaf="lambda-0"] button.detach')?.click()
 
-    expect(heading()).toContain('copy · not linked')
+    expect(lambdaHeading()).toContain('copy · not linked')
     // §4.5's OTHER SURFACE, and the pairing is the point: the badge is the glanceable one and the
     // status line is the authoritative narration. `link-wiring.ts`'s `detachedPanes` reads the same
     // `SessionEntry.detached` the badge does, so the two cannot disagree.
-    expect(statusLine()).toContain('λ view shows a copy')
+    expect(linkStatus()).toContain('λ view shows a copy')
     // The control is gone, because a pane already on the scratchpad has nothing to fork — and the
     // selector is the affordance for the same intent that still works: it is how a user comes back.
     // It did not ARRIVE here, which this comment used to say. Since the control started listing
     // `(leg, session)` pairs it has been on screen since STAGE 1; what the fork changed is the λ
     // group's contents, asserted two lines below.
     expect(forkButton()).toBeNull()
-    const select = selector()
+    const select = lambdaTitle()
     if (select === null) throw new Error('the pane selector should be on screen from the first paint')
     // THE λ GROUP, NOT `select.options`, WHICH FLATTENS THE GROUPS AWAY. The TM group is beside it and
     // holds the source session's TM leg, which this stage says nothing about; what the fork changed is
@@ -301,8 +282,8 @@ describe('the fork control, end to end', () => {
     // BEFORE ANY REPLY: the leg exists and has nothing in it yet, and the step readout says which of
     // those two it is. `controlState` renders `reason` while `!available`, which is what
     // `ScratchBuffers` seeds the leg's status with rather than leaving it `''`.
-    expect(step()).toBe('building…')
-    expect(term()).toBe('')
+    expect(lambdaStepText()).toBe('building…')
+    expect(lambdaTermText()).toBe('')
 
     // STAGE 3 — the scratchpad reduces, on its own thread, from the term the pane was showing.
     //
@@ -312,9 +293,12 @@ describe('the fork control, end to end', () => {
     // leg under a new name — would read `of 7` here. `doneText` appends nothing for `'ended'` and the
     // trailing `…` is `controls.ts`'s "more can still be recorded", so waiting for its absence is
     // waiting for the reduction to finish rather than for a frame to exist.
-    await until(() => step().startsWith('step') && !step().endsWith('…'), 'the scratchpad to finish reducing')
+    await until(
+      () => lambdaStepText().startsWith('step') && !lambdaStepText().endsWith('…'),
+      'the scratchpad to finish reducing',
+    )
     // ON ITS STEP 0, where a run opens (`History`), with all five recorded.
-    expect(step()).toBe('step 0 of 5')
+    expect(lambdaStepText()).toBe('step 0 of 5')
 
     // And its step 0 is the (alpha-equivalent) term the pane was showing when the button was clicked
     // — not `seed` byte-for-byte, and that is §4.1 rather than a slip: the scratch's step 0 is
@@ -322,27 +306,27 @@ describe('the fork control, end to end', () => {
     // came from — see `alphaCanonical`'s doc above for the diff this comparison would otherwise trip
     // on.
     clickLambda('↺')
-    expect(step()).toBe('step 0 of 5')
+    expect(lambdaStepText()).toBe('step 0 of 5')
     await lambdaSettled()
     // WHITESPACE SQUEEZED OUT: the copy's names can be longer (`x0` where the program printed `x`), so the
     // same term can break across lines where the program's did not, and a line break is not a space.
-    expect(alphaCanonical(term()).replace(/\s/g, '')).toBe(alphaCanonical(seed).replace(/\s/g, ''))
+    expect(alphaCanonical(lambdaTermText()).replace(/\s/g, '')).toBe(alphaCanonical(seed).replace(/\s/g, ''))
 
     // STAGE 4 — A RECOMPILE FROM SOURCE LEAVES THE BUFFER ALONE, AND THIS STAGE USED TO ASSERT THE
     // EXACT OPPOSITE. It read "recompile from source retires it. Synchronous on the keystroke", and
-    // checked `heading()` back to `lambda`, the status line without `detached`, and `lambdaOptions()`
+    // checked `lambdaHeading()` back to `lambda`, the status line without `detached`, and `lambdaOptions()`
     // down to `['source']` — the registry having genuinely lost a session. 5d-ii-c decision 2 (design
     // §4.3's table: "recompile from source: ended it -> **survives**") deletes that retire, so a
     // keystroke in the source editor is no longer an event in the buffer's life at all. The same three
     // surfaces are read here, inverted, plus the term — because a buffer that survived the keystroke
     // and was silently re-seeded from the new program would satisfy all three and still have thrown
     // the user's work away.
-    const bufferTerm = term()
+    const bufferTerm = lambdaTermText()
     view.dispatch({ changes: { from: 0, to: view.state.doc.length, insert: 'let x = 40; x + 5' } })
 
     // SYNCHRONOUSLY, because that is when the retire used to happen — before the debounce was armed.
-    expect(heading()).toContain('copy · not linked')
-    expect(statusLine()).toContain('λ view shows a copy')
+    expect(lambdaHeading()).toContain('copy · not linked')
+    expect(linkStatus()).toContain('λ view shows a copy')
     expect(lambdaOptions()).toHaveLength(2)
     expect(select.dataset.binding).toBe(buffer?.key)
 
@@ -355,10 +339,10 @@ describe('the fork control, end to end', () => {
     // keystroke reached `schedule` rather than doing nothing. The pane is still detached, still on the
     // same buffer, and still at the buffer's step 0: not the source's newly recorded leg, and not a
     // re-seed of the buffer from it.
-    expect(heading()).toContain('copy · not linked')
+    expect(lambdaHeading()).toContain('copy · not linked')
     expect(select.dataset.binding).toBe(buffer?.key)
-    expect(step()).toBe('step 0 of 5')
-    expect(term()).toBe(bufferTerm)
+    expect(lambdaStepText()).toBe('step 0 of 5')
+    expect(lambdaTermText()).toBe(bufferTerm)
     // The fork control stays away for the reason it went away: this pane is still on a buffer.
     expect(forkButton()).toBeNull()
 
@@ -367,15 +351,15 @@ describe('the fork control, end to end', () => {
     // `scratch-rebind-editor.test.ts` is where the editor's half of this rebind is pinned.
     pickBinding('lambda-0', bindingKey('lambda', 'source'))
 
-    expect(heading()).toBe('λ · program')
-    expect(statusLine()).not.toContain('shows a copy')
+    expect(lambdaHeading()).toBe('λ · program')
+    expect(linkStatus()).not.toContain('shows a copy')
     // The pane is showing the SOURCE session's newly recorded leg — on its step 0, with no trailing
     // `…`, which is a leg that ran to its end rather than the buffer's leftovers. The fork control is
     // back for the same reason it went away: this pane is attached again.
     expect(forkButton()).not.toBeNull()
-    expect(step()).toMatch(/^step \d+ of \d+$/)
-    expect(term()).not.toBe('')
-    expect(term()).not.toBe(bufferTerm)
+    expect(lambdaStepText()).toMatch(/^step \d+ of \d+$/)
+    expect(lambdaTermText()).not.toBe('')
+    expect(lambdaTermText()).not.toBe(bufferTerm)
     // **AND THE BUFFER IS STILL THERE, WHICH IS THE HALF A REBIND IS NOT.** Coming home moves the pane;
     // it ends nothing, so the λ group still offers the buffer to go back to. Under the old behaviour
     // this list was `['source']` by now and there was nothing to go back to.

@@ -2,7 +2,7 @@ import type { EditorView } from '@codemirror/view'
 import { beforeAll, describe, expect, it } from 'vitest'
 import { page, userEvent } from 'vitest/browser'
 import { OVERSCAN, ROW_HEIGHT, TmPane } from '../../src/tm-pane'
-import { SHELL, until } from './harness'
+import { control, frame, idle, SHELL, stateTable, tmPane, until } from './harness'
 
 /**
  * The rule table as a grid, and as a share of its view's height — Plan 7 part 4, spec §9.1 and §9.2
@@ -16,28 +16,18 @@ let view: EditorView
 
 const SAMPLE = 'let x = 40; x + 2'
 
-const pane = () => document.querySelector('[data-leaf="tm-0"]') as HTMLElement
-const grid = () => pane().querySelector('.state-table') as HTMLElement
-const rows = () => [...pane().querySelectorAll<HTMLElement>('.state-row')]
-const rowCount = () => Number(grid().getAttribute('aria-rowcount'))
+const rows = () => [...tmPane().querySelectorAll<HTMLElement>('.state-row')]
+const rowCount = () => Number(stateTable().getAttribute('aria-rowcount'))
 /** The row `aria-activedescendant` names, by its 0-based index over the whole table. */
 const activeIndex = () => {
-  const id = grid().getAttribute('aria-activedescendant')
+  const id = stateTable().getAttribute('aria-activedescendant')
   const cell = id === null ? null : document.getElementById(id)
   return cell === null ? null : Number(cell.closest('[role="row"]')?.getAttribute('aria-rowindex')) - 1
 }
-const frame = () => new Promise<void>((r) => requestAnimationFrame(() => r()))
-const stepButton = (label: string) =>
-  [...pane().querySelectorAll<HTMLButtonElement>('.controls button')].find((b) => b.textContent === label)
 
 async function settled(src: string): Promise<void> {
   view.dispatch({ changes: { from: 0, to: view.state.doc.length, insert: src } })
-  await until(
-    () =>
-      document.querySelector<HTMLElement>('#results')?.dataset.state === 'idle' &&
-      (document.querySelector('#results')?.textContent ?? '') !== '',
-    'the app to settle',
-  )
+  await until(idle, 'the app to settle')
   await until(() => rows().length > 0, 'the rule table to draw')
 }
 
@@ -53,10 +43,10 @@ beforeAll(async () => {
 
 describe('the rule table as a grid', () => {
   it('is one tab stop, counted over the whole table, with one cell per row', () => {
-    expect(grid().getAttribute('role')).toBe('grid')
-    expect(grid().tabIndex).toBe(0)
+    expect(stateTable().getAttribute('role')).toBe('grid')
+    expect(stateTable().tabIndex).toBe(0)
     // The count is the whole table's, not the drawn window's: the spacer carries the same number in pixels.
-    const spacer = pane().querySelector('.state-spacer') as HTMLElement
+    const spacer = tmPane().querySelector('.state-spacer') as HTMLElement
     expect(rowCount() * ROW_HEIGHT).toBe(Number.parseFloat(spacer.style.height))
     expect(rows().length).toBeLessThan(rowCount())
     for (const row of rows()) {
@@ -71,11 +61,11 @@ describe('the rule table as a grid', () => {
   it('says which state is current and which rule fires next', async () => {
     // At step 0, where a run opens (`History`), a rule fires next; at the frontier the machine sits in `halt`, where
     // none does.
-    await until(() => pane().querySelector('.state-row.is-next') !== null, 'a rule to be about to fire')
-    const current = grid().querySelectorAll('[aria-current="step"]')
+    await until(() => tmPane().querySelector('.state-row.is-next') !== null, 'a rule to be about to fire')
+    const current = stateTable().querySelectorAll('[aria-current="step"]')
     expect(current).toHaveLength(1)
     expect(current[0]?.classList.contains('is-current')).toBe(true)
-    const next = pane().querySelector('.state-row.is-next > [role="gridcell"]') as HTMLElement
+    const next = tmPane().querySelector('.state-row.is-next > [role="gridcell"]') as HTMLElement
     expect(next.dataset.marks).toBe('fires next')
     // THE WORDS ARE READ, AND ARE NOT THE ROW'S TEXT: generated content carries them.
     expect(getComputedStyle(next, '::before').content).toBe('"fires next"')
@@ -83,7 +73,7 @@ describe('the rule table as a grid', () => {
   })
 
   it('moves the active row by index, past the rows the table has drawn', async () => {
-    grid().focus()
+    stateTable().focus()
     await userEvent.keyboard('{End}')
     const last = rowCount() - 1
     expect(activeIndex()).toBe(last)
@@ -99,7 +89,7 @@ describe('the rule table as a grid', () => {
     await userEvent.keyboard('{PageUp}')
     expect(activeIndex()).toBe(1)
     // Keys that scrolled took the table off the machine: following is detached, and its control offered.
-    const reattach = pane().querySelector('.table-reattach') as HTMLElement
+    const reattach = tmPane().querySelector('.table-reattach') as HTMLElement
     expect(reattach.hidden).toBe(false)
     // Following again scrolls the view back to the current state, near the table's top, and an active row left
     // at the far end comes with it: still named, so still a row the table has drawn.
@@ -113,17 +103,17 @@ describe('the rule table as a grid', () => {
   it("links the active row's state on Enter, as a click does", async () => {
     // `pc0`, the first state the program owns: the table opens on `halt` and `overflow`, which belong to no
     // construct and so link nothing.
-    grid().focus()
+    stateTable().focus()
     await userEvent.keyboard('{Home}')
     const pc0 = rows().find((r) => r.textContent === 'pc0') as HTMLElement
     const at = Number(pc0.getAttribute('aria-rowindex')) - 1
     for (let i = 0; i < at; i += 1) await userEvent.keyboard('{ArrowDown}')
     expect(activeIndex()).toBe(at)
-    expect(pane().querySelector('.state-row.is-linked')).toBeNull()
+    expect(tmPane().querySelector('.state-row.is-linked')).toBeNull()
     await userEvent.keyboard('{Enter}')
-    await until(() => pane().querySelector('.state-row.is-linked') !== null, 'the state to be linked')
+    await until(() => tmPane().querySelector('.state-row.is-linked') !== null, 'the state to be linked')
     expect(
-      pane()
+      tmPane()
         .querySelector(`[aria-rowindex="${at + 1}"]`)
         ?.classList.contains('is-linked'),
     ).toBe(true)
@@ -132,7 +122,7 @@ describe('the rule table as a grid', () => {
 
 describe('the tapes (spec §9.3)', () => {
   it('are labelled groups that say where each head is and what it reads', () => {
-    const tapes = [...pane().querySelectorAll<HTMLElement>('.tape')]
+    const tapes = [...tmPane().querySelectorAll<HTMLElement>('.tape')]
     expect(tapes).toHaveLength(5)
     for (const tape of tapes) {
       expect(tape.getAttribute('role')).toBe('group')
@@ -147,28 +137,28 @@ describe('the tapes (spec §9.3)', () => {
 describe("the rule table's height is its view's (spec §9.1)", () => {
   it('shares the view with the state diagram, two to one, and fills it', () => {
     // No `max-height` of its own: the view's flex layout is what bounds it.
-    expect(getComputedStyle(grid()).maxHeight).toBe('none')
-    const diagram = pane().querySelector('[data-panel="diagram"]') as HTMLElement
+    expect(getComputedStyle(stateTable()).maxHeight).toBe('none')
+    const diagram = tmPane().querySelector('[data-panel="diagram"]') as HTMLElement
     // The last open panel runs to the view's bottom edge, and the view does not scroll.
-    expect(Math.abs(pane().getBoundingClientRect().bottom - diagram.getBoundingClientRect().bottom)).toBeLessThan(2)
-    expect(pane().scrollHeight).toBeLessThanOrEqual(pane().clientHeight + 1)
+    expect(Math.abs(tmPane().getBoundingClientRect().bottom - diagram.getBoundingClientRect().bottom)).toBeLessThan(2)
+    expect(tmPane().scrollHeight).toBeLessThanOrEqual(tmPane().clientHeight + 1)
     const ratio =
-      grid().getBoundingClientRect().height /
+      stateTable().getBoundingClientRect().height /
       (diagram.querySelector('.state-diagram') as HTMLElement).getBoundingClientRect().height
     expect(ratio).toBeGreaterThan(1.6)
     expect(ratio).toBeLessThan(2.4)
     // And every row the table shows is drawn: the rows reach the table's own bottom edge.
     const drawn = rows().at(-1)?.getBoundingClientRect().bottom ?? 0
-    expect(drawn).toBeGreaterThanOrEqual(grid().getBoundingClientRect().bottom - 1)
+    expect(drawn).toBeGreaterThanOrEqual(stateTable().getBoundingClientRect().bottom - 1)
   })
 
   it('gives the outline one share beside them, and redraws the rows when its share changes', async () => {
     // Following, to begin with: the keys above took the table off the machine.
-    const reattach = pane().querySelector('.table-reattach') as HTMLElement
+    const reattach = tmPane().querySelector('.table-reattach') as HTMLElement
     if (!reattach.hidden) reattach.click()
-    pane().querySelector<HTMLButtonElement>('button.detach')?.click()
-    await until(() => pane().querySelector('.term-editor') !== null, 'the copy to mount its editor')
-    const outline = pane().querySelector('[data-panel="outline"]') as HTMLElement
+    tmPane().querySelector<HTMLButtonElement>('button.detach')?.click()
+    await until(() => tmPane().querySelector('.term-editor') !== null, 'the copy to mount its editor')
+    const outline = tmPane().querySelector('[data-panel="outline"]') as HTMLElement
     await until(() => !outline.hidden, 'the outline to appear with the editor')
     await until(() => rows().length > 0, 'the copy to draw its table')
     // **AT A STEP WHOSE ROW IS PAST THE TABLE'S TOP, CHOSEN RATHER THAN CAUGHT.** The check below needs the table
@@ -177,14 +167,14 @@ describe("the rule table's height is its view's (spec §9.1)", () => {
     // the copy's recording had painted when its rows appeared: a step mid-run while each chunk painted as it came,
     // and as often as not the recording's end, `halt` at the table's top, once a chunk's paint waited for the next
     // animation frame (`replies.ts`'s `scheduleDraw`). So the recording finishes, and the copy is stepped to step 1.
-    const stepText = () => pane().querySelector('.step')?.textContent ?? ''
+    const stepText = () => tmPane().querySelector('.step')?.textContent ?? ''
     await until(() => /^step [\d,]+ of [\d,]+$/.test(stepText()), 'the copy to finish recording')
-    stepButton('↺')?.click()
-    stepButton('▶')?.click()
+    control('↺')?.click()
+    control('▶')?.click()
     await until(() => stepText().startsWith('step 1 of'), 'the copy to show step 1')
-    expect(grid().scrollTop).toBeGreaterThanOrEqual(OVERSCAN * ROW_HEIGHT)
-    const tableBefore = grid().getBoundingClientRect().height
-    const bottom = () => grid().getBoundingClientRect().bottom
+    expect(stateTable().scrollTop).toBeGreaterThanOrEqual(OVERSCAN * ROW_HEIGHT)
+    const tableBefore = stateTable().getBoundingClientRect().height
+    const bottom = () => stateTable().getBoundingClientRect().bottom
     const lastRow = () => rows().at(-1)?.getBoundingClientRect().bottom ?? 0
     // **EVERY OTHER WAY IN TO THE TABLE'S DRAW IS HELD WHILE THE SHARES CHANGE** — `render`, `setLink` and
     // `setProgram`, the pane's public callers of it — so the rows can follow the table only through its resize
@@ -195,10 +185,10 @@ describe("the rule table's height is its view's (spec §9.1)", () => {
     Object.assign(TmPane.prototype, { render: () => undefined, setLink: () => undefined, setProgram: () => undefined })
     try {
       outline.querySelector<HTMLButtonElement>('button[aria-expanded]')?.click()
-      await until(() => grid().getBoundingClientRect().height < tableBefore, 'the table to give up a share')
+      await until(() => stateTable().getBoundingClientRect().height < tableBefore, 'the table to give up a share')
       await frame()
       await frame()
-      const table = grid().getBoundingClientRect().height
+      const table = stateTable().getBoundingClientRect().height
       const list = (outline.querySelector('.outline') as HTMLElement).getBoundingClientRect().height
       // Two shares against one of the space the headers leave; the headers are why it is not exactly 2.
       expect(table / list).toBeGreaterThan(1.6)
@@ -212,7 +202,7 @@ describe("the rule table's height is its view's (spec §9.1)", () => {
       outline.querySelector<HTMLButtonElement>('button[aria-expanded]')?.click()
       await frame()
       await frame()
-      expect(grid().getBoundingClientRect().height).toBeGreaterThan(table)
+      expect(stateTable().getBoundingClientRect().height).toBeGreaterThan(table)
       expect(lastRow()).toBeGreaterThanOrEqual(bottom() - 1)
     } finally {
       Object.assign(TmPane.prototype, { render, setLink, setProgram })

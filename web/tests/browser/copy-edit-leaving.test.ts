@@ -1,11 +1,12 @@
-import { EditorView } from '@codemirror/view'
+import type { EditorView } from '@codemirror/view'
 import { beforeAll, describe, expect, it, vi } from 'vitest'
 import { page, userEvent } from 'vitest/browser'
-import { BUFFERS_STORAGE_KEY, parseBuffers } from '../../src/buffers-store'
 import { EDITOR_DEBOUNCE_MS } from '../../src/editor-debounce'
 import type { Leg } from '../../src/protocol'
 import { bindingKey } from '../../src/view-header'
-import { SHELL, until } from './harness'
+import { stored } from './copy-text-fixture'
+import { editorOf } from './editor-view-fixture'
+import { menuOf, moreOf, paneByLeaf, pick, SHELL, stateIdle, until, viewTitleOf } from './harness'
 
 /**
  * Typing a view has not yet sent when it leaves its copy goes to that copy, on every leg and by every route that
@@ -48,39 +49,14 @@ const SAMPLE = 'let x = 40; x + 2'
 
 let view: EditorView
 
-const host = (leaf: string) => document.querySelector<HTMLElement>(`.pane[data-leaf="${leaf}"]`) as HTMLElement
-const idle = () => document.querySelector<HTMLElement>('#results')?.dataset.state === 'idle'
-const editorOf = (pane: HTMLElement): EditorView | null => {
-  const el = pane.querySelector<HTMLElement>('.term-editor')
-  return el === null ? null : EditorView.findFromDOM(el)
-}
-const titleOf = (pane: HTMLElement) => pane.querySelector<HTMLButtonElement>('button.view-title') as HTMLButtonElement
 /** The binding a view shows, as its title records it — `bindingKey(leg, session)`. */
-const shows = (pane: HTMLElement) => titleOf(pane).dataset.binding ?? ''
-/** A copy's text of record, as stored — what a reload, a resume and an undo rebuild it from. */
-const stored = (id: string): string | null =>
-  parseBuffers(localStorage.getItem(BUFFERS_STORAGE_KEY))?.buffers.find((b) => b.id === id)?.text ?? null
-const menuOf = (button: HTMLButtonElement): HTMLElement => {
-  const menu = document.getElementById(button.getAttribute('aria-controls') ?? '')
-  if (menu === null) throw new Error('the button controls no menu')
-  return menu
-}
-const moreOf = (pane: HTMLElement) => pane.querySelector<HTMLButtonElement>('button.view-more') as HTMLButtonElement
-
-/** Open `pane`'s `⋯` menu with the pointer and pick `cls`'s item with it, as a user does. */
-async function pick(pane: HTMLElement, cls: string): Promise<void> {
-  await userEvent.click(moreOf(pane))
-  await until(() => menuOf(moreOf(pane)).matches(':popover-open'), 'the view menu to open')
-  const item = menuOf(moreOf(pane)).querySelector<HTMLButtonElement>(`button.${cls}`)
-  if (item === null) throw new Error(`the menu offers no ${cls}`)
-  await userEvent.click(item)
-}
+const shows = (pane: HTMLElement) => viewTitleOf(pane).dataset.binding ?? ''
 
 /** Open `pane`'s title menu with the pointer and return its item for `key`, not yet clicked. */
 async function titleItem(pane: HTMLElement, key: string): Promise<HTMLButtonElement> {
-  await userEvent.click(titleOf(pane))
-  await until(() => menuOf(titleOf(pane)).matches(':popover-open'), 'the title menu to open')
-  const item = menuOf(titleOf(pane)).querySelector<HTMLButtonElement>(`button[data-binding="${key}"]`)
+  await userEvent.click(viewTitleOf(pane))
+  await until(() => menuOf(viewTitleOf(pane)).matches(':popover-open'), 'the title menu to open')
+  const item = menuOf(viewTitleOf(pane)).querySelector<HTMLButtonElement>(`button[data-binding="${key}"]`)
   if (item === null) throw new Error(`the title menu offers no ${key}`)
   return item
 }
@@ -159,16 +135,16 @@ beforeAll(async () => {
   document.addEventListener('click', () => (lastClick = performance.now()), true)
   view = await (await import('../../src/main')).ready
   view.dispatch({ changes: { from: 0, to: view.state.doc.length, insert: SAMPLE } })
-  await until(() => !idle(), 'the compile to start')
-  await until(idle, 'the compile to finish')
-  await until(() => host('asm-0').querySelectorAll('.asm-row').length === 5, 'the program’s listing')
-  await until(() => host('tm-0').querySelectorAll('.state-row').length > 3, 'the program’s rules')
+  await until(() => !stateIdle(), 'the compile to start')
+  await until(stateIdle, 'the compile to finish')
+  await until(() => paneByLeaf('asm-0').querySelectorAll('.asm-row').length === 5, 'the program’s listing')
+  await until(() => paneByLeaf('tm-0').querySelectorAll('.state-row').length > 3, 'the program’s rules')
 })
 
 describe('typing not yet sent when a view leaves its copy', () => {
   it('on λ, goes to the copy it was typed into, not to the copy the view moves to', async () => {
-    const a = await fork(host('lambda-0'))
-    const second = await splitToProgram(host('lambda-0'), 'lambda')
+    const a = await fork(paneByLeaf('lambda-0'))
+    const second = await splitToProgram(paneByLeaf('lambda-0'), 'lambda')
     const b = await fork(second)
     await until(() => stored(a) !== null && stored(b) !== null, 'both copies to be stored')
     const aBefore = stored(a)
@@ -176,11 +152,11 @@ describe('typing not yet sent when a view leaves its copy', () => {
     const bEditor = (editorOf(second) as EditorView).state.doc.toString()
     expect(bBefore, 'the two copies must differ for a misroute to show').not.toBe('\\p. p p')
 
-    const pickB = await titleItem(host('lambda-0'), bindingKey('lambda', b))
-    await typeInto(editorOf(host('lambda-0')) as EditorView, '\\p. p p', 'all')
+    const pickB = await titleItem(paneByLeaf('lambda-0'), bindingKey('lambda', b))
+    await typeInto(editorOf(paneByLeaf('lambda-0')) as EditorView, '\\p. p p', 'all')
     await userEvent.click(pickB)
     insideTheDebounce()
-    expect(shows(host('lambda-0'))).toBe(bindingKey('lambda', b))
+    expect(shows(paneByLeaf('lambda-0'))).toBe(bindingKey('lambda', b))
 
     await until(() => stored(a) !== aBefore || stored(b) !== bBefore, 'the typing to reach a copy')
     expect(stored(b), 'the copy the view moved to').toBe(bBefore)
@@ -189,7 +165,7 @@ describe('typing not yet sent when a view leaves its copy', () => {
   })
 
   it('on asm, reaches the copy when the view moves to the program through its title', async () => {
-    const asm = host('asm-0')
+    const asm = paneByLeaf('asm-0')
     const copy = await fork(asm)
     await until(() => stored(copy) !== null, 'the copy to be stored')
     const text = 'result Nat\nli rr, #5\nhalt\n'
@@ -208,7 +184,7 @@ describe('typing not yet sent when a view leaves its copy', () => {
   })
 
   it('on asm, comes back through undo when the copy is deleted before it was sent', async () => {
-    const asm = host('asm-0')
+    const asm = paneByLeaf('asm-0')
     // A COPY OF ITS OWN, from the program — so this test starts where it says whatever the one above left.
     if (shows(asm) !== bindingKey('asm', 'source')) await choose(asm, bindingKey('asm', 'source'))
     const copy = await fork(asm)
@@ -233,7 +209,7 @@ describe('typing not yet sent when a view leaves its copy', () => {
   })
 
   it('on asm, is stored with the copy when it is paused before it was sent', async () => {
-    const asm = host('asm-0')
+    const asm = paneByLeaf('asm-0')
     if (shows(asm) !== bindingKey('asm', 'source')) await choose(asm, bindingKey('asm', 'source'))
     const copy = await fork(asm)
     const text = 'result Nat\nli rr, #7\nhalt\n'
@@ -249,7 +225,7 @@ describe('typing not yet sent when a view leaves its copy', () => {
   })
 
   it('on TM, reaches the copy when the view changes to another leg', async () => {
-    const tm = host('tm-0')
+    const tm = paneByLeaf('tm-0')
     const copy = await fork(tm)
     await until(() => stored(copy) !== null, 'the copy to be stored')
     // THE COPY'S VALUE RUN FINISHED FIRST, so no reading lands on the page between the keystroke and the click.
@@ -272,8 +248,8 @@ describe('typing not yet sent when a view leaves its copy', () => {
     // THE MOCK'S OWN NUMBER, so a file that lost its `vi.mock` fails here rather than passing at 300 ms again.
     expect(EDITOR_DEBOUNCE_MS, 'the window `vi.mock` sets for this file').toBe(3000)
     // WHICHEVER VIEWS HOLD AN EDITOR ALREADY, so this case asks nothing of the ones above and runs alone as well.
-    const lam = await editing('lambda', host('lambda-0'))
-    const asm = await editing('asm', host('asm-0'))
+    const lam = await editing('lambda', paneByLeaf('lambda-0'))
+    const asm = await editing('asm', paneByLeaf('asm-0'))
     const lamCopy = shows(lam).slice('lambda:'.length)
     const asmCopy = shows(asm).slice('asm:'.length)
     await until(() => stored(lamCopy) !== null && stored(asmCopy) !== null, 'both copies to be stored')

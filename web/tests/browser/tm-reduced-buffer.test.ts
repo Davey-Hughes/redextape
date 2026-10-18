@@ -4,7 +4,18 @@ import { page } from 'vitest/browser'
 import FIXTURE from '../../../crates/redextape-core/tests/fixtures/five_minus_three_single_tape.tm?raw'
 import { VALUE_CHUNK } from '../../src/protocol'
 import { bindingKey } from '../../src/view-header'
-import { SHELL, until } from './harness'
+import {
+  paneOrThrow,
+  recorded,
+  recordingOver,
+  SHELL,
+  splitVia,
+  stateIdle,
+  statusOf,
+  stepLineOf,
+  tmLeaves,
+  until,
+} from './harness'
 
 /**
  * **A REDUCED `.tm` FILE IN A TM BUFFER, THROUGH THE REAL APP** — the worker's value run, the reply that carries it,
@@ -37,18 +48,7 @@ const HALTS_AT_ONCE =
   'tapes 5\nstart s\nversion 1\nencoding unary\nwidth 4\nslots 1\nresult Nat\ntape 0 #1___#\n\n' +
   'state s:\n  [* * * * *] -> write [* * * * *], move [S S S S S], goto done\nstate done: accept\n'
 
-const leaf = (id: string): HTMLElement => {
-  const el = document.querySelector<HTMLElement>(`[data-leaf="${id}"]`)
-  if (el === null) throw new Error(`no pane at [data-leaf="${id}"]`)
-  return el
-}
-const statusOf = (id: string) => leaf(id).querySelector('.tm-status')?.textContent ?? ''
-const valueLineOf = (id: string) => leaf(id).querySelector<HTMLElement>('.tm-value')
-const stepLineOf = (id: string) => leaf(id).querySelector('.step')?.textContent ?? ''
-/** The newest step a step line counts, 0 while it counts none: 72,000 from `step 72,000 of 72,000…`. */
-const recorded = (line: string) => Number(/of ([\d,]+)/.exec(line)?.[1]?.replaceAll(',', '') ?? 0)
-/** Whether a step line says its recording has stopped: a count, and no `…` after it. */
-const recordingOver = (line: string) => line.startsWith('step ') && !line.includes('…')
+const valueLineOf = (id: string) => paneOrThrow(id, 'no pane at').querySelector<HTMLElement>('.tm-value')
 /** The sentence a build of the fixture puts on the status line. */
 const FIXTURE_SENTENCE = 'reduced: single-tape · 241,666 steps'
 /** About half the fixture's first recording, which stops with its history full at step 145,903. */
@@ -92,37 +92,11 @@ async function recordsHalf(
 
 /** Replace the TM pane's editor text, the way a paste does. */
 function paste(id: string, text: string): void {
-  const dom = leaf(id).querySelector<HTMLElement>('.cm-editor')
+  const dom = paneOrThrow(id, 'no pane at').querySelector<HTMLElement>('.cm-editor')
   if (dom === null) throw new Error(`no editor mounted in [data-leaf="${id}"]`)
   const editor = EditorView.findFromDOM(dom)
   if (editor === null) throw new Error('the editor DOM has no view')
   editor.dispatch({ changes: { from: 0, to: editor.state.doc.length, insert: text } })
-}
-
-const tmLeaves = () =>
-  [...document.querySelectorAll<HTMLElement>('[data-kind="tm"]')].map((el) => el.dataset.leaf ?? '')
-
-/**
- * Split `leaf` through its `⋯` menu, as a user does: `pick` is `'same'` (another view of this), `'source'`,
- * or a `bindingKey(leg, session)` — `pane-picker.test.ts`'s `splitVia`, restated for the reason every
- * browser file restates its helpers.
- */
-function splitVia(leaf: string, dir: 'row' | 'column', pick: string): void {
-  const more = document.querySelector<HTMLButtonElement>(`[data-leaf="${leaf}"] button.view-more`)
-  if (more === null) throw new Error(`no view menu on [data-leaf="${leaf}"]`)
-  more.click()
-  const menu = document.getElementById(more.getAttribute('aria-controls') ?? '')
-  menu?.querySelector<HTMLButtonElement>(`button.view-split[data-dir="${dir}"]`)?.click()
-  const selector =
-    pick === 'same' ? 'button[data-same]' : pick === 'source' ? 'button[data-source]' : `button[data-binding="${pick}"]`
-  const item = menu?.querySelector<HTMLButtonElement>(`.view-menu-pairs ${selector}`)
-  if (item == null) {
-    const offered = [...(menu?.querySelectorAll<HTMLButtonElement>('.view-menu-pairs button') ?? [])].map(
-      (b) => b.textContent,
-    )
-    throw new Error(`[data-leaf="${leaf}"] offers no ${pick} to split into — offered: ${offered.join(' | ')}`)
-  }
-  item.click()
 }
 
 beforeAll(async () => {
@@ -135,11 +109,11 @@ beforeAll(async () => {
   document.body.innerHTML = SHELL
   const view: EditorView = await (await import('../../src/main')).ready
   view.dispatch({ changes: { from: 0, to: view.state.doc.length, insert: 'let x = 40; x + 2' } })
-  await until(() => document.querySelector<HTMLElement>('#results')?.dataset.state === 'idle', 'the first compile')
+  await until(stateIdle, 'the first compile')
 
   document.querySelector<HTMLButtonElement>('#buffers')?.click()
   document.querySelector<HTMLButtonElement>('.buffer-list button.new-tm')?.click()
-  const title = leaf('tm-0').querySelector<HTMLButtonElement>('button.view-title')
+  const title = paneOrThrow('tm-0', 'no pane at').querySelector<HTMLButtonElement>('button.view-title')
   if (title === null) throw new Error('no title-selector on the TM view')
   const item = () =>
     document
@@ -153,7 +127,10 @@ beforeAll(async () => {
     return item() != null
   }, 'the buffer to be offered')
   item()?.click()
-  await until(() => leaf('tm-0').querySelector('.cm-editor') !== null, 'the buffer editor to mount')
+  await until(
+    () => paneOrThrow('tm-0', 'no pane at').querySelector('.cm-editor') !== null,
+    'the buffer editor to mount',
+  )
 })
 
 describe('a reduced file in a TM buffer', () => {
@@ -177,7 +154,7 @@ describe('a reduced file in a TM buffer', () => {
   it('says it is reduced, labels its one tape, and reads its value', () => {
     expect(statusOf('tm-0')).toContain('reduced: single-tape · 241,666 steps')
     expect(valueLineOf('tm-0')?.textContent).toBe('value: 2')
-    expect([...leaf('tm-0').querySelectorAll('.tape-label')].map((e) => e.textContent)).toEqual([
+    expect([...paneOrThrow('tm-0', 'no pane at').querySelectorAll('.tape-label')].map((e) => e.textContent)).toEqual([
       '5 tapes, interleaved',
     ])
     expect(valueLineOf('tm-0')?.getAttribute('role')).toBe('status')

@@ -6,6 +6,7 @@ import { FRAME_BYTES, HISTORY_BYTES, lambdaFrameBytes, TM_RADIUS, tmFrameBytes }
 import type { PoolPort, SessionId } from '../../src/session-client'
 import { SessionPool } from '../../src/session-client'
 import type { LambdaState, TmState } from '../../src/types'
+import { heapNow, mean, requireHeapHarness } from './probe-fixture'
 
 /**
  * PLAN 5d-i T9 — THE MEMORY PROBE. Design §4.4.
@@ -50,36 +51,6 @@ import type { LambdaState, TmState } from '../../src/types'
  */
 const SETTLE_PASSES = 8
 const SETTLED_BYTES = 256 * 1024
-
-/** See `frame-cost.test.ts`'s type of the same name for why this is local and not in `types.ts`. */
-type MemoryPerformance = Performance & { memory?: { usedJSHeapSize: number } }
-
-/** See `frame-cost.test.ts`'s type of the same name. Put here by `--js-flags=--expose-gc`. */
-type GlobalWithGc = typeof globalThis & { gc?: () => void }
-
-const heapNow = (): number => (performance as MemoryPerformance).memory?.usedJSHeapSize ?? 0
-
-/**
- * Assert the two non-standard globals exist, and return the collector.
- *
- * IT THROWS `BLOCKED:` RATHER THAN SKIPPING, exactly as `frame-cost.test.ts` does. Without
- * `--enable-precise-memory-info` every heap delta in that file came back as exactly 0 (measured
- * 2026-08-10 by deleting the flag), so a probe that tolerated a missing flag would report a ratio of
- * 0/0 or 1.0 and call the threshold met. A probe that silently reads zeros is worse than no probe.
- */
-function requireHeapHarness(): () => void {
-  if (!(performance as MemoryPerformance).memory) {
-    throw new Error('BLOCKED: performance.memory is unavailable in this browser — cannot measure heap size')
-  }
-  if (heapNow() === 0) {
-    throw new Error('BLOCKED: performance.memory.usedJSHeapSize reads 0 — cannot measure heap size')
-  }
-  const collect = (globalThis as GlobalWithGc).gc
-  if (typeof collect !== 'function') {
-    throw new Error('BLOCKED: globalThis.gc is unavailable — launch Chromium with --js-flags=--expose-gc')
-  }
-  return collect
-}
 
 /**
  * THE ONE PROGRAM EVERY SESSION IN THIS FILE RUNS, and it is `app.test.ts`'s history-budget fixture
@@ -360,7 +331,6 @@ describe('session memory', () => {
 
     console.log('last round ring shape :', JSON.stringify(lastShape))
 
-    const mean = (xs: number[]) => xs.reduce((s, x) => s + x, 0) / xs.length
     const residentOne = mean(one.map((x) => x.resident))
     const residentThree = mean(three.map((x) => x.resident))
     const deltaOne = mean(one.map((x) => x.delta))
@@ -481,7 +451,6 @@ describe('session memory', () => {
       lam.push(await round(LAMBDA_ONLY))
       tm.push(await round(TM_ONLY))
     }
-    const mean = (xs: number[]) => xs.reduce((s, x) => s + x, 0) / xs.length
     const lamReal = mean(lam.map((x) => x.real))
     const tmReal = mean(tm.map((x) => x.real))
     const lamAcc = mean(lam.map((x) => x.accounted))

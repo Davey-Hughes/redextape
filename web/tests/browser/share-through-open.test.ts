@@ -4,7 +4,19 @@ import { userEvent } from 'vitest/browser'
 import { EXAMPLES } from '../../src/examples'
 import { decodeLink, encodeLink, type Positions } from '../../src/share-link'
 import { serializeWorkspace } from '../../src/workspace'
-import { fourViewWorkspace, SHELL, until } from './harness'
+import {
+  fourViewWorkspace,
+  noticeText,
+  SHELL,
+  shareButton,
+  shareLinkField,
+  shareMenu,
+  shareMenuOpen,
+  stateIdle,
+  stepTextOf,
+  undoButton,
+  until,
+} from './harness'
 
 /**
  * **`share` THROUGH AN OPEN** — Plan 7 part 6a spec §5.1's note of 2026-10-01, §5.2 and §5.3. `share`'s popover closes
@@ -38,25 +50,16 @@ const heldOf = (kind: string) => held.filter((h) => h.kind === kind).length
 const ENCODINGS = ['unary', 'binary']
 const FACT = EXAMPLES.find((e) => e.id === 'fact')?.text ?? ''
 
-const shareButton = () => document.querySelector<HTMLButtonElement>('#share') as HTMLButtonElement
-const menu = () => document.querySelector<HTMLElement>('#share-menu') as HTMLElement
-const menuOpen = () => menu().matches(':popover-open')
-const field = () => menu().querySelector<HTMLInputElement>('#share-link')
-const noticeText = () => document.querySelector('#notice .notice-text')?.textContent ?? ''
-const undoButton = () => document.querySelector<HTMLButtonElement>('#notice button.notice-action')
-const stepOf = (leaf: string) => document.querySelector(`[data-leaf="${leaf}"] .step`)?.textContent ?? ''
-const idle = () => document.querySelector<HTMLElement>('#results')?.dataset.state === 'idle'
-
 /** A link to `program` under `encoding`, in the four-view workspace, with `positions`. */
 const link = (program: string, positions: Positions, encoding = 'unary'): Promise<string> =>
   encodeLink({ program, encoding, workspace: serializeWorkspace(fourViewWorkspace()), positions })
 
 /** Open `share` with a click, and answer once its link is made. */
 async function openShare(): Promise<void> {
-  if (menuOpen()) menu().hidePopover()
+  if (shareMenuOpen()) shareMenu().hidePopover()
   await userEvent.click(shareButton())
-  expect(menuOpen()).toBe(true)
-  await until(() => (field()?.value ?? '') !== '', 'the link')
+  expect(shareMenuOpen()).toBe(true)
+  await until(() => (shareLinkField()?.value ?? '') !== '', 'the link')
 }
 
 /**
@@ -65,13 +68,13 @@ async function openShare(): Promise<void> {
  * them at a quarter of a core here. What the link carries is the property, not the gesture that asks for it.
  */
 async function sharedPositions(): Promise<Positions | null> {
-  if (menuOpen()) menu().hidePopover()
+  if (shareMenuOpen()) shareMenu().hidePopover()
   shareButton().click()
-  expect(menuOpen()).toBe(true)
-  await until(() => (field()?.value ?? '') !== '', 'the link')
-  const value = field()?.value ?? ''
+  expect(shareMenuOpen()).toBe(true)
+  await until(() => (shareLinkField()?.value ?? '') !== '', 'the link')
+  const value = shareLinkField()?.value ?? ''
   const opened = await decodeLink(value.slice(value.indexOf('#')), ENCODINGS)
-  menu().hidePopover()
+  shareMenu().hidePopover()
   return opened.kind === 'whole' ? opened.positions : null
 }
 
@@ -80,7 +83,7 @@ let view: EditorView
 beforeAll(async () => {
   document.body.innerHTML = SHELL
   view = await (await import('../../src/main')).ready
-  await until(() => idle() && view.state.doc.toString() === 'let x = 40; x + 2', 'the first compile')
+  await until(() => stateIdle() && view.state.doc.toString() === 'let x = 40; x + 2', 'the first compile')
 })
 
 describe("share's popover through an open", () => {
@@ -88,7 +91,7 @@ describe("share's popover through an open", () => {
     await openShare()
     location.hash = await link('let y = 10; y + 5', {})
     await until(() => noticeText() === 'opened a shared link', 'the open')
-    expect(menuOpen()).toBe(false)
+    expect(shareMenuOpen()).toBe(false)
   })
 
   it("closes when a pasted link's program alone opens", async () => {
@@ -101,7 +104,7 @@ describe("share's popover through an open", () => {
     })
     await until(() => view.state.doc.toString() === 'let z = 3; z + 4', 'the open')
     expect(noticeText()).toBe("opened a shared link's program — its workspace and step positions were left out")
-    expect(menuOpen()).toBe(false)
+    expect(shareMenuOpen()).toBe(false)
   })
 
   /**
@@ -114,11 +117,11 @@ describe("share's popover through an open", () => {
     await openShare()
     undoButton()?.focus()
     expect(document.activeElement).toBe(undoButton())
-    expect(menuOpen()).toBe(true)
+    expect(shareMenuOpen()).toBe(true)
     await userEvent.keyboard('{Enter}')
     await until(() => noticeText() === 'put back the program and the workspace', 'the undo')
     expect(view.state.doc.toString()).toBe('let z = 3; z + 4')
-    expect(menuOpen()).toBe(false)
+    expect(shareMenuOpen()).toBe(false)
   })
 })
 
@@ -130,7 +133,7 @@ describe("a link shared while its link's positions are being reached", () => {
     // `toEqual` ON THE POSITIONS THEMSELVES: `toMatchObject` would take `{}` as a subset every positions object has.
     expect(await sharedPositions()).toEqual({ lambda: 5, asm: 3, tm: 100 })
     letGo()
-    await until(() => idle(), "the link's compile")
+    await until(() => stateIdle(), "the link's compile")
   })
 
   /**
@@ -140,15 +143,15 @@ describe("a link shared while its link's positions are being reached", () => {
   it("carries a leg's pending step, not the step it shows", async () => {
     holding = new Set(['extend'])
     location.hash = await link(FACT, { lambda: 3000 }, 'binary')
-    await until(() => stepOf('lambda-0').includes(' — going to step 3,000 from the link'), 'the pending position')
-    const head = Number(/^step ([\d,]+) of/.exec(stepOf('lambda-0'))?.[1]?.replaceAll(',', ''))
+    await until(() => stepTextOf('lambda-0').includes(' — going to step 3,000 from the link'), 'the pending position')
+    const head = Number(/^step ([\d,]+) of/.exec(stepTextOf('lambda-0'))?.[1]?.replaceAll(',', ''))
     expect(head).toBeLessThan(3000)
     expect((await sharedPositions())?.lambda).toBe(3000)
   })
 
   it('carries no step pending for the program an edit replaced, before its compile answers', async () => {
     holding = new Set(['extend', 'run'])
-    expect(stepOf('lambda-0')).toContain(' — going to step 3,000 from the link')
+    expect(stepTextOf('lambda-0')).toContain(' — going to step 3,000 from the link')
     view.dispatch({ changes: { from: view.state.doc.length, insert: '\n' } })
     expect(await sharedPositions()).toEqual({})
   })

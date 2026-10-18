@@ -998,6 +998,7 @@ mod tests {
     use crate::desugar::desugar;
     use crate::parser::parse;
     use crate::tm::lower_asm::lower_asm;
+    use crate::tm::test_fixtures::{arithmetic_program, branch_program, head_of_tail_program};
 
     /// A flat `List<Nat>` over L cells spends exactly `3L + 1`: L spine steps, L `Nat` leaves, one `Nil`,
     /// L `Cons` nodes. Asserted as an EQUATION at more than one L, so a constant offset cannot pass it.
@@ -1322,18 +1323,7 @@ mod tests {
 
     #[test]
     fn evaluates_straight_line_arithmetic() {
-        // rr = (2 + 3) * 4 = 20
-        let prog = Program {
-            code: vec![
-                Instr::Li(Reg::Loc(0), 2),
-                Instr::Li(Reg::Loc(1), 3),
-                Instr::Bin(BinOp::Add, Reg::Loc(2), Reg::Loc(0), Reg::Loc(1)),
-                Instr::Li(Reg::Loc(3), 4),
-                Instr::Bin(BinOp::Mul, Reg::Rr, Reg::Loc(2), Reg::Loc(3)),
-                Instr::Halt,
-            ],
-            labels: vec![],
-        };
+        let prog = arithmetic_program();
         assert_eq!(ran(prog), 20);
     }
 
@@ -1354,20 +1344,7 @@ mod tests {
 
     #[test]
     fn jz_and_jmp_branch() {
-        // if (1 == 2) rr = 10 else rr = 20  -> 20
-        let prog = Program {
-            code: vec![
-                Instr::Li(Reg::Loc(0), 1),
-                Instr::Li(Reg::Loc(1), 2),
-                Instr::Bin(BinOp::Eq, Reg::Loc(2), Reg::Loc(0), Reg::Loc(1)), // 0 (false)
-                Instr::Jz(Reg::Loc(2), "else".to_string()),
-                Instr::Li(Reg::Rr, 10),
-                Instr::Jmp("end".to_string()),
-                Instr::Li(Reg::Rr, 20), // else:
-                Instr::Halt,            // end:
-            ],
-            labels: vec![("else".to_string(), 6), ("end".to_string(), 7)],
-        };
+        let prog = branch_program();
         assert_eq!(ran(prog), 20);
     }
 
@@ -1458,20 +1435,7 @@ mod tests {
 
     #[test]
     fn builds_and_reads_a_list() {
-        // rr = head(tail(cons(1, cons(2, nil)))) == 2
-        let prog = Program {
-            code: vec![
-                Instr::Nil(Reg::Loc(0)), // r0 = nil
-                Instr::Li(Reg::Loc(1), 2),
-                Instr::Cons(Reg::Loc(2), Reg::Loc(1), Reg::Loc(0)), // r2 = cons(2, nil)
-                Instr::Li(Reg::Loc(3), 1),
-                Instr::Cons(Reg::Loc(4), Reg::Loc(3), Reg::Loc(2)), // r4 = cons(1, r2)
-                Instr::Tail(Reg::Loc(5), Reg::Loc(4)),              // r5 = tail(r4)
-                Instr::Head(Reg::Rr, Reg::Loc(5)),                  // rr = head(r5) = 2
-                Instr::Halt,
-            ],
-            labels: vec![],
-        };
+        let prog = head_of_tail_program();
         assert_eq!(ran(prog), 2);
     }
 

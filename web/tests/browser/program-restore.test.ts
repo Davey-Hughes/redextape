@@ -2,7 +2,8 @@ import type { EditorView } from '@codemirror/view'
 import { describe, expect, it } from 'vitest'
 import { userEvent } from 'vitest/browser'
 import { PROGRAM_STORAGE_KEY, parseProgram, serializeProgram } from '../../src/program-store'
-import { SHELL, until } from './harness'
+import { picker, SHELL, segments, stateIdle, until } from './harness'
+import { stored } from './share-open-hashchange-fixture'
 
 /**
  * **A STORED PROGRAM COMES BACK UNDER ITS OWN ENCODING, AND EACH COMPILE STORES WHAT IT POSTS** — Plan 7 part 6a spec
@@ -20,10 +21,6 @@ import { SHELL, until } from './harness'
 const STORED = { text: 'fn times4(y) {\n    y * 4\n}\ntimes4(5)\n', encoding: 'binary' }
 localStorage.setItem(PROGRAM_STORAGE_KEY, serializeProgram(STORED))
 
-const picker = () => document.querySelector<HTMLSelectElement>('#encoding') as HTMLSelectElement
-const segments = () => [...document.querySelectorAll('#results .segment')].map((s) => s.textContent ?? '')
-const idle = () => document.querySelector<HTMLElement>('#results')?.dataset.state === 'idle'
-const stored = () => parseProgram(localStorage.getItem(PROGRAM_STORAGE_KEY), ['unary', 'binary'])
 const outlineRows = () =>
   [...document.querySelectorAll<HTMLElement>('[data-leaf="source"] .outline-row')].map((r) => r.textContent)
 
@@ -37,7 +34,7 @@ describe('a stored program', () => {
     // WHAT THE STORED VALUE IS TOLD APART FROM: were `binary` the picker's first option, this case would hold nothing.
     expect(picker().options[0]?.value, 'precondition: binary is not the picker’s first option').not.toBe('binary')
     expect(picker().value).toBe('binary')
-    await until(() => idle() && segments().length > 0, 'the first compile')
+    await until(() => stateIdle() && segments().length > 0, 'the first compile')
     expect(segments()[0]).toMatch(/^λ 20 · /)
   })
 
@@ -78,7 +75,7 @@ describe('a stored program', () => {
     try {
       for (const key of '// seven') view.dispatch({ changes: { from: view.state.doc.length, insert: key } })
       const typed = view.state.doc.toString()
-      await until(() => idle() && stored()?.text === typed, 'the burst, stored')
+      await until(() => stateIdle() && stored()?.text === typed, 'the burst, stored')
       expect(writes.map((w) => parseProgram(w, ['unary'])?.text)).toEqual([typed])
     } finally {
       localStorage.setItem = setItem

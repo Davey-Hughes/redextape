@@ -22,6 +22,8 @@ pub mod reduction;
 pub mod sim;
 pub mod single_tape;
 pub mod syntax;
+#[cfg(test)]
+pub(crate) mod test_fixtures;
 pub mod two_symbol;
 pub mod universal;
 
@@ -267,10 +269,10 @@ fn lower_and_size(core: &Core) -> Result<(Program, lower_tm::SlotMap), TmRun> {
 /// that follows it. Without the guard an under-sized run corrupts the bank and frequently runs away to
 /// the full step cap instead, which is what made the pre-guard behaviour expensive as well as wrong.
 ///
-/// **THE THREE `widths()` COPIES IN `tests/` AND `examples/` ARE NOT ROUTED THROUGH THIS AND MUST NOT
-/// BE.** They are independent models of this ladder, and two of them carry assertions ABOUT it; making
-/// them walk whatever this function says would stop those assertions being able to fail. See the doc on
-/// each copy.
+/// **THE TWO `widths()` COPIES IN `tests/` AND `examples/` ARE NOT ROUTED THROUGH THIS AND MUST NOT
+/// BE.** They are independent models of this ladder, and the one in `tests/` carries assertions ABOUT
+/// it; making them walk whatever this function says would stop those assertions being able to fail. See
+/// the doc on each copy.
 fn search_width<T>(mut at: impl FnMut(usize) -> Option<T>, overflowed: impl Fn(&T) -> bool) -> Option<(T, usize)> {
     let mut width = MIN_FIELD_WIDTH;
     loop {
@@ -463,13 +465,8 @@ mod run_tm_tests {
     use super::*;
     use crate::desugar::desugar;
     use crate::parser::parse;
+    use crate::tm::test_fixtures::core_of;
     use crate::value::Value;
-
-    fn core_of(src: &str) -> Core {
-        let (prog, ds) = parse(src);
-        assert!(ds.is_empty(), "parse errors: {ds:?}");
-        desugar(&prog.unwrap())
-    }
 
     /// Auto-fit settles on the narrowest power-of-two width at which nothing overflows, and the answer
     /// is the one the default 64-wide bank gives. The WIDTHS are the interesting assertion: a program

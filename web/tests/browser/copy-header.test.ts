@@ -1,7 +1,8 @@
 import type { EditorView } from '@codemirror/view'
 import { beforeAll, describe, expect, it } from 'vitest'
 import { page, userEvent } from 'vitest/browser'
-import { SHELL, until } from './harness'
+import { controlledMenu, paneByLeaf, rect, SHELL, stateIdle, until } from './harness'
+import { chooseFromWorkspace } from './user-event-fixture'
 
 /**
  * A COPY'S VIEW HEADER FITS ONE ROW WHERE THE PROGRAM'S DOES, AND THE COPIES MENU'S NEW-COPY CONTROLS ARE STYLED.
@@ -18,12 +19,6 @@ import { SHELL, until } from './harness'
  */
 
 const SAMPLE = 'let x = 40; x + 2'
-
-const idle = () => document.querySelector<HTMLElement>('#results')?.dataset.state === 'idle'
-const host = (leaf: string) => document.querySelector<HTMLElement>(`.pane[data-leaf="${leaf}"]`) as HTMLElement
-const rect = (el: Element | null) => (el as Element).getBoundingClientRect()
-const menuOf = (button: HTMLElement): HTMLElement =>
-  document.getElementById(button.getAttribute('aria-controls') ?? '') as HTMLElement
 
 /**
  * Whether `pane`'s header is one row: its `⋯` and `✕` stand beside its title rather than below it — each overlaps the
@@ -49,20 +44,12 @@ function titleWhole(pane: HTMLElement): boolean {
   return rect(text).width + 0.01 >= range.getBoundingClientRect().width
 }
 
-/** Pick from the workspace menu with the pointer, and close it if the pick left it open. */
-async function workspace(selector: string): Promise<void> {
-  const button = document.querySelector<HTMLButtonElement>('#workspace') as HTMLButtonElement
-  await userEvent.click(button)
-  await userEvent.click(document.querySelector<HTMLElement>(`#workspace-menu ${selector}`) as HTMLElement)
-  if (menuOf(button).matches(':popover-open')) await userEvent.keyboard('{Escape}')
-}
-
 /** Open `pane`'s `⋯` menu with the pointer and pick the item `selector` names. */
 async function viewMenu(pane: HTMLElement, selector: string): Promise<void> {
   const more = pane.querySelector<HTMLButtonElement>('button.view-more') as HTMLButtonElement
   await userEvent.click(more)
-  await until(() => menuOf(more).matches(':popover-open'), 'the view menu to open')
-  await userEvent.click(menuOf(more).querySelector<HTMLElement>(selector) as HTMLElement)
+  await until(() => controlledMenu(more).matches(':popover-open'), 'the view menu to open')
+  await userEvent.click(controlledMenu(more).querySelector<HTMLElement>(selector) as HTMLElement)
 }
 
 beforeAll(async () => {
@@ -70,14 +57,14 @@ beforeAll(async () => {
   document.body.innerHTML = SHELL
   const view: EditorView = await (await import('../../src/main')).ready
   view.dispatch({ changes: { from: 0, to: view.state.doc.length, insert: SAMPLE } })
-  await until(() => !idle(), 'the compile to start')
-  await until(idle, 'the compile to finish')
+  await until(() => !stateIdle(), 'the compile to start')
+  await until(stateIdle, 'the compile to finish')
 })
 
 describe('a copy’s view header', () => {
   it('is one row in a half-width Explorer view, as the program’s view beside it is', async () => {
-    const asm = host('asm-0')
-    const tm = host('tm-0')
+    const asm = paneByLeaf('asm-0')
+    const tm = paneByLeaf('tm-0')
     // THE PRECONDITION: the two views are the same width, and the program's header fits one row there.
     expect(Math.abs(rect(asm).width - rect(tm).width)).toBeLessThan(2)
     expect(rect(asm).width).toBeLessThan(700)
@@ -106,12 +93,12 @@ describe('a copy’s view header', () => {
   })
 
   it('is one row in a narrow split, as the program’s view beside it is', async () => {
-    await workspace('[data-preset="debugger"]')
-    const copy = host('asm-0')
+    await chooseFromWorkspace('[data-preset="debugger"]')
+    const copy = paneByLeaf('asm-0')
     await viewMenu(copy, 'button.view-split[data-dir="row"]')
     const before = new Set([...document.querySelectorAll<HTMLElement>('.pane[data-kind="asm"]')])
     await userEvent.click(
-      menuOf(copy.querySelector('button.view-more') as HTMLElement).querySelector(
+      controlledMenu(copy.querySelector('button.view-more') as HTMLElement).querySelector(
         'button[data-binding="asm:source"]',
       ) as HTMLElement,
     )
