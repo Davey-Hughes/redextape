@@ -43,7 +43,7 @@ use crate::lambda::term::{Dir, LambdaTerm, Node, Path, abs, app, var};
 use crate::span::Span;
 
 /// Nesting-depth guard for the recursive-descent parser (mirrors the source parser). Tuned below
-/// the native stack-overflow depth; raise only with a larger stack (see Plan 1).
+/// the native stack-overflow depth; raise only with a larger stack.
 pub const MAX_PARSE_DEPTH: u32 = 256;
 
 #[must_use]
@@ -203,10 +203,9 @@ pub fn print_lambda(t: &LambdaTerm) -> String {
 /// `print_lambda_mapped`, bounded. Returns the text, its spans, and which limit cut the walk, if any.
 ///
 /// THE BUDGET IS ENFORCED DURING THE WALK, WHICH IS THE ENTIRE POINT. Truncating the string this
-/// function returns would be useless: `write_term` recurses over the term's LOGICAL size, and the
+/// function returns would be useless: `write` recurses over the term's LOGICAL size, and the
 /// in-memory term is a shared DAG, so a caller that lets the walk finish has already paid the
-/// exponential allocation the budget exists to prevent. This is the same quantity four falsified λ
-/// designs on this thread were aimed at, and the one `maxfree`/`depth` short-circuit to avoid touching.
+/// exponential allocation the budget exists to prevent.
 ///
 /// THE OVERSHOOT IS BOUNDED BY AT MOST ONE BINDER PREFIX, not one token. The `Abs` arm writes `λ`, the
 /// binder's name, `.`, and its trailing space as a group behind a single check — splitting it with a
@@ -217,28 +216,28 @@ pub fn print_lambda(t: &LambdaTerm) -> String {
 ///
 /// WHAT STILL HOLDS, and is the guarantee a caller budgeting memory actually needs: overshoot is a
 /// per-print constant. It does not grow with term size, nesting depth, or argument count, because the
-/// only two writes that happen on an UNWIND path — the `App` arm's separator and `parenthesized`'s
+/// only two writes that happen on an UNWIND path — the `App` arm's separator and `parens`'s
 /// closing paren — are both guarded by a re-check.
 ///
 /// THE BUDGET ALONE DOES NOT BOUND RECURSION, WHICH IS WHY A DEPTH COUNTER RIDES ALONGSIDE IT. A
-/// left-nested spine — `write_app_fn` delegating into `write_term` down the function-position chain,
-/// exactly the shape the `Core::Apply` arm in `lower.rs` builds — writes ZERO bytes while descending: every
-/// frame calls `write_app_fn`/`write_term` again before it writes anything of its own, so `out.len() >=
-/// budget` cannot fire during that descent no matter how small `byte_budget` is. Native recursion depth
-/// there equals the spine length, and a spine of 100,000 juxtaposed atoms overflows the stack before
-/// the budget ever gets a chance to look at `out`. A `depth` counter threaded alongside `budget` through
-/// `write_term`, `write_app_fn`, `write_atom` and `parenthesized` — incremented once per `Abs`/`App`
-/// level, checked at the top of each function next to the budget check — catches this independently:
-/// past the caller's `depth_cap`, the walk stops and records `Cut::Depth` the same way the budget
-/// records `Cut::Bytes`. See [`Cut`]'s doc for why a caller needs to tell the two apart, and can.
+/// left-nested spine — `node` (in `Role::AppFn`) delegating into `write` down the function-position
+/// chain, exactly the shape the `Core::Apply` arm in `lower.rs` builds — writes ZERO bytes while
+/// descending: every frame calls `node`/`write` again before it writes anything of its own, so
+/// `out.len() >= budget` cannot fire during that descent no matter how small `byte_budget` is. Native
+/// recursion depth there equals the spine length, and a spine of 100,000 juxtaposed atoms overflows the
+/// stack before the budget ever gets a chance to look at `out`. A `depth` counter threaded alongside
+/// `budget` through `node`, `write` and `parens` — incremented once per `Abs`/`App` level, checked at
+/// the top of each function next to the budget check — catches this independently: past the caller's
+/// `depth_cap`, the walk stops and records `Cut::Depth` the same way the budget records `Cut::Bytes`.
+/// See [`Cut`]'s doc for why a caller needs to tell the two apart, and can.
 ///
 /// The cut is not byte-exact for the same reason: the check happens between pushes (or, for the binder
 /// prefix, between push-groups), so whatever was in progress finishes. Cutting mid-token would split a
 /// `λ` — two bytes in UTF-8 — and produce a `String` that is not valid UTF-8 at all.
 ///
 /// TRUNCATED OUTPUT IS NOT SAFE TO REPARSE, AND THE TWO PRODUCERS FAIL DIFFERENTLY. Only the BUDGET
-/// re-check gates a `parenthesized` frame's closing paren (`out.len() >= budget`, above); the DEPTH
-/// check has no matching re-check there, so on a depth bail every `parenthesized` frame still open
+/// re-check gates a `parens` frame's closing paren (`out.len() >= budget`, above); the DEPTH
+/// check has no matching re-check there, so on a depth bail every `parens` frame still open
 /// closes its `)` normally as the stack unwinds. A budget-truncated string is therefore reliably
 /// malformed — an unclosed paren — and fails to reparse loudly. A DEPTH-truncated string can come out
 /// well-formed: syntactically valid λ text that reparses successfully into a DIFFERENT, shorter term
@@ -271,9 +270,7 @@ pub fn print_lambda_mapped(t: &LambdaTerm) -> (String, crate::analysis::Classifi
 /// `print_lambda_capped`, plus the byte span of every subterm the caller named by path.
 ///
 /// WHAT THIS IS FOR. `SourceMap::node_to_lambda` locates a Core node's subterm as a `Path`, and
-/// highlighting it in printed text needs a byte `Span`. Nothing correlated the two until this
-/// function; `viewmodel.rs`'s no-`redex` doc is where that gap was priced. Plan 5b's click-linking is
-/// the consumer.
+/// highlighting it in printed text needs a byte `Span`, which this function supplies.
 ///
 /// `want` IS KEYED BY `NodeId` AND INVERTED HERE, rather than taken pre-inverted, so a caller cannot
 /// get the inversion wrong. Two nodes may name the same path — a transparent wrapper lowers to the
@@ -290,8 +287,7 @@ pub fn print_lambda_mapped(t: &LambdaTerm) -> (String, crate::analysis::Classifi
 /// the entry mark is taken outside it. Lighting `f x` but not the parens around it names a different
 /// subterm than the one at that path.
 ///
-/// Cost is one walk, the walk that was already happening. `want` is `SourceMap::node_to_lambda`, which
-/// the demo corpus measures at 5-403 entries.
+/// Cost is one walk, the walk that was already happening.
 #[must_use]
 pub fn print_lambda_linked(
     t: &LambdaTerm,
@@ -345,13 +341,10 @@ pub enum Cut {
     Depth,
 }
 
-/// The printer's state, threaded as one receiver rather than as seven parameters.
+/// The printer's state, threaded as one receiver rather than as parameters.
 ///
-/// A STRUCT BECAUSE THE PARAMETER LIST RAN OUT, and the shape is otherwise unchanged. The four walker
-/// functions already carried seven arguments each; recording spans needs two more (the current path,
-/// and somewhere to put the results) and `clippy::too_many_arguments` denies at eight. Every field
-/// here was already threaded through every call, unchanged or mutated in place, so collapsing them
-/// costs nothing but the receiver.
+/// A STRUCT BECAUSE THE PARAMETER LIST RUNS OUT: as parameters, these fields would take each walker to
+/// eight arguments or more, and `clippy::too_many_arguments` denies at eight.
 struct Printer<'a> {
     names: Vec<String>,
     out: String,
@@ -512,8 +505,8 @@ pub(crate) fn fresh<S: AsRef<str>>(hint: &str, names: &[S]) -> String {
 /// how many names are in scope, counting any repeat.
 ///
 /// **THE TREE CANNOT AFFORD A SCAN.** It builds a whole term at once, and a list literal's term nests
-/// thousands of binders; scanning the scope for every candidate name made the build grow with roughly
-/// the cube of that depth. It keeps a count per name instead, so `taken` is a lookup.
+/// thousands of binders; scanning the scope for every candidate name would make the build grow with
+/// roughly the cube of that depth. It keeps a count per name instead, so `taken` is a lookup.
 pub(crate) fn fresh_by(hint: &str, bound: usize, taken: impl Fn(&str) -> bool) -> String {
     let base = if hint.is_empty() { "v" } else { hint };
     if !taken(base) {
@@ -566,8 +559,8 @@ mod tests {
 
     /// The printer emits `λ` and the parser accepts both spellings. This is the ONLY test that pins
     /// either half: every other printing test is a round-trip or idempotency property, and those hold
-    /// just as well if the printer emits `\` — so a silent revert to `\`, or a parser that quietly
-    /// dropped the ASCII alias, would leave the whole suite green without this.
+    /// just as well if the printer emits `\` — so a printer emitting `\`, or a parser that dropped the
+    /// ASCII alias, would leave the whole suite green without this.
     #[test]
     fn prints_lambda_but_accepts_both_binder_spellings() {
         let printed = print_lambda(&abs("x", var(0)));
@@ -609,11 +602,9 @@ mod tests {
         assert_eq!(print_lambda(&t2.unwrap()), once);
     }
 
-    /// The text form must be able to express what this backend's own lowering emits. It could not:
-    /// `lower.rs` binds store-passing state under `$store`, and the lexer below accepted only `_` and
-    /// ASCII alphanumerics, so `parse_lambda` rejected `print_lambda`'s output — with `expected a
-    /// parameter name` — for every program with mutable state. `parse_print_round_trips` missed it
-    /// because its generator only ever emitted the hints `v` and `x`.
+    /// The text form must be able to express what this backend's own lowering emits: `lower.rs` binds
+    /// store-passing state under `$store`, so every program with mutable state prints a `$` identifier
+    /// `parse_lambda` must read back.
     #[test]
     fn printed_lowering_of_every_demo_reparses() {
         use crate::desugar::desugar;
@@ -670,9 +661,9 @@ mod tests {
 
     use proptest::prelude::*;
 
-    /// Binder hints the generator draws from. A single fixed hint (what this used to use) can produce
-    /// neither a `$`-prefixed lowering name nor a shadow collision, so it could not have caught either
-    /// the lexer gap above or a freshening bug. Drawing independently at each binder means nested
+    /// Binder hints the generator draws from. A single fixed hint can produce
+    /// neither a `$`-prefixed lowering name nor a shadow collision, so it could not catch a lexer
+    /// that rejects `$` or a freshening bug. Drawing independently at each binder means nested
     /// repeats — and therefore `fresh`'s rename path — occur naturally.
     const HINTS: [&str; 4] = ["v", "x", "$store", "_a1"];
 
@@ -723,11 +714,9 @@ mod tests {
             assert!(w[0].0.end <= w[1].0.start, "spans overlap or are unordered: {:?} then {:?}", w[0], w[1]);
         }
         let named: Vec<(&str, TokenClass)> = spans.iter().map(|(s, c)| (&text[s.start..s.end], *c)).collect();
-        // ASSERT THE WHOLE SEQUENCE, not "some span has this class". Task 6 found the weaker style
-        // vacuous: `named.contains(&("done", Label))` passed even with every operand deliberately
-        // misclassified, because `"done"` also occurs as its own label definition. Here `f` occurs twice —
-        // once as a binder, once as a variable — so any per-text assertion is satisfied by the wrong
-        // occurrence. Only the full ordered sequence pins which is which.
+        // Assert the whole sequence, not "some span has this class": `f` occurs twice — once as a binder,
+        // once as a variable — so any per-text assertion is satisfied by the wrong occurrence. Only the
+        // full ordered sequence pins which is which.
         assert_eq!(
             named,
             vec![
@@ -791,7 +780,7 @@ mod tests {
     }
 
     /// The depth bound is the CALLER'S, not `MAX_TERM_DEPTH`. Driving it at 3 rather than at 3,000 is
-    /// the whole reason it became a parameter: the branch is reachable without building a term deep
+    /// the whole reason it is a parameter: the branch is reachable without building a term deep
     /// enough to be a hazard in its own right.
     #[test]
     fn the_depth_cap_is_the_callers_number() {
@@ -807,10 +796,9 @@ mod tests {
 
     #[test]
     fn capped_printing_stops_at_the_budget_and_says_so() {
-        // A flat 200-element list, then `head` of it. There is no `0..200` range-literal syntax in this
-        // parser (list literals are only comma-separated `[a, b, c]`), so this builds the same shape —
-        // a sizeable first-order term with no recursion — the way `printed_lowering_of_every_demo_reparses`
-        // builds every other term here: `parse` -> `desugar` -> `lower`.
+        // A flat 200-element list, then `head` of it — a sizeable first-order term with no recursion —
+        // built the way `printed_lowering_of_every_demo_reparses` builds every other term here:
+        // `parse` -> `desugar` -> `lower`.
         let items = (0..200).map(|i| i.to_string()).collect::<Vec<_>>().join(", ");
         let src = format!("let xs = [{items}]; head(xs)");
         let t = lowered(&src);
@@ -838,21 +826,20 @@ mod tests {
         let (short, _, truncated) = print_lambda_capped(&t, 128, MAX_TERM_DEPTH);
         assert_eq!(truncated, Some(Cut::Bytes));
         // Overshoot is bounded by one binder prefix, not by the term's size — and in this region every
-        // write is one byte behind its own check, so the fixed implementation lands at or very near
-        // exactly 128 bytes. A wider tolerance here would let the `parenthesized` re-check regress
-        // silently and this test would not notice.
+        // write is one byte behind its own check, so the output lands at or very near exactly 128 bytes.
+        // A wider tolerance here would let the `parens` re-check regress unnoticed.
         assert!(
             short.len() <= 128 + 6,
             "expected at most one binder prefix of overshoot, got {} bytes at a 128-byte budget \
-             (an unfixed `parenthesized` re-check would land well above this)",
+             (on this term, more is `parens` writing `)` after the budget fired, one per enclosing pair)",
             short.len()
         );
     }
 
     /// Exact fit is NOT truncation, and length alone cannot tell the difference. A term whose complete
-    /// printing is exactly `byte_budget` bytes finished its walk with nothing cut; inferring truncation
-    /// from `out.len() >= byte_budget` reported that as truncated, and inferring it from `>` would have
-    /// reported a genuinely cut walk as complete. Only the walk knows, so the walk reports it.
+    /// printing is exactly `byte_budget` bytes finishes its walk with nothing cut; inferring truncation
+    /// from `out.len() >= byte_budget` would report that as truncated, and inferring it from `>` would
+    /// report a genuinely cut walk as complete. Only the walk knows, so the walk reports it.
     #[test]
     fn a_term_printing_to_exactly_the_budget_is_not_truncated() {
         // A small first-order term, built the same way the neighbouring tests build one: parse ->
@@ -872,15 +859,13 @@ mod tests {
     }
 
     /// No printed byte moves. At a budget larger than the term, capped printing is byte-identical to
-    /// `print_lambda_mapped` — text AND spans — which is what pins that this slice changed no output.
+    /// `print_lambda_mapped` — text AND spans.
     #[test]
     fn an_unreachable_budget_is_identical_to_the_uncapped_printer() {
         use crate::desugar::desugar;
         use crate::lambda::lower::lower;
         use crate::parser::parse;
 
-        // The same demo list `printed_lowering_of_every_demo_reparses` uses, for the same reason: it is
-        // the set whose printed lowering this module already promises to keep stable.
         let demos = ["1 + 2 * 3", "let x = 1; let y = x + x; y * 3", "if 2 > 1 { 10 } else { 20 }", "[1, 2, 3]"];
         for src in demos {
             let (program, _) = parse(src);
@@ -894,7 +879,7 @@ mod tests {
         }
     }
 
-    /// Left-nested application chains are the case `parenthesized`'s re-check does NOT cover, and they
+    /// Left-nested application chains are the case `parens`'s re-check does NOT cover, and they
     /// are the common one: the `Core::Apply` arm in `lower.rs` builds `term = app(term, la)` per argument, so
     /// every multi-argument call is left-nested. Without a budget re-check before the separator, each
     /// frame pushes another space as the stack unwinds and overshoot grows with the argument count.
@@ -909,38 +894,36 @@ mod tests {
 
         // 8 bytes lands the walk exactly at the end of "(λf. f " — the chain's innermost spine leaf plus
         // its trailing separator — so the budget fires right as the stack begins unwinding through all
-        // eight `App` frames. Before the fix, each frame pushed its separator unconditionally: one extra
-        // byte PER ARGUMENT (8 extra bytes, double the budget). After the fix, no frame writes past the
-        // point the budget fired.
+        // eight `App` frames, and no frame writes past the point the budget fired.
         let (short, _, truncated) = print_lambda_capped(&t, 8, MAX_TERM_DEPTH);
         assert_eq!(truncated, Some(Cut::Bytes));
         // Pins the exact landing point, not just its length: a change to the lowering that moved where
         // the walk bails would pass the two bound checks below vacuously without this.
         assert_eq!(short, "(λf. f ", "the fixture's exact truncated output moved: {short:?}");
         // Every token in this fixture (identifiers, `.`, `(`, `)`, and the 2-byte `λ`) is short, so one
-        // token of legitimate overshoot is bounded well under this; the pre-fix bug blew past it by
-        // growing with the argument count instead.
+        // token of legitimate overshoot is bounded well under this; an overshoot that grows with the
+        // argument count is not.
         assert!(short.len() <= 8 + 4, "overshoot grew with the chain: {} bytes at an 8-byte budget", short.len());
         assert!(!short.ends_with("  "), "consecutive separators mean a frame wrote after the budget fired: {short:?}");
     }
 
-    /// THE CRITICAL FIX. Before the depth counter, `write_app_fn` delegating into `write_term` down a
-    /// left-nested spine's function position wrote ZERO bytes while descending, so `out.len() >= budget`
-    /// never got a chance to fire during that descent: native recursion depth equalled the spine length.
-    /// At `usize::MAX` the byte budget can never be what stops it — only a depth guard can — and a spine
-    /// this long overflowed the native stack before the fix. Built with `app`/`var` directly, not the
-    /// parser, because the term is OPEN: `var(0)` here names no enclosing binder, and `parse_atom`'s
-    /// ident branch only ever produces a `Var` by resolving a name against `scope` — a free index is not
-    /// something source text can spell, so this exact term is not parser-reachable.
+    /// `node` (in `Role::AppFn`) delegating into `write` down a left-nested spine's function position writes
+    /// ZERO bytes while descending, so `out.len() >= budget` never gets a chance to fire during that descent:
+    /// native recursion depth equals the spine length. At `usize::MAX` the byte budget can never be what
+    /// stops it — only a depth guard can — and a spine this long overflows the native stack without one.
+    /// Built with `app`/`var` directly, not the parser, because the term is OPEN: `var(0)` here names no
+    /// enclosing binder, and `parse_atom`'s ident branch only ever produces a `Var` by resolving a name
+    /// against `scope` — a free index is not something source text can spell, so this exact term
+    /// is not parser-reachable.
     ///
-    /// `MAX_PARSE_DEPTH` is NOT why hand-building is necessary here, and does not make a spine this long
-    /// unreachable from the parser. `depth` is incremented only in `parse_term` (paren nesting and a
-    /// `λ`-body), not by juxtaposition: `parse_application` consumes each argument through a LOOP calling
-    /// `parse_atom`, folding `term = app(term, arg)` at the same parser depth every time, and
-    /// `parse_atom`'s ident branch neither recurses nor touches `depth`. So `λa.` followed by 30,000 `a`s
-    /// parses at parser depth 2 — one for the outer `parse_term`, one for the abstraction's body — and
-    /// produces exactly this left-nested spine. A source program CAN reach this code path, which is why
-    /// the depth guard above is load-bearing for parsed input too, not only for hand-built terms.
+    /// `MAX_PARSE_DEPTH` does not make a spine this long unreachable from the parser. `depth` is
+    /// incremented only in `parse_term` (paren nesting and a `λ`-body), not by juxtaposition:
+    /// `parse_application` consumes each argument through a LOOP calling `parse_atom`, folding
+    /// `term = app(term, arg)` at the same parser depth every time, and `parse_atom`'s ident branch
+    /// neither recurses nor touches `depth`. So `λa.` followed by 30,000 `a`s parses at parser depth 2 —
+    /// one for the outer `parse_term`, one for the abstraction's body — and produces exactly this
+    /// left-nested spine. A source program CAN reach this code path, which is why the depth guard above
+    /// is load-bearing for parsed input too, not only for hand-built terms.
     #[test]
     fn a_left_nested_spine_far_past_max_term_depth_truncates_instead_of_overflowing_the_stack() {
         let mut t = var(0);
@@ -1003,7 +986,7 @@ mod tests {
     #[test]
     fn an_empty_want_is_byte_identical_to_the_capped_printer() {
         // ONE WALKER, NOT TWO — the same property `an_unreachable_budget_is_identical_to_the_uncapped
-        // _printer` pins one layer out. `print_lambda_capped` now delegates here, so a divergence
+        // _printer` pins one layer out. `print_lambda_capped` delegates here, so a divergence
         // would mean the recording path had quietly become a second printer.
         for src in ["\\x. x", "\\z. (\\f. \\x. f (f x)) (\\y. y) z", "\\a. \\b. a b (a b)"] {
             let t = parse_ok(src);
@@ -1143,23 +1126,20 @@ mod tests {
 
     #[test]
     fn a_node_past_the_cut_records_nothing_rather_than_a_clamped_span() {
-        // PINS AN EXACT, NAMED SHAPE — NOT A COUNT INEQUALITY. The original form asserted only
-        // `nodes.len() < want.len()`, which a "records nothing, ever" implementation (`nodes:
-        // Vec::new()` unconditionally) also satisfies, since `0 < want.len()` is vacuously true for
-        // any non-trivial term. Its per-node loop checked only `span.end <= text.len()`, which cannot
-        // tell "never recorded" from "recorded but clamped to the cut": a clamped span satisfies that
-        // bound BY CONSTRUCTION, since clamping means "trim the end to fit inside the text". So the old
-        // test passed unchanged against both bugs this doc paragraph rules out.
+        // Pins an exact, named shape, not a count inequality. `nodes.len() < want.len()` is also satisfied by
+        // a "records nothing, ever" implementation (`nodes: Vec::new()` unconditionally), since `0 <
+        // want.len()` is vacuously true for any non-trivial term. A per-node loop checking only `span.end <=
+        // text.len()` cannot tell "never recorded" from "recorded but clamped to the cut": a clamped span
+        // satisfies that bound BY CONSTRUCTION, since clamping means "trim the end to fit inside the text".
+        // Both bugs this doc paragraph rules out would pass it.
         //
         // This form instead picks a budget where the walk gets partway, and pins both halves by
         // identity: the completed subterm is recorded with its EXACT span and text, and the cut
         // subterm is ABSENT from `nodes` — not present with an end pinned to where the walk stopped.
-        // Budget 10 on `\f. f (\y. y)` was read out empirically (a temporary probe test printed the
-        // walk's output at budgets 0..=15 and was deleted once these numbers were confirmed): the walk
-        // produces exactly `"λf. f (λy. "` (13 bytes) and stops inside the inner `Abs`'s body write, so
-        // `Var f` at `[AbsBody, AppL]` finishes and is recorded, while `(\y. y)` at `[AbsBody, AppR]` —
-        // whose opening paren is written but whose own recording site never runs because `cut` is
-        // already set when its `node()` call returns — is cut and must not appear at all. A clamping
+        // Budget 10 on `\f. f (\y. y)` produces exactly `"λf. f (λy. "` (13 bytes) and stops inside the inner
+        // `Abs`'s body write, so `Var f` at `[AbsBody, AppL]` finishes and is recorded, while `(\y. y)` at
+        // `[AbsBody, AppR]` — whose opening paren is written but whose own recording site never runs because
+        // `cut` is already set when its `node()` call returns — is cut and must not appear at all. A clamping
         // implementation would instead record it as `(7, 13)`, i.e. `"(λy. "`.
         let t = parse_ok("\\f. f (\\y. y)");
         let want = all_paths(&t);
@@ -1218,8 +1198,8 @@ mod tests {
     /// the `bail(depth)` call guarding that chain's root sees `depth == 2` and `out.len() == 10`. Budget
     /// 8 makes `out.len() >= budget` true there (`10 >= 8`), and depth cap 1 makes `depth > depth_cap`
     /// true there too (`2 > 1`) — both at that identical call, not one at an earlier bail and the other
-    /// at a later one. (Depth cap 3, used previously, made only the byte condition true at that call —
-    /// the test passed but did not exercise precedence, only walk order.) `bail` tests bytes before
+    /// at a later one. (Depth cap 3 would make only the byte condition true at that call —
+    /// the test would pass but not exercise precedence, only walk order.) `bail` tests bytes before
     /// depth, so bytes is the answer.
     #[test]
     fn when_both_limits_fire_the_byte_cause_is_the_one_reported() {

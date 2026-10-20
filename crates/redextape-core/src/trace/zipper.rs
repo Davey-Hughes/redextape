@@ -1,9 +1,8 @@
 //! A reduction-context zipper for β-reduction — the alternative to `LambdaCursor`'s root re-descent.
 //!
-//! **THE MEASUREMENT THIS EXISTS FOR:** `LambdaCursor::next` calls `reduce_step` from the root every
-//! step, and `reduce_step` rebuilds the redex spine on the way back up — one `Rc::new` per path
-//! element. That is `Σ path`: 29.2% of every allocation the reducer makes and 36.2% of fitted time,
-//! the largest single allocating traversal in the corpus. This cursor carries the spine instead.
+//! **WHY THIS EXISTS:** `LambdaCursor::next` calls `reduce_step` from the root every step, and
+//! `reduce_step` rebuilds the redex spine on the way back up — one `Rc::new` per path element. That
+//! is `Σ path` allocations. This cursor carries the spine instead.
 //!
 //! **NAVIGATION IS ALLOCATION-FREE ON THE DESCENT AND ON SIBLING MOVES, and the reason is the
 //! invariant below.** Every redex is reduced from exactly one configuration — `focus` is an `Abs` and
@@ -93,16 +92,17 @@ pub struct ZipperCursor {
     /// nothing shipped.
     #[cfg(test)]
     seek_calls_from_root: u32,
-    /// Nodes rebuilt by `advance`'s climb — **the one place navigation allocates**, and the quantity
-    /// that separates what this cursor saves from what it was projected to save. The design's ceiling
-    /// is `Σ path − climbs`; without this counter a null measurement could not be attributed.
+    /// Nodes rebuilt by `advance`'s climb — **the one place navigation allocates**, and what this
+    /// cursor pays back of the `Σ path` it does not rebuild: the net saving is `Σ path − climbs`. PART D
+    /// of `examples/lambda_sharing_probe.rs` reads it for that net; without this counter a net below
+    /// `Σ path` could not be attributed.
     ///
     /// **NOT `#[cfg(test)]`, unlike `seek_calls_from_root`, and not by oversight.** PART D of
     /// `examples/lambda_sharing_probe.rs` is an example rather than a test, so a gated field is
-    /// invisible to it. **Counted here rather than by a global allocator hook on purpose:** `push`
-    /// grows a `Vec<Frame>`, which also allocates, and a hook would fold that into the same number as
-    /// the `Rc::new`s the ceiling is denominated in. The quantity the design is about is NODE
-    /// allocations. If this cursor ever ships, the counter goes.
+    /// invisible to it. **Counted here rather than by a global allocator hook on purpose:**
+    /// `push` grows a `Vec<Frame>`, which also allocates, and a hook would fold that into the
+    /// same number as the `Rc::new`s `Σ path` is denominated in. The quantity the design is
+    /// about is NODE allocations.
     climbs: u64,
 }
 
@@ -176,11 +176,11 @@ impl ZipperCursor {
     /// composed with `max(x + 1, c)` is `max(x + (a+1), max(b, c + a))` — so the whole stack collapses
     /// to one `(add, floor)` pair maintained on push and restored on pop.
     ///
-    /// **This is not an optimization, it is the depth guard's only remaining home.** `LambdaCursor`
+    /// **This is not an optimization, it is the depth guard's only home here.** `LambdaCursor`
     /// reads `self.current.depth()`, a stored field on the root handle. A zipper has no root handle
     /// between steps, and rebuilding one per step to read it would reintroduce exactly the cost this
-    /// cursor removes. Dropping the guard instead is not available: it is the 2026-08-01 fix that
-    /// closed the hang.
+    /// cursor removes. Dropping the guard instead is not available: it is what refuses a term deeper than
+    /// `MAX_TERM_DEPTH` (`HitCap`) rather than stepping it.
     fn root_depth(&self) -> u32 {
         self.focus.depth().saturating_add(self.depth_add).max(self.depth_floor)
     }
@@ -252,10 +252,8 @@ impl ZipperCursor {
         while let Some(f) = self.pop() {
             match f {
                 // The function side held no redex, so try the argument side. `self.focus` is the
-                // function; it becomes the frame's sibling and `arg` becomes the focus. `push` does
-                // the focus swap, so this must not also do it — an earlier draft used
-                // `std::mem::replace` here and then read `self.focus` inside the `push` call, which
-                // both double-moved and failed to borrow-check.
+                // function; it becomes the frame's sibling and `arg` becomes the focus. `push` does the
+                // focus swap, so this must not also do it.
                 //
                 // The `AppR` frame decomposes THE SAME `App` node the popped `AppL` did — only the
                 // side the focus sits on changes — so it inherits that frame's tag rather than
@@ -285,20 +283,18 @@ impl ZipperCursor {
 
     /// Reposition at the leftmost-outermost redex by rebuilding the root and restarting the search from
     /// the top. **Used only for the FIRST step** — `seek_resuming` handles every later one, and the
-    /// difference between them is the entire optimization this cursor exists to measure.
+    /// difference between them is the optimization this cursor exists for.
     fn seek_from_root(&mut self) -> bool {
         #[cfg(test)]
         {
             self.seek_calls_from_root += 1;
         }
-        // Rebuilt once here rather than maintained: `seek_from_root` restarts from the root by
-        // definition, and Task 5 is what stops calling it every step.
+        // Rebuilt once here rather than maintained: `seek_from_root` restarts from the root by definition.
         //
         // **`self.term()` MUST be called before the stack is cleared.** It folds `self.stack` to
-        // rebuild the root, so it needs the stack still intact; calling it after `self.stack.clear()`
-        // folds nothing and silently truncates the term to the current focus. This ordering is
-        // load-bearing — getting it backwards here was the Critical finding this file's history
-        // remembers.
+        // rebuild the root, so it needs the stack still intact; calling it after
+        // `self.stack.clear()` folds nothing and silently truncates the term to the current focus.
+        // This ordering is load-bearing.
         self.focus = self.term();
         self.stack.clear();
         self.depth_add = 0;
@@ -381,13 +377,13 @@ impl ZipperCursor {
     /// **THE ENCLOSING TAG IS READ AFTER THE POP, SO THE SCAN EXPRESSES THE RELATION RATHER THAN
     /// COINCIDING WITH IT.** `reduce_step_go`'s `enclosing` is the innermost tag STRICTLY ABOVE the
     /// redex, and after the pop the redex's own frame is gone, so a reverse walk of what remains is
-    /// exactly that. **Scanning before the pop was measured and is observationally identical today** —
-    /// the redex's own frame answers `Some` only when the redex is tagged, and then the `(Some(id), _)`
-    /// arm below takes `Exact` without consulting `enclosing` at all; when it is untagged it answers
-    /// `None` and `find_map` skips it either way. It is written this way regardless because the
-    /// equivalence is a consequence of `Exact` outranking `Within` in one `match` two lines down, not of
-    /// anything about the stack: reorder those arms and the pre-pop version starts reporting
-    /// `Within(self)`, which is not a claim this type can make.
+    /// exactly that. **Scanning before the pop is observationally identical** — the redex's own frame
+    /// answers `Some` only when the redex is tagged, and then the `(Some(id), _)` arm below takes
+    /// `Exact` without consulting `enclosing` at all; when it is untagged it answers `None` and
+    /// `find_map` skips it either way. It is written this way regardless because the equivalence is a
+    /// consequence of `Exact` outranking `Within` in one `match` two lines down, not of anything about
+    /// the stack: reorder those arms and the pre-pop version starts reporting `Within(self)`, which is
+    /// not a claim this type can make.
     ///
     /// The scan is a reverse walk of the context stack rather than a descent because a stack is what is
     /// available here — same relation, different route, which is exactly what
@@ -528,10 +524,9 @@ mod tests {
         assert_eq!(z.term(), t, "seeking must not change the term");
     }
 
-    /// **`term()`'s fold direction, which Task 1's test structurally could not reach** — it only ever
-    /// had an empty stack, so a reversed fold would have passed it. Now that `descend_to_redex` can
-    /// build a non-trivial stack, use it: the term is asymmetric at both levels, so folding outward
-    /// from the wrong end produces a differently-nested term rather than an equal one.
+    /// `term()`'s fold direction, reached through the non-trivial stack `descend_to_redex` builds:
+    /// the term is asymmetric at both levels, so folding outward from the wrong end produces a
+    /// differently-nested term rather than an equal one.
     #[test]
     fn term_folds_the_context_stack_in_the_right_direction() {
         let t = abs("f", app(app(abs("x", var(0)), var(1)), var(2)));
@@ -579,11 +574,10 @@ mod tests {
         crate::lambda::lower(&crate::desugar::desugar(&prog.expect("fixture must parse"))).expect("fixture must lower")
     }
 
-    /// **Critical regression test.** Before the fix, `seek_from_root` cleared the stack before calling
-    /// `term_at_root`, so a second call — made from a non-root position, exactly how a real caller
-    /// uses it between reduction steps — folded an already-empty stack and silently discarded every
-    /// popped frame's sibling. The term collapsed to `\x. x`, having dropped `z`'s binder and the
-    /// argument `y` along with it.
+    /// A `seek_from_root` that cleared the stack before calling `term` would make a second call
+    /// — made from a non-root position, exactly how a real caller uses it between reduction steps —
+    /// fold an already-empty stack and silently discard every popped frame's sibling: the term would
+    /// collapse to `\x. x`, having dropped `z`'s binder and the argument `y` along with it.
     #[test]
     fn seek_from_root_rebuilds_the_whole_term_before_restarting() {
         let t = abs("z", app(abs("x", var(0)), var(1)));
@@ -598,16 +592,13 @@ mod tests {
         assert_eq!(z.term(), t, "the whole term must survive a second seek from a non-root position");
     }
 
-    /// Exercises the O(1) whole-term depth accounting that `root_depth` is the only remaining home
-    /// for. The arithmetic itself is not under test here (it was independently verified and must not
-    /// change) — only that `root_depth()` agrees with `t.depth()` at every position a caller can
-    /// observe it from, and that the `(depth_add, depth_floor)` pair is all-zero exactly when the
-    /// zipper is back at the root.
+    /// Exercises the O(1) whole-term depth accounting that `root_depth` is the only home for: that
+    /// `root_depth()` agrees with `t.depth()` at every position a caller can observe it from, and that
+    /// the `(depth_add, depth_floor)` pair is all-zero exactly when the zipper is back at the root.
     #[test]
     fn root_depth_tracks_the_whole_terms_depth_at_every_position() {
         // `depth()` is 5 here, and a `push` with the `max(self.depth_floor, ...)` deleted reports 4 —
-        // this fixture is chosen to make that `max` load-bearing, which the earlier flat-App fixture did
-        // not.
+        // this fixture is chosen to make that `max` load-bearing.
         let t = abs("f", app(app(abs("x", var(0)), var(1)), abs("a", abs("b", abs("c", var(0))))));
         let mut z = ZipperCursor::new(&t, MAX_REDUCTION_STEPS);
 
@@ -664,13 +655,11 @@ mod tests {
         );
     }
 
-    /// **THE ONLY TEST THAT CAN SEE `climbs` AT ALL.** Deleting `climbs += 1` from both arms in
-    /// `advance` passes every other test in this tree — nothing else observes the counter, even though
-    /// it is the quantity behind `lambda_sharing_probe.rs` PART D's "99.0% of the ceiling" measurement
-    /// (`net = Σ path − climbs`). `seek_calls_from_root`, a purely diagnostic counter with no bearing on
-    /// any published number, has its own dedicated test above
-    /// (`resuming_keeps_the_context_stack_rather_than_rebuilding_it`); this is the same coverage for the
-    /// counter that actually feeds a headline claim.
+    /// **THE ONLY TEST THAT CAN SEE `climbs` AT ALL.** No other test observes the counter, even though
+    /// it is the quantity behind `lambda_sharing_probe.rs` PART D's net saving (`net = Σ path − climbs`).
+    /// `seek_calls_from_root`, a purely diagnostic counter with no bearing on any published number, has
+    /// its own dedicated test above (`resuming_keeps_the_context_stack_rather_than_rebuilding_it`); this
+    /// is the same coverage for the counter PART D's net is computed from.
     ///
     /// `t = (v0 (\x. x)) ((\y. y) v1)`. The only redex is the right branch, `(\y. y) v1`; the left
     /// branch, `v0 (\x. x)`, holds none — `v0` is a bare `Var` (not reducible), and `\x. x` alone (not

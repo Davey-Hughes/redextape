@@ -24,16 +24,16 @@
 //!
 //! WHAT THE DOCS DID NOT COVER — this file's primary deliverable. Eleven questions the permitted docs
 //! left open, in the order they blocked writing the three components. Where a resolution says
-//! VERIFIED, it means the opposite choice was substituted into the code below and the corpus was
-//! re-run: it failed. Where it says UNEXERCISED, the corpus cannot tell the two apart, and the
-//! resolution is a guess this test does not license anyone to rely on. Findings 8 and 11 carry
-//! neither mark, and that is deliberate rather than an omission: 8 records a structural fact about the
-//! encodings, not a choice between alternatives the corpus could adjudicate, and 11's resolution is a
-//! defensive assertion, not a substitutable code path. The taxonomy applies only to findings whose
-//! resolution could have gone the other way in the code below.
+//! VERIFIED, substituting the opposite choice into the code below makes the corpus fail. Where it says
+//! UNEXERCISED, the corpus cannot tell the two apart, and the resolution is a guess this test does not
+//! license anyone to rely on. Findings 8 and 11 carry neither mark, and that is deliberate rather than
+//! an omission: 8 records a structural fact about the encodings, not a choice between alternatives the
+//! corpus could adjudicate, and 11's resolution is a defensive assertion, not a substitutable code
+//! path. The taxonomy applies only to findings whose resolution could have gone the other way in the
+//! code below.
 //!
 //!  1. WHERE DOES A `\x. e` BODY END? `syntax.rs`'s module doc gives the surface forms (`var`,
-//!     `\x. e`, "application by juxtaposition (left-assoc)", parens) but never states the relative
+//!     `λx. e`, "application by juxtaposition (left-assoc)", parens) but never states the relative
 //!     precedence of abstraction and application — whether `\x. a b` is `\x. (a b)` or `(\x. a) b`.
 //!     This is the single most load-bearing thing a foreign parser needs and it is not written down.
 //!     *Resolved:* took the usual convention, that the body extends as far right as it can.
@@ -43,29 +43,21 @@
 //!  2. IS THERE MULTI-BINDER SUGAR (`\x y. e`)? Not stated either way. *Resolved:* not implemented.
 //!     **UNEXERCISED** in the reading direction — the printer emits exactly one name per `\` — but a
 //!     foreign WRITER has no way to know from the doc whether it is allowed to emit the short form.
-//!  3. IS THE SPACE AFTER `.` REQUIRED? The doc writes `\x. e` with a space and separately lists `.`
+//!  3. IS THE SPACE AFTER `.` REQUIRED? The doc writes `λx. e` with a space and separately lists `.`
 //!     as an identifier terminator, which implies `\x.e` lexes; it never says so. *Resolved:*
 //!     accepted both. **UNEXERCISED** — the printer always emits the space.
 //!  4. IS THERE A COMMENT SYNTAX? Not stated. *Resolved:* assumed none; any character that is neither
 //!     whitespace, an identifier character, nor one of `\ λ . ( )` is a lex error. **UNEXERCISED.**
-//!  5. WHICH INDEX ARITHMETIC IS THE β RULE? This is the gap that mattered most. `term.rs` documents
-//!     `shift(d, cutoff, t)` ("shift the free variables ... by `d`"), `subst(j, s, t)` ("substitute
-//!     `s` for the variable with index `j`") and `beta` ("substitute `arg` for index 0 in `abs_body`
-//!     and close the hole") — but does not spell out the index arithmetic itself, so a reader has to
-//!     derive it from the rule the printed text form implies: closing a hole after substituting needs
-//!     the substituted argument shifted up before it goes in and the reduct shifted down afterward, and
-//!     crossing a binder during substitution renumbers both sides. "Substitution is pure index
-//!     arithmetic (no fresh names, no capture)" tells you it IS index arithmetic, not WHICH. *Resolved:*
-//!     the textbook formulation (Pierce, TAPL §6.2), `beta body arg = shift(-1, 0, subst(0, shift(1, 0,
-//!     arg), body))` with `subst` renumbering both sides at a binder — implemented as three genuinely
-//!     separate passes below, deliberately, even though `term.rs`'s shipped `beta` has computed the same
-//!     answer in one fused walk since 2026-08-03 (β-fusion — see its doc block's note that this was
-//!     three walks until that date). Staying three-pass here is what makes this file an independent oracle
-//!     for that fusion rather than a restatement of it: `tests/subst_differential.rs`'s
+//!  5. WHICH INDEX ARITHMETIC IS THE β RULE? *Resolved:* the textbook formulation (Pierce, TAPL §6.2),
+//!     `beta body arg = shift(-1, 0, subst(0, shift(1, 0, arg), body))` with `subst` renumbering both
+//!     sides at a binder — implemented as three genuinely separate passes below, deliberately, even
+//!     though `term.rs`'s shipped `beta` computes the same answer in one fused walk (β-fusion).
+//!     Staying three-pass here is what makes this file an independent oracle for that fusion rather
+//!     than a restatement of it: `tests/subst_differential.rs`'s
 //!     `the_shipped_beta_agrees_with_the_three_pass_formulation_on_every_enumerated_pair` checks the
-//!     shipped `beta` against `subst_differential.rs`'s own three-pass reference, `beta_three_pass` — a reference this
-//!     file's finding is what justified trusting in the first place, since it VERIFIED the same formula
-//!     independently, from the doc comments alone, against the corpus rather than against `term.rs`.
+//!     shipped `beta` against `subst_differential.rs`'s own three-pass reference, `beta_three_pass` —
+//!     a reference this file's finding backs, since it VERIFIES the same formula independently, from
+//!     the doc comments alone, against the corpus rather than against `term.rs`.
 //!     **VERIFIED, all three shifts independently** — dropping the pre-shift trips the negative-index
 //!     assertion; dropping `subst`'s per-binder shift (i.e. allowing capture) fails the corpus; dropping
 //!     the closing `shift(-1)` fails the corpus.
@@ -82,29 +74,21 @@
 //!     call before the base case can stop it diverges on its own, with no other cause needed. A
 //!     second, independent reason applies to a different corpus row: `head`'s `nil` branch is a
 //!     deliberately non-normalizing term, so an argument-first reader would diverge there too, for an
-//!     unrelated cause. An applicative-order reader of this text form is simply wrong, and nothing in
-//!     the docs warns it.
+//!     unrelated cause. An applicative-order reader of this text form is simply wrong.
 //!  8. THE TEXT FORM CARRIES NO RESULT TYPE, AND THE ENCODINGS COLLIDE — noted here because
 //!     `2026-07-28-lambda-foreign-reader-and-typed-decode.md` asks for it, and because it is stronger
 //!     than "the file happens not to record a type".
 //!     `encode.rs` documents `true = \t.\f. t` and `nil = \n.\c. n`: the SAME de Bruijn term,
 //!     `Abs(Abs(Var 1))`. And `false = \t.\f. f` and `church 0 = \f.\x. x`: also the same term,
 //!     `Abs(Abs(Var 0))`. So a normal form cannot be decoded without an externally supplied type —
-//!     not as an implementation convenience, but in principle. No READER-FACING permitted doc says
-//!     this anywhere — not `syntax.rs`, not `encode.rs`. It IS recorded, in `lambda/decode.rs`'s
-//!     module doc, the file the out-of-band task instructions correctly banned this reader from
-//!     consulting (that file describes the very decoding strategy a foreign reader has to rederive
-//!     independently). So the fact is not undocumented
-//!     project-wide; the gap is narrower and more actionable than that: no file a foreign reader is
-//!     permitted to consult carries it, so it has to be rediscovered rather than looked up.
-//!     *Resolved:* the type is supplied per corpus row, from those out-of-band instructions.
+//!     not as an implementation convenience, but in principle. *Resolved:* the type is supplied per
+//!     corpus row, from out-of-band instructions.
 //!  9. WHAT SHAPE SHOULD A DECODER MATCH? `encode.rs` documents the combinators, not the normal forms
 //!     they produce. That a fully applied, normalized cons cell is `\n.\c. c h t`, and that its two
 //!     payloads are closed and therefore need no shifting out from under those two binders, has to be
 //!     rederived. *Resolved:* derived by hand, **VERIFIED** against `[1, 2, 3]`. Mechanical, but a
 //!     foreign reader does the work.
-//! 10. WHAT DOES `MAX_PARSE_DEPTH` COUNT? **CORRECTED — the original version of this finding was
-//!     wrong; see the note below.** `syntax.rs` documents it as a "nesting-depth guard for the
+//! 10. WHAT DOES `MAX_PARSE_DEPTH` COUNT? `syntax.rs` documents it as a "nesting-depth guard for the
 //!     recursive-descent parser (mirrors the source parser)", which answers parser recursion but says
 //!     nothing about a second axis: TERM depth. A long left-associated application chain deepens the
 //!     parsed term without deepening parser recursion (`parse_application`'s loop is not recursive),
@@ -112,18 +96,8 @@
 //!     *Resolved:* guard parser recursion (mirroring the documented `MAX_PARSE_DEPTH`) and the parsed
 //!     term's depth separately, via `FOREIGN_MAX_TERM_DEPTH`. **UNEXERCISED** — the corpus maximum is
 //!     47.
-//!
-//!     THE CORRECTION: an earlier version of this finding claimed `MAX_PARSE_DEPTH` had "no doc
-//!     comment at all". That was false — the doc quoted above exists and directly answers the question
-//!     this finding poses. A review caught it. Cause: this file's doc-only extraction from `syntax.rs`
-//!     used `grep '^//!'` (module-doc lines only), which by construction cannot match a `///` item doc
-//!     comment, so `MAX_PARSE_DEPTH`'s doc was never seen — and its absence from the extraction was
-//!     then written up as the constant having no doc at all. Recorded here rather than silently
-//!     dropped, because a findings list that quietly loses a false entry teaches the next reader
-//!     nothing.
-//! 11. WHAT DOES `shift` DO IF THE RESULT WOULD BE NEGATIVE? `d` is an `i64` and nothing says. It can
-//!     only happen on an open term. *Resolved:* asserted. Worth keeping: that assertion is what
-//!     caught the missing pre-shift in finding 5.
+//! 11. WHAT DOES `shift` DO IF THE RESULT WOULD BE NEGATIVE? It can only happen on an open term.
+//!     *Resolved:* asserted. Worth keeping: the assertion trips if finding 5's pre-shift is dropped.
 //!
 //! WHAT THE DOCS COVERED CLEANLY, NO GAP — stated because "no gaps here" is only a result if it is
 //! said: the identifier grammar including `$` (exactly right, and load-bearing — dropping `$` from
@@ -154,15 +128,15 @@
 //!
 //! A NARROWER RESIDUAL WITHIN THE β RULE ITSELF, worth stating plainly rather than leaving implicit:
 //! `shift`, `subst` and `beta` below share their originals' names, signatures (`shift(d: i64, cutoff:
-//! u32, ...)`), the TAPL formulation, and one verbatim doc line quoted from `term.rs` (finding 5) — all
-//! of that permitted, since public signatures and doc comments were on the reading list, and quoted
-//! there deliberately. The consequence: the substitution layer is NOT an independent cross-check of
-//! `term.rs`'s, because a shared TAPL-level misreading of `shift`/`subst`/`beta` would be invisible to
-//! this test — both implementations would agree and both would be wrong the same way. The genuinely
-//! independent component is redex selection — which side of `App` reduces first, whether reduction
-//! descends under `Abs` — and that is precisely where the one correctness finding (7) came from.
-//! `tests/tm_foreign_reader.rs` draws exactly this kind of narrowing conclusion about its own scope
-//! ("what it establishes today is narrower than its own title suggests"); the same applies here.
+//! u32, ...)`), the TAPL formulation, and one verbatim doc line quoted from `term.rs` (`shift`'s first
+//! line, below) — all of that permitted, since public signatures and doc comments were on the reading
+//! list, and quoted deliberately. The consequence: the substitution layer is NOT an independent
+//! cross-check of `term.rs`'s, because a shared TAPL-level misreading of `shift`/`subst`/`beta` would
+//! be invisible to this test — both implementations would agree and both would be wrong the same way.
+//! The genuinely independent component is redex selection — which side of `App` reduces first, whether
+//! reduction descends under `Abs` — and that is precisely where the one correctness finding (7) came
+//! from. `tests/tm_foreign_reader.rs` draws exactly this kind of narrowing conclusion about its own
+//! scope ("what it establishes today is narrower than its own title suggests"); the same applies here.
 //!
 //! Imports `lower` and `print_lambda` (the PRODUCER side — this test is about reading what they
 //! write), `run` (the reference), `parse`/`desugar` (the front end) and `Value`. Nothing else from
@@ -454,13 +428,11 @@ fn step(t: &FTerm) -> Option<FTerm> {
     }
 }
 
-/// Iterative (explicit stack) so measuring the depth cannot itself overflow on a deep term. Seeds the
-/// worklist at depth 1, not 0 — which is the exact, now-identified cause of this reader's measured
-/// corpus maximum of 47 running one over the 46 stated in
-/// `2026-07-28-lambda-foreign-reader-and-typed-decode.md` (previously attributed to "a slightly
-/// different origin" for lack of a better explanation). A measured difference in where the two depth
-/// counts start, not a fault: the original `term_depth` was never read, per the discipline this file
-/// depends on.
+/// Iterative (explicit stack) so measuring the depth cannot itself overflow on a deep term. Seeds
+/// the worklist at depth 1, not 0, which is why this reader's measured corpus maximum of 47 runs one
+/// over the 46 stated in `2026-07-28-lambda-foreign-reader-and-typed-decode.md`. A difference in
+/// where the two depth counts start, not a fault: the original `term_depth` was never read, per the
+/// discipline this file depends on.
 fn term_depth(t: &FTerm) -> u32 {
     let mut max = 0;
     let mut work = vec![(t, 1u32)];
@@ -589,8 +561,8 @@ fn foreign_decode(t: &FTerm, ty: FTy) -> Option<Value> {
 /// Compare two `Value`s WITHOUT routing through core's own equality walk. `assert_eq!` would compile —
 /// `value.rs` does implement `PartialEq`, it just isn't derived — but a foreign reader that checked its
 /// result with core's comparison would be leaning on the thing under test for the last step of the
-/// check. Spelled out over the shapes this test can produce, for exactly the reason `decode.rs`'s
-/// `nat_list_to_vec` is spelled out: independence from a separate walk with its own separate decisions.
+/// check. Spelled out over the shapes this test can produce, for independence from a separate walk with
+/// its own separate decisions.
 fn same_value(a: &Value, b: &Value) -> bool {
     match (a, b) {
         (Value::Nat(x), Value::Nat(y)) => x == y,
@@ -612,8 +584,7 @@ const CORPUS: &[(&str, FTy)] = &[
     ("head(cons(7, nil))", FTy::Nat),
     ("[1, 2, 3]", FTy::ListNat),
     ("is_empty(nil)", FTy::Bool),
-    // Mutable state: these lower through `$store` binders, and their printed form was unparseable
-    // before this branch's first commit. They are the regression link to it.
+    // Mutable state: these lower through `$store` binders, so they check those binders print parseably.
     ("let mut x = 1; x = x + 10; x = x * 2; x", FTy::Nat),
     ("let mut n = 4; let mut acc = 0; while n > 0 { acc = acc + 1; n = n - 1; } acc", FTy::Nat),
     ("fn count_down(n) { let mut acc = 0; while n > 0 { acc = acc + 1; n = n - 1; } acc } count_down(4)", FTy::Nat),

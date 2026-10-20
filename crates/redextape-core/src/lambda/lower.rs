@@ -1,6 +1,5 @@
-//! Core AST -> de Bruijn lambda-term. This module has the functional path (Task 5) and the
-//! store-passing path for `let mut`/`while` (Task 6). Lowering is syntax-directed and total
-//! (returns `LowerError`, never panics).
+//! Core AST -> de Bruijn lambda-term. This module has the functional path and the store-passing path
+//! for `let mut`/`while`. Lowering is syntax-directed and total (returns `LowerError`, never panics).
 
 use crate::core::{Core, NodeId};
 use crate::lambda::encode;
@@ -33,41 +32,21 @@ const GROUP: &str = "$group";
 /// 700 rather than the 580 of `lower_asm::MAX_LOWER_DEPTH`/`defunc::MAX_DEFUNC_DEPTH`: same 8 MiB
 /// production stack and the same ~2x margin (the invariant is the margin, not a numeric match to
 /// another guard), but these frames differ in size from `lower_into`'s, so the number follows this
-/// module's own measurement. Measured on an explicit 8 MiB thread in a debug build, the UNGUARDED
-/// lowering survived depth 1453 and overflowed by 1473 on its fattest reachable shape — a store-passing
-/// region's statement spine; a plain list spine survived to ~1750 and a `fn` body to ~1900. 700 keeps
-/// ~2.1x below that, and it is exactly `interp::MAX_EVAL_DEPTH`, so the λ backend refuses nothing the
-/// reference interpreter can evaluate: structural nesting past 700 already faults there. Do NOT tune
-/// this against a smaller test thread — see `lower_asm::MAX_LOWER_DEPTH`'s doc for why.
+/// module's own measurement: an unguarded lowering overflows an 8 MiB debug-build stack by depth 1473
+/// on its fattest reachable shape, a store-passing region's statement spine. 700 keeps ~2.1x below that,
+/// and it is exactly `interp::MAX_EVAL_DEPTH`, so the λ backend refuses nothing the reference
+/// interpreter can evaluate: structural nesting past 700 already faults there. Do NOT tune this against
+/// a smaller test thread — see `lower_asm::MAX_LOWER_DEPTH`'s doc for why.
 const MAX_LAMBDA_LOWER_DEPTH: u32 = 700;
 
-// A SECOND GUARD USED TO SIT HERE AND IT WAS REVERTED. `MAX_SHARED_LOGICAL_NODES` = 10,000 refused a
-// term whose largest SHARED subterm exceeded it (`1652e09`), on the theory that `subst` duplicates a
-// shared subterm once per occurrence of the substituted variable. **Measurement falsified it, and the
-// mechanism it named was not what `subst` does.** `subst`'s `Var` arm is `s.clone()` — an `Rc` bump, so
-// occurrences are free — while its `Abs` arm re-shifts the whole argument once per `Abs` node in the
-// body, unconditionally, before anything checks whether the variable occurs. A step costs
-// `|body| + Abs(body) × |arg|`, and NEITHER factor is a sharing property: `let xs = [0..500); let ys =
-// [0..500); head(xs) + head(ys)` is 4,821 bytes with no recursion, measures `max_shared` = **4** against
-// the bound of 10,000, and its FIRST β-step took 19.0 s. The guard was 2,500x off on a program anyone
-// could write by accident. The measurement stays (`term::max_shared_logical_size` is sound and the two
-// tests below pin it); the refusal does not.
+// `lower` refuses nothing on shared-subterm grounds: `term.rs`'s `shift` and `subst` return their argument's
+// allocation when no free index is in range, and `reduce.rs`'s `depth_exceeds` reads a stored `depth`, so a
+// shared subterm's logical size is not paid per step.
 //
-// **~~The hang is open.~~ CLOSED 2026-08-01, AND NOTHING WAS ADDED HERE.** The account above stops one
-// level short of the cause, and the missing level is why no guard was needed: it does not say why
-// `|arg|` was the LOGICAL size rather than the physical one. `term.rs`'s `shift` rebuilt every node it
-// visited — Θ(logical), and sharing-destroying, since `shift(App(c, c))` recursed twice. `lower_group`'s
-// per-member clone (below) only writes the promise; `shift` cashed it on every step. Both `shift` and
-// `subst` now return their argument's allocation when no free index is in range, and `reduce.rs`'s
-// `depth_exceeds` reads a stored `depth` instead of walking. That 19.0 s step is now under a
-// millisecond, and `lower` still refuses nothing on these grounds — **deliberately, and this is the
-// third design on this hazard not to land here.** The successor named below, a per-redex work budget in
-// `LambdaCursor::next`, was never built: not falsified, made unnecessary.
-//
-// Full record: the λ section of `docs/superpowers/plans/2026-07-19-redextape-roadmap.md`; the
-// falsifications in `docs/superpowers/specs/2026-07-31-lambda-shared-subterm-guard-design.md` §10
-// (whose quantities stand and whose timings do not); instruments `examples/shift_cost_probe.rs` for the
-// fix and `examples/guard_hole_probe.rs` for the guard's verdict per row.
+// Full record: the λ section of `docs/superpowers/plans/2026-07-19-redextape-roadmap.md`;
+// `docs/superpowers/specs/2026-07-31-lambda-shared-subterm-guard-design.md` §10; instruments
+// `examples/shift_cost_probe.rs` for the `shift`/`subst` short-circuit and `examples/guard_hole_probe.rs`
+// for a shared-subterm guard's verdict per row.
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum LowerError {
@@ -130,9 +109,9 @@ fn project(store: LambdaTerm, i: usize, k: usize) -> LambdaTerm {
 /// is called directly from `#[cfg(test)] mod tests` (`store_update_replaces_one_slot`, further down
 /// this file) with an owned `LambdaTerm`, so narrowing the signature would force an edit to that test
 /// call site for a lint's sake alone — not something worth doing here.
-/// Restructuring the loop to consume `new` by move instead (e.g. `Option::take`) was considered and
-/// rejected: every escape needs an infallible fallback, and `unwrap`/`expect` are denied in library
-/// code, so the only honest fallback is one more clone — no smaller than today's.
+/// Consuming `new` by move instead (e.g. `Option::take`) does not help: every escape needs an
+/// infallible fallback, and `unwrap`/`expect` are denied in library code, so the only honest fallback
+/// is one more clone — no smaller than the loop's own.
 #[allow(clippy::needless_pass_by_value)]
 fn update(store: &LambdaTerm, i: usize, new: LambdaTerm, k: usize) -> LambdaTerm {
     let mut slots: Vec<LambdaTerm> = Vec::with_capacity(k);
@@ -266,9 +245,8 @@ pub fn lower_mapped(core: &Core) -> Result<(LambdaTerm, Vec<(NodeId, Path)>), Lo
     for (_, p) in &mut origins.pairs {
         p.reverse();
     }
-    // A SHARING GUARD USED TO RUN HERE, at the end, as the deliberate mirror of `too_deep_node` at the
-    // start. It was reverted — see the note above `LowerError` — so `too_deep_node` is once again the
-    // only refusal this function makes, and lowering is total on every Core within the depth bound.
+    // No shared-subterm refusal runs here (see the note above `LowerError`): `too_deep_node` is the only
+    // guard this function applies, and the passes above refuse only as its `# Errors` lists.
     Ok((term, origins.pairs))
 }
 
@@ -983,10 +961,9 @@ mod tests {
         // `is_even`, proj_1 for `is_odd`) computes `false` at an even argument, so a mis-indexed
         // tuple fails rather than agreeing by symmetry.
         //
-        // The ODD argument is NOT redundant, and this was measured, not assumed. Under the OTHER
-        // natural projection mutant — every member projected to `proj_1`, which is the sabotage the
-        // plan names — `is_odd` collapses onto `is_even`, and the pair degenerates into the single
-        // self-recursive `is_even(n) = if n == 0 { true } else { is_even(n - 1) }`. That still
+        // The ODD argument is NOT redundant. Under the OTHER natural projection mutant — every member
+        // projected to `proj_1` — `is_odd` collapses onto `is_even`, and the pair degenerates into the
+        // single self-recursive `is_even(n) = if n == 0 { true } else { is_even(n - 1) }`. That still
         // returns `true` at every EVEN argument, so `is_even(6)` alone PASSES under the mutant. Only
         // an odd argument, whose answer must come out of the OTHER member's base case, falsifies it.
         let defs = "fn is_even(n) { if n == 0 { true } else { is_odd(n - 1) } }\n\
@@ -1152,8 +1129,7 @@ mod tests {
         }
     }
 
-    /// Copied from `examples/tm_demo.rs`'s `first_order` array. No shared corpus helper exists —
-    /// `redextape-test-support` exports only `arb_expr_over`.
+    /// Copied from `examples/tm_demo.rs`'s `first_order` array.
     const FIRST_ORDER: &[&str] = &[
         "1 + 2 * 3",
         "3 - 5",
@@ -1234,7 +1210,7 @@ mod tests {
         }
     }
 
-    // --- `forget` is reachable only through direct `Core` construction (Finding 2) ---------------
+    // --- `forget` is reachable only through direct `Core` construction --------------------------
 
     /// `\x. (x = x + 1)`: the lambda body is a BARE `Assign`, with no enclosing `Seq`, so
     /// `lower_region` enters `lower_region_body` with `Pos::Value` directly on the `Assign` node —
@@ -1246,27 +1222,6 @@ mod tests {
     /// would survive and pick up the coarse ancestor wraps meant for the (also-discarded) rebuilt
     /// store, landing on paths that do not resolve against the actual — much shallower — produced
     /// term.
-    ///
-    /// BOTH POINTERS ABOVE WERE LINE NUMBERS UNTIL THIS COMMIT, AND NEITHER HELD. THE SELF-CITATION
-    /// WAS NEVER RIGHT AT ALL. `lower.rs` line 576 was this file naming its OWN line, from inside its
-    /// own test module, and at the commit that wrote it (`9fbd911`, the Plan 4 producer slice, which
-    /// added `Origins`, this test and the pointer together) it already sat 53 lines ABOVE the
-    /// `Pos::Value => origins.forget(mv)` it names — on the opening line of the
-    /// `Core::Let { mutable: false }` arm's comment, a sibling arm of the same `match`.
-    /// Three intervening slices then moved it 37 more — the λ-hang measurement apparatus (#1) by 18,
-    /// the β-step-hang close (#3) by 13, and dual focus while running (#26) by 6 — and
-    /// `clippy::pedantic` (#31) a further 44, the same shift already found under other pointers into
-    /// this file, so this conversion found 576 holding a line of
-    /// `lower_region`'s doc — the function the sentence above names as the one that ENTERS
-    /// `lower_region_body`, one caller removed from the branch meant, which is what would have made
-    /// it read as confirmation.
-    ///
-    /// `desugar.rs` lines 77-84 were exactly right when written: the `Stmt::Assign` and
-    /// `Stmt::While` arms in full, each wrapping its statement in a `Core::Seq`. The viewmodel slice
-    /// (#11) gave `lower_stmts_at` its span machinery and pushed both arms 52 lines down (#31 added
-    /// one more), and this conversion found 77-84 holding the last lines of that function's DOC —
-    /// which names "the `Assign` and `While` arms' statement spans" in its own text, so the range
-    /// still reads as though it were about the two arms cited.
     #[test]
     fn forget_discards_a_store_discarding_assigns_subtree_without_dangling_paths() {
         let value = Core::BinOp(2, BinOp::Add, Box::new(Core::Var(3, "x".to_string())), Box::new(Core::Nat(4, 1)));
@@ -1294,15 +1249,13 @@ mod tests {
         core_of(&format!("[{}]", (0..n).map(|i| i.to_string()).collect::<Vec<_>>().join(", ")))
     }
 
-    /// THIS INPUT USED TO ABORT THE PROCESS. Depth 2049 is past the ~1470 at which the unguarded
-    /// lowering overflowed an 8 MiB stack (measured in a debug build), and a stack overflow is an
-    /// uncatchable `SIGABRT` — not something a test could have asserted against. The guard measures
-    /// depth iteratively before recursing, so it now answers `TooDeep`.
+    /// Depth 2049 is past the ~1470 at which an unguarded lowering overflows an 8 MiB debug-build
+    /// stack, and a stack overflow is an uncatchable `SIGABRT` — not something a test could assert
+    /// against. The guard measures depth iteratively before recursing, so it answers `TooDeep`.
     ///
     /// 2049 is chosen to fail LOUDLY rather than fatally if the guard is ever removed: the suite runs
     /// on 32 MiB threads (`.cargo/config.toml` raises `RUST_MIN_STACK`), where an unguarded lowering
-    /// still survives depth ~4000, so a regression makes this assertion fail instead of killing the
-    /// test process.
+    /// survives depth ~4000, so a regression makes this assertion fail instead of killing the test process.
     #[test]
     fn a_core_deeper_than_the_guard_errors_instead_of_overflowing_the_stack() {
         let core = deep_list(2048);
@@ -1320,32 +1273,28 @@ mod tests {
         assert!(matches!(lower(&core), Err(LowerError::TooDeep { .. })), "the deep body must be refused");
     }
 
-    /// The guard admits everything below it, so nothing that lowered before is newly refused: a list
-    /// literal at the bound still lowers, and the refusal starts exactly one level above it.
+    /// The guard admits everything up to its bound: a list literal at the bound lowers, and the
+    /// refusal starts exactly one level above it.
     #[test]
     fn the_guard_admits_a_core_at_the_bound_and_refuses_only_past_it() {
         let at_bound = deep_list(MAX_LAMBDA_LOWER_DEPTH as usize - 1); // depth == MAX
-        assert!(lower(&at_bound).is_ok(), "a Core exactly at the bound must still lower");
+        assert!(lower(&at_bound).is_ok(), "a Core exactly at the bound must lower");
         let past_bound = deep_list(MAX_LAMBDA_LOWER_DEPTH as usize); // depth == MAX + 1
         assert!(matches!(lower(&past_bound), Err(LowerError::TooDeep { .. })), "one level past must refuse");
     }
 
-    // --- Shared-subterm MEASUREMENTS (the guard that read them was reverted) ------------------------
+    // --- Shared-subterm measurements ------------------------
     //
-    // These two used to gate. `MAX_SHARED_LOGICAL_NODES` was falsified and removed (see the note above
-    // `LowerError`), so they now assert what `max_shared_logical_size` reports rather than what `lower`
-    // does with it. They stay because the numbers are worth pinning and cost nothing: both are the
-    // extremes of the corpus profile the investigation ran, and either moving means the LOWERING
-    // changed shape, which is a thing a later reader wants told.
+    // These two assert what `max_shared_logical_size` reports, not what `lower` does with it (no guard reads
+    // it; see the note above `LowerError`). They pin the numbers because both are the extremes of the corpus
+    // profile, and either moving means the LOWERING changed shape, which is a thing a later reader wants told.
 
-    /// **The program that killed the total-size design.** A 699-element list literal is ~497,691 logical
-    /// nodes with NO sharing, and it reduces cleanly (1,398 steps, 35 s). Its `max_shared` is exactly 0
-    /// — which is also why the shared-subterm guard was silent on it, and, read the other way, the first
-    /// hint that `max_shared` is blind to the cost of stepping a large unshared term.
+    /// A 699-element list literal has NO sharing, so its `max_shared` is exactly 0; `max_shared` is blind
+    /// to the cost of stepping a large unshared term.
     #[test]
     fn a_large_unshared_list_measures_zero_shared_nodes() {
         let big = deep_list(MAX_LAMBDA_LOWER_DEPTH as usize - 1);
-        let term = lower(&big).expect("a 699-element list must still lower");
+        let term = lower(&big).expect("a 699-element list must lower");
         assert_eq!(
             crate::lambda::term::max_shared_logical_size(&term),
             0,

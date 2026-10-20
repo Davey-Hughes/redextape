@@ -55,8 +55,8 @@ const CORPUS: &[&str] = &[
 ];
 
 /// One (program, width, encoding) unit of the corpus invariant: lower, simulate, and check the REG
-/// bank after EVERY step. Extracted verbatim from the single test this file used to have, so the split
-/// below changes only how the units are SCHEDULED, never what any one of them asserts.
+/// bank after EVERY step. The split below changes only how the units are SCHEDULED, never what any one
+/// of them asserts.
 fn check_reg_bank_unit(src: &str, width: usize, name: &str, enc: &dyn Encoding) {
     let (prog, ds) = parse(src);
     assert!(ds.is_empty(), "parse errors in `{src}`: {ds:?}");
@@ -113,11 +113,10 @@ fn check_corpus_at(width: usize, encoding_name: &str) {
 /// that encoding — and records what it emitted into `EMITTED`, so the coverage guard below can compare
 /// against the real cross product instead of a second hard-coded copy of it.
 ///
-/// The axis is `(width, encoding)`, not per-width or per-program: cost is quadratic in width (width 64
-/// alone was 73% of the original 131s single test), so a per-width split leaves one ~94s long pole and
-/// looks like a fix without being one; per-(width, encoding) is the fewest tests that clears the real
-/// ceiling in this file (`generated_feature_programs_never_corrupt_the_bank`, ~51s, untouched by this
-/// task), and every generated name says what it covers.
+/// The axis is `(width, encoding)`, not per-width or per-program: cost is quadratic in width, so a
+/// per-width split leaves one ~94s long pole; per-(width, encoding) is the fewest tests that clears the
+/// real ceiling in this file (`generated_feature_programs_never_corrupt_the_bank`, ~51s), and every
+/// generated name says what it covers.
 macro_rules! reg_bank_tests {
     ($( $test:ident => ($w:expr, $enc:expr) ),* $(,)?) => {
         $(
@@ -159,7 +158,7 @@ reg_bank_tests! {
 ///
 /// What this does NOT catch: whether any one generated test's BODY is correct. It only proves every
 /// `(width, encoding)` cell is covered by SOME test; `check_reg_bank_unit` and `check_corpus_at` carry
-/// the actual assertions, extracted unchanged from the single test this file used to have.
+/// the actual assertions.
 #[test]
 fn the_split_covers_the_whole_cross_product() {
     let mut expected: Vec<(usize, &str)> = Vec::new();
@@ -406,21 +405,13 @@ fn a_well_formed_bank_passes_the_invariant() {
     assert!(reg_bank_is_well_formed(&broken, &enc, 3).is_err(), "a clobbered delimiter must be rejected");
 }
 
-// ================================================================================================
-// Review finding: the sabotage that shipped with Task 2 (deleting an overflow guard) exercised the
-// LENGTH clause of `reg_bank_is_well_formed`, an unchanged clause. Task 2 rewrote only the CONTENT
-// clause (`!content.contains(c)`) to consult `Encoding::field_symbols()`. Nothing in the suite planted
-// an illegal symbol strictly INSIDE a field's interior, so nothing proved that clause actually rejects
-// anything. The three tests below close that gap directly.
-// ================================================================================================
-
-/// Pins the CONTENT clause of `reg_bank_is_well_formed` — the one clause Task 2 rewrote. Plants `AT`
-/// (never REG field content, under any encoding) at cell 4, strictly inside field 0's interior: not
-/// cell 0 (the bank's leading `#`), not cell 9 (field 0's closing `#`, since width 8 puts it at
-/// `1 + 8`), and not any other field's boundary. The total length (19 = `1 + 2*(8+1)`) and every `#`
-/// are all left exactly as `init_reg` produced them, so the length clause, the leading-`#` clause and
-/// the closing-`#` clause are all provably unable to be the source of a failure here — only the content
-/// clause can reject this bank.
+/// Pins the CONTENT clause of `reg_bank_is_well_formed`. Plants `AT` (never REG field content, under
+/// any encoding) at cell 4, strictly inside field 0's interior: not cell 0 (the bank's leading `#`),
+/// not cell 9 (field 0's closing `#`, since width 8 puts it at `1 + 8`), and not any other field's
+/// boundary. The total length (19 = `1 + 2*(8+1)`) and every `#` are all left exactly as `init_reg`
+/// produced them, so the length clause, the leading-`#` clause and the closing-`#` clause are all
+/// provably unable to be the source of a failure here — only the content clause can reject
+/// this bank.
 #[test]
 fn reg_bank_content_clause_rejects_a_non_content_symbol_inside_a_field() {
     let enc = Unary::at(8);
@@ -450,13 +441,13 @@ fn box_tape_content_clause_rejects_a_non_content_symbol_inside_a_field() {
     assert!(err.contains("field 0"), "error must name the offending field index, got: {err}");
 }
 
-/// Pins the MID-APPEND concession `box_tape_is_well_formed` needed for `Binary` (see its doc in
+/// Pins the MID-APPEND concession `box_tape_is_well_formed` makes for `Binary` (see its doc in
 /// `tests/common/mod.rs`): `box_append_field_bin` writes a new field's leading `#` FIRST, then its
 /// digits left-to-right onto virgin tape, so for several steps the field genuinely holds "some real
 /// digits, then not-yet-reached `BLANK`" — a snapshot that is not a defect, unlike a foreign symbol or
 /// (checked below) content that RESUMES after a blank, which no gadget ever produces and must still be
-/// rejected. `Unary`'s alphabet already includes `BLANK`, so this concession was invisible before
-/// `Binary` (whose alphabet correctly excludes it) existed.
+/// rejected. `Unary`'s alphabet already includes `BLANK`, so only `Binary` (whose alphabet correctly
+/// excludes it) needs this concession.
 #[test]
 fn box_tape_content_clause_tolerates_binary_mid_append_but_not_a_resumed_field() {
     let enc = Binary::at(4);

@@ -1,6 +1,6 @@
 //! The Module-generic Cranelift codegen: translate a register-asm `Program` into Cranelift IR by
 //! calling ONLY `cranelift_module::Module` trait methods, so the same codegen drives either a
-//! `JITModule` (see `jit.rs`) or an `ObjectModule` (AOT, Task 4). Every entry point here takes
+//! `JITModule` (see `jit.rs`) or an `ObjectModule` (AOT). Every entry point here takes
 //! `module: &mut dyn Module`; a concrete `&mut JITModule`/`&mut ObjectModule` coerces to it at the
 //! call site.
 //!

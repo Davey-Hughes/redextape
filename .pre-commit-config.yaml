@@ -1,31 +1,21 @@
 # Local pre-commit hooks mirroring the CI gates (.forgejo/workflows/ci.yml). Install with:
 #   pre-commit install
-# Hooks only fire when matching files are staged. Rust hooks run on *.rs; web hooks run on the
-# web/ sources — both now fire for real, since crates/ and web/ both exist.
-# `web typecheck` needs `pkg/`, which is not checked in (see .gitignore). A fresh clone runs
-#   cd web && pnpm install && pnpm run build:wasm
+# Hooks scoped by `files:` only fire when matching files are staged: Rust hooks run on *.rs; web hooks
+# run on the web/ sources. The `always_run` hooks fire on every commit.
+# `web typecheck` needs `pkg/` and `pkg-lsp/`, neither checked in (see .gitignore). A fresh clone runs
+#   cd web && pnpm install && pnpm run build:wasm && pnpm run build:lsp-wasm
 # once before committing any TypeScript.
 repos:
   - repo: local
     hooks:
       # NOT scoped by `files:`, unlike every SCOPED hook below it, and that is the point: the byte
       # this rejects makes a file invisible to search, so a gate that only fires when a matching path
-      # is staged would miss it arriving in a path nobody thought to list. The citation hook below is
-      # unscoped for its own version of the same reason, so "every hook below it" was falsified by the
-      # hook this repo added directly underneath — the four `files:`-scoped hooks are the comparison.
+      # is staged would miss it arriving in a path nobody thought to list.
       #
-      # It walks `git ls-files` and costs the better part of a second — 574-594 ms over five runs at
-      # the citation branch's close, with two other observers at 583-589 and 567-587. **THIS SENTENCE
-      # HAS NOW BEEN WRONG TWICE, IN OPPOSITE DIRECTIONS, AND THE SECOND TIME WAS THE FIX FOR THE
-      # FIRST.** It read "milliseconds" until the citation gate's review measured it, and the commit
-      # whose entire subject line was that the adjective was two orders out replaced it with "a
-      # quarter-second — measured 583-589 ms", which contradicts itself inside one clause. The
-      # quarter-second is the CITATION gate below (255-269 ms at the same close); this one is more
-      # than twice that. Cheap enough to run always; not free.
+      # It walks `git ls-files`: cheap enough to run always; not free.
       #
-      # `--self-test` FIRST, then the scan — the same order CI uses, and for the same reason: this
-      # gate's first draft passed against a planted NUL, so a scan of a clean tree proves nothing on
-      # its own.
+      # `--self-test` FIRST, then the scan — the same order CI uses, and for the same reason: a scan of
+      # a clean tree proves nothing on its own.
       - id: check-text-bytes
         name: no control bytes in tracked text
         entry: bash -c 'scripts/check-text-bytes.sh --self-test && scripts/check-text-bytes.sh'
@@ -35,12 +25,7 @@ repos:
       # UNSCOPED FOR THE SAME REASON AS THE HOOK ABOVE, AND WITH ITS OWN EVIDENCE. A `file:line`
       # citation rots because something is inserted ABOVE its target, and the file that moves is
       # almost never the file being committed — so a rule scoped by staged path would miss the
-      # citation arriving in a path nobody thought to list. It walks `git ls-files` instead, and the
-      # cost was MEASURED rather than assumed: self-test plus scan is ~250 ms over 258 files, after
-      # the per-file `printf | grep` filters were replaced with bash matching (~975 ms before). The
-      # tally reconciliation added a second `git ls-files` walk, worth about +35 ms — measured
-      # INTERLEAVED against the previous version on the same machine, because absolute figures here
-      # vary by more than the change does and a single before/after pair would have measured load.
+      # citation arriving in a path nobody thought to list. It walks `git ls-files` instead.
       # `--self-test` first, then the scan, for the reason `check-text-bytes` states: a gate that only
       # ever runs against a passing tree cannot tell you it still works.
       - id: check-citations
@@ -51,81 +36,24 @@ repos:
         pass_filenames: false
       # UNSCOPED FOR THE CITATION GATE'S REASON, ARRIVING FROM THE OTHER END. That gate catches a
       # pointer whose target MOVED DOWN THE FILE; this one catches a symbol that moved to a DIFFERENT
-      # FILE, and the file that goes wrong is even further from the commit: an extraction changes
-      # `main.ts` and `transport.ts`, while the citations that rot are in twenty files neither commit
-      # touched. A `files:`-scoped rule would fire on exactly the commits that do not need it.
-      # MEASURED, AND THE FIRST FIGURE WRITTEN HERE WAS A GUESS THAT WAS WRONG BY 2x IN THE FLATTERING
-      # DIRECTION. It read "3.6-3.9 s" before anything had been timed; the real figure was 7.5 s, and
-      # what the profile then said was not what the sentence had assumed — stripping every cited file
-      # costs ~180 ms, and the other seven seconds were 486 forks, one per SITE, from command
-      # substitutions in the symbol test and the resolver. Both now return through globals and a bash
-      # word test.
-      # **"THE BRANCH ENDS FASTER THAN IT STARTED" STOOD HERE AND IS FALSE. IT FLATTERED THE CHANGE,
-      # AND THE FIGURE IT RESTED ON WAS ATTRIBUTED TO THE WRONG TREE AND THE WRONG RUN COUNT.** It read
-      # "2,599-2,716 ms over five runs at 471 sites, against 2,738-2,751 ms at the commit just before
-      # the declaration extractor was added". That second range is a real measurement of a real tree —
-      # the plan records it as the BRANCH-POINT baseline, 499 sites, over THREE runs — and the commit it
-      # was credited to here, `e7da0a1`, carries 471. The two ranges were also taken minutes apart under
-      # different load, so the comparison measured the machine as much as the change.
-      #
-      # Re-measured INTERLEAVED across three trees, 10 rounds, one sample of each per round in rotating
-      # order, one untimed warm-up per tree, `bash scripts/check-attributions.sh` with no `--self-test`
-      # and the two older trees in `git worktree` checkouts:
-      #
-      #   55750f8  presence rule,    499 sites   2,679-2,830 ms   mean 2,778
-      #   e7da0a1  presence rule,    471 sites   2,637-2,680 ms   mean 2,662
-      #   HEAD     declaration rule, 471 sites   2,679-2,796 ms   mean 2,765
-      #
-      # So the honest result is INDISTINGUISHABLE FROM THE BRANCH POINT — 13 ms of mean on a ~2,700 ms
-      # base, inside a spread of 150 ms — and about **4% SLOWER** than the same 471-site tree under the
-      # old rule, which is the only pair that isolates the extractor. Both halves have a mechanism. The
-      # sweep deleted 28 sites and took ~116 ms of mean with them; the extractor put ~103 ms back.
-      # A whole extractor for ~4%, invisible against the tree the branch started from, needs no
-      # inflating; claiming it came out ahead cost the figure its credibility.
-      # **AND THE SENTENCE THAT USED TO DERIVE "~4% INSTEAD OF ~50%" FROM THE BLANK-LINE GUARD IS GONE,
-      # BECAUSE IT MADE THE EXACT COMPARISON THE PARAGRAPH ABOVE IT RETIRES.** It pitted the interleaved
-      # mean against a single-run-set guard-removed figure — 4,099-4,118 ms, a five-run pair taken on
-      # another tree — and the roadmap entry marks that figure as not comparable to the interleaved
-      # table in so many words. The guard is now measured on its own terms, both sides the same way:
-      # interleaved on this tree, 10 rounds, one sample of each variant per round in rotating order,
-      # one untimed warm-up each, no `--self-test` — guard present **2,845-2,887 ms, mean 2,865**;
-      # guard line commented out **4,180-4,242 ms, mean 4,217**. Removing it makes the same scan
-      # **47% slower** for an identical verdict. That is a claim about the guard and nothing else; what
-      # the extractor costs against the presence rule is the interleaved table above, and the two
-      # measurements are separate sessions that must not be subtracted from each other.
-      # **THE COMPARISON FIGURES HERE ARE MEASURED IN THE SAME MINUTE, NOT QUOTED**, which is the
-      # second thing this comment got wrong: it first read "against 574-594 ms for `check-text-bytes`
-      # and ~250 ms for `check-citations` on the same machine" — two figures copied out of the hook
-      # comments above rather than run, and the first is nearly 2x low against this tree. Re-run
-      # together, interleaved over five rounds, each hook doing what this file makes it do
-      # (`--self-test` then scan): `check-text-bytes` 1,131-1,165 ms, `check-citations` 507-528 ms,
-      # `check-doc-figures` 260-267 ms, `check-shared-docs` 185-193 ms, this hook 2,803-2,843 ms. Still
-      # the slowest here, by about 2.4x over the next one rather than the order of magnitude the guessed
-      # figure implied.
+      # FILE, and the file that goes wrong is even further from the commit: an extraction changes two
+      # files, while the citations that rot are in files it never touched. A `files:`-scoped rule would
+      # fire on exactly the commits that do not need it.
       # `--self-test` first, then the scan, for the reason `check-text-bytes` states: a gate that only
-      # ever runs against a passing tree cannot tell you it still works. This one's red half is not
-      # hypothetical — it was demonstrated against the unfixed tree that motivated it, where it found
-      # 31 sites, and against a draft of itself where it found 467 and was wrong about 441 of them.
+      # ever runs against a passing tree cannot tell you it still works.
       - id: check-attributions
         name: symbol citations name the file that declares the symbol
         entry: bash -c 'scripts/check-attributions.sh --self-test && scripts/check-attributions.sh'
         language: system
         always_run: true
         pass_filenames: false
-      # UNSCOPED FOR A SHARPER VERSION OF THE REASON THE TWO HOOKS ABOVE GIVE, and the sharpening is
-      # the whole argument. A README figure goes stale because a DIFFERENT file changed: one line
-      # added to `grammars/tree-sitter-redextape-lambda/grammar.js` falsifies both that grammar's
-      # README and the TM one, which cites λ's line count for comparison. The file that goes wrong is
-      # never the file being staged, so a `files:`-scoped rule would fire on exactly the commits that
-      # do not need it and stay silent on the ones that do.
-      # MEASURED, NOT ASSUMED, per the two hooks above: self-test plus scan is 142-159 ms over five
-      # runs and the scan alone is 106-111 ms — cheaper than either, because it reads four READMEs
-      # rather than walking `git ls-files`.
-      # **THOSE FIGURES READ "136-143 ms" AND "THREE READMEs" UNTIL THE ROOT README GAINED ITS ROWS**,
-      # one branch later, which is this comment falsifying itself the same way the README's hook count
-      # did — a number describing a gate, invalidated by the gate growing. Re-measured rather than
-      # scaled: the sibling hooks cost 919 ms and 411 ms on the same machine in the same minute, so
-      # "cheaper than either" was re-established rather than carried forward on the old figures.
+      # UNSCOPED FOR A SHARPER VERSION OF THE REASON THE HOOKS ABOVE GIVE, and the sharpening is the
+      # whole argument. A README figure goes stale because a DIFFERENT file changed: one line added to
+      # `grammars/tree-sitter-redextape-lambda/grammar.js` falsifies that grammar's README and the asm
+      # and TM ones, which cite λ's line count for comparison. The file that goes wrong is never the
+      # file being staged, so a `files:`-scoped rule would fire on exactly the commits that do not need
+      # it and stay silent on the ones that do. It reads only the files its table names rather than
+      # walking `git ls-files`.
       # `--self-test` first, then the scan, for the reason `check-text-bytes` states: a gate that only
       # ever runs against a passing tree cannot tell you it still works.
       - id: check-doc-figures
@@ -134,25 +62,13 @@ repos:
         language: system
         always_run: true
         pass_filenames: false
-      # SCOPED, unlike the three unscoped hooks above it, because what it checks is a property of
-      # `plugin/redextape.lua` and the parsers beside it rather than of the whole tree — a Lua file
-      # arriving anywhere else does not invalidate the symbol agreement this gate exists for. It is
-      # here at all because that file shipped into a repository gating every other language it
-      # carries, covered by nothing: its own commit's pre-commit run reported `(no files to check)
-      # Skipped` for all four hooks below, which was the honest reading of a tree with no Lua gate.
-      # UNSCOPED, like the three gates above it and unlike `check-lua` below, and for the sharpest
+      # UNSCOPED, like the gates above it and unlike `check-lua` below, and for the sharpest
       # version of the reason: a shared region goes stale because a DIFFERENT file changed — someone
       # edits `grammars/shared/<name>.md` and the four copies of it are now wrong, in four paths the
       # commit never touched. A `files:`-scoped rule would fire on exactly the commits that do not
       # need it.
-      # MEASURED, NOT ASSUMED, per the three hooks above — and this comment first asserted "the
-      # cheapest of the four" before anything had been timed, which is the habit those hooks exist to
-      # break. It is: self-test plus scan is 197-212 ms over five runs, the scan alone 88-89 ms,
-      # against 281 ms, 535 ms and 1123 ms for the figure, citation and control-byte gates on the same
-      # machine. The comparison with the next-cheapest was re-taken INTERLEAVED in the same minute —
-      # 258-281 ms against 207-211 ms across three alternating pairs — because absolute figures here
-      # vary by more than the gap does. It is cheap because it reads only the files that carry a
-      # marker, rather than walking `git ls-files` as two of its siblings do.
+      # It is cheap because it greps only the tracked `*.md` files for a marker rather than reading
+      # every tracked file.
       - id: check-shared-docs
         name: shared doc regions match their source
         entry: bash -c 'scripts/check-shared-docs.sh --self-test && scripts/check-shared-docs.sh'
@@ -167,8 +83,8 @@ repos:
         language: system
         always_run: true
         pass_filenames: false
-      # UNSCOPED, like every gate above it except `check-lua`, and for a reason this one can state
-      # exactly: the file that goes stale is `grammars/<g>/<g>.wasm` and the file being committed is
+      # UNSCOPED, like every gate above it, and for a reason this one can state exactly: the file
+      # that goes stale is `grammars/<g>/<g>.wasm` and the file being committed is
       # `grammars/<g>/grammar.js` or `src/parser.c`. `check-lua` below is already scoped to
       # `^grammars/.*/src/parser\.c$` for its own reasons, which is the same input set seen from the
       # other side; this hook stays unscoped so that a hand-edited artefact is caught too, which is
@@ -188,6 +104,9 @@ repos:
         language: system
         always_run: true
         pass_filenames: false
+      # SCOPED, unlike the hooks above it: what it checks is a property of the tracked Lua, the grammars'
+      # `src/parser.c` and `crates/redextape-lsp/src/language.rs`, and `files:` names only the first two,
+      # so a commit touching only `language.rs` is checked by CI alone.
       - id: check-lua
         name: lua parses and parser names agree
         entry: bash -c 'scripts/check-lua.sh --self-test && scripts/check-lua.sh'

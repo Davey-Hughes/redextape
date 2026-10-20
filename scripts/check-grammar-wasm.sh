@@ -4,7 +4,7 @@
 #
 # CI invokes this same script (.forgejo/workflows/ci.yml) and so does the pre-commit hook
 # (.pre-commit-config.yaml), so the local and CI gates cannot drift — the convention
-# `scripts/check-all.sh` states and the seven sibling `check-*.sh` scripts already follow.
+# `scripts/check-all.sh` states and the eight sibling `check-*.sh` scripts already follow.
 #
 #   scripts/check-grammar-wasm.sh              # verify every grammar against the manifest
 #   scripts/check-grammar-wasm.sh --self-test  # prove the detector still detects
@@ -15,15 +15,12 @@
 # has neither, and docker-in-docker on the Forgejo runner is its own project. `sha256sum` is on every
 # runner, so the gate compares hashes and the rebuild stays a developer action.
 #
-# **WHY BOTH HASHES.** `parser.c`'s hash catches a grammar regenerated without its `.wasm` rebuilt.
-# It cannot catch a `.wasm` replaced or corrupted by hand with `parser.c` untouched, and the design's
-# first draft accepted that hole on the grounds that CI cannot rebuild the artefact — which does not
-# follow, because checking a hash is not rebuilding. The build was then measured byte-reproducible
-# (the same grammar, rebuilt after deleting the artefact and written to a different output filename,
-# hashes identically), so recording the artefact's own hash costs one field per grammar and causes no
-# churn. What neither column catches is both files edited together to agree; that is every hash
-# manifest's residue, and the browser differential in `web/tests/browser/grammar-differential.test.ts`
-# is what stands behind the artefact's behaviour rather than its identity.
+# **WHY BOTH HASHES.** `parser.c`'s hash catches a grammar regenerated without its `.wasm` rebuilt. It
+# cannot catch a `.wasm` replaced or corrupted by hand with `parser.c` untouched, so the artefact's own
+# hash is recorded too. The build is byte-reproducible, so that costs one field per grammar and causes no
+# churn. What neither column catches is both files edited together to agree; that is every hash manifest's
+# residue, and the browser differential in `web/tests/browser/grammar-differential.test.ts` is what stands
+# behind the artefact's behaviour rather than its identity.
 #
 # **`-o` MUST NAME A PATH ON THE GRAMMAR'S OWN FILESYSTEM.** The CLI renames its output into place, so
 # pointing `--rebuild` at a scratch directory on another mount fails with
@@ -160,8 +157,8 @@ fi
 if [ "${1:-}" = "--rebuild" ]; then
   [ -x "$TREE_SITTER" ] || fail "$TREE_SITTER is missing — run scripts/install-treesitter-ci.sh"
   version="$("$TREE_SITTER" --version | awk '{print $2}')"
-  # The CLI on PATH is Arch's `-git` build and reports a version no release carries; only the pin may
-  # produce these artefacts, for the reason scripts/install-treesitter-ci.sh records at length.
+  # A `tree-sitter` on `$PATH` may be a `-git` build reporting a version no release carries; only the
+  # pin may produce these artefacts, for the reason scripts/install-treesitter-ci.sh records at length.
   [ "$version" = "$PINNED_VERSION" ] || fail "$TREE_SITTER reports $version, expected $PINNED_VERSION"
   while IFS= read -r d; do
     name="$(basename "$d")"

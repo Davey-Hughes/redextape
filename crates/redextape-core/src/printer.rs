@@ -54,14 +54,14 @@ const ATOM_BP: u8 = 4;
 /// offset into `out`?" (test-only `visited_len` is not); it is "does this need to rewind?" — if a print
 /// inside a `mark`/`rewind` window can write it for real, the answer is yes.
 ///
-/// `next` is the fourth field found this way, and the reasoning is the same shape as the other three:
-/// `bracketed` guards its own inline attempt with `must_break`, so THAT path never flushes a comment
-/// during speculation — but `postfix_chain` has no such guard. Its inline attempt calls `args` ->
-/// `bracketed` on each argument list, and if ONE of those holds a comment, `bracketed` takes
-/// `must_break`, breaks vertically, and `vertical_rows` -> `open_line` -> `flush_before` advances `next`
-/// and writes real output — inside a window `postfix_chain` may still discard. Without `next` on `Mark`,
-/// a `rewind` there leaves the cursor already past those comments; the reprint that follows starts
-/// looking from `next` onward and never sees them again. They are not misplaced, they are gone.
+/// `next` is on `Mark` because `bracketed` guards its own inline attempt with `must_break`, so THAT path
+/// never flushes a comment during speculation — but `postfix_chain` has no such guard. Its inline
+/// attempt calls `args` -> `bracketed` on each argument list, and if ONE of those holds a comment,
+/// `bracketed` takes `must_break`, breaks vertically, and `vertical_rows` -> `open_line` ->
+/// `flush_before` advances `next` and writes real output — inside a window `postfix_chain` may still
+/// discard. Without `next` on `Mark`, a `rewind` there leaves the cursor already past those comments;
+/// the reprint that follows starts looking from `next` onward and never sees them again. They are not
+/// misplaced, they are gone.
 #[derive(Clone, Copy)]
 struct Mark {
     out_len: usize,
@@ -100,13 +100,11 @@ struct Printer<'a> {
     /// newline appears in it. NOT on `Mark`: it is a balanced counter that each attempt restores by
     /// its own decrement, so it is never in the wrong state at a `rewind`.
     ///
-    /// **THE COST THIS EXISTS FOR IS EXPONENTIAL, and was measured, not reasoned about.** An inline
-    /// attempt that contains a construct which breaks is doomed — a newline inside it is exactly what
-    /// disqualifies it — so printing that construct's broken form in full is work the enclosing
-    /// `rewind` throws away. Do it at every level of a nested construct and each level costs two full
-    /// prints of the level below: `[[[…]]]` nested 16 deep, 202 bytes of input, took 11.5 SECONDS,
-    /// and 20 deep did not finish. With this counter each doomed attempt stops at the first newline
-    /// its own depth produces, and the same input formats in microseconds.
+    /// The cost this exists for is exponential. An inline attempt that contains a construct which
+    /// breaks is doomed — a newline inside it is exactly what disqualifies it — so printing that
+    /// construct's broken form in full is work the enclosing `rewind` throws away. Do it at every
+    /// level of a nested construct and each level costs two full prints of the level below. With this
+    /// counter each doomed attempt stops at the first newline its own depth produces.
     ///
     /// Correctness rests on one invariant: `speculating` is incremented ONLY around an attempt that
     /// unconditionally discards its output when a newline appears in it. So an abort is never
@@ -161,18 +159,16 @@ impl<'a> Printer<'a> {
         self.line_start = self.out.len();
     }
 
-    /// Close the open line, if one is open. A no-op at column 0 — which since `flush_before` started
-    /// writing its own terminating newline (§7's forced break, made structural) is the state every
-    /// caller is in immediately after a comment was flushed.
+    /// Close the open line, if one is open. A no-op at column 0, which is the state every caller is
+    /// in immediately after a comment was flushed, since `flush_before` writes its own terminating
+    /// newline (§7's forced break, made structural).
     ///
-    /// THIS IS WHY THE FORCED BREAK IS NO LONGER A CALLER'S OBLIGATION. Each site below wants "the
-    /// next thing starts on a fresh line", and `newline()` spelled that as "push one" — correct only
-    /// while nothing else could have ended the line first. `flush_before` now can, so the sites that
-    /// used to push unconditionally would double up, and the one site that pushed CONDITIONALLY
-    /// (`postfix_chain`'s `Link::Call`) is the one that once forgot and swallowed a whole call into a
-    /// comment. Asking the buffer is not the same obligation restated: forgetting `end_line` merges
-    /// two lines the printer chose to separate, while forgetting the old newline merged a line into a
-    /// `//` and changed the program.
+    /// The forced break is not a caller's obligation. Each site below wants "the next thing starts
+    /// on a fresh line", and pushing a newline is correct only while nothing else could have ended
+    /// the line first; `flush_before` can, so an unconditional push would double up. Asking the
+    /// buffer is not the same obligation restated: forgetting `end_line` merges two lines the
+    /// printer chose to separate, while forgetting an unconditional newline merges a line into a
+    /// `//` and changes the program.
     fn end_line(&mut self) {
         if self.col() != 0 {
             self.newline();
@@ -182,18 +178,16 @@ impl<'a> Printer<'a> {
     /// Is everything printed since `mark` still a candidate for the inline form — within the width
     /// budget AND unbroken?
     ///
-    /// `col()` ALONE IS NOT THE QUESTION, and `postfix_chain` said so long before `bracketed` asked
-    /// it: a nested construct can break internally on its own overrun, which leaves a short FINAL
-    /// line even though the attempt was never one line. Accepting that gives the half-broken hybrid —
-    /// one element vertical, everything around it still inline — which is not a shape rustfmt
-    /// produces at this repo's settings.
+    /// `col()` alone is not the question: a nested construct can break internally on its own overrun,
+    /// which leaves a short FINAL line even though the attempt was never one line. Accepting that
+    /// gives the half-broken hybrid — one element vertical, everything around it still inline — which
+    /// is not a shape rustfmt produces at this repo's settings.
     ///
     /// `line_start > mark.out_len` is the O(1) spelling of "a newline was written since the mark":
     /// `newline()` sets `line_start = out.len()`, so it can only exceed a length captured earlier if
-    /// one ran in between. It replaces an `out[mark..].contains('\n')` scan that re-read the whole
-    /// tail on every call.
+    /// one ran in between.
     ///
-    /// MONOTONE, which is what lets a caller stop the moment it goes false: absent a newline the
+    /// Monotone, which is what lets a caller stop the moment it goes false: absent a newline the
     /// buffer only grows, so the column only rises, and a newline cannot be unwritten.
     fn fits_inline_since(&self, mark: Mark) -> bool {
         self.col() <= self.width && self.line_start <= mark.out_len
@@ -216,8 +210,8 @@ impl<'a> Printer<'a> {
     /// THE RULE, and it is the whole of this doc: a site that saves a position to possibly truncate
     /// back to MUST go through `mark`/`rewind` rather than a bare `self.out.len()`, and a field added
     /// to `Printer` must be asked "can a print between `mark` and `rewind` write this for real?" —
-    /// never "is it a byte offset?". `Mark`'s own doc is where the five present fields and the
-    /// reasoning that found each of them live. Their symptoms are all different, which is why the
+    /// never "is it a byte offset?". `Mark` holds the five present fields; its doc states the rule they
+    /// share and the reasoning for `next`. Their symptoms are all different, which is why the
     /// question and not the pattern is what carries: a `col()` underflow (`line_start`), a blank line
     /// measured against text that was thrown away (`last_end`), a visit order that goes backwards
     /// (`visited`), and comments consumed by a print that never shipped (`next`).
@@ -391,14 +385,13 @@ impl<'a> Printer<'a> {
         // every argument list's own region, so no `bracketed` call below ever sees it and the fit
         // check has no way to know it exists. This applies to EVERY chain, breakable or not — `//`
         // runs to end of line no matter how many links follow it, so a chain of plain calls needs the
-        // flush exactly as much as a method chain does. Leaving it ungated on `breakable` was the bug:
-        // a chain of plain calls never reached the vertical loop at all, and the comment drifted to
-        // whatever flush point up the tree ran next — landing inside a LATER link's own parentheses
-        // whenever that link broke for its own reasons, not merely "lost."
+        // flush exactly as much as a method chain does. Gated on `breakable`, the flush would skip a
+        // chain of plain calls: such a chain never reaches the vertical loop, and the comment would
+        // drift to whatever flush point up the tree ran next — landing inside a LATER link's own
+        // parentheses whenever that link broke for its own reasons, not merely "lost."
         let has_connector_comment = links.iter().any(|l| l.has_connector_comment());
-        // THE ATTEMPT IS SKIPPED, NOT MADE AND DISCARDED, when a comment has already decided the
-        // outcome — the same discipline `bracketed` applies to `must_break`. It used to be printed
-        // and then unconditionally rewound: speculation whose result could never be kept.
+        // The attempt is skipped, not made and discarded, when a comment has already decided the
+        // outcome — the same discipline `bracketed` applies to `must_break`.
         if !has_connector_comment {
             let mark = self.mark();
             // COUNTED ONLY WHEN `breakable`. A non-breakable chain has no vertical form to fall back
@@ -446,11 +439,9 @@ impl<'a> Printer<'a> {
                 Link::Call(args, region, _) => {
                     // A plain `Call` link glues to whatever the previous link printed — there is
                     // nowhere in `f(1)(2)` to put a newline for width, so it never opens a line of its
-                    // own. The one exception is not remembered here any more: `flush_before` has
-                    // already ended the line if it emitted a connector comment, so column 0 is the
-                    // signal, and all that is left to decide is the indent. This arm is where the
-                    // obligation was forgotten once — `xs.first(1) // note\n(2).second(3)` printed
-                    // `// note(2)` and reparsed with the `(2)` call gone.
+                    // own. The one exception is not remembered here: `flush_before` has already ended
+                    // the line if it emitted a connector comment, so column 0 is the signal, and all
+                    // that is left to decide is the indent.
                     if self.col() == 0 {
                         self.indent();
                     }
@@ -484,14 +475,10 @@ impl<'a> Printer<'a> {
     /// "second parallel implementation" shape `analysis.rs`'s module doc treats as a defect rather
     /// than a style choice.
     ///
-    /// Lists and argument lists use the SAME fill/vertical decision. The design's recollection (§6
-    /// rule 3, struck through by §13) was that rustfmt packs short elements in an array literal but
-    /// never in an argument list; the "long argument list" case in
-    /// `examples/rustfmt_calibration_probe.rs` measured otherwise — under this
-    /// project's `use_small_heuristics = "Max"`, rustfmt fills a short-element argument list exactly
-    /// like an array, at the identical `SHORT_ELEMENT` width threshold. So there is one rule here, not
-    /// one per caller, and `allow_fill` (a parameter that would now be `true` at both call sites) is
-    /// gone rather than kept as a vestige of the wrong recollection.
+    /// Lists and argument lists use the same fill/vertical decision: under this project's
+    /// `use_small_heuristics = "Max"`, rustfmt fills a short-element argument list exactly like an
+    /// array, at the identical `SHORT_ELEMENT` width threshold (the "long argument list" case in
+    /// `examples/rustfmt_calibration_probe.rs`). So there is one rule here, not one per caller.
     ///
     /// `region` is the span `must_break` tests for a comment: the bracket-to-bracket range, NOT a
     /// range reconstructed from `items`. A range built from `items.first().span().start ..
@@ -504,25 +491,21 @@ impl<'a> Printer<'a> {
     ///     `postfix_chain` recovers it with `open_paren_after(prev_end)` and passes
     ///     `open_paren .. span.end`.
     ///
-    /// **THE PREVIOUS TWO BULLETS SAID `callee.span().end .. span.end` AND `recv.span().end ..
-    /// span.end`, AND CALLED THE WIDTH "HARMLESS: A COMMENT CANNOT OCCUR INSIDE AN IDENTIFIER OR ITS
-    /// LEADING `.`."** A comment cannot, but the zone those regions covered is not an identifier — it
-    /// is everything between one link's end and the next link's `(`, which is exactly where a
-    /// connector comment sits. `xs.first(1) // note` put the comment inside `.second`'s region, forced
-    /// `.second`'s argument list to break, and printed it after `.second`'s `(`. The scan replaced
-    /// those bullets; the claim outlived the code it justified by four commits, so it is written down
-    /// here as the third rationale on this branch that read as a reason and was not one (design §13,
-    /// §14, §15). `postfix_chain`'s `Link` doc cross-references this list.
+    /// A `region` starting at the callee's or receiver's end would not be harmless: the zone between
+    /// one link's end and the next link's `(` is exactly where a connector comment sits, so
+    /// `xs.first(1) // note` would put the comment inside `.second`'s region, force `.second`'s
+    /// argument list to break, and print it after `.second`'s `(`. `postfix_chain`'s `Link` doc
+    /// cross-references this list.
     fn bracketed(&mut self, open: char, close: char, items: &[Expr], region: Span) {
         // A COMMENT ANYWHERE INSIDE FORCES THE BREAK, and the inline attempt is skipped rather than
         // made and discarded: `//` runs to end of line, so an inline form holding a comment is not an
         // ugly candidate to measure, it is a different program.
         //
-        // COMPUTED BEFORE THE EMPTY CASE, WHICH IS THE HALF §14 DID NOT COVER. `[ // inside\n]` and
-        // `f( // inside\n)` hold a comment and have no elements, and the empty early-return used to
-        // run first — so §7's forced break was skipped for exactly the constructs whose entire content
-        // IS the comment. It escaped its own brackets and reattached to whatever flushed next
-        // (`"let xs = []; // inside"`), which the anchoring property sees as depth 1 dropping to 0.
+        // Computed before the empty case: `[ // inside\n]` and `f( // inside\n)` hold a comment and
+        // have no elements, so an early return for them would skip §7's forced break for exactly the
+        // constructs whose entire content is the comment. It would escape its own brackets and
+        // reattach to whatever flushed next (`"let xs = []; // inside"`), which the anchoring property
+        // sees as depth 1 dropping to 0.
         let must_break = self.contains_comment(region);
         if items.is_empty() {
             self.out.push(open);
@@ -531,11 +514,9 @@ impl<'a> Printer<'a> {
                 self.level += 1;
                 let flushed = self.flush_before(region.end, true);
                 self.level -= 1;
-                // GUARDED ON WHAT WAS ACTUALLY EMITTED, not on `must_break` alone. `must_break` asks
-                // whether a comment starts inside `region`; by the time this runs the cursor may have
-                // already passed it (flushed from an enclosing sibling's overrun — see
-                // `vertical_rows`'s `close` clamp). Indenting unconditionally then pushed four columns
-                // of whitespace between `open` and `close` with nothing between them to justify it.
+                // GUARDED ON WHAT WAS ACTUALLY EMITTED, not on `must_break` alone: indenting with
+                // nothing flushed would push four columns of whitespace between `open` and `close`
+                // with nothing between them to justify it.
                 if flushed {
                     self.indent();
                 }
@@ -594,11 +575,9 @@ impl<'a> Printer<'a> {
         self.out.push(close);
     }
 
-    /// As many elements per row as fit, `", "`-separated, ending in a trailing comma. The design's
-    /// recollection (§6 rule 4, struck through by §13) was that fill mode had no trailing comma; the
-    /// "long list of short elements" case
-    /// in `examples/rustfmt_calibration_probe.rs` measured rustfmt adding one after the final element
-    /// even in fill mode, same as vertical mode.
+    /// As many elements per row as fit, `", "`-separated, ending in a trailing comma: rustfmt adds
+    /// one after the final element even in fill mode, same as vertical mode (the "long list of short
+    /// elements" case in `examples/rustfmt_calibration_probe.rs`).
     ///
     /// Reserves one extra column beyond the element itself: breaking a row appends a single `,` to
     /// terminate it, so a row that were allowed to pack all the way to `MAX_WIDTH` would overflow by
@@ -628,25 +607,19 @@ impl<'a> Printer<'a> {
 
     /// One element per row, each comma-terminated.
     ///
-    /// `i == 0` IS THE `first` FLAG, not `false`. §5's "no blank line just inside a brace" was
-    /// implemented for `{` (by `block_body` and `program` threading their own loop flag) and for
-    /// nothing else: hardcoding `false` here left `open_line` measuring the gap from the previous
-    /// STATEMENT's end to the first element's start, a range that crosses the `[` or `(` and the
-    /// newline after it, so any list broken across lines gained a blank line just inside its own
-    /// bracket. It survived review because it needs a comment to force the break AND a statement in
-    /// front of the list, and every corpus entry with a bracket comment was the file's first statement.
+    /// `i == 0` is the `first` flag, not `false`. §5's "no blank line just inside a brace" is
+    /// implemented for `{` by `block_body` and `program` threading their own loop flag; hardcoding
+    /// `false` here would leave `open_line` measuring the gap from the previous statement's end to the
+    /// first element's start, a range that crosses the `[` or `(` and the newline after it, so any
+    /// list broken across lines would gain a blank line just inside its own bracket.
     ///
-    /// `close` is the CONSTRUCT'S OWN closing bracket offset (`bracketed`'s `region.end`), not derived
+    /// `close` is the construct's own closing bracket offset (`bracketed`'s `region.end`), not derived
     /// from `items`. It bounds the last element's trailing flush the same way `n.span().start` bounds
-    /// every other element's: for `i + 1 < items.len()` the next SIBLING already caps how far a
-    /// trailing comment can be pulled forward, but the last element has no next sibling, and
-    /// `usize::MAX` used to stand in for one. §17: when the source puts a later CONSTRUCT — not
-    /// element, a sibling of the whole bracketed thing one level up — on the same line,
-    /// `next_boundary`'s "end of the line in the original source" runs past this construct's own `]`
-    /// or `)` and pulls that later construct's comment in here instead. `contains_comment` is
-    /// position-based, so the construct the comment actually belonged to still sees it in its own span
-    /// and forces a break for a comment `flush_before` has already emitted elsewhere — a break with
-    /// nothing left to flush, present on pass 1 and gone on pass 2 once the comment has moved.
+    /// every other element's: for `i + 1 < items.len()` the next sibling already caps how far a
+    /// trailing comment can be pulled forward, but the last element has no next sibling. §17: when the
+    /// source puts a later construct — not element, a sibling of the whole bracketed thing one level
+    /// up — on the same line, `next_boundary`'s "end of the line in the original source" would run
+    /// past this construct's own `]` or `)` and pull that later construct's comment in here instead.
     fn vertical_rows(&mut self, items: &[Expr], trailing_comma: bool, close: usize) {
         for (i, item) in items.iter().enumerate() {
             self.open_line(item.span().start, i == 0);
@@ -781,9 +754,7 @@ impl<'a> Printer<'a> {
     /// POSITION-based (bracket-to-bracket source offsets) while `self.next` is where printing actually
     /// stands; a comment already flushed still has a `span.start` inside some later sibling's range
     /// (the source doesn't know it moved), so an unbounded scan finds it there too and forces that
-    /// sibling to break for a comment `flush_before` has already emitted elsewhere. §17: this is what
-    /// let `vertical_rows`'s stale-boundary bug (see its `close` parameter) turn into a spurious
-    /// break instead of a silent one — the two only agree once both ask where the CURSOR is.
+    /// sibling to break for a comment `flush_before` has already emitted elsewhere.
     fn contains_comment(&self, span: Span) -> bool {
         self.comments[self.next.min(self.comments.len())..]
             .iter()
@@ -821,13 +792,10 @@ impl<'a> Printer<'a> {
     /// next one, so the same cursor finds both kinds at the same moment. A flush that ran after the
     /// newline could only ever produce own-line comments.
     ///
-    /// EMITTING A COMMENT ALWAYS ENDS THE LINE, and THIS function is what ends it. `//` runs to end of
-    /// line, so anything written after one on the same line is inside it. §7 always described that as
-    /// structural; until the final review it was not — the newline lived at all five call sites, and
-    /// the sixth kind of call site (`postfix_chain`'s `Link::Call`) is the one that forgot it and
-    /// silently deleted a call from the program. The POSTCONDITION is now: if this returns `true`,
-    /// `out` ends with a newline. Callers therefore ask `end_line()`/`col() == 0` rather than pushing
-    /// a newline they may or may not need.
+    /// Emitting a comment always ends the line, and this function is what ends it. `//` runs to end of
+    /// line, so anything written after one on the same line is inside it. §7 describes that as
+    /// structural. The postcondition: if this returns `true`, `out` ends with a newline. Callers
+    /// therefore ask `end_line()`/`col() == 0` rather than pushing a newline they may or may not need.
     ///
     /// Returns whether it emitted anything, which is what lets `open_line` tell "first thing in this
     /// block" from "first CONSTRUCT in this block, but a comment already opened it".
@@ -859,11 +827,10 @@ impl<'a> Printer<'a> {
             let text = self.comment_text(c);
             self.out.push_str(text);
             // §7 MADE STRUCTURAL. `//` runs to end of line, so anything written after a comment on the
-            // same line is inside it — §7 called that "the emit-comment path writes the newline
-            // itself, not a case for a caller to remember", and until now every one of the five call
-            // sites remembered it instead. One of them forgot: `postfix_chain`'s `Link::Call` arm
-            // printed an argument list straight onto a just-flushed comment, and `f(1) // note\n(2)`
-            // reparsed with the `(2)` call gone. It is written here now, once.
+            // same line is inside it — §7 calls that "the emit-comment path writes the newline itself,
+            // not a case for a caller to remember", so it is written here, once. A caller left to
+            // remember it can print an argument list straight onto a just-flushed comment, and
+            // `f(1) // note\n(2)` then reparses with the `(2)` call gone.
             self.newline();
             // MONOTONE, never a plain assignment. A comment can start EARLIER in the source than text
             // already printed — a comment in a statement-interior position (between `=` and its value,
@@ -892,10 +859,9 @@ impl<'a> Printer<'a> {
     /// comment.
     fn open_line(&mut self, start: usize, first: bool) {
         let flushed = self.flush_before(start, first);
-        // ORDER MATTERS, and it is the reverse of what it was: terminate the open line first, THEN
-        // add the author's blank line on top. Both newlines used to be unconditional pushes, so
-        // either order gave two; `end_line` is conditional, so putting it second makes the blank
-        // line's own newline close the open line and collapse the pair into one.
+        // Order matters: terminate the open line first, then add the author's blank line on top.
+        // `end_line` is conditional, so putting it second makes the blank line's own newline close
+        // the open line and collapse the pair into one.
         self.end_line();
         if (!first || flushed) && self.blank_between(self.last_end, start) {
             self.newline();
@@ -919,8 +885,8 @@ impl Printer<'_> {
             self.last_end = tail.span().end;
         }
         // Comments between the last item and `}` belong inside the braces, at the body's indent. Pass
-        // the loop's own `first` rather than hardcoding `false`: a block that is entirely comments
-        // (no statements, no tail) never flips `first` to `false`, and hardcoding it here suppressed
+        // the loop's own `first` rather than hardcoding `false`: a block that is entirely comments (no
+        // statements, no tail) never flips `first` to `false`, and hardcoding it here would suppress
         // that fact, leaking a blank line just inside the brace whenever the author left one.
         self.flush_before(block.span.end, first);
     }
@@ -982,7 +948,7 @@ impl Printer<'_> {
         }
         // Anything after the last construct. `usize::MAX` drains the rest of the cursor. Pass `first`
         // rather than hardcoding `false`, for the same reason as `block_body`'s matching call: a
-        // comment-only program never flips `first`, and hardcoding `false` here leaked a blank line
+        // comment-only program never flips `first`, and hardcoding `false` here would leak a blank line
         // above the file's first byte.
         self.flush_before(usize::MAX, first);
         // NOT `end_line()`: the empty program's whole output is this one newline, and an empty buffer
@@ -997,8 +963,8 @@ impl Printer<'_> {
     fn open_first_or_next(&mut self, start: usize, first: &mut bool) {
         if *first {
             self.flush_before(start, true);
-            // Both of the old branches collapse into `end_line`: an empty buffer is at column 0, and
-            // so is a buffer a just-flushed comment ended. Nothing else can reach here with `*first`.
+            // `end_line` covers both cases: an empty buffer is at column 0, and so is a buffer a
+            // just-flushed comment ended. Nothing else can reach here with `*first`.
             self.end_line();
             self.indent();
         } else {
@@ -1096,7 +1062,7 @@ mod tests {
     fn the_empty_program_prints_a_single_newline() {
         // The empty string parses to a `Block` with no statements and no tail (the parser's `while`
         // loop over `parse_block_body` never runs), so `program` skips both loops and falls straight
-        // to its unconditional trailing `newline()`.
+        // to its trailing `newline()`.
         assert_eq!(f(""), "\n");
     }
 
@@ -1176,7 +1142,7 @@ mod tests {
     fn a_nested_if_in_an_else_stays_fully_braced() {
         // NOT collapsed to `else if b { … }`: this grammar has no such sugar (the `If` arm in `parser.rs`
         // requires a literal `{` right after `else`), so the collapsed text would not reparse. Design
-        // doc §15 — see `if_chain`'s doc.
+        // doc §15.
         let out = p("if a { 1 } else { if b { 2 } else { 3 } }");
         assert_eq!(out, "if a {\n    1\n} else {\n    if b {\n        2\n    } else {\n        3\n    }\n}");
         let (program, diags) = parse(&out);
@@ -1250,8 +1216,8 @@ mod tests {
         let body: Vec<&str> = out.lines().filter(|l| l.starts_with("    ")).collect();
         assert!(body.len() > 1, "it broke into rows: {out:?}");
         assert!(body[0].matches(',').count() > 1, "fill puts several elements on a row: {body:?}");
-        // §6 rule 4's recollection was that fill mode had no trailing comma; the probe measured
-        // rustfmt adding one after the final element in fill mode too. See `fill_rows`'s doc comment.
+        // rustfmt adds a trailing comma after the final element in fill mode too; see `fill_rows`'s
+        // doc comment.
         assert!(out.contains(",\n]"), "fill mode adds a trailing comma: {out:?}");
     }
 
@@ -1314,10 +1280,10 @@ mod tests {
 
     #[test]
     fn short_arguments_fill_the_same_as_short_list_elements() {
-        // §6 rule 3 was "arguments never fill, only lists do" — `examples/rustfmt_calibration_probe.rs`'s
-        // "long argument list" case measured rustfmt filling a short-element argument list exactly
-        // like an array, under this project's `use_small_heuristics = "Max"`. Mirrors
-        // `a_list_of_short_elements_fills_when_it_does_not_fit` with `f(...)` in place of `[...]`.
+        // `examples/rustfmt_calibration_probe.rs`'s "long argument list" case: rustfmt fills a
+        // short-element argument list exactly like an array, under this project's
+        // `use_small_heuristics = "Max"`. Mirrors `a_list_of_short_elements_fills_when_it_does_not_fit`
+        // with `f(...)` in place of `[...]`.
         let src = format!("f({})", (0..80).map(|i| i.to_string()).collect::<Vec<_>>().join(", "));
         let out = f(&src);
         assert!(out.starts_with("f(\n    "), "fill mode indents its first row: {out:?}");
@@ -1331,8 +1297,7 @@ mod tests {
     #[test]
     fn wide_arguments_break_one_per_line_with_a_trailing_comma() {
         // Mirrors `a_list_with_a_wide_element_breaks_one_per_line_with_a_trailing_comma`: elements
-        // over `SHORT_ELEMENT` force vertical mode in an argument list too, same as an array literal —
-        // the probe's calibration only moved WHICH lists fill, not what happens once elements are wide.
+        // over `SHORT_ELEMENT` force vertical mode in an argument list too, same as an array literal.
         let wide = "a_rather_long_name";
         let src = format!("f({})", std::iter::repeat_n(wide, 12).collect::<Vec<_>>().join(", "));
         let out = f(&src);
@@ -1369,11 +1334,10 @@ mod tests {
 
     #[test]
     fn a_nested_construct_that_breaks_breaks_the_one_around_it() {
-        // `postfix_chain` explained at length why `col()` alone is not the fit question — a nested
-        // construct that broke internally leaves a SHORT final line even though the attempt was never
-        // one line — and then `bracketed`, the nested construct in question, asked only `col()`. The
-        // result was the half-broken hybrid: the inner list vertical, the outer one still inline.
-        // rustfmt breaks the outer list at this repo's settings, so this follows it.
+        // A nested construct that broke internally leaves a SHORT final line even though the attempt
+        // was never one line, so a fit check on `col()` alone accepts the half-broken hybrid: the inner
+        // list vertical, the outer one still inline. rustfmt breaks the outer list at this repo's
+        // settings, so this follows it.
         let wide = (1..=8).map(|i| i.to_string().repeat(13)).collect::<Vec<_>>().join(", ");
         let out = f(&format!("let xs = [[{wide}], 2];\nxs"));
         assert!(!out.contains("[["), "the outer list must break too, not stay inline around a broken inner: {out:?}");
@@ -1389,19 +1353,16 @@ mod tests {
 
     #[test]
     fn a_doomed_inline_attempt_costs_a_newline_rather_than_a_whole_subtree() {
-        // WITHOUT `speculating` THIS IS 2^depth, MEASURED AND NOT REASONED ABOUT: printing the broken
-        // form of a construct inside an enclosing attempt that is about to discard it makes each level
-        // cost two full prints of the level below. `nested_lists(16)` — 202 bytes of input — took 11.5
-        // SECONDS, and depth 20 did not finish. That is a hang on user input, which the no-panic rule
-        // exists to forbid the milder version of.
+        // Without `speculating` this is 2^depth: printing the broken form of a construct inside an
+        // enclosing attempt that is about to discard it makes each level cost two full prints of the
+        // level below. That is a hang on user input, which the no-panic rule exists to forbid the
+        // milder version of.
         //
-        // ASSERTED AS A WORK COUNT, NOT A WALL CLOCK, because the failure mode of a regression here is
-        // a test that never returns. Doubling the depth must roughly double the work; exponential
-        // growth would be a factor of 256 over the same span.
-        // The depths are DELIBERATELY SHALLOW. A regression has to FAIL this test, not hang the run:
-        // at depth 16 the exponential version takes minutes, so the numbers compared are 4 and 8,
-        // where it still finishes while the ratio still separates the two shapes by 16x against a
-        // threshold of 4.
+        // Asserted as a work count, not a wall clock, because the failure mode of a regression here is
+        // a test that never returns. Doubling the depth must roughly double the work. The depths are
+        // deliberately shallow. A regression has to fail this test, not hang the run, so the numbers
+        // compared are 4 and 8, where the exponential version still finishes while the ratio still
+        // separates the two shapes by 16x against a threshold of 4.
         let (d4, d6, d8) = (print_work(&nested_lists(4)), print_work(&nested_lists(6)), print_work(&nested_lists(8)));
         assert!(d4 < d6 && d6 < d8, "deeper input must cost more, or this measures nothing: {d4}/{d6}/{d8}");
         assert!(
@@ -1409,9 +1370,8 @@ mod tests {
             "work must be linear in the nesting depth, not exponential: depth 4 = {d4}, depth 6 = {d6}, \
              depth 8 = {d8} (exponential is roughly 16x over that span, linear roughly 1.5x)"
         );
-        // The same shape through `postfix_chain`, whose inline attempt has had the newline-aware fit
-        // check since it was written and so has had this cost all along: a 713-byte chain nested 22 deep
-        // took 1.82 seconds before this fix.
+        // The same shape through `postfix_chain`, whose inline attempt has the newline-aware fit check
+        // and so would pay this cost too without `speculating`.
         let chain = |depth: usize| {
             let mut s = String::from("xs");
             for _ in 0..depth {
@@ -1450,21 +1410,11 @@ mod tests {
 
     #[test]
     fn a_bracketed_base_after_a_link_that_broke_internally_does_not_underflow_the_column() {
-        // Reproduction for the `line_start`/`out` desync: `postfix_chain` saves `mark` before the
-        // base, prints the base plus every link inline, and truncates back to `mark` if that overran
-        // — but only `bracketed`'s two post-truncate paths call `newline()` before anything reads
-        // `col()`. `postfix_chain` calls `expr_prec` on the base FIRST, with no intervening
-        // `newline()`, so if that base is itself bracketed (a list here), `bracketed` computes
-        // `self.col()` unconditionally before deciding whether IT needs to break, using whatever
-        // `line_start` the truncated-away text left behind.
-        //
-        // `.map(...)`'s own argument list is wide enough to overflow on its own (a) — `args` breaks
-        // internally and calls `newline()`, advancing `line_start` past `mark`. That makes the whole
-        // chain's inline attempt contain a newline, so `postfix_chain` truncates back to `mark`
-        // without restoring `line_start`, then reprints the base — a list literal (b) — whose
-        // `bracketed` call reads `col()` before any `newline()` of its own. `line_start` (left
-        // pointing partway through the now-truncated argument list) exceeds `out.len()` (rewound to
-        // `mark`), so `out.len() - line_start` underflows.
+        // Guards the `line_start`/`out` desync `Mark` exists to prevent (see `mark`'s doc): `.map(...)`'s
+        // own argument list overflows on its own, so `args` breaks internally and advances `line_start`
+        // past `mark`; `postfix_chain` rewinds and reprints the base, a list literal, whose `bracketed`
+        // call reads `col()` before any `newline()` of its own — an underflow unless the rewind
+        // restored `line_start`.
         let src = "[1, 2, 3].map(aaaaaaaaaa, bbbbbbbbbb, cccccccccc, dddddddddd, eeeeeeeeee, ffffffffff, \
                     gggggggggg, hhhhhhhhhh, iiiiiiiiii, jjjjjjjjjj)";
         let out = f(src);
@@ -1473,11 +1423,11 @@ mod tests {
 
     #[test]
     fn last_end_rewinds_with_the_buffer() {
-        // Finding: `bracketed`'s inline attempt prints every item via `expr_prec` before deciding
-        // whether to keep the result. A list item that is a block expression routes through `braced` ->
+        // `bracketed`'s inline attempt prints every item via `expr_prec` before deciding whether to
+        // keep the result. A list item that is a block expression routes through `braced` ->
         // `block_body`, which writes `self.last_end` for real, mid-speculation. If the attempt then
-        // overruns, a `rewind` that does not restore `last_end` leaves it holding a value from discarded
-        // work.
+        // overruns, a `rewind` that does not restore `last_end` leaves it holding a value from
+        // discarded work.
         //
         // That corruption never survives a full call to `bracketed`: on overrun, `bracketed`
         // unconditionally reprints every item in the fallback (fill or vertical) layout, and
@@ -1488,7 +1438,7 @@ mod tests {
         // unconditional fixup, or skip the read entirely on `first = true`). So this test drives
         // `bracketed`'s speculative phase directly — the same sequence `bracketed` itself runs — and
         // inspects `last_end` in that window, rather than relying on final output (which is identical
-        // with or without the fix).
+        // whether or not `Mark` carries `last_end`).
         //
         // Two list items: a block (so a real `block_body` write happens mid-speculation) followed by an
         // identifier wide enough that the combined line — the block's closing `}`, `, `, the identifier,
@@ -1645,11 +1595,11 @@ mod tests {
 
     #[test]
     fn a_comment_trailing_a_lists_last_element_forces_the_break_and_stays_attached() {
-        // Finding 1 reproduction: `list_span` measured only first-element-start..last-element-end, so
-        // a comment between the last element and the closing `]` fell outside it. `must_break` missed
-        // it, the list printed inline (the path that never flushes), and the comment resurfaced at the
-        // next statement boundary, reattached to an unrelated `;` and inventing a blank line. Before
-        // the fix this reproduced byte-for-byte as `"let xs = [1, 2]; // trailing\n\nlet y = 3;\ny\n"`.
+        // A comment between the last element and the closing `]`: if the span `must_break` tests ran only
+        // first-element-start..last-element-end (see `bracketed`'s `region` doc), the comment would fall
+        // outside it, `must_break` would miss it, the list would print inline (the path that never
+        // flushes), and the comment would resurface at the next statement boundary, reattached to an
+        // unrelated `;` and inventing a blank line.
         assert_formats_and_reparses(
             "let xs = [1, 2 // trailing\n];\nlet y = 3;\ny",
             "let xs = [\n    1,\n    2, // trailing\n];\nlet y = 3;\ny\n",
@@ -1658,51 +1608,49 @@ mod tests {
 
     #[test]
     fn a_comment_trailing_a_calls_last_argument_forces_the_break_and_stays_attached() {
-        // Same defect, on a call's argument list. Before the fix this reproduced byte-for-byte as
-        // `"f(1) // trailing\n"` — the call stayed inline and the comment jumped past the `)`.
+        // Same hazard, on a call's argument list, where it would print `"f(1) // trailing\n"` — the
+        // call staying inline and the comment jumping past the `)`.
         assert_formats_and_reparses("f(1 // trailing\n)", "f(\n    1, // trailing\n)\n");
     }
 
     #[test]
     fn a_comment_leading_a_list_forces_the_break() {
-        // Same defect, on the OTHER edge: a comment between `[` and the first element also sat outside
-        // `list_span`'s first-start..last-end range.
+        // Same hazard, on the OTHER edge: a comment between `[` and the first element also falls
+        // outside a first-element-start..last-element-end span.
         assert_formats_and_reparses("[ // leading\n1, 2]", "[ // leading\n    1,\n    2,\n]\n");
     }
 
     #[test]
     fn a_comment_leading_a_calls_argument_list_forces_the_break() {
-        // Same defect, on a call's argument list: a comment between `(` and the first argument.
+        // Same hazard, on a call's argument list: a comment between `(` and the first argument.
         assert_formats_and_reparses("f( // leading\n1, 2)", "f( // leading\n    1,\n    2,\n)\n");
     }
 
     #[test]
     fn a_comment_only_file_has_no_leading_blank_line() {
-        // Finding 2 reproduction: `program`'s trailing `flush_before(usize::MAX, false)` hardcoded
-        // `first = false` instead of passing the loop's own `first` flag, so content that is entirely
-        // comments opened with a blank line it was never given. Before the fix this reproduced
-        // byte-for-byte as `"\n\n// only\n"`, violating `no_blank_line_at_the_start_of_the_file`.
+        // `program`'s trailing `flush_before` has to pass the loop's own `first` flag:
+        // hardcoding `first = false` would open content that is entirely comments with a blank line it was
+        // never given, violating `no_blank_line_at_the_start_of_the_file`.
         assert_formats_and_reparses("\n\n// only", "// only\n");
     }
 
     #[test]
     fn a_comment_only_block_body_has_no_leading_blank_line() {
-        // Same defect in `block_body`'s trailing `flush_before(block.span.end, false)`. Before the fix
-        // this reproduced byte-for-byte as `"fn g() {\n\n    // only\n}\ng()\n"`, violating
+        // Same hazard in `block_body`'s trailing `flush_before(block.span.end, first)`: passing `false`
+        // there would print `"fn g() {\n\n    // only\n}\ng()\n"`, violating
         // `no_blank_line_is_kept_just_after_the_open_brace`.
         assert_formats_and_reparses("fn g() {\n\n// only\n}\ng()", "fn g() {\n    // only\n}\ng()\n");
     }
 
     #[test]
     fn a_comment_flushed_from_a_statement_interior_invents_no_blank_line() {
-        // `last_end` used to be assigned, not maxed, so a comment emitted from a position with no
-        // flush point of its own — the whole statement is already in `out` by the time the next flush
-        // point arrives — moved the cursor BACKWARDS relative to the buffer. The following
-        // `blank_between(last_end, next_start)` then measured a gap running across the REST OF THE
-        // STATEMENT rather than across whitespace, counted its newlines, and invented a blank line.
-        // Each of these reproduced byte-for-byte with a spurious `\n\n` before the fix. WHERE the
-        // comment lands is a separate, deliberately open question (design §17); that it does not drag
-        // a blank line along with it is not.
+        // `last_end` is maxed, not assigned: a comment emitted from a position with no flush point of
+        // its own — the whole statement is already in `out` by the time the next flush point arrives
+        // — would move the cursor BACKWARDS relative to the buffer. The following
+        // `blank_between(last_end, next_start)` would then measure a gap running across the REST OF
+        // THE STATEMENT rather than across whitespace, count its newlines, and invent a blank line.
+        // WHERE the comment lands is a separate, deliberately open question (design §17); that it
+        // does not drag a blank line along with it is not.
         assert_eq!(f("let a = // c\n1;\nb"), "let a = 1; // c\nb\n");
         assert_eq!(f("let mut a = 1;\na = // c\n2;\na"), "let mut a = 1;\na = 2; // c\na\n");
         assert_eq!(f("let f = |x| // c\nx;\nf(1)"), "let f = |x| x; // c\nf(1)\n");
@@ -1710,29 +1658,27 @@ mod tests {
 
     #[test]
     fn a_trailing_comment_that_opens_the_file_gains_no_leading_space() {
-        // `flush_before`'s own-line branch guarded its newline with `!out.is_empty()`; the trailing
-        // branch pushed its separating space unconditionally, onto a buffer that is still empty. The
-        // space became the file's first byte — and was not even a fixed point, since reformatting
-        // lexes a line-leading `//` as own-line and drops it. Before the fix: `" // c\n1 + 2\n"`.
+        // The trailing branch of `flush_before` must not push its separating space onto an empty
+        // buffer (its `col() == 0` arm indents instead): the space would become the file's first byte,
+        // and not a fixed point, since reformatting lexes a line-leading `//` as own-line and drops it.
         //
-        // THE INPUT IS PARENTHESISED FOR A REASON. Every other way of putting a trailing comment at
+        // The input is parenthesised for a reason. Every other way of putting a trailing comment at
         // the head of a file is closed: a comment with nothing but whitespace before it is `own_line`
-        // by construction (`lexer::own_line_at`), and every `Expr` variant's span now starts at its
-        // own first token — including `Expr::Block`, which is what `{ // c` used to exercise before
-        // the parser started merging the `{` into the span. `Expr` has no `Paren` variant, so `(`
-        // is the one opening token that survives into printed output without a span of its own,
-        // leaving `( // c` as the remaining door into this branch.
+        // by construction (`lexer::own_line_at`), and every `Expr` variant's span starts at its own
+        // first token — including `Expr::Block`, whose span the parser starts at the `{`. `Expr` has
+        // no `Paren` variant, so `(` is the one opening token that survives into printed output
+        // without a span of its own, leaving `( // c` as the remaining door into this branch.
         assert_formats_and_reparses("( // c\n1 + 2)", "// c\n1 + 2\n");
     }
 
     #[test]
     fn a_broken_list_gains_no_blank_line_just_inside_its_own_bracket() {
-        // §5's "no blank line just inside a brace" was implemented for `{` and for nothing else:
-        // `vertical_rows` hardcoded `first = false`, so `open_line` measured the gap from the
-        // PREVIOUS STATEMENT's end to the first element's start — a range crossing the `[` and the
-        // newline after it. Before the fix the first input was not idempotent (pass 2 gained
-        // `"[\n\n    1,"`), and the second, already in this shape, gained the blank line on pass ONE
-        // and was then a fixed point, so idempotence could not have caught it at all.
+        // §5's "no blank line just inside a brace" holds for `[` as well as `{`. A `vertical_rows` that
+        // hardcoded `first = false` would have `open_line` measure the gap from the PREVIOUS
+        // STATEMENT's end to the first element's start — a range crossing the `[` and the newline after
+        // it. Then the first input would not be idempotent (pass 2 would gain `"[\n\n    1,"`), and the
+        // second, already in this shape, would gain the blank line on pass ONE and then be a fixed
+        // point, so idempotence could not catch it at all.
         assert_formats_and_reparses(
             "let a = 1;\nlet xs = [1, // c\n2];\nxs",
             "let a = 1;\nlet xs = [\n    1, // c\n    2,\n];\nxs\n",
@@ -1745,13 +1691,12 @@ mod tests {
 
     #[test]
     fn a_block_element_starts_at_its_own_open_brace() {
-        // `parse_block_body` starts a `Block`'s span at the first token INSIDE the braces, and
-        // `Expr::Block` used to adopt it unchanged — so the printer's `item.span().start`, which it
-        // reads as "the offset this item's printed text begins at", pointed PAST the `{`. Two
-        // consequences, both here: a comment between `{` and the first statement counted as preceding
-        // the whole block and escaped its braces, and `blank_between` measured a gap running across
-        // the `{` and its newline and invented a blank line. Before the fix, pass 1 was
-        // `"let xs = [ // c\n    {\n..."` — comment outside the block — and pass 2 added `"[ // c\n\n"`.
+        // `parse_block_body` starts a `Block`'s span at the first token INSIDE the braces, so
+        // `Expr::Block` must not adopt it unchanged: the printer reads `item.span().start` as "the
+        // offset this item's printed text begins at", and one pointing PAST the `{` has two
+        // consequences, both pinned here: a comment between `{` and the first statement counts as
+        // preceding the whole block and escapes its braces, and `blank_between` measures a gap running
+        // across the `{` and its newline and invents a blank line.
         assert_formats_and_reparses(
             "let xs = [{ // c\nlet a = 1; a }, 2];\nxs",
             "let xs = [\n    { // c\n        let a = 1;\n        a\n    },\n    2,\n];\nxs\n",
@@ -1760,9 +1705,9 @@ mod tests {
 
     #[test]
     fn a_comment_inside_an_empty_bracket_pair_stays_inside_it() {
-        // `bracketed`'s `items.is_empty()` early return ran BEFORE `must_break` was computed, so §7's
-        // forced break was skipped for exactly the constructs whose entire content is a comment. The
-        // comment escaped its own brackets and reattached to whatever flushed next. Before the fix:
+        // If `bracketed`'s `items.is_empty()` early return ran BEFORE `must_break` is computed, §7's
+        // forced break would be skipped for exactly the constructs whose entire content is a comment,
+        // and the comment would escape its own brackets and reattach to whatever flushed next:
         // `"let xs = []; // inside\n\nxs\n"` and `"f() // inside\n"` — the anchoring property sees
         // both as a comment at bracket depth 1 dropping to depth 0.
         assert_formats_and_reparses("let xs = [ // inside\n];\nxs", "let xs = [ // inside\n];\nxs\n");
@@ -1775,26 +1720,10 @@ mod tests {
 
     #[test]
     fn a_later_sibling_construct_on_the_same_line_does_not_donate_its_comment() {
-        // §17.7. THE CAUSE PREDATES THIS BRANCH'S FIX WAVES; THE OBSERVABLE DEFECT DOES NOT — bisected
-        // after the fact, and the first draft of this comment said "pre-existing" of both, which is
-        // wrong in the way this branch keeps being wrong. At `77af295` this input already fails
-        // idempotence for a different reason, but `// c` is still correctly attached to its `1`. The
-        // misattribution appears at `9005c44`, the nested-break rule: until that landed, `bracketed`
-        // accepted the half-broken hybrid, these lists never broke vertically, and the flush path
-        // below was unreachable. A latent cause and a reachable defect are not the same claim.
-        // `vertical_rows`
-        // capped the LAST element's trailing flush at `usize::MAX` rather than this construct's own
-        // close, so `next_boundary` — "the end of the line this item ends on in the ORIGINAL SOURCE",
-        // uncapped for the last element — ran past the tail list's own `]` and into the sibling
-        // construct that follows it on the same source line, pulling `// c` in there instead.
-        // `contains_comment` then still found the comment sitting inside the tail list's own span
-        // (position-based against the source, not cursor-based against what has actually been
-        // emitted), so it forced a break for a comment that had already been printed somewhere else —
-        // present on pass 1, gone on pass 2 once the comment had genuinely moved. Before the fix this
-        // reproduced byte-for-byte as:
-        // `"fn e(x) {\n    x\n}\n[\n    {\n        e(\n            {\n            }, // c\n        )\n    },\n    [\n        1,\n    ],\n]\n"`
-        // — `// c` landing inside `e`'s empty-block argument, four levels away from the list it was
-        // written against, and `[1]` breaking vertically for a comment it no longer held.
+        // §17.7. `vertical_rows` has to cap the LAST element's trailing flush at this construct's own
+        // close: uncapped, `next_boundary` — "the end of the line this item ends on in the ORIGINAL
+        // SOURCE" — runs past the tail list's own `]` and into the sibling construct that follows it
+        // on the same source line, pulling `// c` in there instead.
         assert_formats_and_reparses(
             "fn e(x) { x }\n[{ e({}) }, [1 // c\n]]",
             "fn e(x) {\n    x\n}\n[\n    {\n        e(\n            {\n            },\n        )\n    },\n    [\n        1, // c\n    ],\n]\n",
@@ -1803,17 +1732,10 @@ mod tests {
 
     #[test]
     fn a_later_sibling_construct_on_the_same_line_does_not_starve_an_empty_bracket_pair() {
-        // §17.7, INTRODUCED by this task's own C2 fix (`a_comment_inside_an_empty_bracket_pair_stays_
-        // inside_it`, immediately above). Same root cause as the test above, but the donated comment is
-        // the ENTIRE content of the next construct — an empty bracket pair whose only reason to break
-        // at all is the comment `vertical_rows` had already stolen from it. `must_break` still fired
-        // (the same position-based `contains_comment`, oblivious to the comment having been flushed
-        // already), and the empty-bracket branch called `indent()` unconditionally inside `if
-        // must_break`, ignoring the `bool` `flush_before` returns for exactly this case — so with
-        // nothing left to flush, `indent` ran straight after the open bracket with no newline before
-        // it. Before the fix this reproduced byte-for-byte as:
-        // `"fn e(x) {\n    x\n}\n[\n    e(\n        {\n        }, // c\n    ),\n    [    ],\n]\n"`
-        // — `[    ]`, an empty bracket pair holding four columns of bare whitespace.
+        // §17.7. Same root cause as the test above, but the donated comment is the ENTIRE content of
+        // the next construct — an empty bracket pair whose only reason to break at all is that comment.
+        // `indent()` called unconditionally inside `if must_break`, with nothing left to flush, would
+        // leave `[    ]`, an empty bracket pair holding four columns of bare whitespace.
         assert_formats_and_reparses(
             "fn e(x) { x }\n[e({}), [ // c\n]]",
             "fn e(x) {\n    x\n}\n[\n    e(\n        {\n        },\n    ),\n    [ // c\n    ],\n]\n",
@@ -1822,10 +1744,10 @@ mod tests {
 
     #[test]
     fn flushing_a_comment_always_ends_the_line_itself() {
-        // §7 SAID THIS WAS STRUCTURAL AND IT WAS NOT: "the emit-comment path writes the newline
-        // itself — not a case for a caller to remember." `flush_before` wrote no newline; all five
-        // call sites did, and `postfix_chain`'s `Link::Call` arm forgot, printing an argument list
-        // onto a just-flushed comment so that `f(1) // note\n(2)` reparsed with the call gone.
+        // §7: "the emit-comment path writes the newline itself — not a case for a caller to
+        // remember." If `flush_before` wrote no newline, each of its callers would have to, and one
+        // that forgot would print an argument list onto a just-flushed comment, so that
+        // `f(1) // note\n(2)` reparses with the call gone.
         //
         // Asserted against `flush_before` directly rather than through output, because output only
         // shows that today's callers happen to be right. Each input reaches the flush in a different
@@ -1858,33 +1780,33 @@ mod tests {
 
     #[test]
     fn a_comment_between_chain_links_stays_trailing_the_link_it_followed() {
-        // Finding reproduction: `bracketed`'s region for a call/method link started at the END of the
-        // PREVIOUS link (`callee.span().end` / `recv.span().end`), not at this link's own `(`. A comment
-        // trailing `.first(1)` therefore fell inside `.second`'s region, forced `.second`'s OWN argument
-        // list to break, and printed just after `.second`'s `(` — attached to the wrong call. Before the
-        // fix this reproduced byte-for-byte as `"xs\n    .first(1)\n    .second( // note\n        2,\n    )\n"`.
+        // If `bracketed`'s region for a call/method link started at the END of the PREVIOUS link
+        // (`callee.span().end` / `recv.span().end`), not at this link's own `(`, a comment trailing
+        // `.first(1)` would fall inside `.second`'s region, force `.second`'s OWN argument list to
+        // break, and print just after `.second`'s `(` — attached to the wrong call:
+        // `"xs\n    .first(1)\n    .second( // note\n        2,\n    )\n"`.
         //
         // The comment stays on `.first(1)`'s line, the chain breaks one link per line to make room for
-        // it, and — this is the "not beyond what the comment requires" half of the finding — `.second`'s
-        // own argument list stays INLINE, since nothing about `(2)` itself holds a comment.
+        // it, and the break goes no further than the comment requires: `.second`'s own argument list
+        // stays INLINE, since nothing about `(2)` itself holds a comment.
         assert_formats_and_reparses("xs.first(1) // note\n.second(2)", "xs\n    .first(1) // note\n    .second(2)\n");
     }
 
     #[test]
     fn a_comment_trailing_the_bare_receiver_stays_before_the_first_link() {
-        // Same defect, one link shorter: the comment trails the bare receiver `xs`, before any `.` at
-        // all. Before the fix this was absorbed into `.first`'s argument list.
+        // Same hazard, one link shorter: the comment trails the bare receiver `xs`, before any `.` at
+        // all, and such a region would absorb it into `.first`'s argument list.
         assert_formats_and_reparses("xs // note\n.first(1)", "xs // note\n    .first(1)\n");
     }
 
     #[test]
     fn a_comment_genuinely_inside_an_argument_list_still_forces_that_list_to_break() {
-        // The other direction: narrowing `region` to the link's own `(...)` must not stop catching a
+        // The other direction: a `region` that is only the link's own `(...)` must still catch a
         // comment that is actually inside the parens. A comment inside `.second`'s own argument list
-        // forces THAT list to break internally — `must_break` still fires, unregressed by the narrower
-        // region — which in turn introduces a newline before `postfix_chain`'s own `fits_inline` check
-        // runs, so the whole chain converges on the same one-link-per-line form a too-long chain would
-        // (`postfix_chain`'s pre-existing "half-broken hybrid" avoidance, untouched by this fix).
+        // forces THAT list to break internally — `must_break` fires — which in turn introduces a
+        // newline before `postfix_chain`'s own `fits_inline` check runs, so the whole chain converges
+        // on the same one-link-per-line form a too-long chain would (`fits_inline_since`'s "half-broken
+        // hybrid" avoidance).
         assert_formats_and_reparses(
             "xs.first(1).second(2 // inside\n)",
             "xs\n    .first(1)\n    .second(\n        2, // inside\n    )\n",
@@ -1901,23 +1823,22 @@ mod tests {
 
     #[test]
     fn a_short_chain_with_an_inter_link_comment_is_not_force_broken_beyond_the_comment() {
-        // The reviewer's other half of the finding: the CURRENT bug forces a two-link chain that would
-        // otherwise fit on one line into the full vertical form even when the only thing that actually
-        // needs a break is the comment's own end-of-line. This is the same shape as
-        // `a_comment_between_chain_links_stays_trailing_the_link_it_followed` but asserts the negative
-        // space directly: nothing downstream of the comment (here, `.b(2)`'s own argument list) is
-        // touched, and the chain is short enough that width alone would never have forced a break.
+        // A two-link chain that would otherwise fit on one line must not be forced into the full
+        // vertical form when the only thing that actually needs a break is the comment's own
+        // end-of-line. This is the same shape as
+        // `a_comment_between_chain_links_stays_trailing_the_link_it_followed` but asserts the
+        // negative space directly: nothing downstream of the comment (here, `.b(2)`'s own argument
+        // list) is touched, and the chain is short enough that width alone would never have forced
+        // a break.
         assert_formats_and_reparses("xs.a(1) // note\n.b(2)", "xs\n    .a(1) // note\n    .b(2)\n");
     }
 
     #[test]
     fn a_connector_comment_in_an_all_call_chain_survives_a_later_forced_break() {
-        // The reviewer's reproduction: `breakable` (true only when a `Link::Method` exists) used to
-        // gate the EARLY RETURN too, so an all-`Call` chain never reached the connector-flushing loop
-        // at all — the comment drifted until the next thing that broke, which here is the third call's
-        // own wide argument. Before the fix this reproduced byte-for-byte as
-        // `"f(1)(2)( // note\n    aaaa…,\n)\n"` — the comment landing inside the THIRD call's
-        // parentheses, two links from where it was written.
+        // An all-`Call` chain has to reach the connector-flushing loop: `breakable` (true only when a
+        // `Link::Method` exists) must not gate the early return too, or the comment drifts until the
+        // next thing that breaks, which here is the third call's own wide argument — landing inside
+        // the THIRD call's parentheses, two links from where it was written.
         let wide = "a".repeat(130);
         let src = format!("f(1) // note\n(2)({wide})");
         let expected = format!("f(1) // note\n    (2)(\n        {wide},\n    )\n");
@@ -1928,27 +1849,23 @@ mod tests {
 
     #[test]
     fn a_connector_comment_in_an_all_call_chain_survives_when_nothing_else_breaks() {
-        // Same defect, one call shorter and with no width pressure at all: nothing else in the chain
-        // forces a break, so before the fix this drifted all the way to the program's trailing
-        // catch-all flush, reproducing byte-for-byte as `"f(1)(2) // note\n"` — attached to the whole
-        // chain's end rather than to the call it actually followed.
+        // Same hazard, one call shorter and with no width pressure at all: nothing else in the chain
+        // forces a break, so the comment would drift all the way to the program's trailing catch-all
+        // flush, attached to the whole chain's end rather than to the call it actually followed.
         assert_eq!(f("f(1) // note\n(2)").matches("//").count(), 1);
         assert_formats_and_reparses("f(1) // note\n(2)", "f(1) // note\n    (2)\n");
     }
 
     #[test]
     fn a_connector_comment_before_a_bare_call_link_in_a_mixed_chain_does_not_swallow_the_call() {
-        // Adjacent defect surfaced while fixing the all-`Call` case: the vertical reprint's `Link::Call`
-        // arm called `self.args(...)` right after `flush_before`, with no newline in between — safe
-        // ONLY because every existing test's connector comment happened to precede a `Link::Method`,
-        // whose own `newline()` runs unconditionally. A connector comment before a bare `Call` link
-        // (legal: `xs.first(1)(2)` is `(2)` called on `.first(1)`'s result) had no such newline, so the
-        // flushed trailing `// note` absorbed the `(2)` that followed it on the same physical line —
-        // verified against actual HEAD output before this fix: `"xs\n    .first(1) // note(2)\n    .second(3)\n"`,
-        // which reparses to `xs.first(1).second(3)` — the whole `(2)` call silently dropped, not merely
-        // misplaced. Fixed by giving `Link::Call` the same "connector implies a newline" treatment
-        // `Link::Method` already had unconditionally, gated on `connector` so a `Call` link with
-        // nothing to flush still glues to the previous link exactly as before.
+        // A connector comment before a bare `Call` link (legal: `xs.first(1)(2)` is `(2)` called on
+        // `.first(1)`'s result) reaches the vertical reprint's `Link::Call` arm with the line already
+        // ended by `flush_before`, so the arm only indents at column 0 and `(2)` opens its own line. A
+        // `Link::Method` ends its line itself. Without a line end after the flushed trailing `// note`,
+        // the comment absorbs the `(2)` that followed it on the same physical line —
+        // `"xs\n    .first(1) // note(2)\n    .second(3)\n"`, which reparses to `xs.first(1).second(3)` —
+        // the whole `(2)` call silently dropped, not merely misplaced. A `Call` link with nothing to
+        // flush still glues to the previous link.
         let src = "xs.first(1) // note\n(2).second(3)";
         assert_eq!(f(src).matches("//").count(), 1, "exactly one comment in the source");
         assert_formats_and_reparses(src, "xs\n    .first(1) // note\n    (2)\n    .second(3)\n");
@@ -1956,9 +1873,9 @@ mod tests {
 
     #[test]
     fn a_connector_comment_before_a_method_link_in_a_mixed_chain_is_unaffected() {
-        // The `Link::Call` arm's new `if connector { newline(); indent(); }` must not change
-        // `Link::Method`'s own unconditional newline — a mixed chain (both link kinds present) with the
-        // connector comment before the METHOD link exercises the untouched arm.
+        // The `Link::Call` arm's column-0 indent must not change what `Link::Method` does — it ends its
+        // own line with `end_line`, which is a no-op at column 0. A mixed chain (both link kinds
+        // present) with the connector comment before the METHOD link exercises that arm.
         let src = "xs(1).second(2) // note\n.third(3)";
         assert_eq!(f(src).matches("//").count(), 1, "exactly one comment in the source");
         assert_formats_and_reparses(src, "xs(1)\n    .second(2) // note\n    .third(3)\n");
@@ -1966,14 +1883,13 @@ mod tests {
 
     #[test]
     fn an_all_call_chain_with_no_comment_still_never_rewinds_for_width() {
-        // Path-3 pin, same shape as the reviewer's reproduction with the comment removed: the third
-        // call's wide argument still overruns `MAX_WIDTH` and `bracketed` still breaks THAT argument
-        // list vertically on its own (introducing a newline into `self.out` since `mark`), but with no
-        // connector comment, `has_connector_comment` is false, so `!breakable` alone (still true, per
-        // the widened `if`) is enough to return early and keep the FIRST attempt's output — no
-        // chain-level rewind, no `self.level` indent bump. `fits_inline` is irrelevant here, which is
-        // exactly what proves the width check was not accidentally re-coupled to `!breakable` chains by
-        // widening the condition.
+        // `a_connector_comment_in_an_all_call_chain_survives_a_later_forced_break` with the comment
+        // removed: the third call's wide argument still overruns `MAX_WIDTH` and `bracketed` still
+        // breaks THAT argument list vertically on its own (introducing a newline into `self.out` since
+        // `mark`), but with no connector comment, `has_connector_comment` is false, so `!breakable`
+        // alone is enough to return early and keep the FIRST attempt's output — no chain-level rewind,
+        // no `self.level` indent bump. `fits_inline` is irrelevant here, which is exactly what proves
+        // the width check does not decide a `!breakable` chain's output.
         let wide = "a".repeat(130);
         let src = format!("f(1)(2)({wide})");
         assert_formats_and_reparses(&src, &format!("f(1)(2)(\n    {wide},\n)\n"));
@@ -2007,9 +1923,8 @@ mod tests {
         // `self.src[span]` would still contain "@@@ nonsense" (it is a substring of `src` too), so only
         // equality against the complete printed program pins the arm to the span it was given. The
         // expected value is exactly the span slice (`src[11..23]`) plus the one trailing newline `print`
-        // always appends: this program has a single top-level statement and no comments, so nothing
-        // else — no indent (top-level, `level == 0`), no tail, no flushed comment — contributes any
-        // other byte.
+        // appends: this program has a single top-level statement and no comments, so nothing else — no
+        // indent (top-level, `level == 0`), no tail, no flushed comment — contributes any other byte.
         assert_eq!(print(&parsed), "@@@ nonsense\n");
     }
 }

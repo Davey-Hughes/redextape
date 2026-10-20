@@ -2,7 +2,7 @@
  * The Redextape register-assembly text form — HIGHLIGHTING ONLY.
  *
  * Not authoritative. `redextape_core::tm::asm_syntax`'s `parse_asm_full` is the parser, and
- * `print_asm_mapped` (through `print_asm_with_mapped`) is the printer AND the classifier. This
+ * `print_asm_mapped` and `print_asm_with_mapped` are the printer AND the classifier. This
  * grammar is held to that classifier span for span by `crates/redextape-grammar-check`; a
  * disagreement is a defect here, never there.
  *
@@ -12,11 +12,10 @@
  * `;`-delimited, trimmed text. A newline is therefore structural to the authority. Here it is in
  * `extras`, so this grammar accepts `halt jmp foo` on one line where the authority rejects it.
  *
- * THAT IS THE ONE ACCEPT-MORE DIVERGENCE THIS GRAMMAR HAS, and it is the right direction for an
- * editor, which is where a half-typed buffer is not an error worth underlining. It is also
- * unreachable by the differential, whose corpus is printed output and therefore always one
- * construct per line. The opposite divergence — a rule REJECTING input the real parser accepts — is
- * the one PR 1 of the tree-sitter slice recorded as the defect to avoid, and the aliasing below
+ * THAT IS AN ACCEPT-MORE DIVERGENCE, and it is the right direction for an editor, which is where a
+ * half-typed buffer is not an error worth underlining. It is also unreachable by the differential,
+ * whose corpus is printed output and therefore always one construct per line. The opposite
+ * divergence — a rule REJECTING input the real parser accepts — is a defect, and the aliasing below
  * exists to close exactly that hole rather than open a new one.
  *
  * The one place a newline still matters is `comment`, whose pattern stops at the end of its line. A
@@ -26,9 +25,10 @@
  *
  * ## A LABEL MAY BE SPELLED LIKE A MNEMONIC, AND THE AUTHORITY SAYS SO FIRST
  *
- * `parse_asm_full` checks `strip_suffix(':')` BEFORE it dispatches on `result` or on a mnemonic —
- * its own comment says the label check "must win over the `result` directive dispatch", and the
- * same order applies to every mnemonic: `add:` is a label, not a truncated `add` instruction.
+ * `parse_asm_nav`, which `parse_asm_full` wraps, checks `strip_suffix(':')` BEFORE it dispatches on
+ * `result` or on a mnemonic — its own comment says the label check "must win over the `result`
+ * directive dispatch", and the same order applies to every mnemonic: `add:` is a label, not a
+ * truncated `add` instruction.
  *
  * Without `_label_name`'s aliases, `word: $ => $.identifier` would make tree-sitter's automatic
  * keyword extraction claim `add` as the `reg_reg_reg_instruction` keyword everywhere the literal
@@ -36,18 +36,13 @@
  * ERROR node, a rule REJECTING input the real parser accepts. Aliasing each reserved word to
  * `$.identifier` inside `_label_name` gives the lexer a second, equally valid reading of that exact
  * text in label position, and LR(1) lookahead on the token that follows (`:` versus an operand, or
- * versus a type name for `result`) settles which reading applies — no `conflicts` declaration is
- * needed. This was probed against `.tools/tree-sitter` 0.25.10 before it was written: a minimal
- * grammar without the aliases parsed `add:` as `(ERROR [0, 0] - [0, 4])` while `foo:` parsed clean;
- * with the aliases, `add:`, `halt:` and `foo:` all parsed as `(label name: (identifier))` and
- * `add r0, r1` still parsed as an instruction.
+ * versus a type name for `result`) settles which reading applies — no `conflicts` declaration
+ * is needed.
  *
  * The aliases are needed ONLY at line start, where the mnemonics and `result` genuinely are valid
  * productions. Tree-sitter's keyword substitution only fires where the keyword token is valid in the
- * current parser state — a fact the TM grammar's `state state:` already demonstrates (the second
- * `state` reads as a plain identifier, because the `state` keyword is not valid there) — so `target:`
- * and `type:` position need no aliasing of their own: `$.identifier` already accepts any reserved
- * spelling there.
+ * current parser state, so `target:` and `type:` position need no aliasing of their own:
+ * `$.identifier` already accepts any reserved spelling there.
  *
  * ## SEVEN INSTRUCTION RULES, NAMED AFTER THEIR SHAPE, NOT COLLAPSED INTO ONE
  *
@@ -86,9 +81,9 @@ const L       = ['jmp', 'call'];
 const RESULT = 'result';
 
 // `choice()` of a single element is a `tree-sitter generate` warning ("contains a `seq` or
-// `choice` rule with a single element"), which three of the seven shapes below hit today since
-// they hold exactly one mnemonic (`R`, `RI`, `RL`). `oneOf` collapses that case in one place so
-// all seven rules stay written the same way rather than special-casing three of them.
+// `choice` rule with a single element"), which three of the seven shapes below hit, since they hold
+// exactly one mnemonic (`R`, `RI`, `RL`). `oneOf` collapses that case in one place so all seven rules
+// stay written the same way rather than special-casing three of them.
 const oneOf = xs => (xs.length === 1 ? xs[0] : choice(...xs));
 
 // Every word this grammar spells as a string literal, and therefore every word tree-sitter's
@@ -114,10 +109,10 @@ module.exports = grammar({
 
     label: $ => seq(field('name', $._label_name), ':'),
 
-    // A LABEL MAY BE SPELLED LIKE A MNEMONIC, AND THE AUTHORITY SAYS SO FIRST. `parse_asm_full`
-    // checks `strip_suffix(':')` BEFORE it dispatches on `result` or on a mnemonic, with its own
-    // comment explaining that order. Without these aliases, `word: $ => $.identifier` makes
-    // `add:` an ERROR node — see the module doc above for the probe that confirmed it. The alias
+    // A LABEL MAY BE SPELLED LIKE A MNEMONIC, AND THE AUTHORITY SAYS SO FIRST. `parse_asm_nav`, which
+    // `parse_asm_full` wraps, checks `strip_suffix(':')` BEFORE it dispatches on `result` or on a
+    // mnemonic, with its own comment explaining that order. Without these aliases,
+    // `word: $ => $.identifier` makes `add:` an ERROR node — see the module doc above. The alias
     // makes each one a plain `(identifier)` in the tree, so `queries/highlights.scm`'s
     // `(label name: (identifier) @label)` still fires on it.
     _label_name: $ => choice($.identifier, ...RESERVED.map(w => alias(w, $.identifier))),
@@ -142,8 +137,8 @@ module.exports = grammar({
 
     // `rr` FIRST. The three spellings `reg_str` produces, and the three `parse_reg` reads back.
     // The reader is more permissive than the printer is precise — `r007` reads as `Reg::Loc(7)`
-    // and prints back as `r7` — and this pattern matches the reader, since a hand-typed buffer is
-    // what an editor colours.
+    // and prints back as `r7` — and this pattern follows the reader there, since a hand-typed buffer
+    // is what an editor colours.
     register: _ => token(/rr|r[0-9]+|a[0-9]+/),
 
     // ONE TOKEN INCLUDING THE `#`. `operand_str` writes `format!("#{n}")` and the printer pushes a

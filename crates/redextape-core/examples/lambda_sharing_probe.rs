@@ -2,116 +2,54 @@
 //!
 //!     cargo run --release --example lambda_sharing_probe -p redextape-core
 //!
-//! # PART B WENT STALE ON 2026-08-01 AND WAS REPAIRED ON 2026-08-02 — READ THIS BEFORE ANY B/C FIGURE
+//! # READ THIS BEFORE ANY PART B OR PART C FIGURE
 //!
-//! **The failure is worth stating before the fix, because it is the interesting half.** PART B's cost
-//! counters were STATIC MODELS: `Σ abs×arg` is `count_abs(body) × size_of(arg)`, computed from the
-//! trace's terms rather than by watching `subst`. When the `maxfree` short-circuits and the stored
-//! `depth` landed and the reducer got three to four orders of magnitude faster, **every counter here
-//! reported exactly the number it had reported the day before.** An instrument built to falsify claims
-//! about cost could not detect that its own subject had changed underneath it.
-//!
-//! It showed up as nonsense rather than as silence, which is the only reason it was caught: only **2 of
-//! 46 rows** still cleared timer resolution, the two-price fit was left fitting two parameters to two
-//! points and returned **-77.04 ns/node** for read-only work, and the closing table projected
-//! **-427.5 ms** of remaining time. A negative millisecond is an instrument reporting that it can no
-//! longer price its corpus.
-//!
-//! **What the models were wrong by**, now printed by PART B itself rather than quoted here:
-//! `Σ abs×arg` over-reports the re-shift `subst` performs by **~1,584x** (70,542,349 against 44,539),
-//! and `Σ size` over-reports `depth_exceeds` by **~1,248x** (7,433,964 against 5,955 — it reads a
-//! stored field, once per step). The headline "86.8% of the nodes the reducer visits" is a share of the
-//! first and inherits its error. The fix PART C used to project at 7.0x/18.0x measures at **2.16x here
-//! and 0.99x — a regression — on the nested-group family**; it is falsified and will not be built. See
+//! Some of PART B's cost counters are STATIC MODELS: `Σ abs×arg` is `count_abs(body) × size_of(arg)`, computed
+//! from the trace's terms rather than by watching `subst`. They do not track the reducer: `Σ abs×arg`
+//! over-reports the re-shift `subst` performs, and `Σ size` over-reports `depth_exceeds` (it reads a stored
+//! field, once per step). PART B prints both errors itself rather than quoting them here. See
 //! `shift_cost_probe.rs`'s census section and the perf design's §10.
 //!
-//! **The repair, in three parts.** (1) Counters that MIRROR the functions — `Σ opening`, `Σ spine`,
-//! `Σ reshift`, `Σ closing`, `Σ guard` — replacing the products in `alloc`/`read`. (2) The stale models
-//! kept beside them as CONTROLS and entered in PART C's contest, where they lose: `Σ alloc` now prices
-//! at a spread of 1.8x against `Σ abs×arg`'s 4,318x. (3) Batched timing — each replay repeated until it
-//! clears `BATCH_MIN_MS` — which puts all 46 rows back above the timer and makes the two-price fit a
-//! fit again (`a` stable to ~1% under leave-one-out, where it printed `0.00 to 0.00 (infx)`).
+//! PART B has three parts. (1) Counters that MIRROR the functions — `Σ opening`, `Σ spine`,
+//! `Σ reshift`, `Σ closing`, `Σ guard` — which `alloc`/`read` sum. (2) The stale models
+//! kept beside them as CONTROLS and entered in PART C's contest. (3) Batched timing —
+//! each replay repeated until it clears `BATCH_MIN_MS` — which keeps every row above the timer and makes
+//! the two-price fit a fit.
 //!
-//! The accounting now predicts the clock: 189,152 nodes at the fitted prices is 7.6 ms against a corpus
-//! that replays in 7.4 ms.
+//! **A counter that models a function instead of measuring it has no way to notice that the function
+//! changed.** Mirroring the code costs one extra `subst` per step in `account` and is worth it. Where that
+//! is genuinely impossible, the counter needs a sanity check against the clock that fails loudly — which
+//! is what PART C's `spread` column is.
 //!
-//! # PART B RAN THE β-FUSION GATE ON 2026-08-03, AND IT PASSED AT 4.3%
+//! # THE β-FUSION GATE
 //!
-//! PART B gained `Σ per_occ` and `Σ freevar` and a β-FUSION block for
+//! PART B has `Σ per_occ` and `Σ freevar` and a β-FUSION block for
 //! `docs/superpowers/specs/2026-08-02-lambda-beta-fusion-design.md`, whose §5 set a GO/NO-GO bar
 //! **before** any of these numbers existed: `Σ freevar` under 40% of `Σ opening + Σ closing`, and no
-//! row's total allocations rising. Measured here:
-//!
-//! ```text
-//! GATE (design §5): Σ freevar = 1458 against Σ opening + Σ closing = 34085 — 4.3%, and the bar is under 40%.
-//! ```
-//!
-//! and **0 of the 46 rows rise** under either candidate. `Σ β today` 102,273 → `Σ β fused` 69,646.
-//!
-//! **`Σ freevar` is the design's null-result counter, and this corpus tests its defining claim 46 times
-//! without being asked to.** §4 calls it a proper subset of `Σ closing`; `freevar <= closing` holds on
-//! every row and `freevar == 0` on exactly the rows where `closing == 0`. The corpus-wide ratio is
-//! **6.3%**, which is the mechanism rather than luck: the closing shift rebuilds whole PATHS to free
-//! variables and `Σ freevar` counts only the leaves at their ends.
-//!
-//! **`Σ opening + Σ closing = 34,085` is NOT independent corroboration of that**, and the temptation to
-//! read it as such is why this paragraph exists. It agrees to the unit with the zipper design's §5b —
-//! but both are pre-existing `Work` fields that the β-fusion work never touched, and §5b's table was
-//! built from THIS probe, so the agreement is an identity and could not have come out otherwise. The
-//! one thing it establishes is that adding `Σ per_occ` and `Σ freevar` perturbed neither counter.
-//!
-//! **THE FORMULATION CONTEST WENT AGAINST THE DESIGN ON THIS CORPUS.** `Σ β fused` (design §2, `s`
-//! carried per binder) is **69,646**; `Σ β occ` (design §5b, the shift paid per occurrence) is
-//! **33,051**. The whole gap is `Σ reshift` **44,539** against `Σ per_occ` **7,944**, since `Σ spine`
-//! and `Σ freevar` are common to both. §2 predicted the reverse and argued the direction was *"forced
-//! rather than incidental"* from `shift_cost_probe.rs`'s nested-group family, where the sign genuinely
-//! is reversed (64,006 against 96,036, `incr` ahead by 1.0095x). **Both corpora were already in the
-//! record; the design generalised one of them.** Neither formulation regresses a row, so this decides
-//! WHICH fusion, not whether — see the design's §5 GATE RESULT.
-//!
-//! **AND ON THE CLOCK, 2026-08-03: THIS CORPUS WON AND THE FAMILY LOST.** The `replay ms` column below
-//! (PART B's three-decimal column, not PART A's one) sums to **7.416–7.466 ms three-pass against
-//! 5.707–5.760 ms fused, a 1.288–1.308x** over four runs a side across two builds. No row's median
-//! regresses and three carry 87% of it — rows 35, 9 and 36 — while four (28, 31, 32, 33) have
-//! overlapping ranges and are at parity rather than improved. The nested-group family measured **0.910–0.925x** on the same pair of
-//! builds, so the design's ship bar — `>= 1.10x` on the family AND `>= 1.00x` here — is MISSED on a
-//! clause this corpus passes. **The half expected to show nothing is the half that moved**, which is
-//! the design's §9 prediction 3 failing in both directions at once; §5's SHIP RESULT has the tables.
+//! row's total allocations rising.
 //!
 //! **`Σ per_occ` is not `Σ occ×arg`.** The latter is one of the STALE static models kept below as a
-//! control; reusing it here would have reproduced the exact error this file was repaired for. `Σ per_occ`
-//! mirrors `shift_cost_probe.rs`'s `subst_allocs_lifted` arm for arm, as `Σ freevar` mirrors its
-//! `beta_allocs_fused`. **Both are marked `HYPO` in PART C and one of them has outgrown the label:**
-//! `Σ per_occ` still mirrors the falsified lifted-shift rewrite and is genuinely the cost of a function
-//! nobody runs, but `Σ freevar` mirrors the fused `beta` that SHIPPED in `eb9e134`, so by the legend's
-//! own definition it is now `TRUE`. The labels are left as they are and the discrepancy is named here
-//! rather than silently repaired, because relabelling would move a column PART C's contest is fitted
-//! against; see that legend for the same note and for `Σ β today`, which is the one that now models
-//! code no longer in the tree.
+//! control; reusing it here would reproduce that model's error. `Σ per_occ` mirrors `shift_cost_probe.rs`'s
+//! `subst_allocs_lifted` arm for arm, as `Σ freevar` mirrors its `beta_allocs_fused`. **Both are marked
+//! `HYPO` in PART C and one of them does not fit the label:** `Σ per_occ` mirrors the falsified
+//! lifted-shift rewrite and is genuinely the cost of a function nobody runs, but `Σ freevar` mirrors the
+//! shipped fused `beta` (`beta_go`), so by the legend's own definition it is `TRUE`. The labels are left
+//! as they are and the discrepancy is named here rather than silently repaired, because relabelling would
+//! move a column PART C's contest is fitted against; see that legend for the same note and for
+//! `Σ β 3-pass`, which models the pre-fusion `beta`, not the shipped one.
 //!
-//! **What was never stale:** PART A. The sharing/interning measurement is structural — node and distinct
-//! counts over the trace — and does not depend on either fix. Its own module doc already records that
-//! its numbers did not move when `LambdaTerm` became `Rc`-backed.
-//!
-//! **THE LESSON THIS FILE IS NOW THE RECORD OF:** a counter that models a function instead of measuring
-//! it has no way to notice that the function changed. Mirroring the code costs one extra `subst` per
-//! step in `account` and is worth it. Where that is genuinely impossible, the counter needs a
-//! sanity check against the clock that fails loudly — which is what PART C's `spread` column turned out
-//! to be, and why it caught this at all.
+//! **PART A's sharing/interning measurement is structural** — node and distinct counts over the trace —
+//! and does not depend on the `maxfree` short-circuits or the stored `depth`.
 //!
 //! This exists to answer one question with data instead of intuition: **is interning (hash-consing)
 //! worth more than plain `Rc` structural sharing?** It answers it WITHOUT implementing interning, by
 //! running hash-consing's own algorithm — a bottom-up intern pass keyed on already-interned children —
-//! offline over the terms the reducer produces today.
+//! offline over the terms the reducer produces.
 //!
-//! IT WAS WRITTEN AGAINST THE `Box` REPRESENTATION AND ITS NUMBERS DID NOT MOVE WHEN `LambdaTerm`
-//! BECAME `Rc`-BACKED, which is worth stating because the opposite is the natural guess. The traversal
-//! descends into both children of every `App`, so a subterm reached twice is walked twice whether the
-//! two edges are two `Box`es or two handles on one allocation: the pass measures the LOGICAL tree, and
-//! structural sharing changes only how that tree is stored. Measured either side of the conversion,
-//! the corpus totals are identical to the node — 7,435,004 trace nodes, 43,580 within-term nodes over
-//! 2,994 distinct (14.56x). So the `share` columns still mean what they say below, and none of them is
-//! evidence that `Rc` sharing is or is not working.
+//! The traversal descends into both children of every `App`, so a subterm reached twice is walked twice
+//! whether the two edges are two `Box`es or two handles on one allocation: the pass measures the LOGICAL
+//! tree, and structural sharing changes only how that tree is stored. So the `share` columns mean what
+//! they say below, and none of them is evidence that `Rc` sharing is or is not working.
 //!
 //! TWO RATIOS COME OUT, AND ONLY ONE OF THEM DECIDES THE QUESTION FROM THIS TABLE ALONE.
 //!
@@ -119,16 +57,10 @@
 //!     This is the CEILING for sharing of any kind, and BY ITSELF IT CANNOT TELL YOU WHETHER
 //!     INTERNING IS WORTH IT: `Rc` takes an unmeasured share of it, because consecutive terms differ
 //!     only along the redex path and every untouched sibling is physically inherited. Where that share
-//!     HAS been counted — rows 9 and 7, by `tests/lambda_sharing.rs` — `Rc` leaves a residual that
-//!     interning would still collapse by 10.3x and 50.0x, so the RESIDUAL AFTER `Rc` is what
-//!     discriminates. The printed number on its own does not: the other 44 rows have no allocation
-//!     count, so nothing says how much of the number `Rc` has already taken.
-//!
-//!     CORRECTED 2026-07-31. This bullet read "`Rc` already captures the bulk of it ... proves nothing
-//!     about interning" — an inference made before any `Rc` allocation existed to count. Layer 1
-//!     produced them, and on the two rows now counted the conclusion did not survive. The design's §3
-//!     records the correction — and note what the correction does NOT say: that a big number here
-//!     justifies interning. That would be false on the 44 rows with no allocation count.
+//!     HAS been counted — rows 9 and 7, pinned by `tests/lambda_sharing.rs` and counted again here (the
+//!     legend prints the residual) — `Rc` leaves a residual that interning would still collapse, so the
+//!     RESIDUAL AFTER `Rc` is what discriminates. The printed number on its own does not: the other 44
+//!     rows have no allocation count, so nothing says how much of the number `Rc` has already taken.
 //!
 //!   * **within-term** (nodes of the single largest term ÷ distinct subterms inside THAT term).
 //!     This is the number that decides it. It counts subterms that are structurally identical but
@@ -136,34 +68,26 @@
 //!     buys nothing beyond `Rc` and the question is closed.
 //!
 //! WHAT THIS PROBE DOES NOT MEASURE, stated so the table is not over-read. It measures the SHARING
-//! (memory) win. Interning's speed win is a separate and weaker claim: `subst`/`shift` still traverse
-//! the whole abstraction body, and under de Bruijn a shifted copy carries DIFFERENT INDICES, so it is
-//! a structurally new term that interning does not dedupe. A large within-term ratio justifies
-//! interning on memory; it does not by itself justify it on reduction speed.
+//! (memory) win. Interning's speed win is a separate and weaker claim: `subst`/`shift` still walk the
+//! body down to every variable they rewrite, and under de Bruijn a shifted copy carries DIFFERENT
+//! INDICES, so it is a structurally new term that interning does not dedupe. A large within-term
+//! ratio justifies interning on memory; it does not by itself justify it on reduction speed.
 //!
 //! The `ns/node` column is the cost side: the throughput of the intern pass itself, to be weighed
-//! against the ~35 ns/node the reducer already pays to CONSTRUCT one — PART C.2's fitted allocating
-//! price, measured below in this same run. Both figures are whole-traversal costs, walking a node and
-//! paying for it, so they compare directly: the intern pass is about **1.7x** dearer per node, not the
-//! ~15x that this line's earlier "~4 ns/node" (a figure nothing here ever measured) implied.
+//! against the price the reducer already pays to CONSTRUCT one: PART C.2's fitted allocating price `a`,
+//! measured below in this same run. Both figures are whole-traversal costs, walking a node and paying
+//! for it, so they compare directly.
 //!
 //! PART B AND PART C ANSWER A DIFFERENT QUESTION AND SHARE ONLY THE CORPUS. Everything above is about
-//! what interning would SAVE. PART B is about what replay currently SPENDS, and it exists because
-//! PART A's `replay ms` column carries a 6.7x that node count contradicts: row 7 has more steps and
-//! bigger terms than row 31 and runs 6.7x faster. It counts, per β-step, the size of every traversal
-//! the reducer actually performs, and PART C checks the candidate against all 46 rows rather than the
-//! two that motivated it. The answer is `Σ abs×arg` — `subst` deep-copies the argument once per `Abs`
-//! NODE IN THE BODY (its `Abs` arm re-shifts it), where the step has ~1 use for it — and it is **86.8%
-//! of the nodes the reducer visits**. That is neither of the two costs this file's sharing question was
-//! about, and no amount of interning or memoization addresses it; see the design's §10.
+//! what interning would SAVE. PART B is about what replay SPENDS. It counts, per β-step, the size of
+//! every traversal the reducer actually performs, and PART C checks every candidate against all 46 rows.
 //!
 //! **A NODE SHARE IS NOT A TIME SHARE, AND PART C.2 IS WHERE THE DIFFERENCE IS MEASURED.** Turning one
 //! into the other needs a price per node, and the obvious assumption — one price, whatever the
 //! traversal was doing — is testable rather than obligatory. It fails: nodes the reducer CONSTRUCTS and
-//! nodes it merely READS price about 18x apart, so `depth_exceeds`' whole-term walk is a large share of
-//! the node count and a small share of the clock. PART C.2 fits both prices, prints the collinearity and
+//! nodes it merely READS price differently. PART C.2 fits both prices, prints the collinearity and
 //! leave-one-out diagnostics that say whether the second parameter is earned, and PART C's closing table
-//! reports the effect of the proposed fix under BOTH models rather than under the flattering one.
+//! prices where the reducer's allocations go under BOTH models rather than under the flattering one.
 //!
 //! TIMING-DERIVED COLUMNS ARE RUN-DEPENDENT and the tables quoted in the design are from one run.
 //! `replay ms` is best-of-three, but `ns/node`, every fitted price and everything derived from them come
@@ -172,36 +96,29 @@
 //!
 //! The corpus is `tests/three_way_oracle.rs::FIRST_ORDER_DEMOS`, copied verbatim (an example is a
 //! separate binary crate and Cargo has no supported way to share a `const` with a test target).
-//! It was extracted mechanically rather than retyped: that list has drifted from hand-copying twice
-//! before, as `step_survey.rs`'s module doc records. Programs the λ backend cannot lower are skipped
-//! and counted, not silently dropped. The copy, in `examples/common/demos.rs`, is now CHECKED, by
-//! `three_way_oracle.rs::first_order_demos_stay_synced_across_every_copy` — see its own doc
-//! comment, which reads that file, for why it took two attempts to get here.
+//! Programs the λ backend cannot lower are skipped and counted, not silently dropped. The copy, in
+//! `examples/common/demos.rs`, is CHECKED, by
+//! `three_way_oracle.rs::first_order_demos_stay_synced_across_every_copy` — see its own doc comment.
 //!
-//! # ALLOCATOR — READ THIS BEFORE TRUSTING ANY TIMING ABOVE
+//! # ALLOCATOR
 //!
-//! **This target has set `mimalloc` as its global allocator since 2026-08-04. Every timing recorded
-//! in this file above this note was measured under glibc's malloc and is NOT comparable to a run
-//! made today.** Counts are: node counts, allocation counts and step counts are properties of the
-//! reduction, not of the machine, and did not move. Seconds, ms and ns did.
+//! This target sets `mimalloc` as its global allocator, so a timing taken here is not comparable with one
+//! taken under glibc's malloc, which is what the timings quoted in this file were. Node counts, allocation
+//! counts and step counts are properties of the reduction, not of the machine, and do not depend on it.
 //!
-//! It is here for a measured reason rather than a preference. The reducer allocates one `Rc<Node>`
-//! per term node and frees on the same order, and glibc's layout for that pattern costs real
-//! address-translation pressure: on the nested-group family, swapping ONLY the allocator took L1
-//! DTLB misses from 1.20e9 to 0.92e9 for the three-pass `beta` and from 1.83e9 to 0.93e9 for the
-//! fused one, with the wall clock following at ~9% and ~16%. That is also how the β-fusion family
-//! regression was explained — it was glibc's layout, not the reducer's work.
+//! The reducer allocates one `Rc<Node>` per term node and frees on the same order, and glibc's layout for
+//! that pattern costs real address-translation pressure.
 //!
 //! `mimalloc` is a `[dev-dependencies]` entry and reaches examples and tests ONLY.
-//! `redextape-core`'s `[dependencies]` stays empty and WASM-clean: `libmimalloc-sys` is C that does
+//! `redextape-core`'s `[dependencies]` stays WASM-clean: `libmimalloc-sys` is C that does
 //! not build for wasm32, and a library must not choose a global allocator for its consumers.
 
 // Example target: `clippy.toml`'s `allow-*-in-tests` keys do not reach example targets at all, so the
 // exemption is stated per target. A probe that cannot build its own fixture has nothing to report.
 #![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic, clippy::pedantic)]
 
-use std::collections::HashMap;
 use std::collections::hash_map::Entry;
+use std::collections::{HashMap, HashSet};
 use std::time::Instant;
 
 use redextape_core::desugar::desugar;
@@ -222,6 +139,12 @@ use demos::FIRST_ORDER_DEMOS;
 /// trade the measurement for an OOM. Skipped rows report their node count and blank the ratios, so a
 /// skip is visible in the table rather than absent from it.
 const MAX_INTERN_NODES: u64 = 40_000_000;
+
+/// The rows of `FIRST_ORDER_DEMOS` whose distinct `Rc` allocations `tests/lambda_sharing.rs` pins: 7 is
+/// the `while` loop and 9 is `sum(5)`. The legend reads the residual after `Rc` on these two because
+/// `tests/lambda_sharing.rs` pins the same count, from the same walk over the same roots; the other rows
+/// get no allocation count (module doc).
+const RC_COUNTED_ROWS: [usize; 2] = [7, 9];
 
 /// A structural key over ALREADY-INTERNED children. This is what makes the pass O(1) per node
 /// instead of O(subtree): by the time a node is keyed, its children are ids, not trees.
@@ -319,20 +242,36 @@ fn size_of(t: &LambdaTerm) -> u64 {
     n
 }
 
+/// Distinct `Rc` allocations across every step's term and the normal form: the set whose size
+/// `tests/lambda_sharing.rs` pins as `seen.len()`. `alloc_id` is an address and identifies an allocation
+/// only while it is alive; the borrow of `trace` keeps every term alive for the whole walk.
+fn distinct_allocations(trace: &Trace) -> usize {
+    let mut seen = HashSet::new();
+    let mut stack: Vec<&LambdaTerm> = trace.steps.iter().map(|s| &s.term).collect();
+    stack.push(&trace.normal_form);
+    while let Some(node) = stack.pop() {
+        seen.insert(node.alloc_id());
+        match node.node() {
+            Node::Var(_) => {}
+            Node::Abs(_, b) => stack.push(b),
+            Node::App(f, a, _) => {
+                stack.push(f);
+                stack.push(a);
+            }
+        }
+    }
+    seen.len()
+}
+
 // ==================================================================================================
 // PART B — per-step work accounting. A SEPARATE QUESTION from everything above, sharing only the
 // corpus and the traces.
 //
-// PART A asks what interning would SAVE. PART B asks what replay currently SPENDS, because PART A's
-// `replay ms` column contains a 6.7x that node count does not explain: row 7 has more steps (470 vs
-// 411) and bigger terms (9,763 vs 4,898 nodes) than row 31 and runs in 180 ms against row 31's 1,203.
-// Sharing did not touch it — both rows sped up ~2.5x when `LambdaTerm` became `Rc`-backed and the
-// ratio between them barely moved. Whatever separates them is therefore not allocation volume.
+// PART A asks what interning would SAVE. PART B asks what replay SPENDS.
 //
-// Each counter below was the size of one traversal the reducer performed WHEN THIS TABLE WAS WRITTEN —
-// before the `maxfree` short-circuits (2026-08-01) and before β-fusion (2026-08-03) — summed over the
-// trace, in NODES VISITED. Read them as the cost model `LambdaCursor::next` was priced against then,
-// which per step did:
+// Each counter below is the size of one traversal the reducer would perform without the `maxfree`
+// short-circuits, the stored `depth` and β-fusion, summed over the trace, in NODES VISITED: a cost model
+// of `LambdaCursor::next` without them, which per step would do:
 //
 //     depth_exceeds(term)          -> `term_size`                 (whole term, every step)
 //     reduce_step's search         -> `scan` (+ `path_len`)
@@ -341,8 +280,8 @@ fn size_of(t: &LambdaTerm) -> u64 {
 //     shift(-1, 0, result)         -> `body_size` + `occ_times_arg`, i.e. the reduct
 //     spine rebuild                -> `path_len`
 //
-// See "PART B WENT STALE ON 2026-08-01" and "TWO GENERATIONS OF COUNTER LIVE HERE" below for what
-// replaced this mapping and why these fields are kept anyway, as controls.
+// See "READ THIS BEFORE ANY PART B OR PART C FIGURE" in the module doc, and "TWO GENERATIONS OF COUNTER LIVE
+// HERE" below, for the counters that mirror the functions and why these fields are kept anyway, as controls.
 //
 // THE COUNTERS ARE CHOSEN TO SEPARATE CANDIDATES, NOT TO CONFIRM ONE. If two move together across
 // the corpus, neither is the answer, and PART C is what decides that rather than the eye.
@@ -354,9 +293,8 @@ fn size_of(t: &LambdaTerm) -> u64 {
 
 /// Node-constructions `shift(d, cutoff, t)` performs, counted FAITHFULLY — the recursion mirrors
 /// `shift`'s arm for arm and reads the stored `maxfree` for the short-circuit, and there is no memo
-/// because `shift` has none. This and the two below are what made the model counters above obsolete:
-/// they measure the function, where `Σ arg` / `Σ abs×arg` / `Σ occ×arg` model a function that stopped
-/// existing on 2026-08-01.
+/// because `shift` has none. This and the two below measure the function, where `Σ arg` / `Σ abs×arg` /
+/// `Σ occ×arg` model the reducer without its `maxfree` short-circuits and β-fusion.
 fn shift_allocs(cutoff: u32, t: &LambdaTerm) -> u64 {
     if t.maxfree() <= cutoff {
         return 0;
@@ -392,13 +330,12 @@ fn subst_allocs(j: u32, s: &LambdaTerm, t: &LambdaTerm) -> (u64, u64) {
     }
 }
 
-/// Allocations the falsified lifted rewrite WOULD make, as `(body spine, per-occurrence shift)`.
+/// Allocations the lifted rewrite WOULD make, as `(body spine, per-occurrence shift)`.
 ///
 /// Body ported verbatim from `shift_cost_probe.rs`'s `subst_allocs_lifted`, which is the faithful
-/// mirror — one sentence of that file's inline `lift == 0` comment did not make the crossing.
-/// **`Work::occ_times_arg` is NOT this** — that is `occ × size_of(arg)`, a static model kept as a
-/// control, and the whole point of the 2026-08-02 repair was to stop products standing in for walks.
-/// This exists so the β-fusion design's disagreement with §5b's formulation is measured on this corpus.
+/// mirror. **`Work::occ_times_arg` is NOT this** — that is `occ × size_of(arg)`, a static model kept
+/// as a control, and the point of mirroring is to stop products standing in for walks. This exists
+/// so the β-fusion design's disagreement with §5b's formulation is measured on this corpus.
 fn subst_allocs_lifted(j: u32, lift: u32, s: &LambdaTerm, t: &LambdaTerm) -> (u64, u64) {
     if t.maxfree() <= j {
         return (0, 0);
@@ -419,18 +356,13 @@ fn subst_allocs_lifted(j: u32, lift: u32, s: &LambdaTerm, t: &LambdaTerm) -> (u6
     }
 }
 
-/// Allocations the FUSED `beta` of the β-fusion design §2 would make, as
+/// Allocations the fused `beta` of the β-fusion design §2 makes, as
 /// `(body spine, per-binder re-shift, free-variable rebuild)`.
 ///
 /// **Mirrors `beta_go` arm for arm, prune included** — the discipline `subst_allocs` exists to
-/// enforce and that `Σ abs×arg` was retired for breaking. **`beta_go` IS in this tree** — it is the
-/// shipped fused `beta` in `src/lambda/term.rs`, since `eb9e134`. ~~`beta_go` is not in this tree; it
-/// is the spec's proposed fused `beta`, named here so a reader grepping the crate lands on the spec
-/// instead of an empty search.~~ **Corrected 2026-08-04:** that was true when this counter was written
-/// against a proposal and false from the moment the proposal landed — and it justified itself by an
-/// appeal to `grep`, which is exactly what falsifies it. Note the
-/// caller passes `arg` ITSELF, not `shift(1, 0, arg)`: never building the `+1` is the mechanism, not an
-/// optimization on top of it.
+/// enforce and `Σ abs×arg` breaks. `beta_go` is the shipped fused `beta` in `src/lambda/term.rs`.
+/// Note the caller passes `arg` ITSELF, not `shift(1, 0, arg)`: never building the `+1` is the
+/// mechanism, not an optimization on top of it.
 fn beta_allocs_fused(j: u32, s: &LambdaTerm, t: &LambdaTerm) -> (u64, u64, u64) {
     // The same prune as `subst`'s, and the same one the closing shift applies at this depth: every
     // free index in `t` is below `j`, so there is nothing to substitute AND nothing to decrement.
@@ -438,11 +370,11 @@ fn beta_allocs_fused(j: u32, s: &LambdaTerm, t: &LambdaTerm) -> (u64, u64, u64) 
         return (0, 0, 0);
     }
     match t.node() {
-        // `s.clone()` — a refcount bump, exactly as `subst`'s hit arm is today.
+        // `s.clone()` — a refcount bump, exactly as `subst`'s hit arm is.
         Node::Var(k) if *k == j => (0, 0, 0),
         // `var(*k - 1)`. `k > j` here (the prune took `k < j`), so `k >= 1` and the subtraction cannot
-        // underflow. This is the ONE node today's closing shift allocates that fusion cannot delete —
-        // the null-result counter of §4.
+        // underflow. This is the ONE node the pre-fusion closing shift allocates that fusion cannot
+        // delete — the null-result counter of §4.
         Node::Var(_) => (0, 0, 1),
         Node::Abs(_, b) => {
             let re = shift_allocs(0, s);
@@ -462,23 +394,22 @@ fn beta_allocs_fused(j: u32, s: &LambdaTerm, t: &LambdaTerm) -> (u64, u64, u64) 
 ///
 /// **TWO GENERATIONS OF COUNTER LIVE HERE AND THE TABLE PRINTS BOTH.** The `*_size` / `*_times_arg` /
 /// `term_size` fields are the ORIGINAL static models, kept as controls: they were written against a
-/// `subst` whose `Abs` arm copied unconditionally and a `depth_exceeds` that walked the whole term, and
-/// they report the same numbers today that they reported before those changed. The `opening` / `spine`
-/// / `reshift` / `closing` / `depth_guard` fields mirror the functions instead. Keeping both is the
-/// point rather than clutter — PART C's contest now has the stale counters in it, and watching them
-/// lose to the faithful ones on the same corpus is the falsification, run rather than quoted.
+/// `subst` whose `Abs` arm copied unconditionally and a `depth_exceeds` that walked the whole term.
+/// The `opening` / `spine` / `reshift` / `closing` / `depth_guard` fields mirror the functions
+/// instead. Keeping both is the point rather than clutter — PART C's contest has the stale counters
+/// in it, and running them against the faithful ones on the same corpus is the falsification, run
+/// rather than quoted.
 #[derive(Default)]
 struct Work {
     /// FAITHFUL, AND OF THE PRE-FUSION `beta` DELIBERATELY. `beta`'s opening `shift(1, 0, arg)` — the
-    /// separate up-front lift β-fusion (2026-08-03) deleted; the fused `beta_go` starts from `arg`
-    /// itself instead. Priced here anyway because it is the baseline `Σ opening + Σ closing` the
-    /// fusion design's ceiling and gate are computed against. Zero whenever `arg` is closed, which is
-    /// 88.4% of corpus steps — the single fact that retired the `subst` lifted-shift slice.
+    /// separate up-front lift β-fusion deleted; the fused `beta_go` starts from `arg` itself instead.
+    /// Priced here anyway because it is the baseline `Σ opening + Σ closing` the fusion design's
+    /// ceiling and gate are computed against. Zero whenever `arg` is closed.
     opening: u64,
     /// FAITHFUL. The body spine `subst` rebuilds on the way down.
     spine: u64,
     /// FAITHFUL. `subst`'s `Abs` arm, `shift(1, 0, s)` once per binder DESCENDED THROUGH — not once per
-    /// `Abs` node in the body, which is what `abs_times_arg` below still counts.
+    /// `Abs` node in the body, which is what `abs_times_arg` below counts.
     reshift: u64,
     /// FAITHFUL, AND OF THE PRE-FUSION `beta` DELIBERATELY, LIKE `opening` ABOVE. `beta`'s closing
     /// `shift(-1, 0, ·)` over the term `subst` just returned — the separate rebuilding pass β-fusion
@@ -487,49 +418,48 @@ struct Work {
     /// rebuilds the reduct. Kept, unlike the shipped reducer, because this is the other half of the
     /// baseline the fusion ceiling is priced against — see `freevar` below.
     closing: u64,
-    /// FAITHFUL. The falsified lifted rewrite's replacement for `reshift`: `shift(lift, 0, s)` once per
-    /// OCCURRENCE at `lift > 0`. New 2026-08-03 with β-fusion, which needs it to price §5b's
-    /// formulation against §2's. `occ_times_arg` below is the STALE model of the same idea and loses to
-    /// this in PART C.
+    /// FAITHFUL. The lifted rewrite's replacement for `reshift`: `shift(lift, 0, s)` once
+    /// per OCCURRENCE at `lift > 0`. β-fusion needs it to price §5b's formulation against §2's.
+    /// `occ_times_arg` below is the STALE model of the same idea.
     per_occ: u64,
     /// FAITHFUL, and it is β-fusion's NULL-RESULT COUNTER. The `var(k-1)` nodes the one-walk `beta`
     /// still allocates for a body free variable above the binder — a proper subset of `closing`, which
     /// also pays the spine down to them and a rebuild of every substituted argument copy.
     freevar: u64,
-    /// FAITHFUL, and it is 1 per step: `depth_exceeds` reads a stored field. It used to walk the whole
-    /// logical expansion, which is what `term_size` counts and what 96% of the hang turned out to be.
+    /// FAITHFUL, and it is 1 per step: `depth_exceeds` reads a stored field. `term_size` counts the
+    /// whole logical expansion a walking check would visit.
     depth_guard: u64,
-    /// Spine-rebuild work: one node constructed per path element. Should be negligible after
+    /// Spine-rebuild work: one node constructed per path element. Should be negligible under
     /// structural sharing — a large share here would mean the sharing is not doing its job.
     path_len: u64,
     /// Redex SEARCH, which `path_len` does not bound and which nothing else here stands in for. See
     /// `redex_at`.
     scan: u64,
-    /// `subst`'s traversal: the size of the abstraction body it walks, per step.
+    /// `subst`'s traversal under the static model: the size of the abstraction body, per step.
     body_size: u64,
     /// `beta`'s opening `shift(1, 0, arg)`. Also the multiplier in the two counters below, broken
     /// out so a row with a huge argument is visible as such rather than only through a product.
     arg_size: u64,
-    /// SUBSTITUTION BLOWUP — the hypothesis this accounting was built to test. Every occurrence of
-    /// the bound variable is replaced by a copy of the shifted argument, so this is the work `subst`
-    /// does that the body size alone does not bound.
+    /// SUBSTITUTION BLOWUP — a STALE model kept as a control. It charges a copy of the shifted
+    /// argument per occurrence of the bound variable, where `subst`'s `Var` arm returns a handle.
     occ_times_arg: u64,
-    /// THE ARGUMENT RE-SHIFTED UNDER EVERY BINDER, which the hypothesis above does not include and
-    /// which is a different quantity: `subst`'s `Abs` arm is
+    /// THE ARGUMENT RE-SHIFTED UNDER EVERY BINDER, which the model above does not include and which is
+    /// a different quantity: `subst`'s `Abs` arm is
     ///
     ///     Node::Abs(n, b) => abs(Rc::clone(n), subst(j + 1, &shift(1, 0, s), b))
     ///
-    /// so the argument is deep-copied ONCE PER `Abs` NODE IN THE BODY — not once per OCCURRENCE of
-    /// the variable. A body with 60 binders and one occurrence pays 60 copies of the argument to
-    /// substitute it once. `occ_times_arg` and this differ by exactly the factor `#Abs(body)/occ`,
-    /// so a corpus where they move together says nothing and a corpus where they diverge decides it.
+    /// and this model charges a deep copy of the argument ONCE PER `Abs` NODE IN THE BODY — not once
+    /// per OCCURRENCE of the variable — as if neither `maxfree` short-circuit (`subst`'s or `shift`'s)
+    /// pruned. A body with 60 binders and one occurrence is charged 60 copies of the argument to substitute
+    /// it once. `occ_times_arg` and this differ by exactly the factor `#Abs(body)/occ`, so a corpus where
+    /// they move together says nothing and a corpus where they diverge decides it.
     abs_times_arg: u64,
-    /// Whether `depth_exceeds`' per-step O(size) walk is implicated: its cost tracks term size, and
-    /// summing it here makes that comparable against the others.
+    /// The whole logical expansion a walking depth check would visit — a STALE model; `depth_exceeds`
+    /// reads a stored `depth`, which `depth_guard` counts.
     term_size: u64,
     /// Occurrences replaced, and `Abs` nodes walked, WITHOUT the argument-size multiplier. Not
-    /// columns — the two ratios that make the finding legible in one sentence: how many copies of the
-    /// argument a step actually needs, against how many it makes.
+    /// columns — the two ratios that make the comparison legible in one sentence: how many copies of
+    /// the argument a step actually needs, against how many `abs_times_arg` charges.
     occ: u64,
     abs_count: u64,
     /// Steps whose redex was not `(\. body) arg`. That would be a defect in the trace, not a case to
@@ -538,38 +468,31 @@ struct Work {
 }
 
 impl Work {
-    /// The traversals that CONSTRUCT a node, **counted rather than modelled** since 2026-08-02. Every
-    /// node here is an `Rc::new` plus the write that fills it, and every term is measured by mirroring
-    /// the function that performed it — `opening` and `closing` mirror the PRE-FUSION `beta`
-    /// deliberately, per the field docs above:
+    /// The traversals that CONSTRUCT a node, **counted rather than modelled**. Every node here is an
+    /// `Rc::new` plus the write that fills it, and every term is measured by mirroring the function
+    /// that performed it — `opening` and `closing` mirror the PRE-FUSION `beta` deliberately, per the
+    /// field docs above:
     ///
     ///     reduce_step's spine rebuild          -> path_len   (one node per path element)
     ///     pre-fusion beta's shift(1, 0, arg)   -> opening
     ///     subst's body rebuild                 -> spine
     ///     subst's Abs arm                      -> reshift
     ///     pre-fusion beta's shift(-1, 0, ·)    -> closing
-    ///
-    /// **THE PREVIOUS VERSION OF THIS FUNCTION WAS `path + arg + body + abs×arg + (body - occ +
-    /// occ×arg)`**, which is the same list expressed as static products — and every one of those
-    /// products over-counts now. `arg` charges a full copy of an argument that is closed 88.4% of the
-    /// time; `abs×arg` charges every `Abs` in the body where `subst` descends through the ones on the
-    /// path to an occurrence; `occ×arg` charges a copy per occurrence where `subst`'s `Var` arm returns
-    /// a handle. Corpus-wide the old sum reports 73,806,194 against a measured 68,188-plus-reduct.
     fn alloc(&self) -> u64 {
         self.path_len + self.opening + self.spine + self.reshift + self.closing
     }
 
     /// The traversals that only READ. `reduce_step`'s search walks rejected left siblings and returns a
     /// path; `depth_exceeds` reads a stored `depth` and returns a bool, so it is 1 per step rather than
-    /// the whole-term walk `term_size` still counts. Split out from `alloc` because assuming the two
+    /// the whole-term walk `term_size` counts. Split out from `alloc` because assuming the two
     /// cost the same is a MODEL, and PART C fits both prices rather than asserting one.
     fn read(&self) -> u64 {
         self.depth_guard + self.scan
     }
 
-    /// β-FUSION's contest. `beta_today` is `alloc()` minus the traversals fusion does not touch, so
+    /// β-FUSION's contest. `beta_three_pass` is `alloc()` minus the traversals fusion does not touch, so
     /// the ratio below is about `beta` and not about the whole reducer.
-    fn beta_today(&self) -> u64 {
+    fn beta_three_pass(&self) -> u64 {
         self.opening + self.spine + self.reshift + self.closing
     }
 
@@ -595,8 +518,8 @@ impl Work {
     /// KNOWN GAP, stated because this is a control described as complete: the accounting is summed
     /// over `trace.steps`, and the final `reduce_step` that finds no redex — plus the `depth_exceeds`
     /// that precedes it — happens once per program after the last step and is not counted. One extra
-    /// `Σ size + Σ scan` per program against 5,955 steps' worth; negligible, and it is read-only work,
-    /// which PART C prices near zero anyway. It is the only traversal known to be outside the sum.
+    /// `Σ guard + Σ scan` per program; negligible, and it is read-only work. It is the only traversal
+    /// known to be outside the sum.
     fn model(&self) -> u64 {
         self.alloc() + self.read()
     }
@@ -604,7 +527,7 @@ impl Work {
 
 /// Follow `path` from `t` to the redex, returning it and what `reduce_step` SPENT getting there.
 ///
-/// The second number is the one the four-counter hypothesis lacks. `reduce_step` finds the
+/// The second number is the SEARCH cost, which no other counter bounds. `reduce_step` finds the
 /// leftmost-outermost redex by recursion, and at an `App` it tries the function side first: if that
 /// side holds no redex it has already visited EVERY node of it before the argument side is tried at
 /// all. So each `AppR` in the path means one entire left sibling was traversed and rejected.
@@ -652,7 +575,7 @@ fn count_occurrences(body: &LambdaTerm, j: u32) -> u64 {
     n
 }
 
-/// `Abs` nodes in `body` — one `shift(1, 0, s)` of the whole argument apiece, per `subst`'s `Abs` arm.
+/// `Abs` nodes in `body` — one `shift(1, 0, s)` of the whole argument apiece under the static model.
 fn count_abs(body: &LambdaTerm) -> u64 {
     let mut stack = vec![body];
     let mut n = 0u64;
@@ -718,8 +641,8 @@ fn account(trace: &Trace) -> Work {
         // GUARDS between `subst_allocs` and `beta_allocs_fused`, forced true by construction rather than
         // a check of the design (`shift_cost_probe.rs`'s `SubstCensus::observe` states the reason: the
         // two mirrors share the identical prune and spine recursion, and the fused walk's `s` is exactly
-        // one `shift(1, 0, ·)` behind today's, under which `shift_allocs(0, ·)` is invariant). What they
-        // catch is a later desync between the two mirrors, not a design error.
+        // one `shift(1, 0, ·)` behind `subst_allocs`'s, under which `shift_allocs(0, ·)` is invariant).
+        // What they catch is a later desync between the two mirrors, not a design error.
         let (spine_fused, reshift_fused, freevar) = beta_allocs_fused(0, arg, body);
         assert_eq!(spine, spine_fused, "fusion must rebuild the same body spine as `subst`");
         assert_eq!(reshift, reshift_fused, "fusion must re-shift once per binder, as `subst` does");
@@ -742,11 +665,12 @@ struct Row {
     trace_distinct: u32,
     max_term_nodes: u64,
     max_term_distinct: u32,
+    /// Distinct `Rc` allocations across the trace, counted only on `RC_COUNTED_ROWS`.
+    rc_allocs: Option<usize>,
     intern_ns_per_node: f64,
     interned: bool,
     /// Wall time of the BATCH `replay_ms` was divided out of. This is what says whether the number can
-    /// be trusted, and it exists because `replay_ms` alone stopped saying so: after the 2026-08-01
-    /// fixes a single replay of 44 of the 46 programs finishes below the timer's resolution.
+    /// be trusted: a single replay of most programs finishes below the timer's resolution.
     batch_ms: f64,
     work: Work,
 }
@@ -770,13 +694,9 @@ fn measure(idx: usize, src: &str) -> Option<Row> {
 
     // Replay cost: best of three BATCHES, each batch repeated until it clears `BATCH_MIN_MS`.
     //
-    // **THIS USED TO BE BEST-OF-THREE SINGLE REPLAYS, AND THE 2026-08-01 FIXES BROKE IT.** Nothing
-    // about the corpus changed; it got three to four orders of magnitude faster, and an instrument that
-    // samples each program once went from timing 14 rows usably to timing 2. Everything downstream
-    // degraded with it — PART C.2 was left fitting two parameters to two points and returned a
-    // NEGATIVE price per read-only node, and the projection table printed negative milliseconds. That
-    // is what a measurement apparatus outliving its subject looks like from the inside, and the fix is
-    // to measure a batch rather than to widen the tolerances until the numbers look plausible again.
+    // A single replay of most programs is below the timer's resolution, and PART C.2's two-price fit needs
+    // rows above it, so the remedy is to measure a batch rather than to widen the tolerances until the
+    // numbers look plausible.
     let (replay_ms, batch_ms) = batch_best_of_three(|| {
         let nf = drain_lambda_cursor(&term);
         std::hint::black_box(&nf);
@@ -810,6 +730,7 @@ fn measure(idx: usize, src: &str) -> Option<Row> {
             trace_distinct: 0,
             max_term_nodes,
             max_term_distinct: 0,
+            rc_allocs: None,
             intern_ns_per_node: 0.0,
             interned: false,
             work,
@@ -818,7 +739,8 @@ fn measure(idx: usize, src: &str) -> Option<Row> {
 
     // ACROSS-TRACE: one interner over every step's term plus the normal form. Ceiling for sharing of
     // any kind; on its own it does NOT separate Rc from interning — what does is the residual after
-    // Rc, which needs an allocation count this probe does not take (module doc).
+    // Rc, which needs an allocation count; this probe takes one only on `RC_COUNTED_ROWS` (`rc_allocs`,
+    // below), the rows `tests/lambda_sharing.rs` pins.
     let mut across = Interner::default();
     let t0 = Instant::now();
     for s in &trace.steps {
@@ -842,6 +764,7 @@ fn measure(idx: usize, src: &str) -> Option<Row> {
         trace_distinct: across.next,
         max_term_nodes: within_nodes,
         max_term_distinct: within.next,
+        rc_allocs: RC_COUNTED_ROWS.contains(&idx).then(|| distinct_allocations(&trace)),
         intern_ns_per_node: if trace_nodes == 0 { 0.0 } else { intern_secs * 1e9 / trace_nodes as f64 },
         interned: true,
         work,
@@ -865,8 +788,8 @@ fn run() {
         "subst differential: `crates/redextape-core/tests/subst_differential.rs` (shift-additivity \
          lemma, exhaustive differential of the SHIPPED `subst` against an eager and a lifted \
          reference, and the allocation-identity sharing pins) — run it with `cargo nextest run -p \
-         redextape-core`. The lifted rewrite it used to propose was FALSIFIED 2026-08-02: 0.99x on the \
-         nested-group family. PART B's `Σ abs×arg` below is the stale model that justified it.\n"
+         redextape-core`. The lifted rewrite is FALSIFIED: 0.99x on the nested-group family. PART B's \
+         `Σ abs×arg` below is the stale model it rests on.\n"
     );
     println!(
         "λ-term sharing probe — hash-consing dry run over FIRST_ORDER_DEMOS ({} programs)\n",
@@ -924,36 +847,41 @@ fn run() {
         "Corpus within-term: {tot_within} nodes -> {tot_within_distinct} distinct  ({:.2}x)",
         tot_within as f64 / tot_within_distinct.max(1) as f64
     );
-    // THE 10.3x/50.0x BELOW ARE DERIVED, NOT MEASURED HERE, and they are the third superseded claim
-    // this legend has had to be corrected for. Each is one program's pinned distinct-allocation count
-    // from `tests/lambda_sharing.rs` (`seen.len()`: 140,529 on row 9, 185,459 on row 7) divided by that
-    // row's own `distinct` column in the table just printed (13,590 and 3,710). Both inputs are pinned
-    // constants in a different file, so either can move without this text noticing — re-derive rather
-    // than trusting these two numbers if the gate is ever re-pinned. Design §3 has the full arithmetic.
+    // The residual after `Rc` is computed from this run rather than copied from the test: `rc_allocs` is
+    // the count `tests/lambda_sharing.rs` pins as `seen.len()`, and the divisor is the same row's trace
+    // `distinct` (the first `distinct` column) in the table above. A reducer change that moves an allocation
+    // count fails that pin and moves this ratio with it. The `ns/node` line names PART C.2's price instead
+    // of quoting it, because the fit runs after this legend prints and its value moves between runs.
+    let residual = |idx: usize| match rows.iter().find(|r| r.idx == idx) {
+        Some(Row { rc_allocs: Some(allocs), trace_distinct, .. }) => format!(
+            "row {idx}: {allocs} Rc allocations -> {trace_distinct} distinct ({:.2}x)",
+            *allocs as f64 / f64::from((*trace_distinct).max(1))
+        ),
+        _ => format!("row {idx}: not counted"),
+    };
     println!("\nHOW TO READ THIS:");
     println!("  `share` after `distinct` (trace)  — CEILING for all sharing, but NO verdict on its own:");
-    println!("                                      Rc takes an unmeasured share. Where it was counted");
-    println!("                                      (rows 9, 7 via tests/lambda_sharing.rs) the residual");
-    println!("                                      after Rc is 10.3x/50.0x: THAT argues for interning.");
-    println!("                                      Those two are DERIVED from that file's pinned");
-    println!("                                      seen.len() over this table's `distinct` — re-derive");
-    println!("                                      them if either side is ever re-pinned.");
+    println!("                                      Rc takes a share this table does not show. On the");
+    println!("                                      rows tests/lambda_sharing.rs pins, Rc leaves");
+    println!("                                      {}", residual(9));
+    println!("                                      {}", residual(7));
+    println!("                                      for interning to collapse: THAT residual, not the");
+    println!("                                      ceiling, is what interning adds beyond Rc.");
     println!("  `share` after `distinct` (max term) — THE DISCRIMINATING NUMBER. Structurally identical");
     println!("                                      subterms built separately: Rc cannot share these,");
     println!("                                      interning can. ~1.00x means interning adds nothing.");
-    println!("  `ns/node`                          — interning's cost, against the ~35 ns/node the reducer");
+    println!("  `ns/node`                          — interning's cost, against the price the reducer");
     println!("                                      already pays to CONSTRUCT a node (PART C.2's fitted");
-    println!("                                      allocating price, below). Both are whole-traversal");
-    println!("                                      costs, so they compare directly: ~1.7x, not ~15x.");
+    println!("                                      allocating price `a`, below). Both are whole-traversal");
+    println!("                                      costs, so they compare directly.");
 
     part_b(&rows);
     part_d(&rows);
 }
 
-/// Counters, in the order the table prints them. `f` reads one off a `Work`; `origin` says whether the
-/// counter is one of the four the substitution-blowup hypothesis proposed (`yes`), one found by reading
-/// `reduce.rs`/`term.rs` for a traversal the four do not bound (`NEW`), an aggregate over several of
-/// them (`SPLIT`), or the total (`SUM`).
+/// Counters, in the order the table prints them. `f` reads one off a `Work`; `origin` is the counter's
+/// `hyp?` label as the legend `part_c` prints defines it (`yes`, `STALE`, `TRUE`, `HYPO`, `SPLIT`, `SUM`),
+/// or `NEW` for a traversal found by reading `reduce.rs`/`term.rs` that no hypothesised counter bounds.
 struct Counter {
     name: &'static str,
     origin: &'static str,
@@ -975,7 +903,7 @@ const COUNTERS: &[Counter] = &[
     Counter { name: "Σ guard", origin: "TRUE", f: |w| w.depth_guard },
     Counter { name: "Σ per_occ", origin: "HYPO", f: |w| w.per_occ },
     Counter { name: "Σ freevar", origin: "HYPO", f: |w| w.freevar },
-    Counter { name: "Σ β today", origin: "SPLIT", f: Work::beta_today },
+    Counter { name: "Σ β 3-pass", origin: "SPLIT", f: Work::beta_three_pass },
     Counter { name: "Σ β fused", origin: "SPLIT", f: Work::beta_fused_incr },
     Counter { name: "Σ β occ", origin: "SPLIT", f: Work::beta_fused_occ },
     Counter { name: "Σ alloc", origin: "SPLIT", f: Work::alloc },
@@ -985,14 +913,9 @@ const COUNTERS: &[Counter] = &[
 
 /// A row is timer-reliable when the BATCH its `replay ms` was divided out of ran at least this long.
 ///
-/// **THE SUBJECT OF THIS CONSTANT CHANGED ON 2026-08-02 AND THE NUMBER DELIBERATELY DID NOT.** It used
-/// to test `replay ms` itself, which was one replay: below a millisecond a single `Instant` reading
-/// carries enough cache and scheduling noise that a 2x ratio means nothing. That test was correct and
-/// it stopped selecting anything useful — after the 2026-08-01 fixes only 2 of 46 single replays
-/// cleared it, and a two-parameter fit over two points is not a measurement. Batching moved the
-/// uncertainty: `replay ms` is now a batch of `BATCH_MIN_MS`-or-`BATCH_MAX_REPS` divided by its
-/// repetition count, so what has to clear a millisecond is the BATCH. Essentially every row does, which
-/// is the repair — the corpus can price a node again.
+/// Below a millisecond a single `Instant` reading carries enough cache and scheduling noise that a 2x
+/// ratio means nothing. `replay ms` is a batch of `BATCH_MIN_MS`-or-`BATCH_MAX_REPS` divided by its
+/// repetition count, so what has to clear a millisecond is the BATCH.
 ///
 /// EVERY STATISTIC IS STILL REPORTED OVER ALL 46 ROWS. This constant selects the subset the failure
 /// test's BASELINE is taken from and the subset a row can be FLAGGED in — not the subset the table
@@ -1002,11 +925,11 @@ const RELIABLE_MS: f64 = 1.0;
 fn part_b(rows: &[Row]) {
     println!("\n\nPART B — COST: what replay actually spends, in nodes visited per trace.\n");
     println!(
-        "TWO GENERATIONS OF COUNTER, PRINTED SIDE BY SIDE. The `model` block is the original static\n\
-         accounting — products of node counts, written against a `subst` whose `Abs` arm copied\n\
-         unconditionally and a `depth_exceeds` that walked the whole term. The `measured` block mirrors\n\
-         the functions as they are, short-circuits included. The models were correct when written and\n\
-         are kept as controls, because PART C's contest is more useful with a known-wrong entrant in it.\n"
+        "TWO GENERATIONS OF COUNTER, PRINTED SIDE BY SIDE. The `model` block is the static accounting\n\
+         — products of node counts, which model a `subst` whose `Abs` arm copies unconditionally and a\n\
+         `depth_exceeds` that walks the whole term. The `measured` block mirrors the functions as they\n\
+         are, short-circuits included. The models are kept as controls, because PART C's contest is\n\
+         more useful with a known-wrong entrant in it.\n"
     );
     println!(
         "{:>3}  {:>9} | {:>10}  {:>9}  {:>12}  {:>12}  {:>11} | {:>9}  {:>9}  {:>9}  {:>9}",
@@ -1042,7 +965,7 @@ fn part_b(rows: &[Row]) {
     }
 
     println!(
-        "\nβ-FUSION (design 2026-08-02-lambda-beta-fusion §4). `beta today` is the three passes;\n\
+        "\nβ-FUSION (design 2026-08-02-lambda-beta-fusion §4). `β 3-pass` is the three passes;\n\
          `fused incr` carries `s` per binder and deletes both shifts; `fused occ` is the\n\
          per-occurrence formulation §2 rejects, paying `per_occ` where `fused incr` pays `reshift`\n\
          (printed in the table above). `freevar` is the null-result counter — what the fused walk\n\
@@ -1052,7 +975,7 @@ fn part_b(rows: &[Row]) {
     );
     println!(
         "{:>3} | {:>9}  {:>9}  {:>9}  {:>9} | {:>10}  {:>10}  {:>10}",
-        "#", "opening", "closing", "per_occ", "freevar", "β today", "fused incr", "fused occ"
+        "#", "opening", "closing", "per_occ", "freevar", "β 3-pass", "fused incr", "fused occ"
     );
     println!("{}", "-".repeat(90));
     let (mut oc, mut fv) = (0u64, 0u64);
@@ -1067,7 +990,7 @@ fn part_b(rows: &[Row]) {
             w.closing,
             w.per_occ,
             w.freevar,
-            w.beta_today(),
+            w.beta_three_pass(),
             w.beta_fused_incr(),
             w.beta_fused_occ()
         );
@@ -1078,7 +1001,7 @@ fn part_b(rows: &[Row]) {
         if oc == 0 { 0.0 } else { 100.0 * fv as f64 / oc as f64 }
     );
 
-    // The headline correction, stated as a ratio rather than left for the reader to divide.
+    // Model against measurement, stated as a ratio rather than left for the reader to divide.
     let m_abs: u64 = rows.iter().map(|r| r.work.abs_times_arg).sum();
     let t_reshift: u64 = rows.iter().map(|r| r.work.reshift).sum();
     let m_size: u64 = rows.iter().map(|r| r.work.term_size).sum();
@@ -1087,8 +1010,8 @@ fn part_b(rows: &[Row]) {
         "\nMODEL AGAINST MEASUREMENT, corpus-wide:\n  \
          `Σ abs×arg` {m_abs} vs `Σ reshift` {t_reshift} — over-counts by {:.0}x\n  \
          `Σ size`    {m_size} vs `Σ guard`   {t_guard} — over-counts by {:.0}x\n\
-         The first is the `subst` re-shift the retired lifted-shift slice existed to delete; the second\n\
-         is `depth_exceeds`, which reads a stored field and has walked nothing since 2026-08-01.",
+         The first is the `subst` re-shift the lifted-shift rewrite targets; the second\n\
+         is `depth_exceeds`, which reads a stored field and walks nothing.",
         m_abs as f64 / t_reshift.max(1) as f64,
         m_size as f64 / t_guard.max(1) as f64,
     );
@@ -1102,19 +1025,17 @@ fn part_b(rows: &[Row]) {
         }
     );
 
-    // The two ratios the columns above encode as products. `Σ occ×arg` and `Σ arg` sitting on top of
-    // each other in the table is not a coincidence to note in passing — it says the mean occurrence
-    // count is ~1, i.e. there is no substitution blowup anywhere in this corpus.
+    // The two ratios the columns above encode as products, printed per step.
     let steps: u64 = rows.iter().map(|r| r.steps as u64).sum();
     let occ: u64 = rows.iter().map(|r| r.work.occ).sum();
     let abs_count: u64 = rows.iter().map(|r| r.work.abs_count).sum();
     println!(
         "\nOver all {steps} β-steps in the corpus, `subst` replaced {occ} occurrences of the bound variable\n\
          ({:.2} per step). The body holds {abs_count} `Abs` nodes in total ({:.1} per step), a ratio of\n\
-         {:.0}:1 — and THAT RATIO IS THE ONE THAT MISLED THE RECORD FOR A DAY. It counts `Abs` nodes in\n\
-         the body, not binders `subst` descends through: since the `maxfree` short-circuit, `subst`\n\
-         descends only along paths to an occurrence, and the re-shift it actually performs is {:.2} per\n\
-         step. Paying that once per occurrence instead — the retired lifted-shift slice — is a 0.99x\n\
+         {:.0}:1 — and THAT RATIO IS NOT WHAT `subst` PAYS. It counts `Abs` nodes in the body, not\n\
+         binders `subst` descends through: with the `maxfree` short-circuit, `subst` descends only along\n\
+         paths to an occurrence, and the re-shift it actually performs is {:.2} per step. Paying that\n\
+         once per occurrence instead — the lifted-shift rewrite — is a 0.99x\n\
          REGRESSION on the nested-group family, because occurrences outnumber binders crossed. See\n\
          `examples/shift_cost_probe.rs`'s census section and the perf design's §10.",
         occ as f64 / steps as f64,
@@ -1126,9 +1047,9 @@ fn part_b(rows: &[Row]) {
     part_c(rows);
 }
 
-/// The verification the two rows that motivated this cannot supply. A counter whose ratio between
-/// rows 31 and 7 happens to land near 6.6x is one coincidence; a counter that ORDERS all 46 rows the
-/// way the clock does, and costs the same nanoseconds per unit on each of them, is an explanation.
+/// The verification no pair of rows can supply. A counter whose ratio between two rows happens to land
+/// near the clock's is one coincidence; a counter that ORDERS all 46 rows the way the clock does, and
+/// costs the same nanoseconds per unit on each of them, is an explanation.
 ///
 /// Two tests, because they fail differently. Spearman ρ asks only whether the ORDER agrees, which is
 /// robust to a wrong constant factor and blind to a wrong exponent. Nanoseconds-per-unit asks whether
@@ -1190,19 +1111,17 @@ fn part_c(rows: &[Row]) {
     let (_, winner) = best.unwrap();
     println!(
         "\n`hyp?` — `yes` marks a counter the substitution-blowup hypothesis proposed, `STALE` one of the\n\
-         static models written against the pre-2026-08-01 `subst`/`depth_exceeds` and kept as a control,\n\
+         static models of an always-copying `subst` and a whole-term `depth_exceeds`, kept as a control,\n\
          `TRUE` one that mirrors the function as it is, `HYPO` a faithful walk over code that is\n\
-         PROPOSED OR FALSIFIED rather than shipped: `Σ per_occ` mirrors the falsified lifted-shift\n\
-         rewrite and its fitted price is the cost of a function nobody runs. `Σ freevar` mirrored a\n\
-         PROPOSED fused `beta` when it was written and that `beta` SHIPPED on 2026-08-03, so by this\n\
-         legend it is now TRUE and the label understates it. Inverted, `Σ β today` models the\n\
-         three-pass `beta` that no longer exists, and prints a fitted price with no caveat at all --\n\
-         read that column as the cost of a function nobody runs. `SPLIT` marks an aggregate over\n\
-         several\n\
-         counters above — `Σ alloc`/`Σ read` are the allocating/read-only partition of the WHOLE\n\
-         accounting, and `Σ β today`/`Σ β fused`/`Σ β occ` are the β-fusion aggregates from the block\n\
-         above: a DIFFERENT partition, not a further split of the first, so none of the three sums\n\
-         against `Σ read` or `Σ alloc`. `SUM` is the total.\n\
+         PROPOSED OR FALSIFIED rather than shipped: `Σ per_occ` mirrors the lifted-shift\n\
+         rewrite and its fitted price is the cost of a function nobody runs. `Σ freevar` mirrors the\n\
+         fused `beta` that ships, so by this legend it is TRUE and its `HYPO` label understates it.\n\
+         Inverted, `Σ β 3-pass` models a three-pass `beta` that does not ship, and prints a fitted price\n\
+         with no caveat at all -- read that column as the cost of a function nobody runs. `SPLIT` marks\n\
+         an aggregate over several counters above — `Σ alloc`/`Σ read` are the allocating/read-only\n\
+         partition of the WHOLE accounting, and `Σ β 3-pass`/`Σ β fused`/`Σ β occ` are the β-fusion\n\
+         aggregates from the block above: a DIFFERENT partition, not a further split of the first, so\n\
+         none of the three sums against `Σ read` or `Σ alloc`. `SUM` is the total.\n\
          **THE STALE AND HYPO ROWS ARE IN THIS CONTEST ON PURPOSE.** A counter that no longer describes\n\
          the shipped code — or never did — should lose it, and watching one do so on the same corpus is\n\
          worth more than a sentence asserting that it would. `spread` is\n\
@@ -1211,18 +1130,16 @@ fn part_c(rows: &[Row]) {
          \n\
          `ns/unit m46` is the median price over ALL 46 rows. The `vs med` column further down divides\n\
          by the median over the {} timer-reliable rows instead; the two are different baselines and are\n\
-         labelled apart because an earlier draft printed both as `median`.\n\
+         labelled apart.\n\
          \n\
          `Σ scan`'s spread is not a measurement. Scan is 0 on rows whose redex path never takes an\n\
          `AppR`, and `.max(1.0)` in the price divides by 1 there rather than by 0, so the printed max/min\n\
          is an artifact of that floor. What `Σ scan` actually says is its ρ: it does not track the clock.\n\
          \n\
-         THE TWO ρ/spread COLUMNS ARE NOW IDENTICAL, AND THAT IS A RESULT RATHER THAN A REDUNDANCY.\n\
+         THE TWO ρ/spread COLUMNS ARE IDENTICAL, AND THAT IS A RESULT RATHER THAN A REDUNDANCY.\n\
          They are `all 46 rows` against `the timer-reliable rows`, and {} of 46 rows are reliable — the\n\
-         batched timing restored the resolution that a single replay lost when the reducer got three to\n\
-         four orders of magnitude faster. Between 2026-08-01 and 2026-08-02 this read `(46)` and `(2)`,\n\
-         and a two-parameter fit over two points is what produced a negative price per read-only node.\n\
-         The columns are kept side by side so the day they diverge again is visible.",
+         timing is batched, because a single replay is too fast for the timer to resolve. The columns\n\
+         are kept side by side so a divergence is visible.",
         reliable.len(),
         reliable.len()
     );
@@ -1231,8 +1148,8 @@ fn part_c(rows: &[Row]) {
 
     // Per-row detail over ALL 46 rows, so "the rows it does not explain" are named rather than
     // summarized. Two columns, doing two jobs: `ns/node` prices `Σ model` and so tests whether the
-    // accounting is COMPLETE; the share column tests whether `Σ abs×arg` DOMINATES it. Neither alone
-    // is the finding — a complete model that no single traversal dominates would point at nothing to
+    // accounting is COMPLETE; the share column tests whether the contest's winner DOMINATES it. Neither
+    // alone is enough — a complete model that no single traversal dominates would point at nothing to
     // fix, and a dominant counter inside an incomplete model could be dominating a mismeasurement.
     let model: Vec<f64> = rows.iter().map(|r| r.work.model() as f64).collect();
     let share: Vec<f64> = rows.iter().map(|r| (winner.f)(&r.work) as f64 / r.work.model().max(1) as f64).collect();
@@ -1287,9 +1204,9 @@ fn part_c(rows: &[Row]) {
 
     // THE SAME 2x CRITERION, APPLIED TO THE WINNER RATHER THAN TO THE CONTROL. The table above prices
     // `Σ model`, so its failure list answers "is the accounting complete?" — a different question from
-    // "which rows does the identified counter fail to explain?" A counter that is 96% of the work
-    // on one row and 16% on another cannot price the same on both, and
-    // naming the rows where it does not is the honest form of the dominance claim.
+    // "which rows does the identified counter fail to explain?" A counter whose share of the work differs
+    // widely between two rows cannot price the same on both, and naming the rows where it does not is the
+    // honest form of the dominance claim.
     let win_vals: Vec<f64> = rows.iter().map(|r| (winner.f)(&r.work) as f64).collect();
     let (win_med_rel, _) = unit_prices(&win_vals, &reliable);
     let (win_med46, _) = unit_prices(&win_vals, &all);
@@ -1352,25 +1269,16 @@ fn part_c(rows: &[Row]) {
         100.0 * tot_alloc as f64 / tot_model.max(1) as f64,
     );
 
-    // WHERE THE COST IS NOW, under BOTH price models rather than under whichever one flatters it.
-    //
-    // **THIS USED TO BE "WHAT THE FIX WOULD BUY", AND THERE IS NO FIX.** It projected `Σ abs×arg`
-    // becoming `Σ occ×arg` — the argument shifted once per OCCURRENCE instead of once per BINDER — at
-    // 7.0x flat and 18.0x allocating. Both were projections from a static counter, both were recorded as
-    // falsifiable predictions, and on 2026-08-02 both were falsified together: the rewrite measures at
-    // 2.16x on this corpus and 0.99x — a regression — on the nested-group family. What replaces the
-    // projection is the same table without the counterfactual: where the allocations actually go.
+    // WHERE THE COST IS, under BOTH price models rather than under whichever one flatters it.
     remaining(rows, &reliable, &ms);
 }
 
-/// Where the reducer's allocations actually go, priced under both models. Forward guidance for the next
-/// plan, computed rather than inferred by hand from the node accounting.
+/// Where the reducer's allocations actually go, priced under both models, computed rather than inferred
+/// by hand from the node accounting.
 ///
-/// **EVERY ROW HERE IS A MEASURED TRAVERSAL, NOT A MODELLED ONE**, which is the difference between this
-/// and the projection it replaces. The two models still disagree about which traversal is largest, and
-/// both columns are still printed for the reason PART C.2 exists: a read-only traversal that is most of
-/// the remaining NODES is most of the remaining TIME only if a node costs the same to read as to
-/// construct, and that was measured to be false.
+/// **EVERY ROW HERE IS A MEASURED TRAVERSAL, NOT A MODELLED ONE.** Both columns are printed for the
+/// reason PART C.2 exists: a read-only traversal that is most of the remaining NODES is most of the
+/// remaining TIME only if a node costs the same to read as to construct.
 fn remaining(rows: &[Row], reliable: &[usize], ms: &[f64]) {
     let a_v: Vec<f64> = rows.iter().map(|r| r.work.alloc() as f64).collect();
     let r_v: Vec<f64> = rows.iter().map(|r| r.work.read() as f64).collect();
@@ -1410,9 +1318,7 @@ fn remaining(rows: &[Row], reliable: &[usize], ms: &[f64]) {
             if allocating { "" } else { "   (read-only)" }
         );
     }
-    // THE RANKING IS DERIVED, NOT ASSERTED, and the reason is this file's own history: the sentence
-    // that used to sit here named a winner by hand, and the hand-named winner was a static model that
-    // had stopped describing the code. A ranking printed from the table below it cannot go stale
+    // THE RANKING IS DERIVED, NOT ASSERTED: a ranking printed from the table below it cannot go stale
     // without the table going stale first.
     let mut ranked: Vec<&(&str, &str, u64, bool)> = where_it_goes.iter().collect();
     ranked.sort_by_key(|c| std::cmp::Reverse(c.2));
@@ -1429,8 +1335,8 @@ fn remaining(rows: &[Row], reliable: &[usize], ms: &[f64]) {
          \n\
          LARGEST THREE, ranked from the table above rather than named by hand: {top}.\n\
          \n\
-         AND WHAT THAT DOES *NOT* SAY ABOUT THE RETIRED LIFTED-SHIFT SLICE. `Σ reshift` is the counter\n\
-         that slice was about and it is {:.1}% of this corpus's allocations — NOT negligible here, and a\n\
+         AND WHAT THAT DOES *NOT* SAY ABOUT THE FALSIFIED LIFTED-SHIFT REWRITE. `Σ reshift` is the\n\
+         counter that rewrite targets: {:.1}% of this corpus's allocations — NOT negligible here, and a\n\
          reader who came for the falsification should not leave thinking it was. The rewrite would\n\
          replace those {reshift} allocations with ~7,944, a real ~19% cut. Two things sink it anyway,\n\
          and both are about magnitude rather than direction: the absolute is ~1.5 ms across all 46\n\
@@ -1462,8 +1368,8 @@ fn remaining(rows: &[Row], reliable: &[usize], ms: &[f64]) {
 /// timer-reliable rows.
 ///
 /// WHY THE DIAGNOSTICS ARE NOT OPTIONAL, and are printed whether or not they flatter the fit. Two free
-/// parameters against 14 points fit well for uninteresting reasons, and both regressors grow with
-/// program size, so they may be collinear enough that the split is arithmetic rather than physics.
+/// parameters can fit well for uninteresting reasons, and both regressors grow with program size, so
+/// they may be collinear enough that the split is arithmetic rather than physics.
 /// Printed alongside the coefficients: the uncentered correlation of the two regressors (this is a
 /// no-intercept fit, so uncentered is the right one), the variance-inflation factor it implies, and the
 /// leave-one-out range of each coefficient. **A read-only price that changes sign when one row is
@@ -1568,8 +1474,8 @@ fn two_price(rows: &[Row], reliable: &[usize], ms: &[f64], winner: &Counter) {
         rows.len(),
     );
 
-    // TODAY'S SPLIT AT THE FITTED PRICES — the sentence §7 needs and the one it is easiest to get
-    // wrong, so it is printed rather than left to be derived from the node table by hand.
+    // THE READ/ALLOCATE SPLIT AT THE FITTED PRICES — the sentence §7 needs and the one it is easiest
+    // to get wrong, so it is printed rather than left to be derived from the node table by hand.
     let (n_alloc, n_read): (u64, u64) =
         rows.iter().fold((0, 0), |(a, r), row| (a + row.work.alloc(), r + row.work.read()));
     let n_size: u64 = rows.iter().map(|r| r.work.term_size).sum();
@@ -1577,7 +1483,7 @@ fn two_price(rows: &[Row], reliable: &[usize], ms: &[f64], winner: &Counter) {
     println!(
         "\nTHE CORPUS AS IT STANDS, priced at the fit above rather than by node count:\n\
          \x20 read-only     {:>10} nodes  = {:>5.1}% of nodes  but {:>5.2}% of time\n\
-         \x20 of which Σ size (`depth_exceeds`) {:>5.1}% of nodes  but {:>5.2}% of time\n\
+         \x20 Σ size (STALE whole-term walk, in neither row) {:>5.1}% of nodes  but {:>5.2}% of time\n\
          \x20 allocating    {:>10} nodes  = {:>5.1}% of nodes  and {:>5.2}% of time",
         n_read,
         100.0 * n_read as f64 / (n_alloc + n_read).max(1) as f64,
@@ -1605,17 +1511,13 @@ fn two_price(rows: &[Row], reliable: &[usize], ms: &[f64], winner: &Counter) {
          WHAT THIS CHANGES DOWNSTREAM, which is why it is measured rather than assumed. If `r` is near\n\
          zero, a NODE share of a read-only counter is NOT a TIME share of it: `Σ size` can be a large\n\
          fraction of `Σ model` and still be a negligible fraction of the clock. Any claim that\n\
-         `depth_exceeds` is 'the largest remaining cost' after the substitution fix is a claim about\n\
-         TIME and must be derived under the price that fits, not read off the node accounting.\n\
+         `depth_exceeds` is 'the largest remaining cost' is a claim about TIME and must be derived under\n\
+         the price that fits, not read off the node accounting.\n\
          \n\
          AN UNSTABLE `r` IS EXPECTED AND DOES NOT SEND YOU BACK TO THE FLAT MODEL. It is the corpus\n\
-         failing to price a nearly-free node, not the split failing, and since 2026-08-02 there is less\n\
-         read-only work than ever to price: `depth_exceeds` reads a stored field, so `Σ read` is now\n\
-         essentially `Σ scan` alone. What the conclusions depend on is `a`, which the leave-one-out\n\
-         range above shows is stable to within a few percent — and note what changed to make that true.\n\
-         Until the timing was batched, this fit ran over TWO rows, `a`'s leave-one-out range printed as\n\
-         `0.00 to 0.00 (infx)` because dropping either row left one point, and `r` came out at -77\n\
-         ns/node. A degenerate fit is not a small-sample fit; it is not a fit. See the design's §10."
+         failing to price a nearly-free node, not the split failing: `depth_exceeds` reads a stored\n\
+         field, so `Σ read` is essentially `Σ scan` alone. What the conclusions depend on is `a`, which\n\
+         the leave-one-out range above shows is stable to within a few percent. See the design's §10."
     );
 }
 
@@ -1631,10 +1533,10 @@ fn ls_one(x: &[f64], y: &[f64], idx: &[usize]) -> f64 {
 
 /// Least-squares fit of `y ≈ a·p + b·q` with no intercept, over `idx`. Returns `(a, b)`.
 ///
-/// Solved from the 2x2 normal equations directly rather than through a matrix library: this crate takes
-/// no dependencies, and a 2x2 solve is four lines. A singular system — one regressor identically zero,
-/// or the two exactly proportional — returns `(0, 0)` rather than a NaN, and the caller's collinearity
-/// diagnostic is what makes that visible instead of silently plausible.
+/// Solved from the 2x2 normal equations directly rather than through a matrix library: a 2x2 solve is
+/// four lines. A singular system — one regressor identically zero, or the two exactly proportional —
+/// returns `(0, 0)` rather than a NaN, and the caller's collinearity diagnostic is what makes that
+/// visible instead of silently plausible.
 fn ls_two(p: &[f64], q: &[f64], y: &[f64], idx: &[usize]) -> (f64, f64) {
     let (mut spp, mut spq, mut sqq, mut spy, mut sqy) = (0.0, 0.0, 0.0, 0.0, 0.0);
     for &i in idx {
@@ -1665,8 +1567,8 @@ fn median_and_spread(v: &[f64]) -> (f64, f64) {
     (med, if lo > 0.0 { s[s.len() - 1] / lo } else { f64::INFINITY })
 }
 
-/// Spearman rank correlation. Ties take the average rank, so the 32 sub-millisecond rows — which sit
-/// on top of each other once the timer's resolution is accounted for — cannot inflate it.
+/// Spearman rank correlation. Ties take the average rank, so rows that tie at the timer's resolution
+/// cannot inflate it.
 fn spearman(xs: &[f64], ys: &[f64]) -> f64 {
     pearson(&ranks(xs), &ranks(ys))
 }
@@ -1706,9 +1608,9 @@ fn pearson(a: &[f64], b: &[f64]) -> f64 {
     if va == 0.0 || vb == 0.0 { 0.0 } else { num / (va * vb).sqrt() }
 }
 
-/// INDEPENDENT CHECK ON THE INTERNER, because the table's headline claim (a 9,763-node term holding
-/// ~150 distinct subterms) is load-bearing for a design decision and a silently wrong interner would
-/// produce exactly that shape. Two checks, deliberately different in kind:
+/// INDEPENDENT CHECK ON THE INTERNER, because the table's headline claim (the within-term ratio: the
+/// largest term holds far fewer distinct subterms than nodes) is load-bearing for a design decision and a
+/// silently wrong interner would produce exactly that shape. Two checks, deliberately different in kind:
 ///
 ///   1. A hand-built term whose distinct count is countable by eye.
 ///   2. An O(n²) recount of the same subterms using `LambdaTerm`'s OWN `PartialEq` — no hashing, no
@@ -1792,47 +1694,26 @@ fn verify_interner() {
         assert_eq!(iv.next as usize, by_eq, "interner disagrees with PartialEq on a real term: {src}");
         checked += 1;
     }
-    println!("interner verified: 4 hand-built cases + {checked} real reduction terms recounted by PartialEq");
+    println!("interner verified: 3 hand-built terms + {checked} real reduction terms recounted by PartialEq");
 }
 
 // ==================================================================================================
-// THE PROPOSED `subst` REWRITE'S VALIDATION MOVED OUT OF THIS FILE.
+// THE `subst` VALIDATION LIVES IN `crates/redextape-core/tests/subst_differential.rs`, as
+// `#[test]`s which `cargo nextest run -p redextape-core` executes on every CI run. CI compiles this
+// example — `ci.yml`'s `rust` job, in its `Feature matrix (non-LLVM, non-browser configs)` step, which
+// runs `scripts/check-all.sh`, whose base tier carries the `clippy|--workspace --all-targets` row — but
+// never RUNS it, so a check kept here would gate nothing automatically. It is not duplicated here: two
+// copies of an equivalence argument is exactly the kind of drift to avoid.
 //
-// It used to live here — `subst_lifted`/`subst_at` (the candidate rewrite §10 records), an exhaustive
-// differential against `subst` in `src/`, the shift-additivity lemma the rewrite depends on, and a
-// `lift == 0` allocation-identity pin — and it ran on every MANUAL `cargo run --example
-// lambda_sharing_probe`. That turned out to be weaker evidence than it sounds: CI compiles this
-// example — `ci.yml`'s `rust` job, in its `Feature matrix (non-LLVM, non-browser configs)` step,
-// which runs `scripts/check-all.sh`, whose base tier carries the `clippy|--workspace --all-targets`
-// row — but never RUNS it, so the check that makes the rewrite safe to act on gated nothing
-// automatically.
-//
-// THAT POINTER READ `.forgejo/workflows/ci.yml` line 112 UNTIL THIS COMMIT, AND THE STEP IT NAMED NO
-// LONGER EXISTS. A YAML file has no symbol in the Rust sense, but it has job and step names, and those
-// are what a reader needs and what survives a reordering of the file — so this now names both. Line
-// 112 was `- name: Clippy`, whose `run:` on the line below was the very
-// `cargo clippy --workspace --all-targets` quoted here, when the structural-sharing commit
-// (`9a7db07`) wrote this. The scope-filter slice (#8) deleted that step outright and folded workspace
-// clippy into `check-all.sh`'s feature matrix, so the invocation changed FILES rather than lines.
-// This conversion found line 112 holding a comment in the unrelated `linear-history` job, explaining
-// why its merge-commit check runs on pushes to `main` rather than on `pull_request` — still a gating
-// job in the same CI file, which is near enough to survive a glance.
-//
-// It now lives in `crates/redextape-core/tests/subst_differential.rs` as three `#[test]`s,
-// which `cargo nextest run -p redextape-core` executes on every CI run. It is not duplicated here: two
-// copies of an equivalence argument is exactly the kind of drift this branch spent its effort removing.
-//
-// **AND ITS SUBJECT INVERTED ON 2026-08-02.** The candidate rewrite was falsified on cost — 0.99x on
-// the nested-group family, against a `Σ abs×arg` that over-reports by ~1,584x — so `subst_lifted` is
-// no longer a proposal. It and a new eager `subst_naive` are now REFERENCES, and the shipped `subst` is
-// the subject: the same 355,840 triples, checked against two independent implementations instead of
-// one. See that file's module doc, and the design's §8/§10.
+// In that file `subst_lifted` (the rewrite falsified on cost) and an eager `subst_naive` are REFERENCES,
+// and the shipped `subst` is the subject: the same 355,840 triples, checked against two independent
+// implementations instead of one. See that file's module doc, and the design's §8/§10.
 // ==================================================================================================
 
 /// Time one closure, batched: repeat until the batch clears `BATCH_MIN_MS`, divide by the repetition
 /// count, take the best of three. Used by both `measure` (the corpus replay cost) and PART D (the A/B
 /// timing), so the two are directly comparable — one batching implementation rather than two copies
-/// held together by a comment, which is the drift pattern this tree has fought before.
+/// held together by a comment.
 ///
 /// Returns `(per_rep_ms, batch_ms)`: the per-repetition time (what callers usually want) alongside the
 /// raw wall time of the batch that produced the winning per-rep figure — `measure` needs both, to also
@@ -1870,8 +1751,7 @@ fn batch_best_of_three(mut run_once: impl FnMut()) -> (f64, f64) {
 ///
 /// `Σ path` is the ceiling: the spine rebuild the zipper does not perform. `climbs` is what it pays
 /// back — `advance` rebuilding a parent per level climbed past an exhausted subtree, the one place
-/// zipper navigation allocates. The design's ceiling is `Σ path − climbs`, and until this table existed
-/// nobody had the second term.
+/// zipper navigation allocates. The net saving is `Σ path − climbs`.
 fn part_d(rows: &[Row]) {
     println!("\n\nPART D — ZIPPER A/B: what carrying the reduction context actually recovers.\n");
     println!(
@@ -1928,10 +1808,9 @@ fn part_d(rows: &[Row]) {
          Ceiling `Σ path` = {t_path}; `climbs` = {t_climb}; net node saving = {net} \
          ({:.1}% of the ceiling).\n\
          \n\
-         READ THE NET COLUMN, NOT THE CEILING. The design projected the zipper would recover `Σ path`\n\
-         in full and was corrected mid-slice when the climb turned out to allocate; this is the number\n\
-         that correction was waiting for. A net far below the ceiling means the climb is the cost, which\n\
-         is exactly where the plan said to look first.",
+         READ THE NET COLUMN, NOT THE CEILING. The zipper does not recover `Σ path` in full, because\n\
+         the climb allocates: the net is `Σ path` less the climbs. A net far below the ceiling means the\n\
+         climb is the cost.",
         t_today / t_zip.max(f64::MIN_POSITIVE),
         100.0 * net as f64 / t_path.max(1) as f64,
     );
@@ -1946,15 +1825,14 @@ fn term_of_demo(idx: usize) -> Option<LambdaTerm> {
     lower(&desugar(&prog?)).ok()
 }
 
-/// Drain `LambdaCursor` to normal form and read the term once — what `reduce_to_normal_form` did
-/// before it was wired to `ZipperCursor`.
+/// Drain `LambdaCursor` to normal form and read the term once.
 ///
 /// **THE PROBE MUST NAME ITS CURSOR EXPLICITLY, and this helper is why.** PART B's counters and PART
 /// C's fitted prices describe `LambdaCursor`'s traversals. If the baseline kept calling
 /// `reduce_to_normal_form`, the moment that function switched cursors every timing here would silently
 /// become the zipper's while every counter still described the old reducer — a model describing one
-/// thing and a clock measuring another, which is precisely the failure this file was repaired for on
-/// 2026-08-02. PART D would also have compared the zipper against itself.
+/// thing and a clock measuring another, the failure the module doc's "READ THIS BEFORE ANY PART B OR
+/// PART C FIGURE" section is about. PART D would also have compared the zipper against itself.
 fn drain_lambda_cursor(term: &LambdaTerm) -> LambdaTerm {
     let mut c = LambdaCursor::new(term, MAX_REDUCTION_STEPS);
     while c.next().is_some() {}

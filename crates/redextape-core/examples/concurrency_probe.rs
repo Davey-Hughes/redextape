@@ -9,19 +9,18 @@
 //! ```
 //!
 //! **`--release` is not optional here and neither is the cap.** Every figure is a timing, and a debug
-//! build measures the wrong program — the design's whole argument is a ratio between a ~13 ns step and a
-//! ~2,200 ns rendezvous, and an unoptimized build moves only one of those. The memory cap is the same
-//! rule `shift_cost_probe.rs` states at length: Part G/H reduce real λ terms, an earlier measurement over
-//! that path took 60 GiB of RAM and 29 GiB of swap and wedged the machine, and `MemorySwapMax=0` is the
-//! load-bearing half. An OOM-kill or a timeout is a RESULT to report, not something to work around by
-//! raising the cap.
+//! build measures the wrong program — the design's whole argument is a ratio between a step and a
+//! rendezvous, and an unoptimized build moves only one of those. The memory cap is the same rule
+//! `shift_cost_probe.rs` states: Parts G and H reduce real λ terms, the cap alone lets the kernel thrash
+//! instead of failing, and `MemorySwapMax=0` is the load-bearing half. An OOM-kill or a timeout is a
+//! RESULT to report, not something to work around by raising the cap.
 //!
 //! **Never `reduce_trace` in this file.** Parts G and H drive `trace::LambdaCursor`, which holds ONE term
-//! at a time; `reduce_trace` materialises every step's term by contract, and that is exactly how the
-//! 60 GiB run happened. Part E drives `trace::TmCursor` for the same reason — `simulate_trace` allocates
-//! a tape snapshot per step, which Part F measures at 75x the untraced step and which would dominate the
-//! very distribution Part E exists to report. Rows are flushed BEFORE the next is computed, so an
-//! OOM-kill leaves the completed table on stdout instead of losing it.
+//! at a time; `reduce_trace` materialises every step's term by contract. Part E drives `trace::TmCursor`
+//! for the same reason — `simulate_trace` allocates a tape snapshot per step, which Part F measures
+//! against the untraced step and which would dominate the very distribution Part E exists to report.
+//! Rows are flushed BEFORE the next is computed, so an OOM-kill leaves the completed table on stdout
+//! instead of losing it.
 //!
 //! # WHAT IT MEASURES, AND WHICH CLAIM EACH PART CARRIES
 //!
@@ -36,63 +35,24 @@
 //!   **This is the table a fusion slice is calibrated against** (§8.1), and open question 1 is precisely
 //!   whether it holds beyond one program under one encoding.
 //! - **F** `simulate_trace` ns/step against untraced (§3's snapshot result).
-//! - **G** λ redex-path profile. **Four of its five columns exist to keep a NEGATIVE result falsifiable:**
-//!   §8.2 concludes that run fusion does not carry to λ because same-path runs average ~1.3 steps against
-//!   the TM's 37. If that number ever approaches the TM's, the conclusion flips and fusion becomes a λ
-//!   optimization after all. The fifth column — retraced descent — is the positive finding.
+//! - **G** λ redex-path profile. **Its run columns exist to keep a NEGATIVE result falsifiable:**
+//!   §8.2 concludes that run fusion does not carry to λ because λ's same-path runs are far shorter than
+//!   the TM's. If they ever approach the TM's, the conclusion flips and fusion becomes a λ optimization
+//!   after all. The `prefix` column — retraced descent — is the positive finding.
 //! - **H** ns per β-step. **§8.2 has no wall-clock number and cannot get one without this.**
 //!
-//! # WHAT IT FOUND (2026-08-01, 32 logical CPUs)
+//! # ALLOCATOR
 //!
-//! A full δ-step is **12.99 ns**; a 5-thread barrier is **2,063 ns**, or **159x the entire step it would
-//! be parallelizing**. Break-even for a 5-way split needs ~200x more work per step than exists, and k = 2
-//! is no kinder (a cheaper barrier, a worse k/(k-1)). That single ratio is what rejects parallel `apply`,
-//! and it is why a thread pool does not help: a pool removes thread *creation*, and the cost is the
-//! *rejoin*.
+//! This target sets `mimalloc` as its global allocator, so a timing taken here is not comparable with one
+//! taken under glibc's malloc, which is what the timings quoted in this file were. Node counts,
+//! allocation counts and step counts are properties of the reduction, not of the machine, and do not
+//! depend on it.
 //!
-//! The strongest form of the result is Part F. `Tape::snapshot` is the only genuinely O(cells) per-tape
-//! operation in either interpreter — five independent tapes, real work in each, 1,011 ns/step. Split
-//! perfectly across five threads it is **still 2.25x slower** than sequential, because the barrier is
-//! larger than the whole traced step.
-//!
-//! What survives is sequential, and both loops carry the same defect — recomputing per step a quantity the
-//! previous step already knew, the class `depth_exceeds` cost 187.6 s of 195.7 s to before `depth` was
-//! stored.
-//!
-//! **WRITING THIS FILE CHANGED TWO CONCLUSIONS THE THROWAWAY HARNESS HAD REACHED, which is the argument
-//! for the probe discipline rather than an accident of it.**
-//!
-//!   1. **Part E: `Binary` is not `Unary`.** Under `Unary` the corpus confirms the single-program figure
-//!      (mean run 38.56 vs `map`'s 37.09; 99.3% of steps in a run >= 2). Under `Binary` the mean run is
-//!      **7.77** — five times shorter, and far more skewed (longest 1,431). A fused op costing `c`
-//!      ordinary steps turns a run of `R` into `c`, so the win is ~`R/c`: at the pessimistic `c = 10` the
-//!      first draft used, `Unary` gives ~3.9x and **`Binary` gives 0.78x — a LOSS**. The design's "~3.7x
-//!      across the board" did not survive running the second encoding.
-//!   2. **Part H: a β-step is 1,323 ns, ~102x a δ-step.** Part G's headline — **93.7% of all λ descent
-//!      retraces the previous step's path** — is a large share of a SMALL thing: ~8.7 spine nodes against
-//!      a 1,323 ns step. The zipper it argues for is a single-digit-percent lever, and the standing
-//!      `subst` re-shift target (which attacks where that 1,323 ns lives) should land first.
-//!
-//! Part G's negative result did survive the corpus, and is stated with more confidence than the positive
-//! one it contrasts with: same-redex-path runs average **1.22** against the TM's 38.56, and consecutive
-//! root redexes are 1.3%, so there is nothing to fuse in λ and n-ary β has no surface.
-//!
-//! # ALLOCATOR — READ THIS BEFORE TRUSTING ANY TIMING ABOVE
-//!
-//! **This target has set `mimalloc` as its global allocator since 2026-08-04. Every timing recorded
-//! in this file above this note was measured under glibc's malloc and is NOT comparable to a run
-//! made today.** Counts are: node counts, allocation counts and step counts are properties of the
-//! reduction, not of the machine, and did not move. Seconds, ms and ns did.
-//!
-//! It is here for a measured reason rather than a preference. The reducer allocates one `Rc<Node>`
-//! per term node and frees on the same order, and glibc's layout for that pattern costs real
-//! address-translation pressure: on the nested-group family, swapping ONLY the allocator took L1
-//! DTLB misses from 1.20e9 to 0.92e9 for the three-pass `beta` and from 1.83e9 to 0.93e9 for the
-//! fused one, with the wall clock following at ~9% and ~16%. That is also how the β-fusion family
-//! regression was explained — it was glibc's layout, not the reducer's work.
+//! The reducer allocates one `Rc<Node>` per term node and frees on the same order, and glibc's layout for
+//! that pattern costs real address-translation pressure.
 //!
 //! `mimalloc` is a `[dev-dependencies]` entry and reaches examples and tests ONLY.
-//! `redextape-core`'s `[dependencies]` stays empty and WASM-clean: `libmimalloc-sys` is C that does
+//! `redextape-core`'s `[dependencies]` stays WASM-clean: `libmimalloc-sys` is C that does
 //! not build for wasm32, and a library must not choose a global allocator for its consumers.
 
 #![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic, clippy::pedantic)]
@@ -236,7 +196,7 @@ fn part_b(ns_per_step: f64) {
         // A k-way split pays off when W/k + barrier < W, i.e. W > barrier * k/(k-1).
         let break_even = per * k as f64 / (k as f64 - 1.0);
         println!(
-            "    {k:>3}  {per:>12.1}  {:>9.0}x  {:>13.0} ns  ({:.0}x today's step)",
+            "    {k:>3}  {per:>12.1}  {:>9.0}x  {:>13.0} ns  ({:.0}x a δ-step)",
             per / ns_per_step,
             break_even,
             break_even / ns_per_step
@@ -252,8 +212,8 @@ fn part_b(ns_per_step: f64) {
 // ---------------------------------------------------------------------------------------------------
 
 /// Prices what any thread-level λ scheme must pay first. `LambdaTerm` is `Rc<Node>` and `Rc` is not
-/// `Send`; after the 2026-08-01 sharing fixes the reducer's fast paths ARE refcount bumps (`subst`'s
-/// `Var` arm, both `maxfree` short-circuits, `reduce_step`'s untouched sibling).
+/// `Send`; the reducer's fast paths ARE refcount bumps (`subst`'s `Var` arm, both `maxfree`
+/// short-circuits, `reduce_step`'s untouched sibling).
 fn part_c() {
     println!("[C] refcount bump: what `Rc` -> `Arc` would cost on the λ hot path");
     let n = 20_000_000u64;
@@ -301,9 +261,9 @@ fn part_c() {
 // D — dispatch profile
 // ---------------------------------------------------------------------------------------------------
 
-/// Taken expecting the classic interpreter-dispatch failure (one indirect branch, thousands of targets)
-/// and finding the opposite: entropy is maximal, but Part E's runs make last-target prediction hit, so
-/// the hardware already predicts this workload. There is no misprediction for speculation to recover.
+/// Whether the classic interpreter-dispatch failure (one indirect branch, thousands of targets) applies.
+/// Entropy is maximal, but Part E's runs make last-target prediction hit, so the hardware already
+/// predicts this workload. There is no misprediction for speculation to recover.
 fn part_d(m: &Machine, init: &[Vec<char>]) {
     println!("[D] dispatch profile — is the indirect branch the problem?");
     let mut counts = vec![0u64; m.states.len()];
@@ -340,7 +300,7 @@ fn part_d(m: &Machine, init: &[Vec<char>]) {
 // ---------------------------------------------------------------------------------------------------
 
 /// Streams `TmCursor` rather than `simulate_trace`: the distribution must not be measured through the
-/// per-step snapshot Part F prices at 75x. Reports BOTH same-state runs (what a sweep looks like) and
+/// per-step snapshot Part F prices. Reports BOTH same-state runs (what a sweep looks like) and
 /// same-(state, rule) runs (what is STRICTLY fusable — an identical transition firing again).
 fn part_e() {
     println!("[E] same-state run lengths — the fusion case, over the corpus x both encodings");
@@ -463,8 +423,8 @@ fn part_f(m: &Machine, init: &[Vec<char>], ns_per_step: f64) {
 // G — λ redex-path profile
 // ---------------------------------------------------------------------------------------------------
 
-/// The λ analogue of Part E, and the four run columns exist to keep a NEGATIVE result falsifiable: if
-/// `run>=2` and `meanrun` ever approach the TM's 99.3% / 37.09, §8.2's conclusion flips. `prefix%` is the
+/// The λ analogue of Part E, and its run columns exist to keep a NEGATIVE result falsifiable: if
+/// `run>=2` and `meanrun` ever approach the TM's (Part E), §8.2's conclusion flips. `prefix%` is the
 /// positive finding — descent that retraces the path the previous step already walked, which
 /// `reduce_step` pays because it re-enters from the root and rebuilds the spine coming back up.
 ///
@@ -580,9 +540,10 @@ fn path_stats(term: &LambdaTerm) -> Option<PathStats> {
 // H — ns per β-step
 // ---------------------------------------------------------------------------------------------------
 
-/// **The measurement §8.2 cannot be sized without.** Part G's 95.1% is a ratio over DESCENT, and descent
-/// is not the whole β-step — `subst` rebuilds the spine of whatever it descends into, and a zipper does
-/// not touch that. Until a zipper exists to time against this baseline, no speedup may be quoted.
+/// **The measurement §8.2 cannot be sized without.** Part G's `prefix%` is a ratio over DESCENT,
+/// and descent is not the whole β-step — `subst` rebuilds the spine of whatever it descends into,
+/// and a zipper does not touch that. Until a zipper is timed against this baseline, no speedup
+/// may be quoted.
 ///
 /// Drives `LambdaCursor` and discards the events, so one term is live at a time.
 fn part_h() {

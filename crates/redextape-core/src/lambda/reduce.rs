@@ -26,9 +26,8 @@
 //! implementer who knows that can correctly conclude the order does not change the answer — and then
 //! incorrectly conclude the order does not matter. Confluence is about UNIQUENESS. REACHABILITY is the
 //! separate standardization/normalization result, and that is the one saying normal order reaches a
-//! normal form whenever one exists. So correct prior knowledge points the wrong way exactly where these
-//! docs were silent, and the symptom — hitting the step cap — reads as "the cap is too low" rather than
-//! "the strategy is wrong".
+//! normal form whenever one exists. So correct prior knowledge points the wrong way here, and the
+//! symptom — hitting the step cap — reads as "the cap is too low" rather than "the strategy is wrong".
 //!
 //! The three mechanisms are listed rather than summarized because they are what a later optimization
 //! pass would have to retire before relaxing the requirement: thunking the `if` branches retires (1),
@@ -46,112 +45,24 @@ pub const MAX_REDUCTION_STEPS: u64 = 5_000_000;
 /// recurse once per term node, so a value whose Church/Scott encoding is very deep (a large `Nat` or
 /// a long list) would otherwise overflow the native stack instead of failing cleanly. Once a term
 /// exceeds this depth the reducer returns `HitCap` instead of calling `reduce_step` on it. Effective
-/// only when the running thread's stack is large enough. **THE WASM SHADOW STACK IS NOT
-/// THE RELEVANT STACK, and `-zstack-size` cannot help** — on that target the printer exhausted V8's
-/// own engine call stack, which no module can size, at term depth 1,930 in a Web Worker on its FIRST
-/// deep print (measured 2026-08-09; a worker's ceiling drops after that print — see
-/// `redextape_wasm::session::MAX_PRINT_DEPTH`'s doc for the steady-state figure). This constant no
-/// longer bounds the printer for that reason; see `redextape_wasm::session::MAX_PRINT_DEPTH`. What
-/// remains here is the REDUCER's bound, which is what it was written for.
+/// only when the running thread's stack is large enough. The WASM shadow stack is not the relevant
+/// stack, and `-zstack-size` cannot help: on that target the stack a deep term exhausts when
+/// printed is V8's own engine call stack, which no module can size. The printer's bound is
+/// `redextape_wasm::session::MAX_PRINT_DEPTH`; this constant is the reducer's.
 pub const MAX_TERM_DEPTH: u32 = 3_000;
 
-/// True if the tree `t` denotes is deeper than `limit`. **O(1) since 2026-08-01** — `LambdaTerm::depth`
+/// True if the tree `t` denotes is deeper than `limit`. **O(1)**: `LambdaTerm::depth`
 /// is a construction-time invariant, so this reads a `u32` and compares it.
 ///
-/// WHY THE GUARD EXISTS AT ALL: `reduce_step` (and `beta`'s `shift`/`subst`) recurse once per term node,
+/// Why the guard exists at all: `reduce_step` (and `beta`'s `shift`/`subst`) recurse once per term node,
 /// so a value whose Church/Scott encoding is very deep would overflow the native stack instead of
 /// failing cleanly. The quantity that matters is therefore the DENOTED depth — the longest path — which
 /// is what a recursive descent actually follows.
 ///
-/// **THIS USED TO BE A WALK, AND THAT WALK WAS 96% OF THE REDUCER'S TIME.** It pushed an explicit stack
-/// and descended into both children of every `App` without asking whether they were one allocation, so
-/// it visited each allocation once per EDGE reaching it — the LOGICAL expansion. That is the same bug
-/// class as the `shift` fix one file over, and it survived it: with `shift` fixed, the nested-group
-/// family's reduction still doubled per level, and sampling showed **187.6 s of level 11's 195.7 s was
-/// this function**. Carrying `depth` on the handle took that level to 7.48 s and made the whole ramp
-/// FLAT — 7.5–9.0 s at every level from 1 to 11, against a logical size growing 306 → 616,152.
-///
-/// **Memoizing the walk by allocation was measured and rejected.** It gives the same answer in
-/// O(physical), but costs a `HashMap` per call, and at eleven levels that is a flat ~24 s of pure
-/// allocation overhead across ~105,000 calls — a net LOSS at the small end (25.1 s against the walk's
-/// 11.6 s at level 7), which is where the ordinary corpus lives. A number the constructors already know
-/// is free at both ends. `examples/shift_cost_probe.rs` has the table.
-///
-/// THE HISTORY THIS REPLACES, kept because the shape it warned about is real and someone will
-/// reintroduce it. The walk's early exit bounded *depth*, not *work*: thirty nested `App(c, c)` levels
-/// is 30 allocations and 2^30 logical nodes, and it returned `false` on all of them after walking every
-/// one. That was called "merely unreached — nothing in the corpus builds one" until 2026-07-31, which
-/// was true of the corpus and false as a guarantee: `lower_group` clones the whole group term once per
-/// member and the factor nests, so `examples/blowup_probe.rs` reaches 1,644 allocations holding 616,152
-/// logical nodes (375x) from **512 bytes**. Nothing in this file fired on it — the term's depth was 141
-/// against `MAX_TERM_DEPTH` = 3,000 — and `MAX_REDUCTION_STEPS` was never consulted, because control did
-/// not return from `reduce_step`. Every one of those numbers is still true of the term; none of them is
-/// still true of the cost.
-///
-/// **THE HANG IS CLOSED, AND NOT BY A GUARD — BY FIXING `shift` (2026-08-01).** What no longer holds is
-/// the conclusion this block used to end on.
-///
-/// ~~"THE HANG IS OPEN. NOTHING REFUSES THESE SIZES."~~ — and before that,
-/// ~~"the sizes at which one step does not return are refused before reduction ever starts"~~. The
-/// first was true when written; the second never was. Both are superseded: nothing refuses these sizes
-/// now either, because **nothing needs to**. A single β-step returns.
-///
-/// The diagnosis in the middle of that block was right and pointed one level too shallow. `subst`'s
-/// `Var` arm is `s.clone()` (an `Rc` bump — occurrences are FREE) while its `Abs` arm re-shifted the
-/// whole argument once per `Abs` node in the body, unconditionally: a step cost
-/// **`|body| + Abs(body) × |arg|`**, at 23.1–23.6 ns/node-copy over a 1,255x range. What that account
-/// left implicit is WHY `|arg|` was the logical number rather than the physical one. `shift` rebuilt
-/// every node it visited, so it was Θ(logical) AND it destroyed sharing — `shift(App(c, c))` recursed
-/// twice and produced two copies of `c`. `lower_group`'s duplication only writes the promise; `shift`
-/// was what cashed it, on every step.
-///
-/// `term.rs` now carries a `maxfree` per handle (highest free index + 1; 0 means closed), maintained in
-/// O(1) by the constructors, and both `shift` and `subst` return their argument's ALLOCATION when it
-/// cannot be affected. The counterexample that killed the shared-subterm guard —
-/// `let xs = [0..500); let ys = [0..500); head(xs) + head(ys)`, 4,821 bytes, `max_shared` = 4 — went
-/// from **19.0 s in its first β-step to 0.002 s**. The 512-byte nested-group program that did not
-/// finish one β-step in 13 minutes at 974 MB then ran 105,607 steps in 195.7 s under a 2 GiB cap.
-///
-/// **AND THEN THIS FUNCTION WAS 96% OF WHAT WAS LEFT** — see the top of this comment. With `depth`
-/// stored too, that same program is **7.48 s**, the two-list counterexample is under a millisecond, and
-/// the ramp is flat across all eleven levels. Instrument: `examples/shift_cost_probe.rs`.
-///
-/// **THE PER-REDEX WORK BUDGET WAS NOT BUILT, and this is the record of why it was not needed.** The
-/// roadmap's next λ slice was `logical_abs_count(body) × logical_size(arg)` checked in
-/// `LambdaCursor::next` before the step it prices. That design is sound and its reasoning survives —
-/// it prices the measured cost model rather than a proxy, and it checks per step. It was overtaken:
-/// the quantity it was going to bound is no longer large, because `|arg|` is no longer paid logically.
-/// A guard sized against the pre-fix numbers would be calibrated against costs inflated up to ~9,500x
-/// on these programs. If one is wanted later it must be re-measured from scratch.
-///
-/// **WHAT IS STILL OPEN, stated because "the hang is closed" will be read as covering more than it
-/// does.** Divergence is untouched and was never this slice's to solve — the nested-group family has no
-/// base case, so "terminates" above means it reaches a cap in bounded time, not that it computes an
-/// answer. The cap it reaches is **this function's**, not the step cap: `MAX_TERM_DEPTH` fires at
-/// 105,607 steps against a `MAX_REDUCTION_STEPS` of 5,000,000, because the family grows deep as it
-/// diverges. Both are reachable now only because control returns from each step, which is the whole
-/// change.
-///
-/// **THE RAMP BEING FLAT IS A FACT ABOUT THIS FAMILY, NOT A COMPLEXITY CLAIM.** What the two fixes
-/// removed is cost that scaled with the LOGICAL size while the physical size stayed small — which is
-/// exactly what this family is built to exhibit. A program whose physical size genuinely grows still
-/// pays for it, and `subst` still rebuilds the spine of whatever it descends into. ~~The older next
-/// target — carrying `subst`'s per-binder re-shift down as one `shift(d, 0, ·)`, with an additivity
-/// lemma already verified in the perf design — is untouched and still available.~~
-///
-/// **THE OLDER NEXT TARGET IS FALSIFIED TOO — 2026-08-02, by the same short-circuit that closed the
-/// hang.** Priced against what `subst` NOW allocates it is not a win but a **0.99x loss** on this
-/// family at every level, and 1.00x on both counterexamples. The quantity it deletes is 5,696
-/// allocations across 105,607 β-steps — 0.05 per step, against a model that priced it at 44 copies of
-/// the argument per step. It inverts because `subst` descends only through the binders ON THE PATH TO
-/// AN OCCURRENCE, so binders-crossed is now smaller than occurrences and paying per occurrence costs
-/// more than paying per binder. Instrument: `examples/shift_cost_probe.rs`'s census section, which
-/// mirrors `subst` arm for arm rather than modelling it; full statement in the perf design's §10.
-///
-/// **What that leaves as the largest measured λ cost, neither of which any proposal so far addresses:**
-/// the body spine `subst` rebuilds (60–90% of its allocations), and `beta`'s own opening
-/// `shift(1, 0, arg)` — the only quantity on this family that still scales with it, 20,725 → 190,666
-/// allocations across levels 1 to 11 while everything else is flat or falling.
+/// The depth is stored on the handle rather than found by a walk. A walk that descends both children of every
+/// `App` visits each allocation once per EDGE reaching it, the logical expansion, and its early exit bounds
+/// depth, not work. Memoizing the walk by allocation costs a `HashMap` per call, a net LOSS at the small end,
+/// which is where the ordinary corpus lives. A number the constructors already know is free at both ends.
 pub(crate) fn depth_exceeds(t: &LambdaTerm, limit: u32) -> bool {
     t.depth() > limit
 }
@@ -179,13 +90,11 @@ pub struct Trace {
 
 /// Which source construct a β-step belongs to.
 ///
-/// **THREE STATES, NOT TWO, AND THAT IS THE DECISION THIS SLICE TURNS ON.** `Exact` and `Within` are
-/// different claims — *this step IS that construct* against *this step is somewhere inside it* — and a
-/// consumer given one flag cannot tell them apart. 5b's design refused the containment shape outright
-/// on the TM leg (*"'nearest enclosing linkable node' frequently means highlight the entire program,
-/// which is worse than reporting nothing"*), and it was right to for a single-signal consumer.
-/// Distinguishing them here is the same move that replaced `truncated: bool` with `cut: Option<Cut>`:
-/// two different kinds of object must not collapse into one.
+/// **Three states, not two.** `Exact` and `Within` are different claims — *this step IS that
+/// construct* against *this step is somewhere inside it* — and a consumer given one flag cannot tell
+/// them apart. A single-signal consumer is right to refuse the containment shape
+/// (`docs/superpowers/specs/2026-08-08-plan5b-click-linking-design.md`, on the TM leg). Two different
+/// kinds of object must not collapse into one.
 ///
 /// **`Within` IS A CLAIM ABOUT THE REDUCT'S STRUCTURE, NOT THE LOWERING'S.** After N substitutions the
 /// innermost tagged `App` enclosing the redex is a node of the reduct. That is a true statement and a
@@ -236,8 +145,7 @@ impl Owner {
 ///
 /// **THE OWNER IS HARVESTED FROM A DESCENT THAT ALREADY HAPPENS.** This function walks root→redex
 /// regardless; carrying "the innermost tagged node passed so far" down that walk costs one
-/// `Option<NodeId>` copy per level, on a path measured at mean 9.3 and max 30. There is no second
-/// traversal and no allocation.
+/// `Option<NodeId>` copy per level. There is no second traversal and no allocation.
 #[must_use]
 pub fn reduce_step(t: &LambdaTerm) -> Option<(LambdaTerm, Path, Owner)> {
     reduce_step_go(t, None)
@@ -264,7 +172,7 @@ fn reduce_step_go(t: &LambdaTerm, enclosing: Option<NodeId>) -> Option<(LambdaTe
             // nearer than anything above it.
             let inner = (*owner).or(enclosing);
             // Try the function side first (leftmost), then the argument. Both `clone`s below are
-            // refcount bumps; under `Box` they deep-copied the untouched sibling at every level of
+            // refcount bumps; under `Box` they would deep-copy the untouched sibling at every level of
             // the path, which is the cost this representation exists to remove.
             if let Some((f2, mut path, who)) = reduce_step_go(f, inner) {
                 path.insert(0, Dir::AppL);
@@ -289,20 +197,16 @@ fn reduce_step_go(t: &LambdaTerm, enclosing: Option<NodeId>) -> Option<(LambdaTe
 /// snapshot per step BY CONTRACT — this is the API that promises the full history; `trace::LambdaCursor`
 /// is the O(1) alternative for callers that only walk forward.
 ///
-/// **THIS DRIVES `LambdaCursor`, AND IT IS THE ONE CONSUMER THAT SHOULD.** `reduce_to_normal_form`
-/// switched to `ZipperCursor` on 2026-08-02 for a 1.41–1.43x (glibc) win; this function cannot take it. The
-/// zipper's saving is the per-step spine rebuild, and it is only a saving for a caller that reads the
-/// term ONCE. Calling `cursor.term()` every step — which is this function's entire promise — makes the
-/// zipper fold its context stack per step, paying the same cost back with frame bookkeeping on top.
+/// **This drives `LambdaCursor`, and it is the one consumer that should.** `reduce_to_normal_form`
+/// uses `ZipperCursor`; this function cannot take its win. The zipper's saving is the per-step spine
+/// rebuild, and it is only a saving for a caller that reads the term ONCE. Calling `cursor.term()`
+/// every step — which is this function's entire promise — makes the zipper fold its context stack per
+/// step, paying the same cost back with frame bookkeeping on top.
 ///
-/// **THERE ARE NOW TWO β-REDUCTION LOOPS IN THIS CRATE, AND THIS COMMENT USED TO SAY THERE WAS ONE.**
-/// It read "the stepping itself lives in the cursor, so there is one β-reduction loop in this crate
-/// rather than two that must be kept in agreement" — true until the zipper landed, and the reason it is
-/// tolerable now is that the two ARE kept in agreement, mechanically:
+/// **There are two β-reduction loops in this crate,** and they are kept in agreement mechanically:
 /// `tests/zipper_equivalence.rs` asserts identical `StepEvent` sequences, identical terms and identical
-/// statuses across 256 generated programs and ten curated shapes. The guarantee moved from "there is
-/// only one" to "there are two and a gate holds them equal"; a slice that deletes that gate reintroduces
-/// exactly the hazard the old sentence was avoiding.
+/// statuses across 256 generated programs and its curated cases. Without that gate, nothing holds the two
+/// loops in agreement.
 #[must_use]
 pub fn reduce_trace(t: &LambdaTerm, cap: u64) -> Trace {
     let mut cursor = crate::trace::LambdaCursor::new(t, cap);
@@ -322,7 +226,7 @@ pub fn reduce_trace(t: &LambdaTerm, cap: u64) -> Trace {
             // Kept apart from `None`'s arm rather than merged, even though both `break` today: this one
             // is "an event kind `LambdaCursor` doesn't currently emit" (a forward-compat safety net),
             // `None`'s is "the cursor is genuinely done" — different situations that share a body only
-            // by accident of `LambdaCursor` having one variant today.
+            // by accident of `LambdaCursor` emitting one variant today.
             #[allow(clippy::match_same_arms)]
             Some(_) => break,
             None => break,
@@ -339,18 +243,17 @@ pub fn reduce_trace(t: &LambdaTerm, cap: u64) -> Trace {
 ///
 /// **THIS DRIVES `ZipperCursor`, WHERE `reduce_trace` DRIVES `LambdaCursor`, AND THE SPLIT IS THE
 /// WHOLE POINT.** A zipper carries the reduction context across steps instead of re-descending from
-/// the root, which removes the spine rebuild `reduce_step` pays per step — **1.41–1.43x (glibc) on the corpus,
-/// recovering 99.0% of that ceiling**. It can only do that for a caller that reads the term ONCE, at
-/// the end. `reduce_trace` materialises `cursor.term()` every step by contract, so under a zipper it
-/// would fold the context stack per step and pay the same cost back with frame bookkeeping on top —
-/// measurably worse, not merely neutral. Routing by consumer rather than replacing one with the other
-/// is what captures the win without taking the regression.
+/// the root, which removes the spine rebuild `reduce_step` pays per step. It can only do that for a
+/// caller that reads the term ONCE, at the end. `reduce_trace` materialises `cursor.term()` every
+/// step by contract, so under a zipper it would fold the context stack per step and pay the same cost
+/// back with frame bookkeeping on top — measurably worse, not merely neutral. Routing by consumer
+/// rather than replacing one with the other is what captures the win without taking the regression.
 ///
 /// **The two cursors are held to being interchangeable, not assumed to be.**
 /// `tests/zipper_equivalence.rs` asserts identical `StepEvent` sequences, identical terms and
-/// identical statuses over 256 generated programs, six curated terminating shapes and four curated
-/// capping cases. Any divergence is a correctness defect, not a performance trade — normal order is
-/// required, not chosen (see this module's own doc comment for the three independent reasons).
+/// identical statuses over 256 generated programs and its curated terminating and capping cases.
+/// Any divergence is a correctness defect, not a performance trade — normal order is required, not
+/// chosen (see this module's own doc comment for the three independent reasons).
 ///
 /// Full record: `docs/superpowers/specs/2026-08-02-lambda-reduction-context-zipper-design.md`.
 #[must_use]

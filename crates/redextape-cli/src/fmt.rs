@@ -38,9 +38,8 @@ pub enum Outcome {
 // config default it was already collapsed with (see `main.rs`'s own comment on that), and `form` is
 // the user's `--form` override, resolved once inside `one` rather than here. Eight plain parameters
 // naming eight independent things is the honest shape of that. **An enclosing struct is a taste
-// call and not a correctness one** — an earlier revision of this comment claimed those two fields
-// "cannot fold into an enclosing struct without losing what each one is for", which is false: a
-// struct would carry the same fields under the same names and lose nothing.
+// call and not a correctness one**: a struct would carry the same fields under the same names and
+// lose nothing.
 #[allow(clippy::too_many_arguments)]
 pub fn run(
     inputs: &[Input],
@@ -152,8 +151,8 @@ fn one(
         }
         // Without `--check`, stdin has nowhere to be written back to, so it always prints the
         // reformatted source whole — this is what makes `redextape fmt -` usable as a pipeline
-        // filter (`fmt_stdin.rs`'s I3). This arm is untouched by the `--check` diff behaviour above:
-        // plain `fmt -` must keep printing SOURCE, never a diff.
+        // filter (`tests/fmt_stdin.rs` pins it). This arm is untouched by the `--check` diff
+        // behaviour above: plain `fmt -` must keep printing SOURCE, never a diff.
         Input::Stdin => {
             write!(out, "{formatted}")?;
             Ok(Outcome::Clean)
@@ -166,7 +165,7 @@ fn one(
                 write!(out, "{}", diff(&label, &src, &formatted))?;
                 return Ok(Outcome::WouldChange);
             }
-            // I5: resolve `p` to the real file before writing. `write_atomic` takes its path
+            // Resolve `p` to the real file before writing. `write_atomic` takes its path
             // literally (see its own doc) — handed a symlink, it would rename a fresh file onto the
             // LINK's own name, replacing the link with a plain file and leaving whatever it used to
             // point at unformatted and untouched. Canonicalizing here, at the one call site that
@@ -183,9 +182,9 @@ fn one(
                     return Ok(Outcome::Failed);
                 }
             };
-            // A failure here is the target file's problem, not `out`/`err`'s — it must be reported and
-            // folded into the outcome like a read or parse failure, not propagated with `?`, or every
-            // input after this one is silently skipped (that is the bug I1 exists to keep fixed).
+            // A failure here is the target file's problem, not `out`/`err`'s — it must be reported and folded
+            // into the outcome like a read or parse failure, not propagated with `?`, or every input after
+            // this one is silently skipped. `a_write_failure_on_one_file_does_not_stop_the_others` pins this.
             if let Err(e) = write_atomic(&target, &formatted) {
                 writeln!(err, "cannot write `{label}`: {e}")?;
                 return Ok(Outcome::Failed);
@@ -208,10 +207,9 @@ mod tests {
         (got, out, err)
     }
 
-    // Not hypothetical: the two `--check`-on-a-clean-file tests below both ask for "check-clean", and
-    // used to fail 4 of 15 `cargo test -p redextape-cli` runs on exactly the collision
-    // `redextape_test_support::ScratchDir`'s per-call counter now rules out, while every `cargo
-    // nextest` run (one process per test) stayed green — so the gate could not see it and never will.
+    // The two `--check`-on-a-clean-file tests below both ask for "check-clean", and
+    // `redextape_test_support::ScratchDir`'s per-call counter is what keeps them from colliding
+    // under `cargo test`; `cargo nextest` (one process per test) cannot see that collision.
     //
     // The directory this returns removes itself once the calling test's scope ends, but ONLY if that
     // test passed — see `ScratchDir`'s own doc.
@@ -228,7 +226,7 @@ mod tests {
         assert!(matches!(got, Outcome::Rewritten), "got {got:?}");
         let after = std::fs::read_to_string(&p).unwrap();
         assert_eq!(after, redextape_core::format("let   x=1;\nx+1").unwrap());
-        // I3: nothing stops the path arm from also dumping the formatted text to stdout, which would
+        // Nothing stops the path arm from also dumping the formatted text to stdout, which would
         // make a repo-wide `fmt` unusable (and would silently double as a `cat` of every file touched).
         assert!(out.is_empty(), "formatting a path in place must not print to stdout: {out:?}");
     }
@@ -268,7 +266,7 @@ mod tests {
         let (got, out, err) = run_fmt(&[Input::from_arg(&p)], false, MAX_WIDTH);
         assert!(matches!(got, Outcome::Failed), "got {got:?}");
         assert_eq!(std::fs::read_to_string(&p).unwrap(), original, "THE FILE MUST NOT BE TOUCHED");
-        // M2: `!err.is_empty()` also passes for a one-byte stderr; require the message name the file,
+        // `!err.is_empty()` also passes for a one-byte stderr; require the message name the file,
         // the way the missing-file diagnostic below already is required to.
         assert!(String::from_utf8(err).unwrap().contains("bad.rxt"), "the diagnostic must name the file");
         assert_eq!(out, [] as [u8; 0]);
@@ -286,7 +284,7 @@ mod tests {
         assert_eq!(std::fs::read_to_string(&good).unwrap(), redextape_core::format("let   y=2;\ny+1").unwrap());
     }
 
-    // M1: the case above only pins that an earlier worse outcome is not overwritten by a later better
+    // The case above only pins that an earlier worse outcome is not overwritten by a later better
     // one. The converse — a later worse outcome must not be shadowed by an earlier better one — needs
     // its own case, or "first non-`Clean` wins" would pass everything above too.
     #[test]
@@ -301,20 +299,19 @@ mod tests {
         assert_eq!(std::fs::read_to_string(&good).unwrap(), redextape_core::format("let   y=2;\ny+1").unwrap());
     }
 
-    // I1 (the real bug): a write failure on one target must not abort the loop and skip every input
-    // after it, the same way a read failure already does not. Lock the directory containing the first
-    // file so `write_atomic`'s temporary cannot be created there, then confirm the second file — which
-    // comes after it in the input list — is still formatted, and that the failure message names the
-    // file that could not be written.
+    // A write failure on one target must not abort the loop and skip every input after it, the same
+    // way a read failure already does not. Make `write_atomic`'s temporary for the first file
+    // impossible to create (the mechanism is below), then confirm the second file — which comes
+    // after it in the input list — is still formatted, and that the failure message names the file
+    // that could not be written.
     //
-    // NOT a `0o500` directory: that was this test's original mechanism, and CI runs as root
-    // (`catthehacker/ubuntu:act-latest`). `CAP_DAC_OVERRIDE` makes root exempt from directory
-    // permission checks, so as root the write SUCCEEDS, the outcome comes back `Rewritten`, and the
-    // test fails — not because the product is wrong, but because the mechanism stopped inducing the
-    // failure it exists to test. Reaching for `0o500` again is the obvious next move for a future
-    // reader hitting the same "make a write fail" problem; it produces exactly the silently-vacuous
-    // test this branch's roadmap entry spent eleven mutations learning to distrust — a run as any
-    // non-root uid would still pass, and never expose that the assertion is no longer live under root.
+    // NOT a `0o500` directory: CI runs as root (`catthehacker/ubuntu:act-latest`). `CAP_DAC_OVERRIDE`
+    // makes root exempt from directory permission checks, so as root the write SUCCEEDS, the outcome
+    // comes back `Rewritten`, and the test fails — not because the product is wrong, but because the
+    // mechanism does not induce the failure it exists to test. Reaching for `0o500` is the obvious
+    // move for a reader hitting the same "make a write fail" problem; it produces a silently-vacuous
+    // test — a run as any non-root uid would still pass, and never expose that the assertion is no
+    // longer live under root.
     //
     // Instead, plant something at the exact path `write_atomic` will use for its sibling temporary —
     // `<file name>.redextape-tmp.<pid>`, per that function's own doc, and computable in advance from
@@ -340,7 +337,7 @@ mod tests {
         // "cannot write", not "cannot read": confirms the READ of `unwritable` succeeded (it is an
         // ordinary file) and it was the WRITE that failed. Were the target unreadable instead — a
         // directory, say — `run` would still return `Failed` and still name the file, and this test
-        // would pass for the wrong reason: the one bug I1 exists to catch (a write failure aborting
+        // would pass for the wrong reason: the one bug this test exists to catch (a write failure aborting
         // the loop) would go uncovered.
         assert!(err.contains("cannot write"), "must be a write failure, not a read failure: {err}");
         assert_eq!(
@@ -350,10 +347,10 @@ mod tests {
         );
     }
 
-    // I2: nothing pins that `fmt` calls `write_atomic` rather than some plain `std::fs::write` — every
-    // test above is satisfied by either (a plain write to an EXISTING path truncates the same inode in
-    // place, so even permission bits survive it unchanged; only a rename swaps the inode). Pin the
-    // mechanism itself: `write_atomic` replaces the directory entry via rename, so the inode after
+    // No test above tells the rename inside `write_atomic` apart from a plain write to the
+    // target (a plain write to an EXISTING path truncates the same inode in place, so even
+    // permission bits survive it unchanged; only a rename swaps the inode). Pin the mechanism
+    // itself: `write_atomic` replaces the directory entry via rename, so the inode after
     // formatting must differ from the inode before it.
     #[cfg(unix)]
     #[test]
@@ -373,7 +370,7 @@ mod tests {
         assert_eq!(std::fs::read_to_string(&p).unwrap(), redextape_core::format("let   x=1;\nx+1").unwrap());
     }
 
-    // I5: formatting a symlinked source must rewrite the REAL file and leave the link standing, not
+    // Formatting a symlinked source must rewrite the REAL file and leave the link standing, not
     // replace the link with a plain file (which is what a `write_atomic` call given the link's own
     // path, unresolved, would do — see `fmt::one`'s own comment on the `canonicalize` call this pins).
     #[cfg(unix)]
@@ -446,7 +443,7 @@ mod tests {
     }
 
     // A symlink pointing at nothing must be a clean `Failed`, not a panic — and in fact never reaches
-    // the new `canonicalize` call at all: `input.read()` follows the same broken link first and fails
+    // the `canonicalize` call at all: `input.read()` follows the same broken link first and fails
     // there, exactly like a missing plain path does.
     #[cfg(unix)]
     #[test]
@@ -462,13 +459,12 @@ mod tests {
         assert_eq!(out, [] as [u8; 0]);
     }
 
-    // C1: `--check` had zero coverage — every existing test above passes `check = false`. These three
-    // pin the file-input half of I4/C1; `fmt_stdin.rs` (an integration test, since `Input::Stdin` reads
-    // the real process stdin) covers the stdin half.
+    // Every test above passes `check = false`. The next six pin `--check` on file input; `fmt_stdin.rs`
+    // (an integration test, since `Input::Stdin` reads the real process stdin) covers the stdin half.
     //
-    // This test predates the unified diff (see `check_on_a_dirty_file_prints_a_diff_and_leaves_the_file_alone`
-    // below, which now owns `out`'s content). What stays pinned HERE, and must never regress back to
-    // false, is disk: `--check` writes nothing to the file no matter what it prints.
+    // `check_on_a_dirty_file_prints_a_diff_and_leaves_the_file_alone` below owns `out`'s content. What
+    // this test pins, and must never regress back to false, is disk: `--check` writes nothing to the
+    // file no matter what it prints.
     #[test]
     fn check_reports_would_change_and_writes_nothing() {
         let d = tmpdir("check-dirty-disk");
@@ -527,10 +523,9 @@ mod tests {
         assert!(text.contains("--- "), "a unified diff has a before header: {text}");
         assert!(text.contains("+++ "), "and an after header: {text}");
         assert!(text.contains(&format!("{}", p.display())), "both headers name the real path: {text}");
-        // F2: headers alone tell you a file WOULD change, not WHAT would change — a stub `diff` that
-        // emits only the two header lines above satisfied every assertion in this test before this
-        // one was added. Require an actual hunk, and the specific before/after line content in it, so
-        // that stub fails here.
+        // Headers alone tell you a file WOULD change, not WHAT would change — a stub `diff` that
+        // emits only the two header lines above would satisfy every assertion before this one. Require
+        // an actual hunk, and the specific before/after line content in it, so that stub fails here.
         assert!(text.contains("@@"), "a unified diff has a hunk header: {text}");
         assert!(text.contains("-let   x=1;"), "the diff must show the original line being removed: {text}");
         assert!(text.contains("+let x = 1;"), "the diff must show the formatted line being added: {text}");
@@ -548,7 +543,7 @@ mod tests {
         assert!(!text.contains(".redextape-tmp"), "the temporary file is an implementation detail: {text}");
     }
 
-    // M4: a relative path resolves against the test process's cwd, which is incidental and shared with
+    // A relative path resolves against the test process's cwd, which is incidental and shared with
     // every other test. Use an absolute path under this test's own temp directory instead.
     #[test]
     fn a_missing_file_reports_and_does_not_panic() {
@@ -588,8 +583,6 @@ mod tests {
 
     #[test]
     fn comments_survive_fmt_on_both_forms() {
-        // THE PAYOFF OF PR A, ASSERTED FROM THE COMMAND LINE. Before it, `print ∘ parse` over these
-        // two forms deleted every comment in the file.
         for (name, input, expected) in [("p.tm", TM_IN, TM_OUT), ("p.asm", ASM_IN, ASM_OUT)] {
             let dir = redextape_test_support::ScratchDir::new(&format!("fmt-comments-{name}")).unwrap();
             let p = dir.join(name);
@@ -653,8 +646,8 @@ mod tests {
         assert_eq!(std::fs::read_to_string(&p).unwrap(), TM_OUT);
     }
 
-    // The gap list's fifth row: `--check` had coverage on `.rxt` (`check_on_a_dirty_file_prints_a_diff_and_leaves_the_file_alone`
-    // above) but none on either artifact form. Reusing `diff` itself to build the expected text
+    // `--check` on `.rxt` is covered by `check_on_a_dirty_file_prints_a_diff_and_leaves_the_file_alone`
+    // above; this covers the two artifact forms. Reusing `diff` itself to build the expected text
     // (rather than hand-copying hunk lines) means this assertion is exactly as strict as the
     // production diff, and it is sensitive to a passthrough: a formatter that writes `src` back
     // unchanged makes `formatted == src`, which flips the outcome to `Clean` and empties `out`

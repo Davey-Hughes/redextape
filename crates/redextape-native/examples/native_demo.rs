@@ -8,11 +8,11 @@
 //! literally cannot represent on its tape (`100 * 100 = 10_000`, say) runs on native the same way it
 //! would on any compiled language.
 //!
-//! CORRECTION (Task 17, `tm-binary-encoding`): the TM backend also has a `Binary` encoding now, where a
-//! `w`-cell field holds `0..2^w` — at the 64-cell ceiling, the entire `u64` range. `100 * 100 = 10_000`
-//! is representable there too; it no longer distinguishes native from "the TM backend", only from
-//! unary. The real remaining gap is values `>= 2^64`; section 3 below EXPLAINS that gap rather than
-//! demonstrating it — no program in this demo reaches that far, as section 3's own printed output says.
+//! The TM backend's `Binary` encoding holds `0..2^w` in a `w`-cell field — at the 64-cell ceiling, the
+//! entire `u64` range. `100 * 100 = 10_000` is representable there too; it does not distinguish native
+//! from "the TM backend", only from unary. The real remaining gap is values `>= 2^64`; section 3 below
+//! EXPLAINS that gap rather than demonstrating it — no program in this demo reaches that far, as
+//! section 3's own printed output says.
 //!
 //!     cargo run --example native_demo -p redextape-native
 //!
@@ -68,12 +68,12 @@ fn main() {
     println!("   The TM backend's unary encoding stores a value as that many MARKS in a fixed-width field");
     println!("   (`MAX_FIELD_WIDTH = 64` cells), so a result that exceeds 64 cannot even be decoded off the");
     println!("   tape. Native compiles to real 64-bit machine registers, so it has no such ceiling.\n");
-    println!("   CORRECTION (Task 17): the TM backend also has a `Binary` encoding now — a `w`-cell binary");
-    println!("   field holds `0..2^w`, so at the 64-cell ceiling it covers the entire `u64` range, exactly");
-    println!("   like native's registers. Every value below is representable in `Binary`, so this contrast");
-    println!("   is \"native vs. unary\", not \"native vs. the TM backend\" — see `Binary::at`/`run_tm_fitted`");
-    println!("   in `redextape_core::tm`. The genuinely remaining gap is values `>= 2^64`: this language's");
-    println!("   own `Value::Nat(u64)` saturates there too (the `saturating_add`/`_mul` in `interp.rs`), so no");
+    println!("   The TM backend also has a `Binary` encoding — a `w`-cell binary field holds `0..2^w`, so");
+    println!("   at the 64-cell ceiling it covers the entire `u64` range, exactly like native's registers.");
+    println!("   Every value below is representable in `Binary`, so this contrast is \"native vs. unary\",");
+    println!("   not \"native vs. the TM backend\" — see `Binary::at`/`run_tm_fitted` in");
+    println!("   `redextape_core::tm`. The genuinely remaining gap is values `>= 2^64`: this language's own");
+    println!("   `Value::Nat(u64)` saturates there too (the `saturating_add`/`_mul` in `interp.rs`), so no");
     println!("   program in this demo can express one — the boundary this file can actually show is unary");
     println!("   vs. everything else, not native vs. the TM backend as a whole.\n");
     println!("   {:<64} {:>10}  {}", "program", "result", "oracle");

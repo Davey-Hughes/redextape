@@ -1,7 +1,7 @@
 //! A composable builder for `Machine`s. `Builder` hands out fresh `StateId`s and appends rules via
 //! `RuleSpec`, which defaults every untouched tape to (wildcard read, unchanged write, `Stay`) — so a
-//! gadget names only the tapes it touches and stays agnostic to the fixed tape count. Part 2b's
-//! `encoding` (gadgets) and `lower_tm` (control flow) build every `Machine` through this.
+//! gadget names only the tapes it touches and stays agnostic to the fixed tape count. `encoding`
+//! (gadgets) and `lower_tm` (control flow) build every `Machine` through this.
 
 pub use crate::tm::machine::BLANK;
 use crate::tm::machine::{Machine, Move, Rule, State, StateId, Symbol};
@@ -76,64 +76,36 @@ pub const MAX_FIELD_WIDTH: usize = 64;
 /// machine-model reductions enforce the same ceiling through `reduction.rs`'s `StateTable`, and refuse
 /// with `too-many-states`.
 ///
-/// MEASURED, not chosen for roundness. At **727 bytes per state** — RSS delta around `lower_tm`,
-/// against a `size_of::<State>()` of 56 that understates the heap `String` name and `Vec<Rule>` by
-/// 13x — this ceiling is 727 MB, an order-of-magnitude figure rather than three-significant-figure
-/// precision. 727 was the larger of two measured rows: 725 at 1,022 tokens (575,861 states) and 727 at
-/// 4,094 tokens (8,595,317 states), the pair that established "stable across a 15x size range."
-/// **That pairing can no longer be re-verified**: `MAX_MACHINE_STATES` now refuses the 4,094-token row
-/// outright (see the "NOT ALL OF THEM" note below), so a fresh run of the probe re-derives only the
-/// surviving row — 700-725 B/state depending on machine and allocator, not a pinned 727. Three facts
-/// fix the ceiling at 727 MB regardless, none of which needs the retired row:
+/// At about 727 bytes per state (`docs/superpowers/specs/2026-08-11-count-bounds-design.md` §3.1)
+/// this ceiling is about 727 MB. Three facts fix it:
 ///
 ///   * The worst program this project SHIPS (the `map` + `ap2` demo in `native_oracle.rs`'s
-///     `FIRST_ORDER_DEMOS`) builds **49,135** states, 35.7 MB, from 97 tokens — roughly 500 states
-///     per token. The ceiling is 20x that in states, but the front door a user actually types against
-///     is `MAX_TOKENS` (100,000), not a state count. At ~500 states/token (order-of-magnitude only —
-///     it varies with program shape) the ceiling is reached around 2,000 tokens of demo-style code, a
-///     few hundred lines: **a ~50x gap between what the parser accepts and what this backend can lay
-///     out**. That gap, not the 20x in states, is what a reader needs to judge "never rejects a
-///     legitimate program" against `MAX_TOKENS`'s own limit.
-///   * A balanced arithmetic tree of 1,022 tokens builds 575,861 states (398 MB) and works today;
-///     one of 4,094 tokens builds 8,595,317 (6.0 GB) and does not — that is fatal in wasm32, and at
-///     16,382 tokens the same shape was killed by `SIGKILL` under an 8 GB budget. The ceiling admits the largest size
-///     measured to work and refuses the first size measured not to.
+///     `FIRST_ORDER_DEMOS`) is 20x under the ceiling in states; spec §3.4 gives its per-token cost and
+///     the gap to `MAX_TOKENS`'s own limit (100,000).
+///   * The ceiling admits the largest balanced arithmetic tree measured to work and refuses the first
+///     measured not to (spec §3.2).
 ///   * `StateId` is a `u32`, so the `states.len() as StateId` casts below sit a factor of **4,295**
 ///     under `StateId::MAX`. That is what makes them provable rather than argued.
 ///
-/// **WHY A STATE COUNT AND NOT A `Program::code.len()` CAP.** Cost per instruction is not a
-/// constant: 1 state for `Halt`/`Jmp`, 571 for `Box` under `Binary`, and for `Call` it scales with
-/// the local bank — 973 states per call site at `n_loc` 4, 34,577 at 128, so ~270,000 (196 MB) for
-/// ONE `Call` at the largest `n_loc` that `MAX_FRAME_LOC` permits. A length that bounds the
-/// allocation is single digits; a length that admits real programs bounds nothing. `lower_tm_all`'s
-/// three guards bound the MULTIPLIERS (`MAX_SLOTS` the register footprint, `MAX_FRAME_LOC` the frame
-/// bank, `MAX_MUL_INSTRS` the `Mul` count) and nothing bounded the base, so their product was
-/// unbounded. This bounds the product directly.
+/// **Why a state count and not a `Program::code.len()` cap.** Cost per instruction is not a
+/// constant: 1 state for `Halt`/`Jmp`, and for `Call` it scales with the local bank (spec §4.1 has
+/// the figures, up to one `Call` at the largest `n_loc` that `MAX_FRAME_LOC` permits). A length that
+/// bounds the allocation is single digits; a length that admits real programs bounds nothing.
+/// `lower_tm_all`'s three guards bound the MULTIPLIERS (`MAX_SLOTS` the register footprint,
+/// `MAX_FRAME_LOC` the frame bank, `MAX_MUL_INSTRS` the `Mul` count) and nothing bounds the base, so
+/// their product would be unbounded. This bounds the product directly.
 ///
-/// **AND WHY COUNTING RATHER THAN PREDICTING.** A `state_count_unrepresentable(prog, sm, enc)` that
+/// **And why counting rather than predicting.** A `state_count_unrepresentable(prog, sm, enc)` that
 /// estimated the cost up front would be symmetric with those three and would refuse before
 /// allocating anything. It would also duplicate per-gadget cost knowledge in a second place, which
-/// goes stale silently the first time a gadget changes — the same failure mode as the prose this
-/// replaces. `Builder::state`/`accept` is the single choke point every state LOWERING builds goes
-/// through, so a ceiling here is exact and cannot drift from what the gadgets actually build. The
-/// reductions count at their own choke point, `StateTable::id`, for the same reason.
+/// goes stale silently the first time a gadget changes. `Builder::state`/`accept` is the single choke
+/// point every state LOWERING builds goes through, so a ceiling here is exact and cannot drift from
+/// what the gadgets actually build. The reductions count at their own choke point, `StateTable::id`,
+/// for the same reason.
 ///
-/// Full measurement tables: `docs/superpowers/specs/2026-08-11-count-bounds-design.md` §3.
-/// `cargo run --release --example state_cost_probe -p redextape-core` re-derives most of them.
-///
-/// **NOT ALL OF THEM, AND THE REASON IS THIS CONSTANT.** Two ROWS that justify the ceiling most
-/// directly — the 8,595,317-state machine (4,094 tokens) and the run killed by `SIGKILL` (16,382
-/// tokens) — were measured BEFORE the ceiling existed. It is enforced in `state`/`accept` below, the
-/// choke point `lower_tm`, `lower_tm_guarded` and `lower_tm_mapped` all share, so no lowering
-/// reachable from the probe can exceed it any more: those rows now report a refusal instead of a size.
-/// A third casualty follows from the first: the "727 bytes per state, stable across a 15x range" claim
-/// above needed BOTH the 1,022-token and the now-refused 4,094-token row, so a fresh run can re-derive
-/// the surviving row's figure (700-725 B/state) but not 727, nor the stability claim across the pair.
-/// **The evidence for a guard stops being reproducible once the guard is enforced**, which is worth
-/// stating rather than leaving a reader to discover that the probe disagrees with this comment.
-///
-/// To re-derive them, raise this constant temporarily (one line) and re-run the probe under a memory
-/// cap — the second row needs more than 8 GB, and being killed IS the measurement.
+/// Full measurement tables: `docs/superpowers/specs/2026-08-11-count-bounds-design.md` §3. The
+/// ceiling is enforced in `state`/`accept` below, the choke point `lower_tm`, `lower_tm_guarded` and
+/// `lower_tm_mapped` all share.
 pub const MAX_MACHINE_STATES: usize = 1_000_000;
 
 /// The state-0 sentinel `state`/`accept` return past the ceiling is only addressable because a
@@ -242,15 +214,9 @@ impl Builder {
     /// caller that goes on to `add_rule` against the returned id indexes a live state instead of
     /// panicking. It builds nonsense, which is exactly why `overflowed()` must be checked before the
     /// machine is used; being total here and refusing at the caller is the same shape of answer
-    /// `lower_tm_all`'s three existing guards already give.
+    /// `lower_tm_all`'s three guards give.
     ///
-    /// **THIS REPLACES A PROSE ARGUMENT THAT WAS WRONG.** The previous doc reasoned that
-    /// `prog.code.len()` was bounded by ~172 GB of resident memory and so the cast was unreachable.
-    /// Measurement found a 6 KB balanced expression building an 8.6M-state, 6.0 GB machine and a
-    /// 24 KB one getting killed by `SIGKILL` under an 8 GB budget — both reachable from the editor through
-    /// `run_tm_described`. The cast was never the defect; the unbounded product was, and the process
-    /// died at ~0.2% of the way to `StateId::MAX`. See `MAX_MACHINE_STATES` and
-    /// `docs/superpowers/specs/2026-08-11-count-bounds-design.md` §3.
+    /// See `MAX_MACHINE_STATES` and `docs/superpowers/specs/2026-08-11-count-bounds-design.md` §3.
     #[allow(clippy::cast_possible_truncation)]
     pub fn state(&mut self, name: impl Into<String>) -> StateId {
         if self.states.len() >= MAX_MACHINE_STATES {
@@ -393,16 +359,12 @@ mod tests {
     /// `Builder` stops allocating at `MAX_MACHINE_STATES` and says so, rather than growing until the
     /// allocator gives up.
     ///
-    /// THE ONE TEST THAT TRIPS THE CEILING DIRECTLY. It allocates the full ceiling in rule-less
-    /// states with a 1-char name — a `Vec<State>` of 1,000,000 entries at `size_of::<State>()` = 56
-    /// bytes is 56 MB, plus 1,000,000 one-byte heap `String`s at glibc's 32-byte minimum chunk (~32
-    /// MB), so ~90 MB and a second or two — still far cheaper than the ~727 bytes a real state (name
-    /// plus `Vec<Rule>`, as `lower_tm` produces) costs — see `MAX_MACHINE_STATES`. This runs in the
-    /// DEFAULT (fast) tier, in parallel under `cargo nextest`, alongside
-    /// `overflow_does_not_cache_a_refused_allocation` below (another ~90 MB) and two
-    /// `vec![Instr::Halt; MAX_MACHINE_STATES + 1]` allocations elsewhere in the same tier (`tm.rs`,
-    /// `tests/guard_counterexamples.rs`, ~40 MB each) — it is the fast tier's COMBINED peak that
-    /// matters for a memory budget, not any one of these tests' number alone.
+    /// It allocates the full ceiling in rule-less states with a 1-char name, far cheaper per state
+    /// than a state `lower_tm` builds (see `MAX_MACHINE_STATES`). This runs in the DEFAULT (fast)
+    /// tier, in parallel under `cargo nextest`, alongside `overflow_does_not_cache_a_refused_allocation`
+    /// below and two `vec![Instr::Halt; MAX_MACHINE_STATES + 1]` allocations elsewhere in the same tier
+    /// (`tm.rs`, `tests/guard_counterexamples.rs`) — it is the fast tier's COMBINED peak that matters
+    /// for a memory budget, not any one of these tests alone.
     #[test]
     fn the_builder_stops_at_the_state_ceiling_and_reports_it() {
         let mut b = Builder::new();
@@ -430,14 +392,13 @@ mod tests {
     /// real overflow guard.
     ///
     /// This drives the builder to EXACTLY the ceiling with rule-less `state("s")` calls, then makes
-    /// `overflow()` itself the call that trips it — the one case the old code got wrong. If the `if
-    /// !self.overflowed` guard in `overflow()` is removed, `overflow_state()` below reports
-    /// `Some(0)` instead of `None` and this test fails.
+    /// `overflow()` itself the call that trips it — the one case an unconditional cache gets wrong.
+    /// If the `if !self.overflowed` guard in `overflow()` is removed, `overflow_state()` below
+    /// reports `Some(0)` instead of `None` and this test fails.
     ///
-    /// Allocates the full ceiling in rule-less states — ~90 MB (56 MB `Vec<State>` + ~32 MB of
-    /// one-byte heap `String`s at glibc's 32-byte minimum chunk) and a second or two, same as
+    /// Allocates the full ceiling in rule-less states, same as
     /// `the_builder_stops_at_the_state_ceiling_and_reports_it` above — see that test's doc for why the
-    /// fast tier's COMBINED peak, not this number alone, is what a memory budget has to clear.
+    /// fast tier's COMBINED peak is what a memory budget has to clear.
     #[test]
     fn overflow_does_not_cache_a_refused_allocation() {
         let mut b = Builder::new();
@@ -448,7 +409,7 @@ mod tests {
         assert_eq!(b.overflow_state(), None, "not allocated until asked for");
 
         // `overflow`'s own allocation is the one that trips the ceiling: this is the "first call
-        // after the trip" scenario the caching bug got wrong.
+        // after the trip" scenario an unconditional cache gets wrong.
         let s = b.overflow();
         assert!(b.overflowed(), "overflow's own allocation must trip the ceiling");
         assert_eq!(s, 0, "past the ceiling, overflow returns the state-0 sentinel, same as state/accept");

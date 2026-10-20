@@ -22,10 +22,9 @@ pub enum Lang {
     Asm,
 }
 
-/// The asm form's emitted header comment. It used to exist to declare that the file could not be
-/// read back — `parse_asm` was unclaimed, and ten roadmap entries said so. It now names the function
-/// that reads it, because a file that states what opens it is worth more than a bare listing —
-/// `redextape run` takes the file it names, the same as it always has for a `.tm`.
+/// The asm form's emitted header comment. It names the function that reads it, because a file that
+/// states what opens it is worth more than a bare listing — `redextape run` takes the file it names,
+/// the same as for a `.tm`.
 const ASM_PREAMBLE: &str = "\
 ; Register-assembly listing, read back by `parse_asm` and run by `redextape run`.
 ";
@@ -77,7 +76,7 @@ pub struct Defaults {
 /// `emit_tm` identically whether it was typed as `--field-width 4` or read from a config file's
 /// `emit.field-width`, and the two users need different sentences: one can drop a flag they just
 /// typed, the other has to be told a file they may not have written is in effect at all. A refusal
-/// that names neither — which is what shipped — sends both of them looking at `--encoding` instead.
+/// that names neither sends both of them looking at `--encoding` instead.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum Width {
     /// No pin. The fitting search runs: `MIN_FIELD_WIDTH`, doubling, to at most `MAX_FIELD_WIDTH`.
@@ -136,19 +135,18 @@ pub fn run(
 ) -> std::io::Result<Outcome> {
     // **`Option`, NOT A `default_value_t`, AND THAT IS THE WHOLE POINT.** Once clap fills a default
     // in, an explicitly passed `--encoding unary` and an omitted flag arrive here as the same value,
-    // so the guard below used to read `encoding != EncodingArg::default()` and let
-    // `--lang lambda --encoding unary` through at exit 0 while the README promised a 2.
+    // so only an `Option` can tell them apart.
     //
     // **THE CONFIG LAYER CAN RE-ENTER THAT SAME BUG ONE LEVEL UP, AND THIS IS WHERE IT DOES NOT.**
     // Both guards test whether the FLAG was typed. A config-set value merged in before them would
     // make `emit --lang lambda` exit 2 for every user whose repository configures an encoding — a
     // config file must never trip THIS GUARD on a command line that used to work. Design §7.
     //
-    // Scoped to the guard, and deliberately not the absolute it used to be stated as: a config file
-    // CAN make a previously-working command line fail, and `emit.field-width` is how. Pinning a
-    // width refuses programs auto-fit accepts — that is the point of the key — so `field-width = 4`
-    // turns a working `emit --lang tm` into an exit 2, and the refusal names the key so the cause is
-    // visible. What must never happen is a refusal about a flag nobody typed, which is this branch.
+    // Scoped to the guard: a config file CAN make a previously-working command line fail, and
+    // `emit.field-width` is how. Pinning a width refuses programs auto-fit accepts — that is the point
+    // of the key — so `field-width = 4` turns a working `emit --lang tm` into an exit 2, and the
+    // refusal names the key so the cause is visible. What must never happen is a refusal about a flag
+    // nobody typed, which is this branch.
     if lang != Lang::Tm {
         if opts.encoding.is_some() {
             writeln!(err, "error: `--encoding` applies to `--lang tm` only")?;
@@ -245,11 +243,11 @@ pub fn run(
 /// which is exactly what `run` needs to execute it. The cost is that it SIMULATES, under
 /// `TM_DEFAULT_CAPS`.
 ///
-/// **`Ok` DOES NOT MEAN THE FITTING RUN SUCCEEDED**, and reading it as one wrote files that answered
-/// wrongly at exit 0. `run_tm_described` returns `Ok` for every run that STARTED — `HitCap` and
-/// `Overflow` included — because a header records the initial tapes and the decoding recipe, never
-/// the answer, so it is complete however the run ended. Only `d.run` separates a machine that is
-/// faithful from one that is not; `emit_described` is where that decision lives.
+/// **`Ok` DOES NOT MEAN THE FITTING RUN SUCCEEDED**, and reading it as one would write files that
+/// answer wrongly at exit 0. `run_tm_described` returns `Ok` for every run that STARTED — `HitCap`
+/// and `Overflow` included — because a header records the initial tapes and the decoding recipe,
+/// never the answer, so it is complete however the run ended. Only `d.run` separates a machine that
+/// is faithful from one that is not; `emit_described` is where that decision lives.
 ///
 /// `stages` is `--reduce`'s parsed list. The machine is still fitted and run first, since a reduction
 /// starts from that run and is checked against its value; `emit_reduced` decides what is written.
@@ -268,10 +266,9 @@ fn emit_tm(
     // a TM header is never optional (it also carries the initial tapes, `TmHeader`'s own doc), so there
     // is no headerless fallback here and the whole file is refused instead.
     //
-    // GROUNDED ONCE, NOT TWICE: `ty::is_decodable` grounds `ty` for its own round-trip check, and the
-    // message below used to ground it again through `ty::ground` for the words alone. `AsmHeader::for_type`
-    // grounds once and asks `ty::is_decodable_ground` of the result it already holds; this does the same.
-    // Cloned, not moved: `ty` itself still has to reach the simulation below, ungrounded.
+    // GROUNDED ONCE: `AsmHeader::for_type` grounds once and asks `ty::is_decodable_ground` of the
+    // result it already holds; this does the same. Cloned, not moved: `ty` itself still has to reach
+    // the simulation below, ungrounded.
     let grounded = redextape_core::ty::ground(ty.clone());
     if !redextape_core::ty::is_decodable_ground(&grounded) {
         // GROUNDED, LIKE EVERY OTHER `result`-LINE MESSAGE: `ty::show(&ty)` alone would print a free
@@ -289,9 +286,9 @@ fn emit_tm(
         )?;
         return Ok(None);
     }
-    // `AutoFit` is the fitting search, which is what this command has always done. A pin skips the
-    // search, which can refuse a program the search would have accepted — the whole reason to ask
-    // for it, and the reason `Width` carries where the pin came from rather than just its value.
+    // `AutoFit` is the fitting search. A pin skips the search, which can refuse a program the search
+    // would have accepted — the whole reason to ask for it, and the reason `Width` carries where the
+    // pin came from rather than just its value.
     let described = match width {
         Width::AutoFit => {
             redextape_core::tm::run_tm_described(core, encoding.into(), ty, redextape_core::tm::TM_DEFAULT_CAPS)
@@ -315,11 +312,8 @@ fn emit_tm(
             )?;
             Ok(None)
         }
-        // **THE SAME SENTENCE `run --backend tm`, `--lang lambda` AND `--lang asm` USE FOR THIS EXACT
-        // CONDITION.** It read "cannot build a self-describing machine … a header needs the initial
-        // tapes" until the whole-branch review — one condition in two voices, and the wrong voice
-        // here: nothing was built, so header construction is not what went wrong. That sentence now
-        // survives only where the subject genuinely is a header that could not be assembled.
+        // The same sentence `run --backend tm`, `--lang lambda` and `--lang asm` use for this exact
+        // condition: nothing was built here, so header construction is not what went wrong.
         Err(redextape_core::tm::TmRun::LowerError(e)) => {
             writeln!(err, "error: this program has no TM lowering: {e:?}")?;
             Ok(None)
@@ -353,15 +347,12 @@ fn emit_tm(
 ///   would report a wrong answer at exit 0. Exit 2 under the whose-fault-is-it rule either way — the
 ///   program is fine — but the two width paths overflow for DIFFERENT reasons and must say so.
 ///
-/// **THE PINNED PATH USED TO SPEAK THE AUTO-FIT PATH'S SENTENCE, AND EVERY CLAUSE OF IT WAS FALSE
-/// THERE.** Under auto-fit the search really did reach `MAX_FIELD_WIDTH`, so "this encoding's widest
-/// tape field (64 cells)" is what was tried and `--encoding binary` is the remedy worth naming.
-/// Under a pin, 64 was never attempted; the width tried is the one that was pinned, and the setting
-/// that pinned it is what the message has to name — `--field-width` when it was typed,
-/// `emit.field-width` when a config file supplied it and the user typed nothing at all. Measured on
-/// `40 + 2`: `--field-width 4` refuses under BOTH encodings, and `--encoding binary --field-width 8`
-/// emits at exit 0 — so on the pinned path the encoding suggestion was not merely unhelpful, it
-/// pointed away from the one setting that actually caused the refusal.
+/// **THE PINNED PATH DOES NOT SPEAK THE AUTO-FIT PATH'S SENTENCE.** Under auto-fit the search really
+/// does reach `MAX_FIELD_WIDTH`, so "this encoding's widest tape field (64 cells)" is what was tried
+/// and `--encoding binary` is the remedy worth naming. Under a pin, 64 is never attempted; the width
+/// tried is the one that was pinned, and the setting that pinned it is what the message has to name —
+/// `--field-width` when it was typed, `emit.field-width` when a config file supplied it and the user
+/// typed nothing at all.
 fn emit_described(
     d: &redextape_core::tm::DescribedRun,
     encoding: EncodingArg,
@@ -384,9 +375,9 @@ fn emit_described(
         }
         redextape_core::tm::TmRun::Overflow => {
             let (lo, hi) = (redextape_core::tm::MIN_FIELD_WIDTH, redextape_core::tm::MAX_FIELD_WIDTH);
-            // The auto-fit clause is unchanged, byte for byte: there the search DID reach the
-            // ceiling, so naming it is true and naming the encoding is the useful remedy. See this
-            // function's doc for why the pinned arms say something else entirely.
+            // In the auto-fit clause the search DID reach the ceiling, so naming it is true and
+            // naming the encoding is the useful remedy. See this function's doc for why the pinned
+            // arms say something else entirely.
             let (what, remedy) = match width {
                 Width::AutoFit => (
                     format!("this encoding's widest tape field ({hi} cells, `MAX_FIELD_WIDTH`)"),
@@ -568,8 +559,8 @@ mod tests {
     /// be removed, right here rather than surviving into the caller.
     ///
     /// Takes a whole `Options` so the flag and the config default can be set INDEPENDENTLY — which
-    /// is the distinction the pinned refusal message now draws, and which `emit_case`'s
-    /// encoding-only shape cannot express.
+    /// is the distinction the pinned refusal message draws, and which `emit_case`'s encoding-only
+    /// shape cannot express.
     fn emit_opts(case: &str, src: &str, lang: Lang, opts: Options) -> (String, String, Outcome) {
         let dir = redextape_test_support::ScratchDir::new(&format!("emit-{case}")).unwrap();
         let p = dir.join("p.rxt");
@@ -580,10 +571,10 @@ mod tests {
     }
 
     /// `emit_opts`, but with a real `dest` path instead of `None` — every other failure-path test above
-    /// passes `dest: None`, so the brief's "no file is written" was only ever checked against empty
-    /// stdout, which every failure produces regardless of whether something was written to a path
-    /// nobody gave it. `dest` lives outside the input's own `ScratchDir` so a caller can inspect it, and
-    /// possibly pre-populate it, after this returns.
+    /// passes `dest: None`, so their "no file is written" checks see only empty stdout, which every
+    /// failure produces regardless of whether something was written to a path nobody gave it. `dest`
+    /// lives outside the input's own `ScratchDir` so a caller can inspect it, and possibly pre-populate
+    /// it, after this returns.
     fn emit_opts_to(case: &str, src: &str, lang: Lang, opts: Options, dest: &Path) -> (String, Outcome) {
         let dir = redextape_test_support::ScratchDir::new(&format!("emit-{case}")).unwrap();
         let p = dir.join("p.rxt");
@@ -595,7 +586,7 @@ mod tests {
         (String::from_utf8(err).unwrap(), outcome)
     }
 
-    /// The common case: no width anywhere, so every existing test still exercises auto-fit.
+    /// The common case: no width anywhere, so a test that calls this exercises auto-fit.
     fn emit_case(case: &str, src: &str, lang: Lang, encoding: Option<EncodingArg>) -> (String, String, Outcome) {
         emit_opts(case, src, lang, Options { encoding, field_width: None, reduce: None, defaults: Defaults::default() })
     }
@@ -616,10 +607,10 @@ mod tests {
         assert_eq!(Width::resolve(None, 16), Width::Config(16));
     }
 
-    /// **THE PINNED REFUSAL NAMES THE WIDTH THAT WAS TRIED, NOT ONE THAT NEVER WAS.** The shipped
-    /// message said the value did not fit "the widest tape field (64 cells, `MAX_FIELD_WIDTH`)"
-    /// while the field was 4, then suggested `--encoding binary` — measured, that does not lift a
-    /// pin: `--encoding binary --field-width 4` refuses the same program, and
+    /// **THE PINNED REFUSAL NAMES THE WIDTH THAT WAS TRIED, NOT ONE THAT NEVER WAS.** Saying the
+    /// value did not fit "the widest tape field (64 cells, `MAX_FIELD_WIDTH`)" while the field was
+    /// 4 would be false, and suggesting `--encoding binary` would not help: it does not lift a pin.
+    /// `--encoding binary --field-width 4` refuses the same program, and
     /// `--encoding binary --field-width 8` emits.
     #[test]
     fn a_pinned_overflow_names_the_width_tried_and_the_flag_that_pinned_it() {
@@ -653,8 +644,8 @@ mod tests {
         assert!(!err.contains("widest tape field"), "64 was never attempted: {err}");
     }
 
-    /// The emitted file must be a complete, self-describing `.tm` — the property `run` (Task 4)
-    /// depends on, since a header-less file records no initial tapes.
+    /// The emitted file must be a complete, self-describing `.tm` — the property `run` depends on,
+    /// since a header-less file records no initial tapes.
     #[test]
     fn emitted_tm_carries_a_header_and_re_parses() {
         let (text, err, outcome) = emit_case("tm", "1 + 2", Lang::Tm, Some(EncodingArg::Unary));
@@ -665,8 +656,9 @@ mod tests {
         assert!(doc.header.is_some(), "emitted TM must carry a header, or `run` cannot use it");
     }
 
-    /// A free type variable is written as `Nat` in a `.tm` header too — `[]` wrote `result List<t1>`, which
-    /// `parse_tm_full` refuses, so `run` could not read the file `emit` had just written.
+    /// A free type variable is written as `Nat` in a `.tm` header too — otherwise `[]` would write
+    /// `result List<t1>`, which `parse_tm_full` refuses, so `run` could not read the file `emit`
+    /// just wrote.
     #[test]
     fn emitted_tm_of_a_polymorphic_program_re_parses_with_nat() {
         let (text, err, outcome) = emit_case("tm-var", "[]", Lang::Tm, Some(EncodingArg::Unary));
@@ -704,7 +696,7 @@ mod tests {
     fn the_refusal_names_the_grounded_type_not_a_free_variable() {
         let (out, err, outcome) = emit_case("tm-fun-var", "|x| x", Lang::Tm, Some(EncodingArg::Unary));
         assert_eq!(out, "", "no `.tm` file may be written for a function-valued program");
-        // `|x| x` types raw as `(t1) -> t1` — measured; a regression back to `ty::show(&ty)` prints
+        // `|x| x` types raw as `(t1) -> t1` — measured; a regression to `ty::show(&ty)` prints
         // exactly that instead, which this positive assertion on the grounded string alone catches.
         assert!(err.contains("(Nat) -> Nat"), "the message must name the GROUNDED type, got: {err}");
         assert!(matches!(outcome, Outcome::ToolFailed), "the program is fine; this tool cannot express it");
@@ -738,8 +730,7 @@ mod tests {
         assert!(term.is_some());
     }
 
-    /// The asm target's round trip, which this crate could not test until `parse_asm` landed: what
-    /// `emit` writes, `parse_asm` reads — preamble comment and all.
+    /// The asm target's round trip: what `emit` writes, `parse_asm` reads — preamble comment and all.
     #[test]
     fn emitted_asm_parses_back() {
         let (text, err, outcome) = emit_case("asm", "1 + 2", Lang::Asm, None);
@@ -750,10 +741,9 @@ mod tests {
         assert!(!prog.expect("parses").code.is_empty(), "and it is not empty");
     }
 
-    /// **BOTH VALUES, AND `Unary` IS THE ONE THAT USED TO PASS.** The flag carried a
-    /// `default_value_t`, so an explicit `--encoding unary` was indistinguishable from an omitted
-    /// one and slipped through the guard at exit 0 while the README said it exited 2. A test that
-    /// only ever passed `Binary` asserted half of what its name claimed.
+    /// **BOTH VALUES.** A `default_value_t` on the flag would make an explicit `--encoding unary`
+    /// indistinguishable from an omitted one, so it would slip through the guard at exit 0, and a
+    /// test that passed only `Binary` would assert half of what its name claims.
     #[test]
     fn encoding_is_rejected_off_the_tm_target() {
         for encoding in [EncodingArg::Binary, EncodingArg::Unary] {
@@ -775,8 +765,8 @@ mod tests {
 
     /// A program whose values do not fit the widest tape field unary has. **THE FILE MUST NOT BE
     /// WRITTEN.** `run_tm_described` still returns `Ok` here — it built a valid header for a run
-    /// that started — and emitting it produced a machine that HALTS on truncated fields, so `run`
-    /// decoded them, printed `0` for a program whose answer is 300, and exited 0.
+    /// that started — and emitting it would produce a machine that HALTS on truncated fields, so
+    /// `run` would decode them, print `0` for a program whose answer is 300, and exit 0.
     #[test]
     fn a_program_that_overflows_the_widest_field_is_refused_not_emitted() {
         let (out, err, outcome) = emit_case("overflow", OVERFLOW_SRC, Lang::Tm, Some(EncodingArg::Unary));
@@ -835,10 +825,10 @@ mod tests {
         }
     }
 
-    /// **`StageKind::parse` MATCHES EXACTLY, CASE INCLUDED, AND NOTHING SAID SO.** `Fold`, `FOLD` and
-    /// `single -tape` are not `is_stage_list`'s `fold, single-tape, two-symbol` under any looser
-    /// reading of `header.rs`'s `StageKind::parse` — an exact, case-sensitive `==` against `name()` —
-    /// so all three are refused the same as an unknown stage, and now pinned rather than left implicit.
+    /// **`StageKind::parse` MATCHES EXACTLY, CASE INCLUDED.** `Fold`, `FOLD` and `single -tape` are not
+    /// `is_stage_list`'s `fold, single-tape, two-symbol` under any looser reading of `header.rs`'s
+    /// `StageKind::parse` — an exact, case-sensitive `==` against `name()` — so all three are refused
+    /// the same as an unknown stage.
     #[test]
     fn a_stage_list_that_is_empty_out_of_order_repeated_or_unknown_is_refused_naming_the_order() {
         for (i, list) in
@@ -885,16 +875,16 @@ mod tests {
         assert!(err.starts_with("error: no reduced machine was written: the fitting run did not halt"), "{err}");
     }
 
-    /// **A `ReduceError` IS AN ERROR, AND NO FILE IS WRITTEN — THE BRIEF'S OWN WORDS.** Every other
-    /// `--reduce` failure test above runs with `dest: None`, so their "no file" check only ever
-    /// observed empty stdout, which a failure produces either way. This is the deepest failure a real
-    /// compiled program reaches under `--reduce`: past every argument check (unlike
-    /// `reduce_is_rejected_off_the_tm_target` and the stage-list test above, both refused before the
-    /// input is even read), through parsing, type-checking, desugaring and the actual fitting TM run,
-    /// which is where this source's `Overflow` comes from. A genuine `ReduceError::Refused` /
-    /// `Layout` / `Unverified` needs a hand-built `Machine` to trigger for real —
-    /// `reduced_file.rs`'s own tests reach for `run_of`/`walk`/`bank` fixtures for exactly that reason
-    /// — so this program is the closest a real `.rxt` source gets to the producer.
+    /// **A `ReduceError` IS AN ERROR, AND NO FILE IS WRITTEN.** Every other `--reduce` failure test
+    /// above runs with `dest: None`, so their "no file" check observes only empty stdout, which a
+    /// failure produces either way. This is the deepest failure a real compiled program reaches under
+    /// `--reduce`: past every argument check (unlike `reduce_is_rejected_off_the_tm_target` and the
+    /// stage-list test above, both refused before the input is even read), through parsing,
+    /// type-checking, desugaring and the actual fitting TM run, which is where this source's
+    /// `Overflow` comes from. A genuine `ReduceError::Refused` / `Layout` / `Unverified` needs a
+    /// hand-built `Machine` to trigger for real — `reduced_file.rs`'s own tests reach for
+    /// `run_of`/`walk`/`bank` fixtures for exactly that reason — so this program is the closest a real
+    /// `.rxt` source gets to the producer.
     #[test]
     fn an_overflowing_program_is_refused_under_reduce_as_it_is_without() {
         let (out, err, outcome) = emit_opts("reduce-overflow", OVERFLOW_SRC, Lang::Tm, reduce_opts("fold"));
@@ -923,16 +913,12 @@ mod tests {
         );
     }
 
-    /// **EVERY ONE OF CORE'S FIVE REFUSAL NAMES GETS ITS OWN CAUSE, AND ONLY `too-many-states` MAY
-    /// BLAME THE STATE CEILING.** The shipped message named every refusal and then explained the
-    /// ceiling regardless of which one it was — true only of `TOO_MANY_STATES` — so a left-end
-    /// collision or an uncovered alphabet sent a reader to look at a state count. Each of the five
-    /// cases below asserts its own explanation's substance, not only that a name appears, and the
-    /// final loop over all five re-confirms that `MAX_MACHINE_STATES` shows up in exactly one message.
+    /// Every one of core's five refusal names gets its own cause, and only `too-many-states` may blame
+    /// the state ceiling. Each of the five cases below asserts its own explanation's substance, not only
+    /// that a name appears, and the final loop over all five re-confirms that `MAX_MACHINE_STATES` shows
+    /// up in exactly one message.
     ///
-    /// The block after it pins the same property for `Unverified`, which is one variant over four
-    /// causes: the whole-branch review found the fix above had swept `Refused` and left this sibling
-    /// blaming the step ceiling for a measuring run that never reached it.
+    /// The block after it pins the same property for `Unverified`, which is one variant over four causes.
     #[test]
     fn every_reduce_refusal_names_its_cause() {
         use redextape_core::tm::reduction::{
@@ -982,11 +968,10 @@ mod tests {
         assert!(missing.is_empty(), "`Unverified` must name all four causes; missing {missing:?}:\n  {said}");
     }
 
-    /// `emit --lang asm`'s new behavior: the common path's `ty` (already computed before `match lang`)
-    /// becomes a header when `AsmHeader::for_type` can name it. A distinct case name from
-    /// `emitted_asm_parses_back`'s `"asm"` — `emit_case` keys a temp directory by case, and reusing
-    /// one is a race two tests should not share even though, here, they would have written identical
-    /// bytes.
+    /// `emit --lang asm` writes a header when `AsmHeader::for_type` can name the common path's `ty`
+    /// (already computed before `match lang`). A distinct case name from `emitted_asm_parses_back`'s
+    /// `"asm"` — `emit_case` keys a temp directory by case, and reusing one is a race two tests should
+    /// not share even though, here, they would have written identical bytes.
     #[test]
     fn emitted_asm_carries_a_result_header() {
         let (text, err, outcome) = emit_case("asm-header", "1 + 2", Lang::Asm, None);
@@ -1001,8 +986,7 @@ mod tests {
     }
 
     /// **A FREE TYPE VARIABLE IS WRITTEN AS `Nat`.** `[]` is never constrained by anything else in the
-    /// program, so its element type stays a variable, `List<t1>`, which `parse_ty` refuses — and until
-    /// `AsmHeader::for_type` grounded it, `[]` emitted with no header and `run` refused the file. A closed
+    /// program, so its element type stays a variable, `List<t1>`, which `parse_ty` refuses. A closed
     /// `List<t>` holds no `t`, so reading it as `List<Nat>` reads the same value. `[[]]` nests the variable
     /// a level deeper. Each file starts with its header and runs to the program's value.
     ///

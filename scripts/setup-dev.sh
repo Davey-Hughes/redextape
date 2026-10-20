@@ -12,14 +12,14 @@ cd "$(dirname "$0")/.."
 # LINEAR HISTORY. `main` has no merge commits and is kept that way: `ff = only` makes a
 # non-fast-forward merge or pull FAIL rather than quietly creating one.
 #
-# Feature branches land as ONE squashed commit via a PR, squash-merged in the Forgejo web UI —
-# that is now the only route to main. `ff = only` does not conflict with that: it governs local
-# merges/pulls, not the remote's squash-merge, and matters more here than before, since there is no
-# local landing step left to refuse a stale main on your behalf.
+# Feature branches land as ONE squashed commit via a PR, squash-merged in the Forgejo web UI — that
+# is the only route to main. `ff = only` does not conflict with that: it governs local merges/pulls,
+# not the remote's squash-merge, and matters because there is no local landing step to refuse a
+# stale main on your behalf.
 #
 # This is convenience, not enforcement — a local setting cannot bind anyone. Two things that do: the
-# remote allows only squash and fast-forward merges, and CI's `linear-history` job rejects a merge
-# commit on main regardless of how it got there.
+# remote allows only squash merges, and CI's `linear-history` job rejects a merge commit on main
+# regardless of how it got there.
 git config merge.ff only
 git config pull.ff only
 echo "==> git: merge.ff=only, pull.ff=only (linear history; land via a squash-merged PR)"
@@ -73,16 +73,15 @@ fi
 # reason cargo-nextest and wasm-pack are installed above rather than left to the README.
 #
 # INSTALLED REPO-LOCAL (`.tools/`, git-ignored) RATHER THAN VIA `command -v`, and that is deliberate,
-# not an inconsistency with the tools above. The grammars are generated at language ABI 15, which
-# needs the pinned, released v0.25.10 CLI specifically — NOT the newest numbered release (see
-# scripts/install-treesitter-ci.sh for why the pin sits below it, and
-# docs/superpowers/specs/2026-08-20-tree-sitter-grammars-design.md §8.1 for the ABI measurement) — a
-# `tree-sitter` already on this machine's `$PATH` is just as likely to be Arch's `tree-sitter-cli-git`,
-# built off `master` and self-reporting "0.27.0", which regenerates a different `.minor_version` and
-# reddens the grammar leg. `ensure_treesitter` in scripts/check-all.sh prefers this exact directory
-# over `$PATH` for the same reason. Calling the same pinned installer CI uses (a checksummed download
-# — see scripts/install-treesitter-ci.sh for why) means a developer regenerates with the identical
-# binary CI checks against, not a coincidentally-similar one.
+# not an inconsistency with the tools above. The grammars are generated at language ABI 15 by the
+# pinned, released v0.25.10 CLI — NOT the newest numbered release (see scripts/install-treesitter-ci.sh
+# for why the pin sits below it, and docs/superpowers/specs/2026-08-20-tree-sitter-grammars-design.md
+# §8.1 for the ABI measurement) — a `tree-sitter` already on this machine's `$PATH` is just as likely
+# to be Arch's `tree-sitter-cli-git`, built off `master`, which regenerates files that differ from the
+# committed ones and reddens the grammar leg. `ensure_treesitter` in scripts/check-all.sh prefers this
+# exact directory over `$PATH` for the same reason. Calling the same pinned installer CI uses (a
+# checksummed download — see scripts/install-treesitter-ci.sh for why) means a developer regenerates
+# with the identical binary CI checks against, not a coincidentally-similar one.
 if .tools/tree-sitter --version 2>/dev/null | grep -q ' 0\.25\.10$'; then
   echo "==> tree-sitter already installed (.tools/tree-sitter, $(.tools/tree-sitter --version))"
 else
@@ -112,8 +111,8 @@ fi
 # already established, so pnpm's presence is the real precondition and is what is tested. Same shape as
 # every other optional block in this file.
 #
-# NON-FATAL, WHICH THE BLOCKS ABOVE ARE NOT. Those abort on a missing hard precondition of
-# `scripts/check-all.sh` — no nextest, no wasm32 target, no pinned tree-sitter — and aborting is the
+# NON-FATAL, WHICH THE BLOCKS ABOVE ARE NOT. Those abort when installing a hard precondition of
+# `scripts/check-all.sh` fails — nextest, the wasm32 target, the pinned tree-sitter — and aborting is the
 # honest answer to an environment that cannot run the gate. This one is a BUILD, and a build fails for
 # reasons that are not the environment being wrong: no network on a first clone, `ts-rs` not yet in the
 # cargo registry cache. Under `set -euo pipefail` that would kill the script before `pre-commit install`
@@ -132,7 +131,7 @@ fi
 
 if command -v pre-commit >/dev/null 2>&1; then
   pre-commit install
-  echo "==> pre-commit hooks installed (9: control bytes, citations, doc figures, shared docs, lua, cargo fmt, clippy, biome, web typecheck)"
+  echo "==> pre-commit hooks installed"
 else
   echo "==> pre-commit not found; skipping hook install (pip install pre-commit)" >&2
 fi

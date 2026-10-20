@@ -1,9 +1,9 @@
 //! λ's grammar: its generated parser, its highlight queries, its capture table, and the thin wrapper
 //! over `analysis::print_lambda_mapped` that makes it λ's authority.
 //!
-//! Model this on `mini.rs` — it went through review and this follows its shape — but read the module
-//! doc there too: `@variable.parameter` is `Ident` in the mini-language and `Binder` here, and that
-//! is why the tables are per-grammar rather than shared. Design §5.1.
+//! Model this on `mini.rs`, whose shape this follows, but read the module doc there too:
+//! `@variable.parameter` is `Ident` in the mini-language and `Binder` here, and that is why the
+//! tables are per-grammar rather than shared. Design §5.1.
 
 use crate::grammar::{Grammar, compare_classified};
 use redextape_core::Span;
@@ -17,8 +17,8 @@ unsafe extern "C" {
 /// Hand-written corpus. Every entry parses cleanly under the grammar and, between them, they reach
 /// every position `queries/highlights.scm` names: a bare identifier as the whole `source_file`, both
 /// sides of an application, an identifier inside a parenthesized term, an abstraction's body, and an
-/// abstraction used as an application's argument (a shape `grammar.js` was widened to accept). Several
-/// are lifted straight from `grammars/tree-sitter-redextape-lambda/test/corpus/terms.txt`, which
+/// abstraction used as an application's argument (a shape `grammar.js` accepts). Several are lifted
+/// straight from `grammars/tree-sitter-redextape-lambda/test/corpus/terms.txt`, which
 /// `tree-sitter test` already holds to the grammar, so reusing them costs nothing new to trust.
 pub const CORPUS: &[(&str, &str)] = &[
     ("empty", ""),
@@ -46,8 +46,8 @@ pub const HIGHLIGHTS: &str = include_str!("../../../grammars/tree-sitter-redexta
 
 /// Where the two vocabularies meet, for this language.
 ///
-/// **THE TABLE MOVED TO `redextape_core::capture_map` AND THIS IS THE SAME DATA, NOT A COPY.** It moved
-/// because the web app needs it and cannot link this crate: `build.rs` compiles four generated
+/// **THE TABLE LIVES IN `redextape_core::capture_map` AND THIS IS THE SAME DATA, NOT A COPY.** It lives
+/// there because the web app needs it and cannot link this crate: `build.rs` compiles four generated
 /// `parser.c` into this one, so there is no wasm build of it. What stays here is everything that ties
 /// the table to a query — totality over `HIGHLIGHTS`, and the no-unused-row rule — because those are
 /// tests about a grammar rather than facts about a naming map.
@@ -81,8 +81,8 @@ pub static LAMBDA: Grammar = Grammar {
 /// this pipeline: `parser::parse` -> `desugar::desugar` -> `lambda::lower` -> `print_lambda_mapped`.
 ///
 /// **THIS MUST NOT REDUCE**, and never will: the pipeline stops at `lower`, which produces a
-/// `LambdaTerm`, and `print_lambda_mapped`, which prints one. Neither calls a reducer. A λ measurement
-/// that reduces has previously cost this machine 60 GiB of RAM and all of swap — see the roadmap.
+/// `LambdaTerm`, and `print_lambda_mapped`, which prints one. Neither calls a reducer. Reducing is what
+/// can take memory without bound; `redextape-core`'s `examples/blowup_probe.rs` demonstrates it.
 ///
 /// **Lowering is allowed to fail, and that is not this function's failure to report** — `lower` returns
 /// `Result` because `LowerError::StatefulClosure`/`Unsupported`/`TooDeep` are real, expected outcomes

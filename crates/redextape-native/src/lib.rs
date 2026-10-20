@@ -3,18 +3,18 @@
 
 // Test code is exempt from `pedantic`, for the reason `clippy.toml` gives for the
 // unwrap/expect/panic set: an assertion is a deliberate panic, and a probe that casts a `u64` step
-// count to `f64` to print a ratio is not a defect. `cfg_attr` rather than 54 module-level attributes
-// — under `--all-targets` each lib compiles twice, and `cfg(test)` holds only in the test-harness
-// pass, so production warnings still surface from the other one.
+// count to `f64` to print a ratio is not a defect. `cfg_attr` rather than an attribute on each test
+// module — under `--all-targets` each lib compiles twice, and `cfg(test)` holds only in the
+// test-harness pass, so production warnings still surface from the other one.
 //
 // This ALSO covers the four `#[cfg(all(test, feature = "..."))]` modules in redextape-native that
 // clippy.toml's header calls out as unreachable by clippy's own in-test detection: that limitation
 // is specific to clippy's `is_in_test` heuristic, and this is ordinary `cfg` evaluation.
 #![cfg_attr(test, allow(clippy::pedantic))]
 use redextape_core::core::{Core, NodeId};
-use redextape_core::tm::{AsmOutcome, Caps, LowerError};
 #[cfg(any(feature = "cranelift", feature = "llvm"))]
-use redextape_core::tm::{Program, defunc, lower_asm};
+use redextape_core::tm::lower_program;
+use redextape_core::tm::{AsmOutcome, Caps, LowerError};
 
 pub mod analysis;
 #[cfg(feature = "cranelift")]
@@ -35,7 +35,7 @@ pub use aot::{LinkOptions, LinkerChoice, emit_object, link_executable};
 
 /// An ahead-of-time (AOT) object-emission / link failure. Defined unconditionally (not behind the
 /// `cranelift` feature) so the no-`cranelift` `emit_object` stub can name it too. `Link`/`NoLinker`/
-/// `NoStaticlib` are produced by the linker driver (Task 6); `emit_object` itself only ever yields
+/// `NoStaticlib` are produced by the linker driver; `emit_object` itself only ever yields
 /// `Unsupported`/`Lower`/`Codegen`/`Object`.
 #[derive(Debug)]
 pub enum AotError {
@@ -48,11 +48,11 @@ pub enum AotError {
     Codegen(String),
     /// Building or emitting the object (ISA setup, `declare`/`define`, `emit`) failed.
     Object(String),
-    /// Invoking the system linker failed (Task 6).
+    /// Invoking the system linker failed.
     Link(String),
-    /// No usable system linker was found (Task 6).
+    /// No usable system linker was found.
     NoLinker,
-    /// The runtime static library (`libredextape_native_rt.a`) could not be located (Task 6).
+    /// The runtime static library (`libredextape_native_rt.a`) could not be located.
     NoStaticlib,
 }
 
@@ -133,25 +133,6 @@ pub enum NativeRun {
     HitCap,
     Fault(String),
     LowerError(LowerError),
-}
-
-/// Lower `core` to asm, trying direct (first-order) lowering before defunctionalizing.
-///
-/// This mirrors `redextape_core::tm`'s own `lower_program` template exactly: try `lower_asm(core)` first;
-/// only retry through `defunc` when it rejects the program as higher-order (`LowerError::Unsupported`).
-/// A `LowerError::TooDeep` (the deep-Core stack-safety guard) is returned immediately rather than retried
-/// -- see that function's doc comment for the rationale. This copy was made while that function was
-/// private; it is public now.
-/// Shared by both backends (Cranelift and LLVM), so its cfg is widened to either being enabled.
-#[cfg(any(feature = "cranelift", feature = "llvm"))]
-fn lower_program(core: &Core) -> Result<Program, LowerError> {
-    match lower_asm(core) {
-        Ok(p) => return Ok(p),
-        Err(LowerError::Unsupported { .. }) => {}
-        Err(e @ LowerError::TooDeep { .. }) => return Err(e),
-    }
-    let defunced = defunc(core)?;
-    lower_asm(&defunced)
 }
 
 /// A `LowerError::Unsupported` reporting that `redextape-native` was built without `feature`'s
@@ -314,7 +295,7 @@ mod run_native_tests {
         assert_eq!(native_value("if 2 > 1 { 10 } else { 20 }"), Value::Nat(10));
         assert_eq!(native_value("fn sum(n) { if n == 0 { 0 } else { n + sum(n - 1) } } sum(5)"), Value::Nat(15));
         assert_eq!(native_value("head(tail([1, 2, 3]))"), Value::Nat(2));
-        // Escapes FIELD_WIDTH: a value the TM can't represent (> 64).
+        // Escapes unary's `MAX_FIELD_WIDTH` ceiling: a value the unary TM can't represent (> 64).
         assert_eq!(native_value("100 * 100"), Value::Nat(10_000));
     }
 

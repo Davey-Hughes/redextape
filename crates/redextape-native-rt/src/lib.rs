@@ -1,5 +1,5 @@
 //! `redextape-native-rt`: the native backend's runtime — heap/box arenas plus the `extern "C"`
-//! host functions that JIT-generated code (Task 4) calls for heap allocation, faults, and cap
+//! host functions that JIT-generated code calls for heap allocation, faults, and cap
 //! checks. Semantics mirror the asm interpreter's `Cons`/`Head`/`Tail`/`IsEmpty`/`Box`/`BoxGet`/`BoxSet`
 //! arms (`redextape_core::trace::AsmCursor`, which `run_asm` loops over) EXACTLY: 1-based heap/box
 //! pointers, `0` = nil, the same fault and cap conditions. This is what lets the native backend reuse
@@ -8,8 +8,8 @@
 //! This crate is split out from `redextape-native` (which depends on Cranelift) so its `rt_*`
 //! functions can be **linked** into a standalone AOT binary without dragging Cranelift along:
 //! `crate-type = ["rlib", "staticlib"]` — the JIT registers these as in-process fn pointers via the
-//! rlib, while a future AOT object resolves its `rt_*` imports against `libredextape_native_rt.a`.
-//! Every `rt_*` function below is `#[unsafe(no_mangle)]` so its linker symbol is the literal name
+//! rlib, while an AOT object resolves its `rt_*` imports against `libredextape_native_rt.a`. Every
+//! `rt_*` function below is `#[unsafe(no_mangle)]` so its linker symbol is the literal name
 //! (`rt_cons`, `rt_head`, …) rather than a mangled Rust symbol — required for the staticlib case.
 
 // Test code is exempt from `pedantic`, for the reason `clippy.toml` gives for the
@@ -24,7 +24,7 @@ use redextape_core::tm::{AsmOutcome, Caps};
 use redextape_core::ty::Ty;
 
 /// The native backend's runtime state: heap/box arenas, step/depth counters, and fault/cap
-/// flags. JIT-generated code (Task 4) holds a `*mut Runtime` for the duration of a run and calls
+/// flags. JIT-generated code holds a `*mut Runtime` for the duration of a run and calls
 /// the `rt_*` host functions below for every heap/box operation and every cap check, mirroring
 /// the asm interpreter's machine state (`trace::AsmCursor`) one-for-one (`heap`/`boxes`/`steps`/`caps`
 /// are the same fields; `depth` plays the role the cursor's `stack().len()` plays for the stack cap,
@@ -202,10 +202,9 @@ pub unsafe extern "C" fn rt_box(rt: *mut Runtime, v: u64) -> u64 {
 /// # Safety
 /// `rt` must be a valid, non-null, non-aliased `*mut Runtime` for the duration of the call.
 // The two quoted fault strings above are the LITERAL fault text (asserted byte-for-byte by
-// `box_get_and_set_fault_on_null_and_dangling_handles` below), not code references — an automated
-// `doc_markdown` pass once backticked `box_get` inside them, which left the doc's prose matching
-// the real bytes but broke the "this is a verbatim literal" convention the quotes signal. Reverted;
-// this allow keeps `doc_markdown` from re-adding backticks inside the quoted text.
+// `box_get_and_set_fault_on_null_and_dangling_handles` below), not code references — backticking
+// `box_get` inside them would break the "this is a verbatim literal" convention the quotes signal, so
+// this allow keeps `doc_markdown` from adding backticks inside the quoted text.
 #[allow(clippy::doc_markdown)]
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn rt_box_get(rt: *mut Runtime, p: u64) -> u64 {
@@ -233,8 +232,8 @@ pub unsafe extern "C" fn rt_box_get(rt: *mut Runtime, p: u64) -> u64 {
 ///
 /// # Safety
 /// `rt` must be a valid, non-null, non-aliased `*mut Runtime` for the duration of the call.
-// Same corrupted-then-reverted literal as `rt_box_get`: the two quoted strings are the exact fault
-// bytes (see `box_get_and_set_fault_on_null_and_dangling_handles`), not code references.
+// As on `rt_box_get`: the two quoted strings are the exact fault bytes (see
+// `box_get_and_set_fault_on_null_and_dangling_handles`), not code references.
 #[allow(clippy::doc_markdown)]
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn rt_box_set(rt: *mut Runtime, p: u64, v: u64) {
@@ -383,18 +382,14 @@ pub(crate) mod config {
 }
 
 /// A decoded `Value` in hand, printed through the CAPPED printer rather than the uncapped
-/// `format_value` — the same defect class `redextape-cli/src/run.rs`'s five capped print sites and
-/// `redextape-wasm`'s `decoded_value` close, on this crate's own decode (`decode_asm_ty`, bounded by
-/// `MAX_DECODE_NODES` on DISTINCT nodes) whose answer can still be logically enormous once the memo
-/// shares Rc nodes across the output. `decode_asm_ty` succeeding is no guarantee `format_value` would
-/// ever return.
+/// `format_value` — the same cap `redextape-cli/src/run.rs`'s five capped print sites and
+/// `redextape-wasm`'s `decoded_value` apply, here on this crate's own decode (`decode_asm_ty`,
+/// bounded by `MAX_DECODE_NODES` on DISTINCT nodes) whose answer can still be logically enormous once
+/// the memo shares Rc nodes across the output. `decode_asm_ty` succeeding is no guarantee
+/// `format_value` would ever return.
 ///
-/// Extracted from `print_outcome` so a test can drive the too-large-to-print refusal directly from a
-/// small-in-memory fixture `Value`, without a run that could build one itself — this crate's own
-/// caller today is a trusted test harness on small fixtures (see this function's doc on `print_outcome`
-/// for the reachability note), but the crate is built as `rlib` + `staticlib` precisely so a future
-/// standalone AOT binary can link it, and closing this here is cheaper than leaving it for that binary
-/// to rediscover.
+/// Separate from `print_outcome` so a test can drive the too-large-to-print refusal directly from a
+/// small-in-memory fixture `Value`, without a run that could build one itself.
 fn print_value_or_refuse(
     v: &redextape_core::value::Value,
     out: &mut dyn std::io::Write,
@@ -414,8 +409,7 @@ fn print_value_or_refuse(
 
 /// Classify + render a finished run. `outcome` is `Some` iff the run produced a value (not a
 /// fault/cap). Returns the process exit code: 0 value, 2 fault, 3 cap, 4 internal/decode failure
-/// (which now also covers a value that decoded but is too large to print — see
-/// `print_value_or_refuse`).
+/// (which also covers a value that decoded but is too large to print — see `print_value_or_refuse`).
 ///
 /// Two writers keep the "value → stdout; everything else → stderr" contract: the decoded value is
 /// the ONLY thing written to `out` (a caller can grep `out` for the result unambiguously), while a
@@ -450,14 +444,15 @@ pub(crate) fn print_outcome(
     }
 }
 
-/// Reserved native-stack size for a run thread — the SINGLE SOURCE OF TRUTH shared by both the JIT
-/// driver (`redextape_native::jit`, which spawns its compile+run thread with this stack size) and
-/// this crate's own `rt_run` (which spawns the AOT run thread with it). `redextape-native`'s
-/// emit-time `codegen::native_depth_cap` computation bakes a frame-size-aware recursion-depth cap
-/// into the AOT CONFIG blob sized against exactly this constant (re-exported from this crate rather
-/// than duplicated, since `redextape-native` already depends on `redextape-native-rt`), so the two
-/// can never drift out of sync: recursion always trips `HitCap` before the OS stack overflows,
-/// whether the code is running under the JIT or as a linked AOT binary.
+/// Reserved native-stack size for a run thread — the SINGLE SOURCE OF TRUTH shared by the JIT
+/// drivers (`redextape_native::jit` and `redextape_native::llvm`, which spawn their compile+run
+/// threads with this stack size) and this crate's own `rt_run` (which spawns the AOT run thread
+/// with it). `redextape-native`'s emit-time `shared::native_depth_cap` computation bakes a
+/// frame-size-aware recursion-depth cap into the AOT CONFIG blob sized against exactly this
+/// constant (re-exported from this crate rather than duplicated, since `redextape-native` already
+/// depends on `redextape-native-rt`), so the two can never drift out of sync: recursion always
+/// trips `HitCap` before the OS stack overflows, whether the code is running under the JIT or as a
+/// linked AOT binary.
 pub const RUN_STACK_SIZE: usize = 512 << 20;
 
 /// The AOT binary's entry point (called by the emitted `main`). Deserializes CONFIG, runs `main_fn`
@@ -595,7 +590,7 @@ mod tests {
     fn tick_and_enter_divert_without_latching_hit_cap_when_already_stopped() {
         // After a fault latches, a subsequent back-edge (`rt_tick`) or `Call` (`rt_enter`) must
         // return the `1` divert signal WITHOUT setting `hit_cap`, so the driver still classifies
-        // the run as `Fault`, not `HitCap` (regression for the fault-masked-as-HitCap bug).
+        // the run as `Fault`, not `HitCap`.
         let mut r = rt();
         let _ = unsafe { rt_head(&mut r, 0) }; // latch a fault
         assert!(r.fault.is_some());
@@ -661,7 +656,7 @@ mod tests {
         use redextape_core::ty::Ty;
         // A `Bool` result whose word is 7 (not 0/1) fails `decode_asm_ty`. The failure is a
         // diagnostic: it must go to `err` (exit 4) and leave `out` EMPTY, so a caller grepping
-        // stdout can never mistake it for a value. (This directly guards the misrouting bug.)
+        // stdout can never mistake it for a value.
         let mut out = Vec::new();
         let mut err = Vec::new();
         let code =
@@ -674,9 +669,9 @@ mod tests {
     /// The same fixture `redextape-cli/src/run.rs` and `redextape-wasm`'s `session.rs` tests use: 64
     /// levels of self-sharing, 65 allocations, 2^64 logical nodes — small enough to build here, but far
     /// too large for `format_value_capped` to walk within `MAX_PRINT_NODES`. Drives
-    /// `print_value_or_refuse` directly rather than through a run that could build one — this task's
-    /// own safety note forbids that, and `print_outcome`'s only path to a `Value` is `decode_asm_ty`,
-    /// which this fixture was never built to survive as a heap.
+    /// `print_value_or_refuse` directly rather than through a run that could build one:
+    /// `print_outcome`'s only path to a `Value` is `decode_asm_ty`, which this fixture was never built to
+    /// survive as a heap.
     fn tiny_but_logically_enormous_dag() -> redextape_core::value::Value {
         use redextape_core::value::Value;
         use std::rc::Rc;
@@ -688,11 +683,11 @@ mod tests {
         v
     }
 
-    /// **THE IMPORTANT FINDING THIS TEST PINS.** Before this fix, `print_outcome` printed a decoded
-    /// value through the uncapped `format_value` — the same defect class Fix 1 closes in
-    /// `redextape-wasm`. `print_value_or_refuse` now refuses past `MAX_PRINT_NODES` instead, reporting
-    /// exit 4 (this tool's own limit) with a message distinct from a decode failure, and writing
-    /// NOTHING to `out` so a caller grepping stdout can never mistake the refusal for a value.
+    /// **THIS TEST PINS THE CAP ON PRINTING.** Printing a decoded value through the uncapped
+    /// `format_value` is the defect class `redextape-wasm` guards against. `print_value_or_refuse` refuses
+    /// past `MAX_PRINT_NODES` instead, reporting exit 4 (this tool's own limit) with a message distinct
+    /// from a decode failure, and writing NOTHING to `out` so a caller grepping stdout can never mistake
+    /// the refusal for a value.
     #[test]
     fn print_value_or_refuse_reports_a_logically_enormous_value_as_too_large_rather_than_hanging() {
         let mut out = Vec::new();

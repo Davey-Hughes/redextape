@@ -2,8 +2,7 @@
 //! that assertion made executable, because the whole coordinate system rests on it.
 
 // This file carries no file-wide unwrap/expect/panic allow because only `lower_with_map` trips those
-// lints, and it is allowed there — the file needs only the pedantic exemption, for the same reason
-// `clippy.toml` exempts test/example code generally.
+// lints, and it is allowed there — the file needs only the pedantic exemption.
 #![allow(clippy::pedantic)]
 
 use redextape_core::lambda::reduce::Owner;
@@ -57,11 +56,11 @@ fn subst_preserves_tags_from_both_the_body_and_the_argument() {
 
 #[test]
 fn beta_go_preserves_the_exact_tags_of_the_body_and_the_argument() {
-    // `beta_go` is the third of the three propagating functions (`shift`, `subst`, `beta_go`) and,
-    // unlike the other two, had no direct exact-match test before this one — only the totality test
-    // below, which proves membership, not exactness. This mirrors `subst`'s test in shape but exercises
-    // what `beta_go` alone does: substitute index 0 with the argument AND decrement every surviving
-    // free index above it, in the same walk that must also carry every App's owner tag.
+    // `beta_go` is the third of the three propagating functions (`shift`, `subst`, `beta_go`); the
+    // totality test below proves membership, not exactness, so this is its direct exact-match test.
+    // This mirrors `subst`'s test in shape but exercises what `beta_go` alone does: substitute index 0
+    // with the argument AND decrement every surviving free index above it, in the same walk that must
+    // also carry every App's owner tag.
     //
     // body = App( App(Var(0), Var(1), 10), Var(0), 20 ), called as the body of the redex (`beta`
     // substitutes for index 0). Var(0) occurs twice and is replaced by `s` both times; Var(1) is the
@@ -86,36 +85,18 @@ fn a_full_reduction_never_produces_a_tag_that_was_not_in_the_source_term() {
     // TOTALITY, which is the property design §2.1 actually claims: every tag in the reduct traces to
     // a tag in the original. A propagation bug that INVENTED a tag would pass the two tests above.
     //
-    // EVERY App BELOW MUST BE TAGGED, WITH A DISTINCT NON-ZERO VALUE — do not "simplify" this back to
-    // an untagged inner App. If any App here were `None` (via plain `app`), `None` would be a
-    // legitimate member of `allowed`, and the realistic regression — reverting `beta_go`'s `App` arm
-    // from `app_tagged(.., *owner)` back to `app(f, a)` — turns every REBUILT tag into `None` too,
-    // which is already `allowed`. The assertion below would then never fire, for all 20 iterations,
-    // and this test would pass against a full revert of the change it exists to protect. Distinctness
-    // guards the same hole in miniature: a mutation that writes one wrong constant tag (e.g.
-    // hardcoding `Some(0)`) is caught only if `0` collides with none of these.
+    // EVERY App BELOW MUST BE TAGGED, WITH A DISTINCT NON-ZERO VALUE. If any App here were `None` (via
+    // plain `app`), `None` would be a legitimate member of `allowed`, and a `beta_go` whose `App` arm
+    // rebuilds with `app(f, a)` rather than `app_tagged(.., *owner)` would turn every REBUILT tag into
+    // `None` too, which is already `allowed`. The assertion below would then never fire, for all 20
+    // iterations. Distinctness guards the same hole in miniature: a mutation that writes one wrong
+    // constant tag (e.g. hardcoding `Some(0)`) is caught only if `0` collides with none of these.
     //
     // The term is `(\f. f f) (\y. y y)`, an Ω-variant that never normalises: every step's redex is at
     // the ROOT, which is both why the 20-iteration loop actually runs instead of breaking at step 0,
     // AND why this fixture attributes every observed tag to `beta_go` alone. A root redex makes
     // `reduce_step` return before its descent arms run at all, so nothing but `beta_go` writes a tag
     // in the reducts asserted over below.
-    //
-    // THE JUSTIFICATION THIS COMMENT USED TO GIVE IS DEAD, AND IT IS NOT WHY THE FIXTURE STAYS THIS
-    // SHAPE. It read that `reduce_step`'s non-root path rebuilds spine `App`s through plain `app(..)`,
-    // so a redex below the root would emit unrelated `None`s. Task 4 changed exactly that: the descent
-    // now rebuilds through `app_tagged_for_rebuild` (called at `reduce.rs`'s `reduce_step_go`, once on the
-    // function side and once on the argument side of its `Node::App` arm), preserving each spine node's own
-    // owner, so a deeper fixture would no longer manufacture spurious `None`s. What survives is the
-    // narrower point above — root-only keeps the descent out of the picture, so a failure here can only be
-    // `beta_go`'s.
-    //
-    // THAT POINTER READ `reduce.rs` lines 268 and 271 UNTIL THIS COMMIT, AND BOTH HAD DRIFTED. They were
-    // exactly the two `app_tagged_for_rebuild` calls when 5c wrote them; `clippy::pedantic` (#31) moved
-    // each call down two lines, into the pair the paragraph above names — the function side and the
-    // argument side of `reduce_step_go`'s `Node::App` arm. This conversion found the old pair landing on
-    // the two `reduce_step_go` recursion branches two lines above each call — close enough to read as
-    // confirmation.
     let t = app_owned(abs("f", app_owned(var(0), var(0), 3)), abs("y", app_owned(var(0), var(0), 42)), 7);
 
     let mut allowed: Vec<Option<u32>> = owners(&t);
@@ -167,15 +148,9 @@ fn lowering_tags_each_core_construct_at_its_own_root() {
     // block's span instead, the root's tag would name the entire program — and since the root is the
     // outermost `App`, every `Within` step in the run would resolve to it. "Somewhere inside
     // `let x = 40;`" is a real narrowing; "somewhere inside the whole program" is exactly the degenerate
-    // nearest-enclosing-node answer 5b refused on the TM leg, and design §6's M2 threshold would have
+    // nearest-enclosing-node answer the TM leg refuses, and design §6's M2 threshold would have
     // been a formality. That is why this asserts the exact text rather than merely that `resolve`
     // returns something.
-    //
-    // THAT POINTER READ `desugar.rs` lines 119-123 UNTIL THIS COMMIT, AND IT HAD DRIFTED. It was the
-    // whole `Stmt::Let` arm — its pattern down to the `Core::Let` the arm builds — when 5c wrote it;
-    // `clippy::pedantic` (#31) pushed the arm down a line, so this conversion found the range opening on
-    // the enclosing `acc = match stmt` and stopping at the `spans.push`. The push it names was still
-    // inside it, which is exactly why the range read as confirmation.
     assert_eq!(resolve(let_id), "let x = 40;", "the Let's tag must resolve to the let binding's own source text");
 
     // 2. Descend by STRUCTURE — not by searching — to the BinOp's own App. The `Let` arm in `lower.rs`
@@ -271,10 +246,9 @@ fn the_cursor_exposes_the_last_step_owner_and_redex() {
 ///
 /// `zipper_equivalence.rs` already holds the two equal over 256 generated programs and six lowered
 /// shapes, and those ARE tagged (`lower.rs` tags `BinOp` and `If` at their own root `App`, which is
-/// all `arb_expr_over` emits — measured: 115 `Exact`, 522 `Within`, 228 `None` across the six curated
-/// programs). What lowering cannot reach is arbitrary tag placement: a tag on the argument side of a
-/// spine, a tag separated from its redex by a binder, a tagged redex whose parent is also tagged. Each
-/// row below names the frame-level mistake it would catch.
+/// all `arb_expr_over` emits). What lowering cannot reach is arbitrary tag placement: a tag on the
+/// argument side of a spine, a tag separated from its redex by a binder, a tagged redex whose parent
+/// is also tagged. Each row below names the frame-level mistake it would catch.
 ///
 /// The expected first-step owner is pinned per row as well as compared across loops, because agreement
 /// alone is satisfied by both loops being wrong in the same direction — e.g. if `Owner` were `None`
@@ -335,7 +309,7 @@ fn both_beta_loops_agree_on_the_owner() {
             Owner::Exact(21),
         ),
         // A tagged term that never normalizes, so the comparison covers 50 steps rather than a handful.
-        // This is the original single case, kept as the long-run row.
+        // It is the long-run row.
         (
             "a diverging tagged term",
             app_owned(abs("f", omega_body.clone()), abs("y", app_owned(var(0), var(0), 42)), 7),
@@ -448,14 +422,13 @@ fn region_constructs_tag_their_own_roots_without_duplicating() {
         "the region's `let mut` must carry a tag of its own, got {texts:?}"
     );
 
-    // The `Seq` joining the while-statement to its continuation `n`, and the `While` itself, BOTH
-    // carry tags now (the latter as of the task that added `a_whiles_tag_names_the_loop_and_not_the_
-    // whole_program`, below) — and the desugarer gives that `Seq` the same span as the statement it
-    // opens with, so `While`'s own span is CHARACTER-IDENTICAL to `"while n > 0 { n = n - 1; }"`. A
-    // text-only assertion here could not tell whose tag it was looking at: it would stay green whether
-    // the Seq's tag, the While's, or (wrongly) only one of the two survived. Anchoring to each
-    // construct's own `NodeId` is what a text match cannot do — exactly this project's recorded defect
-    // shape, an assertion that has stopped looking at which node it names.
+    // The `Seq` joining the while-statement to its continuation `n`, and the `While` itself, BOTH carry
+    // tags (`a_whiles_tag_names_the_loop_and_not_the_whole_program`, below, pins the latter) — and the
+    // desugarer gives that `Seq` the same span as the statement it opens with, so `While`'s own span is
+    // CHARACTER-IDENTICAL to `"while n > 0 { n = n - 1; }"`. A text-only assertion here could not tell
+    // whose tag it was looking at: it would stay green whether the Seq's tag, the While's, or (wrongly)
+    // only one of the two survived. Anchoring to each construct's own `NodeId` is what a text match
+    // cannot do.
     let seq_id = find_id(&core, &|c| matches!(c, redextape_core::core::Core::Seq(..)))
         .expect("the fixture's while-statement is joined to its continuation by a Seq");
     let while_id =
@@ -477,25 +450,16 @@ fn region_constructs_tag_their_own_roots_without_duplicating() {
     );
 }
 
-/// **FINDING 1: THE FOURTH TAGGED ARM, OBSERVED.** `lower_region_body`'s `Let { mutable: false }` arm
-/// (`lower.rs`) was the one tagged arm with no fixture reaching it: neither the fixture above nor
-/// `a_region_ifs_tag_sits_on_its_outer_application`'s below contains an immutable `let` in region
-/// position, and every other test in this file stays green whether or not that arm tags anything at
-/// all — reverting the `app_owned(..)` returned by `lower.rs`'s `lower_region_body` in its
-/// `Core::Let { mutable: false }` arm back to plain `app(..)` left the whole file green.
-///
-/// BOTH POINTERS ABOVE READ `lower.rs` line 637 UNTIL THIS COMMIT, AND IT HAD DRIFTED ONTO THE
-/// OPPOSITE ARM. It was that `Core::Let { mutable: false }` arm's own `Ok(app_owned(..))` when
-/// region-path tagging (#28) wrote it; `clippy::pedantic` (#31) then pushed `lower_region_body`'s arms
-/// down 44 lines, carrying the `app_owned(..)` it named down with the rest of its arm. This conversion
-/// found 637 holding the `origins.at_root(*id)` of the `Core::Let { mutable: true }` arm — the arm this
-/// Finding exists to tell this one apart from. It still landed on a `Let` arm of the right function,
-/// which is what made it read as confirmation.
+/// **THE FOURTH TAGGED ARM, OBSERVED.** `lower_region_body`'s `Let { mutable: false }` arm
+/// (`lower.rs`) is the one tagged arm no other fixture in this file reaches: neither the fixture
+/// above nor `a_region_ifs_tag_sits_on_its_outer_application`'s below contains an immutable `let`
+/// in region position, so every other test in this file stays green whether or not that arm tags
+/// anything at all.
 ///
 /// `let k = 1;` sits in the body of the region-opening `let mut n`, which `lower_region_body`'s
 /// `Let { mutable: true }` arm hands to `lower_region_body` again for its continuation — exactly
-/// where the `Let { mutable: false }` arm fires, rather than the separate (untagged-by-this-task)
-/// functional-path `Let` arm in `lower_expr` that a top-level immutable `let` would hit instead.
+/// where the `Let { mutable: false }` arm fires, rather than the separate functional-path `Let` arm in
+/// `lower_expr` that a top-level immutable `let` would hit instead.
 #[test]
 fn region_immutable_let_is_tagged_at_its_own_root() {
     let src = "let mut n = 0; let k = 1; n = k; n";
@@ -504,8 +468,8 @@ fn region_immutable_let_is_tagged_at_its_own_root() {
     let let_id = find_id(&core, &|c| matches!(c, redextape_core::core::Core::Let { mutable: false, .. }))
         .expect("the fixture contains an immutable let");
     app_tagged_with(&term, let_id).expect(
-        "the region's immutable `let k = 1;` must carry a tag of its own root App — this is exactly \
-         what reverting lower.rs's `Let { mutable: false }` arm back to plain `app(..)` breaks",
+        "the region's immutable `let k = 1;` must carry a tag of its own root App, which `lower.rs`'s \
+         `Let { mutable: false }` arm sets with `app_owned`; a plain `app(..)` there carries none",
     );
 
     let span = map.source_span(let_id).unwrap_or_else(|| panic!("tag {let_id} resolves to no source span"));
@@ -518,8 +482,7 @@ fn region_immutable_let_is_tagged_at_its_own_root() {
 
 /// **WHICH `App` THE TAG LANDS ON, WHICH FLATTENING A TERM INTO A TAG SET CANNOT SEE.** A region `If`
 /// builds `app(app(lc, lt), le)` and only the OUTER application is the construct's own root; tagging
-/// the inner one leaves the tag set identical, resolves through the source map identically, and is
-/// exactly the wrong-node defect this project has now hit in several disguises.
+/// the inner one leaves the tag set identical and resolves through the source map identically.
 ///
 /// The discriminator is the condition's own shape. `true` lowers to a Scott boolean — an `Abs` — so
 /// on the outer application the function side is an `App`, and on the inner one it would be that
@@ -589,12 +552,6 @@ fn lower_with_map(src: &str) -> (redextape_core::core::Core, redextape_core::sou
 /// tens of thousands of nodes deep and that recursive traversal of it "aborts the process with an
 /// uncatchable stack overflow", so a caller "walks the tree with its own explicit worklist"; this
 /// function IS that caller, not licence to call itself.
-///
-/// THAT POINTER READ `core.rs` lines 85-89 UNTIL THIS COMMIT, AND IT HAD DRIFTED. It ran from the
-/// doc's second line to `for_each_child`'s own signature when region-path tagging (#28) wrote it;
-/// `clippy::pedantic` (#31) moved the item down two lines, so this conversion found the range opening
-/// on the blank line above the doc and stopping a line short of its end. Both quoted sentences were
-/// still inside it, so nothing about it looked wrong.
 fn find_id(core: &redextape_core::core::Core, pred: &impl Fn(&redextape_core::core::Core) -> bool) -> Option<u32> {
     let mut stack = vec![core];
     while let Some(n) = stack.pop() {
@@ -609,9 +566,9 @@ fn find_id(core: &redextape_core::core::Core, pred: &impl Fn(&redextape_core::co
 /// **THE FACT THE WHOLE `Within` ARGUMENT RESTS ON, FOR THE LOOP.** A `While`'s tag encloses its
 /// entire body, so if it resolved to the whole program instead of the loop's own text, every
 /// `Within` step inside a loop would name the program — the degenerate nearest-enclosing-node
-/// answer 5b refused on the TM leg. This is the same assertion 5c added for `Let`'s span, for the
-/// same reason. Asserted as a prefix and a strict-substring bound rather than an exact literal: the
-/// property is "the loop, not the program", not a particular slice of the fixture.
+/// answer refused on the TM leg. The same assertion is made for `Let`'s span, for the same reason.
+/// Asserted as a prefix and a strict-substring bound rather than an exact literal: the property is
+/// "the loop, not the program", not a particular slice of the fixture.
 ///
 /// `app_tagged_with` anchors presence on the While's own `NodeId`, not on resolved text — the same
 /// fixture's `Seq` (joining the while-statement to its continuation `n`) resolves to
@@ -636,15 +593,13 @@ fn a_whiles_tag_names_the_loop_and_not_the_whole_program() {
     );
 }
 
-/// **WHICH `App` THE TAG LANDS ON, WHICH FLATTENING A TERM INTO A TAG SET CANNOT SEE.** `build_while`
-/// builds `app(app(fix(), g), s_init)` and only the OUTER application is the loop's own root; tagging
-/// the inner one — `(fix g)` — instead leaves the tag set identical and resolves through the source
-/// map identically, so neither `a_whiles_tag_names_the_loop_and_not_the_whole_program` above nor
-/// `region_constructs_tag_their_own_roots_without_duplicating` can tell the two placements apart
-/// (confirmed BEFORE THIS TEST EXISTED: mutating `build_while` to tag `(fix g)` instead of its own
-/// return left every test binary in the crate green. The test below is what closes that gap — at
-/// HEAD, the same mutation now fails it). This is `a_region_ifs_tag_sits_on_its_outer_application`'s
-/// idiom, applied here.
+/// **WHICH `App` THE TAG LANDS ON, WHICH FLATTENING A TERM INTO A TAG SET CANNOT SEE.**
+/// `build_while` builds `app(app(fix(), g), s_init)` and only the OUTER application is the loop's
+/// own root; tagging the inner one — `(fix g)` — instead leaves the tag set identical and resolves
+/// through the source map identically, so neither
+/// `a_whiles_tag_names_the_loop_and_not_the_whole_program` above nor
+/// `region_constructs_tag_their_own_roots_without_duplicating` can tell the two placements apart.
+/// This is `a_region_ifs_tag_sits_on_its_outer_application`'s idiom, applied here.
 ///
 /// It is not just tidiness: `fix()` is itself an `Abs` (`lower.rs`, the Y-combinator shape), so
 /// `(fix g)` is a redex. Under the WRONG (inner) placement the loop's first β-step would report
@@ -674,14 +629,13 @@ fn a_whiles_tag_sits_on_its_outer_application() {
 /// tag and nothing runs. A later "fix" that stopped discarding it would silently start tagging a
 /// term the reducer never reaches; this fails if that happens.
 ///
-/// **NOT REACHABLE THROUGH `parser::parse` — BUILT DIRECTLY.** `while` is a `Stmt`, never an
-/// `Expr` (`ast.rs`), and `Stmt::While` desugars UNCONDITIONALLY into
-/// `Core::Seq(seq_id, While(..), acc)` (`desugar.rs`'s `lower_stmts_at`, in its `Stmt::While` arm) —
-/// even for a tail-less block, whose `acc` starts as `Core::Unit`, not the `While` itself
-/// (`desugar.rs`'s `lower_stmts_at` again, where `acc` is seeded from `tail`). `Core::Seq`'s `first`
-/// is always lowered at `Pos::Store` (the `Core::Seq` arm in `lower_region_body`), never
-/// `Pos::Value`. So no parsed program can ever put a `Core::While` node itself in `Pos::Value` — a
-/// fixture built through `parser::parse` (as originally tried here, with
+/// **NOT REACHABLE THROUGH `parser::parse` — BUILT DIRECTLY.** `while` is a `Stmt`, never an `Expr`
+/// (`ast.rs`), and `Stmt::While` desugars UNCONDITIONALLY into `Core::Seq(seq_id, While(..), acc)`
+/// (`desugar.rs`'s `lower_stmts_at`, in its `Stmt::While` arm) — even for a tail-less block, whose
+/// `acc` starts as `Core::Unit`, not the `While` itself (`desugar.rs`'s `lower_stmts_at` again,
+/// where `acc` is seeded from `tail`). `Core::Seq`'s `first` is always lowered at `Pos::Store` (the
+/// `Core::Seq` arm in `lower_region_body`), never `Pos::Value`. So no parsed program can ever put a
+/// `Core::While` node itself in `Pos::Value` — a fixture built through `parser::parse` (e.g.
 /// `"let mut n = 2; while n > 0 { n = n - 1; }"`, on the theory that a tail-less region's last
 /// statement lowers in `Pos::Value`) does not test this: it fails, because that `while` is the
 /// `first` of a `Seq` and so is tagged anyway, at `Pos::Store`, exactly like every other `while`.
@@ -698,24 +652,6 @@ fn a_whiles_tag_sits_on_its_outer_application() {
 /// identical structural fact for `Assign`/`While` together, so the two accounts should not drift
 /// apart. Constructing the `Core` by hand — bypassing `parser::parse`/`desugar` — is what actually
 /// exercises this branch, by any such route.
-///
-/// THE FIVE POINTERS ABOVE WERE LINE NUMBERS UNTIL THIS COMMIT, AND ALL FIVE HAD DRIFTED — under one
-/// lint-only PR (`clippy::pedantic`, #31) that DID open this file: its whole edit here was the
-/// crate-level `allow` attribute at the top, and it re-resolved none of the eleven citations it was
-/// sitting in. Being in the file was not enough — which is the argument for a gate, rather than for a
-/// convention asking authors to re-check what they pass. `desugar.rs` lines 141-153
-/// were the whole `Stmt::While` arm down to the `Core::Seq` it builds, and this conversion found them
-/// opening on the `Stmt::Assign` arm's closing brace and stopping one line short of that `Core::Seq`.
-/// Its lines 93-99 were `acc`'s initializer through the `Core::Unit` branch — which #31 also rewrote
-/// from a `match` into an `if let` — and were found starting in the comment above it and ending before
-/// the `Core::Unit`. `lower.rs` line 566 was `lower_region`'s own
-/// `lower_region_body(.., Pos::Value, ..)` call, which #31 moved 35 lines down, leaving 566 a blank
-/// line above `cur_store`, a different function. `lower.rs` line 1204 was that test's `fn` line —
-/// `forget_discards_a_store_discarding_assigns_subtree_without_dangling_paths`, moved 44 lines — and
-/// 1204 was found inside the unrelated `nat_nodes` helper. `lower.rs` lines 1193-1198 were the section
-/// banner and the opening of its doc, moved the same 44 lines, and 1193-1198 was found holding
-/// `nat_nodes`'s doc — which also argues about deep spines and stack overflow, so it reads like the
-/// right block to anyone who checks it quickly.
 #[test]
 fn a_while_in_value_position_carries_no_tag() {
     use redextape_core::core::Core;

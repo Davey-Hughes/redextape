@@ -5,34 +5,17 @@
 # Called by `web/package.json`'s `build:bindings` script, which `typecheck`, `test` and `build` all run
 # first — so this runs every time a pre-commit hook, CI, or a second agent working in `web/` does.
 #
-# THE ORIGINAL SHAPE WAS `rm -rf bindings && cargo test ... export_bindings`, run at the START of every
-# `typecheck`, `test` and `build` in `web/`. THAT HAD TWO MEASURED CONSEQUENCES: (i) a failed
-# generation destroyed the last-good directory, because the `rm -rf` ran before `cargo` could fail; and
-# (ii) `tsc` was measurably sensitive to the directory being gone for roughly the first second of a
-# `--noEmit` run, which a concurrent `tsc` (a pre-commit hook, an editor's tsserver, a second agent)
-# could land inside.
+# A failed generation must never touch the last-good copy (an `rm -rf bindings` before `cargo` could fail
+# would destroy it), so generation goes into a scratch directory that is swapped in with two renames. `tsc`
+# is measurably sensitive to the directory being gone for roughly the first second of a `--noEmit` run,
+# which a concurrent `tsc` (a pre-commit hook, an editor's tsserver, a second agent) could land inside, so
+# the directory must be gone for no longer than a rename.
 #
-# THE FIRST ROUND'S FIX — generate into a scratch directory and swap it in with two renames — closed
-# both of those and INTRODUCED A WORSE ONE: it used two FIXED, SHARED scratch names
-# (`web/bindings.tmp`, `web/bindings.old`) and `rm -rf`'d both unconditionally with no lock. Two
-# concurrent runs raced identically every time: the second run's `rm -rf` deleted the first run's
-# already-populated scratch mid-flight, the first run's swap then moved the SECOND run's (still-being-
-# written, or already-deleted) directory into place, and the loser's final `mv` found nothing to move —
-# `web/bindings` ended up not existing at all, twelve files stranded under `bindings.old`, at exit 0.
-# The pre-fix inline shape, raced identically, came through clean every time: this was a regression the
-# scratch-directory fix introduced, not a hazard it failed to close, and a fix that is worse than the
-# problem it fixed must not ship. There was a second, latent defect in the same lines too: `mv
-# web/bindings web/bindings.old` when `web/bindings.old` already existed (a straggler from a crashed
-# run) moved the directory INSIDE it, silently producing `web/bindings.old/bindings/`.
-#
-# THIS VERSION FIXES BOTH BY MAKING THE SCRATCH NAMES PER-PROCESS AND PUTTING A LOCK AROUND THE SWAP.
-#
-# PER-PROCESS SCRATCH NAMES (`mktemp -d`, suffixed `.old` for the swap's holding spot) mean no run ever
-# owns a name any other run could also construct, so no run's cleanup can ever delete a directory a
-# concurrent run is using — the exact mechanism of the regression above. A `trap ... EXIT INT TERM HUP`
-# removes THIS run's own scratch directories no matter how the script exits, which is also what keeps a
-# process interrupted mid-swap (see Finding 3 below) from leaving a scratch directory as the only copy
-# of anything for longer than it takes the next run to reclaim the lock.
+# PER-PROCESS SCRATCH NAMES (`mktemp -d`, suffixed `.old` for the swap's holding spot) mean no run ever owns
+# a name any other run could also construct, so no run's cleanup can ever delete a directory a concurrent
+# run is using. A `trap ... EXIT INT TERM HUP` removes THIS run's own scratch directories no matter how the
+# script exits, which is also what keeps a process interrupted mid-swap from leaving a scratch directory as
+# the only copy of anything for longer than it takes the next run to reclaim the lock.
 #
 # A LOCK AROUND THE SWAP, because per-process names alone are not enough: the swap itself — check
 # whether `web/bindings` exists, rename it out of the way, rename the new tree into its place — is a
@@ -80,20 +63,16 @@
 # nothing, so "cargo exited 0" was never evidence that generation happened, only that nothing failed —
 # the checks below are literal file-existence tests, not a trust in the exit code.
 #
-# THE CHECK IS PER LEG, NOT ONE COMBINED CHECK OVER A SHARED SCRATCH DIRECTORY. Before `redextape-wasm`
-# had its own `ts-rs` derives, its leg ran 0 tests and wrote nothing, so "at least one `.ts` file exists
-# anywhere in the scratch directory" and "the leg that matters produced something" were the same
-# question — one file existing was equivalent to the producing leg having produced. Once
-# `redextape-wasm` gained its own derives and started writing files too, that equivalence broke
-# silently: either leg's output alone now satisfies a combined check, so a regression that made ONE
-# leg's filter match nothing — a removed derive, a `ts`-feature regression on that crate, a `ts-rs`
-# upgrade that renames the `export_bindings_*` test prefix — would ride in on the OTHER leg's files,
-# exit 0, and destroy the last-good `web/bindings` at swap: the single outcome this whole script exists
-# to prevent. So each leg writes into its own subdirectory of the scratch directory (`$TMP_DIR/core`,
+# THE CHECK IS PER LEG, NOT ONE COMBINED CHECK OVER A SHARED SCRATCH DIRECTORY. With both `redextape-core`
+# and `redextape-wasm` writing files, either leg's output alone satisfies a combined check, so a regression
+# that made ONE leg's filter match nothing — a removed derive, a `ts`-feature regression on that crate, a
+# `ts-rs` upgrade that renames the `export_bindings_*` test prefix — would ride in on the OTHER leg's files,
+# exit 0, and destroy the last-good `web/bindings` at swap: the single outcome this whole script exists to
+# prevent. So each leg writes into its own subdirectory of the scratch directory (`$TMP_DIR/core`,
 # `$TMP_DIR/wasm`) instead of into the scratch directory directly, each subdirectory is checked non-empty
 # independently, and only once BOTH have proven non-empty are they merged into the flat tree that gets
-# swapped in. Neither subdirectory needs its own lock or trap entry: both live under the already unique-
-# per-process `$TMP_DIR`, so `rm -rf "${TMP_DIR:?}"` in cleanup already removes them.
+# swapped in. Neither subdirectory needs its own lock or trap entry: both live under the already
+# unique-per-process `$TMP_DIR`, so `rm -rf "${TMP_DIR:?}"` in cleanup already removes them.
 #
 # EVERY `rm -rf` BELOW USES A LITERAL PATH OR A VARIABLE WRITTEN `"${VAR:?}"` — the colon form is what
 # aborts if a variable is ever set but empty, which `set -u` does not catch and quoting does not save
@@ -112,12 +91,13 @@ LOCK_TIMEOUT_SECS=30
 TMP_DIR="$(mktemp -d "$PWD/web/bindings.tmp.XXXXXX")"
 OLD_DIR="${TMP_DIR}.old"   # never pre-created — appending to a unique name keeps this unique too, and
                            # `mv` onto a path that does not yet exist renames INTO that path rather than
-                           # inside it, which is what closes the second, latent defect described above.
+                           # inside it, whereas `mv` onto an existing `.old` would nest the directory
+                           # inside it.
 
-# Each cargo leg below writes into its own subdirectory of TMP_DIR rather than into TMP_DIR itself — see
-# the header comment for why a single check over one shared directory can no longer tell "a leg produced
-# nothing" from "the other leg produced something". Both names are derived from the already per-process
-# TMP_DIR, so they carry the same collision-freedom without needing their own lock or trap entry.
+# Each cargo leg below writes into its own subdirectory of TMP_DIR rather than into TMP_DIR itself — see the
+# header comment for why a single check over one shared directory cannot tell "a leg produced nothing" from
+# "the other leg produced something". Both names are derived from the already per-process TMP_DIR, so they
+# carry the same collision-freedom without needing their own lock or trap entry.
 CORE_DIR="$TMP_DIR/core"
 WASM_DIR="$TMP_DIR/wasm"
 mkdir -p "$CORE_DIR" "$WASM_DIR"
@@ -158,12 +138,12 @@ acquire_lock() {
       # `kill -0` fails for TWO different reasons, and only one of them means "gone": ESRCH (no
       # process has this PID) and EPERM (a process HAS this PID, alive, but owned by someone else
       # this caller may not signal) both return nonzero with stderr suppressed identically. Treating
-      # either as "confirmed gone" is exactly the bug this replaced: a lock held by pid 1, or by any
-      # live process another user owns, was reclaimed on the very next loop iteration. Bash's `kill`
-      # builtin distinguishes the two only in its error TEXT ("No such process" vs "Operation not
-      # permitted"), so that text — not the exit code alone — is what this checks. `kill_status=$?`
-      # on the `||` branch, rather than checking `$?` directly after the assignment, is deliberate:
-      # under `set -e`, `x=$(cmd)` with a failing `cmd` would otherwise exit this script outright.
+      # either as "confirmed gone" would reclaim a lock held by pid 1, or by any live process another
+      # user owns, on the very next loop iteration. Bash's `kill` builtin distinguishes the two only in
+      # its error TEXT ("No such process" vs "Operation not permitted"), so that text — not the exit
+      # code alone — is what this checks. `kill_status=$?` on the `||` branch, rather than checking `$?`
+      # directly after the assignment, is deliberate: under `set -e`, `x=$(cmd)` with a failing `cmd`
+      # would otherwise exit this script outright.
       local kill_err="" kill_status=0
       kill_err="$(kill -0 "$holder_pid" 2>&1 >/dev/null)" || kill_status=$?
       if [ "$kill_status" -ne 0 ] && [[ "$kill_err" == *"No such process"* ]]; then
@@ -189,8 +169,8 @@ acquire_lock() {
 TS_RS_EXPORT_DIR="$CORE_DIR" cargo test -p redextape-core --features ts export_bindings
 TS_RS_EXPORT_DIR="$WASM_DIR" cargo test -p redextape-wasm --features ts export_bindings
 
-# Checked independently, one leg at a time: an empty CORE_DIR must fail loudly even when WASM_DIR is
-# full, and vice versa — see the header comment for why a single combined check can no longer catch that.
+# Checked independently, one leg at a time: an empty CORE_DIR must fail loudly even when WASM_DIR is full,
+# and vice versa — see the header comment for why a single combined check cannot catch that.
 check_leg_produced_files() {
   local dir="$1" crate="$2"
   if [ -z "$(find "$dir" -maxdepth 1 -name '*.ts' -print -quit)" ]; then
@@ -204,16 +184,14 @@ check_leg_produced_files() {
 check_leg_produced_files "$CORE_DIR" "redextape-core"
 check_leg_produced_files "$WASM_DIR" "redextape-wasm"
 
-# ONLY POSSIBLE SINCE redextape-wasm GAINED ITS OWN DERIVES. Before that, CORE_DIR was the only leg
-# that ever held anything, so two legs writing the same basename could not happen. Now a type of the
-# same name exported from BOTH crates — say a `Span` added to redextape-wasm carrying the canonical
-# derive — lands on that basename in each leg's own directory, and the plain `mv` below would merge
-# them onto one file, silently keeping whichever it happens to write last. NO COVERAGE GATE SEES THIS:
-# each crate's `the_gate_covers_every_exported_type` (in its own `tests/ts_bindings.rs`) compares only
-# that crate's derive sites against its own `generated()` list, so a same-named type declared in the
-# OTHER crate never enters the comparison — both gates pass, and the wrong file ships to every
-# TypeScript consumer. Checked here, before the merge and before anything under $BINDINGS_DIR is
-# touched, so a collision refuses loudly instead of being resolved by mv's last-write-wins.
+# A type of the same name exported from BOTH crates — say a `Span` added to redextape-wasm carrying the
+# canonical derive — lands on the same basename in each leg's own directory, and the plain `mv` below would
+# merge them onto one file, silently keeping whichever it happens to write last. NO COVERAGE GATE SEES THIS:
+# each crate's `the_gate_covers_every_exported_type` (in its own `tests/ts_bindings.rs`) compares only that
+# crate's derive sites against its own `generated()` list, so a same-named type declared in the OTHER crate
+# never enters the comparison — both gates pass, and the wrong file ships to every TypeScript consumer.
+# Checked here, before the merge and before anything under $BINDINGS_DIR is touched, so a collision refuses
+# loudly instead of being resolved by mv's last-write-wins.
 #
 # A BASENAME BOTH LEGS WROTE WITH THE SAME BYTES IS NOT A COLLISION, and it is dropped from the wasm leg. ts-rs
 # exports a type's dependencies with it, so a redextape-wasm type that names a redextape-core type — the asm leg's
@@ -244,9 +222,9 @@ check_no_leg_collisions() {
 check_no_leg_collisions
 
 # Both legs proved non-empty independently, and neither collides with the other: merge them into
-# TMP_DIR itself so the tree that gets swapped in below keeps the same flat layout web/bindings has
-# always had. mv's directory-destination form takes any number of sources, so a third leg added later
-# is one more argument here, not a new check shape.
+# TMP_DIR itself so the tree that gets swapped in below keeps the same flat layout web/bindings has.
+# mv's directory-destination form takes any number of sources, so a third leg added later is one more
+# argument here, not a new check shape.
 mv "$CORE_DIR"/*.ts "$WASM_DIR"/*.ts "$TMP_DIR/"
 rm -rf "${CORE_DIR:?}" "${WASM_DIR:?}"
 

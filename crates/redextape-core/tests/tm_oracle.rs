@@ -1,20 +1,17 @@
-//! Part of the backend oracle (spec §12.1), control-flow slice: the reference tree-walker and the
-//! genuine multi-tape TM agree on straight-line + branching programs (no calls, no heap yet). Also
-//! carries the intermediate `asm-interp == TM` oracle (a disagreement localizes to asm->TM lowering)
-//! and cap-equivalence. Parts 2b-2-ii/iii/iv extend this to calls, lists, and the full
-//! `reference == lambda == TM`. As of Task 14 every demo below runs under BOTH `Unary` and `Binary`
-//! (`assert_tm_agrees`/`assert_asm_interp_matches_tm` take `enc: &dyn Encoding` and each test calls the
-//! body twice), so this file's two legs (reference==TM, asm-interp==TM) both cover the binary TM too.
+//! Part of the backend oracle (spec §12.1): the reference tree-walker and the genuine multi-tape TM
+//! agree on straight-line, branching, call and list programs. Also carries the intermediate
+//! `asm-interp == TM` oracle (a disagreement localizes to asm->TM lowering) and cap-equivalence. The
+//! full `reference == lambda == TM` is `three_way_oracle.rs`. Every demo below runs under BOTH `Unary`
+//! and `Binary` (`assert_tm_agrees`/`assert_asm_interp_matches_tm` take `enc: &dyn Encoding` and each
+//! test calls the body twice), so this file's two legs (reference==TM, asm-interp==TM) both cover the
+//! binary TM too.
 //!
 //! Both helpers use `run_tm_fitted`, not `run_tm`, and decode with `enc.at_width(width)` at the width
-//! the fit actually settled on. That was once REQUIRED: `Binary`'s decode used to be width-strict, and
-//! decoding a fitted-at-16 tape with a 64-cell `Binary` returned `None` for every demo here, not just
-//! the headline `100 * 100` case. Both decoders are structural now (`binary.rs`, "Reading a tape back"),
-//! so any instance would do.
+//! the fit actually settled on. Both decoders are structural (`binary.rs`, "Reading a tape back"), so
+//! any instance would do.
 //!
-//! It stays anyway, and not out of inertia: the fitted width is the one an oracle disagreement would be
-//! reported at, and threading it keeps `at_width` on the executed path rather than leaving it to the
-//! width-equivalence suite alone.
+//! Threading the fitted width is a convention, not a requirement: it keeps `at_width` on the executed
+//! path rather than leaving it to the width-equivalence suite alone.
 
 // Test target: a fixture that fails to build IS the failure this file reports, so panicking is
 // deliberate here. The `allow-*-in-tests` keys in `clippy.toml` only reach `#[test]` functions and
@@ -73,7 +70,7 @@ fn assert_asm_interp_matches_tm(src: &str, enc: &dyn Encoding) {
 }
 
 /// The control-flow demo subset: arithmetic, monus, comparisons, if, let/let mut, assign, while, seq.
-/// No `call`/`ret`, no list/heap ops (those are Parts 2b-2-ii/iii). Values stay well under MAX_FIELD_WIDTH.
+/// No `call`/`ret`, no list/heap ops. Values stay well under MAX_FIELD_WIDTH.
 const CONTROL_FLOW_DEMOS: &[&str] = &[
     "1 + 2 * 3",
     "3 - 5",
@@ -83,7 +80,7 @@ const CONTROL_FLOW_DEMOS: &[&str] = &[
     "let x = 1; let y = x + x; y * 3",
     "let mut x = 1; x = x + 10; x = x * 2; x",
     "let mut n = 4; let mut acc = 0; while n > 0 { acc = acc + 1; n = n - 1; } acc",
-    // Latent-trap program (Plan 2 follow-up): an immutable `let` shadowing a mutable variable.
+    // Latent-trap program: an immutable `let` shadowing a mutable variable.
     "let mut x = 1; x = x + 1; let x = x + 10; x",
 ];
 
@@ -104,18 +101,17 @@ fn asm_interp_matches_tm_on_control_flow_demos() {
 }
 
 /// The call/recursion demo subset: named-fn calls, recursion, a directly-applied lambda, and a `fn`
-/// inside a mutation region (Plan-2 latent trap). Still NO list/heap ops (Part 2b-2-iii). Values « 64.
+/// inside a mutation region (a latent trap). NO list/heap ops. Values « 64.
 ///
 /// Unary recursion is step-heavy (`Call`/`Ret` save/restore a whole frame per level, and each frame op
-/// is many TM steps), so these were checked against `TM_DEFAULT_CAPS` (5,000,000 steps/cells) before
-/// being added: even the heaviest, `sum(5)`, halts in ~178k steps (~3.6% of the cap, no `HitCap`), so
+/// is many TM steps), but these fit `TM_DEFAULT_CAPS` (5,000,000 steps/cells), so
 /// `assert_tm_agrees`/`assert_asm_interp_matches_tm` are used unmodified — no raised-cap variant needed.
 const CALL_DEMOS: &[&str] = &[
     "let add1 = |x| x + 1; add1(41)",
     "fn sum(n) { if n == 0 { 0 } else { n + sum(n - 1) } } sum(5)",
     "fn count_down(n) { let mut acc = 0; while n > 0 { acc = acc + 1; n = n - 1; } acc } count_down(4)",
     "fn add1(x) { x + 1 } fn pair_sum(a, b) { a + b } pair_sum(1, add1(2))",
-    // Plan-2 latent-trap program: a `fn` defined inside a mutation region.
+    // Latent-trap program: a `fn` defined inside a mutation region.
     "let mut acc = 0; fn bump(n) { n + 1 } acc = bump(acc); acc = bump(acc); acc",
 ];
 
@@ -136,7 +132,7 @@ fn asm_interp_matches_tm_on_call_demos() {
 }
 
 /// The list-CONSTRUCTION demo subset: nil, cons, is_empty, and a list literal (desugars to a cons
-/// spine). NO head/tail (those dereference a pointer — Part 2b-2-iii-b). Values/lengths « MAX_FIELD_WIDTH.
+/// spine). NO head/tail (those dereference a pointer). Values/lengths « MAX_FIELD_WIDTH.
 const LIST_BUILD_DEMOS: &[&str] = &["is_empty(nil)", "is_empty(cons(1, nil))", "[1, 2, 3]", "cons(1, cons(2, nil))"];
 
 #[test]
@@ -156,9 +152,8 @@ fn asm_interp_matches_tm_on_list_build_demos() {
 }
 
 /// The list-ACCESS demo subset: head/tail deref on real (non-nil) lists — head -> a Nat, tail -> nil or
-/// a sub-list pointer, and a nested head(tail(...)). NO faulting access (head/tail of nil): the reference
-/// faults (RunError::Runtime) while the TM defensively halts, which is an oracle mismatch BY DESIGN;
-/// oracle-level fault-equivalence is Part 2b-2-iv. Values/lengths « MAX_FIELD_WIDTH.
+/// a sub-list pointer, and a nested head(tail(...)). NO faulting access (head/tail of nil).
+/// Values/lengths « MAX_FIELD_WIDTH.
 const LIST_ACCESS_DEMOS: &[&str] = &[
     "head(cons(7, nil))",
     "tail(cons(7, nil))",

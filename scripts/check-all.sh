@@ -2,14 +2,12 @@
 # The full feature-matrix gate: every config the crate supports, in one command.
 #
 # CI invokes this same script (.forgejo/workflows/ci.yml), so the local and CI gates cannot drift.
-# The pre-commit hooks deliberately do NOT run it — they stay fast: fmt and clippy on a Rust change,
-# biome and tsc on a web/ one, the Lua/parser check on a grammar one, plus eight `always_run` tree-wide
-# gates (control bytes, `file:line` citations, symbol-citation attributions, documented figures, shared
-# doc regions, colour literals, grammar `.wasm`, third-party licences) on every commit. **This comment
-# read "four" and named only the first four** — check-colours and check-grammar-wasm were added later
-# and never counted here; recount is `.pre-commit-config.yaml`'s `always_run: true` entries, not this
-# comment.
-# Thirteen hooks; this is the before-a-merge check.
+# The pre-commit hooks deliberately do NOT run it — they stay fast: fmt and clippy on a Rust change, biome
+# and tsc on a web/ one, the Lua/parser check on a grammar one, plus the `always_run` tree-wide gates
+# (control bytes, `file:line` citations, symbol-citation attributions, documented figures, shared doc
+# regions, colour literals, grammar `.wasm`, third-party licences) on every commit; count them in
+# `.pre-commit-config.yaml`'s `always_run: true` entries, not in this comment. This script is the
+# before-a-merge check.
 #
 #   scripts/check-all.sh                  # everything: base, LLVM and browser configs
 #   scripts/check-all.sh --no-llvm        # skip LLVM (no toolchain installed)
@@ -18,15 +16,14 @@
 #   scripts/check-all.sh --browser-only   # ONLY the browser leg — NOT a full gate on its own
 #   scripts/check-all.sh --list           # print the legs the mode selects; run nothing
 #
-# --llvm-only exists because CI's `rust-llvm` job invoked this script with no flag, and no flag is
-# `--no-llvm` PLUS the LLVM configs by construction — so that job recompiled every non-LLVM config
-# the `rust` job had already run, from a different cache key. See
-# docs/superpowers/specs/2026-08-04-ci-scope-filters-design.md §2.2.
+# --llvm-only exists because no flag is `--no-llvm` PLUS the LLVM configs by construction, so CI's
+# `rust-llvm` job, invoked with no flag, would recompile every non-LLVM config the `rust` job has already
+# run, from a different cache key. See docs/superpowers/specs/2026-08-04-ci-scope-filters-design.md §2.2.
 #
 # THE BROWSER TIER IS THE SAME SHAPE OF ANSWER TO THE SAME SHAPE OF PROBLEM, and it is worth saying
 # why it is a TIER rather than a separate script. `wasm-pack test` needs a browser, which not every
-# machine running this gate has — exactly the position LLVM was in. LLVM was not excluded for that;
-# it was given a tier and an opt-out. A separate `check-browser.sh` would sit OUTSIDE the union
+# machine running this gate has — exactly LLVM's position, and LLVM is not excluded for it;
+# it has a tier and an opt-out. A separate `check-browser.sh` would sit OUTSIDE the union
 # invariant below, so "full gate" would quietly stop meaning full, and it would be a script nobody
 # runs. The browser leg covers what nothing else can: the wasm32 rows below check that the crates
 # BUILD for wasm32, while `#[wasm_bindgen]`'s generated glue and `serde-wasm-bindgen`'s marshalling
@@ -50,14 +47,14 @@ cd "$(dirname "$0")/.."
 # the gate writes the same bindings the web build consumes instead of a stray copy nobody reads.
 export TS_RS_EXPORT_DIR="$PWD/web/bindings"
 
-# THE SCRIPT ALREADY ASSUMED CWD == REPO ROOT IN SEVERAL PLACES BEFORE THIS LINE EXISTED — it was
-# just never enforced. `check_grammars` walks `grammars/` for `tree-sitter.json`, the browser leg passes the relative
-# `crates/redextape-wasm` straight to `wasm-pack test`, and `ensure_treesitter`'s probe list checks
-# the relative `.tools/tree-sitter`: every one of those already broke, silently or with a raw `cd:
-# ...: No such file or directory`, when run from a subdirectory. Nothing else in this file depends on
-# the CALLER's directory — every other leg is a `cargo` invocation, and cargo finds the workspace
-# manifest by searching upward regardless of cwd, so this `cd` (matching scripts/setup-dev.sh's own
-# first line) can only fix cases that were already broken, not change a working one.
+# THE SCRIPT ASSUMES CWD == REPO ROOT IN SEVERAL PLACES, AND THE `cd` ABOVE ENFORCES IT.
+# `check_grammars` walks `grammars/` for `tree-sitter.json`, the browser leg passes the relative
+# `crates/redextape-wasm` straight to `wasm-pack test`, and `ensure_treesitter`'s probe list checks the
+# relative `.tools/tree-sitter`: without the `cd`, every one of those breaks, silently or with a raw
+# `cd: ...: No such file or directory`, when run from a subdirectory. Nothing else in this file depends
+# on the CALLER's directory — every other leg is a `cargo` invocation, and cargo finds the workspace
+# manifest by searching upward regardless of cwd, so the `cd` (matching scripts/setup-dev.sh's own `cd`)
+# can only fix cases that break without it, not change a working one.
 
 run() { echo; echo "==> $*"; "$@"; }
 usage() {
@@ -69,7 +66,7 @@ usage() {
 # a full run — a flag that quietly does the opposite of what was asked is the same class of bug as a
 # gate that quietly covers less than it claims.
 #
-# THREE INDEPENDENT WANTS, NOT ONE `mode`, and the change is what a third tier forces. With two tiers
+# THREE INDEPENDENT WANTS, NOT ONE `mode`, because a third tier forces it. With two tiers
 # a single `mode` variable could name every reachable state; with three it cannot, because "skip LLVM
 # but keep the browser" and "skip both" are different runs and CI needs to ask for each. The `--no-*`
 # flags subtract, the `--x-only` flags select exactly one tier, and the conflicts below are rejected
@@ -166,7 +163,8 @@ LEGS=(
   # so it is a config like `ts`, and a config no leg builds is one whose tests never run.
   "base|clippy|-p redextape-wasm --features probe-no-tm-scratch-ceiling --all-targets"
   "base|test|-p redextape-wasm --features probe-no-tm-scratch-ceiling"
-  # `probe-asm-copy` does the same for `MAX_SCRATCH_ASM_BYTES`, and adds an export; the same reason for a leg of its own.
+  # `probe-asm-copy` does the same for `MAX_SCRATCH_ASM_BYTES`, and adds an export; the same reason gives
+  # it a leg of its own.
   "base|clippy|-p redextape-wasm --features probe-asm-copy --all-targets"
   "base|test|-p redextape-wasm --features probe-asm-copy"
   # `redextape-lsp-wasm` is a `cdylib` the browser loads, so "does it build for wasm32" is a
@@ -239,22 +237,19 @@ if [ "$list_only" -eq 1 ]; then
   exit 0
 fi
 
-# THE RUNNER IS cargo-nextest, not `cargo test`. `cargo test` runs the 22 test binaries ONE AT A TIME
-# and shares threads only WITHIN a binary; nextest schedules every test from every binary in one
-# parallel pool. Measured on this suite (2026-07-28, 12 logical CPUs): 231.7s -> 135.2s wall, the same
-# 623 tests with the same pass set, parallelism 1.39x -> 2.51x. Nothing about any test changed.
+# THE RUNNER IS cargo-nextest, not `cargo test`. `cargo test` runs the test binaries ONE AT A TIME and
+# shares threads only WITHIN a binary; nextest schedules every test from every binary in one parallel pool.
 #
 # A hard failure, not a fallback to `cargo test`. A gate that silently runs a different runner
 # depending on what happens to be installed is a gate whose behaviour nobody can predict — and the
 # fallback would be the SLOW path, so the machine least likely to notice is the one that needed the
 # speed most.
 #
-# DEMANDED ONLY WHEN A `test` LEG IS ACTUALLY SELECTED, which `--browser-only` is the first mode to
-# make matter: its two legs run `wasm-pack`, never `cargo nextest`. An unconditional guard would
-# refuse a browser run on a machine that has Chrome and wasm-pack but no nextest — a precondition
-# demanded for work the run does not do, which is the same defect as `ensure_browser`'s Chrome-name
-# problem wearing different clothes. `--llvm-only` still needs it and still gets it: that tier has
-# `test` rows.
+# DEMANDED ONLY WHEN A `test` LEG IS ACTUALLY SELECTED, which matters for `--browser-only`: its two
+# legs run `wasm-pack`, never `cargo nextest`. An unconditional guard would refuse a browser run on a
+# machine that has Chrome and wasm-pack but no nextest — a precondition demanded for work the run does
+# not do, which is the same defect as `ensure_browser`'s Chrome-name problem wearing different clothes.
+# `--llvm-only` still needs it and still gets it: that tier has `test` rows.
 needs_nextest=0
 for row in "${LEGS[@]}"; do
   tier="${row%%|*}"; rest="${row#*|}"; kind="${rest%%|*}"
@@ -267,45 +262,35 @@ if [ "$needs_nextest" -eq 1 ] && ! cargo nextest --version >/dev/null 2>&1; then
   exit 1
 fi
 
-# NEXTEST DOES NOT RUN DOCTESTS. `cargo test` ran them as a side effect, so swapping the runner would
-# silently drop them — the exact "gate covers less than its name claims" defect this project keeps
-# finding. Every `test` leg therefore pairs nextest with an explicit `cargo test --doc` AT THE SAME
-# FEATURE FLAGS. Keep the pairing if a leg is ever added.
-#
-# There is one doctest in the tree today, `ty::show` (crates/redextape-core/src/ty.rs) — the paired
-# run is what actually executes it, since nextest alone cannot. Its value only grows as more `///`
-# examples land.
+# NEXTEST DOES NOT RUN DOCTESTS. `cargo test` runs them as a side effect, so nextest alone silently
+# drops them — a gate covering less than its name claims. Every `test` leg therefore pairs nextest
+# with an explicit `cargo test --doc` AT THE SAME FEATURE FLAGS. Keep the pairing if a leg is ever added.
 test_cfg() { run cargo nextest run "$@"; run cargo test "$@" --doc; }
 
 # The wasm32 target is what makes `redextape-core`'s WASM-cleanliness a CHECK rather than a claim.
 #
-# A HARD FAILURE, not a skip. Before this leg existed the rule was "keep [dependencies] empty", which
-# is checkable in one line but is a PROXY: it is sufficient for WASM-clean and not necessary (serde
-# compiles to wasm32; a proc-macro dependency cannot break a wasm32 build at all). The proxy was worth
-# keeping only while nothing checked the real property — and nothing did, since `rustup target add
-# wasm32-unknown-unknown` appeared in ci.yml exactly once, inside the `web` job, which was gated off.
-# A gate that silently skips when the target is missing would recreate that situation with extra steps.
+# A HARD FAILURE, not a skip. A rule of "keep [dependencies] empty" would be checkable in one line but is a
+# PROXY: it is sufficient for WASM-clean and not necessary (serde compiles to wasm32; a proc-macro
+# dependency cannot break a wasm32 build at all). Only building for wasm32 checks the real property, and a
+# gate that silently skips when the target is missing would leave it unchecked.
 #
 # TWO FAILURE MODES, not one. `rustup target list --installed 2>/dev/null` swallows stderr, so a
-# missing or broken `rustup` reported exactly the same "target is not installed" message as a present
-# rustup missing the target — and pointed at `rustup target add`, a command that does not exist on a
-# box without rustup. Distro-packaged Rust without rustup is a real configuration, so rustup's
+# missing or broken `rustup` would report exactly the same "target is not installed" message as a
+# present rustup missing the target — and point at `rustup target add`, a command that does not exist
+# on a box without rustup. Distro-packaged Rust without rustup is a real configuration, so rustup's
 # presence is checked first and reported honestly before the target is checked at all.
 #
-# CALLED FROM `base|wasmprobe|` AND AGAIN FROM EVERY `wasm` ROW, and the redundancy is the cheaper
-# mistake. NO COUNT IS GIVEN, deliberately: this paragraph said "THREE ROWS" while the table held four
-# `wasm` rows, having been written when it held two — the stale-figure failure this repository keeps
-# finding, here in the comment explaining why the redundancy is deliberate. `base|wasmprobe|` runs it
-# FIRST in its tier so a missing target fails in seconds rather than after the workspace clippy and
-# test legs have already run — the same reason `llvm|probe|` leads the LLVM tier. Each `wasm` row then
-# calls it again so every leg is correct on its own:
-# a future edit that drops or reorders the probe row degrades the error message, where removing this
-# call would let a leg run without its precondition and fail inside cargo instead. It is a `grep`
-# against a list rustup already has in memory, so repeating it per row costs nothing worth saving.
-# `ensure_llvm_prefix` is NOT called this way for a different reason: its own guard (`if [ -z
-# "${LLVM_SYS_221_PREFIX:-}" ]`) memoizes the probe, so the exported variable persists for the rest of
-# the process and a repeat call would add nothing but a duplicate log line. One call suffices — that is
-# why one row calls it, not that a second call would cost something.
+# CALLED FROM `base|wasmprobe|` AND AGAIN FROM EVERY `wasm` ROW, and the redundancy is the cheaper mistake.
+# NO COUNT IS GIVEN, deliberately: a count of the `wasm` rows here would go stale. `base|wasmprobe|` runs it
+# FIRST in its tier so a missing target fails in seconds rather than after the workspace clippy and test
+# legs have already run — the same reason `llvm|probe|` leads the LLVM tier. Each `wasm` row then calls it
+# again so every leg is correct on its own: a future edit that drops or reorders the probe row degrades the
+# error message, where removing this call would let a leg run without its precondition and fail inside cargo
+# instead. It is a `grep` against a list rustup already has in memory, so repeating it per row costs nothing
+# worth saving. `ensure_llvm_prefix` is NOT called this way for a different reason: its own guard
+# (`if [ -z "${LLVM_SYS_221_PREFIX:-}" ]`) memoizes the probe, so the exported variable persists for the
+# rest of the process and a repeat call would add nothing but a duplicate log line. One call suffices — that
+# is why one row calls it, not that a second call would cost something.
 ensure_wasm_target() {
   if ! command -v rustup >/dev/null 2>&1; then
     echo "error: rustup not found, so this gate cannot check the wasm32 build." >&2
@@ -326,7 +311,7 @@ ensure_wasm_target() {
 #
 # `/usr` is in the list because that is where most Linux distributions put LLVM (Arch, Fedora, and
 # openSUSE all ship `/usr/bin/llvm-config`); without it this gate could not run its LLVM configs on
-# those systems at all, and reported "no LLVM 22 found" on a machine with LLVM 22 installed.
+# those systems at all, and would report "no LLVM 22 found" on a machine with LLVM 22 installed.
 #
 # THE VERSION CHECK IS THE POINT, not decoration. Three of the four entries are UNVERSIONED
 # (`/opt/homebrew/opt/llvm`, `/usr/local/opt/llvm`, `/usr`) — only `/usr/lib/llvm-22` names 22 in the
@@ -354,39 +339,8 @@ ensure_llvm_prefix() {
   echo "==> using LLVM at $LLVM_SYS_221_PREFIX"
 }
 
-# The browser leg runs `wasm-pack test --headless --chrome`, which needs two things this gate cannot
-# assume: wasm-pack, and a Chrome that wasm-pack can find.
-#
-# A HARD FAILURE, not a skip — the same rule `ensure_wasm_target` follows, and for a sharper reason
-# here. A browser leg that silently skips when Chrome is absent would report green on exactly the
-# machines where it covered nothing, and the boundary it guards (`#[wasm_bindgen]`'s generated glue,
-# `serde-wasm-bindgen`'s marshalling) is invisible to every other leg in this file. `--no-browser`
-# is how a machine without Chrome asks to skip it, and asking is the point: the flag leaves a record
-# in the invocation, an auto-skip leaves none.
-#
-# CHROME IS PROBED BY PATH BECAUSE THE NAME IS THE ACTUAL PROBLEM, and this cost real time twice
-# before it was written down. wasm-pack looks for `google-chrome` (or `$CHROME_PATH`); the Debian and
-# Arch packages both install the binary as `google-chrome-stable`, so a machine with Chrome fully
-# installed reports it as missing. Setting CHROME_PATH from the first binary that actually exists is
-# the fix, and doing it here rather than in a README is what stops the next person rediscovering it.
-#
-# CHROMEDRIVER IS MATCHED TO CHROME BY `ensure_chromedriver` BELOW, and this paragraph used to say the
-# opposite: "chromedriver is deliberately NOT probed: wasm-pack downloads a matching one on first use."
-# It does not download a matching one — it downloads the LATEST one, which is the same thing only while
-# the machine's Chrome is also the latest. That stopped being true when Chrome 152 shipped, and the
-# resulting failure is unusually hard to read: chromedriver starts, announces success, and the run dies
-# with `http status: 404` and `driver status: signal: 9 (SIGKILL)`. See that function for the
-# measurement both ways.
-#
-# `crates/redextape-wasm/webdriver.json` CARRIES THE TWO FLAGS THIS LEG NEEDS IN A CONTAINER, and it
-# lives there because that is where wasm-bindgen-test looks (crate root, `goog:chromeOptions.args`).
-# `--no-sandbox` because CI containers run as root and Chrome refuses to sandbox as root;
-# `--disable-dev-shm-usage` because a container's default /dev/shm is too small and Chrome crashes
-# partway through instead of failing at startup. Both are no-ops for correctness locally, which is
-# why one file serves both. `headless` is NOT in that list: wasm-bindgen-test enables it by default,
-# and `--headless` on the wasm-pack command line is the separate switch that keeps it on.
 # The tree-sitter CLI, which regenerates the committed parsers. PINNED to v0.25.10 — NOT the newest
-# NUMBERED release (that is v0.26.12), and NOT the "0.27.0" a locally installed CLI may report. See
+# NUMBERED release, and NOT the version a locally installed CLI built off `master` may report. See
 # scripts/install-treesitter-ci.sh for why the pin sits below the newest release: 0.26+'s prebuilt
 # Linux asset needs GLIBC_2.39, which the CI runner does not have, and building 0.26 from source needs
 # `libclang`, which the runner also does not have. The grammars are generated at language ABI 15,
@@ -397,15 +351,14 @@ ensure_llvm_prefix() {
 #
 # THE PINNED BINARY IS PREFERRED OVER `$PATH`, not merely probed alongside it, and the order below is
 # load-bearing rather than cosmetic. This developer's machine keeps Arch's `tree-sitter-cli-git` — a
-# build off `master`, well past v0.25.10, self-reporting "0.27.0" — at /usr/sbin, which
-# `command -v tree-sitter` finds once it is on `$PATH`. Regenerating with that build is CORRECT work
-# that nonetheless emits a different `.minor_version` (design doc §8.1's measurement), so probing
-# `$PATH` before the pinned install would redden the very leg meant to catch a STALE parser, on
+# build off `master`, well past v0.25.10 — at /usr/sbin, which `command -v tree-sitter` finds
+# once it is on `$PATH`. Regenerating with that build is CORRECT work that nonetheless emits
+# generated files that differ from the committed ones (design doc §8.1), so probing `$PATH`
+# before the pinned install would redden the very leg meant to catch a STALE parser, on
 # exactly the machine most likely to be regenerating one. Probe order: an explicit override, then the
 # repo-local install `scripts/setup-dev.sh` places (via `scripts/install-treesitter-ci.sh .tools`),
-# then `$HOME/.cargo/bin` — where CI installs it (`scripts/install-treesitter-ci.sh` defaults there
-# now, matching scripts/install-nextest-ci.sh, since `/usr/local/bin` assumed a root nothing
-# demonstrated), then `$PATH`, then the paths this machine has historically kept it at.
+# then `$HOME/.cargo/bin` — where CI installs it (`scripts/install-treesitter-ci.sh` defaults there,
+# matching scripts/install-nextest-ci.sh), then `$PATH`, then `/usr/local/bin` and `/usr/sbin`.
 ensure_treesitter() {
   local c
   if [ -z "${TREE_SITTER:-}" ]; then
@@ -431,9 +384,9 @@ ensure_treesitter() {
     echo "  set it explicitly: TREE_SITTER=/path/to/tree-sitter scripts/check-all.sh" >&2
     exit 1
   fi
-  # A ONE-LINE DIFF IN GENERATED C IS A TERRIBLE WAY TO LEARN YOUR CLI IS THE WRONG BUILD. This
-  # asserts the version up front instead, so the failure names the mismatch rather than presenting as
-  # a spurious `check_grammars` diff on `.minor_version`.
+  # A DIFF IN GENERATED C IS A TERRIBLE WAY TO LEARN YOUR CLI IS THE WRONG BUILD. This asserts the
+  # version up front instead, so the failure names the mismatch rather than presenting as a spurious
+  # `check_grammars` diff in the generated files.
   #
   # THE CAPTURE ITSELF MUST NOT BE ALLOWED TO KILL THE SCRIPT UNDER `set -e`/`pipefail`. A binary that
   # exists, is executable-bit-set, and still cannot run — the wrong OS/architecture, a corrupt partial
@@ -456,9 +409,9 @@ ensure_treesitter() {
   version="$(echo "$raw" | awk '{print $2}')"
   if [ "$version" != "0.25.10" ]; then
     echo "error: tree-sitter at $TREE_SITTER reports $version, not the pinned 0.25.10." >&2
-    echo "  a different build (e.g. Arch's tree-sitter-cli-git off master, which self-reports" >&2
-    echo "  \"0.27.0\") regenerates a different .minor_version and reddens this leg for no real" >&2
-    echo "  reason — see docs/superpowers/specs/2026-08-20-tree-sitter-grammars-design.md §8.1." >&2
+    echo "  a different build (e.g. Arch's tree-sitter-cli-git off master) regenerates files that differ" >&2
+    echo "  from the committed ones and reddens this leg for no real reason — see" >&2
+    echo "  docs/superpowers/specs/2026-08-20-tree-sitter-grammars-design.md §8.1." >&2
     echo "  install the pinned build: scripts/install-treesitter-ci.sh .tools" >&2
     echo "  set it explicitly: TREE_SITTER=/path/to/tree-sitter scripts/check-all.sh" >&2
     exit 1
@@ -467,6 +420,35 @@ ensure_treesitter() {
   echo "==> using tree-sitter $version at $TREE_SITTER"
 }
 
+# The browser leg runs `wasm-pack test --headless --chrome`, which needs two things this gate cannot
+# assume: wasm-pack, and a Chrome that wasm-pack can find.
+#
+# A HARD FAILURE, not a skip — the same rule `ensure_wasm_target` follows, and for a sharper reason
+# here. A browser leg that silently skips when Chrome is absent would report green on exactly the
+# machines where it covered nothing, and the boundary it guards (`#[wasm_bindgen]`'s generated glue,
+# `serde-wasm-bindgen`'s marshalling) is invisible to every other leg in this file. `--no-browser`
+# is how a machine without Chrome asks to skip it, and asking is the point: the flag leaves a record
+# in the invocation, an auto-skip leaves none.
+#
+# CHROME IS PROBED BY PATH BECAUSE THE NAME IS THE ACTUAL PROBLEM. wasm-pack looks for `google-chrome` (or
+# `$CHROME_PATH`); the Debian and Arch packages both install the binary as `google-chrome-stable`, so a
+# machine with Chrome fully installed reports it as missing. Setting CHROME_PATH from the first binary that
+# actually exists is the fix, and doing it here rather than in a README is what stops the next person
+# rediscovering it.
+#
+# CHROMEDRIVER IS MATCHED TO CHROME BY `ensure_chromedriver` BELOW: wasm-pack does not download a matching
+# chromedriver, it downloads the LATEST one, which is the same thing only while the machine's Chrome is also
+# the latest. When they differ the failure is unusually hard to read: chromedriver starts, announces
+# success, and the run dies with `http status: 404` and `driver status: signal: 9 (SIGKILL)`. See that
+# function for why the major version is enough.
+#
+# `crates/redextape-wasm/webdriver.json` CARRIES THE TWO FLAGS THIS LEG NEEDS IN A CONTAINER, and it
+# lives there because that is where wasm-bindgen-test looks (crate root, `goog:chromeOptions.args`).
+# `--no-sandbox` because CI containers run as root and Chrome refuses to sandbox as root;
+# `--disable-dev-shm-usage` because a container's default /dev/shm is too small and Chrome crashes
+# partway through instead of failing at startup. Both are no-ops for correctness locally, which is
+# why one file serves both. `headless` is NOT in that list: wasm-bindgen-test enables it by default,
+# and `--headless` on the wasm-pack command line is the separate switch that keeps it on.
 ensure_browser() {
   if ! command -v wasm-pack >/dev/null 2>&1; then
     echo "error: wasm-pack not found (the browser leg drives the wasm boundary through it)." >&2
@@ -498,16 +480,12 @@ ensure_browser() {
 # A chromedriver whose MAJOR VERSION MATCHES THE INSTALLED CHROME, placed on `$PATH` so wasm-pack
 # uses it instead of fetching its own.
 #
-# THIS EXISTS BECAUSE THE COMMENT ABOVE USED TO SAY WASM-PACK "DOWNLOADS A MATCHING ONE ON FIRST USE",
-# AND THAT WAS NEVER TRUE. It downloads the LATEST one. The two agree only while the machine's Chrome
-# is also the latest, which is a coincidence that expires on every Chrome release — and it expired:
-# Chrome 152 shipped, wasm-pack began fetching chromedriver 152, and every machine still on 151
-# started failing. The failure does not say "version mismatch"; chromedriver starts fine, reports
+# THIS EXISTS BECAUSE WASM-PACK DOWNLOADS THE LATEST chromedriver, NOT A MATCHING ONE. The two agree only
+# while the machine's Chrome is also the latest, which is a coincidence that expires on every Chrome
+# release. The failure does not say "version mismatch"; chromedriver starts fine, reports
 # `ChromeDriver was started successfully`, and then the runner gets `http status: 404` and reports
-# `driver status: signal: 9 (SIGKILL)`, which reads like a crash or an OOM. MEASURED BOTH WAYS on one
-# machine: driver 152 against Chrome 151 reproduces that signature byte for byte; driver 151.0.7922.138
-# against Chrome 151.0.7922.137 runs 24 tests green. Major-matching is enough — the patch levels differ
-# in that passing run.
+# `driver status: signal: 9 (SIGKILL)`, which reads like a crash or an OOM. Major-matching is enough:
+# driver 151.0.7922.138 runs green against Chrome 151.0.7922.137.
 #
 # ON `$PATH` RATHER THAN VIA `--chromedriver`, because `$PATH` is the hook wasm-pack documents for
 # exactly this ("if the chromedriver WebDriver client is not on the `$PATH`, and not specified with
@@ -542,8 +520,8 @@ ensure_chromedriver() {
       exit 1
     fi
     # ONE ENDPOINT, KEYED BY MILESTONE, so this asks the question it actually has ("a driver for Chrome
-    # $major") rather than the one that broke us ("the newest driver"). `latest-patch` within the
-    # milestone is fine: the passing measurement above pairs .138 with .137.
+    # $major") rather than "the newest driver", which need not match it. `latest-patch` within the
+    # milestone is fine: the major version is what must match (above).
     url="$(curl -fsSL https://googlechromelabs.github.io/chrome-for-testing/latest-versions-per-milestone-with-downloads.json 2>/dev/null \
       | tr ',' '\n' | grep -F "/$major." | grep -F 'chromedriver-linux64.zip' | grep -oE 'https://[^"]+' | head -1 || true)"
     if [ -z "$url" ]; then
@@ -567,41 +545,30 @@ ensure_chromedriver() {
 
 check_grammars() {
   local g status=0 untracked
-  # SELECTED BY `tree-sitter.json`, NOT BY BEING A DIRECTORY, and the difference is not hypothetical.
-  # This loop globbed `grammars/*/` and so treated every directory under `grammars/` as a grammar; the
-  # branch that added `grammars/shared/` — prose, no `grammar.js` — made it die with `Failed to load
-  # grammar.js -- No such file or directory`. `scripts/check-doc-figures.sh`'s `grammar_count` broke in
-  # the same commit for the same reason and is corrected the same way. A directory under `grammars/`
-  # is now a grammar when it says so, which is also what makes `tree-sitter.json` load-bearing
+  # SELECTED BY `tree-sitter.json`, NOT BY BEING A DIRECTORY: `grammars/shared/` holds prose and no
+  # `grammar.js`, and a loop over `grammars/*/` dies on it with `Failed to load grammar.js -- No such file
+  # or directory`. `scripts/check-doc-figures.sh`'s `grammar_count` selects the same way. A directory under
+  # `grammars/` is a grammar when it says so, which is also what makes `tree-sitter.json` load-bearing
   # everywhere else: without it the CLI silently generates the wrong ABI.
   for g in $(find grammars -mindepth 2 -maxdepth 2 -name tree-sitter.json -printf '%h/\n' | sort); do
     echo "==> regenerating and testing ${g}"
-    # SAME SUBSHELL AS THE REGENERATE STEP, and `test` runs only if `generate` succeeded — a stale or
-    # broken `parser.c` is not a corpus the tests below should even attempt to read. Neither command is
-    # guarded by an `if`/`&&`/`||` at the STATEMENT level that reaches this function's caller, so a
-    # failure here is traced the same way `generate`'s already was: `set -e` (in effect for this whole
-    # script) kills the run on the spot, with the tree-sitter CLI's own output as the last thing
-    # printed, exactly as a `generate` failure already did before `test` existed. This is "layer 1" of
-    # the testing story the design and the grammar README both describe, and the design's own
-    # disclosed gap — that the differential checks captured spans, never tree SHAPE — names this corpus
-    # as the thing that covers it. A gate that regenerates but never runs it would leave that
-    # disclosed gap enforced nowhere: a tree-shape regression regenerates clean (parser.c still matches
-    # grammar.js) and only the corpus notices.
+    # SAME SUBSHELL AS THE REGENERATE STEP, and `test` runs only if `generate` succeeded — a stale or broken
+    # `parser.c` is not a corpus the tests below should even attempt to read. Neither command is guarded by an
+    # `if`/`&&`/`||` at the STATEMENT level that reaches this function's caller, so a failure here is traced
+    # the same way `generate`'s already was: `set -e` (in effect for this whole script) kills the run on the
+    # spot, with the tree-sitter CLI's own output as the last thing printed. This is "layer 1" of the testing
+    # story the design and the grammar README both describe, and the design's own disclosed gap — that the
+    # differential checks captured spans, never tree SHAPE — names this corpus as the thing that covers it. A
+    # gate that regenerates but never runs it would leave that disclosed gap enforced nowhere: a tree-shape
+    # regression regenerates clean (parser.c still matches grammar.js) and only the corpus notices.
     ( cd "$g" && "$TREE_SITTER" generate && "$TREE_SITTER" test )
   done
-  # TWO SEPARATE CHECKS, not one, because they catch DIFFERENT failures needing DIFFERENT responses
-  # from the reader. `git diff --exit-code` sees only TRACKED modifications — a regenerated file that
-  # was never `git add`ed reports clean, since diff has nothing to compare it against. That is not
-  # hypothetical: a reviewer of this leg dropped an untracked file under `grammars/` and this check
-  # returned clean. Four grammars exist today (`tree-sitter-redextape`, `tree-sitter-redextape-lambda`,
-  # `tree-sitter-redextape-tm` and `tree-sitter-redextape-asm`) and every one of their generated files
-  # is tracked, so nothing is broken — but ANY grammar added later whose `src/` was never staged would
-  # regenerate green FOREVER, silently, which is exactly the gap this leg exists to close. This
-  # comment has needed its own count corrected twice now: once when `-tm` arrived and this sentence
-  # still named it as a hypothetical fourth, and again now that `-asm` is a real fourth. This version
-  # names no specific NEXT grammar, on purpose — the hazard is the untracked file, not any particular
-  # grammar or count. `git ls-files --others --exclude-standard` is what actually lists it. Restricted
-  # to `grammars/` so an unrelated dirty or untracked file elsewhere in the tree does not fail this leg.
+  # TWO SEPARATE CHECKS, not one, because they catch DIFFERENT failures needing DIFFERENT responses from the
+  # reader. `git diff --exit-code` sees only TRACKED modifications — a regenerated file that was never
+  # `git add`ed reports clean, since diff has nothing to compare it against. So ANY grammar added later
+  # whose `src/` was never staged would regenerate green FOREVER, silently, which is exactly the gap this
+  # leg exists to close. `git ls-files --others --exclude-standard` is what actually lists it. Restricted to
+  # `grammars/` so an unrelated dirty or untracked file elsewhere in the tree does not fail this leg.
   if ! git diff --quiet --exit-code -- grammars/; then
     echo "error: the committed generated parsers differ from what grammar.js produces." >&2
     # NOT "run tree-sitter generate" — this leg already did, above, and the diff below is that
@@ -614,10 +581,11 @@ check_grammars() {
     status=1
   fi
   # `--exclude-standard` HONOURS .gitignore, WHICH IS THIS CHECK'S OWN BLIND SPOT. No grammar
-  # directory carries a .gitignore today and the top-level one names nothing under grammars/, so the
-  # check is sound as written — but some tree-sitter project templates DO ship one, and a generated
-  # file it happened to match would become invisible here. That is the same defect this arm exists to
-  # close, one level up. If a grammar ever gains a .gitignore, re-check what this can still see.
+  # directory carries a .gitignore, and no pattern in the top-level one matches a file that
+  # `tree-sitter generate` writes, so the check is sound as written — but some tree-sitter project
+  # templates DO ship one, and a generated file it happened to match would become invisible here. That
+  # is the same defect this arm exists to close, one level up. If a grammar ever gains a .gitignore,
+  # re-check what this can still see.
   untracked="$(git ls-files --others --exclude-standard -- grammars/)"
   if [ -n "$untracked" ]; then
     echo "error: regenerating left untracked file(s) under grammars/ — a DIFFERENT problem from a" >&2
@@ -641,21 +609,20 @@ do_leg() {
     wasmprobe) ensure_wasm_target ;;
     # Parameterized on cargo args, not a second kind: a `wasm` row is `cargo check --target
     # wasm32-unknown-unknown` plus whatever the row supplies, so `--features serde` builds exactly the
-    # wasm32+serde configuration `Cargo.toml`'s `serde` dependency comment cites — the one config the
-    # default-features-only wasm leg never built.
+    # wasm32+serde configuration `Cargo.toml`'s `serde` dependency comment cites — a config a
+    # default-features-only wasm leg would never build.
     #
-    # THE PACKAGE MOVED FROM HERE INTO THE ROWS when `redextape-wasm` arrived. It used to be hardcoded
-    # as `-p redextape-core --lib`, which cannot express a second crate: appending `-p redextape-wasm`
-    # to that would check both packages in one invocation and report them as one leg, so a crate whose
-    # ONLY real target is wasm32 would fail under the other crate's name. Each row names its own
-    # package now, which costs one repeated fragment per row and buys a leg per crate.
+    # EACH ROW NAMES ITS OWN PACKAGE, which costs one repeated fragment per row and buys a leg per crate. A
+    # hardcoded `-p redextape-core --lib` cannot express a second crate: appending `-p redextape-wasm` to
+    # that would check both packages in one invocation and report them as one leg, so a crate whose ONLY
+    # real target is wasm32 would fail under the other crate's name.
     wasm)   ensure_wasm_target; run cargo check --target wasm32-unknown-unknown "$@" ;;
     # NOT a `cargo` leg. Regenerates each grammar and fails if the committed output differs, because
     # `src/parser.c` is a build artifact checked into git and nothing else can tell whether it was
     # built from the `grammar.js` beside it.
     grammar) ensure_treesitter; check_grammars ;;
-    # NOT a `cargo` leg, and unlike `grammar)` above it needs no tree-sitter CLI: it hashes four
-    # `parser.c` and four `.wasm` and compares them to a manifest. Cheap enough to sit beside the
+    # NOT a `cargo` leg, and unlike `grammar)` above it needs no tree-sitter CLI: it hashes each
+    # grammar's `parser.c` and `.wasm` and compares them to a manifest. Cheap enough to sit beside the
     # other grammar leg at the top of the tier.
     grammarwasm) run scripts/check-grammar-wasm.sh --self-test && run scripts/check-grammar-wasm.sh ;;
     browserprobe) ensure_browser ;;
@@ -673,11 +640,9 @@ for row in "${LEGS[@]}"; do
   selects "$tier" || continue
   read -r -a leg_args <<< "$argstr"
   # Guarded expansion: with `set -u`, "${leg_args[@]}" on an empty array aborts as an unbound
-  # variable on bash < 4.4 — that boundary is a documented bash fact (bash's own changelog), not a
-  # guess. What is untested is not the version number but whether this script actually runs, let
-  # alone is supported, under bash that old: this is an inference from the LLVM probe's
-  # /opt/homebrew/opt/llvm entry above (which suggests a macOS/Homebrew, bash-3.2-vintage target),
-  # and "older bash" below names that untested support claim, not the 4.4 boundary itself.
+  # variable on bash < 4.4 (bash's changelog). The LLVM probe's /opt/homebrew/opt/llvm entry above
+  # suggests a macOS/Homebrew, bash-3.2-vintage target; whether this script actually runs under bash
+  # that old is untested.
   do_leg "$kind" ${leg_args[@]+"${leg_args[@]}"}
 done
 

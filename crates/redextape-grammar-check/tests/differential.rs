@@ -12,8 +12,7 @@ fn the_grammar_agrees_with_classify_source_on_every_corpus_program() {
 }
 
 /// The differential must be capable of failing. A grammar that agreed with nothing would pass a
-/// comparison that silently compared nothing, and this repository has shipped a gate that could not
-/// fail before — see the roadmap's citation-gate entries.
+/// comparison that silently compared nothing.
 #[test]
 fn the_comparison_can_fail() {
     // `@@@` is not lexable: `classify_source` recovers and classifies what it can while the grammar
@@ -21,20 +20,20 @@ fn the_comparison_can_fail() {
     //
     // Asserts WHICH branch fired, not just that the call errored — `.is_err()` alone would still pass
     // if a later edit made this hit the per-index or length branch instead of the ERROR-node guard it
-    // is meant to exercise, the same gap `the_lambda_comparison_can_fail` was found to have left open
-    // on this branch. This is the ERROR-node guard: `compare_classified` checks it first and returns
-    // before the per-index or length comparisons ever run.
+    // is meant to exercise. This is the ERROR-node guard: `compare_classified` checks it first and
+    // returns before the per-index or length comparisons ever run.
     let err = compare("let x = @@@;").expect_err("the comparison must reject un-lexable input");
     assert!(err.contains("ERROR/MISSING nodes"), "expected the ERROR-node guard's message, got: {err}");
 }
 
 /// `the_comparison_can_fail` above only ever exercises the ERROR-node guard: for `let x = @@@;` the
 /// two sides happen to agree on all four real spans, so `compare`'s own comparison — the per-index
-/// mismatch loop and the `want.len() != got.len()` extra-spans block — never runs. Both are untested
-/// by every other test in this crate: the shipped `HIGHLIGHTS` never disagrees with `classify_source`
-/// anywhere the corpus or the generated programs reach. These two tests drive `compare_with` with a
-/// deliberately wrong query, the same device `a_conflicting_query_is_rejected` (tests/captures.rs)
-/// uses for `captures_with`, to pin that the comparison itself can fail, not just its guard.
+/// mismatch loop and the `want.len() != got.len()` extra-spans block — never runs. For the
+/// mini-language, neither fires in any other test: the shipped `HIGHLIGHTS` never disagrees with
+/// `classify_source` anywhere the corpus or the generated programs reach. These two tests drive
+/// `compare_with` with a deliberately wrong query, the same device `a_conflicting_query_is_rejected`
+/// (tests/captures.rs) uses for `captures_with`, to pin that the comparison itself can fail, not just
+/// its guard.
 ///
 /// This one drives the length branch. `(number) @number` alone is a strict SUBSET of the shipped
 /// queries: over "1 + x" it captures only "1", never the operator or the identifier after it. The two

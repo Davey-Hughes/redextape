@@ -30,16 +30,15 @@ impl Scheme {
 ///
 /// This is a TOTALITY guard on untrusted input, not a language limit. The parse below is iterative,
 /// so parsing itself cannot overflow — but `Ty::List` holds a `Box<Ty>`, so a 100,000-deep type
-/// overflows the stack in its recursive `Drop` on the way out of the function that built it. Refusing
-/// to build it is the fix. Nothing the typechecker infers from real source comes close to 64.
+/// overflows the stack in its recursive `Drop` on the way out of the function that built it. Nothing
+/// the typechecker infers from real source comes close to 64.
 pub const MAX_TY_DEPTH: usize = 64;
 
 /// Render `ty` in the surface type syntax: `Nat`, `Bool`, `Unit`, `List<Nat>`, `(Nat) -> Bool`, `t0`.
 ///
-/// Moved here from `typeck`, which used it only for error messages, because the TM text form's
-/// `result` directive needs the same rendering and a second printer would be a second thing to keep
-/// in agreement. `parse_ty` is its partial inverse — partial because `Fun`/`Var` print but do not
-/// parse back (see `parse_ty`).
+/// Shared by `typeck`'s error messages and the TM text form's `result` directive, because a second
+/// printer would be a second thing to keep in agreement. `parse_ty` is its partial inverse — partial
+/// because `Fun`/`Var` print but do not parse back (see `parse_ty`).
 ///
 /// ```
 /// use redextape_core::ty::{Ty, show};
@@ -51,8 +50,8 @@ pub const MAX_TY_DEPTH: usize = 64;
 /// pairs every config with an explicit `cargo test --doc`. With no doctest anywhere, that paired run
 /// would execute nothing and assert nothing, and a config added later with a bare `cargo nextest run`
 /// would drop doctests with no failure to show for it. One real doctest makes the wiring OBSERVABLE:
-/// the gate prints `1 passed` per config, so a dropped pairing shows up as a zero. Same reasoning as
-/// the slow tier's `#[ignore]` marker, which was chosen over an env-var guard because `cargo test`
+/// the gate prints `1 passed` per config, so a dropped pairing shows up as a zero. Same
+/// reasoning as the slow tier's `#[ignore]` marker rather than an env-var guard: `cargo test`
 /// prints the ignored count.
 pub fn show(ty: &Ty) -> String {
     match ty {

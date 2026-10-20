@@ -25,8 +25,7 @@
 # why. Run alone, this writes an empty stamp, which no probe run accepts.
 #
 # The corpus brackets `MAX_SCRATCH_TM_BYTES`, 6,100,000 bytes: `head([1, 2])` through `single-tape, two-symbol` and
-# `[1, 2, 3]` through `fold, two-symbol` are the two files either side of it. That constant's doc gives their sizes
-# and the commit they were emitted at.
+# `[1, 2, 3]` through `fold, two-symbol` are the two files either side of it. That constant's doc gives their sizes.
 set -euo pipefail
 
 root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"

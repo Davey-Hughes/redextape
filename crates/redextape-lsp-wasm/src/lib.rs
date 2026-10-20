@@ -10,10 +10,7 @@
 //! sends. The client hand-writes the subset it uses instead, and this boundary stays what JSON-RPC
 //! already is: a JSON message in, JSON messages out.
 //!
-//! **THE SERVER IS UNCHANGED BY THIS CRATE EXISTING, WHICH WAS MEASURED BEFORE IT WAS WRITTEN.** A
-//! throwaway build of exactly this shape answered `initialize`, `didOpen`, `didChange`,
-//! `formatting`, `documentSymbol`, `definition` and `references` correctly under Node, and returned
-//! one real diagnostic for broken input in each of the four languages. See the part 3 design's §2.3.
+//! **THE SERVER IS UNCHANGED BY THIS CRATE EXISTING.** See the part 3 design's §2.3.
 
 use wasm_bindgen::prelude::*;
 
@@ -57,11 +54,10 @@ impl LspServer {
     /// JS exception, which kills that worker's message handler, so every later request dies with
     /// it. `[]` costs one request and keeps the worker serving the rest.
     ///
-    /// **WHAT IT COSTS IS STATED PLAINLY, BECAUSE THE CLIENT HAS NO TIMEOUT TO RECOVER WITH.** An
-    /// earlier draft of this comment said "the client's own timeout is what reports it";
-    /// `lsp-client.ts` says the opposite in capitals, and deliberately — a ceiling whose only
-    /// reachable cause is already handled by a listener is a ceiling that never fires, which this
-    /// repository has paid for before. So a request dropped here hangs until the worker dies.
+    /// **WHAT IT COSTS IS STATED PLAINLY, BECAUSE THE CLIENT HAS NO TIMEOUT TO RECOVER WITH.**
+    /// `lsp-client.ts` says so, deliberately — a ceiling whose only reachable cause is already
+    /// handled by a listener is a ceiling that never fires. So a request dropped here hangs until the
+    /// worker dies.
     ///
     /// **NOTHING IN THE APP CAN REACH IT.** `LspClient` builds every message with
     /// `JSON.stringify`, so the parse below cannot fail on traffic this project produces; the arm
@@ -141,8 +137,7 @@ mod tests {
 
     /// **THE ONE FOOTGUN OF THIS BOUNDARY, PINNED.** A `languageId` the server does not match is not
     /// an error — `Language::from_language_id` answers `None` and every language request returns
-    /// empty, so a wrong id looks exactly like a clean file. It cost the part 3 design a whole round
-    /// of wrong measurements before the spec was written.
+    /// empty, so a wrong id looks exactly like a clean file.
     #[test]
     fn a_broken_program_in_each_language_reports_exactly_one_diagnostic() {
         for (language_id, ext, text) in [
@@ -171,9 +166,8 @@ mod tests {
         }
     }
 
-    /// The same documents with an id the server does not serve. **This is the test that would have
-    /// caught the design's bad measurement**, and it asserts the silence is real rather than
-    /// asserting it away.
+    /// The same documents with an id the server does not serve. It asserts the silence is real rather
+    /// than asserting it away.
     #[test]
     fn an_unserved_language_id_is_silent_rather_than_an_error() {
         let mut s = initialized();
@@ -225,9 +219,8 @@ mod tests {
     ///
     /// **IT ARRIVES AS `null`, NOT AS `[]`, AND THE CLIENT MUST NOT MAP OVER IT.** `formatting`
     /// builds an `Option<Vec<TextEdit>>` and hands it straight to `from_success`, so a document that
-    /// does not parse answers `"result": null`. The part 3 design said the server produced an empty
-    /// edit list and it does not; this test is what found that, and `lsp-client.ts` treats a `null`
-    /// result and an empty array as the same answer because of it.
+    /// does not parse answers `"result": null`, and `lsp-client.ts` treats a `null` result and an empty
+    /// array as the same answer.
     #[test]
     fn formatting_an_unparseable_document_answers_null_rather_than_an_empty_list() {
         let mut s = initialized();
@@ -328,11 +321,9 @@ mod tests {
     /// label in it through the UI. This test checks below the UI what that one gesture does not: an
     /// instruction's answer, and a label's two roles, each answering its own sentence.
     ///
-    /// **THE REFERENCE ARM HAD ZERO COVERAGE.** `hover::asm`'s `Role::Reference` branch
-    /// (`"A jump or call target."`) was never exercised anywhere in the tree — Task 5's fixtures only
-    /// ever hovered a label DEFINITION (`f:`). A bug that swapped the two arms' messages would have
-    /// passed every existing test. The fixture below carries a label defined once and referenced
-    /// twice, so both roles get hovered and their answers are checked to actually differ.
+    /// The fixture below carries a label defined once and referenced twice, so both roles get hovered,
+    /// including `hover::asm`'s `Role::Reference` branch (`"A jump or call target."`), and their answers
+    /// are checked to actually differ: a bug that swapped the two arms' messages fails here.
     #[test]
     fn asm_hover_answers_an_instruction_and_tells_a_label_reference_from_its_definition() {
         // The same fixture `asm_syntax.rs`'s `NAV_ASM` uses, whose own doc comment records it as
@@ -400,9 +391,9 @@ mod tests {
             "a definition must not read as a reference: {definition_text}"
         );
 
-        // This is the gap the task closes: a swap of the two arms' messages would leave every other
-        // assertion in this file untouched, so the two answers must be checked against each other,
-        // not just against their own expected substring.
+        // A swap of the two arms' messages would leave every other assertion in this file untouched,
+        // so the two answers must be checked against each other, not just against their own
+        // expected substring.
         assert_ne!(reference_text, definition_text, "a reference and a definition must say different things");
     }
 }

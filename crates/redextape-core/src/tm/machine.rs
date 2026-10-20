@@ -1,7 +1,7 @@
 //! The multi-tape Turing machine model: a finite `Vec` of named control states, each with an ordered
 //! list of transition rules over `tapes` two-way-infinite tapes. Deterministic (first matching rule
 //! wins; `read[i] = None` is a per-tape wildcard) and flat (`Vec`-backed, no recursive tree — so no
-//! hand-written `Drop`). Part 2b's `encoding`/`lower_tm` build `Machine`s; this module is data + checks.
+//! hand-written `Drop`). `encoding`/`lower_tm` build `Machine`s; this module is data + checks.
 
 use std::collections::{BTreeSet, HashSet};
 
@@ -52,7 +52,7 @@ pub struct Machine {
 
 impl Machine {
     /// The sorted set of concrete symbols appearing in any rule (wildcards excluded). Derived — the
-    /// text form and Plan 4's view model present it; it is not stored.
+    /// text form and the view model present it; it is not stored.
     #[must_use]
     pub fn alphabet(&self) -> Vec<Symbol> {
         let mut set: BTreeSet<Symbol> = BTreeSet::new();

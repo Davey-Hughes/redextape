@@ -8,7 +8,7 @@
 //! unrelated to bank navigation — it branches on STACK-tape emptiness — but lives here too because it
 //! is likewise a control-flow gadget every encoding shares rather than reimplements.
 //!
-//! `unary` is the v1 implementation (a value is `v` marks, left-justified, blank-padded).
+//! `unary` is the mark-count implementation (a value is `v` marks, left-justified, blank-padded).
 //! `binary` is the base-2 implementation (a value is exactly `width` digits, LSB-first).
 
 use crate::core::BinOp;
@@ -20,10 +20,9 @@ pub mod unary;
 pub use binary::Binary;
 pub use unary::Unary;
 
-/// The pluggable numeric encoding (the swappable seam). `Unary` is the v1 implementation; a `Binary`
-/// impl is the committed follow-on. Gadgets build states into `b`, flowing `entry -> exit`, under the
-/// home convention (REG head on the leading `#`; WORK head at its leftmost (value) cell — blank only
-/// when WORK is empty) on entry and exit.
+/// The pluggable numeric encoding (the swappable seam), implemented by `Unary` and `Binary`. Gadgets
+/// build states into `b`, flowing `entry -> exit`, under the home convention (REG head on the leading
+/// `#`; WORK head at its leftmost (value) cell — blank only when WORK is empty) on entry and exit.
 // `arith`/`compare` carry (b, entry, exit, op, ra, rb, rd) — the register-machine three-address shape;
 // the operands are intrinsic to the interface, so allow the arg count on the whole seam.
 #[allow(clippy::too_many_arguments)]
@@ -47,9 +46,9 @@ pub trait Encoding {
     fn decode_nat(&self, reg_cells: &[Symbol], slot: Slot) -> Option<u64>;
     /// This instance's field width, in TAPE CELLS — not directly a value bound, since what a `width`-cell
     /// field can hold is encoding-specific: `v < width` for `Unary`, `v < 2^width` for `Binary`. Both
-    /// implementations are bounded today (always `Some`). `None` means an unbounded encoding — no
-    /// fixed cell count, hence no value ceiling — which is how `run_tm_fitted`'s auto-fit would know not
-    /// to search at all; no such implementation exists in the tree yet.
+    /// implementations are bounded (always `Some`). `None` means an unbounded encoding — no fixed cell
+    /// count, hence no value ceiling — which is how `run_tm_fitted`'s auto-fit would know not to search
+    /// at all; no such implementation exists in the tree.
     fn field_width(&self) -> Option<usize>;
     /// The symbols that may legally appear INSIDE a field — never `SEP`, which delimits fields rather
     /// than filling them. Unary fields hold marks and padding blanks; binary fields hold digits.
@@ -111,7 +110,7 @@ pub trait Encoding {
     /// `n_loc = 0` pushes only the tag. A COPY (not a move): the REG `Loc` fields are left UNCHANGED.
     fn push_frame(&self, b: &mut Builder, entry: StateId, exit: StateId, n_loc: u32, tag: u64);
     /// The first half of the `Ret`-side gadget: pop the `Loc` fields (top->down, reverse of the save)
-    /// back into REG, leaving the STACK head on the tag field for `Task 4` to dispatch. `from` `entry`
+    /// back into REG, leaving the STACK head on the tag field for the second half to dispatch. `from` `entry`
     /// (a non-empty STACK at the top, REG/WORK home): pop the top `n_loc` fields — they are
     /// `Loc_{n_loc-1}` … `Loc0`, since `push_frame` saved `Loc0..Loc_{n_loc-1}` above the tag — and write
     /// each back into its REG `Loc` slot. Flows `entry -> exit`. On exit the STACK head is at the top
@@ -137,14 +136,13 @@ pub trait Encoding {
     /// `rd` is written.
     fn is_empty_op(&self, b: &mut Builder, entry: StateId, exit: StateId, rl: Slot, rd: Slot);
     /// `rd <- head(field rl)`: read the pointer in `rl`, seek the cell, write its head-word into `rd`.
-    /// Flows `entry -> exit` with all heads home/top on the value exit. A `nil` pointer (`rl == 0`) or a
-    /// dangling pointer has no value and SPINS to a cap (`HitCap`), matching λ (Ω) and the reference
+    /// Flows `entry -> exit` with all heads home/top on the value exit. A `nil` pointer (`rl == 0`) or
+    /// a dangling pointer has no value and SPINS to a cap (`HitCap`), matching λ (Ω) and the reference
     /// (Runtime); `rd` is not written. BOTH the head-word and the structural navigation follow the
-    /// encoding: `Unary` walks the cell chain by counting marks, `Binary` skips whole fixed-width cells
-    /// with a counted chain driven by a binary counter. (This doc previously said the navigation was
-    /// "unary-always"; the binary impl makes that false, and a trait doc asserting an implementation
-    /// property its second implementation violates is worse than saying nothing.) PRECONDITION: `rd` distinct from `rl` (`rd` is
-    /// written last, after `rl` is fully read — but keep them distinct; `lower_asm` emits fresh operands).
+    /// encoding: `Unary` walks the cell chain by counting marks, `Binary` skips whole fixed-width
+    /// cells with a counted chain driven by a binary counter. PRECONDITION: `rd` distinct from `rl`
+    /// (`rd` is written last, after `rl` is fully read — but keep them distinct; `lower_asm` emits
+    /// fresh operands).
     fn head_op(&self, b: &mut Builder, entry: StateId, exit: StateId, rl: Slot, rd: Slot);
     /// As `head_op`, but writes the tail-word into `rd`.
     fn tail_op(&self, b: &mut Builder, entry: StateId, exit: StateId, rl: Slot, rd: Slot);
@@ -260,8 +258,8 @@ mod tests {
     /// `seek_slot` + `rewind_home` navigate a `#`-delimited equal-width bank on ANY tape, over ANY
     /// content alphabet: seek to field `k`, mark where you landed, walk home, and the head must be
     /// back on cell 0. Run here on WORK over the BINARY digit set — a combination no unary gadget
-    /// produces — because that is the case the generalization exists for and the one a REG/mark-only
-    /// test would not cover.
+    /// produces — because that is the case the `tape`/`content` parameters exist for and the one a
+    /// REG/mark-only test would not cover.
     #[test]
     fn seek_and_rewind_navigate_any_tape_and_alphabet() {
         const W: usize = 3;

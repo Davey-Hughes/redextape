@@ -1,8 +1,8 @@
 //! Sharing-aware decode: an aliased sub-list is built once, not once per pointer into it.
 //!
 //! The fixture throughout is `tails([1..m])`, whose inner lists all alias suffixes of ONE spine —
-//! `2m` heap cells carrying `m^2 + m + 1` logical nodes. That is not a crafted heap; it is what an
-//! ordinary `tails` returns, because `Instr::Tail` is a pointer read rather than an allocation.
+//! `2m` heap cells carrying on the order of `m^2` logical nodes. That is not a crafted heap; it is what
+//! an ordinary `tails` returns, because `Instr::Tail` is a pointer read rather than an allocation.
 //!
 //! Design: docs/superpowers/specs/2026-08-28-sharing-aware-decode-design.md
 
@@ -51,8 +51,8 @@ fn list_of_lists() -> Ty {
     Ty::List(Box::new(Ty::List(Box::new(Ty::Nat))))
 }
 
-/// THE TEST THAT COULD NOT PASS BEFORE THIS BRANCH. At m = 64,000 the un-memoized decode is about
-/// 4.1e9 logical nodes against a 20,000,000 budget, so it is refused. Memoized it is ~192,000.
+/// At m = 64,000 the un-memoized decode is about 4.1e9 logical nodes against a 20,000,000 budget, so
+/// it is refused. Memoized it is ~192,000.
 #[test]
 fn tails_decodes_far_past_the_unmemoized_budget() {
     let m = 64_000;
@@ -65,26 +65,21 @@ fn tails_decodes_far_past_the_unmemoized_budget() {
     );
 }
 
-/// The value-directed twin of `tails_decodes_far_past_the_unmemoized_budget`. This one had no budget
-/// to exceed, so before the memo it did not refuse — it allocated: at m = 4,000 the un-memoized walk
-/// built 16,012,001 nodes and about 1 GiB. At m = 64,000 it is ~4.1e9 nodes, which does not complete.
+/// The value-directed twin of `tails_decodes_far_past_the_unmemoized_budget`, under the same
+/// `MAX_DECODE_NODES` budget: un-memoized, m = 64,000 is ~4.1e9 nodes, which that budget refuses.
 ///
-/// Slow tier, not for a reason `check-slow.sh`'s other entries share: `decode_word_memo` recurses
-/// once per list element (unlike the type-directed decoder, whose recursion follows TYPE nesting, not
-/// value length), so its stack depth is the list length — measured at `m + 2` for m = 10, 100, 1,000,
-/// 5,000 and 20,000. NOT `2m`: `decode_word_memo` computes `head` fully, and lets it unwind, before it
-/// computes `tail`, so the deepest point of the whole decode occurs ONCE — while decoding the single
-/// longest sub-list, nested one frame inside the outer call — and that peak is never added to the
-/// later traversal of the outer spine, which is shallow because every element after the first is a
-/// memo hit. The two `m`-deep contributions a naive sum would add together never coexist on the stack.
-/// So m = 64,000 needs a call stack ~64,002 frames deep. A release build's frames fit the workspace's
-/// 32 MiB `RUST_MIN_STACK` with room to spare; a debug build's do not — confirmed by running this test
-/// directly (bypassing `#[ignore]`) under `cargo test` (no `--release`), which aborts with "thread ...
-/// has overflowed its stack" at the default 32 MiB, and passes once `RUST_MIN_STACK` is raised to
-/// 64 MiB. This is a property of the recursion's SHAPE, not a bug this task's memo introduced or is
-/// scoped to fix, and `m + 2` agrees with the plan's standing constraint that this decoder's stack
-/// depth is the list length (design plan, "Out of scope, and must not get worse") — the `2m` framing
-/// this comment used to carry contradicted that constraint.
+/// Slow tier, not for a reason `check-slow.sh`'s other entries share: `decode_word_memo` recurses once
+/// per list element (unlike the type-directed decoder, whose recursion follows TYPE nesting, not value
+/// length), so its stack depth is the list length (`m + 2`). NOT `2m`: `decode_word_memo` computes
+/// `head` fully, and lets it unwind, before it computes `tail`, so the deepest point of the whole
+/// decode occurs ONCE — while decoding the single longest sub-list, nested one frame inside the outer
+/// call — and that peak is never added to the later traversal of the outer spine, which is shallow
+/// because every element after the first is a memo hit. The two `m`-deep contributions a naive sum
+/// would add together never coexist on the stack. So m = 64,000 needs a call stack ~64,002 frames
+/// deep. A release build's frames fit the workspace's 32 MiB `RUST_MIN_STACK` with room to spare; a
+/// debug build's do not. This is a property of the recursion's SHAPE, and `m + 2` agrees with the
+/// plan's standing constraint that this decoder's stack depth is the list length (design plan, "Out of
+/// scope, and must not get worse").
 #[test]
 #[ignore = "slow tier: needs a release build's smaller stack frames — a debug build overflows the \
             workspace's 32 MiB test stack at this recursion depth; run via scripts/check-slow.sh"]
@@ -100,9 +95,8 @@ fn value_directed_tails_is_linear() {
     );
 }
 
-/// Equivalence at the sizes the un-memoized decoder could still finish. The expected value is built
-/// independently by `tails_value` rather than captured from the old decoder, so this keeps biting
-/// after the old code path is gone.
+/// Both decoders at three sizes. The expected value is built independently by `tails_value`, so the
+/// test does not lean on the decoder it checks.
 #[test]
 fn memoized_decode_equals_the_independently_built_value() {
     for m in [1_000_u64, 2_000, 4_000] {
@@ -138,14 +132,13 @@ fn a_cyclic_heap_is_still_a_mismatch() {
 /// A cycle that never reaches a populated memo entry is still caught by the ordinary step bound:
 /// decoding the outer list's first element populates `memo[(1,1)]` and `memo[(2,1)]`, and the second
 /// element then cycles (`3 -> 4 -> 3 -> ...`) without ever visiting pointer 1 or 2. This shows a
-/// populated memo does not spuriously short-circuit an unrelated cycle elsewhere in the heap — which
-/// is narrower than this test was once named to suggest, when it claimed the cycle ran INTO the
-/// memoized pointer and raced the memo-hit check against the step bound.
+/// populated memo does not spuriously short-circuit an unrelated cycle elsewhere in the heap.
 ///
-/// That race cannot happen with any fixture: a pointer enters the memo only after a decode proves its
+/// A cycle running INTO a memoized pointer, racing the memo-hit check against the step bound,
+/// cannot happen with any fixture: a pointer enters the memo only after a decode proves its
 /// tail-chain reaches nil, a property of the raw pointer graph that holds at every depth, so a
-/// pointer that sits on a non-terminating cycle can never be memoized at any depth. The scenario this
-/// test was originally written to cover is unsatisfiable.
+/// pointer that sits on a non-terminating cycle can never be memoized at any depth. That scenario
+/// is unsatisfiable.
 ///
 /// Consequently this test does not exercise PASS 1's `|| memo.contains_key(&(w, depth))` exit at all
 /// — removing that disjunct would not change the outcome here — so it must not be cited as coverage
@@ -183,7 +176,7 @@ fn a_spine_that_converges_on_a_memoized_pointer_still_decodes() {
     assert!(got == want, "decode_asm_ty of the convergent spine did not match the independently constructed value");
 }
 
-/// The value-directed decoder is bounded now, and says so. A 3-cell heap under a budget it cannot
+/// The value-directed decoder is bounded, and says so. A 3-cell heap under a budget it cannot
 /// meet is not constructible from outside, so this asserts the two things that ARE observable: an
 /// ordinary decode reports `Ok`, and a representation mismatch reports `Mismatch` rather than a bare
 /// `None` — i.e. the reason channel exists and carries the right arm.

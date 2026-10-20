@@ -2,9 +2,9 @@
 //! state block. All three maps are keyed to Core node ids, which is what lets the UI light the same
 //! construct in every pane at once.
 //!
-//! THE TM HALF ADDS NO LOWERING. It inverts the chain the 2026-07-24 slice already shipped:
-//! `lower_tm_mapped` gives `state -> code index`, `lower_asm_mapped` gives `code index -> NodeId`.
-//! `attribute.rs` composes these forwards to attribute step counts; this inverts the same composition.
+//! THE TM HALF ADDS NO LOWERING. It inverts the existing chain: `lower_tm_mapped` gives
+//! `state -> code index`, `lower_asm_mapped` gives `code index -> NodeId`. `attribute.rs` composes these
+//! forwards to attribute step counts; this inverts the same composition.
 //!
 //! THE ASM HALF IS THE CHAIN'S MIDDLE LINK, KEPT. `lower_asm_mapped`'s `code index -> NodeId` is what the
 //! TM half composes through; `asm_owner` records it on its own, because the asm view links instructions
@@ -31,15 +31,6 @@
 //! It does not fall back to a surrounding block. A caller that wants "nearest enclosing block" for
 //! highlighting computes that at its own call site, where it reads as the UI heuristic it is rather
 //! than as map data. `tests/sourcemap_coverage.rs` pins both halves of that boundary.
-//!
-//! THAT POINTER READ `lower_asm.rs` line 321 UNTIL THIS COMMIT, AND IT WAS ALREADY WRONG WHEN IT WAS
-//! WRITTEN — invalidated by its own commit, which is §1.1's mechanism caught in the act. Line 321
-//! WAS `if src != dst`, in the PARENT of the commit that wrote this citation (`9fbd911`, the Plan 4
-//! producer slice); that same commit added seven lines above it in `lower_asm.rs` — two no-panic
-//! rewrites in `Ctx::bind` and `Ctx::bind_fn`, unrelated to anything this module doc argues — so the
-//! pointer was seven lines short the moment it landed. `clippy::pedantic` (#31) later moved the
-//! guard a further 35 lines, and this conversion found 321 holding the `"$box"` arm of
-//! `lower_builtin_apply`'s dispatch `match`, a different function entirely.
 
 use std::collections::{BTreeMap, BTreeSet};
 
@@ -91,16 +82,15 @@ impl SourceMap {
     /// built from its program; a machine the TM refuses to lay out empties the TM half alone; and a λ
     /// backend that returns `LowerError` leaves `node_to_lambda` empty.
     ///
-    /// Depth is one of those refusals rather than a hole in them, which it was not until the λ lowering
-    /// grew a guard of its own. Every recursive pass either side of this call is now bounded —
-    /// `lower_asm::MAX_LOWER_DEPTH` and `defunc::MAX_DEFUNC_DEPTH` (580) on the TM side,
-    /// `lambda::lower::MAX_LAMBDA_LOWER_DEPTH` (700) on the λ side — so the wide band of programs that
-    /// parse and desugar cleanly and then nest far deeper than any backend can walk (a long list literal
-    /// desugars to a `cons`-`Apply` spine, and `MAX_PARSE_DEPTH` counts only nested parens/blocks) yields
-    /// empty halves instead of an uncatchable stack-overflow `SIGABRT`. That is the whole difference
-    /// between a map a caller can rely on and one that can take the process — or the browser tab — with
-    /// it. `build_is_total_on_a_core_too_deep_for_the_tm_lowering` pins it on an input past the depth at
-    /// which the unguarded λ lowering used to abort.
+    /// Depth is one of those refusals rather than a hole in them. Every recursive pass either side of
+    /// this call is bounded — `lower_asm::MAX_LOWER_DEPTH` and `defunc::MAX_DEFUNC_DEPTH` (580) on the TM
+    /// side, `lambda::lower::MAX_LAMBDA_LOWER_DEPTH` (700) on the λ side — so the wide band of programs
+    /// that parse and desugar cleanly and then nest far deeper than any backend can walk (a long list
+    /// literal desugars to a `cons`-`Apply` spine, and `MAX_PARSE_DEPTH` counts only nested
+    /// parens/blocks) yields empty halves instead of an uncatchable stack-overflow `SIGABRT`. That is the
+    /// whole difference between a map a caller can rely on and one that can take the process — or the
+    /// browser tab — with it. `build_is_total_on_a_core_too_deep_for_the_tm_lowering` pins it on an input
+    /// past the depth at which an unguarded λ lowering would abort.
     pub fn build(core: &Core, enc: &dyn Encoding) -> SourceMap {
         let asm = asm_half(core);
         let tm = asm.as_ref().map_or_else(TmHalf::default, |a| tm_half(a, enc));
@@ -254,14 +244,14 @@ struct TmHalf {
 
 fn tm_half(asm: &AsmHalf, enc: &dyn Encoding) -> TmHalf {
     let AsmHalf { prog, origins, synthetic } = asm;
-    // `None` is the state-ceiling refusal — one of `lower_tm_mapped`'s four layout refusals (`MAX_SLOTS`,
-    // `MAX_FRAME_LOC`, `MAX_MUL_INSTRS`, `MAX_MACHINE_STATES`; see its doc). NONE of the four is
-    // re-derived here: `asm_half` handles a different error entirely, `LowerError`'s
-    // `Unsupported`/`TooDeep` from `lower_asm_mapped`/`defunc_mapped`. All four layout refusals arrive
-    // here, at this single `else`, deferred whole to `lower_tm_mapped`'s own `Option` — there is
-    // nothing here that could drift from what it checks. It gives back empty TM maps, as `build` does when
-    // `asm_half` refuses: a refused program built no machine, so there is no state to own anything. The
-    // asm half is unaffected — the program still lowered.
+    // `None` is any of `lower_tm_mapped`'s four layout refusals (`MAX_SLOTS`, `MAX_FRAME_LOC`,
+    // `MAX_MUL_INSTRS`, `MAX_MACHINE_STATES`; see its doc). NONE of the four is re-derived here:
+    // `asm_half` handles a different error entirely, `LowerError`'s `Unsupported`/`TooDeep` from
+    // `lower_asm_mapped`/`defunc_mapped`. All four layout refusals arrive here, at this single `else`,
+    // deferred whole to `lower_tm_mapped`'s own `Option` — there is nothing here that could drift from
+    // what it checks. It gives back empty TM maps, as `build` does when `asm_half` refuses: a refused
+    // program built no machine, so there is no state to own anything. The asm half is unaffected — the
+    // program still lowered.
     let Some((machine, state_origins)) = lower_tm_mapped(prog, enc) else {
         return TmHalf::default();
     };
@@ -288,10 +278,6 @@ fn tm_half(asm: &AsmHalf, enc: &dyn Encoding) -> TmHalf {
         // state) and nothing else. Both enforce `MAX_MACHINE_STATES`, which is 4,295x under
         // `StateId::MAX`, so the narrowing cannot truncate. The `#[allow]` stays only because clippy
         // cannot see a guard two modules away.
-        //
-        // THIS USED TO RESTATE `Builder::state`'s ~172 GB memory argument IN FULL, which is how the
-        // same wrong reasoning came to live in two files: the argument was prose, so keeping it in
-        // step meant remembering to. Now there is one check and this cites it.
         #[allow(clippy::cast_possible_truncation)]
         out.entry(node).or_default().push(state as StateId);
     }
@@ -299,9 +285,9 @@ fn tm_half(asm: &AsmHalf, enc: &dyn Encoding) -> TmHalf {
 
     // Now the same claim keyed by name, taken from `out` rather than from the loop above so that the
     // FIRST claim on a name is settled in the order the block map records it — ascending node, then
-    // ascending state — which is the order the removed caller-side inversion used. Duplicate names are
-    // unreachable in a machine `lower_tm_mapped` builds, so the tie-break decides nothing today; it is
-    // pinned anyway, because two fields describing one lowering must not be able to disagree.
+    // ascending state. Duplicate names are unreachable in a machine `lower_tm_mapped` builds, so the
+    // tie-break decides nothing today; it is pinned anyway, because two fields describing one lowering
+    // must not be able to disagree.
     let mut names: BTreeMap<String, NodeId> = BTreeMap::new();
     for (node, block) in &out {
         for state in block {
@@ -387,13 +373,13 @@ mod tests {
     }
 
     /// `defunc` mints constructs no one wrote; the instructions they emit have no owner, and every
-    /// instruction that does have one points at source. Measured on this sample: 17 of its 54 instructions
-    /// are minted, so an `asm_owner` that dropped every owner of a program `defunc` touched fails too.
+    /// instruction that does have one points at source. 17 of its 54 instructions are minted, so an
+    /// `asm_owner` that dropped every owner of a program `defunc` touched fails too.
     #[test]
     fn instructions_defunc_minted_have_no_owner() {
         let (_, map) = map_of(MAP);
         let unowned = map.asm_owner.iter().filter(|o| o.is_none()).count();
-        assert_eq!((unowned, map.asm_owner.len()), (17, 54), "the split measured on this sample");
+        assert_eq!((unowned, map.asm_owner.len()), (17, 54), "unowned and total instructions on `MAP`");
         for (i, node) in map.asm_owner.iter().enumerate().filter_map(|(i, o)| Some((i, (*o)?))) {
             assert!(map.source_span(node).is_some(), "instruction {i}'s owner {node} was minted");
         }
@@ -452,11 +438,10 @@ mod tests {
         // replaying this through `defunc`'s own recursive passes is what the depth guard exists to
         // prevent. The TM half is simply empty, and `build` still returns.
         //
-        // 2048 IS A DEPTH THIS TEST COULD NOT USE BEFORE. It is above both backends' guards —
-        // `MAX_LOWER_DEPTH` (580) and `lambda::lower::MAX_LAMBDA_LOWER_DEPTH` (700) — so BOTH halves
-        // genuinely refuse, and it is past the ~1470 at which the once-unguarded λ lowering overflowed
-        // an 8 MiB stack in a debug build. That overflow is an uncatchable `SIGABRT`, which is why this
-        // test used to be pinned below it at 1024 and could only pin the TM half's refusal.
+        // 2048 is above both backends' guards — `MAX_LOWER_DEPTH` (580) and
+        // `lambda::lower::MAX_LAMBDA_LOWER_DEPTH` (700) — so BOTH halves genuinely refuse, and it is
+        // past the ~1470 at which an unguarded λ lowering overflows an 8 MiB stack in a debug build.
+        // That overflow is an uncatchable `SIGABRT`.
         //
         // It is still a bounded size, deliberately: the suite runs on 32 MiB threads, where an unguarded
         // lowering survives depth ~4000, so removing either guard fails this test rather than killing the

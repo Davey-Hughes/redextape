@@ -16,12 +16,10 @@
 //! So this checks the FINAL tape of a run that produced a value, which is a real property and the
 //! strongest one these tapes admit cheaply.
 //!
-//! Both properties were sabotage-verified, and the heap one earned its keep in the process. Making
-//! `cons` write a MARK where the head/tail `#` belongs turned the corpus test red on a WRONG VALUE —
-//! which the existing oracle would also have caught — but turned the generated-program property red on
-//! `fn ap(f, x) { f(x) } fn add(y) { y + 0 } ap(add, 0)`, whose answer was still CORRECT while its heap
-//! was structurally broken. That is precisely the class the value oracle cannot see, and the reason to
-//! check structure rather than only results.
+//! Making `cons` write a MARK where the head/tail `#` belongs turns the generated-program property red
+//! (sabotage-verified; one counterexample is `fn ap(f, x) { f(x) } fn add(y) { y + 0 } ap(add, 0)`),
+//! and that program's answer stays CORRECT while its heap is structurally broken. That is precisely the
+//! class the value oracle cannot see, and the reason to check structure rather than only results.
 
 // Test target: a fixture that fails to build IS the failure this file reports, so panicking is
 // deliberate here. The `allow-*-in-tests` keys in `clippy.toml` only reach `#[test]` functions and
@@ -40,8 +38,8 @@ mod common;
 // `encodings`: EVERY encoding. `run_tm_fitted` (not `run_tm`) is used everywhere below, but NOT because
 // decode needs the fitted width: both decoders are structural at every width, so a default-width instance
 // would decode a fitted tape correctly too — `a_tape_decodes_the_same_at_every_reader_width`
-// (`redextape-core/src/tm.rs`) pins exactly that. The fitted form is kept because the width it settles on is
-// worth naming in a failure message and because it keeps `at_width` on this file's executed path.
+// (`redextape-core/src/tm.rs`) pins exactly that. The fitted form is kept because it keeps `at_width` on
+// this file's executed path.
 use common::{encodings, heap_tape_is_well_formed, stack_is_empty};
 
 /// Programs spanning both tapes: list construction and access (HEAP), calls and recursion (STACK),
@@ -166,13 +164,11 @@ fn the_heap_checker_accepts_binary_digit_content_and_rejects_it_under_unary() {
 }
 
 /// The heap checker's WORD-LENGTH clause (`Encoding::heap_word_len`), which exists because
-/// `Binary::parse_heap_cells` no longer performs it.
+/// `Binary::parse_heap_cells` does not perform it.
 ///
-/// Length used to be checked twice over — the parser required each word to close exactly at `width`,
-/// and the four-way oracle ran every corpus heap through the parser. Making the parser STRUCTURAL
-/// deleted that check, so a binary word truncated by a clobbered high digit would decode to the
-/// smaller number its remaining digits spell — a plausible wrong value, and the oracle's only signal.
-/// This rung is what sees the damage instead.
+/// Because the parser is STRUCTURAL, a binary word truncated by a clobbered high digit would decode
+/// to the smaller number its remaining digits spell — a plausible wrong value, and the oracle's only
+/// signal. This rung is what sees the damage.
 ///
 /// The unary case is not decoration: `heap_word_len` returns `None` there, and a checker that answered
 /// `field_width` for both would reject every heap word holding less than the maximum value. The two

@@ -9,20 +9,17 @@ repository.workspace = true
 workspace = true
 
 [dependencies]
-# THE CRATE'S FIRST DEPENDENCY, AND IT IS OPTIONAL ON PURPOSE. `redextape-core` must build for wasm32,
-# which `scripts/check-all.sh`'s wasm leg now checks on every gate run — serde builds for wasm32, so it
-# is admissible under the rule that gate replaced ("dependencies are admissible; the gate decides",
-# PR #10). Optional and default-off keeps `cargo tree -p redextape-core --edges normal` listing only
-# this crate in a default build, which is no longer the guarantee but costs nothing to keep true.
+# Optional on purpose: `redextape-core` must build for wasm32, which `scripts/check-all.sh`'s wasm leg
+# checks on every gate run, and serde builds for wasm32. Optional and default-off keeps
+# `cargo tree -p redextape-core --edges normal` listing only this crate in a default build.
 #
-# It is here rather than in a wrapper crate because §9.1's view models are CORE outputs and there is a
-# second consumer coming: Plan 6's CLI wants them and cannot depend on a cdylib.
+# It is here rather than in a wrapper crate because §9.1's view models are CORE outputs.
 serde = { version = "1", features = ["derive"], optional = true }
-# THE CRATE'S SECOND DEPENDENCY, AND THE FIRST THAT IS NOT `serde`. It exists so `web/src/types.ts`
-# stops being a hand-written copy of this crate's wire types: `ts-rs` derives generate the TypeScript
-# from these declarations, which is the only arrangement in which a variant added here cannot reach
-# the browser unhandled. Optional and default-off, so the browser build never sees it — and
-# `scripts/check-all.sh` builds the `ts` configuration for wasm32 anyway rather than trusting that.
+# Here so `web/src/types.ts` is not a hand-written copy of this crate's wire types: `ts-rs` derives
+# generate the TypeScript from these declarations, which is the only arrangement in which a variant
+# added here cannot reach the browser unhandled. Optional and default-off, so the browser build never
+# sees it — and `scripts/check-all.sh` builds the `ts` configuration for wasm32 anyway rather than
+# trusting that.
 ts-rs = { version = "10", optional = true }
 
 [features]
@@ -35,25 +32,21 @@ ts = ["dep:ts-rs", "serde"]
 [dev-dependencies]
 # Examples and tests only.
 #
-# THE RULE IS NOW THE GATE, NOT THE EMPTY LIST. `redextape-core` must build for wasm32 — that is what
-# "WASM-clean" means and what the browser build depends on. Until 2026-08-05 this was enforced by
-# keeping `[dependencies]` empty, which is SUFFICIENT for wasm32-cleanliness but not NECESSARY: serde
-# builds for wasm32, and a proc-macro dependency cannot break a wasm32 build at all (it runs on the
-# host). The empty list was worth keeping only while nothing checked the real property, and nothing
-# did — `rustup target add wasm32-unknown-unknown` appeared in ci.yml once, inside the gated-off `web`
-# job. `scripts/check-all.sh`'s `wasm` leg now runs `cargo check --target wasm32-unknown-unknown -p
-# redextape-core --lib` on every gate run, so a dependency that breaks the browser build fails at the
-# PR that adds it. Dependencies are admissible; the gate decides.
+# THE RULE IS THE GATE, NOT AN EMPTY LIST. `redextape-core` must build for wasm32 — that is what
+# "WASM-clean" means and what the browser build depends on. An empty `[dependencies]` would be
+# SUFFICIENT for wasm32-cleanliness but not NECESSARY: serde builds for wasm32, and a proc-macro
+# dependency cannot break a wasm32 build at all (it runs on the host). `scripts/check-all.sh`'s `wasm`
+# leg runs `cargo check --target wasm32-unknown-unknown -p redextape-core --lib` on every gate run, so
+# a dependency that breaks the browser build fails at the PR that adds it. Dependencies are
+# admissible; the gate decides.
 #
-# WHAT THE GATE DOES NOT COVER, stated because the previous comment stated it honestly too: `--lib`,
-# not `--all-targets`. The dev graph is NOT wasm32-clean — `--all-targets` fails on `wait-timeout` and
-# `getrandom` via `proptest`, and failed identically before `mimalloc` existed. Nothing short of
-# dropping `proptest` would fix that, and `--lib` is what a consumer builds.
+# WHAT THE GATE DOES NOT COVER: `--lib`, not `--all-targets`. The dev graph is NOT wasm32-clean —
+# `--all-targets` fails on `wait-timeout` and `getrandom` via `proptest`. Nothing short of dropping
+# `proptest` would fix that, and `--lib` is what a consumer builds.
 #
-# `mimalloc` stays a dev-dependency for two independent reasons, neither retired by the rule change:
-# `libmimalloc-sys` is C that does not build for wasm32, and a library must not choose a global
-# allocator at all — that belongs to the final binary. See any probe's ALLOCATOR note for the measured
-# reason it is here.
+# `mimalloc` is a dev-dependency for two independent reasons: `libmimalloc-sys` is C that does not
+# build for wasm32, and a library must not choose a global allocator at all — that belongs to the
+# final binary. See any probe's ALLOCATOR note for why it is here.
 proptest = "1"
 redextape-test-support = { path = "../redextape-test-support" }
 serde_json = "1"

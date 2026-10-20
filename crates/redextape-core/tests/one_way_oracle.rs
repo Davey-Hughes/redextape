@@ -214,9 +214,9 @@ proptest! {
 }
 
 /// **A GREEN PROPTEST SAYS NOTHING ABOUT HOW DEEP IT WENT**, so the generator's reach is measured on a
-/// fixed seed and held. The floor is a tenth of the cases reaching cell -2, set well under what the
-/// generator measured when this was written, so it trips when the generator stops reaching depth rather
-/// than on a small change in the mix; the printed line gives the live counts.
+/// fixed seed and held. The floor is a tenth of the cases reaching cell -2, set well under the
+/// generator's measured reach, so it trips when the generator stops reaching depth rather than on a
+/// small change in the mix; the printed line gives the live counts.
 #[test]
 fn the_acyclic_generator_reaches_deep_excursions() {
     use proptest::strategy::ValueTree;
@@ -285,10 +285,9 @@ fn the_fold_composes_with_the_alphabet_reduction_and_stays_right() {
 /// Padding blocks for a stage 1 image, matching `two_symbol_oracle.rs`'s `PAD`.
 const PAD: usize = 2;
 
-/// **THE REGRESSION GATE ON THE FINDING THAT RESHAPED STAGE 3.** Stage 1's `<` sentinel already keeps
-/// every head of the composed canonical machine at or right of cell 0; this holds it there. Sound
-/// because stage 1 never writes `<` and stage 2 strides whole blocks, so a left excursion would put some
-/// other block — or the all-zero block — at cell 0.
+/// Stage 1's `<` sentinel already keeps every head of the composed canonical machine at or right of
+/// cell 0; this holds it there. Sound because stage 1 never writes `<` and stage 2 strides whole
+/// blocks, so a left excursion would put some other block — or the all-zero block — at cell 0.
 #[test]
 fn stages_one_and_two_never_step_left_of_cell_zero() {
     const CAPS: Caps = Caps { steps: 2_000_000_000, cells: DEFAULT_CAPS.cells };

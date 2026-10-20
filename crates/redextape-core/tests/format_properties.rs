@@ -1,7 +1,7 @@
 //! Six of the seven properties design §10 holds the formatter to: idempotence, comment preservation,
-//! semantics, reparses, width, and anchoring. The seventh — source-order, the printer's visit order —
-//! lives in `printer.rs`'s inline test module, because asserting it needs the printer's own traversal
-//! and a second one written here could only disagree with the first.
+//! semantics, reparses, width, and anchoring. The remaining one — source-order, the printer's visit
+//! order — lives in `printer.rs`'s inline test module, because asserting it needs the printer's own
+//! traversal and a second one written here could only disagree with the first.
 
 // Test target: a fixture that fails to parse IS the failure this file reports. The `allow-*-in-tests`
 // keys in `clippy.toml` reach `#[test]` functions and `#[cfg(test)]` modules, not the free helpers
@@ -30,39 +30,34 @@ const CORPUS: &[&str] = &[
     "[1, 2, 3]",
     "// leading\nlet x = 1; // trailing\nx + 1",
     "let a = 1;\n\n\n// two blanks collapse\nlet b = 2;\na + b",
-    // THE LEADING `let a = 1;` IS LOAD-BEARING, in this entry and the two bracket entries below.
-    // `vertical_rows` hardcoded `first = false`, so a list broken for a comment measured its
-    // blank-line gap from the previous STATEMENT's end, across its own `[`. With the list as the
-    // file's FIRST statement there is no previous statement and the gap is empty, which is the only
-    // reason this suite was green: every bracket-comment entry here used to open its file.
+    // The leading `let a = 1;` is load-bearing, in this entry and the two bracket entries below: a list
+    // broken for a comment must measure its blank-line gap from its own `[`, not from the previous
+    // statement's end, and with the list as the file's FIRST statement there is no previous statement, so
+    // the gap is empty either way and the entry cannot tell the two apart.
     "let a = 1;\nlet xs = [\n    1, // first\n    2,\n];\n0",
     "fn h(a) { // brace-trailing\n    // own line\n    a // tail-trailing\n}\nh(1)",
-    // §14: a comment after a list's LAST element, before `]` — the exact shape that was torn out of
-    // its list and reattached to an unrelated `;`, with a blank line the author never wrote appearing
+    // §14: a comment after a list's LAST element, before `]` — the exact shape a printer would tear out
+    // of its list and reattach to an unrelated `;`, with a blank line the author never wrote appearing
     // beside it.
     "let a = 1;\nlet xs = [1, 2 // last\n];\nxs",
-    // §14: a comment in the CONNECTOR zone between two method-chain links — the shape that was swept
-    // into the next link's own argument list rather than staying between the two calls.
+    // §14: a comment in the CONNECTOR zone between two method-chain links — the shape a printer would
+    // sweep into the next link's own argument list rather than leave between the two calls.
     "fn first(x, y) { x + y } fn second(x, y) { x * y } let a = 1; a.first(2) // step\n    .second(3)",
     // §14's second defect, the BLOCK case: a `{ }` body whose entire content is a comment (no
-    // statements, no tail). Two hardcoded `first = false` flush calls leaked a blank line just inside
-    // the brace for exactly this input class.
+    // statements, no tail). Hardcoding `first = false` at the two flush calls would leak a blank line
+    // just inside the brace for exactly this input class.
     "fn only_comment() {\n    // nothing else in this body\n}\nonly_comment()",
     // §14's second defect, the FILE case: a program whose entire content is a comment. A tail-less
     // block evaluates to `Unit`, so this both parses and runs, before and after formatting alike.
     "// the whole file is this one comment",
-    // Final review C2: a comment whose whole construct is a bracket pair with no elements. The empty
-    // early return ran before `must_break` was computed, so §7's forced break never applied here and
-    // the comment escaped its own brackets — depth 1 to depth 0, which is exactly what the anchoring
-    // property below measures.
+    // A comment whose whole construct is a bracket pair with no elements: an empty early return before
+    // `must_break` is computed would skip §7's forced break, and the comment would escape its own
+    // brackets — depth 1 to depth 0, which is exactly what the anchoring property below measures.
     "let a = 1;\nlet xs = [ // inside\n];\nxs",
-    // Final review C1: a block expression as a list element, with a comment just inside its `{`.
-    // `Expr::Block`'s span used to start at the first token INSIDE the braces, so the comment read as
-    // preceding the whole block and escaped it.
+    // A block expression as a list element, with a comment just inside its `{`.
     "let a = 1;\nlet xs = [{ // c\nlet b = 2; b }, 2];\nxs",
-    // §15: a nested `if` inside an `else` branch, carrying a comment. Before this task's fix, the
-    // printer collapsed this into `else if`, which this grammar's parser cannot read back — guarded
-    // only by an opaque `.proptest-regressions` seed until now.
+    // §15: a nested `if` inside an `else` branch, carrying a comment. Collapsing it into `else if` would
+    // print text this grammar's parser cannot read back.
     "fn classify(n) { if n == 0 { 0 } else {\n    // nested branch\n    if n > 0 { 1 } else { 2 }\n} }\nclassify(5)",
 ];
 
@@ -126,11 +121,9 @@ fn output_always_reparses_with_no_diagnostics() {
 
 #[test]
 fn no_line_exceeds_the_budget_except_the_three_documented_constructs() {
-    // THE EXCEPTIONS ARE ENUMERATED, NOT WAIVED BY A WILDCARD — and there are THREE, not one. This
-    // test said "nothing else may" while asserting only the first; design §6 said "no input can
-    // produce an unbounded line" while three constructs could. §17 corrects both, and each exception
-    // is pinned below by an input that overruns, so a fix that closes one fails here and gets to say
-    // so rather than passing silently.
+    // THE EXCEPTIONS ARE ENUMERATED, NOT WAIVED BY A WILDCARD, and there are THREE (design §17). Each
+    // is pinned below by an input that overruns, so a fix that closes one fails here and gets to say so
+    // rather than passing silently.
     let breakable = "fn wide(a) { a } wide([1, 2, 3])";
     for line in format(breakable).unwrap().lines() {
         assert!(line.len() <= MAX_WIDTH, "over budget: {line:?}");
@@ -176,14 +169,7 @@ fn no_line_exceeds_the_budget_except_the_three_documented_constructs() {
 /// comparisons in `printer.rs` is individually load-bearing: reverting any ONE of them to
 /// `MAX_WIDTH` fails one of the three fixtures below.
 ///
-/// **THIS REPLACES A SABOTAGE CHECK THAT COULD NOT SABOTAGE ANYTHING.** Its predecessor,
-/// `the_budget_holds_at_widths_other_than_the_default`, checked `"fn wide(a) { a } wide([1, 2, 3])"`
-/// at widths `[40, 60, 80, 200]` — small enough that it never overflowed at any of them, so
-/// `fill_rows` was never entered and neither `bracketed` check was ever pushed past its boundary.
-/// Reverting all THREE sites to `MAX_WIDTH` at once still passed it. The fix was not a wider net of
-/// widths; it was fixtures sized against the specific comparison each one exercises, confirmed by
-/// actually reverting each site in turn (task report, "Fix round 1" — the sabotage matrix) rather
-/// than by inspection.
+/// Each fixture is sized against the specific comparison it exercises.
 #[test]
 fn reverting_any_single_width_site_fails_one_of_these_fixtures() {
     // `fits_inline_since`, and — jointly, since this fixture cannot tell the two apart — the
@@ -256,14 +242,12 @@ fn the_three_documented_exceptions_are_still_exceptions_at_a_narrow_width() {
 
 /// `format` and `format_with_width(.., MAX_WIDTH)` are the same function.
 ///
-/// **THE FIRST TWO FIXTURES BELOW ARE WIDTH-INSENSITIVE, AND THAT COST A DETECTION.** Both stay
-/// under budget across nearly the whole realistic width range, so a mutation of `format` to hard-code
-/// `format_with_width(src, 60)` in place of `printer::MAX_WIDTH` passed this test undetected;
-/// binary-searching the threshold, it only starts failing once the hard-coded width drops to 14 or
-/// below — 60, 100, and 110 all slip through. `close_bracket_boundary` is the fix: built the same way
-/// as the fixture of that name in `reverting_any_single_width_site_fails_one_of_these_fixtures`
-/// (above), but re-sized for a boundary at `MAX_WIDTH` (120) instead of 60, so it is sensitive to a
-/// drift anywhere below 120 rather than only below 15.
+/// **THE FIRST TWO FIXTURES BELOW ARE WIDTH-INSENSITIVE.** Both stay under budget across nearly the
+/// whole realistic width range, so on them alone a mutation of `format` to hard-code
+/// `format_with_width(src, 60)` in place of `printer::MAX_WIDTH` would pass undetected.
+/// `close_bracket_boundary` covers that gap: built the same way as the fixture of that name in
+/// `reverting_any_single_width_site_fails_one_of_these_fixtures` (above), but re-sized for a boundary
+/// at `MAX_WIDTH` (120) instead of 60, so it is sensitive to a drift anywhere below 120.
 #[test]
 fn the_default_entry_point_agrees_with_the_parameterized_one_at_the_default() {
     // `1 + 58 + 2 + 58 + 1 == 120`: brackets, separator, and both identifiers included, this list's
@@ -272,9 +256,7 @@ fn the_default_entry_point_agrees_with_the_parameterized_one_at_the_default() {
     // `120 <= 120` at width 120 and keeps the list on one line; at any width below 120 that same
     // check fails instead and the list breaks into `vertical_rows`, one element per line. A `format`
     // hard-coded to 60, 100, 110, or even 119 therefore prints this fixture differently than
-    // `format_with_width(_, MAX_WIDTH)` does — confirmed by mutation for all four in the task report,
-    // "Fix round 2." No width between 1 and 119 was found to escape it; 119 is caught along with the
-    // rest, so there is no known drift this fixture misses short of 120 itself.
+    // `format_with_width(_, MAX_WIDTH)` does.
     let close_bracket_boundary = format!("[{}, {}]", "a".repeat(58), "b".repeat(58));
     for src in ["let x = 1;\nx + 1".to_string(), "fn wide(a) { a } wide([1, 2, 3])".to_string(), close_bracket_boundary]
     {
@@ -285,11 +267,11 @@ fn the_default_entry_point_agrees_with_the_parameterized_one_at_the_default() {
 /// Where a comment sits, structurally: how deeply nested it is, and the nearest real tokens either
 /// side of it.
 ///
-/// **THIS IS THE PROPERTY §10 WAS MISSING, AND ITS ABSENCE COST TWO BUGS.** Design §14 records both:
-/// a comment touching a bracket was torn out of its list and reattached to an unrelated `;`, and a
-/// comment trailing one link of a method chain was swept into the next link's argument list. Both
-/// outputs reparsed, preserved every comment's text and order, and were idempotent — so properties
-/// 1 through 4 all passed while the comment sat on the wrong construct.
+/// Design §14 records two bugs this property catches: a comment touching a bracket torn out of its
+/// list and reattached to an unrelated `;`, and a comment trailing one link of a method chain swept
+/// into the next link's argument list. A printer making either move can still produce output that
+/// reparses, keeps every comment's text and order, and is idempotent, so properties 1 through 4 all
+/// pass while the comment sits on the wrong construct.
 ///
 /// **Depth is what catches them.** A comment inside `[ … ]` is at depth 1; moved outside, it is at 0.
 /// A comment after a chain link is at 0; swept into the next call's arguments, it is at 1.
@@ -332,7 +314,7 @@ fn every_comment_keeps_the_construct_it_was_written_against() {
 fn comment_anchoring_catches_the_two_defects_it_was_written_for() {
     // NOT A REGRESSION TEST FOR THE BUGS — `printer.rs` already has those. This asserts the PROPERTY
     // itself is capable of failing, by checking it distinguishes the two shapes design §14 records.
-    // A property that cannot fail is worth nothing, and these two passed four other properties.
+    // A property that cannot fail is worth nothing, and these two pass four other properties.
     let torn_from_its_list = ("let xs = [1, 2 // t\n];\nlet y = 3;\ny", "let xs = [1, 2]; // t\n\nlet y = 3;\ny\n");
     let swept_into_next_link =
         ("xs.first(1) // n\n.second(2)", "xs\n    .first(1)\n    .second( // n\n        2,\n    )\n");
@@ -352,11 +334,8 @@ fn arb_leaf() -> impl Strategy<Value = String> {
 /// A list literal carrying comments at the three positions a statement-level generator can never
 /// reach: just after the `[`, just after an interior `,`, and just before the `]`.
 ///
-/// **EVERY DEFECT THE FINAL REVIEW FOUND LIVED IN ONE OF THESE POSITIONS**, and none of them was
-/// reachable from `arb_program_with_trivia` alone, which placed comments only own-line before a `let`
-/// and trailing after its `;`. The suite that found §15's `else if` within 89 cases could not have
-/// found any of them however long it ran. The empty-list arm is here for the same reason: a comment
-/// whose entire construct is `[ ]` skipped the forced break altogether.
+/// The empty-list arm is here because a comment whose entire construct is `[ ]` must still get the
+/// forced break.
 fn arb_list_with_bracket_trivia(element: impl Strategy<Value = String>) -> impl Strategy<Value = String> {
     (proptest::collection::vec(element, 0..3), any::<bool>(), any::<bool>(), any::<bool>()).prop_map(
         |(items, lead, mid, trail): (Vec<String>, bool, bool, bool)| {
@@ -388,10 +367,10 @@ fn arb_list_with_bracket_trivia(element: impl Strategy<Value = String>) -> impl 
 /// forced newline before `]` unless a trailing comment needs one to keep `//` from running into it.
 ///
 /// `arb_list_with_bracket_trivia` (above) puts one element per line BY CONSTRUCTION — every comma and
-/// every `]` gets its own `\n` — which is exactly why `next_boundary` (§17.7: "the end of the line
-/// this item ends on, in the ORIGINAL SOURCE") never had anywhere to overrun TO: every element already
-/// had a nearby newline stopping it. This is the shape actual formatter input looks like instead:
-/// several constructs sharing one physical source line.
+/// every `]` gets its own `\n` — so on its output `next_boundary` (§17.7: "the end of the line this
+/// item ends on, in the ORIGINAL SOURCE") has nowhere to overrun TO: every element has a nearby
+/// newline stopping it. This arm generates the shape actual formatter input takes: several constructs
+/// sharing one physical source line.
 fn arb_compact_list(element: impl Strategy<Value = String>) -> impl Strategy<Value = String> {
     (proptest::collection::vec(element, 1..3), any::<bool>()).prop_map(|(items, trail): (Vec<String>, bool)| {
         let mut s = format!("[{}", items.join(", "));
@@ -406,15 +385,14 @@ fn arb_compact_list(element: impl Strategy<Value = String>) -> impl Strategy<Val
 /// Two or three `arb_compact_list`s, comma-joined on ONE source line, as the elements of one outer
 /// list.
 ///
-/// §17.7 NEEDED A CONSTRUCT WITH NO COMMENT OF ITS OWN, forced vertical by something else entirely —
-/// `arb_expr_over`'s `if` arms always braces both branches, and a braced block always breaks (see
-/// `braced`'s doc) — SHARING A LINE with a LATER construct that does carry one. Only then can the
+/// §17.7'S DEFECT NEEDS A CONSTRUCT WITH NO COMMENT OF ITS OWN, forced vertical by something else
+/// entirely — `arb_expr_over`'s `if` arms always brace both branches, and a braced block always breaks
+/// (see `braced`'s doc) — SHARING A LINE with a LATER construct that does carry one. Only then can the
 /// first construct's own trailing flush, uncapped at its own close, reach across its own `]` and the
-/// outer `,` and steal a comment that was never inside it. Neither existing arm above can produce
-/// that: `arb_list_with_bracket_trivia` puts a comment on every element it generates and always
-/// follows one with `\n`, so a comment is never more than one line from where it belongs. This is what
-/// found the defect design §17.7 records, and is kept here as the arm that could find the next one in
-/// the same family.
+/// outer `,` and steal a comment that was never inside it. Neither arm above can produce that:
+/// `arb_list_with_bracket_trivia` puts a comment on every element it generates and always follows one
+/// with `\n`, so a comment is never more than one line from where it belongs. It is the arm for the
+/// defect design §17.7 records, and for the next one in the same family.
 fn arb_multi_construct_line() -> impl Strategy<Value = String> {
     proptest::collection::vec(arb_compact_list(arb_expr_over(arb_leaf())), 2..4)
         .prop_map(|parts| format!("[{}]", parts.join(", ")))
@@ -477,11 +455,9 @@ proptest! {
         prop_assert_eq!(comments_of(&out), comments_of(&src));
     }
 
-    /// PROPERTY 7 OVER GENERATED PROGRAMS, not just the hardcoded corpus. Design §14 records that
+    /// Property 7 over generated programs, not just the hardcoded corpus. Design §14 records that
     /// anchoring is the property whose absence cost two bugs; running it only over inputs someone
-    /// wrote by hand means it can only catch shapes someone already thought of, which is exactly the
-    /// gap the final review found — every defect it reported was an interior comment in a
-    /// multi-statement file, outside both of the old generator's two comment positions.
+    /// wrote by hand means it can only catch shapes someone already thought of.
     #[test]
     fn comments_keep_their_construct_on_generated_programs(src in arb_program_with_trivia()) {
         let out = format(&src).expect("generated programs parse");

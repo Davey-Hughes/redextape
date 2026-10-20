@@ -30,15 +30,13 @@ use redextape_core::ty::Ty;
 mod common;
 use common::core_of;
 
-/// COMMENTS ARE IN THE CORPUS AS OF THE TRIVIA SLICE, AND THAT IS THE POINT. `lexer.rs` used to
-/// discard `//` comments, so `classify_source` emitted nothing over their bytes — a real,
-/// non-whitespace hole in the coverage assertion in `check`, which this corpus avoided on purpose and
-/// `source_with_a_comment_is_the_one_gap_this_corpus_avoids` stated outright. `lex` now returns them
-/// and `classify_source` classifies them, so the last entry below exercises the property that was
-/// previously excluded from it. The printed forms are unaffected: no printer emits a comment.
-/// THE `if` IS NOT DECORATION. The four straight-line programs lower to assembly with NO LABELS, so the
-/// coverage assertion could not see the label `:` at all: deleting its classification left this whole
-/// file green, which is how it was measured. A branch is the smallest program that emits one.
+/// Comments are in the corpus, and that is the point: `classify_source` classifies them, so the last
+/// entry below exercises the coverage assertion in `check` over a comment's bytes. The printed forms are
+/// unaffected: `parse` discards comments, so no form printed below carries a source comment.
+///
+/// THE `if` IS NOT DECORATION. The other five programs lower to assembly with NO LABELS, so without it
+/// the coverage assertion could not see the label `:` at all: deleting its classification would leave
+/// this whole file green. A branch is the smallest program that emits one.
 const CORPUS: &[&str] = &[
     "1 + 2 * 3",
     "3 - 5",
@@ -85,11 +83,10 @@ fn check(text: &str, spans: &[(Span, TokenClass)], what: &str) {
     for w in spans.windows(2) {
         assert!(w[0].0.end <= w[1].0.start, "{what}: spans overlap or unordered: {:?} then {:?}", w[0], w[1]);
     }
-    // COVERAGE, the property the design's §6 states and this helper used to omit: every non-whitespace
-    // byte lies inside some span. Without it a printer can emit punctuation it never classifies and stay
-    // green — which is exactly what λ (56 bytes) and asm (16) did, while the TM printer covered its own.
-    // The spans are ordered and disjoint by the assertions above, so one forward sweep over the holes
-    // between them decides it, and every bound below is a char boundary those assertions already pinned.
+    // COVERAGE, the property the design's §6 states: every non-whitespace byte lies inside some span.
+    // Without it a printer can emit punctuation it never classifies and stay green. The spans are
+    // ordered and disjoint by the assertions above, so one forward sweep over the holes between them
+    // decides it, and every bound below is a char boundary those assertions already pinned.
     let mut cursor = 0usize;
     for (s, _) in spans {
         assert_gap_is_whitespace(text, cursor, s.start, what);
@@ -131,10 +128,9 @@ fn every_classifier_produces_well_formed_spans() {
         let (at, asm_spans) = print_asm_mapped(&prog);
         check(&at, &asm_spans, &format!("asm {src:?}"));
 
-        // The HEADERED asm form too, for the same reason as the headered TM form below: until now
-        // nothing put `print_asm_with_mapped`'s spans through `check`, so the header's own `result`
-        // and `Ident` spans, and the listing spans shifted by the header's byte length, had their
-        // coverage, ordering and bounds unproven while the bare form's were pinned.
+        // The HEADERED asm form too, for the same reason as the headered TM form below: the header's
+        // own `result` and `Ident` spans, and the listing spans shifted by the header's byte length,
+        // get their coverage, ordering and bounds checked as the bare form's are.
         let (aht, ahs) = print_asm_with_mapped(&prog, &AsmHeader { result: Ty::Nat });
         check(&aht, &ahs, &format!("asm+header {src:?}"));
 
@@ -142,11 +138,9 @@ fn every_classifier_produces_well_formed_spans() {
         check(&mt, &ms, &format!("tm {src:?}"));
 
         // The HEADERED TM form too. `print_tm_with_mapped` emits a whole block the bare form does not
-        // — `version`, `encoding`, `width`, `slots`, `result` and the `tape` lines — and until now
-        // nothing put those spans through `check`, so their coverage, ordering and bounds were
-        // unproven while every other printer's were pinned. The header is also the only place a
-        // `Comment` class is currently reachable (the trailing `; reg` tape annotation), which makes
-        // it exactly the part most worth checking rather than the least.
+        // — `version`, `encoding`, `width`, `slots`, `result` and the `tape` lines. The header is also
+        // the only place a `Comment` class is reachable (the trailing `; reg` tape annotation), which
+        // makes it exactly the part most worth checking rather than the least.
         let header = TmHeader::new(EncodingKind::Unary, 4, 1, Ty::Nat, vec![(0, vec!['#', '_', '#'])]);
         let (ht, hs) = print_tm_with_mapped(&m, &header);
         check(&ht, &hs, &format!("tm+header {src:?}"));
@@ -289,9 +283,9 @@ fn text_that_merely_looks_like_a_state_name_is_never_attributed() {
 }
 
 /// `attribute_tm_spans` promises totality: an out-of-range span yields `None` rather than a panic.
-/// Nothing tested that promise — reverting the `text.get(..)` inside it to a plain `&text[..]` slice
-/// left every other test in this file green, because they only ever pass spans produced against the
-/// very text they hand in.
+/// No other test here can see that promise break: with the `text.get(..)` inside it replaced by a plain
+/// `&text[..]` slice, every other test in this file stays green, because they only ever pass spans
+/// produced against the very text they hand in.
 ///
 /// The realistic way to violate that pairing is mixing the two TM printers: `print_tm_with_mapped` emits a
 /// header, so its spans sit further into the string than `print_tm_mapped`'s text is long. Empty
@@ -320,15 +314,15 @@ fn spans_that_do_not_belong_to_the_text_yield_none_instead_of_panicking() {
     assert_eq!(mismatched.len(), headered_spans.len(), "spans must be returned unchanged in number");
 }
 
-/// THE MAP AND THE MACHINE CANNOT DISAGREE, BECAUSE THERE IS NO LONGER A SECOND ONE TO PASS.
-/// `attribute_tm_spans` used to take a `Machine` beside the `SourceMap`, and used it for one thing:
-/// turning the map's `StateId`s into the names printed text refers to states by. Nothing checked the
-/// two came from the same lowering, so a renderer offering an encoding switch — build the map once,
-/// re-lower the machine — silently attributed most state-naming spans to the wrong Core node.
+/// THE MAP AND THE MACHINE CANNOT DISAGREE, BECAUSE THERE IS NO SECOND ONE TO PASS.
+/// A `Machine` passed to `attribute_tm_spans` beside the `SourceMap` would serve one thing: turning
+/// the map's `StateId`s into the names printed text refers to states by. Nothing would check the two
+/// came from the same lowering, so a renderer offering an encoding switch — build the map once,
+/// re-lower the machine — would silently attribute most state-naming spans to the wrong Core node.
 ///
 /// What is pinned is the honest answer: a name the map's OWN lowering never produced is attributed to
-/// nothing. The final block reconstructs the old composition as a witness, so this test cannot pass by
-/// asserting something both versions satisfy — it counts the spans the discarded machine used to answer
+/// nothing. The final block builds that two-argument composition as a witness, so this test cannot
+/// pass by asserting something both forms satisfy — it counts the spans that composition answers
 /// confidently and wrongly.
 #[test]
 fn a_map_built_at_one_encoding_declines_text_printed_at_another() {
@@ -342,7 +336,7 @@ fn a_map_built_at_one_encoding_declines_text_printed_at_another() {
     let (text, spans) = print_tm_mapped(&binary);
 
     // Which names the map covers, resolved through the machine it was really built from — computed
-    // from `node_to_tm`, so it does not restate the name index the implementation now consults.
+    // from `node_to_tm`, so it does not restate the name index the implementation consults.
     let covered: BTreeSet<&str> = map
         .node_to_tm
         .values()
@@ -376,9 +370,9 @@ fn a_map_built_at_one_encoding_declines_text_printed_at_another() {
         );
     }
 
-    // The old composition, written out as the bug it was: the map's state IDS resolved through the
-    // machine handed in alongside — here the binary one. Every id still indexes some state, so every
-    // lookup still answers; the answers are just about a different machine's states.
+    // The stale composition, written out: the map's state IDS resolved through the machine handed in
+    // alongside — here the binary one. Every id still indexes some state, so every lookup still answers;
+    // the answers are just about a different machine's states.
     let mut stale: BTreeMap<&str, NodeId> = BTreeMap::new();
     for (node, block) in &map.node_to_tm {
         for state in block {
@@ -387,9 +381,9 @@ fn a_map_built_at_one_encoding_declines_text_printed_at_another() {
             }
         }
     }
-    // Of the spans that old composition attributed AT ALL, how many did it attribute to a name this
+    // Of the spans that stale composition attributed AT ALL, how many did it attribute to a name this
     // map's lowering never produced — an origin manufactured out of an id collision between two
-    // unrelated machines, which is precisely what has no honest answer and now yields `None`.
+    // unrelated machines, which is precisely what has no honest answer and yields `None`.
     let (mut claimed, mut manufactured) = (0usize, 0usize);
     for (span, class, _) in &attributed {
         if !matches!(class, TokenClass::Label | TokenClass::StateName) {
@@ -403,12 +397,12 @@ fn a_map_built_at_one_encoding_declines_text_printed_at_another() {
             }
         }
     }
-    assert!(claimed > 0, "the old composition must have attributed something, or there is no bug to contrast");
+    assert!(claimed > 0, "the stale composition must attribute something, or there is no bug to contrast");
     assert!(
         manufactured * 10 > claimed * 9,
-        "nearly every origin the old composition produced here came from an id collision between two \
-         unrelated machines — measured at 802 of 818 when this was written, got {manufactured} of \
-         {claimed}. A fixture where that ratio collapses is no longer reproducing the bug."
+        "nearly every origin the stale composition gives here must come from an id collision between two \
+         unrelated machines — got {manufactured} of {claimed}. A fixture where that ratio collapses does \
+         not reproduce the bug."
     );
     assert!(
         attributed.iter().filter(|(_, _, n)| n.is_some()).count() < claimed,

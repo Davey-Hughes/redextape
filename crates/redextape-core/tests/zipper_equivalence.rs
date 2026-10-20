@@ -1,27 +1,27 @@
 //! `ZipperCursor` against `LambdaCursor`, event for event.
 //!
-//! **THE GATE THE ZIPPER SLICE LIVES OR DIES BY.** The zipper is a different way to find the same
-//! redexes, so the only acceptable difference is speed. Any divergence in the emitted sequence is a
-//! correctness defect: normal order is required, not chosen (`reduce.rs`'s module doc gives three
-//! independent reasons a call-by-value order fails to terminate on ordinary programs).
+//! **The gate the zipper lives or dies by.** The zipper is a different way to find the same redexes, so
+//! the only acceptable difference is speed. Any divergence in the emitted sequence is a correctness defect:
+//! normal order is required, not chosen (`reduce.rs`'s module doc gives three independent reasons a
+//! call-by-value order fails to terminate on ordinary programs).
 //!
-//! **SINCE `StepEvent::Beta` GAINED `owner`, THAT IS PART OF WHAT IS COMPARED — AND `OwnerCensus` IS
-//! WHAT STOPS THAT FROM BEING A LIE.** The two cursors compute the owner by genuinely different means
-//! (`reduce_step_go` carries the enclosing tag down a root→redex descent; `ZipperCursor::reduce_here`
-//! reads it off the popped frame and scans the context stack), so holding them equal is worth as much
-//! as holding their redex paths equal — but only over terms that carry tags. Over untagged terms both
-//! sides say `Owner::None` and the comparison passes while proving nothing. The terms here are lowered
-//! from source. The generated half (the proptest below) is covered by `lower.rs` tagging `BinOp` and
-//! `If`, the only constructs `arb_expr_over` emits. The curated half additionally runs a region-path
-//! loop shape whose tags come from five other `lower.rs` arms entirely — `Let { mutable: true }` (both
-//! arms), `Seq`, the region `If`, and `build_while`'s own root — none of which the generator can ever
-//! produce. The census assertions below hold both halves of that fact rather than assume it.
+//! **The `owner` on `StepEvent::Beta` is part of what is compared, and `OwnerCensus` is what stops that from
+//! being a lie.** The two cursors compute the owner by genuinely different means (`reduce_step_go` carries
+//! the enclosing tag down a root→redex descent; `ZipperCursor::reduce_here` reads it off the popped frame and
+//! scans the context stack), so holding them equal is worth as much as holding their redex paths equal — but
+//! only over terms that carry tags. Over untagged terms both sides say `Owner::None` and the
+//! comparison passes while proving nothing. The terms here are lowered from source. The generated half
+//! (the proptest below) is covered by `lower.rs` tagging `BinOp` and `If`, the only constructs
+//! `arb_expr_over` emits. The curated half additionally runs a region-path loop shape whose tags come
+//! from three other `lower.rs` arms entirely — `lower_region_body`'s `Let { mutable: true }` and `Seq`
+//! arms, and `build_while`'s own root — none of which the generator can ever produce. The census
+//! assertions below hold both halves of that fact rather than assume it.
 //!
-//! Proptest rather than the 46-program corpus, deliberately. `FIRST_ORDER_DEMOS` lives in a test
-//! target and has been hand-copied five times with a sync test holding the copies together; a sixth
-//! copy is the drift this tree has fought twice. Generated programs are stronger evidence for an
-//! equivalence property anyway. The corpus-wide check lives in `examples/lambda_sharing_probe.rs`,
-//! which already uses a checked copy, and is reported rather than gated.
+//! Proptest rather than the corpus, deliberately. `FIRST_ORDER_DEMOS` lives in a test target and is
+//! hand-copied, with a sync test holding the copies together; another copy would be one more to drift.
+//! Generated programs are stronger evidence for an equivalence property anyway. The corpus-wide check lives
+//! in `examples/lambda_sharing_probe.rs`, which already uses a checked copy, and is reported rather
+//! than gated.
 
 // Test target: `clippy.toml`'s `allow-*-in-tests` keys do not reach free helpers in a `tests/` target,
 // so the exemption is stated per target — same idiom as `lambda_sharing.rs`.
@@ -59,14 +59,6 @@ fn term_of(src: &str) -> Option<LambdaTerm> {
 /// "aborts the process with an uncatchable stack overflow", and that `for_each_child` "must never call
 /// itself" for exactly that reason — a recursive caller here would defeat the point. Mirrors `find_id`
 /// in `lambda_provenance.rs`, generalized to collect every match instead of the first.
-///
-/// THAT POINTER READ `core.rs` lines 84-89 UNTIL THIS COMMIT, AND IT HAD DRIFTED. It was exactly that
-/// doc's five lines plus `for_each_child`'s own signature when region-path tagging (#28) wrote it;
-/// `clippy::pedantic` (#31) moved the item down two, so this conversion found the range opening on
-/// `Core::id`'s closing brace and the blank line under it and stopping one line short of the doc's end
-/// — dropping "this method must never call itself", the one of the three claims quoted above that this
-/// function's shape turns on. The other two were still inside it, which is what made the range read as
-/// confirmation.
 fn ids_where(core: &Core, pred: &dyn Fn(&Core) -> bool) -> BTreeSet<NodeId> {
     let mut out = BTreeSet::new();
     let mut stack = vec![core];
@@ -79,64 +71,40 @@ fn ids_where(core: &Core, pred: &dyn Fn(&Core) -> bool) -> BTreeSet<NodeId> {
     out
 }
 
-/// **NOT `MAX_REDUCTION_STEPS`, and not because the generated programs need it.** `arb_expr_over`
-/// generates only `+`, monus `-`, `>`, `==` and `if` over integer leaves — no recursion, no functions,
-/// no loops (`arb_expr_below(8)` in `three_way_oracle.rs`, whose comment covers this same generator: "every
-/// generated program terminates to a value"). Verified directly: raising this cap to 5,000,000 still
-/// runs the proptest below in 0.22 s with 0 of 262 generated programs capping. **This cap exists for
-/// the four CURATED capping cases in `curated_shapes_agree_step_for_step` below** — terms and programs
-/// built to diverge or recurse unboundedly — so they hit a small, cheap bound instead of running to
-/// `MAX_REDUCTION_STEPS`. The property under test is "these two cursors agree": on the emitted
-/// `StepEvent` sequence, on the resulting term, AND on the resulting `Status` — `Some(Normalized)` for
-/// the six terminating shapes and every generated program, `Some(HitCap)` for the four capping cases,
-/// and never a case where the two cursors' statuses disagree.
-///
-/// THE `three_way_oracle.rs` POINTER READ line 529 UNTIL THIS COMMIT, AND IT HAD DRIFTED. Line 529 was
-/// the literal line carrying "every generated program terminates to a value" when the zipper slice (#5)
-/// wrote it; the node-count bound (#32) moved `arb_tm_safe_expr` down eight lines, taking the quoted
-/// sentence with it, and this conversion found 529 holding a DIFFERENT line of the same doc — the one
-/// naming `redextape-test-support`'s `arb_expr_over` as where the safety lever lives. Recorded ACCURATE
-/// at first, because the citing text says "529's doc" and that doc does still carry the quote; STALE is
-/// the right verdict, because what 529 holds is something adjacent and plausible, which is the failure
-/// mode this slice exists to catch rather than an exception to it.
+/// Not `MAX_REDUCTION_STEPS`. `arb_expr_over` generates only `+`, monus `-`, `>`, `==` and `if` over integer
+/// leaves — no recursion, no functions, no loops (`arb_expr_below(8)` in `three_way_oracle.rs`, whose comment
+/// covers this same generator: "every generated program terminates to a value"), so none of the generated
+/// programs reaches this cap. The four CURATED capping cases in `curated_shapes_agree_step_for_step` below —
+/// terms and programs built to diverge or recurse unboundedly — do not run at it: each passes its own cap to
+/// `assert_cursors_agree_at`, so it hits a small, cheap bound instead of running to `MAX_REDUCTION_STEPS`.
+/// The property under test is "these two cursors agree": on the emitted `StepEvent` sequence, on the
+/// resulting term, AND on the resulting `Status` — `Some(Normalized)` for every terminating shape, curated
+/// and generated, `Some(HitCap)` for the four capping cases, and never a case where the two cursors'
+/// statuses disagree.
 const EQUIV_CAP: u64 = 10_000;
 
 /// How many events of each `Owner` variant a run emitted.
 ///
-/// **THIS IS THE ANTI-VACUITY INSTRUMENT FOR THE HALF OF THIS GATE THAT LOOKS FREE.** When
-/// `StepEvent::Beta` gained `owner`, this file's comparison started covering it without a line of new
-/// test code — but *only* if the terms under test carry provenance tags at all. Over untagged terms
-/// every event on both sides is `Owner::None`, the comparison is trivially satisfied, and the strongest
-/// gate in the crate would silently prove nothing about the newest field in the type it compares. The
-/// terms here are LOWERED from source. The generated programs are tagged by the `BinOp` and `If` arms
-/// in `lower.rs` — the two constructs `arb_expr_over` generates — at their own root `App`, so they are
-/// tagged in the way real programs are. The curated shapes below go further: the region-path loop shape
-/// is tagged by five other `lower.rs` arms on the store-passing path (`Let { mutable: true }`, `Seq`,
-/// the region `If`, `build_while`'s own root) that no generated program ever reaches. The assertions
-/// below are what hold that true rather than assumed.
+/// **This is the anti-vacuity instrument for the half of this gate that looks free.** This file's comparison
+/// covers `StepEvent::Beta`'s `owner` without test code of its own — but *only* if the terms under test
+/// carry provenance tags at all. Over untagged terms every event on both sides is `Owner::None`, the
+/// comparison is trivially satisfied, and the strongest gate in the crate would silently prove nothing about
+/// the `owner` field of the type it compares. The terms here are LOWERED from source. The generated
+/// programs are tagged by the `BinOp` and `If` arms in `lower.rs` — the two constructs `arb_expr_over`
+/// generates — at their own root `App`, so they are tagged in the way real programs are. The curated
+/// shapes below go further: the region-path loop shape is tagged by three other `lower.rs` arms on the
+/// store-passing path (`Let { mutable: true }`, `Seq`, `build_while`'s own root) that no generated
+/// program ever reaches. The assertions below are what hold that true rather than assumed.
 ///
-/// Measured 2026-08-10: the six curated programs emit 115 `Exact`, 522 `Within` and 228 `None`, and the
-/// smallest program the generator can produce that steps at all — `(0 + 0)` — emits 1, 1 and 4. So the
-/// gate does see the field; these assertions are what will say so if lowering ever stops tagging.
+/// Together the six curated programs emit tagged events, and so does the smallest program the generator can
+/// produce that steps at all — `(0 + 0)` — so the gate does see the field; these assertions are what will say
+/// so if lowering ever stops tagging.
 ///
 /// `exact_ids` and `within_ids` exist because a bare count cannot name what it counted. A floor like
-/// `exact > 30` stays green as long as the SUM across every tagged construct clears it, whichever
-/// construct actually supplied the tags — so it goes blind the moment one construct loses its tag as
-/// long as the others keep the total up. Measured 2026-08-10: reverting `Let { mutable: true }`'s own
-/// tag (`lower.rs`'s `lower_region_body`, in its `Core::Let { mutable: true }` arm) or `build_while`'s
-/// root tag (`lower.rs`) individually still left `exact` at 49 and 50 respectively, both comfortably
-/// above such a floor. Recording each event's own `NodeId` is what lets an assertion be about ONE
-/// construct rather than the sum of all of them.
-///
-/// BOTH POINTERS ABOVE WERE LINE NUMBERS UNTIL THIS COMMIT, AND BOTH HAD DRIFTED 44 LINES UNDER ONE
-/// COMMIT. `lower.rs` line 611 was that arm's own `Ok(app_owned(abs(STORE, cont), new_store, *id))`,
-/// and line 766 was `build_while`'s own `Ok(app_owned(app(fix(), g), s_init, id))`, when region-path
-/// tagging (#28) took the measurement; `clippy::pedantic` (#31) pushed both down 44 lines, so the two
-/// calls are now exactly where the parentheticals above name them — inside `lower_region_body`'s
-/// `Core::Let { mutable: true }` arm, and at the end of `build_while`. This conversion found 611
-/// holding the blank line above `lower_region_body`'s doc, and 766 the closing brace of `in_position`'s
-/// `match`, five lines above `fn build_while`. THE MEASUREMENT ITSELF STANDS — it is a
-/// dated observation about a real run, and only the two coordinates were ever wrong.
+/// `exact > 30` stays green as long as the SUM across every tagged construct clears it, whichever construct
+/// actually supplied the tags — so it goes blind the moment one construct loses its tag as long as the others
+/// keep the total up. Recording each event's own `NodeId` is what lets an assertion be about ONE construct
+/// rather than the sum of all of them.
 #[derive(Default, Debug)]
 struct OwnerCensus {
     exact: usize,
@@ -191,8 +159,8 @@ impl OwnerCensus {
 /// nothing new), and the `Owner` census of the agreed sequence so a caller can check the comparison
 /// was not vacuous on that field.
 ///
-/// Each cursor is driven ONCE. An earlier draft collected the events and then drained a second cursor
-/// to read the final term, reducing every program four times over.
+/// Each cursor is driven ONCE: collecting the events and then draining a second cursor to read the
+/// final term would reduce every program four times over.
 fn assert_cursors_agree_at(t: &LambdaTerm, label: &str, cap: u64) -> (Option<Status>, OwnerCensus) {
     let mut lc = LambdaCursor::new(t, cap);
     let expected: Vec<StepEvent> = lc.by_ref().collect();
@@ -270,50 +238,30 @@ fn curated_shapes_agree_step_for_step() {
         "none of the six curated shapes produced Owner::Within; the owner comparison is vacuous: {census:?}"
     );
 
-    // THE REGION PATH, WHICH NOTHING IN THIS FILE REACHED BEFORE. The six shapes above are all
-    // functional, and `arb_expr_over` emits only `+`, monus `-`, `>`, `==` and `if` over integer
-    // leaves — so `while`, `let mut` and assignment were never executed by the strongest gate in the
-    // crate. That matters beyond coverage arithmetic: `ZipperCursor` derives `Owner` from a reverse
-    // scan of its context stack where `reduce_step_go` carries it down a descent, and `build_while`'s
-    // `fix`-based spine is deeper and differently shaped than anything the six above produce. Two
-    // routes to one answer diverge, if they diverge at all, exactly there.
+    // The region path. The six shapes above are all functional, and `arb_expr_over` emits only `+`, monus
+    // `-`, `>`, `==` and `if` over integer leaves — so without this shape `while`, `let mut` and assignment
+    // would never be executed by the strongest gate in the crate. That matters beyond coverage arithmetic:
+    // `ZipperCursor` derives `Owner` from a reverse scan of its context stack where `reduce_step_go` carries
+    // it down a descent, and `build_while`'s `fix`-based spine is deeper and differently shaped than anything
+    // the six above produce. Two routes to one answer diverge, if they diverge at all, exactly there.
     //
-    // BOUND SEPARATELY RATHER THAN ADDED TO `cases` because Task 4 asserts this shape's own census:
-    // merged into the total, a region path reporting `None` for every step would hide behind the
-    // hundreds of `Exact`/`Within` the functional shapes already supply.
+    // Bound separately rather than added to `cases` because this shape's own census is asserted below: merged
+    // into the total, a region path reporting `None` for every step would hide behind the hundreds of
+    // `Exact`/`Within` the functional shapes already supply.
     let loop_src = "let mut n = 4; let mut acc = 0; while n > 0 { acc = acc + 1; n = n - 1; } acc";
     let loop_core = core_of(loop_src).expect("the loop shape must parse and desugar");
     let loop_t = lower(&loop_core).unwrap_or_else(|_| panic!("the loop shape must lower"));
     let loop_census = assert_cursors_agree(&loop_t, "mutation and a loop");
 
-    // THE REGION PATH'S OWN CENSUS, ASSERTED ALONE. Merged into the total it would be invisible: the
-    // six functional shapes already supply hundreds of `Exact` and `Within`, so a region path that
-    // reported `None` for every step would leave `census.exact > 0` and `census.within > 0` green.
+    // The region path's own census, asserted alone. Merged into the total it would be invisible: the six
+    // functional shapes already supply hundreds of `Exact` and `Within`, so a region path that reported
+    // `None` for every step would leave `census.exact > 0` and `census.within > 0` green.
     //
-    // **WHAT THIS FIXTURE ACTUALLY CONTAINS, AND WHERE ITS SURVIVING `Exact` EVENTS ACTUALLY COME
-    // FROM.** An earlier version of this assertion was `exact > 30`, justified by a comment claiming
-    // `let mut`, `while`'s own root `App` (`build_while`) "and region `if` each tag independently of
-    // `Seq`". Both halves of that claim were wrong. There is no `Core::If` anywhere in this fixture —
-    // it has no `if` at all, only `Let { mutable: true }` (twice), the `Seq` joining the loop to its
-    // continuation, and the `While` itself. And measured directly: reverting only `Seq`'s own tag
-    // (`lower.rs`'s `lower_region_body`, in its `Core::Seq` arm) drops `exact` from 51 to 22 — but 19
-    // of those 22 SURVIVING `Exact` events come from `lower_expr`'s `BinOp` arm (the functional path
-    // this fixture's `acc + 1`, `n - 1` and `n > 0` also go through), not from any region construct at
-    // all; only 3 of 22 are region-path `Exact` events. A floor between 22 and 51 mostly measures
-    // whether `BinOp` is still tagged, which no revert here ever touches — and reverting
-    // `Let { mutable: true }` or `build_while`'s own root tag individually left `exact` at 49 and 50,
-    // both comfortably clear of a floor that also has to sit below 51. A count cannot distinguish "the
-    // construct I care about lost its tag" from "an unrelated construct is still tagged"; only naming
-    // each construct's own `NodeId` and checking it directly can. `ids_where` plus the loop below do
+    // A floor on the `Exact` count is no substitute: a count cannot distinguish "the construct I care about
+    // lost its tag" from "an unrelated construct is still tagged" (this fixture's `acc + 1`, `n - 1` and
+    // `n > 0` go through `lower_expr`'s `BinOp` arm, which is not a region construct). Only
+    // naming each construct's own `NodeId` and checking it directly can. `ids_where` plus the loop below do
     // that instead, one construct at a time.
-    //
-    // THE `Seq` POINTER READ `lower.rs` line 652 UNTIL THIS COMMIT, AND IT HAD DRIFTED. It was that
-    // `Core::Seq` arm's own `Ok(app_owned(abs(STORE, cont), first_store, *id))` when region-path
-    // tagging (#28) took this measurement; `clippy::pedantic` (#31) pushed it down 44 lines, so that
-    // call is now the last line of `lower_region_body`'s `Core::Seq` arm. This conversion found 652
-    // landing on the `let cont = cont?;` of the `Core::Let { mutable: true }` arm — the same function,
-    // three lines above THAT arm's tag, which is one of the two neighbouring reverts this very
-    // paragraph contrasts the `Seq` one against.
     for (what, pred) in [
         ("while", &(|c: &Core| matches!(c, Core::While(..))) as &dyn Fn(&Core) -> bool),
         ("let mut", &|c: &Core| matches!(c, Core::Let { mutable: true, .. })),
@@ -331,30 +279,18 @@ fn curated_shapes_agree_step_for_step() {
         }
     }
 
-    // **THE OTHER FAILURE SHAPE, NAMED SEPARATELY.** `OwnerCensus`'s doc (and this file's module doc)
-    // distinguish two ways this gate can go blind: a dropped OWN tag turns `Exact` into `Within` or
-    // `None` (what the loop above catches), and a dropped CONTEXT SCAN turns `Within` into `None` —
-    // `ZipperCursor::reduce_here`'s reverse walk of its context stack is exactly that scan, and nothing
-    // above exercises it. `While` is the one construct in this fixture whose `Within` presence is
-    // stable enough to anchor on: its root `App` encloses the entire loop body, so a redex deep inside
-    // that no nearer `Let`/`Seq` tag covers reports `Owner::Within(while_id)` instead of `Owner::None`
-    // — measured at HEAD, `within_ids` is exactly `{while_id}` plus the fixture's three `BinOp` ids;
-    // `Let { mutable: true }`'s and `Seq`'s own ids never appear there AT ALL, at HEAD or under any of
-    // the three reverts below, because every step this fixture attributes to them is `Exact`, never the
-    // *enclosing* tag for a deeper redex — so there is no `Within` presence to assert for either one.
-    // Losing `build_while`'s own root tag (`lower.rs`) removes `while_id` from every `App` in the
-    // term, so it can no longer be named by EITHER an exact contraction or a context scan — the one
-    // mutation this fixture can drive that breaks both symptoms from the same root cause, and (checked
-    // directly) `within_ids` stays exactly `{while_id, ...the three BinOp ids}` under the other two
-    // reverts (`Seq`, `Let { mutable: true }`), so `While`'s `Within` presence is not an artifact of
-    // whichever revert happened to be active when it was measured.
-    //
-    // THAT POINTER READ `lower.rs` line 766 UNTIL THIS COMMIT, AND IT HAD DRIFTED — the same 44 lines,
-    // under the same commit, as the pair in `OwnerCensus`'s doc, and resolved here separately because
-    // this sentence makes a different claim about the same tag. It was `build_while`'s own
-    // `Ok(app_owned(app(fix(), g), s_init, id))` when region-path tagging (#28) wrote it; after
-    // `clippy::pedantic` (#31) that call is the last line of `build_while`, and this conversion found
-    // 766 holding the closing brace of `in_position`'s `match`, five lines above `fn build_while`.
+    // **The other failure shape, named separately.** `OwnerCensus`'s doc (and this file's module doc)
+    // distinguish two ways this gate can go blind: a dropped OWN tag turns `Exact` into `Within` or `None`
+    // (what the loop above catches), and a dropped CONTEXT SCAN turns `Within` into `None` —
+    // `ZipperCursor::reduce_here`'s reverse walk of its context stack is exactly that scan, and nothing above
+    // exercises it. `While` is the one construct in this fixture whose `Within` presence is stable enough to
+    // anchor on: its root `App` encloses the entire loop body, so a redex deep inside that no nearer
+    // `Let`/`Seq` tag covers reports `Owner::Within(while_id)` instead of `Owner::None`.
+    // `Let { mutable: true }`'s and `Seq`'s own ids never appear in `within_ids` at all, because every step this
+    // fixture attributes to them is `Exact`, never the *enclosing* tag for a deeper redex — so there is no
+    // `Within` presence to assert for either one. Losing `build_while`'s own root tag (`lower.rs`) removes
+    // `while_id` from every `App` in the term, so it can no longer be named by EITHER an exact contraction or a
+    // context scan — the one mutation this fixture can drive that breaks both symptoms from the same root cause.
     let while_ids = ids_where(&loop_core, &|c: &Core| matches!(c, Core::While(..)));
     assert!(!while_ids.is_empty(), "the loop fixture must contain a while");
     for id in while_ids {
@@ -410,26 +346,15 @@ proptest! {
     /// signature `arb_expr_over(leaf: impl Strategy<Value = String> + 'static) -> impl Strategy<Value
     /// = String>`, so it takes a leaf *strategy* and yields source text directly.
     ///
-    /// **The leaf range (`0u64..8`) was chosen by measurement, not to mirror any call site — it does
-    /// NOT mirror `arb_expr_below(1000)` in `llvm_oracle.rs`.** Arithmetic here
-    /// runs on CHURCH NUMERALS, so cost scales with the numeral's VALUE; which redex normal order picks
-    /// next depends only on the term's structure, never on the magnitude of a leaf, so a narrower range
-    /// changes nothing about what this test exercises. Measured in release: `0u64..8` runs this
-    /// proptest in 0.22 s; `0u64..64` takes >110 s; `0u64..1000` takes >5 min. This range in fact
-    /// mirrors `arb_expr_below(8)` in `three_way_oracle.rs`, which lands on the same bound for an
-    /// unrelated reason — TM fixed-width-field safety — irrelevant to this file. A future editor
-    /// "restoring" a wider range on the belief that it should match `llvm_oracle.rs` will hang this
-    /// suite. See the generator's doc in `redextape-test-support` for why the recursion parameters must
-    /// not be changed either.
-    ///
-    /// THE `three_way_oracle.rs` POINTER READ line 535 UNTIL THIS COMMIT, AND IT HAD DRIFTED. It was
-    /// `arb_tm_safe_expr`'s own `arb_expr_over((0u64..8)..)` — the bound this range is said to mirror —
-    /// when the zipper slice (#5) wrote it; the node-count bound (#32) moved that function down eight
-    /// lines, so that bound was then `arb_tm_safe_expr`'s own one-line body, and this conversion found
-    /// 535 holding a line of that function's DOC, about the operators the generator omits. Still inside
-    /// the same item, which is why it read as confirmation. The `llvm_oracle.rs` pointer beside it had
-    /// NOT drifted: line 153 still held `arb_first_order_expr`'s `(0u64..1000)`, unmoved since #5 wrote
-    /// the two pointers together.
+    /// **The leaf range (`0u64..8`) was chosen by measurement, not to mirror any call site — it does NOT
+    /// mirror `arb_expr_below(1000)` in `llvm_oracle.rs`.** Arithmetic here runs on CHURCH NUMERALS, so cost
+    /// scales with the numeral's VALUE; which redex normal order picks next depends only on the term's
+    /// structure, never on the magnitude of a leaf, so a narrower range changes nothing about what this test
+    /// exercises. In release `0u64..8` runs this proptest in 0.22 s and `0u64..64` takes >110 s. This range
+    /// in fact mirrors `arb_expr_below(8)` in `three_way_oracle.rs`, which lands on the same bound for an
+    /// unrelated reason — TM fixed-width-field safety — irrelevant to this file. A future editor "restoring"
+    /// a wider range on the belief that it should match `llvm_oracle.rs` will hang this suite. See the
+    /// generator's doc in `redextape-test-support` for why the recursion parameters must not be changed either.
     #[test]
     fn generated_programs_agree_step_for_step(
         src in arb_expr_over((0u64..8).prop_map(|n| n.to_string()))

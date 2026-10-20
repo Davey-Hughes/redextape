@@ -1,19 +1,19 @@
-//! The backend oracle (spec §12.1) — FOUR-WAY as of Task 14: for every first-order demo, the reference
-//! tree-walker's value, the decoded λ normal form, and the decoded TM final tape — compiled and
-//! simulated under BOTH `Unary` and `Binary` — all agree: reference == λ == unary-TM == binary-TM. The
-//! two TM legs are DIFFERENT MACHINES compiled from the same Core (a different encoding lowers to a
-//! genuinely different bank layout and gadget set), not the same machine read two ways -- which is what
-//! makes this a real fourth leg rather than a restatement of the third. Runtime faults are the shared
-//! "no value" outcome (reference Runtime, λ HitCap, both TM legs HitCap). Higher-order programs
-//! (map/fold, a function-valued argument) are four-way too, as of Plan 3b-1 for the TM legs: `run_tm`
-//! defunctionalizes -- rewrites higher-order Core into the first-order subset `lower_asm` already
-//! handles -- before lowering, so they run on the TM like everything else, under either encoding. The
-//! dual case is the λ-refuses side (`LAMBDA_LIMITATION_DEMOS`/`assert_tm_only`): Plan-2 latent traps
-//! that λ v1 REJECTS (`LowerError`) while the reference and both first-order TM legs run them to a
-//! value. The per-category oracles (tm_oracle.rs's reference==TM / asm-interp==TM, lambda_oracle.rs's
-//! reference==λ) stay for localization; this file is the unified capstone.
+//! The backend oracle (spec §12.1) — FOUR-WAY: for every first-order demo, the reference tree-walker's
+//! value, the decoded λ normal form, and the decoded TM final tape — compiled and simulated under BOTH
+//! `Unary` and `Binary` — all agree: reference == λ == unary-TM == binary-TM. The two TM legs are
+//! DIFFERENT MACHINES compiled from the same Core (a different encoding lowers to a genuinely
+//! different bank layout and gadget set), not the same machine read two ways -- which is what makes
+//! this a real fourth leg rather than a restatement of the third. Runtime faults are the shared "no
+//! value" outcome (reference Runtime, λ HitCap, both TM legs HitCap). Higher-order programs (map/fold,
+//! a function-valued argument) are four-way too: `run_tm` defunctionalizes -- rewrites higher-order
+//! Core into the first-order subset `lower_asm` already handles -- before lowering, so they run on the
+//! TM like everything else, under either encoding. The dual case is the λ-refuses side
+//! (`LAMBDA_LIMITATION_DEMOS`/`assert_tm_only`): latent traps that λ v1 REJECTS (`LowerError`) while
+//! the reference and both TM legs run them to a value. The per-category oracles (tm_oracle.rs's
+//! reference==TM / asm-interp==TM, lambda_oracle.rs's reference==λ) stay for localization; this file is
+//! the unified capstone.
 //!
-//! This file keeps the name `three_way_oracle.rs` even though the oracle it drives is now four-way:
+//! This file keeps the name `three_way_oracle.rs` even though the oracle it drives is four-way:
 //! renaming it would break `first_order_demos_stay_synced_across_every_copy`'s path-based
 //! extraction of `FIRST_ORDER_DEMOS` (by `CARGO_MANIFEST_DIR`-relative path, not by module name) for no
 //! gain, so the filename/doc mismatch is a deliberate decision, not an oversight.
@@ -23,22 +23,9 @@
 //! `a_tape_decodes_the_same_at_every_reader_width` pins exactly that. So `run_tm` paired with a default
 //! instance would work here too, and NOTHING below depends on the fitted width for correctness.
 //!
-//! The binary legs nonetheless run via `run_tm_fitted` and decode with `Binary::at(width)`, for two
-//! reasons that are both conveniences: the width the fit settles on is worth naming in a failure
-//! message, and it keeps `at_width` on this file's executed path. CONVENTION, NOT REQUIREMENT — do not
+//! The binary legs nonetheless run via `run_tm_fitted` and decode with `Binary::at(width)` as a
+//! convenience: it keeps `at_width` on this file's executed path. CONVENTION, NOT REQUIREMENT — do not
 //! cite this file as evidence that a fitted decode is necessary.
-//!
-//! (Historical, stated in the past tense deliberately. Decode WAS once width-strict: `Binary::decode_nat`
-//! and `parse_heap_cells` required a field to close exactly `self.width` cells later, where `Unary`'s
-//! content-driven decode scanned to the next `#` and so worked at any width; a fitted-at-16 binary tape
-//! read with a 64-wide `Binary` returned `None` for every demo, measured directly rather than assumed.
-//! That stopped being true when both decoders became structural. This note is subordinate to the
-//! statement above, and phrased so it cannot be quoted as current fact, BECAUSE IT REPEATEDLY WAS: the
-//! obsolete half of the older wording — which led with "that was once REQUIRED" and put the retraction
-//! in a separate paragraph — was copied into other files as a live correctness constraint seven times
-//! across two branches before anyone checked it against `binary.rs`. Any sentence anywhere in this tree
-//! claiming that binary decode needs the fitted width describes a version of this code that no longer
-//! exists.)
 
 // Test target: a fixture that fails to build IS the failure this file reports, so panicking is
 // deliberate here. The `allow-*-in-tests` keys in `clippy.toml` only reach `#[test]` functions and
@@ -72,8 +59,8 @@ fn assert_three_way(src: &str) {
     let core = desugar(&prog.unwrap());
     let lambda = run_lambda(&core, MAX_REDUCTION_STEPS);
     let tm = run_tm(&core, &Unary::default(), TM_DEFAULT_CAPS);
-    // `run_tm_fitted`, not `run_tm`: reads the tape back at the width the fit settled on. Once forced
-    // by a width-strict decode, now kept so a failure names the width (see this file's module doc).
+    // `run_tm_fitted`, not `run_tm`: reads the tape back at the width the fit settled on, a convention
+    // rather than a requirement (see this file's module doc).
     let (btm, bwidth) = run_tm_fitted(&core, &Binary::default(), TM_DEFAULT_CAPS);
     match (reference, lambda, tm, btm) {
         (Ok(rv), LambdaRun::Reduced(nf), TmRun::Ran { tapes }, TmRun::Ran { tapes: btapes }) => {
@@ -116,7 +103,7 @@ fn assert_three_way_diverges(src: &str) {
 }
 
 /// A program the λ backend refuses to lower in v1 (`LowerError`),
-/// while the reference and both first-order TM legs agree on the value.
+/// while the reference and both TM legs agree on the value.
 fn assert_tm_only(src: &str) {
     let reference = run(src);
     let (prog, ds) = parse(src);
@@ -155,9 +142,8 @@ fn assert_tm_only(src: &str) {
 /// if binary were secretly falling back to unary, or if the ceiling had been raised for both.
 ///
 /// Uses `run_tm_fitted`, not `run_tm`, and decodes with `Binary::at(width)` at the width the fit
-/// settled on. Once required — `Binary::decode_nat` was width-strict, and a fixed `Binary::default()`
-/// (64 cells) would have reported `None` even though the machine computed 10,000 correctly — and now
-/// kept for the width itself, which is half of what this test claims (see the module doc).
+/// settled on. Decode is structural at every width, so this is a convention, not a requirement (see
+/// the module doc).
 #[test]
 fn binary_computes_what_unary_cannot_represent() {
     let (prog, ds) = parse("100 * 100");
@@ -177,9 +163,8 @@ fn binary_computes_what_unary_cannot_represent() {
     }
 }
 
-/// A tape produced by one encoding must NOT decode through the other. Before `parse_heap_cells` moved
-/// onto the trait, `decode_tape` took `enc` and ignored it for the heap half; this pins that the
-/// encoding is now load-bearing all the way through the decode.
+/// A tape produced by one encoding must NOT decode through the other: this pins that the encoding is
+/// load-bearing all the way through the decode, heap half included.
 #[test]
 fn a_binary_tape_does_not_decode_as_unary() {
     let (prog, ds) = parse("[1, 2, 3]");
@@ -198,11 +183,11 @@ fn a_binary_tape_does_not_decode_as_unary() {
 }
 
 /// The full first-order demo suite — arithmetic, monus, comparison, if, let/let-mut/assign/while/seq,
-/// calls & recursion, list construction & access, (Plan 3b-1) higher-order programs that `run_tm`
-/// now defunctionalizes before lowering (a function passed as a value, `map`/`fold`), and
-/// MUTUALLY RECURSIVE / FORWARD-REFERENCING `fn`s (`Core::LetRecGroup`). Every value
-/// stays « MAX_FIELD_WIDTH (64) and every program runs to a value on ALL THREE backends. (The Plan-2
-/// latent traps that λ v1 REJECTS live in LAMBDA_LIMITATION_DEMOS below — they are not three-way.)
+/// calls & recursion, list construction & access, higher-order programs that `run_tm` defunctionalizes
+/// before lowering (a function passed as a value, `map`/`fold`), and MUTUALLY RECURSIVE /
+/// FORWARD-REFERENCING `fn`s (`Core::LetRecGroup`). Every value stays « MAX_FIELD_WIDTH (64) and every
+/// program runs to a value on ALL THREE backends. (The latent traps that λ v1 REJECTS live in
+/// LAMBDA_LIMITATION_DEMOS below — they are not three-way.)
 const FIRST_ORDER_DEMOS: &[&str] = &[
     "1 + 2 * 3",
     "3 - 5",
@@ -227,10 +212,10 @@ const FIRST_ORDER_DEMOS: &[&str] = &[
     "head(tail(cons(1, cons(2, nil))))",
     "head([1, 2, 3])",
     "tail([1, 2, 3])",
-    // Higher-order (Plan 3b-1): a function received as a value, defunctionalized before lowering.
+    // Higher-order: a function received as a value, defunctionalized before lowering.
     "fn apply2(f, x) { f(x) } fn add1(x) { x + 1 } apply2(add1, 5)",
     "fn map(xs, f) { if is_empty(xs) { nil } else { cons(f(head(xs)), map(tail(xs), f)) } } fn add1(x) { x + 1 } [3, 1, 2].map(add1)",
-    // Higher-order with immutable capture (Plan 3b-1 Task 4): `|x| x + n` captures `n` by value.
+    // Higher-order with immutable capture: `|x| x + n` captures `n` by value.
     "let n = 5; fn map(xs, f) { if is_empty(xs) { nil } else { cons(f(head(xs)), map(tail(xs), f)) } } [1, 2, 3].map(|x| x + n)",
     "\
         fn map(xs, f) { if is_empty(xs) { nil } else { cons(f(head(xs)), map(tail(xs), f)) } }\n\
@@ -238,39 +223,34 @@ const FIRST_ORDER_DEMOS: &[&str] = &[
         fn add(a, b) { a + b }\n\
         fn add1(x) { x + 1 }\n\
         fold([3, 1, 2].map(add1), 0, add)",
-    // Higher-order currying (Plan 3b-1): a value-lambda whose body is ANOTHER value-lambda
-    // (`|y| |z| y + z`). Both nested closures now get guaranteed-unique anon names, so `defunc` no
-    // longer panics on the duplicate key and this defuncs three-way to 9.
+    // Higher-order currying: a value-lambda whose body is ANOTHER value-lambda (`|y| |z| y + z`). Both
+    // nested closures get guaranteed-unique anon names; this defuncs three-way to 9.
     "fn ap(f, x) { f(x) } let add = |y| |z| y + z; ap(ap(add, 4), 5)",
-    // MUTUAL RECURSION (Core::LetRecGroup): a program class that previously reached NO backend —
-    // `typeck` rejected the forward reference, and `lower_asm` bound a name only before its own body.
-    // Each member is observably DIFFERENT at every level (not merely in its base case), so a backend
-    // that permuted the group's members would compute a plausible WRONG value rather than agree.
-    // Measured cost (well inside both caps): λ 367 of 5,000,000 steps, TM 99,699 of 5,000,000.
+    // MUTUAL RECURSION (Core::LetRecGroup): each member is observably DIFFERENT at every level (not
+    // merely in its base case), so a backend that permuted the group's members would compute a
+    // plausible WRONG value rather than agree.
     "fn is_even(n){ if n == 0 { true } else { is_odd(n - 1) } } \
      fn is_odd(n){ if n == 0 { false } else { is_even(n - 1) } } is_even(4)",
     // The ODD argument is not a duplicate: its answer comes out of the OTHER member's base case. A
     // backend that COLLAPSED the pair (both names resolving to `is_even`) still answers `true` at
     // every even argument, so the even case alone would agree with the reference under that mutant —
-    // measured, not assumed; see `lambda/lower.rs`'s own group test. λ 502 steps, TM 120,899.
+    // see `lambda/lower.rs`'s own group test.
     "fn is_even(n){ if n == 0 { true } else { is_odd(n - 1) } } \
      fn is_odd(n){ if n == 0 { false } else { is_even(n - 1) } } is_even(5)",
     // A FORWARD REFERENCE with no cycle: `a` is a one-member component that must still be emitted
-    // INSIDE `b`, so this pins dependency order rather than grouping. λ 25 steps, TM 16,143.
+    // INSIDE `b`, so this pins dependency order rather than grouping.
     "fn a(n){ b(n) + 1 } fn b(n){ n * 2 } a(3)",
-    // THREE members, not two — an n-ary bug that happens to work at n = 2 is the shape of defect this
-    // codebase keeps finding. Each member contributes its own constant at its own level (1/2/4), so
-    // the answer 1+2+4+1 = 8 identifies the exact rotation of the cycle; any rotation of the three
-    // bodies gives a different number. λ 411 steps, TM 145,819.
+    // THREE members, not two — an n-ary bug can happen to work at n = 2. Each member contributes its
+    // own constant at its own level (1/2/4), so the answer 1+2+4+1 = 8 identifies the exact rotation
+    // of the cycle; any rotation of the three bodies gives a different number.
     "fn s0(n){ if n == 0 { 0 } else { 1 + s1(n - 1) } } \
      fn s1(n){ if n == 0 { 0 } else { 2 + s2(n - 1) } } \
      fn s2(n){ if n == 0 { 0 } else { 4 + s0(n - 1) } } s0(4)",
-    // A group that reaches the backends THROUGH `defunc`. Every case above lowers via `lower_asm`
-    // directly, so `defunc`'s group handling — peeling a `LetRecGroup` and re-emitting it as one
-    // ordered unit, the whole of Task 6 — was asserted only by unit tests stopping at the reference
-    // and `run_asm`, never through λ, the TM, or native. `id` is used as a VALUE, which is what routes
-    // the program through `defunc`; `ev`/`od` stay a genuine cycle inside it. The answer comes out of
-    // whichever member's base case the parity reaches, so a collapsed or rotated group is caught.
+    // A group that reaches the backends THROUGH `defunc`. Every group case above lowers via `lower_asm`
+    // directly, so none exercises `defunc`'s group handling — peeling a `LetRecGroup` and re-emitting it
+    // as one ordered unit. `id` is used as a VALUE, which is what routes the program through `defunc`;
+    // `ev`/`od` stay a genuine cycle inside it. The answer comes out of whichever member's base case the
+    // parity reaches, so a collapsed or rotated group is caught.
     "fn ev(n,k){ if n == 0 { k(1) } else { od(n - 1, k) } } \
      fn od(n,k){ if n == 0 { k(0) } else { ev(n - 1, k) } } fn id(x){ x } ev(4, id)",
     "fn ev(n,k){ if n == 0 { k(1) } else { od(n - 1, k) } } \
@@ -278,13 +258,11 @@ const FIRST_ORDER_DEMOS: &[&str] = &[
     // A FORWARD reference through `defunc` (no cycle): `f` names `g` before `g` is defined, and `g`
     // is value-used, so the dependency ordering and the dispatcher interact.
     "fn ap(h,x){ h(x) } fn f(n){ ap(g, n) } fn g(n){ n + 1 } f(3)",
-    // A fn both CALLED BY NAME and USED AS A VALUE. Previously `Unsupported` on TM and native while
-    // the reference and λ accepted it — an oracle asymmetry this class now closes.
-    // Non-commutative at arity 2, so a forwarder with swapped arguments cannot pass: 5 + 7 = 12.
+    // A fn both CALLED BY NAME and USED AS A VALUE. Non-commutative at arity 2, so a forwarder with
+    // swapped arguments cannot pass: 5 + 7 = 12.
     "fn sub(a, b) { a - b } fn ap2(g, a, b) { g(a, b) } sub(9, 4) + ap2(sub, 10, 3)",
-    // RECURSIVE and value-used — the case the restriction actually blocked, and the reason the class
-    // is large: `analyze` counts a self-call as `name_called`, so every recursive fn used as a value
-    // was BOTH. 10 + 3 = 13.
+    // RECURSIVE and value-used — the reason the class is large: `analyze` counts a self-call as
+    // `name_called`, so every recursive fn used as a value is BOTH. 10 + 3 = 13.
     "fn sum(n) { if n == 0 { 0 } else { n + sum(n - 1) } } fn ap(g, x) { g(x) } ap(sum, 4) + sum(2)",
     // `map` itself passed as a value while ALSO being called by name. Its body dispatches at arity 1
     // and it is value-used at arity 2, so the two dispatchers are distinct. `map` calls itself by
@@ -302,76 +280,66 @@ const FIRST_ORDER_DEMOS: &[&str] = &[
     // its own -- would compile and pass unnoticed. Tags are assigned in declaration order per arity:
     // in the first program below `v` is tag 0 (normal arm) and `b` is tag 1 (forwarder); in the
     // second, the two `fn`s are declared in the opposite order, so `b` is tag 0 (forwarder) and `v`
-    // is tag 1 (normal arm) -- confirmed by dumping the lowered asm, not assumed. `v` (x*10) and `b`
-    // (x+1) are value-distinguishable, so a tag mix-up or a mis-bound param changes the answer rather
-    // than staying silent: 10 + 2 + 6 = 18.
+    // is tag 1 (normal arm). `v` (x*10) and `b` (x+1) are value-distinguishable, so a tag mix-up or a
+    // mis-bound param changes the answer rather than staying silent: 10 + 2 + 6 = 18.
     "fn v(x) { x * 10 } fn b(x) { x + 1 } fn ap(g, x) { g(x) } ap(v, 1) + ap(b, 1) + b(5)",
     "fn b(x) { x + 1 } fn v(x) { x * 10 } fn ap(g, x) { g(x) } ap(v, 1) + ap(b, 1) + b(5)",
     // A user `fn` shadowing a list builtin. `defunc` synthesizes `$head($clos)` for its dispatcher
     // tag test, and `lower_asm` resolves a bound function BEFORE the builtin table — so with the
-    // bare name this silently miscompiled (measured at 3246742: reference 5, λ 5, TM 3). The `$`
-    // form is unforgeable in user source, so scaffolding is uncapturable. 2 + 3 = 5.
+    // bare name this would silently miscompile. The `$` form is unforgeable in user source, so
+    // scaffolding is uncapturable. 2 + 3 = 5.
     "fn head(x) { x + 1 } fn ap(g, x) { g(x) } fn add1(y) { y + 1 } head(1) + ap(add1, 2)",
     // The same shadowing where the shadowing function is ALSO the value being dispatched. 2 + 3 = 5.
     "fn head(x) { x + 1 } fn ap(g, x) { g(x) } head(1) + ap(head, 2)",
-    // A user `fn tail` shadowing the builtin — but unlike the `head` pair above, a `tail`-shaped
-    // twin of THAT demo (`fn tail(x){x+1} fn ap(g,x){g(x)} tail(1)+ap(tail,2)`) is VACUOUS: `$head`
-    // is called unconditionally by every dispatcher (the tag test), but `$tail` is only called by
+    // A user `fn tail` shadowing the builtin — but unlike the `head` pair above, a `tail`-shaped twin
+    // of THAT demo (`fn tail(x){x+1} fn ap(g,x){g(x)} tail(1)+ap(tail,2)`) is VACUOUS: `$head` is
+    // called unconditionally by every dispatcher (the tag test), but `$tail` is only called by
     // `tail1()` to unpack a dispatcher arm's CAPTURED env, and that program's closures capture
     // nothing, so `tail1()` is never invoked and the demo could not detect a reverted `$tail`->`tail`
-    // regression (found when this class was surveyed for Task 2). Here `tail` is BOTH called by name
-    // (`tail(3)`) and used as a value (`ap(tail, 2)`), so it is KEPT — a real top-level `tail` binder
-    // exists for scaffolding to collide with — and the sibling value-lambda `|y| y + n` at the SAME
-    // arity captures `n`, forcing its dispatcher arm to call `tail1()` to unpack `$env`. Confirmed
-    // non-vacuous by sabotage (reverting `tail1`'s emitted name to the bare `"tail"`): the TM diverges
-    // (`HitCap`) while reference and λ still agree. 4 + 3 + 12 = 19.
+    // regression. Here `tail` is BOTH called by name (`tail(3)`) and used as a value (`ap(tail, 2)`),
+    // so it is KEPT — a real top-level `tail` binder exists for scaffolding to collide with — and the
+    // sibling value-lambda `|y| y + n` at the SAME arity captures `n`, forcing its dispatcher arm to
+    // call `tail1()` to unpack `$env`. 4 + 3 + 12 = 19.
     "let n = 7; fn tail(x) { x + 1 } fn ap(g, y) { g(y) } tail(3) + ap(tail, 2) + ap(|y| y + n, 5)",
     // `nil` is the FOURTH synthesized scaffolding name (the closed-function-value closure's env, the
     // dispatcher's fault sentinel, the env-list terminator), and `rewrite_value_name`'s bare-`"nil"`
-    // check used to short-circuit BEFORE its `tags` check — so a user `fn nil`, itself USED AS A
-    // VALUE, compiled to the empty list instead of `cons(tag, $nil)`, and the dispatcher's
-    // `$head($clos)` tag test then faulted on it. `nil` is not a keyword in this language (see
-    // `prelude.rs`'s module doc), so a user `fn nil` SHADOWS the empty list exactly as the reference
-    // interpreter's frame lookup does — confirmed against the reference, which evaluates this to 5.
-    // Confirmed non-vacuous by sabotage (restoring the old check order): TM `HitCap`, matching the
-    // reference/λ "no value" outcome being wrongly a value fault instead of true agreement — see
-    // `defunc.rs`'s `rewrite_value_name` for the measured failure this reorder closes.
+    // check must come AFTER its `tags` check — otherwise a user `fn nil`, itself USED AS A VALUE,
+    // compiles to the empty list instead of `cons(tag, $nil)`, and the dispatcher's `$head($clos)`
+    // tag test faults on it. `nil` is not a keyword in this language (see `prelude.rs`'s module
+    // doc), so a user `fn nil` SHADOWS the empty list exactly as the reference interpreter's frame
+    // lookup does — the reference evaluates this to 5. `defunc.rs`'s `rewrite_value_name` says why the
+    // check order matters.
     "fn nil(x) { x + 5 } fn ap(g, x) { g(x) } ap(nil, 0)",
     // A user `fn nil` called by name ONLY (never itself used as a value) sharing a program with an
-    // unrelated CLOSED function-value (`add1`, passed to `ap`). Before the `$nil` alias, `add1`'s
-    // closed closure was built as `cons(tag, nil)` — a bare `nil` that `lower_asm`'s
-    // `reject_fn_value` then flagged as a value-use of the user's KEPT `fn nil`, rejecting the whole
+    // unrelated CLOSED function-value (`add1`, passed to `ap`). Without the `$nil` alias, `add1`'s
+    // closed closure would be built as `cons(tag, nil)` — a bare `nil` that `lower_asm`'s
+    // `reject_fn_value` would flag as a value-use of the user's KEPT `fn nil`, rejecting the whole
     // program on every lowering backend even though `nil` itself is never value-used anywhere.
-    // Confirmed non-vacuous by sabotage (reverting `$nil` at that one synthesis site): all three
-    // lowering backends `Unsupported { "\`nil\` used as a value" }`, while reference and λ still
-    // agree at 5. 2 + 3 = 5.
+    // 2 + 3 = 5.
     "fn nil(x) { x + 1 } fn ap(g, x) { g(x) } fn add1(y) { y + 1 } nil(1) + ap(add1, 2)",
     // A user `fn cons` shadowing the list builtin — the `cons`-shaped twin of the `head`/`tail` pair
-    // above, closing the one member a review found missing (reverting the `cons` helper to its bare
-    // name left both oracle suites green). `defunc` builds every closure as `$cons(tag, env)`, so a
-    // bare `cons` here would let this user function capture the closure representation itself —
-    // `add1`'s closed closure would become `(tag + env)` (the user's `cons` computes `a + b`, not a
-    // pair), and the dispatcher's `$head($clos)` tag test then reads that number as a list. Confirmed
-    // non-vacuous by sabotage (reverting the `cons` helper's `"$cons"` to the bare `"cons"`):
-    // reference/λ still agree at 10, while the TM diverges (`HitCap`). 3 + 7 = 10.
+    // above. `defunc` builds every closure as `$cons(tag, env)`, so a bare `cons` here would let this
+    // user function capture the closure representation itself — `add1`'s closed closure would become
+    // `(tag + env)` (the user's `cons` computes `a + b`, not a pair), and the dispatcher's
+    // `$head($clos)` tag test would then read that number as a list. 3 + 7 = 10.
     "fn cons(a, b) { a + b } fn ap2(g, a, b) { g(a, b) } cons(1, 2) + ap2(cons, 3, 4)",
 ];
 
 /// Runtime-faulting programs: the reference faults, both other backends diverge — all "no value".
 const FAULT_DEMOS: &[&str] = &["head(nil)", "tail(nil)"];
 
-/// Plan-2 latent-trap programs the λ backend REJECTS in v1 (an immutable `let` shadowing a mutable
-/// variable; a `fn` inside a mutation region — λ returns `LowerError` rather than silently miscompile,
-/// commit 54aad42), while the reference and the first-order TM both run them to a value. Asserted
-/// reference == TM, and λ is `LowerError`.
+/// Latent-trap programs the λ backend REJECTS in v1 (an immutable `let` shadowing a mutable
+/// variable; a `fn` inside a mutation region — λ returns `LowerError` rather than silently
+/// miscompile; and the two closures over a mutable commented below), while the reference and the TM
+/// both run them to a value. Asserted reference == TM, and λ is `LowerError`.
 const LAMBDA_LIMITATION_DEMOS: &[&str] = &[
     "let mut x = 1; x = x + 1; let x = x + 10; x",
     "let mut acc = 0; fn bump(n) { n + 1 } acc = bump(acc); acc = bump(acc); acc",
-    // Plan 3b-2: a value-used closure captures a MUTABLE, observed by-reference. λ rejects
+    // A value-used closure captures a MUTABLE, observed by-reference. λ rejects
     // mutable-in-closure (`unbound` — it never binds the mutable into the closure body); the reference
     // (by-reference) and the boxed TM (defunc boxes the capture) agree at 10.
     "let mut n = 1; fn apply0(g) { g(0) } let f = |x| x + n; n = 10; apply0(f)",
-    // Plan 3b-2: an EFFECTFUL closure body (`c = c + 1`) that mutates its boxed capture on each call,
+    // An EFFECTFUL closure body (`c = c + 1`) that mutates its boxed capture on each call,
     // called twice via a higher-order `twice`. λ rejects with `StatefulClosure`; the reference and the
     // boxed TM both land on 2 (0 -> 1 -> 2).
     "let mut c = 0; fn twice(g) { g(0); g(0); } let bump = |x| { c = c + 1; c }; twice(bump); c",
@@ -437,43 +405,19 @@ fn extract_str_array(source: &str, const_name: &str) -> Vec<String> {
 
 /// `examples/step_survey.rs`, `redextape-native/tests/native_oracle.rs` and `examples/common/demos.rs`
 /// each hand-copy this file's `FIRST_ORDER_DEMOS` — an example is a separate binary crate and cannot
-/// `use` an integration test's module, and the native crate's oracle predates a shared fixtures crate —
-/// so all three are duplicated by hand rather than referencing this array. That has already drifted
-/// twice (documented in `docs/superpowers/plans/2026-07-19-redextape-roadmap.md`'s survey caveat and,
-/// within this very branch, in `step_survey.rs` again after the FIRST fix), so a one-off resync is
-/// demonstrably not durable on its own. This test reads all four files as TEXT (via
-/// `CARGO_MANIFEST_DIR`, so it works under `cargo test` from any directory) and asserts their extracted
-/// string literals are byte-for-byte equal, catching the next drift at compile-time cost instead of the
-/// next survey run silently describing a stale corpus.
+/// `use` an integration test's module, and no shared fixtures crate holds the array — so all three are
+/// duplicated by hand rather than referencing this array. This test reads all four files as TEXT (via
+/// `CARGO_MANIFEST_DIR`, so it works under `cargo test` from any directory) and asserts their
+/// extracted string literals are byte-for-byte equal, catching the next drift at compile-time cost
+/// instead of the next survey run silently describing a stale corpus.
 ///
-/// COPIES WERE ADDED TO THIS TEST AFTER THE FACT, TWICE, AND THE SECOND TIME PROVES THE FIRST FIX'S OWN
-/// COUNT WRONG. `list_reduction_probe.rs` was committed with a copy and a comment claiming this test kept
-/// it in sync; it did not, because the test covered three, so the test went to four. It should have gone
-/// to five: `examples/lambda_sharing_probe.rs` carried a copy too, with its own module doc citing the
-/// same drift history, and nothing read it. **The fix's own count of the damage was short** — which is
-/// the roadmap's standing lesson about this class stated by a fresh instance of it, and the reason this
-/// doc names the enumeration method rather than the number: the check is `grep -rn FIRST_ORDER_DEMOS`
-/// over the whole tree, not a list anyone maintains by memory. All five were byte-identical when the
-/// fifth was added, so this closed an uncovered copy rather than live drift; that is the window this
-/// test exists to shut, and it stayed open through one deliberate attempt to shut it.
-///
-/// **THE SIXTH (2026-08-01, `examples/concurrency_probe.rs`) IS THE FIRST ADDED *WITH* ITS COPY RATHER
-/// THAN AFTER IT**, which is what the paragraph above asks for and had not yet been tested. Two things
-/// changed to make that the cheap path rather than the diligent one. The per-copy `read_to_string` +
-/// `extract_str_array` + `assert_eq!` triple became one row in a `copies` table, so adding a copy is a
-/// one-line edit instead of a three-place one — the shape that made the fifth easy to miss. And the
-/// count is now asserted (`copies.len() + 1 == 6`), because a table makes a *deletion* silent in a way
-/// three hand-written asserts did not: dropping a row would leave this test green while that file
-/// drifted. The assert is deliberately a literal, so bumping it is a conscious act that re-runs the
-/// `grep`.
-///
-/// **THE SEVENTH (`examples/state_cost_probe.rs`, this same branch) REVERTED TO *AFTER THE FACT* —**
-/// the pattern the sixth entry above was supposed to have broken. Its copy shipped as a `part_g` local
-/// binding named `demos`, not `FIRST_ORDER_DEMOS`, so even the `grep -rn FIRST_ORDER_DEMOS` audit this
-/// doc names would not have found it, and nothing added a row here either. Renamed to the module-level
-/// `const FIRST_ORDER_DEMOS: &[&str]` every other copy uses, and added to `copies` — closing the same
-/// window a third time, inside the branch that is supposed to be fixing this class of defect, not adding
-/// to it.
+/// Find every copy with `git grep -l 'const FIRST_ORDER_DEMOS' -- crates`, not a list anyone maintains
+/// by memory, and give a new copy the module-level name `const FIRST_ORDER_DEMOS: &[&str]` every other
+/// copy uses: a copy bound under another name (a local named `demos`, say) is invisible to that grep.
+/// Each copy is one row in the `copies` table, so adding one is a one-line edit. The count is asserted
+/// (`copies.len() + 1 == 4`) because a table makes a *deletion* silent: dropping a row would leave this
+/// test green while that file drifted. The assert is deliberately a literal, so bumping it is a
+/// conscious act that re-runs the `grep`.
 ///
 /// An example target is not a test target, but that was never what made a copy checkable — the check is
 /// textual and path-based, so an untracked-by-CI probe costs one more `read_to_string` and closes the
@@ -483,8 +427,7 @@ fn first_order_demos_stay_synced_across_every_copy() {
     let manifest = env!("CARGO_MANIFEST_DIR");
     // Every copy in the tree, as (path relative to this crate, label for the failure message). Adding a
     // row is the whole cost of adding a copy — which is the point, and is why this is a table rather than
-    // six hand-written `read_to_string`/`assert_eq!` pairs: the fifth copy was missed because each new
-    // one meant editing three places, and the sixth and seventh are the ones added under this shape.
+    // hand-written `read_to_string`/`assert_eq!` pairs, where each new copy would mean editing three places.
     let copies: &[(&str, &str)] = &[
         ("examples/step_survey.rs", "examples/step_survey.rs"),
         ("../redextape-native/tests/native_oracle.rs", "redextape-native/tests/native_oracle.rs"),
@@ -503,7 +446,7 @@ fn first_order_demos_stay_synced_across_every_copy() {
     }
 
     // The count is asserted, not just the contents: a copy silently DROPPED from `copies` would leave
-    // this test green while its file drifted. `grep -rn FIRST_ORDER_DEMOS` over the tree is the
+    // this test green while its file drifted. `git grep -l 'const FIRST_ORDER_DEMOS' -- crates` is the
     // enumeration method this doc names, and 4 is what it returns — this file plus `copies`.
     assert_eq!(copies.len() + 1, 4, "a copy was added to or removed from the tree without updating this count");
 }
@@ -634,7 +577,7 @@ proptest! {
     fn three_way_agrees_on_random_first_order_programs(src in arb_expr_below(8)) {
         let reference = run(&src);
         let (prog, ds) = parse(&src);
-        prop_assume!(ds.is_empty()); // skip anything that does not parse/type-check
+        prop_assume!(ds.is_empty()); // skip anything that does not parse
         let core = desugar(&prog.unwrap());
         let lambda = run_lambda(&core, MAX_REDUCTION_STEPS);
         let tm = run_tm(&core, &Unary::default(), TM_DEFAULT_CAPS);
@@ -649,15 +592,14 @@ proptest! {
 }
 
 // ============================================================================================
-// Broadened property-based oracle (correctness hardening, 2026-07-23)
+// Broadened property-based oracle
 //
 // `arb_expr_below(8)` above randomizes ONLY arithmetic/comparison/if. These generators extend the
-// oracle to the features that were previously covered by curated demos alone — the hardest, most
-// bug-prone code: mutable capture (boxing, Plan 3b-2), higher-order (defunc, Plan 3b-1), lists +
-// access, bounded recursion, and bounded imperative loops. Every operand is `< 8` and every
-// generated value AND intermediate is provably `< MAX_FIELD_WIDTH` (64) — the only arithmetic is a
-// small number of bounded `+`s (worst case ~17) plus monus/comparison, so the TM's fixed-width unary
-// fields never overflow.
+// oracle to the features otherwise covered only by curated demos — the hardest, most bug-prone code:
+// mutable capture (boxing), higher-order (defunc), lists + access, bounded recursion, and bounded
+// imperative loops. Every operand is `< 8` and every generated value AND intermediate is provably
+// `< MAX_FIELD_WIDTH` (64) — the only arithmetic is a small number of bounded `+`s (worst case ~17)
+// plus monus/comparison, so the TM's fixed-width unary fields never overflow.
 // Each generator carries a non-vacuity meta-test proving it actually reaches its target oracle bucket.
 // ============================================================================================
 
@@ -666,12 +608,12 @@ proptest! {
 fn three_way_value(src: &str) -> Result<(), TestCaseError> {
     let reference = run(src);
     let (prog, ds) = parse(src);
-    prop_assume!(ds.is_empty()); // skip anything that doesn't parse/type-check
+    prop_assume!(ds.is_empty()); // skip anything that doesn't parse
     let core = desugar(&prog.unwrap());
     let lambda = run_lambda(&core, MAX_REDUCTION_STEPS);
     let tm = run_tm(&core, &Unary::default(), TM_DEFAULT_CAPS);
-    // Decodes at the width `run_tm_fitted` settled on. No longer required (both decoders are
-    // structural), but it names the width in a shrunk counterexample, which a bare `run_tm` would not.
+    // Decodes at the width `run_tm_fitted` settled on. Not required (both decoders are structural); see
+    // this file's module doc.
     let (btm, bwidth) = run_tm_fitted(&core, &Binary::default(), TM_DEFAULT_CAPS);
     match (reference, lambda, tm, btm) {
         (Ok(rv), LambdaRun::Reduced(nf), TmRun::Ran { tapes }, TmRun::Ran { tapes: btapes }) => {
@@ -742,10 +684,10 @@ fn two_way_tm_only(src: &str) -> Result<(), TestCaseError> {
     }
 }
 
-/// PLAN 3b-2 mutable capture (the highest-ROI generator — the newest code). A value-USED closure
-/// captures a MUTABLE `n`, which is reassigned AFTER the closure is built and observed by-reference.
-/// λ rejects; reference == boxed TM. Operands `< 8` ⇒ `x + n < 16 < 64`. Three structural variants
-/// stress box alloc/get/set over the value space (incl. the box_set grow/shrink quadrants).
+/// Mutable capture. A value-USED closure captures a MUTABLE `n`, which is reassigned AFTER the closure
+/// is built and observed by-reference. λ rejects; reference == boxed TM. Operands `< 8` ⇒
+/// `x + n < 16 < 64`. Three structural variants stress box alloc/get/set over the value space (incl.
+/// the box_set grow/shrink quadrants).
 fn arb_mutable_capture() -> impl Strategy<Value = String> {
     prop_oneof![
         // capture + reassign-after + read at call time: result = arg + later (by-reference, not init)
@@ -770,7 +712,7 @@ proptest! {
     #![proptest_config(ProptestConfig { cases: 64, ..ProptestConfig::default() })]
 
     /// Random mutable-capture programs: λ refuses, reference == boxed TM. Stresses the BOX tape +
-    /// defunc boxing across the value space — the code that just needed three Critical fixes.
+    /// defunc boxing across the value space.
     #[test]
     fn mutable_capture_agrees_reference_and_tm(src in arb_mutable_capture()) {
         two_way_tm_only(&src)?;
@@ -788,7 +730,7 @@ fn arb_mutable_capture_is_non_vacuous() {
         "let mut n = 2; fn ap(g) { g(4) } let f = |x| x + n; n = n + 3; ap(f)",
     ] {
         let (prog, ds) = parse(src);
-        assert!(ds.is_empty(), "non-vacuity: must type-check: {src}");
+        assert!(ds.is_empty(), "non-vacuity: must parse clean: {src}");
         let core = desugar(&prog.unwrap());
         assert!(
             matches!(run_lambda(&core, MAX_REDUCTION_STEPS), LambdaRun::LowerError(_)),
@@ -806,7 +748,7 @@ fn list_lit(elems: &[u64]) -> String {
     format!("[{}]", elems.iter().map(|e| e.to_string()).collect::<Vec<_>>().join(", "))
 }
 
-/// PLAN 3b-1 higher-order via `map`/`fold` (defunctionalized, three-way). The step-HEAVIEST generator
+/// Higher-order via `map`/`fold` (defunctionalized, three-way). The step-HEAVIEST generator
 /// (list recursion on the unary TM), so tight bounds (≤ 2 elems) + few cases. Elems `< 7` so `add1`
 /// stays `< 8`; folds of `≤ 2` elems `< 8` stay `< 16`.
 fn arb_map_fold() -> impl Strategy<Value = String> {
@@ -824,7 +766,7 @@ fn arb_map_fold() -> impl Strategy<Value = String> {
     ]
 }
 
-/// PLAN 3b-1 immutable capture: an anonymous closure `|x| x + n` capturing an immutable `n`, passed as
+/// Immutable capture: an anonymous closure `|x| x + n` capturing an immutable `n`, passed as
 /// a value (three-way via defunc). Cheap — no list recursion. `x + n < 16`.
 fn arb_capturing_closure() -> impl Strategy<Value = String> {
     (0u64..8, 0u64..8).prop_map(|(n, arg)| format!("let n = {n}; fn ap(g) {{ g({arg}) }} ap(|x| x + n)"))
@@ -947,7 +889,7 @@ fn broadened_generators_are_non_vacuous() {
 }
 
 // ============================================================================================
-// Metamorphic / algebraic laws (correctness hardening #2)
+// Metamorphic / algebraic laws
 //
 // The differential oracle catches BACKEND DISAGREEMENT. It cannot catch a bug in the SHARED front-end
 // (`desugar`) or in the reference itself: all three backends would faithfully compute the same WRONG
@@ -960,10 +902,9 @@ fn broadened_generators_are_non_vacuous() {
 /// Run `src` on the TM under ONE encoding and decode against its reference value; `None` if the
 /// reference faults, the program doesn't lower/halt, or decode fails.
 ///
-/// `run_tm_fitted` rather than `run_tm`: once required, because `Binary`'s decode was width-strict and
-/// a tape fitted at 16 cells decoded to `None` under `Binary::default()` (see this file's module doc).
-/// Both decoders are structural now, so this is no longer load-bearing — but both legs still go through
-/// the same path rather than branching on encoding, which is why it reads the same for `Unary` too.
+/// `run_tm_fitted` rather than `run_tm`: the fitted width is a convention, not a requirement (see this
+/// file's module doc), and both legs still go through the same path rather than branching on encoding,
+/// which is why it reads the same for `Unary` too.
 fn tm_val_with(src: &str, enc: &dyn Encoding) -> Option<Value> {
     let expected = run(src).ok()?;
     let (prog, ds) = parse(src);
@@ -991,7 +932,7 @@ fn assert_equiv(lhs: &str, rhs: &str) -> Result<(), TestCaseError> {
             prop_assert_eq!(vl, vr, "law violated on the reference:\n  {} = {:?}\n  {} = {:?}", lhs, vl, rhs, vr);
             // EVERY encoding. A law is a property of the pipeline, not of one representation, so a
             // law that held under unary and broke under binary would be exactly the kind of defect
-            // this file exists to catch — and until now these ~14 law proptests ran unary only.
+            // this file exists to catch.
             // `at(MAX_FIELD_WIDTH)`, not a default: identical to `{Unary,Binary}::default()` today, and
             // stated explicitly so a future encoding whose default differs cannot silently re-width this
             // test.

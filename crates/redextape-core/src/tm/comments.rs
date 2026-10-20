@@ -8,8 +8,8 @@
 //!
 //! WHY NOT A FIELD ON `Machine` OR `Program`. `lower_tm` states the rule twice and `tm::header`
 //! holds it at the import level by not importing `Machine` at all. A machine that came out of
-//! `lower_tm` has no comments and must print exactly as it does today, which is what the listing
-//! golden pins — so comments must not reach the compiler's output path.
+//! `lower_tm` has no comments and must print exactly what the listing golden pins — so comments must
+//! not reach the compiler's output path.
 
 use std::collections::HashMap;
 use std::hash::Hash;
@@ -106,28 +106,16 @@ pub(crate) fn split_trailing(content: &str) -> (&str, Option<&str>) {
 ///
 /// `split_trailing`'s first half, which is what a caller wants when it needs only the content and
 /// not the comment. It exists so that "where does this line's content end" is decided by one
-/// function rather than at each site that happens to need it. Both grammars now reach that decision
+/// function rather than at each site that happens to need it. Both grammars reach that decision
 /// through `split_trailing` — TM's content side through this wrapper and its comment side through
 /// `attach`, asm's both halves through a single destructured call — so a change to what starts a
-/// comment lands in one place. That is the property; it is not that the two parsers call the same
-/// number of functions, and they do not.
+/// comment lands in one place. That is the property.
 ///
-/// **THIS REPLACED SIX HAND-ROLLED COPIES, AND THE HAZARD WAS THE DUPLICATION AND NOT ANY DISAGREEMENT.**
-/// `parse_rule_line`, three branches of `parse_tm_full`, `HeaderParts::directive` and `parse_cells`
-/// each spelled `line.split(';').next().unwrap_or("").trim()` for themselves while the comment half
-/// of the very same line was derived through `split_trailing`. The two spellings agree — `split`
-/// always yields at least one item, so the `unwrap_or` arm is unreachable and both answer with the
-/// prefix before the first `;`, or the whole string when there is none — and nothing made them agree.
-/// One change to what starts a comment — an escape rule, say — would have had to land in seven
-/// places, and the `.tm` comment fixtures would have caught an ordinary boundary change at three of
-/// them; what they could not have caught is a change invisible to those fixtures landing in six.
-///
-/// **`parse_asm_full` CARRIED THE SEVENTH COPY, AND THIS BRANCH ALREADY FOLDED IT ONCE.** Before
-/// this branch it spelled the same thing character-for-character, and the comment-retention task
-/// replaced it with a single `split_trailing` call feeding both halves — because that parser needed
-/// the comment half for the first time, and taking it from a second, independent split would have
-/// been the duplication this function exists to remove. So the fold performed here is the one
-/// already performed there, on the same argument, one task earlier.
+/// The hazard in hand-rolling `line.split(';').next().unwrap_or("").trim()` beside `split_trailing` is
+/// the duplication, not any disagreement: the two spellings agree — `split` always yields at least one
+/// item, so the `unwrap_or` arm is unreachable and both answer with the prefix before the first `;`, or
+/// the whole string when there is none — and nothing makes them agree. One change to what starts a
+/// comment — an escape rule, say — would have to land in every copy.
 #[must_use]
 pub(crate) fn content_before_comment(line: &str) -> &str {
     split_trailing(line).0.trim()
@@ -180,38 +168,33 @@ impl<'a, A: Copy + Eq + Hash> CommentWriter<'a, A> {
 
     /// Write the trailing comment for `anchor`, if any, WITHOUT the newline that ends the line.
     ///
-    /// Several trailing comments on one anchor cannot each take the slot — `;` runs to end of line
-    /// — so they join into one. **A parse can never produce that case — but not merely because "a
-    /// line holds at most one trailing comment and an anchor names one line".** That was once stated
-    /// here as self-evident, and it is false for two anchors on its own: `TmAnchor::Tapes` and
-    /// `TmAnchor::Start` are each named by `parse_tm_full` from a FAMILY of lines (every `tapes ...`
-    /// line, every `start ...` line), not from one fixed line, so a second line in either family used
-    /// to attach a second trailing comment to the same anchor with no diagnostic — exactly the gap a
-    /// `tapes 1` followed by a second `tapes 1` (or `start` likewise) exploited. What makes the
-    /// anchor-names-one-line claim TRUE now is that `parse_tm_full` diagnoses a second `tapes` or
-    /// `start` line as an error (the "duplicate tapes line" / "duplicate start line" diagnostics) and
-    /// attaches no comment from it, so only the first line in either family ever reaches an anchor.
-    /// `Directive`, `State` and `Rule` already named at most one line before this fix — a
-    /// `state`/rule/directive line is anchored by its own identity (index, state id, or directive
-    /// key), not by a shared, uncounted keyword, and `HeaderParts::directive` already refused a
+    /// Several trailing comments on one anchor cannot each take the slot — `;` runs to end of line —
+    /// so they join into one. A parse can never produce that case, but not merely because "a line
+    /// holds at most one trailing comment and an anchor names one line", which is false for two
+    /// anchors on its own: `TmAnchor::Tapes` and `TmAnchor::Start` are each named by `parse_tm_nav`
+    /// from a FAMILY of lines (every `tapes ...` line, every `start ...` line), not from one fixed
+    /// line, so a second line in either family would attach a second trailing comment to the same
+    /// anchor with no diagnostic. What makes the anchor-names-one-line claim TRUE is that
+    /// `parse_tm_nav` diagnoses a second `tapes` or `start` line as an error (the "duplicate `tapes`
+    /// line" / "duplicate `start` line" diagnostics) and attaches no comment from it, so only the first
+    /// line in either family ever reaches an anchor. `Directive`, `State` and `Rule` name at most one
+    /// line — a `state`/rule/directive line is anchored by its own identity (index, state id, or
+    /// directive key), not by a shared, uncounted keyword, and `HeaderParts::directive` refuses a
     /// duplicate directive the same way. `Eof` needs no such argument at all: it names no line —
-    /// `parse_tm_full` only ever drains it own-line, never trailing — so this function is never even
+    /// `parse_tm_nav` only ever drains it own-line, never trailing — so this function is never even
     /// called with it. So the join is total-by-construction for documents built by hand and
     /// unreachable for documents that were read. `.tm`'s guarantee — idempotence, not a round trip —
     /// is stated over the latter, which is why the join does not weaken it.
     ///
-    /// **That sentence said "the round-trip property" until it was the sixth false claim of its kind
-    /// on this branch**, and it survived the review round that fixed the identical phrase in
-    /// `TmAnchor`'s doc ten lines above. `.tm` has no round-trip property; `printing_twice_after_a_
-    /// reparse_is_idempotent` is what it has, because `write_header` fabricates a `tape_name` label
-    /// that an authored document never carried. Recorded rather than quietly corrected, because the
-    /// branch's own entry documents this class four times and then reproduced it here.
+    /// `.tm` has no round-trip property; `printing_twice_after_a_reparse_is_idempotent` is what
+    /// it has, because `write_header` fabricates a `tape_name` label that an authored document
+    /// never carried.
     ///
-    /// **This argument is `parse_tm_full`-specific.** `CommentWriter` is generic over its anchor type,
+    /// **This argument is `parse_tm_nav`-specific.** `CommentWriter` is generic over its anchor type,
     /// and the reasoning above does not transfer to another instantiation by itself.
     ///
-    /// **`AsmAnchor` is the second instantiation, and for it the argument is DISCHARGED, not merely
-    /// started.** `print_asm_with_inner` is the printer that instantiates `CommentWriter<AsmAnchor>`.
+    /// **`AsmAnchor` is the second instantiation, and for it the argument is DISCHARGED.**
+    /// `print_asm_with_inner` is the printer that instantiates `CommentWriter<AsmAnchor>`.
     /// `AsmAnchor::Result` is diagnosed on either of its two branches — a second `result` line takes
     /// "duplicate `result` directive" when nothing has parsed yet, or "must precede the first
     /// instruction or label" once anything has — under one tail check that empties `comments` for the
@@ -224,9 +207,8 @@ impl<'a, A: Copy + Eq + Hash> CommentWriter<'a, A> {
     ///
     /// **The two obligations still stand for a genuinely third anchor type.** Whoever instantiates
     /// `CommentWriter` there must establish, for that parser: one line holds at most one trailing
-    /// comment, AND every anchor variant names at most one line. The second is the one that was false
-    /// for `TmAnchor` — `Tapes` and `Start` were each named from a family of lines — and it is the one
-    /// a reader is most likely to assume true without checking.
+    /// comment, AND every anchor variant names at most one line. The second is the easy one to assume
+    /// true without checking: `TmAnchor`'s `Tapes` and `Start` are each named from a family of lines.
     pub(crate) fn trailing(&self, out: &mut String, spans: &mut Classified, anchor: A) {
         let all: Vec<&str> = self.trailing.get(&anchor).into_iter().flatten().copied().collect();
         if !all.is_empty() {
@@ -263,9 +245,7 @@ mod tests {
         assert_eq!(content_before_comment("no comment here"), "no comment here");
     }
 
-    /// The two inputs every one of the six folded sites can receive and none of them pinned: an
-    /// empty line, and a line that is nothing but a comment. Both were only ever covered indirectly,
-    /// by `parse_cells`'s test in another module.
+    /// The two inputs every caller can receive: an empty line, and a line that is nothing but a comment.
     #[test]
     fn an_empty_line_and_a_bare_comment_both_yield_empty_content() {
         assert_eq!(content_before_comment(""), "");

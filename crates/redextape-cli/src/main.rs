@@ -107,13 +107,13 @@ fn main() -> ExitCode {
             }
         }
         cli::Command::Emit { path, lang, encoding, field_width, reduce, out: dest } => {
-            // **THE FLAG IS RANGE-CHECKED HERE, BECAUSE THE CONFIG KEY IT OVERRIDES ALREADY WAS.**
-            // `config::validate` refuses `emit.field-width` outside `0 | MIN..=MAX` at exit 2, and
-            // the flag that beats it checked nothing: `--field-width 65` wrote a `.tm` carrying
-            // `width 65`, at exit 0, which this tool's own reader then refuses — and a width past
-            // what a `usize` can allocate a bank for panicked inside the encoding. Both bounds are
-            // read from core's constants rather than written out, for the reason `validate` gives:
-            // a copy drifts the first time either constant moves.
+            // **THE FLAG IS RANGE-CHECKED HERE, BECAUSE THE CONFIG KEY IT OVERRIDES ALREADY IS.**
+            // `config::validate` refuses `emit.field-width` outside `0 | MIN..=MAX` at exit 2. Without
+            // this check, `--field-width 65` would write a `.tm` carrying `width 65`, at exit 0, which
+            // this tool's own reader then refuses — and a width past what a `usize` can allocate a
+            // bank for would panic inside the encoding. Both bounds are read from core's constants rather
+            // than written out, for the reason `validate` gives: a copy drifts the first time either
+            // constant moves.
             //
             // BEFORE the `--lang tm` guard rather than after, and that ordering is a choice: a width
             // outside the range is never valid on any target, so it is refused wherever it is typed.

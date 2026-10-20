@@ -6,7 +6,7 @@ use crate::core::{BinOp, Core, NodeGen, NodeId};
 use crate::span::Span;
 use std::collections::{BTreeMap, BTreeSet};
 
-/// `desugar`, plus the span each minted `NodeId` came from — §5.4's missing third leg.
+/// `desugar`, plus the span each minted `NodeId` came from — §5.4's third leg.
 ///
 /// A SYNTHESIZED NODE'S SPAN ANSWERS "WHAT DID THE USER WRITE THAT PRODUCED THIS NODE" — that is the
 /// rule's PURPOSE, and everything below serves it. Desugaring mints ids that correspond to no source
@@ -21,10 +21,10 @@ use std::collections::{BTreeMap, BTreeSet};
 /// synthesized node is, in the ordinary case, whatever surrounds it. But "nearest enclosing" is a means
 /// to the purpose above, not the purpose itself, and the two diverge for a list literal's `cons` cells:
 /// mechanically each cell is a CHILD of the literal, so "nearest enclosing" would point every cell at
-/// the whole literal (which is what this code used to do). The honest answer to "what produced this
-/// cell" is not the literal as a whole, though — it is the one element the cell exists for. So the i-th
-/// `cons` cell takes the i-th element's own span; `nil` keeps the literal's span, since it marks the
-/// literal's END rather than any element. See `Expr::List`'s arm in `lower_expr_at`.
+/// the whole literal. The honest answer to "what produced this cell" is not the literal as a whole,
+/// though — it is the one element the cell exists for. So the i-th `cons` cell takes the i-th element's
+/// own span; `nil` keeps the literal's span, since it marks the literal's END rather than any element.
+/// See `Expr::List`'s arm in `lower_expr_at`.
 #[must_use]
 pub fn desugar_mapped(program: &Program) -> (Core, Vec<(NodeId, Span)>) {
     let mut g = NodeGen::default();
@@ -129,10 +129,8 @@ fn lower_stmts_at(
             // second, driftable copy of the lowering.
             Stmt::Fn { .. } => lower_fn_run_at(g, std::slice::from_ref(stmt), acc, spans),
             Stmt::Assign { target, value, target_span: _, span } => {
-                // `g.fresh()` for the `Assign` id is read BEFORE `value` is lowered — a single
-                // constructor call evaluates its arguments left to right — and preserving that order
-                // keeps every `NodeId` identical to what the unmapped lowering minted before this leg
-                // existed.
+                // `g.fresh()` for the `Assign` id is read BEFORE `value` is lowered, so the `Assign` id
+                // precedes every id minted inside `value`.
                 let assign_id = g.fresh();
                 let assign = Core::Assign(assign_id, target.clone(), Box::new(lower_expr_at(g, value, spans)));
                 spans.push((assign_id, *span));
@@ -141,8 +139,8 @@ fn lower_stmts_at(
                 Core::Seq(seq_id, Box::new(assign), Box::new(acc))
             }
             Stmt::While { cond, body, span } => {
-                // Same left-to-right constructor-argument note as `Assign` above: `while_id` is minted
-                // before `cond`/`body` are lowered.
+                // As in `Assign` above, `while_id` is read before `cond` and `body` are lowered, so it
+                // precedes every id minted inside them.
                 let while_id = g.fresh();
                 let while_ = Core::While(
                     while_id,
@@ -180,18 +178,16 @@ fn lower_stmts_at(
 /// directions:
 ///
 /// 1. Against an ENCLOSING binding of the same name — an outer `let`, a `fn` from an earlier run, or
-///    an enclosing function's parameter — the RUN's `fn` wins. `typeck::infer_fn_run` (Task 1) binds
-///    the whole run before checking any body, so this is desugar catching up to the scope the
-///    program was typechecked against; the alternative is a program that typechecks against one
+///    an enclosing function's parameter — the RUN's `fn` wins. `typeck::infer_fn_run` binds
+///    the whole run before checking any body, so desugar binds to the scope the program was
+///    typechecked against; the alternative is a program that typechecks against one
 ///    binding and runs against another. It matches how Rust's own block-scoped `fn` items hoist.
-///    `a_member_name_wins_over_an_enclosing_binding_of_the_same_name` pins it. **This is a
-///    deliberate language change**: `let g = |x| x * 10; fn f(x){ g(x) } fn g(y){ y } f(3)` was 30
-///    and is now 3.
+///    `a_member_name_wins_over_an_enclosing_binding_of_the_same_name` pins it: `let g = |x| x * 10;
+///    fn f(x){ g(x) } fn g(y){ y } f(3)` is 3.
 /// 2. Against ANOTHER MEMBER OF THE SAME RUN with the same name, there is no answer to give, so the
 ///    program is rejected — `typeck::infer_fn_run` reports it. Last-wins wants the second definition
 ///    INNERMOST while a sibling that calls the name wants it OUTERMOST, and no nesting satisfies
-///    both. **Also a deliberate language change**: `fn a … fn a …` in one run used to be legal with
-///    the last definition winning. See `infer_fn_run`'s doc comment for the unsound shape it closes.
+///    both. See `infer_fn_run`'s doc comment for the unsound shape it closes.
 fn lower_fn_run_at(g: &mut NodeGen, run: &[Stmt], acc: Core, spans: &mut Vec<(NodeId, Span)>) -> Core {
     let groups = fn_run_groups(run);
     let mut acc = acc;
@@ -199,16 +195,13 @@ fn lower_fn_run_at(g: &mut NodeGen, run: &[Stmt], acc: Core, spans: &mut Vec<(No
         acc = match group.as_slice() {
             // Cannot happen (an SCC is never empty); folding it away keeps this total.
             [] => acc,
-            // A component of ONE is a plain `LetRec` — byte-identical to what a `fn` lowered to
-            // before grouping existed, down to the `NodeId`s, which is the additive guarantee that
-            // keeps every step-count golden still. `LetRec` already binds its own name in its value,
-            // so a self-recursive member needs nothing more. Both minted ids are the member's own
-            // `Stmt::Fn` span — this member IS the source construct, not scaffolding.
+            // A component of ONE is a plain `LetRec`. `LetRec` already binds its own name in its
+            // value, so a self-recursive member needs nothing more. Both minted ids are the member's
+            // own `Stmt::Fn` span — this member IS the source construct, not scaffolding.
             [i] => match run.get(*i) {
                 Some(Stmt::Fn { name, params, body, span, .. }) => {
-                    // `lam_id` is read before `body` is lowered — a single constructor call evaluates
-                    // its arguments left to right — preserving the `NodeId`s the unmapped lowering
-                    // already minted.
+                    // `lam_id` is read before `body` is lowered, so `lam_id` precedes every id minted
+                    // inside `body`.
                     let lam_id = g.fresh();
                     let lam = Core::Lambda(
                         lam_id,
@@ -336,8 +329,7 @@ const NO_SHADOW: usize = usize::MAX;
 /// Cost is O(chain depth), and the chain is never truncated within one `free_member_refs` call, so a
 /// body that binds K member names in sequence makes this O(K^2) overall. K is the number of DISTINCT
 /// member names actually rebound inside one `fn` body — nothing else gets a node — so in practice it
-/// is 0 or 1. Noted as a bound, not a live cost: it is well under the noise even at the 5,000-member
-/// runs `a_long_fn_chain_groups_without_stack_overflow` exercises.
+/// is 0 or 1. Noted as a bound, not a live cost.
 fn shadowed(chain: &[Shadow<'_>], scope: usize, name: &str) -> bool {
     let mut cur = scope;
     // `get` returns `None` for `NO_SHADOW`, which ends the walk at the root.
@@ -507,8 +499,7 @@ fn note<'a>(
 /// Components come out in REVERSE TOPOLOGICAL order of the condensation: a component is emitted
 /// before every component with an edge INTO it, so with `i -> j` meaning "i calls j", callees are
 /// emitted before their callers. Roots are visited in index order, so a graph with no edges yields
-/// one singleton per node IN SOURCE ORDER — which is what makes an existing, non-mutual program lower
-/// exactly as it did before. Each component's indices are sorted ascending (source order).
+/// one singleton per node IN SOURCE ORDER. Each component's indices are sorted ascending (source order).
 fn strongly_connected(adj: &[Vec<usize>]) -> Vec<Vec<usize>> {
     let n = adj.len();
     let mut index: Vec<Option<usize>> = vec![None; n];
@@ -641,8 +632,7 @@ fn lower_expr_at(g: &mut NodeGen, expr: &Expr, spans: &mut Vec<(NodeId, Span)>) 
         }
         Expr::Block { block, .. } => lower_block_at(g, block, spans),
         Expr::Lambda { params, body, span } => {
-            // `id` is read before `body` is lowered — a single constructor call evaluates its
-            // arguments left to right — preserving the `NodeId`s the unmapped lowering already minted.
+            // `id` is read before `body` is lowered, so `id` precedes every id minted inside `body`.
             let id = g.fresh();
             spans.push((id, *span));
             let inner = Box::new(lower_expr_at(g, body, spans));
@@ -657,8 +647,8 @@ fn lower_expr_at(g: &mut NodeGen, expr: &Expr, spans: &mut Vec<(NodeId, Span)>) 
         }
         Expr::Method { recv, name, args, span, .. } => {
             // UFCS: recv.m(args) -> m(recv, args). The callee `Var` is synthesized and inherits the
-            // whole call's span, NOT the method name's — `name_span` exists now and navigation uses
-            // it, but feeding it here would move sourcemap entries that `sourcemap_coverage` pins.
+            // whole call's span, NOT the method name's: navigation uses `name_span`, but feeding it
+            // here would move sourcemap entries that `sourcemap_coverage` pins.
             let callee = Box::new(var_at(g, name, *span, spans));
             let mut all = vec![lower_expr_at(g, recv, spans)];
             all.extend(args.iter().map(|a| lower_expr_at(g, a, spans)));
@@ -694,9 +684,8 @@ mod tests {
     }
 
     /// Every `Core` variant's children, mirroring `core.rs::take_core_children` (the authority).
-    /// Deliberately EXHAUSTIVE — no catch-all arm — so a new `Core` variant is a compile error here
-    /// rather than a silently childless node that makes `count`/`collect_ids`/`contains_group`
-    /// under-report. (A catch-all is exactly how `LetRecGroup` first slipped through.)
+    /// Deliberately EXHAUSTIVE — no catch-all arm — so a new `Core` variant is a compile error here,
+    /// not a silently childless node that makes `count`/`collect_ids`/`contains_group` under-report.
     fn children(node: &Core) -> Vec<&Core> {
         match node {
             Core::BinOp(_, _, a, b) | Core::Seq(_, a, b) => vec![a, b],
@@ -830,15 +819,15 @@ mod tests {
 
     #[test]
     fn an_independent_fn_still_lowers_as_a_plain_letrec() {
-        // The additive guarantee: a non-mutual `fn` must NOT become a group.
+        // A non-mutual `fn` must NOT become a group.
         let core = desugar(&crate::parser::parse("fn f(n){ n + 1 } f(2)").0.unwrap());
         assert!(!contains_group(&core), "a singleton must stay a LetRec, or every step golden moves");
     }
 
     #[test]
     fn a_mutual_pair_lowers_to_one_group_holding_both_names() {
-        // The other side of the guarantee: a genuine cycle DOES become one `LetRecGroup`, with its
-        // members in source order — not two nested `LetRec`s (which could never see each other).
+        // The other side: a genuine cycle DOES become one `LetRecGroup`, with its members in source
+        // order — not two nested `LetRec`s (which could never see each other).
         let c = core_of(
             "fn is_even(n){ if n == 0 { true } else { is_odd(n - 1) } } \
                       fn is_odd(n){ if n == 0 { false } else { is_even(n - 1) } } is_even(10)",
@@ -864,11 +853,11 @@ mod tests {
 
     #[test]
     fn a_duplicate_fn_name_keeps_the_later_definition_innermost() {
-        // `typeck` now REJECTS two members of one run sharing a name (see `infer_fn_run`), so no
+        // `typeck` REJECTS two members of one run sharing a name (see `infer_fn_run`), so no
         // program reaching the compiler from source can hit this. `desugar` is `pub` and runs on a
         // raw AST though, so it must still not scramble the shape — which is what `fn_run_groups`'s
         // own-name check buys, and this test is its guard. Asserted structurally, since `crate::run`
-        // no longer gets this far.
+        // does not get this far.
         //
         // Source order must survive: the FIRST definition outermost, the SECOND innermost, so a
         // reader (and any consumer that resolves names the way `TyEnv::lookup` does, last-wins)
@@ -898,16 +887,13 @@ mod tests {
 
     #[test]
     fn a_member_name_wins_over_an_enclosing_binding_of_the_same_name() {
-        // The one intended, observable behaviour change of this pass. A run's members are hoisted
-        // above each other, so a name bound BOTH by an enclosing binding and by a later member of the
-        // run resolves, inside the run, to the run's `fn` — these three all yielded 30 before and
-        // yield 3 now.
+        // A run's members are hoisted above each other, so a name bound BOTH by an enclosing binding and
+        // by a later member of the run resolves, inside the run, to the run's `fn`.
         //
-        // This is desugar catching up to `typeck::infer_fn_run` (Task 1), which already binds the
-        // whole run before checking any body: the typechecker checks `g(x)` against the run's `g`, so
-        // desugar binding it to the enclosing `g` would mean a program typechecked against one
-        // binding and run against another. Rust's own block-scoped `fn` items hoist the same way.
-        // Not observable at Task 2 — the grouping in this file is what makes it visible.
+        // `typeck::infer_fn_run` already binds the whole run before checking any body: the typechecker
+        // checks `g(x)` against the run's `g`, so desugar binding it to the enclosing `g` would mean a
+        // program typechecked against one binding and run against another. Rust's own block-scoped `fn`
+        // items hoist the same way.
         assert_eq!(
             crate::run("let g = |x| x * 10; fn f(x){ g(x) } fn g(y){ y } f(3)").unwrap(),
             crate::value::Value::Nat(3),
@@ -928,7 +914,7 @@ mod tests {
     #[test]
     fn a_shadowed_member_name_is_not_a_dependency() {
         // `f` mentions `g`, but as its own local — the later `fn g` is NOT a dependency, so the two
-        // stay independent singletons and lower exactly as they did before grouping existed.
+        // stay independent singletons and lower exactly as they would without grouping.
         let c = core_of("fn f(x){ let g = 1; g + x } fn g(y){ y } f(1)");
         assert!(!contains_group(&c), "a shadowed name must not create an edge");
         assert!(matches!(&c, Core::LetRec { name, .. } if name == "f"), "source order must be preserved: {c:?}");
@@ -960,7 +946,7 @@ mod tests {
 
     /// Cross-check the hand-written iterative Tarjan against the DEFINITION of an SCC, on a few
     /// thousand small random graphs: `u` and `v` share a component iff each reaches the other. Also
-    /// checks the two properties `lower_fn_run` relies on — every node appears exactly once, and the
+    /// checks the two properties `lower_fn_run_at` relies on — every node appears exactly once, and the
     /// components come out callees-first (a component is emitted before any component with an edge
     /// into it). A hand-rolled Tarjan is easy to get subtly wrong; this is the guard.
     #[test]
@@ -1027,10 +1013,9 @@ mod tests {
 
     #[test]
     fn an_edgeless_run_keeps_source_order() {
-        // What makes an existing program lower identically: with no dependencies at all, the
-        // components are singletons in source order, so the right-to-left fold emits exactly what it
-        // always did. This is the shape `fn_run_groups` actually hands over for a run of independent
-        // `fn`s — it strips self-edges, so its graphs are genuinely edgeless, not self-looping.
+        // With no dependencies at all, the components are singletons in source order. This is the
+        // shape `fn_run_groups` actually hands over for a run of independent `fn`s — it strips
+        // self-edges, so its graphs are genuinely edgeless, not self-looping.
         assert_eq!(strongly_connected(&vec![Vec::new(); 4]), vec![vec![0], vec![1], vec![2], vec![3]]);
         // Self-loops must not change that (they cannot reach `strongly_connected` from
         // `fn_run_groups`, but a self-loop is still a legitimate SCC input and must stay a singleton).
@@ -1040,9 +1025,8 @@ mod tests {
 
     #[test]
     fn long_statement_sequence_desugars_without_stack_overflow() {
-        // `lower_stmts` is iterative, so a statement count well above what the old per-statement
-        // recursion could survive (empirically ~4800 on an 8 MiB debug main thread) must still
-        // desugar cleanly into a deeply right-nested Seq chain with unique NodeIds.
+        // `lower_stmts_at` is iterative, so a statement count well above what per-statement recursion could
+        // survive must still desugar cleanly into a deeply right-nested Seq chain with unique NodeIds.
         let stmts: Vec<String> = (0..20_000).map(|i| format!("{i};")).collect();
         let src = stmts.join("");
         let c = core_of(&src);

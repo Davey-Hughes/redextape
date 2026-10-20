@@ -63,7 +63,7 @@ use redextape_core::tm::asm::{print_asm, print_asm_doc};
 /// A program with a comment against every `AsmAnchor` variant `print_asm_with_inner` can write to,
 /// both `own_line` values reached for `Result`, `Label` and `Instr` — two labels (`f`, `g`) and two
 /// instructions (`li`, `halt`) so an index (`Label(1)`, `Instr(1)`) can only come from a correctly
-/// threaded position, never a hardcoded `0`. `Eof` is own-line only: `parse_asm_full` only ever
+/// threaded position, never a hardcoded `0`. `Eof` is own-line only: `parse_asm_nav` only ever
 /// drains it that way (there is no line left for a trailing comment to sit on), matching
 /// `tm_comments.rs`'s `ALL_ANCHORS`.
 const ALL_ANCHORS: &str = "\
@@ -140,34 +140,32 @@ g:  ; g's trailing
 /// `program`, `header` and `comments` back exactly — not merely "the comment text appears somewhere",
 /// but the very list `printing_a_document_emits_every_comment` already pinned, unchanged.
 ///
-/// This is the STRONGER guarantee than `.tm` gets, and it holds here for two reasons established by
-/// reading the production code (not assumed):
+/// This is the STRONGER guarantee than `.tm` gets, and it holds here for two reasons:
 ///
 /// 1. `print_asm_with_inner` (and everything it calls) writes a `;` in exactly one place —
 ///    `CommentWriter::own_line`/`CommentWriter::trailing` — so unlike TM's `write_header`, which
 ///    fabricates a `; reg`/`; work` tape label via `tape_name` whenever an anchor carries no authored
 ///    trailing comment, the asm printer never invents a comment a hand-authored file didn't have —
-///    `a_document_with_no_comments_prints_exactly_what_the_old_printer_prints` (below) is the test for
-///    that: it shows `print_asm_doc` agrees with the pre-comments `print_asm` on a document that has
-///    none, not that such a document is some special fixed point (under the strict round trip this
-///    file states, EVERY clean-parse document is a fixed point of print-then-parse, comments or not —
-///    "with no comments at all" names no distinction the guarantee actually draws). A document with
-///    comments only ever reprints the comments it was given.
+///    `a_document_with_no_comments_prints_exactly_what_print_asm_prints` (below) is the test for
+///    that: it shows `print_asm_doc` agrees with `print_asm`, which prints no comments, on a document
+///    that has none, not that such a document is some special fixed point (under the strict round
+///    trip this file states, EVERY clean-parse document is a fixed point of print-then-parse,
+///    comments or not — "with no comments at all" names no distinction the guarantee actually draws).
+///    A document with comments only ever reprints the comments it was given.
 /// 2. `CommentWriter::trailing` joins several trailing comments on one anchor with `" ; "`, and that
-///    join is not a fixed point when a body is empty — the defect that cost `.tm` two of its four
-///    review rounds. It cannot fire here: `parse_asm_full` names `AsmAnchor::Result` from at most one
-///    line. A second `result` line takes the "duplicate `result` directive" diagnostic ONLY when no
-///    code or label precedes it — the `!code.is_empty() || !labels.is_empty()` check runs first and
-///    wins whenever anything already parsed, sending that line to the "must precede the first
-///    instruction or label" diagnostic instead. Either branch empties `comments` for the whole
-///    document (the single tail check does not care which diagnostic fired), so no second `result`
-///    line, on either path, ever attaches a second trailing comment to a clean parse. And
-///    `Label(i)`/`Instr(i)` are positional — `labels.len() - 1` / `code.len() - 1` at the moment of
-///    the push — so no two lines in one clean parse can ever share an index and no two trailing
-///    comments can ever land on one anchor. `AsmAnchor::Eof` is never a `trailing` argument at all:
-///    `parse_asm_full` only ever drains `pending` into it as `own_line: true`, matching
-///    `print_asm_with_inner`'s own `Eof` call (`cw.own_line(&mut out, &mut spans, AsmAnchor::Eof,
-///    "")`, no `cw.trailing` counterpart).
+///    join is not a fixed point when a body is empty. It cannot fire here: `parse_asm_nav` names
+///    `AsmAnchor::Result` from at most one line. A second `result` line takes the "duplicate
+///    `result` directive" diagnostic ONLY when no code or label precedes it — the `!code.is_empty()
+///    || !labels.is_empty()` check runs first and wins whenever anything already parsed, sending
+///    that line to the "must precede the first instruction or label" diagnostic instead. Either
+///    branch empties `comments` for the whole document (the single tail check does not care which
+///    diagnostic fired), so no second `result` line, on either path, ever attaches a second trailing
+///    comment to a clean parse. And `Label(i)`/`Instr(i)` are positional — `labels.len() - 1` /
+///    `code.len() - 1` at the moment of the push — so no two lines in one clean parse can ever share
+///    an index and no two trailing comments can ever land on one anchor. `AsmAnchor::Eof` is never a
+///    `trailing` argument at all: `parse_asm_nav` only ever drains `pending` into it as `own_line:
+///    true`, matching `print_asm_with_inner`'s own `Eof` call (`cw.own_line(&mut out, &mut spans,
+///    AsmAnchor::Eof, "")`, no `cw.trailing` counterpart).
 #[test]
 fn printing_and_reparsing_all_anchors_recovers_the_document_exactly() {
     let d = parse_asm_full(ALL_ANCHORS);
@@ -206,7 +204,7 @@ fn printing_and_reparsing_all_anchors_recovers_the_document_exactly() {
 }
 
 #[test]
-fn a_document_with_no_comments_prints_exactly_what_the_old_printer_prints() {
+fn a_document_with_no_comments_prints_exactly_what_print_asm_prints() {
     let d = parse_asm_full("f:\n    li\tr0, #1\n");
     let program = d.program.clone().expect("the fixture parses");
     assert_eq!(print_asm_doc(&d).as_deref(), Some(print_asm(&program).as_str()));
@@ -224,8 +222,8 @@ mod comment_slots;
 
 // Every position below draws its `Slot` INDEPENDENTLY of every other, which is what makes a typical
 // generated document exercise many anchors, and both `own_line` values on most of them, in one case —
-// rather than the shape this task's brief warns against: comments appended after a fixed skeleton,
-// which only ever lands at `Eof` with `own_line: true`.
+// rather than comments appended after a fixed skeleton, which only ever lands at `Eof` with
+// `own_line: true`.
 use comment_slots::{Slot, body, emit, slot, write_own};
 
 /// The result types `AsmHeader::result` admits, matching `ty::parse_ty`'s acceptance and
@@ -296,7 +294,7 @@ const MAX_LINES: usize = 6;
 /// label/instruction lines each independently choosing which kind it is and drawing its own `Slot`,
 /// and an EOF slot's own-line comments. Every anchor `print_asm_with_inner` can write to is reachable
 /// from this shape, with both `own_line` values independently possible everywhere except `Eof` (which
-/// `parse_asm_full` only ever drains as `own_line: true` — there is no line left for a trailing
+/// `parse_asm_nav` only ever drains as `own_line: true` — there is no line left for a trailing
 /// comment to sit on, matching `tm_comments.rs`'s generator).
 #[derive(Clone, Debug)]
 struct DocSpec {
@@ -316,9 +314,8 @@ fn doc_spec() -> impl Strategy<Value = DocSpec> {
 
 /// Render `spec` as `.asm` source text — placing each `Slot`'s comments AT the position they anchor
 /// to, as the document is built, rather than appending every comment after a fixed skeleton once it is
-/// done. That "append at the end" shape is the mistake this task's brief names: it puts every comment
-/// at `Eof` with `own_line: true`, one of a dozen (anchor, `own_line`) combinations, and a green run
-/// under it says nothing about the rest.
+/// done. That "append at the end" shape puts every comment at `Eof` with `own_line: true`, one of a
+/// dozen (anchor, `own_line`) combinations, and a green run under it says nothing about the rest.
 fn render(spec: &DocSpec) -> String {
     let mut src = String::new();
     if let Some(h) = &spec.header {
@@ -348,8 +345,8 @@ proptest! {
     /// `prop_assume!(first.diagnostics.is_empty())` stays even though every candidate this generator
     /// draws is built from syntax that parses clean by construction (closed pools of valid label names
     /// and instruction text, a header type from `RESULT_TYS`, comment bodies that carry no newline): it
-    /// guards against a PANIC below, not against a failed comparison. `parse_asm_full`'s tail check —
-    /// the single `if diags.is_empty() { .. } else { .. }` at the end of the function — sets
+    /// guards against a PANIC below, not against a failed comparison. `parse_asm_nav`'s tail check —
+    /// the single `if diags.is_empty() { .. } else { .. }` at the end of that function — sets
     /// `program: None` whenever `diags` is non-empty, and `print_asm_doc` opens with
     /// `let p = d.program.as_ref()?;`, so it returns `None` for any document with a diagnostic. Without
     /// the guard, a candidate `first` that failed to parse would reach

@@ -9,32 +9,28 @@
 //! ```
 //!
 //! **The cap is not decoration and `MemorySwapMax=0` is the load-bearing half.** This file drives λ
-//! cursors over programs picked to be inconvenient. An earlier measurement over a comparable family
-//! took 60 GiB of RAM and 29 GiB of swap and wedged the machine; the cap alone lets the kernel thrash
-//! instead of failing. An OOM-kill or a timeout here is a RESULT to report, not something to work
-//! around by raising the cap.
+//! cursors over programs picked to be inconvenient, and the cap alone lets the kernel thrash instead of
+//! failing. An OOM-kill or a timeout here is a RESULT to report, not something to work around by
+//! raising the cap.
 //!
 //! Every section drives `trace::LambdaCursor`/`TmCursor`, which hold ONE state at a time. **Never
-//! `reduce_trace` on anything this file builds** — it materialises every step's term by contract, and
-//! that is how the 60 GiB run happened. Rows are flushed BEFORE the next is computed, so an OOM-kill
-//! leaves the completed rows on stdout instead of losing the table.
+//! `reduce_trace` on anything this file builds** — it materialises every step's term by contract. Rows
+//! are flushed BEFORE the next is computed, so an OOM-kill leaves the completed rows on stdout instead
+//! of losing the table.
 //!
 //! `--features serde` is optional. Without it the byte columns read `-`; the timing columns, which are
 //! what §11.1 is actually about, do not need it.
 //!
-//! # SECTION F IS RETIRED (Plan 7 part 4a)
+//! # THE λ TREE IS NOT PRICED HERE
 //!
-//! It priced a per-step `TermTree` recorder — one tree per history frame, the design this probe's
-//! measurements declined — and `TermTree` is gone with `lambdaAst`. Part 4a serves one tree for the
-//! displayed step, rebuilt from checkpoints (`redextape-wasm`'s `LambdaLeg`); its cost is measured by
-//! `web/tests/browser/lambda-tree-cost.test.ts`.
+//! `redextape-wasm`'s `LambdaLeg` serves one tree for the displayed step, rebuilt from checkpoints; its
+//! cost is measured by `web/tests/browser/lambda-tree-cost.test.ts`.
 //!
 //! # THE QUESTION
 //!
-//! PR 3c's worker drives λ with `runLambda(50_000)` — **one wasm call per 50,000 β-steps**. Recording
-//! a scrubbable history means `stepLambda()` + `lambdaState(budget)` **per step**, and the second of
-//! those prints and classifies the whole term. If printing dominates stepping, then `RECORD_BUDGET`
-//! and `FRAME_BYTES` are wrong before the plan that picks them is written.
+//! Recording a scrubbable history means `stepLambda()` + `lambdaState(budget)` **per step**, and the
+//! second of those prints and classifies as much of the term as `budget` and `MAX_PRINT_DEPTH` allow.
+//! If printing dominates stepping, then `FRAME_BYTES` (`web/src/protocol.ts`) is wrong.
 //!
 //! So: for each program, and for each leg, how long does `next()` take, how long does rendering the
 //! state that `next()` produced take, and how large is the result?
@@ -48,10 +44,10 @@
 //! cannot rescue it — which is the decision this probe exists to make.
 //!
 //! Likewise **`json_b` is a proxy for the JS heap cost, not the cost itself.** It is a stable,
-//! re-runnable number in the units the ring buffer will budget in; `text_b` beside it is the part that
-//! is really `LAMBDA_BYTE_BUDGET`'s doing. **SINCE A λ FRAME'S SPANS CROSS AS ONE BYTE STRING (2026-10-07) A λ ROW'S
-//! `json_b` SPELLS A SPAN AS TWELVE JSON NUMBERS**, one a byte, so it no longer proxies what a span holds in the
-//! browser, 12.56 bytes (`frame-cost.test.ts`), and it is not comparable with a λ row taken before then.
+//! re-runnable number in the units the ring buffer budgets in; `text_b` beside it is the part that
+//! is really `LAMBDA_BYTE_BUDGET`'s doing. A λ frame's spans cross as one byte string, so a λ row's
+//! `json_b` spells a span as twelve JSON numbers, one a byte, and does not proxy what a span holds in
+//! the browser (`frame-cost.test.ts`).
 #![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic, clippy::pedantic)]
 
 use std::rc::Rc;
@@ -89,11 +85,10 @@ fn us(d: Duration) -> f64 {
     d.as_secs_f64() * 1e6
 }
 
-/// Programs, spread deliberately rather than sampled. The first six are the demo suite's own rows —
-/// `three_way_oracle.rs`'s `FIRST_ORDER_DEMOS` — which makes them CALIBRATION. The last three exist to
-/// falsify: the roadmap's standing lesson is that the corpus is chosen to be representative and so
-/// cannot break a bound, and that a cost claim is not established until a program picked to defeat it
-/// has been run.
+/// Programs, spread deliberately rather than sampled. The first six are CALIBRATION, five of them the
+/// demo suite's own rows (`three_way_oracle.rs`'s `FIRST_ORDER_DEMOS`). The rest exist to falsify: the
+/// roadmap's standing lesson is that the corpus is chosen to be representative and so cannot break a
+/// bound, and that a cost claim is not established until a program picked to defeat it has been run.
 fn programs() -> Vec<(String, String)> {
     let list20 = format!("[{}]", (1..=20).map(|n| n.to_string()).collect::<Vec<_>>().join(", "));
     let list60 = format!("[{}]", (1..=60).map(|n| n.to_string()).collect::<Vec<_>>().join(", "));
@@ -122,12 +117,10 @@ fn programs() -> Vec<(String, String)> {
     .iter()
     .map(|(n, s)| ((*n).to_string(), (*s).to_string()))
     .collect();
-    // A list literal desugars to a `cons` spine of depth n+1 — the shape whose 699-element instance
-    // falsified the logical-size guard. These two are far below that and still the largest terms here.
+    // A list literal desugars to a `cons` spine of depth n+1; these two are the largest terms here.
     v.push(("list20".to_string(), list20));
     v.push(("list60".to_string(), list60));
-    // Added for the per-frame tree section this probe no longer has (see the module doc's note on section
-    // F), and kept because it defeats a DIFFERENT bound from the three above: those attack frame SIZE with a
+    // Here because it defeats a DIFFERENT bound from the three above: those attack frame SIZE with a
     // large term, and this is the corpus's longest run in β-steps. `while4` is the same shape at n=4.
     v.push((
         "while40".to_string(),
@@ -144,7 +137,7 @@ struct Compiled {
     lambda: Option<LambdaCursor>,
     tm: Option<(TmProgram, TmCursor<Rc<Machine>>)>,
     map: SourceMap,
-    /// Wall-clock of the whole pipeline. PR 3c's open risk 1, unmeasured for two slices running.
+    /// Wall-clock of the whole pipeline.
     compile_time: Duration,
     /// δ-steps the TM run took at compile time — the run is finished before the cursor is touched.
     tm_total_steps: Option<u64>,
@@ -327,13 +320,12 @@ fn report(legs: &Legs) -> String {
 const HDR: &str = "  steps   step_us/  render_us/    ratio   max_txt   avg_txt  max_json  avg_json  stopped";
 
 fn section_compile(progs: &[(String, String)]) {
-    head("A — compile() wall-clock (PR 3c open risk 1, unmeasured for two slices)");
+    head("A — compile() wall-clock");
     line("  This is the whole pipeline INCLUDING the TM run, which `compile` performs eagerly.");
     line("");
-    line("  `states`/`rules` size 5a-ii's virtualized table, whose only measured point was the");
-    line("  `list_1_2.tm` fixture: 146 states and 309 rules for `[1, 2]`. `rows` is what the table");
-    line("  flattens to — one per state plus one per rule — and is what `rowHeight` and `overscan`");
-    line("  have to be chosen against.");
+    line("  `states`/`rules` size the TM pane's virtualized rule table; the `list_1_2.tm` fixture is");
+    line("  146 states and 309 rules for `[1, 2]`. `rows` is what the table flattens to — one per state");
+    line("  plus one per rule — and is what `rowHeight` and `overscan` have to be chosen against.");
     line("");
     line(&format!(
         "{:<12} {:>12} {:>12} {:>8} {:>8} {:>8} {:>12}  {}",

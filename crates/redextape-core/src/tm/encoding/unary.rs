@@ -1,4 +1,4 @@
-//! The v1 unary `Encoding`: a SCALAR (`Nat`/`Bool`/`Unit`) value `v` is `v` `MARK`s, left-justified in
+//! The unary `Encoding`: a SCALAR (`Nat`/`Bool`/`Unit`) value `v` is `v` `MARK`s, left-justified in
 //! a `width`-cell field and padded with `BLANK`s. The bound is STRICT (`v < width`) — see
 //! `MAX_FIELD_WIDTH` for why the padding blank is load-bearing rather than cosmetic.
 //!
@@ -18,7 +18,7 @@ use crate::tm::encoding::stack_is_empty;
 use crate::tm::encoding::{Encoding, rewind_home, seek_slot};
 use crate::tm::machine::{BLANK, Move, StateId, Symbol};
 
-/// The v1 unary encoding at a given field width. `Default` is `MAX_FIELD_WIDTH`; `run_tm` auto-fits a
+/// The unary encoding at a given field width. `Default` is `MAX_FIELD_WIDTH`; `run_tm` auto-fits a
 /// narrower one per program via `at_width`.
 #[derive(Clone, Copy, Debug)]
 pub struct Unary {
@@ -40,7 +40,7 @@ impl Unary {
     }
 }
 
-/// Unary field content, in the rule order the gadgets were built with: marks first, then padding.
+/// Unary field content, in the rule order the gadgets use: marks first, then padding.
 ///
 /// THE ORDER IS LOAD-BEARING, for the same reason spelled out on `append_field_to_work` below:
 /// `seek_slot`/`rewind_home` emit one rule per element of this slice, in slice order, and rule lookup
@@ -433,9 +433,10 @@ fn heap_count_cells_to_work(b: &mut Builder, from: StateId, label: &str) -> Stat
 /// right onto cell 1, then loops decrementing the counter once per cell — landing on the `P`-th `@` when
 /// the counter drains. `found`: HEAP head on the `P`-th cell's `@`, WORK **empty** at home (the counter
 /// is drained to 0 to detect the target), REG home. `missing`: `P` exceeds the cell count (or the heap
-/// is empty) — HEAP position unspecified (the caller halts). Read-only on REG. Derives unique state
-/// names from `from`, like `stack_is_empty`. Totality: the counter strictly decreases each iteration and
-/// the HEAP head strictly advances right over a finite tape, so the loop always reaches an exit.
+/// is empty) — HEAP position unspecified (the caller routes it to its fault spin). Read-only on REG.
+/// Derives unique state names from `from`, like `stack_is_empty`. Totality: the counter strictly
+/// decreases each iteration and the HEAP head strictly advances right over a finite tape, so the loop
+/// always reaches an exit.
 fn heap_seek_cell(b: &mut Builder, from: StateId, found: StateId, missing: StateId) {
     let base = format!("hs{from}");
     // Pass 1: step left off the top blank, then walk left over the cell region (`AT`/`MARK`/`SEP`) to the
@@ -628,7 +629,7 @@ fn box_count_fields_to_work(b: &mut Builder, from: StateId, label: &str, width: 
 /// the 1-based counter `p`; REG home. Walks right field-by-field, decrementing `p` once per `#`; when it
 /// drains, steps right onto the target field's first cell -> `found` (BOX on that cell, WORK empty home).
 /// `missing`: `p == 0`, an empty box, or a skip that runs off onto the top blank (`p` exceeds the field
-/// count) — the caller routes it to the rule-less `fault` spin. Content-blind skips, so a zero-valued
+/// count) — the caller routes it to the `fault` spin. Content-blind skips, so a zero-valued
 /// field is sought exactly like any other.
 fn box_seek_field(b: &mut Builder, from: StateId, found: StateId, missing: StateId, label: &str, width: usize) {
     let loop_head = b.state(format!("{label}.lp")); // BOX on a `#`, WORK home = remaining counter (>= 1)
@@ -807,8 +808,6 @@ impl Encoding for Unary {
         None
     }
 
-    // `arith` Add/Sub are Task 3 (below); `Mul` is Task 4; `compare` (Task 5) has its own stub.
-    //
     // `clippy::similar_names`: each gadget step is named `after_<step>` (`after_ra`/`after_rb`,
     // `after_ra`/`after_er`, …), tracking the state the machine is in after that step — consistent
     // with the register names (`ra`/`rb`/`rd`) and step mnemonics the surrounding comments use, not a
@@ -899,7 +898,7 @@ impl Encoding for Unary {
         // copy. `encoding.rs` documents `content` as "the encoding's `field_symbols()`"; returning a
         // separate literal would make that false the moment either drifted — and drift is silent in
         // both directions (an extra symbol makes the generic bank checkers report false corruption; a
-        // missing one stalls the skeleton walk mid-bank). `Binary` already returns its own `BITS`.
+        // missing one stalls the skeleton walk mid-bank). `Binary` likewise returns its own `BITS`.
         UNARY_CONTENT
     }
 
@@ -1553,7 +1552,7 @@ mod tests {
     #[test]
     fn heap_build_two_cells_and_count() {
         // Build cell1 = (3, 0), cell2 = (2, 1) by loading WORK via write-then-copy, then count == 2.
-        // We stage WORK by writing a REG literal then copy_field_to_work (reusing merged primitives).
+        // We stage WORK by writing a REG literal then copy_field_to_work.
         let enc = Unary::default();
         let mut b = Builder::new();
         let halt = b.accept("halt");
@@ -1916,7 +1915,7 @@ mod tests {
 
     // The BOX tape is blank-padded, so a ZERO-valued field is `width` blanks — indistinguishable
     // from the origin-left / top blanks by a single read. These probe the content-blind fixed-width
-    // navigation on exactly that case (never exercised by the six contract tests, whose values are all
+    // navigation on exactly that case (never exercised by the box tests above, whose values are all
     // > 0). A box holds a value 0 <= v < width (a captured counter can start at 0).
 
     #[test]
@@ -2032,7 +2031,7 @@ mod tests {
 
     /// `box_overwrite_field` gets the same guard, but only because it is a COUNTED chain. Content-driven
     /// it could not have one: BOX fields have no trailing `#` after the LAST one — the top is a blank —
-    /// so an overflow there had no delimiter to hit and would surface only later, when the next
+    /// so an overflow there would have no delimiter to hit and would surface only later, when the next
     /// `box_skip_field_right` landed mid-spill and went stuck-silent.
     #[test]
     fn box_overwrite_field_guards_a_value_that_does_not_fit() {
@@ -2056,14 +2055,7 @@ mod tests {
     /// matched BEFORE the rules it shadows. Rule lookup is first-match-wins and `validate()` has no
     /// overlap check — the hazard already documented at `append_field_to_work`.
     ///
-    /// MEASURED, because the spec claimed more for this layer than it delivers: moving
-    /// `append_work_to_field`'s guard to the end of its state turns this test red, but it turns the
-    /// BEHAVIOURAL test (`a_computed_value_that_does_not_fit_is_reported`) red too, because the loop
-    /// rule that then shadows it matches on the very inputs the behavioural test uses. So this layer is
-    /// NOT catching a silent disable that behaviour would miss, at least for the guards as currently
-    /// written.
-    ///
-    /// What it does add is coverage that is STRUCTURAL rather than path-dependent: every call site of
+    /// What it adds is coverage that is STRUCTURAL rather than path-dependent: every call site of
     /// `append_work_to_field` builds its own `wr` state, and a behavioural test only exercises the
     /// states its particular program reaches. This checks every state in a built machine that routes to
     /// the guard at all, and fails naming the offending state.
@@ -2161,7 +2153,7 @@ mod tests {
     }
 
     /// `field_symbols` names exactly what may appear INSIDE a field, which is what lets the bank-safety
-    /// checkers stop hardcoding `MARK`/`BLANK`. For unary that is a mark or a padding blank — and
+    /// checkers avoid hardcoding `MARK`/`BLANK`. For unary that is a mark or a padding blank — and
     /// crucially NOT `SEP`, since a delimiter inside a field is precisely the corruption those checkers
     /// exist to catch.
     #[test]

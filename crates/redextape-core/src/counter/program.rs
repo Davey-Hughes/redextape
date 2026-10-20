@@ -9,8 +9,7 @@
 //!
 //! **ONE MACRO PER HEAD MOVE.** Between halts a compiled Turing machine does nothing but move heads, so
 //! [`Macro::Move`] is the whole of its work. Its expansion is the transfer, add and divide loops a head move
-//! takes when each is written out. They were three separate macros first; merging them left one macro per
-//! move for an accelerated run to execute.
+//! takes when each is written out, so an accelerated run executes one macro per move.
 
 use crate::counter::nat::{Divisor, Nat};
 use crate::tm::machine::StateId;

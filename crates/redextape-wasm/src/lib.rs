@@ -7,10 +7,10 @@
 
 // Test code is exempt from `pedantic`, for the reason `clippy.toml` gives for the
 // unwrap/expect/panic set: an assertion is a deliberate panic, and a probe that casts a `u64` step
-// count to `f64` to print a ratio is not a defect. `cfg_attr` rather than the one module-level
-// attribute this crate's own single inline `#[cfg(test)] mod tests` (in `session.rs`) would
-// otherwise need — under `--all-targets` each lib compiles twice, and `cfg(test)` holds only in the
-// test-harness pass, so production warnings still surface from the other one.
+// count to `f64` to print a ratio is not a defect. `cfg_attr` rather than a module-level attribute
+// on each of this crate's inline `#[cfg(test)] mod tests` (in `session.rs` and in this file) —
+// under `--all-targets` each lib compiles twice, and `cfg(test)` holds only in the test-harness
+// pass, so production warnings still surface from the other one.
 #![cfg_attr(test, allow(clippy::pedantic))]
 
 #[cfg(feature = "probe-asm-copy")]
@@ -21,13 +21,13 @@ mod session;
 ///
 /// **FEATURE-GATED, AND NARROWED TO EIGHT NAMES, BECAUSE IT EXISTS FOR A GATE.** `mod session` is
 /// private and stays private: `Session`, `Compiled`, `TmScratch` and the rest are this crate's
-/// internals, reached from JavaScript through `#[wasm_bindgen]` rather than from Rust. But the two
-/// fidelity gates are integration tests, and an integration test links against this crate the way any
-/// consumer would — it cannot see into a private module. `pub mod session` would export everything to
-/// enable one test; an inline `#[cfg(test)]` gate inside `session.rs` cannot work at all, because the
-/// coverage scanner reads that file and a bare import of `ts-rs`'s `TS` trait anywhere in it fails the
-/// canonical-line check. Under default features — which is every browser build — this line does not
-/// exist.
+/// internals, reached from JavaScript through `#[wasm_bindgen]` rather than from Rust. But the gates
+/// that read these types are integration tests, and an integration test links against this crate the
+/// way any consumer would — it cannot see into a private module. `pub mod session` would export
+/// everything to enable one test; an inline `#[cfg(test)]` gate inside `session.rs` cannot work at
+/// all, because the coverage scanner reads that file and a bare import of `ts-rs`'s `TS` trait
+/// anywhere in it fails the canonical-line check. Under default features — which is every browser
+/// build — this line does not exist.
 #[cfg(feature = "ts")]
 pub use session::{AsmStatus, Decoded, LambdaStatus, ReductionStatus, RunStatus, TmScratchStatus, TmStatus, ValueRun};
 
@@ -342,14 +342,14 @@ pub fn capture_classes() -> Result<JsValue, JsValue> {
 
 /// The lowering's tape names, in tape order. The TENTH export.
 ///
-/// EXPORTED RATHER THAN HARDCODED, for the reason `encodings()` gives one export up: a TypeScript
-/// array of names is a second authoritative registry that not even the compiler is watching. Five
-/// unlabeled tape rows are unreadable, so the UI needs names; this is where they come from.
+/// EXPORTED RATHER THAN HARDCODED, for the reason `encodings()` gives: a TypeScript array of names is
+/// a second authoritative registry that not even the compiler is watching. Five unlabeled tape rows
+/// are unreadable, so the UI needs names; this is where they come from.
 ///
 /// A CONSUMER MUST NOT TREAT ITS LENGTH AS EVERY MACHINE'S TAPE COUNT. These name the tapes THIS
-/// compiler emits. `tmProgram().tapes` is the count for the machine in hand, and Plan 5d's
-/// hand-written machines may declare up to `MAX_TAPES`. Label tape `i` with `names[i]` when one
-/// exists and positionally otherwise — see `TAPE_NAMES`' own doc.
+/// compiler emits. `tmProgram().tapes` is the count for the machine in hand, and a hand-written
+/// machine may declare up to `MAX_TAPES`. Label tape `i` with `names[i]` when one exists and
+/// positionally otherwise — see `TAPE_NAMES`' own doc.
 ///
 /// # Errors
 ///
@@ -379,8 +379,8 @@ fn err(e: session::SessionError) -> JsValue {
 /// `serde_wasm_bindgen`'s default renders `Option::None` as `undefined`, and §5.1's TypeScript writes
 /// every optional as `T | null` — a renderer testing `x === null` would get it wrong. Getting this
 /// right only for top-level returns (`sourceSpan`) and leaving struct FIELDS on the
-/// default was worse than either choice alone: `lambdaStatus().run` would have been `undefined` while
-/// `sourceSpan()` was `null`, so one boundary would need two rules in the renderer. One serializer,
+/// default would be worse than either choice alone: `lambdaStatus().run` would be `undefined` while
+/// `sourceSpan()` is `null`, so one boundary would need two rules in the renderer. One serializer,
 /// one rule.
 fn to_value<T: Serialize>(v: &T) -> Result<JsValue, JsValue> {
     let s = serde_wasm_bindgen::Serializer::new().serialize_missing_as_null(true);
@@ -538,7 +538,7 @@ impl Session {
     /// **RETURNS `JsValue`, NOT A BARE `Option<String>`.** wasm-bindgen's native ABI marshals `None` as
     /// `undefined`, never `null` — `serialize_missing_as_null(true)` is this crate's `to_value` helper's
     /// setting, and this method does not call `to_value`. The explicit match below is what makes the
-    /// doc's `string | null` claim true; collapsing it back to a bare `Option<String>` return would keep
+    /// doc's `string | null` claim true; collapsing it to a bare `Option<String>` return would keep
     /// this compiling while quietly turning a declined leg's `null` into `undefined`. Same idiom as
     /// `lambdaScratchAt`'s `text` field, this crate's own precedent for a plain string that can be absent.
     #[wasm_bindgen(js_name = tmText)]
@@ -693,7 +693,7 @@ impl Session {
 
     // --- the reference leg --------------------------------------------------------------------
 
-    /// BLOCKS THE MAIN THREAD FOR UP TO 5,000,000 INTERPRETER STEPS, and cannot be chunked — see
+    /// BLOCKS ITS CALLER FOR UP TO 5,000,000 INTERPRETER STEPS, and cannot be chunked — see
     /// `session::evaluate` for why `eval` has no resumable form. `evaluateWithBudget` is how a caller
     /// bounds that.
     ///
@@ -733,15 +733,14 @@ impl Session {
 
     /// `linkIndex(byteBudget)` -> the columnar link index for this compile.
     ///
-    /// COLUMNAR, BUILT BY HAND, NOT THROUGH SERDE. `serde_wasm_bindgen` would produce arrays of
-    /// objects, and the measurement says no: `list60`'s index is 552 KB that way against ~220 KB as
-    /// typed arrays, and `prog200`'s is 1.9 MB against ~689 KB. The app recompiles on every 300 ms
-    /// typing pause, so this crosses often. Typed arrays are also transferable, which a structured
-    /// clone of 48,332 objects is not.
+    /// COLUMNAR, BUILT BY HAND, NOT THROUGH SERDE. `serde_wasm_bindgen` would produce arrays of objects, and
+    /// the measurement says no: `list60`'s index is 552 KB that way against ~220 KB as typed arrays. The app
+    /// recompiles on every 300 ms typing pause, so this crosses often. Typed arrays are also transferable,
+    /// which a structured clone of 48,332 objects is not.
     ///
-    /// This is 5a-ii's row-index trade — one `Int32Array` rather than 127,881 row objects — applied
-    /// to every leg at once. `tmOwner` and `asmOwner` are two columns of one kind, an owner per state and
-    /// an owner per instruction, `-1` for none, and one closure builds both.
+    /// This is `web/src/state-table.ts`'s row-index trade — one `Int32Array` rather than an object per
+    /// row — applied to every leg at once. `tmOwner` and `asmOwner` are two columns of one kind, an
+    /// owner per state and an owner per instruction, `-1` for none, and one closure builds both.
     ///
     /// # Errors
     ///
@@ -758,13 +757,13 @@ impl Session {
     // argument from target width; the crate is structured so it is also true operationally — this
     // file's own header states every branch lives in `session.rs`, tested natively, BECAUSE `lib.rs`'s
     // glue (this function included) cannot be exercised outside a browser.
-    // `crates/redextape-wasm/tests/browser.rs` says the same from the test side ("neither `cargo clippy
-    // --all-targets` nor `cargo test --workspace` compiles or runs this tier"), and
-    // `.forgejo/workflows/ci.yml`'s browser job says it again ("`#[wasm_bindgen]`'s generated glue ...
-    // only execute[s] in a browser"). The lint still fires because clippy also lints the `rlib` build,
-    // which targets the host's 64-bit `usize` — a target this function is never actually run compiled
-    // for. The lengths cast here (span and node counts, the two owner columns) carry no separate numeric bound
-    // of their own; the bound that matters is this one, on the target, not on the value.
+    // `crates/redextape-wasm/tests/browser.rs` says the same from the test side (its module doc: that
+    // tier does not run under `cargo test`), and `.forgejo/workflows/ci.yml`'s browser job says it again
+    // ("`#[wasm_bindgen]`'s generated glue ... only execute[s] in a browser"). The lint still fires
+    // because clippy also lints the `rlib` build, which targets the host's 64-bit `usize` — a target this
+    // function is never actually run compiled for. The lengths cast here (span and node counts, the two
+    // owner columns) carry no separate numeric bound of their own; the bound that matters is this one, on
+    // the target, not on the value.
     #[allow(clippy::cast_possible_truncation)]
     #[wasm_bindgen(js_name = linkIndex)]
     pub fn link_index(&self, byte_budget: usize) -> Result<JsValue, JsValue> {
@@ -842,7 +841,7 @@ impl Session {
 /// reach and declaring it would put an unreachable `# Errors` clause on the boundary. `bool` and
 /// `Result<bool, JsValue>` both cross as `boolean`, and `()` and `Result<(), JsValue>` both cross as
 /// `void`, so the `.d.ts` a renderer reads is the same either way. The four that keep a `Result` keep
-/// it for `to_value` alone.
+/// it for marshalling alone.
 #[wasm_bindgen]
 impl LambdaScratch {
     /// # Errors
@@ -902,11 +901,11 @@ impl LambdaScratch {
     }
 }
 
-/// **FIVE METHODS, AND TWO ABSENCES AND ONE RESHAPE, FROM §3.3's AUDIT; AND ONE METHOD SINCE.** The audit puts
+/// **FIVE METHODS FROM §3.3's AUDIT, WITH ITS ABSENCES AND ONE RESHAPE, AND `tapeNames`.** The audit puts
 /// `tmProgram`, `stepTm`, `tapeSlice` and `raiseTmCap` on this type unchanged, and `tmState` too — but only because
-/// T1 made `TmState::window` take `Option<&SourceMap>`; before that, the method a TM pane renders from every
-/// frame could not have existed here at all. `tapeNames` came with reduced files: the fixed export's names are
-/// wrong for a file reduced to one tape, and only the scratch knows its own stage list.
+/// `TmState::window` takes `Option<&SourceMap>`; otherwise the method a TM pane renders from every frame could not
+/// exist here at all. `tapeNames` is on this type because the fixed export's names are wrong for a file reduced to
+/// one tape, and only the scratch knows its own stage list.
 ///
 /// `tmValue` is absent (it reads `ty` + `final_tapes` + `kind`), and so are `sourceSpan` and
 /// `linkIndex`. `tmStatus` is present with a DIFFERENT RETURN SHAPE — see `session::TmScratchStatus`.

@@ -485,7 +485,7 @@ Three things worth knowing before taking the Zed route:
 
 ## What the grammar covers
 
-`grammar.js` is **195 lines**, against the mini-language's **171**, asm's **165** and λ's **78** — what
+`grammar.js` is **177 lines**, against the mini-language's **164**, asm's **160** and λ's **77** — what
 a fifteen-keyword, line-oriented form with three stage names costs, plus the comments recording what
 `fold`'s own token admits. `queries/highlights.scm`
 holds **15 patterns** over **11 capture names**, and `tm::CAPTURE_CLASSES` has **11 rows**, checked

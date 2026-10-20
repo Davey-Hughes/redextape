@@ -9,35 +9,19 @@
 //! For each case it prints our output beside rustfmt's output for the equivalent Rust, so the shapes
 //! can be compared by eye. It asserts nothing — the report is the deliverable.
 //!
-//! **MEASURED 2026-08-19, rustfmt 1.9.0-stable (8bab26f4f6 2026-07-14):**
-//!   1. long short-element array: filled  (agrees)
-//!   2. switch point: 10  (`SHORT_ELEMENT` = 10 agrees — the "array at the short-element boundary (10)"
-//!      / "array just past it (11)" pair above straddles it directly: width 10 fills, width 11 breaks
-//!      one-per-line, on both sides)
-//!   3. trailing comma: fill yes, vertical yes  (fill DIFFERED — printer had no trailing comma in fill
-//!      mode; fixed in `fill_rows`)
-//!   4. method chain: broke at every `.`  (agrees — the "method chain long enough to break" case above,
-//!      matching the printer's own pinned unit test `a_long_method_chain_breaks_one_link_per_line`
-//!      (`.filter(|a_long_parameter| a_long_parameter > 2)` x5), breaks at every link on both sides.
-//!      The original "method chain" case above stays 105 columns wide at its `let _ = ` indent, under
-//!      the 120 budget, so it never exercised the break rule; kept alongside the new case as a "stays
-//!      inline" contrast.)
+//! The "array at the short-element boundary (10)" / "array just past it (11)" pair straddles the
+//! printer's `SHORT_ELEMENT` directly.
 //!
-//! A FIFTH finding, outside the four numbered questions but squarely inside the "long argument list"
-//! case above: Task 6's `bracketed` rule was "rustfmt packs short elements in an array literal but
-//! NEVER in an argument list" — the case's own rustfmt output filled the 11-argument call instead of
-//! breaking it one-per-line, at the identical `SHORT_ELEMENT`-based 10/11 threshold as arrays (checked
-//! directly, both boundary widths). That recollection was wrong for this project's
-//! `use_small_heuristics = "Max"`, and is now DIFFERED and fixed: `bracketed` uses one fill rule for
-//! both lists and argument lists, and `allow_fill` — no longer a real difference between the two
-//! callers — is gone rather than kept as a vestige.
+//! `bracketed` uses one fill rule for both lists and argument lists, because rustfmt under this
+//! project's `use_small_heuristics = "Max"` fills an argument list at the same `SHORT_ELEMENT`-based
+//! 10/11 threshold as arrays rather than breaking it one-per-line.
 //!
-//! Binary expressions are excluded from this probe's authority by design (see `printer.rs`'s
-//! `binary_chain` doc) — rustfmt breaks long binary chains and this printer deliberately does not; no
-//! case above exercises that shape.
+//! Binary expressions are excluded from this probe's authority by design (see §6.6 of
+//! `docs/superpowers/specs/2026-08-18-surface-trivia-and-printer-design.md`) — rustfmt breaks long binary
+//! chains and this printer deliberately does not; no case exercises that shape.
 
 // Probe target: a probe that cannot run its own subprocess has nothing to report, so panicking is the
-// useful behaviour here. Matches every other `examples/*_probe.rs` in this crate.
+// useful behaviour here.
 #![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
 
 use std::io::Write;
@@ -60,8 +44,7 @@ const CASES: &[(&str, &str, &str)] = &[
     // Boundary pair for `SHORT_ELEMENT` (printer.rs's constant, currently 10): 12 identifiers of width
     // W, one repeated letter each (a..l). Inline length = 2 (brackets) + 12*W (elements) + 11*2 (", "
     // separators). At W=10: 2 + 120 + 22 = 144; at W=11: 2 + 132 + 22 = 156. Both exceed MAX_WIDTH
-    // (120), so both must break — the boundary under test is only in HOW they break (fill vs
-    // one-per-line), which is exactly the question the disclaimed reading needed answered.
+    // (120), so both must break — the boundary under test is only in HOW they break (fill vs one-per-line).
     (
         "array at the short-element boundary (10)",
         "[aaaaaaaaaa, bbbbbbbbbb, cccccccccc, dddddddddd, eeeeeeeeee, ffffffffff, gggggggggg, hhhhhhhhhh, iiiiiiiiii, jjjjjjjjjj, kkkkkkkkkk, llllllllll]",

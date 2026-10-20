@@ -7,10 +7,10 @@
 
 // Test code is exempt from `pedantic`, for the reason `clippy.toml` gives for the
 // unwrap/expect/panic set: an assertion is a deliberate panic, and a probe that casts a `u64` step
-// count to `f64` to print a ratio is not a defect. `cfg_attr` rather than the 36 module-level
-// attributes this crate's own inline `#[cfg(test)]` modules would otherwise need — under
-// `--all-targets` each lib compiles twice, and `cfg(test)` holds only in the test-harness pass, so
-// production warnings still surface from the other one.
+// count to `f64` to print a ratio is not a defect. `cfg_attr` rather than a module-level attribute
+// on every inline `#[cfg(test)]` module in this crate — under `--all-targets` each lib compiles
+// twice, and `cfg(test)` holds only in the test-harness pass, so production warnings still surface
+// from the other one.
 #![cfg_attr(test, allow(clippy::pedantic))]
 
 pub mod analysis;
@@ -44,7 +44,7 @@ pub use diagnostic::{Diagnostic, Severity};
 pub use interp::RuntimeError;
 pub use span::Span;
 
-/// The library version string, used by the smoke test and later by the CLI `--version`.
+/// The library version string, used by the smoke test.
 pub const VERSION: &str = env!("CARGO_PKG_VERSION");
 
 /// The result of static analysis: all diagnostics plus the Core AST when the program is clean.
@@ -66,7 +66,7 @@ pub fn analyze(src: &str) -> Analysis {
     let has_error = diagnostics.iter().any(|d| d.severity == Severity::Error);
     // Lints run only on a program that is otherwise clean. A file with a type error does not also
     // need to be told one of its bindings is unused — and it keeps the blast radius of these rules to
-    // programs that previously reported NOTHING, which is the set the tree's `is_empty()` assertions
+    // programs that report no other diagnostic, which is the set the tree's `is_empty()` assertions
     // are about.
     if !has_error {
         diagnostics.extend(lints::check(&program));
@@ -163,16 +163,15 @@ mod api_tests {
 
     #[test]
     fn analyze_reports_every_parse_error_not_just_the_first() {
-        // THE SHIPPING VALUE OF THIS PR, asserted on the path a user actually travels:
-        // `analyze` -> `parser::parse` -> `parse_full` -> `parse_inner`, which is also what
-        // `Language::diagnostics` in redextape-lsp calls through. `parser::parse_recovering` still
-        // has no caller outside this crate's own tests — navigation, once the reason to expect
-        // one, ships through `parse_for_nav` instead — so pinning the multi-error behaviour there
-        // alone would leave the shipping path unverified.
+        // Asserted on the path a user actually travels: `analyze` -> `parser::parse` -> `parse_full` ->
+        // `parse_inner`, which is also what `Language::diagnostics` in redextape-lsp calls through.
+        // `parser::parse_recovering` has no caller outside this crate's own tests — navigation ships
+        // through `parse_for_nav` instead — so pinning the multi-error behaviour there alone would leave
+        // the shipping path unverified.
         //
-        // Every character here lexes cleanly — no lexer diagnostic can satisfy this assertion in
-        // its place, which already happened once on this branch. Three statements each fail to
-        // parse at their empty `;`, and `analyze` must report all three, not just the first.
+        // Every character here lexes cleanly — no lexer diagnostic can satisfy this assertion in its place.
+        // Three statements each fail to parse at their empty `;`, and `analyze` must report all three, not
+        // just the first.
         let src = "let a = ; let b = 1; let c = ; let d = 2; let e = ;";
         let a = analyze(src);
         assert!(a.core.is_none(), "a file with parse errors must produce no Core");
@@ -231,7 +230,7 @@ mod api_tests {
 ///
 /// The `.cargo/config.toml` `RUST_MIN_STACK = 32 MiB` means the default test threads are far too
 /// large to overflow at these depths — so each test runs on an EXPLICIT 512 KiB thread that a naive
-/// recursive drop of the same tree WOULD overflow (verified: a plain 40 000-deep `Box` cons list
+/// recursive drop of the same tree WOULD overflow (a plain 40 000-deep `Box` cons list
 /// aborts a 512 KiB thread). Each test building its tree without overflowing and then joining
 /// cleanly proves the iterative teardown works; a regression would abort the whole test process.
 ///
@@ -308,15 +307,13 @@ mod drop_tests {
         drop(program); // exercises take_stmt_children's Fn/While/expr-statement arms
     }
 
-    /// `Core::LetRecGroup` (mutual-recursion slice, Task 2) is the highest-risk edit to
-    /// `take_core_children`: a binding group's children live in TWO places — every binding's VALUE
-    /// (an unboxed `Core` inside a `Vec`, not a `Box<Core>`) and the `body`. Missing either one means
-    /// the compiler's own field drop-glue (which runs after our custom `drop()` returns) recurses into
-    /// that un-unlinked child via a genuine Rust function call instead of our explicit worklist — and
-    /// if that child is another `LetRecGroup` down a long chain, each level adds one more native stack
-    /// frame until it overflows. Nothing produces this variant from source yet (Task 3 desugars into
-    /// it), so it is built directly here, the same way `interp.rs`'s own unit test does.
-    ///
+    /// `Core::LetRecGroup` is the highest-risk arm of `take_core_children`: a binding group's
+    /// children live in TWO places — every binding's VALUE (an unboxed `Core` inside a `Vec`, not a
+    /// `Box<Core>`) and the `body`. Missing either one means the compiler's own field drop-glue (which
+    /// runs after our custom `drop()` returns) recurses into that un-unlinked child via a genuine Rust
+    /// function call instead of our explicit worklist — and if that child is another `LetRecGroup`
+    /// down a long chain, each level adds one more native stack frame until it overflows. It is built
+    /// directly here, the same way `interp.rs`'s own unit test does.
     /// Two chains, so each half of the invariant is independently falsifiable: chaining through
     /// `body` (bindings shallow) would only catch a forgotten `body`; chaining through a binding's
     /// VALUE (body shallow) would only catch a forgotten bindings-vec drain.
@@ -342,10 +339,7 @@ mod drop_tests {
 
     /// The binding-value half of the pair: bindings deep, `body` shallow. Its twin above carries
     /// the shared reason for building two chains rather than one; this one is what makes a
-    /// forgotten bindings-vec drain falsifiable. Verified by sabotage, not reasoned about: deleting
-    /// the bindings drain from `take_core_children`'s `LetRecGroup` arm aborts THIS test alone with
-    /// a stack overflow while the twin still passes, and deleting the `body` unlink instead aborts
-    /// the TWIN alone while this one still passes.
+    /// forgotten bindings-vec drain falsifiable.
     #[test]
     fn dropping_deep_letrecgroup_chain_through_a_binding_value_does_not_overflow() {
         std::thread::Builder::new()
@@ -368,10 +362,7 @@ mod drop_tests {
     /// Deep `LambdaTerm` via a right-nested `Abs` chain: exercises the `Abs` arm of `LambdaTerm`'s
     /// `Drop` — both of them, the root unlink and the worklist descent.
     ///
-    /// `term.rs` gives `LambdaTerm` the same hand-written iterative `Drop` the types above have, and
-    /// before this NOTHING tested it directly — `decode.rs`'s small-stack decode exercised it only
-    /// incidentally, as a side effect of a test about a different subject. This closed that gap
-    /// BEFORE the representation changed, so the net was known to work before it was needed.
+    /// `term.rs` gives `LambdaTerm` the same hand-written iterative `Drop` the types above have.
     ///
     /// Built with an iterative loop, not a recursive helper: the build must not be what overflows.
     #[test]
@@ -395,9 +386,6 @@ mod drop_tests {
     /// `Drop`, which unlinks TWO children rather than one. This is the left-nested half of a pair — the same
     /// device the `LetRecGroup` pair above uses — so it is falsifiable only for a forgotten `f`;
     /// its twin below (deep via `a`) is what makes a forgotten `a` falsifiable too.
-    ///
-    /// The model was the weaker of the two when this was written: that pair left its second member
-    /// undocumented entirely. It carries a doc now, and this pair is why.
     #[test]
     fn dropping_deep_lambda_app_chain_does_not_overflow() {
         std::thread::Builder::new()
@@ -421,7 +409,7 @@ mod drop_tests {
     ///
     /// Concretely: a destructor that unlinked `f` and forgot `a` would leave `a` to the
     /// compiler's recursive drop glue — which is O(1) when `a` is always `var(1)`, so the left-nested
-    /// test PASSES with that half broken. Verified by sabotage, not reasoned about.
+    /// test PASSES with that half broken.
     #[test]
     fn dropping_deep_lambda_app_chain_through_the_argument_does_not_overflow() {
         std::thread::Builder::new()
@@ -441,17 +429,16 @@ mod drop_tests {
 
     /// Deep `LambdaTerm` where EVERY child is SHARED: each level is `App(c, c)` over one allocation.
     ///
-    /// Not reachable at all before the `Rc` conversion — under `Box` this term is a tree of 2^40,000
-    /// nodes and could not be built — but `subst` now installs the substituted argument at every
-    /// occurrence as a refcount bump, so a node holding two handles to the same child is the ordinary
-    /// product of reducing `(\x. x x) M`, and iterating that nests it.
+    /// Under `Box` this term is a tree of 2^40,000 nodes and could not be built, but `subst` installs the
+    /// substituted argument at every occurrence as a refcount bump, so a node holding two handles to the same
+    /// child is the ordinary product of reducing `(\x. x x) M`, and iterating that nests it.
     ///
     /// THE THREE CHAINS ABOVE CANNOT CATCH WHAT THIS CATCHES. In each of them every child is uniquely
     /// owned, so a destructor that unlinked only uniquely-owned children — leaving shared ones to the
     /// compiler's glue on the reasoning that a decrement frees nothing — passes all three. Here it
     /// overflows: at each level the glue's SECOND decrement is the one that reaches zero, and the free
     /// it triggers recurses into the next level through drop glue rather than through the worklist.
-    /// The fix is the invariant `Drop` actually maintains: unlink ALL children, so the handle that
+    /// `Drop` maintains the invariant that prevents it: unlink ALL children, so the handle that
     /// finally reaches zero does so inside the loop.
     #[test]
     fn dropping_deep_lambda_shared_child_chain_does_not_overflow() {
@@ -485,8 +472,8 @@ mod drop_tests {
     ///
     /// That check has to be more than "did not crash", and what it does and does not distinguish is
     /// worth being exact about. `Drop` contains no `unsafe`, so "corrupted" here cannot mean torn or
-    /// freed memory: `Rc` will not hand out an owned `Node` while another handle holds it, and the
-    /// sabotage that tries to force one does not compile. What the depth assert distinguishes is a
+    /// freed memory: `Rc` will not hand out an owned `Node` while another handle holds it, and code
+    /// that tries to force one does not compile. What the depth assert distinguishes is a
     /// STRUCTURAL LOGIC bug — a walk that unlinked a shared child anyway would leave `keep` TRUNCATED
     /// at the shared node — from a run that merely did not crash. Walking and counting the spine
     /// BEFORE `keep` is dropped is what turns that into a failed assertion here, rather than a silently

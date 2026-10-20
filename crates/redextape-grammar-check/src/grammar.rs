@@ -3,8 +3,9 @@
 //! **THE CAPTURE TABLE IS PER GRAMMAR AND THE MACHINERY IS NOT.** Design §5.1 records why the tables
 //! cannot be shared: `@variable.parameter` is an `Ident` in the mini-language, where `class_of` calls
 //! a parameter an identifier, and a `Binder` in λ, where `print_lambda_mapped` folds the bound name
-//! into the binder. Both are right for their own language. What would be a defect is three copies of
-//! the overlap rule, the disagreement check and the span comparison — so those live here, once.
+//! into the binder. Both are right for their own language. What would be a defect is a copy per
+//! grammar of the overlap rule, the disagreement check and the span comparison — so those live
+//! here, once.
 
 use redextape_core::Span;
 use redextape_core::analysis::TokenClass;
@@ -183,11 +184,11 @@ impl Grammar {
 
     /// Every pattern in this grammar's `highlights.scm`, exercised at least once by `corpus`.
     ///
-    /// **A QUERY PATTERN NOTHING EXERCISES IS A CLAIM NOTHING CHECKS.** The λ grammar shipped one —
-    /// `(parenthesized_term (identifier) @variable)` — that no corpus entry reached AND that the
-    /// printer can never produce, so it had zero coverage in the whole pipeline while every test
-    /// stayed green. Deleting a pattern outright was equally invisible. This is the local guard for
-    /// both, and it lives on `Grammar` so a third grammar inherits it rather than rediscovering it.
+    /// **A QUERY PATTERN NOTHING EXERCISES IS A CLAIM NOTHING CHECKS.** Such a pattern — one no corpus
+    /// entry reaches and that the printer can never produce — has zero coverage in the whole pipeline
+    /// while every test stays green. Deleting a pattern outright is equally invisible. This is the
+    /// local guard for both, and it lives on `Grammar` so another grammar inherits it rather than
+    /// rediscovering it.
     ///
     /// # Errors
     ///
@@ -217,14 +218,12 @@ impl Grammar {
     }
 
     // ------------------------------------------------------------------------------------------
-    // FIVE CHECKS PROMOTED FROM `tests/captures.rs` AND `tests/lambda.rs`, WHERE THEY WERE
-    // DUPLICATED VERBATIM. Same motive as `every_query_pattern_fires` above: none of these five
-    // reads anything grammar-specific beyond `self`, so a third grammar (TM, PR 3) inherits them by
-    // calling them rather than becoming a third copy-pasted copy. `a_conflicting_query_is_rejected`
-    // is deliberately NOT here — see its doc comment in each `tests/*.rs` for why it must stay
-    // per-grammar. Every method below returns `Result` rather than panicking: `clippy.toml` exempts
-    // `unwrap`/`expect`/`panic` only inside `#[test]` fns and `#[cfg(test)]` modules, and this is
-    // neither.
+    // FIVE CHECKS THAT LIVE ON `Grammar` ITSELF. Same motive as `every_query_pattern_fires` above: none
+    // of these five reads anything grammar-specific beyond `self`, so another grammar inherits them by
+    // calling them rather than copying them. `a_conflicting_query_is_rejected` is deliberately NOT here
+    // — see its doc comment in each `tests/*.rs` for why it must stay per-grammar. Every method below
+    // returns `Result` rather than panicking: `clippy.toml` exempts `unwrap`/`expect`/`panic` only
+    // inside `#[test]` fns and `#[cfg(test)]` modules, and this is neither.
     // ------------------------------------------------------------------------------------------
 
     /// Every capture name this grammar's queries emit has a row in `capture_classes`. Adding a
@@ -318,7 +317,7 @@ impl Grammar {
 /// divergence is a defect in `grammar.js` or `highlights.scm`, never a reason to relax the
 /// comparison.
 ///
-/// The caller supplies `want` because the two authorities have different shapes: the mini-language's
+/// The caller supplies `want` because the authorities come in two shapes: the mini-language's
 /// `classify_source` is a function of source text, while λ's `print_lambda_mapped` produces the text
 /// and its spans together. A single signature could not serve both without lying about one.
 ///

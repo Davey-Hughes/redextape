@@ -2,38 +2,31 @@
  * The redextape mini-language, for editor highlighting ONLY.
  *
  * THIS IS NOT AN AUTHORITATIVE GRAMMAR. `crates/redextape-core/src/parser.rs` is the semantic source
- * of truth and owns the canonical printer; this file may never be lowered into Core. Its agreement
- * with the real front end is enforced by `crates/redextape-grammar-check`, which compares every
- * highlight capture against `analysis::classify_source` span for span.
+ * of truth; this file may never be lowered into Core. Its agreement with the real front end is
+ * enforced by `crates/redextape-grammar-check`, which compares every highlight capture against
+ * `analysis::classify_source` span for span.
  *
- * NO KNOWN DIVERGENCE FROM THE REAL PARSER, and an earlier draft of this file had one. That draft
- * excluded braced blocks from callee, receiver and condition position — `_expression_except_block`,
- * the device Rust's own tree-sitter grammar uses — assuming `while n > 0 { .. }` would otherwise be
- * ambiguous. It is not: the generated parser resolves all three positions with no declared conflict.
- * The exclusion was REJECTING INPUT THE REAL PARSER ACCEPTS: `parse_postfix` runs its call and method
- * postfixes on any atom `parse_atom` produced, blocks included, so `{ f }(1)`, `{ f }.m(1)` and
- * `while { a } { b }` are all legal and all came back as ERROR nodes. In an editor that shows a valid
- * file as an error region, and nothing in CI would have caught it — the differential refuses a source
- * that produces ERROR nodes rather than comparing it.
+ * NO KNOWN DIVERGENCE FROM THE REAL PARSER. `parse_postfix` runs its call and method postfixes on any
+ * atom `parse_atom` produced, blocks included, so `{ f }(1)`, `{ f }.m(1)` and `while { a } { b }`
+ * are all legal, and the generated parser resolves callee, receiver and condition position with no
+ * declared conflict.
  */
 module.exports = grammar({
   name: 'redextape',
 
-  // `word` makes the generated parser extract keywords from this token, which is what stops
-  // `letter` from lexing as `let` followed by `ter`.
+  // `word` makes the generated parser extract keywords from this token.
   word: $ => $.identifier,
 
   // The class lists EXACTLY the code points `is_ascii_whitespace()` accepts — the WhatWG Infra set:
-  // TAB, LF, FF, CR, SPACE. It was `/\s/`, which is nearly right and diverges on ONE code point,
-  // U+000B VERTICAL TAB: `/\s/` accepts it and the lexer's `is_ascii_whitespace()` rejects it, so the
-  // grammar parsed a file the front end refuses. POSIX counts VT as whitespace and Rust does not,
-  // which is the whole disagreement.
+  // TAB, LF, FF, CR, SPACE. `/\s/` is nearly right and diverges on ONE code point, U+000B VERTICAL
+  // TAB: `/\s/` accepts it and the lexer's `is_ascii_whitespace()` rejects it. POSIX counts VT as
+  // whitespace and Rust does not, which is the whole disagreement.
   //
-  // THE DIFFERENTIAL COULD NOT SEE THIS, which is why it survived two PRs. `classify_source` is total
-  // on malformed input: it skips the byte and emits no span for it, so it returns the same spans
-  // either way and the span comparison passes. `the_grammar_and_the_lexer_agree_on_every_ascii_
-  // whitespace_candidate` in `redextape-grammar-check`'s `tests/captures.rs` asks `parser::parse`
-  // instead, which is the only authority that can answer.
+  // THE DIFFERENTIAL CANNOT SEE THIS. `classify_source` is total on malformed input: it skips the
+  // byte and emits no span for it, so it returns the same spans either way and the span comparison
+  // passes. `the_grammar_and_the_lexer_agree_on_every_ascii_whitespace_candidate` in
+  // `redextape-grammar-check`'s `tests/captures.rs` asks `parser::parse` instead, which is the only
+  // authority that can answer.
   //
   // DO NOT HARMONISE THIS WITH `tree-sitter-redextape-lambda`'s `extras`, which is deliberately wider:
   // λ's `skip_ws` tests `char::is_whitespace()`, the Unicode White_Space property. Two grammars, two
@@ -96,7 +89,7 @@ module.exports = grammar({
 
     arguments: $ => seq($._expression, repeat(seq(',', $._expression)), optional(',')),
 
-    // Blocks are included. See the note above on why excluding them was wrong.
+    // Blocks are included; the module doc says why.
     _expression: $ => choice(
       $.binary_expression,
       $.call_expression,

@@ -15,10 +15,9 @@
  * THAT IS AN ACCEPT-MORE DIVERGENCE AND IT IS THE RIGHT DIRECTION FOR AN EDITOR, which is where a
  * half-typed buffer is not an error worth underlining. It is also unreachable by the differential,
  * whose corpus is printed output and therefore always one construct per line. The opposite
- * divergence — a rule REJECTING input the real parser accepts — is the one PR 1 recorded as a defect,
- * and nothing here does that.
+ * divergence — a rule REJECTING input the real parser accepts — is a defect.
  *
- * There are FIVE accept-more divergences reachable from a hand-typed buffer, and this is the list:
+ * Five of the accept-more divergences reachable from a hand-typed buffer:
  *
  *   1. one construct per line is not enforced (above);
  *   2. header directives are not required to precede the first `state`, where `header_position`
@@ -64,9 +63,7 @@
  *   - `symbol` is a SINGLE character, because `write_syms` pushes one span per symbol inside `[..]`
  *     while `write_header` pushes ONE span for a whole packed run. Same-looking text, two span
  *     shapes, so two nodes.
- *   - `head_move` is `/[LRS]/` rather than the string literals 'L'/'R'/'S', to keep them out of
- *     tree-sitter's keyword extraction, which is driven by `word` below and has no business
- *     inspecting the inside of a `move [..]` group.
+ *   - `head_move` is its own token, `/[LRS]/`.
  *
  * ## What this grammar does NOT accept, on purpose
  *
@@ -88,8 +85,7 @@ module.exports = grammar({
   // actually emits; widening it would claim agreement this grammar has no authority to check.
   extras: $ => [/[ \t\r\n]/, $.comment],
 
-  // Makes the generated parser extract the keywords below from `identifier`, so `state` is a keyword
-  // and `stateful` is a name. Without it, `identifier` swallows every keyword.
+  // Makes the generated parser extract keywords from `identifier`.
   word: $ => $.identifier,
 
   rules: {
@@ -106,8 +102,7 @@ module.exports = grammar({
 
     // One node per directive rather than a shared `(directive key: value:)`, because the queries must
     // give `encoding`'s operand and `result`'s operand DIFFERENT captures (`@variable` and `@type`,
-    // both projecting to `Ident`) and `captures_with` does not evaluate query predicates — an
-    // `#eq?` on the key would be ignored and would over-capture.
+    // both projecting to `Ident`).
     _directive: $ => choice($.version, $.encoding, $.width, $.slots, $.result, $.reduced, $.steps),
 
     version: $ => seq('version', $.number),
@@ -123,25 +118,12 @@ module.exports = grammar({
     // fails.
     //
     // What fixes it is keeping the token OUT of the generated keyword lexer, and `\r?` is what does
-    // that. MEASURED: each form regenerated, `ts_lex_keywords` read out of `src/parser.c`, and
-    // `reduced fold, single-tape 5` parsed.
-    //
-    //   token('fold')     extracted, as `anon_sym_fold`        ERROR
-    //   token(/fold/)     extracted, as `aux_sym_fold_token1`  ERROR
-    //   token(/fold\r?/)  NOT extracted                        parses
-    //
-    // Extraction tracks the outcome across all three. A regex token is extracted under a generated
-    // `aux_sym_*` name, which is why `/fold/` reads as absent to a grep for `anon_sym_fold` — that
-    // misreading is what an earlier version of this comment was built on. `/fold\r?/` stays out
-    // because it matches a string `identifier` cannot, so `word` does not subsume it.
-    //
-    // BEING ALL LETTERS NEITHER CAUSES NOR PREVENTS EXTRACTION, which this comment also once claimed:
-    // the keyword lexer here holds `head_move`, which is `/[LRS]/`, and omits the all-letter
-    // `version`, `encoding` and `result`, all three of which main's holds.
+    // that. `/fold\r?/` stays out because it matches a string `identifier` cannot, so `word` does not
+    // subsume it.
     //
     // The cost is divergence 5 in the module doc: this admits `fold\r` mid-line, which the authority
-    // refuses. A stage name ending in `\r` at a line's END was always read, since `parse_tm_full`
-    // strips that one.
+    // refuses. A stage name ending in `\r` at a line's END is read, since `parse_tm_full` strips
+    // that one.
     reduced: $ => seq('reduced', $._stage, repeat(seq(',', $._stage))),
     _stage: $ => choice($.fold, $.single_tape, $.two_symbol),
     fold: $ => alias(token(/fold\r?/), $.stage),

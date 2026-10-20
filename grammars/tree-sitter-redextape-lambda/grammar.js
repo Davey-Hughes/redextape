@@ -19,12 +19,11 @@ module.exports = grammar({
   name: 'redextape_lambda',
 
   // λ's `skip_ws` (`syntax.rs`) tests `char::is_whitespace()`, the Unicode White_Space property —
-  // wider than the mini-language lexer's `is_ascii_whitespace()` (`parser.rs`), so this set is
+  // wider than the mini-language lexer's `is_ascii_whitespace()` (`lexer.rs`), so this set is
   // deliberately wider than `tree-sitter-redextape/grammar.js`'s `extras`. Do not "harmonise" the
-  // two by copying this class over there. That sibling USED to carry `/\s/`, which was NEARLY right
-  // for `is_ascii_whitespace()` and diverged on one code point, U+000B VERTICAL TAB; it now spells
-  // out the five code points `is_ascii_whitespace()` accepts, so both grammars are exactly right and
-  // each is right for a DIFFERENT authority. Copying either class into the other breaks it.
+  // two by copying this class over there. That sibling spells out the five code points
+  // `is_ascii_whitespace()` accepts, so both grammars are exactly right and each is right for a
+  // DIFFERENT authority. Copying either class into the other breaks it.
   // The class lists exactly the code points `char::is_whitespace()` accepts: U+0009-U+000D, U+0020,
   // U+0085, U+00A0, U+1680, U+2000-U+200A, U+2028, U+2029, U+202F, U+205F, U+3000.
   extras: $ => [/[\t-\r \u0085\u00A0\u1680\u2000-\u200A\u2028\u2029\u202F\u205F\u3000]/],

@@ -134,9 +134,9 @@ fn pass_pipeline(opt: OptLevel) -> Option<&'static str> {
 /// individual function rather than off the pipeline, so a `default<Oz>` run over functions carrying
 /// neither attribute gets a fraction of the intended effect.
 ///
-/// The mapping is exactly what clang emits, verified rather than assumed — on the pinned LLVM 22.1,
-/// `clang -Os -S -emit-llvm` puts `optsize` in the function's attribute group, `clang -Oz` puts
-/// `minsize` AND `optsize`, and `-O0`..`-O3` put neither.
+/// The mapping is exactly what clang emits: on the pinned LLVM 22.1, `clang -Os -S -emit-llvm` puts
+/// `optsize` in the function's attribute group, `clang -Oz` puts `minsize` AND `optsize`, and
+/// `-O0`..`-O3` put neither.
 fn size_attributes(opt: OptLevel) -> &'static [&'static str] {
     match opt {
         OptLevel::O0 | OptLevel::O1 | OptLevel::O2 | OptLevel::O3 => &[],
@@ -357,8 +357,7 @@ fn map_rt_symbols(ee: &ExecutionEngine<'_>, module: &Module<'_>) {
 
 /// The intrinsics the SATURATING arithmetic arms lower to. The asm interpreter's `eval_bin` uses
 /// `saturating_add`/`saturating_mul` and monus, so plain `add`/`mul`/`sub` (which WRAP) would
-/// disagree with the reference on overflow — the exact bug the Cranelift backend shipped once and
-/// had to fix, so it is a known trap rather than a hypothetical.
+/// disagree with the reference on overflow.
 ///
 /// **The optimizer legitimately UN-saturates these, and that is fine.** In the `O3` IR for `sum`,
 /// `llvm.usub.sat(n, 1)` comes out as a plain wrapping `add i64 %n, -1` — correct, because the
@@ -913,7 +912,7 @@ fn build_module<'ctx>(
 ///
 /// `opt` drives BOTH LLVM knobs: the IR pass pipeline (`optimize`) and the codegen level the
 /// `TargetMachine`/`ExecutionEngine` are built at (`opt_level`). The agreement contract holds at
-/// every level — see `o0_equals_o3` and the per-level totality tests.
+/// every level — see `every_opt_level_agrees_on_source_programs` and the per-level totality tests.
 fn build_and_run(prog: &Program, subs: &[Subroutine], caps: Caps, depth_cap: u64, opt: OptLevel) -> NativeRun {
     let ctx = Context::create();
     let machine = match host_target_machine(opt) {
@@ -1016,7 +1015,7 @@ pub fn object_bytes(prog: &Program, _caps: Caps, opt: OptLevel) -> Result<Vec<u8
 #[cfg(test)]
 mod tests {
     use super::*;
-    use redextape_core::tm::{AsmRun, DEFAULT_CAPS, decode_asm, lower_asm, run_asm};
+    use redextape_core::tm::{AsmRun, DEFAULT_CAPS, decode_asm, lower_asm, lower_program, run_asm};
     use redextape_core::{desugar::desugar, parser::parse, run, value::Value};
 
     /// Every level `OptLevel` offers, the size-oriented ones included. The agreement contract is
@@ -1028,10 +1027,10 @@ mod tests {
 
     fn llvm_value(src: &str) -> Value {
         let core = desugar(&parse(src).0.unwrap());
-        // Reuse the crate's own lowering template (direct first, `defunc` only for a higher-order
-        // `Unsupported`) rather than re-deriving it, so a higher-order source like `map` reaches the
-        // backend exactly as `run_native_with` would deliver it.
-        let prog = crate::lower_program(&core).unwrap();
+        // Lower through `lower_program` (direct first, `defunc` only for a higher-order `Unsupported`),
+        // as `run_native_with` does, so a higher-order source like `map` reaches the backend exactly as
+        // `run_native_with` would deliver it.
+        let prog = lower_program(&core).unwrap();
         let expected = run(src).unwrap();
         match compile_and_run(&prog, DEFAULT_CAPS, OptLevel::O0) {
             NativeRun::Ran(o) => decode_asm(&o, &expected).expect("decode"),
@@ -1139,8 +1138,7 @@ mod tests {
         // Swept over EVERY opt level, not just `O0`: the saturating intrinsics are precisely what
         // the pipeline rewrites most (`default<O3>` is observed turning `llvm.usub.sat` back into a
         // plain wrapping `add` wherever a dominating compare proves the operand in range), so
-        // `O0`-only coverage would leave the interesting half of the claim unchecked — on the one
-        // arm the Cranelift backend already shipped a wrap-instead-of-saturate bug on.
+        // `O0`-only coverage would leave the interesting half of the claim unchecked.
         const TWO40: u64 = 1 << 40;
         let cases = [
             (BinOp::Add, u64::MAX, u64::MAX), // wrapping would give u64::MAX - 1
@@ -1267,24 +1265,23 @@ mod tests {
     }
 
     /// A recursive `countdown(n)` whose subroutine writes `fillers` extra `Loc` registers and reads
-    /// every one of them AFTER its self-call, keeping them live across the call so the native frame
-    /// is genuinely FAT. Deliberately DIFFERS in shape from `jit::tests::fat_recursive_countdown` now:
-    /// that fixture uses mutually INDEPENDENT fillers (`Loc(i) = Arg(0) + (i+1)`, each derived from
+    /// every one of them AFTER its self-call, keeping them live across the call so the native frame is
+    /// genuinely FAT. Deliberately DIFFERS in shape from `jit::tests::fat_recursive_countdown`: that
+    /// fixture uses mutually INDEPENDENT fillers (`Loc(i) = Arg(0) + (i+1)`, each derived from
     /// `Arg(0)` alone), because that is what makes optimized Cranelift frames grow (live-range
-    /// splitting spills every independently-live value, ~2.85x at 200 fillers). This fixture instead
-    /// keeps the DEPENDENT saturating chain below (`Loc(i) = Arg(0) + Loc(i-1)`), which barely grows
-    /// under optimization (~1.01x) and so would not exercise Cranelift's growth — but that is fine
-    /// here because LLVM's binding case is `O0`, not its optimized levels: every register slot is
-    /// still its own entry-block `alloca` at `O0` regardless of chain shape, while `O1+`'s
-    /// `mem2reg`/SROA promote them into SSA and shrink the frame instead. That is the CURRENT
-    /// rationale, not an established measurement: a follow-up is filed to actually measure this
-    /// fixture's frame at `O0` vs `O3` and confirm or retract it.
+    /// splitting spills every independently-live value). This fixture instead keeps the DEPENDENT
+    /// saturating chain below (`Loc(i) = Arg(0) + Loc(i-1)`), which barely grows under optimization
+    /// and so would not exercise Cranelift's growth — but that is fine here because for this chain
+    /// LLVM's binding case is `O0`, not its optimized levels: every register slot is still its own
+    /// entry-block `alloca` at `O0` regardless of chain shape, while `O1+`'s `mem2reg`/SROA promote
+    /// them into SSA and shrink this chain's frame instead. `shared::BYTES_PER_VAR`'s doc gives how
+    /// the opt level moves LLVM's frame for both shapes.
     ///
     /// Each filler is DERIVED from `Arg(0)` rather than being a constant: `Loc(0) = Arg(0) +
     /// Arg(0)`, then `Loc(i) = Arg(0) + Loc(i-1)` — a chain of *saturating* adds (`llvm.uadd.sat`,
     /// which is not associative, so no pass may reassociate the chain into one multiply) whose
     /// elements are all distinct runtime values. A bank of constants would const-fold away at `O1+`,
-    /// leaving a 32-byte frame and making every non-`O0` leg of the totality test below vacuous: the
+    /// leaving a thin frame and making every non-`O0` leg of the totality test below vacuous: the
     /// `BYTES_PER_VAR` frame ESTIMATE would then be exercised at `O0` only, which is not what that
     /// test claims.
     ///
@@ -1300,15 +1297,13 @@ mod tests {
     /// This is not merely an internal quirk: `redextape_native::llvm::compile_and_run` and
     /// `jit::compile_and_run` are both `pub` and take a `Program`, so a hand-built `Program` reaching
     /// this divergence is public-API-reachable. What actually keeps every oracle leg from tripping
-    /// over it is narrower and was verified by a definite-assignment dataflow analysis over 30 real
-    /// programs (recursion, mutual list recursion, `while` loops, heap `cons`/`head`/`tail`,
-    /// higher-order `map`/`fold`, currying, immutable capture, mutable capture via boxing): no
-    /// `Program` produced by `lower_asm`/`defunc` ever reads a `Loc` or `Rr` before writing it on
-    /// every path, so the two backends' initial values never actually differ for real output.
-    /// (`Arg` is structurally immune for a different reason: `analysis::partition` sets `arity =
-    /// max_arg_read + 1`, so every `Arg` a body reads is a parameter by construction.) A hand-built
-    /// body that read an unwritten `Loc`/`Rr` would be outside that contract, and this helper is a
-    /// test fixture, not the place to litigate it.
+    /// over it is narrower: a definite-assignment dataflow analysis over 30 real programs found that no
+    /// `Program` produced by `lower_asm`/`defunc` ever reads a `Loc` or `Rr` before writing it on every
+    /// path, so the two backends' initial values never actually differ for real output. (`Arg` is
+    /// structurally immune for a different reason: `analysis::partition` sets `arity = max_arg_read + 1`,
+    /// so every `Arg` a body reads is a parameter by construction.) A hand-built body that read an
+    /// unwritten `Loc`/`Rr` would be outside that contract, and this helper is a test fixture, not the
+    /// place to litigate it.
     fn fat_recursive_countdown(fillers: u32, depth: u64) -> Program {
         let (zero, eqbit, one) = (fillers, fillers + 1, fillers + 2);
         let mut code = vec![
@@ -1378,8 +1373,7 @@ mod tests {
 
     #[test]
     fn builds_and_reads_a_list() {
-        // rr = head(tail(cons(1, cons(2, nil)))) == 2. Also the first test that actually EXECUTES
-        // `Nil` (rather than pairing it with an unimplemented op).
+        // rr = head(tail(cons(1, cons(2, nil)))) == 2. Also EXECUTES `Nil`.
         agree(Program {
             code: vec![
                 Instr::Nil(Reg::Loc(0)),
@@ -1512,8 +1506,8 @@ mod tests {
     /// `declare_rt` runs BEFORE `declare_subroutines`, so a user subroutine whose label collides
     /// with an import gets uniquified (`rt_cons` → `rt_cons.1`) and the import keeps the bare name.
     /// Without that ordering the by-name lookup would bind a HOST function's address onto a user
-    /// subroutine — a silent miscompile, and precisely the UB the re-fetch was introduced to avoid.
-    /// The premise lived only in a doc comment, so a future reordering could break it silently.
+    /// subroutine — a silent miscompile, and precisely the UB the re-fetch avoids. Pinned so a
+    /// reordering cannot break it silently.
     #[test]
     fn a_subroutine_named_like_an_import_does_not_hijack_it() {
         // `$main: arg0 = 6; call <name>; halt` / `<name>: rr = arg0 + arg0; ret` — 12, only if the
@@ -1602,8 +1596,8 @@ mod tests {
     #[test]
     fn every_opt_level_agrees_with_the_interpreter() {
         // `opt` drives both LLVM knobs (IR pass pipeline + codegen level). This is the register-asm
-        // -level smoke check that raising the level does not change outcomes; `o0_equals_o3` is the
-        // same claim over real source programs.
+        // -level smoke check that raising the level does not change outcomes;
+        // `every_opt_level_agrees_on_source_programs` is the same claim over real source programs.
         let prog = Program {
             code: vec![
                 Instr::Li(Reg::Arg(0), 10),
@@ -1632,16 +1626,16 @@ mod tests {
         }
     }
 
-    /// THE HEADLINE of this slice: the optimizer must not change what a program MEANS.
+    /// The headline property: the optimizer must not change what a program MEANS.
     ///
-    /// For each source program, compile it at every opt level and decode each result. All four must
+    /// For each source program, compile it at every opt level and decode each result. All six must
     /// decode to the same `Value`, and that `Value` must be the reference interpreter's — so this is
-    /// simultaneously an `O0 == O1 == O2 == O3` differential and a `native == reference` oracle leg.
+    /// simultaneously a differential of every level against `O0` and a `native == reference` oracle leg.
     /// Because `default<O3>` really does rewrite this IR (see
     /// `the_o3_pipeline_actually_transforms_the_ir`), the agreement is evidence about the optimizer
     /// rather than a tautology.
     #[test]
-    fn o0_equals_o3() {
+    fn every_opt_level_agrees_on_source_programs() {
         let progs = [
             "1 + 2 * 3",
             "if 2 > 1 { 10 } else { 20 }",
@@ -1658,7 +1652,7 @@ mod tests {
         ];
         for src in progs {
             let core = desugar(&parse(src).0.unwrap());
-            let prog = crate::lower_program(&core).unwrap();
+            let prog = lower_program(&core).unwrap();
             let expected = run(src).unwrap();
             let mut decoded = Vec::new();
             for opt in OPT_LEVELS {
@@ -1692,18 +1686,18 @@ mod tests {
     /// Build the module for `src` exactly as the driver does, and return it with its target machine.
     fn built_module<'ctx>(ctx: &'ctx Context, src: &str, opt: OptLevel) -> (Module<'ctx>, TargetMachine) {
         let core = desugar(&parse(src).0.unwrap());
-        let prog = crate::lower_program(&core).unwrap();
+        let prog = lower_program(&core).unwrap();
         let subs = partition(&prog).unwrap();
         let machine = host_target_machine(opt).expect("host target machine");
         let (module, _entry) = build_module(ctx, &machine, &prog, &subs, opt).expect("build module");
         (module, machine)
     }
 
-    /// The evidence that `o0_equals_o3` is not passing because `O3` quietly does nothing — the exact
-    /// failure mode a differential against a no-op optimizer has. Compares the IR either side of
-    /// `run_passes`: the register banks (entry-block `alloca`s, the whole reason this backend's
-    /// `Fun` is shaped the way it is) must be promoted away by `mem2reg`/SROA, the instruction count
-    /// must drop, and the result must still verify.
+    /// The evidence that `every_opt_level_agrees_on_source_programs` is not passing because `O3`
+    /// quietly does nothing — the exact failure mode a differential against a no-op optimizer has.
+    /// Compares the IR either side of `run_passes`: the register banks (entry-block `alloca`s, the
+    /// whole reason this backend's `Fun` is shaped the way it is) must be promoted away by
+    /// `mem2reg`/SROA, the instruction count must drop, and the result must still verify.
     #[test]
     fn the_o3_pipeline_actually_transforms_the_ir() {
         let ctx = Context::create();
@@ -1739,7 +1733,7 @@ mod tests {
     /// What `Linkage::Private` on non-entry subroutines actually buys, made observable: a subroutine
     /// the inliner folds into its only caller is then DELETED. Under external linkage `globaldce`
     /// must assume an unknown outside caller and keep the now-dead definition — so this is the test
-    /// that would catch a regression back to external linkage for the whole subroutine set.
+    /// that would catch a regression to external linkage for the whole subroutine set.
     #[test]
     fn a_fully_inlined_subroutine_is_deleted_at_o3() {
         let ctx = Context::create();
@@ -1764,7 +1758,7 @@ mod tests {
         // against the reference interpreter.
         let src = "fn twice(x){ x + x } twice(21)";
         let core = desugar(&parse(src).0.unwrap());
-        let prog = crate::lower_program(&core).unwrap();
+        let prog = lower_program(&core).unwrap();
         let expected = run(src).unwrap();
         for opt in OPT_LEVELS {
             agree_caps(prog.clone(), DEFAULT_CAPS, opt);
@@ -1783,8 +1777,7 @@ mod tests {
     ///
     /// Inlining, the other obvious lever, does NOT separate the levels for this backend: the emitted
     /// callees are either recursive (which the inliner declines everywhere) or single-call-site
-    /// (which even `Oz` inlines, on the last-call-to-static bonus). Measured — a straight-line callee
-    /// at two and at four call sites came out identical at all of `O2`/`O3`/`Os`/`Oz`.
+    /// (which even `Oz` inlines, on the last-call-to-static bonus).
     ///
     /// The loop cannot simply be folded away despite the program being closed: `rt_tick` is an opaque
     /// external call the lowering emits before every backward branch, so the iterations are
@@ -1821,12 +1814,11 @@ mod tests {
     ///   only thing keeping the two levels apart. The other three inequalities are NOT soft in this
     ///   way — one of those breaking is a real regression, not a threshold shift.
     ///
-    /// Measured on the pinned LLVM 22.1: `O2` 61, `O3` 61, `Os` 38, `Oz` 32. Suppressing only the
-    /// `optsize`/`minsize` attributes (leaving `default<Os>`/`default<Oz>` in place) puts `Os` back
-    /// at 61 and `Oz` at 63 — the pipeline string ALONE buys nothing here, and this test fails
-    /// without `apply_size_attributes`. That is what makes the attribute half load-bearing rather
-    /// than decorative, and the concrete reason those attributes must be attached before
-    /// `run_passes` rather than merely before codegen.
+    /// On the pinned LLVM 22.1 `O2` and `O3` measure 61. Suppressing only the `optsize`/`minsize`
+    /// attributes (leaving `default<Os>`/`default<Oz>` in place) puts `Os` at 61 and `Oz` at 63 — the
+    /// pipeline string ALONE buys nothing here, and this test fails without `apply_size_attributes`. That
+    /// is what makes the attribute half load-bearing rather than decorative, and the concrete reason those
+    /// attributes must be attached before `run_passes` rather than merely before codegen.
     #[test]
     fn the_size_pipelines_produce_strictly_smaller_ir_than_the_speed_pipelines() {
         let o2 = optimized_instruction_count(SIZE_FIXTURE, OptLevel::O2);
@@ -1911,7 +1903,7 @@ mod tests {
     #[test]
     fn object_bytes_emits_a_real_object_that_shrinks_under_oz() {
         let core = desugar(&parse("fn twice(x){ x + x } twice(21)").0.unwrap());
-        let prog = crate::lower_program(&core).unwrap();
+        let prog = lower_program(&core).unwrap();
         let o0 = object_bytes(&prog, DEFAULT_CAPS, OptLevel::O0).expect("O0 object");
         let oz = object_bytes(&prog, DEFAULT_CAPS, OptLevel::Oz).expect("Oz object");
         // Mach-O 64-bit magic (0xFEEDFACF, little-endian) or ELF magic, depending on host.

@@ -131,7 +131,7 @@ impl Tape {
     ///
     /// THIS EXISTS SO SCROLLING DOES NOT COST A CLONE. `snapshot` materializes the whole tape; a
     /// renderer dragging a scrollbar calls this per frame, and paying O(tape) each time is the cost
-    /// `TmState::window` was changed to stop paying.
+    /// this avoids.
     ///
     /// THE CLAMP IS OBSERVABLE FROM THE RESULT, which is why `cells` stays `pub(crate)`: a returned
     /// `Vec` shorter than `to - from` is exactly the signal that the range ran off an end, so a caller
@@ -217,12 +217,12 @@ pub(crate) fn apply(rule: &Rule, tapes: &mut [Tape]) {
 /// `simulate_watched`.
 pub type Watcher<'a> = &'a mut dyn FnMut(&[Tape]) -> bool;
 
-/// The shared driver behind all five entry points below. The δ-stepping itself — the guard sequence,
-/// the matcher, the step accounting, the defensiveness on a malformed machine (missing state /
-/// out-of-range target / stuck state all halt) — lives in `trace::TmCursor`, so that loop exists once in
-/// this crate rather than twice; what remains here is the three optional recorders. `record` optionally
-/// collects a step trace; `counts` optionally accumulates a per-state step tally (indexed by state id,
-/// charging the state being *left*).
+/// The shared driver behind every entry point below. The δ-stepping itself — the guard sequence, the
+/// matcher, the step accounting, the defensiveness on a malformed machine (missing state /
+/// out-of-range target / stuck state all halt) — lives in `trace::TmCursor`, so that loop exists once
+/// in this crate; this function adds the three optional recorders. `record` optionally collects a
+/// step trace; `counts` optionally accumulates a per-state step tally (indexed by state id, charging
+/// the state being *left*).
 fn run(
     m: &Machine,
     init: &[Vec<Symbol>],
@@ -291,9 +291,8 @@ pub fn simulate(m: &Machine, init: &[Vec<Symbol>], caps: Caps) -> (Vec<Tape>, St
 /// overflow-guard state that `lower_tm_guarded` hands back. `simulate` is exactly this with the state
 /// and the count discarded.
 ///
-/// THE COUNT IS REPORTED HERE RATHER THAN BY A FIFTH WRAPPER, because it is a fact about the run
-/// that every caller could use and none could previously reach — `run` has always counted it to
-/// enforce the step cap.
+/// THE COUNT IS REPORTED HERE RATHER THAN BY A SEPARATE WRAPPER, because it is a fact about the run
+/// that every caller could use; `run` counts it to enforce the step cap.
 #[must_use]
 pub fn simulate_final(m: &Machine, init: &[Vec<Symbol>], caps: Caps) -> (Vec<Tape>, StateId, Status, u64) {
     run(m, init, caps, None, None, None)
@@ -357,8 +356,8 @@ pub fn simulate_trace(m: &Machine, init: &[Vec<Symbol>], caps: Caps) -> Trace {
 /// Simulate `m`, accumulating how many steps were taken *in* each state, indexed by state id.
 ///
 /// The counting analogue of `simulate_trace`, and the reason it exists: a trace records tapes per
-/// step, so counting a 178k-step program through it would allocate 178k tape snapshots. This
-/// allocates one `u64` per state, once.
+/// step, so counting a long run through it would allocate one tape snapshot per step. This allocates
+/// one `u64` per state, once.
 #[must_use]
 pub fn simulate_counts(m: &Machine, init: &[Vec<Symbol>], caps: Caps) -> (Vec<u64>, Status) {
     let mut counts = vec![0u64; m.states.len()];

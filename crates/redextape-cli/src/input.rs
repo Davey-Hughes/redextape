@@ -183,10 +183,10 @@ mod tests {
         assert_eq!(std::fs::read_to_string(&p).unwrap(), "new");
     }
 
-    // M2 (mechanism): the previous test only pins the end state, which a plain `std::fs::write`
-    // would also satisfy. Rename replaces the directory entry with a new inode; an in-place write
-    // would truncate and rewrite the *same* inode. Unix-only because inode identity is a Unix
-    // concept — there is no portable equivalent to assert.
+    // The previous test only pins the end state, which a plain `std::fs::write` would also satisfy.
+    // Rename replaces the directory entry with a new inode; an in-place write would truncate and
+    // rewrite the *same* inode. Unix-only because inode identity is a Unix concept — there is no
+    // portable equivalent to assert.
     #[cfg(unix)]
     #[test]
     fn an_atomic_write_goes_through_a_rename_rather_than_truncating_in_place() {
@@ -204,7 +204,7 @@ mod tests {
         assert_eq!(std::fs::read_to_string(&p).unwrap(), "new");
     }
 
-    // S2: a source file that was privately-permissioned before `fmt` touched it must come out with
+    // A source file that was privately-permissioned before `fmt` touched it must come out with
     // the same permissions, not the process umask's default. Unix-specific — permission bits are a
     // Unix concept.
     #[cfg(unix)]
@@ -223,7 +223,7 @@ mod tests {
         assert_eq!(mode, 0o600, "write_atomic must not widen the target's permissions");
     }
 
-    // S1: the temporary's name is deterministic (this process's id plus the target's file name), so
+    // The temporary's name is deterministic (this process's id plus the target's file name), so
     // it is predictable — but `create_new` (`O_EXCL`) must still refuse a path that already exists,
     // symlink included, rather than following it. Plant the symlink at exactly the name `write_atomic`
     // will compute (we can, because the test and the code under test share a process, hence a pid),
@@ -249,7 +249,7 @@ mod tests {
         );
     }
 
-    // M1: if the write succeeds but the rename fails, the temporary must not be left behind. Force
+    // If the write succeeds but the rename fails, the temporary must not be left behind. Force
     // the rename to fail portably-within-Unix by making the destination an existing, non-empty
     // directory — renaming a regular file onto that is refused by the OS.
     #[test]
@@ -266,9 +266,9 @@ mod tests {
         assert!(!tmp.exists(), "the temporary should be removed after a failed rename");
     }
 
-    // M2 (boundary): a weakened `starts_with('-')` check would wrongly route `-foo` and `--` to
-    // stdin. Only an exact `-` is stdin; everything else, including other dash-leading strings and a
-    // dash with a leading path component, is a path.
+    // A weakened `starts_with('-')` check would wrongly route `-foo` and `--` to stdin. Only an exact
+    // `-` is stdin; everything else, including other dash-leading strings and a dash with a leading
+    // path component, is a path.
     #[test]
     fn only_a_lone_dash_means_standard_input() {
         assert!(matches!(Input::from_arg(Path::new("-")), Input::Stdin));

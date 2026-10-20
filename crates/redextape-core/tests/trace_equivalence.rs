@@ -1,6 +1,6 @@
 //! The cursor must agree with the shipped simulator step for step. If a replayed delta stream and a
 //! direct simulation diverge, every consumer silently disagrees with the oracle while both traces
-//! still look well-formed — so this is the crux test of the slice, not a nicety.
+//! still look well-formed — so this is the crux test, not a nicety.
 
 // Test target: a fixture that fails to build IS the failure this file reports, so panicking is
 // deliberate here. The `allow-*-in-tests` keys in `clippy.toml` only reach `#[test]` functions and
@@ -274,10 +274,10 @@ fn an_absurd_tape_count_hits_the_cap_without_allocating() {
 
 /// `raise_cap` must NOT clear the constructor's absurd-tape-count refusal: `TmCursor::new` never
 /// allocated tapes on this path (`init` was not retained either), so there is nothing to continue
-/// FROM. Before the guard, clearing `HitCap` here let `next` run with zero allocated tapes against a
-/// machine declaring `tapes > 0` — `rule_matches` requires `read.len() == tapes.len()`, so no rule
-/// ever matches and the "stuck == halt" path reported a terminal, WRONG `Halted` for a machine that
-/// never took a single step.
+/// FROM. Clearing `HitCap` here would let `next` run with zero allocated tapes against a machine
+/// declaring `tapes > 0` — `rule_matches` requires `read.len() == tapes.len()`, so no rule would ever
+/// match and the "stuck == halt" path would report a terminal, WRONG `Halted` for a machine that never
+/// took a single step.
 #[test]
 fn raise_cap_does_not_resurrect_the_absurd_tape_count_refusal() {
     // Non-accepting, with a rule that reads as many symbols as the machine declares tapes: this is
@@ -385,10 +385,10 @@ fn raise_cap_is_additive_and_saturates() {
     assert_eq!(c.status(), None);
 }
 
-/// `HitCap` has two producers, and only the step cap is a budget outcome. Before the fix, `raise_cap`
-/// cleared `HitCap` unconditionally, so calling it on a depth-refused term cleared the status, `next`
-/// re-ran the same depth guard against the same (unreduced) term, and re-latched `HitCap` immediately
-/// — a "continue" control that provably could never advance, however many times it was called.
+/// `HitCap` has two producers, and only the step cap is a budget outcome. A `raise_cap` that cleared
+/// `HitCap` unconditionally would clear a depth-refused term's status, and `next` would re-run the
+/// same depth guard against the same (unreduced) term and re-latch `HitCap` immediately — a
+/// "continue" control that provably could never advance, however many times it was called.
 #[test]
 fn raise_cap_does_not_resurrect_a_depth_refused_run() {
     let deep =

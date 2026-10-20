@@ -1,4 +1,4 @@
-//! The data contract PR 3 renders. These are properties of the builders, not of any renderer.
+//! The view-model data contract. These are properties of the builders, not of any renderer.
 
 // Test target: a fixture that fails to build IS the failure this file reports, so panicking is
 // deliberate here. The `allow-*-in-tests` keys in `clippy.toml` only reach `#[test]` functions and
@@ -31,8 +31,8 @@ use common::one_rule_machine;
 /// escapes today only because the bare `check-slow.sh` invocation (no `--all`) passes `--ignored`,
 /// filtering it out. The allocation assertion below is therefore a BOUND, not an exact-equality
 /// delta: a concurrent allocation landing inside the measurement window can only push `bytes_large`
-/// up, and the margin between what the fix allocates (~12 bytes) and the 4KiB bound is wide enough to
-/// absorb that, so the assertion no longer depends on which runner drives it.
+/// up, and the margin between what `TmState::window` allocates (~12 bytes) and the 4KiB bound is wide
+/// enough to absorb that, so the assertion does not depend on which runner drives it.
 struct CountingAlloc;
 
 static BYTES_ALLOCATED: AtomicUsize = AtomicUsize::new(0);
@@ -69,21 +69,16 @@ fn the_byte_budget_is_honoured_and_truncation_is_reported_exactly() {
     assert_eq!(stepped.step, 1, "step must track the cursor");
 }
 
-/// `LambdaState` no longer has a `source_node` field, so this is not a test of that field — it is a
-/// test of the underlying fact that made it unshippable: `SourceMap::node_to_lambda` records paths
-/// root-relative into the INITIAL lowered term, but a `Beta` event's redex path at step N indexes the
-/// term BEFORE step N — a structurally different tree once N > 1, since normal-order reduction
-/// contracts root redexes. `owning_node` (deleted) never surfaced this because it compared `redex`
-/// against recorded paths as plain `Vec<Dir>` prefixes, never checking whether `redex` was walkable in
-/// any real term at all — so this test checks that directly instead, against the initial term itself.
+/// `SourceMap::node_to_lambda` records paths root-relative into the INITIAL lowered term, but a `Beta`
+/// event's redex path at step N indexes the term BEFORE step N — a structurally different tree once N > 1,
+/// since normal-order reduction contracts root redexes. So a later step's redex path is not a coordinate into
+/// the initial term, and this test checks that directly, against the initial term itself.
 ///
-/// STEPS 2 AND 3 ARE NOT ENOUGH TO SHOW THIS, ON THIS FIXTURE. Their redex paths are short (length 1
-/// and 0) and happen to still walk into the initial term by coincidence — a short path is a valid walk
-/// into almost any term with that much `App`/`Abs` structure near its root, regardless of whether it
-/// means anything. Checked by instrumenting a scratch build of this cursor against this exact fixture:
-/// step 4's redex path (length 3) is the first one where the walk provably fails, which is the property
-/// this test needs — not "eventually diverges" but "is not, in general, a coordinate into the map's
-/// term."
+/// Steps 2 and 3 are not enough to show this on this fixture. Their redex paths are short (length 1 and 0)
+/// and happen to still walk into the initial term by coincidence — a short path is a valid walk into almost
+/// any term with that much `App`/`Abs` structure near its root, regardless of whether it means anything. Step
+/// 4's redex path (length 3) is the first one where the walk provably fails, which is the property this test
+/// needs — not "eventually diverges" but "is not, in general, a coordinate into the map's term."
 #[test]
 fn a_later_steps_redex_path_is_not_a_coordinate_into_the_initial_term() {
     // `term` is the initial lowered term -- exactly what `SourceMap::node_to_lambda` (returned
@@ -108,14 +103,12 @@ fn a_later_steps_redex_path_is_not_a_coordinate_into_the_initial_term() {
     assert!(
         walk(&term, &redex).is_none(),
         "step 4's redex path must not resolve against the initial term -- if it does, this fixture no \
-         longer demonstrates the coordinate system `source_node` relied on going stale, and needs a \
-         program that steps deep enough that it still does"
+         longer demonstrates a later step's redex path failing as a coordinate into the initial term, \
+         and needs a program that steps deep enough that it still does"
     );
 }
 
-/// Walks `path` into `term`, `Dir` by `Dir`, returning `None` the moment a step has nowhere to go --
-/// exactly the check `owning_node` never performed, because it only ever tested path PREFIXES against
-/// `redex` as plain `Vec<Dir>`s, never whether `redex` itself still lands inside a real term.
+/// Walks `path` into `term`, `Dir` by `Dir`, returning `None` the moment a step has nowhere to go.
 fn walk(term: &redextape_core::lambda::LambdaTerm, path: &[redextape_core::lambda::Dir]) -> Option<()> {
     use redextape_core::lambda::{Dir, Node};
 
@@ -168,10 +161,10 @@ fn the_window_costs_the_same_regardless_of_how_large_the_tape_has_grown() {
     let mut large = TmCursor::new(&large_machine, &[], caps);
     large.by_ref().take(200_000).count();
 
-    // The observable contract: bounded regardless of tape size. This alone does NOT prove the fix --
-    // the buggy `snapshot`-based implementation this pins against also produced a correctly bounded
-    // slice, just after paying to clone the whole tape first. It is a regression guard on the SHAPE of
-    // the result; the allocation check below is what pins the COST.
+    // The observable contract: bounded regardless of tape size. This alone does NOT prove the window is
+    // cheap -- a `snapshot`-based implementation would also produce a correctly bounded slice, just
+    // after paying to clone the whole tape first. It is a regression guard on the SHAPE of the result;
+    // the allocation check below is what pins the COST.
     for cursor in [&small, &large] {
         let st = TmState::window(cursor, Some(&empty_map()), 2);
         assert_eq!(st.window.len(), 1, "one window per tape");
@@ -205,11 +198,10 @@ fn the_window_costs_the_same_regardless_of_how_large_the_tape_has_grown() {
 
     // A bound, not `assert_eq!(bytes_small, bytes_large)`: `BYTES_ALLOCATED` is a process-wide
     // `AtomicUsize`, and under a runner that shares this binary's process across threads (see the
-    // `#[global_allocator]` doc above), a concurrent test's allocation landing inside this window
-    // would be charged to `bytes_large` and break an exact-equality delta without this test's own
-    // behaviour having changed at all. A bound has the same discriminating power against the bug this
-    // pins -- the pre-fix `snapshot`-based path allocated ~800,000 bytes here (200,000 cells * 4,
-    // since `Symbol = char`) against the fix's ~12 -- with roughly 66,000x of margin to spare.
+    // `#[global_allocator]` doc above), a concurrent test's allocation landing inside this window would be
+    // charged to `bytes_large` and break an exact-equality delta without this test's own behaviour having
+    // changed at all. A bound has the same discriminating power against a `snapshot`-based path, which
+    // would allocate far past it.
     assert!(
         bytes_large < 4096,
         "sanity bound: a radius-2, one-tape window should allocate well under 4KiB regardless of how \
@@ -232,9 +224,8 @@ fn tm_program_projects_the_machine_and_agrees_with_its_alphabet() {
 }
 
 /// `tapeSlice(tape, from, to)` needs a public operation in the coordinate space `TmState` defines.
-/// Before this, the only public accessor was `Tape::snapshot`, whose O(tape) clone is exactly what
-/// `TmState::window` was changed to stop paying — a scrolling renderer calling it per drag would
-/// reintroduce the cost one layer out.
+/// `Tape::snapshot` clones the whole tape, which is exactly the cost `TmState::window` avoids, so a scrolling
+/// renderer calling it per drag would reintroduce the cost one layer out.
 #[test]
 fn a_tape_can_be_sliced_in_the_same_coordinates_the_window_reports() {
     let (machine, init) = tm_fixture("let x = 40; x + 2");
@@ -379,8 +370,7 @@ fn every_view_model_round_trips_through_json() {
 }
 
 /// **A λ FRAME PUTS ITS SPANS ON THE WIRE AS ONE BYTE STRING, THREE LITTLE-ENDIAN `u32`S A SPAN, AND READS THEM BACK.**
-/// A span's start, its end, and its class's index in `token_class_names`. As `[{start, end}, "Class"]` tuples, about
-/// 300 a frame, they were most of what a λ frame cost to build in the worker and to copy across to the page.
+/// A span's start, its end, and its class's index in `token_class_names`.
 ///
 /// `serde_json` writes the bytes as an array of numbers; `serde-wasm-bindgen`, what the app uses, as a `Uint8Array`.
 #[cfg(feature = "serde")]
@@ -405,9 +395,7 @@ fn a_lambda_frame_puts_its_spans_on_the_wire_as_one_byte_string() {
 }
 
 /// **A TM FRAME PUTS EACH TAPE'S WINDOW ON THE WIRE AS ONE STRING, AND READS ONE BACK AS CELLS.** The web app records a
-/// TM leg a frame a step, and `window` as an array of one-character strings a tape was most of what a frame cost to
-/// build in the worker and to copy across to the page. The Rust type keeps a cell a `Symbol`; only what serde writes
-/// changes.
+/// TM leg a frame a step. The Rust type keeps a cell a `Symbol`; only what serde writes is one string.
 ///
 /// A SYMBOL OUTSIDE THE BASIC PLANE, ON PURPOSE: `𝟙` is one `char` and two UTF-16 units, so a reader that indexed the
 /// string by unit would find two cells where the tape has one. The text form accepts it (`symbol_representable`), so a
@@ -434,8 +422,8 @@ fn a_tm_frame_puts_each_tapes_window_on_the_wire_as_one_string() {
 /// enough for a byte or node budget to bite and small enough for an unreachable one not to.
 ///
 /// NOT LITERALLY `[0..200)`: this parser has no range-literal syntax (list literals are only
-/// comma-separated `[a, b, c]`), which `lambda/syntax.rs`'s `capped_printing_stops_at_the_budget_and_says_so`
-/// already hit and documented for the identical shape. This builds the same program the same way.
+/// comma-separated `[a, b, c]`). This builds the same program `lambda/syntax.rs`'s
+/// `capped_printing_stops_at_the_budget_and_says_so` builds, the same way.
 fn big_list_program() -> String {
     let items = (0..200).map(|i| i.to_string()).collect::<Vec<_>>().join(", ");
     format!("let xs = [{items}]; head(xs)")
@@ -464,7 +452,7 @@ fn tm_fixture(src: &str) -> (redextape_core::tm::Machine, Vec<Vec<redextape_core
 /// state. Lowering a separately-desugared `Core` here would risk a machine whose names the map has no
 /// claim on, and `source_node` would then be `None` everywhere for a reason that has nothing to do
 /// with the code under test. `desugar` is `desugar_mapped(..).0`, so routing the plain `tm_fixture`
-/// through this one changes no existing fixture's `Core`.
+/// through this one changes no fixture's `Core`.
 fn tm_fixture_with_map(
     src: &str,
 ) -> (
@@ -549,11 +537,11 @@ fn rule_names_the_transition_the_next_step_actually_takes() {
 
 #[test]
 fn link_index_resolves_tm_owners_by_name_at_the_width_the_run_fitted() {
-    // THE TRAP THIS PINS. `run_tm_described` auto-fits the width, and state NAMES depend on the width: a
-    // map built at any other width resolves only the names both machines happen to share. So the map is
-    // built at the width the run fitted, as `compile` builds it, and `tm_owner` is built by name — the
-    // same resolution `TmState::window` performs per step. At width 4 this sample resolved 77 of its 110
-    // billed states under binary; at the fitted width every one resolves.
+    // THE TRAP THIS PINS. `run_tm_described` auto-fits the width, and state NAMES depend on the
+    // width: a map built at any other width resolves only the names both machines happen to share.
+    // So the map is built at the width the run fitted, as `compile` builds it, and `tm_owner` is
+    // built by name — the same resolution `TmState::window` performs per step. At the fitted width
+    // every state the sample bills resolves.
     let src = "let x = 40; x + 2";
     let (program, diags) = redextape_core::parser::parse(src);
     let program = program.expect("the sample must parse");
@@ -586,7 +574,7 @@ fn link_index_resolves_tm_owners_by_name_at_the_width_the_run_fitted() {
         }
     }
     // A first-order program has no `defunc`-minted construct, so every state its run bills to an
-    // instruction has an owner. `owned > 0` alone passed with a third of them missing.
+    // instruction has an owner. `owned > 0` alone would pass with a third of them missing.
     let billed = tm_program.states.iter().filter(|s| s.instr.is_some()).count();
     assert!(billed > 100, "the sample bills {billed} states; it must bill enough to pin anything");
     assert_eq!(owned, billed, "every billed state of the sample resolves an owner");
@@ -688,9 +676,10 @@ fn a_rendered_frame_carries_the_step_that_produced_it() {
     assert_eq!(after.owner, c.last_owner(), "render must forward the cursor's owner, not fabricate one");
 }
 
-/// The case `node_to_lambda` could never answer, and the reason it was deleted:
-/// `viewmodel_contract.rs` already pins that all seven steps of this program reported `let x = 40;`
-/// and `x + 2` was never named. At least one step must now name `x + 2`.
+/// The case `node_to_lambda` could never answer, and the reason `LambdaState` carries no `source_node`
+/// field: `a_later_steps_redex_path_is_not_a_coordinate_into_the_initial_term` pins that a later
+/// step's redex path is not a coordinate into the initial term `node_to_lambda` maps. At least one
+/// step must name `x + 2`.
 #[test]
 fn some_step_of_the_sample_program_names_the_addition() {
     let (program, _) = redextape_core::parser::parse("let x = 40; x + 2");
@@ -713,32 +702,28 @@ fn some_step_of_the_sample_program_names_the_addition() {
         }
         found
     };
-    assert!(plus_span.is_some(), "no step ever named `x + 2` — the defect node_to_lambda was deleted for");
+    assert!(
+        plus_span.is_some(),
+        "no step's owner within the 5,000-step cap resolves to `x + 2`, so no λ frame of this run names the addition"
+    );
 }
 
 /// Spec §8.6. A `Within` answer must name a construct that genuinely CONTAINS an `Exact` answer's,
 /// or "innermost enclosing" is not what the harvest computes.
 ///
-/// NOT THE SLICE'S CANONICAL `let x = 40; x + 2` — DELIBERATELY. That fixture has only two tagged
-/// constructs (`Let` and one `BinOp`), and every `Within` answer it produces is immediately followed,
-/// in the very next step, by an `Exact` answer of the SAME id — "the same descent" collapsing to a
-/// same-id self-match. A prior version of this test asserted only span containment (ids ignored) and
-/// still passed against that fixture with a wrong-but-real hardcoded `Owner::Within` (verified by
-/// injecting `Owner::Within(4)` in place of the computed id in `reduce_step_go` and rerunning: still
-/// green), because id 4 was independently a valid `Exact` answer elsewhere in the same trace. With only
-/// two tagged constructs, any id the harvest could report — right or wrong — coincides with one of the
+/// Not this file's canonical `let x = 40; x + 2`, deliberately. That fixture has only two tagged constructs
+/// (`Let` and one `BinOp`), and every `Within` answer it produces is immediately followed, in the very next
+/// step, by an `Exact` answer of the SAME id — "the same descent" collapsing to a same-id self-match. With
+/// only two tagged constructs, any id the harvest could report — right or wrong — coincides with one of the
 /// two `Exact` ids, so a span-only check cannot tell "the innermost enclosing tag" from "some tag that
 /// happens to appear somewhere in this trace".
 ///
-/// `let x = 1; x + (2 + 3)` nests a second `BinOp` inside the first's argument, giving three distinct
-/// tagged constructs — `Let`, the outer `+`, the inner `+` — with the outer `+`'s source span strictly
-/// containing the inner `+`'s. The trace produces `Within(outer)` while the outer `+`'s own
-/// (not-yet-contracted) App is the innermost tagged ancestor of an untagged redex, and separately
-/// `Exact(inner)` once the inner `+`'s own App is itself contracted: two DIFFERENT ids, one properly
-/// inside the other, which `let x = 40; x + 2` had no way to produce. Proven below, not just argued by
-/// fixture selection: rebuilding the same hardcoded-`Within` regression against THIS fixture makes the
-/// strengthened assertion below fail (the id-blind one above it still passes, by the same self-match
-/// loophole).
+/// `let x = 1; x + (2 + 3)` nests a second `BinOp` inside the first's argument, giving three distinct tagged
+/// constructs — `Let`, the outer `+`, the inner `+` — with the outer `+`'s source span strictly containing
+/// the inner `+`'s. The trace produces `Within(outer)` while the outer `+`'s own (not-yet-contracted) App is
+/// the innermost tagged ancestor of an untagged redex, and separately `Exact(inner)` once the inner `+`'s own
+/// App is itself contracted: two DIFFERENT ids, one properly inside the other, which `let x = 40; x + 2` had
+/// no way to produce.
 #[test]
 fn a_within_span_strictly_contains_an_exact_span_from_the_same_descent() {
     let (program, _) = redextape_core::parser::parse("let x = 1; x + (2 + 3)");
@@ -747,8 +732,8 @@ fn a_within_span_strictly_contains_an_exact_span_from_the_same_descent() {
     let (core, map) = redextape_core::sourcemap::SourceMap::build_from_program(&program, &*enc);
     let term = redextape_core::lambda::lower(&core).expect("lowers");
 
-    // Carries the owning id alongside the span, unlike the version this replaces — the id is what lets
-    // the strengthened check below tell a genuine cross-construct containment from a same-id self-match.
+    // Carries the owning id alongside the span: the id is what lets the check below tell a genuine
+    // cross-construct containment from a same-id self-match.
     let mut exact: Vec<(u32, redextape_core::span::Span)> = Vec::new();
     let mut within: Vec<(u32, redextape_core::span::Span)> = Vec::new();
     let mut c = redextape_core::trace::LambdaCursor::new(&term, 5_000);
@@ -774,9 +759,9 @@ fn a_within_span_strictly_contains_an_exact_span_from_the_same_descent() {
         "no Within answer on the sample program — the fixture no longer exercises the enclosing case"
     );
 
-    // Baseline sanity, kept from the version this replaces: every Within span must contain SOME Exact
-    // span (self allowed). A Within naming a span disjoint from every Exact answer is obviously broken,
-    // even though (see the doc above) this alone cannot catch a wrong-but-real owner.
+    // Baseline sanity: every Within span must contain SOME Exact span (self allowed). A Within naming a
+    // span disjoint from every Exact answer is obviously broken, even though (see the doc above) this
+    // alone cannot catch a wrong-but-real owner.
     for (_, w) in &within {
         assert!(
             exact.iter().any(|(_, e)| w.start <= e.start && e.end <= w.end),
@@ -784,13 +769,13 @@ fn a_within_span_strictly_contains_an_exact_span_from_the_same_descent() {
         );
     }
 
-    // THE PROPERTY THE OLD FIXTURE COULD NOT EXERCISE: at least one Within answer must STRICTLY contain
-    // an Exact answer belonging to a DIFFERENT construct — not merely itself under a later step. This
-    // checks that a `Within` answer strictly contains a DIFFERENT construct's `Exact` answer somewhere
-    // in the trace; it is existential over the whole trace, not a per-step innermost-ness check, so it
-    // does NOT rule out an outermost-enclosing regression on a fixture (like this one) where the outer
-    // construct's span also happens to strictly contain the inner one's. It is, however, what a
-    // hardcoded wrong owner cannot satisfy by accident the way it can satisfy the id-blind check above.
+    // At least one Within answer must STRICTLY contain an Exact answer belonging to a DIFFERENT
+    // construct — not merely itself under a later step. This checks that a `Within` answer strictly
+    // contains a DIFFERENT construct's `Exact` answer somewhere in the trace; it is existential over the
+    // whole trace, not a per-step innermost-ness check, so it does NOT rule out an outermost-enclosing
+    // regression on a fixture (like this one) where the outer construct's span also happens to strictly
+    // contain the inner one's. It is, however, what a hardcoded wrong owner cannot satisfy by accident
+    // the way it can satisfy the id-blind check above.
     let genuine_cross_containment = within.iter().any(|(w_id, w)| {
         exact.iter().any(|(e_id, e)| {
             e_id != w_id && w.start <= e.start && e.end <= w.end && (w.start < e.start || e.end < w.end)
@@ -803,8 +788,8 @@ fn a_within_span_strictly_contains_an_exact_span_from_the_same_descent() {
     );
 }
 
-/// Task 10, Step 1's own failing test. `f.redex_span` is left unconstrained when it is `None` —
-/// weak on its own (a version of `render` that never populates the field would still pass this) — so
+/// `f.redex_span` is left unconstrained when it is `None` — weak on its own (a version of `render` that
+/// never populates the field would still pass this) — so
 /// `a_frame_locates_its_own_redex_at_the_exact_span_the_walk_recorded` immediately below pins the
 /// dimension this one does not: that the field is actually populated, and with the right bytes.
 #[test]
@@ -821,16 +806,15 @@ fn a_frame_locates_its_own_redex_in_its_own_text() {
     }
 }
 
-/// A UTF-8 case, because 5b's worst bug was byte offsets sliced as UTF-16 indices and every fixture
-/// that could have caught it was pure ASCII — on the one function whose input is GUARANTEED to
-/// contain `λ`.
+/// A UTF-8 case, because byte offsets sliced as UTF-16 indices pass every pure-ASCII fixture — on the
+/// one function whose input is GUARANTEED to contain `λ`.
 ///
-/// LIKE THE TEST ABOVE, THE CHAR-BOUNDARY CHECKS ARE GATED ON `Some` — kept as specified so this test
-/// still runs under a `render` that never populates the field. `redex_span_pinpoints_a_bound_occurrence_
-/// under_a_binder` below is what makes `Some` itself part of what is checked, on a fixture built for
-/// exactly this: a redex whose span sits AFTER a printed `λ` binder, so a byte/UTF-16 conflation
-/// anywhere in the pipeline that feeds this span would put it at the wrong offset rather than merely
-/// off by a fixed amount at the very start of the string.
+/// LIKE THE TEST ABOVE, THE CHAR-BOUNDARY CHECKS ARE GATED ON `Some`, so this test still runs under a
+/// `render` that never populates the field. `redex_span_pinpoints_a_bound_occurrence_under_a_binder`
+/// below is what makes `Some` itself part of what is checked, on a fixture built for exactly this: a
+/// redex whose span sits AFTER a printed `λ` binder, so a byte/UTF-16 conflation anywhere in the
+/// pipeline that feeds this span would put it at the wrong offset rather than merely off by a fixed
+/// amount at the very start of the string.
 #[test]
 fn the_redex_span_is_in_bytes_over_text_containing_lambdas() {
     use redextape_core::lambda::term::{abs, app, app_owned, var};
@@ -846,21 +830,18 @@ fn the_redex_span_is_in_bytes_over_text_containing_lambdas() {
     }
 }
 
-/// THE DIMENSION `a_frame_locates_its_own_redex_in_its_own_text` CANNOT SEE — the pairing that test's
-/// own doc names from the other side: that `redex_span` is actually populated, not merely
-/// well-formed when present. A `render` that always leaves the field `None` — the exact regression
-/// `viewmodel.rs`'s former `NO redex FIELD, DELIBERATELY` header warns against reintroducing one field
-/// over — passes `a_frame_locates_its_own_redex_in_its_own_text` above outright (its assertion is
-/// inside an `if let Some`) while failing this one.
+/// The dimension `a_frame_locates_its_own_redex_in_its_own_text` cannot see — the pairing that test's own doc
+/// names from the other side: that `redex_span` is actually populated, not merely well-formed when present. A
+/// `render` that always leaves the field `None` passes `a_frame_locates_its_own_redex_in_its_own_text` above
+/// outright (its assertion is inside an `if let Some`) while failing this one.
 ///
-/// The redex is the whole term here (`app_owned`'s own root), so the recorded span must be the ENTIRE
-/// printed text — measured via a scratch probe against this exact fixture (`?3`, span `0..2`) before
-/// being hard-coded here, rather than assumed.
+/// The redex is the whole term here (`app_owned`'s own root), so the recorded span must be the ENTIRE printed
+/// text (`?3`, span `0..2`).
 ///
-/// AND THE TEXT IT COVERS IS THE CONTRACTUM, NOT THE REDEX, which is worth naming because the field's
-/// name does not: the redex was `(λx. x) ?3`, the path to it was the root, and `?3` is what the step
-/// PRODUCED at that root. `redex_span` is a redex's PATH resolved against the POST-step term (see the
-/// field's own doc), so on every frame the highlighted text is the step's result.
+/// And the text it covers is the contractum, not the redex, which is worth naming because the field's name
+/// does not: the redex was `(λx. x) ?3`, the path to it was the root, and `?3` is what the step PRODUCED at
+/// that root. `redex_span` is a redex's PATH resolved against the POST-step term (see the field's own doc),
+/// so on every frame the highlighted text is the step's result.
 #[test]
 fn a_frame_locates_its_own_redex_at_the_exact_span_the_walk_recorded() {
     use redextape_core::lambda::term::{abs, app_owned, var};
@@ -877,18 +858,16 @@ fn a_frame_locates_its_own_redex_at_the_exact_span_the_walk_recorded() {
     );
 }
 
-/// THE STRONGEST VERSION OF THE UTF-8 CASE: an INTERIOR redex (path `[AbsBody]`, not the trivial root
-/// path `[]` every other test in this file uses), whose span sits AFTER a printed `λ` binder in this
-/// frame's own text — `λx. x`, where the second `x` (byte 5..6) is what step 2 of
-/// `(λf. λx. f x) (λy. y)` LEFT BEHIND: the redex at `[AbsBody]` was `(λy. y) x`, and `x` is its
-/// contractum. (`λx. x` is a normal form; nothing further contracts here. `redex_span` is a redex's
-/// PATH resolved against the POST-step term, so the text it covers is always the step's result — see
-/// the field's own doc.) A root-path span always starts at byte 0, which cannot distinguish a correct
-/// byte offset from a UTF-16 code-unit count that happens to agree at zero; this fixture can, because
-/// the printer has already written a 2-byte, 1-UTF-16-unit `λ` before the span starts; a byte/UTF-16
-/// conflation anywhere in the pipeline that produced this span would land it one unit short of byte 5
-/// (or clip a character while trying). Measured via the same scratch-probe
-/// discipline as the test above, over TWO real β-steps of this exact fixture, before being hard-coded.
+/// The strongest version of the UTF-8 case: an INTERIOR redex (path `[AbsBody]`, not the trivial root path
+/// `[]` every other test in this file uses), whose span sits AFTER a printed `λ` binder in this frame's own
+/// text — `λx. x`, where the second `x` (byte 5..6) is what step 2 of `(λf. λx. f x) (λy. y)` LEFT BEHIND:
+/// the redex at `[AbsBody]` was `(λy. y) x`, and `x` is its contractum. (`λx. x` is a normal form; nothing
+/// further contracts here. `redex_span` is a redex's PATH resolved against the POST-step term, so the text it
+/// covers is always the step's result — see the field's own doc.) A root-path span always starts at byte 0,
+/// which cannot distinguish a correct byte offset from a UTF-16 code-unit count that happens to agree at
+/// zero; this fixture can, because the printer has already written a 2-byte, 1-UTF-16-unit `λ` before the
+/// span starts; a byte/UTF-16 conflation anywhere in the pipeline that produced this span would land it one
+/// unit short of byte 5 (or clip a character while trying).
 #[test]
 fn redex_span_pinpoints_a_bound_occurrence_under_a_binder() {
     use redextape_core::lambda::term::{abs, app, app_owned, var};
@@ -918,15 +897,14 @@ fn redex_span_pinpoints_a_bound_occurrence_under_a_binder() {
     );
 }
 
-/// `redex_span` MUST NOT REPORT A SPAN PAST THE TRUNCATION CUT. `print_lambda_linked`'s own contract
-/// ("A NODE PAST THE TRUNCATION CUT RECORDS NOTHING") is exactly what a caller needs here: a frame
-/// budget of 512 bytes (`FRAME_BYTES`, `web/src/protocol.ts`) truncates most non-trivial terms, and a
-/// `redex_span` clamped to the cut point instead of dropped would tell a renderer "the redex ends
-/// here", which is false — the walk never reached it. Measured directly: at `byte_budget = 64` on
-/// `big_list_program()`'s first step, the redex is the WHOLE term (a root path, like the tests above),
-/// so if this field ever clamped instead of dropping, it would report `Some(Span { start: 0, end: 64
-/// })` here rather than `None`, which is what makes this fixture a real discriminator and not a
-/// vacuous truth.
+/// `redex_span` MUST NOT REPORT A SPAN PAST THE TRUNCATION CUT. `print_lambda_linked`'s own contract ("A NODE
+/// PAST THE TRUNCATION CUT RECORDS NOTHING") is exactly what a caller needs here: a frame budget of 512 bytes
+/// (`FRAME_BYTES`, `web/src/protocol.ts`) truncates most non-trivial terms, and a `redex_span` clamped to the
+/// cut point instead of dropped would tell a renderer "the redex ends here", which is false — the walk never
+/// reached it. At `byte_budget = 64` on `big_list_program()`'s first step, the redex is the WHOLE term (a
+/// root path, like the tests above), so if this field ever clamped instead of dropping, it would report
+/// `Some(Span { start: 0, end: 64 })` here rather than `None`, which is what makes this fixture a real
+/// discriminator and not a vacuous truth.
 #[test]
 fn redex_span_is_none_when_the_step_it_names_falls_past_the_truncation_cut() {
     let (term, _map) = lambda_fixture(&big_list_program());
@@ -938,11 +916,11 @@ fn redex_span_is_none_when_the_step_it_names_falls_past_the_truncation_cut() {
     assert!(f.redex_span.is_none(), "a redex past the cut must not report a clamped or stale span");
 }
 
-/// `redex_span` MUST NOT BE HARDCODED `Some`, EITHER — the mirror image of the truncation test above,
-/// and the same dimension `a_rendered_frame_carries_the_step_that_produced_it` already checks for
-/// `redex` itself. Step 0 precedes any contraction, so there is nothing for a genuine implementation to
-/// name; a stub that always reports SOME span regardless of the cursor's own state would still pass
-/// every other test in this file (none of them render step 0), and only this one would catch it.
+/// `redex_span` MUST NOT BE HARDCODED `Some`, EITHER — the mirror image of the truncation test above, and
+/// the same dimension `a_rendered_frame_carries_the_step_that_produced_it` already checks for `redex`
+/// itself. Step 0 precedes any contraction, so there is nothing for a genuine implementation to name; a
+/// `render` that reports a span at step 0 anyway would still pass every other test in this file (none
+/// of them checks `redex_span` at step 0), and only this one would catch it.
 #[test]
 fn redex_span_is_none_before_any_step() {
     let (term, _map) = lambda_fixture("let x = 40; x + 2");

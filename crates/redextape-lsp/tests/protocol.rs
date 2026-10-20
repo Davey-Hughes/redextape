@@ -83,7 +83,7 @@ fn server_binary_speaks_the_protocol() {
             "jsonrpc": "2.0", "method": "textDocument/didOpen",
             "params": { "textDocument": {
                 "uri": "file:///a.tm", "languageId": "redextape_tm", "version": 1,
-                // TM_DUP from the Verified fixtures section: one error, on line 1.
+                // `TM_DUP`, as in the tests in `src/lib.rs`: one error, on line 1.
                 "text": "tapes 1\ntapes 2\nstart q0\nstate q0: accept\n"
             }}
         }),

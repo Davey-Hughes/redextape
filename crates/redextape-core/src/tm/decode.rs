@@ -56,7 +56,7 @@ pub fn decode_tape_reason(tapes: &[Tape], expected: &Value, enc: &dyn Encoding) 
 ///
 /// Seeds a fresh `MAX_DECODE_NODES` budget for this call, same as `decode_asm_ty` — `tapes` and `ty`
 /// both come from a `.tm` FILE here, so both the heap's acyclicity (the spine loop's job) and its
-/// decoded SIZE under nested types (the budget's job) are file-supplied and unchecked until now.
+/// decoded SIZE under nested types (the budget's job) are file-supplied and unchecked before this call.
 ///
 /// `decode_tape_ty_reason`'s `.ok()` — see that function and `asm::DecodeFailure` for why a caller
 /// (`redextape-cli::run`) might want the reason a decode failed instead of just that it did.
@@ -201,7 +201,7 @@ mod tests {
     /// proof is `tests/three_way_oracle.rs::a_binary_tape_does_not_decode_as_unary`, which decodes a
     /// binary-produced tape with `Unary` and asserts it does NOT produce the right answer.
     ///
-    /// What this test adds over `decodes_a_constructed_list` below, which also dies if `decode_tape`
+    /// What this test adds over `decodes_a_constructed_list` above, which also dies if `decode_tape`
     /// ignores its `enc`: it hand-builds the tapes, so it isolates `decode_tape` from `lower_tm` and
     /// `simulate` — a decode failure here cannot be a compilation bug.
     #[test]

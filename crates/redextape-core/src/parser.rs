@@ -8,7 +8,7 @@ use crate::lexer::lex;
 use crate::span::Span;
 use crate::token::{Comment, Token, TokenKind};
 
-/// Maximum number of tokens (including the trailing `Eof`) a program may contain. This is now only
+/// Maximum number of tokens (including the trailing `Eof`) a program may contain. This is only
 /// a coarse resource bound — it caps the memory and time spent lexing/parsing pathological input —
 /// NOT the stack-safety mechanism: each recursive pass (parser, typecheck, eval) has its own
 /// depth guard (`MAX_PARSE_DEPTH`, `MAX_TYPE_DEPTH`, `MAX_EVAL_DEPTH`) that turns deep-but-narrow
@@ -21,9 +21,7 @@ pub const MAX_TOKENS: usize = 100_000;
 ///
 /// THE THREE TRAVEL TOGETHER BECAUSE A MISMATCH AMONG THEM IS SILENT. Comments carry byte offsets;
 /// resolving them against a different string yields text from the wrong place with no error and no
-/// empty result. `analysis::attribute_tm_spans` records the same failure from the version that took a
-/// map and a machine as two arguments — it "could not check they described one lowering", and
-/// resolved every id to some other state's name. One value makes that unrepresentable.
+/// empty result. One value makes that unrepresentable.
 #[derive(Debug)]
 pub struct Parsed<'a> {
     pub program: Program,
@@ -41,9 +39,8 @@ pub struct Parsed<'a> {
 /// that tree back over the author's buffer and delete the part that did not parse. Consumers that
 /// print, lower, or evaluate must keep going through `parse`/`parse_full`. Navigation goes through
 /// `parse_for_nav`, not this — the file navigation is worth most on is exactly the broken one.
-/// `parse_recovering` has no caller left outside this crate's own tests: what remains is a
-/// convenient way to get a tree unconditionally, indifferent to completeness, without
-/// `parse_full`'s `Option` to unwrap first.
+/// `parse_recovering` has no caller outside this crate's own tests: it is a convenient way to get a
+/// tree unconditionally, indifferent to completeness, without `parse_full`'s `Option` to unwrap first.
 ///
 /// **IT ANSWERS A TREE EVEN WHEN THE PARSER NEVER RAN.** Above `MAX_TOKENS` the tree is an empty
 /// `Program`, which a consumer counting statements reads as a document with none. `parse_for_nav`
@@ -126,7 +123,7 @@ fn parse_inner(src: &str) -> (Parsed<'_>, Vec<Diagnostic>, Completeness) {
 }
 
 /// Parse `src`, discarding trivia. The entry point for every consumer that wants a tree and nothing
-/// else — roughly 25 call sites across this workspace, none of which formats anything.
+/// else; none of them formats anything.
 #[must_use]
 pub fn parse(src: &str) -> (Option<Program>, Vec<Diagnostic>) {
     let (parsed, diags) = parse_full(src);
@@ -137,8 +134,8 @@ pub fn parse(src: &str) -> (Option<Program>, Vec<Diagnostic>) {
 /// through `parse_binary`) `parse_binary` will descend before giving up. Every nested sub-expression
 /// passes through `parse_binary`, so counting its recursion depth bounds the parser's native stack
 /// usage; input nested deeper than this yields a `Diagnostic` instead of a parser stack overflow
-/// (an uncatchable process abort). Chosen empirically at roughly half the depth that overflows an
-/// 8 MiB debug main thread (see the crash-harness measurements in the robust-fix report).
+/// (an uncatchable process abort). Chosen at roughly half the depth that overflows an 8 MiB debug
+/// main thread.
 pub const MAX_PARSE_DEPTH: u32 = 300;
 
 /// Recovered constructs past which diagnostics stop being recorded.
@@ -317,11 +314,9 @@ impl Parser<'_> {
     /// current token's start when nothing matched.
     ///
     /// **ZERO-WIDTH, NOT THE MISMATCHED TOKEN'S FULL SPAN.** That token was never consumed here --
-    /// it still belongs to whatever the caller parses next. Answering its full span used to make
-    /// the construct claim source that a following sibling also claims: `"let x = 1 let y = 2; y"`
-    /// gave `Let(x)` the span `0..13` ("let x = 1 let", swallowing the next statement's `let`) and
-    /// `Let(y)` `10..20`, overlapping it. A zero-width span at the same start point marks exactly
-    /// where the construct ended without stealing source the next construct still owns.
+    /// it still belongs to whatever the caller parses next. Answering its full span would make the construct
+    /// claim source that a following sibling also claims. A zero-width span at the same start point marks
+    /// exactly where the construct ended without stealing source the next construct still owns.
     ///
     /// Recording here counts a recovery, so `parse_full` still answers `None` for the file.
     fn expect_or_record(&mut self, kind: TokenKind, what: &str) -> Span {
@@ -342,10 +337,9 @@ impl Parser<'_> {
     /// span covers it; when nothing was -- whether that is real end of input, or `parse_expr`
     /// failing on the very first token it saw -- the span is a zero-width position at that token's
     /// start, not the token's full span. The token was never consumed, so it still belongs to
-    /// whatever the caller parses next; claiming its full span here is what let `"let x =\nlet y =
-    /// 1;\ny"` give `Let(x)` the span `0..11` ("let x =\nlet"), overlapping the following `Let(y)`.
-    /// A zero-width span still marks the correct insertion point, and `record` still fires there so
-    /// the source-loss invariant holds.
+    /// whatever the caller parses next; claiming its full span here would give this `Expr::Error` a
+    /// span that overlaps the statement that follows. A zero-width span still marks the correct
+    /// insertion point, and `record` still fires there so the source-loss invariant holds.
     fn parse_expr_recovering(&mut self) -> Expr {
         let before = self.pos;
         match self.parse_expr() {
@@ -408,12 +402,12 @@ impl Parser<'_> {
         }
         // The loop above can exit two ways: at `close` (or `Eof`, when `close` IS `Eof`), where
         // `peek` is the token that ends this block and its full span belongs to the block -- a
-        // brace-delimited block covers its own closing brace, which is existing behaviour. Or via
-        // the `Tail` arm's `break`, on whatever token stopped the tail expression, which was never
-        // consumed and still belongs to whatever the caller parses next: `"fn f(a) { 1 let x = 1;
-        // }"` took that `let`'s full span into the block here, which then extended into `Stmt::Fn`'s
-        // own span and overlapped the sibling `Stmt::Let` parsed from the very same `let`. A
-        // zero-width span at the stopping token's start marks the block's end without claiming it.
+        // brace-delimited block covers its own closing brace. Or via the `Tail` arm's `break`, on
+        // whatever token stopped the tail expression, which was never consumed and still belongs to
+        // whatever the caller parses next: in `"fn f(a) { 1 let x = 1; }"`, taking that `let`'s full
+        // span into the block would extend `Stmt::Fn`'s own span over the sibling `Stmt::Let` parsed
+        // from the very same `let`. A zero-width span at the stopping token's start marks the block's
+        // end without claiming it.
         let peek = self.peek();
         let end = if peek.kind == close { peek.span } else { Span::new(peek.span.start, peek.span.start) };
         Block { stmts, tail, span: start.merge(end) }
@@ -637,9 +631,9 @@ impl Parser<'_> {
                 // token (`Expr::List` merges `t.span` with the `]` right above), and the printer relies
                 // on that: it uses `item.span().start` as "the offset this item's printed text begins
                 // at" to decide what a comment precedes and how many newlines the author left before it.
-                // With the inner start, a comment between `{` and the first statement read as being
-                // BEFORE the block entirely and escaped its braces, and the gap measured for blank
-                // lines ran across the `{` and its newline, inventing one. Design §14 and §17.
+                // With the inner start, a comment between `{` and the first statement would read as
+                // being BEFORE the block entirely and escape its braces, and the gap measured for blank
+                // lines would run across the `{` and its newline, inventing one. Design §14 and §17.
                 let span = t.span.merge(block.span);
                 Ok(Expr::Block { block: Box::new(block), span })
             }
@@ -718,7 +712,7 @@ mod tests {
     }
 
     #[test]
-    fn parse_is_unchanged_and_still_returns_a_two_tuple() {
+    fn parse_returns_the_program_and_its_diagnostics() {
         let (program, diags) = parse("let x = 1; x");
         assert!(diags.is_empty());
         assert!(program.is_some());
@@ -739,8 +733,7 @@ mod tests {
     fn parses_additive_and_multiplicative_precedence() {
         // 1 + 2 * 3  ==  1 + (2 * 3)
         let e = expr("1 + 2 * 3");
-        // Match by reference: `Expr` now has a hand-written `Drop`, so its fields cannot be moved
-        // out by value.
+        // Match by reference: `Expr` has a hand-written `Drop`, so its fields cannot be moved out by value.
         match &e {
             Expr::Binary { op: BinOp::Add, rhs, .. } => {
                 assert!(matches!(&**rhs, Expr::Binary { op: BinOp::Mul, .. }));
@@ -770,8 +763,7 @@ mod tests {
     fn parses_call_and_ufcs_chain() {
         // [3,1,2].map(add1).fold(0, add)
         let e = expr("[3, 1, 2].map(add1).fold(0, add)");
-        // Match by reference: `Expr` now has a hand-written `Drop`, so its fields cannot be moved
-        // out by value.
+        // Match by reference: `Expr` has a hand-written `Drop`, so its fields cannot be moved out by value.
         match &e {
             Expr::Method { name, args, recv, .. } => {
                 assert_eq!(name, "fold");
@@ -980,9 +972,7 @@ mod tests {
         // The depth counter is what makes this ONE diagnostic rather than two: with it broken,
         // resync cannot tell the body's own `;` from a statement boundary and stops there instead
         // of running past the `}` that closes the body, leaving that `}` behind as a stray token
-        // that trips a second, unrelated diagnostic on the way out (verified by disabling the depth
-        // increment: `g` still survives, but `diags` gains "expected an expression" for the stray
-        // `}`).
+        // that trips a second, unrelated diagnostic on the way out.
         assert_eq!(diags.len(), 1, "resync must swallow the malformed fn whole, in one diagnostic: {diags:?}");
     }
 
@@ -1056,11 +1046,9 @@ mod tests {
 
     #[test]
     fn a_mismatched_expect_or_record_does_not_claim_the_next_statements_first_token() {
-        // DEFECT 2, site (a): `expect_or_record` used to answer a MISMATCHED token's full span, even
-        // though that token was never consumed. `"let x = 1 let y = 2; y"` -- `Let(x)`'s `;` check
-        // meets the second `let` instead, which `expect_or_record` records and must not claim: it
-        // still belongs to `Let(y)`, parsed right after. Before the fix this gave `Let(x)` the span
-        // `0..13` ("let x = 1 let") and `Let(y)` `10..20`, overlapping it.
+        // `expect_or_record` must not answer a MISMATCHED token's full span, since that token was never
+        // consumed. `"let x = 1 let y = 2; y"` -- `Let(x)`'s `;` check meets the second `let` instead,
+        // which `expect_or_record` records and must not claim: it still belongs to `Let(y)`, parsed right after.
         let (parsed, diags) = parse_recovering("let x = 1 let y = 2; y");
         assert!(!diags.is_empty(), "the missing `;` must be reported");
         let spans: Vec<Span> = parsed.program.block.stmts.iter().map(Stmt::span).collect();
@@ -1085,11 +1073,9 @@ mod tests {
 
     #[test]
     fn an_expr_recovering_failure_that_consumes_nothing_does_not_claim_the_next_statements_keyword() {
-        // DEFECT 2, site (b): `parse_expr_recovering` used to answer `tokens[before]`'s full span even
-        // when `parse_expr` consumed nothing trying it. `"let x =\nlet y = 1;\ny"` -- `Let(x)`'s value
-        // meets the keyword `let` instead of an expression, consumes nothing, and must not claim it:
-        // it still belongs to `Let(y)`. Before the fix this gave `Let(x)` the span `0..11` ("let
-        // x =\nlet") and `Let(y)` `8..18`, overlapping it.
+        // `parse_expr_recovering` must not answer `tokens[before]`'s full span when `parse_expr` consumed
+        // nothing trying it. `"let x =\nlet y = 1;\ny"` -- `Let(x)`'s value meets the keyword `let`
+        // instead of an expression, consumes nothing, and must not claim it: it still belongs to `Let(y)`.
         let (parsed, diags) = parse_recovering("let x =\nlet y = 1;\ny");
         assert!(!diags.is_empty(), "the missing value must be reported");
         let spans: Vec<Span> = parsed.program.block.stmts.iter().map(Stmt::span).collect();
@@ -1108,12 +1094,11 @@ mod tests {
 
     #[test]
     fn a_block_that_stops_on_its_tail_does_not_claim_the_next_statements_first_token() {
-        // DEFECT 2, site (c): `parse_block_body`'s own end span used to be `self.peek().span`
-        // unconditionally, even when the loop stopped on the `Tail` arm's `break` rather than at
-        // `close`. `"fn f(a) { 1 let x = 1; } g()"` -- the body's tail (`1`) is followed by `let`, not
-        // `}`, so the body never reaches its own closing brace; the `let` was never consumed and
-        // still belongs to the top-level `Stmt::Let` parsed right after. Before the fix this let
-        // `Fn`'s span run into that `let`, overlapping the sibling `Stmt::Let`.
+        // `parse_block_body`'s own end span must not be `self.peek().span` unconditionally, since the loop
+        // can stop on the `Tail` arm's `break` rather than at `close`. `"fn f(a) { 1 let x = 1; } g()"` --
+        // the body's tail (`1`) is followed by `let`, not `}`, so the body never reaches its own
+        // closing brace; the `let` was never consumed and still belongs to the top-level `Stmt::Let` parsed
+        // right after, so `Fn`'s span must not run into it.
         let (parsed, diags) = parse_recovering("fn f(a) { 1 let x = 1; } g()");
         assert!(!diags.is_empty(), "the missing `}}` must be reported");
         let spans: Vec<Span> = parsed.program.block.stmts.iter().map(Stmt::span).collect();
@@ -1132,11 +1117,11 @@ mod tests {
 
     #[test]
     fn a_recovered_value_makes_parse_full_answer_none() {
-        // The two tests above use `@@@`, which is a LEXER error -- their `!diags.is_empty()`
-        // assertion holds even if `parse_expr_recovering` never called `record`, because the
-        // lexer's own diagnostic covers for it. This input lexes clean, so the only diagnostic
-        // `parse_full` can see is the one `record` produces, which is what actually flips
-        // `parse_full` to `None` and keeps a lossy tree away from `format`.
+        // `a_binding_whose_value_does_not_parse_still_binds_its_name` uses `@@@`, which is a LEXER
+        // error -- its `!diags.is_empty()` assertion holds even if `parse_expr_recovering` never
+        // called `record`, because the lexer's own diagnostic covers for it. This input lexes clean,
+        // so the only diagnostic `parse_full` can see is the one `record` produces, which is what
+        // actually flips `parse_full` to `None` and keeps a lossy tree away from `format`.
         let src = "let x = ; let y = 2; x + y";
         let (parsed, diags) = parse_recovering(src);
         assert!(!diags.is_empty(), "the missing value must be reported");

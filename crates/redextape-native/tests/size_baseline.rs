@@ -7,20 +7,11 @@
 //! It catches an **LLVM** pass that has stopped firing, and **not a Cranelift one**. That is
 //! arithmetic, not a bug: an optimizer that stops firing makes a level's measured size revert to its
 //! `O0` size, and the gate compares that against the OPTIMIZED baseline row. Off this repo's own
-//! `baselines/aarch64-apple-darwin.txt` (`O0` size vs the `O3` row it would be measured against):
-//!
-//! | program | cranelift | llvm |
-//! |---|---:|---:|
-//! | `loop1000000` | 1112 vs 1104 = **+0.7%** | 1009 vs 873 = **+15.6%** |
-//! | `sum30000` | 1304 vs 1296 = **+0.6%** | 1393 vs 1217 = **+14.5%** |
-//! | `list30000` | 1384 vs 1360 = **+1.8%** | 1521 vs 1377 = **+10.5%** |
-//! | `map30000` | 2440 vs 2400 = **+1.7%** | 3281 vs 2337 = **+40.4%** |
-//!
-//! Every LLVM row clears the ±10% band (`list30000` by only half a point — the thinnest margin here);
-//! every Cranelift row sits an order of magnitude inside it. Cranelift's ISA-level optimizer changes
-//! *which* instructions are selected far more than *how many* there are, so its object sizes barely
-//! move. Verified by sabotage: mapping all six levels onto `"none"` in
-//! `codegen::cranelift_opt_level` leaves THIS TEST GREEN.
+//! `baselines/aarch64-apple-darwin.txt` (`O0` size vs the `O3` row it would be measured against),
+//! every LLVM row clears the ±10% band (`list30000` by the thinnest margin); every Cranelift row sits
+//! an order of magnitude inside it. Cranelift's ISA-level optimizer changes *which* instructions are
+//! selected far more than *how many* there are, so its object sizes barely move. Mapping all six
+//! levels onto `"none"` in `codegen::cranelift_opt_level` leaves THIS TEST GREEN.
 //!
 //! **Do not tighten `TOLERANCE` to chase the Cranelift deltas.** A band narrow enough to catch 1%
 //! would fire on ordinary codegen churn — a gate that cries wolf gets deleted. Cranelift's
@@ -28,7 +19,7 @@
 //! output must DIFFER (any amount) rather than by a size band:
 //! `jit::tests::the_opt_level_reaches_the_jits_own_isa` (the JIT's ISA, over emitted code bytes) and
 //! `aot::tests::the_opt_level_reaches_the_cranelift_isa` (the AOT ISA, over object bytes). Both fail
-//! under the sabotage above.
+//! under that mapping.
 //!
 //! The check is BIDIRECTIONAL, deliberately. Every measured row must have a baseline entry within
 //! tolerance (catches a size regression), AND every baseline entry must be claimed by a measured row

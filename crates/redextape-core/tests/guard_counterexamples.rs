@@ -7,11 +7,9 @@
 //! per-redex work budget that has not been built yet, and this file is the gate it has to clear.
 //! (The design records count a *third falsification* as well, which is a different tally: the
 //! structural-sharing design's claim that the hazard was unreachable. That one had no counterexample
-//! program to commit — it fell to a family that had to be written — so it has no test here.)
-//! Until this file
-//! existed those programs lived only in `examples/` probes and in the design records' prose, so the
-//! next person to propose a bound on **total size** or on **sharing** would have found out in review,
-//! if at all. Now the evidence runs in CI.
+//! program to commit — it fell to a family that had to be written — so it has no test here.) The
+//! evidence runs in CI, so the next person to propose a bound on **total size** or on **sharing**
+//! finds out here, not in review.
 //!
 //! | withdrawn design | the bound it wanted | what refutes it, below |
 //! | --- | --- | --- |
@@ -43,16 +41,9 @@
 //! Neither guard exists. Nothing here calls `lower` expecting a refusal; both programs lower, and
 //! that both lower is half of what each one proves.
 //!
-//! **Runtime, measured rather than hoped for: ~1.97 s for the file** in the unoptimized profile the
-//! gate uses (the two tests run in parallel under `cargo nextest`, ~1.94 s each), **~0.21 s
-//! optimized.** Building and lowering the programs is not what costs — that is ~0.1 ms and ~20 ms
-//! respectively for either one. The rest is three O(physical) folds over ~500,000 `Rc` allocations,
-//! hash-dominated and ~11x slower without optimization. That cost is itself part of the record: the
-//! shared-subterm design's §9 measures `max_shared_logical_size` at 92.6 ms optimized on exactly the
-//! first program below, against a `lower()` of 9.7 ms — so the folds asserted here ARE the ~90 ms
-//! that section is about, paid in a debug build. Nothing is shrinkable without dropping a pin: the
-//! sizes are the falsification, and 699 and 500 are the two element counts that make these programs
-//! the specific counterexamples they are.
+//! Nothing is shrinkable (to make the file cheaper) without dropping a pin: the sizes are the
+//! falsification, and 699 and 500 are the two element counts that make these programs the specific
+//! counterexamples they are.
 
 // Test target: `clippy.toml`'s `allow-*-in-tests` keys do not reach free helpers in a `tests/`
 // target, so the exemption is stated per target.
@@ -124,9 +115,7 @@ fn list_src(n: usize) -> String {
 }
 
 /// 699 = `MAX_LAMBDA_LOWER_DEPTH - 1`, the largest list literal `lower` accepts. The constant is
-/// private to `lambda::lower` (it is 700), so this restates the value rather than importing it; if
-/// the depth bound ever moves, `lower.rs`'s `the_guard_admits_a_core_at_the_bound_and_refuses_only_past_it`
-/// fails first and points here.
+/// private to `lambda::lower` (it is 700), so this restates the value rather than importing it.
 const LARGEST_ADMITTED_LIST: usize = 699;
 
 /// **The program that killed the TOTAL-SIZE guard** (`2026-07-31-lambda-logical-size-guard-design.md`,
@@ -145,8 +134,8 @@ const LARGEST_ADMITTED_LIST: usize = 699;
 /// admit this program and still refuse the nesting family, because the family's blow-up is *smaller*
 /// on this axis. `logical_size` returns one number for both and cannot tell them apart.
 ///
-/// It is not fast: ~35 s to reduce, and the cost grows ~n³. But it terminates in bounded memory, which
-/// makes it a UX problem and not a hazard, and refusing it at lowering time is a capability loss.
+/// It terminates in bounded memory, so it is not a hazard, and refusing it at lowering time is a
+/// capability loss.
 ///
 /// `max_shared` is 0 here, and that is pinned by `lower.rs`'s
 /// `a_large_unshared_list_measures_zero_shared_nodes` as well. Kept in both places on purpose: there
@@ -160,7 +149,7 @@ fn a_699_element_list_is_half_a_million_unshared_nodes_and_lowers() {
 
     let term = lower_src(&src);
 
-    // Measured 2026-08-01. The withdrawn bound was 300,000, so this working program is 1.66x over it.
+    // The withdrawn bound was 300,000, so this working program is 1.66x over it.
     assert_eq!(logical_size(&term), 497_691, "logical nodes in the 699-element list");
 
     // Exactly 1.000x. Not "approximately": a list literal is a tree, so every denoted node is a real
@@ -196,18 +185,16 @@ fn two_list_src(n: usize) -> String {
 /// 2,500x under a bound meant to catch exactly this cost. The gap is not near any threshold: no
 /// constant admits the corpus's 684 and refuses this 4.
 ///
-/// **THE 19 SECONDS ARE PROSE HERE, DELIBERATELY, AND THAT DECISION IS WHY THIS TEST STILL PASSES.**
-/// They were the falsifying fact and they were not asserted, because they are neither deterministic nor
-/// cheap — a timing assertion would be a flaky gate. Since 2026-08-01 that step is **under a
-/// millisecond** and the whole program normalises in well under one: `term.rs`'s `shift` was Θ(logical)
-/// and sharing-destroying, and fixing it removed the cost this guard was supposed to refuse. **A timing
-/// assertion here would now be failing for a good reason, which is the worst kind of red gate.**
+/// The 19 seconds are prose here, deliberately. They were the falsifying fact and they were not
+/// asserted, because they are neither deterministic nor cheap — a timing assertion would be a flaky
+/// gate. **A timing assertion on that cost would also go red whenever the step gets faster, which is
+/// the worst kind of red gate.**
 ///
 /// What IS asserted is the number the guard would have read, which is deterministic, still 4, and
 /// **still falsifies the design** — the guard is blind to this program in kind, not in degree, and that
 /// was never a claim about how long it took. Re-derive the current timings with
 /// `cargo run --release --example shift_cost_probe`; `examples/guard_hole_probe.rs` remains the
-/// instrument for the guard's verdict per row, with its own timings marked as pre-fix.
+/// instrument for the guard's verdict per row.
 ///
 /// **The single-list control is why this is decisive.** `let xs = [0, …, 499]; head(xs)` — same
 /// element count, same lowering path, one binding instead of two — took **0.043 s** and scores 0.
@@ -218,18 +205,10 @@ fn two_list_src(n: usize) -> String {
 /// on.**
 ///
 /// **Why sharing was the wrong quantity.** A β-step cost `|body| + Abs(body) x |arg|`: `subst`'s
-/// `Var` arm is an `Rc` bump and is free, while its `Abs` arm took `shift(1, 0, s)` — a full logical
+/// `Var` arm was an `Rc` bump and was free, while its `Abs` arm took `shift(1, 0, s)` — a full logical
 /// copy of the argument — once per `Abs` node in the body, unconditionally, before anything checked
 /// whether the variable occurs there. Neither factor is a sharing property; both are large in a term
 /// that aliases nothing.
-///
-/// **That account was one level too shallow, and the missing level is what closed the hang.** It does
-/// not say why `|arg|` was the LOGICAL size rather than the physical one. `shift` rebuilt every node it
-/// visited — Θ(logical), and sharing-destroying, since `shift(App(c, c))` recursed twice. Both `shift`
-/// and `subst` now return their argument's allocation when no free index is in range, so the `Abs` arm
-/// no longer builds that copy and the whole cost model collapses on these programs. This program lowers to `(\xs. (\ys. BODY) YS) XS`, whose leftmost-outermost
-/// redex is the root, so the first step re-shifts the whole of `XS` once per `Abs` in `(\ys. BODY) YS`
-/// — and `YS` supplies ~6 of those per element.
 ///
 /// The size pins below are that argument as a measurement: 513,053 allocations denoting 513,061
 /// nodes, a ratio of 1.000x. **The program is enormous and almost perfectly unshared**, and the
@@ -241,8 +220,8 @@ fn two_list_literals_score_four_shared_nodes_and_lower() {
 
     let term = lower_src(&src);
 
-    // Measured 2026-08-01. THE FALSIFICATION, in one integer: the withdrawn bound was 10,000, the
-    // corpus maximum it was calibrated against is 684, and this 19-second program reads 4.
+    // The falsification, in one integer: the withdrawn bound was 10,000, the corpus maximum it was
+    // calibrated against is 684, and this program reads 4.
     assert_eq!(max_shared_logical_size(&term), 4, "the largest shared subterm — 2,500x under the withdrawn bound");
 
     // Why 4 is so small: there is almost nothing to share. 513,061 denoted nodes over 513,053
@@ -272,7 +251,7 @@ fn balanced(lo: usize, hi: usize) -> String {
 
 /// `Core` to asm: `lower_asm` directly, then, on ANY error — `TooDeep` included — again through `defunc`.
 /// That is looser than `lower_program`, which retries through `defunc` only on `Unsupported` and returns
-/// `TooDeep` at once. Written while `lower_program` was private; it is public now.
+/// `TooDeep` at once.
 fn asm_of(src: &str) -> redextape_core::tm::asm::Program {
     let core = core_of(src);
     lower_asm(&core).or_else(|_| defunc(&core).and_then(|d| lower_asm(&d))).expect("program must lower to asm")
@@ -285,18 +264,16 @@ fn asm_of(src: &str) -> redextape_core::tm::asm::Program {
 /// `native_oracle.rs`'s `FIRST_ORDER_DEMOS`: 97 tokens, and 49,135 states under `Binary` — 4.9% of
 /// the ceiling.
 ///
-/// **A prior version of this test used a different, smaller member of that array (38,070 states)
-/// under the mistaken belief that it was the largest.** It was not: `FIRST_ORDER_DEMOS` has 46
-/// entries and this file only ever hand-copies one of them, so nothing here re-checks that the
-/// hand-copy is still the true maximum. THAT is a different question from whether the SOURCE array
-/// has drifted, which `tests/three_way_oracle.rs`'s
-/// `first_order_demos_stay_synced_across_every_copy` now checks —
+/// `FIRST_ORDER_DEMOS` has 46 entries and this file only ever hand-copies one of them, so nothing
+/// here re-checks that the hand-copy is still the true maximum. THAT is a different question from
+/// whether the SOURCE array has drifted, which `tests/three_way_oracle.rs`'s
+/// `first_order_demos_stay_synced_across_every_copy` checks —
 /// `crates/redextape-core/examples/common/demos.rs`, the array
-/// `crates/redextape-core/examples/state_cost_probe.rs`'s section G reads, is one of its four tracked
-/// copies, so section G's own array cannot silently go stale. Whether `WORST_SHIPPED_DEMO` here is
-/// still that array's max is still a manual step: section G lowers the whole array and prints every
-/// member's state count sorted descending — re-run it after `FIRST_ORDER_DEMOS` changes and update
-/// `WORST_SHIPPED_DEMO` if the maximum moves.
+/// `crates/redextape-core/examples/state_cost_probe.rs`'s section G reads, is one of its four
+/// tracked copies, so section G's own array cannot silently go stale. Whether `WORST_SHIPPED_DEMO`
+/// here is still that array's max is still a manual step: section G lowers the whole array and
+/// prints every member's state count sorted descending — re-run it after `FIRST_ORDER_DEMOS`
+/// changes and update `WORST_SHIPPED_DEMO` if the maximum moves.
 ///
 /// THE ASSERTION IS THE RELATION, NOT THE LITERAL. A gadget change that moves the count is fine; a
 /// change that puts the shipped demo within 10x of the ceiling is not, and is the thing worth being
@@ -332,10 +309,9 @@ fn the_worst_shipped_demo_lowers_far_below_the_state_ceiling() {
 /// nothing laid out" or "refused later, after the `pc` loop drove `Builder` to its own
 /// `MAX_MACHINE_STATES` cap". `Builder`'s internal state count IS observable from outside
 /// `lower_tm_all`, though, through the public `lower_tm` — the unguarded entry point — so the second
-/// `assert_eq!` below pins the mechanism too: exactly two states means the pre-check fired before the
-/// `pc` loop ever ran. Deleting the pre-check turns that assertion red (`lower_tm(&prog,
-/// &Unary::default()).states.len()` reads `MAX_MACHINE_STATES` then, not 2) — verified by hand, not
-/// left as an unasserted claim.
+/// `assert_eq!` below pins the mechanism too: exactly two states means the pre-check fired before
+/// the `pc` loop ever ran. Deleting the pre-check turns that assertion red
+/// (`lower_tm(&prog, &Unary::default()).states.len()` reads `MAX_MACHINE_STATES` then, not 2).
 ///
 /// It stays fast-tier either way. Even without the pre-check, `n = MAX_MACHINE_STATES + 1`
 /// instructions hits `Builder`'s own ceiling after allocating the SAME ~90 MB `build.rs`'s
@@ -380,17 +356,14 @@ fn a_short_program_whose_gadgets_exceed_the_ceiling_is_refused() {
     );
 }
 
-/// THE TWO SIDES OF THE LINE, from source rather than hand-built asm — the shape that made this a
-/// live defect rather than a latent one.
+/// THE TWO SIDES OF THE LINE, from source rather than hand-built asm.
 ///
 /// A BALANCED expression tree is depth-log, so `lower_asm`'s `MAX_LOWER_DEPTH` never fires and the
 /// whole token budget turns into instructions AND slots, which multiply: growth is about
-/// O(code.len()^1.9). Left-nested shapes hit the depth guard at ~580 and never get here, which is
-/// why `code.len()` LOOKED bounded at 3,472 and why this went unnoticed.
+/// O(code.len()^1.9). Left-nested shapes hit the depth guard at ~580 and never get here.
 ///
 /// 1,022 tokens builds 575,861 states (398 MB) and must be ADMITTED — it works today. 4,094 tokens
-/// builds 8,595,317 states (6.0 GB) and must be REFUSED — it is fatal in wasm32, and at 16,382 tokens
-/// the same shape was killed by `SIGKILL` under an 8 GB budget.
+/// builds 8,595,317 states (6.0 GB) and must be REFUSED — it is fatal in wasm32.
 ///
 /// `balanced`'s ARGUMENT IS A LEAF COUNT, NOT A TOKEN COUNT OR A `code.len()`. The figures above are
 /// keyed to `code.len()` in the design doc's own table (512 and 2,048 respectively), which for this
@@ -416,20 +389,19 @@ fn the_balanced_tree_is_admitted_below_the_ceiling_and_refused_above_it() {
     let refused = asm_of(&balanced(0, 1_024));
     assert!(
         lower_tm_guarded(&refused, &Binary::default()).is_none(),
-        "4,094 tokens builds 8,595,317 states (6.0 GB) and must be refused — this is the program \
-         that made the gap a live OOM reachable from the editor, not a latent cast hazard"
+        "4,094 tokens builds 8,595,317 states (6.0 GB) and must be refused: built, it would \
+         exhaust memory, and the editor can reach it"
     );
 }
 
-/// THE END-TO-END ASSERTION, and the one that would have caught the bug this slice's Task 3 exists
-/// to prevent: the refusal must arrive at the caller as `TooLarge` and NEVER as `Ran`.
+/// THE END-TO-END ASSERTION: the refusal must arrive at the caller as `TooLarge` and NEVER as `Ran`.
 ///
-/// `lower_tm_guarded` returning `None` (asserted above) is only half of it. `lower_tm_all` answers a
-/// refusal with a machine that HALTS IMMEDIATELY, so a version of this that failed to plumb the
-/// refusal out would simulate that machine, halt at a state that is not the overflow guard, and come
-/// back as `Ran` over tapes that decode to nothing — a plausible-looking wrong answer rather than a
-/// crash. That is the defect `lower_and_size`'s doc records having fixed for `MAX_SLOTS` and
-/// `MAX_FRAME_LOC`, reachable again through the one guard it cannot pre-check.
+/// `lower_tm_guarded` returning `None` (asserted above) is only half of it. `lower_tm_all` answers
+/// a refusal with a machine that HALTS IMMEDIATELY, so a version of this that failed to plumb the
+/// refusal out would simulate that machine, halt at a state that is not the overflow guard, and
+/// come back as `Ran` over tapes that decode to nothing — a plausible-looking wrong answer rather
+/// than a crash. That is the outcome `lower_and_size`'s doc rules out, and `MAX_MACHINE_STATES` is
+/// the one refusal it cannot pre-check.
 ///
 /// `TooLarge` is what reaches the user as "the machine this program needs is too large to build"
 /// (`redextape-wasm`'s `session.rs`), so this also pins that the UI is told the truth.
@@ -469,22 +441,23 @@ fn width_straddling_witness_src() -> String {
 }
 
 /// **THE LATER-WIDTH REFUSAL, WITNESSED — `TmRun::TooLarge`'s doc claims a refusal can first surface
-/// at a width other than the first one tried, and until this test the claim lived only in prose.**
+/// at a width other than the first one tried.**
 ///
-/// `MAX_SLOTS`, `MAX_FRAME_LOC` and `MAX_MUL_INSTRS` are properties of the `Program` alone and refuse
-/// identically at every width, so `run_tm_fitted`'s width search used to always report a refusal (if
-/// any) on its FIRST attempt. `MAX_MACHINE_STATES` broke that: a `Binary`-encoded machine's state
-/// count scales with the field width (`lower_tm::MAX_MUL_INSTRS`'s doc measures `Mul` alone as
+/// `MAX_SLOTS`, `MAX_FRAME_LOC` and `MAX_MUL_INSTRS` are properties of the `Program` alone and
+/// refuse identically at every width, so `lower_and_size` refuses them before `run_tm_fitted`'s width
+/// search begins. `MAX_MACHINE_STATES` does not: a `Binary`-encoded machine's state count
+/// scales with the field width (`lower_tm::MAX_MUL_INSTRS`'s doc measures `Mul` alone as
 /// O(width^2)), so a program can lay out fine and run at a narrow width, overflow its value there,
 /// and exceed the ceiling only once the search widens to retry it.
 ///
-/// **THE BRANCH'S OWN END-TO-END TEST DOES NOT REACH THIS.**
+/// **THE BALANCED-TREE END-TO-END TEST DOES NOT REACH THIS.**
 /// `the_balanced_tree_is_admitted_below_the_ceiling_and_refused_above_it` refuses at every width it
-/// is asked to fit, including `MIN_FIELD_WIDTH` — the FIRST width tried — so it cannot tell "refused
-/// immediately" apart from "refused only once widened". This witness can, because it straddles: its
-/// VALUE overflows a narrow `Binary` field (unremarkable — `Overflow`, not a refusal) while its
-/// MACHINE stays under the ceiling at widths 4 and 8 and only exceeds it once `run_tm_fitted` widens
-/// to 16 — the state cost growing with width, not the value's own size, is what trips `TooLarge` here.
+/// is asked to fit, including `MIN_FIELD_WIDTH` — the FIRST width tried — so it cannot tell
+/// "refused immediately" apart from "refused only once widened". This witness can, because it
+/// straddles: its VALUE overflows a narrow `Binary` field (unremarkable — `Overflow`, not a
+/// refusal) while its MACHINE stays under the ceiling at widths 4 and 8 and only exceeds it once
+/// `run_tm_fitted` widens to 16 — the state cost growing with width, not the value's own size, is
+/// what trips `TooLarge` here.
 ///
 /// SLOW TIER: the refusing attempt (width 16) allocates a ceiling's worth of real states — the same
 /// ~727 MB class of cost as the other ceiling tests above — before `overflowed()` catches it.

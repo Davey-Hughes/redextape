@@ -29,7 +29,7 @@ use common::build_machine;
 /// Padding blocks per side for the single-tape image, matching `single_tape_oracle.rs`'s `PAD`.
 const PAD: usize = 2;
 
-/// The leg itself, over an arbitrary machine and its tapes, so Task 7 can point it at a single-tape
+/// The leg itself, over an arbitrary machine and its tapes, so it can be pointed at a single-tape
 /// image without a second copy of the assertions.
 fn assert_two_symbol_agrees(label: &str, m: &Machine, inits: &[Vec<Symbol>], caps: Caps) -> (u64, u64) {
     let code = Code::new(m, inits);
@@ -49,8 +49,7 @@ fn assert_two_symbol_agrees(label: &str, m: &Machine, inits: &[Vec<Symbol>], cap
     let (got, got_state, got_status, got_steps) = simulate_final(&reduced, &cells, caps);
     assert_eq!(got_status, Status::Halted, "the reduced run hit a cap for {label}");
     // NOT just "it halted": a stuck state halts too and reports the same `Status`. The difference is
-    // visible only in the final state's accept flag, which is the gap stage 1's Task 6 review found
-    // by sabotaging `entry_name` and watching its strongest leg stay green.
+    // visible only in the final state's accept flag.
     assert!(
         reduced.states[got_state as usize].accept,
         "halted in `{}`, not an accept, for {label}",
@@ -95,14 +94,10 @@ fn live_tapes(want: &[Tape]) -> Vec<&'static str> {
 /// `Instr::Call`, where `cons`/`nil`/`head`/`tail` lower through dedicated builtin instructions
 /// instead.
 ///
-/// **IT WAS ADDED FOR A REASON THAT TURNED OUT TO BE FALSE**: that it would leave the STACK tape
-/// non-blank. `return` pops the frame before the machine halts, so that tape ends blank here exactly
-/// as it does in the other three, and the per-tape measurement below is what falsified it.
-///
-/// **NOTHING IN THIS FILE ENFORCES THE REASON IT IS HERE NOW.** The per-program floor asserts only
-/// that some tape discriminates a head position; it would pass identically if `Instr::Call` lowering
-/// never ran at all. Enforcing it would mean lowering the program a second time to inspect its asm,
-/// which this leg does not do.
+/// **NOTHING IN THIS FILE ENFORCES THAT THE FOURTH MEMBER REACHES THE STACK-FRAME GADGETS.** The
+/// per-program floor asserts only that some tape discriminates a head position; it would pass
+/// identically if `Instr::Call` lowering never ran at all. Enforcing it would mean lowering the
+/// program a second time to inspect its asm, which this leg does not do.
 const CORPUS: &[&str] = &[
     "3 - 5",
     "if 2 > 1 { 10 } else { 20 }",
@@ -216,10 +211,10 @@ fn the_composed_machine_is_one_tape_over_two_symbols() {
 /// Two figures both spelled "steps per source step" can measure different regimes, and these two do.
 /// Do not read them as one constant, and do not quote them side by side.
 ///
-/// **RUNS IN THE NORMAL TIER, NOT THE SLOW ONE THIS FILE'S OTHER RATIO TESTS LIVE IN.** The note
+/// **RUNS IN THE NORMAL TIER, NOT THE SLOW ONE `the_two_symbol_cost_table` LIVES IN.** The note
 /// above restricts the corpus to the smallest program available exactly to hold down THIS test's own
 /// step count; having done that, the leg below is cheap enough for the normal tier despite composing
-/// two constructions' costs. It belongs there for a reason those other tests don't share: `inits`
+/// two constructions' costs. It belongs there for a reason that test doesn't share: `inits`
 /// changes the resulting `Code` for the composed leg — asserted directly below — because `interleave`
 /// writes a marker for every tape whether that tape's rules mention it or not, so the composed image's
 /// alphabet reaches symbols only `inits` carries. The same comparison on this test's own RAW machine
@@ -252,9 +247,8 @@ fn the_composed_machine_runs() {
 
 /// The roadmap's actual point: "polynomial slowdown is normally a hand-wave; here step counts are
 /// exact integers". **`k` IS NAMED IN EVERY ROW**, because a blowup quoted without the block width
-/// it was measured at is not a property of the reduction — the same trap stage 1's cost table fell
-/// into with its padding constant, where a raw ratio spanning 4.98× across three programs was
-/// measuring `PAD` rather than the construction.
+/// it was measured at is not a property of the reduction — `single_tape_oracle.rs`'s `PAD` doc makes
+/// the same point about its padding constant.
 ///
 /// **THE PREDICTION THIS TABLE TESTS:** unlike stage 1, this reduction is LOCAL — a head moves at
 /// most `k` cells to read, `k` back to rewind and `k` to move — so the per-step cost should be `O(k)`

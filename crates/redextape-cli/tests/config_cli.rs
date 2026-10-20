@@ -68,10 +68,8 @@ fn config_and_no_config_together_are_a_clap_error() {
 
 /// A warning that is not denied still exits 0, and the diagnostic still reaches stderr.
 ///
-/// **THE MESSAGE ASSERTION IS NOT PADDING.** Plan 6's first half found eleven mutations surviving a
-/// full suite, four of them because their tests asserted a diagnostic's count and span and never its
-/// message. A `--deny-warnings` implementation that swallowed the warning would pass a code-only
-/// test in both directions.
+/// The message assertion is not padding: a `--deny-warnings` implementation that swallowed the warning
+/// would pass a code-only test in both directions.
 #[test]
 fn a_warning_exits_0_by_default_and_still_prints() {
     let root = tree("warn-default", "");
@@ -135,15 +133,14 @@ fn denial_changes_nothing_for_a_clean_file_or_an_errored_one() {
 
 /// A narrower width really does change the output, and the flag beats the config.
 ///
-/// **THE SOURCE IS ALREADY `w.rxt`'s OWN WIDTH-120 CANONICAL FORM**, not the literal
-/// `"fn f(a) { a }\n..."` one-liner — that fixture never reaches `--check` exit 0 at ANY width,
-/// because `printer::braced` always breaks a function body onto its own lines regardless of the
-/// budget (see `printer.rs`'s own comment on `braced`: "A block ALWAYS breaks"), so
-/// `fn f(a) { a }` differs from its canonical form no matter what `width` is. Writing the fixture
-/// pre-broken removes that width-independent noise, so the ONLY difference between widths is the
-/// call's argument list — confirmed directly: `format_with_width(SRC, 120) == SRC` (clean) and
-/// `format_with_width(SRC, 40)` wraps the list onto its own lines (dirty). See the task report for
-/// both outputs side by side.
+/// **THE SOURCE IS ALREADY `w.rxt`'s OWN WIDTH-120 CANONICAL FORM.** A one-liner such as
+/// `fn f(a) { a }` never reaches `--check` exit 0 at ANY width, because `printer::braced` always
+/// breaks a function body onto its own lines regardless of the budget (see `printer.rs`'s own
+/// comment on `braced`: "A block ALWAYS breaks"), so `fn f(a) { a }` differs from its canonical
+/// form no matter what `width` is. Writing the fixture pre-broken removes that width-independent
+/// noise, so the ONLY difference between widths is the call's argument list:
+/// `format_with_width(SRC, 120) == SRC` (clean) and `format_with_width(SRC, 40)` wraps the list
+/// onto its own lines (dirty).
 const SRC: &str = "fn f(a) {\n    a\n}\nf([100000, 200000, 300000, 400000, 500000, 600000, 700000])\n";
 
 #[test]
@@ -152,8 +149,8 @@ fn the_width_flag_beats_the_config_and_both_beat_the_default() {
     std::fs::write(root.join("w.rxt"), SRC).unwrap();
 
     // **THE EXPECTED EXIT CODE IS PASSED IN PER CALL, NOT ACCEPTED AS A SET, AND THAT IS THE WHOLE
-    // POINT OF THIS HELPER'S SHAPE.** An earlier draft asserted `Some(0)` on every invocation, which
-    // cannot hold: `fmt --check` returns `Clean` — and exits 0 — BEFORE writing anything to stdout,
+    // POINT OF THIS HELPER'S SHAPE.** Asserting `Some(0)` on every invocation cannot hold:
+    // `fmt --check` returns `Clean` — and exits 0 — BEFORE writing anything to stdout,
     // so demanding 0 from both widths forces both diffs empty, contradicting the `assert_ne!` below
     // that this test exists for. The obvious repair, accepting `Some(0 | 1)` everywhere, is weaker
     // than it looks: deleting `fmt::one`'s clean short-circuit turns a genuinely clean file into
@@ -203,9 +200,7 @@ fn a_configured_encoding_does_not_break_a_lambda_emit() {
     std::fs::write(root.join("p.rxt"), "1 + 2\n").unwrap();
     // **BOTH NON-`tm` TARGETS, NOT JUST LAMBDA.** The guard is `lang != Lang::Tm`, so `asm` is
     // covered by the same branch — but "covered by the same branch" is a claim about today's code,
-    // and the design's rule is stated for ANY non-`tm` target. An earlier version of this test
-    // checked only `lambda`, which would have left a third of the rule resting on a reading of the
-    // source rather than on anything that runs.
+    // and the design's rule is stated for ANY non-`tm` target.
     for lang in ["lambda", "asm"] {
         let out = Command::cargo_bin("redextape")
             .unwrap()
@@ -272,17 +267,15 @@ fn a_configured_encoding_applies_to_a_tm_emit() {
     assert_ne!(with_config.stdout, with_defaults.stdout, "binary and unary must not produce the same machine");
 }
 
-/// **`emit.field-width` WAS THE ONE CONFIG KEY WHOSE EFFECT NO TEST COULD FAIL ON.** The other three
-/// keys each had a takes-effect test; this one had only refusal tests, and a sabotage that reads the
-/// key, validates it and then ignores it passes every refusal test there is.
+/// **THIS IS THE TAKES-EFFECT TEST FOR `emit.field-width`.** The other three keys each have one;
+/// without it, a sabotage that reads the key, validates it and then ignores it passes every refusal
+/// test there is.
 ///
 /// The sabotage is one argument of the `Width::resolve` call in `emit.rs`: written
 /// `Width::resolve(opts.field_width, 0)`, the configured value is discarded outright, so `(None, 0)`
-/// resolves to `Width::AutoFit` and the pin is gone. Re-measured at this tree with exactly that one
-/// argument changed, `cargo nextest run --workspace --no-fail-fast` reports
-/// `1615 tests run: 1613 passed, 2 failed, 12 skipped` — and the two are this test and
-/// `a_config_pinned_overflow_names_the_key_rather_than_a_flag_nobody_typed` in `emit.rs`. Both arrived
-/// in the same commit as the key itself, which is the sense in which nothing could fail on it before.
+/// resolves to `Width::AutoFit` and the pin is gone. With exactly that one argument changed, the two
+/// tests that fail are this test and
+/// `a_config_pinned_overflow_names_the_key_rather_than_a_flag_nobody_typed` in `emit.rs`.
 ///
 /// **THE HEADER IS WHAT IS ASSERTED, NOT THE EXIT CODE.** `width 8` is the configured value arriving
 /// in the artifact, which is the only thing the key is for. A `--no-config` run of the same program
@@ -314,20 +307,20 @@ fn a_configured_field_width_reaches_the_emitted_header_and_the_flag_beats_it() {
     assert!(from_flag.contains("\nwidth 16\n"), "the flag must beat the configured 8:\n{from_flag}");
 }
 
-/// **THE FLAG THAT OVERRIDES A VALIDATED KEY IS VALIDATED TOO, AND FOR TWO SLICES IT WAS NOT.**
-/// `config::validate` has always refused `emit.field-width` outside `0` or `4..=64` at exit 2;
-/// `--field-width` checked nothing, so `65` wrote a `.tm` carrying `width 65` at exit 0 — a header
-/// this tool's own `parse_tm_full` then refuses, so the mistake outlived the invocation as a file on
-/// disk — and `usize::MAX` reached `Unary::init_reg` and aborted the process on a capacity overflow.
+/// **THE FLAG THAT OVERRIDES A VALIDATED KEY IS VALIDATED TOO.** `config::validate` refuses
+/// `emit.field-width` outside `0` or `4..=64` at exit 2, and so does `--field-width`: unchecked, `65`
+/// would write a `.tm` carrying `width 65` at exit 0 — a header this tool's own `parse_tm_full` then
+/// refuses, so the mistake would outlive the invocation as a file on disk — and `usize::MAX` would
+/// reach `Unary::init_reg` and abort the process on a capacity overflow.
 ///
 /// **`-o` IS PASSED ON EVERY REFUSED CASE ON PURPOSE.** Exit 2 alone does not say the artifact was
-/// not written, and "writes a file its own reader refuses" is the half of this bug that exit codes
-/// cannot see; asserting the destination does not exist is what pins it.
+/// not written, and "writes a file its own reader refuses" is what exit codes cannot see; asserting
+/// the destination does not exist is what pins it.
 #[test]
 fn an_out_of_range_field_width_flag_is_refused_and_writes_nothing() {
     let root = tree("emit-fw-range", "");
     std::fs::write(root.join("p.rxt"), "1 + 2\n").unwrap();
-    // Below the floor, above the ceiling, and the value that actually panicked.
+    // Below the floor, above the ceiling, and `usize::MAX`.
     for bad in ["3", "65", "18446744073709551615"] {
         let dest = root.join(format!("p-{bad}.tm"));
         let out = Command::cargo_bin("redextape")
@@ -345,7 +338,7 @@ fn an_out_of_range_field_width_flag_is_refused_and_writes_nothing() {
         assert!(!dest.exists(), "`--field-width {bad}` must leave no file behind");
     }
     // The sentinel and both bounds still work, and the file each writes still reads back — the
-    // property `65` broke. A guard that refused these would pass the loop above and be useless.
+    // property `65` would break. A guard that refused these would pass the loop above and be useless.
     for good in ["0", "4", "64"] {
         let dest = root.join(format!("ok-{good}.tm"));
         let out = Command::cargo_bin("redextape")
@@ -389,14 +382,13 @@ fn a_pinned_field_width_can_refuse_what_auto_fit_accepts() {
     // `emit_tm` has an `Overflow` arm ("a value does not fit this encoding's widest tape field")
     // and a `TooLarge` arm ("this program lowers to more than N TM states"), and both exit 2. A
     // regression routing the pinned path through `TooLarge` would keep the code and swap the
-    // message, and a code-only test would never see it — the shape that once let eleven mutations
-    // survive a full suite in this repository.
+    // message, and a code-only test would never see it.
     //
-    // **AND THE MESSAGE MUST BE THE PINNED PATH'S OWN, NOT THE AUTO-FIT PATH'S.** It read "a value
-    // does not fit this encoding's widest tape field (64 cells, `MAX_FIELD_WIDTH`)" here, where 64
-    // was never attempted — the field was 4 — and then suggested `--encoding binary`, which does not
-    // lift a pin (`--encoding binary --field-width 4` refuses this same program; `8` emits). So the
-    // width tried and the setting that pinned it are what is asserted.
+    // **AND THE MESSAGE MUST BE THE PINNED PATH'S OWN, NOT THE AUTO-FIT PATH'S.** The auto-fit message
+    // reads "a value does not fit this encoding's widest tape field (64 cells, `MAX_FIELD_WIDTH`)",
+    // where 64 was never attempted here — the field was 4 — and then suggests `--encoding binary`,
+    // which does not lift a pin (`--encoding binary --field-width 4` refuses this same program; `8`
+    // emits). So the width tried and the setting that pinned it are what is asserted.
     let text = String::from_utf8(pinned.stderr).unwrap();
     assert!(
         text.contains("a value does not fit a 4-cell tape field"),
@@ -413,14 +405,14 @@ fn a_pinned_field_width_can_refuse_what_auto_fit_accepts() {
     assert_eq!(fitted.status.code(), Some(0), "auto-fit widens and succeeds on the same program");
 }
 
-/// Item 2 (filed during the branch): nothing exercised `main`'s `Err(_) => Source::Defaults`
-/// fallback, taken when `std::env::current_dir()` fails.
+/// Exercises `main`'s `Err(_) => Source::Defaults` fallback, taken when
+/// `std::env::current_dir()` fails.
 ///
 /// **THE MECHANISM.** A process whose working directory has been removed out from under it gets
-/// `getcwd() -> -1 ENOENT` on Linux — confirmed directly before writing this test. `sh -c`
-/// reproduces that deterministically: `cd` into a directory, `rmdir` that SAME directory (which only
-/// succeeds because it holds nothing else), then `exec` the real binary so it STARTS with an
-/// already-gone cwd, rather than merely `chdir`-ing away from a still-valid one partway through.
+/// `getcwd() -> -1 ENOENT` on Linux. `sh -c` reproduces that deterministically: `cd` into a
+/// directory, `rmdir` that SAME directory (which only succeeds because it holds nothing else), then
+/// `exec` the real binary so it STARTS with an already-gone cwd, rather than merely `chdir`-ing away
+/// from a still-valid one partway through.
 /// Both the binary's own path and the file to lint are passed in absolute — a relative path cannot
 /// resolve against a cwd that no longer exists, which is exactly the condition under test.
 ///

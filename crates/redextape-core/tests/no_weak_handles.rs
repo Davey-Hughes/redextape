@@ -1,10 +1,10 @@
 //! The gate behind `LambdaTerm`'s hand-written `Drop`.
 //!
-//! That destructor unlinks the root's children so the compiler's field drop glue — which runs after
-//! it returns — has nothing deep to descend into. It reaches those children through `Rc::get_mut`,
-//! which is `Some` only while the strong count is 1 AND no weak handle to the same allocation
-//! exists. The strong count is checked at the call site. The second half was, until this file, a
-//! grep somebody ran once and wrote into a comment. This runs that grep.
+//! That destructor unlinks the root's children so the compiler's field drop glue — which runs
+//! after it returns — has nothing deep to descend into. It reaches those children through
+//! `Rc::get_mut`, which is `Some` only while the strong count is 1 AND no weak handle to the same
+//! allocation exists. The strong count is checked at the call site. This file runs the grep for
+//! the second half.
 //!
 //! THE BAN IS WIDER THAN THE INVARIANT AND THAT IS DELIBERATE. The invariant is about weak handles
 //! to a TERM's allocation; this refuses every weak handle anywhere under `src`, because deciding
@@ -21,9 +21,8 @@
 //! THE ROUTES BELOW DEFEAT IT, NAMED HERE RATHER THAN DISCOVERED LATER, in the same spirit as
 //! `redextape-test-support`'s derive-site scanner names its own. Naming them is not the same as
 //! having enumerated them: `NEEDLES` is a blacklist, and a blacklist holds only the spellings
-//! somebody has already thought of. `Rc::new_cyclic` was named here as a route until it was gated
-//! instead — it is now the fifth needle below — and that move shortened this list without making it
-//! complete.
+//! somebody has already thought of. `Rc::new_cyclic` is gated as the fifth needle below rather
+//! than listed here.
 //!
 //! 1. A macro that expands to a downgrade or a cyclic construction only at its call site.
 //! 2. A `#[path]` attribute resolving outside `src`.
@@ -41,7 +40,7 @@
 //! would fail against the very explanation it exists to enforce.
 
 // Test target: `clippy.toml`'s `allow-*-in-tests` keys do not reach free helpers in a `tests/`
-// target, so the exemption is stated per target, same as every other file under this directory.
+// target, so the exemption is stated per target.
 #![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic, clippy::pedantic)]
 
 use std::fs;
@@ -56,17 +55,13 @@ use std::path::Path;
 /// comment and this file's prose name. The method name is the one part that cannot be aliased the
 /// way the type path can, which is what makes the bare form hard to dodge without a macro.
 /// `Rc::downgrade` is the only FUNCTION that mints a weak handle from a strong one, but a needle
-/// matches a SPELLING, and conflating the two is what let the aliased call above pass this gate.
-/// Adding `downgrade` cost nothing when it was added: `grep -rn 'Weak\|downgrade' crates/*/src/`
-/// matched no line workspace-wide. `new_cyclic` is the odd one out: it mints nothing from a strong
-/// handle, it hands its closure a `&Weak<T>` to the allocation being built, so a call site can reach
-/// a weak handle with no `downgrade` and no `Weak` anywhere on the line — the closure's parameter
-/// type is inferred, so the call need name neither the type nor the method. It is spelled bare for
-/// the same reason `downgrade` is: `use std::rc::Rc as Handle;` then `Handle::new_cyclic(..)`
-/// contains no path-qualified form, and that exact alias construction is what defeated this gate
-/// once already. It too cost nothing when it was added: `grep -rn 'new_cyclic' crates/` matched no
-/// line outside this file's own doc. None of the five appears in ordinary prose about this subject,
-/// which is what lets the scan run over string literals as well as code.
+/// matches a SPELLING. `new_cyclic` is the odd one out: it mints nothing from a strong handle, it
+/// hands its closure a `&Weak<T>` to the allocation being built, so a call site can reach a weak
+/// handle with no `downgrade` and no `Weak` anywhere on the line — the closure's parameter type is
+/// inferred, so the call need name neither the type nor the method. It is spelled bare for the
+/// same reason `downgrade` is: `use std::rc::Rc as Handle;` then `Handle::new_cyclic(..)` contains
+/// no path-qualified form. None of the five appears in ordinary prose about this subject, which is
+/// what lets the scan run over string literals as well as code.
 const NEEDLES: [&str; 5] = ["Rc::downgrade", "Weak<", "rc::Weak", "downgrade", "new_cyclic"];
 
 /// The 1-based line number and trimmed text of every non-comment line of `src` carrying a needle.
@@ -100,13 +95,11 @@ fn walk(dir: &Path, hits: &mut Vec<String>) {
 /// needle verbatim inside a comment, so the assertion can only pass because `offending_lines`'
 /// comment filter removed the line — not because the fixture happened to dodge the substring it
 /// exists to prove the filter catches. One offending fixture — `Handle::downgrade(&t.0)` — spells
-/// the call under an aliased `Rc` path and names neither `Rc::downgrade` nor `Weak` at all, because
-/// that exact alias route once walked past every other needle and defeated an earlier version of
-/// this gate, so pinning it here exercises the `downgrade` needle from this tree rather than only
-/// from a report. A second offending fixture spells `Rc::new_cyclic` and was checked character by
-/// character to contain none of the other four needles, because a probe that also matches an older
-/// needle proves nothing about the new one: `downgrade` shipped for one commit with no probe that
-/// could fail for it alone, and every needle added since is pinned by a fixture that is its alone.
+/// the call under an aliased `Rc` path and names neither `Rc::downgrade` nor `Weak` at all, so it
+/// exercises the `downgrade` needle. A second offending fixture spells `Rc::new_cyclic` and
+/// contains none of the other four needles, because a probe that also matches another needle
+/// proves nothing about its own, so `new_cyclic`'s fixture, like `Handle::downgrade(&t.0)`,
+/// matches its needle alone.
 #[test]
 fn the_scan_catches_every_spelling_it_claims_to_and_no_prose() {
     for probe in [

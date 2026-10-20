@@ -11,9 +11,8 @@ proptest! {
     /// Those live in `CORPUS` and rest on the weaker layer, which design §11.3 states rather than
     /// leaves for a reader to discover.
     ///
-    /// This is a new caller of `arb_expr_over` and RECORDS NO RATE against it, so it adds no
-    /// constraint on that generator's recursion parameters — read its doc comment before changing
-    /// anything there.
+    /// This caller of `arb_expr_over` RECORDS NO RATE against it, so it adds no constraint on that
+    /// generator's recursion parameters — read its doc comment before changing anything there.
     #[test]
     fn the_grammar_agrees_with_classify_source_on_generated_programs(
         src in arb_expr_over((0u64..100).prop_map(|n| n.to_string()))

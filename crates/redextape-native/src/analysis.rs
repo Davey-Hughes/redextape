@@ -1,7 +1,7 @@
 //! Pure analysis over a register-asm `Program`: partition its flat `code` into per-subroutine
 //! bodies (`$main` plus each `fn`, per `lower_asm`'s calling convention — `Call`/`Ret`, `$main`
 //! ends in `Halt`), and compute each subroutine's arity, local-register count, and internal block
-//! labels. Task 4's Cranelift codegen compiles one native function per `Subroutine`.
+//! labels. The Cranelift codegen compiles one native function per `Subroutine`.
 //!
 //! **Why reachability, not slicing.** `lower_asm` emits every `fn` *inline*, at its definition
 //! site, guarded by a `Jmp` that jumps over the body (see `lower_asm::lower_function`):
@@ -10,7 +10,7 @@
 //! `Jmp`, and everything after `skip`). `$main`'s code is therefore **non-contiguous** in the raw
 //! index space. Any "sort entries ascending, slice by adjacent boundary" scheme misattributes
 //! `$main`'s epilogue (and its `Halt`) to the textually-last `fn`, and puts `$main`'s resume label
-//! into that `fn`'s labels — which would break Task 4's one-native-function-per-subroutine codegen.
+//! into that `fn`'s labels — which would break the one-native-function-per-subroutine codegen.
 //!
 //! Instead each subroutine's `body` is the set of instruction indices **reachable from its entry**
 //! by following control flow (`Jmp`/`Jz`/fallthrough), stopping at `Ret`/`Halt`, and treating a
@@ -42,8 +42,8 @@ pub struct Subroutine {
     /// `1 + max Loc(i) referenced` (read or written) across `body` (`0` if none).
     pub n_locals: u32,
     /// Labels whose index is in `body` and is not itself a subroutine entry (a `Call` target).
-    /// These are the intra-function block labels (`if`/`while` targets, guard `skip`s) Task 4 turns
-    /// into Cranelift blocks.
+    /// These are the intra-function block labels (`if`/`while` targets, guard `skip`s) that become
+    /// Cranelift blocks.
     pub internal_labels: Vec<(String, usize)>,
 }
 
@@ -121,7 +121,7 @@ fn reachable_from(prog: &Program, entry: usize) -> Result<BTreeSet<usize>, Lower
                 work.push(i + 1);
                 work.push(target(l)?);
             }
-            // A `Call` returns to the next instruction; the callee `l` is a SEPARATE subroutine and
+            // A `Call` returns to the next instruction; the callee is a SEPARATE subroutine and
             // is deliberately NOT added to this body.
             Instr::Call(_) => work.push(i + 1),
             // Everything else falls through to the next instruction.
@@ -176,7 +176,7 @@ pub fn partition(prog: &Program) -> Result<Vec<Subroutine>, LowerError> {
     // only ever reachable via `Call` and bodies are disjoint in practice (see the module doc). But
     // `partition` must DEFEND against a future producer change (or an adversarial hand-built
     // `Program`) where an entry is *also* reachable via fall-through from an earlier subroutine —
-    // that would silently compile the same instruction into two native functions in Task 4. Track
+    // that would silently compile the same instruction into two native functions. Track
     // every index claimed by an earlier entry's body and fault loudly on any overlap instead.
     let mut claimed: BTreeSet<usize> = BTreeSet::new();
 
@@ -188,12 +188,12 @@ pub fn partition(prog: &Program) -> Result<Vec<Subroutine>, LowerError> {
         }
         claimed.extend(visited.iter().copied());
 
-        // `Halt` stops the WHOLE program (`run_asm`); `Ret` returns to the caller. Task 4 compiles a
-        // non-`$main` subroutine into a native function that can only `return` to its caller, so a
-        // `Halt` inside a `fn` body would wrongly resume the caller (returning `rr`) instead of
-        // ending the program. `lower_asm` only ever emits `Halt` in `$main` (`entry == 0`), so this
-        // never rejects real lowered output — it turns a constructible wrong answer into a loud
-        // reject. (`entry == 0` is always `$main`; every other entry is a `Call` target.)
+        // `Halt` stops the WHOLE program (`run_asm`); `Ret` returns to the caller. A non-`$main`
+        // subroutine compiles into a native function that can only `return` to its caller, so a `Halt`
+        // inside a `fn` body would wrongly resume the caller (returning `rr`) instead of ending the
+        // program. `lower_asm` only ever emits `Halt` in `$main` (`entry == 0`), so this never rejects
+        // real lowered output — it turns a constructible wrong answer into a loud reject.
+        // (`entry == 0` is always `$main`; every other entry is a `Call` target.)
         if entry != 0 && visited.iter().any(|&i| prog.code.get(i) == Some(&Instr::Halt)) {
             return Err(unsupported(
                 "a non-`$main` subroutine contains `halt` (halt stops the whole program, not just the callee)",
@@ -284,7 +284,7 @@ mod tests {
     fn partitions_a_real_lower_asm_program() {
         // `lower_asm` emits `sum` inline (guarded by `jmp skip1`). Reachability gives the correct,
         // non-contiguous body for `$main` (prologue index 0, then the post-`skip` epilogue) and a
-        // clean, disjoint body for `sum.0` — the inline-layout misattribution is gone.
+        // clean, disjoint body for `sum.0`.
         let core = desugar(&parse("fn sum(n) { if n == 0 { 0 } else { n + sum(n - 1) } } sum(3)").0.unwrap());
         let prog = lower_asm(&core).unwrap();
         let subs = partition(&prog).unwrap();
@@ -292,16 +292,16 @@ mod tests {
         let main = subs.iter().find(|s| s.name == "$main").expect("a `$main` subroutine");
         let sum = subs.iter().find(|s| s.name.starts_with("sum")).expect("a `sum` subroutine");
 
-        // (c) sum takes one argument.
+        // `sum` takes one argument.
         assert_eq!(sum.arity, 1);
-        // (b) the two bodies are DISJOINT — the inline-layout bug is fixed.
+        // The two bodies are DISJOINT.
         let main_set: BTreeSet<usize> = main.body.iter().copied().collect();
         assert!(sum.body.iter().all(|i| !main_set.contains(i)), "main {:?} and sum {:?} overlap", main.body, sum.body);
-        // (d) `$main` owns the program's `Halt`; `sum` owns a `Ret`.
+        // `$main` owns the program's `Halt`; `sum` owns a `Ret`.
         assert!(main.body.iter().any(|&i| prog.code[i] == Instr::Halt), "main body should contain the Halt");
         assert!(!sum.body.iter().any(|&i| prog.code[i] == Instr::Halt), "sum body must NOT contain the Halt");
         assert!(sum.body.iter().any(|&i| prog.code[i] == Instr::Ret), "sum body should contain a Ret");
-        // The resume label `skip1` is `$main`'s, not `sum`'s (the misattribution the old slice hit).
+        // The resume label `skip1` is `$main`'s, not `sum`'s.
         assert!(main.internal_labels.iter().any(|(n, _)| n == "skip1"));
         assert!(!sum.internal_labels.iter().any(|(n, _)| n == "skip1"));
     }
@@ -309,8 +309,8 @@ mod tests {
     #[test]
     fn partitions_a_multi_fn_higher_order_program_into_disjoint_bodies() {
         // A higher-order program: `map` takes a function `f`. `lower_asm` rejects it directly (a
-        // function-as-value), so defunctionalize first — yielding THREE inline subroutines
-        // (`$apply1.*`, `map.*`, plus `$main`), each guarded by its own jump-over. Every fn entry
+        // function-as-value), so defunctionalize first — yielding two inline subroutines
+        // (`$apply1.*`, `map.*`), each guarded by its own jump-over, plus `$main`. Every fn entry
         // must partition into a disjoint body.
         let src = "fn map(xs, f) { if is_empty(xs) { nil } else { cons(f(head(xs)), map(tail(xs), f)) } } \
                    fn add1(x) { x + 1 } [1, 2].map(add1)";

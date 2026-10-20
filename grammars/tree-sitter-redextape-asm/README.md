@@ -490,7 +490,7 @@ Three things worth knowing before taking the Zed route:
 
 ## What the grammar covers
 
-`grammar.js` is **165 lines** — just under the mini-language's 171, and just over twice λ's 78.
+`grammar.js` is **160 lines** — just under the mini-language's 164, and just over twice λ's 77.
 `queries/highlights.scm` holds **10 patterns** over **9 capture names**, and `asm::CAPTURE_CLASSES` has
 **9 rows**, projecting onto **8** distinct `TokenClass` values, checked total in both directions
 (`the_capture_map_is_total_over_the_queries`, `every_map_row_is_used_by_a_query`) and each pattern

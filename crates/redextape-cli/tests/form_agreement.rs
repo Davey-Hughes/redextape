@@ -12,10 +12,10 @@
 //! worse, get weakened until it asserted nothing. What is worth pinning instead: one shared answer
 //! to "WHICH FORM is this", read through two different observable refusals.
 //!
-//! **THE FORM, NOT A BOOLEAN, AND THE DIFFERENCE IS WHAT THIS FILE IS FOR.** An earlier version
-//! collapsed the table's second column to `*expected != "rxt"` before comparing, which made
-//! `("p.asm", "asm")` and `("p.asm", "tm")` the same test: a defect mapping `.asm` onto `Form::Tm`
-//! left every row green, because both forms are equally "an artifact". Both commands print a noun
+//! **THE FORM, NOT A BOOLEAN, AND THE DIFFERENCE IS WHAT THIS FILE IS FOR.** Collapsing the table's
+//! second column to `*expected != "rxt"` before comparing would make `("p.asm", "asm")` and
+//! `("p.asm", "tm")` the same test: a defect mapping `.asm` onto `Form::Tm` would leave every row
+//! green, because both forms are equally "an artifact". Both commands print a noun
 //! that names the form outright — `run` says "a `.tm` file, which is already a machine" against "a
 //! `.asm` file, which is already a program", `fmt` says "a `.tm` file, …" against "an `.asm` file,
 //! …" — so the form is observable, and the column is compared against it rather than against a

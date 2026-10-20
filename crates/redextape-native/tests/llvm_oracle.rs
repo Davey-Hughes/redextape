@@ -3,23 +3,22 @@
 // `#[cfg(test)]` modules, not the free helpers below, so the exemption is stated per target.
 #![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic, clippy::pedantic)]
 #![cfg(all(feature = "llvm", feature = "cranelift"))]
-//! The LLVM oracle leg (Task 6, native Phase 2): extends `native_oracle.rs`'s four-way oracle
+//! The LLVM oracle leg: extends `native_oracle.rs`'s four-way oracle
 //! (`reference == λ == TM == native`) with a SECOND native codegen backend behind the same
 //! `Codegen`/`run_native_with` seam. Every case here is checked `reference == cranelift == llvm`.
 //!
 //! Gated on BOTH `llvm` and `cranelift` (not just `llvm`): this file's distinctive job is the DIRECT
 //! `cranelift == llvm` comparison, so it inherently needs both backends compiled in. `llvm`-only
-//! builds (`--no-default-features --features llvm`) still compile this crate/workspace cleanly (the
-//! global constraint) -- this test module just has zero tests in that configuration, rather than
-//! spuriously failing every case on `Codegen::Cranelift` reporting `unsupported("cranelift")`.
+//! builds (`--no-default-features --features llvm`) still compile this crate/workspace cleanly --
+//! this test module just has zero tests in that configuration, rather than spuriously failing every
+//! case on `Codegen::Cranelift` reporting `unsupported("cranelift")`.
 //!
 //! The sharpened claim this file adds (not just each backend separately pinned to the reference,
 //! which would let a cranelift-only or llvm-only bug hide behind "both happen to match the
 //! interpreter"): a DIRECT `cranelift == llvm` comparison, at every `OptLevel` (`O0`..`O3` plus the
-//! size-oriented `Os`/`Oz`). This is the literal cross-backend leg and the headline claim of the LLVM
-//! phase -- that `default<O1..O3>`/`default<Os,Oz>` optimization never changes the observable outcome
-//! relative to the unoptimized `O0` build OR relative to the independently-implemented Cranelift
-//! backend.
+//! size-oriented `Os`/`Oz`). This is the literal cross-backend leg, and it checks that
+//! `default<O1..O3>`/`default<Os,Oz>` optimization never changes the observable outcome relative to
+//! the unoptimized `O0` build OR relative to the independently-implemented Cranelift backend.
 //!
 //! `llvm.rs`'s own unit tests already sweep `OptLevel` against `run_asm` on hand-built `Program`s
 //! (internal, white-box); this file instead drives the PUBLIC surface (`run_native_with`, `Core` ->
@@ -89,11 +88,10 @@ const CASES: &[&str] = &[
     "fn map(xs,f){ if is_empty(xs){nil}else{cons(f(head(xs)),map(tail(xs),f))} } fn add1(x){x+1} [5,6].map(add1)",
     "head(tail([1, 2, 3]))",
     "100 * 100",
-    // A mutually recursive group (`Core::LetRecGroup`): the first program shape in this repo that
-    // produces a genuine SCC AMONG SUBROUTINES. Everything above is either self-recursive (`sum`) or
-    // a DAG (defunc'd `map` + `$apply1`), and an SCC is exactly what LLVM's bottom-up inliner treats
-    // specially -- in the backend where Phase 2 already found IPO-related defects. Three members, so
-    // the answer 1+2+4+1 = 8 pins the rotation of the cycle rather than merely its members.
+    // A mutually recursive group (`Core::LetRecGroup`): a genuine SCC AMONG SUBROUTINES. Everything
+    // above is either self-recursive (`sum`) or a DAG (defunc'd `map` + `$apply1`), and an SCC is
+    // exactly what LLVM's bottom-up inliner treats specially. Three members, so the answer
+    // 1+2+4+1 = 8 pins the rotation of the cycle rather than merely its members.
     "fn s0(n){ if n == 0 { 0 } else { 1 + s1(n - 1) } } \
      fn s1(n){ if n == 0 { 0 } else { 2 + s2(n - 1) } } \
      fn s2(n){ if n == 0 { 0 } else { 4 + s0(n - 1) } } s0(4)",
@@ -111,11 +109,11 @@ fn llvm_faults_and_caps_match() {
     // `head(nil)`/`tail(nil)`: the reference faults at runtime, and every codegen backend, at every
     // opt level, must report `Fault` -- not a value, not a crash, not a spurious `HitCap`.
     //
-    // The message TEXT is compared too, which the plan's literal Agreement Contract (same outcome
-    // CLASS) does not require. It costs nothing -- both backends route every fault through the same
-    // `rt_*` host functions, so the text is the runtime's, not either codegen's -- and it catches a
-    // whole "right class, wrong message" regression class: a backend synthesizing its own fault, or
-    // tripping a DIFFERENT fault condition than the other while landing in the same class.
+    // The message TEXT is compared too, beyond the same outcome CLASS. It costs nothing -- both
+    // backends route every fault through the same `rt_*` host functions, so the text is the
+    // runtime's, not either codegen's -- and it catches a whole "right class, wrong message"
+    // regression class: a backend synthesizing its own fault, or tripping a DIFFERENT fault
+    // condition than the other while landing in the same class.
     for src in ["head(nil)", "tail(nil)"] {
         let core = core_of(src);
         assert!(matches!(run(src), Err(RunError::Runtime(_))), "the reference must fault on `{src}`");
@@ -143,8 +141,8 @@ fn llvm_faults_and_caps_match() {
 // A small first-order expression generator (arithmetic/comparison/if only; shape supplied by
 // `redextape-test-support`'s `arb_expr_over`, shared with `native_oracle.rs`'s generators rather than
 // copied from them) for a randomized cross-backend differential. Kept deliberately SMALL: each
-// generated program here compiles SEVEN times (Cranelift once, plus LLVM at all six opt levels),
-// unlike the single-backend suite whose generator this one shares.
+// generated program here compiles thirteen times (one Cranelift pivot, then both backends at all six
+// opt levels), unlike the single-backend suite whose generator this one shares.
 proptest! {
     #![proptest_config(ProptestConfig { cases: 12, ..ProptestConfig::default() })]
 
@@ -156,7 +154,7 @@ proptest! {
     #[test]
     fn cranelift_and_llvm_agree_on_random_first_order_programs(src in arb_expr_below(1000)) {
         let (prog, ds) = parse(&src);
-        prop_assume!(ds.is_empty()); // skip anything that does not parse/type-check
+        prop_assume!(ds.is_empty()); // skip anything that does not parse
         let core = desugar(&prog.unwrap());
         let reference = run(&src);
         let cl = run_native_with(&core, DEFAULT_CAPS, Codegen::Cranelift { opt: OptLevel::default() });

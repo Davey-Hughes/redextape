@@ -1,9 +1,8 @@
 //! TM's grammar: its generated parser, its highlight queries, its capture table, and the thin
 //! wrappers over `print_tm_mapped`/`print_tm_with_mapped` that make them TM's authority.
 //!
-//! **THE TM FORM HAS TWO PRINTERS AND THEY EMIT DIFFERENT CLASS SETS**, which is the fact design §6.3
-//! got wrong until PR 3's survey corrected it. `print_tm_inner` is the one printer and the header
-//! `Option` is the only difference between the entry points:
+//! **THE TM FORM HAS TWO PRINTERS AND THEY EMIT DIFFERENT CLASS SETS.** `print_tm_inner` is the one
+//! printer and the header `Option` is the only difference between the entry points:
 //!
 //! | printer | header | classes | `Comment`? |
 //! |---|---|---|---|
@@ -14,8 +13,8 @@
 //! which classes that test can possibly exercise. See `printed_machine` and
 //! `printed_machine_with_header`.
 //!
-//! Model the layout on `lambda.rs`, which went through review — but note the shapes genuinely differ
-//! here, and that difference is the point rather than drift.
+//! Model the layout on `lambda.rs` — but note the shapes genuinely differ here, and that difference
+//! is the point rather than drift.
 
 use crate::grammar::{Grammar, compare_classified};
 use redextape_core::Span;
@@ -38,11 +37,11 @@ unsafe extern "C" {
 /// (`every_tm_query_pattern_fires_over_the_corpus`). Four of those patterns — `encoding`'s operand,
 /// `result`'s operand, a `tape` line's packed run, and `@comment` — are reachable ONLY from a headered
 /// file, so a corpus of header-less machines would leave them at zero coverage with every other test
-/// still green. That is the gap `every_query_pattern_fires` was promoted onto `Grammar` to catch. Two
+/// still green. That is the gap `every_query_pattern_fires` on `Grammar` catches. Two
 /// more — a stage name and a two-symbol code's symbols — are reachable only from a REDUCED file.
 ///
-/// The last two entries are design §6.3's residue: comment positions **no printer can produce**, so
-/// they have no differential authority and rest on this corpus plus `tree-sitter test`.
+/// The last three entries are design §6.3's residue: comment positions the differential cannot
+/// reach, so they have no differential authority and rest on this corpus plus `tree-sitter test`.
 pub const CORPUS: &[(&str, &str)] = &[
     ("a minimal machine", "tapes 1\nstart s\n\nstate s: accept\n"),
     (
@@ -78,12 +77,12 @@ pub const CORPUS: &[(&str, &str)] = &[
     ),
     // ---- design §6.3's residue: nothing in this project's pipeline emits any of these ----
     ("a whole-line comment", "; what this machine does\ntapes 1\nstart s\n\nstate s: accept\n"),
-    // `; stack` is the third residue shape and it is the subtlest: unlike the two below it, the
+    // `; stack` is the third residue shape and it is the subtlest: unlike the other two, the
     // PRINTER would happily write it — `tape_name` names indices 2, 3 and 4 `stack`, `heap` and
     // `box`. It is unreachable in practice because those three tapes start empty and
     // `TmHeader::new` drops empty tapes, so `run_tm_described` never produces a `tape 2` line at
-    // all. Reachable-in-principle, unreachable-in-fact: the differential cannot get to it, so it
-    // is carried here.
+    // all. Reachable-in-principle, unreachable-in-fact: the differential cannot get to it, so it is
+    // carried here.
     (
         "a comment naming a tape this compiler never starts non-empty",
         "tapes 3\nstart s\nversion 1\nencoding unary\nwidth 4\nslots 1\nresult Nat\ntape 2 #  ; stack\n\nstate s: accept\n",
@@ -100,8 +99,8 @@ pub const HIGHLIGHTS: &str = include_str!("../../../grammars/tree-sitter-redexta
 
 /// Where the two vocabularies meet, for this language.
 ///
-/// **THE TABLE MOVED TO `redextape_core::capture_map` AND THIS IS THE SAME DATA, NOT A COPY.** It moved
-/// because the web app needs it and cannot link this crate: `build.rs` compiles four generated
+/// **THE TABLE LIVES IN `redextape_core::capture_map` AND THIS IS THE SAME DATA, NOT A COPY.** It lives
+/// there because the web app needs it and cannot link this crate: `build.rs` compiles four generated
 /// `parser.c` into this one, so there is no wasm build of it. What stays here is everything that ties
 /// the table to a query — totality over `HIGHLIGHTS`, and the no-unused-row rule — because those are
 /// tests about a grammar rather than facts about a naming map.
@@ -136,14 +135,13 @@ pub static TM: Grammar = Grammar {
 /// `print_tm_mapped`, which prints one. Simulation is the TM-side analogue of the reduction the λ
 /// corpus is forbidden from doing. The cost that makes it worth forbidding is the LOWERING, not the
 /// run: `run_tm_described` builds a whole `Machine` before it steps once, and `MAX_MACHINE_STATES`
-/// bounds that at 1,000,000 states — **roughly 700 MB at the 700-725 bytes per state
-/// `examples/state_cost_probe.rs` measures** — refusing past it rather than growing. A reviewer
-/// should treat a `simulate` in this function as a defect.
+/// bounds that at 1,000,000 states (`examples/state_cost_probe.rs` measures a state's cost),
+/// refusing past it rather than growing. A reviewer should treat a `simulate` in this function as
+/// a defect.
 ///
 /// **Lowering is allowed to fail and that is not this function's failure to report** — `lower_asm`
 /// returns `Result` because `LowerError` outcomes are expected for some programs. Callers filter on
-/// `None`. Measured over `arb_expr_over` at both leaf ranges in use, 128 samples each: nothing
-/// refused. The filter is real and currently idle; design §11.5 says what actually needs sizing.
+/// `None`. The filter is real; design §11.5 says what actually needs sizing.
 ///
 /// `Unary::at(8)` rather than the default width: the field width is not what this corpus is about,
 /// and a narrow one keeps a printed machine at roughly 19 KB instead of considerably more.
@@ -159,20 +157,19 @@ pub fn printed_machine(src: &str) -> Option<(String, Vec<(Span, TokenClass)>)> {
 
 /// Lower a mini-language program and print it WITH a header, or `None` when it does not run.
 ///
-/// **THIS IS THE ONLY PATH IN THIS CRATE THAT REACHES `Comment` AND `Ident`**, and it is the reason
-/// design §6.3's gap is much narrower than that section originally claimed.
+/// **THIS IS THE ONLY PATH IN THIS CRATE THAT REACHES `Comment` AND `Ident`.**
 ///
 /// **IT SIMULATES, AND THAT IS PERMITTED HERE FOR EXACTLY THREE REASONS.** `run_tm_described` lowers,
 /// fits the field width, RUNS the machine under `TM_DEFAULT_CAPS`, and hands back a `DescribedRun`
 /// whose header the rest of the project already agrees is correct — `examples/tm_emit.rs` and
-/// `examples/regen_fixtures.rs` both call it, and the two checked-in `.tm` fixtures are its output.
-/// The alternative, hand-building a `TmHeader::new`, runs nothing but constructs a value no other
-/// non-test caller constructs that way, and a header built wrongly is a corpus that checks text
-/// nobody would ever write. The three bounds that make the simulation safe: `TM_DEFAULT_CAPS`, a
-/// FIXED hand-chosen program list (`HEADERED_CORPUS`), and small programs only. **No generated
-/// program may reach this function.**
+/// `examples/regen_fixtures.rs` both call it, and the two `.tm` fixtures `examples/regen_fixtures.rs`
+/// writes are its output. The alternative, hand-building a `TmHeader::new`, runs nothing but
+/// constructs a value no other non-test caller constructs that way, and a header built wrongly is a
+/// corpus that checks text nobody would ever write. The three bounds that make the simulation safe:
+/// `TM_DEFAULT_CAPS`, a FIXED hand-chosen program list (`HEADERED_CORPUS`), and small programs only.
+/// **No generated program may reach this function.**
 ///
-/// **WHAT IT ACTUALLY REACHES, MEASURED.** Every entry yields all nine classes. `Unary` yields ONE
+/// **WHAT IT ACTUALLY REACHES.** Every entry yields all nine classes. `Unary` yields ONE
 /// `Comment` span (`; reg`; `Unary::init_work()` is empty, so there is no `tape 1` line) and `Binary`
 /// yields TWO (`; reg`, `; work`). Tapes 2-4 — `stack`, `heap`, `box` — start empty and
 /// `TmHeader::new` drops empty tapes, so `; stack`, `; heap` and `; box` are unreachable from here and

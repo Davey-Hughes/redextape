@@ -1,10 +1,10 @@
 //! Token classification for every language in the project (§8, §9.4). One vocabulary spans all four,
 //! so a renderer learns one enum rather than four.
 //!
-//! CORE EMITS CLASSES, NEVER COLOURS. No ANSI, no CSS, no theme — those belong to consumers (the CLI,
+//! Core emits classes, never colours. No ANSI, no CSS, no theme — those belong to consumers (the CLI,
 //! the web UI), which keeps this crate WASM-clean and matches the model/renderer split §9.1 locks in.
 //!
-//! WHY THE PRINTERS REPORT SPANS INSTEAD OF SOMETHING RE-LEXING THEIR OUTPUT. Only the source language
+//! Why the printers report spans instead of something re-lexing their output: only the source language
 //! has a reusable lexer. λ's parser scans chars inline with no token type, and TM's and asm's are
 //! line-oriented and hand back a `Machine` and a `Program` — a shape, never a classified span. So
 //! "re-lex the printed text" would still mean three new scanners recovering structure the printer
@@ -12,15 +12,9 @@
 //! That is the second-parallel-implementation failure this project's conventions treat as a defect
 //! rather than a style choice.
 //!
-//! **This clause read "asm has no parser at all" until 2026-08-24, when `parse_asm` landed and made
-//! it false.** The count did not move: what rules a reader out here is that it returns a structure
-//! rather than spans, which is true of all three and was true of the two that already existed. The
-//! sentence named the wrong property — absence rather than shape — and a new parser exposed it.
-//!
-//! **NAME RESOLUTION IS NOT HERE.** The LSP navigation design describes `.rxt`'s binder pass as
-//! teaching this module to keep resolved symbols; it landed in `binder` instead, because this
-//! module classifies tokens and a scoping pass is a different concern with a different consumer.
-//! A reader following that phrasing wants `binder::nav_rxt`.
+//! **Name resolution is not here.** It is in `binder` (`binder::nav_rxt`): this module classifies
+//! tokens, and a scoping pass is a different concern with a different consumer. The LSP navigation
+//! design's phrasing places it in this module.
 
 use crate::core::NodeId;
 use crate::lexer::lex;
@@ -61,16 +55,16 @@ pub enum TokenClass {
 
 /// Every `TokenClass` variant's name, in declaration order, so `names[c as usize] == name of c`.
 ///
-/// EXPORTED SO THE TYPESCRIPT COPY CAN BE CHECKED RATHER THAN TRUSTED. `web/src/types.ts` holds the
-/// same list by hand, and until now nothing could verify it — the residual risk its own doc names is
-/// a variant added here and not mirrored there. That risk changes shape in Plan 5b: `LinkIndex` ships
-/// classes as a `Uint8Array` of discriminants, so a REORDERING (not just an addition) would silently
-/// mis-colour every span past the moved variant instead of producing an unrecognised string.
+/// Exported so the TypeScript copy can be checked rather than trusted. `web/src/types.ts` holds the
+/// same list by hand; the residual risk its own doc names is a variant added here and not mirrored
+/// there. `LinkIndex` ships classes as a `Uint8Array` of discriminants, so a REORDERING (not just an
+/// addition) would silently mis-colour every span past the moved variant instead of producing an
+/// unrecognised string.
 ///
 /// The list is written out rather than derived from a macro because the enum is written out too;
 /// a macro pairing the two would be a third thing to keep in step. The test below is what makes the
-/// pairing mechanical: it asserts the index of a variant at each end and in the middle, and pins the
-/// count, so an insertion anywhere fails rather than shifting the tail by one.
+/// pairing mechanical: it asserts every variant's index against its discriminant and pins the count,
+/// so an insertion or a transposition anywhere fails.
 #[must_use]
 pub fn token_class_names() -> &'static [&'static str] {
     &[
@@ -148,13 +142,11 @@ pub type Attributed = Vec<(Span, TokenClass, Option<NodeId>)>;
 /// mnemonic, tape symbol or move is not a state reference even when its text happens to be spelled
 /// like one, so it is left unattributed rather than looked up.
 ///
-/// TAKES NO `Machine`, AND THAT IS THE WHOLE OF THE GUARANTEE. It once took one, purely to turn the
-/// map's `StateId`s into the names the text uses; `SourceMap` now records that association itself, at
-/// build time, against the very machine it was built from (`SourceMap::tm_owner`). There is therefore
-/// no second object to pass and no wrong one to pass. The version that took both could not check they
-/// described one lowering: a map built at one encoding, indexed through a machine lowered at another,
-/// resolved each id to some other state's name and attributed the majority of state-naming spans to
-/// the wrong construct — no error, no empty result, just a confidently wrong highlight.
+/// Takes no `Machine`, and that is the whole of the guarantee. `SourceMap` records the association
+/// between its `StateId`s and the names the text uses itself, at build time, against the very machine
+/// it was built from (`SourceMap::tm_owner`), so there is no second object to pass and no wrong one
+/// to pass. A map indexed through a machine lowered at another encoding would attribute state-naming
+/// spans to the wrong construct, with no error and no empty result.
 ///
 /// Takes `text` because a `Span` carries offsets, not the bytes at those offsets — resolving a state
 /// name means slicing the string the spans were produced against. Total: an out-of-range span or an
@@ -181,9 +173,7 @@ pub fn classify_source(src: &str) -> Classified {
     let mut out: Classified =
         tokens.iter().filter(|t| t.kind != TokenKind::Eof).map(|t| (t.span, class_of(t.kind))).collect();
     // A MERGE, NOT A RECONCILIATION. A comment can never overlap a token — the lexer consumes it whole
-    // before emitting anything else — so ordering the union by start offset is the entire operation,
-    // and `class_of` stays the exhaustive match it was. `TokenClass::Comment` was declared and
-    // unreachable until this line.
+    // before emitting anything else — so ordering the union by start offset is the entire operation.
     out.extend(comments.iter().map(|c| (c.span, TokenClass::Comment)));
     out.sort_by_key(|(s, _)| s.start);
     out
@@ -265,11 +255,7 @@ mod tests {
     fn classify_source_is_total_on_malformed_input() {
         // Lexing a program with an illegal character must not panic, AND a file with a parse error
         // still has tokens to highlight -- highlighting a file with errors is exactly when it matters
-        // most (see `classify_source`'s own doc). This second half was held ONLY by the wasm crate's
-        // `the_free_exports_need_no_session` browser test, and went with it when Plan 7 part 3b
-        // deleted the `classifySource` export. This test did not hold it: it discarded its own result
-        // (`let _ = classify_source(...)`), which asserts no-panic and nothing about the tokens
-        // surviving. Restored here, which is where the property belongs.
+        // most (see `classify_source`'s own doc).
         let malformed = classify_source("let x = @@@;");
         assert!(!malformed.is_empty(), "a parse error still leaves tokens to classify and highlight");
         assert!(classify_source("").is_empty(), "an empty file has no tokens and no spans");

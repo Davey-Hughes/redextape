@@ -396,7 +396,7 @@ mod tests {
     }
 
     #[test]
-    fn a_lowered_header_decodes_as_it_always_has() {
+    fn decode_reduced_of_a_lowered_header_is_the_plain_decode() {
         let d = run_of(walk(&[Move::R], accept()), bank(true));
         let TmRun::Ran { tapes } = &d.run else { panic!("run_of always runs") };
         let want = decode_tape_ty_reason(tapes, &d.header.result, &*d.header.encoding());
@@ -456,8 +456,8 @@ mod tests {
         assert_eq!(value_of_run(&d.machine, &h, &bits, WALKING, Status::Halted), Err(RunFailure::NotAccept(WALKING)));
     }
 
-    /// The accept check is `reduce`'s promise about a reduced run. A lowered file reads exactly as it did before
-    /// reductions existed, whatever state it halts in.
+    /// The accept check is `reduce`'s promise about a reduced run. A lowered file reads its value whatever state
+    /// it halts in.
     #[test]
     fn a_lowered_run_is_not_held_to_an_accept_state() {
         let d = finished();

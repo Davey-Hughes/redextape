@@ -13,8 +13,8 @@
 //! the CLI prepending text no printer classifies, so `TokenClass::Comment` never appears on the
 //! authority side of this crate's asm differential. See `tests/asm.rs`.
 //!
-//! Model the layout on `tm.rs`, which went through review — but the shapes genuinely differ here
-//! and the differences are the point rather than drift.
+//! Model the layout on `tm.rs` — but the shapes genuinely differ here and the differences are the
+//! point rather than drift.
 
 use crate::grammar::{Grammar, compare_classified};
 use redextape_core::Span;
@@ -36,7 +36,7 @@ unsafe extern "C" {
 /// is unreachable from any printer at all, so a corpus of bare listings would leave them at zero
 /// coverage with every other test still green.
 ///
-/// The last three entries are the residue: a comment position no printer produces, and the two
+/// The last three entries are the residue: two comment positions no printer produces, and the two
 /// label names `_label_name`'s aliases exist for.
 pub const CORPUS: &[(&str, &str)] = &[
     ("an empty file", ""),
@@ -69,11 +69,11 @@ pub const HIGHLIGHTS: &str = include_str!("../../../grammars/tree-sitter-redexta
 
 /// Where the two vocabularies meet, for this language.
 ///
-/// **THE TABLE MOVED TO `redextape_core::capture_map` AND THIS IS THE SAME DATA, NOT A COPY.** It moved
-/// because the web app needs it and cannot link this crate: `build.rs` compiles four generated
-/// `parser.c` into this one, so there is no wasm build of it. What stays here is everything that ties
-/// the table to a query — totality over `HIGHLIGHTS`, and the no-unused-row rule — because those are
-/// tests about a grammar rather than facts about a naming map.
+/// **THE TABLE LIVES IN `redextape_core::capture_map` AND THIS IS THE SAME DATA, NOT A COPY.** It
+/// lives there because the web app needs it and cannot link this crate: `build.rs` compiles four
+/// generated `parser.c` into this one, so there is no wasm build of it. What stays here is everything
+/// that ties the table to a query — totality over `HIGHLIGHTS`, and the no-unused-row rule — because
+/// those are tests about a grammar rather than facts about a naming map.
 ///
 /// **THE MANY-TO-ONE `Label` ROWS ARE HELD APART BY A TEST, NOT BY THE MAP ITSELF.**
 /// `capture_map_has_no_duplicate_keys` checks the map is a function, not an injection, so it says
@@ -118,9 +118,8 @@ pub fn compare_printed(text: &str, want: &[(Span, TokenClass)]) -> Result<(), St
     compare_classified(&ASM, HIGHLIGHTS, text, want)
 }
 
-/// `lower_program`'s template, reproduced while `redextape_core::tm::lower_program` was private (it is
-/// public now). It is not the only copy: `redextape-native` holds two more, in `src/lib.rs` and
-/// `tests/native_oracle.rs`, each saying so in a doc comment.
+/// `lower_program`'s template, reproduced here. `redextape_core::tm::lower_program` is public, with the
+/// same steps and an `Err` where this returns `None`.
 ///
 /// **THE ORDER IS LOAD-BEARING AND IS NOT A PREFERENCE.** Try the program as first-order Core
 /// unchanged, and defunctionalize only when the direct attempt rejects it as higher-order.
@@ -154,8 +153,7 @@ fn lower_via_program_template(core: &redextape_core::core::Core) -> Option<redex
 /// forbidden from doing, and a reviewer should treat it as a defect.
 ///
 /// **Lowering is allowed to fail and that is not this function's failure to report.** Callers
-/// filter on `None`. Measured over 64 samples of `arb_expr_over` at the leaf range in use: nothing
-/// refused. The filter is real and currently idle.
+/// filter on `None`. The filter is real.
 #[must_use]
 pub fn printed_program(src: &str) -> Option<(String, Vec<(Span, TokenClass)>)> {
     let (program, _diagnostics) = redextape_core::parser::parse(src);
@@ -201,8 +199,7 @@ pub fn printed_program_with_header(src: &str) -> Option<(String, Vec<(Span, Toke
 /// **THE LAST FIVE ARE THIS CRATE'S OWN ADDITIONS, EACH FOR A NAMED GAP.** The mutable-capture
 /// closure is the only entry that needs the `defunc` retry and the only one that reaches
 /// `box`/`box_get`/`box_set`. The four comparisons reach `cmpne`, `cmplt`, `cmple` and `cmpge`,
-/// which `DEMOS` alone does not: measured, `DEMOS` plus the closure reaches 20 of 24 mnemonics and
-/// this list reaches all 24 (`the_fixed_corpus_reaches_every_mnemonic`).
+/// which `DEMOS` alone does not; `the_fixed_corpus_reaches_every_mnemonic` checks this list.
 pub const FIXED_CORPUS: &[&str] = &[
     "1 + 2 * 3",
     "3 - 5",

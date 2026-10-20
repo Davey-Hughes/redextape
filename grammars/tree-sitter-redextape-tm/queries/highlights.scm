@@ -1,10 +1,9 @@
 ; Highlight queries for the Redextape TM text form.
 ;
-; THESE MUST BE TOTAL OVER THE GRAMMAR'S OWN TOKENS, which is a constraint neither sibling grammar
-; carries. `print_tm_inner` pushes a span for EVERY non-whitespace byte it writes — separators
-; included — so a token this file leaves uncaptured becomes a length mismatch in the differential
-; rather than merely an uncoloured character. That is a feature: it means nothing here can quietly
-; go unchecked.
+; THESE MUST BE TOTAL OVER THE GRAMMAR'S OWN TOKENS. `print_tm_inner` pushes a span for EVERY
+; non-whitespace byte it writes — separators included — so a token this file leaves uncaptured
+; becomes a length mismatch in the differential rather than merely an uncoloured character. That is
+; a feature: it means nothing here can quietly go unchecked.
 ;
 ; NOTHING OVERLAPS. Every name in this form is one `identifier` token, told apart by the FIELD it
 ; sits in. Resist adding a broad `(identifier) @variable` catch-all: it would land on the same byte

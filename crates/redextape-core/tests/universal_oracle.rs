@@ -7,9 +7,9 @@
 //! two and three tapes, and a proptest over small generated machines, are what show the UTM reads the tape
 //! count from its input.
 //!
-//! **TIERS FOLLOW THE DEV PROFILE**, which runs the UTM over 20 times slower than a release build. The fast tier
-//! holds the compiled programs under about a second there, under the default caps; the rest are `#[ignore]`d,
-//! run under `UTM_CAPS`, and `scripts/check-slow.sh` runs them in `--release`.
+//! **TIERS FOLLOW THE DEV PROFILE**, which runs the UTM far slower than a release build. The fast tier holds the
+//! compiled programs under about a second there, under the default caps; the rest are `#[ignore]`d, run under
+//! `UTM_CAPS`, and `scripts/check-slow.sh` runs them in `--release`.
 
 #![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic, clippy::pedantic)]
 
@@ -24,9 +24,8 @@ mod common;
 use common::{acyclic_machine, core_and_ty, one_rule_machine, run_with_origins};
 
 /// The slow tier's caps: enough steps for its largest row, `sum(5)` under unary, which the UTM runs in
-/// 7,315,621,686; the cells cap stays the default's, far above the 204,401 cells the largest row uses. The fast
-/// tier keeps `DEFAULT_CAPS`, whose 5,000,000 steps are twice the 2,432,575 its largest compiled row takes, so a
-/// UTM that never halts fails there on a cap instead of running toward these.
+/// 7,315,621,686; the cells cap stays the default's. The fast tier keeps `DEFAULT_CAPS`, so a UTM that never
+/// halts fails there on a cap instead of running toward these.
 const UTM_CAPS: Caps = Caps { steps: 10_000_000_000, cells: DEFAULT_CAPS.cells };
 
 /// The guest's current state id, decoded from a snapshot of [`STATE`]: the status cell, then the id's bits
@@ -233,8 +232,8 @@ fn three_tape_guests_agree() {
 }
 
 proptest! {
-    // A failing case runs again at every shrink step, and a UTM that never halts takes each run to its cap, so
-    // shrinking is also bounded at ten seconds: proptest's own bound is 1,024 runs, four times the 256 cases.
+    // A failing case runs again at every shrink step, and a UTM that never halts takes each run to its cap,
+    // so shrinking is also bounded at ten seconds.
     #![proptest_config(ProptestConfig { max_shrink_time: 10_000, ..ProptestConfig::default() })]
     #[test]
     fn random_acyclic_machines_agree_with_the_universal_machine((m, inits) in acyclic_machine()) {
@@ -244,7 +243,7 @@ proptest! {
 
 /// **A GREEN PROPTEST SAYS NOTHING ABOUT WHAT IT GENERATED**, so the generator's reach is held on a fixed
 /// seed: every tape count appears, and the left half is reached. Each floor is a tenth of the cases, well under
-/// what the generator measured when this was written; the printed line gives the live counts.
+/// the generator's measured reach; the printed line gives the live counts.
 #[test]
 fn the_acyclic_generator_reaches_every_tape_count_and_the_left_half() {
     use proptest::strategy::ValueTree;

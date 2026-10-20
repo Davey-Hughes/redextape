@@ -82,6 +82,4 @@ fn main() {
     let (reparsed, diags) = parse_lambda(&printed);
     println!("   `2` compiles to        {}", printed);
     println!("   re-parses identically: {}   (diagnostics: {})", reparsed.as_ref() == Some(&church_two), diags.len(),);
-
-    println!("\nAll of the above is the data the future web UI (Plan 5) will render.\n");
 }

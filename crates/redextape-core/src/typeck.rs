@@ -80,8 +80,7 @@ impl TyEnv {
 /// Every nested expression and block passes through one of these two functions, so counting their
 /// combined recursion depth bounds the typechecker's native stack usage; input nested deeper than
 /// this yields a `Diagnostic` instead of a typechecker stack overflow (an uncatchable process
-/// abort). Chosen empirically at roughly half the depth that overflows an 8 MiB debug main thread
-/// (see the crash-harness measurements in the robust-fix report).
+/// abort). Set at roughly half the depth that overflows an 8 MiB debug main thread.
 const MAX_TYPE_DEPTH: u32 = 1500;
 
 struct Infer {
@@ -261,27 +260,23 @@ impl Infer {
         ty
     }
 
-    /// Typecheck a maximal run of consecutive `Stmt::Fn` as a single mutually-recursive group:
-    /// every name in the run is bound monomorphically (its own `param_tys`/`ret`/`fun`) before any
-    /// body is checked, then each body is checked in turn against that shared, fully-bound
-    /// environment. This is what lets `fn a(n){ b(n) }` (or a genuine cycle) see a name defined
-    /// later in the same run — the ordering gate that used to reject both forward references and
-    /// mutual recursion.
+    /// Typecheck a maximal run of consecutive `Stmt::Fn` as a single mutually-recursive group: every
+    /// name in the run is bound monomorphically (its own `param_tys`/`ret`/`fun`) before any body is
+    /// checked, then each body is checked in turn against that shared, fully-bound environment. This
+    /// is what lets `fn a(n){ b(n) }` (or a genuine cycle) see a name defined later in the same run.
     ///
-    /// Everything else matches the original per-`fn` discipline: `rec_mark`/`body_mark`,
+    /// Everything else is the per-`fn` discipline: `rec_mark`/`body_mark`,
     /// `unify(&ret, &body_ty, *span)`, and re-binding each name with a generalized scheme once all
     /// bodies are checked. `fns` is non-empty and every element is `Stmt::Fn` (the caller's run).
     ///
-    /// Two members of one run may NOT share a name — that is an error, reported here. This is a
-    /// DELIBERATE LANGUAGE CHANGE: before mutual recursion, `fn a … fn a …` was legal and the last
-    /// definition simply won, because each `fn` was bound in turn. Pre-binding the whole run makes
-    /// that shape genuinely ambiguous rather than merely redundant: last-wins requires the second `a`
-    /// to be the INNERMOST binding, while a sibling that calls `a` requires `a` to be OUTSIDE it, and
-    /// with `fn b(z){ a(z) } fn a(x){ x } fn a(y){ true }` no ordering satisfies both — the program
-    /// typechecks as `Bool` (last-wins) but evaluates through the first `a` to a `Nat`. There is no
-    /// winner to pick, so the honest move is to reject, as Rust does ("the name `a` is defined
-    /// multiple times"). Two runs separated by a non-`fn` statement are unaffected: those are
-    /// ordinary shadowing, not a duplicate, and stay legal.
+    /// Two members of one run may NOT share a name — that is an error, reported here. Pre-binding the
+    /// whole run makes `fn a … fn a …` genuinely ambiguous rather than just shadowing: last-wins
+    /// requires the second `a` to be the INNERMOST binding, while a sibling that calls `a` requires
+    /// `a` to be OUTSIDE it, and with `fn b(z){ a(z) } fn a(x){ x } fn a(y){ true }` no ordering
+    /// satisfies both — the program typechecks as `Bool` (last-wins) but evaluates through the first
+    /// `a` to a `Nat`. There is no winner to pick, so the honest move is to reject, as Rust does
+    /// ("the name `a` is defined multiple times"). Two runs separated by a non-`fn` statement are
+    /// unaffected: those are ordinary shadowing, not a duplicate, and stay legal.
     fn infer_fn_run(&mut self, env: &mut TyEnv, fns: &[Stmt]) {
         let rec_mark = env.mark();
         // Pass 1: create every function's type and bind its name monomorphically, all before any
@@ -640,17 +635,16 @@ mod tests {
 
     #[test]
     fn two_fns_in_one_run_may_not_share_a_name() {
-        // A DELIBERATE LANGUAGE CHANGE: `fn a … fn a …` used to be legal (last one won). Pre-binding
-        // the whole run makes it ambiguous rather than redundant, so it is now rejected — see
-        // `infer_fn_run`'s doc comment.
+        // `fn a … fn a …` in one run is rejected: pre-binding the whole run makes it ambiguous
+        // rather than redundant — see `infer_fn_run`'s doc comment.
         //
         // The unsound shape this closes: this program typechecks as `Bool` (last-wins picks the
         // second `a`) but, since `b` needs `a` bound OUTSIDE it, evaluates through the FIRST `a` to
         // `Nat(3)` — a well-typed program producing a value of the wrong type. No ordering can
         // satisfy both constraints, which is why the answer is rejection and not a better ordering.
         assert_err("fn b(z){ a(z) } fn a(x){ x } fn a(y){ true } a(3)", "the name `a` is defined multiple times");
-        // The silent value change the same map caused: `b(3)` was 3 (the first `a`), became 4 (the
-        // second). Both readings are defensible, which is the point — neither is now on offer.
+        // Without the rejection, `b(3)` is 3 if the first `a` wins and 4 if the second does. Both
+        // readings are defensible, which is the point — neither is on offer.
         assert_err("fn a(x){ x } fn b(y){ a(y) } fn a(z){ z + 1 } b(3)", "the name `a` is defined multiple times");
         // Three definitions: reported once per redefinition, and the run still typechecks onward.
         assert_err("fn a(x){a(x)} fn a(x){a(x)} fn a(x){x} a(1)", "the name `a` is defined multiple times");
@@ -667,8 +661,7 @@ mod tests {
     #[test]
     fn the_same_name_in_two_different_runs_is_still_legal() {
         // Only a duplicate WITHIN one adjacent run is rejected. A non-`fn` statement ends the run, so
-        // the second `fn a` is ordinary shadowing — exactly as before this change — and must not be
-        // caught by the duplicate check.
+        // the second `fn a` is ordinary shadowing and must not be caught by the duplicate check.
         assert_ok("fn a(x){ x } let sep = 0; fn a(y){ y + 1 } a(3)");
         assert_eq!(crate::run("fn a(x){ x } let sep = 0; fn a(y){ y + 1 } a(3)").unwrap(), crate::value::Value::Nat(4));
         // Same name at a different nesting level is likewise untouched.
@@ -697,8 +690,8 @@ mod tests {
     fn an_error_expression_types_as_a_fresh_variable_and_adds_no_type_error() {
         use crate::ast::{BinOp, Block, Expr, Program};
         // `1 + <error>`. A fresh variable unifies with Nat, so the ONLY diagnostic a user sees for
-        // a broken file is the parse error — not a type error stacked on top of it. Sabotage: make
-        // the arm answer `Ty::Bool` and this reddens.
+        // a broken file is the parse error — not a type error stacked on top of it. An arm answering
+        // `Ty::Bool` fails this.
         let program = Program {
             block: Block {
                 stmts: Vec::new(),
@@ -721,8 +714,7 @@ mod tests {
         // an `if` condition unifies against `Ty::Bool`. An arm that answered a hardcoded `Ty::Nat`
         // instead of `self.fresh()` would still pass the test above (a fresh `Var` unifies with
         // `Nat` too, same as it does here), while it would cascade a spurious "expected `Nat`,
-        // found `Bool`" type-mismatch diagnostic on this one. Sabotage: make the arm answer
-        // `Ty::Nat` and this reddens.
+        // found `Bool`" type-mismatch diagnostic on this one. An arm answering `Ty::Nat` fails this.
         let then_blk = Block {
             stmts: Vec::new(),
             tail: Some(Box::new(Expr::Nat { value: 1, span: Span::new(4, 5) })),

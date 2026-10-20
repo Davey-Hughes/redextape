@@ -6,13 +6,13 @@
 //!
 //!   * **Counted, not content-driven, by default.** Most gadgets here — `write_literal`, `decode_nat`,
 //!     and the shared `seek_slot`/`rewind_home` navigation they build on — walk exactly `width` cells
-//!     and stop, instead of scanning to a blank. This is the style the BOX tape already uses,
-//!     generalized to every tape. `branch_on_zero` (below) is a deliberate exception: it scans for a
-//!     `MARK` and exits as soon as it meets one, because "is any digit set" cannot be decided by
-//!     counting cells — see its own doc for why.
-//!   * **No strict bound.** `MAX_FIELD_WIDTH`'s "a padding blank must always remain" (and the
-//!     `rewind_home` miscount it prevents) is an artifact of content-driven loops over a mark/blank
-//!     alphabet. It has no analogue here: every field is the same length and both digits are content.
+//!     and stop, instead of scanning to a blank. This is the style the BOX tape uses, applied to
+//!     every tape. `branch_on_zero` (below) is a deliberate exception: it scans for a `MARK` and
+//!     exits as soon as it meets one, because "is any digit set" cannot be decided by counting
+//!     cells — see its own doc for why.
+//!   * **No strict bound.** Unary's `v < width` (the padding blank `rewind_home` needs; see
+//!     `MAX_FIELD_WIDTH`'s doc) is an artifact of content-driven loops over a mark/blank alphabet. It
+//!     has no analogue here: every field is the same length and both digits are content.
 //!
 //! Overflow is still real, and still routes to `Builder::overflow()`: a carry out of the top digit, a
 //! 1 shifted out of the top by `mul`, or a literal needing more than `width` digits.
@@ -33,8 +33,7 @@ pub(crate) const BITS: &[Symbol] = &[ZERO, MARK];
 /// no multiplier register and no loop counter — the loop is unrolled at build time), and `eq` parks
 /// its intermediate in REG `rd`, a fresh temporary, exactly as `Unary::eq_to_work` does.
 ///
-/// `mov` (Task 7) is its first consumer, and later gadgets will follow; `write_literal`/`jz`/
-/// `decode_nat` never touch WORK at all.
+/// `write_literal`/`jz`/`decode_nat` never touch WORK at all.
 pub(crate) const W_ACC: Slot = 0;
 
 /// How many fields `init_work` lays out.
@@ -136,10 +135,10 @@ fn ripple_add(b: &mut Builder, from: StateId, rb: Slot, label: &str) -> StateId 
     b.add_rule(c0, RuleSpec::new().on(REG, Some(SEP), None, Move::L).on(WORK, Some(SEP), None, Move::L), fin);
     let overflow = b.overflow();
     // Reads BOTH tapes' `SEP`, mirroring `c0` above and both of `ripple_sub`'s exits. Equal-width
-    // lockstep means the two heads always arrive together, so this is defence in depth, not a
-    // correctness fix — but if that invariant were ever broken, a desync would then surface as a STUCK
-    // HALT (which the gadget harness catches by name) rather than being mislabelled as an overflow,
-    // which `run_tm_fitted` would act on by retrying at a wider bank.
+    // lockstep means the two heads always arrive together, so this is defence in depth — but if
+    // that invariant were ever broken, a desync would then surface as a STUCK HALT (which the gadget
+    // harness catches by name) rather than being mislabelled as an overflow, which `run_tm_fitted`
+    // would act on by retrying at a wider bank.
     b.add_rule(c1, RuleSpec::new().on(REG, Some(SEP), None, Move::S).on(WORK, Some(SEP), None, Move::S), overflow);
     let h1 = rewind_home(b, fin, REG, BITS, rb, &format!("{label}.r1"));
     rewind_home(b, h1, WORK, BITS, W_ACC, &format!("{label}.r2"))
@@ -249,10 +248,9 @@ fn zero_field(b: &mut Builder, from: StateId, width: usize, tape: usize, slot: S
 /// O(width) steps. The digit shifted OUT of the top is `old[width-1]`; if it is set, the product does
 /// not fit and the walk routes to the shared overflow guard before touching anything.
 ///
-/// CORRECTION: earlier text here also claimed O(1) states. That was wrong — the counted walk to the
-/// MSB (`for i in 1..width`, below) allocates one fresh state per digit, so a single call is O(width)
-/// states, same order as its step count. See the `Mul` arm's comment for the consequence this has for
-/// `Mul` as a whole.
+/// The counted walk to the MSB (`for i in 1..width`, below) allocates one fresh state per digit, so a
+/// single call is O(width) states, same order as its step count. See the `Mul` arm's comment for the
+/// consequence this has for `Mul` as a whole.
 fn shift_left_acc(b: &mut Builder, from: StateId, width: usize, label: &str) -> StateId {
     let at = seek_slot(b, from, WORK, BITS, W_ACC, &format!("{label}.s")); // on digit 0
     // Counted walk to the MSB, so it cannot depend on content.
@@ -327,9 +325,9 @@ fn bit_is_one(
 // ---- STACK tape sub-primitives (free functions; each preserves the STACK "top" invariant) ----
 //
 // The STACK holds `[field]#[field]#…#[field]#` with the head on the BLANK immediately after the last
-// `#` (the "top"). That SKELETON is unchanged from `Unary` (`stack_is_empty`, shared in `encoding.rs`,
-// is untouched). What changes is that a field is exactly `width` digits rather than a variable-length
-// mark run, so push and pop below are COUNTED walks instead of scans to a blank.
+// `#` (the "top"). That SKELETON is `Unary`'s (`stack_is_empty` is shared, in `encoding.rs`). What
+// differs is that a field is exactly `width` digits rather than a variable-length mark run, so push
+// and pop below are COUNTED walks instead of scans to a blank.
 
 /// Append `W_ACC`'s digits as a new `width`-cell field terminated by `#` at the STACK top. `from`:
 /// WORK home, STACK head at the top. On exit the STACK head is at the new top and WORK is home with
@@ -452,7 +450,6 @@ fn branch_on_equals(
     // each. That is a SIMPLICITY choice, not a necessity: `rewind_home` self-loops over content until
     // it meets `SEP`, so it is offset-independent within a field and one shared mismatch exit would be
     // equally correct — and O(width) states cheaper per call, which `dispatch_tag` pays once per exit.
-    // Recorded as a known non-minimality rather than left implying the per-digit exits are required.
     for i in 0..width {
         let nxt = b.state(format!("{label}.e{i}"));
         let ne = b.state(format!("{label}.x{i}"));
@@ -475,14 +472,10 @@ fn branch_on_equals(
 
 /// Blindly advance `tape`'s head `n` cells in direction `mv`, writing nothing and reading with a
 /// wildcard — safe precisely because it never writes, so no "explicit non-`#` read" obligation applies.
-/// Shared machinery for the HEAP walkers above and the BOX walkers below: both must cross an
-/// already-located, fixed-length cell/field once its start is known, and before this was extracted that
-/// "blindly skip N cells" loop was duplicated three times over (once per HEAP walker). There are now
-/// ELEVEN call sites — 3 on HEAP and 8 on BOX, the latter in both directions, since BOX's
-/// origin-preserving design skips forward to seek/count and backward to return home. (An earlier
-/// version of this comment said "four more, five total beyond three"; it undercounted, and the commit
-/// message that introduced it repeats the wrong figure.)
-/// `from`/exit: `tape` head moved exactly `n` cells.
+/// Shared machinery for the HEAP and BOX walkers below: both must cross an already-located,
+/// fixed-length cell/field once its start is known. There are ELEVEN call sites — 3 on HEAP and 8 on
+/// BOX, the latter in both directions, since BOX's origin-preserving design skips forward to
+/// seek/count and backward to return home. `from`/exit: `tape` head moved exactly `n` cells.
 fn skip_cells(b: &mut Builder, from: StateId, tape: usize, n: usize, mv: Move, label: &str) -> StateId {
     let mut cur = from;
     for k in 0..n {
@@ -497,7 +490,7 @@ fn skip_cells(b: &mut Builder, from: StateId, tape: usize, n: usize, mv: Move, l
 //
 // The HEAP holds `@ <head digits> # <tail digits>` cons cells laid left-to-right, the head on the
 // BLANK immediately after the last cell (the "top"); an empty heap has the head at the origin over a
-// blank. Cells sit at 1-based addresses (nil = pointer 0). What changes from `Unary`'s HEAP is that a
+// blank. Cells sit at 1-based addresses (nil = pointer 0). What differs from `Unary`'s HEAP is that a
 // cell is FIXED width — `heap_cell_len(width)` cells, always — rather than a variable-length mark run,
 // so moving from one cell to the next is a COUNTED skip rather than a content scan. Locating the FIRST
 // cell from the top is still a content scan (`heap_rewind_to_first_cell`): the NUMBER of cells is not
@@ -744,7 +737,7 @@ fn deref_op(b: &mut Builder, entry: StateId, exit: StateId, rl: Slot, rd: Slot, 
 // `#` (the ORIGIN) on entry AND exit of every `box_*` gadget — an empty box has origin == top, both at
 // cell 0. This is `Unary`'s BOX convention (see `unary.rs`'s "rest at the ORIGIN" section), NOT `Binary`
 // HEAP's "rest at the top" convention: every walk below therefore starts already AT the position it
-// needs (the origin), so unlike the HEAP walkers there is no rewind-to-first-cell step. What changes
+// needs (the origin), so unlike the HEAP walkers there is no rewind-to-first-cell step. What differs
 // from `Unary` is only that a field is FIXED width — `width` digits, always — rather than a
 // blank-padded mark run, so crossing one is a COUNTED skip (`box_field_len(width)` cells) instead of a
 // content scan, and reading/writing a field's value is a counted digit copy rather than a mark/blank
@@ -902,15 +895,13 @@ fn box_return_to_origin_bin(b: &mut Builder, from: StateId, width: usize, label:
 // The two decoders below find a word's extent from the tape's own DELIMITERS — `#` on REG and BOX,
 // `@`/`#` on HEAP — and never consult `self.width`. A `Binary` at any width therefore reads a tape
 // laid out at any other, which is what lets `decode_tape` work without being told the width the
-// machine was lowered at. `Unary`'s mark-counting decode always had that property; this is what
-// removes the asymmetry.
+// machine was lowered at. `Unary`'s mark-counting decode has the same property.
 //
-// What it gives up, deliberately: the decoder no longer double-checks each word's LENGTH. A word
-// truncated by a clobbered high digit used to read as `None`; it now reads as the smaller number the
-// remaining digits spell. That check is not lost, only moved — the REG bank's field width is checked
-// directly by `tests/common::reg_bank_is_well_formed` (the skeleton must be exactly
-// `1 + slots * (width + 1)` cells with a `#` at every boundary), and the HEAP's word length by
-// `heap_tape_is_well_formed`, which grew a length check in the same change for exactly this reason.
+// What it gives up, deliberately: the decoder does not double-check each word's LENGTH. A word
+// truncated by a clobbered high digit reads as the smaller number the remaining digits spell, not as
+// `None`. That check lives elsewhere — the REG bank's field width is checked directly by
+// `tests/common::reg_bank_is_well_formed` (the skeleton must be exactly `1 + slots * (width + 1)`
+// cells with a `#` at every boundary), and the HEAP's word length by `heap_tape_is_well_formed`.
 
 /// Count the leading cells of `cells` that are binary field content, i.e. the extent of a word.
 ///
@@ -929,7 +920,7 @@ fn digit_run(cells: &[Symbol]) -> usize {
 fn word(digits: &[Symbol]) -> Option<u64> {
     let mut acc = 0u64;
     for (k, &d) in digits.iter().enumerate() {
-        // `clippy::match_same_arms`: `MARK` (k >= 64) and `_` both `return None` today, but they are
+        // `clippy::match_same_arms`: `MARK` (k >= 64) and `_` both `return None`, but they are
         // not the same case — a set bit past the `u64` ceiling is a real digit this function simply
         // cannot represent, while `_` is a foreign symbol that should never reach here at all (see the
         // doc comment above: "a silent 0 for a foreign symbol is the failure mode this file must not
@@ -1073,14 +1064,7 @@ impl Encoding for Binary {
                 // (O(i) states for digit `i`, so O(width) summed over one full unrolled loop). So `Mul`
                 // as a whole is O(width²) states, NOT O(width).
                 //
-                // CORRECTION: an earlier version of this comment claimed O(width) states and "several
-                // hundred" at width 64. Both the exponent and the magnitude were wrong. Counting every
-                // `b.state()` call across `zero_field`/`shift_left_acc`/`bit_is_one`/`ripple_add`/
-                // `copy_field`, for this test harness's `ra=0, rb=1, rd=2` slot layout, gives the
-                // measured closed form `1.5*w^2 + 26.5*w + 13` (a fit for this specific three-slot
-                // shape, not a universal constant): 143 states at width 4, 821 at width 16, and 7,853
-                // at width 64 for a single `Mul` instruction — thousands, not "several hundred". A
-                // known trade regardless.
+                // The quadratic cost is a known trade.
                 let l = format!("bmul{entry}");
                 let mut cur = zero_field(b, entry, self.width, WORK, W_ACC, &format!("{l}.z"));
                 for i in (0..self.width).rev() {
@@ -1305,9 +1289,9 @@ impl Encoding for Binary {
     }
 
     fn heap_word_len(&self) -> Option<usize> {
-        // `heap_open`/`heap_append` write exactly `width` digits per word, the same as a REG field —
-        // binary pads with leading-position ZEROs rather than with blanks, so a word's length carries no
-        // information about its value and is fixed.
+        // `heap_open_cell_bin`/`heap_append_bin` write exactly `width` digits per word, the same as a
+        // REG field — binary pads with leading-position ZEROs rather than with blanks, so a word's
+        // length carries no information about its value and is fixed.
         Some(self.width)
     }
 
@@ -1348,8 +1332,7 @@ impl Encoding for Binary {
 /// even number zero.
 // `z`/`nz`/`home_z`/`home_nz` name the zero/nonzero branch pair this gadget builds, matching
 // `if_zero`/`if_nonzero` above them — the same zero/nonzero naming convention `Unary`'s own
-// `rewind_home` call sites use. Not a coincidental collision `clippy::similar_names` should rename
-// away.
+// `rewind_home` call sites use. Not a coincidental collision `clippy::similar_names` should rename away.
 #[allow(clippy::similar_names)]
 pub(crate) fn branch_on_zero(
     b: &mut Builder,

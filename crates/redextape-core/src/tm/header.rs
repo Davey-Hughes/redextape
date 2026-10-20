@@ -1,16 +1,15 @@
 //! What a `.tm` file records ABOUT its machine, as opposed to the machine itself.
 //!
-//! A Turing machine is a transition function plus an initial configuration. The text form serialized
-//! only the first half: `print_tm` emits δ and q₀ and nothing about how the machine STARTS, so a
-//! printed machine round-tripped faithfully as a machine and still could not be run or read back from
-//! the file alone. `TmHeader` is the second half — the literal initial tapes, so any TM simulator can
-//! run the file with no knowledge of this project's encodings, plus the `encoding`/`width`/`slots`/
-//! `result` recipe needed to interpret the answer.
+//! A Turing machine is a transition function plus an initial configuration. `print_tm` emits δ and q₀
+//! and nothing about how the machine STARTS, so a machine printed without a header round-trips
+//! faithfully as a machine and still cannot be run or read back from the file alone. `TmHeader` is the
+//! second half — the literal initial tapes, so any TM simulator can run the file with no knowledge of
+//! this project's encodings, plus the `encoding`/`width`/`slots`/`result` recipe needed to interpret
+//! the answer.
 //!
 //! **The header is OPTIONAL and adds no capability to the machine — it removes an INPUT requirement.**
 //! `simulate(&m, &init, caps)` needs the caller to supply `init`; with a header, `init` can come from
-//! the file instead. Nothing about δ, the start state, or execution changes, which is why a
-//! header-less file stays exactly as runnable as it was.
+//! the file instead. Nothing about δ, the start state, or execution changes.
 //!
 //! **Returned alongside a `Machine`, never stored on one.** `lower_tm.rs` states the rule twice:
 //! `Machine` derives `PartialEq` and the round-trip asserts `parse_tm(print_tm(m)) == m`, which a
@@ -171,7 +170,7 @@ macro_rules! encoding_kinds {
             /// count, so it says "every" rather than naming the current two — a row added here without
             /// a bounded `Encoding` behind it would go stale on exactly this line.
             /// `encoding_kind_instantiates_the_named_encoding_at_the_given_width` (below) pins
-            /// boundedness for every kind in `ALL`, not just the two named at the time it was written.
+            /// boundedness for every kind in `ALL`.
             pub fn at(self, width: usize) -> Box<dyn Encoding> {
                 match self {
                     $( EncodingKind::$variant => Box::new(<$ty>::at(width)) ),*
@@ -202,7 +201,7 @@ macro_rules! encoding_kinds {
 // THE REGISTRATION POINT. One row per encoding: variant, its name in a `.tm` file, its `Encoding` type.
 // Adding a row updates `EncodingKind`, `ALL`, `at`, `name` and `parse` together.
 encoding_kinds! {
-    /// Unary: value `n` is `n` filled cells, so a `w`-cell field holds `0..=w`.
+    /// Unary: value `n` is `n` filled cells, so a `w`-cell field holds `0..w`.
     Unary => "unary" => Unary,
     /// Binary: a `w`-cell field is base-2, holding `0..2^w`.
     Binary => "binary" => Binary,
@@ -268,12 +267,13 @@ impl TmHeader {
     /// `slots`, but `parse_tm_nav` caps them at `MAX_FIELD_WIDTH` and `MAX_SLOTS` (totality guards on
     /// untrusted input). So a header built with `width: 0`, `width > MAX_FIELD_WIDTH` or
     /// `slots > MAX_SLOTS` will PRINT and then fail to parse back — optionality property 2 holds for
-    /// headers within those caps, not for every value this constructor admits. `run_tm_described`, the
-    /// only producer in the tree, cannot exceed them: its width comes from the auto-fit search, which
-    /// clamps at `MAX_FIELD_WIDTH`, and its slot count from `lower_and_size`, which refuses above
-    /// `MAX_SLOTS` before a machine is ever built. The caps are not re-checked here because doing so
-    /// would make a pure normalizer fallible for a case its only caller cannot reach — but a hand-built
-    /// header is outside the guarantee, and that is stated here rather than discovered at parse time.
+    /// headers within those caps, not for every value this constructor admits. `run_tm_described`
+    /// cannot exceed them: its width comes from the auto-fit search, which clamps at `MAX_FIELD_WIDTH`,
+    /// and its slot count from `lower_and_size`, which refuses above `MAX_SLOTS` before a machine is
+    /// ever built; `reduce` (in `reduced_file.rs`) copies `width` and `slots` from the `DescribedRun` it
+    /// reduces. The caps are not re-checked here because doing so would make a pure normalizer
+    /// fallible for a case its callers cannot reach — but a hand-built header is outside the guarantee,
+    /// and that is stated here rather than discovered at parse time.
     #[must_use]
     pub fn new(
         encoding: EncodingKind,
@@ -384,7 +384,7 @@ pub(crate) fn write_header(out: &mut String, spans: &mut Classified, h: &TmHeade
         // somebody who wrote their own has said what they want the line to say.
         //
         // Reachable, not defensive: `tape_name` labels tape 0 `reg` and tape 1 `work`, and
-        // `tests/fixtures/list_1_2.tm` carries `; reg` on its `tape 0` line today.
+        // `tests/fixtures/list_1_2.tm` carries `; reg` on its `tape 0` line.
         //
         // A reduced header's tapes are the reduced machine's, which `tape_name` does not name, so they
         // carry no label at all.
@@ -439,7 +439,7 @@ fn write_reduced(out: &mut String, spans: &mut Classified, stages: &[Stage], cw:
 }
 
 /// Unpack a `tape` line's cell run: strip a trailing `;` comment, trim, and take one `Symbol` per
-/// char. The inverse of `print_header`'s packing (D4).
+/// char. The inverse of `write_header`'s packing (D4).
 pub(crate) fn parse_cells(s: &str) -> Vec<Symbol> {
     content_before_comment(s).chars().collect()
 }
@@ -472,9 +472,9 @@ pub(crate) struct HeaderParts {
     /// instead of the whole file. The span is parse-time-only: `finish` strips it before handing the
     /// tapes to `TmHeader::new`, which never carries one (see that type's doc).
     tapes: Vec<(usize, Vec<Symbol>, Span)>,
-    /// The index of every entry in `tapes`, so a duplicate `tape` line is found in one lookup.
-    /// Scanning `tapes` for it compared each line's index with every earlier one, which made a header
-    /// of many `tape` lines quadratic to parse.
+    /// The index of every entry in `tapes`, so a duplicate `tape` line is found in one lookup; scanning
+    /// `tapes` instead would compare each line's index with every earlier one, making a header of many
+    /// `tape` lines quadratic to parse.
     tape_indices: std::collections::HashSet<usize>,
     /// Whether any `tape` line was seen. Tracked separately from `tapes` because a `tape` line that
     /// FAILED to parse still means the file was trying to carry a header, and `finish` must not then
@@ -630,8 +630,7 @@ impl HeaderParts {
     /// caller stamps `None` to a `Span { start: 0, end: 0 }` placeholder.
     ///
     /// - **Zero of the four present** (and no `tape` or `version` line) -> `(None, [])`: the file has
-    ///   no header, which is not an error. This is optionality property 4, and it is what every file
-    ///   written before this slice looks like.
+    ///   no header, which is not an error. This is optionality property 4.
     /// - **All four present** -> a validated header. (`version`, valid or absent, has already been
     ///   settled in `directive` — an unrecognized version errors there, immediately, rather than
     ///   waiting for `finish`.)
@@ -693,7 +692,7 @@ impl HeaderParts {
             return (None, errs);
         }
         // `missing` is empty here, so all four ARE `Some` — but destructure rather than unwrap, so the
-        // no-panic rule holds by construction rather than by reading the twenty lines above. The `else`
+        // no-panic rule holds by construction rather than by reading the code above. The `else`
         // arm is unreachable in practice and reports the same incomplete-header diagnostic it would
         // have reported above, so a future edit that breaks the invariant degrades to a diagnostic.
         let (Some(encoding), Some(width), Some(slots), Some(result)) =
@@ -855,10 +854,9 @@ mod tests {
         );
         assert_eq!(h.tapes(), &[(REG, vec!['#', '_']), (WORK, vec!['#'])]);
 
-        // The duplicate-index collapse `dedup_by_key` implements has been untested until now, though
-        // `TmHeader::new` is `pub` and documents the behaviour. Neither entry here is empty, so the
-        // empty-tape filter above does not interfere with either one — input order alone decides the
-        // winner, and (per the corrected doc on `new`) the first entry survives.
+        // `TmHeader::new` is `pub` and documents the duplicate-index collapse `dedup_by_key` implements.
+        // Neither entry here is empty, so the empty-tape filter above does not interfere with either one —
+        // input order alone decides the winner, and (per the doc on `new`) the first entry survives.
         let h = TmHeader::new(EncodingKind::Unary, 8, 1, Ty::Nat, vec![(REG, vec!['#', 'a']), (REG, vec!['#', 'b'])]);
         assert_eq!(h.tapes().len(), 1, "duplicate indices must collapse to one entry");
         assert_eq!(h.tapes()[0], (REG, vec!['#', 'a']), "first survives when neither side is empty");

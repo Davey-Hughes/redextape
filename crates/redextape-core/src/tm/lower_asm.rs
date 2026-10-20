@@ -16,17 +16,12 @@ pub enum LowerError {
 
 /// Bounds `lower_into` recursion so a deeply-nested Core (a huge list literal desugars to a deep
 /// `cons`-`Apply` spine) yields `TooDeep` instead of overflowing the native stack. Tuned for the
-/// production 8 MiB main thread with a ~2x margin, exactly like the Plan 1 guards (whose real
-/// stack-safety invariant is the margin, not a numeric match to any other guard). Empirically, an
-/// unguarded `lower_into` overflows the 8 MiB stack at a recursion depth of ~1175 (measured in both
-/// debug and coverage-instrumented builds by lowering list literals of increasing length until the
-/// native stack aborts; a `lower_into`/`lower_inner` frame is fatter than an `eval` frame, so this
-/// crashes shallower than `interp::MAX_EVAL_DEPTH`'s reference point). 580 leaves ~2x margin below
-/// that crash and still admits every realistic first-order program — a 580-deep nesting / 580-element
-/// list literal is far beyond anything real. Do NOT tune this against a smaller test thread: 580
-/// native frames need a few MiB, so an artificially tiny 512 KiB thread would overflow at depth ~90 —
-/// long before the guard fires. The deep-Core safety test runs on an explicit 8 MiB thread for
-/// exactly this reason.
+/// production 8 MiB main thread with a ~2x margin (the real stack-safety invariant is the margin,
+/// not a numeric match to any other guard). An unguarded `lower_into` overflows the 8 MiB stack at
+/// a recursion depth of ~1175. 580 leaves ~2x margin below that crash and still admits every
+/// realistic first-order program — a 580-deep nesting / 580-element list literal is far beyond
+/// anything real. Do NOT tune this against a smaller test thread: 580 native frames need a few MiB.
+/// The deep-Core safety test runs on an explicit 8 MiB thread for exactly this reason.
 const MAX_LOWER_DEPTH: u32 = 580;
 
 /// A bound function's calling info: its entry label and the number of arguments it takes.
@@ -190,16 +185,13 @@ type FnDef<'a> = (&'a str, &'a [String], &'a Core);
 /// `jmp skip; f1: <body1> ret; … fn: <bodyn> ret; skip:`.
 ///
 /// **EVERY member's `(label, arity)` is registered in `ctx` before ANY body is lowered.** That
-/// ordering *is* mutual recursion: allocating a label and binding it immediately before lowering
-/// that one body — what this function did when it only ever took one function — is exactly why a
-/// member could not call a sibling. It is pinned by
+/// ordering *is* mutual recursion: a member's body can call a sibling only if the sibling's label is
+/// already bound when that body is lowered. It is pinned by
 /// `a_binding_group_lowers_and_runs_on_the_asm_interpreter`, which cannot lower at all if a name is
 /// bound late.
 ///
 /// `lower_function` is the n == 1 case and calls straight through, so the single-`LetRec` path and
-/// the group path are ONE implementation and cannot drift. For n == 1 the emitted code and the label
-/// numbering (`{name}.` then `skip`) are byte-identical to what a single `fn` produced before, which
-/// is what keeps the captured step-count goldens still.
+/// the group path are ONE implementation and cannot drift.
 fn lower_function_group(ctx: &mut Ctx, group: &[FnDef<'_>]) -> Result<(), LowerError> {
     let labels: Vec<String> = group.iter().map(|(name, ..)| ctx.fresh_label(&format!("{name}."))).collect();
     let skip = ctx.fresh_label("skip");
@@ -215,9 +207,9 @@ fn lower_function_group(ctx: &mut Ctx, group: &[FnDef<'_>]) -> Result<(), LowerE
         // fresh activation whose locals renumber from 0, so a caller-scope variable would silently
         // alias one of this function's own locals. Hiding them makes any capture resolve to `None`,
         // so the `Var` arm rejects it as unbound -> `Unsupported` — a capturing closure is genuinely
-        // higher-order (deferred to defunctionalization, Plan 3b), and a clean error beats a wrong
-        // value. `fn_scopes` stays visible so recursion and calls to other functions still resolve —
-        // including, now, to the other members of this same group.
+        // higher-order (deferred to defunctionalization), and a clean error beats a wrong value.
+        // `fn_scopes` stays visible so recursion and calls to other functions still resolve — including
+        // the other members of this same group.
         let saved_scopes = std::mem::replace(&mut ctx.scopes, vec![Vec::new()]);
         let saved_next = ctx.next_local;
         ctx.next_local = 0; // each activation has its own local space
@@ -346,7 +338,7 @@ fn lower_inner(ctx: &mut Ctx, core: &Core, dst: Reg) -> Result<(), LowerError> {
         }
         Core::Var(id, name) => {
             // `$nil` is `defunc`'s uncapturable scaffolding alias for the empty list (see its module
-            // doc and `prelude::runtime_env`'s doc comment): resolve it UNCONDITIONALLY. Unlike bare
+            // doc and the comment in `prelude.rs`'s `runtime_env`): resolve it UNCONDITIONALLY. Unlike bare
             // `nil` below, `$nil` never yields to a local binding — `$` is rejected by the lexer in a
             // user identifier, so no local can ever be named `$nil`, and there is no "yield" case to
             // guard against.
@@ -507,7 +499,7 @@ fn lower_inner(ctx: &mut Ctx, core: &Core, dst: Reg) -> Result<(), LowerError> {
                     what: "call of a non-name (higher-order)".to_string(),
                 });
             };
-            // Prelude list builtins are handled in Task 9; defer to it if not a known function.
+            // Prelude list builtins are handled by `lower_builtin_apply`; defer to it if not a known function.
             if let Some(info) = ctx.resolve_fn(fname) {
                 if info.arity != args.len() {
                     return Err(LowerError::Unsupported {
@@ -539,7 +531,7 @@ fn lower_inner(ctx: &mut Ctx, core: &Core, dst: Reg) -> Result<(), LowerError> {
                 }
                 Ok(())
             } else {
-                lower_builtin_apply(ctx, *id, fname, args, dst) // Task 9
+                lower_builtin_apply(ctx, *id, fname, args, dst)
             }
         }
     }
@@ -567,10 +559,10 @@ mod tests {
         out
     }
 
-    /// Push every child of `core` onto `stack`. Mirrors `core::take_core_children`'s match arms
-    /// exactly (grouping and all) so a new `Core` variant cannot be silently missed here: that
-    /// function is the authority on which children each variant has, since it must already enumerate
-    /// all of them for `Core`'s iterative `Drop` to be correct.
+    /// Push every child of `core` onto `stack`. Mirrors `core::take_core_children`'s match arms so a
+    /// new `Core` variant cannot be silently missed here: that function is the authority on which
+    /// children each variant has, since it must already enumerate all of them for `Core`'s iterative
+    /// `Drop` to be correct.
     fn push_children<'a>(core: &'a Core, stack: &mut Vec<&'a Core>) {
         match core {
             Core::BinOp(_, _, a, b) => {
@@ -687,7 +679,7 @@ mod tests {
 
     #[test]
     fn while_loop_and_mutation() {
-        // count_down's loop body inlined (a top-level call needs Task 8).
+        // count_down's loop body inlined.
         let inline = "let mut n = 4; let mut acc = 0; while n > 0 { acc = acc + 1; n = n - 1; } acc";
         assert_eq!(run(inline), Value::Nat(4));
     }
@@ -715,7 +707,7 @@ mod tests {
 
     #[test]
     fn function_as_a_value_is_unsupported() {
-        // `apply2` receives a function argument -> higher-order -> Unsupported (deferred to 3b).
+        // `apply2` receives a function argument -> higher-order -> Unsupported.
         let src = "fn apply2(f, x) { f(x) } fn add1(x) { x + 1 } apply2(add1, 5)";
         let (prog, ds) = parse(src);
         assert!(ds.is_empty(), "parse errors: {ds:?}");
@@ -726,7 +718,7 @@ mod tests {
     #[test]
     fn multi_arg_call_with_a_nested_call_in_a_later_argument() {
         // A regression test for argument staging: evaluating `add1(2)` for the second argument must
-        // not clobber the first argument (`1`), which was already computed into `Arg(0)`.
+        // not clobber the first argument (`1`).
         let src = "fn add1(x) { x + 1 } fn pair_sum(a, b) { a + b } pair_sum(1, add1(2))";
         assert_eq!(run(src), Value::Nat(4));
     }
@@ -753,9 +745,9 @@ mod tests {
     /// The headline: a mutually recursive `fn` pair lowers and computes the reference's answer.
     ///
     /// NEITHER body can be lowered until the OTHER name is already bound — which is exactly the
-    /// ordering `lower_function_group` exists to establish. Registering names one-at-a-time, as the
-    /// single-`LetRec` path used to, leaves `is_odd` unknown while `is_even`'s body is lowered, and
-    /// the call falls through to `lower_builtin_apply` -> `Unsupported`.
+    /// ordering `lower_function_group` exists to establish. Registering names one-at-a-time leaves
+    /// `is_odd` unknown while `is_even`'s body is lowered, and the call falls through to
+    /// `lower_builtin_apply` -> `Unsupported`.
     #[test]
     fn a_binding_group_lowers_and_runs_on_the_asm_interpreter() {
         let src = "fn is_even(n){ if n == 0 { true } else { is_odd(n - 1) } } \
@@ -768,15 +760,15 @@ mod tests {
     }
 
     /// A call inside a group must reach the member it NAMES. Binding a name to a SIBLING's entry
-    /// label — a mis-zip of names against labels, which the ordering fix newly makes possible — still
-    /// lowers and still terminates, so it is a silent wrong VALUE rather than an error, and only a
-    /// program whose two members do different arithmetic can see it.
+    /// label — a mis-zip of names against labels — still lowers and still terminates, so it is a
+    /// silent wrong VALUE rather than an error, and only a program whose two members do different
+    /// arithmetic can see it.
     ///
     /// Each level contributes its own member's constant, so the answer is a sum over the ALTERNATION:
     /// 1 + 10 + 1 + 0 = 12. Under a swap every call lands in `odd_step`'s body instead (the swap
     /// composes: entering the wrong body, its call to the other name lands wrong again), giving
-    /// 10 + 10 + 10 + 0 = 30. A pair that differed only in its base case would NOT catch this — it was
-    /// tried, and the swapped program still returned the right number.
+    /// 10 + 10 + 10 + 0 = 30. A pair that differed only in its base case would NOT catch this: the
+    /// swapped program would still return the right number.
     #[test]
     fn each_call_in_a_group_reaches_the_member_it_names() {
         let src = "fn even_step(n){ if n == 0 { 0 } else { 1 + odd_step(n - 1) } } \
@@ -784,19 +776,19 @@ mod tests {
         assert_eq!(run(src), Value::Nat(12));
     }
 
-    /// THREE members, not two — an n-ary bug that happens to work at n = 2 is exactly the shape of
-    /// defect this codebase keeps finding, and every guard above this one uses a PAIR. `lower_asm`'s
-    /// group loop indexes nothing by size, but "it is size-agnostic" is an argument, not evidence.
+    /// THREE members, not two: every guard above this one uses a PAIR, and an n-ary bug can happen to
+    /// work at n = 2. `lower_asm`'s group loop indexes nothing by size, but "it is size-agnostic" is an
+    /// argument, not evidence.
     ///
     /// Each member contributes its OWN constant at its own level (1 / 2 / 4), so the answer is a
     /// positional sum over the cycle: `s0(4) = 1 + 2 + 4 + 1 + 0 = 8`. A ROTATION (each name bound to
     /// the NEXT member's label) walks the bodies `s1, s0, s2, s1` instead, giving `2 + 1 + 4 + 2 = 9`,
     /// and either transposition gives a different number again. A trio differing only in its base case
-    /// would return the same 0 either way, which is the vacuity Task 5 already caught once.
+    /// would return the same 0 either way.
     ///
     /// **The ARGUMENT is what makes a rotation visible, not the constants** — a rotation permutes which
     /// constant lands at which level, so it is observable only when the walk does not consume a whole
-    /// number of laps: measured, `s0(n)` differs from the correct answer exactly at `n ≡ 1 (mod 3)`
+    /// number of laps: `s0(n)` differs from the correct answer exactly at `n ≡ 1 (mod 3)`
     /// (`n = 0, 2, 3, 5, 6` all give the rotated and correct sums alike). `4` is chosen for that, and
     /// `s1(4) == 9` enters the same cycle one phase along.
     #[test]
@@ -891,14 +883,12 @@ mod tests {
     /// `$cons`/`$head`/`$tail`/`$nil` are aliases for the bare builtins/value, existing so `defunc`'s
     /// synthesized scaffolding cannot be captured by a user `fn`/value of the same name (`$` is
     /// unforgeable in user source). An alias that behaved even slightly differently would be worse
-    /// than the bug it fixes, so pin equivalence on both a value and a fault.
+    /// than the capture it prevents, so pin equivalence on both a value and a fault.
     ///
     /// `$` is rejected by the lexer in an identifier, so (unlike most tests in this module) there is
     /// no source string to `parse` for the dollar side — each program is built by hand, exactly like
-    /// `box_builtins_lower_and_run_on_the_asm_interpreter` above. The reference interpreter doesn't
-    /// know the dollar names either (they exist only in `defunc`'s output, never typechecked or
-    /// evaluated on their own), so the BARE program's reference value stands in as `decode_asm`'s type
-    /// witness for both sides of each pair.
+    /// `box_builtins_lower_and_run_on_the_asm_interpreter` above. The BARE program's reference value
+    /// stands in as `decode_asm`'s type witness for both sides of each pair.
     #[test]
     fn dollar_aliases_match_their_bare_builtins() {
         use crate::core::NodeGen;

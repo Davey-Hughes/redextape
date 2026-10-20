@@ -20,8 +20,7 @@ pub struct Block {
 ///
 /// A pair rather than `Vec<String>` beside `Vec<Span>`, because two parallel vectors carry a
 /// length invariant nothing enforces — the parser writes both and the printer reads one, so a
-/// desync produces wrong spans rather than a failure. Navigation needs the span; nothing else
-/// does, and every other consumer reads `name` exactly as it read the bare `String`.
+/// desync produces wrong spans rather than a failure. Navigation needs the span; nothing else does.
 ///
 /// Holds no `Expr` or `Block`, so it stays outside the iterative `Drop` worklist below.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -299,9 +298,9 @@ impl Stmt {
 /// A run is the unit `typeck::infer_fn_run` pre-binds: every name in it is bound before any body
 /// is checked, so a member may forward-reference or mutually recurse with any other member, and
 /// any non-`fn` statement ends it. Five passes need that boundary — `typeck`, `lints`, `binder`
-/// and `desugar` twice — and until this existed they agreed only by inspection.
+/// and `desugar` twice.
 ///
-/// **SCANS BOTH WAYS, AND THE BACKWARD HALF IS NOT DEAD WEIGHT.** `desugar`'s statement lowering
+/// **Scans both ways, and the backward half is not dead weight.** `desugar`'s statement lowering
 /// walks right-to-left and so meets a run's END first; it asks at the run's last statement. The
 /// other four walk left-to-right and ask at the first, where the backward scan stops on its first
 /// test. Answering the same range from any index inside a run is what lets one function serve
@@ -373,8 +372,8 @@ mod tests {
             src.push_str(" let after = 1; after");
             let (parsed, _diags) = parse_recovering(&src);
             let stmts = &parsed.program.block.stmts;
-            // Probed on 6e0ad6e: this parses to [Let, Fn * n, Let] with `after` as the tail, so
-            // the run is bracketed by a non-`fn` on both sides rather than by the block's ends.
+            // This parses to [Let, Fn * n, Let] with `after` as the tail, so the run is
+            // bracketed by a non-`fn` on both sides rather than by the block's ends.
             let first = stmts.iter().position(|s| matches!(s, Stmt::Fn { .. })).expect("a run");
             assert_eq!(first, 1, "n={n}");
             let expected = first..first + n;
@@ -391,7 +390,7 @@ mod tests {
         use crate::ast::fn_run_at;
         use crate::parser::parse_recovering;
 
-        // Probed on 6e0ad6e: [Fn, Let, Fn] with `0` as the tail.
+        // The parse is [Fn, Let, Fn] with `0` as the tail.
         let (parsed, _diags) = parse_recovering("fn a(n) { n } let x = 0; fn b(n) { n } 0");
         let stmts = &parsed.program.block.stmts;
         assert_eq!(fn_run_at(stmts, 0), 0..1);

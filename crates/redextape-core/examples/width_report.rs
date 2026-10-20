@@ -2,21 +2,19 @@
 //!
 //!     cargo run --release --example width_report -p redextape-core
 //!
-//! The experiment that motivated per-program sizing was originally run by editing a constant and
-//! rebuilding eleven times. Now that the width lives on the encoding instance (`Unary::at(w)`), the
-//! whole sweep is a runtime loop, and now that the overflow guard exists, the fitted width is something
-//! the machine DETERMINES rather than something a human infers from whether the answer looked right.
+//! Because the width lives on the encoding instance (`Unary::at(w)`), the whole sweep is a runtime loop,
+//! and because the overflow guard exists, the fitted width is something the machine DETERMINES rather
+//! than something a human infers from whether the answer looked right.
 //!
-//! That distinction is the reason this report supersedes the estimated table in
-//! `docs/superpowers/specs/2026-07-26-per-program-field-width-design.md`. Those fitted widths were read
-//! off answer agreement, which is an unsound detector: at width 4 the program `3 - 5` destroys a field
-//! delimiter and still returns 0, and `0 + 5` merges two 4-cell fields into a 9-cell run and still
-//! returns 5. The numbers below come from the guard instead, so some are one power of two higher.
+//! Answer agreement is an unsound detector of the fitted width: at width 4 the program `3 - 5` destroys
+//! a field delimiter and still returns 0, and `0 + 5` merges two 4-cell fields into a 9-cell run and
+//! still returns 5. The numbers below come from the guard instead.
 //!
-//! Three sections:
+//! Four sections:
 //!   A. the affine fit `steps(W) = a + b*W` per program, and the share of width-driven padding at 64;
 //!   B. the width auto-fit settles on, and the speedup against the pinned 64-cell bank;
-//!   C. the cost of the search itself — total steps across all attempts versus the final attempt.
+//!   C. the cost of the search itself — total steps across all attempts versus the final attempt;
+//!   D. unary against binary encodings, each at its own fitted width.
 //!
 //! LIMITATION, stated up front: the corpus is an ORACLE suite, built to exercise backend features, not
 //! to be a representative workload. This says what sizing is worth ON THESE PROGRAMS.
@@ -37,7 +35,7 @@ use redextape_core::value::format_value;
 #[path = "common/allocator.rs"]
 mod allocator;
 
-/// The corpus, kept in step with `tests/tm_bank_invariant.rs`.
+/// The corpus: `tests/tm_bank_invariant.rs`'s `CORPUS`, less `is_empty(cons(1, nil))`.
 const CORPUS: &[(&str, &str)] = &[
     ("arith", "1 + 2 * 3"),
     ("monus", "3 - 5"),
@@ -70,8 +68,7 @@ const CORPUS: &[(&str, &str)] = &[
 /// width and is reported rather than silently averaged in.
 ///
 /// Generic over `enc` (already at the width to measure) so this serves both `Unary` and `Binary` — the
-/// only reason it needs `init[WORK]` at all is `Binary`: `Unary::init_work()` is the empty vector, so
-/// this is a behaviour-preserving addition for every existing (unary) call site.
+/// only reason it needs `init[WORK]` at all is `Binary`: `Unary::init_work()` is the empty vector.
 fn steps_at(src: &str, enc: &dyn Encoding) -> Option<u64> {
     let (prog, ds) = parse(src);
     assert!(ds.is_empty(), "parse errors in `{src}`: {ds:?}");
@@ -125,12 +122,8 @@ fn widths() -> Vec<usize> {
 /// `Binary::default()` — `run_tm_fitted` re-widens it as it searches).
 ///
 /// Decodes at the FITTED width (`family.at_width(w)`), not at `family`'s own (usually 64-cell) width.
-/// This was once required for correctness: `Binary`'s decode was width-strict, so a tape fitted at, say,
-/// 4 cells decoded to `None` under a 64-cell `Binary`, while `Unary`'s scan-to-the-first-blank decode hid
-/// the asymmetry — this function used to decode every result with `Unary::default()` regardless of the
-/// fitted width and happened to work only because of it. Both decoders are structural now, so the
-/// `at_width` below is no longer load-bearing; it stays because a width report that decoded at a width
-/// it does not report would be a confusing thing to leave behind.
+/// Both decoders are structural, so the `at_width` is not load-bearing for correctness; it stays because
+/// a width report that decoded at a width it does not report would be a confusing thing to leave behind.
 fn fitted(src: &str, family: &dyn Encoding) -> (Option<usize>, String) {
     let (prog, ds) = parse(src);
     assert!(ds.is_empty(), "parse errors in `{src}`: {ds:?}");
@@ -158,9 +151,8 @@ struct Measured {
     value: String,
 }
 
-/// Fit `family` to `src`, run once at the fitted width, and report width + steps + final REG length —
-/// the deliverable this task adds: a per-program, per-encoding comparison at the width each actually
-/// settles on, not at a shared pinned width.
+/// Fit `family` to `src`, run once at the fitted width, and report width + steps + final REG length: a
+/// per-program, per-encoding comparison at the width each actually settles on, not at a shared pinned width.
 fn measure(src: &str, family: &dyn Encoding) -> Measured {
     let (prog, ds) = parse(src);
     assert!(ds.is_empty(), "parse errors in `{src}`: {ds:?}");
@@ -216,14 +208,13 @@ fn main() {
             sorted[sorted.len() - 1]
         );
         println!("   A program marked `NO` deviates from its own line at some width, which happens only");
-        println!("   where it is corrupting its bank — a shape the guard now refuses outright.");
+        println!("   where it is corrupting its bank — a shape the guard refuses outright.");
         println!();
         println!("   BIAS, stated because it runs one way: fitting a line needs two widths at which the");
         println!("   program COMPLETES, so any program that fits only at 64 is excluded from this median.");
         println!("   Those are exactly the programs holding a large literal — the ones with the LOWEST");
         println!("   width-driven share, since their intercept is large relative to their slope. So the");
-        println!("   median above is optimistic; the excluded programs measured ~71% before the guard");
-        println!("   existed, when a narrow run still returned numbers (from a corrupted bank).");
+        println!("   median above is optimistic.");
     }
 
     println!("\n=== B. the width auto-fit determines, and what it saves ===\n");
@@ -274,13 +265,13 @@ fn main() {
     println!();
 
     // ============================================================================================
-    // D. unary vs binary at each encoding's OWN fitted width — the payoff of the toggle (Task 17).
+    // D. unary vs binary at each encoding's OWN fitted width — the payoff of the toggle.
     // ============================================================================================
     //
     // Every earlier section is unary-only (it measures per-program width sizing WITHIN one encoding).
-    // This section is the new thing: the same corpus, run through BOTH encodings, each auto-fit by
-    // `run_tm_fitted` independently, so the comparison is "the width and step cost each encoding
-    // actually settles on", not the same pinned width imposed on both.
+    // This section runs the same corpus through BOTH encodings, each auto-fit by `run_tm_fitted`
+    // independently, so the comparison is "the width and step cost each encoding actually settles on",
+    // not the same pinned width imposed on both.
     println!("\n=== D. unary vs binary, each at its OWN fitted width ===\n");
     println!("   `ratio` is binary steps / unary steps: below 1.0 binary is FASTER. `reg` is the final REG");
     println!("   tape's cell length (`1 + slots*(w+1)`). Both encodings are fit independently by");

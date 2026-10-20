@@ -113,7 +113,7 @@ impl StateTable {
 
 /// The largest machine the shipped demos build, with the initial tapes it runs on: the `map` + `ap2` entry
 /// of `native_oracle.rs`'s `FIRST_ORDER_DEMOS`, which `state_cost_probe`'s section G finds as the corpus's
-/// maximum, lowered as section G lowers it — under `Binary` at `MAX_FIELD_WIDTH`, 49,135 states.
+/// maximum, lowered as section G lowers it — under `Binary` at `MAX_FIELD_WIDTH`.
 ///
 /// The source is byte-identical to `guard_counterexamples.rs`'s `WORST_SHIPPED_DEMO`, which an
 /// integration test cannot share. Within this crate's unit tests it is written once, here, for
@@ -125,12 +125,9 @@ impl StateTable {
 /// job to re-derive, not this crate's unit tests' — this lowers the one entry that job has already named.
 ///
 /// **`run_tm_described_at(..., MAX_FIELD_WIDTH)` REPRODUCES SECTION G'S OWN METHOD** (`Binary::default()` is
-/// `MAX_FIELD_WIDTH`, not an auto-fitted width): confirmed by getting the identical 49,135 states back, where
-/// `run_tm_described`'s normal auto-fit search — the sequence
-/// `real_lowered_machines_cost_far_more_than_the_toy_fixtures` uses — lands on a narrower width and only
-/// 12,295 states for this same program, understating the ratio `single_tape.rs`'s `CEILING` actually needs
-/// (single-tape ratios measured 28.29 at the auto-fitted width against 39.51 at `MAX_FIELD_WIDTH`, before the
-/// no-write split in `single_tape.rs`'s `emit_one_tape_pass`).
+/// `MAX_FIELD_WIDTH`, not an auto-fitted width): `run_tm_described`'s normal auto-fit search — the sequence
+/// `real_lowered_machines_cost_far_more_than_the_toy_fixtures` uses — lands on a narrower width, understating
+/// the ratio `single_tape.rs`'s `CEILING` actually needs.
 #[cfg(test)]
 pub(crate) fn worst_shipped_demo() -> (Machine, Vec<Vec<crate::tm::machine::Symbol>>) {
     use crate::tm::{EncodingKind, MAX_FIELD_WIDTH, TM_DEFAULT_CAPS, run_tm_described_at};
@@ -162,13 +159,10 @@ mod tests {
     /// them green; only a trip at the real ceiling can see it. One test per stage rather than one test with
     /// three assertions, because a failed assertion ends its test and would hide the stages after it.
     ///
-    /// Unguarded, [`worst_shipped_demo`] builds 1,811,054 states through stage 1, 2,601,972 through stage 2
-    /// applied to the lowered machine, and 7,363,253 through the fold
+    /// Unguarded, [`worst_shipped_demo`] builds more than the ceiling's states through each stage
     /// (`docs/superpowers/specs/2026-09-14-reduction-state-guard-design.md`), so each stage fills its table
     /// to the ceiling before it refuses. Each test then asserts that its stage's `states_per_original` is
     /// `None` on the same demo, which builds that stage's table to the ceiling a second time.
-    ///
-    /// Peak RSS of this test alone, as the release test binary's `ru_maxrss`: 746,100 KB, in 2.3 s.
     #[test]
     #[ignore = "slow tier: builds a ceiling's worth of states before refusing; run via scripts/check-slow.sh"]
     fn stage_one_refuses_the_worst_shipped_demo_at_the_real_ceiling() {
@@ -180,8 +174,6 @@ mod tests {
 
     /// Stage 2 on the lowered machine, with the `Code` its initial tapes need. See
     /// `stage_one_refuses_the_worst_shipped_demo_at_the_real_ceiling` for why each stage has its own test.
-    ///
-    /// Peak RSS of this test alone, as the release test binary's `ru_maxrss`: 675,104 KB, in 2.0 s.
     #[test]
     #[ignore = "slow tier: builds a ceiling's worth of states before refusing; run via scripts/check-slow.sh"]
     fn stage_two_refuses_the_worst_shipped_demo_at_the_real_ceiling() {
@@ -194,8 +186,6 @@ mod tests {
 
     /// The fold on the lowered machine. See `stage_one_refuses_the_worst_shipped_demo_at_the_real_ceiling`
     /// for why each stage has its own test.
-    ///
-    /// Peak RSS of this test alone, as the release test binary's `ru_maxrss`: 722,860 KB, in 2.4 s.
     #[test]
     #[ignore = "slow tier: builds a ceiling's worth of states before refusing; run via scripts/check-slow.sh"]
     fn the_fold_refuses_the_worst_shipped_demo_at_the_real_ceiling() {

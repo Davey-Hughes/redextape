@@ -45,8 +45,10 @@ impl Language {
 
     /// Every static diagnostic this form's front end reports over `src`.
     ///
-    /// Slice 1 adds no analysis. All four of these are already written, already tested, and
-    /// already consumed by the CLI and the web UI; each returns the same spanned `Diagnostic`.
+    /// This adds no analysis of its own. All four of these are already written, already tested, and
+    /// already consumed by the web UI. The CLI consumes the `.rxt` and `.tm` ones and the `.asm` parse's;
+    /// it reads no λ text, and it reaches `.asm`'s label checks through `Program::validate` instead
+    /// (below). Each returns the same spanned `Diagnostic`.
     ///
     /// **`.asm` ADDS ITS LABEL MARKS TO THE PARSE'S DIAGNOSTICS**: a jump to a label nothing
     /// defines, a label defined twice, a label name the printer cannot write. The parser accepts
@@ -97,10 +99,10 @@ impl Language {
     /// variant, so there is nothing to resolve a document position against. That is a designed gap,
     /// asserted by a test rather than left as an omission.
     ///
-    /// **`nav` IS `doc.nav`, PASSED THROUGH RATHER THAN REBUILT.** Core's three functions used to
-    /// call `parse_tm_nav`/`parse_asm_nav`/`nav_rxt` themselves — a full re-parse on every hover
-    /// request, on top of the one `Document::nav` already pays and caches per version. `lib.rs`'s
-    /// `hover` passes `doc.nav.as_ref()` straight through; core uses it instead of building its own.
+    /// **`nav` IS `doc.nav`, PASSED THROUGH RATHER THAN REBUILT.** Building it inside core's three
+    /// functions would be a full re-parse on every hover request, on top of the one `Document::nav`
+    /// already pays and caches per version. `lib.rs`'s `hover` passes `doc.nav.as_ref()` straight
+    /// through; core uses it instead of building its own.
     #[must_use]
     pub fn hover(
         self,
@@ -140,22 +142,18 @@ impl Language {
 /// The `SymbolKind` a document outline lists this definition as, or `None` for a definition an
 /// outline should not list.
 ///
-/// **THIS TAKES NO `Language`, AND THAT IS WHAT REPLACED A TEST.** `Language::symbol_kind`
-/// answered one fixed kind per form, and `every_form_with_an_index_has_a_symbol_kind` existed to
-/// stop `nav` and that match drifting apart — because a form gaining an index without gaining a
-/// kind reports nothing in an outline, with no compile error. `DefKind` moves the answer to the
-/// push site, so the match is exhaustive over kinds and a new one is a compile error here. The
-/// test is gone; the compiler holds what it held.
+/// **THIS TAKES NO `Language`.** A per-form kind would let a form gain an index without gaining a
+/// kind and report nothing in an outline, with no compile error. `DefKind` moves the answer to the
+/// push site, so the match is exhaustive over kinds and a new one is a compile error here.
 ///
 /// **`None` MEANS "NOT AN OUTLINE SYMBOL", NOT "NOT INDEXED".** A parameter must be in the index —
 /// go-to-definition on one has to land — but an outline node per parameter is noise whether flat
 /// or nested under its `fn`: a parameter's navigability is what the index is for, and that is a
-/// different question from what belongs in a document's outline. The name is `outline_kind` rather
-/// than `symbol_kind` because those are two different questions and the old name answered one.
+/// different question from what belongs in a document's outline.
 pub(crate) fn outline_kind(kind: DefKind) -> Option<SymbolKind> {
     match kind {
         // A TM state is a place the machine can be in; an asm label names a point in a program.
-        // `Class` and `Function` are the nearest of the protocol's fixed set. Unchanged.
+        // `Class` and `Function` are the nearest of the protocol's fixed set.
         DefKind::State => Some(SymbolKind::Class),
         DefKind::Label | DefKind::Fn => Some(SymbolKind::Function),
         DefKind::Let => Some(SymbolKind::Variable),
@@ -254,10 +252,9 @@ f: ; the entry
 
     #[test]
     fn formatting_keeps_the_comments_in_the_two_forms_that_have_them() {
-        // THE WHOLE REASON PR A EXISTS. Before it, `print ∘ parse` over these two forms deleted
-        // every comment in the file — in the files hand-writing is most plausible in. This asserts
-        // the property from the consumer's side, which is where a regression would actually be
-        // felt: nothing else in this crate would notice a printer that stably dropped them.
+        // Comments survive formatting these two forms — the files hand-writing is most plausible in.
+        // This asserts the property from the consumer's side, which is where a regression would
+        // actually be felt: nothing else in this crate would notice a printer that stably dropped them.
         let out = Language::Tm.format(TM_COMMENTS).expect("the fixture parses");
         assert!(out.contains("; a machine"), "own-line comment lost:\n{out}");
         assert!(out.contains("; and a trailing one"), "trailing comment lost:\n{out}");
@@ -310,27 +307,21 @@ f: ; the entry
 
     #[test]
     fn hover_reaches_core_for_every_dispatching_form_and_lambda_never_calls_in() {
-        // Originally (Task 1) `hover::rxt`, `hover::tm` and `hover::asm` were all unconditional
-        // `None` stubs, so this test alone could not prove WHICH stub a given `Language` arm
-        // called — a mis-wiring that swapped `Tm`'s and `Asm`'s dispatch would have been
-        // byte-identical to this assertion passing. What it proves, and has always proved, is that
-        // `Language::hover`'s match has a LIVE arm for each of the three non-Lambda forms that
-        // reaches `redextape_core::hover` at all, rather than a `Lambda`-only path with the other
-        // three silently falling through to the same hard-coded `None`.
-        // `hover_answers_content_only_through_the_matching_form` below is what proves WHICH arm,
-        // now that `hover::rxt`, `hover::tm` and `hover::asm` all have real content to disagree
-        // over — this test's own job stays narrower: only that the call reaches core at all.
+        // What this proves is that `Language::hover`'s match has a LIVE arm for each of the three
+        // non-Lambda forms that reaches `redextape_core::hover` at all, rather than a `Lambda`-only
+        // path with the other three silently falling through to the same hard-coded `None`.
+        // `hover_answers_content_only_through_the_matching_form` below is what proves WHICH arm —
+        // this test's own job stays narrower: only that the call reaches core at all.
         //
-        // None of the three stubs remain, so each fixture below is instead a position its own live
-        // handler genuinely has nothing to say about — a directive or declaration KEYWORD, never an
-        // occurrence or a construct with content — so a `None` answer here means "the arm ran and
-        // had nothing to add", not "the arm never ran".
+        // Each fixture below is a position its own live handler genuinely has nothing to say
+        // about — a directive or declaration KEYWORD, never an occurrence or a construct with
+        // content — so a `None` answer here means "the arm ran and had nothing to add", not "the
+        // arm never ran".
         assert_eq!(Language::Redextape.hover("let x = 1;\nx", 0, None), None);
         assert_eq!(Language::Tm.hover("tapes 1\nstart q0\nstate q0: accept\n", 0, None), None);
         // On the `result` directive keyword — asm's own analogue of `.rxt`'s `let` and `.tm`'s
         // `tapes` above: a header line names no mnemonic and no label, so neither `instr_at` nor the
-        // navigation index has anything here, unlike `"f:\n\tret\n"` (the fixture this used before
-        // `hover::asm` had content), whose `f:` and `ret` now both answer.
+        // navigation index has anything here, unlike `"f:\n\tret\n"`, whose `f:` and `ret` both answer.
         assert_eq!(Language::Asm.hover("result Nat\n", 0, None), None);
         // `.rxlambda` is the one arm that is deliberately hard-coded rather than dispatched — it
         // never reaches `redextape_core::hover` at all, which is the designed gap `Language::hover`'s
@@ -340,13 +331,10 @@ f: ; the entry
 
     #[test]
     fn hover_answers_content_only_through_the_matching_form() {
-        // Task 1 could not write this: with all three of `hover::rxt`, `hover::tm` and `hover::asm`
-        // returning `None` unconditionally, a `Language::hover` match with `Redextape` and `Tm`
-        // swapped was byte-identical to a correct one — there was no input for which the two
-        // disagreed. `hover::rxt` now answers content for a literal, which is exactly the
-        // disagreement that swap needs: feeding this `.rxt` source through `Language::Redextape`
-        // must answer something, and the SAME text through `Language::Tm` or `Language::Asm` must
-        // still answer `None`, a pair no crossed arm could satisfy.
+        // `hover::rxt` answers content for a literal, which is exactly the disagreement a swapped
+        // `Redextape`/`Tm` arm in `Language::hover` needs to be caught: feeding this `.rxt` source
+        // through `Language::Redextape` must answer something, and the SAME text through `Language::Tm`
+        // or `Language::Asm` must still answer `None`, a pair no crossed arm could satisfy.
         let src = "let x = 42;\nx\n";
         let at = src.find("42").expect("fixture holds it");
         assert!(Language::Redextape.hover(src, at, None).is_some(), "a literal must hover through Redextape");
@@ -363,7 +351,6 @@ f: ; the entry
         assert_eq!(outline_kind(DefKind::Fn), Some(SymbolKind::Function));
         assert_eq!(outline_kind(DefKind::Let), Some(SymbolKind::Variable));
         assert_eq!(outline_kind(DefKind::Param), None);
-        // Unchanged from the slice that shipped them.
         assert_eq!(outline_kind(DefKind::State), Some(SymbolKind::Class));
         assert_eq!(outline_kind(DefKind::Label), Some(SymbolKind::Function));
     }

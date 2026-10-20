@@ -2,11 +2,11 @@
 //! whole: without `ts` there are no `TS` impls to ask and this target compiles to nothing.
 //!
 //! **THE SIBLING OF `crates/redextape-core/tests/ts_bindings.rs`, OVER A DIFFERENT SET OF TYPES.**
-//! Both run the same two gates and both call the same scanner —
+//! Both run the same three gates and both call the same scanner —
 //! `redextape_test_support::ts_derive_scan` — which is why that scanner lives in a shared crate
-//! rather than in either test file. Read its doc for what the coverage scan guarantees, the seven
-//! revisions that shaped it, and the three routes it names as outside its reach rather than closed.
-//! What is local to this file is the list below and the reason each entry is on it.
+//! rather than in either test file. Read its doc for what the coverage scan guarantees and the three
+//! routes it names as outside its reach rather than closed. What is local to this file is the list
+//! below and the reason each entry is on it.
 //!
 //! THESE ASK THE TYPES, NOT `web/bindings/`. `ts-rs` emits one `export_bindings_*` test per type and
 //! cargo orders tests arbitrarily, so a directory scan can run before generation and pass on an empty
@@ -56,11 +56,11 @@ fn generated() -> Vec<(&'static str, String)> {
 /// override generates TypeScript that typechecks, ships, and is wrong at runtime. This fails at the
 /// commit instead.
 ///
-/// **IT DOES NOT CATCH EVERY WAY AN OVERRIDE CAN BE WRONG, AND `TmStatus::total_steps` IS THE
-/// STANDING EXAMPLE.** `ts(type = "number")` on that `Option<u64>` field generates `total_steps:
-/// number` — no `bigint`, so this gate passes, and the `| null` that `None` puts on the wire is gone.
-/// See that field's own doc for what does catch it. Naming the hole here is the point: a gate that
-/// implied it covered the whole override class would tell the next reader not to check.
+/// **IT DOES NOT CATCH EVERY WAY AN OVERRIDE CAN BE WRONG.** `ts(type = "number")` on an
+/// `Option<u64>` field generates `number` — no `bigint`, so this gate passes, and the `| null` that
+/// `None` puts on the wire is gone. The third test below catches that class. Naming the hole here is
+/// the point: a gate that implied it covered the whole override class would tell the next reader not
+/// to check.
 ///
 /// THE SCAN SKIPS JSDOC. `export_to_string` reproduces Rust doc comments verbatim, so a doc comment
 /// that merely discusses `bigint` in prose would otherwise fail this test for a documentation reason
@@ -81,11 +81,9 @@ fn no_generated_type_carries_bigint() {
 /// because `export_to_string` is a default trait method and does not require `#[ts(export)]`.
 /// Comparing NAMES as sets catches both directions.
 ///
-/// **THE SCAN ITSELF IS `redextape_test_support::ts_derive_scan`'s, AND ITS DOC IS WHERE THE
-/// REASONING LIVES** — four revisions plus three more in review, each defeated by an ordinary
-/// spelling of the same attribute, ending in a whitelist rather than a fifth banned spelling. Read it
-/// before assuming this gate is stronger or weaker than it is; it names three routes it does not
-/// close rather than denying them.
+/// **THE SCAN ITSELF IS `redextape_test_support::ts_derive_scan`'s, AND ITS DOC IS WHERE THE REASONING
+/// LIVES**. Read it before assuming this gate is stronger or weaker than it is; it names three routes
+/// it does not close rather than denying them.
 #[test]
 fn the_gate_covers_every_exported_type() {
     assert_generated_covers_every_derive_site(Path::new(env!("CARGO_MANIFEST_DIR")), &generated());
@@ -96,13 +94,13 @@ fn the_gate_covers_every_exported_type() {
 /// **NEITHER TEST ABOVE CAN SEE THIS CLASS, WHICH IS WHY IT IS A THIRD TEST RATHER THAN A WIDENING
 /// OF EITHER.** `ts(type = "number")` on an `Option<u64>` generates `number`: no `bigint` for the
 /// gate above to find, and the type still carries the derive, so the coverage gate is satisfied too.
-/// The `| null` that `None` puts on the wire is simply gone. `TmStatus::total_steps` in this crate is
-/// the field that class was measured on.
+/// The `| null` that `None` puts on the wire is simply gone.
 ///
 /// THE RULE AND ITS REASONING LIVE IN `redextape_test_support::ts_derive_scan` — read
-/// `assert_overrides_match_field_nullability`'s own doc for the anchor, the forward resolution, and
-/// the two things it names as outside its reach rather than closed. One implementation with two
-/// callers is deliberate: a second copy drifts the moment one is widened and the other is not.
+/// `assert_overrides_match_field_nullability`'s own doc for why it parses with `syn`, the rule over
+/// the three keys that say anything about null, and what it names as outside its reach rather than
+/// closed. One implementation with two callers is deliberate: a second copy drifts the moment one is
+/// widened and the other is not.
 #[test]
 fn no_override_misstates_a_field_s_nullability() {
     assert_overrides_match_field_nullability(Path::new(env!("CARGO_MANIFEST_DIR")));

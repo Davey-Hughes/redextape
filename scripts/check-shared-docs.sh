@@ -3,20 +3,15 @@
 #
 # CI invokes this same script (.forgejo/workflows/ci.yml) and so does the pre-commit hook
 # (.pre-commit-config.yaml), so the local and CI gates cannot drift — the convention
-# `scripts/check-all.sh` states and the four sibling `check-*.sh` scripts already follow.
+# `scripts/check-all.sh` states and the eight sibling `check-*.sh` scripts already follow.
 #
 #   scripts/check-shared-docs.sh              # scan every marked region
 #   scripts/check-shared-docs.sh --self-test  # prove the detector still detects
 #   scripts/check-shared-docs.sh --fix        # rewrite every marked region from its source
 #
-# **WHY THIS EXISTS, AND IT IS NOT A STYLE PREFERENCE.** The branch that gave Neovim a one-line install
-# wrote the same install prose into all four grammar READMEs. A review flagged the duplication; the
-# measurement that followed found **184 identical lines across the four**, and — the part that settles
-# it — one of the three shared blocks had ALREADY drifted into three different wordings. The `main`
-# versus `master` paragraph reads one way in the mini-language README, is re-wrapped in λ's, and in the
-# asm and TM copies has lost the clause *"Pick the one you have installed — the `install_info` field
-# sets are different"* entirely. Nobody decided that. Four copies of a paragraph edited over four
-# branches is all it takes, and no gate in this repository could see it: `check-doc-figures.sh` derives
+# **WHY THIS EXISTS, AND IT IS NOT A STYLE PREFERENCE.** The same install prose is written into all four
+# grammar READMEs, and copies of a paragraph drift without anyone deciding it: four copies edited over four
+# branches is all it takes, and no other gate in this repository can see it: `check-doc-figures.sh` derives
 # NUMBERS from the tree and has no opinion about prose.
 #
 # **THE COPIES STAY IN THE READMEs RATHER THAN BECOMING A LINK, DELIBERATELY.** Each grammar README is

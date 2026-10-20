@@ -1,25 +1,22 @@
-//! The step survey — the payoff of the Core source-map slice (Tasks 1-5): where TM steps actually go
-//! (Part A), and what each candidate optimizer pass could recover (Part B). This is evidence, not
-//! code — the reader is choosing which Tier A pass to write next, and this prints the numbers for it.
+//! The step survey: where TM steps actually go (Part A), and what each candidate optimizer pass could
+//! recover (Part B). This is evidence, not code — the reader is choosing which optimizer pass to write
+//! next, and this prints the numbers for it.
 //!
 //!     cargo run --release --example step_survey -p redextape-core
 //!
 //! Part A's corpus is COPIED VERBATIM from `tests/three_way_oracle.rs` (`FIRST_ORDER_DEMOS` and
 //! `LAMBDA_LIMITATION_DEMOS`) rather than invented here — an example is a separate binary crate and
 //! cannot `use` another crate's integration-test module, so the strings are duplicated by hand.
-//! `tests/tm_oracle.rs`'s `CONTROL_FLOW_DEMOS`/`CALL_DEMOS`/`LIST_BUILD_DEMOS`/`LIST_ACCESS_DEMOS` were
-//! checked by hand against `FIRST_ORDER_DEMOS`/`LAMBDA_LIMITATION_DEMOS`: every string in those four
-//! arrays already appears in one of the two copied here, so nothing from that file is missing. Excluded
-//! on purpose: `three_way_oracle.rs`'s `FAULT_DEMOS` and `tm_oracle.rs`'s unbounded-loop cap test —
-//! both are DESIGNED to hit a cap/diverge (a "no value" outcome has no completed steps to attribute),
-//! which is outside this survey's scope (every program here must complete under `DEFAULT_CAPS`).
-//! This copy (and `redextape-native/tests/native_oracle.rs`'s) drifted from `FIRST_ORDER_DEMOS` twice
-//! across two slices despite the "verbatim" claim above, so hand-checking is no longer enough:
-//! `three_way_oracle.rs::first_order_demos_stay_synced_across_every_copy` now asserts all four
-//! copies — this one, `native_oracle.rs`'s, `examples/common/demos.rs`'s and the canonical — are
-//! textually identical, so a future drift fails a test instead of silently stale-ing this report's
-//! corpus count. The enumeration is `grep -rn FIRST_ORDER_DEMOS` over the tree, not a count anyone
-//! maintains from memory.
+//! `tests/tm_oracle.rs`'s `CONTROL_FLOW_DEMOS`/`CALL_DEMOS`/`LIST_BUILD_DEMOS`/`LIST_ACCESS_DEMOS`
+//! add nothing: every string in those four arrays appears in one of the two copied here. Excluded on
+//! purpose: `three_way_oracle.rs`'s `FAULT_DEMOS` and `tm_oracle.rs`'s unbounded-loop cap test — both
+//! are DESIGNED to hit a cap/diverge (a "no value" outcome has no completed steps to attribute), which
+//! is outside this survey's scope (every program here must complete under `DEFAULT_CAPS`).
+//! Hand-checking is not enough: `three_way_oracle.rs::first_order_demos_stay_synced_across_every_copy`
+//! asserts all four copies — this one, `native_oracle.rs`'s, `examples/common/demos.rs`'s and the
+//! canonical — are textually identical, so a future drift fails a test instead of silently stale-ing
+//! this report's corpus count. The enumeration is `git grep -l 'const FIRST_ORDER_DEMOS' -- crates`, not
+//! a count anyone maintains from memory.
 //!
 //! THE SURVEY'S OWN BIGGEST LIMITATION, stated up front because it bounds every number below: that
 //! corpus is an ORACLE suite, built to exercise BACKEND FEATURES (arithmetic, lists, recursion,
@@ -34,22 +31,17 @@
 //! CEILING on a shape built to suit it — not what it would recover on a real program. Part A is what
 //! tells you whether that shape actually occurs.
 //!
-//! # ALLOCATOR — READ THIS BEFORE TRUSTING ANY TIMING ABOVE
+//! # ALLOCATOR
 //!
-//! **This target has set `mimalloc` as its global allocator since 2026-08-04. Every timing recorded
-//! in this file above this note was measured under glibc's malloc and is NOT comparable to a run
-//! made today.** Counts are: node counts, allocation counts and step counts are properties of the
-//! reduction, not of the machine, and did not move. Seconds, ms and ns did.
+//! This target sets `mimalloc` as its global allocator, so a timing taken here is not comparable with one
+//! taken under glibc's malloc. Node counts, allocation counts and step counts are properties of the
+//! reduction, not of the machine, and do not depend on it.
 //!
-//! It is here for a measured reason rather than a preference. The reducer allocates one `Rc<Node>`
-//! per term node and frees on the same order, and glibc's layout for that pattern costs real
-//! address-translation pressure: on the nested-group family, swapping ONLY the allocator took L1
-//! DTLB misses from 1.20e9 to 0.92e9 for the three-pass `beta` and from 1.83e9 to 0.93e9 for the
-//! fused one, with the wall clock following at ~9% and ~16%. That is also how the β-fusion family
-//! regression was explained — it was glibc's layout, not the reducer's work.
+//! The reducer allocates one `Rc<Node>` per term node and frees on the same order, and glibc's layout for
+//! that pattern costs real address-translation pressure.
 //!
 //! `mimalloc` is a `[dev-dependencies]` entry and reaches examples and tests ONLY.
-//! `redextape-core`'s `[dependencies]` stays empty and WASM-clean: `libmimalloc-sys` is C that does
+//! `redextape-core`'s `[dependencies]` stays WASM-clean: `libmimalloc-sys` is C that does
 //! not build for wasm32, and a library must not choose a global allocator for its consumers.
 
 // Example target: a demo that cannot build its own input has nothing to demonstrate, so aborting is
@@ -106,10 +98,10 @@ const FIRST_ORDER_DEMOS: &[&str] = &[
     "head(tail(cons(1, cons(2, nil))))",
     "head([1, 2, 3])",
     "tail([1, 2, 3])",
-    // Higher-order (Plan 3b-1): a function received as a value, defunctionalized before lowering.
+    // Higher-order: a function received as a value, defunctionalized before lowering.
     "fn apply2(f, x) { f(x) } fn add1(x) { x + 1 } apply2(add1, 5)",
     "fn map(xs, f) { if is_empty(xs) { nil } else { cons(f(head(xs)), map(tail(xs), f)) } } fn add1(x) { x + 1 } [3, 1, 2].map(add1)",
-    // Higher-order with immutable capture (Plan 3b-1 Task 4): `|x| x + n` captures `n` by value.
+    // Higher-order with immutable capture: `|x| x + n` captures `n` by value.
     "let n = 5; fn map(xs, f) { if is_empty(xs) { nil } else { cons(f(head(xs)), map(tail(xs), f)) } } [1, 2, 3].map(|x| x + n)",
     "\
         fn map(xs, f) { if is_empty(xs) { nil } else { cons(f(head(xs)), map(tail(xs), f)) } }\n\
@@ -117,39 +109,34 @@ const FIRST_ORDER_DEMOS: &[&str] = &[
         fn add(a, b) { a + b }\n\
         fn add1(x) { x + 1 }\n\
         fold([3, 1, 2].map(add1), 0, add)",
-    // Higher-order currying (Plan 3b-1): a value-lambda whose body is ANOTHER value-lambda
-    // (`|y| |z| y + z`). Both nested closures now get guaranteed-unique anon names, so `defunc` no
-    // longer panics on the duplicate key and this defuncs three-way to 9.
+    // Higher-order currying: a value-lambda whose body is ANOTHER value-lambda (`|y| |z| y + z`). Both
+    // nested closures get guaranteed-unique anon names; this defuncs three-way to 9.
     "fn ap(f, x) { f(x) } let add = |y| |z| y + z; ap(ap(add, 4), 5)",
-    // MUTUAL RECURSION (Core::LetRecGroup): a program class that previously reached NO backend —
-    // `typeck` rejected the forward reference, and `lower_asm` bound a name only before its own body.
-    // Each member is observably DIFFERENT at every level (not merely in its base case), so a backend
-    // that permuted the group's members would compute a plausible WRONG value rather than agree.
-    // Measured cost (well inside both caps): λ 367 of 5,000,000 steps, TM 99,699 of 5,000,000.
+    // MUTUAL RECURSION (Core::LetRecGroup). Each member is observably DIFFERENT at every level (not
+    // merely in its base case), so a backend that permuted the group's members would compute a
+    // plausible WRONG value rather than agree.
     "fn is_even(n){ if n == 0 { true } else { is_odd(n - 1) } } \
      fn is_odd(n){ if n == 0 { false } else { is_even(n - 1) } } is_even(4)",
     // The ODD argument is not a duplicate: its answer comes out of the OTHER member's base case. A
     // backend that COLLAPSED the pair (both names resolving to `is_even`) still answers `true` at
     // every even argument, so the even case alone would agree with the reference under that mutant —
-    // measured, not assumed; see `lambda/lower.rs`'s own group test. λ 502 steps, TM 120,899.
+    // see `lambda/lower.rs`'s own group test.
     "fn is_even(n){ if n == 0 { true } else { is_odd(n - 1) } } \
      fn is_odd(n){ if n == 0 { false } else { is_even(n - 1) } } is_even(5)",
     // A FORWARD REFERENCE with no cycle: `a` is a one-member component that must still be emitted
-    // INSIDE `b`, so this pins dependency order rather than grouping. λ 25 steps, TM 16,143.
+    // INSIDE `b`, so this pins dependency order rather than grouping.
     "fn a(n){ b(n) + 1 } fn b(n){ n * 2 } a(3)",
-    // THREE members, not two — an n-ary bug that happens to work at n = 2 is the shape of defect this
-    // codebase keeps finding. Each member contributes its own constant at its own level (1/2/4), so
-    // the answer 1+2+4+1 = 8 identifies the exact rotation of the cycle; any rotation of the three
-    // bodies gives a different number. λ 411 steps, TM 145,819.
+    // THREE members, not two — an n-ary bug can happen to work at n = 2. Each member contributes its
+    // own constant at its own level (1/2/4), so the answer 1+2+4+1 = 8 identifies the exact rotation of
+    // the cycle; any rotation of the three bodies gives a different number.
     "fn s0(n){ if n == 0 { 0 } else { 1 + s1(n - 1) } } \
      fn s1(n){ if n == 0 { 0 } else { 2 + s2(n - 1) } } \
      fn s2(n){ if n == 0 { 0 } else { 4 + s0(n - 1) } } s0(4)",
-    // A group that reaches the backends THROUGH `defunc`. Every case above lowers via `lower_asm`
-    // directly, so `defunc`'s group handling — peeling a `LetRecGroup` and re-emitting it as one
-    // ordered unit, the whole of Task 6 — was asserted only by unit tests stopping at the reference
-    // and `run_asm`, never through λ, the TM, or native. `id` is used as a VALUE, which is what routes
-    // the program through `defunc`; `ev`/`od` stay a genuine cycle inside it. The answer comes out of
-    // whichever member's base case the parity reaches, so a collapsed or rotated group is caught.
+    // A group that reaches the backends THROUGH `defunc`. Every group case above lowers via `lower_asm`
+    // directly, so none exercises `defunc`'s group handling — peeling a `LetRecGroup` and re-emitting it
+    // as one ordered unit. `id` is used as a VALUE, which is what routes the program through `defunc`;
+    // `ev`/`od` stay a genuine cycle inside it. The answer comes out of whichever member's base case the
+    // parity reaches, so a collapsed or rotated group is caught.
     "fn ev(n,k){ if n == 0 { k(1) } else { od(n - 1, k) } } \
      fn od(n,k){ if n == 0 { k(0) } else { ev(n - 1, k) } } fn id(x){ x } ev(4, id)",
     "fn ev(n,k){ if n == 0 { k(1) } else { od(n - 1, k) } } \
@@ -157,13 +144,11 @@ const FIRST_ORDER_DEMOS: &[&str] = &[
     // A FORWARD reference through `defunc` (no cycle): `f` names `g` before `g` is defined, and `g`
     // is value-used, so the dependency ordering and the dispatcher interact.
     "fn ap(h,x){ h(x) } fn f(n){ ap(g, n) } fn g(n){ n + 1 } f(3)",
-    // A fn both CALLED BY NAME and USED AS A VALUE. Previously `Unsupported` on TM and native while
-    // the reference and λ accepted it — an oracle asymmetry this class now closes.
-    // Non-commutative at arity 2, so a forwarder with swapped arguments cannot pass: 5 + 7 = 12.
+    // A fn both CALLED BY NAME and USED AS A VALUE. Non-commutative at arity 2, so a forwarder with
+    // swapped arguments cannot pass: 5 + 7 = 12.
     "fn sub(a, b) { a - b } fn ap2(g, a, b) { g(a, b) } sub(9, 4) + ap2(sub, 10, 3)",
-    // RECURSIVE and value-used — the case the restriction actually blocked, and the reason the class
-    // is large: `analyze` counts a self-call as `name_called`, so every recursive fn used as a value
-    // was BOTH. 10 + 3 = 13.
+    // RECURSIVE and value-used — the reason the class is large: `analyze` counts a self-call as
+    // `name_called`, so every recursive fn used as a value is BOTH. 10 + 3 = 13.
     "fn sum(n) { if n == 0 { 0 } else { n + sum(n - 1) } } fn ap(g, x) { g(x) } ap(sum, 4) + sum(2)",
     // `map` itself passed as a value while ALSO being called by name. Its body dispatches at arity 1
     // and it is value-used at arity 2, so the two dispatchers are distinct. `map` calls itself by
@@ -181,15 +166,14 @@ const FIRST_ORDER_DEMOS: &[&str] = &[
     // its own -- would compile and pass unnoticed. Tags are assigned in declaration order per arity:
     // in the first program below `v` is tag 0 (normal arm) and `b` is tag 1 (forwarder); in the
     // second, the two `fn`s are declared in the opposite order, so `b` is tag 0 (forwarder) and `v`
-    // is tag 1 (normal arm) -- confirmed by dumping the lowered asm, not assumed. `v` (x*10) and `b`
-    // (x+1) are value-distinguishable, so a tag mix-up or a mis-bound param changes the answer rather
-    // than staying silent: 10 + 2 + 6 = 18.
+    // is tag 1 (normal arm). `v` (x*10) and `b` (x+1) are value-distinguishable, so a tag mix-up or a
+    // mis-bound param changes the answer rather than staying silent: 10 + 2 + 6 = 18.
     "fn v(x) { x * 10 } fn b(x) { x + 1 } fn ap(g, x) { g(x) } ap(v, 1) + ap(b, 1) + b(5)",
     "fn b(x) { x + 1 } fn v(x) { x * 10 } fn ap(g, x) { g(x) } ap(v, 1) + ap(b, 1) + b(5)",
     // A user `fn` shadowing a list builtin. `defunc` synthesizes `$head($clos)` for its dispatcher
     // tag test, and `lower_asm` resolves a bound function BEFORE the builtin table — so with the
-    // bare name this silently miscompiled (measured at 3246742: reference 5, λ 5, TM 3). The `$`
-    // form is unforgeable in user source, so scaffolding is uncapturable. 2 + 3 = 5.
+    // bare name this would silently miscompile. The `$` form is unforgeable in user source, so
+    // scaffolding is uncapturable. 2 + 3 = 5.
     "fn head(x) { x + 1 } fn ap(g, x) { g(x) } fn add1(y) { y + 1 } head(1) + ap(add1, 2)",
     // The same shadowing where the shadowing function is ALSO the value being dispatched. 2 + 3 = 5.
     "fn head(x) { x + 1 } fn ap(g, x) { g(x) } head(1) + ap(head, 2)",
@@ -198,46 +182,36 @@ const FIRST_ORDER_DEMOS: &[&str] = &[
     // is called unconditionally by every dispatcher (the tag test), but `$tail` is only called by
     // `tail1()` to unpack a dispatcher arm's CAPTURED env, and that program's closures capture
     // nothing, so `tail1()` is never invoked and the demo could not detect a reverted `$tail`->`tail`
-    // regression (found when this class was surveyed for Task 2). Here `tail` is BOTH called by name
-    // (`tail(3)`) and used as a value (`ap(tail, 2)`), so it is KEPT — a real top-level `tail` binder
-    // exists for scaffolding to collide with — and the sibling value-lambda `|y| y + n` at the SAME
-    // arity captures `n`, forcing its dispatcher arm to call `tail1()` to unpack `$env`. Confirmed
-    // non-vacuous by sabotage (reverting `tail1`'s emitted name to the bare `"tail"`): the TM diverges
-    // (`HitCap`) while reference and λ still agree. 4 + 3 + 12 = 19.
+    // regression. Here `tail` is BOTH called by name (`tail(3)`) and used as a value (`ap(tail, 2)`), so it
+    // is KEPT — a real top-level `tail` binder exists for scaffolding to collide with — and the sibling
+    // value-lambda `|y| y + n` at the SAME arity captures `n`, forcing its dispatcher arm to call `tail1()`
+    // to unpack `$env`. 4 + 3 + 12 = 19.
     "let n = 7; fn tail(x) { x + 1 } fn ap(g, y) { g(y) } tail(3) + ap(tail, 2) + ap(|y| y + n, 5)",
     // `nil` is the FOURTH synthesized scaffolding name (the closed-function-value closure's env, the
     // dispatcher's fault sentinel, the env-list terminator), and `rewrite_value_name`'s bare-`"nil"`
-    // check used to short-circuit BEFORE its `tags` check — so a user `fn nil`, itself USED AS A
-    // VALUE, compiled to the empty list instead of `cons(tag, $nil)`, and the dispatcher's
-    // `$head($clos)` tag test then faulted on it. `nil` is not a keyword in this language (see
+    // check has to come AFTER its `tags` check: the other order would compile a user `fn nil`, itself
+    // USED AS A VALUE, to the empty list instead of `cons(tag, $nil)`, and the dispatcher's
+    // `$head($clos)` tag test would then fault on it. `nil` is not a keyword in this language (see
     // `prelude.rs`'s module doc), so a user `fn nil` SHADOWS the empty list exactly as the reference
-    // interpreter's frame lookup does — confirmed against the reference, which evaluates this to 5.
-    // Confirmed non-vacuous by sabotage (restoring the old check order): TM `HitCap`, matching the
-    // reference/λ "no value" outcome being wrongly a value fault instead of true agreement — see
-    // `defunc.rs`'s `rewrite_value_name` for the measured failure this reorder closes.
+    // interpreter's frame lookup does — the reference evaluates this to 5.
+    // `defunc.rs`'s `rewrite_value_name` says why the check order matters.
     "fn nil(x) { x + 5 } fn ap(g, x) { g(x) } ap(nil, 0)",
     // A user `fn nil` called by name ONLY (never itself used as a value) sharing a program with an
-    // unrelated CLOSED function-value (`add1`, passed to `ap`). Before the `$nil` alias, `add1`'s
-    // closed closure was built as `cons(tag, nil)` — a bare `nil` that `lower_asm`'s
-    // `reject_fn_value` then flagged as a value-use of the user's KEPT `fn nil`, rejecting the whole
-    // program on every lowering backend even though `nil` itself is never value-used anywhere.
-    // Confirmed non-vacuous by sabotage (reverting `$nil` at that one synthesis site): all three
-    // lowering backends `Unsupported { "\`nil\` used as a value" }`, while reference and λ still
-    // agree at 5. 2 + 3 = 5.
+    // unrelated CLOSED function-value (`add1`, passed to `ap`). Without the `$nil` alias, `add1`'s
+    // closed closure would be built as `cons(tag, nil)` — a bare `nil` that `lower_asm`'s
+    // `reject_fn_value` would flag as a value-use of the user's KEPT `fn nil`, rejecting the whole
+    // program on every lowering backend even though `nil` itself is never value-used anywhere. 2 + 3 = 5.
     "fn nil(x) { x + 1 } fn ap(g, x) { g(x) } fn add1(y) { y + 1 } nil(1) + ap(add1, 2)",
     // A user `fn cons` shadowing the list builtin — the `cons`-shaped twin of the `head`/`tail` pair
-    // above, closing the one member a review found missing (reverting the `cons` helper to its bare
-    // name left both oracle suites green). `defunc` builds every closure as `$cons(tag, env)`, so a
-    // bare `cons` here would let this user function capture the closure representation itself —
-    // `add1`'s closed closure would become `(tag + env)` (the user's `cons` computes `a + b`, not a
-    // pair), and the dispatcher's `$head($clos)` tag test then reads that number as a list. Confirmed
-    // non-vacuous by sabotage (reverting the `cons` helper's `"$cons"` to the bare `"cons"`):
-    // reference/λ still agree at 10, while the TM diverges (`HitCap`). 3 + 7 = 10.
+    // above. `defunc` builds every closure as `$cons(tag, env)`, so a bare `cons` here would let this
+    // user function capture the closure representation itself — `add1`'s closed closure would become
+    // `(tag + env)` (the user's `cons` computes `a + b`, not a pair), and the dispatcher's
+    // `$head($clos)` tag test would then read that number as a list. 3 + 7 = 10.
     "fn cons(a, b) { a + b } fn ap2(g, a, b) { g(a, b) } cons(1, 2) + ap2(cons, 3, 4)",
 ];
 
-/// Verbatim copy of `tests/three_way_oracle.rs::LAMBDA_LIMITATION_DEMOS`: Plan-2 latent traps the λ
-/// backend refuses (`LowerError`) while `reference == TM`. Two-way, not three-way, but still a genuine
+/// Verbatim copy of `tests/three_way_oracle.rs::LAMBDA_LIMITATION_DEMOS`: latent traps the λ backend
+/// refuses (`LowerError`) while `reference == TM`. Two-way, not three-way, but still a genuine
 /// completed TM run worth attributing.
 const LAMBDA_LIMITATION_DEMOS: &[&str] = &[
     "let mut x = 1; x = x + 1; let x = x + 10; x",
@@ -293,8 +267,8 @@ const PROBE_CAVEATS: &[(&str, &str)] = &[
     ),
 ];
 
-/// (label, as-written, hand-optimized, why-this-shape) — probes added by the fix wave, either to
-/// unbundle a `PROBES` row that measured two passes at once, or to cover a lever `PROBES` misses.
+/// (label, as-written, hand-optimized, why-this-shape) — probes that either unbundle a `PROBES` row that
+/// measured two passes at once, or cover a lever `PROBES` misses.
 const SUPPLEMENTARY_PROBES: &[(&str, &str, &str, &str)] = &[
     (
         "inlining, real callee",
@@ -313,7 +287,7 @@ const SUPPLEMENTARY_PROBES: &[(&str, &str, &str, &str)] = &[
         "devirtualization",
         "fn ap(g) { g(5) } fn add1(x) { x + 1 } ap(add1)",
         "fn add1(x) { x + 1 } fn ap_add1() { add1(5) } ap_add1()",
-        "I5's first gap: the defunctionalization tax. As-written passes `add1` as a VALUE, so defunc \
+        "The defunctionalization tax. As-written passes `add1` as a VALUE, so defunc \
          builds a cons(tag,env) closure and routes the call through the `$apply1` dispatcher; the \
          optimized form is `ap` SPECIALIZED to its statically-known callee. Note what the optimized \
          form deliberately does NOT do: it keeps `ap_add1` as a real function, still CALLS it, and \
@@ -337,7 +311,7 @@ fn main() {
     println!("\n════════════════════════════════════════════════════════════════════");
     println!(" Redextape — the step survey");
     println!(" where TM steps go (Part A), and what each candidate optimizer pass");
-    println!(" could recover (Part B). Evidence for choosing the Tier A pass set.");
+    println!(" could recover (Part B). Evidence for choosing which pass to write next.");
     println!("════════════════════════════════════════════════════════════════════");
 
     println!("\nREAD THIS FIRST — the bound on every number below:");
@@ -347,7 +321,7 @@ fn main() {
     println!("  PROGRAMS. It CANNOT say which population an intended workload resembles. Every share");
     println!("  below is conditional on that corpus, and the sensitivity tables show how much they move.");
 
-    println!("\nHow to read the buckets (established by measurement, Task 5):");
+    println!("\nHow to read the buckets (established by measurement):");
     println!("  • MachineScaffold is the CALL/RETURN ABI, not noise: zero for call-free programs,");
     println!("    ~7.2k steps per return on sum(3), and it scales O(n_loc^2) over the Loc bank in");
     println!("    `Ret`'s frame-restore. It is a LEVER, not a floor — do not read it as unattributable.");
@@ -360,17 +334,6 @@ fn main() {
     println!("    strategy. Merging them would overstate the devirtualization headline.");
     println!("  • Apply is DECOMPOSED BY CALLEE, because one `Apply` bucket would merge populations with");
     println!("    opposite optimizer implications. In particular `cons`/`head`/`tail`/`is_empty` lower to");
-    // THE PARENTHETICAL ON THE NEXT LINE READ `lower_asm.rs` lines 247-250 UNTIL THIS COMMIT, AND IT
-    // HAD DRIFTED 70 LINES — the full accounting is in `ApplyClass::Builtin`'s doc below, which cited
-    // the same range and is resolved there. The short version: the range was those four dispatch arms
-    // when this survey landed, and it is now the tail of `lower_function`'s doc plus that function's
-    // signature and body — the emitter that gives a user function a frame, a `Call` and a `Ret`,
-    // which is the exact thing this sentence says these builtins do NOT get.
-    //
-    // "a SINGLE" became "ONE" on the same line for width alone: the symbol is 18 characters longer
-    // than the coordinate it replaces, which puts the line 5 over `max_width = 120`; dropping
-    // "a SINGLE" for "ONE" saves exactly 5. "ONE" is the wording `ApplyClass::Builtin` already uses
-    // for this same claim, so the two now match.
     println!("    ONE asm instruction each (`lower_asm.rs`'s `lower_builtin_apply`) — no frame, no Call, no Ret. They");
     println!("    are heap ops, and there is NOTHING THERE FOR AN INLINER TO INLINE.");
     println!("  • A Node(id) bucket identifies a construct by KIND and NodeId only. Core carries no");
@@ -397,8 +360,8 @@ fn main() {
     for src in FIRST_ORDER_DEMOS.iter().chain(LAMBDA_LIMITATION_DEMOS.iter()) {
         let a = attribute(src).unwrap_or_else(|e| panic!("corpus program failed to attribute: {src}: {e:?}"));
         any_capped |= a.capped;
-        // ONE `core_for_display` per program, shared by the printer and both rollups: it re-runs
-        // `lower_asm`/`defunc`, and recomputing it per consumer was pure waste.
+        // ONE `core_for_display` per program, shared by the printer and both rollups: it
+        // re-runs `lower_asm`/`defunc`.
         let (core, first_order) = core_for_display(src);
         print_program_attribution(src, &a, &core);
         all.add(src, &a, &core);
@@ -482,7 +445,7 @@ fn main() {
         }
     }
 
-    println!("\n\n  ── SUPPLEMENTARY PROBES (fix wave): unbundled shapes, and the levers PROBES misses ──\n");
+    println!("\n\n  ── SUPPLEMENTARY PROBES: unbundled shapes, and the levers PROBES misses ──\n");
     println!("  {:<28} {:>12} {:>12} {:>10} {:>8}", "pass", "as-written", "optimized", "delta", "% cut");
     println!("  {}", "─".repeat(76));
     for (label, written, optimized, _why) in SUPPLEMENTARY_PROBES {
@@ -518,8 +481,7 @@ fn main() {
     print_width_caveat();
 
     // ============================================================================================
-    // PART D — unary vs binary at the fitted width (Task 17: the measurement that makes the toggle
-    // worth having).
+    // PART D — unary vs binary at the fitted width (the measurement that makes the toggle worth having).
     // ============================================================================================
     println!("\n\n════════════════════════════════════════════════════════════════════");
     println!(" PART D — unary vs binary, each at its OWN fitted width");
@@ -599,11 +561,10 @@ fn ended_in_guard(program: &Program, enc: &dyn Encoding) -> bool {
     status == TmStatus::Halted && final_state == overflow
 }
 
-/// The Task 17 deliverable: for every program in this file's own Part A corpus
-/// (`FIRST_ORDER_DEMOS` + `LAMBDA_LIMITATION_DEMOS`), fit BOTH encodings independently via
-/// `run_tm_fitted` and report width, total steps, and final REG tape length under each, plus the
-/// ratio. Returns whether anything hit a genuine step cap (as opposed to `Overflow`, which is not
-/// expected here — see `Measured`'s doc).
+/// For every program in this file's own Part A corpus (`FIRST_ORDER_DEMOS` + `LAMBDA_LIMITATION_DEMOS`),
+/// fit BOTH encodings independently via `run_tm_fitted` and report width, total steps, and final REG tape
+/// length under each, plus the ratio. Returns whether anything hit a genuine step cap (as opposed to
+/// `Overflow`, which is not expected here — see `Measured`'s doc).
 fn print_encoding_comparison() -> bool {
     println!("\nEvery earlier section in this survey attributes steps under a PINNED width (`Unary::default()`,");
     println!("64 cells, or a program's unary-fitted width in the re-ranking section). This section fits BOTH");
@@ -701,7 +662,7 @@ fn print_conclusion(all: &Rollup, first_order: &Rollup, ceilings: &BTreeMap<&str
         "  A single merged `Apply` bucket ({:.1}%) would suggest inlining is the standout. It is not:",
         pct(all.apply_total(), all.total)
     );
-    println!("  that bucket is four populations with OPPOSITE optimizer implications, and the largest");
+    println!("  that bucket is six populations with OPPOSITE optimizer implications, and the largest");
     println!(
         "  slice of it ({:.1}% dispatch) is not something an inliner can touch at all, while another",
         pct(dispatch, all.total)
@@ -746,15 +707,15 @@ fn print_conclusion(all: &Rollup, first_order: &Rollup, ceilings: &BTreeMap<&str
         pct(all.closure_box, all.total)
     );
     println!("       Devirtualization removes NONE of it; a different mutable-capture strategy removes");
-    println!("       ALL of it. Bucketing by what a pass could DO about it is what puts it here and not");
-    println!("       in the headline — the same call `3b932ec` made for the `$box_get`/`$box_set` row.");
+    println!("       ALL of it. Bucketing by what a pass could DO about it is what puts all of it here,");
+    println!("       the `$box_get`/`$box_set` row included, and not in the headline.");
     println!();
     println!("  2. `Ret`'s FRAME-RESTORE / LIVE-Loc-BANK REDUCTION — target {:.1}%", pct(all.machine, all.total));
     println!("       MachineScaffold is the largest SINGLE bucket in the survey — larger than any user");
     println!("       construct kind — and the scaling table above measures it growing QUADRATICALLY in");
     println!("       locals live across a call (constant 2nd differences). It is asm->asm rather than");
-    println!("       Core->Core, so it may fall outside \"Tier A\" by the plan's taxonomy; per step saved");
-    println!("       per unit of engineering it is nonetheless the largest measured target.");
+    println!("       Core->Core, so a Core->Core pass set may not cover it; per step saved per unit of engineering");
+    println!("       it is nonetheless the largest measured target.");
     println!();
     println!(
         "  3. INLINING — target {:.1}% ({:.1}% counting self-recursive calls it can only unroll)",
@@ -811,9 +772,9 @@ fn print_conclusion(all: &Rollup, first_order: &Rollup, ceilings: &BTreeMap<&str
 /// capped (which the in-loop assert then rejects — a capped total is not a usable ceiling), and the
 /// % of steps the pass cut, which the conclusion quotes.
 fn run_probe(label: &str, written: &str, optimized: &str) -> (bool, f64) {
-    // Honesty check (Step 3 of the task): a probe whose "optimized" form computes something
-    // different measures nothing. `.unwrap()` is fine here — this is example code, and a probe
-    // that fails to run at all is a bug in the probe worth panicking loudly on.
+    // Honesty check: a probe whose "optimized" form computes something different measures
+    // nothing. `.unwrap()` is fine here — this is example code, and a probe that fails to run
+    // at all is a bug in the probe worth panicking loudly on.
     assert_eq!(run(written).unwrap(), run(optimized).unwrap(), "probe {label}: the two forms disagree");
 
     let wa = attribute(written).unwrap_or_else(|e| panic!("probe {label}: as-written form: {e:?}"));
@@ -827,10 +788,10 @@ fn run_probe(label: &str, written: &str, optimized: &str) -> (bool, f64) {
     (capped, cut)
 }
 
-/// The `MachineScaffold` scaling measurement (I5's second gap). Not a pass-ceiling probe — these are
-/// not (as-written, optimized) pairs, they are the SAME call with a growing number of locals live
-/// across it. `Ret`'s frame-restore re-seeks from home per field copy, so the claim under test is that
-/// the ABI's cost is superlinear in the Loc bank. Returns whether any run capped.
+/// The `MachineScaffold` scaling measurement. Not a pass-ceiling probe — these are not (as-written,
+/// optimized) pairs, they are the SAME call with a growing number of locals live across it. `Ret`'s
+/// frame-restore re-seeks from home per field copy, so the claim under test is that the ABI's cost is
+/// superlinear in the Loc bank. Returns whether any run capped.
 fn print_abi_scaling() -> bool {
     println!("\n\n  ── ABI SCALING (not a probe): MachineScaffold vs. locals live across a call ──\n");
     println!("  Same single call, K locals defined BEFORE it and used AFTER it, so all K are live across");
@@ -889,7 +850,7 @@ fn abi_scaling_program(k: usize) -> String {
 }
 
 /// Print one corpus program's attribution: total steps, capped status, and its buckets sorted by
-/// descending step count, each as construct-kind + id + share of total (per the task's exact spec).
+/// descending step count, each as construct-kind + id + share of total.
 fn print_program_attribution(src: &str, a: &Attribution, core: &Core) {
     println!("\n  {}", truncate(src, 96));
     println!(
@@ -1095,10 +1056,9 @@ impl Rollup {
     /// `Apply`s were routed through, plus defunc's dispatch scaffolding.
     ///
     /// NOT included, deliberately: every step of defunc's mutable-capture boxing — the `Apply -> $box*`
-    /// row, the `$box` allocation, and the `$boxh{k}` handle reads. Commit `3b932ec` established the
-    /// rule "bucket by what a pass could DO about it" and applied it to the first of those three;
-    /// these are the other two, removed by the same alternative mutable-capture strategy and by no
-    /// amount of devirtualization. Leaving them in overstated this target by ~0.9pp.
+    /// row, the `$box` allocation, and the `$boxh{k}` handle reads. The rule is "bucket by what a pass
+    /// could DO about it": these are removed by the alternative mutable-capture strategy and by no
+    /// amount of devirtualization.
     fn devirt_target(&self) -> u64 {
         self.by_kind.get(APPLY_DISPATCH).copied().unwrap_or(0) + self.closure_dispatch
     }
@@ -1121,7 +1081,7 @@ impl Rollup {
     }
 
     /// The mean over programs of each program's OWN percentage — the un-step-weighted view, where a
-    /// 548-step program counts as much as a 944k-step one.
+    /// short program counts as much as a long one.
     fn program_averaged(&self, get: fn(&ProgramRow) -> u64) -> f64 {
         if self.programs.is_empty() {
             return 0.0;
@@ -1130,7 +1090,7 @@ impl Rollup {
     }
 
     /// How concentrated the corpus is. A step-weighted share is only as representative as the spread
-    /// of the programs behind it, and this one is bimodal enough that the spread IS the finding.
+    /// of the programs behind it.
     fn print_concentration(&self) {
         let mut totals: Vec<u64> = self.programs.iter().map(|p| p.total).collect();
         totals.sort_unstable_by(|a, b| b.cmp(a));
@@ -1235,25 +1195,14 @@ const MACHINE_SCAFFOLD_ROW: &str = "MachineScaffold (call/return ABI)";
 const CLOSURE_DISPATCH_ROW: &str = "ClosureScaffold (defunc dispatch/tag/env)";
 const CLOSURE_BOX_ROW: &str = "ClosureScaffold ($box alloc + $boxh reads)";
 
-/// How an `Apply`'s callee resolves. THE Critical finding of the review: one `Apply` bucket merges
-/// four populations with opposite optimizer implications, and the merged number over-credits inlining
-/// by ~4.7x. Everything needed to split them is already in the Core the rollup holds.
+/// How an `Apply`'s callee resolves. One `Apply` bucket merges populations with opposite optimizer
+/// implications and over-credits inlining. Everything needed to split them is already in the Core the
+/// rollup holds.
 #[derive(Clone, Copy, PartialEq, Eq)]
 enum ApplyClass {
     /// `cons`/`head`/`tail`/`is_empty` — ONE asm instruction each (`lower_asm.rs`'s
     /// `lower_builtin_apply`). No frame, no `Call`, no `Ret`. A heap op wearing call syntax; nothing
     /// here for an inliner.
-    ///
-    /// THAT POINTER READ `lower_asm.rs` lines 247-250 UNTIL THIS COMMIT — as did the printed report's
-    /// own copy of this claim, up in `main` — AND IT HAD DRIFTED 70 LINES. It was exactly the four
-    /// dispatch arms `"cons"`, `"head"`, `"tail"` and `"is_empty"`, inside `lower_builtin_apply`, when
-    /// the source map and this survey landed together (`6adca99`); mutually recursive functions
-    /// (`9cec4f6`) pushed them 32 lines down, the unshadowable-scaffolding-builtins fix (`c870d0b`) 1,
-    /// the Plan 4 producer slice (`9fbd911`) 7, and `clippy::pedantic` (#31) a further 30. The range
-    /// now holds the closing two lines of `lower_function`'s doc plus that function's signature and
-    /// body — the emitter that gives a user function its own subroutine, with the frame, `Call` and
-    /// `Ret` this sentence exists to say these builtins avoid. Still in the same file, still about
-    /// lowering a call, which is what would have made it read as confirmation.
     Builtin,
     /// `$applyN` — defunc's closure-dispatch indirection. The devirtualization target.
     Dispatch,
@@ -1261,12 +1210,12 @@ enum ApplyClass {
     SelfRecursive,
     /// A direct call to a named user function from outside it. The inliner's actual target.
     Direct,
-    /// Any other `$`-prefixed callee defunc minted. MEASURED on this corpus, the row is entirely
-    /// `$box_get` (30,742 steps) + `$box_set` (18,888) — defunc's mutable-capture boxing, nothing else.
-    /// Kept OUT of `Builtin` deliberately, even though `$box*` also lowers to one asm instruction: the
-    /// two have opposite optimizer implications, which is precisely what the `Apply` split exists to
-    /// stop hiding. `cons`/`head`/`tail` is irreducible heap work; `$box_get`/`$box_set` is an
-    /// artifact of THIS mutable-capture strategy and a different one could avoid it.
+    /// Any other `$`-prefixed callee defunc minted. On this corpus the row is entirely `$box_get` +
+    /// `$box_set` — defunc's mutable-capture boxing, nothing else. Kept OUT of `Builtin` deliberately,
+    /// even though `$box*` also lowers to one asm instruction: the two have opposite optimizer
+    /// implications, which is precisely what the `Apply` split exists to stop hiding.
+    /// `cons`/`head`/`tail` is irreducible heap work; `$box_get`/`$box_set` is an artifact of THIS
+    /// mutable-capture strategy and a different one could avoid it.
     Synthetic,
     /// A callee that is not a plain name — nothing static to resolve.
     Indirect,
@@ -1566,7 +1515,7 @@ struct Shares {
     total: u64,
 }
 
-/// Running bucket totals, in the shape the Tier A comparison needs.
+/// Running bucket totals, in the shape the ranking comparison needs.
 #[derive(Clone, Copy, Debug, Default)]
 struct Tally {
     user: u64,
@@ -1574,8 +1523,7 @@ struct Tally {
     closure_dispatch: u64,
     closure_box: u64,
     /// `Apply` steps whose callee is an `$applyN` dispatcher. NOT the same as `closure_dispatch`: the
-    /// devirtualization target is the SUM of the two, which is the number the Tier A choice was made
-    /// on — the `ClosureScaffold` bucket alone is barely half of it.
+    /// devirtualization target is the SUM of the two.
     apply_dispatch: u64,
 }
 
@@ -1623,22 +1571,21 @@ fn shares_of(t: Tally) -> Shares {
 }
 
 /// THE RE-RANKING MEASUREMENT. Every share this survey reports is measured at the pinned field width
-/// 64. Step cost is affine in the width (`steps = a + b*W`) and the `b*W` term is 91–97% of the total
-/// at 64, so those shares are very nearly a ranking by `b` alone — by field-traversal cost. `run_tm`
-/// now fits a narrower width per program, where the fixed term is a third of the cost rather than a
-/// twentieth. A bucket's share is width-independent only if every bucket has the same `b/a` ratio,
-/// which nothing guarantees.
+/// 64. Step cost is affine in the width (`steps = a + b*W`) and the `b*W` term dominates at 64, so those
+/// shares are very nearly a ranking by `b` alone — by field-traversal cost. `run_tm` fits a narrower
+/// width per program, where the fixed term weighs more. A bucket's share is width-independent only if
+/// every bucket has the same `b/a` ratio, which nothing guarantees.
 ///
 /// So: re-attribute the whole corpus at each program's OWN fitted width and compare. This answers
-/// whether the Tier A ordering survives sizing, rather than asserting a direction for it.
+/// whether the bucket ordering survives sizing, rather than asserting a direction for it.
 fn print_width_reranking() {
     println!("\n\n  ══ DOES THE RANKING SURVIVE PER-PROGRAM SIZING? ══\n");
     for line in wrap(
         "Every share above is measured at the pinned field width 64. Step cost is affine in the width \
          and the width-driven term is 91% to 97% of the total there, so those shares are close to a \
-         ranking by field-traversal cost alone. `run_tm` now fits a narrower width per program. This \
+         ranking by field-traversal cost alone. `run_tm` fits a narrower width per program. This \
          re-attributes the identical corpus at each program's own fitted width and compares — the \
-         question is whether the ORDER of the buckets the Tier A passes target changes.",
+         question is whether the ORDER of the buckets the candidate passes target changes.",
         96,
     ) {
         println!("  {line}");
@@ -1683,8 +1630,7 @@ fn print_width_reranking() {
 
     // The ranking claim under test is the order of the two PASS TARGETS, which is NOT the same as the
     // order of the raw scaffolding buckets: the devirtualization target is `$applyN`-callee Apply steps
-    // PLUS the ClosureScaffold dispatch bucket, and the ClosureScaffold half alone is barely half of
-    // it. Comparing the raw buckets would test a margin of ~14pp instead of the real ~1pp.
+    // PLUS the ClosureScaffold dispatch bucket.
     let order = |s: &Shares| if s.dispatch > s.machine { "devirt > ABI" } else { "ABI > devirt" };
     println!(
         "\n  margin between the two pass targets — at 64: {:.1}pp   at fitted: {:.1}pp",
@@ -1697,32 +1643,26 @@ fn print_width_reranking() {
         if order(&p) == order(&f) {
             "is PRESERVED under per-program sizing."
         } else {
-            "FLIPS under per-program sizing — the Tier A choice was made on width-64 evidence."
+            "FLIPS under per-program sizing — the width-64 order does not hold at fitted widths."
         }
     );
 }
 
-/// The narrow, MEASURED caveat that survives the re-ranking section above. An earlier draft of this
-/// survey asserted a mechanism here — that a traversal-eliminating pass (the frame-restore ABI) would
-/// lose most of its measured win as fields narrow while an instruction-eliminating one
-/// (devirtualization) kept its. That was reasoning, not measurement, and the measurement contradicts
-/// its direction: the ABI share ROSE. Both pass targets rose, because the buckets that shrink fastest
-/// under sizing are the user constructs, not the scaffolding.
+/// The narrow, MEASURED caveat that survives the re-ranking section above.
 fn print_width_caveat() {
     println!("\n\n  ── What the width result does and does not settle ──\n");
     for line in wrap(
-        "SETTLED: the Tier A ordering does not depend on the field width. Re-attributing the whole \
+        "SETTLED: the bucket ordering does not depend on the field width. Re-attributing the whole \
          corpus at each program's own fitted width moves every share by at most 2.5 percentage points \
-         and leaves the order of the two pass targets unchanged. The concern that these shares were an \
-         artifact of measuring at width 64 — where 91% to 97% of every step is padding traversal — is \
-         answered, and answered against the hypothesis that motivated it.",
+         and leaves the order of the two pass targets unchanged. The shares are not an artifact of \
+         measuring at width 64, where 91% to 97% of every step is padding traversal.",
         96,
     ) {
         println!("  {line}");
     }
     println!();
     for line in wrap(
-        "NOT SETTLED, and more important than the width question ever was: the two pass targets are \
+        "NOT SETTLED, and more important than the width question: the two pass targets are \
          within about one percentage point of each other, at either width. That is not a ranking. It \
          is a tie inside the noise of a 50-program corpus whose largest single member is 17.7% of all \
          steps, and it means the choice between devirtualization and the frame-restore ABI cannot be \

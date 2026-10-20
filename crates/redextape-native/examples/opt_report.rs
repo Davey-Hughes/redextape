@@ -3,7 +3,7 @@
 //! `--release` — a debug build of a compiler dominates every number here with unoptimized rustc
 //! output.
 //!
-//! What the optimizer's Tier C actually buys: compile time, emitted object size, and one end-to-end
+//! What the optimizer actually buys: compile time, emitted object size, and one end-to-end
 //! compile-and-run time, for every corpus program (`measure::CORPUS`) across every available native
 //! backend and all six optimization levels (`measure::OPT_LEVELS`). See the `measure` module docs for
 //! the full measurement contract. Five things to know before reading the table:
@@ -20,18 +20,13 @@
 //!    byte counts between the two backends measures the container, not the codegen.
 //! 3. **On Cranelift, `Os`/`Oz` measure byte-identical to `O1`/`O2`/`O3`.** Cranelift's ISA-level
 //!    optimizer exposes only three settings (`none`/`speed`/`speed_and_size`), so the six-level grid
-//!    collapses to three distinct rows per program on that backend. The duplicate rows below are the
-//!    correct result of that deliberate collapse, not a measurement error.
+//!    collapses to at most three distinct rows per program on that backend. The duplicate rows below
+//!    are the correct result of that deliberate collapse, not a measurement error.
 //! 4. **`compile+run` is wall-clock on a shared machine — indicative, never asserted**, the median of
-//!    `RUNS` timed calls after one discarded warmup. Execution is only a fraction of it: a separate,
-//!    out-of-band experiment (a temporary split timer wrapped around just the call into JIT-compiled
-//!    code, used to size `measure::CORPUS` and then discarded — see that constant's doc) put
-//!    execution at roughly 15-30% of `compile+run` for the recursion-bound programs
-//!    (`sum30000`/`list30000`/`map30000`), with codegen making up the rest, and near 100% for the
-//!    counted loop (`loop1000000`). Those figures come from that instrumented run, NOT from anything
-//!    derivable from the two columns printed below — see caveat 5. That split is a documented
-//!    property of this harness — compile-and-run is not separable with this API — not a claim about
-//!    the language's steady-state speed.
+//!    `RUNS` timed calls after one discarded warmup. Execution is a share of it that varies by program
+//!    (see `measure::CORPUS`), with codegen making up the rest. That split is a documented property of
+//!    this harness — compile-and-run is not separable with this API — not a claim about the language's
+//!    steady-state speed.
 //! 5. **Never subtract `compile` from `compile+run` to estimate execution time — they are different
 //!    code paths, not the same work measured twice.** `compile` times AOT object emission
 //!    (`aot::emit_object`, which builds a Cranelift `ObjectModule`; `llvm::object_bytes`, which asks
@@ -94,7 +89,7 @@ fn main() {
     }
 
     println!(
-        "Tier C optimization report: {} program(s) x {} backend(s) x {} level(s) = {} rows\n",
+        "Optimization report: {} program(s) x {} backend(s) x {} level(s) = {} rows\n",
         CORPUS.len(),
         backends,
         OPT_LEVELS.len(),

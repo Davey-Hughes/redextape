@@ -1,7 +1,7 @@
 //! **Why do the `None` β-steps sit outside the tags that are still alive, and would a contractum
-//! -inherits rule reach them?** Successor to `none_probe.rs`, which established that 96.2% of
-//! `while4`'s 397 `None` steps happen with tagged `App`s alive elsewhere in the term — a quantity,
-//! not a mechanism. This probe supplies the mechanism and prices two candidate rules.
+//! -inherits rule reach them?** `none_probe.rs` counts how many of `while4`'s `None` steps happen with
+//! tagged `App`s alive elsewhere in the term — a quantity, not a mechanism. This probe supplies the
+//! mechanism and prices two candidate rules.
 //!
 //! # HOW TO RUN THIS
 //!
@@ -10,12 +10,12 @@
 //!   cargo run --release -p redextape-core --example inherit_probe
 //! ```
 //!
-//! **The cap is not decoration and `MemorySwapMax=0` is the load-bearing half.** An earlier
-//! measurement over this family took 60 GiB of RAM and 29 GiB of swap and wedged the machine. An
-//! OOM-kill or a timeout here is a RESULT to report, not something to work around by raising the cap.
+//! **The cap is not decoration and `MemorySwapMax=0` is the load-bearing half.** This file reduces λ
+//! terms, and the cap alone lets the kernel thrash instead of failing. An OOM-kill or a timeout here is a
+//! RESULT to report, not something to work around by raising the cap.
 //!
-//! **Drives `trace::LambdaCursor`, never `reduce_trace`**, which materialises every step's term by
-//! contract and is how the 60 GiB run happened.
+//! **Drives `trace::LambdaCursor`, never `reduce_trace`**, which materialises every step's term
+//! by contract.
 //!
 //! # WHAT THIS MEASURES
 //!
@@ -159,14 +159,10 @@ enum Variant {
 /// established.** (1) Sharing loss without the memo is real: a plain recursive rebuild allocates a
 /// fresh node per REFERENCE rather than per allocation, so one allocation reached twice comes back as
 /// two distinct `alloc_id`s — pinned by `retag_all_loses_sharing_without_the_memo` below, which runs a
-/// memo-less rebuild and asserts the ids diverge. (2) The blowup that loss was expected to cause on
-/// THIS corpus is **not** established: a mutation that stripped the memo from this very function and
-/// ran all four probe programs under the 2 GB cap completed to normal-form on every one, with
-/// byte-identical output to the memoized run. These four programs evidently do not build enough
-/// duplicate structure through this walk to hit the wall `max_shared_logical_size` guards against —
-/// that is a fact about this corpus's redexes, not a refutation of the blowup, which is real for terms
-/// this corpus does not happen to construct. The memo stays: it is cheap, it is correct per (1), and
-/// removing it would be betting the next corpus looks like these four.
+/// memo-less rebuild and asserts the ids diverge. (2) The blowup that loss could cause is **not**
+/// established on THIS corpus — a fact about this corpus's redexes, not a refutation of the blowup,
+/// which is real for terms this corpus does not happen to construct. The memo stays: it is cheap, it is
+/// correct per (1), and removing it would be betting the next corpus looks like this one.
 ///
 /// With the memo, each allocation is rebuilt once and re-shared, and the walk is O(physical
 /// allocations): the same order as the `count_tagged_apps` walk already running per step.
@@ -285,7 +281,7 @@ struct VariantStats {
     exact: u64,
     /// Steps whose shadow `Owner` was `Within` — an enclosing construct carried the tag, not the redex
     /// itself. A subset of `tagged`. Equal to `within_widths.len()` whenever every resolved span's
-    /// `source_span` lookup succeeds — see `within_widths`'s doc, which this count now makes assertable.
+    /// `source_span` lookup succeeds — see `within_widths`'s doc, which this count makes assertable.
     within: u64,
     /// Steps the real reducer reported `None` and the shadow did not. A subset of `tagged`.
     converted: u64,
@@ -309,8 +305,7 @@ fn rate_of(rows: &[(&str, f64, Option<f64>, Option<f64>)], name: &str) -> Option
 
 /// The pre-registered gate's verdict, computed purely from the collected `rows` so the decision
 /// `main` prints — the deliverable of this probe — is directly testable from synthetic rows instead
-/// of only by a human reading the printed line. The same fix Task 2 applied by extracting
-/// `classify_pos`.
+/// of only by a human reading the printed line.
 ///
 /// **Reads ONLY `rows`' V1 fields** — index 1 (the V1 rate) and index 2 (the V1 Within median).
 /// Index 3, V3's median, is never read here: V3 is printed beside V1 for comparison and must never
@@ -356,7 +351,7 @@ struct Census {
     /// `None` steps with tags alive in the term but none reachable from the redex.
     pos_disjoint: u64,
     /// `None` steps with no tagged `App` anywhere in the term. `none_probe`'s "consumed" column;
-    /// carried here so the four buckets sum to `none` and a reader can check that they do.
+    /// carried here so the three exclusive buckets sum to `none` and a reader can check that they do.
     pos_no_tags: u64,
     /// Binder name of the `Abs` applied in each `None` redex. **A HINT, NOT EVIDENCE** — see the
     /// module doc: names collide across constructs with nothing else in common.
@@ -418,8 +413,8 @@ fn measure(src: &str) -> Census {
                 c.v1.converted += 1;
             }
         }
-        // Fix 1: per-variant Exact/Within, so `[INH]` can show V1's split and `within` becomes an
-        // assertable population size for `within_widths` (see the assert after this loop).
+        // Per-variant Exact/Within, so `[INH]` can show V1's split and `within` becomes an assertable
+        // population size for `within_widths` (see the assert after this loop).
         match owner_v1 {
             Owner::Exact(_) => c.v1.exact += 1,
             Owner::Within(_) => c.v1.within += 1,
@@ -484,11 +479,11 @@ fn measure(src: &str) -> Census {
             }
         }
     }
-    // Fix 3: `within_widths`'s doc claims this holds, per-variant, and now it is checked rather than
-    // assumed — the same shape of check `owner_probe.rs`'s `Census` makes for its single un-variantized
-    // `within`. A cheap post-processing pass, not the risky β-step loop this file's module doc warns
-    // about, so crashing on a violation is safe and preferred over silently reporting a narrower
-    // population than the shadow actually produced.
+    // `within_widths`'s doc claims this holds, per-variant, and this checks it rather than assuming it —
+    // the same shape of check `owner_probe.rs`'s `Census` makes for its single un-variantized `within`.
+    // A cheap post-processing pass, not the risky β-step loop this file's module doc warns about, so
+    // crashing on a violation is safe and preferred over silently reporting a narrower population than
+    // the shadow actually produced.
     assert_eq!(
         c.v1.within_widths.len() as u64,
         c.v1.within,
@@ -560,7 +555,7 @@ fn main() {
     // Every table's row for a program is flushed immediately after that program's `measure()`
     // finishes — interleaved across tags rather than in separate passes — so a kill mid-run leaves
     // every table complete through the last finished program, never one table ahead of the others.
-    // Same fix `none_probe` and `owner_probe` both already apply.
+    // `none_probe` and `owner_probe` flush the same way.
     for (name, src) in &programs() {
         let c = measure(src);
         line(&format!(
@@ -607,7 +602,7 @@ fn main() {
     }
 
     head("[GATE] The pre-registered rule. FLOOR: V1 >= 31.1% on while4 and >= 32.5% on countdown4.");
-    line("  CEILING: the count of programs with a V1 Within median > 60% must not exceed 1 (sum5 today).");
+    line("  CEILING: the count of programs with a V1 Within median > 60% must not exceed 1.");
     line("  THE GATE READS V1 ONLY. V3 is the ceiling of the rule family, not the thing being admitted.");
     for (name, v1_rate, v1_med, v3_med) in &rows {
         line(&format!(
@@ -621,7 +616,7 @@ fn main() {
     // rows. See its doc for the missing-program-fails-by-absence and V1-only-never-V3 guarantees.
     let GateVerdict { floor_ok, degenerate, ceiling_ok } = evaluate_gate(&rows);
     line(&format!(
-        "[GATE] FLOOR {}   CEILING {} ({degenerate} degenerate, was 1)   => SLICE {}",
+        "[GATE] FLOOR {}   CEILING {} ({degenerate} degenerate)   => {} V1",
         if floor_ok { "PASS" } else { "FAIL" },
         if ceiling_ok { "PASS" } else { "FAIL" },
         if floor_ok && ceiling_ok { "BUILD" } else { "DO NOT BUILD" },
@@ -714,8 +709,7 @@ mod tests {
     #[test]
     fn classify_pos_nothing_tagged_anywhere_is_no_tags() {
         // (0, 0) from the redex AND zero anywhere in the whole term — this is the case a
-        // disjoint/no_tags branch swap collapses into `disjoint`, and the case the old
-        // `an_untagged_redex_with_no_tags_inside_is_disjoint` test could not distinguish from it.
+        // disjoint/no_tags branch swap collapses into `disjoint`.
         assert_eq!(classify_pos(0, 0, 0), PosBucket::NoTags, "no tagged App anywhere in the term");
     }
 

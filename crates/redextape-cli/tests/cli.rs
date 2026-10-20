@@ -24,39 +24,35 @@
 //! `redextape.toml`, stopping at whichever comes first in a directory: the config file, or a `.git`.
 //! `/tmp` on this machine is a shared tmpfs other processes write to, so a case with no config of its
 //! own has an unbounded walk that can reach `/tmp` and pick up whatever a stray file there holds,
-//! silently changing what the case tests. Measured: 20 of the 22 `.in` directories under
-//! `tests/cmd/` have no `redextape.toml` anywhere in them, and for those the marker is what stops the
-//! walk — delete it and `discover` keeps climbing toward `/tmp`.
+//! silently changing what the case tests. All but two of the `.in` directories under `tests/cmd/`
+//! have no `redextape.toml` anywhere in them, and for those the marker is what stops the walk —
+//! delete it and `discover` keeps climbing toward `/tmp`.
 //!
 //! The other two, `config_unknown_key.in` and `config_bad_width.in`, put their `redextape.toml`
 //! directly in the sandbox root, which is also `discover`'s starting directory. `discover` checks
 //! `dir.join(FILE_NAME).is_file()` before `dir.join(".git").exists()` **in the same directory** —
 //! the order `discover`'s own doc comment calls out — so for those two the config file is found and
-//! returned on the very first
-//! iteration — `.git` in that same directory is never consulted. The marker there is inert; it gets
-//! planted anyway only because the loop below writes one into every `.in` directory unconditionally,
-//! reading the list from disk rather than naming cases, so a future case with no config of its own is
-//! bounded automatically instead of depending on someone remembering to add a marker for it.
+//! returned on the very first iteration — `.git` in that same directory is never consulted. The
+//! marker there is inert; it gets planted anyway only because the loop below writes one into every
+//! `.in` directory unconditionally, reading the list from disk rather than naming cases, so a future
+//! case with no config of its own is bounded automatically instead of depending on someone
+//! remembering to add a marker for it.
 //!
 //! It is written into the working tree's `.in/` directories right before `trycmd` copies each into
 //! its sandbox, which makes it present on every run including a fresh CI checkout. `tests/cmd/.gitignore`
 //! names them, with the pattern `*.in/.git`, and **that ignore is belt-and-braces rather than the
-//! reason they stay out of `git status`.** Measured with the ignore file moved aside:
-//! `git status --porcelain --untracked-files=all` still lists none of the markers,
-//! `git check-ignore -v` reports the path matched by no rule at all, and `git add -f` on one of them
-//! silently stages nothing. Git skips a directory entry literally named `.git` during traversal
-//! unconditionally, ignore rules or not — so the pattern suppresses nothing that was ever going to
-//! show. It is kept as a statement of intent for whoever finds untracked-looking `.git` files
-//! on disk and goes looking for why. Git refuses to
-//! track any path component literally named `.git`: `git add` and even
-//! `git update-index --add --cacheinfo` both silently no-op on it (verified directly, including with
-//! `core.protectHFS`/`core.protectNTFS` off — this is the unconditional exact-name check, not the
-//! configurable fuzzy one), so this marker cannot be a fixture like `a.rxt` or `redextape.toml` are.
+//! reason they stay out of `git status`.** Git skips a directory entry literally named `.git` during
+//! traversal unconditionally, ignore rules or not — so the pattern suppresses nothing that was ever
+//! going to show. It is kept as a statement of intent for whoever finds untracked-looking `.git` files
+//! on disk and goes looking for why. Git refuses to track any path component literally named `.git`:
+//! `git add` and even `git update-index --add --cacheinfo` both silently no-op on it (this is the
+//! unconditional exact-name check, not the configurable fuzzy one), so this marker cannot be a
+//! fixture like `a.rxt` or `redextape.toml` are.
 //!
-//! **INLINE IN THE `#[test]` FN, NOT A FREE HELPER.** A free helper in this target sits outside both
-//! exemptions this file's own doc comment above describes, so an `expect` here would need its own
-//! `#[allow(clippy::expect_used)]`; lexically inside `#[test] fn cli_transcripts` it is already
-//! covered.
+//! **INLINE IN THE `#[test]` FN, NOT A FREE HELPER.** A free helper in this target sits
+//! outside `clippy.toml`'s in-tests exemption, so an `expect` here would need its own
+//! `#[allow(clippy::expect_used)]`; lexically inside `#[test] fn cli_transcripts` it is
+//! already covered.
 #[test]
 fn cli_transcripts() {
     for entry in std::fs::read_dir("tests/cmd").expect("reading tests/cmd") {

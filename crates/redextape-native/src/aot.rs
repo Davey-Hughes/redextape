@@ -3,14 +3,14 @@
 //! `main` entry and a CONFIG data blob.
 //!
 //! The object is *incomplete on its own*: its subroutines call the `rt_*` runtime helpers, which are
-//! left as undefined imports to be resolved at link time against `libredextape_native_rt.a` (Task 6).
+//! left as undefined imports to be resolved at link time against `libredextape_native_rt.a`.
 //! `main` is a tiny shim that does nothing but `return rt_run(&$main, &CONFIG, CONFIG_LEN)` — the
-//! runtime's `rt_run` (Task 5) sets up a `Runtime`, calls `$main`, and prints the decoded result
+//! runtime's `rt_run` sets up a `Runtime`, calls `$main`, and prints the decoded result
 //! using the `Ty` and `Caps`/`depth_cap` recorded in the CONFIG blob. Splitting the driver logic into
 //! `rt_run` (rather than emitting it as Cranelift IR here) keeps this emitter small and shares one
 //! run/decode path with the rest of the runtime.
 //!
-//! # Tier 0 debuggability
+//! # Debuggability
 //! Subroutines are declared `Linkage::Local` (module-private) but their *names* (`$main`, each `fn`)
 //! are retained in the object's symbol table — we do not strip — so a debugger/`nm` shows meaningful
 //! frames. The smoke test asserts a `$main`-containing symbol survives.
@@ -33,7 +33,7 @@ fn cg(e: CodegenError) -> AotError {
 }
 
 /// Append `ty`, tag-encoded, to `out`. The layout is matched byte-for-byte by
-/// `redextape_native_rt::config::deserialize` (Task 5): `0=Nat 1=Bool 2=Unit 3=List<elem follows>`.
+/// `redextape_native_rt::config::deserialize`: `0=Nat 1=Bool 2=Unit 3=List<elem follows>`.
 /// A non-value type (`Fun`/`Var`) has no runtime representation to print, so it is rejected as
 /// `Unsupported` here — before any object is built — keeping `emit_object` total.
 fn serialize_ty(ty: &Ty, out: &mut Vec<u8>) -> Result<(), AotError> {
@@ -78,10 +78,10 @@ fn serialize_config(caps: Caps, depth_cap: u64, ty: &Ty) -> Result<Vec<u8>, AotE
 /// `ty` in the CONFIG blob so the standalone binary can print its result. Returns the object bytes;
 /// never panics.
 ///
-/// The object exports `main` (a shim calling `rt_run`), keeps every subroutine symbol (Tier 0
+/// The object exports `main` (a shim calling `rt_run`), keeps every subroutine symbol (for
 /// debuggability), defines a local `redextape_config` data object, and imports `rt_run` plus the
-/// `rt_*` runtime helpers — all resolved at link time (Task 6). A non-value `ty`, an over-cap
-/// register index, or a partition failure is returned as the corresponding `AotError`, not a panic.
+/// `rt_*` runtime helpers — all resolved at link time. A non-value `ty`, an over-cap register
+/// index, or a partition failure is returned as the corresponding `AotError`, not a panic.
 ///
 /// # Errors
 /// - `AotError::Unsupported` — `ty` is `Fun`/`Var` (no runtime representation to print), or `prog`
@@ -124,7 +124,7 @@ pub fn emit_object(prog: &Program, caps: Caps, ty: &Ty, opt: OptLevel) -> Result
         .map_err(|e| AotError::Object(e.to_string()))?;
     let mut module = ObjectModule::new(builder);
 
-    // Shared codegen (byte-for-byte identical to the JIT's): declare the `rt_*` imports and every
+    // Shared codegen (the same `codegen` calls the JIT makes): declare the `rt_*` imports and every
     // subroutine, then translate + define each one.
     let rt = codegen::declare_rt(&mut module).map_err(cg)?;
     let (func_ids, arity) = codegen::declare_subroutines(&mut module, &subs).map_err(cg)?;
@@ -165,7 +165,8 @@ pub fn emit_object(prog: &Program, caps: Caps, ty: &Ty, opt: OptLevel) -> Result
     let main_id =
         module.declare_function("main", Linkage::Export, &main_sig).map_err(|e| AotError::Object(e.to_string()))?;
 
-    // `rt_run(main_fn_ptr, config_ptr, config_len) -> i32`, an undefined import (linked in Task 6).
+    // `rt_run(main_fn_ptr, config_ptr, config_len) -> i32`, an undefined import
+    // (resolved by `link_executable`).
     let mut run_sig = Signature::new(module.isa().default_call_conv());
     run_sig.params.push(AbiParam::new(ptr)); // $main fn address
     run_sig.params.push(AbiParam::new(ptr)); // config address
@@ -188,7 +189,7 @@ pub fn emit_object(prog: &Program, caps: Caps, ty: &Ty, opt: OptLevel) -> Result
         let main_addr = b.ins().func_addr(ptr, inner_main);
         let config_gv = module.declare_data_in_func(config_id, b.func);
         // `declare_data_in_func` yields a `Symbol`-kind global value; `symbol_value` materialises its
-        // address (Cranelift 0.134 dropped the legacy `global_value` instruction from `InstBuilder`).
+        // address (`InstBuilder` has no `global_value` instruction in Cranelift 0.134).
         let config_addr = b.ins().symbol_value(ptr, config_gv);
         let len_val = b.ins().iconst(types::I64, config_len);
         let run_ref = module.declare_func_in_func(rt_run_id, b.func);
@@ -204,7 +205,7 @@ pub fn emit_object(prog: &Program, caps: Caps, ty: &Ty, opt: OptLevel) -> Result
     product.emit().map_err(|e| AotError::Object(e.to_string()))
 }
 
-// --- Linking: staticlib discovery, `cc` driver, platform-aware linker selection, strip (Task 6) ---
+// --- Linking: staticlib discovery, `cc` driver, platform-aware linker selection, strip ---
 //
 // `emit_object` above produces an *incomplete* object -- its `rt_*` calls are undefined imports.
 // `link_executable` resolves them against `libredextape_native_rt.a` via the system `cc` driver,
@@ -390,8 +391,8 @@ mod tests {
         let bytes = emit_object(&prog("2 + 3"), DEFAULT_CAPS, &Ty::Nat, OptLevel::default()).unwrap();
         let obj = cranelift_object::object::File::parse(&*bytes).expect("valid object");
         let syms: Vec<String> = obj.symbols().filter_map(|s| s.name().ok().map(str::to_string)).collect();
-        // `main` is defined/exported; the subroutine names are present (Tier 0 debuggability);
-        // rt_run is an undefined import to be linked later.
+        // `main` is defined/exported; the subroutine names are present (for debuggability); rt_run
+        // is an undefined import to be linked later.
         assert!(syms.iter().any(|n| n == "main" || n == "_main"), "main symbol present: {syms:?}");
         assert!(syms.iter().any(|n| n.contains("$main")), "subroutine symbols kept: {syms:?}");
         assert!(syms.iter().any(|n| n == "rt_run" || n == "_rt_run"), "rt_run import present: {syms:?}");
@@ -410,8 +411,8 @@ mod tests {
     #[test]
     fn the_opt_level_reaches_the_cranelift_isa() {
         // `none` and `speed` must not produce byte-identical objects for a program with obvious
-        // optimization headroom. If they do, the flag never reached the ISA builder — which is exactly
-        // the bug this task fixes, so without this test the wiring could silently regress.
+        // optimization headroom. If they do, the flag never reached the ISA builder, so without
+        // this test the wiring could silently regress.
         let p = prog("fn twice(x){ x + x } twice(21)");
         let o0 = emit_object(&p, DEFAULT_CAPS, &Ty::Nat, OptLevel::O0).expect("O0 object");
         let o3 = emit_object(&p, DEFAULT_CAPS, &Ty::Nat, OptLevel::O3).expect("O3 object");
@@ -431,8 +432,7 @@ mod tests {
     }
 }
 
-/// Policy tests for linker selection (Task 6, Step 1: written to fail first -- `selected_linker`,
-/// `LinkOptions`, `LinkerChoice` do not exist yet).
+/// Policy tests for linker selection (`selected_linker`, `LinkOptions`, `LinkerChoice`).
 ///
 /// `REDEXTAPE_LINKER` is a process-global env var; `cargo test` runs a crate's tests in parallel
 /// threads within one binary, so two tests mutating it concurrently could race and flake. Every test

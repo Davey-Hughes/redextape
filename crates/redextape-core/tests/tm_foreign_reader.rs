@@ -21,38 +21,20 @@
 //! semantics, so a reader needs the spec — and a decoder written from that spec works. This test is
 //! that claim, made falsifiable.
 //!
-//! WHAT THE SPEC DID NOT COVER WHEN THIS WAS WRITTEN — the primary deliverable of this file. **All
-//! three were closed by commit 51ab55a, immediately after; they are kept here because the record of
-//! what a documentation test FOUND is the reason to keep running one.**
-//!
-//! 1. `unary.rs`'s module doc documented ONLY the scalar register-field encoding. It said nothing
-//!    about how a compound value (this fixture's result is `List<Nat>`) is represented once it no
-//!    longer fits one field — no heap tape, no cons-cell tag, no pointer convention. *Closed:*
-//!    `unary.rs`'s module doc now covers the compound case (HEAP by index, 1-based pointers, `nil = 0`,
-//!    `@ <head> # <tail>`, and that head/tail words are variable-length mark runs rather than
-//!    fixed-width fields).
-//! 2. Neither `unary.rs` nor `machine.rs` named the literal character for `MARK`, though `machine.rs`
-//!    pins `BLANK` as `'_'`. *Closed:* `build.rs`'s symbol doc now names `MARK` as `1`, beside `BLANK`
-//!    and `SEP`.
-//! 3. `TmHeader::result`'s doc said "The type the final tape decodes to" — wrong for this very
-//!    fixture, where `tapes 5` makes tape 4 the final one and the simulator below shows it never
-//!    leaves its single blank cell. The result is REG (tape 0) field 0 read as a pointer, chased
-//!    through tape 3. *Closed:* that doc now says so explicitly and no longer says "final tape".
-//!
-//! **THE RESIDUAL, WHICH THOSE FIXES DO NOT REMOVE AND WHICH THIS FILE MUST NOT BE READ AS CLOSING.**
+//! **WHAT THIS FILE MUST NOT BE READ AS CLOSING.**
 //! `decode_unary_heap` below took its `@ head # tail` layout **from the out-of-band task instructions
 //! given to whoever wrote it, not from a doc comment** — and the docs that now describe that layout
 //! were written afterwards, partly informed by those same instructions. So no independent implementer
-//! has re-derived the heap format from the corrected documentation, and **this test does not establish
-//! that one could.** What it establishes today is narrower than its own title suggests: the SCALAR
-//! register-field decode is doc-derivable (that half
-//! was genuinely reconstructed from `unary.rs`'s original three lines), and the run semantics are
-//! (tape count, head start, two-way growth, halt-on-no-rule, wildcards, first-match-wins). The
-//! compound decode is *asserted* to be doc-derivable and *not yet demonstrated*. Re-deriving it from
-//! HEAD's docs, by someone who never saw those original instructions, is a separate slice.
+//! has re-derived the heap format from the documentation, and **this test does not establish that one
+//! could.** What it establishes today is narrower than its own title suggests: the SCALAR register-field
+//! decode is doc-derivable (that half was genuinely reconstructed from `unary.rs`'s scalar-field doc),
+//! and the run semantics are (tape count, head start, two-way growth, halt-on-no-rule, wildcards,
+//! first-match-wins). The compound decode is *asserted* to be doc-derivable and *not yet demonstrated*.
+//! Re-deriving it from the docs as they stand, by someone who never saw those original instructions, is
+//! what would close it.
 //!
-//! What the docs DID cover cleanly, no gap: tape count/head start/two-way-infinite growth/halt-on-no-
-//! rule (`syntax.rs`), rule matching/wildcards/first-match-wins/write-`None`-is-unchanged (`machine.rs`),
+//! What the docs cover cleanly: tape count/head start/two-way-infinite growth/halt-on-no-rule
+//! (`syntax.rs`), rule matching/wildcards/first-match-wins/write-`None`-is-unchanged (`machine.rs`),
 //! and the scalar register-field layout (`unary.rs`).
 //!
 //! Imports `parse_tm_full` (that is the FORMAT, not the simulation) and nothing else from
@@ -169,9 +151,9 @@ fn decode_unary_nat(cells: &[char], slot: usize) -> usize {
 }
 
 /// Decode a heap tape into cons cells, 1-indexed by position: `cells[p - 1]` is the `p`-th cell.
-/// EXPECTED LAYOUT — NOT sourced from `unary.rs`'s module doc (see the gap noted in the file header):
-/// each cell is `@`, then `head` `MARK`s, then `#`, then `tail` `MARK`s, running up to the next `@` or
-/// the end of the tape.
+/// EXPECTED LAYOUT — NOT sourced from `unary.rs`'s module doc (see the file header's "WHAT THIS FILE
+/// MUST NOT BE READ AS CLOSING"): each cell is `@`, then `head` `MARK`s, then `#`, then `tail` `MARK`s,
+/// running up to the next `@` or the end of the tape.
 fn decode_unary_heap(cells: &[char]) -> Vec<(usize, usize)> {
     let mut out = Vec::new();
     let mut i = 0;
@@ -201,7 +183,7 @@ fn decode_unary_heap(cells: &[char]) -> Vec<(usize, usize)> {
     out
 }
 
-/// Walk a cons-cell pointer chain (1-based, `0` = nil — undocumented, verified against this fixture)
+/// Walk a cons-cell pointer chain (1-based, `0` = nil, per `unary.rs`'s module doc)
 /// into a plain `Vec` of head values.
 fn decode_list(heap: &[(usize, usize)], mut ptr: usize) -> Vec<usize> {
     let mut out = Vec::new();
@@ -234,12 +216,11 @@ fn foreign_reader_decodes_list_1_2() {
     run(&m, &mut tapes);
 
     // REG (tape 0) field 0 holds the result — a pointer when the header's result type is compound
-    // (`List<Nat>` here), a value directly otherwise. Neither fact is documented; both were checked
-    // against this fixture (see the file header's gap #3).
+    // (`List<Nat>` here), a value directly otherwise, as `TmHeader::result`'s doc states; this fixture
+    // takes the pointer case.
     let ptr = decode_unary_nat(&tapes.cells[0], 0);
 
-    // The heap tape is identified by CONTENT (the one tape containing a cons-cell `@` tag), not by a
-    // documented index — no doc names which physical tape is "the heap".
+    // The heap tape is found by CONTENT rather than by index: the one tape holding a cons-cell `@` tag.
     let heap_tape = tapes.cells.iter().position(|c| c.contains(&'@')).expect("no tape contains a cons-cell `@` marker");
     let heap = decode_unary_heap(&tapes.cells[heap_tape]);
 

@@ -1,6 +1,5 @@
 //! One step-event vocabulary over both backends (§9), stepped lazily so a renderer never holds the
-//! whole run. Materializing is not viable: the pre-existing `sim::Step` copies every tape each step,
-//! measured at 3,488 bytes/step and 592.9 MB for `sum(5)` — row 7 of the demo suite.
+//! whole run. Materializing is not viable: `sim::Step` copies every tape each step.
 //!
 //! The asm cursor lives here too, lazy in the same way, and is deliberately OUTSIDE that vocabulary:
 //! `AsmCursor` yields its own `AsmStep`, never a `StepEvent`, for the reason its module doc gives.
@@ -12,9 +11,9 @@
 //! field and `parse_tm` accepts a hand-written machine declaring any count, so a fixed-size
 //! `[Option<Symbol>; TAPES]` array would silently mis-shape every such machine.
 //!
-//! The λ variant does allocate a small `Vec` (`Path`, measured maximum length 30). Accepted rather
-//! than optimized: `Path` is what the reducer already produces, and an inline-capacity alternative
-//! would need a dependency core is not allowed.
+//! The λ variant does allocate a small `Vec` (`Path`). Accepted rather than optimized: `Path` is what
+//! the reducer already produces, and an inline-capacity alternative would need a dependency core is
+//! not allowed.
 
 use crate::lambda::reduce::{MAX_TERM_DEPTH, Owner, depth_exceeds, reduce_step};
 use crate::lambda::{LambdaTerm, Path, Status};
@@ -44,7 +43,7 @@ pub enum StepEvent {
 
 /// Lazy β-reduction. Holds one term, never a history — O(1) in the number of steps, where
 /// `lambda::reduce_trace` is O(steps) by contract. `reduce_trace` is written over this cursor, so the
-/// β-stepping loop exists once in the crate rather than twice.
+/// β-stepping loop exists once in the crate.
 ///
 /// **`Clone` IS A CHECKPOINT.** Every field is an `Rc`-backed term or a few words, so a clone costs a
 /// refcount bump and shares the whole term with the original; `LambdaCheckpoints` keeps one per
@@ -118,7 +117,7 @@ impl LambdaCursor {
     /// THIS EXISTS SO A CALLER CAN OFFER "CONTINUE" HONESTLY. `status()` reports `HitCap` for both
     /// producers, and `raise_cap` already refuses to clear the depth one (see its doc) — but a UI
     /// reading only `status()` cannot tell them apart, so it would render a "continue" button that
-    /// provably cannot advance the run. That is the same defect `raise_cap`'s own guard fixed one
+    /// provably cannot advance the run. That is the same defect `raise_cap`'s own guard rules out one
     /// layer in. `false` whenever `status()` is not `HitCap`, because there is then no `HitCap` for
     /// either producer to own.
     #[must_use]
@@ -144,7 +143,7 @@ impl LambdaCursor {
     /// `HitCap` on that path would take zero steps, re-run the same guard, and re-latch `HitCap`
     /// immediately: a "continue" that provably cannot advance. `depth_capped` is set exactly when the
     /// depth guard is the one that fired, and this checks it before clearing — so a depth-refused run
-    /// now stays honestly latched instead of cycling through a false "resumed" state on every call.
+    /// stays latched instead of cycling through a false "resumed" state on every call.
     pub fn raise_cap(&mut self, extra_steps: u64) {
         self.cap = self.cap.saturating_add(extra_steps);
         if self.status == Some(Status::HitCap) && !self.depth_capped {
@@ -166,8 +165,8 @@ impl Iterator for LambdaCursor {
             return None;
         }
         // The depth guard is checked BEFORE the step, and the term is left unreduced when it fires.
-        // That ordering is the contract `reduce_trace` had before it delegated here: a term deeper
-        // than the reducer can safely recurse over yields `HitCap`, not a native stack overflow.
+        // That ordering is `reduce_trace`'s contract: a term deeper than the reducer can safely
+        // recurse over yields `HitCap`, not a native stack overflow.
         //
         // `depth_capped = true` marks this producer of `HitCap` as the non-continuable one — see
         // `raise_cap`'s doc on why extending `cap` cannot help a term that is simply too deep.
@@ -193,9 +192,8 @@ impl Iterator for LambdaCursor {
 /// `every - 1` steps from the nearest saved one.
 ///
 /// **A CLONE PER INTERVAL, NOT A TERM PER STEP.** Recording every step's term is what the frame ring
-/// cannot afford (a whole-term print of every `fact(4)` step is 99 MB); a cursor clone shares its term
-/// with every other, so memory grows with steps ÷ `every` and with the nodes reduction actually
-/// allocates, not with the size of each term.
+/// cannot afford; a cursor clone shares its term with every other, so memory grows with steps ÷
+/// `every` and with the nodes reduction actually allocates, not with the size of each term.
 ///
 /// THE INTERVAL IS THE CALLER'S. This module picks no renderer policy, the same rule `viewmodel.rs`
 /// states for budgets.
@@ -247,25 +245,24 @@ impl LambdaCheckpoints {
     }
 }
 
-/// Lazy δ-stepping, and THE δ-stepping loop in this crate. `sim::run` — the single implementation behind
-/// `simulate`, `simulate_final`, `simulate_watched`, `simulate_trace` and `simulate_counts` — is written
-/// over this cursor, so the guard sequence below exists once rather than once per backend. Borrowing the
-/// machine and owning only the tapes also makes the cursor O(tape size) rather than O(steps), where
-/// `sim::simulate_trace` copies every tape on every step by contract.
+/// Lazy δ-stepping, and THE δ-stepping loop in this crate. `sim::run` — the single implementation
+/// behind `simulate`, `simulate_final`, `simulate_watched`, `simulate_origins`, `simulate_trace` and
+/// `simulate_counts` — is written over this cursor, so the guard sequence below exists once in the
+/// crate. Borrowing the machine and owning only the tapes also makes the cursor O(tape size) rather
+/// than O(steps), where `sim::simulate_trace` copies every tape on every step by contract.
 ///
 /// THE GUARD ORDER IS THEREFORE THE SIMULATOR'S SEMANTICS, not a copy of them: a cursor that ended a run
-/// one step earlier or later would move all five entry points with it. The sequence is: absurd declared
+/// one step earlier or later would move every entry point with it. The sequence is: absurd declared
 /// tape count (checked in `new`, before allocating, so an enormous `Machine::tapes` caps instead of
 /// attempting that many allocations) → missing state → accepting state → step cap → live-cell cap → no
 /// matching rule ("stuck == halt") → malformed rule. Only after all of those does a step get emitted,
 /// which is why a malformed rule produces no event — and so no `sim::Step` in a recorded trace, since
 /// `run` records exactly the steps this cursor emits.
 ///
-/// NOT EVERY ADJACENT PAIR IN THAT SEQUENCE IS ORDER-CRITICAL, and saying "the order is load-bearing"
-/// without saying which pairs actually bear load is how a docstring outlives its guarantee. The
-/// accepting-state check MUST precede the step cap: at `caps.steps` set to exactly the number of steps
-/// the machine takes, the correct answer is `Halted` (a budget spent exactly is not a budget exceeded),
-/// and swapping those two yields `HitCap`. `tests/trace_equivalence.rs`'s
+/// NOT EVERY ADJACENT PAIR IN THAT SEQUENCE IS ORDER-CRITICAL. The accepting-state check MUST precede
+/// the step cap: at `caps.steps` set to exactly the number of steps the machine takes, the correct
+/// answer is `Halted` (a budget spent exactly is not a budget exceeded), and swapping those two yields
+/// `HitCap`. `tests/trace_equivalence.rs`'s
 /// `at_the_exact_step_budget_the_cursor_halts_rather_than_capping` is the only test that distinguishes
 /// them — every other capped case there trips strictly before the machine would have halted. By
 /// contrast the step cap and the live-cell cap are genuinely interchangeable: both return `HitCap` with
@@ -286,7 +283,7 @@ pub struct TmCursor<M> {
 impl<M: Borrow<Machine>> TmCursor<M> {
     pub fn new(m: M, init: &[Vec<Symbol>], caps: TmCaps) -> TmCursor<M> {
         // Before allocating a `Tape` per declared tape: a machine declaring e.g. `tapes 10_000_000_000`
-        // must hit the cap, not attempt that many allocations. `run` guards this the same way.
+        // must hit the cap, not attempt that many allocations.
         if m.borrow().tapes as u64 > caps.cells {
             return TmCursor {
                 cur: m.borrow().start,
@@ -560,7 +557,7 @@ mod tests {
     /// This match has no wildcard, so a new variant breaks the build and forces someone to decide what
     /// each consumer should do with it. Same device as `analysis::class_of`, which is exhaustive over
     /// `TokenKind` so a new token cannot silently classify as punctuation, and `Core::for_each_child`,
-    /// which lists all thirteen variants so a new one cannot go unvisited.
+    /// which lists every variant so a new one cannot go unvisited.
     #[test]
     fn every_step_event_variant_has_a_declared_producer() {
         fn producer(e: &StepEvent) -> &'static str {

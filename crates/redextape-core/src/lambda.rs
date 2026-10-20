@@ -33,7 +33,7 @@ pub enum LambdaRun {
     LowerError(LowerError),
 }
 
-/// Lower -> reduce. The convenience entry point for the oracle and later plans.
+/// Lower -> reduce. The convenience entry point.
 #[must_use]
 pub fn run_lambda(core: &Core, cap: u64) -> LambdaRun {
     let term = match lower(core) {

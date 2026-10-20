@@ -13,8 +13,8 @@
 #
 # Slow tests rot if nothing runs them, so CI runs this (.forgejo/workflows/ci.yml, the `rust-slow`
 # job) on every push to `main`, every `v*` tag, `workflow_dispatch`, AND every push to a non-draft pull
-# request (its `if:` is `github.event_name != 'pull_request' || !github.event.pull_request.draft`) —
-# so a green PR always describes the head commit before merge. A draft PR gets `rust-scoped` instead.
+# request (its `if:` includes `github.event_name != 'pull_request' || !github.event.pull_request.draft`)
+# — so a green PR always describes the head commit before merge. A draft PR gets `rust-scoped` instead.
 # It runs in its own job — a slow sweep must never delay the fast signal, the same reasoning the
 # `rust-llvm` job already uses.
 set -euo pipefail
@@ -35,14 +35,12 @@ esac
 # the tier take hours rather than minutes. Correctness is identical — the simulator has no
 # debug-only behaviour — so this trades nothing away.
 #
-# STILL `cargo test`, DELIBERATELY, while the fast tier moved to cargo-nextest. Two reasons, and
-# neither is inertia. First, `--nocapture` is load-bearing here: a sweep that prints progress is the
-# difference between a long job and a silent one, and nextest's `--no-capture` implies
-# `--test-threads 1`, so adopting it would serialise the very thing the switch was meant to
-# parallelise. Second, these sweeps were written and measured under a serial runner — the exhaustive
-# 198,928-program sweep in particular — and running them concurrently changes their peak memory
-# profile in a way nobody has measured. Converting this tier is a separate change that starts with
-# that measurement, not a footnote to the fast one.
+# `cargo test`, NOT cargo-nextest AS THE FAST TIER USES, DELIBERATELY. Two reasons, and neither is
+# inertia. First, `--nocapture` is load-bearing here: a sweep that prints progress is the difference
+# between a long job and a silent one, and nextest's `--no-capture` implies `--test-threads 1`, so
+# adopting it would serialise the very thing nextest parallelises. Second, these sweeps' peak memory is
+# known only under a serial runner, and running them concurrently changes it in a way nobody has
+# measured. Converting this tier starts with that measurement.
 if [ "$mode" = ignored ]; then
   echo "==> slow tier only (use --all to include the fast tier)"
   run cargo test --release --workspace -- --ignored --nocapture

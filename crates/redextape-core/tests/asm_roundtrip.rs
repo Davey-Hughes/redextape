@@ -24,14 +24,13 @@ use redextape_core::ty::Ty;
 /// The programs P1 is held over, chosen for `Instr`-variant coverage — which is what P1's evidence
 /// base needs, and what the test below MEASURES rather than assumes.
 ///
-/// **Inherited wholesale from `asm_oracle.rs`, then extended deliberately.** The first 11 entries are
-/// a byte-for-byte copy, in order, of that file's `demos` array plus the first two `assert_asm_agrees`
-/// calls in `asm_oracle_on_the_latent_trap_programs` — a corpus chosen for a different question
-/// (backend agreement), reused here because it was already at hand. That inherited part reaches
-/// whatever variants it happens to reach; nothing about its selection was coverage-driven. The
-/// `tail(cons(7, nil))` entry is the deliberate part: added specifically to reach `Instr::Tail`, which
-/// none of the inherited entries touch. There is no shared `const` between the two files, so the two
-/// lists can drift — accepted, since they answer different questions and neither constrains the other.
+/// The first 11 entries are a byte-for-byte copy, in order, of `asm_oracle.rs`'s `demos` array plus
+/// the first two `assert_asm_agrees` calls in `asm_oracle_on_the_latent_trap_programs` — a corpus
+/// chosen for a different question (backend agreement). That inherited part reaches whatever variants
+/// it happens to reach; nothing about its selection was coverage-driven. The `tail(cons(7, nil))`
+/// entry is the deliberate part: it is there to reach `Instr::Tail`, which none of the inherited
+/// entries touch. There is no shared `const` between the two files, so the two lists can drift —
+/// accepted, since they answer different questions and neither constrains the other.
 const DEMOS: &[&str] = &[
     "1 + 2 * 3",
     "3 - 5",
@@ -70,10 +69,7 @@ fn printed_text_reads_back_to_identical_text() {
 /// §9 risk 2 — and the count is asserted so that a future change to `DEMOS` or to `lower_asm` which
 /// drops coverage fails here instead of silently weakening P1.
 ///
-/// Measured, not guessed: an earlier draft of this test predicted 13 of 16, naming `Box`, `BoxGet`
-/// and `BoxSet` as the gap. Running it found 12 of 16 instead — `Tail` was also unreached, because
-/// `DEMOS` exercised `head(cons(7, nil))` but no demo called `tail(...)`. Adding `tail(cons(7, nil))`
-/// brought the measured count to 13 of 16, leaving `Box`, `BoxGet` and `BoxSet` as the remaining gap.
+/// `DEMOS` reaches 13 of the 16 variants; `Box`, `BoxGet` and `BoxSet` are the remaining gap.
 ///
 /// That remaining gap is not a fixture problem. `Box`/`BoxGet`/`BoxSet` are emitted only by `defunc`'s
 /// mutable-capture boxing rewrite (a `let mut` captured by a closure used as a value), and this file's
@@ -139,10 +135,10 @@ fn lowered_programs_survive_print_then_parse() {
     }
 }
 
-// The generator is `redextape_test_support::arb_expr_over`, NOT a local one. Its own doc records
-// why: four independently-drifting copies of this shape once made a claim nothing enforced, and
-// `asm_oracle.rs` still carries one of them. A fifth copy here would be that defect committed
-// again, in the file whose subject is two descriptions of one form agreeing.
+// The generator is `redextape_test_support::arb_expr_over`, NOT a local one. Its own doc records why:
+// comparisons across backends and encodings only mean something when the programs are drawn from one
+// distribution shape, and copies that could drift independently would make a claim nothing enforces. A
+// copy here would be one, in the file whose subject is two descriptions of one form agreeing.
 //
 // No new `Arbitrary` for `Program` either: `lower_asm`'s image IS P2's domain, so generating source
 // and lowering it produces exactly the programs the property is about, and `in_p2_domain` is what
@@ -210,16 +206,12 @@ fn label_order_is_normalized_across_indices_and_kept_within_one() {
     );
 }
 
-/// §3.3, measured rather than assumed under this test's original name in
-/// `2026-08-24-asm-reader.md` (`a_label_name_with_a_space_does_not_survive_the_trip`).
-/// `validate()` does correctly reject this
-/// name — whitespace is one of `label_name_representable`'s own separators — but that check is about
-/// what a label may be USED as (a jump target, where an operand list splits on whitespace); it is not
-/// what the *label-declaration* line actually enforces. `parse_asm`'s label arm strips a trailing `:`
-/// and trims only leading/trailing whitespace; it never splits the interior on whitespace the way
-/// `parse_instr`'s operand reader does. So the printed line `two words:` reads back as the identical
-/// name, with no diagnostic — a third outcome, neither of the two this test was drafted to
-/// distinguish (a parse error, or a different name coming back).
+/// §3.3 (`2026-08-24-asm-reader.md`). `validate()` does correctly reject this name — whitespace is one of
+/// `label_name_representable`'s own separators — but that check is about what a label may be USED as (a
+/// jump target, where an operand list splits on whitespace); it is not what the *label-declaration* line
+/// actually enforces. `parse_asm`'s label arm strips a trailing `:` and trims only leading/trailing
+/// whitespace; it never splits the interior on whitespace the way `parse_instr`'s operand reader does. So
+/// the printed line `two words:` reads back as the identical name, with no diagnostic.
 #[test]
 fn a_label_name_with_an_embedded_space_silently_round_trips_despite_failing_validate() {
     let prog = Program { code: vec![Instr::Halt], labels: vec![("two words".to_string(), 0)] };
@@ -235,16 +227,15 @@ fn a_label_name_with_an_embedded_space_silently_round_trips_despite_failing_vali
     );
 }
 
-/// §3.3's worst case — the second of its two tests, after the correction — and the only one of the
-/// four tests pinning the three asymmetries where the round trip loses an INSTRUCTION rather than a
-/// label: a name that itself ENDS in `:`, used as a jump target. The printed operand line is
-/// `    jmp\ttarget:` — which itself ends in `:` — so `parse_asm`'s
-/// line-level label check reads the WHOLE LINE, mnemonic included, as a declaration of a label named
-/// `jmp\ttarget`. Measured, not assumed: the genuine declaration of `target:` immediately below it is
-/// ALSO read as a label line (`target::` strips back to `target:`), so nothing here raises a
-/// diagnostic — the text is well-formed, just not what was meant. The round trip leaves two spurious
-/// labels and zero jumps where there was one jump and one label; this is what `validate()` exists to
-/// keep out of any program the project itself produces.
+/// §3.3's worst case — the second of its two tests — and the only one of the four tests pinning the
+/// three asymmetries where the round trip loses an INSTRUCTION rather than a label: a name that itself
+/// ENDS in `:`, used as a jump target. The printed operand line is `    jmp\ttarget:` — which itself
+/// ends in `:` — so `parse_asm`'s line-level label check reads the WHOLE LINE, mnemonic included, as
+/// a declaration of a label named `jmp\ttarget`. Measured, not assumed: the genuine declaration of
+/// `target:` immediately below it is ALSO read as a label line (`target::` strips back to `target:`),
+/// so nothing here raises a diagnostic — the text is well-formed, just not what was meant. The round
+/// trip leaves two spurious labels and zero jumps where there was one jump and one label; this is
+/// what `validate()` exists to keep out of any program the project itself produces.
 #[test]
 fn a_label_name_ending_in_a_colon_used_as_an_operand_silently_drops_the_instruction() {
     let prog = Program {

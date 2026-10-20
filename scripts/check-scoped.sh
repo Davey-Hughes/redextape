@@ -14,12 +14,12 @@
 # everything for every later test-only push. Scoping on the PUSH increment is what would help, and
 # that is only sound for a check nobody merges on.
 #
-# BUT CI CANNOT GIVE THIS SCRIPT A PUSH INCREMENT, measured 2026-08-04 on PR #8 run 60:
-# `github.event.before` is EMPTY on Forgejo's synchronize event, and `base.sha` is the merge-base
-# with `main`. So the `rust-scoped` job always passes an unresolvable range and this script always
-# takes the whole-branch fallback below. Run it by hand with a real range (`main..HEAD`, or any two
-# resolvable commits) and the narrow paths do work — they are exercised by the local case, not the
-# CI one. See the `rust-scoped` job's header for what that leaves the job buying.
+# BUT CI CANNOT GIVE THIS SCRIPT A PUSH INCREMENT: `github.event.before` is EMPTY on Forgejo's
+# synchronize event, and `base.sha` is the merge-base with `main`. So the `rust-scoped` job always
+# passes an unresolvable range and this script always takes the whole-branch fallback below. Run it
+# by hand with a real range (`main..HEAD`, or any two resolvable commits) and the narrow paths do
+# work — they are exercised by the local case, not the CI one. See the `rust-scoped` job's header
+# for what that leaves the job buying.
 #
 # THE DEFAULT IS ALWAYS TO RUN MORE. A path this script has not been taught escalates to
 # `check-all.sh --no-llvm --no-browser`; it never becomes a skip. Permissive scoping — skipping
@@ -27,8 +27,9 @@
 #
 # WHY binary() AND NOT rdeps() FOR TESTS: Cargo test and example targets are LEAVES — nothing in the
 # build graph depends on them — so a change confined to them provably cannot alter another target's
-# result. rdeps() is the crate-graph answer and it buys almost nothing here: redextape-core is one
-# 23k-line crate that all three others depend on, so rdeps(redextape-core) is the whole workspace.
+# result. rdeps() is the crate-graph answer and it buys almost nothing here: redextape-core is the
+# crate nearly every other workspace crate builds on, so rdeps(redextape-core) is nearly the
+# whole workspace.
 #
 # A PUSH THAT ONLY DELETES A TEST FILE is a known spurious-red case, not a bug. The deleted path
 # still matches the `crates/*/tests/*` case below and still produces a `binary(=<stem>)` term, but
@@ -54,10 +55,10 @@ if ! cargo nextest --version >/dev/null 2>&1; then
   exit 1
 fi
 
-# A range whose endpoints do not both resolve describes nothing. Force-pushed branches produce these
-# routinely — CI hands over a `before` SHA that the push destroyed — so fall back to the branch's
-# whole diff rather than scoping on a range git cannot read. Falling back means checking MORE, which
-# is the safe direction; silently scoping to an unreadable range would mean checking nothing.
+# A range whose endpoints do not both resolve describes nothing — CI always passes one (see above), and
+# a force-push destroys a `before` SHA — so fall back to the branch's whole diff rather than scoping on a
+# range git cannot read. Falling back means checking MORE, which is the safe direction; silently scoping
+# to an unreadable range would mean checking nothing.
 base="${range%%..*}"
 head="${range##*..}"
 if [ "$base" = "$range" ] \
@@ -70,7 +71,7 @@ fi
 # NOTE ON `...`: the split above reduces `a...b` to the same base/head as `a..b`, and the `git diff`
 # below is then a DIRECT two-tree diff — not the merge-base diff `...` normally means. On a divergent
 # `main` that shows extra files rather than missing ones, so it errs toward checking more, which is
-# this script's whole disposition. CI passes a two-dot range (`github.event.before..HEAD`), so the
+# this script's whole disposition. CI passes a two-dot range (`${BEFORE:-none}..${SHA}`), so the
 # case only arises when someone types `...` by hand on a dev box.
 echo "==> scoping to ${base}..${head}"
 
@@ -100,9 +101,9 @@ add_doc_pkg() {
 # `case` globs match `/`, so `crates/*/tests/*.rs` also matches crates/x/tests/common/mod.rs. The
 # arms below re-split the path and check for a further `/` rather than trusting the glob.
 #
-# `pkg` below is the crate's DIRECTORY name under `crates/`, used directly as its cargo package
-# name for `package(=$pkg)` / `rdeps(=$pkg)`. Holds for all four crates today (each `[package].name`
-# in Cargo.toml matches its directory) but is not something Cargo enforces — undocumented until now.
+# `pkg` below is the crate's DIRECTORY name under `crates/`, used directly as its cargo package name
+# for `package(=$pkg)` / `rdeps(=$pkg)`. Holds for every crate in the workspace (each
+# `[package].name` in Cargo.toml matches its directory) but is not something Cargo enforces.
 while IFS= read -r f; do
   [ -n "$f" ] || continue
   case "$f" in
@@ -137,7 +138,7 @@ if [ -n "$force_full" ]; then
   echo "    Escalating to the fast full tier. This is the fail-safe, not a failure."
   # --no-browser TOO, and dropping it here would be a silent escalation in cost rather than in
   # coverage. This is the CHEAP draft-PR path; the browser tier needs Chrome and wasm-pack, which
-  # this script has never required, so selecting it would make the fail-safe fail outright on a
+  # this script does not require, so selecting it would make the fail-safe fail outright on a
   # machine where the narrow check was fine. `rust-browser` in CI covers that tier.
   run ./scripts/check-all.sh --no-llvm --no-browser
   exit 0

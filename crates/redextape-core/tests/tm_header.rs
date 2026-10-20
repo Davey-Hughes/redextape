@@ -56,9 +56,9 @@ fn the_headers_recipe_reproduces_its_literal_tapes() {
             // unary tape — so without these two lines the spec's Testing §2 ("both encodings, at
             // their fitted widths") is asserted nowhere.
             //
-            // Naming the program matters: a review read this comment as describing `sum(5)` (which is
-            // `result Nat`) and reported it as a false claim. The claim was true of a different
-            // corpus entry; an unnamed "combination" invites exactly that misreading.
+            // Naming the program matters: this comment describes `cons(1, cons(2, nil))`, not a
+            // different corpus entry such as `sum(5)` (which is `result Nat`); an unnamed
+            // "combination" invites exactly that misreading.
             assert_eq!(doc.machine.as_ref(), Some(&d.machine), "{src} under {kind:?}: machine must round-trip");
             assert_eq!(h, d.header, "{src} under {kind:?}: header must round-trip");
 
@@ -76,7 +76,7 @@ fn the_headers_recipe_reproduces_its_literal_tapes() {
     }
 }
 
-/// THE POINT OF THE SLICE: a file, and only a file, becomes a value.
+/// THE POINT OF THE HEADER: a file, and only a file, becomes a value.
 ///
 /// No `Core`, no `lower_asm`, no `lower_tm`, no reference run — the input is a checked-in `.tm` file
 /// read off disk. If any piece of the header were insufficient, this is the test that could not be
@@ -121,7 +121,7 @@ fn a_binary_tm_file_becomes_a_value_with_nothing_but_the_file() {
 /// The fixture is a real artifact of today's compiler, not a hand-tuned file that drifted from it.
 /// A codegen change updates the fixture deliberately, with this test as the prompt.
 #[test]
-fn the_fixture_is_what_the_compiler_emits_today() {
+fn the_fixture_is_what_the_compiler_emits() {
     let d = described("cons(1, cons(2, nil))", EncodingKind::Unary);
     assert_eq!(
         print_tm_with(&d.machine, &d.header),
@@ -132,9 +132,9 @@ fn the_fixture_is_what_the_compiler_emits_today() {
 
 /// The binary twin of the check above. `Binary::init_work()` lays out a real `#`-delimited bank (unlike
 /// `Unary::init_work()`, which is empty), so this fixture is the only one carrying a `tape 1` line —
-/// the WORK-tape path had never round-tripped through an actual file before this one existed.
+/// the WORK-tape path round-trips through an actual file only here.
 #[test]
-fn the_binary_fixture_is_what_the_compiler_emits_today() {
+fn the_binary_fixture_is_what_the_compiler_emits() {
     let d = described("cons(1, cons(2, nil))", EncodingKind::Binary);
     assert_eq!(
         print_tm_with(&d.machine, &d.header),
@@ -145,11 +145,10 @@ fn the_binary_fixture_is_what_the_compiler_emits_today() {
 
 /// SABOTAGE, each aimed at the check that can actually see it.
 ///
-/// The width row is the one worth reading twice. Structural decode made both encodings
+/// The width row is the one worth reading twice. Structural decode makes both encodings
 /// width-independent — `Binary::decode_nat` and `parse_heap_cells` each say outright that
 /// `self.width` is never consulted — so a width off by one is INVISIBLE to the end-to-end test and
-/// visible only here, where `init_reg` writes `width` cells per field. An earlier draft of the spec
-/// aimed it at the end-to-end test, where it would have proved nothing.
+/// visible only here, where `init_reg` writes `width` cells per field.
 #[test]
 fn sabotaging_the_recipe_is_caught_by_the_consistency_check() {
     let d = described("1 + 2 * 3", EncodingKind::Binary);
@@ -189,11 +188,8 @@ fn sabotaging_the_header_is_caught_by_the_end_to_end_decode() {
     // unconditional, absolute write before any read; even `nil` compiles to an explicit `nil rr` rather
     // than relying on `rr` starting blank), so no DATA cell of the literal REG or WORK bank should
     // survive to influence the final decoded value. That is a claim about the whole compiler, which
-    // nothing here proves; what was actually checked, as corroboration rather than proof, is narrower --
-    // for the 4 programs in `CORPUS`, under both encodings, flipping any single DATA cell decodes
-    // identically to the untouched run. A delimiter is different: the scanning gadgets that locate
-    // field boundaries read it before any register is (re)written, so corrupting one is genuinely
-    // visible.
+    // nothing here proves. A delimiter is different: the scanning gadgets that locate field boundaries
+    // read it before any register is (re)written, so corrupting one is genuinely visible.
     let mut bad_init = h.init(m.tapes);
     bad_init[0][0] = '_';
     let (bad_tapes, _) = simulate(&m, &bad_init, TM_DEFAULT_CAPS);
@@ -261,15 +257,14 @@ fn a_described_run_computes_what_an_ordinary_run_computes() {
 
 /// `run_tm_described` returns `Ok` for a run that never reached a value.
 ///
-/// THE TRAP THIS PINS, found by a whole-branch review and reproduced live: its `Err` arm carries only
-/// `LowerError`/`TooLarge`, so `Overflow` and `HitCap` come back as `Ok` with a `machine` and `header`
-/// that print as a complete, self-describing `.tm` file. Nothing about that file says the run failed.
-/// And the overflow guard is a rule-less non-accept state — which HALTS — so a reader's
-/// `status != Halted` check passes too, and it decodes whatever the guard left on the tapes.
+/// THE TRAP THIS PINS: its `Err` arm carries only `LowerError`/`TooLarge`, so `Overflow` and `HitCap`
+/// come back as `Ok` with a `machine` and `header` that print as a complete, self-describing `.tm`
+/// file. Nothing about that file says the run failed. And the overflow guard is a rule-less non-accept
+/// state — which HALTS — so a reader's `status != Halted` check passes too, and it decodes whatever
+/// the guard left on the tapes.
 ///
-/// `tm_emit emit '50 + 50'` did exactly that: wrote a file, exit 0, no diagnostic, which `tm_emit run`
-/// then read back as **64**. Any consumer of `run_tm_described` must inspect `.run`; this test is what
-/// tells the next one that `Ok` is not the same as "produced a value".
+/// Any consumer of `run_tm_described` must inspect `.run`; this test is what tells the next one that
+/// `Ok` is not the same as "produced a value".
 #[test]
 fn a_described_run_can_be_ok_without_having_produced_a_value() {
     // 100 exceeds `Unary`'s strict `v < width` bound at every width up to `MAX_FIELD_WIDTH` (64).
@@ -298,8 +293,8 @@ fn the_program_unary_refuses_succeeds_under_binary() {
 /// the `Overflow` case above, the `machine` and `header` alongside it still print as a complete,
 /// self-describing file that a reader would happily simulate and decode.
 ///
-/// This arm had no coverage until a whole-branch review named it. It is cheap to hold, and it is the
-/// second of exactly two ways `Ok` can mean "did not produce a value".
+/// This case is cheap to hold, and it is the second of exactly two ways `Ok` can mean "did not
+/// produce a value".
 #[test]
 fn a_described_run_can_be_ok_because_it_never_halted() {
     let (core, ty) = core_and_ty("head(nil)");

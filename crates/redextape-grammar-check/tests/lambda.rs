@@ -10,10 +10,9 @@ use redextape_test_support::arb_expr_over;
 /// Every capture name any query emits must have a class. Adding a capture without deciding its class
 /// would otherwise colour something in an editor that the differential then silently ignores.
 ///
-/// PROMOTED to `Grammar::capture_map_is_total` — this test and the mini-language's identically-named
-/// one in `tests/captures.rs` were duplicated verbatim, and neither reads anything grammar-specific
-/// beyond `self`. See `src/grammar.rs` for the shared implementation, kept fallible there and
-/// panicking here (`clippy.toml` exempts `unwrap`/`expect`/`panic` only inside `#[test]` fns and
+/// Runs `Grammar::capture_map_is_total`, which reads nothing grammar-specific beyond `self`.
+/// See `src/grammar.rs` for the shared implementation, kept fallible there and panicking here
+/// (`clippy.toml` exempts `unwrap`/`expect`/`panic` only inside `#[test]` fns and
 /// `#[cfg(test)]` modules).
 #[test]
 fn the_capture_map_is_total_over_the_queries() {
@@ -23,9 +22,6 @@ fn the_capture_map_is_total_over_the_queries() {
 }
 
 /// The map is a function: one capture name, one class.
-///
-/// PROMOTED to `Grammar::capture_map_has_no_duplicate_keys` — see the note on
-/// `the_capture_map_is_total_over_the_queries` above; same duplication, same fix.
 #[test]
 fn the_capture_map_has_no_duplicate_keys() {
     if let Err(why) = LAMBDA.capture_map_has_no_duplicate_keys() {
@@ -35,9 +31,6 @@ fn the_capture_map_has_no_duplicate_keys() {
 
 /// A row no query uses is a row a query edit left behind. Testable only because the tables are
 /// per-grammar — design §5.1.
-///
-/// PROMOTED to `Grammar::every_capture_row_is_used` — same duplication and same fix as
-/// `the_capture_map_is_total_over_the_queries` above.
 #[test]
 fn every_map_row_is_used_by_a_query() {
     if let Err(why) = LAMBDA.every_capture_row_is_used() {
@@ -50,9 +43,6 @@ fn every_map_row_is_used_by_a_query() {
 /// `queries/highlights.scm` — so this also stands as evidence that scoping is exhaustive over the
 /// corpus below: an unscoped catch-all colliding with `@variable.parameter` would surface as a
 /// `captures` error (different classes on one range), not a silently-wrong length.
-///
-/// PROMOTED to `Grammar::shipped_queries_never_disagree` — same duplication and same fix as
-/// `the_capture_map_is_total_over_the_queries` above.
 #[test]
 fn the_shipped_queries_never_disagree() {
     if let Err(why) = LAMBDA.shipped_queries_never_disagree(CORPUS) {
@@ -98,10 +88,11 @@ fn captures_pins_text_and_class_for_a_printed_term() {
 /// one byte range — the exact shape `queries/highlights.scm`'s scoped occurrence patterns are
 /// written to avoid.
 ///
-/// **NOT PROMOTED, unlike the five checks above.** The conflicting query this builds must name
-/// capture rows that exist in *this* grammar's table — `@variable.parameter`/`@variable` here, but
-/// `@variable`/`@operator` for the mini-language (see `tests/captures.rs`'s copy) — so a
-/// grammar-agnostic version would have no query to hand it. This one legitimately stays per-grammar.
+/// **PER GRAMMAR, unlike the four checks above, which run on `Grammar`.** The conflicting query this
+/// builds must name capture rows that exist in *this* grammar's table —
+/// `@variable.parameter`/`@variable` here, but `@variable`/`@operator` for the mini-language (see
+/// `tests/captures.rs`'s copy) — so a grammar-agnostic version would have no query to hand it. This
+/// one legitimately stays per-grammar.
 #[test]
 fn a_conflicting_query_is_rejected() {
     let conflicting = "(abstraction parameter: (identifier) @variable.parameter)\n(identifier) @variable\n";
@@ -121,9 +112,8 @@ fn a_conflicting_query_is_rejected() {
 /// holds this string to the grammar" is true only until that file next changes underneath this one —
 /// this test is what keeps the guarantee alive independent of that.
 ///
-/// PROMOTED to `Grammar::every_corpus_program_parses_without_error_nodes` — this test and
-/// `tests/corpus.rs`'s identically-named mini-language one were duplicated verbatim, and neither
-/// reads anything grammar-specific beyond `self`. See `src/grammar.rs` for the shared implementation.
+/// Calls `Grammar::every_corpus_program_parses_without_error_nodes`; see `src/grammar.rs` for the
+/// shared implementation.
 #[test]
 fn every_corpus_program_parses_without_error_nodes() {
     if let Err(why) = LAMBDA.every_corpus_program_parses_without_error_nodes(CORPUS) {
@@ -135,9 +125,8 @@ fn every_corpus_program_parses_without_error_nodes() {
 /// a `\` and then classified, because the differential's corpus is printer-produced (§4) and the
 /// printer emits only `λ`, so no comparison entry can ever contain a `\` — is a hand-written corpus
 /// entry checked by `tree-sitter test` for tree shape, "plus the observation that `parse_lambda(text)`
-/// must succeed on each" (design §6.2, and the λ README's *How it is checked*). Before this test that
-/// second half was only an observation: nothing in this crate called `parse_lambda`
-/// (`grep -rn parse_lambda crates/redextape-grammar-check/` was empty). This makes it real.
+/// must succeed on each" (design §6.2, and the λ README's *How it is checked*). This test makes that
+/// second half a check: it calls `parse_lambda` on each.
 #[test]
 fn parse_lambda_succeeds_on_every_backslash_spelled_corpus_entry() {
     let mut checked = 0;
@@ -171,13 +160,11 @@ fn every_lambda_query_pattern_fires_over_the_corpus() {
 /// The hand-written half of λ's differential: programs chosen (in `mini::CORPUS`) to exercise
 /// binders, nesting and application, lowered to λ and printed, then checked against the grammar.
 ///
-/// Not every corpus program lowers — `let mut`, `while`, UFCS and list literals either are not yet
-/// supported by `lambda::lower` or fall outside it entirely — and that is expected, not a failure:
-/// `printed_term` returns `None` for those and this loop filters them out rather than asserting. The
-/// measured rate is 12 of `mini::CORPUS`'s 13 entries: only `"ufcs chain"` fails to lower, because list
-/// literals and UFCS sit outside `lambda::lower` entirely. The `printed >= 12` floor holds the suite to
-/// that measured rate, so a regression that dropped even one more entry — never mind a collapse toward
-/// zero — fails loudly instead of this test passing on a shrunken comparison.
+/// Not every corpus program lowers, and that is expected, not a failure: `printed_term` returns `None`
+/// for those and this loop filters them out rather than asserting. The measured rate is 12 of
+/// `mini::CORPUS`'s 13 entries: only `"ufcs chain"` fails to lower. The `printed >= 12` floor holds the
+/// suite to that measured rate, so a regression that dropped even one more entry — never mind a collapse
+/// toward zero — fails loudly instead of this test passing on a shrunken comparison.
 #[test]
 fn the_lambda_grammar_agrees_with_the_printer_on_every_corpus_program() {
     let total = redextape_grammar_check::mini::CORPUS.len();
@@ -196,28 +183,24 @@ fn the_lambda_grammar_agrees_with_the_printer_on_every_corpus_program() {
     assert!(
         printed >= 12,
         "only {printed}/{total} corpus programs lowered (expected 12 of 13 — \"ufcs chain\" is the \
-         one known exception, since list literals and UFCS are outside `lambda::lower`); the corpus \
-         is not exercising λ"
+         one known exception); the corpus is not exercising λ"
     );
 }
 
 /// The comparison must be capable of failing, the same standard `differential.rs`'s
-/// `the_comparison_can_fail` holds the mini-language to. PR 1 shipped `compare_classified`'s span-for
-/// -span comparison completely untested — deletable with the suite still green, caught only by the
-/// final whole-branch review — and this is what closes that gap for λ.
+/// `the_comparison_can_fail` holds the mini-language to.
 ///
 /// A query that captures only parens leaves every binder and identifier uncaptured, so the grammar
 /// side is short and the length branch must fire.
 ///
-/// The mini source is `"1"`, not `"let f = |x| x; f(1)"`: that program's printed
-/// term DOES contain literal parens (`"(λf. f (λf0. λx. f0 x)) (λx. x)"`), and one of them sits at
-/// `want`'s second element, so `compare_classified`'s PER-INDEX loop finds a mismatch (a `Binder` at
-/// `want[1]` against a `Punct` at `got[1]`) before the lengths are ever compared — the wrong branch,
-/// verified by actually running it rather than assumed up front. Church numeral `1`
+/// The mini source is `"1"`, not `"let f = |x| x; f(1)"`: that program's printed term DOES contain
+/// literal parens (`"(λf. f (λf0. λx. f0 x)) (λx. x)"`), and one of them sits at `want`'s second
+/// element, so `compare_classified`'s PER-INDEX loop finds a mismatch (a `Binder` at `want[1]` against
+/// a `Punct` at `got[1]`) before the lengths are ever compared — the wrong branch. Church numeral `1`
 /// prints as `"λf. λx. f x"`, with NO literal parentheses anywhere, so `["(" ")"] @punctuation.bracket`
 /// captures nothing at all here: `got` is empty, the per-index loop (zipped against an empty iterator)
-/// runs zero times, and every one of `want`'s 8 spans becomes an extra span on the authority side —
-/// the length branch, unambiguously.
+/// runs zero times, and every one of `want`'s 8 spans becomes an extra span on the authority side — the
+/// length branch, unambiguously.
 #[test]
 fn the_lambda_comparison_can_fail() {
     let (text, want) = printed_term("1").expect("this program lowers");
@@ -236,9 +219,9 @@ fn the_lambda_comparison_can_fail() {
 /// `#[test]` in its own process, so a static counter shared with a second, later test would not see
 /// what this one counted.
 ///
-/// This is a new caller of `arb_expr_over` and records no rate AGAINST that generator's own
-/// recursion parameters or arm set, so it adds no constraint there — see that function's doc before
-/// changing anything about it. The rate logged below is about λ's lowering coverage, not about
+/// This caller of `arb_expr_over` records no rate AGAINST that generator's own recursion
+/// parameters or arm set, so it adds no constraint there — see that function's doc before changing
+/// anything about it. The rate logged below is about λ's lowering coverage, not about
 /// `arb_expr_over` itself.
 #[test]
 fn the_lambda_grammar_agrees_with_the_printer_on_generated_programs() {

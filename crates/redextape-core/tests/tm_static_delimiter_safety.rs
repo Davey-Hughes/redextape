@@ -13,8 +13,7 @@
 //! If that holds for every rule, then no execution of that machine — of any length, terminating or
 //! not — can destroy a delimiter. It is proven per rule, in O(rules), by inspection.
 //!
-//! WHAT IT DOES NOT PROVE, because the earlier framing of this rung was wrong twice and the corrections
-//! belong next to the claim:
+//! WHAT IT DOES NOT PROVE:
 //!
 //!   * NOT "correct for all inputs". The TM is a closed program: `init_reg` is an all-zero bank and
 //!     every other tape starts empty, so each `(program, width)` pair has exactly ONE execution.
@@ -25,13 +24,12 @@
 //!   * NOT navigation correctness. A gadget can leave the head in the wrong field without ever
 //!     clobbering a `#`; this says nothing about that.
 //!
-//! The check is deliberately syntactic. An earlier attempt at a head-offset dataflow analysis was
-//! rejected because its own soundness would become a new thing to trust, and an analyzer that reports
-//! "verified" while being subtly wrong is worse than a checker that can only report what it saw. The
-//! price of staying syntactic is that the gadgets must be written to suit it: three rules that used to
-//! write with a WILDCARD read (`on(REG, None, Some(MARK), R)`) now read explicitly. That change is
-//! step-for-step identical — same rule fires on the same configuration — which is why every step-count
-//! golden is unchanged.
+//! The check is deliberately syntactic. A head-offset dataflow analysis would make its own soundness a
+//! new thing to trust, and an analyzer that reports "verified" while being subtly wrong is worse than
+//! a checker that can only report what it saw. The price of staying syntactic is that the gadgets must
+//! be written to suit it: a rule that writes a non-`#` symbol to a fixed-width tape must pass the
+//! per-rule check, so it reads explicitly (or sits behind a `SEP` guard) rather than with a WILDCARD
+//! read like `on(REG, None, Some(MARK), R)`.
 
 // Test target: a fixture that fails to build IS the failure this file reports, so panicking is
 // deliberate here. The `allow-*-in-tests` keys in `clippy.toml` only reach `#[test]` functions and
@@ -45,7 +43,7 @@ use redextape_core::tm::{BLANK, BOX, MARK, REG, SEP, defunc, lower_asm, lower_tm
 mod common;
 use common::{assert_delimiter_safe, encodings_at, unsafe_rules};
 
-/// The corpus, spanning every gadget family. Kept in step with `tm_bank_invariant.rs`.
+/// The corpus, spanning every gadget family.
 const CORPUS: &[&str] = &[
     "1 + 2 * 3",
     "3 - 5",
@@ -106,8 +104,8 @@ fn the_property_holds_for_programs_that_never_terminate() {
 }
 
 /// NON-VACUITY: the checker must actually be capable of reporting something. Build a machine with a
-/// rule that writes a MARK reading a wildcard, unshadowed — precisely the shape the three gadget
-/// rewrites removed — and require it to be flagged.
+/// rule that writes a MARK reading a wildcard, unshadowed — the `on(REG, None, Some(MARK), R)`
+/// shape the module doc keeps out of the gadgets — and require it to be flagged.
 ///
 /// Without this the whole file could be passing because `unsafe_rules` never returns anything.
 #[test]
@@ -160,13 +158,12 @@ fn the_checker_accepts_both_forms_of_safety() {
 }
 
 /// `unsafe_rules`' clause (b) accepts ANY non-`#` read, not just symbols an encoding calls "field
-/// content" — see `tests/common/mod.rs` for why the field-content-restricted version was tried and
-/// rejected (it flagged `box_append_field_bin`'s legitimate `BLANK` read as unsafe). Pin that this did
-/// not go too far the other way: a rule that writes a digit under a WILDCARD read — no explicit read at
-/// all — must still be reported, checked against a REAL `Binary` digit (`ZERO`). Without this, a fix
-/// that accidentally made clause (b) accept `rule.read[tape].is_none()` too would pass every other test
-/// in this file (every real gadget, unary or binary, reads an explicit symbol) while silently no longer
-/// rejecting anything.
+/// content" — see `tests/common/mod.rs` for why: restricted to field content, it would flag
+/// `box_append_field_bin`'s legitimate `BLANK` read as unsafe. Pin that it does not go too far the other
+/// way: a rule that writes a digit under a WILDCARD read — no explicit read at all — must still be
+/// reported, checked against a REAL `Binary` digit (`ZERO`). Without this, a fix that accidentally made
+/// clause (b) accept `rule.read[tape].is_none()` too would pass every other test in this file (every real
+/// gadget, unary or binary, reads an explicit symbol) while silently no longer rejecting anything.
 #[test]
 fn the_checker_still_flags_a_wildcard_digit_write() {
     use redextape_core::tm::{Builder, Move, RuleSpec, ZERO};

@@ -1,8 +1,8 @@
 //! Gadget-level tests for the binary `Encoding`, mirroring `tm_encoding.rs`'s role for `Unary`.
 //!
 //! Each test builds a tiny machine that runs ONE gadget on a freshly laid-out bank, simulates it, and
-//! reads the result back with `decode_nat`. Nothing here goes through `lower_tm` or `run_tm` — those
-//! arrive in Phase 3 — so a failure here localizes to a single gadget.
+//! reads the result back with `decode_nat`. Nothing here goes through `lower_tm` or `run_tm`, so a
+//! failure here localizes to a single gadget.
 
 // Test target: a fixture that fails to build IS the failure this file reports, so panicking is
 // deliberate here. The `allow-*-in-tests` keys in `clippy.toml` only reach `#[test]` functions and
@@ -50,7 +50,7 @@ fn run_gadget_raw(
 
 /// Turn `run_gadget_raw`'s status into a pass/fail verdict: `true` if the run reached the accept state,
 /// `false` if it hit a cap (did not halt at all), and a PANIC — naming the state it stopped in — if it
-/// halted anywhere else. That panic is the fix this harness exists for: without it, a gadget that gets
+/// halted anywhere else. That panic is what this harness exists for: without it, a gadget that gets
 /// stuck partway through reads as a passing `Halted` run, and only fails downstream if some value
 /// assertion happens to notice — which, for the class of bug this guards against, it may never do.
 fn require_accepted(final_state: StateId, halt: StateId, status: TmStatus) -> bool {
@@ -66,9 +66,9 @@ fn require_accepted(final_state: StateId, halt: StateId, status: TmStatus) -> bo
 }
 
 /// Build and run a one-gadget machine, returning the final REG tape. `None` only when the run hit a
-/// cap without halting at all; a halt anywhere but the accept state PANICS (see `require_accepted`) —
-/// it no longer reads as success. Tests that intentionally expect a NON-accept halt (the overflow
-/// guard) use `run_gadget_expect_stuck`; tests that need a tape other than REG use `run_gadget_tapes`.
+/// cap without halting at all; a halt anywhere but the accept state PANICS (see `require_accepted`).
+/// Tests that intentionally expect a NON-accept halt (the overflow guard) use
+/// `run_gadget_expect_stuck`; tests that need a tape other than REG use `run_gadget_tapes`.
 fn run_gadget(
     width: usize,
     slots: u32,
@@ -144,8 +144,8 @@ fn a_literal_is_written_lsb_first_with_no_padding() {
 }
 
 /// `decode_nat` is the inverse of `write_literal` over the whole representable range, and a `w`-cell
-/// field holds `2^w` values — not `w` of them. Width 4 reaching 15 is the capability the whole slice
-/// exists for: unary's 4-cell field stops at 3.
+/// field holds `2^w` values — not `w` of them. Width 4 reaching 15 is the capability the binary
+/// encoding exists for: unary's 4-cell field stops at 3.
 #[test]
 fn write_then_decode_roundtrips_the_full_range() {
     let enc = Binary::at(4);
@@ -278,10 +278,6 @@ fn arith(width: usize, op: redextape_core::core::BinOp, a: u64, bv: u64) -> Opti
 /// Addition across the full representable range at a small width, so every carry chain is covered by
 /// construction rather than by a chosen example: `3 + 1` propagates a carry through two digits into an
 /// all-zero high half, `15 + 0` takes the no-carry path, `15 + 1` carries out of the top into the guard.
-///
-/// (An earlier version of this comment cited `7 + 8` as the carry case. It is not one — 7 is `1110`
-/// and 8 is `0001` LSB-first, so their set bits never coincide and the sum produces NO carry at any
-/// digit. The sweep was always right; only the example was wrong.)
 #[test]
 fn add_is_exact_over_the_representable_range() {
     use redextape_core::core::BinOp::Add;
@@ -310,8 +306,8 @@ fn sub_is_monus_not_wrapping() {
     }
 }
 
-/// The capability the slice exists for, stated as a test: a 4-cell BINARY field computes 9 + 6 = 15,
-/// which a 4-cell unary field cannot represent at all (its strict bound stops at 3).
+/// The capability the binary encoding exists for, stated as a test: a 4-cell BINARY field computes
+/// 9 + 6 = 15, which a 4-cell unary field cannot represent at all (its strict bound stops at 3).
 #[test]
 fn a_four_cell_binary_field_beats_a_four_cell_unary_field() {
     use redextape_core::core::BinOp::Add;
@@ -321,10 +317,6 @@ fn a_four_cell_binary_field_beats_a_four_cell_unary_field() {
 /// Multiplication is exact over every representable product, and hits the guard on every one that is
 /// not. 256 pairs at width 4 — of which 180 overflow (76 representable), so the guard path is the
 /// common case here and gets more coverage than the value path.
-///
-/// (An earlier version of this comment cited 137 overflow. By direct enumeration the real split is
-/// 180 overflow / 76 representable; only the number was wrong, the test's own `a * bv < 16` check was
-/// never affected.)
 #[test]
 fn mul_is_exact_and_guards_what_does_not_fit() {
     use redextape_core::core::BinOp::Mul;
@@ -352,7 +344,7 @@ fn mul_by_zero_is_zero_both_ways() {
 }
 
 /// A wider bank reaches products no unary field can hold: 200 * 200 = 40,000 needs 16 digits.
-/// `100 * 100` is the program the whole slice is measured by, and this is its gadget-level form.
+/// `100 * 100` states that capability end to end in `three_way_oracle.rs`; this is its gadget-level form.
 #[test]
 fn a_wide_binary_field_computes_products_unary_cannot_represent() {
     use redextape_core::core::BinOp::Mul;
@@ -440,11 +432,6 @@ fn push_frame_lays_tag_then_locals_in_slot_order() {
 /// `stack_pop_acc` is INVISIBLE for a palindromic value, and at width 4 there are exactly four of them
 /// — 0 (`0000`), 6 (`0110`), 9 (`1001`), 15 (`1111`). Reversed, 3 becomes 12 and 5 becomes 10, so
 /// either local alone exposes the defect.
-///
-/// This test originally used 6 and 9, on the stated grounds that 6 was non-palindromic. It is not —
-/// both were palindromes, so the test named for the pop's correctness PASSED under a real reversal
-/// sabotage, which only `dispatch_tag_routes_on_the_tag_value` caught, incidentally. Measured, not
-/// argued: the sabotage was applied and this test stayed green.
 ///
 /// The push-side test shares these literals. That is worth having, but note the asymmetry: `push` has
 /// no analogous reversal risk, because both its walks start at the same index and advance in the same
@@ -548,7 +535,7 @@ fn head_and_tail_dereference_a_runtime_pointer() {
 /// here means `HitCap` -- the run never halts at all -- which IS the intended fault outcome, not a
 /// failure to reach accept. It must NOT reach the overflow guard: overflow means 'retry at a wider
 /// bank', and a nil deref routed there would burn a full step budget at every width on the way to
-/// reporting the same thing (sabotage-verified -- see the task report).
+/// reporting the same thing (sabotage-verified).
 #[test]
 fn a_nil_dereference_spins_to_a_cap() {
     let result = run_gadget(4, 2, |e, b, start, halt| {
@@ -578,8 +565,8 @@ fn is_empty_op_tests_the_whole_pointer() {
 /// `tail(p2)` reads a MIDDLE cell's non-empty tail, so the deref must land on the NEXT cell's `@` (not
 /// yet the true top) and still restore correctly from there -- exercising `deref_op`'s "cross the `#` +
 /// tail digits, then keep skipping" restore path, which `head_and_tail_dereference_a_runtime_pointer`
-/// (whose target is always the LAST cell) does not reach. Ported from
-/// `Unary::tail_of_a_non_last_cell_with_a_nonempty_tail`.
+/// (whose target is always the LAST cell) does not reach. The binary twin of
+/// `unary.rs`'s `tail_of_a_non_last_cell_with_a_nonempty_tail`.
 #[test]
 fn tail_of_a_non_last_cell_with_a_nonempty_tail() {
     let enc = Binary::at(4);
@@ -608,7 +595,8 @@ fn tail_of_a_non_last_cell_with_a_nonempty_tail() {
 
 /// After a successful (non-fault) deref, the HEAP head must be back at the TRUE top -- not merely the
 /// boundary right after the dereferenced cell -- so a SUBSEQUENT `cons` appends a correct new cell
-/// rather than corrupting an existing one. Ported from `Unary::cons_after_a_deref_keeps_the_heap_top`.
+/// rather than corrupting an existing one. The binary twin of
+/// `unary.rs`'s `cons_after_a_deref_keeps_the_heap_top`.
 #[test]
 fn cons_after_a_deref_keeps_the_heap_top() {
     let enc = Binary::at(4);
@@ -667,8 +655,8 @@ fn boxes_get_sequential_pointers_and_stay_independent() {
 /// and growing the digit count, including down to zero and back up.
 ///
 /// ON THE `the field grew` ASSERTION, which is NOT sabotage-verified and should not be described as
-/// though it were. Three successively harsher mutations of `box_overwrite_field_bin`'s write loop were
-/// run, and NONE made it fire:
+/// though it were. NONE of three successively harsher mutations of `box_overwrite_field_bin`'s write
+/// loop makes it fire:
 ///
 ///   1. bound `0..=width` — the extra step's explicit BOX digit read cannot match the blank top;
 ///   2. that, plus a wildcard BOX read — the extra step's `Some(w)` WORK read cannot match `W_ACC`'s
@@ -676,14 +664,13 @@ fn boxes_get_sequential_pointers_and_stay_independent() {
 ///   3. that, plus a wildcard WORK read — the following `back` transition's `Some(SEP)` WORK read
 ///      cannot match, since the head is now past the `#`.
 ///
-/// Every one died as a stuck halt, caught by `require_accepted`, one transition before any delimiter
+/// Every one dies as a stuck halt, caught by `require_accepted`, one transition before any delimiter
 /// could be touched. So a "walks too far" bug in this design CANNOT manifest as corruption — four
 /// independent guards stand in front of it — and this assertion is unfalsifiable for that bug class.
 ///
 /// It is kept anyway, as a cheap structural net for a FUTURE refactor that removes those guards (a
 /// content-driven rewrite of the write loop would be exactly that). But the thing actually doing the
-/// work here is the accept-state check, and saying otherwise would be the same overclaim this suite
-/// has now found twelve times.
+/// work here is the accept-state check.
 #[test]
 fn box_set_overwrites_in_place_in_both_directions() {
     let enc = Binary::at(4);
@@ -712,7 +699,7 @@ fn box_set_overwrites_in_place_in_both_directions() {
 /// run never halts at all — which IS the intended fault outcome, not a failure to reach accept. It must
 /// NOT reach the overflow guard: overflow means "retry at a wider bank", and a nil deref routed there
 /// would burn a full step budget at every width on the way to reporting the same thing (see
-/// `a_nil_dereference_spins_to_a_cap`, and the task report, for the HEAP analogue of this same point).
+/// `a_nil_dereference_spins_to_a_cap` for the HEAP analogue of this same point).
 #[test]
 fn a_nil_box_get_spins_to_a_cap() {
     let result = run_gadget(4, 2, |e, b, start, halt| {
@@ -728,8 +715,7 @@ fn a_nil_box_get_spins_to_a_cap() {
 //
 // `decode_nat` and `parse_heap_cells` read from one delimiter to the next and never consult
 // `self.width`, so an instance at ANY width reads a tape laid out at any other. That is what makes
-// `decode_tape` work without being told the width the machine was lowered at — the property `Unary`
-// always had and `Binary` did not.
+// `decode_tape` work without being told the width the machine was lowered at, under either encoding.
 //
 // The tests below therefore assert the SAME answer across a spread of widths on ONE fixed tape. A
 // width-strict decoder passes only at the tape's own width, so any single-width assertion here would

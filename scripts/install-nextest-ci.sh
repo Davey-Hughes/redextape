@@ -1,13 +1,11 @@
 #!/usr/bin/env bash
 # Install cargo-nextest for CI, from a pinned and checksummed release asset.
 #
-# Called by BOTH the `rust` and `rust-llvm` jobs (.forgejo/workflows/ci.yml), because both run
-# scripts/check-all.sh and that gate hard-fails when the runner is missing — by design, see its
-# header. It lived inline in `rust` only, so `rust-llvm` ran check-all.sh with no runner on PATH and
-# failed on every run from the day the fast tier moved to nextest. One file instead of two copies:
-# the version and its checksum are the kind of pair that drifts silently once duplicated, and a
-# second job quietly installing a different runner than the first is the same class of defect as a
-# gate that covers less than its name claims.
+# Called by the `rust-scoped`, `rust` and `rust-llvm` jobs (.forgejo/workflows/ci.yml), because each reaches
+# a gate that hard-fails when the runner is missing — by design, see scripts/check-all.sh's cargo-nextest
+# note. One file instead of three copies: the version and its checksum are the kind of pair that drifts
+# silently once duplicated, and a second job quietly installing a different runner than the first is the
+# same class of defect as a gate that covers less than its name claims.
 #
 # PINNED to an exact version and an exact release asset, and checksummed BEFORE it reaches PATH.
 # This binary executes every test in CI with full repo access, so the documented one-liner —
@@ -20,7 +18,7 @@
 # has changed since. Update BOTH values together when bumping.
 #
 #   scripts/install-nextest-ci.sh              # -> $HOME/.cargo/bin
-#   scripts/install-nextest-ci.sh /some/dir    # -> /some/dir (used by the self-test below)
+#   scripts/install-nextest-ci.sh /some/dir    # -> /some/dir
 set -euo pipefail
 
 NEXTEST_VERSION=0.9.140

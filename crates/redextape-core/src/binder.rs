@@ -3,23 +3,22 @@
 //! `.tm` and `.asm` resolve a name by looking it up in a flat table, which `NameIndex::link` does
 //! for both. `.rxt` names are SCOPED: an occurrence resolves to a binding, and in
 //! `let x = 1; let x = x + 1;` the two `x`es on the second line resolve to different ones. So this
-//! is a pass and not a lookup, and it is why `.rxt` navigation is a separate piece of work from
-//! the two forms that shipped first.
+//! is a pass and not a lookup.
 //!
-//! **ITERATIVE, AND THE GUARANTEE IT CANNOT BORROW IS THE REASON.** `lints.rs`'s `check` walks the
+//! **Iterative, and the guarantee it cannot borrow is the reason.** `lints.rs`'s `check` walks the
 //! same surface tree recursively, and its module doc records that this is safe only because both
 //! of its callers run it AFTER typechecking has added no error-severity diagnostic — so
 //! `MAX_TYPE_DEPTH` has already rejected anything nested deeper than a recursive walk survives.
-//! Navigation runs BEFORE typechecking, on a tree that may not typecheck and, since `.rxt` gained
-//! parse recovery, may not have parsed completely either. It cannot borrow that gate, and what it
-//! would buy is not a diagnostic: a recursive walk over adversarial nesting is an uncatchable
-//! native stack overflow that takes the editor's server process with it. The parser builds
-//! left-nested `Binary`/`Call`/`Method` chains up to roughly `MAX_TOKENS`/2 deep — `ast.rs`'s
-//! hand-written iterative `Drop` exists for exactly those — so the depth is reachable from
-//! ordinary source. `desugar.rs`'s `free_member_refs` already walks this scoping shape over an
-//! explicit worklist; this follows it rather than reinventing it.
+//! Navigation runs BEFORE typechecking, on a tree that may not typecheck and may not have parsed
+//! completely either (parse recovery). It cannot borrow that gate, and what it would buy is not a
+//! diagnostic: a recursive walk over adversarial nesting is an uncatchable native stack overflow
+//! that takes the editor's server process with it. The parser builds left-nested
+//! `Binary`/`Call`/`Method` chains up to roughly `MAX_TOKENS`/2 deep — `ast.rs`'s hand-written
+//! iterative `Drop` exists for exactly those — so the depth is reachable from ordinary source.
+//! `desugar.rs`'s `free_member_refs` already walks this scoping shape over an explicit worklist;
+//! this follows it rather than reinventing it.
 //!
-//! **THE RESOLUTION RULES ARE THE TYPECHECKER'S, NOT A SECOND READING OF THE GRAMMAR.** A jump
+//! **The resolution rules are the typechecker's, not a second reading of the grammar.** A jump
 //! that disagrees with `typeck` is wrong rather than merely different, so each rule below names
 //! the function it copies: `TyEnv::lookup`'s reverse scan for shadowing, `infer_stmt`'s `Let` arm
 //! for a value that cannot see its own binding, `infer_block_inner` and `infer_fn_run` for the
@@ -285,9 +284,7 @@ impl Binder<'_> {
 mod tests {
     use super::*;
 
-    /// Every fixture in this module was run through `parse_recovering` before being written down.
-    /// Three earlier candidates did not hold the property their test asserted — see the design's
-    /// §9. Byte offsets below are from that probe, not from counting characters by eye.
+    /// Byte offsets below are from a `parse_recovering` run, not from counting characters by eye.
 
     #[test]
     fn a_reference_resolves_to_the_binding_in_scope_and_not_to_the_name() {
@@ -365,8 +362,8 @@ mod tests {
 
     #[test]
     fn a_file_that_does_not_parse_still_indexes_what_it_has() {
-        // THE POINT OF THE PARSE-RECOVERY PR THIS ONE SPENDS. Both fixtures were probed: each
-        // reports exactly one diagnostic and each keeps the occurrences asserted here.
+        // These fixtures exercise parse recovery: each reports exactly one diagnostic and each keeps the
+        // occurrences asserted here.
         let n = nav_rxt("let x = ; x").expect("within the token cap");
         assert_eq!(n.definitions().count(), 1, "the binding survives losing its value");
         assert_eq!(n.definition_of(n.at(10).expect("a name at 10").0), Some(0));
@@ -436,8 +433,8 @@ mod tests {
             .expect("spawn")
             // A genuine stack overflow here aborts the whole process (SIGABRT) rather than making
             // `join` return `Err`, so this `expect` can only ever fire on an ordinary assertion
-            // panic inside the closure. The test still fails under the recursive-walk sabotage —
-            // not because this message prints, but because there is no process left to print it.
+            // panic inside the closure. A recursive walk still fails the test — not because this
+            // message prints, but because there is no process left to print it.
             .join()
             .expect("the spawned thread panicked");
     }
@@ -491,10 +488,9 @@ mod tests {
 
     /// An over-cap file is NOT indexed, which is a different claim from containing no names.
     ///
-    /// **THE TOKEN COUNTS ARE ASSERTED, NOT ASSUMED.** The fixture is generated, so a lexer change
+    /// **The token counts are asserted, not assumed.** The fixture is generated, so a lexer change
     /// that moves the boundary would otherwise leave this quietly comparing two under-cap
-    /// programs and passing for the wrong reason. Measured on 6e0ad6e: 19,999 statements is
-    /// 99,996 tokens and 20,000 is 100,001, against a cap of 100,000.
+    /// programs and passing for the wrong reason.
     #[test]
     fn a_program_over_the_token_cap_is_not_indexed_and_one_under_it_is() {
         let under = let_chain(19_999);
@@ -510,19 +506,17 @@ mod tests {
 
     /// Recovery is not refusal, and this is the assertion that separates the two states.
     ///
-    /// A sabotage mapping `Completeness::Recovered` to `None` leaves the cap test above green and
-    /// reddens only this one, which is what makes the three-state enum earn its third state.
+    /// Mapping `Completeness::Recovered` to `None` would leave the cap test above green and redden
+    /// only this one, which is what makes the three-state enum earn its third state.
     #[test]
     fn a_file_that_did_not_parse_completely_is_still_indexed() {
         let n = nav_rxt("fn f(a) { a").expect("a recovered file is indexed");
-        // Probed on 6e0ad6e: `f` and its parameter `a`.
+        // `f` and its parameter `a`.
         assert_eq!(n.definitions().count(), 2);
     }
 
     /// A `.rxt` definition carries the span of the statement that introduces it, which is the
     /// span `documentSymbol` needs and the name span cannot supply.
-    ///
-    /// Offsets probed on 6e0ad6e, not counted by eye.
     #[test]
     fn a_definition_carries_the_extent_of_its_statement() {
         let src = "fn f(a) {\n  let x = 1;\n  x\n}\nlet y = 2;\ny";

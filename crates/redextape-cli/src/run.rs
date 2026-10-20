@@ -59,9 +59,9 @@ pub fn run(
         }
     };
     let label = input.label();
-    // ASCII-case-insensitive, because `M.TM` is a real artifact and a byte-for-byte `e == "tm"` sent
-    // it down the `.rxt` path, where the lexer produced a cascade of errors and exit 1 blamed a
-    // perfectly valid file on the program. The table now lives in `Form::from_extension`, which is
+    // ASCII-case-insensitive, because `M.TM` is a real artifact and a byte-for-byte `e == "tm"` would
+    // send it down the `.rxt` path, where the lexer produces a cascade of errors and exit 1 blames a
+    // perfectly valid file on the program. The table lives in `Form::from_extension`, which is
     // the one copy `fmt` reads too.
     //
     // **A `Form`, not an `Option<Form>`, and that is what lets `is_artifact` answer the next
@@ -111,8 +111,8 @@ pub fn run(
 /// **A REDUCED FILE, `version 2`, RUNS UNDER THE STEPS ITS OWN HEADER RECORDS**, with
 /// `TM_DEFAULT_CAPS`'s cell cap, because a reduced machine takes far more steps than that cap's
 /// step count allows. It must halt in an accept state, since a reduction's run ends in one, and
-/// `decode_reduced` undoes its stages before the value is decoded. A `version 1` file is simulated and
-/// decoded as it always was: `decode_reduced` decodes a header with no reduction exactly as
+/// `decode_reduced` undoes its stages before the value is decoded. A `version 1` file has no
+/// reduction to undo: `decode_reduced` decodes a header with no reduction exactly as
 /// `decode_tape_ty_reason` does.
 ///
 /// **THOSE CHECKS ARE `run_caps` AND `value_of_run`, NOT CODE IN THIS FUNCTION.** The web app's TM buffers
@@ -176,24 +176,21 @@ fn run_artifact_text(
         Err(redextape_core::tm::RunFailure::Decode(failure)) => Err(failure),
         Ok(v) => Ok(v),
     };
-    // **TWO CAUSES REACH THIS DECODE, WITH OPPOSITE FAULT ATTRIBUTIONS — SEE `DecodeFailure`.** An
-    // earlier revision of this comment argued every failure here was the file's fault, on the strength
-    // of `HeaderParts::directive` (D5) already refusing a `result` that is not a value type — true, but
-    // not the whole story: `MAX_DECODE_NODES` bounds how many `Value` nodes a single decode may build
-    // (nested list types multiply the count; see that constant's doc), and a completely TRUTHFUL header
-    // can still exhaust it. So there are two causes, not one: `DecodeFailure::Mismatch` — the tapes
-    // disagree with the type the file itself declares — is the file's fault, exit 1, unchanged from
-    // before. `DecodeFailure::BudgetExhausted` is this tool's limit on an otherwise-good file, exit 2 —
-    // the SAME distinction `run_asm_artifact` draws for the identical two causes on the `.asm` form; the
-    // two runners used to give it opposite, and each individually wrong, treatments (see that function's
-    // doc).
+    // **TWO CAUSES REACH THIS DECODE, WITH OPPOSITE FAULT ATTRIBUTIONS — SEE `DecodeFailure`.**
+    // `HeaderParts::directive` (D5) already refuses a `result` that is not a value type, but
+    // `MAX_DECODE_NODES` bounds how many `Value` nodes a single decode may build (nested list types
+    // multiply the count; see that constant's doc), and a completely TRUTHFUL header can still exhaust
+    // it. So there are two causes, not one: `DecodeFailure::Mismatch` — the tapes disagree with the
+    // type the file itself declares — is the file's fault, exit 1. `DecodeFailure::BudgetExhausted` is
+    // this tool's limit on an otherwise-good file, exit 2 — the SAME distinction `run_asm_artifact`
+    // draws for the identical two causes on the `.asm` form.
     report_tm_decode(decoded, label, &header.result, out, err)
 }
 
 /// `run_artifact_text`'s final `match`, on the two `DecodeFailure` causes — extracted so the MAPPING
 /// (which message, which `Outcome`) can be pinned directly, without paying for a decode that actually
 /// reaches `BudgetExhausted`. See `an_asm_artifact_that_exhausts_the_decode_budget_is_the_tools_limit`'s
-/// doc (the `.asm` sibling test) for what that would now cost and why this seam exists instead.
+/// doc (the `.asm` sibling test) for what that would cost and why this seam exists instead.
 fn report_tm_decode(
     result: Result<redextape_core::value::Value, redextape_core::tm::DecodeFailure>,
     label: &str,
@@ -254,10 +251,8 @@ fn report_tm_decode(
 /// diverge further when either form gains a directive.
 ///
 /// **What this cannot get wrong, and does not guard against:** `AsmOutcome` lives *inside*
-/// `AsmRun::Ran`, so a capped run has no outcome to decode — unlike the `.tm` path, where `simulate`
-/// once returned tapes and status separately and a capped run still had tapes a decoder could read.
-/// Here the type itself makes a `HitCap` printing a value unrepresentable, so there is no redundant
-/// guard to add before the `match` below.
+/// `AsmRun::Ran`, so a capped run has no outcome to decode. Here the type itself makes a `HitCap`
+/// printing a value unrepresentable, so there is no redundant guard to add before the `match` below.
 ///
 /// **THE FINAL DECODE HAS TWO FAILURE CAUSES WITH OPPOSITE FAULT ATTRIBUTIONS, MIRRORING
 /// `run_artifact_text`'s.** A `result` directive that lies about what `rr` (and the heap it may point
@@ -265,13 +260,10 @@ fn report_tm_decode(
 /// `MAX_DECODE_NODES` exhaustion on an otherwise-truthful header is `DecodeFailure::BudgetExhausted` —
 /// this tool's limit: exit 2, naming the budget, never the type. `emit`'s own output can reach the
 /// second cause on a completely honest header: a program that nests list types over a large,
-/// heavily-shared heap (see `MAX_DECODE_NODES`'s doc on the `tails`-shaped sharing that makes this
-/// cheap to reach) can exhaust the budget without the type or the file being at fault in any way. An
-/// earlier revision of this function gave the whole decode ONE treatment — always `ToolFailed`, always
-/// "does not decode as `Ty`" — which was backwards for a lying header and right only by coincidence for
-/// a budget exhaustion; `run_artifact_text` had the opposite bug, always blaming the file. Both runners
-/// are now driven by the SAME `DecodeFailure` rather than guessing an answer from which artifact form
-/// asked.
+/// heavily-shared heap (sharing spread across all `MAX_TY_DEPTH` depths — see the `BudgetExhausted`
+/// tests' docs below) can exhaust the budget without the type or the file being at fault in any way.
+/// Both runners are driven by the SAME `DecodeFailure` rather than guessing an answer from which
+/// artifact form asked.
 fn run_asm_artifact(
     src: &str,
     label: &str,
@@ -398,20 +390,19 @@ fn run_reference(
 
 /// `run_reference`'s "value in hand, print or refuse" step — extracted, like `report_tm_decode` and
 /// `report_asm_decode` above, so the too-large-to-print branch can be driven directly from a `Value`
-/// fixture in a test rather than by running a program that builds one; this task's safety note
-/// forbids constructing a `tails`-shaped result via a running program, and this function needs
-/// nothing but a `Value` to test.
+/// fixture in a test rather than by running a program that builds one. This function needs nothing
+/// but a `Value` to test.
 ///
-/// **PROVEN reachable, and the most urgent of the three sites this fix pass caps — `Backend::Reference`
-/// is `#[default]`, so this is what `redextape run` does with no flags at all.** It runs the
-/// tree-walking interpreter under `interp::DEFAULT_BUDGET` = 5,000,000 steps. `interp.rs`'s
-/// `Builtin::Tail` is `Ok((**t).clone())` — an `Rc` clone, O(1), no allocation — structurally the SAME
-/// sharing mechanism as the asm VM's `Instr::Tail` this branch's decode-side fix was built around.
+/// **Reachable, and the most urgent of the three backend sites that cap (this, `print_lambda_value`
+/// and `print_tm_value`) — `Backend::Reference` is `#[default]`, so this is what `redextape run` does
+/// with no flags at all.** It runs the tree-walking interpreter under `interp::DEFAULT_BUDGET` =
+/// 5,000,000 steps. The interpreter's `Builtin::Tail` is `Ok((**t).clone())` — an `Rc` clone, O(1),
+/// no allocation — structurally the SAME sharing mechanism as the asm VM's `Instr::Tail`.
 /// `nil`/`cons`/`tail`/`is_empty` are ordinary prelude builtins, and `while` iterates via a real Rust
 /// loop without accumulating against `MAX_EVAL_DEPTH`, so an ordinary non-recursive `tails`-style
 /// program builds an `m`-suffix shared value in O(m) interpreter steps. The quadratic breakeven
-/// against `MAX_PRINT_NODES` is `m` ~= 4,471 (`m^2 + m + 1` ~= 20,000,000) — three to four orders of
-/// magnitude below what 5,000,000 steps reach — so before this fix, `redextape run tails.rxt` with no
+/// against `MAX_PRINT_NODES` is `m` ~= 4,471 (`m^2 + 3m + 1` ~= 20,000,000) — three to four orders of
+/// magnitude below what 5,000,000 steps reach — so without the cap, `redextape run tails.rxt` with no
 /// flags would hang on the uncapped `format_value` walk.
 fn print_reference_value(
     v: &redextape_core::value::Value,
@@ -567,8 +558,7 @@ fn run_tm_backend(
             writeln!(err, "error: a value exceeded the widest tape field this encoding has")?;
             Ok(Outcome::ProgramFailed)
         }
-        // Design §9.1. The ceiling is `MAX_MACHINE_STATES`; a balanced expression tree reaches it
-        // from about 6 KB of source, and the allocation before refusal is roughly 700 MB.
+        // Design §9.1. The ceiling is `MAX_MACHINE_STATES`.
         redextape_core::tm::TmRun::TooLarge => {
             writeln!(
                 err,
@@ -623,10 +613,10 @@ mod tests {
     use redextape_core::value::Value;
     use std::rc::Rc;
 
-    /// The shape Task 11's own `value::tests` fixture uses: 64 levels of self-sharing, 65
+    /// The shape the `value::tests` fixture uses: 64 levels of self-sharing, 65
     /// allocations, 2^64 logical nodes — small enough to build here, but far too large for
     /// `format_value_capped` to walk within `MAX_PRINT_NODES`. Never fed to the UNCAPPED
-    /// `format_value`; all five seam functions below (`report_tm_decode`, `report_asm_decode`,
+    /// `format_value`; all five seam functions (`report_tm_decode`, `report_asm_decode`,
     /// `print_reference_value`, `print_lambda_value`, `print_tm_value`) route this through the
     /// cap only.
     fn tiny_but_logically_enormous_dag() -> Value {
@@ -638,15 +628,12 @@ mod tests {
         v
     }
 
-    /// **EVERY TEST GETS ITS OWN `redextape_test_support::ScratchDir`, KEYED BY `case`.** `cargo test`
-    /// runs the tests in one binary on parallel threads, so they share a process id — a single shared
-    /// path would let one test read another's source. That fails intermittently rather than outright,
-    /// which is worse than a broken test. `filename` carries the extension, because Task 4 dispatches
-    /// on it. The directory is done with (its content already read into `out`/`err`/`outcome`) by the
-    /// time this function returns, so it is safe to remove it right here.
-    ///
-    /// This is the only helper in this module; Tasks 2 and 4 parameterise it rather than adding
-    /// near-identical copies.
+    /// Every test gets its own `redextape_test_support::ScratchDir`, keyed by `case`. `cargo test` runs
+    /// the tests in one binary on parallel threads, so they share a process id — a single shared path
+    /// would let one test read another's source. That fails intermittently rather than outright, which
+    /// is worse than a broken test. `filename` carries the extension, because that is what is dispatched
+    /// on. The directory is done with (its content already read into `out`/`err`/`outcome`) by the time
+    /// this function returns, so it is safe to remove it right here.
     fn run_case(case: &str, filename: &str, src: &str, backend: Backend) -> (String, String, Outcome) {
         let dir = redextape_test_support::ScratchDir::new(&format!("cli-{case}")).unwrap();
         let p = dir.join(filename);
@@ -690,7 +677,7 @@ mod tests {
     }
 
     /// The oracle, as a test: three backends, one answer. This is the property the whole project is
-    /// built on, and until now nothing outside `redextape-core`'s own tests asserted it.
+    /// built on.
     #[test]
     fn all_three_backends_agree_on_a_value_program() {
         for backend in [Backend::Reference, Backend::Lambda, Backend::Tm] {
@@ -749,9 +736,9 @@ mod tests {
         assert!(matches!(outcome, Outcome::ProgramFailed), "a capped run is the program's fault");
     }
 
-    /// `M.TM` is as much an artifact as `m.tm`. The dispatch tested `e == "tm"` byte-for-byte, so an
-    /// uppercase extension fell through to the `.rxt` lexer: exit 1 and a cascade of parse errors,
-    /// which claims a valid file is a broken program.
+    /// `M.TM` is as much an artifact as `m.tm`. A dispatch that tested `e == "tm"` byte-for-byte would
+    /// send an uppercase extension to the `.rxt` lexer: exit 1 and a cascade of parse errors, which
+    /// claims a valid file is a broken program.
     #[test]
     fn an_uppercase_tm_extension_is_still_an_artifact() {
         let text = include_str!("../../redextape-core/tests/fixtures/list_1_2.tm");
@@ -762,8 +749,9 @@ mod tests {
 
     /// **THE FILE'S FAULT, NOT THE TOOL'S.** A header's `result` is a promise about the tapes, and
     /// `HeaderParts::directive` (D5) already refuses a `result` that is not a value type — so the
-    /// only decode failure reachable on this path is a file whose tapes disagree with the type it
-    /// declares itself. This machine accepts immediately, leaving a blank tape that is no `Nat`.
+    /// only decode failure on this path that is the file's fault is a file whose tapes disagree
+    /// with the type it declares itself. This machine accepts immediately, leaving a blank tape
+    /// that is no `Nat`.
     #[test]
     fn tapes_that_contradict_the_headers_own_result_type_are_the_files_fault() {
         let text = "tapes 1\nstart s\nversion 1\nencoding unary\nwidth 4\nslots 0\nresult Nat\n\n\
@@ -851,11 +839,9 @@ mod tests {
 
     // ---- `DecodeFailure`'s two causes, on both artifact forms (four cases) ----
     //
-    // `Mismatch` (the file's fault, exit 1) and `BudgetExhausted` (the tool's limit, exit 2) used to be
-    // conflated on the `.asm` path (always `ToolFailed`) and on the `.tm` path (always `ProgramFailed`
-    // — the pre-existing bug `decode_tape_ty_reason` also fixes). These four tests pin the corrected,
-    // SYMMETRIC behaviour: both runners now give the same cause the same exit code and an honest
-    // message.
+    // `Mismatch` (the file's fault, exit 1) and `BudgetExhausted` (the tool's limit, exit 2) are two
+    // different causes. These four tests pin the SYMMETRIC behaviour: both runners give the same cause
+    // the same exit code and an honest message.
 
     /// MISMATCH, `.asm` form. `result Bool` over a machine that leaves `rr = 7` (not `0`/`1`) is a
     /// header that lies about its own program: the FILE's fault, exit 1.
@@ -874,31 +860,23 @@ mod tests {
     }
 
     /// BUDGET, `.asm` form — calls `report_asm_decode` directly rather than driving a real decode to
-    /// `BudgetExhausted`. **What that would cost now, and why this test does not pay it:** before the
-    /// `(pointer, depth)` memo, a heap of `n` cells sharing one spine across two nesting levels reached
-    /// `MAX_DECODE_NODES` at `n = 6000` (`n² + n + 1` nodes from `n` cells). The memo collapses that
-    /// case to linear regardless of the order the outer spine's heads arrive in — both PASS 1 and PASS 2
-    /// stop at a memo hit mid-spine, not only at nil (see `decode_word_ty`'s doc on `budget`), so
-    /// neither the favorable (longest-suffix-first, `tails`-shaped) order nor the adversarial
-    /// (increasing) order Task 3's review once used as a counterexample reaches the budget cheaply — see
-    /// `a_nested_type_over_a_shared_spine_decodes_instead_of_refusing`'s own doc, which now pins both.
-    /// Reaching `MAX_DECODE_NODES` this way instead needs sharing spread ACROSS all `MAX_TY_DEPTH`
-    /// nesting depths, which takes roughly 312,000 heap cells. Measured directly on commit `a148c6c`,
-    /// where the fixture this test used before the extraction to `report_asm_decode` still exists
-    /// (320,000 cells, sharing spread across all 64 `MAX_TY_DEPTH` levels): decoding it aborts with
-    /// `memory allocation ... failed` under both a 2 GiB and a 4 GiB `ulimit -v`, and only completes at
-    /// 8 GiB, in ~15s per test. That is unaffordable for the fast tier and marginal even for the slow
-    /// one run at default (concurrent) thread count. Reaching `BudgetExhausted` at all means `spend` ran
-    /// `MAX_DECODE_NODES` = 20,000,000 times, so ~20,000,000 live `Value` nodes (roughly 1 GB) exist at
-    /// the moment of refusal regardless of how few heap cells built them — that memory cost is inherent
-    /// to reaching the budget at all, not a property of this particular fixture's cell count. So the
-    /// fixture is gone rather than shrunk: shrinking the CELL COUNT would not have shrunk that memory
-    /// cost.
+    /// `BudgetExhausted`. **Why this test does not pay for a real decode:** the `(pointer, depth)` memo
+    /// collapses a heap of `n` cells sharing one spine across two nesting levels to linear regardless
+    /// of the order the outer spine's heads arrive in — both PASS 1 and PASS 2 stop at a memo hit
+    /// mid-spine, not only at nil (see `decode_word_ty`'s doc on `budget`), so neither the favorable
+    /// (longest-suffix-first, `tails`-shaped) order nor the adversarial (increasing) order reaches the
+    /// budget cheaply — see `a_nested_type_over_a_shared_spine_decodes_instead_of_refusing`'s own doc,
+    /// which pins both. Reaching `MAX_DECODE_NODES` instead needs sharing spread ACROSS all
+    /// `MAX_TY_DEPTH` nesting depths, which takes roughly 312,000 heap cells. Reaching
+    /// `BudgetExhausted` at all means `spend` ran `MAX_DECODE_NODES` = 20,000,000 times, so
+    /// ~20,000,000 live `Value` nodes exist at the moment of refusal regardless of how few heap cells
+    /// built them — that memory cost is inherent to reaching the budget at all, not a property of any
+    /// fixture's cell count, so shrinking the CELL COUNT would not shrink it.
     ///
     /// **What this costs:** the end-to-end path — a real file whose decode actually exhausts
-    /// `MAX_DECODE_NODES` — is no longer exercised anywhere in CI. This test now pins only the mapping
-    /// from `DecodeFailure::BudgetExhausted` to this message and to `Outcome::ToolFailed`; it says
-    /// nothing about whether the decoder can still be driven to return that error at all.
+    /// `MAX_DECODE_NODES` — is exercised nowhere in CI. This test pins only the mapping from
+    /// `DecodeFailure::BudgetExhausted` to this message and to `Outcome::ToolFailed`; it says nothing
+    /// about whether the decoder can still be driven to return that error at all.
     #[test]
     fn an_asm_artifact_that_exhausts_the_decode_budget_is_the_tools_limit() {
         let (mut out, mut err) = (Vec::new(), Vec::new());
@@ -920,12 +898,11 @@ mod tests {
         assert!(!err.contains("List<Nat>"), "the message must not blame the type, got: {err}");
     }
 
-    /// Task 11: a value can be SMALL in memory (65 allocations) and logically enormous (2^64 nodes)
-    /// once the decoder memoizes, and `format_value`'s tree walk would not return on it — see
-    /// `MAX_PRINT_NODES`'s doc. `report_asm_decode` must refuse via the capped printer rather than
-    /// calling the uncapped one, so this passes the fixture straight to `Ok(v)` and asserts the
-    /// tool's-limit exit path, exactly as the `BudgetExhausted` sibling test above does for the
-    /// decode side of the same guard.
+    /// A value can be SMALL in memory (65 allocations) and logically enormous (2^64 nodes) once the
+    /// decoder memoizes, and `format_value`'s tree walk would not return on it — see `MAX_PRINT_NODES`'s
+    /// doc. `report_asm_decode` must refuse via the capped printer rather than calling the uncapped one,
+    /// so this passes the fixture straight to `Ok(v)` and asserts the tool's-limit exit path, exactly as
+    /// the `BudgetExhausted` sibling test above does for the decode side of the same guard.
     #[test]
     fn an_asm_artifact_whose_value_is_too_large_to_print_is_the_tools_limit() {
         let (mut out, mut err) = (Vec::new(), Vec::new());
@@ -969,16 +946,15 @@ mod tests {
 
     /// BUDGET, `.tm` form — the `.tm` sibling of the `.asm` case above: calls `report_tm_decode`
     /// directly with `Err(DecodeFailure::BudgetExhausted)` rather than driving a real decode there. See
-    /// that test's doc for why: the memo now collapses a spine reached from any suffix, regardless of
+    /// that test's doc for why: the memo collapses a spine reached from any suffix, regardless of
     /// order, so reaching `MAX_DECODE_NODES` needs sharing spread across all `MAX_TY_DEPTH` depths
-    /// instead — roughly 312,000 heap cells, measured directly on commit `a148c6c`, which aborts under a
-    /// 2 GiB or 4 GiB `ulimit -v`, completing only at 8 GiB — because reaching the budget at all means
-    /// ~20,000,000 live `Value` nodes exist at that moment, not because of the fixture's own cell count.
+    /// instead — roughly 312,000 heap cells. Reaching the budget at all means ~20,000,000 live `Value`
+    /// nodes exist at that moment, however few heap cells built them.
     ///
     /// **What this costs:** as with the `.asm` case, the end-to-end path — a real `.tm` file whose
-    /// decode actually exhausts `MAX_DECODE_NODES` — is no longer exercised anywhere in CI. This test
-    /// pins only the mapping from `DecodeFailure::BudgetExhausted` to this message and to
-    /// `Outcome::ToolFailed`, not the threshold itself.
+    /// decode actually exhausts `MAX_DECODE_NODES` — is exercised nowhere in CI. This test pins only
+    /// the mapping from `DecodeFailure::BudgetExhausted` to this message and to `Outcome::ToolFailed`,
+    /// not the threshold itself.
     #[test]
     fn a_tm_artifact_that_exhausts_the_decode_budget_is_the_tools_limit() {
         let (mut out, mut err) = (Vec::new(), Vec::new());
@@ -1000,7 +976,7 @@ mod tests {
         assert!(!err.contains("List<Nat>"), "the message must not blame the type, got: {err}");
     }
 
-    /// Task 11, `.tm` sibling of `an_asm_artifact_whose_value_is_too_large_to_print_is_the_tools_limit`
+    /// The `.tm` sibling of `an_asm_artifact_whose_value_is_too_large_to_print_is_the_tools_limit`
     /// above — see that test's doc.
     #[test]
     fn a_tm_artifact_whose_value_is_too_large_to_print_is_the_tools_limit() {
@@ -1024,18 +1000,16 @@ mod tests {
         assert!(!err.contains("List<Nat>"), "the message must not blame the type, got: {err}");
     }
 
-    // ---- Fix pass: the three sites Task 11 left uncapped (`run_reference`, `run_lambda_backend`,
-    // `run_tm_backend`) — see `print_reference_value`, `print_lambda_value` and `print_tm_value`'s own
-    // docs for the evidence behind capping each. Each test below drives the seam function directly
-    // with the same 65-allocation/2^64-logical-node fixture the two artifact-seam tests above use,
-    // for the same reason those do: this task's safety note forbids running a program that BUILDS a
-    // `tails`-shaped result, so the fixture is handed straight to `Ok`/`Some` rather than produced by
-    // evaluating source.
+    // ---- The capped print at `run_reference`, `run_lambda_backend` and `run_tm_backend` — see
+    // `print_reference_value`, `print_lambda_value` and `print_tm_value`'s own docs for the evidence
+    // behind capping each. Each test below drives the seam function directly with the same
+    // 65-allocation/2^64-logical-node fixture the two artifact-seam tests above use, handing it straight
+    // to `Ok`/`Some` rather than producing it by evaluating source.
 
     /// `run_reference` sibling of `an_asm_artifact_whose_value_is_too_large_to_print_is_the_tools_limit`
-    /// above. Of the three sites this fix pass caps, this is the one PROVEN reachable — see
+    /// above. Of the three capped sites, this is the one PROVEN reachable — see
     /// `print_reference_value`'s doc: `Backend::Reference` is `#[default]`, so a program building this
-    /// shape needs no flag at all, and hits this exact refusal today rather than hanging.
+    /// shape needs no flag at all, and hits this exact refusal rather than hanging.
     #[test]
     fn a_reference_run_whose_value_is_too_large_to_print_is_the_tools_limit() {
         let (mut out, mut err) = (Vec::new(), Vec::new());

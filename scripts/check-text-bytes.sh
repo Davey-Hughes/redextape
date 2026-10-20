@@ -8,19 +8,16 @@
 #   scripts/check-text-bytes.sh              # scan the tracked tree
 #   scripts/check-text-bytes.sh --self-test  # prove the detector still detects
 #
-# **WHY THIS GATE EXISTS, since the defect it catches is invisible by construction.**
-# `web/src/pane-chrome.ts` carried a literal NUL (0x00) and SOH (0x01) as delimiters in
-# `bindingSelect`'s cache key. One NUL byte makes the WHOLE FILE binary to every search tool:
-# `rg` skips it and reports no match with exit 1 — silently, no warning — and `grep` says
-# "Binary file matches" and prints nothing. So every search across `web/src/` quietly omitted a
-# file holding four heavily-argued doc comments, and one of those had gone stale and was found
-# only because a reviewer read the file rather than searching it.
+# **WHY THIS GATE EXISTS, since the defect it catches is invisible by construction.** One NUL byte
+# makes the WHOLE FILE binary to every search tool: `rg` skips it and reports no match with exit 1 —
+# silently, no warning — and `grep` says "Binary file matches" and prints nothing. So every search
+# quietly omits such a file.
 #
-# Nothing announces that state. Without a gate it can return and no one would notice, which is
-# the whole argument for checking it rather than fixing it once.
+# Nothing announces that state. Without a gate it can arrive and no one would notice, which is the
+# whole argument for checking it rather than fixing it once.
 #
-# THE FIX IS ALWAYS AN ESCAPE, NEVER A DIFFERENT DELIMITER. `\x00` and `\x01` produce the
-# identical string at runtime; the escape is for the source file, not for the value.
+# THE FIX IS ALWAYS AN ESCAPE, NEVER A DIFFERENT DELIMITER. `\x00` and `\x01` produce the same string
+# at runtime as a literal NUL and SOH; the escape is for the source file, not for the value.
 set -euo pipefail
 
 # TAB (0x09), LF (0x0a) and CR (0x0d) are legitimate in text and are the only C0 bytes allowed.
@@ -28,8 +25,8 @@ set -euo pipefail
 readonly ALLOWED='\011\012\015\040-\176\200-\377'
 
 # BINARY FILES ARE SKIPPED BY EXTENSION rather than by sniffing, because sniffing is the very
-# thing this gate exists to distrust: a heuristic that calls a file binary is how the original
-# defect hid. An extension list is dumb, visible, and wrong in ways a reader can see — a new
+# thing this gate exists to distrust: a heuristic that calls a file binary is how this
+# defect hides. An extension list is dumb, visible, and wrong in ways a reader can see — a new
 # binary format fails this gate until someone adds it here, which is the loud direction to be
 # wrong in.
 readonly BINARY_RE='\.(png|jpg|jpeg|gif|ico|webp|pdf|wasm|woff2?|ttf|otf|zip|gz|tar|bin|snap)$'
@@ -40,12 +37,11 @@ readonly BINARY_RE='\.(png|jpg|jpeg|gif|ico|webp|pdf|wasm|woff2?|ttf|otf|zip|gz|
 #
 # `tr -d` deletes every ALLOWED byte, so whatever survives is a violation.
 #
-# **THE COUNT CROSSES AS A NUMBER, NEVER THE BYTES THEMSELVES, AND THAT IS THE WHOLE TRICK.** The
-# first version of this script piped the surviving bytes through `$(...)` and silently found
-# nothing: bash strips NUL from command substitution ("warning: command substitution: ignored null
-# byte in input"), so the one byte this gate exists to catch was the one byte it could not see. It
-# had the same shape of defect as the bug it guards, and only a by-hand test against a planted NUL
-# found it — which is the entire reason `--self-test` exists.
+# **THE COUNT CROSSES AS A NUMBER, NEVER THE BYTES THEMSELVES, AND THAT IS THE WHOLE TRICK.** Piping
+# the surviving bytes through `$(...)` silently finds nothing: bash strips NUL from command substitution
+# ("warning: command substitution: ignored null byte in input"), so the one byte this gate exists to
+# catch would be the one byte it could not see. That is the same shape of defect as the bug it guards,
+# which is the entire reason `--self-test` exists.
 violations_in() {
   LC_ALL=C tr -d "$ALLOWED" < "$1" | wc -c | tr -d '[:space:]'
 }
@@ -67,8 +63,8 @@ self_test() {
   # copies out of a script is the version that later grows the suffix. `check-citations.sh` already
   # writes it this way. **`dir` IS DELIBERATELY NOT `local`** — a fire-time expansion needs the variable
   # to still exist when the trap fires, which is after this function has returned; the sibling's
-  # `SELF_TEST_DIR` is global for the same reason. The previous double-quoted form baked the path in at
-  # trap-set time and so did not care, which is precisely what made the weak form look adequate.
+  # `SELF_TEST_DIR` is global for the same reason. A double-quoted trap bakes the path in at trap-set
+  # time and so does not care, which is what makes the weak form look adequate there.
   dir=$(mktemp -d)
   trap 'rm -rf "${dir:?}"' EXIT
   dirty="$dir/dirty.ts"
@@ -91,10 +87,9 @@ self_test() {
   echo "self-test passed: a planted NUL is detected, an escaped one is not"
 }
 
-# AN UNRECOGNISED ARGUMENT IS AN ERROR. The first version tested `[ "${1:-}" = "--self-test" ]` and fell
-# through on anything else, so `check-text-bytes.sh --slf-test` ran a full scan and exited 0 — a typo in
-# the CI step or the hook would have silently downgraded the self-test into a duplicate of the scan
-# beside it, and this is the gate whose first draft passed against a planted NUL.
+# AN UNRECOGNISED ARGUMENT IS AN ERROR. A `[ "${1:-}" = "--self-test" ]` test falls through on anything
+# else, so `check-text-bytes.sh --slf-test` would run a full scan and exit 0 — a typo in the CI step or
+# the hook would silently downgrade the self-test into a duplicate of the scan beside it.
 case "$#:${1-}" in
   0:) ;;                              # no argument: scan the tracked tree
   1:--self-test) self_test; exit 0 ;;
@@ -115,11 +110,11 @@ cd "$(git rev-parse --show-toplevel)"
 bad=0
 # **NUL-DELIMITED, AND THAT IS NOT ABOUT SPACES.** `git ls-files` C-QUOTES any path it considers unusual
 # — `core.quotePath` defaults to true — so a tracked `café.ts` arrives as the literal string
-# `"caf\303\251.ts"`, `[ -f ]` fails on it, and the file is dropped unread and unwarned. Demonstrated on
-# a throwaway repo: a `café.ts` carrying a real NUL passed this gate, a hole in the very gate that
-# exists to catch the byte that makes a file invisible. `-c core.quotePath=false` would close that and
-# would still drop a path with an embedded newline, because the loop would still be reading lines; `-z`
-# closes both and cannot be undone by a user's config.
+# `"caf\303\251.ts"`, `[ -f ]` fails on it, and the file is dropped unread and unwarned. Read that way,
+# a `café.ts` carrying a real NUL would pass this gate — a hole in the very gate that exists to catch the
+# byte that makes a file invisible. `-c core.quotePath=false` would close that and would still drop a
+# path with an embedded newline, because the loop would still be reading lines; `-z` closes both and
+# cannot be undone by a user's config.
 while IFS= read -r -d '' f; do
   [ -f "$f" ] || continue
   printf '%s\n' "$f" | grep -qiE "$BINARY_RE" && continue

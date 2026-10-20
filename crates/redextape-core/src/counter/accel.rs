@@ -4,7 +4,7 @@
 //!   It is the counter machine itself, and it is only affordable for toys and small programs.
 //! * **Accelerated** — [`run_accelerated`] executes each move as arithmetic on the counters' values and
 //!   counts its literal steps by `program.rs`'s `move_steps` formula, kept in a deferred shape. **The count is
-//!   computed, not taken:** a stage 1 image of `3 - 5` reports about 10^380 literal steps.
+//!   computed, not taken.**
 //!
 //! **THE TWO ARE HELD TO EACH OTHER BY A TRACE.** Both can record `(macro, literal steps so far)` each time
 //! a macro is entered. A literal run of a program's expansion and an accelerated run of its macros agree on
@@ -16,8 +16,7 @@
 //! `u64` holding its `j` lowest base-`b` digits, `j` at most the largest `k` for which `b^k` fits a `u64`:
 //! 16 for base 15. A push or a pop is then arithmetic on `lo`, and only a full `lo` (flushed into `hi`) or an
 //! empty one (refilled from `hi`, dividing by `b^k` through a `Divisor`) passes over the limbs — about once
-//! every `k` moves of that counter. Measured on `sum(5)`'s stage 1 image while this was planned, it took the
-//! run from 110.2 s, with a limb pass on every move, to 11.9 s (11.861 s at `74906c4`, load 27.8).
+//! every `k` moves of that counter.
 //!
 //! **THE TALLY IS DEFERRED THE SAME WAY.** The steps of a move are `(b + 3)·(P + ⌊Q/b⌋) + (Q mod b) + s + 4`
 //! for `P` the value pushed onto and `⌊Q/b⌋` the value left after the pop — two counter values. A counter's

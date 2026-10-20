@@ -20,15 +20,6 @@
 //! missing or misspelled `js_name` cannot survive that; it simply is not something a test in this file
 //! can see.
 //!
-//! **THIS PARAGRAPH NAMED `classify_source`/`classifySource` UNTIL PLAN 7 PART 3b, WHICH DELETED THAT
-//! EXPORT AND MADE IT FALSE.** The web tier colours its editors from tree-sitter grammars now
-//! (`web/src/colour.ts`), so the export had no JS caller left and this crate's own tests were its
-//! last one; see `the_free_exports_need_no_session`'s own doc for what the deletion took with it. The
-//! stale sentence kept reading true locally because `pkg/redextape_wasm.d.ts` is a gitignored build
-//! artefact `build:wasm` had not been re-run to regenerate, so it still listed `classifySource` —
-//! that is not evidence the export still exists, only that nothing had rebuilt the file this
-//! paragraph cites.
-//!
 //! THE EXPECTED VALUES ARE PINNED IN `session.rs`'s NATIVE TESTS TOO, deliberately: "the values that
 //! come back are the ones a native run produces" is only a claim if both sides name the same numbers.
 //! `let x = 40; x + 2` reduces in 7 β-steps to Church 42, runs 2,870 δ-steps on a 5-tape machine of
@@ -148,11 +139,11 @@ fn compile_step_and_read_both_legs() {
     assert!(word(8) < redextape_core::analysis::token_class_names().len(), "the first span's class is a class");
 
     // `owner` AT A NON-ZERO STEP, DELIBERATELY: at step 0 a `None`-shaped bug and a correct answer
-    // are indistinguishable (both are the literal `"None"`), which is why `lambda_state_owner_and_
-    // redex_take_every_shape_across_a_real_reduction` below exercises `Exact`/`Within` at steps 1-3
-    // instead. What THIS assertion is for is different: it is the one place in this file that reaches
-    // the NORMAL FORM (step 7, after all 7 β-steps), where `owner` is genuinely `Owner::None` again —
-    // most of Church 42 is arithmetic machinery no source construct owns. The risk this guards is
+    // are indistinguishable (both are the literal `"None"`), which is why
+    // `lambda_state_owner_takes_every_shape_across_a_real_reduction` below exercises `Exact`/`Within` at
+    // steps 1-3 instead. What THIS assertion is for is different: it is the one place in this file that
+    // reaches the NORMAL FORM (step 7, after all 7 β-steps), where `owner` is genuinely `Owner::None`
+    // again — most of Church 42 is arithmetic machinery no source construct owns. The risk this guards is
     // `Owner::None` (a fieldless enum VARIANT) crossing as, or being mistaken in TypeScript for, JS
     // `null` — a confusion worth guarding against explicitly. It must be the STRING `"None"`, not `null`.
     let owner = get(&state, "owner");
@@ -168,10 +159,10 @@ fn compile_step_and_read_both_legs() {
 
     // AND THE PATH ITSELF IS ABSENT, WHICH IS A DECISION AND NOT AN OVERSIGHT. `LambdaState.redex` is
     // `serde(skip)`ped (see its own doc): the span above is resolved Rust-side by the walk that already
-    // prints `text`, and the ~9.3-element `Vec<Dir>` behind it had no JS reader while still costing the
-    // history ring. UN-SKIPPING IT FOR THE TREE VIEW MUST FAIL HERE FIRST — that is the point of pinning
-    // absence rather than deleting the assertion. Restoring the field means restoring `types.ts`'s
-    // `redex` and `protocol.ts`'s `PATH_ENTRY_BYTES` term with it, and this is what says so.  check-attributions: allow
+    // prints `text`, and no JS reader needs the `Vec<Dir>` behind it, which would cost the history ring
+    // if it crossed. UN-SKIPPING IT FOR THE TREE VIEW MUST FAIL HERE FIRST — that is the point of
+    // pinning absence rather than deleting the assertion. Crossing the path would also need `types.ts`
+    // and `protocol.ts` to carry it, and this is what says so.
     assert!(get(&state, "redex").is_undefined(), "the redex path is skipped on the wire; only `redex_span` crosses");
 
     let tree = call(&session, "lambdaTree", &[JsValue::from_f64(1_000_000.0), JsValue::from_f64(1_000_000.0)]);
@@ -229,8 +220,8 @@ fn compile_step_and_read_both_legs() {
     let tape0: Vec<char> = window.get(0).as_string().expect("a tape's window is one string").chars().collect();
     assert!(tape0.len() <= 7, "radius 3 yields at most 7 cells, got {}", tape0.len());
 
-    // `rule` crosses as a number or null, never as a bigint — the failure `TermNode`'s `u32` note was
-    // guarding against, checked here rather than assumed because `usize` is what this field uses.
+    // `rule` crosses as a number or null, never as a bigint, checked here because `usize` is what
+    // this field uses.
     let rule = get(&tm_state, "rule");
     assert!(rule.is_null() || rule.as_f64().is_some(), "rule must be a number or null, got {rule:?}");
 
@@ -266,11 +257,9 @@ fn compile_step_and_read_both_legs() {
     assert!(Reflect::apply(&f, &session, &args).is_err(), "an absent tape throws rather than aborting");
 }
 
-/// `owner` and `redex` at step 7 (the previous test) prove `Owner::None` and a long real path cross
-/// intact, but that read alone never exercises `Exact`, `Within`, or the empty-path case (`redex` at
-/// the root) — a bug that mis-marshaled every non-`None` variant, or collapsed `[]` into `null`, could
-/// still leave step 7 looking right. This walks the first three β-steps of `let x = 40; x + 2`
-/// instead, MEASURED IN A HEADLESS-CHROME RUN rather than assumed:
+/// `owner` at step 7 (the previous test) proves `Owner::None` crosses intact, but that read alone never
+/// exercises `Exact` or `Within` — a bug that mis-marshaled every non-`None` variant could still leave
+/// step 7 looking right. This walks the first three β-steps of `let x = 40; x + 2` instead:
 ///
 ///   * step 1 owner={"Exact":4} redex=[]
 ///   * step 2 owner={"Within":2} redex=["AppL"]
@@ -347,16 +336,15 @@ fn lambda_state_owner_takes_every_shape_across_a_real_reduction() {
 }
 
 /// `redex_span` IS THE GATE `crates/redextape-core/tests/viewmodel_contract.rs` CANNOT COVER: the wire
-/// key. Task 7's own lesson (this file's module doc) is that neither `cargo clippy --all-targets` nor
-/// `cargo test --workspace` compiles or runs this tier, so a broken rename here — `redexSpan` instead
-/// of the `redex_span` serde actually emits, matching `total_steps`'s own precedent — would merge
-/// silently without this test.
+/// key. The lesson in this file's module doc is that this tier does not run under `cargo test`, so a
+/// broken rename here — `redexSpan` instead of the `redex_span` serde actually emits, matching
+/// `total_steps`'s own precedent — would merge silently without this test.
 ///
 /// **THE BYTE/TEXT-LENGTH CHECK IS A REAL CROSSING CHECK, NOT A RUST-SIDE ONE REPEATED.** `text` comes
 /// back through `as_string()`, which reconstructs a Rust `String` from the JS (UTF-16) value —
 /// `text.len()` is therefore the UTF-8 BYTE length of whatever actually crossed the boundary, and
-/// comparing `redex_span`'s `end` against it exercises the same crossing `lambdaState`'s `text`,
-/// `spans` and `redex` fields go through, not a re-assertion of what the native tests already cover.
+/// comparing `redex_span`'s `end` against it exercises the same crossing `lambdaState`'s `text` and
+/// `spans` fields go through, not a re-assertion of what the native tests already cover.
 #[wasm_bindgen_test]
 fn lambda_state_carries_the_redex_span_in_its_own_frame() {
     let (_, session) = compile("let x = 40; x + 2");
@@ -380,9 +368,9 @@ fn lambda_state_carries_the_redex_span_in_its_own_frame() {
     );
     assert_eq!(start1, 0.0, "step 1's redex is the Let's own tagged App, a ROOT path: its span starts at byte 0");
 
-    // Step 2's redex is INTERIOR (`redex2` above is `["AppL"]`, not `[]`), so its span need not start
-    // at 0 — the same distinction the native `redex_span_pinpoints_a_bound_occurrence_under_a_binder`
-    // test exercises, checked here for the one thing only a real crossing can break: the key survives.
+    // Step 2's redex is INTERIOR (its path is `["AppL"]`, not `[]`), so its span need not start at 0 —
+    // the same distinction the native `redex_span_pinpoints_a_bound_occurrence_under_a_binder` test
+    // exercises, checked here for the one thing only a real crossing can break: the key survives.
     assert_eq!(call(&session, "stepLambda", &[]), JsValue::TRUE, "step 2 must succeed");
     let s2 = call(&session, "lambdaState", &[JsValue::from_f64(1_000_000.0)]);
     let span2 = get(&s2, "redex_span");
@@ -417,7 +405,7 @@ fn a_lambda_limitation_program_reports_a_tm_only_session() {
     // certainly not a made-up "Ended".
     assert!(get(&lambda, "run").is_null(), "there is no λ run to have a status, got {:?}", get(&lambda, "run"));
 
-    // Every λ method now throws rather than aborting the module.
+    // Every λ method throws rather than aborting the module.
     for method in ["stepLambda", "lambdaState", "lambdaTree"] {
         let f: Function = get(&session, method).unchecked_into();
         let args = Array::new();
@@ -492,12 +480,12 @@ fn a_program_just_under_the_guard_still_compiles() {
     assert!(!session.is_null(), "and it compiles in a browser, not only natively");
 }
 
-/// THE REGRESSION TEST FOR THE LINK ARG. It exercises the deepest recursion any front-end guard
-/// admits — λ lowering at depth ~600 — rather than the parser's, which
-/// `a_deep_program_is_refused_rather_than_trapping` above already covers. A 600-element list desugars
-/// to a 600-deep `cons`-`Apply` spine, which `MAX_LAMBDA_LOWER_DEPTH` (700) admits — and on wasm32's
-/// stock 1 MiB shadow stack that ABORTED the module with `RuntimeError: memory access out of bounds`,
-/// measured. It returns here only because `.cargo/config.toml` links with `-zstack-size=8388608`.
+/// THE REGRESSION TEST FOR THE LINK ARG. It exercises the deepest recursion any front-end guard admits — λ
+/// lowering at depth ~600 — rather than the parser's, which `a_deep_program_is_refused_rather_than_trapping`
+/// above already covers. A 600-element list desugars to a 600-deep `cons`-`Apply` spine, which
+/// `MAX_LAMBDA_LOWER_DEPTH` (700) admits — and on wasm32's stock 1 MiB shadow stack that aborts the module
+/// with `RuntimeError: memory access out of bounds`. It returns here only because `.cargo/config.toml`
+/// links with `-zstack-size=8388608`.
 ///
 /// **THE λ ASSERTION IS THE LOAD-BEARING ONE.** Without it this case would still pass if the lowering
 /// had DECLINED — no deep recursion, nothing exercised, a green test proving nothing. Only the λ leg
@@ -505,13 +493,11 @@ fn a_program_just_under_the_guard_still_compiles() {
 /// and no machine runs — which is also why this case costs milliseconds rather than the ~12 seconds a
 /// 400-element list does.
 ///
-/// STILL BELOW THE CRASH, and measured rather than assumed: past 580 the TM lowering refuses, so the
-/// deepest input any guard admits is a 699-element list, and bisecting the STACK SIZE (the depth
-/// cannot be pushed further — the guards refuse first) puts its requirement between 2 and 3 MiB of
-/// the 8 given — against the LIST spine specifically. `lower.rs`'s `MAX_LAMBDA_LOWER_DEPTH` records a
-/// store-passing statement spine as ~19% fatter per level than that spine, so the true worst-reachable-case
-/// margin is roughly **2.2x–3.4x**, not the 2.7x–4x a straight read of this bisection would give (the
-/// decision is unaffected either way — see the roadmap entry for the full derivation).
+/// STILL BELOW THE CRASH: past 580 the TM lowering refuses, so the deepest input any guard admits is a
+/// 699-element list, and bisecting the STACK SIZE puts its requirement between 2 and 3 MiB of the 8 given —
+/// against the LIST spine specifically. A store-passing statement spine is fatter per level than that spine
+/// (`MAX_LAMBDA_LOWER_DEPTH`'s doc gives the depth it overflowed at), so the true worst-reachable-case
+/// margin is roughly **2.2x–3.4x** (see the roadmap entry for the full derivation).
 #[wasm_bindgen_test]
 fn a_deep_but_legal_program_needs_the_raised_shadow_stack() {
     let elems = vec!["0"; 600].join(", ");
@@ -522,33 +508,25 @@ fn a_deep_but_legal_program_needs_the_raised_shadow_stack() {
     assert_eq!(get(&lambda, "available"), JsValue::TRUE, "the λ lowering really recursed 600 deep");
 }
 
-/// THE DEPTH-TOLERANCE CASE, and it samples a REDUCED term rather than a compiled one — and, unlike
-/// the version this replaces, it MEASURES depth rather than only checking `lambdaAst` came back
-/// non-null. A non-null result is true regardless of how deep the sampled term was, since the node
-/// budget below is unreachable by construction; only reading the arena's actual height, via `depth`
-/// above, can tell a shallow sample from a deep one.
+/// THE DEPTH-TOLERANCE CASE, and it samples a REDUCED term rather than a compiled one. It MEASURES depth
+/// rather than only checking `lambdaAst` came back non-null. A non-null result is true regardless of how
+/// deep the sampled term was, since the node budget below is unreachable by construction; only reading
+/// the arena's actual height, via `depth` above, can tell a shallow sample from a deep one.
 ///
-/// NOT A REGRESSION TEST, and the distinction is recorded rather than glossed: measured before the
-/// arena landed, the `Box`-shaped `TermNode` did not trap at any depth the guards admit on the 8 MiB
-/// shadow stack. There is no crash here to pin. What this is instead is a TRIPWIRE: a future change
-/// that reintroduces per-level recursion into `lambdaTree`'s marshaling, or that lowers the shadow
-/// stack, has nothing to trap on today — this case is what would first notice, by no longer being able
-/// to walk a term this deep without itself recursing into a stack it does not have.
+/// NOT A REGRESSION TEST: there is no crash here to pin. What this is instead is a TRIPWIRE: a future
+/// change that adds per-level recursion to `lambdaTree`'s marshaling, or that lowers the shadow
+/// stack, has nothing to trap on today — this case is what would first notice, by no longer being
+/// able to walk a term this deep without itself recursing into a stack it does not have.
 ///
-/// MEASURED IN THIS RUN, IN HEADLESS CHROME, NOT ASSUMED FROM AN EARLIER ONE: fourteen samples at
-/// 100-step spacing (thirteen mid-reduction, the fourteenth the normal form) —
-/// `[607, 707, 807, 907, 1007, 1107, 1207, 1307, 1407, 1507, 1607, 1707, 1803, 1803]` — peak depth
-/// **1803**. The freshly compiled term alone is depth 607; sampling only that would pin a depth well
-/// under half of what this program actually reaches mid-reduction, which is why the loop steps rather
-/// than reading once. The assertion's threshold, 1,500, sits with real margin below the observed peak
-/// and well above the compile-time floor, so a pass means a mid-reduction depth was genuinely observed.
+/// The peak depth over samples at 100-step spacing is **1803**. The freshly compiled term alone is depth
+/// 607; sampling only that would pin a depth well under half of what this program actually reaches
+/// mid-reduction, which is why the loop steps rather than reading once. The assertion's threshold,
+/// 1,500, sits with real margin below the observed peak and well above the compile-time floor, so a pass
+/// means a mid-reduction depth was genuinely observed.
 ///
 /// A GAP HONESTLY LEFT OPEN: 100-step sampling still discretizes a continuously changing depth, so the
-/// true peak between two adjacent samples could exceed any single one caught here. The two consecutive
-/// 1803s at the end suggest the depth had already leveled off near the normal form by then, and an
-/// earlier, coarser 300-step run of this same program recorded 1805 — close enough to this run's 1803
-/// to be consistent with a true peak in the low 1800s, but this test does not prove that number is the
-/// maximum, only that a depth in that neighborhood was reached.
+/// true peak between two adjacent samples could exceed any single one caught here. This test does not
+/// prove 1803 is the maximum, only that a depth in that neighborhood was reached.
 ///
 /// THE HELPER ITSELF IS THE OTHER HALF OF THE POINT: `depth` is a consumer-side walk of the arena,
 /// computed with one linear pass and no recursion — the capability the flat, pre-order shape exists to
@@ -565,11 +543,9 @@ fn the_tree_tolerates_the_deepest_term_a_reduction_reaches() {
     assert_eq!(diagnostics.length(), 0, "a 600-deep cons spine is inside every front-end guard");
     assert!(!session.is_null(), "and it compiles at 8 MiB");
 
-    // MEASURED, NOT THE ORIGINALLY DRAFTED `2_000`: this program normalizes in exactly 1,200 β-steps
-    // (confirmed via `lambdaState`'s `step` field in a headless-Chrome run), so a 100-step chunk gives
-    // roughly a dozen samples across the run rather than four (this run took fourteen, see below) — a
-    // spacing dense enough that the earlier 300-step version, which sampled the same run in only four
-    // places, could straddle the depth peak entirely.
+    // This program normalizes in exactly 1,200 β-steps, so a 100-step chunk gives roughly a dozen
+    // samples across the run — dense enough that a sample lands in the peak's neighbourhood rather than
+    // straddling it entirely (the doc's open gap still applies).
     let mut chunks = 0;
     let mut depths: Vec<u32> = Vec::new();
     loop {
@@ -600,38 +576,34 @@ fn the_tree_tolerates_the_deepest_term_a_reduction_reaches() {
 }
 
 /// MEASURES V8's OWN LIMITS on a nested plain JS object, independent of any type this crate marshals.
-/// The design's load-bearing justification for this whole branch is a claim that was never
-/// run: *"a 3,000-deep nested object still traps a recursive JS walk or a `JSON.stringify`"*
-/// (`docs/superpowers/specs/2026-08-07-termnode-arena-design.md` §0). This project's own standard —
-/// applied to the Rust side just above, in `the_tree_tolerates_the_deepest_term_a_reduction_reaches` —
-/// is that a claim like this is not established until a program chosen to break it has actually been
-/// run. This test runs it, checking both the design's own quoted 3,000 and the smaller 1,805 this
-/// project's own reduction is independently measured to reach (a native run recorded in the roadmap;
-/// this file's own sampling above measured 1,803).
+/// The design (`docs/superpowers/specs/2026-08-07-termnode-arena-design.md` §0) claims *"a 3,000-deep
+/// nested object still traps a recursive JS walk or a `JSON.stringify`"*; a claim like this is not
+/// established until a program chosen to break it has actually been run, and this test runs it, checking
+/// both the design's own quoted 3,000 and the smaller 1,805 this project's own reduction is
+/// independently measured to reach (a native run recorded in the roadmap; this file's own sampling above
+/// measured 1,803).
 ///
 /// BUILT ITERATIVELY: `nested_object` wraps one plain object per level in a loop, never recursing to
 /// construct its own input — the fixture must not import the hazard it exists to measure.
 ///
-/// MEASURED, HEADLESS CHROME, THIS RUN (Chrome via `wasm-pack test --headless --chrome`): at depth
-/// 1,805 AND at the design's own quoted depth of 3,000, `JSON.stringify` succeeds and the naive
-/// recursive walk also succeeds — **neither traps at either depth.** Bisecting further: `JSON.stringify`
-/// was not observed to fail at all, up through this test's own 1,000,000-depth safety cap (V8's
-/// stringifier does not appear to recurse one native call-stack frame per JS nesting level, unlike the
-/// walk below). The naive recursive walk has a real, reproducible boundary: it survives up to 15,000
-/// and fails by 15,031 (`RangeError: Maximum call stack size exceeded`) — more than 8x past 3,000, and
-/// more than 8x past the 1,805 this project's own programs actually reach.
+/// In headless Chrome (`wasm-pack test --headless --chrome`), at depth 1,805 AND at the design's own
+/// quoted depth of 3,000, `JSON.stringify` succeeds and the naive recursive walk also succeeds —
+/// **neither traps at either depth.** `JSON.stringify` was not observed to fail at all, up through this
+/// test's own 1,000,000-depth safety cap (V8's stringifier does not appear to recurse one native
+/// call-stack frame per JS nesting level, unlike the walk below). The naive recursive walk has a real,
+/// reproducible boundary: it survives up to 15,000 and fails by 15,031 (`RangeError: Maximum call stack
+/// size exceeded`) — 5x past 3,000, and more than 8x past the 1,805 this project's own programs
+/// actually reach.
 ///
 /// VERDICT: the design's specific numeric claim does not hold on this stack. A 3,000-deep plain object
 /// traps NEITHER a naive recursive JS walk NOR `JSON.stringify` in headless Chrome — the walk's own
 /// boundary is roughly 5x deeper than 3,000, and `JSON.stringify` did not break within a cap more than
-/// 300x deeper. **This weakens this branch's stated justification** for the reason the design itself
-/// gives most weight to (§0's "now the load-bearing reason"). What remains true, and is worth keeping
-/// separate from the falsified number: a JS object CAN be built deep enough to overflow a naive
-/// recursive walk — the boundary is real, just at ~15,000 rather than 3,000 — and the arena's iterative
-/// `depth` helper above is what lets a consumer avoid ever reaching for that recursive walk at all. The
-/// insurance is real; it is insurance against a depth roughly 5x deeper than the design claimed, and
-/// `JSON.stringify` on this stack is not shown to be a hazard at any depth this project's own programs
-/// could plausibly produce.
+/// 300x deeper. What remains true, and is worth keeping separate from the falsified number: a JS object
+/// CAN be built deep enough to overflow a naive recursive walk — the boundary is real, just at ~15,000
+/// rather than 3,000 — and the arena's iterative `depth` helper above is what lets a consumer avoid ever
+/// reaching for that recursive walk at all. The insurance is real; it is insurance against a depth
+/// roughly 5x deeper than the design claimed, and `JSON.stringify` on this stack is not shown to be a
+/// hazard at any depth this project's own programs could plausibly produce.
 #[wasm_bindgen_test]
 fn v8_native_limits_on_a_nested_plain_js_object() {
     /// Wraps `depth` plain objects around `null`, one key `"k"` per level: `{k:{k:{k:...null}}}}`.
@@ -703,7 +675,7 @@ fn v8_native_limits_on_a_nested_plain_js_object() {
 
     let walker = recursive_walker();
 
-    // The two numbers this branch's own justification turns on: the design's own quoted depth, and
+    // The two numbers the verdict in this test's doc turns on: the design's own quoted depth, and
     // the smaller depth this project's own reduction is independently measured to reach.
     let designs_quoted_depth = 3_000u32;
     let reachable = 1_805u32;
@@ -719,7 +691,8 @@ fn v8_native_limits_on_a_nested_plain_js_object() {
     let (walk_lo, walk_hi) = find_breakpoint(cap, |n| walk_survives(&walker, &nested_object(n)));
 
     console_log(&format!(
-        "FIX 2 measurement -- at depth {designs_quoted_depth} (the design's own quoted depth): \
+        "V8 native limits on a nested plain JS object -- at depth {designs_quoted_depth} \
+         (the design's own quoted depth): \
          stringify_ok={stringify_at_quoted} walk_ok={walk_at_quoted}. At depth {reachable} (this \
          project's own reachable depth): stringify_ok={stringify_at_reachable} \
          walk_ok={walk_at_reachable}. Bisected: stringify ok up to {stringify_lo}, fails by \
@@ -748,8 +721,7 @@ fn v8_native_limits_on_a_nested_plain_js_object() {
 
     // The walk's own measured boundary is real and reproducible: it must be found (not just "didn't
     // break within the cap"), and it must sit comfortably above the design's own quoted depth -- which
-    // is the actual insurance the arena's iterative `depth` helper buys a consumer, now measured rather
-    // than assumed.
+    // is the actual insurance the arena's iterative `depth` helper buys a consumer.
     assert!(walk_hi <= cap, "the recursive walk never broke within the {cap}-depth safety cap");
     assert!(
         walk_lo > designs_quoted_depth,
@@ -761,24 +733,6 @@ fn v8_native_limits_on_a_nested_plain_js_object() {
 
 /// `analyze` and `captureClasses`, both reachable as module-level functions rather than as prototype
 /// methods, because there is nothing to look either of them up on.
-///
-/// **IT COVERED `classifySource` TOO UNTIL PLAN 7 PART 3b, WHICH DELETED THAT EXPORT.** The web tier
-/// colours its editors from tree-sitter grammars now (`web/src/colour.ts`), so the export had no JS
-/// caller left and this was its last Rust one. What the deleted half asserted was that a file which
-/// does NOT analyze still classifies.
-///
-/// **NOTHING IN `redextape_core::analysis` HELD THAT PROPERTY WHEN THE ASSERTION WENT.**
-/// `classify_source_is_total_on_malformed_input` discarded `classify_source`'s return value
-/// (`let _ = classify_source(...)`), so it asserted only that classification does not panic — nothing
-/// there checked a malformed file still yields spans, and the assertion deleted from this test —
-/// `a file that does not analyze still has tokens` — was the whole of it.
-/// That test now asserts the property directly: a parse error still leaves tokens to classify, and the
-/// empty string classifies to nothing. That is where it lives.
-///
-/// **PLURAL AGAIN, DELIBERATELY.** Plan 7 part 3b's deletion of `classifySource` left this test
-/// exercising exactly one free export, which the name above says it does not do. `captureClasses` —
-/// new in this same branch (Task 2) and, until now, untested at the wasm boundary at all — closes it
-/// back up to two.
 #[wasm_bindgen_test]
 fn the_free_exports_need_no_session() {
     let clean: Array = redextape_wasm::analyze("let x = 40; x + 2").expect("marshals").unchecked_into();
@@ -832,8 +786,8 @@ fn all_three_legs_agree_across_the_boundary() {
 
     // `Value { text }` is a struct variant: serde renders it as `{ Value: { text: "42" } }`.
     //
-    // MEASURED IN THIS BROWSER, NOT ASSUMED, because PR 3c's renderer reads exactly this. A probe run
-    // of `JSON.stringify` on `before` and on the three values below reported, verbatim:
+    // Measured in this browser rather than assumed, because the renderer reads exactly this. A probe
+    // run of `JSON.stringify` on `before` and on the three values below reported, verbatim:
     //
     // ```
     // before    = "Unfinished"
@@ -927,11 +881,11 @@ fn tape_names_are_five_strings_in_tape_order() {
     assert_eq!(names.get(4).as_string().as_deref(), Some("BOX"));
 }
 
-/// Task 6: `linkIndex(byteBudget)` must cross as one string, one nullable cut, and ELEVEN TYPED ARRAYS — never
-/// as serde's arrays-of-objects. That trade is measured, not stylistic: `list60`'s index is 552 KB as
-/// objects against ~220 KB as typed arrays, and `prog200`'s is 1.9 MB against ~689 KB. A plain JS
-/// `Array` would still satisfy a naive length check, which is why every field below is checked with
-/// `is_instance_of` against its specific typed-array kind rather than merely for a `length`.
+/// `linkIndex(byteBudget)` must cross as one string, one nullable cut, and ELEVEN TYPED ARRAYS — never
+/// as serde's arrays-of-objects. That trade is measured, not stylistic: `list60`'s index is 552 KB as objects
+/// against ~220 KB as typed arrays. A plain JS `Array` would still satisfy a naive length check, which is why
+/// every field below is checked with `is_instance_of` against its specific typed-array kind rather than merely
+/// for a `length`.
 #[wasm_bindgen_test]
 fn link_index_crosses_as_typed_arrays() {
     let (diagnostics, session) = compile("let x = 40; x + 2");
@@ -940,7 +894,7 @@ fn link_index_crosses_as_typed_arrays() {
 
     let index = call(&session, "linkIndex", &[JsValue::from_f64(65_536.0)]);
 
-    // A string, a nullable cut string, and ten typed arrays. If any leg came back as a plain Array,
+    // A string, a nullable cut string, and eleven typed arrays. If any leg came back as a plain Array,
     // serde crept in.
     assert!(get(&index, "lambdaText").as_string().is_some_and(|s| !s.is_empty()), "lambdaText must be text");
     assert_eq!(get(&index, "lambdaCut"), JsValue::NULL, "a small program fits the byte budget whole");
@@ -999,11 +953,10 @@ fn link_index_crosses_as_typed_arrays() {
     );
 }
 
-/// Task 6, Fix 2: `Session::link_index`'s own doc calls it "total over either absence" -- a declined λ
-/// backend must still cross as an empty λ leg rather than throwing, and the source/TM legs must be
-/// unaffected. `LinkIndex::build` already has native coverage for this in `redextape-core`, but nothing
-/// before this exercised the WIRING through the actual wasm export, which is where a `None`-handling
-/// mistake would bite a real caller.
+/// `Session::link_index`'s own doc calls it "total over either absence" -- a declined λ backend must
+/// still cross as an empty λ leg rather than throwing, and the source/TM legs must be unaffected.
+/// `LinkIndex::build` already has native coverage for this in `redextape-core`; this drives the WIRING
+/// through the actual wasm export, which is where a `None`-handling mistake would bite a real caller.
 ///
 /// THE FIXTURE IS FOUND, NOT GUESSED: the identical program `a_lambda_limitation_program_reports_a_tm_
 /// only_session` above already uses, which is `session.rs`'s own `LAMBDA_DECLINES` test constant (in
@@ -1042,11 +995,10 @@ fn link_index_survives_a_declined_lambda_leg() {
     assert!(len("asmOwner") > 0.0, "the program lowers to asm, so its instructions have owners too");
 }
 
-/// n=2,900 rather than the investigation's 2,690, because THIS test runs on the page thread, whose
-/// ceiling is term depth 2,833. At 2,690 it would pass with or without the cap and pin nothing; at
-/// 2,900 the uncapped walk exhausts the page stack, so the assertion bites where the test actually
-/// runs. The worker-thread cases live in `web/tests/browser/depth-cap.test.ts` — `wasm_bindgen_test`
-/// runs on the page, and `run_in_dedicated_worker` would re-home every test in this file to buy two.
+/// n=2,900 because THIS test runs on the page thread, whose ceiling is term depth 2,833: at 2,900
+/// the uncapped walk exhausts the page stack, so the assertion bites where the test actually runs.
+/// The worker-thread cases live in `web/tests/browser/depth-cap.test.ts` — `wasm_bindgen_test` runs
+/// on the page, and `run_in_dedicated_worker` would re-home every test in this file to buy two.
 #[wasm_bindgen_test]
 fn a_term_past_the_print_cap_is_bounded_rather_than_fatal() {
     let (_, session) = compile("let x = 2900; x + 1");
@@ -1065,7 +1017,7 @@ fn a_term_past_the_print_cap_is_bounded_rather_than_fatal() {
     assert!(!again.is_null(), "the session survives its own bounded print");
 }
 
-/// 5d-i T2: a `LambdaScratch` crosses as a HANDLE beside plain diagnostics, and its six methods are
+/// A `LambdaScratch` crosses as a HANDLE beside plain diagnostics, and its six methods are
 /// reachable on the prototype. Same shape as `compile`, and asserted the same way — through `Reflect`,
 /// because a method missing from the generated glue is exactly what this tier exists to catch and
 /// holding the Rust value would prove nothing about the glue.
@@ -1130,7 +1082,7 @@ fn unparseable_lambda_text_crosses_as_diagnostics_and_a_null_handle() {
     assert_eq!(scratch, JsValue::NULL, "no term, no handle — and `null`, not `undefined`");
 }
 
-/// 5d-iii T2: `lambdaScratchAt` forks a scratch from mid-history and hands back the text that built it,
+/// `lambdaScratchAt` forks a scratch from mid-history and hands back the text that built it,
 /// through the boundary — the marshalling this tier exists to catch, not the reduction itself (that is
 /// `session.rs`'s `lambda_scratch_at_*` unit tests).
 #[wasm_bindgen_test]
@@ -1139,8 +1091,7 @@ fn lambda_scratch_at_returns_a_handle_and_the_text_that_built_it() {
     let text = get(&out, "text");
     // `λ`, NOT `\`. `lambda/syntax.rs`'s binder spelling is asymmetric on purpose — the parser
     // accepts both, the printer emits only `λ` — and past step 0 `text` is a reparsed PRINT, never the
-    // caller's `src`; at step 0 it is `src` as given. T1 found three of its five tests wrong this way
-    // before this note existed.
+    // caller's `src`; at step 0 it is `src` as given.
     assert_eq!(text.as_string().as_deref(), Some("λy. y"));
     let scratch = get(&out, "scratch");
     assert!(!scratch.is_null(), "a term that parsed must yield a handle");
@@ -1155,7 +1106,7 @@ fn lambda_scratch_at_nulls_both_fields_when_the_text_does_not_parse() {
     }
 }
 
-/// 5d-i T3: a headerless `.tm` file crosses as a runnable machine, and `tmStatus().header` is `false`
+/// A headerless `.tm` file crosses as a runnable machine, and `tmStatus().header` is `false`
 /// so the pane can say the configuration was invented (decision 6). Asserted through the glue because
 /// `tmStatus` on this type answers a DIFFERENT wire shape from `Session::tmStatus` — no `total_steps`,
 /// a `header` boolean, and `width`/`run` that are never null — and a renderer switching on the wrong
@@ -1290,8 +1241,7 @@ fn declined_tm_text_crosses_as_null_not_undefined() {
 /// **THE COMPILE-TIME HALF OF DECISION 2, AND IT IS A TEST RATHER THAN A COMMENT.** The design's §5
 /// asks for a `trybuild`-style case or an assertion against the generated `.d.ts`; this is neither
 /// literally, and it is stronger than both for what it costs — no new dependency, and no dependence on
-/// `pkg/`, which is a gitignored build artifact that may hold whatever WASM was last built (the trap
-/// PR #28 recorded).
+/// `pkg/`, which is a gitignored build artifact that may hold whatever WASM was last built.
 ///
 /// HOW IT WORKS: Rust resolves an INHERENT method before a trait method. `NotOnAScratch` is a blanket
 /// impl over every type, so `s.lambda_value()` below binds to the trait's default body — and its

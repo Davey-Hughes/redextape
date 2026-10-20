@@ -1,110 +1,79 @@
-//! **ALL TIMINGS BELOW ARE PRE-2026-08-01 AND WILL NOT REPRODUCE.** The costs this probe was built to
-//! expose were removed at the root, not guarded: `term.rs`'s `shift` was Θ(logical) and
-//! sharing-destroying, and `reduce.rs`'s `depth_exceeds` walked the logical tree once per step. Both now
-//! read `u32`s the constructors maintain. The counterexample below went from **19.0 s in its first
-//! β-step to under a millisecond**, and the whole program normalises. See
-//! `examples/shift_cost_probe.rs`.
+//! **Do not "fix" the `predicted node-copies` column.** It is `Abs(body) × |arg|`, the cost model this
+//! probe tests, and it predicts what the OLD `subst`/`shift` pair would copy. Beside it a row's first
+//! β-step reads near zero, and the ns/predicted-copy rate collapses toward zero, because the shipped
+//! `shift` does not make those copies. The 23.1–23.6 ns/copy figure below is the OLD pair's rate.
 //!
-//! **The quantities are unchanged and the falsification stands** — `max_shared` is still 4, the corpus
-//! maximum is still 684, and `max_shared` still collapses rather than grows. What this file establishes
-//! about the two reverted guards does not depend on the timings, which is why it is corrected in place
-//! rather than rewritten.
+//! **This probe asks the MIRROR question of `lambda/lower.rs`'s reverted shared-subterm guard.** The
+//! guard's own record documents one direction of error (could a legitimate program EXCEED 10,000 and be
+//! wrongly refused?); this asks the other — **can a program pass the guard and still not return from a
+//! single β-step?** — plus the follow-on question the guard's placement makes unavoidable: **does
+//! `max_shared` stay put while the term reduces, given that the guard is consulted exactly once, at
+//! lowering time?**
 //!
-//! **EXPECT THE `predicted node-copies` COLUMN TO LOOK ABSURD NOW, AND DO NOT "FIX" IT.** It is
-//! `Abs(body) × |arg|`, the cost model this probe established, and it still correctly predicts what the
-//! OLD `subst`/`shift` pair would copy — 773,869,551 node-copies on the n=500 two-list row. Beside it
-//! that row's first β-step now reads **0.000 s**, and the ns/predicted-copy rate collapses toward zero.
-//! That divergence is the fix, stated in the probe's own units: the model was never wrong about what
-//! was being copied, and `shift` no longer copies it. The 23.1–23.6 ns/copy figure below is the rate
-//! measured while it did.
-//!
-//! **The instrument that falsified `lambda/lower.rs`'s shared-subterm guard.** It asked the MIRROR
-//! question the guard's own record never did. That record documents one direction of error (could a
-//! legitimate program EXCEED 10,000 and be wrongly refused?). This probe asks the other — **can a
-//! program pass the guard and still not return from a single β-step?** — plus the follow-on question the
-//! guard's placement makes unavoidable: **does `max_shared` stay put while the term reduces, given that
-//! the guard is consulted exactly once, at lowering time?**
-//!
-//! **Both answers were no, and `MAX_SHARED_LOGICAL_NODES` was reverted on the strength of them.** The
-//! `source` section's counterexample is `let xs = [0..500); let ys = [0..500); head(xs) + head(ys)` —
-//! 4,821 bytes, no recursion, no `while`, no closure — which measures `max_shared` = **4** against a
-//! bound of 10,000 and **spent 19.0 s in its first β-step**; `lets` shows that cost was linear in the
-//! number of let-bound lists (2.2 / 7.1 / 17.6 / 42.0 s at k = 2/4/8/16), so it is a family rather than
-//! an artifact of one ceiling; and `curve` shows `max_shared` COLLAPSING rather than growing — sampled
-//! after every step across six programs it is non-increasing in all six, so the lowering-time reading
-//! was the peak, taken at the one moment it is maximal and destroyed by the second β-step.
-//!
-//! **The guard is gone; this file is kept as the re-runnable source for those figures and for the
-//! 23.1–23.6 ns/node-copy rate the cost model below is calibrated on.** `MAX_SHARED_LOGICAL_NODES`
-//! survives here as a transcribed HISTORICAL constant so the rows can still print the verdict the
-//! reverted guard would have given — that verdict is the finding. `lower` refuses nothing on these
-//! grounds today, so every section runs to its own budget rather than stopping at a refusal, and the
-//! `--tm`-style "did not lower" paths in the sibling probes no longer trigger either.
+//! **The first answer is yes for the OLD `subst`/`shift` pair (`source`) and the second is no (`curve`),
+//! which is why `lower.rs` has no `MAX_SHARED_LOGICAL_NODES`.** `MAX_SHARED_LOGICAL_NODES` is here as a
+//! transcribed constant so the rows can print the verdict the reverted guard would have given — that
+//! verdict is the finding. `lower` refuses nothing on these grounds, so every section runs to its own
+//! budget rather than stopping at a refusal, and the `--tm`-style "did not lower" paths in the sibling
+//! probes do not trigger either.
 //!
 //! Full record: `docs/superpowers/specs/2026-07-31-lambda-shared-subterm-guard-design.md` §10.
 //!
 //!     systemd-run --user --scope -q -p MemoryMax=2G -p MemorySwapMax=0 -- \
 //!       cargo run --release --example guard_hole_probe -p redextape-core -- <section>…
 //!
-//! # The cost model this probe was written to test
+//! # The cost model this probe tests
 //!
-//! **HISTORICAL, LIKE THE TIMINGS ABOVE: `beta` no longer has this shape.** `beta(body, arg)` WAS
-//! `shift(-1, 0, subst(0, shift(1, 0, arg), body))` when this model was fitted — β-fusion (2026-08-03)
-//! replaced the three-pass form with one walk; see `examples/shift_cost_probe.rs`. The reasoning below
-//! is kept because it is what the reverted guard was measured against, and `subst`'s `Abs` arm is still
+//! **This model is of the three-pass `beta`, `shift(-1, 0, subst(0, shift(1, 0, arg), body))`; the
+//! shipped `beta` is one walk.** See `examples/shift_cost_probe.rs`. `subst`'s `Abs` arm is
 //!
 //! ```text
 //! Node::Abs(n, b) => abs(Rc::clone(n), subst(j + 1, &shift(1, 0, s), b)),
 //! ```
 //!
-//! `shift(1, 0, s)` is a FULL LOGICAL COPY of the substituted argument, and it is taken **once per
-//! `Abs` node in the body — unconditionally**, before anything looks at whether the body's remaining
-//! subtree mentions the variable at all. So a step's cost is
+//! Without the `maxfree` short-circuits, `shift(1, 0, s)` is a FULL LOGICAL COPY of the substituted
+//! argument, taken **once per `Abs` node in the body — unconditionally**, before anything looks at
+//! whether the body's remaining subtree mentions the variable at all. So a step's cost is
 //!
 //! ```text
 //! |body| + (Abs nodes in body) × |arg|          (logical sizes, both factors)
 //! ```
 //!
-//! and NOT "occurrences of the bound variable × |arg|", which is already one factor too generous and is
-//! what the guard's doc comment claimed `subst` does, and not "the size of the largest shared subterm",
-//! which is the quantity the guard measured. Neither factor above is a sharing property: **both are
-//! large in a completely alias-free term**, whose `max_shared_logical_size` is 0.
-//! `examples/lambda_sharing_probe.rs`'s PART B reached the same multiplier from the other end — it
-//! attributes 86.8% of all nodes the reducer visits to `Σ abs×arg`, as its HEADLINE FINDING, on the
-//! branch immediately before the guard's — so this is a re-derivation of a number that was already in
-//! the tree, unconnected, while the guard was being designed against a different mechanism.
+//! and NOT "occurrences of the bound variable × |arg|", which is already one factor too generous, and
+//! not "the size of the largest shared subterm", which is the quantity the guard measured. Neither factor
+//! above is a sharing property: **both are large in a completely alias-free term**, whose
+//! `max_shared_logical_size` is 0. `examples/lambda_sharing_probe.rs`'s PART B reached the same
+//! multiplier, `Σ abs×arg`, from the other end.
 //!
-//! **`Σ abs×arg` ITSELF WAS FALSIFIED ON 2026-08-02** — it is a static model of a `subst` that no longer
-//! exists, over-reporting by ~1,584x since the `maxfree` short-circuits landed. That does not disturb
-//! the reasoning above, which is about which FACTORS the guard should have been reading and is a claim
-//! about the shape of the cost rather than its size; but a reader arriving here for the 86.8% should
-//! read `shift_cost_probe.rs`'s census section first. The per-node price measured below is likewise
-//! historical: it was fitted before the short-circuits.
+//! `Σ abs×arg` is itself a static model of a `subst` without the `maxfree` short-circuit (see
+//! `shift_cost_probe.rs`'s census section). That does not disturb the reasoning above, which is
+//! about which FACTORS the guard should have been reading and is a claim about the shape of the
+//! cost rather than its size. The per-node price measured below is likewise the OLD pair's.
 //!
 //! Measured here at **23.1–23.6 ns per predicted node-copy, constant over a 1,255x range** of predicted
 //! copies, which is what makes the model a fit rather than a story.
 //!
-//! The corollary is what makes it a hole rather than a re-statement: the copies `subst` takes at each
-//! `Abs` are TRANSIENT (each is dropped as its subtree finishes), so peak RSS is bounded by
+//! The corollary is what makes it a hole rather than a re-statement: the copies the model's `subst` takes
+//! at each `Abs` are TRANSIENT (each is dropped as its subtree finishes), so peak RSS is bounded by
 //! `Abs-nesting-depth × |arg|`, not by the product. A step can therefore burn Θ(A × |arg|) CPU at flat
-//! memory and produce an output SMALLER than its input — which is exactly the profile
-//! `list_reduction_probe.rs` recorded for the nesting family at seven groups (15+ s in one step at
-//! 93.6 MB peak RSS), and which no guard on a size can see.
+//! memory and produce an output SMALLER than its input — a profile no guard on a size can see.
 //!
 //! # Sections
 //!
 //! Sections are selected by argument and run in this file's order regardless of the order given.
 //!
-//! | arg | what it establishes | cost |
-//! | --- | --- | --- |
-//! | `mechanism` | one β-step's cost on HAND-BUILT alias-free terms: `max_shared` = 0, output smaller than the input, time ∝ A × \|arg\| | ~35 s, stops over budget |
-//! | `source` | **the counterexample.** The same shape reached from SOURCE through parse → desugar → lower, control vs two-list at each n, with the reverted guard's verdict per row | ~30 s |
-//! | `lets` | that it is a FAMILY, not one ceiling: the first step's cost is linear in the number of let-bound lists | ~70 s, stops over budget |
-//! | `curve` | `max_shared_logical_size` sampled after EVERY step while real programs reduce — does the lowering-time number hold? (no: it collapses) | ~50 s |
-//! | `ceiling <v>` | the largest instance `lower` accepts, at element value `v` — **deliberately over budget** | 196 s at `v` = 1500 |
+//! - `mechanism`: one β-step's cost on HAND-BUILT alias-free terms: `max_shared` = 0, output smaller
+//!   than the input, time ∝ A × |arg|
+//! - `source`: **the counterexample.** The same shape reached from SOURCE through parse → desugar →
+//!   lower, control vs two-list at each n, with the reverted guard's verdict per row
+//! - `lets`: that it is a FAMILY, not one ceiling: the first step's cost is linear in the number of
+//!   let-bound lists
+//! - `curve`: `max_shared_logical_size` sampled after EVERY step while real programs reduce — does the
+//!   lowering-time number hold? (no: it collapses)
+//! - `ceiling <v>`: the largest instance `lower` accepts, at element value `v` — not held to `BUDGET_S`
 //!
 //! ```text
-//! # every section except `ceiling`; ~3 min
+//! # every section except `ceiling`
 //! systemd-run --user --scope -q -p MemoryMax=2G -p MemorySwapMax=0 -- \
 //!   cargo run --release --example guard_hole_probe -p redextape-core
 //!
@@ -112,7 +81,7 @@
 //! systemd-run --user --scope -q -p MemoryMax=2G -p MemorySwapMax=0 -- \
 //!   cargo run --release --example guard_hole_probe -p redextape-core -- source lets curve 20000
 //!
-//! # THE OVER-BUDGET SECTION — one row, 196.5 s in a SINGLE β-step at n=697 (8,405 bytes of source).
+//! # THE UNBUDGETED SECTION — one row, a SINGLE β-step at the largest instance `lower` accepts.
 //! # `ceiling` takes a required element value and is never part of the no-argument run. It needs an
 //! # EXTERNAL wall-clock kill as well as the cap: nothing inside this process can interrupt a β-step
 //! # once `beta` has been entered. Build first, so the kill budget covers the run and not the compile.
@@ -123,8 +92,7 @@
 //!
 //! # Safety — the same rules as `blowup_probe.rs` and `list_reduction_probe.rs`
 //!
-//! An earlier measurement on this project consumed 60 GiB of RAM and 29 GiB of swap and wedged the
-//! machine. This file:
+//! This file:
 //!
 //!   - **Never calls `reduce_trace`** (it materializes every step by contract). `LambdaCursor` steps
 //!     lazily and holds exactly one term.
@@ -148,22 +116,17 @@
 //! that way: another copy would have to be added to that test, and the roadmap's standing lesson is
 //! about copies that do not receive corrections.
 //!
-//! # ALLOCATOR — READ THIS BEFORE TRUSTING ANY TIMING ABOVE
+//! # ALLOCATOR
 //!
-//! **This target has set `mimalloc` as its global allocator since 2026-08-04. Every timing recorded
-//! in this file above this note was measured under glibc's malloc and is NOT comparable to a run
-//! made today.** Counts are: node counts, allocation counts and step counts are properties of the
-//! reduction, not of the machine, and did not move. Seconds, ms and ns did.
+//! This target sets `mimalloc` as its global allocator, so a timing taken here is not comparable with one
+//! taken under glibc's malloc, which is what the timings quoted in this file were. Node counts, allocation
+//! counts and step counts are properties of the reduction, not of the machine, and do not depend on it.
 //!
-//! It is here for a measured reason rather than a preference. The reducer allocates one `Rc<Node>`
-//! per term node and frees on the same order, and glibc's layout for that pattern costs real
-//! address-translation pressure: on the nested-group family, swapping ONLY the allocator took L1
-//! DTLB misses from 1.20e9 to 0.92e9 for the three-pass `beta` and from 1.83e9 to 0.93e9 for the
-//! fused one, with the wall clock following at ~9% and ~16%. That is also how the β-fusion family
-//! regression was explained — it was glibc's layout, not the reducer's work.
+//! The reducer allocates one `Rc<Node>` per term node and frees on the same order, and glibc's layout for
+//! that pattern costs real address-translation pressure.
 //!
 //! `mimalloc` is a `[dev-dependencies]` entry and reaches examples and tests ONLY.
-//! `redextape-core`'s `[dependencies]` stays empty and WASM-clean: `libmimalloc-sys` is C that does
+//! `redextape-core`'s `[dependencies]` stays WASM-clean: `libmimalloc-sys` is C that does
 //! not build for wasm32, and a library must not choose a global allocator for its consumers.
 
 #![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic, clippy::pedantic)]
@@ -197,10 +160,9 @@ use text::{head, line};
 /// how far past a whole-program budget one step can get.
 const BUDGET_S: f64 = 20.0;
 
-/// The REVERTED guard's bound, transcribed. It is no longer in `lower.rs` and nothing enforces it;
+/// The REVERTED guard's bound, transcribed. It is not in `lower.rs` and nothing enforces it;
 /// every row prints its own `max_shared` against this number so a reader can see the verdict the guard
-/// WOULD have given — which is the finding, not decoration. `source`'s 19.0 s row scoring 4 against
-/// 10,000 is the whole falsification in one line.
+/// WOULD have given — which is the finding, not decoration.
 const MAX_SHARED_LOGICAL_NODES: u64 = 10_000;
 
 fn rss_str() -> String {
@@ -208,7 +170,7 @@ fn rss_str() -> String {
 }
 
 /// `Abs` nodes in the tree this term DENOTES — the multiplier on `|arg|` in the cost model above,
-/// because `subst`'s `Abs` arm re-shifts the argument once per one of these.
+/// because the cost model's `subst` re-shifts the argument once per one of these.
 ///
 /// A DISTINCT QUANTITY FROM `logical_size`, not a local re-implementation of it: sizes come from
 /// `lambda::term::logical_size` everywhere in this file, exactly as that function's `pub`-ness intends.
@@ -263,7 +225,7 @@ fn list_term(n: u64) -> LambdaTerm {
 }
 
 /// Drive ONE step through `LambdaCursor` — the real reduction entry point, so the timing includes the
-/// `depth_exceeds` walk the reducer actually pays, not just `beta`. Returns
+/// `depth_exceeds` check the reducer actually pays, not just `beta`. Returns
 /// `(seconds, stepped?, out_physical, out_logical, out_max_shared)`.
 ///
 /// Takes `t` BY VALUE and drops it before stepping, so exactly one term is alive across the step.
@@ -326,16 +288,16 @@ fn mechanism() {
 /// Two list literals, bound with `let`, and a body that reads both. Ordinary surface syntax; nothing
 /// recursive, nothing mutually recursive, no `while`.
 ///
-/// It lowers to `(\xs. (\ys. BODY) YS) XS`, whose LEFTMOST-OUTERMOST redex is the root — so the very
-/// first β-step re-shifts `XS` once per `Abs` node in `(\ys. BODY) YS`, and `YS` supplies ~6 of those
-/// per element.
+/// It lowers to `(\xs. (\ys. BODY) YS) XS`, whose LEFTMOST-OUTERMOST redex is the root — so under the
+/// cost model, the very first β-step re-shifts `XS` once per `Abs` node in `(\ys. BODY) YS`, and `YS`
+/// supplies ~6 of those per element.
 fn two_lists_src(n: usize) -> String {
     let items = (0..n).map(|i| i.to_string()).collect::<Vec<_>>().join(", ");
     format!("let xs = [{items}]; let ys = [{items}]; head(xs) + head(ys)")
 }
 
-/// The single-literal control: the program the withdrawn total-size guard was falsified by. Same
-/// element count, one binding, so the first step has nothing large to re-shift.
+/// The single-literal control. Same element count, one binding, so the first step has nothing large
+/// to re-shift.
 fn one_list_src(n: usize) -> String {
     let items = (0..n).map(|i| i.to_string()).collect::<Vec<_>>().join(", ");
     format!("let xs = [{items}]; head(xs)")
@@ -465,13 +427,13 @@ fn lowers(src: &str) -> Option<LambdaTerm> {
     lower(&desugar(&prog?)).ok()
 }
 
-/// ONE row, DELIBERATELY OVER `BUDGET_S`, run last and by explicit argument: the largest instance of
+/// ONE row, NOT HELD TO `BUDGET_S`, run last and by explicit argument: the largest instance of
 /// the `source` shape that `lower` accepts. Everything is printed BEFORE the step starts, so an
 /// external kill still leaves the prediction and the reverted guard's verdict on record.
 ///
 /// Wrap in `timeout`; nothing inside this process can interrupt a β-step once `beta` is entered.
 fn ceiling(v: u64) {
-    head(&format!("CEILING — the largest admitted instance, element value {v} (deliberately over budget)"));
+    head(&format!("CEILING — the largest admitted instance, element value {v} (not held to the budget)"));
     // Descend to the largest element count `too_deep_node` still admits. Lowering is cheap next to
     // stepping, and this is the only way to state the ceiling as a fact rather than a guess.
     let mut found = None;
@@ -523,11 +485,8 @@ fn ceiling(v: u64) {
 /// Reduce `t` with a `LambdaCursor`, sampling `max_shared_logical_size` of the CURRENT term every
 /// `every` steps. Holds one term (the cursor's) and one sample line at a time.
 ///
-/// The guard ran once, at lowering time. This asked whether the number it read stayed true, and it does
-/// not: `max_shared` is NON-INCREASING across all six rows, so the peak is always the lowering-time
-/// value. At 6 groups it reaches 0 by step 2 while individual steps are reaching ~4.2 s each by step 9.
-/// A one-shot reading is taken at the single moment the quantity is largest and is destroyed by the
-/// second β-step — the opposite of the monotonicity a lowering-time guard needs.
+/// A lowering-time guard reads `max_shared` once; this samples it while the term reduces, to check
+/// whether that reading stays true.
 fn curve_row(label: &str, t: LambdaTerm, every: u64, step_cap: u64) {
     let start_shared = max_shared_logical_size(&t);
     let start_logical = logical_size(&t);
@@ -627,8 +586,8 @@ fn main() {
     let args: Vec<String> = std::env::args().skip(1).collect();
     let want = |s: &str| args.is_empty() || args.iter().any(|a| a == s);
     line(&format!(
-        "guard_hole_probe — MAX_SHARED_LOGICAL_NODES = {MAX_SHARED_LOGICAL_NODES} (REVERTED; this probe \
-         is why — nothing enforces it), MAX_REDUCTION_STEPS = {MAX_REDUCTION_STEPS}"
+        "guard_hole_probe — MAX_SHARED_LOGICAL_NODES = {MAX_SHARED_LOGICAL_NODES} (REVERTED; nothing \
+         enforces it), MAX_REDUCTION_STEPS = {MAX_REDUCTION_STEPS}"
     ));
     if want("mechanism") {
         mechanism();
@@ -639,7 +598,7 @@ fn main() {
     if want("lets") {
         lets_ramp();
     }
-    // NOT part of the no-argument run: one row, deliberately past the budget. `ceiling <v>`.
+    // NOT part of the no-argument run: one row, not held to the budget. `ceiling <v>`.
     if args.iter().any(|a| a == "ceiling") {
         let v = args
             .iter()

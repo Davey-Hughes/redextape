@@ -1,7 +1,7 @@
-//! The register-assembly IR: a small register machine whose control flow becomes (in Part 2) the
-//! Turing machine's state graph, and whose data (registers, stack, heap) becomes tapes. Registers
-//! hold `u64` words; because Core is typed, the compiled code statically knows whether a word is a
-//! `Nat` count, a `0`/`1` `Bool`, or a heap pointer, so there are no runtime type tags.
+//! The register-assembly IR: a small register machine whose control flow becomes the Turing machine's
+//! state graph, and whose data (registers, stack, heap) becomes tapes. Registers hold `u64` words;
+//! because Core is typed, the compiled code statically knows whether a word is a `Nat` count, a `0`/`1`
+//! `Bool`, or a heap pointer, so there are no runtime type tags.
 
 use crate::analysis::push_span;
 use crate::core::BinOp;
@@ -88,21 +88,17 @@ impl Program {
     /// `lower_asm` has no text for a span to point into. `Machine::validate` returns strings for the
     /// same reason.
     ///
-    /// `run_asm` is deliberately unchanged. The two ways to obtain a `Program` must behave
-    /// identically, so this is a check callers opt into rather than a gate on execution.
+    /// `run_asm` does not call this. The two ways to obtain a `Program` must behave identically, so
+    /// this is a check callers opt into rather than a gate on execution.
     #[must_use]
     pub fn validate(&self) -> Vec<String> {
         let mut errs = Vec::new();
         let n = self.code.len();
 
-        // A `HashSet`, not the `Vec` + `.contains` this used to be: `.contains` on a `Vec` is O(n)
-        // inside a loop over `self.labels`, making the whole pass O(n²) — measured on the release
-        // binary at 20,000/40,000/80,000 labels, about 5x per doubling, while the parser that builds
-        // `self.labels` stays linear. `Machine::validate` (`tm/machine.rs`) already uses a `HashSet`
-        // for its own duplicate-name check; this matches that sibling rather than inventing a second
-        // way to do the same thing. The DIAGNOSTIC order and text are unchanged — a set changes lookup
-        // cost, not what is reported: `.insert` returns `false` on exactly the names `.contains` used
-        // to find already present, so the branch taken per label is identical.
+        // A `HashSet`: `.contains` on a `Vec` is O(n) inside a loop over `self.labels`, making the
+        // whole pass O(n²) while the parser that builds `self.labels` stays linear.
+        // `Machine::validate` (`tm/machine.rs`) already uses a `HashSet` for its own duplicate-name
+        // check; this matches that sibling rather than inventing a second way to do the same thing.
         let mut seen: HashSet<&str> = HashSet::new();
         for (name, at) in &self.labels {
             if !label_name_representable(name) {
@@ -317,8 +313,7 @@ impl AsmHeader {
 
 /// `print_asm`, preceded by `h`'s directives and a blank line.
 ///
-/// The listing's bytes are IDENTICAL to `print_asm`'s — this prepends and never perturbs — which is
-/// what lets every existing consumer keep its goldens while gaining a self-describing form.
+/// The listing's bytes are IDENTICAL to `print_asm`'s: this prepends and never perturbs.
 #[must_use]
 pub fn print_asm_with(prog: &Program, h: &AsmHeader) -> String {
     print_asm_with_mapped(prog, h).0
@@ -335,8 +330,8 @@ pub fn print_asm_with_mapped(prog: &Program, h: &AsmHeader) -> (String, crate::a
 /// appended, so an offset is exact by construction and nothing re-scans the output.
 ///
 /// `comments` is `&[]` from `print_asm_mapped`/`print_asm_with_mapped`: an empty slice makes every
-/// `CommentWriter` call below write nothing, so those two entry points stay byte-identical to what
-/// they produced before comments existed by construction, not by care taken here.
+/// `CommentWriter` call below write nothing, so those two entry points' output holds no comment bytes
+/// — by construction, not by care taken here.
 fn print_asm_with_inner(
     prog: &Program,
     header: Option<&AsmHeader>,
@@ -360,13 +355,12 @@ fn print_asm_with_inner(
     }
 
     // Bucket the labels by the index they precede, once. Rescanning `prog.labels` inside the loop over
-    // `prog.code` made printing O(code x labels), and both grow with program size.
+    // `prog.code` would make printing O(code x labels), and both grow with program size.
     //
     // `prog.labels` ORDER is load-bearing: when several labels sit at one index they print in the order
     // they appear there, and the goldens pin that. Pushing into per-index buckets in `prog.labels` order
     // reproduces it exactly. The `code.len() + 1` length covers the one-past-the-end targets handled
-    // below; a label further past the end is dropped by `get_mut`, which is what the old scan did too
-    // (neither loop had an index for it).
+    // below; a label further past the end is dropped by `get_mut`.
     //
     // `(usize, &str)` rather than `&str`: the anchor is the label's own index in `prog.labels`, because
     // several labels may sit at one instruction index and this bucketing is what reproduces their
@@ -558,7 +552,7 @@ pub fn decode_asm_reason(outcome: &AsmOutcome, expected: &Value) -> Result<Value
 /// to the walk the memo exists to avoid — and no more correct, since sharing is precisely what
 /// address identity detects and structure does not.
 ///
-/// **Bounded now, the same way `TyMemo` is.** Every insert happens in the `Cons` arm, right after the
+/// **Bounded, the same way `TyMemo` is.** Every insert happens in the `Cons` arm, right after the
 /// `Cons`-node `spend` (see `MAX_DECODE_NODES`'s doc), and nothing else inserts — so the table can hold
 /// at most one entry per budget unit spent, at most `MAX_DECODE_NODES` entries, on the order of a
 /// gigabyte at the current constant, same as `TyMemo`.
@@ -583,8 +577,8 @@ pub(crate) fn decode_word(
 /// **Recurses once per list element, unlike its type-directed sibling.** `decode_word_ty_at` is
 /// iterative over the list spine — that two-pass loop structure is what it is for. This function
 /// instead calls itself on `tail` for every `Cons`, so its stack depth is the list length. That is a
-/// property of this recursion's SHAPE, pre-existing before this branch's memo and not introduced or
-/// worsened by it — the memo changes how much work a frame does, not how many frames there are (see
+/// property of this recursion's SHAPE, and the memo does not change it: it changes how much work a
+/// frame does, not how many frames there are (see
 /// `crates/redextape-core/tests/sharing_aware_decode.rs`'s `value_directed_tails_is_linear` for a
 /// measured depth).
 ///
@@ -669,38 +663,32 @@ fn decode_word_memo(
 /// constants are numerically equal today and independently changeable: raising `sim`'s cell cap
 /// without revisiting this would silently break the property on the TM path.
 ///
-/// DERIVED, not picked, and the derivation counts WORK rather than nodes. A decode spends one unit
-/// per constructed `Value` node and one per spine step, so a flat `List<Nat>` over an `L`-cell heap
-/// costs `3L + 1`: `L` steps, `L` `Nat` leaves, one `Nil`, `L` `Cons` nodes. A run under
-/// `DEFAULT_CAPS` may legitimately build `DEFAULT_CAPS.heap` = `5_000_000` cells, so the largest
-/// legitimate flat decode is `3 * 5_000_000 + 1` = `15_000_001` against this constant's `20_000_000`.
-/// It fits with `4_999_999` units of headroom, which is the figure to re-derive if `DEFAULT_CAPS.heap`
-/// ever rises: above `6_666_666` cells the flat case alone exceeds the budget. The margin is 1.33x,
-/// where the earlier `2L + 1` accounting left 2.0x.
+/// DERIVED, not picked, and the derivation counts WORK rather than nodes. A decode spends one unit per
+/// constructed `Value` node and one per spine step, so a flat `List<Nat>` over an `L`-cell heap costs
+/// `3L + 1`: `L` steps, `L` `Nat` leaves, one `Nil`, `L` `Cons` nodes. A run under `DEFAULT_CAPS` may
+/// legitimately build `DEFAULT_CAPS.heap` = `5_000_000` cells, so the largest legitimate flat decode
+/// is `3 * 5_000_000 + 1` = `15_000_001` against this constant's `20_000_000`. It fits with
+/// `4_999_999` units of headroom, which is the figure to re-derive if `DEFAULT_CAPS.heap` ever rises:
+/// above `6_666_666` cells the flat case alone exceeds the budget. The margin is 1.33x.
 ///
 /// **WHY STEPS COST, AND NOT ONLY NODES.** The decode memoizes on `(pointer, depth)`, and a memo hit
-/// constructs nothing. Charging only constructed nodes would therefore leave a way to make progress
-/// for free — and PASS 1's spine walk, which allocates nothing and stops the instant it reaches nil or
-/// a pointer already in the memo, would be re-walkable for free from every spine that reaches it: `k`
+/// constructs nothing. Charging only constructed nodes would therefore leave a way to make progress for
+/// free — and PASS 1's spine walk, which allocates nothing and stops the instant it reaches nil or a
+/// pointer already in the memo, would be re-walkable for free from every spine that reaches it: `k`
 /// distinct prefixes converging on one shared tail of length `s` each re-walk that whole tail before
 /// PASS 1's own memo exit can answer, so an unbudgeted PASS 1 costs `k * s` rather than `k + s` —
 /// quadratic on a convergent heap, and nothing else bounds it (see
 /// `convergent_chains_walk_the_shared_tail_once`). Charging the step restores the bound. The invariant
 /// that follows, and the one worth keeping in mind when editing either loop: **every memo entry is paid
-/// for by exactly one budget unit, so the memo cannot outgrow the budget** — still true here: every
-/// insert happens in PASS 2's cons-up loop, one per `Cons` `spend`, which moving the spine-step charge
-/// to PASS 1 does not touch.
+/// for by exactly one budget unit, so the memo cannot outgrow the budget** — every insert happens in
+/// PASS 2's cons-up loop, one per `Cons` `spend`.
 ///
-/// **WHAT THIS CONSTANT NO LONGER HAS TO ABSORB.** It used to carry a documented residual gap:
-/// `Instr::Tail` is a pointer read rather than an allocation, so an ordinary `tails`-style function
-/// returns a `List<List<Nat>>` whose inner lists share the outer spine — `~2m` heap cells but
-/// `m^2 + m + 1` decode nodes, because the decoder re-walked each shared sub-list once per pointer
-/// into it. Breakeven was `m ~ 4_471`, three orders of magnitude below `DEFAULT_CAPS.heap`, so a
-/// correct, fast, cap-respecting program could be refused. Memoization closes it: the same fixture at
-/// `m = 64_000` decodes in about 192,000 nodes. What remains is honest — distinct `(pointer, depth)`
-/// pairs are at most `heap.len() * (depth + 1)`, so a 5,000,000-cell heap under a 64-deep type can
-/// still present 320,000,000 distinct nodes and be refused, and 320,000,000 distinct nodes is
-/// 320,000,000 nodes of real memory.
+/// Memoization on `(pointer, depth)` closes the residual gap that shared sub-lists would otherwise
+/// leave (`Instr::Tail` is a pointer read rather than an allocation, so an ordinary `tails`-style
+/// function returns a `List<List<Nat>>` whose inner lists share the outer spine). What remains is
+/// honest — distinct `(pointer, depth)` pairs are at most `heap.len() * (depth + 1)`, so a
+/// 5,000,000-cell heap under a 64-deep type can still present 320,000,000 distinct nodes and be
+/// refused, and 320,000,000 distinct nodes is 320,000,000 nodes of real memory.
 ///
 /// `decode_asm`/`decode_word`, the Value-directed siblings, are bounded the same way and for the same
 /// reason; see `decode_word`.
@@ -713,7 +701,7 @@ pub(crate) const MAX_DECODE_NODES: usize = 4 * DEFAULT_CAPS.heap as usize;
 
 /// Why a type-directed decode failed. The two causes have OPPOSITE fault attributions (see
 /// `redextape-cli::run`'s module doc, "the exit-code rule is whose fault is it"), which is the whole
-/// reason this exists rather than collapsing straight to `None` the way `decode_word_ty` used to.
+/// reason this exists rather than collapsing straight to `None`.
 ///
 /// **Mismatch is a claim about the DATA, never about the budget — and vice versa.** `Ty::Nat` and
 /// `Ty::Unit` never mismatch (any word is a valid `Nat`; `Unit` ignores the word entirely), so every
@@ -721,15 +709,15 @@ pub(crate) const MAX_DECODE_NODES: usize = 4 * DEFAULT_CAPS.heap as usize;
 /// word, an unrepresentable or out-of-bounds heap pointer, a chain that never reaches nil (a cyclic
 /// heap), a non-value type — is `Mismatch`, and none of them touch `budget` at all before returning.
 ///
-/// **Tagged at the point of detection, not inferred from `budget` afterward.** An earlier design
-/// considered leaving `decode_word_ty` returning `Option<Value>` and having the caller read `budget`
-/// after a `None`: `budget == 0` would mean exhaustion, anything else a mismatch. That is UNSOUND.
-/// `budget` can legitimately reach exactly `0` from prior, correctly-decremented nodes elsewhere in
-/// the same decode — a sibling `Nat` leaf, an earlier list's `Nil`/`Cons` nodes — and every mismatch
-/// arm (`Ty::Bool`'s `_ => ...`, both pointer-validity checks in `Ty::List`, the cyclic-heap fallback)
-/// checks its condition and returns BEFORE touching `budget`. So a mismatch discovered in that exact
-/// state would leave `budget == 0` behind it, identical to what real exhaustion leaves — a real
-/// counterexample, not a hypothetical one, which is why every arm below tags its own reason instead.
+/// **Tagged at the point of detection, not inferred from `budget` afterward.** Returning
+/// `Option<Value>` from `decode_word_ty` and having the caller read `budget` after a `None` —
+/// `budget == 0` meaning exhaustion, anything else a mismatch — would be UNSOUND. `budget` can
+/// legitimately reach exactly `0` from prior, correctly-decremented nodes elsewhere in the same decode
+/// — a sibling `Nat` leaf, an earlier list's `Nil`/`Cons` nodes — and every mismatch arm (`Ty::Bool`'s
+/// `_ => ...`, both pointer-validity checks in `Ty::List`, the cyclic-heap fallback) checks its
+/// condition and returns BEFORE touching `budget`. So a mismatch discovered in that exact state would
+/// leave `budget == 0` behind it, identical to what real exhaustion leaves — a real counterexample,
+/// not a hypothetical one, which is why every arm below tags its own reason instead.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum DecodeFailure {
     /// The word/heap does not have the shape `ty` claims — a header (or a `result` directive) that
@@ -787,39 +775,36 @@ pub fn decode_asm_ty_reason(outcome: &AsmOutcome, ty: &Ty) -> Result<Value, Deco
 /// **The table's total size is bounded too, and by the same unit `MAX_DECODE_NODES` counts.** Every
 /// insert happens in the cons-up loop, one per `Cons` `spend` (see `MAX_DECODE_NODES`'s doc), and
 /// nothing else inserts — so the table can hold at most one entry per budget unit spent, roughly
-/// 20,000,000 entries at the current constant, on the order of a gigabyte. That is a new term in the
-/// decoder's peak memory that did not exist before this branch.
+/// 20,000,000 entries at the current constant, on the order of a gigabyte.
 type TyMemo = HashMap<(u64, usize), Value>;
 
-/// Type-directed decode of one word. `pub(crate)` because `tm::decode::decode_tape_ty_reason` decodes
-/// the same `(word, heap)` pair off a set of TAPES and must not carry a second copy of THIS decoder —
-/// a second budget/cycle-bound pair could silently disagree with this one. **That claim used to be
-/// qualified, and the qualification was false.** It read: the VALUE-directed sibling `decode_word` IS
-/// duplicated, "but safely, since both recurse structurally on a finite reference `Value` already in
-/// memory and need no budget at all". A finite reference `Value` bounds TERMINATION and not COST — an
-/// `Rc`-shared one is a DAG, and walking it expands the DAG back into a tree. So `decode_word` is no
-/// longer duplicated either, for exactly the reason given above for this function.
+/// Type-directed decode of one word. `pub(crate)` because `tm::decode::decode_tape_ty_reason`
+/// decodes the same `(word, heap)` pair off a set of TAPES and must not carry a second copy of THIS
+/// decoder — a second budget/cycle-bound pair could silently disagree with this one. The
+/// VALUE-directed sibling `decode_word` is not duplicated either, for the same reason: a finite
+/// reference `Value` bounds TERMINATION and not COST — an `Rc`-shared one is a DAG, and walking it
+/// expands the DAG back into a tree.
 ///
 /// Two SEPARATE totality guards, neither implying the other:
 ///
-/// - Recursion here is on the TYPE (strictly smaller at each `List` element), never on the heap
-///   chain: the list SPINE is a loop, bounded by one step per heap cell. That bound is what makes a
-///   cyclic heap decode to `Err` instead of overflowing the stack — a chain longer than the heap has
-///   cells must have revisited one. It bounds CYCLES, not SIZE: it says nothing about how much a
-///   single acyclic decode may construct. **A cycle wins a `Mismatch` against its OWN spine's cost,
+/// - Recursion here is on the TYPE (strictly smaller at each `List` element), never on the heap chain:
+///   the list SPINE is a loop, bounded by one step per heap cell. That bound is what makes a cyclic
+///   heap decode to `Err` instead of overflowing the stack — a chain longer than the heap has cells
+///   must have revisited one. It bounds CYCLES, not SIZE: it says nothing about how much a single
+///   acyclic decode may construct. **A cycle wins a `Mismatch` against its OWN spine's cost,
 ///   unconditionally** — matching `DecodeFailure`'s doc, which lists this arm's failure as `Mismatch`
 ///   with no qualification — because the `Ty::List` arm below walks the spine to completion (or to the
 ///   cycle bound) in a pass that decodes no head at all, BEFORE a second pass decodes any head of THAT
-///   spine. An earlier version of this function interleaved the two — decoding each head as it walked
-///   past it — so a cyclic heap whose OWN elements were themselves expensive to decode could exhaust
-///   `budget` on an early, repeated element before the cycle bound ever fired, and get misreported as
-///   `BudgetExhausted`. Separating the passes closes that hazard: a cycle can never be starved by the
-///   cost of DECODING its own spine's elements. Nor, once PASS 1 started charging one unit per step
-///   (see `MAX_DECODE_NODES`'s doc on why), can it be starved by the cost of WALKING them: PASS 1 does
-///   not use `?` on its own `spend` — it records exhaustion and keeps walking, still bounded by
-///   `steps > heap.len()`, so the cycle bound gets its chance to fire regardless of how little budget
-///   the walk itself has left. Only if the walk reaches nil (or a memo hit) without ever tripping the
-///   cycle bound is the recorded exhaustion reported.
+///   spine. Interleaving the two — decoding each head as it walked past it — would let a cyclic heap
+///   whose OWN elements were themselves expensive to decode exhaust `budget` on an early, repeated
+///   element before the cycle bound ever fired, and get misreported as `BudgetExhausted`. Separating
+///   the passes closes that hazard: a cycle can never be starved by the cost of DECODING its own
+///   spine's elements. Nor, since PASS 1 charges one unit per step (see `MAX_DECODE_NODES`'s doc on
+///   why), can it be starved by the cost of WALKING them: PASS 1 does not use `?` on its own `spend` —
+///   it records exhaustion and keeps walking, still bounded by `steps > heap.len()`, so the cycle
+///   bound gets its chance to fire regardless of how little budget the walk itself has left. Only if
+///   the walk reaches nil (or a memo hit) without ever tripping the cycle bound is the recorded
+///   exhaustion reported.
 ///
 ///   **That guarantee does not reach a cycle sitting behind an expensive SIBLING.** If an earlier
 ///   element of an enclosing `List` — decoded first, in a separate call to this function — exhausts
@@ -966,10 +951,10 @@ fn decode_word_ty_at(
                 // These two checks are unreachable in practice: PASS 1 above walks this identical chain
                 // over the same immutable heap first, so an invalid pointer is already a `Mismatch`
                 // raised there, before PASS 2 ever sees it. They stay rather than get deleted as dead
-                // code because they are what keeps this arm total if the two passes ever diverge — and
-                // that stays true after this mid-spine exit: both passes stop at the same memo hit, so
-                // the two chains still coincide. No `spend` here — PASS 1 already charged this step (see
-                // `MAX_DECODE_NODES`'s doc); charging it again would double-count.
+                // code because they are what keeps this arm total if the two passes ever diverge. Both
+                // passes stop at the same memo hit, so the two chains coincide. No `spend` here —
+                // PASS 1 already charged this step (see `MAX_DECODE_NODES`'s doc); charging it again
+                // would double-count.
                 let Some(idx) = usize::try_from(w - 1).ok() else { return Err(DecodeFailure::Mismatch) };
                 let Some(&(h, t)) = heap.get(idx) else { return Err(DecodeFailure::Mismatch) };
                 cells.push((w, decode_word_ty_at(h, heap, elem, depth + 1, memo, budget)?));
@@ -1036,13 +1021,10 @@ mod tests {
         decode_word_ty_at(m + 1, &heap, &ty, 0, &mut memo, &mut budget).expect("tails decodes");
         let spent = start - budget;
         // Every insert accompanies exactly one `spend` in the cons-up loop, and nothing else inserts, so
-        // entries can never exceed units spent. (A second assertion here used to claim linear-vs-quadratic
-        // too, `spent < 10 * (2 * m)`, but it never bit: decoding each of this fixture's `m` inner lists
-        // with NO memo at all — 3 * (m - j + 1) + 1 summed over j, plus the outer spine's 2m + 1 — spends
-        // exactly 82 against that 120 threshold at `m = 6`, since `m` is too small for the O(m^2) a
-        // no-memo run would actually cost to cross it. The linear-vs-quadratic claim belongs to
-        // `convergent_chains_walk_the_shared_tail_once` and its increasing-order case instead, which use
-        // thresholds a quadratic run actually exceeds.)
+        // entries can never exceed units spent. The linear-vs-quadratic claim is not asserted here,
+        // because `m` is too small for the O(m^2) a no-memo run would cost to cross a linear threshold;
+        // it belongs to `convergent_chains_walk_the_shared_tail_once` and its increasing-order case,
+        // which use thresholds a quadratic run actually exceeds.
         assert!(memo.len() <= spent, "memo {} entries against {spent} units spent", memo.len());
     }
 
@@ -1054,13 +1036,12 @@ mod tests {
     /// Without the exit each spine re-walks the whole shared tail: `k * (p + s)`. With it, the tail is
     /// walked once: `k * p + s`, plus nodes.
     ///
-    /// A second, unrelated shape shares this test because both are what forced the mid-spine exit: an
-    /// outer list whose heads are pointers `1, 2, ..., n` in INCREASING order, over cells `i = (i - 1,
-    /// i - 1)` — the counterexample Task 3's review used to show the un-qualified size bound was false
-    /// (see `a_nested_type_over_a_shared_spine_decodes_instead_of_refusing`'s doc for the FAVOURABLE
-    /// order this one inverts). Head `j` misses `(j, depth)` — only shorter suffixes were recorded
-    /// before it runs — so without this exit PASS 2 re-decodes `j` heads per outer step: `Sigma(2j+1) ~=
-    /// n^2` spends on a `2n`-cell heap. With it, head `j` stops the instant it reaches `(j-1, depth)`, so
+    /// A second, unrelated shape shares this test because the same exit keeps it linear: an outer list
+    /// whose heads are pointers `1, 2, ..., n` in INCREASING order, over cells `i = (i - 1, i - 1)` (see
+    /// `a_nested_type_over_a_shared_spine_decodes_instead_of_refusing`'s doc for the FAVOURABLE order
+    /// this one inverts). Head `j` misses `(j, depth)` — only shorter suffixes were recorded before it
+    /// runs — so without this exit PASS 2 re-decodes `j` heads per outer step: `Sigma(2j+1) ~= n^2`
+    /// spends on a `2n`-cell heap. With it, head `j` stops the instant it reaches `(j-1, depth)`, so
     /// every cell is walked once across the whole decode.
     #[test]
     fn convergent_chains_walk_the_shared_tail_once() {
@@ -1161,14 +1142,13 @@ mod tests {
         let nil = AsmOutcome { result: 0, heap: vec![] };
         assert_eq!(decode_asm_ty(&nil, &Ty::List(Box::new(Ty::Nat))), Some(Value::Nil));
 
-        // Now actually CROSS-CHECK against `decode_asm`: for each shared concrete case, feed
-        // `decode_asm` a witness `Value` of the SAME shape as the `Ty` (`Ty::Nat` <-> `Value::Nat(0)`,
-        // `Ty::Bool` <-> `Value::Bool(false)`, `Ty::List(Nat)` <-> a `Value::list_of_nats` of the SAME
-        // LENGTH as the outcome actually decodes to -- `decode_asm` is shape-directed by its `expected`
-        // argument, so a length-2 outcome needs a length-2 witness and a nil (length-0) outcome needs
+        // CROSS-CHECK against `decode_asm`: for each shared concrete case, feed `decode_asm` a witness
+        // `Value` of the SAME shape as the `Ty` (`Ty::Nat` <-> `Value::Nat(0)`, `Ty::Bool` <->
+        // `Value::Bool(false)`, `Ty::List(Nat)` <-> a `Value::list_of_nats` of the SAME LENGTH as the
+        // outcome actually decodes to -- `decode_asm` is shape-directed by its `expected` argument, so
+        // a length-2 outcome needs a length-2 witness and a nil (length-0) outcome needs
         // `Value::Nil`/`list_of_nats(&[])`) and assert the two decoders produce the identical
-        // `Option<Value>` on identical `AsmOutcome`s -- so this test earns its name instead of only
-        // exercising `decode_asm_ty` in isolation.
+        // `Option<Value>` on identical `AsmOutcome`s.
         assert_eq!(decode_asm_ty(&nat, &Ty::Nat), decode_asm(&nat, &Value::Nat(0)));
         assert_eq!(decode_asm_ty(&b, &Ty::Bool), decode_asm(&b, &Value::Bool(false)));
         assert_eq!(decode_asm_ty(&bad, &Ty::Bool), decode_asm(&bad, &Value::Bool(false)));
@@ -1220,12 +1200,10 @@ mod tests {
         // leaves every span well-formed and every class correct, so only exact text catches it.
         assert_eq!(text, concat!("    li\tr0, #5\n", "    jz\tr0, done\n", "    halt\n", "done:\n"));
 
-        // ASSERT THE WHOLE ORDERED SEQUENCE. Every weaker form has now failed on this branch. A
-        // `named.contains(&("done", Label))` is satisfied by EITHER occurrence — "done" is both the
-        // `jz` operand and the trailing label definition — so it cannot tell a broken operand
-        // classification from a correct one while the unrelated definition span is still right. And
-        // per-text checks say nothing at all about `#5`, which is how the `Nat` arm went untested:
-        // mutating `Operand::Imm => Nat` to `Register` was caught by no test in the suite.
+        // Assert the whole ordered sequence. A `named.contains(&("done", Label))` is satisfied by
+        // EITHER occurrence — "done" is both the `jz` operand and the trailing label definition —
+        // so it cannot tell a broken operand classification from a correct one while the unrelated
+        // definition span is still right. And per-text checks say nothing at all about `#5`.
         let named: Vec<(&str, TokenClass)> = spans.iter().map(|(s, c)| (&text[s.start..s.end], *c)).collect();
         assert_eq!(
             named,
@@ -1402,10 +1380,10 @@ mod tests {
     fn mem_cap_stops_crafted_self_recursion_before_it_can_abort() {
         // A legal-but-wide register bank (r1000, well under `MAX_REGISTERS`) makes every `Call`
         // clone a ~1000-word `locals` vector into the frame stack. Self-recursion through `f` would
-        // otherwise accumulate that clone on every activation, and with a wide enough register (as
-        // in the real crafted input this guards against) run the process out of memory long before
-        // the stack's frame-COUNT cap could fire. With a tiny `mem` cap, this must return `HitCap`
-        // after only a handful of frames — fast, and without ever approaching an abort.
+        // otherwise accumulate that clone on every activation, and with a wide enough register run
+        // the process out of memory long before the stack's frame-COUNT cap could fire. With a tiny
+        // `mem` cap, this must return `HitCap` after only a handful of frames — fast, and without
+        // ever approaching an abort.
         let prog = Program {
             code: vec![
                 Instr::Li(Reg::Loc(1000), 1),
@@ -1571,9 +1549,9 @@ mod tests {
         assert_eq!(decode_asm_ty(&o2, &Ty::List(Box::new(Ty::Nat))), None);
     }
 
-    /// The hardening must not change any acyclic answer — including a chain long enough that the old
-    /// recursive shape was the only thing under test. This test now checks the HEADS, not just the length,
-    /// so a reversed rebuild (which would still produce a 1000-element nil-terminated list) fails it.
+    /// The cycle guard must not change any acyclic answer. This test checks the HEADS, not just the
+    /// length, so a reversed rebuild (which would still produce a 1000-element nil-terminated list)
+    /// fails it.
     #[test]
     fn a_long_acyclic_list_still_decodes() {
         use crate::ty::Ty;
@@ -1584,7 +1562,7 @@ mod tests {
 
         // Collect the HEADS, not just the length: a reversed rebuild would still produce a
         // 1000-element `Nil`-terminated list, so a length-only assertion cannot tell the two apart —
-        // and "the hardening must not change any acyclic answer" is a claim about the VALUES.
+        // and "the cycle guard must not change any acyclic answer" is a claim about the VALUES.
         let mut heads = Vec::new();
         let mut cur = &v;
         while let Value::Cons(h, t) = cur {
@@ -1604,26 +1582,23 @@ mod tests {
     /// **This heap is not that case, and that is the point.** Every cell here doubles as the next OUTER
     /// spine pointer AND the root of an INNER list — the identical "one big shared spine" shape `tails`
     /// exhibits (see `tests/sharing_aware_decode.rs`), just self-referential instead of split across two
-    /// halves. Before `TyMemo`, decoding inner list `q` re-walked cells `q, q-1, ..., 1` from scratch on
-    /// every outer step, for the O(n^2) total the first paragraph derives — this test used to pin
-    /// exactly that, asserting `None` at n = 6000 (`6000^2 + 6000 + 1` = 36,006,001 nodes, ~1.8x
-    /// `MAX_DECODE_NODES`). After `TyMemo`, the outer spine's first step decodes inner list `n - 1` in
-    /// full and records every one of its suffixes at depth 1 (§4.1 of the design doc), so every later
-    /// outer step's inner decode is a memo hit. The heap and the answer are unchanged; only the work to
-    /// reach it dropped from ~36,006,001 nodes to a few thousand. Refusing this decode would now be the
-    /// WRONG answer — `MAX_DECODE_NODES` measures DISTINCT nodes, and this decode produces far fewer
-    /// than n^2 of them — so the assertion below is on the correct VALUE, not on refusal.
+    /// halves. Without `TyMemo`, decoding inner list `q` would re-walk cells `q, q-1, ..., 1` from
+    /// scratch on every outer step, for the O(n^2) total the first paragraph derives. With it, the outer
+    /// spine's first step decodes inner list `n - 1` in full and records every one of its suffixes at
+    /// depth 1 (§4.1 of the design doc), so every later outer step's inner decode is a memo hit.
+    /// Refusing this decode would be the WRONG answer — `MAX_DECODE_NODES` measures DISTINCT nodes, and
+    /// this decode produces far fewer than n^2 of them — so the assertion below is on the correct VALUE,
+    /// not on refusal.
     ///
     /// **That DISTINCT-nodes claim holds in general, not only for this test's own spine order.** This
     /// outer spine walks pointers `n → 1`, so it reaches every inner list at its LONGEST suffix first —
     /// the same favorable order `tails`-shaped input has, and on its own that order is enough for the
     /// collapse above. A spine reached from a SHORTER suffix first (heads arriving in INCREASING order)
-    /// used to be the counterexample: PASS 1 and PASS 2 only checked the memo at the very top of the arm,
-    /// never mid-spine, so a later, longer head would re-walk and re-charge a suffix already recorded.
-    /// Both passes now stop the instant they reach a pointer already in the memo, not only at nil, so the
-    /// same collapse holds for that order too — see `convergent_chains_walk_the_shared_tail_once`'s
-    /// second case, which walks this identical heap shape in increasing order and pins the same
-    /// distinct-node bound.
+    /// is the harder case: the passes must check the memo mid-spine, not only at the very top of the arm,
+    /// or a later, longer head would re-walk and re-charge a suffix already recorded. Both passes stop
+    /// the instant they reach a pointer already in the memo, not only at nil, so the same collapse holds
+    /// for that order too — see `convergent_chains_walk_the_shared_tail_once`'s second case, which walks
+    /// this identical heap shape in increasing order and pins the same distinct-node bound.
     #[test]
     fn a_nested_type_over_a_shared_spine_decodes_instead_of_refusing() {
         use crate::ty::Ty;
@@ -1711,13 +1686,12 @@ mod tests {
         );
     }
 
-    /// PASS 1 must confirm a cycle from the spine's SHAPE alone, decoding no heads and spending no
-    /// `budget` — never by decoding heads as it walks, the way an earlier version of this arm did (see
-    /// `decode_word_ty`'s doc, "An earlier version of this function interleaved the two"). Pins that
+    /// PASS 1 must confirm a cycle from the spine's SHAPE alone, decoding no heads — never by decoding
+    /// heads as it walks (see `decode_word_ty`'s doc on why the two passes are separate). Pins that
     /// directly: a small 2-cell cycle (pointers 6 <-> 7) whose own head (pointer 1, shared by both
     /// cells) is a 5-element acyclic `List<Nat>` — 11 nodes to decode in full (5 `Cons` + 5 `Nat` + 1
-    /// `Nil`) — against a `budget` of only 3, far below that. An interleaved implementation decodes
-    /// that head on the very first spine step, exhausts `budget` partway through it, and never gets far
+    /// `Nil`) — against a `budget` of only 3, far below that. An interleaved implementation decodes that
+    /// head on the very first spine step, exhausts `budget` partway through it, and never gets far
     /// enough into the spine walk to notice it never reaches nil — misreporting `BudgetExhausted`
     /// instead of `Mismatch`.
     ///
@@ -1749,8 +1723,7 @@ mod tests {
 
     /// Counts bytes requested through the global allocator for one call below, so
     /// `budget_zero_allocates_nothing_at_any_nesting_depth` can measure what `decode_word_ty` commits
-    /// BEFORE its budget can act, instead of inferring it from wall-clock time (which this repository
-    /// has recorded enough measurement mistakes over to keep trusting).
+    /// BEFORE its budget can act, instead of inferring it from wall-clock time, which cannot show it.
     ///
     /// An integration test under `tests/` — a separate crate — is the shape `redextape-core/tests/
     /// viewmodel_contract.rs` already uses for exactly this technique, and says so in its own comment,
@@ -1763,24 +1736,20 @@ mod tests {
     /// every `#[cfg(test)] mod tests` in the crate, not just this file's — rather than the one
     /// integration-test binary `viewmodel_contract.rs` has to itself.
     ///
-    /// THAT divergence is what made an earlier version of this counter wrong: it was one process-wide
-    /// `AtomicUsize`, exact under cargo-nextest (one OS process per test) but not under plain `cargo
-    /// test`, which runs every non-`#[ignore]`d lib test — all 682 of them — against the SAME counter.
-    /// `scripts/check-slow.sh --all` drives exactly that shared-process path and failed this test
-    /// deterministically (300KB-600KB of concurrent tests' allocations landing inside the before/after
-    /// window, against a 4,096-byte bound), even though every CI job would have stayed green: the
-    /// `rust-slow` job filters this test out via `--ignored`, and every other Rust job uses nextest.
+    /// A process-wide `AtomicUsize` would be exact under cargo-nextest (one OS process per test) but
+    /// not under plain `cargo test`, which runs every non-`#[ignore]`d lib test against the SAME
+    /// counter, so concurrent tests' allocations would land inside the before/after window.
     ///
-    /// THE FIX below is per-THREAD, not per-process, and that is safe for a reason narrower than "less
+    /// The counter is per-THREAD, not per-process, and that is safe for a reason narrower than "less
     /// sharing": `libtest`'s default parallel runner spawns a genuinely new OS thread for every
     /// `#[test]` function (bounded concurrency via `--test-threads`, not a reused pool), so two tests
     /// never share a THREAD even when they share a process. A `thread_local!` counter therefore reads
     /// exact under every runner this repository has: nextest's one-process-per-test makes it exact
     /// trivially, and plain `cargo test`'s many concurrent OS threads each carry their own
     /// zero-initialized counter that only this test's own thread ever touches — a concurrent test on a
-    /// SIBLING thread cannot add to it no matter how much it allocates. Unlike the process-wide
-    /// version, this scoping no longer depends on which runner is asking, so it stays crate-global
-    /// (`#[global_allocator]` cannot be anything else) without reintroducing the hazard.
+    /// SIBLING thread cannot add to it no matter how much it allocates. Unlike a process-wide counter,
+    /// this scoping does not depend on which runner is asking, so it stays crate-global
+    /// (`#[global_allocator]` cannot be anything else) without the hazard.
     ///
     /// A DIFFERENT hazard this thread-local scoping does not close: libtest's own spawn hook — the
     /// closure that sets up each test's thread and clones its output-capture sink — runs on the PARENT
@@ -1819,14 +1788,10 @@ mod tests {
 
         // The default `GlobalAlloc::realloc` (inherited if this arm is omitted) is alloc-copy-dealloc:
         // it always allocates `new_size` fresh, copies the old bytes in, and frees the original, even
-        // when the underlying allocator could have grown the same block in place. That default was
-        // live here for every one of this binary's 685 tests, not just this one — every in-place
-        // `Vec`/`String` growth anywhere in `redextape-core`'s lib tests was silently paying for a
-        // fresh allocation and a copy it would not have paid running under `System` alone, which is
-        // also most of why the noise floor a shared-process counter saw ran to hundreds of KB. Routing
-        // through `System::realloc` restores in-place growth, and counting only `new_size`'s excess
-        // over the OLD layout's size (never the full `new_size`, which would recount bytes the block
-        // already held) matches what `alloc`/`dealloc` count: bytes newly committed, not bytes moved.
+        // when the underlying allocator could have grown the same block in place. Routing through
+        // `System::realloc` restores in-place growth, and counting only `new_size`'s excess over the
+        // OLD layout's size (never the full `new_size`, which would recount bytes the block already
+        // held) matches what `alloc`/`dealloc` count: bytes newly committed, not bytes moved.
         unsafe fn realloc(&self, ptr: *mut u8, layout: std::alloc::Layout, new_size: usize) -> *mut u8 {
             if let Some(grew_by) = new_size.checked_sub(layout.size()) {
                 BYTES_ALLOCATED.with(|bytes| bytes.set(bytes.get() + grew_by));
@@ -1838,31 +1803,28 @@ mod tests {
     #[global_allocator]
     static ALLOCATOR: CountingAlloc = CountingAlloc;
 
-    /// Pins the SECOND fix: at `budget = 0`, the `Ty::List` arm must allocate NOTHING before the first
-    /// `spend` anywhere in the call can even run, at any nesting depth — `cells` grows lazily and
-    /// nothing buffers the spine's WORDS ahead of decoding them. `budget = 0` makes that first `spend`
-    /// fail immediately, so whatever the allocator saw during the call is exactly what was committed
-    /// before the budget could act.
+    /// Pins that at `budget = 0` the `Ty::List` arm must allocate NOTHING before the first `spend`
+    /// anywhere in the call can even run, at any nesting depth — `cells` grows lazily and nothing
+    /// buffers the spine's WORDS ahead of decoding them. `budget = 0` makes that first `spend` fail
+    /// immediately, so whatever the allocator saw during the call is exactly what was committed before
+    /// the budget could act.
     ///
     /// The heap is a single `l`-cell acyclic spine where EVERY cell's head word repoints at the spine's
     /// own start — "one big shared spine", so decoding any head at any nesting level re-walks the SAME
-    /// `l` cells. `ty` nests that spine 4 levels deep (`List<List<List<List<Nat>>>>`). An earlier
-    /// version of this arm (in what is now `decode_word_ty_at`) collected the spine's head WORDS into a
-    /// `Vec<u64>` before decoding any of them — a paragraph PASS 1's own comment used to carry, removed
-    /// when that comment was shortened — one such `Vec`, sized to the FULL spine, PER nesting level, all
-    /// before `budget = 0` ever gets to refuse anything: roughly
-    /// `4 * l * 8` bytes for `l = 20,000`, around 640KB, decisively over the bound below. The current
+    /// `l` cells. `ty` nests that spine 4 levels deep (`List<List<List<List<Nat>>>>`). Collecting the
+    /// spine's head WORDS into a `Vec<u64>` before decoding any of them would allocate one such `Vec`,
+    /// sized to the FULL spine, PER nesting level, all before `budget = 0` ever gets to refuse anything:
+    /// roughly `4 * l * 8` bytes for `l = 20,000`, around 640KB, decisively over the bound below. The
     /// arm allocates zero regardless of `l` or nesting depth.
     ///
-    /// The bound is `assert_eq!(.., 0)`, not a generous margin, because the counter is now exact (see
+    /// The bound is `assert_eq!(.., 0)`, not a generous margin, because the counter is exact (see
     /// `CountingAlloc`'s doc): a `thread_local!` counter cannot see a concurrent test's allocation, so
     /// there is no foreign noise left to leave headroom FOR. What remains is only whether THIS call
     /// allocates, and tracing it settles that exactly — PASS 1 counts without allocating, PASS 2's
     /// `cells` is `Vec::new()` (no allocation until a first successful push), and at `budget = 0` the
     /// first `spend` anywhere in the call — reached by recursing to the innermost `Ty::Nat`, before
     /// `cells.push` on any level ever returns — fails via `?` before any `Vec` grows or any `Cons`
-    /// node's `Rc::new` runs. Confirmed directly: a probe read of `bytes_used` at HEAD prints `0`, on
-    /// every one of `cargo test --release`, its debug build, `--include-ignored`, and `cargo nextest`.
+    /// node's `Rc::new` runs.
     #[test]
     fn budget_zero_allocates_nothing_at_any_nesting_depth() {
         use crate::ty::Ty;
@@ -1900,10 +1862,8 @@ mod tests {
     fn a_cyclic_sibling_wins_only_against_its_own_spines_cost() {
         use crate::ty::Ty;
         // The `3L + 1` boundary `the_node_budget_boundary_is_exact` derives: `l_ok` is the largest `L`
-        // for which `3L + 1` still fits `MAX_DECODE_NODES`, so `l_ok + 1` is one element past it —
-        // "one element over budget, alone" for the expensive sibling below. (A stale `(MAX_DECODE_NODES
-        // - 1) / 2 + 1` used to stand here: the pre-branch `2L + 1` boundary, millions of elements
-        // short of the true one under this branch's `3L + 1` accounting.)
+        // for which `3L + 1` still fits `MAX_DECODE_NODES`, so `l_ok + 1` is one element past it — "one
+        // element over budget, alone" for the expensive sibling below.
         let l_ok = (MAX_DECODE_NODES as u64 - 1) / 3;
         let l_over = l_ok + 1;
 

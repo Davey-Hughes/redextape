@@ -58,8 +58,8 @@ fn main() -> Result<(), Box<dyn Error + Sync + Send>> {
     // The writer thread's channel is a rendezvous with `connection.sender` as its only producer;
     // `join` waits for that thread to see the channel close, which only happens once every sender
     // is gone. `connection` lives in this function's scope for the whole call, so without an
-    // explicit drop here the sender outlives the join and the two wait on each other forever —
-    // this is the shape of the hang the brief warned about, not the missing-`initialized` one.
+    // explicit drop here the sender outlives the join and the two wait on each other forever — a
+    // hang distinct from the one a missing `initialized` causes.
     drop(connection);
     io_threads.join()?;
     Ok(())

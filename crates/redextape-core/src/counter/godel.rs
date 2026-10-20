@@ -5,10 +5,9 @@
 //! `A` by 3, and a nonzero remainder says `y` was already zero, so the division is undone and the zero
 //! branch taken.
 //!
-//! **THIS RUNS LITERALLY, AND ONLY ON TOYS.** Every instruction of the folded program costs steps in
-//! proportion to `A`, and `A` is exponential in counters that are themselves exponential in a tape's
-//! length. A stage 1 image of `3 - 5` has a counter of 1,253 bits, whose `A` would need about 10^377 bits to
-//! store; a unary incrementer on four marks takes 2,974,863 two-counter steps.
+//! **THIS RUNS LITERALLY, AND ONLY ON TOYS.** Every instruction of the folded program costs steps
+//! in proportion to `A`, and `A` is exponential in counters that are themselves exponential in a
+//! tape's length.
 
 use crate::counter::program::{Instr, MAX_LITERAL_INSTRS};
 

@@ -9,7 +9,8 @@
 //! `the_variant_order_is_the_severity_order` pins — the order that makes `.max()` the merge rule with
 //! no rank table — and would print "Error" for a warning. The severity a user reads and the exit code
 //! a script reads are different questions, and this flag answers only the second. It is also why
-//! `run` gains no parameter: what was found does not change, only what an exit code makes of it.
+//! `run` takes no parameter for this flag: what was found does not change, only what an exit code
+//! makes of it.
 //!
 //! One bad input does not stop the others, the same reason `fmt` gives for the same shape: a
 //! repo-wide invocation that aborts on the first unreadable file is useless.
@@ -91,10 +92,8 @@ mod tests {
     use super::*;
     use crate::input::Input;
 
-    // Carries the same pid-plus-atomic-counter idiom `fmt::tests::tmpdir` does — see
-    // `redextape_test_support::ScratchDir`'s doc for why (that crate now owns the implementation both
-    // this and `fmt.rs`'s helper used to duplicate) and for the panicking()-gated cleanup a value this
-    // returns provides once it goes out of scope.
+    // See `redextape_test_support::ScratchDir`'s doc for the pid-plus-atomic-counter idiom and for
+    // the panicking()-gated cleanup a value this returns provides once it goes out of scope.
     fn tmpdir(name: &str) -> redextape_test_support::ScratchDir {
         redextape_test_support::ScratchDir::new(&format!("lint-{name}")).unwrap()
     }
@@ -126,8 +125,8 @@ mod tests {
         assert!(matches!(got, Outcome::Warned), "a warning is not a failure: {got:?}");
         let text = String::from_utf8(err).unwrap();
         assert!(text.contains("Warning"), "got {text}");
-        // Task 2's lesson: a neutered lint pass still lets a run through green if nothing checks
-        // that the RIGHT diagnostic came out the other end, not merely that some text did.
+        // A neutered lint pass still lets a run through green if nothing checks that the RIGHT
+        // diagnostic came out the other end, not merely that some text did.
         assert!(text.contains("does not need to be mutable"), "the real diagnostic must reach stderr: {text}");
         assert!(out.is_empty(), "a warning must never reach stdout: {:?}", String::from_utf8_lossy(&out));
     }
@@ -143,9 +142,9 @@ mod tests {
         assert!(out.is_empty(), "an error must never reach stdout: {:?}", String::from_utf8_lossy(&out));
     }
 
-    // M4 (borrowed from fmt.rs): a relative path resolves against the test process's cwd, which is
-    // incidental and shared with every other test in the binary. An absolute path under this test's
-    // own temp directory is what makes "the file really is missing" deterministic.
+    // A relative path resolves against the test process's cwd, which is incidental and shared with
+    // every other test in the binary. An absolute path under this test's own temp directory is what
+    // makes "the file really is missing" deterministic.
     #[test]
     fn a_missing_file_reports_and_does_not_panic() {
         let d = tmpdir("missing");
@@ -167,10 +166,10 @@ mod tests {
         assert_eq!(Outcome::Clean.max(Outcome::Errored), Outcome::Errored);
     }
 
-    // "THE ONE THING MOST LIKELY TO BE WRONG": the three-way decision itself, pinned directly against
-    // synthetic diagnostics rather than through `analyze` — `analyze` structurally never produces the
-    // mixed case (lints only run when there is no error already), so routing through it could never
-    // catch a wrong-order rewrite of `outcome_for`'s branches.
+    // The three-way decision itself, pinned directly against synthetic diagnostics rather than
+    // through `analyze` — `analyze` structurally never produces the mixed case (lints only run when
+    // there is no error already), so routing through it could never catch a wrong-order rewrite of
+    // `outcome_for`'s branches.
     #[test]
     fn a_diagnostic_list_with_both_a_warning_and_an_error_is_errored() {
         use redextape_core::Span;
@@ -222,10 +221,10 @@ mod tests {
         assert_eq!(out, [] as [u8; 0]);
     }
 
-    // I1 (Task 6's real bug, same loop shape): a per-file read failure must not `?`-propagate out of
-    // the loop and skip every input after it. The `Outcome` alone can't catch a regression here —
-    // `Failed` already outranks everything else `run` could report — so the second file must leave
-    // its OWN diagnostic content in `err`, proving it was actually checked rather than skipped.
+    // A per-file read failure must not `?`-propagate out of the loop and skip every input after it. The
+    // `Outcome` alone can't catch a regression here — `Failed` already outranks everything else `run`
+    // could report — so the second file must leave its OWN diagnostic content in `err`, proving it was
+    // actually checked rather than skipped.
     #[test]
     fn a_read_failure_on_one_file_does_not_stop_the_next() {
         let d = tmpdir("continue");

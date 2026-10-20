@@ -513,9 +513,8 @@ The grammar table key must be `snake_case`; `redextape_lambda` qualifies.
 
 ## What the grammar covers
 
-`grammar.js` is **78 lines** — under half the mini-language's 171, which is what a four-token
-language costs. (Both figures grew by a comment in PR 3, which closed the U+000B item this file
-describes above; they read 75 and 156 before that.)
+`grammar.js` is **77 lines** — under half the mini-language's 164, which is what a four-token
+language costs.
 `queries/highlights.scm` holds **nine patterns** over **five capture names**, and
 `lambda::CAPTURE_CLASSES` has **five rows**, one per name, checked total in both directions
 (`the_capture_map_is_total_over_the_queries`, `every_map_row_is_used_by_a_query`).

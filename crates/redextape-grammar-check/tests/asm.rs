@@ -143,7 +143,7 @@ fn the_asm_grammar_agrees_with_the_headered_printer() {
 /// `the_table_has_one_row_per_mnemonic_and_no_duplicates`. What is unique here is that the mnemonics
 /// arrive through real programs, so this is a claim about text an editor would actually be handed.
 /// `asm_roundtrip.rs`'s `the_demo_corpus_covers_thirteen_of_the_sixteen_instr_variants` asserts 13
-/// of 16 `Instr` variants, and PR 2's roadmap entry records the missing three as structural to that
+/// of 16 `Instr` variants, and that test's own doc records the missing three as structural to that
 /// file's `lower` helper. Lowering through `lower_program`'s template instead reaches all of them.
 ///
 /// Counted from the printed TEXT rather than by matching on `Instr`, so this test needs nothing
@@ -177,22 +177,15 @@ fn the_fixed_corpus_reaches_every_mnemonic() {
 
 /// The header-less leg, generated.
 ///
-/// **`cases` IS SET EXPLICITLY AND 256 IS A MEASUREMENT, NOT AN INHERITED DEFAULT.** One printed
-/// asm listing averages 146 bytes and 36 spans against λ's 912/637 and TM's 18,905/6,865. Both asm
-/// figures are FLOORS of a measured 256-case total rather than figures a total can be derived from,
-/// so multiplying either out undercounts. The measured span total is roughly 9,000 and moves with
-/// the seed: fifteen runs observed on 2026-08-26 ranged from 8,384 to 9,620. Even at the top of that
-/// range this leg compares less than a sixteenth of what λ's 256-case leg does (163K) and less than
-/// a twenty-ninth of TM's 32-case leg (282,006). This is the cheapest of the four corpora; if you
-/// lower it, say why.
+/// **`cases` IS SET EXPLICITLY, NOT AN INHERITED DEFAULT.** This is the cheapest of the four
+/// corpora; if you lower it, say why.
 ///
-/// **Reproducible on demand**: this is what `arb_expr_over` at this leaf range, through
-/// `printed_program`, actually produces at 256 cases, and the `eprintln!` below prints the live
-/// span total on every run.
+/// The `eprintln!` below prints the live span total on every run.
 ///
 /// Driven through `TestRunner` directly rather than the `proptest!` macro so the lowering pass rate
 /// can be logged once after every case has run — the same reason λ's and TM's generated legs do.
-/// **Expect 100%**: measured over 64 samples at this leaf range, `lower_asm` refused nothing.
+/// The log line shows the lowering pass rate; the final assertion requires only half, so a rate well
+/// under 100% is worth a look rather than a failure.
 #[test]
 fn the_asm_grammar_agrees_with_the_printer_on_generated_programs() {
     let strategy = arb_expr_over((0u64..100).prop_map(|n| n.to_string()));
@@ -219,8 +212,7 @@ fn the_asm_grammar_agrees_with_the_printer_on_generated_programs() {
     assert!(lowered >= total / 2, "only {lowered}/{total} generated programs lowered; the leg is not exercising asm");
 }
 
-/// The comparison must be capable of failing — the standard every PR in the tree-sitter slice has
-/// met, and PR 1's review found `compare_classified` had shipped entirely untested.
+/// The comparison must be capable of failing.
 ///
 /// **THIS FIRES THE LENGTH BRANCH, NOT THE PER-INDEX ONE, AND THE CHOICE IS DELIBERATE.** A subset
 /// query like `[":" ","] @punctuation.delimiter` would diverge at index 0 (the mnemonic against the

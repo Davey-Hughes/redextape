@@ -68,8 +68,8 @@ const PROGRAM: &str = "// doubles\nfn double(n) { n * 2 }\ndouble(3)\n";
 ///
 /// **`PROGRAM` ABOVE NEVER PRODUCES ONE.** It has no `true`/`false`, and none of the three printers
 /// lowers to a `Bool`-classified token either, so `("boolean", TokenClass::Bool)` in
-/// `capture_map::REDEXTAPE` crossed to the browser in no test until this fixture existed — the one row
-/// of the mini-language's table this differential never exercised. A single literal reaches it, so
+/// `capture_map::REDEXTAPE` crosses to the browser in no other test — the one row of the mini-language's
+/// table this differential would otherwise never exercise. A single literal reaches it, so
 /// this stays one line rather than growing `PROGRAM` itself or joining the three lowered fixtures
 /// below at the size those already carry.
 const BOOL_PROGRAM: &str = "true\n";
@@ -77,11 +77,10 @@ const BOOL_PROGRAM: &str = "true\n";
 /// The program the TM fixture is a lowering of, and it is not `PROGRAM`.
 ///
 /// **THE TM FORM IS THE ONE WHERE FIXTURE SIZE IS DECIDED BY THE LOWERING RATHER THAN BY THE SOURCE.**
-/// `PROGRAM` lowers to 46,715 bytes of machine — measured, `redextape emit <PROGRAM> --lang tm | wc -c`
-/// — every state of it real and none of it reviewable in a golden. `1` is the smallest program this
-/// pipeline has: 10 states and 13 rule lines over 1,158 code units, and still a full header, which is
-/// what keeps `@comment`, `@variable` and `@type` reachable at all (design §6.3: those three are
-/// unreachable from a header-less machine).
+/// `PROGRAM` lowers to 46,715 bytes of machine, every state of it real and none of it reviewable in a
+/// golden. `1` is the smallest program this pipeline has, and still a full header, which is what keeps
+/// `@comment`, `@variable` and `@type` reachable at all (design §6.3: those three are unreachable
+/// from a header-less machine).
 const TM_PROGRAM: &str = "1";
 
 /// One fixture: the grammar that computes its spans, the `languageId` that keys it in the golden, a
@@ -407,7 +406,7 @@ fn every_fixture_agrees_with_its_own_authority() {
 /// is exclusive because neither TM's table nor asm's has an `@operator` row at all.
 ///
 /// **THE MINI-LANGUAGE HAS TWO FIXTURES, AND `Operator` NEED ONLY LIVE ON ONE OF THEM.** The
-/// boolean-literal fixture added for `Bool` coverage carries no `@operator` capture, so the check below
+/// boolean-literal fixture, for `Bool` coverage, carries no `@operator` capture, so the check below
 /// asks whether ANY of a language's fixtures carries its witness — not every one — while still asking
 /// whether NONE of the other three languages' fixtures do, whichever of theirs is checked.
 ///

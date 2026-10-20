@@ -19,7 +19,7 @@ redextape-core = { path = "../redextape-core" }
 lsp-server = "0.10.0"
 # The message types AND the JSON-RPC envelope types, both generated from Microsoft's official LSP
 # MetaModel. `gen_lsp_types::json_rpc` is why the pure half of this crate can speak the protocol
-# without naming `lsp-server`: without it, the alternative was a hand-written second copy of
+# without naming `lsp-server`: without it, the alternative would be a hand-written second copy of
 # Request/Response/Notification, which is the drift that made rust-analyzer leave `lsp-types` and
 # is the reason this crate is here rather than that one.
 #

@@ -147,8 +147,6 @@ impl LineIndex {
 }
 
 /// The largest char boundary at or below `offset`, clamped into `text`.
-///
-/// `str::floor_char_boundary` is unstable; this is it, and it is three lines.
 fn floor_char_boundary(text: &str, offset: usize) -> usize {
     let mut o = offset.min(text.len());
     while o > 0 && !text.is_char_boundary(o) {
@@ -296,14 +294,12 @@ mod tests {
         assert_eq!(idx.offset(text, Position::new(0, 99), Encoding::Utf8), 3);
         assert_eq!(idx.offset(text, Position::new(1, 99), Encoding::Utf8), 7);
         // And the round trip holds at every boundary, terminators included. Keeping this in the
-        // SAME test as the columns above is deliberate: the two assertions constrain each other,
-        // and it was their conflict in an earlier draft that produced a method whose stated
-        // invariant was false at two offsets of this exact fixture.
+        // SAME test as the columns above is deliberate: the two assertions constrain each other.
         // BOTH encodings. The fixture is ASCII, so `len_utf16` equals the byte length and the
         // UTF-16 arm collapses to the UTF-8 one — which is exactly why running only one of them
         // leaves the stated "every `o`, CRLF included" property half-checked the day that arm is
         // edited. The design's own testing section names a round trip run only under `Utf8` as a
-        // trap to look for, and this was one.
+        // trap to look for.
         for enc in [Encoding::Utf8, Encoding::Utf16] {
             for o in 0..=text.len() {
                 let back = idx.offset(text, idx.position(text, o, enc), enc);

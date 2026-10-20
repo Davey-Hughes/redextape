@@ -4,9 +4,9 @@
 //! the running dispatch in `run.rs`; keeping printers out of here is what lets `run` — a command
 //! that never prints a program back — depend on it.
 //!
-//! **AND IT EXISTS SO THE EXTENSION TABLE IS WRITTEN ONCE.** `run` had the only copy; `fmt` needs
-//! the same knowledge, and two copies of "which extension means what" is the drift this repository
-//! treats as a defect rather than a style question.
+//! **AND IT EXISTS SO THE EXTENSION TABLE IS WRITTEN ONCE.** `run` and `fmt` both need it, and two
+//! copies of "which extension means what" is the drift this repository treats as a defect rather
+//! than a style question.
 
 use std::path::Path;
 
@@ -36,7 +36,7 @@ impl Form {
     ///
     /// **ASCII-case-insensitive, and that is not decoration.** `M.TM` is a real artifact; a
     /// byte-for-byte comparison sends it down the `.rxt` path where the lexer produces a cascade of
-    /// errors blaming a perfectly valid file on the program. `run.rs` paid that once already.
+    /// errors blaming a perfectly valid file on the program.
     ///
     /// `.rxt` is deliberately absent: it is the fallback both callers apply to this `None` —
     /// `resolve`, and `run`'s own path arm — not an entry here, so that "this extension names an
@@ -83,9 +83,9 @@ impl Form {
     /// sniffer keyed to emptiness would then refuse a machine that parsed fine and merely warned.
     #[must_use]
     pub fn sniff(src: &str) -> Option<Form> {
-        // The one ambiguity the matrix found: an empty or whitespace-only file is accepted by the
-        // asm parser AND by `.rxt`. There is nothing to format either way, so the guard costs
-        // nothing and removes the only case a precedence rule would have to arbitrate.
+        // The one ambiguity in the matrix: an empty or whitespace-only file is accepted by the asm
+        // parser AND by `.rxt`. There is nothing to format either way, so the guard costs nothing
+        // and removes the only case a precedence rule would have to arbitrate.
         if src.trim().is_empty() {
             return None;
         }
@@ -144,12 +144,10 @@ mod tests {
     /// `ASM_IN`'s printed form, byte-exact. The idempotence fixture.
     const ASM_OUT: &str = "; a program\nresult Nat\n\nf:  ; the entry\n    li\tr0, #1  ; and a trailing one\n    ret\n";
 
-    // DERIVED from design §4.1's matrix, measured against the real front ends before this plan was
-    // written — not a copy of it, and the two lists being twelve rows each is a coincidence that
-    // hid the difference. Three of §4.1's rows have no counterpart here: a comment-free minimal tm,
-    // `42` and `x`. Three rows here have none there: `TM_OUT`, `ASM_IN` and `ASM_OUT`, the printed
-    // and round-trip fixtures the rest of this module reads, which pin that a printer's own output
-    // sniffs back as the form it came from. Each row is (input, what sniff must answer).
+    // Derived from design §4.1's matrix, not a copy of it. Three rows here have no counterpart there:
+    // `TM_OUT`, `ASM_IN` and `ASM_OUT`, the printed and round-trip fixtures the rest of this module
+    // reads, which pin that a printer's own output sniffs back as the form it came from. Each row is
+    // (input, what sniff must answer).
     const MATRIX: &[(&str, Option<Form>)] = &[
         // Both degenerate rows are accepted by the asm parser AND by `.rxt`. They are the only
         // ambiguity in the matrix, and the emptiness guard is why they resolve here rather than
@@ -193,9 +191,8 @@ mod tests {
     fn the_extension_table_is_case_insensitive() {
         assert_eq!(Form::from_extension(Path::new("p.tm")), Some(Form::Tm));
         assert_eq!(Form::from_extension(Path::new("p.asm")), Some(Form::Asm));
-        // `M.TM` is as much an artifact as `m.tm`. `run.rs` records what a byte-for-byte
-        // comparison cost: an uppercase file went down the `.rxt` path and the lexer blamed a
-        // valid file on the program.
+        // `M.TM` is as much an artifact as `m.tm`: a byte-for-byte comparison would send it down
+        // the `.rxt` path, and exit 1 would blame a valid file on the program.
         assert_eq!(Form::from_extension(Path::new("M.TM")), Some(Form::Tm));
         assert_eq!(Form::from_extension(Path::new("P.AsM")), Some(Form::Asm));
 

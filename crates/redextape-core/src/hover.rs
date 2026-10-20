@@ -84,14 +84,14 @@ fn walk(program: &Program, offset: usize) -> Walked {
                     out.fns.push((*name_span, params.len()));
                     blocks.push(body);
                 }
-                // A `while` holds both an expression and a block, and an earlier draft of this walk
-                // visited neither — a literal in a loop condition would never have hovered.
+                // A `while` holds both an expression and a block: a walk that visited neither would
+                // leave a literal in a loop condition with no hover.
                 Stmt::While { cond, body, .. } => {
                     exprs.push(cond);
                     blocks.push(body);
                 }
-                // The common case, and the one the earlier draft also missed: a bare expression
-                // statement. `fact(3)` on its own line is this, not the block's tail.
+                // The common case: a bare expression statement. `fact(3)` on its own line is this,
+                // not the block's tail.
                 Stmt::Expr(e) => exprs.push(e),
                 Stmt::Error { .. } => {}
             }
@@ -231,12 +231,12 @@ pub fn rxt(src: &str, offset: usize, nav: Option<&NameIndex>) -> Option<HoverAns
 /// second parse of `src` on every request — see `redextape-lsp`'s `Document::nav` for the cost.
 #[must_use]
 pub fn tm(src: &str, offset: usize, nav: Option<&NameIndex>) -> Option<HoverAnswer> {
-    // The rule row runs first, but NOT because a rule line holds no state name — it does: a `goto`
-    // target pushes a `Reference` occurrence for it, exactly like `start q0` does. What actually
-    // keeps the two rows apart is the `Role::Definition { kind: DefKind::State, .. }` guard below,
-    // which a `goto`'s `Reference` fails and a `state <name>:` header's `Definition` passes. Delete
-    // that guard as "redundant" and hovering `q0` on a `start q0` line would answer a rule count
-    // scanned forward from the `start` line — a number about nothing.
+    // The rule row runs first. A rule line can hold a state name — a `goto` target pushes a
+    // `Reference` occurrence for it, exactly like `start q0` does — so what keeps the two rows apart
+    // is the `Role::Definition { kind: DefKind::State, .. }` guard below, which a `goto`'s
+    // `Reference` fails and a `state <name>:` header's `Definition` passes. Delete that guard as
+    // "redundant" and hovering `q0` on a `start q0` line would answer a rule count scanned forward
+    // from the `start` line — a number about nothing.
     if let Some((span, facts)) = crate::tm::rule_at(src, offset) {
         let sym = |s: &Option<char>| s.map_or_else(|| "any symbol".to_string(), |c| format!("`{c}`"));
         let reads = facts.reads.iter().map(sym).collect::<Vec<_>>().join(", ");
@@ -333,8 +333,8 @@ mod tests {
     }
 
     /// `rxt`, building its own `NameIndex` fresh. What every name-resolving test below needs: the
-    /// cache `rxt` now takes instead of building lives one crate up, in `redextape-lsp`'s
-    /// `Document`, which no test here constructs.
+    /// cache `rxt` takes instead of building lives one crate up, in `redextape-lsp`'s `Document`,
+    /// which no test here constructs.
     fn rxt_with_nav(src: &str, offset: usize) -> Option<HoverAnswer> {
         let nav = crate::binder::nav_rxt(src);
         rxt(src, offset, nav.as_ref())
@@ -389,10 +389,10 @@ mod tests {
 
     #[test]
     fn a_literal_hovers_in_every_construct_that_can_hold_one() {
-        // ONE ROW PER STATEMENT KIND THAT CARRIES AN EXPRESSION. An earlier draft of the walk
-        // visited `Let`, `Assign` and `Fn` only, so a literal in a `while` condition, a `while`
-        // body or a bare expression statement answered nothing — and the bare expression statement
-        // is the commonest shape a program has.
+        // ONE ROW PER STATEMENT KIND THAT CARRIES AN EXPRESSION. A walk that visited `Let`, `Assign`
+        // and `Fn` only would answer nothing for a literal in a `while` condition, a `while` body or
+        // a bare expression statement — and the bare expression statement is the commonest shape a
+        // program has.
         let cases = [
             ("let x = 7;\nx\n", "a let"),
             ("fn f(a) { 7 }\nf(1)\n", "a fn body"),
@@ -522,8 +522,8 @@ state q1: accept
         // A two-tape rule with a `*` wildcard in it, so ONE fixture exercises both gaps: the `sym`
         // closure's `None => "any symbol"` branch (never run by `MACHINE`, which has no wildcard),
         // and the `", "`-joining of reads/writes/moves across more than one element (never run by
-        // `MACHINE`, which is single-tape). Consulted `parse_rule_line` for the exact syntax — one
-        // space-separated symbol/move per tape, inside each `[..]` group.
+        // `MACHINE`, which is single-tape). The syntax is `parse_rule_line`'s: one space-separated
+        // symbol/move per tape, inside each `[..]` group.
         let src = "\
 tapes 2
 start q0
@@ -603,11 +603,10 @@ f:
 
     #[test]
     fn a_label_hovers_with_where_it_is_defined() {
-        // THE OLD TEST PROVED NOTHING ABOUT THE LOCATION. It hovered a DEFINITION (`PROGRAM`'s
-        // `f:`), whose title is `label f` — `text(&a).contains('f')` passed off that title alone,
-        // with `lines` never read, so an answer of `lines: vec![]` for `Role::Definition` would have
-        // satisfied it exactly as well as `"Defined here."` does. This fixture instead hovers a
-        // REFERENCE (`g`, used twice) and checks the actual LINE NUMBER its definition (`g:`) sits on.
+        // This fixture hovers a REFERENCE (`g`, used twice) and checks the actual LINE NUMBER its
+        // definition (`g:`) sits on. Hovering a DEFINITION (`PROGRAM`'s `f:`) would not pin the location:
+        // its title is `label f`, so `text(&a).contains('f')` passes off that title alone, with `lines`
+        // never read.
         let g_line = LABELED.lines().position(|l| l == "g:").expect("fixture holds it") + 1;
         assert_eq!(g_line, 6, "fixture drifted under the test that assumes this");
 
@@ -623,9 +622,7 @@ f:
         let definition = asm_with_nav(LABELED, at).expect("a definition answers");
         assert!(text(&definition).contains("Defined here."), "{}", text(&definition));
 
-        // The wasm-boundary test asserts the two arms differ; this checks the same property against
-        // the location specifically, so a fix that made both arms report the same line would still
-        // be caught here even though `Defined here.` and `A jump or call target.` already differ.
+        // The two arms answer differently; the `line {g_line}` assertion above is what pins the location.
         assert_ne!(text(&reference), text(&definition));
     }
 }

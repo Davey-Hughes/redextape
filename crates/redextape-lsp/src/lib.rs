@@ -7,13 +7,12 @@
 //! messages that go back, so a test constructs a message and asserts on what comes out — no
 //! process spawn, no stdio, no threads, no sleeping, no timing.
 //!
-//! And it is what keeps the web phase possible at no cost to this slice. `web/` is not a consumer
-//! and this slice does not make it one; what it does is not foreclose it. `Server::handle` is pure
-//! over `gen-lsp-types` structs, which are plain serde types, so a wasm caller could drive the
-//! identical code. `lsp-server`'s threads and channels — the part that cannot compile to wasm —
-//! live in `main.rs` and nowhere else. That the JSON-RPC envelope types come from
-//! `gen_lsp_types::json_rpc` rather than from `lsp-server` is what makes "nowhere else" achievable
-//! without hand-writing a second copy of a shape defined elsewhere.
+//! And it is what keeps the web phase possible: `redextape-lsp-wasm` wraps this crate for the browser's
+//! language-server worker. `Server::handle` is pure over `gen-lsp-types` structs, which are plain serde
+//! types, so a wasm caller drives the identical code. `lsp-server`'s threads and channels — the part
+//! that cannot compile to wasm — live in `main.rs` and nowhere else. That the JSON-RPC envelope types
+//! come from `gen_lsp_types::json_rpc` rather than from `lsp-server` is what makes "nowhere else"
+//! achievable without hand-writing a second copy of a shape defined elsewhere.
 
 pub mod document;
 pub mod language;
@@ -39,12 +38,12 @@ use crate::position::Encoding;
 
 /// One message the server sends because of one message from the client.
 ///
-/// **THE DESIGN SAID `handle(&mut self, Request) -> Response`, AND THAT SHAPE CANNOT CARRY
-/// DIAGNOSTICS.** `textDocument/publishDiagnostics` is a server-to-client notification with no
-/// request behind it, and the messages that produce it — `didOpen`, `didChange` — are notifications
-/// too, so neither the input nor the output of that signature had a place for the traffic this
-/// slice exists to serve. This enum is the correction. `handle` is still a pure function of the
-/// client's message and the server's state, which is the property the split was for.
+/// **A `handle(&mut self, Request) -> Response` SHAPE CANNOT CARRY DIAGNOSTICS.**
+/// `textDocument/publishDiagnostics` is a server-to-client notification with no request behind it,
+/// and the messages that produce it — `didOpen`, `didChange` — are notifications too, so neither the
+/// input nor the output of that signature has a place for that traffic; this enum gives it one.
+/// `handle` is still a pure function of the client's message and the server's state, which is the
+/// property the split from `main.rs` is for.
 #[derive(Debug, PartialEq)]
 pub enum Outgoing {
     /// An answer to a request, carrying the request's id.
@@ -142,7 +141,7 @@ impl Server {
 
     fn initialize(&mut self, id: Id, params: serde_json::Value) -> Outgoing {
         // A client whose `initialize` params do not deserialize still gets a server: every field
-        // this slice reads is optional, so `default()` answers exactly as a client that sent none
+        // this server reads is optional, so `default()` answers exactly as a client that sent none
         // would be answered. Failing the handshake over an unrecognised extension field would be a
         // worse trade than ignoring it.
         let params: InitializeParams = serde_json::from_value(params).unwrap_or_default();
@@ -179,7 +178,7 @@ impl Server {
             document_symbol_provider: Some(DocumentSymbolProvider::Bool(true)),
             // Everything else stays `None`. Diagnostics are PUSHED, via `publishDiagnostics`, which
             // needs no capability entry: it is universally supported, where pull diagnostics are a
-            // 3.17 addition this slice does not need.
+            // 3.17 addition this server does not need.
             ..ServerCapabilities::default()
         };
 
@@ -298,9 +297,9 @@ impl Server {
     /// at all — a TM rule, an asm instruction and a `.rxt` literal are resolved from the text itself,
     /// not from an occurrence `NameIndex` records — so `locate`'s question is the wrong one for
     /// those three, and hover does not ask it. But the *index* `locate` reaches into `doc.nav` for is
-    /// exactly what the other four rows want, and re-parsing it per request was never necessary:
-    /// `doc.nav.as_ref()` is passed straight through to `Language::hover`, which is why hover takes a
-    /// third argument now, and the four name-based rows read the same cache `definition` does.
+    /// exactly what the other four rows want, so `doc.nav.as_ref()` is passed straight through to
+    /// `Language::hover` rather than re-parsed per request, and the four name-based rows read the
+    /// same cache `definition` does.
     ///
     /// `null` for every case with no answer, which is what LSP says "nothing to show" is.
     fn hover(&self, id: Id, params: serde_json::Value) -> Outgoing {
@@ -351,13 +350,9 @@ impl Server {
             let uri = pos.text_document.uri;
             let (doc, nav, offset) = self.locate(uri.as_ref(), pos.position)?;
             let (i, _) = nav.at(offset)?;
-            // **A NAME NOTHING DEFINES STILL HAS OTHER MENTIONS, AND THE INDEX IS HOLDING THEM.**
-            // This used to short-circuit on `definition_of(i)?` and answer `null`, which tells
-            // someone hunting every `jmp nowhere` still to fix that the name under their cursor is
-            // not a name — in exactly the mid-edit state `nav.rs`'s module doc calls the moment
-            // navigation is worth most. `include_declaration` has nothing to include here, so it
-            // is not consulted: with no binding, every occurrence of the name IS a reference,
-            // including the one under the cursor.
+            // A name nothing defines still has other mentions, and the index holds them:
+            // with no binding, every occurrence of the name is a reference, including the one
+            // under the cursor, so `include_declaration` has nothing to include and is not consulted.
             let spans: Vec<_> = match nav.definition_of(i) {
                 Some(def) => include
                     .then(|| nav.get(def).map(|o| o.span))
@@ -383,20 +378,17 @@ impl Server {
     /// **RULES NEVER NEST UNDER THEIR STATE.** A `.tm` document mixes states and rules, but the
     /// demo suite contains a machine of **7,353 states carrying 18,499 rules**, and an outline
     /// nesting the second under the first is not one a human uses — so no `.tm` parser records a
-    /// state's extent, and `outline` therefore never nests a rule under one. (An earlier version
-    /// of this sentence said "25,852 states". That is `map_fold`'s ROW count — the states and the
-    /// rules added together — so it both inflated the state count 3.5x and named the one quantity
-    /// that is neither of the two this decision is about.)
+    /// state's extent, and `outline` therefore never nests a rule under one.
     ///
     /// `selection_range` is the name; `range` is the construct's extent when the form records one
     /// and the enclosing line when it does not. `.tm` and `.asm` record none — no parser knows
-    /// where a state's rules end — so both keep the line-shaped range they shipped with, and
-    /// `.rxt` gets the `fn` or `let` statement itself. `outline` builds the nesting; see that
-    /// module for why containment is the rule.
+    /// where a state's rules end — so both keep the line-shaped range, and `.rxt` gets the `fn` or
+    /// `let` statement itself. `outline` builds the nesting; see that module for why containment is
+    /// the rule.
     ///
     /// The `SymbolKind` comes from `outline_kind(DefKind)`, per occurrence rather than per
-    /// document — a `.rxt` file mixes `fn`s, `let`s and parameters, so one language no longer
-    /// implies one kind. `nav.rs` still holds no grammar; `DefKind` is the parser's answer and
+    /// document — a `.rxt` file mixes `fn`s, `let`s and parameters, so one language does not imply
+    /// one kind. `nav.rs` still holds no grammar; `DefKind` is the parser's answer and
     /// `outline_kind` is this crate's mapping of it to the protocol.
     fn document_symbol(&self, id: Id, params: serde_json::Value) -> Outgoing {
         let params = match serde_json::from_value::<DocumentSymbolParams>(params) {
@@ -482,8 +474,7 @@ impl Server {
     /// means. `None` for an untracked URI or a form this server does not index.
     fn locate(&self, uri: &str, pos: Position) -> Option<(&crate::document::Document, &NameIndex, usize)> {
         let doc = self.documents.get(uri)?;
-        // The index is CACHED per document version beside `LineIndex` — see `Document::nav`. This
-        // used to rebuild it per request, which is a whole parse, and then return it by value.
+        // The index is CACHED per document version beside `LineIndex` — see `Document::nav`.
         let nav = doc.nav.as_ref()?;
         let offset = doc.index.offset(&doc.text, pos, self.encoding);
         Some((doc, nav, offset))
@@ -496,10 +487,8 @@ impl Server {
     /// the user has already fixed. An untracked URI and a document in a language this server does
     /// not serve both produce an empty list, for the same reason.
     fn publish(&self, uri: &str) -> Outgoing {
-        // ONE LOOKUP FEEDS BOTH FIELDS. The two `get`s this replaces could not disagree — nothing
-        // mutates between them — so this changes no behaviour. It is that the diagnostics and the
-        // version they are reported against are one answer about one document, and looking the
-        // document up twice wrote it as two.
+        // ONE LOOKUP FEEDS BOTH FIELDS: the diagnostics and the version they are reported against
+        // are one answer about one document.
         let doc = self.documents.get(uri);
         let version = doc.map(|d| d.version);
         let diagnostics = doc
@@ -518,10 +507,10 @@ impl Server {
 /// The answer to a request this server could not READ.
 ///
 /// **`null` IS THE ANSWER TO A QUESTION WITH NO ANSWER; IT IS NOT THE ANSWER TO A QUESTION THAT DID
-/// NOT PARSE.** All four request handlers used to deserialize with `.ok()`, so a client that sent
-/// `textDocument/references` without the required `context`, or a `position.line` as a string, got
+/// NOT PARSE.** Deserializing with `.ok()` would answer a client that sent
+/// `textDocument/references` without the required `context`, or a `position.line` as a string, with
 /// a SUCCESS response of `null` — indistinguishable from "this name has no references", which is a
-/// plausible answer, so the client bug never surfaced to anyone. The `null`-for-no-answer rule
+/// plausible answer, so the client bug would never surface to anyone. The `null`-for-no-answer rule
 /// `formatting` established is about cases the SERVER cannot answer, and that argument does not
 /// reach a request it could not read.
 fn invalid_params(id: Id, method: &str, err: &serde_json::Error) -> Outgoing {
@@ -618,11 +607,10 @@ state q1: accept
 
     #[test]
     fn references_on_a_name_nothing_defines_lists_its_other_mentions() {
-        // Probed: this parses with `program: Some` and no diagnostics of the parser's own — the
+        // This parses with `program: Some` and no diagnostics of the parser's own — the
         // parser never checks jump targets; `asm_label_diagnostics` marks both, and navigation
-        // answers anyway — and records two dangling references to `nowhere`. This used to answer `null`,
-        // which tells someone hunting every jump still to fix that the name under their cursor is
-        // not a name. `include_declaration` has nothing to include: with no binding, every
+        // answers anyway — and records two dangling references to `nowhere`.
+        // `include_declaration` has nothing to include: with no binding, every
         // occurrence IS a reference, so both are listed either way.
         let mut server = Server::new();
         server.handle(notification(
@@ -652,9 +640,9 @@ state q1: accept
     #[test]
     fn a_request_this_server_cannot_read_is_an_error_not_a_null() {
         // **`null` IS THE ANSWER TO A QUESTION WITH NO ANSWER, NOT TO ONE THAT DID NOT PARSE.**
-        // All four handlers deserialized with `.ok()`, so a client omitting `context` — a required
-        // field with no serde default — was told the name has no references, which is a plausible
-        // answer and therefore one nobody investigates.
+        // Deserializing with `.ok()` would tell a client omitting `context` — a required field with
+        // no serde default — that the name has no references, which is a plausible answer and
+        // therefore one nobody investigates.
         let mut server = Server::new();
         open_tm(&mut server, "file:///a.tm", NAV_TM);
         let cases = [
@@ -672,10 +660,10 @@ state q1: accept
             ),
             // `documentSymbol` with no `textDocument`.
             ("textDocument/documentSymbol", json!({})),
-            // `formatting`, which established the `null` rule and is corrected with the rest.
+            // `formatting`, whose doc states the `null` rule.
             // NOTE it needs a missing `textDocument`, not a missing `options`: `FormattingOptions`
             // deserializes from an absent field, so the obvious malformed formatting request is
-            // not malformed at all — checked rather than assumed.
+            // not malformed at all.
             ("textDocument/formatting", json!({})),
         ];
         for (method, params) in cases {
@@ -698,13 +686,11 @@ state q1: accept
 
         assert_eq!(caps.text_document_sync, Some(TextDocumentSync::Kind(TextDocumentSyncKind::Full)));
         assert_eq!(caps.document_formatting_provider, Some(DocumentFormattingProvider::Bool(true)));
-        // Slice 1 advertises no semantic tokens: the four grammars already highlight all four forms
-        // in the target editor, so the server would be a second, competing answer to a solved
-        // question. Asserted so that adding one is a deliberate edit to this line.
+        // No semantic tokens: the four grammars already highlight all four forms in the target editor,
+        // so the server would be a second, competing answer to a solved question. Asserted so that
+        // adding one is a deliberate edit to this line.
         assert_eq!(caps.semantic_tokens_provider, None);
         assert_eq!(caps.hover_provider, Some(HoverProvider::Bool(true)));
-        // Slice 2 serves definition. The two assertions above it stay: they are what keeps a
-        // capability this server does not serve from appearing without a decision.
         assert_eq!(caps.definition_provider, Some(DefinitionProvider::Bool(true)));
     }
 
@@ -748,9 +734,8 @@ state q1: accept
         // A request MUST be answered or the client waits forever; a notification MUST NOT be,
         // because there is no id to answer to. The two halves are why this is one test.
         let mut server = Server::new();
-        // `textDocument/rename` rather than `textDocument/hover`: this test is about the arm that
-        // answers a method this server does not serve, and hover — which it used to name — is served
-        // as of part 3c. Swapping the assertion would have deleted the test's subject.
+        // This test is about the arm that answers a method this server does not serve, so it uses
+        // `textDocument/rename`, not `textDocument/hover`, which is served.
         let out = server.handle(request(3, "textDocument/rename", &json!({})));
         let [Outgoing::Response(r)] = out.as_slice() else { panic!("expected one response") };
         assert_eq!(r.error().map(|e| e.code), Some(ErrorCodes::MethodNotFound));
@@ -1070,10 +1055,9 @@ state q1: accept
     #[test]
     fn definition_works_with_the_cursor_at_the_end_of_a_name() {
         // WHERE THE CARET ACTUALLY SITS after typing a name, after `e`/`w` in Vim, and after a
-        // double-click or `End`. `NameIndex::at` answered `null` one past the last byte until it
-        // was taught that adjacency counts, under a test asserting "the end is exclusive" as
-        // though that were the contract. `start scan` occupies characters 6..10 on line 1, so
-        // character 10 is one past the final `n`.
+        // double-click or `End`. `NameIndex::at` counts adjacency: a caret one past the last byte
+        // is on the name. `start scan` occupies characters 6..10 on line 1, so character 10 is one
+        // past the final `n`.
         let mut server = Server::new();
         open_tm(&mut server, "file:///a.tm", NAV_TM);
         for character in [6, 9, 10] {
@@ -1275,9 +1259,8 @@ state q1: accept
         // The DEFINITIONS, in source order. `start scan` is a reference and must not appear.
         assert_eq!(names, vec![Some("scan"), Some("halt")]);
         // `range` is the whole `state scan:` LINE and `selectionRange` is the name inside it.
-        // They were both the name span until a review pointed out that `range` is what a client
-        // tests the cursor against — so an outline reported no symbol anywhere except the four
-        // columns of the name.
+        // `range` is what a client tests the cursor against, so with both set to the name span an
+        // outline would report no symbol anywhere except the four columns of the name.
         assert_eq!(
             syms[0]["range"],
             json!({"start": {"line": 2, "character": 0}, "end": {"line": 2, "character": 11}})
@@ -1292,9 +1275,9 @@ state q1: accept
     #[test]
     fn a_tm_state_and_an_asm_label_get_different_symbol_kinds() {
         // The `SymbolKind` comes from `outline_kind(DefKind)` per occurrence, not per document —
-        // a single `.rxt` file already mixes several kinds, so knowing the document's language no
-        // longer determines the kind. A single hardcoded kind would pass a test that only looked
-        // at one form, which is why this test opens two documents.
+        // a single `.rxt` file mixes several kinds, so knowing the document's language does not
+        // determine the kind. A single hardcoded kind would pass a test that only looked at one
+        // form, which is why this test opens two documents.
         let mut server = Server::new();
         init_hierarchical(&mut server);
         open_tm(&mut server, "file:///a.tm", NAV_TM);
@@ -1320,9 +1303,8 @@ state q1: accept
         // **THE SHAPE IS THE CLIENT'S CHOICE, AND `DocumentSymbolResponse` IS `#[serde(untagged)]`
         // SO A WRONG CHOICE IS SILENT.** A client that does not advertise
         // `hierarchicalDocumentSymbolSupport` expects `SymbolInformation[]`, whose members carry a
-        // `location` rather than a `range` — sending the other arm gives it objects with no
-        // `location` field, which it cannot report as a protocol error and renders as an empty
-        // outline. This server always sent the hierarchical arm until that was noticed.
+        // `location` rather than a `range` — sending the other arm gives it objects with no `location`
+        // field, which it cannot report as a protocol error and renders as an empty outline.
         let mut server = Server::new();
         server.handle(request(1, "initialize", &json!(InitializeParams::default())));
         open_tm(&mut server, "file:///a.tm", NAV_TM);
@@ -1402,12 +1384,11 @@ state q1: accept
     /// A client without `hierarchicalDocumentSymbolSupport` gets every symbol the tree holds, not
     /// only its roots — the nesting reaches it through `containerName`.
     ///
-    /// `the_flat_arm_lists_every_node_not_just_the_roots` already pins the node LIST; what is new
-    /// here is the container on each row. Both stay, but not for the reason once written here:
-    /// this test's own assertion — `x`'s container is `Some("f")` — already fails against a
-    /// roots-only `flatten`, since a roots-only walk drops `x` from the list rather than merely
-    /// clearing its container. What the older test alone still covers is `f`'s `location.range`
-    /// being the extent, which this test never asserts.
+    /// `the_flat_arm_lists_every_node_not_just_the_roots` already pins the node LIST, and `f`'s
+    /// `location.range` being the extent, which this test never asserts; what is new here is the
+    /// container on each row. This test's own assertion — `x`'s container is `Some("f")` — also
+    /// fails against a roots-only `flatten`, since a roots-only walk drops `x` from the list rather
+    /// than merely clearing its container.
     ///
     /// **THE FLAT SHAPE IS WHAT THIS CLIENT ASKED FOR, NOT A FALLBACK**, and
     /// `DocumentSymbolResponse` is `#[serde(untagged)]`, so sending the wrong arm is not an error
@@ -1436,10 +1417,9 @@ state q1: accept
 
     #[test]
     fn the_cached_index_is_rebuilt_when_the_document_changes() {
-        // THE CLASSIC CACHE DEFECT, AND THE REASON THE INDEX WAS NOT CACHED BEFORE IS THAT NOTHING
-        // MADE IT CHEAP TO GET WRONG. `Document::replace` rebuilds `index` and `nav` together and
+        // THE CLASSIC CACHE DEFECT. `Document::replace` rebuilds `index` and `nav` together and
         // nowhere else; a stale `nav` would answer navigation against text the buffer no longer
-        // holds, which is worse than the parse-per-request it replaced.
+        // holds, which is worse than a parse per request.
         let mut server = Server::new();
         init_hierarchical(&mut server);
         open_tm(&mut server, "file:///a.tm", NAV_TM);
@@ -1487,8 +1467,6 @@ state q1: accept
 
     #[test]
     fn document_symbol_lists_a_rxt_fn_and_its_let_but_not_its_parameters() {
-        // The source this test opens is the one the `.rxt`-is-not-indexed test used to open, back
-        // when answering `null` for it was the correct behaviour.
         let mut server = Server::new();
         init_hierarchical(&mut server);
         server.handle(notification(
@@ -1633,17 +1611,15 @@ state q1: accept
         // an offset. So that test alone never proves the document lookup or the offset computation
         // run for the three forms that DO dispatch.
         //
-        // **THIS USED TO DRIVE THE SAME REQUEST THROUGH ALL THREE AT POSITIONS CHOSEN TO HAVE
-        // NOTHING TO SAY, BECAUSE `hover::asm` WAS AN UNCONDITIONAL STUB AND "STILL NULL" WAS THE
-        // ONLY THING THERE WAS TO ASSERT.** All three forms now answer real content, and three
-        // `null`s prove far less than three distinct sentences would: a crossed dispatch — `.tm`'s
-        // request reaching `hover::asm`, or `self.documents` handing back the wrong document for a
-        // URI — usually ALSO answers `null`, because a `.tm` rule grammar has nothing to say about
-        // `.rxt` source and vice versa (checked by hand for every pairing this test exercises). A
-        // null-only assertion cannot tell "wired correctly, nothing here" from "wired backward,
-        // nothing there either"; requiring each answer to be that document's OWN content needs BOTH
-        // the right document AND the right language handler to line up, so a crossed dispatch shows
-        // up as the wrong text (or nothing) instead of passing by coincidence.
+        // **EACH FORM IS DRIVEN AT A POSITION WITH REAL CONTENT, NOT ONE CHOSEN TO HAVE NOTHING TO
+        // SAY.** Three `null`s prove far less than three distinct sentences would: a crossed
+        // dispatch — `.tm`'s request reaching `hover::asm`, or `self.documents` handing back the wrong
+        // document for a URI — usually ALSO answers `null`, because a `.tm` rule grammar has nothing
+        // to say about `.rxt` source and vice versa (true of every pairing this test exercises).
+        // A null-only assertion cannot tell "wired correctly, nothing here" from "wired
+        // backward, nothing there either"; requiring each answer to be that document's OWN content
+        // needs BOTH the right document AND the right language handler to line up, so a crossed
+        // dispatch shows up as the wrong text (or nothing) instead of passing by coincidence.
         //
         // No null case here: `redextape_core::hover`'s own test modules already cover the null rule
         // at the logic level (`rxt`'s `a_cursor_on_nothing_answers_nothing`, `tm`'s
@@ -1656,14 +1632,11 @@ state q1: accept
         did_open(&mut server, "file:///a.asm", "redextape_asm", "result Nat\nf:\n\tret\n");
 
         // rxt: the literal `1` on line 0 — its own "Nat" row. tm: the DEFINITION of state `scan` on
-        // line 2, character 6 (`state scan:` — the keyword itself has nothing to say, which is why
-        // the old null-answering version of this test sat there instead) — its own rule count,
-        // asserted by the word "rule" rather than by the name `scan`, since a crossed dispatch into
+        // line 2, character 6 (`state scan:` — the keyword itself has nothing to say) — its own rule
+        // count, asserted by the word "rule" rather than by the name `scan`, since a crossed dispatch into
         // `hover::asm`'s label fallback would answer "label state scan" for this position (`.asm`'s
         // label grammar reads any colon-terminated line as a label, `state scan` included) and a
-        // `scan`-only assertion would not catch that. asm: the `r` of `ret` on line 2, character 1 —
-        // UNCHANGED from the position this test used when `.asm` was a stub, now answering `ret`'s
-        // hover row instead of `null`.
+        // `scan`-only assertion would not catch that. asm: the `r` of `ret` on line 2, character 1.
         for (uri, line, character, own_content) in
             [("file:///a.rxt", 0, 8, "Nat"), ("file:///a.tm", 2, 6, "rule"), ("file:///a.asm", 2, 1, "ret")]
         {

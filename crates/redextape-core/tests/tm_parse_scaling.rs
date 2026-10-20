@@ -1,11 +1,8 @@
 //! Parsing a `.tm` file takes time in proportion to its size, for the two line kinds whose duplicate
-//! checks once compared each line with every line of its kind before it: `state` lines and header
-//! `tape` lines.
+//! check must consider every earlier line of the same kind: `state` lines and header `tape` lines.
 //!
 //! A timing test is only as good as its margin. Each test parses a file and one with four times the
-//! lines, and allows the larger 10x as long, where linear growth gives about 4x. Against the parser at
-//! `78ebea6`, which still compared each line with every earlier line of its kind, the same files
-//! measured 23.08x for `state` lines and 17.17x for `tape` lines in a `--release` build.
+//! lines, and allows the larger 10x as long, where linear growth gives about 4x.
 //!
 //! The two files of a pair are parsed in turn, small then large, for `ROUNDS` rounds, and each keeps
 //! its fastest parse. Load on the machine that lasts long enough to slow every parse of one file

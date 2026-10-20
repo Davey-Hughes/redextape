@@ -47,12 +47,11 @@ pub enum StepBucket {
     /// state, the return-tag dispatch chain that routes a `Ret` back to its call site, and `Ret`'s
     /// frame-restore gadget.
     ///
-    /// So it is exactly ZERO for a program that makes no calls (measured: all three call-free cases
-    /// in this module's tests), and it is the largest single bucket in a recursive one — ~25% of
-    /// `sum(3)`, about 7.2k steps per return. And it SCALES: `push_frame`/`pop_frame_restore` unroll
-    /// `O(n_loc^2)` states over the `Loc` bank, because each field-copy re-seeks from home. A program
-    /// with more locals in scope across a call pays quadratically more here for the same call. That
-    /// makes this bucket a lever, not a floor.
+    /// So it is exactly ZERO for a program that makes no calls and it is the largest single bucket in
+    /// a recursive one. And it SCALES: `push_frame`/`pop_frame_restore` unroll `O(n_loc^2)` states
+    /// over the `Loc` bank, because each field-copy re-seeks from home. A program with more locals in
+    /// scope across a call pays quadratically more here for the same call. That makes this bucket a
+    /// lever, not a floor.
     MachineScaffold,
 }
 
@@ -77,10 +76,9 @@ impl Attribution {
     /// a degenerate machine that halts before doing anything, so nothing ran and nothing is
     /// attributed — and `capped` says the histogram does not describe a complete execution.
     ///
-    /// The alternative is what this used to do for the `MAX_FRAME_LOC` half, and — until this branch's
-    /// fix — for `MAX_MACHINE_STATES` too: simulate the degenerate machine and report
-    /// `{ histogram: {}, total: 0, capped: false }`, which a consumer reads as a program that RAN and
-    /// cost NOTHING. That is the one wrong answer available here.
+    /// The alternative is to simulate the degenerate machine and report `{ histogram: {}, total: 0,
+    /// capped: false }`, which a consumer reads as a program that RAN and cost NOTHING. That is the
+    /// one wrong answer available here.
     ///
     /// `run_tm` reports the SAME class of program as `TmRun::TooLarge` — a program refused before it
     /// took a step, never `Ran` over tapes that decode to nothing. Attribution mirrors `run_tm`'s
@@ -166,13 +164,12 @@ fn lower_mapped(core: &Core, enc: &dyn Encoding) -> Result<Option<Mapped>, Lower
         }
         Err(e @ LowerError::TooDeep { .. }) => return Err(e),
     };
-    // `lower_tm_mapped` reports EVERY layout refusal through this `Option` — all four conditions, not
-    // just the three that used to be re-derived here by hand (`MAX_SLOTS`/`frame_bank_unrepresentable`/
-    // `mul_count_unrepresentable`). That old three-check mirror left the FOURTH — the state ceiling,
-    // `MAX_MACHINE_STATES` — unmirrored: a program over it passed all three checks, simulated the
-    // degenerate halt-immediately machine, and reported `{ histogram: {}, total: 0, capped: false }` —
-    // `Attribution::unrepresentable`'s documented wrong answer, and worse than what came before this
-    // branch (an OOM) because it now answers cleanly and falsely. Deferring to `lower_tm_mapped`'s own
+    // `lower_tm_mapped` reports EVERY layout refusal through this `Option` — all four conditions
+    // (`MAX_SLOTS`, `frame_bank_unrepresentable`, `mul_count_unrepresentable`, and the state ceiling
+    // `MAX_MACHINE_STATES`). Re-deriving the first three here by hand would leave the FOURTH
+    // unmirrored: a program over the state ceiling would pass all three checks, simulate the degenerate
+    // halt-immediately machine, and report `{ histogram: {}, total: 0, capped: false }` —
+    // `Attribution::unrepresentable`'s documented wrong answer. Deferring to `lower_tm_mapped`'s own
     // `Option` instead of re-deriving a fourth predicate here means this cannot drift from the guard it
     // mirrors — there is nothing left to keep in sync.
     let Some((machine, state_origins)) = lower_tm_mapped(&prog, enc) else {
@@ -184,8 +181,7 @@ fn lower_mapped(core: &Core, enc: &dyn Encoding) -> Result<Option<Mapped>, Lower
     // omission: `Unary::init_work()` is empty so nothing shows, but `Binary::init_work()` lays out a
     // real `#`-delimited bank, and a binary machine run against an EMPTY WORK tape walks off the end
     // of a bank that is not there, lands in a rule-less state, and HALTS. That halt is indistinguishable
-    // from a real one — `capped` stays false — so attribution reported `sum(5)` under `Binary` as a
-    // COMPLETE 329-step execution when the real run is three orders of magnitude longer.
+    // from a real one — `capped` stays false.
     // `REG`/`WORK < TAPES` by construction; `get_mut` rather than indexing keeps this library path total.
     if let Some(reg) = init.get_mut(REG) {
         *reg = enc.init_reg(sm.n_slots());
@@ -228,9 +224,8 @@ fn parse_core(src: &str) -> Result<Core, LowerError> {
 /// Attribute a source program's TM steps to the Core constructs that caused them.
 ///
 /// Mirrors `run_tm`'s lowering sequence exactly — including its `defunc` retry — so the attribution
-/// describes the same machine `run_tm` would actually run, not a differently-lowered one. Likewise
-/// the encoding and caps: every `run_tm` call site in the workspace passes `&Unary::default()` (the only
-/// `Encoding` impl) and `DEFAULT_CAPS`.
+/// describes the same machine `run_tm` would actually run, not a differently-lowered one. The encoding
+/// and caps are `&Unary::default()` and `DEFAULT_CAPS`.
 ///
 /// # Errors
 ///
@@ -247,11 +242,11 @@ pub fn attribute(src: &str) -> Result<Attribution, LowerError> {
 
 /// `attribute` at an explicit encoding rather than the default 64-cell one.
 ///
-/// Exists because every share `attribute` reports is measured at ONE field width, and step cost is
-/// affine in that width (`steps = a + b·W`) with the `b·W` term at 91–97% of the total at width 64. A
-/// bucket's SHARE is therefore only width-independent if every bucket happens to have the same `b/a`
-/// ratio, which nothing guarantees. Re-attributing at the width `run_tm` actually fits is how that gets
-/// checked rather than assumed — see `examples/width_ranking.rs`.
+/// Exists because every share `attribute` reports is measured at ONE field width, and step cost
+/// is affine in that width (`steps = a + b·W`). A bucket's SHARE is therefore only
+/// width-independent if every bucket happens to have the same `b/a` ratio, which nothing
+/// guarantees. Re-attributing at the width `run_tm` actually fits is how that gets checked rather
+/// than assumed — see `examples/step_survey.rs`.
 ///
 /// A program whose values do not fit `enc` halts in the overflow guard, which is a real halt, so the
 /// histogram it produces describes a run that computed nothing. Callers must pass a width the program
@@ -290,22 +285,14 @@ mod tests {
     use crate::desugar::desugar;
     use crate::parser::parse;
 
-    /// Programs small enough to simulate on the TM. TM arithmetic is UNARY — `sum(5)` alone costs
-    /// ~178k steps of a 5,000,000 cap — so nothing here may grow much.
-    ///
-    /// The last one is HIGHER-ORDER, and it is the only case that exercises three things the others
-    /// cannot: `lower_mapped`'s `defunc` retry, a non-empty `synthetic` set, and therefore the
-    /// `ClosureScaffold` bucket — which is precisely the split (what the user wrote vs what
-    /// defunctionalization added) the step survey consumes. It is the two-element `map` demo the TM
-    /// goldens already pin, kept to two elements so it stays cheap.
     /// Attribution must describe THE MACHINE `run_tm` RUNS — under every encoding, not just the one
     /// whose scratch bank happens to be empty.
     ///
     /// `lower_mapped` seeds `init` itself, and its doc says it mirrors `run_tm`'s lowering "step for
-    /// step". It seeded only REG. Under `Unary` that is invisible, because `init_work()` returns
-    /// nothing; under `Binary` it lays out a real `#`-delimited bank, so the machine walked off a bank
-    /// that was not there, hit a rule-less state, and HALTED — reporting `capped: false`, i.e. a
-    /// COMPLETE execution. `sum(5)` attributed to 329 steps against a real 223,886.
+    /// step". Seeding only REG is invisible under `Unary`, because `init_work()` returns nothing;
+    /// under `Binary` a real `#`-delimited bank is laid out, so a machine without it would walk off a
+    /// bank that was not there, hit a rule-less state, and HALT — reporting `capped: false`, i.e. a
+    /// COMPLETE execution.
     ///
     /// This asserts the property rather than the numbers: whatever `simulate_counts` reports for the
     /// machine built the way `tm.rs`'s `attempt` builds it is what attribution must total. A future
@@ -337,6 +324,13 @@ mod tests {
         }
     }
 
+    /// Programs small enough to simulate on the TM. TM arithmetic is UNARY, so nothing here may grow much.
+    ///
+    /// The last one is HIGHER-ORDER, and it is the only case that exercises three things the others
+    /// cannot: `lower_mapped`'s `defunc` retry, a non-empty `synthetic` set, and therefore the
+    /// `ClosureScaffold` bucket — which is precisely the split (what the user wrote vs what
+    /// defunctionalization added) the step survey consumes. It is the two-element `map` demo the TM
+    /// goldens already pin, kept to two elements so it stays cheap.
     const CASES: [&str; 5] = [
         "2 * 3",
         "1 + 2 * 3",
@@ -412,15 +406,14 @@ mod tests {
         }
     }
 
-    /// A GOLDEN: the WHOLE attribution of `2 * 3`, bucket by bucket — the only test here that pins
-    /// *which* node each step is charged to.
+    /// A GOLDEN: the WHOLE attribution of `2 * 3`, bucket by bucket, which pins *which* node each step
+    /// is charged to.
     ///
     /// Exhaustiveness cannot do this and is not meant to. A step charged to the wrong bucket is still
     /// charged exactly once, so any constant shift inside the composition (`origins.get(idx + 1)`, a
     /// rotated `state_origins`) preserves the sum perfectly. Nor does the rotation test catch it: a
     /// shift introduced inside the composition COMPOSES with the rotation instead of cancelling it, so
-    /// the histogram still differs and `assert_ne!` still holds. Both mutants were applied and both
-    /// left all the other tests green; this assertion is what fails.
+    /// the histogram still differs and `assert_ne!` still holds.
     ///
     /// `2 * 3` desugars to a `BinOp` over two `Nat`s, so the three buckets are the two literals and
     /// the multiply — and the multiply's bucket also carries the trailing `Halt`, which
@@ -463,15 +456,14 @@ mod tests {
     /// no `defunc` — so nothing above constrained which construct a step lands on in any program with
     /// a function in it, which is every interesting program in the corpus the survey reports on.
     ///
-    /// Two mutants motivate it, both of which left the ENTIRE rest of the suite green and both of
-    /// which move the survey's headline pass ranking:
+    /// Two mutants it catches:
     ///
     ///   1. `lower_asm::lower_function` re-billing the prologue (`Mov` per param) and the `Ret` from
     ///      the enclosing `LetRec` to the body node — e.g. by lowering the `Lambda` through
-    ///      `lower_into`. That is exactly the attribution `defunc.rs` cites as its own reason to
-    ///      exist ("`lower_asm` bills a function's prologue and its `Ret` to the `LetRec` node, and
-    ///      those run on EVERY call"). Here it empties the `LetRec` bucket; corpus-wide it moved
-    ///      `LetRec` from 128,040 steps to 16.
+    ///      `lower_into`. That is exactly the attribution `defunc.rs`'s `Origin` doc cites as the reason
+    ///      a kept function carries its source id ("`lower_asm` bills a function's prologue (one `Mov`
+    ///      per parameter) and its `Ret` to the binder node, and those run on EVERY call"). Here it
+    ///      empties the `LetRec` bucket.
     ///   2. Anything that drops the `at` source-id carry in `defunc`'s `box_get1`/`box_set2` — see
     ///      `a_boxed_read_and_write_bill_the_source_nodes_they_replace`, which pins that half.
     ///
@@ -525,21 +517,19 @@ mod tests {
     /// `$box_set($boxh0, v)` — and it builds those two `Apply`s with the id of the `Var`/`Assign`
     /// they replace rather than a fresh one, so a read through a box still bills the read the user
     /// wrote. Dropping that carry (minting fresh ids, which is what the surrounding builders do)
-    /// compiles, computes the same value, and leaves every other test green: the steps merely move
-    /// into `ClosureScaffold`. Corpus-wide that silently relabels 49,630 steps — 1.5% of the survey —
-    /// from "a mutable the user read/wrote" to "defunctionalization overhead", which are the two
-    /// buckets with the most opposite optimizer implications in the whole report.
+    /// compiles and computes the same value: the steps merely move into `ClosureScaffold`.
+    /// Corpus-wide that silently relabels steps from "a mutable the user read/wrote" to
+    /// "defunctionalization overhead", which are the two buckets with the most opposite optimizer
+    /// implications in the whole report.
     ///
     /// Both bucket ids are read off the SOURCE Core (before `defunc`), which is the property under
     /// test: they must be findable there at all.
     ///
-    /// The WRITE bucket and the total were re-blessed (+106 steps, 4,954 -> 5,060) when
-    /// `box_overwrite_field` became a COUNTED `width`-long chain instead of a content-driven loop. That
-    /// is a deliberate algorithmic change, not a guard: a box write now always traverses the full
-    /// window, so at the pinned width 64 these numbers grew. The overflow guards themselves add rules
-    /// and no steps, which is what the untouched `tm_step_count_goldens` continue to check. At the
-    /// fitted widths `run_tm` actually uses for a boxing program (8, not 64) the counted chain costs
-    /// about what the content-driven loop did, so the regression is confined to pinned-64 measurement.
+    /// The pinned numbers are at width 64, where a box write always traverses the full window because
+    /// `box_overwrite_field` is a COUNTED `width`-long chain rather than a content-driven loop. The
+    /// overflow guards add rules and no steps, which `tm_step_count_goldens` checks. At the fitted widths
+    /// `run_tm` actually uses for a boxing program (8, not 64) the counted chain costs about what a
+    /// content-driven loop would, so the full-window traversal cost is confined to pinned-64 measurement.
     #[test]
     fn a_boxed_read_and_write_bill_the_source_nodes_they_replace() {
         const SRC: &str = "let mut n = 1; fn apply0(g) { g(0) } let f = |x| x + n; n = 10; apply0(f)";
@@ -568,10 +558,9 @@ mod tests {
     }
 
     /// `lower_tm_mapped` has FOUR layout refusals, and all four hand back a degenerate machine that
-    /// halts before doing anything. Before `lower_mapped` deferred to `lower_tm_mapped`'s own `Option`,
-    /// mirroring only the `MAX_SLOTS` one made this program — which really does exceed `MAX_FRAME_LOC`,
-    /// 3,315 states of which 0 were mapped — attribute as `{ histogram: {}, total: 0, capped: false }`:
-    /// a program that never ran, reported as one that ran and cost nothing.
+    /// halts before doing anything. This program exceeds `MAX_FRAME_LOC`; a `lower_mapped` that
+    /// mirrored only `MAX_SLOTS` would attribute it as `{ histogram: {}, total: 0, capped: false }`: a
+    /// program that never ran, reported as one that ran and cost nothing.
     #[test]
     fn a_program_too_wide_for_the_frame_bank_reports_that_nothing_ran() {
         // > MAX_FRAME_LOC (1,000) locals in a function that contains a call.
@@ -600,28 +589,26 @@ mod tests {
         assert!(a.capped, "a program that never ran must not be reported as one that ran for free");
     }
 
-    /// THE FOURTH LAYOUT REFUSAL, and the one Finding 1 exists to fix: `MAX_MACHINE_STATES`, the state
-    /// ceiling. It is the one `lower_mapped` used to be unable to see at all — the old code re-derived
-    /// only `MAX_SLOTS`/`frame_bank_unrepresentable`/`mul_count_unrepresentable` by hand, so a program
-    /// over the state ceiling passed all three, simulated the degenerate halt-immediately machine, and
-    /// reported `{ histogram: {}, total: 0, capped: false }`: `Attribution::unrepresentable`'s
-    /// documented wrong answer, and worse than what this branch's `MAX_MACHINE_STATES` guard replaced —
-    /// before it, the same program exhausted memory instead of answering cleanly and falsely.
+    /// The fourth layout refusal: `MAX_MACHINE_STATES`, the state ceiling. It is the one
+    /// `lower_mapped` would be unable to see if it re-derived only
+    /// `MAX_SLOTS`/`frame_bank_unrepresentable`/`mul_count_unrepresentable` by hand: a program over
+    /// the state ceiling would pass all three, simulate the degenerate halt-immediately machine, and
+    /// report `{ histogram: {}, total: 0, capped: false }`, `Attribution::unrepresentable`'s
+    /// documented wrong answer.
     ///
     /// The cheap `code.len()` pre-check in `lower_tm_all` (`n >= MAX_MACHINE_STATES`) is UNREACHABLE
     /// from source here, but not because `MAX_LOWER_DEPTH` bounds `code.len()` in general — it does
     /// not. `lower_asm::MAX_LOWER_DEPTH` (580) bounds Core *depth*; it holds `code.len()` down only for
-    /// DEPTH-LIMITED shapes, where 3,472 was the largest measured across three such generators. THIS
-    /// program is not depth-limited — it is BALANCED, depth 11 for 2,048 leaves — so `MAX_LOWER_DEPTH`
-    /// never fires, and it lowers to 4,096 instructions, already past that 3,472 figure. What actually
-    /// keeps the pre-check unreached is `n_slots`: for this shape `n_slots` tracks `code.len()`, so
-    /// `MAX_SLOTS` (100,000) refuses the layout an order of magnitude before source could push
-    /// `code.len()` anywhere near the 1,000,000-state pre-check. So this trips the ceiling by GADGET
-    /// EXPANSION instead — a balanced arithmetic tree of 2,048 leaves, the shape `build.rs`'s
-    /// `MAX_MACHINE_STATES` doc measured building states in the hundreds of thousands to millions.
-    /// This allocates a ceiling's worth of states (~727 MB per `MAX_MACHINE_STATES`'s doc), so it is
-    /// slow tier like the repo's other large-machine tests — run explicitly via
-    /// `scripts/check-slow.sh`, not in the default suite.
+    /// DEPTH-LIMITED shapes. THIS program is not depth-limited — it is BALANCED, depth 11 for 2,048
+    /// leaves — so `MAX_LOWER_DEPTH` never fires. What actually keeps the pre-check unreached is
+    /// `n_slots`: for this shape `n_slots` tracks `code.len()`, so `MAX_SLOTS` (100,000) refuses the
+    /// layout an order of magnitude before source could push `code.len()` anywhere near the
+    /// 1,000,000-state pre-check. So this trips the ceiling by GADGET EXPANSION instead — a
+    /// balanced arithmetic tree of 2,048 leaves, the shape the count-bounds spec (§3.2,
+    /// `docs/superpowers/specs/2026-08-11-count-bounds-design.md`) measured building states in the
+    /// hundreds of thousands to millions. This allocates a ceiling's worth of states (~727 MB per
+    /// `MAX_MACHINE_STATES`'s doc), so it is slow tier like the repo's other large-machine tests —
+    /// run explicitly via `scripts/check-slow.sh`, not in the default suite.
     #[test]
     #[ignore = "slow tier: builds a ceiling's worth of states before refusing; run via scripts/check-slow.sh"]
     fn a_program_past_the_state_ceiling_attributes_as_unrepresentable() {
@@ -744,10 +731,10 @@ mod tests {
     ///
     /// Exhaustiveness cannot see this, which is why it is pinned separately. Simulate the very same
     /// machine WITHOUT `run_tm`'s seeded REG bank — the one part of the pipeline no `*_mapped`
-    /// function hands back, and so the easiest to drop — and three of these four cases halt in ZERO
-    /// steps: `0 == 0` satisfies the invariant while every number in the histogram describes a
-    /// machine that computed nothing. So pin the observable instead: the machine these counts came
-    /// from decodes to the program's value.
+    /// function hands back, and so the easiest to drop — and a case can halt in ZERO steps: `0 == 0`
+    /// satisfies the invariant while every number in the histogram describes a machine that computed
+    /// nothing. So pin the observable instead: the machine these counts came from decodes to the
+    /// program's value.
     #[test]
     fn the_attributed_machine_computes_the_program() {
         for src in CASES {
@@ -793,18 +780,16 @@ mod tests {
     /// and known-callee devirtualization is precisely the pass that removes it. So its steps must land
     /// in `ClosureScaffold` — while the function's own body still bills to the user's constructs.
     ///
-    /// WHY THIS ASSERTS BY IDENTITY, not by summing each kind of bucket: the summed form (`closure =
+    /// Why this asserts by identity, not by summing each kind of bucket: the summed form (`closure =
     /// sum of every ClosureScaffold bucket`, `user = sum of every Node bucket`, each asserted `> 0`)
-    /// was measured UNABLE TO FAIL under the exact mutation this test exists to catch — making 5c's
-    /// forwarding arm reuse the source function's own `lambda_id` instead of minting fresh ids from
-    /// `SynthGen`. Under that mutation the forwarding call's 13,082 steps relocate WHOLESALE from
-    /// `ClosureScaffold(25)` to `Node(16)` — the wrong-bucket bug this whole file exists to catch —
-    /// yet `closure` (24,052) and `user` (81,733) both stay positive, so both `assert!(... > 0)`s keep
-    /// passing. The mutant was caught only incidentally, by `defunc::no_output_node_id_is_duplicated`
-    /// in a different file, and for a different symptom (a duplicate output id, not a relocated cost).
-    /// So this test locates the forwarding `Apply` structurally, confirms `defunc` itself declares it
-    /// synthetic, and then asserts the histogram bills THAT SPECIFIC id to `ClosureScaffold` — a claim
-    /// the relocation actually breaks.
+    /// cannot fail under the exact mutation this test exists to catch — making the forwarding arm
+    /// reuse the source function's own `lambda_id` instead of minting fresh ids from `SynthGen`. Under
+    /// that mutation the forwarding call's steps relocate WHOLESALE from a `ClosureScaffold` bucket to a
+    /// `Node` bucket — the wrong-bucket bug this whole file exists to catch — yet `closure` and `user`
+    /// both stay positive, so both `assert!(... > 0)`s keep passing. So this test locates the
+    /// forwarding `Apply` structurally, confirms `defunc` itself declares it synthetic, and then
+    /// asserts the histogram bills THAT SPECIFIC id to `ClosureScaffold` — a claim the relocation
+    /// actually breaks.
     #[test]
     fn a_both_functions_forwarding_arm_bills_to_closure_scaffold() {
         const SRC: &str = "fn sub(a, b) { a - b } fn ap2(g, a, b) { g(a, b) } sub(9, 4) + ap2(sub, 10, 3)";
@@ -835,7 +820,7 @@ mod tests {
         });
 
         // THE HEADLINE ASSERTION: the forwarder's own id must bill `ClosureScaffold`, specifically —
-        // not merely "some ClosureScaffold bucket is nonzero" (the summed form above's replacement).
+        // not merely "some ClosureScaffold bucket is nonzero".
         // This is checked BEFORE the synthetic-membership sanity check below on purpose: under the
         // mutation this test exists to catch, the relocated cost fails this assertion (`None` where a
         // positive count belongs) — the synthetic check would ALSO fail for the same underlying

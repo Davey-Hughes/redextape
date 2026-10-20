@@ -1,13 +1,13 @@
 //! Regenerates the checked-in `.tm` fixtures `tests/tm_header.rs` pins against.
 //!
-//! This used to be `#[ignore]`d test `regenerate_fixture` inside `tests/tm_header.rs` itself. That was
-//! miscategorised: `scripts/check-slow.sh` runs `cargo test --release --workspace -- --ignored`, which
-//! selects *every* ignored test regardless of its reason string, so the "slow tier" job — whose whole
-//! purpose is verification — silently rewrote a checked-in source file on every run. Under `--all` it
-//! was worse: the regenerator and the drift check (`the_fixture_is_what_the_compiler_emits_today`)
-//! shared a binary, so if the regenerator ran first the drift check compared the fixture against a file
-//! it had just written and passed unconditionally. A function that asserts nothing and writes to the
-//! source tree is not a test, so it lives here instead, run only when a developer deliberately asks:
+//! This is not an `#[ignore]`d test in `tests/tm_header.rs`: `scripts/check-slow.sh` runs
+//! `cargo test --release --workspace -- --ignored`, which selects *every* ignored test regardless of its
+//! reason string, so the "slow tier" job — whose whole purpose is verification — would silently rewrite
+//! a checked-in source file on every run. Under `--all` it would be worse: the regenerator and the drift
+//! check (`the_fixture_is_what_the_compiler_emits`) would share a binary, so if the regenerator ran
+//! first the drift check would compare the fixture against a file it had just written and pass
+//! unconditionally. A function that asserts nothing and writes to the source tree is not a test, so it
+//! lives here instead, run only when a developer deliberately asks:
 //!
 //!     cargo run --example regen_fixtures -p redextape-core
 //!

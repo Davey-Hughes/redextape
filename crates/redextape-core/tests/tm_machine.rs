@@ -1,6 +1,6 @@
-//! Part 2a substrate: a genuine multi-tape TM can be authored (in text or by hand), simulated to a
-//! result, and round-tripped through its text form. Part 2b compiles register-assembly down to such
-//! machines and checks them against the reference (the three-way oracle).
+//! A genuine multi-tape TM can be authored (in text or by hand), simulated to a result, and round-tripped
+//! through its text form. Register-assembly is compiled down to such machines and checked against the
+//! reference (the three-way oracle).
 
 // Test target: a fixture that fails to build IS the failure this file reports, so panicking is
 // deliberate here. The `allow-*-in-tests` keys in `clippy.toml` only reach `#[test]` functions and

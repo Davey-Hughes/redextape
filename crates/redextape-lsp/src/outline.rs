@@ -5,10 +5,9 @@
 //! definition introduces — and containment over extents is the whole rule: a definition is a child
 //! of the innermost extent that contains its name.
 //!
-//! **`.tm` AND `.asm` CARRY NO EXTENT, SO THEY ARE UNCHANGED BY EVERY LINE HERE.** Nothing is ever
-//! pushed on the stack for them, the stack stays empty, every definition is a root, and the
-//! outline is exactly the flat list it was. That is not a fallback path — it is the same pass
-//! reading a form that records no construct spans.
+//! **`.tm` AND `.asm` CARRY NO EXTENT.** Nothing is ever pushed on the stack for them, the stack
+//! stays empty, every definition is a root, and the outline is a flat list. That is not a fallback
+//! path — it is the same pass reading a form that records no construct spans.
 
 use gen_lsp_types::SymbolKind;
 use redextape_core::Span;
@@ -20,10 +19,9 @@ use crate::language::outline_kind;
 ///
 /// **`DocumentSymbol::range` IS NOT DECORATION, IT IS WHAT A CLIENT TESTS THE CURSOR AGAINST.** The
 /// protocol defines it as the region used to decide whether the caret is inside the symbol, and
-/// `selectionRange` as the part to reveal — so setting both to the name span made breadcrumbs,
+/// `selectionRange` as the part to reveal — so setting both to the name span would make breadcrumbs,
 /// sticky scroll and nvim-navic report no symbol for every position except the few columns of the
-/// name itself. The name span still goes to `selectionRange`, which is what it is for. Containment
-/// holds either way, which is the only requirement the earlier doc comment checked itself against.
+/// name itself. The name span still goes to `selectionRange`, which is what it is for.
 ///
 /// A line rather than a whole `state` block: `.tm` and `.asm` record no construct extent, so a line
 /// is the smallest span that makes the cursor test behave, and is exact for `.asm`, where a label
@@ -183,15 +181,15 @@ mod tests {
             .join(" ")
     }
 
-    /// Probed on 6e0ad6e: `f` extent (0,28) contains `x`'s name at (16,17) and not `y`'s at
-    /// (33,34), and the parameter `a` is filtered by `outline_kind` inside the pass's own loop,
-    /// before that iteration's stack work runs.
+    /// `f` extent (0,28) contains `x`'s name at (16,17) and not `y`'s at (33,34), and the parameter
+    /// `a` is filtered by `outline_kind` inside the pass's own loop, before that iteration's stack
+    /// work runs.
     ///
     /// Span-anchored per the design's testing section: `shape_with_spans` pins each node to the
     /// exact `(name, selection_range)` this pass produced, so the assertion cannot pass against a
     /// node sitting in the right place in the tree but carrying the wrong span — `shape` alone
-    /// checks names and nesting, nothing about the spans on the nodes that carry them. Offsets
-    /// measured on a real run of this source, not computed by hand: `f@3-4[x@16-17] y@33-34`.
+    /// checks names and nesting, nothing about the spans on the nodes that carry them. Offsets:
+    /// `f@3-4[x@16-17] y@33-34`.
     #[test]
     fn a_let_inside_a_fn_body_becomes_that_fn_s_child() {
         let src = "fn f(a) {\n  let x = 1;\n  x\n}\nlet y = 2;\ny";
@@ -204,7 +202,7 @@ mod tests {
     /// `Program::block::stmts` would find it. The binder reaches it through its worklist and the
     /// extent puts it in the right place.
     ///
-    /// Span-anchored, as above. Offsets measured on a real run: `g@4-5[y@14-15]`.
+    /// Span-anchored, as above. Offsets: `g@4-5[y@14-15]`.
     #[test]
     fn a_let_inside_a_block_expression_nests_under_the_binding_that_holds_it() {
         let src = "let g = { let y = 1; y };";
@@ -212,12 +210,12 @@ mod tests {
         assert_eq!(shape_with_spans(&outline(&nav, src)), "g@4-5[y@14-15]");
     }
 
-    /// Probed on 6e0ad6e: `a`'s extent ends at 10 and `b`'s name starts at 15 — a closed extent
-    /// that this pins is actually popped, not left open forever. `end == name.start` cannot occur
-    /// on this grammar: every name is preceded by its own `let `/`fn ` keyword, so a name always
-    /// starts at least three bytes past its own statement's start, which is at or after the
-    /// previous extent's end. The pop's `<=` is written for the general containment rule, and
-    /// coincides with plain `<` on every input this grammar can produce.
+    /// `a`'s extent ends at 10 and `b`'s name starts at 15 — a closed extent that this pins is
+    /// actually popped, not left open forever. `end == name.start` cannot occur on this grammar:
+    /// every name is preceded by its own `let `/`fn ` keyword, so a name always starts at least
+    /// three bytes past its own statement's start, which is at or after the previous extent's end.
+    /// The pop's `<=` is written for the general containment rule, and coincides with plain `<` on
+    /// every input this grammar can produce.
     #[test]
     fn consecutive_lets_are_siblings() {
         let src = "let a = 1; let b = 2;";
@@ -237,14 +235,13 @@ mod tests {
     /// Not self-parenting — the extent branch only ever PUSHES the current node, so `f` can never
     /// be attached under itself in either ordering. What this pins is a CLOSED construct's
     /// trailing sibling: `f`'s extent closes before `z` starts, so by the time `z` is reached both
-    /// `f` and its child `x` must already be off the stack. Push `z`'s own extent before draining
-    /// — the ordering this test is named for — and the drain loop's new top is `z` itself, never
-    /// closed, so it stops immediately and leaves `f`[x] buried underneath; the final flush then
-    /// attaches `z` under `x` and `x` under `f`, giving one root `"f[x[z]]"` instead of the two
-    /// siblings `"f[x] z"`.
+    /// `f` and its child `x` must already be off the stack. Push `z`'s own extent before draining,
+    /// and the drain loop's new top is `z` itself, never closed, so it stops immediately and leaves
+    /// `f`[x] buried underneath; the final flush then attaches `z` under `x` and `x` under `f`,
+    /// giving one root `"f[x[z]]"` instead of the two siblings `"f[x] z"`.
     ///
-    /// Span-anchored, as `a_let_inside_a_fn_body_becomes_that_fn_s_child` is. Offsets measured on
-    /// a real run: `f@3-4[x@14-15] z@29-30`.
+    /// Span-anchored, as `a_let_inside_a_fn_body_becomes_that_fn_s_child` is. Offsets:
+    /// `f@3-4[x@14-15] z@29-30`.
     #[test]
     fn a_closed_construct_does_not_bury_its_trailing_sibling() {
         let src = "fn f(a) { let x = 1; x } let z = 2;";
@@ -254,8 +251,7 @@ mod tests {
         assert_eq!(shape_with_spans(&tree), "f@3-4[x@14-15] z@29-30");
     }
 
-    /// A broken file still outlines. Probed on 6e0ad6e: recovery gives `f` the extent (0,11),
-    /// which runs to end of input.
+    /// A broken file still outlines. Recovery gives `f` the extent (0,11), which runs to end of input.
     #[test]
     fn a_file_that_did_not_parse_completely_still_outlines() {
         let src = "fn f(a) { a";
@@ -374,16 +370,14 @@ mod tests {
     /// because `parent` here carries the parent's `(name, selection_range)`, not the bare name
     /// `flatten`'s `container_name` gives the protocol.
     ///
-    /// A bare name is not enough on its own: measured on
-    /// `"fn f(p) { fn f(q) { let z = 1; z } f(0) } 0"`, with `attach` sabotaged to prefer the
-    /// OUTERMOST open extent instead of the innermost, `z` (correctly the inner `f`'s child) is
-    /// misattached to the outer `f` instead — and because both parents are named `f`, the
-    /// name-only form of this check (comparing `container.map(str::to_string)` against
-    /// `expected_parent`'s name alone, as this function did before this paragraph) produced an
-    /// identical sorted multiset for the correct and the misplaced tree, so it passed against the
-    /// misplaced one. Carrying the parent's `selection_range` alongside its name — via
-    /// `flatten_with_parent_span` rather than `flatten` — tells the two `f`s apart and reddens on
-    /// that same sabotage.
+    /// A bare name is not enough on its own: on `"fn f(p) { fn f(q) { let z = 1; z } f(0) } 0"`,
+    /// if `attach` preferred the OUTERMOST open extent instead of the innermost, `z` (correctly the
+    /// inner `f`'s child) would be misattached to the outer `f` — and because both parents are
+    /// named `f`, the name-only form of this check (comparing `container.map(str::to_string)`
+    /// against `expected_parent`'s name alone) would produce an identical sorted multiset for the
+    /// correct and the misplaced tree, so it would pass against the misplaced one. Carrying the
+    /// parent's `selection_range` alongside its name — via `flatten_with_parent_span` rather than
+    /// `flatten` — tells the two `f`s apart.
     ///
     /// Sorted vectors rather than counts: a pass that duplicated one node and dropped another
     /// would have the right COUNT and the wrong CONTENTS, and a length check alone would not
@@ -449,7 +443,7 @@ mod tests {
         assert_eq!(got, listed, "{ctx}");
     }
 
-    /// The exact scenario `assert_definitions_match_tree`'s doc comment measures: two `fn`s named
+    /// The exact scenario `assert_definitions_match_tree`'s doc comment describes: two `fn`s named
     /// `f`, one nested in the other, with a `let` inside the inner one. The correct tree nests `z`
     /// under the INNER `f`, and this test's job is only to pin that outcome for the shipped
     /// algorithm — the counterfactual (a name-only check passing against a MISPLACED tree here) is
@@ -515,18 +509,17 @@ mod tests {
     /// Every definition the outline lists reaches the tree exactly once, and at the right place.
     ///
     /// Two halves, because they cover two different POPULATIONS under the same check: the real
-    /// fixtures this pass exists for, and a generated source deep enough to nest, which the
-    /// fixtures are not.
+    /// fixtures this pass exists for, and a generated source that nests at a breadth the fixtures
+    /// do not.
     ///
     /// **THE CORPUS HALF** runs over the `.rxt` files checked into the tree, which is the
-    /// population this pass exists for. Measured on this branch, all but one of them are FLAT —
-    /// ten contribute no outline-eligible definition at all and eleven are depth-1, so a flat file
-    /// contributes at most two top-level definitions and two are `.tm` source in a `.rxt` file. The exception is `run_nested_scopes.in/p.rxt` — a CLI
-    /// end-to-end case for a program whose scopes actually nest, not a fixture written for this
-    /// test — which reaches depth 3 and gives the corpus its first real parent-child edges. One
-    /// fixture is not scale: it alone cannot exercise the defect the doc below names — a node LOST
-    /// by being popped and attached to a parent that was itself already popped — at anything like
-    /// the breadth the generated half below produces, no matter how many flat files sit beside it.
+    /// population this pass exists for. Its guard rests on one of them by name:
+    /// `run_nested_scopes.in/p.rxt` — a CLI end-to-end case for a program whose scopes actually
+    /// nest, not a fixture written for this test — whose node count and depth the assertions after
+    /// the loop pin. One fixture is not scale: it alone cannot exercise the defect this test
+    /// catches — a node LOST by being popped and attached to a parent that was itself already
+    /// popped — at anything like the breadth the generated half below produces, no matter how many
+    /// flat files sit beside it.
     ///
     /// **THE GENERATED HALF** supplies nesting at a scale no single checked-in fixture matches:
     /// `nested_fn_source` builds several siblings per level, several levels deep, with one chain
@@ -540,10 +533,11 @@ mod tests {
     /// `(name, selection_range, parent)` triples.
     #[test]
     fn every_listed_definition_appears_in_the_tree_exactly_once() {
-        // Measured on this branch: 22 `.rxt` files, all under `crates/redextape-cli/tests/cmd`,
-        // and several are deliberately broken fixtures — which is the population this pass exists
-        // for.
+        // The walk starts at the repo root, and several of the `.rxt` files it reaches are
+        // deliberately broken fixtures — which is the population this pass exists for.
         let root = std::path::Path::new(concat!(env!("CARGO_MANIFEST_DIR"), "/../.."));
+        // The one corpus file whose node count and depth the assertions after the loop pin.
+        let nested_fixture = root.join("crates/redextape-cli/tests/cmd/run_nested_scopes.in/p.rxt");
         let mut files = Vec::new();
         let mut dirs = vec![root.to_path_buf()];
         while let Some(dir) = dirs.pop() {
@@ -561,47 +555,36 @@ mod tests {
             }
         }
         // This only proves the walk found the tree's fixtures — it says nothing about what any of
-        // them contain. Measured on this branch: 10 of the 22 fixtures parse but contribute zero
-        // outline-eligible definitions (and a fixture where `nav_rxt` returns `None` would
-        // `continue` past it below the same way), so a corpus that read every file and built
-        // nothing from half of them would still satisfy this alone.
+        // them contain. Some fixtures parse but contribute zero outline-eligible definitions (and
+        // a fixture where `nav_rxt` returns `None` would `continue` past it below the same way),
+        // so a corpus that read every file and built nothing from some of them would still
+        // satisfy this alone.
         assert!(files.len() >= 20, "expected the tree's .rxt fixtures, found {}", files.len());
 
-        let mut nodes_built = 0usize;
-        let mut file_max_depth = 0usize;
+        let mut nested_tree = None;
         for path in files {
             let src = std::fs::read_to_string(&path).expect("a readable fixture");
             let Some(nav) = nav_rxt(&src) else { continue };
             assert_definitions_match_tree(&nav, &src, &path.display().to_string());
-            let tree = outline(&nav, &src);
-            nodes_built += flatten(&tree).len();
-            file_max_depth = file_max_depth.max(max_depth(&tree));
+            if path == nested_fixture {
+                nested_tree = Some(outline(&nav, &src));
+            }
         }
         // **THIS IS THE GUARD THAT MAKES THE CORPUS HALF A TEST RATHER THAN A LOOP OVER
         // NOTHING** — the file count above cannot tell a corpus that built real trees apart from
-        // one that read every file and compared two empty lists 22 times. Measured on this
-        // branch: 20 outline nodes built across the corpus, 8 of them from the one fixture that
-        // nests (`run_nested_scopes.in/p.rxt`); the floor is raised from the previous 10 to sit
-        // above the 12 the corpus built before that fixture existed, so losing that fixture fails
-        // this assertion where the old floor of 10 would not have. It is not exclusive to it —
-        // removing six of the eleven flat contributing fixtures also drops below 15 — but it is
-        // slack measured against the corpus rather than an arbitrary round number. The depth floor
-        // below is the one that is specific to nesting.
-        assert!(nodes_built >= 15, "expected the corpus to build outline nodes, got {nodes_built}");
-        // A second, independent floor on the same loop: node COUNT alone cannot tell a corpus that
-        // nests from one that is wide but flat — ten more single-`let` fixtures would raise
-        // `nodes_built` without adding a single parent-child edge. Measured on this branch: the
-        // deepest corpus file is `run_nested_scopes.in/p.rxt` at depth 3; the floor sits under that
-        // so an equally-nested but shallower replacement fixture would not fail this alone.
-        assert!(
-            file_max_depth >= 2,
-            "expected the corpus itself to nest beyond depth 1, got max depth {file_max_depth}"
-        );
+        // one that read every file and compared two empty lists each time. It is pinned to one
+        // named fixture rather than to a total over the corpus, which other files can raise: losing
+        // `run_nested_scopes.in/p.rxt`, or `nav_rxt` no longer parsing it, fails here.
+        let shown = nested_fixture.display();
+        let nested_tree = nested_tree.unwrap_or_else(|| panic!("expected the walk to reach and parse {shown}"));
+        assert_eq!(flatten(&nested_tree).len(), 8, "expected {shown} to build its outline nodes");
+        // A second, independent check on the same tree: node COUNT alone cannot tell a tree that
+        // nests from one that holds the same nodes flat, so its depth is pinned too.
+        assert_eq!(max_depth(&nested_tree), 3, "expected {shown} to nest");
 
         // The generated half: three levels of `fn`, three siblings per level — nesting at a scale
-        // and breadth the corpus, even with one nesting fixture in it, does not supply on its own.
-        // Measured on this branch: 30 definitions over 591 bytes, tree depth 4 (three nested `fn`s
-        // and the `let` run at the bottom of the deep chain).
+        // and breadth the corpus does not supply on its own. 30 definitions, tree depth 4 (three
+        // nested `fn`s and the `let` run at the bottom of the deep chain).
         let src = nested_fn_source(3, 3);
         let nav = nav_rxt(&src).expect("within the token cap");
         let depth = max_depth(&outline(&nav, &src));

@@ -74,8 +74,8 @@ state q0: accept
 }
 
 /// The parser buffers own-line comments in `pending` and drains ALL of them onto the next anchor
-/// that parses. Every other fixture in this file has at most one own-line comment per anchor, so
-/// the drain-more-than-one path — and the source-order guarantee across the drain — was untested.
+/// that parses. This fixture pins that drain, and source order across it, on a minimal document;
+/// `ALL_ANCHORS` exercises it on `TmAnchor::Tapes` too.
 #[test]
 fn an_anchor_can_carry_two_own_line_comments_in_source_order() {
     let src = "\
@@ -104,8 +104,8 @@ use redextape_core::Severity;
 
 /// A second `tapes` line is an error, on the same rule `HeaderParts::directive` already states for
 /// the four header directives (its "duplicate `encoding` directive" and siblings): the file states a
-/// thing once. Before this diagnostic existed, a second `tapes` line silently overwrote the first —
-/// `tapes 1` then `tapes 5` yielded a 5-tape machine with no diagnostic at all.
+/// thing once. Without this diagnostic, a second `tapes` line would silently overwrite the first —
+/// `tapes 1` then `tapes 5` would yield a 5-tape machine with no diagnostic at all.
 #[test]
 fn a_duplicate_tapes_line_is_an_error() {
     let src = "tapes 1\ntapes 5\nstart q0\n\nstate q0: accept\n";
@@ -116,13 +116,13 @@ fn a_duplicate_tapes_line_is_an_error() {
     assert!(dup.message.contains("duplicate"), "{:?}", d.diagnostics);
     // The SECOND `tapes` line's span, not the first: that is what an editor underlines, and the only
     // observable trace of the ignore-first-wins choice (the diagnostic fires only once `tapes.is_some()`
-    // — see `parse_tm_full`'s `tapes` branch — which is true starting on the second line). `"tapes 1\n"`
+    // — see `parse_tm_nav`'s `tapes` branch — which is true starting on the second line). `"tapes 1\n"`
     // is 8 bytes, so the second line (`"tapes 5"`, 7 bytes) runs from byte 8 to byte 15.
     assert_eq!(dup.span, Span::new(8, 15), "the duplicate diagnostic must point at the SECOND `tapes` line");
 }
 
-/// Same rule, same reason, for `start`: a second `start` line used to silently move where the
-/// machine begins (`start q0` then `start q1` started at `q1`), with no diagnostic.
+/// Same rule, same reason, for `start`: a second `start` line would silently move where the
+/// machine begins (`start q0` then `start q1` would start at `q1`), with no diagnostic.
 #[test]
 fn a_duplicate_start_line_is_an_error() {
     let src = "tapes 1\nstart q0\nstart q1\n\nstate q0: accept\nstate q1: accept\n";
@@ -137,8 +137,8 @@ fn a_duplicate_start_line_is_an_error() {
     assert_eq!(dup.span, Span::new(17, 25), "the duplicate diagnostic must point at the SECOND `start` line");
 }
 
-/// The new checks are additive, not stricter than intended: exactly one `tapes` line and one `start`
-/// line — the shape every existing `.tm` file has — still parses with no diagnostics at all.
+/// The duplicate checks reject only a duplicate: exactly one `tapes` line and one `start` line — the
+/// shape every checked-in `.tm` file has — parses with no diagnostics at all.
 #[test]
 fn exactly_one_tapes_and_one_start_line_still_parses_clean() {
     let src = "tapes 1\nstart q0\n\nstate q0: accept\n";
@@ -147,17 +147,16 @@ fn exactly_one_tapes_and_one_start_line_still_parses_clean() {
     assert!(d.machine.is_some());
 }
 
-/// The exact counterexample the finding was verified against: two `tapes 1 ;` lines, each with an
-/// EMPTY trailing comment body, used to attach two trailing comments to one anchor (`TmAnchor::Tapes`)
-/// — which `CommentWriter::trailing` joins with `" ; "`, a join that is not a fixed point when a body
-/// is empty (`print_once` and `print_twice` differed: `"tapes 1  ;  ; "` then `"tapes 1  ; ;"` — and
-/// `print_twice` IS the stable value, reached after one re-parse; there is no third value still to
-/// come). The shape parsed with ZERO diagnostics before this fix. It must not parse at all now.
+/// The exact counterexample: two `tapes 1 ;` lines, each with an EMPTY trailing comment body, would
+/// attach two trailing comments to one anchor (`TmAnchor::Tapes`) — which `CommentWriter::trailing` joins
+/// with `" ; "`, a join that is not a fixed point when a body is empty (`print_once` would be
+/// `"tapes 1  ;  ; "` and `print_twice` `"tapes 1  ; ;"` — and `print_twice` would be the stable value,
+/// reached after one re-parse; there is no third value still to come). It must not parse at all.
 #[test]
-fn the_verified_counterexample_is_now_rejected() {
+fn two_tapes_lines_with_empty_trailing_comments_are_rejected() {
     let src = "tapes 1 ;\ntapes 1 ;\nstart q0\n\nstate q0: accept\n";
     let d = parse_tm_full(src);
-    assert!(d.machine.is_none(), "the counterexample must no longer parse to a machine");
+    assert!(d.machine.is_none(), "the counterexample must not parse to a machine");
     assert!(
         d.diagnostics.iter().any(|dg| dg.severity == Severity::Error && dg.message.contains("duplicate")),
         "expected a duplicate-line error, got {:?}",
@@ -197,10 +196,7 @@ state q1: accept  ; done
 }
 
 /// Every `TmDirective` variant carries a comment, including one own-line comment above a directive
-/// (`; how symbols pack` above `encoding`) — none of that was true of any test before this one:
-/// `printing_a_document_emits_every_comment` uses the header-less `ANNOTATED`, so `write_header`
-/// never ran under an emission assertion, and the only directive ever exercised anywhere was
-/// `Tape`'s trailing/displacement path in `an_authored_comment_takes_the_tape_line_over_the_generated_name`.
+/// (`; how symbols pack` above `encoding`).
 #[test]
 fn printing_a_header_emits_a_comment_on_every_directive_variant() {
     // Version 2, because `reduced` and `steps` exist only there, and a variant no fixture here could
@@ -270,7 +266,7 @@ state q0: accept
 }
 
 #[test]
-fn a_document_with_no_comments_prints_exactly_what_the_old_printer_prints() {
+fn a_document_with_no_comments_prints_exactly_what_print_tm_prints() {
     let src = "tapes 1\nstart q0\n\nstate q0: accept\n";
     let d = parse_tm_full(src);
     let machine = d.machine.clone().expect("the fixture parses");
@@ -578,20 +574,20 @@ fn render(spec: &DocSpec) -> String {
 /// reach every one of these; this test DEMONSTRATES it, and proves the restated (idempotence)
 /// property holds for the document that does. Each construct below carries an own-line comment above
 /// it AND a trailing comment on its own line, which is what gives every anchor both `own_line` values
-/// from one occurrence — except `Eof`, which `parse_tm_full` only ever drains as `own_line: true`
+/// from one occurrence — except `Eof`, which `parse_tm_nav` only ever drains as `own_line: true`
 /// (there is no line left for a trailing comment to sit on), so this fixture's `Eof` comment is
 /// own-line only, on purpose. `tape 1` (not `tape 0`) additionally proves the anchor carries the
 /// PARSED index rather than a hardcoded one, matching `a_header_directive_carries_its_own_anchor`
 /// above.
 ///
 /// `TmAnchor::Tapes` carries TWO own-line comments (`about tapes` and `also about tapes`), not one —
-/// every other anchor here has at most one, which is exactly why this deterministic test used to NOT
-/// redden under the `.skip(1)` sabotage on `CommentWriter::own_line`: with a single own-line comment
-/// per anchor, `.skip(1)` drops it entirely on the FIRST print, so the drop is already reflected in
-/// `print_once`, and reparsing-then-reprinting drops nothing further — `print_once == print_twice`
-/// still holds even though real data was lost. Two comments on one anchor make the loss GRADUAL
-/// (`[A, B]` -> `[B]` -> `[]` across two prints), which is what makes `print_once != print_twice`
-/// under the sabotage and gives this test the same bite the proptest property already has.
+/// every other anchor here has at most one. With a single own-line comment per anchor, a `.skip(1)`
+/// sabotage on `CommentWriter::own_line` drops it entirely on the FIRST print, so the drop is
+/// already reflected in `print_once`, and reparsing-then-reprinting drops nothing further —
+/// `print_once == print_twice` still holds even though real data was lost. Two comments on one
+/// anchor make the loss GRADUAL (`[A, B]` -> `[B]` -> `[]` across two prints), which is what makes
+/// `print_once != print_twice` under the sabotage and gives this test the same bite the proptest
+/// property already has.
 const ALL_ANCHORS: &str = "\
 ; about tapes
 ; also about tapes

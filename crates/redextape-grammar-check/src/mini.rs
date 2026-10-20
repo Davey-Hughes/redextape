@@ -32,8 +32,8 @@ pub const HIGHLIGHTS: &str = include_str!("../../../grammars/tree-sitter-redexta
 
 /// Where the two vocabularies meet, for this language.
 ///
-/// **THE TABLE MOVED TO `redextape_core::capture_map` AND THIS IS THE SAME DATA, NOT A COPY.** It moved
-/// because the web app needs it and cannot link this crate: `build.rs` compiles four generated
+/// **THE TABLE LIVES IN `redextape_core::capture_map` AND THIS IS THE SAME DATA, NOT A COPY.** It lives
+/// there because the web app needs it and cannot link this crate: `build.rs` compiles four generated
 /// `parser.c` into this one, so there is no wasm build of it. What stays here is everything that ties
 /// the table to a query — totality over `HIGHLIGHTS`, and the no-unused-row rule — because those are
 /// tests about a grammar rather than facts about a naming map.

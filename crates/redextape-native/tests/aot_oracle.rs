@@ -3,10 +3,10 @@
 // `#[cfg(test)]` modules, not the free helpers below, so the exemption is stated per target.
 #![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic, clippy::pedantic)]
 #![cfg(feature = "cranelift")]
-//! The AOT oracle leg (B1): compile a program all the way through `emit_object` -> `link_executable`
+//! The AOT oracle leg: compile a program all the way through `emit_object` -> `link_executable`
 //! into a REAL standalone native binary, run that binary as a subprocess, and check its stdout + exit
 //! code against the reference interpreter. This is the bounded end-to-end validation of the whole
-//! Phase-3 pipeline (Tasks 4-6): emit -> link -> run -> decode/print/exit.
+//! AOT pipeline: emit -> link -> run -> decode/print/exit.
 //!
 //! Exit-code taxonomy the linked binary uses (`redextape-native-rt`'s `rt_run`), asserted here:
 //!   0 = value (printed to stdout as `format_value(result)`), 2 = fault, 3 = cap hit.
@@ -27,13 +27,13 @@ fn cc_available() -> bool {
 
 /// Compile `src` to a native binary, run it, return (stdout, exit_code).
 ///
-/// Mirrors `run_native`'s (private) lowering template exactly: try `lower_asm` first, only retry
-/// through `defunc` when it rejects the program as higher-order -- see this crate's `lib.rs`.
+/// Lowers with `lower_asm` and retries through `defunc` on any error, `TooDeep` included, where
+/// `redextape_core::tm::lower_program` retries only on `Unsupported` and returns `TooDeep` at once.
 ///
 /// The binary lives under its own `redextape_test_support::ScratchDir` rather than directly in
 /// `std::env::temp_dir()`, so it is removed once this function returns (it has already been run and
 /// its output captured by then, so nothing outside this function needs it to survive) instead of
-/// accumulating under `/tmp` on every call, forever, the way it did before.
+/// accumulating under `/tmp` on every call, forever.
 fn run_binary(src: &str, name: &str) -> (String, i32) {
     let ast = parse(src).0.unwrap();
     // `result_type` can legitimately return an unresolved type variable for a program whose result

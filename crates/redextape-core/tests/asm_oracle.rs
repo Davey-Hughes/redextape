@@ -1,6 +1,6 @@
-//! Part 1 of the three-way oracle (spec §12.2): the reference tree-walker and the asm interpreter
-//! agree on every first-order demo. This is the intermediate oracle that makes Part 2's TM δ-tables
-//! debuggable (a disagreement is localized to Core→asm before the TM even exists).
+//! The asm leg of the three-way oracle (spec §12.2): the reference tree-walker and the asm interpreter
+//! agree on every first-order demo. This is the intermediate oracle that makes the TM δ-tables
+//! debuggable (a disagreement is localized to Core→asm, before the TM is involved).
 
 // Test target: a fixture that fails to build IS the failure this file reports, so panicking is
 // deliberate here. The `allow-*-in-tests` keys in `clippy.toml` only reach `#[test]` functions and
@@ -52,8 +52,8 @@ fn asm_oracle_on_the_first_order_demo_suite() {
 
 #[test]
 fn asm_oracle_on_the_latent_trap_programs() {
-    // Plan 2 follow-ups: an immutable `let` shadowing a mutable variable, and a `fn` defined inside a
-    // mutation region — both must agree three-way (here: reference == asm).
+    // An immutable `let` shadowing a mutable variable, and a `fn` defined inside a mutation region —
+    // both must agree three-way (here: reference == asm).
     assert_asm_agrees("let mut x = 1; x = x + 1; let x = x + 10; x");
     assert_asm_agrees("let mut acc = 0; fn bump(n) { n + 1 } acc = bump(acc); acc = bump(acc); acc");
 }
@@ -64,8 +64,8 @@ fn head_of_empty_matches_a_reference_fault() {
 }
 
 /// A tiny first-order expression generator that stays within every backend's caps: `Nat` literals
-/// are bounded (< 1500, the λ-representability bound), nesting is shallow, and it emits only the
-/// first-order constructs Part 1 supports (no function-as-a-value, no closures passed as arguments).
+/// are bounded (< 1500, the λ-representability bound), nesting is shallow, and it emits only
+/// first-order constructs (no function-as-a-value, no closures passed as arguments).
 fn arb_expr() -> impl Strategy<Value = String> {
     let leaf = (0u64..1500).prop_map(|n| n.to_string());
     leaf.prop_recursive(4, 32, 3, |inner| {
@@ -91,7 +91,7 @@ proptest! {
         // Both must reach the same place: a value that decodes equal, or a shared cap/fault.
         let reference = run(&src);
         let (prog, ds) = parse(&src);
-        prop_assume!(ds.is_empty()); // skip anything that does not parse/type-check
+        prop_assume!(ds.is_empty()); // skip anything that does not parse
         let core = desugar(&prog.unwrap());
         let program = match lower_asm(&core) {
             Ok(p) => p,
@@ -109,13 +109,9 @@ proptest! {
 fn deep_list_literal_lowers_without_overflowing() {
     // A huge list literal desugars to a deep cons-Apply spine. lower_asm must return (Ok or a
     // TooDeep LowerError), never overflow the native stack. Run it on an explicit 8 MiB thread — the
-    // production main-thread stack size that MAX_LOWER_DEPTH (580) is tuned against, like the Plan 1
-    // guards. On 8 MiB the guard fires at depth 580 (yielding TooDeep) with ~2x margin below the
-    // measured ~1175-deep native crash point, while the unguarded 40_000-deep recursion (40_000 »
-    // that crash depth) WOULD overflow — so this still genuinely proves the guard prevents the native
-    // overflow, not just that the input happens to fit. (A 512 KiB thread would hold only ~90
-    // lower_into frames and so overflow before the guard fires; the constant must be dictated by the
-    // real production stack.)
+    // production main-thread stack size that MAX_LOWER_DEPTH (580) is tuned against. The unguarded
+    // 40_000-deep recursion WOULD overflow — so this proves the guard prevents the native overflow,
+    // not just that the input happens to fit.
     std::thread::Builder::new()
         .stack_size(8 * 1024 * 1024)
         .spawn(|| {

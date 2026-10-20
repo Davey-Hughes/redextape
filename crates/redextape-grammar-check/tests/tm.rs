@@ -29,8 +29,7 @@ fn printed_reduced_corpus() -> Vec<Printed> {
 
 /// Every capture name any query emits must have a class.
 ///
-/// PROMOTED to `Grammar::capture_map_is_total` in PR 2, specifically so this grammar would call it
-/// rather than become a third verbatim copy. See `src/grammar.rs`.
+/// Calls `Grammar::capture_map_is_total`; see `src/grammar.rs`.
 #[test]
 fn the_capture_map_is_total_over_the_queries() {
     if let Err(why) = TM.capture_map_is_total() {
@@ -57,10 +56,10 @@ fn every_map_row_is_used_by_a_query() {
 
 /// `captures` collapses overlapping captures, so its output has one entry per byte range.
 ///
-/// **TM's QUERIES ARE WRITTEN NEVER TO OVERLAP AT ALL**, which is a stronger position than either
-/// sibling's. Every name in this form is one `identifier` token and the queries tell them apart by
-/// FIELD, so `state s:` matches only the `name:` pattern and `goto s` only the `target:` one. There is
-/// no catch-all `(identifier) @variable` to collide with anything — see
+/// **TM's QUERIES ARE WRITTEN NEVER TO OVERLAP AT ALL**, which is a stronger position than the
+/// mini-language's or λ's. Every name in this form is one `identifier` token and the queries tell them
+/// apart by FIELD, so `state s:` matches only the `name:` pattern and `goto s` only the `target:` one.
+/// There is no catch-all `(identifier) @variable` to collide with anything — see
 /// `a_conflicting_query_is_rejected` for what adding one would do.
 #[test]
 fn the_shipped_queries_never_disagree() {
@@ -133,7 +132,7 @@ fn captures_pins_text_and_class_for_a_headered_machine() {
 /// colour". Because every name here is one `identifier` token, that catch-all lands on the SAME byte
 /// range as `(state name: ...) @label` and asks for `Ident` where the printer says `Label`.
 ///
-/// **NOT PROMOTED, unlike the checks above**: the query has to name capture rows that exist in *this*
+/// **PER GRAMMAR, unlike the checks above**: the query has to name capture rows that exist in *this*
 /// grammar's table, so a grammar-agnostic version would have no query to hand it.
 #[test]
 fn a_conflicting_query_is_rejected() {
@@ -154,8 +153,8 @@ fn every_corpus_program_parses_without_error_nodes() {
     }
 }
 
-/// TM's mandatory half of `every_query_pattern_fires`. It matters more here than for either sibling:
-/// TM has the largest query file of the three, and several of its patterns — `encoding`'s operand,
+/// TM's mandatory half of `every_query_pattern_fires`. It matters more here than for any sibling: TM
+/// has the largest query file of the four, and several of its patterns — `encoding`'s operand,
 /// `result`'s operand, a `tape` line's packed run, a comment — are reachable ONLY from a headered
 /// file. A `CORPUS` of header-less machines would leave four patterns with zero coverage while every
 /// other test in this file stayed green.
@@ -197,10 +196,10 @@ fn parse_tm_accepts_every_corpus_entry() {
     }
 }
 
-/// Design §6.3's residue, pinned by name so a corpus edit cannot quietly drop it. These are the
-/// comment positions NO printer can produce — a whole-line comment, and a trailing comment on a line
-/// that is not a named `tape` line — so they have no differential authority and rest on
-/// `tree-sitter test` plus `parse_tm_accepts_every_corpus_entry` above. That is weaker than the
+/// The part of design §6.3's residue no printer can produce, pinned by name so a corpus edit cannot
+/// quietly drop it: a whole-line comment, and a trailing comment on a line that is not a named `tape`
+/// line. They have no differential authority and rest on `tree-sitter test` plus
+/// `parse_tm_accepts_every_corpus_entry` above. That is weaker than the
 /// differential, and saying so is the point.
 #[test]
 fn the_corpus_carries_the_comment_positions_no_printer_emits() {
@@ -221,14 +220,12 @@ fn the_corpus_carries_the_comment_positions_no_printer_emits() {
     );
 }
 
-/// The headered leg — **the only corpus in this crate that reaches `Comment` and `Ident`**, and the
-/// reason design §6.3's gap is much narrower than that section claimed before PR 3's survey.
+/// The headered leg — **the only corpus in this crate that reaches `Comment` and `Ident`**.
 ///
 /// `HEADERED_CORPUS` is FIXED rather than generated because `printed_machine_with_header` simulates;
-/// see its doc for the three bounds that make that safe. The comment floor is what stops a future
-/// edit from quietly dropping the `Binary` entries and leaving this leg comparing nine classes it no
-/// longer reaches: `Unary` yields one `Comment` span per entry and `Binary` two, so the measured
-/// total over this list is 8.
+/// see its doc for the three bounds that make that safe. The comment floor is what stops a future edit
+/// from quietly dropping the `Binary` entries and leaving this leg comparing nine classes it no longer
+/// reaches: `Unary` yields one `Comment` span per entry and `Binary` two, so the total over this list is 8.
 #[test]
 fn the_tm_grammar_agrees_with_the_headered_printer() {
     let mut comments = 0;
@@ -249,8 +246,8 @@ fn the_tm_grammar_agrees_with_the_headered_printer() {
 /// The reduced leg: `REDUCED_CORPUS`, printed by the same printer as the headered leg above, for the text only
 /// a reduced header carries.
 ///
-/// **ITS OWN TEST RATHER THAN MORE OF THE ONE ABOVE**, because together the two took over a second in a debug
-/// build, timed alone, and this project's fast tier is under one.
+/// **ITS OWN TEST RATHER THAN MORE OF THE ONE ABOVE**, because together the two would not fit this project's
+/// fast tier, which is under one second.
 ///
 /// The comma floor is what stops an edit to `REDUCED_CORPUS` from quietly leaving every stage list one stage
 /// long, which would leave the one token here that follows a stage name directly uncompared.
@@ -270,24 +267,19 @@ fn the_tm_grammar_agrees_with_the_reduced_printer() {
 
 /// The header-less leg, generated.
 ///
-/// **`cases` IS SET EXPLICITLY AND THE NUMBER IS A MEASUREMENT, NOT A DEFAULT** — design §11.5. One
-/// printed TM machine averages 18,905 bytes and 6,865 spans against λ's 912 and 637, so proptest's
-/// default 256 would have this leg parsing ~4.8 MB and comparing ~2.0M spans every run.
-///
-/// **AT 32 THIS LEG COMPARES 282,006 SPANS IN 0.74 s**, measured, which is already 1.7x what λ's
-/// 256-case leg compares (163K) and takes the whole crate from 0.600 s to 0.742 s. Raising it is
-/// affordable and was deliberately not done: `arb_expr_over` is five arms over numeric leaves —
-/// design §11.3's "depth on a narrow shape, not breadth" — so a 64th case of the same shape buys
-/// very little that the 32nd did not, and the hand-written `CORPUS` and `HEADERED_CORPUS` are where
-/// the structurally interesting constructs actually live. If you raise it, raise it with a new
-/// measurement rather than on the theory that more is better.
+/// **`cases` IS SET EXPLICITLY, NOT A DEFAULT** — design §11.5 has the measurement. Raising it
+/// would buy little: `arb_expr_over` is five arms over numeric leaves — design §11.3's "depth on a
+/// narrow shape, not breadth" — so a 64th case of the same shape adds little the 32nd did not, and the
+/// hand-written `CORPUS` and `HEADERED_CORPUS` are where the structurally interesting constructs
+/// actually live. If you raise it, raise it with a new measurement rather than on the theory that
+/// more is better.
 ///
 /// Driven through `TestRunner` directly rather than the `proptest!` macro so the lowering pass rate
 /// can be logged once after every case has run — the same reason λ's generated leg does.
 ///
-/// The pass rate is logged because design §7 asks for it. **Expect 100%**: measured over 128 samples
-/// at both leaf ranges in use, `lower_asm` refused nothing. The guard is real and currently idle, and
-/// §11.5 records that the risk §7 named is not the one that bites.
+/// The pass rate is logged because design §7 asks for it. The final assertion requires only half, so a
+/// rate well under 100% is worth a look rather than a failure; §11.5 records that the risk §7 named is
+/// not the one that bites.
 #[test]
 fn the_tm_grammar_agrees_with_the_printer_on_generated_programs() {
     let strategy = arb_expr_over((0u64..100).prop_map(|n| n.to_string()));
@@ -318,16 +310,15 @@ fn the_tm_grammar_agrees_with_the_printer_on_generated_programs() {
     assert!(lowered >= total / 2, "only {lowered}/{total} generated programs lowered; the leg is not exercising TM");
 }
 
-/// The comparison must be capable of failing — the standard PR 1 and PR 2 both met, and PR 1's review
-/// found `compare_classified` shipped entirely untested.
+/// The comparison must be capable of failing.
 ///
 /// **THIS FIRES THE LENGTH BRANCH, NOT THE PER-INDEX ONE, AND THE CHOICE IS DELIBERATE.** A subset
 /// query like `["[" "]"] @punctuation.bracket` would diverge at index 0 (`tapes`/`Keyword` against
 /// `[`/`Punct`) and never reach the length comparison. `(comment) @comment` over HEADER-LESS printed
-/// text captures nothing at all — `print_tm_mapped` writes no comment, which is the true half of what
-/// design §6.3 originally claimed — so `got` is empty, the per-index loop runs zero times, and every
-/// one of `want`'s spans becomes an extra on the authority side. The length branch is what catches a
-/// grammar that silently captures too little, so it is the branch worth proving can fire.
+/// text captures nothing at all — `print_tm_mapped` writes no comment — so `got` is empty, the
+/// per-index loop runs zero times, and every one of `want`'s spans becomes an extra on the authority
+/// side. The length branch is what catches a grammar that silently captures too little, so it is the
+/// branch worth proving can fire.
 #[test]
 fn the_tm_comparison_can_fail() {
     let (text, want) = printed_machine("1 + 2").expect("this program lowers");

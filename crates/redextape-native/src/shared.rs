@@ -8,15 +8,15 @@ use redextape_native_rt::RUN_STACK_SIZE;
 use crate::analysis::{Subroutine, for_each_operand};
 
 /// Reserved off the top of `RUN_STACK_SIZE` (the crate-neutral run-thread stack size, defined once
-/// in `redextape_native_rt` and shared by both the JIT thread here and the AOT run thread in
-/// `rt_run`, so the two can never drift) for the outermost run frame plus host bookkeeping; the
+/// in `redextape_native_rt` and shared by the JIT drivers' run threads and the AOT run thread in
+/// `rt_run`, so they can never drift) for the outermost run frame plus host bookkeeping; the
 /// recursion budget is `RUN_STACK_SIZE - STACK_MARGIN`.
 const STACK_MARGIN: usize = 8 << 20;
 
 /// Deliberately conservative bytes charged per register slot when estimating a native frame — one
 /// Cranelift `Variable`, or one LLVM entry-block `alloca`, depending on the backend.
 ///
-/// Measurements, both backends (this constant now underwrites TWO frame layouts at SIX opt levels
+/// Measurements, both backends (this constant underwrites TWO frame layouts at SIX opt levels
 /// each, so tightening it means clearing all of them):
 /// * Cranelift at `opt_level=none`: ~8–16 bytes per local (i64 slot + no-reg-reuse spills).
 /// * Cranelift at `speed`/`speed_and_size` — **the binding case for Cranelift, and LARGER than
@@ -28,33 +28,23 @@ const STACK_MARGIN: usize = 8 << 20;
 ///   the frame (live-range splitting spills more distinct values than there are asm registers), and
 ///   the ratio converges from below to **~3.0 words per asm register** — bounded, not growing.
 /// * LLVM, a 203-local frame (`8832` bytes charged): ~1680 bytes actual, and the opt level barely
-///   moves it — by under 2%, in a direction that is SHAPE-dependent rather than structural. Measured
-///   the same way (aarch64, `objdump` over `llvm::object_bytes` output, the `countdown` prologue),
-///   200 fillers unless noted:
+///   moves it — by under 2%, in a direction that is SHAPE-dependent rather than structural: `O1+` is
+///   LARGER than `O0` for the independent shape `jit.rs`'s totality sweep ships (+1.9% at 200 fillers,
+///   +0.5% at 800) and smaller (−1.9%) for the dependent chain the `llvm.rs` fixture uses.
 ///
-///   | filler shape | `O0` | `O1`/`O2`/`O3`/`Os`/`Oz` |
-///   | --- | ---: | ---: |
-///   | independent (the shape `jit.rs`'s totality sweep ships) | 1680 B | **1712 B** (+1.9%) |
-///   | dependent chain (the `llvm.rs` fixture) | 1680 B | 1648 B (−1.9%) |
-///   | independent, 800 fillers | 6480 B | **6512 B** (+0.5%) |
-///
-///   An earlier revision of this doc asserted that LLVM's `O1+` is always *smaller* (`mem2reg`/SROA
-///   promoting the register banks into SSA) and concluded that `O0` was LLVM's binding case. The
-///   first row falsifies it: `O1+` is LARGER for the independent shape, and the shrink held only for
-///   the fixture `llvm.rs` happens to use. That is the same "optimization only shrinks frames"
-///   reasoning the Cranelift row above already disproves — do not reintroduce it. No safety
-///   consequence either way: LLVM sits at ~8 bytes per register slot against the 32 charged
-///   (4.3–5.2x headroom) at EVERY level, nowhere near binding.
+///   Do not reason that `O1+` always shrinks LLVM's frames (`mem2reg`/SROA promoting the register banks
+///   into SSA) and so makes `O0` its binding case: the shrink holds only for the fixture `llvm.rs`
+///   happens to use, and that is the same "optimization only shrinks frames" reasoning the Cranelift row
+///   above already disproves. No safety consequence either way: LLVM sits at ~8 bytes per register slot
+///   against the 32 charged (4.3–5.2x headroom) at EVERY level, nowhere near binding.
 ///
 /// **Cranelift at `speed`/`speed_and_size` is therefore the binding case for BOTH backends** — the
 /// fattest frame measured anywhere, at any level, on either backend.
 ///
-/// The numbers above were read off AOT objects (`aot::emit_object`, the path `objdump` can read) and
-/// transfer to the JIT verbatim: emitting with `is_pic=false` — the JIT's exact flag, see
-/// `jit::host_isa` — produces byte-identical `countdown` prologues (`sub sp` of `0x600` at `none`,
-/// `0x11d0` at `speed`, `0x49c0` at 800 fillers, each plus 96 B of saved-register pushes, i.e. the
-/// 1632 / 4656 / 18976 B rows above) and identical object sizes. There is no separate JIT
-/// calibration to keep in sync with this one.
+/// The Cranelift numbers above were read off AOT objects (`aot::emit_object`, the path `objdump` can
+/// read) and transfer to the JIT verbatim: emitting with `is_pic=false` — the JIT's exact flag, see
+/// `jit::host_isa` — produces byte-identical `countdown` prologues and identical object sizes. There is
+/// no separate JIT calibration to keep in sync with this one.
 ///
 /// `32` = 4 words charged per register slot, against the ~3.0 words optimized Cranelift was measured
 /// to use: the margin is ~4.8x at 50 locals and converges to ~1.33x for thousands. It over-estimates
@@ -103,7 +93,7 @@ pub(crate) fn reg_over_cap(prog: &Program) -> bool {
 /// always invoked by the driver as `(rt_ptr) -> I64` with NO args, so it takes `0` regardless of the
 /// `Arg`s its body reads (a hand-built `$main` reading `Arg(i)` sees the init-`0` value — an entry
 /// takes no arguments); every other subroutine takes its `arity` args from the caller. Used
-/// consistently for the signature, the `Call` argument count, and the from-params init below.
+/// consistently for the signature, the `Call` argument count, and the from-params init.
 pub(crate) fn param_count(sub: &Subroutine) -> u32 {
     if sub.entry == 0 { 0 } else { sub.arity }
 }
@@ -141,20 +131,17 @@ pub(crate) fn n_arg_vars(prog: &Program, sub: &Subroutine) -> u32 {
 ///
 /// The estimate is BACKEND- and OPT-LEVEL-agnostic by construction: it is computed from the ASM
 /// `Program` alone, and `BYTES_PER_VAR` is calibrated (see its doc) against **Cranelift at
-/// `speed`/`speed_and_size` — the binding case for both backends**, where live-range splitting
-/// spills ~3x what `none` does, i.e. ~3.0 words per asm register against the 4 charged. LLVM is
-/// nowhere near binding at any level: ~8 bytes per slot against 32 charged, with under 2% variation
-/// between its levels (in a shape-dependent direction — `O1+` is not uniformly smaller; see
-/// `BYTES_PER_VAR`). Inlining, where a backend does it, preserves the bytes-per-`rt_enter` ratio. So
-/// a level the constant was not measured at cannot make the bound unsafe — but tightening the
-/// constant toward either backend's measurement would.
+/// `speed`/`speed_and_size` — the binding case for both backends**. LLVM is nowhere near binding at
+/// any level (see `BYTES_PER_VAR`). Inlining, where a backend does it, preserves the
+/// bytes-per-`rt_enter` ratio. So a level the constant was not measured at cannot make the bound
+/// unsafe — but tightening the constant toward either backend's measurement would.
 ///
 /// This cap is computed at EMIT time (both for the JIT, immediately before running, and for AOT,
 /// baked into the CONFIG blob `emit_object` writes) against `RUN_STACK_SIZE` — the same constant the
-/// run thread is spawned with, whether that's the JIT's thread (`jit.rs`) or the AOT binary's thread
-/// (`redextape_native_rt::rt_run`). Both import `RUN_STACK_SIZE` from `redextape_native_rt` rather
-/// than each declaring its own duplicate stack-size literal, so the invariant below can never be
-/// violated by the two drifting out of sync.
+/// run thread is spawned with, whether that's a JIT's thread (`jit.rs`, `llvm.rs`) or the AOT
+/// binary's thread (`redextape_native_rt::rt_run`). All of them take `RUN_STACK_SIZE` from
+/// `redextape_native_rt` rather than each declaring its own duplicate stack-size literal, so the
+/// invariant below can never be violated by them drifting out of sync.
 ///
 /// # Invariant (the totality guarantee)
 /// `native_depth_cap * frame_bytes + STACK_MARGIN <= RUN_STACK_SIZE`. Integer division gives

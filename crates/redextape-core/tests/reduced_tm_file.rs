@@ -49,13 +49,13 @@ fn round_trip(src: &str, stages: &[StageKind]) {
 }
 
 /// The fast tier's program. Its value is 2, not 0: a decode that goes wrong on a tape whose value is 0
-/// reads 0 anyway, and `3 - 5` hid a header whose code had two of its symbols swapped.
+/// reads 0 anyway.
 const FIVE_MINUS_THREE: &str = "5 - 3";
 
 /// The web app's browser tier pastes this file into a TM buffer, so it must be the file `reduce` writes today: a stale
 /// copy would pin the web app to a format nothing produces any more.
 #[test]
-fn the_web_fixture_is_the_file_reduce_writes_today() {
+fn the_web_fixture_is_the_file_reduce_writes() {
     let (core, ty) = core_and_ty(FIVE_MINUS_THREE);
     let d = run_tm_described(&core, EncodingKind::Unary, ty, TM_DEFAULT_CAPS).unwrap();
     let (m, h) = reduce(&d, &[SingleTape]).unwrap();

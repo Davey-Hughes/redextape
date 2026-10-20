@@ -20,7 +20,7 @@ fn main() {
     let expected = run(src).unwrap();
 
     println!("\n════════════════════════════════════════════════════════════════════");
-    println!(" Redextape — LLVM backend demo (native Phase 2)");
+    println!(" Redextape — LLVM backend demo");
     println!(" mini-language  →  register-asm  →  LLVM IR  →  optimize  →  JIT  →  decode,");
     println!(" checked against Cranelift and the reference interpreter.");
     println!("════════════════════════════════════════════════════════════════════\n");

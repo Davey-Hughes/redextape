@@ -9,32 +9,21 @@
 #   scripts/check-doc-figures.sh              # check every claim in the table below
 #   scripts/check-doc-figures.sh --self-test  # prove the locators still locate
 #
-# **WHY THIS GATE EXISTS — MEASUREMENT, NOT PRINCIPLE.** One commit in the tree-sitter slice
-# replaced `extras`'s `/\s/` with the five code points `is_ascii_whitespace()` accepts. That added
-# one comment line to two `grammar.js` files, and the λ README — which had asserted *"75 lines —
-# half the sibling's 156"* — became wrong in both halves of one sentence. Nothing failed. It was
-# found only because a third README was being written and happened to need the same two numbers for
-# a comparison. Had that PR not existed, the claim would still be there.
+# **WHY THIS GATE EXISTS: A README's FIGURE GOES STALE WHEN A DIFFERENT FILE CHANGES.** Adding one comment
+# line to a `grammar.js` falsifies a README that asserts that file's line count, and nothing fails.
 #
-# **THE ROOT README EARNED ITS ROWS BY BEING WRONG IN FOUR PLACES AT ONCE.**
-# The three grammar READMEs came first. The root README was added after a survey found it claiming
-# "Four crates" against seven, "841 tests" against 1,156, "six pre-commit hooks" against seven, and
-# "15 browser tests" against 26. **One of those was falsified by the very branch that introduced this
-# script** — adding `check-doc-figures` made the hook count seven — so the gate's own arrival broke a
-# figure in the one file it did not yet cover. Its repo-level rows (`.` as the scope) describe the
-# workspace rather than a grammar, and every one is a structural grep that compiles nothing.
+# **THE ROOT README HAS REPO-LEVEL ROWS.** Its rows (`.` as the scope) describe the workspace rather than a
+# grammar, and every one is a structural grep that compiles nothing.
 #
-# **HOW MANY DOCUMENTS THIS TABLE COVERS IS DELIBERATELY NOT STATED HERE.** This header used to open
-# by counting them, and that count went stale the moment a fourth grammar README got rows — the same
-# failure the gate exists to stop, one level up, in the gate's own file. `scripts/check-all.sh`
-# removed its own count for the same reason rather than bumping it. Read the table.
+# **HOW MANY DOCUMENTS THIS TABLE COVERS IS DELIBERATELY NOT STATED HERE:** a count goes stale when a README
+# gets rows — the same failure the gate exists to stop, one level up, in the gate's own file. Read the table.
 #
 # **THE CROSS-REFERENCES ARE WHY THIS IS WORTH A GATE RATHER THAN A HABIT.** These READMEs quote
-# each other: λ's cites the mini-language's line count AND its capture-name count, and TM's and
-# asm's each cite the mini-language's line count and λ's. So editing ONE `grammar.js` can falsify
-# several READMEs at once, and only one of them is the one the editor has any reason to open. The
-# cross-reference rows below — the ones whose grammar-dir column is not their own README's — are the
-# ones nobody is looking at. No count of them is given here, for the reason above.
+# each other: λ's cites the mini-language's line count AND its capture-name count, TM's cites the
+# mini-language's, asm's and λ's line counts, and asm's cites the mini-language's and λ's. So editing
+# ONE `grammar.js` can falsify several READMEs at once, and only one of them is the one the editor has
+# any reason to open. The cross-reference rows below — the ones whose grammar-dir column is not their
+# own README's — are the ones nobody is looking at. No count of them is given here, for the reason above.
 #
 # **A FIGURE ASSERTED TWICE IS TWO ROWS, BECAUSE IT DRIFTS TWICE.** The λ README states its
 # capture-name count in three separate sentences — *"entire capture vocabulary is five names"*,
@@ -42,73 +31,71 @@
 # `@function.call`"* — and the TM README states its own twice. Whoever updates the paragraph they
 # are editing has no reason to suspect the other two. Each assertion gets its own row.
 #
-# **A CLAIM THAT CANNOT BE LOCATED IS A FAILURE, NOT A SKIP.** This is the whole design. The
-# obvious construction — scan the prose for number-shaped things and check the ones found — passes
-# when a rewording moves a figure out from under its pattern, which is the exact defect it exists
-# to catch, reproduced inside the gate. So the table below is a REQUIRED set: every row must match
-# EXACTLY once. Zero matches fails as loudly as a wrong number, and so do two or more, because an
-# ambiguous locator may be reading a different sentence than the one intended. That is not
-# hypothetical either: the first draft of the cross-reference rows matched `mini-language's lexer`
-# and `λ's 912` — a different figure entirely, sharing only the possessive — and the ambiguity rule
-# is what turned that into an error message instead of a wrong number checked against the wrong
-# sentence. The cross-reference locators are anchored on their whole clause for that reason.
+# **A CLAIM THAT CANNOT BE LOCATED IS A FAILURE, NOT A SKIP.** This is the whole design. The obvious
+# construction — scan the prose for number-shaped things and check the ones found — passes when a rewording
+# moves a figure out from under its pattern, which is the exact defect it exists to catch, reproduced inside
+# the gate. So the table below is a REQUIRED set: every row must match EXACTLY once. Zero matches fails as
+# loudly as a wrong number, and so do two or more, because an ambiguous locator may be reading a different
+# sentence than the one intended. The cross-reference locators are anchored on their whole clause for that
+# reason: a bare `mini-language's N` locator would also match the λ README's `mini-language's lexer`,
+# since a number may be a word, and a bare `λ's N` the TM README's `λ's 912`, a different figure entirely,
+# sharing only the possessive.
 #
 # **THIS SCAN IS NOT LINE-BASED, AND THAT DEPARTS FROM `check-citations.sh` DELIBERATELY.** That
 # script documents the line wrap as its own blind spot — grep is line-based, so a citation split
-# across a wrap is invisible to it. The TM README splits a claim across a wrap TODAY: it reads
-# `**13 patterns** over **11` / `capture names**`. A line-based locator finds zero matches for the
-# capture-name claim — and under the rule above that is a failure rather than a silent pass, which
+# across a wrap is invisible to it. The TM README splits a claim across a wrap: it reads
+# `queries/highlights.scm` / `holds **15 patterns**`. A line-based locator finds zero matches for the
+# pattern-count claim — and under the rule above that is a failure rather than a silent pass, which
 # is how this construction catches an error in its own implementation. Each README is normalized to
 # a single line before matching, so a reflow is invisible here by design.
 #
 # **NUMBERS ARE SPELLED THREE WAYS AND ALL THREE ARE ACCEPTED.** The λ README writes *"nine
-# patterns over five capture names"* where the TM README writes *"13 patterns over 11 capture
+# patterns over five capture names"* where the TM README writes *"15 patterns over 11 capture
 # names"* — and TM also opens a sentence with *"Eleven capture names for nine classes"*, capitalised.
-# A digit-only locator finds nothing in the λ README and, without the required-set rule, would have
-# reported that whole file clean while checking none of it.
+# A digit-only locator misses every figure the λ README spells out, and without the required-set rule
+# each miss would pass unchecked.
 #
 # **WHAT IT DELIBERATELY DOES NOT CATCH.**
 #
-#   1. THE ADJECTIVE BESIDE THE NUMBER. TM's README says *"nearly twice λ's 78"*. This gate checks
-#      that 78 is λ's current line count; it cannot check "nearly twice". If λ's grammar doubled,
-#      the gate would demand the 78 be corrected and then pass on prose calling the new figure
-#      "nearly twice" its own. Anchoring the locator on the clause means EDITING the adjective
-#      trips the gate, which is a tripwire, not a check — the relation itself stays a review
-#      concern. So does "largest of the three", which was wrong for a whole PR and is not a number.
+#   1. THE ADJECTIVE BESIDE THE NUMBER. The asm README says *"just over twice λ's 77"*. This gate
+#      checks that 77 is λ's current line count; it cannot check "just over twice". If λ's grammar
+#      doubled, the gate would demand the 77 be corrected and then pass on prose calling the new
+#      figure "just over twice" its own. Anchoring the locator on the clause means EDITING the
+#      adjective trips the gate, which is a tripwire, not a check — the relation itself stays a
+#      review concern.
 #   2. `docs/` — SPECS, PLANS AND THE ROADMAP — WHICH IS A BOUNDARY RATHER THAN AN EXEMPTION, and
 #      the same one `check-citations.sh` draws for the same reason. A README says what the tree IS;
 #      a dated roadmap entry says what the tree WAS on a date, and its figures are OBSERVATIONS.
-#      One entry records `156 grammar.js lines`; that file is 171 today and the entry is still
+#      One entry records `156 grammar.js lines`; that file has changed since and the entry is still
 #      correct. Gating it would demand falsifying the record. The roadmap's own convention — a
 #      block headed "Every count this entry quotes, with what produces it" — is how those are held
 #      honest, at the time they are written, which is the only time they can be.
-#   3. HISTORICAL FIGURES INSIDE A README. The mini README reads `is 171 lines (156 until PR 3 …)`
-#      and the λ README says its figures `read 75 and 156 before that`. Those are observations
-#      sitting in a present-tense document, and every locator below is anchored to exclude them.
-#      `--self-test` asserts that exclusion rather than trusting it.
+#   3. HISTORICAL FIGURES INSIDE A README, such as `(156 until PR 3 …)` or `read 75 and 156 before
+#      that`. Those are observations sitting in a present-tense document, and every locator below is
+#      anchored to exclude them. `--self-test` asserts that exclusion rather than trusting it.
 #   4. FIGURES THAT ARE NOT CHEAPLY DERIVABLE. The TM README's `18,905 bytes` and `6,865 spans`
 #      averages, its `282,006 spans in 0.74 s`, and the `32`/`256` proptest case counts are
 #      measurements or config, not properties a one-line command recovers. λ's *"Five positions,
 #      five patterns"* is a claim about where `_atom` and `_term` appear in the grammar, not a
 #      total, and is not derivable either. None are gated.
-#   5. THE WORKSPACE'S TEST COUNT, AND ANYTHING ELSE THAT NEEDS A BUILD. `cargo nextest list
-#      --workspace` costs 218 s warm; this whole script costs well under a second. Gating that figure would make
-#      every commit in this repository unusable, and putting it in CI alone would break the one
-#      invariant both sibling gates rest on — the same script in both places, so local and CI cannot
-#      drift. **The root README states it as a DATED OBSERVATION instead**, which is the same move
-#      `docs/` gets and for the same reason: a figure nothing can cheaply check should carry a date
-#      rather than a present tense. It had drifted by 315 tests and lost three crates from its
-#      breakdown before anyone noticed. A gate that cannot be cheap should not exist; a claim that
-#      cannot be gated should not be written in the present tense.
+#   5. THE WORKSPACE'S TEST COUNT, AND ANYTHING ELSE THAT NEEDS A BUILD. `cargo nextest list --workspace`
+#      costs 218 s warm; this whole script costs well under a second. Gating that figure would make every
+#      commit in this repository unusable, and putting it in CI alone would break the one invariant both
+#      sibling gates rest on — the same script in both places, so local and CI cannot drift. **The root
+#      README states it as a DATED OBSERVATION instead**, which is the same move `docs/` gets and for the
+#      same reason: a figure nothing can cheaply check should carry a date rather than a present tense. A
+#      gate that cannot be cheap should not exist; a claim that cannot be gated should not be written in the
+#      present tense.
+#   6. A FIGURE WITH NO ROW HERE. Adding a claim to a README does not add it to this table. The
+#      gate covers what it lists and reports that count on success, rather than implying the prose
+#      is checked. Deleting a claimed figure, by contrast, fails loudly.
+#
 # **ONE ROW'S DOCUMENT IS A SOURCE FILE, NOT A README, AND THAT IS A DELIBERATE WIDENING.**
 # `crates/redextape-wasm/src/lib.rs` calls `tapeNames()` "The TENTH export" in a doc comment, and
-# `README.md` states the same fact twice more — "ten exports" and "the tenth, `tapeNames()`". An
-# ORDINAL that moves whenever any export is added, with no gate behind it, is the exact shape this
-# repository keeps retracting; `.pre-commit-config.yaml`'s hook comments and the `linear-history` CI
-# header each carry their own retraction of one. All three went false inside a single branch when Plan
-# 7 part 3b added `captureClasses` and deleted `classifySource`, and nothing noticed, because the
-# derivation did not exist. The scan reads any path it is given — `normalize` just flattens a file — so
-# the widening costs one row and no machinery.
+# `README.md` states the same fact twice more — "ten exports" and "the tenth, `tapeNames()`". An ORDINAL
+# that moves whenever any export is added, with no gate behind it, goes stale with nothing to say so.
+# The scan reads any path it is given — `normalize` just flattens a file — so the widening costs one row
+# and no machinery.
 #
 # **THE ORDINAL IS DERIVED AS A POSITION, NOT AS THE COUNT.** `wasm_exports` and
 # `wasm_tapenames_ordinal` are two derivations, and the second walks to `tapeNames` rather than
@@ -116,15 +103,11 @@
 # deleting one export and appending another leaves the COUNT unchanged while moving the position, and a
 # single count-shaped derivation would report green through exactly that edit.
 #
-# **BOTH RETURN 10 AGAINST THE REAL TREE TODAY, SO THE REAL TREE CANNOT TELL THE TWO DERIVATIONS APART**
-# — a position-shaped implementation that quietly became a count would still pass every check that
+# **BOTH RETURN THE SAME NUMBER AGAINST THE REAL TREE, SO THE REAL TREE CANNOT TELL THE TWO DERIVATIONS
+# APART** — a position-shaped implementation that quietly became a count would still pass every check that
 # only ever runs against `wasm_export_names()`'s real output, because `tapeNames` happens to be last.
 # `--self-test` closes that hole with a SYNTHETIC export list carrying a name AFTER `tapeNames`, so the
 # count (4) and the position (3) disagree there and a count masquerading as a position fails.
-#
-#   6. A FIGURE WITH NO ROW HERE. Adding a claim to a README does not add it to this table. The
-#      gate covers what it lists and reports that count on success, rather than implying the prose
-#      is checked. Deleting a claimed figure, by contrast, fails loudly.
 set -euo pipefail
 
 ROOT="$(git rev-parse --show-toplevel)"
@@ -141,12 +124,10 @@ readonly G_ASM="grammars/tree-sitter-redextape-asm"
 # broken scan — the shape `check-text-bytes.sh` uses for the same reason.
 # ---------------------------------------------------------------------------
 
-# THIS COMMENT WAS WRONG ONCE. It used to say the table "lives in the checker crate, one module per
-# grammar" — true when this script was written, false since the tables moved to
-# `redextape-core::capture_map`. They moved because the web app needs them to colour an editor and
-# cannot depend on `redextape-grammar-check`, which links four generated `parser.c` files through a
-# `cc` build script that nothing shipped can carry. All four tables now live in that one file, as
-# four separate `pub const` items rather than four modules each named `CAPTURE_CLASSES`.
+# The tables live in `redextape-core::capture_map`, not in the checker crate: the web app needs them to
+# colour an editor and cannot depend on `redextape-grammar-check`, which links four generated `parser.c`
+# files through a `cc` build script that nothing shipped can carry. All four tables live in that one file,
+# as four separate `pub const` items.
 map_src() {
   case "$1" in
     "$G_MINI"|"$G_LAM"|"$G_TM"|"$G_ASM") echo "crates/redextape-core/src/capture_map.rs" ;;
@@ -154,9 +135,9 @@ map_src() {
   esac
 }
 
-# The `pub const` name a grammar's table is bound to, now that a shared filename can no longer tell
-# the four apart. `map_rows_raw` keys its `awk` range on this instead of the old `CAPTURE_CLASSES`
-# literal, which one file cannot use for four tables at once.
+# The `pub const` name a grammar's table is bound to, since a shared filename cannot tell the four apart.
+# `map_rows_raw` keys its `awk` range on this, because one file cannot use a single `CAPTURE_CLASSES`
+# literal for four tables.
 map_const() {
   case "$1" in
     "$G_MINI") echo "REDEXTAPE" ;;
@@ -174,15 +155,9 @@ map_rows_raw() { awk "/pub const $(map_const "$1"):/,/^\];/" "$(map_src "$1")" |
 # disagree about what an export is.
 #
 # **A TOP-LEVEL `pub fn` ON THE NEXT LINE IS THE WHOLE TEST, AND A BARE `grep -c` IS NOT A SUBSTITUTE.**
-# `#[wasm_bindgen]` also annotates four `pub struct` declarations and four `impl` blocks in that file,
-# so counting the attribute alone reads 18 — those eight, plus `init`, plus the nine functions a caller
-# can reach — against the nine. A method inside an `impl` carries the attribute too and is indented,
-# which is what `^pub fn` excludes.
-#
-# THOSE THREE FIGURES WERE WRONG THE DAY THIS COMMENT WAS WRITTEN, NOT LEFT BEHIND BY A LATER EDIT.
-# It said five structs, three impls and 19; the file has never held those. At `79b0f14`, before this
-# branch touched the crate, it was already four, four and 18, exactly as it is now. A paragraph
-# arguing that a bare count misleads is the last place to put a count nobody ran.
+# `#[wasm_bindgen]` also annotates `pub struct` declarations, `impl` blocks and `init` in that file, so
+# counting the attribute alone reads more than the functions a caller can reach. A method inside an
+# `impl` carries the attribute too and is indented, which is what `^pub fn` excludes.
 #
 # `#[wasm_bindgen(start)]` IS EXCLUDED, and the prose it gates says so: `init` runs on module
 # instantiation and is not something a caller counts among the module's functions.
@@ -232,7 +207,7 @@ derive() {
     # Each `tree-sitter test` case is fenced by TWO `===` rules, so the count is half the rules.
     corpus_cases)     n=$(( $(cat "$dir"/test/corpus/* | grep -c '^===*$') / 2 )) ;;
     # REPO-LEVEL KEYS. These ignore `$dir` (passed as `.`) and describe the workspace rather than a
-    # grammar. All three are structural greps — the reason they are gateable at all is that none
+    # grammar. Each is a structural read of the tree — the reason they are gateable at all is that none
     # compiles anything. The workspace's TEST COUNT is deliberately absent: `cargo nextest list
     # --workspace` costs 218 s warm against this whole script's fraction of a second, so the root README states
     # that figure as a dated observation instead. A gate that cannot be cheap should not exist.
@@ -280,10 +255,10 @@ derive_cmd() {
 # Claim location
 # ---------------------------------------------------------------------------
 
-# Number words appear in the λ README where the others use digits, and one TM sentence opens with a
-# capitalised one. Input is lowercased before lookup. Anything unrecognised falls through with
-# commas stripped, so `42,220` becomes 42220 and a non-numeric match stays non-numeric and fails the
-# comparison loudly rather than silently reading as zero.
+# Number words appear beside digits in these documents, and one TM sentence opens with a capitalised
+# one. Input is lowercased before lookup. Anything unrecognised falls through with commas stripped, so
+# `42,220` becomes 42220 and a non-numeric match stays non-numeric and fails the comparison loudly
+# rather than silently reading as zero.
 #
 # **ORDINALS ARE HERE FOR THE `tapeNames()` ROWS, AND THEY READ AS THE POSITION THEY NAME.** Two
 # documents call that export "the tenth" and one of them capitalises it; there is no sentence in this
@@ -460,7 +435,7 @@ self_test() {
     "$(find_claim '**Eleven capture names for nine classes**, and both' "$cls_re")"
   check "commas are stripped" 42220 \
     "$(find_claim '`src/parser.c` is **42,220 bytes** at ABI 15' '`src/parser\.c` is \*{0,2}([0-9,]+|[A-Za-z]+) bytes')"
-  check "a claim WRAPPED across lines is found (the TM README wraps this one)" 11 \
+  check "a claim WRAPPED across lines is found once flattened" 11 \
     "$(find_claim "$(printf 'holds **13 patterns** over **11\ncapture names**, and' | tr '\n' ' ')" "$cap_re")"
   check "a cross-reference is read" 171 \
     "$(find_claim "under half the mini-language's 171, which is" "$xref_re")"
@@ -476,8 +451,8 @@ self_test() {
     "$(find_claim 'the grammar file runs to 147 lines' "$lines_re")"
   check "an AMBIGUOUS locator is refused, not silently first-match" "AMBIGUOUS:2" \
     "$(find_claim '`grammar.js` is 171 lines and `grammar.js` is 78 lines' "$lines_re")"
-  # The loose cross-reference locator this script shipped with in draft, and the prose that caught
-  # it: `mini-language's (...)` matched four different clauses in the λ README.
+  # An unanchored cross-reference locator reads the wrong clause: `mini-language's (...)` matches more
+  # than one clause in the λ README.
   check "an UNANCHORED cross-reference is refused rather than reading the wrong clause" "AMBIGUOUS:2" \
     "$(find_claim "the mini-language's lexer and the mini-language's 171 lines" "mini-language's \\*{0,2}([0-9,]+|[A-Za-z]+)")"
   # The export count and the ordinal share one sentence, so each locator has to refuse the other's
@@ -486,10 +461,10 @@ self_test() {
     "$(find_claim 'to WASM through **nine exports** — the ninth, `tapeNames()`, labels' "$exports_re")"
   check "a reworded export claim returns empty rather than passing" "" \
     "$(find_claim 'compiles to WASM and exports nine functions' "$exports_re")"
-  # The two historical figures that live inside present-tense READMEs today.
-  check "the mini README's historical '156 until PR 3' is NOT captured" 171 \
+  # Two historical figures of the shape a present-tense README can carry.
+  check "a README's historical '156 until PR 3' is NOT captured" 171 \
     "$(find_claim '`grammar.js` is 171 lines (156 until PR 3 replaced extras)' "$lines_re")"
-  check "the lambda README's historical 'read 75 and 156 before that' is NOT captured" 78 \
+  check "a README's historical 'read 75 and 156 before that' is NOT captured" 78 \
     "$(find_claim '`grammar.js` is **78 lines** — under half. (they read 75 and 156 before that.)' "$lines_re")"
 
   echo "derivation reaches the real tree:"
@@ -530,7 +505,7 @@ self_test() {
     "$(printf '%s\n' "$names" | grep -qx 'lambdaStatus' && echo yes || echo no)"
 
   # THE ORDINAL VS. THE COUNT, ON A LIST WHERE THEY DISAGREE. Against the real tree today
-  # `wasm_exports` (a count) and `wasm_tapenames_ordinal` (a position) both read 9, because
+  # `wasm_exports` (a count) and `wasm_tapenames_ordinal` (a position) both read the same number, because
   # `tapeNames` happens to be the last export — so neither the scan above nor the checks above it can
   # tell a position derivation from a count-shaped one that coincidentally returns the right number.
   # A synthetic list with a name AFTER `tapeNames` breaks the coincidence on purpose: the count grows

@@ -20,8 +20,8 @@
 ["(" ")" "{" "}" "[" "]"] @punctuation.bracket
 
 ; `.` and `|` are `Punct` in `class_of`, NOT `Operator` — `TokenKind::Dot` and `TokenKind::Pipe` fall
-; in the punctuation arm. Capturing either as `@operator` is the single most likely way to fail the
-; differential in Task 4.
+; in the punctuation arm. Capturing either as `@operator` is the single most likely way to fail
+; the differential.
 ["," ";" "." "|"] @punctuation.delimiter
 
 ; Every identifier, whatever its role. Required: without it, an identifier in a position no narrow

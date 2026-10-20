@@ -27454,3 +27454,321 @@ LLVM tier at 195cf8b, CI's image, LLVM 22.1.8   → setup, check-all --llvm-only
 | 801, 6, 0 | attribution sites, excused, violations | `scripts/check-attributions.sh`; `grep sites $R/gate-b/scan-attributions.log` |
 | 6 of 6 | web `build:wasm`, `build:lsp-wasm`, `build:bindings`, `biome ci --error-on-warnings`, `typecheck`, `build:app` exiting 0 | run.sh's `web-*` steps; `grep exit= $R/gate-b/web-{build-wasm,build-lsp-wasm,build-bindings,biome,typecheck,build-app}.log` |
 | 280 of 280 files; 2,906 of 2,906 tests | web `pnpm run test:coverage`, passed | run.sh's `web-test-coverage` step; `grep -E 'Test Files\|Tests ' $R/gate-b/web-test-coverage.log` |
+
+#### COMMENTS IN `crates/`, `scripts/`, `.forgejo/`, THE GRAMMARS AND THE ROOT CONFIG FILES KEEP THEIR WHY, AND THE HISTORY AND MEASUREMENTS THEY CARRIED ARE IN SIX PER-AREA NOTES FILES OR GONE; EIGHTEEN CODE COMMITS FIX A BLIND TEST GUARD, TWO PRIVATE COPIES OF `lower_program` AND THE PRINTED STRINGS, MESSAGES AND TEST NAMES THAT CARRIED HISTORY OR FALSE CLAIMS (2026-10-20, branch `comments-crates`, `630248f..df71626`, 92 commits, plus this entry)
+
+**This is PR C of the comments-and-repeats plan.** It applies the user's comment rule of 2026-10-17 to the comments in
+`crates/`, `scripts/` and `.forgejo/`, and by rulings (w) and (z) to the repo-root config files and the grammars'
+hand-written `grammar.js` and `highlights.scm` files: a comment holds the reason, the invariant and what breaks if it
+changes. History and measurements left the comments. Text a future editor could need moved verbatim into six notes
+files, `docs/superpowers/notes/2026-10-17-code-history-<area>.md` for `core`, `core-tests`, `probes`, `wasm-native`,
+`cli-lsp-support` and `scripts-ci`. The rest was dropped. Of the 92 commits, 73 change no code token, and 19 make up
+the code list: 18 change code, each under a user ruling or a controller call named below, and `47dad9f`, CODE-3's
+second commit, rewords two `///` lines. The lane record is `~/temp/redextape-comment-pass-record/` (`R` below); its
+ledger is `progress-part-c.md`.
+
+##### WHAT CHANGED
+
+- **Comments.** The range changes 219 files, +12,028 −10,738: 180 under `crates/`, 16 under `scripts/`,
+  `.forgejo/workflows/ci.yml`, 11 under `grammars/`, five root config files (`.gitignore`, `.dockerignore`,
+  `Dockerfile`, `.pre-commit-config.yaml`, `Cargo.toml`; 0 changed lines outside `#` comments) and the six notes files.
+  `check_comment_only.py 630248f` passes 147 source files as comment-only, their comment lines going from 20,637 to
+  18,988, and reports CODE CHANGED for 57, which are files the code commits change. It has no lexer for 9: in
+  `Dockerfile`, `.dockerignore` and three `highlights.scm` files the changed lines are `#` or `;` comments, and in four
+  grammar READMEs they are the `grammar.js` line counts `check-doc-figures.sh` pins and two "PR 3" asides those counts
+  made misleading.
+- **Notes.** Five notes files are new, and `…-probes.md`, which PR A started, grew. `check_moves.py` finds 623 added
+  entries holding 996 paragraphs, 0 of them failing its verbatim check against the comments at `630248f`.
+- **Fences.** By rulings (c), (i), (s) and (x), ```` ```text ```` fences that held history or measurements were edited
+  like prose: in five probe files, 3 fences were rewritten and 4 removed whole. The checker pins each byte for byte.
+- **False claims.** By ruling (a), comments untrue of the code at `630248f` were fixed as they were found,
+  comment-only. Among them: the stale tree-sitter claims in `check-all.sh` and `setup-dev.sh` (`c0edd56`, `67bb9ec`,
+  `48f35f2`, and in the error string CODE-8 and CODE-9), and the asm grammar's two pointers, D870 and D872, at
+  `parse_asm_full`'s "own comment", which sits in `parse_asm_nav` (`191dd92`).
+
+##### THE USER'S RULINGS
+
+- **2026-10-17:** the comment rule, and the plan's decisions: Sonnet implements and task-reviews the chunks, and Opus
+  reviews the whole PR once.
+- **(a)** Fix the pre-existing false claims in this PR, comment-only. **(b)** An extra chunk, `unlisted-01`: the 150
+  unlisted blocks a history regex matched. **(c)** Fix the fenced `text` block in `list_reduction_probe.rs`'s module
+  doc under a one-fence exception in the checker. **(d)** An Opus review of each changed block the sample missed, then
+  one fix wave. **(e)** An extra chunk, `unlisted-02`: the 105 unchanged blocks with process labels; a label that is
+  the reason stays. **(f)** Fix three code items: `lambda_sharing_probe`'s legend, `list_reduction_probe`'s "HAZARD …
+  IS OPEN" line and the floors in `outline.rs`'s corpus test. **(no letter)** CODE-4 is its own code commit.
+  **(g)** An Opus review of fix wave 3's diff, one fix round, an Opus re-review. **(h)** CODE-5 is its own code commit.
+  **(i)** Re-pin the one fence so it and `family_reduce_one`'s doc carry one true ramp rule. **(j)** CODE-2's fix
+  commit also corrects the printed "(not used directly; …)" line. **(k)** One code commit fixes three leftover printed
+  strings. **(l)** CODE-7: q2b's sizes become `[699, 700, 800, 1000, 1250, 1499, 1500, 2000]`. **(m)** The Q2a heading
+  prints `BUDGET_S`; its wall-clock "(6.25s)" and "(35.2s)" are listed for a later code pass. **(n)**, **(o)** CODE-8
+  and CODE-9 fix `check-all.sh`'s tree-sitter mismatch error.
+- **(p)** CODE-10: one code commit fixes the class of process labels and history in printed strings.
+- **(q)** Fix the wider history class in this PR, from the first history scan's 251 hits.
+- **(r)** Reword one commit message before the push: `284ba54` became `5008810`, message only.
+- **(s)** Pin a second fence, `blowup_probe`'s, proven in a tree where only that fence differs.
+- **(t)** CODE-12 renames the three test names that tell history.
+- **(u)** A full read of every comment in `crates/`, `scripts/` and `.forgejo/`, one fix round per area with reviews,
+  then stop.
+- **(v)** CODE-13: the native crate and `native_oracle` call core's `lower_program` in place of identical private
+  copies.
+- **(w)** The repo-root config files join Part C.
+- **(x)** ```` ```text ```` fences holding history or measurements are edited like prose, each pinned and proven;
+  command blocks keep their commands.
+- **(y')**, superseding **(y)** (CODE-15 removes the zipper `climbs` counter): keep the counter, which
+  `lambda_sharing_probe`'s PART D reads, and cut only the stale clause, comment-only (`0d85980`).
+- **(z)** The grammars' hand-written files, four `grammar.js` and four `highlights.scm`, join Part C.
+
+Rulings (a) to (j) and CODE-4's are dated 2026-10-18, (k) to (s) 2026-10-19, and (t) to (z) 2026-10-20.
+
+##### HOW THE COMMENTS WERE CHECKED
+
+The method ran in four stages: keyword-cut chunks with reviews, regex scans for history, a full read, then reviews of
+the fix commits. Its limit is that a read is one reader's judgement: reviews kept finding false claims that a fix had
+written, a review's own drafted fix among them (`$R/c/F-Bfix-1-review.md` I-1), and the last fix of each lane was
+self-checked, not reviewed.
+
+- **Chunks.** Task C0 cut 1,033 flagged blocks into nine chunks; by ruling, `unlisted-01` (150 blocks) and
+  `unlisted-02` (105 with process labels) followed. A Sonnet implementer ran `check_comment_only.py 630248f` and
+  `check_moves.py` (built in the lane, not committed), then a Sonnet task review. `check_moves.py` checks each moved
+  paragraph against the comments at `630248f`, case-sensitive, and flags added comment lines over 120 columns and
+  one-word orphans.
+- **Whole-PR review.** At `1c97b3a` an Opus review of a 321-block sample found 20 Important defects; 3 of the random
+  tenth's 75 blocks were Important, so ruling (d) put Opus on the other 464 changed blocks, which found 36 more. An
+  enumerator kept 979 pointer sentences into files whose comments changed; Opus verifiers read the 308 it marked
+  LIKELY-DANGLING or UNSURE and 20 of the 671 it marked LANDS: 20 CONFIRMED, 18 PRE-EXISTING, 290 FALSE. Fix wave 3
+  took 219 items in seven area commits; Opus reviews of its diff found 7 more Important, and of `unlisted-02` 7.
+- **Printed strings.** CODE-10's scan at `2ebc223` matched 483 strings and judged them: 13 LABEL, 28 HISTORY, 1 STALE,
+  441 LEGIT.
+- **History scans (ruling q).** A regex scan at `855c3be` judged 819 hits: 250 HISTORY and 1 FALSE, in 206 blocks. A
+  second scan at `f2bd834`, for forms the first missed, judged 469: 74 HISTORY and 2 FALSE, in 70 blocks. Chunks H1
+  `f2bd834`, H1b `6d8998c`, H2 `67787f9`, H3a `68b604b`, H3b `4abbd82` and H4 `abee2d2` fixed them, each with an Opus
+  review. The H3a and H3b reviews read their files whole and found about 45 more each that neither scan matched, so
+  the class needed a read, not a wider regex.
+- **The full read (ruling u).** Ten readers took the files under `crates/`, `scripts/` and `.forgejo/` that had a
+  comment line at `abee2d2` (`.rs`, shell, YAML, TOML, text, `.gitignore` and proptest-regressions files) and that no
+  chunk review had read whole: 176 files in nine slices, 57 more having been read whole. A tenth slice held the nine
+  root config files (ruling w), and one more dispatch read and fixed the eight grammar files (ruling z). The ten
+  wrote 709 finding rows (history, measurements, labels, false claims), and the grammar dispatch 28. Not read:
+  fixtures (`.rxt`, `.tm`, `.asm`, `.stdout`, `.stderr`), Markdown and JSON under those directories.
+- **The fix phase.** Lane A fixed core `src/` and `tests/` in 9 commits, `b96f5ab` to `c7b421c`. Lane B fixed the core
+  examples, the other crates, the grammars, the scripts, CI and the root files in 10 commits, cherry-picked as
+  `b64557e` to `087f326`. Each of the 34 commits after `2ebc223` has a review in `$R/c/`; `c7b421c` and `087f326`,
+  each lane's last, applied a narrow review's drafted fixes and then had a narrow review of their own
+  (`$R/c/F-closing-review.md`). The rows that were printed strings,
+  messages or test names went to CODE-14.
+
+##### THE CODE COMMITS
+
+- **CODE-3, `0d873f2` + `47dad9f`, ruling (f), `crates/redextape-lsp/src/outline.rs`.** The corpus half's two floors
+  were blind: the test passed with its named fixture, `run_nested_scopes.in/p.rxt`, deleted, because the other `.rxt`
+  files of the 31 the walk reaches still build 25 nodes at depth 2. The test now panics if the walk does not reach that
+  file, and pins its 8 nodes and depth 3. Deleting the fixture fails at the guard; a flat copy fails the depth pin (1
+  vs 3); removing `fn grow` fails the count (7 vs 8). `47dad9f` changes only two `///` lines.
+- **CODE-1, `666a276` + `598e50b`, ruling (f), `examples/lambda_sharing_probe.rs`.** The legend printed "the residual
+  after Rc is 10.3x/50.0x: THAT argues for interning", from pins `tests/lambda_sharing.rs` no longer holds. The probe
+  now counts distinct `Rc` allocations on rows 7 and 9 and prints the ratios from the run: row 9 17,920 → 13,590
+  (1.32x), row 7 4,305 → 3,710 (1.16x). **The verdict changed:** "THAT residual, not the ceiling, is what interning
+  adds beyond Rc". The "~35 ns/node" it quoted is gone; PART C.2's fit gave 19.31 to 20.23 ns/node in four capped runs.
+- **CODE-2, `3a6c45d` (f) + `aa5f946` (i, j), `examples/list_reduction_probe.rs`.** The refusal line said a level-7
+  β-step does not return. Capped runs of `family-reduce` 1 to 7 each returned `HitCap`, at 107,379 to 109,594 steps,
+  below `MAX_REDUCTION_STEPS` (5,000,000); a scratch print showed `depth_capped=true term_depth=3001`, so the depth
+  guard (`MAX_TERM_DEPTH`, 3,000) ends each level. The doc and the pinned fence share one ramp rule: stop at the first
+  level that is killed from outside or reports `did not finish in budget`.
+- **CODE-4, `dcd73e7`, the unlettered ruling, `src/lambda/syntax.rs`.** The assert message named a `parenthesized`
+  re-check; `Printer`'s method is `parens`, and the message now names it.
+- **CODE-5, `2895a0b`, ruling (h), `tests/viewmodel_contract.rs`.** The message said `node_to_lambda` "was deleted",
+  but the field `SourceMap::node_to_lambda` exists. It now says no step's owner within the 5,000-step cap resolves to
+  `x + 2`.
+- **CODE-6, `2439d29`, ruling (k).** `list_reduction_probe`'s Q2b heading prints `MAX_TERM_DEPTH` where it hard-coded
+  3000, and its ramp line says `10 * n + 100`, the cap the loop passes. `step_survey`'s "I5's" labels are gone.
+- **CODE-7, `6d49fcb`, rulings (l) and (m).** q2b's sizes run to 2000, past the crossing: in a capped run n=1499 gives
+  depth 3000, not refused, and n=1500 depth 3002, refused. The Q2a heading prints `BUDGET_S` where it hard-coded "10s".
+- **CODE-8, `daacc5b` (n), and CODE-9, `2ebc223` (o), `scripts/check-all.sh`.** The tree-sitter mismatch error said a
+  `master` build self-reports "0.27.0" and "regenerates a different .minor_version". Today's `master` build reports
+  0.28.0 and regenerates `parser.c`'s `@generated` line and `array.h` differently; the error now says such a build
+  regenerates files that differ from the committed ones. Fake CLIs reporting 0.28.0 and 0.25.10 drove it to exit 1
+  and 0.
+- **CODE-10, `f246a68` + `7b86e74`, ruling (p).** The probes, demos, test messages, `check-citations.sh` and
+  `setup-dev.sh` print what their output means without the plan, task, review or history behind it; `setup-dev.sh`
+  prints "==> pre-commit hooks installed" where it listed 9 hooks.
+- **CODE-11, `7313836`, ruling (p).** `step_survey` printed `3b932ec`, a SHA this repository does not hold; it now
+  says the `$box_get`/`$box_set` row is included and not in the headline.
+- **CODE-12, `2f2ba9d`, rulings (t) and (p).** `silent_literal_corruption_is_now_reported`,
+  `the_verified_counterexample_is_now_rejected` and `an_override_in_a_file_that_used_to_be_skipped_is_now_checked` are
+  renamed for what they pin, and five printed or asserted messages say what holds.
+- **CODE-13, `c30cf2f`, ruling (v).** `redextape-native`'s `lib.rs` and `tests/native_oracle.rs` dropped their private
+  copies of `lower_program` and call `redextape_core::tm::lower_program`. `tests/aot_oracle.rs` keeps its own
+  lowering, which retries through `defunc` on any error, `TooDeep` included; its doc now says how it differs.
+- **CODE-14, `b3e713b` (core) + `df71626` (the rest), rulings (p) and (t).** The printed strings, messages and test
+  names the full read found historical, labelled or false say what holds: `tm_demo` prints a 5-tape machine where it
+  printed "4-tape"; the grammar-check λ floor no longer says list literals and UFCS fall outside `lambda::lower`;
+  `check-citations.sh` no longer says its marker count ships at zero; `shift_cost_probe`'s `subst` contest and three
+  golden tests are no longer called today. It renames 16 test functions, among them `o0_equals_o3`, now
+  `every_opt_level_agrees_on_source_programs`; that test needs LLVM, and the LLVM tier below is its first run.
+
+##### CALLS THE CONTROLLER MADE THAT THE USER HAS NOT RULED ON
+
+- **False printed strings and messages** went into CODE-12 and CODE-14 with the label class ruling (p) named.
+- **Hard-coded measured figures in printed strings and `#[ignore]` reasons are listed, not changed,** as ruling (m)
+  did for Q2a's.
+- **Borderline provenance words** ("measured", "verified") were judged LEGIT unless they tell how or when something
+  was found.
+- **Kept:** `native_oracle`'s "v1" (core's `LowerError` says "(v1 limitation)"); `check-all.sh`'s chromedriver figures,
+  one clause of evidence another comment points at; `redextape-lsp`'s 7,353/18,499, a one-clause reason.
+- **`aot_oracle`'s lowering kept its code:** CODE-13 first replaced it too, and was amended, since a copy whose shape
+  differs keeps its code, as in Part B.
+- **CODE-14's scope:** 16 test renames beyond (t)'s three, the three golden tests ending `_today` among them, and
+  `shift_cost_probe`'s "today" names, which called the pre-fusion `subst` path current.
+- **The grammar READMEs** follow the shorter `grammar.js` line counts `check-doc-figures.sh` pins, and lost the two
+  "PR 3" asides those counts made misleading. Their other prose errors are listed below: READMEs are docs.
+- **Earlier calls:** CODE-1's verdict wording; CODE-2's review-driven code (`MAX_TERM_DEPTH` imported, `let _ =
+  Status::Normalized;` deleted); `step_survey`'s "(I5's second gap)" moved into code commit `2439d29`;
+  `RECORD_BUDGET` left `frame_cost_probe`'s comment (`49addbf`; 0 files outside `docs/` name it);
+  `install-treesitter-ci.sh`'s "no 0.27.0 release" sentence deleted (`9e847fa`); `MAX_MUL_INSTRS`'s doc lost its ~410
+  MB figure, the note keeping ~421 MB (`e524595`); optional review points not taken.
+- **Opus in place of Sonnet** for the `unlisted-02` review, the dangling-pointer enumerator and its six verifiers, fix
+  wave 3's final fixers, the history chunks' implementers and reviews, and the full read's readers.
+
+##### THE CHECKER
+
+`check_comment_only.py` and its `lexer.py` sit in `.superpowers/sdd/comment-pass/`, gitignored, as the plan decided.
+It lexes shell, and it counts a trailing YAML `#` comment as code, so `ci.yml`'s one runner comment is CODE CHANGED.
+
+- **Fence pins.** `ALLOWED_FENCE_EDITS` holds 7 entries: ruling (c)'s `list_reduction_probe` fence (re-pinned by
+  (i)), the rewritten `blowup_probe` and `guard_hole_probe` fences, and four removals (`lambda_sharing_probe`'s GATE
+  fence, `shift_cost_probe`'s three tables). The real check skips the fence test on a file whose code changed, so
+  each pin was proven at `630248f` in a tree whose one change was that fence: exit 0, a one-word change exits 1, and
+  the restored copy is `cmp`-identical. The self-test passes 52 of 52.
+- **A `.gitignore` reader.** The lexer reads a line whose first character is `#` as a comment, per gitignore(5).
+- **The comment-only proof** (`$R/c/proof-final-report.md`). In a scratch worktree at `df71626`, `git revert
+  --no-commit` of the 19 code-list commits, newest first, stopped twice, at `aa5f946` (`list_reduction_probe.rs`)
+  and `0d873f2` (`outline.rs`). Both conflicts were comment regions, resolved to `df71626`'s comment text, and four
+  of `aa5f946`'s comment hunks were set back to it so the pinned fence matches. The live checker run with `630248f`
+  then reports 0 CODE CHANGED and 0 fence FAILs; its FAIL lines are the 9 files it has no lexer for. A one-token
+  change in `outline.rs` and a one-word change in `guard_hole_probe`'s pinned fence were refused, then restored
+  `cmp`-identical. Checked one by one, none of the 73 commits outside the list changes a code token.
+
+##### WHAT THIS DID NOT CLOSE
+
+- **Left for Part D (`web/`).** D961, D965, D970 and D975 (`$R/c/fw3-dangling-part-d.md`; its D870 and D872 were
+  fixed here). `web/tests/browser/app.test.ts` lines 667-668 say the printer walks to `MAX_TERM_DEPTH` (3,000), where
+  `MAX_PRINT_DEPTH` (1,000) caps it. `web/src/lambda-pane.ts` line 872 ("found and fixed in T8 … this whole slice's"),
+  `web/src/editor-custody.ts` line 104 ("until this fix") and `web/src/main.ts` line 1586 ("today's behaviour").
+- **The leading-`+` divergence.** The grammars reject `tapes +1`, `width +4`, `mov r+1, r0` and `li r0, #+5`, which
+  `parse_tm_full` and `parse_asm_full` accept (`$R/c/F-G-review.md` ran both). The printer never writes `+`, so the
+  differential cannot see it.
+- **For a later code pass.** `.pre-commit-config.yaml`'s `check-lua` hook has
+  `files: (\.lua$|^grammars/.*/src/parser\.c$)` and misses `crates/redextape-lsp/src/language.rs`, which
+  `check-lua.sh` reads. `check-attributions.sh`'s self-test writes a `core.rs` fixture at line 645 that line 857
+  overwrites before an assertion reads it (`$R/c/F-B5-review.md`). `redextape-grammar-check`'s
+  `lower_via_program_template` keeps its own lowering (it returns `Option`, a different shape). The hard-coded
+  measured figures in printed strings and `#[ignore]` reasons that `$R/c/code-14a-report.md` and `code-14b-report.md`
+  list, among them Q2a's "(6.25s)" and "(35.2s)", whose 10 s crossing does not happen on this machine (CODE-7's
+  slowest q2a row, n=650, took 0.615 s).
+- **Grammar README prose** (docs): TM README lines 153 and 175-176, asm README 4-5 and 164, the mini-language README
+  381-383 and 394, and the λ README 212-214, which says a `master` build "emits different metadata" where it also
+  emits a different `array.h` (`$R/c/F-G-review.md`, `$R/c/code-14b-report.md`, `$R/c/end2-review.md` m-4).
+- **Pre-existing run failures.** Under a 2 GiB cap `concurrency_probe` is killed in part F; the CODE-14 review judged
+  it pre-existing by comparing the code part F runs with `630248f`'s, not by a run there. `llvm_demo`, linked on this
+  host against LLVM 23.1, exits 1 at its `Os` row ("no longer supported"), as it does at `630248f`.
+- **NOT VERIFIED.** The claim that line 1 of `parser.c` is "The ONLY change anywhere in `src/`" between v0.25.10 and
+  v0.26.12 moved with its measurement from `install-treesitter-ci.sh` to the scripts-ci notes (`02c210c`); the grammars
+  design spec §8.1.1 says `array.h` "downgrades with it". Settling it needs a v0.26.12 binary.
+- **Records keep the old figures.** The structural-sharing design spec
+  (`docs/superpowers/specs/2026-07-30-lambda-structural-sharing-design.md`) quotes 10.3x/50.0x and ~35 ns/node in §3
+  and §10, and this roadmap's two entries of 2026-07-31 on λ sharing and layer 1.5 quote them too. The grammars
+  design spec's §8.1.2 says, undated, that a `master` build "would emit the other `.minor_version`". Docs are
+  records, so they stay.
+- **Notes entries sit out of order.** An entry a later commit added sits at the end of its notes file, away from the
+  same source file's earlier entries; 78 source files have entries in more than one run. The probes notes' 14
+  entries from PR A anchor on lines that were gone at `630248f` too, and are left.
+- **Pointer sentences not read:** 651 of the 671 marked LANDS (the 20 spot-checks found 0 wrong), and 437 the
+  enumerator could not resolve to a file.
+
+##### VERIFICATION
+
+The git counts and the two checkers ran on 2026-10-20 at `df71626` (the comment checker in a `git clone --shared` of
+the repository, since a gate held the main checkout). The full gate ran on 2026-10-20 at `df71626`, started by
+`$R/gate-c2/all-final.sh`; the test counts and coverage come from its units' journals, saved in
+`$R/gate-c2/journal-df71626/`. The web job did not run locally: `git diff --stat 630248f..df71626 -- web/` is empty.
+Nothing has run in CI: the branch has not been pushed. The commit that adds this entry changes this one file.
+
+```
+python3 -I .superpowers/sdd/comment-pass/check_comment_only.py 630248f
+  → exit 1: "147 source files changed only in comments; comment lines 20637 -> 18988";
+    CODE CHANGED for 57 files; 9 files with no lexer
+python3 -I .superpowers/sdd/comment-pass/check_comment_only.py --self-test
+  → exit 0, "self-test: 52/52 pass"
+python3 -I $R/c/check/check_moves.py df71626
+  → exit 0: "moves: 623 entries, 996 paragraphs, 0 failing";
+    "width: 6962 added comment lines, 0 over 120, 0 orphans"
+comment-only proof, 19 reverts, live checker with 630248f ($R/c/proof-final-report.md)
+  → exit 1 for the 9 no-lexer files only: "202 source files changed only in comments;
+    comment lines 35151 -> 31713"; 0 CODE CHANGED, 0 fence FAILs
+scripts/check-all.sh --no-llvm ($R/gate-c2/chain.sh)
+  → exit 0; "green, but PARTIAL — these tiers were SKIPPED: LLVM"; nextest
+    1903 passed/33 skipped, 1319/32, 1343/32, 130/0, 118/0, 119/0, 10/0
+cargo llvm-cov nextest --workspace --fail-under-lines 90 ($R/gate-c2/chain.sh)
+  → exit 0; 1903 passed, 33 skipped; TOTAL lines 95.59%
+scripts/check-slow.sh ($R/gate-c2/chain.sh)
+  → exit 0, "slow tier green"; 33 passed across its `test result` lines
+the eight scans, --self-test then alone ($R/gate-c2/scans.sh)
+  → 16 exits 0; "checked 793 attribution sites, 4 excused by marker, 0 violations"
+check-licences.sh --self-test, then alone, in web/ after pnpm install --frozen-lockfile ($R/gate-c2/chain.sh)
+  → exit 0 each; "web/src/third-party-licences.json matches what the site ships"
+LLVM tier: $R/llvm-gate/llvm-host-c2.sh df71626 (git archive into CI's pinned catthehacker/ubuntu image, LLVM 22.1.8)
+  → CI's rust-llvm job reproduced locally: setup, check-all.sh --llvm-only and opt_report exit 0;
+    nextest 104 passed/0 skipped and 45/0; every_opt_level_agrees_on_source_programs PASS in both
+```
+
+The notes-order count, 78, is the sum of this loop's six numbers (20, 23, 13, 5, 11, 6):
+
+```
+for f in docs/superpowers/notes/2026-10-17-code-history-{core,core-tests,probes,wasm-native,cli-lsp-support,scripts-ci}.md; do
+  grep '^## ' $f | sed -E 's/^## `([^`]*)`.*/\1/' |
+    awk '{ if ($0 != p) { if (s[$0]) x[$0] = 1; s[$0] = 1 } p = $0 } END { n = 0; for (k in x) n++; print n }'
+done
+```
+
+**The counts this entry quotes outside the blocks above, with what produces them.** From the repository root,
+`B=630248f`, `H=df71626`, `W=.superpowers/sdd/comment-pass`, `R=~/temp/redextape-comment-pass-record`, `C` = the 19
+code-list SHAs (`0d873f2 47dad9f 666a276 598e50b 3a6c45d aa5f946 dcd73e7 2895a0b 2439d29 6d49fcb daacc5b 2ebc223
+f246a68 7b86e74 7313836 2f2ba9d c30cf2f b3e713b df71626`). "Report" and "ledger" rows are results recorded in
+`$R/c/<name>` or `$R/progress-part-c.md`, not commands run for this entry.
+
+| Value | What | Produced by |
+|---|---|---|
+| 92; 19; 73 | commits; on the code list; outside it | `git rev-list --count $B..$H`; `git rev-list $B..$H \| cut -c1-7 \| grep -c -E '^(<C, joined by \|>)$'` (and `-v -c`) |
+| 18; 0 | code-list commits changing a code token; other commits doing so | report: `proof-final-report.md`, "Is the code-commit list complete?" |
+| 57; 60 | CODE CHANGED files; files the 19 touch | the checker's FAIL lines; `git show --name-only --format=` on `C`, `sort -u` |
+| 219 files, +12,028 −10,738; 180; 16; 11 | the range; under `crates`, `scripts`, `grammars` | `git diff --shortstat $B $H` (and `-- crates`, `-- scripts`, `-- grammars`) |
+| 5; 0 | root files changed; their changed lines outside `#` comments | `git diff --name-only $B $H`, outside the five directories; `git diff -U0 $B $H -- <file> \| grep -E '^[+-]' \| grep -v -E '^(\+\+\+\|---)' \| grep -v -c -E '^[+-][[:space:]]*#'` |
+| 5; 0 | notes files added; files deleted | `git diff --name-status $B $H -- docs`; `git diff --name-status --diff-filter=D $B $H \| wc -l` |
+| 7: 3 rewritten, 4 removed; 5 files | fence pins | report: `fence-pins-report.md`; re-checked at `$H` in `proof-final-report.md` |
+| 1,033 in 9; 150; 105 | blocks in the C0 chunks; `unlisted-01`; `unlisted-02` | the length of each `$W/c/<chunk>.json` list, read with `python3 -I` |
+| 321; 464 | sample blocks at `1c97b3a`; the other changed blocks | `grep -c -E '^#+ B[0-9]{4}' $R/c/sample/sample-1c97b3a-{A,B,C}.md`, summed; the same on `sample-rest-1c97b3a.md` |
+| 20 | Important in the sample reviews | `grep -c -E '^(#+ *\|\*\*\|- \*\*\|[0-9]+\. \*\*)(I[0-9]+\|Important [0-9]+)\b' $R/c/whole-review-{A,B,C}.md`, summed (6, 7, 7) |
+| 36; 3 of 75 | Important in the remainder reviews; random-tenth blocks graded Important | ledger, "ALL 6 REMAINDER REVIEWS DONE" and "SAMPLE RATE" |
+| 979; 308; 671; 437 | pointer sentences kept; marked LIKELY-DANGLING (19) or UNSURE (289); LANDS; unresolved | `$R/c/dangling/candidates.md`, "Counts" and "Scope and patterns" |
+| 20, 18, 290; 0 of 20 | CONFIRMED, PRE-EXISTING, FALSE; LANDS spot-checks wrong | `grep -c -E '^## D[0-9]+ — CONFIRMED' $R/c/dangling/verified-*.md` (and the other two), summed; ledger, "DANGLING VERIFY ALL DONE" |
+| 6; 4 | Part D dangling entries; still open | `grep -c '^## D' $R/c/fw3-dangling-part-d.md`; D870 and D872 fixed in `191dd92` (`git grep -n parse_asm_nav $H -- grammars/tree-sitter-redextape-asm/grammar.js`) |
+| 219; 7; 7, 7 | fix-wave-3 items; its area commits; Important in its Opus reviews and the `unlisted-02` review | `$R/c/fix-wave-3-list.md`, the total row; ledger, "FW3 PLAN", "Opus fw3 A review" and "unlisted-02 review (OPUS)" |
+| 483: 13, 28, 1, 441 | CODE-10's scan | report: `code-10-report.md` |
+| 819: 250, 1 in 206; 469: 74, 2 in 70 | the two history scans | reports: `history-enum.md`, `history-enum-2.md`, "Result" |
+| about 45 each | history the H3a and H3b reviews found by reading files whole | ledger, "H3a REVIEW" and "H3b REVIEW" |
+| 176 in 9; 57; 9; 8 | files read: sliced; read whole by chunk reviews; root; grammar | `grep -c .` on `$R/c/fullread/slice-{1..9}.txt`, summed; on `already-read.txt`, `slice-10.txt`, `g-files.txt` |
+| 709; 28 | finding rows in slices 1 to 10; in the grammar dispatch | `grep -c -E '^\| *[0-9]+ *\|' $R/c/fullread/slice-*-findings.md`, summed; ledger, "F-G DONE" |
+| 9; 10 | lane A commits; lane B commits | `git log --oneline b96f5ab~1..c7b421c \| wc -l`; `git log --oneline b64557e~1..087f326 \| wc -l` |
+| 34; 32 | commits after `2ebc223`; with a review in `$R/c/` | `git rev-list --count 2ebc223..$H`; the ledger's map of each commit to `code-10*`, `hist-*`, `code-12-13`, `F-*` and `code-14` reviews |
+| 16 | test functions CODE-14 renames | `git show -U0 --format= b3e713b df71626 -- '*.rs'`: the `-fn` lines (20) less the probes' `beta_today` (2), `today` and `subst_allocs_today` |
+| 31; 25 at depth 2; 8; 3; 1 vs 3; 7 vs 8 | CODE-3's corpus, pins and sabotages | report: `code-3-report.md`; `grep -n -E 'len\(\), 8\|max_depth\(&nested_tree\), 3' crates/redextape-lsp/src/outline.rs` |
+| 17,920 → 13,590 (1.32x); 4,305 → 3,710 (1.16x) | rows 9 and 7 | report: `code-1-report.md` |
+| 19.31 to 20.23 in four runs | PART C.2's fitted price | reports: `code-1-report.md` (20.23, 19.40), `code-1-review.md` (20.19); ledger, "CODE-1 fix round 1" (19.31) |
+| 107,379 to 109,594; `term_depth=3001` | `HitCap` steps; the scratch print at level 7 | reports: `code-2-report.md`; `code-2-review.md` |
+| 5,000,000; 3,000; 1,000; 5,000 | `MAX_REDUCTION_STEPS`; `MAX_TERM_DEPTH`; `MAX_PRINT_DEPTH`; CODE-5's cap | `git grep -n -E 'pub const (MAX_TERM_DEPTH\|MAX_REDUCTION_STEPS\|MAX_PRINT_DEPTH)' $H -- crates`; `grep -n '5,000-step cap' crates/redextape-core/tests/viewmodel_contract.rs` |
+| n=1499 depth 3000; n=1500 depth 3002; 0.615 s | CODE-7's capped q2b rows; its slowest q2a row | report: `code-7-report.md` |
+| 0.28.0; `@generated` line, `array.h` | today's `master` build; where its regenerated files differ | report: `end-review.md`, I-1 |
+| 9; `3b932ec` | hooks `setup-dev.sh` listed; the SHA `step_survey` printed | `git show 7b86e74 -- scripts/setup-dev.sh`; `git show 7313836`, and `git cat-file -t 3b932ec` fails |
+| 0; 0; 0 | `I5's` at `$H`; files outside `docs/` naming `RECORD_BUDGET`; `4(10\|21) MB` in `crates/` | `git grep "I5's" $H \| wc -l`; `git grep -l RECORD_BUDGET $H -- ':!docs' \| wc -l`; `git grep -n -E '4(10\|21) MB' $H -- crates \| wc -l` |
+| §3, §10; 2 entries | where the design spec quotes 10.3x/50.0x and ~35 ns/node; roadmap entries quoting them | `git grep -n -E '10\.3x\|50\.0x\|35 ns/node' $H -- <spec> <roadmap>`, against each file's headings |
+| 14; 651 | probes notes entries at `$B`; LANDS marks not read | `git show $B:docs/superpowers/notes/2026-10-17-code-history-probes.md \| grep -c '^## '`; 671 less the 20 spot-checks |

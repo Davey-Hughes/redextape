@@ -42,11 +42,9 @@ pub(crate) fn physical(t: &LambdaTerm) -> usize {
     seen.len()
 }
 
-/// `None` when `lower` refuses, printing the error rather than aborting. Since the shared-subterm guard
-/// was reverted only `TooDeep` and the two `Unsupported` cases can fire here, and none of
-/// `guard_hole_probe.rs`'s sources trips them — but a ramp that panics reports nothing after the panic,
-/// and that defect is exactly what took `list_reduction_probe`'s documented invocation down when the
-/// guard landed.
+/// `None` when `lower` refuses, printing the error rather than aborting, because a ramp that panics
+/// reports nothing after the panic. `lower` makes no shared-subterm refusal, and none of
+/// `guard_hole_probe.rs`'s sources trips the refusals it does make.
 pub(crate) fn lower_src(src: &str) -> Option<LambdaTerm> {
     let (prog, ds) = parse(src);
     assert!(ds.is_empty(), "parse errors: {ds:?}");

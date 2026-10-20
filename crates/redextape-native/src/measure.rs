@@ -1,20 +1,19 @@
-//! Measurement for the optimizer's Tier C: what each backend's optimization levels actually cost
-//! and buy. Collects three observables per (program, backend, level) — compile time, emitted object
-//! bytes, and one end-to-end compile-and-run time — as structured records shared by the
-//! `opt_report` example (which prints them) and the `size_baseline` test (which gates the byte
-//! counts).
+//! Measurement for the optimizer: what each backend's optimization levels actually cost and buy.
+//! Collects three observables per (program, backend, level) — compile time, emitted object bytes,
+//! and one end-to-end compile-and-run time — as structured records shared by the `opt_report`
+//! example (which prints them) and the `size_baseline` test (which gates the byte counts).
 //!
 //! Three deliberate limits. **Size is comparable within a backend only**: an LLVM object and a
 //! Cranelift object differ in format and symbol-table overhead, so only the across-level deltas
 //! inside one backend mean anything. **`compile_and_run` is not isolated execution time, and is NOT
 //! orthogonal to `compile`**: `run_native_with` lowers, JIT-compiles, AND executes in one call, and
-//! this crate has no API that builds once and then loops just the call (adding one is out of scope
-//! here) — so every `compile_and_run` sample necessarily re-pays codegen. `CORPUS` is sized (see its
-//! doc) so execution is a meaningful share of that time rather than being lost entirely in codegen
-//! noise, but the column must never be read as steady-state execution time, and a level that makes
-//! codegen slower (e.g. `-O3`'s extra inlining/unrolling work) can make `compile_and_run` look worse
-//! even when the generated code itself runs faster. **Run time is indicative, never asserted** — it
-//! is wall-clock on a shared machine, so it belongs in a report a human reads, not in a gate.
+//! this crate has no API that builds once and then loops just the call — so every `compile_and_run`
+//! sample necessarily re-pays codegen. `CORPUS` is sized (see its doc) so execution is a meaningful
+//! share of that time rather than being lost entirely in codegen noise, but the column must never be
+//! read as steady-state execution time, and a level that makes codegen slower (e.g. `-O3`'s extra
+//! inlining/unrolling work) can make `compile_and_run` look worse even when the generated code
+//! itself runs faster. **Run time is indicative, never asserted** — it is wall-clock on a shared
+//! machine, so it belongs in a report a human reads, not in a gate.
 //!
 //! Ruled out as an observable: `rt_tick` counts. `rt_tick` is an opaque external call, so unrolling
 //! duplicates the calls rather than eliminating them and the count is codegen-invariant.
@@ -30,7 +29,7 @@ use std::time::{Duration, Instant};
 use redextape_core::core::Core;
 use redextape_core::desugar::desugar;
 use redextape_core::parser::parse;
-use redextape_core::tm::{DEFAULT_CAPS, Program};
+use redextape_core::tm::{DEFAULT_CAPS, Program, lower_program};
 use redextape_core::ty::Ty;
 use redextape_core::typeck::result_type;
 
@@ -51,17 +50,11 @@ pub const RUNS: usize = 5;
 ///
 /// Sized, not just shaped: native ticks the step counter only on backward edges and calls, not per
 /// instruction, so a loop's cost scales with its iteration count and a recursive program's with its
-/// call depth — NOT with how much arithmetic each iteration/call does. At the original sizes
-/// (100/100/50/a 3-element list) every program ran in low single-digit microseconds against a JIT
-/// compile of tens of microseconds to several milliseconds (worse at `-O3`/LLVM), so execution was
-/// under 1% of `compile_and_run` (measured directly with a temporary split timer around just the
-/// call into JIT-compiled code, then discarded — not part of this file): the old `run` field was
-/// really a second compile-time column wearing a misleading label. Scaled up here so each program's
-/// own execution is a meaningful share of `compile_and_run` (double digits of percent, sometimes the
-/// majority) while staying comfortably inside `redextape_core::tm::DEFAULT_CAPS`
-/// (`steps: 5_000_000, stack: 100_000, heap: 5_000_000`, checked directly, not assumed): the loop's
-/// 1,000,000 backward edges are 20% of the step cap; the three recursive programs' call depth of
-/// 30,000 is 30% of the 100,000 stack (recursion-depth) cap, with steps and heap far under their
+/// call depth — NOT with how much arithmetic each iteration/call does. Sized so each program's own
+/// execution is a meaningful share of `compile_and_run` while staying comfortably inside
+/// `redextape_core::tm::DEFAULT_CAPS` (`steps: 5_000_000, stack: 100_000, heap: 5_000_000`): the
+/// loop's 1,000,000 backward edges are 20% of the step cap; the three recursive programs' call depth
+/// of 30,000 is 30% of the 100,000 stack (recursion-depth) cap, with steps and heap far under their
 /// caps too. Every `time_runs` call asserts `NativeRun::Ran(_)`, so headroom here is not optional —
 /// a program that trips a cap panics the whole grid instead of silently reporting a fault as a time.
 ///
@@ -69,9 +62,6 @@ pub const RUNS: usize = 5;
 /// matching rename would silently mislabel that row (e.g. a `loop100` that actually runs a million
 /// iterations).
 pub const CORPUS: [(&str, &str); 4] = [
-    // The original `loop100` source was missing the `;` after `i = i + 1` (a while-loop body's last
-    // statement needs one — see e.g. `count_down` throughout redextape-core's own tests); fixed here,
-    // then scaled from 100 to 1,000,000 iterations for the reason given above.
     ("loop1000000", "let mut i = 0; let mut acc = 0; while i < 1000000 { acc = acc + i; i = i + 1; } acc"),
     ("sum30000", "fn sum(n){ if n==0 {0} else { n + sum(n-1) } } sum(30000)"),
     ("list30000", "fn build(n){ if n==0 {nil} else { cons(n, build(n-1)) } } build(30000)"),
@@ -159,7 +149,7 @@ pub fn measure_all() -> Vec<Measurement> {
         let core = desugar(&ast);
         // Reuse the runtime path's lowering so the `defunc` retry matches exactly — the `map`
         // corpus entry is higher-order and only lowers after defunctionalization.
-        let prog = crate::lower_program(&core).expect("corpus program lowers");
+        let prog = lower_program(&core).expect("corpus program lowers");
         for backend in Backend::available() {
             for opt in OPT_LEVELS {
                 let (compile, object_bytes) = compile_runs(backend, &prog, &ty, opt);
@@ -238,10 +228,9 @@ mod tests {
     /// The assertions in the body are cheap structural cross-checks, NOT plausibility checks:
     /// `object_bytes` and the two durations cannot realistically be zero, and the grid-size check is
     /// tautological (`measure_all` pushes exactly one record per iteration of the very three loops it
-    /// counts, so it cannot fail short of restructuring them). This test used to be named
-    /// `..._with_plausible_numbers`, which promised a judgement the body does not make. Object sizes
-    /// are gated for real in `tests/size_baseline.rs`; timings are wall-clock and deliberately never
-    /// asserted (see the module doc).
+    /// counts, so it cannot fail short of restructuring them). Object sizes are gated for real in
+    /// `tests/size_baseline.rs`; timings are wall-clock and deliberately never asserted (see the
+    /// module doc).
     #[cfg(any(feature = "cranelift", feature = "llvm"))]
     #[test]
     fn every_corpus_program_compiles_and_runs_at_every_level() {

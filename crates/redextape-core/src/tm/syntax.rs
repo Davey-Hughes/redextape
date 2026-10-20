@@ -1,12 +1,12 @@
 //! The TM text form: a flat, line-oriented, human-readable language for a `Machine`. `print_tm`
-//! renders it; `parse_tm` reads it back (Task 4); they round-trip (design §9). Reserved markers:
-//! `_` is the blank symbol, `*` is the read-wildcard / write-unchanged marker, and `;` starts a
-//! comment (whole-line or trailing). The round-trip guarantee
-//! `parse_tm(print_tm(m)) == (Some(m), [])` holds for every `Machine` that passes
-//! `Machine::validate()` **and declares `tapes <= MAX_TAPES`** — i.e. identifier-ish state names (no
-//! whitespace or reserved `; * : [ ]`), data symbols outside the reserved set, and a tape count the
-//! parser will accept back. `lower_tm` produces only such machines; a machine outside this
-//! representable subset is *rejected* by `validate` rather than silently corrupted.
+//! renders it; `parse_tm` reads it back; they round-trip (design §9). Reserved markers: `_` is the
+//! blank symbol, `*` is the read-wildcard / write-unchanged marker, and `;` starts a comment
+//! (whole-line or trailing). The round-trip guarantee `parse_tm(print_tm(m)) == (Some(m), [])` holds
+//! for every `Machine` that passes `Machine::validate()` **and declares `tapes <= MAX_TAPES`** — i.e.
+//! identifier-ish state names (no whitespace or reserved `; * : [ ]`), data symbols outside the
+//! reserved set, and a tape count the parser will accept back. `lower_tm` produces only such
+//! machines; a machine outside this representable subset is *rejected* by `validate` rather than
+//! silently corrupted.
 //!
 //! **The tape-count clause is a real caveat, not a formality, and `validate()` does not enforce it.**
 //! `validate()` places no bound on `tapes`, and an accept-only machine has no rules, so the
@@ -97,9 +97,8 @@ fn write_state_name(out: &mut String, spans: &mut Classified, m: &Machine, id: u
     }
 }
 
-/// Render `m` as the readable TM text form, with NO header. Byte-identical to what this function has
-/// always emitted — a machine printed without a header must stay exactly as readable, and as
-/// parseable, as it was before headers existed.
+/// Render `m` as the readable TM text form, with NO header: a machine printed without a header must be
+/// exactly as readable, and as parseable, as it would be if headers did not exist.
 #[must_use]
 pub fn print_tm(m: &Machine) -> String {
     print_tm_mapped(m).0
@@ -131,8 +130,7 @@ pub fn print_tm_with_mapped(m: &Machine, h: &TmHeader) -> (String, Classified) {
 ///
 /// `comments` is `&[]` from `print_tm_mapped`/`print_tm_with_mapped`: an empty slice makes every
 /// `CommentWriter` call below write nothing and `has_trailing` answer `false` for every anchor, so
-/// those two entry points stay byte-identical to what they produced before comments existed by
-/// construction, not by care taken here.
+/// those two entry points' output holds no comment bytes — by construction, not by care taken here.
 fn print_tm_inner(
     m: &Machine,
     header: Option<&TmHeader>,
@@ -159,7 +157,7 @@ fn print_tm_inner(
     }
     o.push('\n');
     for (idx, st) in m.states.iter().enumerate() {
-        // Definition order assigns the id, matching how `parse_tm_full` assigns it (see the `ids`
+        // Definition order assigns the id, matching how `parse_tm_nav` assigns it (see the `ids`
         // map there) — the same "no caller in this tree can construct that input" argument bounds
         // this cast, since a `Vec<State>` this large cannot exist in memory.
         #[allow(clippy::cast_possible_truncation)]
@@ -248,14 +246,13 @@ fn parse_sym(tok: &str) -> Option<Symbol> {
 /// parent. Both work; only one is checkable by reading it. The subtraction cannot underflow:
 /// `trim_start` only ever removes bytes, so its result is never longer than its input.
 ///
-/// **THE PAD IS ONLY MEANINGFUL IF THE CALLER PASSES UN-TRIMMED TEXT, AND THAT HAS ALREADY GONE
-/// WRONG ONCE.** `trimmed_at` has four callers — three in this file (`goto`, `start`, `state`) and
-/// one in `asm_syntax`. The two NAME-KEYWORD sites here, `start` and `state`, originally fed this
-/// `comments::content_before_comment(..)`,
-/// which is `split_trailing(..).0.trim()` — so the pad was structurally zero, and every name span
-/// was correct only when exactly one space followed its keyword. `start  scan` reported a span
-/// beginning on the space. Pass `split_trailing(..).0`, which removes a trailing comment without
-/// touching the leading whitespace this measures.
+/// **THE PAD IS ONLY MEANINGFUL IF THE CALLER PASSES UN-TRIMMED TEXT.** `trimmed_at` has five callers —
+/// three in this file (`goto`, `start`, `state`) and two in `asm_syntax`. The two NAME-KEYWORD sites
+/// here, `start` and `state`, must not feed this `comments::content_before_comment(..)`, which is
+/// `split_trailing(..).0.trim()`: the pad would be structurally zero, and every name span correct only
+/// when exactly one space followed its keyword (`start  scan` would report a span beginning on the
+/// space). Pass `split_trailing(..).0`, which removes a trailing comment without touching the leading
+/// whitespace this measures.
 pub(super) fn trimmed_at(s: &str) -> (&str, usize) {
     (s.trim(), s.len() - s.trim_start().len())
 }
@@ -298,9 +295,9 @@ fn parse_rule_line(line: &str, span: Span) -> Result<RawRule, Diagnostic> {
     let goto_at = line.len() - after_goto.len() + goto_pad;
     let read = read_s.split_whitespace().map(parse_sym).collect();
     let write = write_s.split_whitespace().map(parse_sym).collect();
-    // Named `moves_s` (not `move_s`) to stay clear of `moves` below — `clippy::similar_names` flagged
-    // the original `move_s`/`moves` pair, and this keeps the `<field>_s` (raw bracket text) vs
-    // `<field>` (parsed value) convention that `read_s`/`write_s` already use.
+    // Named `moves_s` (not `move_s`) to stay clear of `moves` below (`clippy::similar_names`),
+    // keeping the `<field>_s` (raw bracket text) vs `<field>` (parsed value) convention that
+    // `read_s`/`write_s` already use.
     let moves = moves_s
         .split_whitespace()
         .map(parse_move)
@@ -384,11 +381,9 @@ fn line_containing(src: &str, offset: usize) -> Option<(Span, &str)> {
 
 /// Reject a header directive that appears AFTER the first `state`.
 ///
-/// The grammar has always said directives "must precede the first `state`", and the parser has always
-/// accepted them anywhere — a divergence that only gets more expensive with age, because every file
-/// written in the meantime that violates the stated grammar is one a later, stricter parser breaks.
-/// The printer emits them in position unconditionally, so no file this project produces is affected;
-/// enforcing now costs nothing and closes the gap while that is still true.
+/// The grammar says directives "must precede the first `state`". A parser that accepted them anywhere
+/// would let files that break the stated grammar pile up, each one a file a stricter parser breaks.
+/// The printer emits them in position unconditionally, so no file this project produces is affected.
 fn header_position(key: &str, states: &[RawState]) -> Result<(), String> {
     if states.is_empty() {
         Ok(())
@@ -397,13 +392,12 @@ fn header_position(key: &str, states: &[RawState]) -> Result<(), String> {
     }
 }
 
-/// Parse the TM text form, dropping any header. Unchanged in signature and behaviour: a file with a
-/// header still reads as the machine it describes (optionality property 3).
+/// Parse the TM text form, dropping any header. A file with a header still reads as the machine it
+/// describes (optionality property 3).
 ///
-/// A thin wrapper over `parse_tm_full` rather than a second parser (spec D2). This is not an
-/// aesthetic preference: `parse_tm` MUST be taught to skip header directives regardless, or it hits
-/// its unknown-line error path and rejects any file carrying one. Given that it must change, having
-/// it delegate removes the failure mode where two parsers drift.
+/// A thin wrapper over `parse_tm_full` rather than a second parser (spec D2): it must skip header
+/// directives — a file carrying one would otherwise hit its unknown-line error path and be rejected —
+/// and delegating removes the failure mode where two parsers drift.
 #[must_use]
 pub fn parse_tm(src: &str) -> (Option<Machine>, Vec<Diagnostic>) {
     let d = parse_tm_full(src);
@@ -413,12 +407,11 @@ pub fn parse_tm(src: &str) -> (Option<Machine>, Vec<Diagnostic>) {
 /// A `.tm` file as authored: the machine it describes, its optional header, and the comments that
 /// belong to neither.
 ///
-/// Returned by `parse_tm_full` in place of the 3-tuple it used to return. A struct rather than a
-/// wider tuple because the next field this grows — navigation wants one — costs no call site here
-/// and would cost all of them there.
+/// Returned by `parse_tm_full`. A struct rather than a wider tuple because a new field costs no call
+/// site here and would cost all of them in a tuple.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct TmDocument {
-    /// `None` exactly when `diagnostics` holds an error, matching what the tuple returned.
+    /// `None` exactly when `diagnostics` holds an error, matching `parse_tm`'s tuple.
     pub machine: Option<Machine>,
     /// `None` means the file carried no header, which is not an error.
     pub header: Option<TmHeader>,
@@ -458,17 +451,14 @@ fn directive_anchor(key: &str, rest: &str) -> Option<TmDirective> {
     })
 }
 
-/// Parse the TM text form. Unchanged in signature and behaviour.
+/// Parse the TM text form.
 ///
 /// `parse_tm_nav`'s document half, exactly as `print_tm` is `print_tm_mapped`'s text half. One
 /// parser, two entry points, and no way for them to disagree.
 ///
 /// **REFERENCES ELSEWHERE TO THIS FUNCTION DIAGNOSING OR CAPPING SOMETHING MEAN THE LOOP IN
-/// `parse_tm_nav`.** Several safety arguments across this crate — `header.rs`'s allocation bound,
-/// `comments.rs`'s anchor-names-one-line claim — name this function as the code that performs a
-/// check, and were written when it WAS that code. It is now one line. The checks did not move
-/// out of the crate, only into `parse_tm_nav`, and a reader following such a pointer should
-/// continue there rather than conclude the bound is unenforced.
+/// `parse_tm_nav`.** This function is one line, a call to `parse_tm_nav`, so a reader following
+/// such a pointer should continue there rather than conclude the check is unenforced.
 #[must_use]
 pub fn parse_tm_full(src: &str) -> TmDocument {
     parse_tm_nav(src).0
@@ -491,8 +481,8 @@ pub fn parse_tm_nav(src: &str) -> (TmDocument, NameIndex) {
     let mut start_name: Option<(String, Span)> = None;
     let mut states: Vec<RawState> = Vec::new();
     // The name of every `state` line seen so far, as slices of `src`, so a duplicate is found in one
-    // lookup. Scanning `states` for it compared each line's name with every earlier one, which made
-    // parsing quadratic in the number of states.
+    // lookup; scanning `states` for it would compare each line's name with every earlier one,
+    // quadratic in the number of states.
     let mut state_names: std::collections::HashSet<&str> = std::collections::HashSet::new();
     let mut header = HeaderParts::default();
     let mut comments: Vec<AnchoredComment<TmAnchor>> = Vec::new();
@@ -575,15 +565,14 @@ pub fn parse_tm_nav(src: &str) -> (TmDocument, NameIndex) {
                 diags.push(err(span, msg));
             }
         } else if let Some(rest) = trimmed.strip_prefix("start ") {
-            // Same rule as `tapes` above, for the same reason: a second `start` line is an error, its
-            // value is ignored (the first line's target is kept), and it attaches no comment.
+            // Same rule as `tapes` above, for the same reason: a second `start` line is an error,
+            // its value is ignored (the first line's target is kept), and it attaches no comment.
             // **RECORDED BEFORE THE DUPLICATE CHECK, AND OUTSIDE IT.** A second `start` line is an
             // error whose VALUE is ignored, but the name on it is still a name the user can put a
             // cursor on — and a file with two `start` lines is the ordinary mid-edit state of
-            // someone renaming the entry state, who types the new line before deleting the old.
-            // The `state` branch below already records both definitions of a duplicated name for
-            // exactly this reason; these two arms took opposite decisions until this was fixed,
-            // and only one of them said why.
+            // someone renaming the entry state, who types the new line before deleting the old. The
+            // `state` branch below already records both definitions of a duplicated name for exactly
+            // this reason.
             //
             // `split_trailing(..).0`, NOT `content_before_comment`. The latter is
             // `split_trailing(..).0.trim()`, and that leading trim is exactly the whitespace this
@@ -604,7 +593,7 @@ pub fn parse_tm_nav(src: &str) -> (TmDocument, NameIndex) {
         } else if let Some(rest) = trimmed.strip_prefix("state ") {
             // `split_trailing(..).0` rather than `content_before_comment`, so that `name_part`
             // below keeps the leading whitespace its span offset is measured from. `name_part`
-            // and `tail` are both `.trim()`ed at their own use sites, so nothing else changes.
+            // and `tail` are both `.trim()`ed at their own use sites.
             let rest = comments::split_trailing(rest).0;
             let Some((name_part, tail)) = rest.split_once(':') else {
                 diags.push(err(span, "expected `state <name>:`"));
@@ -687,21 +676,18 @@ pub fn parse_tm_nav(src: &str) -> (TmDocument, NameIndex) {
     // final builder can consume `states` freely. (Duplicate names were diagnosed above; if any exist
     // the error gate below returns `None` before this map is used to build.)
     // Bounded by `src.len()`, not by any explicit cap: `states` holds one entry per `state <name>:`
-    // LINE actually present in `src`, which `parse_tm_full` takes as a single in-memory `&str` up
+    // LINE actually present in `src`, which this function takes as a single in-memory `&str` up
     // front (no streaming) — so reaching `StateId::MAX` (u32, ~4.29 billion) states requires a source
     // text of tens of GB already resident in memory, not a compact trigger for a disproportionate
     // allocation the way `tapes N` is (see `build::MAX_TAPES`'s doc for that distinction). No caller in
     // this tree can construct that input.
     //
-    // THIS IS THE SAME SHAPE OF ARGUMENT `tm/build.rs` and `sourcemap.rs` removed — the reason it is
-    // still sound HERE is worth citing rather than re-deriving. Parsing has a multiplier of ONE:
-    // `parse_tm_full` produces at most one state per `state <name>:` line, so the input bounds the
-    // count directly and the allocator refuses first. Lowering was dangerous because its state count
-    // is a PRODUCT — a 6 KB program expands to 8.6M states (`build::MAX_MACHINE_STATES`'s doc) — and
-    // no such multiplier exists here. See
-    // `docs/superpowers/specs/2026-08-11-count-bounds-design.md` §6, which records the corollary this
-    // site is an instance of: `MAX_MACHINE_STATES` bounds machines built through `Builder`, not
-    // machines parsed from text.
+    // Parsing has a multiplier of ONE: this function produces at most one state per `state <name>:`
+    // line, so the input bounds the count directly and the allocator refuses first. Lowering is the
+    // dangerous case because its state count is a PRODUCT (see `build::MAX_MACHINE_STATES`'s doc) and no
+    // such multiplier exists here. See `docs/superpowers/specs/2026-08-11-count-bounds-design.md` §6,
+    // which records the corollary this site is an instance of: `MAX_MACHINE_STATES` bounds machines
+    // built through `Builder`, not machines parsed from text.
     #[allow(clippy::cast_possible_truncation)]
     let ids: std::collections::HashMap<String, StateId> =
         states.iter().enumerate().map(|(i, s)| (s.name.clone(), i as StateId)).collect();
@@ -811,11 +797,10 @@ state halt: accept
         assert_eq!(print_tm_with(&increment(), &a_header()), expected);
     }
 
-    /// GLOBAL CONSTRAINT: `print_tm`'s output is byte-identical to before this slice. The check is that
-    /// removing the header from `print_tm_with`'s output recovers it exactly — if the two printers had
-    /// been allowed to drift, this is what catches it.
+    /// `print_tm`'s output is recovered exactly by removing the header from `print_tm_with`'s output —
+    /// if the two printers had been allowed to drift, this is what catches it.
     #[test]
-    fn print_tm_output_is_unchanged_by_the_header_split() {
+    fn print_tm_is_print_tm_with_minus_the_header() {
         let m = increment();
         let plain = print_tm(&m);
         let headered = print_tm_with(&m, &a_header());
@@ -922,7 +907,8 @@ state halt: accept
             assert!(w[0].0.end <= w[1].0.start, "spans overlap or are unordered: {:?} then {:?}", w[0], w[1]);
         }
         let named: Vec<(&str, TokenClass)> = spans.iter().map(|(s, c)| (&text[s.start..s.end], *c)).collect();
-        // The header occupies exactly the four spans after `tapes N` / `start scan` and before the states.
+        // The header occupies exactly the spans after the four of `tapes N` / `start scan` and
+        // before the states.
         assert_eq!(
             &named[4..18],
             &[
@@ -1063,12 +1049,10 @@ state halt: accept
         }
     }
 
-    /// A header directive AFTER the first `state` is refused, as the grammar has always said.
+    /// A header directive AFTER the first `state` is refused, as the grammar says.
     ///
-    /// The parser used to accept them anywhere, so this file parsed clean. Nothing this project emits
-    /// is affected — `print_header` writes the block between `start` and the states unconditionally —
-    /// which is exactly why enforcing was cheap NOW and would not have been later: every file written
-    /// against the looser parser is one a stricter parser breaks.
+    /// Nothing this project emits is affected — `write_header` writes the block between `start` and
+    /// the states unconditionally.
     #[test]
     fn a_header_directive_after_the_first_state_is_refused() {
         for bad in ["encoding unary", "width 4", "slots 1", "result Nat", "tape 0 #_#", "version 1"] {
@@ -1093,14 +1077,14 @@ state halt: accept
         assert!(doc.machine.is_some() && doc.header.is_some());
     }
 
-    /// PROPERTY 1: today's round-trip, untouched.
+    /// PROPERTY 1: the plain round-trip, untouched by the header.
     #[test]
     fn property_1_plain_round_trip_is_untouched() {
         let m = increment();
         assert_eq!(parse_tm(&print_tm(&m)), (Some(m), vec![]));
     }
 
-    /// PROPERTY 2: the new round-trip. A header printed is a header parsed back, equal.
+    /// PROPERTY 2: the headered round-trip. A header printed is a header parsed back, equal.
     #[test]
     fn property_2_headered_round_trip_returns_both_halves() {
         let (m, h) = (increment(), a_header());
@@ -1121,8 +1105,7 @@ state halt: accept
     /// PROPERTY 4: a header-less file yields NO HEADER, NOT AN ERROR.
     ///
     /// This is the property most likely to regress silently, because a parser taught to recognize
-    /// directives is a parser that can start requiring them. Every file written before this slice looks
-    /// like this one.
+    /// directives is a parser that can start requiring them.
     #[test]
     fn property_4_a_headerless_file_yields_none_not_a_diagnostic() {
         let m = increment();
@@ -1217,13 +1200,12 @@ state s: accept
             for d in &doc.diagnostics {
                 assert!(d.span.start <= d.span.end && d.span.end <= src.len(), "bad span for:\n{header}");
             }
-            // The out-of-range `tape` diagnostic is about ONE specific line, whose real span was in
-            // scope when `directive` saw it. `start <= end <= len` is trivially true of `{0, 0}` too
-            // (which is exactly how this went unnoticed before), so check the span is non-empty and
-            // actually covers the offending `tape` line — exactly, not by substring: `covered.contains
-            // ("tape")` would also pass for the `tapes 1` line above it, which is the same defect class
-            // this test exists to catch. The other cases legitimately have no single offending line and
-            // keep the loose check above.
+            // The out-of-range `tape` diagnostic is about ONE specific line, whose real span was in scope
+            // when `directive` saw it. `start <= end <= len` is trivially true of `{0, 0}` too, so check
+            // the span is non-empty and actually covers the offending `tape` line — exactly, not by
+            // substring: `covered.contains("tape")` would also pass for the `tapes 1` line above it,
+            // which is the same defect class this test exists to catch. The other cases legitimately have
+            // no single offending line and keep the loose check above.
             if *needle == "out of range" {
                 let d = doc
                     .diagnostics
@@ -1283,7 +1265,8 @@ state s: accept
     /// A `.tm` file is untrusted. `tapes N` drives `TmHeader::init`'s allocation directly, and a machine
     /// whose only state is `state s: accept` has no rules — so the rule-arity check never constrains it.
     /// Without a cap, `tapes 10000000000` parses clean and the documented next step allocates 10^10 Vecs.
-    /// `sim.rs` guards this exact scenario by name; the header path reintroduced it one call earlier.
+    /// `sim.rs`'s `a_huge_tape_count_hits_the_cap_instead_of_allocating` tests this exact scenario; the
+    /// header path reaches it one call earlier.
     #[test]
     fn an_absurd_tape_count_is_refused_rather_than_allocated() {
         let src = "tapes 10000000000\nstart s\n\nstate s: accept\n";
@@ -1307,15 +1290,15 @@ state s: accept
         assert!(m.is_none(), "one over the cap must not parse");
         // Naming the directive matters: `is_none()` alone would also be satisfied by an unrelated
         // parse error, so it cannot tell "the cap fired" from "something else rejected this file".
-        // Its two sibling cap tests both check the message; this one did not.
         assert!(ds.iter().any(|d| d.message.contains("tapes")), "must be refused BY THE CAP: {ds:?}");
     }
 
-    /// `slots` and `width` feed `init_reg`, which allocates `slots * (width + 1)` cells — the recipe
-    /// evaluation the header exists for, and what the consistency check itself performs. MAX_SLOTS and
-    /// MAX_FIELD_WIDTH already bound this for in-memory programs; the file path bypassed them.
+    /// `slots` and `width` feed `init_reg`, which allocates `slots * (width + 1)` cells — the
+    /// recipe evaluation the header exists for, and what the consistency check itself performs.
+    /// `MAX_SLOTS` and `MAX_FIELD_WIDTH` bound this for in-memory programs, and the file path is
+    /// held to the same ceilings.
     #[test]
-    fn absurd_slots_and_width_are_refused_at_their_existing_ceilings() {
+    fn absurd_slots_and_width_are_refused_at_the_in_memory_ceilings() {
         let hdr = |s: &str, w: &str| {
             format!("tapes 1\nstart s\nencoding unary\nwidth {w}\nslots {s}\nresult Nat\n\nstate s: accept\n")
         };
@@ -1336,7 +1319,7 @@ state s: accept
         );
     }
 
-    /// Absent means version 1, so every file written before this directive existed stays valid.
+    /// Absent means version 1, so a file with no `version` line stays valid.
     #[test]
     fn an_absent_version_means_one() {
         let src = "tapes 1\nstart s\nencoding unary\nwidth 4\nslots 1\nresult Nat\n\nstate s: accept\n";
@@ -1480,10 +1463,10 @@ state s: accept
     }
 
     /// THE KNOWN TRAP: a key in `parse_tm_nav`'s header filter with no arm in `HeaderParts::directive`
-    /// is skipped with no diagnostic at all. So every new key gets malformed values, and each must be
-    /// refused BY that key's own arm, naming the key.
+    /// is skipped with no diagnostic at all. So `reduced` and `steps` each get malformed values, and
+    /// each must be refused BY that key's own arm, naming the key.
     #[test]
-    fn a_malformed_value_for_each_new_key_is_refused_by_that_key() {
+    fn a_malformed_reduced_or_steps_value_is_refused_by_that_key() {
         let over = MAX_ENCODABLE_TAPES + 1;
         let reduced = [
             String::new(),
@@ -1555,9 +1538,8 @@ state s: accept
         }
     }
 
-    /// Probed at `64c1164`: parses clean, and `scan` appears at 14, 25 and 66 while `halt`
-    /// appears at 106 and 117. Three occurrences of one name is the point — an assertion that
-    /// only checked the NAME would be satisfied by any of them.
+    /// `scan` appears three times, which is the point: an assertion that only checked the NAME would be
+    /// satisfied by any of them.
     const NAV_TM: &str = "tapes 1\nstart scan\nstate scan:\n  [1] -> write [*], move [R], goto scan\n  [*] -> write [1], move [S], goto halt\nstate halt: accept\n";
 
     #[test]
@@ -1605,10 +1587,10 @@ state s: accept
 
     #[test]
     fn a_line_that_does_not_parse_contributes_no_occurrences() {
-        // Probed: this reports one diagnostic, `bad move (expected L/R/S)`, spanning the WHOLE
-        // rule line 31..70 — and `parse_rule_line` reads `goto` last, so the `halt` at 66 is
-        // never reached. The `state halt:` definition at 77 is on a line that DOES parse and is
-        // recorded. That asymmetry is the per-line rule, stated as a test.
+        // This reports one diagnostic, `bad move (expected L/R/S)`, spanning the WHOLE rule line
+        // 31..70 — and `parse_rule_line` reads `goto` last, so the `halt` at 66 is never reached.
+        // The `state halt:` definition at 77 is on a line that DOES parse and is recorded. That
+        // asymmetry is the per-line rule, stated as a test.
         let src = "tapes 1\nstart scan\nstate scan:\n  [1] -> write [*], move [X], goto halt\nstate halt: accept\n";
         let (doc, nav) = parse_tm_nav(src);
         assert!(doc.machine.is_none(), "the fixture's premise: it does not parse");
@@ -1619,8 +1601,8 @@ state s: accept
     #[test]
     fn an_index_survives_a_document_that_produced_no_machine() {
         // THE WHOLE REASON THE INDEX IS RETURNED BESIDE THE DOCUMENT RATHER THAN INSIDE IT.
-        // Probed: this reports `unknown goto target `nowhere`` and `machine` is None, while
-        // `comments` would have been emptied. Navigation is not.
+        // This reports `unknown goto target `nowhere`` and `machine` is None, while `comments` would
+        // have been emptied. Navigation is not.
         let src = "tapes 1\nstart scan\nstate scan:\n  [*] -> write [*], move [S], goto nowhere\n";
         let (doc, nav) = parse_tm_nav(src);
         assert!(doc.machine.is_none());
@@ -1631,10 +1613,10 @@ state s: accept
 
     #[test]
     fn a_duplicate_state_line_records_both_definitions() {
-        // §3.1 of the design claims the index records BOTH definitions of a duplicated name, and
-        // the `.asm` sibling has a test while this one did not — so the claim was the untested
-        // half. A duplicate `state` IS diagnosed here (unlike `.asm`, which accepts it silently),
-        // so `machine` is `None` and this doubles as a per-line-recovery case.
+        // §3.1 of the LSP navigation design (`docs/superpowers/specs/2026-09-06-lsp-navigation-design.md`)
+        // claims the index records BOTH definitions of a duplicated name. A duplicate `state` IS diagnosed
+        // here (unlike `.asm`, which accepts it silently), so `machine` is `None` and this doubles as a
+        // per-line-recovery case.
         let src = "tapes 1\nstart scan\nstate scan: accept\nstate scan: accept\n";
         let (doc, nav) = parse_tm_nav(src);
         assert!(doc.machine.is_none(), "the premise: a duplicate state name is an error");
@@ -1703,11 +1685,10 @@ state s: accept
 
     #[test]
     fn a_duplicate_start_line_records_its_name_too() {
-        // The two duplicate-line arms in `parse_tm_nav` took opposite decisions until this was
-        // fixed: `state` recorded both, `start` recorded neither, because its `nav.push_reference`
-        // sat inside the `else` of the duplicate check. Two `start` lines is the ordinary mid-edit
-        // state of renaming the entry state — the new line typed before the old one is deleted —
-        // and `nav.rs`'s module doc says navigation is worth most exactly then.
+        // The two duplicate-line arms in `parse_tm_nav` must take the same decision: `state` records
+        // both lines, so `start` must too. Two `start` lines is the ordinary mid-edit state
+        // of renaming the entry state — the new line typed before the old one is deleted — and `nav.rs`'s
+        // module doc says navigation is worth most exactly then.
         let src = "tapes 1\nstart a\nstart b\nstate a: accept\nstate b: accept\n";
         let (doc, nav) = parse_tm_nav(src);
         assert!(doc.machine.is_none(), "the premise: a duplicate start line is an error");
@@ -1724,15 +1705,14 @@ state s: accept
 
     #[test]
     fn a_trailing_comment_does_not_shift_any_span() {
-        // The sibling invariant to `asm_syntax`'s test of the same name, added when a real
-        // off-by-the-comment-length defect was found there. This form's arithmetic uses a LEADING
-        // pad and was never affected — which is a thing to hold with a test rather than to
-        // conclude from reading, since the two parsers compute their offsets differently.
+        // The sibling invariant to `asm_syntax`'s test of the same name, which pins an
+        // off-by-the-comment-length defect there. This form's arithmetic uses a LEADING pad and is
+        // not exposed to it — which is a thing to hold with a test rather than to conclude from
+        // reading, since the two parsers compute their offsets differently.
         // **SPACING THE PRINTER NEVER EMITS, WHICH IS THE POINT.** Every other fixture in this
         // file uses one space after each keyword — printer layout — and the population this
-        // feature exists for is hand-written files, where names get aligned. An earlier version
-        // of this fixture used single spaces throughout and passed while `start  scan` reported a
-        // span beginning on the space.
+        // feature exists for is hand-written files, where names get aligned. A fixture with single
+        // spaces throughout would pass even while `start  scan` reports a span beginning on the space.
         let src = "tapes 1 ; t\nstart  scan ; go\n   state   scan: ; here\n  [1] -> write [*], move [R], goto   scan ; loop\nstate halt: accept ; done\n";
         let (_doc, nav) = parse_tm_nav(src);
         let mut seen = 0;
@@ -1780,11 +1760,9 @@ state s: accept
         assert_eq!(line_containing(lf, lf.len() + 1), None, "past end of file");
 
         let crlf = "abc\r\ndef\r\n";
-        // CRLF: offsets 4 and 9 sit ON the terminator's `\n` byte (`\r` is at 3 and 8) — exactly the
-        // holes Finding 1 reports, where the old guard compared against the trimmed span's end and
-        // returned `None` outright instead of resolving to the line the terminator belongs to.
-        // Offset 10 is end-of-file (`== crlf.len()`) and still resolves; offset 11 is genuinely past
-        // it and must not.
+        // CRLF: offsets 4 and 9 sit ON the terminator's `\n` byte (`\r` is at 3 and 8) and resolve to
+        // the line the terminator belongs to. Offset 10 is end-of-file (`== crlf.len()`) and still
+        // resolves; offset 11 is genuinely past it and must not.
         let want_crlf = ["abc", "abc", "abc", "abc", "abc", "def", "def", "def", "def", "def", "def"];
         for (offset, want) in want_crlf.iter().enumerate() {
             let (_, line) = line_containing(crlf, offset)

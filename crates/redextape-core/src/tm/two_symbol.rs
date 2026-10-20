@@ -200,10 +200,10 @@ pub fn unbitify(tape: &Tape, code: &Code) -> Option<(Vec<Symbol>, usize)> {
 }
 
 /// Generated states per original state — the ratio that decides whether a machine can be reduced at
-/// all, and the figure Task 5's gate holds a ceiling on. `None` when `to_two_symbol` returns any refusal,
-/// one handed back from an earlier stage included. A refusal is a one-state machine, and dividing that state
-/// count by the original would report the refusal as a favorable ratio instead of a failure to construct at
-/// all — the same reason [`bitify`] returns `Option`.
+/// all, and the figure the test's `STATE_CEILING` holds a ceiling on. `None` when `to_two_symbol` returns
+/// any refusal, one handed back from an earlier stage included. A refusal is a one-state machine, and
+/// dividing that state count by the original would report the refusal as a favorable ratio instead of a
+/// failure to construct at all — the same reason [`bitify`] returns `Option`.
 #[must_use]
 pub fn states_per_original(m: &Machine, code: &Code) -> Option<f64> {
     let reduced = to_two_symbol(m, code);
@@ -469,8 +469,8 @@ impl Names {
     /// verify blocks are then threaded right to left so each names the next. **A wildcard read emits
     /// nothing at all**, which is the property that makes stage 1 fit too — most read positions are
     /// wildcards on the real lowered machines spec measured, under UNARY encoding. Binary encoding's
-    /// data symbols carry bits a wildcard cannot skip, so its wildcard share is lower, and this
-    /// branch's corpus — half binary — is not the population that measurement describes.
+    /// data symbols carry bits a wildcard cannot skip, so its wildcard share is lower, and a corpus
+    /// that is half binary is not the population that measurement describes.
     fn emit_candidate(
         &mut self,
         m: &Machine,
@@ -502,11 +502,10 @@ impl Names {
     /// `rule.next` is entered at. Returns the name to enter, which is that entry directly when no
     /// tape acts.
     ///
-    /// **THE WRITE AND THE MOVE FUSE, AND `Move::S` WITH NO WRITE IS FREE.** A write walks right one
-    /// cell per bit and lands on the next block, so `R` is already done, `S` owes `k` cells back and
-    /// `L` owes `2k`. Without a write, `R` and `L` are a `k`-cell stride and `S` emits no state at
-    /// all. Stage 1 had to split its no-write path out as an optimisation worth ~9% of its state
-    /// count; here it falls out of the layout.
+    /// **THE WRITE AND THE MOVE FUSE, AND `Move::S` WITH NO WRITE IS FREE.** A write walks right
+    /// one cell per bit and lands on the next block, so `R` is already done, `S` owes `k` cells
+    /// back and `L` owes `2k`. Without a write, `R` and `L` are a `k`-cell stride and `S` emits no
+    /// state at all.
     ///
     /// Tapes are folded RIGHT TO LEFT so each one's pass names the next, and a tape that neither
     /// writes nor moves drops out of the chain entirely rather than contributing a no-op state.
@@ -721,7 +720,7 @@ mod tests {
     }
 
     /// A machine that steps `n` times through wildcard rules and accepts. Every rule reads a
-    /// wildcard, writes nothing and stays put, so Task 2's construction alone is enough for it.
+    /// wildcard, writes nothing and stays put, so the wildcard construction alone handles it.
     fn chain(n: usize) -> Machine {
         let mut states: Vec<State> = (0..n)
             .map(|i| State {
@@ -917,10 +916,8 @@ mod tests {
         }
     }
 
-    /// **`stride` HAD NEVER EXECUTED BEFORE THIS TEST.** It carried `#[expect(dead_code)]` through
-    /// two tasks — which only survives `-D warnings` while nothing calls the item — and the two arms
-    /// that reach it, a move with no write, are reached by no other machine in this file. A rule that
-    /// moves without writing is every scanning step a real lowered machine takes.
+    /// The two arms that reach `stride`, a move with no write, are reached by no other machine in this
+    /// file. A rule that moves without writing is every scanning step a real lowered machine takes.
     #[test]
     fn a_move_with_no_write_strides_one_whole_block() {
         for mv in [Move::R, Move::L] {
@@ -1034,9 +1031,8 @@ mod tests {
     }
 
     /// The ratio the construction may not exceed, as a PROPERTY rather than a restated measurement.
-    /// **A gate on an exact figure is a gate that a one-state change trips**, which stage 1 learned
-    /// by putting a program with a 0.062% margin inside its gated set — a PERCENT margin, which does
-    /// not say how many states that was. `the_construction_stays_under_its_state_ceiling` measures
+    /// **A gate on an exact figure is a gate that a one-state change trips**, and a PERCENT margin
+    /// does not say how many states it is. `the_construction_stays_under_its_state_ceiling` measures
     /// and prints this construction's own margin in STATES instead: an absolute count says whether
     /// the next generated state is the one that trips it, and a percentage alone does not.
     const STATE_CEILING: f64 = 30.0;
@@ -1109,9 +1105,7 @@ mod tests {
     /// than claiming the per-state scaffold is `.enter` alone.
     ///
     /// **THIS SAYS NOTHING ABOUT STEPS.** What the entry state costs at run time is a different
-    /// quantity, needing a different instrument, and no figure for it is asserted anywhere in this
-    /// file. Two earlier drafts of this comment asserted one: the first claimed this test measured
-    /// it, the second dropped that and kept the figure.
+    /// quantity, needing a different instrument, and no figure for it is asserted anywhere in this file.
     #[test]
     fn there_is_exactly_one_enter_state_per_non_accept_original_state() {
         let (m, inits) = demo_machine("1 + 2 * 3", crate::tm::EncodingKind::Unary);

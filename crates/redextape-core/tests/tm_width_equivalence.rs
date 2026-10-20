@@ -1,17 +1,15 @@
 //! Correctness properties of the VARIABLE field width itself, as distinct from the overflow guard.
 //!
 //! `tm_bank_invariant.rs` checks that the REG bank is never corrupted. This file checks the four things
-//! that everything built on top of variable widths will depend on, each of which was previously either
-//! argued or covered only by a handful of hand-picked programs:
+//! that everything built on top of variable widths will depend on:
 //!
-//!   1. AUTO-FIT IS ANSWER-PRESERVING. `run_tm` (which now searches) must agree with `run_tm_at(64)`
+//!   1. AUTO-FIT IS ANSWER-PRESERVING. `run_tm` (which searches) must agree with `run_tm_at(64)`
 //!      (which does not) and with the reference, over randomly generated programs whose values span the
 //!      whole representable range — so the retry path is actually taken at every width.
 //!   2. THE BOX TAPE stays well-formed at every step, the same property `tm_bank_invariant.rs` asserts
-//!      for REG. `box_overwrite_field` was restructured from content-driven to a counted chain in this
-//!      slice, so it is the gadget with the most recent structural change and the least coverage.
+//!      for REG.
 //!   3. EVERY WIDTH IS TOTAL, not just the five powers of two auto-fit happens to try. `Unary::at`
-//!      accepts any `usize`, and later work (a visualizer, the binary encoding) will pass others.
+//!      accepts any `usize`, and other callers may pass others.
 //!   4. NARROWER IS NEVER MORE WORK. `run_tm_fitted` returns `HitCap` from the FIRST attempt without
 //!      retrying wider, which is only sound if a run that caps at a narrow width would also cap at
 //!      every wider one. That is an argument about monotonicity; this measures it.
@@ -33,7 +31,7 @@ use redextape_core::tm::{
 
 mod common;
 // `encodings`: EVERY encoding. This file's properties must hold for each, tested at its OWN default
-// (`MAX_FIELD_WIDTH`) width — the width `run_tm_at`/`run_tm` pin to when no explicit width is given.
+// (`MAX_FIELD_WIDTH`) width — the width `run_tm_at` runs at.
 //
 // `encodings_at`: EVERY encoding at a given width — used where the property is checked at every rung of
 // `widths()` rather than only at the default.
@@ -47,9 +45,9 @@ use common::{box_tape_is_well_formed, encodings, encodings_at, widths};
 /// actually exercises its retry loop at every width — and sometimes runs off the ceiling entirely.
 ///
 /// `arb_expr_below(8)` in `three_way_oracle.rs` is deliberately bounded so every value stays « 64; that
-/// makes it a poor test of a search whose whole job is to find the right width, because every program
-/// would fit at 8 on the first attempt. Leaves here reach 70, above `MAX_FIELD_WIDTH`, so `Overflow` is
-/// a reachable outcome and must be reported identically by both entry points.
+/// makes it a poor test of a search whose whole job is to find the right width, because none of its
+/// programs can run the search off the ceiling. Leaves here reach 69, above `MAX_FIELD_WIDTH`, so
+/// `Overflow` is a reachable outcome and must be reported identically by both entry points.
 fn arb_wide_ranging_expr() -> impl Strategy<Value = String> {
     let leaf = (0u64..70).prop_map(|n| n.to_string());
     leaf.prop_recursive(3, 8, 3, |inner| {
@@ -85,11 +83,10 @@ proptest! {
                 (TmRun::Ran { tapes: a }, TmRun::Ran { tapes: p }) => {
                     let rv = reference.as_ref().expect("a program that runs on the TM must run on the reference").clone();
                     // Decode the AUTO tapes at the width ACTUALLY FITTED (`enc.at_width`), not `enc`'s
-                    // own default. Once required — `Binary`'s decode was width-strict, so a tape fitted
-                    // narrower than 64 decoded to `None` under a 64-cell `Binary` — and now redundant,
-                    // both decoders being structural. Kept because THIS suite is where `at_width` is the
-                    // subject: dropping it would decode both runs through the same instance and stop
-                    // exercising the re-instantiation the comparison is about.
+                    // own default. Both decoders are structural, so decoding does not need it; it is
+                    // kept because THIS suite is where `at_width` is the subject: dropping it would
+                    // decode both runs through the same instance and stop exercising the
+                    // re-instantiation the comparison is about.
                     let w = width.expect("a bounded encoding always reports a width");
                     let fitted = enc.at_width(w);
                     let from_auto = decode_tape(a, &rv, fitted.as_ref());
@@ -103,12 +100,11 @@ proptest! {
                 }
                 (TmRun::Overflow, TmRun::Overflow) => {
                     // Both refuse, which is the agreement this test is about. Deliberately NOT asserted
-                    // here: that the reference's RESULT exceeds the ceiling. It often does not — the first
-                    // counterexample this generator produced was `(0 + if 64 == 0 { 1 } else { 0 })`, whose
-                    // result is 0 but whose literal `64` must be stored in a field to be compared, and 64
-                    // does not fit a 64-cell field (the bound is strict). The fitted width is set by the
-                    // largest value ever STORED, never by the answer. See
-                    // `overflow_is_driven_by_stored_values_not_the_result`.
+                    // here: that the reference's RESULT exceeds the ceiling. It often does not —
+                    // `(0 + if 64 == 0 { 1 } else { 0 })` has result 0, but its literal `64` must be stored
+                    // in a field to be compared, and 64 does not fit a 64-cell field (the bound is strict).
+                    // The fitted width is set by the largest value ever STORED, never by the answer.
+                    // See `overflow_is_driven_by_stored_values_not_the_result`.
                     let _ = &reference;
                 }
                 (TmRun::HitCap, TmRun::HitCap) => {}
@@ -119,7 +115,7 @@ proptest! {
 
     /// The fitted width is MINIMAL among the widths tried: the program must overflow one step narrower.
     /// Without this, a search that always returned 64 would pass every correctness test above while
-    /// delivering none of the point of the slice.
+    /// delivering none of the point of auto-fit.
     #[test]
     fn the_fitted_width_is_the_narrowest_that_works(src in arb_wide_ranging_expr()) {
         let (prog, ds) = parse(&src);
@@ -179,16 +175,14 @@ fn probe_search(enc: &dyn Encoding, n: u32) -> (std::collections::BTreeSet<usize
 /// Asserts the generator reaches at least three distinct fitted widths AND produces some `Overflow`s,
 /// over a fixed sample so the check is deterministic.
 ///
-/// UNARY ONLY — measured, not assumed. Under `Binary` this generator (leaves 0..70, depth 3, size 8)
-/// never produces a value needing more than an 8-cell field: a fixed 300-sample probe gave
-/// `ran=300 overflows=0 widths_seen={4, 8}`, for every seed tried. That is not under-sampling — it is
-/// structural. Unary's bound is `v < width`, so a leaf of 70 already exceeds even the 64-cell ceiling
-/// (capacity 64), which is exactly why `Overflow` and wide widths are reachable for unary with this
-/// generator. Binary's bound is `v < 2^width`, so the 64-cell ceiling has capacity 2^64 — a value in the
-/// hundreds (the largest this generator's shape can produce) cannot come remotely close. Reusing the
-/// SAME generator to make the SAME claim for binary would need leaves in the quintillions, which is not
-/// what this generator is for; see `the_wide_ranging_generator_for_binary` below for the honest,
-/// weaker claim this generator CAN support for binary.
+/// UNARY ONLY. Unary's bound is `v < width`, so a leaf of 64 or more already exceeds even the 64-cell
+/// ceiling (capacity 64), which is exactly why `Overflow` and wide widths are reachable for unary with
+/// this generator. Binary's bound is `v < 2^width`, so the 64-cell ceiling has capacity 2^64 — a value
+/// in the hundreds (the largest this generator's shape can produce) cannot come remotely close.
+/// Reusing the SAME generator to make the SAME claim for binary would need leaves in the quintillions,
+/// which is not what this generator is for; see
+/// `the_wide_ranging_generator_for_binary_reaches_more_than_one_width` below for the honest, weaker
+/// claim this generator CAN support for binary.
 #[test]
 fn the_wide_ranging_generator_actually_exercises_the_search() {
     let (widths_seen, ran, overflows) = probe_search(&Unary::default(), 300);
@@ -202,7 +196,7 @@ fn the_wide_ranging_generator_actually_exercises_the_search() {
 }
 
 /// The honest binary counterpart to the test above: `arb_wide_ranging_expr` cannot drive binary's
-/// search off its ceiling (see that test's doc for the measured reason), but it DOES still drive it
+/// search off its ceiling (see that test's doc for the reason), but it DOES still drive it
 /// through more than one width — the retry path from 4 is genuinely taken, just never very far — which
 /// is the part of `auto_fit_agrees_with_a_pinned_wide_run`'s binary coverage this pins as non-vacuous.
 #[test]
@@ -213,15 +207,14 @@ fn the_wide_ranging_generator_for_binary_reaches_more_than_one_width() {
         widths_seen.len() >= 2,
         "the generator must drive binary auto-fit past width 4 at least sometimes, saw only {widths_seen:?}"
     );
-    // NOT asserted: `overflows > 0` or `widths_seen.len() >= 3` — measured false for this generator
-    // under binary (see the doc above), and not a defect.
+    // NOT asserted: `overflows > 0` or `widths_seen.len() >= 3` — false for this generator under
+    // binary (see the doc above), and not a defect.
     let _ = overflows;
 }
 
 /// The fitted width is set by the largest value ever STORED IN A FIELD, not by the program's result.
-/// Found by the proptest above rather than anticipated, and worth its own case because it is the most
-/// natural wrong mental model of what auto-fit does — and because a reader debugging an unexpected
-/// `Overflow` will look at the answer first.
+/// Worth its own case because it is the most natural wrong mental model of what auto-fit does — and
+/// because a reader debugging an unexpected `Overflow` will look at the answer first.
 ///
 /// Each program below produces a SMALL result from a LARGE intermediate or literal, so a width chosen
 /// from the answer would be far too narrow.
@@ -261,12 +254,10 @@ const BOX_CORPUS: &[&str] = &[
     "let mut a = 1; let mut b = 2; fn ap(f, x) { f(x) } ap(|x| { a = a + x; b = b + a; b }, 2) + a + b",
 ];
 
-// NOTE: this file used to define its OWN private `box_tape_is_well_formed(cells, width)` here,
-// hardcoding `MARK`/`BLANK` — a second copy of `tests/common/mod.rs::box_tape_is_well_formed`, which
-// takes `enc: &dyn Encoding` and was already generalized for `Binary`. Two copies of the same skeleton
-// check is exactly the situation `common/mod.rs` exists to avoid (see its own module doc), so this file
-// now imports the shared one (`use common::box_tape_is_well_formed;`, above) instead of reimplementing
-// it a second time under `Binary`'s alphabet.
+// This file imports `tests/common/mod.rs::box_tape_is_well_formed`, which takes `enc: &dyn Encoding`
+// and covers `Binary`, rather than carrying a private copy that hardcodes `MARK`/`BLANK`: two copies
+// of the same skeleton check is exactly the situation `common/mod.rs` exists to avoid (see its own
+// module doc).
 
 #[test]
 fn the_box_tape_stays_well_formed_at_every_step_and_every_width() {
@@ -321,9 +312,9 @@ fn the_box_checker_rejects_a_spill_past_the_last_field() {
 }
 
 /// The shared checker's CONTENT clause is generic over the encoding (`common::box_tape_is_well_formed`
-/// takes `enc: &dyn Encoding`, generalized from this file's own former private copy). A `ZERO` digit is
-/// legal `Binary` content but not `Unary` content, so the same BOX tape must be ACCEPTED under `Binary`
-/// and REJECTED under `Unary` — the claim the unary-only test above cannot make on its own.
+/// takes `enc: &dyn Encoding`). A `ZERO` digit is legal `Binary` content but not `Unary` content, so the
+/// same BOX tape must be ACCEPTED under `Binary` and REJECTED under `Unary` — the claim the unary-only
+/// test above cannot make on its own.
 #[test]
 fn the_box_checker_accepts_binary_digit_content_and_rejects_it_under_unary() {
     let enc = Binary::at(2);
@@ -340,9 +331,9 @@ fn the_box_checker_accepts_binary_digit_content_and_rejects_it_under_unary() {
 // 3. Every width is total
 // ================================================================================================
 
-/// `Unary::at` accepts any `usize`, and auto-fit only ever tries five powers of two. A visualizer
-/// sizing to a value, or the binary encoding's own search, will pass others — including degenerate
-/// ones. Every width must reach a DEFINED outcome: no panic, no hang, no wrong answer.
+/// `Unary::at` accepts any `usize`, and auto-fit only ever tries five powers of two. A caller
+/// sizing to a value may pass others — including degenerate ones. Every width must reach a DEFINED
+/// outcome: no panic, no hang, no wrong answer.
 ///
 /// Width 0 and 1 are the interesting degenerates. At width 0 no value is representable at all (the
 /// bound is strict, so even 0 needs one padding cell); at width 1 only the value 0 is. Both must

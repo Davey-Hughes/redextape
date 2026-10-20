@@ -51,8 +51,7 @@ pub enum Core {
     /// Mutually recursive bindings: `letrec f1 = v1 and … and fn = vn in body`. Every value is a
     /// `Lambda`, and every name is in scope in every value AND in the body.
     ///
-    /// Constructed only for a genuine group (n >= 2) — a single recursive binding stays `LetRec`, so
-    /// existing programs lower identically and the step-count goldens do not move.
+    /// Constructed only for a genuine group (n >= 2) — a single recursive binding stays `LetRec`.
     LetRecGroup(NodeId, Vec<(String, Core)>, Box<Core>),
     /// Evaluate `first` for effect (discard its value), then evaluate `then` for the result.
     Seq(NodeId, Box<Core>, Box<Core>),
@@ -182,7 +181,7 @@ fn take_core_children(n: &mut Core, stack: &mut Vec<Core>) {
 
 /// The largest `NodeId` `NodeGen` will issue. Reaching it stops issuance rather than wrapping.
 ///
-/// **THE VALUE IS CHOSEN AGAINST `i32`, NOT AGAINST MEMORY.** It is below `i32::MAX`
+/// **The value is chosen against `i32`, not against memory.** It is below `i32::MAX`
 /// (2,147,483,647), which is what makes `viewmodel::LinkIndex::build`'s `i32::try_from(node)`
 /// provably succeed instead of merely usually succeeding: the `tm_owner` leg crosses to JavaScript as
 /// an `Int32Array`, and a `NodeId` past `2^31` would go negative under the cast — landing on `-1` for
@@ -190,11 +189,10 @@ fn take_core_children(n: &mut Core, stack: &mut Vec<Core>) {
 /// owner", or on some other negative value that `web/src/link.ts`'s `nodeForState` collapses to the
 /// same `null`.
 ///
-/// It is **12,500x** the largest `NodeId` measured from source: 80,000, at 80,002 tokens, from a
-/// `1 + 1 + ...` chain. `desugar` has no depth guard of its own, so `parser::MAX_TOKENS` (100,000) is
-/// what bounds real issuance — roughly one id per token. No memory argument justifies a tighter
-/// number: a `Core` tree of 10^9 nodes is impossible at >= 40 bytes a node, so this ceiling exists to
-/// bound the COUNTER, not the tree.
+/// `desugar` has no depth guard of its own, so `parser::MAX_TOKENS` (100,000) is what bounds real
+/// issuance — roughly one id per token. No memory argument justifies a tighter number: a `Core` tree
+/// of 10^9 nodes is impossible at >= 40 bytes a node, so this ceiling exists to bound the COUNTER,
+/// not the tree.
 ///
 /// See `docs/superpowers/specs/2026-08-11-count-bounds-design.md` §4.3.
 pub const MAX_NODE_ID: NodeId = 1_000_000_000;
@@ -210,12 +208,11 @@ impl NodeGen {
     /// A generator whose first `fresh()` returns `next`. Used by synthetic passes (e.g. `defunc`)
     /// that mint new nodes and must not collide with an existing tree's ids: seed past its max id.
     ///
-    /// **CLAMPED TO `MAX_NODE_ID`, because this is the door the wrap was actually reachable
-    /// through.** A `Core` tree of 4.29 billion nodes cannot be built — `MAX_TOKENS` holds real
-    /// issuance to ~100,000 — but `seeded` is `pub` and takes an arbitrary `u32`, so
-    /// `seeded(u32::MAX)` plus one `fresh()` reached the wrap from outside this module. A seed past
-    /// the ceiling has already lost ids, so the generator reports `exhausted()` immediately rather
-    /// than pretending the clamp was free.
+    /// **CLAMPED TO `MAX_NODE_ID`, because this is the door a wrap would be reachable through.** A `Core`
+    /// tree of 4.29 billion nodes cannot be built — `MAX_TOKENS` holds real issuance to ~100,000 — but
+    /// `seeded` is `pub` and takes an arbitrary `u32`, so without the clamp `seeded(u32::MAX)` plus one
+    /// `fresh()` would wrap from outside this module. A seed past the ceiling has already lost ids, so the
+    /// generator reports `exhausted()` immediately rather than pretending the clamp was free.
     #[must_use]
     pub fn seeded(next: NodeId) -> Self {
         NodeGen { next: next.min(MAX_NODE_ID), exhausted: next > MAX_NODE_ID }
@@ -232,23 +229,20 @@ impl NodeGen {
 
     /// Issue the next id. **SATURATES AT `MAX_NODE_ID` rather than wrapping.**
     ///
-    /// This was a bare `self.next += 1`, which wraps silently in release (the workspace's only
-    /// `[profile]` setting is dev debug info, so no debug assertion catches it) and re-issues id 0 to
-    /// whatever mints next — colliding with the root of the tree and every early node, in the map the
-    /// UI resolves clicks through.
+    /// Wrapping is silent in release (the workspace's only `[profile]` setting is dev debug info, so no
+    /// debug assertion catches it) and would re-issue id 0 to whatever mints next, colliding with the root
+    /// of the tree and every early node, in the map the UI resolves clicks through.
     ///
     /// **SATURATION STILL REPEATS AN ID, and that is the honest trade rather than an oversight.** One
     /// known repeated id at a documented ceiling beats a silent restart at 0 that collides with the
     /// nodes most likely to be clicked. Making this fallible is the only fully correct fix — no id
-    /// ever issued twice — and it ripples through ~15 call sites and `desugar`'s own return type,
+    /// ever issued twice — and it ripples through every call site and `desugar`'s own return type,
     /// which cannot express refusal; `panic`/`expect`/`unwrap` are denied in library code
-    /// (`clippy.toml`), so aborting is not available either. `exhausted()` is how a caller that cares
-    /// finds out.
+    /// (`[workspace.lints.clippy]` in `Cargo.toml`), so aborting is not available either.
+    /// `exhausted()` is how a caller that cares finds out.
     ///
-    /// **THE GAP `LinkIndex::build` CITED IS NOW CLOSED AT THE SOURCE.** Its `NodeId -> i32` cast
-    /// refused because "nothing bounds how many a `Core` tree can mint (`NodeGen::fresh` is a bare
-    /// counter)". Something does now, and `MAX_NODE_ID < i32::MAX`, so that cast provably succeeds.
-    /// The refusal stays as defence in depth — see its own doc.
+    /// `MAX_NODE_ID < i32::MAX`, so `LinkIndex::build`'s `NodeId -> i32` cast provably succeeds; its
+    /// refusal stays as defence in depth — see its own doc.
     pub fn fresh(&mut self) -> NodeId {
         let id = self.next;
         if self.next >= MAX_NODE_ID {
@@ -264,9 +258,8 @@ impl NodeGen {
 mod tests {
     use super::*;
 
-    /// THE WRAP THIS CLOSES. `seeded(u32::MAX)` used to reach it in one call: `fresh()` returned
-    /// `u32::MAX` and left `next` at 0, so the NEXT id collided with the root of whatever tree was
-    /// being built — silently, in release, in the map the UI resolves clicks through.
+    /// A seed past the ceiling must not wrap `next` to 0, which would collide the next id with the root of
+    /// whatever tree is being built.
     #[test]
     fn a_seed_past_the_ceiling_never_recycles_id_zero() {
         let mut g = NodeGen::seeded(NodeId::MAX);
@@ -291,7 +284,7 @@ mod tests {
     }
 
     /// Ordinary issuance is untouched: consecutive, from zero, not exhausted. The guard must be
-    /// invisible to every real tree — the largest `NodeId` measured from source is 80,000.
+    /// invisible to every real tree.
     #[test]
     fn fresh_still_issues_consecutive_ids_from_zero() {
         let mut g = NodeGen::default();

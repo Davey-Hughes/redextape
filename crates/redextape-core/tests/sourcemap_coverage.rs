@@ -113,20 +113,9 @@ fn find_first<'a>(core: &'a Core, pred: &dyn Fn(&Core) -> bool) -> Option<&'a Co
 ///
 /// THE ROOT ALWAYS EMITS, whatever its kind: `lower_asm_mapped` sets `ctx.current = core.id()` and
 /// emits the program's terminating `Halt` itself, so a transparent construct at top level still owns
-/// that one block. (This is the invariant `tm_half` used to lean on for its fallback — true here, and
-/// false on the defunc path, where the root of the tree that gets lowered is `defunc`'s, not this one.)
+/// that one block.
 ///
 /// Iterative, like every other `Core` walk — see `Core::for_each_child`'s doc.
-///
-/// THE `lower_asm.rs` POINTER IN THE `Var` BULLET READ line 321 UNTIL THIS COMMIT, AND IT WAS ALREADY
-/// WRONG THE DAY IT LANDED. `if src != dst` was exactly line 321 at the parent of `9fbd911` — but
-/// `9fbd911`, the commit that added this file, also replaced the `unwrap`s in `Ctx::bind` and
-/// `Ctx::bind_fn` with `if let` for the no-panic rule, adding seven lines above the guard. The
-/// citation shipped seven lines short of the thing it named, inside the commit that wrote it.
-/// `clippy::pedantic` (#31) then moved it 35 further, so the guard now sits where the `Var` bullet
-/// above names it, in `lower_inner`'s `Core::Var` arm; this conversion found 321 holding a `"$box"` arm
-/// of `lower_builtin_apply`, a different function. A coordinate can be stale before it is even pushed;
-/// a symbol cannot.
 fn classify(core: &Core) -> (Vec<NodeId>, Vec<NodeId>) {
     let (mut emits, mut transparent) = (Vec::new(), Vec::new());
     // Third field: `target_name`, `Some(x)` iff this node is lowered with `dst` == the register
@@ -208,7 +197,7 @@ fn every_core_node_maps_into_both_backends() {
     }
 }
 
-/// The complement, and the regression guard for the fallback this module used to have: a node whose
+/// The complement, and the regression guard against a fallback to the enclosing block: a node whose
 /// lowering emitted nothing maps to `None`, NOT to the block of whatever encloses it. Deleting the
 /// `emits_here` distinction cannot pass both this test and the one above.
 #[test]
@@ -242,7 +231,7 @@ fn transparent_nodes_map_to_none() {
     assert_eq!(seen_kinds, ["Lambda", "Let", "Seq", "callee Var"], "the corpus must exercise every transparent kind");
 }
 
-/// Finding 3: the defunc branch of `asm_half`, which a first-order corpus never reaches, and the TM half
+/// The defunc branch of `asm_half`, which a first-order corpus never reaches, and the TM half
 /// built through it. The two halves are asserted SEPARATELY here — see `HIGHER_ORDER`'s doc for why the
 /// TM half cannot be exhaustive.
 #[test]
@@ -266,7 +255,7 @@ fn higher_order_programs_exercise_the_defunc_branch() {
     }
 }
 
-/// Finding 5: a golden that pins the actual composition, not just its non-emptiness. Everything else
+/// A golden that pins the actual composition, not just its non-emptiness. Everything else
 /// here checks *whether* a node has a block; this checks *which states* it has, so an off-by-one in
 /// `origins.get(*code_index)` — the exact inversion this module exists to perform — fails a test.
 ///
@@ -383,13 +372,13 @@ fn letrecgroup_and_statement_seq_spans_are_precise_not_block_wide() {
     );
 }
 
-/// Finding 1's fix: attribution is unchanged (a `LetRecGroup`'s span is still the hull of its members'
-/// own spans), but that is a HULL, not a SET — `Span` is one contiguous `[start, end)` range, so it
-/// cannot exclude anything sitting inside that range. Put an unrelated `fn indep` BETWEEN the two cycle
-/// members instead of before them (the arrangement the test above uses, where the hull happens to be
-/// tight) and the hull has no choice but to cover it: the group's span becomes exactly the whole
-/// three-`fn` run, `indep` included. That is a direct, unavoidable consequence of representing the
-/// attribution as a single `Span` rather than a set of spans — not a bug in the merge.
+/// A `LetRecGroup`'s span is the hull of its members' own spans, but that is a HULL, not a SET — `Span`
+/// is one contiguous `[start, end)` range, so it cannot exclude anything sitting inside that range. Put
+/// an unrelated `fn indep` BETWEEN the two cycle members instead of before them (the arrangement the
+/// test above uses, where the hull happens to be tight) and the hull has no choice but to cover it: the
+/// group's span becomes exactly the whole three-`fn` run, `indep` included. That is a direct,
+/// unavoidable consequence of representing the attribution as a single `Span` rather than a set of
+/// spans — not a bug in the merge.
 #[test]
 fn letrecgroup_span_is_the_hull_and_can_cover_an_interleaved_non_member() {
     let src = "fn a(m) { b(m) } fn indep(n) { n } fn b(m) { a(m) } indep(1) + a(2)";
@@ -495,12 +484,11 @@ fn synthesized_leaves_inherit_the_span_of_what_caused_them() {
 }
 
 /// The list-literal `cons`-cell divergence `desugar_mapped`'s doc calls out: each cell answers "what
-/// element produced this node", not "which literal contains it". The OLD behaviour attributed every
-/// cell to the whole literal, so a three-element list produced three IDENTICAL spans — and every test
-/// committed at the time passed, because none of them checked for distinctness, only for "in bounds"
-/// (`every_core_node_resolves_to_an_in_bounds_source_span`) or for a single hand-picked cell
-/// (`synthesized_leaves_inherit_the_span_of_what_caused_them`, before this commit). So the load-bearing
-/// assertion here is that the three spans DIFFER from each other, not merely that each one is valid.
+/// element produced this node", not "which literal contains it". Attributing every cell to the whole
+/// literal would give a three-element list three IDENTICAL spans, which
+/// `every_core_node_resolves_to_an_in_bounds_source_span` (only "in bounds") does not check for. So
+/// the load-bearing assertion here is that the three spans DIFFER from each other, not merely that each
+/// one is valid.
 #[test]
 fn list_literal_cons_cells_point_at_their_own_elements() {
     let src = "[1, 2, 3]";
@@ -561,23 +549,20 @@ fn list_literal_cons_cells_point_at_their_own_elements() {
     assert_ne!(span1, span3, "cons_1 and cons_3 must not share a span");
 }
 
-/// Finding 7: `desugar.rs` deliberately preserves `NodeId` ALLOCATION ORDER — every id-minting site
-/// reads its own id BEFORE lowering its children, a single constructor call's arguments evaluating left
-/// to right — because ids are the join key `node_to_lambda` and `node_to_tm` resolve through. A site
-/// that instead minted its id AFTER lowering its children would produce an equally well-formed `Core`
-/// (every id still unique, every tree still shaped the same), just with each affected node's id shifted
-/// to wherever `NodeGen` happened to be once its children were done — silently re-pointing both legs at
-/// different constructs while nothing else notices, because nothing else compares ids across two
-/// orderings. `a_known_node_maps_to_its_exact_state_block` runs on `"3 - 5"`, which has none of the five
-/// order-sensitive sites below, so it does not guard this.
+/// `desugar.rs` deliberately preserves `NodeId` ALLOCATION ORDER, because ids are the join key
+/// `node_to_lambda` and `node_to_tm` resolve through. A site that moved its mint to the other side of
+/// lowering its children would produce an equally well-formed `Core` (every id still unique, every tree
+/// still shaped the same), just with each affected node's id shifted — silently re-pointing both legs
+/// at different constructs while nothing else notices, because nothing else compares ids across two
+/// orderings. `a_known_node_maps_to_its_exact_state_block` runs on `"3 - 5"`, which has none of the
+/// five order-sensitive sites below, so it does not guard this.
 ///
 /// One fixture exercises all five (see, in `desugar.rs`, the `Stmt::Assign`/`Stmt::While` arms of
 /// `lower_stmts_at`, the `[i]` and multi-member arms of `lower_fn_run_at`, and the `Expr::Lambda` arm of
-/// `lower_expr_at`) and pins the exact id each one gets. The values below were read off one known-good
-/// run of this exact fixture (`cargo test -p redextape-core --test sourcemap_coverage`), not computed by
-/// hand — see the commit that added this test for the reorder-and-observe-a-failure demonstration.
+/// `lower_expr_at`) and pins the exact id each one gets. The values below are read off a known-good run
+/// of this fixture (`cargo test -p redextape-core --test sourcemap_coverage`), not computed by hand.
 #[test]
-fn node_id_allocation_order_is_pinned_for_every_mint_before_children_site() {
+fn node_id_allocation_order_is_pinned_for_every_order_sensitive_site() {
     let src = "fn helper(x) { x }\nfn a(m) { b(m) }\nfn b(m) { a(m) }\nlet mut n = 0;\nn = 1;\n\
                while n < 3 { n = n + 1; }\nlet f = |y| y + 1;\nf(n)";
     let (program, ds) = redextape_core::parser::parse(src);

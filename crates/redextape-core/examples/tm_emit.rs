@@ -1,18 +1,17 @@
 //! `tm_emit` — write a self-describing `.tm` file, and run one back.
 //!
-//! `tm_demo` runs the TM backend in-process and checks it against the reference interpreter; this
-//! example is the other half — it is the slice's headline claim (a `.tm` file is self-describing: it
-//! carries the literal initial tapes plus the `encoding`/`width`/`slots`/`result` recipe, not just δ
-//! and q₀) made executable OUTSIDE the test harness. `emit` compiles a program and writes the text;
-//! `run` reads nothing but that text, builds the initial configuration from its header, simulates, and
-//! decodes the final tapes to a value.
+//! `tm_demo` runs the TM backend in-process and checks it against the reference interpreter; this example
+//! is the other half — it makes a `.tm` file's self-description (it carries the literal initial tapes
+//! plus the `encoding`/`width`/`slots`/`result` recipe, not just δ and q₀) executable OUTSIDE the test
+//! harness. `emit` compiles a program and writes the text; `run` reads nothing but that text, builds the
+//! initial configuration from its header, simulates, and decodes the final tapes to a value.
 //!
 //!     cargo run --example tm_emit -p redextape-core -- emit '<program>' [--encoding unary|binary] [-o <path>]
 //!     cargo run --example tm_emit -p redextape-core -- run <path>
 //!
-//! This is the one place in the tree where a human types the input directly, so both subcommands are
-//! total over their argument list and over whatever the file/program string turns out to say: every
-//! failure prints a diagnostic to stderr and exits non-zero rather than panicking.
+//! A human types this example's input directly, so both subcommands are total over their argument list
+//! and over whatever the file/program string turns out to say: every failure prints a diagnostic to
+//! stderr and exits non-zero rather than panicking.
 
 // Example target: a demo that cannot build its own input has nothing to demonstrate, so aborting is
 // deliberate here. The `allow-*-in-tests` keys in `clippy.toml` do not reach example targets at all.
@@ -173,25 +172,23 @@ fn run(args: &[String]) -> Result<(), String> {
         return Err(format!("`{path}` does not parse as a `.tm` file:\n{}", format_diagnostics(&doc.diagnostics)));
     }
     let m = doc.machine.ok_or_else(|| format!("`{path}` did not parse to a machine"))?;
-    // THIS REFUSAL IS NO LONGER THE TREE'S ONLY ANSWER TO A MISSING HEADER, AND THAT IS DELIBERATE
-    // RATHER THAN DRIFT. `redextape-wasm`'s `session::tm_scratch` RUNS a headerless machine, from blank
-    // tapes at `MIN_FIELD_WIDTH` — decision 6 of
-    // docs/superpowers/specs/2026-08-11-plan5d-i-session-model-design.md, taken at §3.4 with this
-    // example named as the refusal it reverses.
+    // `redextape-wasm`'s `session::tm_scratch` RUNS a headerless machine, from blank tapes at
+    // `MIN_FIELD_WIDTH` — decision 6 of
+    // docs/superpowers/specs/2026-08-11-plan5d-i-session-model-design.md, taken at §3.4, which names
+    // this example's refusal. This refusal is not the tree's only answer to a missing header, and that
+    // is deliberate rather than drift.
     //
     // THE TWO ARE NOT IN CONFLICT ABOUT THE FACTS, ONLY ABOUT WHO IS PRESENT. The message below is
-    // still exactly true: a header-free file records δ and the start state and no initial
-    // configuration, so it cannot be run unless the CALLER supplies `init`. A scratchpad IS that
-    // caller — a user typed the machine into a pane and is looking at it, so inventing blank tapes is
-    // a visible offer they can correct, and `tmStatus().header` reports `false` so the pane is
-    // obliged to say the configuration was not the file's. `tm_emit run` is a batch tool with nobody
-    // to offer anything to and nowhere to say it, so for IT the honest answer is still to decline.
+    // exactly true: a header-free file records δ and the start state and no initial configuration, so it
+    // cannot be run unless the CALLER supplies `init`. A scratchpad IS that caller — a user typed the
+    // machine into a pane and is looking at it, so inventing blank tapes is a visible offer they can
+    // correct, and `tmStatus().header` reports `false` so the pane is obliged to say the configuration
+    // was not the file's. `tm_emit run` is a batch tool with nobody to offer anything to and nowhere to
+    // say it, so for IT the honest answer is still to decline.
     //
-    // The wording below is left alone on purpose: it describes this tool, and softening it to
-    // accommodate a caller that is not this tool would make it less true here. What is corrected is
-    // the reading a future maintainer would otherwise take from it — that nothing in this tree runs a
-    // headerless machine. #32's `lower_tm` "cannot drift" entry is the failure this comment exists to
-    // avoid: two places asserting opposite things about one condition, with neither naming the other.
+    // The wording below describes this tool, and softening it to accommodate a caller that is not this
+    // tool would make it less true here. Two places asserting opposite things about one condition, with
+    // neither naming the other, is the failure this comment exists to avoid.
     let h = doc.header.ok_or_else(|| {
         format!(
             "`{path}` has no header. A `.tm` file without one records δ and the start state but not \

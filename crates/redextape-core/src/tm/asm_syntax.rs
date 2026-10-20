@@ -224,7 +224,7 @@ pub fn instr_at(src: &str, offset: usize) -> Option<(Span, &'static MnemonicDoc)
             // `split_trailing(..).0`, NOT `content_before_comment` — the latter is `.trim()`ed, so
             // feeding it to `trimmed_at` makes the pad structurally zero and reports every indented
             // mnemonic one line's worth of leading whitespace too early. `trimmed_at`'s own doc
-            // records this exact mistake at the TM `start`/`state` sites it was first written for.
+            // warns of the same mistake at the TM `start`/`state` sites.
             let content = comments::split_trailing(content).0;
             let (trimmed, pad) = trimmed_at(content);
             // A label line is `name:` and carries no mnemonic; the label row answers it instead.
@@ -263,7 +263,7 @@ pub(super) fn bin_op_for(mnemonic: &str) -> Option<BinOp> {
 /// belong to neither. `TmDocument`'s shape over asm's line grammar, for the reasons stated there.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct AsmDocument {
-    /// `None` exactly when `diagnostics` is non-empty, matching what the tuple returned.
+    /// `None` exactly when `diagnostics` is non-empty, matching `parse_asm`'s tuple.
     pub program: Option<Program>,
     pub header: Option<AsmHeader>,
     /// Recovered only from lines that parsed, for the reason `TmDocument::comments` states.
@@ -271,24 +271,20 @@ pub struct AsmDocument {
     pub diagnostics: Vec<Diagnostic>,
 }
 
-/// Parse the register-assembly text form. Unchanged in signature and behaviour.
+/// Parse the register-assembly text form.
 ///
 /// `parse_asm_nav`'s document half, for the reason `parse_tm_full` states.
 ///
 /// **REFERENCES ELSEWHERE TO THIS FUNCTION DIAGNOSING OR CAPPING SOMETHING MEAN THE LOOP IN
-/// `parse_asm_nav`.** Several safety arguments across this crate — `header.rs`'s allocation bound,
-/// `comments.rs`'s anchor-names-one-line claim — name this function as the code that performs a
-/// check, and were written when it WAS that code. It is now one line. The checks did not move
-/// out of the crate, only into `parse_asm_nav`, and a reader following such a pointer should
-/// continue there rather than conclude the bound is unenforced.
+/// `parse_asm_nav`.** This function is one line, a call to `parse_asm_nav`, so a reader following
+/// such a pointer should continue there rather than conclude the check is unenforced.
 #[must_use]
 pub fn parse_asm_full(src: &str) -> AsmDocument {
     parse_asm_nav(src).0
 }
 
 /// Parse the register-assembly text form, returning the header and a navigation index too.
-/// Iterative over a flat line grammar, no recursion, never panics — `parse_tm_full`'s former shape
-/// and contract, now shared with `parse_tm_nav`.
+/// Iterative over a flat line grammar, no recursion, never panics.
 ///
 /// A `None` program means at least one diagnostic; an empty source is an empty program and no
 /// diagnostics, since a program with no instructions is well-formed and the printer emits one. A
@@ -362,10 +358,10 @@ pub fn parse_asm_nav(src: &str) -> (AsmDocument, NameIndex) {
                 attach(&mut comments, &mut pending, AsmAnchor::Label(labels.len() - 1), comment);
                 // `name` is already fully trimmed — `text` is `before.trim()` and this strips a
                 // `:` then `trim_end`s — so this pad is structurally ZERO and `indent` carries the
-                // whole offset. Called for the name rather than the pad. Spelled out because the
-                // `.tm` sites had exactly this shape and were WRONG there, the difference being
-                // that they added a keyword length this site does not have; `trimmed_at`'s doc
-                // now warns that a trimmed argument makes its second return meaningless.
+                // whole offset. Called for the name rather than the pad. Spelled out because at the
+                // `.tm` sites this shape is WRONG, the difference being that they add a keyword
+                // length this site does not have; `trimmed_at`'s doc warns that a trimmed argument
+                // makes its second return meaningless.
                 let (name_text, pad) = trimmed_at(name);
                 let at = line_start + indent + pad;
                 nav.push_definition(name_text, Span::new(at, at + name_text.len()), DefKind::Label, None);
@@ -406,10 +402,10 @@ pub fn parse_asm_nav(src: &str) -> (AsmDocument, NameIndex) {
                 if let Some((name, rel)) = label {
                     // `text` is `before.trim()` and `before` starts where `content` does, so
                     // `text` begins exactly `indent` bytes into the line — there is no further
-                    // leading pad to add. An earlier version added the difference between the
-                    // indent-stripped line and `text`, which measures what was removed from the
-                    // END (a trailing comment), and so pushed the span INTO the comment: `jmp f
-                    // ; go back` reported the `k` of `back`.
+                    // leading pad to add. Adding the difference between the indent-stripped
+                    // line and `text` would measure what was removed from the END (a trailing
+                    // comment), and so push the span INTO the comment: `jmp f ; go back` would
+                    // report the `k` of `back`.
                     let at = line_start + indent + rel;
                     nav.push_reference(name, Span::new(at, at + name.len()));
                 }
@@ -441,9 +437,8 @@ pub fn parse_asm_nav(src: &str) -> (AsmDocument, NameIndex) {
 /// Parse the register-assembly text form, dropping any header.
 ///
 /// A thin wrapper over `parse_asm_full` rather than a second parser, for the reason `parse_tm` states
-/// about its own: this function MUST learn to skip directives regardless — otherwise a file carrying
-/// one hits the unknown-mnemonic path and is rejected — and once it must change anyway, delegating
-/// removes the failure mode where two parsers drift.
+/// about its own: it must skip directives — a file carrying one would otherwise hit the unknown-mnemonic
+/// path and be rejected — and delegating removes the failure mode where two parsers drift.
 #[must_use]
 pub fn parse_asm(src: &str) -> (Option<Program>, Vec<Diagnostic>) {
     let d = parse_asm_full(src);
@@ -498,26 +493,26 @@ pub fn asm_label_diagnostics(nav: &NameIndex) -> Vec<Diagnostic> {
 /// `parse_instr_at`'s instruction half, the shape `parse_asm` and `parse_tm` already use for the
 /// same reason: one reader, two entry points, and no way for them to disagree.
 ///
-/// `#[cfg(test)]`: production now calls `parse_instr_at` directly (it needs the offset), so this
-/// wrapper's only remaining caller is the test suite below, which exercises the plain `Result`
-/// without carrying `label_at` through every assertion.
+/// `#[cfg(test)]`: production calls `parse_instr_at` directly (it needs the offset), so this
+/// wrapper's only caller is the test suite below, which exercises the plain `Result` without
+/// carrying `label_at` through every assertion.
 #[cfg(test)]
 fn parse_instr(text: &str) -> Result<Instr, String> {
     parse_instr_at(text).map(|(i, _)| i)
 }
 
+/// One parsed instruction, plus its label operand — the name as written and where it begins,
+/// relative to the start of the instruction text — for the three mnemonics that carry one.
+type InstrWithLabel<'a> = (Instr, Option<(&'a str, usize)>);
+
 /// `parse_instr`, plus where the `Label` operand begins relative to the start of `text` — `None`
-/// for the twenty-one shapes that take no label.
+/// for the twenty-one mnemonics that take no label.
 ///
 /// **THE OFFSET IS RECORDED AS THE OPERANDS ARE SPLIT**, which is the discipline `print_tm_inner`
 /// already states for its own spans: an offset is exact by construction and nothing re-scans the
 /// text. Which operand is the label comes from `Shape::kinds()`, the one table that says so — a
 /// list of label-taking mnemonics here would be a second copy of `MNEMONICS` with no gate able to
 /// hold the two in agreement.
-/// One parsed instruction, plus its label operand — the name as written and where it begins,
-/// relative to the start of the instruction text — for the three shapes that carry one.
-type InstrWithLabel<'a> = (Instr, Option<(&'a str, usize)>);
-
 fn parse_instr_at(text: &str) -> Result<InstrWithLabel<'_>, String> {
     let (mnemonic, rest_raw) = text.split_once(char::is_whitespace).unwrap_or((text, ""));
     let shape = shape_of(mnemonic).ok_or_else(|| format!("unknown mnemonic `{mnemonic}`"))?;
@@ -529,9 +524,8 @@ fn parse_instr_at(text: &str) -> Result<InstrWithLabel<'_>, String> {
     let rest_start = (text.len() - rest_raw.len()) + (rest_raw.len() - rest_raw.trim_start().len());
     let rest = rest_raw.trim();
 
-    // Each operand's text AND where it begins in `text`. Still bounded to `kinds.len() + 1` for
-    // the reason the previous version stated: one operand past what any shape accepts is what lets
-    // the arity check below tell "too many" from "too few".
+    // Each operand's text AND where it begins in `text`. Bounded to `kinds.len() + 1`: one operand
+    // past what any shape accepts is what lets the arity check below tell "too many" from "too few".
     let mut operands: Vec<(&str, usize)> = Vec::new();
     if !rest.is_empty() {
         let mut cursor = rest_start;
@@ -551,14 +545,13 @@ fn parse_instr_at(text: &str) -> Result<InstrWithLabel<'_>, String> {
     // SAFETY INVARIANT (not enforced by the type system): these closures index `operands[i]`
     // directly. That is in bounds only because the arity check above guarantees
     // `operands.len() == kinds.len()`, PLUS a hand-maintained correspondence between each
-    // `MNEMONICS` row's `Shape` and the indices the match arm below actually reads — nothing stops
-    // `("head", Shape::RR)` from being written next to `"head" => Ok(Instr::Head(reg(0)?, reg(1)?))`
-    // even though `Head` only needs one register, and nothing stops the reverse either. The
-    // guarantee that every match arm's indices stay within its row's arity is a TEST RESULT, not a
-    // construction: `table_agrees_with_the_printer` pins each row's `Shape` to what the printer
-    // actually emits, and `every_table_mnemonic_builds_an_instruction` calls every row's match arm
-    // with exactly that many operands and asserts it does not panic. Keep both green when adding or
-    // reshaping a row.
+    // `MNEMONICS` row's `Shape` and the indices the match arm below actually reads — nothing stops a
+    // row's `Shape` from naming fewer operands than its match arm reads, and nothing stops the
+    // reverse either. The guarantee that every match arm's indices stay within its row's arity is a
+    // TEST RESULT, not a construction: `table_agrees_with_the_printer` pins each row's `Shape` to
+    // what the printer actually emits, and `every_table_mnemonic_builds_an_instruction` calls every
+    // row's match arm with exactly that many operands and asserts it does not panic. Keep both green
+    // when adding or reshaping a row.
     let reg = |i: usize| -> Result<Reg, String> {
         parse_reg(operands[i].0).ok_or_else(|| format!("`{}` is not a register", operands[i].0))
     };
@@ -572,15 +565,14 @@ fn parse_instr_at(text: &str) -> Result<InstrWithLabel<'_>, String> {
 
     // This sits AFTER the arity check, which is what makes `operands[k]` in bounds — the same
     // invariant the three closures above rely on, and the one the SAFETY INVARIANT comment above
-    // them documents.
-    // **THE TEXT AND THE OFFSET COME FROM ONE LOOKUP, WHICH IS WHAT MAKES THEM UNABLE TO
-    // DISAGREE.** They were two: `Shape::kinds()` gave the offset here and a hand-written match
-    // over `Instr` variants gave the name at the call site — the second copy of `MNEMONICS` this
-    // function's own doc refuses, written in variants rather than strings. Add a fourth
-    // label-taking mnemonic with a new `Instr` variant and the offset would have been right while
-    // the name lookup returned `None`, dropping the reference with no diagnostic, no panic and no
-    // compile error. `operands[k]` holds both halves on one line; taking both deletes the
-    // disagreement rather than documenting it.
+    // them documents. **THE TEXT AND THE OFFSET COME FROM ONE LOOKUP, WHICH IS WHAT MAKES THEM
+    // UNABLE TO DISAGREE.** Two lookups — `Shape::kinds()` for the offset here and a hand-written
+    // match over `Instr` variants for the name at the call site — would be the second copy of
+    // `MNEMONICS` this function's own doc refuses, written in variants rather than strings. Add a
+    // fourth label-taking mnemonic with a new `Instr` variant and the offset would be right while
+    // the name lookup returns `None`, dropping the reference with no diagnostic, no panic and no
+    // compile error. `operands[k]` holds both halves on one line; taking both leaves no
+    // disagreement to document.
     let label_at = kinds.iter().position(|k| matches!(k, OperandKind::Label)).map(|k| operands[k]);
 
     if let Some(op) = bin_op_for(mnemonic) {
@@ -832,7 +824,7 @@ mod tests {
 
     /// `jz` is `Shape::RL`, arity 2. `"r0,"` splits on `,` into `["r0", ""]` — length 2, so the arity
     /// check does not trip, and the empty second operand reaches the label closure's `is_empty()` arm
-    /// instead. That branch was reachable but untested; this pins the exact error it produces.
+    /// instead. That branch is reachable; this pins the exact error it produces.
     #[test]
     fn a_trailing_comma_with_no_label_reaches_the_empty_label_error() {
         let e = parse_instr("jz\tr0,").expect_err("the label operand is empty, not present");
@@ -840,10 +832,9 @@ mod tests {
     }
 
     /// `.take(kinds.len() + 1)` bounds the allocation, not the diagnostic: a list with exactly one
-    /// operand too many is still within the bound, so the reported count is the true one — the same
-    /// message a caller would have seen before the bound existed. A wildly over-long list (the
-    /// pathological case the bound exists for) is still rejected as "too many", just with a capped
-    /// count rather than a true one, which is the trade this bound makes.
+    /// operand too many is still within the bound, so the reported count is the true one. A wildly
+    /// over-long list (the pathological case the bound exists for) is still rejected as "too many",
+    /// just with a capped count rather than a true one, which is the trade this bound makes.
     #[test]
     fn an_over_long_operand_list_is_bounded_and_still_reports_too_many() {
         // `ret` is `Shape::Nullary` — arity 0 — so one operand is already one too many.
@@ -926,7 +917,7 @@ mod tests {
         assert_eq!(prog.expect("parses").code, vec![Instr::Halt]);
     }
 
-    /// `parse_asm` must keep working on a headered file rather than choking on the directive.
+    /// `parse_asm` must read a headered file rather than choking on the directive.
     #[test]
     fn parse_asm_drops_a_header_instead_of_rejecting_it() {
         let (prog, ds) = parse_asm("result List<Nat>\n\n    halt\n");
@@ -969,7 +960,7 @@ mod tests {
 
     /// `result` is a directive only when a separator follows it — a label named `result:` or
     /// `resultset:` must still read as the label it is, not a malformed directive. This is the
-    /// property the `strip_prefix("result")` + separator check in `parse_asm_full` exists for.
+    /// property the `strip_prefix("result")` + separator check in `parse_asm_nav` exists for.
     #[test]
     fn a_label_named_result_or_resultset_is_not_read_as_a_directive() {
         let AsmDocument { program: prog, header, diagnostics: ds, .. } =
@@ -981,10 +972,10 @@ mod tests {
         assert_eq!(prog.labels, vec![("result".to_string(), 0), ("resultset".to_string(), 0)]);
     }
 
-    /// THE REGRESSION: a label named `result` with a space before its colon must read as the label
-    /// `result`, not be swallowed by the `result` directive dispatch. Space-before-colon is legal for
-    /// every other identifier (see `a_label_named_foo_with_a_space_before_the_colon_is_a_label`, the
-    /// control case below) — `result :` is no different, and directive dispatch must not claim it just
+    /// A label named `result` with a space before its colon must read as the label `result`, not be
+    /// swallowed by the `result` directive dispatch. Space-before-colon is legal for every other
+    /// identifier (see `a_label_named_foo_with_a_space_before_the_colon_is_a_label`, the control
+    /// case below) — `result :` is no different, and directive dispatch must not claim it just
     /// because the line starts with the word `result`.
     #[test]
     fn a_label_named_result_with_a_space_before_the_colon_is_a_label() {
@@ -996,10 +987,10 @@ mod tests {
         assert_eq!(prog.labels, vec![("result".to_string(), 0)]);
     }
 
-    /// The control proving the case above is really a regression and not just how labels work: `foo`
-    /// is an ordinary identifier with no directive to compete with, and `foo :` has always read as the
-    /// label `foo`. If this ever stops passing, the fix for the regression above went too far and broke
-    /// label parsing generally, not just the `result` special case.
+    /// The control proving the case above is specific to `result` and not just how labels work:
+    /// `foo` is an ordinary identifier with no directive to compete with, and `foo :` reads as the
+    /// label `foo`. If this ever stops passing, the handling of the `result` case went too far and
+    /// broke label parsing generally, not just the `result` special case.
     #[test]
     fn a_label_named_foo_with_a_space_before_the_colon_is_a_label() {
         let (prog, ds) = parse_asm("foo :\n    halt\n");
@@ -1009,8 +1000,8 @@ mod tests {
         assert_eq!(prog.labels, vec![("foo".to_string(), 0)]);
     }
 
-    /// The fix must not overcorrect: `result Nat` does not end in `:`, so it is still read as a
-    /// directive, not a label — the label check only claims lines that end in `:`.
+    /// The `result :` handling must not overcorrect: `result Nat` does not end in `:`, so it is still
+    /// read as a directive, not a label — the label check only claims lines that end in `:`.
     #[test]
     fn result_nat_with_no_trailing_colon_is_still_a_directive() {
         let AsmDocument { program: prog, header, diagnostics: ds, .. } = parse_asm_full("result Nat\n\n    halt\n");
@@ -1025,10 +1016,9 @@ mod tests {
     fn the_label_operand_offset_survives_every_spacing_the_grammar_allows() {
         // Tabs, several spaces, and no space after the comma are all legal here, and each moves
         // the operand. A fixture using only the printer's own tab layout would pass against
-        // arithmetic that is wrong for every hand-written file.
-        // The expectation carries the NAME as well as the offset, because the two now come from
-        // one lookup and pinning only the offset would leave the half that used to be computed
-        // separately unchecked.
+        // arithmetic that is wrong for every hand-written file. The expectation carries the
+        // NAME as well as the offset, because the two come from one lookup and pinning only the
+        // offset would leave the name unchecked.
         for (text, want) in [
             ("jmp\tf", Some(("f", 4))),
             ("jz\tr0, f", Some(("f", 7))),
@@ -1045,9 +1035,9 @@ mod tests {
         }
     }
 
-    /// Probed at `64c1164`: parses clean, `labels` is [("f", 0), ("g", 3)] and `code` is
-    /// [Li(Loc(0), 1), Jz(Loc(0), "g"), Jmp("g"), Ret]. Note the TABs — that is what the
-    /// printer emits and what the existing fixtures in this file use.
+    /// Parses clean: `labels` is [("f", 0), ("g", 3)] and `code` is [Li(Loc(0), 1), Jz(Loc(0),
+    /// "g"), Jmp("g"), Ret]. Note the TABs — that is what the printer emits and what the
+    /// other fixtures in this file use.
     const NAV_ASM: &str = "result Nat\nf:\n\tli\tr0, #1\n\tjz\tr0, g\n\tjmp\tg\ng:\n\tret\n";
 
     #[test]
@@ -1093,9 +1083,9 @@ mod tests {
 
     #[test]
     fn a_dangling_jump_target_is_a_reference_that_resolves_to_nothing() {
-        // Probed: this parses with `program: Some` and ZERO diagnostics. The parser never checks
-        // jump targets, so to it this is a clean file carrying a reference to nothing — not an
-        // error. `asm_label_diagnostics` is where it becomes one.
+        // This parses with `program: Some` and ZERO diagnostics. The parser never checks jump
+        // targets, so to it this is a clean file carrying a reference to nothing — not an error.
+        // `asm_label_diagnostics` is where it becomes one.
         let src = "result Nat\nf:\n\tjmp\tnowhere\n\tret\n";
         let (doc, nav) = parse_asm_nav(src);
         assert!(doc.program.is_some());
@@ -1106,9 +1096,9 @@ mod tests {
 
     #[test]
     fn a_duplicate_label_is_listed_twice_and_the_first_one_is_linked() {
-        // Probed: `labels` comes back [("f", 0), ("f", 0)] with ZERO diagnostics — unlike `.tm`,
-        // whose parser diagnoses a duplicate state name; `asm_label_diagnostics` marks this one.
-        // Both must appear in an outline.
+        // `labels` comes back [("f", 0), ("f", 0)] with ZERO diagnostics — unlike `.tm`, whose
+        // parser diagnoses a duplicate state name; `asm_label_diagnostics` marks this one. Both
+        // must appear in an outline.
         let src = "result Nat\nf:\nf:\n\tjmp\tf\n\tret\n";
         let (doc, nav) = parse_asm_nav(src);
         assert_eq!(doc.diagnostics.len(), 0, "the premise: the parser does not diagnose duplicates");
@@ -1197,17 +1187,15 @@ mod tests {
     fn a_trailing_comment_does_not_shift_any_span() {
         // **A SPAN IS MEASURED FROM THE LINE'S START AND A COMMENT IS REMOVED FROM ITS END**, so
         // any offset term derived from what comment-stripping removed pushes the span rightwards
-        // — INTO the comment. An earlier version of this code did exactly that: `jmp f ; go back`
-        // reported the `k` of `back` as the reference to `f`. Every other fixture in this file
-        // lacks a trailing comment and passes under that defect, which is the whole reason this
-        // test exists.
+        // — INTO the comment. `jmp f ; go back` would report the `k` of `back` as the reference
+        // to `f`. A fixture without a trailing comment would pass under that defect, which is why
+        // this test exists.
         //
         // The assertion is the general invariant rather than a table of offsets: every
         // occurrence's span must slice back to its own name. That catches this bug and every
         // other one of its shape, including ones no fixture here anticipates.
         // The label is INDENTED and carries a trailing comment, and all three label-taking
         // mnemonics appear — `jz` (label is the second operand), `jmp` and `call` (the first).
-        // Every fixture elsewhere in this file puts labels at column 0 and omits `call`.
         let src = "result Nat ; r\n  f: ; entry\n\tjz\tr0, f ; conditional\n\tjmp\tf ; go back\n\tcall\tf ; and again\n\tret ; end\n";
         let (doc, nav) = parse_asm_nav(src);
         assert!(doc.program.is_some(), "the fixture's premise: {:?}", doc.diagnostics);
@@ -1270,7 +1258,7 @@ mod tests {
             assert_eq!(nav.definition_of(i), Some(0), "{mnemonic}: operand links to the label");
             checked += 1;
         }
-        assert_eq!(checked, 3, "MNEMONICS has three label-taking entries today: jz, jmp, call");
+        assert_eq!(checked, 3, "MNEMONICS has three label-taking entries: jz, jmp, call");
     }
 
     #[test]

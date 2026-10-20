@@ -1,10 +1,10 @@
 //! asm `Program` -> multi-tape `Machine`. Control flow becomes the TM's state graph: one entry state
 //! per instruction index; each instruction is a block of states (a delta-gadget) that flows from its
-//! `pc` to a successor `pc`. Straight-line instructions fall through to `pc[i+1]`; `jmp`/`jz` (Task 4)
+//! `pc` to a successor `pc`. Straight-line instructions fall through to `pc[i+1]`; `jmp`/`jz`
 //! jump to a label's `pc`. Value gadgets come from the `Encoding` seam. Total and panic-free on any
-//! `Program`. `call`/`ret` lower via STACK frames + return-tag dispatch (Part 2b-2-ii); `Nil`/`Cons`/
-//! `IsEmpty` lower via the HEAP tape (Part 2b-2-iii-a); `Head`/`Tail` (Part 2b-2-iii-b) dereference a
-//! pointer over the HEAP — `nil`/dangling have no value and spin to a cap (matching λ/reference).
+//! `Program`. `call`/`ret` lower via STACK frames + return-tag dispatch;
+//! `Nil`/`Cons`/`IsEmpty` lower via the HEAP tape; `Head`/`Tail` dereference a pointer over the HEAP —
+//! `nil`/dangling have no value and spin to a cap (matching λ/reference).
 
 use crate::core::BinOp;
 use crate::tm::asm::{Instr, Program, Reg};
@@ -23,7 +23,7 @@ pub(crate) const MAX_SLOTS: u32 = 100_000;
 /// (`push_frame`/`pop_frame_restore`) are `O(n_loc^2)` states (each field-copy re-seeks from home), so
 /// an absurd local count in a call-containing program would build an OOM-sized machine. Real
 /// first-order programs use « this. A program that exceeds it routes to a degenerate halt (total,
-/// bounded). `MAX_SLOTS` (the `O(n_slots)` bank/init-tape bound) stays as-is for no-call programs.
+/// bounded). `MAX_SLOTS` (the `O(n_slots)` bank/init-tape bound) bounds no-call programs.
 pub(crate) const MAX_FRAME_LOC: u32 = 1_000;
 
 /// True when `lower_tm_mapped` will REFUSE to lay `prog` out over the `Loc` bank and return the
@@ -40,24 +40,20 @@ pub(crate) fn frame_bank_unrepresentable(prog: &Program, sm: &SlotMap) -> bool {
 /// Upper bound on the number of `Mul` instructions a single program may contain.
 ///
 /// `Add`/`Sub` cost O(width) states per instruction under either encoding, but `Binary::arith`'s `Mul`
-/// gadget is O(width²) — measured `1.5*width^2 + 26.5*width + 13` states for the gadget alone: 143
-/// states at width 4, 7,853 at the 64-cell ceiling (`MAX_FIELD_WIDTH`). A chain of `Mul`s therefore
-/// grows the machine far faster than a chain of any other instruction would, so it needs its own bound
-/// the way `MAX_FRAME_LOC` bounds the `Loc` bank's own `O(n_loc^2)` blowup.
+/// gadget is O(width²). A chain of `Mul`s therefore grows the machine far faster than a chain of any
+/// other instruction would, so it needs its own bound the way `MAX_FRAME_LOC` bounds the `Loc` bank's
+/// own `O(n_loc^2)` blowup.
 ///
 /// This is checked UNCONDITIONALLY — not only when `enc` happens to be `Binary` — because `Unary`'s
 /// per-`Mul` cost (dominated by seeking to a growing slot index, not by width) grows with the same
-/// instruction count too, just more slowly: measured at width 64, a chain of 32 `Mul`s costs 616,999
-/// states / ~421 MB under `Binary` and only 12,411 states / ~10 MB under `Unary`; 128 `Mul`s cost
-/// 6,842,311 states / ~4.6 GB under `Binary` and 178,635 states / ~129 MB under `Unary`. `Unary` needs
-/// roughly an order of magnitude more `Mul`s to reach the same danger zone, but it is not immune, so a
-/// guard that fired only for `Binary` would leave that path open — see `mul_count_unrepresentable`.
+/// instruction count too, just more slowly. `Unary` needs roughly an order of magnitude more `Mul`s to
+/// reach the same danger zone, but it is not immune, so a guard that fired only for `Binary` would
+/// leave that path open — see `mul_count_unrepresentable`.
 ///
 /// 32 is far above any real program's `Mul` count (the corpus's demos and every property-test generator
-/// in this workspace never exceed 2 in one program), while keeping the worst case this permits
-/// (measured, at the 64-cell ceiling) to ~617k states / ~410 MB under `Binary` — well short of the
-/// multi-GB territory a longer chain reaches, and comfortably inside what a single test process can
-/// build without risking the abort this guard exists to prevent.
+/// in this workspace never exceed 2 in one program), while keeping the worst case this permits to
+/// ~617k states under `Binary` at the 64-cell ceiling, comfortably inside what a single test process
+/// can build without risking the abort this guard exists to prevent.
 pub(crate) const MAX_MUL_INSTRS: u32 = 32;
 
 /// True when `lower_tm_mapped` will REFUSE to build `prog`'s arithmetic gadgets and return the
@@ -144,8 +140,7 @@ fn is_arith(op: BinOp) -> bool {
 /// map of all `None`s (nothing built past `b.state_count()` belongs to any instruction), the shared
 /// overflow-guard state, and `true` for "refused". `b` is MOVED rather than borrowed — every call site
 /// returns immediately after, including the one inside the per-instruction loop, so there is nothing
-/// left for the caller to do with it. Named so the five identical two-line bodies this replaces cannot
-/// drift from each other one at a time.
+/// left for the caller to do with it. Named so the five refusals cannot drift from each other one at a time.
 fn refused(b: Builder, halt: StateId, overflow: StateId) -> (Machine, Vec<Option<usize>>, StateId, bool) {
     let state_origins = vec![None; b.state_count()];
     (b.finish(halt), state_origins, overflow, true)
@@ -162,8 +157,8 @@ fn refused(b: Builder, halt: StateId, overflow: StateId) -> (Machine, Vec<Option
 /// `None` bucket is reserved for states that genuinely belong to no single instruction.
 ///
 /// A REFUSED layout (the fourth element, `true`) returns the degenerate halt-immediately machine —
-/// `b.finish(halt)` — and a state map of all `None`s, exactly as before refusal was reported at all.
-/// Every early return in this function is a refusal; only the final return at the bottom is not.
+/// `b.finish(halt)` — and a state map of all `None`s. Every early return in this function is a
+/// refusal; only the final return at the bottom is not.
 ///
 /// Returned rather than stored on `Machine` deliberately: `Machine` derives `PartialEq` and the TM
 /// text round-trip test asserts `parse_tm(print_tm(m)) == m`, which a side-table field would break
@@ -332,11 +327,10 @@ fn lower_tm_all(prog: &Program, enc: &dyn Encoding) -> (Machine, Vec<Option<usiz
         for _ in before..after {
             state_origins.push(Some(i));
         }
-        // The ceiling is reached MID-GADGET for any program the length pre-check waved through — 2,000
-        // `Box` instructions are ~1.1M states from a 2,001-instruction program — so it is checked per
-        // instruction rather than once at the end. Stopping here bounds the wasted work at one
-        // instruction's worth; running on would keep attaching rules to the state-0 sentinel that
-        // `Builder::state` hands back past the ceiling, growing the machine's rule count without
+        // The ceiling is reached MID-GADGET for any program the length pre-check waved through, so it
+        // is checked per instruction rather than once at the end. Stopping here bounds the wasted work
+        // at one instruction's worth; running on would keep attaching rules to the state-0 sentinel
+        // that `Builder::state` hands back past the ceiling, growing the machine's rule count without
         // growing its state count.
         if b.overflowed() {
             return refused(b, halt, overflow);
@@ -349,23 +343,21 @@ fn lower_tm_all(prog: &Program, enc: &dyn Encoding) -> (Machine, Vec<Option<usiz
 /// Lower `prog` to a Turing machine, returning the machine AND its state map (see `lower_tm_all`) — or
 /// `None` if the layout was REFUSED, the same four conditions `lower_tm_guarded` reports (see its doc).
 ///
-/// `Option` RATHER THAN THE OLD BEHAVIOUR OF HANDING BACK A MAP OF ALL `None`s, for the same reason
-/// `lower_tm_guarded` is `Option` rather than a bool beside a usable-looking `Machine`: a refusal that
-/// merely LOOKS like an empty map is the easiest thing here to discard by accident, and this function has
-/// TWO callers for which discarding it means two DIFFERENT things.
+/// `Option` RATHER THAN HANDING BACK A MAP OF ALL `None`s, for the same reason `lower_tm_guarded` is
+/// `Option` rather than a bool beside a usable-looking `Machine`: a refusal that merely LOOKS like an
+/// empty map is the easiest thing here to discard by accident, and this function has TWO callers for
+/// which discarding it means two DIFFERENT things.
 ///
 /// `sourcemap.rs`'s `tm_half` is one. Reading "every state maps to `None`" as "no ownership recorded" is
 /// TRUE for it, and `SourceMap::build` already gives empty TM maps on every OTHER refusal along the same
 /// lowering path (`Unsupported`-then-`defunc`-failure, `TooDeep`), which `sourcemap.rs`'s `asm_half`
 /// returns as `None` before `tm_half` is ever called — so on this `None` `tm_half` returns those same
-/// empty maps. For that caller the pre-`Option` behaviour was never wrong, only implicit where it is now
-/// a branch a reader can see.
+/// empty maps.
 ///
 /// `attribute.rs`'s `lower_mapped` is the other, and for it "no ownership recorded" does NOT hold:
 /// simulating the degenerate machine reports `{ histogram: {}, total: 0, capped: false }` — a program
-/// that RAN and cost NOTHING, which is `Attribution::unrepresentable`'s documented wrong answer. That
-/// caller used to re-derive only THREE of these four conditions by hand and so had no way to see this
-/// one; `Option` is what makes the state ceiling's refusal impossible to leave unhandled there.
+/// that RAN and cost NOTHING, which is `Attribution::unrepresentable`'s documented wrong answer. `Option`
+/// is what makes the state ceiling's refusal impossible to leave unhandled there.
 #[must_use]
 pub fn lower_tm_mapped(prog: &Program, enc: &dyn Encoding) -> Option<(Machine, Vec<Option<usize>>)> {
     let (m, origins, _, was_refused) = lower_tm_all(prog, enc);
@@ -381,10 +373,9 @@ pub fn lower_tm_mapped(prog: &Program, enc: &dyn Encoding) -> Option<(Machine, V
 /// conditions produce it — `MAX_SLOTS`, `MAX_FRAME_LOC`, `MAX_MUL_INSTRS` and `MAX_MACHINE_STATES`.
 ///
 /// `Option` RATHER THAN A THIRD TUPLE ELEMENT. A `bool` alongside a `Machine` that looks perfectly
-/// usable is the easiest thing in this design to ignore, and ignoring it is precisely the
-/// `Ran`-over-empty-tapes bug `lower_and_size`'s doc records: the degenerate machine halts
-/// immediately, so a caller that skips the check gets a plausible-looking wrong answer rather than a
-/// crash. `Option` makes skipping it not compile.
+/// usable is the easiest thing in this design to ignore, and ignoring it gives a `Ran` over empty
+/// tapes: the degenerate machine halts immediately, so a caller that skips the check gets a
+/// plausible-looking wrong answer rather than a crash. `Option` makes skipping it not compile.
 ///
 /// Returned as an artifact rather than stored on `Machine` for the same reason as the origin map:
 /// `Machine` derives `PartialEq` and the TM text round-trip asserts `parse_tm(print_tm(m)) == m`, which
@@ -418,12 +409,11 @@ pub fn n_slots_of(prog: &Program) -> u32 {
 /// per instruction, so ITS refusal returns `code.len() + 2` states, itself capped at the ceiling —
 /// the one length where the formula does not hold is `code.len() == MAX_MACHINE_STATES - 1`, where
 /// the loop's last `state` call is refused and the count lands on `MAX_MACHINE_STATES` rather than
-/// one past it. That count SCALES WITH THE
-/// PROGRAM, which makes it the most convincing fake measurement of the four: more so than the fixed
-/// `MAX_MACHINE_STATES` a refusal caught only mid-layout, by `Builder::state`/`accept`'s own ceiling
-/// check, produces. Read bare — `.states.len()`, a state count printed in a report — any of these
-/// looks like a real measurement; each is the refusal `lower_tm_guarded` was built to make visible,
-/// wearing the costume of a number.
+/// one past it. That count SCALES WITH THE PROGRAM, which makes it the most convincing fake
+/// measurement of the four: more so than the fixed `MAX_MACHINE_STATES` a refusal caught only
+/// mid-layout, by `Builder::state`/`accept`'s own ceiling check, produces. Read bare —
+/// `.states.len()`, a state count printed in a report — any of these looks like a real measurement;
+/// each is the refusal `lower_tm_guarded` was built to make visible, wearing the costume of a number.
 ///
 /// Use `lower_tm_guarded` (or `lower_tm_mapped`, if the state map is also needed) when the caller
 /// must know whether the layout was refused — which is every caller near the ceiling. This function
@@ -508,7 +498,7 @@ mod tests {
     /// the computed-store one. The assertion is on the OUTCOME precisely because the value and even the
     /// decode succeed.
     #[test]
-    fn silent_literal_corruption_is_now_reported() {
+    fn a_literal_corruption_that_still_decodes_right_is_reported() {
         assert!(halts_in_overflow("3 - 5", 4), "the literal 5 does not fit a 4-cell field");
         assert!(halts_in_overflow("0 + 5", 4), "the literal 5 does not fit a 4-cell field");
         assert!(!halts_in_overflow("3 - 5", 8));
@@ -566,8 +556,8 @@ mod tests {
     /// same width: **a BOX overflow is unreachable through any lowered program.** The BOX guards are
     /// therefore defensive, against a hand-built machine or a future gadget that writes a box field
     /// from somewhere other than a register, and they are tested where they can actually fire — at the
-    /// gadget level, in `encoding.rs`. This test pins the reachable half, and the comment records why
-    /// it is not evidence about the BOX guard.
+    /// gadget level, in `encoding/unary.rs`. This test pins the reachable half, and the comment records
+    /// why it is not evidence about the BOX guard.
     #[test]
     fn a_boxing_program_at_too_narrow_a_width_is_reported() {
         let src = "let mut c = 0; fn ap(f, x) { f(x) } ap(|x| { c = c + x; c }, 5) + c";
@@ -720,7 +710,6 @@ mod tests {
     #[test]
     fn no_call_program_does_not_build_frame_gadgets() {
         // A no-Call/no-Ret program with a large local count must NOT build the O(n_loc^2) Ret handler.
-        // (Before the fix this built a ~O(2000^2) machine and could OOM.)
         let prog = Program { code: vec![Instr::Li(Reg::Loc(2_000), 1), Instr::Halt], labels: vec![] };
         let m = lower_tm(&prog, &Unary::default());
         assert!(m.validate().is_empty(), "{:?}", m.validate());
@@ -761,7 +750,7 @@ mod tests {
         // head(nil), tail(nil), and a dangling pointer have no runtime value: the reference faults
         // (RunError::Runtime), λ's nil-branch is Ω (no normal form). The TM matches by DIVERGING — the
         // deref's fault state spins, so under any cap the machine hits it (HitCap), never Ran. This is
-        // what lets the three-way oracle (Part 2b-2-iv-a) treat all three "no value" outcomes alike.
+        // what lets the three-way oracle treat all three "no value" outcomes alike.
         // A small cap keeps the test fast (the spin has no fixed point; sim runs it to the step cap).
         fn hits_cap(prog: &Program) -> bool {
             let m = lower_tm(prog, &Unary::default());
@@ -805,9 +794,9 @@ mod tests {
         assert!(m.states.len() < 10_000, "must not build an O(n_loc^2) machine; got {}", m.states.len());
     }
 
-    /// A chain of `n` `Mul`s: `Loc(0)=2; Loc(1)=2; Loc(2)=Loc(0)*Loc(1); Loc(3)=Loc(2)*Loc(1); ...` —
-    /// the exact shape `MAX_MUL_INSTRS`'s doc measured (there via the front end on `"2 * 2 * ... * 2"`,
-    /// here built directly so the test does not depend on the parser/desugarer's own instruction count).
+    /// A chain of `n` `Mul`s: `Loc(0)=2; Loc(1)=2; Loc(2)=Loc(1)*Loc(1); Loc(3)=Loc(2)*Loc(1); ...`,
+    /// built directly rather than through the front end so the test does not depend on the
+    /// parser/desugarer's own instruction count.
     fn mul_chain(n: u32) -> Program {
         let mut code = vec![Instr::Li(Reg::Loc(0), 2), Instr::Li(Reg::Loc(1), 2)];
         for i in 0..n {
@@ -820,9 +809,9 @@ mod tests {
     #[test]
     fn program_with_too_many_muls_routes_to_degenerate_halt() {
         // One MORE than MAX_MUL_INSTRS must route to a degenerate halt under EITHER encoding — not
-        // build the O(width^2)-per-`Mul` machine (measured, at just one more `Mul` than the bound: on
-        // the order of hundreds of thousands of states / hundreds of MB under `Binary` — see
-        // `MAX_MUL_INSTRS`'s doc). The guard is unconditional on encoding, so both must degenerate.
+        // build the O(width^2)-per-`Mul` machine (on the order of hundreds of thousands of states
+        // under `Binary` at the bound itself — see `MAX_MUL_INSTRS`'s doc). The guard is
+        // unconditional on encoding, so both must degenerate.
         let prog = mul_chain(MAX_MUL_INSTRS + 1);
         for m in [lower_tm(&prog, &Unary::default()), lower_tm(&prog, &Binary::default())] {
             assert!(m.validate().is_empty(), "{:?}", m.validate());
@@ -862,7 +851,7 @@ mod tests {
             trace.steps.len()
         }
         // CAPTURE the actual counts (run once, paste the real numbers). Keep the demos SMALL so the trace
-        // stays cheap — avoid step-heavy recursion (sum(5) is ~178k steps).
+        // stays cheap — avoid step-heavy recursion.
         assert_eq!(steps("1 + 2 * 3"), 5724);
         assert_eq!(steps("if 2 > 1 { 10 } else { 20 }"), 2174);
         assert_eq!(steps("head(cons(7, nil))"), 2300);
@@ -871,7 +860,7 @@ mod tests {
     #[test]
     fn tm_step_count_golden_higher_order() {
         // Mirrors `tm_step_count_goldens` above, but for a demo that is higher-order and so must run
-        // through `defunc` before `lower_asm` (Plan 3b-1). Pins the TM step cost of the defunctionalized
+        // through `defunc` before `lower_asm`. Pins the TM step cost of the defunctionalized
         // dispatch path (a HEAP closure `cons(tag, env)`, an `$apply1` dispatcher call per list element,
         // plus the existing list/recursion gadget costs) as a regression guard, same discipline as the
         // first-order goldens above. Keep the list SMALL (2 elements) so the trace stays cheap.
@@ -889,7 +878,6 @@ mod tests {
             assert_eq!(trace.status, crate::tm::sim::Status::Halted, "demo must halt: {src}");
             trace.steps.len()
         }
-        // CAPTURED (run, pasted the real number, re-ran to confirm stable/deterministic).
         assert_eq!(
             steps(
                 "fn map(xs, f) { if is_empty(xs) { nil } else { cons(f(head(xs)), map(tail(xs), f)) } } \
@@ -921,8 +909,7 @@ mod tests {
             assert_eq!(trace.status, crate::tm::sim::Status::Halted, "demo must halt: {src}");
             trace.steps.len()
         }
-        // CAPTURED the same way as the unary set above: run once, paste the real numbers, re-ran to
-        // confirm stable/deterministic. A gadget-cost re-bless moves these too, deliberately.
+        // As with the unary goldens above, a gadget-cost re-bless moves these too, deliberately.
         assert_eq!(steps("1 + 2 * 3"), 58393);
         assert_eq!(steps("if 2 > 1 { 10 } else { 20 }"), 2495);
         assert_eq!(steps("head(cons(7, nil))"), 3949);
@@ -967,8 +954,8 @@ mod tests {
         };
         // Hoist each `vec![...]`'s `g.fresh()` args into `let` bindings before the `ap(&mut g, ...)`
         // call: passing `&mut g` as `ap`'s first argument while a `vec![Core::Nat(g.fresh(), ..), ..]`
-        // literal in a later argument also needs `&mut g` is two concurrent mutable borrows of `g` —
-        // the same trap Tasks 2/3 hit (a pure NodeId-order change; no semantic difference).
+        // literal in a later argument also needs `&mut g` is two concurrent mutable borrows of `g`.
+        // The hoist only reorders `NodeId`s; it has no semantic effect.
         let one = Core::Nat(g.fresh(), 1);
         let boxed = ap(&mut g, "$box", vec![one]);
         let h_ref_1 = Core::Var(g.fresh(), "h".into());
@@ -1012,12 +999,12 @@ mod tests {
     /// `i` begins) must bill instruction `i`, never scaffolding.
     ///
     /// Pinned separately from the non-vacuity check above, which it does NOT subsume: that check
-    /// sits at ~79% and would still pass with every entry state regressed to `None` (it would only
-    /// dip to ~77%). That regression is the dangerous kind — a systematic, one-directional bias
-    /// that understates EVERY construct's cost and correspondingly inflates the scaffolding bucket,
-    /// silently corrupting the very "cost the user wrote" vs "cost the machinery added" split this
-    /// map exists to inform, while still looking entirely plausible in a report. So it gets an
-    /// assertion that bites on it specifically rather than one that merely tolerates it.
+    /// would still pass with every entry state regressed to `None`. That regression is the dangerous
+    /// kind — a systematic, one-directional bias that understates EVERY construct's cost and
+    /// correspondingly inflates the scaffolding bucket, silently corrupting the very "cost the user
+    /// wrote" vs "cost the machinery added" split this map exists to inform, while still looking
+    /// entirely plausible in a report. So it gets an assertion that bites on it specifically
+    /// rather than one that merely tolerates it.
     #[test]
     fn each_instructions_entry_state_bills_that_instruction() {
         let core = desugar(&parse("fn sum(n){ if n==0 {0} else { n + sum(n-1) } } sum(3)").0.unwrap());

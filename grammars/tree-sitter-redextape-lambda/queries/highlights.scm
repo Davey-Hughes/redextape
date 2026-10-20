@@ -1,7 +1,7 @@
 ; Highlight captures for the redextape λ text form.
 ;
-; Five capture sites, matching `print_lambda_mapped`'s five `push_span` calls exactly. The binder head
-; and the name it binds are BOTH `Binder` — that is the printer's rule, not a simplification here.
+; The binder head and the name it binds are BOTH `Binder` — that is the printer's rule, not a
+; simplification here.
 
 ["\\" "λ"] @keyword.function
 

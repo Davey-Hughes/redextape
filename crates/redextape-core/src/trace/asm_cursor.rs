@@ -1,7 +1,7 @@
 //! Lazy asm stepping, and THE asm interpreter in this crate. `tm::asm::run_asm` is written over this
 //! cursor, so the fetch-decode-execute loop exists once — the arrangement `TmCursor` already has with
-//! the simulator. The machine state below is what `run_asm` held privately before it stepped; it moved
-//! here rather than being copied, so the two cannot disagree about what an instruction does.
+//! the simulator. The machine state below lives only here, not in `run_asm` too, so the two cannot
+//! disagree about what an instruction does.
 //!
 //! **AN ASM STEP IS NOT A `StepEvent`.** `StepEvent`'s consumers end their loops on a variant they do not
 //! recognise (its own test `every_step_event_variant_has_a_declared_producer` says why), and nothing
@@ -201,10 +201,10 @@ impl Vm {
     /// not any one arm's complexity.
     ///
     /// `#[inline]` because `next` is this function's only caller and `run_asm` calls `next` once per
-    /// instruction: the hint asks for the instruction match to be folded into that per-step loop, where it
-    /// sat before this cursor existed, rather than left a call per step by the size heuristics a function
-    /// this long meets. No gate holds a figure for it; its effect on `run_asm` was measured with
-    /// `asmbench`, the probe in the appendix of `docs/superpowers/plans/2026-09-27-plan7-part5a-asm-core.md`.
+    /// instruction: the hint asks for the instruction match to be folded into that per-step loop rather
+    /// than left a call per step by the size heuristics a function this long meets. No gate holds a
+    /// figure for it; `asmbench`, the probe in the appendix of
+    /// `docs/superpowers/plans/2026-09-27-plan7-part5a-asm-core.md`, measures its effect on `run_asm`.
     #[allow(clippy::too_many_lines)]
     #[inline]
     fn exec(&mut self, prog: &Program, caps: &Caps) -> Result<bool, AsmStatus> {
@@ -356,7 +356,7 @@ fn eval_bin(op: BinOp, a: u64, b: u64) -> u64 {
     }
 }
 
-/// The index a jump or call lands on, or the fault `run_asm` has always reported for an undefined label.
+/// The index a jump or call lands on, or the fault `run_asm` reports for an undefined label.
 fn jump(prog: &Program, label: &str) -> Result<usize, AsmStatus> {
     prog.label_index(label).ok_or_else(|| AsmStatus::Faulted(format!("undefined label `{label}`")))
 }
@@ -1065,20 +1065,18 @@ mod tests {
     }
 
     proptest! {
-        // The case count is sized so that each gate the test's doc names fails the test on every seed
-        // it was tried with, with cases to spare; lower it only after re-running each gate against the
-        // new count.
+        // The case count is sized so that each gate the test's doc names fails the test with cases to
+        // spare; lower it only after re-running each gate against the new count.
         #![proptest_config(ProptestConfig { cases: 4096, ..ProptestConfig::default() })]
 
-        /// THE DISPLAY-STATE RULE, over hand-built programs. The oracles run compiled programs, which
-        /// tripped neither of two gates when each was tried — `head`, `tail`, `box_get` and `box_set`
-        /// faulting on an operand not tagged a list or a box, and `mov`, `jz`, `bin` and `cons` faulting
-        /// on reading a local whose written bit is clear — so the rule needs programs that use a word
-        /// against its tag and read locals nothing wrote. Each program runs twice with the same caps; before
-        /// every step of the second run, every tag and written bit is overwritten with arbitrary values,
-        /// and the run must end as the first did, word for word. Both gates fail it, and so does a gate on
-        /// `tail`, `box_get` or `box_set` alone that checks the tag only once it has found a real cell or
-        /// box.
+        /// THE DISPLAY-STATE RULE, over hand-built programs. The oracles run compiled programs, which trip
+        /// neither of two gates — `head`, `tail`, `box_get` and `box_set` faulting on an operand not tagged
+        /// a list or a box, and `mov`, `jz`, `bin` and `cons` faulting on reading a local whose written bit
+        /// is clear — so the rule needs programs that use a word against its tag and read locals nothing
+        /// wrote. Each program runs twice with the same caps; before every step of the second run, every
+        /// tag and written bit is overwritten with arbitrary values, and the run must end as the first did,
+        /// word for word. Both gates fail it, and so does a gate on `tail`, `box_get` or `box_set` alone
+        /// that checks the tag only once it has found a real cell or box.
         #[test]
         fn a_run_ends_the_same_whatever_its_tags_and_written_bits_say(
             prog in arb_program(),

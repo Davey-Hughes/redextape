@@ -14,8 +14,8 @@
 //!
 //! **RULES ARE COPIED, NOT REWRITTEN.** Reads and writes happen in place, so a pair carries its original
 //! state's rules in order with identical reads and writes, and only the moves change. Nothing here
-//! enumerates a symbol, which is what the roadmap's two-track fold would have had to do: `Symbol` is a
-//! `char`, so a pair of symbols must be one `char`, and no rule can wildcard half of one.
+//! enumerates a symbol, which a two-track fold would have to do: `Symbol` is a `char`, so a pair of
+//! symbols must be one `char`, and no rule can wildcard half of one.
 //!
 //! **ONE-WAYNESS IS CERTIFIED PER RUN, NOT ARGUED.** `sim.rs`'s `Tape` materializes cells lazily and
 //! never discards one, so a head that ever stepped left of physical cell 0 leaves index 0 of every later
@@ -696,15 +696,15 @@ mod tests {
 
     /// The ratio [`to_one_way`] may not exceed on the corpus below, as a PROPERTY rather than a restated
     /// measurement: an oracle leg can never redden for a cost regression, because a bloated-but-correct
-    /// construction is still correct. Set above the highest ratio that corpus measured when this module
-    /// was written, and each row prints its margin in STATES, because a percentage does not say whether
-    /// the next generated state is the one that trips it.
+    /// construction is still correct. Set above the highest ratio that corpus measured, and each row prints
+    /// its margin in STATES, because a percentage does not say whether the next generated state is the one
+    /// that trips it.
     ///
     /// **NOT A CEILING EVERY SHIPPED MACHINE MEETS.** The largest shipped demo — `single_tape.rs`'s
     /// `the_worst_shipped_demo_measured_directly` builds it — has four tapes with a `Move::L` rule where
-    /// this corpus has two or three, and folded to 7,363,253 states against `MAX_MACHINE_STATES` of
-    /// 1,000,000 when measured on 2026-09-13, before the reductions had a state ceiling. `to_one_way` now
-    /// refuses it with `too-many-states`; the measurement is recorded in the roadmap entry, not gated here.
+    /// this corpus has two or three, and folds to more states than `MAX_MACHINE_STATES` allows.
+    /// `to_one_way` refuses it with `too-many-states`; its folded state count is recorded in the
+    /// roadmap entry, not gated here.
     const STATE_CEILING: f64 = 40.0;
 
     /// Also prints, per row, how many `sides` combinations the worklist reached against `2^n` for `n`

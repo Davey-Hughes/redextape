@@ -19,8 +19,8 @@ use redextape_core::{Diagnostic, Severity};
 ///
 /// Ariadne itself panics if any `d.span` fails `d.span.start <= d.span.end <= src.len()` with both
 /// ends on a UTF-8 char boundary — `render` passes each span straight through unvalidated. Every
-/// diagnostic this crate's `analyze` and `format` produce satisfies that invariant today, but it is
-/// the caller's responsibility to keep satisfying it; `render` does not re-check it.
+/// diagnostic `redextape_core`'s `analyze` and `format` produce satisfies that invariant today, but
+/// it is the caller's responsibility to keep satisfying it; `render` does not re-check it.
 pub fn render(
     w: &mut impl std::io::Write,
     label: &str,
@@ -56,9 +56,7 @@ pub fn should_color() -> bool {
 /// The pure decision behind `should_color`, taking `NO_COLOR` and the terminal check as plain
 /// values instead of reading them itself. Split out so the four `NO_COLOR`-present/absent ×
 /// tty/non-tty combinations can be tested directly — mutating `std::env` in a test races under
-/// parallel execution (both within `cargo test`'s threads and across concurrent `cargo nextest`
-/// processes, which still share one environment), so this is the only place those combinations can
-/// be pinned at all.
+/// parallel execution, so this is the only place those combinations can be pinned at all.
 ///
 /// `no_color`'s value is never inspected, only its presence — `NO_COLOR`'s own convention is that
 /// merely setting the variable, to any value including an empty string, opts out.
@@ -71,7 +69,7 @@ fn should_color_from(no_color: Option<&std::ffi::OsStr>, tty: bool) -> bool {
 mod tests {
     use super::*;
 
-    // I1: `should_color` itself reads real process state (`NO_COLOR`, stderr's tty-ness), which is
+    // `should_color` itself reads real process state (`NO_COLOR`, stderr's tty-ness), which is
     // exactly what a test must not mutate — `std::env::set_var` races every other test in the same
     // process. `should_color_from` is the pure decision extracted so all four combinations can be
     // pinned directly, with no environment involved at all.
@@ -144,8 +142,7 @@ mod tests {
         // is one past its char offset. `render`'s label is `LINE:COL`: byte-correct indexing must
         // therefore report `2:1`, and a char-indexed renderer fed these byte offsets would report
         // `2:2` instead — asserting the exact column is what makes this test fail if `IndexType::Byte`
-        // is ever swapped for `IndexType::Char`. Confirmed by making that swap locally: the label moved
-        // one column later, exactly as this comment predicts.
+        // is ever swapped for `IndexType::Char`.
         //
         // The two coordinates below are RENDERED OUTPUT, not pointers. `a.rxt` is the `label` argument
         // this test passes to `render` — no such file exists — so `LINE:COL` here names a position in

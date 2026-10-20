@@ -3,7 +3,7 @@
 //! NOTHING HERE IS `#[wasm_bindgen]`, AND THAT IS THE POINT. `lib.rs` is the shell that JavaScript
 //! sees; this module is ordinary Rust that `cargo test` compiles natively. `wasm-bindgen-test` runs in
 //! a browser while `cargo llvm-cov` instruments the native build, so any logic living in the shell is
-//! uncovered by construction and drags the workspace's 80% floor down with it.
+//! uncovered by construction and drags the workspace's coverage down with it.
 
 use std::collections::BTreeMap;
 use std::rc::Rc;
@@ -25,30 +25,21 @@ use redextape_core::{Diagnostic, Severity, Span, lints, parser, typeck};
 ///
 /// **1,000, BELOW A MEASURED STEADY-STATE CEILING THAT LIES SOMEWHERE IN [1400, 1497).** That
 /// ceiling is the term depth at which a Web Worker's V8 call stack dies mid-print ONCE THE WORKER
-/// HAS ALREADY PRINTED A DEEP TERM BEFORE. It is not the same quantity as 1,930, which this constant
-/// used to be justified against: 1,930 was measured with a fresh worker per sample, so every sample
-/// was that worker's FIRST print — and a worker's ceiling is not fixed. It drops after the first deep
-/// print, measured 2026-08-09 by driving one worker through repeated prints at fixed depths: at term
-/// depth 1,497, two prints in a row held but by the fourth or fifth it failed with a stack overflow,
-/// every time; at term depth 1,400 and below, the SAME worker held for 60 prints straight with no
-/// further degradation observed. Those are the endpoints actually sampled — nothing between them was
-/// tested, so no single number inside [1400, 1497) is itself a measured ceiling, only the bracket is.
-/// That bracket is what governs an app a user keeps typing into, and 1,930 a number that was never a
-/// bound on that.
+/// HAS ALREADY PRINTED A DEEP TERM BEFORE. A worker's ceiling is not fixed: it drops after the first
+/// deep print. 1,497 and 1,400 are the endpoints actually sampled — nothing between them was tested,
+/// so no single number inside [1400, 1497) is itself a measured ceiling, only the bracket is. That
+/// bracket is what governs an app a user keeps typing into.
 ///
 /// **THE DEGRADATION DOES NOT ERODE BELOW 1,400 WITHIN 60 PRINTS, AND THAT IS WHAT MAKES A CAP A REAL
-/// FIX RATHER THAN A SMALLER GUESS.** The data is five depths across four rep-counts, topping out at
-/// 60 repeated prints in one worker — enough to show the ceiling drops from ~1,930 toward the
-/// [1400, 1497) bracket without eroding further across that run, but not enough to tell "falls once
-/// then holds" apart from "asymptotes somewhere above 1,400", and not a worker's lifetime — a user
-/// typing for an hour issues far more than 60 prints. A cap set below 1,400 is a margin good for at
-/// least the 60 prints measured, not one stated to be good for the life of the worker.
+/// FIX RATHER THAN A SMALLER GUESS.** The data tops out at 60 repeated prints in one worker — not
+/// enough to tell "falls once then holds" apart from "asymptotes somewhere above 1,400", and not a
+/// worker's lifetime — a user typing for an hour issues far more than 60 prints. A cap set below 1,400
+/// is a margin good for at least the 60 prints measured, not one stated to be good for the life of
+/// the worker.
 ///
-/// **IT IS NOT `MAX_TERM_DEPTH`, AND THE DIFFERENCE IS THE BUG THIS FIXES.** That constant is 3,000
-/// and bounds the REDUCER against a native 8 MiB stack. The printer borrowed it, and 3,000 sits above
-/// every browser ceiling measured — so the guard could not fire, and past 3,000 it fires at 3,000
-/// frames, which is already past the cliff. There is no input size at which the old arrangement saved
-/// the module.
+/// **IT IS NOT `MAX_TERM_DEPTH`.** That constant is 3,000 and bounds the REDUCER against a native
+/// 8 MiB stack, and 3,000 sits above every browser ceiling measured — a printer guard at 3,000 would
+/// fire at 3,000 frames, which is already past the cliff.
 ///
 /// **IT DOES NOT LIVE BESIDE `LAMBDA_BYTE_BUDGET` in `web/src/protocol.ts`, deliberately.** A byte
 /// budget is renderer taste — how much text a pane will hold — and getting it wrong makes a pane
@@ -124,7 +115,7 @@ pub enum RunStatus {
     /// ITS OWN STATUS RATHER THAN `Capped`, because the cursor latches `HitCap` for this too and
     /// raising the cap provably cannot help — `LambdaCursor::raise_cap` refuses to clear it. Folding
     /// the two together would put a "continue" button on the one run that cannot continue, which is
-    /// the defect `raise_cap`'s own guard fixed one layer in, reintroduced at the boundary.
+    /// the defect `raise_cap`'s own guard rules out one layer in, reintroduced at the boundary.
     DepthRefused,
 }
 
@@ -157,24 +148,22 @@ pub enum RunStatus {
 /// "head of empty list at pc1", and not a status. Each ✅ in its row has a test of
 /// its own below, by the program that reaches it.
 ///
-/// **BOTH `Undecodable` MARKS ARE A FIXTURE, NOT AN ARGUMENT.**
+/// **THE λ AND TM `Undecodable` MARKS ARE A FIXTURE, NOT AN ARGUMENT.**
 /// `a_function_valued_program_decodes_as_undecodable_on_both_legs` pins them against `|x| x + 1`,
 /// which types as `Fun([Nat], Nat)` — a type `decode_lambda_ty` and `decode_tape_ty` both bottom out
 /// on — and which BOTH backends nonetheless lower and run to an end. A ✅ in a reachability table that
 /// no test can demonstrate is a claim, and this one is not.
 ///
-/// **`TooLargeToPrint` IS A DIFFERENT FACT THAN `Undecodable`, AND THE FIX THAT ADDED IT IS THE WHOLE
-/// REASON THIS VARIANT EXISTS.** `Undecodable` means the decode itself found no value of a
-/// representable type. `TooLargeToPrint` means the decode SUCCEEDED — `decode_lambda_ty`/
-/// `decode_tape_ty` answered `Some(v)`, or the reference interpreter answered `Ok(v)` — and only the
-/// PRINT refused, because `v`'s LOGICAL size (an `Rc` DAG's printed size, not its allocation count —
-/// see `redextape_core::value::MAX_PRINT_NODES`'s doc) exceeds what `format_value_capped` will walk.
-/// Collapsing the two into one `Undecodable` would tell a renderer the value has no encoding when it
-/// is, in fact, a real answer this tool merely cannot afford to print — the same distinction
-/// `redextape-cli`'s `Outcome::ToolFailed` draws against `Outcome::ProgramFailed` for the identical
-/// hazard on the CLI's own five print sites (`run.rs`). Each producer's own test below pins that this
-/// state is reachable from a small-in-memory, logically enormous fixture, the same one `run.rs`'s
-/// tests use.
+/// **`TooLargeToPrint` IS A DIFFERENT FACT THAN `Undecodable`.** `Undecodable` means the decode itself found
+/// no value of a representable type. `TooLargeToPrint` means the decode SUCCEEDED — `decode_lambda_ty`/
+/// `decode_tape_ty` answered `Some(v)`, or the reference interpreter answered `Ok(v)` — and only the PRINT
+/// refused, because `v`'s LOGICAL size (an `Rc` DAG's printed size, not its allocation count — see
+/// `redextape_core::value::MAX_PRINT_NODES`'s doc) exceeds what `format_value_capped` will walk. Collapsing
+/// the two into one `Undecodable` would tell a renderer the value has no encoding when it is, in fact, a
+/// real answer this tool merely cannot afford to print — the same distinction `redextape-cli`'s
+/// `Outcome::ToolFailed` draws against `Outcome::ProgramFailed` for the identical hazard on the CLI's own
+/// five print sites (`run.rs`). Each producer's own test below pins that this state is reachable from a
+/// small-in-memory, logically enormous fixture, the same one `run.rs`'s tests use.
 ///
 /// `text` IS `format_value_capped` OUTPUT, AND `Value` ITSELF CANNOT CROSS. `Value::Closure { params,
 /// body: Rc<Core>, env: Env }` carries an environment and a Core subtree; it has no serde derive and
@@ -238,55 +227,27 @@ pub struct TmStatus {
     /// compile time because `compile` already ran the machine; λ's is not, because `compile` builds
     /// the cursor and never reduces. There is no honest number to put there.
     ///
-    /// **`ts(type = "number | null")`, NOT `ts(type = "number")` — AND THE DESIGN PRESCRIBED THE
-    /// SECOND.** `ts-rs` maps `u64` to `bigint` unconditionally, which is not what the wire carries:
-    /// `serde_wasm_bindgen` puts it across as a JS number, which
-    /// `all_three_legs_agree_across_the_boundary` in `crates/redextape-wasm/tests/browser.rs`
-    /// measures directly against a real browser. So an override is needed. But `ts(type = ...)`
-    /// substitutes the WHOLE field type, `Option` and all, so the prescribed `ts(type = "number")`
-    /// generates `total_steps: number` and silently drops the `| null` that `None` puts on the wire.
-    /// `LambdaState::step` and `TmState::step` take that same override correctly, because they are
-    /// bare `u64` with no `Option` around them.
+    /// **`ts(type = "number | null")`, NOT `ts(type = "number")`.** `ts-rs` maps `u64` to `bigint`
+    /// unconditionally, which is not what the wire carries: `serde_wasm_bindgen` puts it across as a JS number,
+    /// which `all_three_legs_agree_across_the_boundary` in `crates/redextape-wasm/tests/browser.rs` measures
+    /// directly against a real browser. So an override is needed. But `ts(type = ...)` substitutes the WHOLE
+    /// field type, `Option` and all, so `ts(type = "number")` would generate `total_steps: number` and silently
+    /// drop the `| null` that `None` puts on the wire. `LambdaState::step` and `TmState::step` take that same
+    /// override correctly, because they are bare `u64` with no `Option` around them.
     ///
-    /// **NO RUST-SIDE GATE CAN SEE THE DROPPED `| null`.** `no_generated_type_carries_bigint` passes
-    /// on `total_steps: number` — there is no `bigint` in it to find — and
-    /// `the_gate_covers_every_exported_type` only checks which types derive `TS`, not what their
-    /// fields say.
+    /// **`no_override_misstates_a_field_s_nullability` IS THE RUST-SIDE GATE THAT SEES THE DROPPED `| null`.**
+    /// `no_generated_type_carries_bigint` passes on `total_steps: number` — there is no `bigint` in it to find —
+    /// and `the_gate_covers_every_exported_type` only checks which types derive `TS`, not what their fields say.
     ///
-    /// **WHAT CAN CATCH IT IS `tsc`, AND ONLY WHILE `web/src/types.ts` TAKES `TmStatus` FROM
-    /// `../bindings/`.** `tsconfig.json`'s `include` is `["src", "tests", "vite.config.ts"]`, so
-    /// `web/bindings/TmStatus.ts` enters the TypeScript program at all only through that import.
+    /// **`tsc` CAN CATCH IT TOO, BUT ONLY WHILE `web/src/types.ts` TAKES `TmStatus` FROM `../bindings/`.**
+    /// `tsconfig.json`'s `include` is `["src", "tests", "scripts", "vite.config.ts"]`, so `web/bindings/TmStatus.ts`
+    /// enters the TypeScript program at all only through that import.
     ///
     /// **NO PRODUCTION SOURCE FILE CATCHES THIS.** `resultRows` in `web/src/results.ts` reads
     /// `total_steps` and narrows it on `!== null`, and that narrowing compiles clean against the wrong
-    /// type — a `number` compared against `null` is not an error TypeScript reports here. What catches
-    /// it is three TEST FIXTURES that assign a literal `null` to the field, and nothing else. So the
-    /// check exists only because tests happen to construct a `TmStatus` with `total_steps: null` in it;
-    /// a refactor that stopped doing so would remove the last thing watching this class, with no other
-    /// signal that anything had changed.
-    ///
-    /// **MEASURED, AT THE COMMIT THAT ADDED THESE DERIVES AND BEFORE `web/src/types.ts` CONSUMED THE
-    /// GENERATED FILES: UNDER EXACTLY THIS SABOTAGE, BOTH RUST GATES PASSED AND `pnpm run typecheck`
-    /// EXITED 0.** `TmStatus` was still hand-declared there, so nothing imported
-    /// `web/bindings/TmStatus.ts` and `tsc` never opened it — the condition above did not hold, and
-    /// there was nothing watching to catch it.
-    ///
-    /// **MEASURED AGAIN, AT THE COMMIT THAT MAKES `web/src/types.ts` THE BARREL: UNDER THE SAME
-    /// SABOTAGE, THE RUST GATES STILL PASSED AND `pnpm run typecheck` NOW EXITED 1.** With the override
-    /// changed to `ts(type = "number")` and `pnpm run build:bindings` re-run,
-    /// `cargo nextest run -p redextape-wasm --features ts -E 'binary(ts_bindings)'` still reported
-    /// `2 tests run: 2 passed` — neither Rust gate moved — but `tsc` reported three `TS2322` errors, one
-    /// per call site assigning a literal `null` to the now-narrowed field: `replies.test.ts`'s
-    /// `compiled` fixture; the `declined` fixture in `results.test.ts`, under `'shows the TM reason and
-    /// no width when that backend declines'`; and `session-client.test.ts`'s `compiled` fixture, each
-    /// `Type 'null' is not assignable to type 'number'.` **THE MIDDLE ONE READ "the `TmLeg` fixture in
-    /// `results.test.ts`" AND THAT FILE HOLDS FOUR OF THEM** — `tmOk` at module scope, two `capped`
-    /// bindings in adjacent tests, and this `declined` one — so the definite article rested entirely on
-    /// the test title trailing it, and a reader who stopped at the filename had three wrong fixtures to
-    /// choose from. Restoring
-    /// `ts(type = "number | null")` and re-running `build:bindings` returns `pnpm run typecheck` to exit
-    /// 0. The condition named above holds, on this tree, on this measurement: with the barrel importing
-    /// `TmStatus` from `../bindings/`, `tsc` does refuse the dropped `| null`.
+    /// type — a `number` compared against `null` is not an error TypeScript reports here. On the TypeScript
+    /// side, what catches it is three TEST FIXTURES that assign a literal `null` to the field, so that check
+    /// exists only because tests happen to construct a `TmStatus` with `total_steps: null` in it.
     #[cfg_attr(feature = "ts", ts(type = "number | null"))]
     pub total_steps: Option<u64>,
 }
@@ -378,8 +339,8 @@ pub struct Session {
     /// a `Core` this struct could have held.
     pub(crate) core: redextape_core::core::Core,
     /// The program's top-level type, which BOTH decoders need — `decode_lambda_ty(nf, &ty)` and
-    /// `decode_tape_ty(&tapes, &ty, enc)`. `compile` computes it for `run_tm_described` and passed
-    /// it away; decoding is type-directed, so a session that discarded it could not decode anything.
+    /// `decode_tape_ty(&tapes, &ty, enc)`. `compile` computes it for `run_tm_described`; decoding is
+    /// type-directed, so a session that discarded it could not decode anything.
     pub(crate) ty: redextape_core::ty::Ty,
     pub(crate) lambda: Result<LambdaLeg, LowerError>,
     /// The INITIAL lowered term, kept so `link_index` can print step 0 after the cursor has moved.
@@ -395,29 +356,28 @@ pub struct Session {
     /// `Result` RATHER THAN IN TWO FIELDS.
     ///
     /// **THE PAIRING IS WHAT MAKES A CURSOR WITHOUT ITS PROGRAM UNREPRESENTABLE.** `build_tm_leg`
-    /// derives both from one machine and hands them back as a pair, so that combination was never a
-    /// state this code could REACH — only one the earlier shape, a `Result` beside an `Option`, could
-    /// SPELL. Spelling it was not free. `tm_status` had to match on both fields, and the arm for the
-    /// combination that cannot occur could not be an `unreachable!()` — a panic under wasm aborts the
-    /// module — so it fabricated a user-facing status instead: an error message describing a
-    /// situation no program can produce, untriggerable and therefore permanently uncovered.
+    /// derives both from one machine and hands them back as a pair, so that combination is not a
+    /// state this code can REACH — only one a `Result` beside an `Option` could SPELL. Spelling it
+    /// is not free: a match on both fields needs an arm for the combination that cannot occur,
+    /// which cannot be an `unreachable!()` — a panic under wasm aborts the module — so it would
+    /// have to fabricate a user-facing status instead: an error message describing a situation no
+    /// program can produce, untriggerable and therefore permanently uncovered.
     ///
-    /// It also put TWO SOURCES UNDER ONE FACT. `tm_program` read availability off the `Option` while
-    /// `tm_status` read it off the `Result`, two encodings of one boolean that only the constructor
-    /// kept in step. One `Result` collapses both costs: the type now states what `compile` always
-    /// guaranteed.
+    /// A second field would also put TWO SOURCES UNDER ONE FACT: availability read off the `Option`
+    /// in one place and off the `Result` in another, two encodings of one boolean that only the
+    /// constructor keeps in step. One `Result` collapses both costs: the type states what `compile`
+    /// always guarantees.
     ///
-    /// The projection is still built ONCE and cached — see `build_tm_leg`. Pairing changes where it
-    /// is stored, not how often it is computed.
+    /// The projection is built ONCE and cached — see `build_tm_leg`.
     ///
-    /// **THE HEADER JOINS THE PAIR RATHER THAN SITTING BESIDE IT AS A FOURTH `Option` FIELD, FOR THE
-    /// REASON THE PARAGRAPHS ABOVE GIVE FOR THE PAIR ITSELF.** A header exists exactly when this
-    /// `Result` is `Ok` — `compile` reads it off `run_tm_described`, which always produces one on a
-    /// non-declining arm — so an `Option<TmHeader>` next to this field could spell "an available leg
-    /// with no header", a state no program can reach and every reader would have to handle. It is
-    /// retained because `tm_text` needs it: `print_tm` without a header reparses to a machine running
-    /// from blank tapes at `MIN_FIELD_WIDTH` instead of from this program's input. Cost is
-    /// O(tapes x width), not O(states).
+    /// **THE HEADER JOINS THE PAIR RATHER THAN SITTING BESIDE IT AS A FOURTH `Option` FIELD, FOR
+    /// THE REASON THE PARAGRAPHS ABOVE GIVE FOR THE PAIR ITSELF.** A header exists exactly when
+    /// this `Result` is `Ok` — `compile` reads it off `run_tm_described`, which always produces one
+    /// on a non-declining arm — so an `Option<TmHeader>` next to this field could spell "an
+    /// available leg with no header", a state no program can reach and every reader would have to
+    /// handle. It is retained because `tm_text` needs it: `print_tm` without a header reparses to a
+    /// machine running from blank tapes at `MIN_FIELD_WIDTH` instead of from this program's input.
+    /// Cost is O(tapes x width), not O(states).
     pub(crate) tm: Result<(TmProgram, TmCursor<Rc<Machine>>, tm::TmHeader), TmDecline>,
     pub(crate) map: SourceMap,
     /// The halted run's final tapes, from `TmRun::Ran`. `None` for `HitCap` — a capped run never
@@ -432,16 +392,15 @@ pub struct Session {
     /// The encoding the tapes were produced under. NO WIDTH IS KEPT ALONGSIDE IT: `TmRun::Ran`'s own
     /// doc records that both encodings decode structurally, delimiter to delimiter, so any instance
     /// decodes tapes produced at any width. There is therefore no second object that can disagree
-    /// with the first — the shape that once mis-attributed 1,049 of 1,374 spans.
+    /// with the first.
     pub(crate) kind: EncodingKind,
     /// δ-steps the run `compile` performed took, from `DescribedRun.steps`. `None` when
     /// `run_tm_described` answered `Err`, which is exactly the program that never ran a step.
     ///
     /// **`Some` HERE DOES NOT MEAN THE LEG IS AVAILABLE.** `Overflow` and `TooLarge` arrive inside an
-    /// `Ok`, carrying the real count of the attempt that produced them, and still decline the leg —
-    /// the runaway counter in `a_declined_tm_leg_reports_no_total_steps` reaches 740,183. `tm_status`
-    /// is where that is withheld: a declined leg reports `None` however this field reads, because a
-    /// length beside `available: false` describes a run the caller has no cursor to reach.
+    /// `Ok`, carrying the real count of the attempt that produced them, and still decline the leg.
+    /// `tm_status` is where that is withheld: a declined leg reports `None` however this field reads,
+    /// because a length beside `available: false` describes a run the caller has no cursor to reach.
     pub(crate) total_steps: Option<u64>,
     /// The asm leg, or the lowering's refusal. Absent ONLY when `tm::lower_program` fails: a program the TM
     /// declines as too large to build or as overflowing every width still lowered, so it still runs here
@@ -452,11 +411,11 @@ pub struct Session {
 /// The shared tail of `compile`'s two non-declining arms. `Ran` and `HitCap` build the same cursor
 /// and the same projected program; they differ only in whether a final configuration exists.
 ///
-/// **THE FINAL TAPES ARE PAIRED ON AT THE CALL SITE RATHER THAN PASSED THROUGH HERE.** This function
-/// once took them as a third parameter and returned them untouched, purely to shape the return tuple —
-/// a parameter that could not affect the result, which reads as though it might. What the helper is
-/// actually for is that both arms build the leg identically, so the `match` in `compile` can stay
-/// exhaustive with no catch-all; that property is unaffected by where the tapes are attached.
+/// **THE FINAL TAPES ARE PAIRED ON AT THE CALL SITE RATHER THAN PASSED THROUGH HERE.** Taking them as a
+/// third parameter and returning them untouched, purely to shape the return tuple, would add a parameter
+/// that cannot affect the result and reads as though it might. What the helper is actually for is that
+/// both arms build the leg identically, so the `match` in `compile` can stay exhaustive with no catch-all;
+/// that property is unaffected by where the tapes are attached.
 ///
 /// `caps` IS THE BUDGET THE DESCRIBED RUN ALREADY SPENT, handed on so the cursor starts life with the
 /// same one. A cursor budgeted differently from the run whose outcome the session reports would stop
@@ -465,15 +424,14 @@ pub struct Session {
 /// `header` BY REFERENCE: both uses (`init`, `.width`) only ever read it, and both call sites still own
 /// their `TmHeader` afterward — there is nothing here for taking it by value to buy.
 ///
-/// **STILL `&TmHeader` AND NOT `Option<&TmHeader>`, WHICH IS THE OPPOSITE CALL FROM THE ONE `window`
-/// TOOK IN T1, AND DELIBERATELY SO.** `TmScratch` also has to build a leg and may have no header
-/// (§3.4), so widening this would let both callers share one function. It is not widened, because
-/// `source_node: None` was ALREADY reachable on the `Session` path and "blank tapes at
-/// `MIN_FIELD_WIDTH`" is not: `compile` reads its header off `run_tm_described`, which always
-/// produces one, so a `None` here would be a state no `Session` can reach and every `Session` could
-/// spell. Widening would put decision 6's invented width and invented tapes one accidental `None`
-/// away from a compiled program. The shared part is factored into `tm_leg_at` instead, which knows
-/// nothing about headers.
+/// **`&TmHeader` AND NOT `Option<&TmHeader>`, WHICH IS THE OPPOSITE CALL FROM `TmState::window`'S, AND
+/// DELIBERATELY SO.** `TmScratch` also has to build a leg and may have no header (§3.4), so widening this
+/// would let both callers share one function. It is not widened, because `source_node: None` was ALREADY
+/// reachable on the `Session` path and "blank tapes at `MIN_FIELD_WIDTH`" is not: `compile` reads its
+/// header off `run_tm_described`, which always produces one, so a `None` here would be a state no
+/// `Session` can reach and every `Session` could spell. Widening would put decision 6's invented width and
+/// invented tapes one accidental `None` away from a compiled program. The shared part is factored into
+/// `tm_leg_at` instead, which knows nothing about headers.
 ///
 /// `map` IS THE SESSION'S OWN, BUILT AT `header.width` — `compile`'s doc says why it has to be — and gives
 /// the projection each state's instruction and the listing. A scratch has none.
@@ -746,15 +704,14 @@ fn run_lambda_cursor(leg: &mut LambdaLeg, budget: u64) -> RunStatus {
 /// **THE ONE PLACE ANY OF THE THREE PRODUCERS (`decoded_of`, `lambda_value`, `tm_value`) TURNS A
 /// `Value` INTO EITHER `Decoded::Value` OR `Decoded::TooLargeToPrint`.**
 ///
-/// **THIS IS THE FIX, AND EVERY CALLER MUST GO THROUGH IT RATHER THAN `format_value` DIRECTLY.** All
-/// three producers are `#[wasm_bindgen]`-reachable from an ordinary user-typed program (`evaluate`,
-/// `evaluateWithBudget`, `lambdaValue`, `tmValue`), and `format_value` is an uncapped tree walk over a
-/// `Value` whose printed size is its LOGICAL size once a decoder memoizes sharing — `tm_value`'s own
-/// decode (`tm::decode_tape_ty`) is the exact function this branch made sharing-aware, and a
-/// `tails`-shaped program that used to be refused around the decode budget now decodes in ~192,000
-/// nodes and would hand the uncapped printer a walk of billions. See `redextape_core::value::
-/// MAX_PRINT_NODES`'s doc and `redextape-cli/src/run.rs`'s five capped print sites for the same fix on
-/// the CLI's own side of this hazard.
+/// **EVERY CALLER MUST GO THROUGH IT RATHER THAN `format_value` DIRECTLY.** All three producers are
+/// `#[wasm_bindgen]`-reachable from an ordinary user-typed program (`evaluate`,
+/// `evaluateWithBudget`, `lambdaValue`, `tmValue`), and `format_value` is an uncapped tree walk
+/// over a `Value` whose printed size is its LOGICAL size once a decoder memoizes sharing —
+/// `tm_value`'s own decode (`tm::decode_tape_ty`) does — and a `tails`-shaped program decodes in
+/// ~192,000 nodes and would hand the uncapped printer a walk of billions. See
+/// `redextape_core::value::MAX_PRINT_NODES`'s doc and `redextape-cli/src/run.rs`'s five capped
+/// print sites for the same fix on the CLI's own side of this hazard.
 fn decoded_value(v: &redextape_core::value::Value) -> Decoded {
     match redextape_core::value::format_value_capped(v, redextape_core::value::MAX_PRINT_NODES) {
         Some(text) => Decoded::Value { text },
@@ -783,7 +740,7 @@ fn grouped(n: u64) -> String {
 /// "decode answered, print-or-refuse" step for `lambda_value` and `tm_value`. Extracted (mirroring
 /// `redextape-cli/src/run.rs`'s `report_tm_decode`/`report_asm_decode`) so a test can drive the
 /// too-large-to-print refusal directly from a fixture `Value`, without an actual reduction or
-/// simulation that could build the shared DAG itself — forbidden by this task's own safety note.
+/// simulation that could build the shared DAG itself.
 fn decoded_or_undecodable(v: Option<redextape_core::value::Value>) -> Decoded {
     match v {
         Some(v) => decoded_value(&v),
@@ -803,14 +760,14 @@ fn decoded_of(run: Result<redextape_core::value::Value, redextape_core::interp::
 impl Session {
     /// Parse, typecheck, and build whichever legs the backends accept.
     ///
-    /// **THE MACHINE RUNS FIRST, AND THE MAP IS BUILT AT THE WIDTH IT FITTED.** The map keys the TM half
-    /// on state NAMES, and names depend on the field width: the sample, `let x = 40; x + 2`, fits at 64
-    /// under unary, and 47 of its 123 states have names no width-4 machine has. The map was once built at
-    /// `MIN_FIELD_WIDTH` before the run, and `tm_owner` then resolved 74 of the 121 states the run bills
-    /// to an instruction. `every_billed_state_resolves_at_the_width_the_run_fitted` below holds all of
-    /// them. The run desugars the program on its own, since the map's constructor is what pairs a `Core`
-    /// with its spans and it cannot be called until the width is known; `desugar` mints the same ids
-    /// every time, and only the machine leaves the run.
+    /// **THE MACHINE RUNS FIRST, AND THE MAP IS BUILT AT THE WIDTH IT FITTED.** The map keys the TM half on
+    /// state NAMES, and names depend on the field width: the sample, `let x = 40; x + 2`, fits at 64 under
+    /// unary, and 47 of its 123 states have names no width-4 machine has. Built at `MIN_FIELD_WIDTH` before the
+    /// run, the map would leave `tm_owner` resolving only 74 of the 121 states the run bills to an instruction.
+    /// `every_billed_state_resolves_at_the_width_the_run_fitted` below holds all of them. The run desugars the
+    /// program on its own, since the map's constructor is what pairs a `Core` with its spans and it cannot be
+    /// called until the width is known; `desugar` mints the same ids every time, and only the machine leaves
+    /// the run.
     ///
     /// **THE ASM PROGRAM RUNS TO ITS END TOO**, from the map's own `Core` — see `build_asm_leg` for why that
     /// program is the one the map's `asm_owner` indexes, and for what the run costs a program that never halts.
@@ -890,11 +847,11 @@ impl Session {
             Err(TmRun::TooLarge) => Err(TmDecline::TooLarge),
             Err(TmRun::LowerError(e)) => Err(TmDecline::Lower(format!("{e:?}"))),
             // `run_tm_described`'s `Err` is only ever `LowerError` or `TooLarge` — both matched above —
-            // so this arm is unreachable today. That rests on two facts now, not one: `lower_and_size`
-            // produces no other `Err`, AND `attempt`'s `None` (the state-ceiling refusal) is folded
-            // into `TooLarge` rather than surfacing as a distinct variant. It is a mapping rather than
-            // an `unreachable!()` because that macro is a panic, and a panic under wasm aborts the
-            // module; a future `Err` variant becomes a legible decline instead.
+            // so this arm is unreachable today. That rests on two facts: `lower_and_size` produces no
+            // other `Err`, AND `attempt`'s `None` (the state-ceiling refusal) is folded into `TooLarge`
+            // rather than surfacing as a distinct variant. It is a mapping rather than an
+            // `unreachable!()` because that macro is a panic, and a panic under wasm aborts the module;
+            // a future `Err` variant becomes a legible decline instead.
             Err(other) => Err(TmDecline::Lower(format!("{other:?}"))),
             Ok(d) => match d.run {
                 TmRun::Overflow => Err(TmDecline::Overflow),
@@ -975,23 +932,17 @@ impl Session {
     /// paused, and hide it from the one run that can actually take it.
     ///
     /// Returns `RunStatus` rather than `bool` for the reason `step_lambda`'s doc records: `false`
-    /// answers every end condition identically, and a renderer cannot act on that.
-    /// **NO LONGER RE-READS `lambda_status()` FOR ITS ANSWER, AND THAT DELETED AN UNREACHABLE
-    /// FALLBACK.** It used to end `self.lambda_status().run.unwrap_or(RunStatus::Running)` — `run` is
-    /// `None` only for an absent leg, which the `?` above has already ruled out, so the `unwrap_or` was
-    /// a branch no input could take, written that way only because unwrapping is a panic and a panic
-    /// under wasm aborts the module. `run_lambda_cursor` answers a bare `RunStatus` off the cursor it
-    /// was handed, so there is no `Option` to unwrap and no unreachable arm to justify. Same values,
-    /// one fewer state spellable — the shape argument the `tm` field's own doc makes.
+    /// answers every end condition identically, and a renderer cannot act on that. **IT DOES NOT
+    /// RE-READ `lambda_status()` FOR ITS ANSWER.** `run_lambda_cursor` answers a bare `RunStatus` off
+    /// the cursor it was handed, so there is no `Option` to unwrap and no unreachable arm to justify.
     pub fn run_lambda(&mut self, budget: u64) -> Result<RunStatus, SessionError> {
         let leg = self.lambda.as_mut().map_err(|_| SessionError::LambdaAbsent)?;
         Ok(run_lambda_cursor(leg, budget))
     }
 
-    /// `LambdaState::render(cursor, byte_budget, depth_cap)` and nothing else — PR 2 removed the map and redex
-    /// PARAMETERS along with the `source_node` field they existed to compute. Still three arguments today: the
-    /// `redex`/`redex_span`/`owner` fields 5c added to the returned `LambdaState` are all read off the cursor
-    /// inside `render`, so nothing had to come back in here.
+    /// `LambdaState::render(cursor, byte_budget, depth_cap)` and nothing else: the
+    /// `redex`/`redex_span`/`owner` fields of the returned `LambdaState` are all read off the cursor inside
+    /// `render`, so nothing has to come back in here.
     pub fn lambda_state(&self, byte_budget: usize) -> Result<LambdaState, SessionError> {
         let leg = self.lambda.as_ref().map_err(|_| SessionError::LambdaAbsent)?;
         Ok(LambdaState::render(&leg.cursor, byte_budget, MAX_PRINT_DEPTH))
@@ -1175,22 +1126,22 @@ impl Session {
     ///
     /// **NO SECOND RUN.** `compile` calls `run_tm_described`, which simulates the machine to a halt;
     /// driving the cursor for the same answer would simulate the `map` demo's 344,999 steps twice.
-    /// The cursor exists for WATCHING a run, which is Plan 5's job.
+    /// The cursor exists for WATCHING a run.
     ///
     /// **THE CURSOR IS THE FALLBACK, AND ONLY THE FALLBACK.** `final_tapes` is written once, by
     /// `compile`, and a `HitCap` compile writes `None` — but `raise_tm_cap` then lets a caller drive
     /// the cursor to a halt, at which point the session holds a final configuration that `final_tapes`
-    /// does not. Reading `final_tapes` alone answered `Unfinished` forever for exactly the run
-    /// `RunStatus::Capped` invites the caller to continue, so `tm_status().run` said `Ended` while this
-    /// said `Unfinished` and both were reporting on the same machine. The fallback decodes tapes the
+    /// does not. Reading `final_tapes` alone would answer `Unfinished` forever for exactly the run
+    /// `RunStatus::Capped` invites the caller to continue: `tm_status().run` says `Ended` while
+    /// this says `Unfinished`, both reporting on the same machine. The fallback decodes tapes the
     /// cursor ALREADY HOLDS, so the "no second run" property above survives it intact.
     ///
     /// `Unfinished` therefore means there is no final configuration ANYWHERE — no halted run recorded
     /// at compile time and a cursor that has not itself halted.
     ///
     /// `TooLargeToPrint` IS A REAL OUTCOME TOO: `decode_tape_ty` answered `Some(v)` and only
-    /// `decoded_value`'s capped print refused — `decode_tape_ty` is the exact function this branch
-    /// memoized, so a `tails`-shaped program reaches this at ~4,471 elements, far below any run cap.
+    /// `decoded_value`'s capped print refused — `decode_tape_ty` memoizes, so a `tails`-shaped program
+    /// reaches this at ~4,471 elements, far below any run cap.
     ///
     /// **THE `HitCap` THAT PUTS IT THERE HAS TWO PRODUCERS, NOT ONE.** `TmCursor` caps on the step
     /// budget and on the live-CELL budget, and `trace.rs` says outright that no test can tell those two
@@ -1322,9 +1273,8 @@ impl Session {
     /// at `DEFAULT_BUDGET` — 5,000,000 steps — inside one uninterruptible call. That is precisely the
     /// cost `run_lambda`'s chunking exists to avoid, and its justification applies here word for word:
     /// a five-million-step run in one call blocks the main thread with no progress and no cancellation.
-    /// It is not hypothetical. This branch's own TM-decline fixture,
-    /// `let mut n = 1; while n > 0 { n = n + 1; } n`, spends the entire budget inside one boundary call
-    /// before answering `Fault`.
+    /// It is not hypothetical: the TM-decline fixture, `let mut n = 1; while n > 0 { n = n + 1; } n`,
+    /// spends the entire budget inside one boundary call before answering `Fault`.
     ///
     /// **`eval` IS NOT RESUMABLE, so there is no chunked version to write.** It is a recursive
     /// tree-walker with no cursor, no saved continuation and no way to be stopped halfway and
@@ -1373,7 +1323,7 @@ impl Session {
         self.map.source_span(node)
     }
 
-    /// The step-0 link index for THIS compile — `LinkIndex`'s doc says which half the web app still reads.
+    /// The step-0 link index for THIS compile — `LinkIndex`'s doc says which half the web app reads.
     ///
     /// BUILT ON DEMAND RATHER THAN CACHED, and called once per compile by the worker. Caching it
     /// would pay the print for every program including the ones nobody clicks into, and the caller
@@ -1415,17 +1365,16 @@ pub struct Scratched<T> {
 /// is decision 2 stated precisely: a method that needs a `ty` DOES NOT EXIST on a scratch rather than
 /// being available-and-declining. `tests/browser.rs` pins that absence at compile time.
 ///
-/// **NO `initial_lambda`, AND CHECKING WHY IS WHAT CORRECTED THE FIRST DRAFT OF THE DESIGN.** That
-/// field's doc on `Session` says it is kept "so `link_index` can print step 0 after the cursor has
-/// moved", and `link_index` is its only consumer in this file. §3.3 puts `linkIndex` off every scratch
-/// type — it needs a `SourceMap` as well, and a scratch has none — so the field would be retained for
-/// nobody. `lambda_state` prints from the cursor, not from it. A first draft added it anyway "for the
-/// same `Rc`-bump reason as `Session`", which is a reason to keep a field cheap, not a reason to have
-/// one.
+/// **NO `initial_lambda`.** That field's doc on `Session` says it is kept "so `link_index` can print
+/// step 0 after the cursor has moved", and `link_index` is its only consumer in this file. §3.3 puts
+/// `linkIndex` off every scratch type — it needs a `SourceMap` as well, and a scratch has none — so
+/// the field would be retained for nobody. `lambda_state` prints from the cursor, not from it. Keeping
+/// it "for the same `Rc`-bump reason as `Session`" would be a reason to keep a field cheap, not a
+/// reason to have one.
 ///
 /// **NO `SourceMap` EITHER, WHICH IS WHAT DETACHED MEANS.** `sourceSpan` and `linkIndex` are the two
-/// linking affordances 5b and 5c built, and neither exists here — see §4.5 for why that has to be said
-/// out loud in the UI rather than merely being true.
+/// linking affordances, and neither exists here — see §4.5 for why that has to be said out loud in the UI
+/// rather than merely being true.
 pub struct LambdaScratch {
     lambda: LambdaLeg,
 }
@@ -1485,7 +1434,7 @@ pub fn asm_scratch(src: &str) -> Scratched<AsmScratch> {
 }
 
 /// The longest `.asm` text an asm copy builds, in bytes, and the longest `Session::asm_text` hands out for one (Plan 7
-/// part 5 spec, amendment 24; the figure below is amendment 45's, which supersedes amendment 36's).
+/// part 5 spec, amendment 24; the figure below is amendment 45's).
 ///
 /// **MEASURED, NOT CHOSEN, AGAINST THE 250 MS AN INITIATED GESTURE MAY TAKE** — `MAX_SCRATCH_TM_BYTES`' budget. A
 /// copy's build pays four costs before its first frame: the text's structured clone to the worker; `asm_scratch`,
@@ -1494,15 +1443,12 @@ pub fn asm_scratch(src: &str) -> Scratched<AsmScratch> {
 /// prices the four together (`cd web && pnpm run test:probe:asm-copy`), over generated files that halt on their first
 /// instruction, and prices every run the memory probe knows apart from that, since none of them grows with the text:
 /// a loop to the step cap, and `asm-copy-corpus.ts`'s `CASES` and its `both` at `COPY_CAPS`' heap cap — the
-/// heaviest of those runs is what the figures below add, not the loop alone (amendment 36 priced only the loop).
+/// heaviest of those runs is what the figures below add, not the loop alone.
 ///
-/// FOUR RUNS, ON AN AMD RYZEN 9 9950X3D, RELEASE BUILD, THIS CHECK OFF (`probe-asm-copy`). The ledger's three
-/// quiet-machine runs found `both` heaviest at medians 38.4, 36.1 and 38.8 ms against the loop's 32.1, 30.7 and
-/// 32.9, and with `both` added 5,200,038 bytes stayed under the 250 ms budget in all three (241.5, 243.9, 245.5
-/// ms) while 5,400,000 was over it in two of them (254.3, 256.7 ms). This fix wave's own run agrees: `both` 39.0
-/// ms against the loop's 31.6, 5,200,038 bytes under budget at 245.4 ms and 5,300,019 bytes, the next size up,
-/// over it at 250.2 ms. The ceiling is the largest size known under budget in every run, with the heaviest run
-/// known added, so it is 5,200,000.
+/// FOUR RUNS, RELEASE BUILD, THIS CHECK OFF (`probe-asm-copy`). In three of them 5,200,038 bytes stayed under the 250
+/// ms budget with `both` added while 5,400,000 was over it in two; in the fourth, 5,200,038 bytes stayed under and
+/// 5,300,019 bytes, the next size up, was over it at 250.2 ms. The ceiling is the largest size known under budget in
+/// every run, with the heaviest run known added, so it is 5,200,000.
 ///
 /// ONE CONSTANT FOR BOTH DIRECTIONS (spec amendment 24): the text a copy parses, and the text *edit a copy* would post,
 /// since a text over it is one the copy would refuse.
@@ -1515,11 +1461,9 @@ pub const MAX_SCRATCH_ASM_BYTES: usize = 5_200_000;
 /// worker of its own, up to `MAX_WARM_BUFFERS` of them, and a wasm memory only grows, so a copy that once filled its
 /// caps holds that memory until its worker ends. Under `DEFAULT_CAPS` a hand-written copy can fill far more:
 /// `web/tests/browser/asm-copy-memory.test.ts` (`cd web && pnpm run test:probe:asm-copy`) builds each worst case in a
-/// worker of its own, records it as the session worker does, and reads the worker's wasm memory. One run, on the machine
-/// above: 629.8 MiB for a million-word locals bank saved by every `call`, to the memory cap; 264.6 MiB for a `cons` a
-/// step, to the step cap; 136.6 MiB for a `box` a step; 18.4 MiB for bare recursion, to the stack cap. Under these caps
-/// the same cases read 133.1, 72.5, 40.4 and 18.4 MiB, and a copy that fills the heap to its cap and then saves locals
-/// to theirs — the two together, since a run stops at the first cap it meets — reads 168.4 MiB.
+/// worker of its own, records it as the session worker does, and reads the worker's wasm memory. Under these caps a
+/// copy that fills the heap to its cap and then saves locals to theirs — the two together, since a run stops at the
+/// first cap it meets — reads 168.4 MiB.
 ///
 /// A copy of the program therefore stops, heap-full or with its saved frames full, where the program's own session
 /// runs on: the session keeps `DEFAULT_CAPS`, and the step line names the cap that ended a copy.
@@ -1608,16 +1552,15 @@ pub struct ForkedAt {
 /// step 0, and the term the user was looking at one object instead of three that agree until they do
 /// not — and it puts the whole path through `lambda/syntax.rs`'s round-trip guarantee.
 ///
-/// **AT STEP 0 THE TEXT IS `src` ITSELF, AND THE SCRATCH IS THE ONE `src` BUILT.** Nothing is replayed,
-/// so the text that built the scratch exists already and is the caller's: an edit as it was typed, a
-/// paused copy's text of record, or the program's step-0 print for a copy made at step 0. The app puts
-/// this answer in the copy's editor and in its text of record, and answered with the print, an edit had
-/// whatever the printer spells differently replaced under the caret each time a build was answered — a
-/// space typed at the end was gone before the next letter, and a caret inside the text went to its
-/// start. Tidying a copy's text is *format*'s. The cut's refusal below comes first at step 0 too.
-/// **TEXT LONGER THAN `byte_budget` IS ANSWERED WITH THE PRINT ALL THE SAME**, as every text was: a
-/// copy's text of record was never longer than a print that was not cut, and text padded past the
-/// budget would be.
+/// **AT STEP 0 THE TEXT IS `src` ITSELF, AND THE SCRATCH IS THE ONE `src` BUILT.** Nothing is replayed, so
+/// the text that built the scratch exists already and is the caller's: an edit as it was typed, a paused
+/// copy's text of record, or the program's step-0 print for a copy made at step 0. The app puts this
+/// answer in the copy's editor and in its text of record, so answering with the print would replace
+/// whatever the printer spells differently under the caret each time a build is answered — a space typed
+/// at the end would be gone before the next letter, and a caret inside the text would go to its start.
+/// Tidying a copy's text is *format*'s. The cut's refusal below comes first at step 0 too. **TEXT LONGER
+/// THAN `byte_budget` IS ANSWERED WITH THE PRINT ALL THE SAME**: a copy's text of record is never longer
+/// than a print that was not cut, and text padded past the budget would be.
 ///
 /// **`step` IS CLAMPED BY THE REDUCTION, NOT VALIDATED.** `step_lambda` answers `false` at the normal
 /// form, so a step past the end lands on the normal form. A history's step count and a fresh
@@ -1669,7 +1612,7 @@ impl LambdaScratch {
     /// A `LambdaScratch` exists only for text that parsed, so the leg genuinely is there and there
     /// genuinely is nothing to explain — degenerate values that are TRUE, unlike the `total_steps` a
     /// `TmScratch` would have to invent (see `TmScratch::tm_status`, and the `tm` field's doc on what
-    /// fabricating a status for an unreachable state cost this file once already).
+    /// fabricating a status for an unreachable state costs).
     ///
     /// The struct is shared with `Session` rather than narrowed so one renderer can read either kind of
     /// session's λ leg through one shape; `run` is the field it actually switches on.
@@ -1732,15 +1675,14 @@ impl LambdaScratch {
     }
 }
 
-/// Where a `TmScratch`'s machine stands. **NOT `TmStatus`, AND THE DIFFERENCE IS THIS TASK'S TRAP.**
+/// Where a `TmScratch`'s machine stands. **NOT `TmStatus`, AND THE DIFFERENCE IS A TRAP.**
 ///
-/// `TmStatus::total_steps` is "how long the WHOLE run is, in δ-steps, from the run `compile`
-/// performed" — it comes from `run_tm_described`, and a scratch is never described-run. It is
-/// *stepped*. So there is no such total to report, and the two candidate ways to report one anyway are
-/// both worse than not having the field: `Some(0)` is a lie a progress bar would render as "step 40 of
-/// 0", and `None` beside `available: true` is a shape `TmStatus`'s own doc reserves for a DECLINED
-/// leg. The `tm` field's doc records at length what the last fabricated-status-for-an-unreachable-state
-/// cost this file; this type is that lesson applied before the fact.
+/// `TmStatus::total_steps` is "how long the WHOLE run is, in δ-steps, from the run `compile` performed" — it
+/// comes from `run_tm_described`, and a scratch is never described-run. It is *stepped*. So there is no such
+/// total to report, and the two candidate ways to report one anyway are both worse than not having the field:
+/// `Some(0)` is a lie a progress bar would render as "step 40 of 0", and `None` beside `available: true` is a
+/// shape `TmStatus`'s own doc reserves for a DECLINED leg. The `tm` field's doc records at length what a
+/// fabricated status for an unreachable state costs; this type does not fabricate one.
 ///
 /// The Rust side pins the field list by an exhaustive destructuring in this module's own tests
 /// (`let TmScratchStatus { available, reason, width, run, header, reduction } = sc.tm_status();`), so a seventh
@@ -1802,10 +1744,9 @@ pub struct ReductionStatus {
 /// compile time. A headered file's value is read instead by `TmValueRun`, which `tm_scratch` builds beside
 /// the scratch, and only for a file with a header.
 ///
-/// **NO `SourceMap`, WHICH IS WHY T1 HAPPENED.** `tm_state` is the method a TM pane renders from every
-/// frame, and it needed a map. `TmState::window` now takes `Option<&SourceMap>` and this passes `None`,
-/// so `source_node` is `None` on exactly the leg where a Core node would be meaningless — see §3.1 and
-/// that function's own doc.
+/// **NO `SourceMap`.** `tm_state` is the method a TM pane renders from every frame, and `TmState::window`,
+/// which it calls, takes `Option<&SourceMap>`: this passes `None`, so `source_node` is `None` on exactly
+/// the leg where a Core node would be meaningless — see §3.1 and that function's own doc.
 ///
 /// **`Option<TmHeader>` AND THAT `None` IS NOT AN ERROR.** `parse_tm_full` already answers
 /// `Option<TmHeader>` and explicitly does not treat absence as a failure (`HeaderParts::finish`).
@@ -1821,15 +1762,14 @@ pub struct TmScratch {
 
 /// Build a TM scratchpad from TM TEXT — the `.tm` form, not asm and not source.
 ///
-/// **A HEADERLESS FILE RUNS FROM BLANK TAPES AT `MIN_FIELD_WIDTH`, WHICH REVERSES AN EXPLICIT REFUSAL
-/// ALREADY IN THE TREE.** `examples/tm_emit.rs`'s `run` declines exactly this file, on the grounds that
-/// it "genuinely cannot be run without the caller supplying `init` by hand". That remains true, and the
-/// difference is who is present: `tm_emit` is a batch tool with nobody to supply anything, and **a
-/// scratchpad IS the caller supplying `init` by hand** — the user typed the machine into a pane and is
-/// looking at it. Design §3.4 takes that decision deliberately rather than by drift, and `tm_emit`'s
-/// own comment now names this path so the tree does not assert two opposite things about one
-/// condition. Because the values are invented, `tm_status().header` reports `false` and the pane is
-/// obliged to say so (decision 6).
+/// **A HEADERLESS FILE RUNS FROM BLANK TAPES AT `MIN_FIELD_WIDTH`, WHERE `examples/tm_emit.rs`'s `run`
+/// DECLINES THE SAME FILE**, on the grounds that it "genuinely cannot be run without the caller
+/// supplying `init` by hand". That is true there, and the difference is who is present: `tm_emit` is a
+/// batch tool with nobody to supply anything, and **a scratchpad IS the caller supplying `init` by
+/// hand** — the user typed the machine into a pane and is looking at it. Design §3.4 takes that
+/// decision deliberately rather than by drift, and `tm_emit`'s own comment names this path so the tree
+/// does not assert two opposite things about one condition. Because the values are invented,
+/// `tm_status().header` reports `false` and the pane is obliged to say so (decision 6).
 ///
 /// `TM_DEFAULT_CAPS`, THE SAME BUDGET `compile` USES. `compile_with_caps` hands `build_tm_leg` the caps
 /// the described run already spent, so its cursor and its reported outcome agree; a scratch has no
@@ -1849,14 +1789,12 @@ pub fn tm_scratch(src: &str) -> TmScratched {
 /// cd web && pnpm run test:probe:tm-buffer
 /// ```
 ///
-/// **THE READINGS ARE ONE RUN OF THAT COMMAND AT THE COMMIT THAT ADDED THE PROBE'S RUN STAMP**
-/// (`web/tests/browser/provided-context.d.ts`), on an AMD Ryzen 9 9950X3D, starting at a load average of 1.32. It ran a
-/// release build with this check switched off (`probe-no-tm-scratch-ceiling`), so files over the ceiling were parsed
-/// too, in the browser test tier's headless Chromium. It priced 65 reduced files from 28,140 to 15,451,499 bytes,
-/// taking each cost's median over seven passes and a file's total as the four medians' sum. The largest file under
-/// budget was 6,053,591 bytes at 223.1 ms, and the smallest over it 6,617,969 bytes at 274.8 ms. This is the first
-/// round hundred thousand at or above the first. The 6,053,591-byte file's seven passes took 215.6 to 231.9 ms in
-/// total, so the ceiling is a band, not a line.
+/// **THE READINGS ARE ONE RUN OF THAT COMMAND**, a release build with this check switched off
+/// (`probe-no-tm-scratch-ceiling`), so files over the ceiling were parsed too, in the browser test tier's headless
+/// Chromium. Each file's cost is the median over seven passes of each of the four costs, summed. The largest
+/// file under budget was 6,053,591 bytes at 223.1 ms, and the smallest over it 6,617,969 bytes at 274.8 ms. This
+/// is the first round hundred thousand at or above the first. The 6,053,591-byte file's seven passes took 215.6
+/// to 231.9 ms in total, so the ceiling is a band, not a line.
 ///
 /// **BYTES,** because bytes are the one size known before parsing, and the parse is one of the costs being bounded.
 /// They do not predict the cost alone. In the same run `head([1, 2])` reduced through `fold, two-symbol` is 5,351,636
@@ -1953,7 +1891,7 @@ impl TmScratch {
     ///
     /// **ONLY THE SINGLE-TAPE STAGE CHANGES WHAT A TAPE IS.** The fold lays each tape out zig-zag and the
     /// two-symbol stage spells each cell in bits, but tape `i` is still lowered tape `i` after either, so the bank
-    /// names stay true. A headerless file names no stages and keeps them too, as it always has.
+    /// names stay true. A headerless file names no stages and keeps them too.
     pub fn tape_names(&self) -> Vec<String> {
         let interleaved = self.header.as_ref().and_then(|h| h.reduction.as_ref()).and_then(|r| {
             r.stages.iter().find_map(|s| match s {
@@ -1980,9 +1918,9 @@ impl TmScratch {
         self.cursor.next().is_some()
     }
 
-    /// **THE METHOD T1 EXISTED FOR.** `source_node` is `None` for every state this renders, because a
-    /// scratch has no lowering that could have recorded an owner — which is what "detached" means at
-    /// §4.5 and why the pane has to announce it rather than merely show nothing highlighted.
+    /// `source_node` is `None` for every state this renders, because a scratch has no lowering that could
+    /// have recorded an owner — which is what "detached" means at §4.5 and why the pane has to announce
+    /// it rather than merely show nothing highlighted.
     pub fn tm_state(&self, radius: usize) -> TmState {
         TmState::window(&self.cursor, None, radius)
     }
@@ -2143,7 +2081,7 @@ mod tests {
     /// allocations, 2^64 logical nodes — small enough to build here, but far too large for
     /// `format_value_capped` to walk within `MAX_PRINT_NODES`. Never fed to the UNCAPPED
     /// `format_value`; every test below drives it through `decoded_value`/`decoded_of`/
-    /// `decoded_or_undecodable`, the capped seams this fix pass adds.
+    /// `decoded_or_undecodable`, the capped seams.
     fn tiny_but_logically_enormous_dag() -> redextape_core::value::Value {
         use redextape_core::value::Value;
         let mut v = Value::Cons(Rc::new(Value::Nat(1)), Rc::new(Value::Nil));
@@ -2243,7 +2181,7 @@ mod tests {
 
     /// A literal past the print cap must yield a BOUNDED print rather than an unbounded walk. Natively
     /// there is stack enough for either, so this pins the cap's arithmetic, not its safety — the
-    /// browser tests in Task 5 are what pin the safety.
+    /// browser tests are what pin the safety.
     #[test]
     fn a_literal_past_the_print_cap_prints_bounded() {
         let src = format!("let x = {}; x + 1", MAX_PRINT_DEPTH + 200);
@@ -2378,11 +2316,11 @@ mod tests {
         assert_eq!(s.lambda_state(1_000_000).expect("present").step, 0);
     }
 
-    /// **A DEPTH REFUSAL MUST SURVIVE `run_lambda` AS ITSELF, NEVER AS `Capped`.** The distinction was
-    /// asserted only through `step_lambda`, and `run_lambda` reaches its answer by a different route —
-    /// one `lambda_status()` read after the chunk rather than one per step — so a regression that folded
-    /// the two together here would have left that test green. `Capped` is the only status for which
-    /// "continue" is an honest offer, and this is the one run that provably cannot take it.
+    /// **A DEPTH REFUSAL MUST SURVIVE `run_lambda` AS ITSELF, NEVER AS `Capped`.** `step_lambda`'s test
+    /// cannot see this: `run_lambda` reaches its answer by a different route — one `lambda_run_status`
+    /// read of the cursor after the chunk rather than one per step — so folding the two together here
+    /// would leave that test green. `Capped` is the only status for which "continue" is an honest offer,
+    /// and this is the one run that provably cannot take it.
     #[test]
     fn run_lambda_reports_a_depth_refusal_as_itself_not_as_capped() {
         // A Church numeral is a spine as deep as its value, so a literal above `reduce::MAX_TERM_DEPTH`
@@ -2401,8 +2339,8 @@ mod tests {
         assert_eq!(s.run_lambda(1_000_000).expect("λ leg present"), RunStatus::DepthRefused);
     }
 
-    /// **`Decoded::Undecodable` HAS A FIXTURE**, and until this test the two ✅ marks in `Decoded`'s own
-    /// reachability table rested on argument alone — the state was asserted nowhere, for either producer.
+    /// **`Decoded::Undecodable` HAS A FIXTURE**, which the λ and TM `Undecodable` ✅ marks in `Decoded`'s own
+    /// reachability table rest on, rather than on argument alone.
     ///
     /// The mechanism is a top-level type neither decoder has an encoding for. `decode_lambda_ty` answers
     /// `None` for `Ty::Fun` and `Ty::Var` — "well-formed but not first-class values, exactly as
@@ -2413,7 +2351,7 @@ mod tests {
     /// nothing in the answer a decoder can read. The availability assertions are load-bearing — against
     /// a program either backend refused, this test would pass while exercising nothing.
     ///
-    /// **`Undecodable`, NOT `Unfinished`, AND THAT IS WHY THERE ARE FOUR STATES.** "the run has not
+    /// **`Undecodable`, NOT `Unfinished`, AND THAT IS WHY THERE ARE FIVE STATES.** "the run has not
     /// finished" and "it finished and the result is not a recognizable encoding" are different facts
     /// about the program, and a UI that renders one blank field for both is wrong about one of them.
     #[test]
@@ -2585,8 +2523,8 @@ mod tests {
         assert_eq!(sc.lambda_state(usize::MAX).text, "λy. y", "the identity applied to the identity");
     }
 
-    /// **THE FIXTURE FOR T8's DETACH, ASSERTED HERE WHERE IT IS CHEAP.** Detaching a source-derived λ
-    /// pane seeds a `LambdaScratch` with that pane's current TEXT (design §4.3), so the scratch's whole
+    /// **THE FIXTURE FOR DETACH, ASSERTED HERE WHERE IT IS CHEAP.** Detaching a source-derived λ pane
+    /// seeds a `LambdaScratch` with that pane's current TEXT (design §4.3), so the scratch's whole
     /// value depends on the round trip: `print_lambda` -> `parse_lambda` -> the same reduction.
     ///
     /// **IT IS ALSO WHAT PINS THE CAP.** `lambda_scratch` hands `LambdaCursor::new` the same
@@ -2636,7 +2574,7 @@ mod tests {
     }
 
     /// `runLambda`'s chunk/cap distinction has to hold on a scratch too, and it is the same shared loop
-    /// — so this is a check that the transplant reached it, not a re-test of the loop.
+    /// — so this is a check that the scratch goes through it, not a re-test of the loop.
     ///
     /// THE DIVERGENT TERM IS ω = `(λx. x x) (λx. x x)`, which β-reduces to itself forever. A spent
     /// CHUNK leaves it `Running`; only the cursor's own cap yields `Capped`, which `cap_lambda_at`
@@ -2667,8 +2605,8 @@ mod tests {
     fn lambda_scratch_at_step_zero_keeps_the_text_it_was_given() {
         // Nothing is replayed at step 0, so the text that built the scratch is the caller's own: spelled
         // with `\`, with parentheses the printer does not write, a line break and a trailing space, and
-        // answered as given. The printer's spelling of it is what someone typing into a copy found
-        // their text replaced with each time a build was answered.
+        // answered as given. The printer's spelling of it is what someone typing into a copy would find
+        // their text replaced with each time a build is answered.
         let src = "(\\x. (x))\n  (\\y. y) ";
         let out = lambda_scratch_at(src, 0, 65_536);
         assert!(out.diagnostics.is_empty());
@@ -2682,8 +2620,7 @@ mod tests {
     #[test]
     fn lambda_scratch_at_step_zero_keeps_a_text_up_to_the_budget_and_prints_a_longer_one() {
         // Text padded with spaces, whose term prints well inside the budget either way. At the budget's
-        // own length it is answered as given; one byte longer, with the print, as every later step is —
-        // so a copy's text of record is no longer than it could be when every answer was a print.
+        // own length it is answered as given; one byte longer, with the print, as every later step is.
         let at = format!("\\x. x{}", " ".repeat(59));
         assert_eq!(at.len(), 64);
         assert_eq!(lambda_scratch_at(&at, 0, 64).text.as_deref(), Some(at.as_str()));
@@ -2696,7 +2633,7 @@ mod tests {
     #[test]
     fn lambda_scratch_at_step_zero_refuses_a_text_whose_print_is_cut() {
         // The cut's refusal comes before a text is answered as given: these 4 bytes fit a 5-byte budget,
-        // and the print of their term, `λx. x`, does not. Refused, as it was when the print was the answer.
+        // and the print of their term, `λx. x`, does not.
         let out = lambda_scratch_at("\\x.x", 0, 5);
         assert!(out.scratch.is_none());
         assert!(out.text.is_none());
@@ -2718,13 +2655,12 @@ mod tests {
         // `step` is what a pane was showing, and a history can outlive nothing — asking for step 500
         // of a 1-step reduction must still answer the term the reduction actually ended on.
         //
-        // THIS DOES NOT PIN THE REPLAY LOOP'S `break` (final whole-branch review, T1's mutation
-        // result). `LambdaCursor::next` latches permanently once ended (`trace.rs`:
-        // `self.status.is_some()` short-circuits every call after the first `None`), so `step_lambda`
-        // answers `false` forever past the end — looping the full 500 iterations and breaking out
-        // early reach bit-identical state, which is why deleting the `break` kills nothing here. What
-        // this genuinely pins is that `lambda_scratch_at` survives a step far past the reduction's
-        // length and reports the right term, rather than panicking or spinning.
+        // THIS DOES NOT PIN THE REPLAY LOOP'S `break`. `LambdaCursor::next` latches permanently once
+        // ended (`trace.rs`: `self.status.is_some()` short-circuits every call after the first `None`),
+        // so `step_lambda` answers `false` forever past the end — looping the full 500 iterations and
+        // breaking out early reach bit-identical state, which is why deleting the `break` kills nothing
+        // here. What this genuinely pins is that `lambda_scratch_at` survives a step far past the
+        // reduction's length and reports the right term, rather than panicking or spinning.
         let out = lambda_scratch_at("(\\x. x) (\\y. y)", 500, 65_536);
         assert_eq!(out.text.as_deref(), Some("λy. y"));
     }
@@ -2986,10 +2922,11 @@ mod tests {
         assert_eq!(s.tm_status().total_steps, None, "but a declined leg still reports no length");
     }
 
-    /// **`tmValue()` AND `tmStatus().run` MUST NOT CONTRADICT EACH OTHER**, and a raised cap is the one
-    /// place they could. `RunStatus::Capped` exists specifically so a renderer can offer "continue";
-    /// taking that offer used to produce a UI showing a halted machine with no answer, permanently,
-    /// because `final_tapes` is written once in `compile` and a capped compile writes `None`.
+    /// **`tmValue()` AND `tmStatus().run` MUST NOT CONTRADICT EACH OTHER**, and a raised cap is the
+    /// one place they could. `RunStatus::Capped` exists specifically so a renderer can offer
+    /// "continue"; taking that offer would produce a UI showing a halted machine with no answer,
+    /// permanently, if `final_tapes` alone were read: it is written once in `compile` and a capped
+    /// compile writes `None`.
     ///
     /// THE SEQUENCE IS DRIVEN, NOT CONSTRUCTED. Every step here is one a renderer takes: step until the
     /// cursor stops, read `run` to learn the run may continue, raise, step again, read the answer.
@@ -3500,10 +3437,10 @@ state scan:
 state halt: accept
 ";
 
-    /// **DECISION 6, AND IT REVERSES A REFUSAL ALREADY IN THE TREE** (`examples/tm_emit.rs`, whose
-    /// comment now names this path). A headerless machine runs, from blank tapes, at
-    /// `MIN_FIELD_WIDTH` — and `tm_status().header` is `false`, which is the ONLY thing that lets a
-    /// pane tell an invented configuration from one the file asked for.
+    /// **DECISION 6, WHERE `examples/tm_emit.rs` DECLINES THE SAME MACHINE** (its comment names
+    /// this path). A headerless machine runs, from blank tapes, at `MIN_FIELD_WIDTH` — and
+    /// `tm_status().header` is `false`, which is the ONLY thing that lets a pane tell an invented
+    /// configuration from one the file asked for.
     ///
     /// THE WIDTH IS ASSERTED AGAINST THE CONSTANT AND AGAINST ITS VALUE. `MIN_FIELD_WIDTH` alone would
     /// stay green if the constant itself moved; `4` alone would break for a reason that has nothing to
@@ -3687,20 +3624,23 @@ state halt: accept
         assert!(ord.tm_result_decodable());
     }
 
-    /// **`TmScratchStatus` HAS EXACTLY THESE FIVE FIELDS, AND A SIXTH FAILS TO COMPILE HERE.** The
+    /// **`TmScratchStatus` HAS EXACTLY THESE SIX FIELDS, AND A SEVENTH FAILS TO COMPILE HERE.** The
     /// field this type exists in order NOT to have is `total_steps` — `Session::tm_status` reports one
     /// from the run `compile` performed, and a scratch is stepped rather than described-run, so any
     /// value it put there would be invented. See `TmScratchStatus`'s own doc.
     ///
-    /// **A DESTRUCTURING PATTERN RATHER THAN FIVE FIELD READS, BECAUSE ONLY THE PATTERN IS EXHAUSTIVE.**
+    /// **A DESTRUCTURING PATTERN RATHER THAN SIX FIELD READS, BECAUSE ONLY THE PATTERN IS EXHAUSTIVE.**
     /// Rust requires a struct pattern to name every field (or say `..`), so adding one to the type
-    /// breaks this line with `missing field in pattern` — while five `assert_eq!(st.field, ..)` lines
-    /// would happily keep passing beside a newly fabricated sixth.
+    /// breaks this line with `missing field in pattern` — while six `assert_eq!(st.field, ..)` lines
+    /// would happily keep passing beside a newly fabricated seventh.
     ///
-    /// **THIS EXISTS BECAUSE THE MUTATION PROVED IT WAS MISSING.** Adding `total_steps: Some(0)` to the
-    /// struct was caught by `tests/browser.rs`'s wire assertion and by NOTHING in the native suite —
-    /// 894 tests green. The browser tier needs Chrome and is skippable; the trap this task's own plan
-    /// flags as its biggest should not depend on a tier that can be skipped.
+    /// **ONLY THE PATTERN CATCHES A FABRICATED FIELD WHATEVER ITS TYPE.** `ts_bindings.rs`'s
+    /// `no_generated_type_carries_bigint` gate sees one only when it is an un-overridden `u64`, and
+    /// `tests/browser.rs`'s wire assertion checks just that `total_steps` is undefined. So, outside this
+    /// test, a `total_steps` overridden to `number | null` (as `Option<u64>` is) or not a `u64` at all
+    /// would be caught only by that browser assertion, and such a field under any other name by neither.
+    /// The browser tier needs Chrome and is skippable; the biggest trap on this type should not depend on
+    /// a tier that can be skipped.
     #[test]
     fn the_tm_scratch_status_has_no_field_for_a_total_it_cannot_know() {
         let sc = tm_scratch(HEADERLESS_TM).scratch.expect("parses");
@@ -3837,8 +3777,8 @@ state halt: accept
         (value.run(u64::MAX), value.value())
     }
 
-    /// `5 - 3` is 2 and not 0, so a decode that read the reduced tapes as lowered ones cannot pass by
-    /// coincidence — #95's first sabotage row stayed green on a program whose value was 0.
+    /// `5 - 3` is 2 and not 0, so a decode that read the reduced tapes as lowered ones cannot pass
+    /// by coincidence.
     #[test]
     fn every_stage_reads_the_programs_value() {
         for stage in tm::StageKind::ALL {
@@ -3874,7 +3814,7 @@ state halt: accept
     }
 
     /// A TM copy of a program whose type has a free variable builds, and reads the program's value: the header
-    /// writes the variable as `Nat`, where `result List<t1>` was one the copy's own parser refused.
+    /// writes the variable as `Nat`, since the copy's own parser refuses `result List<t1>`.
     #[test]
     fn a_tm_copy_of_a_polymorphic_program_builds_and_reads_its_value() {
         for (src, header) in [("[]", "result List<Nat>\n"), ("[[]]", "result List<List<Nat>>\n")] {
@@ -4127,13 +4067,12 @@ state halt: accept
         assert_eq!(s.evaluate(), Decoded::Value { text: "[1, 2, 3]".to_string() });
     }
 
-    /// **THE CRITICAL FINDING THIS TEST PINS.** `evaluate`/`evaluateWithBudget` are
-    /// `#[wasm_bindgen]`-reachable from an ordinary user-typed program, and before this fix both
-    /// printed through the uncapped `format_value` — a `tails`-shaped program builds a small-in-memory,
-    /// logically enormous `Value` in O(m) interpreter steps (`Builtin::Tail` is an O(1) `Rc` clone) and
-    /// the uncapped printer would then walk it forever. `decoded_of` now routes every `Ok(v)` through
-    /// `decoded_value`, which refuses past `MAX_PRINT_NODES` instead. Drives `decoded_of` directly with
-    /// the fixture rather than running a program that builds one, per this task's own safety note.
+    /// **THE HAZARD THIS TEST PINS.** `evaluate`/`evaluateWithBudget` are `#[wasm_bindgen]`-reachable
+    /// from an ordinary user-typed program, and `format_value` is uncapped — a `tails`-shaped program
+    /// builds a small-in-memory, logically enormous `Value` in O(m) interpreter steps (`Builtin::Tail`
+    /// is an O(1) `Rc` clone) and the uncapped printer would then walk it forever. `decoded_of` routes
+    /// every `Ok(v)` through `decoded_value`, which refuses past `MAX_PRINT_NODES` instead. Drives
+    /// `decoded_of` directly with the fixture rather than running a program that builds one.
     #[test]
     fn evaluate_reports_too_large_to_print_for_a_logically_enormous_value() {
         assert_eq!(decoded_of(Ok(tiny_but_logically_enormous_dag())), Decoded::TooLargeToPrint);
@@ -4149,16 +4088,15 @@ state halt: accept
     }
 
     /// `tm_value` sibling of the test above. `tm_value` calls the SAME `decoded_or_undecodable` with
-    /// `decode_tape_ty`'s answer — `decode_tape_ty` is the exact function this branch made
-    /// sharing-aware, so this is the sharpest of the three: a `tails`-shaped `.tm` program reaches this
-    /// refusal at ~4,471 elements, far below any run cap.
+    /// `decode_tape_ty`'s answer — `decode_tape_ty` is the sharing-aware decode, so this is the sharpest
+    /// of the three: a `tails`-shaped `.tm` program reaches this refusal at ~4,471 elements, far below
+    /// any run cap.
     #[test]
     fn tm_value_reports_too_large_to_print_for_a_logically_enormous_decode() {
         assert_eq!(decoded_or_undecodable(Some(tiny_but_logically_enormous_dag())), Decoded::TooLargeToPrint);
     }
 
-    /// `RunError::Runtime` is the one genuinely new failure shape this slice adds, and it must arrive as
-    /// a message rather than as an abort.
+    /// `RunError::Runtime` must arrive as a message rather than as an abort.
     ///
     /// THE MESSAGE IS MATCHED ON A SUBSTRING, not merely checked non-empty. Every runtime fault carries
     /// a non-empty message — including "exceeded step budget" — so `!is_empty()` alone would stay green
@@ -4177,9 +4115,9 @@ state halt: accept
         }
     }
 
-    /// A BUDGET SMALLER THAN THE PROGRAM NEEDS FAULTS RATHER THAN RUNNING ON. The fixture is this
-    /// branch's own runaway counter, which never terminates at all — so the only thing bounding
-    /// `evaluate` on it is `DEFAULT_BUDGET`'s five million steps, spent inside one uninterruptible call.
+    /// A BUDGET SMALLER THAN THE PROGRAM NEEDS FAULTS RATHER THAN RUNNING ON. The fixture is a runaway
+    /// counter, which never terminates at all — so the only thing bounding `evaluate` on it is
+    /// `DEFAULT_BUDGET`'s five million steps, spent inside one uninterruptible call.
     /// That is the freeze this method exists to let a caller bound.
     #[test]
     fn a_small_budget_faults_instead_of_running_long() {
@@ -4228,16 +4166,15 @@ state halt: accept
         assert!(Session::compile("1 + true", EncodingKind::Unary).session.is_none());
     }
 
-    /// **EVERY STATE THE RUN BILLS TO AN INSTRUCTION RESOLVES — ITS INSTRUCTION, AND FOR A FIRST-ORDER
-    /// PROGRAM ITS OWNER.** State names depend on the field width, so this holds only because `compile`
-    /// builds its map at the width the run fitted (its doc has the numbers from when it did not).
+    /// **EVERY STATE THE RUN BILLS TO AN INSTRUCTION RESOLVES — ITS INSTRUCTION, AND FOR A FIRST-ORDER PROGRAM ITS
+    /// OWNER.** State names depend on the field width, so this holds only because `compile` builds its map at the
+    /// width the run fitted (its doc has the numbers for a map built at `MIN_FIELD_WIDTH`).
     ///
-    /// **THIS REPLACES A TEST THAT WAS GREEN OVER THE HOLE.** Its predecessor stepped the sample until ONE
-    /// state resolved an owner and passed — which the map built at `MIN_FIELD_WIDTH` did, with 47 of the
-    /// sample's 121 billed states unresolved. So this counts: the authority is `lower_tm_mapped` at the
-    /// fitted width, over a program lowered by `lower_asm` and `defunc` rather than their `_mapped` twins
-    /// the map uses, and every state must agree with it. Each fixture fits wider than `MIN_FIELD_WIDTH`,
-    /// or it could not tell the two widths apart.
+    /// **THIS COUNTS RATHER THAN STEPPING UNTIL ONE STATE RESOLVES AN OWNER**, which a map built at
+    /// `MIN_FIELD_WIDTH` passes with 47 of the sample's 121 billed states unresolved: the authority is
+    /// `lower_tm_mapped` at the fitted width, over a program lowered by `lower_asm` and `defunc` rather than their
+    /// `_mapped` twins the map uses, and every state must agree with it. Each fixture fits wider than
+    /// `MIN_FIELD_WIDTH`, or it could not tell the two widths apart.
     ///
     /// **BOTH ARMS THAT YIELD A LEG, AND THE DEFUNC ROAD.** A budget of 10 steps stops the sample in `HitCap` at the
     /// narrowest width — the fitting loop retries only an overflow — so that case asks for no widening. A program

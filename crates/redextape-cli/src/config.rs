@@ -2,9 +2,10 @@
 //!
 //! **THIS MODULE NEVER READS THE PROCESS'S WORKING DIRECTORY.** `discover` takes the directory to
 //! start from and `main` is what passes `std::env::current_dir()`. `cwd` is process-global, and
-//! under `cargo test` every test in a binary shares one process — the hazard `lint.rs`'s `tmpdir`
-//! helper already documents for process ids — so a `set_current_dir` here would be a race that
-//! `nextest` hides by giving each test its own process and `cargo test` does not.
+//! under `cargo test` every test in a binary shares one process — the hazard
+//! `redextape_test_support::ScratchDir`'s doc already documents for process ids — so a
+//! `set_current_dir` here would be a race that `nextest` hides by giving each test its own process
+//! and `cargo test` does not.
 //!
 //! **A FILE THAT CANNOT BE UNDERSTOOD STOPS THE RUN.** Unknown key, unknown table, wrong type and
 //! out-of-range value are all refusals at exit 2, never a fallback to a default. The config's most
@@ -15,19 +16,15 @@
 //! `main.rs`'s dispatch calls `config::load` with a `Source` built from real CLI flags; from that
 //! root `load` reaches `discover` and `parse`, `parse` reaches `validate`, and each reads the
 //! constant and constructs the `Error` its own refusal needs. If a change ever makes one of these
-//! unreachable from production code again, restore its allow with a reason naming what still calls
-//! it only under `#[cfg(test)]` — measured at that time, not copied from here.
+//! unreachable from production code, give it an allow with a reason naming what calls it only under
+//! `#[cfg(test)]` — measured at that time, not copied from here.
 //!
 //! **AND CLEAR SUCH ALLOWS FROM THE OUTSIDE IN, BECAUSE SHIELDING RUNS CALLER → CALLEE.** rustc
 //! treats an item carrying `#[allow(dead_code)]` as a synthetic reachability root, so everything its
-//! body reaches stops being reported while the allow stands — transitively, not one hop. Probed
-//! directly with `rustc -D warnings` over three uncalled shapes: an allowed CALLER silences its
-//! callee, and its callee's callee; an allowed CALLEE silences nothing above it, its caller still
-//! reported. Read that against this module's own call graph and the outermost item is `load`: its
-//! allow shielded `discover` and `parse`, and through `parse` everything `parse` reaches. `parse`'s
-//! own allow reached only its subtree — `validate`, the range constant, and the two `Error` variants
-//! those two construct — and never `load` above it. Removing the innermost first buys silence and
-//! reads like progress.
+//! body reaches stops being reported while the allow stands — transitively, not one hop. An allowed
+//! CALLER silences its callee, and its callee's callee; an allowed CALLEE silences nothing above it,
+//! its caller still reported. In this module's own call graph the outermost item is `load`. Removing
+//! the innermost first buys silence and reads like progress.
 use crate::emit::EncodingArg;
 use serde::Deserialize;
 use std::path::{Path, PathBuf};
@@ -61,7 +58,7 @@ pub struct Config {
 #[derive(Clone, Copy, Debug, Default, Deserialize, PartialEq, Eq)]
 #[serde(default, deny_unknown_fields, rename_all = "kebab-case")]
 pub struct Lint {
-    /// Make a warning fail the run. `false` is today's behaviour and stays the default.
+    /// Make a warning fail the run. The default is `false`.
     pub deny_warnings: bool,
 }
 
@@ -85,13 +82,13 @@ impl Default for Fmt {
 #[derive(Clone, Copy, Debug, Default, Deserialize, PartialEq, Eq)]
 #[serde(default, deny_unknown_fields, rename_all = "kebab-case")]
 pub struct Emit {
-    /// Tape encoding. Applies to `--lang tm` and is ignored for every other target — a config file
-    /// must never make a previously-working command line fail.
+    /// Tape encoding. Applies to `--lang tm` and is ignored for every other target, so configuring one
+    /// cannot make a previously-working `emit` of any other target fail.
     pub encoding: EncodingArg,
-    /// TM tape field width in cells. **`0` MEANS AUTO-FIT**, which is today's behaviour: the fitting
-    /// search starts at `MIN_FIELD_WIDTH` and doubles. Any other value pins the width and skips the
-    /// search. The sentinel exists so this struct holds no `Option` — `emit`'s flag is the only
-    /// `Option` in the merge, which is what keeps its flag-presence guard readable.
+    /// TM tape field width in cells. **`0` MEANS AUTO-FIT**, the default: the fitting search starts at
+    /// `MIN_FIELD_WIDTH` and doubles. Any other value pins the width and skips the search. The
+    /// sentinel exists so this struct holds no `Option` — `emit`'s flag is the only `Option` in the
+    /// merge, which is what keeps its flag-presence guard readable.
     pub field_width: usize,
 }
 
@@ -252,7 +249,7 @@ mod tests {
         assert_eq!(got, Config::default());
         assert!(!got.lint.deny_warnings, "warnings are not denied by default");
         assert_eq!(got.fmt.width, redextape_core::printer::MAX_WIDTH, "the default IS the constant");
-        assert_eq!(got.emit.field_width, 0, "0 is auto-fit, which is today's behaviour");
+        assert_eq!(got.emit.field_width, 0, "0 is auto-fit");
     }
 
     #[test]
@@ -276,10 +273,9 @@ mod tests {
         assert_eq!(got.emit.field_width, 32);
     }
 
-    // THE ONE THING MOST LIKELY TO BE WRONG: the kebab-case rename. A snake_case key is the typo a
-    // user actually makes, and if `rename_all` were dropped this test would pass while
-    // `every_key_round_trips_from_its_toml_spelling` failed — so both spellings are pinned, in
-    // opposite directions, rather than trusting one.
+    // The kebab-case rename: a snake_case key is the typo a user actually makes. This test refuses that
+    // spelling and `every_key_round_trips_from_its_toml_spelling` accepts the kebab-case one, so both
+    // spellings are pinned, in opposite directions, rather than trusting one.
     #[test]
     fn the_snake_case_spelling_of_a_key_is_refused_and_the_message_names_it() {
         let err = parse("[lint]\ndeny_warnings = true\n", p()).unwrap_err();
@@ -375,8 +371,7 @@ mod tests {
     /// exercises the `.git` stop rule in the same breath.
     ///
     /// Built on `redextape_test_support::ScratchDir` for the uniqueness and panicking()-gated cleanup
-    /// its own doc explains — the reason `fmt::tests::tmpdir` and `lint::tests::tmpdir` used to give
-    /// individually before they and this helper all deferred to that one implementation.
+    /// its own doc explains.
     fn tree(name: &str) -> redextape_test_support::ScratchDir {
         let root = redextape_test_support::ScratchDir::new(&format!("config-{name}")).unwrap();
         std::fs::create_dir_all(root.join("a/b/c")).unwrap();
@@ -428,12 +423,11 @@ mod tests {
         // One level deeper than `tree()`'s usual shape, and that is load-bearing: testing the stop
         // requires a config ABOVE the marker, so if `parent` itself is not private too, `outside`
         // below is the fixed global path `/tmp/redextape.toml` — shared with every concurrent process
-        // on this machine, including any `trycmd` sandbox, measured one hop under `/tmp` with no
-        // `.git` of its own, once `main.rs` wires discovery.
+        // on this machine.
         //
         // Asserting AFTER the guard is constructed (rather than removing `parent` by hand right
-        // before the assertion, as an earlier version of this test did) means a failure here leaves
-        // `parent` on disk for inspection, the same as every other fixture in this module now does.
+        // before the assertion) means a failure here leaves `parent` on disk for inspection, the
+        // same as every other fixture in this module does.
         let parent = redextape_test_support::ScratchDir::new("config-stop").unwrap();
         let root = parent.join("root");
         std::fs::create_dir_all(root.join("a/b/c")).unwrap();

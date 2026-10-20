@@ -8,11 +8,10 @@
 #   scripts/check-colours.sh              # scan the tracked web sources
 #   scripts/check-colours.sh --self-test  # prove the detector still detects
 #
-# WHY THIS GATE EXISTS. Plan 7 part 1 made the palette data: `web/src/palettes.ts` holds every colour the
+# WHY THIS GATE EXISTS. The palette is data: `web/src/palettes.ts` holds every colour the
 # app draws with, and `web/src/style.css` keeps one copy of the default palette, between two marker
 # comments, as the first-paint fallback. A colour written anywhere else is one no palette can change and
-# no contrast test checks — a skin that half-applies. The tree had none when this gate landed, so it
-# enforces an invariant that already held rather than one that had to be reached.
+# no contrast test checks — a skin that half-applies.
 #
 # THE MARKED BLOCK IS EXEMPT IN `web/src/style.css` ONLY, AND ONLY ONCE. `palettes.test.ts` holds only
 # the first block in that file equal to `palettes.ts`, so a second block, or one in any other file, would
@@ -25,17 +24,17 @@
 # and `inherit` are keywords, not literals.
 #
 # WHAT IT DOES NOT SEE, AS A DECISION: CSS named colours (`red`, `white`, …). Telling `white` the colour
-# from `white-space` the property needs a value-position parser, and there were none in the tree. The
-# self-test asserts the blind spot, so it stays visible rather than accidental.
+# from `white-space` the property needs a value-position parser, and the tree has none. The self-test
+# asserts the blind spot, so it stays visible rather than accidental.
 #
 # WHAT ELSE IT DOES NOT SEE, AS A DECISION: in TypeScript, a colour literal that shares a line with a
 # `//` sitting inside an earlier string, e.g. `const u = 'https://x'; const c = '#aabbcc'`. The
 # line-comment strip (`s{//[^\n]*}{}g`) cannot tell that `//` from a real comment's, so it blanks the
-# rest of the line, hex literal included. Telling the two apart needs a string-aware scanner, and there
-# were none in the tree. The self-test asserts this blind spot too.
+# rest of the line, hex literal included. Telling the two apart needs a string-aware scanner, and the
+# tree has none. The self-test asserts this blind spot too.
 #
 # WHAT IT SEES THAT IT SHOULD NOT, ALSO AS A DECISION: a TypeScript private member named only in hex
-# letters (`#add`, `#feed`, `#decade`) reads as a hex colour. There were none in the tree; rename one
+# letters (`#add`, `#feed`, `#decade`) reads as a hex colour. There are none in the tree; rename one
 # rather than weaken the pattern. The self-test asserts this too.
 
 set -euo pipefail

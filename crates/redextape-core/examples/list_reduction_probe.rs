@@ -1,21 +1,16 @@
-//! Falsification check for the abandoned λ logical-size guard
-//! (`docs/superpowers/specs/2026-07-31-lambda-logical-size-guard-design.md` §10), and then the
-//! threshold-setting measurement for the guard that replaced it
-//! (`docs/superpowers/specs/2026-07-31-lambda-shared-subterm-guard-design.md` §3). It is the
-//! re-runnable source for three figures that design's table pins: the 699-element list's reduction, the
-//! 46-program corpus sharing profile, and the nesting family's `max_shared` per level.
+//! Measurements behind two λ guard designs, neither of which is in `lower`: the logical-size guard
+//! (`docs/superpowers/specs/2026-07-31-lambda-logical-size-guard-design.md` §10) and the shared-subterm
+//! guard (`docs/superpowers/specs/2026-07-31-lambda-shared-subterm-guard-design.md` §3). It is the
+//! re-runnable source for three figures the shared-subterm design's table pins: the 699-element list's
+//! reduction, the 46-program corpus sharing profile, and the nesting family's `max_shared` per level.
 //!
-//! **BOTH GUARDS ARE GONE.** The logical-size one was abandoned before commit; the shared-subterm one
-//! landed and was reverted after `examples/guard_hole_probe.rs` falsified it. Every measurement in this
-//! file survived both — that is the point of committing an instrument rather than a conclusion — and the
-//! hazard the file demonstrates is open. See the note before "Safety" below.
+//! No measurement in this file depends on either guard — that is the point of committing an instrument
+//! rather than a conclusion.
 //!
-//! The LOGICAL-SIZE design was withdrawn because a PRE-EXISTING test — `lower.rs`'s
-//! `the_guard_admits_a_core_at_the_bound_and_refuses_only_past_it` — builds a **699-element list
-//! literal** (`deep_list(MAX_LAMBDA_LOWER_DEPTH - 1)`) that measures 497,691 logical nodes at a
-//! logical/physical ratio of exactly 1.000x, and the guard refused it. The falsification's premise is
-//! that this program is FINE — a large but working program the guard should not refuse. **Nobody had
-//! ever reduced it**; the pre-existing test only asserts `lower(&at_bound).is_ok()`.
+//! A **699-element list literal** (`deep_list(MAX_LAMBDA_LOWER_DEPTH - 1)`) is the largest list `lower`
+//! admits, and the LOGICAL-SIZE design's guard would refuse it. The question is whether it is FINE — a
+//! large but working program the guard should not refuse. `lower.rs`'s
+//! `the_guard_admits_a_core_at_the_bound_and_refuses_only_past_it` asserts of it only `lower(&at_bound).is_ok()`.
 //!
 //! This probe reduces it. Three questions:
 //!
@@ -23,66 +18,33 @@
 //!   2. If so, where does it stop being fine? Ramped past 699 by constructing the target `LambdaTerm`
 //!      directly (see `direct_list_term`'s doc for why `lower` itself cannot go past 699).
 //!   3. Among allocations referenced more than once within a term (the structural-sharing proxy for
-//!      `Rc::strong_count() > 1` — see `ref_counts`'s doc for why that proxy, not the count itself, is
-//!      what this file can observe), what is the largest `logical_size` of any one of them? Measured
+//!      `Rc::strong_count() > 1`), what is the largest `logical_size` of any one of them? Measured
 //!      for the list literal and for `blowup_probe.rs`'s nesting family at 6, 8 and 10 groups, to test
 //!      the hypothesis that a big *shared* subterm — not a big term per se — is what makes reduction
-//!      expensive (because `subst` duplicates a shared subterm into every occurrence it substitutes
-//!      into, where an unshared subterm of the same size is copied once, by construction).
-//!      **THE PARENTHESIS IS WRONG AND THE HYPOTHESIS WITH IT** — `subst`'s `Var` arm is `s.clone()`,
-//!      an `Rc` bump, so occurrences are FREE; it is the `Abs` arm that copies, once per binder in the
-//!      body, whether or not the variable occurs. See the note after section 6. **The measurements
-//!      themselves stand** — what was falsified is the reading taken off them.
+//!      expensive. It is not; the shared-subterm design's §10.2 says why.
 //!
-//! Those three killed the old design. **Three further sections set the new one's bound**, added once
-//! the answer to question 3 turned out to be the discriminator — a corpus profile, a per-level profile
-//! of the family, and a single-level reduction check that establishes what "dangerous" means:
+//! Three further sections: a corpus profile, a per-level profile of the family, and a single-level
+//! reduction check that establishes what "dangerous" means:
 //!
-//!   4. `corpus` — `max_shared` over every program in `FIRST_ORDER_DEMOS`. ANSWER: the maximum is
-//!      **684**, at index 31 (`fn s0/s1/s2 … s0(4)`); **twelve of the 46 measure zero** and the other
-//!      **34 share something**, in three bands. 4 for the seven `head`/`tail` programs, 400–684 for the
-//!      five with a mutual-recursion group of **two or more members**, and 6 for the twenty-two
-//!      remaining programs that declare a `fn` or a `while` (the recursive-binding scaffolding, whether
-//!      or not anything actually recurses). Only the middle band is large, and group SIZE is why: the multiplier is
-//!      `lower_group` cloning the whole group term once per member, so a *self*-recursive `fn` is a
-//!      one-member group and measures 6, the same as a non-recursive one. The twelve zeros are the
-//!      programs with none of those three constructs — not "everything without a recursive cycle".
+//!   4. `corpus` — `max_shared` over every program in `FIRST_ORDER_DEMOS`. The multiplier is
+//!      `lower_group` cloning the whole group term once per member, so group SIZE is what makes
+//!      `max_shared` large: a *self*-recursive `fn` is a one-member group and measures the same as a
+//!      non-recursive one.
 //!   5. `family` — `max_shared` and `logical_size` for the nesting family at 1..=12 groups.
-//!      Construction only, no reduction. ANSWER: **9,453** at 6 groups, **19,085** at 7, roughly
-//!      doubling per level after that.
-//!   6. `family-reduce <level>` — does ONE level keep stepping, or does a single step hang? **THE
-//!      HAZARD SECTION.** ANSWER: level 6 steps steadily; level 7 pegged one core at 100% for 15+
-//!      seconds inside a single step, at a peak RSS of only **93.6 MB**, and had to be killed from
-//!      outside — the hang is computational, not memory. See its own doc comment for why it takes one
-//!      level per process rather than ramping in a loop.
+//!      Construction only, no reduction.
+//!   6. `family-reduce <level>` — does ONE level keep stepping, hang in a single step, or stop on the
+//!      depth guard? **THE HAZARD SECTION.** See its own doc comment for why it takes one level per
+//!      process rather than ramping in a loop.
 //!
-//! THE GUARD THIS PROBE CALIBRATED WAS REVERTED, AND EVERY RAMP HERE REACHES ITS FULL RANGE AGAIN.
-//! Between `1652e09` and the revert, `lambda/lower.rs`'s `MAX_SHARED_LOGICAL_NODES` = 10,000 refused a  check-attributions: allow
-//! term whose largest SHARED subterm exceeded it, so `q3`, `family` and `family-reduce` stopped at seven
-//! groups printing `lower error: TooShared { .. }`. **Measurement then falsified the guard.** The
-//! mechanism it was calibrated against is not the one `subst` implements, and a program with no
-//! recursion at all — `let xs = [0..500); let ys = [0..500); head(xs) + head(ys)`, 4,821 bytes — measures
-//! `max_shared` = 4 against that bound of 10,000 while spending 19.0 s in its FIRST β-step — **a
-//! pre-2026-08-01 timing; that step is now under a millisecond, see `examples/shift_cost_probe.rs`. The
-//! score of 4 is unchanged, so the falsification stands.** Instrument:
-//! `examples/guard_hole_probe.rs`; record: the shared-subterm design's §10. So the figures above at
-//! seven groups and beyond are **live measurements again, not a pre-guard record**. ~~"`family-reduce 7`
-//! is once more the hazard this file warns about"~~ — **no longer true as of 2026-08-01: it reduces.**
-//! Every WALL-CLOCK figure in this file predates the `shift` and `depth` fixes and will not reproduce;
-//! every SIZE and STEP COUNT is unaffected, because `lower` builds the same term it always did and the
-//! reductions take the same steps.
+//! `lower` refuses nothing on these grounds, so every ramp here reaches its full range.
 //!
-//! `lower_src` RETURNS `Option` ANYWAY and must not go back to panicking. It used to `panic!` on `Err`,
-//! which killed the documented no-argument invocation below at `q3` — before `corpus` or `family` ran at
-//! all — so the headline command in this very doc block aborted. Nothing refuses these programs today,
-//! but a ramp that reports a refusal and keeps its remaining rows is the shape that survives the next
-//! guard as well as this one.
+//! `lower_src` RETURNS `Option` and must not panic: a ramp that reports a refusal and keeps its
+//! remaining rows is the shape that survives the next guard.
 //!
 //! # Safety — same rules as `blowup_probe.rs`, and for the same reason
 //!
-//! An earlier measurement on this project consumed 60 GiB of RAM and 29 GiB of swap and wedged the
-//! machine, from calling `reduce_trace` (which materializes every step by contract) on a term of
-//! unbounded growth. This file:
+//! `reduce_trace` materializes every step by contract, so on a term of unbounded growth its memory is
+//! unbounded too. This file:
 //!
 //!   - **Never calls `reduce_trace`.** `LambdaCursor` steps lazily; this holds exactly one term.
 //!   - **Holds one term at a time.** No `Vec` of terms, no snapshot history.
@@ -91,7 +53,7 @@
 //!     the next, so a killed or interrupted run still reports everything established so far.
 //!
 //! `MemorySwapMax=0` is not decoration: the memory cap alone lets the kernel push the excess to swap,
-//! which turns a bounded failure into an unbounded one — and did, in the 60/29 GiB run above.
+//! which turns a bounded failure into an unbounded one.
 //!
 //! # How to run this
 //!
@@ -102,14 +64,14 @@
 //!
 //! | arg | what it establishes | cost |
 //! | --- | --- | --- |
-//! | `q1` | a list literal reduces, through the real `lower()` pipeline, n ≤ 699 | the n=699 row alone is 35 s |
-//! | `q2a` | the 10 s crossing, between n=400 (6.25 s) and n=699 (35.2 s) | five reduction rows |
-//! | `q2` | past 699, by direct construction — `lower` cannot reach these sizes | ~cubic in n; 60 s hard stop |
+//! | `q1` | a list literal reduces, through the real `lower()` pipeline, n ≤ 699 | the n=699 row is slowest |
+//! | `q2a` | the 10 s crossing, between n=400 and n=699 | five reduction rows |
+//! | `q2` | past 699, by direct construction — `lower` cannot reach these sizes | 60 s hard stop |
 //! | `q2b` | where the list's own depth crosses `MAX_TERM_DEPTH` | construction only |
 //! | `q3` | the max shared subterm: the list vs the family at 6, 8 and 10 groups | construction only |
 //! | `corpus` | `max_shared` over all 46 `FIRST_ORDER_DEMOS` | construction only |
 //! | `family` | `max_shared` over the family, all twelve levels | construction only |
-//! | `family-reduce <level>` | whether ONE level keeps stepping | **hangs at level 7 — see below** |
+//! | `family-reduce <level>` | whether ONE level keeps stepping | **one level per process, 20 s budget** |
 //!
 //! ```text
 //! # every section except family-reduce
@@ -121,10 +83,9 @@
 //!   cargo run --release --example list_reduction_probe -p redextape-core -- corpus family
 //!
 //! # THE HAZARD SECTION — one level per invocation, ramped upward by the caller, stopping at the first
-//! # level that does not report Normalized. Level 7 does NOT return: a single β-step runs at 100% CPU
-//! # without finishing, so this needs an EXTERNAL wall-clock kill as well as the cap, because nothing
-//! # inside the process can interrupt a step once it has started. Build first, so the kill budget
-//! # covers the run and not the compile.
+//! # level that is killed from outside or reports "did not finish in budget". This needs an EXTERNAL
+//! # wall-clock kill as well as the cap, because nothing inside the process can interrupt a step once
+//! # it has started. Build first, so the kill budget covers the run and not the compile.
 //! cargo build --release --example list_reduction_probe -p redextape-core
 //! systemd-run --user --scope -q -p MemoryMax=2G -p MemorySwapMax=0 -- \
 //!   timeout 60 ./target/release/examples/list_reduction_probe family-reduce 6
@@ -134,22 +95,17 @@
 //! and for the same reason: CI compiles examples but does not run them. It is committed so the figures
 //! in both designs' tables have a re-runnable repro rather than a quoted number.
 //!
-//! # ALLOCATOR — READ THIS BEFORE TRUSTING ANY TIMING ABOVE
+//! # ALLOCATOR
 //!
-//! **This target has set `mimalloc` as its global allocator since 2026-08-04. Every timing recorded
-//! in this file above this note was measured under glibc's malloc and is NOT comparable to a run
-//! made today.** Counts are: node counts, allocation counts and step counts are properties of the
-//! reduction, not of the machine, and did not move. Seconds, ms and ns did.
+//! This target sets `mimalloc` as its global allocator, so a timing taken here is not comparable with one
+//! taken under glibc's malloc, which is what the timings quoted in this file were. Node counts, allocation
+//! counts and step counts are properties of the reduction, not of the machine, and do not depend on it.
 //!
-//! It is here for a measured reason rather than a preference. The reducer allocates one `Rc<Node>`
-//! per term node and frees on the same order, and glibc's layout for that pattern costs real
-//! address-translation pressure: on the nested-group family, swapping ONLY the allocator took L1
-//! DTLB misses from 1.20e9 to 0.92e9 for the three-pass `beta` and from 1.83e9 to 0.93e9 for the
-//! fused one, with the wall clock following at ~9% and ~16%. That is also how the β-fusion family
-//! regression was explained — it was glibc's layout, not the reducer's work.
+//! The reducer allocates one `Rc<Node>` per term node and frees on the same order, and glibc's layout for
+//! that pattern costs real address-translation pressure.
 //!
 //! `mimalloc` is a `[dev-dependencies]` entry and reaches examples and tests ONLY.
-//! `redextape-core`'s `[dependencies]` stays empty and WASM-clean: `libmimalloc-sys` is C that does
+//! `redextape-core`'s `[dependencies]` stays WASM-clean: `libmimalloc-sys` is C that does
 //! not build for wasm32, and a library must not choose a global allocator for its consumers.
 
 #![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic, clippy::pedantic)]
@@ -157,10 +113,11 @@
 use std::time::Instant;
 
 use redextape_core::desugar::desugar;
+use redextape_core::lambda::MAX_REDUCTION_STEPS;
 use redextape_core::lambda::encode;
 use redextape_core::lambda::lower;
+use redextape_core::lambda::reduce::MAX_TERM_DEPTH;
 use redextape_core::lambda::term::{LambdaTerm, app, logical_size, max_shared_logical_size};
-use redextape_core::lambda::{MAX_REDUCTION_STEPS, Status};
 use redextape_core::parser::parse;
 use redextape_core::trace::LambdaCursor;
 
@@ -220,10 +177,9 @@ fn lowered_list_term(n: usize) -> LambdaTerm {
 /// constructed — by the parser or by hand — and `lower_mapped`'s `too_deep_node` guard measures exactly
 /// that depth, unconditionally, before any other pass runs. There is no `Core` shape denoting a
 /// genuine `n`-element list literal with less nesting than `n + 1`, so for `n > 699` there is no way
-/// through `lower` at all — matching the task's own anticipation ("you may need to construct the Core
-/// directly... if you cannot get past 699 without fighting another guard, say so and stop"). Building
-/// the target `LambdaTerm` directly is the one way past it: it produces the identical term (verified
-/// below, at `n = 699`, against the real pipeline) without ever presenting `lower` with a deep `Core`.
+/// through `lower` at all. Building the target `LambdaTerm` directly is the one way past it: it produces
+/// the identical term (verified below, at `n` = 1, 5 and 50, against the real pipeline) without ever presenting
+/// `lower` with a deep `Core`.
 fn direct_list_term(n: u64) -> LambdaTerm {
     let mut acc = encode::nil();
     for i in (0..n).rev() {
@@ -233,8 +189,9 @@ fn direct_list_term(n: u64) -> LambdaTerm {
 }
 
 /// Confidence check: `direct_list_term` must build the SAME term `lower` does, at a size both can
-/// reach. If this ever prints a mismatch, every row built with `direct_list_term` alone (n > 699) is
-/// measuring something other than what it claims to.
+/// reach. It prints the `false` row and then asserts, so a divergence prints and then panics: every
+/// row built with `direct_list_term` alone (n > 699) would otherwise be measuring something other
+/// than what it claims to.
 fn verify_direct_construction_matches_lower() {
     for n in [1usize, 5, 50] {
         let via_lower = lowered_list_term(n);
@@ -247,24 +204,20 @@ fn verify_direct_construction_matches_lower() {
 
 // --- shared-subterm analysis -------------------------------------------------------------------------
 
-// THE IN-DEGREE FOLD USED TO LIVE HERE, as a local `ref_counts` + `max_shared_logical_size` pair that
-// called `logical_size` once per shared node — O(shared x physical). It went the way `blowup_probe.rs`'s
-// local `logical()` fold went, and for the same reason: `lambda::term::max_shared_logical_size` is `pub`
-// and O(physical), so two copies of one measurement is drift waiting to happen and the local one was the
-// slower copy besides. That function's own doc carries what this comment used to argue — in-degree
-// rather than `Rc::strong_count`, because a caller retaining snapshots would inflate the count and a
-// measurement whose value changes with observers cannot gate anything.
+// The in-degree fold is `lambda::term::max_shared_logical_size`, which is `pub` and O(physical). Its own
+// doc says why it counts in-degree rather than `Rc::strong_count`: a caller retaining snapshots would
+// inflate the count, and a measurement whose value changes with observers cannot gate anything.
 
 // --- question 1 & 2: does the list reduce, and where does it stop being fine? ----------------------
 
 /// One row: build `t`, drive a `LambdaCursor` to completion (or the cap), report steps/time/size.
-/// `STEP_CAP` is generous relative to what a list literal should need (`cons` is the only redex source;
+/// `step_cap` is generous relative to what a list literal should need (`cons` is the only redex source;
 /// two β-steps collapse each cons cell's two applied arguments, so `2n` steps normalizes an n-element
 /// list if nothing else is going on) but far short of `MAX_REDUCTION_STEPS`, so a construction bug that
 /// produced a genuinely divergent term reports `HitCap` in seconds rather than grinding for 5,000,000
 /// steps first.
 /// Returns the row's wall-clock seconds, so a ramp can decide whether to attempt the next (larger, and
-/// on this family's observed cubic-ish growth, much slower) size at all.
+/// much slower) size at all.
 fn reduce_row(label: &str, t: LambdaTerm, step_cap: u64) -> f64 {
     let start_phys = physical(&t);
     let start_logical = logical_size(&t);
@@ -295,18 +248,17 @@ fn list_ramp_under_699() {
     line("  cross-check: direct_list_term must equal lower()'s output at sizes both can reach");
     verify_direct_construction_matches_lower();
     line("");
-    line("  step cap = 10 * n (generous over the expected 2n; HitCap is itself an answer)");
+    line("  step cap = 10 * n + 100 (generous over the expected 2n; HitCap is itself an answer)");
     for n in [50usize, 100, 200, 400, 699] {
         let t = lowered_list_term(n);
         reduce_row(&format!("n={n}"), t, (n as u64) * 10 + 100);
     }
 }
 
-/// Extra points BELOW 699, added after the fixed 50/100/200/400/699 ramp showed n=699 already taking
-/// 35 s — over `BUDGET_S` — while n=400 took 6.25 s: the crossing is somewhere in (400, 699], not past
-/// it. All reachable through the real `lower()` pipeline (no guard fight needed below 700).
+/// Extra points BELOW 699, to pin where the ramp crosses `BUDGET_S`. All reachable through the real
+/// `lower()` pipeline (no guard fight needed below 700).
 fn list_ramp_crossing() {
-    head("Q2a — pinning the 10s crossing between n=400 (6.25s) and n=699 (35.2s)");
+    head(&format!("Q2a — pinning the {BUDGET_S:.0}s crossing between n=400 (6.25s) and n=699 (35.2s)"));
     for n in [450usize, 500, 550, 600, 650] {
         let t = lowered_list_term(n);
         reduce_row(&format!("n={n}"), t, (n as u64) * 10 + 100);
@@ -315,10 +267,7 @@ fn list_ramp_crossing() {
 
 /// Past 699: `direct_list_term` only (see its doc — `lower` cannot reach these sizes at all).
 ///
-/// DELIBERATELY SHORT. By n=699 the row already took 35 s against a 10 s budget, on a roughly cubic
-/// time curve (0.014 s / 0.101 s / 0.747 s / 6.254 s / 35.209 s at n = 50/100/200/400/699 — each ~2x n
-/// costs ~7-8x time). Extrapolating that curve, n=1000 costs roughly 100 s and n=2000 roughly 800 s
-/// (13 min); this ramp stops well short of finding out the hard way. `HARD_STOP_S` is a second, looser
+/// DELIBERATELY SHORT, because the time curve is roughly cubic in n. `HARD_STOP_S` is a second, looser
 /// budget checked AFTER each row (a β-step cannot be interrupted mid-flight, so this can only stop
 /// BETWEEN rows) — once a row exceeds it, the next size would cost several times more, so there is
 /// nothing left to learn without a much longer run.
@@ -338,12 +287,9 @@ fn list_ramp_past_699() {
 
 // --- question 3: the max shared-subterm hypothesis --------------------------------------------------
 
-/// RAMPS UPWARD THROUGH ALL THREE LEVELS AGAIN. The two levels this section was written around — 8 and
-/// 10 groups (38,349 and 153,933) — were unreachable between `1652e09` and the shared-subterm guard's
-/// revert, and are live measurements once more. Six groups leads the ramp so the section still
-/// demonstrates the contrast it exists for: the list is enormous and shares nothing, the family is small
-/// and shares almost half of itself. **That contrast is real and the conclusion drawn from it was not** —
-/// sharing is not what makes a step expensive; see the module doc.
+/// Six groups leads the ramp so the section demonstrates the contrast it exists for: the list is
+/// enormous and shares nothing, the family is small and shares almost half of itself. **The contrast is
+/// real, but sharing is not what makes a step expensive**; see the module doc.
 fn shared_subterm_report() {
     head("Q3 — the largest logical_size among SHARED subterms (in-degree > 1)");
     line("  hypothesis: ~0 for the list (no sharing anywhere) vs huge for the nesting family");
@@ -363,9 +309,9 @@ fn shared_subterm_report() {
         let src = nested_groups_src(groups - 1); // nested_groups_src(m) yields m+1 groups
         let Some(t) = lower_src(&src) else {
             line(&format!(
-                "  STOP: lower refused the nesting family at {groups} groups. Nothing bounds sharing today — the \
-                 shared-subterm guard was reverted — so this is a DEPTH refusal or a lowering change, not the \
-                 expected path. Re-run `family` to see where the ramp actually stops."
+                "  STOP: lower refused the nesting family at {groups} groups. Nothing bounds sharing, so this \
+                 is a DEPTH refusal or a lowering change, not the expected path. Re-run `family` to see where \
+                 the ramp actually stops."
             ));
             return;
         };
@@ -380,23 +326,20 @@ fn shared_subterm_report() {
 }
 
 /// Where does the UNREDUCED term's own depth cross `MAX_TERM_DEPTH` (3,000)? Cheap — no reduction, just
-/// construction + the O(physical) `depth` fold — so this can afford a finer sweep than the reduction
-/// ramps above.
+/// construction + the O(physical) `depth` fold — so this can afford sizes past the reduction ramps above.
 fn depth_probe() {
-    const MAX_TERM_DEPTH: u32 = 3_000; // reduce.rs's constant; pub(crate), so transcribed, not imported
-    head("Q2b — where does the list's own depth cross MAX_TERM_DEPTH=3000?");
-    for n in [699u64, 700, 750, 800, 850, 900, 1000] {
+    head(&format!("Q2b — where does the list's own depth cross MAX_TERM_DEPTH={MAX_TERM_DEPTH}?"));
+    for n in [699u64, 700, 800, 1000, 1250, 1499, 1500, 2000] {
         let t = direct_list_term(n);
         let d = depth(&t);
         line(&format!("  n={n:<5} depth={d:<6} exceeds MAX_TERM_DEPTH={}", d > MAX_TERM_DEPTH));
     }
 }
 
-// --- threshold-setting data: the corpus sharing profile & the family's danger ramp -----------------
+// --- sharing data: the corpus profile & the family's danger ramp -----------------------------------
 //
-// Added for the λ shared-subterm guard's threshold-setting measurement (sharing-profile.md). Three
-// pieces: (1) `max_shared` over every program in `three_way_oracle.rs::FIRST_ORDER_DEMOS`, to find the
-// corpus ceiling; (2) `max_shared`/logical_size over the nesting family at 1..=12 groups — cheap,
+// Three pieces: (1) `max_shared` over every program in `three_way_oracle.rs::FIRST_ORDER_DEMOS`, to find
+// the corpus ceiling; (2) `max_shared`/logical_size over the nesting family at 1..=12 groups — cheap,
 // construction only, no reduction; (3) a SEPARATE, opt-in, single-level reduction-feasibility check
 // (`family-reduce <level>`) driven under a hard 20s wall budget, meant to be invoked once per level by
 // an external ramp (see the doc block below) so a level that hangs or gets OOM-killed cannot prevent
@@ -404,9 +347,9 @@ fn depth_probe() {
 // file, just enforced by the process boundary instead of by a between-rows flush, because a single
 // β-step cannot be interrupted from inside this process (see `blowup_probe.rs`'s `part_oom` doc).
 
-/// Question A — the corpus sharing profile that sets the bound: `max_shared` and total `logical_size`
-/// for every program in `FIRST_ORDER_DEMOS`. All 46 are small (the whole sweep is seconds), so this
-/// runs the full corpus in one pass rather than ramping.
+/// Question A — the corpus sharing profile: `max_shared` and total `logical_size` for every program in
+/// `FIRST_ORDER_DEMOS`. All 46 are small (the whole sweep is seconds), so this runs the full corpus in
+/// one pass rather than ramping.
 fn corpus_sharing_profile() {
     head(&format!("Corpus sharing profile — max_shared over all {} FIRST_ORDER_DEMOS", FIRST_ORDER_DEMOS.len()));
     let mut max_row: Option<(usize, u64)> = None;
@@ -454,10 +397,8 @@ fn corpus_sharing_profile() {
 /// it never reduces, so unlike the reduction ramp below it does not need a per-level process boundary
 /// or a wall budget.
 ///
-/// IT REACHES 12 AGAIN. Between `1652e09` and the shared-subterm guard's revert this ramp printed levels
-/// 1–6 and stopped, because `lower` refused the family from seven groups on; that guard is gone, so the
-/// L7–L12 rows in the design's §3 table are re-derivable here rather than quoted from a pre-guard run.
-/// The early-stop branch below is kept for whatever bounds this next: it stops at the FIRST refusal
+/// It reaches level 12, so the L7–L12 rows in the design's §3 table are re-derivable here.
+/// The early-stop branch below is for whatever bounds this family: it stops at the FIRST refusal
 /// rather than skipping ahead, because `max_shared` is monotone in this family and any bound that
 /// refuses one level refuses every level above it.
 fn family_sharing_profile() {
@@ -466,9 +407,9 @@ fn family_sharing_profile() {
         let src = nested_groups_src(level - 1); // nested_groups_src(m) yields m+1 groups
         let Some(t) = lower_src(&src) else {
             line(&format!(
-                "  STOP: lower refused this family at {level} groups. Nothing bounds sharing today (the \
-                 shared-subterm guard was reverted), so this is a depth refusal or a lowering change. \
-                 max_shared is monotone here, so every level above this one is refused too."
+                "  STOP: lower refused this family at {level} groups. Nothing bounds sharing, so this is a \
+                 depth refusal or a lowering change. max_shared is monotone here, so every level above this \
+                 one is refused too."
             ));
             return;
         };
@@ -487,31 +428,32 @@ fn family_sharing_profile() {
 /// Question B (second half) — does reduction complete at this ONE level, within a hard 20s wall budget?
 /// Opt-in and single-level BY DESIGN: invoke once per level (`family-reduce <level>`), each invocation
 /// under its own `systemd-run --user --scope -q -p MemoryMax=2G -p MemorySwapMax=0` and an external
-/// wall-clock kill, ramped upward by the caller, stopping at the first level that does not report
-/// `Normalized`. A single process cannot safely attempt levels 1..=12 in a loop and self-enforce the 20s
-/// budget: a β-step cannot be interrupted from inside this process once started (`blowup_probe.rs`'s
-/// `part_oom` doc — a step's cost is `|body| x |arg|`, allocated inside one `reduce_step` call), so the
-/// only instrument that can reliably cut a hung step off at 20s is the OS, from outside. The in-process
-/// check below (between steps) is a soft, best-effort early exit for the common case where many small
-/// steps land the run over budget; the external wall-clock kill is what makes the budget HARD.
+/// wall-clock kill, ramped upward by the caller, stopping at the first level that is killed from outside
+/// or reports `did not finish in budget`. A single process cannot safely attempt levels 1..=12 in a loop
+/// and self-enforce the 20s budget: a β-step cannot be interrupted from inside this process once started
+/// (`blowup_probe.rs`'s `part_oom` doc), so the only instrument that can reliably cut a hung step off at
+/// 20s is the OS, from outside. The in-process check below (between steps) is a soft, best-effort early
+/// exit for the common case where many small steps land the run over budget; the external wall-clock
+/// kill is what makes the budget HARD.
 ///
 /// Step cap is `MAX_REDUCTION_STEPS` — the same cap the real pipeline (`run_lambda`) drives reduction
 /// with — so `HitCap` here means what it would mean for a real program, not an artificially small probe
-/// cap.
+/// cap. `HitCap` has a second producer, the depth guard (`MAX_TERM_DEPTH`): a `HitCap` with `steps`
+/// below the cap is the depth guard's.
 fn family_reduce_one(level: u32) {
     const WALL_BUDGET_S: f64 = 20.0;
     // Heartbeat so a process that gets killed mid-step (OOM, or the external wall-clock kill) still
     // leaves a transcript of how far it got: every 5,000 steps OR every 2s of wall time, whichever
-    // comes first — steps alone would print nothing if a single step is what hangs, and time alone
-    // would flood the log at this family's fast levels (100K+ steps/20s at level 1).
+    // comes first, so a run of slow steps still prints. Both are checked between steps, so neither
+    // prints during a single step: a run killed mid-step last printed less than 5,000 steps and 2s
+    // before that step began.
     const HEARTBEAT_STEPS: u64 = 5_000;
     const HEARTBEAT_SECS: f64 = 2.0;
     let src = nested_groups_src(level - 1);
     let Some(t) = lower_src(&src) else {
         line(&format!(
-            "  level={level} REFUSED at lowering time. Nothing bounds sharing today — the shared-subterm guard \
-             was reverted — so this is a depth refusal or a lowering change, not the expected path. THE HAZARD \
-             THIS SECTION DEMONSTRATES IS OPEN: at level 7 a single β-step does not return."
+            "  level={level} REFUSED at lowering time. Nothing bounds sharing, so this is a depth refusal or a \
+             lowering change, not the expected path."
         ));
         return;
     };
@@ -559,10 +501,10 @@ fn family_reduce_one(level: u32) {
 fn main() {
     let args: Vec<String> = std::env::args().skip(1).collect();
     let want = |name: &str| args.is_empty() || args.iter().any(|a| a == name);
-    line("list_reduction_probe — does the falsifying 699-element list literal actually reduce?");
+    line("list_reduction_probe — does a 699-element list literal actually reduce?");
     line("  RUN UNDER: systemd-run --user --scope -q -p MemoryMax=2G -p MemorySwapMax=0");
     line(&format!(
-        "  MAX_REDUCTION_STEPS={MAX_REDUCTION_STEPS} (not used directly; rows use a much smaller per-row cap)"
+        "  MAX_REDUCTION_STEPS={MAX_REDUCTION_STEPS} (family-reduce's cap; list rows use a much smaller per-row cap)"
     ));
     if let Some(pos) = args.iter().position(|a| a == "family-reduce") {
         let level: u32 = args
@@ -594,5 +536,4 @@ fn main() {
     if want("family") {
         family_sharing_profile();
     }
-    let _ = Status::Normalized; // keep the import honest if a section above is skipped by args
 }

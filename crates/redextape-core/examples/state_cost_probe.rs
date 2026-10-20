@@ -4,73 +4,51 @@
 //!     cargo run --release --example state_cost_probe -p redextape-core
 //!
 //! **RUN IT UNDER A MEMORY CAP ANYWAY.** Section F deliberately walks a balanced expression tree
-//! upward, and the step past 4,094 tokens was killed by `SIGKILL` under an 8 GB budget WHEN THESE
-//! NUMBERS WERE TAKEN — before `MAX_MACHINE_STATES` existed. `Builder::state`/`accept` now bounds
-//! every lowering this file can reach at that same ceiling (~727 MB), so a fresh run cannot reproduce
-//! that kill; see the post-guard note below for what changed. The cap stays here as the same
-//! belt-and-suspenders every `*_probe.rs` in this crate runs under, not because this file is
-//! currently expected to need it:
+//! upward. `Builder::state`/`accept` bounds every lowering this file can reach at
+//! `MAX_MACHINE_STATES`, so a fresh run is not expected to need the cap (see the note on reading D, F
+//! and H below); it stays as belt-and-suspenders:
 //!
 //!     systemd-run --user --scope -p MemoryMax=8G -p MemorySwapMax=0 --quiet \
 //!       cargo run --release --example state_cost_probe -p redextape-core
 //!
-//! **WHY THIS EXISTS.** Four narrowing casts used to justify themselves with a prose argument that
-//! `Program::code.len()` was bounded by ~172 GB of resident memory. It is not, and the prose had
-//! already been copied verbatim into a second file. Sections F and G are the refutation: a balanced
-//! arithmetic tree of 6 KB — well inside `MAX_TOKENS`, and reachable from the editor through
-//! `run_tm_described` — builds an 8.6 million state machine costing 6.0 GB.
+//! | section | question |
+//! | --- | --- |
+//! | H | bytes per state |
+//! | A | how big can `code.len()` get from source |
+//! | B | states per instruction, by kind and encoding |
+//! | C | the bisected `code.len()` ceiling |
+//! | D | the largest machine a depth-limited program builds |
+//! | E | the largest `NodeId` minted from source |
+//! | G | what the SHIPPED demos cost |
+//! | F | the balanced tree, which no depth guard bounds |
 //!
-//! | section | question | what it fixes |
-//! | --- | --- | --- |
-//! | H | bytes per state | 700-725 B/state, measured as RSS delta at the row a fresh run can still reach (`size_of::<State>()` of 56 understates it ~13x); the historical 727 was measured at a row this file can no longer reach post-guard — see note below |
-//! | A | how big can `code.len()` get from source | not `MAX_TOKENS` — `lower_asm`'s `MAX_LOWER_DEPTH` |
-//! | B | states per instruction, by kind and encoding | 1 (`Halt`) to 571 (`Box`); `Call` scales with `n_loc` |
-//! | C | the bisected `code.len()` ceiling | 3,472 — and only for depth-limited shapes |
-//! | D | the largest machine a depth-limited program builds | 2.8M states, pre-guard — table in design doc §3.2 |
-//! | E | the largest `NodeId` minted from source | 80,000, roughly one per token |
-//! | G | what the SHIPPED demos cost | 49,135 states worst case — the floor a ceiling must clear |
-//! | F | the balanced tree, which no depth guard bounds | the live OOM, pre-guard (see below) |
-//!
-//! Section G hand-copies every entry of `native_oracle.rs`'s `FIRST_ORDER_DEMOS`
-//! (`crates/redextape-native/tests/native_oracle.rs`) as the `FIRST_ORDER_DEMOS` const in
-//! `examples/common/demos.rs` — `redextape-core` cannot depend on `redextape-native` (the dependency
-//! runs the other way), so this file cannot import that array. **That explains why this is a copy, not
-//! why the copy could drift unnoticed**: `tests/three_way_oracle.rs`'s
+//! Section G hand-copies every entry of `tests/three_way_oracle.rs`'s `FIRST_ORDER_DEMOS` as the
+//! `FIRST_ORDER_DEMOS` const in `examples/common/demos.rs` — an example cannot `use` an integration
+//! test's items, so this file cannot import that array. **That explains why this is a copy, not why the
+//! copy could drift unnoticed**: `tests/three_way_oracle.rs`'s
 //! `first_order_demos_stay_synced_across_every_copy` is a TEXTUAL, path-based check, not an import — it
-//! `read_to_string`s `examples/common/demos.rs` and asserts its array is byte-identical to the
-//! canonical one, so a drifted copy fails the test suite rather than going quiet. Keep the binding a
-//! module-level `const` named `FIRST_ORDER_DEMOS`, exactly as every other copy is shaped: that is both
-//! what the sync test's extractor looks for and what `grep -rn FIRST_ORDER_DEMOS` — the audit method
-//! that test's own doc names — finds. If `FIRST_ORDER_DEMOS` grows a new entry, re-copy the array from
-//! that file into `examples/common/demos.rs` and re-run this probe; its
-//! `WORST SHIPPED DEMO` line is what `tm/build.rs`'s `MAX_MACHINE_STATES` doc,
+//! `read_to_string`s `examples/common/demos.rs` and asserts its array is byte-identical to the canonical
+//! one, so a drifted copy fails the test suite rather than going quiet. Keep the binding a module-level
+//! `const` named `FIRST_ORDER_DEMOS`, exactly as every other copy is shaped: that is both what the sync
+//! test's extractor looks for and what the audit method that test's own doc names finds. If
+//! `FIRST_ORDER_DEMOS` grows a new entry, re-copy the array from that file into `examples/common/demos.rs`
+//! and re-run this probe; its `WORST SHIPPED DEMO` line is what `tm/build.rs`'s `MAX_MACHINE_STATES` doc,
 //! `guard_counterexamples.rs`'s `WORST_SHIPPED_DEMO` and `reduction.rs`'s `worst_shipped_demo` need to
-//! match if the maximum moves. G is what
-//! pins the "never rejects a legitimate program" half of `MAX_MACHINE_STATES`, and
-//! `guard_counterexamples.rs` asserts the relation this section measures.
+//! match if the maximum moves. G is what pins the "never rejects a legitimate program" half of
+//! `MAX_MACHINE_STATES`, and `guard_counterexamples.rs` asserts the relation this section measures.
 //!
-//! Section order is deliberate: F runs LAST — not because it can still be killed (see below), but
-//! because it is the section most likely to grow past that again if a future edit weakens the guard.
+//! Section order is deliberate: F runs LAST — not because it can exhaust memory (see below), but
+//! because it is the section most likely to outgrow the memory cap if a future edit weakens the guard.
 //!
-//! **READING D, F AND H ONCE `MAX_MACHINE_STATES` EXISTS.** The 8.6M-state / 6.0 GB / `SIGKILL`
-//! figures above were measured BEFORE this crate had a ceiling at all, using a scratch copy of this
-//! file that called the (then-unguarded) `lower_tm`. `Builder::state`/`accept` (`tm/build.rs`) is
-//! the ONE choke point every one of `lower_tm`, `lower_tm_guarded` and `lower_tm_mapped` shares, so
-//! now that `MAX_MACHINE_STATES` is live, NOTHING built through any of them can exceed it —
-//! including a fresh run of this file. Sections D, F and H below therefore print `REFUSED` rather
-//! than a number for any row whose true cost would have crossed the ceiling — `guard_counterexamples.rs`'s
+//! **READING D, F AND H UNDER `MAX_MACHINE_STATES`.** `Builder::state`/`accept` (`tm/build.rs`) is the
+//! ONE choke point every one of `lower_tm`, `lower_tm_guarded` and `lower_tm_mapped` shares, so NOTHING
+//! built through any of them can exceed `MAX_MACHINE_STATES` — including a fresh run of this file.
+//! Sections D, F and H below therefore print `REFUSED` rather than a number for any row whose true cost
+//! would have crossed the ceiling — `guard_counterexamples.rs`'s
 //! `the_balanced_tree_is_admitted_below_the_ceiling_and_refused_above_it` asserts the identical
 //! admit/refuse boundary at the identical size. **That is the guard working, not a regression in this
-//! probe.** What a fresh run DOES still re-derive: 575,861 states at the 1,022-token row, at roughly
-//! 700-725 B/state (RSS delta is allocator- and machine-dependent; the spec's §3.1 table records
-//! **725** for this row) — NOT 727. That figure was measured at the 4,094-token row, which this file
-//! can no longer reach (now refused outright), so a fresh run cannot reproduce it, and neither can it
-//! reproduce the "stable across a 15x size range" claim that rests on comparing the two rows. Also
-//! still reproducible: the 49,135-state worst shipped demo, and the 80,000 max `NodeId`. The larger
-//! historical figures survive only in
-//! `docs/superpowers/specs/2026-08-11-count-bounds-design.md` §3 and in the git history of the
-//! scratch probe that produced them — this file cannot reach them again by design, and should not be
-//! made to.
+//! probe.** The figures above the ceiling are in `docs/superpowers/specs/2026-08-11-count-bounds-design.md`
+//! §3; this file cannot reach them by design, and should not be made to.
 
 #![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic, clippy::pedantic)]
 
@@ -112,7 +90,7 @@ fn states_col(m: &Option<Machine>) -> String {
     m.as_ref().map_or_else(|| format!("REFUSED(>={MAX_MACHINE_STATES})"), |m| m.states.len().to_string())
 }
 
-/// Token-cheap statement whose lowering is instruction-rich: each `let` costs ~6 tokens.
+/// Token-cheap statement whose lowering is instruction-rich.
 fn wide_src(n: usize) -> String {
     let mut s = String::from("fn main() {\n");
     for i in 0..n {
@@ -315,15 +293,12 @@ fn part_c() {
     }
 }
 
-/// What a depth-limited program built BEFORE `MAX_MACHINE_STATES` existed: a PRE-GUARD HISTORICAL
-/// row, not a floor the ceiling must clear. Every row here now prints `REFUSED` — 2.8M states exceeds
-/// the ceiling — so under this section's old framing the ceiling would fail to clear its own floor.
-/// It does not, because this was never the floor: section G is (49,135 states, the worst program this
-/// project actually SHIPS), and this section survives only as the historical measurement that forced
-/// the correction recorded in the design doc's §3.2.
+/// The largest machine a depth-limited program builds. Its `wide_let` and `bin_chain` rows print
+/// `REFUSED`, so this section is not a floor the ceiling must clear; section G is (the worst program
+/// this project actually SHIPS). See the design doc's §3.2.
 fn part_d() {
     println!();
-    println!("=== D. pre-guard historical machine (depth-limited shape, now refused) ===");
+    println!("=== D. depth-limited machine shape ===");
     println!("size_of::<State>() = {} bytes (heap for `name` and `rules` is on top)", size_of::<State>());
     println!("{:<12} {:>8} {:>10} {:>12} {:>12} {:>12}", "generator", "n", "code.len", "unary", "binary", "u rules");
     let gens: Vec<GenAt> = vec![

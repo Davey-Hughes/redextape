@@ -7,12 +7,10 @@
 //! Programs small enough to run literally are held to more: the lowered machines of `1` and `1 + 1`,
 //! compiled to eleven counters, must agree literal against accelerated at every macro entry, and the
 //! accelerated run must halt in the state, leave the tapes, and empty the scratch counter the same way the
-//! Turing machine simulator does. No stage 1 image is small enough — `3 - 5`'s stands for about 10^380
-//! literal steps.
+//! Turing machine simulator does. No stage 1 image is small enough.
 //!
-//! **THE TIERS ARE MEASURED.** A test is in the fast tier when it ran in under 1 s in the debug build `cargo nextest`
-//! runs, timed on its own, and in the slow tier otherwise; every slow-tier test ran in under 60 s in the release
-//! build `scripts/check-slow.sh` runs.
+//! The tiers are measured: a test is in the fast tier when it runs in under 1 s in the debug build
+//! `cargo nextest` runs, timed on its own, and in the slow tier otherwise.
 
 // Test target: a fixture that fails to build IS the failure this file reports, so panicking is
 // deliberate here. The `allow-*-in-tests` keys in `clippy.toml` only reach `#[test]` functions and
@@ -93,19 +91,19 @@ fn arithmetic_runs_as_a_counter_machine() {
 }
 
 #[test]
-#[ignore = "slow tier: over 1 s in a debug build when this leg was planned; run via scripts/check-slow.sh"]
+#[ignore = "slow tier: run via scripts/check-slow.sh"]
 fn a_call_runs_as_a_counter_machine() {
     agrees_at_stage_one("fn add1(x) { x + 1 } fn pair_sum(a, b) { a + b } pair_sum(1, add1(2))");
 }
 
 #[test]
-#[ignore = "slow tier: over 1 s in a debug build when this leg was planned; run via scripts/check-slow.sh"]
+#[ignore = "slow tier: run via scripts/check-slow.sh"]
 fn a_binding_runs_as_a_counter_machine() {
     agrees_at_stage_one("let x = 40; x + 2");
 }
 
 #[test]
-#[ignore = "slow tier: over 1 s in a debug build when this leg was planned; run via scripts/check-slow.sh"]
+#[ignore = "slow tier: run via scripts/check-slow.sh"]
 fn recursion_runs_as_a_counter_machine() {
     agrees_at_stage_one("fn sum(n) { if n == 0 { 0 } else { n + sum(n - 1) } } sum(5)");
 }
@@ -143,7 +141,7 @@ fn a_lowered_literal_agrees_literally() {
 }
 
 #[test]
-#[ignore = "slow tier: over 1 s in a debug build when this leg was planned; run via scripts/check-slow.sh"]
+#[ignore = "slow tier: run via scripts/check-slow.sh"]
 fn a_lowered_sum_agrees_literally() {
     let steps = literal_and_accelerated_agree("1 + 1");
     println!("1 + 1 lowered: {steps} literal steps");
@@ -186,16 +184,11 @@ fn unbuffered_run(p: &Program, mut counters: Vec<Nat>) -> (End, Nat, Vec<Nat>) {
     (end, steps, counters)
 }
 
-/// **THE COST IS MEASURED.** An independent reference for the four fast stage 1 images the oracle runs above:
-/// replay the compiled program's macros with `unbuffered_run` — plain `Nat` counters and `move_steps` alone,
-/// no `Buffers` code — and require it to agree with the accelerated (buffered) run on the steps, the
-/// counters, and the macro each stops in. **THIS RAN SLOWER THAN PLANNED.** A whole-branch review's probe of
-/// the same check ran in about 1.78 s wall in a debug build; this one ran in about 5.2 s in this workspace's
-/// unoptimized dev profile (`cargo nextest`, timed on its own), over this file's 1 s bound, so it is in the slow
-/// tier. The two largest images dominate — `if`'s at
-/// 1.5M moves up to 2855 bits and `1 + 2 * 3`'s at 1.6M moves up to 1956 bits — because unbuffered `Nat`
-/// arithmetic is O(moves · bits), which buffering exists to avoid. If a future change makes it slower still,
-/// say so here.
+/// An independent reference for the four fast stage 1 images the oracle runs above: replay the compiled
+/// program's macros with `unbuffered_run` — plain `Nat` counters and `move_steps` alone, no `Buffers` code —
+/// and require it to agree with the accelerated (buffered) run on the steps, the counters, and the macro each
+/// stops in. It is over this file's 1 s bound in the debug build, so it is in the slow tier: unbuffered `Nat`
+/// arithmetic is O(moves · bits), which buffering exists to avoid.
 #[test]
 #[ignore = "slow tier: about 5.2 s in a debug build, timed on its own; run via scripts/check-slow.sh"]
 fn an_unbuffered_tally_matches_the_buffered_run_on_fast_stage_one_images() {

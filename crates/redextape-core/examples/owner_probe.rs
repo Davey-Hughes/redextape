@@ -1,5 +1,5 @@
 //! **How often does a β-step name a source construct, and how wide is the answer when it only
-//! contains one?** M1 and M2 of the 5c design.
+//! contains one?** M1 and M2 of `docs/superpowers/specs/2026-08-10-plan5c-dual-focus-design.md` §6.
 //!
 //! # HOW TO RUN THIS
 //!
@@ -8,17 +8,15 @@
 //!   cargo run --release -p redextape-core --example owner_probe
 //! ```
 //!
-//! **The cap is not decoration and `MemorySwapMax=0` is the load-bearing half.** An earlier
-//! measurement over a comparable family took 60 GiB of RAM and 29 GiB of swap and wedged the machine.
-//! An OOM-kill or a timeout here is a RESULT to report, not something to work around by raising the
-//! cap.
+//! **The cap is not decoration and `MemorySwapMax=0` is the load-bearing half.** This file reduces λ
+//! terms, and the cap alone lets the kernel thrash instead of failing. An OOM-kill or a timeout here is a
+//! RESULT to report, not something to work around by raising the cap.
 //!
 //! **Drives `trace::LambdaCursor`, never `reduce_trace`**, which materialises every step's term by
-//! contract and is how the 60 GiB run happened. A program's M1 AND M2 rows are both flushed —
-//! interleaved, tagged `[M1]`/`[M2]` — before the next program's `measure()` begins; M2 is not a
-//! deferred second pass over the whole corpus, because it is the table that gates (see below), and
-//! deferring it would mean an OOM-kill mid-run loses every M2 row, including for programs whose
-//! `Census` was already complete.
+//! contract. A program's M1 AND M2 rows are both flushed — interleaved, tagged `[M1]`/`[M2]` — before
+//! the next program's `measure()` begins; M2 is not a deferred second pass over the whole corpus,
+//! because it is the table that gates (see below), and deferring it would mean an OOM-kill mid-run
+//! loses every M2 row, including for programs whose `Census` was already complete.
 //!
 //! # WHAT THIS MEASURES
 //!
@@ -27,10 +25,10 @@
 //! versus neither (`Owner::None`)? Reported, not gated: `Owner` has three states rather than two, so a
 //! low `Exact` rate is information the renderer already handles, not a failure.
 //!
-//! **M2 — the `Within` span width**, as a fraction of program length. THIS ONE GATES. The threshold
-//! was fixed before any number existed: if the median `Within` span exceeds 60% of program length on
-//! more than one corpus program, a later task renders `Within` as a status line only, not a highlight.
-//! That verdict is not renegotiated here even if a number lands close to the line.
+//! **M2 — the `Within` span width**, as a fraction of program length. THIS ONE GATES. The threshold:
+//! if the median `Within` span exceeds 60% of program length on more than one corpus program, `Within`
+//! would render as a status line only, not a highlight. That verdict is not renegotiated here even if a
+//! number lands close to the line.
 #![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic, clippy::pedantic)]
 
 use redextape_core::lambda::{self, MAX_REDUCTION_STEPS, Owner};
@@ -46,20 +44,9 @@ mod text_underlined;
 use nearest_rank::{median, percentile};
 use text_underlined::{head, line};
 
-/// The corpus, copied verbatim from `frame_cost_probe.rs`'s `programs()`, minus `while40`, which that
-/// file adds only for its own section F. Reusing it keeps this probe's columns comparable with every
-/// figure this Plan has already recorded. The last three entries are picked to defeat bounds, not to
-/// represent the corpus — see that file's comment on `num200`/`list20`/`list60`.
-///
-/// THAT POINTER READ `frame_cost_probe.rs` lines 107-133 UNTIL THIS COMMIT, AND IT NEVER COVERED WHAT
-/// IT CLAIMED TO. It has not drifted a line since dual focus while running (#26) wrote it — that
-/// function is byte-identical in the cited range — so this is the other failure the branch keeps
-/// finding: a range that was wrong the day it was written. The material actually copied here runs two
-/// lines further at each end than the range names. This conversion found 107 opening on
-/// `let mut v: Vec<(String, String)> = [`, which skips the two `let list20`/`let list60` `format!`s
-/// above it, and 133 closing on the comment about the `cons` spine, one line short of the two
-/// `v.push` calls that put those lists in the corpus. All four are copied verbatim below, and without
-/// them "its `programs()`, minus `while40`" is not what the range holds.
+/// The corpus, copied verbatim from `frame_cost_probe.rs`'s `programs()`, minus `while40`. Reusing it
+/// keeps this probe's columns comparable with `frame_cost_probe.rs`'s. The last three entries are picked
+/// to defeat bounds, not to represent the corpus — see that file's comment on `num200`/`list20`/`list60`.
 fn programs() -> Vec<(String, String)> {
     let list20 = format!("[{}]", (1..=20).map(|n| n.to_string()).collect::<Vec<_>>().join(", "));
     let list60 = format!("[{}]", (1..=60).map(|n| n.to_string()).collect::<Vec<_>>().join(", "));
@@ -88,8 +75,7 @@ fn programs() -> Vec<(String, String)> {
     .iter()
     .map(|(n, s)| ((*n).to_string(), (*s).to_string()))
     .collect();
-    // A list literal desugars to a `cons` spine of depth n+1 — the shape whose 699-element instance
-    // falsified the logical-size guard. These two are far below that and still the largest terms here.
+    // A list literal desugars to a `cons` spine of depth n+1; these two are the largest terms here.
     v.push(("list20".to_string(), list20));
     v.push(("list60".to_string(), list60));
     v
@@ -106,9 +92,9 @@ fn programs() -> Vec<(String, String)> {
 /// `*owner` through `app_tagged` unchanged, so a step's tag is never regenerated), and
 /// `sourcemap_coverage.rs`'s `every_core_node_resolves_to_an_in_bounds_source_span` pins — as a
 /// tested invariant over `SourceMap::build_from_program`'s output, not an empirical fact about this
-/// corpus — that every id `desugar_mapped` mints resolves to a span. So `map.source_span(id)` at
-/// `:125` returning `None` for a `Within` id is a genuine bug, not an expected corpus quirk, and this
-/// struct never carries a `within_widths` narrower than `within` without saying so loudly.
+/// corpus — that every id `desugar_mapped` mints resolves to a span. So `map.source_span(id)` in
+/// `measure()` returning `None` for a `Within` id is a genuine bug, not an expected corpus quirk, and
+/// this struct never carries a `within_widths` narrower than `within` without saying so loudly.
 struct Census {
     exact: u64,
     within: u64,
@@ -147,10 +133,10 @@ fn measure(src: &str) -> Census {
             Owner::None => none += 1,
         }
     }
-    // Finding 2 (task 8's fix pass): cheap post-processing, not the risky β-step loop this file's
-    // module doc warns about, so crashing on a violation is safe — and preferred over silently
-    // reporting a `within_widths` narrower than `within`. See `Census`'s doc for why this is expected
-    // to hold structurally, not just for this corpus.
+    // Cheap post-processing, not the risky β-step loop this file's module doc warns about, so
+    // crashing on a violation is safe — and preferred over silently reporting a `within_widths`
+    // narrower than `within`. See `Census`'s doc for why this is expected to hold structurally, not
+    // just for this corpus.
     assert_eq!(
         within_widths.len() as u64,
         within,
@@ -176,11 +162,10 @@ fn main() {
     head("M1 (tagged-contraction rate) and M2 (Within span width), interleaved per program");
     line("  M1 is `[M1]`-tagged, M2 is `[M2]`-tagged — read each table down by filtering on its tag;");
     line("  they print interleaved, program by program, so a kill mid-run leaves BOTH tables complete");
-    line("  up through the last program `measure()` finished, never M1-only. This is the fix for the");
-    line("  finding that M2 — the table that gates — used to be a second pass over the whole corpus.");
+    line("  up through the last program `measure()` finished, never M1-only. M2 is the table that gates.");
     line("");
     line("  M2 verdict: `degenerate` when the median Within span exceeds 60% of program length.");
-    line("  Gate: Task 9 renders Within as a status line, not a highlight, if MORE THAN ONE program");
+    line("  Gate: Within renders as a status line, not a highlight, if MORE THAN ONE program");
     line("  reports `degenerate`.");
     line("");
     line(&format!("[M1] {:<10}{:>7}{:>9}{:>10}{:>9}{:>9}", "program", "steps", "Exact", "Within", "None", "Exact%"));
@@ -197,11 +182,10 @@ fn main() {
         line(&format!("[M1] {:<10}{:>7}{:>9}{:>10}{:>9}{:>8.1}%", name, steps, c.exact, c.within, c.none, exact_pct));
 
         // M2 row — computed and flushed right here, still inside this program's iteration, so it
-        // reaches stdout before the next program's `measure()` call begins. This is the fix for the
-        // finding: M2 used to be a wholly separate pass, deferred until every program's `measure()`
-        // had already run, so an OOM-kill during ANY program's `measure()` left zero M2 rows even for
-        // programs whose `Census` (including `within_widths`) was already complete and sitting in
-        // memory.
+        // reaches stdout before the next program's `measure()` call begins. A separate pass deferred
+        // until every program's `measure()` had run would lose every M2 row to an OOM-kill during ANY
+        // program's `measure()`, even for programs whose `Census` (including `within_widths`) was
+        // already complete and sitting in memory.
         let med = median(&c.within_widths);
         let p90 = percentile(&c.within_widths, 0.9);
         let max = percentile(&c.within_widths, 1.0);

@@ -1,9 +1,9 @@
 //! The open documents, one `LineIndex` per version.
 //!
-//! `textDocumentSync` is `FULL` in slice 1, so "update" means "replace": these files are small, and
+//! `textDocumentSync` is `FULL`, so "update" means "replace": these files are small, and
 //! incremental sync is an optimization that buys a class of bugs before it buys anything else.
-//! `replace` rebuilding the whole index is the honest cost of that choice and the reason it is one
-//! line.
+//! `replace` rebuilding the `LineIndex` and, for a form that has one, the name index from scratch is
+//! the honest cost of that choice.
 
 use std::collections::HashMap;
 
@@ -23,14 +23,12 @@ pub struct Document {
     /// form carries no index at all, or (`.rxt` only) the document is over `MAX_TOKENS` and the
     /// parser refused it before running. See `Language::nav`.
     ///
-    /// **CACHED FOR THE SAME REASON `index` IS, AND IT WAS NOT UNTIL A REVIEW MEASURED THE
-    /// DIFFERENCE.** Both derive from `text` alone and both are invalidated by exactly one event,
-    /// the `replace` below — so a rebuild-per-request for one and a rebuild-per-version for the
-    /// other was an inconsistency, not a decision. Measured on a real emitted machine (1,906,914
-    /// bytes, 8,610 states): rebuilding is 33.25 ms against `LineIndex::new`'s 0.26 ms, and every
-    /// navigation request paid it. `main.rs` drives one strictly sequential message loop, so each
-    /// of those blocked the `publishDiagnostics` queued behind it — and advertising
-    /// `documentSymbolProvider` newly invites outline plugins to re-request on every change.
+    /// **CACHED FOR THE SAME REASON `index` IS.** Both derive from `text` alone and both are
+    /// invalidated by exactly one event, the `replace` below — so a rebuild per request for one and a
+    /// rebuild per version for the other would be an inconsistency, not a decision. `main.rs` drives
+    /// one strictly sequential message loop, so a rebuild per navigation request would block the
+    /// `publishDiagnostics` queued behind it — and advertising `documentSymbolProvider` invites
+    /// outline plugins to re-request on every change.
     pub nav: Option<NameIndex>,
 }
 

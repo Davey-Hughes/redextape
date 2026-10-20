@@ -4,7 +4,7 @@
 //! or which of the three a given document contains. The parsers push occurrences as they scan —
 //! they are the only things in this crate that know where a name begins — and the server maps a
 //! definition to a `SymbolKind` per occurrence, via `outline_kind(DefKind)`, because a `.rxt`
-//! document mixes several kinds and no one language determines the kind any more. Anything here
+//! document mixes several kinds and no one language determines the kind. Anything here
 //! that could answer "is this a state?" would be a second definition of a grammar that already
 //! has exactly one.
 //!
@@ -85,8 +85,8 @@ pub enum Role {
         /// that read is ever reached. Nothing upstream removes `Param` first. Without that check a
         /// `Param` would not make the pass unsound — it has no extent, so it would take the
         /// `attach` arm like any other extentless definition — it would just produce a wrong
-        /// outline, with every parameter listed as a child of its own `fn`. A coupling this
-        /// module does not enforce and did not, until now, write down.
+        /// outline, with every parameter listed as a child of its own `fn`. This module does not
+        /// enforce that coupling.
         extent: Option<Span>,
     },
     Reference {
@@ -155,8 +155,7 @@ impl NameIndex {
         // caret sits after typing one, after `e`/`w` in Vim, and after a double-click or `End` in
         // most editors — so a strictly half-open test answers `null` at the position navigation is
         // most often invoked from. rust-analyzer's `find_node_at_offset` and gopls both accept
-        // `offset == end`. An earlier version of this method did not, under a test asserting "the
-        // end is exclusive" as though that were the requirement rather than the defect.
+        // `offset == end`.
         //
         // Containment wins over adjacency, so an occurrence ending where the next one begins can
         // never shadow the one the cursor is genuinely inside. None of the three grammars can
@@ -199,8 +198,7 @@ impl NameIndex {
     /// reference has no binding: `parse_asm_full` accepts `jmp nowhere` with zero diagnostics, and
     /// a `.tm` file mid-edit has every `goto X` dangling the moment its `state X:` header is being
     /// retyped. Grouping those by name is not a shortcut past a better answer, it is the only
-    /// answer available — and the alternative that shipped first was `null`, which tells someone
-    /// hunting every jump still to fix that the name under their cursor is not a name.
+    /// answer available.
     ///
     /// Returns nothing for an index that is a definition or a resolved reference; those have a
     /// binding and belong to `references_to`.
@@ -295,10 +293,9 @@ mod tests {
         let n = fixture();
         assert_eq!(n.at(0).map(|(i, _)| i), Some(0), "first byte is inside");
         assert_eq!(n.at(4).map(|(i, _)| i), Some(0), "last byte is inside");
-        // ONE PAST THE LAST BYTE IS STILL THE NAME — see `at`'s doc. This assertion read
-        // `n.at(5) == None, "the end is exclusive"` and pinned the defect as though it were the
-        // contract: it is where the caret lands after typing a name, and answering `null` there
-        // is the single most likely way a user meets this feature failing.
+        // ONE PAST THE LAST BYTE IS STILL THE NAME — see `at`'s doc. It is where the caret lands
+        // after typing a name, and answering `null` there is the single most likely way a user meets
+        // this feature failing.
         assert_eq!(n.at(5).map(|(i, _)| i), Some(0), "one past the end is still the name");
         assert_eq!(n.at(6), None, "two past the end is not");
         assert_eq!(n.at(22).map(|(i, _)| i), Some(1));
@@ -321,8 +318,7 @@ mod tests {
     fn definitions_lists_only_definitions_in_source_order() {
         // NAMES CHOSEN SO SOURCE ORDER AND ALPHABETICAL ORDER DISAGREE. The shared fixture's
         // `alpha` before `beta` satisfies both, so against it this test's own name is the only
-        // thing claiming source order is what is checked. Sabotage-verified: sorting
-        // `definitions()` by name reddens this test and nothing else in the file.
+        // thing claiming source order is what is checked.
         let mut n = NameIndex::default();
         n.push_reference("zeta", Span::new(0, 4));
         n.push_definition("zeta", Span::new(10, 14), DefKind::State, None);
@@ -334,8 +330,9 @@ mod tests {
 
     #[test]
     fn the_first_definition_wins_when_a_name_is_defined_twice() {
-        // `.asm` accepts a duplicate label with no diagnostic at all — `labels` comes back as
-        // [("f", 0), ("f", 0)] — so this is a shape the index really meets, not a hypothetical.
+        // `.asm`'s parser accepts a duplicate label with no diagnostic (`asm_label_diagnostics` marks
+        // it) — `labels` comes back as [("f", 0), ("f", 0)] — so this is a shape the index really
+        // meets, not a hypothetical.
         // BOTH definitions stay listed; only the link is singular.
         let mut n = NameIndex::default();
         n.push_definition("f", Span::new(0, 1), DefKind::State, None);
@@ -372,9 +369,8 @@ mod tests {
     fn references_to_does_not_answer_by_name() {
         // The ordinary case: distinct names, each resolving to its own definition. **THIS TEST
         // DOES NOT CATCH A NAME-MATCHING `references_to`** — with one definition per name the two
-        // implementations cannot disagree, and an earlier draft of this file claimed otherwise
-        // here. The test that separates them is the shadowed-name one directly below; this one
-        // covers that the ordinary case works at all.
+        // implementations cannot disagree. The test that separates them is the shadowed-name one
+        // directly below; this one covers that the ordinary case works at all.
         let mut n = NameIndex::default();
         n.push_definition("a", Span::new(0, 1), DefKind::State, None);
         n.push_definition("b", Span::new(10, 11), DefKind::State, None);
@@ -384,12 +380,11 @@ mod tests {
         assert_eq!(n.references_to(1).map(|o| o.span).collect::<Vec<_>>(), vec![Span::new(20, 21)]);
     }
 
-    /// ADDED BEYOND THE BRIEF. `references_to_does_not_answer_by_name` above does not actually
-    /// distinguish name-matching from link-matching: with one definition per name, `link` resolves
-    /// every reference to the string's unique definition, so the two answers always agree —
-    /// verified by running the sabotage it names with that test present, which still passed.
-    /// Divergence needs a SHADOWED name: two definitions sharing one string, so that a name-match
-    /// on the SECOND one wrongly pulls in a reference that actually links to the FIRST.
+    /// `references_to_does_not_answer_by_name` above does not actually distinguish name-matching
+    /// from link-matching: with one definition per name, `link` resolves every reference to the
+    /// string's unique definition, so the two answers always agree. Divergence needs a SHADOWED
+    /// name: two definitions sharing one string, so that a name-match on the SECOND one wrongly
+    /// pulls in a reference that actually links to the FIRST.
     #[test]
     fn references_to_does_not_answer_by_name_even_when_a_name_is_shadowed() {
         let mut n = NameIndex::default();

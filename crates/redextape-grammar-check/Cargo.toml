@@ -16,9 +16,9 @@ tree-sitter = "0.26"
 # of `std::mem::transmute`. `tree-sitter` already depends on this crate transitively; naming it here
 # makes `LanguageFn` importable.
 tree-sitter-language = "0.1"
-# `error_nodes`'s return type is `Vec<redextape_core::Span>`, and that is `src/lib.rs` — not test
-# code — so this is a real dependency, not a dev-dependency: a `[dev-dependencies]` entry is invisible
-# to the library target itself and this crate would fail to compile without it.
+# `error_nodes`'s return type is `Vec<redextape_core::Span>`, and that is in `src/grammar.rs` — not
+# test code — so this is a real dependency, not a dev-dependency: a `[dev-dependencies]` entry is
+# invisible to the library target itself and this crate would fail to compile without it.
 redextape-core = { path = "../redextape-core" }
 
 [dev-dependencies]

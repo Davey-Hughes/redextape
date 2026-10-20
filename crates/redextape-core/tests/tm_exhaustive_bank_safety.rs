@@ -4,7 +4,7 @@
 //!
 //! Layer 3 (`tm_bank_invariant.rs`) asserts the right property with the right epistemics — it inspects
 //! the actual tape, so it depends on none of my reasoning being correct — but it is an OBSERVATION over
-//! the programs that ran. Rung 1 raised that sample; it did not change the kind of claim.
+//! the programs that ran. Rung 1 raises that sample; it does not change the kind of claim.
 //!
 //! This changes the kind of claim, for a bounded space: for EVERY asm `Program` over a fixed small
 //! alphabet, at every width in a range, no execution corrupts the register bank. Verified by
@@ -61,10 +61,9 @@ const BINARY_WIDTHS: &[usize] = &[1, 2, 3];
 /// between encodings, so there is no width list a new encoding could inherit: the VALUES here are
 /// irreducibly manual, and whoever adds a variant to `EncodingKind` has to pick them deliberately.
 ///
-/// WILDCARD-FREE on purpose. That manual step used to be enforced by a runtime test
-/// (`every_encoding_has_a_sweep_target`, since deleted — see this test file's history) that could only
-/// ever fail *after* a new encoding already compiled with no widths chosen for it. A missing match arm
-/// here is a COMPILE ERROR instead, which is strictly stronger and needs no separate guard to fail loudly.
+/// WILDCARD-FREE on purpose. A missing match arm is a COMPILE ERROR, not a runtime failure that could
+/// only come *after* a new encoding already compiled with no widths chosen for it. That is strictly
+/// stronger and needs no separate guard to fail loudly.
 fn widths_for(kind: EncodingKind) -> &'static [usize] {
     match kind {
         EncodingKind::Unary => UNARY_WIDTHS,
@@ -84,7 +83,7 @@ fn sweep_targets() -> Vec<(EncodingKind, &'static [usize])> {
 /// formula is on the `Encoding` trait (`field_width`'s own doc says the cell count is "not directly a
 /// value bound, since what a `width`-cell field can hold is encoding-specific"), so the sweep has to
 /// know each one itself, in exactly this one place — WILDCARD-FREE, so a new encoding cannot silently
-/// fall back to unary's formula the way a `_ => width as u64` arm once let it.
+/// fall back to unary's formula, as a `_ => width as u64` arm would let it.
 fn capacity(kind: EncodingKind, width: usize) -> u64 {
     match kind {
         EncodingKind::Unary => width as u64,
@@ -198,9 +197,9 @@ fn describe(program: &Program) -> String {
 /// enumerated programs are infinite loops (`Jmp L`, `Call L`, a `Jz` back to index 0) that spend the
 /// entire budget going nowhere, and that half dominates the runtime.
 ///
-/// Safe to cut because corruption appears EARLY when it appears at all — the two sabotage reproducers
-/// this suite found fail at step 11 and step 64. The slow tier keeps the large budget so its coverage
-/// of long-running programs is genuinely deeper, not merely slower.
+/// Safe to cut because corruption appears EARLY when it appears at all — two sabotage reproducers
+/// fail at step 11 and step 64. The slow tier keeps the large budget so its coverage of long-running
+/// programs is genuinely deeper, not merely slower.
 const FAST_CAPS: TmCaps = TmCaps { steps: 2_000, cells: 2_000 };
 
 /// The exact number of `(length-1 program, encoding, width)` triples the exhaustive sweeps must cover,
@@ -226,7 +225,7 @@ fn length_one_programs(kind: EncodingKind, width: usize) -> Vec<Program> {
 /// test's name is true by construction — a whole-tree sabotage that adds a third encoding either lands
 /// a regime check for it here or fails to compile, rather than passing this test having checked two of
 /// three kinds. This test does not check a machine. It checks that the constants still describe what
-/// their comment claims, which is the failure mode this suite keeps finding in itself.
+/// their comment claims.
 #[test]
 fn the_swept_widths_cover_the_overflow_regime_for_each_encoding() {
     for &kind in EncodingKind::ALL {
@@ -247,10 +246,6 @@ fn the_swept_widths_cover_the_overflow_regime_for_each_encoding() {
         }
     }
 }
-
-// ================================================================================================
-// Task 1: measure, so the bounds in the spec are derived from data rather than from my estimate.
-// ================================================================================================
 
 /// Prints the real cost of the sweep and the alphabet's real size, which is what the exhaustive
 /// bounds must be derived from. Informational — it asserts only that the measurement is meaningful.
@@ -293,19 +288,10 @@ fn measure_enumeration_cost() {
 /// corrupt the bank by itself; a length-2 one can corrupt it through a state the first instruction
 /// left behind, which is the whole class of defect that head-position reasoning gets wrong.
 ///
-/// Cost, MEASURED DIRECTLY (2026-07-30): **305s in release**, a little over five minutes.
+/// Cost, measured: **305s in release**, a little over five minutes.
 ///
-/// The figure here previously read "roughly two minutes" and called itself "measured, not estimated".
-/// Half of that was true. The 892-pair length-1 sweep at 0.46s release (~0.52 ms/pair) was measured;
-/// ~200k pairs at that rate EXTRAPOLATES to ~104s. The extrapolation assumed per-pair cost is flat
-/// across program lengths, and it is not — a length-2 program executes more TM steps than a length-1
-/// one — so the real sweep is ~2.9x the projection. A rate measured at one length is not a measurement
-/// of another, and labelling the product "measured" hid that it was a derivation.
-///
-/// The DECISION that figure justified — enumerating length 2 outright rather than sampling it, per the
-/// spec's original plan — still holds at five minutes in a tier that runs separately from the merge
-/// gate. The number was wrong; the conclusion was not. Both are recorded because whoever revisits this
-/// trade needs the real cost, not the one that made it look cheap.
+/// Enumerating length 2 outright rather than sampling it holds at five minutes in a tier that runs
+/// separately from the merge gate.
 ///
 /// Reports the outcome mix rather than only pass/fail, because a sweep where every program instantly
 /// halted would be green while covering nothing.
@@ -369,9 +355,8 @@ fn every_two_instruction_program_keeps_the_bank_well_formed() {
 // The default (fast) tier
 // ================================================================================================
 
-/// EXHAUSTIVE over every length-1 program at every swept width. This is the strongest statement the
-/// project makes about the bank, and it is cheap enough to run on every commit: it covers every
-/// instruction in the alphabet against every boundary literal.
+/// EXHAUSTIVE over every length-1 program at every swept width, and cheap enough to run on every
+/// commit: it covers every instruction in the alphabet against every boundary literal.
 #[test]
 fn every_single_instruction_program_keeps_the_bank_well_formed() {
     let caps = FAST_CAPS;
@@ -409,8 +394,7 @@ fn every_single_instruction_program_keeps_the_bank_well_formed() {
 /// leaves the length-1 sweep entirely GREEN: every field starts at zero, so a single instruction can
 /// only compute from zeros, and no computed value ever reaches the width. The guard on the universal
 /// REG store is therefore invisible to length-1 programs. Seeding a value with `Li` first makes it
-/// reachable in two instructions, which is exactly what the full length-2 sweep found
-/// (`Box(Rr, Rr); Box(Rr, Rr)` at width 2, where the second pointer is 2 and does not fit).
+/// reachable in two instructions.
 ///
 /// So the fast tier is not a scaled-down version of the slow one — it is chosen to keep the specific
 /// coverage that matters on every commit.
@@ -453,7 +437,7 @@ fn every_seeded_two_instruction_program_keeps_the_bank_well_formed() {
 }
 
 /// The TM text form round-trips every machine the length-1 sweep builds. `parse_tm(print_tm(m)) == m`
-/// is currently checked on a handful of compiled machines; this checks it over the whole alphabet,
+/// is otherwise checked only on a handful of machines; this checks it over the whole alphabet,
 /// including instructions no source program produces in isolation.
 #[test]
 fn every_single_instruction_machine_round_trips_through_the_text_form() {

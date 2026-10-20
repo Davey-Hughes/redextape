@@ -1,15 +1,13 @@
 //! The data contract a renderer consumes (§9.1). Types plus budget-parameterized builders — and the
 //! budgets are PARAMETERS, never constants in this file.
 //!
-//! CORE NEVER PICKS A NUMBER. A window radius and a truncation threshold are renderer policy: how much
-//! tape fits on screen and how much text a pane will hold are facts about the pane, not about the
-//! machine. A library that hardcodes them stops being reusable by the second consumer, and there are
-//! already two more coming — Plan 6's CLI and the terminal-visualization track.
+//! CORE NEVER PICKS A NUMBER. A window radius and a truncation threshold are renderer policy: how much tape
+//! fits on screen and how much text a pane will hold are facts about the pane, not about the machine. A
+//! library that hardcodes them stops being reusable by the second consumer.
 //!
-//! THE MACHINE CROSSES ONCE, NOT PER STEP. §9.1 puts the machine inside `TmState`; the `map` demo is
-//! 3,203 states and 344,999 steps, so that would re-send 3,203 states 344,999 times. `TmProgram` is
-//! built once per compile and `TmState` carries a bounded window instead — the same reasoning that made
-//! `trace.rs` refuse to materialize tapes per step (3,488 bytes/step, 592.9 MB for `sum(5)`).
+//! THE MACHINE CROSSES ONCE, NOT PER STEP. §9.1 puts the machine inside `TmState`, which would re-send every
+//! state on every step. `TmProgram` is built once per compile and `TmState` carries a bounded window instead —
+//! the same reasoning that made `trace.rs` refuse to materialize tapes per step.
 //!
 //! THE ASM LEG IS SPLIT THE SAME WAY, AND ITS FRAME'S BOUNDS ARE PARAMETERS TOO. `AsmProgram` is built once
 //! per compile; `AsmState` carries at most `AsmWindow`'s count of locals, arguments, call frames, cells and
@@ -33,42 +31,28 @@ pub mod tree;
 
 pub use tree::{LambdaTree, TreeAnswer};
 
-/// NO `redex` FIELD, DELIBERATELY. §4.2 lists one, and nothing in this PR can fill it: a redex is a
-/// `Path` INTO THE TERM, while highlighting it in `text` needs a byte SPAN, and correlating the two
-/// means the printer recording where a given path lands as it walks — real work in
-/// `print_lambda_capped`, touching every recursive arm of `write_term`, and not part of this task.
+/// **THE λ SIDE HAS NO `source_node` FIELD, AND DOES NOT LEAVE ONE `None` EITHER.** One resolved from a
+/// caller-supplied redex `Path` by prefix match against `SourceMap::node_to_lambda` is right for exactly
+/// the first β-event and confidently wrong for every one after: `node_to_lambda` records paths
+/// root-relative into the INITIAL lowered term, while normal-order reduction contracts root redexes, so a
+/// `Beta` event's redex path at step N > 1 indexes a structurally different tree — the coordinate system
+/// `node_to_lambda` speaks in has stopped existing. A prefix match cannot detect this: the root is
+/// recorded at the empty path, the empty path is a prefix of every path, so it always finds a match.
 ///
-/// Shipping the field as a structural `None` would be the exact defect `node_to_source` was built to
-/// remove: a consumer could not distinguish "no redex here" from "not implemented". The field is
-/// omitted until something can populate it, which is the same call already made for
-/// `TmState.source_node` below. Adding it later is not a breaking change, because nothing consumes
-/// these types yet.
-///
-/// NO `source_node` FIELD EITHER, ANYMORE — REMOVED, NOT LEFT `None`, FOR THE SAME REASON ABOVE ONE
-/// LAYER WORSE. This field shipped briefly, resolved by `owning_node` from a caller-supplied redex
-/// `Path`. It was right for exactly the first β-event and confidently wrong for every one after:
-/// `SourceMap::node_to_lambda` records paths root-relative into the INITIAL lowered term, while
-/// normal-order reduction contracts root redexes, so a `Beta` event's redex path at step N > 1 indexes
-/// a structurally different tree — the coordinate system `node_to_lambda` speaks in has stopped
-/// existing. `owning_node` could not detect this: the root is recorded at the empty path, the empty
-/// path is a prefix of every path, so it always found a match. Measured on `let x = 40; x + 2`, all
-/// seven steps reported the same node, "let x = 40;"; `x + 2` was never named.
-///
-/// A structurally-`None` `redex` at least tells a consumer "not implemented". A `source_node` that is
+/// A structurally-`None` field at least tells a consumer "not implemented". A `source_node` that is
 /// sometimes silently wrong tells a consumer nothing is wrong at all — the exact fallback
 /// `sourcemap.rs`'s module doc forbids ("THE MAP SAYS NOTHING WHERE THE LOWERING SAID NOTHING"),
-/// reintroduced one layer out. `render` no longer takes `map` or `redex`; they existed only to compute
-/// this field.
+/// reintroduced one layer out.
 ///
-/// `TmState.source_node` SURVIVED AND IS NOW RESOLVED, which is not an inconsistency: it is keyed by the
-/// current state's NAME, and a name is not a coordinate into a tree that reduction rewrites underneath
-/// it. That is the whole difference — the λ field was wrong because its coordinate system went stale
-/// after one step, and a state name never does.
+/// `TmState.source_node` EXISTS, which is not an inconsistency: it is keyed by the current state's NAME,
+/// and a name is not a coordinate into a tree that reduction rewrites underneath it. That is the whole
+/// difference — a λ field would be wrong because its coordinate system goes stale after one step, and
+/// a state name never does.
 ///
-/// **AND THE λ SIDE NOW HAS ONE AGAIN, BY A DIFFERENT MECHANISM.** `owner` is not a coordinate into a
-/// tree that reduction rewrites — it is a tag inherited by every rebuild, so it does not go stale after
-/// one step the way `node_to_lambda`'s paths did. `redex` IS a path, and is honest precisely because it
-/// is scoped to the frame that carries it.
+/// **THE λ SIDE HAS A `redex` FIELD INSTEAD, BY A DIFFERENT MECHANISM.** `owner` is not a coordinate
+/// into a tree that reduction rewrites — it is a tag inherited by every rebuild, so it does not go stale
+/// after one step the way `node_to_lambda`'s paths do. `redex` IS a path, and is honest precisely
+/// because it is scoped to the frame that carries it.
 #[derive(Clone, Debug, PartialEq, Eq)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 #[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export))]
@@ -77,8 +61,7 @@ pub struct LambdaState {
     /// The classified spans of `text`, byte offsets into it.
     ///
     /// **ON THE WIRE THEY ARE ONE BYTE STRING, THREE LITTLE-ENDIAN `u32`S A SPAN** (`span_words`): its start, its end
-    /// and its class's index in `token_class_names`, which `serde-wasm-bindgen` puts on the page as a `Uint8Array`. As
-    /// `[{start, end}, "Class"]` tuples, about 300 a frame, they were most of what a λ frame cost to build and to copy.
+    /// and its class's index in `token_class_names`, which `serde-wasm-bindgen` puts on the page as a `Uint8Array`.
     #[cfg_attr(feature = "serde", serde(with = "span_words"))]
     #[cfg_attr(feature = "ts", ts(type = "Uint8Array"))]
     pub spans: Vec<(Span, TokenClass)>,
@@ -88,8 +71,8 @@ pub struct LambdaState {
     /// The redex contracted by the step that produced this frame; `None` at step 0.
     ///
     /// A `Path` INTO THE TERM THIS FRAME HOLDS, which is exactly `print_lambda_linked`'s contract —
-    /// and exactly what `node_to_lambda` was not. The distinction is the whole slice: this path is
-    /// resolved against the term it was taken from, never against a later one.
+    /// and exactly what `node_to_lambda` is not. The distinction matters: this path is resolved
+    /// against the term it was taken from, never against a later one.
     ///
     /// **NAMED FOR THE REDEX; WHAT STANDS AT IT IS THE CONTRACTUM.** `LambdaCursor::next` records this
     /// path against the PRE-step term, where it did name the redex `App` — but `beta` then consumed
@@ -99,13 +82,12 @@ pub struct LambdaState {
     /// resolved against; the consequence is only that a consumer painting it is showing WHAT THE STEP
     /// JUST PRODUCED, not what the step was about to contract.
     ///
-    /// **NOT ON THE WIRE — `serde(skip)`, AND THE TREE VIEW DID NOT CHANGE THAT** (spec §4.3 keeps it
-    /// skipped). It has no JS consumer: the λ view's flat text paints from `redex_span`, and its tree
-    /// marks the contractum through `LambdaTree.contractum`, which the core resolves from this same path
-    /// (below). Shipping the path as well put a ~9.3-element array of
-    /// `Dir` strings on every frame that nothing read and that `lambdaFrameBytes` then charged against
-    /// `HISTORY_BYTES`, evicting the ring earlier for dead weight. `reduce.rs`'s `reduce_trace` refuses
-    /// to widen `Step` for exactly that reason ("a field with no reader"); the same rule applies here.
+    /// **NOT ON THE WIRE — `serde(skip)`** (spec §4.3 keeps it skipped). It has no JS consumer: the λ view's flat text
+    /// paints from `redex_span`, and its tree marks the contractum through `LambdaTree.contractum`, which the core
+    /// resolves from this same path (below). Shipping the path as well would put an array of `Dir` strings on every
+    /// frame that nothing reads and that `lambdaFrameBytes` would charge against `HISTORY_BYTES`, evicting the ring
+    /// earlier for dead weight. `reduce.rs`'s `reduce_trace` refuses to widen `Step` for exactly that reason ("a field
+    /// with no reader"); the same rule applies here.
     ///
     /// **IT STAYS ON THE RUST TYPE RATHER THAN BEING DELETED**, because `redex_span` cannot replace it
     /// for a STRUCTURAL consumer: a byte span is a coordinate into `text`, and `LambdaTree` — which the tree
@@ -123,13 +105,13 @@ pub struct LambdaState {
     /// same rule `redex_span` inherits rather than reinvents.
     ///
     /// **RESOLVED AGAINST THE TERM THIS FRAME HOLDS — `print_lambda_linked`'s ACTUAL CONTRACT, AND
-    /// PRECISELY WHAT `node_to_lambda` WAS NOT.** `redex`'s own doc, immediately above, draws this
+    /// PRECISELY WHAT `node_to_lambda` IS NOT.** `redex`'s own doc, immediately above, draws this
     /// line for the PATH; this field closes it for the SPAN a renderer actually needs to paint. A
-    /// `node_to_lambda` span was fixed once, against the INITIAL term, and went stale the instant
-    /// reduction contracted a root redex — the exact staleness that killed the old `source_node` field
-    /// (see this struct's header comment). `redex_span` cannot go stale that way: `render` computes it
-    /// FRESH every frame, by handing `redex`'s own path to the SAME walk that prints `text` for THIS
-    /// frame — never a path recorded once and later resolved against a term it was not taken from.
+    /// `node_to_lambda` span is fixed once, against the INITIAL term, and goes stale the instant
+    /// reduction contracts a root redex — the exact staleness this struct's header comment describes.
+    /// `redex_span` cannot go stale that way: `render` computes it FRESH every frame, by handing
+    /// `redex`'s own path to the SAME walk that prints `text` for THIS frame — never a path recorded
+    /// once and later resolved against a term it was not taken from.
     ///
     /// **AND SO IT COVERS THE CONTRACTUM, NOT THE REDEX** — the same distinction `redex`'s own doc
     /// draws for the PATH, cashed here as printed bytes: the text under this span is the subterm the
@@ -186,8 +168,8 @@ pub struct RuleView {
     pub next: StateId,
 }
 
-/// The machine, projected ONCE per compile and never per step — see the module doc for the
-/// measurement behind that split, and `TmProgram::of` for what `width` is doing in the signature.
+/// The machine, projected ONCE per compile and never per step — see the module doc for why, and
+/// `TmProgram::of` for what `width` is doing in the signature.
 #[derive(Clone, Debug, PartialEq, Eq)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 #[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export))]
@@ -206,16 +188,16 @@ pub struct TmProgram {
 }
 
 /// `source_node` IS THE CORE NODE THAT PRODUCED THE CURRENT STATE, resolved through the `SourceMap`
-/// `window` now takes. §6.2's dual-focus highlight is the consumer that decided it: it needs the Core
-/// node behind the state the machine is in, and `SourceMap::tm_owner` keys on the state's printed NAME,
+/// `window` takes. §6.2's dual-focus highlight is the consumer that decided it: it needs the Core node
+/// behind the state the machine is in, and `SourceMap::tm_owner` keys on the state's printed NAME,
 /// which is why a map has to reach `window` at all.
 ///
 /// IT IS HONESTLY `None` FOR THREE KINDS OF STATE, and the map's own contract is the limit: machine
 /// scaffolding with no instruction behind it, `defunc`-minted constructs, and any state THIS lowering
 /// did not produce — including every state belonging to some other lowering of the same program.
 /// `tm_owner` has deliberately no fallback to a nearby or similarly-spelled state, so neither does
-/// this. Unlike the `source_node` that `LambdaState` had and lost, this one cannot be silently wrong
-/// about a state it does resolve: a name either was recorded by this lowering or was not.
+/// this. It cannot be silently wrong about a state it does resolve: a name either was recorded by this
+/// lowering or was not.
 ///
 /// A `StateId` past the end of `states` also yields `None` rather than panicking — `window` is a
 /// library path a renderer calls per step, and no index it could hold may abort the process.
@@ -224,10 +206,10 @@ pub struct TmProgram {
 /// `heads[i]` is tape `i`'s head index against the tape as currently materialized
 /// (`sim::Tape::head_index`, i.e. `left.len()`), and `window_start[i]` is the index of tape `i`'s first
 /// window cell in that same space. A marker's position inside the window is therefore `heads[i] -
-/// window_start[i]`, and a scrolling call that addresses the tape directly — the planned
-/// `tapeSlice(tape, from, to)` — has these as a coordinate space to speak in, rather than only a
-/// window-relative index with nothing to scroll against. See `TmState::window`'s doc for the one
-/// caveat on what "materialized" bounds this coordinate to.
+/// window_start[i]`, and a scrolling call that addresses the tape directly — `tapeSlice(tape, from, to)` —
+/// has these as a coordinate space to speak in, rather than only a window-relative index with nothing to
+/// scroll against. See `TmState::window`'s doc for the one caveat on what "materialized" bounds this
+/// coordinate to.
 #[derive(Clone, Debug, PartialEq, Eq)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 #[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export))]
@@ -241,15 +223,9 @@ pub struct TmState {
     pub window_start: Vec<usize>,
     /// Each tape's cells from `window_start[i]`, at most `radius` either side of its head.
     ///
-    /// **ON THE WIRE A TAPE'S WINDOW IS ONE STRING, A CELL A CHARACTER** (`tape_windows`). The web app records a TM leg
-    /// a frame a step, and as an array of one-character strings a tape this field was most of what a frame cost. For
-    /// `map`/`fold` over three elements, 78,459 frames of 85 cells, measured in node on the release wasm: building them
-    /// took 501 to 519 ms, and the structured clone that carries them from the worker to the page 227 to 235 ms to
-    /// write and 199 to 208 ms to read, 44.1 MB in all (2026-10-06). As a string a tape, from a throwaway build that
-    /// wrote the same shape and from this one: building 185 to 203 ms in five runs, writing 49 to 55 ms and reading 58
-    /// to 59 ms in three, 20.7 MB (2026-10-06 and 07). A full TM history in Chromium retained 68,637,886.67 bytes of heap, and retains
-    /// 29,342,720.67 (`HISTORY_BYTES`'s doc). **A CELL IS A `char`, NOT A UTF-16 UNIT**: a symbol outside the basic
-    /// plane is two units of the string, so a reader takes the cells by code point.
+    /// **ON THE WIRE A TAPE'S WINDOW IS ONE STRING, A CELL A CHARACTER** (`tape_windows`), because the web app
+    /// records a TM leg a frame a step. **A CELL IS A `char`, NOT A UTF-16 UNIT**: a symbol outside the basic plane
+    /// is two units of the string, so a reader takes the cells by code point.
     #[cfg_attr(feature = "serde", serde(with = "tape_windows"))]
     #[cfg_attr(feature = "ts", ts(type = "Array<string>"))]
     pub window: Vec<Vec<Symbol>>,
@@ -498,18 +474,14 @@ impl LambdaState {
     /// `want` (see that function's one-line body); the recording a non-empty `want` triggers lives at
     /// `Printer::node`, the single site every subterm passes through regardless of whether `want` has
     /// anything in it. Calling `print_lambda_linked` here directly, with `c.last_redex()` as `want`,
-    /// rides the walk this call was already paying for — it does not add one. That matters because the
-    /// record loop calls this once per β-step (`FRAME_BYTES`, measured at 555 steps on `map_fold`); a
-    /// design that printed twice here would pay for the second print that many times over.
+    /// rides the walk this call was already paying for — it does not add one. That matters because the record
+    /// loop calls this once per β-step; a design that printed twice here would pay for the second print that
+    /// many times over.
     ///
-    /// **NO SECOND WALK IS NOT THE SAME AS FREE.** Measured with `frame_cost_probe` before and after,
-    /// same machine, section D (`FRAME_BYTES = 512`): render cost rose **+20% to +75%** per step —
-    /// `map_fold` 3.92 → 5.74 µs, `while4` 4.41 → 5.46, `sample` 3.31 → 5.81 — while the β-step itself
-    /// was unchanged (`while4` 0.46 → 0.46). Two things this doc's argument does not mention pay for
-    /// that: the `want` map is allocated and dropped per call, and `Printer::node`'s
-    /// `want.get(&self.path)` compares a `Vec<Dir>` where the empty-`want` path was a null check, so it
-    /// scales with path length. Microseconds in absolute terms, and the record loop's budget is bytes
-    /// rather than time — but the figure belongs next to the claim rather than inferred from it.
+    /// **NO SECOND WALK IS NOT THE SAME AS FREE.** Two costs remain: the `want` map is allocated and
+    /// dropped per call, and `Printer::node`'s `want.get(&self.path)` compares a `Vec<Dir>` where the
+    /// empty-`want` path is a null check, so it scales with path length. The record loop's budget is
+    /// bytes rather than time.
     ///
     /// **THE SENTINEL KEY IS ARBITRARY AND NEVER LEAVES THIS FUNCTION.** `print_lambda_linked` inverts
     /// `want` BY PATH (see its own doc) and hands back whichever id named the matching path; nothing
@@ -607,11 +579,11 @@ impl TmState {
     /// state's name, which allocates nothing and so does not disturb the cost above. See the struct doc
     /// for what it resolves and the three cases where it honestly answers `None`.
     ///
-    /// **`Option<&SourceMap>` BECAUSE A CALLER CAN HONESTLY HAVE NO MAP AT ALL**, which is 5d-i's
-    /// `TmScratch`: a machine typed straight into a pane was never lowered from a Core, so there is no
-    /// lowering for `tm_owner` to have recorded anything in. `Session::tm_state` passes
-    /// `Some(&self.map)`; a scratch passes `None`, and `source_node` becomes `None` on exactly the path
-    /// where it has no meaning. See
+    /// **`Option<&SourceMap>` BECAUSE A CALLER CAN HONESTLY HAVE NO MAP AT ALL**, which is
+    /// `redextape-wasm`'s `TmScratch`: a machine typed straight into a pane was never lowered from a
+    /// Core, so there is no lowering for `tm_owner` to have recorded anything in. `Session::tm_state`
+    /// passes `Some(&self.map)`; a scratch passes `None`, and `source_node` becomes `None` on exactly the
+    /// path where it has no meaning. See
     /// `docs/superpowers/specs/2026-08-11-plan5d-i-session-model-design.md` §3.1.
     ///
     /// **THIS IS THE SHAPE §3.1's DECISION 2 REJECTED ONE LAYER OUT, AND IT IS ADMISSIBLE HERE FOR A
@@ -623,25 +595,22 @@ impl TmState {
     /// struct doc above lists three kinds of state that do — so the parameter adds no state to the type
     /// and there is no status to fabricate.
     ///
-    /// **THE REJECTED ALTERNATIVE IS A SECOND `window_unmapped` CONSTRUCTOR**, which is the cheaper
-    /// diff: it leaves the twelve test call sites of this function untouched. It duplicates the window,
-    /// heads and rule computation — the part of this function with logic in it — so a change to how a
-    /// window is clamped, or to how `rule` matches, would have to land in two places or silently land
-    /// in one. Cheap diff, wrong factoring.
+    /// **THE REJECTED ALTERNATIVE IS A SECOND `window_unmapped` CONSTRUCTOR.** It duplicates the
+    /// window, heads and rule computation — the part of this function with logic in it — so a change
+    /// to how a window is clamped, or to how `rule` matches, would have to land in two places or
+    /// silently land in one.
     ///
     /// CLAMPED AT BOTH ENDS OF WHAT THE TAPE HAS MATERIALIZED, not merely bounded in length: a head
     /// near the start of a tape has no `radius` cells to its left, and `Tape::window`'s own
     /// `saturating_sub`/`min` are what stop the slice running off either edge rather than merely
     /// producing a short-but-wrong one.
     ///
-    /// `heads[i]` AND `window_start[i]` ARE MATERIALIZED-TAPE COORDINATES (see the struct doc), which
-    /// corrects an earlier claim here that no coordinate existed once the head had moved left of
-    /// everything it had visited. Checked against `sim::Tape::step`: `left.len()` is a well-defined
-    /// index into every cell the tape has touched so far. What is true is narrower than "no
-    /// coordinate" — a `Move::L` past the materialized region leaves `left` empty, so the region's own
-    /// left edge (and therefore the origin `left.len()` counts from) shifts with the head rather than
-    /// staying fixed at the start of the run. `heads`/`window_start` are reported against the region as
-    /// materialized at the moment of this call, which is well-defined, just not a fixed absolute origin.
+    /// `heads[i]` AND `window_start[i]` ARE MATERIALIZED-TAPE COORDINATES (see the struct doc):
+    /// `left.len()` is a well-defined index into every cell the tape has touched so far. A `Move::L`
+    /// past the materialized region leaves `left` empty, so the region's own left edge (and therefore
+    /// the origin `left.len()` counts from) shifts with the head rather than staying fixed at the start
+    /// of the run. `heads`/`window_start` are reported against the region as materialized at the moment
+    /// of this call, which is well-defined, just not a fixed absolute origin.
     pub fn window<M: Borrow<Machine>>(c: &TmCursor<M>, map: Option<&SourceMap>, radius: usize) -> TmState {
         let mut window = Vec::with_capacity(c.tapes().len());
         let mut heads = Vec::with_capacity(c.tapes().len());
@@ -655,10 +624,9 @@ impl TmState {
         let state = c.state();
         // `get`, never `[]`: a `StateId` past the end must answer `None` rather than abort a renderer.
         let entry = c.machine().states.get(state as usize);
-        // `entry` FIRST, `map` SECOND, which is the order this line already read in before the map
-        // became optional — both are pure `Option`s over lookups with no side effects, so the nesting
-        // is free to be chosen for legibility rather than forced by evaluation order. NO FALLBACK IN
-        // THE `None` ARM: an absent map answers `None` for every state, the same answer `tm_owner`
+        // `entry` FIRST, `map` SECOND — both are pure `Option`s over lookups with no side effects, so the
+        // nesting is free to be chosen for legibility rather than forced by evaluation order. NO FALLBACK
+        // IN THE `None` ARM: an absent map answers `None` for every state, the same answer `tm_owner`
         // already gives for scaffolding, rather than an invented owner. See this function's doc.
         let source_node = entry.and_then(|s| map.and_then(|m| m.tm_owner(&s.name)));
         let rule = entry.and_then(|s| s.rules.iter().position(|r| crate::tm::sim::rule_matches(&r.read, c.tapes())));
@@ -880,21 +848,20 @@ fn words(pairs: &[(u64, WordTag)]) -> Vec<AsmWord> {
 
 /// The step-0 half of linking one construct across the panes, built ONCE PER COMPILE.
 ///
-/// **THE λ VIEW NO LONGER LINKS THROUGH THIS (Plan 7 part 4a).** It links through the tree it draws,
-/// `LambdaTree`'s per-node `link`, at whatever step it shows. `lambda_spans` and `lambda_nodes` still
-/// cross the wasm boundary but have no reader in the web app; what it reads here is the source spans,
-/// the TM owners and `lambda_text`, the initial term a copy is seeded from.
+/// **THE λ VIEW DOES NOT LINK THROUGH THIS.** It links through the tree it draws, `LambdaTree`'s per-node
+/// `link`, at whatever step it shows. `lambda_spans` and `lambda_nodes` cross the wasm boundary but have
+/// no reader in the web app; what it reads here is the source spans, the TM owners and `lambda_text`, the
+/// initial term a copy is seeded from.
 ///
 /// NOT A FRAME, AND THE DIFFERENCE IS THE WHOLE DESIGN. `LambdaState` is recorded per step at
-/// `FRAME_BYTES`; this is built once, at the readout's budget, for the INITIAL term only. That is
-/// what makes it affordable where `LambdaState::ast` was not: a per-step tree cost 850 MB against a
-/// 32 MB ring, and this costs one extra print per compile over a walk that was already happening.
+/// `FRAME_BYTES`; this is built once, at the readout's budget, for the INITIAL term only. That is what
+/// makes it affordable: this costs one extra print per compile over a walk that was already happening.
 ///
 /// **IT IS STEP-0 ONLY, AND THAT IS NOT A SHORTCUT.** `SourceMap::node_to_lambda` records paths
-/// root-relative into the initial lowered term; normal-order reduction contracts root redexes, so at
-/// step N > 1 a path indexes a structurally different tree. `LambdaState` had a `source_node` on that
-/// mistake and lost it — see this module's header. A consumer must not use `lambda_nodes` against any
-/// term but the one `lambda_text` holds.
+/// root-relative into the initial lowered term; normal-order reduction contracts root redexes, so at step
+/// N > 1 a path indexes a structurally different tree. That is why `LambdaState` has no `source_node` —
+/// see `LambdaState`'s doc. A consumer must not use `lambda_nodes` against any term but the one
+/// `lambda_text` holds.
 ///
 /// **ONE STRUCT RATHER THAN AN ACCESSOR PER LEG**, because every leg must come from ONE compile. An
 /// accessor per leg would be a chance per leg to hold one program's source index beside another
@@ -907,9 +874,7 @@ pub struct LinkIndex {
     /// The INITIAL term, printed at the caller's budget.
     pub lambda_text: String,
     pub lambda_spans: Vec<(Span, TokenClass)>,
-    /// Which limit cut `lambda_text`, or `None`. **Renamed from `lambda_truncated` rather than
-    /// retyped**: leaving the name would let `if (index.lambdaTruncated)` keep compiling while
-    /// silently meaning something new.
+    /// Which limit cut `lambda_text`, or `None`.
     pub lambda_cut: Option<Cut>,
     /// A node's span in `lambda_text`. ABSENT for a node whose subterm fell past the cut, never a
     /// span clamped to it — see `print_lambda_linked`.
@@ -926,7 +891,7 @@ pub struct LinkIndex {
     /// at the width its run fitted (`SourceMap::tm_instr`'s doc).
     ///
     /// `-1` RATHER THAN `Option<NodeId>` because this crosses to JavaScript as an `Int32Array`, and a
-    /// dense typed array is the difference between 143 KB and 26,484 objects for `list60`.
+    /// dense typed array is far cheaper than objects.
     ///
     /// **A `NodeId` THAT WOULD NOT FIT `i32` DECLINES THE WHOLE LEG, THE SAME WAY A `None` PROGRAM
     /// DOES — IT DOES NOT BECOME `-1`.** `NodeId` is a `u32`, and a value at or past `2^31` goes
@@ -936,14 +901,13 @@ pub struct LinkIndex {
     /// `i32::try_from` and empties the whole vec on failure — the same "no lie, just nothing" refusal
     /// `LambdaTree::build` makes when its arena index would not fit `u32`.
     ///
-    /// **THAT REFUSAL IS NOW PROVABLY UNREACHABLE, AND IS KEPT ANYWAY.** It used to cite
-    /// `core::NodeGen::fresh` as a bare counter that bounded nothing; `core::MAX_NODE_ID` bounds it
-    /// now, and sits under `i32::MAX` precisely so this cast cannot fail. The check stays because it
-    /// costs one comparison and because the alternative is a cast whose soundness lives in another
-    /// module's constant — if that ceiling is ever raised past `2^31`, this refuses instead of
+    /// **THAT REFUSAL IS PROVABLY UNREACHABLE, AND IS KEPT ANYWAY.** `core::MAX_NODE_ID` bounds
+    /// `core::NodeGen::fresh` and sits under `i32::MAX` precisely so this cast cannot fail. The check
+    /// stays because it costs one comparison and because the alternative is a cast whose soundness lives
+    /// in another module's constant — if that ceiling is ever raised past `2^31`, this refuses instead of
     /// silently emitting a wrong owner.
     ///
-    /// THE NARROWER ALTERNATIVE WAS WEIGHED AND REJECTED, recorded so it is not re-proposed blind:
+    /// THE NARROWER ALTERNATIVE IS REJECTED, and stated so it is not re-proposed blind:
     /// map only the failing entries to some *other* negative value (`i32::MIN`) and keep every
     /// representable owner, trading total refusal for one missing link. It buys availability and
     /// costs honesty, and honesty is what this refusal is for — `web/src/link.ts`'s `nodeForState`
@@ -1027,12 +991,12 @@ mod tests {
         assert_eq!(move_text(Move::S), "S");
     }
 
-    /// THE DEFECT THIS PINS: before the fix, `tm_owner` cast a `NodeId` to `i32` with `as`, which wraps
-    /// silently rather than refusing. `u32::MAX` is the sharpest fixture for it — `u32::MAX as i32` is
-    /// exactly `-1`, the same sentinel `tm_owner`'s doc reserves for "this state has no owner at all" —
-    /// so the pre-fix build for `s0` (which DOES have an owner, `u32::MAX`) was byte-for-byte identical
-    /// to the pre-fix build for `s1` (which genuinely has none). A consumer reading `tm_owner` could not
-    /// tell a real, huge owner id from no owner; that is the silent wrong answer, not a crash.
+    /// THE DEFECT THIS PINS: a `tm_owner` that casts a `NodeId` to `i32` with `as` wraps silently rather
+    /// than refusing. `u32::MAX` is the sharpest fixture for it — `u32::MAX as i32` is exactly `-1`, the
+    /// same sentinel `tm_owner`'s doc reserves for "this state has no owner at all" — so that cast builds
+    /// `s0` (which DOES have an owner, `u32::MAX`) byte-for-byte identical to `s1` (which genuinely has
+    /// none). A consumer reading `tm_owner` could not tell a real, huge owner id from no owner; that is
+    /// the silent wrong answer, not a crash.
     ///
     /// No parse can mint a `NodeId` this large: `core::NodeGen::fresh` saturates at `core::MAX_NODE_ID`,
     /// which sits under `i32::MAX` so that this cast cannot fail — see both docs. That is exactly why this
@@ -1063,7 +1027,7 @@ mod tests {
 
         let index = LinkIndex::build(None, Some(&program), &map, 0, 0);
 
-        // Not `vec![-1, -1]` — that would be the pre-fix collision, s0's real (if unrepresentable) owner
+        // Not `vec![-1, -1]` — that would be the `as`-cast collision, s0's real (if unrepresentable) owner
         // reading identically to s1's genuine absence. The whole leg must decline instead, exactly as it
         // already does for a `None` program (`link_index_is_total_over_a_declined_leg`, in the
         // integration suite).

@@ -1,8 +1,6 @@
 //! **Are `Owner::None` β-steps structurally unattributable, or is there headroom for more tagging?**
-//! Follow-up to `owner_probe.rs`'s M1/M2: that probe measured `while4` and `countdown4` at 470/474
-//! steps with 397 `None` each, after `lower.rs` grew five tagging sites. This one asks WHY the `None`
-//! count stayed so high — decayed tag coverage (headroom == 0, tags consumed by contraction) or
-//! misplaced tagging (headroom > 0, tags still present but off the redex's path).
+//! This probe asks why a β-step is `None`: decayed tag coverage (headroom == 0, tags consumed by
+//! contraction) or misplaced tagging (headroom > 0, tags still present but off the redex's path).
 //!
 //! # HOW TO RUN THIS
 //!
@@ -11,14 +9,13 @@
 //!   cargo run --release -p redextape-core --example none_probe
 //! ```
 //!
-//! **The cap is not decoration and `MemorySwapMax=0` is the load-bearing half.** An earlier measurement
-//! over a comparable family took 60 GiB of RAM and 29 GiB of swap and wedged the machine. An OOM-kill
-//! or a timeout here is a RESULT to report, not something to work around by raising the cap.
+//! **The cap is not decoration and `MemorySwapMax=0` is the load-bearing half.** This file reduces λ
+//! terms, and the cap alone lets the kernel thrash instead of failing. An OOM-kill or a timeout here is a
+//! RESULT to report, not something to work around by raising the cap.
 //!
 //! **Drives `trace::LambdaCursor`, never `reduce_trace`**, which materialises every step's term by
-//! contract and is how the 60 GiB run happened. Every table below is flushed per program, per line —
-//! see `line()` — so a kill mid-run leaves complete rows up through the last program's `measure()`,
-//! never a half-written one.
+//! contract. Every table below is flushed per program, per line — see `line()` — so a kill mid-run
+//! leaves complete rows up through the last program's `measure()`, never a half-written one.
 //!
 //! # WHAT THIS MEASURES
 //!
@@ -192,8 +189,8 @@ fn main() {
 
     // Every table's row for a program is flushed immediately after that program's `measure()` finishes
     // — interleaved across the three tags rather than three separate passes — so a kill mid-run leaves
-    // every table complete through the last finished program, never one table ahead of the others. Same
-    // fix `owner_probe.rs` already applies to its M1/M2 split; see this file's module doc.
+    // every table complete through the last finished program, never one table ahead of the others.
+    // `owner_probe.rs` flushes its M1/M2 rows the same way; see this file's module doc.
     for (name, src) in &progs {
         let c = measure(src);
 

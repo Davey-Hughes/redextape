@@ -1,5 +1,5 @@
-//! Part 2b-1 substrate: the unary gadgets compose into a multi-step computation on a genuine simulated
-//! multi-tape TM. Part 2b-2's `lower_tm` produces machines of exactly this shape from register-assembly.
+//! The unary gadgets compose into a multi-step computation on a genuine simulated multi-tape TM;
+//! `lower_tm` produces machines of exactly this shape from register-assembly.
 
 // Test target: a fixture that fails to build IS the failure this file reports, so panicking is
 // deliberate here. The `allow-*-in-tests` keys in `clippy.toml` only reach `#[test]` functions and
@@ -87,16 +87,15 @@ fn gadgets_compose_with_a_trailing_comparison() {
 /// An encoding reporting `field_width() == None` declares itself UNBOUNDED, and `run_tm_fitted` must
 /// then make exactly ONE attempt with no width search and report `None` as the fitted width.
 ///
-/// That branch has never been executed. Roadmap item 4 predicted the binary encoding would exercise
-/// it for free; it does not, because Binary is bounded. This mock is what actually covers it —
-/// delegating every gadget to `Unary::default()` so only the width REPORTING differs.
+/// No shipped encoding reaches that branch: `Unary` and `Binary` both report a width. This mock is what
+/// covers it — delegating every gadget to `Unary::default()` so only the width REPORTING differs.
 #[derive(Debug)]
 struct Unbounded(Unary);
 
 /// How many times ANY `Unbounded::at_width` has been called. `run_tm_fitted`'s search loop calls
 /// `enc.at_width(w)` once per attempt; its unbounded early-return calls it never. Counting is what
 /// turns "no search happened" from an inference about which branch must have run into an OBSERVATION
-/// of the search's own mechanism — the distinction this branch has had to make fourteen times.
+/// of the search's own mechanism.
 static AT_WIDTH_CALLS: AtomicUsize = AtomicUsize::new(0);
 
 impl Encoding for Unbounded {
@@ -194,11 +193,10 @@ fn an_unbounded_encoding_does_not_search_on_overflow() {
     let before = AT_WIDTH_CALLS.load(Ordering::Relaxed);
     let (run, width) = run_tm_fitted(&core, &Unbounded(Unary::default()), TM_DEFAULT_CAPS);
     // Asserted FIRST, deliberately. This is the DIRECT evidence that no search ran — it observes the
-    // search's own mechanism, where `width == None` below only says which branch was taken, from which
-    // "one attempt" follows by code structure rather than by observation. Ordering matters because the
-    // width assertion would otherwise fire first and this one would never be reached, leaving it
-    // unproven: checked by making the mock report bounded, which fires THIS assertion with 5 calls
-    // (widths 4, 8, 16, 32, 64) rather than the width one.
+    // search's own mechanism, where `width == None` below only says which branch was taken, from
+    // which "one attempt" follows by code structure rather than by observation. Ordering matters
+    // because the width assertion would otherwise fire first and this one would never be reached,
+    // leaving it unproven.
     assert_eq!(
         AT_WIDTH_CALLS.load(Ordering::Relaxed) - before,
         0,

@@ -14,11 +14,10 @@
 //!
 //! # THE QUESTIONS
 //!
-//! 1. **How large is the step-0 term?** 5b's lambda link is step-0 only, so the text it highlights
+//! 1. **How large is the step-0 term?** The lambda link is step-0 only, so the text it highlights
 //!    against is `print(lower(core))` — bounded by the PROGRAM, not by any reduction. If that prints
 //!    whole at a sane budget, windowing around a clicked construct is a JS string slice rather than
-//!    new printer machinery. `while40`, which defeated 5a-ii's tree bound, is irrelevant here: it
-//!    explodes at step N, not step 0.
+//!    new printer machinery. `while40` is irrelevant here: it explodes at step N, not step 0.
 //! 2. **How many clicks land?** A click resolves to the innermost node whose source span contains it.
 //!    That node needs a lambda path for the lambda highlight and a TM block for the table highlight.
 //!    `lam%`/`tm%` measure exactly that share, over the nodes `SourceMap::node_to_source` maps — the
@@ -54,10 +53,9 @@ mod web_budget;
 
 use web_budget::WEB_BYTE_BUDGET;
 
-/// Programs, spread deliberately. The first seven are `frame_cost_probe`'s own calibration rows; the
-/// last two exist to falsify, and they attack a DIFFERENT bound from that probe's. The standing lesson
-/// is that a corpus chosen to be representative cannot break a bound, and 5a-ii proved it twice in one
-/// day.
+/// Programs, spread deliberately. The first six are `frame_cost_probe`'s own calibration rows and the
+/// next four its falsifiers; the last two exist to falsify, and they attack a DIFFERENT bound from that
+/// probe's. The standing lesson is that a corpus chosen to be representative cannot break a bound.
 fn programs() -> Vec<(String, String)> {
     let list20 = format!("[{}]", (1..=20).map(|n| n.to_string()).collect::<Vec<_>>().join(", "));
     let list60 = format!("[{}]", (1..=60).map(|n| n.to_string()).collect::<Vec<_>>().join(", "));
@@ -114,8 +112,8 @@ struct Row {
     ///
     /// NOT the same axis as `lam_nodes` above: `lam_nodes` is `LinkIndex::lambda_nodes`, which drops a
     /// node whose subterm fell past the truncation cut (see `LinkIndex`'s doc on that field), so it
-    /// would UNDERSTATE λ coverage on `prog200`, the one program the cut bites. `lam_pct` looks up
-    /// `SourceMap`'s own map instead, which the cut never touches.
+    /// would UNDERSTATE λ coverage on a program the cut bites. `lam_pct` looks up `SourceMap`'s own map
+    /// instead, which the cut never touches.
     lam_pct: usize,
     /// Share (rounded to the nearest percent) of `src_nodes` that also have an entry in
     /// `SourceMap::node_to_tm`. This IS design §2.2's "TM coverage", claimed at 50-82%.
@@ -128,9 +126,7 @@ struct Row {
     /// much of `tm_owner` is `-1`.
     ///
     /// IT IS NOT §2.2's "TM coverage" (`tm_pct`, above), which counts NODES. A program can have
-    /// `states` far exceed `src_nodes` — `prog200` is 44,670 states over 403 nodes — so the two ratios
-    /// read nothing alike: `prog200` is ~1.3% by this count against 50% by `tm_pct`. Conflating the
-    /// two was exactly the bug this probe shipped with.
+    /// `states` far exceed `src_nodes`, so the two ratios read nothing alike.
     owned_states: usize,
     naive_b: usize,
     columnar_b: usize,
@@ -153,8 +149,8 @@ fn build(name: &str, src: &str) -> Option<Row> {
     let ty = typeck::result_type(&program).ok()?;
     let kind = EncodingKind::Binary;
     // The session's order: run first, then build the map at the width the run fitted, since the map keys
-    // on state names and names depend on the width (`Session::compile`'s doc). `own_st` read low while the
-    // map was built at `MIN_FIELD_WIDTH`.
+    // on state names and names depend on the width (`Session::compile`'s doc). A map built at
+    // `MIN_FIELD_WIDTH` instead makes `own_st` read low.
     let described = tm::run_tm_described(&redextape_core::desugar::desugar(&program), kind, ty, tm::TM_DEFAULT_CAPS);
     let width = described.as_ref().map_or(tm::MIN_FIELD_WIDTH, |d| d.header.width);
     let (core, map) = SourceMap::build_from_program(&program, &*kind.at(width));
@@ -184,7 +180,7 @@ fn build(name: &str, src: &str) -> Option<Row> {
 
     // §2.2's clickable-set ratios, over `map`'s OWN maps rather than `index`'s legs — see `Row::lam_pct`
     // and `Row::tm_pct` for why that distinction matters (in short: `index.lambda_nodes` drops a node
-    // past the truncation cut, which would understate λ coverage on `prog200` specifically).
+    // past the truncation cut, which would understate λ coverage on a program the cut bites).
     let src_n = map.node_to_source.len();
     let lam_hits = map.node_to_source.keys().filter(|id| map.node_to_lambda.contains_key(id)).count();
     let tm_hits = map.node_to_source.keys().filter(|id| map.node_to_tm.contains_key(id)).count();
@@ -210,8 +206,8 @@ fn build(name: &str, src: &str) -> Option<Row> {
 /// `(state, owner)` PAIRS rather than the dense `Vec<i32>` the columnar decision introduced. Built
 /// from `index`'s own legs — `lambda_spans`, `lambda_nodes` and `source_nodes` are identical arrays
 /// in both the naive and columnar shapes, so only the TM leg needs reshaping — never from
-/// `serde_json::to_vec(index)` whole, which was the bug: `LinkIndex` IS the columnar decision's
-/// output, so serializing it directly can only re-measure the winner under a naive label.
+/// `serde_json::to_vec(index)` whole: `LinkIndex` IS the columnar decision's output, so serializing it
+/// directly can only re-measure the winner under a naive label.
 #[cfg(feature = "serde")]
 fn naive_len(index: &LinkIndex) -> usize {
     let tm_pairs: Vec<(u32, u32)> = index
@@ -231,8 +227,14 @@ fn naive_len(_index: &LinkIndex) -> usize {
 }
 
 fn main() {
-    println!("Plan 5b link index. `naive_b` is JSON and reads 0 without --features serde.");
-    println!("`lam%`/`tm%` are §2.2's node coverage; `own_st` is a different axis (states, not nodes).\n");
+    println!(
+        "`linkIndex()`: what it weighs, and how many clicks land. `naive_b` is JSON and reads 0 without \
+         --features serde."
+    );
+    println!(
+        "`lam%`/`tm%` are the click-linking design's §2.2 node coverage; `own_st` is a different axis \
+         (states, not nodes).\n"
+    );
     println!(
         "{:<12} {:>7} {:>9} {:>5} {:>9} {:>8} {:>8} {:>8} {:>6} {:>6} {:>8} {:>10} {:>10}",
         "program",

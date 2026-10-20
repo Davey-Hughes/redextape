@@ -1,18 +1,16 @@
 #!/usr/bin/env bash
-# Gate the tracked Lua. Syntax, and the one invariant `plugin/redextape.lua` calls load-bearing.
+# Gate the tracked Lua: syntax, and the two lists in `plugin/redextape.lua` that must equal lists elsewhere.
 #
 # CI invokes this same script (.forgejo/workflows/ci.yml) and so does the pre-commit hook
 # (.pre-commit-config.yaml), so the local and CI gates cannot drift — the convention
-# `scripts/check-all.sh` states and the three sibling `check-*.sh` scripts already follow.
+# `scripts/check-all.sh` states and the eight sibling `check-*.sh` scripts already follow.
 #
 #   scripts/check-lua.sh              # scan the tracked Lua
 #   scripts/check-lua.sh --self-test  # prove the detector still detects
 #
-# **WHY THIS EXISTS.** `plugin/redextape.lua` arrived in a repository that gates every other language
-# it ships — `cargo fmt` and `clippy` on `*.rs`, `biome ci` and `tsc` on `web/` — and was covered by
-# nothing at all. Its own commit's pre-commit run reported `(no files to check) Skipped` for all four
-# of those hooks, which is the honest reading of a tree with no Lua gate in it. A syntax error would
-# have shipped green.
+# **WHY THIS EXISTS.** `plugin/redextape.lua` is shipped by a repository that gates every other language it
+# ships — `cargo fmt` and `clippy` on `*.rs`, `biome ci` and `tsc` on `web/` — and nothing else covers it: a
+# syntax error would ship green.
 #
 # **THE CHECKS AFTER THE FIRST ARE THE ONES THAT EARN THE SCRIPT, AND BOTH HAVE THE SAME SHAPE:** a
 # list in `plugin/redextape.lua` that must equal a list somewhere else in the tree, where disagreeing
@@ -35,13 +33,11 @@
 # with it. Nothing on either side fails: the Lua is valid, the Rust compiles, and every test of both
 # still passes.
 #
-# **THE INTERPRETER IS PROBED RATHER THAN NAMED, AND THE FIRST DRAFT NAMING ONE FAILED IN CI.** It ran
-# `nvim --headless` with `loadfile`, on the reasoning that Neovim is required to use any of this
-# anyway. True on a developer's machine and false on the runner: `catthehacker/ubuntu:act-latest`
-# carries node, git and curl, and no Neovim and no Lua at all. The self-test caught it rather than the
-# scan — with the interpreter missing, "a syntactically invalid file is rejected" passes for the wrong
-# reason and "a valid file is accepted" fails, which is the pair working exactly as the sibling gates'
-# comments say a self-test should.
+# **THE INTERPRETER IS PROBED RATHER THAN NAMED.** `nvim --headless` with `loadfile` would be natural, since
+# Neovim is required to use any of this anyway, but the runner (`catthehacker/ubuntu:act-latest` carries
+# node, git and curl) has no Neovim and no Lua at all. With the interpreter missing, "a syntactically
+# invalid file is rejected" passes for the wrong reason and "a valid file is accepted" fails, so it is the
+# self-test, not the scan, that catches a missing interpreter.
 #
 # So any Lua-capable interpreter will do and the script takes the first one it finds. If it finds
 # none it FAILS rather than skipping: a gate that quietly does less in one of the two places it runs

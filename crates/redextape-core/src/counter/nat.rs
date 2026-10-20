@@ -1,12 +1,10 @@
 //! The unbounded natural numbers a counter holds, and the few operations a counter program's accelerated
 //! run and its readback need of them.
 //!
-//! **WHY THIS IS IN THE TREE AND NOT A DEPENDENCY.** A compiled program's counters reach thousands of bits,
-//! and an accelerated run divides them by a divisor that never changes within the program. When every head
-//! move divided a counter by the base with `num-bigint`, that division was 55% of the profile of
-//! `let x = 40; x + 2`'s stage 1 run and `sum(5)` took 146.9 s, because `num-bigint` spends a hardware `div`
-//! on every limb. This module divides through a precomputed reciprocal instead — [`Divisor`] — which is a
-//! multiplication and a few compares per limb, and it works in place on the limbs.
+//! **Why this is in the tree and not a dependency.** A compiled program's counters reach thousands of bits,
+//! and an accelerated run divides them by a divisor that never changes within the program. `num-bigint` spends a
+//! hardware `div` on every limb. This module divides through a precomputed reciprocal instead — [`Divisor`] —
+//! which is a multiplication and a few compares per limb, and it works in place on the limbs.
 //!
 //! **THE REPRESENTATION.** A [`Nat`] is its base-2^64 digits, least significant first, with no zero limb
 //! at the top, so zero is the empty vector and two equal numbers have equal limbs. 64-bit limbs halve the

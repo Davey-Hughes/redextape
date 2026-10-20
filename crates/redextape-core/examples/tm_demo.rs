@@ -2,9 +2,8 @@
 //! multi-tape Turing machine, simulate it, decode the final tape, and check it against BOTH the
 //! reference tree-walker and the λ-calculus normal form — the three-way oracle `reference == λ == TM`.
 //!
-//! It also shows the headline of Plan 3b-1: first-class functions (`map`/`fold`, capturing closures,
-//! currying) run on the *first-order* TM via a Core→Core defunctionalization pass — so higher-order
-//! programs are three-way too.
+//! It also shows first-class functions (`map`/`fold`, capturing closures, currying) running on the
+//! *first-order* TM via a Core→Core defunctionalization pass — so higher-order programs are three-way too.
 //!
 //!     cargo run --example tm_demo -p redextape-core
 //!
@@ -60,7 +59,7 @@ fn main() {
         report(src);
     }
 
-    // 2. First-class functions on a first-order Turing machine (Plan 3b-1). The TM has no notion of a
+    // 2. First-class functions on a first-order Turing machine. The TM has no notion of a
     //    function value; a Core→Core *defunctionalization* pass compiles each closure to a plain HEAP
     //    record `cons(tag, env)` and each dynamic call to a generated `$applyN` dispatcher — first-order
     //    Core the existing δ-layer runs unchanged. So map/fold/capture/currying are three-way too.
@@ -81,19 +80,19 @@ fn main() {
         report(src);
     }
 
-    // 3. The honest boundary: Plan-2 latent traps the λ backend REFUSES to lower (it returns a
+    // 3. The honest boundary: latent traps the λ backend REFUSES to lower (it returns a
     //    LowerError rather than risk a silent miscompile), while the reference and the first-order TM
     //    both run them to a value. These are `reference == TM` two-way — the dual of a λ-only program.
-    //    The last row is Plan 3b-2's headline: a closure that captures a MUTABLE by reference. λ still
-    //    refuses (it has no notion of a mutable capture), but the TM now runs it via BOXING — defunc
-    //    allocates a heap box for the captured mutable and the closure reads/writes through it.
+    //    The last row is a closure that captures a MUTABLE by reference. λ refuses (it has no notion of
+    //    a mutable capture), but the TM runs it via BOXING — defunc allocates a heap box for the
+    //    captured mutable and the closure reads/writes through it.
     println!("\n3. Where λ bows out but the TM does not (reference == TM, two-way)\n");
     println!("   {:<64} {:>9}  {}", "program", "result", "reference == TM ?");
     println!("   {}", "─".repeat(96));
     for src in [
         "let mut x = 1; x = x + 1; let x = x + 10; x",
         "let mut acc = 0; fn bump(n) { n + 1 } acc = bump(acc); acc = bump(acc); acc",
-        // Plan 3b-2: `|x| x + n` captures the MUTABLE `n` by reference; `n` is reassigned to 10 AFTER
+        // `|x| x + n` captures the MUTABLE `n` by reference; `n` is reassigned to 10 AFTER
         // the closure is built but BEFORE it's called. λ rejects (mutable-in-closure); the TM boxes the
         // capture, so the call observes the later write and agrees with the reference at 10.
         "let mut n = 1; fn apply0(g) { g(0) } let f = |x| x + n; n = 10; apply0(f)",
@@ -111,7 +110,7 @@ fn main() {
         println!("       {line}");
     }
     let machine = lower_tm(&prog, &Unary::default());
-    println!("\n   → compiled to a {}-state, 4-tape Turing machine (REG / WORK / STACK / HEAP).", machine.states.len());
+    println!("\n   → compiled to a {}-state, 5-tape Turing machine (REG/WORK/STACK/HEAP/BOX).", machine.states.len());
     match run_tm(&core, &Unary::default(), TM_DEFAULT_CAPS) {
         TmRun::Ran { tapes } => {
             let (cells, head) = tapes[REG].snapshot();

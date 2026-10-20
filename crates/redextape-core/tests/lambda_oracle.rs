@@ -1,6 +1,5 @@
 //! The two-way oracle (§10.1): for every demo program, the reference tree-walker's result equals
-//! the decoded lambda normal form. This is the first cross-backend agreement guarantee; Plan 3
-//! extends it to three ways.
+//! the decoded lambda normal form.
 
 // Test target: a fixture that fails to build IS the failure this file reports, so panicking is
 // deliberate here. The `allow-*-in-tests` keys in `clippy.toml` only reach `#[test]` functions and

@@ -20,8 +20,7 @@ pub const DEFAULT_BUDGET: u64 = 5_000_000;
 /// `eval`/`apply` tree-walker uses fat frames in debug builds — reaching this depth needs on the
 /// order of a few MiB of stack — so the guard is only effective when the running thread has enough
 /// stack. We ensure that by raising the test/coverage thread stack via `RUST_MIN_STACK` in
-/// `.cargo/config.toml`; the CLI runs on the ~8 MiB main thread. (The WASM build, added in a
-/// later plan, must size its shadow stack to match — tracked as a Plan 4 follow-up.)
+/// `.cargo/config.toml`; the CLI runs on the ~8 MiB main thread.
 pub const MAX_EVAL_DEPTH: u32 = 700;
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -198,11 +197,11 @@ impl Evaluator {
     }
 
     fn apply(&mut self, callee: &Value, args: Vec<Value>) -> EResult {
-        // Match by reference: `Value` now has a hand-written `Drop`, so its fields cannot be moved
-        // out by value. Borrowing the closure's parts is sufficient here (`env`/`body` are only
-        // cloned/borrowed) and keeps behavior identical. `callee` itself is taken by reference too —
-        // its only caller (`eval_inner`'s `Apply` arm) never needs it back, but nothing here consumes
-        // it either, so a borrow is enough and avoids handing over ownership for nothing.
+        // Match by reference: `Value` has a hand-written `Drop`, so its fields cannot be moved out
+        // by value. Borrowing the closure's parts is sufficient here (`env`/`body` are only
+        // cloned/borrowed). `callee` itself is taken by reference too — its only caller
+        // (`eval_inner`'s `Apply` arm) never needs it back, but nothing here consumes it either, so
+        // a borrow is enough and avoids handing over ownership for nothing.
         match callee {
             Value::Closure { params, body, env } => {
                 if params.len() != args.len() {
@@ -413,7 +412,7 @@ mod tests {
 
     #[test]
     fn long_statement_sequence_is_a_runtime_error_not_a_stack_overflow() {
-        // A long statement sequence desugars to a deep Seq chain (desugar itself is now iterative
+        // A long statement sequence desugars to a deep Seq chain (desugar itself is iterative
         // and won't overflow, but evaluating the resulting deep tree still must not overflow eval).
         let stmts: Vec<String> = (0..10_000).map(|i| format!("{i};")).collect();
         let src = stmts.join("");

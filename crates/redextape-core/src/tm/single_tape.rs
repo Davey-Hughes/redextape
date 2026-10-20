@@ -22,8 +22,8 @@ pub const RIGHT: Symbol = '>';
 /// `TAPES` is 5, so this is slack rather than a live limit.
 ///
 /// **NOT named `MAX_TAPES`**: `tm/build.rs`'s `MAX_TAPES` is a different cap, on how many tapes a
-/// parsed `.tm` file may declare (`tm/syntax.rs` only imports it). Two different limits under one
-/// name in one module tree is the drift `scripts/check-attributions.sh` exists downstream of.
+/// parsed `.tm` file may declare. Two different limits under one name in one module tree is the drift
+/// `scripts/check-attributions.sh` exists downstream of.
 pub const MAX_ENCODABLE_TAPES: usize = 26;
 
 /// Tape `i`'s marker when its head IS in this block.
@@ -110,9 +110,8 @@ pub fn deinterleave(tape: &Tape, k: usize) -> Option<Vec<(Vec<Symbol>, usize)>> 
 /// though the two heads started in different places. Every oracle assertion built on this function
 /// (tape identity between the multi- and single-tape runs) is therefore satisfied by ANY head on
 /// either side whenever that tape ends all-blank, which the normal-tier corpus does for most of its
-/// tapes. This is an instrument weakness, not a construction defect — nothing in `to_single_tape` or
-/// `interleave` loses head information, only this comparison does — and is left as-is rather than
-/// redesigned.
+/// tapes. This is an instrument weakness, not a construction defect: nothing in `to_single_tape` or
+/// `interleave` loses head information, only this comparison does.
 #[must_use]
 pub fn normalize(cells: &[Symbol], head: usize) -> (Vec<Symbol>, usize) {
     let first = cells.iter().position(|c| *c != BLANK).unwrap_or(head).min(head);
@@ -148,9 +147,7 @@ pub const OVERFLOW: &str = "overflow";
 /// [`MAX_ENCODABLE_TAPES`]), whose `Machine::alphabet()` collides with the layout's own symbols
 /// (`layout_collision(m, &[])`), or whose image would hold more than `MAX_MACHINE_STATES` states. Each
 /// refusal is a degenerate one-state machine ([`refused`]) that halts in a named, non-accept state
-/// instead of building a construction it cannot represent
-/// correctly — the same shape `lower_tm.rs`'s `refused` takes for ITS unrepresentable inputs (an
-/// absurd slot count, `Mul` count, or state count).
+/// instead of building a construction it cannot represent correctly.
 ///
 /// **THAT SECOND REFUSAL IS NOT THE WHOLE PRECONDITION, AND CANNOT BE.** `Machine::alphabet` collects symbols
 /// only from rules' `read`/`write` — it has no way to see INITIAL TAPE CONTENTS, which are a separate
@@ -322,13 +319,12 @@ impl Names {
 
     /// The scan state walks RIGHT looking for head markers. A tape with a CONCRETE read hands off to
     /// that tape's check state on the content cell; a wildcard read emits no check at all, which is
-    /// the whole reason this construction fits (81% of read positions are wildcards on the design
-    /// spec's real lowered machines). **THAT SHARE IS NOT UNIVERSAL, THOUGH** (same caveat as
-    /// `emit_apply`'s tapes-per-rule figure, for the same reason — a different triple of machines):
-    /// the worst shipped demo (`the_worst_shipped_demo_measured_directly` below) measures only **66.0%**
-    /// wildcard read positions. Reaching `>` means every concrete read matched, so the candidate is verified and the
-    /// sweep rewinds to apply it; a mismatch on any checked tape abandons this candidate and falls
-    /// through to the next one, or to a stuck state if there is none.
+    /// the whole reason this construction fits: most read positions on the design spec's real lowered
+    /// machines are wildcards. That share is not universal: the worst shipped demo
+    /// (`the_worst_shipped_demo_measured_directly` below) has a lower wildcard share. Reaching `>`
+    /// means every concrete read matched, so the candidate is verified and the sweep rewinds to apply
+    /// it; a mismatch on any checked tape abandons this candidate and falls through to the next one,
+    /// or to a stuck state if there is none.
     fn emit_candidate(&mut self, m: &Machine, sid: StateId, c: usize, n_rules: usize, rule: &Rule) {
         let scan = format!("q{sid}.c{c}.scan");
         let rew = format!("q{sid}.c{c}.rew");
@@ -341,8 +337,7 @@ impl Names {
         self.push_rule(&scan, Names::r(Some(RIGHT), None, Move::S, rew_id));
         // A head marker for a tape with a CONCRETE read hands over to that tape's check state, which
         // sits on the content cell one to the right. Wildcard reads emit nothing here, which is the
-        // whole reason this construction fits — see this function's doc for the measured share and
-        // why it is not universal.
+        // whole reason this construction fits — see this function's doc for why it is not universal.
         for (i, want) in rule.read.iter().enumerate().take(m.tapes) {
             if let Some(sym) = want {
                 let chk = format!("q{sid}.c{c}.chk{i}");
@@ -360,18 +355,10 @@ impl Names {
         // `fail` (and, for the last candidate, `stuck`) is minted UNCONDITIONALLY here regardless of
         // whether `rule` has any concrete read at all. When `rule` is an all-wildcard catch-all, the
         // `for` loop above never pushes a rule INTO `fail_id` — nothing can mismatch a wildcard — so
-        // `fail` (and the `stuck` it would lead to) is allocated but UNREACHABLE from `start`. Corrects
-        // a prior claim of mine that such states "do not touch the state budget": measured by BFS
-        // reachability over the built `Machine` (following every rule's `next` from `start`),
-        // unreachable states are **1.25%-2.65%** of every real first-order lowered image measured
-        // (`1 + 2 * 3`, `cons(1, cons(2, nil))`, `sum(5)`, `count_down(4)`, the `while`-loop program in
-        // `real_lowered_machines_cost_far_more_than_the_toy_fixtures`'s doc) — exactly one `fail` plus
-        // one `stuck` per state whose last rule is an all-wildcard catch-all — and a smaller **0.46%**
-        // of the worst shipped (higher-order) demo. Pruning them would take `sum(5)` from 19.2014 to
-        // **18.8866** states per original state, and the worst shipped demo from 36.8587 to **36.6878**
-        // — real, but nowhere near enough alone to close either gap against `CEILING`. NOT IMPLEMENTED:
-        // recorded here, not acted on, so a future roadmap entry can cite the measurement without
-        // re-deriving it.
+        // `fail` (and the `stuck` it would lead to) is allocated but UNREACHABLE from `start`. These
+        // states still count against the state budget. Pruning them is NOT IMPLEMENTED: it would not
+        // by itself bring the worst shipped demo's image (`the_worst_shipped_demo_measured_directly`)
+        // under `CEILING`.
         let after_fail = if c + 1 < n_rules {
             self.id(&format!("q{sid}.c{}.scan", c + 1))
         } else {
@@ -386,13 +373,9 @@ impl Names {
         self.push_rule(&rew, Names::r(None, None, Move::L, rew_id));
     }
 
-    /// One pass per ACTING tape: a tape acts when it has a concrete write or a non-`S` move. Measured
-    /// on the design spec's three real lowered machines (`sum(5)`, `count_down(4)`, `[1, 2, 3]`), that
-    /// is 0.91-0.94 tapes per rule — essentially one — which is why a pass per acting tape costs what a
-    /// single pass would. **NOT the same triple this file's own tests measure**:
-    /// `real_lowered_machines_cost_far_more_than_the_toy_fixtures`'s three `SOURCES` (`1 + 2 * 3`,
-    /// `cons(1, cons(2, nil))`, `sum(5)`) measure 0.87, 0.90 and 0.93 tapes per rule respectively — a
-    /// nearby but different range, since it is a different triple of machines.
+    /// One pass per ACTING tape: a tape acts when it has a concrete write or a non-`S` move. On the
+    /// design spec's real lowered machines that is essentially one tape per rule, which is why a pass
+    /// per acting tape costs what a single pass would.
     fn emit_apply(&mut self, m: &Machine, sid: StateId, c: usize, rule: &Rule) -> StateId {
         let acting: Vec<usize> = (0..m.tapes)
             .filter(|i| {
@@ -418,18 +401,14 @@ impl Names {
     /// marker and hand straight to `mv{i}`. Either way, move the marker, rewind, continue.
     ///
     /// **THE NO-WRITE ARM SKIPS THE CONTENT CELL ENTIRELY, RATHER THAN VISITING IT TO WRITE NOTHING.**
-    /// Measured on `real_lowered_machines_cost_far_more_than_the_toy_fixtures`'s three `SOURCES`,
-    /// `rule.write.get(i)` is `None` for 87-91% of acting-tape passes there: for a first-order machine,
-    /// a write is the exception, not the rule. **THAT SHARE IS NOT UNIVERSAL, THOUGH**: the worst
-    /// shipped demo (`the_worst_shipped_demo_measured_directly` below) measures only 53% no-write
-    /// against 1.71 acting tapes per rule — nearly double the acting-tape rate and roughly half the
-    /// no-write share of the three `SOURCES` machines, which is why this split's saving on that machine
-    /// (6.7%, see that test's doc) falls well short of what the `SOURCES` figure alone would suggest.
-    /// Either way, the old unconditional shape emitted `wr{i}` and stepped right onto the content cell
-    /// and back left onto the marker even when `write` was `None` — a whole state and two steps spent
-    /// producing no effect. `ap{i}` in the no-write arm now stops moving as soon as it finds the marker
-    /// (`Move::S`, not `Move::R`) and hands off to `mv{i}` directly, which is exactly where the write
-    /// arm's `wr{i}` also leaves it: `mv{i}`'s wildcard read does not care which arm put it there.
+    /// For a first-order machine, a write is the exception, not the rule. **THE NO-WRITE SHARE IS NOT
+    /// UNIVERSAL, THOUGH**: the worst shipped demo (`the_worst_shipped_demo_measured_directly` below)
+    /// has a lower no-write share and a higher acting-tape rate than the first-order machines, which is
+    /// why this split's saving on that machine falls well short of the first-order machines' saving.
+    /// Visiting the content cell without writing costs a whole state and two steps for no effect. `ap{i}`
+    /// in the no-write arm stops moving as soon as it finds the marker (`Move::S`, not `Move::R`) and hands
+    /// off to `mv{i}` directly, which is exactly where the write arm's `wr{i}` also leaves it: `mv{i}`'s
+    /// wildcard read does not care which arm put it there.
     fn emit_one_tape_pass(&mut self, sid: StateId, c: usize, i: usize, rule: &Rule, after: StateId) -> StateId {
         let ap = format!("q{sid}.c{c}.ap{i}");
         let mv = format!("q{sid}.c{c}.mv{i}");
@@ -740,10 +719,10 @@ mod tests {
         assert_eq!(single.states[fin as usize].name, OVERFLOW);
     }
 
-    /// The exact failing input from the review: a 1-tape machine that writes `'a'`, which collides with
-    /// `head_away(0)`. Without `to_single_tape`'s `alphabet-collision` refusal, the marker move would clear
-    /// the marker to `'a'`, step onto the just-written `'a'` content cell, and the seek would mistake it for
-    /// the tape's own marker — corrupting the tape while the machine still reports ACCEPT.
+    /// A 1-tape machine that writes `'a'`, which collides with `head_away(0)`. Without
+    /// `to_single_tape`'s `alphabet-collision` refusal, the marker move would clear the marker to `'a'`,
+    /// step onto the just-written `'a'` content cell, and the seek would mistake it for the tape's own
+    /// marker — corrupting the tape while the machine still reports ACCEPT.
     #[test]
     fn a_data_symbol_colliding_with_a_marker_is_refused_not_silently_corrupted() {
         use crate::tm::sim::{DEFAULT_CAPS, simulate_final};
@@ -775,7 +754,7 @@ mod tests {
     /// `Machine::alphabet()` is empty) paired with an initial tape that contains `head_away(0)`. That
     /// refusal does NOT fire for this pair — it only ever looks at `m.alphabet()`, which is empty here —
     /// so `to_single_tape` would build the real construction and hand back a machine that silently corrupts
-    /// this exact tape. That asymmetry between the two checks is the whole point of the finding:
+    /// this exact tape. That asymmetry between the two checks is the whole point of this test:
     /// `layout_collision` sees the initial tape too, and refuses what `to_single_tape` alone cannot see.
     #[test]
     fn layout_collision_sees_a_symbol_only_the_initial_tape_carries() {
@@ -806,16 +785,16 @@ mod tests {
     }
 
     /// The real safety gap `to_single_tape`'s tape-count refusal closes: past `MAX_ENCODABLE_TAPES`,
-    /// `head_here`/`head_away` wrap past `Z`/`z` into other reserved symbols and eventually into
-    /// `BLANK` itself — `head_here(30)` is `'A' + 30` = code point 95 = `'_'` = [`BLANK`]. With the
-    /// tape-count check REMOVED (verified by temporarily disabling it, in `--release` so the
-    /// `debug_assert!` inside `head_here`/`head_away` does not catch it first): a 27-tape machine
-    /// touching only tape 26 reduces to a `Machine` whose `validate()` reports `'['` (tape 26's own
-    /// `head_here`) as an unrepresentable symbol — caught, just not by THIS refusal. A 31-tape machine
-    /// touching only tape 30 reduces to a `Machine` `validate()` calls CLEAN: `head_here(30)` typechecks
-    /// as an ordinary data symbol because it IS `BLANK`, so nothing distinguishes a head marker from an
-    /// untouched cell — the corruption class `layout_collision` exists for, reached through a door that
-    /// check does not cover because it is about tape COUNT, not alphabet content.
+    /// `head_here`/`head_away` wrap past `Z`/`z` into other reserved symbols and eventually into `BLANK`
+    /// itself — `head_here(30)` is `'A' + 30` = code point 95 = `'_'` = [`BLANK`]. With the tape-count
+    /// check REMOVED (in `--release`, so the `debug_assert!` inside `head_here`/`head_away` does not
+    /// catch it first), a 27-tape machine touching only tape 26 would reduce to a `Machine` whose
+    /// `validate()` reports `'['` (tape 26's own `head_here`) as an unrepresentable symbol — caught,
+    /// just not by THIS refusal. A 31-tape machine touching only tape 30 would reduce to a `Machine`
+    /// `validate()` calls CLEAN: `head_here(30)` typechecks as an ordinary data symbol because it IS
+    /// `BLANK`, so nothing distinguishes a head marker from an untouched cell — the corruption class
+    /// `layout_collision` exists for, reached through a door that check does not cover because it is
+    /// about tape COUNT, not alphabet content.
     #[test]
     fn a_machine_with_too_many_tapes_is_refused_not_silently_corrupted() {
         // `head_here(30)` itself is not callable here: its `debug_assert!` forbids `i >=
@@ -922,7 +901,7 @@ mod tests {
     /// A 2-tape machine whose rule has tape 0 MOVE WITHOUT WRITING (`write: None`, `moves: R`) and tape
     /// 1 WRITE WITHOUT MOVING (`write: Some('z')`, `moves: S`) — the two arms `emit_one_tape_pass`
     /// splits between. Every acting tape in `multi_tape_rule` above has a concrete write, so that test
-    /// never exercises the no-write arm at all. Tape 0 here is exactly the case Step 1 rewired: `ap0`
+    /// never exercises the no-write arm at all. Tape 0 here is exactly the no-write arm's case: `ap0`
     /// must land ON the marker and hand off to `mv0` directly, never visiting the content cell; an off
     /// by one step there corrupts tape 0's own data (a marker symbol written into a content cell, or the
     /// head left on a neighbouring block's cell) rather than raising an error, so only a differential
@@ -959,15 +938,12 @@ mod tests {
     /// and `MAX_MACHINE_STATES` is 1,000,000, so the construction has 20.4 states per original state
     /// to spend. This asserts the PROPERTY rather than recording a figure that goes stale.
     ///
-    /// MEASURED (inverting this assertion once, via `cargo nextest run -p redextape-core
-    /// the_construction_stays_inside_the_state_budget`): `wildcard_only` 3.00, `two_candidates`
-    /// 3.67, `rewrite_ones` 7.50 — all comfortably inside the 20.35 budget, UNCHANGED by Task 5b's
-    /// no-write split in `emit_one_tape_pass` (`rewrite_ones` has a concrete write on its only acting
-    /// tape; the other two have no acting tape at all — none of these three fixtures ever exercises
-    /// the no-write arm). **These fixtures are NOT representative of a real lowered machine**, and
-    /// comfortably passing here does not mean the construction fits a real one: see
-    /// `real_lowered_machines_cost_far_more_than_the_toy_fixtures` below, which measures that directly
-    /// and finds a ratio that crosses this same budget.
+    /// None of these three fixtures exercises the no-write arm of `emit_one_tape_pass` (`rewrite_ones`
+    /// has a concrete write on its only acting tape; the other two have no acting tape at all).
+    /// **These fixtures are NOT representative of a real lowered machine**, and comfortably passing
+    /// here does not mean the construction fits a real one: see
+    /// `real_lowered_machines_cost_far_more_than_the_toy_fixtures` below, which measures real machines
+    /// directly, and `the_worst_shipped_demo_measured_directly`, whose ratio crosses this same budget.
     #[test]
     fn the_construction_stays_inside_the_state_budget() {
         for m in [wildcard_only(), two_candidates(), rewrite_ones()] {
@@ -978,90 +954,45 @@ mod tests {
 
     /// The gate above uses only the hand-written toy fixtures at the top of this module, and they are
     /// not representative: `docs/superpowers/specs/2026-09-10-single-tape-reduction-design.md`
-    /// measures a real lowered machine at ~2.35 rules per state and ~0.94 concrete reads per rule
-    /// (echoed here by `emit_candidate`'s "81% of read positions are wildcards" and `emit_apply`'s
-    /// "0.91-0.94 tapes per rule"), while a 2-3 state toy has neither property. This builds three
-    /// real machines through the same pipeline `tm_header.rs` uses end to end — `parser::parse` ->
-    /// `typeck::result_type` -> `desugar::desugar` -> `tm::run_tm_described` — and measures
-    /// `states_per_original` on the `Machine` that pipeline actually produces, reachable here with no
-    /// new dependency because `parser`, `typeck`, `desugar` and `tm` are all modules of this same
-    /// crate.
-    ///
-    /// MEASURED (inverting this test's assertion once, via `cargo nextest run -p redextape-core
-    /// real_lowered_machines_cost_far_more_than_the_toy_fixtures`), under `EncodingKind::Unary`, BEFORE
-    /// and AFTER Task 5b's no-write split in `emit_one_tape_pass`:
-    ///
-    /// | source | original states | rules | rules/state | ratio BEFORE | ratio AFTER |
-    /// | --- | --- | --- | --- | --- | --- |
-    /// | `1 + 2 * 3` | 143 | 315 | 2.20 | 19.22 | 17.51 |
-    /// | `cons(1, cons(2, nil))` | 146 | 309 | 2.12 | 18.75 | 17.09 |
-    /// | `fn sum(n) { if n == 0 { 0 } else { n + sum(n - 1) } } sum(5)` | 1182 | 2782 | 2.35 | 21.20 | **19.20** |
-    ///
-    /// **THE LAST ROW IS THE DESIGN DOC'S OWN `sum(5)` FIXTURE** (1,182 states, 2.35 rules/state,
-    /// 0.94 reads/rule — identical to its table). Before Task 5b it measured 21.20, over the 20.35
-    /// budget; AFTER Task 5b's split it measures 19.20 — UNDER budget on its own. That doc's formula
-    /// estimated this same machine at 7.75 states per original state and called the margin "roughly
-    /// 2.5x inside" the budget; even the improved construction (this module) measures 19.20 for it,
-    /// 2.5x higher than the estimate, for the same reason as before: the formula counted the check and
-    /// apply states and not the scan, rewind, fail and seek states this module also emits.
+    /// measures a real lowered machine at ~2.35 rules per state and ~0.94 concrete reads per rule,
+    /// while a 2-3 state toy has neither property. This builds three real machines through the same
+    /// pipeline `tm_header.rs` uses end to end — `parser::parse` -> `typeck::result_type` ->
+    /// `desugar::desugar` -> `tm::run_tm_described` — and measures `states_per_original` on the
+    /// `Machine` that pipeline actually produces, reachable here with no new dependency because
+    /// `parser`, `typeck`, `desugar` and `tm` are all modules of this same crate.
     ///
     /// **`sum(5)` CLEARING THE BUDGET DOES NOT MEAN THE CONSTRUCTION FITS.** `sum(5)` is first-order
     /// recursion — a different shape from the higher-order demos that set the ceiling's own floor (see
-    /// `the_worst_shipped_demo_measured_directly` below), whose ratio stays over budget after this same
-    /// change. This test does not extend a `ratio < CEILING` assertion to that machine: for the worst
-    /// shipped demo it would fail permanently (closing that gap needs shrinking the construction
-    /// further, raising `MAX_MACHINE_STATES`, or lowering the worst-shipped-demo floor, none of which
-    /// this task does), and that budget question stays on record here and in `task-5b-report.md`. The
-    /// OTHER two rows above (`1 + 2 * 3`, `cons(1, cons(2, nil))`) DO get the same `ratio < CEILING`
-    /// assertion `sum(5)` gets, for the reason the next paragraph measures.
+    /// `the_worst_shipped_demo_measured_directly` below), whose ratio stays over budget. This test does
+    /// not extend a `ratio < CEILING` assertion to that machine, because for the worst shipped demo it
+    /// would fail permanently: closing that gap needs shrinking the construction further, raising
+    /// `MAX_MACHINE_STATES`, or lowering the worst-shipped-demo floor. The other two `SOURCES` rows (`1 + 2 * 3`,
+    /// `cons(1, cons(2, nil))`) DO get the same `ratio < CEILING` assertion `sum(5)` gets, for the
+    /// reason the next paragraph gives.
     ///
-    /// **ALL THREE `SOURCES` ROWS GET A REAL CEILING ASSERTION BELOW, THREE WITNESSES RATHER THAN ONE**
-    /// — an earlier version of this doc gated `sum(5)` alone and said no sabotage measurement showed
-    /// the other two rows were sensitive enough; that was never re-checked, and it is false. The
-    /// toy-fixture gate above (`the_construction_stays_inside_the_state_budget`) is too small to catch
-    /// a regression in the wildcard skip `emit_candidate` documents as "the whole reason this
-    /// construction fits". A sabotage that deletes that skip — emitting a `chk` state for every read
-    /// position instead of only `Some(_)` reads — moves the three toy fixtures from 3.00/3.67/7.50 to
-    /// 4.00/4.67/8.00: all three stay far under the 20.3521 ceiling, so that gate DOES NOT REDDEN. The
-    /// SAME sabotage, measured directly rather than assumed, moves EVERY `SOURCES` row across the
-    /// ceiling: `1 + 2 * 3` from 17.51 to **26.49**, `cons(1, cons(2, nil))` from 17.09 to **25.77**,
-    /// `sum(5)` from 19.20 to **28.76** — and the worst shipped demo from 36.86 to 46.43 (already over
-    /// budget before the sabotage, so not a NEW crossing). All three `SOURCES` rows are sensitive to
-    /// this regression, so all three carry the assertion, not `sum(5)` alone.
+    /// **ALL THREE `SOURCES` ROWS GET A REAL CEILING ASSERTION BELOW, THREE WITNESSES RATHER THAN
+    /// ONE.** The toy-fixture gate above (`the_construction_stays_inside_the_state_budget`) is too
+    /// small to catch a regression in the wildcard skip `emit_candidate` documents as "the whole reason
+    /// this construction fits". All three `SOURCES` rows are sensitive to this regression, so all three
+    /// carry the assertion, not `sum(5)` alone.
     ///
     /// **THE ORACLE LEG ITSELF CANNOT REPLACE THIS ASSERTION, FOR A STRUCTURAL REASON, NOT A GAP TO
-    /// CLOSE.** Under the same wildcard-skip sabotage, `single_tape_oracle.rs`'s
-    /// `the_single_tape_leg_agrees_on_small_programs` still PASSES — verified directly, not assumed: a
-    /// bloated construction that emits far more states is still a CORRECT one, and an oracle leg checks
-    /// correctness, never cost. No oracle leg can ever redden for a pure cost regression; this ratio
-    /// assertion is the only thing in this module that can.
+    /// CLOSE.** A bloated construction that emits far more states is still a CORRECT one, and an oracle
+    /// leg checks correctness, never cost. No oracle leg can ever redden for a pure cost regression;
+    /// this ratio assertion is the only thing in this module that can.
     ///
-    /// **THE MARGIN AGAINST THE CEILING IS TIGHTER THAN THIS DOC USED TO SAY, AND `sum(5)` IS NOT THE
-    /// TIGHTEST CASE ON RECORD.** `sum(5)`'s margin is 5.65% (19.2014 against 20.3521 — the same figure
-    /// this doc used to round to "~5.6%" against a rounded 19.20). Two related first-order fixtures,
-    /// measured the same way, sit far closer to the edge — MEASURED (via a temporary block added to
-    /// this test's `SOURCES` loop, run with `cargo nextest run -p redextape-core
-    /// real_lowered_machines_cost_far_more_than_the_toy_fixtures --nocapture`, then removed), under
-    /// `EncodingKind::Unary`:
+    /// **`sum(5)` IS NOT THE TIGHTEST CASE.** Two related first-order programs, a `while` loop counting
+    /// `n` down from 4 and `count_down(4)`, sit far closer to the ceiling than `sum(5)`.
     ///
-    /// - `let mut n = 4; let mut acc = 0; while n > 0 { acc = acc + 1; n = n - 1; } acc` — 542 original
-    ///   states, ratio **20.3395**, margin +0.062% against 20.3521
-    /// - `fn count_down(n) { let mut acc = 0; while n > 0 { acc = acc + 1; n = n - 1; } acc } count_down(4)`
-    ///   — 1,365 original states, ratio **20.1480**, margin +1.003% against 20.3521
-    /// - `fn sum(n) { if n == 0 { 0 } else { n + sum(n - 1) } } sum(5)` — 1,182 original states, ratio
-    ///   19.2014, margin +5.654% against 20.3521
-    ///
-    /// NEITHER new program is in `SOURCES`, and neither gets a `ratio < CEILING` assertion, on purpose:
-    /// at a 0.062% or 1.003% margin the assertion would fail on essentially any future change to the
+    /// NEITHER of those programs is in `SOURCES`, and neither gets a `ratio < CEILING` assertion, on
+    /// purpose: at their margins the assertion would fail on essentially any future change to the
     /// construction's per-rule state cost — not only the specific wildcard-skip-class regression it
     /// exists to police — which is not a useful signal, only noise with a pass/fail label on it.
-    /// `sum(5)`'s 5.654% (and the other two `SOURCES` rows' 13.96% and 16.03%) is thin but wide enough
-    /// that the one change that already moved this construction the other way (Task 5b's no-write
-    /// split, 21.20 -> 19.20) did not cross it. Reddening any `SOURCES` row's assertion is the test
-    /// WORKING, not the test being brittle: a change that costs states instead of saving them is
-    /// exactly the kind of regression this assertion exists to surface, and the fix at that point is to
-    /// shrink the construction, not to loosen this test — or, if a program this close to the ceiling
-    /// legitimately needs to be reducible, to move that program's own row into `SOURCES`.
+    /// Reddening any `SOURCES` row's assertion is the test WORKING, not the test being brittle: a
+    /// change that costs states instead of saving them is exactly the kind of regression this assertion
+    /// exists to surface, and the fix at that point is to shrink the construction, not to loosen this
+    /// test — or, if a program this close to the ceiling legitimately needs to be reducible, to move
+    /// that program's own row into `SOURCES`.
     #[test]
     fn real_lowered_machines_cost_far_more_than_the_toy_fixtures() {
         use crate::desugar::desugar;
@@ -1071,9 +1002,9 @@ mod tests {
 
         const SOURCES: [&str; 3] =
             ["1 + 2 * 3", "cons(1, cons(2, nil))", "fn sum(n) { if n == 0 { 0 } else { n + sum(n - 1) } } sum(5)"];
-        // Every row is gated on the shared `CEILING` — see the doc above for the sabotage measurement
-        // that establishes all three, not `sum(5)` alone, are sensitive to the wildcard-skip
-        // regression the toy-fixture gate above cannot see.
+        // Every row is gated on the shared `CEILING` — see the doc above for why all three, not
+        // `sum(5)` alone, are gated against the wildcard-skip regression the toy-fixture gate above
+        // cannot see.
         for src in SOURCES {
             let (prog, ds) = parse(src);
             assert!(ds.is_empty(), "parse errors for {src}: {ds:?}");
@@ -1103,28 +1034,14 @@ mod tests {
     ///
     /// Why it is one hand-copied program, lowered at `MAX_FIELD_WIDTH`: `reduction.rs`'s `worst_shipped_demo`.
     ///
-    /// MEASURED (inverting this test's assertion once, via `cargo nextest run -p redextape-core
-    /// the_worst_shipped_demo_measured_directly -- --nocapture`), `Binary` at `MAX_FIELD_WIDTH`:
-    /// 49,135 original states throughout (Step 1 changes only how the single-tape image is built, not
-    /// the multi-tape machine being reduced), BEFORE Step 1's split **39.51** states per original state
-    /// (1,941,089 single-tape states, 1.94x the 20.35 budget), AFTER **36.86** (1,811,054 single-tape
-    /// states, 1.81x the budget) — worse than `sum(5)`'s 21.20 either way, and over budget both before
-    /// and after. Step 1's saving is real (130,035 fewer states, 6.7%) but nowhere near enough on its
-    /// own to close a 1.8x gap; closing it needs shrinking the construction further, raising
-    /// `MAX_MACHINE_STATES`, or lowering the worst-shipped-demo floor, none of which this task does —
-    /// see this test's own non-assertion below for why that is recorded rather than forced green.
+    /// This machine's ratio is over the 20.35 budget, so it carries no `ratio < CEILING` assertion: closing
+    /// the gap needs shrinking the construction further, raising `MAX_MACHINE_STATES`, or lowering the
+    /// worst-shipped-demo floor — see this test's own non-assertion below for why that is recorded rather than
+    /// forced green.
     ///
-    /// That `cargo nextest run` command no longer selects this test, which is now ignored; re-running it
-    /// needs `--run-ignored only`.
-    ///
-    /// **THESE FIGURES ARE NOW MEASURED WITH THE CEILING LIFTED.** Since the reductions gained a state
-    /// ceiling, `to_single_tape` refuses this machine with `too-many-states` and `states_per_original`
-    /// answers `None` for it, so this test builds the image through `to_single_tape_within` at
-    /// `usize::MAX` — the whole image, as it did before the ceiling existed.
-    ///
-    /// Peak RSS of this test alone, as the test binary's `ru_maxrss`: 1,264,160 KB in 4.3 s in the binary
-    /// `cargo test -p redextape-core --lib --no-run` builds, and 1,262,508 KB in 3.2 s in the one
-    /// `cargo test --release -p redextape-core --lib --no-run` builds, each run with this test's name and `--exact`.
+    /// **THIS TEST BUILDS THE IMAGE WITH THE CEILING LIFTED.** `to_single_tape` refuses this machine with
+    /// `too-many-states` and `states_per_original` answers `None` for it, so this test builds the image
+    /// through `to_single_tape_within` at `usize::MAX`: the whole image.
     #[test]
     #[ignore = "slow tier: builds an unguarded 1,811,054-state stage 1 image, ~1.2 GiB peak; run via scripts/check-slow.sh"]
     fn the_worst_shipped_demo_measured_directly() {
@@ -1133,9 +1050,9 @@ mod tests {
         let single = to_single_tape_within(&machine, usize::MAX).0;
         #[expect(clippy::cast_precision_loss, reason = "a ratio of state counts")]
         let ratio = single.states.len() as f64 / machine.states.len() as f64;
-        // Same shape as `real_lowered_machines_cost_far_more_than_the_toy_fixtures`: this is deliberately
-        // not `ratio < CEILING` (see that test's doc for why), since Step 0 found this machine already
-        // over budget before Step 1's change and Step 1 alone does not close the gap.
+        // Deliberately not `ratio < CEILING`: this machine is over budget, so that assertion would fail
+        // permanently — the reason `real_lowered_machines_cost_far_more_than_the_toy_fixtures`'s doc gives
+        // for not extending it to this machine.
         assert!(ratio.is_finite() && ratio > 0.0, "non-sensical ratio {ratio}");
     }
 }

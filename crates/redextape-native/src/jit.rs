@@ -5,11 +5,11 @@
 //! must produce the same outcome (`Ran`/`HitCap`/`Fault`) as the asm interpreter on every `Program`,
 //! at every `OptLevel` — optimization changes the code generated, never the answer. We reach it by
 //! compiling **one Cranelift function per subroutine** (from `analysis::partition`) via
-//! `codegen::translate_subroutine`, and threading a `*mut Runtime` (Task 2) through every function so
+//! `codegen::translate_subroutine`, and threading a `*mut Runtime` through every function so
 //! the `rt_*` host functions can perform the heap/box operations and cap checks with identical
 //! semantics. This module owns only the JIT-specific concerns: registering the in-process `rt_*`
 //! symbols, finalizing definitions, and transmuting + calling the finalized `$main`. The
-//! `Module`-generic translation lives in `codegen` so an `ObjectModule` (AOT, Task 4) can reuse it.
+//! `Module`-generic translation lives in `codegen` so an `ObjectModule` (AOT) can reuse it.
 
 use cranelift_codegen::ir::UserFuncName;
 use cranelift_codegen::isa::OwnedTargetIsa;
@@ -96,9 +96,8 @@ fn register_symbols(builder: &mut JITBuilder) {
 /// Build the host ISA the JIT compiles against, with `opt` as its `opt_level` setting.
 ///
 /// The ISA is built explicitly rather than via `JITBuilder::new`, which constructs its own from
-/// default flags and offers no way to reach `opt_level` — which is why Cranelift ran unoptimized
-/// until this was wired up. `JITBuilder::new` delegates to `with_flags(&[], ..)`, whose whole ISA
-/// setup is (cranelift-jit 0.134.2, `src/backend.rs`):
+/// default flags and offers no way to reach `opt_level`. `JITBuilder::new` delegates to
+/// `with_flags(&[], ..)`, whose whole ISA setup is (cranelift-jit 0.134.2, `src/backend.rs`):
 ///
 /// ```text
 ///     let mut flag_builder = settings::builder();
@@ -138,7 +137,7 @@ fn host_isa(opt: OptLevel) -> Result<OwnedTargetIsa, NativeRun> {
 ///
 /// The byte count exists for the liveness guard: it is measured off the compilation this function
 /// just performed, through the JIT's own ISA, so if `opt` ever stops reaching `host_isa` — a
-/// Cranelift version bump forcing a rewrite of the flag block, a "simplification" back to
+/// Cranelift version bump forcing a rewrite of the flag block, a "simplification" to
 /// `JITBuilder::new` — `O0` and `O3` start emitting the same number of bytes and
 /// `tests::the_opt_level_reaches_the_jits_own_isa` fails. `build_and_run` discards it.
 fn build_module(prog: &Program, subs: &[Subroutine], opt: OptLevel) -> Result<(JITModule, Decls, u64), NativeRun> {
@@ -231,7 +230,7 @@ mod tests {
 
     use super::*;
     use redextape_core::core::BinOp;
-    use redextape_core::tm::{AsmRun, DEFAULT_CAPS, Instr, Program, Reg, run_asm};
+    use redextape_core::tm::{AsmRun, DEFAULT_CAPS, Instr, Program, Reg, lower_program, run_asm};
 
     /// Every Cranelift opt level. The frame-size estimate behind `native_depth_cap` is calibrated
     /// against OPTIMIZED frames (Cranelift's binding case), so each level must still be checked
@@ -265,7 +264,7 @@ mod tests {
     /// code; a corpus this small must compile).
     fn jit_code_bytes(src: &str, opt: OptLevel) -> u64 {
         let ast = redextape_core::parser::parse(src).0.expect("fixture parses");
-        let prog = crate::lower_program(&redextape_core::desugar::desugar(&ast)).expect("fixture lowers");
+        let prog = lower_program(&redextape_core::desugar::desugar(&ast)).expect("fixture lowers");
         let subs = partition(&prog).expect("fixture partitions");
         match build_module(&prog, &subs, opt) {
             Ok((_module, _decls, bytes)) => bytes,
@@ -275,22 +274,20 @@ mod tests {
 
     #[test]
     fn the_opt_level_reaches_the_jits_own_isa() {
-        // LIVENESS GUARD for `host_isa`. There are TWO Cranelift ISA construction sites — this
-        // module's and `aot::emit_object`'s — and `aot::tests::the_opt_level_reaches_the_cranelift_isa`
-        // covers only the other one. Without this test, replacing `cranelift_opt_level(opt)` in
-        // `host_isa` with a literal `"none"` (or reverting to `JITBuilder::new`, which has no way to
-        // reach `opt_level` at all) leaves the WHOLE suite green while every native oracle leg —
+        // LIVENESS GUARD for `host_isa`. There are TWO Cranelift ISA construction sites — this module's
+        // and `aot::emit_object`'s — and `aot::tests::the_opt_level_reaches_the_cranelift_isa` covers
+        // only the other one. Without this test, replacing `cranelift_opt_level(opt)` in `host_isa`
+        // with a literal `"none"` (or switching to `JITBuilder::new`, which has no way to reach
+        // `opt_level` at all) leaves the WHOLE suite green while every native oracle leg —
         // `reference == λ == TM == native`, `native == asm-interp`, the cross-backend sweep — quietly
-        // goes back to validating unoptimized codegen. That silent regression is the state this
-        // branch exists to end. It cannot be caught by the object-size baseline either: Cranelift's
-        // optimized-vs-`none` object deltas on that corpus are 0.6-1.8%, well inside its ±10% band
+        // validates unoptimized codegen. It cannot be caught by the object-size baseline either:
+        // Cranelift's optimized-vs-`none` object deltas on that corpus sit well inside its ±10% band
         // (see `tests/size_baseline.rs`).
         //
         // The fixture is chosen for margin, not for parity with the AOT test: redundant `a + b`
-        // subexpressions are exactly what `speed`'s GVN eliminates. Measured (aarch64, cranelift
-        // 0.134.2): 256 B at `O0` → 228 B at every optimized level, an 11% drop. The AOT test's
-        // `fn twice(x){ x + x } twice(21)` also differs here (148 → 144) but by only 4 bytes, thin
-        // enough that an unrelated Cranelift change could close it and make this guard vacuous.
+        // subexpressions are exactly what `speed`'s GVN eliminates. The AOT test's
+        // `fn twice(x){ x + x } twice(21)` differs by a margin thin enough that an unrelated Cranelift
+        // change could close it and make this guard vacuous.
         //
         // Both arms of the six-to-three collapse are checked: `O3` covers `speed`, `Os` covers
         // `speed_and_size`. A failure means `opt` stopped reaching the JIT's ISA — investigate the
@@ -308,20 +305,18 @@ mod tests {
 
     #[test]
     fn agreement_holds_at_every_opt_level() {
-        // Per-level Cranelift agreement in the DEFAULT (cranelift-only) build. Cross-level agreement
-        // was otherwise asserted only in `tests/llvm_oracle.rs`, which needs an LLVM 22 toolchain, so
-        // `cargo test --workspace` / `check-all.sh --no-llvm` / the CI `rust` job exercised Cranelift
-        // at `OptLevel::default()` and one fat-frame shape alone. Everything else here goes through
+        // Per-level Cranelift agreement in the DEFAULT (cranelift-only) build. Without it, the default
+        // build checks cross-level agreement on one fat-frame shape alone; the rest is asserted only in
+        // `tests/llvm_oracle.rs`, which needs an LLVM 22 toolchain. Everything else here goes through
         // `agree`, which is default-level only.
         //
-        // Deliberately small programs — this runs on every `cargo test`, and 6 levels x 6 programs of
-        // this size is well under a second. Between them they cover the shapes where an optimizer
-        // could plausibly change the ANSWER rather than just the code: saturating arithmetic (the
-        // I1 miscompile), a backward edge (the step counter), a call/return with recursion, heap
+        // Deliberately small programs — this runs on every `cargo test`. Between them they cover the
+        // shapes where an optimizer could plausibly change the ANSWER rather than just the code:
+        // saturating arithmetic, a backward edge (the step counter), a call/return with recursion, heap
         // `rt_*` calls the optimizer cannot see through, a fault, and a cap trip.
         for opt in OPT_LEVELS {
             // Saturating add/mul: `u64::MAX + u64::MAX` and `u64::MAX * u64::MAX` must saturate at
-            // every level, not wrap (I1).
+            // every level, not wrap.
             for op in [BinOp::Add, BinOp::Mul] {
                 agree_caps_at(
                     Program {
@@ -727,10 +722,9 @@ mod tests {
 
     #[test]
     fn a_huge_register_index_is_rejected_not_a_process_abort() {
-        // C1: `run_asm` scans for `Reg::Loc/Arg(n) >= MAX_REGISTERS` and faults to avoid a multi-GB
+        // `run_asm` scans for `Reg::Loc/Arg(n) >= MAX_REGISTERS` and faults to avoid a multi-GB
         // `Vec::resize` abort. Native must likewise reject up front (as `LowerError`) rather than
-        // materialise a billion-slot `Variable` bank and abort the whole process. Before the fix
-        // this aborted; after it, it returns `LowerError`.
+        // materialise a billion-slot `Variable` bank and abort the whole process.
         let prog = Program { code: vec![Instr::Li(Reg::Loc(4_000_000_000), 0), Instr::Halt], labels: vec![] };
         assert!(matches!(compile_and_run(&prog, DEFAULT_CAPS, OptLevel::default()), NativeRun::LowerError(_)));
         // `run_asm` faults on the same program; both are "not a value" (out of oracle scope).
@@ -739,8 +733,7 @@ mod tests {
 
     #[test]
     fn add_saturates_on_overflow_like_run_asm() {
-        // I1: u64::MAX + u64::MAX saturates to u64::MAX (run_asm uses `saturating_add`). The old
-        // wrapping `iadd` gave u64::MAX - 1, so this diverged before the fix.
+        // u64::MAX + u64::MAX saturates to u64::MAX (run_asm uses `saturating_add`).
         agree(Program {
             code: vec![
                 Instr::Li(Reg::Loc(0), u64::MAX),
@@ -753,8 +746,7 @@ mod tests {
 
     #[test]
     fn mul_saturates_on_overflow_like_run_asm() {
-        // I1: u64::MAX * u64::MAX saturates to u64::MAX (run_asm uses `saturating_mul`). The old
-        // wrapping `imul` gave 1, so this diverged before the fix.
+        // u64::MAX * u64::MAX saturates to u64::MAX (run_asm uses `saturating_mul`).
         agree(Program {
             code: vec![
                 Instr::Li(Reg::Loc(0), u64::MAX),
@@ -767,7 +759,7 @@ mod tests {
 
     #[test]
     fn a_faulting_callee_in_a_loop_is_fault_not_hit_cap() {
-        // I2: `main` loops calling `crash`, which faults (head of nil). `run_asm` faults on the
+        // `main` loops calling `crash`, which faults (head of nil). `run_asm` faults on the
         // first iteration. Native must ALSO report `Fault`: without the `stopped()` guard in
         // `rt_tick`/`rt_enter`, the loop's back-edge keeps ticking and eventually sets `hit_cap`,
         // masking the fault as `HitCap` (the driver checks `hit_cap` before `fault`).
@@ -786,10 +778,9 @@ mod tests {
 
     #[test]
     fn a_non_main_callee_containing_halt_is_rejected_not_miscompiled() {
-        // I3: `f` (a `Call` target) contains a `Halt`, which under `run_asm` ends the whole program
-        // with rr==7. The old codegen lowered `Halt` as a plain `Ret`, resuming `main` and yielding
-        // the WRONG rr==99. The fix rejects a non-`$main` `Halt` at partition time → `LowerError`
-        // (never `Ran(99)`).
+        // `f` (a `Call` target) contains a `Halt`, which under `run_asm` ends the whole program
+        // with rr==7. Lowering it as a plain `Ret` would resume `main` and yield the WRONG rr==99, so a
+        // non-`$main` `Halt` is rejected at partition time → `LowerError` (never `Ran(99)`).
         let prog = Program {
             code: vec![
                 Instr::Call("f".into()), // 0
@@ -806,7 +797,7 @@ mod tests {
 
     #[test]
     fn main_reading_an_arg_sees_zero() {
-        // M1: the entry `$main` takes no args (the driver calls it as `(rt_ptr) -> i64`); a `$main`
+        // The entry `$main` takes no args (the driver calls it as `(rt_ptr) -> i64`); a `$main`
         // that reads `Arg(0)` must see the init-0 value, matching `run_asm` (args empty → get(0)=0),
         // not garbage from a mis-shaped multi-param signature called as a one-param fn.
         agree(Program {
@@ -816,45 +807,31 @@ mod tests {
     }
 
     /// Build a recursive `countdown(n)` whose `countdown` subroutine writes `fillers` extra `Loc`
-    /// registers and reads every one of them AFTER its self-call — keeping them live across the call
-    /// so codegen spills them into the frame, making a genuinely FAT native frame. It self-calls `n`
-    /// times before returning. With the OLD `caps.stack` depth cap (100_000) and a 64 MiB thread, a
-    /// deep run of this program overflows the native stack and aborts the process; with the
-    /// frame-size-aware cap it must `HitCap` instead.
+    /// registers and reads every one of them AFTER its self-call — keeping them live across the call so
+    /// codegen spills them into the frame, making a genuinely FAT native frame. It self-calls `n` times
+    /// before returning. With the frame-size-aware cap, a deep run of this program must `HitCap`
+    /// rather than overflow the native stack and abort the process.
     ///
     /// Each filler is an INDEPENDENT function of the runtime argument — `Loc(i) = Arg(0) + (i+1)`,
     /// built as `Li(Loc(i), i+1)` then `Bin(Add, Loc(i), Arg(0), Loc(i))` — and every filler is read
     /// back in `READ_PASSES` full sweeps after the self-call. **Do not "simplify" this into
     /// `Li(Loc(i), 1)`, and do not chain it into `Loc(i) = Arg(0) + Loc(i-1)` either.** Both weaker
-    /// shapes hollow out the optimized legs of the totality test below. All numbers below are the
-    /// `countdown` prologue's `sp` adjustment in an `aot::emit_object` object (aarch64: the
-    /// `stp .., [sp, #-0x10]!` pushes plus `sub sp, sp, #imm`), at 200 fillers:
+    /// shapes hollow out the optimized legs of the totality test below.
     ///
-    /// | filler shape | `none` | `speed` / `speed_and_size` | ratio |
-    /// | --- | ---: | ---: | ---: |
-    /// | constants (`Li(Loc(i), 1)`) | 1632 B | **32 B** | 0.02x |
-    /// | dependent chain (`Arg(0) + Loc(i-1)`) | 1632 B | 1648 B | 1.01x |
-    /// | independent (SHIPPED) | 1632 B | **4656 B** | **2.85x** |
+    /// Non-constness alone is not enough. A constant bank is rematerialized wholesale and the frame
+    /// collapses, making five of the six legs vacuous. A dependent chain resists rematerialization,
+    /// but each `Loc(i)` dies the moment `Loc(i+1)` is computed, so almost no live ranges overlap and
+    /// the optimized frame lands a rounding error above the unoptimized one — non-vacuous, yet
+    /// measuring the wrong thing. INDEPENDENCE is what bites: every filler is computed from `Arg(0)`
+    /// alone at entry, so all of them are simultaneously live across the self-call and regalloc2
+    /// splits their live ranges. The repeated read passes matter for the same reason.
     ///
-    /// Non-constness alone is not enough — that is what the middle row is here to record. A constant
-    /// bank is rematerialized wholesale and the frame collapses to 32 bytes, making five of the six
-    /// legs vacuous. A dependent chain resists rematerialization, but each `Loc(i)` dies the moment
-    /// `Loc(i+1)` is computed, so almost no live ranges overlap and the optimized frame lands a
-    /// rounding error above the unoptimized one — non-vacuous, yet measuring the wrong thing.
-    /// INDEPENDENCE is what bites: every filler is computed from `Arg(0)` alone at entry, so all of
-    /// them are simultaneously live across the self-call, regalloc2 splits their live ranges, and the
-    /// optimized frame spills ~3 words per asm register against the 4 words `shared::BYTES_PER_VAR`
-    /// charges. The repeated read passes matter for the same reason: 1 pass gives 3232 B, 2 gives
-    /// 4576 B, and it saturates at 4656 B from 4 passes on.
-    ///
-    /// This is the shape `BYTES_PER_VAR`'s safety argument actually rests on (its doc's measurement
-    /// table is this program at 50..3200 fillers), and Cranelift is where that argument is thinnest:
-    /// optimized Cranelift frames are ~3x LARGER than unoptimized ones, the opposite direction from
-    /// LLVM — whose `O1+` `mem2reg`/SROA shrink frames, making `O0` its binding case. An
-    /// under-charging estimate therefore bites on optimized Cranelift first, and those are exactly
-    /// the legs the weaker shapes would silence. At 200 fillers the estimate charges
-    /// `(200 + 3 + 1 + 8) * 32 + 2048 = 8832` B against 4656 B actual — 1.90x headroom, and this test
-    /// is what would notice if that ratio ever moved.
+    /// This is the shape `BYTES_PER_VAR`'s safety argument actually rests on (its doc's frame
+    /// measurements are this program at 50..3200 fillers), and Cranelift is where that argument is
+    /// thinnest: optimized Cranelift frames are LARGER than unoptimized ones, whereas LLVM's opt
+    /// level barely moves its frame (see `BYTES_PER_VAR`). An under-charging estimate therefore bites
+    /// on optimized Cranelift first, and those are exactly the legs the weaker shapes would silence;
+    /// this test is what would notice if the estimate's headroom over this frame closed.
     ///
     /// Each `Loc(i)` is seeded by its own `Li` before being read, so no instruction here READS a
     /// `Loc` this body has not already written: `run_asm`'s `Call` leaves the caller's locals in
@@ -902,21 +879,18 @@ mod tests {
 
     #[test]
     fn a_fat_frame_deep_recursion_returns_hitcap_at_every_opt_level() {
-        // C1 (the reviewer's repro): a subroutine with a FAT native frame recursing far deeper than
-        // that frame size lets the reserved stack hold. Before the fix this overflowed the JIT
-        // thread's 64 MiB stack and ABORTED the whole process (uncatchable SIGABRT). The
-        // frame-size-aware depth cap must instead return `HitCap` — total, no abort. That this test
-        // completes in-suite (rather than killing the test process) is the proof C1 is fixed.
+        // A subroutine with a FAT native frame recursing far deeper than that frame size lets the
+        // reserved stack hold must return `HitCap` — total, no abort (an overflow would ABORT the
+        // whole process with an uncatchable SIGABRT). That this test completes in-suite (rather than
+        // killing the test process) is the proof.
         //
-        // Swept over every opt level because `native_depth_cap`'s per-slot estimate was calibrated on
-        // UNOPTIMIZED frames: `speed`/`speed_and_size` change frame layout, and an estimate that
-        // under-charges an optimized frame would let this recursion reach the real stack's end. The
-        // optimized legs only MEAN anything because `fat_recursive_countdown`'s fillers are mutually
-        // INDEPENDENT functions of `Arg(0)` (see its doc): constants fold away to a 32-byte frame and
-        // a dependent chain barely splits any live range, whereas this shape is the one optimized
-        // Cranelift blows up ~2.85x (1632 → 4656 bytes at 200 fillers) — the very ratio
-        // `BYTES_PER_VAR = 32` is calibrated against. A failure here is a real totality bug in that
-        // constant, not a test to loosen.
+        // Swept over every opt level because `speed`/`speed_and_size` change frame layout, and an
+        // estimate that under-charges an optimized frame would let this recursion reach the real
+        // stack's end. The optimized legs only MEAN anything because `fat_recursive_countdown`'s
+        // fillers are mutually INDEPENDENT functions of `Arg(0)` (see its doc): constants fold away
+        // and a dependent chain barely splits any live range, whereas this shape is the one optimized
+        // Cranelift blows up — the case `BYTES_PER_VAR = 32` is calibrated against. A failure here is
+        // a real totality bug in that constant, not a test to loosen.
         for opt in OPT_LEVELS {
             let prog = fat_recursive_countdown(200, 100_000);
             let run = compile_and_run(&prog, DEFAULT_CAPS, opt);

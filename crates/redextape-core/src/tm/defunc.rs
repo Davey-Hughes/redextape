@@ -1,5 +1,5 @@
-//! Core -> Core defunctionalization (Plan 3b-1): rewrite higher-order Core into the first-order
-//! subset the existing `lower_asm`/`lower_tm`/`decode` handle unchanged, or `LowerError::Unsupported`.
+//! Core -> Core defunctionalization: rewrite higher-order Core into the first-order subset
+//! `lower_asm`/`lower_tm`/`decode` handle, or `LowerError::Unsupported`.
 //!
 //! A function or lambda *used as a value* (occurring anywhere other than as the immediate callee of
 //! an `Apply`) becomes a closure `cons(tag, env)` on the HEAP; an `Apply` of a value becomes a call
@@ -9,49 +9,48 @@
 //! reference and `lower_asm` both bind every name in a group before evaluating any of its values. A
 //! cycle between two *distinct* binders remains `Unsupported`.
 //!
-//! Task 4 adds **immutable environment capture**: an anonymous `Lambda` used as a value (e.g. as an
-//! `Apply` argument) captures its free immutable variables **by value** — the closure env carries the
+//! **Immutable environment capture**: an anonymous `Lambda` used as a value (e.g. as an `Apply`
+//! argument) captures its free immutable variables **by value** — the closure env carries the
 //! captured *values*, built at the creation site, and the dispatcher arm unpacks them from the env
 //! before binding params. Capture-by-value is exact for immutables (they never change).
 //!
-//! Plan 3b-2 adds **mutable environment capture by boxing**: a `let mut` (or any assigned name) that
-//! some lambda captures is BOXED — its binding becomes an immutable handle `let $boxh{k} = $box(v)`,
-//! every read `$box_get($boxh{k})`, every write `$box_set($boxh{k}, v)`, and a capturing closure
-//! carries the *handle* (an immutable, so no closure ever captures a mutable). Capturing the handle by
-//! value is exactly by-reference capture of the shared cell, matching the reference. A mutable NO
-//! lambda captures is left byte-for-byte unchanged (purely-imperative loop counters never box).
+//! **Mutable environment capture by boxing**: a `let mut` (or any assigned name) that some lambda
+//! captures is BOXED — its binding becomes an immutable handle `let $boxh{k} = $box(v)`, every read
+//! `$box_get($boxh{k})`, every write `$box_set($boxh{k}, v)`, and a capturing closure carries the
+//! *handle* (an immutable, so no closure ever captures a mutable). Capturing the handle by value is
+//! exactly by-reference capture of the shared cell, matching the reference. A mutable NO lambda
+//! captures is left byte-for-byte unchanged (purely-imperative loop counters never box).
 //!
-//! Still `Unsupported` (never a silent miscompile): a builtin used as a bare value, a nested/local
+//! `Unsupported` (never a silent miscompile): a builtin used as a bare value, a nested/local
 //! function definition, a cyclic higher-order call graph, and (conservatively, to preserve the
 //! lets-around-main emission scoping) a top-level named function whose body references an outer `let`
-//! binding. A function both called-by-name and used-as-a-value IS accepted (see `Emitted`'s doc
-//! comment for how it is emitted without duplicating any id) — UNLESS the emitted BINDER graph (kept
-//! `fn`s and `$applyN` dispatchers, with an edge for every call and every dispatcher arm) has a CYCLE
-//! that returns to that function's OWN dispatcher, however it gets there. That is the rule in full; it
-//! is NOT "its body applies a value at its own arity, or calls another kept `fn` whose body does" — a
-//! two-disjunct phrasing this module used to state, and which looks exhaustive but is not, because the
-//! cycle can also leave through one dispatcher and re-enter through ANOTHER, of a different arity,
-//! reachable through other kept `fn`s along the way. Direct (own arity, own body): `fn inc(x) { x + 1 }
-//! fn t(g) { g(3) } fn ap(h, y) { h(y) } t(inc) + ap(t, inc)` — `t` is BOTH (`t(inc)` calls it by name,
-//! `ap(t, inc)` uses it as a value), and `t`'s own body `g(3)` applies `g` (on the dispatched path, `t`
-//! itself) at `t`'s own arity, closing `$apply1 -> t -> $apply1` through `t`'s own forwarding arm. Own
-//! arity, via another kept `fn`: `fn ap(g, y) { g(y) } fn f(x) { x + 1 } fn q(z) { ap(f, z) } q(1) +
-//! ap(q, 2)` is *also* rejected even though `q`'s own body never applies a value directly — it calls
-//! `ap` by name, and `ap`'s body applies ITS OWN parameter at arity 1, closing `$apply1 -> q -> ap ->
-//! $apply1` one hop further out. Neither of those shapes, and still correctly rejected: the
-//! non-obvious case, measured — `fn add(a, b) { a + b } fn inc(x) { x + 1 } fn f(g) { g(1, 2) } fn
-//! h(p, q) { p(q) } fn ap1(k, x) { k(x) } fn ap2(k, a, b) { k(a, b) } f(add) + h(inc, 5) + ap1(f,
-//! add) + ap2(h, inc, 5)`. `f` is BOTH at arity 1 (`f(add)`, `ap1(f, add)`), but its body `g(1, 2)`
-//! applies a value at arity **2**, not 1, and it calls no kept `fn` by name at all (only its own
-//! parameter `g`). Reference and λ agree at 18. Yet `f`'s body still reaches `$apply2` (arity 2), one
-//! of whose arms is `h` (also BOTH, value-used at arity 2 via `ap2`); `h`'s body `p(q)` applies at arity 1,
-//! reaching `$apply1` — the same dispatcher `t` closes through above, and the one `f` is itself an arm
-//! of. The cycle `$apply1 -> f -> $apply2 -> h -> $apply1` closes on `f`'s own dispatcher without
-//! either hop looking like "applies at its own arity" or "calls another kept `fn`" — it leaves through
-//! one dispatcher and comes back through a different one. `topo_order`'s cycle check catches it
-//! regardless, because it walks the actual graph rather than testing for these two named shapes; only
-//! the doc's claim to be exhaustive was wrong. TM/asm/native: `Unsupported { "cyclic higher-order call
-//! graph through `f`" }`.
+//! binding. A function both called-by-name and used-as-a-value IS accepted (see `Emitted`'s doc comment
+//! for how it is emitted without duplicating any id) — UNLESS the emitted BINDER graph (kept `fn`s and
+//! `$applyN` dispatchers, with an edge for every call and every dispatcher arm) has a CYCLE that
+//! returns to that function's OWN dispatcher, however it gets there. That is the rule in full; it is
+//! NOT "its body applies a value at its own arity, or calls another kept `fn` whose body does", which
+//! looks exhaustive but is not, because the cycle can also leave through one dispatcher and re-enter
+//! through ANOTHER, of a different arity, reachable through other kept `fn`s along the way. Direct (own
+//! arity, own body): `fn inc(x) { x + 1 } fn t(g) { g(3) } fn ap(h, y) { h(y) } t(inc) + ap(t, inc)` —
+//! `t` is BOTH (`t(inc)` calls it by name, `ap(t, inc)` uses it as a value), and `t`'s own body `g(3)`
+//! applies `g` (on the dispatched path, `t` itself) at `t`'s own arity, closing `$apply1 -> t ->
+//! $apply1` through `t`'s own forwarding arm. Own arity, via another kept `fn`: `fn ap(g, y) { g(y) }
+//! fn f(x) { x + 1 } fn q(z) { ap(f, z) } q(1) + ap(q, 2)` is *also* rejected even though `q`'s own
+//! body never applies a value directly — it calls `ap` by name, and `ap`'s body applies ITS OWN
+//! parameter at arity 1, closing `$apply1 -> q -> ap -> $apply1` one hop further out. Neither of those
+//! shapes, and still correctly rejected: the non-obvious case — `fn add(a, b) { a + b } fn
+//! inc(x) { x + 1 } fn f(g) { g(1, 2) } fn h(p, q) { p(q) } fn ap1(k, x) { k(x) } fn ap2(k, a, b) {
+//! k(a, b) } f(add) + h(inc, 5) + ap1(f, add) + ap2(h, inc, 5)`. `f` is BOTH at arity 1 (`f(add)`,
+//! `ap1(f, add)`), but its body `g(1, 2)` applies a value at arity **2**, not 1, and it calls no kept
+//! `fn` by name at all (only its own parameter `g`). Yet `f`'s body still reaches `$apply2`
+//! (arity 2), one of whose arms is `h` (also BOTH, value-used at arity 2 via `ap2`);
+//! `h`'s body `p(q)` applies at arity 1, reaching `$apply1` — the same dispatcher `t` closes through
+//! above, and the one `f` is itself an arm of. The cycle `$apply1 -> f -> $apply2 -> h -> $apply1`
+//! closes on `f`'s own dispatcher without either hop looking like "applies at its own arity" or "calls
+//! another kept `fn`" — it leaves through one dispatcher and comes back through a different one.
+//! `topo_order`'s cycle check catches it regardless, because it walks the actual graph rather than
+//! testing for these two named shapes. TM/asm/native: `Unsupported { "cyclic higher-order call graph
+//! through `f`" }`.
 
 use std::collections::{BTreeMap, BTreeSet};
 
@@ -61,17 +60,16 @@ use crate::tm::lower_asm::LowerError;
 /// Bounds every recursive tree-walk in this module (`analyze`, `free_vars`/`fv_into`,
 /// `Rewriter::rewrite`/`rewrite_apply`/`rewrite_lambda_value`, `collect_calls`, `visit`) so `defunc`
 /// is TOTAL -- `LowerError::TooDeep`, never a native stack overflow -- on any Core, including a deep
-/// FIRST-order Core (that `run_tm` no longer even routes here, see `tm.rs::lower_program`) and a deep
+/// FIRST-order Core (that `run_tm` does not even route here, see `tm.rs::lower_program`) and a deep
 /// HIGHER-order one (which it does).
 ///
 /// Rather than thread a live counter through every one of those functions, `defunc` measures the
 /// input's nesting depth ONCE, ITERATIVELY (`too_deep_node`, an explicit worklist -- no native
-/// recursion, mirroring the `Drop` impl in `core.rs` and this module's own `max_id`), before any recursive
-/// pass runs. `analyze`/`free_vars`/`Rewriter::rewrite`/`peel` all recurse only on `core` itself or its
-/// sub-trees, so bounding `core`'s own height bounds them too; `collect_calls`/`visit` walk the
-/// *rewritten* output instead (structurally close to the input, plus a small constant), so they
-/// additionally carry their own depth counter as defense-in-depth (cheap to add, and the reviewer
-/// flagged them by name).
+/// recursion, mirroring the `Drop` impl in `core.rs` and this module's own `max_id`), before any
+/// recursive pass runs. `analyze`/`free_vars`/`Rewriter::rewrite`/`peel` all recurse only on `core`
+/// itself or its sub-trees, so bounding `core`'s own height bounds them too; `collect_calls`/`visit`
+/// walk the *rewritten* output instead (structurally close to the input, plus a small constant), so
+/// they additionally carry their own depth counter as defense-in-depth (cheap to add).
 ///
 /// Same bound as `lower_asm::MAX_LOWER_DEPTH` (580): both are tuned against the same 8 MiB production
 /// stack, and `defunc`'s frames are not meaningfully fatter than `lower_into`'s, so reusing the
@@ -80,7 +78,7 @@ use crate::tm::lower_asm::LowerError;
 const MAX_DEFUNC_DEPTH: u32 = 580;
 
 /// Prelude functions that are always applied directly (never used as a bare value). The `$box*`
-/// trio (Plan 3b-2) joins them so `is_builtin_fn` keeps them as static direct-call callees — the
+/// trio joins them so `is_builtin_fn` keeps them as static direct-call callees — the
 /// boxing rewrite emits `$box`/`$box_get`/`$box_set` applications, never a bare value-use of them.
 const BUILTIN_FNS: [&str; 7] = ["cons", "head", "tail", "is_empty", "$box", "$box_get", "$box_set"];
 
@@ -162,14 +160,12 @@ struct Func<'a> {
 ///      nodes themselves are in none of the three: they are not rewritten at all, but re-emitted from
 ///      the ids recorded in `Func`/`LetBinding`, once each.)
 ///   2. `dispatcher` consumes each arm with `arms.remove(name)`, so an inlined body is emitted once.
-///   3. Step 5c's forwarding arm for a function both called-by-name AND used-as-a-value HOLDS ONE
+///   3. The forwarding arm for a function both called-by-name AND used-as-a-value HOLDS ONE
 ///      `Apply` node (`f($a1..$aN)`), never a copy of the body: the function itself is emitted ONCE,
-///      as a kept `fn` (step 5b), and the dispatcher arm just calls it. This was previously guaranteed
-///      instead by rejecting the case outright; forwarding is what replaced that rejection without
-///      weakening the invariant. Duplicating the body — the obvious alternative, which buys one fewer
-///      frame on the dispatched path — would put every id inside it on two nodes, silently doubling
-///      the cost billed to the user's arithmetic, so a future change that prefers duplication MUST
-///      re-id one of the copies.
+///      as a kept `fn`, and the dispatcher arm just calls it. Duplicating the body — the
+///      obvious alternative, which buys one fewer frame on the dispatched path — would put every id
+///      inside it on two nodes, silently doubling the cost billed to the user's arithmetic, so a
+///      future change that prefers duplication MUST re-id one of the copies.
 ///
 /// `no_output_node_id_is_duplicated` fails loudly if any of the three stops holding.
 ///
@@ -203,7 +199,7 @@ impl Emitted {
 /// only shape that can be right: a group's members call one another, so ordering them individually
 /// would report a cycle for exactly the construct the group exists to express — and there is nothing
 /// to order between them anyway, since ONE binder binds them all simultaneously. Edges within a unit
-/// are dropped for the same reason self-edges always were: the binder binds every one of its names
+/// are dropped for the same reason self-edges are: the binder binds every one of its names
 /// before any of its values is evaluated. Edges in and out of the group are kept, so a genuine cycle
 /// through a group (a dispatcher arm that calls a member while a member calls that dispatcher) is
 /// still rejected.
@@ -273,7 +269,7 @@ struct AnonClosure {
 /// shallower program. `Err(LowerError::Unsupported)` for every higher-order construct this pass
 /// cannot rewrite: a builtin used as a bare value, a nested/local function definition, a top-level
 /// function whose body references an outer `let` binding (guard 2 — hoisting would put it out of
-/// scope), a boxed mutable that collides with a parameter or function name (the Plan 3b-2 box-handle
+/// scope), a boxed mutable that collides with a parameter or function name (the box-handle
 /// guard), or a cyclic higher-order call graph among the emitted binders (step 8's `topo_order`; see
 /// the module doc for the non-obvious shapes this catches). Each `Unsupported` names the offending
 /// construct; the caller's only recourse is rewriting the source to avoid it.
@@ -300,11 +296,11 @@ pub fn defunc_mapped(core: &Core) -> Result<(Core, BTreeSet<NodeId>), LowerError
     let let_names: BTreeSet<String> = lets.iter().map(|l| l.name.clone()).collect();
 
     // Names bound `let mut` or `Assign`ed anywhere in the program. A mutable that some lambda
-    // captures must be BOXED (Plan 3b-2): the closure captures a shared mutable cell by reference,
+    // captures must be BOXED: the closure captures a shared mutable cell by reference,
     // matching the reference's by-reference capture.
     let mutable_names = collect_mutable_names(core);
 
-    // Plan 3b-2: `boxed_names` = the mutables that some lambda captures = mutable_names ∩ (⋃ over
+    // `boxed_names` = the mutables that some lambda captures = mutable_names ∩ (⋃ over
     // every `Lambda` node of free_vars(body) \ params). A mutable NO lambda captures is left
     // untouched (purely-imperative mutables — loop counters — stay byte-for-byte unchanged). Each
     // boxed name gets a stable, uncollidable handle `$boxh{k}` ($-prefixed so no user identifier can
@@ -313,20 +309,20 @@ pub fn defunc_mapped(core: &Core) -> Result<(Core, BTreeSet<NodeId>), LowerError
     let captured_by_lambda = lambda_captured_names(core);
     let boxed_names: BTreeSet<String> = mutable_names.intersection(&captured_by_lambda).cloned().collect();
 
-    // Plan 3b-2 (Task 7 fix): the by-name box interception (keyed by NAME) fires on ANY use of a name
-    // matching a boxed mutable — but only `let mut` bindings are ever boxed, so two OTHER binder kinds
-    // that reuse a boxed name would be miscompiled:
+    // The by-name box interception (keyed by NAME) fires on ANY use of a name matching a boxed mutable
+    // — but only `let` bindings are ever boxed, so two OTHER binder kinds that reuse a boxed name
+    // would be miscompiled:
     //   - a lambda/fn PARAMETER (`param_names`): a param is never boxed, so its (never-boxed) reads get
     //     rewritten to `$box_get($boxh…)` — a handle NOT in scope inside that param's body — producing
     //     malformed `Ok` Core with a FREE `$boxh…`.
     //   - a top-level `fn`/`LetRec` FUNCTION NAME (`func_names`): the by-name interception in
     //     `rewrite_value_name` fires on the FUNCTION's value-use too, rewriting it to `$box_get($boxh…)`
     //     — a MISBOUND handle — again malformed `Ok` Core (`run_tm` then diverges to HitCap).
-    // Either is a miscompile, not an accept, so a boxed mutable whose name ALSO appears as a parameter
-    // OR a function name anywhere degrades the whole program to `Unsupported` (exactly how 3b-1 handled
-    // these). Conservative: it also over-rejects the sound sibling where the name-collision is benign,
-    // which is fine per never-miscompile > always-accept. The sound inner-`let`-shadowing case (an
-    // inner `let n` shadowing an outer boxed `let mut n`) is neither a param nor a function name, so it
+    // Either is a miscompile, not an accept, so a boxed mutable whose name ALSO appears as a
+    // parameter OR a function name anywhere degrades the whole program to `Unsupported`.
+    // Conservative: it also over-rejects the sound sibling where the name-collision is benign, which
+    // is fine per never-miscompile > always-accept. The sound inner-`let`-shadowing case (an inner
+    // `let n` shadowing an outer boxed `let mut n`) is neither a param nor a function name, so it
     // still boxes. `func_names` is the top-level function set already computed above.
     if !boxed_names.is_empty() {
         let mut clashers = param_names(core);
@@ -446,8 +442,7 @@ pub fn defunc_mapped(core: &Core) -> Result<(Core, BTreeSet<NodeId>), LowerError
     // bindings (an empty `ArmData.params` makes `dispatcher` emit none, so `$a_i` reaches the call
     // directly). Forwarding rather than duplicating is what keeps every input id labelling exactly ONE
     // output node; see `Emitted`'s doc comment. It costs one extra frame on the DISPATCHED path only —
-    // the by-name path stays a direct call — and no existing program regresses, because programs in
-    // this class were rejected outright before.
+    // the by-name path stays a direct call.
     let mut arms: BTreeMap<String, ArmData> = BTreeMap::new();
     for f in &value_funcs {
         if kept_names.contains(&f.name) {
@@ -504,7 +499,7 @@ pub fn defunc_mapped(core: &Core) -> Result<(Core, BTreeSet<NodeId>), LowerError
     // an earlier one). Innermost-first here means iterating in reverse.
     let mut let_pairs: Vec<(&LetBinding, Core)> = lets.iter().zip(let_values_rw).collect();
     while let Some((l, v)) = let_pairs.pop() {
-        // Plan 3b-2: a boxed prelude mutable is re-emitted as an immutable box-handle binding
+        // A boxed prelude mutable is re-emitted as an immutable box-handle binding
         // `let $boxh(n) = $box(value)`, so the closure built at a later let's site captures the box.
         if let Some(h) = box_handle.get(&l.name) {
             let boxed_val = box1(&mut g, v);
@@ -546,8 +541,7 @@ pub fn defunc_mapped(core: &Core) -> Result<(Core, BTreeSet<NodeId>), LowerError
             Unit::Group(id) => Some(*id),
             // A lone unit whose one member carries no source origin is a generated dispatcher, which
             // mints BOTH of its ids here. Mint the binder's now, BEFORE the member loop mints the
-            // lambda's, so a dispatcher's pair keeps the order it had before groups existed — this
-            // loop is the only place either is minted, and every higher-order program has one.
+            // lambda's — this loop is the only place either is minted.
             Unit::Solo(name) => match by_name.get(name) {
                 Some(e) if e.src.is_none() => Some(g.fresh()),
                 _ => None,
@@ -731,7 +725,7 @@ struct Rewriter<'a> {
     tags: &'a BTreeMap<String, u64>,
     kept: &'a BTreeSet<String>,
     mutable_names: &'a BTreeSet<String>,
-    /// Plan 3b-2: boxed name → its stable immutable handle name `$boxh{k}` (the box the closure
+    /// Boxed name → its stable immutable handle name `$boxh{k}` (the box the closure
     /// captures). Its KEY set IS `boxed_names` (the mutables some lambda captures), so a `.get(name)`
     /// both tests boxed-membership and yields the handle in one lookup.
     box_handle: &'a BTreeMap<String, String>,
@@ -765,7 +759,7 @@ impl Rewriter<'_> {
             }
             Core::Assign(id, name, v) => {
                 let rv = self.rewrite(v, locals)?;
-                // Plan 3b-2: a write to a boxed mutable is `$box_set($boxh(n), v)`, which (like
+                // A write to a boxed mutable is `$box_set($boxh(n), v)`, which (like
                 // `Assign`) evaluates to unit — semantics preserved. The `$box_set` call IS this
                 // assignment, rewritten, so it carries the `Assign`'s own id.
                 if let Some(h) = self.box_handle.get(name).cloned() {
@@ -780,7 +774,7 @@ impl Rewriter<'_> {
                 // detection in a nested lambda matches on the original free-var name; the read/write
                 // rewrites below intercept the boxed name before the `locals` check.
                 let body = self.rewrite(body, &with(locals, name))?;
-                // Plan 3b-2: a binding of a boxed mutable becomes an IMMUTABLE box-handle binding
+                // A binding of a boxed mutable becomes an IMMUTABLE box-handle binding
                 // `let $boxh(n) = $box(value)`. Keyed on box-set membership (not the `mutable` flag) so
                 // an immutable inner `let n` shadowing an outer boxed mutable is boxed consistently —
                 // otherwise its reads (rewritten to `$box_get($boxh(n))`) would hit the wrong cell.
@@ -818,7 +812,7 @@ impl Rewriter<'_> {
 
     /// A `Var` in value position (not an immediate static-call callee).
     fn rewrite_value_name(&mut self, id: NodeId, name: &str, locals: &BTreeSet<String>) -> Result<Core, LowerError> {
-        // Plan 3b-2: a read of a boxed mutable is `$box_get($boxh(n))`. Intercepted BEFORE the
+        // A read of a boxed mutable is `$box_get($boxh(n))`. Intercepted BEFORE the
         // `locals` check (a boxed mutable is a local, but its value lives in the box) so every
         // read site — direct `Var`, or an `Apply` callee routed here — resolves through the cell. The
         // `$box_get` call IS this variable read, rewritten, so it carries the `Var`'s own id.
@@ -829,13 +823,12 @@ impl Rewriter<'_> {
         if locals.contains(name) {
             return Ok(Core::Var(id, name.to_string())); // a local value
         }
-        // The `tags` check MUST run before the literal-`nil` fallback below: `nil` is just an
-        // ordinary identifier in this language (not a keyword — see `prelude.rs`'s module doc), so a
-        // user `fn nil` used as a value SHADOWS the empty list exactly the way the reference
-        // interpreter's frame lookup shadows it (a `LetRecGroup` frame nearer than the prelude
-        // frame). Checking `name == "nil"` first would resolve every value-use of a user `fn nil` to
-        // the empty list instead of its closure — the bug this reorder closes (measured: TM `HitCap`
-        // where reference and λ both agree on a value).
+        // The `tags` check MUST run before the literal-`nil` fallback below: `nil` is just an ordinary
+        // identifier in this language (not a keyword — see `prelude.rs`'s module doc), so a user
+        // `fn nil` used as a value SHADOWS the empty list exactly the way the reference interpreter's
+        // frame lookup shadows it (a `LetRecGroup` frame nearer than the prelude frame). Checking
+        // `name == "nil"` first would resolve every value-use of a user `fn nil` to the empty list
+        // instead of its closure.
         if let Some(&tag) = self.tags.get(name) {
             // A closed named function-value: `cons(tag, $nil)` (a named value fn never captures — guard
             // 2 rejects one that would).
@@ -876,11 +869,11 @@ impl Rewriter<'_> {
         for p in params {
             fv.remove(p);
         }
-        // Captures in original-name order (BTreeSet). Plan 3b-2: a captured mutable contributes its
-        // IMMUTABLE box HANDLE `$boxh(c)` (not `c`) — capturing the box handle by value is exactly
-        // by-reference capture of the underlying cell. An immutable capture stays by-value (3b-1). The
-        // mapping preserves order, so the creation-site env and the arm-unpack still pair up 1:1; and
-        // since a box handle is immutable, no closure captures a mutable — the 3b-1 rejection is gone.
+        // Captures in original-name order (BTreeSet). A captured mutable contributes its IMMUTABLE box
+        // HANDLE `$boxh(c)` (not `c`) — capturing the box handle by value is exactly by-reference capture
+        // of the underlying cell. An immutable capture stays by-value. The mapping preserves order, so the
+        // creation-site env and the arm-unpack still pair up 1:1; and since a box handle is immutable, no
+        // closure captures a mutable.
         let raw_captures = fv.iter().filter(|v| locals.contains(*v));
         let mut captures: Vec<String> = Vec::new();
         for c in raw_captures {
@@ -907,13 +900,12 @@ impl Rewriter<'_> {
             t
         };
         // GUARANTEED-UNIQUE, independent of push order. The invariant this name needs is exactly: a
-        // MONOTONIC counter, read BEFORE the recursive body rewrite. The historical bug was the FIRST
-        // half — the name came from `self.anon.len()`, which DID satisfy "read before the recursion"
-        // but is not a monotonic ticket dispenser at read time: `len()` only advances on the
-        // `self.anon.push` below, which happens AFTER the recursive rewrite. So a value-lambda whose
-        // body contains ANOTHER value-lambda (currying, nested callbacks) had both read `0` and mint
-        // the SAME `$lam0` — a duplicate key that corrupted `tags`/`by_arity`/`arms` and panicked the
-        // dispatcher's `arms.remove`.
+        // MONOTONIC counter, read BEFORE the recursive body rewrite. `self.anon.len()` would
+        // satisfy "read before the recursion" but is not a monotonic ticket dispenser at read time:
+        // `len()` only advances on the `self.anon.push` below, which happens AFTER the recursive
+        // rewrite. So a value-lambda whose body contains ANOTHER value-lambda (currying, nested
+        // callbacks) would have both read `0` and mint the SAME `$lam0` — a duplicate key that
+        // corrupts `tags`/`by_arity`/`arms`.
         //
         // `self.g` satisfies that invariant, but nothing here NEEDS it to be the node generator: a
         // dedicated monotonic counter would be equally collision-proof. Borrowing `g` is a deliberate
@@ -1009,10 +1001,10 @@ fn dispatcher(
 
     // Fold the arms into an `if tag == k { arm } else …` chain (tag 0 outermost).
     for name in group.iter().rev() {
-        // Defensive: `group`/`tags`/`arms` are built together in phases 4/6, so every `name` here has a
-        // tag and an unconsumed arm. Rather than `expect`/panic on a would-be internal-invariant
-        // violation (e.g. a future duplicate-name regression like the one this pass just fixed), degrade
-        // to `Unsupported` — `run_tm` must stay panic-free on ANY input.
+        // Defensive: `group`/`tags`/`arms` are built together in phases 4, 5c and 6, so every
+        // `name` here has a tag and an unconsumed arm. Rather than `expect`/panic on a would-be
+        // internal-invariant violation (e.g. a future duplicate-name regression), degrade to
+        // `Unsupported` — `run_tm` must stay panic-free on ANY input.
         let Some(&tag) = tags.get(name) else {
             return Err(LowerError::Unsupported { node: g.fresh(), what: format!("missing tag for `{name}`") });
         };
@@ -1263,17 +1255,17 @@ fn fv_into(node: &Core, out: &mut BTreeSet<String>) {
         }
         Core::Assign(_, name, value) => {
             // The lvalue is a read/write reference (must be in scope) — treat it as free so a lambda
-            // that assigns a captured name is caught by the mutable-capture check.
+            // that assigns an outer name captures it, and `defunc_mapped` boxes that name.
             out.insert(name.clone());
             fv_into(value, out);
         }
     }
 }
 
-/// The names bound `let mut` or `Assign`ed anywhere in `core` — a captured one is mutable (rejected).
-/// Iterative (explicit worklist via `push_children`), so it can never overflow. Name-based and
-/// therefore conservative under shadowing (an immutable inner binding sharing a name with an outer
-/// `let mut` is treated as mutable → `Unsupported`, never a miscompile).
+/// The names bound `let mut` or `Assign`ed anywhere in `core`; a captured one is boxed. Iterative
+/// (explicit worklist via `push_children`), so it can never overflow. Name-based and therefore
+/// conservative under shadowing (an immutable inner binding sharing a name with a captured outer
+/// `let mut` is boxed too).
 fn collect_mutable_names(core: &Core) -> BTreeSet<String> {
     let mut out = BTreeSet::new();
     let mut stack = vec![core];
@@ -1281,7 +1273,7 @@ fn collect_mutable_names(core: &Core) -> BTreeSet<String> {
         match n {
             // A `let mut` binder and an `Assign` use-site are the two ways a name becomes "mutable" by
             // this function's own definition (see its doc comment) — genuinely the same case, not a
-            // coincidence, so merged rather than kept apart.
+            // coincidence, so one arm.
             Core::Let { mutable: true, name, .. } | Core::Assign(_, name, _) => {
                 out.insert(name.clone());
             }
@@ -1296,7 +1288,7 @@ fn collect_mutable_names(core: &Core) -> BTreeSet<String> {
 /// params — every name some lambda captures. Iterative outer walk (explicit worklist, no native
 /// recursion); `free_vars` per lambda recurses only over a lambda body, so it is depth-bounded by the
 /// up-front `too_deep_node` check (see `MAX_DEFUNC_DEPTH`) — totality preserved. Intersected with the
-/// mutables (`collect_mutable_names`) to decide which mutables must be boxed (Plan 3b-2).
+/// mutables (`collect_mutable_names`) to decide which mutables must be boxed.
 fn lambda_captured_names(core: &Core) -> BTreeSet<String> {
     let mut out = BTreeSet::new();
     let mut stack = vec![core];
@@ -1317,8 +1309,8 @@ fn lambda_captured_names(core: &Core) -> BTreeSet<String> {
 /// whose value is a `Lambda`, so collecting every `Core::Lambda` node's params covers both bare
 /// value-lambdas and named `fn` definitions. Iterative outer walk (explicit worklist, no native
 /// recursion), so it is unconditionally total, like `collect_mutable_names`/`lambda_captured_names`.
-/// Plan 3b-2 (Task 7 fix): intersected with `boxed_names` to reject a boxed mutable whose name is also
-/// reused as a parameter (the by-name box interception would miscompile such a param — see `defunc`).
+/// Intersected with `boxed_names` to reject a boxed mutable whose name is also reused as a parameter
+/// (the by-name box interception would miscompile such a param — see `defunc_mapped`).
 fn param_names(core: &Core) -> BTreeSet<String> {
     let mut out = BTreeSet::new();
     let mut stack = vec![core];
@@ -1354,7 +1346,7 @@ fn cons(g: &mut SynthGen, head: Core, tail: Core) -> Core {
     // `$cons`, not `cons`: this builds the closure representation itself, so a user `fn cons` must
     // never be able to capture it. `$` is rejected by the lexer in an identifier, so no user
     // binding can ever collide with this name — the same holds for its three siblings, `$head`/
-    // `$tail`/`$nil` (see `prelude.rs`'s `runtime_env` doc comment, which enumerates all four, and
+    // `$tail`/`$nil` (see the comment in `prelude.rs`'s `runtime_env`, which enumerates all four, and
     // `lower_asm.rs`).
     let c = var(g, "$cons");
     apply(g, c, vec![head, tail])
@@ -1387,7 +1379,7 @@ fn nil_scaffold(g: &mut SynthGen) -> Core {
     var(g, "$nil")
 }
 
-// Plan 3b-2 box builders: `$box(init)` allocates a fresh cell, `$box_get(h)` reads it, and
+// Box builders: `$box(init)` allocates a fresh cell, `$box_get(h)` reads it, and
 // `$box_set(h, v)` writes it (evaluating to unit). `$box*` are `BUILTIN_FNS`, so these applications
 // stay static direct calls — the reference resolves them to the `Builtin::Box*` builtins and
 // `lower_asm` to the `Box`/`BoxGet`/`BoxSet` instructions.
@@ -1412,7 +1404,7 @@ fn box_set2(g: &mut SynthGen, at: NodeId, h: Core, v: Core) -> Core {
 }
 
 /// `cons(c1, cons(c2, … $nil))` of the captured names as plain `Var`s (each in scope at the creation
-/// site). Empty captures → `$nil` (a closed closure's env), matching the pre-Task-4 `cons(tag, $nil)`.
+/// site). Empty captures → `$nil` (a closed closure's env), so a closed closure is `cons(tag, $nil)`.
 fn build_env(g: &mut SynthGen, captures: &[String]) -> Core {
     let mut env = nil_scaffold(g);
     for c in captures.iter().rev() {
@@ -1568,7 +1560,7 @@ mod tests {
 
     #[test]
     fn one_closed_function_value_through_a_dispatcher() {
-        // Currently `function_as_a_value_is_unsupported`: apply2 takes a function argument.
+        // `lower_asm`'s `function_as_a_value_is_unsupported` program: `apply2` takes a function argument.
         defunc_preserves_and_lowers("fn apply2(f, x) { f(x) } fn add1(x) { x + 1 } apply2(add1, 5)");
     }
 
@@ -1594,8 +1586,7 @@ mod tests {
 
     #[test]
     fn two_value_fns_of_the_same_arity_get_distinct_tags() {
-        // The contract demos put each value fn in a distinct arity (one arm per dispatcher); this
-        // exercises the multi-arm path — `add1`/`dbl` share `apply1` as tags 0 and 1.
+        // This exercises the multi-arm path — `add1`/`dbl` share `apply1` as tags 0 and 1.
         defunc_preserves_and_lowers(
             "fn ap(f, x) { f(x) }\n\
              fn add1(x) { x + 1 }\n\
@@ -1620,18 +1611,18 @@ mod tests {
         );
     }
 
-    /// A value-lambda whose body is ANOTHER value-lambda (currying: `|y| |z| y + z`) once minted the
-    /// SAME `$lam0` name for both, corrupting `tags`/`by_arity`/`arms` and panicking the dispatcher's
-    /// `arms.remove`. With guaranteed-unique anon names it defuncs semantics-exact and lowers (result 9).
+    /// A value-lambda whose body is ANOTHER value-lambda (currying: `|y| |z| y + z`) must mint a
+    /// distinct `$lam` name for each: a shared name is a duplicate key in `tags`/`by_arity`/`arms`,
+    /// and the dispatcher then refuses the program with `Unsupported`. With unique names it defuncs
+    /// semantics-exact and lowers (result 9).
     #[test]
-    fn nested_value_lambdas_curry_defunc_three_way() {
+    fn nested_value_lambdas_curry_and_lower_after_defunc() {
         defunc_preserves_and_lowers("fn ap(f, x) { f(x) } let add = |y| |z| y + z; ap(ap(add, 4), 5)");
     }
 
     /// A nested higher-order callback (`|x| head([x].map(|y| y + x))`, an inner value-lambda passed to
-    /// `map` inside an outer value-lambda) no longer panics: unique naming fixes the crash, and the
-    /// program then lands cleanly on defunc's existing cyclic-call-graph rejection (`map -> $apply1 ->
-    /// map`, induced by dispatcher aggregation), returning `Unsupported` — never a panic.
+    /// `map` inside an outer value-lambda) is cleanly `Unsupported`, never a panic: it lands on defunc's
+    /// cyclic-call-graph rejection (`map -> $apply1 -> map`, induced by dispatcher aggregation).
     #[test]
     fn nested_hof_callback_is_cleanly_unsupported() {
         use crate::tm::lower_asm::LowerError;
@@ -1665,9 +1656,9 @@ mod tests {
         }
     }
 
-    /// Plan 3b-2: a mutable captured by a VALUE-USED lambda is now BOXED and runs (it was
-    /// `Unsupported` in 3b-1). `m` (a `let mut`) is captured by `|x| x + m`, which is passed to `ap` —
-    /// defunc boxes `m` into a shared cell, and the reference agrees on the value.
+    /// A mutable captured by a VALUE-USED lambda is BOXED and runs. `m` (a `let mut`) is captured by
+    /// `|x| x + m`, which is passed to `ap` — defunc boxes `m` into a shared cell, and the reference agrees
+    /// on the value.
     #[test]
     fn value_used_mutable_capture_is_boxed_and_runs() {
         defunc_preserves_and_lowers("let mut m = 0; fn ap(f) { f(1) } ap(|x| x + m)");
@@ -1704,11 +1695,10 @@ mod tests {
         assert_eq!(count_calls_to(&d, "sub"), 2, "the by-name call plus the forwarding arm");
     }
 
-    /// Pins the REAL `Unsupported` rejection boundary: every one of these was run individually to
-    /// confirm it actually returns `Err(LowerError::Unsupported { .. })` (not `Ok`, not a downstream
-    /// panic) before being added here — see the task-5 report for the full discovery log. `needle` also
-    /// pins *why* (the `what` message), so this can't accidentally pass by tripping a different,
-    /// unrelated rejection than the one the case names.
+    /// Pins the REAL `Unsupported` rejection boundary: every one of these returns
+    /// `Err(LowerError::Unsupported { .. })` (not `Ok`, not a downstream panic). `needle` also pins
+    /// *why* (the `what` message), so this can't accidentally pass by tripping a different, unrelated
+    /// rejection than the one the case names.
     #[test]
     fn unsupported_boundary() {
         use crate::tm::lower_asm::LowerError;
@@ -1730,10 +1720,10 @@ mod tests {
         rejects("fn ap(f, x) { f(x) } ap(tail, cons(1, nil))", "builtin `tail`");
         rejects("fn ap(f, x) { f(x) } ap(is_empty, nil)", "builtin `is_empty`");
 
-        // The BOTH class's ONE remaining exception. A BOTH function's arm forwards to it, giving
-        // `$applyN` an edge to `f`; if `f`'s body applies a value at the SAME arity N, that closes
-        // `$applyN -> t -> $applyN`. This is the PRE-EXISTING cycle rule (see the two cases below),
-        // not a new restriction — and dispatching at a DIFFERENT arity is fine, which is why the
+        // The BOTH class's ONE exception. A BOTH function's arm forwards to it, giving `$applyN` an
+        // edge to `f`; if `f`'s body applies a value at the SAME arity N, that closes
+        // `$applyN -> f -> $applyN`. This is the cycle rule (see the two cases below), not a
+        // restriction of its own — and dispatching at a DIFFERENT arity is fine, which is why the
         // `map`-passed-as-a-value demo works. Lifting it means emitting the dispatcher and the BOTH
         // function as one `LetRecGroup`, which is a change to `topo_order`'s unit model.
         rejects(
@@ -1749,31 +1739,30 @@ mod tests {
         // relaxed, this line fails and the forwarder must start binding captures from the env.
         rejects("let n = 5; fn f(x) { x + n } fn ap(g, x) { g(x) } f(1) + ap(f, 1)", "references an outer let binding");
 
-        // A named value-fn referencing an outer `let` (Task 4's restriction): `f` is used only as a
-        // value (passed to `ap`), and its body reads the outer `n`.
+        // A named value-fn referencing an outer `let`: `f` is used only as a value (passed to
+        // `ap`), and its body reads the outer `n`.
         rejects("let n = 5; fn f(x) { x + n } fn ap(g,x){g(x)} ap(f, 1)", "references an outer let binding");
 
-        // Plan 3b-2 scope: boxing only helps a mutable captured by a VALUE-USED lambda. A mutable
-        // captured by a NAME-CALLED fn referencing an outer scope stays Unsupported (the pre-existing
-        // closed-subroutine boundary): `f` is only called (`f(1)`), and reads the outer `let mut n`.
+        // Scope: boxing only helps a mutable captured by a VALUE-USED lambda. A mutable captured by a
+        // NAME-CALLED fn referencing an outer scope stays Unsupported (the closed-subroutine
+        // boundary): `f` is only called (`f(1)`), and reads the outer `let mut n`.
         rejects("let mut n = 5; fn f(x) { x + n } f(1)", "references an outer let binding");
 
         // A cyclic higher-order call graph that reaches defunc's cycle detection: `ap` (kept, dispatches
         // through `$apply1`) and `again` (value-used, arity 1, so its body becomes an `$apply1` arm that
         // calls `ap` by name) form a real cycle in the emitted call graph -- `ap -> $apply1 -> ap` --
-        // even though no *named* function calls itself (the language's strict declare-before-use
-        // scoping rules out mutual recursion by name; this cycle is induced by dispatcher aggregation).
+        // even though no *named* function calls itself (this cycle is induced by dispatcher aggregation).
         rejects(
             "fn ap(f, x) { f(x) } fn inc(x) { x + 1 } fn again(x) { ap(inc, x) } \
              fn use_it(g, y) { g(y) } use_it(again, 5)",
             "cyclic higher-order call graph",
         );
 
-        // The half of the `Unit` rule that was deliberately NOT relaxed. `topo_order` drops edges
-        // *within* a binder (a group's members call each other freely, since `lower_asm` binds every
-        // name in the group before lowering any body) but KEEPS every edge in and out of one, so a
-        // cycle running THROUGH a group is still rejected: `b` is value-used, so its body becomes an
-        // `$apply1` arm that calls `a` by name, giving group{a,b} -> `ap` -> `$apply1` -> group{a,b}.
+        // The half of the `Unit` rule a group does not relax. `topo_order` drops edges *within* a
+        // binder (a group's members call each other freely, since `lower_asm` binds every name in the
+        // group before lowering any body) but KEEPS every edge in and out of one, so a cycle running
+        // THROUGH a group is rejected: `b` is value-used, so its body becomes an `$apply1` arm
+        // that calls `a` by name, giving group{a,b} -> `ap` -> `$apply1` -> group{a,b}.
         rejects(
             "fn ap(f, x) { f(x) } fn a(n) { if n == 0 { 0 } else { ap(b, n - 1) } } \
              fn b(n) { if n == 0 { 1 } else { a(n - 1) } } a(4)",
@@ -1781,7 +1770,7 @@ mod tests {
         );
 
         // A nested/local function definition, reached (its enclosing fn must be called, or it's dead
-        // code and silently dropped rather than rewritten — see the report for that false start).
+        // code and silently dropped rather than rewritten).
         rejects("fn outer(x) { fn inner(y) { y + 1 } inner(x) } outer(5)", "nested function definition");
 
         // A nested/local mutually recursive GROUP, same boundary one variant over: `peel` takes the
@@ -1794,12 +1783,13 @@ mod tests {
     }
 
     /// The dispatcher's fault arm (`$head($nil)`), not `Unsupported`, is how a partial-application /
-    /// arity-mismatched closure call is handled (Task 1's review): `defunc` has no static arity check on
-    /// a value-application, so a mismatched call simply lands on a per-arity dispatcher with no matching
+    /// arity-mismatched closure call is handled: `defunc` has no static arity check on a
+    /// value-application, so a mismatched call simply lands on a per-arity dispatcher with no matching
     /// arm and falls through to the faulting `else`. Both the reference (dynamic arity check on
-    /// `Value::Closure`) and `defunc`'s output fault — never a silently wrong value. (`crate::run` would
-    /// reject this SRC statically as a type error before it ever reached `defunc`, so this exercises the
-    /// untyped parse+desugar path directly, exactly as `defunc`'s other unit tests build `core`.)
+    /// `Value::Closure`) and `defunc`'s output fault — never a silently wrong value. (`crate::run`
+    /// would reject this SRC statically as a type error before it ever reached `defunc`, so this
+    /// exercises the untyped parse+desugar path directly, exactly as `defunc`'s other unit tests
+    /// build `core`.)
     #[test]
     fn arity_mismatch_on_closure_call_faults_not_unsupported() {
         let src = "fn ap(f, x) { f(x) } fn add(a, b) { a + b } ap(add, 5)";
@@ -1811,7 +1801,7 @@ mod tests {
         assert!(crate::interp::eval(&d).is_err(), "defunc's output must also fault (never silently wrong)");
     }
 
-    /// The headline (Plan 3b-2): a value-used closure captures a mutable; a later assignment is
+    /// The by-reference case: a value-used closure captures a mutable; a later assignment is
     /// observed (by-reference). `defunc` must box the mutable and preserve the reference's value.
     #[test]
     fn boxed_mutable_capture_is_semantics_preserving() {
@@ -1832,11 +1822,11 @@ mod tests {
         let src = "let mut n = 1; fn apply0(g) { g(0) } let f = |x| x + n; n = 10; apply0(f)";
         let core = desugar(&parse(src).0.unwrap());
         let d = defunc(&core).expect("lowers");
-        // It lowers first-order (the ultimate structural check) and runs on the TM.
+        // It lowers first-order (the ultimate structural check).
         assert!(crate::tm::lower_asm(&d).is_ok(), "defunc'd boxing program must be first-order");
     }
 
-    /// A purely imperative mutable (never captured by any lambda) is NOT boxed — no regression.
+    /// A purely imperative mutable (never captured by any lambda) is NOT boxed.
     #[test]
     fn uncaptured_mutable_is_not_boxed() {
         let src = "let mut n = 3; let mut acc = 0; while n > 0 { acc = acc + 1; n = n - 1; } acc";
@@ -1847,7 +1837,7 @@ mod tests {
         let d = defunc(&core).expect("a purely-imperative program (no higher-order construct) must defunc");
         assert_eq!(crate::interp::eval(&d).unwrap(), reference);
         // No mutable here is captured by any lambda, so NOTHING is boxed: the output is byte-for-byte
-        // un-boxed — a loop counter never grows a box. (FIX 3: previously vacuous under `if let Ok`.)
+        // un-boxed — a loop counter never grows a box.
         assert!(!format!("{d:?}").contains("$box"), "an uncaptured loop counter must not be boxed:\n{d:?}");
     }
 
@@ -1888,12 +1878,12 @@ mod tests {
         defunc_preserves_and_lowers("let mut n = 0; fn ap(f) { f(10) } let g = |x| x + n; n = n + 5; ap(g)");
     }
 
-    /// FIX 1 (Task 7 review — the contract hole): a boxed mutable whose NAME is ALSO reused as a
-    /// lambda/fn PARAMETER cannot be boxed safely. The read/write interception (`box_handle.get(name)`)
-    /// is keyed by NAME, so a param that shadows the boxed mutable would have its (never-boxed) reads
-    /// rewritten to `$box_get($boxh)` — a handle NOT in scope inside that param's body — producing
-    /// malformed `Ok` Core with a free `$boxh`. That violates the contract (accept ⟹ semantics-exact),
-    /// so the program must degrade to `Unsupported`, never `Ok` with a free variable.
+    /// A boxed mutable whose NAME is ALSO reused as a lambda/fn PARAMETER cannot be boxed safely. The
+    /// read/write interception (`box_handle.get(name)`) is keyed by NAME, so a param that shadows the
+    /// boxed mutable would have its (never-boxed) reads rewritten to `$box_get($boxh)` — a handle NOT
+    /// in scope inside that param's body — producing malformed `Ok` Core with a free `$boxh`. That
+    /// violates the contract (accept ⟹ semantics-exact), so the program must degrade to `Unsupported`,
+    /// never `Ok` with a free variable.
     #[test]
     fn boxed_mutable_reused_as_a_parameter_is_unsupported() {
         use crate::tm::lower_asm::LowerError;
@@ -1916,13 +1906,12 @@ mod tests {
         }
     }
 
-    /// FIX C1 (Task 7 whole-branch review — the SAME contract hole as the param case, one rung up): a
-    /// boxed mutable whose NAME is ALSO a top-level `fn`/`LetRec` (FUNCTION) name cannot be boxed
-    /// safely. The by-name box interception in `rewrite_value_name` fires on ANY value-use of that
-    /// name — INCLUDING the FUNCTION's value-use — rewriting it to `$box_get($boxh…)`, which is
-    /// malformed Core `defunc` would otherwise return as `Ok`, making `run_tm` diverge (HitCap) from
-    /// the reference. `param_names` only collects `Lambda` params, NOT function binder names, so the
-    /// original guard let this through; the fix unions `func_names` into the clash set. Must degrade to
+    /// A boxed mutable whose NAME is ALSO a top-level `fn`/`LetRec` (FUNCTION) name cannot be boxed
+    /// safely: the same contract hole as the param case, one rung up. The by-name box interception in
+    /// `rewrite_value_name` fires on ANY value-use of that name — INCLUDING the FUNCTION's value-use —
+    /// rewriting it to `$box_get($boxh…)`, which is malformed Core `defunc` would otherwise return as
+    /// `Ok`, making `run_tm` diverge (HitCap) from the reference. `param_names` only collects `Lambda`
+    /// params, NOT function binder names, so the clash set also unions in `func_names`. Must degrade to
     /// `Unsupported`, never `Ok` with a free/misbound `$boxh`.
     #[test]
     fn boxed_mutable_reused_as_a_function_name_is_unsupported() {
@@ -1943,13 +1932,13 @@ mod tests {
         );
     }
 
-    /// FIX 2 (Task 7 review): the SOUND inner-`let`-shadowing-a-boxed-mutable case the `boxed_names`
-    /// membership keying exists for. The inner immutable `let n = 5` shadows the outer boxed `let mut
+    /// The SOUND inner-`let`-shadowing-a-boxed-mutable case the `boxed_names` membership keying exists
+    /// for. The inner immutable `let n = 5` shadows the outer boxed `let mut
     /// n`; because `collect_mutable_names` is name-based, `n ∈ boxed_names`, so the inner `let n` is
     /// boxed to a fresh `$boxh` that shadows the outer handle exactly as `n` shadows. The closure `f`
     /// captured the OUTER box (holding 1, un-reassigned here), so `ap(f) = 0 + 1 = 1`; the inner read
-    /// sees 5; `5 + 1 = 6`. `n` is never a PARAMETER, so FIX 1 must NOT reject this (only lets, not
-    /// params, are boxed here).
+    /// sees 5; `5 + 1 = 6`. `n` is never a PARAMETER, so the parameter-name clash check must NOT reject
+    /// this (only lets, not params, are boxed here).
     #[test]
     fn inner_let_shadowing_a_boxed_mutable_is_boxed_consistently() {
         let src = "let mut n = 1; fn ap(g){g(0)} let f = |x| x + n; { let n = 5; n + ap(f) }";
@@ -2002,8 +1991,7 @@ mod tests {
     /// checks only that the two buckets TOGETHER cover the output; it cannot tell whether a given
     /// node landed in the right one, so on its own it admits a pass that mints everything. These
     /// assertions name the three judgement calls the classification rests on, so flipping any of them
-    /// fails the build instead of silently re-billing the two largest cost buckets of a higher-order
-    /// program.
+    /// fails the build instead of silently re-billing a higher-order program's cost.
     #[test]
     fn defunc_pins_which_constructs_keep_their_identity() {
         let core = desugar(
@@ -2100,10 +2088,9 @@ mod tests {
     /// shape that reaches this pass.
     ///
     /// The two members contribute DIFFERENT arithmetic PER LEVEL (`+ 2` in `ev`, `+ 5` in `od`), not
-    /// just different base constants: with `ev(4, id) == 1 + 5 + 2 + 5 + 2 == 15`, binding either
-    /// body to the other's name gives 20, so a name<->body swap FAILS here instead of passing by
-    /// symmetry (a constant-only difference can cancel out). Verified by mutation, see the task-6
-    /// report.
+    /// just different base constants: with `ev(4, id) == 1 + 5 + 2 + 5 + 2 == 15`, binding either body
+    /// to the other's name gives 20, so a name<->body swap FAILS here instead of passing by symmetry
+    /// (a constant-only difference can cancel out).
     #[test]
     fn a_binding_group_survives_defunctionalization() {
         let src = "fn ev(n,k){ if n == 0 { k(1) } else { od(n - 1, k) + 2 } } \
@@ -2157,21 +2144,11 @@ mod tests {
     /// **`p(4, id)`, not `p(5, id)` — the ARGUMENT is what makes a permutation visible, not the
     /// constants.** A rotation permutes *which* constant lands at *which* level; when the walk
     /// consumes a whole number of laps, the multiset of constants summed — and the base body finally
-    /// reached — are both unchanged, so the answer is identical. Measured over all six pairings:
+    /// reached — are both unchanged, so the answer is identical.
     ///
-    /// | pairing | `p(4, id)` | `p(5, id)` |
-    /// |---|---:|---:|
-    /// | correct | **20** | **32** |
-    /// | rotate | 24 | **32** ← invisible |
-    /// | rotate the other way | 51 | 62 |
-    /// | swap first two | 32 | 44 |
-    /// | swap last two | 27 | 35 |
-    /// | swap outer two | 51 | 62 |
-    ///
-    /// At `p(5, id)` one of the two rotations returns **exactly the correct answer**, so this test
-    /// stayed green under the n-ary-only mispairing it exists to catch — only the rotation that
-    /// degenerates into a self-loop showed, which is the one Task 6 happened to try. At `p(4, id)`
-    /// every non-identity pairing differs.
+    /// At `p(5, id)` one of the two rotations returns exactly the correct answer, so a test there
+    /// would stay green under the n-ary-only mispairing it exists to catch; at `p(4, id)` every
+    /// non-identity pairing differs.
     #[test]
     fn a_three_member_group_defuncs_and_agrees() {
         defunc_preserves_and_lowers(
@@ -2189,8 +2166,8 @@ mod tests {
     /// hazard here, not a theoretical one. The corpus below includes a function both called-by-name
     /// and used-as-a-value (`sub`/`ap2`); it passes because that function's dispatcher arm FORWARDS to
     /// the kept subroutine (`sub($a1, $a2)`) rather than inlining a second copy of its body. If a
-    /// future change ever switched that arm back to duplicating the body, THIS is the test that would
-    /// fail — with a duplicate id, not by silently doubling the arithmetic inside it.
+    /// future change made that arm duplicate the body, THIS is the test that would fail — with a
+    /// duplicate id, not by silently doubling the arithmetic inside it.
     #[test]
     fn no_output_node_id_is_duplicated() {
         fn count_nodes(core: &Core) -> usize {
@@ -2237,10 +2214,10 @@ mod tests {
         }
     }
 
-    /// A user `fn` named after a list builtin must not capture `defunc`'s own scaffolding. Before the
-    /// `$`-alias fix this MISCOMPILED SILENTLY: `lower_asm` resolves a bound function before the
-    /// builtin table, so the dispatcher's synthesized `head($clos)` tag test resolved to the user's
-    /// `head`. Measured at 3246742: reference 5, λ 5, TM 3.
+    /// A user `fn` named after a list builtin must not capture `defunc`'s own scaffolding:
+    /// `lower_asm` resolves a bound function before the builtin table, so the dispatcher's
+    /// synthesized `head($clos)` tag test would resolve to the user's `head` and MISCOMPILE SILENTLY;
+    /// the `$`-aliases avoid that.
     #[test]
     fn a_user_fn_named_like_a_builtin_does_not_capture_scaffolding() {
         for src in [
@@ -2248,12 +2225,12 @@ mod tests {
             "fn head(x) { x + 1 } fn ap(g, x) { g(x) } head(1) + ap(head, 2)",
             "fn cons(a, b) { a + b } fn ap2(g, a, b) { g(a, b) } cons(1, 2) + ap2(cons, 3, 4)",
             // NOT `"fn tail(x) { x + 1 } fn ap(g, x) { g(x) } tail(1) + ap(tail, 2)"`: that program is
-            // VACUOUS for the same reason `defunc_synthesizes_no_unaliased_builtin_call` was — `tail`
-            // there is a NAMED value-fn, which never captures, so `tail1()` (the helper that only fires
-            // to unpack a dispatched closure's non-empty env) is never invoked and a reverted
-            // `$tail`->`tail` regression would pass unnoticed. This entry adds a capturing value-lambda
-            // (`|y| y + n`) at the SAME arity alongside the shadowing `fn tail`, so its dispatcher arm
-            // actually calls `tail1()` while a real top-level `tail` binder exists to collide with.
+            // VACUOUS — `tail` there is a NAMED value-fn, which never captures, so `tail1()` (the
+            // helper that only fires to unpack a dispatched closure's non-empty env) is never invoked
+            // and a `tail1` emitting bare `tail` would pass unnoticed. This entry adds a capturing
+            // value-lambda (`|y| y + n`) at the SAME arity alongside the shadowing `fn tail`, so its
+            // dispatcher arm actually calls `tail1()` while a real top-level `tail` binder exists to
+            // collide with.
             "let n = 7; fn tail(x) { x + 1 } fn ap(g, y) { g(y) } tail(3) + ap(tail, 2) + ap(|y| y + n, 5)",
         ] {
             defunc_preserves_and_lowers(src);
@@ -2319,7 +2296,7 @@ mod tests {
     /// `is_empty` deliberately has NO `$` alias: `defunc` never synthesizes it, and an unused alias is
     /// a name that later drifts out of sync with the thing it aliases. If a future change starts
     /// synthesizing `is_empty`, this fails and points at the decision instead of silently
-    /// reintroducing the capture bug this slice fixed.
+    /// reintroducing the user-`fn` capture the `$` aliases prevent.
     #[test]
     fn defunc_synthesizes_no_unaliased_builtin_call() {
         for src in [
@@ -2332,7 +2309,7 @@ mod tests {
             // reaches it, and a mutation of `tail1` to emit any other name stays invisible. A capturing
             // value-lambda dispatched through `$apply1` (`|y| y + n`, closing over `n`) forces the arm
             // to actually bind from `$env`, so this entry is what makes the check below cover all
-            // three helpers (`cons1`/`head1`/`tail1`) rather than just two of them.
+            // three helpers (`cons`/`head1`/`tail1`) rather than just two of them.
             "let n = 7; fn ap(g, x) { g(x) } ap(|y| y + n, 5)",
         ] {
             let (prog, ds) = parse(src);
@@ -2349,10 +2326,8 @@ mod tests {
                 {
                     assert!(!synthetic.contains(id), "synthesized call to bare `{name}` at {id} is capturable");
                 }
-                // `nil` is a VALUE, not a call — the same hazard shows up as a bare `Var`, not an
-                // `Apply` callee, so it gets its own check rather than being silently uncovered by the
-                // one above (this is the check that would have caught the `$nil` gap this test's
-                // sibling demos in `three_way_oracle.rs` were added to close).
+                // `nil` is a VALUE, not a call — the same hazard shows up as a bare `Var`, not an `Apply`
+                // callee, so it gets its own check rather than being silently uncovered by the one above.
                 if let Core::Var(id, name) = node
                     && name == "nil"
                 {

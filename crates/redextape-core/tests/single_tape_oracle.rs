@@ -34,10 +34,9 @@ fn assert_single_tape_agrees(src: &str) {
 }
 
 /// The same check as `assert_single_tape_agrees`, but over a caller-chosen `Caps`. Split out for
-/// `the_single_tape_cost_table`: its corpus needs far more than `DEFAULT_CAPS`'s 5,000,000 steps
-/// (`sum(5)` alone measures 303,610,850 single-tape steps below), and raising `DEFAULT_CAPS` itself
-/// would loosen every other test in this file that relies on a runaway construction hitting its cap
-/// quickly.
+/// `the_single_tape_cost_table`: its corpus needs far more than `DEFAULT_CAPS`'s 5,000,000 steps,
+/// and raising `DEFAULT_CAPS` itself would loosen every other test in this file that relies on a
+/// runaway construction hitting its cap quickly.
 fn assert_single_tape_agrees_capped(src: &str, caps: Caps) {
     let (m, inits) = build_machine(src, ENCODING);
     // THE LAYOUT'S OWN SYMBOLS MUST NOT APPEAR IN THE DATA, and `to_single_tape`'s `alphabet-collision`
@@ -76,11 +75,11 @@ fn assert_single_tape_agrees_capped(src: &str, caps: Caps) {
 /// Every member here MUST be a member of `native_oracle.rs`'s `FIRST_ORDER_DEMOS`
 /// (`crates/redextape-native/tests/native_oracle.rs`), which is what this file's own doc claims a
 /// fourth leg onto: that array's `four_way_oracle_on_the_first_order_suite_unary` already asserts
-/// `reference == λ == multitape-TM == native` for every one of its entries, so a program drawn from
-/// it gets `reference == λ == multitape-TM` for free and this test only has to add the fourth
-/// equality, `== singletape-TM`. A program NOT in that array (the corpus used to be `"1 + 2"` and
-/// `"[1, 2]"`, neither a member) gets no such thing: this leg would then establish only
-/// `multitape-TM == singletape-TM`, not the four-way chain the module doc claims.
+/// `reference == λ == multitape-TM == native` for every one of its entries, so a program drawn
+/// from it gets `reference == λ == multitape-TM` for free and this test only has to add the
+/// fourth equality, `== singletape-TM`. A program NOT in that array gets no such thing: this leg
+/// would then establish only `multitape-TM == singletape-TM`, not the four-way chain the module
+/// doc claims.
 #[test]
 fn the_single_tape_leg_agrees_on_small_programs() {
     for src in ["3 - 5", "if 2 > 1 { 10 } else { 20 }", "cons(1, cons(2, nil))"] {
@@ -109,14 +108,12 @@ fn step_counts(src: &str, caps: Caps) -> (u64, u64, usize) {
 /// quadratic is a measured table rather than an adjective.
 ///
 /// **THE `ratio` COLUMN IS PAD-DEPENDENT, NOT A PROPERTY OF THE REDUCTION BY ITSELF.** Every
-/// simulated single-tape step sweeps the WHOLE block skeleton — both sentinels, every tape's marker,
-/// every content cell, padding included — so growing `PAD` grows `ratio` for free: Task 6's review
-/// measured `1 + 2` at 795,199 single-tape steps at `PAD = 64` against 88,339 at `PAD = 1`, a ~9x
-/// spread produced entirely by a constant nobody meant to be measuring. `steps per multi-tape step
-/// per block` divides that padding back out (by dividing by `blocks`, which counts the padding too),
-/// and is the figure that is reproducible across a different `PAD`; `ratio`, `PAD` and `blocks` are
-/// printed alongside it only so the run that produced `ratio` is fully named, not because `ratio`
-/// itself generalizes.
+/// simulated single-tape step sweeps the WHOLE block skeleton — both sentinels, every tape's
+/// marker, every content cell, padding included — so growing `PAD` grows `ratio` for free. `steps
+/// per multi-tape step per block` divides that padding back out (by dividing by `blocks`, which
+/// counts the padding too), and is the figure that is reproducible across a different `PAD`;
+/// `ratio`, `PAD` and `blocks` are printed alongside it only so the run that produced `ratio` is
+/// fully named, not because `ratio` itself generalizes.
 #[test]
 #[ignore = "slow tier: sum(5) alone costs ~300 million single-tape steps; run via cargo nextest run \
             -p redextape-core --test single_tape_oracle --run-ignored all"]

@@ -1,11 +1,11 @@
 //! Tree-sitter capture names to `TokenClass`, one table per language.
 //!
-//! **HERE RATHER THAN IN `redextape-grammar-check`, WHICH IS WHERE THESE TABLES USED TO LIVE.** That
-//! crate is test-only and links four generated `parser.c` through a `cc` build script, so nothing that
-//! ships can depend on it and nothing in a browser can call it. The tables themselves are neither
-//! test-only nor tree-sitter-shaped: they are `&[(&str, TokenClass)]`, pure data, and the web app needs
-//! exactly them to colour an editor. Moving them here keeps this crate WASM-clean — no `tree-sitter`
-//! dependency arrives with them — and lets `redextape-wasm` export them, so `web/` holds no hand copy.
+//! **These tables are here rather than in `redextape-grammar-check`.** That crate is test-only and
+//! links four generated `parser.c` through a `cc` build script, so nothing that ships can depend on it
+//! and nothing in a browser can call it. The tables themselves are neither test-only nor
+//! tree-sitter-shaped: they are `&[(&str, TokenClass)]`, pure data, and the web app needs exactly them
+//! to colour an editor. Having them here keeps this crate WASM-clean — no `tree-sitter` dependency
+//! arrives with them — and lets `redextape-wasm` export them, so `web/` holds no hand copy.
 //!
 //! **THE ALTERNATIVE WAS A HAND-WRITTEN TYPESCRIPT MIRROR HELD EQUAL BY A DRIFT TEST, AND IT WAS
 //! DECLINED.** A map that disagrees per language in three places is precisely the shape a hand copy

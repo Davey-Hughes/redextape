@@ -1,9 +1,5 @@
 //! Lint rules over the surface AST.
 //!
-//! These are the first producers of `Severity::Warning` in the crate. The variant was declared,
-//! matched and unreachable until this module existed — the same shape of gap `TokenClass::Comment`
-//! carried until the printer slice gave it a producer.
-//!
 //! These rules are syntactic and run only on a program with no error-severity diagnostic, so they
 //! never add noise to a file that is already broken.
 //!
@@ -403,14 +399,13 @@ mod tests {
 
     #[test]
     fn rebinding_a_name_with_its_own_old_value_reads_the_old_binding_not_the_new_one() {
-        // The commonest shadowing idiom: `let x = x + 1;` must resolve the `x` on its RIGHT-hand side
-        // to the binding that already exists, not to the one this very statement is about to
-        // introduce. `stmt`'s `Stmt::Let` arm is documented to walk `value` before pushing the new
-        // `Local` for exactly this reason ("The value is inferred in the scope BEFORE the binding
-        // exists") but nothing exercised that claim: both the first `x` and the second are read, so
-        // this must produce zero diagnostics. Pushing the new `Local` before walking `value` would
-        // instead make the second `let`'s value expression read ITSELF, leaving the first `x` never
-        // read and wrongly warned "unused variable".
+        // The commonest shadowing idiom: `let x = x + 1;` must resolve the `x` on its RIGHT-hand side to
+        // the binding that already exists, not to the one this very statement is about to introduce.
+        // `stmt`'s `Stmt::Let` arm is documented to walk `value` before pushing the new `Local` for
+        // exactly this reason ("The value is inferred in the scope BEFORE the binding exists"). Both the
+        // first `x` and the second are read, so this must produce zero diagnostics. Pushing the new
+        // `Local` before walking `value` would instead make the second `let`'s value expression read
+        // ITSELF, leaving the first `x` never read and wrongly warned "unused variable".
         let ds = crate::analyze("let x = 1; let x = x + 1; x").diagnostics;
         assert!(ds.is_empty(), "both bindings are read; the outer one via the inner's own value: {ds:?}");
     }
@@ -453,10 +448,10 @@ mod tests {
 
     #[test]
     fn a_fn_shadows_an_outer_let_of_the_same_name() {
-        // Before the fix, `Stmt::Fn` never pushed its own name onto the scope at all, so `f(2)`
-        // had nothing to resolve against but the outer `let f`, and wrongly marked IT used — hiding
-        // a genuinely dead binding. The `fn`'s own name must shadow it, exactly as typeck's `TyEnv`
-        // does (a later `insert` shadows on lookup regardless of statement kind).
+        // If `Stmt::Fn` did not push its own name onto the scope, `f(2)` would have nothing to
+        // resolve against but the outer `let f`, and would wrongly mark IT used — hiding a genuinely
+        // dead binding. The `fn`'s own name must shadow it, exactly as typeck's `TyEnv` does (a
+        // later `insert` shadows on lookup regardless of statement kind).
         let ds = crate::analyze("let f = 1; fn f(x) { x } f(2)").diagnostics;
         assert_eq!(ds.len(), 1, "{ds:?}");
         assert!(ds[0].message.contains("unused variable"), "got {:?}", ds[0].message);

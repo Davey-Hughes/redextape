@@ -1,5 +1,5 @@
-//! Optionality property 2 over GENERATED machines and headers, alongside the existing
-//! `tm_bank_invariant` and `tm_width_equivalence` proptests.
+//! Optionality property 2 over GENERATED machines and headers, alongside the `tm_bank_invariant` and
+//! `tm_width_equivalence` proptests.
 //!
 //! The generator must produce headers in the normal form `TmHeader::new` maintains — empty tapes
 //! dropped, indices ascending, no duplicates — because a header outside that form is not a value the
@@ -52,7 +52,7 @@ fn arb_state_shape(arity: usize, n_states: u32) -> impl Strategy<Value = (bool, 
     ]
 }
 
-/// A validate()-clean machine: 1..3 tapes, 1..4 states, every rule's arity == tapes, every `next` and
+/// A validate()-clean machine: 1..=3 tapes, 1..=4 states, every rule's arity == tapes, every `next` and
 /// `start` in range, unique identifier-ish state names (`s0`, `s1`, ...).
 fn arb_machine(tapes: usize, n_states: u32) -> impl Strategy<Value = Machine> {
     (0..n_states, prop::collection::vec(arb_state_shape(tapes, n_states), n_states as usize)).prop_map(
@@ -78,9 +78,9 @@ fn arb_result_ty() -> impl Strategy<Value = Ty> {
 }
 
 /// A non-empty cell run over the tape alphabet — empty runs are excluded on purpose, since
-/// `TmHeader::new` drops an empty entry and a generator that produced one would be exercising the
-/// "no tape line at all" case rather than the "a tape line survives" case the indices strategy already
-/// covers by sometimes choosing zero entries.
+/// `TmHeader::new` drops an empty entry and a generator that produced one would be exercising the "no
+/// tape line at all" case, which the indices strategy already covers by sometimes choosing zero
+/// entries, rather than the "a tape line survives" case.
 fn arb_tape_cells() -> impl Strategy<Value = Vec<char>> {
     prop::collection::vec(arb_symbol(), 1..8)
 }

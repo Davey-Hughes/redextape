@@ -26,9 +26,9 @@ use std::rc::Rc;
 /// binding half of the `min` is the term, and only for terms some producer built.
 ///
 /// `decode_lambda_ty` walks its spine ITERATIVELY, and the contrast is narrower than "it lacks a guard
-/// `decode` has": both are ultimately bounded by `nf`. Being new code, it could drop the
-/// data-proportional axis outright for no cost, which beats justifying a bound — and it survives a term
-/// built DIRECTLY, past every producer cap, as a result (its own spine test builds a 5,000-cell one).
+/// `decode` has": both are ultimately bounded by `nf`. It drops the data-proportional axis outright,
+/// which beats justifying a bound, and as a result it survives a term built DIRECTLY, past every
+/// producer cap (its own spine test builds a 5,000-cell one).
 pub fn decode(nf: &LambdaTerm, expected: &Value) -> Option<Value> {
     match expected {
         Value::Nat(_) => decode_church(nf).map(Value::Nat),
@@ -315,15 +315,12 @@ mod tests {
     /// independent of that separate question, in either direction.
     ///
     /// The decode AND its assertion both run inside the thread: `Value` holds `Rc`s, so it is not
-    /// `Send` — and since `LambdaTerm` became `Rc`-backed, neither is the term. `Vec<u64>` is, so
-    /// `ns` is moved in and both the term and the expected list are built there.
+    /// `Send` — and `LambdaTerm` is `Rc`-backed, so neither is the term. `Vec<u64>` is, so `ns` is
+    /// moved in and both the term and the expected list are built there.
     ///
-    /// WIDER THAN IT WAS, stated rather than glossed. The term used to be built on the main thread
-    /// so only the DECODE was measured against the small stack; it now also covers construction and
-    /// teardown. That is acceptable because `scott_list_nf` builds with an iterative loop and
-    /// `LambdaTerm`'s `Drop` is iterative by contract — but it means a failure here no longer points
-    /// at the decode alone, and the 256 KiB below was re-measured with construction included rather
-    /// than inherited: it still passes unchanged.
+    /// The test also builds and tears down the term inside the thread, so a failure here does not point at
+    /// the decode alone. That is acceptable because `scott_list_nf` builds with an iterative loop and
+    /// `LambdaTerm`'s `Drop` is iterative by contract.
     #[test]
     fn decode_lambda_ty_is_iterative_over_the_list_spine() {
         let ns: Vec<u64> = (0..5_000).map(|i| i % 10).collect();

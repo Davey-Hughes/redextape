@@ -9,109 +9,76 @@
 #   scripts/check-citations.sh              # scan the tracked tree
 #   scripts/check-citations.sh --self-test  # prove the detector still detects
 #
-# **WHY THIS GATE EXISTS — MEASUREMENT, NOT PRINCIPLE.** Converting the tree's surviving `file:line`
-# citations to symbol citations resolved **57** of them and found **37 stale (65%)**. Three distinct
-# mechanisms were confirmed, and only the first was anticipated by the design:
+# **WHY THIS GATE EXISTS: LINE NUMBERS ROT, AND NO CARE AT THE CITING SITE PREVENTS IT.** Three
+# distinct mechanisms:
 #
-#   1. THE CITING COMMIT ITSELF INVALIDATES THE POINTER. `sourcemap_coverage.rs` cited a guard in
-#      `lower_asm.rs` that was at exactly the cited line in the PARENT commit — and the same commit
-#      that wrote the citation also replaced two `unwrap`s with `if let` seven lines above it. The
-#      pointer shipped seven lines short of the thing it named. No later edit was required.
-#   2. A LATER, UNRELATED COMMIT SHIFTS THE TARGET. One lint sweep over 104 files — `clippy::pedantic`,
-#      whose only behaviour changes were three edge-case defect fixes in unrelated files — broke fifteen
-#      citations across two test files: ten of the eleven in one and five of the eight in the other. It
-#      **had the first of those files open**, adding four lines at the top for a crate-level
-#      `#![allow(..)]`, and re-resolved none of the eleven citations below them.
-#   3. THE TARGET IS DELETED OR RELOCATED ENTIRELY. A citation named a `- name: Clippy` step in
-#      `ci.yml` that a later commit folded into `scripts/check-all.sh`'s matrix. The invocation moved
-#      BETWEEN FILES, so after that commit no line number was correct at any offset — nothing
-#      line-based could have followed it.
+#   1. THE CITING COMMIT ITSELF INVALIDATES THE POINTER. The commit that writes the citation can also edit
+#      lines above its target, so the pointer ships short of the thing it named. No later edit is required.
+#   2. A LATER, UNRELATED COMMIT SHIFTS THE TARGET. A lint sweep that adds lines at the top of a file
+#      re-resolves none of the citations below them.
+#   3. THE TARGET IS DELETED OR RELOCATED ENTIRELY. When the invocation moves BETWEEN FILES, no line number
+#      is correct at any offset — nothing line-based could follow it.
 #
-# **AND ONE SURVIVOR IS ACCURATE PURELY BY COINCIDENCE, WHICH IS THE SHARPEST ARGUMENT OF ALL.** Two
-# probes cite the same constant one line apart. Each recorded the position its own commit had just
-# destroyed, and a later import happened to push the constant back under one of the two pointers. Two
-# errors cancelling. Both authors were careful, both were wrong, one got lucky — and no amount of
-# care at the citing site reaches that.
+# A citation can even be accurate purely by coincidence — two errors cancelling — and no amount of care at
+# the citing site reaches that.
 #
-# **`docs/` IS OUT OF SCOPE, AND THAT IS A BOUNDARY RATHER THAN AN EXEMPTION** (spec §4.2). A citation
-# in source is a POINTER — *go look here* — and it stops being true the moment the target moves. A
-# citation in a dated spec, plan or roadmap entry is an OBSERVATION — *on that date, this was at that
-# line* — and rewriting it would falsify the record. They live there deliberately and in bulk: **849**
-# at this slice's branch point, **855** by the time its design was written, **985** when this gate
-# landed four and a half hours after the branch point, and **1015** two commits later, because writing
-# the closing entry moved it again. Every figure here names a commit for the same reason. **THAT THE
-# NUMBER MOVES IS THE POINT, NOT A DEFECT IN IT** — an observation is allowed to be about a tree that no
-# longer exists — and the phrase this comment used to carry, "at this branch's close", is a coordinate
-# with no tree attached, which is the same fault in prose that the gate rejects in `file:line` form. So
-# a future roadmap entry may still cite a line, and should, when the point is to timestamp where
+# **`docs/` IS OUT OF SCOPE, AND THAT IS A BOUNDARY RATHER THAN AN EXEMPTION** (spec §4.2). A citation in
+# source is a POINTER — *go look here* — and it stops being true the moment the target moves. A citation in
+# a dated spec, plan or roadmap entry is an OBSERVATION — *on that date, this was at that line* — and
+# rewriting it would falsify the record. They live there deliberately and in bulk, and **THAT THEIR NUMBER
+# MOVES IS THE POINT, NOT A DEFECT** — an observation is allowed to be about a tree that no longer
+# exists. So a future roadmap entry may still cite a line, and should, when the point is to timestamp where
 # something stood.
 #
 # **WHAT IT DELIBERATELY DOES NOT CATCH.** Spec §4.3 names the prose form — `` (`desugar.rs` lines
-# <a>-<b>) `` — which rots identically and is out of scope by measurement: a gate on it would fire on 13
-# non-citations to catch 2. **A CITATION SPLIT ACROSS A LINE WRAP IS THE OTHER ONE, and it is not in
-# §4.3's list because it is a property of the tool rather than a decision.** Write `// see desugar.rs:`
-# on one line and `// <line> for the binding` on the next and nothing here matches, because grep is
-# line-based and so is every rule below. Reflowing a comment can therefore hide a pointer this gate
-# would have rejected the moment it was written on one line — and the pointer rots exactly as fast.
+# <a>-<b>) `` — which rots identically and is out of scope by the measurement §4.3 records.
+# **A CITATION SPLIT ACROSS A LINE WRAP IS THE OTHER ONE, and it is not in §4.3's list because it is
+# a property of the tool rather than a decision.** Write `// see desugar.rs:` on one line and
+# `// <line> for the binding` on the next and nothing here matches, because grep is line-based and so
+# is every rule below. Reflowing a comment can therefore hide a pointer this gate would have rejected
+# the moment it was written on one line — and the pointer rots exactly as fast.
 #
-# **THIS FILE MAY NOT CONTAIN A REAL CITATION.** It is scanned by its own scan, on the very commit that
-# adds it, so a header spelling one out in full would fail the gate it documents. That is not a
-# hypothetical: this sentence carried a real one in its first draft — written while explaining that it
-# must not — and the first run of the scan over the staged file rejected it by name. Every example here
-# is written with a placeholder line (`desugar.rs:<line>`); the ONLY real one is assembled from parts at
-# runtime inside `--self-test` and is never written to a tracked file.
+# **THIS FILE MAY NOT CONTAIN A REAL CITATION.** It is scanned by its own scan, so a header spelling one out
+# in full would fail the gate it documents. Every example here is written with a placeholder line
+# (`desugar.rs:<line>`); the ONLY real one is assembled from parts at runtime inside `--self-test` and is
+# never written to a tracked file.
 set -euo pipefail
 
 # The banned form: a filename with a source extension, a colon, and a digit. `file:N` and `file:N-M`
 # are both caught, because the pattern stops at the first digit — and RANGES ARE THE COMMON FORM, not
 # the exception, so anything anchored on a bare trailing integer would have passed half the corpus.
-# Counted over tracked non-`docs/` files at this slice's branch point: 55 citation tokens, of which 29
-# were ranges and 26 were singles. Spec §3.4 first said *"26 of the 55 are `file:N-M`"* — **THE TWO
-# HALVES WERE TRANSPOSED, not merely different: 26 is the SINGLES count wearing the ranges label.** The
-# total agreed because nothing had been miscounted, which is exactly what made the disagreement look
-# harmless enough to note and leave. §3.4 now reads 29, and these three numbers re-derive from the tree
-# with this very pattern.
 #
-# **THE EXTENSION LIST FAILS SILENT, AND THAT IS THE OPPOSITE DIRECTION FROM `BINARY_RE` BELOW.** Both
-# lists are dumb and visible for the same stated reason, so the difference has to be said out loud
-# rather than inferred from the shared argument. A format missing from `BINARY_RE` is a binary file
-# this gate then tries to read: it fails LOUDLY, at the person who added the format. A format missing
-# from THIS list is a citation nobody is ever told about — a clean tree reported over a live pointer,
-# which is the one outcome the rest of this file exists to prevent. **The quiet direction is the
-# dangerous one here, and the list shipped wrong in it.** Eleven extensions, against a tree that
-# already tracked five kinds it did not name: an `.html`, a `Dockerfile`, a `.txt`, a `.conf` and two
-# `.tm` all passed, and so did an upper-case `Helper.RS:<line>`, because the alternation was
-# lower-case only. Demonstrated by the whole-branch review, in a sandbox, on planted pointers — not by
-# this gate, which reported the tree clean throughout. `-i` on every match below closes the case half;
-# `Dockerfile` is an ALTERNATIVE rather than an entry in the list because it has no extension to match.
+# **THE EXTENSION LIST FAILS SILENT, AND THAT IS THE OPPOSITE DIRECTION FROM `BINARY_RE` BELOW.** Both lists
+# are dumb and visible for the same stated reason, so the difference has to be said out loud rather than
+# inferred from the shared argument. A format missing from `BINARY_RE` is a binary file this gate then tries
+# to read: it fails LOUDLY, at the person who added the format. A format missing from THIS list is a
+# citation nobody is ever told about — a clean tree reported over a live pointer, which is the one outcome
+# the rest of this file exists to prevent. **The quiet direction is the dangerous one here.** `-i` on every
+# match below makes the extensions case-insensitive; `Dockerfile` is an ALTERNATIVE rather than an entry in
+# the list because it has no extension to match.
 #
-# **AND THAT ALTERNATIVE IS THE FIRST MEASURED FALSE POSITIVE THIS GATE HAS EVER HAD, WHICH IS WHY IT
-# CARRIES A GUARD.** `-i` plus a bare `Dockerfile` fires on `# syntax=docker/dockerfile:1` — the
-# BuildKit frontend directive that opens this repo's Dockerfile and most others. It is an `image:tag`,
-# not a pointer, and **the escape hatch cannot reach it**: that directive must be the file's first line
-# and BuildKit reads everything after the `=` as the image reference, so appending a marker would break
-# the build rather than excuse the line. So the discrimination is structural — the character before
-# `Dockerfile` must not be a path or word character, which a NAMESPACED image reference's `/` is and a
-# citation's `(`, space or line start is not. The roadmap said this gate's false-positive rate was
-# unmeasured because the tree held no legitimate use of the form. It holds one.
+# **THE `Dockerfile` ALTERNATIVE CARRIES A GUARD.** `-i` plus a bare `Dockerfile` fires on
+# `# syntax=docker/dockerfile:1` — the BuildKit frontend directive that opens this repo's Dockerfile and
+# most others. It is an `image:tag`, not a pointer, and **the escape hatch cannot reach it**: that directive
+# must be the file's first line and BuildKit reads everything after the `=` as the image reference, so
+# appending a marker would break the build rather than excuse the line. So the discrimination is structural
+# — the character before `Dockerfile` must not be a path or word character, which a NAMESPACED image
+# reference's `/` is and a citation's `(`, space or line start is not.
 #
-# **THAT GUARD IS NARROWER THAN ITS FIRST WORDING CLAIMED, AND THE MEASUREMENT IS HERE RATHER THAN THE
-# CLAIM.** It read "which an image reference's `/` ALWAYS is", and an unnamespaced Docker Hub reference
-# has no slash at all. Measured against the shipped pattern: `# syntax=docker/dockerfile:1` passes, and
-# both `# syntax=dockerfile:<tag>` and `FROM dockerfile:<tag>` are FLAGGED — written with a placeholder
-# tag here because the real digits made THIS COMMENT fail the scan, which is the same reason the header
-# above may hold no real citation. Neither form appears in this repo
-# and the real BuildKit frontend is `docker/dockerfile`, so nothing here fires — but the guard covers
-# the namespaced case only. **The residue fails LOUD**, which is the direction to be wrong in: an
-# unnamespaced reference stops a commit and gets read, where a missed citation would not.
+# **THE GUARD COVERS THE NAMESPACED CASE ONLY.** An unnamespaced Docker Hub reference has no slash at all:
+# `# syntax=dockerfile:<tag>` and `FROM dockerfile:<tag>` are FLAGGED (written with a placeholder tag here
+# because real digits would make THIS COMMENT fail the scan, the same reason the header above may hold no
+# real citation). Neither form appears in this repo and the real BuildKit frontend is `docker/dockerfile`,
+# so nothing here fires. **The residue fails LOUD**, which is the direction to be wrong in: an unnamespaced
+# reference stops a commit and gets read, where a missed citation would not.
 #
-# **WHAT IS STILL UNCOVERED, STATED HERE RATHER THAN LEFT TO BE FOUND THE SAME WAY.** A `Dockerfile`
-# citation written with a path prefix, which the guard above cannot keep apart from an image reference
-# — this repo has one Dockerfile and it is at the root. Any other extensionless file. Any dotfile cited
-# by its bare name, because `[A-Za-z0-9_./-]+` needs at least one character before the dot it anchors
-# on. And `.lock`, `.proptest-regressions`, `.gitignore`, `.dockerignore` — tracked here, deliberately
-# absent, on the judgement that nobody writes a line pointer into a lockfile or a proptest seed. If one
-# appears, this list is the one-line edit, and nothing in this repository will ask for it first.
+# **WHAT IS STILL UNCOVERED.** A `Dockerfile` citation written with a path prefix, which the guard above
+# cannot keep apart from an image reference — this repo has one Dockerfile and it is at the root. Any other
+# extensionless file. Any dotfile cited by its bare name, because `[A-Za-z0-9_./-]+` needs at least one
+# character before the dot it anchors on. And `.lock`, `.proptest-regressions`, `.gitignore`,
+# `.dockerignore` — tracked here, deliberately absent, on the judgement that nobody writes a line pointer
+# into a lockfile or a proptest seed. If one appears, this list is the one-line edit, and nothing in this
+# repository will ask for it first.
 readonly CITATION_RE='([A-Za-z0-9_./-]+\.(rs|ts|tsx|js|json|toml|yml|yaml|css|md|sh|html|conf|tm|txt|rxt)|(^|[^/A-Za-z0-9_.-])Dockerfile):[0-9]+'
 
 # THE ESCAPE HATCH, AND IT IS COUNTED OUT LOUD BECAUSE THAT IS THE ONLY THING SEPARATING IT FROM AN
@@ -119,13 +86,13 @@ readonly CITATION_RE='([A-Za-z0-9_./-]+\.(rs|ts|tsx|js|json|toml|yml|yaml|css|md
 # them; a marker sits on the line it excuses and is visible in review. If this count is ever above zero
 # without an argument beside it, that is a finding.
 #
-# **IT SHIPPED AT ZERO AND NOW SHIPS AT TWO, AND THIS IS THE ARGUMENT THE SENTENCE ABOVE DEMANDS.**
-# Both are in `report.rs`'s byte-vs-char indexing test, on the two lines carrying `a.rxt:<line>:<col>`.
-# That is the exact case the message at the bottom of this file names — *"a stack-trace assertion, a
-# source-map fixture"* — and it is a stronger instance than either: `a.rxt` IS NOT A FILE. It is the
-# `label` argument that test hands to `render`, so the coordinate names a position in a string literal
-# in the same function, and there is no target it could ever drift away from. A pointer that cannot rot
-# is not what this gate is for, and the marker says so on the line rather than in a config nobody reads.
+# **IT SHIPS AT TWO, AND THIS IS THE ARGUMENT THE SENTENCE ABOVE DEMANDS.** Both are in `report.rs`'s
+# byte-vs-char indexing test, on the two lines carrying `a.rxt:<line>:<col>`. That is the exact case the
+# message at the bottom of this file names — *"a stack-trace assertion, a source-map fixture"* — and it is a
+# stronger instance than either: `a.rxt` IS NOT A FILE. It is the `label` argument that test hands to
+# `render`, so the coordinate names a position in a string literal in the same function, and there is no
+# target it could ever drift away from. A pointer that cannot rot is not what this gate is for, and the
+# marker says so on the line rather than in a config nobody reads.
 readonly ALLOW_RE='check-citations: allow[[:space:]]*$'
 
 # BINARY FILES ARE SKIPPED BY EXTENSION, reusing `check-text-bytes.sh`'s argument verbatim: an
@@ -136,33 +103,30 @@ readonly BINARY_RE='\.(png|jpg|jpeg|gif|ico|webp|pdf|wasm|woff2?|ttf|otf|zip|gz|
 # `docs/` is a scope boundary, not an exemption — see the header and spec §4.2.
 readonly SCOPE_RE='^docs/'
 
-# **RECORDINGS ARE THE SECOND BOUNDARY, AND THEY ARE A BOUNDARY FOR `docs/`'s REASON, NOT A NEW ONE.**
-# A `.stdout`/`.stderr` golden is a byte-for-byte capture of what the binary printed. When `rxt` joined
-# the list above, three of them lit up on lines rendering `warn.rxt:<line>:<col>` — ariadne's rendered
-# diagnostic location for a real fixture at its real position. That is not a pointer somebody wrote and
-# will forget to update; it is output, and the test that owns it fails the moment it stops matching, so
-# it is the one citation-shaped thing in this tree that CANNOT go stale unnoticed. Exactly `docs/`'s
-# argument — an observation is not a pointer — arriving from the other end.
+# **RECORDINGS ARE THE SECOND BOUNDARY, AND THEY ARE A BOUNDARY FOR `docs/`'s REASON, NOT A NEW ONE.** A
+# `.stdout`/`.stderr` golden is a byte-for-byte capture of what the binary printed. A golden can hold lines
+# rendering `warn.rxt:<line>:<col>` — ariadne's rendered diagnostic location for a real fixture at its real
+# position. That is not a pointer somebody wrote and will forget to update; it is output, and the test that
+# owns it fails the moment it stops matching, so it CANNOT go stale unnoticed. Exactly `docs/`'s argument
+# — an observation is not a pointer — arriving from the other end.
 #
 # **AND THE ESCAPE HATCH STRUCTURALLY CANNOT REACH THEM, WHICH IS WHY THIS IS A BOUNDARY RATHER THAN
-# THREE MARKERS.** A marker excuses the line it sits on; a golden must byte-match the program's output;
+# PER-LINE MARKERS.** A marker excuses the line it sits on; a golden must byte-match the program's output;
 # the program does not print `check-citations: allow`. Appending one would break the test it belongs to
 # — the same shape as the Dockerfile `# syntax=` line above, where the hatch also could not reach and
 # the discrimination had to move into the pattern.
 #
 # What this gives up, stated rather than discovered later: a genuine authored pointer inside a golden
-# is now invisible here. Nobody hand-writes prose into a file `TRYCMD=dump` regenerates, and a golden
+# is invisible here. Nobody hand-writes prose into a file `TRYCMD=dump` regenerates, and a golden
 # is reviewed as a diff against real output, so the exposure is small — but it is not zero.
 readonly RECORDING_RE='\.(stdout|stderr)$'
 
 # True when $1 is a path this gate does not read: out of scope, binary, or a recording.
 #
-# **THIS IS A FUNCTION SO THE SELF-TEST CAN REACH IT, AND THAT IS THE WHOLE REASON.** Every exclusion
-# here is a door of exactly the shape this file has closed three times — nothing on stdout, no warning,
-# exit 0 — and until `RECORDING_RE` was added the three predicates lived inline in the scan loop where
-# `--self-test` could not see them at all. `violations_in` was tested to death and the decision about
-# WHICH FILES REACH IT was tested not at all. Adding a fourth untested exclusion to prove a point about
-# untested exclusions would have been its own punchline.
+# **THIS IS A FUNCTION SO THE SELF-TEST CAN REACH IT, AND THAT IS THE WHOLE REASON.** Every exclusion here
+# is a door of exactly the shape of the three doors below — nothing on stdout, no warning, exit 0 —
+# and predicates written inline in the scan loop are out of the self-test's reach. `violations_in` is
+# tested, and the decision about WHICH FILES REACH IT needs testing as much.
 excluded_path() {
   local f="$1"
   [[ $f =~ $SCOPE_RE ]] || [[ ${f,,} =~ $BINARY_RE ]] || [[ ${f,,} =~ $RECORDING_RE ]]
@@ -173,33 +137,28 @@ excluded_path() {
 # else, so the self-test exercises the real thing rather than a paraphrase of it that could drift into
 # agreeing with a broken scan.
 #
-# **REPORTING A CLEAN TREE OVER A FILE THAT WAS NEVER READ IS THE ONE OUTCOME THIS GATE CANNOT AFFORD,
-# AND IT TOOK THREE DOORS TO CLOSE. That is the honest lesson here, not the fix.** The class was
-# declared shut after the first was found and argued about at length; review then found the other two
-# still open, in the shipped gate, on a tree it had already reported clean. All three have the identical
-# signature — nothing on stdout, no warning the caller sees, exit 0 — and each arrives from a different
-# layer, which is why closing one taught nothing about the others:
+# **REPORTING A CLEAN TREE OVER A FILE THAT WAS NEVER READ IS THE ONE OUTCOME THIS GATE CANNOT AFFORD, AND
+# THREE DOORS LEAD TO IT.** All three have the identical signature — nothing on stdout, no warning the
+# caller sees, exit 0 — and each arrives from a different layer, which is why closing one says nothing
+# about the others:
 #
-#   1. **THE SHELL OPENED THE FILE, NOT GREP.** The first draft read `< "$1"`, which looks equivalent
-#      and is not: a redirect that cannot open the file fails in BASH, before grep runs, and bash
-#      reports that as status **1** — indistinguishable from grep's "found nothing". Tested by hand
-#      against a `chmod 000` file, this script printed "0 violations" and exited 0 over a file it had
-#      never read. Passing the path makes grep the opener, so a permission failure arrives as grep's
-#      exit **2** and the `rc` check below has something real to catch.
-#   2. **GREP READ THE FILE AND CALLED IT BINARY.** Under the default `--binary-files=binary` a file
+#   1. **A FILE THE SHELL OPENS, NOT GREP.** A `< "$1"` redirect looks equivalent and is not: a redirect
+#      that cannot open the file fails in BASH, before grep runs, and bash reports that as status **1** —
+#      indistinguishable from grep's "found nothing". Passing the path makes grep the opener, so a
+#      permission failure arrives as grep's exit **2** and the `rc` check below has something real to catch.
+#   2. **A FILE GREP READS AND CALLS BINARY.** Under the default `--binary-files=binary` a file
 #      holding a NUL — or any byte sequence invalid for the ambient locale — makes grep write
 #      `binary file matches` to STDERR, print NOTHING to stdout, and exit **0**. Empty output plus
-#      `rc=0` is precisely a clean file, so the `rc > 1` guard never fires. One stray `\377` byte hid
+#      `rc=0` is precisely a clean file, so the `rc > 1` guard never fires. One stray `\377` byte hides
 #      every citation in a file, and the sibling does not cover the gap: `check-text-bytes.sh` allows
 #      `\200-\377` deliberately, so the file is legal there and invisible here. `-a` forces text
 #      handling, so matches print and `rc` still means what the check below assumes; `LC_ALL=C` makes
 #      that byte-exact instead of dependent on whoever's locale is set, which is the sibling's
-#      convention. **AND IT WAS LIVE AT MORE THAN ONE GREP:** measured, `violations_in`'s `grep -vE`
-#      independently declared the PIPED stream binary and dropped the very line this function had just
-#      produced — so fixing this one grep alone would still have reported a clean file. Every grep in
-#      this script now handles bytes the same way, which is the only version a reader can check at a
-#      glance rather than re-derive per call site.
-#   3. **THE FILE NEVER REACHED GREP AT ALL** — `git ls-files` quoting, closed at the scan's `-z` loop
+#      convention. **AND IT IS NOT CONFINED TO ONE GREP:** `violations_in`'s `grep -vE` would
+#      independently declare the PIPED stream binary and drop the very line this function produced, so
+#      every grep in this script handles bytes the same way, which is the only version a reader can check
+#      at a glance rather than re-derive per call site.
+#   3. **A FILE THAT NEVER REACHES GREP AT ALL** — `git ls-files` quoting, closed at the scan's `-z` loop
 #      below, where the argument for it belongs.
 #
 # A single file operand means grep prints no filename prefix, so the caller still formats the location
@@ -239,15 +198,10 @@ tracked_total() {
   git ls-files -z | LC_ALL=C tr -dc '\0' | wc -c | tr -d '[:space:]'
 }
 
-# **THIS IS THE ASSERTION THAT CAN FAIL, AND FOR ONE BRANCH IT WAS ONE THAT COULD NOT.** The scan's
-# tally used to print `$((scanned + excluded + skipped))` under a comment calling it *"`git ls-files`'
-# own count"*. It compared nothing. The sum of the three buckets is the sum of the three buckets, so a
-# path that vanished before the loop moved every term at once and the arithmetic stayed consistent all
-# the way to `exit 0`. The whole-branch review demonstrated it: a planted drop over a file holding a
-# real pointer, `0 skipped`, *"7 tracked paths in all"* against a tree of 8, clean exit. **That is door
-# 3's own shape, reproduced inside the sentence written to announce door 3** — in the gate whose thesis
-# is that a written claim rots, four doors after the class was declared shut. `$4` now has an
-# independent origin, which is the entire difference between a reconciliation and a restatement.
+# **THIS IS THE ASSERTION THAT CAN FAIL.** Comparing the sum of the three buckets with itself compares
+# nothing: a path that vanished before the loop moves every term at once and the arithmetic stays consistent
+# all the way to `exit 0`. `$4` has an independent origin (`git ls-files`' own count), which is the entire
+# difference between a reconciliation and a restatement.
 reconcile() {
   local scanned="$1" excluded="$2" skipped="$3" total="$4" sum
   sum=$((scanned + excluded + skipped))
@@ -260,10 +214,9 @@ reconcile() {
 
 # Prove the detector still detects. **A GATE THAT ONLY EVER RUNS AGAINST A PASSING TREE CANNOT TELL YOU
 # IT STILL WORKS** — this repo's own "an assertion that cannot fail is a defect" rule turned on the
-# checker itself. `check-text-bytes.sh`'s first draft reported clean against a planted NUL, and only a
-# by-hand test against the real thing found it; that is why its `--self-test` exists and why this one
-# does. Both directions are asserted here, plus the escape hatch, because a valve that silently stopped
-# working would be discovered only by the person who needed it.
+# checker itself. That is why `check-text-bytes.sh` and this script each carry a `--self-test`. Both
+# directions are asserted here, plus the escape hatch, because a valve that silently stopped working
+# would be discovered only by the person who needed it.
 self_test() {
   local dirty clean allowed ranged uppercase dockerish name html shouty lineno n
   SELF_TEST_DIR=$(mktemp -d)
@@ -276,23 +229,19 @@ self_test() {
   dockerish="$SELF_TEST_DIR/Dockerfile"
   surfaced="$SELF_TEST_DIR/surfaced.rs"
 
-  # **THE ONLY REAL CITATION ANYWHERE IN THIS SLICE, AND IT IS ASSEMBLED HERE RATHER THAN WRITTEN.**
-  # The name and the number are separate values joined by printf, so no line of this tracked file
-  # matches `CITATION_RE` and the script does not fail its own scan on the commit that adds it.
+  # A real citation, assembled here rather than written. The name and the number are separate values
+  # joined by printf, so no line of this tracked file matches `CITATION_RE` and the script does not
+  # fail its own scan.
   name='desugar.rs'
   lineno=77
   printf '//! the `Stmt::Let` arm (%s:%d) builds the binding.\n' "$name" "$lineno" > "$dirty"
   printf '//! the `Stmt::Let` arm (`%s` — `lower_stmts_at`) builds the binding.\n' "$name" > "$clean"
   printf 'assert_eq!(frame, "%s:%d"); // check-citations: allow\n' "$name" "$lineno" > "$allowed"
 
-  # **FOR A WHOLE BRANCH THE ONLY THING THIS TEST EVER PLANTED WAS A SINGLE-LINE CITATION IN A `.rs`
-  # FILE, WHICH IS THE SAME BLIND-SPOT SHAPE AS THE DOORS IT MISSED.** The corpus is 29 ranges to 26
-  # singles and the pattern's extension list runs to fifteen entries plus `Dockerfile`, so the one form
-  # planted was the form least able to expose a fault in either half. These two, with the pair below,
-  # cover the rest of the pattern's surface: a RANGE in a non-`.rs` extension, an upper-case extension,
-  # and the extensionless alternative against the image reference it must not fire on. The extension
-  # list's silent-failure direction is argued at `CITATION_RE`; these are the assertions that would
-  # have caught the five kinds it was missing.
+  # These two, with the pair below, cover the pattern's surface beyond a single-line citation in a `.rs`
+  # file: a RANGE in a non-`.rs` extension, an upper-case extension, and the extensionless alternative
+  # against the image reference it must not fire on. The extension list's silent-failure direction is
+  # argued at `CITATION_RE`; these are its assertions.
   html='index.html'
   shouty='Desugar.RS'
   printf '<!-- the viewport meta tag (%s:%d-%d) sets the scale -->\n' "$html" "$lineno" "$((lineno + 9))" > "$ranged"
@@ -300,19 +249,14 @@ self_test() {
 
   # THE EXTENSIONLESS ALTERNATIVE AND THE THING IT MUST NOT FIRE ON, IN ONE FILE, BECAUSE THE PAIR IS
   # THE ASSERTION — either half alone can be satisfied by deleting the other. `# syntax=<image>:<tag>`
-  # is a real line of this repo's Dockerfile and the only false positive this gate has ever produced;
-  # the guard in `CITATION_RE` is what tells the two apart, and nothing else here would notice if it
-  # were removed.
+  # is a real line of this repo's Dockerfile; the guard in `CITATION_RE` is what tells the two apart, and
+  # nothing else here would notice if it were removed.
   printf '# the build context (%s:%d) is what COPY reads\n# syntax=%s/%s:%d\n' \
     'Dockerfile' "$lineno" 'docker' 'dockerfile' 1 > "$dockerish"
 
-  # **THE EXTENSION THE LIST WAS LAST MISSING, PLANTED SO THE LIST CANNOT QUIETLY LOSE IT AGAIN.**
-  # `rxt` joined `CITATION_RE` when the CLI slice landed and `.rxt` fixtures entered the tree. Removing
-  # it again passed this whole self-test — every planted citation named a `.rs`, `.md`, `.html` or
-  # `Dockerfile` target, so the newest entry was the one thing no assertion covered. That is the
-  # extension list's documented silent-failure direction reproduced inside the test written to guard
-  # it, one branch after the same shape was found in the list itself. Caught by sabotaging the shipped
-  # pattern rather than by reading it.
+  # Planted so the extension list cannot quietly lose `rxt`: every other planted citation names a
+  # `.rs`, `.html` or `Dockerfile` target, so without this one, removing `rxt` from `CITATION_RE`
+  # would pass this whole self-test.
   printf '//! the fixture at %s:%d is what `fmt_error.toml` feeds the binary.\n' 'broken.rxt' "$lineno" > "$surfaced"
 
   n=$(violations_in "$dirty" | wc -l | tr -d '[:space:]')
@@ -347,7 +291,7 @@ self_test() {
 
   n=$(violations_in "$uppercase" | wc -l | tr -d '[:space:]')
   if [ "$n" -ne 1 ]; then
-    echo "self-test FAILED: a planted citation with an upper-case extension was not detected — the match is case-sensitive again" >&2
+    echo "self-test FAILED: a planted citation with an upper-case extension was not detected — the match is case-sensitive" >&2
     exit 1
   fi
 
@@ -363,13 +307,12 @@ self_test() {
     exit 1
   fi
 
-  # **WHICH FILES REACH THE DETECTOR, ASSERTED IN BOTH DIRECTIONS AND FOR THE FIRST TIME.** Every
-  # assertion above this point tests `violations_in`; none of them tested whether a file ever gets
-  # handed to it. That is the same blind spot as the doors in the header — a path silently skipped and
-  # a file silently unread are the identical outcome — and `excluded_path` exists as a function
-  # precisely so this block can exist. The NEGATIVE half is the load-bearing one: an exclusion
-  # predicate that returned true for everything would satisfy all three positive cases and read like a
-  # working gate.
+  # **WHICH FILES REACH THE DETECTOR, ASSERTED IN BOTH DIRECTIONS.** Every assertion above this point
+  # tests `violations_in`; none of them tests whether a file ever gets handed to it. That is the same
+  # blind spot as the three doors named above `citation_lines` — a path silently skipped and a file
+  # silently unread are the identical outcome — and `excluded_path` exists as a function precisely so
+  # this block can exist. The NEGATIVE half is the load-bearing one: an exclusion predicate that
+  # returned true for everything would satisfy every positive case and read like a working gate.
   for excluded_case in 'docs/superpowers/plans/roadmap.md' 'web/public/logo.PNG' 'tests/cmd/lint_warn.stderr' 'tests/cmd/fmt_stdin.stdout'; do
     if ! excluded_path "$excluded_case"; then
       echo "self-test FAILED: '$excluded_case' should be out of scope, binary or a recording, and was not — an exclusion this gate documents is not being applied" >&2
@@ -383,12 +326,9 @@ self_test() {
     fi
   done
 
-  # THE SCAN'S BOOKKEEPING, BOTH DIRECTIONS, AND IT IS THE ONE ASSERTION HERE THAT IS NOT ABOUT THE
-  # DETECTOR. `reconcile` exits rather than returns, so it is driven in a subshell and judged by its
-  # status. It is tested because the claim it now enforces shipped for a whole branch as an identity
-  # that could not fail, and because four of this gate's five silent-pass doors were invisible to this
-  # function — this one being the fifth, and an announcement that cannot fail being the same defect
-  # wearing a new shape.
+  # THE SCAN'S BOOKKEEPING, BOTH DIRECTIONS. `reconcile` exits rather than returns, so it is driven in
+  # a subshell and judged by its status. It is tested because an identity check that cannot fail looks
+  # exactly like one that passes.
   if ! ( reconcile 7 3 1 11 ) 2>/dev/null; then
     echo "self-test FAILED: an exact tally was rejected — the reconciliation fires on a whole tree" >&2
     exit 1
@@ -401,12 +341,12 @@ self_test() {
   echo "self-test passed: planted file:line citations are caught (single and range, .rs and not, either case, and naming a .rxt target), a symbol citation is not, an excused one is counted rather than hidden, the scan's own exclusions admit and reject the right paths, and a tally that does not match git ls-files is rejected"
 }
 
-# **AN UNRECOGNISED ARGUMENT IS AN ERROR, IN A GATE WHOSE WHOLE THESIS IS "NO SILENT PASS".** The first
-# version tested `[ "${1:-}" = "--self-test" ]` and fell through on anything else, so
-# `check-citations.sh --slf-test` ran a full scan and exited 0 — a typo in the CI step or the hook would
-# have quietly downgraded the self-test into a duplicate of the scan beside it, and a duplicate scan
-# passes for exactly as long as the tree is clean. Matching `$#` alongside `$1` also rejects a second
-# operand and an explicit empty one, which a bare `case "${1-}"` would wave through.
+# **AN UNRECOGNISED ARGUMENT IS AN ERROR, IN A GATE WHOSE WHOLE THESIS IS "NO SILENT PASS".** A
+# `[ "${1:-}" = "--self-test" ]` test falls through on anything else, so `check-citations.sh --slf-test`
+# would run a full scan and exit 0 — a typo in the CI step or the hook would quietly downgrade the
+# self-test into a duplicate of the scan beside it, and a duplicate scan passes for exactly as long as
+# the tree is clean. Matching `$#` alongside `$1` also rejects a second operand and an explicit empty
+# one, which a bare `case "${1-}"` would wave through.
 case "$#:${1-}" in
   0:) ;;                              # no argument: scan the tracked tree
   1:--self-test) self_test; exit 0 ;;
@@ -430,19 +370,16 @@ scanned=0
 excluded=0
 skipped=0
 # **DOOR 3, AND `-z` IS NOT ABOUT SPACES.** `git ls-files` C-QUOTES any path it considers unusual —
-# `core.quotePath` defaults to true — so a tracked `café.rs` arrives as the ten-character literal
-# `"caf\303\251.rs"`, `[ -f ]` fails on that string, and the file is dropped: not read, not counted, not
-# warned, `scanned` unmoved. Demonstrated on a throwaway repo, this scan reported a clean tree over a
-# file carrying a citation, and flipping ONLY `core.quotePath` made the same script catch it — the gate's
-# verdict hung on a config setting nobody had thought about. `-c core.quotePath=false` would close that
-# and would still drop a path with an embedded NEWLINE, because the loop would still be reading lines.
-# NUL-delimited closes both, plus the spaces and leading dashes that were already handled, and cannot be
-# undone by whatever a user has in their config.
+# `core.quotePath` defaults to true — so a tracked `café.rs` arrives as the literal `"caf\303\251.rs"`,
+# `[ -f ]` fails on that string, and the file is dropped: not read, not counted, not warned, `scanned`
+# unmoved. Read that way, the gate's verdict would hang on a config setting. `-c core.quotePath=false`
+# would close that and would still drop a path with an embedded NEWLINE, because the loop would still
+# be reading lines. NUL-delimited closes both, plus spaces and leading dashes, and cannot be undone by
+# whatever a user has in their config.
 while IFS= read -r -d '' f; do
   if [ ! -f "$f" ]; then
-    # A DANGLING SYMLINK OR A SUBMODULE GITLINK LANDS HERE — and so would a return of door 3, which is
-    # the point of counting rather than skipping in silence. This branch was the channel door 3 rode in
-    # through, and it said nothing while it did.
+    # A dangling symlink or a submodule gitlink lands here — and so would a return of door 3, which is
+    # the point of counting rather than skipping in silence.
     printf 'note: skipped %s — tracked but not a regular file\n' "$f" >&2
     skipped=$((skipped + 1))
     continue
@@ -458,17 +395,17 @@ while IFS= read -r -d '' f; do
 
   # ONE detector pass on the overwhelmingly common path — no file has a citation, so this returns
   # empty and the file is done. The two classifiers below each run `citation_lines` again, and that
-  # re-read is free precisely because it only happens for a file that already has a hit; running it
-  # on all of them was two thirds of this gate's cost. THE EARLY EXIT CANNOT CHANGE AN ANSWER: both
-  # classifiers read `citation_lines`' output and nothing else, so empty in means empty and zero out.
+  # re-read is free precisely because it only happens for a file that already has a hit. THE EARLY EXIT
+  # CANNOT CHANGE AN ANSWER: both classifiers read `citation_lines`' output and nothing else, so empty in
+  # means empty and zero out.
   #
   # `$(...)` STRIPS NUL AND PRINTS A WARNING WHEN IT DOES, WHICH IS SAFE ONLY BECAUSE OF WHAT THIS
   # VALUE IS USED FOR. It is tested for emptiness and nothing else, and a line that matched
   # `CITATION_RE` carries a filename and a digit, so no amount of NUL-stripping can empty it. That is
-  # the whole argument — it is not that the bytes survive, it is that they cannot flip this test. The
-  # sibling's first draft was killed by the same stripping precisely because it passed the BYTES
-  # through `$(...)` rather than a count, so a reader who sees bash's warning here should be able to
-  # find out in one place why this instance is not that bug.
+  # the whole argument — it is not that the bytes survive, it is that they cannot flip this test. A
+  # check that passes the BYTES through `$(...)` rather than a count is killed by the same stripping, so
+  # a reader who sees bash's warning here should be able to find out in one place why this instance is
+  # not that bug.
   hits=$(citation_lines "$f")
   [ -n "$hits" ] || continue
 
@@ -481,10 +418,10 @@ while IFS= read -r -d '' f; do
     # written into a tracked file has to stay true; a line of terminal output is an observation of one
     # run against one tree, and it is never a tracked file.
     # **THE `Dockerfile` ALTERNATIVE'S GUARD IS CONSUMING, SO `-o` HANDS BACK THE CHARACTER BEFORE THE
-    # CITATION AS WELL.** Unstripped, this printed `cites =dockerfile:<tag>` and `cites  dockerfile:<tag>` —
-    # misreporting what was found, in the message whose whole job is to name it (placeholder tags again —
-    # the literal examples tripped the scan). The class is exactly
-    # one character and always one of the guard's own exclusion set, so one `sed` removes it; for every
+    # CITATION AS WELL.** Unstripped, this would print `cites =dockerfile:<tag>` and
+    # `cites  dockerfile:<tag>` — misreporting what was found, in the message whose whole job is to name
+    # it (placeholder tags again, since literal ones would trip the scan). The class is exactly one
+    # character and always one of the guard's own exclusion set, so one `sed` removes it; for every
     # other alternative the match already starts on a citation character and the strip is a no-op.
     tokens=$(printf '%s\n' "$hit" | { LC_ALL=C grep -a -oEi "$CITATION_RE" || true; } \
       | LC_ALL=C sed -E 's|^[^/A-Za-z0-9_.-]||' | tr '\n' ' ')
@@ -495,19 +432,16 @@ while IFS= read -r -d '' f; do
 done < <(git ls-files -z)
 
 # A SCAN OF NOTHING MUST NOT PASS. Run from a tree where `git ls-files` returns nothing — a bad `cd`, a
-# fresh worktree, a submodule — every check above is vacuous and the gate reports success. That is the
-# empty-scan trap the conversion tasks had to rule out by hand before trusting their own clean runs.
+# fresh worktree, a submodule — every check above is vacuous and the gate reports success.
 if [ "$scanned" -eq 0 ]; then
   echo "error: scanned 0 files — this is an empty scan reporting success, not a clean tree" >&2
   exit 1
 fi
 
-# **EVERY TRACKED PATH LANDS IN EXACTLY ONE OF THE THREE, AND THAT IS CHECKED AGAINST `git ls-files`
-# RATHER THAN RESTATED FROM THE THREE.** A file that goes missing between them shows up as a total that
-# no longer adds — which is the shape door 3 had and could not announce, and which the first version of
-# this very sentence also could not, because it printed the sum instead of comparing it. `reconcile`
-# carries that history and the demonstration. `skipped` ships at 0 — this repo has no submodules and no
-# dangling symlinks — and the reported total is now `git ls-files`' number, not the scan's.
+# **EVERY TRACKED PATH LANDS IN EXACTLY ONE OF THE THREE, AND THAT IS CHECKED AGAINST `git ls-files` RATHER
+# THAN RESTATED FROM THE THREE.** A file that goes missing between them shows up as a total that no longer
+# adds. `skipped` ships at 0 — this repo has no submodules and no dangling symlinks — and the reported total
+# is `git ls-files`' number, not the scan's.
 total=$(tracked_total)
 reconcile "$scanned" "$excluded" "$skipped" "$total"
 tally=$(printf '%s out of scope, binary or recording, %s skipped — %s tracked paths in all' \
@@ -517,9 +451,7 @@ if [ "$bad" -ne 0 ]; then
   cat >&2 <<'MSG'
 
 A `file:line` citation is a POINTER, and it stops being true the moment anything is inserted above the
-target — including by the commit that writes the citation. Of 57 resolved on the slice that introduced
-this gate, 37 were already stale; one lint sweep over 104 files — whose only behaviour changes were
-three edge-case defect fixes in unrelated files — broke fifteen of them.
+target — including by the commit that writes the citation.
 
 Cite the SYMBOL instead. It survives every edit that does not rename it, and a rename is a `grep` the
 compiler will usually run for you:
@@ -532,13 +464,13 @@ coordinate is worth keeping as a record of the drift, write it in prose (`desuga
 a dated observation about the past is not a pointer, which is also why `docs/` is out of scope here.
 
 If a line genuinely must carry a coordinate — a stack-trace assertion, a source-map fixture — end it
-with `check-citations: allow`. Every run counts those out loud, and the count ships at zero.
+with `check-citations: allow`. Every run counts those out loud.
 MSG
   # **"EVERY RUN" HAS TO INCLUDE THIS ONE, AND THAT IS §4.5'S DISTINCTION RATHER THAN A FORMATTING
-  # CHOICE.** The count printed only on the success path at first, so a commit adding a violation AND a
-  # marker slipped the marker past unannounced: the run that should have shown it exited 1 without it,
-  # and it first became visible on the run after the violation was fixed — exactly when nobody is
-  # looking for it. A marker nobody is told about is the allowlist §4.5 rejected.
+  # CHOICE.** Printed only on the success path, the count would let a commit adding a violation AND a
+  # marker slip the marker past unannounced: the failing run would exit 1 without it, and it would first
+  # show on the run after the violation is fixed — exactly when nobody is looking for it. A marker
+  # nobody is told about is the allowlist §4.5 rejected.
   printf '%s escape-hatch marker(s) honoured on this run; %s files scanned (%s).\n' \
     "$honoured" "$scanned" "$tally" >&2
   exit 1

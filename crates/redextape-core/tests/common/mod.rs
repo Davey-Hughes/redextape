@@ -1,14 +1,13 @@
 //! Shared helpers for the integration tests: the TM bank-safety checkers, `core_of`, and the two
 //! program-to-machine builders `core_and_ty` and `build_machine`.
 //!
-//! Integration tests are separate binaries and cannot import one another, so these were originally
-//! duplicated across `tm_bank_invariant.rs`, `tm_exhaustive_bank_safety.rs` and
-//! `tm_static_delimiter_safety.rs`, with a test pinning the copies identical. `tests/common/mod.rs` is
-//! the standard way to share code between integration tests, and one definition cannot drift from itself.
+//! Integration tests are separate binaries and cannot import one another, so the shared code lives in
+//! `tests/common/mod.rs`, the standard way to share code between integration tests, and one definition
+//! cannot drift from itself.
 //!
 //! Two oracle-leg helpers live here as well: `run_with_origins`, which locates each tape's origin after a
-//! run, and `acyclic_machine`, a generator of small machines that always halt. `one_way_oracle.rs` defined
-//! both; they moved here when `universal_oracle.rs` needed them too, so neither leg keeps a copy.
+//! run, and `acyclic_machine`, a generator of small machines that always halt. `one_way_oracle.rs` and
+//! `universal_oracle.rs` both use them, so neither leg keeps a copy.
 //!
 //! Several checkers live here. Two of them establish DIFFERENT kinds of claim about the same property:
 //!
@@ -50,9 +49,7 @@ pub fn core_of(src: &str) -> Core {
 /// Parse, typecheck and desugar `src`, returning its `Core` and its top-level type together, for a
 /// fixture that must be clean. Panics on a diagnostic or a type error for the reason `core_of` gives.
 ///
-/// **SHARED BECAUSE SEVERAL INTEGRATION TESTS CARRIED IT VERBATIM:** `single_tape_oracle.rs`,
-/// `two_symbol_oracle.rs`, `one_way_oracle.rs` and `tm_header.rs`. `examples/regen_fixtures.rs` still
-/// carries its own copy.
+/// `examples/regen_fixtures.rs` keeps its own copy.
 pub fn core_and_ty(src: &str) -> (Core, Ty) {
     let (prog, ds) = parse(src);
     assert!(ds.is_empty(), "parse errors for {src}: {ds:?}");
@@ -62,8 +59,7 @@ pub fn core_and_ty(src: &str) -> (Core, Ty) {
 }
 
 /// The lowered machine for `src` under `enc`, and the initial tapes it runs on — for a program the TM
-/// backend must run to completion. `two_symbol_oracle.rs` and `one_way_oracle.rs` each carried this function
-/// verbatim; `single_tape_oracle.rs` carried a unary-only variant, which its `ENCODING` constant now replaces.
+/// backend must run to completion.
 pub fn build_machine(src: &str, enc: EncodingKind) -> (Machine, Vec<Vec<Symbol>>) {
     let (core, ty) = core_and_ty(src);
     let d = run_tm_described(&core, enc, ty, TM_DEFAULT_CAPS).unwrap_or_else(|r| panic!("{src} did not run: {r:?}"));
@@ -108,10 +104,9 @@ fn width_of(enc: &dyn Encoding) -> usize {
 /// `width + 1` cells thereafter, and only field content in between.
 ///
 /// Deliberately NOT "each field is marks-then-blanks". That is a BETWEEN-GADGET invariant, not a
-/// per-step one, and the suite found the difference the hard way: `append_work_to_field` and
-/// `write_literal` both blank their window left-to-right before rewriting it, so mid-gadget a field
-/// legitimately reads blanks-then-marks. An invariant checked after EVERY step can only assert what is
-/// true after every step.
+/// per-step one: `append_work_to_field` and `write_literal` both blank their window left-to-right
+/// before rewriting it, so mid-gadget a field legitimately reads blanks-then-marks. An invariant
+/// checked after EVERY step can only assert what is true after every step.
 ///
 /// The skeleton is the right property anyway, because it is exactly what an overflow destroys: a value
 /// written past the end of its window overwrites the field's trailing `#` with a MARK, merging two
@@ -157,11 +152,11 @@ pub fn reg_bank_is_well_formed(cells: &[char], enc: &dyn Encoding, slots: usize)
 /// re-enter the mid-append shape. The check is gadget-behaviour-dependent here, not intrinsically
 /// last-field-only, and a future gadget that overwrote a field blank-first would slip past it.
 ///
-/// This was invisible under `Unary` only because `BLANK` is already part of `Unary::field_symbols()`
-/// (a unary field IS "marks then blank padding", complete or not, so a partial append already looks like
-/// ordinary field content and needed no special case). `Binary::field_symbols()` correctly excludes
-/// `BLANK` — a binary field has no padding, every cell is a real digit once written — which is what
-/// surfaces the mid-append shape as a THIRD case here rather than a subset of the first.
+/// Under `Unary`, `BLANK` is already part of `Unary::field_symbols()` (a unary field IS "marks then
+/// blank padding", complete or not, so a partial append already looks like ordinary field content and
+/// needed no special case). `Binary::field_symbols()` correctly excludes `BLANK` — a binary field has
+/// no padding, every cell is a real digit once written — which is what surfaces the mid-append shape as
+/// a THIRD case here rather than a subset of the first.
 ///
 /// An EARLIER field can never be in the mid-append shape: every `box_*` gadget that writes an EXISTING
 /// field (`box_overwrite_field`/`box_overwrite_field_bin`) reads and writes real content only, never a
@@ -209,16 +204,9 @@ pub fn box_tape_is_well_formed(cells: &[char], enc: &dyn Encoding) -> Result<(),
 ///   (c) an EARLIER rule in the same state reads `Some(SEP)` there AND constrains no other tape, so by
 ///       first-match-wins it always shadows this one whenever the head is on a delimiter.
 ///
-/// Clause (b) was originally `matches!(rule.read[tape], Some(MARK) | Some(BLANK))`, hardcoding the
-/// UNARY alphabet: under `Binary` a digit-write rule that reads `Some(ZERO)` failed that clause and was
-/// reported as unsafe, a FALSE POSITIVE on correct code (`write_literal`/`copy_field` enumerate both
-/// `ZERO` and `MARK` explicitly — see `binary.rs`). The obvious repair — restrict clause (b) to
-/// `enc.field_symbols()` instead of a hardcoded pair — turns out to be ANOTHER hardcoded alphabet one
-/// level up, and it is caught by the very first binary machine run through it:
-/// `box_append_field_bin` legitimately reads `Some(BLANK)` when appending a fresh BOX field onto virgin
-/// tape (a BOX field's WIDTH is declared field content, but the growing TOP beyond the last field is
-/// not — `BLANK` is deliberately excluded from `Binary::field_symbols()` because a binary field is never
-/// blank-padded). Restricting to `field_symbols()` would reject that real, correct rule.
+/// Restricting clause (b) to `enc.field_symbols()` would reject `box_append_field_bin`'s legitimate
+/// `Some(BLANK)` read when appending a fresh BOX field onto virgin tape (a BOX field's WIDTH is
+/// declared field content, but the growing TOP beyond the last field is not).
 ///
 /// The actual invariant clause (b) needs has nothing to do with what an encoding calls "field content":
 /// `SEP`, `BLANK`, `MARK`, `ZERO` and `AT` are five DISTINCT, globally-fixed symbols (see
@@ -297,17 +285,13 @@ pub fn assert_delimiter_safe(m: &Machine, enc: &dyn Encoding, what: &str) {
 /// here either: a rule that writes a mark over a `@` is not automatically a defect on this tape.
 pub fn heap_tape_is_well_formed(cells: &[char], enc: &dyn Encoding) -> Result<(), String> {
     let content = enc.field_symbols();
-    // A word is "a run of field content", which covers both encodings and is why this stayed one loop.
-    // Its LENGTH is checked only where the encoding fixes one (`Encoding::heap_word_len`): `None` under
-    // `Unary`, whose words are bare mark runs whose length IS the value, and `Some(width)` under
-    // `Binary`, whose words are always `width` digits.
+    // A word is "a run of field content", which covers both encodings. Its LENGTH is checked only where
+    // the encoding fixes one (`Encoding::heap_word_len`): `None` under `Unary`, whose words are bare mark
+    // runs whose length IS the value, and `Some(width)` under `Binary`, whose words are always `width` digits.
     //
-    // THAT ASYMMETRY IS THE POINT, and it used to be a recorded gap here. This rung checked no length
-    // at all, which was the whole property for unary but covered strictly less of binary's heap
-    // structure than binary admits. What compensated was `Binary::parse_heap_cells` being width-strict
-    // — and making it STRUCTURAL removed that compensation, so the check moved here in the same change.
-    // Without it, a binary word truncated by a clobbered high digit would now decode to the smaller
-    // number its remaining digits spell, and nothing anywhere would notice.
+    // That asymmetry is the point. `Binary::parse_heap_cells` is structural, not width-strict, so this is
+    // the only length check: without it, a binary word truncated by a clobbered high digit would decode
+    // to the smaller number its remaining digits spell, and nothing anywhere would notice.
     let word_len = enc.heap_word_len();
     let check_len = |cell: usize, what: &str, len: usize| -> Result<(), String> {
         match word_len {

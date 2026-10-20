@@ -68,8 +68,9 @@ fn generated() -> Vec<(&'static str, String)> {
 /// field type rather than the integer inside it, so `ts(type = "number")` on an `Option<u64>` field
 /// would generate `field: number` — no `bigint`, so this gate passes, and the `| null` that `None`
 /// puts on the wire is gone. None of this crate's fields are `Option<u64>` today; `redextape-wasm`'s
-/// `TmStatus::total_steps` is where this actually happened, and that field's own doc records what does
-/// catch it. Naming the hole here is the point: a gate that implied it covered the whole override class
+/// `TmStatus::total_steps` and `AsmStatus::total_steps` are. `no_override_misstates_a_field_s_nullability`
+/// below catches that class in this crate, and its twin in `redextape-wasm`'s `ts_bindings.rs` catches it
+/// there. Naming the hole here is the point: a gate that implied it covered the whole override class
 /// would tell the next reader not to check.
 ///
 /// THE SCAN SKIPS JSDOC. `export_to_string` reproduces Rust doc comments verbatim, so a doc comment
@@ -94,22 +95,20 @@ fn no_generated_type_carries_bigint() {
 /// the NAMES as sets catches both directions: a name present in the sources but not in `generated()`,
 /// and a name present in `generated()` but no longer in the sources.
 ///
-/// NOR IS TEXT-MATCHING ONE SPELLING OF THE ATTRIBUTE ENOUGH — FOUR REVIEW ROUNDS EACH COMPILED A
-/// COUNTEREXAMPLE PAST THE PREVIOUS WORDING, EACH TIME BY FINDING ONE MORE SPELLING A BLACKLIST HAD NOT
-/// NAMED YET. `ts(rename = "Foo", export)` carried the export flag without the substring `ts(export)`.
-/// `derive(Default, ts_rs::TS)` carried the derive without the substring `derive(ts_rs::TS)`. `use
-/// ts_rs::TS;` followed by bare `derive(TS)` carried it without the path `ts_rs::TS` appearing on the
-/// derive line at all. And `use ts_rs as tsrs;` followed by `derive(tsrs::TS)` carried it under an
-/// aliased crate name — the fourth round, found by the whole-branch review with `web/bindings/Rule.ts`
-/// really written while both tests here stayed green. A fifth round found the scan itself scoped to
-/// `src/` only, missing a derive routed through a file elsewhere in the crate — see
+/// A BLACKLIST OF SPELLINGS OF THE ATTRIBUTE IS NOT ENOUGH. Each of these carries the derive past a
+/// match on one spelling: `ts(rename = "Foo", export)` carries the export flag without the substring
+/// `ts(export)`. `derive(Default, ts_rs::TS)` carries the derive without the substring
+/// `derive(ts_rs::TS)`. `use ts_rs::TS;` followed by bare `derive(TS)` carries it without the path
+/// `ts_rs::TS` appearing on the derive line at all. And `use ts_rs as tsrs;` followed by
+/// `derive(tsrs::TS)` carries it under an aliased crate name. The scan covers the whole crate, not
+/// `src/` only, which would miss a derive routed through a file elsewhere in the crate — see
 /// `ts_deriving_type_names_in_crate`'s doc for that construction. `ts_deriving_type_names_in_crate`
-/// does not try to name a sixth banned spelling: it WHITELISTS the one canonical derive line and fails
+/// does not try to name another banned spelling: it WHITELISTS the one canonical derive line and fails
 /// on any OTHER line that so much as mentions `ts_rs`, so every spelling above — and every one nobody
 /// has thought of yet — fails the same assertion, for the same reason, rather than needing its own ban
-/// added after the fact. See `redextape_test_support::ts_derive_scan::ts_deriving_type_names_in_crate`'s
-/// own doc for what this construction actually guarantees, and what remains outside it, named rather
-/// than denied.
+/// added after the fact. See
+/// `redextape_test_support::ts_derive_scan::ts_deriving_type_names_in_crate`'s own doc for what this
+/// construction actually guarantees, and what remains outside it, named rather than denied.
 #[test]
 fn the_gate_covers_every_exported_type() {
     assert_generated_covers_every_derive_site(Path::new(env!("CARGO_MANIFEST_DIR")), &generated());
@@ -123,9 +122,10 @@ fn the_gate_covers_every_exported_type() {
 /// The `| null` that `None` puts on the wire is simply gone.
 ///
 /// THE RULE AND ITS REASONING LIVE IN `redextape_test_support::ts_derive_scan` — read
-/// `assert_overrides_match_field_nullability`'s own doc for the anchor, the forward resolution, and
-/// the two things it names as outside its reach rather than closed. One implementation with two
-/// callers is deliberate: a second copy drifts the moment one is widened and the other is not.
+/// `assert_overrides_match_field_nullability`'s own doc for why it parses with `syn`, the rule over the
+/// three keys that say anything about null, and what it names as outside its reach rather than closed.
+/// One implementation with two callers is deliberate: a second copy drifts the moment one is widened and
+/// the other is not.
 #[test]
 fn no_override_misstates_a_field_s_nullability() {
     assert_overrides_match_field_nullability(Path::new(env!("CARGO_MANIFEST_DIR")));
