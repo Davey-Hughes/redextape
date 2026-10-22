@@ -22,8 +22,9 @@ export type BufferRow = {
   readonly label: string
   readonly paneCount: number
   /**
-   * What the copy holds, under its name: a λ copy's current term, or `null` when it has none; a TM or asm copy's
-   * run, as its readout line says it without the name (`readout.ts`'s `tmCopyRow`).
+   * What the copy holds, under its name: a λ copy's current term, or, with none, its leg's reason while the leg is
+   * not available (`building…`, `did not build`), or `null`; a TM or asm copy's run, as its readout line says it
+   * without the name (`readout.ts`'s `tmCopyRow`). `main.ts`'s `copyHolds` resolves it.
    *
    * **WITHOUT IT A ROW IS A COUNTER'S OUTPUT AND A PANE COUNT, AND AT THE CAP EVERY PANE COUNT IS THE
    * SAME TOO.** The one gesture this control exists for is *choose a buffer and end it* — and the user
@@ -37,8 +38,8 @@ export type BufferRow = {
    * or that it has not built yet.
    *
    * `string | null` RATHER THAN AN EMPTY STRING FOR THE ABSENT CASE, because the two are different
-   * things the row says differently: a λ buffer whose fork has not answered yet, or never will, has no
-   * term — where a buffer holding the empty term is not a state the worker can produce. The renderer
+   * things the row says differently: a λ buffer whose build has landed before its first frame has no
+   * term yet — where a buffer holding the empty term is not a state the worker can produce. The renderer
    * marks the absent case rather than drawing a blank line, since a blank line under a name reads as a
    * rendering fault rather than as a fact about the buffer.
    *
@@ -58,8 +59,8 @@ export type BufferRow = {
    *
    * **A COLD BUFFER IS TEXT AND A NAME, AND NOTHING THIS MODULE CAN ASK ABOUT** (5d-ii-d design §4.2).
    * It has no session, so `term` is necessarily `null` for one — and that `null` means something
-   * different from the one a warm buffer produces. A warm buffer with no term is a fork that has not
-   * answered or never will; a cold one simply is not running. The row says which, because "no term"
+   * different from the one a warm buffer produces. A warm buffer's `null` is a build whose first frame
+   * has not come yet; a cold one simply is not running. The row says which, because "no term"
    * under a name reads as a fault where *paused* reads as a state.
    */
   readonly warm: boolean
@@ -160,12 +161,10 @@ const bufferRow = (
    * states the same split for its own controls: the visible text is the glanceable half, the `title` is
    * the one that does not have to fit.
    *
-   * THE ABSENT CASE IS A SENTENCE, NOT AN EMPTY LINE, and it deliberately does not guess WHY — **FOR A
-   * WARM λ ROW.** A buffer with no term is one whose fork has not answered yet or one whose build failed,
-   * and this row cannot tell those apart — `no term yet` is true of both, where "wedged" would be a
-   * claim and "building…" would repeat the very lie a phantom-forked pane already tells (deferred-a11y
-   * item 11's neighbourhood). It takes a class of its own so the stylesheet can mark it without this
-   * file choosing a colour.
+   * THE ABSENT CASE IS A SENTENCE, NOT AN EMPTY LINE — **FOR A WARM λ ROW** whose build has landed and
+   * whose first frame has not. A λ copy with no frame whose leg is not available is handed its leg's
+   * reason instead (`building…`, `did not build`), so `no term yet` is said only where no reason is. It
+   * takes a class of its own so the stylesheet can mark it without this file choosing a colour.
    *
    * A COLD ROW GETS NEITHER THE SENTENCE NOR THE EMPTY LINE — IT GETS NO LINE — which is why this
    * element is built unconditionally but only ever appended below when `row.warm`. `BufferRow.warm`'s

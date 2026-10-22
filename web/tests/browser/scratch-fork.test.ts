@@ -296,16 +296,16 @@ describe('detach is a fork', () => {
 
 /**
  * **THE `no-session` REPORT.** `fork` rebinds a pane to a new λ buffer SYNCHRONOUSLY, before the worker
- * has answered (`ScratchBuffers.noSessionReply`'s doc: "`fork` has ALREADY rebound the pane
- * synchronously"), so a build that fails strands the pane there: `scratch-compiled` never fires, so
- * `LambdaPane.setEditor` is never called; the step readout is stuck on the `'building…'` placeholder
- * `fork` seeds; and `#refreshDetach`'s `!this.#detached` gate hides the control that would fork again,
- * because the session the pane is stuck on IS the one that never works. `ScratchBuffers.noSessionReply`
- * is what reports it. Nothing ends a buffer implicitly (5d-ii-c §4.3), so the stranding is the state a
- * failed fork LEAVES; 5d-ii-c §4.4 makes the header list the way out, which can reach a wedged buffer
- * whether or not a pane still shows it, and the first test below drives that way out at this layer, one
- * assertion after the one that pins the stranding. This method reports, and something the user aims at
- * is what repairs.
+ * has answered (`ScratchBuffers.noSessionReply`'s doc: "`fork` rebinds it before the build's
+ * outcome is knowable"), so a build that fails strands the pane there: `scratch-compiled` never fires, so
+ * `LambdaPane.setEditor` is never called; the step readout reads `did not build`, the reason
+ * `replies.ts`'s `no-session` arm gives the leg; and `#refreshDetach`'s `!this.#detached` gate hides the
+ * control that would fork again, because the session the pane is stuck on IS the one that never works.
+ * `ScratchBuffers.noSessionReply` is what reports it. Nothing ends a buffer implicitly (5d-ii-c §4.3), so
+ * the stranding is the state a failed fork LEAVES; 5d-ii-c §4.4 makes the header list the way out, which can
+ * reach a wedged buffer whether or not a pane still shows it, and the first test below drives that way out
+ * at this layer, one assertion after the one that pins the stranding. This method reports, and something the
+ * user aims at is what repairs.
  *
  * **AN UNPARSEABLE SEED, DELIBERATELY, NOT A GENUINELY OVER-BUDGET TERM.** Both reach the identical
  * `scratch === null` branch of `session-worker.ts`'s `onLambdaScratch` (`ForkedAt`'s doc in
@@ -557,6 +557,7 @@ describe('the no-session report for a failed fork', () => {
         links,
         notify: (t: string) => {
           notified.push(t)
+          return { dismiss: () => undefined }
         },
         draw: () => {
           drawn += 1

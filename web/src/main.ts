@@ -1190,8 +1190,9 @@ async function main(): Promise<EditorView> {
 
   /**
    * Write the buffers to storage — called at every moment the payload would say something different:
-   * a fork, a retire, a recorded term, a rebind, and each `applyLayout()` (`pane-host.ts`), which is
-   * where a view is built or dropped, the first of them turning restored bindings into real panes.
+   * a fork, a retire and its undo, a recorded term, an edit, a collapse, a rebind, and each `applyLayout()`
+   * (`pane-host.ts`), which is where a view is built or dropped, the first of them turning restored bindings
+   * into real panes.
    *
    * **`applyLayout()` WRITES WHETHER OR NOT IT BUILT OR DROPPED A VIEW**, as it writes the workspace: once
    * a gesture, a Stage tab's and a divider's included.
@@ -2279,9 +2280,14 @@ async function main(): Promise<EditorView> {
   }
 
   /**
-   * What a WARM copy's row says it holds, under its name: a λ copy's current frame, as its text, or `null` when it has
-   * none yet; a machine copy's run, as its readout line says it without the name (`readout.ts`'s `tmCopyRow`). The
-   * copies menu's `term` below asks this, and only for a warm buffer (that doc has why).
+   * What a WARM copy's row says it holds, under its name: a λ copy's current frame, as its text; a machine copy's run,
+   * as its readout line says it without the name (`readout.ts`'s `tmCopyRow`). The copies menu's `term` below asks
+   * this, and only for a warm buffer (that doc has why).
+   *
+   * **A λ COPY WITH NO FRAME READS ITS LEG'S REASON WHILE THE LEG IS NOT AVAILABLE**, as its readout does
+   * (`readout.ts`'s `lambdaCopyParts`): `building…` until its build is answered, `did not build` when that build
+   * failed, where `no term yet` would read the same for both. `null`, which reads `no term yet`, is left for a leg
+   * that is available with no frame yet: a build that landed, before its first frame has.
    *
    * **A MACHINE COPY HAS NO TERM, AND `null` FOR ONE WOULD READ AS `no term yet`.** A `TmState` is tape windows and a
    * state index and an `AsmState` registers and a pc, so neither prints a term; but "no term yet" would say nothing
@@ -2295,8 +2301,10 @@ async function main(): Promise<EditorView> {
    */
   const copyHolds = (session: SessionId, leg: Leg): string | null => {
     switch (leg) {
-      case 'lambda':
-        return sessions.legOf({ session, leg: 'lambda' }).hist.current?.text ?? null
+      case 'lambda': {
+        const copy = sessions.legOf({ session, leg: 'lambda' })
+        return copy.hist.current?.text ?? (copy.status.available ? null : copy.status.reason)
+      }
       case 'tm':
         return tmCopyRow(sessions.entryOf(session).tmScratch, copyLegOf(sessions.legOf({ session, leg: 'tm' })))
       case 'asm':
@@ -2307,7 +2315,7 @@ async function main(): Promise<EditorView> {
   /**
    * **THE HEADER'S BUFFER LIST — 5d-ii-c design §4.2's surface, and §4.4's poison recovery.** Without it
    * the app could create buffers and end none, so a wedged worker could not be reclaimed and a failed fork
-   * would leave its pane reading `building…` forever.
+   * would leave its pane on a copy that did not build, for good.
    *
    * **`paneCount` IS COMPUTED HERE AND LIVES ON NO OTHER TYPE, WHICH IS WHY `BufferInfo` AND
    * `BufferRow` ARE TWO TYPES.** `ScratchBuffers` answers what buffers exist; `PaneCollection` answers
@@ -2501,13 +2509,14 @@ async function main(): Promise<EditorView> {
     // offers a blank copy and so is never empty, which removes the reason for a hide.
     buffers.update(live)
     /**
-     * **THE PERSIST RIDES ON THIS FUNCTION BECAUSE ITS CALLERS ARE ALREADY THE RIGHT SET.** The doc
-     * above establishes exactly when this runs — a fork, a retire, and a warm/cool that cannot move the
-     * count but is called anyway for uniformity — and the first two of those are two of the moments the
-     * stored payload would say something different (the others reach `persistBuffers` directly: a
-     * recorded term, a rebind, and each `applyLayout()`, which is `pane-host.ts`'s). A `persistBuffers()`
-     * in the fork and retire handlers instead would be two copies of a rule this function already states
-     * once, and a third in the temperature handler that writes the same bytes back.
+     * **THE PERSIST RIDES ON THIS FUNCTION BECAUSE ITS CALLERS ARE ALREADY THE RIGHT SET.** It runs at a
+     * fork, a retire and its undo, an open's `showWorkspace`, and a warm/cool that cannot move the count
+     * but is called anyway for uniformity — and a fork, a retire and an undo are moments the stored
+     * payload would say something different (the others reach `persistBuffers` directly: a recorded
+     * term, an edit, a collapse, a rebind, and each `applyLayout()`, which is `pane-host.ts`'s). A
+     * `persistBuffers()` in the fork, retire and undo handlers instead would be three copies of a rule
+     * this function already states once, and a fourth in the temperature handler that writes the same
+     * bytes back.
      *
      * **AND IT IS WHY THE INITIAL CALL BELOW IS NOT THE LAST WRITE OF A PAGE LOAD.** This runs once
      * during start-up, before `applyLayout()` has built a single pane, so the `bindings` it writes are

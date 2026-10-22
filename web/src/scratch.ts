@@ -77,6 +77,11 @@ type BufferState = {
   text: string
   collapsed: boolean
   warm: boolean
+  /**
+   * Whether a failed build on this copy's current worker has been answered with its diagnostics — `noSessionReply`'s
+   * once per worker. `#spawn` clears it as it posts the worker's first build; `noSessionReply`'s doc has why.
+   */
+  reported: boolean
 }
 
 /**
@@ -264,8 +269,7 @@ export class ScratchBuffers {
    * that safe, not this map's record-keeping.
    *
    * **`recompile` DEPENDS ON THE SAME FACT**: it checks `warm` before `this.#reg.entryOf(id)`, which
-   * would throw for a cold buffer's id. `recompile`'s own doc has the route by which an edit reaches a
-   * cold buffer.
+   * would throw for a cold buffer's id. `recompile`'s own doc has when an edit reaches a cold buffer.
    */
   #buffers = new Map<SessionId, BufferState>()
 
@@ -372,9 +376,7 @@ export class ScratchBuffers {
    * `BufferCapReached` and hands the message to its `notify` dependency, so it is shown as a notice
    * (`notice.ts`). **THE `cannot make a copy — ` WORDS ARE PART OF THIS THROW'S OWN MESSAGE, NOT
    * SOMETHING THE RENDERER ADDS** — `#refuseAtCap`'s own doc has the argument for why the prefix lives
-   * at the call site. `replies.ts` composes its own prefix for the SIBLING refusal — a fork whose build
-   * fails, worded `the copy did not build — ` because that is the gesture THAT call site names —
-   * for the same reason. **Uncaught, it would reach nothing**: there is no `window` error handler in
+   * at the call site. **Uncaught, it would reach nothing**: there is no `window` error handler in
    * `src/` (`main.ts`'s is a WORKER `error` listener, which a main-thread click never reaches), so the
    * message would go to the console and the user would see no answer at all.
    *
@@ -447,7 +449,7 @@ export class ScratchBuffers {
     // `copy N` — THE LEG IS SAID WHEREVER THE LABEL IS SHOWN (`nameOf`, `view-header.ts`'s `pairLabel`),
     // so the label carries only the number (Plan 7 part 2 spec §12).
     const label = `copy ${this.#minted}`
-    const state: BufferState = { id, label, leg, text: src, collapsed: false, warm: false }
+    const state: BufferState = { id, label, leg, text: src, collapsed: false, warm: false, reported: false }
     this.#spawn(state, src, step)
     this.#buffers.set(id, state)
     slot?.rebind(id)
@@ -528,7 +530,7 @@ export class ScratchBuffers {
    * a pause before the timer fired. The pause's handler in `main.ts` sends the pending edit first
    * (`EditorCustody.flush`), and an editor that comes down sends what it held (`destroy()` flushes). An
    * edit that still arrives after this method has put the buffer to sleep is recorded too
-   * (`recompile`'s own doc names the route).
+   * (`recompile`'s own doc).
    */
   cool(id: SessionId, home: SessionId, slots: readonly Detachable[]): boolean {
     const state = this.#buffers.get(id)
@@ -556,28 +558,27 @@ export class ScratchBuffers {
 
   /**
    * Record the term buffer `id` now holds — 5d-ii-d design §4.3's "text of record", read back by `warm`
-   * on every restart and by `snapshot` for the field a page reload rebuilds a buffer from, PROVIDED the
-   * write this method makes is followed by a `persistBuffers()`/`onBuffersPersist()`; see below. This
-   * method itself only ever touches memory — it has no idea whether either caller pairs it with one.
+   * on every restart and by `snapshot` for the field a page reload rebuilds a buffer from.
    *
-   * **TWO CALLERS, AND ONLY ONE OF THEM IS A DURABILITY MOMENT.** `recompile` below calls it with the
-   * user's own just-typed text, at the point a rebuild is POSTED, not answered — nothing persists
-   * there. `replies.ts`'s `scratch-compiled` arm calls it with its reply's text — for a FORK, the
-   * worker's re-derived term and the first moment this app can know what a forked buffer holds at all,
-   * since `fork` posts the SOURCE session's step-0 text plus a step and the worker replays between
-   * them; for a `recompile`'s own reply, the text `recompile` wrote, answered back as it was typed (a
-   * build at step 0 is answered with the text it was given: `session.rs`'s `lambda_scratch_at`) — and,
-   * under the SAME `reply.text !== null` guard, calls `onBuffersPersist()` (both lines are in
-   * `replies.ts`'s `scratch-compiled` arm, the `setText` and the persist below it). That PAIRING, not
-   * the call to this method alone, is what makes it a durability moment; `recompile`'s call has no such
-   * pairing anywhere in its body.
+   * **THIS METHOD ONLY TOUCHES MEMORY; WHOEVER HOLDS `onBuffersPersist` STORES WHAT IT WROTE.** The design
+   * puts a persist at every `setText`, and this class holds no storage at all. `replies.ts`'s
+   * `scratch-compiled` arm holds that dependency and stores straight after its own call; `recompile` does
+   * not hold it, so its caller, `transport.ts`'s `editSink`, stores on `recompile`'s `true`. Both reach
+   * `main.ts`'s `persistBuffers`.
    *
-   * **SO A `recompile` WHOSE BUILD FAILS LEAVES THIS METHOD'S WRITE STRANDED IN MEMORY.** Unparseable
-   * input and a term over `LAMBDA_BYTE_BUDGET` both answer `no-session` (5d-iii §4.1a), which carries
-   * no text, so the `scratch-compiled` arm's `setText`/persist pair never runs and nothing ever
-   * persists the text `recompile` wrote. The typed text stays live in this record — a caller reading
-   * `text` back before the next reload still sees it — but a reload restores whatever WAS durable
-   * before the edit, not what the user just typed.
+   * **`recompile` BELOW WRITES THE USER'S OWN JUST-TYPED TEXT, AND ITS CALLER STORES IT AS THE BUILD IS
+   * POSTED, NOT WHEN IT IS ANSWERED** (`transport.ts`'s `editSink`). Text that does not parse, or a term
+   * over `LAMBDA_BYTE_BUDGET`, answers `no-session` (the 5d-iii design's §4.1a), which carries no text and
+   * stores nothing, so a store left to the reply would miss every edit that does not build, and a reload
+   * would restore what was stored before it.
+   *
+   * **`replies.ts`'s `scratch-compiled` ARM WRITES ITS REPLY'S TEXT** and, under the same
+   * `reply.text !== null` guard, stores it. For a FORK that is the worker's re-derived term and the first
+   * moment this app can know what a forked buffer holds at all, since `fork` posts the SOURCE session's
+   * step-0 text plus a step and the worker replays between them. For a `recompile`'s own reply it is, for
+   * text up to `LAMBDA_BYTE_BUDGET` bytes, the text `recompile` wrote, answered back as it was typed, so that
+   * store writes again what the edit sink stored; longer text is answered with its term's print
+   * (`session.rs`'s `lambda_scratch_at`), and this write puts the print in place of what was typed.
    *
    * Neither writer could read the field back off the `ScratchEditor` instead: `editor-custody.ts` owns
    * that editor's lifetime and retires orphans, so a buffer whose editor was never mounted — a fork
@@ -715,6 +716,8 @@ export class ScratchBuffers {
       asmScratch: null,
     })
     state.warm = true
+    // A NEW WORKER'S FIRST BUILD IS A GESTURE'S, SO ITS FAILURE IS SAID AGAIN (`noSessionReply`'s doc).
+    state.reported = false
     // SUPERSEDE THEN POST, the order `compile.ts`'s `schedule` also keeps: a fresh client is at
     // generation 0, which its reply filter matches to nothing (`SessionClient`'s constructor), so the
     // claim has to happen before the post or the client would drop the request's own replies.
@@ -788,7 +791,7 @@ export class ScratchBuffers {
    */
   reinstate(record: BufferRecord): void {
     if (this.#buffers.has(record.id)) throw new Error(`a copy is already held under ${record.id}`)
-    this.#buffers.set(record.id, { ...record, warm: false })
+    this.#buffers.set(record.id, { ...record, warm: false, reported: false })
   }
 
   /**
@@ -872,6 +875,7 @@ export class ScratchBuffers {
         text: b.text,
         collapsed: b.collapsed,
         warm: false,
+        reported: false,
       })
     }
   }
@@ -892,12 +896,17 @@ export class ScratchBuffers {
    * **A COLD BUFFER'S TEXT IS RECORDED AND NOTHING IS POSTED — `this.#reg.entryOf(id)` BELOW WOULD THROW
    * FOR ITS ID.** A buffer in `#buffers` need not be in the registry: a cold one is not (`#buffers`'s own
    * doc). `cool` rebinds every pane on `id` before it forgets the session, but this method's caller is
-   * an editor's own sink, bound to its copy when the editor was built (`transport.ts`'s `editSink`), and
-   * an edit can arrive after the pause that put its copy to sleep: the click on *pause* blurs the editor,
-   * *format on blur* starts a format that takes the pending edit off the debounce, and when the server
-   * answers after the pause the format sends the edit it owed (`ScratchEditor.format`). The text is the
-   * user's, so it is kept, and `warm` builds it. The membership check answers `false` for an id no fork
-   * ever minted, or a buffer already retired, which is where an edit sent after a delete goes: nowhere.
+   * an editor's own sink, bound to its copy when the editor was built (`transport.ts`'s `editSink`). The
+   * pause's handler sends what an editor holds before `cool` runs (`EditorCustody.flush`), so a pause
+   * delivers its copy's edits while the copy is warm; an edit that arrives later still — a sink firing
+   * after its copy went to sleep, which nothing here can stop — is the user's text, so it is kept, and
+   * `warm` builds it. The membership check answers `false` for an id no fork ever minted, or a buffer
+   * already retired, which is where an edit sent after a delete goes: nowhere.
+   *
+   * **IT STORES NOTHING ITSELF: ITS CALLER STORES THE TEXT IT WROTE, ON EITHER BRANCH.** `true` — a warm
+   * buffer's build posted, or a cold one's text recorded — is `transport.ts`'s `editSink`'s cue to call
+   * `onBuffersPersist()`, at the moment the text is written rather than when a build answers; `setText`'s
+   * own doc has why.
    *
    * **IT DOES NOT REBIND AND DOES NOT TOUCH THE REGISTRY.** The pane is already on this session and
    * stays on it; what changes is the term behind the leg. `resetLegs` is NOT called here either — the
@@ -909,10 +918,10 @@ export class ScratchBuffers {
     if (state === undefined) return false
     // THE TEXT OF RECORD, WRITTEN AT THE POINT IT BECOMES TRUE (5d-ii-d design §4.3). This is the user's
     // own text; the other `setText` caller is `replies.ts`'s `scratch-compiled` arm, which carries the
-    // worker's answer for a fork.
+    // worker's answer for a fork. This method's caller stores it on either `true` below.
     this.setText(id, src)
     // A SLEEPING BUFFER KEEPS THE TEXT AND BUILDS NOTHING — it has no worker to build on, and `warm` rebuilds
-    // from what was just written. See this method's doc for how an edit reaches a sleeping buffer at all.
+    // from what was just written. See this method's doc for when an edit reaches a sleeping buffer.
     if (!state.warm) return true
     const client = this.#reg.entryOf(id).client
     // BRANCHES ON `state.leg`, MIRRORING `#spawn`. `client.scratch` for every leg would post
@@ -990,8 +999,8 @@ export class ScratchBuffers {
   }
 
   /**
-   * A `no-session` reply naming a buffer: the diagnostics to report as a FAILED FORK, or `null` when
-   * this buffer's own editor is the right place for them.
+   * A `no-session` reply naming a buffer: the diagnostics to say in a notice, or `null` when the copy's own editor
+   * is the place for them.
    *
    * **IT TAKES THE BUFFER THE REPLY NAMED.** The reply arrives with its session
    * (`ScratchBuffersConfig.onReply` curries it in per buffer) and that is the buffer this answers for.
@@ -999,50 +1008,42 @@ export class ScratchBuffers {
    * **NOTHING HERE MOVES A PANE OR ENDS A SESSION**, which is why the signature carries neither
    * `home: SessionId` nor `slots: readonly Detachable[]`.
    *
-   * **THE PANE STAYS ON A BUFFER THAT WILL NEVER PRODUCE A FRAME**, reading the `building…` placeholder
-   * `fork` seeded, with the reason in a notice and no PANE-LOCAL way out: 5d-ii-c design §4.4 puts
-   * poison recovery in the header list precisely because a wedged buffer has to be reachable whether or
-   * not a pane is still showing it. The way out is one gesture away from any state: open `copies ▾` and
-   * delete the row, which rebinds this pane home and offers `edit a copy` again — the remedy
-   * 5d-iii §4.1a promises, delivered from the header instead of from the pane that is stuck.
+   * **A `no-session` ANSWERS A BUILD THAT FAILED, AND WHAT ASKED FOR THAT BUILD DECIDES WHERE IT IS SAID.** A worker's
+   * first build is the one `#spawn` posts for a gesture: a fork, a blank copy, or a warm (a resume, an undone delete, a
+   * page's restore). The copy may be in no view when that build fails — a blank copy and a resumed one bind no pane,
+   * and a fork's pane has no editor until a build lands, since `fork` rebinds it before the build's outcome is knowable
+   * (`fork`'s own doc). A fork's build fails when the term at the requested step is over `LAMBDA_BYTE_BUDGET` (5d-iii
+   * §4.1a), or, rarely, when the source's own step-0 print was itself cut, so the replay's first parse fails. A notice
+   * (`notice.ts`) is the one surface that exists whether or not a view shows the copy. Every later build on the same
+   * worker is an edit (`recompile`), typed into the copy's editor, whose LSP document shows that edit's diagnostics;
+   * saying them in a notice as well would repeat them in the live region on every keystroke's build (Plan 7 part 5
+   * spec, amendment 27).
+   *
+   * **SO THE DIAGNOSTICS COME BACK ONCE PER WORKER, AND ONLY WHILE THE COPY'S OWN LEG HAS RECORDED NO FRAME.**
+   * `reported` is cleared by `#spawn` and set here by the first answer. A leg that holds a frame has a build behind it,
+   * whose run 5d-iii design §4.4 keeps on screen under an edit that does not parse ("an edit that does not parse leaves
+   * the frames region showing the last good run"), so its failures are edits on any worker. The leg read is
+   * `legs[state.leg]`, the one leg `#spawn` gave the buffer's entry (Plan 7 part 5 spec amendment 27): `#spawn` gives
+   * a TM or asm buffer's entry no `lambda` leg at all, so reading `legs.lambda` would find no frame on every call for
+   * one.
+   *
+   * **A PANE ON A COPY THAT HAS NOT BUILT STAYS ON IT**, reading `did not build`, the reason `replies.ts`'s
+   * `no-session` arm gives its leg. A fork's pane has no PANE-LOCAL way out: `#refreshDetach`'s `!this.#detached`
+   * gate hides the control that would fork again, because this session is the one the pane is on. 5d-ii-c design
+   * §4.4 puts poison recovery in the header list precisely because a wedged buffer has to be reachable whether or not
+   * a pane is still showing it: open `copies ▾` and delete the row, which rebinds this pane home and offers `edit a
+   * copy` again — the remedy 5d-iii §4.1a promises, delivered from the header instead of from the pane that is stuck.
    * `tests/browser/scratch-fork.test.ts` asserts exactly that sequence.
    *
    * `null` FOR AN ID THAT IS NOT A LIVE BUFFER: there is nothing to report about a buffer the user has
    * already ended. A `no-session` for the SOURCE session never reaches this method (`replies.ts` routes
    * source replies to `onReply`).
    *
-   * **A `no-session` REACHES A BUFFER FOR TWO REASONS THAT DEMAND OPPOSITE ANSWERS, AND THE WIRE
-   * CANNOT TELL THEM APART.** `fork`'s OWN build can fail — the term at the requested step is over
-   * `LAMBDA_BYTE_BUDGET` (5d-iii §4.1a), or (rarely) the source's own step-0 print was itself cut, so
-   * the replay's first parse fails — and `fork` has ALREADY rebound the pane synchronously, before either
-   * of those was knowable (`fork`'s own doc). Then no `scratch-compiled` ever fires, so nothing in
-   * `replies.ts` ever calls `setEditor`: the pane has no editor, reads the `'building…'` placeholder
-   * `fork` seeded, and `#refreshDetach`'s `!this.#detached` gate hides the only pane-local control that
-   * could recover it, because this session IS the one the pane is stuck on. An edit's recompile can
-   * ALSO fail, on a buffer that already has a good build behind it — the ordinary case a user hits on
-   * nearly every mid-identifier keystroke — and there 5d-iii design §4.4 is explicit: "an edit that does
-   * not parse leaves the frames region showing the last good run".
-   *
-   * **WHAT DIFFERS IS WHERE THE DIAGNOSTICS GO.** A build that never reached `scratch-compiled` mounted
-   * no editor, so a notice (`notice.ts`) is the only surface left; a buffer mid-edit has a mounted
-   * editor with a gutter built for exactly this. Reporting a mid-edit parse failure as a failed FORK
-   * would also be a lie about which gesture failed.
-   *
-   * **THE DISCRIMINATOR IS WHETHER THE COPY'S OWN LEG HAS EVER RECORDED A FRAME.** A fork posts exactly
-   * one build per buffer and posts it at creation, so a buffer with no frame yet has had nothing but that
-   * build addressed to it. A buffer that already holds a frame can only be mid-`recompile`, because that is
-   * the only other message this class ever posts to an existing buffer. The two cases are exhaustive and
-   * mutually exclusive by construction, not by inspecting which caller happened to trigger this reply — on
-   * every leg, because the line below reads `legs[state.leg]`: the one leg `#spawn` gave the buffer's entry
-   * (Plan 7 part 5 spec amendment 27). `#spawn` gives a TM or asm buffer's entry no `lambda` leg at all,
-   * so reading `legs.lambda` would take the phantom branch on every call for one, whichever of the two
-   * reasons produced the reply.
-   *
-   * RETURNS THE DIAGNOSTICS ON THE PHANTOM PATH, so the caller has the reason to put on the surface
+   * RETURNS THE DIAGNOSTICS FOR A WORKER'S FIRST FAILED BUILD, so the caller has the reason to put on the surface
    * built for it — a routing decision rather than a report on something that has already happened.
-   * `null` ON THE LIVE-EDIT PATH, where the editor's own diagnostics, which arrive on its LSP document's
-   * sink, are what 5d-iii design §4.4 asks for and this method has nothing to add to them. `null` ALSO
-   * WHEN THERE IS NO BUFFER AT ALL: there is no fork to report a failure for.
+   * `null` FOR AN EDIT, where the editor's own diagnostics, which arrive on its LSP document's sink, are
+   * what 5d-iii design §4.4 asks for and this method has nothing to add to them. `null` ALSO WHEN THERE
+   * IS NO BUFFER AT ALL: there is no build to report a failure for.
    *
    * **IT ANSWERS WITH THE DIAGNOSTICS RATHER THAN A BOOLEAN.** A `boolean` would make the caller
    * re-derive nothing and read exactly the same — but the caller would then hold two things that must
@@ -1066,7 +1067,7 @@ export class ScratchBuffers {
    * **THE CHECK STAYS ANYWAY, AND ON ITS OWN TERMS.** It is one field read on a path that already does
    * a map lookup, it makes this method total over every `BufferState` rather than over the warm ones its
    * caller happens to produce, and the answer it gives is the one this method already gives for an id
-   * that was never a buffer: `null`, meaning "there is nothing here to report a fork failure for." What
+   * that was never a buffer: `null`, meaning "there is nothing here to report a failed build for." What
    * it must NOT be read as is a guard against a state the app can reach — the fake-port tier records
    * `terminate()` as a COUNT rather than as message-discarding (`FakePort.terminated`,
    * `tests/node/session-fixtures.ts`), so no node test can distinguish the two readings, and only a real
@@ -1075,8 +1076,10 @@ export class ScratchBuffers {
   noSessionReply(id: SessionId, diagnostics: readonly Diagnostic[]): readonly Diagnostic[] | null {
     const state = this.#buffers.get(id)
     if (state === undefined || !state.warm) return null
+    if (state.reported) return null
     const leg = this.#reg.entryOf(id).legs[state.leg]
     if (leg !== undefined && leg.hist.current !== undefined) return null
+    state.reported = true
     return diagnostics
   }
 }

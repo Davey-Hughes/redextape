@@ -1,5 +1,6 @@
-import type { EditorView } from '@codemirror/view'
-import { describe, expect, it } from 'vitest'
+import { EditorView } from '@codemirror/view'
+import { afterAll, beforeAll, describe, expect, it } from 'vitest'
+import { userEvent } from 'vitest/browser'
 // THE PASTE THE BLANK-BUFFER CASE BELOW MAKES. `?raw` is Vite's own text-import suffix
 // (`node_modules/vite/client.d.ts` declares `'*?raw'` as a default-exported `string`), which is what lets
 // a real, tracked `.tm` file reach this browser-tier test without a second, synthetic copy of 25,142
@@ -9,14 +10,19 @@ import { describe, expect, it } from 'vitest'
 import list_1_2 from '../../../crates/redextape-core/tests/fixtures/list_1_2.tm?raw'
 import { BUFFERS_STORAGE_KEY, parseBuffers, serializeBuffers } from '../../src/buffers-store'
 import { pickSessionBinding } from './binding-fixture'
+import { answered, answerTo, recordBuildReplies, replyTo, typeAnswered } from './build-reply-fixture'
 import { editorViewOf } from './editor-view-fixture'
 import {
   bufferRows,
   buffersButton,
   buffersMenu,
   editedToHaltImmediately,
+  hear,
   idle,
+  paneStepText,
   SHELL,
+  segments,
+  shownNoticeText,
   startStateGoesToHalt,
   storeFourViews,
   tmPaneHost,
@@ -64,8 +70,9 @@ import {
  * and the rest are pure DOM queries, duplicated because nothing here is exported for another file to
  * import, not because a shared page forbids it. `SHELL`, `until`, `tmPaneHost`, `idle`, `buffersButton`,
  * `buffersMenu`, `bufferRows`, `editedToHaltImmediately` and `startStateGoesToHalt` are not part of either
- * duplication — all are imported from `tests/browser/harness.ts` — and neither are `editorViewOf` and
- * `pickSessionBinding`, imported from `tests/browser/editor-view-fixture.ts` and `tests/browser/binding-fixture.ts`.
+ * duplication — all are imported from `tests/browser/harness.ts` — and neither are `editorViewOf`,
+ * `pickSessionBinding` and `replyTo`, imported from `tests/browser/editor-view-fixture.ts`,
+ * `tests/browser/binding-fixture.ts` and `tests/browser/build-reply-fixture.ts`.
  *
  * Section and decision citations here are the 5d-iv design's unless they name another.
  */
@@ -178,6 +185,29 @@ async function remountApp(): Promise<App> {
   return appHandle()
 }
 
+/**
+ * Wait until a build of each of `texts` is answered, listed at or after `from`, an index into `answered` taken before
+ * they were asked for; a text listed twice waits for two answers.
+ *
+ * **A BUILD THAT LANDS WRITES THE STORE** (`replies.ts`'s compiled arms call `onBuffersPersist`), and the page it lands
+ * on goes on running after the next case's `mountApp` replaces it, on the one store this file's cases share. So a
+ * case whose reload builds a copy waits for that build before it ends: one still running would land after the next
+ * case's `mountApp` cleared the store, and write this case's copies into it. `settled()` is no wait for it: its quiet
+ * period can pass while a build is still running on a slow machine.
+ */
+async function buildsAnswered(from: number, ...texts: string[]): Promise<void> {
+  const owed = (text: string) =>
+    texts.filter((t) => t === text).length - answered.slice(from).filter((a) => a.src === text).length
+  await until(() => texts.every((t) => owed(t) <= 0), 'the restored copies’ builds to be answered')
+}
+
+/** Puts `Worker`'s own `postMessage` back once this file is done: `recordBuildReplies` wraps it for the whole file. */
+let unrecord = (): void => undefined
+beforeAll(() => {
+  unrecord = recordBuildReplies()
+})
+afterAll(() => unrecord())
+
 describe('restoring λ and TM buffers', () => {
   it('brings a warm TM buffer back showing its machine', async () => {
     const first = await mountApp('let x = 40; x + 2')
@@ -187,10 +217,12 @@ describe('restoring λ and TM buffers', () => {
     const text = first.editorText(first.tmPane())
     expect(text).toContain('state ')
 
+    const from = answered.length
     const second = await remountApp()
     await second.settled()
     expect(second.editorText(second.tmPane())).toBe(text)
     expect(second.tmPane().textContent).toMatch(/copy · not linked/)
+    await buildsAnswered(from, text)
   })
 
   it('brings a λ buffer and a TM buffer back on their own legs', async () => {
@@ -200,13 +232,16 @@ describe('restoring λ and TM buffers', () => {
     await first.settled()
     first.tmPane().querySelector<HTMLButtonElement>('button.detach')?.click()
     await first.settled()
+    const texts = [first.editorText(first.lambdaPane()), first.editorText(first.tmPane())]
 
+    const from = answered.length
     const second = await remountApp()
     await second.settled()
     const rows = second.bufferRows()
     expect(rows).toHaveLength(2)
     expect(second.lambdaPane().querySelector('.cm-editor')).not.toBeNull()
     expect(second.tmPane().querySelector('.cm-editor')).not.toBeNull()
+    await buildsAnswered(from, ...texts)
   })
 
   /**
@@ -314,10 +349,10 @@ describe('restoring λ and TM buffers', () => {
    * **A FORK'S OWN EDIT REACHES `localStorage`.** `ScratchBuffers.recompile` writes the edit into memory
    * synchronously (`this.setText(id, src)`, ahead of posting the build), so the running pane shows the
    * edit immediately — this test's own first assertions below hold that half. The write a reload reads
-   * back, `ScratchBuffers.snapshot`'s payload, which `restore` takes in, is flushed by `replies.ts`'s
-   * `tm-scratch-compiled` arm calling `onBuffersPersist()`, as its λ sibling does (`scratch-compiled`'s own
-   * three-guard sibling: `if (reply.text !== null) onBuffersPersist()`); an arm that mounted the recompiled
-   * text and moved on would leave a reload restoring the buffer's ORIGINAL text, silently discarding the edit.
+   * back, `ScratchBuffers.snapshot`'s payload, which `restore` takes in, is stored by the edit sink as the
+   * edit is sent (`transport.ts`'s `editSink`), and again by `replies.ts`'s `tm-scratch-compiled` arm when
+   * the build lands; a page that stored neither would leave a reload restoring the buffer's ORIGINAL text,
+   * silently discarding the edit.
    *
    * **THIS IS `tm-scratch-fork.test.ts`'s `runs the edited machine`, CONTINUED PAST THE POINT THAT FILE
    * STOPS.** That file proves the edit reaches the running machine; it never reloads, so it cannot see
@@ -342,17 +377,20 @@ describe('restoring λ and TM buffers', () => {
     // `tm-scratch-compiled` and its persist have run.
     await until(() => startStateGoesToHalt(first.tmPane(), start), `the δ-table to show \`${start}\` going to halt`)
 
+    const from = answered.length
     const second = await remountApp()
     await second.settled()
     expect(second.editorText(second.tmPane())).toBe(edited)
+    await buildsAnswered(from, edited)
   })
 
   /**
    * **A BLANK BUFFER'S PASTE IS THE WORSE CASE.** Design §2 decision 1's entire stated purpose for the
-   * blank-buffer gesture is *"emit a file, paste it into a pane"* — `tm_emit`'s own round trip. Without
-   * `onBuffersPersist()` in `tm-scratch-compiled`, that paste would parse, run, and then a reload would
-   * come back to an EMPTY buffer: there is no fork to seed `localStorage` with anything at all (unlike the
-   * case above, where at least a stale ORIGINAL text would survive), so the user's pasted file would be gone.
+   * blank-buffer gesture is *"emit a file, paste it into a pane"* — `tm_emit`'s own round trip. Unstored —
+   * by the edit sink as it is sent, or by `tm-scratch-compiled` when it lands — that paste would parse, run,
+   * and then a reload would come back to an EMPTY buffer: there is no fork to seed `localStorage` with
+   * anything at all (unlike the case above, where at least a stale ORIGINAL text would survive), so the
+   * user's pasted file would be gone.
    *
    * **`list_1_2.tm` IS THE REAL, TRACKED FIXTURE, NOT A SYNTHETIC STAND-IN** — 25,142 characters,
    * imported through Vite's own `?raw` suffix (see this file's own import comment) rather than
@@ -377,17 +415,13 @@ describe('restoring λ and TM buffers', () => {
     await first.settled()
 
     const view = editorViewOf(first.tmPane())
+    const pasted = answered.length
     view.dispatch({ changes: { from: 0, to: view.state.doc.length, insert: list_1_2 } })
     // NOT A `.state-row` COUNT: the δ-table is VIRTUALIZED (only the ~24 rows in view exist in the DOM), so
     // its row count never reflects the machine's true size and stays ~24 whichever machine is loaded — a
     // check waiting for `list_1_2.tm`'s own 455 (146 states + 309 rules) would never resolve.
     //
-    // **BUT NOT `settled()` EITHER.** It waits for 500 ms of unchanged text. The paste repaints the pane
-    // synchronously, and the worker then compiles 25,142 characters with nothing further touching the DOM
-    // until it answers — so the window can elapse inside that silence and hand back "settled" while the
-    // buffer has not been persisted yet, after which `remountApp` below would reload a store that never
-    // received the paste.
-    //
+    // **BUT NOT `settled()` EITHER**: 500 ms of unchanged text is a fact about the pane, not about storage.
     // The persist IS the fact the remount depends on, so it is what this waits for, through the app's
     // own `parseBuffers` rather than a hand-read of the JSON — a test that agrees with the app's parser
     // cannot drift from the format the app writes.
@@ -405,5 +439,212 @@ describe('restoring λ and TM buffers', () => {
     const second = await remountApp()
     await until(() => second.tmPane().querySelector('.term-editor') !== null, 'the restored buffer to mount its editor')
     expect(second.editorText(second.tmPane())).toBe(list_1_2)
+    // THE PASTE'S BUILD AND THE RELOAD'S: the wait above is on the store, which the edit sink writes as it sends the
+    // paste, so the paste's own build can still be running too.
+    await buildsAnswered(pasted, list_1_2, list_1_2)
+  })
+
+  /**
+   * **TEXT THAT DOES NOT BUILD IS KEPT TOO, ON EACH LEG.** Half-typed text is an editor's ordinary state, and its
+   * build answers `no-session`, which carries no text and stores nothing (`replies.ts`'s `no-session` arm), so the
+   * edit is stored by the edit sink itself as the build is posted (`transport.ts`'s `editSink`). Without that write a
+   * reload would bring back the text from before the edit.
+   *
+   * **THE WAIT IS ON THE BUILD'S ANSWER**: a failed build leaves the page as it was, so the reply is the one fact to
+   * wait on (`build-reply-fixture.ts`'s own doc), and that it is `no-session` is the precondition these cases are
+   * about. The restored view then marks the text where it is wrong, as `asm-copy-restore.test.ts` holds for an asm
+   * copy.
+   */
+  async function keepsTextThatDoesNotBuild(pane: (app: App) => HTMLElement, typed: (original: string) => string) {
+    const first = await mountApp('let x = 40; x + 2')
+    await first.compiled()
+    pane(first).querySelector<HTMLButtonElement>('button.detach')?.click()
+    await first.settled()
+
+    const text = typed(first.editorText(pane(first)))
+    const view = editorViewOf(pane(first))
+    view.dispatch({ changes: { from: 0, to: view.state.doc.length, insert: text } })
+    await until(() => replyTo(text) !== undefined, 'the typed text’s build to be answered')
+    expect(replyTo(text), 'precondition: the typed text does not build').toBe('no-session')
+
+    const second = await remountApp()
+    await until(() => pane(second).querySelector('.term-editor') !== null, 'the restored buffer to mount its editor')
+    expect(second.editorText(pane(second))).toBe(text)
+    // SCROLLED TO THE END, WHERE THE TEXT GOES WRONG: an editor draws only the lines in view, and a machine's are many.
+    const restored = editorViewOf(pane(second))
+    restored.dispatch({ effects: EditorView.scrollIntoView(restored.state.doc.length) })
+    await until(
+      () => pane(second).querySelector('.cm-editor .cm-lintRange-error') !== null,
+      'the restored editor to mark where the text is wrong',
+    )
+  }
+
+  it("keeps a forked λ buffer's typed text that does not build after a reload", async () => {
+    // AN OPEN PARENTHESIS AT THE END, which no λ term closes.
+    await keepsTextThatDoesNotBuild(
+      (app) => app.lambdaPane(),
+      (original) => `${original} (`,
+    )
+  })
+
+  it("keeps a forked TM buffer's typed text that does not build after a reload", async () => {
+    // A LINE IN THE LAST STATE THAT IS NO RULE.
+    await keepsTextThatDoesNotBuild(
+      (app) => app.tmPane(),
+      (original) => `${original}\n  garbage here\n`,
+    )
+  })
+})
+
+/**
+ * **A COPY WHOSE TEXT HAS NEVER BUILT SAYS SO, ON ITS VIEW'S STEP LINE, ITS ROW IN THE COPIES MENU AND ITS READOUT.** A
+ * reload brings back a copy whose stored text does not build in its editor, marked where it is wrong (the cases above),
+ * and its build answers `no-session`, so no frame of it ever lands. Its leg then carries the reason `replies.ts`'s
+ * `no-session` arm gives it, `did not build`, where `building…` would say a build is still coming after it has been
+ * answered.
+ *
+ * **AND IT SAYS IN A NOTICE THAT IT DID NOT BUILD ONCE, NOT ONCE PER EDIT.** The reload is a fresh page, whose first
+ * build of the copy is answered with a notice (Plan 7 part 5 spec, amendment 40); an edit to the copy after that shows
+ * its diagnostics in its editor alone, as an edit to a copy that has built does (amendment 27). The count is of notices
+ * drawn and of sentences the live region says (`harness.ts`'s `hear`), since a notice said again in the same words is
+ * heard again. The edits are real key presses, each waited on until its build is answered.
+ *
+ * **AND THE NOTICE ENDS WHEN A BUILD OF THE COPY LANDS**, where it would go on saying the copy did not build over a
+ * copy that now runs.
+ *
+ * **THE READOUT READS THE FOCUSED VIEW'S SESSION** (Plan 7 part 2 spec §9), so a click in the copy's editor, real
+ * input, is what puts the copy's line there.
+ */
+describe('a copy that has never built', () => {
+  const failures = (heard: readonly string[]) => heard.filter((t) => t.startsWith('the copy did not build — '))
+
+  async function neverBuilt(
+    pane: (app: App) => HTMLElement,
+    name: string,
+    typed: (original: string) => string,
+    built: string,
+  ) {
+    const first = await mountApp('let x = 40; x + 2')
+    await first.compiled()
+    pane(first).querySelector<HTMLButtonElement>('button.detach')?.click()
+    await first.settled()
+    const original = first.editorText(pane(first))
+    const text = typed(original)
+    const view = editorViewOf(pane(first))
+    let from = answered.length
+    view.dispatch({ changes: { from: 0, to: view.state.doc.length, insert: text } })
+    expect(await answerTo(text, from, 'the typed text’s build'), 'precondition: it does not build').toBe('no-session')
+
+    const ears = hear()
+    from = answered.length
+    const second = await remountApp()
+    expect(await answerTo(text, from, 'the restored copy’s build'), 'precondition: it does not build').toBe(
+      'no-session',
+    )
+    await until(() => pane(second).querySelector('.term-editor') !== null, 'the restored copy’s editor')
+    expect(paneStepText(pane(second))).toBe('did not build')
+    // ITS ROW IN THE COPIES MENU, which is built as the menu opens; closed again before the click below.
+    expect(second.bufferRows().map((r) => r.querySelector('.buffer-row-term')?.textContent)).toEqual(['did not build'])
+    second.buffersButton().click()
+
+    // NEAR THE EDITOR'S TOP LEFT, NOT ITS CENTRE: a machine's lines are wider than its view, so the centre of its
+    // content can lie outside the view and a click there lands on whatever is drawn at that point instead.
+    const content = pane(second).querySelector('.cm-content') as HTMLElement
+    await userEvent.click(content, { position: { x: 4, y: 4 } })
+    await until(() => segments().some((s) => s.startsWith(name)), 'the readout to read the copy')
+    expect(segments()).toEqual([`${name} · did not build`])
+    // THE POINTER LEAVES THE EDITOR: the next case's mount replaces the page under it, and an editor of this page,
+    // still hovered, would go on measuring text that is no longer in the document.
+    await userEvent.unhover(content)
+    expect(failures(ears.notices), 'the reload’s notice').toHaveLength(1)
+    expect(failures(ears.said), 'the reload’s notice, said').toHaveLength(1)
+
+    for (const key of ['y', 'z', 'w']) {
+      expect(await typeAnswered(editorViewOf(pane(second)), key), 'precondition: the edit does not build').toBe(
+        'no-session',
+      )
+    }
+    expect(failures(ears.notices), 'no notice for an edit').toHaveLength(1)
+    expect(failures(ears.said), 'nothing said for an edit').toHaveLength(1)
+    expect(paneStepText(pane(second))).toBe('did not build')
+
+    // A SECOND RELOAD, A FRESH PAGE AND SO A FRESH NOTICE, and the edit that makes the copy build comes well inside the
+    // notice's eight seconds: the three edits above can outlast them on a slow machine, and a notice that ended by
+    // itself would pass the check below without anything ending it.
+    from = answered.length
+    const third = await remountApp()
+    expect(await answerTo(`${text}yzw`, from, 'the restored copy’s build'), 'precondition: it does not build').toBe(
+      'no-session',
+    )
+    expect(failures(ears.notices), 'one notice from each page').toHaveLength(2)
+    await until(() => pane(third).querySelector('.term-editor') !== null, 'the restored copy’s editor')
+    const fixed = editorViewOf(pane(third))
+    fixed.dispatch({ selection: { anchor: original.length, head: fixed.state.doc.length } })
+    fixed.focus()
+    await until(() => fixed.hasFocus, 'the copy’s editor to take the focus')
+    expect(shownNoticeText(), 'precondition: the reload’s notice is up').toMatch(/^the copy did not build — /)
+    from = answered.length
+    await userEvent.keyboard('{Backspace}')
+    expect(await answerTo(original, from, 'the build of the edit that fixes it'), 'precondition: it builds').toBe(built)
+    expect(shownNoticeText(), 'the notice ends when the copy builds').toBe('')
+    await until(() => paneStepText(pane(third)).startsWith('step 0 of '), 'the step line to read the copy’s run')
+    ears.stop()
+  }
+
+  it('reads `did not build` for a restored λ copy, says so in one notice, and ends it when the copy builds', async () => {
+    // TWO OPEN PARENTHESES AT THE END, which no λ term closes: a text no other case in this file types, since
+    // `answerTo` matches a build by its text alone, on whichever page's worker answers it.
+    await neverBuilt(
+      (app) => app.lambdaPane(),
+      'λ copy 1',
+      (original) => `${original} ((`,
+      'scratch-compiled',
+    )
+  })
+
+  it('reads `did not build` for a restored TM copy, says so in one notice, and ends it when the copy builds', async () => {
+    // A LINE IN THE LAST STATE THAT IS NO RULE, worded as no other case in this file words one,
+    // for the λ case's reason.
+    await neverBuilt(
+      (app) => app.tmPane(),
+      'TM copy 1',
+      (original) => `${original}\n  not a rule\n`,
+      'tm-scratch-compiled',
+    )
+  })
+
+  /**
+   * **A BLANK TM COPY HAS NEVER BUILT EITHER**: its empty text is no machine (`missing \`tapes <n>\``), so a view bound
+   * to it, and its row in the copies menu, read `did not build` too. The menu's rows are built as it opens, so it is
+   * closed first if the gesture left it open.
+   *
+   * **ITS FIRST BUILD IS ANSWERED WITH A NOTICE, AFTER THE ONE SAYING IT WAS CREATED**, as any copy's first failed
+   * build is: no spec says what making a blank copy announces beyond that it was made. Edits to it say nothing more.
+   */
+  it('reads `did not build` for a blank TM copy, in a view of it and in its row, and says so in one notice', async () => {
+    const app = await mountApp('let x = 40; x + 2')
+    await app.compiled()
+    const ears = hear()
+    const from = answered.length
+    app.buffersButton().click()
+    app.buffersMenu().querySelector<HTMLButtonElement>('button.new-tm')?.click()
+    expect(await answerTo('', from, 'the blank copy’s build'), 'precondition: it does not build').toBe('no-session')
+    expect(ears.notices).toEqual(['TM copy 1 created', 'the copy did not build — missing `tapes <n>`'])
+    pickSessionBinding(app.tmPane(), { leg: 'tm', session: 'scratch-1' })
+    await until(() => app.tmPane().querySelector('.term-editor') !== null, 'the copy’s editor')
+    expect(paneStepText(app.tmPane())).toBe('did not build')
+
+    if (app.buffersButton().getAttribute('aria-expanded') === 'true') app.buffersButton().click()
+    expect(app.bufferRows().map((r) => r.querySelector('.buffer-row-term')?.textContent)).toEqual(['did not build'])
+    if (app.buffersButton().getAttribute('aria-expanded') === 'true') app.buffersButton().click()
+
+    for (const key of ['x', 'y', 'z']) {
+      expect(await typeAnswered(editorViewOf(app.tmPane()), key), 'precondition: the edit does not build').toBe(
+        'no-session',
+      )
+    }
+    expect(failures(ears.notices), 'no notice for an edit').toHaveLength(1)
+    expect(failures(ears.said), 'nothing said for an edit').toHaveLength(1)
+    ears.stop()
   })
 })

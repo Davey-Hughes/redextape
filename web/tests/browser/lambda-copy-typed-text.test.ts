@@ -1,6 +1,7 @@
 import { EditorView } from '@codemirror/view'
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 import { userEvent } from 'vitest/browser'
+import { answered, recordBuildReplies } from './build-reply-fixture'
 import { stored } from './copy-text-fixture'
 import { lambdaPane, SHELL, stateIdle, until } from './harness'
 
@@ -13,10 +14,10 @@ import { lambdaPane, SHELL, stateIdle, until } from './harness'
  * printer does not write would become the printer's. And a copy's text of record would never hold the space.
  *
  * **EACH CASE WAITS FOR THE ANSWER TO THE BUILD THAT CARRIES ITS TEXT**, since the answer is what would replace the
- * text. `answered` hears every answer on the copy's worker after the app's own listener, attached when the app
- * built the worker, so the app has handled an answer by the time it is listed. **BY ITS TEXT AND NOT AS THE NEXT
- * BUILD**: several keys typed against the shipped 300 ms debounce can be split by a slow machine into a build of
- * a part of them, and that build is not the one a case is about. Nothing is slept.
+ * text. `answered` (`build-reply-fixture.ts`) hears every answer on the copy's worker after the app's own listener,
+ * attached when the app built the worker, so the app has handled an answer by the time it is listed. **BY ITS TEXT
+ * AND NOT AS THE NEXT BUILD**: several keys typed against the shipped 300 ms debounce can be split by a slow machine
+ * into a build of a part of them, and that build is not the one a case is about. Nothing is slept.
  *
  * **THE KEYS UNDER TEST ARE REAL ONES** (`userEvent`), typed where the caret is; a case's starting text is
  * dispatched, which the editor reports as typing all the same.
@@ -24,10 +25,8 @@ import { lambdaPane, SHELL, stateIdle, until } from './harness'
  * ONE MOUNT FOR THE FILE, for the reason `app.test.ts` gives: `main()` runs once per page.
  */
 
-const post = Worker.prototype.postMessage
-/** Each λ build the app posted and has handled the answer to: its text, and the kind of its answer. */
-const answered: { src: string; reply: string }[] = []
-
+/** Puts `Worker`'s own `postMessage` back once this file is done: `recordBuildReplies` wraps it for the whole file. */
+let unrecord = (): void => undefined
 let copy = ''
 
 const editor = () => EditorView.findFromDOM(lambdaPane().querySelector('.term-editor') as HTMLElement) as EditorView
@@ -60,17 +59,7 @@ async function typeAt(anchor: number, head: number, keys: string): Promise<void>
 }
 
 beforeAll(async () => {
-  Worker.prototype.postMessage = function (this: Worker, message: unknown, options?: unknown) {
-    ;(post as (this: Worker, m: unknown, o?: unknown) => void).call(this, message, options)
-    const m = message as { kind?: string; gen?: number; src?: string } | null
-    if (m?.kind !== 'lambda-scratch') return
-    const heard = (e: MessageEvent) => {
-      if (e.data?.gen !== m.gen || (e.data.kind !== 'scratch-compiled' && e.data.kind !== 'no-session')) return
-      this.removeEventListener('message', heard)
-      answered.push({ src: m.src ?? '', reply: e.data.kind })
-    }
-    this.addEventListener('message', heard)
-  }
+  unrecord = recordBuildReplies()
   document.body.innerHTML = SHELL
   const source = await (await import('../../src/main')).ready
   source.dispatch({ changes: { from: 0, to: source.state.doc.length, insert: 'let x = 40; x + 2' } })
@@ -84,9 +73,7 @@ beforeAll(async () => {
   await until(() => stored(copy) !== null, 'the copy to be stored')
 })
 
-afterAll(() => {
-  Worker.prototype.postMessage = post
-})
+afterAll(() => unrecord())
 
 describe('a λ copy keeps the text typed into it', () => {
   it('keeps a space typed at its end, so a letter typed after the build is answered follows it', async () => {

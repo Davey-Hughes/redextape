@@ -7,6 +7,7 @@ import type { LambdaTrees } from './lambda-trees'
 import { unhandled } from './legs'
 import { LinkIndex } from './link'
 import type { LinkWiring } from './link-wiring'
+import type { Notice } from './notice'
 import type { PaneCollection } from './panes'
 import { asmFrameBytes, lambdaFrameBytes, type RunReply, ruleCount, tmFrameBytes } from './protocol'
 import type { ProgramResult } from './readout'
@@ -88,16 +89,19 @@ export function createReplies(deps: {
    * **THE `scratch-compiled` ARM IS WHERE A FORKED BUFFER'S TEXT FIRST EXISTS AT ALL**, so without this
    * dependency a term the user forked would live in `ScratchBuffers` and never reach `localStorage`.
    * `ScratchBuffers.setText`'s own doc names its two writers: `recompile`, which the user reaches by
-   * typing, and this arm, which the worker reaches by answering. Both must persist, and this is the one
-   * of the two that `main.ts` cannot see from a call site it already owns.
+   * typing, and this arm, which the worker reaches by answering. Both store what they write: `recompile`'s
+   * caller, `transport.ts`'s `editSink`, through its own `onBuffersPersist`, and this arm through this one.
    *
    * A CALLBACK RATHER THAN THIS FILE WRITING STORAGE. `main.ts` holds the guarded writer and the
    * `PaneCollection` the `bindings` are read off; a `localStorage` call here would be a second place
    * the key, the envelope and the quota-failure policy are decided.
    */
   onBuffersPersist: () => void
-  /** Say a refusal — `notice.ts`'s `notify`. */
-  notify: (text: string) => void
+  /**
+   * Say a refusal or a failure — `notice.ts`'s `notify`. The `Notice` it answers is what lets the notice that a copy
+   * did not build end when a build of that copy lands.
+   */
+  notify: (text: string) => Notice
   /** Store the program's result, or its failure, for the readout (`readout.ts`'s `ProgramResult`). */
   setProgram: (r: ProgramResult) => void
 }): {
@@ -120,6 +124,25 @@ export function createReplies(deps: {
     notify,
     setProgram,
   } = deps
+
+  /**
+   * The notice saying a copy did not build, with the copy it names, until a build of that copy lands — `built` below.
+   *
+   * **ONE, NOT ONE PER COPY: THE LINE SHOWS ONE NOTICE AT A TIME** (`notice.ts`), so only the newest can still be on
+   * it. An older copy's was drawn over when a newer notice was said, and a `Notice`'s `dismiss` does nothing once
+   * its notice is no longer the one on the line, so a stale one can never end what another gesture has said since.
+   */
+  let failure: { readonly session: SessionId; readonly notice: Notice } | null = null
+
+  /**
+   * A build of `session` landed: end the notice saying it did not build, if that is still the one on the line. Left
+   * up, it would go on saying the copy did not build over a copy that now runs, for the rest of its eight seconds.
+   */
+  const built = (session: SessionId): void => {
+    if (failure?.session !== session) return
+    failure.notice.dismiss()
+    failure = null
+  }
 
   /**
    * Store `compiled` on `session`'s entry and fan `setProgram` out to every TM pane bound to it that is
@@ -433,6 +456,7 @@ export function createReplies(deps: {
         // `ScratchBuffers.noSessionReply` carries the full argument, including why its own `warm` check
         // is belt-and-braces — it is stated once, there, rather than three times across this switch.
         resetLegs(sessions.entryOf(session).legs, { lambda: reply.lambda })
+        built(session)
         // THE EDITOR IS SEEDED FROM THE REPLY'S OWN TEXT, NOT FROM THE FRAME THAT ARRIVES NEXT
         // (5d-iii design §4.1: `text` "travels back so `main.ts` can seed the editor from the same
         // string that created the scratch, rather than from a second print that could disagree with
@@ -491,6 +515,7 @@ export function createReplies(deps: {
         // it is the reverse. `reply.tm` is a `TmScratchStatus`, not a `TmStatus` — `resetLegs`'s own
         // doc has the argument for why its `statuses` record accepts it.
         resetLegs(sessions.entryOf(session).legs, { tm: reply.tm })
+        built(session)
         // THE MACHINE IS STORED ON THE ENTRY AND FANNED OUT TO `setProgram`, THE SAME PAIRING
         // `setTmProgram` MAKES FOR THE `compiled` ARM — so a pane bound to this session later
         // (`pane-host.ts`'s `tmProgramOf`) is seeded from the entry rather than left blank. THROUGH
@@ -526,17 +551,13 @@ export function createReplies(deps: {
         // to mount.
         const seed = scratchpad.editorSeed(session)
         if (seed !== null) editorHome(session)?.setEditor(seed.text, seed.collapsed)
-        // AND THEN INTO STORAGE, UNCONDITIONALLY. This arm's own λ sibling above makes this call under the
-        // defensive guard the write above it shares (`if (reply.text !== null)`; `protocol.ts`'s
-        // `scratch-compiled` doc: never `null` on that reply). Nothing here is conditional on
-        // this reply the same way: `protocol.ts`'s own doc on `tm-scratch-compiled` records that this
-        // variant carries no absent-leg case — a `TmScratch` exists only for text that already parsed to a
-        // machine, so every arrival here follows a real edit or a real fork, either of which already wrote
-        // `BufferState.text` (the paragraph above). Without this call, a fork's own edit, or a blank
-        // buffer's own paste, would reach the running machine (`recompile`'s synchronous `setText`) and
-        // never reach `localStorage`, so a reload would return whatever was durable before the edit — the
-        // buffer's ORIGINAL text for an edited fork, or nothing at all for a pasted blank buffer, since
-        // neither one has another persist site of its own.
+        // **AND THEN INTO STORAGE, UNCONDITIONALLY AND DEFENSIVELY: TODAY THIS WRITE STORES NOTHING NEW.** The λ
+        // arm above stores because its reply carries a term, under the guard its `setText` shares. This reply
+        // carries no text, and every route that posts a TM build has stored the buffer's text already: an edit by
+        // the sink that sent it (`transport.ts`'s `editSink`), a fork or a blank copy when it was made (each
+        // reaches `main.ts`'s `refreshBuffers`), and `warm`'s build from the text of record, which is what is
+        // stored. The write is kept so that a build that landed stays stored if a route that posts a build
+        // without storing its text is ever added.
         onBuffersPersist()
         draw()
         return
@@ -576,14 +597,16 @@ export function createReplies(deps: {
         // status and value retained on the entry for a view built after this reply. The value comes with the build
         // (`protocol.ts`'s own doc on this reply). No `asmText`: a copy offers no copy of itself.
         resetLegs(sessions.entryOf(session).legs, { asm: reply.asm })
+        built(session)
         sessions.entryOf(session).asmScratch = { status: reply.asm, value: reply.value }
         setAsmProgram(session, { program: reply.asmProgram, asmText: null })
         // THE EDITOR FROM THE BUFFER'S OWN TEXT OF RECORD, as `tm-scratch-compiled`'s arm mounts a TM copy's, and for
         // its reason: a fork and an edit both write the text before posting the build.
         const asmSeed = scratchpad.editorSeed(session)
         if (asmSeed !== null) editorHome(session)?.setEditor(asmSeed.text, asmSeed.collapsed)
-        // INTO STORAGE UNCONDITIONALLY, for the reason `tm-scratch-compiled`'s arm gives: every arrival here follows an
-        // edit or a fork that has already written the buffer's text.
+        // INTO STORAGE UNCONDITIONALLY AND DEFENSIVELY, as `tm-scratch-compiled`'s arm stores and for its reason: this
+        // reply carries no text either, every route that posts an asm build has stored the text already, and the write
+        // keeps a build that landed stored if a route that posts without storing is ever added.
         onBuffersPersist()
         draw()
         return
@@ -639,9 +662,9 @@ export function createReplies(deps: {
           for (const p of panes.ofSession('tm', session)) (p.pane as TmPane).setScratchValue(null)
         }
         // WHICH OF TWO REASONS THIS FIRES IS `ScratchBuffers.noSessionReply`'s QUESTION, NOT THIS
-        // FILE'S — see that method's doc for the discriminator (has the copy's own leg ever recorded a
-        // frame) and why the two demand different surfaces. Everything below is what THIS reply still
-        // has to do once that question is answered.
+        // FILE'S — see that method's doc for the discriminator (the first failure on the copy's worker,
+        // while its own leg has recorded no frame) and why the two demand different surfaces. Everything
+        // below is what THIS reply still has to do once that question is answered.
         //
         // **`session` IS THE FIRST ARGUMENT, AND IT IS THE ONE FACT THIS ARM HAS THAT THE CALLEE COULD
         // NOT DERIVE.** A reply belongs to the session whose worker sent it (§3.2: the port is the id),
@@ -652,30 +675,32 @@ export function createReplies(deps: {
         // pane the fork moved onto it.
         const failed = scratchpad.noSessionReply(session, reply.diagnostics)
         if (failed !== null) {
-          // THE PHANTOM PATH. The fork's OWN build never landed a single frame, so `scratch-compiled`
-          // never fired and `setEditor` was never called. A notice is the surface for that case
-          // (`notice.ts`, Plan 7 part 2 spec §11): it exists whether or not a view can show anything.
+          // THE PHANTOM PATH: THE FIRST BUILD ON A COPY'S WORKER FAILED, AND ITS LEG HAS NEVER RECORDED A
+          // FRAME. The build answers a gesture — a fork, a blank copy, a resume, an undone delete or a page's
+          // restore — whose copy may be in no view, or in one with no editor yet, so a notice is the surface:
+          // it exists whether or not a view can show anything (`notice.ts`, Plan 7 part 2 spec §11). It is
+          // said once per worker; the copy's later failures are edits, which `noSessionReply` sends below.
           //
-          // The pane stays on a buffer that will never produce a frame, reading `building…`, and the
-          // notice below is what says why. **THE ESCAPE IS THE HEADER LIST** (the 5d-ii-c design's
-          // §4.2), which is where it has to live anyway: a wedged buffer must be reachable whether or
-          // not a pane is still showing it. Retiring the row from it rebinds this pane home.
-          //
-          // `the copy did not build — ` IS COMPOSED HERE. This IS a fork failing (the build the fork
-          // posted never landed), so this call site is one of the two places in `src/` that earns the
-          // words; `scratch.ts`'s `BufferCapReached`/`#refuseAtCap` doc has the argument for the other.
-          notify(`the copy did not build — ${failed.map((d) => d.message).join(' · ')}`)
+          // **THE LEG SAYS `did not build`**, the reason the copy's step line and its readout read while
+          // the leg is not available; the `building…` a new copy's leg starts with (`ScratchBuffers`'
+          // `#pendingLegs`) would go on saying a build is coming after this one has answered. A build that
+          // lands replaces it through its own arm's `resetLegs`. The reset clears no frame, because a leg on
+          // this path holds none.
+          resetLegs(sessions.entryOf(session).legs, {}, 'did not build')
+          // `the copy did not build — ` IS COMPOSED HERE, the one place that knows a copy's build failed
+          // with no run behind it; `scratch.ts`'s `BufferCapReached`/`#refuseAtCap` doc has the argument for
+          // composing a failure's words at its call site.
+          failure = { session, notice: notify(`the copy did not build — ${failed.map((d) => d.message).join(' · ')}`) }
           // `draw()` REPAINTS WHAT ELSE THE REPLY CHANGED. It ends no session, so there is no editor to
           // sweep, and `draw()` rather than `applyLayout()` because no leaf changes here.
           draw()
           return
         }
-        // THE LIVE-EDIT PATH — THE TEXT DID NOT PARSE ON A SCRATCH THAT ALREADY HAS A GOOD BUILD
-        // BEHIND IT. An editor's edit (`transport.ts`'s `editSink`) posts whatever the user just typed,
-        // and most keystrokes mid-identifier do not parse, so this is the ordinary path, not the
-        // defensive one. (A fork's own build can fail too, on the same two reasons `noSessionReply`
-        // names — but every one of those lands in the branch above, on a session with no frame yet,
-        // never here.)
+        // THE LIVE-EDIT PATH — AN EDIT'S TEXT DID NOT PARSE. An editor's edit (`transport.ts`'s
+        // `editSink`) posts whatever the user just typed, and most keystrokes mid-identifier do not parse,
+        // so this is the ordinary path, not the defensive one. The editor shows the edit's diagnostics, and
+        // the copy's leg is left as it was: on a copy that has built, its last good run; on one that has
+        // not, the `did not build` the branch above gave it when its worker's first build failed.
         //
         // THE FRAMES ARE LEFT ALONE — NOT `resetLegs`. 5d-iii design §4.4: "an edit that does not parse
         // leaves the frames region showing the last good run", the opposite of `onReply`'s "STALE FRAMES

@@ -1340,7 +1340,7 @@ button.view-title[aria-expanded="true"] {
 }
 
 /* A buffer with no term yet. NOT A NEW COLOUR (5d-ii-a design §6.3) and not a hue that would read as an
-   error: this is an ordinary state — a fork the worker has not answered — wearing the same `--fg-dim` as the
+   error: this is an ordinary state — a build that landed, before its first frame — wearing the same `--fg-dim` as the
    term it stands in for, italic so a glance down the column can tell prose from a term without reading it. */
 .buffer-row-term.is-absent {
   font-family: inherit;

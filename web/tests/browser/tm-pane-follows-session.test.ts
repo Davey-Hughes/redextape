@@ -97,7 +97,7 @@ describe('a TM buffer whose worker died', () => {
       // THE FIRST PANE IS THE EDITOR'S HOME, as a buffer bound through a pane's selector makes it.
       editorHome: () => held.pane,
       onBuffersPersist: () => undefined,
-      notify: () => undefined,
+      notify: () => ({ dismiss: () => undefined }),
     })
 
     replies.onScratchReply(id, {

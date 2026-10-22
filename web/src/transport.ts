@@ -104,15 +104,16 @@ export function createTransport(deps: {
    */
   onBuffersChanged: () => void
   /**
-   * A pane has moved between sessions — the stored `bindings` are stale until this returns.
+   * The stored payload is stale until this returns: a pane has moved between sessions, a copy's editor was
+   * collapsed or expanded, or a copy's text was edited (`rebind`, `collapse` and `editSink` below).
    *
-   * **THE PAYLOAD CHANGES HERE WITHOUT ANY BUFFER CHANGING**, which is why it is a second
+   * **THE PAYLOAD CHANGES HERE WITHOUT THE BUFFER COUNT CHANGING**, which is why it is a second
    * dependency and not a second caller of `onBuffersChanged` above. That one is about the header's
-   * COUNT, and a rebind moves no count: it takes a pane off one session and puts it on another, so the
-   * `bindings` half of `PersistedBuffers` is different and the `buffers` half is identical. Routing a
-   * rebind through `onBuffersChanged` would repaint the header for a number that did not move, and
-   * naming this separately is what keeps "what changed" readable at the call site (`main.ts`'s
-   * `persistBuffers` / `refreshBuffers` pair).
+   * COUNT, and none of these moves it: a rebind takes a pane off one session and puts it on another, so
+   * the `bindings` half of `PersistedBuffers` is different and the `buffers` half is identical, and a
+   * collapse or an edit changes one buffer's record. Routing them through `onBuffersChanged` would repaint
+   * the header for a number that did not move, and naming this separately is what keeps "what changed"
+   * readable at the call site (`main.ts`'s `persistBuffers` / `refreshBuffers` pair).
    */
   onBuffersPersist: () => void
 }): {
@@ -418,7 +419,14 @@ export function createTransport(deps: {
     editSink: () => {
       const session = slot.binding.session
       return (src: string) => {
-        scratchpad.recompile(session, src)
+        // **THE EDIT IS STORED AS IT IS POSTED, NOT WHEN ITS BUILD ANSWERS** — the 5d-ii-d design's §4.3 puts a
+        // persist at every `setText`, and `recompile` has just made one on either of its branches: a warm copy's,
+        // which posts a build, and a sleeping copy's, which only records. A build's reply cannot carry this write:
+        // text that does not parse, or a λ term over `LAMBDA_BYTE_BUDGET`, answers `no-session`, which carries no
+        // text and stores nothing, so the reply arms' persists reach only the edits that built. `false` names no
+        // buffer, and there is nothing of it to store. No debounce here: this sink is already behind the editor's
+        // (`EDITOR_DEBOUNCE_MS`), as the design says of the text writes.
+        if (scratchpad.recompile(session, src)) onBuffersPersist()
       }
     },
     // THE COLLAPSE REPORT — 5d-ii-d design §4.7.

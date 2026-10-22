@@ -221,7 +221,12 @@ describe('buffers restored from storage', () => {
     // would hide a version that redrew a frame later or not at all.
     expect(rowNames()[0]).toBe('λ copy 1 · not shown')
 
-    await until(() => termsAfterReopen()[0] !== 'no term yet', 'the warmed orphan to rebuild its term')
+    // A λ ROW READS `building…` UNTIL ITS BUILD IS ANSWERED, AND `no term yet` UNTIL ITS FIRST FRAME (`main.ts`'s
+    // `copyHolds`).
+    await until(
+      () => !['building…', 'no term yet'].includes(termsAfterReopen()[0] ?? ''),
+      'the warmed orphan to rebuild its term',
+    )
     // `(\a. a)` PRINTED — the identity, from the text that was in `localStorage` and nowhere else.
     expect(termsAfterReopen()[0]).toContain('λa')
     // NOTHING WAS CREATED OR ENDED BY A WARM (`refreshBuffers`'s own doc: temperature cannot move the

@@ -1,7 +1,7 @@
 import type { EditorView } from '@codemirror/view'
-import { beforeAll, describe, expect, it } from 'vitest'
+import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 import { page, userEvent } from 'vitest/browser'
-import { BUFFERS_STORAGE_KEY } from '../../src/buffers-store'
+import { recordBuildReplies, replyTo } from './build-reply-fixture'
 import { editorOf } from './editor-view-fixture'
 import {
   controlIn,
@@ -48,7 +48,6 @@ const tm = () => tmHost
 const pcs = () => [...asm().querySelectorAll<HTMLElement>('.asm-row .asm-pc')].map((e) => e.textContent)
 const value = () => asm().querySelector('.asm-value')?.textContent ?? ''
 const sourceLinked = () => view.dom.querySelector('.linked')?.textContent ?? null
-const stored = () => localStorage.getItem(BUFFERS_STORAGE_KEY) ?? ''
 const frame = () => new Promise((r) => requestAnimationFrame(() => r(undefined)))
 
 /** Pin `PINNED` in the source with `Mod-'`, the keyboard's link gesture, and wait for the source to show it. */
@@ -61,7 +60,11 @@ async function pin(): Promise<void> {
   await frame()
 }
 
+/** Puts `Worker`'s own `postMessage` back once this file is done: `recordBuildReplies` wraps it for the whole file. */
+let unrecord = (): void => undefined
+
 beforeAll(async () => {
+  unrecord = recordBuildReplies()
   await page.viewport(1280, 1600)
   document.body.innerHTML = SHELL
   view = await (await import('../../src/main')).ready
@@ -73,6 +76,8 @@ beforeAll(async () => {
   await until(() => pcs().length === 5, 'the program’s listing')
   await until(() => tm().querySelectorAll('.state-row').length > 3, 'the program’s rules')
 })
+
+afterAll(() => unrecord())
 
 describe('a view on the page showing a copy', () => {
   it('marks no instruction of an edited asm copy, where a view of the program marks the pin', async () => {
@@ -174,14 +179,14 @@ describe('a view off the page when its copy rebuilt, and shown after the pin', (
     await userEvent.click(stageTab('source'))
     await until(() => !asm().isConnected && !tm().isConnected, 'both copies’ views to be off the page')
 
-    // EACH COPY REBUILDS OFF THE PAGE, which puts its view in `replies.ts`'s `unseen`. A rebuild is stored when it
-    // lands (`onBuffersPersist`) and not when it is typed, so the stored copies changing is the build having landed.
-    let before = stored()
+    // EACH COPY REBUILDS OFF THE PAGE, which puts its view in `replies.ts`'s `unseen`. The wait is on each build's
+    // reply (`build-reply-fixture.ts`), not on the stored copies: an edit is stored as it is sent, before its build
+    // lands.
     retype(asmEditor, EDITED_AGAIN)
-    await until(() => stored() !== before, 'the asm copy’s rebuild to land off the page')
-    before = stored()
-    retype(tmEditor, `${tmEditor.state.doc.toString()}\n`)
-    await until(() => stored() !== before, 'the TM copy’s rebuild to land off the page')
+    await until(() => replyTo(EDITED_AGAIN) === 'asm-scratch-compiled', 'the asm copy’s rebuild to land off the page')
+    const tmText = `${tmEditor.state.doc.toString()}\n`
+    retype(tmEditor, tmText)
+    await until(() => replyTo(tmText) === 'tm-scratch-compiled', 'the TM copy’s rebuild to land off the page')
 
     await pin()
 

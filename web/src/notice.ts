@@ -36,7 +36,8 @@ export type NoticeAction = {
  * on it, and nothing reports whether a call acted.
  *
  * `main.ts`'s base16 import keeps the one a palette removal drew, so the next import ends that removal's *undo*, and
- * an undo never writes an old half over a newer import (Plan 7 part 6b spec §8.5).
+ * an undo never writes an old half over a newer import (Plan 7 part 6b spec §8.5). `replies.ts` keeps the one saying a
+ * copy did not build, and ends it when a build of that copy lands.
  */
 export type Notice = { dismiss(): void }
 

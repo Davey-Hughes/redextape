@@ -1,5 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { createNotices, NOTICE_MS } from '../../src/notice'
+import { hear } from './harness'
 
 let line: HTMLElement
 let live: HTMLElement
@@ -26,6 +27,22 @@ describe('notices', () => {
     expect(live.textContent).toContain('λ copy 1 paused')
     vi.advanceTimersByTime(NOTICE_MS)
     expect(line.hidden).toBe(true)
+  })
+
+  /**
+   * **`harness.ts`'s `hear` HEARS EACH NOTICE IN ITS OWN WORDS, TWO IN ONE TASK AMONG THEM.** Its observer is called
+   * after both writes, when the live region holds the second notice's words alone.
+   */
+  it('is heard notice by notice, two in one task each in its own words', async () => {
+    live.id = 'live'
+    const ears = hear()
+    const n = createNotices(line, live)
+    n.notify('TM copy 1 created')
+    n.notify('the copy did not build — missing `tapes <n>`')
+    await Promise.resolve()
+    ears.stop()
+    expect(ears.notices).toEqual(['TM copy 1 created', 'the copy did not build — missing `tapes <n>`'])
+    expect(ears.said).toEqual(['TM copy 1 created', 'the copy did not build — missing `tapes <n>`'])
   })
 
   it('replaces the notice before it, action and all', () => {

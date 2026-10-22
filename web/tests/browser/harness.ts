@@ -726,6 +726,35 @@ export const live = (): string => (document.querySelector('#live')?.textContent 
 /** What the live region says, as it is written: unlike `live`, not trimmed. */
 export const liveText = () => document.querySelector('#live')?.textContent ?? ''
 
+/**
+ * Every notice the line draws and every sentence the live region says from this call on, in order, until `stop`.
+ *
+ * **A NOTICE IS COUNTED BY ITS ELEMENT, AND A SENTENCE BY ITS WRITE.** `notice.ts`'s `paint` builds a new
+ * `.notice-text` for each notice without an action, and its `say` writes the live region once per notice, so a notice
+ * said again in the same words is counted again: what the user sees drawn and what a screen reader hears. **IT WATCHES
+ * THE WHOLE BODY**, so a remount's fresh `SHELL` goes on being counted, and the page it replaced, whose elements are
+ * gone from the body, is not.
+ *
+ * **A SENTENCE IS READ FROM THE NODE ITS WRITE ADDED, NOT FROM THE REGION.** The observer is called once the code
+ * that wrote has run, so two writes in one task would both read the region's last words; each `textContent` write
+ * replaces the region's text node with a new one, which keeps that write's own words (`notice.test.ts` holds both).
+ */
+export function hear(): { readonly notices: string[]; readonly said: string[]; stop(): void } {
+  const notices: string[] = []
+  const said: string[] = []
+  const observer = new MutationObserver((records) => {
+    for (const r of records) {
+      if (r.target instanceof HTMLElement && r.target.id === 'live')
+        said.push(r.addedNodes[0]?.textContent?.trim() ?? '')
+      for (const n of r.addedNodes) {
+        if (n instanceof HTMLElement && n.classList.contains('notice-text')) notices.push(n.textContent ?? '')
+      }
+    }
+  })
+  observer.observe(document.body, { childList: true, subtree: true })
+  return { notices, said, stop: () => observer.disconnect() }
+}
+
 /** The notice, `#notice`. */
 export const noticeEl = (): HTMLElement => document.querySelector<HTMLElement>('#notice') as HTMLElement
 

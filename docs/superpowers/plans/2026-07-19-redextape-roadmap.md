@@ -28873,3 +28873,208 @@ the command or log named here; git commands run from the worktree's root. A brow
 | 9 of 9; 3,400 ms | `focus-press.test.ts` at 25%, on `fc0a8e7` with this branch's changes to `web/` | `d4/q25-focus-press.log` |
 | 281 / 2,916; 97.59 / 92.21 / 98.39 / 98.92; 3 of 3, 900 ms | the coverage gate, and `share-open-clamps.test.ts` at 25%, with this branch's code commits on `bdd977d` | `d5/coverage.log`, `d5/q25-share.log` |
 | 95 / 89 / 97 / 97 | the coverage floors | `grep thresholds web/vite.config.ts` |
+
+#### A COPY'S EDIT IS STORED AS THE EDIT SINK SENDS IT, SO A RELOAD BRINGS BACK TEXT THAT DID NOT BUILD, WHERE IT BROUGHT BACK THE TEXT FROM BEFORE THAT EDIT; A COPY THAT HAS NEVER BUILT READS `did not build`, SAYS SO IN ONE NOTICE PER WORKER, AND THE NOTICE ENDS WHEN THE COPY BUILDS (2026-10-21, branch `recompile-persists`, `47c8a40..82364c5`, 9 commits, plus this entry)
+
+**This closes "`recompile` does not persist"** from Part D's WHAT THIS DID NOT CLOSE (the `#### COMMENTS IN \`web/\``
+entry). Fixing it showed what a copy whose text has never built does after a reload, and the user chose to fix that in
+this branch too. Every file the range changes is under `web/`.
+
+##### THE DEFECT
+
+- **A reload brought back the text from before an edit that did not build.** An edit to a copy reaches
+  `ScratchBuffers.recompile` through `transport.ts`'s `editSink`, which writes the text into the buffer and posts a
+  build; nothing stored it. A build that lands stored the copy through its compiled arm in `replies.ts`, but a build
+  that fails answers `no-session`, which carries no text and stores nothing. So text a user was halfway through typing
+  was lost on a reload, on every leg. The 5d-ii-d design's §4.3 schedules a persist at `setText`.
+
+##### THE FIX
+
+- **`editSink` stores the copy when `recompile` answers that it wrote the text**: `if (scratchpad.recompile(session,
+  src)) onBuffersPersist()`, in `transport.ts`, which now takes `onBuffersPersist` as a dependency as `replies.ts` does.
+  `recompile` answers true on its warm branch and its cold one, and false for an id that is no copy, which stores
+  nothing. There is no debounce of its own: the sink is already behind the editor's `EDITOR_DEBOUNCE_MS`.
+  `ScratchBuffers.setText`'s doc and `persistBuffers`' and `refreshBuffers`' docs in `main.ts` name the edit among the
+  moments the copies are stored.
+- **A reload of a stored text that does not build brings it back in the copy's editor**, marked where it is wrong, on
+  each leg.
+
+##### A COPY THAT HAS NEVER BUILT
+
+That reload led to a copy whose build fails before it has recorded a frame, on every leg. A probe drove one
+(`phantom/zz-phantom-probe.test.ts` in the record, on this branch's first commit's code on `fc0a8e7`): a λ and a TM copy
+forked, a failing edit typed, the page reloaded, three more failing key presses, then an edit that builds; and a blank
+TM copy shown in a view and edited the same way. "Notices" counts new notice elements drawn; only one is on screen at a
+time.
+
+| Step | λ copy, reloaded | TM copy, reloaded | Blank TM copy |
+|---|---|---|---|
+| before the reload, a failing edit to a built copy | 0 notices, `step 0 of 7` | 0, `step 0 of 405` | made: 2 notices, `TM copy 1 created`, then `the copy did not build — missing \`tapes <n>\`` |
+| after the reload, or bound to a view | 1, `building…` | 1, `building…` | 1, `view now shows TM · copy 1`; `building…` |
+| each of three failing key presses | 1 each, the same sentence again, `building…` | the same | the same |
+| an edit that builds | 0, `step 0 of 7`; the failure notice still up 1.5 s later | the same, `step 0 of 405` | the same |
+| a failing edit after that | 0, the run stays | the same | the same |
+
+The step line said a build was coming after the build had been answered; the live region said the same failure again on
+every key press, where Plan 7 part 5 spec amendment 27 has an edit to a copy that has built show its diagnostics in its
+editor alone; and the notice went on saying the copy did not build over a copy that ran. **The user's decisions**
+(2026-10-21): fix all three, in separate commits, for failed forks too; and the step line reads exactly `did not build`.
+
+##### THE THREE BEHAVIOURS
+
+- **`did not build`** (`b41cf8a`). `replies.ts`'s `no-session` arm, on the branch where `ScratchBuffers.noSessionReply`
+  answers a copy's first failure, gives the copy's leg the reason `did not build` through `resetLegs`, as the
+  `worker-error` arm gives `the copy failed`. The view's step line, the copy's readout and its row in the copies menu
+  read it; a build that lands replaces it through its own arm's `resetLegs`. A λ copy's row read `no term yet` for a
+  copy with no frame; `main.ts`'s `copyHolds` now hands it the leg's reason while the leg is not available, as
+  `tmCopyRow` and `asmCopyRow` do (`building…`, `did not build`, and `the copy failed` after its thread threw), and
+  keeps `no term yet` for a leg that is available with no frame yet.
+- **One notice per worker** (`7b0b3ab`). `BufferState.reported` is cleared by `#spawn`, which posts a worker's first
+  build, and set by `noSessionReply` on the first failure it answers; a later failure on that worker answers `null`, so
+  the editor's own diagnostics are the only report of an edit. A reload, a resume or an undone delete gives the copy a
+  new worker, so its first failure is said again.
+- **The notice ends when the copy builds** (`9e7895c`). `notify` answers a `Notice` whose `dismiss` ends it only while
+  it is still the one on the line; `replies.ts` keeps the one saying a copy did not build, with the copy it names, and
+  each compiled arm's `built(session)` ends it for that copy.
+
+##### THE REVIEWS' FIXES
+
+Reviews of the branch found nothing Critical; their points are folded into the commit that wrote the text, and the three
+on text that predates the branch are commits of their own (`bac6c3c`, `2bb20f5`, `817c033`), as is one comment line's
+wrap (`82364c5`).
+
+- **Comments made true or deleted**: `scratch.test.ts`'s note on the cold branch and `ScratchEditor.destroy`'s doc no
+  longer say a pause reaches `recompile`'s cold branch (`bac6c3c`: `EditorCustody.flush` sends a copy's typing while it
+  is warm); `noSessionReply`'s doc no longer says the wire cannot tell a first build's failure from an edit's;
+  `BufferState.reported` points at the doc that has its reason; `ScratchBuffers.fork`'s doc no longer says the failure
+  notice is worded for the fork that asked for it (`817c033`); `replies.ts`'s phantom comment lists the undone delete
+  among the gestures and no longer names the copies menu as the way out, which an edit that builds also is; the compiled
+  arms' comments say their store writes add nothing today; `setText`'s doc says which text each caller stores.
+- **`build-reply-fixture.ts` is the one copy of the build-reply recorder**, which `lambda-copy-typed-text.test.ts`
+  carried too.
+- **`harness.ts`'s `hear` reads each live-region write's own words** from the node the write added, as
+  `view-keys.test.ts` does, where it read the region when its observer ran, which gave two writes in one task the
+  second's words both.
+- **The never-built cases in `tm-buffer-restore.test.ts` use texts no other case in the file uses**, since `answerTo`
+  matches a build by its text on any page's worker; comment lines the branch wrote are wrapped at 120.
+
+##### THE FLAKE
+
+- **`tm-buffer-restore.test.ts`'s "warms a restored cold TM buffer onto the tm leg" failed once at `CPUQuota=25%`**,
+  `expected 'TM copy 1 · not shown · paused' not to match /paused/` (`d3-q25-tm-buffer-restore.log` in the record), and
+  passed on two reruns. The cause is a reading of the code by review, not reproduced: the two cases before it end on
+  `settled()`, whose 500 ms quiet period can pass while a reload's build is still running; the page that posted it goes
+  on running after the next case's `mountApp` replaces it, and when the build lands its compiled arm stores that page's
+  copies into the store the next case has just cleared.
+- **`40bce00` makes every case whose reload builds a copy wait for that build's answer before it ends**: the first two,
+  and "keeps a forked TM buffer's edited text" and "keeps a pasted blank TM buffer's text", the other two that end the
+  same way (the last waits for the paste's build too, since the store holds the paste once the edit sink sends it). A
+  print in the wait, run once at 25%, found builds still unanswered when the wait began in three of the four: the first
+  case's one, both of the second's, and one of the fourth's two; the third's had landed. Three runs of the file at 25%
+  after it: 11 of 11 each time, the slowest cases 9,500, 7,906 and 8,585 ms.
+
+##### THE TESTS
+
+13 cases added: five browser cases in `tm-buffer-restore.test.ts`, two in `asm-copy-restore.test.ts` and one in
+`notice.test.ts`, and five node cases in `sessions.test.ts`, `scratch.test.ts` and `replies.test.ts`. `copy-pin.test.ts`
+waits on each build's answer, since an edit is now stored when it is sent; `buffer-restore.test.ts`'s wait for a warmed
+λ copy's term skips `building…` as well as `no term yet`. The browser cases' waits on a failed build are on its answer
+(`build-reply-fixture.ts`).
+
+- **RED.** Before the persist, the three typed-text cases failed at the restored text (λ, TM, asm). Before each
+  behaviour, its cases failed: `expected 'building…' to be 'did not build'` (λ, TM, blank and asm); `no notice for an
+  edit: expected [ …(4) ] to have a length of 1 but got 4` (all four); `the notice ends when the copy builds: expected
+  'the copy did not build — …' to be ''` (λ, TM and asm). The λ row's case failed `expected [ 'no term yet' ] to deeply
+  equal [ 'did not build' ]`; the `hear` case, run on the old `hear`, failed with the second notice's words received
+  twice.
+- **Sabotages, each one edit, each fired at the property it aimed at.** The persist taken out, or moved before
+  `recompile`: the three browser cases and the node case fail. The persist without `recompile`'s answer as its guard:
+  the node case's second half fails. Aimed at the leg's reason: the step-line assertions fail with `expected 'building…'
+  to be 'did not build'`, and, in `readout.ts`, the readout assertions with `expected [ 'λ copy 1 · building…' ] to
+  deeply equal [ 'λ copy 1 · did not build' ]`. Aimed at `reported`: `no notice for an edit` fails on all four, `nothing
+  said for an edit` on all four, and the node case's warm half with `expected null to deeply equal [ { …(3) } ]`. Aimed
+  at ending the notice: `the notice ends when the copy builds` fails on λ, TM and asm, and the node case's `another
+  copy’s build` when any copy's build ends it. The λ row hard-coded to `building…`: `expected [ 'building…' ] to deeply
+  equal [ 'did not build' ]`.
+- **Not shown able to fail**: the error-mark waits after the restored text, which every sabotage of the persist stopped
+  before; the count of the reload's notice (1) and of `one notice from each page` (2), which no sabotage made wrong; the
+  TM restored case's row in the copies menu, since the λ row's sabotage hard-coded the λ row alone and failed 1 case of
+  11; the second step-line check for `did not build`, after the three edits; and the closing waits on `step 0 of`, after
+  the assertion that the notice ends.
+
+##### WHAT THIS DID NOT CLOSE
+
+- **A blank copy says two notices for one gesture**, `TM copy 1 created` and at once `the copy did not build — missing
+  \`tapes <n>\``; no spec says what making a blank copy announces beyond that it was made. **And a resume, an undone
+  delete or a page's restore of a copy that has never built says its failure again**, one notice per worker.
+- **`recompile`'s cold branch is reached by no browser test.** A pause's `custody.flush` sends the pending edit while
+  the copy is warm (probe `zz-cold-probe.test.ts` in the record, 2 of 2 passed); the node case in `scratch.test.ts`
+  holds the branch.
+- **The TM and asm compiled arms' store writes store nothing new today.**
+- **The bigger fix for the flake is not done**: terminating a replaced page's workers in `mountApp` and `remountApp`,
+  which would end every late reply rather than wait for the ones that store. Two cases in `tm-buffer-restore.test.ts`,
+  "keeps a forked λ/TM buffer's typed text that does not build", still end with their reload's build running; it fails,
+  and a failed build stores nothing.
+
+##### VERIFICATION
+
+Run on 2026-10-21 and 2026-10-22 in the worktree `~/temp/redextape-recompile-persists`, branch `recompile-persists`, by
+`a-recompile/d6-gates.sh` (in `~/temp/redextape-lanes-2026-10-21-record/`), the lane's `gates.sh` with each vitest run
+held until no other process listens on port 63315, with HEAD at `82364c5`, the last code commit, after this branch was
+rebased onto `47c8a40`; `focus-press.test.ts`, which #150 added, ran once whole after the gates with HEAD at the same
+commit, and the nine scans ran again with HEAD at this entry's commit, which changes only this file. Before the gate
+run, two runs of `test:coverage` and one of the browser project at `82364c5` hung, printing `Cannot connect to the
+server in 60 seconds` from the browser, and were stopped before any summary; the browser project then passed whole at
+the same commit, and the gate run quoted here came after it. `47c8a40` brought in #150's change to the focus draw
+(`web/src/main.ts`, `pane-host.ts`, `focus-draw.ts`, `virtual-grid.ts`) and its tests, besides #148's and #149's
+`docs/`, comments in four Rust files and in `web/src/scratch.ts`, and two probe files outside the default suite. Every
+other test run quoted here ran before that rebase, on this branch's code on `fc0a8e7` or `349ac8c`: the probe table, the
+RED and sabotage runs, the flake and its reruns, the cold-branch probe, the print in the wait and the three runs after
+`40bce00`. The two rebases left the code commits they moved unchanged by patch id (`git patch-id --stable`): 8 of 8 onto
+`349ac8c`, 9 of 9 onto `47c8a40`. `pkg/` is built from `fc0a8e7`'s crates. No Rust file changed and no image was built;
+no figure here is from CI.
+
+```
+pnpm exec biome ci --error-on-warnings          → exit 0, 432 files
+pnpm run typecheck                              → exit 0
+pnpm run test:coverage                          → exit 0, 281 files / 2,929 tests;
+                                                  97.6 / 92.21 / 98.39 / 98.93 against 95 / 89 / 97 / 97
+pnpm run build:app                              → exit 0
+scripts/check-{text-bytes,citations,attributions,doc-figures,shared-docs,colours,grammar-wasm,lua,licences}.sh,
+  --self-test then alone                        → 18 of 18 exit 0, at 82364c5 and again at this entry's commit
+each browser file the branch changed, alone, at 25%
+                                                → exit 0; slowest case: tm-buffer-restore 8,003 ms, asm-copy-restore
+                                                  6,096, scratch-fork 3,301, copy-pin 2,878, buffer-restore 999,
+                                                  tm-pane-follows-session 997, lambda-copy-typed-text 824, notice 98
+focus-press.test.ts, whole, once                → exit 0, 9 of 9; slowest case 882 ms
+```
+
+**Every count this entry quotes, with what produces it.** Commands run from the worktree root under zsh unless they say
+`web/`, with `B=47c8a40`, `H=82364c5` and `R=~/temp/redextape-lanes-2026-10-21-record/a-recompile`, the lane's record;
+"at 25%" is `flock <lock> systemd-run --user --scope -q -p MemoryMax=16G -p MemorySwapMax=0 -p CPUQuota=25% pnpm exec
+vitest run --project browser tests/browser/<file>.test.ts --reporter=verbose`, from `web/`.
+
+| Value | What | Produced by |
+|---|---|---|
+| 9 | commits in the range | `git rev-list --count $B..$H` |
+| 21 files, +912 −225; 0 | the range; files it changes outside `web/` | `git diff --shortstat $B $H`; `git diff --name-only $B $H -- . ':!web' \| wc -l` |
+| 13: 5, 2, 1; 5 | cases the range adds: in `tm-buffer-restore`, `asm-copy-restore` and `notice.test.ts`; in the node files | `git diff $B $H -- web/tests \| grep -cE '^\+\s*it\('`, and the same with a file's path in place of `web/tests` |
+| the probe's table | notices drawn and step line at each step | `grep -o '"label":"[^"]*"\|"notifiesThisStep":[0-9]*\|"stepLine":"[^"]*"' $R/d2-phantom-probe.log \| paste - - - \| sort -u`; the notice texts by `grep -o '"notifyTexts":\[[^]]*\]'` on the same log |
+| 3 | RED: the typed-text cases failing at the restored text | `grep 'Tests ' $R/red.log` |
+| the RED lines quoted | before each behaviour; the λ row; the old `hear` | `grep AssertionError` on `$R/d3-red1-*.log`, `$R/d3-red2-*.log`, `$R/d3-red3-*.log`; `$R/d4-red1-tm-buffer-restore.log`; `$R/d4-sab2-notice.log` (the old `hear` put back as a sabotage, with `grep -A8 'Expected'`) |
+| the sabotage lines quoted | dispatch 1's three; dispatch 3's seven (`s1a` to `s3b`); the λ row's | `grep -E 'AssertionError\|Tests '` on `$R/sabotage-*.log`, `$R/d3-sab/s*.log` and `$R/d4-sab1-tm-buffer-restore.log` |
+| `expected 'TM copy 1 · not shown · paused' not to match /paused/`; 11 of 11, twice | the flake; its reruns | `grep AssertionError $R/d3-q25-tm-buffer-restore.log`; `grep 'Tests ' $R/d3-q25-tm-buffer-restore-rerun{1,2}.log` |
+| 1; 1 and 1; 0; 1 of 2 | builds still unanswered when each case's wait began, at 25%: the first case, the second (its λ and TM copies), the third, the fourth | `grep '^PROBE' $R/d4-q4-rebased-q25-probe.log`: a `console.error` of `owed` added to `buildsAnswered` at the top of its wait, the file run at 25%, the copy put back and `cmp` clean |
+| 11 of 11, three times; 9,500, 7,906 and 8,585 ms | the file at 25% after the fix; each run's slowest case | `grep 'Tests ' $R/d4-q4-rebased-q25-run{1,2,3}.log`; the largest of `grep -oE '[0-9]+ms$'` on each |
+| 2 of 2 | the cold-branch probe's cases passing | `grep 'Tests ' $R/cold-probe.log` |
+| 432 | files biome checked | `grep Checked $R/gates-47c8a40/gate-biome.log` |
+| 281 / 2,929; 97.6 / 92.21 / 98.39 / 98.93 | coverage gate files and tests; statements, branches, functions, lines | `grep -E 'Test Files\|Tests \|All files' $R/gates-47c8a40/gate-coverage.log` |
+| 95 / 89 / 97 / 97 | the floors | `grep thresholds web/vite.config.ts` |
+| 18 of 18, twice | scan runs exiting 0, at `82364c5`; at this entry's commit | `grep '^scans' $R/gates-47c8a40/gates.log`; `grep '^scans' $R/d6-entry-scans.log` |
+| 0 | comment lines the range adds that are over 120 columns | `git diff -U0 $B $H -- web \| grep '^+' \| grep -v '^+++' \| cut -c2- \| grep -E '^\s*(//\|\*\|/\*)' \| awk 'length > 120' \| wc -l` |
+| 4 and 0; 2; 8 of 8 | Rust files #148 and #149 brought in, and lines they change in them or in `web/src` that are not comments; probe files they brought in; the commits the rebase onto `349ac8c` moved whose patch id is unchanged | `git diff --stat fc0a8e7 349ac8c`; `git diff fc0a8e7 349ac8c -- crates web/src \| grep '^[+-]' \| grep -vE '^(\+\+\+\|---)' \| grep -vcE '^[+-]\s*(//\|\*\|/\*\|$)'`; `diff <(cut -d' ' -f2 $R/d4-patchids-old.txt) <(cut -d' ' -f2 $R/d4-patchids-new2.txt)`, which prints nothing, on the files `git patch-id --stable` wrote before and after |
+| `focus-draw.ts`, `main.ts`, `pane-host.ts`, `virtual-grid.ts` | the `web/src` files #150 changed | `git diff --name-only 349ac8c $B -- web/src` |
+| 9 of 9 | the code commits the rebase onto `47c8a40` moved whose patch id is unchanged | `diff <(cut -d' ' -f2 $R/d6-patchids-old.txt) <(cut -d' ' -f2 $R/d6-patchids-new.txt)`, which prints nothing, on the files `git patch-id --stable` wrote before and after |
+| the slowest cases at 25% | each changed browser file alone | `grep -E '^q25\|slowest' $R/gates-47c8a40/gates.log` |
+| exit 0; 9 of 9; 882 ms | `focus-press.test.ts` whole, once: its exit, tests, slowest case | `cat $R/gates-47c8a40/focus-press-summary.log` |
+| 211 of 211; 1,517 | the browser project after the hung runs, at `82364c5`: files and tests passing | `grep -E 'Test Files\|Tests ' $R/d6-diag-debug.log`; the hung runs' logs are `$R/gates-47c8a40-hung/`, `$R/gates-47c8a40-hung2/` and `$R/d6-diag-browser.log` |

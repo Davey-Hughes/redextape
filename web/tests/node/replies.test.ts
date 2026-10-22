@@ -127,7 +127,7 @@ function driver(entry: SessionEntry, opts: { frame?: (cb: () => void) => void } 
     view: () => view,
     panes: new PaneCollection(),
     links,
-    notify: () => undefined,
+    notify: () => ({ dismiss: () => undefined }),
     draw: () => {
       drawn += 1
     },
@@ -275,6 +275,7 @@ function scratchDriver(opts: { draw?: () => void; frame?: (cb: () => void) => vo
     () => {},
   )
   const notified: string[] = []
+  const dismissed: string[] = []
   const editorAsked: SessionId[] = []
   // COUNTED RATHER THAN STUBBED OUT, because the text of record and the write of it are two claims:
   // `setText` puts a term in memory, this callback is the arm's own write of it to where a reload
@@ -319,8 +320,10 @@ function scratchDriver(opts: { draw?: () => void; frame?: (cb: () => void) => vo
     onBuffersPersist: () => {
       persists += 1
     },
+    // EACH NOTICE'S `dismiss` IS RECORDED BY ITS TEXT, so a case can tell which notice a reply ended.
     notify: (t: string) => {
       notified.push(t)
+      return { dismiss: () => void dismissed.push(t) }
     },
   })
   // THE MOST RECENT PORT'S MOST RECENT `lambda-scratch` REQUEST — `scratch.test.ts`'s `harness()`
@@ -339,6 +342,7 @@ function scratchDriver(opts: { draw?: () => void; frame?: (cb: () => void) => vo
     panes,
     slot,
     notified: () => notified,
+    dismissed: () => dismissed,
     editorAsked: () => editorAsked,
     lastScratchPost,
     persists: () => persists,
@@ -355,7 +359,7 @@ function scratchDriver(opts: { draw?: () => void; frame?: (cb: () => void) => vo
  * to end. `ScratchBuffers.noSessionReply` hands the diagnostics back so the caller can report them.
  *
  * **WHAT THAT COSTS.** The pane stays on a buffer that will never produce a frame, reading
- * `building…`, and `✎ edit a copy` is not offerable there until the user retires the buffer from the
+ * `did not build`, and `✎ edit a copy` is not offerable there until the user retires the buffer from the
  * header list (design §4.2/§4.4). Retiring rebinds the pane to source and `✎ edit a copy` comes back
  * with the binding.
  */
@@ -408,6 +412,71 @@ describe('a poisoned buffer survives its own no-session reply', () => {
 
     expect(notified().join(' ')).toContain('unexpected `(`')
     expect(editorAsked()).toEqual([])
+  })
+
+  /**
+   * **ONE NOTICE FOR A COPY THAT HAS NEVER BUILT, NOT ONE PER FAILED EDIT.** The copy's editor shows each edit's
+   * diagnostics, so saying the same sentence again on every keystroke's build would only repeat it in the live region
+   * (Plan 7 part 5 spec, amendment 27). The leg goes on saying it did not build.
+   */
+  it('says once that a copy which has never built did not build, however often its builds fail', () => {
+    const { reg, buffers, replies, slot, notified } = scratchDriver()
+    const id = buffers.fork(slot, 'not a term (((', 0, 'lambda')
+
+    replies.onScratchReply(id, noSession([DIAGNOSTIC]))
+    replies.onScratchReply(id, noSession([DIAGNOSTIC]))
+    replies.onScratchReply(id, noSession([DIAGNOSTIC]))
+
+    expect(notified()).toEqual(['the copy did not build — unexpected `(`'])
+    expect(reg.legOf({ session: id, leg: 'lambda' }).status).toEqual({ available: false, reason: 'did not build' })
+  })
+
+  /**
+   * **THE COPY'S LEG SAYS IT DID NOT BUILD**, the reason its view's step line and its readout read while the leg is not
+   * available (`controls.ts`'s `controlState`, `readout.ts`'s `lambdaCopyParts`). The `building…` a new copy's leg
+   * starts with would go on saying a build is coming after this one has been answered. A build that lands replaces it.
+   */
+  it('says on the copy’s leg that it did not build, until a build of it lands', () => {
+    const { reg, buffers, replies, slot } = scratchDriver()
+    const id = buffers.fork(slot, 'not a term (((', 0, 'lambda')
+    const leg = () => reg.legOf({ session: id, leg: 'lambda' })
+    expect(leg().status, 'precondition: the build has not answered').toEqual({ available: false, reason: 'building…' })
+
+    replies.onScratchReply(id, noSession([DIAGNOSTIC]))
+    expect(leg().status).toEqual({ available: false, reason: 'did not build' })
+
+    replies.onScratchReply(id, {
+      kind: 'scratch-compiled',
+      gen: 1,
+      lambda: { available: true, reason: '', node: null, run: null },
+      text: 'λx. x',
+    })
+    expect(leg().status).toEqual({ available: true, reason: '' })
+  })
+
+  /**
+   * **A BUILD THAT LANDS ENDS THE NOTICE SAYING ITS COPY DID NOT BUILD**, which would otherwise go on saying so over a
+   * copy that now runs, for the rest of its eight seconds. Another copy's build leaves it: that copy's notice is not
+   * this one.
+   */
+  it('ends the notice that a copy did not build when a build of that copy lands', () => {
+    const { buffers, replies, slot, notified, dismissed } = scratchDriver()
+    const failing = buffers.fork(slot, 'not a term (((', 0, 'lambda')
+    replies.onScratchReply(failing, noSession([DIAGNOSTIC]))
+    expect(notified(), 'precondition: the failure is said').toEqual(['the copy did not build — unexpected `(`'])
+    const compiled = (text: string): RunReply => ({
+      kind: 'scratch-compiled',
+      gen: 1,
+      lambda: { available: true, reason: '', node: null, run: null },
+      text,
+    })
+
+    const other = buffers.fork(slot, 'λx. x', 0, 'lambda')
+    replies.onScratchReply(other, compiled('λx. x'))
+    expect(dismissed(), 'another copy’s build').toEqual([])
+
+    replies.onScratchReply(failing, compiled('λy. y'))
+    expect(dismissed()).toEqual(['the copy did not build — unexpected `(`'])
   })
 
   /**

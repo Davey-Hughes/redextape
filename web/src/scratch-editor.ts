@@ -437,7 +437,8 @@ export class ScratchEditor {
    * the program, so cancelling would drop whatever was typed in the last `debounceMs` before the view moved,
    * silently. Sending after a retirement reaches no worker, because the sink an editor is built with is its
    * own copy's (`ScratchEditorConfig.onEdit`), and `ScratchBuffers.recompile` posts nothing for a copy that is
-   * deleted or asleep — it records the text of one asleep, which is the pause keeping what was typed.
+   * deleted or asleep. It keeps an asleep copy's text for `warm` to build; the pause itself sends what an editor
+   * holds before the copy sleeps (`EditorCustody.flush`), so what reaches that branch is only an edit sent later.
    *
    * **AND `flush()` REACHES A FORMAT IN FLIGHT'S OWN PENDING TEXT TOO** (`#formatPending`), not only `#timer`'s —
    * `#formatPending`'s own doc has the reason a closure alone was not enough.

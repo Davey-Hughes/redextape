@@ -317,6 +317,60 @@ describe('PaneSlot', () => {
   })
 
   /**
+   * **AN EDIT STORES THE TEXT `recompile` WROTE, AS IT IS SENT, AND NOTHING FOR A COPY THAT IS GONE.** The 5d-ii-d
+   * design's §4.3 puts a persist at every `setText`, and a build that fails answers `no-session`, which stores
+   * nothing, so the edit sink is where an edit's text is stored. `recompile` answers `true` on both of its branches —
+   * a warm copy's build posted, a sleeping copy's text recorded (`tests/node/scratch.test.ts` holds the second) — and
+   * `false` for an id that names no copy.
+   *
+   * THE ORDER IS THE ASSERTION: a write ahead of `recompile` would store the text from before the edit.
+   */
+  it('stores an edit after recompile writes it, and stores nothing for a copy that is gone', () => {
+    const reg = new SessionRegistry()
+    reg.add(entry('source', { label: 'source', lambda: ['from source'] }))
+    reg.add(entry('scratch-1', { label: 'copy 1', detached: true, lambda: ['from scratch'] }))
+    const order: string[] = []
+    // ONLY `recompile` IS REACHED BY AN EDIT, and the cast says so for `scratchpad`'s reason in the rebind test above.
+    const scratchpad = {
+      recompile: (id: SessionId, src: string) => {
+        order.push(`recompile ${id} ${src}`)
+        return id === 'scratch-1'
+      },
+    } as unknown as ScratchBuffers
+
+    const transport = createTransport({
+      sessions: reg,
+      scratchpad,
+      draw: () => undefined,
+      speed: () => 8,
+      setSpeed: () => undefined,
+      lspClient: LSP_STUB,
+      colour: () => [],
+      formatOnBlur: () => false,
+      keymap: {} as KeymapSetting,
+      linkWiring: () => ({}) as LinkWiring,
+      notify: () => undefined,
+      // A THROW, FOR THE REBIND TEST'S REASON: an edit changes no buffer's count.
+      onBuffersChanged: () => {
+        throw new Error('an edit must not report a change to the buffer count')
+      },
+      onBuffersPersist: () => order.push('persist'),
+    })
+
+    const sinkOf = (session: SessionId) => {
+      const sink = transport.events(new PaneSlot('lambda', session)).editSink?.()
+      if (sink === undefined) throw new Error('a λ view is offered no edit sink')
+      return sink
+    }
+    sinkOf('scratch-1')('typed')
+    expect(order).toEqual(['recompile scratch-1 typed', 'persist'])
+
+    order.length = 0
+    sinkOf('scratch-9')('typed after a delete')
+    expect(order).toEqual(['recompile scratch-9 typed after a delete'])
+  })
+
+  /**
    * **THE `catch` AROUND THE FORK LETS A WIRING BUG THROUGH AND KEEPS A REFUSAL.**
    *
    * `detach` is the last frame before the raw DOM dispatch of `✎ edit a copy`'s click listener, and there is no

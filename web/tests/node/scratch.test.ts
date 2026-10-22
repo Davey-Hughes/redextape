@@ -705,6 +705,29 @@ describe('ScratchBuffers.noSessionReply', () => {
     expect(slot.binding.session).toBe(id)
   })
 
+  /**
+   * **ONE ANSWER PER BUILD THE COPY IS GIVEN A WORKER FOR.** The first failure of a copy that has recorded no frame is
+   * answered with its diagnostics, which the caller says in a notice; a later failure on the same worker answers
+   * `null`, since an edit's diagnostics show in the copy's editor (Plan 7 part 5 spec, amendment 27). A warm gives the
+   * copy a new worker and a new build from its text, so that build's failure is answered again.
+   */
+  it('answers the diagnostics once for a copy that has never built, and once more after a warm', () => {
+    const { reg, buffers } = harness()
+    reg.add(sourceEntry())
+    const slot = new PaneSlot('lambda', SOURCE)
+    const id = buffers.fork(slot, 'not a term (((', 0, 'lambda')
+    const diagnostics = [{ span: { start: 0, end: 0 }, severity: 'Error' as const, message: 'unexpected `(`' }]
+
+    expect(buffers.noSessionReply(id, diagnostics)).toEqual(diagnostics)
+    expect(buffers.noSessionReply(id, diagnostics)).toBe(null)
+    expect(buffers.noSessionReply(id, diagnostics)).toBe(null)
+
+    expect(buffers.cool(id, SOURCE, [slot])).toBe(true)
+    buffers.warm(id)
+    expect(buffers.noSessionReply(id, diagnostics)).toEqual(diagnostics)
+    expect(buffers.noSessionReply(id, diagnostics)).toBe(null)
+  })
+
   // AN ID THAT IS NOT LIVE — a buffer `retire` has spent, the only way an id `fork` minted stops being
   // one. A real worker's reply cannot arrive after the retire (`noSessionReply`'s doc: `terminate()`
   // empties the parent port's queue), so this pins the method's answer rather than an app path: with no
@@ -1011,9 +1034,11 @@ describe('cold and warm buffers', () => {
     expect(lastScratchPost()).toEqual({ src: 'typed-term', step: 0 })
   })
 
-  // A COLD BUFFER KEEPS AN EDIT AND BUILDS NOTHING — `recompile`'s own doc names the edit that arrives after a pause:
-  // a format started by the pause's own click, answering after it. No worker is spawned and nothing is posted, and the
-  // next `warm` builds what was typed. Unguarded, `entryOf` throws for the id the pause forgot.
+  // A COLD BUFFER KEEPS AN EDIT AND BUILDS NOTHING. The pause sends what a copy's editor holds while the copy is still
+  // warm (`EditorCustody.flush`, before `cool`), so no route a browser test can drive delivers an edit to a sleeping
+  // copy, and this case is where the cold branch is held: for any caller, `recompile` on a sleeping copy does not throw
+  // (unguarded, `entryOf` throws for the id the pause forgot), spawns and posts nothing, answers `true` so the edit
+  // sink stores the text, and the next `warm` builds what was recorded.
   it('recompile keeps a cold buffer’s text and posts nothing', () => {
     const { reg, pool, buffers, ports, lastScratchPost } = harness()
     reg.add(sourceEntry())
