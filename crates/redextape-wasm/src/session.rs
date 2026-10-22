@@ -1427,14 +1427,14 @@ pub struct AsmScratch {
 /// other check a text can fail, a register at or over `MAX_REGISTERS`, is not refused: it has no name to
 /// mark, and the cursor faults on it at step 0, which the view shows as the run's end.
 ///
-/// **THE WHOLE RUN HAPPENS HERE, ONCE**, as in `compile` (spec amendment 26), under `COPY_CAPS` rather than
-/// `compile`'s caps: the step total and the value come with the build.
+/// **THE WHOLE RUN HAPPENS HERE, ONCE**, as in `compile` (Plan 7 part 5 spec amendment 26), under `COPY_CAPS`
+/// rather than `compile`'s caps: the step total and the value come with the build.
 pub fn asm_scratch(src: &str) -> Scratched<AsmScratch> {
     asm_scratch_with_caps(src, COPY_CAPS)
 }
 
-/// The longest `.asm` text an asm copy builds, in bytes, and the longest `Session::asm_text` hands out for one (Plan 7
-/// part 5 spec, amendment 24; the figure below is amendment 45's).
+/// The longest `.asm` text an asm copy builds, in bytes, and the longest `Session::asm_text` hands out for one
+/// (Plan 7 part 5 spec amendment 24; the figure below is amendment 45's).
 ///
 /// **MEASURED, NOT CHOSEN, AGAINST THE 250 MS AN INITIATED GESTURE MAY TAKE** — `MAX_SCRATCH_TM_BYTES`' budget. A
 /// copy's build pays four costs before its first frame: the text's structured clone to the worker; `asm_scratch`,
@@ -1450,12 +1450,12 @@ pub fn asm_scratch(src: &str) -> Scratched<AsmScratch> {
 /// 5,300,019 bytes, the next size up, was over it at 250.2 ms. The ceiling is the largest size known under budget in
 /// every run, with the heaviest run known added, so it is 5,200,000.
 ///
-/// ONE CONSTANT FOR BOTH DIRECTIONS (spec amendment 24): the text a copy parses, and the text *edit a copy* would post,
-/// since a text over it is one the copy would refuse.
+/// ONE CONSTANT FOR BOTH DIRECTIONS (Plan 7 part 5 spec amendment 24): the text a copy parses, and the text
+/// *edit a copy* would post, since a text over it is one the copy would refuse.
 pub const MAX_SCRATCH_ASM_BYTES: usize = 5_200_000;
 
-/// The caps an asm copy runs under: `DEFAULT_CAPS` with fewer heap cells and fewer saved words (Plan 7 part 5 spec,
-/// amendment 25).
+/// The caps an asm copy runs under: `DEFAULT_CAPS` with fewer heap cells and fewer saved words
+/// (Plan 7 part 5 spec amendment 25).
 ///
 /// **SET SO A COPY'S WORKER STAYS UNDER 256 MIB, THE BUDGET THE USER SET, AND MEASURED THERE.** Each warm copy has a
 /// worker of its own, up to `MAX_WARM_BUFFERS` of them, and a wasm memory only grows, so a copy that once filled its

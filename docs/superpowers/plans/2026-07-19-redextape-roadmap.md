@@ -28238,3 +28238,191 @@ cbebbca ca3d707`, the list in `$R/d/fix/revert_check.sh`). The commands below ar
 | 1241 | `app.test.ts`'s "§11, risk 9" | `git grep -n -i 'risk 9' $H -- web/tests/browser/app.test.ts` |
 | 628 | "both legs decoded" in the web-src notes | `git grep -n 'both legs decoded' $H -- docs/superpowers/notes` |
 | 3; 8 | source files `cco_commit.py` reads from `332e5a2` to `9f0da7e`; from `5710d15` to `9f0da7e`, each with "0 with code or fence changes" | `python3 -I $R/d/tests-15-review-work/cco_commit.py <a> <b>` |
+
+#### THE WEB-TESTS NOTES HOLD `app.test.ts`'S ENTRIES IN ONE RUN, THE TWO WEB NOTES FILES START AND END EACH PARAGRAPH WHERE ITS SOURCE SENTENCE DOES, AND THE FIVE BARE `spec amendment N` CITATIONS IN `crates/` NAME THEIR SPEC (2026-10-21, branch `notes-and-amendments`, `fc0a8e7..10937ef`, 7 commits, plus this entry)
+
+**This closes two items in Part D's WHAT THIS DID NOT CLOSE** (the `#### COMMENTS IN \`web/\`` entry), "Notes order
+(ruling D15)" and "Two `spec amendment N` with no part outside this PR's files", **and the two classes they belong to**:
+every bare amendment citation in `crates/`, and every paragraph in the two web notes files that the move cut
+mid-sentence. Ruling D15 left the move out of Part D only because it conflicted with a revert check that PR ran; the
+user has since asked for it. No commit changes code: four edit the notes, three edit comments.
+
+##### THE NOTES ORDER
+
+- **`1b80f96` moves one entry.** The entry above `app.test.ts`'s `it('reports the absence when a construct emits no
+  instructions or machine states', ...` sat after `buffers-quota-restored.test.ts`'s entry; it now follows the
+  `app.test.ts` entry above `it('marks the contractum the step produced, and nothing at step 0', ...`, so each source
+  file's entries in `docs/superpowers/notes/2026-10-17-code-history-web-tests.md` form one run. The commit is Part D's
+  `R/d/fix/X7-work/item6.patch`, applied unchanged.
+- **It is a pure move.** Four lines (the heading, its paragraph and two blank lines) left old lines 252-255 and are new
+  lines 67-70; the file's lines, sorted, are byte-identical before and after the commit.
+- **Nothing points at the entry by position.** The lines outside the notes that name the notes file name an entry by the
+  code line it sat above, or name only the file; none gives a line number, and no entry in the file refers to another as
+  above or below it.
+
+##### THE CUT SENTENCES
+
+- **`4bf5ce7`, `86d9fe2` and `10937ef` start and end each paragraph of the two web notes files where a sentence of its
+  source comment does.** The source is the comment the paragraph was moved from, in the file its entry's heading names,
+  at `4687e79`, the commit before #147 (which created the web-src notes and wrote every web-tests entry but the 8 #145
+  had), its lines joined. Where the source sentence went on past the paragraph's end, or began before its start, the
+  rest is restored word for word, even where the comment still carries that text today. `4bf5ce7` is the first,
+  `buffers-quota-restored.test.ts`'s "the SAME assertion the crash would have failed,"; `10937ef` is the five starts
+  that followed a colon inside their source sentence (below); `86d9fe2` is every other. Of the 80 paragraphs the range
+  changes, 76 were one line at `fc0a8e7` and are one line now; the other 4 were hard-wrapped and keep their lines, each
+  with a restored start broken where its source comment breaks its lines.
+- **Ends.** At `fc0a8e7`, 22 paragraphs in the web-tests notes and 14 in the web-src notes ended on a comma, a
+  semicolon, a dash, a colon or a word. 33 of those 36 ends are restored, each by the text that followed it in its
+  source sentence: 29 at the end of a paragraph, and 4 between two paragraphs that the restore joins, where the next
+  paragraph of the same entry was the end of the same sentence with the middle dropped (three in web-tests, at "it does
+  not, and could not:", "which is structural:" and "That measured almost nothing:"; one in web-src's `colour.ts` entry).
+  Web-src's `licences.ts` entry was a clause from a list item, and its sentence is the whole four-item list of toolchain
+  licences, restored whole.
+- **Starts.** 61 starts are restored: the 48 paragraphs that began with a lowercase letter once the ends were restored
+  (52 at `fc0a8e7`, four of them absorbed by the joins above), and 13 that began mid-sentence with a dash, a bracket, a
+  backtick, a digit or a capital letter, which a lowercase scan cannot see. Five of the 13 began just after a colon
+  inside their source sentence, which an earlier version of the verifier below counted as a sentence end: web-tests'
+  `app.test.ts` entry after "FIX 4's REGRESSION GUARD:", and web-src's `base16-adjust.ts`, `colour.ts`, `layout.ts` and
+  `scratch.ts` entries after "which then steps over it:", "costs more:", "not of its share:" and "Since then a TM copy
+  is:". Where a source sentence opens with a bold or capitalised label (`**WHAT IS HELD IS ...**`, `THROUGH \`settled\`,
+  FOR ITS THREE WAITS:`, `FIX 4's REGRESSION GUARD:`), the label is part of the sentence and is restored with it; for
+  web-tests' "whole-branch review before merge, finding 5." that is the bold run `**HOW TO RUN IT: \`pnpm test:probe\`.
+  IT IS NOT IN THE DEFAULT SUITE, AND THAT IS DELIBERATE — ... finding 5.**`, its closing `**` included.
+- **The verifier** (`verify_restored.py` in the record directory) reads each source as its comment blocks only:
+  a `/* */` comment, or a run of `//` comments on consecutive lines, each line's marker stripped and the lines joined,
+  so code is never read and no match spans two blocks. It checks that every paragraph that differs from `fc0a8e7` occurs
+  whole inside one comment block of its source; that every paragraph found in a block starts and ends a sentence at one
+  or more of its occurrences there (the text before it ends one at a full stop, a question or exclamation mark, a table
+  row, a fence or a list bullet, or at a colon only where the paragraph opens a list, as a paragraph may end on a colon
+  only where a list follows it; or it opens the block; and the text after it starts one or the block ends); and that no
+  paragraph starts lowercase or ends without a full stop, except a table row and a paragraph that opens the list after
+  it. One start is exempt by name, web-src's "**THE READINGS ARE ONE RUN OF THAT COMMAND ...", which follows a command
+  line the source sets on its own line. Its `--self-test` checks the block reader on a fixed snippet and corrupts the
+  notes five ways, and passes only when each is caught: one word of a restored paragraph changed fails as not verbatim,
+  its first word dropped as starting inside a source sentence, its last word dropped as ending inside one, a changed
+  paragraph replaced by the end of one comment block of `app.test.ts` joined to the start of the next, which only blank
+  lines separate, as not verbatim, and the `app.test.ts` paragraph whose start `10937ef` restores, cut back to the text
+  after "FIX 4's REGRESSION GUARD:", as starting inside a source sentence.
+- **Three paragraphs still end without a full stop, and stay**: two introduce the numbered lists that follow them, in
+  the source too (`buffer-affordability.test.ts`'s "FIXED HERE:**" and "SELF-EVIDENT:**"), and one is a markdown table
+  row (web-src, `layout.ts`). None of the web-tests lines the branch removes or changes was in that file at `4687e79`,
+  so none belongs to #145's 8 entries.
+
+##### THE CITATIONS
+
+- **`tree.rs`'s "(spec amendment 3)"** was written by `ec79f21` (#106, Plan 7 part 4a). At that commit no part 5 spec
+  existed, the 4a plan's head says "The spec is `docs/superpowers/specs/2026-09-23-plan7-part4-views-design.md` **as
+  amended**", and that spec's amendment 3 is "The next redex is found by the arena walk, not by `reduce_step`", the
+  sentence the citation ends.
+- **`sourcemap_coverage.rs`'s "(spec amendment 14)"** was written by `a4e7c6f` (#107, Plan 7 part 4b). At that commit no
+  part 5 spec existed either, the 4b plan's head names the same spec "**as amended** — amendments 8 to 16 are 4b's", and
+  that spec's amendment 14 is "The map is built at the width the run fitted, which fixes `tm_owner` as well", the
+  premise the test's doc names.
+- **`session.rs`'s "(spec amendment 26)" and "(spec amendment 24)"** were written by `18f8225` (#112, Plan 7 part 5c).
+  The 5c plan's head says "The spec is `docs/superpowers/specs/2026-09-27-plan7-part5-asm-design.md` **as amended** —
+  amendments 22 to 37 are 5c's". That spec's amendment 26, "A copy's value is computed when it builds", runs the program
+  to its end "as `compile` does", which is `asm_scratch`'s "THE WHOLE RUN HAPPENS HERE, ONCE, as in `compile`"; its
+  amendment 24, "One byte cap serves both directions", is `MAX_SCRATCH_ASM_BYTES`' "ONE CONSTANT FOR BOTH DIRECTIONS".
+  The part 4 spec's amendments end at 18.
+- **`viewmodel.rs`'s "(spec §5.3, amendment 13)"**, its number wrapped onto the next line, was written by `e29df3c`
+  (#111, Plan 7 part 5b). The 5b plan's head names the part 5 spec "**as amended** — amendments 6 to 21 are 5b's", and
+  that spec's amendment 13 says "**§5.3's decimal-string word is required, not only tidy**", because
+  `serde-wasm-bindgen` 0.6.5 answers a `u64` above `Number.MAX_SAFE_INTEGER` with an error: the doc's own argument. The
+  part 4 spec's amendment 13 is "The grid's active element is a cell".
+- **The other docs with that numbered item after an "Amended" line**, any case, at the commit that wrote each citation:
+  for 3, the roadmap, the sharing-aware-decode and counter-machines plans and the cli-config and web-reduced-files
+  specs; for 14, the counter-machines plan; for 13, the roadmap, the counter-machines plan and the part 4 spec. None is
+  the spec the commit's plan names, and none is about the sentence cited. For 24 and 26 the part 5 spec is the one such
+  doc.
+- **`ab077e4`, `bac0a0c` and `20e692a` write every amendment citation in `crates/` (twelve, on eleven lines) with "Plan
+  7 part N spec"**, the form `session.rs` 263 already had (`viewmodel.rs` keeps its section: "Plan 7 part 5 spec §5.3,
+  amendment 13"). `bac0a0c` also drops the comma from `session.rs`'s two "part 5 spec, amendment", and each citation now
+  sits on one line, so a search for the whole phrase finds all eleven lines. The part 5 spec has had an amendment 3 of
+  its own since it landed at `899c8b2` (#108), and an amendment 13 and 14 since `e29df3c` (#111). Every line these
+  commits change stays inside `rustfmt.toml`'s `max_width = 120`.
+- **The class was enumerated across line breaks**: every "amendment N" in `crates/`, with the number allowed on the next
+  line, checked for a doc named on its line or the line before. At `10937ef` none is bare.
+
+##### WHAT THIS DID NOT CLOSE
+
+- **28 `spec §N` citations in `crates/` name no doc** (27 on one line, 1 with the section wrapped onto the next line),
+  among them `viewmodel.rs`'s "(spec §6.3)", `session.rs`'s `lambda_tree` doc, whose "(spec" ends its line and "§4)"
+  opens the next, and three that say only "design spec" or "design (spec": `printer.rs`'s "trivia design (spec §4",
+  `unary.rs`'s and `tm_bank_invariant.rs`'s "(design spec §4)". This branch was scoped to amendment citations.
+
+##### VERIFICATION
+
+Run on 2026-10-21 in the worktree `~/temp/redextape-notes-and-amendments`, every command below with HEAD at the commit
+that adds this entry, whose parent is `10937ef`, the last commit before this entry. Six of the scans take their file
+list from the git index (`git ls-files`) and read those files from the working tree; `check-doc-figures`,
+`check-grammar-wasm` and `check-licences` find their files in the working tree; the tree was clean when they ran. The
+other commands read the commits they name, or the working tree, whose notes and source files are the same as at
+`10937ef`. Logs and the scripts named below are in `~/temp/redextape-lanes-2026-10-21-record/b-docs/` (`T` below). Rust
+tests and the web suite were not run: the comment-only check proves nothing they compile changed beyond comments. The
+pre-commit hook ran `cargo fmt` and `cargo clippy --workspace --all-targets -- -D warnings` on `ab077e4`, `bac0a0c` and
+`20e692a`; both passed each time. No image was built, and nothing has run in CI: the branch has not been pushed.
+
+```
+python3 $T/tools/check_comment_only.py fc0a8e7
+                                               → exit 0,
+                                                 "4 source files changed only in comments; comment lines 2357 -> 2358"
+python3 $T/tools/check_comment_only.py --self-test
+                                               → exit 0, "self-test: 52/52 pass"
+the same check with tree.rs's `use std::collections::BTreeMap;` changed to `HashMap`
+                                               → exit 1,
+                                                 "FAIL M crates/redextape-core/src/viewmodel/tree.rs: CODE CHANGED";
+                                                 restored from a copy, `cmp` clean
+python3 $T/verify_restored.py fc0a8e7 --self-test, from a copy whose block reader is replaced by a reading of the
+  whole file, every line joined                → exit 1, "clean: 31 failures (FAIL)", and the two-block paragraph
+                                                 not caught as NOT VERBATIM (it fails only as starting and ending
+                                                 inside a source sentence and mid-sentence); the copy deleted
+python3 $T/verify_restored.py fc0a8e7 --self-test, from a copy whose SENT_END counts a colon as a sentence end
+                                               → exit 1, "cut after a colon (2026-10-17-code-history-web-tests.md
+                                                 line 45): NOT DETECTED", "self-test FAILS", every other line as
+                                                 in the run at full strength; the copy deleted
+scripts/check-{text-bytes,citations,attributions,doc-figures,shared-docs,colours,grammar-wasm,lua,licences}.sh,
+  --self-test then alone                       → 18 of 18 exit 0 (attributions: 772 sites, 2 excused, 0 violations)
+```
+
+**Every count this entry quotes, with what produces it.** Commands run from the worktree root under zsh, `B=fc0a8e7`,
+`M=1b80f96`, `H=10937ef`, `N=docs/superpowers/notes/2026-10-17-code-history-web-tests.md`,
+`NS=docs/superpowers/notes/2026-10-17-code-history-web-src.md`,
+`S=docs/superpowers/specs/2026-09-23-plan7-part4-views-design.md`,
+`S5=docs/superpowers/specs/2026-09-27-plan7-part5-asm-design.md`, `W=crates/redextape-wasm/src/session.rs`,
+`Q=web/tests/browser/buffers-quota-restored.test.ts` and `T=~/temp/redextape-lanes-2026-10-21-record/b-docs`; all of it
+is `$T/figures.sh`, and its output `$T/figures.log`.
+
+| Value | What | Produced by |
+|---|---|---|
+| 7 | commits in the range | `git rev-list --count $B..$H` |
+| 6 files, +107 −109 | the whole range | `git diff --shortstat $B $H` |
+| 468; 468 | the web-tests notes' lines at `$B`; at `$M` | `git show $B:$N \| wc -l`, and the same at `$M` |
+| identical, exit 0 | those lines, sorted, at `$B` and at `$M` | `cmp <(git show $B:$N \| sort) <(git show $M:$N \| sort)` |
+| old 252-255; new 67-70 | the lines that moved | `diff <(git show $B:$N) <(git show $M:$N)`, which prints `66a67,70` and `252,255d255` |
+| `web/tests/browser/app.test.ts`; none | source files whose entries form more than one run, at `$B`; at `$H` | `git show $B:$N \| grep '^## ' \| sed -E 's/, above.*//' \| uniq \| sort \| uniq -d`, and the same at `$H` |
+| 6 | lines outside the notes that name the web-tests notes, at `$H` (4 in `web/`, 2 in this roadmap) | `git grep -n 'code-history-web-tests' $H -- ':!docs/superpowers/notes' \| wc -l` |
+| 0; 0 | lines naming that file with a line number; lines in it saying an entry is above or below another | `git grep -n -E 'code-history-web-tests\.md(:[0-9]\|#L\|,? lines? [0-9])' $H \| wc -l`; `git show $H:$N \| grep -c -i -E 'entry (above\|below)\|(above\|below\|previous\|next\|preceding\|following) entry'` |
+| 22 and 14; 2 and 1 | paragraphs not ending a sentence in the web-tests and web-src notes, at `$B`; at `$H` | `python3 $T/cut_paragraphs.py <file>...` on `git show $B:$N` and `git show $B:$NS`, then on `$N $NS` at `$H` |
+| 80 changed, 261 checked, 259 found in one comment block and checked at its boundaries, 0 failures; exit 0 | the verifier at `$H` | `python3 $T/verify_restored.py $B` |
+| snippet pass; clean 0 failures; caught as NOT VERBATIM; STARTS INSIDE A SOURCE SENTENCE; ENDS INSIDE A SOURCE SENTENCE and ENDS MID-SENTENCE; NOT VERBATIM, STARTS MID-SENTENCE and ENDS MID-SENTENCE, the joined-file reading finding that paragraph: True; STARTS INSIDE A SOURCE SENTENCE; exit 0 | its self-test: the block reader on its snippet, the clean files, then one word changed, first word dropped, last word dropped, two blocks joined, cut after a colon | `python3 $T/verify_restored.py $B --self-test` |
+| exit 0 at `$H`; exit 1 at `$B` | `$Q`'s entry's second paragraph against `$Q`'s lines 14-19 at `4687e79`, joined | `diff <(git show 4687e79:$Q \| sed -n '14,19p' \| sed 's/^ \* //' \| paste -sd' ') <(git show <sha>:$N \| grep -F '**THE FIX MOVED THE START-UP')` |
+| 0 of 55; 8 | web-tests lines the range removes or changes that were in that file at `4687e79`; its entries there | `git diff -U0 $B $H -- $N \| grep '^-[^-]' \| cut -c2- \| grep -c -x -F -f <(git show 4687e79:$N \| grep .)`, and the same without the last `grep`'s `-f` filter as `grep -c '^-[^-]'`; `git show 4687e79:$N \| grep -c '^## '` |
+| 80 changed; 61 starts, 48 whose paragraph began lowercase and 13 other; 36 cut ends, 33 resolved: 29 by an insertion at a paragraph's end and 4 by one between two paragraphs, none by a paragraph joined straight on; 30 insertions at a paragraph's end, 1 of them after a sentence end; 4 joins, each absorbing a paragraph that began lowercase; 76 one line before and after, 4 hard-wrapped before and after | the range's changed paragraphs, matched to the `$B` paragraphs each contains | `python3 $T/count_restored.py $B $H` (`changed`, `starts`, `starts_lower`, `starts_other`, `cut`, `resolved`, `resolved_at_paragraph_end`, `resolved_between_paragraphs`, `resolved_by_next_paragraph`, `ends`, `insertions_after_a_sentence_end`, `joins`, `absorbed_lower`, `one_to_one`, `wrapped_to_wrapped`) |
+| 5, each STARTS INSIDE A SOURCE SENTENCE (web-tests line 45; web-src lines 29, 65, 466, 602); exit 1 | the verifier on the notes at `86d9fe2` | `python3 $T/verify_restored.py $B --at 86d9fe2` |
+| 5 changed; 5 starts, 0 lowercase and 5 other; 0 ends | what `10937ef` changes, matched as above | `python3 $T/count_restored.py 86d9fe2 $H` (`changed`, `starts`, `starts_lower`, `starts_other`, `ends`) |
+| web-tests, after "finding 5." | the one insertion after a sentence end: the bold run's closing `**` | `python3 $T/count_restored.py $B $H -v \| grep 'after a sentence end'` |
+| 34 and 18 at `$B`; 0 and 0 at `$H` | paragraphs starting with a lowercase letter in the web-tests and web-src notes | `git show <sha>:<file> \| awk 'prev=="" && /^[a-z]/ {n++} {prev=$0} END {print n}'` |
+| `ec79f21`; `a4e7c6f`; `18f8225`; `18f8225`; `e29df3c` | the commit that wrote "amendment 3" in `tree.rs`; "amendment 14" in `sourcemap_coverage.rs`; "spec amendment 26" and "spec amendment 24" in `$W` (the oldest listed; `bac0a0c` adds a second 24); "§5.3, amendment" in `viewmodel.rs` | `git log -S'<phrase>' --format='%h %ad' --date=short -- <file>` |
+| 0; 0 | spec files with `part5` in the name at `ec79f21`; at `a4e7c6f` | `git ls-tree -r --name-only <sha> -- docs/superpowers/specs \| grep -c part5` |
+| lines 30; 96; 168 and 185; 88, with the §5.3 sentence at 93 | the part 4 spec's amendment 3 at `ec79f21`; its 14 at `a4e7c6f`; the part 5 spec's 24 and 26 at `18f8225`; its 13 at `e29df3c` | `git show <sha>:<spec> \| grep -n -E '^<n>\. \*\*'`; `git show e29df3c:$S5 \| grep -n -F "§5.3's decimal-string word is required"` |
+| line 13; 14; 13; 13 | the "The spec is" line of the 4a plan at `ec79f21`; the 4b plan at `a4e7c6f`; the 5c plan at `18f8225`; the 5b plan at `e29df3c` | `git show <sha>:docs/superpowers/plans/<plan> \| grep -n -m1 'The spec is'` |
+| 6; 2; 1; 1; 4 | specs and plans with a numbered item 3 after an "Amended" line, any case, at `ec79f21`; 14 at `a4e7c6f`; 24 and 26 at `18f8225`; 13 at `e29df3c` | `for f in $(git ls-tree -r --name-only <sha> -- docs/superpowers/specs docs/superpowers/plans); do git show <sha>:$f \| awk -v F=$f 'tolower($0) ~ /\*\*amended/ {on=1} on && /^<n>\. \*\*/ {print F; exit}'; done` |
+| `899c8b2` (#108); line 31 only; lines 88 and 101 | the commit that added `$S5`; its amendments 3, 13 and 14 there; its 13 and 14 at `e29df3c` | `git log --diff-filter=A --format='%h %s' -- $S5`; `git show <sha>:$S5 \| awk 'NR<144 && /^(3\|13\|14)\. \*\*/'` |
+| 18 | the part 4 spec's last amendment, above its §1 at line 144 | `git show $H:$S \| awk 'NR<144 && /^[0-9]+\. \*\*/' \| tail -1`; `git show $H:$S \| grep -n -m1 '^## '` |
+| 7 bare and 5 named at `$B`; 12 named at `$H` | "amendment N" in `crates/`, the number allowed on the next line, by whether its line or the line before names a doc (2 of the 7 are `session.rs`'s "(Plan 7 / part 5 spec, amendment 24; … amendment 45's)", whose doc name was itself split) | `python3 $T/enum_amendments.py <sha>` |
+| 4 at `$B`; 11 at `$H` | `crates/` lines holding a whole "Plan 7 part N spec[ §N,] amendment M" | `git grep -n -E 'Plan 7 part [45] spec( §[0-9.]+,)? amendment [0-9]+' <sha> -- crates/ \| wc -l` |
+| 3 at `$B`; 0 at `$H` | `crates/` lines ending inside a "Plan 7 part N spec" citation, or with "spec, amendment" | `git grep -n -E 'Plan 7( part [45]( spec,?)?)?$\|part [45] spec, amendment' <sha> -- crates/ \| wc -l` |
+| 0 | lines the range adds under `crates/` longer than 120 | `git diff -U0 $B $H -- crates/ \| grep '^+[^+]' \| awk 'length($0) > 121' \| wc -l` |
+| 27; 1; 1 | `spec §N` citations in `crates/` at `$H`: on one line naming no doc; on one line naming one (`viewmodel.rs`'s "Plan 7 part 5 spec §5.3"); with the section wrapped, naming none | `git grep -n -i -E 'spec,? §[0-9]' $H -- crates/ \| grep -v -E 'Plan [0-9]+ part [0-9]+ spec' \| wc -l`, and the same with `grep -c -E` in place of `grep -v -E` and `wc -l`; `git grep -n -A1 -i -E 'spec,?$' $H -- crates/ \| grep -c -E '^[^ ]+-[0-9]+-\s*(///\|//!\|//)\s*§[0-9]'` |
+| 52/52 | the comment-only check's self-test | `python3 $T/tools/check_comment_only.py --self-test` |
+| 18 of 18; 772, 2, 0 | the scan runs that exited 0; attribution sites, excused, violations | `for s in text-bytes citations attributions doc-figures shared-docs colours grammar-wasm lua licences; do scripts/check-$s.sh --self-test; scripts/check-$s.sh; done`; `scripts/check-attributions.sh \| tail -1` |

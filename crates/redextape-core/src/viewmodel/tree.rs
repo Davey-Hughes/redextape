@@ -5,7 +5,7 @@
 //! is the order the printer writes a term in: a renderer walking indices upward walks the text left
 //! to right. It is also the order in which the first `App` whose function is an `Abs` is the
 //! leftmost-outermost redex, so the walk that builds the arena finds the next redex without a second
-//! traversal (spec amendment 3).
+//! traversal (Plan 7 part 4 spec amendment 3).
 //!
 //! **COLUMNS, NOT A VEC OF ENUMS**, because this crosses the wasm boundary as typed arrays (the
 //! `linkIndex` precedent in `redextape-wasm`'s `lib.rs`): one buffer per column, not one JS object

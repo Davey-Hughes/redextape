@@ -14,11 +14,11 @@ They used to follow focus: `PaneCollection.active`, the pane the user last focus
 
 The old probe pushed a `fixtureFrame` (`spans: []`, `redex_span: null`, `owner: 'None'`, ~88 bytes) into the ring on the main thread instead of using what this worker was already building and discarding right here.
 
-never the ~381,000 the fixture needed at its ~88 bytes/frame.
+Collected ONLY up to `HISTORY_BYTES` charged — the same stopping rule a real ring itself uses — so this posts on the order of the ~3,200 frames `protocol.ts`'s `HISTORY_BYTES` doc records for a real λ ring, never the ~381,000 the fixture needed at its ~88 bytes/frame.
 
 ## `web/tests/browser/app-header.test.ts`, above `it('keeps every closed popover off the page', () => {`
 
-written `.header-menu.settings { display: grid }`, the settings menu painted over the header and the source view from first load, open or shut.
+`[popover]:not(:popover-open) { display: none }` is a user-agent rule, and ANY author `display` beats it whatever its specificity: written `.header-menu.settings { display: grid }`, the settings menu painted over the header and the source view from first load, open or shut.
 
 ## `web/tests/browser/app.test.ts`, above `it('keeps the scroll range honest across a compile with the table hidden', async () => {`
 
@@ -28,13 +28,13 @@ written `.header-menu.settings { display: grid }`, the settings menu painted ove
 
 `#reattach.hidden` is maintained inside `#drawTable`, which the toggle called only when REOPENING — so hiding a detached table left a live "follow" button with nothing under it, offering to reposition something not on screen.
 
-and the closed-table term written for it could never fire, because `#drawTable`, where it is evaluated, did not run on the way down.
+That is the idiom's own rule broken (`pane-chrome.ts`: a control is present only when it does something), and the closed-table term written for it could never fire, because `#drawTable`, where it is evaluated, did not run on the way down.
 
 ## `web/tests/browser/app.test.ts`, above `it('ignores a scroll that arrives while the table is hidden', async () => {`
 
 Reproduced 5/5 in Chromium by stepping, hiding, then showing.
 
-A version of this test that stepped and hid and waited two animation frames passed against the bug —
+A version of this test that stepped and hid and waited two animation frames passed against the bug — whether a real echo is in flight at the moment of the hide depends on whether that step moved the follow target at all, which depends on the program.
 
 ## `web/tests/browser/app.test.ts`, above `expect(table().clientHeight).toBeLessThan(window.innerHeight)`
 
@@ -42,15 +42,15 @@ Two others used to sit here and both were drained by the `until` above: once the
 
 ## `web/tests/browser/app.test.ts`, above `it('a source-originated link scrolls the table into view even while it is still following `
 
-`TmPane.setLink` wrote `scrollTop` and then called `#drawTable`, which — while `#follow.following` (the default state on every fresh compile; see `setProgram`'s `#follow.attach()`) — computed its OWN target from the machine's CURRENT frame and overwrote the link's write in the same synchronous turn, so a source-originated link scroll never moved the table at all while following.
+FIX 4's REGRESSION GUARD: `TmPane.setLink` wrote `scrollTop` and then called `#drawTable`, which — while `#follow.following` (the default state on every fresh compile; see `setProgram`'s `#follow.attach()`) — computed its OWN target from the machine's CURRENT frame and overwrote the link's write in the same synchronous turn, so a source-originated link scroll never moved the table at all while following.
 
 ## `web/tests/browser/app.test.ts`, above `it('clears all three panes on an edit, not only the source echo, and says linking will res`
 
-so the source echo went stale correctly. But the listener never told the OTHER two panes: the λ window and the δ-table's `.is-linked` rows stayed painted from the PREVIOUS index until the next `compiled` reply landed, up to `DEBOUNCE_MS` plus a compile — seconds on a larger program — all while the status line already said "linking resumes when this compiles".
+FIX 3's REGRESSION GUARD: `linkMark` clears its own decoration on `docChanged`, and `main.ts`'s update listener sets `linkable = false` / `link = null` in the SAME synchronous dispatch, well before any debounced worker round trip could confirm the edit even compiles — so the source echo went stale correctly. But the listener never told the OTHER two panes: the λ window and the δ-table's `.is-linked` rows stayed painted from the PREVIOUS index until the next `compiled` reply landed, up to `DEBOUNCE_MS` plus a compile — seconds on a larger program — all while the status line already said "linking resumes when this compiles".
 
 ## `web/tests/browser/app.test.ts`, above `it('records further once the TM leg spends its history budget, and the step count advances`
 
-which a worker-only probe measured this fixture reaching at 75,025 TM frames (~129,300 δ-steps known total from `compile`, only 58% of them recorded) in ~1.9s, with `[continue]` recording the remaining 54,276 frames to `'ended'` in ~1.3s more — see `task-12-report.md`'s "Fix pass" section for the raw numbers.
+`budget` only needs `HISTORY_BYTES` (32 MiB) spent, which a worker-only probe measured this fixture reaching at 75,025 TM frames (~129,300 δ-steps known total from `compile`, only 58% of them recorded) in ~1.9s, with `[continue]` recording the remaining 54,276 frames to `'ended'` in ~1.3s more — see `task-12-report.md`'s "Fix pass" section for the raw numbers.
 
 ## `web/tests/browser/app.test.ts`, above `// THE `'too-large'` λ LINK STATE IS NOT COVERED END TO END HERE. The attempt at its predecessor, `'truncated'`,`
 
@@ -64,17 +64,21 @@ THE `'too-large'` λ LINK STATE IS NOT COVERED END TO END HERE, AND NEITHER WAS 
 
 THE FIXTURE WAS CHOSEN FOR LAYER 5b's WORST BUG, a byte span sliced as UTF-16: three `λ` precede this redex's span, so the two readings disagree.
 
+## `web/tests/browser/app.test.ts`, above `it('reports the absence when a construct emits no instructions or machine states', async (`
+
+Measured across the corpus, 18-50% of clickable constructs emit no machine states at all (`link-status.ts`'s module doc) — the transparent `let`/`seq` binders, the `Lambda`s, and statically-resolved callee `Var`s.
+
 ## `web/tests/browser/app.test.ts`, above `it('recovers from a worker-error without killing the editor', async () => {`
 
 `main.ts` used to answer it with `showBanner(root, ...)`, which is `root.replaceChildren(bannerEl)` — deleting the editor, both panes, and `#results` in one call, after which nothing on the page could ever dispatch again.
 
 ## `web/tests/browser/app.test.ts`, above `// THROUGH `settled`, FOR ITS THREE WAITS.`
 
-this compile's one wait for the word took 7,705 ms at `CPUQuota=15%`.
+THROUGH `settled`, FOR ITS THREE WAITS: this compile's one wait for the word took 7,705 ms at `CPUQuota=15%`.
 
 ## `web/tests/browser/app.test.ts`, above `it('renders the λ pane’s first binder span as exactly "λ", not "λ" plus its name', async (`
 
-Written for a critical finding on the flat frame — `LambdaState.spans` are BYTE offsets, `λ` is 2 bytes but 1 UTF-16 code unit, and slicing `frame.text` by byte offset drew this span as `"λf"` —
+Written for a critical finding on the flat frame — `LambdaState.spans` are BYTE offsets, `λ` is 2 bytes but 1 UTF-16 code unit, and slicing `frame.text` by byte offset drew this span as `"λf"` — it now reads the step's tree, whose layout writes the glyph and the name as two tokens.
 
 ## `web/tests/browser/app.test.ts`, above `it('colours keywords once the grammar lands, and reports all three legs', async () => {`
 
@@ -84,11 +88,11 @@ Written for a critical finding on the flat frame — `LambdaState.spans` are BYT
 
 Until PR 5b the bump happened 300 ms later, inside `request`, and a stale `result` landing in the gap resolved this against the OLD program — two flakes on 5a-ii traced to exactly that.
 
-and as one wait it took 7,583 to 8,601 ms at `CPUQuota=25%` (2026-10-05), against `until`'s 10 s; as two, the second took up to 7,400 ms.
+`BIG`'s run ends only once its TM leg has recorded a full history, to step 78,458, and as one wait it took 7,583 to 8,601 ms at `CPUQuota=25%` (2026-10-05), against `until`'s 10 s; as two, the second took up to 7,400 ms.
 
 ## `web/tests/browser/asm-app.test.ts`, above `const UPTO = 'fn upto(n) { if n == 0 { nil } else { cons(n, upto(n - 1)) } } upto(600)'`
 
-— measured against `asmFrameBytes` by stepping the same lowering in node.
+`upto(600)`: 8,413 instructions, whose frames carry up to eight saved frames and sixteen cells, so recording them passes `HISTORY_BYTES` at about step 7,400 — measured against `asmFrameBytes` by stepping the same lowering in node.
 
 ## `web/tests/browser/asm-copy-cost.test.ts`, above `type Copy = { asmStatus(): AsmStatus; asmProgram(): AsmProgram; asmValue(): Decoded; free(`
 
@@ -96,11 +100,11 @@ Amendment 36 priced only the loop; amendment 45 found `both` heavier in every ru
 
 ## `web/tests/browser/asm-copy-restore.test.ts`, above `it('brings back a copy that does not build in its editor, with the label that names nothin`
 
-and the editor used to come only from a build that landed — the view read `building…` with no editor and no way to get one.
+A jump to a label that names nothing refuses the whole copy, so its build answers no session, and the editor used to come only from a build that landed — the view read `building…` with no editor and no way to get one.
 
 ## `web/tests/browser/asm-copy.test.ts`, above `await userEvent.click(tm.querySelectorAll<HTMLElement>('.state-row')[3] as HTMLElement)`
 
-measured on `main`, where a click on it in the copy pinned `40` in the source through the program's index.
+THE ROW `let x = 40`'s CONSTRUCT OWNS IN THE PROGRAM — measured on `main`, where a click on it in the copy pinned `40` in the source through the program's index.
 
 ## `web/tests/browser/bindings-stored.test.ts`, above `const FOUR = ['source', 'lambda-0', 'asm-0', 'tm-0']`
 
@@ -110,13 +114,13 @@ The bindings were written at a fork, a pick in a title, a pause and a delete, an
 
 A `map-fold` machine under `binary` held that way read 4,485,864 and 4,483,346.67 bytes a copy in the whole-branch review's probe (2026-10-07), which the first cut of this case left out and so derived 9 where the page affords 8.
 
-and holding them read 279,644 and 279,412 bytes a copy more.
+**THE REPLIES' FRAME ARRAYS ARE DROPPED BEFORE THE READING**: the page pushes a reply's frames into the ring and keeps no array of them, and holding them read 279,644 and 279,412 bytes a copy more.
 
 ## `web/tests/browser/buffer-affordability.test.ts`, above `it('measures what a warm TM copy costs, and the cap a page of them affords', { timeout: 60`
 
 **THE COSTLIEST COPY IS A TM COPY NOW, AND THE CASE ABOVE PRICES ONLY λ COPIES** (2026-10-07).
 
-One copy of each example under each encoding, 13 with a machine (`fact-12` has none under `unary`), priced one at a time through `tmRound` in one run (2026-10-07): `map-fold` under `binary` 54,334,652 bytes, its wasm 25,362,432 and its ring 28,972,220; under `unary` 52,794,396; `fact-12` under `binary` 51,585,008; every other copy 42,067,500 or less. Those were priced before this case held the page's copy of each machine. Through this case's `tmRound`, which holds it, the whole-branch review's run read `map-fold` under `binary` at 58,545,848 bytes, under `unary` 56,119,708, and `fact-12` under `binary` 55,037,816, the same order (2026-10-07). Its copy records 69,009 frames, 69,008 steps,
+One copy of each example under each encoding, 13 with a machine (`fact-12` has none under `unary`), priced one at a time through `tmRound` in one run (2026-10-07): `map-fold` under `binary` 54,334,652 bytes, its wasm 25,362,432 and its ring 28,972,220; under `unary` 52,794,396; `fact-12` under `binary` 51,585,008; every other copy 42,067,500 or less. Those were priced before this case held the page's copy of each machine. Through this case's `tmRound`, which holds it, the whole-branch review's run read `map-fold` under `binary` at 58,545,848 bytes, under `unary` 56,119,708, and `fact-12` under `binary` 55,037,816, the same order (2026-10-07). Its copy records 69,009 frames, 69,008 steps, fills a TM history and runs its value run to the end.
 
 ## `web/tests/browser/buffer-affordability.test.ts`, above `console.log('warm-up (n=1), discarded:', JSON.stringify(await round(1, collect)))`
 
@@ -134,41 +138,35 @@ This is also why the missing warm-up showed up as `n=1`'s per-ring reading runni
 
 THE FIFTH INTERCEPT COMPONENT — CRITICAL 1, FIX ROUND 2.
 
-that file's own `init()` call moved ITS page baseline by only ~0.6 MB (16.41 MB -> 17.0 MB) against this module's 8.06 MiB
+`session-memory.test.ts`'s three-sessions test is the proof on the main thread specifically — that file's own `init()` call moved ITS page baseline by only ~0.6 MB (16.41 MB -> 17.0 MB) against this module's 8.06 MiB, so what the heap reading sees is `init()`'s JS glue, not the memory it allocates.
 
 ## `web/tests/browser/buffer-affordability.test.ts`, above `const APP_PAGE_BASELINE_FLOOR_BYTES = 17_825_792`
 
-**DOES NOT COVER THE MAIN-THREAD WASM MODULE — CORRECTED, CRITICAL 1, FIX ROUND 2.** This doc used to list "the main-thread wasm module" as part of what this figure covers; it does not, and could not:
-
-its own `init()` raised THAT file's page baseline by ~0.6 MB (16.41 MB -> 17.0 MB) against the SAME module's 8,454,144-byte (8.06 MiB) linear-memory baseline
+**DOES NOT COVER THE MAIN-THREAD WASM MODULE — CORRECTED, CRITICAL 1, FIX ROUND 2.** This doc used to list "the main-thread wasm module" as part of what this figure covers; it does not, and could not: `session-memory.test.ts`'s three-sessions test is the proof — its own `init()` raised THAT file's page baseline by ~0.6 MB (16.41 MB -> 17.0 MB) against the SAME module's 8,454,144-byte (8.06 MiB) linear-memory baseline, so what `usedJSHeapSize` sees from `init()` is the JS glue around it, not the wasm memory `init()` allocates.
 
 ## `web/tests/browser/buffer-affordability.test.ts`, above `const ringRetained = builtRings.map((r) => r.length)`
 
-**THE STATEMENT STAYS AND WHAT IT CHECKS CHANGED, BECAUSE THE OLD CHECK COULD NOT FAIL — whole-branch review before merge, finding 3d.** It read `if (builtRings.length !== n) throw …("round filled … of … rings")`, which is structural:
-
-and the throw named a state this code cannot be in.
+**THE STATEMENT STAYS AND WHAT IT CHECKS CHANGED, BECAUSE THE OLD CHECK COULD NOT FAIL — whole-branch review before merge, finding 3d.** It read `if (builtRings.length !== n) throw …("round filled … of … rings")`, which is structural: `runWorkers(n)` answers an `n`-element array (`Promise.all` over an `n`-array), `buildRings` pushes exactly one ring per element and throws before pushing a short one, so `builtRings.length === n` by construction and the throw named a state this code cannot be in.
 
 ## `web/tests/browser/buffer-affordability.test.ts`, above `async function round(`
 
-A first version of this fix called `runWorkers` first, then took "before" and built the rings from the frames it got back. That measured almost nothing:
-
-the observed symptom was a ~90 KB delta for a ring that should cost tens of megabytes.
+A first version of this fix called `runWorkers` first, then took "before" and built the rings from the frames it got back. That measured almost nothing: `runWorkers` returns only once every worker's `frames` array has already been structured-cloned onto the main thread — that IS the expensive step, and by the time "before" ran, the frame data it was trying to price was already fully resident and already counted in it. Building the ring afterward just copies references into `History`'s own arrays, which costs next to nothing on top of memory that was already live — the observed symptom was a ~90 KB delta for a ring that should cost tens of megabytes.
 
 **THE TASK BOUNDARY AND DOUBLE COLLECTION LIVE HERE FOR THE SAME REASON THEY DID ON THE OLD `ringBytesFor`** — Important 3.
 
-without one, that file's own experiment read a delta of −75,368,894.
+The previous round's rings and frame arrays go out of scope the instant `round` returns (nothing outside this function retains them), so they need exactly the boundary `session-memory.test.ts`'s `round` measured as necessary before a collection can see them as garbage: without one, that file's own experiment read a delta of −75,368,894.
 
-`held` IS READ HERE, WHERE THE FIRST CUT POSTED IT AND NEVER READ IT BACK — Minor. It folds into the same per-worker structural check `steps` gets in the sweep below:
+`held` IS READ HERE, WHERE THE FIRST CUT POSTED IT AND NEVER READ IT BACK — Minor. It folds into the same per-worker structural check `steps` gets in the sweep below: a worker that answered without holding its scratch is reporting a wasm reading for a buffer that may already be eligible for finalization, which is not "a warm buffer" either.
 
 ## `web/tests/browser/buffer-affordability.test.ts`, above `function buildRings(framesByWorker: LambdaState[][]): { rings: History<LambdaState>[]; cha`
 
 **CRITICAL 1's FIX LIVES HERE ON THE BUILDING SIDE.**
 
-rather than the fixture's ~381,000 featherweight frames landing at ~0.93x the byte budget they were charged against.
+Pushing all of them drives this ring to the same exhaustion a real ring reaches — `History#push`'s own eviction still trims to the budget as frames land, exactly as it would for a session's real ring — rather than the fixture's ~381,000 featherweight frames landing at ~0.93x the byte budget they were charged against.
 
 Fix round 1 computed `charged` only to gate the 90%-exhaustion throw below and then discarded it; nothing anywhere counted the frames going into a ring.
 
-and would previously have shown up nowhere.
+Both numbers are handed back now so the caller can print them per ring and, jointly with `frames.length` on the worker side, tell a real λ ring apart from a regression back to the featherweight fixture this file's fix round 1 replaced — which would still satisfy the 90% guard below (it is a BYTE bound, indifferent to how many frames pay it) and would previously have shown up nowhere.
 
 ## `web/tests/browser/buffer-affordability.test.ts`, above `const BUDGET_BYTES = 512 * 1024 * 1024`
 
@@ -184,21 +182,21 @@ Important-severity fixes carried in the same pass: a sanity bound on the ring re
 
 Minor fixes carried in the same pass (reasoning lives at each site): `sourceLambdaRingAtExhaustion` now uses this probe's own n=1 at-exhaustion reading instead of extrapolating `protocol.ts`'s ratio (measured at 19% fill) up to 100% — the two are printed together as a cross-check; the alternating- rounds comment's stated reason was wrong and is rewritten below; `setTimeout(0)` is now `setTimeout(100)` to match `session-memory.test.ts`'s own figure; a `messageerror` listener now catches a main-thread deserialization failure the same way `error` catches a load failure; `held`'s per-worker `expect` is dropped to a comment because it cannot fail by construction; and the marginal's exclusion of a per-buffer `Worker` handle and its client is now stated (~11,395 bytes/buffer — `protocol.ts`'s `DROP_HISTORY_ON_UNFOCUS` doc's own figure, and ONLY that: that doc's own words are "the `Worker` handle and its client and nothing else", not the play timer or the pane-state entry a prior revision of this comment also named. Only the play state lives in `main.ts`'s session registry (`sessions.ts`'s `LegState.playing`, a timer until Plan 7 part 2), per `session-client.ts`'s `SessionPool` doc's own distinction between what the pool tracks and what the registry does; the pane-state entry does not — it lives in `panes.ts`'s `PaneCollection` instead, not in a `SessionEntry` (`sessions.ts`'s `SessionEntry` fields are `id`, `label`, `detached`, `client`, `legs`, `tmProgram` — no pane), and that same `SessionPool` doc says nothing about it. Neither figure is quantified here or anywhere else in this repo.
 
-Fix round 2's sweep was `[1, 2, 4]`,
+Fix round 2's sweep was `[1, 2, 4]`, and both derived caps came from a two-point marginal fit through n=1 and n=4, projected forward to the cap — an extrapolation, not a reading, and exactly the range where a non-linearity (GC pressure, allocator fragmentation, scheduler contention across a page's worth of concurrent workers) would first show.
 
-whole-branch review before merge, finding 5.
+**HOW TO RUN IT: `pnpm test:probe`. IT IS NOT IN THE DEFAULT SUITE, AND THAT IS DELIBERATE — whole-branch review before merge, finding 5.**
 
 This repo's history records a λ probe taking 60 GiB of RAM and all of swap.
 
 ## `web/tests/browser/buffer-cool-warm.test.ts`, above `await until(() => editorHost() !== null, 'the warmed buffer to mount an editor onto its ne`
 
-chosen for exactly the reason this comment used to give locally:
+The bound itself is `harness.ts`'s single default, chosen for exactly the reason this comment used to give locally: a wait bounded at or above Vitest's own lets Vitest kill the test first and print "Test timed out" with no name for what never arrived.
 
 Measured: with `pane-host.ts`'s `mountScratchEditor` reverted, this line is what fails.
 
 ## `web/tests/browser/buffer-cool-warm.test.ts`, above `/** `scratch-edit.test.ts`'s program, for its reason: it truncates at neither budget, so ``
 
-**THE COOL → WARM → BIND ROUND TRIP, AND THE DEFECT IT USED TO END IN**
+**THE COOL → WARM → BIND ROUND TRIP, AND THE DEFECT IT USED TO END IN** — design §4.5's stated flow ("warm from the header list, then bind a pane through the selector"), driven through the app.
 
 **WHAT THIS FILE EXISTS FOR: A WARMED BUFFER USED TO COME BACK UNEDITABLE, FOREVER** — whole-branch review before merge.
 
@@ -210,33 +208,33 @@ WHERE THE LIST LANDS — geometry, because the split picker got exactly this wro
 
 ## `web/tests/browser/buffer-list.test.ts`, above `const temperature = (action: 'resume' | 'pause', name: string): HTMLButtonElement | null =`
 
-now that the control carries one (5d-ii-d review, Finding 3: it shipped with none, so a screen-reader user at eight buffers heard an indistinguishable column of `warm`/`cool` buttons). Found by text-and-position is exactly what that gap made invisible —
+A row's temperature control, reached by the ACCESSIBLE NAME that names its buffer and the action it offers — mirroring `retire`'s own helper above and for the same reason, now that the control carries one (5d-ii-d review, Finding 3: it shipped with none, so a screen-reader user at eight buffers heard an indistinguishable column of `warm`/`cool` buttons). Found by text-and-position is exactly what that gap made invisible — this file's own convention is the name, not the position.
 
 ## `web/tests/browser/buffer-list.test.ts`, above `describe('bufferList: temperature', () => {`
 
-and the reason this file's crash-site history matters here: `main.ts`'s row builder used to call `legOf` unconditionally, an id `SessionRegistry.entryOf` throws for once a buffer is cold.
+TEMPERATURE — design §4.2, and the reason this file's crash-site history matters here: `main.ts`'s row builder used to call `legOf` unconditionally, an id `SessionRegistry.entryOf` throws for once a buffer is cold.
 
 ## `web/tests/browser/buffer-list.test.ts`, above `it('gives each list its own id and points its own button at it', () => {`
 
-which had a paragraph and no assertion.** Deleting the counter AND the attribute failed nothing, so both were argued for and neither was pinned.
+**`aria-controls` NAMES THIS LIST AND NOT SOME OTHER ONE — the `listSeq` counter's whole stated justification, which had a paragraph and no assertion.** Deleting the counter AND the attribute failed nothing, so both were argued for and neither was pinned.
 
 ## `web/tests/browser/buffer-list.test.ts`, above `it('shows each copy’s own term, so two rows can be told apart', () => {`
 
 A `label` is `scratch N` from a counter and a `paneCount` is the same on every row at the cap — so before `BufferRow.term` the list rendered eight identical rows under a refusal instructing the user to choose one of them. Found by opening the list on a real page; this is that page's assertion.
 
-— whole-branch review before merge, finding 3c.** This paragraph read "ASSERTED AS DISTINCT STRINGS RATHER THAN AGAINST A LITERAL LIST, because what the field buys is DIFFERENCE. A test reading `toEqual([...])` passes just as well on a renderer that prints the same term three times" — and the line it was written above was a `toEqual([...])`, of three literals that are pairwise distinct. So the claim was false of the very assertion it sat on, and the `expect(new Set(termText()).size).toBe(THREE.length)` it justified was dead: a renderer printing one term three times fails the `toEqual` first, and nothing that passes the `toEqual` can fail the count. The list literal is kept and the count is dropped, because the literal says everything the count did
+**THE `toEqual` BELOW IS WHAT ASSERTS THE DIFFERENCE, AND A SECOND LINE THAT COUNTED IT SEPARATELY COULD NOT FAIL — whole-branch review before merge, finding 3c.** This paragraph read "ASSERTED AS DISTINCT STRINGS RATHER THAN AGAINST A LITERAL LIST, because what the field buys is DIFFERENCE. A test reading `toEqual([...])` passes just as well on a renderer that prints the same term three times" — and the line it was written above was a `toEqual([...])`, of three literals that are pairwise distinct. So the claim was false of the very assertion it sat on, and the `expect(new Set(termText()).size).toBe(THREE.length)` it justified was dead: a renderer printing one term three times fails the `toEqual` first, and nothing that passes the `toEqual` can fail the count. The list literal is kept and the count is dropped, because the literal says everything the count did and also says WHICH term belongs to which row — which is the fact `paneCount` and `label` cannot supply and this field exists for.
 
 ## `web/tests/browser/buffer-list.test.ts`, above `const THREE: readonly BufferRow[] = [`
 
-**THE THREE TERMS DIFFER, AND THE THIRD IS `null`, WHICH IS THE OTHER AXIS THIS FIXTURE NOW CARRIES.** `BufferRow.term` exists because eight rows on a real page read `scratch N — orphan` and nothing else;
+**THE THREE TERMS DIFFER, AND THE THIRD IS `null`, WHICH IS THE OTHER AXIS THIS FIXTURE NOW CARRIES.** `BufferRow.term` exists because eight rows on a real page read `scratch N — orphan` and nothing else; a fixture whose rows all held the same term would reproduce exactly the defect the field was added to fix while asserting that the field is rendered.
 
 ## `web/tests/browser/buffer-restore.test.ts`, above `it('restores both buffers and warms only the one a pane names', async () => {`
 
-Before this slice's T4 gave the row builder its `warm` branch, a cold buffer reached an unguarded `sessions.legOf(...)` and threw out of a `beforetoggle` handler
+Before this slice's T4 gave the row builder its `warm` branch, a cold buffer reached an unguarded `sessions.legOf(...)` and threw out of a `beforetoggle` handler — on this exact page, since a restored orphan is the cheapest way to produce a cold buffer at all.
 
 ## `web/tests/browser/buffer-restore.test.ts`, above `const SEEDED = serializeBuffers({`
 
-AND IT IS HERE BECAUSE IT KILLED THE PAGE.**
+**THE THIRD BINDING IS A BINDING THE TREE MUST REFUSE, AND IT IS HERE BECAUSE IT KILLED THE PAGE.**
 
 Seeded without `main.ts`'s leaf-kind guard, `applyLayout` built a `PaneSlot('tm', 'scratch-1')` and the first `draw()` threw `session scratch-1 has no tm leg` out of `main()` itself: every test in this file reported as a SKIP under one failed suite, which is what a whole page dying looks like from here.
 
@@ -248,17 +246,13 @@ Seeded without `main.ts`'s leaf-kind guard, `applyLayout` built a `PaneSlot('tm'
 
 **THE REGRESSION TEST FOR THE CRITICAL THIS SLICE'S OWN SELF-REVIEW FOUND AND DID NOT FIX ON FIRST PASS** — a page that restored buffers from storage, hitting a full store on its very first write, used to die at start-up rather than degrade. `main.ts`'s `refreshBuffers()` start-up call reached `persistBuffers()` reached `writeBuffersStorage()`'s `catch`, which called `reportStorageFailure()` — and `reportStorageFailure` reads `linkWiring`/`draw`, both still `undefined` at that point in `main()`. The result was a bare `TypeError` thrown out of `main()` itself, not caught anywhere, which is strictly worse than the silent failure this whole task exists to improve on.
 
-**THE FIX MOVED THE START-UP `refreshBuffers()` CALL PAST WHERE `linkWiring` AND `draw` ARE ASSIGNED** (see that call site's own comment in `main.ts`, and the comment left at the old position). This file is what proves it: mount a page that restores a buffer, refuse the buffers write from before the mount even begins, and assert `main()` still returns a working page — the SAME assertion the crash would have failed,
-
-## `web/tests/browser/app.test.ts`, above `it('reports the absence when a construct emits no instructions or machine states', async (`
-
-Measured across the corpus, 18-50% of clickable constructs emit no machine states at all (`link-status.ts`'s module doc) — the transparent `let`/`seq` binders, the `Lambda`s, and statically-resolved callee `Var`s.
+**THE FIX MOVED THE START-UP `refreshBuffers()` CALL PAST WHERE `linkWiring` AND `draw` ARE ASSIGNED** (see that call site's own comment in `main.ts`, and the comment left at the old position). This file is what proves it: mount a page that restores a buffer, refuse the buffers write from before the mount even begins, and assert `main()` still returns a working page — the SAME assertion the crash would have failed, and the specific scenario `buffers-quota.test.ts`'s "a full store" describe does not reach, since that file's page has never forked when it mounts.
 
 ## `web/tests/browser/collect.ts`, above `const MOST_PAGES_ALIVE = 8`
 
 Measured 2026-10-13 at each of 1,260 file starts: five whole runs of `pnpm run test:coverage` in twelve tabs, and one in three tabs under a CPU quota of one and a half cores, with this file's collection.
 
-with the restart above taken out, a whole run in twelve tabs failed 104 browser files here.
+Eight leaves that margin more than twice over and still trips at a tab's tenth file, so a tab of nineteen files, as on the faster runner, shows a leak that only the slower runner's seventy could turn into a failed allocation: with the restart above taken out, a whole run in twelve tabs failed 104 browser files here.
 
 ## `web/tests/browser/collect.ts`, above `const gc = (`
 
@@ -278,7 +272,7 @@ As one case this took 7,396 to 9,093 ms in three runs alone at `CPUQuota=25%` (2
 
 ## `web/tests/browser/colour-slices-fork.test.ts`, above `/** `tm-scratch-fork.test.ts`'s `BIG`: a λ leg of 555 steps and a machine of 7,353 states `
 
-and the colourer parsed all of it inside the update that first needed a tree: 194 to 208 ms in this tier's Chromium with the program and then the copy recording, and from the mount the page ran no timer for 232 to 249 ms and drew no frame for 216 to 232 ms, in five runs (2026-10-06). `colour.ts`'s `PARSE_SLICE_MS` has what replaced that, and `tests/node/colour.test.ts` holds it.
+*Edit a copy* on the TM view of `BIG` mounts an editor on the machine's text, 1,518,470 units under the `unary` encoding this tier's setup stores, and the colourer parsed all of it inside the update that first needed a tree: 194 to 208 ms in this tier's Chromium with the program and then the copy recording, and from the mount the page ran no timer for 232 to 249 ms and drew no frame for 216 to 232 ms, in five runs (2026-10-06). `colour.ts`'s `PARSE_SLICE_MS` has what replaced that, and `tests/node/colour.test.ts` holds it.
 
 ## `web/tests/browser/colour-slices.test.ts`, above `type Call = { units: number; sliced: boolean; finished: boolean }`
 
@@ -286,7 +280,7 @@ A parse of 1,518,470 units in one go measured 154 to 179 ms in this tier's Chrom
 
 ## `web/tests/browser/controls-gate.test.ts`, above `function controls(): HTMLElement[] {`
 
-The first version of this filter asked the button, passed it, and then passed it again on a `tabIndex` that reads 0 inside a hidden subtree;
+The first version of this filter asked the button, passed it, and then passed it again on a `tabIndex` that reads 0 inside a hidden subtree; asking whether anything above it is hidden is what makes the reachability check below mean what it says.
 
 ## `web/tests/browser/copy-edit-leaving.test.ts`, above `vi.mock('../../src/editor-debounce', () => ({ EDITOR_DEBOUNCE_MS: 3000 }))`
 
@@ -294,13 +288,13 @@ Measured 2026-10-02 under `CPUQuota=25%`, 4 of 20 gaps were over 300 ms and the 
 
 ## `web/tests/browser/divider-drag-focus.test.ts`, above `// BEFORE THE MOUNT, AT MODULE SCOPE: `main()` reads storage once, when it is imported bel`
 
-the focus went to `<body>` with them: measured before `resized` (2026-10-12), with the caret in the source editor and the divider beside it dragged 80 px, `document.activeElement` was `<body>` at once and two frames on, and a key typed next went nowhere.
+The drag's end is a rebuild, which detaches every view's host, and the focus went to `<body>` with them: measured before `resized` (2026-10-12), with the caret in the source editor and the divider beside it dragged 80 px, `document.activeElement` was `<body>` at once and two frames on, and a key typed next went nowhere.
 
-the second case has the caret out of sight, where a give-back that brought it into sight moved the view from 500 px to 80, while the source view's own box was what scrolled a long program.
+**A POINTER'S GESTURE SCROLLS NOTHING** (`pane-host.ts`'s `moveFocus`), and a drag is always a pointer's where it has a focus to give back: the second case has the caret out of sight, where a give-back that brought it into sight moved the view from 500 px to 80, while the source view's own box was what scrolled a long program.
 
 ## `web/tests/browser/divider-drag-format-on-blur.test.ts`, above `recordFormats()`
 
-measured before the drag was held to it (2026-10-12), a λ copy's editor lost its caret to a drag as the machine copy's did.
+Every copy's editor is handed the one answer to whether a blur formats, whatever its leg (`transport.ts`'s `formatOnBlur`); measured before the drag was held to it (2026-10-12), a λ copy's editor lost its caret to a drag as the machine copy's did.
 
 ## `web/tests/browser/editor-custody.test.ts`, above `it('sends the pre-format text a format in flight is carrying, before the format answers', `
 
@@ -324,7 +318,7 @@ Arm A keeping no spans read 0.56 a span, and so did one collection in place of `
 
 ## `web/tests/browser/frame-cost.test.ts`, above `// ONE DISCARDED PAIR FIRST, and it is not superstition: the first pair pays one-time costs the`
 
-and it reads 1.5 bytes/span high because of them (75.66 against 74.08, 74.12, 74.08, 74.08 for the four rounds after it — measured 2026-08-10).
+ONE DISCARDED PAIR FIRST, and it is not superstition: the first pair pays one-time costs the steady state does not, and it reads 1.5 bytes/span high because of them (75.66 against 74.08, 74.12, 74.08, 74.08 for the four rounds after it — measured 2026-08-10).
 
 ## `web/tests/browser/frame-cost.test.ts`, above `const settle = (): void => {`
 
@@ -340,7 +334,9 @@ NOT ONLY `spans` DIFFERS, AND THE OVER-ATTRIBUTION IS MEASURED RATHER THAN WAVED
 
 ## `web/tests/browser/harness.ts`, above `export async function showFourViews(): Promise<void> {`
 
-a probe read the views area's and the rule table's observed sizes,
+`page.viewport` resolves a
+frame after the tester's frame is resized (Vitest 4.1.10's `setIframeViewport`), and the app's `ResizeObserver`s
+and its narrow-window listener had run by then: a probe read the views area's and the rule table's observed sizes,
 the toggles' `hidden`, the rule table's rows and the term's lines as `resetToFourViews` returned, two frames later
 and 200 ms after that, and the three readings agreed in 40 rounds of 40, and in 40 of 40 at `CPUQuota=50%`
 (2026-10-12).
@@ -359,7 +355,8 @@ the three files in one run (2026-10-06); the same runner had passed both 48 minu
 
 ## `web/tests/browser/inspector-phone.test.ts`, above `* **`main` IS AT LEAST 15REM TALL, AND BELOW THAT THE PAGE SCROLLS** — the user's decision of 2026-10-05, for pages`
 
-measured at 320 px wide
+**WHAT IS HELD IS THAT SOME VIEW SHOWS A
+WHOLE LINE OF ITS CONTENT**, not that each does: measured at 320 px wide
 with `main` at 240 px, Debugger's four
 views show 1, 0, 0 and 0 whole lines with the inspector open, the three with headers on two rows having 12.22 px
 under them, and 3, 1, 1 and 1 with it closed. With no minimum, `main` was what the page left over, so at 320×320
@@ -401,11 +398,11 @@ Across the three CI runs that produced the figures above, `deltaOne` read 75,438
 
 ## `web/tests/browser/state-diagram-local.test.ts`, above `for (const part of intoCmpeq(tmPane)) beforeAll(part)`
 
-with the walk at its end, the mount's one hook took 14.9 s of its 30 under half a CPU here, and 32.7 s under a quarter.
+**IN THREE HOOKS OF ITS OWN, AFTER THE MOUNT'S** (`harness.ts`' `walkInParts`): with the walk at its end, the mount's one hook took 14.9 s of its 30 under half a CPU here, and 32.7 s under a quarter.
 
 ## `web/tests/browser/state-diagram.test.ts`, above `describe('once the run is inside sub', () => {`
 
-which as the middle of one case's body took 9.9 s of its 15 under half a CPU here, and 11.1 s on CI on the day the walk into `cmpeq` timed out there (2026-10-06).
+**THE WALK ON TO `sub` IS IN HOOKS TOO, TWO OF THEM**: 1,104 clicks, from pc4's gadget to pc11's, which as the middle of one case's body took 9.9 s of its 15 under half a CPU here, and 11.1 s on CI on the day the walk into `cmpeq` timed out there (2026-10-06).
 
 ## `web/tests/browser/step-bar-narrow.test.ts`, above `* Pick the line's example, and wait for its line on the bar and then for the run's result, so nothing on the page`
 
@@ -413,7 +410,7 @@ Measured on 2026-10-01 under a 25% CPU quota, in a run that timed the two separa
 
 ## `web/tests/browser/tm-buffer-restore.test.ts`, above `await until(`
 
-MEASURED by bisecting the window against this test: 150 ms fails, 300 ms passes, so the shipped 500 ms carried a margin of only about 2-3x
+MEASURED by bisecting the window against this test: 150 ms fails, 300 ms passes, so the shipped 500 ms carried a margin of only about 2-3x — the same order as the margin that actually reddened CI in `tm-scratch-fork.test.ts` (run 229), whose `forkEditorMounted` doc has that story.
 
 ## `web/tests/browser/tm-fork-cost.test.ts`, above `* THE TM-FORK-COST PROBE. 5d-iv design §3.1, §4.2.`
 
@@ -451,17 +448,17 @@ The view scrolled sideways: at 390px its `scrollWidth` was 209 against a `client
 
 ## `web/tests/browser/two-lambda-panes.test.ts`, above `it('keeps a held editor whose claim was dropped when its view’s id was minted again reacha`
 
-what was measured in the running app before the fix is three separate failures from one cause: E1 survived; the sixth step threw `a λ pane was handed a second editor while still holding one` out of `reconcileEditors` -> `applyLayout` -> the click handler, so `renderLayout`, `writeLayoutStorage` and `draw` never ran (the model gained a leaf, the DOM did not, and storage kept the old tree); and E1 LEAKED permanently, because `heldEditors.delete` ran before the `receiveEditor` that threw.
+Six clicks with both halves in one sequence do — and what was measured in the running app before the fix is three separate failures from one cause: E1 survived; the sixth step threw `a λ pane was handed a second editor while still holding one` out of `reconcileEditors` -> `applyLayout` -> the click handler, so `renderLayout`, `writeLayoutStorage` and `draw` never ran (the model gained a leaf, the DOM did not, and storage kept the old tree); and E1 LEAKED permanently, because `heldEditors.delete` ran before the `receiveEditor` that threw.
 
 ## `web/tests/browser/view-strip-narrow.test.ts`, above `* Pick the line's example, and wait for its line in the λ view and then for the run's result, so nothing on the`
 
-Here, under a 25% CPU quota, three runs on 2026-10-04 put the two together at 5,413, 6,117 and 7,001ms, the last 70% of one wait's 10s
+Here, under a 25% CPU quota, three runs on 2026-10-04 put the two together at 5,413, 6,117 and 7,001ms, the last 70% of one wait's 10s; the split is `step-bar-narrow.test.ts`', where #123 measured the same pair, under `unary` in Debugger, past it.
 
 ## `web/tests/browser/view-toggles-first-paint.test.ts`, above `const tenth = (n: number): number => Math.round(n * 10) / 10`
 
 **NOT THE HEADER'S HEIGHT AT 390 px**, which this compared before the app was up and after, in Instrument, where the two agree: `main.ts` fills `encoding` and `#appearance` there as at any width, and the header is 136 px in each style in the markup alone and, with the app up, 136 in Paper and Instrument and 181 in Terminal (measured 2026-10-12).
 
-this was one case under a case's cap, and took 6.2 s of it at `CPUQuota=25%` (2026-10-12).
+The mount is the hook after it, as its siblings' is, so the wasm load and the first compile have a hook's time and each case has only its own reading to make: this was one case under a case's cap, and took 6.2 s of it at `CPUQuota=25%` (2026-10-12).
 
 ## `web/tests/node/arrangements.test.ts`, above `describe('enter, over generated sequences of switches and edits', () => {`
 

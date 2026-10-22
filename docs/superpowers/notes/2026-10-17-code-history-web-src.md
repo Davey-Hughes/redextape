@@ -4,7 +4,7 @@ Text moved verbatim out of code comments when they were trimmed to their why. Ea
 
 ## `web/scripts/licences.ts`, above `export const TOOLCHAIN: readonly { name: string; spdx: string; url: string; dir: string; c`
 
-found by name in the unstripped `.wasm` wasm-pack builds first
+Each `dir` under `scripts/toolchain-licences/` holds the texts as published, at the versions that built the shipped files: - the Rust repository's `COPYRIGHT`, `LICENSE-MIT` and `LICENSE-APACHE`, at the commit of Rust 1.99.0 (`b940084d7`); - `compiler-builtins`' `LICENSE.txt`, from the same tree, where the standard library builds it from (0.1.160 in that release's `library/Cargo.lock`): both builds link its `__multi3` and `memcmp`, found by name in the unstripped `.wasm` wasm-pack builds first; - `dlmalloc`'s and `hashbrown`'s licence files, from the crates that lockfile names (0.2.14 and 0.17.1): both builds carry their source paths, `/rust/deps/dlmalloc-0.2.14` and `/rust/deps/hashbrown-0.17.1`; - Emscripten's `LICENSE` at 4.0.15, the version `web-tree-sitter` 0.27.0 is built with.
 
 ## `web/src/app-header.ts`, above `export function toggleSentence(kind: PaneKind, count: number, state: 'shown' | 'hidden' | `
 
@@ -22,11 +22,11 @@ With the rule at 30rem, or the query at 38rem, every test passed before those tw
 
 ## `web/src/appearance.ts`, above `export const STORAGE_KEY = 'redextape.appearance'`
 
-observed in practice, with an unrelated app's preferences sitting alongside ours in the same origin.
+Every dev server on `http://localhost:5173` shares one store, so a bare `appearance` is a key any other project on that port can read or overwrite — observed in practice, with an unrelated app's preferences sitting alongside ours in the same origin.
 
 ## `web/src/base16-adjust.ts`, above `function nearestLightness(from: Oklch, ok: (hex: string) => boolean, scan: () => readonly `
 
-`NIGHT`'s warning on black beside a `#aaaaaa` panel meets 3:1 on both only for lightness 0.4650 to 0.4655, and the walk lands on 0.4731 and 0.4631.
+A region where `ok` holds can be narrower than one step of the walk, which then steps over it: `NIGHT`'s warning on black beside a `#aaaaaa` panel meets 3:1 on both only for lightness 0.4650 to 0.4655, and the walk lands on 0.4731 and 0.4631.
 
 ## `web/src/buffer-list.ts`, above `const handleTemperature = (id: SessionId, warm: boolean): void => {`
 
@@ -46,9 +46,9 @@ The alternative measured was a task that runs ahead of other work: it landed the
 
 ## `web/src/colour.ts`, above `export function colourPluginClass(opts: ColourOptions, now: () => number = () => performan`
 
-with a key every 100 ms into 1,534,779 units whose parse was pending, the end of the text was coloured after 0 of 30 keys, and about 200 ms after the last.
+**SO TEXT PAST THE FIRST SCREEN STAYS PLAIN FOR AS LONG AS KEYS ARRIVE FASTER THAN ONE PARSE TAKES**: with a key every 100 ms into 1,534,779 units whose parse was pending, the end of the text was coloured after 0 of 30 keys, and about 200 ms after the last.
 
-after one character typed that measured 3.0 to 4.3 ms at 1,518,470 units and 13.4 to 15.1 ms at 6,072,644 (2026-10-06).
+A single change edits the tree and reparses against it: after one character typed that measured 3.0 to 4.3 ms at 1,518,470 units and 13.4 to 15.1 ms at 6,072,644 (2026-10-06).
 
 **THIS BRANCH PUT THOSE TWO IN SLICES AT FIRST, AND ITS REVIEW MEASURED WHY NOT TO**: the tree is gone while the slices run, and a screen past the first went plain, for 14 of 15 frames at 1,534,779 units on an idle page, where the parse in one go held the update for 164.4 ms with the screen coloured throughout.
 
@@ -62,19 +62,17 @@ A copy's editor mounts showing its first lines, and without this they stood plai
 
 Of that machine, the first 20,064 units parsed in 2.20 ms and the first 64,040 in 6.80 ms.
 
-31,995 units of one mnemonic repeated took 14.5 ms as asm, and of one bracket repeated 9.6 ms as TM and 9.8 ms as λ.
+Text the grammars make more work of costs more: 31,995 units of one mnemonic repeated took 14.5 ms as asm, and of one bracket repeated 9.6 ms as TM and 9.8 ms as λ.
 
-in 6 of 6 programs and λ terms cut so, the marks were the whole tree's.
+A program cut at a line end may be cut inside a bracket, and the parser then recovers as it can; in 6 of 6 programs and λ terms cut so, the marks were the whole tree's.
 
 ## `web/src/colour.ts`, above `export const PARSE_SLICE_MS = 8`
 
 **AN EDITOR'S FIRST PARSE RUNS IN SLICES OF THIS LENGTH, AND IT RAN IN ONE TASK UNTIL THE COPY OF A 7,353-STATE MACHINE HELD THE PAGE FOR IT.** That machine's text is 1,518,470 units: 7,353 states and 18,499 rules, a line each. Measured in Chromium on 2026-10-06, the machine copied while its program's run and then the copy's both record, five runs on each side taken in turn: in one go the parse took 194 to 208 ms, and from the editor's mount the page ran no timer for 232 to 249 ms and drew no frame for 216 to 232 ms; in slices no gap between two timers or two frames reached 100 ms, the parser's calls took 179 to 188 ms in all and the longest 8.1 to 9.0 ms, and the tree landed 720 to 860 ms after the click.
 
-The update that carries a first slice measured 8.3 to 12.0 ms in five editors, the slice and the rest of the update, and 22.6 ms in the first editor a page mounted;
+The update that carries a first slice measured 8.3 to 12.0 ms in five editors, the slice and the rest of the update, and 22.6 ms in the first editor a page mounted; editors that mount together each queue a slice of their own; and a slice cannot stop inside a token, so one comment line of 3,000,000 units parsed in 57.2 ms without a callback.
 
-so one comment line of 3,000,000 units parsed in 57.2 ms without a callback.
-
-16,095 times over that machine's text
+`web-tree-sitter` calls a parse's `progressCallback` as it goes, 16,095 times over that machine's text, and a parse whose callback answers `true` returns `null` with its state kept: the next `parse` on that parser with the same text carries on from there, and `reset()` drops the state.
 
 That machine's two trees were compared node for node, 787,756 nodes, and were the same. On text with a mistake every 61 to 1,499 units a resumed parse recovered differently from a parse in one go, in each of the four grammars, and differently again with where its slices ended; with one mistake in a text of 0.55 to 1.5 million units, 0 of 8 sliced parses differed, in each of six cases.
 
@@ -82,17 +80,17 @@ That machine's two trees were compared node for node, 787,756 nodes, and were th
 
 **2 × CODE UNITS, NOT UTF-8 BYTES — measured, because the two coincide on ASCII and that is the reading a 2× on an ASCII document invites.** `λab λcd` is 7 code units and 9 UTF-8 bytes, and its second `λ` starts at unit 4, byte 5. `endIndex: 8` — past that byte — still returns only the first capture; `endIndex: 14` (2 × 7) returns both.
 
-(measured: `{startIndex: 0, endIndex: 0}` returns all 6 captures above, and `{startIndex: 10, endIndex: 0}` returns the 3 past unit 5)
+The library reads a zero end as "no limit" (measured: `{startIndex: 0, endIndex: 0}` returns all 6 captures above, and `{startIndex: 10, endIndex: 0}` returns the 3 past unit 5).
 
 **THE SORT IS NOT WHAT FIXES THAT, AND DELETING IT REDDENS NOTHING TODAY — MEASURED, AND SAID HERE RATHER THAN LEFT FOR SOMEONE TO REDISCOVER.**
 
 ## `web/src/colour.ts`, above `function editFor(`
 
-which measured 8.1 ms at 103,028 units.
+The caller drops the tree and reparses instead, which measured 8.1 ms at 103,028 units.
 
 ## `web/src/colour.ts`, above `export const COLOUR_CEILING_UNITS = 6_100_000`
 
-a parse of a whole text of 6,072,644 units measured 614 to 673 ms, in slices 676 and 688 ms, and a reparse after one character typed 13.4 to 15.1 ms, in one go inside the keystroke's update (2026-10-06).
+A document no copy will hold is not one worth parsing on the main thread: a parse of a whole text of 6,072,644 units measured 614 to 673 ms, in slices 676 and 688 ms, and a reparse after one character typed 13.4 to 15.1 ms, in one go inside the keystroke's update (2026-10-06).
 
 ## `web/src/colour.ts`, above `/** The `TokenClass` names as they cross the wasm boundary, paired with their capture name`
 
@@ -390,18 +388,20 @@ press's polls came more than 601 ms apart, where they had come 7,604 to 8,288 ms
 
 ## `web/src/lambda-body.ts`, above `if (resized) this.#follow.onResize(this.el.scrollTop)`
 
-a body following at 602 px came back
+Where the clamp lands
+on the redex's own position nothing below writes, so nothing announces it: a body following at 602 px came back
 to a Stage tab at 162, the redex's place, and its `scroll` read as the user's.
 
 ## `web/src/lambda-body.ts`, above `if (this.el.clientHeight !== this.#drawnHeight) this.#follow.onResize(this.el.scrollTop)`
 
-measured in the built app, a window grown from
+A BOX THAT CHANGED HEIGHT SINCE ITS LAST PAINT MAY HAVE HAD ITS SCROLL CLAMPED, and a window resize reports
+that clamp's `scroll` BEFORE the resize observer below runs: measured in the built app, a window grown from
 600 to 1000 px tall clamped a body following a redex at its term's end from 400 to 160, and the clamp read as
 the user's scroll detached it.
 
 ## `web/src/lambda-layout.ts`, above `export function codeLines(t: Tree, o: LayoutOptions): Line[] {`
 
-a walk that recursed once per open level overflowed the call stack on `2990 + 0` one step from its end, a legal program.
+The automatic folds keep the whole path to the next redex open, and that path can be as deep as the reducer lets a term grow: a walk that recursed once per open level overflowed the call stack on `2990 + 0` one step from its end, a legal program.
 
 ## `web/src/lambda-pane.ts`, above `setDetached(detached: boolean): void {`
 
@@ -429,15 +429,15 @@ A layout that overflowed on a deep term left it in `#treeFor`; `render` redraws 
 
 ## `web/src/lambda-pane.ts`, above `export class LambdaPane implements EditablePane {`
 
-`frame_cost_probe` measured a history frame's budget at 512 bytes, two orders below the readout's
+`frame_cost_probe` measured a history frame's budget at 512 bytes, two orders below the readout's, so most non-trivial frames WILL truncate.
 
 ## `web/src/lambda-tree.ts`, above `key(i: number): string {`
 
-walking to the root for each cost the path's depth per node, which on a path thousands deep was most of a layout's time.
+A layout asks for every open node on a path, top down, so each ask adds one letter; walking to the root for each cost the path's depth per node, which on a path thousands deep was most of a layout's time.
 
 ## `web/src/layout-view.ts`, above `export function retitleStage(root: HTMLElement, title: (id: LeafId) => string): void {`
 
-so the tab went on naming what the view used to show until another tab was selected — on every leg.
+*Edit a copy*, a pick in the title's menu and a move back to the program each rebind a view in place: its header repaints on the frame the rebind draws, but `renderStage` runs only when the layout is applied, so the tab went on naming what the view used to show until another tab was selected — on every leg.
 
 ## `web/src/layout-view.ts`, above `const focusAt = (i: number): void => {`
 
@@ -459,11 +459,11 @@ It was held only along the axis the add divides — the controller's brief said 
 
 Measured at 1280×800 with no notice up, `#views` is 1280×725.5 px and each default view 634×356.75, which is what this answers for that area.
 
-(the review's probe, within 0.012 px in nested layouts)
+**IT DRAWS A TREE THAT IS NOT ON THE PAGE YET** — the one an add would build — which is why it is arithmetic: in tiles every view of the current tree measures what this says (the review's probe, within 0.012 px in nested layouts), and the Stage, which mounts one view, is not asked (`pane-host.ts`'s `admit`).
 
 ## `web/src/layout.ts`, above `export const MIN_VIEW_PX = 160`
 
-`+ view` pressed in a row at 1280 wide took the newest view to 0 px, each press a half of the last, and no floor on a fraction of a split refuses a half.
+What a view can show is a matter of pixels and not of its share: `+ view` pressed in a row at 1280 wide took the newest view to 0 px, each press a half of the last, and no floor on a fraction of a split refuses a half.
 
 ## `web/src/layout.ts`, above `export const MAX_TREE_LEAVES = 64`
 
@@ -525,15 +525,15 @@ Measured, the TM leg is absent for 18-50% of clickable nodes, so reporting the a
 
 ## `web/src/link.ts`, above `export class LinkIndex {`
 
-— 5a-ii timed a 4,679 ms gap —
+The worker is measurably starved for seconds while recording frames — 5a-ii timed a 4,679 ms gap — and recording begins the instant a compile lands, which is exactly when a user reads the result and clicks.
 
 ## `web/src/link.ts`, above `function innermost(start: Uint32Array, end: Uint32Array, byteOffset: number): number {`
 
-— 403 on the most adversarial program measured —
+That file binary- searches because it faces 127,881 rows; this faces at most a few hundred intervals — 403 on the most adversarial program measured — and they are NESTED rather than disjoint, which makes a correct binary search subtler than the scan while buying nothing measurable.
 
 ## `web/src/link.ts`, above `export type LinkIndexWire = {`
 
-`list60` is 552 KB as arrays of objects against ~220 KB this way, and `prog200` is 1.9 MB against ~689 KB
+`list60` is 552 KB as arrays of objects against ~220 KB this way, and `prog200` is 1.9 MB against ~689 KB — and the app rebuilds this on every 300 ms typing pause.
 
 ## `web/src/link.ts`, above `import type { Leg } from './protocol'`
 
@@ -551,7 +551,7 @@ Measured by pressing F2 once and then hovering: neither closes, for the rest of 
 
 ## `web/src/lsp-nav.ts`, above `export function navKeymap(deps: {`
 
-a scan of `defaultKeymap` and `historyKeymap` — 74 bindings — found no F-key among them
+They are what every other editor binds these to, and a scan of `defaultKeymap` and `historyKeymap` — 74 bindings — found no F-key among them, so neither shadows anything CodeMirror already does.
 
 ## `web/src/lsp-nav.ts`, above `/** What a navigation needs from the app: where the caret is, and how to say what happened`
 
@@ -569,11 +569,11 @@ That it is genuinely exercised is not inferred from the test passing — removin
 
 ## `web/src/protocol.ts`, above `export const REDEX_SPAN_BYTES = 40`
 
-a run retaining `redex_span` alongside `step`/`text`/`cut` against one retaining only those three costs 35.1 bytes per NON-NULL span — the 264 of `while4`'s 471 frames that carry one.
+MEASURED, not estimated, by the same forced-collection differential `SPAN_BYTES` is (2026-08-10): a run retaining `redex_span` alongside `step`/`text`/`cut` against one retaining only those three costs 35.1 bytes per NON-NULL span — the 264 of `while4`'s 471 frames that carry one.
 
 ## `web/src/protocol.ts`, above `export const SPAN_BYTES = 80`
 
-Two runs step the same program (`while4`, ~470 β-steps, 132,882 spans total) identically at `FRAME_BYTES`: run A pushes every full `LambdaState` into a kept-alive array, run B pushes the same frames with `spans` dropped. `(meanA - meanB) / totalSpans`, over three alternating A/B pairs after one discarded warm-up pair, lands at 74.08289058462897 — that value TO THE BYTE across browser restarts
+Two runs step the same program (`while4`, ~470 β-steps, 132,882 spans total) identically at `FRAME_BYTES`: run A pushes every full `LambdaState` into a kept-alive array, run B pushes the same frames with `spans` dropped. `(meanA - meanB) / totalSpans`, over three alternating A/B pairs after one discarded warm-up pair, lands at 74.08289058462897 — that value TO THE BYTE across browser restarts, because every reading is taken after a forced collection and so measures retained heap rather than a GC schedule.
 
 THE OLD JSON ESTIMATE WAS ~76, AND IT WAS CLOSER THAN THE ARGUMENT AGAINST IT. That argument is still true as far as it goes: `TokenClass` is one of only 14 string values and V8 interns repeated string literals, so 132,882 entries share a handful of string objects instead of paying for one each, where JSON re-writes the literal in full every time. The sharing is real; it is just smaller than the structural cost of the pair around it — a two-element array with its backing store, wrapping a two-field `Span` object.
 
@@ -591,7 +591,7 @@ One worker holding a `Session` for the probe fixture is 11,993,088 bytes; three 
 
 **λ leg since a frame's spans cross as one byte string — 0.19451407924488462**: 1,233,805.33 bytes against the same 6,343,013 for the same 253 frames, in five runs of the same file, two of them taken in turn with two on `406676e`, before that change, which read 6,798,725.33 and 1.0718447736640826 (2026-10-07). Every reading in those runs follows two forced collections, where the rows above follow one: a `Uint8Array` that has become garbage is still counted after one (`session-memory.test.ts`'s `round`).
 
-twice the places, and 2.2 times the bytes at the peak. Measured in node for 69,008 frames kept (2026-10-05), the two arrays held 1,208 to 2,708 KB through the evictions, against 1,208 to 1,216 KB when `History` shifted them
+It charges nothing for the ring's own two parallel arrays — `History`'s `#frames` and `#sizes` are 8 bytes an entry each, about 16 B/frame here by arithmetic rather than by separate measurement, and more on a ring that evicts, whose arrays hold up to as many evicted places again as frames kept before each cut (`History`'s `#evict`): twice the places, and 2.2 times the bytes at the peak. Measured in node for 69,008 frames kept (2026-10-05), the two arrays held 1,208 to 2,708 KB through the evictions, against 1,208 to 1,216 KB when `History` shifted them: about 1.5 MB at most, against the 29.3 MB a full TM ring retains.
 
 ## `web/src/protocol.ts`, above `export const FRAME_BYTES = 512`
 
@@ -599,7 +599,7 @@ MEASURED, and the measurement moved it two orders of magnitude below the readout
 
 ## `web/src/scratch.ts`, above `export const MAX_WARM_BUFFERS = 8`
 
-`buffer-affordability.test.ts`'s TM case prices one of `map-fold` under `binary`, the costliest of the shipped examples' 13 TM copies (that case's doc names the costliest three), at a marginal of 58,535,454.67 and 58,537,982.67 bytes in two runs: its wasm 25,362,432, and on the page its ring with the machine, status and value the page keeps on the copy's session entry, 33,188,960 and 33,181,304 bytes at n = 1. Reading (a)'s intercept on that probe page, 40,993,517 and 40,993,537 bytes, derives 8; eight copies came to 485.70 MiB with it and nine to 541.53 MiB, against 512, in both runs.
+Since then a TM copy is: `buffer-affordability.test.ts`'s TM case prices one of `map-fold` under `binary`, the costliest of the shipped examples' 13 TM copies (that case's doc names the costliest three), at a marginal of 58,535,454.67 and 58,537,982.67 bytes in two runs: its wasm 25,362,432, and on the page its ring with the machine, status and value the page keeps on the copy's session entry, 33,188,960 and 33,181,304 bytes at n = 1. Reading (a)'s intercept on that probe page, 40,993,517 and 40,993,537 bytes, derives 8; eight copies came to 485.70 MiB with it and nine to 541.53 MiB, against 512, in both runs.
 
 Copies of the other kinds cost less there, in one run each, counting their worker and ring only, where the TM copy's figure also counts what the page keeps: a λ copy of a shipped example 17,241,868 bytes at the most of the fork steps tried (`fact-12` forked at step 200; from step 250 the fork is refused, too large to print), an asm copy 9,454,688 at most, each over 41 MB less.
 
@@ -615,13 +615,13 @@ This branch's own `map`-fixture browser test reaches the TM history budget at 75
 
 ## `web/src/style.css`, above `/* **AT A PHONE'S WIDTH THE INSPECTOR STACKS UNDER THE VIEWS** (the user's decisions, 2026-10-05), at the header's own`
 
-which closed is its header and open at 390 by 1600 was 35.1% of `main`
+`max-height: 40%` IS THE CAP: `flex: none` sizes the inspector to what it holds, which closed is its header and open at 390 by 1600 was 35.1% of `main`, and past the cap its rows scroll inside `.inspector-body`.
 
 15rem is 240px. **WITH THE DEFAULT PROGRAM** `main` is 267.63px at 320 by 568 with the preset's notice up, 27.63px over the minimum, so that page is as it was. **NOT WITH EVERY PROGRAM**: the `fact` example's step line makes the step bar 135.38px tall at 320px wide, where the default program's is 62.38px, and at 320 by 568 with a notice up `main` is then at the minimum and the page 613px tall, so it scrolls 45px; with the notice gone `main` is 242.63px and the page does not scroll. The user saw those figures and kept 240px. A 200px minimum was weighed and not taken: it shows less on a short page, and measured afterwards it scrolls that page as well, by 5px, `main` having 194.63px there with a notice up. Measured at 320px wide with `main` at 240px: open, the inspector is 96px and the views 144px, so in Debugger each tile is 66px tall and the source view shows a line of its content under its header, while λ's, asm's and TM's headers, on two rows, leave 12.22px and no whole line; on the Stage the shown view has 71px under its header. Closed, the views have 212px, and Debugger's four show 3, 1, 1 and 1 lines. With no minimum, at 320 by 320 with the notice gone, a closed inspector was cut to 27.05px and its header ran into the step bar.
 
 ## `web/src/style.css`, above `@container state-diagram (width < 14rem) {`
 
-it was set above the widest level then measured at a phone's width, 201px (Explorer at 414px), and below the narrowest then measured in a desktop's layout, 239px (Debugger at 1280px with the TM view split right). A re-review then measured desktop layouts under it, TM views of 173 to 219px in narrower splits and beside views added with `+ view`, whose rows `53ecbfa` drew 0 to 43px wide.
+**WHY 14REM, 224PX, AND WHY THE LEVEL'S WIDTH**: it was set above the widest level then measured at a phone's width, 201px (Explorer at 414px), and below the narrowest then measured in a desktop's layout, 239px (Debugger at 1280px with the TM view split right). A re-review then measured desktop layouts under it, TM views of 173 to 219px in narrower splits and beside views added with `+ view`, whose rows `53ecbfa` drew 0 to 43px wide.
 
 ## `web/vite.config.ts`, above `exclude: ['src/session-worker.ts', 'src/lsp-worker.ts'],`
 

@@ -681,7 +681,8 @@ fn the_listing_is_print_asm_line_for_line() {
 /// **NAMES DEPEND ON THE WIDTH, WHICH IS WHY `tm_instr` ANSWERS ONLY FOR THE WIDTH THE MAP WAS BUILT AT.**
 /// `let x = 40; x + 2` fits at width 64 under unary, and its width-64 machine has states whose names no
 /// width-4 machine has: a map built at width 4 resolves none of them, and one built at 64 resolves all.
-/// This is the premise that makes `compile` build its map at the width the run fitted (spec amendment 14).
+/// This is the premise that makes `compile` build its map at the width the run fitted
+/// (Plan 7 part 4 spec amendment 14).
 #[test]
 fn a_map_built_at_another_width_misses_the_states_only_this_width_names() {
     let core = core_of("let x = 40; x + 2");

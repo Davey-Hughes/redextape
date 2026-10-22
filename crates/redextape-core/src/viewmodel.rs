@@ -284,13 +284,13 @@ pub struct AsmWindow {
 
 /// One machine word and the tag saying which kind of instruction made it.
 ///
-/// **`word` IS THE `u64` IN DECIMAL, A STRING FOR EVERY WORD, NOT ONLY THE LARGE ONES** (spec §5.3, amendment
-/// 13). Saturating `mul` reaches `u64::MAX`, which a JS number cannot hold exactly — 2^53 + 1 already rounds —
-/// and `serde-wasm-bindgen` 0.6.5, the serializer `redextape-wasm` puts every frame through, refuses a `u64`
-/// above `Number.MAX_SAFE_INTEGER` with an error rather than rounding it, so one saturated register would
-/// fail the whole frame. A number for small words and a string for large ones would put a branch in every
-/// reader for a case no corpus program reaches; one form puts none. `ts-rs`'s `u64`-to-`bigint` default
-/// never arises, since there is no `u64` here to map.
+/// **`word` IS THE `u64` IN DECIMAL, A STRING FOR EVERY WORD, NOT ONLY THE LARGE ONES**
+/// (Plan 7 part 5 spec §5.3, amendment 13). Saturating `mul` reaches `u64::MAX`, which a JS number cannot hold
+/// exactly — 2^53 + 1 already rounds — and `serde-wasm-bindgen` 0.6.5, the serializer `redextape-wasm` puts
+/// every frame through, refuses a `u64` above `Number.MAX_SAFE_INTEGER` with an error rather than rounding it,
+/// so one saturated register would fail the whole frame. A number for small words and a string for large ones
+/// would put a branch in every reader for a case no corpus program reaches; one form puts none. `ts-rs`'s
+/// `u64`-to-`bigint` default never arises, since there is no `u64` here to map.
 ///
 /// **THE TAG TRAVELS WITH THE WORD, NOT BESIDE THE LIST IT SITS IN**, because it is what the view reads the
 /// word by: `3` as a value, `#3` or `nil` as a list, `box #3` as a box handle (spec §6.3). A parallel list
