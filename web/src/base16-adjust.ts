@@ -102,9 +102,8 @@ function fineScan(from: Oklch): readonly string[] {
  * one rises as contrast with the other falls — and the first region where it holds is the nearest.
  *
  * **BEFORE IT SAYS NO LIGHTNESS PASSES, A FINE SCAN**, `scan`'s colours asked of `ok` nearest first. A region where
- * `ok` holds can be narrower than one step of the walk, which then steps over it: `NIGHT`'s warning on black beside a
- * `#aaaaaa` panel meets 3:1 on both only for lightness 0.4650 to 0.4655, and the walk lands on 0.4731 and 0.4631. The
- * walk stays the fast path, and the scan runs only where it found nothing.
+ * `ok` holds can be narrower than one step of the walk, which then steps over it. The walk stays the fast path, and
+ * the scan runs only where it found nothing.
  */
 function nearestLightness(from: Oklch, ok: (hex: string) => boolean, scan: () => readonly string[]): string | null {
   let best: { readonly hex: string; readonly dL: number } | null = null

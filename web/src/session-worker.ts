@@ -3,39 +3,30 @@
  *
  * THE HANDLE CANNOT LEAVE THIS THREAD. `Session` is an opaque wasm-bindgen object with no serialized
  * form, so the worker owns it and answers questions about it rather than handing it over. That is
- * also why the module's FREE functions are not here: they take no session, so there is nothing for a
- * worker to own, and a round trip to reach one would be lag bought for nothing. This paragraph named
- * `classifySource` and `analyze` as the pair and said the editor called them on every keystroke.
- * Neither half survives: `analyze` has had no web caller since diagnostics became a push from the LSP
- * worker, and `classifySource` was deleted with the decoration path it fed (Plan 7 part 3b — the
- * editors colour from tree-sitter grammars now, on the main thread, out of `colour.ts`). What the main
- * thread still calls straight through is `captureClasses`, `encodings` and `tokenClasses`, each once at
- * start-up rather than per keystroke.
+ * also why `captureClasses`, `encodings` and `tokenClasses`, free functions that take no session, are
+ * called straight through on the main thread: there is nothing for a worker to own, and a round trip
+ * to reach one would be lag bought for nothing.
  *
- * THE SESSION NOW OUTLIVES ITS MESSAGE, which is the one structural change in this file. PR 3c freed
- * the handle at the end of every request; `[continue]` needs it alive to resume. Exactly one is live
- * at a time and it is freed BEFORE the next compile, which makes the transient two-session window PR
- * 3c's review flagged strictly zero rather than merely bounded.
+ * THE SESSION OUTLIVES ITS MESSAGE: `[continue]` needs it alive to resume. Exactly one is live at a
+ * time and it is freed BEFORE the next compile, which makes a window with two sessions alive strictly
+ * zero rather than merely bounded.
  *
- * **A WORKER CAN NOW HOLD A `LambdaScratch` INSTEAD OF A `Session`, AND THE ONE-LIVE-SESSION
- * INVARIANT IS UNCHANGED BY IT** (design §4.2, plan T8). What `live` holds gained a second SHAPE; it
- * did not gain a second OCCUPANT. `dropLive` still runs at the top of every request that builds
- * anything, so this thread owns exactly one wasm handle at a time, whichever kind it is — which is
- * the property §4.2 names as the reason decision 3 (one worker per session) is safe, and the property
- * `tests/browser/pool-isolation.test.ts` asserts a shared worker cannot have. A scratchpad is a
- * DIFFERENT WORKER holding a different single handle, not a second handle in this one.
- *
- * PLAN T5 SAID THIS FILE WAS NOT TO BE EDITED AND T8 LIFTS THAT, for the reason T7 recorded
- * from the other side: nothing up to T7 could put a second session in the registry because the worker
- * had no message that builds a scratch. That message is `lambda-scratch`; see `onLambdaScratch`.
+ * **A WORKER CAN HOLD A `LambdaScratch` INSTEAD OF A `Session`, AND THE ONE-LIVE-SESSION INVARIANT
+ * HOLDS FOR IT** (design §4.2). What `live` holds has more than one SHAPE; it has one OCCUPANT.
+ * `dropLive` runs at the top of every request that builds anything, so this thread owns exactly one
+ * wasm handle at a time, whichever kind it is — which is the property §4.2 names as the reason
+ * decision 3 (one worker per session) is safe, and the property `tests/browser/pool-isolation.test.ts`
+ * asserts a shared worker cannot have. A scratchpad is a DIFFERENT WORKER holding a different single
+ * handle, not a second handle in this one.
  *
  * **LOGIC PUT HERE IS INVISIBLE TO THE COVERAGE GATE** — `vite.config.ts` excludes this module from
  * the `include` set for a measured instrumentation reason (v8 coverage does not attach to a dedicated
  * worker's context), so a new untested branch in this file moves none of the four numbers. That is
  * why the fork's POLICY — how many buffers a fork makes, which pane rebinds, when a buffer is
- * retired — lives in `scratch.ts` and only the wasm call it cannot make from the main thread lives
- * here. (It read "singleton" for the first of those until 5d-ii-c decision 1 made a fork mint a buffer
- * per call; what did not change is that this file has no opinion either way.)
+ * retired — lives in `scratch.ts` and only the wasm call it cannot make from the main thread
+ * lives here.
+ *
+ * Section and decision citations here are the 5d-i design's unless they name another.
  */
 import init, { asmScratch, compile, lambdaScratchAt, tapeNames, tmScratch } from '../../pkg/redextape_wasm.js'
 import { LEGS, perLeg, unhandled } from './legs'
@@ -101,10 +92,10 @@ type Session = {
   sourceSpan(node: number): Span | null
   linkIndex(byteBudget: number): LinkIndexWire
   /**
-   * `null` is load-bearing here, unlike every other claim in this type: it is how the app learns a
-   * machine is over `MAX_FORK_RULES` or its TM leg declined, not a stand-in for "value not yet known".
-   * A caller that coalesced it away with `??` would silently paper over that boundary regression — so
-   * `onRun` below reads it and passes it through unchanged, never through `??`.
+   * `null` is load-bearing here: it is how the app learns a machine is over `MAX_FORK_RULES` or its TM
+   * leg declined, not a stand-in for "value not yet known". A caller that coalesced it away with `??`
+   * would silently paper over that boundary regression — so `onRun` below reads it and passes it
+   * through unchanged, never through `??`.
    */
   tmText(): string | null
   /**
@@ -125,18 +116,18 @@ type Session = {
 
 /**
  * The wasm-bindgen `LambdaScratch`, described structurally for the reason `Session` above is — and it
- * is a STRICT SUBSET of `Session`'s λ half, which is design §3.3's table as a type.
+ * is a STRICT SUBSET of `Session`'s λ part, which is design §3.3's table as a type.
  *
  * THE SIX λ METHODS TRANSPLANT UNCHANGED (§3.3: "nothing but the λ cursor"), so `LAMBDA_RECORDING` below
  * needs no second implementation and no cast: it reads `lambdaStatus`, `lambdaState` and `stepLambda`,
  * all three identical in name and signature on both kinds, and a `Session` satisfies this type
- * structurally. Four are named here because four are what this file calls.
+ * structurally. The ones named here are the ones this file calls.
  *
  * `lambdaValue`, `sourceSpan` AND `linkIndex` ARE ABSENT AND THAT IS THE POINT. They do not exist on
- * the generated class (`pkg/redextape_wasm.d.ts` — plan T2 pins the absence at compile time on the
- * Rust side), so a handler that reached for one would not compile here either. `lambdaLeg` and
- * `tmLeg` below are exactly the two functions that reach for them, which is why neither is called for
- * a scratch — see `onLambdaScratch` and `onExtend`.
+ * the generated class (`pkg/redextape_wasm.d.ts`), and on the Rust side `redextape-wasm`'s
+ * `tests/browser.rs` pins their absence at compile time (`scratch_methods_that_must_not_exist`), so a
+ * handler that reached for one would not compile here either. `lambdaLeg` below reaches for the first
+ * two, which is why it is never called for a scratch — see `onLambdaScratch` and `onExtend`.
  */
 type LambdaScratchHandle = {
   lambdaStatus(): LambdaStatus
@@ -149,12 +140,13 @@ type LambdaScratchHandle = {
 
 /**
  * The wasm-bindgen `TmScratch`, described structurally for the reason `Session` above is — and it is
- * `Session`'s TM half with `tmValue` gone, mirroring `LambdaScratchHandle` one type up.
+ * `Session`'s TM part with `tmValue` gone, mirroring `LambdaScratchHandle` one type up.
  *
  * `tmStatus` RETURNS `TmScratchStatus`, NOT `TmStatus` — a different wire shape, not a narrower read of
- * the same one; see that type's own doc in `types.ts`. `tmProgram` HAS NO ABSENT-LEG CASE HERE, UNLIKE
- * `Session.tmProgram`'s caller-side guard in `onRun`: `session.rs`'s own doc on `TmScratch::tm_program`
- * says so directly — there is no declined leg for a scratch to have declined.
+ * the same one; see that type's own doc, on its Rust declaration in `session.rs`. `tmProgram` HAS NO
+ * ABSENT-LEG CASE HERE, UNLIKE `Session.tmProgram`'s caller-side guard in `onRun`: `session.rs`'s
+ * own doc on `TmScratch::tm_program` says so directly — there is no declined leg for a scratch to
+ * have declined.
  *
  * NO `tmValue`, `sourceSpan`, OR `linkIndex`, for decision 2's reason: a `TmScratch` has no `ty`, no
  * lowering and no `SourceMap`. `tmLeg` below is exactly the function that reaches for the first of
@@ -250,24 +242,21 @@ let latest = 0
  * it sees `null` (or a newer generation) and returns, instead of calling into a dangling handle and
  * raising "null pointer passed to rust" from a place no caller can see.
  *
- * **A DISCRIMINATED UNION, AND IT IS STILL ONE OCCUPANT.** `kind` says which wasm type this thread is
+ * **A DISCRIMINATED UNION, AND IT IS ONE OCCUPANT.** `kind` says which wasm type this thread is
  * holding; the field is `session` in every arm because that is what a record loop steps, λ, TM or asm
- * (§3.3, §4.4). The invariant §4.2 rests on is about the CARDINALITY of this binding, which is one, not
- * about the type of what is in it — `dropLive` empties it before anything else is built, exactly as
- * before.
+ * (§3.3; 5d-iv design §4.4). The invariant §4.2 rests on is about the CARDINALITY of this binding, which
+ * is one, not about the type of what is in it — `dropLive` empties it before anything else is built.
  *
  * `kind` RATHER THAN A `tm`-SHAPED DUCK TEST (`'tmStatus' in live.session`). A tag is what makes the
  * checker refuse `live.session.tmStatus()` on the `lambda-scratch` arm at every call site rather than
- * only at the ones somebody remembered to guard — and, since 5d-iv T4, the mirror image on the
- * `tm-scratch` arm for `live.session.lambdaStatus()` — and §3.3's whole method split is a compile-time
- * claim, a runtime probe would restate it as a convention.
+ * only at the ones somebody remembered to guard — and the mirror image on the `tm-scratch` arm for
+ * `live.session.lambdaStatus()` — and §3.3's whole method split is a compile-time claim, a runtime
+ * probe would restate it as a convention.
  *
- * **A THIRD ARM, THEN A FOURTH, AND EVERY LEG NOW ASKS WHAT KIND OF THING IS LIVE, WHERE ONLY THE TM
- * LEG USED TO.** `TmScratchHandle` carries the TM methods the TM leg's recording calls but none of
- * the λ ones the λ leg's does — the reverse of `LambdaScratchHandle` — so the asymmetry that used
- * to read "the λ methods exist on both wasm types and the TM ones exist only on `Session`" no longer
- * holds in either direction, and `AsmScratchHandle` carries the asm leg's alone. See each leg's `handle`
- * (`LAMBDA_RECORDING`, `TM_RECORDING`, `ASM_RECORDING`).
+ * **EVERY LEG ASKS WHAT KIND OF THING IS LIVE.** `TmScratchHandle` carries the TM methods the TM leg's
+ * recording calls but none of the λ ones the λ leg's does — the reverse of `LambdaScratchHandle` — and
+ * `AsmScratchHandle` carries the asm leg's alone. See each leg's `handle` (`LAMBDA_RECORDING`,
+ * `TM_RECORDING`, `ASM_RECORDING`).
  */
 type Live =
   | { gen: number; kind: 'session'; session: Session }
@@ -303,18 +292,17 @@ function dropLive(): void {
   // caller, and the process-lifetime leak of one wasm session is bounded, not the kind of thing
   // worth trading for a throw here.
   //
-  // THIS IS DEFENCE-IN-DEPTH, against a mechanism observed (2026-08-09) turning a thrown session
-  // call into permanent silence: a `&self` wasm call that aborts mid-flight (a stack overflow, at
-  // the time) leaves wasm-bindgen's reentrancy borrow taken, so `free()` on that same session throws
-  // "attempted to take ownership of Rust value while it was borrowed" — and this function used to
-  // call `free()` unguarded. The message handler's `catch` block (below) calls `dropLive()` first
-  // thing on ANY thrown session call, specifically so a poisoned session cannot stay live; an
-  // unguarded `free()` there threw a second time, before the `worker-error` postMessage on the next
-  // line ever ran, and the client heard nothing — the exact silence that handler's own comment says
-  // must not happen. See `MAX_PRINT_DEPTH` in `session.rs` for the mechanism that used to reach this;
-  // that cap now keeps ordinary input from poisoning a session at all, which is what makes this path
-  // untested rather than merely defensive — there is no longer an honest way to make `free()` throw
-  // through normal input, and this function must still not amplify the next mechanism that does.
+  // THIS IS DEFENCE-IN-DEPTH, against a mechanism that turns a thrown session call into permanent
+  // silence: a `&self` wasm call that aborts mid-flight (a stack overflow, say) leaves wasm-bindgen's
+  // reentrancy borrow taken, so `free()` on that same session throws "attempted to take ownership of
+  // Rust value while it was borrowed". The message handler's `catch` block (below) calls `dropLive()`
+  // first thing on ANY thrown session call, specifically so a poisoned session cannot stay live; an
+  // unguarded `free()` there would throw a second time, before the `worker-error` postMessage on the
+  // next line ran, and the client would hear nothing — the exact silence that handler's own comment
+  // says must not happen. `MAX_PRINT_DEPTH` in `session.rs` keeps ordinary input from poisoning a
+  // session at all, which is what makes this path untested rather than merely defensive — there is
+  // no honest way to make `free()` throw through normal input, and this function must still not
+  // amplify the next mechanism that does.
   try {
     held?.session.free()
   } catch {
@@ -338,14 +326,9 @@ function dropLive(): void {
  * `setTimeout(r, 0)` IS A MACROTASK, BUT A CLAMPED ONE, and that is not a hypothetical cost here. HTML's
  * timer-nesting rule floors any `setTimeout` past nesting depth 5 to ~4 ms — in workers too — and a
  * yield happens every `RECORD_CHUNK` (256) steps, so a recording of any real length spends almost all
- * of it past depth 5. This branch's own `map`-fixture browser test reaches the TM history budget at
- * 75,025 frames, `75,025 / 256 ≈ 293` yields — MEASURED, not estimated from that count alone:
- * `app.test.ts`'s "records further once the TM leg spends its history budget" (real Chromium, four
- * runs each) averaged **~2,814 ms with `setTimeout`, ~2,097 ms with `MessageChannel`** below — about
- * 25% faster, materially less than a naive "4 ms × 293 yields ≈ 1.17 s" estimate would suggest, because
- * most of that budget is real step/render work interleaved with the clamped yields, not idle time
- * alone. `MessageChannel`'s `postMessage` is a macrotask with no such floor — same abandon-check
- * semantics (the message queue still has to drain for it to fire), without paying HTML's timer tax.
+ * of it past depth 5. `MessageChannel`'s `postMessage` is a macrotask with no such floor — same
+ * abandon-check semantics (the message queue still has to drain for it to fire), without paying HTML's
+ * timer tax.
  */
 const yieldToEventLoop = (): Promise<void> =>
   new Promise<void>((resolve) => {
@@ -370,10 +353,9 @@ const worker: RecordWorker = {
 /**
  * The λ leg's pieces for `recordLeg`: a `Session`'s λ leg or a `LambdaScratch`'s, which carry the same λ methods.
  *
- * **ITS `handle` ASKS WHAT KIND OF THING IS LIVE, WHICH IT DID NOT UNTIL `TmScratchHandle` EXISTED.** The λ methods
- * used to exist on both occupants of `live`, so the union of their return types called cleanly with no guard. A
- * `TmScratch` has none of them — see `onTmScratch`, which never records this leg — and nor has an asm copy, so the
- * occupants with no λ leg need the same kind of exclusion the TM leg has always needed for the opposite reason.
+ * **ITS `handle` ASKS WHAT KIND OF THING IS LIVE.** A `TmScratch` has none of the λ methods — see `onTmScratch`,
+ * which never records this leg — and nor has an asm copy, so the occupants with no λ leg need the same kind of
+ * exclusion the TM leg needs for the opposite reason.
  *
  * **ON THIS LEG, SPENDING THE ALLOWANCE COSTS THE ANSWER.** The λ leg's recording is what decides its value, where
  * TM's and asm's replay a run `compile` already finished, whose allowance costs history alone.
@@ -381,8 +363,7 @@ const worker: RecordWorker = {
 const LAMBDA_RECORDING: RecordLeg<Session | LambdaScratchHandle, LambdaState> = {
   leg: 'lambda',
   handle: (gen) => {
-    // Deliberate silence: the caller's generation is stale, so there is nothing to record for it — not the
-    // accidental kind this file shipped once before.
+    // Deliberate silence: the caller's generation is stale, so there is nothing to record for it.
     if (live?.gen !== gen) return null
     switch (live.kind) {
       case 'session':
@@ -407,9 +388,8 @@ const LAMBDA_RECORDING: RecordLeg<Session | LambdaScratchHandle, LambdaState> = 
 /**
  * The TM leg's pieces for `recordLeg`: a `Session`'s TM leg or a `TmScratch`'s.
  *
- * **ITS `handle` ADMITS TWO KINDS.** §3.3's table used to say the TM methods exist only on `Session`; `TmScratchHandle`
- * now carries them too, so this leg admits a second kind rather than naming exactly one — see `LAMBDA_RECORDING` for
- * the guard the λ leg gained in the same commit, for the opposite exclusion.
+ * **ITS `handle` ADMITS TWO KINDS**, since `Session` and `TmScratchHandle` both carry the TM methods — see
+ * `LAMBDA_RECORDING` for the opposite exclusion.
  */
 const TM_RECORDING: RecordLeg<Session | TmScratchHandle, TmState> = {
   leg: 'tm',
@@ -444,9 +424,9 @@ const TM_RECORDING: RecordLeg<Session | TmScratchHandle, TmState> = {
 /**
  * The asm leg's pieces for `recordLeg`: a `Session`'s asm leg or an asm copy's, which carry the same asm methods.
  *
- * **LIKE TM'S, A REPLAY OF A RUN WHOSE ANSWER IS KNOWN.** `compile` drove a cursor over the program to its end (spec
- * amendment 13), so exhausting this leg's allowance costs history, not the value. Its end is `asmRecordEnd`'s, which
- * names a full cap where `endOf` has none to name.
+ * **LIKE TM'S, A REPLAY OF A RUN WHOSE ANSWER IS KNOWN.** `compile` drove a cursor over the program to its end
+ * (Plan 7 part 5 spec amendment 13), so exhausting this leg's allowance costs history, not the value. Its end is
+ * `asmRecordEnd`'s, which names a full cap where `endOf` has none to name.
  */
 const ASM_RECORDING: RecordLeg<Session | AsmScratchHandle, AsmState> = {
   leg: 'asm',
@@ -490,10 +470,9 @@ function recordAsm(gen: number, emitInitial: boolean): Promise<boolean> {
  * refusal names no node. `sourceSpan` IS RESOLVED HERE because the handle cannot leave this thread; a
  * refusal that names a node the main thread cannot look up would highlight nothing.
  *
- * ONE EXPRESSION, not two written differently in two call sites. This used to be inlined once in
- * `onRun`'s `compiled` message and again, with a different but equivalent condition, in `lambdaLeg`
- * below for the `result` message — the same fact computed two ways is exactly the shape a future edit
- * changes correctly in one place and not the other.
+ * ONE EXPRESSION, not two written differently in two call sites: `onRun`'s `compiled` message and
+ * `lambdaLeg` below for the `result` message both call this, and the same fact computed two ways is
+ * exactly the shape a future edit changes correctly in one place and not the other.
  */
 function declinedSourceSpan(session: Session, status: LambdaStatus): Span | null {
   return status.available || status.node === null ? null : session.sourceSpan(status.node)
@@ -540,9 +519,8 @@ async function onRun(req: Extract<RunRequest, { kind: 'run' }>): Promise<void> {
     recording[leg] = false
   }
 
-  // `compile` RUNS THE WHOLE TM LEG and is one uninterruptible call — measured at 0.21-75.44 ms
-  // across the demo suite (`frame_cost_probe` section A). Off the main thread that can only delay the
-  // next result; it can never block input, highlighting or linting.
+  // `compile` RUNS THE WHOLE TM LEG and is one uninterruptible call. Off the main thread that can only
+  // delay the next result; it can never block input, highlighting or linting.
   const { diagnostics, session } = compile(req.src, req.encoding) as CompileResult
   if (session === null) {
     ctx.postMessage({ kind: 'no-session', gen: req.gen, diagnostics })
@@ -562,12 +540,11 @@ async function onRun(req: Extract<RunRequest, { kind: 'run' }>): Promise<void> {
   const index = session.linkIndex(LAMBDA_BYTE_BUDGET)
   // GUARDED FOR `tmProgram`'s REASON BELOW: `asmProgram` throws `AsmAbsent` for a program that does not lower.
   const asmProgram = asm.available ? session.asmProgram() : null
-  // GUARDED: `tmProgram` throws `TmAbsent` for a declined leg, and a thrown error inside this
-  // async handler rejects it with nothing catching — no reply, and a caller that waits forever.
-  // That is exactly the shape of the defect PR 3c's browser tier caught in `drive`.
+  // GUARDED: `tmProgram` throws `TmAbsent` for a declined leg, and a throw lands in the listener's
+  // `catch`, which drops the whole session.
   const tmProgram = tm.available ? session.tmProgram() : null
-  // THE GATE, AND THE ONLY LOGIC IN THIS FILE THAT IS NOT A WASM CALL — `forkable` is imported from
-  // `protocol.ts` precisely so it is not written here, where the coverage gate cannot see it.
+  // THE GATE — `forkable` is imported from `protocol.ts` precisely so it is not written here, where the
+  // coverage gate cannot see it.
   const tmText = forkable(tmProgram) ? session.tmText() : null
   // UNGUARDED, LIKE `asmText` BELOW: a fact about the program's type, answerable whether or not
   // `tmText` itself was ever asked for — see this method's own doc on the worker's `Session` type.
@@ -610,8 +587,9 @@ async function onRun(req: Extract<RunRequest, { kind: 'run' }>): Promise<void> {
     ],
   )
 
-  // λ, THEN ASM, THEN TM (spec §5.4). asm is the cheapest leg per step, and TM's recording can run to its whole
-  // `HISTORY_BYTES` before a leg after it starts; the λ leg stays first, since its recording is what decides its value.
+  // λ, THEN ASM, THEN TM (Plan 7 part 5 spec §5.4). asm is the cheapest leg per step, and TM's recording can run to
+  // its whole `HISTORY_BYTES` before a leg after it starts; the λ leg stays first, since its recording is what decides
+  // its value.
   await recordLambda(req.gen, true)
   await recordAsm(req.gen, true)
   await recordTm(req.gen, true)
@@ -635,10 +613,9 @@ async function onRun(req: Extract<RunRequest, { kind: 'run' }>): Promise<void> {
  * **THE SAME PROLOGUE AS `onRun`, AND THAT IS THE INVARIANT RATHER THAN A COPY.** `dropLive` first,
  * then the byte counters, then the `recording` flags: whatever this thread was holding is freed
  * BEFORE anything new is built, so the two-handle window stays strictly zero for a scratch exactly as
- * it does for a session (§4.2, and this module's own doc). Factoring the reset into a shared `reset()`
- * was considered and refused while it was six lines, and a loop over `LEGS` changes nothing about why:
- * it would read as bookkeeping, when what it actually is is the one place the invariant is enforced,
- * and the two callers must be seen to enforce it.
+ * it does for a session (§4.2, and this module's own doc). A shared `reset()` would read as
+ * bookkeeping, when what it actually is is where the invariant is enforced, and each caller must be
+ * seen to enforce it.
  *
  * NO `linkIndex`, NO `tmProgram`, NO `tapeNames` IN THE REPLY, and no `result` after it. All four read
  * something §3.3 puts off this type (`self.map`, the TM leg, `self.ty`), which is why the reply is
@@ -650,11 +627,10 @@ async function onRun(req: Extract<RunRequest, { kind: 'run' }>): Promise<void> {
  * the absence rather than respecting it.
  *
  * **THE REPLAY HAPPENS INSIDE `lambdaScratchAt`, NOT HERE, AND THAT IS DELIBERATE.** Every method the
- * loop needs is on `LambdaScratchHandle`, so ~8 lines of TypeScript here would have worked and needed
- * no new export. It is in Rust because this file is excluded from the coverage include set and is
- * reachable only from the browser tier, which needs Chrome and is skippable — and 5d-i recorded a
- * fabricated status that left the native suite 894/894 green and was caught only there. The rule this
- * file already states is that it holds the wasm call and not the logic.
+ * loop needs is on `LambdaScratchHandle`, so ~8 lines of TypeScript here would work and need no new
+ * export. It is in Rust because this file is excluded from the coverage include set and is reachable
+ * only from the browser tier, which needs Chrome and is skippable. The rule this file states is that
+ * it holds the wasm call and not the logic.
  */
 async function onLambdaScratch(req: Extract<RunRequest, { kind: 'lambda-scratch' }>): Promise<void> {
   await ready
@@ -691,7 +667,7 @@ async function onLambdaScratch(req: Extract<RunRequest, { kind: 'lambda-scratch'
 
 /**
  * Build a `TmScratch` from `.tm` text and record its run — `onLambdaScratch`'s counterpart, arriving on
- * this thread as `tm-scratch` (design §4.4, plan 5d-iv T4).
+ * this thread as `tm-scratch` (5d-iv design §4.4).
  *
  * **THE SAME PROLOGUE AS `onRun`/`onLambdaScratch`, AND THAT IS THE INVARIANT RATHER THAN A COPY** —
  * see `onLambdaScratch`'s own doc for the argument; it applies here unchanged.
@@ -704,8 +680,8 @@ async function onLambdaScratch(req: Extract<RunRequest, { kind: 'lambda-scratch'
  *
  * IT DOES NOT `await recordLambda`. A `TmScratch` has one leg; calling it to be told so at its own
  * `kind` guard would be a line asserting the absence rather than respecting it. IT DOES `await
- * recordTm`, WHICH THE TM LEG'S WIDENED GUARD (`TM_RECORDING`'s `handle`) IS WHAT MAKES CORRECT — when
- * that guard refused every `kind` but `'session'`, this call would have silently recorded nothing.
+ * recordTm`, WHICH `TM_RECORDING`'s `handle` ADMITTING `'tm-scratch'` IS WHAT MAKES CORRECT — a guard
+ * that refused every `kind` but `'session'` would make this call silently record nothing.
  *
  * **DIAGNOSTICS ARE DROPPED ON THE SUCCESS PATH, LIKE `onLambdaScratch`'s — BUT CHECKED HERE RATHER
  * THAN ASSUMED, AND FOR A DIFFERENT REASON.** `onLambdaScratch`'s diagnostics on a non-null scratch are
@@ -718,7 +694,7 @@ async function onLambdaScratch(req: Extract<RunRequest, { kind: 'lambda-scratch'
  * the second is always empty whenever the first is true. There is also no `diagnostics` reply on the
  * wire for a success path to ride: `RunReply` names `no-session` for a failed parse and nothing else
  * carries diagnostics. A headerless file is real and ordinary, but it is not a diagnostic — it is
- * `tm.header: false` on the status this reply already carries (design decision 6), which is why the
+ * `tm.header: false` on the status this reply already carries (5d-iv decision 6), which is why the
  * pane has what it needs without one.
  */
 async function onTmScratch(req: Extract<RunRequest, { kind: 'tm-scratch' }>): Promise<void> {
@@ -831,12 +807,11 @@ async function onExtend(req: Extract<RunRequest, { kind: 'extend' }>): Promise<v
   // stop `recorded[leg] >= allowance[leg]`, but not necessarily equal to it: the check runs BEFORE
   // that iteration's frame is added, so `recorded` can overshoot the old `allowance` by up to one
   // frame's bytes by the time the loop actually stops. Setting `allowance[leg]` to `recorded[leg] +
-  // HISTORY_BYTES` is therefore not exactly the old `+= HISTORY_BYTES` — it grants HISTORY_BYTES from
-  // that (slightly later) point instead. Harmless, and arguably better: it guarantees at least one
-  // more step happens after `[continue]` rather than possibly none. On a `capped` stop
-  // `recorded[leg] < allowance[leg]`, and the old code let the unspent remainder stack — a k-th
-  // extend would permit (k+1)×HISTORY_BYTES instead of one more. Setting the allowance itself avoids
-  // that stacking in both cases.
+  // HISTORY_BYTES` rather than `+= HISTORY_BYTES` grants HISTORY_BYTES from that (slightly later)
+  // point instead. Harmless, and arguably better: it guarantees at least one more step happens after
+  // `[continue]` rather than possibly none. On a `capped` stop `recorded[leg] < allowance[leg]`, and
+  // `+=` would let the unspent remainder stack — a k-th extend would permit (k+1)×HISTORY_BYTES
+  // instead of one more. Setting the allowance itself avoids that stacking in both cases.
   allowance[req.leg] = recorded[req.leg] + HISTORY_BYTES
 
   let ran: boolean
@@ -919,7 +894,7 @@ async function onExtend(req: Extract<RunRequest, { kind: 'extend' }>): Promise<v
 }
 
 /**
- * Answer one `lambda-tree` request, synchronously, between record chunks (spec §4.1).
+ * Answer one `lambda-tree` request, synchronously, between record chunks (Plan 7 part 4 spec §4.1).
  *
  * **NOT A CLAIM ON `latest`.** A tree is a question about what a `run` or `lambda-scratch` built, not a
  * new build, so it supersedes nothing; a request for a generation that is no longer live is dropped, as a
@@ -950,9 +925,9 @@ function onLambdaTree(req: Extract<RunRequest, { kind: 'lambda-tree' }>): void {
 ctx.addEventListener('message', async (e: MessageEvent<RunRequest>) => {
   const req = e.data
   try {
-    // A `switch` ENDING IN `unhandled`, WHERE THIS WAS AN `else if` CHAIN WITH NO END. A request kind the
-    // chain did not name would have fallen off its end and been dropped with no reply and `tsc` green, which
-    // is where a new leg's requests arrive (Plan 7 part 5's spec, amendment 8); now it is a type error here.
+    // A `switch` ENDING IN `unhandled`: a request kind with no case is a type error here, where it would
+    // otherwise fall off the end and be dropped with no reply and `tsc` green — which is where a new
+    // leg's requests arrive (Plan 7 part 5's spec, amendment 8).
     switch (req.kind) {
       case 'run':
         latest = req.gen

@@ -15,7 +15,7 @@ import { picker, readout, SHELL, stateIdle, until } from './harness'
  * what `encodings()` lists first. It cannot fail a start-up that fell back to the default encoding, which is `binary`
  * too: with two encodings, one stored value differs from one wrong fallback and equals the other.
  * `share-open-alone.test.ts` stores `unary`, which fails that one and cannot fail this one. It takes the pair to hold
- * the encoding as storage's. A SECOND FILE, BECAUSE A FILE MOUNTS ONCE, for the reason every sibling gives.
+ * the encoding as storage's. A SECOND FILE, BECAUSE EACH MOUNTS ONCE, for the reason `app.test.ts` gives.
  */
 
 const LINKED = 'let y = 10; y + 5'

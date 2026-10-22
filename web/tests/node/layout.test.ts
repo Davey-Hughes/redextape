@@ -28,7 +28,7 @@ import { DIVIDER_PX } from '../../src/layout-view'
 import { fourViews, leafOf, pressedLayout, rowOfLeaves, sourceBeside } from '../browser/harness'
 
 /**
- * THE TREE MODEL, WITH NO DOM ANYWHERE — every invariant design §4.1 states, asserted as a value.
+ * THE TREE MODEL, WITH NO DOM ANYWHERE — every invariant 5d-ii-a design §4.1 states, asserted as a value.
  *
  * The reason this tier exists at all is that a layout bug is invisible in a browser until it is
  * grotesque: a single-child split renders as a pane with slightly wrong padding, and sizes that do
@@ -87,7 +87,7 @@ describe('defaultArrangement', () => {
     })
   })
 
-  it('puts all four in two rows of two in a tall area, the tree a fresh page built until the view layouts', () => {
+  it('puts all four in two rows of two in a tall area, the harness’s fourViews()', () => {
     expect(defaultArrangement(KIND_ORDER, 'tall')).toEqual(fourViews())
     expect(fourViews()).toEqual({
       kind: 'split',
@@ -209,8 +209,8 @@ describe('splitLeaf', () => {
     expect(leaves(tree).map((l) => l.id)).toEqual(['source', 'lambda-0', 'asm-0', 'tm-0', 'tm-1'])
   })
 
-  it('refuses to split the source leaf, because there is no second editor to duplicate', () => {
-    expect(() => splitLeaf(fourViews(), 'source', 'row', 'source-1', 'lambda')).toThrow(/source/)
+  it('refuses to split the source leaf, because there is no second editor to duplicate, saying the source pane cannot be split', () => {
+    expect(() => splitLeaf(fourViews(), 'source', 'row', 'pane-1', 'lambda')).toThrow(/source pane cannot be split/)
   })
 
   it('throws on an unknown leaf rather than returning the tree unchanged', () => {
@@ -219,12 +219,8 @@ describe('splitLeaf', () => {
 
   it('refuses a newId already in the tree, because the duplicate would be unreachable', () => {
     // findLeaf uses .find(), so a duplicate id would silently hide the second leaf behind the first
-    // rather than surface as a tree parseLayout could also reject on load.
+    // rather than surface as a tree `parseTree` could also reject on load.
     expect(() => splitLeaf(fourViews(), 'lambda-0', 'row', 'tm-0', 'lambda')).toThrow(/tm-0/)
-  })
-
-  it('still refuses the source leaf as its subject', () => {
-    expect(() => splitLeaf(fourViews(), 'source', 'row', 'pane-1', 'lambda')).toThrow(/source pane cannot be split/)
   })
 })
 
@@ -302,13 +298,12 @@ describe('resize', () => {
   /**
    * **TWO NEIGHBOURS THAT CANNOT BOTH HOLD THE FLOOR ARE LEFT AS THEY ARE.** In a row of 21 equal views each has a
    * share of 1/21, under `MIN_PANE_FRACTION`, and the clamp's bounds cross: the least it may move is more than the
-   * most. It took the first to the floor and the second below nothing, a tree `parseTree` refuses, so one arrow key on
-   * such a divider stored a workspace the next load threw away (measured in the browser on a stored row of 21,
-   * 2026-10-12: shares 0.1 and −0.0048).
+   * most. Clamped anyway, the first would go to the floor and the second below nothing, a tree `parseTree` refuses, so
+   * one arrow key on such a divider would store a workspace the next load throws away.
    *
-   * **THE BOUNDS CROSS FROM A ROW OF 11, WHERE TWO SHARES TOGETHER ARE FIRST UNDER TWO FLOORS.** There the clamp took
-   * the first to the floor whichever way it was asked to move, shares of 0.1 and 0.0818, a tree the loader takes, and
-   * moved neither again. A guard that began at a row of 20, where the loader first refuses, would not stop that.
+   * **THE BOUNDS CROSS FROM A ROW OF 11, WHERE TWO SHARES TOGETHER ARE FIRST UNDER TWO FLOORS.** There a clamp would
+   * take the first to the floor whichever way it was asked to move, shares of 0.1 and 0.0818, a tree the loader takes,
+   * and move neither again. A guard that began at a row of 20, where the loader first refuses, would not stop that.
    */
   it.each([11, 21])(
     'leaves two neighbours alone where both cannot hold the minimum, in either direction: a row of %i',
@@ -354,11 +349,11 @@ describe('resize', () => {
   /**
    * FOUR OF THE SIX THROW PATHS `at()` AND `resize()` CAN TAKE — the other two live inside
    * `resize`'s `rewrite` closure and are not reachable from here. `rewrite` re-walks the same
-   * `path` over the same, unmutated `root` that `at()` already walked to completion two lines
-   * above it in `resize`'s body. Every node `at()` stepped through on the way to the target was
-   * already proven `kind === 'split'` (or `at()` itself would have thrown), and the target node
-   * itself is proven `kind === 'split'` by the check immediately after `at()` returns — so by the
-   * time `rewrite` runs, both of its own `kind !== 'split'` guards are checking something already
+   * `path` over the same, unmutated `root` that `at()` already walked to completion at the top of
+   * `resize`'s body. Every node `at()` stepped through on the way to the target was already
+   * proven `kind === 'split'` (or `at()` itself would have thrown), and the target node itself is
+   * proven `kind === 'split'` by the check immediately after `at()` returns — so by the time
+   * `rewrite` runs, both of its own `kind !== 'split'` guards are checking something already
    * established. There is no path array that gets a caller past `at()` and the post-`at()` check
    * but still trips either guard inside `rewrite`.
    */
@@ -394,11 +389,11 @@ describe('immutability', () => {
 })
 
 /**
- * VALIDATION IS THE WORK HERE, NOT PARSING — design §4.4.
+ * VALIDATION IS THE WORK HERE, NOT PARSING — 5d-ii-a design §4.4.
  *
- * `localStorage` is user-editable, so a value that passes a shallow shape check but violates §4.1
- * crashes inside the renderer on load, which is strictly worse than falling back. Every case below is
- * a hand-written malformed value rather than a mutation of a good one, because a hand-edited entry is
+ * `localStorage` is user-editable, so a value that passes a shallow shape check but violates 5d-ii-a
+ * §4.1 crashes inside the renderer on load, which is strictly worse than falling back. Every malformed
+ * value below is written by hand rather than mutated from a good one, because a hand-edited entry is
  * the hazard being defended against.
  */
 describe('parseLayout', () => {
@@ -504,15 +499,15 @@ describe('parseLayout', () => {
 
   /**
    * THE COMPANION TO THE CASE ABOVE, AND THE ONE THAT COSTS SOMETHING REAL WHEN IT IS MISSING. "At
-   * most one source leaf" was enforced; "the source leaf is `SOURCE_LEAF`" was not, and the two are
-   * not the same claim. `SOURCE_LEAF`'s own doc says a source leaf under a fresh id "would be a
-   * different leaf as far as every one of those is concerned — an empty pane beside a detached
-   * editor": `pane-host.ts`'s creation pass skips the source kind (the editor's host is seeded before
-   * any layout exists), so `hostFor('foo', 'source')` mints an EMPTY `<section>` and the real editor
-   * is left mounted in a host the tree no longer names.
+   * most one source leaf" and "the source leaf is `SOURCE_LEAF`" are not the same claim. `SOURCE_LEAF`'s
+   * own doc says a source leaf under a fresh id "would be a different leaf as far as every one of those
+   * is concerned — an empty pane beside a detached editor": `pane-host.ts`'s creation pass skips the
+   * source kind (the editor's host is seeded before any layout exists), so `hostFor('foo', 'source')`
+   * would mint an EMPTY `<section>` and the real editor would be left mounted in a host the tree no
+   * longer names.
    *
    * ONE SOURCE LEAF UNDER THE WRONG ID, NOT TWO — a tree with `{id:'foo', pane:'source'}` and nothing
-   * else of that kind passes the `sources > 1` count, which is exactly why counting was not enough.
+   * else of that kind passes the `sources > 1` count, which is exactly why counting is not enough.
    */
   it('returns null for a source leaf under an id that is not SOURCE_LEAF', () => {
     expect(
@@ -550,7 +545,6 @@ describe('parseLayout', () => {
   /**
    * A STORED ASM VIEW SURVIVES A RELOAD. A kind `validate` does not know fails the whole layout, and a layout that
    * fails is replaced by the default without a word, so an asm view would be lost on every reload with nothing red.
-   * Written out by hand rather than read off `defaultLayout()`, so a later default without an asm view keeps the case.
    */
   it('accepts an asm view in a stored tree', () => {
     const tree = {
@@ -624,13 +618,14 @@ describe('setLeafKind', () => {
       ['source', 'source'],
       ['a', 'tm'],
     ])
-    // Decision 1 is that the pane keeps its place: same shape, same sizes.
+    // The 5d-ii-b design's decision 1 is that the pane keeps its place: same shape, same sizes.
     expect(next).toMatchObject({ kind: 'split', dir: 'row', sizes: [0.3, 0.7] })
   })
 
   it('refuses source as a target even when the tree has no source leaf', () => {
-    // The condition that lets the PICKER create a source pane is exactly the condition a reader
-    // expects to unlock this. Decision 4 is why it does not: a pane never becomes the source pane.
+    // The condition that lets the SPLIT MENU create a source pane is exactly the condition a reader
+    // expects to unlock this. The 5d-ii-b design's decision 4 is why it does not: a pane never becomes
+    // the source pane.
     const noSource: LayoutNode = {
       kind: 'split',
       dir: 'row',
@@ -779,7 +774,7 @@ describe('insertBeside, `+ view`’s equal share', () => {
 /**
  * **NO ADD MAKES A VIEW SMALLER THAN `MIN_VIEW_PX`, AND NONE MAKES A TREE THE LOADER REFUSES.** Worked out from the
  * tree's fractions and the tiled area, so it needs no element: 1280×725.5 is `#views` at 1280×800 with no notice up,
- * where each default view is 634×356.75.
+ * where each of `fourViews()`'s views is 634×356.75.
  */
 describe('the floor on an add', () => {
   const AREA = { width: 1280, height: 725.5 }
@@ -837,9 +832,9 @@ describe('the floor on an add', () => {
   })
 
   /**
-   * **A SPLIT DOWN IS HELD TO WIDTH TOO** (the user's decision 2, the re-review's finding): it makes a view as narrow
-   * as the one it halves. λ dragged to 0.12 of its row is 152.16 px wide; split down, its halves are 172.375 px tall,
-   * which passes the height floor, and 152.16 wide, which does not.
+   * **A SPLIT DOWN IS HELD TO WIDTH TOO**: it makes a view as narrow as the one it halves. λ dragged to 0.12 of its
+   * row is 152.16 px wide; split down, its halves are 172.375 px tall, which passes the height floor, and 152.16 wide,
+   * which does not.
    */
   it('refuses a split down of a view already narrower than the floor', () => {
     const tree = resize(fourViews(), [0], 0, 0.38)
@@ -850,8 +845,8 @@ describe('the floor on an add', () => {
   })
 
   /**
-   * **A VIEW THE ADD SHRINKS COUNTS, NOT ONLY THE ONE IT MAKES** (the user's decision 2): in a row at `[0.85, 0.15]`,
-   * `+ view` beside the narrow view takes it from 190.2 px to 125.6 while the new view gets 418.67.
+   * **A VIEW THE ADD SHRINKS COUNTS, NOT ONLY THE ONE IT MAKES**: in a row at `[0.85, 0.15]`, `+ view` beside the
+   * narrow view takes it from 190.2 px to 125.6 while the new view gets 418.67.
    */
   it('refuses an add whose new view has room when a view it shrinks would not', () => {
     const row: LayoutNode = {
@@ -928,8 +923,8 @@ describe('parseTree', () => {
 
 /**
  * **A TREE IS AT MOST 64 SPLITS DEEP AND HAS AT MOST 64 LEAVES** (Plan 7 part 6a spec §5.3, amended 2026-10-01), so a
- * link's tree and a stored one are held alike. Before, a link of a few kilobytes could carry a tree that threw out of
- * `validate`'s recursion, or one that took many seconds to open and was then stored.
+ * link's tree and a stored one are held alike. Without them, a link of a few kilobytes could carry a tree that throws
+ * out of `validate`'s recursion, or one that takes many seconds to open and is then stored.
  */
 describe('the bound on a tree', () => {
   /**
@@ -942,9 +937,7 @@ describe('the bound on a tree', () => {
       node = { kind: 'split', dir: 'row', sizes: [0.5, 0.5], children: [node, leafOf(`pane-${i}`, 'lambda')] }
     return node
   }
-  /**
-   * A tree `depth` splits deep down each split's SECOND child, as `+ view` nested the views it added until 2026-10-04.
-   */
+  /** A tree `depth` splits deep down each split's SECOND child. */
   const trailing = (depth: number): LayoutNode => {
     let node: LayoutNode = leafOf(`pane-${depth}`, 'lambda')
     for (let i = depth - 1; i >= 0; i--)
@@ -1002,10 +995,8 @@ describe('the bound on a tree', () => {
   })
 
   /**
-   * **`+ view` PUTS EACH VIEW IT ADDS IN THE ROW, WHERE IT NESTED EACH ONE SPLIT DEEPER** (2026-10-04). Pressed seven
-   * times in a row in the app on 2026-10-01, it stored a tree 9 deep with 11 leaves; the same presses make one row now,
-   * 2 deep. The leaf bound is still the one it meets: 60 presses parse, the 61st would make 65 leaves, and `addRefusal`
-   * refuses it, however wide the window.
+   * **`+ view` PUTS EACH VIEW IT ADDS IN THE ROW**, so seven presses make one row, 2 deep. The leaf bound is the one it
+   * meets: 60 presses parse, the 61st would make 65 leaves, and `addRefusal` refuses it, however wide the window.
    */
   it('accepts a tree built as `+ view` builds one, and refuses the press that would make its 65th leaf', () => {
     expect(shape(pressedLayout(7))).toEqual({ depth: 2, leaves: 11 })
@@ -1023,8 +1014,8 @@ describe('the bound on a tree', () => {
    * **A LEAF ID'S NUMBER IS ONE THE LEAF COUNTER CAN STEP PAST.** `main.ts`'s `seedLeafCounter` sets the counter one past
    * the largest number in the tree, as `leafNumber` reads it, and from 2^53 on adding one no longer moves it: the second
    * view added after such a tree would mint a duplicate id. Every form the app has minted parses: `source`; a default
-   * arrangement's `lambda-0`, `asm-0` and `tm-0`; `${leg}-${n}`, minted by 5d-ii-a's `nextLeafId` until 5d-ii-b; and
-   * `pane-${n}` since. An id with no number cannot move the counter, and parses as before.
+   * arrangement's `lambda-0`, `asm-0` and `tm-0`; `${leg}-${n}`; and `pane-${n}`. An id with no number cannot move the
+   * counter, and parses.
    */
   it.each(['lambda-0', 'asm-0', 'tm-0', 'lambda-3', 'tm-3', 'pane-1', 'pane-1000000000', 'a', 'lambda-x'])(
     'accepts the leaf id %s',

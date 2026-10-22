@@ -25,7 +25,7 @@ import {
  * every view again on the program, and a λ view dropped by that rebuild hands its editor to custody, as a close does;
  * the `undo` brings the view back onto the copy with that editor in it, and not with *move the editor here*.
  *
- * Every gesture is a `userEvent` one. ONE MOUNT FOR THE FILE, for the reason every sibling gives.
+ * Every gesture is a `userEvent` one. ONE MOUNT FOR THE FILE, for the reason `app.test.ts` gives.
  */
 
 const SUM_TO = EXAMPLES.find((e) => e.id === 'sum-to')?.text ?? ''

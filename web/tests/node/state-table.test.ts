@@ -136,9 +136,9 @@ describe('centredScrollTop', () => {
     expect(centredScrollTop(100, 24, 240, 10_000)).toBe(2292)
   })
 
-  // THE TERM `setLink` WAS MISSING. Without `+ Math.floor(rowHeight / 2)` this would be 2280 — the
-  // row's top edge at the viewport's centre, not the row's own centre. An odd row height makes the
-  // `Math.floor` in that term load-bearing too: 24 -> 12 exactly, 25 -> 12 (not 12.5).
+  // Without `+ Math.floor(rowHeight / 2)` this would be 2280 — the row's top edge at the viewport's
+  // centre, not the row's own centre. An odd row height makes the `Math.floor` in that term load-bearing
+  // too: 24 -> 12 exactly, 25 -> 12 (not 12.5).
   it('the middle-of-row term is not the row height itself', () => {
     expect(centredScrollTop(100, 24, 240, 10_000)).not.toBe(100 * 24 - 120)
     expect(centredScrollTop(100, 25, 240, 10_000)).toBe(100 * 25 - 120 + 12)
@@ -149,10 +149,8 @@ describe('centredScrollTop', () => {
     expect(centredScrollTop(416, 24, 240, 10_000)).toBe(10_000 - 240)
   })
 
-  // A LINK SCROLL AND A FOLLOW SCROLL MUST AGREE. This is the property the two call sites drifted on
-  // once already — `TmPane.setLink` centred a row's top edge while `Follow.targetScrollTop` centred its
-  // middle, about 12px apart on the same gesture. Sharing this function is what makes them the same
-  // number now, checked here directly rather than only through each caller's own test.
+  // A LINK SCROLL AND A FOLLOW SCROLL MUST AGREE. Sharing this function is what makes them the same
+  // number, checked here directly rather than only through each caller's own test.
   it('agrees with a following `Follow.targetScrollTop` for the same row', () => {
     const f = new Follow()
     expect(f.targetScrollTop(250, 24, 300, 50_000)).toBe(centredScrollTop(250, 24, 300, 50_000))
@@ -229,7 +227,7 @@ describe('Follow', () => {
   })
 
   // A BOX THAT GROWS PAST ITS CONTENT HAS ITS SCROLL CLAMPED, and the browser reports the clamp as a scroll a frame
-  // later. Read as a user's, it detached a following view every time a panel beside it closed.
+  // later. Read as a user's, it would detach a following view every time a panel beside it closed.
   it('does not detach on the scroll a resize clamped', () => {
     const f = new Follow()
     f.onProgrammaticScroll(280)
@@ -311,9 +309,9 @@ describe('focusedRows', () => {
     expect([...focusedRows(i, [0, 3])].sort((x, y) => x - y)).toEqual([0, 8])
   })
 
-  // THE COMMON CASE, MEASURED AT 50-82% TM COVERAGE (`link-status.ts`'s own doc) — a focus naming a
-  // node with no TM block arrives here as an empty `states` array, not an edge case to special-case
-  // away. An empty `Set` is the correct, unremarkable answer.
+  // THE COMMON CASE (`link-status.ts`'s own doc measures it) — a focus naming a node with no TM block
+  // arrives here as an empty `states` array, not an edge case to special-case away. An empty `Set` is
+  // the correct, unremarkable answer.
   it('marks no row when the focus names a node with no TM block', () => {
     const i = new StateIndex(program())
     expect(focusedRows(i, []).size).toBe(0)

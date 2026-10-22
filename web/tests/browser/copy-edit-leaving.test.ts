@@ -22,12 +22,10 @@ import { menuOf, moreOf, paneByLeaf, pick, SHELL, stateIdle, until, viewTitleOf 
  * **THE WINDOW IS 3 S IN THIS FILE, WHERE THE APP SHIPS 300 MS.** `vi.mock` below replaces the one-constant module
  * `lambda-pane.ts` and `copy-editor.ts` take the debounce from, and this file's own import reads the replacement. The
  * gap is not a test's to bound: it holds the keyboard's reply and the whole of the click's round trip, the checks
- * Playwright makes before it presses among them, and a machine short of CPU stretches each. Measured 2026-10-02 under
- * `CPUQuota=25%`, 4 of 20 gaps were over 300 ms and the longest was 1,012 ms; the CI run that failed here measured
- * 309.8 ms. A press sent straight to the browser, with the pointer already on its target, still left 2 of 20 over, so
- * it is the window that is widened and not the gap that is narrowed. The asm and TM cases take no longer for it, their
- * typing being sent as the view leaves; the λ case's reaches its copy when the debounce fires, so that case and the
- * last one each wait the window out.
+ * Playwright makes before it presses among them, and a machine short of CPU stretches each — at `CPUQuota=25%` the
+ * longest measured 1,012 ms — so it is the window that is widened and not the gap that is narrowed. The asm and TM
+ * cases take no longer for it, their typing being sent as the view leaves; the λ case's reaches its copy when the
+ * debounce fires, so that case and the last one each wait the window out.
  *
  * **THE LAST CASE IS WHAT MAKES THAT WINDOW THE APP'S AND NOT ONLY THIS FILE'S.** Were the replacement to reach this
  * file's import and miss an editor's, every gap above would be held to 3 s while the debounce fired at 300 ms, and
@@ -37,10 +35,10 @@ import { menuOf, moreOf, paneByLeaf, pick, SHELL, stateIdle, until, viewTitleOf 
  * Every gesture is a real one — `userEvent` keys into the editor, `userEvent` clicks on the title, the menus and the
  * notice — because the time between them is what the tests are about. **THE MENU THAT LEAVES IS OPENED BEFORE THE
  * TYPING**, so the one gesture after the last key is the click that leaves: opened after it, the round trips of the
- * click that opens it and the wait for it to open sat inside the window, and on a machine at a quarter of its speed
- * they alone outlasted it.
+ * click that opens it and the wait for it to open would sit inside the window, and on a machine at a quarter of its
+ * speed they alone outlasted it.
  *
- * ONE MOUNT FOR THE FILE, for the reason every sibling gives: `main()` runs once per page.
+ * ONE MOUNT FOR THE FILE, for the reason `app.test.ts` gives: `main()` runs once per page.
  */
 
 vi.mock('../../src/editor-debounce', () => ({ EDITOR_DEBOUNCE_MS: 3000 }))
@@ -245,7 +243,7 @@ describe('typing not yet sent when a view leaves its copy', () => {
   })
 
   it('is sent no sooner than this file’s window after its key, in a λ copy’s editor and an asm copy’s', async () => {
-    // THE MOCK'S OWN NUMBER, so a file that lost its `vi.mock` fails here rather than passing at 300 ms again.
+    // THE MOCK'S OWN NUMBER, so a file that lost its `vi.mock` fails here rather than passing at 300 ms.
     expect(EDITOR_DEBOUNCE_MS, 'the window `vi.mock` sets for this file').toBe(3000)
     // WHICHEVER VIEWS HOLD AN EDITOR ALREADY, so this case asks nothing of the ones above and runs alone as well.
     const lam = await editing('lambda', paneByLeaf('lambda-0'))

@@ -13,7 +13,7 @@ import {
 } from './harness'
 
 /**
- * `let x = 40; x + 2` — the program `setup.ts` stores for every browser test file, and the only corpus program whose
+ * `let x = 40; x + 2` — the program `setup.ts` stores for every browser test file, and a corpus program whose
  * entire `Owner` sequence is short enough to assert step by step.
  *
  * MEASURED, NOT ASSUMED. Driving `trace::LambdaCursor` over this source and printing `last_owner()`
@@ -33,32 +33,28 @@ import {
  * changing under a constant `textContent`.
  *
  * Step 3 is also design §8.4's own case — "the step contracting the `BinOp`'s own `App` reports
- * `Exact` naming `x + 2`", the answer `viewmodel_contract.rs` pinned as never namable while
- * `node_to_lambda` was the mechanism — reached here through the real app rather than through the
- * cursor.
+ * `Exact` naming `x + 2`" — reached here through the real app rather than through the cursor.
+ *
+ * Section citations here are the 5c design's unless they name another.
  */
 const SAMPLE = 'let x = 40; x + 2'
 
-/** Byte offset of the `+`, which is the only position inside `x + 2` that `innermost` resolves to the
- * `BinOp` itself: byte 12 lands on the `x` `Var` and byte 16 on the `2`, both narrower spans that win
+/** Byte offset of the `+`, a position inside `x + 2` that `innermost` resolves to the `BinOp`
+ * itself: byte 12 lands on the `x` `Var` and byte 16 on the `2`, both narrower spans that win
  * `link.ts`'s smallest-containing-span rule. `app.test.ts` links at 12 deliberately, for the opposite
  * reason. */
 const PLUS = SAMPLE.indexOf('+')
 
 /**
- * A program most of whose β-steps report `Owner::None` — but, since region-path tagging landed, no
- * longer ALL of them. This fixture used to be fully untagged (`exact=0 within=0 none=5`, `lower.rs`
- * tagging `Apply`/`Let`/`LetRec`/`BinOp`/`If` and never `While`/`Assign`/`Seq`/the region `Let` arms);
- * that is the same reason `while4` used to report `None` on 432 of its 470 steps (task 8's M1). Region-
- * path tagging (2026-08-10) added five region tagging sites — both `Let` arms, `Seq`, the region `If`,
- * and `While`'s own root `App` — and this program's desugaring cannot avoid two of them: `let mut n = 1`
- * is a `Let{mutable: true}` node, and `desugar.rs`'s `lower_stmts_at`, in its `Stmt::Assign` arm,
- * unconditionally wraps the assignment in a `Core::Seq` — there is no statement position that skips it.
- * `Assign` itself is STILL never tagged (the `Core::Assign` arm in `lower.rs` returns the rebuilt store
- * untagged), but the `Seq` wrapping it is, and `desugar.rs`'s `lower_stmts_at`, in that same
- * `Stmt::Assign` arm, mints that `Seq`'s span from the `Stmt::Assign` span with two `spans.push` calls
- * that share the one `*span` — one for the `Assign`, one for the `Seq` — so its tag reads on screen as
- * if `n = 2;` itself were the named construct.
+ * A program most of whose β-steps report `Owner::None`, but not all of them. Of the region tagging
+ * sites — both `Let` arms, `Seq`, the region `If`, and `While`'s own root `App` — this program's
+ * desugaring cannot avoid two: `let mut n = 1` is a `Let{mutable: true}` node, and `desugar.rs`'s
+ * `lower_stmts_at`, in its `Stmt::Assign` arm, unconditionally wraps the assignment in a `Core::Seq`
+ * — there is no statement position that skips it. `Assign` itself is never tagged (the
+ * `Core::Assign` arm in `lower.rs` returns the rebuilt store untagged), but the `Seq` wrapping it is,
+ * and `desugar.rs`'s `lower_stmts_at`, in that same `Stmt::Assign` arm, mints that `Seq`'s span from
+ * the `Stmt::Assign` span with two `spans.push` calls that share the one `*span` — one for the
+ * `Assign`, one for the `Seq` — so its tag reads on screen as if `n = 2;` itself were the named construct.
  *
  * MEASURED, NOT ASSUMED, THE SAME WAY AS `SAMPLE`: driving `trace::LambdaCursor` over this source
  * (`cargo run --example`-style, against a throwaway probe, cross-checked against the running app)
@@ -74,39 +70,23 @@ const PLUS = SAMPLE.indexOf('+')
  *   step 5   None                        same
  * ```
  *
- * A FULLY untagged program is no longer constructible from source syntax at all, not just unlucky for
+ * A FULLY untagged program is not constructible from source syntax at all, not just unlucky for
  * this fixture. `x = e` parses only as `Stmt::Assign` (`parser.rs`'s `parse_block_body` special-cases
  * `Ident '='` at statement position; assignment is never a tail `Expr`), and every
  * `Stmt::Assign`/`Stmt::While`/non-tail `Stmt::Expr` desugars inside a `Core::Seq` (`desugar.rs`'s
- * `lower_stmts_at`, one arm each) — so there is no source route to a
- * bare, `Seq`-free `Assign` (only `lower.rs`'s own
- * `forget_discards_a_store_discarding_assigns_subtree_without_dangling_paths` test reaches that shape,
- * and only by constructing `Core` directly, bypassing the parser and desugarer). `owner_probe.rs`'s
- * nine-program corpus agrees at scale: the roadmap's "THE FULL NINE-PROGRAM TABLE AFTER" entry
- * (`docs/superpowers/plans/2026-07-19-redextape-roadmap.md`) shows every one of the nine rows with
- * `Exact > 0` post-slice — even `while4` and `countdown4`, which used to sit almost entirely in `None`.
+ * `lower_stmts_at`, one arm each) — so there is no source route to a bare, `Seq`-free `Assign` (only
+ * `lower.rs`'s own `forget_discards_a_store_discarding_assigns_subtree_without_dangling_paths` test
+ * reaches that shape, and only by constructing `Core` directly, bypassing the parser and desugarer).
+ * `owner_probe.rs`'s nine-program corpus agrees at scale: the roadmap's "THE FULL NINE-PROGRAM TABLE
+ * AFTER" entry (`docs/superpowers/plans/2026-07-19-redextape-roadmap.md`) shows every one of the nine
+ * rows with `Exact > 0`.
  *
- * SO THIS FIXTURE NOW CARRIES BOTH HALVES OF WHAT THIS FILE NEEDS, and neither the exact-value steps nor
+ * SO THIS FIXTURE CARRIES BOTH HALVES OF WHAT THIS FILE NEEDS, and neither the exact-value steps nor
  * the `None` steps below are decorative:
- *   - steps 2-3 pin the tagging this slice added, the same way `SAMPLE`'s steps pin the pre-existing
- *     sites, so a regression that stops `Let{mutable: true}`/`Seq` from tagging goes red here too, and
- *   - steps 1, 4 and 5 are what remain of the ORIGINAL property this test was written for: §5.1's "most
- *     β-steps have no source construct" must still show nothing and never throw on the way to deciding
- *     that, exactly where `while4` spends 92% of its own run.
- *
- * THE FOUR POINTERS ABOVE WERE LINE NUMBERS UNTIL THIS COMMIT, AND EVERY ONE OF THEM HAD DRIFTED BY
- * EXACTLY ONE. They were resolved correctly when region-path tagging (#28) wrote them; `clippy::pedantic`
- * (#31) then inserted a line above each and nothing re-resolved them. **EVERY LANDING SITE BELOW IS
- * WHERE THIS CONVERSION FOUND THE OLD COORDINATE, NOT WHERE IT STANDS TODAY** — the dated form Tasks
- * 2 through 4 settled on, adopted here by the whole-branch review so the six agents' notes read alike.
- * A present-tense sentence about a coordinate is a live pointer wearing prose, in the one form the
- * gate cannot see. `desugar.rs` lines 129-140 were the whole `Stmt::Assign` arm and were found opening
- * on the `Stmt::Fn` arm above it; its lines 136 and 138 were the arm's two `spans.push` calls and were
- * found landing on the `Core::Assign` construction and on the `seq_id` mint rather than on either
- * push; `parser.rs` line 97 was the `Ident`-then-`Assign` predicate itself and was found holding the
- * comment introducing it; `desugar.rs` lines 129-160 spanned the three `Seq`-wrapping arms and were
- * found beginning one arm early. Not one of them broke a reader outright — each still landed close
- * enough to read as confirmation, which is exactly why they are symbols now.
+ *   - steps 2-3 pin the region tagging, the same way `SAMPLE`'s steps pin the other sites, so a
+ *     regression that stops `Let{mutable: true}`/`Seq` from tagging goes red here too, and
+ *   - steps 1, 4 and 5 hold §5.1's "most β-steps have no source construct": they must show nothing
+ *     and never throw on the way to deciding that.
  */
 const SPARSELY_TAGGED = 'let mut n = 1; n = 2; n'
 
@@ -134,7 +114,7 @@ const focusReading = () => {
 const toNewest = (leaf: string) =>
   document.querySelector<HTMLButtonElement>(`[data-leaf="${leaf}"] .controls button.to-newest`)?.click()
 
-/** Press a step control by its accessible name — `play` is an icon now, so it has no text to find it by. */
+/** Press a step control by its accessible name — `play` is an icon, so it has no text to find it by. */
 const clickByName = (name: string) =>
   document.querySelector<HTMLButtonElement>(`[data-leaf="lambda-0"] .controls [aria-label="${name}"]`)?.click()
 const click = (label: string) => {
@@ -166,7 +146,7 @@ async function settled(v: EditorView, src: string): Promise<void> {
   await until(idle)
 }
 
-/** `settled`, then the play head parked at step 0 — where every test below starts walking from. */
+/** `settled`, then the play head parked at step 0, for a case that walks the run forward from its start. */
 async function settledAtZero(src: string): Promise<void> {
   await settled(view, src)
   click('↺')
@@ -175,17 +155,13 @@ async function settledAtZero(src: string): Promise<void> {
 
 describe('the running focus', () => {
   // ITS OWN FILE, NOT CASES IN `app.test.ts`, AND THE ISOLATION IS THE POINT. Vitest gives each test
-  // FILE its own page and worker; `app.test.ts` runs ~40 tests against one long-lived pair, and two
-  // previous slices (5b, and the print-depth cap) each found that a program needing many steps
-  // degrades badly there against a fresh page — a worker's print stack ceiling settles lower after its
-  // first deep print, so which program settles depends on run order within the worker. These tests
-  // walk two programs to their frontier and back, several times each.
+  // FILE its own page and worker; `app.test.ts` runs all its cases against one long-lived pair, and a
+  // program needing many steps degrades badly there against a fresh page — a worker's print stack
+  // ceiling settles lower after its first deep print, so which program settles depends on run order
+  // within the worker. These tests walk two programs to their frontier and back, several times each.
   beforeAll(async () => {
     window.addEventListener('error', (e) => pageErrors.push(`error: ${e.message}`))
     window.addEventListener('unhandledrejection', (e) => pageErrors.push(`rejection: ${String(e.reason)}`))
-    // Each browser test file gets its own in-memory `Storage` now, installed in `tests/browser/setup.ts`
-    // before this file's own module body runs — see that file's doc for why clearing a shared key was
-    // not enough. Neither key needs clearing here any more.
     document.body.innerHTML = SHELL
     view = await (await import('../../src/main')).ready
   })
@@ -222,16 +198,14 @@ describe('the running focus', () => {
 
   // THE SAME SEQUENCE, THROUGH `⏵` RATHER THAN `▶`. A different code path: `transport.ts`'s `play()` hands
   // the leg to `player.ts`'s animation-frame loop over recorded frames, and every other test in this file
-  // drives `draw()` from a synchronous button handler instead. Nothing anywhere else in the suite exercises `⏵` at all.
+  // drives `draw()` from a synchronous button handler instead.
   //
-  // OBSERVED, NOT SAMPLED, AND THAT IS THE WHOLE DESIGN OF THIS TEST. A polling version of it — 5 ms
-  // ticks against the old 120 ms play interval, which in practice sees every frame several times over — was
-  // written first and SURVIVED EVERY MUTATION tried against this file, including collapsing `Within`
-  // into `Exact` and never clearing the mark, because a set-membership assertion tolerant enough to
-  // never flake is also tolerant enough to accept a wrong sequence. A `MutationObserver` on the
-  // editor's content is exact instead: every `draw()` writes the decoration synchronously inside its
-  // own animation frame (at the default 8/s the player takes at most one step per frame), so each frame
-  // gets its own microtask checkpoint and its own callback.
+  // OBSERVED, NOT SAMPLED, AND THAT IS THE WHOLE DESIGN OF THIS TEST. A polling version fast enough to see
+  // every frame several times over is still a set-membership assertion, and one tolerant enough to never
+  // flake is also tolerant enough to accept a wrong sequence: `Within` collapsed into `Exact`, or a mark
+  // never cleared. A `MutationObserver` on the editor's content is exact instead: every `draw()` writes
+  // the decoration synchronously inside its own animation frame (at the default 8/s the player takes at
+  // most one step per frame), so each frame gets its own microtask checkpoint and its own callback.
   //
   // DEDUPED ON CONSECUTIVE EQUALITY, AND BLANKS ARE FILTERED OUT OF THE ORDERED ASSERTION. CodeMirror
   // may touch the content DOM more than once per frame (its own measure pass), and a redraw that
@@ -309,7 +283,7 @@ describe('the running focus', () => {
   // TWO LAYERS, BOTH ON SCREEN (design §4.3). The pin is a click the user made; the focus moves every
   // β-step. Neither may suppress the other — suppressing the focus while a pin is set turns the
   // highlight off at exactly the moment it is most wanted, and a focus that cleared the pin would undo
-  // the gesture 5b exists for.
+  // that click.
   it('paints the pin and the focus at once, on different constructs, with neither clearing the other', async () => {
     await settledAtZero(SAMPLE)
 
@@ -328,7 +302,7 @@ describe('the running focus', () => {
   }, 30_000)
 
   // COINCIDENCE — "the moment the app exists to show" (design §4.3), and the one state that is neither
-  // claim: `main.ts`'s `draw()` substitutes `'coincident'` for `focus.claim` when `isCoincident` holds,
+  // claim: `draw.ts`'s `createDraw` substitutes `'coincident'` for `focus.claim` when `isCoincident` holds,
   // so `.is-focus-exact` and `.is-focus-within` must BOTH be absent here rather than one of them
   // sitting under the pin.
   //
@@ -352,11 +326,11 @@ describe('the running focus', () => {
     expect(document.querySelector('.cm-editor .is-focus-within')).toBeNull()
 
     // THE PIN IS STILL THERE, AND THE TWO MARKS NEST RATHER THAN MERGE. A rendering-engine fact that
-    // no stylesheet diff and no `getComputedStyle` call can establish: task 9's review could not settle
-    // from the diff whether CodeMirror gives two same-range mark decorations from two independent
-    // `StateField`s ONE element carrying both classes or TWO nested elements, and the visual outcome
-    // differs. One element means the cascade picks a single winner per property; two nested elements
-    // mean each keeps its own, and the inner background composites over the outer's.
+    // no stylesheet diff and no `getComputedStyle` call can establish: whether CodeMirror gives two
+    // same-range mark decorations from two independent `StateField`s ONE element carrying both classes
+    // or TWO nested elements, and the visual outcome differs. One element means the cascade picks a
+    // single winner per property; two nested elements mean each keeps its own, and the inner
+    // background composites over the outer's.
     //
     // MEASURED IN REAL CHROMIUM by dumping the rendered line: it is TWO NESTED ELEMENTS, and the
     // running focus is the OUTER one —
@@ -365,23 +339,20 @@ describe('the running focus', () => {
     //     <span class="tok-ident">x</span> <span class="tok-operator">+</span> <span class="tok-nat">2</span>
     //   </span></span>
     //
-    // `linkMark` is declared BEFORE `focusMark` in `main.ts`'s extension list and lands INSIDE. Since
-    // Plan 7 part 1 the two draw different shapes — the inner pin a box, the outer running focus a double
-    // underline that `text-decoration` carries through to the text inside — so both show at once rather
-    // than one painting over the other. This assertion pins only the nesting that depends on.
+    // `linkMark` is declared BEFORE `focusMark` in `main.ts`'s extension list and lands INSIDE. The two
+    // draw different shapes — the inner pin a box, the outer running focus a double underline that
+    // `text-decoration` carries through to the text inside — so both show at once rather than one
+    // painting over the other. This assertion pins only the nesting that depends on.
     const pin = document.querySelector('.cm-editor .linked')
     expect(pin?.textContent).toBe('x + 2')
     expect(pin?.classList.contains('is-focus-coincident'), 'nested, not merged into one element').toBe(false)
     expect(focusEls()[0]?.contains(pin ?? null), 'the pin sits inside the running focus’s element').toBe(true)
   }, 30_000)
 
-  // THE TM LEG'S OWN RUNNING FOCUS, THROUGH THE RUNNING APP — the one of the three panes whose wiring
-  // nothing observed. `focusedRows`, `sourceNodeOwner`, `isCoincident` and `linkStatus({focus: true})`
-  // are each unit-tested in `tests/node/`, but until this case existed `main.ts`'s
-  // `tmFocus`/`tmFocusLink` block could be replaced wholesale by `tmPane.setFocus([])` and the entire
-  // suite still passed — no assertion anywhere reached `[data-leaf="tm-0"] .state-row.is-focus` at all. Verified by
-  // making exactly that mutation while writing this: every assertion below the frontier fails under it,
-  // and nothing else in the suite moves.
+  // THE TM LEG'S OWN RUNNING FOCUS, THROUGH THE RUNNING APP. `focusedRows`, `sourceNodeOwner`,
+  // `isCoincident` and `linkStatus({focus: true})` are each unit-tested in `tests/node/`, which does not
+  // reach `draw.ts`'s `tmFocus`/`tmFocusLink` block: replaced wholesale by `tmPane.setFocus([])`, it
+  // would fail every assertion below the frontier here.
   //
   // MEASURED AGAINST THE RUNNING APP, NOT ASSUMED, the same way `SAMPLE`'s own owner sequence above
   // was. `let x = 40; x + 2` is 2,870 δ-steps, and its tail reads:
@@ -404,15 +375,15 @@ describe('the running focus', () => {
     expect(tmFocusNames(), '`halt` belongs to no source construct, so nothing may be focused').toEqual([])
 
     // ONE ROW, AND IT IS THE MACHINE'S OWN. The narrowest true answer this leg can give, and the one a
-    // "nearest enclosing linkable node" fallback could not produce — the shape 5b refused (`types.ts`'s
-    // `Owner` doc). Asserted as element IDENTITY, not two matching queries: `.is-current` and
+    // "nearest enclosing linkable node" fallback could not produce — the shape 5b refused (`Owner`'s
+    // doc). Asserted as element IDENTITY, not two matching queries: `.is-current` and
     // `.is-focus` must be the same row, which is a fact about the wiring rather than about the table.
     tmClick('◀')
     expect(tmStepText()).toContain('step 2,869')
     expect(tmFocusNames()).toEqual(['pc4'])
     expect(tmFocusRows()[0], 'the focused row is the row the machine is standing on').toBe(tmCurrentRow())
 
-    // ONE MORE BACK AND THE FOCUS IS A BLOCK, NOT A ROW. `main.ts` resolves `source_node` to a node id
+    // ONE MORE BACK AND THE FOCUS IS A BLOCK, NOT A ROW. `draw.ts` resolves `source_node` to a node id
     // and then asks the index for EVERY state that node emitted, so a construct's whole δ block lights
     // at once — which is why this asserts a count above one rather than an exact set: the table is
     // virtualized, so only the block's states inside the rendered window can be in the DOM at all.
@@ -421,8 +392,8 @@ describe('the running focus', () => {
     const block = tmFocusRows()
     expect(block.length, 'a construct owns several states and all of them light').toBeGreaterThan(1)
     expect(tmFocusNames()).toContain(tmCurrentRow()?.textContent)
-    // HEADERS ONLY — `focusedRows`'s own contract, and the one visible difference from `.is-linked`,
-    // which marks a block's rule rows too (see the pin below).
+    // HEADERS ONLY — `focusedRows`'s own contract, and a visible difference from `.is-linked`,
+    // which marks a block's rule rows too.
     for (const row of block) {
       expect(row.classList.contains('is-state'), `${row.textContent} is a state header`).toBe(true)
       expect(row.classList.contains('is-rule')).toBe(false)
@@ -435,12 +406,11 @@ describe('the running focus', () => {
     await until(() => linkedSource() !== '')
     expect(linkedSource(), 'the focused block is `x + 2`’s own').toBe('x + 2')
 
-    // THE COINCIDENCE, AND WHY THE STATUS LINE CARRIES IT ALONE ON THIS LEG. The pinned rows now carry
+    // THE COINCIDENCE, AND WHY THE STATUS LINE CARRIES IT ALONE ON THIS LEG. The pinned rows carry
     // BOTH classes on one element — `.state-row.is-linked` and `.state-row.is-focus` set `background`
-    // at equal specificity with `.is-focus` declared second and `.is-linked` setting nothing else, so
-    // the focus wash simply replaces the pin's and a pinned-and-focused row is pixel-identical to a
-    // focused-only one (`link-status.ts`'s `focus` doc). Nothing in the δ table says "the run reached
-    // what you pinned"; `#link-status` is the whole signal, so it is asserted here.
+    // at equal specificity with `.is-focus` declared second, so the focus wash replaces the pin's
+    // (`link-status.ts`'s `focus` doc). Nothing in the δ table says "the run reached what you
+    // pinned"; `#link-status` is the whole signal, so it is asserted here.
     expect(tmFocusRows()[0]?.classList.contains('is-linked'), 'one row, both classes').toBe(true)
     expect(linkStatus()).toContain('the machine is here right now')
   }, 30_000)
@@ -466,23 +436,23 @@ describe('the running focus', () => {
   // nothing rather than showing something wrong or falling over. `runningFocus` returns `null` for
   // `'None'` before it ever touches the index, so the failure this guards against is not a bad span —
   // it is a `draw()` that throws on the way to deciding there is nothing to draw, which would take the
-  // pane with it on every one of the 432 `None` steps `while4` reports.
+  // pane with it on every `None` step.
   //
-  // NO LONGER "EVERY STEP", SINCE REGION-PATH TAGGING — see `SPARSELY_TAGGED`'s own doc for the full
-  // account, and for why a fixture with a genuinely untagged EVERY step is no longer constructible from
-  // this language's source syntax at all. Steps 1, 4 and 5 are still `None` and still carry the original
-  // guarantee; steps 2 and 3 are asserted to their exact measured values rather than skipped, so a
-  // regression in the tagging this slice added — silently reverting to `None`, or naming the wrong
-  // construct — goes red here too, in the same fixture, rather than needing a second one.
+  // THIS FIXTURE IS NOT UNTAGGED AT EVERY STEP: see `SPARSELY_TAGGED`'s own doc for why a fixture
+  // with a genuinely untagged EVERY step is not constructible from this language's source syntax at
+  // all. Steps 1, 4 and 5 are `None` and carry that guarantee; steps 2 and 3 are asserted to their
+  // exact measured values rather than skipped, so a regression in the region tagging — silently
+  // reverting to `None`, or naming the wrong construct — goes red here too, in the same fixture,
+  // rather than needing a second one.
   it('clears the focus on this program’s untagged steps, and never errors on the tagged ones either', async () => {
     await settledAtZero(SPARSELY_TAGGED)
     const before = pageErrors.length
     expect(resultsText(), 'the program still runs to an answer').toContain('reductions')
 
     // MEASURED, NOT ASSUMED — see `SPARSELY_TAGGED`'s doc for how, and for the mechanism behind each
-    // entry. A test tolerant enough to accept blanks at every step (the property this test used to
-    // assert) would no longer notice `draw()` throwing on a TAGGED step, since two of these five no
-    // longer are one; pinning all five keeps that mutation caught rather than only the `None` half.
+    // entry. A test tolerant enough to accept blanks at every step would not notice `draw()` throwing
+    // on a TAGGED step, and two of these five are tagged; pinning all five keeps that mutation caught
+    // rather than only the `None` half.
     const expected = ['', 'exact:let mut n = 1;', 'exact:n = 2;', '', '']
     for (let i = 1; i <= 5; i += 1) {
       click('▶')

@@ -24,16 +24,16 @@ import { DEFAULT_DISPLAY, type LambdaDisplay } from './workspace'
 export type { PaneEvents }
 
 /**
- * The λ pane: the displayed step's term, laid out from the tree the worker serves for it (Plan 7 part 4a)
- * — or, before that tree arrives and when it is refused, the frame's own text, syntax-coloured by the
- * same token classes the source pane uses.
+ * The λ pane: the displayed step's term, laid out from the tree the worker serves for it (Plan 7 part 4
+ * spec §4) — or, before that tree arrives and when it is refused, the frame's own text, syntax-coloured by
+ * the same token classes the source pane uses.
  *
- * TRUNCATION IS SHOWN, NOT HIDDEN, in that flat text. `frame_cost_probe` measured a history frame's
- * budget at 512 bytes, two orders below the readout's, so most non-trivial frames WILL truncate. A BYTE
- * cut's text is a prefix of the real term; a DEPTH cut's is not — see `results.ts`'s note on `Cut` for
- * why — but showing either beats hiding it, which is why both are marked the same way (`… truncated` /
- * `… too deep`, `lambda-body.ts`'s `flatText`) rather than one being suppressed. The tree is the whole
- * term, and `results.ts` still prints the full normal form at 64 KiB.
+ * TRUNCATION IS SHOWN, NOT HIDDEN, in that flat text. A history frame's budget is 512 bytes, two orders
+ * below the readout's, so most non-trivial frames WILL truncate. A BYTE cut's text is a prefix of the real
+ * term; a DEPTH cut's is not — see `results.ts`'s note on the two cuts for why — but showing either beats
+ * hiding it, which is why both are marked the same way (`… truncated` / `… too deep`, `lambda-body.ts`'s
+ * `flatText`) rather than one being suppressed. The tree is the whole term, and `results.ts` still prints
+ * the full normal form at 64 KiB.
  */
 export class LambdaPane implements EditablePane {
   /** The body — a laid-out tree, or a frame's flat text (`lambda-body.ts`). */
@@ -65,9 +65,9 @@ export class LambdaPane implements EditablePane {
    * The tree whose drawing last threw, or `null`. The view shows its step as the frame's text with one note
    * instead (spec §10), and does not try that tree again until the display or the folds change.
    *
-   * **THE TREE IS STORED BEFORE IT IS DRAWN, SO A DRAW THAT THROWS MUST NOT LEAVE IT TO THROW AGAIN.** A layout
-   * that overflowed on a deep term left it in `#treeFor`; `render` redraws before `renderTree` can replace it,
-   * so every later frame threw inside `draw()` and the view never drew another tree, even after a recompile.
+   * **THE TREE IS STORED BEFORE IT IS DRAWN, SO A DRAW THAT THROWS MUST NOT LEAVE IT TO THROW AGAIN.** A tree
+   * whose layout throws would stay in `#treeFor`; `render` redraws before `renderTree` can replace it, so every
+   * later frame would throw inside `draw()` and the view would never draw another tree, even after a recompile.
    */
   #unlaid: Tree | null = null
   #steps: ReturnType<typeof stepControls>
@@ -81,16 +81,16 @@ export class LambdaPane implements EditablePane {
    * move the editor here.
    *
    * AN ITEM IS BUILT ONLY WHEN ITS HANDLER EXISTS, rather than built always and calling `on.detach?.()`.
-   * That is the same standard §4.5 states and the `linkLambda` handler below does NOT need: a click that
-   * goes nowhere is invisible, but a control that cannot work is on screen. A caller with no `detach` — a
-   * test fixture, or any future pane that renders λ frames it does not own — gets a view with no copy
-   * offered rather than one that offers a copy and swallows it.
+   * That is the same standard 5d-i design §4.5 states and the `linkLambda` handler below does NOT need: a
+   * click that goes nowhere is invisible, but a control that cannot work is on screen. A caller with no
+   * `detach` — a test fixture, or any future pane that renders λ frames it does not own — gets a view with
+   * no copy offered rather than one that offers a copy and swallows it.
    */
   #menu: ViewMenu
   #frame: LambdaState | null = null
   /**
-   * The upper half of design §4.2's split body — a stable parent that outlives any editor mounted or
-   * unmounted inside it, so `setEditor` can do both without touching the pane's own child order.
+   * The upper half of 5d-iii design §4.2's split body — a stable parent that outlives any editor mounted
+   * or unmounted inside it, so `setEditor` can do both without touching the pane's own child order.
    *
    * CARRIES NO CLASS UNTIL `setEditor` GIVES IT ONE. An empty class means `.term-editor` selects
    * nothing on a pane that has never had an editor, which is what `lambda-pane-editor.test.ts`'s
@@ -103,8 +103,7 @@ export class LambdaPane implements EditablePane {
    * is collapsed away — the text panel (`textPanel`, constructor below) hides `#editorHost` itself with
    * `hidden`; this field is untouched, so a collapsed editor is a live CodeMirror instance sitting
    * behind a hidden parent, with its debounce still running exactly as it was before the click.
-   * `setDetached` is what makes "attached" and "`#editor === null`" the same fact — see its own doc for
-   * the review finding that made that true rather than merely intended.
+   * `setDetached` is what makes "attached" and "`#editor === null`" the same fact — see its own doc.
    */
   #editor: ScratchEditor | null = null
   #collapse: ReturnType<typeof textPanel>
@@ -122,7 +121,7 @@ export class LambdaPane implements EditablePane {
    * `on.editSink`, captured once at construction — `setEditor` calls it per mount, so each editor it builds sends
    * its edits to the copy this pane showed when it was built (`PaneEvents.editSink`). A pane built with no handler
    * mounts an editor that simply drops its edits, the same "control that cannot work is still absent, an edit that
-   * goes nowhere is invisible" split `PaneEvents.detach`'s doc draws for the fork button.
+   * goes nowhere is invisible" split `#menu`'s doc above draws.
    */
   #editSink: (() => (src: string) => void) | undefined
   /** `PaneEvents.linkLambda`: link from a construct's id. Absent, a click on the term links nothing. */
@@ -149,10 +148,11 @@ export class LambdaPane implements EditablePane {
   /** The page's keymap setting, which this pane's editor joins — see `PaneEvents.keymap`. */
   #keymap: ScratchEditorConfig['keymap']
   /**
-   * Whether the session this pane is bound to is outside the source correspondence — §4.5's fact,
-   * kept because the fork control needs it and `setDetached` is not the only thing that moves it.
+   * Whether the session this pane is bound to is outside the source correspondence — 5d-i design
+   * §4.5's fact, kept because the fork control needs it and `setDetached` is not the only thing that
+   * moves it.
    *
-   * A FIELD RATHER THAN A READ OF THE BADGE'S OWN STATE. The fork control's availability is a
+   * A FIELD RATHER THAN A READ OF THE STATUS'S OWN STATE. The fork control's availability is a
    * function of TWO inputs that arrive through two different calls — the binding (`setDetached`) and
    * the frame (`render`) — so whichever arrives second has to see the first. The view header holds an
    * equivalent boolean privately for its own no-op guard; asking it would make one widget's internal
@@ -160,24 +160,17 @@ export class LambdaPane implements EditablePane {
    */
   #detached = false
   /**
-   * Whether this pane's session has an editor to bring here at all — `#refreshClaim`'s THIRD input, and
-   * the one whose absence made "move the editor here" a control that provably could not
-   * work (deferred-a11y item 11, fixed here).
+   * Whether this pane's session has an editor to bring here at all — `#refreshClaim`'s THIRD input, without
+   * which "move the editor here" would be a control that provably could not work (deferred-a11y item 11).
    *
-   * **THE TWO INPUTS IT JOINS ONLY APPROXIMATED THIS, AND 5d-ii-c's DECISION 2 IS WHAT SEPARATED THEM.**
-   * `#detached && #editor === null` was read as "this session has an editor, mounted elsewhere" — true
-   * while a detached pane with no editor anywhere was a state the app cleaned up rather than one it
-   * left. A fork whose build failed used to END the buffer, putting `#detached` back to `false` within
-   * the same reply. Nothing ends a buffer implicitly now, so a pane stranded on a phantom fork sits with
-   * both conjuncts permanently true and no editor in existence: the control was offered forever and the
-   * click recorded a claim `reconcileEditors` could find nothing for.
+   * **THE TWO INPUTS IT JOINS ONLY APPROXIMATE THIS.** `#detached && #editor === null` reads as "this session
+   * has an editor, mounted elsewhere", but nothing ends a buffer implicitly, so a pane stranded on a phantom
+   * fork sits with both conjuncts permanently true and no editor in existence: the control would be offered
+   * forever and the click would record a claim `reconcileEditors` could find nothing for.
    *
-   * **TWO ROUTES REACH THAT STATE, NOT ONE — this paragraph said "the one path" and the paragraph's own
-   * last sentence contradicted it (Minor finding, review of this fix).** `replies.ts`'s `worker-error`
-   * arm calls `editorHome(session)?.setEditor(null)`, which DESTROYS the editor and retires nothing, so
-   * a pane whose worker died is left in exactly the same shape as one whose fork never built. That route
-   * has existed since 5d-ii-a and was never covered by the retire the sentence above rests on, so the
-   * approximation was already imperfect before decision 2 widened the gap.
+   * **TWO ROUTES REACH THAT STATE.** A fork whose build failed is one. `replies.ts`'s `worker-error` arm calls
+   * `editorHome(session)?.setEditor(null)`, which DESTROYS the editor and retires nothing, so a pane whose
+   * worker died is left in exactly the same shape as one whose fork never built.
    *
    * PUSHED PER FRAME BY `draw()`, NOT ASKED FOR ON THE FOUR TRANSITIONS `#refreshClaim` ALREADY RUNS ON.
    * The other two inputs are facts about THIS pane and change only when this pane is called; this one is
@@ -221,7 +214,7 @@ export class LambdaPane implements EditablePane {
         this.#drawMap()
       },
     })
-    // THE MAP IS DRAWN FOR THE HEIGHT ITS CANVAS HAS, AND THAT HEIGHT IS NO LONGER THE STYLESHEET'S 120px ALONE (the
+    // THE MAP IS DRAWN FOR THE HEIGHT ITS CANVAS HAS, AND THAT HEIGHT IS NOT THE STYLESHEET'S 120px ALONE (the
     // view layouts spec §11.1): the map has a share of its view once its boundary is dragged, and takes the view's
     // spare height while it is maximised. The term's own change of size draws it again (`scrolled`, above), which
     // covers a drag and a view that changes height. It does not cover a canvas that changes with the term as it was:
@@ -248,9 +241,9 @@ export class LambdaPane implements EditablePane {
     this.#mapPanel.actions.append(this.#mapMode.el)
     this.#steps = stepControls(on)
     // THE FRAME'S STEP for `edit a copy`. The run closure supplies the step of the frame this leg is
-    // actually at, which is what design §4.1's replay reduces to. `#refreshDetach` does NOT check the
-    // frame's cut: §4.1a moved that refusal to the worker, which answers a diagnostic while this control
-    // stays offered.
+    // actually at, which is what 5d-iii design §4.1's replay reduces to. `#refreshDetach` does NOT check
+    // the frame's cut: 5d-iii §4.1a gives that refusal to the worker, which answers a diagnostic while
+    // this control stays offered.
     const detach = on.detach
     this.#menu = viewMenu(this.#header.actions, {
       // REMOVED WHERE THERE IS NO EDITOR, not disabled: a view showing a running leg has no
@@ -302,9 +295,10 @@ export class LambdaPane implements EditablePane {
     this.#lspDocument = on.lspDocument
     this.#colour = on.colour
     this.#keymap = on.keymap
-    // FOLLOW REDEX (spec §5.3), ADDED AND REMOVED, NEVER DISABLED — the TM view's `follow current rule`, and
-    // the umbrella's rule for a control that cannot apply: a re-attach does something only while the body
-    // shows a tree it is not following, so the action exists only then, and the body says when that changes.
+    // FOLLOW REDEX (Plan 7 part 4 spec §5.3), ADDED AND REMOVED, NEVER DISABLED — the TM view's
+    // `follow current rule`, and the umbrella's rule for a control that cannot apply: a re-attach does
+    // something only while the body shows a tree it is not following, so the action exists only then, and
+    // the body says when that changes.
     // A HEADER ACTION: the body sits under the view's header as the TM table sits under its panel's, where
     // that view's action rides.
     this.#reattach = document.createElement('button')
@@ -316,8 +310,10 @@ export class LambdaPane implements EditablePane {
       const had = document.activeElement === this.#reattach
       // Follows again and repaints now, on the redex, rather than at the next step.
       this.#body.attach()
-      // THE BUTTON HIDES ITSELF — the paint above tells `onDetached` — AND MUST NOT TAKE THE FOCUS WITH IT
-      // (`focus-handoff.ts`'s rule): the term it acts on takes it, one tab stop with its own keys.
+      // THE BUTTON HIDES ITSELF — the paint above tells `onDetached` — AND MUST NOT TAKE THE FOCUS WITH IT.
+      // A control its own click removes is the gesture case `focus-handoff.ts`'s doc sets apart from its
+      // rule, so the gesture says where the focus goes: the term it acts on takes it, one tab stop with its
+      // own keys.
       if (had && this.#reattach.hidden) this.#body.el.focus()
     })
     // PREPENDED, BECAUSE `⋯` IS ALREADY THERE: the menu's display settings mount it at construction, and the
@@ -361,7 +357,7 @@ export class LambdaPane implements EditablePane {
     )
 
     // λ -> SOURCE, the third direction: a click on any token links from the construct its node belongs to
-    // (`LambdaBody`'s `link` event, `#linkFrom`), at whatever step is on screen (Plan 7 part 4a).
+    // (`LambdaBody`'s `link` event, `#linkFrom`), at whatever step is on screen (Plan 7 part 4 spec §5.4).
     this.#onLinkNode = on.linkLambda
   }
 
@@ -491,47 +487,35 @@ export class LambdaPane implements EditablePane {
   }
 
   /**
-   * Mount an editor over this pane's term seeded with `text`, or unmount it with `null` — design
+   * Mount an editor over this pane's term seeded with `text`, or unmount it with `null` — 5d-iii design
    * §4.2's upper region.
    *
-   * MOUNTED AND UNMOUNTED, NEVER HIDDEN, for the view status's reason taken one step further: a hidden
-   * CodeMirror instance is a live instance with a live debounce, and §5 asks for a test that
-   * reattaching a pane REMOVES the editor. Removal is what makes that question have one answer.
+   * MOUNTED AND UNMOUNTED, NEVER HIDDEN: a hidden CodeMirror instance is a live instance with a live
+   * debounce, and 5d-iii §5 asks for a test that reattaching a pane REMOVES the editor. Removal is what
+   * makes that question have one answer.
    *
    * A RE-SEED WITH THE SAME TEXT IS A NO-OP INSIDE `ScratchEditor.setText`, so this is safe on the
-   * per-frame path — which, since the whole-branch review before merge, it genuinely sits on:
-   * `setDetached` below now calls `setEditor(null)` itself whenever the pane it reports for stops
-   * being detached, and `setDetached` is driven every frame by `PaneSlot.render`, for a view on the
-   * page. `replies.ts` still calls this method directly for the two things only a caller outside this
-   * class can know — the text a freshly-built scratch replied with (`scratch-compiled`) and a scratch
-   * whose worker just died with nothing left to recompile against (`worker-error`). **IT ALSO SAID "and
-   * still explicitly at retire, ahead of the draw", AND THAT CALL SITE IS GONE**: it was `compile.ts`'s
-   * `editorHome()?.setEditor(null)`, already a no-op on every path that reached it (a retire rebinds
-   * its panes first, so nothing resolves), and 5d-ii-c decision 2 deleted the branch around it. A
-   * retire's editors come down through the sweep instead (`editor-custody.ts`'s `reconcileEditors`).
-   * What no caller has to remember is every OTHER way a pane can stop being detached: that used to
-   * require a matching `setEditor(null)` at each one, and was found missing at a third exit with no click
-   * handler of its own to add one to (the binding selector) and briefly at a fourth that has one but
-   * had not called it (`worker-error`, fixed alongside this) — see `setDetached`'s own doc.
+   * per-frame path, which it sits on: `setDetached` below calls `setEditor(null)` itself whenever the
+   * pane it reports for stops being detached, and `setDetached` is driven every frame by
+   * `PaneSlot.render`, for a view on the page. `replies.ts` calls this method directly for the two
+   * things only a caller outside this class can know — the text a freshly-built scratch replied with
+   * (`scratch-compiled`) and a scratch whose worker just died with nothing left to recompile against
+   * (`worker-error`). A retire's editors come down through the sweep (`editor-custody.ts`'s
+   * `reconcileEditors`). No caller has to remember a matching `setEditor(null)` for every OTHER way a
+   * pane can stop being detached — see `setDetached`'s own doc.
    *
-   * **`collapsed` SEEDS THE MOUNT, AND ONLY THE MOUNT — 5d-ii-d T9, design §4.7.** Every mount the app
+   * **`collapsed` SEEDS THE MOUNT, AND ONLY THE MOUNT — 5d-ii-d design §4.7.** Every mount the app
    * makes passes the buffer's own recorded flag, which is `false` for a fresh fork (nobody has collapsed
    * a buffer that has never had an editor). The RE-SEED branch below (`this.#editor.setText(text)`)
    * ignores it, because a live editor's collapse state is the user's own click, not something a later
    * reply gets to overwrite.
    *
-   * **`#editorHost.className` HAS FOUR WRITERS IN THIS FILE, NOT ONE — a claim this paragraph used to
-   * make and which was false the day it was written (Important finding, 5d-ii-d T9 fix round 1).** It
-   * read "the class assignment stays in ONE place — this is the only line that ever writes
-   * `#editorHost.className`". Two of the four CLEAR it (this method's own `text === null` branch, and
-   * `takeEditor`), because an unmounted host carries no class at all. The other two are MOUNT sites, and
-   * both write the unconditional `'term-editor'` now — this line, and `receiveEditor`'s.
+   * **`#editorHost.className` HAS FOUR WRITERS IN THIS FILE.** Two CLEAR it (this method's own `text === null`
+   * branch, and `takeEditor`), because an unmounted host carries no class at all. The other two are MOUNT
+   * sites, and both write the unconditional `'term-editor'`: this method's, and `receiveEditor`'s.
    *
-   * **THE SEED NO LONGER LIVES IN THE CLASS, WHICH REVERSES WHAT THIS PARAGRAPH USED TO SAY — Plan 7
-   * part 1 Task 8.** It read `collapsed ? 'term-editor is-collapsed' : 'term-editor'` here and in
-   * `receiveEditor`; the text panel replaced that with `hidden`, so `collapsed` reaches only
-   * `this.#collapse.update(true, collapsed)`, in this method and in `receiveEditor` — see that method's
-   * own doc for the finding that once left ITS seed out.
+   * **THE SEED DOES NOT LIVE IN THE CLASS.** The text panel hides a collapsed editor with `hidden`, so
+   * `collapsed` reaches only `this.#collapse.update(true, collapsed)`, in this method and in `receiveEditor`.
    */
   setEditor(text: string | null, collapsed = false): void {
     if (text === null) {
@@ -578,10 +562,10 @@ export class LambdaPane implements EditablePane {
 
   /**
    * Detach this pane's mounted editor WITHOUT DESTROYING IT, for a caller about to remount it on a
-   * different pane — the editor-moves rule's other half of `receiveEditor`, and together the two are
-   * what `editor-custody.ts`'s `reconcileEditors` uses to answer the "move the editor here" control. `null` if
-   * this pane holds none, so a caller can call this on every lambda pane and only act on the one that
-   * says yes.
+   * different pane — with `receiveEditor`, one half of the editor-moves rule (5d-ii-a design §4.3), and
+   * together the two are what `editor-custody.ts`'s `reconcileEditors` uses to answer the "move the
+   * editor here" control. `null` if this pane holds none, so a caller can call this on every lambda pane
+   * and only act on the one that says yes.
    *
    * LEAVES `#detached` UNTOUCHED. This pane may still be bound to the scratch session that just lost
    * its editor — the binding did not change, only which pane renders the editor for it — so the fork
@@ -594,20 +578,16 @@ export class LambdaPane implements EditablePane {
     if (editor === null) return null
     this.#editor = null
     this.#syncEditorControls()
-    // **THE NODE LEAVES TOO, AND FOR TWO CALLERS IT NEVER USED TO HAVE TO — found by driving the app in
-    // a browser, which is the only thing that could have found it.** This method dropped the reference
-    // and stripped the host's class and left `editor.dom` parented where it was, because both original
-    // callers made that invisible: `applyLayout`'s drop loop takes the whole host out of the document
-    // with the pane, and `reconcileEditors`' sweep hands the view straight to `receiveEditor`, whose
-    // `append` RELOCATES the node. The `rebind` handover in `pane-host.ts` is the first caller where the
-    // pane SURVIVES and nothing re-parents — and without this line the view stayed mounted, visible and
-    // `contenteditable`, in a pane now bound to a different buffer, with only the `.term-editor` class
-    // gone. Measured in Chromium: 458x44 px, showing the OLD buffer's term, accepting keystrokes.
+    // **THE NODE LEAVES TOO.** For two callers its place would not matter: `applyLayout`'s drop loop takes the
+    // whole host out of the document with the pane, and `reconcileEditors`' sweep hands the view straight to
+    // `receiveEditor`, whose `append` RELOCATES the node. For the `rebind` handover in `pane-host.ts` the pane
+    // SURVIVES and nothing re-parents — and without this line the view would stay mounted, visible and
+    // `contenteditable`, in a pane now bound to a different buffer, with only the `.term-editor` class gone.
     //
     // WORSE THAN COSMETIC, WHICH IS WHY IT IS A `remove()` AND NOT A `display: none`. The view keeps the
-    // `onEdit` it was constructed with, so a keystroke in that stray editor still reached
-    // `ScratchBuffers.recompile` — the parse error from a half-edited term was painted as a diagnostic
-    // on a DIFFERENT pane's editor, one buffer over. That is the same class of defect the handover
+    // `onEdit` it was constructed with, so a keystroke in that stray editor would still reach
+    // `ScratchBuffers.recompile` — the parse error from a half-edited term would be painted as a diagnostic
+    // on a DIFFERENT pane's editor, one buffer over. That would be the same class of defect the handover
     // exists to prevent, reintroduced by the handover itself.
     //
     // SAFE FOR THE OTHER TWO CALLERS AND FOR CODEMIRROR. Removing a node then appending it elsewhere is
@@ -628,53 +608,38 @@ export class LambdaPane implements EditablePane {
    * rather than duplicating it, so the SAME `EditorView` — cursor, selection and undo history included —
    * is what ends up inside this pane's host.
    *
-   * **IT THROWS ON A PANE THAT ALREADY HOLDS ONE, AND THE UNCONDITIONAL OVERWRITE IT REPLACES IS HALF
-   * OF AN IMPORTANT FINDING (re-review of the whole-branch review's own custody fix).** Assigning
-   * `#editor` over a live value dropped the only reference to the previous view WITHOUT removing its
-   * node: the pane went on rendering two `.cm-editor`s stacked in one host, `#editor` named whichever
-   * arrived last, and the other was unreachable for `setEditor`, `takeEditor` and `destroy` alike —
-   * design §4.3's "two uncoordinated CodeMirror instances over one buffer", reached by the very
-   * mechanism §4.3 introduces to make it impossible. `editor-custody.ts`'s `reconcileEditors` is what must never
-   * ask for that; this is the check that the invariant is a fact rather than an argument.
+   * **IT THROWS ON A PANE THAT ALREADY HOLDS ONE.** Assigning `#editor` over a live value would drop the
+   * only reference to the previous view WITHOUT removing its node: the pane would go on rendering two
+   * `.cm-editor`s stacked in one host, `#editor` would name whichever arrived last, and the other would be
+   * unreachable for `setEditor`, `takeEditor` and `destroy` alike — 5d-ii-a design §4.3's "two
+   * uncoordinated CodeMirror instances over one buffer", reached by the very mechanism 5d-ii-a §4.3
+   * introduces to make it impossible. `editor-custody.ts`'s `reconcileEditors` is what must never ask for
+   * that; this is the check that the invariant is a fact rather than an argument.
    *
-   * **AND IT ASKED FOR IT AGAIN, ONE ROUND LATER — WHICH IS WHY THIS PARAGRAPH NO LONGER CLAIMS IT
-   * "CANNOT".** That sentence read "and it no longer can (see its doc for the root fix)". A third review
-   * round then reached this throw in six clicks (*edit a copy*, `close`, *reset preset*, type in the
-   * source, *edit a copy* again, split), because the root fix's sweep ran over the CLAIM map while the entry that
-   * outlived its session sat in the CUSTODY map with no claim naming it — see `reconcileEditors`' own
-   * doc for the interaction. The fix is there, in the caller's domains, and it is a better fix than a
-   * promise here would have been: **this throw is not a backstop for an argument, it is the only reason
-   * either round's defect announced itself at all.** A method that cannot state an invariant about its
-   * callers should not try to; it should refuse, loudly, and let the caller be the thing that is
-   * corrected. THROWING RATHER THAN QUIETLY DESTROYING THE INCUMBENT:
-   * a silent repair would have absorbed the finding as normal operation, and the choice between the two
-   * editors — which text, whose cursor, whose undo — is not one this class has any basis to make.
-   * `PaneCollection.add` and `SessionRegistry.add` refuse a duplicate id in exactly the same words for
-   * exactly the same reason.
+   * A method that cannot state an invariant about its callers should not try to; it should refuse, loudly,
+   * and let the caller be the thing that is corrected. THROWING RATHER THAN QUIETLY DESTROYING THE
+   * INCUMBENT: a silent repair would absorb a caller's defect as normal operation, and the choice between
+   * the two editors — which text, whose cursor, whose undo — is not one this class has any basis to make.
+   * `SessionRegistry.add` refuses a duplicate id for the same reason, and `PaneCollection.add` for the
+   * stranding one above: an overwritten pane would leave its DOM subtree unreachable.
    *
-   * **`collapsed` SEEDS THIS MOUNT TOO, AND UNTIL THIS FIX IT DID NOT — Important finding, review of
-   * 5d-ii-d T9.** This is the OTHER mount — the one custody's own sweep and custody passes use
-   * (`editor-custody.ts`'s `reconcileEditors`), not the one a fresh build takes — and it was seeded
-   * nowhere: the host's class was written unconditionally and `#collapse.update(true)` ran with
-   * `initial` defaulting to `false`, so a collapsed buffer claimed
-   * onto another pane, or re-claimed out of custody after its holder closed, remounted EXPANDED. Nothing
-   * in either sweep pass calls `on.collapse`, so `redextape.buffers` went on reading the buffer as
-   * collapsed while the screen showed otherwise, and the next reload silently collapsed what the user had
-   * just expanded by moving it. `editor-custody.ts`'s two `receiveEditor` call sites now read the
-   * buffer's own flag through the `collapsedOf` reader threaded into `createEditorCustody` for exactly
-   * this call, the same way `replies.ts`'s `scratch-compiled` arm already does for `setEditor`.
+   * **`collapsed` SEEDS THIS MOUNT TOO.** This is the OTHER mount — the one custody's own sweep and custody
+   * passes use (`editor-custody.ts`'s `reconcileEditors`), not the one a fresh build takes. Unseeded, a
+   * collapsed buffer claimed onto another pane, or re-claimed out of custody after its holder closed, would
+   * remount EXPANDED; nothing in either sweep pass calls `on.collapse`, so `redextape.buffers` would go on
+   * reading the buffer as collapsed while the screen showed otherwise, and the next reload would silently
+   * collapse what the user had just expanded by moving it. `editor-custody.ts`'s two `receiveEditor` call
+   * sites read the buffer's own flag through the `collapsedOf` reader threaded into `createEditorCustody`
+   * for this call, the same way `replies.ts`'s `scratch-compiled` arm does for `setEditor`.
    */
   receiveEditor(editor: ScratchEditor, collapsed = false): void {
     if (this.#editor !== null) throw new Error('a λ pane was handed a second editor while still holding one')
     this.#editorHost.className = 'term-editor'
     this.#editorHost.append(editor.dom)
-    // **THE EDITS STAY WITH THE COPY, AND NOTHING HERE TOUCHES THEM.** A claimed editor once went on reporting
-    // through the pane that built it, whose handler read that pane's binding when an edit fired — so the instant
-    // that pane was rebound elsewhere, keystrokes in the moved editor recompiled whatever IT was showing, found by
-    // driving the app. This line re-pointed the editor's handler at this pane, which fixed that and left typing
-    // still pending when THIS pane moved on going to the copy it moved to. The editor's sink is now bound to its
-    // copy when it is built (`PaneEvents.editSink`), and this pane shows that same copy, so there is nothing to
-    // re-point.
+    // **THE EDITS STAY WITH THE COPY, AND NOTHING HERE TOUCHES THEM.** The editor's sink is bound to its copy
+    // when it is built (`PaneEvents.editSink`), and this pane shows that same copy, so there is nothing to
+    // re-point. A handler that read the building pane's binding when an edit fired would send keystrokes in
+    // the moved editor to whatever that pane shows once it is rebound elsewhere.
     this.#editor = editor
     this.#syncEditorControls()
     this.#collapse.update(true, collapsed)
@@ -702,9 +667,8 @@ export class LambdaPane implements EditablePane {
    * Report whether this pane's session has an editor anywhere — see `#editorAvailable` for why this is a
    * third input rather than something this class could work out for itself.
    *
-   * THE NO-OP GUARD IS THE SAME ONE EVERY PER-FRAME SETTER IN THIS FILE STATES, and here it also keeps
-   * `#refreshClaim` — and so `ViewMenu.setClaim`'s DOM write — off the hot path on the frames
-   * where nothing moved, which is most of them during playback.
+   * THE NO-OP GUARD KEEPS `#refreshClaim` — and so `ViewMenu.setClaim`'s DOM write — off the hot path
+   * on the frames where nothing moved, which is most of them during playback.
    */
   setEditorAvailable(available: boolean): void {
     if (available === this.#editorAvailable) return
@@ -715,17 +679,17 @@ export class LambdaPane implements EditablePane {
   /**
    * Offer `options` in the pane selector and show `current` as the pair in force.
    *
-   * A PUSH FROM THE SLOT RATHER THAN A PULL FROM A REGISTRY, which is what keeps design §3.2b's
+   * A PUSH FROM THE SLOT RATHER THAN A PULL FROM A REGISTRY, which is what keeps 5d-i design §3.2b's
    * "neither pane knows what it is bound to" true of the pane's TYPE while making it false of its
-   * chrome. This pane still renders `(frame, controls) -> DOM`; what it gained is a control it reports
+   * chrome. This pane renders `(frame, controls) -> DOM`; beside that it has a control it reports
    * a click from (`PaneEvents.rebind`) and a list it displays. It does not resolve a binding, hold a
    * `Binding` of its own, or know that a registry exists — `PaneSlot.render` in `sessions.ts` is the
    * one place those live.
    *
    * `Binding<Leg>` RATHER THAN `Binding<'lambda'>`, THOUGH THIS IS THE λ PANE. The list is pairs for
-   * EVERY leg now (`SessionRegistry.pairs()`), so the pair in force has to be spelled in the same
+   * EVERY leg (`SessionRegistry.pairs()`), so the pair in force has to be spelled in the same
    * vocabulary the list is — a `Binding<'lambda'>` here would say the current pair can only ever name
-   * this pane's own leg, which is the claim the widened control exists to stop making. The pane's
+   * this pane's own leg, which is a claim a control listing every leg must not make. The pane's
    * frame type is what pins its renderer; this parameter pins nothing.
    *
    * NOT A PURE SETTER. The selector is chrome on the `<h2>`'s row and is unaffected by which text the body
@@ -735,7 +699,7 @@ export class LambdaPane implements EditablePane {
   setBindings(options: PaneOption[], current: Binding<Leg>): void {
     this.#header.setBindings(options, current)
     // A NEW BINDING IS A DIFFERENT TERM. Folds are keyed by path, and a path in one session's term names
-    // nothing in another's — the prototype carried a copy's folds home onto the program's tree. Called
+    // nothing in another's, so a copy's folds kept across a rebind would land on the program's tree. Called
     // every frame, so it acts only when the binding actually changed.
     if (current.session !== this.#bound) {
       this.#bound = current.session
@@ -761,10 +725,10 @@ export class LambdaPane implements EditablePane {
   /**
    * Which layout gestures this pane currently offers, and what a split may create.
    *
-   * DRIVEN FROM `main.ts`'s DRAW PASS, not from the pane, because every answer is a fact about
-   * something the pane does not hold — whether this is the last leaf, whether this pane's kind may be
-   * duplicated, and which `(leg, session)` pairs exist to create. Same division as `setBindings`, which
-   * takes the options rather than computing them.
+   * DRIVEN FROM THE DRAW PASS (`draw.ts`'s `createDraw`), not from the pane, because every answer is a
+   * fact about something the pane does not hold — whether this is the last leaf, whether this pane's
+   * kind may be duplicated, and which `(leg, session)` pairs exist to create. Same division as
+   * `setBindings`, which takes the options rather than computing them.
    *
    * `choices` IS STORED AND NOT PASSED ON, because `viewMenu` reads it through the thunk this
    * pane gave it at construction — see `#choices`, and `PaneView.setLayoutControls` for why the list
@@ -776,59 +740,49 @@ export class LambdaPane implements EditablePane {
   }
 
   /**
-   * Show or hide the `copy · not linked` status — design §4.5's second surface, paired with the sentence
-   * `link-status.ts` puts in `#link-status`.
+   * Show or hide the `copy · not linked` status — 5d-i design §4.5's second surface, paired with the
+   * sentence `link-status.ts` puts in `#link-status`.
    *
    * `setDetached`, NOT `renderDetached`, THOUGH §4.5 CALLS IT "analogous to `renderLink`" (the link
-   * window's setter, which Plan 7 part 4a folded into `renderTree`). The analogy is about the shape of
-   * the call, not about what it does: a `render*` name here would suggest this participates in the
-   * body's redraw. It does not touch `#redraw` at all — the badge is
-   * chrome, it lives on the `<h2>`, and it is unaffected by which text the body is showing. `TmPane`
-   * spells its chrome-and-highlight setters `setLink`/`setFocus`/`setProgram` for the same reason,
-   * and this pane's counterpart is named to match across the two.
+   * window's setter, which this pane does not have). The analogy is about the shape of the call, not
+   * about what it does: a `render*` name here would suggest this participates in the body's redraw. It
+   * does not touch `#redraw` at all — the status is chrome, it lives on the `<h2>`, and it is unaffected
+   * by which text the body is showing. `TmPane` spells its chrome-and-highlight setters
+   * `setLink`/`setFocus`/`setProgram`, and this pane's counterpart is named to match across the two.
    *
    * A PURE SETTER, LIKE `TmPane.setFocus` AND UNLIKE `renderTree`: nothing here needs a redraw,
    * because the view header repaints its heading itself and the body is the caller's separate
    * decision — a detached λ pane shows its scratch's own term, which arrives through `render` like
    * any other frame.
    *
-   * DEFAULTS TO ATTACHED AND IS NOW DRIVEN EVERY FRAME. It was "never called today" when the badge
-   * landed, because no pane had a binding to report (§3.2b); `PaneSlot.render` calls it with
-   * `SessionEntry.detached` for whichever session the slot is bound to, so the badge follows a rebind
-   * without a second fact to keep in step. The default still matters: a pane that has never been
-   * rendered shows no badge.
+   * DEFAULTS TO ATTACHED AND IS DRIVEN EVERY FRAME. `PaneSlot.render` calls it with
+   * `SessionEntry.detached` for whichever session the slot is bound to, so the status follows a rebind
+   * without a second fact to keep in step. The default matters: a pane that has never been rendered
+   * shows no status.
    *
-   * **AN EDITOR CANNOT OUTLIVE `#detached`, AND THIS IS WHERE THAT IS ENFORCED — IMPORTANT finding,
-   * whole-branch review before merge.** `setEditor` used to be reachable from exactly two places in
-   * `main.ts` (the scratch's first build, and recompile-from-source's retire), and this method — the
-   * one `PaneSlot.render` actually calls every frame — was not one of them. So the THIRD way a pane
-   * stops being detached, the binding selector, unmounted nothing: picking `source` in a forked λ
-   * pane's selector dropped the `[detached]` badge and repainted `#text` from the newly-bound leg, but
-   * left `#editor` mounted on the scratch it had just left — a text input whose keystrokes reached a
-   * session no longer on screen, which is exactly `pane-chrome.ts`'s "a control that provably cannot
-   * work should not be presented as though it might" turned inside out (the control LOOKED live and
-   * quietly wasn't). Rather than add a third external call site `main.ts` would have to remember at
-   * every future exit — the fix the review rejected — the invariant lives here instead: an editor can
-   * only be showing while its pane is detached, so the one setter that reports `#detached` is the one
-   * place that tears it down, and no future way of leaving `#detached` needs its own reminder.
+   * **AN EDITOR CANNOT OUTLIVE `#detached`, AND THIS IS WHERE THAT IS ENFORCED.** An editor can only be
+   * showing while its pane is detached, so the one setter that reports `#detached` is the one place
+   * that tears it down, and no future way of leaving `#detached` needs its own reminder. A teardown
+   * left to callers would need a call at every exit: a pause or a delete that moves a view onto the
+   * program would drop the `copy · not linked` status but leave `#editor` mounted on the copy it had
+   * just left — a text input whose keystrokes reach a session no longer on screen.
    *
-   * **ONE DID: A VIEW THAT IS NOT ON THE PAGE.** `PaneSlot.render` calls this every frame for a view that
-   * is drawn, and `draw()` passes over a Stage tab that is not selected and a view a switch parked. One
-   * that a pause or a delete moved onto the program was told nothing, and went on holding the editor of
-   * a copy it no longer showed. `pane-host.ts`'s `reseedingSlots` calls this as it moves such a view (the
-   * view layouts spec §5.5).
+   * **A VIEW THAT IS NOT ON THE PAGE IS TOLD SEPARATELY.** `PaneSlot.render` calls this every frame for
+   * a view that is drawn, and `draw()` passes over a Stage tab that is not selected and a view a switch
+   * parked. One that a pause or a delete moves onto the program would be told nothing, and would go on
+   * holding the editor of a copy it no longer shows, so `pane-host.ts`'s `reseedingSlots` calls this as
+   * it moves such a view (the view layouts spec §5.5).
    *
-   * GUARDED ON `#editor !== null` RATHER THAN CALLING `setEditor(null)` UNCONDITIONALLY, for the
-   * no-op-cost reason every control in this file and `pane-chrome.ts` states: an ATTACHED pane is the
-   * common case and is repainted every recorded frame during playback, so an unguarded call would pay
-   * `setEditor`'s own work — a destroy check, a class assignment, a text-panel update — sixty
-   * times a second for a pane that has never been forked at all.
+   * GUARDED ON `#editor !== null` RATHER THAN CALLING `setEditor(null)` UNCONDITIONALLY: an ATTACHED
+   * pane is the common case and is repainted every recorded frame during playback, so an unguarded call
+   * would pay `setEditor`'s own work — a destroy check, a class assignment, a text-panel update — on
+   * every frame for a pane that has never been forked at all.
    *
    * WHAT THIS DOES NOT COVER: a scratch whose WORKER DIES without the pane ever leaving it. Its
-   * registry entry keeps `detached: true` (nothing here retires it — only `ScratchBuffers.retire`
-   * does, and a dead worker is not that), so this method's own input never changes and this branch
-   * never fires. `main.ts`'s `worker-error` arm for a scratch calls `setEditor(null)` directly for
-   * exactly that reason — see its own comment there.
+   * registry entry keeps `detached: true` (nothing here removes it — only `ScratchBuffers.cool`
+   * does, `retire` through it, and a dead worker is neither), so this method's own input never
+   * changes and this branch never fires. `replies.ts`'s `worker-error` arm for a scratch calls
+   * `setEditor(null)` directly for exactly that reason — see its own comment there.
    */
   setDetached(detached: boolean): void {
     this.#detached = detached
@@ -843,20 +797,22 @@ export class LambdaPane implements EditablePane {
     this.#refreshClaim()
   }
 
-  /** Spec §8's `steps` switch, per `PaneView.setStepsShown` — the view's header owns the slot. */
+  /**
+   * Plan 7 part 2 spec §8's `steps` switch, per `PaneView.setStepsShown` — the view's header owns the slot.
+   */
   setStepsShown(shown: boolean): void {
     this.#header.setStepsShown(shown)
   }
 
   /**
    * Offer "move the editor here" exactly when this pane's session has one to show and this pane is not
-   * already showing it — wave 3 (5d-ii-a)'s editor-moves rule.
+   * already showing it — the editor-moves rule (5d-ii-a design §4.3).
    *
    * THE SAME "PAIR OF INPUTS ARRIVE THROUGH TWO DIFFERENT CALLS" SHAPE AS `#refreshDetach`: `#detached`
    * moves through `setDetached`, `#editor` through `setEditor`/`takeEditor`/`receiveEditor`, and
    * whichever arrives second has to see the first — so this is called from all four.
    *
-   * **THERE ARE THREE INPUTS NOW, AND THE THIRD IS THE ONLY ONE THAT IS NOT ABOUT THIS PANE** —
+   * **THERE ARE THREE INPUTS, AND THE THIRD IS THE ONLY ONE THAT IS NOT ABOUT THIS PANE** —
    * `#editorAvailable`, arriving through `setEditorAvailable` on the per-frame path, with the whole
    * argument for its existence on the field's own doc. The first two say "I am on a scratch and I am not
    * the one showing its editor"; without the third that sentence quietly assumes the editor exists.
@@ -868,50 +824,31 @@ export class LambdaPane implements EditablePane {
   /**
    * Offer the fork control exactly when a fork would work.
    *
-   * `frame.cut` NO LONGER GATES THIS, AND THAT REVERSES WHAT THIS METHOD USED TO CHECK — found and
-   * fixed in T8 (plan 5d-iii), because the check it replaces silently disabled this whole slice's
-   * headline capability. `detachButton`'s doc used to say a TRUNCATED frame "cannot be forked at
-   * all" — true while the seed WAS the frame's own 512-byte print (`FRAME_BYTES`, "most non-trivial
-   * terms WILL truncate here", this file's own module doc), so a `Bytes` cut was a prefix that would
-   * not parse and a `Depth` cut was not even that. Design §4.1 replaced that seed: `detach` now sends
-   * a STEP, and `main.ts` re-derives the term from the SOURCE compile's step-0 print at
-   * `LAMBDA_BYTE_BUDGET` (65,536 — 128× `FRAME_BYTES`), which this frame's own 512-byte truncation
-   * says nothing about. §4.1a states the consequence outright: "a term can still be too large to
-   * fork, and the refusal moved rather than vanished... the worker answers `scratch: null` with a
-   * diagnostic saying so, and **the pane keeps offering ✎**" — checking `frame.cut` here was
-   * therefore refusing a control that provably CAN work, which is the opposite of what §4.5's own
-   * standard asks for. The one refusal that survives is a source step-0 term that is ITSELF cut at
-   * `LAMBDA_BYTE_BUDGET`; that cannot be seen from a `LambdaState` frame at all (a different budget,
-   * a different print), so it is reported after the click — **not by routing a diagnostic into this
-   * pane's own editor, which this paragraph used to claim and which was found wrong in code review
-   * against a real worker.** The refusal this method exists to keep offering a fork for is exactly the
-   * refusal that never mounts an editor at all: a failed build never reaches `scratch-compiled`, so
-   * `setEditor` is never called and `#editor` stays `null` — `setDiagnostics`'s own doc already says
-   * that call is a no-op with no editor mounted, which is what a diagnostic routed there would have
-   * silently hit. `onScratchReply`'s `no-session` arm puts the diagnostic in a notice
-   * (`notice.ts`'s `createNotices`) instead, which is a surface this pane does not have to be able to
-   * show anything for.
+   * `frame.cut` DOES NOT GATE THIS. Under 5d-iii design §4.1, `detach` sends a STEP, and the term is
+   * re-derived from the SOURCE compile's step-0 print at `LAMBDA_BYTE_BUDGET` (65,536 — 128×
+   * `FRAME_BYTES`), which this frame's own 512-byte truncation says nothing about. 5d-iii §4.1a states
+   * the consequence outright: "a term can still be too large to fork, and the refusal moved rather than
+   * vanished... the worker answers `scratch: null` with a diagnostic saying so, and
+   * **the pane keeps offering ✎**" — checking `frame.cut` here would refuse a control that provably CAN
+   * work, which is the opposite of what 5d-i design §4.5's own standard asks for. The one refusal left
+   * is a source step-0 term that is ITSELF cut at `LAMBDA_BYTE_BUDGET`; that cannot be seen from a
+   * `LambdaState` frame at all (a different budget, a different print), so it is reported after the
+   * click. A failed build never reaches `scratch-compiled`, so `setEditor` is never called and `#editor`
+   * stays `null`; `onScratchReply`'s `no-session` arm puts the diagnostic in a notice (`notice.ts`'s
+   * `createNotices`), which is a surface this pane does not have to be able to show anything for.
    *
-   * **AND THE CONTROL DOES NOT COME BACK AFTERWARDS, WHICH THIS PARAGRAPH USED TO PROMISE.** It said
-   * the arm "asks `ScratchBuffers.noSessionReply` (`scratch.ts`) to retire the failed attempt — which is
-   * what actually keeps this control offered, by putting `#detached` back to `false` rather than by
-   * anything in this method". 5d-ii-c decision 2 deleted that retire: nothing ends a buffer implicitly,
-   * so a pane whose fork failed stays bound to the buffer that failed, `#detached` stays `true`, and the
-   * gate below withholds ✎ — correctly, since that buffer has no term to fork. §4.1a's "the pane keeps
-   * offering ✎" is therefore unmet at this pane, and design §4.4 relocates the way out to the header
-   * list, which can reach a buffer no pane is showing and is wired in `main.ts`. Retiring that buffer
-   * rebinds this pane to source, which is what makes `#detached` false again and this control offered
-   * again — through the binding, exactly as the deleted retire did, and never through this method.
-   * Nothing in this method changes either way.
+   * THE CONTROL DOES NOT COME BACK AFTERWARDS. Nothing ends a buffer implicitly, so a pane whose fork
+   * failed stays bound to the buffer that failed, `#detached` stays `true`, and the gate below withholds
+   * ✎ — correctly, since that buffer has no term to fork. 5d-iii §4.1a's "the pane keeps offering ✎" is
+   * therefore unmet at this pane, and 5d-ii-c design §4.4 relocates the way out to the header list,
+   * which can reach a buffer no pane is showing and is wired in `main.ts`. Retiring that buffer rebinds
+   * this pane to source, which is what makes `#detached` false again and this control offered again —
+   * through the binding, never through this method.
    *
-   * WHAT STILL GATES IT: a detached pane is already on the scratchpad and has nothing to fork, and an
-   * absent frame — `render(null, …)`, what a declined or not-yet-compiled leg produces — has no term
-   * at all to report a step against. Reading `ControlState` for the second of those would be a second
-   * source for the same fact.
-   *
-   * **THE LINK WINDOW'S REFUSAL WENT WITH THE WINDOW (Plan 7 part 4a).** This also withheld the
-   * control while the step-0 link window was showing, since that body was not the step's term. The view
-   * now shows only its own step, as a tree or as text, so there is nothing left for that rule to refuse.
+   * WHAT GATES IT: a detached pane is already on the scratchpad and has nothing to fork, and an absent
+   * frame — `render(null, …)`, what a declined or not-yet-compiled leg produces — has no term at all to
+   * report a step against. Reading `ControlState` for the second of those would be a second source for
+   * the same fact.
    */
   #refreshDetach(): void {
     this.#menu.setCopy(!this.#detached && this.#frame !== null ? 'ready' : null)

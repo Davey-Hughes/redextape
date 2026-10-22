@@ -22,7 +22,7 @@ import {
  * clicks, because a synthetic `.click()` is not the gesture, but where a case needs what the popover holds before its
  * link is made, which a click that awaits the browser is too slow to see. The page opens on the program `setup.ts`
  * stores, `let x = 40; x + 2`, whose legs end at λ 7, asm 5 and TM 2,870 (spec §2.7). ONE MOUNT FOR THE FILE, for
- * the reason every sibling gives.
+ * the reason `app.test.ts` gives.
  */
 
 const ENCODINGS = ['unary', 'binary']

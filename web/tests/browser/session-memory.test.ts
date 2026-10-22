@@ -9,7 +9,7 @@ import type { LambdaState, TmState } from '../../src/types'
 import { heapNow, mean, requireHeapHarness } from './probe-fixture'
 
 /**
- * PLAN 5d-i T9 — THE MEMORY PROBE. Design §4.4.
+ * THE MEMORY PROBE. Design §4.4.
  *
  * **A MEASUREMENT, NOT A GATE.** This file produces the numbers that pick one default — the boolean
  * `DROP_HISTORY_ON_UNFOCUS` in `protocol.ts` — and every assertion below is a loose sanity bound
@@ -20,34 +20,31 @@ import { heapNow, mean, requireHeapHarness } from './probe-fixture'
  * console output IS the deliverable; the decision it produced is written down where the constant it
  * chose lives.
  *
- * THE THRESHOLD, PRE-REGISTERED BEFORE ANY NUMBER EXISTED (plan T9, design §4.4): *three sessions at
- * four legs must sit at or below 2x the single-session resident figure the same harness measures
- * today.* Above that, `DROP_HISTORY_ON_UNFOCUS` flips to `true`, and the threshold does not move.
+ * THE THRESHOLD, PRE-REGISTERED BEFORE ANY NUMBER EXISTED (design §5): *three sessions at four legs
+ * must sit at or below 2x the single-session resident figure the same harness measures today.* Above
+ * that, `DROP_HISTORY_ON_UNFOCUS` flips to `true`, and the threshold does not move. That constant's doc
+ * records the verdict, and the one reading that does NOT clear 2x — the wasm side, which this harness
+ * cannot see and the third test below therefore measures separately.
  *
- * **MEASURED 2026-08-11, AND IT IS MET: 1.8160189425298086.** `protocol.ts`'s
- * `DROP_HISTORY_ON_UNFOCUS` carries every figure, and the one reading that does NOT clear 2x — the
- * wasm side, which this harness cannot see and the third test below therefore measures separately.
+ * THE HARNESS IS `frame-cost.test.ts`'s, SHARED THROUGH `probe-fixture.ts`, AND WHAT IT NEEDS IS NOT
+ * RE-DERIVED HERE: `frame-cost.test.ts` has why a heap reading is taken after a forced collection, and
+ * `vite.config.ts`'s browser `launchOptions` has the two flags it launches Chromium with. Three
+ * adaptations were forced by the size of what this file retains, each documented at its site: the
+ * rounds RELEASE rather than accumulate, the release needs a task boundary before a collection can see
+ * it, and the warm-up round is discarded rather than kept.
  *
- * THE HARNESS IS `frame-cost.test.ts`'s AND THE DEBTS IT PAID ARE NOT RE-DERIVED HERE — read that
- * file for why `performance.memory` and `globalThis.gc` are typed locally rather than in `types.ts`,
- * why `vite.config.ts`'s browser `launchOptions` passes `--enable-precise-memory-info` and
- * `--js-flags=--expose-gc`, and why a reading taken without a forced collection first is "a schedule,
- * not a size". Three adaptations were forced by the size of what this file retains, each documented at
- * its site:
- * the rounds RELEASE rather than accumulate, the release needs a task boundary before a collection
- * can see it, and the warm-up round is discarded rather than kept.
+ * Section and decision citations here are the 5d-i design's unless they name another.
  */
 
 /**
  * The most collections `round` will spend waiting for the heap to stop falling before it reads `base`,
  * and the fall below which it treats the heap as settled. A pass freeing under 256 KB is noise rather
- * than a release; eight is four times what the two-collect version this replaces ever spent, and bounds
- * a browser whose readings never settle.
+ * than a release; eight is four times the two passes a developer machine's rounds take, and bounds a
+ * browser whose readings never settle.
  *
- * ON A DEVELOPER MACHINE THE CAP IS NEVER APPROACHED — every round of a local run reports `collects: 2`,
- * the floor, because the second collection already frees nothing. The loop exists for the runner where
- * it did not: each round prints its own count, so a CI run that needed more says so in the log rather
- * than hiding it in a ratio.
+ * ON A DEVELOPER MACHINE THE CAP IS NEVER APPROACHED: the second collection already frees nothing. The
+ * loop exists for a runner where it does not: each round prints its own count, so a CI run that needed
+ * more says so in the log rather than hiding it in a ratio.
  */
 const SETTLE_PASSES = 8
 const SETTLED_BYTES = 256 * 1024
@@ -57,11 +54,8 @@ const SETTLED_BYTES = 256 * 1024
  * rather than a new one.
  *
  * IT IS THE FIXTURE BECAUSE ITS TM LEG ACTUALLY FILLS THE RING. The measurement is about what
- * `HISTORY_BYTES` costs when it is spent, and almost no program spends it: `frame-cost.test.ts`'s
- * `while4` retains ~6 MB of λ frames and stops. This one reaches the `budget` stop at 75,025 TM
- * frames — the count `app.test.ts`'s history-budget case records from a worker-only probe, reproduced
- * to the frame by the runs below, which is worth more as a cross-check than a fresh fixture would be
- * worth as novelty. Its λ leg ends naturally at 253 frames and ~6.3 MB, well under the budget, and that
+ * `HISTORY_BYTES` costs when it is spent, and almost no program spends it. This one reaches the
+ * `budget` stop on its TM leg, while its λ leg ends naturally, well under the budget, and that
  * asymmetry is itself reported by the second test.
  */
 const MAP =
@@ -95,16 +89,15 @@ function realPool(): SessionPool {
 /**
  * Bind `id`, run `MAP` on it, and retain the frames for the legs `legs` names — through the REAL
  * `SessionPool`, the REAL `session-worker.ts`, and the REAL `History`, sized and pushed exactly as
- * `main.ts`'s `onReply` does it.
+ * `replies.ts`'s `onReply` does it.
  *
  * A LEG THE SLOT DOES NOT NAME IS RECEIVED AND DROPPED, WHICH IS WHAT MAKES A SCRATCH SIMULABLE.
- * §4.1's `LambdaScratch` has a λ leg and no TM leg; `session-worker.ts` only knows `Session`, and the
- * worker module that would drive a scratch belongs to T7/T8, so this file cannot spawn one. What it
- * can do is retain exactly what a scratch would retain — one ring of the same frame type, filled from
- * the same program — because the quantity this harness measures lives entirely on THIS side of the
- * boundary. The simulation is pessimistic on the far side and exact on the near one: the third test
- * measures what a real `LambdaScratch`/`TmScratch` costs in the worker (65,536 and 0 bytes of wasm
- * against a `Session`'s 3,538,944), so the substitution is quantified rather than waved at.
+ * §4.1's `LambdaScratch` has a λ leg and no TM leg, and a slot naming one leg retains exactly what a
+ * scratch would retain — one ring of the same frame type, filled from the same program — because the
+ * quantity this harness measures lives entirely on THIS side of the boundary. The simulation is
+ * pessimistic on the far side and exact on the near one: the third test measures what a real
+ * `LambdaScratch`/`TmScratch` costs in the worker, so the substitution is quantified rather than
+ * waved at.
  */
 function record(pool: SessionPool, slot: Slot): { rings: Rings; done: Promise<void> } {
   const rings: Rings = {
@@ -164,11 +157,14 @@ async function load(slots: Slot[]): Promise<Loaded> {
   }
 }
 
-/** Today: one session, both legs. §3.2b's `SessionLegs` requires both, and the source session has both. */
+/**
+ * Arm A: one session with the two legs `Slot` models, λ and TM. The app's program session also has an
+ * asm leg, for which this harness keeps no ring.
+ */
 const ONE_SESSION: Slot[] = [{ id: 'source', legs: { lambda: true, tm: true } }]
 
 /**
- * 5d-i: three sessions, FOUR legs — the source session's two, plus one leg apiece for the two
+ * Arm B: three sessions, FOUR legs — the source slot's two (λ and TM), plus one leg apiece for the two
  * scratchpads (§4.1, and confirmed against the generated `pkg/redextape_wasm.d.ts`: `LambdaScratch`
  * exposes `stepLambda`/`lambdaState` and no TM method, `TmScratch` the mirror image).
  *
@@ -192,13 +188,12 @@ type Reading = { resident: number; base: number; delta: number; ms: number; kept
 /**
  * What a round's rings ended up holding, as plain numbers.
  *
- * NUMBERS AND NOT THE RINGS THEMSELVES, AND THAT IS NOT TIDINESS — IT IS THE MEASUREMENT. A first
- * draft kept the last arm-B round's `Loaded` in an outer variable so the assertions below could read
- * `oldestStep` off it. **`release()` UNBINDS THE WORKERS AND DOES NOT DROP THE RINGS** — only losing
- * the last reference does — so that variable carried ~150 MB of frames into every round that
- * followed, inflating their baselines and dropping the resident ratio from 1.816478530039582 to
- * 1.4135398495945761, `(base + 2C)/(base + C)` falling towards 1 exactly as this file's own model says
- * it must. Summarising to scalars is what makes that impossible to get wrong twice.
+ * NUMBERS AND NOT THE RINGS THEMSELVES, AND THAT IS NOT TIDINESS — IT IS THE MEASUREMENT.
+ * **`release()` UNBINDS THE WORKERS AND DOES NOT DROP THE RINGS** — only losing the last reference
+ * does — so a round's `Loaded` kept in an outer variable would carry its frames into every round that
+ * followed, inflating their baselines and pulling the resident ratio towards 1, `(base + 2C)/(base + C)`
+ * falling exactly as this file's own model says it must. Summarising to scalars is what makes that
+ * impossible to get wrong.
  */
 type Shape = {
   lambdaFrames: number
@@ -229,8 +224,7 @@ describe('session memory', () => {
     // reason: nothing measured may be collectable before the reading that depends on it being alive.
     //
     // BUT THEY ARE RELEASED BETWEEN ROUNDS RATHER THAN ACCUMULATED, WHICH IS WHERE THIS FILE PARTS
-    // COMPANY WITH THAT ONE. Its rounds retain ~11 MB each, so keeping all seven costs ~77 MB and
-    // buys a steady baseline. A round here retains 75 MB (arm A) or 151 MB (arm B); seven of them is
+    // COMPANY WITH THAT ONE. A round here retains 75 MB (arm A) or 151 MB (arm B); seven of them is
     // ~800 MB of live JS heap, which is a probe that measures V8's behaviour near its heap limit
     // rather than the app's memory. The property that actually matters is preserved — each round's
     // data is alive at its own `resident` reading, and `kept` below reads it AFTERWARDS so no
@@ -249,32 +243,24 @@ describe('session memory', () => {
 
     const round = async (slots: Slot[]): Promise<{ reading: Reading; shape: Shape[] }> => {
       releaseHeld()
-      // THE RELEASE NEEDS A TASK BOUNDARY BEFORE A COLLECTION CAN SEE IT, AND THIS WAS MEASURED
-      // RATHER THAN ASSUMED. `unbind` deletes the entry and calls `terminate`, but the previous
-      // round's frames stayed reachable across two immediate `collect()` calls: with this `await`
-      // removed, arm A's `base` read 167,222,632 — the whole of the preceding arm-B round — and its
-      // delta came back as -75,368,894. A negative delta is the signature, and it is the same class
-      // of error as reading an uncollected heap: the number is real, it just is not a size.
+      // THE RELEASE NEEDS A TASK BOUNDARY BEFORE A COLLECTION CAN SEE IT. `unbind` deletes the entry
+      // and calls `terminate`, but without this `await` the previous round's frames stay reachable
+      // across two immediate `collect()` calls: arm A's `base` would read the whole of the preceding
+      // arm-B round, and its delta would come back negative. A negative delta is the signature, and
+      // it is the same class of error as reading an uncollected heap: the number is real, it just is
+      // not a size.
       await new Promise((r) => setTimeout(r, 100))
-      // COLLECTED UNTIL THE HEAP STOPS FALLING, WHERE THIS USED TO COLLECT EXACTLY TWICE. One full
-      // collection is enough for `frame-cost.test.ts`'s ~11 MB of young objects; these rounds put tens
-      // of thousands of frames into old space, and two passes were chosen as "cheap insurance against a
-      // reading taken one cycle early". On a loaded runner two is not always enough, and the residue
-      // lands in `base`, which is the one reading nothing downstream can correct.
+      // COLLECTED UNTIL THE HEAP STOPS FALLING. These rounds put tens of thousands of frames into old
+      // space, and on a loaded runner two collections are not always enough: the residue lands in
+      // `base`, which is the one reading nothing downstream can correct.
       //
-      // **MEASURED, IN CI RUN 441 ON `450440e2`.** Both arms' baselines rose by the same ~22.9 MB
-      // against the run before it on the same runner: arm A's `resident` rose with its `base` (the
-      // residue survived both readings) while arm B's did not (it was collected between them), which is
-      // uncollected garbage by its own signature rather than anything the app allocated. It dropped the
-      // resident ratio from 1.5494 to 1.3281.
-      //
-      // IT STILL COLLECTS AT LEAST TWICE, which is the insurance the two-collect version bought and
-      // which a bare "stop when it stops falling" loop would have thrown away: a first pass that frees
-      // nothing would end it after one. Past that it stops on a pass that freed no more than
-      // `SETTLED_BYTES`, capped at `SETTLE_PASSES` so a browser whose readings never settle costs a
-      // bounded number of passes rather than hanging. Reaching the cap is not a failure — `base` is
-      // then simply the best floor available, and the assertions below no longer depend on it. The
-      // count is reported in each round's console line so a run that needed more than two says so.
+      // IT COLLECTS AT LEAST TWICE, as insurance against a reading taken one cycle early, which a bare
+      // "stop when it stops falling" loop would throw away: a first pass that frees nothing would end
+      // it after one. Past that it stops on a pass that freed no more than `SETTLED_BYTES`, capped at
+      // `SETTLE_PASSES` so a browser whose readings never settle costs a bounded number of passes
+      // rather than hanging. Reaching the cap is not a failure — `base` is then simply the best floor
+      // available, and the assertions below do not depend on it. The count is reported in each
+      // round's console line so a run that needed more than two says so.
       collect()
       let collects = 1
       let base = heapNow()
@@ -289,10 +275,9 @@ describe('session memory', () => {
       const loaded = await load(slots)
       const ms = performance.now() - t0
       held = loaded
-      // TWICE, NOT ONCE, SINCE A λ FRAME'S SPANS ARE A `Uint8Array` (2026-10-07). `usedJSHeapSize` counts a typed
-      // array's bytes while it is retained, and still counts them after one forced collection once it is not:
-      // 36,000,000 bytes of dropped arrays read +36,002,008 after one `gc()` and +2,008 after two. Spans the page has
-      // dropped by the reading would read as resident after one.
+      // TWICE, NOT ONCE, BECAUSE A λ FRAME'S SPANS ARE A `Uint8Array`. `usedJSHeapSize` counts a typed
+      // array's bytes while it is retained, and still counts them after one forced collection once it is
+      // not, so spans the page has dropped by the reading would read as resident after one.
       collect()
       collect()
       const resident = heapNow()
@@ -342,20 +327,14 @@ describe('session memory', () => {
     //
     // THE DELTA IS PRINTED ANYWAY, AND IT IS THE STRICTER OF THE TWO, because a reader is entitled to
     // ask what the answer looks like with the harness's own ~17.0 MB page baseline removed. It comes
-    // out at exactly 2 AND HAS NO SIGN AT THIS PRECISION: four runs of this probe read
-    // 2.000012445644004, 1.999953682804821, 1.9999763640919819 and 1.99990656956171 — ONE OF THEM
-    // ABOVE 2 — straddling it by under a kilobyte in 150 MB while the round-to-round spread of the
-    // single-session delta alone is ~7,700 bytes. "At or below 2x" is satisfied by "at", so the
+    // out at 2 — four legs is twice two legs — and "at or below 2x" is satisfied by "at", so the
     // verdict does not depend on which of the two readings is taken, which is the only reason it is
     // safe to name one.
     //
     // THE BASELINE IS ALSO WHY THE RESIDENT RATIO IS NOT A CONSTANT OF THE APP. `(base + 2C)/(base + C)`
-    // falls towards 1 as `base` grows, and this file's own `init()` in the third test raised the page
-    // baseline from ~16.41 MB to ~17.0 MB and moved the ratio from 1.8213397456344755 to
-    // 1.816478530039582 and 1.8160189425298086 — the model reproducing itself to three decimals. The
-    // shipped app's baseline (CodeMirror, the main-thread wasm module, the DOM) is larger still, so
-    // this figure is an upper bound on the app's and the delta reading above is the floor. Both clear
-    // the threshold.
+    // falls towards 1 as `base` grows. The shipped app's baseline (CodeMirror, the main-thread wasm
+    // module, the DOM) is larger still, so this figure is an upper bound on the app's and the delta
+    // reading above is the floor.
     console.log('mean resident: one', residentOne, 'three', residentThree, 'ratio', residentThree / residentOne)
     console.log('mean delta   : one', deltaOne, 'three', deltaThree, 'ratio', deltaThree / deltaOne)
     console.log('threshold 2.0 met (resident):', residentThree / residentOne <= 2)
@@ -368,19 +347,14 @@ describe('session memory', () => {
     // the probe rather than a finding about memory. Neither bound is the threshold; see this file's
     // header for why the threshold is not asserted at all.
     //
-    // **ON THE DELTA RATIO, WHERE THIS USED TO BOUND THE RESIDENT ONE — and the resident one could not
-    // carry a bound, by this file's own model.** `(base + 2C)/(base + C)` falls towards 1 as `base`
-    // grows, which the paragraph above says in as many words, so a bound on it is a bound on the page
-    // baseline rather than on the app. The baselines this probe actually meets differ by a factor of
-    // five: ~17 MB on a developer machine against ~62 MB on CI runner `450440e2`, which put main's own
-    // reading at 1.5505 against a bound of 1.5 — clearing it by three hundredths. Run 441 then read
-    // 1.3281 and failed the build on a branch that had not touched this file, which is exactly the
-    // "browser update moved a heap reading two percent" retirement this file's header forbids.
+    // **ON THE DELTA RATIO, NOT THE RESIDENT ONE — the resident one cannot carry a bound, by this file's
+    // own model.** `(base + 2C)/(base + C)` falls towards 1 as `base` grows, which the paragraph above
+    // says in as many words, so a bound on it is a bound on the page baseline rather than on the app,
+    // and the baselines this probe meets differ by a factor of five between a developer machine and a
+    // CI runner.
     //
     // THE DELTA IS THE SAME SANITY CHECK ON THE QUANTITY THE PROBE IS ABOUT. `2C/C` has no `base` in it
-    // and is what the console block above already calls the stricter reading. Across the three CI runs
-    // that produced the figures above, `deltaOne` read 75,438,868, 75,438,868 and 75,439,880 bytes —
-    // constant to within a kilobyte while the resident readings moved by 23 MB. A ratio near 1 still
+    // and is what the console block above already calls the stricter reading. A ratio near 1 still
     // means arm B retained nothing extra, which is the failure both bounds exist to catch.
     const deltaRatio = deltaThree / deltaOne
     expect(deltaRatio).toBeGreaterThan(1.5)
@@ -427,8 +401,7 @@ describe('session memory', () => {
       const base = heapNow()
       const loaded = await load(slots)
       held = loaded
-      // Twice, for `round`'s reason in the test above. With one, the λ ring read 1,248,021.33 bytes where it reads
-      // 1,233,805.33, in one run (2026-10-07).
+      // Twice, for `round`'s reason in the test above.
       collect()
       collect()
       const real = heapNow() - base
@@ -465,9 +438,9 @@ describe('session memory', () => {
 
     // Sanity only: a ratio at or near zero means nothing was retained, and one past 5 means the
     // sizers are not measuring the same objects the heap is. The figures themselves are the output,
-    // and `HISTORY_BYTES`'s doc in `protocol.ts` is where they are written down. **THE λ FLOOR IS 0.1, WHERE IT WAS
-    // 0.5, SINCE A λ FRAME'S SPANS CROSS AS BYTES (2026-10-07)**: `SPAN_BYTES` still charges a span 80 and it holds
-    // 12.56 (`frame-cost.test.ts`), so the λ ring reads 0.1945 of its charge; a ring keeping its frames without
+    // and `HISTORY_BYTES`'s doc in `protocol.ts` is where they are written down. **THE λ FLOOR IS 0.1
+    // BECAUSE A λ FRAME'S SPANS CROSS AS BYTES**: `SPAN_BYTES` charges a span 80 and it holds 12.56
+    // (`frame-cost.test.ts`), so the λ ring reads 0.1945 of its charge; a ring keeping its frames without
     // their spans read 0.048.
     expect(lamReal / lamAcc).toBeGreaterThan(0.1)
     expect(tmReal / tmAcc).toBeGreaterThan(0.5)
@@ -520,9 +493,10 @@ describe('session memory', () => {
     held.push(ls)
     console.log(`LambdaScratch (${lambdaSteps} steps):`, afterLambdaScratch, 'growth', afterLambdaScratch - baseline)
 
-    // The headerless machine from `crates/redextape-wasm/tests/browser.rs`'s T3 case — one rule, blank
-    // tape, `MIN_FIELD_WIDTH`. Small on purpose: this measures a scratch's FLOOR, and the ceiling is
-    // whatever the user types.
+    // The headerless machine from `crates/redextape-wasm/tests/browser.rs`'s
+    // `a_headerless_tm_scratch_runs_and_says_its_configuration_was_invented` — one rule, blank tape,
+    // `MIN_FIELD_WIDTH`. Small on purpose: this measures a scratch's FLOOR, and the ceiling is whatever
+    // the user types.
     const { scratch: ts } = tmScratch(
       'tapes 1\nstart scan\n\nstate scan:\n  [1] -> write [*], move [R], goto scan\n  [*] -> write [1], move [S], goto halt\nstate halt: accept\n',
     ) as { scratch: { stepTm(): boolean; tmState(r: number): unknown } | null }
@@ -569,20 +543,20 @@ describe('session memory', () => {
     const sessionCost = afterStepping - afterTmScratch
     const lambdaScratchCost = afterLambdaScratch - baseline
     const tmScratchCost = afterTmScratch - afterLambdaScratch
-    const today = baseline + sessionCost
-    const tomorrow = 3 * baseline + sessionCost + lambdaScratchCost + tmScratchCost
-    console.log('one worker  (baseline + Session)      :', today)
-    console.log('three workers (3*baseline + all three):', tomorrow)
-    console.log('wasm ratio:', tomorrow / today)
+    const oneWorker = baseline + sessionCost
+    const threeWorkers = 3 * baseline + sessionCost + lambdaScratchCost + tmScratchCost
+    console.log('one worker  (baseline + Session)      :', oneWorker)
+    console.log('three workers (3*baseline + all three):', threeWorkers)
+    console.log('wasm ratio:', threeWorkers / oneWorker)
 
     // Sanity only. The module has to cost something, a session has to cost more than nothing, and
     // three threads cannot cost less than one — an inversion in any of those means the reading is not
     // measuring what the names say. The ratio is the output and is NOT asserted: it exceeds 2, and
-    // the threshold this slice pre-registered is over the heap harness's figure and not this one.
+    // the threshold design §5 pre-registers is over the heap harness's figure and not this one.
     // `DROP_HISTORY_ON_UNFOCUS`'s doc records the overshoot and why the boolean is not its remedy.
     expect(baseline).toBeGreaterThan(0)
     expect(sessionCost).toBeGreaterThan(0)
-    expect(tomorrow).toBeGreaterThan(today)
+    expect(threeWorkers).toBeGreaterThan(oneWorker)
     expect(held.length).toBe(3)
   })
 })

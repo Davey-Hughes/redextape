@@ -7,8 +7,8 @@ import { SHELL, stateIdle, until } from './harness'
 /**
  * **A STORED PROGRAM THE APP REFUSES OPENS THE FIRST-LOAD EXAMPLE, AND SAYS NOTHING** — Plan 7 part 6a spec §4.3 and
  * §7: a refusal cannot be told from a first visit. The refusal here is the one only the browser can see, an encoding
- * `encodings()` does not list; `program-store.test.ts` holds every other. ONE MOUNT FOR THE FILE, for the reason every
- * sibling gives.
+ * `encodings()` does not list; `program-store.test.ts` holds every other. ONE MOUNT FOR THE FILE, for the reason
+ * `app.test.ts` gives.
  */
 
 localStorage.setItem(

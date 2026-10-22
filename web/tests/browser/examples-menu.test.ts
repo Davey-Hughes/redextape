@@ -9,7 +9,7 @@ import { examplesButton, noticeText, picker, SHELL, segments, stateIdle, undoBut
 /**
  * **`examples ▾`: THE MENU, A PICK AND ITS UNDO** — Plan 7 part 6a spec §4.2, §4.5 and §6. Driven by real pointer
  * clicks and by keys, because a synthetic `.click()` is not the gesture. The page opens on the program `setup.ts`
- * stores, `let x = 40; x + 2` under `unary`. ONE MOUNT FOR THE FILE, for the reason every sibling gives.
+ * stores, `let x = 40; x + 2` under `unary`. ONE MOUNT FOR THE FILE, for the reason `app.test.ts` gives.
  */
 
 const menu = () => document.querySelector<HTMLElement>('#examples-menu') as HTMLElement

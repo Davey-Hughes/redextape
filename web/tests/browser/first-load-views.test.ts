@@ -68,8 +68,7 @@ describe('a first load, in a window wider than it is tall', () => {
   /**
    * **A PRESSED TOGGLE DIFFERS FROM ONE THAT IS NOT BY MORE THAN ITS COLOURS** (spec §6): its border is solid where
    * the other's is dashed, and it is underlined, by an inset shadow along its foot. Each is read apart, so either one
-   * taken out of `style.css` fails; with both out, pressed and not pressed differed by colour alone and every file
-   * passed.
+   * taken out of `style.css` fails.
    */
   it('draws a pressed toggle solid and underlined, and one that is not dashed with no underline', () => {
     const look = (b: HTMLButtonElement): { border: string; underlined: boolean } => {

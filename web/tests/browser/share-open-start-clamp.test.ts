@@ -11,7 +11,7 @@ import { fourViewWorkspace, noticeText, SHELL, stepTextOf, undoButton, until } f
  * which `main()` scheduled before the open was said, and not the open; the leg stops short; and the clamp's notice
  * carries the open's `undo`, which puts back what storage would have opened on. The link carries a light program,
  * `let y = 10; y + 5`, whose λ run ends at step 7, long before the link's 100; the stored one is `let x = 40; x + 2`
- * (`setup.ts`). ONE MOUNT FOR THE FILE, for the reason every sibling gives.
+ * (`setup.ts`). ONE MOUNT FOR THE FILE, for the reason `app.test.ts` gives.
  */
 
 const STORED = 'let x = 40; x + 2'

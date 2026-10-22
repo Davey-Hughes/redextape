@@ -2,19 +2,17 @@
  * THE PLAYER — one `requestAnimationFrame` loop over every playing leg, at the workspace's one speed
  * (Plan 7 part 2 spec §8).
  *
- * **IT REPLACES A `setInterval` PER LEG, AND THE REASON IS THE SPEEDS, NOT TIDINESS.** `transport.ts`'s
- * interval stepped once every 120 ms, about 8 steps a second: `fact(3)`'s 18,574 transitions took about 39
- * minutes. An interval cannot step faster than the display paints anyway, so rates above 60/s take several
- * steps per frame and paint once — `advance` is that arithmetic, kept pure so a node test can hold it.
+ * **ONE FRAME LOOP RATHER THAN A `setInterval` PER LEG, AND THE REASON IS THE SPEEDS, NOT TIDINESS.** An
+ * interval cannot step faster than the display paints, so rates above 60/s take several steps per frame and
+ * paint once — `advance` is that arithmetic, kept pure so a node test can hold it.
  *
  * **THE FLAG ON THE LEG IS THE TRUTH, AND THE PLAYER ONLY FOLLOWS IT.** `LegState.playing` is what the step
  * control reads to show `⏸`, and `sessions.ts`'s `resetLegs` clears it when a recompile replaces the
  * history. The player therefore checks the flag on every frame and lets go of a leg whose flag something
  * else cleared, rather than keeping a second copy of "is this playing" that could disagree.
  *
- * **SEMANTICS UNCHANGED:** play walks recorded frames, stops at the recorded frontier, and never asks the
- * worker for more — `▶` at the frontier and *continue* do that, so play cannot run away with a cap raise
- * nobody clicked.
+ * Play walks recorded frames, stops at the recorded frontier, and never asks the worker for more — `▶` at
+ * the frontier and *continue* do that, so play cannot run away with a cap raise nobody clicked.
  */
 
 /**

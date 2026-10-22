@@ -35,10 +35,10 @@ import { resetOffered, userPickInWorkspaceMenu } from './user-event-fixture'
  * 3. the TM toggle then asks for one view more, `tm-0`: 65, refused.
  *
  * **BOTH SIDES OF THE BOUND**: the switch to 64 goes through and the switches to 65 do not. With a switch to 66 as the
- * only case, the bound passed a view higher (measured 2026-10-12: `> MAX_TREE_LEAVES + 1` in `main.ts`'s `switchTo`).
+ * only case, a bound a view higher (`> MAX_TREE_LEAVES + 1` in `main.ts`'s `switchTo`) would pass.
  *
  * **THE NOTICE SAYS THE THREE NUMBERS.** A switch can be refused short of the bound, as the first one here is at 63,
- * and it was told "the workspace holds 64 views" (measured 2026-10-12).
+ * where "the workspace holds 64 views" would be untrue.
  *
  * `live-views-bound.test.ts` holds the bound for `+ view`. Storage is read once, at the mount, so each stores its
  * own workspace before it and each is a file.
@@ -112,8 +112,8 @@ describe('a switch, with 62 λ views on screen and the source view remembered', 
 
   /**
    * **A CUSTOM WORKSPACE'S MENU HAS NO *RESET PRESET*.** Its switches match no preset, and `app-header.ts`'s
-   * `workspaceItems` leaves the item out until one is chosen. The notice named it there all the same, as the way to
-   * make room; it names choosing a preset first now, which is what brings the item back.
+   * `workspaceItems` leaves the item out until one is chosen. The notice names choosing a preset first there, as the
+   * way to make room, which is what brings the item back.
    */
   it('names choosing a preset first in a custom workspace, whose menu has no reset preset', async () => {
     expect(liveViewCount(), 'precondition: the live views are exactly the bound').toBe(MAX_TREE_LEAVES)

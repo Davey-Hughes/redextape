@@ -10,9 +10,10 @@
  * is positional: the nearest control that still works, in the same header or menu.
  *
  * **THE CANDIDATE LIST IS THE CALLER'S, AND `nearest` IS ONLY THE DEFAULT WAY TO BUILD ONE.**
- * `step-controls.ts` prefers *forward, play, back, restart*, then the speed select — an order that is
- * about what those controls MEAN, not where they sit, and DOM order would put the speed select first.
- * A single function computing the order for everyone would have had to be wrong for one of them.
+ * `step-controls.ts` names its step buttons first and the speed select last — an order that is about
+ * what those controls MEAN, not where they sit, and `nearest` from its continue button would put the
+ * speed select first. A single function computing the order for everyone would have had to be wrong
+ * for one of them.
  *
  * **NOT MOVING IS A RESULT, AND IT IS REPORTED.** With no usable candidate this leaves the focus where it
  * is and answers `false`. Blurring to `<body>` would be the failure the whole rule exists to prevent,

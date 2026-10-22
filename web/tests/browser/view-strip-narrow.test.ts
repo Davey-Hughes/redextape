@@ -16,16 +16,15 @@ import {
 } from './harness'
 
 /**
- * **EXPLORER'S STEP STRIPS ON A PHONE'S SCREEN** — each view's own step controls (`view-header.ts`'s `.view-steps`,
- * the `steps` switch at `view`), in Explorer, at 320px and 390px, under a short step line and a long one. A strip was
- * one row that never wrapped: at 390px `fact(4)`'s λ strip was 398px wide in a 189px view, so `keep recording` lay at
- * x = 498–599 against the view's right edge at 390 and could be reached only by scrolling the view sideways, and every
- * strip squeezed its step text into a column a few characters wide. What is held is that each strip lies inside its
- * view at a phone's width, with its step text the width of the view's header wherever it wraps and `keep recording` on
- * one line; that at a desktop's width a short line's strip is still one row beside the title with `main`'s gaps,
- * while a long line's strip is two rows, its step text and `keep recording` one line each; and that at every width
- * each control is drawn and no box in the header hides text. (The 398px and 189px are the browser tier's: headless,
- * it draws no scrollbar.) ONE MOUNT FOR THE FILE, for the reason every sibling gives.
+ * **EXPLORER'S STEP STRIPS ON A PHONE'S SCREEN** — each view's own step controls (`view-header.ts`'s `.view-steps`, the
+ * `steps` switch at `view`), in Explorer, at 320px and 390px, under a short step line and a long one. A strip that is
+ * one row and never wraps would, at 390px, put `keep recording` in `fact(4)`'s λ strip past the view's right edge,
+ * where only a sideways scroll of the view reaches it, and squeeze every strip's step text into a column a few
+ * characters wide. What is held is that each strip lies inside its view at a phone's width, with its step text the
+ * width of the view's header wherever it wraps and `keep recording` on one line; that at a desktop's width a short
+ * line's strip is one row beside the title with the header's and `.controls`' gaps, while a long line's strip is two
+ * rows, its step text and `keep recording` one line each; and that at every width each control is drawn and no box in
+ * the header hides text. ONE MOUNT FOR THE FILE, for the reason `app.test.ts` gives.
  */
 
 /** Explorer's three views that step, in the order the page draws them. The source view has no strip. */
@@ -78,7 +77,7 @@ const boxesFor = (line: Line, leaf: Leaf): string[] => [
  * ellipsis fails here, as does a strip or its controls clipping a row, where every box's position can still pass.
  *
  * **THE SPEED SELECT IS LEFT OUT.** Chrome draws a select's chosen option itself, and its `scrollHeight` read 20
- * against a `clientHeight` of 18 in every case this file measures (2026-10-04), where no other box here read over.
+ * against a `clientHeight` of 18 in every case this file measures, where no other box here read over.
  */
 const hidesNothing = (leaf: Leaf): void => {
   const holders: [string, HTMLElement][] = [
@@ -205,9 +204,9 @@ describe.each(LINES)('Explorer’s step strips, under $name', (line) => {
    * page moves while it is measured.
    *
    * **TWO WAITS, NOT ONE**, each with its own name and its own 10s, and the two together inside the hook's own 30s.
-   * `fact(4)`'s λ line is final well before the other legs' result arrives. Here, under a 25% CPU quota, three runs on
-   * 2026-10-04 put the two together at 5,413, 6,117 and 7,001ms, the last 70% of one wait's 10s; the split is
-   * `step-bar-narrow.test.ts`', where #123 measured the same pair, under `unary` in Debugger, past it.
+   * `fact(4)`'s λ line is final well before the other legs' result arrives, and under a 25% CPU quota the two together
+   * took 70% of one wait's 10s; the split is `step-bar-narrow.test.ts`', whose `beforeAll` doc has the same pair in
+   * Debugger, where the result came past the 10s.
    */
   beforeAll(async () => {
     await page.viewport(1280, 800)
@@ -236,13 +235,12 @@ describe.each(LINES)('Explorer’s step strips, under $name', (line) => {
    * to be CLICKABLE without a sideways scroll: `elementFromPoint` at its centre is the button, once the view and the
    * page are scrolled VERTICALLY to it if it lies below either's fold.
    *
-   * **A STEP TEXT SET ON MORE THAN ONE LINE IS AS WIDE AS ITS VIEW'S HEADER.** At 390px the old strip squeezed
-   * `sum_to(5)`'s line into four lines of a 28px column. The step text may wrap, and `fact(4)`'s λ line must at these
-   * widths, so it is held to more than one line; but only on a row of its own, where it has the header's whole width
-   * (`roomOf`, which says why the strip's own width will not do). **`keep recording` IS ONE LINE**, 146px wide in a
-   * 154px or 189px view. **THE ROWS OF A WRAPPED STRIP ARE `var(--space-1)` APART**, the step bar's own row gap
-   * (`.step-bar-inner`), where `.controls`' own `gap` would set them `var(--space-2)` apart. **EVERY CONTROL IS DRAWN
-   * AND NONE HIDES TEXT** (`boxesFor`, `hidesNothing`).
+   * **A STEP TEXT SET ON MORE THAN ONE LINE IS AS WIDE AS ITS VIEW'S HEADER.** The step text may wrap, and `fact(4)`'s
+   * λ line must at these widths, so it is held to more than one line; but only on a row of its own, where it has the
+   * header's whole width (`roomOf`, which says why the strip's own width will not do). **`keep recording` IS ONE
+   * LINE.** **THE ROWS OF A WRAPPED STRIP ARE `var(--space-1)` APART**, the step bar's own row gap (`.step-bar-inner`),
+   * where `.controls`' own `gap` would set them `var(--space-2)` apart. **EVERY CONTROL IS DRAWN AND NONE HIDES TEXT**
+   * (`boxesFor`, `hidesNothing`).
    *
    * **EVERY GEOMETRY ASSERTION IS SOFT, EVERY PRECONDITION HARD**, here and at 1280px: a red run names each property
    * that fails rather than stopping at the first, so the header, each box and `keep recording` are each shown able to
@@ -298,22 +296,20 @@ describe.each(LINES)('Explorer’s step strips, under $name', (line) => {
   })
 
   /**
-   * **AT A DESKTOP'S WIDTH A SHORT LINE'S STRIP IS ONE ROW BESIDE THE TITLE, WITH `main`'S GAPS**: every box of the
-   * header (the title, each control, the step text, the view's actions) on the title's vertical centre, `↺`
-   * `var(--space-3)` after the heading (the header's own gap), and each box of the strip after it `var(--space-2)`
-   * after the one before (`.controls`' gap). **A LONG LINE'S STRIP IS TWO ROWS, THE TRANSPORT AND THE SPEED, THEN THE
-   * STEP TEXT AND `keep recording`, EACH OF THESE ON ONE LINE.** At 1280px the old strip already took a row of its own
-   * under the title, and kept every box on that one row by setting `fact(4)`'s λ line and its button on two lines
-   * each. The rows are `var(--space-1)` apart, as at a phone's width. Held by what each row holds, since a strip of
-   * three rows (`keep recording` on one of its own) keeps every line to one and every box inside the view. Every
-   * control is drawn and none hides text, as at a phone's width.
+   * **AT A DESKTOP'S WIDTH A SHORT LINE'S STRIP IS ONE ROW BESIDE THE TITLE**: every box of the header (the title, each
+   * control, the step text, the view's actions) on the title's vertical centre, `↺` `var(--space-3)` after the heading
+   * (the header's own gap), and each box of the strip after it `var(--space-2)` after the one before (`.controls`'
+   * gap). **A LONG LINE'S STRIP IS TWO ROWS, THE TRANSPORT AND THE SPEED, THEN THE STEP TEXT AND `keep recording`, EACH
+   * OF THESE ON ONE LINE.** The rows are `var(--space-1)` apart, as at a phone's width. Held by what each row holds,
+   * since a strip of three rows (`keep recording` on one of its own) keeps every line to one and every box inside the
+   * view. Every control is drawn and none hides text, as at a phone's width.
    *
    * **THAT IS ALL IT HOLDS, NOT WHERE EACH BOX IS.** A box that grows inside its row's room moves every box after it
-   * and keeps every gap, so it leaves every case here passing: a speed select padded `0.1em 0.6em` moved the asm view's
-   * step text 7.19px and did. Grown past that room, the view's actions take a second row, which this case catches.
-   * Where each box lies against `main` was measured once, by hand, and the roadmap entry has the figures.
+   * and keeps every gap, so it leaves every case here passing. Grown past that room, the view's actions take a second
+   * row, which this case catches. The roadmap entry "EXPLORER'S STEP STRIP WRAPS INSIDE ITS VIEW" gives the x ranges
+   * of some boxes at 1280 px: four in `fact(4)`'s asm view, and the λ view's `keep recording`.
    */
-  it('at 1280 px, a short line is one row as before and a long line is two rows of one line', async () => {
+  it('at 1280 px, a short line is one row beside the title and a long line is two rows of one line', async () => {
     await at(line, 1280, 800)
     for (const leaf of STEPPED) {
       expect.soft(namesOf(leaf), `${leaf}’s boxes`).toEqual(boxesFor(line, leaf))

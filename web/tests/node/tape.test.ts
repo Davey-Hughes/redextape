@@ -8,10 +8,9 @@ const NAMES = ['REG', 'WORK', 'STACK', 'HEAP', 'BOX']
 const state = (over: Partial<TmState> = {}): TmState => tmStateOf(5, 3, 'abcde', over)
 
 describe('tapeRows', () => {
-  // THE ONE PIECE OF ARITHMETIC IN THE TM PANE. `heads` and `window_start` are both
-  // MATERIALIZED-TAPE coordinates (`viewmodel.rs`'s `TmState` struct doc), so the head's position
-  // inside the window is their difference. Getting it wrong draws the marker on the wrong cell,
-  // silently.
+  // `tapeRows`' ONE PIECE OF ARITHMETIC. `heads` and `window_start` are both MATERIALIZED-TAPE
+  // coordinates (`viewmodel.rs`'s `TmState` struct doc), so the head's position inside the window
+  // is their difference. Getting it wrong draws the marker on the wrong cell, silently.
   it('places the head at heads[i] - window_start[i]', () => {
     const [row] = tapeRows(state(), NAMES)
     expect(row?.headIndex).toBe(2)
@@ -60,8 +59,8 @@ describe('tapeRows', () => {
     expect(tapeRows(s, NAMES).map((r) => r.label)).toEqual(NAMES)
   })
 
-  // `tapeNames()` describes machines THIS compiler produced. A hand-written machine (Plan 5d) may
-  // declare up to MAX_TAPES, and a positional label is the honest answer past the array's end.
+  // `tapeNames()` describes machines THIS compiler produced. A hand-written machine may declare up to
+  // MAX_TAPES, and a positional label is the honest answer past the array's end.
   it('falls back to a positional label past the end of the names', () => {
     const s = state({ heads: [0, 0], window_start: [0, 0], window: ['a', 'b'] })
     expect(tapeRows(s, ['ONLY']).map((r) => r.label)).toEqual(['ONLY', 'tape 1'])

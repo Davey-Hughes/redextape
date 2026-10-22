@@ -21,7 +21,7 @@ import { mountLambdaBody } from './lambda-body-fixture'
  *
  * AND NO ROW NAMES A NODE IT DOES NOT START, in any state drawn: not in its `▸`/`▾`, and not in what its ←
  * folds. A broken node's closing `)` lands on its last row (`codeLines`'s `close`), and a row read by that
- * token once claimed a chip it only ended.
+ * token would claim a chip it only ended.
  */
 
 const mount = () => mountLambdaBody('lambda-fold-routes-fixture')

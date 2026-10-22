@@ -93,7 +93,7 @@ describe('the step controls', () => {
 
   /**
    * **THE CHAIN'S END, WHICH IS THE STATE A COPY'S WORKER THROWING PRODUCES.** `controls.ts`'s
-   * unavailable branch disables all four transport buttons and offers no continue label at once, so the
+   * unavailable branch disables every transport button and offers no continue label at once, so the
    * neighbour chain has nothing in it; the speed select is what is left, and it is never disabled.
    */
   it('still hands the focus on when nothing in the strip is live', () => {

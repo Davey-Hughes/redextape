@@ -23,15 +23,12 @@ describe('lspLintRanges', () => {
   })
 
   /**
-   * **THE WIDENING IS REACHABLE AND COMMON, WHICH WAS MEASURED RATHER THAN ASSUMED.** Driving the
-   * real server over fifteen broken programs produced ten zero-width ranges: `let x = ` reports
-   * `0:8-0:8` twice, `1 +` and `(` and `if` and `let` each once, `(\x. x` once, and a `.tm` file
-   * missing its `tapes` line once. CodeMirror renders NOTHING for `from === to`, so without this
-   * the gutter would mark those and the text would not.
+   * **THE WIDENING IS REACHABLE AND COMMON.** The real server reports zero-width ranges for broken
+   * programs such as `let x = ` (`0:8-0:8`), `1 +` and `(`. CodeMirror renders NOTHING for
+   * `from === to`, so without this the gutter would mark those and the text would not.
    *
    * `let x = ;` is NOT one of them — it reports `0:8-0:9`. A browser test named for the zero-width
-   * case while using that program tests the ordinary path under a misleading name, which is what
-   * this file was written to stop.
+   * case while using that program tests the ordinary path under a misleading name.
    */
   it('widens a zero-width diagnostic forwards so CodeMirror renders it', () => {
     const doc = Text.of(['let x = '])
@@ -61,7 +58,8 @@ describe('lspLintRanges', () => {
    * **THE SERVER CAN BE AHEAD OF THE DOCUMENT, AND `doc.line` THROWS RATHER THAN CLAMPING.**
    * `didChange` goes out from the update listener and `publishDiagnostics` comes back
    * asynchronously, so a fast typist can delete the line a diagnostic in flight refers to. An
-   * unclamped conversion takes out the whole worker message handler.
+   * unclamped conversion would throw out of `LspClient`'s listener for the worker's messages partway
+   * through a reply, and the rest of that reply would be dropped.
    */
   it('clamps a diagnostic that names a line past the end of the document', () => {
     const doc = Text.of(['one line'])
@@ -88,8 +86,8 @@ describe('lspLintRanges', () => {
   })
 
   /**
-   * **SWAPPED, NOT COLLAPSED** — the same policy `lsp-text.ts`'s `rangeOf` applies. The previous
-   * assertion was only `from <= to`, which both policies satisfy, so it could not tell them apart.
+   * **SWAPPED, NOT COLLAPSED** — the same policy `lsp-text.ts`'s `rangeOf` applies. An assertion of
+   * only `from <= to` could not tell them apart: both policies satisfy it.
    */
   it('swaps an inverted range, preserving its extent', () => {
     const doc = Text.of(['abcdef'])

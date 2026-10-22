@@ -60,10 +60,10 @@ export type AsmPanels = {
  * then the copy's value, the panels above, and the outline — its labels — last. The listing stays: it is the only
  * place the instruction about to run is marked, since a copy's editor marks no running line (spec §10).
  *
- * `AsmPane` SATISFIES `PaneView<AsmState>`, as the λ and TM views satisfy theirs, with no `implements` clause —
- * `sessions.ts`'s `PaneView` doc says why the parameterisation is the check. It implements `EditablePane`, as
- * `TmPane` does, so custody can mount a copy's editor on it and destroy the one it leaves; its members hand off
- * to `#copy`, the `CopyEditor` the two views share.
+ * `AsmPane` SATISFIES `PaneView<AsmState>`, as the λ and TM views satisfy theirs, with no `implements PaneView`
+ * clause — `sessions.ts`'s `PaneView` doc says why the parameterisation is the check. It implements `EditablePane`,
+ * as `TmPane` does, so custody can mount a copy's editor on it and destroy the one it leaves; its members hand off to
+ * `#copy`, the `CopyEditor` the two views share.
  */
 export class AsmPane implements EditablePane {
   #header: ViewHeader
@@ -83,7 +83,10 @@ export class AsmPane implements EditablePane {
   #focused: ReadonlySet<number> = new Set()
   #grid: VirtualGrid
   #listingPanel: Panel
-  /** Re-attaches following — `follow current instruction`, in the listing panel's header (amendment 9). */
+  /**
+   * Re-attaches following — `follow current instruction`, in the listing panel's header (Plan 7 part 5 spec
+   * amendment 9).
+   */
   #reattach: HTMLButtonElement
   #registersPanel: Panel
   #registers: HTMLElement
@@ -233,9 +236,9 @@ export class AsmPane implements EditablePane {
     )
     this.#header.steps.append(this.#steps.el)
     host.replaceChildren(this.#header.el, this.#body)
-    // THE REGIONS THAT SHARE THE VIEW'S HEIGHT (the view layouts spec §11.1), top to bottom, with the shares
-    // `style.css` fixed before a boundary could be dragged. The registers and the call stack are one region, the row
-    // they share: no boundary parts the two (they wrap one under the other in a narrow view).
+    // THE REGIONS THAT SHARE THE VIEW'S HEIGHT (the view layouts spec §11.1), top to bottom. The registers and the
+    // call stack are one region, the row they share: no boundary parts the two (they wrap one under the other in a
+    // narrow view).
     // IT KEEPS ITSELF: its listeners are on the regions and their headers, and nothing here reads it again.
     new PanelStack(
       [
@@ -328,7 +331,7 @@ export class AsmPane implements EditablePane {
 
   /**
    * `copy · not linked`, in the title. A view moved off a copy gives up its editor, whichever route moved it, and
-   * *edit a copy* follows the same fact — `CopyEditor.setDetached`, whose doc has the review findings behind both.
+   * *edit a copy* follows the same fact — `CopyEditor.setDetached`, whose doc has the reasons behind both.
    *
    * **THE COPY'S VALUE IS NOT CLEARED HERE, WHERE `TmPane` CLEARS ITS SCRATCH READING AS A SECOND LINE.** Every route
    * that moves a view onto a session but one seeds it through `seedAsm`, which sets the value that session has — none,
@@ -432,7 +435,7 @@ export class AsmPane implements EditablePane {
       follow: nextRow,
       // THE STEP THIS DRAW SHOWS, NOT WHETHER THE FOLLOWED ROW MOVED — `TmPane.#tableRows`'s reason, one leg over:
       // the row above is the instruction the machine is ABOUT to run, and a jump to itself leaves that row
-      // unchanged, so a hold keyed on `follow` alone would never release (amendment 21).
+      // unchanged, so a hold keyed on `follow` alone would never release (Plan 7 part 5 spec amendment 21).
       frame: this.#frame?.step ?? null,
       fill: (i, el, cell) => {
         const row = this.#rows[i]

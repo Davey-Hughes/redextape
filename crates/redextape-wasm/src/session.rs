@@ -246,8 +246,8 @@ pub struct TmStatus {
     /// **NO PRODUCTION SOURCE FILE CATCHES THIS.** `resultRows` in `web/src/results.ts` reads
     /// `total_steps` and narrows it on `!== null`, and that narrowing compiles clean against the wrong
     /// type — a `number` compared against `null` is not an error TypeScript reports here. On the TypeScript
-    /// side, what catches it is three TEST FIXTURES that assign a literal `null` to the field, so that check
-    /// exists only because tests happen to construct a `TmStatus` with `total_steps: null` in it.
+    /// side, `web/tests/node/bindings-contract.test.ts` catches it: it assigns a literal `null` to
+    /// `TmStatus['total_steps']`, so `tsc` (`pnpm run typecheck`) fails once the `| null` is gone.
     #[cfg_attr(feature = "ts", ts(type = "number | null"))]
     pub total_steps: Option<u64>,
 }
@@ -260,7 +260,7 @@ pub struct TmStatus {
 /// it always is: the asm cursor has four caps and only the step cap resumes — `AsmCursor::raise_cap` leaves a
 /// run its stack, heap or saved-frame memory stopped where it is, since more steps cannot deepen a stack —
 /// so a renderer that offered "continue" on `Capped` alone would offer it to three runs that cannot take it.
-/// `cap` says which cap it was, and the step line names it (spec amendment 10).
+/// `cap` says which cap it was, and the step line names it (Plan 7 part 5 spec amendment 10).
 ///
 /// **A FIELD, NOT MORE `RunStatus` VARIANTS.** λ's depth refusal is `RunStatus::DepthRefused` because it is
 /// one fact with one sentence. Three hard caps each need a sentence of their own, and a variant apiece would
@@ -289,7 +289,7 @@ pub struct AsmStatus {
     /// `Ended` would name a stop that did not happen — and only `Some(AsmCap::Steps)` names one that
     /// `raise_asm_cap` resumes.
     pub cap: Option<AsmCap>,
-    /// How long the WHOLE run is, in instructions, from the run `compile` performed (spec amendment 13).
+    /// How long the WHOLE run is, in instructions, from the run `compile` performed (Plan 7 part 5 spec amendment 13).
     ///
     /// **`compile` RUNS THE PROGRAM TO ITS END TO KNOW THIS, AS IT RUNS THE TM.** `run_asm` returns no step
     /// count, so `compile` drives an `AsmCursor` to the end and keeps the count and the outcome, and the
@@ -512,8 +512,8 @@ enum AsmEnd {
 /// and `link_index`'s asm column name this cursor's instructions. Sharing one lowering would mean the map
 /// handing its `Program` back out, for this one caller.
 ///
-/// **THE WHOLE RUN HAPPENS HERE, ONCE** (spec amendment 13): the step total and the value both come from it,
-/// and a program that never halts spends the whole step cap here, before `compile` returns.
+/// **THE WHOLE RUN HAPPENS HERE, ONCE** (Plan 7 part 5 spec amendment 13): the step total and the value both
+/// come from it, and a program that never halts spends the whole step cap here, before `compile` returns.
 fn build_asm_leg(core: &Core, caps: tm::asm::Caps) -> Result<AsmLeg, tm::LowerError> {
     Ok(AsmLeg::run(Rc::new(tm::lower_program(core)?), caps))
 }
@@ -1054,13 +1054,13 @@ impl Session {
     /// rule count to WORD its refusal as well as to make it, so a threshold here would be a second home
     /// for one number.
     ///
-    /// **`None` FOR A FUNCTION-VALUED PROGRAM TOO, THE THIRD REASON BESIDE A DECLINED LEG AND THE SIZE
-    /// CAP.** `header.result` is `ty::ground(self.ty)` (`describe_at`'s own doc), and grounding a `Fun`
-    /// leaves it a `Fun` — a type `ty::is_decodable` refuses, and a `result` line naming it is one
-    /// `parse_tm_full` refuses to read back. Checked here rather than at `compile`, which still builds
-    /// this leg for a function-valued program exactly as it does for any other: the TM VIEW is not
-    /// affected, only the text a fork or `emit --lang tm` would write, which `redextape emit`'s own
-    /// up-front refusal makes for the identical reason.
+    /// **`None` FOR A FUNCTION-VALUED PROGRAM TOO, NOT ONLY FOR A DECLINED LEG.** `header.result` is
+    /// `ty::ground(self.ty)` (`describe_at`'s own doc), and grounding a `Fun` leaves it a `Fun` — a type
+    /// `ty::is_decodable` refuses, and a `result` line naming it is one `parse_tm_full` refuses to read
+    /// back. Checked here rather than at `compile`, which still builds this leg for a function-valued
+    /// program exactly as it does for any other: the TM VIEW is not affected, only the text a fork or
+    /// `emit --lang tm` would write, which `redextape emit`'s own up-front refusal makes for the
+    /// identical reason.
     ///
     /// `print_tm_with` AND NOT `print_tm`: without the header the text reparses to a machine running
     /// from blank tapes at `MIN_FIELD_WIDTH`, which is decision 6's state and is not this machine.

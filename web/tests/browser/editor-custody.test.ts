@@ -15,30 +15,22 @@ import { fakeClient } from '../node/session-fixtures'
 import { typeIn } from './editor-view-fixture'
 
 /**
- * **`reconcileEditors`' THREE UNCOVERED ARMS, DRIVEN AGAINST THE REAL CUSTODY OBJECT — the debt 5d-ii-c
- * ran up in three tasks and this file is where it is paid.**
- *
- * **THE DEBT IS OLDER THAN THE SLICE THAT RECORDED IT.** Decision 2 deleted both of the app's implicit
- * retires, and `!sessions.has(session)` — the guard on two of the three arms below — has no producer but
- * a retire, so those arms went unreachable and were measured uncovered. That much was recorded in four
- * doc comments. What was NOT recorded is that `createEditorCustody` appeared nowhere in `tests/` at all:
- * the one test that looked like it drove this function was handing `createReplies` a STUBBED
- * `reconcileEditors` and counting the calls, so it measured a call site and never a destroy. **Restoring
- * reachability was therefore not enough** — `main.ts`'s header-list retire makes the branches reachable
- * again, and this file is what executes them.
+ * **`reconcileEditors`' THREE ARMS, DRIVEN AGAINST THE REAL CUSTODY OBJECT.**
  *
  * **DRIVEN DIRECTLY RATHER THAN THROUGH `main()`, AND THE THIRD ARM IS WHY.** The app's retire hands
- * `ScratchBuffers.retire` every pane's slot, on the page or off it, so every pane bound to the buffer is rebound home
- * before the sweep runs — which means the app can reach the claim drop and the custody destroy, and
- * cannot reach the sweep's own `held.destroy()` at all: that one needs a λ pane still BOUND to a session
- * whose claim resolves to no home. `tests/browser/scratch-buffers.test.ts` drives the app's two through
- * the app, where they are a user's gesture; this file states all three as the module's own contract,
- * which is what they are — `editor-custody.ts` takes a `PaneCollection` and a `SessionRegistry` and
- * makes no assumption about who removed a session or why.
+ * `ScratchBuffers.retire` every pane's slot, on the page or off it, so every pane bound to the buffer is
+ * rebound home before the sweep runs — which means the app can reach the claim drop and the custody
+ * destroy, and cannot reach the sweep's own `held.destroy()` at all: that one needs a λ pane still BOUND
+ * to a session whose claim resolves to no home. `tests/browser/scratch-buffers.test.ts` drives the app's
+ * two through the app, where they are a user's gesture, and does not assert the destroy (its closing note
+ * says why); this file states all three as the module's own contract, which is what they are —
+ * `editor-custody.ts` takes a `PaneCollection` and a `SessionRegistry` and makes no assumption about who
+ * removed a session or why.
  *
  * **THE FIRST TWO TESTS DIFFER IN EXACTLY ONE FACT, DELIBERATELY.** Same panes, same claim, same editor;
- * the session is registered in one and removed in the other, which is the guard's own condition. That is
- * what makes each of them a statement about the guard rather than about the fixture.
+ * the session is registered in one and removed in the other, which is the condition of
+ * `!sessions.has(session)`, the guard on two of the three arms below. That is what makes each of them a
+ * statement about the guard rather than about the fixture.
  */
 
 const S: SessionId = 'scratch-1'
@@ -75,9 +67,9 @@ let sessions: SessionRegistry
 let custody: ReturnType<typeof createEditorCustody>
 /**
  * A STAND-IN FOR `ScratchBuffers`' OWN `collapsed` FIELD, keyed the same way `ScratchBuffers.setCollapsed`
- * would write it — this file reconstructs custody's inputs rather than driving a real `ScratchBuffers`
- * (`lambdaSession`'s own doc states the idiom), and this is that reconstruction for the one field
- * `receiveEditor` now reads. Absent from a session entirely reads `false`, matching
+ * would write it — custody takes `collapsedOf` as a plain function, not a `ScratchBuffers`, so this file
+ * reconstructs that input rather than driving a real `ScratchBuffers`, and this is that reconstruction for
+ * the one field `receiveEditor` reads. Absent from a session entirely reads `false`, matching
  * `ScratchBuffers.collapsedOf`'s own default for an id it has never seen.
  */
 let collapsedFlags: Map<SessionId, boolean>
@@ -99,10 +91,11 @@ beforeEach(() => {
  * A real `LambdaPane` on a real host, registered in the collection under `leaf` and bound to `session`.
  *
  * `showEditor` IS OPTIONAL AND ITS ABSENCE IS LOAD-BEARING, not a default filled in for convenience:
- * `LambdaPane` builds the "move the editor here" control only for a pane whose events
- * carry that handler (`#claim`'s own doc), so every test above this line gets a pane with no such button
- * in its DOM at all — which is what keeps them about custody. The item-11 tests below pass one, because
- * the button is the thing they are about.
+ * `LambdaPane` builds the "move the editor here" control only for a pane whose events carry that
+ * handler, so every test that omits it gets a pane with no such button in its DOM at all — which is
+ * what keeps them about custody. The one test below that reads the claim control off the page, 'withdraws
+ * the control on a pane whose buffer has no editor, and offers it when one exists', passes one, because
+ * the button is what it asserts on.
  */
 function addPane(
   leaf: LeafId,
@@ -153,8 +146,8 @@ const claimControl = (host: HTMLElement) => host.querySelector<HTMLButtonElement
  * stub with a spy on it would assert that a method was called rather than that the view came down.
  * `dom.isConnected` is CodeMirror's own answer to the second question.
  *
- * `debounceMs` IS SHORT ON PURPOSE — one test waits out a real debounce rather than faking a clock, so
- * that "the pending recompile cannot fire" is asserted against the timer the app actually schedules.
+ * A REAL DEBOUNCE RATHER THAN A FAKED CLOCK: tests below leave an edit pending in it and assert what
+ * sends it, and the one that waits a debounce out waits on the timer the app schedules.
  */
 function makeEditor(initial: string, onEdit: (src: string) => void = () => undefined): ScratchEditor {
   const host = document.createElement('div')
@@ -227,9 +220,8 @@ describe('reconcileEditors: a claim with no home while its session lives', () =>
   /**
    * AND IT DOES NOT REACH A PANE BOUND TO A DIFFERENT BUFFER, which is the binding predicate on the same
    * loop and the reason the destroy above is narrow rather than a sweep. Two panes, two buffers, one
-   * homeless claim: the second pane's editor is untouched. Without that predicate this loop asked EVERY
-   * λ pane for its editor and handed whatever came back to one session's home — a live defect the day
-   * buffers went plural.
+   * homeless claim: the second pane's editor is untouched. Without that predicate this loop would ask
+   * EVERY λ pane for its editor and hand whatever came back to one session's home.
    */
   it('leaves another buffer’s editor alone while destroying the homeless one', () => {
     sessions.add(lambdaSession(S))
@@ -280,11 +272,9 @@ describe('reconcileEditors: an editor in custody whose session has been retired'
 
   /**
    * **AND THE ENTRY IS DROPPED, WHICH IS THE OTHER HALF OF THE BRANCH AND HAS ITS OWN FAILURE.** The
-   * session id is re-registered here and given a pane and a claim — the singleton's exact shape, where
-   * `lambda-scratch` was a constant the next fork re-registered — so a custody entry that survived its
-   * session's death would be mounted onto a live pane by the very next reconcile. That is the state
-   * `two-lambda-panes.test.ts` reached in six clicks: `receiveEditor` handed a view over a terminated
-   * worker, or threw on top of a live one.
+   * session id is re-registered here and given a pane and a claim, so a custody entry that survived its
+   * session's death would be mounted onto a live pane by the very next reconcile, and `receiveEditor`
+   * would be handed a view over a terminated worker, or throw on top of a live one.
    *
    * A DESTROYED EDITOR ARRIVING IS ASSERTED AS "THE PANE HOLDS NOTHING", because a mount would be
    * visible either way — `receiveEditor` sets the pane's `#editor` whether the view behind it is alive
@@ -310,19 +300,17 @@ describe('reconcileEditors: an editor in custody whose session has been retired'
 })
 
 /**
- * **DEFERRED-A11Y ITEM 11: "move the editor here" OFFERED WHERE IT PROVABLY CANNOT WORK.**
+ * **"move the editor here" IS NOT OFFERED WHERE IT PROVABLY CANNOT WORK** (deferred-a11y item 11).
  *
- * `LambdaPane.#refreshClaim` gated the control on `#detached && #editor === null` and read that pair as
- * "this session has an editor, mounted elsewhere". It was only ever an approximation, and it held
- * because the one way to reach a detached pane whose session had NO editor anywhere — a fork whose build
- * failed — used to end the buffer inside the same reply, putting `#detached` back to `false`. 5d-ii-c
- * decision 2 deleted that retire: nothing ends a buffer implicitly, so the pane stays stranded, both
- * conjuncts stay true forever, and the click records a claim `reconcileEditors` can find no editor for.
+ * `LambdaPane`'s `#detached && #editor === null` alone does not mean "this session has an editor, mounted
+ * elsewhere": nothing ends a buffer implicitly, so a detached pane whose session has NO editor anywhere — a
+ * fork whose build failed — stays stranded, both conjuncts stay true forever, and a click would record a
+ * claim `reconcileEditors` can find no editor for.
  *
- * **THE FIX IS A THIRD INPUT, AND THE TESTS HERE ARE SPLIT ALONG THE SEAM IT CROSSES.** `hasEditor` is
+ * **THE GATE TAKES A THIRD INPUT, AND THE TESTS HERE ARE SPLIT ALONG THE SEAM IT CROSSES.** `hasEditor` is
  * the fact (this file's subject: the two custody maps); `setEditorAvailable` is the gate (`lambda-pane.ts`'s).
  * The last test drives both together in the shape the defect actually has, because each half is
- * defensible on its own and it was the JOIN between them that was missing.
+ * defensible on its own and the defect is in the JOIN between them.
  *
  * **THE PHANTOM FORK IS RECONSTRUCTED FROM ITS PARTS RATHER THAN DRIVEN THROUGH A WORKER**, which is
  * this file's existing idiom (`lambdaSession`'s doc: custody reads nothing but `sessions.has`). What
@@ -336,8 +324,8 @@ describe('hasEditor: the third input to the claim control', () => {
   /**
    * **THE DEFECT ITSELF, AT THE LAYER THAT ANSWERS IT.** Every condition `editorHomeFor` checks is
    * satisfied here — a claim, a pane under that leaf, a matching binding — so an implementation written
-   * as `homeFor(session) !== undefined` returns `true` and leaves item 11 exactly where it was. The only
-   * thing missing is the editor, and `holdsEditor` is the only thing that reports it.
+   * as `homeFor(session) !== undefined` returns `true` and offers the control anyway. The only thing
+   * missing is the editor, and `holdsEditor` is the only thing that reports it without taking the editor.
    */
   it('is false for a buffer that has a claim and a pane but never built an editor', () => {
     sessions.add(lambdaSession(S))
@@ -376,23 +364,22 @@ describe('hasEditor: the third input to the claim control', () => {
 
   /**
    * **THE TWO HALVES JOINED, IN THE SHAPE `draw()` JOINS THEM** — `pane.setEditorAvailable(custody.hasEditor(…))`
-   * is the whole of the per-frame line this fix adds, written out here against the phantom-fork fixture.
+   * is the per-frame line, written out here against the phantom-fork fixture.
    *
    * **THE SECOND PANE IS HERE TO MAKE THE POSITIVE ASSERTION MEAN SOMETHING, NOT BECAUSE THE DEFECT
-   * NEEDED ONE — this paragraph claimed the opposite and was wrong (Minor finding, review of this
-   * fix).** It said "the defect was always visible from a pane that was NOT the holder, which is one
-   * split away". For the filed defect — a phantom fork — the affected pane is the FORKING pane itself,
-   * on a page with no split at all: the build never reached `scratch-compiled`, so `#editor` is `null`
-   * on it and `#detached` is `true`, which is roadmap item 11's own wording ("permanently true on a
+   * NEEDS ONE.** For the filed defect — a phantom fork — the affected pane is the FORKING pane itself, on
+   * a page with no split at all: the build never reached `scratch-compiled`, so `#editor` is `null` on it
+   * and `#detached` is `true`, which is roadmap item 11's own wording ("permanently true on a
    * phantom-forked or worker-errored pane"). What `second` buys is that the control is asserted PRESENT
    * before it is asserted absent, over a pane that is not the one holding the view.
    *
    * Then the buffer is stranded — `takeEditor` off the holder, nothing handed to custody — and the
    * control must go. **`takeEditor` IS A STAND-IN FOR THE FAILED BUILD AND A FAITHFUL ONE**, because the
    * state it produces is the state `hasEditor` reads: a claim, a live pane, a matching binding, and no
-   * view. It is this file's stated idiom (`lambdaSession`'s doc) to reconstruct rather than drive a
-   * worker. The real thing is driven in `tests/browser/scratch-fork.test.ts`, over a real thread whose
-   * build really fails, and that test now asserts `hasEditor` directly.
+   * view. This file reconstructs custody's inputs rather than driving a worker, since custody reads
+   * nothing of the registry but `sessions.has` (`lambdaSession`'s doc). The real thing is driven in
+   * `tests/browser/scratch-fork.test.ts`, over a real thread whose build really fails, and that test
+   * asserts `hasEditor` directly.
    *
    * ASSERTED ON THE BUTTON IN THE DOM, not on `hasEditor`'s return: the return is already covered three
    * tests up, and what item 11 is a defect ABOUT is a control the user can see and click.
@@ -426,37 +413,26 @@ describe('hasEditor: the third input to the claim control', () => {
 })
 
 /**
- * **AN EDITOR THAT MOVES MUST TAKE ITS EDIT HANDLER WITH IT — Important finding, found by driving the
- * app in a browser after the suite was green, and the second defect that walkthrough turned up.**
+ * **AN EDITOR THAT MOVES MUST TAKE ITS EDIT HANDLER WITH IT.**
  *
- * A `ScratchEditor` is constructed by the pane that FORKS (`LambdaPane.setEditor`'s mount branch),
- * closing over THAT pane's `editScratch`. `receiveEditor` relocates `editor.dom` — which is all the
- * editor-moves rule ever moved — and left the callback pointing at the pane that built it. That is
- * invisible while both panes are on the same buffer, which is the only state the suite ever reached,
- * and becomes a corruption the moment the ORIGINATING pane is rebound: the edit handler it had then
- * resolved `slot.binding.session` at EDIT time, so keystrokes in the moved editor recompiled whatever
- * the first pane was showing by then. The fix that followed re-pointed the handler at the pane holding
- * the editor, which left the same gap one move later; an editor's edits are bound to its copy when it
- * is built now (`transport.ts`'s `editSink`), and the test below holds that.
+ * A `ScratchEditor` is constructed by the pane that FORKS (`LambdaPane.setEditor`'s mount branch), and
+ * `receiveEditor` relocates only `editor.dom`. An editor's edits are bound to its copy when it is built
+ * (`transport.ts`'s `editSink`), and the test below holds that: a handler that resolved
+ * `slot.binding.session` at EDIT time would send keystrokes in the moved editor to whatever that pane was
+ * showing by then.
  *
- * **MEASURED IN CHROMIUM BEFORE THE FIX, five gestures from a fresh page:** fork on `lambda-0` (which
- * builds `scratch 1`'s editor), split, claim the editor onto the new pane, rebind `lambda-0` to source
- * and fork again (`scratch 2`). Typing `ZZZ` into the pane showing `scratch 1` put the parse error on
- * `lambda-0`'s editor, over `scratch 2` — the user typed in one pane and the error appeared in another.
- *
- * DRIVEN HERE AT THE PANE PAIR RATHER THAN THROUGH `main()`, because what is under test is one
- * assignment in `receiveEditor` and the seam it crosses is `LambdaPane` -> `ScratchEditor`. The app-level
- * sequence above needs two real worker forks to reach a state this file constructs in four lines, and
- * `two-lambda-panes.test.ts` already drives the claim gesture end to end.
+ * DRIVEN HERE AT THE PANE PAIR RATHER THAN THROUGH `main()`, because the seam the edit handler crosses is
+ * `LambdaPane` -> `ScratchEditor`. Through `main()`, this state needs two real worker forks; this file
+ * constructs it in four lines, and `two-lambda-panes.test.ts` already drives the claim gesture end to end.
  */
 describe('receiveEditor: where a moved editor sends its edits', () => {
   /**
    * EACH EDIT IS RECORDED WITH THE SESSION ITS SINK NAMES, so the assertion reads "the copy the editor was built
    * for heard the keystroke" rather than "something fired".
    *
-   * **THE VIEW HOLDING THE EDITOR MOVES ON BEFORE THE DEBOUNCE FIRES**, which is the case the old answer — re-point
-   * the editor at the view holding it, which read its own binding when an edit fired — got wrong: the keystroke went
-   * to whatever that view showed by then. A REAL DEBOUNCE, WAITED OUT, for the reason `makeEditor` states.
+   * **THE VIEW HOLDING THE EDITOR MOVES ON BEFORE THE DEBOUNCE FIRES**, which is the case an editor re-pointed at
+   * the view holding it, reading that view's binding when an edit fired, would get wrong: the keystroke would go to
+   * whatever that view showed by then. A REAL DEBOUNCE, WAITED OUT, for the reason `makeEditor` states.
    */
   it('sends a moved editor’s pending keystroke to its own copy after the view holding it moves on', async () => {
     sessions.add(lambdaSession(S))
@@ -560,12 +536,11 @@ describe('flush: a copy’s pending edit, sent wherever its editor is', () => {
   }
 
   /**
-   * **F1 — THE EXACT CALL A DELETE MAKES, RACING AN IN-FLIGHT FORMAT.** `main.ts`'s delete handler calls
+   * **THE EXACT CALL A DELETE MAKES, RACING AN IN-FLIGHT FORMAT.** `main.ts`'s delete handler calls
    * `custody.flush(id)` before it reads the copy's record for undo, with no `destroy()` in between — the pause
-   * handler calls it the same way before storing the copy. At `bec75f0` this reached nothing while a format was in
-   * flight: `format()` had already cleared the editor's own timer, and the pending edit lived only inside its async
-   * closure until the server answered, so the record this call is meant to update stayed stale and undo restored
-   * text missing the keystrokes typed before *format*, silently.
+   * handler calls it the same way before storing the copy. A flush that missed the edit a format in flight is
+   * carrying would leave the record this call is meant to update stale, and undo would restore text missing the
+   * keystrokes typed before *format*, silently.
    */
   it('sends the pre-format text a format in flight is carrying, before the format answers', async () => {
     sessions.add(lambdaSession(S))
@@ -585,9 +560,9 @@ describe('flush: a copy’s pending edit, sent wherever its editor is', () => {
 })
 
 /**
- * **THE COLLAPSE FLAG MUST FOLLOW THE EDITOR ACROSS A CUSTODY MOVE — Important finding, review of
- * 5d-ii-d T9.** The custody-move path — `receiveEditor`, called from `reconcileEditors`' own sweep —
- * mounted expanded unconditionally.
+ * **THE COLLAPSE FLAG MUST FOLLOW THE EDITOR ACROSS A CUSTODY MOVE.** The custody-move path —
+ * `receiveEditor`, called from `reconcileEditors`' own sweep — mounts expanded unless it is handed the
+ * buffer's flag.
  *
  * **THE REACHABLE SEQUENCE, DRIVEN AT THE SEAM `reconcileEditors` OWNS RATHER THAN THROUGH `main()`:**
  * collapse the editor on one pane (the user's own click on the text panel's toggle, which is what
@@ -595,7 +570,7 @@ describe('flush: a copy’s pending edit, sent wherever its editor is', () => {
  * stands in for that record, per its own doc above), then claim it onto a second pane bound to the same
  * buffer (`custody.claim` + `custody.reconcile()`, exactly `pane-host.ts`'s `showEditor` wrapper followed
  * by its own `applyLayout`'s `custody.reconcile()`). Closing the holding pane and re-claiming out of
- * `heldEditors` is the other route through the same missing seed; both call sites take the same
+ * `heldEditors` is the other route that takes the same seed; both call sites take the same
  * `collapsedOf` reader (`createEditorCustody`'s deps), so one test on the sweep path stands for both.
  */
 describe('reconcileEditors: the collapse flag follows a custody move', () => {
@@ -620,8 +595,8 @@ describe('reconcileEditors: the collapse flag follows a custody move', () => {
 
     const mounted = claimer.host.querySelector('.term-editor')
     expect(mounted).not.toBeNull()
-    // THE FIX: without it, this reads `false` — `receiveEditor` once called `#collapse.update(true)` with
-    // no seed, so a claimed editor mounted expanded regardless of the buffer's own record.
+    // THE SEED: without it, this reads `false` — a `receiveEditor` that called `#collapse.update(true)` with
+    // no seed would mount a claimed editor expanded regardless of the buffer's own record.
     expect((mounted as HTMLElement | null)?.hidden).toBe(true)
     // CHECK BOTH DIRECTIONS — the toggle's `aria-expanded` as well as the host's `hidden`. `panel.ts`'s
     // `apply()` writes both from the same `open` flag, and `update`'s `initial` argument is what starts

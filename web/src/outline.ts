@@ -2,10 +2,10 @@ import type { LspDocumentSymbol, LspRange } from './lsp-protocol'
 import { createPanel, type Panel } from './panel'
 
 /**
- * The outline's rows, rendered into a panel body — Plan 7 part 3a, and a consumer of the panel
- * primitive part 1 built rather than a mechanism of its own.
+ * The outline's rows, rendered into a panel body — Plan 7 part 3 spec §5.3, and a consumer of the panel
+ * primitive in `panel.ts` rather than a mechanism of its own.
  *
- * **WHAT EACH LANGUAGE ANSWERS WAS MEASURED, NOT ASSUMED** (driven against the real server):
+ * **WHAT EACH LANGUAGE ANSWERS:**
  *
  * | language | symbols |
  * |---|---|
@@ -14,18 +14,13 @@ import { createPanel, type Panel } from './panel'
  * | `redextape_asm` | its labels, kind 12 |
  * | `redextape_lambda` | **none, by design** — a λ term carries no source positions |
  *
- * **NOTHING SENDS `children` TODAY, AND THIS RENDERS THEM ANYWAY.** The server answers the
- * hierarchical `DocumentSymbol` shape — that is what `initialize` negotiates, and an entry carries
- * `selectionRange` rather than `location` — but every symbol the four front ends produce is
- * top-level. Rendering the nesting costs four lines, where not rendering it would make the flat data
- * look like a decision.
- *
- * It does NOT follow that a front end gaining structure needs no change here, which an earlier
- * version of this paragraph claimed. `style.css` has an indent rule for depth 1 and depth 2; a third
- * level would render flush with the first until one is added.
+ * The server answers the hierarchical `DocumentSymbol` shape — that is what `initialize` negotiates,
+ * and an entry carries `selectionRange` rather than `location` — and this renders its `children`.
+ * `style.css` has an indent rule for depth 1 and depth 2; a third level would render flush with the
+ * first until one is added.
  */
 
-/** A row's depth is its own class, so a stylesheet decides indentation rather than inline padding. */
+/** A row's depth is its own attribute, so a stylesheet decides indentation rather than inline padding. */
 const DEPTH_ATTR = 'data-depth'
 
 /**

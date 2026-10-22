@@ -3,9 +3,7 @@
  *
  * **ONE VISIBLE NOTICE AT A TIME, AND ONE POLITE LIVE REGION FOR THE WHOLE APP.** Every refusal, every copy
  * change and every layout change is said here, once, in words: shown on a line under the header, and written
- * to a visually hidden `role="status"` element so a screen reader hears it. Before this, refusals were a
- * clause on `#link-status`, which announced nothing (the accessibility list's items 6, 9, 10, 13 and 14 are
- * that silence, one control at a time).
+ * to a visually hidden `role="status"` element so a screen reader hears it.
  *
  * **A NEW NOTICE REPLACES THE OLD ONE, ACTION AND ALL.** A notice lasts `NOTICE_MS`, or until the next one;
  * an undo offered by a notice that has been replaced is gone with it (spec §10), unless the new one offers the
@@ -53,13 +51,13 @@ export type Notices = {
    * End the notice that is up now and put `rest` back under it.
    *
    * **ON THE SHAPE, BUT NOTHING OUTSIDE THIS MODULE CALLS IT — said here rather than left to be
-   * discovered.** `createNotices` reaches its own `dismiss` twice: the `NOTICE_MS` timer, and an action
-   * button, which must tear the notice down before running the action (a second undo would throw).
-   * Neither of those needs the member. It is on the type so that "end this one early" has a name a
-   * caller can find, instead of `rest(null)`, which clears the RESTING condition and is a different
-   * thing entirely. No other module in `src/` and no test drives it — which is worth one line, so the
-   * next reader does not go hunting for the caller. A caller ending ITS OWN notice holds the `Notice`
-   * `notify` returns.
+   * discovered.** `createNotices` reaches its own `dismiss` from the `NOTICE_MS` timer, from an action
+   * button, which must tear the notice down before running the action (a second undo would throw), and
+   * from a `Notice`'s own `dismiss`. None of those needs the member. It is on the type so that "end this
+   * one early" has a name a caller can find, instead of `rest(null)`, which clears the RESTING condition
+   * and is a different thing entirely. No other module in `src/` and no test drives it — which is worth
+   * one line, so the next reader does not go hunting for the caller. A caller ending ITS OWN notice holds
+   * the `Notice` `notify` returns.
    */
   dismiss(): void
   /**
@@ -100,20 +98,22 @@ export function createNotices(line: HTMLElement, live: HTMLElement, fallback?: (
   /**
    * Draw `text` as the line's whole contents, with an optional action, or empty it for `null`.
    *
-   * **IT CAN BE HOLDING THE FOCUS, AND THEN IT OWES IT SOMEWHERE** — spec §11, and the accessibility
-   * list's item 1. The line's actions are *undo*s — a copy's delete and an imported palette's removal —
-   * each offered for eight seconds; a user who tabs to one and waits, or uses it, or is still on it when
-   * any other gesture makes a notice, has the button taken out from under them by the very next repaint.
-   * The action's own `fallback` takes the focus then, where it names one — the palette's, the settings
-   * button its removal was made from — and `fallback` otherwise: what the app hands over, the control
-   * that lists the copies, which is where a copy's undo that did not happen leaves the user.
+   * **IT CAN BE HOLDING THE FOCUS, AND THEN IT OWES IT SOMEWHERE** — Plan 7 part 2 spec §11, and the
+   * accessibility list's item 1. The line's actions are *undo*s — of a copy's delete, an imported
+   * palette's removal, an example's pick and a link's open — each on a notice that lasts eight seconds; a
+   * user who tabs to one and waits, or uses it, or is still on it when any other gesture makes a notice,
+   * has the button taken out from under them by the very next repaint. The action's own `fallback` takes
+   * the focus then, where it names one — the settings button a palette's removal was made from,
+   * `examples ▾` for a pick, the share button for an open — and `fallback` otherwise: what the app hands
+   * over, the control that lists the copies, which is where a copy's undo that did not happen leaves
+   * the user.
    *
    * **THE SAME ACTION AGAIN KEEPS ITS BUTTON, AND ONLY THE WORDS CHANGE** — Plan 7 part 6a spec §5.5: a link's clamps
    * redraw the open's notice with the open's `undo`, hundreds of milliseconds after the open, while a user may be
-   * pressing it. Chrome dispatches a `click` only where the press and the release land on the same element, measured
-   * by real input: a button replaced while pressed clicks nothing even drawn in the same place, and one kept but moved
-   * from under the pointer clicks the line. So the button stays the same element, the focus stays on it, and the
-   * stylesheet keeps it in place: at the line's end, on its first line, whatever the words' length.
+   * pressing it. Chrome dispatches a `click` only where the press and the release land on the same element: a
+   * button replaced while pressed clicks nothing even drawn in the same place, and one kept but moved from under the
+   * pointer clicks the line. So the button stays the same element, the focus stays on it, and the stylesheet keeps
+   * it in place: at the line's end, on its first line, whatever the words' length.
    */
   const paint = (text: string | null, action?: NoticeAction): void => {
     const words = line.querySelector<HTMLElement>('.notice-text')

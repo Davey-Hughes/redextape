@@ -1380,7 +1380,7 @@ const SATURATES: &str = "let mut x = 2; let mut i = 0; while i < 7 { x = x * x; 
 
 /// A saturated register crosses whole. `x` squares itself seven times, past 2^64, where `mul` saturates at
 /// `u64::MAX`; as a JS number that word would not survive `serde-wasm-bindgen`, which refuses a `u64` above
-/// `Number.MAX_SAFE_INTEGER` (spec amendment 13), so this frame reaching JavaScript at all is half the
+/// `Number.MAX_SAFE_INTEGER` (Plan 7 part 5 spec amendment 13), so this frame reaching JavaScript at all is half the
 /// assertion and the exact twenty digits are the other half.
 #[wasm_bindgen_test]
 fn a_saturated_word_crosses_as_its_exact_decimal_text() {

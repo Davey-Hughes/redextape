@@ -6,18 +6,16 @@ import { parseWorkspace } from '../../src/workspace'
 import { SHELL, storeFourViews } from './harness'
 
 /**
- * A DIVIDER DRAG, THROUGH `main()` — the test 5d-ii-a said did not exist, and the reason a broken drag
- * survived every slice since.
+ * A DIVIDER DRAG, THROUGH `main()`.
  *
- * That entry filed the gap in as many words: "no test drags a divider on a tree `main()` mounted and
- * then reads back what was stored." `layout-view.test.ts` drags one, but against an inert
- * `ResizeHandlers` stub whose `resize` and `commit` are both no-ops — so the divider it grabs stays
- * alive for the whole test, which is precisely the condition the real app does not provide.
+ * `layout-view.test.ts` drags one, but against a `ResizeHandlers` stub whose `resize` only records the call
+ * and whose `commit` does nothing — neither rebuilds the tree, so the divider it grabs stays alive for the
+ * whole test, which is precisely the condition the real app does not provide.
  *
- * THE DEFECT THIS FILE PINS. `pointermove` reached `applyLayout` -> `renderLayout` ->
- * `replaceChildren()`, destroying the divider holding the drag on its own first frame. A drag moved one
- * frame's worth and then stopped dead. Test 1 below is the direct guard: the grabbed node is still in
- * the document after every move.
+ * THE DEFECT THIS FILE PINS. A `pointermove` that reached `applyLayout` -> `renderLayout` ->
+ * `replaceChildren()` would destroy the divider holding the drag on its own first frame, so a drag would
+ * move one frame's worth and then stop dead. `does not destroy the divider being dragged` below is the
+ * direct guard: the grabbed node is still in the document after every move.
  */
 
 /**
@@ -37,7 +35,7 @@ async function freshMain(): Promise<{ ready: Promise<EditorView> }> {
 
 async function mountApp(): Promise<void> {
   localStorage.clear()
-  // ALL FOUR VIEWS, WHICH AN EMPTY STORE OPENED ON WHEN THIS WAS WRITTEN: it opens on the source and TM now.
+  // ALL FOUR VIEWS: an empty store opens on the source and TM.
   storeFourViews()
   document.body.innerHTML = SHELL
   await (await freshMain()).ready
@@ -79,8 +77,8 @@ const pointer = (type: string, x: number): PointerEvent =>
 describe('dragging a divider on a mounted app', () => {
   /**
    * **THE DIVIDER SAYS WHAT IT RESIZES, IN THE WORD THE APP USES** — Plan 7 part 2 spec §12: a pane is a
-   * view. Nothing else in the tier reads this name, so without this assertion the rename could be
-   * reverted and every test would stay green.
+   * view. Nothing else in the tier reads this name, so without this assertion it could change and every
+   * test would stay green.
    */
   it('names what it resizes', () => {
     expect(verticalDivider().getAttribute('aria-label')).toBe('resize views left and right')
@@ -96,8 +94,7 @@ describe('dragging a divider on a mounted app', () => {
   // an assertion never runs when that assertion throws, and `tests/browser/setup.ts`'s plain-object
   // `Storage` shim has `setItem` as an own property — so a leaked spy stays installed for the rest of
   // this file, and the next `vi.spyOn` in a later test returns that same spy with its accumulated call
-  // history rather than a fresh one. This bit once: a failed assertion here leaked a spy that made an
-  // unrelated later test report writes that never happened.
+  // history rather than a fresh one.
   afterEach(() => {
     vi.restoreAllMocks()
   })
@@ -108,7 +105,7 @@ describe('dragging a divider on a mounted app', () => {
 
     for (const x of [420, 440, 460]) {
       divider.dispatchEvent(pointer('pointermove', x))
-      // The whole defect, in one assertion. Before the fix this is `false` after the FIRST move.
+      // The defect the file doc names, in one assertion: with it, this is `false` after the FIRST move.
       expect(rootEl().contains(divider)).toBe(true)
     }
 
@@ -124,7 +121,8 @@ describe('dragging a divider on a mounted app', () => {
     for (const x of [420, 440, 460]) divider.dispatchEvent(pointer('pointermove', x))
     divider.dispatchEvent(pointer('pointerup', 460))
 
-    // 60px of travel against the measured split extent. Before the fix only the first 20px landed.
+    // 60px of travel against the measured split extent. A drag that died on its first frame would land
+    // only the first 20px.
     const [first] = storedRowSizes()
     expect(first).toBeCloseTo(0.5 + 60 / span, 3)
   })
@@ -192,9 +190,8 @@ describe('dragging a divider a second time, after the first drag commits and reb
 
   // EVERY GESTURE COMMIT REACHES `applyLayout()` -> `renderLayout()` -> `replaceChildren()`, which
   // rebuilds every divider — so the divider a SECOND gesture grabs is a different element from the one
-  // the first gesture grabbed. This is the shape closest to the original defect (a drag dying on its own
-  // first frame) that no other test in the default suite exercises: everything above drags exactly once.
-  // Only `pane-floor.test.ts` drags twice, and it is a `PROBE_FILES` member excluded from CI.
+  // the first gesture grabbed. This is the shape closest to the defect the file doc names (a drag dying
+  // on its own first frame), and no test above drags twice.
   it('moves the layout by both drags in full, off a freshly re-queried divider', () => {
     const first = verticalDivider()
     const span = first.parentElement?.getBoundingClientRect().width ?? 0
@@ -258,18 +255,17 @@ describe('resizing a divider from the keyboard', () => {
     setItem.mockRestore()
   })
 
-  it('ignores an unrelated keyup mid-hold, so a still-held arrow key commits exactly once — Important finding, review of this task', () => {
-    // `commitKeys` used to check only a boolean `keyMoved`, so ANY keyup on the focused divider consumed
-    // the arming — a modifier pressed and released while the arrow key was still down (a Shift chord, a
-    // stray keystroke) fired the commit early. Auto-repeat then re-armed the gesture for the still-held
-    // arrow key, and the arrow's OWN eventual keyup committed a second time: two writes for one
-    // continuous gesture, against the one-write-per-gesture invariant this path exists to establish.
-    // `armedKey` fixes it by tracking WHICH key armed the gesture, so the unrelated key's keyup finds no
-    // match and commits nothing. The assertion right after the `Shift` keyup is the one that actually
-    // states that: zero writes so far, before the arrow key is ever released. The `keydown('ArrowRight')`
-    // that follows stands in for auto-repeat, which keeps re-arming the gesture with the arrow key while
-    // it stays held — without it, the bug this test is named for writes twice, not once, and the final
-    // count alone can't tell the two apart from the fixed behaviour (both land on 1).
+  it('ignores an unrelated keyup mid-hold, so a still-held arrow key commits exactly once', () => {
+    // `armedKey` TRACKS WHICH KEY ARMED THE GESTURE, so a modifier pressed and released while the arrow
+    // key is still down (a Shift chord, a stray keystroke) finds no match and commits nothing. A bare
+    // boolean consumed by ANY keyup would fire the commit early; auto-repeat would then re-arm the gesture
+    // for the still-held arrow key, and the arrow's OWN eventual keyup would commit a second time: two
+    // writes for one continuous gesture, against the one-write-per-gesture invariant this path exists to
+    // establish. The assertion right after the `Shift` keyup is the one that states it: zero writes so
+    // far, before the arrow key is ever released. The `keydown('ArrowRight')` that follows stands in for
+    // auto-repeat, which keeps re-arming the gesture with the arrow key while it stays held — without it,
+    // the boolean would write once, not twice, and the final count alone could not tell it apart from
+    // `armedKey` (both land on 1).
     const setItem = vi.spyOn(window.localStorage, 'setItem')
     const divider = verticalDivider()
     divider.focus()
@@ -311,8 +307,8 @@ describe('resizing a divider from the keyboard', () => {
     divider.focus()
     for (let i = 0; i < 3; i += 1) {
       divider.dispatchEvent(key('keydown', 'ArrowRight'))
-      // Before this slice each keydown rebuilt the tree and `renderLayout`'s rescue re-focused a NEW
-      // node. Now the node itself survives, which is a stronger statement than "something has focus".
+      // The node itself survives each keydown, which is a stronger statement than "something has focus":
+      // a keydown that rebuilt the tree would leave `renderLayout`'s rescue to focus a NEW node.
       expect(document.activeElement).toBe(divider)
     }
     divider.dispatchEvent(key('keyup', 'ArrowRight'))

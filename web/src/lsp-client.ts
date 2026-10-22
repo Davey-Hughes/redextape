@@ -34,7 +34,7 @@ type OpenDocument = {
   languageId: LanguageId
   text: string
   version: number
-  /** Where this document's diagnostics go, and how to jump into it. Set when it is opened. */
+  /** Where this document's diagnostics go. Set when it is opened. */
   handlers: DocumentHandlers
 }
 
@@ -43,18 +43,16 @@ type OpenDocument = {
  *
  * **PER DOCUMENT RATHER THAN ONE ROUTER FOR THE APP, AND THAT IS WHAT MAKES MISROUTING
  * UNREPRESENTABLE.** A single sink taking a URI would put a lookup — and a way to get it wrong —
- * in whichever module owned the map. The editors that need this are built inside `lambda-pane.ts`
- * and `tm-pane.ts`, so that module would have been neither of them. Opening a document and saying
- * where its diagnostics go is one act here, and `closeDocument` drops the sink with the document.
+ * in whichever module owned the map. Opening a document and saying where its diagnostics go is one
+ * act here, and `closeDocument` drops the sink with the document.
  */
 export type DiagnosticsSink = (diagnostics: LspDiagnostic[]) => void
 
 /**
- * What one editor offers the client, beyond taking its diagnostics.
+ * What one editor offers the client.
  *
- * One field today. It is an object rather than a bare sink because a document's handlers are the
- * natural place for anything else an editor offers the client, and because `openDocument` taking
- * five positional arguments was where this was heading.
+ * It is an object rather than a bare sink because a document's handlers are the natural place for
+ * anything else an editor offers the client.
  */
 export type DocumentHandlers = {
   readonly diagnostics: DiagnosticsSink
@@ -81,15 +79,12 @@ export class LspUnavailable extends Error {
  * class holds a port it may not kill, because lifecycle is `SessionPool`'s and one session's damage
  * is contained by terminating its thread. There is exactly one language server for the whole app, so
  * there is no pool for it to be in, and the thing that would own its lifecycle would have this class
- * as its only member. The `spawn` factory is injected for the reason `SessionPool`'s is: so the
- * failure policy — and the DOM a notice needs — stays in `main.ts`.
+ * as its only member.
  *
  * **NO TIMEOUT ON A PENDING REQUEST, AND THAT IS A DECISION.** A request that is never answered is
  * either a dead worker, which the `error` listener below sees and which rejects every pending request
- * at once, or a bug in the server, which a timer would hide behind a generic message. This repository
- * has already paid for the alternative: a prior slice shipped twenty-three timeout ceilings that could
- * never fire, and `tests/node/browser-timeout-invariants.test.ts` exists because of it. A ceiling
- * whose only reachable cause is already handled by a listener is one of those.
+ * at once, or a bug in the server, which a timer would hide behind a generic message. A ceiling whose
+ * only reachable cause is already handled by a listener is a ceiling that never fires.
  */
 export class LspClient {
   #spawn: () => LspPort
@@ -111,9 +106,9 @@ export class LspClient {
   /**
    * Whether `start()` has ever run. **Without it a request made on a constructed-but-unstarted
    * client queues forever**: `#send` queues whenever there is no ready port, `#off` is still
-   * false, and nothing would ever reject the entry left in `#pending`. That is the one
-   * never-settling cause this class's "no timeout" argument does NOT cover, because no listener
-   * exists yet to cover it.
+   * false, and nothing would ever reject the entry left in `#pending`. That is a never-settling
+   * cause this class's "no timeout" argument does NOT cover, because no listener exists yet to
+   * cover it.
    */
   #started = false
   /** Set while a restart is in flight, so the "it is back" notice waits until it really is. */
@@ -152,9 +147,8 @@ export class LspClient {
     // events already dispatched to this thread, so a worker that throws while several messages are
     // in flight — `didChange` and `documentSymbol` together is the ordinary shape, not an exotic
     // one — delivers two `error` events. Without this check the second one runs `#died` again,
-    // which terminates `this.#port`: by then the BRAND NEW worker. Measured before it was fixed:
-    // `first.crash(); first.crash()` left `ports[1].terminated === true`, `available === false`,
-    // and a notice reading "stopped twice" after exactly one worker had died. A stale `failed` or
+    // which terminates `this.#port`: by then the BRAND NEW worker, so the client would turn itself
+    // off with a notice reading "stopped twice" after one worker had died. A stale `failed` or
     // `out` from the same dead port does the same damage through `#receive`.
     const mine = (): boolean => this.#port === port
     port.addEventListener('message', (e) => {
@@ -185,8 +179,7 @@ export class LspClient {
       // reject every pending request, and this one would have no consumer to catch it. An
       // unhandled rejection in a browser reaches `window.onunhandledrejection` and prints as an
       // uncaught error — noise that names the language server on a path the client has already
-      // reported through a notice. Found by the node suite reporting seven unhandled rejections
-      // across four passing tests, which is a failure the assertions could not see.
+      // reported through a notice.
     })
     this.#notifyServer('initialized', {})
   }
@@ -196,9 +189,8 @@ export class LspClient {
       // Nothing to restart: the module will not load, and starting a second worker would fetch the
       // same bytes. This is a different outcome from a worker that died, and gets its own notice.
       //
-      // TERMINATED BEFORE THE REFERENCE IS DROPPED, the order `#died` already uses and the order
-      // `SessionPool.unbind` argues for: once `#port` is null nothing can terminate it, and the
-      // thread would stay resident for the life of the page.
+      // TERMINATED BEFORE THE REFERENCE IS DROPPED, the order `#died` already uses: once `#port` is
+      // null nothing can terminate it, and the thread would stay resident for the life of the page.
       this.#off = true
       this.#restarting = false
       this.#port?.terminate()
@@ -226,9 +218,8 @@ export class LspClient {
   #dispatch(m: LspOutgoing): void {
     if (isResponse(m)) {
       const waiting = this.#pending.get(m.id)
-      // **DROPPED RATHER THAN THROWN, AND THE CASE IS REAL.** A restarted worker can answer a request
-      // the previous instance was sent, and the ids are per-client rather than per-worker. The
-      // request it belongs to was already rejected by `#died`.
+      // **DROPPED RATHER THAN THROWN.** An answer no request is waiting on has nothing to settle,
+      // and a previous worker's answers never get this far: `start`'s listeners check their own port.
       if (waiting === undefined) return
       this.#pending.delete(m.id)
       if (m.error !== undefined) waiting.reject(new Error(m.error.message))
@@ -238,7 +229,7 @@ export class LspClient {
     if (m.method === 'textDocument/publishDiagnostics') {
       // GUARDED RATHER THAN CAST. `LspNotification.params` is optional because the protocol says
       // so; today's server always sends it, but a cast that denies a case the type admits turns a
-      // malformed notification into a TypeError thrown out of the worker's message handler.
+      // malformed notification into a TypeError thrown out of the listener for the worker's messages.
       const params = m.params as PublishDiagnosticsParams | undefined
       if (params === undefined || !Array.isArray(params.diagnostics)) return
       // A document closed while its diagnostics were in flight has no sink, which is an ordinary
@@ -294,8 +285,8 @@ export class LspClient {
   #request(method: string, params: unknown): Promise<unknown> {
     if (this.#off) return Promise.reject(new LspUnavailable('it stopped'))
     // See `#started`. Queuing here would leave a promise nothing can ever settle, and no
-    // listener exists yet to reject it — the one never-settling cause the "no timeout"
-    // argument above does not already cover.
+    // listener exists yet to reject it — a never-settling cause the "no timeout" argument
+    // above does not already cover.
     if (!this.#started) return Promise.reject(new LspUnavailable('it was never started'))
     const id = this.#nextId
     this.#nextId += 1
@@ -344,7 +335,7 @@ export class LspClient {
    *
    * **IT MUST BE REMOVED FROM THE REPLAY SET TOO**, not only told to the server: a restart replays
    * `#documents`, so a document left here would be reopened into the new worker after the view that
-   * held it was gone, and its diagnostics would be published to a URI nothing routes.
+   * held it was gone.
    */
   closeDocument(uri: string): void {
     if (!this.#documents.delete(uri)) return
@@ -356,10 +347,8 @@ export class LspClient {
    *
    * **THE SERVER ANSWERS `null`, NOT `[]`, FOR TEXT THAT DOES NOT PARSE, AND THIS IS WHERE THAT IS
    * NORMALISED.** `Server::formatting` builds an `Option<Vec<TextEdit>>` and hands it straight to
-   * `from_success`, so an unparseable buffer's `result` is JSON `null`. The part 3 design asserted
-   * the server produced an empty list; it does not, and a client that mapped over the result would
-   * have thrown on the single most likely buffer — one being typed into. Found by a test in
-   * `redextape-lsp-wasm`, not by reading.
+   * `from_success`, so an unparseable buffer's `result` is JSON `null`. A client that mapped over the
+   * result would throw on the single most likely buffer — one being typed into.
    */
   async format(uri: string): Promise<LspTextEdit[]> {
     const result = await this.#request('textDocument/formatting', {

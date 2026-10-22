@@ -807,11 +807,11 @@ jobs:
       - name: Typecheck
         run: pnpm run typecheck
       # `test:coverage`, not `test` — this is the web coverage gate. Thresholds live in
-      # web/vite.config.ts beside the measurement that set them. NO SEPARATE JOB AND NO `gate` EDIT
-      # IS NEEDED: `gate` already lists `web` in `needs` and already requires it under has_web, so a
-      # threshold failure fails this job, which fails the required check. A separate coverage job
-      # would re-install Rust, wasm-pack and Chromium for a signal this job already carries, and
-      # would add a `require` line to `gate` that could be forgotten.
+      # web/vite.config.ts, whose comment names the roadmap entries that hold their measurements.
+      # NO SEPARATE JOB AND NO `gate` EDIT IS NEEDED: `gate` already lists `web` in `needs` and already
+      # requires it under has_web, so a threshold failure fails this job, which fails the required
+      # check. A separate coverage job would re-install Rust, wasm-pack and Chromium for a signal this
+      # job already carries, and would add a `require` line to `gate` that could be forgotten.
       - name: Unit tests + coverage gate
         run: pnpm run test:coverage
       - name: Build the app

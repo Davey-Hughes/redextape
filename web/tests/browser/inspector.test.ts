@@ -18,8 +18,8 @@ describe('the inspector', () => {
     expect(results().querySelectorAll('.segment').length).toBeGreaterThan(0)
   })
 
-  // §9, and the constraint behind it: 24 browser test files wait on `#results[data-state]`, so the
-  // readout's hosts MOVE rather than being duplicated — one element writes that attribute, in both modes.
+  // Plan 7 part 2 spec §9, and the constraint behind it: browser test files wait on `#results[data-state]`, so
+  // the readout's hosts MOVE rather than being duplicated — one element writes that attribute, in both modes.
   it('takes #results and #link-status with it, ids and compile state intact', () => {
     clickWorkspaceItem('[data-switch="readout"][data-value="inspector"]')
     expect(inspector().hidden).toBe(false)
@@ -32,8 +32,8 @@ describe('the inspector', () => {
 
   /**
    * **GEOMETRY, NOT A COUNT.** `#results` carries `class="results"` wherever the switch moves it, and
-   * `.results` is a wrapping flex row — so the inspector's rows packed side by side while a count of
-   * `.row` elements stayed happily above one. Spec §9 is "Every row on its own line", which is a claim
+   * `.results` is a wrapping flex row — so the inspector's rows can pack side by side while a count of
+   * `.row` elements stays above one. Plan 7 part 2 spec §9 is "Every row on its own line", which is a claim
    * about where they are.
    */
   it('puts every row on its own line', () => {
@@ -45,9 +45,9 @@ describe('the inspector', () => {
 
   /**
    * **`Λ` IS NOT `λ`.** `--label-transform` is `uppercase` in the Instrument style, and these labels carry
-   * the leg glyph — so the DOM read `λ normal form` while the screen read `Λ NORMAL FORM`, in the one
-   * vocabulary the umbrella's §4 table fixes. Every test reads `textContent`, which was correct
-   * throughout; only a screenshot showed it. `.view-title` sets `text-transform: none` for this reason.
+   * the leg glyph — so the screen would read `Λ NORMAL FORM` where the DOM reads `λ normal form`, in the one
+   * vocabulary the umbrella's §4 table fixes, and a test reading `textContent` would not see it.
+   * `.view-title` sets `text-transform: none` for this reason.
    */
   it('does not uppercase a label that carries λ', () => {
     const label = results().querySelector<HTMLElement>('.row-label')

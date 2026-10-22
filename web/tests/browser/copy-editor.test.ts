@@ -14,9 +14,9 @@ import { paneEvents } from './harness'
  * same-leg rebind arm and drop pass), which rewrites whatever the unmount cleared. So the part is asked directly.
  *
  * **NOR CAN THE APP SHOW A FUNCTION-VALUED PROGRAM WHOSE OWN TM MACHINE HAS ZERO δ RULES** — every one tried compiles
- * to a real, non-zero machine today (`session.rs`'s own sibling test), so the boundary `#refreshDetach` must still get
- * right (disabled with the function reason, not absent, regardless of `count`) is asked directly here too, through
- * `setForkAvailable` rather than a live compile.
+ * to a real, non-zero machine, so the boundary `#refreshDetach` must still get right (disabled with the
+ * function reason, not absent, regardless of `count`) is asked directly here too, through `setForkAvailable`
+ * rather than a live compile.
  */
 
 /** A part in the page, with a menu that records what it was told and an unmount hook that counts. */
@@ -112,14 +112,12 @@ describe('a copy editor', () => {
   })
 
   /**
-   * Plan 7 part 5c's final fix wave: `#refreshDetach`'s absence check used to be `forkText === null && count ===
-   * 0` on its own, on the assumption a `null` text with a zero count could only be a declined leg. A
-   * function-valued program's own TM machine can have as few δ rules as a declined leg has — zero — since
-   * `count` is `ruleCount(program)` and nothing about a result type touches the machine's own size. This state
-   * is built directly through `setForkAvailable` rather than through a live compile: `session.rs`'s own sibling
-   * test measured every small function-valued program tried at 135 or 204 δ rules, never zero, but
+   * A `null` text with a zero count is not only a declined leg: a function-valued program's own TM machine can
+   * have as few δ rules as a declined leg has — zero — since `count` is `ruleCount(program)` and nothing about a
+   * result type touches the machine's own size. This state is built directly through `setForkAvailable` rather
+   * than through a live compile: every small function-valued program tried compiles to a non-zero machine, but
    * `#refreshDetach` must not lean on that being permanent — `setForkAvailable`'s own contract allows this shape
-   * regardless of what today's compiler happens to produce.
+   * regardless of what the compiler produces.
    */
   it('offers edit a copy disabled with the function reason for a zero-rule function-valued program, not absent', () => {
     const { copy, copyState } = build()
@@ -128,7 +126,7 @@ describe('a copy editor', () => {
     expect(copyState.at(-1)).toEqual({ reason: 'a function-valued program has no TM file a copy can run' })
   })
 
-  /** The positive control for the test above: a declined leg — the one case `count === 0` still means absent. */
+  /** The positive control for the test above: a declined leg — the one case where `count === 0` means absent. */
   it('offers no copy at all for a declined leg (null text, zero count, a decodable result)', () => {
     const { copy, copyState } = build()
     copy.setForkAvailable(null, 0, true)

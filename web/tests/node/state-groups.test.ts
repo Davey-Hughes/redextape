@@ -98,7 +98,7 @@ describe('by name', () => {
   })
 
   it('reorders more groups than one call can take as arguments', () => {
-    // A hand-written dotted file can have a group per state; spread into one call, 150,000 names threw `RangeError`.
+    // A hand-written dotted file can have a group per state; spread into one call, 150,000 names throw `RangeError`.
     const count = 150_000
     const many: TmProgram = {
       ...COPY,

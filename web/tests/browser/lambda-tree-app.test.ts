@@ -6,7 +6,7 @@ import { lambdaSettled } from './lambda-text'
 
 /**
  * The λ view drawing the worker's tree end to end: the real worker, the real wasm, `draw()` asking
- * `LambdaTrees` for the displayed step (Plan 7 part 4a).
+ * `LambdaTrees` for the displayed step (Plan 7 part 4 spec §4).
  */
 const FACT3 = 'fn fact(n) { if n == 0 { 1 } else { n * fact(n - 1) } }\nfact(3)'
 
@@ -71,9 +71,8 @@ describe('the λ view draws the tree for the step it shows', () => {
 
   /**
    * A RECOMPILE DOES NOT STRAND THE VIEW. `supersede()` moves the client's generation the moment a
-   * keystroke schedules a compile, 300 ms before the worker hears of it; a tree asked for in that window
-   * was dropped by the worker and waited on forever, so the view stayed on flat text for good. Found by
-   * the tripwire below, which is the second program this file compiles; this names the mechanism.
+   * keystroke schedules a compile, 300 ms before the worker hears of it; a tree asked for in that window,
+   * dropped by the worker, would be waited on forever, and the view would stay on flat text for good.
    */
   it('draws the new program’s tree after a recompile', async () => {
     await settled('let x = 40; x + 2')
@@ -109,11 +108,10 @@ describe('the λ view draws the tree for the step it shows', () => {
   })
 
   /**
-   * THE DEPTH TRIPWIRE. A 600-element list's term is deepest near the end of its run (the wasm browser tier
-   * measured 1,803). Its last step is the normal form, where the automatic policy folds the list's tail, so
-   * the frontier's tree says nothing about depth: the tripwire steps back once, to a term still being reduced,
-   * where the whole path to the next redex is open, and reads that redex's row nested more than a thousand
-   * levels down.
+   * THE DEPTH TRIPWIRE. A 600-element list's term is deepest near the end of its run. Its last step is the
+   * normal form, where the automatic policy folds the list's tail, so the frontier's tree says nothing about
+   * depth: the tripwire steps back once, to a term still being reduced, where the whole path to the next redex
+   * is open, and reads that redex's row nested more than a thousand levels down.
    */
   it('lays out the deepest term a 600-element list reaches, the path to its redex open', async () => {
     const elems = Array(600).fill('0').join(', ')

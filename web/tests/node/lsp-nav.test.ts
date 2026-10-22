@@ -13,8 +13,7 @@ const at = (line: number, ch: number, len = 1): LspRange => ({
 /**
  * **EVERY TARGET IS IN THE DOCUMENT THAT WAS ASKED ABOUT.** `Server::definition` builds its
  * `Location` from `params.text_document.uri` and `references` does the same, so there are no
- * cross-document cases to test — an earlier version of this file had two, against routing that
- * could never fire.
+ * cross-document cases to test.
  */
 
 /** A state over `doc` with the caret at `head`. No DOM, because nothing in `lsp-nav.ts` needs one. */

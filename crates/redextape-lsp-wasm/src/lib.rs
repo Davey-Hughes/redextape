@@ -1,14 +1,14 @@
 //! The `#[wasm_bindgen]` surface for `redextape-lsp`. Marshalling only — every decision lives in
 //! `redextape-lsp`, and this crate adds no behaviour to it at all.
 //!
-//! **THE BOUNDARY IS JSON STRINGS, NOT `serde-wasm-bindgen` AND NOT `ts-rs`, AND THAT IS THE ONE
-//! PLACE THIS PROJECT'S WIRE-TYPE CONVENTION DOES NOT APPLY.** `redextape-wasm` generates TypeScript
-//! from its own Rust declarations because it owns those declarations. This crate owns none of its
-//! types: they are LSP's, generated into `gen-lsp-types` from Microsoft's official `MetaModel`. A
-//! generated TypeScript copy of them would be a second description of a shape nobody here controls,
-//! and it would be enormous — the protocol is far larger than the handful of messages the web client
-//! sends. The client hand-writes the subset it uses instead, and this boundary stays what JSON-RPC
-//! already is: a JSON message in, JSON messages out.
+//! **THE BOUNDARY IS JSON STRINGS, NOT `serde-wasm-bindgen` AND NOT `ts-rs`, AND THAT IS AN EXCEPTION
+//! TO THIS PROJECT'S WIRE-TYPE CONVENTION.** `redextape-wasm` generates TypeScript from its own Rust
+//! declarations because it owns those declarations. This crate owns none of its types: they are LSP's,
+//! generated into `gen-lsp-types` from Microsoft's official `MetaModel`. A generated TypeScript copy of
+//! them would be a second description of a shape nobody here controls, and it would be enormous — the
+//! protocol is far larger than the handful of messages the web client sends. The client hand-writes
+//! the subset it uses instead, and this boundary stays what JSON-RPC already is: a JSON message in,
+//! JSON messages out.
 //!
 //! **THE SERVER IS UNCHANGED BY THIS CRATE EXISTING.** See the part 3 design's §2.3.
 
@@ -50,9 +50,11 @@ impl LspServer {
     /// messages that go back, which may be empty.
     ///
     /// **A MALFORMED MESSAGE ANSWERS `[]` RATHER THAN THROWING, AND THAT IS NOT LENIENCE.** The one
-    /// caller is a worker whose whole job is to stay alive: a throw here crosses the boundary as a
-    /// JS exception, which kills that worker's message handler, so every later request dies with
-    /// it. `[]` costs one request and keeps the worker serving the rest.
+    /// caller is a worker whose whole job is to stay alive: a throw out of its message listener would
+    /// reach `LspClient` as that worker's `error` event, which it treats as a dead worker: the thread
+    /// is terminated and every pending request rejected, then a new one is started or, the second
+    /// time, language features are turned off. `[]` costs one request and keeps the worker serving
+    /// the rest.
     ///
     /// **WHAT IT COSTS IS STATED PLAINLY, BECAUSE THE CLIENT HAS NO TIMEOUT TO RECOVER WITH.**
     /// `lsp-client.ts` says so, deliberately — a ceiling whose only reachable cause is already

@@ -30,7 +30,7 @@ describe('the app header', () => {
     document.querySelector<HTMLButtonElement>('#new-view')?.click()
     const items = [...document.querySelectorAll<HTMLButtonElement>('#new-view-menu button')]
     expect(items.map((b) => b.textContent)).toEqual(['λ · program', 'asm · program', 'TM · program'])
-    // BY ITS LABEL, NOT ITS INDEX: the asm pair sits between the other two now, so `items[1]` adds an asm view.
+    // BY ITS LABEL, NOT ITS INDEX: the asm pair sits between the other two, so `items[1]` adds an asm view.
     items.find((b) => b.textContent === 'TM · program')?.click()
     await until(() => mainLeafIds().length === 5, 'a fifth view')
     expect(mainLeafIds()).toEqual(['source', 'lambda-0', 'pane-1', 'asm-0', 'tm-0'])
@@ -54,15 +54,11 @@ describe('the app header', () => {
     )
     // THE SWITCHES AND THE FOCUS ARE TWO-THIRDS OF WHAT THE HANDLER DOES, and the leaf order above
     // measures neither: the button's name is the preset its switches make, and the stored focus is what
-    // the workspace normalises to when the tree is replaced.
-    //
-    // **THE SWITCH HALF DISCRIMINATES NOW.** 2a held the switches at Explorer's values and shipped no
-    // control that moved them, so `switches: PRESETS[preset]` restored what they already were; 2b's
-    // workspace menu moves them, `workspace-switches.test.ts` drives that, and a *reset preset* that
-    // dropped the assignment would leave this button reading whatever the last pick made it.
+    // the workspace normalises to when the tree is replaced. No case in this file moves a switch before
+    // the reset, so the name passes whether or not the reset restores the switches.
     expect(document.querySelector('#workspace')?.textContent?.trim()).toBe('Explorer ▾')
     expect(parseWorkspace(localStorage.getItem(LAYOUT_STORAGE_KEY))?.focused).toBe('tm-0')
-    // THE FOUR VIEWS THE CASES BELOW WERE WRITTEN AGAINST, which this reset gave until the view layouts.
+    // THE FOUR VIEWS THE CASES BELOW ARE WRITTEN AGAINST.
     await showFourViews()
     await until(() => mainLeafIds().length === 4, 'all four views')
   })
@@ -116,24 +112,20 @@ describe('the app header', () => {
   })
 
   /**
-   * **A CLOSED MENU IS NOT ON THE PAGE, AND ONE OF THEM WAS** — found by looking at the running app.
-   * `[popover]:not(:popover-open) { display: none }` is a user-agent rule, and ANY author `display` beats
-   * it whatever its specificity: written `.header-menu.settings { display: grid }`, the settings menu
-   * painted over the header and the source view from first load, open or shut. Nothing else caught it —
-   * `:popover-open` is false for a menu in that state, so every test that asks whether a menu is open
-   * agreed it was shut, and none of them asks what it PAINTS.
+   * **A CLOSED MENU IS NOT ON THE PAGE.** `[popover]:not(:popover-open) { display: none }` is a
+   * user-agent rule, and ANY author `display` beats it whatever its specificity. `:popover-open` is false
+   * for a closed menu that an author `display` paints anyway, so every test that asks whether a menu is
+   * open agrees it is shut, and none of them asks what it PAINTS.
    *
-   * **EVERY POPOVER, NOT THE THREE THAT WERE ON THE PAGE WHEN THIS WAS WRITTEN.** One menu was broken
-   * because one rule set `display`; a menu added later with the same rule is the same defect, and naming
-   * the menus here is what would let it through. The sweep enumerates what the page actually holds and
-   * puts that list in the failure message, so a run that finds nothing says so rather than passing.
+   * **EVERY POPOVER.** A menu added later whose rule sets `display` is the same defect, and naming the
+   * menus here is what would let it through. The sweep enumerates what the page actually holds and puts
+   * that list in the failure message, so a run that finds nothing says so rather than passing.
    */
   it('keeps every closed popover off the page', () => {
     const all = [...document.querySelectorAll<HTMLElement>('[popover]')]
     const seen = all.map((p) => `#${p.id}.${p.className.replace(/ /g, '.')}`).join(', ')
-    // A SWEEP OVER NOTHING IS NOT A PASS. The shell builds the header's menus and each view's two, so
-    // the floor is the four a one-view-per-leg Explorer has; the assertion is that the sweep found a
-    // page to sweep at all.
+    // A SWEEP OVER NOTHING IS NOT A PASS. The shell's header alone holds more than three popovers, and
+    // each view adds its own; the assertion is only that the sweep found a page to sweep at all.
     expect(all.length, `popovers found: ${seen}`).toBeGreaterThan(3)
     for (const menu of all) {
       if (menu.matches(':popover-open')) continue

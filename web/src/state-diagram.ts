@@ -285,7 +285,7 @@ export class StateDiagram {
   setLevel(level: Level): void {
     if (level === this.#level) return
     // THE FOCUS GOES WITH THE LEVEL. The level it was in is hidden now, and a hidden element's focus falls to the
-    // page: *show states* in the grid moved it to `<body>`. It moves to the shown level's own tab stop.
+    // page: *show states* in the grid would move it to `<body>`. It moves to the shown level's own tab stop.
     const had = this.el.contains(document.activeElement)
     this.#level = level
     this.#layout()
@@ -438,10 +438,9 @@ export class StateDiagram {
     // nothing in it. Removing `width`/`height` is not enough: an `<svg>` with neither falls back to its own 300×150
     // box, which still reaches past the diagram once the window was scrolled before the machine emptied — setting both
     // to `'0'` is what actually empties it. Its `top`, left at the old window's offset, needs no reset alongside them:
-    // checked against a scrolled window, a zero-sized box adds nothing to the scrollable region at any offset. The side
-    // column's connectors are the same leftover, one step removed: `#drawBoxes` already clears its boxes and hides the
-    // column on every `setProgram`, but `#drawLinks`, which draws these, only runs from `#afterDraw`, so they are
-    // cleared here too.
+    // a zero-sized box adds nothing to the scrollable region at any offset. The side column's connectors are the same
+    // leftover, one step removed: `#drawBoxes` already clears its boxes and hides the column on every `setProgram`,
+    // but `#drawLinks`, which draws these, only runs from `#afterDraw`, so they are cleared here too.
     this.#gutter.replaceChildren()
     this.#gutter.setAttribute('width', '0')
     this.#gutter.setAttribute('height', '0')
@@ -563,7 +562,7 @@ export class StateDiagram {
         if (g.overflow) cell.append(warning())
         // THE COUNT IS ITS NUMBER AND ITS UNIT, EACH IN A BOX OF ITS OWN, AND ITS TEXT IS STILL `53 states`: a row with
         // too little room cuts the unit, never the number, which is drawn whole or not at all (`style.css`'
-        // `.program-count-number`). Cut as one text, `53 states` in a box of 9px read `5.`, another number.
+        // `.program-count-number`). Cut as one text, `53 states` in a box of 9px would read `5.`, another number.
         const count = document.createElement('span')
         count.className = 'program-count'
         const number = document.createElement('span')

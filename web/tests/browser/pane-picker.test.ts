@@ -20,32 +20,30 @@ import {
 } from './harness'
 
 /**
- * **THE PICKER, ACTING** — a split creates what it was asked to create, and the closed source pane has a
+ * **THE SPLIT MENU, ACTING** — a split creates what it was asked to create, and the closed source pane has a
  * way back that keeps the layout the user built.
  *
- * Every file beside this one drives a split as the gesture it USED to be: one click that duplicated the
- * pane it was performed on. That is still reachable — it is the "another view of this" entry, first in every menu —
- * and `two-lambda-panes.test.ts`, `layout-app.test.ts`, `layout-restore.test.ts` and
- * `pane-kind-switch.test.ts` all take it, which is why their splits still produce what they always did.
- * The two claims THIS file makes are the ones only a picker can make: a split can create a pane of a leg
- * the splitting pane does not render, on a session it is not bound to, and it can create the SOURCE pane
- * — the one leaf `reset layout` was previously the only route back to, at the cost of every other pane
- * on the page.
+ * A split that duplicates the pane it was performed on is the "another view of this" entry, first in
+ * the split menu, and `two-lambda-panes.test.ts`, `layout-app.test.ts`, `layout-restore.test.ts` and
+ * `pane-kind-switch.test.ts` take it. The two claims THIS file makes are the ones only the split menu's
+ * other entries can make: a split can create a pane of a leg the splitting pane does not render, on a
+ * session it is not bound to, and it can create the SOURCE pane, which `reset preset` brings back only
+ * at the cost of every other pane on the page.
  *
- * THE HARNESS IS `pane-kind-switch.test.ts`'s, WHICH IS `two-lambda-panes.test.ts`'s — the same shell,
- * the same one-mount-per-file `beforeAll` (ES module imports are cached, so `main()` runs once per page
- * and Vitest gives each test FILE its own page), the same `beforeEach` that undoes both drifts a test can
- * leave behind. Selectors are those files' verbatim: `button.detach` for the fork (the button carries
- * real text, not an `aria-label`), `aria-label` for the glyph-only layout controls, and the title's
- * `data-binding` (`bindingKey(leg, session)`) for the pair a view shows.
+ * THE HARNESS IS `pane-kind-switch.test.ts`'s — `two-lambda-panes.test.ts`'s shell and one-mount-per-file
+ * `beforeAll` (ES module imports are cached, so `main()` runs once per page and Vitest gives each test
+ * FILE its own page), and a `beforeEach` that undoes the tree shape through `resetToFourViews` and puts
+ * the source program back. Selectors are those files' verbatim: `button.detach` for the fork (the button
+ * carries real text, not an `aria-label`), `aria-label` for the glyph-only layout controls, and the
+ * title's `data-binding` (`bindingKey(leg, session)`) for the pair a view shows.
  */
 
 let view: EditorView
 
 beforeAll(async () => {
-  // Each browser test file gets its own in-memory `Storage` now, installed in `tests/browser/setup.ts`
-  // before this file's own module body runs — see that file's doc for why clearing a shared key was not
-  // enough. Neither key needs clearing here any more.
+  // Each browser test file gets its own in-memory `Storage`, installed in `tests/browser/setup.ts` before
+  // this file's own module body runs — see that file's doc for why clearing a shared key was not enough —
+  // so neither key needs clearing here.
   // WIDE ENOUGH FOR ITS ADDS: at the runner's default 414 px a view is 201 px wide, and the app refuses a split or a
   // `+ view` that leaves a view under `MIN_VIEW_PX` (`layout.ts`). The default's 896 px height is kept.
   await page.viewport(1280, 896)
@@ -68,17 +66,17 @@ beforeEach(async () => {
   )
 })
 
-describe('a split creates what the picker was asked for', () => {
+describe('a split creates what the split menu was asked for', () => {
   /**
-   * THE PICKER'S HEADLINE: a λ pane can create a TM pane beside itself. Until this task the new leaf took
-   * the kind of the leaf it was split from, so the λ count below is what makes this test fail against
-   * that — asserting only `data-kind` of the new leaf would leave a "duplicate the kind" implementation
-   * failing on the id it produced rather than on what it produced.
+   * THE SPLIT MENU'S HEADLINE: a λ pane can create a TM pane beside itself. The λ count below is what makes
+   * this test fail against a split that gave the new leaf the kind of the leaf it was split from —
+   * asserting only `data-kind` of the new leaf would leave a "duplicate the kind" implementation failing
+   * on the id it produced rather than on what it produced.
    *
    * IT ASSERTS THE PANE, NOT ONLY THE ATTRIBUTE. `.state-table` is `TmPane`'s own DOM, and the step
    * readout is painted by `draw()` from the leg the slot resolves — so a new pane showing the SAME step
    * as the TM pane the default layout ships is evidence the whole pass ran over a binding `legOf`
-   * accepted, not merely that `applyLayout` wrote three letters into `dataset.kind`.
+   * accepted, not merely that `applyLayout` wrote `tm` into `dataset.kind`.
    */
   it('creates a TM pane from a λ pane, bound to the pair that was picked', async () => {
     const errors: string[] = []
@@ -93,7 +91,7 @@ describe('a split creates what the picker was asked for', () => {
       expect(created).not.toBe('')
       expect(leafKind(created)).toBe('tm')
       expect(document.querySelector(`[data-leaf="${created}"] .state-table`)).not.toBeNull()
-      // THE λ PANE WAS NOT DUPLICATED, which is what the split did before the picker existed.
+      // THE λ PANE WAS NOT DUPLICATED.
       expect(lambdaLeaves()).toEqual(['lambda-0'])
       expect(titleOf(created)?.dataset.binding).toBe(bindingKey('tm', 'source'))
       expect(stepTextOf(created)).toBe(stepTextOf('tm-0'))
@@ -105,12 +103,10 @@ describe('a split creates what the picker was asked for', () => {
   })
 
   /**
-   * **THE PANE THE PICKER CREATES SHOWS THE MACHINE THAT WAS ALREADY COMPILED — the defect that made the
-   * headline above a headline about a blank rectangle.** `TmPane.setProgram` is called from the reply
-   * switch and from nowhere else, so every TM pane created AFTER its session's last `compiled` reply used
-   * to render no tapes, no status line and no δ-rows until something recompiled. Pre-existing, and this
-   * slice is what turns it from a corner case into the primary path: a picker whose whole point is
-   * creating a TM pane from a λ pane.
+   * **THE PANE THE SPLIT MENU CREATES SHOWS THE MACHINE THAT WAS ALREADY COMPILED.** Outside the reply
+   * switch, `TmPane.setProgram` is called only by the seeding (`tm-seed.ts`), so without it every TM
+   * pane created AFTER its session's last `compiled` reply would render no tapes, no status line and no
+   * δ-rows until something recompiled — and creating a TM pane from a λ pane is the split menu's headline.
    *
    * **IT ASSERTS CONTENT, NOT `.state-table`.** `creates a TM pane from a λ pane` asserts that element is
    * present, which it is on an empty pane too — `TmPane`'s constructor builds it before any program exists. `showing`'s
@@ -189,11 +185,10 @@ describe('a split creates what the picker was asked for', () => {
 
   /**
    * **THE SESSION HALF OF THE PICK, WHICH `creates a TM pane from a λ pane` CANNOT SEE.** Both panes there
-   * are on the source
-   * session, so an implementation that ignored `choice.session` and kept binding the new leaf to the
-   * session it was split FROM — which is exactly what `splitRow` did before this task — would pass it.
-   * Forking first puts the splitting pane on a λ copy, so `λ · program` names a session the pane
-   * performing the split is not on, and the new pane's own title-selector is what says which one it landed on.
+   * are on the source session, so an implementation that ignored `choice.session` and kept binding the
+   * new leaf to the session it was split FROM would pass it. Forking first puts the splitting pane on a λ
+   * copy, so `λ · program` names a session the pane performing the split is not on, and the new pane's
+   * own title-selector is what says which one it landed on.
    *
    * AND THE SPLITTING PANE IS ASSERTED UNMOVED: a split names the session of the leaf it CREATES, so an
    * implementation that routed the pick through a rebind would satisfy the first assertion and swap the
@@ -202,12 +197,10 @@ describe('a split creates what the picker was asked for', () => {
   it('starts the new pane on the session that was picked, not on the one that was split', async () => {
     document.querySelector<HTMLButtonElement>('[data-leaf="lambda-0"] button.detach')?.click()
     await until(() => editorsInLeaf('lambda-0') > 0, 'the fork to mount an editor')
-    // THE PAIR THIS FORK LANDED ON, CAPTURED BEFORE THE SPLIT. The last assertion below named
-    // `bindingKey('lambda', 'lambda-scratch')` — 5d-i's one fixed scratch id, which 5d-ii-c decision 1
-    // replaces with a name minted per fork; the number depends on how many forks ran earlier in this
-    // FILE (one `main()` per page), so it is not a constant a test can write. Reading it here also
-    // sharpens the claim: the splitting pane is unmoved from THE BUFFER IT WAS ON, not merely still on
-    // something detached.
+    // THE PAIR THIS FORK LANDED ON, CAPTURED BEFORE THE SPLIT. Each fork mints a name of its own (5d-ii-c
+    // decision 1), and the number depends on how many forks ran earlier in this FILE (one `main()` per
+    // page), so it is not a constant a test can write. Reading it here also sharpens the claim: the
+    // splitting pane is unmoved from THE BUFFER IT WAS ON, not merely still on something detached.
     const buffer = titleOf('lambda-0')?.dataset.binding ?? ''
     expect(buffer).not.toBe(bindingKey('lambda', 'source'))
 
@@ -228,11 +221,11 @@ describe('a split creates what the picker was asked for', () => {
   })
 })
 
-describe('the closed source pane comes back through the picker', () => {
+describe('the closed source pane comes back through the split menu', () => {
   /**
    * **THIS IS THE CAPABILITY `reset preset` DOES NOT PROVIDE, AND THE ASSERTIONS ARE CHOSEN TO TELL THE
    * TWO APART.** Restoring the default layout also brings the source pane back — so a test that only
-   * asked whether a source leaf exists afterwards would pass against a picker that quietly called
+   * asked whether a source leaf exists afterwards would pass against a split menu that quietly called
    * `defaultLayout()`. The layout is therefore made one the default cannot produce (a fifth leaf, from a
    * split of the TM pane) before the source pane is closed, and the whole leaf list is asserted after it
    * returns: the extra pane is still there, in its place, at the size it had.
@@ -284,16 +277,16 @@ describe('the closed source pane comes back through the picker', () => {
 
   /**
    * **THE SOURCE ARM OF THE SAME RESCUE `layout-app.test.ts` PINS FOR THE MINTING ARM.** `split` ends in
-   * `focusPane` now, and this branch of it names `SOURCE_LEAF` rather than a fresh id for the reason the
+   * `focusPane`, and this branch of it names `SOURCE_LEAF` rather than a fresh id for the reason the
    * handler reuses that literal at all: the source pane's host is the one `main.ts` seeded, holding the
-   * live editor. So the leaf focus should land in is the one the picker just put back, and it is the same
-   * leaf the choice named.
+   * live editor. So the leaf focus should land in is the one the split menu just put back, and it is the
+   * same leaf the choice named.
    *
    * IT PARKS FOCUS ON THE CONTROL FIRST — `document.activeElement` is `<body>` on a page nobody has
    * clicked, so an assertion that focus is inside the source pane afterwards would pass against a no-op
    * if focus had never been anywhere else.
    */
-  it('puts focus in the source pane the picker just brought back', async () => {
+  it('puts focus in the source pane the split menu just brought back', async () => {
     document.querySelector<HTMLButtonElement>('[data-leaf="source"] button[aria-label="close this view"]')?.click()
     await until(() => !leafIds().includes('source'), 'the source pane to close')
 
@@ -313,16 +306,14 @@ describe('the closed source pane comes back through the picker', () => {
   /**
    * THE OFFER IS CONDITIONAL, AND BOTH DIRECTIONS ARE ASSERTED ON ONE PAGE. `source` is in the menu
    * exactly when no source leaf is in the tree — `splitLeaf` throws on a second one, so an unconditional
-   * entry would be a control that provably cannot work, offered anyway. The menu is built on OPEN
-   * (`viewMenu`'s own doc), so the second open below has to reflect a tree that changed with nothing
-   * calling `update` in between.
+   * entry would be a control that provably cannot work, offered anyway. The pair list is built when a
+   * split is chosen, from `choices()` (`viewMenu`'s own doc), so the last open below has to reflect a
+   * tree that changed with nothing calling `update` in between.
    *
    * EXACT EQUALITY AGAINST `'source'`, NOT A SUBSTRING TEST. `toContain` on an array compares whole
-   * elements, and the source VIEW's entry is the one label that reads exactly `source`. This used to be
-   * argued from the program SESSION being labelled `source` too, which made every pair it contributed
-   * read `λ · source` / `TM · source` so that a substring test could never fail; spec §12 renamed that
-   * label to `program`, and the whole-element comparison is what keeps the assertion able to fail
-   * whatever the pairs are called next.
+   * elements, and the source VIEW's entry is the one label that reads exactly `source`. A substring test
+   * could never fail while a pair's label held `source` (as `λ · source` would), and the whole-element
+   * comparison is what keeps the assertion able to fail whatever the pairs are called.
    */
   it('offers source only while no source leaf is in the tree', async () => {
     const labels = (leaf: string, dir: 'row' | 'column'): string[] => {

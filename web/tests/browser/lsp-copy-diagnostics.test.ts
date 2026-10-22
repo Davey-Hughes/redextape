@@ -20,11 +20,8 @@ function formatVia(leaf: string): void {
 }
 
 /**
- * **THE TM GUTTER SHOWED NOTHING, WHATEVER WAS WRONG WITH THE MACHINE, AND THIS IS THE CASE THAT
- * COULD NOT PASS BEFORE THIS TASK.** Diagnostics for a copy used to arrive on the session worker's
- * run reply and were handed to `LambdaPane.setDiagnostics`. `tm-pane.ts` had no such method, so
- * `setDiagnostics` had callers in `lambda-pane.ts` and nowhere else — the umbrella's "closes the TM
- * gutter showing none", literally. Every editor is an LSP document now.
+ * **EVERY EDITOR IS AN LSP DOCUMENT**, a TM copy's as much as a λ copy's, so each marks what the language
+ * server finds wrong with it.
  */
 describe('diagnostics in a copy', () => {
   beforeAll(async () => {
@@ -34,12 +31,11 @@ describe('diagnostics in a copy', () => {
     await until(idle, 'the app to settle')
   })
 
-  it('marks a broken machine in a TM copy, where nothing was ever marked before', async () => {
+  it('marks a broken machine in a TM copy', async () => {
     const pane = paneOrThrow('tm-0')
     const editor = await makeCopy(pane)
 
-    // A duplicate `tapes` line: one diagnostic, `duplicate \`tapes\` line`, measured against the
-    // real server rather than guessed.
+    // A duplicate `tapes` line: one diagnostic, `duplicate \`tapes\` line`.
     retype(editor, 'tapes 1\ntapes 2\nstart s\nstate s: accept\n')
 
     await until(() => markersIn(pane) > 0, 'an error marker in the TM copy')
@@ -76,14 +72,11 @@ describe('format in a copy', () => {
    * being a whole-document replacement, would silently undo them.
    */
   /**
-   * **THE ASSERTIONS THIS TEST USED TO CARRY COULD NOT SEE THE PROPERTY ITS NAME CLAIMS.** They were
-   * `toContain('tapes 1')`, `'start s'` and `'accept'` — every one of them true of the text BEFORE
-   * the edit as well, so the test passed whether or not the last keystrokes survived. And the menu
-   * path it drives did not flush at all; only the blur path did. Found by a whole-branch review.
-   *
-   * The edit below is a whole extra `state` block, and the assertion is that it is still there
-   * afterwards. It is made inside the 300 ms debounce, which is the window where the server still
-   * holds the previous text.
+   * **THE ASSERTION HAS TO SEE THE PROPERTY THE NAME CLAIMS.** `toContain('tapes 1')`, `'start s'` or
+   * `'accept'` are true of the text BEFORE the edit as well, and would pass whether or not the last
+   * keystrokes survived. So the edit below is a whole extra `state` block, and the assertion is that it
+   * is still there afterwards. It is made inside the 300 ms debounce, which is the window where the
+   * server still holds the previous text.
    */
   it('reformats a copy without losing an edit made inside the debounce window', async () => {
     const pane = paneOrThrow('tm-0')

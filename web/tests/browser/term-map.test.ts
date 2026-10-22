@@ -121,8 +121,8 @@ describe('the term map', () => {
 
   /**
    * **A PICK IS THE USER TAKING CONTROL, AND FOLLOWING MUST HEAR SO AT ONCE.** The scroll a pick makes reports
-   * itself a frame later; a tree drawn before then — every frame of play draws one — still followed, and put
-   * the view straight back on the redex.
+   * itself a frame later; a tree drawn before then — every frame of play draws one — would still follow, and
+   * put the view straight back on the redex.
    */
   it('keeps the view where a pick put it, though a tree is drawn before the pick’s scroll reports itself', async () => {
     const el = host()
@@ -145,8 +145,8 @@ describe('the term map', () => {
   })
 
   /**
-   * **A VIEW WITH NO TREE HAS NOTHING TO MAP**, and the map said otherwise: over a refused step's flat text it
-   * went on drawing the last tree, labelled with that tree's node count.
+   * **A VIEW WITH NO TREE HAS NOTHING TO MAP**: over a refused step's flat text, a map still drawing the last
+   * tree, labelled with that tree's node count, would say otherwise.
    */
   it('empties, and says why, when the view falls back to flat text', () => {
     const el = host()
@@ -279,9 +279,10 @@ describe('the term map', () => {
   })
 
   /**
-   * **A TOKEN'S TEXT IS NOT A COLOUR A CANVAS TAKES.** Every palette token is a `light-dark(…)` pair, which
-   * `fillStyle` ignores, and the map was drawn entirely in black. `setup.ts` loads the real `style.css`, so
-   * the tokens here are the ones the app ships; the colour gate cannot see this, since no literal is involved.
+   * **A TOKEN'S TEXT IS NOT A COLOUR A CANVAS TAKES.** A palette token such as `--rule` is a `light-dark(…)`
+   * pair, which `fillStyle` ignores, so a map drawn with a token's text would be drawn entirely in black.
+   * `setup.ts` loads the real `style.css`, so the tokens here are the ones the app ships; the colour gate
+   * cannot see this, since no literal is involved.
    */
   it('draws a node in its palette colour, and again in the other theme’s', () => {
     const el = host()
@@ -317,9 +318,10 @@ describe('the term map', () => {
 })
 
 /**
- * **THE MAP'S WINDOW GOES WITH THE BODY'S HEIGHT, NOT ONLY WITH ITS SCROLL.** `.term` is capped at `60vh`, so a window
- * that grows shows more of the term with no `scroll` to say so: here the body is at its top with no redex to follow,
- * and stays at `scrollTop` 0. Last in the file, since it leaves the page at the height it grew to.
+ * **THE MAP'S WINDOW GOES WITH THE BODY'S HEIGHT, NOT ONLY WITH ITS SCROLL.** `.term` is capped at `60vh` on a host
+ * without `data-kind="lambda"`, as this file's are, so a window that grows shows more of the term with no `scroll` to
+ * say so: here the body is at its top with no redex to follow, and stays at `scrollTop` 0. Last in the file, since it
+ * leaves the page at the height it grew to.
  */
 describe('the term map beside a body whose box changes size', () => {
   it('outlines the lines a grown body shows, with no scroll to report them', async () => {

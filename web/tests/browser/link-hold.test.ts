@@ -112,10 +112,10 @@ const BIG_TM_REPLIES = Math.ceil(78_459 / RECORD_CHUNK)
 /**
  * **A RECOMPILE OF `BIG` WITH ITS TM VIEW OFF THE PAGE, IN THREE WAITS COUNTED ON THE WORKER'S REPLIES**: the TM leg
  * starting to record, its recording half way, then the run's end, as the mount's three on the TM step line. As one
- * wait this took 5,111 to 6,387 ms at `CPUQuota=25%` and 9,296 and 10,009 ms at 15 % (2026-10-05 and 06), against
- * `until`'s 10 s. `edit` is the dispatch. The compile is claimed at the dispatch and answers after a debounce, which
- * the first two assertions hold, and each count is taken only once this compile's own `compiled` has been heard, which
- * the third holds, so no wait can pass on the run before.
+ * wait this took up to 10,009 ms at `CPUQuota=15%`, against `until`'s 10 s. `edit` is the dispatch. The compile
+ * is claimed at the dispatch and answers after a debounce, which the first two assertions hold, and each count is
+ * taken only once this compile's own `compiled` has been heard, which the third holds, so no wait can pass on the
+ * run before.
  */
 async function recompilesOffPage(edit: () => void): Promise<void> {
   const before = compiles
@@ -187,9 +187,9 @@ beforeAll(async () => {
   view.dispatch({ changes: { from: 0, to: view.state.doc.length, insert: BIG } })
   await until(() => !stateIdle(), 'the compile to start')
   // THREE WAITS FOR ONE RUN: THE TM LEG STARTING TO RECORD, ITS RECORDING HALF WAY, THEN THE RUN'S END. `BIG`'s TM leg
-  // records last and fills its history at step 78,458, and as one wait this took 9,506 ms at `CPUQuota=25%`
-  // (2026-10-05), against `until`'s 10 s; as two, the second took up to 6,590 ms. Its step line reads `…` from its
-  // first frames until it stops, and counts them; a line waiting on a compile drops the `…` (`controls.ts`).
+  // records last and fills its history at step 78,458, and as one wait this took 9,506 ms at `CPUQuota=25%`, against
+  // `until`'s 10 s, and as two the second took up to 6,590 ms. Its step line reads `…` from its first frames until it
+  // stops, and counts them; a line waiting on a compile drops the `…` (`controls.ts`).
   expect(stepOf('tm-0'), 'precondition: no TM recording under way before the compile').not.toContain('…')
   await until(() => stepOf('tm-0').includes('…') || stateIdle(), 'the TM leg to start recording')
   expect(stepOf('tm-0'), 'precondition: the TM line counts this compile’s run').not.toContain('— recompiling')
@@ -285,8 +285,8 @@ describe('a pin cleared from another view', () => {
 describe('a pin made while the panel is closed', () => {
   /**
    * A CLOSED PANEL'S GRID IS TOLD THE PIN AS A VIEW OFF THE PAGE IS, and shows it when the panel reopens. Refusing the
-   * pin there left the previous link's hold in place, and with the run at rest the reopened grid stayed on that
-   * link's block: neither the new pin nor the run, following on, nothing offered to re-attach.
+   * pin there would leave the previous link's hold in place, and with the run at rest the reopened grid would stay on
+   * that link's block: neither the new pin nor the run, following on, nothing offered to re-attach.
    */
   it('shows the new pin when the rules and listing panels reopen', async () => {
     await until(() => paneByLeaf('tm-0') !== null && paneByLeaf('asm-0') !== null, 'the tiles to show every view')
@@ -493,7 +493,7 @@ describe('a pin made in a second view of the same leg', () => {
     ).toBe(true)
 
     // THE PIN IS STILL PAINTED, READ BY NAVIGATING TO ITS KNOWN ROWS RATHER THAN BY ASSUMING THEY ARE ON SCREEN —
-    // the same construct's rule-table rows, 198-208 (see "a pin made while the panel is closed" above).
+    // the same construct's rule-table rows, 198-208.
     const tmBox = box('tm-0') as HTMLElement
     tmBox.scrollTop = 190 * 24
     tmBox.dispatchEvent(new Event('scroll'))

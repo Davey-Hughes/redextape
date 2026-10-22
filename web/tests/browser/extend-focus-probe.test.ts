@@ -2,7 +2,7 @@ import type { EditorView } from '@codemirror/view'
 import { beforeAll, describe, expect, it } from 'vitest'
 import { forwardButton, historyFills, SHELL, tmStepText } from './harness'
 
-/** The fixture that reaches a `budget` stop on the TM leg — see Task 3's file for the measurement. */
+/** The fixture that reaches a `budget` stop on the TM leg — `extend-during-recompile.test.ts`'s `BUDGET_SRC`. */
 const BUDGET_SRC =
   'fn map(xs, f) { if is_empty(xs) { nil } else { cons(f(head(xs)), map(tail(xs), f)) } } fn add1(x) { x + 1 } [3, 1, 2, 4].map(add1)'
 
@@ -20,9 +20,9 @@ describe('focus when a frontier control is withdrawn', () => {
     view = await (await import('../../src/main')).ready
   })
 
-  // HALF ONE — IS THE MECHANISM REAL? Accessibility item 1 recorded that a control which hides itself
-  // strands focus on `<body>`. This asserts that against the button this slice withdraws, so half two
-  // below is a statement about reachability rather than about whether the hazard exists at all.
+  // HALF ONE — IS THE MECHANISM REAL? A control which hides itself strands focus on `<body>` (item 1 of
+  // the umbrella's §9 accessibility list). This asserts that against the controls a recompile withdraws,
+  // so half two below is a statement about reachability rather than about whether the hazard exists at all.
   it('hiding or disabling the focused frontier control strands focus on body', async () => {
     view.dispatch({ changes: { from: 0, to: view.state.doc.length, insert: BUDGET_SRC } })
     await historyFills()
@@ -78,11 +78,10 @@ describe('focus when a frontier control is withdrawn', () => {
     picker.value = originalEncoding
   }, 90_000)
 
-  // THE ONE ROUTE THAT USED TO STRAND FOCUS, AND NO LONGER DOES. A document change dispatched while focus
-  // sits on `[continue]` withdraws it under the keyboard — no user gesture performs one (typing needs focus
-  // in the editor, the picker needs focus on the picker), but the route is real. This asserted focus on
-  // `<body>`; Plan 7 part 2 (spec §11) closes the hazard, so `step-controls.ts` hands the focus to the
-  // nearest control that still works.
+  // A DISPATCH THAT WITHDRAWS THE FOCUSED `[continue]` HANDS THE FOCUS ON. A document change dispatched while
+  // focus sits on `[continue]` withdraws it under the keyboard — no user gesture performs one (typing needs
+  // focus in the editor, the picker needs focus on the picker), but the route is real. `step-controls.ts`
+  // hands the focus to the nearest control that still works (Plan 7 part 2 spec §11).
   it('hands focus to a working neighbour when a programmatic dispatch withdraws the focused continue button', async () => {
     view.dispatch({ changes: { from: 0, to: view.state.doc.length, insert: BUDGET_SRC } })
     await historyFills()

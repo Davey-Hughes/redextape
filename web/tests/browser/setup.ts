@@ -4,13 +4,13 @@
  * VITEST'S BROWSER MODE SERVES ITS OWN HTML, NOT THIS PROJECT'S `index.html`, and `index.html` is the
  * only place `style.css` is referenced (`<link rel="stylesheet" href="/src/style.css">` — `main.ts`
  * does not import it, deliberately, so the stylesheet loads from `<head>` rather than after the module
- * and the page does not flash unstyled). The consequence is that every browser test before this file
- * ran against a completely unstyled DOM.
+ * and the page does not flash unstyled). Without this file every browser test would run against a
+ * completely unstyled DOM.
  *
  * THAT IS NOT A COSMETIC DIFFERENCE FOR THE STATE TABLE. The TM view's flex rules are what bound
- * the scroll container; without them the box lays out at its full content height — measured at
- * 271,968px for 11,332 rows — and a test asserting that virtualization renders few rows would be
- * measuring a table that draws every row instead of the geometry the app actually ships.
+ * the scroll container; without them the box lays out at its full content height, and a test
+ * asserting that virtualization renders few rows would be measuring a table that draws every row
+ * instead of the geometry the app actually ships.
  *
  * Importing the stylesheet here makes the browser tier test the real thing. It is a `setupFiles` entry
  * rather than an import in `main.ts` because the `<head>` link is the right production loading order
@@ -27,21 +27,16 @@ import { fourViewWorkspace } from './harness'
  *
  * `localStorage` IS SCOPED TO AN ORIGIN, NOT TO A TEST FILE, AND VITEST RUNS BROWSER FILES CONCURRENTLY
  * IN ONE ORIGIN — the evidence for the concurrency half being the suite's own timing, where the
- * wall-clock duration is less than half the sum of its per-file test time (re-measured 2026-08-17:
- * 53.9 s of wall clock against 149.8 s of summed test time, across 38 files). Every browser test file
- * gets its own page (`main()` runs once per page, since ES module
- * imports are cached, and Vitest gives each test FILE its own page) — but every page is the same origin,
- * and therefore the same `localStorage`, so one file's write to it is visible to every sibling that
- * mounts `main()`.
+ * wall-clock duration is less than half the sum of its per-file test time. Every browser test file
+ * gets its own page (`main()` runs once per page, since ES module imports are cached, and Vitest gives
+ * each test FILE its own page) — but every page is the same origin, and therefore the same
+ * `localStorage`, so one file's write to it is visible to every sibling that mounts `main()`.
  *
- * AN EARLIER MITIGATION HAD ~14 FILES CLEAR THE SHARED KEYS BEFORE THEIR OWN MOUNT, AND IT LEFT A RACE —
- * because the window it needed to close is the WIDEST one in `main()`, not the narrowest. `main()`
- * AWAITS `init()` — a wasm fetch and instantiation — and the storage reads sit AFTER that await, so the
- * gap between a sibling's `removeItem()` and its own read spans the whole wasm load. No ordering of
- * synchronous clears on either side of that gap can shrink it; only not sharing the key can. Reproduced
- * twice under the clearing mitigation before this shim replaced it: `scratch-cap.test.ts` (`expected
- * 'buffers 1 ▾' to be 'buffers 0 ▾'`) and, on a different interleaving of the same suite, distinctly in
- * `link-truncated.test.ts`.
+ * CLEARING THE SHARED KEYS BEFORE A FILE'S OWN MOUNT IS NOT ENOUGH, because the window it needs to
+ * close is the WIDEST one in `main()`, not the narrowest. `main()` AWAITS `init()` — a wasm fetch and
+ * instantiation — and the storage reads sit AFTER that await, so the gap between a sibling's
+ * `removeItem()` and its own read spans the whole wasm load. No ordering of synchronous clears on
+ * either side of that gap can shrink it; only not sharing the key can.
  *
  * REPLACING `window.localStorage` FOR THIS FILE'S OWN PAGE, RATHER THAN CLEARING THE SHARED ONE, IS WHAT
  * ACTUALLY CLOSES IT — and it is forced rather than fastidious. `setupFiles` are imported and fully run
@@ -75,32 +70,31 @@ Object.defineProperty(window, 'localStorage', { value: shim, configurable: true 
 /**
  * Browser-tier setup, part three: every file starts on `let x = 40; x + 2`, the program it was written against.
  *
- * **A FIRST VISIT OPENS ON THE FIRST-LOAD EXAMPLE NOW** (Plan 7 part 6a spec §4.4), and every file's storage above
- * starts empty, so every file that mounts the app would start on `sum_to(5)`: a longer first compile in all of them,
- * and a different program in the ones that never type one of their own. The old start-up program is stored here
- * instead, as a returning visitor's would be. `first-load.test.ts` removes it before it mounts, and a file that clears
- * storage before its mount starts on the example too.
+ * **A FIRST VISIT OPENS ON THE FIRST-LOAD EXAMPLE** (Plan 7 part 6a spec §4.4), and every file's storage above
+ * starts empty, so every file that mounts the app would start on `sum_to(5)`: a longer first compile in all of
+ * them, and a different program in the ones that never type one of their own. `let x = 40; x + 2` is stored here
+ * instead, as a returning visitor's would be. `first-load.test.ts` removes it before it mounts, and a file that
+ * clears storage before its mount starts on the example too.
  *
- * **IT IS STORED UNDER `unary` DELIBERATELY, AND THAT IS NOT THE DEFAULT ENCODING.** `unary` is the encoding these files
- * were written and measured against, and it was the default until 2026-10-01, when `binary` became it. A stored
- * program keeps its own encoding, so a file that keeps this one starts under `unary` as it always did; a file that
- * removes it or clears storage starts on the example under the default.
+ * **IT IS STORED UNDER `unary` DELIBERATELY, AND THAT IS NOT THE DEFAULT ENCODING.** `unary` is the encoding these
+ * files were written and measured against. A stored program keeps its own encoding, so a file that keeps this one
+ * starts under `unary`; a file that removes it or clears storage starts on the example under the default.
  */
 shim.setItem(PROGRAM_STORAGE_KEY, serializeProgram({ text: 'let x = 40; x + 2', encoding: 'unary' }))
 
 /**
  * Browser-tier setup, part four: every file starts on all four views, the arrangement it was written against.
  *
- * **A FIRST VISIT OPENS ON THE SOURCE BESIDE THE TM VIEW NOW** (the view layouts spec §8), and every file's storage
- * above starts empty, so every file that mounts the app would start on two views, and a file that names `lambda-0` or
- * `asm-0` names a view that page does not hold. The workspace a four-view page stored is stored here instead, as a
- * returning visitor's would be: all four views in two rows, Explorer, the focus on the λ view, which is what a fresh
- * page was until the view layouts. A file about what a first visit shows removes it before it mounts, as
- * `first-load-views.test.ts` does, and a file that clears storage before its mount starts on the two views too.
+ * **A FIRST VISIT OPENS ON THE SOURCE BESIDE THE TM VIEW** (the view layouts spec §8), and every file's storage
+ * above starts empty, so every file that mounts the app would start on two views, and a file that names `lambda-0`
+ * or `asm-0` names a view that page does not hold. The workspace a four-view page stored is stored here instead, as
+ * a returning visitor's would be: all four views in two rows, Explorer, the focus on the λ view. A file about what
+ * a first visit shows removes it before it mounts, as `first-load-views.test.ts` does, and a file that clears
+ * storage before its mount starts on the two views too.
  *
  * **THIS IS PART THREE'S MOVE, AND IT HAS PART THREE'S COST**: a file kept green by a stored start says nothing about
  * the start a visitor gets, and a case that says "the default" while it reads these four views is true of this seed
- * and of nothing a visitor meets. The files that assert on the default itself — what *reset preset* restores, what a
- * fresh workspace holds — were read and rewritten against the new default when this was added.
+ * and of nothing a visitor meets. A file that asserts on the default itself — what *reset preset* restores, what a
+ * fresh workspace holds — has to be written against the default, not this seed.
  */
 shim.setItem(LAYOUT_STORAGE_KEY, serializeWorkspace(fourViewWorkspace()))

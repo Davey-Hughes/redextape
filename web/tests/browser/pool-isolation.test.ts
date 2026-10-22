@@ -4,30 +4,21 @@ import type { PoolPort, SessionId } from '../../src/session-client'
 import { SessionPool } from '../../src/session-client'
 
 /**
- * POOL ISOLATION — decision 3's whole claim (design §2, §4.2), and the one test in this slice that a
- * single-worker pool fails. Everything else about `SessionPool` (the map, the throw, the idempotent
- * unbind, the per-session generation) is satisfied by a pool that hands the same thread to everyone;
+ * POOL ISOLATION — decision 3's whole claim (design §2, §4.2), which a single-worker pool fails.
+ * Everything else about `SessionPool` (the map, the throw, the idempotent unbind, the per-session
+ * generation) is satisfied by a pool that hands the same thread to everyone;
  * `tests/node/session-pool.test.ts` covers that logic and cannot see this.
  *
- * THE MECHANISM IS NOT A DEEP PRINT, AND THAT IS A FINDING RATHER THAN A SUBSTITUTION. The plan and
- * §5 both ask for "poison one session's worker with a deep print and assert the other sessions still
- * step", and the poison they name was real — `depth-cap.test.ts`'s second case is the 2026-08-09
- * repro, where an aborted print left wasm-bindgen's reentrancy borrow taken and every later call on
- * that module threw. **IT IS NO LONGER REACHABLE THROUGH THIS PROTOCOL, BECAUSE PR #25 CLOSED IT.**
+ * THE MECHANISM IS NOT A DEEP PRINT. §5 asks to "poison one session's worker with a deep print and
+ * assert the other two still step", and the poison it names is the one `depth-cap.test.ts`'s
+ * second case guards against: an aborted print would leave wasm-bindgen's reentrancy borrow taken,
+ * and every later call on that module would throw. It is not reachable through this protocol.
  * `MAX_PRINT_DEPTH` caps every print a session makes — the two big-budget ones and the per-frame
- * `lambdaState(FRAME_BYTES)` alike — so a deep term reports a `Depth` cut instead of aborting.
- * `session-worker.ts`'s `dropLive` already says so in as many words: "there is no longer an honest way
- * to make `free()` throw through normal input".
- *
- * MEASURED BEFORE BELIEVING IT (2026-08-11), because a design doc asserting a hazard is not evidence
- * the hazard is gone: a real `session-worker.ts` driven with `let x = N; x + 1` at N = 1,500, 2,000
- * and 2,900 answered `compiled / lambda-frames / result` with the λ leg `Ended` at step 7 every time,
- * and the SAME worker then ran `let x = 40; x + 2` to a correct `result` immediately afterwards.
- * Three depths, three fresh workers, no poison and no degradation. A test written around that
- * mechanism would assert nothing.
+ * `lambdaState(FRAME_BYTES)` alike — so a deep term reports a `Depth` cut instead of aborting, and a
+ * test written around that mechanism would assert nothing.
  *
  * SO THIS DRIVES THE DAMAGE THAT IS REACHABLE, in two halves, and both are stronger than the deep
- * print because neither depends on an engine measurement:
+ * print because neither depends on how deep a print the engine survives:
  *
  *   1. **Co-tenancy is not survivable at all.** `session-worker.ts` holds ONE live session and frees
  *      it at the top of every `run` (`dropLive`, called before `compile`). Two sessions sharing a
@@ -37,9 +28,10 @@ import { SessionPool } from '../../src/session-client'
  *   2. **The cure has to be local.** `terminate` + respawn is the only fix for both findings in
  *      `SessionPool`'s doc — a poisoned module cannot be asked to clean itself up, since `free()`
  *      throws too. On a shared thread the cure is worse than the damage: terminating the scratchpad
- *      takes the source session with it, which is precisely §4.3's retire path killing the thing it is
- *      supposed to return the user to. (That path was recompile-from-source until 5d-ii-c decision 2;
- *      the retire is what terminates a worker, and the trigger is now the control §4.4 ships.)
+ *      takes the source session with it, which is precisely 5d-ii-c §4.3's retire path killing the
+ *      thing it is supposed to return the user to.
+ *
+ * Section and decision citations here are the 5d-i design's unless they name another.
  */
 
 const SOURCE: SessionId = 'source'
@@ -69,7 +61,7 @@ function realPool(): { pool: SessionPool; workers: Worker[] } {
  * Bind `id` and return a `run` that resolves on that session's next TERMINAL reply.
  *
  * TERMINAL IS `result`/`no-session`/`worker-error` AND NOT THE FIRST MESSAGE, the same rule
- * `worker.test.ts`'s `askAll` follows: one generation now produces `compiled`, then frame batches,
+ * `worker.test.ts`'s `askAll` follows: one generation produces `compiled`, then frame batches,
  * then `result`, so a helper that resolved on the first reply would test only `compiled` and would
  * pass on a pool whose sessions never finish.
  *
@@ -116,11 +108,11 @@ function answer(r: RunReply): string {
   if (r.kind === 'worker-error') return `worker-error: ${r.message}`
   if (r.kind !== 'result') return `unexpected reply: ${r.kind}`
   const v = r.lambda.value
-  // `typeof v === 'object'` BEFORE the `in`, because `Decoded` is not all objects — `'Unfinished'` and
-  // `'Undecodable'` are bare string members (`types.ts`'s header records this), and `in` does not narrow a union
-  // that still admits a primitive. Both string members fall through to the `undecoded:` arm, which is the
-  // right home for them here: this helper exists to make a WRONG reply legible, and "the λ leg never
-  // finished" is exactly that rather than a shape to destructure.
+  // `typeof v === 'object'` BEFORE the `in`, because `Decoded` is not all objects — `'Unfinished'`,
+  // `'Undecodable'` and `'TooLargeToPrint'` are bare string members (`types.ts`'s header records this),
+  // and `in` does not narrow a union that still admits a primitive. All three fall through to the
+  // `undecoded:` arm, which is the right home for them here: this helper exists to make a WRONG reply
+  // legible, and "the λ leg never finished" is exactly that rather than a shape to destructure.
   return typeof v === 'object' && v !== null && 'Value' in v ? v.Value.text : `undecoded: ${JSON.stringify(v)}`
 }
 
@@ -169,10 +161,9 @@ describe('SessionPool isolation', () => {
   })
 
   // HALF TWO: the cure is local. `terminate` is the only recovery from a poisoned module (see this
-  // file's header and `SessionPool`'s doc), and §4.3 fires it from a retire — so a pool where
-  // terminating one session stops the others has no recovery path at all, it has a way to kill the
-  // app. (This read "on every recompile-from-source", which 5d-ii-c decision 2 ended; a poisoned
-  // buffer is now reclaimed by an explicit retire rather than by the next keystroke.)
+  // file's header and `SessionPool`'s doc), and 5d-ii-c §4.3 fires it from a retire — so a pool
+  // where terminating one session stops the others has no recovery path at all, it has a way to kill
+  // the app.
   //
   // THE SURVIVORS MUST STEP AFTER THE TERMINATE, NOT MERELY BE LISTED. `pool.size` and `pool.has`
   // both stay correct on a shared worker: the map entry survives, the thread under it does not. Only

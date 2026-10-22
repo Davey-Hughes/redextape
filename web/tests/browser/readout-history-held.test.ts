@@ -19,8 +19,8 @@ import { countOf, fourViewWorkspace, newest, noticeText, results, resultsIdle, S
  *
  * **`sum_to(10000)` UNDER `unary`**, the encoding `setup.ts` stores the page's program under: its asm history fills
  * at 36,921 of its 140,014 instructions and fills again on one *keep recording*, and `unary` declines its TM leg, so a
- * compile records only λ, which the depth guard stops at once, and asm. ONE MOUNT FOR THE FILE, for the reason every
- * sibling gives; the cases run in order, each from where the last left the page.
+ * compile records only λ, which the depth guard stops at once, and asm. ONE MOUNT FOR THE FILE, for the reason
+ * `app.test.ts` gives; the cases run in order, each from where the last left the page.
  */
 
 /** Whether a `result` is held back from the app, and the replies held. */
@@ -163,12 +163,8 @@ describe('keep recording on the asm leg, its result held', () => {
     nothingHeld()
     holdingResults = true
     await userEvent.click(extend() as HTMLButtonElement)
-    // THREE WAITS. The middle one ran past `until`'s 10 s on a slow runner while `History` moved every frame it kept at
-    // each eviction: at `CPUQuota=25%` it took 12,411 ms in an instrumented copy, its polls at +798, +4,799 and +12,411
-    // ms, and 22,805 ms at 15 %, passing only because `until` reads its predicate before its deadline after every sleep
-    // (`until`'s doc; `harness.test.ts` holds the order). Since that stopped, three runs of the copy at 25 %,
-    // interleaved with three on `53ecbfa`, took 1,797 to 2,204 ms against 11,604 to 11,808, and no two of the
-    // press's polls came more than 893 ms apart.
+    // FOUR WAITS, three on the recording and one on the held result, each with `until`'s 10 s to itself
+    // on a slow runner.
     await until(() => newest(asmStep()) !== first, 'the asm recording to move on')
     await until(
       () => countOf(newest(asmStep())) >= countOf(first) * 1.5 || asmStep().includes('— history is full'),
@@ -199,10 +195,8 @@ describe('keep recording on the asm leg, its result held', () => {
  * fills at 36,921, the run's `result` lands, and the link asks for a continue, held here. The step line says where the
  * link is taking the leg in place of `— history is full`, and the strip must not say the history is full either.
  *
- * **THE CONTINUE IS NOT FOLLOWED TO THE NEXT FILL HERE.** A case that let it go and waited for the history to fill
- * again took 12.9 s at `CPUQuota=25%`, while `History` moved every frame it kept at each eviction, and as a hook its
- * waits saw no poll for 11.5 s. That cost is gone, and the choice was not revisited when it went: `readout.test.ts`
- * still holds a leg with no pending step to its fact.
+ * **THE CONTINUE IS NOT FOLLOWED TO THE NEXT FILL HERE**: `readout.test.ts` holds what the strip says of a leg
+ * with no pending step, that its history is full.
  */
 describe('a link taking the asm leg past where its history fills, its continue held', () => {
   afterAll(letAllGo)

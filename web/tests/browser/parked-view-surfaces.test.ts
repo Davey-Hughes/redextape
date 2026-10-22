@@ -30,14 +30,13 @@ import { clickToggle } from './user-event-fixture'
  *
  * Each case parks a view with its toggle and reads one of them. Three filters hold the four: `main.ts`'s
  * `barTargetNow` for the bar; `draw.ts`'s `watched` for the running focuses; and `link-wiring.ts`'s `detachedPanes`
- * for the status line and the popover, which both read it. With its own filter taken out a case fails, and the other
- * two pass (run 2026-10-12).
+ * for the status line and the popover, which both read it.
  *
  * **`watched` IS ASKED ONCE A LEG, AND EACH LEG HAS A CASE.** The λ leg's running focus is the mark in the source
  * editor. The TM leg's and the asm leg's are marks in their own views, which are off the page with the view, so what
  * is read of them is the status line's sentence for a pin the run has reached: *the machine is here right now*, *the
- * asm run is here right now*. With the λ leg's case alone, the other two legs read the unfiltered set and every file
- * passed.
+ * asm run is here right now*. With the λ leg's case alone, the other two legs could read the unfiltered set and every
+ * file would pass.
  *
  * **THE CASES SHARE ONE PAGE, AND EACH PUTS IT BACK BEFORE IT STARTS** (`start`): Explorer and all four views, which
  * it then asserts, with the λ view on the program. The last case leaves the λ view on a copy, which is why it is last.

@@ -16,10 +16,8 @@ describe('Decoded', () => {
   // `TooLargeToPrint` says the decode SUCCEEDED and the rendering did not, so it must not read as
   // `Undecodable` — that would blame the program for a limit of the printer.
   //
-  // This case would have THROWN before the union learned the variant, rather than falling back to
-  // anything: `decodedText` reaches `'Value' in d` once the bare-string checks miss, and `in` raises
-  // a TypeError on a string primitive. The Rust side gained the variant first, so the crash was
-  // reachable from the playground in between.
+  // Without its own check this case would THROW rather than fall back to anything: `decodedText` reaches
+  // `'Value' in d` once the bare-string checks miss, and `in` raises a TypeError on a string primitive.
   it('reads the too-large-to-print refusal without confusing it for an undecodable type', () => {
     expect(decodedText('TooLargeToPrint')).toBe('value too large to print')
     expect(decodedText('TooLargeToPrint')).not.toBe(decodedText('Undecodable'))
@@ -50,8 +48,8 @@ describe('assertTokenClasses', () => {
   })
 
   it('throws when a variant is missing, added, or reordered', () => {
-    /** The throw path has never been exercised: the browser tier only ever runs the agree branch, so
-     * until now a mistake in this function would have been indistinguishable from agreement.
+    /** The browser tier only ever runs the agree branch, so without this case a mistake in this function
+     * would be indistinguishable from agreement.
      */
     expect(() => assertTokenClasses(['Ident'])).toThrow(/drifted/)
     expect(() => assertTokenClasses([...TOKEN_CLASSES, 'Extra'])).toThrow(/drifted/)

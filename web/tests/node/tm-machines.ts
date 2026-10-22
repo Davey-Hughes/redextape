@@ -18,8 +18,8 @@ export const state = (name: string, instr: number | null, ...next: number[]): St
 
 /**
  * A program of four instructions — `pc0 mov`, `pc1 call f`, `pc2 halt`, and `f: pc3 ret` — **IN THE ORDER THE
- * LOWERING ALLOCATES STATES**: every instruction's entry state first, then the shared return handler and `halt`,
- * then the gadgets, each built for the instruction whose entry falls into it.
+ * LOWERING ALLOCATES STATES**: `halt` and the overflow guard first, then every instruction's entry state, then the
+ * shared return handler, then the gadgets, each built for the instruction whose entry falls into it.
  *
  *  0 halt                                          runtime
  *  1 overflow                                      the guard: no rule, not accepting — a badge, not a row

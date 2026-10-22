@@ -63,16 +63,13 @@ export type PaneEvents = {
   /**
    * The pane selector picked a `(leg, session)` pair for this pane's slot.
    *
-   * REQUIRED, UNLIKE THE TWO OPTIONAL MEMBERS BELOW, and the difference is not stylistic. Those two
+   * REQUIRED, UNLIKE `detach` AND `linkState` BELOW, and the difference is not stylistic. Those two
    * are absent on a pane that genuinely lacks the affordance — the λ pane has no δ-table to click, the
    * TM pane has no λ term — whereas every pane occupies a slot and every slot has a binding
    * (design §3.2b, decision 1). A pane whose rebind did nothing would be a pane whose selector lies.
    *
-   * **IT TAKES THE WHOLE `(leg, session)` PAIR, AND THAT REVERSES WHAT THIS COMMENT USED TO SAY.** It
-   * read "IT TAKES A `SessionId` AND NOT A `(session, leg)` PAIR. The leg is fixed by the slot's
-   * renderer type", which was true while a slot's leg was the only leg its selector could offer. It is
-   * not true of a control that offers pairs, and the pair is what a pick MEANS: a `<select>` listing
-   * several legs reports which option was chosen, not the session half of it.
+   * **IT TAKES THE WHOLE `(leg, session)` PAIR.** The pair is what a pick MEANS: the title's menu
+   * (`view-header.ts`) lists several legs, and reports which pair was picked, not the session half of it.
    *
    * **ONE CONTROL FOR BOTH AXES BECAUSE THE AXES ARE NOT INDEPENDENT (design §3.2).** A session holds
    * at most one leg per `Leg` — the source session has all three, a λ scratch has only λ — and
@@ -89,56 +86,45 @@ export type PaneEvents = {
    * other, which is all a handler with no layout tree can do — it cannot answer the question, so it
    * refuses to pretend; `pane-host.ts`'s wraps it, delegates a same-leg pick there and
    * answers a cross-leg one by changing the LEAF's kind and rebuilding the pane in place — `PaneSlot<K>`'s
-   * leg still has no writer anywhere in the app, so following a pick across legs is the replacement of a
-   * whole `PaneEntry` rather than a field write. **The paragraph this replaces said a cross-leg pick was
-   * "currently a no-op that the next paint snaps back" and that acting on one was a later slice.** That
-   * slice landed, and it was the change to ONE handler this signature was widened to make possible —
-   * the control, the two panes and the two types under it are untouched by it, which is the claim this
-   * paragraph was making in advance.
+   * leg has no writer anywhere in the app, so following a pick across legs is the replacement of a
+   * whole `PaneEntry` rather than a field write.
    */
   rebind(binding: Binding<Leg>): void
   /**
-   * Fork this pane's term into the λ scratchpad — design §4.3, at the step the pane is showing.
+   * Fork this pane's term into the λ scratchpad — 5d-i design §4.3, at the step the pane is showing.
    *
-   * OPTIONAL, LIKE THE TWO BELOW AND UNLIKE `rebind`, and the test is the one those two already
-   * apply: a pane has this handler when it has the affordance the handler reports. The TM pane has no
-   * term to fork; see §6.1 of 5d-iii's design for the slice that changes that.
+   * OPTIONAL, LIKE `linkState` AND UNLIKE `rebind`: a pane has this handler when it has the affordance
+   * the handler reports. A TM or asm pane has no term to fork.
    *
-   * **IT CARRIES A STEP, NOT TEXT, AND THAT REVERSES WHAT THIS COMMENT USED TO SAY.** The rule was
-   * "THE TEXT IS THE PANE'S, NOT A LOOKUP", and it was right for a seed that WAS the rendered frame.
-   * Design §4.1 replaced that seed: the inputs are now the SOURCE session's step-0 term — which lives
-   * in the `compiled` reply that `main.ts` holds, not in any pane — and the step, which `History`
-   * owns. So the pane reports the one fact it owns and `main.ts` resolves the rest.
-   *
-   * **THE HALF OF THE OLD RULE THAT SURVIVES IS THE IMPORTANT HALF:** the pane does not go looking for
-   * a term. What changed is which fact is the small one.
-   *
-   * **THE LINK WINDOW'S REFUSAL WENT WITH THE WINDOW (Plan 7 part 4a).** A pane showing the step-0
-   * link window used to decline to fork, since its body was not the step's term. The view now shows only
-   * its own step, as a tree or as text, so there is no second body a fork could be taken from.
+   * **IT CARRIES A STEP, NOT TEXT.** 5d-iii design §4.1's inputs are the SOURCE session's step-0 term —
+   * the link index's `lambdaText`, which the `compiled` reply carries, not any pane — and the step,
+   * which `History` owns. So the pane reports the one fact it owns, `transport.ts` resolves the rest,
+   * and the pane does not go looking for a term. The view shows only its own step, as a tree or as text,
+   * so there is no second body a fork could be taken from.
    */
   detach?: (step: number) => void
   /**
-   * Where the editor being built sends its edits — design §4.3's second edit gesture, and `detach`'s counterpart:
-   * that one forks a new copy from a view of the program, the sink this returns rebuilds a copy that already exists.
-   * The view calls this once per editor it BUILDS, and hands the sink to the `ScratchEditor` as its `onEdit`, whose
-   * debounce is the only caller — so it fires on a keystroke that survived the debounce, never on the seed that
-   * mounted the editor (`ScratchEditor#setText`'s `#seeding` guard keeps a seed from reaching it at all).
+   * Where the editor being built sends its edits — 5d-iii design §4.3's second edit gesture, and `detach`'s
+   * counterpart: that one forks a new copy from a view of the program, the sink this returns rebuilds a copy that
+   * already exists. The view calls this once per editor it BUILDS, and hands the sink to the `ScratchEditor` as its
+   * `onEdit`, which its debounce, its `flush` and its `format` call — so it fires on a keystroke that survived the
+   * debounce or was flushed before it, and on the text a format leaves, never on the seed that mounted the editor
+   * (`ScratchEditor#setText`'s `#seeding` guard keeps a seed from reaching it at all).
    *
    * **A THUNK THAT RETURNS A SINK, BOUND WHEN IT IS CALLED TO THE COPY THE VIEW SHOWS THEN, AND NOT A HANDLER THAT
-   * READS THE VIEW'S COPY WHEN IT FIRES.** It was the second, and a view that moved to another copy inside the
-   * debounce sent what was typed into the one it left to the one it moved to — confirmed on `main` for a λ view
-   * picking another copy through its title within 300 ms. An editor is one copy's for its life, wherever it is
-   * mounted (`ScratchEditorConfig.onEdit`), which is why a view that is handed an editor it did not build leaves
-   * the editor's sink alone. `lspDocument` above is resolved at the same moment for the same reason.
+   * READS THE VIEW'S COPY WHEN IT FIRES.** With the second, a view that moved to another copy inside the debounce
+   * would send what was typed into the one it left to the one it moved to. An editor is one copy's for its life,
+   * wherever it is mounted (`ScratchEditorConfig.onEdit`), which is why a view that is handed an editor it did not
+   * build leaves the editor's sink alone. `lspDocument` above is resolved at the same moment, so an editor's
+   * document and its sink are the same copy's.
    *
    * OPTIONAL, FOR THE SAME REASON `detach` IS: an editor exists only on a pane whose slot owns a
-   * scratch (§4.2), and this file declares the shape without deciding when a pane gets it — that is
-   * `main.ts`'s wiring, same as `detach` above.
+   * scratch (5d-iii §4.2), and this file declares the shape without deciding when a pane gets it — that is
+   * `transport.ts`'s wiring, same as `detach` above.
    */
   editSink?(): (src: string) => void
   /**
-   * This pane asks to hold its scratch session's editor — wave 3 (5d-ii-a)'s editor-moves rule.
+   * This pane asks to hold its scratch session's editor — the editor-moves rule (5d-ii-a design §4.3).
    *
    * OPTIONAL, FOR `detach`'s REASON: it exists only on a pane whose slot may be bound to a scratch —
    * every λ, TM and asm view, since a TM or asm view showing a copy whose editor another view holds
@@ -148,9 +134,9 @@ export type PaneEvents = {
    * `custody.claim(session, id)` followed by `applyLayout()`, which is where the actual DOM move happens
    * (`editor-custody.ts`'s `reconcileEditors`) — this handler only reports the click.
    *
-   * (`splitRow`/`splitColumn` were in that "carries nothing" list until they gained a `PaneChoice`, and
-   * the distinction is the one their own doc draws: what a picker produced is a fact about the PICK,
-   * not about the tree — which the pane still knows nothing of.)
+   * (`splitRow`/`splitColumn` carry a `PaneChoice`, and the distinction is the one their own doc draws:
+   * what the pane's own menu produced is a fact about the PICK, not about the tree — which the pane
+   * knows nothing of.)
    */
   showEditor?: () => void
   /**
@@ -161,15 +147,12 @@ export type PaneEvents = {
    * handler still shows the panel and toggles it — only the report of the gesture goes missing, an
    * `on.collapse?.(collapsed)` call with nothing on the other end.
    *
-   * **NOT WITHHELD ON A TM PANE, WHICH REVERSES WHAT THIS PARAGRAPH USED TO SAY.** It read "because a
-   * TM pane has no editor to collapse and a handler it can never fire is a parameter pretending to be a
-   * capability" — true before Task 8 (5d-iv), false after: `TmPane` also `implements EditablePane` and
-   * its constructor builds a `textPanel` (in its `CopyEditor` now, as the asm view's does) that wraps the
-   * editor's host in the pane body exactly like `LambdaPane`'s, and calls `on.collapse?.(collapsed)` from it.
-   * `transport.ts`'s `events` provides this handler on every leg now — see its own doc for the review finding
-   * that caught the gap: left λ-only, every `TmPane` was built with `on.collapse === undefined`, so a TM
-   * collapse hid the host but never reached `scratchpad.setCollapsed`, and the buffer came back expanded on
-   * reload.
+   * **NOT WITHHELD ON A TM PANE.** `TmPane` also `implements EditablePane` and builds a `textPanel` (in its
+   * `CopyEditor`, as the asm view's does) that wraps the editor's host in the pane body exactly like
+   * `LambdaPane`'s, and calls `on.collapse?.(collapsed)` from it. `transport.ts`'s `events` provides this
+   * handler on every leg: left λ-only, every `TmPane` would be built with `on.collapse === undefined`, so a
+   * TM collapse would hide the host but never reach `scratchpad.setCollapsed`, and the buffer would come
+   * back expanded on reload.
    *
    * IT REPORTS THE GESTURE AND DOES NOT PERFORM IT. The host is already hidden or shown by the time this
    * runs — `createPanel`'s own click handler (`panel.ts`) applies the new `hidden`/`aria-expanded` state
@@ -179,25 +162,26 @@ export type PaneEvents = {
   collapse?: (collapsed: boolean) => void
   /**
    * One of this view's own panels was opened or closed — Plan 7 part 2 spec §3. `pane-host.ts` records it
-   * per view in the workspace. OPTIONAL, BY `collapse`'s TEST: a pane has it when it has a panel to report,
-   * and the text panel reports through `collapse` instead, because its state belongs to the copy.
+   * per view in the workspace. OPTIONAL for `lspDocument`'s reason: a test builds a pane with only the
+   * handlers it drives, and `pane-host.ts` gives every view this one. The text panel reports through
+   * `collapse` instead, because its state belongs to the copy.
    */
   panel?: (name: string, open: boolean) => void
   /** A boundary between this view's regions was moved, or put back: every share the view now holds (spec §11.4). */
   panelSizes?: (sizes: Shares) => void
-  /** A λ view's display settings changed — recorded per view, as `panel` is (Plan 7 part 4a). */
+  /** A λ view's display settings changed — recorded per view, as `panel` is. */
   display?: (d: LambdaDisplay) => void
-  /** A TM view's display settings changed — `display`'s twin (Plan 7 part 4b). */
+  /** A TM view's display settings changed — `display`'s twin. */
   tmDisplay?: (d: TmDisplay) => void
   /**
    * Fork this pane's MACHINE into a TM scratch buffer — 5d-iv design §4.3.
    *
    * **NO STEP, WHERE `detach` CARRIES ONE, AND THAT IS WHY IT IS A SECOND MEMBER RATHER THAN A REUSE.**
-   * A λ fork replays the source term to the frame the pane was showing, so that handler reports the one
-   * fact it owns. A machine has no step-k text: the seed is the whole `.tm` file, which lives in
-   * `main.ts`'s and `replies.ts`'s retention of the last `compiled` reply, not in the pane. This handler
-   * needs nothing from the pane, and a `step` parameter its handler ignored would be a parameter with no
-   * reader — which this file already refuses by name for `close` above.
+   * A λ fork replays the source term to the frame the pane was showing, so that handler reports the
+   * one fact it owns. A machine has no step-k text: the seed is the whole `.tm` file, which lives
+   * in `main.ts`'s and `replies.ts`'s retention of the last `compiled` reply, not in the pane. This
+   * handler needs nothing from the pane, and a `step` parameter its handler ignored would be a
+   * parameter with no reader.
    *
    * OPTIONAL, LIKE `detach`, AND BY THE SAME TEST: a pane has this handler when it has the affordance
    * the handler reports.
@@ -212,10 +196,10 @@ export type PaneEvents = {
   linkState?: (stateId: number) => void
   /** An instruction row in the asm view's listing was clicked, or Enter pressed on it; `pc` is its index. */
   linkInstr?: (pc: number) => void
-  /** A token in the λ view was clicked; `node` is the construct its node belongs to (Plan 7 part 4a). */
+  /** A token in the λ view was clicked; `node` is the construct its node belongs to. */
   linkLambda?: (node: number) => void
   /**
-   * This pane's split and close gestures — 5d-ii-a.
+   * This pane's split and close gestures.
    *
    * OPTIONAL, LIKE `detach` AND UNLIKE `rebind`, and the same test applies: a pane has these handlers
    * when it has the affordance. A pane rendered outside a layout tree — which is every pane in
@@ -225,22 +209,15 @@ export type PaneEvents = {
    * path in the tree, or whether it is the last leaf. `pane-host.ts` holds the tree and answers all
    * three, which keeps the pane classes free of the layout entirely.
    *
-   * **THE TWO SPLITS CARRY A `PaneChoice`, AND THAT REVERSES WHAT THIS PARAGRAPH USED TO SAY ABOUT ALL
-   * THREE.** It read "THEY CARRY NOTHING", which was true while a split could only ever duplicate the
-   * pane it was performed on — there was one possible answer, so there was nothing to report. A split
-   * now asks WHAT to create (`view-header.ts`'s `viewMenu`), and the answer is a `(leg, session)` pair or the
-   * source pane, which is a fact about the pick rather than about the tree. **THE DIVISION IS
-   * UNCHANGED, ONLY THE SIDE THIS FALLS ON**: a handler still learns nothing here about where in the
-   * tree it is, because the pane still does not know — what crosses is exactly what the pane's own menu
-   * produced, which is the same rule `rebind` states one paragraph up for the binding selector.
+   * **THE TWO SPLITS CARRY A `PaneChoice`.** A split asks WHAT to create (`view-header.ts`'s `viewMenu`),
+   * and the answer is a `(leg, session)` pair or the source pane, which is a fact about the pick rather
+   * than about the tree. A handler learns nothing here about where in the tree it is, because the pane
+   * does not know — what crosses is exactly what the pane's own menu produced, which is the same rule
+   * `rebind` states for the binding selector.
    *
-   * **THE `PaneChoice` IS REQUIRED, AND THE PARAGRAPH THAT SAID OTHERWISE IS GONE RATHER THAN AMENDED.**
-   * It read "THE ARGUMENT IS OPTIONAL BECAUSE THE MENU IS", and described a caller supplying no
-   * `choices` getting a plain split button with no pick to report — true for exactly as long as no
-   * production caller passed `choices` at all. Both panes pass one now, and `viewMenu` builds NO
-   * split control without it (its own doc), so the caller the optionality existed for cannot arrive: a
-   * split gesture and a pick are the same event. Left optional, every handler here and downstream would
-   * branch forever on an `undefined` nothing can produce.
+   * **THE `PaneChoice` IS REQUIRED.** `viewMenu` builds NO split control without `choices`, so a split
+   * gesture and a pick are the same event. Left optional, every handler here and downstream would branch
+   * forever on an `undefined` nothing can produce.
    */
   splitRow?: (choice: PaneChoice) => void
   splitColumn?: (choice: PaneChoice) => void
@@ -249,8 +226,7 @@ export type PaneEvents = {
 
 /**
  * The **text** panel: a copy's editable text — a λ term or a machine — as a collapsible region (Plan 7
- * part 1, spec §8). It replaces the `⌃/⌄` collapse button both views put in their control strips, and
- * gives what was one control with two nouns ("term editor", "machine source") one name.
+ * part 1, spec §8).
  *
  * THE STATE IS `aria-expanded`, NOT A RELABEL — accessibility items 2 and 15 — and hiding is the panel
  * setting `hidden` on the body, which is the view's own editor host. The views keep no collapse class.
@@ -264,10 +240,9 @@ export type PaneEvents = {
  * read only on the unavailable → available transition, and every mount the app makes passes the
  * buffer's own recorded flag.
  *
- * **AN UNMOUNT RESETS TO OPEN.** A reviewer once caught the predecessor coming back from an unmount and
- * remount still reading the PREVIOUS buffer's state over an editor that was showing; a hidden control
- * has no state left to survive with, so the next mount starts from its own record. The reset lives in
- * `update`, behind its no-op guard: a repeated same-state call is a no-op.
+ * **AN UNMOUNT RESETS TO OPEN.** A hidden control has no state left to survive with, so the next mount
+ * starts from its own record. The reset lives in `update`, behind its no-op guard: a repeated same-state
+ * call is a no-op.
  */
 export function textPanel(
   body: HTMLElement,
@@ -296,18 +271,18 @@ export function textPanel(
 /**
  * What a split is asked to create: a `(leg, session)` PAIR, or the source pane when the tree has none.
  *
- * **`{ kind: 'source' }` IS NOT A THIRD LEG AND CARRIES NO SESSION, WHICH IS THE WHOLE SHAPE OF THIS
+ * **`{ kind: 'source' }` IS NOT A LEG AND CARRIES NO SESSION, WHICH IS THE WHOLE SHAPE OF THIS
  * TYPE.** The source pane is chrome around the one editor `main.ts` owns — `pane-host.ts`'s
  * `applyLayout` says so directly with `if (l.pane === 'source') continue` — so it has no `PaneSlot`, no
  * `Binding`, and nothing for a `SessionId` here to name. A `{ kind: Leg; session }` shape stretched to
  * cover it would have needed an invented session for a leaf that resolves none, which is the same
  * unrepresentable-invalid-combination standard `PaneEvents.rebind` states for the axes a pick names.
  *
- * IT IS OFFERED ONLY WHILE NO SOURCE LEAF IS IN THE TREE (`viewMenu`'s `sourceAvailable`), because
- * a second source pane would be a second view of one editor rather than a second editor — and that is
- * the design's own reason source is refused a SPLIT (`viewMenu`'s doc). What this makes possible
- * is the way back: a closed source pane returns through any other pane's picker, with the layout the
- * user built still standing, rather than only through `reset preset`.
+ * IT IS OFFERED ONLY WHILE NO SOURCE LEAF IS IN THE TREE (`viewMenu`'s `sourceAvailable`), because a
+ * second source pane would be a second view of one editor rather than a second editor — and that is the
+ * design's own reason source is refused a SPLIT (`layout.ts`'s `splitLeaf`). What this makes possible
+ * is the way back: a closed source pane returns through any other pane's split menu, with the layout
+ * the user built still standing, rather than only through `reset preset`.
  */
 export type PaneChoice = { kind: 'source' } | { kind: Leg; session: SessionId }
 
@@ -318,12 +293,10 @@ export type PaneChoice = { kind: 'source' } | { kind: Leg; session: SessionId }
  *
  * NAMED, RATHER THAN INLINED AT EVERY SIGNATURE THAT CARRIES IT — `view-header.ts`'s `viewMenu`,
  * `app-header.ts`'s `addViewItems`, and `PaneView.setLayoutControls` (`sessions.ts`), which is the
- * per-frame push that fills it in.
- * It was spelled out as an object type at the two split pickers in this file while they were its only carriers, and
- * `setLayoutControls` is what makes it a shape crossing a module boundary — worth a single spelling.
+ * per-frame push that fills it in: a shape crossing a module boundary is worth a single spelling.
  *
  * **`current` IS NULLABLE AND THE OTHER TWO ARE NOT, WHICH IS A STATEMENT ABOUT A PANE THAT HAS NEVER
- * BEEN PAINTED.** Both pane classes hold their latest `SplitChoices` in a field and hand `viewMenu`
+ * BEEN PAINTED.** Each pane class holds its latest `SplitChoices` in a field and hands `viewMenu`
  * a thunk that reads it, so the field needs a value from construction — and the honest one for a pane
  * `draw()` has not reached yet is "nothing on offer, and no pair in force". `options: []` says the first
  * half without inventing anything; a non-null `current` could only have been a `SessionId` the pane was

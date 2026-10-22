@@ -17,7 +17,7 @@ describe('toggleSentence', () => {
 
   /**
    * A toggle hides or shows every view of its kind, so two are said as two. **AND WHAT STAYS IS THEN ONE KIND OF VIEW,
-   * NOT ONE VIEW**: the reason was the singular's word for word, said of two views that both stay.
+   * NOT ONE VIEW**: the singular's reason, word for word, would be said of two views that both stay.
    */
   it('says two views of a kind with their number, and as the only ones shown, where one kind of view stays', () => {
     expect(toggleSentence('tm', 2, 'shown')).toBe('hide the 2 TM views')
@@ -38,7 +38,7 @@ describe('shownSentence', () => {
 
 /**
  * **THE WIDTH THAT HIDES THE TOGGLES IS WRITTEN THREE TIMES**, in a module, a stylesheet and a page, and neither of
- * the last two can import the first (`NARROW_WINDOW`'s doc). Each is read as text here.
+ * the last two can import the first (`NARROW_WINDOW`'s doc). The last two are read as text here.
  */
 describe('the window too narrow for the views toggles', () => {
   it('is one query in main.ts’s attribute and in the stylesheet’s rule', () => {

@@ -30,9 +30,9 @@ describe('SessionPool', () => {
     expect(pool.has('source')).toBe(false)
   })
 
-  // DECISION 3 AT ITS SMALLEST (design §4.2): one worker per session, so two sessions is two threads.
-  // The shared-worker implementation this task's mutation installs fails right here, before any of
-  // the containment assertions below get a chance to.
+  // DECISION 3 AT ITS SMALLEST (5d-i design §4.2): one worker per session, so two sessions is two
+  // threads. A shared-worker implementation fails right here, before any of the containment assertions
+  // below get a chance to.
   it('spawns one worker per session', () => {
     const { pool, ports } = harness()
     pool.bind('source', () => {})
@@ -53,8 +53,8 @@ describe('SessionPool', () => {
     expect(ports[1]?.sent).toEqual([])
   })
 
-  // §3.2 — "the protocol needs no session id, because the port IS the id". Nothing posted above
-  // carries an id, so this is the only thing that routes a reply, and it has to be shown routing.
+  // 5d-i design §3.2 — "the protocol needs no session id, because the port IS the id". Nothing posted
+  // above carries an id, so this is the only thing that routes a reply, and it has to be shown routing.
   it('delivers a reply to the session whose port carried it', () => {
     const { pool, ports } = harness()
     const onSource = vi.fn()
@@ -69,7 +69,7 @@ describe('SessionPool', () => {
     expect(onSource).not.toHaveBeenCalled()
   })
 
-  // GENERATIONS ARE PER SESSION AND ALWAYS WERE (§3.2): `SessionClient`'s `#gen` is private and per
+  // GENERATIONS ARE PER SESSION (5d-i design §3.2): `SessionClient`'s `#gen` is private and per
   // instance, so two sessions BOTH sitting on generation 1 is correct and must not be mistaken for a
   // collision. Asserting the equal numbers as well as the independent delivery is the point — a pool
   // that "fixed" this by stamping ids into the protocol would fail the first line.
@@ -85,7 +85,7 @@ describe('SessionPool', () => {
     expect(ports[1]?.sent.at(-1)).toEqual({ kind: 'run', gen: 1, src: 'b', encoding: 'unary' })
   })
 
-  // T3 (design §4.1): the step the pane was showing rides the wire beside the seed text, so
+  // 5d-iii design §4.1: the step the pane was showing rides the wire beside the seed text, so
   // `session-worker.ts`'s `onLambdaScratch` can replay to it before forking — see `RunRequest`'s
   // `lambda-scratch` doc in `protocol.ts` for what `step` means.
   it('carries the fork step on the wire', () => {
@@ -118,11 +118,9 @@ describe('SessionPool', () => {
   // handles. `tests/browser/pool-isolation.test.ts` is the half that shows the separation is real at
   // the thread level, which no fake can.
   //
-  // THIS IS ALSO §4.3's RETIRE PATH IN MINIATURE — retiring a buffer terminates its worker while the
-  // source session keeps running, so "unbind one, the rest live" is not a tidiness property, it is the
-  // mechanism that path is built on. (It said "recompile-from-source terminates the scratch's worker",
-  // which was the trigger until 5d-ii-c decision 2; the mechanism it names is unchanged, and with
-  // buffers plural the surviving sessions include the other buffers.)
+  // THIS IS ALSO 5d-ii-c §4.3's RETIRE PATH IN MINIATURE — retiring a buffer terminates its worker
+  // while the source session and the other buffers keep running, so "unbind one, the rest live" is not
+  // a tidiness property, it is the mechanism that path is built on.
   it('unbinding one session leaves every other session running', () => {
     const { pool, ports } = harness()
     const source = pool.bind('source', () => {})
@@ -143,10 +141,7 @@ describe('SessionPool', () => {
     expect(ports[0]?.sent.at(-1)).toEqual({ kind: 'run', gen: 1, src: 'still here', encoding: 'unary' })
   })
 
-  // §4.3 calls `unbind` from a retire, and a retire can name a buffer whose worker is already gone —
-  // this was "on every recompile-from-source, and most recompiles happen with no scratch in the pool at
-  // all" until 5d-ii-c decision 2 removed that caller. See `unbind`'s doc for why this is idempotent
-  // where `bind` throws.
+  // See `unbind`'s doc for why this is idempotent where `bind` throws.
   it('unbinding a session that has no worker does nothing', () => {
     const { pool, ports } = harness()
     pool.bind('source', () => {})
@@ -163,9 +158,9 @@ describe('SessionPool', () => {
     expect(ports[0]?.terminated).toBe(1)
   })
 
-  // `terminate` + RESPAWN IS THE WHOLE RECOVERY STORY (§4.2), so the respawn half has to be a fresh
-  // thread and not the dead one handed back. The generation restarting at 1 is the same fact from the
-  // client's side: a new `SessionClient` was built over a new port.
+  // `terminate` + RESPAWN IS THE WHOLE RECOVERY STORY (5d-i design §4.2), so the respawn half has to
+  // be a fresh thread and not the dead one handed back. The generation restarting at 1 is the same fact
+  // from the client's side: a new `SessionClient` was built over a new port.
   it('rebinding after unbind spawns a fresh worker', () => {
     const { pool, ports } = harness()
     const first = pool.bind('source', () => {})
@@ -183,8 +178,8 @@ describe('SessionPool', () => {
     expect(ports[0]?.sent.length).toBe(1)
   })
 
-  // A reply arriving on a terminated session's port must not reach its handler — the pool dropped the
-  // entry, but the listener the client registered in its constructor is still attached to the fake.
+  // A reply arriving on a terminated session's port still reaches its handler here — the pool dropped
+  // the entry, but the listener the client registered in its constructor is still attached to the fake.
   // A real `Worker.terminate()` stops the thread, so this cannot happen in the app; asserting it here
   // pins that the pool's own bookkeeping does not depend on that.
   it('a client whose session was unbound is unreachable from the pool', () => {

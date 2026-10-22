@@ -10,19 +10,20 @@ import { fourViewWorkspace, noticeText, SHELL, stateIdle, stepTextOf, undoButton
 
 /**
  * **A LINK'S POSITIONS, IN THE APP** — Plan 7 part 6a spec §5.4 and §8's positions row, on the real session worker:
- * `fact(4)`'s λ at 3,000 reached after two continues; at 1,387, which its continue's ring drops, landing on 1,388;
- * `sum_to(5)`'s λ at 5,000 clamped to 951; a step gesture taking a leg from its link before its first continue; and
- * `fact(12)`'s λ at 17,000 stopping at 15,695 after ten continues, with the open's `undo` on the notice that says so.
- * Each link is pasted into the open page, a `hashchange`, **UNDER `binary`, BUT `fact(12)`'s UNDER `unary`**: λ records
- * the same steps under both, a continue waits for the run's `result`, which comes after TM's recording, and `fact(4)`'s
- * TM records fewer steps under `binary` (spec §2.7). `fact(12)`'s case is about the TM leg `unary` declines.
+ * `fact(4)`'s λ at 3,000 reached after two continues; at 1,387, the first its continue records, landing on the oldest
+ * step its ring keeps; `sum_to(5)`'s λ at 5,000 clamped to 951; a step gesture taking a leg from its link before its
+ * first continue; and `fact(12)`'s λ at 17,000 stopping at 15,695 after ten continues, with the open's `undo` on the
+ * notice that says so. Each link is pasted into the open page, a `hashchange`, **UNDER `binary`, BUT `fact(12)`'s UNDER
+ * `unary`**: λ records the same steps under both, a continue waits for the run's `result`, which comes after TM's
+ * recording, and `fact(4)`'s TM records fewer steps under `binary` (spec §2.7). `fact(12)`'s case is about the TM leg
+ * `unary` declines.
  *
  * **EVERY REQUEST AND EVERY REPLY IS COUNTED**, by wrapping `Worker`'s own `postMessage` and `addEventListener` before
  * the app mounts: a continue is an `extend` posted, and a reply is counted after the app's listener has taken it in,
  * so once a `result` is counted, whatever continue it asked for has been posted; and a case can hold a `result` back
  * from the app until it lets it go. **ONE CONTINUE TO A CASE** for `fact(12)`: each takes most of a second here, and
  * a runner six times slower would put ten in one case past vitest's own bound. ONE MOUNT FOR THE FILE, for the reason
- * every sibling gives.
+ * `app.test.ts` gives.
  */
 
 const posted: { readonly kind?: unknown; readonly leg?: unknown }[] = []
@@ -123,10 +124,10 @@ describe("a link's positions", () => {
   })
 
   /**
-   * **THE FIRST STEP PAST THE RUN'S OWN RECORDING, WHICH IS THE OLDEST ITS CONTINUE'S RING KEEPS.** This case was
-   * `1,387 … on 1,388`, a position the continue's ring had dropped, while a ring dropped the first frames of the
-   * recording that filled it. It keeps that recording whole now (`History`'s `#evict`), and 1,387 is kept;
-   * `tests/node/share-positions.test.ts` holds a position a ring has dropped.
+   * **THE FIRST STEP PAST THE RUN'S OWN RECORDING, WHICH IS THE OLDEST ITS CONTINUE'S RING KEEPS.** A ring keeps the
+   * recording that filled it whole (`History`'s `#evict`), so 1,387 is kept, where a ring that dropped that
+   * recording's first frames would land this position on 1,388; `tests/node/share-positions.test.ts` holds a position
+   * a ring has dropped.
    */
   it("lands fact(4)'s λ step 1,387, the first its continue records, on the oldest step its ring keeps", async () => {
     const before = await open(FACT, { lambda: 1387 })
@@ -154,10 +155,10 @@ const forwardButton = () =>
 
 /**
  * **A STEP GESTURE TAKES A LEG FROM ITS LINK** (spec §5.4) before its first continue, which the run's `result` would
- * have posted. **THE `result` IS HELD BACK UNTIL THE GESTURE HAS LANDED**: at a quarter of a core the real click took
- * long enough for the run to answer first, and the continue was posted before the gesture took the leg. ONE WAIT A
- * RESULT: the run waits in a case of its own, since there a real click while the frames arrive and the rest of the
- * recording outlasted vitest's bound for one case.
+ * have posted. **THE `result` IS HELD BACK UNTIL THE GESTURE HAS LANDED**: at a quarter of a core the real click can
+ * take long enough for the run to answer first, and the continue would then be posted before the gesture took the leg.
+ * ONE WAIT A RESULT: the run waits in a case of its own, since there a real click while the frames arrive and the rest
+ * of the recording would outlast vitest's bound for one case.
  */
 describe('a step gesture before the first continue', () => {
   let before: { results: number; extends: number }

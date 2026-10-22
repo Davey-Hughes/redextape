@@ -72,8 +72,8 @@ describe('a λ view restored from a stored workspace', () => {
    * the close itself (`main.ts`'s `enterTree`) drops the closed view's display, from memory and so from the write.
    *
    * **THE λ TOGGLE ALONE, WITH NO *RESET PRESET* BEFORE IT.** A reset forgets the remembered tree, the id is no longer
-   * live, and the display is dropped whatever the close did: this case passed with the close dropping nothing while
-   * it reset first.
+   * live, and the display is dropped whatever the close did: with a reset first, this case would pass with the close
+   * dropping nothing.
    */
   it('does not give a re-minted view the display of the one that closed', async () => {
     expect(lambdaTerm()?.dataset.layout, 'the view to close draws as a new one would').toBe('outline')

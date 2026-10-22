@@ -5,9 +5,9 @@ import { decorationRanges } from '../../src/spans'
 import type { LambdaState, TmProgram, TmState } from '../../src/types'
 
 /**
- * EVERY SHAPE IN `types.ts` IS MEASURED HERE, NOT DESIGNED. `pkg`'s generated declarations type each
- * method's return as `any`, so the only thing standing between a wrong TypeScript type and a runtime
- * surprise is a test that reads the value out of a real browser.
+ * THE `types.ts` SHAPES THIS FILE READS ARE MEASURED HERE, NOT DESIGNED. `pkg`'s generated declarations
+ * type each method's return as `any`, so the only thing standing between a wrong TypeScript type and a
+ * runtime surprise is a test that reads the value out of a real browser.
  */
 type Session = {
   lambdaState(byteBudget: number): LambdaState
@@ -99,9 +99,10 @@ describe('wire shapes', () => {
     session.stepTm()
     const second = session.tmState(40)
     expect(second.step).toBe(1)
-    // The same contract Task 1 pins in Rust, re-checked across the boundary: the rule named BEFORE a
-    // step is the transition that step takes. A serializer that dropped or shifted the field would
-    // satisfy every type check above and fail here.
+    // The contract `viewmodel_contract.rs`'s `rule_names_the_transition_the_next_step_actually_takes`
+    // pins in Rust, re-checked across the boundary: the rule named BEFORE a step is the transition
+    // that step takes. A serializer that dropped or shifted the field would satisfy every type check
+    // above and fail here.
     const beforeStep = session.tmState(40)
     if (beforeStep.rule !== null) {
       // SOUND ONLY BECAUSE THIS RUN NEVER APPROACHES `TM_DEFAULT_CAPS`. `viewmodel.rs`'s doc on `rule`

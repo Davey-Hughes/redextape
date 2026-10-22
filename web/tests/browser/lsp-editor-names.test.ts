@@ -10,7 +10,7 @@ const textboxes = () => [...document.querySelectorAll<HTMLElement>('.cm-content[
 /**
  * **DEFERRED-ACCESSIBILITY ITEM 16 — "neither editable text region carries an accessible name".**
  * CodeMirror gives its content a `textbox` role and no name, so on a workspace showing several editors
- * at once every one of them announced identically.
+ * at once, unnamed, every one of them would announce identically.
  */
 describe('editable regions carry accessible names', () => {
   beforeAll(async () => {

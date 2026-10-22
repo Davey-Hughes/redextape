@@ -32,8 +32,8 @@ import {
  * `unary` is chosen, fails the default (`EXAMPLE_ENCODING`), and fails the program storage opened on, `binary` still.
  * The third, once `binary` is chosen again with the program's write refused, fails the picker's first option, and
  * fails the last program stored, `unary` still. Each such case asserts the value it must differ from. The other half
- * says what the two values storage holds are, and why the write is refused. A SECOND FILE, BECAUSE A FILE MOUNTS ONCE,
- * for the reason every sibling gives.
+ * says what the two values storage holds are, and why the write is refused. A SECOND FILE, BECAUSE EACH MOUNTS ONCE,
+ * for the reason `app.test.ts` gives.
  *
  * **THE OTHER HALF ALSO PASTES A LINK WHOSE ENCODING THIS BUILD HAS**, `binary`, onto its page on `unary`. A page on
  * `binary` cannot hold that one, and `share-open-hashchange.test.ts` holds the `unary` link on a page on `binary`.
@@ -43,8 +43,8 @@ import {
  * its own encoding fails it. An `undo` that puts back the picker's first option fails this file's third case, and one
  * that puts back the default fails the other half's.
  *
- * **WHAT A COMPILE POSTS IS READ WHERE IT LEAVES, AT `Worker.prototype.postMessage`**, and the links carry short
- * programs, each for the reason the other half gives.
+ * **WHAT A COMPILE POSTS IS READ WHERE IT LEAVES, AT `Worker.prototype.postMessage`**, for the reason the other half
+ * gives, and the links carry short programs, for the reason `share-open-hashchange.test.ts` gives.
  */
 
 let view: EditorView

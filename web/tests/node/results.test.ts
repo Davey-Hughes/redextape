@@ -133,8 +133,7 @@ describe('resultRows — refusals', () => {
     expect(find(rows, 'TM', 'width')).toBeUndefined()
   })
 
-  // Capped and DepthRefused are worded differently because raising the cap helps only one of them,
-  // and this slice has no button to offer — so the words are the whole distinction.
+  // Capped and DepthRefused are worded differently because raising the cap helps only one of them.
   it('distinguishes a spent budget from a depth refusal', () => {
     const capped: LambdaLeg = { ...lambdaOk, status: { ...lambdaOk.status, run: 'Capped' }, value: 'Unfinished' }
     expect(find(resultRows(capped, asmOk, tmOk), 'λ', 'run')?.value).toBe('spent its step budget')
@@ -155,9 +154,8 @@ describe('resultRows — refusals', () => {
 })
 
 // `onRun` posts `result` after a `budget` stop (the recording ring filled), and `lambdaStatus().run`
-// is still `Running` when it does — the old doc comment's "the worker only replies once the run ended"
-// is false for this case. `resultRows` must not call a term still `Running` a normal form, and must
-// say why recording stopped instead of staying silent (the old `runNote` default case).
+// is still `Running` when it does. `resultRows` must not call a term still `Running` a normal form,
+// and must say why recording stopped instead of staying silent.
 describe('resultRows — a run stopped by the recording budget, not by ending', () => {
   const running: LambdaLeg = { ...lambdaOk, status: { ...lambdaOk.status, run: 'Running' } }
 

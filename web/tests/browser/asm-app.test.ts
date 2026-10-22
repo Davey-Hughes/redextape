@@ -18,9 +18,8 @@ const HIGHER_ORDER = 'fn inc(x) { x + 1 } fn t(g) { g(3) } fn ap(h, y) { h(y) } 
 const FACT3 = 'fn fact(n) { if n == 0 { 1 } else { n * fact(n - 1) } } fact(3)'
 /**
  * `upto(600)`: 8,413 instructions, whose frames carry up to eight saved frames and sixteen cells, so recording them
- * passes `HISTORY_BYTES` at about step 7,400 — measured against `asmFrameBytes` by stepping the same lowering in node.
- * The TM declines it (a value too wide for the encoding) and the λ leg spends its own history first, in a fifth of a
- * second, so the asm leg is the one this waits on.
+ * passes `HISTORY_BYTES` at about step 7,400. The TM declines it (a value too wide for the encoding) and the λ leg
+ * spends its own history first, so the asm leg is the one this waits on.
  */
 const UPTO = 'fn upto(n) { if n == 0 { nil } else { cons(n, upto(n - 1)) } } upto(600)'
 

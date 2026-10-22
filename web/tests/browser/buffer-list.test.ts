@@ -13,6 +13,8 @@ import type { SessionId } from '../../src/session-client'
  *
  * `bufferList` TAKES A BUTTON RATHER THAN BUILDING ONE, so the fixture supplies the header and the
  * button in it; the list appends its own popover beside that button and nothing else is mounted.
+ *
+ * Section citations here are the Plan 7 part 2 spec's unless they name another.
  */
 
 const noop = () => {}
@@ -35,11 +37,12 @@ beforeEach(() => {
  * the first nor the last. The third has no panes, which is the orphan case — the state that makes this
  * control exist at all, since no pane chrome can reach a buffer nothing is showing.
  *
- * **THE THREE TERMS DIFFER, AND THE THIRD IS `null`, WHICH IS THE OTHER AXIS THIS FIXTURE NOW CARRIES.**
- * `BufferRow.term` exists because eight rows on a real page read `scratch N — orphan` and nothing else;
- * a fixture whose rows all held the same term would reproduce exactly the defect the field was added to
- * fix while asserting that the field is rendered. The `null` row is a buffer whose fork has not answered
- * — the case the renderer must write a sentence for rather than leaving a blank line under a name.
+ * **THE THREE TERMS DIFFER, AND THE THIRD IS `null`, WHICH IS THE OTHER AXIS THIS FIXTURE CARRIES.**
+ * `BufferRow.term` exists because without it every row at the cap reads as a name and a view count and
+ * nothing else; a fixture whose rows all held the same term would reproduce exactly the defect the field
+ * was added to fix while asserting that the field is rendered. The `null` row is a buffer whose fork
+ * has not answered — the case the renderer must write a sentence for rather than leaving a blank line
+ * under a name.
  */
 const THREE: readonly BufferRow[] = [
   { id: 'scratch-1', label: 'copy 1', paneCount: 2, term: '\\x. x', warm: true, leg: 'lambda' },
@@ -49,7 +52,7 @@ const THREE: readonly BufferRow[] = [
 
 const menu = () => bar.querySelector<HTMLElement>('.buffer-list')
 
-/** What each row READS, which is what §5 requires an assertion about a buffer to be made against. */
+/** What each row READS, which is what 5d-ii-c §5 requires an assertion about a buffer to be made against. */
 const rowText = () => [...bar.querySelectorAll<HTMLElement>('.buffer-row-name')].map((e) => e.textContent)
 
 /** The second line of each row — the buffer's own term, or the sentence that stands in for one. */
@@ -71,21 +74,15 @@ describe('bufferList', () => {
 
   /**
    * **THE ROWS ARE TOLD APART BY THEIR TERMS, WHICH IS THE ONLY THING ABOUT THEM THAT CAN DIFFER.**
-   * A `label` is `scratch N` from a counter and a `paneCount` is the same on every row at the cap — so
-   * before `BufferRow.term` the list rendered eight identical rows under a refusal instructing the user
-   * to choose one of them. Found by opening the list on a real page; this is that page's assertion.
+   * A `label` is `copy N` from a counter and a `paneCount` is the same on every row at the cap — so
+   * without `BufferRow.term` the rows at the cap would read the same but for their numbers, under a
+   * refusal instructing the user to choose one of them.
    *
    * **THE `toEqual` BELOW IS WHAT ASSERTS THE DIFFERENCE, AND A SECOND LINE THAT COUNTED IT SEPARATELY
-   * COULD NOT FAIL — whole-branch review before merge, finding 3c.** This paragraph read "ASSERTED AS
-   * DISTINCT STRINGS RATHER THAN AGAINST A LITERAL LIST, because what the field buys is DIFFERENCE. A
-   * test reading `toEqual([...])` passes just as well on a renderer that prints the same term three
-   * times" — and the line it was written above was a `toEqual([...])`, of three literals that are
-   * pairwise distinct. So the claim was false of the very assertion it sat on, and the
-   * `expect(new Set(termText()).size).toBe(THREE.length)` it justified was dead: a renderer printing one
-   * term three times fails the `toEqual` first, and nothing that passes the `toEqual` can fail the count.
-   * The list literal is kept and the count is dropped, because the literal says everything the count did
-   * and also says WHICH term belongs to which row — which is the fact `paneCount` and `label` cannot
-   * supply and this field exists for.
+   * COULD NOT FAIL**: a renderer printing one term three times fails the `toEqual` first, and nothing that
+   * passes the `toEqual` can fail a count such as `expect(new Set(termText()).size).toBe(THREE.length)`.
+   * The list literal says everything the count would and also says WHICH term belongs to which row —
+   * which is the fact `paneCount` and `label` cannot supply and this field exists for.
    */
   it('shows each copy’s own term, so two rows can be told apart', () => {
     bufferList(button, () => THREE, noop, noop, noop)
@@ -186,9 +183,8 @@ describe('bufferList', () => {
   })
 
   /**
-   * **`aria-controls` NAMES THIS LIST AND NOT SOME OTHER ONE — the `listSeq` counter's whole stated
-   * justification, which had a paragraph and no assertion.** Deleting the counter AND the attribute
-   * failed nothing, so both were argued for and neither was pinned.
+   * **`aria-controls` NAMES THIS LIST AND NOT SOME OTHER ONE — the `listSeq` counter's whole
+   * stated justification.**
    *
    * TWO CALLS IN ONE DOCUMENT, which is exactly the state the counter exists for and the one this
    * function's signature does not rule out however singular the header bar is. A duplicated id fails
@@ -210,15 +206,15 @@ describe('bufferList', () => {
     expect(document.getElementById(mine)).toBe(button.nextElementSibling)
     expect(document.getElementById(theirs)).toBe(second.nextElementSibling)
 
-    // AND AN EMPTY LIST OPENS RATHER THAN THROWING, which is a real state of this FUNCTION even though
-    // `main.ts` withholds the button entirely at zero buffers: the `autofocus` line has no first row to
-    // aim at, and a list that raised there would take its caller's gesture with it.
+    // AND AN EMPTY LIST OPENS RATHER THAN THROWING, which is a real state of this FUNCTION: the
+    // `autofocus` line has no first row to aim at, and a list that raised there would take its caller's
+    // gesture with it.
     second.click()
     expect(document.getElementById(theirs)?.querySelectorAll('.buffer-row').length).toBe(0)
   })
 
   /**
-   * THE BUTTON'S OWN READOUT — design §4.2's `[buffers 3 ▾]`, respelled `copies 3 ▾` by spec §6.
+   * THE BUTTON'S OWN READOUT — 5d-ii-c design §4.2's `[buffers 3 ▾]`, respelled `copies 3 ▾` by spec §6.
    * Asserted across TWO calls with different values, so a readout written once at construction and never
    * refreshed cannot pass: a count that stops tracking is worse than none, since the header would go on
    * advertising work that has been deleted.
@@ -286,17 +282,15 @@ describe('bufferList: delete and focus', () => {
 })
 
 /**
- * TEMPERATURE — design §4.2, and the reason this file's crash-site history matters here: `main.ts`'s
- * row builder used to call `legOf` unconditionally, an id `SessionRegistry.entryOf` throws for once a
- * buffer is cold. This is the control that MAKES a cold buffer reachable from the list at all, so it is
- * tested for the same two facts every other row fact gets — what it reads, and what a click reports —
- * plus the one fact unique to it: a cold row must read as ASLEEP rather than as a row with nothing to
- * show, which is a different claim from `BufferRow.term`'s "no term yet".
+ * TEMPERATURE — 5d-ii-d design §4.2. This is the control that MAKES a cold buffer reachable from the list
+ * at all, so it is tested for the same two facts every other row fact gets — what it reads, and what a
+ * click reports — plus the one fact unique to it: a cold row must read as ASLEEP rather than as a row
+ * with nothing to show, which is a different claim from `BufferRow.term`'s "no term yet".
  *
  * A ROW OFFERS EXACTLY ONE OF `warm`/`cool`, NEVER BOTH AND NEVER NEITHER — `bufferRow`'s own comment
- * has the argument (`pane-chrome.ts`'s "added and removed, never disabled" idiom): there is no `cool`
- * for a buffer already cold and no `warm` for one already running, so offering the wrong one would be a
- * control a click could not honour.
+ * has the argument (the "added and removed, never disabled" idiom `step-controls.ts` states for the
+ * continue button): there is no `cool` for a buffer already cold and no `warm` for one already running, so
+ * offering the wrong one would be a control a click could not honour.
  */
 describe('bufferList: temperature', () => {
   const COLD: readonly BufferRow[] = [
@@ -308,10 +302,8 @@ describe('bufferList: temperature', () => {
 
   /**
    * A row's temperature control, reached by the ACCESSIBLE NAME that names its buffer and the action it
-   * offers — mirroring `retire`'s own helper above and for the same reason, now that the control carries
-   * one (5d-ii-d review, Finding 3: it shipped with none, so a screen-reader user at eight buffers heard
-   * an indistinguishable column of `warm`/`cool` buttons). Found by text-and-position is exactly what
-   * that gap made invisible — this file's own convention is the name, not the position.
+   * offers — mirroring `retire`'s own helper above and for the same reason: this file's own convention is
+   * the name, not the position.
    */
   const temperature = (action: 'resume' | 'pause', name: string): HTMLButtonElement | null =>
     bar.querySelector<HTMLButtonElement>(
@@ -338,18 +330,18 @@ describe('bufferList: temperature', () => {
 
   /**
    * **THE WORKER WORD ITSELF, PLAN 7 PART 5 SPEC AMENDMENT 46.** A live copy's name line says nothing of
-   * its worker — its run's own line already says what it did — and only a paused copy still needs the
-   * word, since pausing is what took the worker away. Scoped to `.buffer-row-name` rather than the whole
+   * its worker — its run's own line already says what it did — and only a paused copy needs the word,
+   * since pausing is what took the worker away. Scoped to `.buffer-row-name` rather than the whole
    * row, because `temperature`'s own text is `pause` for this fixture, and `pause` is a substring
    * `paused` is not — asserting against the whole row would pass by accident.
    */
-  it('a live row names no worker, where a paused row still says paused', () => {
+  it('a live row names no worker, where a paused row says paused', () => {
     bufferList(button, () => WARM, noop, noop, noop)
     button.click()
     expect(row()?.querySelector('.buffer-row-name')?.textContent).toBe('λ copy 1 · 1 view')
   })
 
-  it('a paused row still names the worker as paused', () => {
+  it('a paused row names the worker as paused', () => {
     bufferList(button, () => COLD, noop, noop, noop)
     button.click()
     expect(row()?.querySelector('.buffer-row-name')?.textContent).toBe('λ copy 1 · not shown · paused')
@@ -370,10 +362,10 @@ describe('bufferList: temperature', () => {
   })
 
   /**
-   * THE OTHER DIRECTION (5d-ii-d review, Finding 5). Only `warm → true` was asserted above, which an
-   * implementation that hardcoded `onTemperature(row.id, true)` would also pass — every row in that test
-   * is cold, so the callback's second argument was never exercised against a fixture where the correct
-   * answer is `false`. This pins `!row.warm` rather than a constant, against a WARM fixture.
+   * THE OTHER DIRECTION. The test above asserts only `warm → true`, which an implementation that hardcoded
+   * `onTemperature(row.id, true)` would also pass — every row in that test is cold, so it never exercises
+   * the callback's second argument against a fixture where the correct answer is `false`. This pins
+   * `!row.warm` rather than a constant, against a WARM fixture.
    */
   it('clicking pause reports the id and false', () => {
     const seen: [SessionId, boolean][] = []
@@ -397,18 +389,16 @@ describe('bufferList: temperature', () => {
   })
 
   /**
-   * **THE STRANDED-FOCUS REGRESSION (5d-ii-d review round 2, Finding 1).** `rebuildRows`'s
-   * `replaceChildren` throws away the very button the click landed on, and unlike `retire` — which
-   * calls `hidePopover()` first and gets focus handed back to the invoker by the popover's own hide
-   * algorithm — a temperature click never closes the popover, so nothing puts focus anywhere in its
-   * place. Left unfixed, `document.activeElement` here is `<body>`, still inside a popover that is
-   * still open: the deferred-accessibility list's item 1, "a control that hides itself on click strands
-   * the keyboard," reached by a rebuild instead of a hide.
+   * **THE STRANDED-FOCUS REGRESSION.** `rebuildRows`'s `replaceChildren` throws away the very button the
+   * click landed on, and a temperature click never closes the popover, so no popover hide puts focus
+   * anywhere in its place. Left unfixed, `document.activeElement` here is `<body>`, still inside a popover
+   * that is still open: the deferred-accessibility list's item 1, "a control that hides itself on click
+   * strands the keyboard," reached by a rebuild instead of a hide.
    *
    * **THE FIXTURE REORDERS ON EVERY CLICK, WHICH IS WHAT MAKES THIS A MATCH-BY-`id` TEST AND NOT A
-   * MATCH-BY-POSITION ONE.** `scratch 2` is clicked while it sits second; the handler below then
-   * reverses the list, so the rebuilt row for `scratch 2` lands FIRST. An implementation that re-focused
-   * "whatever is now at the clicked index" would land on `scratch 1`'s control instead — this is the
+   * MATCH-BY-POSITION ONE.** `copy 2` is clicked while it sits second; the handler below then
+   * reverses the list, so the rebuilt row for `copy 2` lands FIRST. An implementation that re-focused
+   * "whatever is now at the clicked index" would land on `copy 1`'s control instead — this is the
    * case that catches it.
    *
    * ASSERTED BY ACCESSIBLE NAME, so the same assertion also pins that the label flipped: pausing
@@ -444,14 +434,14 @@ describe('bufferList: temperature', () => {
 })
 
 /**
- * WHERE THE LIST LANDS — geometry, because the split picker got exactly this wrong one slice ago in a
- * way no behavioural test could see, and this control is built on the same two CSS declarations.
+ * WHERE THE LIST LANDS — geometry, because a list placed wrong is wrong in a way no behavioural
+ * test can see.
  *
  * A `popover` IS `position: fixed; inset: 0` IN THE UA STYLESHEET. The `margin: 0` that stops it being
  * centred in the window also leaves `left: 0`/`right: 0` over-constrained against a definite width, so
  * a menu that says nothing about its own placement pins to the TOP-LEFT CORNER OF THE VIEWPORT rather
- * than appearing under the control that opened it. Every test above passes against that, because every
- * one of them asks what the list CONTAINS.
+ * than appearing under the control that opened it. Every test above passes against that, because none
+ * of them asks where the list is drawn.
  *
  * THE FIXTURE MOVES THE HEADER AWAY FROM THE ORIGIN, which is the whole reason this test is not
  * vacuous: the header bar is at the top-left of the real page, and there a correctly-anchored list and
@@ -462,18 +452,16 @@ describe('bufferList: temperature', () => {
 describe('bufferList: where the list opens', () => {
   it('opens against its own button rather than at the viewport origin', () => {
     bar.style.position = 'absolute'
-    // **`left` WAS `100px` AND HAD TO COME IN, WHICH IS A FACT ABOUT THE LIST'S WIDTH RATHER THAN ABOUT
-    // THIS TEST.** The rows carry the buffer's term now (`BufferRow.term`), so `.buffer-list` is
-    // `min(26rem, 90vw)` instead of `14rem` — about 373px in this tier's 414px-wide tester page. At
+    // **`left` IS `20px`, WHICH IS A FACT ABOUT THE LIST'S WIDTH RATHER THAN ABOUT THIS TEST.**
+    // `.buffer-list` is `min(26rem, 90vw)` — about 373px in this tier's 414px-wide tester page. At
     // `left: 100px` there is no inline placement that both fits on screen and shares an edge with the
     // invoker: 314px remain to the right of it and 116px to the left, so every `position-try-fallback`
     // overflows and the browser clamps to the viewport instead. That is the fallbacks working — the list
     // stays reachable — but it makes the edge-sharing claim below unsatisfiable rather than false.
     //
-    // THE BLOCK AXIS IS WHAT THIS TEST DISCRIMINATES ON AND IT IS UNTOUCHED: `top: 150px` is what a
-    // corner-pinned list cannot match, and the two assertions that exclude it are both about `top`.
-    // `20px` is still off the inline origin by ten times the 2px tolerance below, so a list at `left: 0`
-    // still fails `sharesEdge`.
+    // THE BLOCK AXIS IS WHAT THIS TEST DISCRIMINATES ON: `top: 150px` is what a corner-pinned list
+    // cannot match, and the two assertions that exclude it are both about `top`. `20px` is off the
+    // inline origin by ten times the 2px tolerance below, so a list at `left: 0` still fails `sharesEdge`.
     bar.style.left = '20px'
     bar.style.top = '150px'
     bufferList(button, () => THREE, noop, noop, noop)

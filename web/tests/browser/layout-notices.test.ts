@@ -4,7 +4,7 @@ import { page } from 'vitest/browser'
 import { bindingKey } from '../../src/view-header'
 import { mainLeafIds, noticeText, SHELL, stateIdle, until } from './harness'
 
-/** `view-menu`'s `splitVia`, restated for the reason every browser file restates its helpers. */
+/** A looser copy of `harness.ts`'s `splitVia`: no throw and no `source` pick. */
 function splitVia(leaf: string, dir: 'row' | 'column', pick: string): void {
   const more = document.querySelector<HTMLButtonElement>(`[data-leaf="${leaf}"] button.view-more`)
   more?.click()

@@ -11,7 +11,7 @@ import { cloneMs, median, ms } from './harness'
  *
  * **A PROBE, NOT A TEST — IT PRINTS AND ASSERTS ALMOST NOTHING,** like `tm-fork-cost.test.ts`, whose shape it follows.
  * It exists to produce the readings `MAX_SCRATCH_TM_BYTES` (`crates/redextape-wasm/src/session.rs`) and `VALUE_CHUNK`
- * (`web/src/protocol.ts`) are set from, and both docs name the commit they were taken at. One command runs it:
+ * (`web/src/protocol.ts`) are set from. One command runs it:
  *
  *     cd web && pnpm run test:probe:tm-buffer
  *

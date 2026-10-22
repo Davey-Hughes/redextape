@@ -52,7 +52,7 @@ describe('overCeiling', () => {
 
 describe('the bounds on a parse in one go', () => {
   it('are a slice of 8 ms and a first screen of 32,000 units', () => {
-    // THE VALUES, because every case below reads the names: 80 for 8 passed all of them.
+    // THE VALUES, because every case below reads the names: 80 for 8 would pass all of them.
     expect(PARSE_SLICE_MS).toBe(8)
     expect(FIRST_SCREEN_UNITS).toBe(32_000)
   })
@@ -61,12 +61,10 @@ describe('the bounds on a parse in one go', () => {
 /**
  * `colourSpans` over the REAL committed grammars, in Node.
  *
- * **THE HALVED VIEWPORT WINDOW SHIPPED BECAUSE NOTHING HERE PARSED ANYTHING.** Every test in this file
- * was over a pure function on a hand-built table; the one thing the module actually does — put a
- * CodeMirror viewport to a tree-sitter query and read offsets back — had no test at either tier, and a
- * query window half the height of the viewport passed every gate. These load the same `.wasm` and the
- * same `highlights.scm` the app ships, because the defect was in the units crossing that boundary and a
- * stub query would have been written with whichever units the stub's author believed in.
+ * The one thing the module actually does — put a CodeMirror viewport to a tree-sitter query and read
+ * offsets back — turns on the units crossing that boundary, so these load the same `.wasm` and the
+ * same `highlights.scm` the app ships: a stub query would be written with whichever units the stub's
+ * author believed in.
  *
  * NODE, NOT THE BROWSER TIER. `Language.load` takes a filesystem path under Node (it branches on
  * `process.versions.node` and reads the file) and the runtime `.wasm` is located the same way, so this
@@ -94,7 +92,7 @@ const classesFor = (rows: readonly (readonly [string, TokenClass])[]): Map<strin
   return map
 }
 
-/** Named for the reason `REDEXTAPE_ROWS` below is: the registry suite needs the rows, not just the map. */
+/** Named rather than inlined, because the registry suite below needs the rows, not just the map. */
 const LAMBDA_ROWS: readonly (readonly [string, TokenClass])[] = [
   ['keyword.function', 'Binder'],
   ['variable.parameter', 'Binder'],
@@ -153,10 +151,10 @@ describe('colourSpans', () => {
   const starts = (ss: readonly ColourSpan[]): number[] => ss.map((s) => s.from)
 
   it('colours the WHOLE viewport, not the first half of it', () => {
-    // THE REGRESSION TEST FOR THE HALVED WINDOW. A query's `startIndex`/`endIndex` are 2 × UTF-16 code
-    // units; a captured node's are plain code units. Passing the CodeMirror positions through undoubled
-    // asked for the first half of the viewport, and this document is the one the fix's comment quotes:
-    // 9 ASCII units, 6 captures, of which an undoubled `endIndex: 9` returns the first 3.
+    // THE TEST FOR THE HALVED WINDOW. A query's `startIndex`/`endIndex` are 2 × UTF-16 code units; a
+    // captured node's are plain code units. Passing the CodeMirror positions through undoubled would ask
+    // for the first half of the viewport, and this document is the one `colour.ts` quotes: 9 ASCII units,
+    // 6 captures, of which an undoubled `endIndex: 9` returns the first 3.
     expect(starts(spans(lambda, '(ab) (cd)', LAMBDA_CLASSES))).toEqual([0, 1, 3, 5, 6, 8])
   })
 
@@ -168,7 +166,7 @@ describe('colourSpans', () => {
     // THIS IS THE ASSERTION THAT WOULD ALSO CATCH THE LIBRARY CHANGING ITS MIND. An over-wide window is
     // harmless — the test above would stay green if `startIndex`/`endIndex` became plain code units in
     // some later `web-tree-sitter` — but this one queries from 14 on a 15-unit document and would
-    // return nothing at all.
+    // return only the capture at 14.
     const found = spans(lambda, '(λx. x) (λy. y)', LAMBDA_CLASSES, [{ from: 7, to: 15 }])
     expect(starts(found)).toEqual([8, 9, 10, 11, 13, 14])
     // Non-ASCII on purpose: 15 code units, 17 UTF-8 bytes. A `byteToIndex`-style conversion here — the
@@ -186,8 +184,9 @@ describe('colourSpans', () => {
   it('collapses two captures on one node to one decoration', () => {
     // `print(x);` is captured as both `variable@0..5` and `function.call@0..5` by design, and both
     // project to `tok-ident`. Two marks on one range nest rather than conflict, so nothing looks wrong
-    // — but `redextape_grammar_check`'s `captures_with` returns ONE entry per byte range, and part 3's
-    // differential compares this function's output against a fixture emitted from it.
+    // — but `redextape_grammar_check`'s `captures_with` returns ONE entry per byte range, and
+    // `tests/browser/grammar-differential.test.ts` compares this function's output against a fixture
+    // emitted from it.
     const found = spans(redextape, 'print(x);', REDEXTAPE_CLASSES)
     expect(found).toEqual([
       { from: 0, to: 5, cls: 'tok-ident' },
@@ -217,13 +216,14 @@ describe('colourSpans', () => {
     // OFFSET ORDER REGARDLESS OF ARRIVAL ORDER, which is the sort's own contract and the only way to
     // reach it: the collapse alone already yields ascending output for ascending ranges (a `Map` keeps a
     // key's first position when a later `set` overwrites it), so with sorted `visibleRanges` deleting
-    // the sort reddens nothing. The differential in part 3 needs the order, not just the collapse.
+    // the sort reddens nothing. `tests/browser/grammar-differential.test.ts` needs the order, not just
+    // the collapse.
     expect(starts(spans(lambda, '(ab) (cd)', LAMBDA_CLASSES, [...ranges].reverse()))).toEqual([0, 1, 3, 5, 6, 8])
   })
 })
 
 /**
- * **THE CEILING'S ROUND TRIP, WHICH WAS ARGUED IN A COMMENT AND NOT TESTED.**
+ * **THE CEILING'S ROUND TRIP.**
  *
  * `#reparse` DROPS the tree when a document crosses `COLOUR_CEILING_UNITS` rather than merely leaving
  * it unparsed, and the whole reason is a sequence no single transaction can show: paste past the
@@ -233,17 +233,16 @@ describe('colourSpans', () => {
  * touch — for text that is now something else entirely — and the result is a wrong tree, silently, not
  * a slower parse.
  *
- * **THE PLUGIN HAD NO HANDLE TO DRIVE, AND THAT IS WHAT TOOK THE WORK.** It was an anonymous class
- * expression inside `treeSitterColour`; `ViewPlugin.fromClass` hands back an `Extension`, and reaching
- * the instance through `view.plugin(...)` needs a mounted `EditorView` and therefore a DOM — in a tier
- * where the failure is invisible anyway, since a wrong tree renders as wrong decorations rather than as
- * an error. `colour.ts` now exports `colourPluginClass`, the factory that builds that class, so the
- * three transactions can be driven directly here. Nothing in `src/` calls it.
+ * `colour.ts` exports `colourPluginClass`, the factory that builds the plugin's class, so the three
+ * transactions can be driven directly here: `ViewPlugin.fromClass` hands back an `Extension`, and
+ * reaching the instance through `view.plugin(...)` needs a mounted `EditorView` and therefore a DOM — in
+ * a tier where the failure is invisible anyway, since a wrong tree renders as wrong decorations rather
+ * than as an error.
  *
  * **EVERYTHING ELSE IS REAL: a real grammar, a real `Parser`, real `EditorState`s and a real
  * `ChangeSet`.** Only the `EditorView` is a stub, and only for the three members the plugin touches —
  * `state`, `visibleRanges` and a `dispatch` the constructor calls to provoke a recompute
- * (`tests/node/replies.test.ts` casts the same shape for the same reason). A hand-built `ViewUpdate`
+ * (`tests/node/replies.test.ts` casts a stub `EditorView` the same way). A hand-built `ViewUpdate`
  * over a hand-built change set would be the one place the bug could hide, which is why the transitions
  * are produced by `EditorState.update`.
  */
@@ -270,11 +269,7 @@ describe('the colourer across the ceiling', () => {
     expect(overCeiling(over.length)).toBe(true)
     expect(overCeiling(back.length)).toBe(false)
 
-    // **A REAL SINK, NOT AN OMITTED OPTIONAL ONE, AND THE OMISSION IS WHAT THE WHOLE-BRANCH REVIEW
-    // FOUND.** `onCeiling` used to be optional and `#rebuild` called it as `opts.onCeiling?.(…)`; this
-    // test passed nothing, so v8 marked that line covered while an optional call on `undefined` did
-    // nothing at all — a designed notice with no call site anywhere in the tree. The field is required
-    // now, and what it was called with is asserted below rather than merely accepted.
+    // A REAL SINK, so what `onCeiling` is called with is asserted below rather than merely accepted.
     const ceilings: LanguageId[] = []
     const view = { state: EditorState.create({ doc: '' }), visibleRanges: [{ from: 0, to: 0 }], dispatch: () => {} }
     const plugin = new (colourPluginClass({
@@ -333,14 +328,10 @@ describe('the colourer across the ceiling', () => {
     // DELETE THE TAIL, not the whole document, and this is the other half of what makes the bug
     // reachable. `tree.edit` over a replacement of everything marks every node changed, so even a kept
     // tree is fully reparsed and the defect hides; deleting from unit 14 to the end marks nothing before
-    // 14 changed, and the old tree ENDS at 14 — so tree-sitter reuses all of it. Measured directly
-    // against `web-tree-sitter` 0.27.0: the stale parse yields
-    // `(source_file (let_statement name: (identifier) value: (number) (MISSING ";")) (identifier))`
-    // over a document of `z`s, where a fresh parse yields `(source_file (identifier))`.
+    // 14 changed, and the old tree ENDS at 14 — so tree-sitter reuses all of it.
     truncateTo(back.length)
-    // THE ASSERTION THE COMMENT WAS STANDING IN FOR. A tree carried across the ceiling would still
-    // describe `let aaaaa = 1;` here and colour `zzz` as a keyword; a fresh parse of a document of `z`s
-    // has no keyword in it at all.
+    // A tree carried across the ceiling would still describe `let aaaaa = 1;` here and colour `zzz` as a
+    // keyword; a fresh parse of a document of `z`s has no keyword in it at all.
     const fresh = redextape.parser.parse(back)
     if (!fresh) throw new Error('the parser returned no tree')
     const expected = colourSpans(redextape.query, fresh.rootNode, [{ from: 0, to: back.length }], REDEXTAPE_CLASSES)
@@ -355,14 +346,13 @@ describe('the colourer across the ceiling', () => {
 })
 
 /**
- * **A FIRST PARSE THAT OUTLASTS ONE SLICE, WHICH RAN IN ONE TASK UNTIL THE COPY OF A 7,353-STATE MACHINE HELD THE PAGE.**
+ * **A FIRST PARSE THAT OUTLASTS ONE SLICE.**
  *
- * The colourer parsed a document's whole text inside the update that first needed a tree, and a copy editor mounting on
- * 1,518,470 units of machine text stopped the page for the length of that parse. These drive the plugin as the suite
- * above does, over the real TM grammar and a real `Parser`, and hold what it does when an editor's first parse does
- * not fit in `PARSE_SLICE_MS`: the update returns after one slice, the first screen is coloured from a parse of its
- * own lines, the rest of the parse runs a slice to a timer, and an edit meanwhile starts it over. And what it does
- * once there is a tree, which is what it did before.
+ * A parse of a document's whole text inside the update that first needs a tree would stop the page for the length of
+ * that parse. These drive the plugin as the suite above does, over the real TM grammar and a real `Parser`, and hold
+ * what it does when an editor's first parse does not fit in `PARSE_SLICE_MS`: the update returns after one slice, the
+ * first screen is coloured from a parse of its own lines, the rest of the parse runs a slice to a timer, and an edit
+ * meanwhile starts it over. And what it does once there is a tree.
  *
  * **THE CLOCK IS A COUNTER, AND THAT IS WHAT MAKES A SLICE A FIXED AMOUNT OF TEXT.** `colourPluginClass` takes the
  * clock a slice is timed by as its second argument, which nothing in `src/` passes. Here each reading is one
@@ -593,7 +583,7 @@ describe('the colourer on a document whose parse outlasts one slice', () => {
       const inOneGo = parse.mock.calls.filter(([, , options]) => options?.progressCallback === undefined)
       const sliced = parse.mock.calls.filter(([, , options]) => options?.progressCallback !== undefined)
       expect(sliced.map(([text]) => (text as string).length)).toEqual([BIG.length])
-      // To the end of the line the screen ends in, and not a unit of the 91,779 past it.
+      // To the end of the line the screen ends in, and not a unit past it.
       expect(inOneGo.map(([text]) => (text as string).length)).toEqual([BIG.indexOf('\n', TOP_END)])
     } finally {
       parse.mockRestore()
@@ -613,8 +603,8 @@ describe('the colourer on a document whose parse outlasts one slice', () => {
   })
 
   it('does not parse the first screen again at an update that moved neither the text nor the screen', async () => {
-    // A CARET MOVING IN AN EDITOR WHOSE PARSE IS PENDING: its first screen's marks are for this text and this screen
-    // already, and every such update parsed those lines again.
+    // A CARET MOVING IN AN EDITOR WHOSE PARSE IS PENDING: its first screen's marks are for this text and
+    // this screen already.
     const parse = vi.spyOn(Parser.prototype, 'parse')
     try {
       const m = await mount(BIG, TOP)
@@ -663,13 +653,11 @@ describe('the colourer on a document whose parse outlasts one slice', () => {
   })
 
   /**
-   * **A DOCUMENT THAT HAS A TREE IS REPARSED AS IT WAS, IN THE UPDATE THAT CHANGED IT.** The three cases below are what
-   * a coloured editor does on a keystroke, on a transaction of several changes and on a replacement of its whole text.
-   * This branch first put the last two in slices, and its whole-branch review measured what that cost: the tree was
-   * dropped, so a screen past the first went plain, for 14 of 15 frames at 1,534,779 units on an idle page, where the
-   * parse in one go held the update for 164.4 ms and the screen stayed coloured.
+   * **A DOCUMENT THAT HAS A TREE IS REPARSED IN THE UPDATE THAT CHANGED IT.** The three cases below are what a
+   * coloured editor does on a keystroke, on a transaction of several changes and on a replacement of its whole text.
+   * Slicing the last two would drop the tree, so a screen past the first would go plain.
    */
-  it('reparses a keystroke against a landed tree at once, as before', async () => {
+  it('reparses a keystroke against a landed tree at once', async () => {
     const m = await mount(BIG, FAR)
     vi.runAllTimers()
     const dispatched = m.dispatches()
@@ -735,8 +723,7 @@ describe('the colourer on a document whose parse outlasts one slice', () => {
   /**
    * **A REPLACEMENT BY THE SAME TEXT IS NOT A CHANGE TO REPARSE.** *Format* answers with one edit over the whole
    * buffer and the editor dispatches it whether or not it changed a character (`lsp-text.ts`'s `applyEdits`), so
-   * every format of a text that parses, changed by it or not, reparsed the whole of it: 164.4 ms inside the update at
-   * 1,534,779 units, measured by this branch's review on `main`'s colourer.
+   * without this rule every format of a text that parses, changed by it or not, would reparse the whole of it.
    */
   it('does not reparse a replacement by the same text', async () => {
     const m = await mount(BIG, FAR)
@@ -876,22 +863,21 @@ describe('the colourer on a document whose parse outlasts one slice', () => {
 })
 
 /**
- * **THE REGISTRY'S TWO FAILURE SHAPES, WHICH DESIGN §10 GIVES DIFFERENT SENTENCES AND THE CODE GAVE
- * THE SAME ONE.**
+ * **THE REGISTRY'S TWO FAILURE SHAPES, WHICH DESIGN §10 GIVES DIFFERENT SENTENCES.**
  *
  * Row 3 of that table — *a grammar fails to load: that language shows uncoloured, one notice, the other
- * three are unaffected* — was built in `main.ts` and exercised by nothing:
- * `tests/browser/grammar-differential.test.ts` only ever asserts the failure list stays EMPTY, which is
- * a test of the happy path wearing a failure's clothes. The first test below drives a real failed load.
+ * three are unaffected* — is built in `main.ts`, and `tests/browser/grammar-differential.test.ts` only
+ * ever asserts the failure list stays EMPTY, which is a test of the happy path wearing a failure's
+ * clothes. The first test below drives a real failed load.
  *
- * The second is the case the review found underneath it. `Parser.init` is memoised for the whole
- * registry, so a runtime `.wasm` that will not fetch rejects every language's promise from ONE cause —
- * four notices, one per language, for a single event that leaves nothing on the page coloured.
+ * The second is the case underneath it. `Parser.init` is memoised for the whole registry, so a runtime
+ * `.wasm` that will not fetch rejects every language's promise from ONE cause, which reported per
+ * language would be four notices for a single event that leaves nothing on the page coloured.
  * `createGrammarRegistry` reports that through `onRuntimeFailure`, once.
  *
- * **NODE, AND THE GRAMMARS ARE THE REAL ONES**, as the two suites above are: `Language.load` takes a
- * filesystem path here, so a fabricated failure sits beside a genuine success in the same registry and
- * the independence claim is about real loads rather than about two stubs.
+ * **NODE, AND THE GRAMMARS ARE THE REAL ONES**, as in the three suites above that parse: `Language.load`
+ * takes a filesystem path here, so a fabricated failure sits beside a genuine success in the same
+ * registry and the independence claim is about real loads rather than about two stubs.
  */
 describe('the grammar registry when something does not load', () => {
   const highlightsOf = (name: string): string =>
@@ -987,9 +973,9 @@ describe('the grammar registry when something does not load', () => {
     const loaded = await Promise.all(LANGUAGE_IDS.map((id) => registry.load(id)))
 
     expect(loaded, 'every language goes uncoloured, which is the honest outcome').toEqual([null, null, null, null])
-    // **THE DEFECT FIRST, BECAUSE A SEQUENCE PROVES ONLY ITS PREFIX.** Four `onFailure` calls is what
-    // shipped: one event reported as four grammars that happened to break at once, and four notices
-    // where §10 promises one per failure.
+    // **THE DEFECT FIRST, BECAUSE A SEQUENCE PROVES ONLY ITS PREFIX.** Four `onFailure` calls would report
+    // one event as four grammars that happened to break at once, and give four notices where §10 promises
+    // one per failure.
     expect(failures, 'the runtime is nobody’s grammar').toEqual([])
     // And one sentence for the one event, rather than silence — the other way this can be wrong.
     expect(runtimeFailures).toEqual(['the runtime .wasm did not fetch'])

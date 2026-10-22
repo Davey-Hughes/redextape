@@ -50,8 +50,8 @@ describe('armed', () => {
   })
 
   /**
-   * THE PREFIX'S OWN MODIFIER MAY STILL BE DOWN (the user's report, 2026-10-11): holding `Ctrl` through the second
-   * key is the natural motion, so a table key answers with it held as without.
+   * THE PREFIX'S OWN MODIFIER MAY STILL BE DOWN: holding `Ctrl` through the second key is the natural motion, so a
+   * table key answers with it held as without.
    */
   it('answers every key of its table with Ctrl still held, as without', () => {
     for (const row of VIEW_KEYS)
@@ -73,7 +73,7 @@ describe('armed', () => {
 
   /**
    * **`Shift` DOWN DOES NOT STOP A TABLE KEY OR `Escape`**: the machine reads `Alt` and `Meta` and no other modifier
-   * (`bare`). This holds what it answers today. Whether a layout that types these keys with another modifier should be
+   * (`bare`). This holds what it answers. Whether a layout that types these keys with another modifier should be
    * answered is not settled here.
    */
   it('answers every key of its table, and Escape, with Shift down', () => {
@@ -88,13 +88,13 @@ describe('armed', () => {
 
   it.each([
     ['a key the table does not name', key('x')],
-    ['a move key, which the second pull request adds', key('j')],
+    ['a move key (the view layouts spec §9), which the table does not name', key('j')],
     ['a table key with Alt down', key('1', { alt: true })],
     ['a table key with Meta down', key(']', { meta: true })],
     ['Escape with Alt down', key('Escape', { alt: true })],
     ['Escape with Meta down', key('Escape', { meta: true })],
     ['the prefix with Meta too', key('.', { ctrl: true, meta: true })],
-    ['n, which was a cycle key until Ctrl+N opened a window', key('n')],
+    ['n, no cycle key, since Ctrl+N opens a window', key('n')],
     ['Ctrl+N itself, which the browser keeps', key('n', { ctrl: true })],
     ['Enter', key('Enter')],
   ])('ends on %s and leaves the press for whatever is under the focus', (_what, press) => {
@@ -127,7 +127,7 @@ describe('armed', () => {
   /**
    * **A MODIFIER'S OWN `keydown` SAYS THAT MODIFIER IS DOWN**: `Alt` pressed alone arrives with `alt` set, as the
    * browser sends it (`tests/browser/view-keys.test.ts` presses each). The rows above have every flag clear, which no
-   * press of these four has, and a machine that let a modifier through only with `Alt` and `Meta` up passed them.
+   * press of these four has, and a machine that let a modifier through only with `Alt` and `Meta` up would pass them.
    */
   it.each([
     ['Control', key('Control', { ctrl: true })],

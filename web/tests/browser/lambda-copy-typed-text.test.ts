@@ -6,13 +6,13 @@ import { lambdaPane, SHELL, stateIdle, until } from './harness'
 
 /**
  * **A λ COPY KEEPS THE TEXT TYPED INTO IT.** A build of a copy is answered with the copy's text, and the app puts
- * that answer in the copy's editor and in its text of record. The answer used to be the worker's print of the term,
- * for an edit as for a copy made from a later step, so whatever the printer spells differently was replaced under
- * the caret each time a build was answered: a space typed at the end was gone, and the letter typed after a pause
- * joined the one before it; a caret inside the text went to the start; `\`, a line break and parentheses the
- * printer does not write became the printer's. And a copy's text of record never held the space.
+ * that answer in the copy's editor and in its text of record. Were the answer the worker's print of the term, for an
+ * edit as for a copy made from a later step, whatever the printer spells differently would be replaced under the
+ * caret each time a build was answered: a space typed at the end would go, and the letter typed after a pause would
+ * join the one before it; a caret inside the text would go to the start; `\`, a line break and parentheses the
+ * printer does not write would become the printer's. And a copy's text of record would never hold the space.
  *
- * **EACH CASE WAITS FOR THE ANSWER TO THE BUILD THAT CARRIES ITS TEXT**, since the answer is what replaced the
+ * **EACH CASE WAITS FOR THE ANSWER TO THE BUILD THAT CARRIES ITS TEXT**, since the answer is what would replace the
  * text. `answered` hears every answer on the copy's worker after the app's own listener, attached when the app
  * built the worker, so the app has handled an answer by the time it is listed. **BY ITS TEXT AND NOT AS THE NEXT
  * BUILD**: several keys typed against the shipped 300 ms debounce can be split by a slow machine into a build of
@@ -21,7 +21,7 @@ import { lambdaPane, SHELL, stateIdle, until } from './harness'
  * **THE KEYS UNDER TEST ARE REAL ONES** (`userEvent`), typed where the caret is; a case's starting text is
  * dispatched, which the editor reports as typing all the same.
  *
- * ONE MOUNT FOR THE FILE, for the reason every sibling gives: `main()` runs once per page.
+ * ONE MOUNT FOR THE FILE, for the reason `app.test.ts` gives: `main()` runs once per page.
  */
 
 const post = Worker.prototype.postMessage

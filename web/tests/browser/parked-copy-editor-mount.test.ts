@@ -8,16 +8,16 @@ import { clickToggle } from './user-event-fixture'
  *
  * A machine copy's editor lives in one view. When that view closes the editor is destroyed, and `pane-host.ts`'s
  * `mountOnViewOf` mounts a fresh one on a view of the copy in the tree on screen. A view a switch parked is not in
- * that tree. So with the copy's second view parked and its first view closed, the copy had no editor anywhere, and
- * the parked view came back showing it with none and with no *move the editor here* in its menu (measured with the
- * mount taken out, 2026-10-12): a view offers that only while an editor exists. `applyLayout` mounts one on a view
- * that returns from a remembered arrangement showing such a copy, as its creation pass does for a view it builds.
+ * that tree. So with the copy's second view parked and its first view closed, the copy would have no editor
+ * anywhere, and the parked view would come back showing it with none and with no *move the editor here* in its menu:
+ * a view offers that only while an editor exists. `applyLayout` mounts one on a view that returns from a remembered
+ * arrangement showing such a copy, as its creation pass does for a view it builds.
  *
  * **A TM COPY, NOT A λ ONE**: a λ copy's editor waits in custody when its view closes, and the view that returns
  * offers to bring it over.
  *
- * **A FILE OF ITS OWN**, beside `parked-copy-editor.test.ts`, which holds §5.5's other defect and leaves its page on
- * two views of a λ copy: this scenario starts from all four views on the program, with nothing remembered.
+ * **A FILE OF ITS OWN**, beside `parked-copy-editor.test.ts`, which holds §5.5's other defect: this scenario starts
+ * from all four views on the program, with nothing remembered.
  *
  * The toggles, `+ view` and `✕` are pressed with `userEvent`, as a user presses them; *edit a copy* is `.click()`,
  * since its item is in a menu the case does not open.

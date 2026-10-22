@@ -6,28 +6,27 @@ import { rect, SHELL, until } from './harness'
 /**
  * THE HEADER'S SELECTS WEAR THE HEADER BUTTONS' CHROME, AND EVERY SELECT'S OPEN LIST IS IN THE PALETTE.
  *
- * Part 5c's roadmap entry left the encoding `<select>` native and unstyled. It was five, not one: `#encoding` in the
- * header and the settings menu's four. No rule reached any of them, so each drew in the browser's Arial at 13.33px on
- * its own grey field, the same in every style and palette. They now take the header buttons' font, padding, radius,
- * border and height, and the palette's text colour, not the dim colour of the label wrapping them.
+ * There are five: `#encoding` in the header and the settings menu's four. With no rule reaching them, each would draw
+ * in the browser's Arial at 13.33px on its own grey field, the same in every style and palette. They take the header
+ * buttons' font, padding, radius, border and height, and the palette's text colour, not the dim colour of the label
+ * wrapping them.
  *
  * **`#buffers` IS THE REFERENCE**: it stands next to `#encoding`, and every header button shares its one rule, so any
  * of them would read the same. The expected text and option colours are read off `<body>`, whose own rule is
  * `var(--bg)` and `var(--fg)`.
  *
  * **THE HEIGHT IS SET, NOT LEFT TO THE FONT.** Chrome holds a select's `line-height` at `normal`, the font's own, so
- * without a height of its own a select stood 0.5px short of the buttons in Paper and Terminal and 1.5px in Instrument
- * on this machine's Noto — and 2.5px with DejaVu, which a review found by pointing `FONTCONFIG_FILE` at it. Paper and
- * Terminal draw in whatever system font the machine has, so the height is asserted EQUAL, in every style.
+ * without a height of its own a select would stand short of the buttons, by an amount that differs with the font.
+ * Paper and Terminal draw in whatever system font the machine has, so the height is asserted EQUAL, in every style.
  *
  * **THE OPEN LIST IS THE OTHER HALF, AND IT COVERS EVERY SELECT ON THE PAGE.** Chrome paints a select's open list in
- * the select's own background, and a transparent one comes out WHITE, whatever `color-scheme` says. So the palette's
- * light text sat on white in dark mode, all but unreadable, and the step controls' speed select, transparent too,
- * opened that way. Each `<option>` now carries `--bg` and `--fg` itself. Its test walks every select the page holds,
- * rather than a list, so a select added later is held to the same rule without anyone naming it here.
+ * the select's own background, and a transparent one comes out WHITE, whatever `color-scheme` says, so the palette's
+ * light text would sit on white in dark mode, all but unreadable; the step controls' speed select is transparent too.
+ * Each `<option>` carries `--bg` and `--fg` itself. Its test walks every select the page holds, rather than a list,
+ * so a select added later is held to the same rule without anyone naming it here.
  *
  * Every combination of style and light/dark is driven through the settings menu's own selects, with the menu open.
- * ONE MOUNT FOR THE FILE, for the reason every sibling gives.
+ * ONE MOUNT FOR THE FILE, for the reason `app.test.ts` gives.
  */
 
 const SELECTS = ['encoding', 'style', 'palette', 'appearance-choice', 'keymap'] as const

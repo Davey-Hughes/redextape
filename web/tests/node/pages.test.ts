@@ -17,7 +17,7 @@ const html = (name: string): string => readRelative(`../../${name}.html`)
  * The `data-key` of every row in `#id`'s table on `page`.
  *
  * **EVERY ROW OF THE BODY HAS ONE, OR THIS THROWS.** The tests below hold a table to a list by its rows' keys, and a
- * row written with no `data-key` was a row none of them read: the page could list a key the app does not have.
+ * row written with no `data-key` would be a row none of them read: the page could list a key the app does not have.
  */
 function tableKeys(page: string, id: string): string[] {
   const table = new RegExp(`<table id="${id}">([\\s\\S]*?)</table>`).exec(html(page))?.[1]
@@ -107,8 +107,9 @@ describe('the help page’s view keys', () => {
       .trim()
 
   /**
-   * **BOTH WAYS OUT, AS THE HINT LISTS THEM**: the hint's last row is `Esc`, *or `Ctrl+.` leave*, and the page said
-   * `Esc` alone. The machine's own row for them is `tests/node/view-keys.test.ts`'s.
+   * **BOTH WAYS OUT, AS THE HINT LISTS THEM**: the hint's last row is `Esc`, *or `Ctrl+.` leave*. The machine's own
+   * test for them is in `tests/node/view-keys.test.ts`:
+   * `leaves on Escape and on the prefix again, consuming both and doing nothing`.
    */
   it('says both ways out of the mode: the hint’s key, and the prefix again', () => {
     expect(HINT_ROWS.at(-1)?.does).toBe(`or ${PREFIX_LABEL} leave`)

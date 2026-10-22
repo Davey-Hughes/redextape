@@ -23,7 +23,7 @@ import {
  * when an open applies and when the open's `undo` is used, so `copy link` cannot copy the program either replaced. A
  * link shared while a leg is still going to its link's step carries that step, not the step the leg shows, and one
  * shared after an edit carries no step pending for the program the edit replaced. Each link is pasted into the open
- * page, a `hashchange`. ONE MOUNT FOR THE FILE, for the reason every sibling gives.
+ * page, a `hashchange`. ONE MOUNT FOR THE FILE, for the reason `app.test.ts` gives.
  *
  * **A CASE HOLDS BACK THE REQUESTS IT NEEDS UNANSWERED**, by wrapping `Worker`'s own `postMessage` before the app mounts:
  * a `run`, so a compile has not answered when the link is shared, or an `extend`, so a leg stays short of its link's
@@ -64,8 +64,8 @@ async function openShare(): Promise<void> {
 
 /**
  * Share, and answer the positions the link carries. **SYNCHRONOUSLY, SO THE POPOVER TAKES ITS PAYLOAD AT THE MOMENT THE
- * CASE HAS JUST CHECKED**: a click that awaits the browser waits behind the frames the page is taking in, 3.4 s of
- * them at a quarter of a core here. What the link carries is the property, not the gesture that asks for it.
+ * CASE HAS JUST CHECKED**: a click that awaits the browser waits behind the frames the page is taking in. What the link
+ * carries is the property, not the gesture that asks for it.
  */
 async function sharedPositions(): Promise<Positions | null> {
   if (shareMenuOpen()) shareMenu().hidePopover()

@@ -25,16 +25,16 @@ export type CopyEditorOptions = {
 }
 
 /**
- * The part of a machine view that edits a copy — the TM view's and the asm view's, which were one design written twice
- * (spec amendment 28: the asm view holds a copy's editor as the TM view does). It owns the editor's host and the text
- * panel around it, the outline, and the facts behind the view menu's *format* and *edit a copy*; the view puts
- * `textPanel` first in its body and `outline` last, and delegates `EditablePane`'s members here.
+ * The part of a machine view that edits a copy — the TM view's and the asm view's (spec amendment 28: the asm view
+ * holds a copy's editor as the TM view does). It owns the editor's host and the text panel around it, the outline,
+ * and the facts behind the view menu's *format* and *edit a copy*; the view puts `textPanel` first in its body and
+ * `outline` last, and delegates `EditablePane`'s members here.
  *
- * **ONE PART, BECAUSE THE HANDOFF IS WHERE THE REVIEWS KEPT FINDING THINGS.** The comments below record several review
- * rounds' fixes to exactly this code — a control outliving the fork it performed, an editor outliving the session it
- * edits, edits following the view that built an editor rather than the one holding it — and while the two views held a
- * copy each, every such fix had to be made twice with nothing to fail if it was not. What differs between the views is
- * a parameter: the noun a too-large program is counted in, and the TM view's status clear on unmount.
+ * **ONE PART, SO A FIX TO THE HANDOFF IS MADE ONCE.** With a copy in each view, every fix to this code — a control
+ * outliving the fork it performed, an editor outliving the session it edits, edits following the view that built an
+ * editor rather than the one holding it — would have to be made twice with nothing to fail if it was not. What
+ * differs between the views is a parameter: the noun a too-large program is counted in, and the TM view's status
+ * clear on unmount.
  *
  * **`implements EditablePane`**, as each view does, though custody never casts to this class — it casts to the views,
  * which hand their `EditablePane` members through to this one. The clause keeps this class's members in step with
@@ -51,10 +51,10 @@ export class CopyEditor implements EditablePane {
   readonly text: Panel
   readonly outlinePanel: Panel
   /**
-   * The upper half of design §4.2's split body, ported to the machine views — a stable parent that outlives any
-   * editor mounted or unmounted inside it, so `setEditor` can do both without touching the view's own child order.
-   * Same contract as `LambdaPane`'s own `#editorHost`; that field's doc carries the argument for why it carries no
-   * class until `setEditor` gives it one, and is not repeated here.
+   * The upper half of 5d-iii design §4.2's split body, ported to the machine views — a stable parent that outlives
+   * any editor mounted or unmounted inside it, so `setEditor` can do both without touching the view's own child
+   * order. Same contract as `LambdaPane`'s own `#editorHost`; that field's doc carries the argument for why it
+   * carries no class until `setEditor` gives it one, and is not repeated here.
    */
   #editorHost: HTMLElement
   /**
@@ -82,7 +82,7 @@ export class CopyEditor implements EditablePane {
   #onUnmount: (() => void) | undefined
   /**
    * The last `setForkAvailable` call's facts, kept so `#refreshDetach` can re-evaluate them on every frame rather
-   * than only at the moment they arrived — a Critical fix, in a review round of the TM view's fork.
+   * than only at the moment they arrived.
    *
    * **WITHOUT THIS SET, THE CONTROL COULD OUTLIVE THE FORK IT JUST PERFORMED.** `replies.ts`'s `setTmProgram` calls
    * `setForkAvailable` over `panes.ofSession('tm', session)` for the SOURCE session, and `pane-host.ts`'s `seedTmPane`
@@ -91,8 +91,8 @@ export class CopyEditor implements EditablePane {
    * it — nothing calls `setForkAvailable` again to say the new session has nothing to fork. Storing the facts here
    * is what lets a LATER call that has nothing to do with forking — `setDetached`, driven every frame by
    * `PaneSlot.render` regardless of which session the view is bound to — still re-derive the right answer. Same idiom
-   * `LambdaPane.#menu`'s own doc states for `#detached` itself: a fact two different calls both need has to be
-   * readable by whichever one runs second. The asm view's facts arrive the same ways (`asm-seed.ts`'s `seedAsm`).
+   * `LambdaPane.#detached`'s own doc states: a fact two different calls both need has to be readable by whichever
+   * one runs second. The asm view's facts arrive the same ways (`asm-seed.ts`'s `seedAsm`).
    */
   #forkText: string | null = null
   #count = 0
@@ -108,7 +108,7 @@ export class CopyEditor implements EditablePane {
   #resultDecodable = true
   /**
    * Whether the view's own session is outside the source correspondence — `LambdaPane`'s field of the same name,
-   * ported for the identical reason: `#refreshDetach` needs it alongside `#forkText`/`#count`, and it arrives through a
+   * held for the identical reason: `#refreshDetach` needs it alongside `#forkText`/`#count`, and it arrives through a
    * different call (`setDetached`) than either of those two do.
    */
   #detached = false
@@ -131,14 +131,13 @@ export class CopyEditor implements EditablePane {
     this.#lspDocument = on.lspDocument
     this.#colour = on.colour
     this.#keymap = on.keymap
-    // THE TEXT PANEL — the same control `LambdaPane` builds, with the same name ("text") where the views used to say
-    // "term editor" and "machine source". It wraps `#editorHost` and hides it itself; this callback only reports the
-    // gesture, for the copy's record.
+    // THE TEXT PANEL — the same control `LambdaPane` builds, with the same name ("text"). It wraps `#editorHost` and
+    // hides it itself; this callback only reports the gesture, for the copy's record.
     this.#collapse = textPanel(this.#editorHost, (collapsed) => on.collapse?.(collapsed))
     this.textPanel = this.#collapse.el
     this.text = this.#collapse.panel
-    // THE OUTLINE IS WHAT THE SERVER LISTS FOR THE COPY'S DOCUMENT — a TM copy's states, an asm copy's labels; each
-    // view's constructor says why its own starts closed.
+    // THE OUTLINE IS WHAT THE SERVER LISTS FOR THE COPY'S DOCUMENT — a TM copy's states, an asm copy's labels;
+    // `TmPane`'s constructor says why a TM view's starts closed.
     this.#outline = createOutlinePanel({
       open: opts.outlineOpen,
       onToggle: (open) => on.panel?.('outline', open),
@@ -161,22 +160,19 @@ export class CopyEditor implements EditablePane {
   }
 
   /**
-   * Mount an editor over the view seeded with `text`, or unmount it with `null` — design §4.2's upper region, ported
-   * to the machine views. Same contract and same guards as `LambdaPane.setEditor`; that method's doc carries the full
-   * argument (mounted-and-unmounted, the re-seed no-op inside `ScratchEditor.setText`, `collapsed` seeding the mount
-   * and only the mount) and is not repeated here.
+   * Mount an editor over the view seeded with `text`, or unmount it with `null` — 5d-iii design §4.2's upper region,
+   * ported to the machine views. Same contract and same guards as `LambdaPane.setEditor`; that method's doc carries
+   * the full argument (mounted-and-unmounted, the re-seed no-op inside `ScratchEditor.setText`, `collapsed` seeding
+   * the mount and only the mount) and is not repeated here.
    *
-   * **THE COLLAPSE FLAG LANDS THE SAME WAY `LambdaPane`'S DOES.** It used to be that the TM view put it on a
-   * `.collapsed` class on its body where `LambdaPane` put it on `#editorHost`'s own class, while agreeing on WHETHER it
-   * did. Plan 7 part 1 ended that difference: every view hands `collapsed` to the text panel (`textPanel`,
-   * constructor above), which hides `#editorHost` itself with `hidden`, so `#editorHost` here only ever carries the
-   * bare `'term-editor'` class or none at all.
+   * **THE COLLAPSE FLAG LANDS THE SAME WAY `LambdaPane`'S DOES.** Every view hands `collapsed` to the text panel
+   * (`textPanel`, constructor above), which hides `#editorHost` itself with `hidden`, so `#editorHost` here only ever
+   * carries the bare `'term-editor'` class or none at all.
    *
    * ***MOVE THE EDITOR HERE* FOLLOWS THE MOUNT AND THE UNMOUNT**, through `#syncEditorControls`, as
    * `LambdaPane.setEditor` refreshes its own claim control.
    *
-   * **AN UNMOUNT CALLS `onUnmount`, MOUNTED OR NOT** — the TM view's status clear, which it made on every
-   * `setEditor(null)` before this part existed.
+   * **AN UNMOUNT CALLS `onUnmount`, MOUNTED OR NOT** — the TM view's status clear, on every `setEditor(null)`.
    */
   setEditor(text: string | null, collapsed = false): void {
     if (text === null) {
@@ -231,16 +227,15 @@ export class CopyEditor implements EditablePane {
 
   /**
    * Detach the mounted editor WITHOUT DESTROYING IT, for a caller about to remount it on a different view. Same
-   * contract as `LambdaPane.takeEditor`; that method's doc carries the full argument for why the node itself is
-   * removed rather than merely dereferenced (a `LeafId` handover that survives, where the whole host does not leave
-   * with it), and is not repeated here.
+   * contract as `LambdaPane.takeEditor`; that method's comment above `editor.dom.remove()` carries the full argument
+   * for why the node itself is removed rather than merely dereferenced (a `LeafId` handover that survives, where the
+   * whole host does not leave with it), and is not repeated here.
    *
-   * **NO `onUnmount`, WHERE A TAKE USED TO CALL IT — the TM view's status clear.** A take stood for the view leaving
-   * the copy, and the view stopped describing a copy it no longer showed. It stands for nothing of the kind now: a
-   * view leaving its copy destroys its editor through `pane-host.ts`, which then tells the view what the session it
-   * moves onto holds, and a view that gives its editor to another view of the copy through *move the editor here*
-   * (custody's `reconcileEditors`) still shows the copy — clearing its status there blanked the value line of a view
-   * still showing the copy's run.
+   * **NO `onUnmount` — the TM view's status clear.** A take does not stand for the view leaving the copy: a view
+   * leaving its copy destroys its editor through `pane-host.ts`, which then tells the view what the session it moves
+   * onto holds, and a view that gives its editor to another view of the copy through *move the editor here*
+   * (custody's `reconcileEditors`) still shows the copy — clearing its status there would blank the value line of a
+   * view still showing the copy's run.
    */
   takeEditor(): ScratchEditor | null {
     const editor = this.#editor
@@ -256,8 +251,7 @@ export class CopyEditor implements EditablePane {
   /**
    * Mount an editor this view did not build — `takeEditor`'s other half. Same contract and same guard as
    * `LambdaPane.receiveEditor`, including the throw on a view already holding one; that method's doc carries the full
-   * argument (the two review findings that made the throw and the `collapsed` seeding necessary) and is not repeated
-   * here.
+   * argument and is not repeated here.
    *
    * **ONE GESTURE HANDS A MACHINE VIEW AN EDITOR: *move the editor here*, from another view of the same copy.** Custody
    * calls this from `reconcileEditors`' sweep, which takes the editor off the view holding it. Nothing HOLDS a machine
@@ -266,9 +260,9 @@ export class CopyEditor implements EditablePane {
    * fresh one.
    *
    * **`onServerUpdate` IS RE-POINTED, AND THE EDITS ARE NOT.** A server update refreshes the outline, and the outline
-   * that lists this document is this view's now; built for the view that built the editor, it went on refreshing an
-   * outline hidden with that view's editor. The edits need nothing here: an editor's sink is its copy's, bound when it
-   * is built (`PaneEvents.editSink`), and this view shows that copy.
+   * that lists this document is this view's now; built for the view that built the editor, it would go on refreshing
+   * an outline hidden with that view's editor. The edits need nothing here: an editor's sink is its copy's, bound when
+   * it is built (`PaneEvents.editSink`), and this view shows that copy.
    */
   receiveEditor(editor: ScratchEditor, collapsed = false): void {
     if (this.#editor !== null) throw new Error('a machine view was handed a second editor while still holding one')
@@ -296,20 +290,18 @@ export class CopyEditor implements EditablePane {
   /**
    * Record whether the view's session is a copy, and give up its editor when it is not.
    *
-   * **AN EDITOR CANNOT OUTLIVE `#detached` — Important finding, review of the TM view's editor.**
-   * `LambdaPane.setDetached`'s own doc records the same line and the defect that made it necessary: driving the app in
-   * a browser, picking `source` in a forked view's selector dropped the `[detached]` badge and repainted the body from
-   * the newly-bound leg, but left a live `contenteditable` editor mounted on the copy the view had just left.
-   * `PaneSlot.render` calls the view's `setDetached` on every frame, so the invariant lives here rather than waiting
-   * for whichever route first leaves a copy. **ON EVERY FRAME, FOR A VIEW ON THE PAGE**: a view that is off it is not
-   * drawn, and `pane-host.ts`'s `reseedingSlots` calls this as a pause or a delete moves one onto the program
-   * (`LambdaPane.setDetached`'s doc has what that left behind).
+   * **AN EDITOR CANNOT OUTLIVE `#detached`.** `LambdaPane.setDetached`'s own doc records the same line: without
+   * it, a pause or a delete that moves a forked view onto the program would leave a live editor mounted on the
+   * copy the view had just left. `PaneSlot.render` calls the view's `setDetached` on every frame, so the invariant
+   * lives here rather than waiting for whichever route first leaves a copy. **ON EVERY FRAME, FOR A VIEW ON THE
+   * PAGE**: a view that is off it is not drawn, and `pane-host.ts`'s `reseedingSlots` calls this as a pause or a
+   * delete moves one onto the program (`LambdaPane.setDetached`'s doc has what such a view would otherwise go
+   * on holding).
    *
-   * **THE FORK CONTROL IS THE OTHER THING THAT MOVES WHEN `#detached` DOES — a Critical fix, in a review round of
-   * the TM view's fork.** `LambdaPane.setDetached`'s own call to `#refreshDetach` is the model: this is what makes the
-   * control withdraw the instant this method's own input changes, on the very frame the view's session becomes the
-   * copy a fork just made, rather than waiting for a `setForkAvailable` call that a rebound view will never receive
-   * again.
+   * **THE FORK CONTROL IS THE OTHER THING THAT MOVES WHEN `#detached` DOES.** `LambdaPane.setDetached`'s own call to
+   * `#refreshDetach` is the model: this is what makes the control withdraw the instant this method's own input
+   * changes, on the very frame the view's session becomes the copy a fork just made, rather than waiting for a
+   * `setForkAvailable` call that a rebound view will never receive again.
    */
   setDetached(detached: boolean): void {
     this.#detached = detached
@@ -346,7 +338,7 @@ export class CopyEditor implements EditablePane {
   /**
    * Record the program a fork would carry, the count a refusal would name, and — for the TM view only —
    * whether the result type is the reason `text` is withheld — `viewMenu`'s `CopyState` rule, as a data
-   * dependency rather than a convention — design §4.3. `text` is the program's text, or `null` when there
+   * dependency rather than a convention — 5d-iv design §4.3. `text` is the program's text, or `null` when there
    * is none to copy; `count` is how many rules or instructions it has; `resultDecodable` defaults to
    * `true`, which is every asm call's own answer (`#resultDecodable`'s own doc — the asm leg's header is
    * optional, so it has no second reason to distinguish). Stores the facts and defers to `#refreshDetach`,
@@ -362,30 +354,28 @@ export class CopyEditor implements EditablePane {
   }
 
   /**
-   * The one writer of the fork control's state — a Critical fix, in a review round of the TM view's fork. Composes
-   * three independent facts that arrive through two different calls (`setForkAvailable` and `setDetached`), the same
-   * shape `LambdaPane.#refreshDetach` already uses and for the identical reason: whichever call runs second has to see
-   * what the other one left.
+   * The one writer of the fork control's state. Composes the facts that arrive through two different calls
+   * (`setForkAvailable` and `setDetached`), the same shape `LambdaPane.#refreshDetach` already uses: whichever call
+   * runs second has to see what the other one left.
    *
-   * **`!this.#detached` GATES PRESENCE, AND ITS ABSENCE WAS THE WHOLE BUG.** `setForkAvailable` alone cannot express
-   * "this view's OWN session just became the thing it would fork" — that fact arrives through `setDetached`, driven
-   * every frame by `PaneSlot.render` regardless of which session the view is bound to, which is exactly why it is the
-   * one call `LambdaPane`'s own `#refreshDetach` checks first. Left out (as it shipped), the TM view's control kept
-   * whatever rules and text the SOURCE session last reported, forever, on a view that had since rebound onto its own
-   * new copy — the button stayed present and enabled, and a second click reached `transport.ts`'s fork handler with
-   * no text (a copy's own `tmProgram.tmText` is always `null`, `replies.ts`'s `tm-scratch-compiled` arm builds it that
-   * way) and threw. The rule this enforces: A VIEW ALREADY SHOWING A COPY HAS NOTHING LEFT TO COPY.
+   * **`!this.#detached` GATES PRESENCE.** `setForkAvailable` alone cannot express "this view's OWN session just became
+   * the thing it would fork" — that fact arrives through `setDetached`, driven every frame by `PaneSlot.render`
+   * regardless of which session the view is bound to, which is exactly why it is the one call `LambdaPane`'s own
+   * `#refreshDetach` checks first. Left out, the TM view's control would keep whatever rules and text the SOURCE
+   * session last reported, forever, on a view that had since rebound onto its own new copy — the button would stay
+   * present and enabled, and a second click would reach `transport.ts`'s fork handler with no text (a copy's own
+   * `tmProgram.tmText` is always `null`, `replies.ts`'s `tm-scratch-compiled` arm builds it that way) and throw. The
+   * rule this enforces: A VIEW ALREADY SHOWING A COPY HAS NOTHING LEFT TO COPY.
    *
-   * **`this.#forkText !== null || !this.#resultDecodable || this.#count > 0` IS WHETHER THE CONTROL SHOWS AT ALL —
-   * widened from a bare `count > 0`, Minor fix in the same round; widened again this round to add
-   * `!this.#resultDecodable` (below).** A `TmCompiled` whose program parsed to zero δ rules (`ruleCount(program) === 0`)
-   * still has non-`null` `tmText` and is genuinely forkable — `tests/node/sessions.test.ts`'s own fixture for the
-   * machine-fork handler constructs exactly that shape (one accept state, no rules). `count > 0` alone withdrew the
-   * control for it though nothing about the machine made it unforkable; `text !== null` is the worker's own decision
-   * (`forkable` for a machine, the byte ceiling for asm text) — a count disagrees with it only in the direction
-   * count-but-no-text, which `text === null` below still catches — and is the fact that actually decides presence.
+   * **`this.#forkText !== null || !this.#resultDecodable || this.#count > 0` IS WHETHER THE CONTROL SHOWS AT ALL.** A
+   * `TmCompiled` whose program parsed to zero δ rules (`ruleCount(program) === 0`) still has non-`null` `tmText` and
+   * is genuinely forkable — `tests/node/sessions.test.ts`'s own fixture for the machine-fork handler constructs
+   * exactly that shape (one state, no rules). `count > 0` alone would withdraw the control for it though nothing
+   * about the machine makes it unforkable; `text !== null` is the worker's own decision (`forkable` for a machine,
+   * the byte ceiling for asm text) — a count disagrees with it only in the direction count-but-no-text, which
+   * `text === null` below still catches — and is the fact that actually decides presence.
    *
-   * `text === null` IS STILL WHETHER IT IS DISABLED, ONCE `#resultDecodable` HAS BEEN CHECKED. A session WITH a
+   * `text === null` IS WHETHER IT IS DISABLED, ONCE `#resultDecodable` HAS BEEN CHECKED. A session WITH a
    * program whose text was withheld (`text === null`) for a reason that is not "there is no program at all" — a
    * machine over `MAX_FORK_RULES`, a function-valued program's TM text, or asm text over `MAX_SCRATCH_ASM_BYTES` —
    * is the one case the view presents disabled rather than absent: the program exists, the refusal is not an
@@ -393,21 +383,15 @@ export class CopyEditor implements EditablePane {
    * Guarded by `!this.#detached` too, for the same reason presence is: a view that has just withdrawn the control
    * entirely has nothing left to disable.
    *
-   * **`#resultDecodable` IS CHECKED BEFORE `#count` CAN MAKE THE CONTROL ABSENT — fixed this round; it used to be
-   * the other way around, and that was the bug.** The absence check used to be `#forkText === null && #count === 0`
-   * on its own, on the assumption that a `null` text with a zero count could only be a declined leg (no `TmProgram`
-   * at all, where `#count` defaults to `0` — `replies.ts`'s `storeAndSetProgram`). It cannot be assumed: `#count` is
-   * `ruleCount(program)` (`protocol.ts`), a real machine's own rule count, and this file's `#resultDecodable` doc
-   * already said a function-valued program sits well within `MAX_FORK_RULES` — nothing about being function-valued
-   * keeps ITS machine's rule count from being zero too. Measured against every small function-valued program tried
-   * (`|x| x`, `|x| x + 1`, a let-bound function, a two-argument curry): each compiles to a real, non-zero machine
-   * today (135 or 204 δ rules) — but that is this compiler's current lowering, not a guarantee `#refreshDetach` may
-   * lean on, and the umbrella's §4 rule does not have an exception for "not reachable yet". A zero-rule
-   * function-valued program hit the identical `null`/`0` shape a declined leg does and the control vanished instead
-   * of disabling with its reason — the wrong one of the umbrella's two outcomes for a control that could apply but
-   * cannot right now. Checking `!#resultDecodable` first decides the function-valued case by the fact that actually
-   * distinguishes it (the result type), before the absence check — which knows nothing about result types — ever
-   * runs.
+   * **`#resultDecodable` IS CHECKED BEFORE `#count` CAN MAKE THE CONTROL ABSENT.** A `null` text with a zero count is
+   * not only a declined leg (no `TmProgram` at all, where `#count` defaults to `0` — `replies.ts`'s
+   * `storeAndSetProgram`): `#count` is `ruleCount(program)` (`protocol.ts`), a real machine's own rule count, and
+   * nothing about being function-valued keeps ITS machine's rule count from being zero too. A zero-rule
+   * function-valued program checked by count first would hit the identical `null`/`0` shape a declined leg does,
+   * and the control would vanish instead of disabling with its reason — the wrong one of the umbrella's two outcomes
+   * for a control that could apply but cannot right now. Checking `!#resultDecodable` first decides the
+   * function-valued case by the fact that actually distinguishes it (the result type), before the absence check —
+   * which knows nothing about result types — ever runs.
    *
    * **BY THE TIME `#count === 0` IS CHECKED, `#resultDecodable` IS ALREADY KNOWN `true`,** so `#count === 0` here
    * really does mean "no program at all": the only other cause of `text === null` left is a machine over

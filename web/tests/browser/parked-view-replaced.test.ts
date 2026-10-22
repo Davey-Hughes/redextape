@@ -17,9 +17,8 @@ import { clickToggle } from './user-event-fixture'
  * four and parks it; then `✕` on the TM view. The `✕` leaves source, λ and asm, the arrangement the parked view is in,
  * as all four less the TM view, which has no second λ view.
  *
- * `pane-host.ts`'s `applyLayout` drops a pane off the screen once its id is no longer live as its kind. With that
- * condition taken out of its keep rule, every other test passed (measured on `ee09243`, 2026-10-12, with the whole
- * node and browser suites), and the copies menu here went on reading `1 view` for a view nothing could show again.
+ * `pane-host.ts`'s `applyLayout` drops a pane off the screen once its id is no longer live as its kind. Without that
+ * condition in its keep rule, the copies menu here would go on reading `1 view` for a view nothing could show again.
  * `one-id-two-kinds.test.ts` holds the same close where another arrangement still names the view's id.
  *
  * The toggle, `+ view`, its item and the `✕` are pressed with `userEvent`, as a user presses them; *edit a copy* is

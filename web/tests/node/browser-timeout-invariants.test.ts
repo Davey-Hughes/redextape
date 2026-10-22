@@ -34,15 +34,13 @@ import { expect, it } from 'vitest'
  * RUNS UNDER.** A test body in the browser project is bounded at 15,000 ms and a hook at 30,000; in the
  * node project — where this file executes — they are 5,000 and 10,000. This constant describes the
  * files being read, not the process reading them. Asking the ambient environment instead would read
- * 5,000 and flag call sites that are fine, which is exactly the wrong-instrument error this gate exists
- * downstream of.
+ * 5,000 and flag call sites that are fine.
  */
 const BROWSER_TEST_TIMEOUT_MS = 15_000
 
 /**
  * The directory scanned. `REDEXTAPE_SCAN_DIR` points it at a checkout of an older tree so the gate's
- * red half can be demonstrated without a worktree or a second `pnpm install` — see this branch's plan,
- * Task 5 Step 6. Unset in every normal run.
+ * red half can be demonstrated without a worktree or a second `pnpm install`. Unset in every normal run.
  */
 const DIR = process.env.REDEXTAPE_SCAN_DIR
   ? `${process.env.REDEXTAPE_SCAN_DIR.replace(/\/?$/, '/')}`
@@ -123,8 +121,7 @@ const isNumericLiteral = (arg: string): boolean => {
  * own `include` is `tests/browser/**\/*.test.ts`, so a call site two directories down runs under the
  * same gate and must be scanned the same way. Checked with `dirent.isFile()` rather than a name filter
  * alone: `tests/browser/__screenshots__/` holds directories named for the test file they belong to
- * (e.g. `app.test.ts/`, holding PNGs), and a name filter alone reads a directory as readily as a file —
- * the same shape of miscount the roadmap already recorded once for a bare `find -name` over this tree.
+ * (e.g. `app.test.ts/`, holding PNGs), and a name filter alone reads a directory as readily as a file.
  */
 const testFilesUnder = (dir: string): string[] => {
   const out: string[] = []
@@ -142,19 +139,19 @@ const testFilesUnder = (dir: string): string[] => {
  * The name(s) a call in this file may invoke `until` by: `until` itself, any local alias bound by
  * `import { until as X } from '<a relative specifier ending in harness>'`, and any `X.until` reached
  * through `import * as X from '<the same>'`. Reads the RAW source, not the comment/string-stripped form
- * the rest of this scanner uses — the alias and the namespace name both live inside the import's own
- * string literal and quoted specifier, which `stripped()` blanks out along with every other string.
+ * the rest of this scanner uses — both imports are recognised by their quoted specifier, which
+ * `stripped()` blanks out along with every other string.
  *
  * **THE SPECIFIER MATCH IS ON THE MODULE'S NAME, NOT THE LITERAL `./harness`.** A file directly under
- * `tests/browser/` reaches the module as `./harness`; one recursed into a subdirectory — which is
- * exactly the shape `testFilesUnder` was added to reach — must write `../harness`, and one two levels
- * down `../../harness`. Anchoring the specifier to `./` alone matched the first and silently stopped
- * matching every other depth the moment this scanner learned to recurse: the two capabilities did not
- * compose. `[^'"]*\bharness` matches any relative prefix in front of the module's own name.
+ * `tests/browser/` reaches the module as `./harness`; one recursed into a subdirectory — the shape
+ * `testFilesUnder` reaches — must write `../harness`, and one two levels down `../../harness`. A
+ * specifier anchored to `./` alone would match the first and miss every other depth, so recursion and
+ * alias detection would not compose. `[^'"]*\bharness` matches any relative prefix in front of the
+ * module's own name.
  *
  * A text scanner cannot see an alias created any other way (a `require`, a re-export, a second `import`
  * binding the same name under a different local identifier via a barrel file); this covers the two
- * shapes the tier's own convention uses.
+ * `import` shapes named above.
  */
 const untilNames = (raw: string): string[] => {
   const names = new Set<string>(['until'])
@@ -180,11 +177,11 @@ const untilNames = (raw: string): string[] => {
  * Scans `dir` (defaulting to the real `tests/browser/`) for a numeric argument at a call site — any
  * numeric argument, not only a timeout. `until`'s fourth parameter is `pollMs`, and the ceiling a wait
  * actually gets is `timeoutMs + pollMs`, since the throw fires only after a sleep returns; a large poll
- * interval reintroduces the defect with `timeoutMs` untouched. Both live in `harness.ts` and neither
+ * interval would stretch that ceiling with `timeoutMs` untouched. Both live in `harness.ts` and neither
  * belongs at a call site, so a failure here names the value rather than assuming which one it is. Takes
  * `dir` as a parameter, rather than closing over `DIR` alone, so a test below can point it at a
  * throwaway directory and prove the recursion and the alias/namespace detection compose, instead of
- * asserting each in isolation the way the defect this file exists to close slipped through.
+ * asserting each in isolation.
  */
 const numericTimeoutSites = (dir: string = DIR): string[] => {
   const hits: string[] = []
@@ -213,7 +210,7 @@ const numericTimeoutSites = (dir: string = DIR): string[] => {
  * Read `harness.ts`'s `until` signature and return the `timeoutMs` default as a number, or throw if the
  * default is missing or is not a numeric literal the gate can read. Captures the WHOLE token up to the
  * next comma or paren, not `[\d_]+` — that pattern stops at a literal's first non-digit character, so
- * `0xea60` read as `"0"` and `6e4` read as `"6"`, both silently passing a gate meant to reject a default
+ * `0xea60` would read as `"0"` and `6e4` as `"6"`, both silently passing a gate meant to reject a default
  * at or above the browser bound. `isNumericLiteral` is the same check the call-site scanner above
  * trusts, applied here to the one declaration the tier is allowed to have.
  */
@@ -228,13 +225,12 @@ const declaredTimeoutMsDefault = (src: string): number => {
 }
 
 /**
- * **THE SCANNER'S OWN TEST, AND IT IS NOT CEREMONY.** An earlier scan of this tier reported "these two
- * call sites and no others" and had found 2 of 18, because it anchored on the end of the argument list
- * and every multi-line call ends with a trailing comma before its closing paren. A count is a claim
- * about the instrument as much as about the tree, so the instrument is fed a known positive of each
- * shape before any count from it is believed. This follows the repository's own convention rather than
- * inventing one: `check-doc-figures` and `check-text-bytes` both run `--self-test` before their scan,
- * for the reason the pre-commit config states — a gate that only ever runs against a passing tree
+ * **THE SCANNER'S OWN TEST, AND IT IS NOT CEREMONY.** A scan anchored on the end of the argument list
+ * would miss every multi-line call, which ends with a trailing comma before its closing paren. A count is
+ * a claim about the instrument as much as about the tree, so the instrument is fed a known positive of
+ * each shape before any count from it is believed. This follows the repository's own convention rather
+ * than inventing one: `check-doc-figures` and `check-text-bytes` both run `--self-test` before their
+ * scan, for the reason the pre-commit config states — a gate that only ever runs against a passing tree
  * cannot tell you it still works.
  */
 it('the scanner finds a numeric timeout in every shape a call site can take', () => {
@@ -259,11 +255,10 @@ it('the scanner does not read a number inside a comment or a string as an argume
 })
 
 /**
- * **THE SHAPE A SELF-TESTED SCANNER STILL MISSED.** A previous scan of this tier tracked string
- * literals but not comments, and reported 17 of the 18 call sites. The one it missed has a comment
- * inside its argument list, and that comment contains an apostrophe — the words "this file's own
- * default" — so the apostrophe opened a string that swallowed the separator before the number. The
- * self-test above proved three shapes of CALL; the missing case was a shape of COMMENT.
+ * **A COMMENT INSIDE THE ARGUMENT LIST, WHERE THE CASE ABOVE PUTS A CALL INSIDE A COMMENT OR A
+ * STRING.** A comment there that contains an apostrophe — the words "this file's own default" — would,
+ * to a scanner that tracked string literals but not comments, open a string that swallows the separator
+ * before the number.
  */
 it('reads a numeric argument that follows a comment containing an apostrophe', () => {
   const src = [
@@ -284,9 +279,7 @@ it('reads a numeric argument that follows a comment containing an apostrophe', (
  * A text scanner cannot see through a symbolic reference: `until(p, 'x', SLOW_TIMEOUT)` passes a
  * number at runtime and this gate cannot know it. Catching that needs type or dataflow analysis,
  * which is disproportionate here. This is the gate's named boundary rather than an oversight, and
- * it is stated so that a future reader knows the check's edge instead of discovering it. The
- * tier's own convention is a bare `60_000`-style literal, which is the shape the original defect
- * took in all 18 sites.
+ * it is stated so that a future reader knows the check's edge instead of discovering it.
  */
 it('the scanner correctly ignores a named constant', () => {
   const src = "const SLOW_TIMEOUT = 60_000\nawait until(() => x, 'body ready', SLOW_TIMEOUT)\n"
@@ -310,11 +303,11 @@ it('the scanner treats an aliased import of until as another name for it', () =>
 })
 
 /**
- * **THE ALIAS REGEX WAS HARDCODED TO `'./harness'`, WHICH ONLY A TOP-LEVEL FILE WRITES.** A file one
- * directory down under `tests/browser/` — exactly the depth `testFilesUnder`'s recursion was added to
- * reach — must import the module as `../harness`, and one two levels down as `../../harness`. The old
- * regex matched none of those, so recursion and alias detection each had a passing test above and still
- * did not compose.
+ * **`'./harness'` IS WHAT ONLY A TOP-LEVEL FILE WRITES.** A file one directory down under
+ * `tests/browser/` — a depth `testFilesUnder`'s recursion reaches — must import the module as
+ * `../harness`, and one two levels down as `../../harness`. An alias regex hardcoded to
+ * `'./harness'` would match none of those, so recursion and alias detection could each pass a
+ * test and still not compose.
  */
 it('untilNames matches an aliased import reached through a relative parent-directory specifier', () => {
   expect(untilNames("import { until as waitFor } from '../harness'\n")).toContain('waitFor')
@@ -322,13 +315,12 @@ it('untilNames matches an aliased import reached through a relative parent-direc
 })
 
 /**
- * **THE COMBINATION NEITHER OF THE TWO TESTS ABOVE EXERCISES.** `testFilesUnder`'s recursion and
- * `untilNames`'s alias detection each have their own passing test, and the defect this test guards
- * against is exactly that passing both in isolation did not prove they compose: a file reached only by
- * recursing into a subdirectory, importing `until` under a local alias through the one-level-longer
- * relative specifier that depth requires. This runs the real scanner — `numericTimeoutSites`, not a
- * hand-built stand-in — against a throwaway directory built with that exact shape, rather than
- * asserting the two capabilities separately again.
+ * **THE COMBINATION NO TEST ABOVE EXERCISES.** That `testFilesUnder`'s recursion and `untilNames`'s
+ * alias detection each work alone does not prove they compose: a file reached only by recursing into a
+ * subdirectory, importing `until` under a local alias through the one-level-longer relative specifier
+ * that depth requires. This runs the real scanner — `numericTimeoutSites`, not a hand-built stand-in —
+ * against a throwaway directory built with that exact shape, rather than asserting the two
+ * capabilities separately.
  */
 it('the scanner sees a numeric timeout reached through both recursion and an aliased relative import', () => {
   const root = mkdtempSync(join(tmpdir(), 'redextape-timeout-gate-'))
@@ -347,12 +339,10 @@ it('the scanner sees a numeric timeout reached through both recursion and an ali
 
 /**
  * `import * as h from './harness'` then `h.until(p, 'x', 60_000)` is a numeric-timeout call site under a
- * namespace binding rather than a named one — nothing claimed to cover this shape until now, so it was a
- * gap rather than a broken promise, but it shares the same import-specifier logic as the alias fix above
- * and is cheap to close alongside it. `untilNames` returns the dotted name `h.until` for it, and the
- * call-site regex escapes the dot so it matches only that exact qualified name, proved here against an
- * unrelated `other.until(...)` in the same file, which must stay invisible exactly as a bare
- * `foo.until(...)` already was before namespace imports were covered at all.
+ * namespace binding rather than a named one, and it shares the alias's import-specifier logic. `untilNames`
+ * returns the dotted name `h.until` for it, and the call-site regex escapes the dot so it matches only that
+ * exact qualified name; the case after this one proves that against an unrelated `other.until(...)` in the
+ * same file, which must stay invisible as a bare `foo.until(...)` is.
  */
 it('untilNames returns the dotted namespace-qualified name for a namespace import of harness', () => {
   const raw = "import * as h from './harness'\nawait h.until(() => x, 'y', 60_000)\n"
@@ -387,14 +377,10 @@ it('no until call site under tests/browser passes a numeric timeout or poll inte
 })
 
 /**
- * **A DECLARATION DEFAULT IS NOT A CALL-SITE ARGUMENT, AND THE SCANNER ABOVE CANNOT SEE ONE.** The
- * original defect's dominant shape — twelve of the tier's twenty-three `until` bodies — was a file-local
- * `timeoutMs = 60_000` default, not a numeric argument at a call site; `numericTimeoutSites` only ever
- * looks inside an argument list. A file that re-declares `until` locally, in either the `function until`
- * form the original twelve took or the `const until = async (...) =>` form `two-lambda-panes.test.ts`
- * shipped before this branch, is invisible to that scanner no matter what its own default is. This is
- * the check the roadmap entry for this branch ran once by hand
- * (`grep -rl "function until\|const until = async"`) and left wired to nothing; it is wired here.
+ * **A DECLARATION DEFAULT IS NOT A CALL-SITE ARGUMENT, AND THE SCANNER ABOVE CANNOT SEE ONE.**
+ * `numericTimeoutSites` only ever looks inside an argument list, so a file that re-declares `until`
+ * locally, in either the `function until` form or the `const until = async (...) =>` form, is invisible
+ * to that scanner no matter what its own default is.
  */
 it('no file under tests/browser re-declares until locally', () => {
   const offenders = testFilesUnder(DIR)
@@ -410,14 +396,13 @@ it('the shared until default is below vitest browser testTimeout', () => {
 })
 
 /**
- * **THE GATE'S OWN SECOND NUMERIC READER HAD THE SAME BLIND SPOT THE FIRST ONE WAS FIXED FOR.**
- * `isNumericLiteral` exists because `/^[\d_]+$/` let `0xea60` and `6e4` through as call-site arguments;
- * the declaration-default reader above used `/timeoutMs = ([\d_]+)/` right next to it and had the
- * identical gap — `[\d_]+` stops at the first non-digit, so `timeoutMs = 0xea60` was captured as `"0"`
- * and `timeoutMs = 6e4` as `"6"`, both far enough under 15,000 to pass a gate that exists to catch a
- * default at or above it. These two sabotage the declaration exactly as the earlier hex/scientific
- * cases (above) sabotage the call site, and the existing sabotage the plan shipped (`15_000`, decimal)
- * could only ever exercise the half of the reader that already worked.
+ * **THE DEFAULT READER NEEDS THE WHOLE TOKEN, AS THE CALL-SITE READER DOES.** `isNumericLiteral` exists
+ * because `/^[\d_]+$/` would let `0xea60` and `6e4` through as call-site arguments; a default reader
+ * using `/timeoutMs = ([\d_]+)/` would have the identical gap — `[\d_]+` stops at the first non-digit,
+ * so `timeoutMs = 0xea60` would be captured as `"0"` and `timeoutMs = 6e4` as `"6"`, both far enough
+ * under 15,000 to pass a gate that exists to catch a default at or above it. These two feed the
+ * declaration the hex and scientific shapes the cases above feed the call site; a decimal default such
+ * as `15_000` exercises only the half of the reader a digit pattern already reads right.
  */
 it('the default reader captures a hex timeoutMs default in full, not its leading digit', () => {
   const src = 'export async function until(predicate, what, timeoutMs = 0xea60, pollMs = 20) {}'

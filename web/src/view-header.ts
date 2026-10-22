@@ -11,14 +11,12 @@ import type { Binding, PaneOption } from './sessions'
  * A VIEW'S HEADER — Plan 7 part 2 spec §7. Left to right: the title, which is the selector; the status;
  * the step controls; the view's actions (`⋯`, `✕`).
  *
- * **THE TITLE IS THE SELECTOR, AND IT REPLACES THREE THINGS.** A view used to carry an `<h2>` naming its
- * leg (`lambda`, `turing machine`), a `shows` select listing `(leg, session)` pairs under two optgroups,
- * and a `[detached]` badge. The inventory that opened Plan 7 found the select reading as a trivial choice
- * while picking the other leg rebuilt the whole view, with only an optgroup label saying so. Now the title
- * says what the view shows — `λ · program`, `TM · copy 2` — and opening it is how to show something else.
+ * **THE TITLE IS THE SELECTOR.** It says what the view shows — `λ · program`, `TM · copy 2` — and opening it is
+ * how to show something else. A `shows` select listing `(leg, session)` pairs under optgroups would read as a
+ * trivial choice while picking another leg rebuilds the whole view, with only an optgroup label saying so.
  *
- * **THE `<h2>` STAYS, AS THE TITLE'S CONTAINER.** A view is a section with a heading: the heading is what a
- * screen-reader user jumps between views by, and the status sits inside it as the badge did, so the two
+ * **THE `<h2>` IS THE TITLE'S CONTAINER.** A view is a section with a heading: the heading is what a
+ * screen-reader user jumps between views by, and the status sits inside it, so the two
  * facts about a view's identity — what it shows, and that it is a copy no longer linked to the program —
  * read together.
  *
@@ -35,7 +33,7 @@ export function pairLabel(o: { readonly leg: Leg; readonly label: string }): str
  * The key a pair travels under — the menu items' `data-binding`, and the title's, which is what tests pick
  * and read by.
  *
- * **`:`, NOT THE `\x00` THE OLD `<option>` VALUES USED, BECAUSE THIS KEY IS MATCHED BY A CSS SELECTOR.**
+ * **`:`, NOT `\x00`, BECAUSE THIS KEY IS MATCHED BY A CSS SELECTOR.**
  * CSS replaces U+0000 with U+FFFD when it parses a selector (and `CSS.escape` does the same), so
  * `button[data-binding="lambda\x00source"]` can never match the attribute it names. A leg never
  * contains `:` and comes first, so the first `:` splits the key exactly whatever the session id holds.
@@ -65,8 +63,8 @@ export type ViewHeader = {
 }
 
 /**
- * Unique ids for the title menus, so each title's `aria-controls` names exactly one menu — per module, for
- * the split picker's old reason: every view on the page builds one.
+ * Unique ids for the title menus, so each title's `aria-controls` names exactly one menu — per module, because
+ * every λ, TM and asm view on the page builds one.
  */
 let menuSeq = 0
 
@@ -98,8 +96,8 @@ export function viewHeader(onPick: (choice: Binding<Leg>) => void): ViewHeader {
   button.title = 'choose what this view shows'
   button.setAttribute('aria-haspopup', 'menu')
   button.setAttribute('aria-controls', menu.id)
-  // STATED FROM CONSTRUCTION, NOT FROM THE FIRST TOGGLE — `viewMenu`'s reason: a disclosure with no
-  // `aria-expanded` announces as a plain button to the reader who most needs to know it opens something.
+  // STATED FROM CONSTRUCTION, NOT FROM THE FIRST TOGGLE: a disclosure with no `aria-expanded` announces as a
+  // plain button to the reader who most needs to know it opens something.
   button.setAttribute('aria-expanded', 'false')
   button.popoverTargetElement = menu
   const buttonText = document.createElement('span')
@@ -122,9 +120,8 @@ export function viewHeader(onPick: (choice: Binding<Leg>) => void): ViewHeader {
   let detached = false
   let stepsShown = true
 
-  // BUILT ON OPEN, NOT PER FRAME — `viewMenu`'s rule, which `pane-chrome.ts` stated for the same
-  // per-frame reason: `draw()` repaints every view on every recorded frame during playback, and a menu that
-  // is closed has no state to keep fresh. The first item takes `autofocus`, which the popover's own show
+  // BUILT ON OPEN, NOT PER FRAME: `draw()` repaints every view on every recorded frame during playback, and a
+  // menu that is closed has no state to keep fresh. The first item takes `autofocus`, which the popover's own show
   // steps honour after it is visible; `.focus()` here would run while it is still `display: none`.
   menu.addEventListener('beforetoggle', (e) => {
     const open = e.newState === 'open'
@@ -150,13 +147,13 @@ export function viewHeader(onPick: (choice: Binding<Leg>) => void): ViewHeader {
   /**
    * Put the heading in the state the fields describe.
    *
-   * **IT RECONCILES RATHER THAN REPLACING, AND THAT IS A FOCUS RULE, NOT A COST ONE.** This was
-   * `heading.replaceChildren(control, …)`, which removes every child and re-inserts it — including the
-   * title button, the same element, unchanged. **Removing the focused element from the document resets
-   * focus to `<body>`, and putting it back does not bring the focus with it.** So every repaint blurred a
-   * focused title: on the same-leg pick the title itself had just performed (the one rebind arm with no
-   * `focusPane` behind it, because the view stays exactly where it was), on a detach or reattach, and on
-   * any other view's copy being created — every view's key changes when the session list does.
+   * **IT RECONCILES RATHER THAN REPLACING, AND THAT IS A FOCUS RULE, NOT A COST ONE.**
+   * `heading.replaceChildren(control, …)` would remove every child and re-insert it — including the title button,
+   * the same element, unchanged. **Removing the focused element from the document resets focus to `<body>`, and
+   * putting it back does not bring the focus with it.** So every repaint would blur a focused title: on the
+   * same-leg pick the title itself had just performed (the one rebind arm with no `focusPane` behind it, because
+   * the view stays exactly where it was), on a detach or reattach, and on any other view's copy being created —
+   * every view's key changes when the session list does.
    *
    * Spec §11 is categorical about it, and `pane-host.ts`'s same-leg arm relies on this function to keep
    * the promise. `view-title.test.ts`'s "keeps the focus on the title it was picked from" holds it.
@@ -199,8 +196,8 @@ export function viewHeader(onPick: (choice: Binding<Leg>) => void): ViewHeader {
     steps,
     actions,
     setBindings(next: readonly PaneOption[], now: Binding<Leg>): void {
-      // THE RENDERED KEY, AS THE OLD `shows` SELECT KEPT ONE: a repeat call on the per-frame path is free, and an
-      // open menu is not torn out from under a reader mid-choice.
+      // THE RENDERED KEY: a repeat call on the per-frame path is free, and an open menu is not torn out from under
+      // a reader mid-choice.
       const key = `${next.map((o) => `${bindingKey(o.leg, o.id)}\x00${o.label}`).join('\x01')}\x02${bindingKey(now.leg, now.session)}`
       if (key === rendered) return
       rendered = key
@@ -223,8 +220,8 @@ export function viewHeader(onPick: (choice: Binding<Leg>) => void): ViewHeader {
       }
       // A CONTROL REMOVED BY A STATE CHANGE MUST NOT TAKE THE FOCUS WITH IT — spec §11's fourth rule, the
       // same rule the continue button already follows, applied to a whole SLOT rather than one button
-      // (`focus-handoff.ts`). Reached by a user standing on `▶` who flips the `steps` switch in the
-      // header's own menu: without this, focus falls to `<body>`.
+      // (`focus-handoff.ts`). Reached by a user standing on `▶` when an opened link moves the `steps`
+      // switch (`main.ts`'s `showWorkspace`): without this, focus falls to `<body>`.
       handOff(steps, nearest(el, steps))
       steps.remove()
     },
@@ -244,10 +241,9 @@ export function sourceViewHeader(): { readonly el: HTMLElement; readonly actions
 
 /**
  * What `✎ edit a copy` can do right now: not offered (`null`), offered, or offered and disabled with its
- * reason — the one control that is disabled rather than removed, because the refusal (a machine or a text
- * over its size cap, or a TM program whose result type has no header a copy can run) is not an absence: the
- * program exists (umbrella §4 rule 4). `CopyEditor.#refreshDetach` is the one place that decides which of the
- * three this is.
+ * reason — disabled rather than removed, because the refusal (a machine or a text over its size cap, or a TM
+ * program whose result type has no header a copy can run) is not an absence: the program exists (umbrella §4
+ * rule 4). `CopyEditor.#refreshDetach` and `LambdaPane.#refreshDetach` decide which of the three this is.
  */
 export type CopyState = null | 'ready' | { readonly reason: string }
 
@@ -277,10 +273,10 @@ export type DisplayGroup = {
 }
 
 /**
- * A λ view's display settings in its `⋯` menu (Plan 7 part 4a): its groups, and "reset folds".
+ * A λ view's display settings in its `⋯` menu: its groups, and "reset folds".
  *
- * **EACH GROUP IS A `radiogroup` OF `radio`s, NOT `menuitemradio`s** (spec §5.1's "radio items"). This
- * popover is not a `role="menu"` — none of its other items is a `menuitem` either — and a menu item
+ * **EACH GROUP IS A `radiogroup` OF `radio`s, NOT `menuitemradio`s** (Plan 7 part 4 spec §5.1's "radio items").
+ * This popover is not a `role="menu"` — none of its other items is a `menuitem` either — and a menu item
  * outside a menu is not valid ARIA; a radio is valid anywhere. `radioGroup` builds each one.
  */
 export type DisplayMenu = { readonly groups: readonly DisplayGroup[]; readonly reset: () => void }
@@ -368,14 +364,14 @@ export type ViewMenuOptions = {
   readonly editCopy?: { readonly run: () => void; readonly what: string }
   readonly claim?: () => void
   /**
-   * Reformat this view's document — Plan 7 part 3a, the slot part 2a left in this menu.
+   * Reformat this view's document.
    *
    * **IT NEVER REPORTS A FAILURE, BECAUSE THERE IS NOT ONE TO REPORT.** `Language::format` answers
    * `None` for text that does not parse and the client turns that into no edits, so formatting a
    * half-typed buffer does nothing visible. That is what makes *format on blur* safe to leave on.
    */
   readonly format?: () => void
-  /** A λ view's display settings — present only on a λ view (Plan 7 part 4a). */
+  /** A λ view's display settings — present only on a λ view. */
   readonly display?: DisplayMenu
   readonly choices?: () => SplitChoices
 }
@@ -413,8 +409,8 @@ function item(className: string, label: string, hint?: string, glyph?: IconName)
  * A view's `⋯` menu and its `✕` — Plan 7 part 2 spec §7.
  *
  * **ONE GLYPH, ONE MEANING (umbrella §4 rule 2).** `⋯` only ever opens a view's menu and `✕` only ever closes a
- * view. The two split popovers (`⇥`, `⤓`), `✎ fork` and the claim button were four more controls in a view's
- * strip; they are menu items now, because none of them is a thing a user does every few seconds.
+ * view. The two splits, *edit a copy* and the claim are menu items rather than controls in a view's strip,
+ * because none of them is a thing a user does every few seconds.
  *
  * **THE ITEMS STAY IN THE DOM WHILE THE MENU IS CLOSED, ADDED AND REMOVED AS THEY APPLY.** That is this file's
  * idiom for a control that cannot apply (removed, not disabled — rule 4), applied inside a popover: the popover
@@ -423,14 +419,14 @@ function item(className: string, label: string, hint?: string, glyph?: IconName)
  * **A SPLIT IS TWO CHOICES IN ONE MENU.** Choosing *split right* or *split down* replaces the main items with
  * the pairs a new view could show, the view's own pair first and reading *another view of this*, then the
  * others, then *source* while the tree has none. The pair list is built at that moment from `choices()`,
- * which is a thunk for the old split picker's reason: the list is read when it is needed and never per frame.
+ * which is a thunk because the list is read when it is needed and never per frame.
  * Closing the menu puts the main items back.
  *
  * **EVERY ITEM CLOSES THE MENU BEFORE IT RUNS**, so no item is left on screen describing a view the action
  * just changed, and focus goes back to what held it before the menu opened — the popover's own behaviour on a
- * light dismiss or a `hidePopover` while focus is inside it. **A SPLIT'S PAIR IS WHERE THAT FAILS:** measured with
- * real clicks, the focus leaves with the pair list and nothing hands it back, so it falls to `<body>` unless the
- * split puts it somewhere — which `pane-host.ts`'s `split` does, in the view it made or, refused, in its own.
+ * light dismiss or a `hidePopover` while focus is inside it. **A SPLIT'S PAIR IS WHERE THAT FAILS:** the focus
+ * leaves with the pair list and nothing hands it back, so it falls to `<body>` unless the split puts it
+ * somewhere — which `pane-host.ts`'s `split` does, in the view it made or, refused, in its own.
  * **A DISPLAY SETTING'S CHOICES ARE THE EXCEPTION:** a choice leaves the menu open
  * and the focus on it, because a setting is picked and then looked at, and the group itself says which
  * choice is now in force — the arrows would have nothing to move between in a menu that closed on each.
@@ -646,7 +642,7 @@ export function viewMenu(actions: HTMLElement, opts: ViewMenuOptions): ViewMenu 
     }
     const showMore = wanted.length > 0
     // `⋯` GOES AFTER THE VIEW'S OWN ACTIONS AND BEFORE `✕`, the umbrella's order: before `✕` when it is there,
-    // at the end when it is not. Prepended, it passed whatever the view had mounted there (`follow redex`).
+    // at the end when it is not. Prepended, it would pass whatever the view had mounted there (`follow redex`).
     if (showMore && more.parentNode === null) {
       if (close.parentNode === actions) close.before(more, menu)
       else actions.append(more, menu)
@@ -660,7 +656,7 @@ export function viewMenu(actions: HTMLElement, opts: ViewMenuOptions): ViewMenu 
     if (!canClose && close.parentNode !== null) close.remove()
   }
   // THE DISPLAY SETTINGS APPLY FROM THE START, AND NO SETTER WOULD EVER MOUNT THEM: each setter syncs only
-  // on a change, so a view whose other state never left its first value had no `⋯`. Mounted here, `⋯` is
+  // on a change, so a view whose other state never left its first value would have no `⋯`. Mounted here, `⋯` is
   // in `actions` before the view appends anything of its own, so a view with settings prepends its actions.
   if (displayItems.length > 0) sync()
 

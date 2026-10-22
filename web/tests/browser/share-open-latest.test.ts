@@ -18,7 +18,7 @@ import { workspaceName } from './share-open-hashchange-fixture'
  * `share-link-inflate.test.ts` puts a counter in front of one: it holds link A's input until link B has opened, then
  * lets it through. **A FILE OF ITS OWN**, because `share-open-hashchange.test.ts`'s cases share one page and each
  * starts where the last left it, and these two links' order is the whole of what is held, so each case here starts on
- * the program the page opened on. ONE MOUNT FOR THE FILE, for the reason every sibling gives: ES module imports are
+ * the program the page opened on. ONE MOUNT FOR THE FILE, for the reason `app.test.ts` gives: ES module imports are
  * cached, so `main()` runs once per page, and Vitest gives each test file its own page.
  */
 
@@ -190,8 +190,9 @@ describe('a link whose read ends after a later link has opened', () => {
     history.replaceState(null, '', `${location.pathname}${location.search}#kept`)
     hold.release()
     await until(hold.ended, "A's read to end")
-    // READ SOON AFTER B'S OPEN, AND NEVER WAITING ON `NOTICE_MS`, at which B's notice and its `undo` go: a click on
-    // that `undo` after the compile raced that clock on a slow runner, and the next case's start puts the page back.
+    // READ SOON AFTER B'S OPEN, AND NEVER WAITING ON `NOTICE_MS`, at which B's notice and its `undo` go: a click
+    // on that `undo` after the compile would race that clock on a slow runner, and the next case's start puts the
+    // page back.
     await holds(() => expect({ ...page(), fragment: location.hash }).toEqual({ ...ON_B, fragment: '#kept' }))
   })
 })

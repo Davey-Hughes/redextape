@@ -1,19 +1,17 @@
 /**
  * The failure surface for "the app did not start" — and ONLY that. Two cases qualify: `init()`
  * throwing (the wasm module never loaded) and the worker's own `error` event (its module never
- * loaded). Both mean nothing under `<main>` — not the editor, not either pane — was ever wired up, so
- * replacing all of it is the only honest answer.
+ * loaded). Both mean the app cannot run anything, so replacing every view — `main.ts` passes `#views`,
+ * the layout's root, as `host` — is the only honest answer.
  *
- * A THIRD CASE THAT USED TO LAND HERE AND MUST NOT: `worker-error`, a `Session` call that threw
- * AFTER the app started. `main.ts` answers that one with `showWorkerError` below instead — the editor
- * and both panes are alive and working at that point, and `root.replaceChildren` below would have
- * torn them out to report a problem that was already over, leaving the user unable to type again
- * until a reload. See `showWorkerError`'s doc for the rest of that split.
+ * A THIRD CASE MUST NOT LAND HERE: `worker-error`, a `Session` call that threw AFTER the app
+ * started. That one is answered with `showWorkerError` below instead — the editor and every view
+ * are alive and working at that point, and `host.replaceChildren` below would tear them out to
+ * report a problem that is already over, leaving the user unable to type again until a reload. See
+ * `showWorkerError`'s doc for the rest of that split.
  *
- * PR 3c HAD NONE, and named the gap: if the worker or the wasm module fails to load, the page is
- * blank and the only evidence is a console message the user will not open. The design carries this
- * as a §6 row rather than a follow-up ticket because it is three lines and the alternative is a
- * blank page.
+ * Without this banner, if the worker or the wasm module fails to load, the page is blank and the
+ * only evidence is a console message the user will not open.
  *
  * IT NAMES THE FIX, NOT ONLY THE FAULT. By far the most likely cause on a fresh clone is that
  * `pkg/` has never been built, and a message that says only "failed to fetch" sends the reader to
@@ -49,11 +47,11 @@ export function workerErrorText(e: unknown): string {
 
 /**
  * Report a `worker-error` INTO `#results`, not over the page. `showBanner`'s `replaceChildren` is
- * right for "the app did not start" because nothing under `<main>` works yet; it is wrong here
- * because everything under `<main>` still does. `replies.ts`'s `worker-error` arm records the failure
- * with `setProgram` instead of calling `showBanner`, after resetting every leg and clearing the decline
- * mark, and `readout.ts`'s `createReadout` is what calls this — so this only has to render the message,
- * not decide the rest of the response.
+ * right for "the app did not start" because no view can run anything yet; it is wrong here because
+ * every view still can. `replies.ts`'s `worker-error` arm records the failure with `setProgram`
+ * instead of calling `showBanner`, after resetting every leg and clearing the decline mark, and
+ * `readout.ts`'s `createReadout` is what calls this — so this only has to render the message, not
+ * decide the rest of the response.
  */
 export function showWorkerError(results: HTMLElement, e: unknown): void {
   const el = document.createElement('div')

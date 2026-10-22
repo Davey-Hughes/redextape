@@ -124,7 +124,7 @@ describe('the focus after a view key', () => {
       expect(mounted()).toEqual(['lambda-0'])
       expect(toggle('lambda').getAttribute('aria-disabled'), 'precondition: the λ toggle is disabled').toBe('true')
       // `force`, BECAUSE THE TEST DRIVER WAITS FOR A CONTROL TO BE ENABLED BEFORE IT PRESSES ONE, and it reads
-      // `aria-disabled` as not enabled: without it the press is never made (`locator.click: Timeout`, measured). A
+      // `aria-disabled` as not enabled: without it the press is never made (`locator.click: Timeout`). A
       // user's pointer does not wait. The press itself is the driver's own, at the toggle's centre.
       await userEvent.click(toggle('lambda'), { force: true })
       await focusInPage('a pointer press on the only toggle pressed, which is refused')

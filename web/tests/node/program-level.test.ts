@@ -89,7 +89,8 @@ describe("*arcs*' lanes", () => {
   })
 
   it('lets spans that do not overlap share a lane', () => {
-    // Four instructions, each jumping back one: 1 -> 0 and 3 -> 2 are two arcs whose spans do not overlap.
+    // Four instructions, pc1 and pc3 each jumping back one:
+    // 1 -> 0 and 3 -> 2 are two arcs whose spans do not overlap.
     const p: TmProgram = {
       ...COMPILED,
       states: [

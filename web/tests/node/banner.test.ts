@@ -12,8 +12,8 @@ describe('bannerText', () => {
   })
 
   it('tells the reader what to do rather than only what broke', () => {
-    // PR 3c shipped no failure surface at all, so the failure mode was a blank page and a console
-    // message. A banner that only names the exception would be a smaller version of the same problem.
+    // With no failure surface, a failure is a blank page and a console message. A banner that only names
+    // the exception would be a smaller version of the same problem.
     expect(bannerText(new Error('x'))).toContain('pnpm run build:wasm')
   })
 })

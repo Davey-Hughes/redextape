@@ -5,24 +5,19 @@ import { countOf, extendButton, newest, results, resultsIdle, SHELL, tmStepText,
 
 /**
  * **THE READOUT SAYS WHEN THE TM LEG'S HISTORY FILLED, AT THE STEP IT FILLED AT** — the strip in Explorer, the
- * inspector in Debugger. Both used to read only the compile's result, which counts the WHOLE run (`TM 9 · 91,785
- * transitions`), so a recording that stopped on its history budget was said by the TM view's step line and by nothing
- * the readout showed. The step it names is the step line's `of N`, the newest step the recording holds.
+ * inspector in Debugger. The compile's result counts the WHOLE run (`TM 9 · 91,785 transitions`), so a readout that
+ * read only it would leave a recording that stopped on its history budget said by the TM view's step line alone. The
+ * step it names is the step line's `of N`, the newest step the recording holds.
  *
  * **`map and fold`, PICKED FROM `examples ▾` WITH THE POINTER**: its TM history fills before the machine halts (its
  * menu line says so), and one *keep recording* then carries the recording to the halt, which is where the fact has to
  * go away again. `fact(12)` fills too, but its machine runs 481,964 transitions and takes several presses to end.
  *
- * ONE MOUNT FOR THE FILE, for the reason every sibling gives; the cases run in order, each from where the last left the
+ * ONE MOUNT FOR THE FILE, for the reason `app.test.ts` gives; the cases run in order, each from where the last left the
  * page, and each asserts the state it starts from before it measures anything.
  *
  * **EVERY LONG WAIT IS IN A HOOK, SPLIT.** Each hook has Vitest's 30 s to itself. At `CPUQuota=25%` the TM history
- * filled about 7 s after its recording started. During *keep recording* the wait for the recording to be half way to
- * the halt took 10,792 and 12,903 ms in two instrumented runs, polled once, at the halt, and passed only because
- * `until` reads its predicate before its deadline after every sleep (`until`'s doc; `harness.test.ts` holds the
- * order): `History` moved every frame it kept at each eviction, and the page ran no timer. Since it stopped, three
- * runs of an instrumented copy at 25 %, interleaved with three on `53ecbfa`, took 991 to 1,296 ms against 5,109 to
- * 7,988, polled at most 396 ms apart.
+ * filled about 7 s after its recording started.
  */
 
 /** The TM segment of the strip — the third, in `LEGS`' order — or `undefined` while the readout is not the strip. */
@@ -107,10 +102,9 @@ describe('the readout, when the TM history fills', () => {
  * **THE FACT FOLLOWS THE RECORDING, NOT THE COMPILE.** *keep recording* runs the TM leg on from where it stopped, and on
  * `map and fold` it reaches the machine's halt, where the recording ENDED: neither readout says the history filled.
  *
- * **THE RECORDING IS NOT CAUGHT HALF WAY BY POLLING, AND THAT IS NOT AN OVERSIGHT.** A case read the strip at the first
- * poll that saw the step move, and in one run in 24 that poll already saw the halt; at `CPUQuota=25%`, while `History`
- * moved every frame it kept at each eviction, the poll after one at 3,210 ms ran at 12,194 ms, at the halt. Whether a
- * poll lands half way is timing, so no case here asserts it.
+ * **THE RECORDING IS NOT CAUGHT HALF WAY BY POLLING, AND THAT IS NOT AN OVERSIGHT.** A case that read the strip at the
+ * first poll that saw the step move saw the halt already in one run in 24: whether a poll lands half way is timing, so
+ * no case here asserts it.
  * `readout.test.ts` holds a recording still going, `done: null`, to no fact, and `readout-history-held.test.ts` places
  * a continue's window by holding its `result` back.
  */

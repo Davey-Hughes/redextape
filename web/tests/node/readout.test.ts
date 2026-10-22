@@ -38,7 +38,7 @@ const ENDED = { gen: GEN, asm: leg(55, 'ended'), tm: leg(2_870, 'ended') }
 const PLAIN = ['λ 42 · 7 reductions', 'asm 42 · 55 instructions', 'TM 42 · 2,870 transitions · width 8']
 
 describe('programSegments', () => {
-  it('reads value and counts per leg, in the new vocabulary, with no normal-form text', () => {
+  it('reads value and counts per leg, with no normal-form text', () => {
     expect(programSegments(result(), ENDED)).toEqual(PLAIN)
   })
 
@@ -173,14 +173,14 @@ describe('lambdaCopySegments', () => {
 })
 
 describe('tmCopySegments', () => {
-  const running = { newestStep: 241_666, done: 'ended' as const, status: { available: true, reason: '' } }
+  const endedLeg = { newestStep: 241_666, done: 'ended' as const, status: { available: true, reason: '' } }
 
   it('names the copy and carries its count, value line and reduced-file sentence', () => {
     const reading = {
       status: { header: true, width: 4, reduction: { stages: ['single-tape'], steps: 241666 } },
       value: { run: { run: 'Ended', steps: 241666, cap: 1000000000 }, value: { Value: { text: '2' } } },
     }
-    expect(tmCopySegments('TM copy 1', reading as never, running)).toEqual([
+    expect(tmCopySegments('TM copy 1', reading as never, endedLeg)).toEqual([
       'TM copy 1 · 241,666 transitions · value: 2 · reduced: single-tape · 241,666 steps',
     ])
   })
@@ -188,8 +188,8 @@ describe('tmCopySegments', () => {
   /**
    * **A COPY WHOSE THREAD THREW READS ITS LEG, NOT ITS RETAINED READING** — spec §13. `replies.ts`'s
    * `worker-error` arm clears `tmScratch` and writes the reason onto the leg, so a version of this that
-   * took only the reading reported a bare name for the rest of the page load, where the λ half of the
-   * same arm reported `λ copy 1 · the copy failed`.
+   * took only the reading would report a bare name for the rest of the page load, where the λ half of
+   * the same arm reports `λ copy 1 · the copy failed`.
    */
   it('says why a copy stopped, and does not need a reading to say it', () => {
     expect(
@@ -216,8 +216,7 @@ describe('tmCopySegments', () => {
 
   /**
    * **A TM COPY WHOSE RECORDING FILLED ITS HISTORY SAYS SO, AS THE λ AND ASM COPIES DO** — after its count, and with
-   * no step beside it, since a copy's count already IS the newest step its recording holds. Measured on `map and
-   * fold`: a copy of the TM view stops at `step 69,008 of 69,008 — history is full` and offers `keep recording`.
+   * no step beside it, since a copy's count already IS the newest step its recording holds.
    */
   it('says the copy’s history is full after its count, and nothing for a recording that ended', () => {
     const reading = {
@@ -278,9 +277,9 @@ describe('asmCopySegments', () => {
 })
 
 /**
- * **A MACHINE COPY'S ROW IN THE COPIES MENU SAYS WHAT ITS READOUT SAYS OF ITS RUN** — the line under its name, which
- * read `no term yet` for every TM and asm copy, halted ones included, because a machine copy has no term. It is the
- * copy's readout line without the name, so each case is also checked against the strip's own segment.
+ * **A MACHINE COPY'S ROW IN THE COPIES MENU SAYS WHAT ITS READOUT SAYS OF ITS RUN** — the line under its name, where
+ * a machine copy, which has no term, would otherwise read `no term yet`, halted ones included. It is the copy's
+ * readout line without the name, so each case is also checked against the strip's own segment.
  */
 describe('a machine copy’s row in the copies menu', () => {
   const STATUS = { available: true, reason: '', run: 'Ended' as const, cap: null, total_steps: 55 }
@@ -381,12 +380,12 @@ describe('programRows', () => {
   })
 
   /**
-   * **A CUT NORMAL FORM CARRIES ITS MARK.** `results.ts` sets `note` on exactly one row, and the inspector
-   * is the first surface since part 2a to print that row at all — the strip drops it. A DEPTH cut is not a
-   * prefix of the real term: closing every open paren as the stack unwinds yields well-formed λ that
-   * reparses into a different, shorter term, so an unmarked one reads as the answer.
+   * **A CUT NORMAL FORM CARRIES ITS MARK.** `results.ts` sets `note` on exactly one row, and the strip drops
+   * that row, so the inspector is where it is printed. A DEPTH cut is not a prefix of the real term: closing
+   * every open paren as the stack unwinds yields well-formed λ that reparses into a different, shorter term,
+   * so an unmarked one reads as the answer.
    */
-  it('carries the note on a cut normal form, which the strip never had to', () => {
+  it('carries the note on a cut normal form, the row the strip drops', () => {
     const deep = { ...LAMBDA, state: { ...LAMBDA.state, cut: 'Depth' as const } }
     const rows = programRows({ kind: 'result', gen: GEN, lambda: deep, asm: ASM, tm: TM } as never, ENDED)
     const nf = rows.find((r) => r.label.includes('normal form') || r.label.includes('term so far'))

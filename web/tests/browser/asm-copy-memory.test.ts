@@ -14,10 +14,10 @@ import type { MemoryReply, MemoryRequest } from './asm-copy-memory-worker'
  *   cap's words are reached in `mem / 1,000,000` calls;
  * - **the heap**: a `cons` a step, until the heap cap's cells are allocated.
  *
- * The caps are `[steps, stack, heap, mem]`, `DEFAULT_CAPS`' and the candidate `COPY_CAPS`' — kept in step with
- * `session.rs` by hand, as a probe's inputs are, and printed so a run says what it measured. `CASES` and `both` live in
- * `asm-copy-corpus.ts`, shared with `asm-copy-cost.test.ts`, which prices every run this probe knows against the 250 ms
- * budget (amendment 45).
+ * The caps are `[steps, stack, heap, mem]`, `DEFAULT_CAPS`' and `COPY_CAPS`' — kept in step with `session.rs` by hand,
+ * as a probe's inputs are, and printed so a run says what it measured. `CASES` and `both` live in `asm-copy-corpus.ts`,
+ * shared with `asm-copy-cost.test.ts`, which prices every run this probe knows against the 250 ms budget
+ * (amendment 45).
  */
 
 const DEFAULT_CAPS: MemoryRequest['caps'] = [5_000_000, 100_000, 5_000_000, 64_000_000]

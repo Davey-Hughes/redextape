@@ -13,7 +13,7 @@ import { examplesButton, picker, SHELL, stateIdle, undoButton, until } from './h
  * for the undo button asks the language server to format, and the server answers a formatted example with one edit
  * replacing the whole document by the same text: a transaction that changes the document and leaves it equal. That
  * is not an edit anything could lose, so the undo stays. *Format on blur* is stored at module scope, before `main()`
- * reads it, as a returning visitor's choice would be. ONE MOUNT FOR THE FILE, for the reason every sibling gives.
+ * reads it, as a returning visitor's choice would be. ONE MOUNT FOR THE FILE, for the reason `app.test.ts` gives.
  */
 
 localStorage.setItem(FORMAT_ON_BLUR_KEY, 'true')

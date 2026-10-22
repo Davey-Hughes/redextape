@@ -5,32 +5,26 @@ import { lambdaSettled } from './lambda-text'
 import { typeIntoScratchEditor } from './scratch-editor-fixture'
 
 /**
- * **THE SECOND EDIT GESTURE, DRIVEN THROUGH THE APP** — design §4.3's edit path (`editSink`), plan T8's last
- * obligation. `scratch-fork.test.ts`'s new DOM `describe` proves the FIRST gesture (a truncated frame
- * forks and seeds an editor); this file proves the second one works on what that editor becomes: a
- * real CodeMirror buffer whose keystrokes recompile the SAME scratch (`ScratchBuffers.recompile`,
- * not a second fork), and leave the source session's own result alone.
+ * **THE SECOND EDIT GESTURE, DRIVEN THROUGH THE APP** — 5d-iii design §4.3's edit path (`editSink`).
+ * `scratch-fork.test.ts`'s DOM `describe` proves the FIRST gesture (a truncated frame forks and seeds an
+ * editor); this file proves the second one works on what that editor becomes: a real CodeMirror buffer
+ * whose keystrokes recompile the SAME scratch (`ScratchBuffers.recompile`, not a second fork), leave the
+ * source session's own result alone, and survive a source recompile. A source keystroke ends no buffer
+ * (5d-ii-c §4.3's table), so the editor stays mounted over a session that is still running, and STAGE 5
+ * types into it afterwards to prove the buffer's own worker is still answering rather than merely that
+ * its box is still on screen.
  *
- * **THIS SENTENCE USED TO END "and disappear the moment a source recompile retires the scratchpad
- * underneath them", AND STAGE 4 ASSERTED IT.** 5d-ii-c decision 2 (design §4.3's table) removes that
- * retire: a source keystroke ends no buffer, so the editor stays mounted over a session that is still
- * running, and STAGE 5 — new with the rewrite — types into it afterwards to prove the buffer's own
- * worker is still answering rather than merely that its box is still on screen.
+ * **ONE SEQUENCED `it`, NOT THREE INDEPENDENT ONES.** `scratch-app.test.ts` states the house rule this
+ * follows: the states here are ordered — there is no bad-edit case to test until a good fork exists,
+ * and no source recompile to survive until an editor exists — and `beforeAll` mounts ONE app for the
+ * file (ES module imports are cached, so `main()` runs once per page), so three separate `it`s would
+ * make each depend on the previous having actually run, which is exactly the shared-mutable-fixture
+ * shape that file's own comment rejects. Every stage below asserts before it acts, same as there.
  *
- * **ONE SEQUENCED `it`, NOT THREE INDEPENDENT ONES, AND THAT IS A DELIBERATE DEPARTURE FROM
- * `2026-08-11-plan5d-iii-editable-lambda.md`'s SKETCH.** `scratch-app.test.ts` already states the
- * house rule this follows: the states here are ordered — there is no bad-edit case to test until a
- * good fork exists, and no retirement to test until an editor exists to retire — and `beforeAll`
- * mounts ONE app for the file (ES module imports are cached, so `main()` runs once per page), so
- * three separate `it`s would make each depend on the previous having actually run, which is exactly
- * the shared-mutable-fixture shape that file's own comment rejects. Every stage below asserts before
- * it acts, same as there.
- *
- * **`EditorView.findFromDOM` PLUS A REAL CHANGE TRANSACTION, NOT `ScratchEditor#setText`.**
- * `scratch-editor.test.ts`'s own file doc records why: `setText` sets a `#seeding` flag for the
+ * **A REAL CHANGE TRANSACTION, NOT `ScratchEditor#setText`.** `setText` sets a `#seeding` flag for the
  * duration of its dispatch so a fork's seed is never mistaken for a keystroke, which means calling it
- * here would report zero recompiles instead of one. The `typeIntoScratchEditor` this file calls is that file's,
- * aimed at the pane's editor host instead of a bare one; it lives in `scratch-editor-fixture.ts`.
+ * here would report zero recompiles instead of one. `typeIntoScratchEditor` (`scratch-editor-fixture.ts`)
+ * finds the pane's editor with `EditorView.findFromDOM` and dispatches the change to it.
  */
 
 const SAMPLE = 'let x = 40; x + 2'
@@ -39,9 +33,6 @@ let view: EditorView
 
 describe('editing the scratch, through the app', () => {
   beforeAll(async () => {
-    // Each browser test file gets its own in-memory `Storage` now, installed in `tests/browser/setup.ts`
-    // before this file's own module body runs — see that file's doc for why clearing a shared key was
-    // not enough. Neither key needs clearing here any more.
     document.body.innerHTML = SHELL
     view = await (await import('../../src/main')).ready
     await until(idle, 'the first compile')
@@ -65,8 +56,7 @@ describe('editing the scratch, through the app', () => {
 
     // STAGE 2 — a genuine edit changes the frames region, and the SOURCE's own result is untouched.
     // `onScratchReply` never writes `#results` (its own doc: "never touches `results.dataset.state`
-    // at all") — the scratch and the source are two sessions, not one mutable one, which
-    // is the whole reason three sessions exist (design §4.3).
+    // at all") — the scratch and the source are two sessions, not one mutable one (5d-i design §4.3).
     const beforeEdit = lambdaTermText()
     typeIntoScratchEditor('(λa. a a) (λb. b)')
     await until(() => lambdaTermText() !== beforeEdit, 'the edited scratch to recompile')
@@ -75,7 +65,7 @@ describe('editing the scratch, through the app', () => {
     focusProgram()
     expect(resultsText()).toBe(resultsBefore)
 
-    // STAGE 3 — an edit that does not parse. Design §4.4: "leaves the frames region showing the last
+    // STAGE 3 — an edit that does not parse. 5d-iii §4.4: "leaves the frames region showing the last
     // good run and puts the diagnostics in the gutter" — the opposite of what a broken SOURCE program
     // does to its own panes (`onReply`'s `no-session`: "stale frames must not survive a broken
     // program"), and deliberately so: a scratch mid-edit still has the term it had a keystroke ago.
@@ -90,16 +80,14 @@ describe('editing the scratch, through the app', () => {
     )
     expect(lambdaTermText()).toBe(lastGood)
 
-    // STAGE 4 — RECOMPILING FROM SOURCE LEAVES BOTH THE BUFFER AND THE BOX ALONE, WHERE THIS STAGE
-    // USED TO ASSERT THAT IT "retires the scratchpad and takes the editor with it" (5d-i design §4.3:
-    // "the same mechanism as poison recovery"). 5d-ii-c decision 2 ends that: `compile.ts` no longer
-    // retires anything, so `editorHost()` — which this stage checked was `null` — must still be there,
-    // and the pane must still be `copy · not linked` on the buffer it was editing.
+    // STAGE 4 — RECOMPILING FROM SOURCE LEAVES BOTH THE BUFFER AND THE BOX ALONE (5d-ii-c §4.3's table):
+    // `editorHost()` must still be there, and the pane must still be `copy · not linked` on the buffer
+    // it was editing.
     //
     // **IT IS ASSERTED FROM THE MIDDLE OF A BAD EDIT ON PURPOSE.** The editor is holding `(λa.` from
-    // STAGE 3, which is the state the old behaviour was most defensible in: a keystroke in the source
-    // editor threw away a buffer whose text did not parse, and the user got no say. Now the diagnostics
-    // stay, the last good frames stay, and STAGE 5 recovers the buffer by fixing the text.
+    // STAGE 3, a buffer whose text does not parse, and a keystroke in the source editor must not throw it
+    // away without the user having a say: the diagnostics stay, the last good frames stay, and STAGE 5
+    // recovers the buffer by fixing the text.
     view.dispatch({ changes: { from: 0, to: view.state.doc.length, insert: 'let y = 1; y + 1' } })
     expect(editorHost()).not.toBeNull()
     expect(document.querySelector('[data-leaf="lambda-0"] h2')?.textContent).toContain('copy · not linked')
@@ -114,7 +102,7 @@ describe('editing the scratch, through the app', () => {
     // STAGE 5 — THE BUFFER'S OWN THREAD IS STILL ANSWERING, which is the half a mounted `.term-editor`
     // cannot show: the box would look identical over a session `pool.unbind` had terminated. A real
     // keystroke into it recompiles the SAME buffer (`ScratchBuffers.recompile`), and the frames region
-    // moving to the new term is that worker replying after the source recompile that used to kill it.
+    // moving to the new term is that worker replying after the source recompile.
     typeIntoScratchEditor('(λm. m) (λn. n)')
     await until(() => lambdaTermText() !== lastGood, 'the buffer to recompile after the source did')
     await lambdaSettled()

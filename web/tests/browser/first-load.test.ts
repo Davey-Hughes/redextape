@@ -7,9 +7,8 @@ import { SHELL, segments, stateIdle, until } from './harness'
 
 /**
  * **A FIRST VISIT OPENS ON `sum_to(5)`, UNDER THE DEFAULT ENCODING, IN EXPLORER** — Plan 7 part 6a spec §4.4 and
- * row 3, where every load before opened on `let x = 40; x + 2`. `setup.ts` stores that program for every file, so this
- * one removes it at module scope, before `main()` runs: nothing stored is what a first visit has. ONE MOUNT FOR THE
- * FILE, for the reason every sibling gives.
+ * row 3. `setup.ts` stores `let x = 40; x + 2` for every file, so this one removes it at module scope, before `main()`
+ * runs: nothing stored is what a first visit has. ONE MOUNT FOR THE FILE, for the reason `app.test.ts` gives.
  *
  * **AND ON THE SOURCE AND THE TM VIEW** (the view layouts spec §8). `setup.ts` stores a four-view workspace for every
  * file too, so that goes with the program; `first-load-views.test.ts` has what the two views look like.

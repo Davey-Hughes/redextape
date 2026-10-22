@@ -9,9 +9,9 @@ export type LeafId = string
  * What a leaf renders.
  *
  * NOT A `Leg`, BECAUSE `'source'` IS NOT ONE. The source pane renders an editor rather than a leg's
- * frames, so a `Leg`-typed field could not name it. `'lambda'` and `'tm'` coincide with `Leg`'s
- * members and are deliberately not aliased to it — the day a pane kind exists that is not a leg, this
- * type extends and `Leg` does not.
+ * frames, so a `Leg`-typed field could not name it. `'lambda'`, `'asm'` and `'tm'` coincide with `Leg`'s
+ * members and are deliberately not aliased to it — the day another pane kind exists that is not a leg,
+ * this type extends and `Leg` does not.
  */
 export type PaneKind = 'source' | 'lambda' | 'asm' | 'tm'
 
@@ -19,9 +19,9 @@ export type PaneKind = 'source' | 'lambda' | 'asm' | 'tm'
  * The leg a pane of `kind` renders, or `null` for the source pane, which renders an editor and no leg.
  *
  * **A `switch`, SO THAT A NEW KIND IS A TYPE ERROR HERE RATHER THAN A SILENT ANSWER.** Because the kinds that
- * are legs are not aliased to `Leg` (`PaneKind`'s own doc), "is this kind a leg" used to be asked by listing
- * them — `kind === 'lambda' || kind === 'tm'` — which is `false` for a third leg's kind with `tsc` green
- * (`legs.ts` has the class of bug). Every arm returns, so a kind with no arm is TS2366.
+ * are legs are not aliased to `Leg` (`PaneKind`'s own doc), asking "is this kind a leg" by listing them —
+ * `kind === 'lambda' || kind === 'asm' || kind === 'tm'` — would answer `false` for a new leg's kind with
+ * `tsc` green (`legs.ts` has the class of bug). Every arm returns, so a kind with no arm is TS2366.
  */
 export function legOfPane(kind: PaneKind): Leg | null {
   switch (kind) {
@@ -53,18 +53,16 @@ export type PaneEntry<K extends Leg> = {
 }
 
 /**
- * THE PANE COLLECTION — what replaces `main.ts`'s `lambdaPane` and `tmPane` consts.  check-attributions: allow
+ * THE PANE COLLECTION.
  *
- * Thirty call sites assumed exactly one pane of each leg. The question every one of them was really
- * asking is "which panes should this reply repaint", and the answer is a pair: the leg the reply is
- * about, and the session whose worker sent it. `ofSession` is that question; `of` is the half of it
- * that predates sessions.
+ * The question a reply handler asks of it is "which panes should this reply repaint", and the answer is a
+ * pair: the leg the reply is about, and the session whose worker sent it. `ofSession` is that question; `of`
+ * is its leg half.
  *
  * IT READS THE BINDING THROUGH THE SLOT ON EVERY CALL RATHER THAN INDEXING BY SESSION. A
  * `Map<SessionId, …>` would be a second copy of a fact `PaneSlot` already owns, and `rebind` would
  * have to remember to update it — the two-places-to-be-wrong failure `sessions.ts`'s `LegState` doc
- * refuses one type up. The cost is a linear scan of a collection whose size is the number of panes on
- * screen.
+ * refuses. The cost is a linear scan of a collection whose size is the number of panes on screen.
  *
  * INSERTION ORDER IS ITERATION ORDER, matching `SessionRegistry`'s `Map` for the same reason: it
  * falls out without a comparator that would have to invent a rank.
@@ -140,13 +138,12 @@ export class PaneCollection {
    * The pane on `leg` whose state the app's shared surfaces should describe: of the panes on `leg` that `accept`
    * admits, the one the user focused most recently, else the first in insertion order, else `undefined`.
    *
-   * THIS REPLACES `first`, AND IT IS THE ANSWER TO THE QUESTION `first`'s DOC DEFERRED to this slice:
-   * "which pane's state should win once several disagree". Its consumer is `draw.ts`, whose running focuses
-   * drive the ONE source editor's focus mark and each machine view's, so with several panes on a leg it needs a
-   * pane the user can CHOOSE, and clicking into one is that choice.
+   * It answers which pane's state should win once several disagree. Its consumer is `draw.ts`, whose running
+   * focuses drive the ONE source editor's focus mark and each machine view's, so with several panes on a leg it
+   * needs a pane the user can CHOOSE, and clicking into one is that choice.
    *
    * PER LEG RATHER THAN ONE GLOBAL ACTIVE PANE. Clicking into the source editor must not blank out
-   * which λ pane is being described; the source editor is on neither leg.
+   * which λ pane is being described; the source editor is on no leg.
    *
    * THE LEG IS RE-CHECKED RATHER THAN TRUSTED, AND THAT IS THE KIND CHANGE RATHER THAN DEFENSIVE
    * STYLE. `markActive` may have recorded `pane-3` while it was a λ pane, and `pane-3` may be a TM pane now;
@@ -155,12 +152,11 @@ export class PaneCollection {
    * **`accept` IS WHAT A READER REFUSES, AND THE RUNNING FOCUSES REFUSE A COPY.** A running focus is the
    * program's: it resolves against the program's link index, and a copy's frames own no construct of it. So
    * `draw.ts` asks for the most recently focused view that shows the program, and a copy's view focused last
-   * is passed over rather than taken, which left the program's own view unmarked while it was the view being
-   * stepped. With no `accept`, every pane on the leg is admitted.
+   * is passed over: taken, it would leave the program's own view unmarked while it is the view being stepped.
+   * With no `accept`, every pane on the leg is admitted.
    *
-   * THE FALLBACK IS EXACTLY THE OLD `first`, so the single-pane case and the empty-leg case are
-   * unchanged — including the `undefined`, which four modules once each answered privately with a
-   * throw. A leg with no pane is a state, not a wiring bug.
+   * A LEG WITH NO ADMITTED PANE ANSWERS `undefined` RATHER THAN A THROW: a leg with none is a state, not a
+   * wiring bug.
    */
   active<K extends Leg>(leg: K, accept: (e: PaneEntry<K>) => boolean = () => true): PaneEntry<K> | undefined {
     const admitted = (e: PaneEntry<Leg> | undefined): PaneEntry<K> | undefined =>
@@ -183,9 +179,9 @@ export class PaneCollection {
    * **A READER OF A VIEW'S OWN STATE ASKS THIS, NOT `active`.** In Stage one host is on the page and the
    * rest are off it, and selecting a tab records the focused leaf without marking a pane active, so
    * `active(leg)` can name a hidden pane. `draw()` hands a pin and a tree only to views on the page, so a
-   * hidden λ view's `linkState` answered for an earlier pin: the λ link clause asks this, of the views that
-   * show the program. `undefined` is the link clause's honest absence: no λ view of the program on screen,
-   * so no term of the program's to explain.
+   * hidden λ view's `linkState` would answer for an earlier pin: the λ link clause asks this, of the views
+   * that show the program. `undefined` is the link clause's honest absence: no λ view of the program on
+   * screen, so no term of the program's to explain.
    *
    * **A READER OF A LEG'S LIVE HISTORY ASKS `active`.** The running focuses read the session a pane is
    * bound to, which is current whether or not the pane is drawn, and part 2's spec §8 keeps the step bar

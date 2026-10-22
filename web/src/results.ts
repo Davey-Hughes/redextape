@@ -8,15 +8,14 @@ export type Row = { leg: string; label: string; value: string; note?: string }
 /**
  * How a λ run's end reads.
  *
- * `Running` PRODUCES A ROW, and did not used to: that was true of the old `drive()`, which replied
- * once the run ended and never otherwise. `onRun` now posts `result` after a `budget` stop too — the
- * recording ring filled before the cursor did — and `lambdaStatus().run` is still `Running` when it
- * does. `lambdaRows` below must not call that term a normal form, and this must say why recording
- * stopped rather than staying silent about it.
+ * `Running` PRODUCES A ROW. `onRun` posts `result` after a `budget` stop too — the recording ring
+ * filled before the cursor did — and `lambdaStatus().run` is `Running` when it does. `lambdaRows`
+ * below must not call that term a normal form, and this must say why recording stopped rather than
+ * staying silent about it.
  *
  * `Capped` AND `DepthRefused` ARE WORDED DIFFERENTLY ON PURPOSE. Raising the cap helps the first and
- * provably cannot help the second, and this slice ships no button — so the wording carries the whole
- * distinction that `RunStatus` was split to preserve.
+ * provably cannot help the second, so the wording carries the distinction `RunStatus` has separate
+ * variants for.
  */
 function runNote(run: RunStatus | null): string | null {
   switch (run) {
@@ -38,7 +37,7 @@ function lambdaRows(l: LambdaLeg): Row[] {
   if (l.state) {
     // ONLY `Ended` EARNS THE NAME "normal form". `Running` here means recording stopped on the history
     // budget, not that the term stopped reducing — labelling it a normal form next to "value: not
-    // finished" said two contradictory things with nothing explaining the gap between them.
+    // finished" would say two contradictory things with nothing explaining the gap between them.
     const label = l.status.run === 'Ended' ? 'normal form' : 'term so far'
     const row: Row = { leg: 'λ', label, value: l.state.text }
     // The text is SHOWN as well as marked. A BYTE cut is a prefix of the real term, so showing it is

@@ -7,8 +7,7 @@ import { clickToggle } from './user-event-fixture'
  * WHAT THE WORKSPACE STORES FOR A VIEW IS KEPT THROUGH THE SWITCH THAT PARKS IT — the view layouts spec §5.1 and §5.2:
  * its panel state and its display, which a reload builds the view from when its arrangement is entered.
  *
- * Two lines hold this, and each could go with every other test passing (measured on `ee09243`, 2026-10-12, with the
- * whole node and browser suites):
+ * Two lines hold this:
  *
  * - `main.ts`'s `switchTo` tells `enterTree` that its write is a switch's. Without that the views a switch takes off
  *   the screen are treated as an edit's, closed, and their panel state and display are dropped.

@@ -68,25 +68,22 @@ export function renderLayout(
   handlers: ResizeHandlers,
 ): void {
   // THE DIVIDER A KEYBOARD USER IS FOCUSED ON DOES NOT SURVIVE `replaceChildren()` — UNLIKE A HOST, IT
-  // IS REBUILT FROM SCRATCH EVERY CALL. A RESIZE FRAME NO LONGER REBUILDS ANYTHING — `syncSizes` writes
-  // the new fractions onto the elements that are already there, precisely so the FRAMES of a gesture do
-  // not destroy the control performing them. WHAT STILL REBUILDS IS EVERY GESTURE'S COMMIT, AND THAT
-  // INCLUDES AN ORDINARY RESIZE, NOT ONLY A STRUCTURAL CHANGE. `handlers.commit` (`pane-host.ts`'s
-  // `applyLayout`) calls `renderLayout` unconditionally from its `finally` block on every call it makes —
-  // a drag's `pointerup`, a keyboard gesture's `keyup`/`blur`, a split, a close, `reset preset`, a
-  // restore all reach it the same way — so a resize still rebuilds the whole tree once, at the moment the
-  // gesture ends; it merely does so once per GESTURE now instead of once per FRAME. This rescue is what
-  // keeps a keyboard user's place across every one of those rebuilds, resize's own commit included, and
-  // it used to be what kept the arrow keys working at all — without it the FIRST arrow-key press moved
-  // the divider, destroyed the element focus was sitting on, and dropped focus to `<body>`, so the second
-  // press did nothing. A single FRAME no longer has that failure mode, but the `keyup` COMMIT still does:
-  // the divider the user was holding down is destroyed and rebuilt exactly like a structural change would
-  // destroy it, and this rescue is what a `keyup` finds waiting to restore focus onto its replacement. A
-  // divider that answers exactly one keystroke defeats design §6.2's keyboard-operability requirement as
-  // thoroughly as never wiring the handler, so this is not polish: it is what makes the keyboard path keep
-  // working past its first gesture. `path`/`index` (stamped onto every divider as `data-` attributes in
-  // `divider()` below) are what "the same divider" means across a rebuild, since the element itself never
-  // is.
+  // IS REBUILT FROM SCRATCH EVERY CALL. A RESIZE FRAME REBUILDS NOTHING — `syncSizes` writes the new
+  // fractions onto the elements that are already there, precisely so the FRAMES of a gesture do not
+  // destroy the control performing them. WHAT REBUILDS IS EVERY GESTURE'S COMMIT, AND THAT INCLUDES AN
+  // ORDINARY RESIZE, NOT ONLY A STRUCTURAL CHANGE. `handlers.commit` (`pane-host.ts`'s `applyLayout`)
+  // calls `renderLayout` from its `finally` block on every call it makes while the views are tiled (a
+  // stage, which has no dividers, takes `renderStage` there) — a drag's `pointerup`, a keyboard
+  // gesture's `keyup`/`blur`, a split, a close, `reset preset`, a restore all reach it the same way —
+  // so a resize rebuilds the whole tree once per GESTURE, at the moment it ends.
+  // This rescue is what keeps a keyboard user's place across every one of those rebuilds, resize's own
+  // commit included: on a `keyup` COMMIT the divider the user was holding down is destroyed and rebuilt
+  // exactly like a structural change would destroy it, and without this rescue focus would drop to
+  // `<body>` and the next press would do nothing. A divider that answers exactly one keystroke defeats
+  // design §6.2's keyboard-operability requirement as thoroughly as never wiring the handler, so this is
+  // not polish: it is what makes the keyboard path keep working past its first gesture. `path`/`index`
+  // (stamped onto every divider as `data-` attributes in `divider()` below) are what "the same divider"
+  // means across a rebuild, since the element itself never is.
   const focused = root.contains(document.activeElement) ? document.activeElement : null
   const identity =
     focused instanceof HTMLElement && focused.classList.contains('layout-divider')
@@ -161,20 +158,18 @@ const CHILD_STRIDE = 2
  * `root.replaceChildren()`, so calling it from a `pointermove` handler destroys the divider the drag is
  * being performed with, on the drag's own first frame: the replacement element carries a fresh closure
  * whose `dragging` is `false`, every later frame returns immediately, and pointer capture is released
- * implicitly the moment the captured element leaves the document. Measured before this function
- * existed: a drag moved exactly one `pointermove`'s worth and then stopped. Design §1 carries the
- * transcript.
+ * implicitly the moment the captured element leaves the document.
  *
  * `aria-valuenow` IS WRITTEN HERE AND THAT IS NOT A COURTESY. `divider()` sets it once, from the size
- * it is handed at build time, and it stays truthful today only because the whole tree is rebuilt after
- * every resize. A cheap path that moved `flex` and not `aria-valuenow` would leave every divider
- * reporting the fraction it was born with — a silent regression in the one part of this subsystem
- * deliberately exempted from Plan 5's deferred accessibility pass.
+ * it is handed at build time, and a gesture's frames do not rebuild the tree. A cheap path that moved
+ * `flex` and not `aria-valuenow` would leave every divider reporting the fraction it was born with — a
+ * silent regression in the one part of this subsystem deliberately exempted from Plan 5's deferred
+ * accessibility pass.
  *
  * IT THROWS ON A SHAPE MISMATCH RATHER THAN REPAIRING ONE. A model whose splits do not match the
  * rendered boxes means the caller took this path when it owed a `renderLayout`, which is a programming
- * error. `LambdaPane.receiveEditor` made the same call for the same reason: a silent repair absorbs the
- * finding as normal operation.
+ * error. `LambdaPane.receiveEditor` makes the same call for the same reason: a silent repair would absorb
+ * a caller's defect as normal operation.
  */
 export function syncSizes(root: HTMLElement, tree: LayoutNode): void {
   const rendered = root.firstElementChild
@@ -210,7 +205,7 @@ function syncNode(node: LayoutNode, el: HTMLElement): void {
  *
  * THE PIXEL-TO-FRACTION CONVERSION IS THE ONLY PIXEL IN THE LAYOUT, and it lives here rather than in
  * `layout.ts` so that model stays node-testable. The denominator is the split box's measured extent
- * along its own axis, read at pointerdown rather than cached, because a window resize between renders
+ * along its own axis, read at each frame rather than cached, because a window resize between renders
  * would otherwise scale every drag by a stale number.
  */
 function divider(
@@ -289,8 +284,8 @@ export function renderStage(
   const shown = all.some((l) => l.id === opts.focused) ? opts.focused : (all[0]?.id ?? opts.focused)
   const host = hosts.get(shown)
   if (host === undefined) throw new Error(`stage names a leaf with no host: ${shown}`)
-  // THE HOST NEEDS AN ID BECAUSE A TAB NAMES IT, and `panel.ts` mints one the same way for the same
-  // reason: `aria-controls` is an IDREF, and a host built by `pane-host.ts` carries only `data-leaf`.
+  // THE HOST NEEDS AN ID BECAUSE A TAB NAMES IT, minted the way `panel.ts` mints a panel body's:
+  // `aria-controls` is an IDREF, and a host built by `pane-host.ts` carries only `data-leaf`.
   if (host.id === '') host.id = `view-host-${shown}`
 
   const strip = document.createElement('div')
@@ -315,12 +310,12 @@ export function renderStage(
   /**
    * Move the focus to tab `i`, wrapping — and move the TAB STOP with it.
    *
-   * **A ROVING `tabindex` HAS TO ROVE, WHICH THIS DID NOT.** The tabs were built with `tabIndex = selected
-   * ? 0 : -1` and nothing updated it, so arrowing to a tab left the strip's single tab stop on the tab that
-   * was still SELECTED. `Tab` out and `Shift+Tab` back then returned to a different tab than the one the
-   * user had arrowed to — exactly the condition the pattern exists to prevent. Selection is manual here
-   * (§5), so the tab stop follows the FOCUS and not the selection; they part company the moment a user
-   * arrows without pressing Enter, which is the whole point of manual activation.
+   * **A ROVING `tabindex` HAS TO ROVE.** The tabs are built with `tabIndex = selected ? 0 : -1`; left there,
+   * arrowing to a tab would leave the strip's single tab stop on the tab that is still SELECTED, and `Tab`
+   * out and `Shift+Tab` back would return to a different tab than the one the user had arrowed to — exactly
+   * the condition the pattern exists to prevent. Selection is manual here (§5), so the tab stop follows the
+   * FOCUS and not the selection; they part company the moment a user arrows without pressing Enter, which
+   * is the whole point of manual activation.
    */
   const focusAt = (i: number): void => {
     const next = tabs[(i + tabs.length) % tabs.length]
@@ -359,9 +354,9 @@ export function renderStage(
  *
  * **A TAB IS BUILT WITH ITS VIEW'S TITLE, AND A VIEW'S TITLE CHANGES WITHOUT A REBUILD.** *Edit a copy*, a pick in
  * the title's menu and a move back to the program each rebind a view in place: its header repaints on the frame the
- * rebind draws, but `renderStage` runs only when the layout is applied, so the tab went on naming what the view used
- * to show until another tab was selected — on every leg. In Stage the tab is the only place a view is named besides
- * its title, so the two are kept saying the same thing.
+ * rebind draws, but `renderStage` runs only when the layout is applied, so without this the tab would go on naming
+ * what the view showed before until another tab was selected. In Stage the tab names a view as its title does, so
+ * the two are kept saying the same thing.
  *
  * **ONLY WHAT CHANGED IS WRITTEN**: this runs on every recorded frame during playback, and the element keeps its
  * identity, so a tab holding the focus keeps it.

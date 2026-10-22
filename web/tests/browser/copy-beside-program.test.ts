@@ -18,17 +18,16 @@ import {
 /**
  * A view of the program beside a view of a copy on the same leg, with the copy's view focused last.
  *
- * **THE PROGRAM'S RUNNING FOCUS COMES FROM A VIEW OF THE PROGRAM.** `draw.ts` read each machine leg's running focus
- * off the view of that leg focused last, so focusing a copy's view — which owns no construct of the program's —
- * took every focus mark off the program's own view, though the program had not moved. The check by hand saw it in
- * Explorer and in Stage, where the program's tab was the one shown and stepped. Each leg now reads the most recently
- * focused view that shows the program, and a copy's view is never the source.
+ * **THE PROGRAM'S RUNNING FOCUS COMES FROM A VIEW OF THE PROGRAM.** `draw.ts` reads each machine leg's running focus
+ * off the most recently focused view that shows the program, and a copy's view is never the source. Read off the
+ * view of that leg focused last, focusing a copy's view — which owns no construct of the program's — would take
+ * every focus mark off the program's own view, though the program had not moved.
  *
- * **THE STATUS LINE NAMES EVERY VIEW SHOWING A COPY.** It read one view per leg, the one focused last, so the asm copy
- * went unnamed while the program's asm view had been focused more recently, and "asm view" said nothing about which
- * of two. With two views on the leg, the copy's is named by its title, whichever was focused last.
+ * **THE STATUS LINE NAMES EVERY VIEW SHOWING A COPY.** Read off one view per leg, the one focused last, the asm copy
+ * would go unnamed while the program's asm view had been focused more recently, and "asm view" would say nothing
+ * about which of two. With two views on the leg, the copy's is named by its title, whichever was focused last.
  *
- * Every gesture is a `userEvent` one. ONE MOUNT FOR THE FILE, for the reason every sibling gives: `main()` runs once
+ * Every gesture is a `userEvent` one. ONE MOUNT FOR THE FILE, for the reason `app.test.ts` gives: `main()` runs once
  * per page.
  */
 
@@ -65,7 +64,7 @@ async function splitToProgram(pane: HTMLElement, leg: 'asm' | 'tm'): Promise<HTM
 
 /**
  * Click into a copy's view with the pointer, on a row of its grid, and assert the focus landed there. A row of a copy
- * links nothing (amendment 28), so the click moves the focus and changes nothing else.
+ * links nothing (Plan 7 part 5 spec amendment 28), so the click moves the focus and changes nothing else.
  */
 async function focusInto(pane: HTMLElement, row: string): Promise<void> {
   await userEvent.click(pane.querySelector<HTMLElement>(row) as HTMLElement)
@@ -140,7 +139,7 @@ describe('an asm view of the program beside an asm view of a copy', () => {
     expect(titleOf(asmHost)).toMatch(/^asm · copy \d+$/)
     // THE COPY'S VIEW WAS FOCUSED LAST: "asm view shows a copy" would not say which of the two.
     expect(linkStatus()).toBe(said)
-    // THE PROGRAM'S VIEW FOCUSED LAST: the line said nothing of the asm copy on screen.
+    // THE PROGRAM'S VIEW FOCUSED LAST: a line read off that view alone would say nothing of the asm copy on screen.
     await focusTitle(program)
     expect(linkStatus()).toBe(said)
   })
@@ -190,9 +189,9 @@ describe('a TM view of the program beside a TM view of a copy', () => {
 })
 
 /**
- * **EACH MACHINE COPY'S ROW IN THE COPIES MENU SAYS WHAT ITS READOUT SAYS OF ITS RUN** — the line under its name,
- * which read `no term yet` for every TM and asm copy, run or not. Read here against the strip, with each copy's view
- * focused in turn: the row is the strip's line for the copy, without the name.
+ * **EACH MACHINE COPY'S ROW IN THE COPIES MENU SAYS WHAT ITS READOUT SAYS OF ITS RUN** — the line under its name.
+ * Read here against the strip, with each copy's view focused in turn: the row is the strip's line for the copy,
+ * without the name.
  */
 describe('the copies menu, beside both copies', () => {
   const rowOf = (name: string) =>

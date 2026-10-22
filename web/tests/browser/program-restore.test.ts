@@ -9,7 +9,7 @@ import { stored } from './share-open-hashchange-fixture'
  * **A STORED PROGRAM COMES BACK UNDER ITS OWN ENCODING, AND EACH COMPILE STORES WHAT IT POSTS** — Plan 7 part 6a spec
  * §4.3 and §4.4. The program is stored at module scope, before `main()` runs, as a previous page load would have
  * stored it, over the one `setup.ts` stores for every file. It has a function so that the outline can say which text
- * the language server was given. ONE MOUNT FOR THE FILE, for the reason every sibling gives.
+ * the language server was given. ONE MOUNT FOR THE FILE, for the reason `app.test.ts` gives.
  *
  * **IT IS STORED UNDER `binary`, WHICH IS NOT THE PICKER'S FIRST OPTION, SO A START-UP THAT LEFT THE PICKER ON ITS FIRST
  * OPTION FAILS THE FIRST CASE.** That case cannot fail a start-up that took the default encoding in place of the stored

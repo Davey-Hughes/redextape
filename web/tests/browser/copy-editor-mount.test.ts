@@ -14,11 +14,11 @@ import { menuOf, moreOf, paneByLeaf, pick, SHELL, stateIdle, until, viewTitleOf 
  *
  * Every gesture is a real one: `userEvent` clicks on the title, the `⋯` menu, the `+ view` menu and `✕`.
  *
- * ONE MOUNT FOR THE FILE, for the reason every sibling gives: `main()` runs once per page. Each test makes the copies
+ * ONE MOUNT FOR THE FILE, for the reason `app.test.ts` gives: `main()` runs once per page. Each test makes the copies
  * it needs from the program, so none depends on what the one before it left beyond the four views.
  *
- * **AND EACH TEST'S COPIES ARE DELETED AFTER IT** (`afterEach` below): the file makes nine copies, and the ninth waited
- * on a fork the cap refuses once `MAX_WARM_BUFFERS` was 8 (2026-10-07).
+ * **AND EACH TEST'S COPIES ARE DELETED AFTER IT** (`afterEach` below): the file makes nine copies, and with
+ * `MAX_WARM_BUFFERS` at 8 the ninth would wait on a fork the cap refuses.
  */
 
 const SAMPLE = 'let x = 40; x + 2'
@@ -80,7 +80,7 @@ async function close(pane: HTMLElement): Promise<void> {
 
 /**
  * Make a copy on `leg` from `leaf`'s program and take `leaf` back to the program, so the copy is warm with its editor
- * mounted nowhere — asserted, since that is the state every test below starts from. Returns the copy's key.
+ * mounted nowhere — asserted, since that is the state each test that calls this starts from. Returns the copy's key.
  */
 async function orphanCopy(leaf: string, leg: 'asm' | 'tm'): Promise<string> {
   const pane = paneByLeaf(leaf)
@@ -199,7 +199,7 @@ describe('a TM or asm view that comes to show a copy whose editor is mounted now
 describe('a view an undone delete moves back onto its copy', () => {
   /**
    * **UNDO MOVES THE VIEWS BACK BEFORE THE COPY BUILDS, AND A COPY WHOSE TEXT DOES NOT BUILD NEVER DOES** — so an
-   * editor that waited for the build never came. A jump to a label that names nothing is refused whole (spec
+   * editor that waited for the build would never come. A jump to a label that names nothing is refused whole (spec
    * amendment 22), and the copy keeps its last run while its text of record is what was typed.
    */
   it('mounts the copy’s editor there, whether or not the copy builds', async () => {

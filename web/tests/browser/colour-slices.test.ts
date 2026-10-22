@@ -13,15 +13,14 @@ import { until } from './harness'
  * slice is timed by `performance.now`, its continuation waits on a browser timer, and the recompute the plugin asks
  * for when the tree lands goes through a mounted `EditorView` to the DOM a user reads.
  *
- * **ONE EDITOR AND NO APP, SO THAT NOTHING ELSE IS ON THE PAGE'S MAIN THREAD.** The copy of a machine that this was
- * found on mounts while two workers record, and their replies take turns with the slices: at `CPUQuota=25%` the tree
- * had not landed when both recordings ended, 13 s on. `colour-slices-fork.test.ts` is that page, and it waits for
- * nothing that comes after the mount. Here the parse is the only work there is.
+ * **ONE EDITOR AND NO APP, SO THAT NOTHING ELSE IS ON THE PAGE'S MAIN THREAD.** A copy of a machine mounts while two
+ * workers record, and their replies take turns with the slices: at `CPUQuota=25%` the tree had not landed when both
+ * recordings ended, 13 s on. `colour-slices-fork.test.ts` is that page, and it waits for nothing that comes after the
+ * mount. Here the parse is the only work there is.
  *
- * **566,779 UNITS, 57 TO 67 ms OF PARSING ON THIS MACHINE AGAINST A SLICE OF 8.** A parse of 1,518,470 units in one go
- * measured 154 to 179 ms in this tier's Chromium (2026-10-06), 8,500 to 9,900 units a millisecond. Each case asserts
- * that the parse was still pending when its first slice returned, and the rest of the case rests on that: a runner
- * that parsed this text inside one slice would fail there, by name.
+ * **566,779 UNITS, 57 TO 67 ms OF PARSING ON THIS MACHINE AGAINST A SLICE OF 8.** Each case asserts that the parse
+ * was still pending when its first slice returned, and the rest of the case rests on that: a runner that parsed this
+ * text inside one slice would fail there, by name.
  *
  * **EVERY `parse` THE PAGE MAKES IS RECORDED, BY WRAPPING `Parser.prototype.parse` BEFORE THE EDITOR EXISTS.** A call
  * with a progress callback is a slice, and one that returns `null` is a slice that did not finish the parse. What the
@@ -164,9 +163,9 @@ describe('a parse that outlasts one slice, in a mounted editor', () => {
     expect(getComputedStyle(token).color).not.toBe(getComputedStyle(view.contentDOM).color)
 
     // **AND ONCE COLOURED IT STAYS COLOURED THROUGH A TRANSACTION OF SEVERAL CHANGES**, which has no tree to edit and
-    // parses the whole text again. In slices, as this branch first had it, the tree was gone while they ran and this
-    // screen went plain; in one go the update returns with it coloured. Two comment lines, on either side of the
-    // screen's last lines, read back in the same task as the dispatch.
+    // parses the whole text again. In slices the tree would be gone while they ran and this screen would go plain; in
+    // one go the update returns with it coloured. Two comment lines, on either side of the screen's last lines, read
+    // back in the same task as the dispatch.
     const length = view.state.doc.length
     const above = view.state.doc.lineAt(length - 400).from
     view.dispatch({

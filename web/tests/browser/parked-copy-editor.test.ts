@@ -20,18 +20,19 @@ import {
 /**
  * A COPY DELETED, OR PAUSED, WHILE THE VIEW HOLDING ITS EDITOR IS OFF THE PAGE — the view layouts spec §5.5.
  *
- * A view that stopped showing a copy had the copy's editor taken down by the next `draw()`, and `draw()` passes over a
- * view that is not on the page. So a view off the page went on holding the editor of a copy it no longer showed. After
- * a delete and its *undo* the copy had a second editor on the first view moved back, and the next sweep handed that
- * view the stale one and threw `handed a second editor while still holding one`. After a pause nothing threw, and the
- * stale editor stayed where it was.
+ * A view that stops showing a copy has the copy's editor taken down by the next `draw()`, and `draw()` passes over a
+ * view that is not on the page. Left to that, a view off the page would go on holding the editor of a copy it no
+ * longer showed: after a delete and its *undo* the copy would have a second editor on the first view moved back,
+ * and the next sweep would hand that view the stale one and throw `handed a second editor while still holding one`;
+ * after a pause nothing would throw, and the stale editor would stay where it was.
  *
- * **TWO WAYS A VIEW IS OFF THE PAGE**: a view a switch parked, which the view layouts made and this file drives, and a
- * Stage tab that is not selected, which is older and is `stage-copy-editor.test.ts`'s. `pane-host.ts`'s
- * `reseedingSlots` takes the editor down as it moves a view off the page onto the program, for both.
+ * **TWO WAYS A VIEW IS OFF THE PAGE**: a view a switch parked, which this file drives, and a Stage tab that is not
+ * selected, which is `stage-copy-editor.test.ts`'s. `pane-host.ts`'s `reseedingSlots` takes the editor down as it
+ * moves a view off the page onto the program, for both.
  *
  * **THE STALE EDITOR IS LOOKED FOR WHERE IT WAS LEFT, AND EACH LEG HAS ITS OWN CASES** — `stage-copy-editor.test.ts`
- * has why: the throw alone passed a teardown that reached only a λ view, and a pause throws nothing.
+ * has why: the sweep takes the stale editor off the view before it throws, so the throw says less than it seems, and a
+ * λ view's teardown is `LambdaPane`'s where a TM or asm view's is `CopyEditor`'s.
  *
  * **A DELETE, ITS *UNDO*, A PAUSE, A RESUME AND EVERY TOGGLE ARE PRESSED WITH THE POINTER** (`press`), as a user
  * presses them: the copies button, then the row's control; the notice's *undo* where the pointer finds it. The copy,

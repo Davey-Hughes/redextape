@@ -11,7 +11,7 @@ describe('unsavedLine', () => {
     expect(unsavedLine(true, true, 'full')).toBe(`the program and copies are ${FULL}`)
   })
 
-  it('says what it always said while only the copies fail', () => {
+  it('names only the copies while only the copies fail', () => {
     expect(unsavedLine(false, true, 'full')).toBe(
       'copies are not being saved — this browser’s storage for this site is full',
     )

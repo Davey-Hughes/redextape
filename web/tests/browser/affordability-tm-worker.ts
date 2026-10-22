@@ -14,7 +14,7 @@ import type { TmState, ValueRun } from '../../src/types'
  * the value run in `VALUE_CHUNK` chunks. The text arrives from the page, which compiled the program: a copy's worker
  * never compiles, and wasm linear memory never shrinks, so compiling here would price a thread no copy has.
  *
- * **THE SCRATCH IS HELD, NOT FREED**, for `affordability-worker.ts`'s reason: a warm copy holds its machine.
+ * **THE SCRATCH IS HELD, NOT FREED**: a warm copy holds its machine.
  */
 type Scratch = {
   stepTm(): boolean

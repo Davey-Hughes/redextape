@@ -65,7 +65,7 @@ beforeAll(async () => {
   await until(stateIdle, 'the first compile')
   await until(() => tmViewHost()?.querySelector('.state-table .state-row') != null, 'the rule table to draw')
   // THE PAGE'S FONTS FIRST: a line's height is the font's, and a floor of five lines, a header and the view's own
-  // height each settle as the fonts arrive (`panel-sizes-restore-lambda.test.ts` has the figures).
+  // height each settle as the fonts arrive.
   await document.fonts.ready
 })
 
@@ -246,7 +246,7 @@ describe('a view’s shares, in the stored workspace', () => {
   /**
    * **A PANEL A MAXIMISE DRAWS CLOSED WITHDRAWS WHAT IT OFFERED FOR A BODY NOBODY CAN SEE** (`panel.ts`'s `onDrawn`).
    * The state diagram's *follow current state* is offered while its rows do not follow, and only the TM view writes
-   * its `hidden`; a grid draws itself again when its box changes size, which is why the rule table needs no telling.
+   * its `hidden`.
    */
   it('withdraw a hidden panel’s offer to follow again under a maximise, and bring it back with the panel', async () => {
     const again = (): HTMLElement => tmViewHost().querySelector('.diagram-reattach') as HTMLElement
@@ -393,8 +393,9 @@ describe('the source view’s two regions', () => {
 
   /**
    * **AN OUTLINE DRAWN OPEN BY A MAXIMISE LISTS ITS DOCUMENT.** An outline asks for its symbols when it is opened by
-   * its disclosure and at each edit while it is open, and a maximise opens it by neither: the outline, closed since
-   * the program before this one, filled the view with that program's list, or with nothing.
+   * its disclosure and at each edit while it is open, and a maximise opens it by neither, so `outline.ts`'s `onDrawn`
+   * asks then: without it the outline, closed since the program before this one, would fill the view with that
+   * program's list, or with nothing.
    */
   it('lists the program in an outline that is maximised while it is closed', async () => {
     await program(LONG)
@@ -416,9 +417,9 @@ describe('the source view’s two regions', () => {
   })
 
   /**
-   * **A BOUNDARY SAYS THE UPPER REGION'S PART OF THE TWO AS THEY ARE DRAWN.** It said the regions' shares, and 50 for
-   * a region with none of its own: an outline of two rows over an editor of forty read as half the view until an
-   * arrow moved it, and as half again once `Enter` put it back.
+   * **A BOUNDARY SAYS THE UPPER REGION'S PART OF THE TWO AS THEY ARE DRAWN**, not the regions' shares: with the
+   * shares, and 50 for a region with none of its own, an outline of two rows over an editor of forty would read as
+   * half the view until an arrow moved it, and as half again once `Enter` put it back.
    */
   it('says how much of the two its upper region is drawn at, at rest, as it moves and once it is put back', async () => {
     await program(LONG)
@@ -440,9 +441,9 @@ describe('the source view’s two regions', () => {
 
   /**
    * **THE SOURCE VIEW CLOSED AND SHOWN AGAIN IS AS THE WORKSPACE HAS IT.** Its `✕` drops what the workspace stores for
-   * it, as any view's does, and the page keeps the view's elements for the view its toggle shows next: they kept the
-   * outline open and the boundary where it was dragged, for a workspace that stored neither, and the next drag wrote
-   * the dropped shares back.
+   * it, as any view's does, and the page keeps the view's elements for the view its toggle shows next: left as they
+   * were, they would keep the outline open and the boundary where it was dragged, for a workspace that stored neither,
+   * and the next drag would write the dropped shares back.
    */
   it('comes back from its ✕ with its outline closed and its regions as they are built, as stored', async () => {
     await program(LONG)

@@ -22,16 +22,16 @@ import {
 } from './harness'
 
 /**
- * **A FOLLOWING TABLE THAT GROWS STAYS FOLLOWING** (Plan 7 part 4, spec §9.1). Its height is the view's now, so a
+ * **A FOLLOWING TABLE THAT GROWS STAYS FOLLOWING** (Plan 7 part 4, spec §9.1). Its height is the view's, so a
  * panel closing beside it grows it; a table following a row near its end then has its scroll clamped, and the
  * browser reports the clamp as a `scroll`. Here the resize observer's callback comes first, so it is
- * `Follow.onResize` there that holds following. The other order — the `scroll` first, which `TmPane`'s scroll
- * handler answers by comparing heights — was seen in the state diagram (`state-diagram.test.ts`) and could not be
+ * `Follow.onResize` there that holds following. The other order — the `scroll` first, which `VirtualGrid`'s scroll
+ * handler answers by comparing heights (that handler's comment says when the scroll comes first) — could not be
  * produced for the table.
  */
 
 const STATES = 200
-/** A chain of states, each with one rule to the next — a table of 400 rows. */
+/** A chain of states, each with one rule to the next — a table of 399 rows. */
 const PROGRAM: TmProgram = {
   states: Array.from({ length: STATES }, (_, i) => ({
     name: `q${i}`,
@@ -88,19 +88,17 @@ describe('a following rule table that grows', () => {
 })
 
 /**
- * **A FOLLOWING DIAGRAM DETACHES ITSELF, IN *ARCS*, WITH NO PANEL EVER CLOSING.** On `fact(3)`, one step at a
- * time, the diagram detaches exactly once: the machine's `pc20` row carries the current group's sub-steps
- * row, and stepping into `halt` — a runtime routine, with no row of its own in *arcs* — drops that row and
- * shrinks the listing (626 → 600 px measured). The current group becomes `halt`, for which `#rowOf` has no
- * row (its entry is `-1`), so the follow write that would otherwise record the new position never runs; the
- * browser clamps `scrollTop` regardless, and that clamp's own `scroll` event lands far enough from `Follow`'s
- * last recorded position (24 px, past `ECHO_TOLERANCE`'s 12) to read as the user scrolling away. *Chips*
- * never drops a runtime row, so it never shrinks this way and never detaches here.
+ * **A FOLLOWING DIAGRAM, IN *ARCS*, MUST NOT DETACH ITSELF WITH NO PANEL EVER CLOSING.** On `fact(3)` the
+ * machine's `pc20` row carries the current group's sub-steps row, and stepping into `halt` — a runtime routine,
+ * with no row of its own in *arcs* — drops that row and shrinks the listing. The current group becomes `halt`,
+ * for which `#rowOf` has no row (its entry is `-1`), so the follow write that would otherwise record the new
+ * position never runs; the browser clamps `scrollTop` regardless, and that clamp's own `scroll` event lands far
+ * enough from `Follow`'s last recorded position (24 px, past `ECHO_TOLERANCE`'s 12) that it would read as the user
+ * scrolling away. *Chips* never drops a runtime row, so it never shrinks this way.
  *
  * DRIVEN THROUGH THE WHOLE APP, RULES LEFT OPEN — the default layout, not `state-diagram.test.ts`'s
- * `wholeListing()`, which closes the rules panel to draw everything at once. At either viewport measured
- * (1280×900, used here, and 1280×2400) the diagram's listing already outgrows its own share of the view
- * without that shortcut.
+ * `wholeListing()`, which closes the rules panel to draw everything at once. At 1280×900, the viewport used
+ * here, the diagram's listing outgrows its own share of the view without that shortcut.
  */
 describe('a following state diagram, in arcs, under the whole app', () => {
   let view: EditorView

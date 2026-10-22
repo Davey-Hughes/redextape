@@ -102,10 +102,10 @@ describe('createPlayer', () => {
   })
 
   /**
-   * **ONE DRAW PER FRAME, AND NONE WHEN NOTHING MOVED** — the whole point of the rewrite. A `setInterval`
-   * could not step faster than the display paints; this loop takes as many steps as the speed asks for
-   * and repaints once. Asserted as an exact count, because `toBeGreaterThanOrEqual(1)` is satisfied by a
-   * draw per STEP (500 repaints in one frame at 5,000/s) and by a draw on a frame where nothing happened.
+   * **ONE DRAW PER FRAME, AND NONE WHEN NOTHING MOVED.** A `setInterval` could not step faster than the
+   * display paints; this loop takes as many steps as the speed asks for and repaints once. Asserted as an
+   * exact count, because `toBeGreaterThanOrEqual(1)` is satisfied by a draw per STEP (500 repaints in one
+   * frame at 5,000/s) and by a draw on a frame where nothing happened.
    */
   it('stops a leg at its recorded frontier, drawing once for the frame and not again', () => {
     const c = clock()
@@ -135,9 +135,9 @@ describe('createPlayer', () => {
   })
 
   /**
-   * **ONE LOOP OVER EVERY PLAYING LEG, WHICH IS THE MODULE'S HEADLINE SENTENCE AND WAS UNMEASURED.**
-   * `schedule`'s `scheduled` guard is what makes it one: without it, two legs started in the same frame
-   * queue two callbacks, each advances both legs, and each draws.
+   * **ONE LOOP OVER EVERY PLAYING LEG, WHICH IS THE MODULE'S HEADLINE SENTENCE.** `schedule`'s
+   * `scheduled` guard is what makes it one: without it, two legs started in the same frame queue two
+   * callbacks, each advances both legs, and each draws.
    */
   it('runs one loop for two playing legs, and draws once for both', () => {
     const c = clock()

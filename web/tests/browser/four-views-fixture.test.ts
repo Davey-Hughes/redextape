@@ -16,10 +16,10 @@ import {
 
 /**
  * THE FOUR-VIEW FIXTURES — `harness.ts`'s `showFourViews` and `resetToFourViews`, which the files written against a
- * four-view page call where they used to press *reset preset* alone. What each leaves on the page, and in storage, is
- * what those files start from, so it is held here: the tree, what is remembered, what the live region says, which
- * views are new, where the focus is, and the window. And `showFourViews` is held to its refusal: it throws, with the
- * arrangement it found, where the toggles end on any tree but `fourViews()`.
+ * four-view page call. What each leaves on the page, and in storage, is what those files start from, so it is held
+ * here: the tree, what is remembered, what the live region says, which views are new, where the focus is, and the
+ * window. And `showFourViews` is held to its refusal: it throws, with the arrangement it found, where the toggles end
+ * on any tree but `fourViews()`.
  *
  * The page opens as a first visit's does, on the source beside the TM view, so the fixture's first call has the λ and
  * the asm view to bring. **THE CASES RUN IN ORDER ON ONE PAGE**, each from the state the one before left, and each
@@ -90,8 +90,7 @@ describe('the four-view fixtures', () => {
 
   /**
    * **WHERE THE TOGGLES END ON ANOTHER TREE**: all four views were shown once in this wide window, so that
-   * combination remembers two columns of two, and the toggles show what is remembered. The fixture said nothing of it
-   * while it checked the window alone.
+   * combination remembers two columns of two, and the toggles show what is remembered.
    */
   it('showFourViews throws, naming what it found, where all four are remembered in another arrangement', async () => {
     document.querySelector<HTMLButtonElement>('#reset-preset')?.click()

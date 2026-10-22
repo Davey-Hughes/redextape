@@ -11,10 +11,10 @@ import { describe, expect, it } from 'vitest'
  * test reads them — reaching the first through the browser needs a term past the byte budget, and each
  * ceiling a file of megabytes. So the gap is not the rename, it is the ARTEFACT: `pkg/` is gitignored and
  * rebuilt by hand, and a checkout whose `pkg/` predates the rename runs the whole browser tier against the
- * old words with every gate green. That is exactly what this branch found in its own working tree.
+ * old words with every gate green.
  *
- * This reads the built module rather than the crate, so it fails when the build is stale — which is the
- * one thing the Rust tests cannot say.
+ * This reads the built module rather than the crate, so it fails when the build is stale, which the Rust
+ * tests cannot say.
  */
 
 const WASM = fileURLToPath(new URL('../../../pkg/redextape_wasm_bg.wasm', import.meta.url))

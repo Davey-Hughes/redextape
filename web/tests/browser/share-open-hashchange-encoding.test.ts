@@ -26,7 +26,7 @@ import {
  * that follows posts under the page's encoding. The notice names what was left out, its `undo` puts back the program
  * and the encoding, and the fragment is cleared. Later the picker is set to the other encoding and the link pasted
  * again, and then set back while storage refuses the program's write and a link pasted once more: each opens under the
- * encoding the picker holds. ONE MOUNT FOR THE FILE, for the reason every sibling gives.
+ * encoding the picker holds. ONE MOUNT FOR THE FILE, for the reason `app.test.ts` gives.
  *
  * **EACH PASTE OF A `ternary` LINK FAILS A FALLBACK TO A DIFFERENT WRONG ENCODING**, since with two encodings the page's
  * encoding differs from one wrong value and equals the other. The first, onto the page as it started on `unary`, fails

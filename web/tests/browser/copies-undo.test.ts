@@ -78,13 +78,13 @@ describe('deleting a copy', () => {
 })
 
 /**
- * **THE FLOW THE SPEC NAMES, WITH THE EDIT IN IT — whole-branch review, I5.** Spec §14's end-to-end list
- * has "make a copy, edit it, delete it, undo"; the tests above cover every step of that but the EDIT, so
- * "undo restores what I had typed" was a claim about a real window that nothing exercised.
+ * **DELETE AND UNDO, WITH AN EDIT BEFORE THE DELETE.** Spec §14 has a deleted copy come back through
+ * *undo*; the tests above do that with no EDIT, and without this one "undo restores what I had typed"
+ * would be a claim about a real window that nothing exercises.
  *
  * **THE TEXT IS NOT RECORDED ON EVERY KEYSTROKE.** `ScratchBuffers`'s `text` advances on `ScratchEditor`'s
- * 300 ms debounce and on the `scratch-compiled` reply. A delete between the keystroke and the record once
- * took the typing with it; the delete sends a pending edit first now, and `copy-edit-leaving.test.ts` drives
+ * 300 ms debounce and on the `scratch-compiled` reply. A delete between the keystroke and the record would
+ * take the typing with it, so the delete sends a pending edit first, and `copy-edit-leaving.test.ts` drives
  * that window. This test is the ordinary case, an edit recorded before the delete: waiting for the PERSISTED
  * text rather than for a timer is what makes it wait for the thing it is about.
  */

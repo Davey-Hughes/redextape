@@ -4,7 +4,8 @@ import { parseWorkspace, serializeWorkspace, type Workspace } from './workspace'
 
 /**
  * SHARE LINKS — Plan 7 part 6a spec §5.1 and §5.3: the program, its encoding, the workspace and where each leg stands,
- * carried in the page's fragment, so a link is never sent to a server.
+ * carried in the page's fragment, so a link is never sent to a server. Section citations here are the Plan 7 part 6a
+ * spec's unless they name another.
  *
  *     #s= base64url, unpadded ( deflate-raw ( UTF-8 ( JSON { version: 1, program, encoding, workspace, positions } ) ) )
  *
@@ -42,7 +43,7 @@ export const MAX_LINK_BYTES = 8 * 1024 * 1024
  */
 const INFLATE_PIECE = 1024
 
-/** A leg's step, per leg, as a link carries it: only the legs that had frames (spec §5.1). */
+/** A leg's step, per leg, as a link carries it; a leg with no step to share is left out (spec §5.1). */
 export type Positions = { readonly [L in Leg]?: number }
 
 /** What `encodeLink` writes: the program, its encoding, the workspace as `serializeWorkspace` wrote it, and positions. */
@@ -174,9 +175,9 @@ function parsePositions(v: unknown): Positions | null {
  * **IT CANNOT THROW, AND WHAT IT RETURNS CANNOT REJECT** (spec §5.3, amended 2026-10-01): a throw while the workspace is
  * read refuses the workspace, so the program opens alone, and any other throw makes the link unreadable. So `main.ts`
  * always clears the fragment and says what became of the link, and its two calls carry no `.catch`, which nothing
- * could reach. Before, a tree 6,000 splits deep threw out of `parseWorkspace` here, and at start-up `main()` rejected
- * with the fragment still on the page. The bound on a tree in `layout.ts`'s `parseTree` stopped the throw that was
- * measured; the two `try`s hold for any other, such as a decompressor without `deflate-raw`.
+ * could reach. Uncaught, a throw out of `parseWorkspace` would make `main()` reject at start-up with the fragment
+ * still on the page. The bound on a tree in `layout.ts`'s `parseTree` stops a deep tree's throw; the two `try`s hold
+ * for any other, such as a decompressor without `deflate-raw`.
  */
 export async function decodeLink(fragment: string, encodings: readonly string[]): Promise<OpenedLink> {
   try {
@@ -191,9 +192,9 @@ export async function decodeLink(fragment: string, encodings: readonly string[])
  *
  * **A LINK CARRIES THE ARRANGEMENT ON SCREEN AND NO OTHER** (the view layouts spec §4.7), and that is held where one is
  * read as well as where one is made. `parseWorkspace` takes a workspace's `arrangements`, so a link written by hand,
- * or by a build that sent them, opened with them: they went into force and into the reader's storage, with what the
- * link stored for the views only they held. So what is read is written again without them, as `main.ts` writes a
- * link's workspace, and read back: `serializeWorkspace` drops what is stored for a view no tree holds.
+ * or by a build that sent them, would open with them: they would go into force and into the reader's storage, with
+ * what the link stored for the views only they held. So what is read is written again without them, as `main.ts`
+ * writes a link's workspace, and read back: `serializeWorkspace` drops what is stored for a view no tree holds.
  */
 function readWorkspace(raw: string): Workspace | null {
   try {

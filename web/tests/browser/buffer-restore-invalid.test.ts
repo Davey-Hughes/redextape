@@ -13,18 +13,17 @@ import { fourViews, SHELL } from './harness'
  * one mount, and there is no way to ask for a second one.
  *
  * **THE FIXTURE IS A PAYLOAD THAT PARSES AS JSON AND THEN VIOLATES THE TYPE**, not a string of noise.
- * `parseBuffers`'s own doc names the hazard it is written for — a hand-edited `localStorage` entry — and
- * a value that fails `JSON.parse` is caught by a `try` that would be there anyway. `minted: "lots"` gets
- * past the envelope and the version check and is refused on a field, which is the class of failure the
- * validation exists for and the only one that could otherwise reach the app.
+ * `validBuffer`'s doc in `buffers-store.ts` names the hazard the validation is written for — a hand-edited
+ * `localStorage` entry — and a value that fails `JSON.parse` is caught by a `try` that would be there anyway.
+ * `minted: "lots"` gets past the envelope and the version check and is refused on a field, which is the class
+ * of failure the validation exists for and the only one that could otherwise reach the app.
  *
- * IT NO LONGER SUBSTITUTES ITS OWN `Storage` — every browser test file gets one automatically now,
- * installed in `tests/browser/setup.ts` before this file's own module body runs, for
- * `buffer-restore.test.ts`'s reason verbatim: `localStorage` is scoped to an ORIGIN and Vitest runs
- * browser files concurrently in one, so a CORRUPT value written to the shared store would be read by
- * whichever sibling mounts `main()` next — this file's fixture is exactly the thing no other file should
- * ever see. What is left here is just the seeding, straight through `localStorage`, which is that
- * per-file shim by the time this line runs.
+ * IT SUBSTITUTES NO `Storage` OF ITS OWN — every browser test file gets one, installed in
+ * `tests/browser/setup.ts` before this file's own module body runs, for `buffer-restore.test.ts`'s reason:
+ * `localStorage` is scoped to an ORIGIN and Vitest runs browser files concurrently in one, so a CORRUPT value
+ * written to the shared store would be read by whichever sibling mounts `main()` next — this file's fixture
+ * is exactly the thing no other file should ever see. The seeding goes straight through `localStorage`,
+ * which is that per-file shim by the time this line runs.
  */
 
 beforeAll(async () => {
@@ -54,12 +53,11 @@ beforeAll(async () => {
  */
 describe('a corrupt buffers payload', () => {
   it('a corrupt buffers key leaves the page with no buffers and every pane on source', () => {
-    // **THE BUTTON READS THE ZERO-BUFFER LABEL — 5d-iv T10.** This used to assert `#buffers`'s own
-    // `hidden` was `true`, which `main.ts`'s `refreshBuffers` no longer sets at any count: the menu now
-    // offers "new TM copy" and so is never empty, which is exactly why the control is reachable at
-    // zero rather than withheld. `textContent` is what still answers "did nothing restore" — the label
-    // is `copies ▾` (`buffer-list.ts`'s `update`, the zero case this task added) only when the count is
-    // genuinely zero, which a restored buffer would move off of.
+    // **THE BUTTON READS THE ZERO-BUFFER LABEL.** `main.ts`'s `refreshBuffers` sets no `hidden` on
+    // `#buffers` at any count: the menu offers "new TM copy" and so is never empty, which is exactly why
+    // the control is reachable at zero rather than withheld. `textContent` is what answers "did nothing
+    // restore" — the label is `copies ▾` (`buffer-list.ts`'s `update`) only when the count is genuinely
+    // zero, which a restored buffer would move off of.
     expect(document.querySelector<HTMLButtonElement>('#buffers')?.textContent).toBe('copies ▾')
     // AND NO PANE IS DETACHED. `.view-status` is `view-header.ts`'s own class for the `copy · not linked`
     // marker, mounted and unmounted rather than hidden, and a buffer is the only session in this app
@@ -69,21 +67,15 @@ describe('a corrupt buffers payload', () => {
   })
 
   /**
-   * **THE PAGE DOES NOT LEAVE THE BAD BYTES BEHIND.** An earlier version of this comment claimed:
-   * "`main()`'s write-back after the first `applyLayout()` persists the payload... Without it the corrupt
-   * value would sit in storage being re-refused on every load." That statement is false — the corrupt
-   * bytes are already cleared before `applyLayout()` runs. `refreshBuffers()`'s unconditional start-up
-   * call fires during initialization and includes `persistBuffers()`, which
-   * unconditionally writes `{minted:0,buffers:[],bindings:{}}` regardless of whether anything upstream
-   * ever read or refused the corrupt payload. The write the first `applyLayout()` makes — `main()`'s own
-   * last `persistBuffers()` when this was written, `pane-host.ts`'s now — corrects the bindings map (which
-   * start-up's write left empty by necessity), not the failed restore itself.
+   * **THE PAGE DOES NOT LEAVE THE BAD BYTES BEHIND.** The corrupt bytes are cleared before `applyLayout()`
+   * runs: `refreshBuffers()`'s unconditional start-up call fires during initialization and includes
+   * `persistBuffers()`, which unconditionally writes `{minted:0,buffers:[],bindings:{}}` regardless of
+   * whether anything upstream ever read or refused the corrupt payload. The write the first
+   * `applyLayout()` makes, in `pane-host.ts`, corrects the bindings map (which start-up's write left empty
+   * by necessity), not the failed restore itself.
    *
-   * BOTH CITED BY SYMBOL RATHER THAN BY LINE. This file used to name the same two call sites by number,
-   * as lines 947 and 1249 of `main.ts`, while its sibling `buffer-restore.test.ts` named the same two
-   * as lines 936 and 1240 — two files disagreeing about one pair of lines, and both wrong
-   * (whole-branch review before merge). A number that has to be maintained in two files is a number that
-   * will not be.
+   * BOTH CITED BY SYMBOL RATHER THAN BY LINE, as `buffer-restore.test.ts` cites the same two: a number
+   * that has to be maintained in two files is a number that will not be.
    *
    * ASSERTED THROUGH `parseBuffers` RATHER THAN ON THE RAW STRING, because what matters is that what is
    * there now is a value this app would ACCEPT — the bad payload was a string too.

@@ -303,13 +303,13 @@ describe('shortNotice', () => {
     why: 'continues',
   })
 
-  it('says one leg past the end of its run as it always has', () => {
+  it('says one leg past the end of its run, and the step it shows', () => {
     expect(shortNotice([ended('lambda', 5000, 951)])).toBe(
       "the link's λ step 5,000 is past the end of this run — showing step 951",
     )
   })
 
-  it(`says one leg ${MAX_LINK_CONTINUES} continues did not reach as it always has`, () => {
+  it(`says one leg ${MAX_LINK_CONTINUES} continues did not reach, and the step it shows`, () => {
     expect(shortNotice([continues('lambda', 17000, 15695)])).toBe(
       "the link's λ step 17,000 is further on than 10 continues went — showing step 15,695",
     )

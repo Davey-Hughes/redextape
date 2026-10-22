@@ -1,30 +1,28 @@
-// The wasm boundary's wire shapes, as TypeScript — a barrel now, not a file of declarations.
+// The wasm boundary's wire shapes, as TypeScript — a barrel, not a file of declarations.
 //
-// MOST OF WHAT THIS FILE ONCE DECLARED IS GENERATED AND RE-EXPORTED INSTEAD, from `../bindings/`,
-// which `pnpm run build:bindings` writes from each type's Rust declaration; the directory is
-// gitignored, so there is no committed copy to go stale. `crates/redextape-wasm/tests/browser.rs` is
-// what measures each generated shape against a real browser and pins it — not this file, which
-// declares none of them any more.
+// THE GENERATED SHAPES ARE RE-EXPORTED, from `../bindings/`, which `pnpm run build:bindings` writes
+// from each type's Rust declaration; the directory is gitignored, so there is no committed copy to go
+// stale. `crates/redextape-wasm/tests/browser.rs` is what measures each generated shape against a real
+// browser and pins it — not this file, which declares none of them.
 //
-// TWO FACTS ABOUT HOW THE BOUNDARY ENCODES THINGS STILL LIVE HERE, because they are facts about the
+// TWO FACTS ABOUT HOW THE BOUNDARY ENCODES THINGS LIVE HERE, because they are facts about the
 // boundary as a whole rather than about any one type, and moving them into one generated type's Rust
 // doc would strand them there. Both look like bugs and are not. `total_steps` is snake_case because
 // serde does not rename. A fieldless enum variant crosses as the bare variant NAME, and a struct
 // variant as a one-key object — so `Decoded` is a union of three strings and two objects rather than
 // a discriminated union with a `kind` field.
 //
-// WHAT IS STILL DECLARED BELOW IS EVERYTHING THAT HAS NO RUST DECLARATION TO GENERATE FROM, and that
-// is now the whole of it — there is no remaining migration and no later PR to wait for. `Classified`
+// WHAT IS DECLARED BELOW IS WHAT HAS NO RUST DECLARATION TO GENERATE FROM. `Classified`
 // is a structural alias over two generated types, with no derive site to attach a `#[derive(TS)]` to; since
 // a λ frame's spans cross as bytes, only the tests that build a frame use it, to write them (`span-bytes.ts`).
 // `TOKEN_CLASSES` is a runtime array, which a generated *type* cannot supply; the pin below it is what
 // holds the two together. `ownerNode`, `decodedText` and `assertTokenClasses` are consumers, not
 // shapes.
 //
-// `LinkIndexWire` IS THE ONE WIRE TYPE THIS FILE NEVER COVERED, and it is still hand-written and
-// still unwatched — see `link.ts`, where `Session::link_index` assembles a columnar value by hand at
-// the boundary rather than serializing a struct. Generation cannot reach it. It is named here so this
-// header is not read as claiming the whole boundary is generated.
+// `LinkIndexWire` IS A WIRE TYPE THIS FILE DOES NOT COVER, and it is hand-written and unwatched — it is
+// declared in `link.ts`, and `lib.rs`'s `Session::link_index` assembles that columnar value by hand at the
+// boundary rather than serializing a struct. Generation cannot reach it. It is named here so this header
+// is not read as claiming the whole boundary is generated.
 
 import type { Decoded } from '../bindings/Decoded'
 import type { Owner } from '../bindings/Owner'
@@ -61,14 +59,12 @@ export type { Decoded, Owner, Span, TokenClass, ValueRun }
 /**
  * Every `TokenClass` variant, in the Rust enum's declaration order.
  *
- * THE UNION NO LONGER DERIVES FROM THIS ARRAY. Before generation, `TokenClass` was `(typeof TOKEN_CLASSES)[number]`, so
- * a name missing from the array could not be used anywhere in the app — the array was the source. `TokenClass` is now
- * generated from the Rust enum (`../bindings/TokenClass`), and this array is an independent runtime value: a generated
- * *type* cannot supply an array. Until Plan 7 part 4a this one turned the step-0 link window's `Uint8Array`
- * discriminants into class names, and since a λ frame's spans cross as bytes (2026-10-07) it turns theirs: `spans.ts`'s
- * `decorationRanges` reads a span's class as an index into it. Written as a standalone array with a separately-sourced
- * union beside it, the two drift the moment a variant is added on the Rust side and not here — which is exactly the
- * shape the pin below exists to close, now that neither derives from the other.
+ * THE UNION DOES NOT DERIVE FROM THIS ARRAY. `TokenClass` is generated from the Rust enum (`../bindings/TokenClass`),
+ * and this array is an independent runtime value: a generated *type* cannot supply an array. A λ frame's spans
+ * cross as bytes, and `spans.ts`'s `decorationRanges` reads a span's class as an index into it. Written as a
+ * standalone array with a separately-sourced union beside it, the two drift the moment a variant is added on the
+ * Rust side and not here — which is exactly the shape the pin below exists to close, since neither derives from
+ * the other.
  *
  * THE PIN BELOW FIRES AT `pnpm typecheck` AND AT CI'S `web` JOB, in both directions: a name this array
  * is missing, and a name this array has that the union does not. See the pin's own comment for the
@@ -84,8 +80,8 @@ export type { Decoded, Owner, Span, TokenClass, ValueRun }
  * `tokenClasses()`, and is the only one of the two that can see that class of staleness. THE PIN IS
  * ALSO SET-BASED AND BLIND TO ORDER: `Missing`/`Extra` below are `Exclude<...>` over the two SETS of
  * names, so swapping two entries in this array still typechecks — see `assertTokenClasses`'s own
- * comment for the check that does see a reorder, and why that matters more from Plan 5b on. Keep both;
- * each catches a disagreement the other cannot.
+ * comment for the check that does see a reorder, and why that matters. Keep both; each catches a
+ * disagreement the other cannot.
  */
 export const TOKEN_CLASSES = [
   'Ident',
@@ -143,9 +139,7 @@ export function ownerNode(o: Owner): number | null {
  *
  * **THE ORDER OF THE STRING CHECKS IS LOAD-BEARING.** Every bare-string variant must be tested before
  * the `'Value' in d` line: `in` throws a `TypeError` on a string primitive, so an unhandled string
- * variant crashes this function rather than falling through to the `Fault` arm. That is not
- * hypothetical — `TooLargeToPrint` was added on the Rust side first, and until this union learned
- * about it, reaching that state would have thrown here.
+ * variant crashes this function rather than falling through to the `Fault` arm.
  */
 export function decodedText(d: Decoded): string {
   if (d === 'Unfinished') return 'not finished'
@@ -164,10 +158,8 @@ export function decodedText(d: Decoded): string {
  * THIS IS THE CHECK THAT CATCHES A REORDER, NOT THE PIN ABOVE. It joins both arrays into strings and
  * compares them (`ours !== theirs`, below), so it is sensitive to ORDER — unlike the compile-time pin
  * above `TOKEN_CLASSES`, which is set-based (`Exclude<...>`) and typechecks clean if two names swap
- * places. It mattered from Plan 5b until Plan 7 part 4a, while the step-0 link window read `LinkIndex`'s
- * span classes — a `Uint8Array` of DISCRIMINANTS — through this array, where a reordering mis-coloured
- * silently. **IT MATTERS AGAIN SINCE 2026-10-07**: a λ frame's spans carry their classes as indices into
- * this array (`spans.ts`'s `decorationRanges`), so a reorder this check missed would mis-colour λ text.
+ * places. **A REORDER WOULD MIS-COLOUR λ TEXT SILENTLY**: a λ frame's spans carry their classes as
+ * indices into this array (`spans.ts`'s `decorationRanges`).
  */
 export function assertTokenClasses(fromWasm: string[]): void {
   const ours = TOKEN_CLASSES.join(',')

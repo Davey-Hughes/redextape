@@ -12,16 +12,12 @@ const N = 2_000
  * as a tree, with no fallback note and the redex's row on screen.
  *
  * **WHY 2,000, AND NOT NEARER THE REDUCER'S `MAX_TERM_DEPTH` (3,000): THE WORKER'S OWN V8 STACK GIVES OUT
- * FIRST.** This file compiled `2990 + 0` until the full suite failed with "redextape hit a problem and
- * recovered: Maximum call stack size exceeded", before the view drew anything, in 1 of 3 runs; alone it passed.
- * With the browser forced to optimised wasm (`--js-flags=--no-liftoff`) that failure comes every time, and
- * `N + 0` held at 2,520 and overflowed from 2,540 up, the same in two runs. 2,000 leaves about a fifth of that
- * depth spare. The margin itself is a product leftover, not this test's to fix.
+ * FIRST.** With the browser forced to optimised wasm (`--js-flags=--no-liftoff`), `N + 0` overflowed it from
+ * 2,540 up; 2,000 leaves about a fifth of that depth spare. The margin itself is a product leftover, not this
+ * test's to fix.
  *
- * THE LAYOUTS' OWN RECURSION IS CHECKED ELSEWHERE. The code layout, when it recursed once per open level, threw
- * on ◀ at `2990 + 0` and wedged the view; the recursive outline held there in the app and threw at `2900 + 0`
- * only when called directly. Neither depth is safe to run in the app now, so `tests/node/lambda-layout.test.ts`'s
- * cases at 9,997 levels are the check on the recursion, for both layouts.
+ * THE LAYOUTS' OWN RECURSION IS CHECKED ELSEWHERE. A depth that could test it is not safe to run in the app, so
+ * `tests/node/lambda-layout.test.ts`'s cases at 9,997 levels are the check on the recursion, for both layouts.
  *
  * ONE LAYOUT PER FILE, SO EACH RUNS ON A COLD PAGE — a fresh app, following, no fold touched.
  */
@@ -58,11 +54,9 @@ export function deepTermSteppedBack(layout: 'code' | 'outline'): void {
       }
       view.dispatch({ changes: { from: 0, to: view.state.doc.length, insert: `${N} + 0` } })
       await until(stateIdle, 'the compile')
-      // **A TIMEOUT HERE SAYS WHAT THE PAGE READ.** The wait is for a run that ended, `step N of M` and nothing after:
-      // a run still recording ends in `…`, one that stopped short names why, and one that never started reads `not
-      // run`. It timed out once, in the outline file, on CI's slower runner (run 563, 2026-10-12), where the whole
-      // case had taken 0.8 s a run before and nothing else was running; 27 runs here, 26 of them under a CPU quota,
-      // alone, in pairs and in the whole suite, did not time out. Which of those the page read was not recorded, so it is now.
+      // **A TIMEOUT HERE SAYS WHAT THE PAGE READ.** The wait is for a run that ended, `step N of M` and nothing
+      // after: a run still recording ends in `…`, one that stopped short names why, and one that never started
+      // reads `not run`.
       await until(() => /^step [\d,]+ of [\d,]+$/.test(stepText()), 'the λ leg to record its last step').catch(
         (e: unknown) => {
           throw new Error(`${e instanceof Error ? e.message : String(e)}; the page read: ${page()}`)

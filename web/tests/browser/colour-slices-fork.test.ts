@@ -5,16 +5,15 @@ import { FIRST_SCREEN_UNITS } from '../../src/colour'
 import { SHELL, until } from './harness'
 
 /**
- * **THE COPY OF A 7,353-STATE MACHINE, WHOSE EDITOR HELD THE PAGE WHILE ITS TEXT WAS PARSED.**
+ * **THE COPY OF A 7,353-STATE MACHINE, WHOSE EDITOR WOULD HOLD THE PAGE IF ITS TEXT WERE PARSED IN ONE GO.**
  *
  * *Edit a copy* on the TM view of `BIG` mounts an editor on the machine's text, 1,518,470 units under the `unary`
- * encoding this tier's setup stores, and the colourer parsed all of it inside the update that first needed a tree:
- * 194 to 208 ms in this tier's Chromium with the program and then the copy recording, and from the mount the page
- * ran no timer for 232 to 249 ms and drew no frame for 216 to 232 ms, in five runs (2026-10-06). `colour.ts`'s
- * `PARSE_SLICE_MS` has what replaced that, and `tests/node/colour.test.ts` holds it.
+ * encoding this tier's setup stores; parsed in one go, all of it would be parsed inside the update that first needed
+ * a tree. `colour.ts`'s `PARSE_SLICE_MS` has why it is parsed in slices instead, and `tests/node/colour.test.ts`
+ * holds it.
  *
- * **THIS FILE IS THE GESTURE: THE SAME PROGRAM, COPIED AS SOON AS ITS FORK CONTROL IS OFFERED**, which today is while
- * its own run is still recording. It asserts what is true at the moment the copy's text first reaches the parser, and
+ * **THIS FILE IS THE GESTURE: THE SAME PROGRAM, COPIED AS SOON AS ITS FORK CONTROL IS OFFERED**, which is while its
+ * own run is still recording. It asserts what is true at the moment the copy's text first reaches the parser, and
  * waits for nothing after it.
  *
  * **IT DOES NOT WAIT FOR THE WHOLE TREE, AND THAT IS A MEASUREMENT.** The slices take turns with the replies of two
@@ -65,11 +64,9 @@ const tmPane = (): HTMLElement => {
 type Seen = { tokens: string[]; calls: Call[] }
 
 /**
- * **THREE WAITS IN THREE PLACES: THE HOOK, AND A CASE EACH.** As one case this took 7,396 to 9,093 ms in three runs
- * alone at `CPUQuota=25%` (2026-10-06), against Vitest's 15 s for a case: the program's compile to the fork control,
- * the copy's build to its editor, and the grammar's arrival to the first parse. In the three runs after the split, at
- * the same quota, the two cases took 4,300 to 4,903 ms and 2,805 to 5,100 ms; a fourth read 5,303 and 2,302. The
- * second case is the first's next stage and reads what it left.
+ * **THREE WAITS IN THREE PLACES: THE HOOK, AND A CASE EACH** — the program's compile to the fork control, the copy's
+ * build to its editor, and the grammar's arrival to the first parse. As one case they took up to 9,093 ms alone at
+ * `CPUQuota=25%`, against Vitest's 15 s for a case. The second case is the first's next stage and reads what it left.
  */
 describe('the copy of a machine too long to parse in one slice', () => {
   let seen: Seen | null = null
@@ -103,8 +100,8 @@ describe('the copy of a machine too long to parse in one slice', () => {
     // 1,518,470 UNDER `unary`, WHICH THIS TIER'S SETUP STORES, and 1,906,914 under `binary`: either is the property's.
     expect(units, 'precondition: the copy’s text is longer than a first screen').toBeGreaterThan(FIRST_SCREEN_UNITS)
 
-    // ONE CALL ON THE WHOLE TEXT BY THEN, AND IT IS A SLICE THAT DID NOT FINISH. In one go it read
-    // `{ sliced: false, finished: true }`, with the page held until it returned.
+    // ONE CALL ON THE WHOLE TEXT BY THEN, AND IT IS A SLICE THAT DID NOT FINISH. A parse in one go would
+    // read `{ sliced: false, finished: true }`, with the page held until it returned.
     expect(then.calls).toEqual([{ units, sliced: true, finished: false }])
     // AND THE FIRST SCREEN IS ALREADY DRAWN IN COLOUR, from a parse of its own lines: the machine's first word first.
     expect(then.tokens.length).toBeGreaterThan(0)

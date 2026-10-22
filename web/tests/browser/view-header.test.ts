@@ -58,8 +58,8 @@ describe('the title-selector', () => {
     const h = mount()
     h.setBindings([PROGRAM_λ, PROGRAM_TM], { leg: 'lambda', session: 'source' })
     const before = h.el.querySelector('button.view-title')
-    // OPEN, BECAUSE THE BUTTON'S IDENTITY ALONE CANNOT FAIL: `paint` re-inserts the same element. What a
-    // rebuild costs is the menu, which `paint` takes out of the DOM — and a popover removed is closed.
+    // OPEN, BECAUSE THE BUTTON'S IDENTITY ALONE CANNOT FAIL: `paint` keeps the same element. What a
+    // rebuild would cost is the menu: a popover taken out of the DOM is closed.
     before?.dispatchEvent(new MouseEvent('click'))
     const menu = document.querySelector('.view-title-menu')
     expect(menu?.matches(':popover-open')).toBe(true)

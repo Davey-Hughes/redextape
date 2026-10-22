@@ -6,7 +6,7 @@ import type { LeafId, PaneKind } from './panes'
  *
  * A **combination** is the set of kinds a tree's leaves have, written as those kinds in `KIND_ORDER`; its **key** is
  * that list joined by `+`. `Arrangements` holds the tree last seen for every combination visited except the one on
- * screen, whose tree stays where `main.ts` has always kept it.
+ * screen, whose tree `main.ts` keeps.
  *
  * **THE COMBINATION ON SCREEN IS READ FROM THE TREE AND STORED NOWHERE**, for the reason `workspace.ts` gives for the
  * preset: a stored copy could disagree with what it copies. Every function here is a value in and a value out, so the
@@ -57,7 +57,7 @@ export function toggled(kinds: Combination, kind: PaneKind): PaneKind[] {
 }
 
 /**
- * Put `next` in force as the tree on screen — what every write of the tree that a gesture makes goes through (spec
+ * Put `next` in force as the tree on screen — what every write of the tree but those named below goes through (spec
  * §4.3), by `main.ts`'s `enterTree`.
  *
  * **A WRITE THAT REPLACES THE WORKSPACE WHOLE DOES NOT COME HERE**: *reset preset*, an opened link's workspace and
@@ -130,10 +130,10 @@ export function liveLeaves(tree: LayoutNode, arrangements: Arrangements): Map<Le
  * **ONE ID IS ONE PANE, AND THAT PANE IS OF THE OTHER KIND.** A remembered arrangement can name an id as the kind it
  * was before a pick in its view's title, and a combination's default names `lambda-0`, `asm-0` and `tm-0` whatever
  * those are by now. The view such a leaf named no longer exists, and a new one is built in its place either way.
- * Built under the old id, it took that id's pane with it: `pane-host.ts`'s `applyLayout` drops a pane whose kind is
- * not its leaf's, so a TM view of a copy, parked under `asm-0`, was destroyed by the switch that showed the asm view
- * — its editor, its place on the copy and what it had open. Under an id of its own, the new view is built beside it,
- * and the view that holds the old id stays parked like any other.
+ * Built under the old id, it would take that id's pane with it: `pane-host.ts`'s `applyLayout` drops a pane whose kind
+ * is not its leaf's, so a TM view of a copy, parked under `asm-0`, would be destroyed by the switch that showed the
+ * asm view — its editor, its place on the copy and what it had open. Under an id of its own, the new view is built
+ * beside it, and the view that holds the old id stays parked like any other.
  *
  * **A PICK IN A TITLE STILL KEEPS ITS ID**: this is asked only of a tree a switch is about to enter.
  *

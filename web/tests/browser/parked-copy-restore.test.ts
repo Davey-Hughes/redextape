@@ -19,10 +19,9 @@ import { fourViews, fourViewWorkspace, mounted, rowNames, SHELL, stateIdle, titl
  *
  * **THE EMPTY BINDINGS THE MOUNT STORES ARE NOT WHAT HOLDS THAT.** The copies are written once at start-up, before
  * any view is built, and again by the first layout, and each write reads its bindings off the views: no view is on
- * the copy either time, so storage holds none whether the binding was seeded or not. Measured with the restore
- * taking a binding for a remembered arrangement's leaf too (2026-10-12): the stored bindings were as empty, and the
- * first case failed on the copy's row, which no longer said *paused*, and the second on the view's title. This file's
- * doc said the first layout's write is what drops the binding, and the first case's `{}` read as holding it.
+ * the copy either time, so storage holds none whether the binding was seeded or not. A restore that took a binding
+ * for a remembered arrangement's leaf too would leave the stored bindings as empty; what holds it is the copy's row,
+ * which would no longer say *paused*, and the view's title.
  *
  * **SEEDED BEFORE THE ONE MOUNT**, as `buffer-restore.test.ts` seeds its own and for its reason, and built with the
  * app's own writers: the source over the asm and TM views, all four remembered, and `lambda-0` bound to the copy.

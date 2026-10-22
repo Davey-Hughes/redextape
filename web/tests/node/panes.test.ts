@@ -8,13 +8,12 @@ import { PaneSlot } from '../../src/sessions'
 import type { LambdaState, TmState } from '../../src/types'
 
 /**
- * THE COLLECTION, DRIVEN WITHOUT A DOM — the container that replaces `main.ts`'s two pane consts.
+ * THE COLLECTION, DRIVEN WITHOUT A DOM.
  *
  * The claim under test is that `of` and `ofSession` select by leg AND by binding, because that is
- * what turns `tmPane.setProgram(x)` into a loop that reaches every TM pane on the session whose
- * worker sent the reply and no others. A collection that returned everything would still make the
- * app work today, with two panes, and would silently repaint the wrong session's pane the moment a
- * third existed.
+ * what lets a reply's `setProgram` loop reach every TM pane on the session whose worker sent the
+ * reply and no others. A collection that returned everything would silently repaint the wrong
+ * session's pane.
  */
 
 function fakePane<T>(): PaneView<T> & { frames: (T | null)[] } {
@@ -74,9 +73,8 @@ describe('PaneCollection', () => {
     expect(panes.ofSession('lambda', 'lambda-scratch').map((p) => p.id)).toEqual(['a'])
   })
 
-  // `active` IS THE ONE PLACE "THE λ PANE" IS ANSWERED, and the answer it has to give is `undefined`.
-  // Four modules used to ask this question privately and three of them threw, on an invariant that
-  // expired when panes started being derived from the layout tree — see the method's own doc.
+  // For a leg with no pane, the answer `active` has to give is `undefined` rather than a throw — see
+  // the method's own doc.
   it('answers undefined for a leg with no pane rather than throwing', () => {
     const panes = new PaneCollection()
     panes.add(lambdaEntry('a', 'source'))

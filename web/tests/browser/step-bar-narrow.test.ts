@@ -16,11 +16,11 @@ import {
 
 /**
  * **THE ONE STEP BAR ON A PHONE'S SCREEN** — the `steps` switch at `bar` (`step-bar.ts`), in the two presets that put
- * it there, at 320px and 390px, under a short step line and a long one. The bar was one row that never wrapped: at
- * 320px it widened the page, at 390px `fact(4)`'s line pushed `keep recording` past the page's right edge, and where
- * the page held, the step text was squeezed into a column a few characters wide. What is held is that each of its
- * boxes lies inside the page at a phone's width, and that at a desktop's width the bar is still one row with the old
- * bar's two gaps. ONE MOUNT FOR THE FILE, for the reason every sibling gives.
+ * it there, at 320px and 390px, under a short step line and a long one. A bar that is one row and never wraps would
+ * widen the page at 320px, push `keep recording` past the page's right edge on `fact(4)`'s line at 390px, and, where
+ * the page holds, squeeze the step text into a column a few characters wide. What is held is that each of its boxes
+ * lies inside the page at a phone's width, and that at a desktop's width the bar is one row with two gaps. ONE MOUNT
+ * FOR THE FILE, for the reason `app.test.ts` gives.
  */
 
 type Preset = 'debugger' | 'stage'
@@ -113,10 +113,9 @@ describe.each(LINES)('the step bar, under $name', (line) => {
    * Pick the line's example, and wait for its line on the bar and then for the run's result, so nothing on the page
    * moves while it is measured.
    *
-   * **TWO WAITS, NOT ONE.** The λ line is final well before the other legs' result arrives. Measured on 2026-10-01
-   * under a 25% CPU quota, in a run that timed the two separately, `fact(4)`'s line was final 3.1s after the pick's
-   * clicks and its result came 10.2s after them, past the 10s `until` gives one wait. Split, each has its own, and the
-   * two together stay inside the hook's own 30s.
+   * **TWO WAITS, NOT ONE.** The λ line is final well before the other legs' result arrives: under a 25% CPU quota
+   * `fact(4)`'s result came 10.2s after the pick's clicks, past the 10s `until` gives one wait. Split, each has its
+   * own, and the two together stay inside the hook's own 30s.
    */
   beforeAll(async () => {
     await page.viewport(1280, 800)
@@ -144,12 +143,12 @@ describe.each(LINES)('the step bar, under $name', (line) => {
    * widening the page. `keep recording` is held to be CLICKABLE, not only inside the page: `elementFromPoint` at its
    * centre is the button.
    *
-   * **A STEP TEXT SET ON MORE THAN ONE LINE IS AS WIDE AS THE BAR.** At 390px the old bar kept the page's width and
-   * squeezed `sum_to(5)`'s line into four lines of a column a few characters wide. The step text may wrap, as
-   * `fact(4)`'s must at these widths, but only on a row of its own, where it has the bar's whole width.
+   * **A STEP TEXT SET ON MORE THAN ONE LINE IS AS WIDE AS THE BAR**, so a bar that keeps the page's width by squeezing
+   * the step text into a column a few characters wide fails here. The step text may wrap, as `fact(4)`'s must at these
+   * widths, but only on a row of its own, where it has the bar's whole width.
    *
-   * **THE TITLE SHARES ITS ROW WITH `↺`** — the layout the user chose (2026-10-01), where the title and every control
-   * flow as one wrapping line, so the title costs the bar no row of its own.
+   * **THE TITLE SHARES ITS ROW WITH `↺`** — the layout the user chose, where the title and every control flow as one
+   * wrapping line, so the title costs the bar no row of its own.
    */
   it.each(CASES)('in %s at %i px, lies inside the page', async (preset, width, height) => {
     try {
@@ -180,15 +179,14 @@ describe.each(LINES)('the step bar, under $name', (line) => {
   })
 
   /**
-   * **AT A DESKTOP'S WIDTH THE BAR IS ONE ROW, WITH THE OLD BAR'S TWO GAPS**: every box on the title's vertical
-   * centre, the title at the bar's content edge, `↺` `var(--space-3)` after the title (the old `.step-bar-inner`'s gap),
-   * and each box after it `var(--space-2)` after the one before (the old `.controls`' gap).
+   * **AT A DESKTOP'S WIDTH THE BAR IS ONE ROW, WITH TWO GAPS**: every box on the title's vertical centre, the title
+   * at the bar's content edge, `↺` `var(--space-3)` after the title, and each box after it `var(--space-2)` after the
+   * one before.
    *
-   * **THAT IS ALL IT HOLDS, NOT WHERE EACH BOX IS.** A change to a box's own width, or to the bar's padding, can
-   * leave every case here passing: a padding or a larger font on the title, or a wider padding on the bar, did. Where
-   * each box lies against `main` was measured once, by hand, and the roadmap entry has the figures.
+   * **THAT IS ALL IT HOLDS, NOT WHERE EACH BOX IS.** A change to a box's own width, or to the bar's padding, can leave
+   * every case here passing.
    */
-  it.each(PRESETS)('in %s at 1280 px, is one row spaced as before', async (preset) => {
+  it.each(PRESETS)('in %s at 1280 px, is one row with its two gaps', async (preset) => {
     try {
       await at(preset, line, 1280, 800)
       const boxes = drawn()

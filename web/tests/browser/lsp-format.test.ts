@@ -20,9 +20,8 @@ function formatVia(leaf: string): void {
 
 // ONE MOUNT FOR THE FILE. ES module imports are cached, so `main()` runs once per page and Vitest
 // gives each test FILE its own page. A second `beforeAll` that re-assigns `document.body.innerHTML`
-// gets fresh controls with none of the listeners `main()` attached to the old ones — which is how
-// this file first failed: the `format on blur` checkbox changed nothing because it was a different
-// checkbox.
+// gets fresh controls with none of the listeners `main()` attached to the old ones: the `format on
+// blur` checkbox would change nothing, being a different checkbox.
 beforeAll(async () => {
   document.body.innerHTML = SHELL
   view = await (await import('../../src/main')).ready

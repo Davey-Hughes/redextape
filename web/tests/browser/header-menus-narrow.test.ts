@@ -5,11 +5,10 @@ import { buttonOf, menuOfId, presetOf, rem, SHELL, stateIdle, until } from './ha
 /**
  * **THE HEADER'S WIDE MENUS ON A PHONE'S SCREEN** — Plan 7 part 6a spec §4.2, §5.2 and §8's phone-width row, for
  * `examples ▾` and the workspace menu, the two whose minimum width is `20rem`, and `share`'s popover, whose width is
- * `32rem` at a desktop's. Each is no wider than the page less a
- * `1rem` gutter each side at a phone's width, and its button sits in a header that wraps, so what is held is where the
- * open menu lies, measured: inside that gutter on both sides of the page. The page under it is held not to scroll
- * sideways too. The desktop cases hold the geometry the phone's must not change. ONE MOUNT FOR THE FILE,
- * for the reason every sibling gives.
+ * `32rem` at a desktop's. Each is no wider than the page less a `1rem` gutter each side at a phone's width, and its
+ * button sits in a header that wraps, so what is held is where the open menu lies, measured: inside that gutter on
+ * both sides of the page. The page under it is held not to scroll sideways too. The desktop cases hold the geometry
+ * the phone's must not change. ONE MOUNT FOR THE FILE, for the reason `app.test.ts` gives.
  */
 
 beforeAll(async () => {
@@ -30,21 +29,23 @@ async function openAt(id: string, width: number, height: number): Promise<DOMRec
  * Hold a menu's `rect` to a phone-width page: inside its gutter on both sides, on a page with no sideways scroll.
  *
  * **BOTH SIDES, NOT ONLY THE WIDTH.** A menu no wider than the gutter allows can still sit flush with the page's edge,
- * where the browser shifts an anchored menu that would run past it: the examples and workspace menus did, at 320, 360
- * and 390px, until each was given a `1rem` margin on its end side.
+ * where the browser shifts an anchored menu that would run past it, which is why the examples and workspace menus
+ * each have a `1rem` margin on their end side.
  */
 function expectWithinGutter(rect: DOMRect, width: number): void {
   expect(innerWidth).toBe(width)
   // THE PAGE'S OWN WIDTH, WHICH THE HEADER'S WRAP KEEPS, AND IN DEBUGGER AND STAGE THE STEP BAR'S: `scrollWidth` cannot
-  // see the menu, which is in the top layer. Measured: the workspace menu, 370.5px wide on a 320px page, left it at 320.
-  // The rect below is what holds the menu.
+  // see the menu, which is in the top layer. The rect below is what holds the menu.
   expect(document.documentElement.scrollWidth).toBeLessThanOrEqual(width)
   expect(rect.left, 'the gutter on the left').toBeGreaterThanOrEqual(rem())
   expect(rect.right, 'the gutter on the right').toBeLessThanOrEqual(innerWidth - rem())
   expect(rect.width).toBeLessThanOrEqual(innerWidth - 2 * rem())
 }
 
-/** The phones' widths, and 480px, where each menu's maximum is what binds (the per-menu docs have the figures). */
+/**
+ * The phones' widths, and 480px, where the examples menu's maximum is what binds (that menu's case has
+ * the figures).
+ */
 const WIDTHS = [
   [320, 568],
   [360, 640],
@@ -84,12 +85,11 @@ describe('examples ▾, open', () => {
 
 describe('share, open', () => {
   /**
-   * **ITS BUTTON SITS NEAR THE HEADER'S RIGHT EDGE, SO THE POPOVER MEETS THAT EDGE.** Without its end margin it lay
-   * flush with it at 480px, and at 390px in Debugger (`style.css`'s gutter block has the figures). **IN EACH PRESET**,
-   * since a preset changes the header's rows and with them where the button sits. **THE PAGE DOES NOT SCROLL SIDEWAYS
-   * IN ANY OF THEM.** At 320px in Debugger and Stage it did, 36px wider than the page with every menu shut, until the
-   * step bar wrapped (`step-bar-narrow.test.ts` holds the bar); these cases held then only that the popover did not
-   * widen it further.
+   * **ITS BUTTON SITS NEAR THE HEADER'S RIGHT EDGE, SO THE POPOVER MEETS THAT EDGE.** Without its end margin it would
+   * lie flush with it at 480px, and at 390px in Debugger (`style.css`'s gutter block has the figures). **IN EACH
+   * PRESET**, since a preset changes the header's rows and with them where the button sits. **THE PAGE DOES NOT SCROLL
+   * SIDEWAYS IN ANY OF THEM**, which at 320px in Debugger and Stage rests on the step bar wrapping
+   * (`step-bar-narrow.test.ts` holds the bar).
    */
   describe.each(['explorer', 'debugger', 'stage'])('in %s', (preset) => {
     it.each(WIDTHS)(
@@ -126,8 +126,8 @@ describe('the workspace menu, open', () => {
 
   /**
    * **A ROW'S VALUES WRAP UNDER ITS LABEL RATHER THAN RUN PAST THE MENU'S EDGE.** Its rows are 360.5px wide on one
-   * line, so without the wrap the menu overflowed a 320px and a 360px page; with a maximum but no wrap, the menu would
-   * fit and its values would not. Both are held: the menu's rect, and every control inside it.
+   * line, so without the wrap the menu would overflow a 320px and a 360px page; with a maximum but no wrap, the menu
+   * would fit and its values would not. Both are held: the menu's rect, and every control inside it.
    */
   it.each(WIDTHS)(
     'lies inside its gutter on a page %i px wide, with every control inside it',
@@ -194,12 +194,11 @@ describe('the workspace menu, open', () => {
 })
 
 /**
- * **`examples ▾` DOES NOT COST A PHONE'S PAGE A HEADER ROW** — at 390px, in Explorer and Debugger, it pushed the
- * header from three rows to four: 136px to 181px, taken from the views. **NOR DOES `share`, BEFORE `appearance`**
- * (Plan 7 part 6a spec §5.2): after `examples ▾` it took Debugger to four rows here. Rows are counted rather than the height
- * measured, one per distinct vertical centre, since the header's `align-items: center` puts every control in a row on
- * one. Held in Instrument, the page's default style, whose faces are bundled; Paper and Terminal draw the header in
- * the machine's own fonts, so their rows depend on the machine, and are measured by hand rather than held here.
+ * **`examples ▾` DOES NOT COST A PHONE'S PAGE A HEADER ROW**, which would be taken from the views. **NOR DOES
+ * `share`, BEFORE `appearance`** (Plan 7 part 6a spec §5.2). Rows are counted rather than the height measured, one
+ * per distinct vertical centre, since the header's `align-items: center` puts every control in a row on one. Held in
+ * Instrument, the page's default style, whose faces are bundled; Paper and Terminal draw the header in the machine's
+ * own fonts, so their rows depend on the machine, and are measured by hand rather than held here.
  */
 describe('the header at 390px', () => {
   const headerRows = (): number => {

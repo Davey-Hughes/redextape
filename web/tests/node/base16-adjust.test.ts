@@ -344,7 +344,7 @@ describe('what apply adjusted cannot fix', () => {
   const schemes: [string, readonly string[]][] = [
     ...Object.entries({ NIGHT, DAY, EMBER, NEON, TWINS, STUCK, CLOSING, BOXED, NARROW }),
     ['BOXED, its binder in the dark grey too', BOXED.map((c, i) => (i === 11 ? '#202020' : c))],
-    // WHERE THE WALK STEPPED OVER A BAND: black under `#ababab`, `#0c0c0c` under `#b1b1b1` (a warning's band 0.0002
+    // WHERE THE WALK STEPS OVER A BAND: black under `#ababab`, `#0c0c0c` under `#b1b1b1` (a warning's band 0.0002
     // wide), `#101010` under `#b3b3b3`, `#202020` under `#c2c2c2`; and where no band is there at all for warnings and
     // the focus ring: `#101010` under `#aaaaaa`, `#202020` under `#b4b4b4`.
     ...[
@@ -381,7 +381,7 @@ describe('what apply adjusted cannot fix', () => {
 
   /**
    * **ONE CASE PER SCHEME**, since each token a scheme names is scanned at 10,001 lightnesses: every scheme in one case
-   * took 5.4 s on the slower CI runner, past vitest's 5 s default, where it takes under a second here.
+   * took 5.4 s on the slower CI runner, past vitest's 5 s default.
    */
   it.each(schemes)(
     'names only tokens no lightness on a fine scan fixes, and every other token passes on its stored value: %s',

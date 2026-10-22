@@ -162,9 +162,8 @@ describe('History', () => {
     expect(h.current).toBe('a')
   })
 
-  // The ring caps BYTES, not frames. `frame_cost_probe` measured λ frames ranging from 5 KB to
-  // 781 KB depending only on the program, so a frame count is a memory policy spanning three orders
-  // of magnitude.
+  // The ring caps BYTES, not frames. A λ frame's size depends on the program (`frame_cost_probe`
+  // measures it), so a frame count would be a memory policy spanning three orders of magnitude.
   it('evicts oldest-first when the frames before the newest pass the byte budget', () => {
     for (let i = 0; i < 5; i++) h.push(`f${i}`, 300)
     // Budget is 1,000; each frame costs 300, so the frames before the newest fit three to a ring (900 bytes), and a
@@ -270,11 +269,10 @@ describe('History', () => {
 
   /**
    * **NO EVICTION MOVES OR COPIES THE FRAMES THE RING KEEPS THROUGH AN `Array` METHOD, HOWEVER MANY IT KEEPS**, but the
-   * one cut that follows each run of as many evictions as frames kept. `History` used to `shift` both arrays at every
-   * eviction, and on a ring as large as a full TM history that moved every frame kept and was most of the page's main
-   * thread during *keep recording* (`History`'s doc). TWO RINGS: 1,000 frames, and 69,008, about that TM ring (`map
-   * and fold`'s TM history fills at step 69,008). What `arrayWork` charges is what goes through its methods, and only
-   * that (its doc).
+   * one cut that follows each run of as many evictions as frames kept. A `shift` of both arrays at every eviction
+   * would, on a ring as large as a full TM history, move every frame kept (`History`'s doc). TWO RINGS: 1,000 frames,
+   * and 69,008, about that TM ring (`map and fold`'s TM history fills at step 69,008). What `arrayWork` charges is
+   * what goes through its methods, and only that (its doc).
    *
    * **FOUR ELEMENTS PER EVICTION, AND THE BOUND HAS NO SLACK**: each cut slices the frames and their sizes out of arrays
    * holding as many evicted places again as frames kept, so it is charged four times the frames kept, once per that

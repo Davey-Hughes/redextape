@@ -3,9 +3,8 @@ import { beforeAll, describe, expect, it } from 'vitest'
 import { extendButton, forwardButton, historyFills, SHELL, tmStepText } from './harness'
 
 /**
- * The fixture that reaches a `budget` stop on the TM leg, from `app.test.ts`'s own measurement:
- * ~75,025 frames in ~1.9 s. `capped` would need the cursor's 5,000,000-step cap, which is
- * unaffordable in a test, so `budget` is the only route to a live `[continue]`.
+ * The fixture that reaches a `budget` stop on the TM leg. `capped` would need the cursor's 5,000,000-step cap,
+ * which is unaffordable in a test, so `budget` is the only route to a live `[continue]`.
  */
 const BUDGET_SRC =
   'fn map(xs, f) { if is_empty(xs) { nil } else { cons(f(head(xs)), map(tail(xs), f)) } } fn add1(x) { x + 1 } [3, 1, 2, 4].map(add1)'
@@ -17,8 +16,8 @@ const toNewest = () =>
   document.querySelector<HTMLButtonElement>('[data-leaf="tm-0"] .controls button.to-newest')?.click()
 
 describe('the frontier controls during a recompile', () => {
-  // ONE MOUNT FOR THE FILE, as every browser test file does: ES module imports are cached, so
-  // `main()` runs once per page and Vitest gives each test file its own page.
+  // ONE MOUNT FOR THE FILE: ES module imports are cached, so `main()` runs once per page and Vitest
+  // gives each test file its own page.
   beforeAll(async () => {
     document.body.innerHTML = SHELL
     view = await (await import('../../src/main')).ready

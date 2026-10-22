@@ -7,9 +7,8 @@ import { TmPane } from '../../src/tm-pane'
 import { clickWorkspaceItem, compile, linkAt, SHELL, stageTab, tick, until } from './harness'
 
 /**
- * A view off the page costs nothing (Plan 7 part 4a, closing part 2b's "`replies.ts` paints disconnected
- * panes"): a hidden TM view is not handed each compile's machine, and a hidden λ view asks the worker for no
- * tree. In the Stage preset every view but the shown one is off the page.
+ * A view off the page costs nothing: a hidden TM view is not handed each compile's machine, and a hidden λ view asks
+ * the worker for no tree. In the Stage preset every view but the shown one is off the page.
  */
 let view: EditorView
 /** The machine `beforeAll`'s own compile seeded a TM view with, before any view was hidden. */
@@ -75,9 +74,9 @@ describe('views off the page', () => {
     ).not.toBe(baselineRules)
   })
 
-  // THE STATE DIAGRAM (Plan 7 part 4b) RIDES THE SAME SEED: its states are grouped when its view is handed a machine
-  // and drawn when its view is painted, and a view off the page is neither — so it costs nothing either, per compile
-  // or per frame, until its tab is shown.
+  // THE STATE DIAGRAM (Plan 7 part 4 spec §8) RIDES THE SAME SEED: its states are grouped when its view is handed a
+  // machine and drawn when its view is painted, and a view off the page is neither — so it costs nothing either, per
+  // compile or per frame, until its tab is shown.
   it('groups and draws no state diagram for a hidden TM view, and does both once it is shown', async () => {
     stageTab('lambda-0')?.click()
     await tick()

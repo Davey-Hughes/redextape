@@ -8,7 +8,7 @@ import { asmPane, asmValue, noticeText, resultsText, SHELL, stateIdle, until } f
 /**
  * A blank asm copy (Plan 7 part 5 spec §7): *new asm copy* in the copies menu makes one no view shows, an asm view's
  * title then offers it, and what is typed into it runs. Its readout line counts its steps in the singular for one
- * (amendment 29) and reads a fault as a fault. ONE MOUNT FOR THE FILE, for the reason every sibling gives.
+ * (amendment 29) and reads a fault as a fault. ONE MOUNT FOR THE FILE, for the reason `app.test.ts` gives.
  */
 
 let view: EditorView
@@ -65,8 +65,7 @@ describe('a blank asm copy', () => {
   })
 
   /**
-   * **ITS ROW IN THE COPIES MENU SAYS WHAT ITS READOUT SAYS**, under its name, where every asm and TM row read
-   * `no term yet` — a machine copy has no term, and the words for that said nothing had come back.
+   * **ITS ROW IN THE COPIES MENU SAYS WHAT ITS READOUT SAYS**, under its name: a machine copy has no term.
    */
   it('says in its copies-menu row what its readout says of its run', async () => {
     await userEvent.click(document.querySelector<HTMLButtonElement>('#buffers') as HTMLButtonElement)

@@ -21,11 +21,10 @@ import {
  * WHICH VIEW SHOWS WHICH COPY, AS STORAGE HAS IT, AFTER A GESTURE THAT BUILDS OR DROPS A VIEW.
  *
  * `redextape.buffers` stores the copies and, beside them, which leaf shows which. A reload takes any stored binding
- * whose leaf the stored tree holds on the same leg. The bindings were written at a fork, a pick in a title, a pause
- * and a delete, and not when a view was closed, added, or built again. So a `✕` on a view of a copy left its leaf
- * bound in storage, the view its toggle built there next was on the program, and a reload put that view on the closed
- * view's copy: measured on `5ff63af` by seeding a second page with what the first had stored, which opened reading
- * `λ · copy 1`. `pane-host.ts`'s `applyLayout` writes the bindings now, each time it has built or dropped views.
+ * whose leaf the stored tree holds on the same leg. Were the bindings written only at a fork, a pick in a title, a
+ * pause and a delete, a `✕` on a view of a copy would leave its leaf bound in storage, the view its toggle built there
+ * next would be on the program, and a reload would put that view on the closed view's copy. `pane-host.ts`'s
+ * `applyLayout` writes the bindings each time it has built or dropped views.
  *
  * **EACH CASE WAITS FOR ITS COPY'S BUILD BEFORE ITS GESTURE.** A copy's build stores the bindings when its reply
  * lands, and a reply that landed after the gesture would write them right whatever the gesture did. The reply is

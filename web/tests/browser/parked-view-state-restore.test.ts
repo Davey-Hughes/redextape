@@ -16,8 +16,7 @@ import { clickToggle } from './user-event-fixture'
  *
  * **THE FIRST LAYOUT WRITES THE WORKSPACE BACK, AND THAT WRITE MUST KEEP THEM.** `main.ts`'s `normaliseWorkspace` runs
  * before every write and drops what is stored for a view that is not live. Asked of the tree on screen alone, it
- * dropped these at the load, from memory too, with every other test passing (measured on `ee09243`, 2026-10-12): the
- * views were then built with the defaults.
+ * would drop these at the load, from memory too, and the views would then be built with the defaults.
  *
  * Storage is read once, at the mount, so the workspace is stored before it and this is a file of its own.
  */

@@ -22,12 +22,9 @@ import {
  * **THE SHARED SURFACES AND THE λ LEG'S TWO VIEWS** — what the ONE status line and the ONE source editor decoration
  * say once the λ leg holds a view of the program and a view of a copy.
  *
- * They used to follow focus: `PaneCollection.active`, the pane the user last focused on the leg, answered for both,
- * through the `focusin` listener `pane-host.ts`'s `hostFor` wires on each host's creation. The check by hand found
- * what that cost on the machine legs: a copy's view focused last took the program's running focus off the program's
- * own view, and the status line named a copy only while its view had been focused last. So neither follows focus
- * onto a copy now. The decoration is the program's λ running focus, read off the most recently focused view of the
- * program, and the status line names every view showing a copy, by its title where the leg has more than one view.
+ * Neither follows focus onto a copy. The decoration is the program's λ running focus, read off the most recently
+ * focused view of the program, and the status line names every view showing a copy, by its title where the leg has
+ * more than one view.
  *
  * **THE TWO VIEWS ARE MADE TO DISAGREE, WHICH IS THE WHOLE FIXTURE.** One λ view is on a copy and the other is back on
  * the program, so what the line and the decoration say can depend on which one has the focus — and each test drives
@@ -37,10 +34,10 @@ import {
  * is written, and matching it exactly is what makes the assertion fail if that clause is reworded into
  * something else about a view rather than merely deleted.
  *
- * THE HARNESS IS `pane-picker.test.ts`'s, WHICH IS `two-lambda-panes.test.ts`'s — the same shell, the
- * same one-mount-per-file `beforeAll` (ES module imports are cached, so `main()` runs once per page and
- * Vitest gives each test FILE its own page), the same `beforeEach` that undoes both drifts a test can
- * leave behind.
+ * THE HARNESS IS `pane-picker.test.ts`'s — `two-lambda-panes.test.ts`'s shell and one-mount-per-file
+ * `beforeAll` (ES module imports are cached, so `main()` runs once per page and Vitest gives each test
+ * FILE its own page), and a `beforeEach` that undoes the tree shape through `resetToFourViews` and puts
+ * the source program back.
  */
 
 /** `link-status.ts`'s `detachedText` for a λ view on a copy named by `title`, beside another λ view, verbatim. */
@@ -50,16 +47,16 @@ const NO_NODE = 'this construct has no node in the λ term at this step'
 
 /**
  * The construct the SOURCE editor's running-focus decoration is currently over, or `''` for none —
- * `running-focus.test.ts`'s reading, with two differences this file's fixture forces.
+ * `running-focus.test.ts`'s `focusReading` without its claim prefix, and scoped as this file's
+ * fixture forces.
  *
  * SCOPED TO `#editor`, NOT TO `.cm-editor`. That file has one CodeMirror on the page; this one forks a
  * scratch, and a forked λ pane mounts a SECOND `.cm-editor` inside itself. `#editor` is the element
  * `main.ts` mounts the one source `EditorView` into, so it names the surface `draw.ts` decorates and
  * cannot be satisfied by a mark in a pane's own editor.
  *
- * ALL THREE CLAIM CLASSES, for that file's reason: `exact`, `within` and `coincident` are one
- * decoration wearing whichever class the claim earned, so asking for one of them would read "no focus"
- * on a frame that has one.
+ * ALL THREE CLAIM CLASSES: `exact`, `within` and `coincident` are one decoration wearing whichever
+ * class the claim earned, so asking for one of them would read "no focus" on a frame that has one.
  */
 const sourceFocusText = () =>
   document.querySelector('#editor .is-focus-exact, #editor .is-focus-within, #editor .is-focus-coincident')
@@ -75,7 +72,7 @@ const transportClick = (leaf: string, label: string): void => {
 }
 
 /**
- * Put focus inside `leaf` and report what the pane's own chrome says its binding is.
+ * Put the focus on `leaf`'s title-selector.
  *
  * **THE TITLE-SELECTOR IS THE TARGET RATHER THAN A STEP BUTTON, AND THE CHOICE IS ABOUT WHAT SURVIVES
  * THE REDRAW THE FOCUS ITSELF CAUSES.** The listener under test calls `draw()`, and `draw()` reaches every
@@ -83,8 +80,8 @@ const transportClick = (leaf: string, label: string): void => {
  * `view-header.ts`'s `viewMenu` removes any menu item that stops applying — a focused control caught by
  * either is gone from under its holder. The view header repaints its heading only when the pairs on offer
  * change, so the title is the one control in a view that is guaranteed to still be the same element,
- * still focused, after the frame its own `focusin` painted. It is also exactly what `focusPane` targets
- * for the same document-order reason.
+ * still focused, after the frame its own `focusin` painted. It is also the control `pane-host.ts`'s
+ * `focusPane` lands on, since the title precedes `↺` in document order (`focusPane`'s doc).
  *
  * IT THROWS ON A MISSING PANE RATHER THAN `?.focus()`, because a silent no-op here would leave focus
  * wherever the previous step put it and every assertion after it would be about the wrong pane.
@@ -99,9 +96,6 @@ const focusPane = (leaf: string): void => {
 let view: EditorView
 
 beforeAll(async () => {
-  // Each browser test file gets its own in-memory `Storage` now, installed in `tests/browser/setup.ts`
-  // before this file's own module body runs — see that file's doc for why clearing a shared key was not
-  // enough. Neither key needs clearing here any more.
   // WIDE ENOUGH FOR ITS ADDS: at the runner's default 414 px a view is 201 px wide, and the app refuses a split or a
   // `+ view` that leaves a view under `MIN_VIEW_PX` (`layout.ts`). The default's 896 px height is kept.
   await page.viewport(1280, 896)
@@ -125,30 +119,27 @@ beforeEach(async () => {
 })
 
 /**
- * **THE TWO PANES ARE MADE TO DISAGREE, WHICH IS THE WHOLE FIXTURE** — the file header's paragraph of
+ * **THE TWO VIEWS ARE MADE TO DISAGREE, WHICH IS THE WHOLE FIXTURE** — the file header's paragraph of
  * that name, performed. Returns `[scratchLeaf, sourceLeaf]`: the first is `lambda-0` forked onto the λ
  * scratchpad, the second is its split pointed back at the source session.
  *
- * SHARED BY BOTH TESTS BECAUSE BOTH SURFACES NEED THE SAME DISAGREEMENT, and for one reason: the panes
- * must be on two SESSIONS, not merely two leaves. A session owns the history and the detachment flag
- * alike, so two panes on one session answer both questions identically, and neither test could tell an
+ * SHARED BY ALL THREE TESTS BECAUSE BOTH SURFACES NEED THE SAME DISAGREEMENT, and for one reason: the
+ * panes must be on two SESSIONS, not merely two leaves. A session owns the history and the detachment
+ * flag alike, so two panes on one session answer both questions identically, and no test could tell an
  * answer that follows the focus onto a copy from one that does not.
  *
  * THE BINDINGS ARE ASSERTED HERE, BEFORE ANY CALLER LOOKS AT FOCUS. A rebind that never happened would
  * leave both panes on the scratch — where both answers are the same and no expectation downstream could
- * fail. (`pickBinding` throws on a pair the menu does not offer, which the old `select.value = x` did
- * not.)
+ * fail. (`pickBinding` throws on a pair the menu does not offer.)
  */
 async function twoDisagreeingLambdaPanes(): Promise<[string, string]> {
   // 1. Fork `lambda-0` onto a scratch buffer — the pane that IS outside the correspondence.
   document.querySelector<HTMLButtonElement>('[data-leaf="lambda-0"] button.detach')?.click()
   await until(() => editorsInLeaf('lambda-0') > 0, 'the fork to mount an editor')
-  // THE BUFFER'S OWN PAIR, READ OFF THE PANE THAT WAS JUST FORKED — where step 3 below used to write
-  // `('lambda', 'lambda-scratch')`, the fixed id every fork produced under 5d-i's singleton.
-  // 5d-ii-c decision 1 mints `scratch-N` per fork and `main()` runs once per test FILE, so the number
-  // is a function of how many forks ran before this one and is not writable down here. Capturing the
-  // value the fork actually produced is also the stronger statement: step 3 asserts this pane is on THE
-  // BUFFER THIS FORK MADE, not merely on something that is not the source session.
+  // THE BUFFER'S OWN PAIR, READ OFF THE PANE THAT WAS JUST FORKED. A fork mints `scratch-N` and `main()` runs
+  // once per test FILE, so the number is a function of how many forks ran before this one and is not writable
+  // down here. Capturing the value the fork actually produced is also the stronger statement: step 3 asserts
+  // this pane is on THE BUFFER THIS FORK MADE, not merely on something that is not the source session.
   const buffer = titleOf('lambda-0')?.dataset.binding ?? ''
   expect(buffer).not.toBe(bindingKey('lambda', 'source'))
 
@@ -168,11 +159,7 @@ async function twoDisagreeingLambdaPanes(): Promise<[string, string]> {
 }
 
 describe('the app-wide surfaces beside a λ view on a copy', () => {
-  /**
-   * **THE LINE NAMES THE COPY'S VIEW WHICHEVER λ VIEW HAS THE FOCUS.** It read the λ leg's active view, so with the
-   * view of the program focused it said nothing of the copy on screen, and with the copy's focused it said "λ view",
-   * which does not say which of the two. Focusing the program's view is the expectation the old reading failed.
-   */
+  /** **THE LINE NAMES THE COPY'S VIEW WHICHEVER λ VIEW HAS THE FOCUS.** */
   it('the status line names the λ copy by its title whichever of the two λ views has the focus', async () => {
     const [scratchPane, sourcePane] = await twoDisagreeingLambdaPanes()
     const title = titleOf(scratchPane)?.textContent?.trim() ?? ''
@@ -187,18 +174,19 @@ describe('the app-wide surfaces beside a λ view on a copy', () => {
 
   /**
    * **THE SOURCE EDITOR'S FOCUS DECORATION IS THE PROGRAM'S λ RUNNING FOCUS, WHICHEVER λ VIEW HAS THE FOCUS** — the
-   * λ half of the machine legs' fix (`copy-beside-program.test.ts`). `draw.ts` reads it off the most recently focused
-   * view of the program, so focusing the copy's view leaves it where the program's view put it.
+   * λ half of 'keeps marking the program’s running focus when the copy’s view is focused last' and 'moves the
+   * program’s marks when the program steps, with the copy’s view focused last again', which
+   * `copy-beside-program.test.ts` holds for asm and for TM. `draw.ts` reads it off the most recently focused view of
+   * the program, so focusing the copy's view leaves it where the program's view put it.
    *
    * **WHY THE DECORATION COULD DISAGREE BETWEEN THE TWO VIEWS AT ALL**: a scratch session has no lowering behind it,
-   * so every λ frame it records carries `Owner::None` (`session.rs`'s `lambda_state` commentary: "a scratch has no
-   * lowering that could have recorded an owner — which is what 'detached' means"), and `runningFocus` answers `null`
-   * for `'None'`. Read off the copy's view, the decoration went dark.
+   * so every λ frame it records carries `Owner::None`, and `runningFocus` answers `null` for `'None'`. Read off the
+   * copy's view, the decoration would go dark.
    *
    * THE PROGRAM'S VIEW IS PARKED AT STEP 1 RATHER THAN LEFT AT THE FRONTIER, and that is not tidiness.
    * `running-focus.test.ts` records that steps 4-7 of this program are inside `plus` and inside two Church numerals
-   * — `Owner::None`, every one — so a settled λ leg sits on an UNMARKED frame and this test would read `''` either
-   * way and assert nothing. Step 1 owns `let x = 40;`, and step 2 is inside `x + 2`, which is how stepping the
+   * — `Owner::None`, every one — so a λ leg at its frontier sits on an UNMARKED frame and this test would read `''`
+   * either way and assert nothing. Step 1 owns `let x = 40;`, and step 2 is inside `x + 2`, which is how stepping the
    * program is seen to move the decoration.
    */
   it('the source editor focus decoration stays the program’s whichever λ view has the focus', async () => {

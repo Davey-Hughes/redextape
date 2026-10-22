@@ -129,7 +129,7 @@ describe('SessionClient', () => {
 
   // THE DEBOUNCE WINDOW ITSELF: generation 2 is claimed and not yet posted while generation 1's run
   // is still answering. Its replies must not clear the flag, or the control comes back for the run
-  // that is about to be discarded — which is the whole defect.
+  // that is about to be discarded.
   it('keeps awaiting when a reply for a superseded generation lands', () => {
     const { port, deliver } = fakePort()
     const c = new SessionClient(port, () => {})
@@ -319,8 +319,9 @@ describe('SessionClient generation', () => {
     p.deliver(compiled(g1))
     expect(seen).toEqual([g1])
 
-    // A new dispatch. The OLD generation's reply is now stale even though `request` has not run yet —
-    // this is the whole defect: the debounce used to leave a 300 ms window where it was still current.
+    // A new dispatch. The OLD generation's reply is stale even though `request` has not run yet:
+    // advancing the generation at `request` would leave the debounce window during which it was
+    // still current.
     c.supersede()
     p.deliver(compiled(g1))
     expect(seen).toEqual([g1])

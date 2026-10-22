@@ -24,13 +24,11 @@ import {
  *
  * A pick in a view's title changes its kind and keeps its id. So with *TM · program* picked in the asm view, `asm-0` is
  * a TM view, while the arrangement remembered for all four still names `asm-0` as an asm view, and so does the default
- * of every combination with asm in it. Entered under that id, such a tree had `pane-host.ts`'s `applyLayout` build an
- * asm view over the TM one. Measured before `arrangements.ts`'s `reidentified` (2026-10-12), with a copy made in the
- * picked view: the λ toggle and then the asm toggle left the copies menu reading `TM copy 1 · not shown`, and so did
- * the asm toggle alone; the combination the copy's view was parked in then showed `TM · program` in its place.
+ * of every combination with asm in it. Entered under that id, such a tree would have `pane-host.ts`'s `applyLayout`
+ * build an asm view over the TM one.
  *
- * A leaf whose id is live as another kind is entered under a new id now, so the view that holds the id stays parked
- * and comes back as it left.
+ * A leaf whose id is live as another kind is entered under a new id, so the view that holds the id stays parked and
+ * comes back as it left.
  *
  * **AN ID STAYS UNDER TWO KINDS IN STORAGE UNTIL THE TREE THAT NAMES IT WRONGLY IS ENTERED**, and each case says so
  * after each switch: only the tree a switch enters is given new ids. Which of the two a parked view is, is read from
@@ -257,8 +255,8 @@ describe('a TM view picked in the asm view’s title, showing a copy', () => {
    * **AN EDIT THAT REPLACES THE ARRANGEMENT A PARKED VIEW IS IN CLOSES THE VIEW, WHATEVER ELSE NAMES ITS ID.** `+ view`
    * adds a λ view beside the source and the TM view, which is the combination the copy's view is parked in, so the
    * tree it was left in is replaced by the edit (spec §4.3) and no tree holds the view. The tree for all four still
-   * names `asm-0`, as an asm view. Measured while `applyLayout` kept a parked pane on its id alone (2026-10-12): the
-   * copies menu went on reading `TM copy 1 · 1 view` here, until the asm toggle built an asm view over it.
+   * names `asm-0`, as an asm view. Were `applyLayout` to keep a parked pane on its id alone, the copies menu would go
+   * on reading `TM copy 1 · 1 view` here, until the asm toggle built an asm view over it.
    */
   it('is closed when an edit replaces the arrangement it is parked in, though another still names its id', async () => {
     const was = await pickThenCopy()

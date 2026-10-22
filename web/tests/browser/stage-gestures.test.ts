@@ -25,11 +25,12 @@ describe('the stage, under the gestures that add and remove views', () => {
    * Spec §11 is categorical — "Focus never falls to `<body>`" — and names this gesture outright: "closing a
    * view moves focus to the title of the view that becomes `focused`".
    *
-   * **THE FOUR-VIEW ARRANGEMENT IS THE ONE THAT BREAKS IT, WHICH IS WHY THE PRECONDITIONS ARE ASSERTED.**
-   * `close` targets the neighbour that GREW and the stage mounts the view that becomes FOCUSED, and on
-   * `harness.ts`'s `fourViews()` those are two different leaves: closing `lambda-0` grows `source` and focuses
-   * `asm-0`. Closing `asm-0` instead makes them agree — both are `lambda-0`, the leaf before it and the first
-   * view left — so a version of this case that picked that view would pass against the same bug.
+   * **THE PRECONDITIONS ARE ASSERTED BECAUSE THEY PICK A CLOSE WHERE TWO LEAVES DIFFER.** `close` names the
+   * view before the closed one (`main.ts`'s `neighbourOf`), and the stage mounts the focused view, which falls
+   * back to `workspace.ts`'s `defaultFocus` where the named one was not recorded first. On `harness.ts`'s
+   * `fourViews()`, closing `lambda-0` names `source`, and the fallback is `asm-0`. Closing `asm-0` instead
+   * makes them agree — both are `lambda-0`, the leaf before it and the first one left that is not the source —
+   * so a version of this case that picked that view would pass against a stage that mounted the fallback.
    */
   it('does not strand the focus when the shown view is closed', () => {
     clickWorkspaceItem('[data-preset="stage"]')
@@ -55,8 +56,8 @@ describe('the stage, under the gestures that add and remove views', () => {
 
   /**
    * §5: "`+ view` adds the pick beside the focused view … so in Stage the new tab sits after the focused
-   * one". It is the ONLY route that adds a view on the stage, because the `⋯` menu's split items are
-   * removed there — so a `+ view` whose result is invisible leaves the stage with no working way to add.
+   * one". The `⋯` menu's split items are removed there, so a `+ view` whose result is invisible would
+   * leave the stage with no working way to add a view beside the focused one.
    */
   it('shows the view that + view creates', () => {
     const before = tabLeaves()

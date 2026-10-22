@@ -3,22 +3,17 @@ import type { LeafId, PaneKind } from './panes'
 export type Dir = 'row' | 'column'
 
 /**
- * THE LAYOUT TREE — design §4.1.
+ * THE LAYOUT TREE — 5d-ii-a design §4.1.
  *
  * A LEAF CARRIES A `PaneKind`, NOT A `Leg`, AND NOT A SESSION. `'source'` is not a `Leg` — the source
  * pane renders an editor rather than a leg's frames — so a `Leg`-typed field could not name it. The
  * session is absent because the runtime pairing lives in `panes.ts`, keyed by `LeafId`, and that
  * absence is what keeps this module free of `SessionRegistry` and therefore testable as a value.
  *
- * **THE OTHER HALF OF THAT SENTENCE IS SPENT, AND THE CONCLUSION SURVIVES IT.** It read "no binding is
- * persistable (design §3.3: no scratch survives a reload, so a stored binding has exactly one value
- * that could ever resolve)". 5d-ii-d makes scratch buffers survive a reload, so a stored binding now
- * has as many resolvable values as there are buffers — but it still does not belong HERE. A binding is
- * meaningless without the buffer it names, so the two are persisted together under
- * `redextape.buffers` (`buffers-store.ts`'s `PersistedBuffers`, design §4.1): "this key is absent or
- * garbage" then degrades to no bindings at all rather than to a tree full of names nothing can
- * resolve, and no reconciliation pass has to exist. `redextape.layout` stays at `version: 1` because
- * this shape did not change — which is the practical dividend of having kept the session out of it.
+ * **NOR IS A BINDING STORED HERE.** A binding is meaningless without the buffer it names, so the two are
+ * persisted together under `redextape.buffers` (`buffers-store.ts`'s `PersistedBuffers`, 5d-ii-d design
+ * §4.1): "this key is absent or garbage" then degrades to no bindings at all rather than to a tree full of
+ * names nothing can resolve, and no reconciliation pass has to exist.
  *
  * EVERY OPERATION RETURNS A NEW TREE. Nothing here mutates its argument — the caller holds one tree
  * and replaces it, which is what makes an undo or a persistence write a matter of keeping the old
@@ -35,56 +30,17 @@ export type LayoutNode =
  * node-testable. `layout-view.ts` converts a pointer delta into a fraction of the split's measured
  * extent before calling `resize`, which is the one place a pixel exists.
  *
- * MEASURED 2026-08-18 (`pnpm test:probe:floor`, `tests/browser/pane-floor.test.ts`), not merely chosen
- * — 5d-iv T6. The first pass of that task drove only the source/λ (row, WIDTH) divider and read
- * `clipped` off the wrong element; both gaps were found by the probe's own author and fixed the same
- * day, so the table below is the RE-MEASURED reading, not the original one. The probe mounts the real
- * app at three imposed window SIZES (width and height both — a height floor read against an
- * unconstrained container height is the same fiction an unmeasured width would be) and drags BOTH
- * dividers hard past the floor: source/λ (row split) for width, and the row-of-source-and-λ / TM
- * (column split, root) for height. `resize`'s clamp lands each drag exactly on 0.1.
+ * 0.1 STANDS FOR WIDTH, MEASURED (`pnpm test:probe:floor`, `tests/browser/pane-floor.test.ts`), not merely
+ * chosen. `source`'s editor keeps mounting and running at the floor at all three window sizes the probe
+ * imposes — nothing destroyed or hidden, only scrolled. λ's DEFAULT view is `.term`, a plain element with
+ * `white-space: pre-wrap` — not a `ScratchEditor` at all, so it wraps instead of overflowing horizontally.
+ * λ only gains `source`'s editor machinery, and by extension `source`'s measured floor behaviour, once
+ * forked into a scratch buffer — a state the probe does not exercise directly, so that half is inference
+ * by symmetry rather than a direct measurement.
  *
- * | window | source | λ (unforked) | tm, full width | tm, at its OWN (height) floor |
- * | --- | --- | --- | --- | --- |
- * | 900x600   | 89px, overflow 2.28x  | 799px, overflow n/a  | 900px, overflow 1.00x  | 59px, overflow 11.46x |
- * | 1200x800  | 119px, overflow 1.71x | 1069px, overflow n/a | 1200px, overflow 1.00x | 79px, overflow 8.56x  |
- * | 1920x1080 | 191px, overflow 1.06x | 1717px, overflow n/a | 1920px, overflow 1.00x | 107px, overflow 6.32x |
- *
- * `overflow` IS A RATIO (inner content extent ÷ box extent), not the boolean the first pass printed.
- * That boolean read the `[data-leaf]` PANE element's own `scrollWidth`/`clientWidth`, which never
- * differs no matter how hard the pane is squeezed — CodeMirror's `.cm-scroller` and TM's `.cells`
- * absorb all the real overflow one level in, so the boolean was `false` at every width regardless,
- * which is worse than not measuring: a reader would take it as reassurance it never earned. The ratio
- * measures the scroller that actually overflows. `source`'s three figures agree on ~203px of content
- * (`let x = 40; x + 2`, `.cm-scroller`'s `white-space: pre`) squeezed into a shrinking box — the
- * "about four characters, scroll for the rest" state this doc predicted before anything was measured,
- * confirmed rather than contradicted. `tm, full width` is not a floor reading (only the height drag
- * touches TM) — its 1.00x is just "not squeezed," included for contrast with the last column.
- *
- * 0.1 STANDS FOR WIDTH. `source`'s editor keeps mounting and running at the floor at all three
- * widths — nothing destroyed or hidden, only scrolled. λ's DEFAULT view is `.term`, a plain element
- * with `white-space: pre-wrap` — not a `ScratchEditor` at all, so it wraps instead of overflowing
- * horizontally and `overflow=n/a` above is a real absence of a `.cm-scroller`, not a probe gap. λ only
- * gains `source`'s editor machinery, and by extension `source`'s measured floor behaviour, once forked
- * into a scratch buffer — a state this reading still does not exercise directly, so that half remains
- * inference by symmetry rather than a direct measurement.
- *
- * 0.1 DID NOT STAND FOR TM's HEIGHT WHEN THIS WAS MEASURED, AND THAT WAS A FINDING, NOT A FIX. At every
- * size TM's own content was 6-11x taller than the box the drag left it — the `[data-leaf="tm-0"]` pane's
- * `overflow: auto` genuinely fired here (unlike the width case above), because `.state-table`'s cap was
- * then `max-height: 40vh`, relative to the BROWSER'S viewport, not to this pane. A divider drag does not resize the browser
- * window, so shrinking TM's allocated share of the split does nothing to that cap — the δ-table (open
- * by default, since `createPanel`'s `open` option defaults to `true`) stays whatever size the WINDOW
- * allows regardless of how little SPACE the pane itself was just given. This is a shape mismatch
- * between two different boxes a CSS unit was written against, not a wrong constant — no fraction near
- * 0.1 closes it, since the content driving the overflow does not shrink as the fraction does. Per
- * design §9 this module does not become the place a pixel fix would live even if one were made; this
- * is flagged as a design question (does `.state-table`'s cap want to track the PANE rather than the
- * viewport?) rather than acted on here.
- *
- * **PLAN 7 PART 4's SPEC §9.1 ANSWERED IT: THE TABLE TRACKS THE VIEW.** A TM view's open panels now share its
- * height through flex, each down to a floor, so a drag shrinks the table with the pane until the floors are
- * reached, and the view scrolls only below them. The 6-11x figures above predate that and were not re-measured.
+ * HEIGHT IS THE VIEW'S OWN (Plan 7 part 4's spec §9.1): a TM view's open panels share its height through
+ * flex, each down to a floor, so a drag shrinks its δ table with the pane until the floors are reached, and
+ * the view scrolls only below them.
  */
 export const MIN_PANE_FRACTION = 0.1
 
@@ -99,19 +55,16 @@ export const MIN_PANE_FRACTION = 0.1
  * gesture through. A source leaf that came back under a fresh id would be a different leaf as far as
  * every one of those is concerned — an empty pane beside a detached editor.
  *
- * EXPORTED NOW THAT A SECOND MODULE MINTS ONE. It was a literal in the default tree below and three
- * more in `main.ts` while the only source leaf was the one a fresh page shipped; `pane-host.ts`'s split
- * handler creating one through the picker is what made "the id is the same id" a claim two files have to
- * agree on rather than a spelling.
+ * EXPORTED BECAUSE A SECOND MODULE MINTS ONE: `pane-host.ts`'s split handler creates one, so "the id is
+ * the same id" is a claim two files have to agree on rather than a spelling.
  */
 export const SOURCE_LEAF: LeafId = 'source'
 
 /**
  * The four kinds, in the order a combination's key spells them and a default arrangement places them: source, λ, asm,
- * TM (the view layouts spec §4.1) — the order all four views have had on the page since the asm view joined them.
+ * TM (the view layouts spec §4.1) — the order all four views have on the page.
  *
- * **KEYED BY `PaneKind` AND THEN LISTED**, as `PANE_KINDS` below was before it read this: a kind left out is a type
- * error here, and the keys are the list.
+ * **KEYED BY `PaneKind` AND THEN LISTED**: a kind left out is a type error here, and the keys are the list.
  *
  * **NOT THE HEADER'S ORDER**, which is `HEADER_ORDER` below: where a view sits in the default grid and where its
  * toggle sits in the header are two decisions, and the user made the second one differently.
@@ -147,10 +100,7 @@ export const KIND_WORD: Readonly<Record<PaneKind, string>> = { source: 'source',
 /** Whether the views area is wider than it is tall (`wide`) or taller than it is wide (`tall`) — spec §4.4. */
 export type Shape = 'wide' | 'tall'
 
-/**
- * The id a kind's view has in a default arrangement — the four `defaultLayout()` minted as literals while it was all
- * four views.
- */
+/** The id a kind's view has in a default arrangement. */
 const DEFAULT_LEAF: Readonly<Record<PaneKind, LeafId>> = {
   source: SOURCE_LEAF,
   lambda: 'lambda-0',
@@ -171,12 +121,11 @@ const DEFAULT_LEAF: Readonly<Record<PaneKind, LeafId>> = {
  *
  * **IN A WIDE AREA NO DIVIDER AND NO VIEW RUNS THE WHOLE WIDTH** (the user's decision, 2026-10-11): the views are
  * columns side by side, each with its own stack, so the one divider that spans the area is the vertical one and each
- * side's views are resized on their own. It was a column of rows, whose one horizontal divider moved both sides
- * together, and whose third view lay across the whole width. A tall area gets the same trees turned on their side,
- * since there a view across the width is the only view wide enough to read.
+ * side's views are resized on their own. A tall area gets the same trees turned on their side, since there a view
+ * across the width is the only view wide enough to read.
  *
- * **ALL FOUR SIT IN THE SAME CORNERS IN BOTH**: source top left, λ top right, asm bottom left, TM bottom right — where
- * they have been since the asm view joined them. What differs is which pairs share a divider.
+ * **ALL FOUR SIT IN THE SAME CORNERS IN BOTH**: source top left, λ top right, asm bottom left, TM bottom right. What
+ * differs is which pairs share a divider.
  *
  * **IT THROWS FOR NO KINDS**: a tree has a leaf or more, and every caller holds a combination, which is not empty.
  */
@@ -205,15 +154,12 @@ export function defaultArrangement(kinds: readonly PaneKind[], shape: Shape): La
  * The arrangement a first load and `reset preset` build: the source beside the TM view (the user's decision,
  * 2026-10-11; the view layouts spec §8). It is `defaultArrangement` of those two kinds, so the two cannot disagree.
  *
- * **IT WAS ALL FOUR VIEWS** — source and λ above, asm and TM below — until the header's `views` toggles could show any
- * combination; all four are `defaultArrangement(KIND_ORDER, …)` now, in the same corners.
- *
  * **THE TM VIEW IS THE FIRST VIEW LEAF**, so a first load focuses it: `workspace.ts`'s `defaultFocus` takes the first
  * leaf that is not the source. **A STORED LAYOUT IS NOT MIGRATED** — it is still valid and keeps its arrangement, so
  * `LAYOUT_VERSION` does not move.
  *
- * **`shape` HAS NO DEFAULT**, so a caller that leaves the area's shape out does not compile. While it defaulted to
- * `wide`, *reset preset* with its measurement dropped built a row in a tall window and every test passed.
+ * **`shape` HAS NO DEFAULT**, so a caller that leaves the area's shape out does not compile. With a default of `wide`,
+ * *reset preset* with its measurement dropped would build a row in a tall window and every test would pass.
  */
 export function defaultLayout(shape: Shape): LayoutNode {
   return defaultArrangement(['source', 'tm'], shape)
@@ -246,7 +192,8 @@ function hasSource(root: LayoutNode): boolean {
  * split runs `dir`, and otherwise in a new split of `dir` holding the two at `[0.5, 0.5]`.
  *
  * **`insertBeside`'s AND `splitLeaf`'s BODY, AND THE REFUSALS ARE THE TREE'S OWN INVARIANTS**: the leaf is in the
- * tree, at most one source leaf, and no id twice (`splitLeaf`'s own doc has the arguments for the last two).
+ * tree, at most one source leaf, since there is one editor for it to hold, and no id twice (`splitLeaf`'s own doc
+ * has the argument for the last).
  *
  * **AN EQUAL SHARE KEEPS THE OTHERS' PROPORTIONS**: in a split of `n`, the new leaf takes `1/(n+1)` and each size
  * already there is multiplied by `n/(n+1)`. Sizes that summed to `1 + e` sum to `1 + e·n/(n+1)`, so a drift from 1
@@ -285,16 +232,15 @@ function insert(root: LayoutNode, id: LeafId, dir: Dir, newId: LeafId, kind: Pan
  * focused view can be the source view — or the only view, when every other has been closed. `splitLeaf`'s
  * subject refusal is about the `⋯` menu's split items, which duplicate the view they are chosen on, and there
  * is one editor, so the source view offers none; that argument says nothing about putting a DIFFERENT view
- * next to it. The other refusals are the tree's own invariants and stay: at most one source leaf, and no id
- * twice (`splitLeaf`'s own doc has both arguments).
+ * next to it. The other refusals are the tree's own invariants and stay: at most one source leaf, since there
+ * is one editor, and no id twice (`splitLeaf`'s own doc has the argument for that one).
  *
- * **IT TAKES AN EQUAL SHARE OF THE ROW, WHERE IT USED TO HALVE THE VIEW** (the user's decision, 2026-10-04). It
- * wrapped the view in a new split at `[0.5, 0.5]` as a split does, and a new view takes the focus, so each press
- * halved the view the last one made: at 1280×800 the newest λ view measured 311, 149.5, 68.8, 28.4, 8.2 and then 0
- * px, and each press nested the tree one split deeper. The view joins the row now, right after the one it is added
- * beside, and the views already there keep their proportions and shrink to make room — the source view too, when it
- * shares the row. A view whose split is not a row, or that is the whole tree, is wrapped as before. `addRefusal`
- * below is what stops a share going under `MIN_VIEW_PX`.
+ * **IT TAKES AN EQUAL SHARE OF THE ROW, AND DOES NOT HALVE THE VIEW** (the user's decision, 2026-10-04). A new
+ * view takes the focus, so wrapping each in a new split at `[0.5, 0.5]`, as a split does, would halve the view
+ * the last press made and nest the tree one split deeper per press. The view joins the row, right after the one
+ * it is added beside, and the views already there keep their proportions and shrink to make room — the source
+ * view too, when it shares the row. A view whose split is not a row, or that is the whole tree, is wrapped as a
+ * split wraps it. `addRefusal` below is what stops a share going under `MIN_VIEW_PX`.
  */
 export function insertBeside(root: LayoutNode, id: LeafId, dir: Dir, newId: LeafId, kind: PaneKind): LayoutNode {
   return insert(root, id, dir, newId, kind, true)
@@ -303,45 +249,42 @@ export function insertBeside(root: LayoutNode, id: LeafId, dir: Dir, newId: Leaf
 /**
  * Replace the leaf `id` with a split holding it and a new leaf of `kind`.
  *
- * `kind` IS THE CALLER'S CHOICE, NOT A COPY OF THE SPLIT LEAF'S. It used to be: splitting the λ pane
- * gave a second λ pane, which the binding selector 5d-i shipped could then point at a scratch, and
- * that was "two λ sessions side by side" with `PaneSlot<K>` untouched. A caller that still wants that
- * passes the same kind back — the picker's first entry, labelled `(same)`, is exactly that request, and
- * it is what `pane-host.ts`'s split handler forwards here — but the tree itself no longer decides.
+ * `kind` IS THE CALLER'S CHOICE, NOT A COPY OF THE SPLIT LEAF'S. A caller that wants a second pane of the
+ * split leaf's kind passes the same kind back — the split menu's first entry is exactly that request,
+ * and it is what `pane-host.ts`'s split handler forwards here — but the tree itself does not decide.
  *
  * THIS FUNCTION HAS TWO `'source'` REFUSALS, ON TWO DIFFERENT ARGUMENTS, AND THEY ARE NOT THE SAME
- * REFUSAL (design §4.2a):
+ * REFUSAL (5d-ii-b design §4.2a):
  *
  * | argument | refusal |
  * | --- | --- |
- * | `id`, the leaf being split | always, if it is `'source'` — unchanged from before this kind existed |
+ * | `id`, the leaf being split | always, if it is `'source'` |
  * | `kind`, the leaf being created | only if a `'source'` leaf is already in the tree |
  *
  * THE SUBJECT'S REFUSAL IS UNCONDITIONAL because there is one editor, so there is nothing to duplicate
  * into, and a split producing an undefined second thing is the fabricated state `session.rs`'s
- * `Session::tm` prices. `layout-view.ts` does not render a split control on the source pane at all — this throw is
- * the backstop for a caller that got there another way, not the UI.
+ * `Session::tm` prices. The source view is offered no split control at all — this throw is the backstop
+ * for a caller that got there another way, not the UI.
  *
  * THE TARGET'S REFUSAL IS CONDITIONAL, ON PURPOSE: this function must be able to CREATE a source leaf
  * — letting a closed source pane come back without discarding the whole layout is the capability that
- * needs it, and it has shipped: `pane-chrome.ts`'s picker offers `source` exactly while the tree has
- * none, and `pane-host.ts`'s split handler makes that call with `SOURCE_LEAF` — while still enforcing
- * "at most one source leaf" on a tree that already has one. The UI's own `sourceAvailable` and this
- * refusal ask the same question of the same tree; this one is what holds when a caller does not.
- * `setLeafKind` below refuses `'source'` as a target unconditionally instead, because a pane never
- * BECOMES the source pane; that they read as the same guard is exactly why its own doc restates this
- * table rather than pointing here.
+ * needs it: `viewMenu` offers `source` exactly while the tree has none, and `pane-host.ts`'s split
+ * handler makes that call with `SOURCE_LEAF` — while still enforcing "at most one source leaf" on
+ * a tree that already has one. The UI's own `sourceAvailable` and this refusal ask the same question of
+ * the same tree; this one is what holds when a caller does not. `setLeafKind` below refuses `'source'`
+ * as a target unconditionally instead, because a pane never BECOMES the source pane; that they read as
+ * the same guard is exactly why its own doc restates this table rather than pointing here.
  *
  * `newId` IS REFUSED IF IT IS ALREADY IN THE TREE. `findLeaf` resolves an id with `.find()`, so a
  * duplicate would not error — it would silently make the second leaf unreachable, present in the tree
- * but never returned. `parseLayout` already treats a duplicate id as an invalid tree on load, so this
- * refusal keeps the tree unable to reach that state in the first place rather than only detecting it
- * after the fact.
+ * but never returned. `parseTree` already treats a duplicate id as an invalid tree on load
+ * (`parseWorkspace` reads every stored tree through it), so this refusal keeps the tree unable to reach
+ * that state in the first place rather than only detecting it after the fact.
  *
  * **ITS LAST TWO REFUSALS ARE `insertBeside`'s**, whose body it shares once the subject passes; the table
  * above still describes what a caller of either sees.
  *
- * **A SPLIT STILL HALVES THE VIEW IT IS CHOSEN ON, WHERE `+ view` NOW TAKES AN EQUAL SHARE OF THE ROW**: a split is
+ * **A SPLIT HALVES THE VIEW IT IS CHOSEN ON, WHERE `+ view` TAKES AN EQUAL SHARE OF THE ROW**: a split is
  * this view in two, and its `⋯` menu says so. This function refuses nothing for size: `pane-host.ts`'s `admit` asks
  * `addRefusal` first, on width for either direction and on height too for a column.
  */
@@ -366,8 +309,7 @@ export function splitLeaf(root: LayoutNode, id: LeafId, dir: Dir, newId: LeafId,
  * a `PaneView` this tree can conjure. A reader who finds a tree with no source leaf will expect that to
  * unlock this call, so the refusal is unconditional and this paragraph is why.
  *
- * A `'source'` LEAF IS ALSO REFUSED AS THE SUBJECT, for `splitLeaf`'s reason one line up: the editor
- * would be left with no host in the tree.
+ * A `'source'` LEAF IS ALSO REFUSED AS THE SUBJECT: the editor would be left with no host in the tree.
  */
 export function setLeafKind(root: LayoutNode, id: LeafId, kind: PaneKind): LayoutNode {
   const target = findLeaf(root, id)
@@ -394,8 +336,8 @@ export function setLeafKind(root: LayoutNode, id: LeafId, kind: PaneKind): Layou
  * [0.2/0.7, 0.5/0.7] rather than [0.5, 0.5] — the panes the user sized stay the relative size the user
  * made them.
  *
- * THE LAST LEAF CANNOT GO. An empty tree has no honest rendering, and `layout-view.ts` omits the close
- * control when one leaf remains, so this throw is a backstop rather than the mechanism.
+ * THE LAST LEAF CANNOT GO. An empty tree has no honest rendering, and `view-header.ts`'s `viewMenu` omits
+ * the close control when one leaf remains, so this throw is a backstop rather than the mechanism.
  */
 export function closeLeaf(root: LayoutNode, id: LeafId): LayoutNode {
   if (findLeaf(root, id) === null) throw new Error(`cannot close a leaf that is not in the tree: ${id}`)
@@ -450,10 +392,9 @@ function at(root: LayoutNode, path: number[]): LayoutNode {
  *
  * **TWO NEIGHBOURS THAT CANNOT BOTH HOLD THE FLOOR DO NOT MOVE.** Where their shares together are under two floors the
  * clamp's bounds cross: the least it may move is more than the most. That is so from a row of 11 equal views, which
- * tiles can build in an area 1,880 px wide, the Stage at any width, and a stored layout can hold. In a row of 11 to
- * 19 the clamp took the first neighbour to the floor whichever way the divider was dragged, shares of 0.1 and 0.0818
- * in a row of 11, and then moved neither again. In a row of 20 that left the second a share of nothing, and in one of
- * 21 less than nothing, 0.1 and −0.0048: each a tree `parseTree` refuses, so the next load threw the workspace away.
+ * tiles can build in an area 1,880 px wide, the Stage at any width, and a stored layout can hold. Clamped anyway, the
+ * first neighbour would go to the floor whichever way the divider was dragged, and from a row of 20 the second would
+ * be left a share of nothing or less: a tree `parseTree` refuses, so the next load would throw the workspace away.
  * The tree is answered as it was given.
  */
 export function resize(root: LayoutNode, path: number[], index: number, delta: number): LayoutNode {
@@ -505,8 +446,8 @@ export const SIZE_EPSILON = 1e-6
  * **WHAT IT BOUNDS IS THE READING, NOT WHICH TREES PARSE.** A split has two children or more, so a tree 64 splits deep
  * has at least 65 leaves and `MAX_TREE_LEAVES` refuses it anyway. But `validate` reads a split's first child whole
  * before its second, so a tree that nests down its first children reaches no leaf until its deepest split, and the
- * leaf count cannot stop the reading. Unbounded, the recursion threw `RangeError` at 6,000 splits deep, on a link of
- * 25,011 characters. This stops it at the 65th split.
+ * leaf count cannot stop the reading. Unbounded, the recursion would throw `RangeError` on a tree a link can carry.
+ * This stops it at the 65th split.
  *
  * **NO ADD CAN REACH IT**: a tree of at most `MAX_TREE_LEAVES` leaves is at most 63 splits deep, so the bound on live
  * views, which holds every add's tree to that many leaves (`pane-host.ts`'s `admit`), holds it to this one too.
@@ -516,15 +457,13 @@ const MAX_TREE_DEPTH = 64
 /**
  * The most leaves a tree may have; all four views' default arrangement has 4 (spec §5.3, amended 2026-10-01).
  *
- * **A LINK BROUGHT TREES THE STORE NEVER HAD.** A link of 2,034 characters held 400 λ views, which took 4.4 s to open
- * and were stored, so every later load built them again.
+ * **A LINK CAN BRING TREES THE STORE NEVER HAD**: 400 λ views took 4.4 s to open, and what a link brings is stored,
+ * so every later load would build it again.
  *
- * **THE APP STOPS HERE NOW, WHERE IT USED TO BUILD PAST IT** (2026-10-04). `+ view` nested each view it added one
- * split deeper and put no limit on how many, so its 61st press in a row from the default made 65 leaves, a layout that
- * fell back to the default at the next load. `pane-host.ts`'s `admit` refuses an add that would make a 65th live view,
- * from `+ view` and from a split, in tiles and on the Stage: the views of the tree on screen, and with them the ones
- * a remembered arrangement keeps off it (`arrangements.ts`'s `liveLeaves`). Exported so that nothing which holds the
- * bound or says the number copies it.
+ * **THE APP STOPS HERE.** `pane-host.ts`'s `admit` refuses an add that would make a 65th live view, from `+ view` and
+ * from a split, in tiles and on the Stage: the views of the tree on screen, and with them the ones a remembered
+ * arrangement keeps off it (`arrangements.ts`'s `liveLeaves`). A tree past the bound falls back to the default at the
+ * next load. Exported so that nothing which holds the bound or says the number copies it.
  */
 export const MAX_TREE_LEAVES = 64
 
@@ -543,13 +482,12 @@ export function holdsMostLeaves(root: LayoutNode): boolean {
 
 /**
  * The narrowest a view an add makes, or shrinks, may be, in CSS pixels (the user's decision, 2026-10-04) — and, for a
- * split down, the shortest (the controller's choice the same day: a split down divides height).
+ * split down, the shortest, since a split down divides height.
  *
  * **PIXELS, WHERE `MIN_PANE_FRACTION` IS A FRACTION, AND THIS MODULE STILL MEASURES NOTHING.** What a view can show
- * is a matter of pixels and not of its share: `+ view` pressed in a row at 1280 wide took the newest view to 0 px, each
- * press a half of the last, and no floor on a fraction of a split refuses a half. `addRefusal` is handed the tiled
- * area's size and the dividers' width by its caller, which makes the one measurement (`pane-host.ts`'s `admit`), so the
- * arithmetic here stays a value.
+ * is a matter of pixels and not of its share: no floor on a fraction of a split refuses a half, and a view halved
+ * again and again goes to 0 px. `addRefusal` is handed the tiled area's size and the dividers' width by its caller,
+ * which makes the one measurement (`pane-host.ts`'s `admit`), so the arithmetic here stays a value.
  *
  * **IT GATES THE ADD GESTURES ONLY, AND ONLY IN TILES**: a divider drag keeps `MIN_PANE_FRACTION`, and a window made
  * smaller, a switch that opens the inspector (the Debugger and Stage presets, or the readout switch), a stored layout,
@@ -571,11 +509,9 @@ export type Axis = keyof Extent
  *
  * **THE STYLESHEET'S ARITHMETIC, NOT A MEASUREMENT.** Each split's children have a `flex-grow` of their size, a basis
  * of 0 and no minimum, and a divider of fixed width sits between each pair, so a child gets its size's share of the
- * split's extent less its dividers — and nothing, when the dividers alone overrun it. Measured at 1280×800 with no
- * notice up, `#views` is 1280×725.5 px and each default view 634×356.75, which is what this answers for that area.
- * **IT DRAWS A TREE THAT IS NOT ON THE PAGE YET** — the one an add would build — which is why it is arithmetic: in
- * tiles every view of the current tree measures what this says (the review's probe, within 0.012 px in nested layouts),
- * and the Stage, which mounts one view, is not asked (`pane-host.ts`'s `admit`).
+ * split's extent less its dividers — and nothing, when the dividers alone overrun it. **IT DRAWS A TREE THAT IS NOT
+ * ON THE PAGE YET** — the one an add would build — which is why it is arithmetic: in tiles every view of the current
+ * tree measures what this says, and the Stage, which mounts one view, is not asked (`pane-host.ts`'s `admit`).
  */
 export function leafExtents(root: LayoutNode, area: Extent, gap: number): Map<LeafId, Extent> {
   const out = new Map<LeafId, Extent>()
@@ -608,12 +544,10 @@ export type AddRefusal = 'full' | 'narrow' | 'short'
  * view it makes narrower, would come out under `MIN_VIEW_PX` wide; and, where `divides` is `'height'` (a split down),
  * `'short'` when either half would come out under it tall.
  *
- * **WIDTH IS HELD FOR EVERY ADD, WHATEVER IT DIVIDES** (the user's decision 2: "narrower than 160 px"). It was held
- * only along the axis the add divides — the controller's brief said so, and that was the error — so a split down of a
- * view already under 160 px wide made a second view as narrow, unrefused: a view dragged to 152.16 px, split down, gave
- * two of 152.16 × 172.375 (the re-review's probe, 2026-10-04). **HEIGHT IS HELD FOR A SPLIT DOWN ALONE**, the
- * controller's choice: it is the one add that makes a view shorter. Width is asked first, so a split down short of both
- * is said as narrow.
+ * **WIDTH IS HELD FOR EVERY ADD, WHATEVER IT DIVIDES** (the user's decision, 2026-10-04: "narrower than 160 px").
+ * Held only along the axis the add divides, a split down of a view already under 160 px wide would make a second view
+ * as narrow, unrefused. **HEIGHT IS HELD FOR A SPLIT DOWN ALONE**: it is the one add that makes a view shorter. Width
+ * is asked first, so a split down short of both is said as narrow.
  *
  * **`build` IS THE ADD ITSELF** — the caller's own `insertBeside` or `splitLeaf` call, handed the new leaf's id — so
  * what is checked is what would be built, and an equal share and a halving are answered by the one function. It is
@@ -687,20 +621,21 @@ export function serializeLayout(root: LayoutNode): string {
  * `validate` asks it about a string not yet known to be a kind, and a list typed that way says nothing about
  * the union; even `satisfies readonly PaneKind[]` would say only that each entry is a kind, never that each
  * kind is an entry. A kind left out here would fail `validate` for every stored layout that shows one, and a
- * layout that fails is replaced by the default without a word (`parseLayout`'s own doc), so a view of the new
+ * layout that fails is replaced by the default without a word (`parseWorkspace`'s own doc), so a view of the new
  * kind would be lost on every reload with `tsc` green. The `satisfies` makes a missing kind a type error, and
  * the keys are the list (`legs.ts` has the class of bug). **THE LIST IS `KIND_ORDER`'s**, which is where the
- * `satisfies` is written now: one keyed record, read here as strings and there as kinds.
+ * `satisfies` is written: one keyed record, read here as strings and there as kinds.
  */
 const PANE_KINDS: readonly string[] = KIND_ORDER
 
 /**
  * Validate one node and collect its leaf ids, returning `false` on the first violation.
  *
- * IT CHECKS §4.1's INVARIANTS AND NOT ONLY THE SHAPE, WHICH IS THE WHOLE POINT. A single-child split
- * or sizes summing to 1.4 parse perfectly as JSON and then render as a pane with wrong padding or a
- * gap where a divider should be — a crash would at least be reported. The hazard is a hand-edited
- * entry, so every rejection here is something a person could plausibly type.
+ * IT CHECKS 5d-ii-a §4.1's INVARIANTS AND NOT ONLY THE SHAPE, WHICH IS THE WHOLE POINT. A single-child split
+ * or sizes summing to 1.4 parse perfectly as JSON and then render silently wrong: a pane with wrong
+ * padding, or views drawn in proportions other than the fractions their dividers report — a crash
+ * would at least be reported. The hazard is a hand-edited entry, so every rejection here is
+ * something a person could plausibly type.
  *
  * **AND A LINK, WHICH NO PERSON NEED HAVE TYPED** (Plan 7 part 6a spec §5.3, amended 2026-10-01): a link's workspace is
  * read here too, so the tree is bounded as well as valid. `splitsAbove` counts the splits over `node`.
@@ -715,7 +650,7 @@ function validate(node: unknown, ids: Set<string>, splitsAbove: number): node is
     if (number !== null && number > MAX_LEAF_NUMBER) return false
     if (typeof n.pane !== 'string' || !PANE_KINDS.includes(n.pane)) return false
     // THE SOURCE KIND AND `SOURCE_LEAF` IMPLY EACH OTHER, AND NEITHER DIRECTION IS DECORATION.
-    // `parseLayout`'s `sources > 1` count below says at most one leaf renders the editor; it does NOT
+    // `parseTree`'s `sources > 1` count below says at most one leaf renders the editor; it does NOT
     // say that leaf is the one every other module means. `SOURCE_LEAF`'s own doc has the consequence:
     // a source leaf under a fresh id "would be a different leaf as far as every one of those is
     // concerned — an empty pane beside a detached editor". `pane-host.ts`'s creation pass skips the
@@ -770,11 +705,10 @@ export function parseTree(tree: unknown): LayoutNode | null {
 /**
  * The stored layout, or `null` if there is nothing usable there.
  *
- * `null` RATHER THAN A THROW OR A DEFAULT. The caller already knows what the default is
- * (`defaultLayout()`), and returning it from here would make "there was nothing stored" and "what was
- * stored was garbage" indistinguishable to a test. Failure is silent to the user by design §4.4: a
- * layout is a preference, and a banner on every load after a schema bump is worse than what it
- * reports.
+ * `null` RATHER THAN A THROW OR A DEFAULT: returning a default from here would make "there was nothing
+ * stored" and "what was stored was garbage" indistinguishable to a test. Failure is silent to the user
+ * by 5d-ii-a design §4.4: a layout is a preference, and a banner on every load after a schema bump is
+ * worse than what it reports.
  */
 export function parseLayout(raw: string | null): LayoutNode | null {
   if (raw === null) return null

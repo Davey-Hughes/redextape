@@ -15,35 +15,27 @@ import { fakeClient, lambdaFrame, paint } from './session-fixtures'
 import { tmFrame } from './tm-machines'
 
 /**
- * THE BINDING MODEL, DRIVEN WITHOUT A BROWSER — plan T7's claim at the level where it is decided.
+ * THE BINDING MODEL, DRIVEN WITHOUT A BROWSER, at the level where it is decided.
  *
  * The claim is that two panes bound to two DIFFERENT λ sessions render two different terms
- * simultaneously, and the plan is explicit that "anything weaker passes on a single-session
- * implementation". `tests/browser/view-title.test.ts` asserts the same thing with real
- * `LambdaPane`s and real text in a real DOM; this file asserts it against the resolution itself, with
- * recording fakes, which is what makes the failure legible when it breaks — a browser failure says
- * "two panes read the same string", this one says which binding resolved to which leg.
+ * simultaneously, because anything weaker passes on a single-session implementation.
+ * `tests/browser/view-title.test.ts` asserts the same thing with real `LambdaPane`s and real text in a
+ * real DOM; this file asserts it against the resolution itself, with recording fakes, which is what
+ * makes the failure legible when it breaks — a browser failure says "two panes read the same string",
+ * this one says which binding resolved to which leg.
  *
- * NEITHER TIER DRIVES THE APP, AND THAT IS A FINDING RATHER THAN A SHORTCUT. `main.ts` registers
- * exactly one session and nothing in this slice can add a second: a `LambdaScratch` session needs a
- * worker message `session-worker.ts` does not have, and creating one by editing a source-derived λ
- * view is design §4.3, which is T8. So an app-level two-λ-sessions test has nothing to bind to. The
- * production path is shared instead of re-implemented: `main.ts`'s `draw()` calls exactly
+ * The production path is shared instead of re-implemented: `draw.ts`'s per-pane loop calls exactly
  * `slot.resolve(reg)` and `slot.render(reg, pane, leg)`, which is what the `it`s below call.
  *
- * **T8 SHIPPED THE MESSAGE AND THE FINDING SURVIVED IT, NARROWED.** The app registers a second session
- * now (`tests/browser/scratch-app.test.ts` clicks the control that does it), so "nothing in this slice
- * can add a second" is history. Two λ PANES is what it still cannot reach — there is one — so the
- * registry below is still built here and for the same reason.
+ * Section citations here are the 5d-i design's unless they name another.
  */
 
 /**
  * One session, its legs seeded with the frames given.
  *
  * A LEG IS OMITTED WHEN ITS ARGUMENT IS, WHICH IS THE POINT rather than convenience: §4.1's scratch
- * types have one leg apiece, and this task is the one that made `SessionLegs` optional so a registry
- * can hold them. A helper that always built both would make every assertion below about `options`
- * vacuous.
+ * types have one leg apiece, and `SessionLegs` is optional so a registry can hold them. A helper that
+ * always built every leg would make every assertion below about `options` vacuous.
  */
 function entry(
   id: SessionId,
@@ -81,7 +73,7 @@ function entry(
   }
 }
 
-/** A `PaneView` that records every call instead of touching a DOM. */
+/** A `PaneView` that records its render, binding and detached calls instead of touching a DOM. */
 function recorder<T>() {
   const frames: (T | null)[] = []
   const controls: ControlState[] = []
@@ -102,8 +94,8 @@ function recorder<T>() {
 
 /**
  * Inert language-server handle for the transport fixtures below, which drive stepping and binding
- * rather than language features. ONE stub rather than one per fixture: widening `lspClient`'s type is
- * a regular event in part 3a, and four copies would each have to be found and widened by hand.
+ * rather than language features. ONE stub rather than one per fixture: a widened `lspClient` type
+ * would otherwise have to be found and widened in every copy by hand.
  */
 const LSP_STUB = {
   openDocument() {},
@@ -148,9 +140,10 @@ describe('SessionRegistry', () => {
 
   /**
    * "THE SOURCE SESSION OFFERS source/λ/TM; A `LambdaScratch` OFFERS ONLY λ; A `TmScratch` ONLY TM"
-   * (plan T7) — asserted as the filter it is, which is also the whole content of what a selector may
-   * put in front of a user. A slot showing λ must never be offered a session with no λ leg, because
-   * `legOf` throws on one, and these two facts are the same fact read from two sides.
+   * (5d-i decision 1, in the words of 5d-i's plan, T7) — asserted as the filter it is, which is also
+   * the whole content of what a selector may put in front of a user. A slot showing λ must never be
+   * offered a session with no λ leg, because `legOf` throws on one, and these two facts are the same
+   * fact read from two sides.
    */
   it('offers a leg only the sessions that have it, in registration order', () => {
     const reg = new SessionRegistry()
@@ -171,10 +164,9 @@ describe('SessionRegistry', () => {
 
 describe('PaneSlot', () => {
   /**
-   * THE TEST PLAN T7 NAMES, at the level the binding is resolved. Two slots, two λ sessions, painted
-   * in the same pass and asserted TOGETHER — a sequential "bind, check, rebind, check" would pass on
-   * an implementation with one session and a mutable global, which is precisely what the plan means
-   * by "anything weaker".
+   * TWO SLOTS, TWO λ SESSIONS, at the level the binding is resolved, painted in the same pass and
+   * asserted TOGETHER — a sequential "bind, check, rebind, check" would pass on an implementation with
+   * one session and a mutable global.
    *
    * THE FRAMES ARE DIFFERENT STRINGS ON PURPOSE, the same discriminator `pool-isolation.test.ts` uses
    * for three sessions' answers: identical terms would render identically even if both slots resolved
@@ -195,15 +187,15 @@ describe('PaneSlot', () => {
 
     expect(paneA.frames.at(-1)?.text).toBe('(λx. x) 1')
     expect(paneB.frames.at(-1)?.text).toBe('(λy. y y) 2')
-    // Stated as an inequality as well as two equalities: the mutation this task runs — resolving every
-    // binding to the source session — makes both texts `'(λx. x) 1'`, and this is the line that says
-    // so in one sentence rather than leaving it to be inferred from two.
+    // Stated as an inequality as well as two equalities: resolving every binding to the source session
+    // would make both texts `'(λx. x) 1'`, and this is the line that says so in one sentence rather than
+    // leaving it to be inferred from two.
     expect(paneA.frames.at(-1)?.text).not.toBe(paneB.frames.at(-1)?.text)
   })
 
-  // The other half of "simultaneously": one slot moves and the other does not. A `draw()` that
-  // repainted every pane from one resolved leg would pass the test above on the FIRST paint and fail
-  // here on the second.
+  // The other half of "simultaneously": one slot moves and the other does not. A slot that kept the
+  // session it was built on would pass the test above, whose slots never rebind, and fail here, where
+  // `b` is built on the source and then rebound.
   it('follows a rebind, and only the slot that rebound', () => {
     const reg = new SessionRegistry()
     reg.add(entry('source', { label: 'source', lambda: ['from source'], tm: [0] }))
@@ -227,40 +219,32 @@ describe('PaneSlot', () => {
   })
 
   /**
-   * **THE SESSION AXIS, WHICH IS THE WHOLE OF WHAT `transport.ts`'s HANDLER DECIDES — and this test used
-   * to assert one more thing, which moved.**
+   * **THE SESSION AXIS, WHICH IS THE WHOLE OF WHAT `transport.ts`'s HANDLER DECIDES.**
    *
-   * It was written for a Critical, found in review of the commit that widened the selector to
-   * `(leg, session)` pairs. The chain, all four links live: `PaneSlot.render` pushes `reg.pairs()` to
-   * EVERY pane, so a TM pane's selector listed the λ-only scratch; `transport.ts`'s handler kept the
-   * slot's leg and discarded the picked one, minting `{ leg: 'tm', session: 'lambda-scratch' }`; and
-   * `draw.ts`'s per-pane loop calls `slot.resolve` with no `try`/`catch`, so `legOf`'s throw took the
-   * whole render pass — not one dropped frame, but every frame after it. Three clicks from a fresh page:
-   * compile, fork the λ pane, then pick `λ scratchpad` on the TM pane's selector. The fix was a guard in
-   * that handler, and this test asserted the refusal: the slot unmoved, and — the assertion the render
-   * loop was implicitly making — the binding still resolving.
+   * A HANDLER THAT KEPT THE SLOT'S LEG AND DISCARDED THE PICKED ONE would mint `{ leg: 'tm',
+   * session: 'lambda-scratch' }` from a TM pane's pick of the λ-only scratch — `PaneSlot.render` pushes
+   * `reg.pairs()` to EVERY pane, so a TM pane's selector lists it — and `draw.ts`'s per-pane loop calls
+   * `slot.resolve` with no `try`/`catch`, so `legOf`'s throw would take the whole render pass: not one
+   * dropped frame, but every frame after it.
    *
-   * **THE REFUSAL BECAME A THROW, AND WHAT IT MEANS MOVED WITH IT.** A cross-leg pick is ACTED ON now:
-   * `pane-host.ts`'s `paneEvents.rebind` changes the leaf's kind and `applyLayout` rebuilds the entry on
-   * the picked leg. So "ignored" is no longer the app's answer and this test no longer asserts it — but
-   * the pick still cannot be projected onto this slot's leg, and that is what the throw below pins. The
-   * distinction is the whole of why the comparison came back after one commit without it: a silent
-   * decline is an ANSWER, and the wrong one now; a throw is this layer stating it does not answer.
-   * `new LambdaPane(host, transport.events(slot))` typechecks, and `scratch-fork.test.ts` writes that
-   * shape twice with hand-built events, so "no caller does this" is a fact worth checking rather than
-   * asserting.
+   * **A CROSS-LEG PICK IS ACTED ON, BUT NOT HERE.** `pane-host.ts`'s `paneEvents.rebind` changes the
+   * leaf's kind and `applyLayout` rebuilds the entry on the picked leg. The pick cannot be projected onto
+   * this slot's leg, and that is what the throw below pins: a silent decline is an ANSWER, and the wrong
+   * one; a throw is this layer stating it does not answer. `new LambdaPane(host, transport.events(slot))`
+   * typechecks, and `scratch-fork.test.ts` writes that shape twice with hand-built events, so "no caller
+   * does this" is a fact worth checking rather than asserting.
    *
-   * **THE BEHAVIOUR HALF MOVED TO THE BROWSER TIER, WHICH IS WHERE IT CAN BE DRIVEN AT ALL.** The
-   * replacement needs a layout tree, two pane classes and a DOM, so `tests/browser/pane-kind-switch.test.ts`
-   * drives the Critical's own three clicks — compile, fork, pick the λ-only scratch on the TM pane — and
-   * asserts the pane follows the pick AND keeps painting afterwards, the second half being `legOf` not
-   * throwing on a LATER frame, which was the Critical's actual signature.
+   * **THE BEHAVIOUR HALF IS IN THE BROWSER TIER, WHICH IS WHERE IT CAN BE DRIVEN AT ALL.** Replacing the
+   * pane needs a layout tree, two pane classes and a DOM, so `tests/browser/pane-kind-switch.test.ts`
+   * drives three clicks — compile, fork, pick the λ-only scratch on the TM pane — and asserts the pane
+   * follows the pick AND keeps painting afterwards, the second half being `legOf` not throwing on a
+   * LATER frame.
    *
-   * WHAT IS LEFT HERE IS NOT PADDING. This is still the only test that drives `rebind` through
-   * `createTransport` rather than calling `slot.rebind` directly, and the same-leg assertions are the
-   * two facts the browser tier can only read through several layers of DOM: the pick moves the binding,
-   * and it repaints exactly once. A handler that took the pick and skipped the draw would leave the
-   * `<select>` naming a pair the pane is not showing.
+   * THE SAME-LEG HALF IS HERE. This is the only test that drives `rebind` through `createTransport`
+   * rather than calling `slot.rebind` directly, and the same-leg assertions are the two facts the browser
+   * tier can only read through several layers of DOM: the pick moves the binding, and it repaints exactly
+   * once. A handler that took the pick and skipped the draw would leave the view showing the session it
+   * was on before the pick.
    */
   it('takes the session a same-leg pick names, repaints once, and throws on a cross-leg one', () => {
     const reg = new SessionRegistry()
@@ -269,16 +253,15 @@ describe('PaneSlot', () => {
 
     const transport = createTransport({
       sessions: reg,
-      // NEITHER IS REACHED BY `rebind`, AND THE CASTS SAY SO RATHER THAN BUILDING TWO FAKES. The
-      // scratchpad is touched only by `detach`/`editSink` and `linkWiring` only by
-      // `detach`/`linkState`/`linkLambda`; a `rebind` that consulted either would fail here loudly,
-      // which is the point of not supplying them.
+      // NEITHER `scratchpad` NOR `linkWiring` IS REACHED BY `rebind`, AND THEIR CASTS SAY SO RATHER THAN
+      // BUILDING TWO FAKES: a `rebind` that consulted either would fail here loudly, which is the point of
+      // not supplying them.
       scratchpad: {} as ScratchBuffers,
       draw: () => draws++,
       speed: () => 8,
       setSpeed: () => undefined,
       // Inert: these fixtures drive stepping and binding, neither language features nor colour.
-      lspClient: () => LSP_STUB,
+      lspClient: LSP_STUB,
       colour: () => [],
       formatOnBlur: () => false,
       // NEVER REACHED, AND A CAST FOR `scratchpad`'s REASON: a keymap setting is joined by an EDITOR,
@@ -286,16 +269,16 @@ describe('PaneSlot', () => {
       keymap: {} as KeymapSetting,
       linkWiring: () => ({}) as LinkWiring,
       notify: () => undefined,
-      // A THROW RATHER THAN A NO-OP, FOR THE SAME REASON THE TWO CASTS ABOVE ARE CASTS: only `detach`
+      // A THROW RATHER THAN A NO-OP, FOR THE SAME REASON THE CASTS ABOVE ARE CASTS: only a fork
       // announces a new buffer, and a `rebind` that told the header list its count had changed would be
       // reporting a gesture that creates nothing. This test would say so.
       onBuffersChanged: () => {
         throw new Error('a rebind must not report a change to the buffer count')
       },
-      // COUNTED WHERE `onBuffersChanged` THROWS, AND THE PAIR IS THE WHOLE DISTINCTION 5d-ii-d's T5
-      // added a second dependency for: a rebind changes no buffer and therefore no COUNT, while the
-      // stored `bindings` map is exactly what it does change. One of these two must fire and the other
-      // must not, and only asserting both says so.
+      // COUNTED WHERE `onBuffersChanged` THROWS, AND THE PAIR IS THE WHOLE DISTINCTION THE SECOND
+      // DEPENDENCY EXISTS FOR: a rebind changes no buffer and therefore no COUNT, while the stored
+      // `bindings` map is exactly what it does change. One of these two must fire and the other must not,
+      // and only asserting both says so.
       onBuffersPersist: () => persists++,
     })
     let draws = 0
@@ -304,8 +287,7 @@ describe('PaneSlot', () => {
     const lambda = new PaneSlot('lambda', 'source')
     transport.events(lambda).rebind({ leg: 'lambda', session: 'lambda-scratch' })
     expect(lambda.binding).toEqual({ session: 'lambda-scratch', leg: 'lambda' })
-    // RESOLVED, NOT JUST RECORDED — the binding having moved and the binding being usable are two
-    // claims, and it was the second one the Critical broke.
+    // RESOLVED, NOT JUST RECORDED — the binding having moved and the binding being usable are two claims.
     expect(lambda.resolve(reg).hist.current?.text).toBe('from scratch')
     expect(draws).toBe(1)
     // THE STORED BINDINGS FOLLOWED THE SLOT. `main.ts`'s `persistBuffers` reads them off `panes.all()`
@@ -314,22 +296,19 @@ describe('PaneSlot', () => {
     // undo the gesture with nothing on screen to say so.
     expect(persists).toBe(1)
 
-    // THE CROSS-LEG PICK, WHICH THIS LAYER REFUSES TO ANSWER. The exact pick that produced the
-    // Critical: the session half is λ-only, so projecting it onto a TM slot mints the binding `legOf`
-    // dies on.
+    // THE CROSS-LEG PICK, WHICH THIS LAYER REFUSES TO ANSWER. The session half is λ-only, so projecting
+    // it onto a TM slot would mint the binding `legOf` dies on.
     const tm = new PaneSlot('tm', 'source')
     expect(() => transport.events(tm).rebind({ leg: 'lambda', session: 'lambda-scratch' })).toThrow(
       /cannot take a lambda pick/,
     )
     // AND THE SLOT DID NOT MOVE ON THE WAY OUT — a throw AFTER `slot.rebind` would leave exactly the
-    // state this exists to prevent, reported rather than avoided. Both halves, for `view-status`'s
-    // reason: the assertion that something did not happen is not the assertion that it was announced.
+    // state this exists to prevent, reported rather than avoided. Both halves: the assertion that
+    // something did not happen is not the assertion that it was announced.
     expect(tm.binding).toEqual({ session: 'source', leg: 'tm' })
     expect(() => tm.resolve(reg)).not.toThrow()
-    // NO DRAW ON THE REFUSED PICK — the count is unchanged from the same-leg one above. The `<select>`
-    // is left showing the pick, which is correct here and is NOT the "a refused pick still paints"
-    // rule the old guard followed: that rule was for a decline a user could reach, and this is a
-    // wiring bug no user can.
+    // NO DRAW ON THE REFUSED PICK — the count is unchanged from the same-leg one above: the throw is
+    // ahead of the handler's `draw()`, and with the slot unmoved there is nothing new to paint.
     expect(draws).toBe(1)
     // AND NO WRITE ON THE REFUSED PICK EITHER, for the reason the slot did not move: the throw is
     // ahead of `slot.rebind`, so there is nothing new to record and a write here would persist the
@@ -338,13 +317,12 @@ describe('PaneSlot', () => {
   })
 
   /**
-   * **THE `catch` AROUND THE FORK LETS A WIRING BUG THROUGH AND KEEPS A REFUSAL — Important-shaped gap
-   * that shipped ARGUED rather than tested, and was named as such before merge.**
+   * **THE `catch` AROUND THE FORK LETS A WIRING BUG THROUGH AND KEEPS A REFUSAL.**
    *
    * `detach` is the last frame before the raw DOM dispatch of `✎ edit a copy`'s click listener, and there is no
    * `window` error handler anywhere in `src/` behind it. That is what makes the catch necessary — a cap
-   * refusal reaching the console is the Critical this branch already fixed — and it is also exactly what
-   * makes the `instanceof` load-bearing: a BARE catch would take `SessionRegistry.add`'s and
+   * refusal would otherwise reach the console and nothing else — and it is also exactly what makes the
+   * `instanceof` load-bearing: a BARE catch would take `SessionRegistry.add`'s and
    * `SessionPool.bind`'s invariant guards, which are wiring bugs, and show them as a notice
    * that says `cannot make a copy — …`. The bug would look like a refusal, and the user would be told to
    * pause or delete a copy.
@@ -354,9 +332,9 @@ describe('PaneSlot', () => {
    * pins the discrimination, which is the whole content of the line under test.
    *
    * DRIVEN THROUGH `transport.events(slot).detach(...)`, NOT BY CALLING `fork` DIRECTLY.
-   * `tests/node/scratch.test.ts` already asserts that `fork` throws `BufferCapReached` and explains this
-   * catch in a comment; what has never been executed is the catch. The seam is the same one the rebind
-   * test above uses and for the same reason: it is the production handler, not a re-statement of it.
+   * `tests/node/scratch.test.ts` asserts that `fork` throws `BufferCapReached` and explains this catch in
+   * a comment; this executes the catch. The seam is the same one the rebind test above uses: it is the
+   * production handler, not a re-statement of it.
    */
   it('re-throws a non-cap error out of the fork handler and keeps only the cap refusal', () => {
     const reg = new SessionRegistry()
@@ -369,8 +347,8 @@ describe('PaneSlot', () => {
 
     const transport = createTransport({
       sessions: reg,
-      // THE ONLY METHOD `detach` CALLS ON IT, so a fake with one property is the whole dependency
-      // rather than a stub standing in for an object with a surface.
+      // THE ONLY METHOD `detach` CALLS ON IT WHEN `fork` THROWS, so a fake with one property is the
+      // whole dependency rather than a stub standing in for an object with a surface.
       scratchpad: {
         fork: () => {
           throw thrown
@@ -379,22 +357,21 @@ describe('PaneSlot', () => {
       draw: () => draws++,
       speed: () => 8,
       setSpeed: () => undefined,
-      // `index.lambdaText` IS THE ONE FIELD THE GUARD ABOVE THE `try` READS — an empty string makes
-      // `detach` return before it ever forks, which would pass every assertion below vacuously.
       // Inert: these fixtures drive stepping and binding, neither language features nor colour.
-      lspClient: () => LSP_STUB,
+      lspClient: LSP_STUB,
       colour: () => [],
       formatOnBlur: () => false,
-      // NEVER REACHED, AND A CAST FOR `scratchpad`'s REASON: a keymap setting is joined by an EDITOR,
-      // and no fixture in this file builds one.
+      // NEVER REACHED, SO A CAST: a keymap setting is joined by an EDITOR, and no fixture in this file builds one.
       keymap: {} as KeymapSetting,
+      // `index.lambdaText` IS THE ONE FIELD OF `index` THAT `detach`'s GUARD READS — an empty string makes
+      // `detach` return before `forkCopy` ever calls `fork`, so the fake `fork` above would never throw.
       linkWiring: () => ({ index: { lambdaText: 'λx. x' } }) as unknown as LinkWiring,
       notify: (t: string) => {
         notified.push(t)
       },
       onBuffersChanged: () => buffersChanged++,
-      // A THROW, FOR THE REASON THE TWO CASTS ABOVE ARE CASTS: `detach` is not a rebind, and the fork
-      // it performs persists through `onBuffersChanged` reaching `main.ts`'s `refreshBuffers`. A
+      // A THROW, SO A `detach` THAT REACHED IT WOULD FAIL HERE LOUDLY: `detach` is not a rebind, and the
+      // fork it performs persists through `onBuffersChanged` reaching `main.ts`'s `refreshBuffers`. A
       // `detach` that wrote storage itself would be a second writer for one gesture, and this says so.
       onBuffersPersist: () => {
         throw new Error('a fork must not persist through the rebind dependency')
@@ -408,28 +385,17 @@ describe('PaneSlot', () => {
     // behaviour that keeps it loud, and the reason nothing may have been notified afterwards.
     expect(() => events.detach?.(0)).toThrow(/a pool invariant broke/)
     expect(notified).toEqual([])
-    // AND NOTHING WAS REPORTED AS IF IT HAD HAPPENED: no repaint, no count change. A `catch` that
-    // re-threw AFTER calling `notify` would satisfy the line above and fail here.
+    // AND NOTHING WAS REPORTED AS IF IT HAD HAPPENED: no repaint, no count change.
     expect(draws).toBe(0)
     expect(buffersChanged).toBe(0)
 
     // THE REFUSAL, THROUGH THE SAME HANDLER — the contrast that makes the assertions above about the
     // `instanceof` rather than about there being no catch.
-    // **BUILT FROM `MAX_WARM_BUFFERS` AND THE REAL WORDING, WHERE THIS USED TO HAND-SPELL A MESSAGE FROM
-    // TWO RENAMES AGO — whole-branch review before merge, finding 4.** It read
-    // `new BufferCapReached('all 8 scratch buffers are live; retire one')`: the cap is
-    // `MAX_WARM_BUFFERS`, and the sentence `ScratchBuffers.#refuseAtCap` raises ends "pause or delete one
-    // from the copies menu to make room" — it ended "retire or cool one from the buffers list in the
-    // header" when the drift was found. Nothing failed, because the assertion
-    // below looked for `'retire one'` and that survived as a SUBSTRING of `'retire or cool one'` — by
-    // luck of wording, not by design. Task 8's rename sweep was `rg -l MAX_BUFFERS`, which a
-    // hand-spelled string cannot match, so a fixture claiming to be the app's own message drifted
-    // silently past the commit that changed it.
+    // **BUILT FROM `MAX_WARM_BUFFERS`**, because a hand-spelled figure is invisible to a sweep for the
+    // constant's name. The words are copied from `#refuseAtCap`'s, and nothing here fails if they change.
     //
-    // THE ASSERTION MOVES WITH THE WORDING — `'pause or delete one'` today — so a future wording change
-    // breaks this test instead of quietly passing on a shorter prefix of the old one. What this test is about is
-    // unchanged: the `instanceof` branch in `transport.ts`'s `detach` reports a `BufferCapReached`
-    // rather than re-throwing it, and the message reaches `notify` intact.
+    // What this test is about: the `instanceof` branch in `transport.ts`'s `forkCopy` reports a
+    // `BufferCapReached` rather than re-throwing it, and the message reaches `notify` intact.
     thrown = new BufferCapReached(
       `cannot make a copy — all ${MAX_WARM_BUFFERS} copies are running; pause or delete one from the copies menu to make room`,
     )
@@ -441,13 +407,12 @@ describe('PaneSlot', () => {
   })
 
   /**
-   * **THE IDENTICAL DISCRIMINATION, ON THE TM LEG'S OWN HANDLER — 5d-iv Task 9.** `detachMachine`'s
-   * `catch` (`transport.ts`) is the same `instanceof BufferCapReached` shape as `detach`'s above, over
-   * a fake `scratchpad.fork` that throws — cheap for the identical reason: no worker is needed to prove
-   * which branch a throw takes. What differs from the λ test is what `detachMachine` resolves BEFORE
-   * the `try`: `sessions.entryOf(session).tmProgram?.tmText`, not `linkWiring().index.lambdaText`, so
-   * the session here is seeded with a `tmProgram` a real `compiled` reply would have left rather than
-   * with an `index`.
+   * **THE IDENTICAL DISCRIMINATION, ON THE TM LEG'S OWN HANDLER.** `detachMachine` reaches the same
+   * `instanceof BufferCapReached` catch as `detach` above (`transport.ts`'s `forkCopy`), over a fake
+   * `scratchpad.fork` that throws — cheap, since no worker is needed to prove which branch a throw takes.
+   * What differs from the λ test is what `detachMachine` resolves BEFORE the `try`:
+   * `sessions.entryOf(session).tmProgram?.tmText`, not `linkWiring().index.lambdaText`, so the session
+   * here is seeded with a `tmProgram` a real `compiled` reply would have left rather than with an `index`.
    */
   it('re-throws a non-cap error out of the machine-fork handler and keeps only the cap refusal', () => {
     const reg = new SessionRegistry()
@@ -476,7 +441,7 @@ describe('PaneSlot', () => {
 
     const transport = createTransport({
       sessions: reg,
-      // THE ONLY METHOD `detachMachine` CALLS ON IT, mirroring the λ test's fake above.
+      // THE ONLY METHOD `detachMachine` CALLS ON IT WHEN `fork` THROWS, mirroring the λ test's fake above.
       scratchpad: {
         fork: () => {
           throw thrown
@@ -485,17 +450,16 @@ describe('PaneSlot', () => {
       draw: () => draws++,
       speed: () => 8,
       setSpeed: () => undefined,
+      // Inert: these fixtures drive stepping and binding, neither language features nor colour.
+      lspClient: LSP_STUB,
+      colour: () => [],
+      formatOnBlur: () => false,
+      // NEVER REACHED, SO A CAST: a keymap setting is joined by an EDITOR, and no fixture in this file builds one.
+      keymap: {} as KeymapSetting,
       // NO `index` FIELD HERE, UNLIKE THE λ TEST'S FAKE — `detachMachine` never reads `linkWiring()`
       // for its text (`sessions.entryOf(...).tmProgram?.tmText` is the whole resolution), so a fake
       // that omitted `index` would still be exercising the real handler rather than papering over a
       // read it does not perform.
-      // Inert: these fixtures drive stepping and binding, neither language features nor colour.
-      lspClient: () => LSP_STUB,
-      colour: () => [],
-      formatOnBlur: () => false,
-      // NEVER REACHED, AND A CAST FOR `scratchpad`'s REASON: a keymap setting is joined by an EDITOR,
-      // and no fixture in this file builds one.
-      keymap: {} as KeymapSetting,
       linkWiring: () => ({}) as unknown as LinkWiring,
       notify: (t: string) => {
         notified.push(t)
@@ -526,9 +490,78 @@ describe('PaneSlot', () => {
   })
 
   /**
+   * **THE IDENTICAL DISCRIMINATION, ON THE ASM LEG'S OWN HANDLER.** `detachAsm` reaches the same
+   * `instanceof BufferCapReached` catch as `detach` and `detachMachine` above (`transport.ts`'s
+   * `forkCopy`). What it resolves BEFORE the `try` is `sessions.entryOf(session).asmProgram?.asmText`, so
+   * the session here is seeded with the `asmProgram` a real `compiled` reply would have left, as the TM
+   * test's is with a `tmProgram`.
+   */
+  it('re-throws a non-cap error out of the asm-fork handler and keeps only the cap refusal', () => {
+    const reg = new SessionRegistry()
+    const source = entry('source', { label: 'source', asm: [0] })
+    source.asmProgram = {
+      program: { listing: ['li\trr, #1', 'halt'], labels: [] },
+      asmText: 'result Nat\n\n    li\trr, #1\n    halt\n',
+    }
+    reg.add(source)
+
+    const notified: string[] = []
+    let draws = 0
+    let buffersChanged = 0
+    let thrown: unknown = new Error('a pool invariant broke')
+
+    const transport = createTransport({
+      sessions: reg,
+      // THE ONLY METHOD `detachAsm` CALLS ON IT WHEN `fork` THROWS, mirroring the λ test's fake above.
+      scratchpad: {
+        fork: () => {
+          throw thrown
+        },
+      } as unknown as ScratchBuffers,
+      draw: () => draws++,
+      speed: () => 8,
+      setSpeed: () => undefined,
+      // Inert: these fixtures drive stepping and binding, neither language features nor colour.
+      lspClient: LSP_STUB,
+      colour: () => [],
+      formatOnBlur: () => false,
+      // NEVER REACHED, SO A CAST: a keymap setting is joined by an EDITOR, and no fixture in this file builds one.
+      keymap: {} as KeymapSetting,
+      // NO `index` FIELD HERE, AS IN THE TM TEST'S FAKE — `detachAsm` resolves its text from the session's
+      // `asmProgram`, not from `linkWiring()`.
+      linkWiring: () => ({}) as unknown as LinkWiring,
+      notify: (t: string) => {
+        notified.push(t)
+      },
+      onBuffersChanged: () => buffersChanged++,
+      onBuffersPersist: () => {
+        throw new Error('an asm fork must not persist through the rebind dependency')
+      },
+    })
+
+    const slot = new PaneSlot('asm', 'source')
+    const events = transport.events(slot)
+
+    // THE WIRING BUG, IDENTICAL IN SHAPE TO THE λ AND TM CASES ABOVE.
+    expect(() => events.detachAsm?.()).toThrow(/a pool invariant broke/)
+    expect(notified).toEqual([])
+    expect(draws).toBe(0)
+    expect(buffersChanged).toBe(0)
+
+    // THE REFUSAL, THROUGH THE SAME HANDLER.
+    thrown = new BufferCapReached(
+      `cannot make a copy — all ${MAX_WARM_BUFFERS} copies are running; pause or delete one from the copies menu to make room`,
+    )
+    expect(() => events.detachAsm?.()).not.toThrow()
+    expect(notified.join(' ')).toContain('pause or delete one')
+    expect(draws).toBe(1)
+    expect(buffersChanged).toBe(0)
+  })
+
+  /**
    * **`detachMachine` REACHED WITH NO MACHINE TEXT IS A WIRING BUG, NOT A REFUSAL — `transport.ts`'s
-   * own doc on the guard.** The control is disabled exactly when `tmText === null`
-   * (`TmPane.setForkAvailable`), so a click that reaches this handler with one names a gap between the
+   * own doc on the guard.** The control is withdrawn or disabled whenever `tmText === null`
+   * (`CopyEditor.#refreshDetach`), so a click that reaches this handler with one names a gap between the
    * button's own state and what the handler reads, not a state a user chose. Asserted on a session with
    * no `tmProgram` at all (the ordinary case — nothing has compiled a machine to this session yet), the
    * cheapest way to reach `tmText === null` without also building a real one that IS forkable.
@@ -548,11 +581,10 @@ describe('PaneSlot', () => {
       speed: () => 8,
       setSpeed: () => undefined,
       // Inert: these fixtures drive stepping and binding, neither language features nor colour.
-      lspClient: () => LSP_STUB,
+      lspClient: LSP_STUB,
       colour: () => [],
       formatOnBlur: () => false,
-      // NEVER REACHED, AND A CAST FOR `scratchpad`'s REASON: a keymap setting is joined by an EDITOR,
-      // and no fixture in this file builds one.
+      // NEVER REACHED, SO A CAST: a keymap setting is joined by an EDITOR, and no fixture in this file builds one.
       keymap: {} as KeymapSetting,
       linkWiring: () => ({}) as unknown as LinkWiring,
       notify: () => undefined,
@@ -565,13 +597,11 @@ describe('PaneSlot', () => {
   })
 
   /**
-   * §5's JOINT DETACHMENT CASE, WHICH THE DESIGN OWED TO "THE TASK THAT WIRES `main.ts`". Its words:
-   * "bind a pane to a scratch, see both, rebind, see neither — CANNOT be written in this slice ... It
-   * needs a binding to flip, and per §3.2b none exists." A binding exists now, and it flips here.
+   * §5's JOINT DETACHMENT CASE — "bind a pane to a scratch, see both, rebind, see neither".
    *
-   * ASSERTED ABSENT AFTER THE REBIND, not only present before it — an implementation that sets the
-   * badge and never clears it passes the first half. That is the same rule `view-status.test.ts`
-   * states for the surface itself; this is the rule applied to what DRIVES it.
+   * ASSERTED ABSENT AFTER THE REBIND, not only present before it — an implementation that calls
+   * `setDetached(true)` and never clears it passes the first half. That is the same rule
+   * `view-status.test.ts` states for the surface itself; this is the rule applied to what DRIVES it.
    */
   it('reports detachment from the session it is bound to, and stops when rebound', () => {
     const reg = new SessionRegistry()
@@ -590,16 +620,12 @@ describe('PaneSlot', () => {
   })
 
   /**
-   * The selector's contents are a function of the registry ALONE now, and the pair in force is what
-   * ties the list to the slot — so a session added while a pane sits still reaches that pane's
-   * selector.
+   * The selector's contents are a function of the registry ALONE, and the pair in force is what ties
+   * the list to the slot — so a session added while a pane sits still reaches that pane's selector.
    *
-   * **EVERY PAIR, NOT THE SLOT'S OWN LEG, AND THAT REVERSES WHAT THIS TEST USED TO ASSERT.** It was
-   * "pushes the options for its own leg, marking the session in force", and it pinned
-   * `reg.options(b.leg)` — a list that could never mention the other leg. `PaneSlot.render` pushes
-   * `reg.pairs()` now, so a TM slot's list carries the λ pairs too, and the pairs that never appear
-   * are the ones whose SESSION lacks the leg. `tm-scratch` below is that distinction under test: a
-   * TM-only session adds a TM pair and no λ one.
+   * **EVERY PAIR, NOT THE SLOT'S OWN LEG.** `PaneSlot.render` pushes `reg.pairs()`, so a TM slot's list
+   * carries the λ pairs too, and the pairs that never appear are the ones whose SESSION lacks the leg.
+   * `tm-scratch` below is that distinction under test: a TM-only session adds a TM pair and no λ one.
    */
   it('pushes every (leg, session) pair, marking the one in force', () => {
     const reg = new SessionRegistry()
@@ -629,8 +655,8 @@ describe('PaneSlot', () => {
     })
   })
 
-  // `controlState`'s output is the slot's job now (it moved out of `draw()` so this test and the app
-  // share one implementation), so the step readout has to come from the bound leg's own head.
+  // `controlState`'s output is the slot's job (so this test and the app share one implementation), so
+  // the step readout has to come from the bound leg's own head.
   it('drives the control strip from the leg it resolved, not from a shared head', () => {
     const reg = new SessionRegistry()
     reg.add(entry('source', { label: 'source', lambda: ['a', 'b', 'c'], tm: [0] }))
@@ -671,7 +697,7 @@ describe('resetLegs', () => {
 
   /**
    * THE THIRD LEG TOO. A recompile that left the asm leg's frames would step through a program the editor no longer
-   * holds; the loop reads `LEGS`, and this holds it to the leg the list gained last.
+   * holds; the loop reads `LEGS`, and this holds it to the asm leg as well.
    */
   it('clears every leg, asm included, and gives each the status its reply sent', () => {
     const e = entry('source', { lambda: ['a'], asm: [0, 1, 2], tm: [0] })
@@ -695,9 +721,8 @@ describe('resetLegs', () => {
    * status whatever the session's shape; dropping the half that has nowhere to go is the whole
    * behaviour.
    *
-   * BOTH ONE-LEGGED SHAPES, NOT JUST THE λ ONE. §4.1 has two scratch types and this function has two
-   * independent guards; testing one leaves the other's absent-arm unexercised, which is the direction
-   * a coverage number will not report as missing because the function is called.
+   * THE λ AND TM ONE-LEGGED SHAPES, NOT JUST THE λ ONE: §4.1 has two scratch types. An asm copy is a
+   * third one-legged shape, which this case does not build.
    */
   it('drops a status for a leg the session does not have rather than inventing one', () => {
     const lambdaOnly = entry('lambda-scratch', { lambda: ['a'] })
@@ -774,7 +799,7 @@ describe('a step gesture on a leg with a position pending', () => {
       draw: () => undefined,
       speed: () => 8,
       setSpeed: () => undefined,
-      lspClient: () => LSP_STUB,
+      lspClient: LSP_STUB,
       colour: () => [],
       formatOnBlur: () => false,
       keymap: {} as KeymapSetting,

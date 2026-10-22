@@ -32,9 +32,9 @@ beforeAll(async () => {
   await lambdaAtNewest()
 })
 
-// **`show` TAKES A THUNK PAIR SINCE PART 2b** (`readout.ts`'s `Lines`): the strip and the inspector draw
-// different shapes from the same frame, and handing over both eagerly would pay for the unused one on
-// every playback frame. These cases are about the strip, so `rows` is never called.
+// **`show` TAKES A THUNK PAIR** (`readout.ts`'s `Lines`): the strip and the inspector draw different shapes
+// from the same frame, and handing over both eagerly would pay for the unused one on every playback frame.
+// These cases are about the strip, so `rows` is never called.
 const strip = (segments: readonly string[]) => ({ segments: () => segments, rows: () => [] })
 
 describe('the strip', () => {
@@ -60,7 +60,7 @@ describe('the strip', () => {
    * announcement closes. A keystroke rewrites the line twice without announcing either state ("linking
    * resumes when this compiles", then empty when the compile lands), so a second click on the same
    * construct is the line changing from nothing to a sentence. A memo of the last sentence ANNOUNCED
-   * cannot see that, and one was there: `link-wiring.ts` compares the line before and after instead.
+   * cannot see that: `link-wiring.ts` compares the line before and after instead.
    */
   it('announces it again after an edit, though the sentence is the same one', async () => {
     const said = liveText().trimEnd()
@@ -85,8 +85,8 @@ describe('the strip', () => {
   /**
    * **THE DIM IS THE PROGRAM'S, AND IT MUST NOT REACH A COPY'S READOUT.** `#results[data-state]` stays the
    * program's compile state wherever the strip has moved to (spec §9), and the rule that greys a running
-   * compile hangs off the same element — so a copy's readout used to grey out for a compile that had
-   * nothing to do with it.
+   * compile hangs off the same element, so a rule keyed on `data-state` alone would grey a copy's readout
+   * for a compile that has nothing to do with it.
    */
   it('does not dim a copy’s readout for the program’s compile', async () => {
     document.querySelector<HTMLButtonElement>('[data-leaf="lambda-0"] button.detach')?.click()
@@ -117,19 +117,16 @@ describe('the strip', () => {
 })
 
 /**
- * **`createReadout` ON ITS OWN ELEMENT — whole-branch review, M2 and M8's second bullet.** The tests
- * above drive the strip through the whole app, which is the right way to check that the readout FOLLOWS
- * the focus; it cannot reach the first call of a readout's life, because by the time a test can look, the
- * app has already made it. These build their own host and call `show` directly.
+ * **`createReadout` ON ITS OWN ELEMENT.** The tests above drive the strip through the whole app, which is
+ * the right way to check that the readout FOLLOWS the focus; it cannot reach the first call of a readout's
+ * life, because by the time a test can look, the app has already made it. These build their own host and
+ * call `show` directly.
  */
 describe('createReadout', () => {
-  it('says what it describes on the very first call, whose key is empty', async () => {
+  it('says what it describes on the very first call, whose strip is empty', async () => {
     const { createReadout } = await import('../../src/readout')
     const host = document.createElement('div')
-    // THE APP'S OWN FIRST CALL: no program yet, nothing to say. Its key is `''` — which is what the
-    // unchanged-key guard starts at, so this call took the early return and wrote no attribute at all.
-    // `style.css` dims a running compile through `[data-state="running"][data-describes="program"]`, so
-    // the strip stayed undimmed through the one compile with nothing else on it.
+    // THE APP'S OWN FIRST CALL: no program yet, nothing to say.
     createReadout(host).show(null, strip([]))
     expect(host.dataset.describes, 'the first call wrote no data-describes').toBe('copy')
   })
@@ -140,7 +137,7 @@ describe('createReadout', () => {
     const readout = createReadout(host)
     readout.show(null, strip(['λ copy 1 · 3 reductions']))
     expect(host.dataset.describes).toBe('copy')
-    // The error arm returned before writing the attribute too, so `'copy'` survived into a program error.
+    // An error arm that returned before writing the attribute would let `'copy'` survive into a program error.
     readout.show({ kind: 'error', error: 'the worker stopped' } as never, strip([]))
     expect(host.dataset.describes, 'a program error still read as a copy').toBe('program')
   })

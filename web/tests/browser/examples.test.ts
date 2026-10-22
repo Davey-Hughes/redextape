@@ -17,10 +17,9 @@ import type { Leg, RecordEnd, RunReply } from '../../src/protocol'
  * text under the default encoding, every reply until `result`. A declined leg is one `compiled` says is unavailable;
  * an ended leg and a leg whose history fills are its last frames reply's `done`, `ended` or `budget`.
  *
- * **A FAILURE HERE CAN BE A TRUE ONE: A CHANGE IN A FRAME'S SIZE CAN FLIP A LEG'S STOP.** Measured under `binary` on
- * 2026-10-01 (spec §4.6's note of that date): `map` and `fold`'s TM records 69,008 of its 91,785 steps before its
- * history fills, 75.2% of its run, and `sum_to(5)`'s λ ends having spent 22,004,386 bytes, 65.6% of `HISTORY_BYTES`.
- * A leg that flips has its outcome in the manifest changed, and the example's description with it, by hand.
+ * **A FAILURE HERE CAN BE A TRUE ONE: A CHANGE IN A FRAME'S SIZE CAN FLIP A LEG'S STOP.** Plan 7 part 6a spec
+ * §4.6's note of 2026-10-01 has the margins under `binary`. A leg that flips has its outcome in the manifest
+ * changed, and the example's description with it, by hand.
  */
 
 type Compiled = Extract<RunReply, { kind: 'compiled' }>

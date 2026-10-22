@@ -9,11 +9,11 @@ import { asmPane, asmValue, compile, noticeText, paneByLeaf, SHELL, sourceLinked
  * An asm copy, end to end through the app (Plan 7 part 5 spec §7): *edit a copy* in the asm view's `⋯` menu, the copy's
  * editor in the view, a rebuild from what is typed, the language server's marks and outline and format on it, and a
  * copy's rows linking nothing. Every gesture a user makes with the pointer is made with `userEvent`, which moves the
- * browser's pointer, rather than `.click()` — 4b's lesson: a synthetic click passed where a real one was lost. The one
- * exception is the split in the test of a view split from a copy, whose own comment says why it drives the menu with
- * `.click()`: what it tests is the view the split builds, not the menu.
+ * browser's pointer, rather than `.click()`: a synthetic click can pass where a real one is lost. The one exception is
+ * the split in the test of a view split from a copy, whose own comment says why it drives the menu with `.click()`:
+ * what it tests is the view the split builds, not the menu.
  *
- * ONE MOUNT FOR THE FILE, for the reason every sibling gives: `main()` runs once per page.
+ * ONE MOUNT FOR THE FILE, for the reason `app.test.ts` gives: `main()` runs once per page.
  */
 
 const SAMPLE = 'let x = 40; x + 2'
@@ -91,7 +91,7 @@ describe('an asm copy', () => {
     await until(() => (outline.querySelector('.outline')?.textContent ?? '').includes('start'), 'the outline')
   })
 
-  it('answers a hover on a label, from the language server part 3 built', async () => {
+  it('answers a hover on a label, from the language server', async () => {
     const v = editorOf(asmPane()) as EditorView
     const at = v.state.doc.toString().indexOf('start')
     expect(at).toBeGreaterThan(0)
@@ -220,8 +220,7 @@ describe('a TM copy', () => {
     const tm = paneByLeaf('tm-0')
     await until(() => /copy · not linked/.test(tm.textContent ?? ''), 'the TM view to show the copy')
     await until(() => tm.querySelectorAll('.state-row').length > 3, 'the copy’s rules')
-    // THE ROW `let x = 40`'s CONSTRUCT OWNS IN THE PROGRAM — measured on `main`, where a click on it in the copy pinned
-    // `40` in the source through the program's index.
+    // THE ROW `let x = 40`'s CONSTRUCT OWNS IN THE PROGRAM.
     await userEvent.click(tm.querySelectorAll<HTMLElement>('.state-row')[3] as HTMLElement)
     expect(sourceLinked()).toBeNull()
     expect(tm.querySelector('.state-row.is-linked')).toBeNull()
@@ -237,10 +236,10 @@ describe('where the asm leg declines', () => {
 })
 
 /**
- * Plan 7 part 5c's final fix wave: `|x| x + 1` types as `(Nat) -> Nat`, and a `.tm` header naming that in
- * its `result` line is one `run` refuses to read (`ty::is_decodable`, `redextape-core`). The TM leg still
- * builds — `state-row`s below prove it — so *edit a copy* is offered, disabled with the reason, rather than
- * withdrawn (the umbrella's §4 rule); a non-function program is the positive control.
+ * `|x| x + 1` types as `(Nat) -> Nat`, and a `.tm` header naming that in its `result` line is one `run` refuses
+ * to read (`ty::is_decodable`, `redextape-core`). The TM leg still builds — `state-row`s below prove it — so *edit
+ * a copy* is offered, disabled with the reason, rather than withdrawn (the umbrella's §4 rule); a non-function
+ * program is the positive control.
  */
 describe('a function-valued program’s TM view', () => {
   it('disables edit a copy with the reason, and a non-function program leaves it enabled', async () => {

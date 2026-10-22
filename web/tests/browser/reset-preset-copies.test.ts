@@ -6,17 +6,16 @@ import { controlledMenu, linkStatus, noticeText, paneByLeaf, SHELL, stateIdle, u
 /**
  * *RESET PRESET* RESTORES THE DEFAULT VIEWS, AND A DEFAULT VIEW SHOWS THE PROGRAM (Plan 7 part 2 spec §4, §6).
  *
- * The check by hand's finding 5: with views on copies of all three legs, *reset preset* said "Explorer reset — the
- * default views are back" while every view stayed on its copy. The default tree re-minted `lambda-0`, `asm-0` and
- * `tm-0`, and `applyLayout` kept a pane whose id and kind survived, binding and all. `pane-host.ts`'s `resetViews` now
- * rebuilds each such view on the program, as a fresh preset's are, and the copies stay: in the copies menu, and with
- * their editors when a view shows them again.
+ * A default tree re-mints its views' ids, and `applyLayout` would keep a pane whose id and kind survived, binding and
+ * all: *reset preset* would say "Explorer reset — the default views are back" over views still on their copies.
+ * `pane-host.ts`'s `resetViews` rebuilds each such view on the program, as a fresh preset's are, and the copies stay:
+ * in the copies menu, and with their editors when a view shows them again.
  *
- * **THE DEFAULT IS THE SOURCE BESIDE THE TM VIEW NOW** (the view layouts spec §8), so the reset keeps one of the three
+ * **THE DEFAULT IS THE SOURCE BESIDE THE TM VIEW** (the view layouts spec §8), so the reset keeps one of the three
  * views, `tm-0`, and that is the one a kept binding would show. The λ and asm views leave the page with the reset and
  * every remembered arrangement is forgotten, so the views their toggles bring back are new ones.
  *
- * Every gesture is a `userEvent` one. ONE MOUNT FOR THE FILE, for the reason every sibling gives.
+ * Every gesture is a `userEvent` one. ONE MOUNT FOR THE FILE, for the reason `app.test.ts` gives.
  */
 
 const SAMPLE = 'let x = 40; x + 2'

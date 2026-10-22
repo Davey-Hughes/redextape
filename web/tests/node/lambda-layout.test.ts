@@ -167,8 +167,8 @@ function chain(n: number): LambdaTreeWire {
 
 /**
  * BOTH LAYOUTS WALK AN EXPLICIT STACK, NOT THE CALL STACK. The automatic policy keeps the whole path to the
- * next redex open, so a layout that recursed once per open level overflowed on a legal program — `2990 + 0`
- * one step from its end — and wedged the view. This is the deepest application chain the node budget admits.
+ * next redex open, so a layout that recursed once per open level would overflow on a legal program — `2990 + 0`
+ * one step from its end — and wedge the view. This is the deepest application chain the node budget admits.
  */
 describe('the layouts at depth', () => {
   const n = Math.floor((LAMBDA_TREE_NODES - 6) / 2)

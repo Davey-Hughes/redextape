@@ -34,15 +34,15 @@ import {
  * out of sight and no ring drawn on it, and a key press brings the control into sight, which for a control in the
  * header is the view at its top. Each case says which half it is.
  *
- * **THE SOURCE VIEW'S OWN BOX DOES NOT SCROLL A LONG PROGRAM ANY LONGER** (the view layouts spec §11.1): its editor
- * takes a share of the view and scrolls inside it, under a header that stays put. So a focus given to the source
- * view's first control is in sight wherever the editor is scrolled to, and both halves leave the editor where it
- * was; the key's half is held to moving a view by the TM view, in a window short enough that its own box scrolls.
+ * **THE SOURCE VIEW'S OWN BOX DOES NOT SCROLL A LONG PROGRAM** (the view layouts spec §11.1): its editor takes a share
+ * of the view and scrolls inside it, under a header that stays put. So a focus given to the source view's first
+ * control is in sight wherever the editor is scrolled to, and both halves leave the editor where it was; the key's
+ * half is held to moving a view by the TM view, in a window short enough that its own box scrolls.
  *
  * **ON THE VIEWS A VISITOR GETS, NOT THE FOUR `setup.ts` STORES**: the source beside the TM view, and all four as two
  * columns. In both the source view is the neighbour a `✕` gives the focus to. On the stored four, in two rows, the
- * view `scroll-kept.test.ts` closes has the λ view for its neighbour, and that file passed while a `✕` beside the
- * source view put the source view at 0.
+ * view `scroll-kept.test.ts` closes has the λ view for its neighbour, and that file holds no λ view's scroll, so a
+ * `✕` that reset the scroll of the view it gives the focus to would pass there.
  *
  * `scroll-kept.test.ts` holds a scroll position across a rebuild made from ANOTHER view; this file holds it for the
  * view the rebuild's focus lands in.
@@ -160,7 +160,7 @@ describe('the scroll of the view a gesture gives the focus to', () => {
      * is on the source view's first control with its ring drawn, and it has to be in sight.
      *
      * **THE EDITOR STAYS WHERE IT WAS, SINCE THE CONTROL IS IN SIGHT ALREADY**: the source view's header does not
-     * scroll with its editor. The view at its top was the rule's outcome while the header did.
+     * scroll with its editor.
      */
     it('shows the focused control and keeps the editor when the ✕ is pressed with Enter', async () => {
       await resetToFirstLoad()
@@ -184,8 +184,8 @@ describe('the scroll of the view a gesture gives the focus to', () => {
      * on its first control, which is in its header.
      *
      * **THE TM VIEW IS NEAR ITS TOP AFTERWARDS, AND THAT IS THE RULE, NOT A LOSS IT MISSED**: the control is in the
-     * view's header, 3 px under the view's top, so the view is scrolled by that and no more (measured 2026-10-12).
-     * What is held is that the control is in sight where it was not, and that the view moved up for it.
+     * view's header, 3 px under the view's top, so the view is scrolled by that and no more. What is held is that the
+     * control is in sight where it was not, and that the view moved up for it.
      */
     it('gives way to the focused control when the ✕ beside a view whose own box scrolls is pressed with Enter', async () => {
       await resetToFirstLoad()
@@ -240,9 +240,7 @@ describe('the scroll of the view a gesture gives the focus to', () => {
 
     /**
      * **A VIEW KEY PRESSED FROM AN EDITOR GIVES THE FOCUS BACK TO IT, AND THE EDITOR STAYS WHERE IT WAS WHILE THE CARET
-     * SHOWS.** It is asked for its caret and not for its box. While the source view's own box was what scrolled, the
-     * editor was taller than its view: at 120 px a bare `focus()` put the view at 0, and at 0 `scrollIntoView` on
-     * the editor's box put it at 59, the editor's top brought to the view's.
+     * SHOWS.** It is asked for its caret and not for its box.
      */
     it('is kept when a view key is pressed from the source editor, at 120 px and at the top', async () => {
       await resetToFirstLoad()

@@ -15,7 +15,7 @@ import { noticeEl, noticeElText, SHELL, stateIdle, until } from './harness'
  * the start-up compile's write is the first one refused. The program `setup.ts` stores is removed, so the page opens
  * on the first-load example as a first visit does; and a copy is stored, bound to the λ view, so that a write of the
  * copies that goes through can be seen to leave the program's half of the line alone. ONE MOUNT FOR THE FILE, for the
- * reason every sibling gives.
+ * reason `app.test.ts` gives.
  */
 
 localStorage.removeItem(PROGRAM_STORAGE_KEY)

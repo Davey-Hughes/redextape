@@ -25,8 +25,8 @@ export type GridRows = {
    * OPTIONAL**, so a view cannot silently fall back to keying the hold on `follow` alone by omitting it:
    * a link's scroll hold (`VirtualGrid.scrollToRow`) is keyed on this field, because a view whose follow
    * row is the current run's position — the TM rule table's state header — can show a NEW frame at the
-   * SAME follow row, a self-looping step being the ordinary case (amendment 21). Each view's grid keys
-   * its own hold on its own frame; this is this draw's own.
+   * SAME follow row, a self-looping step being the ordinary case (Plan 7 part 5 spec amendment 21).
+   * Each view's grid keys its own hold on its own frame; this is this draw's own.
    */
   readonly frame: number | null
   /**
@@ -79,18 +79,17 @@ export type GridOptions = {
  * A virtualized grid of fixed-height rows with one roving active row: the TM view's rule table, and the asm
  * view's listing (Plan 7 part 5 spec, amendment 7).
  *
- * **ONE COPY OF THE PART THAT KEPT BREAKING.** The drawn window, the active row, the keys, a click that survives
- * the redraw focusing causes, and following with its clamp handling were written out in the rule table, then again
- * in the state diagram and the λ view's body; each fix to one — a lost click, a clamp read as a user's scroll —
- * had to be found again in the others. This class is the rule table's copy, moved here unchanged in behaviour, so
- * the asm listing is its second user rather than a fourth copy, and the state diagram's program level its third. The
- * λ body keeps its own: it is a tree of lines, not a grid of cells, a click on it is a token's, and its arrows fold.
+ * **ONE COPY, SO A FIX IS MADE ONCE.** The drawn window, the active row, the keys, a click that survives the redraw
+ * focusing causes, and following with its clamp handling are written here once, so a fix to one — a lost click, a
+ * clamp read as a user's scroll — reaches the rule table, the asm listing and the state diagram's program level
+ * together. The λ body keeps its own: it is a tree of lines, not a grid of cells, a click on it is a token's, and
+ * its arrows fold.
  *
  * **ONE TAB STOP.** The box is the `role="grid"` element and takes the focus; each row has one `gridcell`, and the
  * active row is named by `aria-activedescendant`, so a table of 127,881 rows (`list60`'s δ-table) is not 127,881
  * tab stops. Only the rows in view are in the DOM.
  *
- * **WHAT THE VIEW STILL OWNS**: what a row says and what it marks (`GridRows.fill`), what a row does
+ * **WHAT THE VIEW OWNS**: what a row says and what it marks (`GridRows.fill`), what a row does
  * (`GridOptions.activate`), the panel the box sits in, and when to draw for a new frame or link. The grid draws on
  * its own for a scroll, a resize, a key and a click.
  *
@@ -109,7 +108,7 @@ export class VirtualGrid {
   #follow = new Follow()
   /**
    * The active row (Plan 7 part 4 spec §9.2), **AN INDEX INTO THE WHOLE GRID, NOT INTO THE DRAWN WINDOW** —
-   * accessibility item 3, which found a cursor designed against the rendered rows unable to move past them. The
+   * accessibility item 3: a cursor indexed into the rendered rows cannot move past them. The
    * keys move it by index and scroll so it is drawn; a scroll the user or following makes carries it along
    * instead, so `aria-activedescendant` always names a row that is in the DOM (`draw`), as the λ view's does.
    */
@@ -150,17 +149,15 @@ export class VirtualGrid {
     this.#rowsEl.setAttribute('role', 'rowgroup')
 
     this.el.addEventListener('scroll', () => {
-      // A SCROLL EVENT ON A HIDDEN BOX IS NEVER USER INTENT, and reading it as such detached a following table with
-      // no user gesture at all. `draw` writes `scrollTop`, and the browser delivers that write's event at the NEXT
-      // rendering update rather than synchronously — so hiding the box in between lands the echo on a
+      // A SCROLL EVENT ON A HIDDEN BOX IS NEVER USER INTENT, and reading it as such would detach a following table
+      // with no user gesture at all. `draw` writes `scrollTop`, and the browser delivers that write's event at the
+      // NEXT rendering update rather than synchronously — so hiding the box in between lands the echo on a
       // `display: none` box, where `scrollTop` reads back 0, which is further from the expected position than any
-      // tolerance. Reproduced 5/5 in Chromium on the rule table: step, close the rules panel, reopen it, and the
-      // table was detached with the current row gone from the DOM. A hidden box cannot be scrolled by a person, so
-      // there is nothing here to honour.
+      // tolerance. A hidden box cannot be scrolled by a person, so there is nothing here to honour.
       if (!this.#opts.isOpen()) return
-      // A BOX THAT CHANGED HEIGHT SINCE IT WAS DRAWN MAY HAVE HAD ITS SCROLL CLAMPED (Plan 7 part 4 spec §9.1 made
-      // its height the view's), and this event can come before the resize observer's: a panel beside it that closed
-      // read the layout at once, in its own toggle.
+      // A BOX THAT CHANGED HEIGHT SINCE IT WAS DRAWN MAY HAVE HAD ITS SCROLL CLAMPED (its height is the view's, Plan
+      // 7 part 4 spec §9.1), and this event can come before the resize observer's: a panel beside it that closes
+      // reads the layout at once, in its own toggle.
       if (this.el.clientHeight !== this.#drawnHeight) this.#follow.onResize(this.el.scrollTop)
       this.#follow.onScroll(this.el.scrollTop)
       this.draw()
@@ -168,9 +165,9 @@ export class VirtualGrid {
 
     // A ROW TAKES NO FOCUS ON `mousedown`; THE GRID TAKES IT WHEN THE CLICK LANDS (Plan 7 part 4 spec, amendment
     // 18). Focusing the grid draws its view, and the draw replaces every row: taken on `mousedown`, as the browser
-    // would, it removed the row under the pointer before `mouseup`, and the browser fired no `click` at all — every
-    // first click on the rule table from anywhere else was lost. The primary button only, so a middle button still
-    // scrolls.
+    // would, it would remove the row under the pointer before `mouseup`, and the browser would fire no `click` at
+    // all — every first click on the grid from anywhere else would be lost. The primary button only, so a middle
+    // button still scrolls.
     this.#rowsEl.addEventListener('mousedown', (event) => {
       if (event.button === 0) event.preventDefault()
     })
@@ -269,23 +266,23 @@ export class VirtualGrid {
 
   /**
    * Centre `row` at the next draw — a link's scroll — **AND HOLD IT THERE UNTIL THE RUN MOVES, WITHOUT TOUCHING
-   * `Follow`'S OWN FLAG** (Plan 5 design §5.1). Following is about where the run is and a link is about a construct:
+   * `Follow`'S OWN FLAG** (5b design §5.1). Following is about where the run is and a link is about a construct:
    * telling `Follow` would make a link silently re-attach a grid the user had detached, or detach one they had not.
    * But `draw` recomputes following's target whenever it follows, so writing `scrollTop` here would be reverted by
    * the very next draw; a pending target that `draw` prefers is what lets the link win.
    *
-   * **WINNING ONE DRAW WAS NOT ENOUGH.** The write's own `scroll` event redraws the box a frame later, and that draw,
-   * still following, scrolled straight back to the run's row: a link made while the grid followed showed its rows
-   * for one frame. So the scroll holds while the frame on display is the one it was written against — through its
-   * own event, a redraw of the same frame, a resize — and following takes over when the view shows another frame,
-   * on `attach`, or on `reset`.
+   * **WINNING ONE DRAW IS NOT ENOUGH.** The write's own `scroll` event redraws the box a frame later, and that draw,
+   * still following, would scroll straight back to the run's row: a link made while the grid followed would show
+   * its rows for one frame. So the scroll holds while the frame on display is the one it was written against —
+   * through its own event, a redraw of the same frame, a resize — and following takes over when the view shows
+   * another frame, on `attach`, or on `reset`.
    *
-   * **KEYED ON THE FRAME, NOT THE FOLLOW ROW** (amendment 21). The TM rule table follows the current state's own
-   * row, and a step that loops in its state — the ordinary case in a compiled machine — leaves that row exactly
-   * where it was: a hold keyed on the row instead of the frame would outlive such a step, leaving the table
-   * parked on the linked block with the current rule off screen and "follow current rule" hidden because
-   * following itself was never touched. A frame the view draws is a step; the run has moved the instant that
-   * number changes, whether or not the row it follows moved with it.
+   * **KEYED ON THE FRAME, NOT THE FOLLOW ROW** (Plan 7 part 5 spec amendment 21). The TM rule table follows the
+   * current state's own row, and a step that loops in its state — the ordinary case in a compiled machine —
+   * leaves that row exactly where it was: a hold keyed on the row instead of the frame would outlive such a
+   * step, leaving the table parked on the linked block with the current rule off screen and
+   * "follow current rule" hidden because following itself was never touched. A frame the view draws is a step;
+   * the run has moved the instant that number changes, whether or not the row it follows moved with it.
    *
    * **THE ROW IS RECORDED, NOT ITS PIXELS, AND THE HOLD STARTS AT THE DRAW THAT WRITES THEM.** A box off the page —
    * a view Stage is not showing, which every link made in another view reaches — reports a height of 0, so a
@@ -295,9 +292,9 @@ export class VirtualGrid {
    * shows: a view shown after a link made elsewhere opens on the pin, held until the run moves.
    *
    * **A CLOSED PANEL RECORDS THE ROW TOO**, for the same reason: its box is not rendered either. Refusing the row
-   * there left the hold of the link before it in place, so a panel reopened with the run at rest stayed on that
-   * earlier link's block — neither the new pin nor the run, following on, nothing offered to re-attach. The draw that
-   * reopens the panel centres the row and holds from the frame it shows. **DOES NOT DRAW.**
+   * there would leave the hold of the link before it in place, so a panel reopened with the run at rest would stay
+   * on that earlier link's block — neither the new pin nor the run, following on, nothing offered to re-attach. The
+   * draw that reopens the panel centres the row and holds from the frame it shows. **DOES NOT DRAW.**
    */
   scrollToRow(row: number): void {
     if (this.#opts.rows().count === null) return
@@ -327,12 +324,11 @@ export class VirtualGrid {
     const total = (count ?? 0) * ROW_HEIGHT
 
     // A GRID THAT JUST LOST ROWS CLAMPS `scrollTop` ONCE ITS SCROLL RANGE SHRINKS TO MATCH, and the browser reports
-    // the clamp as a `scroll` that `Follow` would read as the user's: the state diagram detached exactly so, measured
-    // at 626 → 600 px as `fact(3)` stepped from `pc20` into `halt`. The clamp need not be visible in `scrollTop` yet —
-    // the spacer below has not shrunk, and the diagram's gutter holds the range up until its `afterDraw` — so the
-    // clamp this draw is about to cause is recorded from `total`, the content's new height, before anything shrinks.
-    // The browser's own position can land a couple of pixels past this one, when a row overflows the spacer; that is
-    // inside `ECHO_TOLERANCE`.
+    // the clamp as a `scroll` that `Follow` would read as the user's, detaching the grid. The clamp need not be
+    // visible in `scrollTop` yet — the spacer below has not shrunk, and the diagram's gutter holds the range up
+    // until its `afterDraw` — so the clamp this draw is about to cause is recorded from `total`, the content's new
+    // height, before anything shrinks. The browser's own position can land a couple of pixels past this one, when
+    // a row overflows the spacer; that is inside `ECHO_TOLERANCE`.
     if (this.#opts.shrinks === true) {
       const clamped = Math.max(0, total - this.el.clientHeight)
       if (this.el.scrollTop > clamped) this.#follow.onProgrammaticScroll(clamped)
@@ -372,10 +368,9 @@ export class VirtualGrid {
 
     // THE VIEW'S FLEX LAYOUT IS THE ONLY THING BOUNDING THIS BOX (`style.css`'s panel rules for the view, Plan 7
     // part 4 spec §9.1), and `clientHeight` reports what it actually laid out rather than what the stylesheet asked
-    // for. If those rules never reach the page the box grows to its full content height — measured at 271,968px
-    // for 11,332 rows — the window covers every row, and every draw renders every row. The browser tier loads
-    // `style.css` (`tests/browser/setup.ts`) and asserts the rule table stays bounded, so that gap fails a test
-    // rather than silently costing O(rows) per frame.
+    // for. If those rules never reach the page the box grows to its full content height, the window covers every
+    // row, and every draw renders every row. The browser tier loads `style.css` (`tests/browser/setup.ts`) and
+    // asserts the rule table stays bounded, so that gap fails a test rather than silently costing O(rows) per frame.
     this.#drawnHeight = viewportHeight
     // A PENDING LINK ROW WINS OVER THE FOLLOW TARGET, is consumed, and then holds the box until the frame on
     // display changes — `scrollToRow`. Read and cleared together so a link recorded during THIS call is what the

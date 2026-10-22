@@ -4,8 +4,8 @@ import type { RuleView, TmProgram } from './types'
  * The state diagram's local level as data (Plan 7 part 4, spec §8 and amendment 10): the current state and every
  * state within `REACH` rules of it in either direction, in columns by signed distance, and the rules between them.
  *
- * **SMALL, SO IT IS REBUILT WHEN THE STATE CHANGES.** §2.3 measured a median of 5 states within 2 rules either way
- * on `fact3`, `map_fold` and `while4` alike; a state change re-lays it out, and a frame in the same state does not.
+ * **SMALL, SO IT IS REBUILT WHEN THE STATE CHANGES.** §2.3 measured a median of 5 states within 2 rules either way;
+ * a state change re-lays it out, and a frame in the same state does not.
  */
 
 /** How far the local level reaches, in rules, each way. */

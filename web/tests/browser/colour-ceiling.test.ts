@@ -7,17 +7,10 @@ import { noticeText, SHELL, until } from './harness'
  * **THE OVER-THE-CEILING NOTICE — design §10's fourth row, over the running app.**
  *
  * *A document is over the colour ceiling → that document shows uncoloured, one notice saying which;
- * diagnostics keep running.* **The row promised "no colour and no diagnostics" until the diagnostics
- * path was measured at 135.2 ms in a worker at that size** — a lag rather than a freeze — so only the
- * colour half was ever built and the row now says so deliberately.
+ * diagnostics keep running.* Diagnostics run in a worker, where a document that size is a lag rather
+ * than a freeze; the paragraphs under that row have the measurement.
  *
- * The notice half of that row did not exist until this file: `ColourOptions.onCeiling` was
- * declared in `colour.ts` and invoked in `#rebuild`, and NEITHER of `main.ts`'s two `treeSitterColour`
- * calls passed one, so a document past the ceiling went silently uncoloured. `tests/node/colour.test.ts`
- * drove the ceiling and passed no sink either, which is why the gap survived a green suite: an optional
- * call on `undefined` is a line v8 records as covered and a behaviour that never happens.
- *
- * **SO THIS FILE IS ABOUT THE WIRING, NOT ABOUT THE BRANCH.** The branch — decorations cleared, tree
+ * **THIS FILE IS ABOUT THE WIRING, NOT ABOUT THE BRANCH.** The branch — decorations cleared, tree
  * dropped, reported once — is the node tier's, over a stubbed view in the suite that runs on every push.
  * What only a page can show is that `main.ts` hands the plugin a real sink and that the sink reaches the
  * notice line a user reads. Both halves are needed and neither implies the other.

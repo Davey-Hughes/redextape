@@ -42,7 +42,8 @@ describe('the step bar', () => {
     expect(barTitle()).toBe('TM · program')
   })
 
-  // §8: the focused view is the SOURCE view, which cannot step — the bar keeps the last one that could.
+  // Plan 7 part 2 spec §8: the focused view is the SOURCE view, which cannot step — the bar keeps the
+  // last one that could.
   it('keeps the last view that could step when the source view takes the focus', () => {
     focusView('source')
     expect(barTitle()).toBe('TM · program')
@@ -63,22 +64,19 @@ describe('the step bar', () => {
     stepBar().querySelector<HTMLButtonElement>('button[aria-label="one step forward"]')?.click()
     expect(barStep()).not.toBe(before)
     await lambdaSettled('lambda-0', barStep)
-    // **THE VIEW ITSELF MOVED, WHICH IS THE HALF THE BAR'S OWN READOUT CANNOT SHOW.** This line used to
-    // assert the λ leaf merely exists, which every other case already relies on — it said nothing about
-    // the bar driving the view its title names.
+    // **THE VIEW ITSELF MOVED, WHICH IS THE HALF THE BAR'S OWN READOUT CANNOT SHOW.**
     expect(document.querySelector('[data-leaf="lambda-0"] .term')?.textContent ?? '').not.toBe(termBefore)
   })
 
   /**
    * **EVERY BUTTON ON THE BAR, NOT ONLY ONE.** The case above proves the bar drives the view it names by
-   * stepping back once; coverage then showed `step-bar.ts` at 42.85% of its functions, because each of
-   * the five handlers (six since `⏭`) is a separate closure and four of them had never been clicked. A bar whose `↺` or
-   * `⏵` went to the wrong view — or nowhere — would have shipped.
+   * stepping forward once; each of the bar's handlers is a separate closure, so a bar whose `↺` or `⏵` went
+   * to the wrong view — or nowhere — would pass it.
    *
    * `[continue]` IS THE ONE THAT IS NOT HERE: it exists only on a recording that stopped with more to
    * record, which needs a fixture that spends a step budget. `extend-focus-probe.test.ts` carries that
    * fixture and the cost of building it; the bar's own `extend` handler is the same one-line delegation
-   * as the other four.
+   * as the others.
    */
   it('drives the target with every one of its buttons', async () => {
     // THE BAR'S OWN READOUT, NOT THE VIEW'S — with the `steps` switch at `bar` the view has no step
@@ -105,9 +103,8 @@ describe('the step bar', () => {
     expect(barButton('play'), 'the bar’s pause button did not become play again').not.toBeNull()
   })
 
-  // **SPEC §11's FOURTH RULE AT THIS CALL SITE, IN THE TWO HALVES `extend-focus-probe.test.ts`
-  // ESTABLISHED FOR THE CONTINUE BUTTON** — and the answer comes out the same way, which is the finding
-  // rather than a disappointment.
+  // **PLAN 7 PART 2 SPEC §11's FOURTH RULE AT THIS CALL SITE, IN THE TWO HALVES `extend-focus-probe.test.ts`
+  // ESTABLISHED FOR THE CONTINUE BUTTON** — and the answer comes out the same way.
   //
   // HALF ONE — IS THE MECHANISM REAL? Removing a slot the focus is inside strands it on `<body>`, which
   // is the hazard `ViewHeader.setStepsShown`'s `handOff` exists to prevent.
@@ -127,14 +124,13 @@ describe('the step bar', () => {
     parent.insertBefore(slot, next)
   })
 
-  // HALF TWO — CAN THE SWITCH GESTURE REACH IT? **No**, and for the reason that file already records
-  // about the continue button: the only way to move the `steps` switch is through the workspace menu,
-  // and opening a menu is itself a focus-bearing interaction somewhere else. At the instant the slot is
-  // removed, the focus is on the menu item the user just clicked — never on the control being withdrawn.
+  // HALF TWO — CAN THE SWITCH GESTURE REACH IT? **No**, and for the reason that file records about the
+  // continue button: the gesture moves the `steps` switch through the workspace menu, and opening a
+  // menu is itself a focus-bearing interaction somewhere else. At the instant the slot is removed, the
+  // focus is on the menu item the user just clicked — never on the control being withdrawn.
   //
-  // The `handOff` in `setStepsShown` therefore stays as defence against a future caller that moves the
-  // switch without a menu (a share link, a keyboard shortcut), and its sabotage does NOT fire. That is
-  // recorded as the finding it is, not adjusted until something goes red.
+  // The `handOff` in `setStepsShown` therefore stays as defence against a caller that moves the switch
+  // without a menu, such as a share link's open, and removing it does NOT fail this case.
   it('leaves the focus on the gesture that flipped the switch, not in the view it emptied', () => {
     const forward = document.querySelector<HTMLButtonElement>(
       '[data-leaf="lambda-0"] .view-steps button[aria-label="one step forward"]',

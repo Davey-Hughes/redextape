@@ -11,12 +11,12 @@ import { fourViewWorkspace, liveText, noticeText, SHELL, stateIdle, undoButton, 
  * which names every leg stopped short so far; and an edit withdraws the `undo` the clamp's notice carries, as it does
  * the open's. Each link is pasted into the open page, a `hashchange`, and carries a light program, `let y = 10; y + 5`
  * or `let x = 40; x + 2`, whose run ends long before the link's steps, so each position clamps at once. ONE MOUNT FOR
- * THE FILE, for the reason every sibling gives.
+ * THE FILE, for the reason `app.test.ts` gives.
  *
  * **THE PRESS IS REAL INPUT, THROUGH CDP**: Chrome dispatches `click` only where the press and the release land on the
- * same element, so a synthetic `.click()`, which has no press, cannot fail the way a user's click did. **AND THE LINK'S
- * COMPILE IS HELD UNTIL THE PRESS IS DOWN**, by wrapping `Worker`'s own `postMessage` before the app mounts, so the
- * clamp cannot redraw the notice before the press on a runner of any speed.
+ * same element, so a synthetic `.click()`, which has no press, cannot fail where a user's click would. **AND THE
+ * LINK'S COMPILE IS HELD UNTIL THE PRESS IS DOWN**, by wrapping `Worker`'s own `postMessage` before the app mounts, so
+ * the clamp cannot redraw the notice before the press on a runner of any speed.
  */
 
 /** Whether a `run` posted to a session worker is held back, and the posts held. */

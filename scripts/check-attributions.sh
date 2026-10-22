@@ -143,15 +143,9 @@ readonly ATTRIBUTION_RE='`[A-Za-z0-9_./-]+\.(rs|ts|tsx|js|css|html)`('"'"'|’)s
 # THE ESCAPE HATCH, counted out loud for the reason `check-citations.sh` states: a marker sits on the
 # line it excuses and is visible in review, where a config file collects exemptions nobody meets.
 #
-# **EACH MARKER'S ARGUMENT IS HERE RATHER THAN LEFT TO BE INFERRED.** One is a citation of a thing that
-# deliberately IS NOT in any file's code, which is a different act from citing the wrong file: `panes.ts`'s
-# note on what its `PaneCollection` REPLACED, which is a statement about a file that no longer holds the
-# symbol and is worthless if rewritten to name one that does. Two cite a discriminated-union tag — the
-# `compiled` reply — which lives in `protocol.ts` as a quoted string, and `strip_code` blanks string
-# literals ON PURPOSE, because the blindness it buys back (blind sub-case 1 above) costs more than two
-# markers. **The last is not a live claim at all: `buffers-quota.test.ts` QUOTES the wrong citation that
-# was fixed — `` `replies.ts`'s `LambdaPane.setEditor` `` — as the illustration of its own mistake, and the
-# quote has to stay wrong to illustrate it.**
+# **EACH MARKER'S ARGUMENT IS HERE RATHER THAN LEFT TO BE INFERRED.** Both cite a discriminated-union tag —
+# the `compiled` reply — which lives in `protocol.ts` as a quoted string, and `strip_code` blanks string
+# literals ON PURPOSE, because the blindness it buys back (blind sub-case 1 above) costs more than two markers.
 #
 # This script is NOT scanned by its own scan: `SOURCE_RE` below is `\.(rs|ts|tsx|js|css|html)$` and this
 # script is `.sh`. `check-citations.sh` is scanned by its own scan, because that gate has no `SOURCE_RE` and

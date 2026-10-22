@@ -19,11 +19,9 @@ import { cloneMs, median, ms } from './harness'
  *
  * **EVERY RUN THE MEMORY PROBE KNOWS IS PRICED APART, AND THE HEAVIEST IS ADDED** (amendment 45) — a loop to the step
  * cap, `asm-copy-corpus.ts`'s `CASES` (a saved-locals bank, a filled heap, filled boxes, bare recursion) and its
- * `both`, at `COPY_CAPS`' heap cap, all imported from that file so the two probes never keep two copies of
- * the same program in step by hand — since none of these runs grows with the text they are added to: the ceiling is
- * the size whose build, with the heaviest of them added, stays under the budget. Amendment 36 priced only the loop;
- * amendment 45 found `both` heavier in every run measured and moved the rule to whichever run turns out heaviest,
- * rather than naming one in advance.
+ * `both`, at `COPY_CAPS`' heap cap, all imported from that file so the two probes never keep two copies of the same
+ * program in step by hand — since none of these runs grows with the text they are added to: the ceiling is the size
+ * whose build, with the heaviest of them added, stays under the budget.
  *
  * THE CORPUS IS GENERATED, one block a label, of the shape a hand-written file has: a label, three instructions, and a
  * jump back to it, so the label check has a definition and a reference per block.

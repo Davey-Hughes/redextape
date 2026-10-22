@@ -16,11 +16,12 @@ import {
 } from './harness'
 
 /**
- * **A POINTER, NOT `HTMLElement.click()`** (spec amendment 18). The rule table's rows and the program level's rows
- * are drawn afresh on every draw, and a view draws when it takes the focus, so a row the pointer went down on can be
- * replaced before it comes up — and the browser fires no `click` on an element that has left the page between the
- * two. `.click()` is one synthetic event on one element and cannot see that. Each gesture here is `userEvent.click`,
- * a Playwright pointer: `mousedown` and `mouseup` at the element's centre, and whatever `click` the browser derives.
+ * **A POINTER, NOT `HTMLElement.click()`** (Plan 7 part 4 spec amendment 18). The rule table's rows and the program
+ * level's rows are drawn afresh on every draw, and a view draws when it takes the focus, so a row the pointer went
+ * down on can be replaced before it comes up — and the browser fires no `click` on an element that has left the page
+ * between the two. `.click()` is one synthetic event on one element and cannot see that. Each gesture here is
+ * `userEvent.click`, a Playwright pointer: `mousedown` and `mouseup` at the element's centre, and whatever `click`
+ * the browser derives.
  *
  * **THE FOCUS STARTS OUTSIDE THE GRID**, in the source editor, where a reader who has just typed has it: that first
  * click is the one a focus change moves under the pointer.
@@ -98,9 +99,8 @@ describe('a pointer on the rows a draw rebuilds', () => {
 
   describe('inside cmpeq', () => {
     // Inside `cmpeq`, where the current instruction opens onto its sub-steps and so has a show states. REACHED IN
-    // THREE HOOKS: 1,732 clicks, a full redraw each, whose time is the machine's. On the slower CI runner a body that
-    // walked here came within a second or two of Vitest's 15 s cap, and then the one hook it was moved to ran past
-    // its 30 s there (2026-10-06). See `walkInParts` in `harness.ts`.
+    // THREE HOOKS: 1,732 clicks, a full redraw each, whose time is the machine's: on the slower CI runner they come
+    // close to one test body's 15 s cap and run past one hook's 30 s. See `walkInParts` in `harness.ts`.
     for (const part of intoCmpeq(tmPane)) beforeAll(part)
 
     it('shows the local level on a click on show states, and hands the focus to it', async () => {

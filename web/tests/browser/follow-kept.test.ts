@@ -11,10 +11,8 @@ import { userPickWorkspace } from './user-event-fixture'
  * The TM view's rule table and state diagram, the asm view's listing and the λ view's body each keep the run's place
  * in view until the user scrolls away, and offer a control to follow again once they have (`state-table.ts`'s
  * `Follow`). `pane-host.ts` puts each view's scroll positions back after a rebuild, and that write is reported as a
- * `scroll` a frame later: read as the user's, it stopped a box nobody had touched from following. Measured before
- * the write was announced (`state-table.ts`'s `restoreScroll`), at 1280 × 896 on the program below: all four boxes
- * came back from a toggle off and on, and from a Stage tab away and back, with their control offered. With no
- * restore at all, as before the view layouts, all four came back following.
+ * `scroll` a frame later: read as the user's, it would stop a box nobody had touched from following, so the write is
+ * announced (`state-table.ts`'s `restoreScroll`).
  *
  * **EVERY BOX FOLLOWS A ROW PAST ITS FIRST**, which the first case asserts: a box at its start is given nothing back,
  * and following it proves nothing. The program's last step leaves every box at its start, so each leg is one step
@@ -22,8 +20,7 @@ import { userPickWorkspace } from './user-event-fixture'
  *
  * **ONE PAGE, AND EVERY CASE IS PUT WHERE IT STARTS BEFORE IT RUNS** (`startOn`): all four views, in tiles, or as
  * the Stage's tabs for the cases about a tab. Each then has its boxes follow again (`follow`). So a case passes alone
- * and in any order, and one that fails leaves the next its start. The Stage's cases needed the case that enters the
- * Stage before them, and the toggles' cases could not run after it (2026-10-12).
+ * and in any order, and one that fails leaves the next its start.
  */
 
 const PROGRAM = 'fn double(n) { n + n } fn id(n) { n } let x = 20; id(double(x)) + 2'
@@ -180,9 +177,8 @@ describe('a box that follows the run, across a rebuild of the layout', () => {
 
     /**
      * **THE VIEW COMES BACK IN ANOTHER COMBINATION, TALLER, AND THE DIAGRAM CANNOT SCROLL AS FAR AS IT HAD.** The
-     * browser clamps the restore's write, so its `scroll` reports a position the restore never asked for. Measured
-     * before the restore read the position back: 480 px in a box of 120 came back as 432 in a box of 168, with
-     * *follow current state* offered.
+     * browser clamps the restore's write, so its `scroll` reports a position the restore never asked for, and the
+     * restore reads the position back.
      */
     it('is still following when its view comes back taller and the restore is clamped', async () => {
       await follow(diagram)

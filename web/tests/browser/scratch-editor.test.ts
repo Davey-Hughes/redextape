@@ -5,25 +5,15 @@ import { ScratchEditor } from '../../src/scratch-editor'
 import { typeIn } from './editor-view-fixture'
 
 /**
- * **A MISMATCH FOUND AGAINST `2026-08-11-plan5d-iii-editable-lambda.md`, AND HOW THIS FILE RESOLVES
- * IT.**
- *
- * That plan's Step 1 sketch simulated "a burst of keystrokes" by calling `ScratchEditor#setText`
- * three times. Run as written, that test fails: `setText` sets `#seeding` for the duration of its
- * dispatch (see `scratch-editor.ts`'s own doc on that field — "the fork's seed, and nothing else"),
- * so the update listener never schedules a recompile and `onEdit` is called zero times, not one.
- * Step 5's own prediction agrees with this reading — "coalesces a burst... expects one fire, which
- * THE MUTATION still satisfies" only makes sense if the guard-removed mutant is what makes that test
- * pass, meaning the guard-intact reference implementation does not. Confirmed empirically: run
- * verbatim against the Step 3 implementation, `coalesces a burst of keystrokes` fails 0-vs-1.
- *
- * `setText` cannot be the right way to simulate a keystroke — the whole point of `#seeding` is that
- * a seed and a keystroke must be told apart, and `setText` is named and documented as the seed side
- * of that split. This file simulates a real edit instead, via `EditorView.findFromDOM(host)` —
- * CodeMirror's own public API for recovering the view instance mounted under a DOM node — and
- * dispatches a change transaction directly to it, exactly as `tests/browser/harness.ts`'s `retype`
- * treats a direct `view.dispatch` of a buffer replacement as standing in for a user retyping the
- * whole document. No private field of `ScratchEditor` is touched.
+ * **A KEYSTROKE IS A CHANGE TRANSACTION, NOT `ScratchEditor#setText`.** `setText` sets `#seeding` for the
+ * duration of its dispatch (`setText`'s own doc: "the fork's seed, and nothing else"), so the update listener
+ * never schedules a recompile and `onEdit` is called zero times: the whole point of `#seeding` is that a seed
+ * and a keystroke must be told apart, and `setText` is named and documented as the seed side of that split.
+ * These tests type with `typeIn` (`editor-view-fixture.ts`), which recovers the view mounted under the host
+ * with `EditorView.findFromDOM` — CodeMirror's own public API for that — and dispatches a change transaction
+ * directly to it, exactly as `tests/browser/harness.ts`'s `retype` treats a direct `view.dispatch` of a
+ * buffer replacement as standing in for a user retyping the whole document. No private field of
+ * `ScratchEditor` is touched.
  */
 describe('ScratchEditor', () => {
   beforeEach(() => {
@@ -61,9 +51,9 @@ describe('ScratchEditor', () => {
   })
 
   /**
-   * **A DESTROY SENDS WHAT WAS TYPED, WHERE IT USED TO CANCEL IT** — `ScratchEditor.destroy`'s doc: a view that leaves
-   * its copy destroys the editor, and the cancel dropped the last debounce's typing. Sent at the destroy and not
-   * again when the timer would have fired, so a copy is not rebuilt twice for one edit.
+   * **A DESTROY SENDS WHAT WAS TYPED** — `ScratchEditor.destroy`'s doc: a view that leaves its copy destroys the
+   * editor, and a cancel would drop the last debounce's typing. Sent at the destroy and not again when the timer
+   * would have fired, so a copy is not rebuilt twice for one edit.
    */
   it('sends a pending edit when it is destroyed, once, and nothing after', () => {
     const { host, onEdit, ed } = make()
@@ -97,8 +87,8 @@ describe('ScratchEditor', () => {
   })
 
   /**
-   * A `ScratchEditor` whose document's `format()` stays open until the returned `answer` is called — the race both
-   * tests below need: a language server slower than the gesture that follows *format*.
+   * A `ScratchEditor` whose document's `format()` stays open until the returned `answer` is called — the race
+   * every test that calls it needs: a language server slower than the gesture that follows *format*.
    */
   const makeFormattable = (
     onEdit = vi.fn(),
@@ -139,18 +129,18 @@ describe('ScratchEditor', () => {
   /**
    * **A FORMAT TAKES THE PENDING EDIT OFF THE TIMER, AND `flush()` IS WHAT REACHES IT WHILE THE FORMAT WAITS** — and
    * *format on blur* starts one on the very click that leaves the copy, a click on the view's title, whose pick
-   * destroys a TM or asm view's editor. `destroy()` calls `flush()` first (its own doc), and `flush()` now sends a
-   * format's own pending text the moment it is asked (F1's fix) rather than waiting on the server — so the edit
-   * format owed is sent AT ONCE, not deferred. The server's answer is held back here until after the destroy, which
-   * is the order the race takes when the server is slower than the pick; format's own continuation, finding nothing
-   * left in `#formatPending`, sends nothing a second time.
+   * destroys a TM or asm view's editor. `destroy()` calls `flush()` first (its own doc), and `flush()` sends a
+   * format's own pending text the moment it is asked rather than waiting on the server — so the edit format owed is
+   * sent AT ONCE, not deferred. The server's answer is held back here until after the destroy, which is the order
+   * the race takes when the server is slower than the pick; format's own continuation, finding nothing left in
+   * `#formatPending`, sends nothing a second time.
    */
   it('sends the edit a format owed at once when the editor comes down before the format is answered', async () => {
     const { host, onEdit, ed, answer } = makeFormattable()
     typeIn(host, '\\a. a')
     const formatting = ed.format()
     ed.destroy()
-    expect(onEdit, 'destroy flushes, and flush now reaches a format’s own pending text').toHaveBeenCalledTimes(1)
+    expect(onEdit, 'destroy flushes, and flush reaches a format’s own pending text').toHaveBeenCalledTimes(1)
     expect(onEdit).toHaveBeenCalledWith('\\a. a')
     answer([])
     await formatting
@@ -158,13 +148,12 @@ describe('ScratchEditor', () => {
   })
 
   /**
-   * **F1 — A DELETE (OR A PAUSE) RACING AN IN-FLIGHT FORMAT MUST NOT LOSE THE EDIT TYPED BEFORE IT.**
+   * **A DELETE (OR A PAUSE) RACING AN IN-FLIGHT FORMAT MUST NOT LOSE THE EDIT TYPED BEFORE IT.**
    * `EditorCustody.flush` (`main.ts`'s delete and pause handlers) calls `ScratchEditor.flush` BEFORE the copy's
-   * record is read for undo — or stored for the pause — and before any `destroy()` runs. At `bec75f0` this was a
-   * no-op while a format was in flight: `format()` had already cleared `#timer`, and the pending edit lived only
-   * inside its own async closure until the server answered, so the record was read stale and undo restored text
-   * missing the keystrokes typed before *format*, silently. `flush()` alone — with no destroy anywhere in this test
-   * — is what must reach it now.
+   * record is read for undo — or stored for the pause — and before any `destroy()` runs. `format()` has already
+   * cleared `#timer`, so a `flush()` that looked at the timer alone would find nothing while a format is in flight:
+   * the record would be read stale, and undo would restore text missing the keystrokes typed before *format*,
+   * silently. `flush()` alone — with no destroy anywhere in this test — is what must reach it.
    */
   it('sends the edit a format owed when flush is called, before the format is answered', async () => {
     const { host, onEdit, ed, answer } = makeFormattable()
@@ -181,9 +170,10 @@ describe('ScratchEditor', () => {
   /**
    * **TYPING THAT OVERTOOK A FORMAT AND WAS SENT BY ITS OWN DEBOUNCE LEAVES THE FORMAT NOTHING OLDER TO SEND.**
    * The text a format took off the timer is older than anything typed after it. Kept past the debounce that sent
-   * the newer text, a delete's or a pause's `flush()` sent the older text after it, and the copy's record went back
-   * to it: what was typed during the format was gone from the undo and from the pause. The format's continuation
-   * still sends once it is answered, since the text is not what it asked about; what it sends is the newer text.
+   * the newer text, it would be sent after it by a delete's or a pause's `flush()`, and the copy's record would go
+   * back to it: what was typed during the format would be gone from the undo and from the pause. The format's
+   * continuation still sends once it is answered, since the text is not what it asked about; what it sends is the
+   * newer text.
    */
   it('sends nothing older from flush once a later debounce has sent what was typed during the format', async () => {
     const { host, onEdit, ed, answer } = makeFormattable()
@@ -226,10 +216,8 @@ describe('ScratchEditor', () => {
     expect(text(), 'a seed was refused with nothing pending').toBe('\\z. z')
   })
 
-  // Step 5's mutation (deleting the `#seeding` guard) predicted zero failures among the tests above,
-  // on the grounds that none of them seeds a fresh editor and then checks for an absent recompile.
-  // That prediction held here too, which per that same plan's own instruction means the mutation
-  // exposed a missing test rather than a harmless one. This is that test.
+  // A SEED IS NOT AN EDIT. None of the tests above seeds a fresh editor and then checks for an absent
+  // recompile, so without this one, deleting the `#seeding` guard would fail none of them.
   it('does not treat a seed as an edit', () => {
     const { ed, onEdit } = make()
     ed.setText('\\y. y')

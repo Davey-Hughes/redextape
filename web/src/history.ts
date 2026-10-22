@@ -1,9 +1,9 @@
 /**
  * A byte-budgeted ring of recorded frames, and the play head that walks it.
  *
- * THE BUDGET IS BYTES, NOT FRAMES, and that is measured rather than tasteful. `frame_cost_probe`
- * found a λ frame ranging from ~5 KB to 781 KB across nine programs, so "keep 1,000 frames" is a
- * memory policy spanning three orders of magnitude depending on what the user typed.
+ * THE BUDGET IS BYTES, NOT FRAMES. A λ frame's size depends on the program (`frame_cost_probe`
+ * measures it), so "keep 1,000 frames" would be a memory policy spanning three orders of magnitude
+ * depending on what the user typed.
  *
  * GENERIC OVER THE FRAME, AND SIZING IS THE CALLER'S JOB. `lambdaFrameBytes`/`tmFrameBytes` live in
  * `protocol.ts` beside the budgets they are spent against; this class knows only how to add numbers
@@ -11,15 +11,9 @@
  *
  * **AN EVICTION MOVES NO FRAME THE RING KEEPS.** The oldest frame is dropped by emptying its place and
  * moving `#start` past it, and the emptied places are cut off in one copy once there are as many of
- * them as frames kept, so an eviction's work does not grow with the frames the ring holds. It used to
- * `shift` both arrays. V8 trims a small array in place, but on one as large as a full TM history a
- * `shift` moves every element: a node bench (2026-10-05) put a push and a `shift` at 0.08 to 0.30 µs with
- * 1,000 to 10,000 kept and at 1.76 to 46.95 µs from 16,000 up. One *keep recording* on `map and fold`
- * pushes 22,777 frames onto its full TM ring, from step 69,008 to the halt at 91,785, and at
- * `CPUQuota=25%` CPU profiles of the page put 7,397.5 and 9,347.7 ms of that press's 10,899 and
- * 13,467 ms in `#evict` (2026-10-05, at `53ecbfa`). The page handled the worker's chunks back
- * to back and ran no timer for up to 12.2 s. Since, in three interleaved runs at 25 %, no two of the
- * press's polls came more than 601 ms apart, where they had come 7,604 to 8,288 ms apart.
+ * them as frames kept, so an eviction's work does not grow with the frames the ring holds. Not a
+ * `shift`: V8 trims a small array in place, but on one as large as a full TM history a `shift` moves
+ * every element.
  */
 export class History<T> {
   /**
@@ -99,9 +93,8 @@ export class History<T> {
    *
    * **THE NEWEST FRAME MAY PASS THE BUDGET BECAUSE THE WORKER'S RECORDING DOES.** `record-loop.ts` checks a leg's
    * allowance before each step, so a recording that spends its allowance posts up to one frame past it, and the
-   * allowance is this budget (`HISTORY_BYTES`). A ring that held only the budget dropped the first frames of the very
-   * recording that filled it — two of the 75,025 a TM leg recorded (`HISTORY_BYTES`'s doc) — so a run that opens on
-   * step 0 would have opened on step 2.
+   * allowance is this budget (`HISTORY_BYTES`). A ring that held only the budget would drop the first frames of the
+   * very recording that filled it, and a run would open past step 0.
    *
    * **THE EMPTIED PLACES ARE CUT OFF ONCE THEY ARE AS MANY AS THE FRAMES KEPT**, by one copy of the frames kept and
    * their sizes. A cut follows at least as many evictions as the frames it copies, so the copying averages at most one

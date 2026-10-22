@@ -63,7 +63,7 @@ export function programRows(g: Groups, labels: Labels, edges: Edges, open: numbe
  * **SHORTEST SPANS TAKE THE INNERMOST LANES**, so a short jump sits beside its rows and a long call runs outside
  * it, and two arcs share a lane only where their spans do not overlap. Deterministic: ties break on the lower
  * row, then the source. The lanes are assigned once per machine, since the spans are the listing's, not the
- * run's. `map_fold`'s 107 instructions need 7 lanes (spec §14.1).
+ * run's. Spec §14.1 has the figures for `map_fold`.
  */
 export function arcsOf(g: Groups): Arc[] {
   const spans: { from: number; to: number; lo: number; hi: number }[] = []

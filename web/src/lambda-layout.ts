@@ -196,8 +196,8 @@ type CodeWork =
  *
  * **ITERATIVE, OVER AN EXPLICIT STACK, AS `LambdaTree::build` IS.** The automatic folds keep the whole path to
  * the next redex open, and that path can be as deep as the reducer lets a term grow: a walk that recursed once
- * per open level overflowed the call stack on `2990 + 0` one step from its end, a legal program. The stack is
- * popped in the order the recursion ran, so the lines are the ones it wrote.
+ * per open level would overflow the call stack on a legal program. The stack is popped in the order a
+ * recursive walk would run, so the lines are the ones it would write.
  */
 export function codeLines(t: Tree, o: LayoutOptions): Line[] {
   const w = widths(t, o)

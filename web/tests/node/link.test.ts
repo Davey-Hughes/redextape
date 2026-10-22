@@ -137,7 +137,7 @@ describe('runningFocus', () => {
   })
 
   it('is null when the index is stale, exactly as a click would be', () => {
-    // Same rule main.ts already applies to `linkable`: an index from the last compile has stale
+    // Same rule `link-wiring.ts` applies to `linkable`: an index from the last compile has stale
     // spans, and resolving against it is the silently-wrong answer this project refuses elsewhere.
     expect(runningFocus(null, { Exact: 100 })).toBeNull()
   })
@@ -189,11 +189,10 @@ describe('sourceNodeOwner', () => {
     expect(sourceNodeOwner(null)).toBe('None')
   })
 
-  // THE ONE THING `sourceNodeOwner` MUST NEVER PRODUCE: `Within`. A rewrite that "helpfully" wrapped
-  // every non-null id the same way still passes the two tests above (they check the Exact/None shape,
-  // not which key populated it) — this test discriminates the "no Within on this leg" property by
-  // round-tripping through `runningFocus`, which switches on `'Exact' in owner`: if `sourceNodeOwner`
-  // ever keyed its value under `Within` instead, this would report `claim: 'within'` and fail.
+  // THE ONE THING `sourceNodeOwner` MUST NEVER PRODUCE: `Within`. 'wraps a resolved node as an Exact
+  // owner' reads the key itself; this test holds the same property where the owner is consumed, by
+  // round-tripping through `runningFocus`, which switches on `'Exact' in owner`: an owner keyed under
+  // `Within` would report `claim: 'within'` here and fail.
   it('feeds runningFocus as an Exact claim, never Within', () => {
     const ix = new LinkIndex(wire())
     expect(runningFocus(ix, sourceNodeOwner(100))).toEqual({ node: 100, claim: 'exact' })

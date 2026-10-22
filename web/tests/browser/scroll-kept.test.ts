@@ -24,8 +24,8 @@ import { userPickWorkspace } from './user-event-fixture'
  *
  * `layout-view.ts`'s `renderLayout` and `renderStage` take every view's host off the page and put back the ones they
  * show, which in tiles is every one the tree names and on the Stage the focused view's alone, and an element that
- * leaves the document comes back scrolled to its start. So closing ONE view reset the scroll of
- * every other, and so did a split, `+ view` and a preset. `pane-host.ts` records each scrolled element before a
+ * leaves the document comes back scrolled to its start. So without a hold, closing ONE view would reset the scroll
+ * of every other, and so would a split, `+ view` and a preset. `pane-host.ts` records each scrolled element before a
  * rebuild and puts it back after.
  *
  * **THREE SCROLLERS ARE HELD TO IT, EACH ONE OF A KIND**: the TM view's rule table, a box inside a view, with the
@@ -34,16 +34,15 @@ import { userPickWorkspace } from './user-event-fixture'
  * a `scrollLeft`. The program is `let x = 40; x + 2` with blank lines to make it longer than its view and trailing
  * spaces to make it wider, so every leg is what it is without them.
  *
- * **THE SOURCE VIEW'S HOST WAS THE SECOND OF THEM** until its editor took a share of the view and scrolled inside it
- * (the view layouts spec §11.1): a long program no longer scrolls the view, and its header stays where it is.
+ * **THE SOURCE VIEW'S HOST IS NOT ONE OF THEM**: its editor takes a share of the view and scrolls inside it (the
+ * view layouts spec §11.1), so a long program does not scroll the view, and its header stays where it is.
  *
  * **EVERY CASE PUTS THE THREE WHERE IT STARTS FROM, AND ASSERTS THEY ARE THERE** (`arm`): a case that inherited them
  * from the one before would pass on a page where nothing had been scrolled at all.
  *
  * **AND EVERY CASE STARTS ON THE PAGE THE FILE OPENED ON, WHATEVER THE ONE BEFORE LEFT** (the first `beforeEach`): the
  * program, tiles, all four views and the window's size. The cases close a view, add one, enter the Stage and, in the
- * last, open a link, which replaces the program and the workspace; each ran on what the ones before it had left, the
- * case of a Stage tab left and selected again failed alone, and nothing put the link's program back (2026-10-12).
+ * last, open a link, which replaces the program and the workspace.
  *
  * **THE VIEW THAT IS SCROLLED IS NEVER THE ONE THE GESTURE IS MADE ON**, until the last two cases, which are about a
  * view that is built again and must NOT be given the scroll of the one before it. `view-toggles.test.ts` has the
@@ -216,10 +215,8 @@ describe('a view’s scroll position, across a rebuild made by another view', ()
    * could be elsewhere, which each case asserts beside it.
    *
    * **A PICK IN A VIEW'S TITLE AND *RESET PRESET* BUILD A VIEW AGAIN TOO, AND HAVE NO CASE HERE**, since neither can
-   * fail with the rule off. A title is in its view's header, which scrolls with the view, and a press on it scrolls
-   * it into view first: measured (2026-10-12), an asm view at 60 px was at 0 at the `pointerdown` of a click on its
-   * title. And *reset preset* builds only the TM view again: measured the same day with `fresh` off, an asm view at
-   * 60 px in the TM view's leaf was at 0 once a reset pressed with the pointer had built a TM view there.
+   * fail with the rule off: a title is in its view's header, which scrolls with the view, and a press on it scrolls
+   * it into view first; and *reset preset* builds only the TM view again.
    */
   describe('a view that is built again', () => {
     const asm = (): HTMLElement => host('asm-0') as HTMLElement
@@ -237,8 +234,8 @@ describe('a view’s scroll position, across a rebuild made by another view', ()
      * *RESET PRESET* CLOSES EVERY VIEW THE DEFAULT DOES WITHOUT, and a toggle pressed next shows a new one in the host
      * the closed one had. A toggle leaves the focus where it was, so nothing but the rule under test puts the new view
      * at its top. **CLOSED BY THE RESET, NOT BY ITS `✕`**: the `✕` is at the top of its view, out of sight in one
-     * scrolled 60 px, and a click on it scrolls it into view before it lands — measured, the host was at 0 at the
-     * click's `pointerdown` — so a view closed that way was at its top already.
+     * scrolled 60 px, and a click on it scrolls it into view before it lands, so a view closed that way would be at
+     * its top already.
      */
     it('starts at the top when reset preset closed it and its toggle shows a new one', async () => {
       asm().scrollTop = 60

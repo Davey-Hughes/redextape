@@ -84,12 +84,10 @@ describe('the view menu', () => {
   })
 
   /**
-   * **THE NEGATIVE DIRECTION OF `sourceAvailable`, WHICH NOTHING HELD — whole-branch review, I4.** The
-   * split submenu offers *source* only when the tree has no source leaf; `CHOICES` hardcodes
-   * `sourceAvailable: true`, so the test above pins the positive and the deleted
-   * `pane-layout-controls.test.ts` was the only thing that had ever pinned the other. A source view
-   * offered twice is a tree with two source leaves, which `insertBeside` and `splitLeaf` both assume
-   * cannot happen.
+   * **THE NEGATIVE DIRECTION OF `sourceAvailable`.** The split submenu offers *source* only when the
+   * tree has no source leaf; `CHOICES` hardcodes `sourceAvailable: true`, so the test above pins only
+   * the positive. A source view offered twice is a tree with two source leaves, which `insertBeside` and
+   * `splitLeaf` both assume cannot happen.
    */
   it('does not offer source to split into when the tree already has one', () => {
     const { actions, menu } = build({ choices: () => ({ ...CHOICES, sourceAvailable: false }) })
@@ -113,11 +111,9 @@ describe('the view menu', () => {
   })
 
   /**
-   * **THE HINT IS PART OF THE NAME, AND A MISSING SPACE IS INVISIBLE TO THE CONTROLS GATE.** An
-   * accessible name is built from the element's text with no separator of its own, so two adjacent
-   * spans read as `edit a copythe term at this step` — and `controls-gate.test.ts` compares the name
-   * with the element's own text, which is wrong in exactly the same way, so it cannot fail on this.
-   * Pinned here instead, where the item is built.
+   * **THE HINT IS PART OF THE NAME.** Two adjacent inline spans with no space between them read as
+   * `edit a copythe term at this step` (`view-header.ts`'s `item` has the rule). Pinned here, where the
+   * item is built.
    */
   it('names the item and what it copies, as words a reader can hear', () => {
     const { actions, menu } = build()
@@ -143,8 +139,7 @@ describe('the view menu', () => {
     expect(log).toEqual(['edit', 'claim', 'close'])
   })
 
-  // MOVED FROM `pane-chrome-text-panel.test.ts` WITH THE CONTROL: the claim is a menu item now, and it
-  // keeps its own icon rather than `disclose`'s — one glyph, one meaning.
+  // THE CLAIM'S MENU ITEM KEEPS ITS OWN ICON rather than `disclose`'s — one glyph, one meaning.
   it('move the editor here carries its own icon', () => {
     const { actions, menu } = build()
     menu.setClaim(true)
@@ -155,12 +150,11 @@ describe('the view menu', () => {
   })
 
   /**
-   * **WHAT THE REPEAT GUARD BUYS IS WRITES NOT MADE, SO THAT IS WHAT THIS COUNTS.** `sync` runs on every
-   * frame `draw()` paints — sixty times a second during playback — and the items it would re-append are
-   * the same elements it appended last time, built once at construction. So neither their identity nor
-   * the menu's open state can tell a guarded `sync` from an unguarded one: both survive
-   * `replaceChildren` with the same children. A `MutationObserver` on the list is what can, and the
-   * first version of this test, which compared identities, passed against an unguarded `sync`.
+   * **WHAT THE REPEAT GUARD BUYS IS WRITES NOT MADE, SO THAT IS WHAT THIS COUNTS.** The menu is set on
+   * every frame `draw()` paints, and the items `sync` would re-append are the same elements it appended
+   * last time, built once at construction. So neither their identity nor the menu's open state can tell a
+   * guarded `sync` from an unguarded one: both survive `replaceChildren` with the same children. A
+   * `MutationObserver` on the list is what can.
    */
   it('writes nothing to the menu when the state repeats', () => {
     const { actions, menu } = build()
@@ -169,13 +163,11 @@ describe('the view menu', () => {
     const list = actions.querySelector('.view-menu-main')
     if (list === null) throw new Error('no menu list')
     // `takeRecords`, NOT THE CALLBACK: a `MutationObserver` delivers its records in a microtask, so a
-    // counter incremented by the callback is still zero when a synchronous assertion reads it — which
-    // is how the first draft of this test passed its own "and a real change still reaches it" half
-    // against a working `sync`.
+    // counter incremented by the callback is still zero when a synchronous assertion reads it.
     // `subtree` AND `characterData` TOO: `sync`'s writes on a repeat are not all on the list itself —
-    // the hint line's text is rewritten inside an item. Watching the list alone made the first
-    // assertion below unfailable: the setters return early, so `sync` never ran, and if it had, its own
-    // guard skipped the only mutation this observer could see.
+    // the hint line's text is rewritten inside an item. Watching the list alone would leave the first
+    // assertion below unable to fail: the setters return early, so `sync` does not run, and if it did,
+    // its own guard would skip the only mutation that observer could see.
     const observer = new MutationObserver(() => undefined)
     observer.observe(list, { childList: true, subtree: true, characterData: true })
     menu.setLayout(true, true)
@@ -197,9 +189,8 @@ describe('the view menu', () => {
 })
 
 /**
- * **WHERE THE VIEW MENU OPENS** — the split picker's placement tests,
- * ported to `⋯` and `.view-menu` when the split picker went. It is a whole record of an earlier finding: an
- * unanchored popover opened at the viewport origin, far from the control that opened it.
+ * **WHERE THE VIEW MENU OPENS** — an unanchored popover would open at the viewport origin, far from the
+ * control that opened it.
  *
  * THESE ARE REAL MEASUREMENTS, NOT A PROXY FOR ONE. `tests/browser/setup.ts` loads `style.css` into the
  * tester page, so `getBoundingClientRect` here reads the rules the app ships rather than UA defaults.
@@ -227,11 +218,10 @@ describe('where the view menu opens', () => {
     const button = rect(b)
 
     // Directly below its own button, and sharing its TRAILING edge — `span-inline-start` opens the menu
-    // leftward from `⋯`, which sits at a view's right edge (the split picker this was ported from opened
-    // rightward and shared the leading edge).
+    // leftward from `⋯`, which sits at a view's right edge.
     expect(menu.top).toBeGreaterThanOrEqual(button.bottom - 1)
     expect(Math.abs(menu.right - button.right)).toBeLessThan(2)
-    // Which is nowhere near the corner the unanchored version pinned itself to.
+    // Which is nowhere near the corner an unanchored menu would pin itself to.
     expect(menu.right).toBeGreaterThan(100)
     expect(menu.top).toBeGreaterThan(100)
   })
@@ -269,9 +259,9 @@ describe('where the view menu opens', () => {
     expect(menu.bottom).toBeLessThanOrEqual(rect(b).top + 1)
     expect(menu.top).toBeGreaterThanOrEqual(0)
     expect(menu.bottom).toBeLessThanOrEqual(window.innerHeight)
-    // STILL ITS OWN BUTTON'S MENU AFTER THE FLIP, and this line is what stops the test passing
-    // vacuously: the unanchored version was already ABOVE a button sitting near the bottom of the
-    // window — it was above everything, at the origin — so only the shared edge tells the two apart.
+    // STILL ITS OWN BUTTON'S MENU AFTER THE FLIP, and this line is what stops the test passing vacuously:
+    // an unanchored menu would already be ABOVE a button sitting near the bottom of the window — it would
+    // be above everything, at the origin — so only the shared edge tells the two apart.
     expect(Math.abs(menu.right - rect(b).right)).toBeLessThan(2)
   })
 })

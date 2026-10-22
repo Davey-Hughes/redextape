@@ -109,8 +109,8 @@ export class Tree {
    *
    * **A KEY IS ITS PARENT'S PLUS ONE LETTER.** The walk goes up only to the nearest node already keyed — the
    * root's key is `''` — and writes each key below it on the way back down. A layout asks for every open node
-   * on a path, top down, so each ask adds one letter; walking to the root for each cost the path's depth per
-   * node, which on a path thousands deep was most of a layout's time.
+   * on a path, top down, so each ask adds one letter; walking to the root for each would cost the path's depth
+   * per node.
    */
   key(i: number): string {
     const cached = this.#keys.get(i)
@@ -166,7 +166,7 @@ export class Tree {
    * **A HINT'S TRAILING DIGITS ARE IGNORED.** Freshening is print-time only, so a lowered term's hints never
    * carry them — but a copy made from the program is built by re-parsing printed text, and there the
    * printed, freshened names (`x0`) ARE the hints. Without this a numeral in any copy whose printer had
-   * freshened its binders would never read as a chip (found by the prototype's `scratch-app` run).
+   * freshened its binders would never read as a chip.
    */
   chip(i: number): Chip | null {
     if (this.kind(i) !== KIND_ABS) return null

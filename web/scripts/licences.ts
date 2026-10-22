@@ -63,8 +63,7 @@ export type Package = {
  * - the Rust repository's `COPYRIGHT`, `LICENSE-MIT` and `LICENSE-APACHE`, at the commit of Rust 1.99.0
  *   (`b940084d7`);
  * - `compiler-builtins`' `LICENSE.txt`, from the same tree, where the standard library builds it from (0.1.160 in
- *   that release's `library/Cargo.lock`): both builds link its `__multi3` and `memcmp`, found by name in the
- *   unstripped `.wasm` wasm-pack builds first;
+ *   that release's `library/Cargo.lock`): both builds link its `__multi3` and `memcmp`;
  * - `dlmalloc`'s and `hashbrown`'s licence files, from the crates that lockfile names (0.2.14 and 0.17.1): both
  *   builds carry their source paths, `/rust/deps/dlmalloc-0.2.14` and `/rust/deps/hashbrown-0.17.1`;
  * - Emscripten's `LICENSE` at 4.0.15, the version `web-tree-sitter` 0.27.0 is built with.

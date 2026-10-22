@@ -17,7 +17,7 @@ describe('the style and palette controls', () => {
   let style: HTMLSelectElement
   let palette: HTMLSelectElement
 
-  // One mount for the file, as every app test does: `main()` runs once per page.
+  // One mount for the file, for the reason `app.test.ts` gives: `main()` runs once per page.
   beforeAll(async () => {
     document.body.innerHTML = SHELL
     await (await import('../../src/main')).ready

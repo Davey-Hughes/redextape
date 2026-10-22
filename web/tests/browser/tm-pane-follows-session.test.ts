@@ -28,11 +28,10 @@ import {
 } from './harness'
 
 /**
- * **A TM PANE SHOWS WHAT ITS SESSION HOLDS, WHETHER OR NOT IT HOLDS THE EDITOR** — Important finding, whole-branch
- * review of the reduced-files slice, confirmed in Chrome before this file existed. A buffer's status and value
- * reading reach every TM pane on it, but were cleared only on the pane that held the editor, so a split pane kept
- * `reduced: single-tape · 241,666 steps` and `value: 2` beside the source program after a rebind, kept a value
- * after its buffer was cooled, and kept both after the buffer's worker died.
+ * **A TM PANE SHOWS WHAT ITS SESSION HOLDS, WHETHER OR NOT IT HOLDS THE EDITOR.** A buffer's status and value
+ * reading reach every TM pane on it, and are cleared on every one: cleared only on the pane that held the editor,
+ * a split pane would keep `reduced: single-tape · 241,666 steps` and `value: 2` beside the source program after a
+ * rebind, keep a value after its buffer was cooled, and keep both after the buffer's worker died.
  *
  * **A FILE OF ITS OWN, NOT MORE TESTS IN `tm-reduced-buffer.test.ts`, BECAUSE OF THE COOL.** Every test file gets its
  * own page, and that file's tests all paste into the one buffer its `beforeAll` mints; cooling it would leave every
@@ -40,15 +39,15 @@ import {
  * that leaf ids here would have to route around. Here each test closes the panes it split, the cool comes after the
  * rebinds, and the retire, last, mints a second buffer of its own.
  *
- * **A COOL OR RETIRE TELLS WHAT IT MOVES WHAT SOURCE HOLDS** — Important finding, review of the fix that made the
- * selector reseed a TM pane. `ScratchBuffers.cool` and `retire` moved panes with a bare `PaneSlot.rebind`, so a pane
- * that had visited a reduced buffer came back to source with the buffer's machine and false fork facts. Those two
- * tests follow the review's flow, and compare every moved pane with a pane that never left source.
+ * **A COOL OR RETIRE TELLS WHAT IT MOVES WHAT SOURCE HOLDS.** Moved with a bare `PaneSlot.rebind`, a pane that had
+ * visited a reduced buffer would come back to source with the buffer's machine and false fork facts. Those two
+ * tests compare every moved pane with a pane that never left source.
  *
  * **THE WORKER'S DEATH IS RECONSTRUCTED, NOT DRIVEN.** No text reaches `onTmScratch`'s `worker-error` reply through
  * the app — `tmScratch` answers every string with diagnostics or a scratch — so that describe drives `createReplies`
- * directly over real panes, a real registry and a real `ScratchBuffers` with no threads behind it, the shape
- * `tests/node/replies.test.ts`'s `scratchDriver` uses. It runs first, before the app is mounted over the page.
+ * directly over a real registry and a real `ScratchBuffers` with no threads behind it, as `scratchDriver` in
+ * `tests/node/replies.test.ts` does, but over real panes where `scratchDriver` uses a stub. It runs first, before the
+ * app is mounted over the page.
  */
 
 const REDUCED: TmScratchStatus = {
@@ -131,8 +130,8 @@ describe('a TM buffer whose worker died', () => {
 
 describe('a TM pane told it is attached', () => {
   /**
-   * **DRIVEN ON THE PANE, BECAUSE NO ROUTE IN THE APP REACHES THIS CLEAR FIRST ANY MORE.** Every route that moves a
-   * pane onto source reseeds it before `PaneSlot.render` calls `setDetached(false)`, so the app-level tests below stay
+   * **DRIVEN ON THE PANE, BECAUSE NO ROUTE IN THE APP REACHES THIS CLEAR FIRST.** Every route that moves a pane
+   * onto source reseeds it before `PaneSlot.render` calls `setDetached(false)`, so the app-level tests below stay
    * green with the clear removed. This is what a route that moved a pane without a seed would leave the pane holding.
    */
   it('forgets a buffer’s sentence and value', () => {
@@ -170,7 +169,7 @@ const forkOf = (id: string) => {
   const button = paneOrThrow(id, 'no pane at').querySelector<HTMLButtonElement>('button.detach')
   return button === null ? 'absent' : button.disabled ? `disabled: ${button.title}` : 'enabled'
 }
-const selectOf = (id: string) =>
+const bindingOf = (id: string) =>
   paneOrThrow(id, 'no pane at').querySelector<HTMLButtonElement>('button.view-title')?.dataset.binding
 /** Every pair `id`'s title menu offers, as keys — opens and closes the menu to read it. */
 function offered(id: string): string[] {
@@ -245,14 +244,13 @@ function clickBufferControl(label: string): void {
 
 /**
  * Mint a TM buffer, bind `tm-0` to it through its own selector, and paste the reduced fixture into the editor that
- * mounts there: the selector visit the review's flow starts from. **CALLED ONLY FROM A HOOK**, for its waits below.
+ * mounts there: the selector visit the cases below start from. **CALLED ONLY FROM A HOOK**, for its waits below.
  *
  * **THE BUFFER'S FIRST BUILD IS THREE WAITS: ITS BUILD ANSWERING, ITS FIRST RECORDING HALF WAY, THEN ITS VALUE.** The
  * paste is the buffer's first build, on a worker that has just started, and its value comes only after a whole first
- * recording, 145,904 frames, and the value run after it. As one wait that took 7,100 to 10,384 ms in six runs of this
- * file on `53ecbfa` at `CPUQuota=25%`, timing out once, at 10,384 ms under a load average of 35.62. As two, the build
- * and then the value, the value's still held the whole recording and timed out at 10,094 ms under a load of 33.74. So
- * the recording is waited on in two: the copy's step line counts its frames from the first to `history is full`.
+ * recording, 145,904 frames, and the value run after it. One wait for the value, or a wait for the build and then one
+ * for the value, holds the whole recording in a single wait, which can time out on a loaded runner. So the recording
+ * is waited on in two: the copy's step line counts its frames from the first to `history is full`.
  *
  * **EACH WAIT STARTS FROM A STATE IT ASSERTS.** Before the paste, no reduced sentence and no value. The build's answer
  * puts the fixture's sentence on the status line and resets the step line in one task, and the value run starts only
@@ -260,9 +258,8 @@ function clickBufferControl(label: string): void {
  * value or a count already there would mean a later wait measures nothing. The half-way wait also ends at a recording
  * already over, a state its line cannot skip.
  *
- * **THE COUNT READ AT THAT ASSERTION IS FAR SHORT OF HALF**: at most 1,536 of the 72,000 in 12 reads of this file
- * unconstrained, and 0 in 2 at `CPUQuota=25%` (2026-10-06); in `tm-reduced-buffer.test.ts`, whose helper asserts the
- * same, at most 14,336 of a spinner's 200,000. It can fail only falsely, on a poll late by most of half a recording.
+ * **THE COUNT READ AT THAT ASSERTION IS FAR SHORT OF HALF**, at most 1,536 of the 72,000 in 12 reads, so it can
+ * fail only falsely, on a poll late by most of half a recording.
  */
 async function visitNewBuffer(session: string): Promise<void> {
   openBufferList()
@@ -293,9 +290,10 @@ async function visitNewBuffer(session: string): Promise<void> {
 }
 
 /**
- * Put the review's panes on `session`, which `tm-0` already shows through its selector: a split made on the buffer,
- * and a split made on source then rebound onto the buffer. Also split one pane on source that stays there, for the
- * moved panes to be compared with. Answers the panes a cool or retire of the buffer moves, and that reference.
+ * Put the panes a cool or retire moves on `session`, which `tm-0` already shows through its selector: a split made
+ * on the buffer, and a split made on source then rebound onto the buffer. Also split one pane on source that stays
+ * there, for the moved panes to be compared with. Answers the panes a cool or retire of the buffer moves, and
+ * that reference.
  */
 async function panesOnBuffer(session: string): Promise<{ moved: string[]; reference: string }> {
   const reference = await split('tm-0', bindingKey('tm', 'source'))
@@ -317,7 +315,7 @@ async function panesOnBuffer(session: string): Promise<{ moved: string[]; refere
 function expectShowsSource(moved: string[], reference: string): void {
   const shown = (id: string) => ({
     id,
-    binding: selectOf(id),
+    binding: bindingOf(id),
     table: tableHeightOf(id),
     status: statusOf(id),
     value: valueTextOf(id),
@@ -373,16 +371,16 @@ describe('a TM pane rebound, cooled or retired off a reduced buffer', () => {
   })
 
   /**
-   * **THE REVIEW'S FLOW, AND RED BEFORE A COOL RESEEDED WHAT IT MOVED.** A cool moved every pane with a bare
-   * `PaneSlot.rebind`, so all three panes kept the buffer's machine and a status naming one of its states. The two
-   * splits read `disabled: 1,866 rules — too large to open in an editor`, the buffer's fork facts, and `tm-0`, which
-   * had held the editor, had no fork control at all.
+   * **WHAT A COOL MOVES IS RESEEDED.** Moved with a bare `PaneSlot.rebind`, all three panes would keep the
+   * buffer's machine and a status naming one of its states, the two splits would read
+   * `disabled: 1,866 rules — too large to open in an editor`, the buffer's fork facts, and `tm-0`, which held
+   * the editor, would have no fork control at all.
    */
   it('tells every pane a cool moves what source holds: its machine, its status and a fork control', async () => {
     const { moved, reference } = await panesOnBuffer('scratch-1')
     clickBufferControl('pause TM copy 1')
     await until(
-      () => moved.every((id) => selectOf(id) === bindingKey('tm', 'source')),
+      () => moved.every((id) => bindingOf(id) === bindingKey('tm', 'source')),
       'the cool to move every pane to source',
     )
     expectShowsSource(moved, reference)
@@ -391,9 +389,9 @@ describe('a TM pane rebound, cooled or retired off a reduced buffer', () => {
   })
 
   /**
-   * **A SECOND BUFFER, VISITED IN A HOOK OF ITS OWN**: its first build is `visitNewBuffer`'s three waits, as long at
-   * `CPUQuota=25%` as the first buffer's (that function's doc), and a hook has Vitest's 30 s where this case's body
-   * had 15 s for them and everything after.
+   * **A SECOND BUFFER, VISITED IN A HOOK OF ITS OWN**: its first build is `visitNewBuffer`'s three waits, as
+   * long as the first buffer's, and a hook has Vitest's 30 s where this case's body has 15 s for them and
+   * everything after.
    */
   describe('and a second buffer', () => {
     beforeAll(async () => {
@@ -404,7 +402,7 @@ describe('a TM pane rebound, cooled or retired off a reduced buffer', () => {
       const { moved, reference } = await panesOnBuffer('scratch-2')
       clickBufferControl('delete TM copy 2')
       await until(
-        () => moved.every((id) => selectOf(id) === bindingKey('tm', 'source')),
+        () => moved.every((id) => bindingOf(id) === bindingKey('tm', 'source')),
         'the retire to move every pane to source',
       )
       expectShowsSource(moved, reference)

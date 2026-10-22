@@ -54,8 +54,8 @@ describe('stage', () => {
     expect(document.getElementById(controls ?? '')?.dataset.leaf).toBe('lambda-0')
   })
 
-  // §5: arrow keys move with a roving tabindex; Enter or Space selects. The tab after λ's is asm's in the
-  // four-view tree (Plan 7 part 5 spec §3, row 4).
+  // Plan 7 part 2 spec §5: arrow keys move with a roving tabindex; Enter or Space selects. The tab after λ's
+  // is asm's in the four-view tree (Plan 7 part 5 spec §3, row 4).
   it('moves between tabs with the arrow keys and selects with Enter, keeping the focus', () => {
     expect(stageTab('lambda-0').tabIndex).toBe(0)
     expect(stageTab('asm-0').tabIndex).toBe(-1)
@@ -79,8 +79,8 @@ describe('stage', () => {
     expect(document.activeElement).toBe(stageTab('asm-0'))
   })
 
-  // §5: "In Stage the ⋯ menu's split items are removed" (umbrella §4 rule 4 — they can never apply
-  // there, so they go rather than being disabled).
+  // Plan 7 part 2 spec §5: "In Stage the ⋯ menu's split items are removed" (umbrella §4 rule 4 — they
+  // can never apply there, so they go rather than being disabled).
   it('removes the split items when the stage is chosen', () => {
     clickWorkspaceItem('[data-switch="views"][data-value="tiles"]')
     const more = document.querySelector<HTMLButtonElement>('[data-leaf="tm-0"] button.view-more') as HTMLButtonElement
@@ -125,14 +125,12 @@ describe('stage', () => {
   })
 
   /**
-   * HALF TWO — CAN THE GESTURE REACH IT? **No.** The only way to choose Stage is the workspace menu, and
-   * opening a menu is itself a focus-bearing interaction somewhere else — so at the instant the split
-   * items are removed, the focus is on the menu item the user just clicked, never on a split item.
+   * HALF TWO — CAN THE GESTURE REACH IT? **Not from the workspace menu.** Opening a menu is itself a
+   * focus-bearing interaction somewhere else — so at the instant the split items are removed, the focus is
+   * on the menu item the user just clicked, never on a split item.
    *
-   * The `handOff` in `viewMenu`'s `sync` therefore stays as defence against a future caller that chooses
-   * a preset without a menu — a share link (part 6), a keyboard shortcut (part 3) — and its sabotage does
-   * not fire. **This is the third of part 2b's three instances of §11's fourth rule to come out this
-   * way**, which is a fact about the rule rather than about any one of them.
+   * The `handOff` in `viewMenu`'s `sync` therefore stays as defence against a caller that chooses a preset
+   * without a menu, such as a share link's open.
    */
   it('leaves the focus on the gesture that chose the stage, not on a removed split item', () => {
     clickWorkspaceItem('[data-switch="views"][data-value="tiles"]')
@@ -168,17 +166,14 @@ describe('stage', () => {
    * §5: "`draw()` skips any pane whose host is not connected, and selecting a tab calls `draw()` once so
    * the shown view is current."
    *
-   * **THIS DRIVES THE `steps` SWITCH, AND THAT IS THE WHOLE FINDING.** Two earlier versions of this case
-   * could not fail. Playing the visible view and comparing the hidden one's markup cannot: with the skip
-   * removed, `draw()` does repaint the hidden pane and the markup comes out BYTE-IDENTICAL, because the
-   * hidden leg is not the one playing and the pane's own rendered-key guards make the repaint a no-op.
-   * Driving a recompile cannot either: `replies.ts` paints panes directly when a reply lands and that path
-   * has no connection check, so the hidden view changes with or without the skip.
+   * **THIS DRIVES THE `steps` SWITCH, BECAUSE PLAYING THE VISIBLE VIEW CANNOT FAIL.** Playing it and
+   * comparing the hidden one's markup cannot: with the skip removed, `draw()` does repaint the hidden pane
+   * and the markup comes out BYTE-IDENTICAL, because the hidden leg is not the one playing and the pane's
+   * own rendered-key guards make the repaint a no-op.
    *
-   * `setStepsShown` is the one thing that reaches a pane ONLY through `draw.ts`. So flipping the `steps`
-   * switch while a view is hidden produces a change that only `draw()` can make — and both halves below
-   * discriminate: the first fails if the skip is removed, the second if the `draw()` at the end of a tab
-   * selection is.
+   * `setStepsShown` reaches a pane ONLY through `draw.ts`. So flipping the `steps` switch while a view is
+   * hidden produces a change that only `draw()` can make — and both halves below discriminate: the first
+   * fails if the skip is removed, the second if the `draw()` at the end of a tab selection is.
    */
   it('skips a hidden view, and brings it up to date when its tab is selected', () => {
     clickWorkspaceItem('[data-switch="views"][data-value="tiles"]')
@@ -212,10 +207,10 @@ describe('stage', () => {
   })
 
   /**
-   * THE λ HALF OF THE LINK STATUS COMES FROM THE VIEW THAT DREW THE TREE (spec §5.4), AND A VIEW OFF THE
-   * PAGE DREW NONE. `draw()` skips it, so its pin and its tree are whatever it last drew. Asked anyway, it
-   * answered for the construct pinned before: with `40` pinned while it was shown, a later `x + 2` read "no
-   * node", though the view marks `x + 2` at this step as soon as it is shown again.
+   * THE λ HALF OF THE LINK STATUS COMES FROM THE VIEW THAT DREW THE TREE (Plan 7 part 4 spec §5.4), AND A
+   * VIEW OFF THE PAGE DREW NONE. `draw()` skips it, so its pin and its tree are whatever it last drew. Asked
+   * anyway, it would answer for the construct pinned before: with `40` pinned while it was shown, a later
+   * `x + 2` would read "no node", though the view marks `x + 2` at this step as soon as it is shown again.
    *
    * With no λ view on the page the λ clause says nothing. With two λ views the one the stage shows answers,
    * not the one last clicked into: selecting a tab records the focused leaf and marks no pane active.

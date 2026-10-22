@@ -14,7 +14,7 @@ import { noticeEl, noticeElText, SHELL, showFourViews, stateIdle, until } from '
  * since blocked storage holds nothing, so the page opens on the first-load example as a first visit does. The throw is
  * the storage shim's methods', not `localStorage`'s getter's, which is the other place a browser throws it:
  * `storage-blocked.test.ts` throws from the getter, and holds the same "blocked" sentence there. ONE MOUNT FOR THE
- * FILE, for the reason every sibling gives.
+ * FILE, for the reason `app.test.ts` gives.
  */
 
 localStorage.removeItem(PROGRAM_STORAGE_KEY)

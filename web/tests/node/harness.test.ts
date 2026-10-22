@@ -37,9 +37,9 @@ describe('SHELL', () => {
       // own text — so deleting the element this list is about would leave it green.
       expect(SHELL).toContain(`id="${sel.slice(1)}"`)
     }
-    // `<main>` HOLDS TWO CHILDREN SINCE PART 2b: the layout tree's own root and the inspector column
-    // beside it (spec §9). `renderLayout` opens with `root.replaceChildren()`, so the tree needed a root
-    // of its own the moment anything else lived in `<main>`.
+    // `<main>` HOLDS TWO CHILDREN: the layout tree's own root and the inspector column beside it
+    // (spec §9). `renderLayout` opens with `root.replaceChildren()`, so the tree needs a root of its
+    // own while anything else lives in `<main>`.
     expect(SHELL).toContain('<div id="views"></div>')
   })
 })
@@ -47,13 +47,12 @@ describe('SHELL', () => {
 /**
  * THE GATE THAT HOLDS THE REAL PAGE AND THE TEST SHELL TOGETHER.
  *
- * **THE ID LIST ABOVE IS NOT ONE, AND THAT WAS MEASURED RATHER THAN NOTICED.** It reads `SHELL` and never
- * opens `index.html`, so the two could diverge completely: part 2b's own whole-branch review deleted
- * `#views`, `#inspector` and `#step-bar` from `index.html` — reverting the real page to its part 2a shape —
- * and **all 533 node tests passed**, while the browser tier mounts `SHELL` and could not see it either.
- * `main()` would have thrown `the page is missing a mount point` on the real site, behind a green CI.
+ * **THE ID LIST ABOVE IS NOT ONE.** It reads `SHELL` and never opens `index.html`, so the two could
+ * diverge completely, and the browser tier mounts `SHELL` and could not see it either: a mount point
+ * deleted from `index.html` would leave that list and the browser tier green while `main()` threw `the
+ * page is missing a mount point` on the real site.
  *
- * **STRUCTURE, NOT SUBSTRINGS.** `main.ts` now also resolves `footer.strip` by CLASS, and `#inspector` has
+ * **STRUCTURE, NOT SUBSTRINGS.** `main.ts` also resolves `footer.strip` by CLASS, and `#inspector` has
  * to sit INSIDE `<main>` beside `#views` or the inspector column has nothing to be a column of — neither
  * fact is visible to a list of `id="…"` fragments. Comparing the whole body is the only form that holds
  * what the app actually depends on, and it costs one assertion.
@@ -80,8 +79,8 @@ describe('SHELL against index.html', () => {
 
   /**
    * **THE `views` TOGGLES ARE MARKUP, SO THE MARKUP IS HELD TO THE TABLES.** `app-header.ts`'s `viewToggles` adopts
-   * the four buttons the page ships, where it used to build them from `HEADER_ORDER` and `KIND_WORD`; a kind added
-   * to those, or a word changed, is asked for here. Read from `index.html`, which the case above holds `SHELL` to.
+   * the four buttons the page ships, so a kind added to `HEADER_ORDER` and `KIND_WORD`, or a word changed, is asked
+   * for here. Read from `index.html`, which the case above holds `SHELL` to.
    */
   it('ships the four views toggles in the header’s order, each named by its kind’s word and not pressed', () => {
     const group = /<div id="views-shown"[^>]*>([\s\S]*?)<\/div>/.exec(html)?.[1] ?? ''

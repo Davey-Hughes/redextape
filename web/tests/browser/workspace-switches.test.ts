@@ -20,9 +20,8 @@ describe('the workspace menu', () => {
     await until(stateIdle, 'the first compile')
   })
 
-  // **THE GLYPH IS NOT IN THE NAME.** `copies 2 ▾` already does this; the workspace button did not, and
-  // §6 records that as an inconsistency rather than a decision. A bare `▾` in the accessible name reads
-  // as "down-pointing triangle".
+  // **THE GLYPH IS NOT IN THE NAME**, as on `copies 2 ▾`; §6 records a workspace button without the `▾` as an
+  // inconsistency rather than a decision. A bare `▾` in the accessible name reads as "down-pointing triangle".
   it('carries a ▾ that the accessible name does not', () => {
     const button = document.querySelector<HTMLButtonElement>('#workspace') as HTMLButtonElement
     expect(button.textContent).toContain('▾')
@@ -88,9 +87,9 @@ describe('the workspace menu', () => {
     shut()
   })
 
-  // **NAMED FOR WHAT IT MEASURES.** It used to be called "survives a reload" and performed none — it
-  // reads `localStorage` in the same page. The restore direction is `workspace-boot.test.ts`, which seeds
-  // a Debugger envelope before `main` is imported and asserts the page comes up in it.
+  // **NAMED FOR WHAT IT MEASURES**: it reads `localStorage` in the same page and performs no reload. The restore
+  // direction is `workspace-boot.test.ts`, which seeds a Debugger envelope before `main` is imported and asserts
+  // the page comes up in it.
   it('writes the whole switch triple to storage, under version 2', () => {
     const menu = openWorkspaceMenu()
     item(menu, '[data-preset="stage"]').click()

@@ -1,12 +1,10 @@
 import { icon } from './icons'
 
 /**
- * A named, collapsible region of a view (Plan 7 part 1, spec §8) — the one disclosure mechanism, where
- * there used to be a one-off toggle per view.
+ * A named, collapsible region of a view (Plan 7 part 1, spec §8).
  *
- * THE STATE IS `aria-expanded`, NOT THE LABEL. The controls this replaces relabelled themselves (`hide δ`
- * / `show δ`, `⌃` / `⌄`) and announced nothing — accessibility item 2. A disclosure button keeps one
- * name and carries its state as an attribute a screen reader reads.
+ * THE STATE IS `aria-expanded`, NOT THE LABEL. A control that relabels itself announces nothing — accessibility
+ * item 2. A disclosure button keeps one name and carries its state as an attribute a screen reader reads.
  *
  * THE BODY IS THE CALLER'S OWN ELEMENT, wrapped rather than copied, so the view keeps its references,
  * its listeners and its class-based rules, and the panel only decides whether the body is `hidden`.

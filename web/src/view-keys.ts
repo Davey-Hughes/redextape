@@ -2,7 +2,7 @@ import { HEADER_ORDER, KIND_WORD } from './layout'
 import type { PaneKind } from './panes'
 
 /**
- * VIEW KEYS — the view layouts spec §7: a prefix chord, then one key, and the app's first keys that are not an
+ * VIEW KEYS — the view layouts spec §7: a prefix chord, then one key, and the app's own keys rather than an
  * editor's or a focused control's.
  *
  * **ONE ACTION A PREFIX, AND THE REASON.** A mode that stayed armed would take the next `]` or `j` meant for the editor
@@ -10,9 +10,8 @@ import type { PaneKind } from './panes'
  * and the machine is idle again; a key it does not know ends the mode and is handled as if it had never been armed.
  *
  * **THE KEY AFTER THE PREFIX ACTS WHETHER OR NOT `Ctrl` IS STILL DOWN, AND NONE OF THEM IS A KEY THE BROWSER KEEPS
- * UNDER `Ctrl`** (the user's report, 2026-10-11). Holding the prefix's modifier through the second key is the natural
- * motion, and the cycle keys were `n` and `p`: `Ctrl+N` opened a new window, which no page can stop, and `Ctrl+P`
- * printed. They are `]` and `[` now.
+ * UNDER `Ctrl`.** Holding the prefix's modifier through the second key is the natural motion, so cycle keys of `n`
+ * and `p` would fail: `Ctrl+N` opens a new window, which no page can stop, and `Ctrl+P` prints.
  *
  * `step` is the machine and has no DOM in it. `wireViewKeys` is the one listener that feeds it.
  */
@@ -67,9 +66,9 @@ export const HINT_ROWS: readonly { readonly key: string; readonly does: string }
  * The hint as one sentence, for the live region when the mode is armed: `view keys: ] the next layout, [ the previous
  * layout, …, Esc or Ctrl+. leave`.
  *
- * **IT SAYS WHAT THE HINT SHOWS, ROW FOR ROW.** The live region said `view keys` and no more, so a reader who does
- * not see the hint was told a mode had begun and not one key of it. Leaving the mode says nothing: what follows a
- * key is said by what the key did, and after `Escape` nothing happened.
+ * **IT SAYS WHAT THE HINT SHOWS, ROW FOR ROW.** A live region that said `view keys` and no more would tell a reader
+ * who does not see the hint that a mode had begun, and not one key of it. Leaving the mode says nothing: what follows
+ * a key is said by what the key did, and after `Escape` nothing happened.
  */
 export const HINT_SENTENCE = `view keys: ${HINT_ROWS.map((row) => `${row.key} ${row.does}`).join(', ')}`
 
@@ -77,8 +76,7 @@ export const HINT_SENTENCE = `view keys: ${HINT_ROWS.map((row) => `${row.key} ${
  * The keys a modifier makes on its own; one pressed while the machine is armed is not the key it waits for.
  *
  * **THE LIST IS THE UI EVENTS KEY VALUES' OWN**: the twelve of its table of modifier keys and the two it calls
- * legacy, `Hyper` and `Super`. It was six of them, and a lock key ended the mode: measured (2026-10-12), `NumLock`
- * and `ScrollLock` pressed after the prefix each left it.
+ * legacy, `Hyper` and `Super`. A modifier left out of it would end the mode when pressed after the prefix.
  */
 const MODIFIERS: ReadonlySet<string> = new Set([
   'Alt',
@@ -141,17 +139,15 @@ export function step(armed: boolean, press: KeyPress): Step {
  *   region.
  * - `blocked` is asked of a press that would arm the mode, and of every press while it is armed: while it answers
  *   true (a modal dialog is open) an idle machine stays idle, an armed one is left, and the press is not touched. It
- *   is not asked of any other press, which is every key typed while the mode is idle; it was asked of each of them.
+ *   is not asked of any other press, which is every key typed while the mode is idle.
  * - A press that is part of a composition is not a key press to the machine.
  * - A pointer press, or the window losing the focus, ends an armed mode. Nothing ends it on a timer.
  *
  * **A KEY HELD DOWN IS ONE PRESS, AND ITS REPEATS GO THE WAY ITS PRESS WENT.** A held key sends a `keydown` for the
  * press and one more for each repeat, marked `repeat`. The machine is fed the press alone. A repeat of a press this
- * listener consumed is consumed too and does nothing; a repeat of a press it let through is let through. Measured
- * while every `keydown` was fed to the machine (2026-10-12): the prefix held for one repeat armed the mode and left
- * it again; `2` held after the prefix hid the asm view and typed `22` into the source editor, and under the vim keymap
- * left `22` as a count, so the next `x` deleted the line; and `Ctrl` held with `]` held went to the next layout and
- * indented the source line at each repeat.
+ * listener consumed is consumed too and does nothing; a repeat of a press it let through is let through. Fed every
+ * `keydown`, the machine would take the prefix held for one repeat as the prefix twice, arming the mode and leaving
+ * it again, and a view key held after the prefix would act once and hand each repeat to the editor under the focus.
  *
  * **A REPEAT IS TOLD BY ITS `code`, THE KEY ON THE KEYBOARD, WHATEVER WAS PRESSED OR RELEASED SINCE ITS PRESS.** The
  * prefix held while `Ctrl` is let go repeats as `.` alone, and those repeats are still the prefix's: consumed, and no

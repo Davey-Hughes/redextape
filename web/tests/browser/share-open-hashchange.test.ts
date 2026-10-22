@@ -29,10 +29,10 @@ import { workspaceName } from './share-open-hashchange-fixture'
  * view its tree shares too, so it is drawn as the link says; its `undo` puts back the program, the workspace and the
  * copy's view, and goes at the next edit or encoding chosen. A link whose workspace cannot be read opens the program
  * alone; one that cannot be read at all changes nothing; any other fragment is left alone. ONE MOUNT FOR THE FILE, for
- * the reason every sibling gives.
+ * the reason `app.test.ts` gives.
  *
- * **THE LINKS CARRY TWO-LINE PROGRAMS, NOT EXAMPLES**: no case here is about a recording, and at a tenth of a core,
- * taking in an example's λ frames held the page's main thread past the seconds the open's `undo` is offered for.
+ * **THE LINKS CARRY SHORT PROGRAMS, NOT EXAMPLES**: no case here is about a recording, and at a tenth of a core,
+ * taking in an example's λ frames would hold the page's main thread past the seconds the open's `undo` is offered for.
  */
 
 const LINKED = 'let y = 10; y + 5'
@@ -163,7 +163,7 @@ describe('a whole link pasted into an open page', () => {
   // THE LINK'S TREE HOLDS `pane-2`, THE ID THE OPENER'S NEXT VIEW WOULD HAVE TAKEN: the next is minted past it.
   it("adds a view beside a link's views without taking an id its tree holds", async () => {
     // **THE PAGE IS ON `OTHER`, AS THE CASE ABOVE LEFT IT, SO ONLY THIS OPEN PUTS `LINKED` IN THE EDITOR.** That case's
-    // open put `pane-2` on the page already, and a wait on it let this open land in the middle of the gesture.
+    // open put `pane-2` on the page already, so a wait on it would let this open land in the middle of the gesture.
     expect(view.state.doc.toString()).toBe(OTHER)
     await paste(await encodeLink(LINK), () => view.state.doc.toString() === LINKED, 'the open')
     const before = new Set(leaves())

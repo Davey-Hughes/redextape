@@ -5,7 +5,7 @@ import { KEYMAP_KEY } from '../../src/editor-prefs'
 import { editorHost, idle, inNormalMode, SHELL, until } from './harness'
 
 /**
- * **THE KEYMAP SETTING, THROUGH THE APP** — Plan 7 part 3b task 6, design §9.
+ * **THE KEYMAP SETTING, THROUGH THE APP** — spec §9.
  *
  * Four claims, in the order the page can show them: the setting is read back from STORAGE at mount
  * rather than from the control; `Esc` belongs to vim and does not move the focus out of the editor;
@@ -19,10 +19,11 @@ import { editorHost, idle, inNormalMode, SHELL, until } from './harness'
  *
  * **KEYS ARRIVE THROUGH `userEvent`, NOT THROUGH A SYNTHETIC `KeyboardEvent`.** Half of what this file
  * asserts is that a key INSERTS a character, and a synthetic `keydown` never produces the
- * `beforeinput`/`input` pair a contenteditable actually types with — `panel.test.ts` records the same
- * finding for a button that a synthetic event never activates. So `j` under the default keymap would
- * insert nothing whatever the keymap said, and claim 4 would pass against an editor with no keymap
- * at all.
+ * `beforeinput`/`input` pair a contenteditable actually types with — `panel.test.ts` gives the same reason
+ * for a button, which a synthetic event never activates. So `j` under the default keymap would insert
+ * nothing whatever the keymap said, and claim 4 would pass against an editor with no keymap at all.
+ *
+ * Section citations here are the Plan 7 part 3 spec's unless they name another.
  */
 
 /**
@@ -113,9 +114,7 @@ describe('the keymap setting', () => {
    * behave identically under both placements: `defaultKeymap` binds none of the first two, and its
    * `Escape` runs `simplifySelection`, which declines an empty selection. `Enter` is bound, to
    * `insertNewlineAndIndent`, and vim's normal-mode `Enter` is a MOTION — so the two placements differ
-   * by whether a keystroke edits the document. Measured in Chromium, slot below the first
-   * `keymap.of(...)`, caret at offset 1 of `abc\ndef`: `Enter` produced `a\nbc\ndef` and `Backspace`
-   * produced `bc\ndef`, against an unchanged document and a moved cursor with the slot above.
+   * by whether a keystroke edits the document.
    */
   it('lets vim have the keys the default keymap also binds', async () => {
     await caretTo(0)

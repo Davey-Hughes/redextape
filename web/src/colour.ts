@@ -20,35 +20,26 @@ import type { TokenClass } from './types'
 /**
  * The colourer, over `web-tree-sitter` and the four committed grammar `.wasm`.
  *
- * **INDICES HERE ARE UTF-16 CODE UNITS, NOT BYTES, AND THAT IS MEASURED.** Parsing `(λx. λy. x)` — 11
- * UTF-16 units, 13 UTF-8 bytes — gives a root `endIndex` of 11. CodeMirror positions are UTF-16 code
- * units too, so a tree-sitter offset goes straight into a `Decoration` range. **`spans.ts`'s
- * `byteToIndex` must not be used here.** That conversion exists for the λ pane's frame spans, which
- * `print_lambda_capped` writes as byte offsets, and applying it to these would mis-place every span
- * after the first non-ASCII character — which in this app means every λ document.
+ * **INDICES HERE ARE UTF-16 CODE UNITS, NOT BYTES.** CodeMirror positions are UTF-16 code units too, so
+ * a tree-sitter offset goes straight into a `Decoration` range. **`spans.ts`'s `byteToIndex` must not be
+ * used here.** That conversion exists for the λ pane's frame spans, which `print_lambda_capped` writes
+ * as byte offsets, and applying it to these would mis-place every span after the first non-ASCII
+ * character — which in this app means every λ document.
  *
- * **WITH ONE EXCEPTION, AND IT SHIPPED A BUG: A QUERY'S `startIndex`/`endIndex` ARE NOT IN THOSE
- * UNITS.** They are 2 × UTF-16 code units while the `startIndex`/`endIndex` READ BACK off a captured
- * node are plain code units. `colourSpans` below holds the doubling and the measurement that pins it;
- * this paragraph exists so the sentence above is not read as covering the whole module.
+ * **WITH ONE EXCEPTION: A QUERY'S `startIndex`/`endIndex` ARE NOT IN THOSE UNITS.** They are 2 × UTF-16
+ * code units while the `startIndex`/`endIndex` READ BACK off a captured node are plain code units.
+ * `colourSpans` below holds the doubling and the measurement that pins it; this paragraph exists so the
+ * sentence above is not read as covering the whole module.
  *
  * **TWO CLOCKS, AND CONFLATING THEM IS THE OBVIOUS FIRST IMPLEMENTATION.** The tree is reparsed when
  * the document changes; the decorations are rebuilt when the document changes OR the viewport moves.
- * Measured in Chromium on a 103,028-unit TM: a full reparse is 8.1 ms and an incremental one is
- * 0.4 ms, so reparsing on every scroll would cost twenty times what it buys. **BOTH GROW WITH THE
- * DOCUMENT**: at 1,518,470 units a parse of the whole text measured 154 to 179 ms and a reparse after
- * one character 3.0 to 4.3 ms (2026-10-06). `PARSE_SLICE_MS` has what an editor's first parse does
- * about that.
+ * Reparsing on every scroll would cost far more than it buys. **BOTH COSTS GROW WITH THE DOCUMENT**:
+ * a parse of the whole text and a reparse after one character. `PARSE_SLICE_MS` has what an editor's
+ * first parse does about that.
  *
- * **THE QUERY IS SCOPED TO THE VIEWPORT AND THAT IS A REQUIREMENT, NOT AN OPTIMISATION.** The same
- * document yields 32,591 captures whole and 293 for one viewport, and a 229,181-unit TM yields 82,464
- * against 897. Tens of thousands of decorations in one `RangeSet` is the problem `virtual-list.ts`
- * already exists to avoid on the δ table.
- *
- * **THOSE TWO VIEWPORT FIGURES READ 88 AND 420 UNTIL THE DOUBLING ABOVE WAS FOUND**, because every
- * probe behind them passed a code-unit count to an option that wanted twice one. They were corrected
- * by re-measuring, not by scaling: the whole-document counts beside them pass no range at all and
- * reproduce exactly, which is what pins the error to the range option rather than to the grammars.
+ * **THE QUERY IS SCOPED TO THE VIEWPORT AND THAT IS A REQUIREMENT, NOT AN OPTIMISATION.** A query over
+ * the whole of a large document yields tens of thousands of captures, and tens of thousands of
+ * decorations in one `RangeSet` is the problem `virtual-list.ts` already exists to avoid on the δ table.
  */
 
 /** The `TokenClass` names as they cross the wasm boundary, paired with their capture names. */
@@ -70,9 +61,7 @@ export function classMapFrom(tables: readonly CaptureTable[]): Map<string, Map<s
  *
  * THE LARGER OF THE SESSION'S TWO COPY CEILINGS, NOT A NUMBER OF THIS MODULE'S OWN: a TM copy's,
  * `MAX_SCRATCH_TM_BYTES` at 6,100,000, where an asm copy's, `MAX_SCRATCH_ASM_BYTES`, is 5,200,000. A
- * document no copy will hold is not one worth parsing on the main thread: a parse of a whole text of
- * 6,072,644 units measured 614 to 673 ms, in slices 676 and 688 ms, and a reparse after one character
- * typed 13.4 to 15.1 ms, in one go inside the keystroke's update (2026-10-06).
+ * document no copy will hold is not one worth parsing on the main thread.
  *
  * **ONE CEILING FOR EVERY EDITOR, SO AN ASM DOCUMENT BETWEEN THE TWO IS STILL COLOURED**, though no asm copy
  * builds it: refusing a document is the session's to say, and this gate only refuses the absurd. A ceiling
@@ -119,14 +108,13 @@ const reasonOf = (e: unknown): string => (e instanceof Error ? e.message : Strin
  * **THE RUNTIME IS SHARED AND ITS FAILURE IS THEREFORE NOT A PER-LANGUAGE ONE — TWO CALLBACKS, NOT
  * ONE, AND THAT SPLIT IS THE WHOLE POINT.** `Parser.init` is memoised across every `load`, so a
  * `web-tree-sitter.wasm` that will not fetch rejects EVERY language's promise from the one cause. Put
- * through `onFailure` that read as four coincidental per-language failures and produced four notices,
- * one per language, for one event — against design §10's one notice per failure.
+ * through `onFailure` that would read as four coincidental per-language failures and produce four
+ * notices, one per language, for one event — against design §10's one notice per failure.
  * `onRuntimeFailure` fires at most once per registry and says the thing that is actually true: nothing
  * on the page is coloured. Per-grammar independence below is untouched; only the shared step is folded.
  *
  * **NEITHER CALLBACK IS OPTIONAL.** An optional reporting hook is a notice the design promises and the
- * app can silently not have — which is exactly what `ColourOptions.onCeiling` was until this branch's
- * whole-branch review found it declared, invoked and passed by nobody.
+ * app can silently not have.
  */
 export function createGrammarRegistry(opts: {
   onFailure: (id: LanguageId, reason: string) => void
@@ -135,11 +123,10 @@ export function createGrammarRegistry(opts: {
   /**
    * How the shared runtime is started, for a test that needs it to fail.
    *
-   * **THIS REPLACED A `locateRuntime` SEAM THAT COULD NOT EXPRESS THE FAILURE.** `Parser.init` memoises
-   * its module in a module-level `Module3 ??=`, so once any test in a process has initialised the
-   * runtime successfully, a later `locateFile` pointing at nothing resolves from the cache and the
-   * shared-failure path above is unreachable. A seam over the whole step can reject; a seam over the
-   * path it reads cannot. Nothing in `src/` passes it.
+   * `Parser.init` memoises its module in a module-level `Module3 ??=`, so once any test in a process has
+   * initialised the runtime successfully, a later `locateFile` pointing at nothing resolves from the cache
+   * and the shared-failure path above is unreachable. A seam over the whole step can reject; a seam over
+   * the path it reads cannot. Nothing in `src/` passes it.
    */
   initRuntime?: () => Promise<void>
 }): GrammarRegistry {
@@ -189,8 +176,7 @@ export function createGrammarRegistry(opts: {
  * before calling this. A multi-change transaction's `fromA`/`toA` are all in the old document while its
  * `fromB`/`toB` are all in the new one, so applying them one at a time to a tree feeds tree-sitter
  * coordinates that were never simultaneously true — and an imprecise edit gives a WRONG tree, not
- * merely a slower parse. The caller drops the tree and reparses instead, which measured 8.1 ms at
- * 103,028 units.
+ * merely a slower parse. The caller drops the tree and reparses instead.
  *
  * **`Edit` IS A CLASS, NOT AN INTERFACE, SO THIS CONSTRUCTS ONE.** It carries `editPoint` and
  * `editRange` methods, and an object literal with the six fields is therefore not assignable to it —
@@ -229,11 +215,11 @@ export type ColourSpan = { readonly from: number; readonly to: number; readonly 
  * THE `* 2`.** `web-tree-sitter` 0.27.0 passes `startIndex`/`endIndex` through to the wasm unchanged,
  * where they are offsets into a UTF-16 buffer measured in bytes; the `startIndex`/`endIndex` read back
  * off a captured node are divided by two on the way out. The API is asymmetric, one half of it agrees
- * with CodeMirror, and the halves look identical at the call site — which is how this shipped wrong:
- * the query got a window HALF the height of the viewport, so the lower half of every screen was bare,
- * and after a scroll the window landed on off-screen text and the marks missed the viewport entirely.
+ * with CodeMirror, and the halves look identical at the call site. Without the `* 2` the query gets a
+ * window HALF the height of the viewport, so the lower half of every screen is bare, and after a scroll
+ * the window lands on off-screen text and the marks miss the viewport entirely.
  *
- * MEASURED, on the λ grammar over the pure-ASCII 9-unit document `(ab) (cd)`:
+ * On the λ grammar over the pure-ASCII 9-unit document `(ab) (cd)`, which `tests/node/colour.test.ts` runs:
  *
  * ```text
  * no range    : 6 captures at 0,1,3,5,6,8
@@ -241,17 +227,12 @@ export type ColourSpan = { readonly from: number; readonly to: number; readonly 
  * endIndex=18 : 6 captures at 0,1,3,5,6,8  <- 2x, covering all of it
  * ```
  *
- * **2 × CODE UNITS, NOT UTF-8 BYTES — measured, because the two coincide on ASCII and that is the
- * reading a 2× on an ASCII document invites.** `λab λcd` is 7 code units and 9 UTF-8 bytes, and its
- * second `λ` starts at unit 4, byte 5. `endIndex: 8` — past that byte — still returns only the first
- * capture; `endIndex: 14` (2 × 7) returns both. So the factor is the buffer's element size, not an
- * encoding conversion, and `spans.ts`'s `byteToIndex` is as wrong here as the module header says.
+ * **2 × CODE UNITS, NOT UTF-8 BYTES**: the factor is the buffer's element size, not an encoding
+ * conversion, and `spans.ts`'s `byteToIndex` is as wrong here as the module header says.
  *
  * **AN EMPTY RANGE IS SKIPPED RATHER THAN QUERIED, BECAUSE `endIndex: 0` MEANS UNLIMITED.** The library
- * reads a zero end as "no limit" (measured: `{startIndex: 0, endIndex: 0}` returns all 6 captures
- * above, and `{startIndex: 10, endIndex: 0}` returns the 3 past unit 5). A `from === to` visible range
- * doubled to `0` would therefore query the WHOLE document — the opposite of the bug above, and just as
- * quiet.
+ * reads a zero end as "no limit". A `from === to` visible range doubled to `0` would therefore query the
+ * WHOLE document — the opposite of the failure above, and just as quiet.
  *
  * **ONE SPAN PER RANGE, AND IT IS THE COLLAPSE THAT DOES THE WORK.** The `redextape` grammar captures
  * some nodes twice by design — `print(x);` yields `variable@0..5` AND `function.call@0..5`, both
@@ -260,15 +241,14 @@ export type ColourSpan = { readonly from: number; readonly to: number; readonly 
  * from the second range arrives after a larger `from`, which is what makes `RangeSetBuilder.add` throw
  * "Ranges must be added sorted by `from` position and `startSide`". The keying and the ordering are
  * exactly `redextape_grammar_check`'s `captures_with` — `(start, end)` into a map drained in offset
- * order — because part 3's browser differential compares this function's output against a golden
+ * order — because the browser differential compares this function's output against a golden
  * fixture emitted from that Rust function, and the comparison is only an equality if both sides
  * collapse the same way. Last capture wins per range, as its `BTreeMap::insert` does; the choice is
  * observable only when two captures on ONE range project to different classes, which that function
  * reports as an error rather than resolving, so matching it keeps the two from diverging silently if it
  * ever stops doing so.
  *
- * **THE SORT IS NOT WHAT FIXES THAT, AND DELETING IT REDDENS NOTHING TODAY — MEASURED, AND SAID HERE
- * RATHER THAN LEFT FOR SOMEONE TO REDISCOVER.** `Map` keeps a key's FIRST insertion position when a
+ * **THE SORT IS NOT WHAT FIXES THAT.** `Map` keeps a key's FIRST insertion position when a
  * later `set` overwrites it, so a duplicate from a second range lands where it already was; with
  * `visibleRanges` ascending and disjoint (CodeMirror sorts them) and captures ascending within one
  * query, insertion order is already offset order. The sort is here so the offset order this function
@@ -300,27 +280,15 @@ export function colourSpans(
 /**
  * How long one slice of an editor's first parse may run before it stops for a timer, in milliseconds.
  *
- * **AN EDITOR'S FIRST PARSE RUNS IN SLICES OF THIS LENGTH, AND IT RAN IN ONE TASK UNTIL THE COPY OF A 7,353-STATE
- * MACHINE HELD THE PAGE FOR IT.** That machine's text is 1,518,470 units: 7,353 states and 18,499 rules, a line each.
- * Measured in Chromium on 2026-10-06, the machine copied while its program's run and then the copy's both record,
- * five runs on each side taken in turn: in one go the parse took 194 to 208 ms, and from the editor's mount the page
- * ran no timer for 232 to 249 ms and drew no frame for 216 to 232 ms; in slices no gap between two timers or two
- * frames reached 100 ms, the parser's calls took 179 to 188 ms in all and the longest 8.1 to 9.0 ms, and the tree
- * landed 720 to 860 ms after the click.
+ * **AN EDITOR'S FIRST PARSE RUNS IN SLICES OF THIS LENGTH**, so that a long document's parse does not hold the page.
  *
- * **THE BOUND IS ON ONE CALL TO THE PARSER, IN ONE EDITOR.** The update that carries a first slice measured 8.3 to
- * 12.0 ms in five editors, the slice and the rest of the update, and 22.6 ms in the first editor a page mounted;
- * editors that mount together each queue a slice of their own; and a slice cannot stop inside a token, so one
- * comment line of 3,000,000 units parsed in 57.2 ms without a callback.
+ * **THE BOUND IS ON ONE CALL TO THE PARSER, IN ONE EDITOR.** Editors that mount together each queue a slice of their
+ * own, and a slice cannot stop inside a token.
  *
  * **THE PARSER STOPS ITSELF AND IS ASKED AGAIN.** `web-tree-sitter` calls a parse's `progressCallback` as it goes,
- * 16,095 times over that machine's text, and a parse whose callback answers `true` returns `null` with its state
- * kept: the next `parse` on that parser with the same text carries on from there, and `reset()` drops the state.
- * **THE SAME TREE AS A PARSE IN ONE GO FOR A TEXT WITHOUT ERRORS, AND NOT ALWAYS FOR ONE WITH MANY.** That machine's
- * two trees were compared node for node, 787,756 nodes, and were the same. On text with a mistake every 61 to 1,499
- * units a resumed parse recovered differently from a parse in one go, in each of the four grammars, and differently
- * again with where its slices ended; with one mistake in a text of 0.55 to 1.5 million units, 0 of 8 sliced parses
- * differed, in each of six cases.
+ * and a parse whose callback answers `true` returns `null` with its state kept: the next `parse` on that parser with
+ * the same text carries on from there, and `reset()` drops the state. **THE SAME TREE AS A PARSE IN ONE GO FOR A
+ * TEXT WITHOUT ERRORS, AND NOT ALWAYS FOR ONE WITH MANY.**
  */
 export const PARSE_SLICE_MS = 8
 
@@ -328,22 +296,17 @@ export const PARSE_SLICE_MS = 8
  * How far into a document the first screen's own parse reaches, in UTF-16 code units.
  *
  * **WHILE A SLICED PARSE IS PENDING, THE SCREEN IS COLOURED FROM A PARSE OF THE DOCUMENT'S START, UP TO THE END OF THE
- * LAST VISIBLE LINE, WHEN THAT IS AT MOST THIS FAR IN.** A copy's editor mounts showing its first lines, and without
- * this they stood plain until the whole parse landed, 757 to 969 ms after the click in three runs. With it they are
- * coloured 190 to 255 ms after the click, where the parse in one go coloured them at 377 to 431 ms, in five runs of
- * each taken in turn (2026-10-06). The first 6,048 units of the 1,518,470-unit machine, 130 lines, parsed in 0.70 ms,
- * and gave the captures the whole tree gives over those units.
+ * LAST VISIBLE LINE, WHEN THAT IS AT MOST THIS FAR IN.** A copy's editor mounts showing its first lines, which would
+ * otherwise stand plain until the whole parse lands.
  *
  * **A BOUND, BECAUSE THIS PARSE RUNS IN ONE GO INSIDE AN UPDATE.** A screen further down than this shows plain text
- * until the whole parse lands. Of that machine, the first 20,064 units parsed in 2.20 ms and the first 64,040 in
- * 6.80 ms. Text the grammars make more work of costs more: 31,995 units of one mnemonic repeated took 14.5 ms as asm,
- * and of one bracket repeated 9.6 ms as TM and 9.8 ms as λ.
+ * until the whole parse lands. Text the grammars make more work of costs more: 31,995 units of one mnemonic repeated
+ * took 14.5 ms as asm.
  *
- * **EXACT WHERE A LINE END IS A PLACE THE GRAMMAR CAN STOP.** That is the TM text form, measured, and every item of an
- * asm text is a line too. A program cut at a line end may be cut inside a bracket, and the parser then recovers as it
- * can; in 6 of 6 programs and λ terms cut so, the marks were the whole tree's. **A λ COPY'S TEXT IS ONE LINE**, so
- * its last visible line ends where it does: one longer than this bound has no first screen and is plain until its
- * whole parse lands.
+ * **EXACT WHERE A LINE END IS A PLACE THE GRAMMAR CAN STOP.** That is the TM text form, and every item of an asm text
+ * is a line too. A program cut at a line end may be cut inside a bracket, and the parser then recovers as it can.
+ * **A λ COPY'S TEXT IS ONE LINE**, so its last visible line ends where it does: one longer than this bound has no
+ * first screen and is plain until its whole parse lands.
  */
 export const FIRST_SCREEN_UNITS = 32_000
 
@@ -370,11 +333,9 @@ export type ColourOptions = {
    * Say that this editor's document is past `COLOUR_CEILING_UNITS` — design §10's "no colour and no
    * diagnostics for that document, one notice saying which". Called at most once per plugin instance.
    *
-   * **REQUIRED, AND IT WAS OPTIONAL UNTIL THE WHOLE-BRANCH REVIEW.** Declared, invoked as
-   * `opts.onCeiling?.(…)` and passed by NO caller, which meant a document over the ceiling went
-   * uncoloured in silence — the designed notice did not exist. Worse, the ceiling test still executed
-   * that line, so v8 recorded it covered while an optional call on `undefined` did nothing. A required
-   * field is what makes "declared but never wired" a compile error rather than a coverage figure.
+   * **REQUIRED.** A required field is what makes "declared but never wired" a compile error rather than a
+   * coverage figure: an optional call on `undefined` does nothing, and a test that runs that line still
+   * records it covered.
    */
   onCeiling: (id: LanguageId) => void
 }
@@ -382,15 +343,15 @@ export type ColourOptions = {
 /**
  * The plugin class `treeSitterColour` installs, built over `opts`.
  *
- * **A NAMED FACTORY RATHER THAN THE ANONYMOUS CLASS EXPRESSION THIS USED TO BE, AND A TEST IS THE WHOLE
- * REASON.** `#reparse`'s ceiling branch drops the tree rather than leaving it, so that a paste past the
+ * **A NAMED FACTORY RATHER THAN AN ANONYMOUS CLASS EXPRESSION, AND A TEST IS THE WHOLE REASON.**
+ * `#reparse`'s ceiling branch drops the tree rather than leaving it, so that a paste past the
  * ceiling followed by a delete back under it cannot edit a tree describing text that no longer exists.
  * That round trip is three transactions against one plugin INSTANCE, and `ViewPlugin.fromClass` hands
  * back no handle to one: `view.plugin(...)` needs a mounted `EditorView`, which needs a DOM, and the
  * failure it guards against is invisible in the DOM anyway — a wrong tree renders as wrong decorations,
  * not as an error. Exporting the class lets `tests/node/colour.test.ts` construct one over a real
  * parser and a stubbed view and drive the three transactions directly, in the tier that runs on every
- * push. Nothing in `src/` calls this; `treeSitterColour` below is the only consumer.
+ * push. In `src/`, only `treeSitterColour` below calls it.
  *
  * **`now` IS THE CLOCK A SLICE IS TIMED BY, AND NOTHING IN `src/` PASSES IT.** A test passes a counter, so that a slice
  * is a fixed number of the parser's progress callbacks and a document takes more than one slice by its size alone.
@@ -399,20 +360,15 @@ export type ColourOptions = {
  * first, the first after a document comes back under the ceiling, and the parse of whatever text a change leaves
  * while one of those is still pending: that change abandons the pending parse, the parser is reset, and the new text
  * is parsed from its start. The first slice runs inside the update that asked for it, so a document that parses
- * within `PARSE_SLICE_MS` is coloured in that update, as every document was; the rest run one to a timer, and the
- * plugin asks the view for one recompute when the tree lands. Until then the screen is coloured as
- * `FIRST_SCREEN_UNITS` says. **SO TEXT PAST THE FIRST SCREEN STAYS PLAIN FOR AS LONG AS KEYS ARRIVE FASTER THAN ONE
- * PARSE TAKES**: with a key every 100 ms into 1,534,779 units whose parse was pending, the end of the text was
- * coloured after 0 of 30 keys, and about 200 ms after the last.
+ * within `PARSE_SLICE_MS` is coloured in that update; the rest run one to a timer, and the plugin asks the view for
+ * one recompute when the tree lands. Until then the screen is coloured as `FIRST_SCREEN_UNITS` says. **SO TEXT PAST
+ * THE FIRST SCREEN STAYS PLAIN FOR AS LONG AS KEYS ARRIVE FASTER THAN ONE PARSE TAKES.**
  *
- * **A DOCUMENT THAT HAS A TREE IS REPARSED IN THE UPDATE THAT CHANGED IT, IN ONE GO, AS IT WAS.** A single change
- * edits the tree and reparses against it: after one character typed that measured 3.0 to 4.3 ms at 1,518,470 units
- * and 13.4 to 15.1 ms at 6,072,644 (2026-10-06). A change that replaces most of a large document costs about what a
- * parse of that much text does, and so does a transaction of several changes, which cannot edit the tree (`editFor`)
- * and parses the whole text. **THIS BRANCH PUT THOSE TWO IN SLICES AT FIRST, AND ITS REVIEW MEASURED WHY NOT TO**:
- * the tree is gone while the slices run, and a screen past the first went plain, for 14 of 15 frames at 1,534,779
- * units on an idle page, where the parse in one go held the update for 164.4 ms with the screen coloured throughout.
- * A replacement by the same text, which is what a *format* that changes nothing dispatches, is not reparsed at all.
+ * **A DOCUMENT THAT HAS A TREE IS REPARSED IN THE UPDATE THAT CHANGED IT, IN ONE GO.** A single change edits the tree
+ * and reparses against it. A change that replaces most of a large document costs about what a parse of that much
+ * text does, and so does a transaction of several changes, which cannot edit the tree (`editFor`) and parses the
+ * whole text. In slices the tree would be gone while those two ran, and a screen past the first would go plain. A
+ * replacement by the same text, which is what a *format* that changes nothing dispatches, is not reparsed at all.
  */
 export function colourPluginClass(opts: ColourOptions, now: () => number = () => performance.now()) {
   return class {
@@ -450,8 +406,8 @@ export function colourPluginClass(opts: ColourOptions, now: () => number = () =>
         })
         .catch(() => {
           // CAUGHT, NOT `void`ed: an unhandled rejection in a browser reaches
-          // `window.onunhandledrejection` and prints as an uncaught error. `ScratchEditor`'s blur
-          // handler and `LspClient`'s `initialize` carry the same note, for the same reason.
+          // `window.onunhandledrejection` and prints as an uncaught error. `ScratchEditor`'s blur handler
+          // and the `initialize` request in `LspClient.start` carry the same note, for the same reason.
           //
           // A FETCH THAT FAILS DOES NOT REACH HERE: `createGrammarRegistry` catches it, reports it
           // through `onFailure` and RESOLVES with null. What can still reject is this continuation —
@@ -516,9 +472,7 @@ export function colourPluginClass(opts: ColourOptions, now: () => number = () =>
     /**
      * The pending parse's next slice, from a timer.
      *
-     * **A TIMER, SO THAT A SLICE TAKES ITS TURN WITH EVERYTHING ELSE THE PAGE HAS QUEUED.** The alternative measured
-     * was a task that runs ahead of other work: it landed the tree as soon as a parse in one go does, and through
-     * the parse no timer ran for 221 to 250 ms and no worker's reply was taken in for 206 to 232 ms, in three runs.
+     * **A TIMER, SO THAT A SLICE TAKES ITS TURN WITH EVERYTHING ELSE THE PAGE HAS QUEUED.**
      *
      * **NEVER FOR AN EDITOR THAT IS GONE OR A TEXT THAT IS**: `#abandon` clears the timer, and `destroy` and
      * `#reparse` both abandon.
@@ -545,7 +499,7 @@ export function colourPluginClass(opts: ColourOptions, now: () => number = () =>
     #reparse(u: ViewUpdate) {
       // **A REPLACEMENT BY THE SAME TEXT LEAVES EVERYTHING AS IT IS**: the tree, or the parse that is pending, is
       // this text's already. *Format* is one edit over the whole buffer, dispatched whether or not it changed a
-      // character (`lsp-text.ts`'s `applyEdits`), and reparsed the whole text at every one.
+      // character (`lsp-text.ts`'s `applyEdits`); without this return, every one would reparse the whole text.
       if (u.startState.doc.eq(u.state.doc)) return
       // WHATEVER FOLLOWS, the text a pending parse was reading is no longer the document.
       this.#abandon()
@@ -581,9 +535,8 @@ export function colourPluginClass(opts: ColourOptions, now: () => number = () =>
         this.#tree = next
         return
       }
-      // **SEVERAL CHANGES AGAINST A TREE ARE A WHOLE PARSE, IN ONE GO, AS THEY WERE.** In slices the tree would be
-      // gone while they ran, and with it the colour of every screen past the first: `colourPluginClass`'s doc has
-      // the measurement that put this back.
+      // **SEVERAL CHANGES AGAINST A TREE ARE A WHOLE PARSE, IN ONE GO.** In slices the tree would be gone while they
+      // ran, and with it the colour of every screen past the first.
       old.delete()
       this.#tree = parser.parse(u.state.doc.toString())
     }

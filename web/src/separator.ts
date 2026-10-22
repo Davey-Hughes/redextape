@@ -54,20 +54,18 @@ export function pointerDrag(
     // HELD, FOR THE STYLESHEET: a handle that draws a hand draws it closed from the press to the release.
     el.dataset.dragging = 'true'
     // THE RELEASE IS HEARD ON THE DOCUMENT TOO. A handle taken off the page under a press loses the pointer's
-    // capture, put back or not, and the release then goes to whatever is under the pointer: the handle heard none,
-    // stayed held, and its caller's gesture never ended. With the capture in place the handle hears the release
-    // first and `stop` takes these two off again.
+    // capture, put back or not, and the release then goes to whatever is under the pointer: without these the
+    // handle would hear none, stay held, and its caller's gesture would never end. With the capture in place the
+    // handle hears the release first and `stop` takes these two off again.
     el.ownerDocument.addEventListener('pointerup', stop, true)
     el.ownerDocument.addEventListener('pointercancel', stop, true)
     moved = false
     last = axis === 'x' ? e.clientX : e.clientY
     // BEFORE `setPointerCapture`, NOT AFTER. Capture throws `NotFoundError` for a synthetic
-    // `PointerEvent` whose `pointerId` is anything other than `1` — measured directly (ids `0` and `2`
-    // both throw, `1` never does) — because `1` is the reserved mouse-pointer id and is always active,
-    // even on a page's very first `pointerdown`. Every synthetic pointer event this suite dispatches
-    // uses `pointerId: 1` for exactly that reason, so nothing here throws today — but if a future test
-    // ever used a different id, `preventDefault` is what stops a drag from selecting text across the
-    // panes, so it must not be the thing a throw skips.
+    // `PointerEvent` whose `pointerId` is anything other than `1`, because `1` is the reserved
+    // mouse-pointer id and is always active, even on a page's very first `pointerdown`. A test that
+    // dispatched one with another id would throw here, and `preventDefault` is what stops a drag from
+    // selecting text across the panes, so it must not be the thing a throw skips.
     e.preventDefault()
     el.setPointerCapture(e.pointerId)
   })
@@ -155,11 +153,11 @@ export function separatorGesture(el: HTMLElement, axis: SeparatorAxis, handlers:
   // an UNRELATED key — a modifier, a stray keystroke — without ever releasing the arrow. `armedKey` records
   // WHICH key armed the current gesture rather than merely THAT some key did, so an unrelated key's `keyup`
   // finds no match, calls nothing, and leaves the gesture armed; auto-repeat then keeps re-arming it with the
-  // arrow key itself, and the arrow's own eventual `keyup` is what actually commits. Without this the unrelated
-  // `keyup` mid-hold consumed the arming and wrote to storage early, and the arrow's later `keyup` — re-armed by
-  // auto-repeat in between — committed a SECOND time: two writes for one continuous gesture, against the
-  // one-write-per-gesture invariant this path exists to establish. `blur` has no released key to compare
-  // against — focus can leave from a click or a `Tab` with no `keyup` involved at all — so it stays
+  // arrow key itself, and the arrow's own eventual `keyup` is what actually commits. Without this an unrelated
+  // `keyup` mid-hold would consume the arming and write to storage early, and the arrow's later `keyup` —
+  // re-armed by auto-repeat in between — would commit a SECOND time: two writes for one continuous gesture,
+  // against the one-write-per-gesture invariant this path exists to establish. `blur` has no released key to
+  // compare against — focus can leave from a click or a `Tab` with no `keyup` involved at all — so it stays
   // unconditional on anything but arming: any armed gesture commits when focus goes.
   const commitKeys = (): void => {
     // A `blur` FIRED BY A REBUILD THAT TOOK THE SEPARATOR OFF THE PAGE MUST NOT COMMIT. `renderLayout`'s

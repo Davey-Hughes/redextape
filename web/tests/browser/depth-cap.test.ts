@@ -41,9 +41,9 @@ describe('the print-depth cap', () => {
   })
 
   it('reports a depth cut instead of destroying the session', { timeout: 120_000 }, async () => {
-    // The original repro from the 2026-08-09 investigation: this exact program destroyed the session
-    // unrecoverably, and every later call threw "attempted to take ownership of Rust value while it
-    // was borrowed" because the abort left wasm-bindgen's guard taken.
+    // A program past the cap: a print that walked it whole would destroy the session unrecoverably, and
+    // every later call would throw "attempted to take ownership of Rust value while it was borrowed"
+    // because the abort leaves wasm-bindgen's guard taken.
     const r = await print(2690)
     expect(r.outcome).toBe('ok')
     expect(r.cut).toBe('Depth')

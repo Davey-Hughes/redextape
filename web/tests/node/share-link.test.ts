@@ -21,7 +21,7 @@ import { seededRandom } from './seeded-random'
  * and node reads Chrome's links (spec §A.3).
  */
 
-/** The encodings `main.ts` hands in, as `encodings()` lists them today. */
+/** The encodings `main.ts` hands in, as `encodings()` lists them. */
 const ENCODINGS = ['unary', 'binary']
 
 const WORKSPACE = serializeWorkspace(defaultWorkspace('wide'))
@@ -99,11 +99,11 @@ describe('encodeLink and decodeLink', () => {
 })
 
 /**
- * **THE FROZEN LINK: THE FORMAT'S FIRST VERSION, AS CHROME WROTE IT, WHICH MUST GO ON OPENING** (umbrella §8.4, spec
- * §5.1). Written once by `encodeLink` in Chrome, from `sum_to(5)` under `binary`, the Debugger preset's workspace and a
- * position on each leg. It pins the reading, never an encoder's bytes: node and Chrome deflate one payload differently.
- * Its workspace is `version: 2`, so it pins `parseWorkspace`'s reading of version 2 for good too: a later workspace
- * version migrates version 2 rather than refusing it.
+ * **THE FROZEN LINK: THE FORMAT'S FIRST VERSION, AS CHROME WROTE IT, WHICH MUST GO ON OPENING** (umbrella §8.4,
+ * Plan 7 part 6a spec §5.1). Written once by `encodeLink` in Chrome, from `sum_to(5)` under `binary`, the Debugger
+ * preset's workspace and a position on each leg. It pins the reading, never an encoder's bytes: node and Chrome deflate
+ * one payload differently. Its workspace is `version: 2`, so it pins `parseWorkspace`'s reading of version 2 for good
+ * too: a later workspace version migrates version 2 rather than refusing it.
  */
 describe('the frozen link from version 1', () => {
   const FROZEN =
@@ -199,8 +199,8 @@ describe('a link nothing can be read from', () => {
   })
 
   /**
-   * **THE CAP IS THE ONE BOUND A LINK HAS** (`MAX_LINK_BYTES`' own doc): a payload of exactly the cap is read, and one
-   * byte more is refused. Both are a program of `a`s, which deflate to a few kilobytes.
+   * **THE CAP IS THE ONE BOUND ON WHAT A LINK INFLATES TO** (`MAX_LINK_BYTES`' own doc): a payload of exactly the cap
+   * is read, and one byte more is refused. Both are a program of `a`s, which deflate to a few kilobytes.
    */
   it('reads a payload of exactly MAX_LINK_BYTES, and refuses one a byte longer', async () => {
     const around = (bytes: number): string => {
@@ -251,15 +251,10 @@ describe('a link that opens the program alone', () => {
 })
 
 /**
- * **A LINK'S TREE IS HELD TO THE BOUND A STORED ONE IS** (spec §5.3, amended 2026-10-01): at most 64 splits deep and 64
- * leaves, and leaf ids whose numbers the leaf counter can step past. A workspace past it opens the program alone.
- */
-/**
  * **A LINK CARRIES THE ARRANGEMENT ON SCREEN AND NO OTHER** (the view layouts spec §4.7). `main.ts` writes one from a
  * workspace it has emptied of them, and `decodeLink` drops them from one that carries them all the same: a link
- * written by hand, or by a build that sent them. Opened in the page, such a link put its arrangements into force and
- * into the reader's storage (measured 2026-10-12, by a `hashchange`: `source+lambda+asm+tm` and the panel state of a
- * λ view only it held were both stored).
+ * written by hand, or by a build that sent them. Were they not dropped, such a link opened in the page would put its
+ * arrangements into force and into the reader's storage.
  */
 describe('a link whose workspace carries remembered arrangements', () => {
   const FOUR = defaultArrangement(KIND_ORDER, 'wide')
@@ -295,6 +290,10 @@ describe('a link whose workspace carries remembered arrangements', () => {
   })
 })
 
+/**
+ * **A LINK'S TREE IS HELD TO THE BOUND A STORED ONE IS** (spec §5.3, amended 2026-10-01): at most 64 splits deep and 64
+ * leaves, and leaf ids whose numbers the leaf counter can step past. A workspace past it opens the program alone.
+ */
 describe("a link whose workspace's tree is past the bound", () => {
   const alone = { kind: 'program', program: 'let x = 40; x + 2', encoding: 'binary' }
   /** The default workspace's string with `tree` in place of its tree, and `pane-1` focused. */

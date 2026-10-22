@@ -6,10 +6,10 @@ import { chooseStyle, mountAt, rem } from './harness'
 /**
  * TERMINAL'S HEADER SITS CLOSER IN A WINDOW 85rem WIDE OR NARROWER — `style.css`'s rule beside `.bar`'s.
  *
- * The `views` toggles took Terminal's header past a 1280 px window: measured there before the rule (2026-10-12), it
- * needed 1,315.1 to 1,342.1 px across the presets, `settings` went to a second row, and the header was 91 px where
- * `main`'s was 46. With half the column gap it needs 1,227.1 to 1,254.1 px and is one row in every preset. Paper's
- * and Instrument's headers fitted and are not changed.
+ * At the full column gap the `views` toggles would take Terminal's header past a 1280 px window, with `settings`
+ * on a second row; with half the gap it is one row in every preset. The view-layouts design's §6.1 has the
+ * figures (`docs/superpowers/specs/2026-10-11-view-layouts-design.md`). Paper's and Instrument's headers fit
+ * and are not changed.
  *
  * **WHAT IS HELD IS THE GAP, AND NOT THE ROW IT BUYS.** Terminal draws the header in the machine's monospace, which
  * differs from one machine to the next, so how many pixels the header needs is this machine's figure and a runner's

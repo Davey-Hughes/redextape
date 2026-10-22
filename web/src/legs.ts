@@ -4,12 +4,11 @@ import type { Leg } from './protocol'
  * THE LEG VOCABULARY — each leg's name as a user reads it, the order the app lists legs in, a table with an
  * entry per leg, and the end of a `switch` over one.
  *
- * **IT EXISTS FOR ONE CLASS OF BUG: A BRANCH THAT READS "NOT λ" AS "TM".** Through Plan 7 part 5a the app had
- * two legs, and most of the sites that had to tell them apart asked one question — `leg === 'lambda' ? … : …`
- * — and put TM in the else. That is correct for exactly as long as there are two legs, and no site written
- * that way can say so: the day a third leg arrives, each one hands it TM's name, TM's request or TM's pane
- * class, with `tsc` green. Part 5's spec §2.3 found these branches by reading and its amendment 8 found more
- * by searching, and it says of both counts that an inventory is not a gate.
+ * **IT EXISTS FOR ONE CLASS OF BUG: A BRANCH THAT READS "NOT λ" AS "TM".** A site that asks one question —
+ * `leg === 'lambda' ? … : …` — and puts TM in the else is correct for exactly as long as there are two legs,
+ * and cannot say so: given a third leg, it hands it TM's name, TM's request or TM's pane class, with `tsc`
+ * green. Part 5's spec §2.3 says an inventory of such branches is not a gate, and its amendment 8 found more
+ * than §2.3 counted.
  *
  * **SO THE COMPILER IS THE GATE, AND THIS MODULE IS WHAT IT READS.** A branch on the leg is a `switch` with
  * one arm per leg. One that returns a value is exhaustive already, since a missing arm is TS2366 under
@@ -23,8 +22,8 @@ import type { Leg } from './protocol'
  * Each leg's name as a user reads it: a view's title (`λ · program`), a copy's name (`TM copy 2`), the copies
  * menu, and the link status line's detachment clause.
  *
- * **READ HERE BY EVERY SITE THAT HOLDS A `Leg` AND SAYS IT**, where each used to spell `leg === 'lambda' ?
- * 'λ' : 'TM'` for itself — which named a third leg `TM` at every one of them.
+ * **READ HERE BY EVERY SITE THAT HOLDS A `Leg` AND SAYS IT**, rather than each spelling `leg === 'lambda' ?
+ * 'λ' : 'TM'` for itself, which would name a third leg `TM` at every one of them.
  *
  * **AN ANNOTATION, NOT `as const satisfies`**, the form `editor-prefs.ts`'s `KEYMAP_LABEL` takes. Either makes
  * a leg with no name a type error here; `satisfies` would also make it one at every lookup by a `Leg`, since
@@ -46,7 +45,7 @@ export const LEG_NAME: Readonly<Record<Leg, string>> = { lambda: 'λ', asm: 'asm
  * `LEG_NAME`'s, since an object's string keys enumerate in insertion order.
  *
  * A VALUE RATHER THAN A KEY WALK OVER SOME ENTRY'S `legs`, because the order must not depend on which legs the
- * first session in the registry happens to have — the reason this list gave when it lived in `sessions.ts`.
+ * first session in the registry happens to have.
  */
 export const LEGS: readonly Leg[] = Object.keys(LEG_NAME) as Leg[]
 
@@ -72,7 +71,7 @@ export function perLeg<T>(value: (leg: Leg) => T): Record<Leg, T> {
  * missing arm would then answer `undefined` with `tsc` green — so such a `switch` ends in `unhandled` too.
  *
  * **IT DOES NOTHING WHEN CALLED, AND IT DOES NOT THROW.** The types say no value gets here. If one did — a
- * reply from a worker the page did not expect — the `switch` it ends did nothing for that value before this
- * existed, and several of them sit in handlers where a throw would abandon the rest of the reply.
+ * reply from a worker the page did not expect — the `switch` it ends would do nothing for that value without
+ * this either, and several of them sit in handlers where a throw would abandon the rest of the reply.
  */
 export function unhandled(_value: never): void {}

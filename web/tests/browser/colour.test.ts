@@ -15,44 +15,38 @@ import { idle, paneOrThrow, SHELL, until } from './harness'
  * asm copy .tok-mnemonic    Mnemonic   `@function` in REDEXTAPE_ASM, which the mini-language maps to Ident
  * ```
  *
- * **THESE ARE `golden.rs`'s WITNESSES, AND THE DISAGREEMENT WAS THE FINDING.**
- * `each_language_carries_a_class_no_other_one_does` picks `Operator`, `Binder`, `StateName` and
- * `Mnemonic`; this header used to name `tok-keyword` for the source editor and claim the three classes
- * had one capture row each. Neither half was true. Counted in `crates/redextape-core/src/capture_map.rs`,
- * `Keyword` has THREE rows — `REDEXTAPE`, `REDEXTAPE_TM` and `REDEXTAPE_ASM` all map `@keyword` to it —
- * so the source editor's assertion discriminated nothing: the last test in this file finds `tok-keyword`
- * in the source editor AND in the TM editor on the same page, which is what "no other grammar produces
- * it" was supposed to rule out. `Binder` has two rows rather than one, both λ's, which leaves the CLASS
- * unique to λ even though the row count was wrong. Only `TapeSymbol`, the row this file used for TM, was
- * as described — it is replaced anyway so the witnesses match the Rust side's, two sides of one argument
- * rather than two arguments.
+ * **THESE ARE `golden.rs`'s WITNESSES.** `each_language_carries_a_class_no_other_one_does` picks
+ * `Operator`, `Binder`, `StateName` and `Mnemonic`, and so does this file, so the two sides make one
+ * argument rather than two. `Keyword` is no witness: `REDEXTAPE`, `REDEXTAPE_TM` and `REDEXTAPE_ASM` all
+ * map `@keyword` to it (`crates/redextape-core/src/capture_map.rs`), and the last test in this file finds
+ * `tok-keyword` in the source editor AND in the TM editor on the same page.
  *
- * **ASM'S ROW ARRIVED WITH ITS EDITOR.** An asm copy's editor is coloured by the same mechanism, through
- * `transport.ts`'s `colour` thunk, so the row is what would catch that thunk handing it another language's
- * grammar — which every other test here would pass.
+ * **AN ASM COPY'S EDITOR IS COLOURED BY THE SAME MECHANISM**, through `transport.ts`'s `colour` handler,
+ * which hands each editor its own language's colourer, so the asm row is what would catch it handing an
+ * asm editor another language's grammar — which every other test here would pass.
  *
- * **EVERY ASSERTION READS THE COMPUTED COLOUR AS WELL AS THE CLASS, BECAUSE A CLASS NO STYLESHEET STYLES
- * WOULD SATISFY A CLASS-ONLY ASSERTION WHILE RENDERING AS PLAIN TEXT.** `tests/browser/setup.ts` gives
- * the tester page `style.css`, so `.tok-keyword` resolves to `--tok-keyword`, `.tok-binder` to
- * `--tok-binder`, and `.tok-statename` and `.tok-mnemonic` — the neutral classes among them — to
- * `--tok-neutral`, each different from the `--fg` a `.cm-content` inherits. A missing rule, or a class the
- * palette forgot, reads here as painted === plain.
+ * **EVERY WITNESS'S ASSERTION READS THE COMPUTED COLOUR AS WELL AS THE CLASS, BECAUSE A CLASS NO
+ * STYLESHEET STYLES WOULD SATISFY A CLASS-ONLY ASSERTION WHILE RENDERING AS PLAIN TEXT.**
+ * `tests/browser/setup.ts` gives the tester page `style.css`, so `.tok-operator` resolves to
+ * `--tok-operator`, `.tok-binder` to `--tok-binder`, and `.tok-statename` and `.tok-mnemonic` — the
+ * neutral classes among them — to `--tok-neutral`, each different from the `--fg` a `.cm-content`
+ * inherits. A missing rule, or a class the palette forgot, reads here as painted === plain.
  *
  * **EVERY QUERY IS SCOPED TO A `.cm-content`, AND FOR THE λ PANE THAT IS LOAD-BEARING.** The λ pane's
  * RENDERED FRAME already emits `.tok-binder` spans, computed by the worker from the term it holds
- * (`spans.ts`'s `decorationRanges`) — a route this task does not touch and must not be mistaken for the
- * one under test. An unscoped `.tok-binder` query would pass against that frame with the editor
- * completely uncoloured. `lambda-pane.ts` is the only caller of `decorationRanges`, so the λ pane is the
- * only surface outside an editor that paints these classes; the scoping stays on all three rows anyway,
- * since which surfaces those are is not a property any of them assert.
+ * (`spans.ts`'s `decorationRanges`) — a route that must not be mistaken for the one under test. An
+ * unscoped `.tok-binder` query would pass against that frame with the editor completely uncoloured.
+ * `lambda-body.ts` is the only caller of `decorationRanges`, so the λ pane is the only surface outside an
+ * editor that paints these classes; the scoping stays on every row anyway, since which surfaces those
+ * are is not a property any of them assert.
  *
  * **REAL TIMERS.** A grammar arrives over a `fetch` the plugin awaits in its constructor; a fake clock
  * plus an awaited fetch is a deadlock, not a slow test.
  *
  * **WHAT THIS FILE CANNOT SEE: THE VIEWPORT SCOPING.** `colour.ts` queries only `view.visibleRanges`, and
  * that is a COST property, not a correctness one — querying `tree.rootNode` with no range options at all
- * leaves every test here green (measured, Task 4 step 9). Tens of thousands of decorations in one
- * `RangeSet` is a cost Task 7 measures; nothing below implies coverage of it.
+ * would leave every test here green. Tens of thousands of decorations in one `RangeSet` is a cost;
+ * nothing below implies coverage of it.
  */
 
 /**
@@ -63,7 +57,7 @@ import { idle, paneOrThrow, SHELL, until } from './harness'
  */
 const contentOf = (pane: HTMLElement): HTMLElement | null => pane.querySelector<HTMLElement>('.cm-content')
 
-/** Fork `pane` onto a copy of what it is showing — the `⌄ copy` control both panes carry. */
+/** Fork `pane` onto a copy of what it is showing — its view menu's *edit a copy*. */
 const fork = (pane: HTMLElement): void => {
   const button = pane.querySelector<HTMLButtonElement>('button.detach')
   if (button === null) throw new Error('no fork control on this pane')
@@ -85,7 +79,7 @@ async function colouredIn(pane: HTMLElement, selector: string, what: string): Pr
 }
 
 describe('the editors colour from their grammars', () => {
-  // ONE MOUNT FOR THE FILE, the idiom every sibling states: ES module imports are cached, so `main()`
+  // ONE MOUNT FOR THE FILE, the idiom `app.test.ts` states: ES module imports are cached, so `main()`
   // runs once per page and Vitest gives each test FILE its own page.
   beforeAll(async () => {
     document.body.innerHTML = SHELL
@@ -113,8 +107,9 @@ describe('the editors colour from their grammars', () => {
     const state = await colouredIn(paneOrThrow('tm-0'), '.tok-statename', 'the TM copy’s editor to colour a state name')
     // A state name is one identifier token; asserting it is non-empty rather than naming one keeps this
     // off the lowering's choice of state names, which is not what the colourer is being asked about.
-    // `@label.reference` reaches it — a `start` or `goto` TARGET, never a defining position, which the
-    // TM table maps to `Label` and the asm table maps `@label.reference` to as well (design §5.2).
+    // `@label.reference` reaches it — a `start` or `goto` TARGET, never a defining position, which
+    // the TM table maps to `Label` and the asm table maps `@label.reference` to as well (Plan 7 part 3
+    // spec §6.1).
     expect(state.textContent).not.toBe('')
   })
 
@@ -130,14 +125,14 @@ describe('the editors colour from their grammars', () => {
   })
 
   /**
-   * **THE COUNTER-CLAIM, PINNED RATHER THAN ONLY WRITTEN IN THE HEADER.** `tok-keyword` was this file's
-   * source-editor witness, on a sentence saying no other grammar produces it. `REDEXTAPE_TM` maps
-   * `@keyword` to `Keyword` as well, so the same class is on screen in both editors at once and a
+   * **THE COUNTER-CLAIM, PINNED RATHER THAN ONLY WRITTEN IN THE HEADER.** `REDEXTAPE_TM` maps `@keyword`
+   * to `Keyword` as `REDEXTAPE` does, so the same class is on screen in both editors at once and a
    * `.tok-keyword` query says nothing about which grammar coloured the pane it found one in. Asserting
-   * that here is what keeps the header's correction from being a claim about the tables that no gate
-   * reads — and what makes a future revert to `tok-keyword` fail beside the sentence explaining why.
+   * that here is what keeps the header's word on `Keyword` from being a claim about the tables that no
+   * gate reads — and what makes a future choice of `tok-keyword` as a witness fail beside the sentence
+   * explaining why.
    *
-   * Both panes are already forked and coloured by the tests above; this adds no gesture of its own.
+   * Both editors are already mounted and coloured by the tests above; this adds no gesture of its own.
    */
   it('finds tok-keyword in two editors at once, which is why it is nobody’s witness', () => {
     expect(contentOf(paneOrThrow('source'))?.querySelector('.tok-keyword')?.textContent).toBe('let')

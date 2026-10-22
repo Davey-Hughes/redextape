@@ -8,9 +8,9 @@ import { drawn, focusInPage, live, mountAt, notice, sourcePane, toggle } from '.
  * hides every view of its kind, so its tooltip, and the sentence that says why the last one stays, count them:
  * *hide the 2 TM views*, *the 2 TM views are the only ones shown — one kind of view stays*.
  *
- * **A FIRST LOAD AND `+ view` ARE ALL IT TAKES**: the source beside the TM view, then a second TM view. While each
- * sentence was written for one view, the TM toggle said *hide the TM view* and hid both, and with the source view
- * closed it said *the TM view is the only one shown* of two.
+ * **A FIRST LOAD AND `+ view` ARE ALL IT TAKES**: the source beside the TM view, then a second TM view. Were each
+ * sentence written for one view, the TM toggle would say *hide the TM view* and hide both, and with the source view
+ * closed it would say *the TM view is the only one shown* of two.
  *
  * The cases run in order, each from the page the one before left.
  */

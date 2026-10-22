@@ -4,11 +4,9 @@ import { SHELL, stateIdle, until } from './harness'
 
 /**
  * **`hidden` HIDES.** The browser's own `[hidden] { display: none }` loses to any author rule that sets `display`,
- * so an element a view hides can stay on screen with nothing but a probe to notice. One did: every outline's list,
- * since `.outline` is a flex column — the source view's from the first draw, before anyone opened it. A TM view's
- * outline panel, laid out as a flex column while hidden, was a second. So this looks for the whole class, not the
- * two instances: every `[hidden]` element on the page, across every panel opened and closed and every view forked
- * to a copy.
+ * so an element a view hides can stay on screen with nothing but a probe to notice: an outline's list would, since
+ * `.outline` is a flex column. So this looks for the whole class, not an instance: every `[hidden]` element on the
+ * page, across every panel opened and closed and every view forked to a copy.
  */
 
 const shownWhileHidden = (): string[] =>

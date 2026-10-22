@@ -13,7 +13,7 @@ import { fourViews, fourViewWorkspace, noticeText, SHELL, shows, stateIdle, undo
  * view stays on the program". A link opened whole at start-up warms no copy (§5.3), so its `undo` warms each copy it
  * moves a view back onto. The stored workspace here has one more λ view than `MAX_WARM_BUFFERS`, each bound to a copy
  * of its own: the `undo` warms as many as the cap lets it, and the last stays paused, its view on the program. ONE
- * MOUNT FOR THE FILE, for the reason every sibling gives.
+ * MOUNT FOR THE FILE, for the reason `app.test.ts` gives.
  */
 
 /** A tree of `n` λ views beside the source view, split in halves so none goes under the pane floor. */

@@ -6,7 +6,7 @@
  *
  * **NOT `*.test.ts`, ON PURPOSE**: `vite.config.ts`'s browser project collects tests by that suffix (`include:
  * ['tests/browser/**\/*.test.ts']`), so this file is never picked up as a test of its own, the way
- * `asm-copy-memory-worker.ts` already is not — and `PROBE_FILES` there names only the two `.test.ts` files, so a
+ * `asm-copy-memory-worker.ts` already is not — and `PROBE_FILES` there names the two `.test.ts` files, so a
  * helper of theirs joining neither test run nor the default suite needs no entry of its own.
  */
 

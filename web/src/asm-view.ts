@@ -92,7 +92,7 @@ export type RegisterRow = {
  * The registers panel's rows, in the spec's order: `pc`, `rr`, the arguments `a0…`, then the locals `r0…` — each as
  * far as the frame's window carries them.
  *
- * **ONLY A LOCAL HAS A WRITTEN BIT.** `call` clears them all and `ret` restores the caller's (5a's written bits), so an
+ * **ONLY A LOCAL HAS A WRITTEN BIT.** `call` clears them all and `ret` restores the caller's (spec §4.3), so an
  * unwritten local inside a call still holds its caller's word — the view's "left over from caller". An argument is
  * written by the caller for the callee, and `rr` by whichever instruction last wrote it; neither is ever left over.
  */
@@ -130,7 +130,7 @@ export function unwrittenLegend(s: AsmState, rows: readonly RegisterRow[]): stri
 /**
  * The registers a heap cell's or a box's back-reference names (spec §6.5): every register of `tag` whose word is the
  * cell's or box's own number. **EXACT FOR A COMPILED PROGRAM**, whose every list word was made by `cons` or `nil` and
- * copied since (5a's tag rules), so a `#57` in a *list* register is cell 57. A register past the frame's window is not
+ * copied since (spec §4.3), so a `#57` in a *list* register is cell 57. A register past the frame's window is not
  * here to name.
  */
 export function backRefs(s: AsmState, at: number, tag: WordTag): string[] {

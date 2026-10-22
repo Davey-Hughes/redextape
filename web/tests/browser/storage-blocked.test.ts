@@ -9,16 +9,15 @@ import { bodyBackground, inNormalMode, resultsText, SHELL, showFourViews, stateI
  * refuse storage the same way.
  *
  * **THERE, READING `window.localStorage` ITSELF THROWS**, before any `getItem` or `setItem` is reached. A
- * store whose METHODS throw is the case the app's guards were written against, and a `try` around
- * `store.getItem(...)` covers it. It does not cover the getter unless the getter is read inside the same
- * `try`: `editor-prefs.ts` took its store as a default parameter, `store: Storage = localStorage`, and a
- * default parameter is evaluated at the call, before the function body and its `try` begin. So `main()`
- * rejected at its first preference read and the page never started.
+ * `try` around `store.getItem(...)` covers a store whose METHODS throw. It does not cover the getter unless
+ * the getter is read inside the same `try`: a store taken as a default parameter,
+ * `store: Storage = localStorage`, is evaluated at the call, before the function body and its `try` begin,
+ * so `main()` would reject at its first preference read and the page would never start.
  *
  * **THE GETTERS ARE REPLACED AT MODULE SCOPE, BEFORE THE ONE MOUNT.** `setup.ts` installs this file's own
  * `Storage` as a plain value with `configurable: true`, which is what lets a getter take its place here.
- * `sessionStorage` throws too, as it does in the browser this imitates: nothing in the app reads it today,
- * and one that did would meet the same refusal.
+ * `sessionStorage` throws too, as it does in the browser this imitates: nothing in the app reads it, and one
+ * that did would meet the same refusal.
  *
  * **EVERY SETTING BELOW CHECKS THAT ITS CHOICE REACHED THE GETTER.** A control that stopped writing its
  * choice at all would pass "nothing threw" without ever meeting the refusal, so each of those cases asserts
@@ -132,8 +131,8 @@ describe('with site data blocked', () => {
   })
 
   /**
-   * **THE SETTINGS `main.ts` STORES ITSELF**, rather than through `editor-prefs.ts`. Their writers were
-   * already guarded; this holds them to it, since a gesture is as much the app as its start-up is.
+   * **THE SETTINGS `main.ts` STORES ITSELF**, rather than through `editor-prefs.ts`. Their writers are
+   * guarded; this holds them to it, since a gesture is as much the app as its start-up is.
    */
   it('lets the style and the appearance be changed, and the page wears them', async () => {
     await openSettings()
@@ -168,11 +167,11 @@ describe('with site data blocked', () => {
   })
 
   /**
-   * **THE REFUSAL IS STILL REPORTED WHERE IT ALWAYS WAS**, beside the program's. A copy is work, and `main.ts`'s
-   * buffers writer says so when its write fails; a getter that throws is a write that fails. The program the cases
-   * above edited is refused the same way (Plan 7 part 6a spec §4.3), and its own sentence is waited for before the
-   * copy is made: otherwise the copy's refusal can land first, inside the pause before the program's write, and be
-   * said alone. After it, the one sentence the copy adds is the two stores' together.
+   * **THE REFUSAL IS REPORTED BESIDE THE PROGRAM'S.** A copy is work, and `main.ts`'s buffers writer says so when
+   * its write fails; a getter that throws is a write that fails. The program the cases above edited is refused the
+   * same way (Plan 7 part 6a spec §4.3), and its own sentence is waited for before the copy is made: otherwise the
+   * copy's refusal can land first, inside the pause before the program's write, and be said alone. After it, the
+   * one sentence the copy adds is the two stores' together.
    *
    * **THE PROGRAM THE CASE ABOVE FORMATTED IS WAITED FOR TOO, BY ITS VALUE.** That case ends when the format
    * lands, with the compile it starts still to run, and a λ view offers no copy between a compile's reply and the

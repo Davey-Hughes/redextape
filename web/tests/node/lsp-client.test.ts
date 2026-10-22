@@ -69,7 +69,7 @@ describe('request correlation', () => {
     const h = harness()
     h.client.start()
     h.port().reply({ kind: 'ready' })
-    // A restarted worker can answer a request the previous instance was sent.
+    // An answer no request is waiting on has nothing to settle.
     expect(() => h.port().reply(OUT([{ jsonrpc: '2.0', id: 9999, result: null }]))).not.toThrow()
   })
 
@@ -86,10 +86,9 @@ describe('request correlation', () => {
 
 describe('the null-versus-empty normalisation', () => {
   /**
-   * **THE DEFECT THE DESIGN SHIPPED AND A TEST CAUGHT.** `Server::formatting` builds an
-   * `Option<Vec<TextEdit>>`, so a document that does not parse answers `"result": null`. The spec
-   * said the server produced an empty edit list. A client that mapped over the result would throw on
-   * the single most likely buffer: one being typed into.
+   * `Server::formatting` builds an `Option<Vec<TextEdit>>`, so a document that does not parse answers
+   * `"result": null`. A client that mapped over the result would throw on the single most likely
+   * buffer: one being typed into.
    */
   it('turns a null formatting result into no edits', async () => {
     const h = harness()
@@ -223,8 +222,7 @@ describe('documents', () => {
     expect(h.client.openDocumentCount).toBe(1)
     h.client.closeDocument('redextape:///view/v1.rxt')
     expect(h.client.openDocumentCount).toBe(0)
-    // Otherwise a restart would reopen it into the new worker after its view was gone, and publish
-    // diagnostics to a URI nothing routes.
+    // Otherwise a restart would reopen it into the new worker after its view was gone.
   })
 })
 
@@ -303,8 +301,9 @@ describe('events from a worker that is already dead', () => {
    * **A DEAD WORKER'S LISTENERS CANNOT BE REMOVED, AND `terminate()` CANNOT UNQUEUE EVENTS ALREADY
    * DISPATCHED.** A wasm panic in `handle` throws out of the worker's message handler, and the
    * client routinely has several messages in flight, so two `error` events from one worker is the
-   * ordinary shape of a panic rather than an exotic case. Before the port check this killed the
-   * replacement: `ports[1].terminated === true` and `available === false` after ONE death.
+   * ordinary shape of a panic rather than an exotic case. Without the port check in `start`'s
+   * listeners, the second would kill the replacement: `ports[1].terminated === true` and
+   * `available === false` after ONE death.
    */
   it('do not terminate the healthy replacement', () => {
     const h = harness()

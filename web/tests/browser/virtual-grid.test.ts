@@ -40,8 +40,8 @@ type Extra = Pick<GridOptions, 'enter' | 'afterDraw' | 'shrinks'> & { readonly f
 /**
  * A grid of `count` rows, each reading `row N`, in a box `height` pixels tall, attached to the page and drawn
  * once. `frame` starts at `0`, an arbitrary but fixed step — every test that does not change it draws the same
- * frame throughout, and the ones proving the hold's new rule (`virtual-grid.ts`'s `GridRows.frame`, amendment 21)
- * move it explicitly.
+ * frame throughout, and the ones proving the hold's rule (`virtual-grid.ts`'s `GridRows.frame`, Plan 7 part 5
+ * spec amendment 21) move it explicitly.
  */
 function make(count: number | null, height = 240, extra: Extra = {}): Made {
   const { fill, ...options } = extra
@@ -179,10 +179,10 @@ describe('a virtual grid', () => {
   })
 
   /**
-   * THE LINK'S ROW STAYS UNTIL THE RUN MOVES — AND "MOVES" MEANS A NEW FRAME, NOT A NEW FOLLOW ROW (amendment 21).
-   * The scroll's own event redraws the box, and a link that won only the draw that wrote it lost that redraw to
-   * following, a frame later: a link made while the grid followed never showed its rows. The event is awaited,
-   * so the assertions after it see what that redraw did.
+   * THE LINK'S ROW STAYS UNTIL THE RUN MOVES — AND "MOVES" MEANS A NEW FRAME, NOT A NEW FOLLOW ROW (Plan 7 part 5
+   * spec amendment 21). The scroll's own event redraws the box, and a link that won only the draw that wrote it
+   * would lose that redraw to following, a frame later: a link made while the grid followed would never show its
+   * rows. The event is awaited, so the assertions after it see what that redraw did.
    *
    * THE SELF-LOOP CASE IS WHY THE HOLD IS KEYED ON THE FRAME. The TM rule table's follow row is the current
    * state's own header, and a step that loops in its state — the ordinary case in a compiled machine — leaves that
@@ -237,9 +237,9 @@ describe('a virtual grid', () => {
 
   /**
    * A LINK MADE WHILE THE BOX IS OFF THE PAGE — every view Stage is not showing, which each link made in another view
-   * reaches. The box reports a height of 0 there, so the link's own draw can neither centre the row nor say which
-   * frame the view will show when it comes back; the first draw on the page does both. The frame does not change in
-   * between, as it does not for a run at rest, which is the case a hold keyed on the view's last frame outlived.
+   * reaches. The box reports a height of 0 there, so the link's own draw can neither centre the row nor say which frame
+   * the view will show when it comes back; the first draw on the page does both. The frame does not change in between,
+   * as it does not for a run at rest, which is the case a hold keyed on the view's last frame would outlive.
    */
   it('centres a link made off the page at the first draw on it, and holds it against the frame that draw shows', async () => {
     const made = make(1000)

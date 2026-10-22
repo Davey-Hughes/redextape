@@ -11,14 +11,13 @@ import { KEY_STEP, type ResizeHandlers, renderLayout, syncSizes } from '../../sr
  */
 
 /**
- * The tree every case here renders: source and λ side by side above TM, the shape `defaultLayout()` had
- * until the asm view joined it (Plan 7 part 5 spec §3, row 4).
+ * The tree every case here renders: source and λ side by side above TM.
  *
  * **THIS FILE'S OWN, NOT `defaultLayout()`, BECAUSE ITS SUBJECT IS THE MACHINERY AND NOT THE PRESET.** Every
  * case asks what `renderLayout` and `syncSizes` do with a tree — how many dividers, which path a nested one
  * answers to, which flex a resize moves — and the numbers below are facts about this particular nesting. Borrowed
- * from the preset, they changed meaning the day the preset gained a leaf, with nothing about the machinery
- * having moved. The preset itself is `first-load-views.test.ts`'s to check, through the app.
+ * from the preset, they would change meaning whenever the preset changed, with nothing about the machinery having
+ * moved. The preset itself is `first-load-views.test.ts`'s to check, through the app.
  */
 const tree = (): LayoutNode => ({
   kind: 'split',
@@ -164,14 +163,12 @@ describe('renderLayout', () => {
 
     // The real caller re-renders once per gesture's COMMIT, not once per FRAME — a drag's `pointerup`, a
     // keyboard gesture's `keyup`/`blur`, and every structural change (split, close, reset preset) all end
-    // in `pane-host.ts`'s `applyLayout`, which calls `renderLayout` unconditionally from its `finally`
-    // block on every call. That is what destroys `before` and rebuilds it as a new node with the same
-    // path/index. A resize no longer re-renders on each FRAME (`syncSizes` moves the elements already
-    // there, cheaply), but its own commit still rebuilds the tree exactly like a structural change does —
-    // so the key press below, with no matching `commit`, is standing in for that commit-time rebuild
-    // rather than for something only a structural change causes. The rescue this test pins is unchanged;
-    // what changed is how often a resize reaches it — once per gesture instead of once per frame — not
-    // whether it does.
+    // in `pane-host.ts`'s `applyLayout`, whose `finally` block calls `renderLayout` on every call while
+    // the views are tiles (a stage, which has no dividers, gets `renderStage`). That is what destroys
+    // `before` and rebuilds it as a new node with the same path/index. A resize does not re-render on
+    // each FRAME (`syncSizes` moves the elements already there, cheaply), but its own commit rebuilds the
+    // tree exactly like a structural change does — so the key press below, with no matching `commit`, is
+    // standing in for that commit-time rebuild rather than for something only a structural change causes.
     before.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowRight', bubbles: true }))
     renderLayout(root, tree(), hosts, inert())
 
@@ -264,7 +261,8 @@ describe('syncSizes', () => {
     if (divider === null) throw new Error('no vertical divider')
     // Strip the class that marks this element as a divider WITHOUT touching child count, so the
     // "no element for child i" check earlier in `syncNode` still passes and this is the one throw arm
-    // that fires — the sibling-count mismatch test above exercises the other arm instead.
+    // that fires — the sibling-count mismatch test above reaches this same throw where the position
+    // after a child holds no element at all; here it holds one that is not a divider.
     divider.classList.remove('layout-divider')
 
     expect(() => syncSizes(root, tree())).toThrow(/no divider after child/)

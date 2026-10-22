@@ -22,13 +22,12 @@ import {
  * an index read there names whatever the copy has at it. Both routes a pin takes to a machine view are here, on both
  * legs: `link-wiring.ts`'s fan-out to every view, made while the copy's view is on the page, and `draw.ts`'s re-applied
  * pin, for a view seeded when it is shown after its copy rebuilt off the page. So is the program's running focus,
- * which resolves to the same indices and which `draw.ts` hands every machine view on the page, a copy's among them,
- * while a view of the program beside it is the one the user last focused.
+ * which resolves to the same indices, while a view of the program beside it is the one the user last focused.
  *
  * Every pointer gesture is a `userEvent` one, and the pin is `Mod-'` pressed through `userEvent.keyboard` in the
  * source, with the caret put on the construct first.
  *
- * ONE MOUNT FOR THE FILE, for the reason every sibling gives: `main()` runs once per page.
+ * ONE MOUNT FOR THE FILE, for the reason `app.test.ts` gives: `main()` runs once per page.
  */
 
 const SAMPLE = 'let x = 40; x + 2'

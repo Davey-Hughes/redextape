@@ -2,19 +2,14 @@ import { beforeEach, describe, expect, it } from 'vitest'
 import { bannerText, showBanner } from '../../src/banner'
 
 /**
- * **THE SURFACE NOBODY HAS EVER SEEN RENDER.**
- *
  * `showBanner` is the app's answer to *"redextape did not start"* — the wasm module never loaded, or the
- * worker's module never did. `main.ts` calls it in exactly one place, inside the `try` around `init()`,
- * and then re-throws. Everything under `<main>` is gone at that point: no editor, no panes, no results.
- * The banner is the whole of what the user gets.
+ * worker's module never did. `main.ts` calls it from the `try` around `init()`, which then re-throws, and
+ * from the worker's `error` listener, both times with `#views` as `host`, so every view is replaced: no
+ * editor, no panes. The banner is all `#views` holds; the header bar stands, with its appearance toggle
+ * wired before `init()` and still live (`main.ts`).
  *
- * **AND IT HAD NO TEST AT ALL, WHICH THE COVERAGE REPORT SAID AND THE FILE LIST DISGUISED.**
- * `tests/node/banner.test.ts` covers `bannerText` — the WORDING — and `banner.ts` splits the two
- * precisely so the wording is node-testable. That left the DOM write uncovered. `app.test.ts` mentions
- * `showBanner` twice and both times to assert it did NOT fire (a `worker-error` must not tear the page
- * down), so a `grep` for the name finds two files and neither executes it. Six statements and one
- * function, on the path where a failure means the user is looking at a page with nothing on it.
+ * `tests/node/banner.test.ts` covers `bannerText` — the WORDING — and `banner.ts` splits it from
+ * `showBanner`'s DOM write precisely so the wording is node-testable.
  *
  * **THE POINT OF TESTING IT IN A BROWSER IS THAT IT IS VISIBLE**, which is the one claim a node tier
  * cannot make and the one the blank-page failure is about. `tests/browser/setup.ts` loads the app's own
@@ -33,10 +28,9 @@ beforeEach(() => {
 
 describe('showBanner', () => {
   /**
-   * THE REPLACEMENT IS THE BEHAVIOUR, not the appending. `banner.ts`'s own doc: "nothing under `<main>`
-   * — not the editor, not either pane — was ever wired up, so replacing all of it is the only honest
-   * answer". A version that appended would leave the half-built page underneath the explanation, which
-   * is the state `showWorkerError` exists to keep this one away from.
+   * THE REPLACEMENT IS THE BEHAVIOUR, not the appending, for the reason `banner.ts`'s own doc gives. A
+   * version that appended would leave the half-built page underneath the explanation, which is the state
+   * `showWorkerError` exists to keep this one away from.
    */
   it('replaces everything under the host with one banner', () => {
     host.append(document.createElement('section'), document.createElement('div'))
@@ -80,8 +74,9 @@ describe('showBanner', () => {
 
   /**
    * A THROWN NON-`Error`, which is not a hypothetical here: `init()` rejects with whatever the wasm
-   * glue threw, and `main.ts`'s worker `error` listener hands over an `ErrorEvent`. `bannerText` already
-   * answers both; this asserts the DOM write does not depend on the shape either.
+   * glue threw, and `main.ts`'s worker `error` listener can hand over an `ErrorEvent`'s `message`, a
+   * string. `bannerText` already answers both; this asserts the DOM write does not depend on the
+   * shape either.
    */
   it('renders for a thrown non-Error too', () => {
     showBanner(host, 'boom')

@@ -95,8 +95,8 @@ export function highlight(index: StateIndex, frame: TmState | null): { stateRow:
  *
  * A SET RATHER THAN A RANGE, because a node's state block is not contiguous — `node_to_tm` collects
  * whichever states a lowering emitted for one construct, and a lowering interleaves constructs. The
- * set is built once per link, not per draw: `list60` is 35,715 states, so a per-row scan over the
- * block would be O(visible x block) on every scroll.
+ * set is built once per link, not per draw: a per-row scan over the block would be O(visible x block)
+ * on every scroll.
  *
  * A STATE ID PAST THE END CONTRIBUTES NOTHING rather than a clamped row. `StateIndex.rowOfState`
  * clamps to 0, which would silently light the first state — the same no-fallback rule `tm_owner`
@@ -119,22 +119,21 @@ export function linkedRows(index: StateIndex, states: number[]): Set<number> {
 }
 
 /**
- * Which rows the RUNNING FOCUS marks: the state HEADER of each state in `states`, and none of its
- * rules.
+ * Which rows the RUNNING FOCUS marks: the state HEADER of each state in `states`, and none of
+ * its rules.
  *
  * HEADERS ONLY, UNLIKE `linkedRows`'S FULL BLOCK — this is the one place the two diverge. The pin is a
  * click, a deliberate "look here" that earns the full block, rules included, because a user asked to
- * inspect it. The running focus moves every δ-step instead — `player.ts`'s `createPlayer` repaints on every
- * animation frame while a leg plays — and repainting dozens of rule rows on every frame is a flicker nobody
- * asked for. The header
- * alone answers "which construct is the machine working on right now" without competing for attention
- * with `highlight()`'s `is-current`/`is-next`, which already marks the single row the machine is
- * literally sitting on.
+ * inspect it. The running focus moves every δ-step instead — `player.ts`'s `createPlayer` repaints on
+ * every animation frame while a leg plays — and repainting dozens of rule rows on every frame is a
+ * flicker nobody asked for. The header alone answers "which construct is the machine working on right
+ * now" without competing for attention with `highlight()`'s `is-current`/`is-next`, which already
+ * marks the single row the machine is literally sitting on.
  *
- * EMPTY IS THE COMMON CASE, NOT AN EDGE ONE. Measured, the TM leg's coverage runs 50-82% of
- * source-mapped nodes — see `link-status.ts`'s own doc on the absence being routine — so a focus naming
- * a node with no TM block arrives here as `states: []`, and an empty `Set` is the unremarkable, correct
- * answer for it, exactly as `linkedRows` already gives the pin.
+ * EMPTY IS THE COMMON CASE, NOT AN EDGE ONE. A construct with no TM block is routine, not rare
+ * (`link-status.ts`'s doc gives the share across the demo corpus), so a focus naming a node with no TM
+ * block arrives here as `states: []`, and an empty `Set` is the unremarkable, correct answer for it,
+ * exactly as `linkedRows` already gives the pin.
  */
 export function focusedRows(index: StateIndex, states: number[]): Set<number> {
   const out = new Set<number>()
@@ -153,14 +152,14 @@ export const ROW_HEIGHT = 24
  * Where to scroll so `row`'s MIDDLE sits at the viewport's middle, clamped into the document.
  *
  * PURE ARITHMETIC, DELIBERATELY PULLED OUT OF `Follow`. `TmPane.setLink`'s link-driven scroll wants the
- * exact same centring `Follow.targetScrollTop` computes for its own following-driven scroll — the two
- * already drifted once, when `setLink`'s copy was written without the `+ Math.floor(rowHeight / 2)` term
- * this has, and centred a row's TOP edge where this centres its MIDDLE. Sharing the formula is what
- * keeps a link scroll and a follow scroll agreeing on what "centred" means.
+ * exact same centring `Follow.targetScrollTop` computes for its own following-driven scroll, and two
+ * copies of the formula can drift: one written without the `+ Math.floor(rowHeight / 2)` term this has
+ * centres a row's TOP edge where this centres its MIDDLE. Sharing the formula is what keeps a link
+ * scroll and a follow scroll agreeing on what "centred" means.
  *
  * NOT `Follow.targetScrollTop` ITSELF, because that also asks whether the table is following, and
  * `setLink`'s scroll must NOT consult that — see its own doc for why a link click scrolls regardless of
- * `Follow`'s state. `targetScrollTop` below is now a thin following-gated wrapper around this.
+ * `Follow`'s state. `targetScrollTop` below is a thin following-gated wrapper around this.
  */
 export function centredScrollTop(row: number, rowHeight: number, viewportHeight: number, totalHeight: number): number {
   const centred = row * rowHeight - Math.floor(viewportHeight / 2) + Math.floor(rowHeight / 2)
@@ -179,9 +178,7 @@ const ECHO_TOLERANCE = ROW_HEIGHT / 2
  * Whether the table tracks the machine, and where it should scroll to when it does.
  *
  * THE MODEL IS `history.ts`'s `#following`, deliberately — the table and the play head are the same
- * idea about the same run, and a second idiom for it would be a second set of bugs. 5a-i's reviews
- * found both of that field's: a clamped movement that left the flag set, and an unguarded clear that
- * detached against an empty pane.
+ * idea about the same run, and a second idiom for it would be a second set of bugs.
  *
  * THE TRAP HERE IS DIFFERENT AND IS THIS FILE'S OWN. Following writes `scrollTop`, the browser fires a
  * `scroll` event for that write, and a handler that treats every event as user intent detaches on the
@@ -194,7 +191,7 @@ const ECHO_TOLERANCE = ROW_HEIGHT / 2
  * class exists to prevent, reintroduced one layer down. Instead `#expected` is superseded only by the
  * next `onProgrammaticScroll` (a new write in flight) or by a scroll outside the tolerance (a real
  * detach). The deliberate consequence: a user scroll landing within the tolerance of the last
- * requested position no longer detaches either, while still following. That is a sub-half-row
+ * requested position does not detach either, while still following. That is a sub-half-row
  * movement — indistinguishable in size from an echo — and treating it as "they barely moved" rather
  * than "they took control" is the considered trade-off, not an oversight.
  */
@@ -239,9 +236,8 @@ export class Follow {
   /**
    * The box was resized, and `top` is where its scroll stands now. **A POSITION THAT MOVED SINCE THE LAST EVENT OR
    * WRITE WAS THE BROWSER CLAMPING IT** — a box that grew past its content can no longer scroll as far — and the
-   * clamp's `scroll` event, which comes later, must not read as the user taking control. Plan 7 part 4b's state
-   * diagram detached exactly so when a panel beside it closed: it grew, its scroll was clamped from 280 to 0, and
-   * following stopped. A position that did not move leaves everything as it was.
+   * clamp's `scroll` event, which comes later, must not read as the user taking control. A position that did not
+   * move leaves everything as it was.
    */
   onResize(top: number): void {
     if (this.#seen !== null && top !== this.#seen) this.#expected = top
@@ -271,19 +267,18 @@ export function ownScroll(box: Element, follow: Follow): void {
  * does for every scroller in a view after a rebuild of the layout. A box no `Follow` owns is only written.
  *
  * **A WRITE FROM OUTSIDE IS A PROGRAMMATIC SCROLL LIKE THE BOX'S OWN, AND `Follow` MUST HEAR OF IT BEFORE ITS EVENT.**
- * The write is reported as a `scroll` at the next rendering update. Unannounced, it read as the user taking control:
- * a following box whose view left the page and came back — a Stage tab left and selected again, a view toggled off
- * and on — had stopped following, with its control to follow again offered and nobody having scrolled.
+ * The write is reported as a `scroll` at the next rendering update. Unannounced, it would read as the user taking
+ * control: a following box whose view left the page and came back — a Stage tab left and selected again, a view
+ * toggled off and on — would stop following, with its control to follow again offered and nobody having scrolled.
  *
  * **TOLD HERE, NOT LEFT TO THE DRAW THAT FOLLOWS THE REBUILD.** That draw writes, and so announces, only when
  * following has a row to centre and the box is not on it. A box following a run with no row this frame is written
- * by nothing but this: the state diagram on a run's last step, in `halt`, came back with its control offered when
- * only the draw announced.
+ * by nothing but this: the state diagram on a run's last step, in `halt`, would come back with its control offered
+ * if only the draw announced.
  *
  * **AND TOLD AGAIN WHERE THE BROWSER CLAMPED THE WRITE.** A view can come back at another size, in another
- * combination of views, and a box that grew cannot scroll as far as it had. Measured on a state diagram with no row
- * to centre, at 480 px in a box of 120: back in a box of 168 it landed on 432, 48 px from what `Follow` had been told,
- * and its `scroll` read as the user's. Reading `scrollTop` back forces the layout that clamps.
+ * combination of views, and a box that grew cannot scroll as far as it had: it lands short of what `Follow` was
+ * told, and its `scroll` would read as the user's. Reading `scrollTop` back forces the layout that clamps.
  *
  * `Follow`'s flag is not touched: a box the user scrolled comes back where they left it, still not following.
  */

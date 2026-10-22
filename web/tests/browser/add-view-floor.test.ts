@@ -29,7 +29,7 @@ import { plusView } from './user-event-fixture'
  * axis it divides. The Stage holds only the leaf bound: a view added there is a tab, and nothing on screen shrinks.
  *
  * Every gesture is real input (`userEvent`): the property is about what a click does. ONE MOUNT FOR THE FILE, for the
- * reason every sibling gives; it opens on a stored layout of 64 views for the cap's case, and each later case starts
+ * reason `app.test.ts` gives; it opens on a stored layout of 64 views for the cap's case, and each later case starts
  * by setting 1280×800, choosing its preset and pressing *reset preset* (`resetPreset`), so none depends on the views,
  * the preset or the window the case before it left — a case that fails half way through included.
  */
@@ -121,18 +121,18 @@ async function resetPreset(p: 'explorer' | 'stage' = 'explorer'): Promise<void> 
   await until(() => noticeText().endsWith('reset — the default views are back'), 'the reset')
   // THE RESET'S OWN FOCUS, READ BEFORE THE FIXTURE MOVES IT: the first view of the tree it builds, the TM view.
   expect(focused()).toBe('tm-0')
-  // ALL FOUR VIEWS, WHICH THE RESET GAVE WHEN THESE CASES WERE WRITTEN: it leaves the source beside the TM view now.
+  // ALL FOUR VIEWS: the reset leaves the source beside the TM view.
   await showFourViews()
   expect(tabLeaves().length > 0 ? tabLeaves() : ids()).toEqual(['source', 'lambda-0', 'asm-0', 'tm-0'])
-  // WHERE `showFourViews` PUTS THE FOCUS, AND WHERE EACH CASE'S `+ view` ADDS: the cases' start, and no longer the
-  // reset's doing, which the line above the fixture holds.
+  // WHERE `showFourViews` PUTS THE FOCUS, AND WHERE EACH CASE'S `+ view` ADDS: the cases' start.
   expect(focused()).toBe('lambda-0')
 }
 
 /**
  * Move the top row's divider, between source and λ, `n` key steps with real keys: `ArrowRight` grows source, and
- * `ArrowLeft` grows λ. **FOCUSED BY SCRIPT**: a real click on a divider left the focus on `<body>` (measured; the click
- * is a drag's `pointerdown`, which calls `preventDefault`), and the keys are the gesture these cases need.
+ * `ArrowLeft` grows λ. **FOCUSED BY SCRIPT**: a real click on a divider does not focus it (the click is a drag's
+ * `pointerdown`, which calls `preventDefault`, so the focus stays where it was), and the keys are the gesture
+ * these cases need.
  */
 async function dragTopDivider(key: 'ArrowRight' | 'ArrowLeft', n: number): Promise<void> {
   const divider = document.querySelector<HTMLElement>(
@@ -324,9 +324,9 @@ describe('+ view and the splits, at 1280×800', () => {
   })
 
   /**
-   * **A VIEW THE ADD SHRINKS COUNTS, NOT ONLY THE ONE IT MAKES** (the user's decision 2). λ is dragged by keyboard to
-   * 0.14 of its row, 177.52 px; `+ view` beside it would give the new view 418.67 px and take λ to 117.23, so it is
-   * refused for λ's sake.
+   * **A VIEW THE ADD SHRINKS COUNTS, NOT ONLY THE ONE IT MAKES.** λ is dragged by keyboard to 0.14 of its row,
+   * 177.52 px; `+ view` beside it would give the new view 418.67 px and take λ to 117.23, so it is refused
+   * for λ's sake.
    */
   it('refuses + view where the new view has room but the view beside it would go under 160 px', async () => {
     await resetPreset()
@@ -361,9 +361,9 @@ describe('+ view and the splits, at 1280×800', () => {
   })
 
   /**
-   * **A SPLIT DOWN IS HELD TO WIDTH TOO** (the user's decision 2, the re-review's finding): it makes a view as narrow
-   * as the one it halves. λ is dragged to 0.12 of its row, 152.16 px; its halves would be about 165 px tall, which
-   * passes the height floor, and 152.16 wide, which does not — so it is refused in the width's words.
+   * **A SPLIT DOWN IS HELD TO WIDTH TOO**: it makes a view as narrow as the one it halves. λ is dragged to 0.12 of
+   * its row, 152.16 px; its halves would be about 165 px tall, which passes the height floor, and 152.16 wide, which
+   * does not — so it is refused in the width's words.
    */
   it("refuses split down of a view already narrower than 160 px, in the width's words", async () => {
     await resetPreset()

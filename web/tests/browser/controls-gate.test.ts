@@ -18,35 +18,27 @@ import { base16Dialog, SHELL, stateIdle, until } from './harness'
  * The accessible name, computed the way a browser computes it — `dom-accessibility-api` is the
  * accname spec as a function, and it is a dev dependency of `web/` for this gate.
  *
- * **NOT AN APPROXIMATION OF MY OWN, AND THE FIRST ONE HERE IS WHY.** This read `aria-label`, then a
- * wrapping `<label>`, then `textContent`, then `title` — which passes two things a reader would
- * actually hear as wrong, because it compares text content with itself: an appearance toggle whose
- * name was `◐system` (the glyph is a text node beside the word), and a menu item whose name ran two
- * spans together as `edit a copythe whole machine`. Both were in the tree when this gate first went
- * green (the pre-flight build's finding 12.2). A name computed independently of the visible-label
- * check below is what makes the comparison a check rather than a tautology.
+ * **NOT AN APPROXIMATION OF MY OWN.** One that read `aria-label`, then a wrapping `<label>`, then
+ * `textContent`, then `title` would pass two things a reader would actually hear as wrong, because it
+ * compares text content with itself: an appearance toggle named `◐system` (the glyph a text node beside
+ * the word), and a menu item whose name runs two spans together as `edit a copythe whole machine`. A
+ * name computed independently of the visible-label check below is what makes the comparison a check
+ * rather than a tautology.
  */
 function nameOf(el: HTMLElement): string {
   return computeAccessibleName(el).trim()
 }
 
 /**
- * What a sighted user reads on the control: its text, minus anything hidden from assistive technology.
- * `aria-hidden` subtrees are decoration by declaration — the `◐` glyph, every `icons.ts` SVG — so text
- * inside one is not a label the name has to match.
- */
-/**
  * What a sighted user reads beside a form control — a `<select>`, an `<input>` or a `<textarea>`: the text of the
  * `<label>` wrapping it, if any, with the control itself left out (Plan 7 part 6b spec §10). A select's options
  * and a text area's text are the control's value, not its label.
  *
- * **WITHOUT THIS THE CHECK WAS A TAUTOLOGY.** It read the select's accessible NAME as its visible label
- * too, so `expect([visible, title]).toContain(name)` compared a value with itself and an `aria-label`
- * disagreeing with the words printed next to the control could not fail.
+ * **WITHOUT THIS THE CHECK WOULD BE A TAUTOLOGY.** Reading the select's accessible NAME as its visible
+ * label too, `expect([visible, title]).toContain(name)` would compare a value with itself, and an
+ * `aria-label` disagreeing with the words printed next to the control could not fail.
  *
- * **EVERY SELECT BUT SPEED IS WRAPPED IN A LABEL, AND THIS PARAGRAPH HAS ALREADY BEEN WRONG TWICE FOR
- * SAYING OTHERWISE — whole-branch review M6, and again when Plan 7 part 3b task 6 added a sixth select
- * without updating the count this comment named.** `encoding`, `style`, `palette`, `appearance` and
+ * **EVERY SELECT BUT SPEED IS WRAPPED IN A LABEL.** `encoding`, `style`, `palette`, `appearance` and
  * `keymap` are wrapped, and the label is where each one's name comes from when nothing overrides it, so
  * for those five the comparison is between two different sources again. `step-controls.ts`'s SPEED
  * select carries an `aria-label` and no wrapping label at all; it falls through to the `el.title` branch
@@ -68,6 +60,11 @@ function selectLabel(el: HTMLElement): string {
   return (copy.textContent ?? '').replace(/\s+/g, ' ').trim()
 }
 
+/**
+ * What a sighted user reads on the control: its text, minus anything hidden from assistive technology.
+ * `aria-hidden` subtrees are decoration by declaration — the `◐` glyph, every `icons.ts` SVG — so text
+ * inside one is not a label the name has to match.
+ */
 function visibleLabel(el: HTMLElement): string {
   const copy = el.cloneNode(true) as HTMLElement
   for (const hidden of copy.querySelectorAll('[aria-hidden="true"]')) hidden.remove()
@@ -103,9 +100,9 @@ const isGlyph = (s: string) => !/[\p{L}\p{N}]/u.test(s)
  * green run here says no SYMBOL reached a name. It says nothing about punctuation, and widening the
  * class to catch `·` would fail on names the design asked for rather than on a defect.
  *
- * **`=` IS THE SECOND EXCEPTION, AND IT IS PROGRAM TEXT (Plan 7 part 6a).** An example in `examples ▾` is named by its
- * title, and one title is the program `let x = 40; x + 2`: its `=` is not a glyph standing in for a word but the
- * program's own operator, which a reader says as "equals", as they say its `+`.
+ * **`=` IS THE SECOND EXCEPTION, AND IT IS PROGRAM TEXT (Plan 7 part 6a spec §6).** An example in `examples ▾`
+ * is named by its title, and one title is the program `let x = 40; x + 2`: its `=` is not a glyph standing in for
+ * a word but the program's own operator, which a reader says as "equals", as they say its `+`.
  */
 const straySymbol = (s: string) => /[\p{So}\p{Sm}]/u.test(s.replaceAll('+', '').replaceAll('=', ''))
 
@@ -119,10 +116,9 @@ const straySymbol = (s: string) => /[\p{So}\p{Sm}]/u.test(s.replaceAll('+', '').
  *
  * **`closest('[hidden]')`, NOT `el.hidden` — the difference is a whole panel.** A collapsed or unmounted
  * panel hides its own element (`pane-chrome.ts`'s `textPanel` hides the panel until an editor is
- * mounted), and its toggle inside it reads `hidden === false` while being unreachable and unseen. The
- * first version of this filter asked the button, passed it, and then passed it again on a `tabIndex`
- * that reads 0 inside a hidden subtree; asking whether anything above it is hidden is what makes the
- * reachability check below mean what it says.
+ * mounted), and its toggle inside it reads `hidden === false` while being unreachable and unseen. A
+ * filter that asked the button would pass it; asking whether anything above it is hidden is what makes
+ * the reachability check below mean what it says.
  */
 function controls(): HTMLElement[] {
   const scope: ParentNode = document.querySelector('dialog:modal') ?? document
@@ -155,17 +151,16 @@ function check(where: string): HTMLElement[] {
     if (el.matches(':disabled')) {
       // **A DISABLED CONTROL IS UNREACHABLE ON PURPOSE, SO IT IS NOT HELD TO REACHABILITY.** The
       // transport buttons are disabled whenever their leg has no history to walk, which is the project's
-      // own rule and predates this part; *edit a copy* over `MAX_FORK_RULES` is the one the umbrella's
-      // rule 4 is about, and `view-menu.test.ts` pins that it states its reason. What this gate still
-      // holds a disabled control to is its NAME, asserted above — a control a reader cannot act on is
-      // still a control they will hear.
+      // own rule; *edit a copy* over `MAX_FORK_RULES` is the one the umbrella's rule 4 is about, and
+      // `view-menu.test.ts` pins that it states its reason. What this gate still holds a disabled
+      // control to is its NAME, asserted above — a control a reader cannot act on is still a control
+      // they will hear.
     } else if (el.tabIndex === -1 && el.closest('[role="row"]') !== null) {
       // **A CONTROL OUT OF THE TAB ORDER IN A GRID'S ROW IS NEVER FOCUSED BY A USER, SO IT IS HELD TO ITS NAME
       // ALONE.** The grid is its level's one tab stop, a mousedown on its rows is cancelled (`VirtualGrid`), and
       // the row's Enter does what the control does: the TM view's *show states* (`state-diagram.ts`). Focusing
-      // one here redraws its rows: after `focus()`, with or without `preventScroll`, it was no longer in the
-      // document and the focus was on `<body>` (2026-10-08). This gate first met one when a run began opening on
-      // step 0, whose group has a *show states* row.
+      // one here redraws its rows, which takes it out of the document, with or without `preventScroll`, and
+      // leaves the focus on `<body>`. A run opens on step 0, whose group has a *show states* row.
     } else {
       el.focus()
       expect(document.activeElement, `${id} cannot take the focus`).toBe(el)
@@ -215,10 +210,9 @@ function enter(picks: readonly string[]): void {
  * The leaves a per-view case can be driven from in this state: tiled, every view on the page but the source's; in the
  * stage, the one it shows.
  *
- * **READ OFF THE PAGE, NOT LISTED.** This was `['lambda-0', 'tm-0']`, and when the asm view joined the default tree
- * (Plan 7 part 5) the gate stayed green while walking none of its controls — a list of the views there were is a
- * list that misses the next one. Every view host is a `.pane` with its leaf id; the source's is the one leaf with no
- * title menu to open.
+ * **READ OFF THE PAGE, NOT LISTED**: a list of the views there were is a list that misses the next one, and the gate
+ * would stay green while walking none of its controls. Every view host is a `.pane` with its leaf id; the source's is
+ * the one leaf with no title menu to open.
  */
 function viewLeaves(tiled: boolean): string[] {
   if (tiled) {
@@ -238,11 +232,9 @@ describe.each(STATES)('every control in $name', ({ name, picks, tiled }) => {
 
   /**
    * **EVERY HEADER MENU, READ OFF THE PAGE RATHER THAN LISTED** — `viewLeaves`' reason: a list of the menus there were
-   * is a list that misses the next one. This was `#workspace`, `#new-view`, `#buffers` and `#settings`, and
-   * `examples ▾` joined the header without joining it (Plan 7 part 6a spec §6). Every header menu there is now is
-   * asserted among the ones walked, so the loop cannot pass by walking fewer — and `share`'s popover since part 6a's
-   * second half, a disclosure and not a menu, but opened as one is by a header button naming it in `aria-controls`,
-   * and holding a field the walk reads by its label.
+   * is a list that misses the next one. Every header menu is asserted among the ones walked, the about menu by its
+   * link below, so the loop cannot pass by walking fewer — and `share`'s popover, a disclosure and not a menu, but
+   * opened as one is by a header button naming it in `aria-controls`, and holding a field the walk reads by its label.
    */
   it('with each header menu open', () => {
     const openers = [...document.querySelectorAll<HTMLButtonElement>('header.bar button[aria-controls]')]
@@ -258,11 +250,11 @@ describe.each(STATES)('every control in $name', ({ name, picks, tiled }) => {
       walked.push(...check(`${name}: #${button.id}`).map((el) => el.id))
       if (menu?.matches(':popover-open')) menu.hidePopover()
     }
-    // A FORM CONTROL THAT IS NOT A SELECT IS WALKED: the settings menu's checkbox, which `button, select` never reached,
-    // and the share popover's field.
+    // A FORM CONTROL THAT IS NOT A SELECT IS WALKED: the settings menu's checkbox, which `button, select` alone would
+    // not reach, and the share popover's field.
     expect(walked).toContain('format-on-blur')
     expect(walked).toContain('share-link')
-    // A LINK IS WALKED: the about menu's, which `button, select, input, textarea` never reached.
+    // A LINK IS WALKED: the about menu's, which `button, select, input, textarea` alone would not reach.
     expect(walked).toContain('about-source')
   })
 
@@ -312,8 +304,8 @@ describe.each(STATES)('every control in $name', ({ name, picks, tiled }) => {
       const split = document.querySelector<HTMLButtonElement>(`[data-leaf="${leaf}"] button.view-split[data-dir="row"]`)
       if (!tiled) {
         expect(split, `${name}: the stage must offer no split`).toBeNull()
-        // AND THE MENU IS STILL WALKED: two of the four states reach this branch, and without this they
-        // contributed one negative assertion and no control-name coverage at all.
+        // AND THE MENU IS STILL WALKED: two of the four states reach this branch, and without this they would
+        // contribute one negative assertion and no control-name coverage at all.
         check(`${name}: ${leaf}'s ⋯ menu on the stage`)
       } else {
         expect(split, `${name}: ${leaf} offers no split`).not.toBeNull()
@@ -336,12 +328,11 @@ describe.each(STATES)('every control in $name', ({ name, picks, tiled }) => {
  */
 describe('every control in Explorer, with the copies menu in each of its states', () => {
   /**
-   * **A NOTICE'S ACTION BUTTON IS A CONTROL AND NEVER REACHED THIS GATE — whole-branch review, M8.**
-   * Every other case here runs against a page whose notices carry no action, so `notice.ts`'s
-   * `button.notice-action` — the *undo* a delete offers, the one control in the app that appears only
-   * for eight seconds — was never name-checked or focus-checked. A delete puts one on screen; the
-   * copies menu is left open afterwards by `handleDelete`, which is its own rule (§11) and means this
-   * pass also sees a copies menu with one row fewer.
+   * **A NOTICE'S ACTION BUTTON IS A CONTROL, AND ONLY THIS CASE REACHES IT.** Every other case here runs against
+   * a page whose notices carry no action, so `notice.ts`'s `button.notice-action` — here the *undo* a delete
+   * offers, a control on the page only while its notice lasts — is name-checked and focus-checked here alone. A
+   * delete puts one on screen; the copies menu is left open afterwards by `handleDelete`, which is its own rule
+   * (Plan 7 part 2 spec §11) and means this pass also sees a copies menu with one row fewer.
    */
   it('on the page as it stands, with a notice offering undo', () => {
     document.querySelector<HTMLButtonElement>('#buffers')?.click()
@@ -388,7 +379,7 @@ describe('every control in Explorer, in the settings menu and the import dialog'
     base16Dialog().querySelector<HTMLButtonElement>('button.base16-check')?.click()
   }
 
-  // THE CHECKBOX THE GATE NEVER WALKED BEFORE IT TOOK INPUTS: `format on blur`, named by the label around it.
+  // THE SETTINGS MENU'S CHECKBOX IS AMONG WHAT THE WALK HOLDS: `format on blur`, named by the label around it.
   it("walks the settings menu's checkbox", () => {
     document.querySelector<HTMLButtonElement>('#settings')?.click()
     const box = document.querySelector<HTMLInputElement>('#format-on-blur') as HTMLInputElement
@@ -454,12 +445,6 @@ describe('every control in Explorer, in the settings menu and the import dialog'
 })
 
 /**
- * **WHAT THE WALK LEAVES OUT, HELD WHERE THE PAGE CANNOT SHOW IT** — Plan 7 part 6a spec §6. The app has no hidden
- * input, so nothing on it can say whether `controls()` skips one. One is put on the page for the case and taken off
- * after it. A closed dialog's controls need no case of their own: the import dialog is on the page, closed, for every
- * walk above but its own.
- */
-/**
  * THE `views` TOGGLES, WHICH THE WALKS ABOVE NEVER MEET (the view layouts spec §6): this file runs in the runner's
  * 414 px window, and `main.ts` hides the toggles in a window 40rem wide or narrower. So the window is widened for
  * this one group, and **THE TOGGLES ARE ASSERTED TO BE AMONG WHAT WAS WALKED**, since a walk that skipped them would
@@ -492,6 +477,12 @@ describe('every control in Explorer, in a window wide enough for the views toggl
   })
 })
 
+/**
+ * **WHAT THE WALK LEAVES OUT, HELD WHERE THE PAGE CANNOT SHOW IT** — Plan 7 part 6a spec §6. The app has no hidden
+ * input, so nothing on it can say whether `controls()` skips one. One is put on the page for the case and taken off
+ * after it. A closed dialog's controls need no case of their own: the import dialog is on the page, closed, for every
+ * walk above but its own.
+ */
 describe('the walk itself', () => {
   it('skips a hidden input', () => {
     const hidden = document.createElement('input')

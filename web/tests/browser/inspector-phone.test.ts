@@ -10,15 +10,14 @@ import { hosts, inspector, noticeText, queryEl, SHELL, stepBar, until, views, wo
  * breakpoint, 480 px and under, while the inspector is on the page, `main` is a column: the views full width on top,
  * the inspector full width under them, one 1 px rule between them, its header's. An open inspector is at most 40% of
  * `main`'s height and its rows scroll inside it; a closed one is its header line. `main` is at least 15rem tall:
- * above that the page grows neither taller nor wider, and below it the page scrolls, as it did side by side. Side by
- * side, the inspector kept 288 px at every width, so at 390 px in Debugger `#views` was 102 px and each default view 45
- * px wide, and on the Stage the tab strip was 102 px.
+ * above that the page grows neither taller nor wider, and below it the page scrolls. Side by side, the inspector
+ * keeps 288 px at every width, so at 390 px in Debugger `#views` would be 102 px wide.
  *
- * **WHERE IT DOES NOT STACK NOTHING MOVES**: every box is held to what `53ecbfa` drew, measured there before the change
- * — in Debugger and on the Stage, open and closed, at 1280×800 and 481×800; and, at a phone's width, in Explorer and on
- * the Stage with the strip readout, the two layouts with no inspector, at 390×844, 320×568, 320×400 and 320×320.
+ * **WHERE IT DOES NOT STACK NOTHING MOVES**: every box is held to what `53ecbfa` drew — in Debugger and on the Stage,
+ * open and closed, at 1280×800 and 481×800; and, at a phone's width, in Explorer and on the Stage with the strip
+ * readout, the two layouts with no inspector, at 390×844, 320×568, 320×400 and 320×320.
  *
- * Every gesture is real input (`userEvent`). ONE MOUNT FOR THE FILE, for the reason every sibling gives; each case
+ * Every gesture is real input (`userEvent`). ONE MOUNT FOR THE FILE, for the reason `app.test.ts` gives; each case
  * starts by setting its page size and its workspace, chosen afresh or settled, and opening or closing the inspector,
  * and asserts that state before it measures, so none depends on what the case before it left.
  */
@@ -124,9 +123,9 @@ async function at(
  * `#views` — `#views`, its splits, dividers and Stage, and each view's own box — that ends where the inspector starts,
  * and the top border of the inspector, its panel and its header; each border that draws, with a width, a style and a
  * colour that is not transparent. **ONE LINE, 1 PX, THE HEADER'S** — the user's decision; the inspector's own top
- * border beside it made 2 px. What a view draws inside its box is the view's: in Explorer with the readout switch at
- * `inspector`, closed, at 390×844, the asm view's `registers` panel header ends on that edge, and its own 1 px bottom
- * border lies on the rule there.
+ * border beside it would make 2 px. What a view draws inside its box is the view's: in Explorer with the readout
+ * switch at `inspector`, closed, at 390×844, the asm view's `registers` panel header ends on that edge, and its own
+ * 1 px bottom border lies on the rule there.
  */
 function rulesBetween(): [string, number][] {
   const edge = box(inspector())[1]
@@ -261,14 +260,13 @@ describe('at a phone’s width the inspector stacks under the views', () => {
   })
 
   /**
-   * **THE VIEWS ARE `main`'S WIDTH, AND THE INSPECTOR IS UNDER THEM AND AS WIDE.** On `53ecbfa` at 390 px in Debugger
-   * `#views` was 102 px wide and each default view 45 px, beside a 288 px inspector; under the stack each view is as
+   * **THE VIEWS ARE `main`'S WIDTH, AND THE INSPECTOR IS UNDER THEM AND AS WIDE.** Under the stack each view is as
    * wide as Explorer's at the same width, `main`'s width less one divider, halved. **AN OPEN INSPECTOR IS AT MOST 40%
    * OF `main`'S HEIGHT AND SCROLLS ITS OWN ROWS**: the rows overflow it at every size here, and a real wheel over them
    * takes them to their end, moving neither the inspector nor the page. **A CLOSED ONE IS ITS HEADER LINE**, and the
    * views take the rest of `main`: the cap is on an open inspector's height, not a share of `main` that a closed one
    * would leave empty. At each of these sizes, with this file's program and the pick's notice up, `main` is above its
-   * minimum and the page does not scroll; on `53ecbfa` at 320×568 the open inspector's rows made the page 819 px tall.
+   * minimum and the page does not scroll.
    */
   describe.each(['debugger', 'stage'] as const)('in %s', (p) => {
     describe.each(['open', 'closed'] as const)('%s', (state) => {
@@ -293,15 +291,14 @@ describe('at a phone’s width the inspector stacks under the views', () => {
 })
 
 /**
- * Every box `53ecbfa` drew, as `[left, top, width, height]`, measured there before the change with the preset's
- * notice up: `main`, `#views`, the inspector, its header and (open) its body, the Stage's tab strip, and each view on
- * the page.
+ * Every box `53ecbfa` drew, as `[left, top, width, height]`, measured there with the preset's notice up: `main`,
+ * `#views`, the inspector, its header and (open) its body, the Stage's tab strip, and each view on the page.
  *
- * **BUT AT 481 PX, WHERE `⏭` MOVED THEM** (2026-10-08): the step bar's row, `λ · program ↺ ◀ ▶ ⏭ ⏵ 8/s ▾ step 0 of 7`,
- * no longer fits 481 px, and its step text takes a second row, 22 px off `main`'s height and everything in it. Measured
- * on the branch that added `⏭`; the inspector's own boxes, its width and every left edge are `53ecbfa`'s.
+ * **BUT AT 481 PX, WHERE `⏭` MOVES THEM**: the step bar's row, `λ · program ↺ ◀ ▶ ⏭ ⏵ 8/s ▾ step 0 of 7`, does not
+ * fit 481 px, and its step text takes a second row, 22 px off `main`'s height and everything in it. The inspector's
+ * own boxes, its width and every left edge are `53ecbfa`'s.
  */
-const BEFORE: Readonly<Record<string, Readonly<Record<string, Box>>>> = {
+const HELD_BOXES: Readonly<Record<string, Readonly<Record<string, Box>>>> = {
   'debugger@1280x800 open': {
     main: [0, 74.5, 1280, 678.5],
     views: [0, 74.5, 992, 678.5],
@@ -396,7 +393,7 @@ const BEFORE: Readonly<Record<string, Readonly<Record<string, Box>>>> = {
   },
 }
 
-/** The boxes `BEFORE` names, as the page draws them now. */
+/** The boxes `HELD_BOXES` names, as the page draws them now. */
 function boxesNow(open: boolean | null): Record<string, Box> {
   const now: Record<string, Box> = { main: box(main()), views: box(views()) }
   if (open !== null) {
@@ -427,9 +424,9 @@ describe('nothing moves where the inspector does not stack: at 481 px and wider,
       [1280, 800, 'closed'],
       [481, 800, 'open'],
       [481, 800, 'closed'],
-    ] as const)('at %i×%i px, %s, every box is where BEFORE has it', async (width, height, state) => {
+    ] as const)('at %i×%i px, %s, every box is where HELD_BOXES has it', async (width, height, state) => {
       await at(p, width, height, state === 'open')
-      holdBoxes(boxesNow(state === 'open'), BEFORE[`${p}@${width}x${height} ${state}`] ?? {})
+      holdBoxes(boxesNow(state === 'open'), HELD_BOXES[`${p}@${width}x${height} ${state}`] ?? {})
     })
   })
 
@@ -437,9 +434,9 @@ describe('nothing moves where the inspector does not stack: at 481 px and wider,
   it.each([
     [390, 844],
     [320, 568],
-  ] as const)('in explorer at %i×%i px, every box is where 53ecbfa drew it', async (width, height) => {
+  ] as const)('in explorer at %i×%i px, every box is where HELD_BOXES has it', async (width, height) => {
     await at('explorer', width, height, null)
-    holdBoxes(boxesNow(null), BEFORE[`explorer@${width}x${height}`] ?? {})
+    holdBoxes(boxesNow(null), HELD_BOXES[`explorer@${width}x${height}`] ?? {})
   })
 })
 
@@ -538,10 +535,10 @@ function pageBoxes(): Record<string, Box> {
 }
 
 /**
- * Every box `53ecbfa` drew on a short page with no inspector, measured there before the change by a probe with
- * `pageBoxes`, the notice up or gone.
+ * Every box `53ecbfa` drew on a short page with no inspector, measured there by a probe with `pageBoxes`, the
+ * notice up or gone.
  */
-const SHORT_BEFORE: Readonly<Record<string, Readonly<Record<string, Box>>>> = {
+const SHORT_PAGE_BOXES: Readonly<Record<string, Readonly<Record<string, Box>>>> = {
   'stage-strip@320x400 up': {
     main: [0, 229, 320, 50],
     views: [0, 229, 320, 50],
@@ -659,11 +656,10 @@ describe('on a short page', () => {
    * **`main` IS AT LEAST 15REM TALL, AND BELOW THAT THE PAGE SCROLLS** — the user's decision of 2026-10-05, for pages
    * 480 px wide or less and too short for the views and the inspector, as a desktop page zoomed in or a split window
    * can be, so that a short page shows more of its views than their headers. **WHAT IS HELD IS THAT SOME VIEW SHOWS A
-   * WHOLE LINE OF ITS CONTENT**, not that each does: measured at 320 px wide with `main` at 240 px, Debugger's four
-   * views show 1, 0, 0 and 0 whole lines with the inspector open, the three with headers on two rows having 12.22 px
-   * under them, and 3, 1, 1 and 1 with it closed. With no minimum, `main` was what the page left over, so at 320×320
-   * with the notice gone the cap cut a closed inspector to 27.05 px and its header ran into the step bar; with the
-   * notice up an open one was 7.84 px. Each case is `shortCase`'s.
+   * WHOLE LINE OF ITS CONTENT**, not that each does: at 320 px wide with `main` at 240 px, three of Debugger's four
+   * views show no whole line with the inspector open. With no minimum, `main` would be what the page left over, and
+   * at 320×320 with the notice gone the cap would cut a closed inspector and run its header into the step bar. Each
+   * case is `shortCase`'s.
    */
   describe.each(['debugger', 'stage'] as const)('in %s', (p) => {
     it.each(SHORT_STACKED.filter(([, , notice]) => notice === 'up'))(
@@ -690,16 +686,16 @@ describe('on a short page', () => {
 
   /**
    * **WITH NO INSPECTOR NOTHING MOVES ON A SHORT PAGE EITHER**: the stacking rule asks for an inspector on the page.
-   * The review found `main`'s basis of 0 squeezing the Stage with the strip readout at 320×400 to 15.88 px, its tab
-   * strip run onto the step bar, where `53ecbfa` drew it 50 px tall and scrolled the page.
+   * Applied with none, `main`'s basis of 0 would squeeze the Stage with the strip readout at 320×400 until its tab
+   * strip ran onto the step bar.
    */
   describe.each(['stage-strip', 'explorer'] as const)('in %s, with no inspector', (w) => {
     it.each(SHORT.filter(([, , notice]) => notice === 'up'))(
-      'at %i×%i px, the notice %s, every box is where 53ecbfa drew it',
+      'at %i×%i px, the notice %s, every box is where SHORT_PAGE_BOXES has it',
       async (width, height, notice) => {
         scrollTo(0, 0)
         await at(w, width, height, null, notice)
-        holdBoxes(pageBoxes(), SHORT_BEFORE[`${w}@${width}x${height} ${notice}`] ?? {})
+        holdBoxes(pageBoxes(), SHORT_PAGE_BOXES[`${w}@${width}x${height} ${notice}`] ?? {})
       },
     )
 
@@ -710,11 +706,11 @@ describe('on a short page', () => {
         await settle(w)
       })
       it.each(SHORT.filter(([, , notice]) => notice === 'gone'))(
-        'at %i×%i px, the notice %s, every box is where 53ecbfa drew it',
+        'at %i×%i px, the notice %s, every box is where SHORT_PAGE_BOXES has it',
         async (width, height, notice) => {
           scrollTo(0, 0)
           await at(w, width, height, null, notice)
-          holdBoxes(pageBoxes(), SHORT_BEFORE[`${w}@${width}x${height} ${notice}`] ?? {})
+          holdBoxes(pageBoxes(), SHORT_PAGE_BOXES[`${w}@${width}x${height} ${notice}`] ?? {})
         },
       )
     })

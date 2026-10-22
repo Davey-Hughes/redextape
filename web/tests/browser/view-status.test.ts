@@ -7,20 +7,21 @@ import { TmPane } from '../../src/tm-pane'
 import { newPaneHost } from './harness'
 
 /**
- * Design §4.5's SECOND surface: the view is self-describing when the status line is off-screen or the
- * user is looking straight at the view. The FIRST surface — the sentence in `#link-status` — is
- * `tests/node/link-status.test.ts`; §4.5 says the both-surfaces test splits by runner, and this is
- * the half that needs a DOM.
+ * 5d-i design §4.5's SECOND surface: the view is self-describing when the status line is off-screen or
+ * the user is looking straight at the view. The FIRST surface — the sentence in `#link-status` — is
+ * `tests/node/link-status.test.ts`; §4.5 says the both-surfaces test splits by runner, and this is the
+ * half that needs a DOM.
  *
- * **THE STATUS READS `copy · not linked` NOW (Plan 7 part 2 spec §12)**, in the view header's heading
- * beside the title, where the `[detached]` badge used to sit on the pane's `<h2>`. This file is the
- * affordance itself: both views, set and unset, and the non-colour carriers §4.5 requires — none of
- * which is on the path of any app-level gesture. `tests/browser/scratch-app.test.ts` does the app-level
- * version.
+ * **THE STATUS READS `copy · not linked` (Plan 7 part 2 spec §12)**, in the view header's heading beside
+ * the title. This file is the affordance itself: both views, set and unset, and the non-colour carriers
+ * 5d-i §4.5 requires — none of which is on the path of any app-level gesture.
+ * `tests/browser/scratch-app.test.ts` does the app-level version.
  *
  * THE VIEWS ARE CONSTRUCTED DIRECTLY HERE, and `setBindings` is called before anything is asserted
  * because the header paints its title from the pair in force: a view the draw pass has never reached
  * has an empty heading, and every view in the app is reached on its first frame.
+ *
+ * Section citations here are the 5d-i design's unless they name another.
  */
 const noop = () => undefined
 
@@ -123,9 +124,9 @@ describe('the copy · not linked status', () => {
 
   /**
    * THE STYLESHEET'S CARRIER IS GEOMETRY, NOT HUE, AND THAT IS ASSERTED RATHER THAN COMMENTED. §4.5
-   * rejected a colour treatment because hue was then the sole discriminator for five states
-   * (accessibility item 7), so the status rule must survive a reader who cannot tell its colour from
-   * the title's. A border is that carrier; a rule reduced to `color:` alone fails here.
+   * rejected a colour treatment (accessibility item 7), so the status rule must survive a reader who
+   * cannot tell its colour from the title's. A border is that carrier; a rule reduced to `color:` alone
+   * fails here.
    *
    * The browser tier loads `style.css` (`tests/browser/setup.ts`), so this also catches the rule never
    * reaching the page at all — the same gap that file exists for.

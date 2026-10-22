@@ -8,8 +8,8 @@ import { wireOf } from '../node/tree-fixture'
 import { controlState, fixtureHost, frames, inertEvents, scrolled, until } from './harness'
 
 /**
- * The λ view's `follow redex` header action (spec §5.3). The pane is built directly, as `lambda-display`'s
- * are — nothing here needs `main()`.
+ * The λ view's `follow redex` header action (Plan 7 part 4 spec §5.3). The pane is built directly, as
+ * `lambda-display`'s are — nothing here needs `main()`.
  */
 const host = (): HTMLElement => fixtureHost('lambda-follow-fixture')
 
@@ -95,11 +95,12 @@ describe('a λ view’s follow redex action', () => {
 })
 
 /**
- * **THE BODY'S HEIGHT CHANGES WITH NO FRAME AND NO SCROLL TO REDRAW IT.** `.term` is capped at `60vh`, so a window
- * that grows grows the body with it, and nothing the view draws runs for that. A body following a redex near the
- * term's end then has its scroll clamped, and the browser reports the clamp as a `scroll`; a body following one in
- * the middle has a band below its drawn rows. And a body taken off the page — Stage shows one view at a time — can
- * be sent the `scroll` of its last draw's write after it has gone, where its `scrollTop` reads 0.
+ * **THE BODY'S HEIGHT CHANGES WITH NO FRAME AND NO SCROLL TO REDRAW IT.** `.term` is capped at `60vh` on a host
+ * without `data-kind="lambda"`, as this file's are, so a window that grows grows the body with it, and nothing the
+ * view draws runs for that. A body following a redex near the term's end then has its scroll clamped, and the browser
+ * reports the clamp as a `scroll`; a body following one in the middle has a band below its drawn rows. And a body
+ * taken off the page — Stage shows one view at a time — can be sent the `scroll` of its last draw's write after it
+ * has gone, where its `scrollTop` reads 0.
  *
  * REAL GESTURES WHERE THERE IS ONE: the view is taken off the page and put back as Stage does, with its host, and
  * each `scroll` a case is about is awaited, not counted in frames.
@@ -107,8 +108,7 @@ describe('a λ view’s follow redex action', () => {
  * **TWO RESIZES, BECAUSE THEY REACH THE BODY IN OPPOSITE ORDERS.** `page.viewport` sets the size of the iframe the
  * test runs in, from vitest's page around it; there, in every kept run, the body's resize observer was told of the
  * new height before the clamp's `scroll`. A resize of the WINDOW, as Playwright's `setViewportSize` makes one,
- * delivered the clamp's `scroll` first, before the observer could record it; that is `inWindow`'s case, which found
- * #115's λ body detaching.
+ * delivered the clamp's `scroll` first, before the observer could record it; that is `inWindow`'s case.
  */
 describe('a λ view whose box changes size under it', () => {
   /** `f a0 … a199`, the redex, then `a200 … a399`: the redex in the middle of a term far taller than the view. */

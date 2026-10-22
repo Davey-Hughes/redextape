@@ -26,29 +26,24 @@ import {
  * **A PANE CHANGES WHAT IT SHOWS, IN PLACE** — decision 1's headline capability, driven entirely
  * through the pane's own binding selector.
  *
- * Every file beside this one asserts what a pane does while its LEG stays fixed:
- * `two-lambda-panes.test.ts` moves the session axis and the editor between panes,
- * `scratch-rebind-editor.test.ts` moves the session axis away from a scratch. The axis this file adds
- * is the one `PaneSlot<K>` deliberately cannot carry — a slot's leg has no writer, so a leg change is
- * the replacement of a whole `PaneEntry` under an unchanged `LeafId`, performed by `applyLayout`'s two
- * existing passes rather than by anything in the slot.
+ * The axis this file drives, the LEG, is the one `PaneSlot<K>` deliberately cannot carry — a slot's leg
+ * has no writer, so a leg change is the replacement of a whole `PaneEntry` under an unchanged `LeafId`,
+ * performed by `applyLayout`'s two passes rather than by anything in the slot.
  *
- * THE HARNESS IS `two-lambda-panes.test.ts`'s, DELIBERATELY UNMODIFIED — the same shell, the same
- * one-mount-per-file `beforeAll` (ES module imports are cached, so `main()` runs once per page and
- * Vitest gives each test FILE its own page), and a `beforeEach` that undoes the tree shape through
- * `resetToFourViews` and puts the source program back. Its own doc has the argument for each, including why
- * the first compile has to be waited for before any fork click can land. **THE SECOND HALF OF THAT
- * SENTENCE USED TO READ "a live scratchpad, through a source recompile"**, which stopped being true
- * with 5d-ii-c decision 2: a keystroke ends no buffer, so a buffer a test forks outlives it. Only the
- * last test here forks, and nothing runs after it — where `two-lambda-panes.test.ts`, whose every test
- * forks, rebinds its λ panes back to `source` explicitly for exactly this reason. Selectors are that file's verbatim: `button.detach` for the
- * fork (the button carries real text, not an `aria-label`), `aria-label` for the glyph-only layout
+ * THE HARNESS IS `two-lambda-panes.test.ts`'s shell and one-mount-per-file `beforeAll` (ES module
+ * imports are cached, so `main()` runs once per page and Vitest gives each test FILE its own page), with
+ * a `beforeEach` of this file's own that undoes the tree shape through `resetToFourViews` and puts the
+ * source program back. That file's doc has the argument for each, including why the first compile has to
+ * be waited for before any fork click can land. Selectors are that file's verbatim: `button.detach` for
+ * the fork (the button carries real text, not an `aria-label`), `aria-label` for the glyph-only layout
  * controls, and `bindingKey(leg, session)` for the title menu's items.
  *
  * **KINDS ARE READ FROM `data-kind`, AND THAT IS THE POINT OF THE ATTRIBUTE RATHER THAN A CONVENIENCE
  * HERE.** `hostFor` writes it once when it mints a host and a kind change REUSES that host, so
  * `applyLayout`'s rewrite of it is the only thing keeping it true — a test that inferred a pane's kind
- * from its leaf id would be reading a string `nextLeafId` stopped spelling for exactly this reason.
+ * from its leaf id would be reading a string `nextLeafId` does not spell from the kind.
+ *
+ * Section and decision citations here are the 5d-ii-b design's unless they name another.
  */
 
 const storedTree = (): LayoutNode | null => parseWorkspace(localStorage.getItem(LAYOUT_STORAGE_KEY))?.tree ?? null
@@ -56,9 +51,9 @@ const storedTree = (): LayoutNode | null => parseWorkspace(localStorage.getItem(
 let view: EditorView
 
 beforeAll(async () => {
-  // Each browser test file gets its own in-memory `Storage` now, installed in `tests/browser/setup.ts`
-  // before this file's own module body runs — see that file's doc for why clearing a shared key was not
-  // enough. Neither key needs clearing here any more.
+  // Each browser test file gets its own in-memory `Storage`, installed in `tests/browser/setup.ts` before
+  // this file's own module body runs — see that file's doc for why clearing a shared key was not enough —
+  // so neither key needs clearing here.
   // WIDE ENOUGH FOR ITS ADDS: at the runner's default 414 px a view is 201 px wide, and the app refuses a split or a
   // `+ view` that leaves a view under `MIN_VIEW_PX` (`layout.ts`). The default's 896 px height is kept.
   await page.viewport(1280, 896)
@@ -86,12 +81,11 @@ describe('a pane changes which leg it renders', () => {
    * DECISION 1 ITSELF: the pane keeps its leaf id, its place among its siblings and its size, which is
    * exactly what a close followed by a split cannot promise.
    *
-   * IT SPLITS FIRST, SO THE TREE IS UNEVEN BEFORE THE SWITCH. On the shipped three-pane row every leaf
-   * has the same `flex`, so "the sizes did not change" would hold for an implementation that dropped the
-   * leaf and appended a fresh one at the end of the row. One split makes the switched leaf's size 0.5
-   * inside an inner split while its neighbours are a third of the outer one — a shape a rebuild cannot
-   * arrive at by accident, and one whose collapse `closeLeaf` would perform is visible in both the DOM
-   * order and the persisted tree.
+   * IT SPLITS FIRST, SO THE TREE IS UNEVEN BEFORE THE SWITCH. On the four-view tree every leaf has the
+   * same `flex`, so "the sizes did not change" would hold for an implementation that dropped the leaf and
+   * appended a fresh one at the end of its row. One split makes the switched leaf's size 0.5 inside an
+   * inner split — a shape a rebuild cannot arrive at by accident, and one whose collapse `closeLeaf` would
+   * perform is visible in both the DOM order and the persisted tree.
    *
    * THE PERSISTED TREE IS COMPARED AGAINST `setLeafKind` OF THE OLD ONE, not against a hand-written
    * literal. That is decision 1 spelled as an equation — "the tree afterwards is the tree before with
@@ -148,17 +142,17 @@ describe('a pane changes which leg it renders', () => {
   })
 
   /**
-   * **THE OTHER CREATION PATH, AND IT HAD THE SAME HOLE.** A cross-leg pick drops the leaf's entry and
-   * builds a new `TmPane` under the unchanged id, so the pane it produces is as new as one a split
-   * creates — and `TmPane.setProgram` is called from the reply switch and from nowhere else, so before
-   * the seeding both arrived blank. The test above asserts this pane resolves its new binding (`.step`,
-   * painted from the leg); nothing there asks whether the MACHINE reached it, and every assertion in it
-   * holds of a pane showing no tapes, no status line and no δ-rows at all.
+   * **THE OTHER CREATION PATH.** A cross-leg pick drops the leaf's entry and builds a new `TmPane` under
+   * the unchanged id, so the pane it produces is as new as one a split creates — and outside the reply
+   * switch, `TmPane.setProgram` is called only by the seeding (`tm-seed.ts`), so without it both would
+   * arrive blank. The test above asserts this pane resolves its new binding (`.step`, painted from the
+   * leg); nothing there asks whether the MACHINE reached it, and every assertion in it holds of a pane
+   * showing no tapes, no status line and no δ-rows at all.
    *
    * IT ASSERTS AGAINST `tm-0`, WHICH NEVER MOVED. That pane was on screen when the `compiled` reply
    * landed and was pushed the program directly; equal tapes and an equal status line are what say the
    * switched pane was seeded with the same machine at the same frame rather than with anything non-empty.
-   * `showing`'s own doc has the rest, including why the δ-row count is not compared.
+   * `showing`'s own doc has the rest; `pane-picker.test.ts` says why the δ-row count is not compared.
    */
   it('renders the program compiled before the switch, in the pane the switch created', async () => {
     const errors: string[] = []
@@ -183,11 +177,10 @@ describe('a pane changes which leg it renders', () => {
   })
 
   /**
-   * **THE EDITOR SURVIVES A KIND CHANGE, WHICH IS THE CUSTODY PATH REACHED THROUGH A GESTURE THAT DID
-   * NOT EXIST WHEN IT WAS WRITTEN.** `applyLayout`'s pass 1 hands a departing λ pane's editor to
-   * `custody.hold` before `panes.remove` makes the pane unreachable; every test that drove that path
-   * before this one closed the pane to trigger it. A kind change removes the same entry for a different
-   * reason, and the handover has to cover both — which is why the widened predicate sits ABOVE the
+   * **THE EDITOR SURVIVES A KIND CHANGE, WHICH IS THE CUSTODY PATH REACHED THROUGH A GESTURE OTHER THAN A
+   * CLOSE.** `applyLayout`'s pass 1 hands a departing λ pane's editor to `custody.hold` before
+   * `panes.remove` makes the pane unreachable. A kind change removes the same entry as a close does, for a
+   * different reason, and the handover has to cover both — which is why the predicate sits ABOVE the
    * handover rather than beside it.
    *
    * IT ASSERTS IDENTITY, NOT A COUNT, for `two-lambda-panes.test.ts`'s reason: destroying the view and
@@ -252,11 +245,10 @@ describe('a pane changes which leg it renders', () => {
   })
 
   /**
-   * **THE CONTROL THE PICK WAS MADE WITH IS DESTROYED BY THE PICK — IMPORTANT FINDING, REVIEW OF THE
-   * COMMIT THAT ADDED THE CROSS-LEG ARM.** `applyLayout` reaches the incoming pane's
-   * `host.replaceChildren(…)`, which takes the title-selector the user is operating with it, and nothing
-   * put focus anywhere afterwards: a keyboard user who arrowed to a TM pair and pressed Enter was left
-   * on `<body>`, one Tab away from the top of the document. `close` answered exactly this with a
+   * **THE CONTROL THE PICK WAS MADE WITH IS DESTROYED BY THE PICK.** `applyLayout` reaches the incoming
+   * pane's `host.replaceChildren(…)`, which takes the title-selector the user is operating with it; with
+   * nothing putting focus anywhere afterwards, a keyboard user who arrowed to a TM pair and pressed Enter
+   * would be left on `<body>`, one Tab away from the top of the document. `close` answers this with a
    * `focusPane` on the view next to the closed one; this arm answers it with `focusPane(id)`, the same
    * leaf, because the pane did not go anywhere — only its contents changed.
    *
@@ -266,10 +258,9 @@ describe('a pane changes which leg it renders', () => {
    * Parking it on the control that is about to be destroyed is what makes the "not `<body>`" assertion
    * mean the rescue ran.
    *
-   * IT ASSERTS THE LEAF, NOT MERELY "SOMEWHERE IN THE TREE" — `layout-app.test.ts`'s close-path test
-   * takes the weaker form because a close has no pane of its own to return to, and this one does. Focus
-   * landing in a NEIGHBOUR would satisfy that weaker assertion while moving the user somewhere they did
-   * not ask to be.
+   * IT ASSERTS THE LEAF, NOT MERELY "SOMEWHERE IN THE TREE": focus landing in a NEIGHBOUR would satisfy
+   * that weaker assertion while moving the user somewhere they did not ask to be. Here the leaf is the
+   * pane itself; `layout-app.test.ts`'s close case names the pane that took the closed one's space.
    */
   it('puts focus back in the pane whose control the switch destroyed', async () => {
     const title = titleOf('lambda-0')
@@ -290,24 +281,18 @@ describe('a pane changes which leg it renders', () => {
   })
 
   /**
-   * **THE CRITICAL'S OWN THREE CLICKS, WHOSE ANSWER CHANGED FROM "REFUSE" TO "FOLLOW".** Compile, fork
-   * the λ pane, then pick the buffer's own `λ · …` entry on the TM pane: `PaneSlot.render` pushes
-   * `pairs()` to every pane, so a TM pane's selector genuinely lists a λ-only session. `transport.ts`'s
-   * handler used to take the session half and keep the slot's leg, minting `{ leg: 'tm', session: <the
-   * buffer> }` —
-   * which `legOf` throws on, inside `draw.ts`'s per-pane loop, which has no `try`/`catch`: not one
-   * dropped frame but every frame after it. A guard in that handler then made the pick a silent no-op.
+   * **THREE CLICKS: COMPILE, FORK THE λ PANE, THEN PICK THE BUFFER'S OWN `λ · …` ENTRY ON THE TM PANE.**
+   * `PaneSlot.render` pushes `pairs()` to every pane, so a TM pane's selector genuinely lists a λ-only
+   * session. A handler that took the session half and kept the slot's leg would mint `{ leg: 'tm',
+   * session: <the buffer> }` — which `legOf` throws on, inside `draw.ts`'s per-pane loop, which has no
+   * `try`/`catch`: not one dropped frame but every frame after it. A guard there that refused the pick
+   * would make it a silent no-op. The pick is acted on one layer up, where the layout tree is: the leaf
+   * changes kind and the entry is rebuilt on the leg that was picked. The node tier cannot drive that —
+   * `pane-host.ts` needs a DOM and a tree.
    *
-   * **THIS FILE IS WHERE THAT GUARD'S CLAIM MOVED TO, AND `tests/node/sessions.test.ts` NO LONGER MAKES
-   * IT.** The pick is acted on now, one layer up, where the layout tree is: the leaf changes kind and
-   * the entry is rebuilt on the leg that was picked. The node tier cannot drive that — `pane-host.ts`
-   * needs a DOM and a tree — so the cross-leg half of that test moved here, to the same three clicks it
-   * described, with the outcome inverted.
-   *
-   * IT DRIVES A SECOND FRAME AFTER THE SWITCH RATHER THAN STOPPING AT THE DOM. The Critical's signature
-   * was that EVERY LATER frame threw, so a test that asserted only the state right after the pick would
-   * pass on a render loop that was already dead — `◀` on the switched pane's own transport strip runs
-   * `draw()` again, and a changed step readout is evidence it completed.
+   * IT DRIVES A SECOND FRAME AFTER THE SWITCH RATHER THAN STOPPING AT THE DOM. A wedged loop throws on
+   * EVERY LATER frame, so a test that asserted only the state right after the pick would pass on a render
+   * loop that was already dead.
    */
   it('acts on a cross-leg pick from the TM side instead of wedging the render loop', async () => {
     const errors: string[] = []
@@ -318,12 +303,11 @@ describe('a pane changes which leg it renders', () => {
       await until(() => editorsInLeaf('lambda-0') > 0, 'the fork to register a scratch buffer')
       expect(leafKind('tm-0')).toBe('tm')
 
-      // THE PAIR THE FORK PRODUCED, READ OFF THE PANE THAT PERFORMED IT. This test picked the literal
-      // `bindingKey('lambda', 'lambda-scratch')` — 5d-i's one fixed scratch id — and 5d-ii-c decision 1
-      // mints `scratch-N` per fork instead. The number depends on how many forks this FILE ran before
-      // this test (one `main()` per page), so it cannot be written down; the pane that just forked is
-      // where the app itself records it. `pickBinding` throws if the value it is handed is not in the target
-      // selector, which is what keeps this from silently picking nothing.
+      // THE PAIR THE FORK PRODUCED, READ OFF THE PANE THAT PERFORMED IT. A fork mints `scratch-N`
+      // (5d-ii-c decision 1), and the number depends on how many forks this FILE ran before this test (one
+      // `main()` per page), so it cannot be written down; the pane that just forked is where the app itself
+      // records it. `pickBinding` throws if the value it is handed is not in the target selector, which is
+      // what keeps this from silently picking nothing.
       const buffer = titleOf('lambda-0')?.dataset.binding ?? ''
       expect(buffer).not.toBe(bindingKey('lambda', 'source'))
 
@@ -338,19 +322,14 @@ describe('a pane changes which leg it renders', () => {
       expect(lambdaLeaves().sort()).toEqual(['lambda-0', 'tm-0'])
       expect(document.querySelectorAll('[data-kind="tm"]').length).toBe(0)
 
-      // A SECOND FRAME, WHICH IS THE WHOLE POINT OF THE STAGE — the Critical's signature was that EVERY
-      // later frame threw. **NOT `◀` ON THE SWITCHED PANE, WHICH IS WHAT THIS WAS UNTIL IT WAS RUN**:
-      // the buffer's run opens on its step 0 (`History`), so `canBack` is false and the click is a silent
-      // no-op.
+      // A SECOND FRAME, WHICH IS THE WHOLE POINT OF THE STAGE — a wedged loop throws on EVERY later frame.
+      // **NOT `◀` ON THE SWITCHED PANE**: the buffer's run opens on its step 0 (`History`), so `canBack` is
+      // false and the click is a silent no-op.
       //
-      // **AND NOT A SOURCE KEYSTROKE EITHER, WHICH IS WHAT IT WAS UNTIL 5d-ii-c DECISION 2.** That
-      // keystroke used to retire the buffer, so the switched pane was rebound to `source` and repainted
-      // from a session it was never built for — this stage asserted exactly that, ending on
-      // a negative check of the old `[detached]` badge and on both λ panes showing the source's own leg. A keystroke ends
-      // no buffer now (design §4.3's table), so it moves nothing and there would be nothing to observe.
-      // AN EDIT OF THE BUFFER drives the same per-pane loop `draw.ts` threw in, and says something the
-      // retire could not: the switched pane follows the buffer's OWN later frames, on a binding it
-      // acquired through a cross-leg pick.
+      // **AND NOT A SOURCE KEYSTROKE EITHER.** A keystroke ends no buffer (5d-ii-c design §4.3's table), so
+      // it moves nothing and there would be nothing to observe. AN EDIT OF THE BUFFER drives the same
+      // per-pane loop `draw.ts` would throw in, and shows the switched pane following the buffer's OWN later
+      // frames, on a binding it acquired through a cross-leg pick.
       const scratchTerm = termOf('tm-0')
       expect(stepTextOf('tm-0')).not.toBe('')
       const editorHost = document.querySelector<HTMLElement>('[data-leaf="lambda-0"] .cm-content')
@@ -368,9 +347,9 @@ describe('a pane changes which leg it renders', () => {
       expect(document.querySelector('[data-leaf="tm-0"] h2')?.textContent).toContain('copy · not linked')
 
       // AND THE KEYSTROKE PATH, which reaches `link-wiring.ts` from the source editor's own update
-      // listener without going through `draw.ts` first — the other entry point the Critical could be
-      // reached from. The switched pane is still on the buffer afterwards, which is decision 2 read on
-      // the pane the Critical was about.
+      // listener without going through `draw.ts` first — the other entry point the throw could be
+      // reached from. The switched pane is still on the buffer afterwards, which is 5d-ii-c decision 2 (a
+      // keystroke ends no buffer) read on a pane bound through a cross-leg pick.
       view.dispatch({ changes: { from: view.state.doc.length, insert: ' + 0' } })
       await until(stateIdle, 'the source recompile to settle')
       expect(titleOf('tm-0')?.dataset.binding).toBe(buffer)

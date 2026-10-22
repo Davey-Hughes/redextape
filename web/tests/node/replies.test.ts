@@ -30,37 +30,33 @@ import { ONE_RULE_PROGRAM, tmFrame } from './tm-machines'
  * **WHAT A SESSION KEEPS FROM ITS OWN `compiled` REPLY** — the retention a TM pane created later is
  * seeded from.
  *
- * `TmPane.setProgram` is only ever called from the reply switch this file drives, so before this
- * retention existed a TM pane built after the last `compiled` reply had no route to a program at all:
- * `pane-host.ts` constructs the pane and nothing hands it one until the next compile. The browser tier
- * asserts the visible half of the repair (`pane-picker.test.ts`, `pane-kind-switch.test.ts`: a pane
- * created from a picker paints tapes and δ-rows). This file asserts the half that has no DOM in it — the
- * entry holds what the panes were told, whether or not any pane was there to be told.
+ * Without this retention a TM pane built after the last `compiled` reply would have no route to a
+ * program until the next compile: `pane-host.ts` constructs the pane and seeds it from what the entry
+ * retained. The browser tier asserts the visible half (`pane-picker.test.ts`,
+ * `pane-kind-switch.test.ts`: a pane created from the split menu or a title menu paints tapes and
+ * δ-rows). This file asserts the half that has no DOM in it — the entry holds what the panes were
+ * told, whether or not any pane was there to be told.
  *
- * **THE COLLECTION IS EMPTY IN BOTH CASES, AND THAT IS THE POINT RATHER THAN A SHORTCUT.** The
- * retention has to survive a reply that reached no pane — that is the only situation it exists for, since
- * a session with a TM pane already open needs nothing retained to look right. A test that registered a
- * pane could not tell "the entry was written" from "the pane was pushed to".
+ * **THE COLLECTION IS EMPTY, AND THAT IS THE POINT RATHER THAN A SHORTCUT.** The retention has to
+ * survive a reply that reached no pane — that is the only situation it exists for, since a session
+ * with a TM pane already open needs nothing retained to look right. A test that registered a pane
+ * could not tell "the entry was written" from "the pane was pushed to".
  *
- * **EVERY INJECTED DEPENDENCY IS STOOD IN FOR, AND THEY DIVIDE IN THREE.** (Said without a count, having
- * been written as "the four injected dependencies" and been wrong — a false arity, in a doc, about
- * arities. It named `reconcileEditors` among them, which 5d-ii-c decision 2 has since deleted from the
- * signature along with the retire it swept for.) `view` and
- * `links` are REACHED by the arm under test — the `compiled` arm dispatches two CodeMirror effects and
- * installs a link index — so they record, and their calls are asserted below, together with `draw`'s:
- * a green retention over a switch that fell through somewhere else is not a green test. `editorHome` is
- * an honest no-op, belonging to `onScratchReply`'s arms, which `driver` does not drive. `scratchpad` and
- * `results` are not reached by the `compiled` arm at all and are `undefined`
- * behind a cast, deliberately: an arm that starts touching either crashes this test loudly rather than
- * passing over a fake that quietly absorbs the call. There is no honester option in the node tier — an
- * `EditorView` and an `HTMLElement` both need a document, which is exactly why the browser tier owns
- * everything about this repair that can be seen.
+ * **THE STAND-INS DIVIDE IN THREE.** `view` and `links` are REACHED by the arm under test — the
+ * `compiled` arm dispatches two CodeMirror effects and installs a link index — so they record, and their
+ * calls are asserted below, together with `draw`'s: a green retention over a switch that fell through
+ * somewhere else is not a green test. `editorHome` is an honest no-op, belonging to `onScratchReply`'s
+ * arms, which `driver` does not drive. `scratchpad` and `results` are not reached by the `compiled` arm
+ * at all and are `undefined` behind a cast, deliberately: an arm that starts touching either crashes this
+ * test loudly rather than passing over a fake that quietly absorbs the call. There is no honester option
+ * in the node tier — an `EditorView` and an `HTMLElement` both need a document, which is exactly why the
+ * browser tier owns everything about this retention that can be seen.
  *
- * **`onScratchReply` IS DRIVEN AT THE FOOT OF THIS FILE, WHICH THE PARAGRAPH ABOVE USED TO SAY IT WAS
- * NOT.** Its `no-session` arm needs neither a document nor a worker — the buffer collection, the
- * registry and the pool are all reachable in this tier — so `scratchDriver` below stands `scratchpad` up
- * for real rather than casting it away. The two harnesses are separate on purpose: `driver`'s
- * `undefined` is an assertion about which arms may touch what, and reusing it would spend that.
+ * **`onScratchReply` IS DRIVEN AT THE FOOT OF THIS FILE.** Its `no-session` arm needs neither a
+ * document nor a worker — the buffer collection, the registry and the pool are all reachable in this
+ * tier — so `scratchDriver` below stands `scratchpad` up for real rather than casting it away. The two
+ * harnesses are separate on purpose: `driver`'s `undefined` is an assertion about which arms may touch
+ * what, and reusing it would spend that.
  *
  * **THE CLEARING ARMS ARE NOT HERE, AND THE REASON IS THAT SAME MISSING `#results`.** `no-session` and
  * `worker-error` clear the retention exactly as they clear every TM pane on the session, and both open by
@@ -138,9 +134,9 @@ function driver(entry: SessionEntry, opts: { frame?: (cb: () => void) => void } 
     frame: opts.frame ?? ((cb: () => void) => cb()),
     editorHome: () => undefined,
     // NO SCRATCH REPLY REACHES THIS DRIVER — every test built on it sends `compiled` or a recording
-    // chunk through `onReply`, and `onBuffersPersist` is called from the `scratch-compiled`
-    // arm of the OTHER switch. A no-op rather than a throw, because "this driver does not exercise
-    // that arm" is a fact about the fixture and not a claim any test here is making.
+    // chunk through `onReply`, and `onBuffersPersist` is called only from the build replies of the
+    // OTHER switch. A no-op rather than a throw, because "this driver does not exercise those arms" is
+    // a fact about the fixture and not a claim any test here is making.
     onBuffersPersist: () => undefined,
   })
   return { replies, dispatched, indexed, drawn: () => drawn }
@@ -168,9 +164,8 @@ describe('a session retains its last compiled machine', () => {
   })
 
   /**
-   * **A COMPILE THAT PRODUCED NO MACHINE RETAINS NOTHING, AND `null` IS NOT A PLACEHOLDER HERE.**
-   * `protocol.ts` types `tmProgram` nullable defensively rather than reachably (its own doc), so this is
-   * the wire contract being honoured rather than a producer being reproduced — and the seeding in
+   * **A COMPILE THAT PRODUCED NO MACHINE RETAINS NOTHING, AND `null` IS NOT A PLACEHOLDER HERE.** The
+   * worker sends `tmProgram: null` for a program whose TM leg is declined, and the seeding in
    * `pane-host.ts` reads exactly this field, so a retention that stored the reply unconditionally would
    * hand a new pane a `null` program wrapped in a non-null envelope and have it paint an empty δ-table
    * over a `width` line with no machine behind it.
@@ -189,7 +184,7 @@ describe('a session retains its last compiled machine', () => {
 
   /**
    * **THE SECOND COMPILE REPLACES THE FIRST RATHER THAN ADDING TO IT.** A recompile invalidates every
-   * state id — `setProgram`'s own doc says so, and it drops each pane's links for that reason — so an
+   * state id — `TmPane.setProgram`'s body says so, and it drops each pane's links for that reason — so an
    * entry still holding the previous machine would seed a newly created pane with a δ-table whose rows
    * name states the session no longer has.
    */
@@ -210,9 +205,9 @@ describe('a session retains its last compiled machine', () => {
  * A `PoolPort` with no thread behind it, recording what was posted and what a `retire` would have done
  * to it.
  *
- * `sent` ARRIVED WITH TASK 3, matching `session-fixtures.ts`'s `FakePort` rather than inventing a
- * second shape for the same recording — this file's `scratch-compiled` test needs to read back a
- * post the same way `scratch.test.ts`'s `warm posts the buffer text at step 0` does.
+ * `sent` MATCHES `session-fixtures.ts`'s `FakePort` rather than inventing a second shape for the same
+ * recording — this file's `scratch-compiled` test needs to read back a post the same way
+ * `scratch.test.ts`'s `warm posts the buffer text at step 0` does.
  */
 function fakePort(): PoolPort & { sent: RunRequest[]; terminated: number } {
   const p: PoolPort & { sent: RunRequest[]; terminated: number } = {
@@ -246,13 +241,15 @@ const noSession = (diagnostics: Diagnostic[]): RunReply => ({ kind: 'no-session'
  * behind a cast for the reason the file's doc gives — this arm reaches neither, and an arm that starts
  * to should say so loudly.
  *
- * **THE SLOT IS IN THE PANE COLLECTION, AND THAT IS NOT DECORATION.** The retire this task removes was
- * handed `panes.all().map((p) => p.slot)`, so it could only ever move a pane the COLLECTION held: with
- * an empty collection, "the pane stayed on the buffer" is satisfied by the old behaviour too, and the
- * assertion that reads best is the one that would have been vacuous. It also gives the live-edit branch
- * somewhere to deliver diagnostics to. The pane itself is a recording stub of the two members these arms
- * touch, in `panes.test.ts`'s own idiom — a real `LambdaPane` needs a document, which is the browser
- * tier's business (`tests/browser/scratch-edit.test.ts`).
+ * `editorHome` RECORDS THE SESSIONS IT IS ASKED FOR, and answers `undefined`, so a `?.setEditor` behind it
+ * does nothing. The failed fork's arm has no editor to reach, and a call recorded there means it has
+ * started reaching for one.
+ *
+ * **THE SLOT IS IN THE PANE COLLECTION, AND THAT IS NOT DECORATION.** A retire handed
+ * `panes.all().map((p) => p.slot)` could only move a pane the COLLECTION held: with an empty collection,
+ * "the pane stayed on the buffer" would be satisfied by such a retire too, and the assertion that reads
+ * best would be vacuous. The pane itself is a stub, in `panes.test.ts`'s own idiom — a real `LambdaPane`
+ * needs a document, which is the browser tier's business (`tests/browser/scratch-edit.test.ts`).
  */
 /**
  * `draw` and `frame` are overridable for the tests below that assert how often `draw()` runs —
@@ -262,8 +259,8 @@ const noSession = (diagnostics: Diagnostic[]): RunReply => ({ kind: 'no-session'
  * `environment: 'node'` has no such global (unlike jsdom or a real page), so a test that sends a `Running`
  * tm-value reply, or a recording chunk that does not end its recording, without overriding `frame` would
  * throw `ReferenceError: requestAnimationFrame is not defined` the moment its arm schedules one. Running
- * the callback synchronously instead keeps every existing retention test's behaviour identical to `draw()`
- * being called straight, since none of them assert on `draw`'s call count or timing — only the coalescing
+ * the callback synchronously instead keeps every other test's behaviour identical to `draw()` being
+ * called straight, since none of them assert on `draw`'s call count or timing — only the coalescing
  * tests do, and they pass both overrides.
  */
 function scratchDriver(opts: { draw?: () => void; frame?: (cb: () => void) => void } = {}) {
@@ -278,9 +275,10 @@ function scratchDriver(opts: { draw?: () => void; frame?: (cb: () => void) => vo
     () => {},
   )
   const notified: string[] = []
+  const editorAsked: SessionId[] = []
   // COUNTED RATHER THAN STUBBED OUT, because the text of record and the write of it are two claims:
-  // `setText` puts a term in memory and only this callback puts it where a reload can find it, and the
-  // arm below can satisfy the first while dropping the second (5d-ii-d T5).
+  // `setText` puts a term in memory, this callback is the arm's own write of it to where a reload
+  // can find it, and the arm below can satisfy the first while dropping the second.
   let persists = 0
   const buffers = new ScratchBuffers({
     registry: reg,
@@ -289,7 +287,6 @@ function scratchDriver(opts: { draw?: () => void; frame?: (cb: () => void) => vo
     onReply: () => undefined,
   })
   const links = {} as unknown as LinkWiring
-  const gutter: Diagnostic[][] = []
   const slot = new PaneSlot('lambda', SOURCE)
   const panes = new PaneCollection()
   panes.add({
@@ -301,7 +298,6 @@ function scratchDriver(opts: { draw?: () => void; frame?: (cb: () => void) => vo
       setBindings: () => undefined,
       setDetached: () => undefined,
       setLayoutControls: () => undefined,
-      setDiagnostics: (ds: readonly Diagnostic[]) => gutter.push([...ds]),
     } as unknown as PaneEntry<'lambda'>['pane'],
     host: {} as HTMLElement,
   })
@@ -316,7 +312,10 @@ function scratchDriver(opts: { draw?: () => void; frame?: (cb: () => void) => vo
     links,
     draw: opts.draw ?? (() => undefined),
     frame: opts.frame ?? ((cb: () => void) => cb()),
-    editorHome: () => undefined,
+    editorHome: (session: SessionId) => {
+      editorAsked.push(session)
+      return undefined
+    },
     onBuffersPersist: () => {
       persists += 1
     },
@@ -339,8 +338,8 @@ function scratchDriver(opts: { draw?: () => void; frame?: (cb: () => void) => vo
     replies,
     panes,
     slot,
-    gutter,
     notified: () => notified,
+    editorAsked: () => editorAsked,
     lastScratchPost,
     persists: () => persists,
   }
@@ -350,27 +349,20 @@ function scratchDriver(opts: { draw?: () => void; frame?: (cb: () => void) => vo
  * **A BUFFER THAT FAILED TO BUILD IS STILL A BUFFER** — 5d-ii-c decision 2, design §4.3's row for
  * "worker error / poison": *ended it* -> **survives; retire is the escape**.
  *
- * **WHAT THIS ARM USED TO DO.** `ScratchBuffers.noSessionReply` retired the buffer synchronously on the
- * path where its fork's build never succeeded even once — terminating its worker, dropping it from the
- * registry and the pool, and rebinding every pane on it back to the source session — and handed the
- * diagnostics back so the caller could report them on a surface that survived the rebind. The
- * diagnostics half is unchanged. The retire is gone: the governing rule is that nothing ends a buffer
- * implicitly, and a build that failed is not a user asking for the buffer to end.
+ * Retiring the buffer here — terminating its worker, dropping it from the registry and the pool, and
+ * rebinding every pane on it back to the source session — would end it implicitly. The governing rule
+ * is that nothing ends a buffer implicitly, and a build that failed is not a user asking for the buffer
+ * to end. `ScratchBuffers.noSessionReply` hands the diagnostics back so the caller can report them.
  *
- * **WHAT THAT COSTS, SAID HERE RATHER THAN ONLY IN A PLAN.** The retire was also what put the pane back
- * on the source session and so made `✎ edit a copy` offerable again (design §4.1a's promised remedy). It is
- * not offerable now: the pane stays on a buffer that will never produce a frame, reading `building…`,
- * until the user retires it from the header list (design §4.2/§4.4), which is wired and is where that
- * gesture lives. Retiring rebinds the pane to source and `✎ edit a copy` comes back with the binding. That gap
- * is the same one `compile.ts`'s `schedule` records for the recompile path, widened — and the escape is
- * the same escape, moved from a keystroke nobody aimed to a control they do.
+ * **WHAT THAT COSTS.** The pane stays on a buffer that will never produce a frame, reading
+ * `building…`, and `✎ edit a copy` is not offerable there until the user retires the buffer from the
+ * header list (design §4.2/§4.4). Retiring rebinds the pane to source and `✎ edit a copy` comes back
+ * with the binding.
  */
 describe('a poisoned buffer survives its own no-session reply', () => {
   /**
-   * THE TASK'S OWN ASSERTION: the buffer is still in `list()`, which is the header control's input and
-   * therefore the only place a user could reach it from. A retire deletes the entry `list()` reads
-   * (`retire`'s own "the collection's own entry goes last of all"), so this fails against the old
-   * behaviour rather than describing it.
+   * THE BUFFER IS STILL IN `list()`, which is the header control's input. A retire deletes the entry
+   * `list()` reads, so this would fail against an arm that retired the buffer.
    *
    * THE POOL AND THE REGISTRY ARE ASSERTED BESIDE IT, AND `terminated` IS THE ONE THAT CANNOT BE
    * SATISFIED BY ACCIDENT. A `list()` that kept its row while `retire` still ran underneath would leave
@@ -390,10 +382,9 @@ describe('a poisoned buffer survives its own no-session reply', () => {
   })
 
   /**
-   * THE PANE STAYS WHERE THE FORK PUT IT. Rebinding it home was the retire's other visible effect, and
-   * it is the one a reader is most likely to assume survived — the pane is showing a buffer that will
-   * never build, so "put it back" is the intuitive repair. It is exactly the implicit ending decision 2
-   * refuses: the buffer would still be live and the pane would have left it without being asked to.
+   * THE PANE STAYS WHERE THE FORK PUT IT. The pane is showing a buffer that will never build, so "put it
+   * back" is the intuitive repair, and it is exactly the implicit ending decision 2 refuses: the buffer
+   * would still be live and the pane would have left it without being asked to.
    */
   it('leaves the pane on the buffer rather than dragging it home', () => {
     const { buffers, replies, slot } = scratchDriver()
@@ -405,36 +396,26 @@ describe('a poisoned buffer survives its own no-session reply', () => {
   })
 
   /**
-   * **THE DIAGNOSTICS STILL SURFACE, WHICH IS THE HALF THAT DID NOT CHANGE.** A notice (`notice.ts`) is
-   * the surface for this path because no editor was ever mounted to hold a gutter: `scratch-compiled` never
-   * fired for a build that never succeeded, so `LambdaPane.setDiagnostics` is a silent no-op. That
-   * argument used to end "…and the retire has just moved the pane anyway"; the rebind is gone and the
-   * no-editor half is what carries it now, unchanged.
+   * **THE DIAGNOSTICS SURFACE IN A NOTICE.** A notice (`notice.ts`) is the surface for this path
+   * because no editor was ever mounted to hold a gutter: `scratch-compiled` never fired for a build
+   * that never succeeded. So the arm asks `editorHome` for no editor at all.
    */
   it('reports the reason in a notice, since no editor was ever mounted to hold a gutter', () => {
-    const { buffers, replies, slot, gutter, notified } = scratchDriver()
+    const { buffers, replies, slot, notified, editorAsked } = scratchDriver()
     const id = buffers.fork(slot, 'not a term (((', 0, 'lambda')
 
     replies.onScratchReply(id, noSession([DIAGNOSTIC]))
 
     expect(notified().join(' ')).toContain('unexpected `(`')
-    // AND NOT INTO THE PANE, which is the branch's other half: there is no editor behind
-    // `setDiagnostics` on a build that never reached `scratch-compiled`, so routing it there is the
-    // silent no-op the notice exists to replace.
-    expect(gutter).toEqual([])
+    expect(editorAsked()).toEqual([])
   })
 
   /**
    * **A COPY'S THREAD THREW, AND THE PROGRAM'S READOUT IS NOT WHERE THAT GOES — Plan 7 part 2 spec §9,
-   * §13, and the pre-flight build's finding 9.5.** This arm used to render into `#results`, which was
-   * one surface for the whole app; the strip reads the FOCUSED view's session now, so a copy's failure
-   * stored as the program's result would replace a program result that is still valid and then show up
-   * only while the program is focused — nowhere at all while the copy's own view is on screen. It is a
-   * notice that names the copy, and the copy's own leg carries the reason its readout reads.
-   *
-   * **DRIVABLE IN THIS TIER ONLY SINCE THAT CHANGE.** The arm's `document.createElement` went with
-   * `showWorkerError`; the file's own `scratchDriver` doc records why a `document` in an arm makes it
-   * unreachable here.
+   * §13.** The strip reads the FOCUSED view's session, so a copy's failure stored as the program's result
+   * would replace a program result that is still valid and then show up only while the program is
+   * focused — nowhere at all while the copy's own view is on screen. It is a notice that names the copy,
+   * and the copy's own leg carries the reason its readout reads.
    */
   it('says a copy stopped, by name, and leaves the program alone', () => {
     const { reg, buffers, replies, slot, notified } = scratchDriver()
@@ -451,17 +432,14 @@ describe('a poisoned buffer survives its own no-session reply', () => {
   })
 
   /**
-   * THE LIVE-EDIT PATH IS UNTOUCHED AND STILL DISTINGUISHED. A buffer with a frame behind it takes the
-   * other branch — nothing is reported as a failed fork and the buffer survives — and that
-   * discrimination is the whole reason `noSessionReply` still returns something rather than nothing.
-   * Without this case the arm could report every parse failure as a fork failure and every assertion
-   * above would still pass.
+   * THE LIVE-EDIT PATH IS DISTINGUISHED. A buffer with a frame behind it takes the other branch —
+   * nothing is reported as a failed fork and the buffer survives — and that discrimination is the whole
+   * reason `noSessionReply` returns something rather than nothing. Without this case the arm could
+   * report every parse failure as a fork failure and every assertion above would still pass.
    *
-   * **THE GUTTER IS NO LONGER PART OF THAT DISCRIMINATION, AND THIS TEST USED TO ASSERT IT.** The
-   * diagnostics on this reply went to `LambdaPane.setDiagnostics`, which served λ copies and left TM
-   * copies with an empty gutter whatever was wrong with them. Every editor is an LSP document now and
-   * its diagnostics arrive on that document's own sink. What this case still pins — no notice, buffer
-   * retained — is the whole of what the branch decides.
+   * **THE GUTTER IS NOT PART OF THAT DISCRIMINATION.** Every editor is an LSP document and its
+   * diagnostics arrive on that document's own sink. What this case pins — no notice, buffer retained —
+   * is the whole of what the branch decides.
    */
   it('does not report a mid-edit parse failure as a failed fork', () => {
     const { reg, buffers, replies, slot, notified } = scratchDriver()
@@ -476,10 +454,9 @@ describe('a poisoned buffer survives its own no-session reply', () => {
 })
 
 /**
- * **THE FORK'S WRITER OF THE TEXT OF RECORD** (design §4.3) — `scratch.test.ts`'s `recompile records
- * the text it posts` covers the OTHER writer, the user's own typed text. This is the worker's, and it
- * is the only one that can record a term for a buffer whose editor never mounts at all (a fork whose
- * build failed never reaches `setEditor`).
+ * **THE FORK'S WRITER OF THE TEXT OF RECORD** (5d-ii-d design §4.3) — `scratch.test.ts`'s `recompile
+ * records the text it posts` covers the OTHER writer, the user's own typed text. This is the worker's,
+ * and it is the only one that can record a term for a buffer whose editor never mounts at all.
  *
  * READ BACK THE SAME WAY, because there is no `textOf` accessor: cool the buffer, clear the recorded
  * posts, warm it again, and check what the rebuild posted.
@@ -501,21 +478,20 @@ describe('onScratchReply records a buffer’s text from its own scratch-compiled
     buffers.warm(id)
 
     expect(lastScratchPost()).toEqual({ src: 'built-term', step: 0 })
-    // **THE WRITE IS A SECOND CLAIM FROM THE RECORDING** (5d-ii-d T5, design §4.9). `setText` alone
-    // leaves the term in memory: this is the only moment a FORKED buffer's term exists at all, and
-    // without this call it would reach `localStorage` only if the user later typed into it. An
+    // **THE WRITE IS A SECOND CLAIM FROM THE RECORDING** (5d-ii-d design §4.3). `setText` alone leaves
+    // the term in memory: this is the only moment a FORKED buffer's term exists at all, and without
+    // this call it would reach `localStorage` only when some other event wrote the whole collection. An
     // implementation that kept the `setText` and dropped this line passes every other assertion here.
     expect(persists()).toBe(1)
   })
 
   /**
-   * THE `null` ARM — a build that produced no scratch (design §4.1a: unparseable text, or a term over
-   * `LAMBDA_BYTE_BUDGET`). `setText` is skipped for it, so there is nothing new for a write to carry,
-   * and an unconditional persist here would be a `localStorage` round trip per failed fork.
+   * THE `null` ARM, WHICH THE WORKER NEVER SENDS: `protocol.ts` types `scratch-compiled`'s `text`
+   * nullable defensively, and unparseable text or a term over `LAMBDA_BYTE_BUDGET` takes `no-session`
+   * instead. `setText` is skipped for it, so there is nothing new for a write to carry.
    *
-   * IT ALSO PINS WHICH GUARD THE WRITE SITS UNDER. `text: null` is the one reachable reply that
-   * distinguishes "persist whenever this arm runs" from "persist when the text changed"; both pass the
-   * test above.
+   * IT ALSO PINS WHICH GUARD THE WRITE SITS UNDER. `text: null` tells "persist whenever this arm runs"
+   * apart from "persist when the text changed"; both pass the test above.
    */
   it('does not ask for a write when the build produced no scratch', () => {
     const { buffers, replies, slot, persists } = scratchDriver()
@@ -612,7 +588,7 @@ describe('a TM buffer retains what its panes were last told', () => {
     const id = buffers.forkBlank('tm')
     replies.onScratchReply(id, built(['REG']))
     // PRECONDITION: the build itself draws once, straight, exactly as `tm-scratch-compiled`'s own arm
-    // always has — a build is not one of the streamed replies whose redraw is coalesced. Reset the counter
+    // does — a build is not one of the streamed replies whose redraw is coalesced. Reset the counter
     // so the burst below is read against a known zero, not against this unrelated draw.
     expect(drawn).toBe(1)
     drawn = 0
@@ -699,9 +675,9 @@ describe('a TM buffer retains what its panes were last told', () => {
 /**
  * **A RECORDING CHUNK'S REDRAW IS COALESCED TO ONE PER FRAME, AS A RUNNING VALUE'S IS** — the six `*-frames` arms,
  * three in each switch. `record-loop.ts`'s `recordLeg` posts one chunk per `RECORD_CHUNK` steps while any leg records,
- * far more often than a display paints, and each arm drew once per chunk. The arms now push the chunk's frames at once
- * and leave only the paint for the next frame; the chunk that ends the recording paints at once, since a copy's run
- * gets no `result` reply to paint its last frame.
+ * far more often than a display paints, so each arm pushes the chunk's frames at once and leaves only the paint for
+ * the next frame; the chunk that ends the recording paints at once, since a copy's run gets no `result` reply to
+ * paint its last frame.
  *
  * EVERY CASE RUNS FOR BOTH SWITCHES AND ALL THREE LEGS. The six arms are written out separately, so a case run against
  * one of them says nothing about the other five.

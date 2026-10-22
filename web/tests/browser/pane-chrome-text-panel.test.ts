@@ -40,7 +40,7 @@ describe('textPanel', () => {
   })
 
   // The buffer's own record decides where a mount starts, and an unmount must not leave
-  // that state behind for the next buffer to inherit — the defect `collapseButton` was once fixed for.
+  // that state behind for the next buffer to inherit.
   it('starts where the buffer record says, and resets on unmount', () => {
     const body = document.createElement('div')
     const t = textPanel(body, () => {})

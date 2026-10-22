@@ -27,7 +27,7 @@ import {
 } from '../../src/workspace'
 import { fourViews, fourViewWorkspace } from '../browser/harness'
 
-/** All four views, two rows of two — the tree these cases were written against; `defaultLayout()` is two views now. */
+/** All four views, two rows of two — the tree these cases are written against; `defaultLayout()` is two views. */
 const FOUR = fourViews()
 const SPLIT = splitLeaf(FOUR, 'lambda-0', 'row', 'pane-1', 'tm')
 
@@ -64,7 +64,7 @@ describe('defaultFocus', () => {
     expect(defaultFocus({ kind: 'leaf', id: 'source', pane: 'source' })).toBe('source')
   })
 
-  /** An asm view is a view like the others: it was passed over while this took the first λ or TM leaf. */
+  /** An asm view is a view like the others: a `defaultFocus` that took the first λ or TM leaf would pass it over. */
   it('is the asm leaf where that is the first leaf that is not the source', () => {
     expect(defaultFocus(defaultArrangement(['source', 'asm'], 'wide'))).toBe('asm-0')
     expect(defaultFocus(defaultArrangement(['asm', 'tm'], 'wide'))).toBe('asm-0')
@@ -128,13 +128,13 @@ describe('parseWorkspace', () => {
       (e: Record<string, unknown>) => ({ ...e, panels: { 'tm-0': { rules: 'yes' } } }),
     ],
     // **AT VERSION 2, NOT ONLY THROUGH THE MIGRATION.** The `'an invalid tree'` row above is wrapped at
-    // version 1, so it measured the migration branch's guard alone; a hand-edited version 2 envelope is
-    // the reachable hazard, and an unvalidated tree reaches `applyLayout` — a split with no children
+    // version 1, so it checks the migration branch's guard alone; a hand-edited version 2 envelope is
+    // the reachable hazard, and an unvalidated tree reaches `applyLayout` — a split with one child
     // renders as a pane with wrong padding, and a source leaf under another id mints an empty section
     // beside the detached editor (`layout.ts`'s `validate` argues both).
     // EACH SPOILED TREE CARRIES A `focused` THAT ITS OWN LEAVES SATISFY. Otherwise the envelope is
-    // refused by the focus check and the tree check is never reached — which is how the first version of
-    // these two rows passed against a `parseWorkspace` that took its version 2 tree entirely on trust.
+    // refused by the focus check and the tree check is never reached, and these two rows would pass
+    // against a `parseWorkspace` that took its version 2 tree entirely on trust.
     [
       'a version 2 tree whose source leaf is under another id',
       (e: Record<string, unknown>) => ({ ...e, tree: { kind: 'leaf', id: 'foo', pane: 'source' }, focused: 'foo' }),
@@ -159,9 +159,9 @@ describe('parseWorkspace', () => {
   ])('rejects the whole envelope for %s', (_what, spoil) => {
     expect(parseWorkspace(JSON.stringify(spoil(valid())))).toBeNull()
   })
-  // **A FIELD 2a DID NOT WRITE IS NOT AN INVALID FIELD.** Version 2 shipped without `inspector`, so a
-  // workspace stored by part 2a has none; refusing it would reset every upgrading user's layout, which is
-  // the one thing the version 2 envelope exists to avoid (spec §3).
+  // **A MISSING `inspector` IS NOT AN INVALID ONE.** A version 2 workspace stored before the field existed
+  // has none; refusing it would reset every upgrading user's layout, which the version 2 envelope exists
+  // to avoid (Plan 7 part 2 spec §3).
   it('defaults a missing inspector to open, and refuses one that is not a boolean', () => {
     const base = {
       version: 2,
@@ -176,8 +176,8 @@ describe('parseWorkspace', () => {
     expect(parseWorkspace(JSON.stringify({ ...base, inspector: 'yes' }))).toBeNull()
   })
 
-  // **A FIELD 2b DID NOT WRITE IS NOT AN INVALID FIELD**, for `inspector`'s reason: a workspace stored
-  // before Plan 7 part 4a has no `display`, and refusing it would reset every upgrading user's layout.
+  // **A MISSING `display` IS NOT AN INVALID ONE**, for `inspector`'s reason: a workspace stored before the
+  // field existed has none, and refusing it would reset every upgrading user's layout.
   it('defaults a missing display to none stored, and refuses a malformed one', () => {
     const base = { version: 2, tree: SPLIT, switches: PRESETS.explorer, speed: 8, focused: 'lambda-0', panels: {} }
     expect(parseWorkspace(JSON.stringify(base))?.display).toEqual({})
@@ -195,7 +195,7 @@ describe('parseWorkspace', () => {
     }
   })
 
-  // **THE SAME FOR A TM VIEW'S DISPLAY**, which Plan 7 part 4b added after 4a's.
+  // **THE SAME FOR A TM VIEW'S DISPLAY.**
   it('defaults a missing TM display to none stored, and refuses a malformed one', () => {
     const base = { version: 2, tree: SPLIT, switches: PRESETS.explorer, speed: 8, focused: 'lambda-0', panels: {} }
     expect(parseWorkspace(JSON.stringify(base))?.tmDisplay).toEqual({})

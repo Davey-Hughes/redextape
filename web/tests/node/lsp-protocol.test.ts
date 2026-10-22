@@ -7,10 +7,9 @@ const LANGUAGE_RS = fileURLToPath(new URL('../../../crates/redextape-lsp/src/lan
 
 describe('the language ids the client sends', () => {
   /**
-   * **THE ONE CONTRACT IN PART 3 WHOSE BREACH IS SILENT.** `Language::from_language_id` answers
-   * `None` for an id it does not match, and every language request then returns empty — no error, no
-   * console warning, and on screen a file with no problems in it. It cost the part 3 design a round
-   * of measurements that read nine times too fast.
+   * **A CONTRACT WHOSE BREACH IS SILENT.** `Language::from_language_id` answers `None` for an id it
+   * does not match, and every language request then returns empty — no error, no console warning,
+   * and on screen a file with no problems in it.
    *
    * Read out of the Rust source rather than restated, so this fails when the server's list changes
    * rather than when someone remembers to update a copy.
@@ -27,7 +26,7 @@ describe('the language ids the client sends', () => {
   })
 
   it('cover every pane kind that has an editor, and every id has an extension', () => {
-    // EVERY `PaneKind`, asm included: its editor is part 5c's asm copies, and they take their language from here.
+    // EVERY `PaneKind`, asm included: an asm view's editor is an asm copy's, which takes its language from here.
     expect(Object.keys(LANGUAGE_OF_PANE).sort()).toEqual(['asm', 'lambda', 'source', 'tm'])
     expect(LANGUAGE_OF_PANE.asm).toBe('redextape_asm')
     for (const id of Object.values(LANGUAGE_OF_PANE)) expect(LANGUAGE_IDS).toContain(id)

@@ -8,8 +8,8 @@ import { drawn, frames, host, SHELL, stateIdle, until } from './harness'
 /**
  * A DIVIDER DRAGGED WHILE AN EDITOR HAS THE FOCUS DOES NOT FORMAT IT — the settings menu's *format on blur*, and
  * `pane-host.ts`'s `keepingFocus`: the drag's end takes the editor off the page and puts it back with the focus in
- * it, as a switch of views does, and the `blur` that sends the editor is not the user leaving it (`main.ts`'s
- * `focusKept` has what was measured). `view-keys-format-on-blur.test.ts` holds a switch to the same flag, and
+ * it, as a switch of views does, and the `blur` that sends the editor is not the user leaving it (`focusKept`'s
+ * doc in `main.ts`). `view-keys-format-on-blur.test.ts` holds a switch to the same flag, and
  * `divider-drag-focus.test.ts` drags with the setting off.
  *
  * **WHAT IS COUNTED IS THE REQUEST TO FORMAT**, as `view-keys-format-on-blur.test.ts` counts it and for its reason:
@@ -22,8 +22,7 @@ import { drawn, frames, host, SHELL, stateIdle, until } from './harness'
  * the text formatted: the setting is on, the server answers, and the count reads what a blur does.
  *
  * **A COPY'S EDITOR IS HELD ON A MACHINE COPY ALONE.** Every copy's editor is handed the one answer to whether a blur
- * formats, whatever its leg (`transport.ts`'s `formatOnBlur`); measured before the drag was held to it (2026-10-12),
- * a λ copy's editor lost its caret to a drag as the machine copy's did.
+ * formats, whatever its leg (`transport.ts`'s `formatOnBlur`).
  */
 
 recordFormats()

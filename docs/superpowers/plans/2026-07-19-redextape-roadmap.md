@@ -27772,3 +27772,469 @@ f246a68 7b86e74 7313836 2f2ba9d c30cf2f b3e713b df71626`). "Report" and "ledger"
 | 0; 0; 0 | `I5's` at `$H`; files outside `docs/` naming `RECORD_BUDGET`; `4(10\|21) MB` in `crates/` | `git grep "I5's" $H \| wc -l`; `git grep -l RECORD_BUDGET $H -- ':!docs' \| wc -l`; `git grep -n -E '4(10\|21) MB' $H -- crates \| wc -l` |
 | §3, §10; 2 entries | where the design spec quotes 10.3x/50.0x and ~35 ns/node; roadmap entries quoting them | `git grep -n -E '10\.3x\|50\.0x\|35 ns/node' $H -- <spec> <roadmap>`, against each file's headings |
 | 14; 651 | probes notes entries at `$B`; LANDS marks not read | `git show $B:docs/superpowers/notes/2026-10-17-code-history-probes.md \| grep -c '^## '`; 671 less the 20 spot-checks |
+
+#### COMMENTS IN `web/` KEEP THEIR WHY, AND THE HISTORY AND MEASUREMENTS THEY CARRIED ARE IN TWO PER-AREA NOTES FILES OR GONE; EIGHTEEN CODE COMMITS FIX A BLIND TEST, DROP A CHECK THAT COULD NOT FAIL, MERGE A DUPLICATE CASE, ASSERT THAT A FAILED FORK ASKS FOR NO EDITOR AND WHICH PANE A CLOSE FOCUSES, PIN THE NINETEEN NULLABLE SITES OF THE GENERATED BINDINGS, ADD THE ASM LEG'S CAP ARM, REMOVE AN UNCALLED MEMBER, A DEAD CSS CAP AND A THUNK, AND RENAME TEST NAMES, MESSAGES AND IDENTIFIERS THAT CARRIED HISTORY OR FALSE CLAIMS (2026-10-21, branch `comments-web`, `4687e79..9f0da7e`, 107 commits, plus this entry)
+
+**This is PR D of the comments-and-repeats plan, its last.** It applies the user's comment rule of 2026-10-17 to the
+comments in `web/` (`web/src/`, `web/tests/`, `web/scripts/` and `web/vite.config.ts`): a comment holds the reason, the
+invariant and what breaks if it changes. History and measurements left the comments. Text a future editor could need
+moved verbatim into `docs/superpowers/notes/2026-10-17-code-history-web-src.md` and `…-web-tests.md`; the rest was
+dropped. The read also reached nine doc comments in four `crates/` files (three by ruling D6, one a code review found
+false, and five by ruling D14: `tmText`'s wrapper doc and four `amendment N` citations), the `ci.yml` comment that
+pointed at `vite.config.ts`'s cut measurements, and `check-attributions.sh`'s account of the two markers that left
+`web/` with the comments carrying them. Of the 107 commits, 18 make up the code list, each under a user ruling or a
+controller call named below; the other 89 change no code token, which the step-6 proof checks by reverting the 18. The
+lane record is `~/temp/redextape-comment-pass-record/` (`R` below); its ledger is `R/d/ledger.md`.
+
+##### WHAT CHANGED
+
+- **Comments.** The range changes 352 files, +10,512 −12,712: 84 under `web/src/`, 258 under `web/tests/` (204 browser,
+  54 node), `web/scripts/licences.ts`, `web/vite.config.ts`, 4 under `crates/`, `.forgejo/workflows/ci.yml`,
+  `scripts/check-attributions.sh` and the two notes files. At `9f0da7e`, `check_comment_only.py 4687e79` passes 303
+  source files as comment-only, their comment lines going from 27,520 to 25,282, and reports CODE CHANGED for 47. The 18
+  code commits touch 51 files: the 47, the two notes files, and two files whose edits are comment-only,
+  `web/tests/browser/lsp-restored-panel.test.ts` (CODE-F) and `web/tests/browser/pane-kind-switch.test.ts` (CODE-O).
+- **Notes.** The web-src notes file is new, with 86 entries on 33 source files. The web-tests notes file held 8
+  one-paragraph entries at `4687e79`, from Part B; 0 of their headings and 0 of their paragraphs are left, and the file
+  holds 92 new entries on 44 source files. `check_moves.py 9f0da7e` finds 178 added entries holding 263 paragraphs, 0
+  failing its verbatim check against the comments at `4687e79`; of 9,150 added comment lines, 0 are over 120 columns and
+  0 are one-word orphans.
+- **False claims.** By ruling D1, which takes Part C's ruling (a), comments untrue of the code were fixed as they were
+  found, comment-only, whether the branch or `4687e79` wrote them. Among them: `sessions.ts`'s `pairs()` doc gave the
+  title menu "one `<optgroup>` per leg" (it is a button and a menu); `transport.ts` said panes are "constructed once, at
+  mount" (`applyLayout` builds them on each creation pass); `sessions.test`'s "BOTH ONE-LEGGED SHAPES" and "the source
+  session's two legs" in buffer-affordability.test and scratch-rebind-editor.test missed the asm leg. Class E (below) is
+  that last class: the program session has λ, asm and TM legs.
+- **Design citations (ruling D12).** A `§N` or `decision N` citation the branch's cut left bare, or left inheriting the
+  wrong design from its block or file, was given its design: in place, or through one sentence in the file doc, "Section
+  [and decision] citations here are the X's unless they name another", which 15 files carry (0 at `4687e79`); a
+  sixteenth, local-level.test, says "Section and amendment citations here are the Plan 7 part 4 spec's". The last
+  audit's 32 rows, at `dfa14f9`, are fixed in `547d668`.
+- **The first draft's leftovers (ruling D14).** Six of the seven are done, three as code commits (CODE-M, N and O,
+  below) and three as comments. `8a98b6d` names the 5d-ii-a design §4.3 at the 2 sites of the editor-moves rule that
+  were still bare, `editor-custody.ts` 235 and `lambda-pane.ts` 809, so all 8 that C-D §8 found name it. It also
+  completes `redextape-wasm`'s `tmText` wrapper doc: a result type a `.tm` header cannot name (a function-valued
+  program) is `null` as well as a declined leg, and the wrapper calls `JsValue::from_str`. Bare `amendment N`: C-D
+  counted 31 bare of 88 at `2afc7b7`, 15 of them ambiguous, since the Plan 7 part 4 and part 5 specs both number their
+  amendments from 1, and 2 of the 15 named the part 5 spec at `10fe9c4`. `932c135` names the spec at the other 13: 11
+  the part 5 spec's, `tm-pane.ts`'s state-diagram one the part 4 spec's, and tm-copy-value-readout's "(amendment 12's
+  default)" is cut, since neither spec's amendment 12 says the source is focused. Code review 5 found 3 more that the X7
+  sweep's rule passed, "spec amendment N" with no part and N at most 18: `332e5a2` names the part 5 spec in
+  `session-worker.ts` 428 and the part 4 spec in tm-pointer.test 19, and gives local-level.test the file doc above for
+  its describe names. R5's sweep at `332e5a2` read the 22 lines citing an amendment 1 to 18 with no part on the line,
+  and each resolves through its sentence, doc or file doc. `9f0da7e` (call (u)) names the part 5 spec at four more in
+  `redextape-wasm` (`session.rs` 263, 292 and 515, `tests/browser.rs` 1383). Item 6 is left (below).
+- **One wording for one fact.** "`main.ts`'s `draw()`" or "`main.ts`'s draw pass" is on 13 lines at `4687e79` and 0 at
+  `9f0da7e`: the lanes' commits had reworded or cut eight by `2afc7b7` (now `f9c8c11`, the same tree), and call (c')
+  gave the last five "`draw.ts`'s `createDraw`", the wording the rest of `web/` used.
+
+##### THE USER'S RULINGS
+
+- **2026-10-17:** the comment rule, and the plan's decisions, among them Sonnet chunk implementers and task reviews and
+  one Opus whole-PR review; D1 replaced that model mix for this part.
+- **(D1)** A full read up front with Opus: chunks of every block; an Opus implementer reads each chunk's files whole and
+  decides every comment, fixing false claims as Part C's ruling (a) did; an Opus task review per chunk, then the
+  dangling-pointer enumeration and one Opus whole-branch review.
+- **(D2)** Printed, thrown and assert messages and test names that tell history or are false are fixed in separate code
+  commits, proven comment-only elsewhere by reverting them.
+- **(D3)** Fix both blind tests, one code commit each: buffers-quota-empty asserts the notice hidden, as
+  program-quota.test does; replies.test drops the dead `setDiagnostics` stub, `gutter` and the assertion on it.
+- **(D4)** Three `web/src/` tidies as separate code commits: drop `PaneHost.focusPane` and restore its doc's rule
+  (typecheck); delete the dead outline `max-height: 40vh` and the three `max-height: none` overrides (computed-style
+  probe, desktop and phone); the `lspClient` thunk becomes a value (typecheck and transport tests).
+- **(D5)** Rename identifiers in one code commit: session-memory's `today`/`tomorrow` become `oneWorker`/`threeWorkers`;
+  two-lambda-panes' `selectOf` and its family follow the tests-12 drafts, with tm-pane-follows-session's `selectOf`.
+- **(D6)** The `crates/` docs are fixed comment-only in this PR: `redextape-lsp-wasm`'s `lib.rs` (`handle`'s "a throw
+  kills the message handler" and "the one place") and `redextape-wasm`'s `Session::tm_text` doc (the size cap).
+- **(D7)** D5 covers the class `R/d/ident-enum.md` found: rename 11 of its 13 in CODE-G2; keep `PRE_ASM_DEFAULT` (old
+  stored data, so history is its why) and `.skin` (the settings group's term).
+- **(D8)** Read the changed remainder: an Opus review of each changed block no sample held.
+- **(D9)** Extend bindings-contract.test.ts to pin `StateView.instr` and `AsmState`'s `next`, `wrote` and `source_node`,
+  one code commit, proven like D3.
+- **(D10)** buffer-affordability's reading (b): fix the comments, which now say it covers the λ and TM rings; the
+  unmeasured asm ring is a leftover.
+- **(D11)** Add a `detachAsm` cap arm to sessions.test.ts shaped like the λ and TM ones, one code commit, proven by
+  removing the asm cap.
+- **(D12)** Citations: fix the 9 WRONG, the 125 that inherit the wrong design and the 175 the branch made bare
+  (`R/d/classes/C-D.md`), mostly by a file-doc sentence naming the design; the ~400 bare at `4687e79` that mislead no
+  one are a leftover.
+- **(D13)** Pin the other four nullable fields too, `AsmStatus`'s `run`, `cap` and `total_steps` and
+  `TmScratchStatus.reduction`, as CODE-J2, proven like CODE-J: D9's "the four unpinned" was short by these four.
+- **(D14)** Take seven leftovers of this entry's first draft into this PR: (1) name the editor-moves rule at its 2 bare
+  sites; (2) merge layout.test's two source-leaf refusals; (3) assert the failed fork's editor half; (4) strengthen
+  layout-app's close case; (5) complete the `tmText` wrapper doc; (6) put the web-tests notes' `app.test.ts` entries in
+  one run; (7) name the spec of the ambiguous bare `amendment N`.
+- **(D15)** Leave item 6: the `app.test.ts` notes entry stays in its second run.
+
+D1 and D2 are dated 2026-10-20, D3 to D15 2026-10-21.
+
+##### HOW THE COMMENTS WERE CHECKED
+
+The method ran in five stages: a read of the chunks with a task review each; a dangling-pointer enumeration; a
+whole-branch review of a sample and then of the changed blocks it left; three class enumerations, which with the reviews
+fed one fix round in two lanes; and a cross-lane check and two citation audits of the result. Its limit is that a read
+is one reader's judgement, and fixes write new errors: the D12 audit found 16 citations that the fix round's own
+in-place names had made inherit the wrong design, and the review of the commit that fixed them found a sentence it had
+named quoting a 5d-i rule that the 5d-iii design reverses. The whole review found 2 Important in the 170 blocks of its
+every-tenth sample of changed blocks, the remainder review 29 in 1,112, and most were false at `4687e79` already,
+several in text the branch kept; no sample measured the rate in the 4,490 blocks the branch left unchanged.
+
+- **Chunks (ruling D1).** `R/d/cut.py` split the 6,188 comment blocks in `web/` into 29 chunks of up to about 200 KB of
+  source: 11 for `web/src/`, `web/scripts/` and `web/vite.config.ts` (lane S) and 18 for `web/tests/` (lane T). An Opus
+  implementer read each chunk's files whole and decided its comments; an Opus task review followed each chunk, and each
+  lane batched the reviews' findings into fix commits, each but fix T7 (a byte-identical restore) with a narrow review
+  of its own. Lane S made 23 commits (11 chunks, 12 fixes), lane T 38 (18 and 20), and lane T's were cherry-picked onto
+  `comments-web`, ending at `0b398c2`. For scale: the plan's keyword cut listed 1,340 of the blocks, and Part C's
+  history patterns hit 424 it did not list.
+- **Dangling pointers.** At `936e63a` (now `0b398c2`) an enumerator kept 1,100 of 3,155 pointer sentences, marking 19
+  LIKELY-DANGLING, 401 UNSURE (92 of them crossing lanes) and 680 LANDS, and checked 201 notes headings and 47 twins. A
+  first judging found 5 CONFIRMED and 12 PRE-EXISTING; verify batches over the 309 same-lane UNSURE rows and the 37
+  twins it left found 4 and 12 more.
+- **Whole-branch review.** By call (h), seven Opus reviewers read a reduced sample at `2afc7b7`: every tenth changed
+  block (170), every block a fix touched (346) and every block a review named under a finding, 743 blocks; they found 16
+  Important. By ruling D8, twelve more read the 1,112 changed blocks the sample did not hold, which with the sample's
+  586 changed blocks make the 1,698 the branch changed, and found 29 Important.
+- **Class enumerations.** A-B, a pointer that credits another doc with a reason (A) or a test with what it proves (B):
+  2,272 candidate sentences, 155 FALSE; a recall pass (calls (j), (j') and (j'')) then read the 976 sentences the
+  patterns had dropped, the 157 with no backtick and 9 in a widened possessive form, and found about 10 more FALSE. C-D,
+  citations and labels: 1,372 `§` and `decision N` citations and 88 `amendment N` at `2afc7b7`, with 9 WRONG, 125
+  inheriting the wrong design and 175 made bare by the branch (ruling D12), and 29 history labels among 44 sightings. E,
+  leg counts: 385 lines, 44 FALSE, 36 comment-only and 8 test names or messages (CODE-K).
+- **The fix round.** One worklist merged the review findings, the enumerations' rows and the carried rows: 1,117 rows,
+  1,107 live, at 523 sites. By call (m) it ran in two lanes, FS in the main checkout (`web/src/`, the root files, the D6
+  docs and the web-src notes; 11 commits, `918d7cf` to `1aab3c6`) and FT in a worktree (`web/tests/` and the web-tests
+  notes; 9 commits, `3dca394` to `5a30787`, cherry-picked), each commit with a narrow review; from FS3 and FT3 on, each
+  group was split into halves of about 20 to 28 sites (call (n)). A comment fix inside a code commit's revert context
+  went into that code commit as a fixup (fixups-1, FIXUP-2), and `R/d/fix/revert_check.sh` replayed the code commits'
+  reverts with `git merge-tree` after each fix commit.
+- **Audits.** `b589b47` (XL) applied the FS-END review's findings and checked 22 cross-lane pointer groups, which all
+  landed. The D12 audit re-ran C-D's classifier with the file-doc rule at `dfa14f9`, the FT head that FIXUP-2 and the
+  rewords rewrote as `5a30787`: 0 WRONG, 22 wrong-inheritance and 10 made bare, the 32 rows `547d668` fixes. The
+  provenance audit asked whether a design a citation now names postdates the commit that brought the citation in: of
+  1,537 tokens, 908 named and 412 whose name is new since `4687e79`, 4 meet the date rule and 0 are misnamed (the
+  5d-ii-c commit `560d465` rewrote each sentence round them). `f1bb04c` took the D12F review's findings and `10fe9c4`
+  code review 4's Minors.
+- **Code reviews.** Five reviews (`R/d/code-review-1.md` to `-5.md`) and one of fixups-1 read the code commits at their
+  SHAs. The fourth, over FIXUP-2, D12G, CODE-J, L, K and J2, approved with 0 Important and 3 Minor. The fifth, over
+  `8a98b6d`, `932c135` and CODE-M, N and O, found 1 Important and 3 Minor, which R5 took (`R/d/fix/R5-report.md`):
+  fixups into CODE-N and CODE-O, now `03bd897` and `500ecfa`, and the comment-only `332e5a2`; R5's own review
+  (`R/d/fix/R5-review.md`) approved with 0 Important and 0 Minor, and its one note, three bare "spec amendment 13" in
+  `crates/`, led to `9f0da7e`.
+
+##### THE CODE COMMITS
+
+- **CODE-C, `b7c9469`, ruling D3 and call (g), `web/tests/browser/buffers-quota-empty.test.ts`. This closes the "green
+  and blind" item** of the PLAN 7 PART 6a-i entry (item 9 and its WHAT THIS DID NOT CLOSE bullet) and of that part's
+  plan (line 77). The never-forked case asserted `#link-status` empty, which the copies' report no longer writes. It now
+  counts the writes its module-scope wrapper refuses, asserts the count is above 0, and asserts the notice line stays
+  hidden. In scratch worktrees: with `main.ts`'s `if (hasBuffers)` guard deleted, the old test passed and the new one
+  failed at the notice assertion; with the buffers write skipped, the first version of the new test passed and the
+  amended one failed at the precondition; with `#notice` removed, the first version threw at `.hidden`. Its notes entry,
+  which described the `#link-status` pair, is deleted, and FIXUP-2 folded into it the re-heading of the
+  buffers-quota-restored entry beside it.
+- **CODE-B2, `a1c0c7c`, ruling D3, `web/tests/node/replies.test.ts`.** The failed-fork case asserted `gutter` empty, but
+  only a `setDiagnostics` stub wrote `gutter`, and no pane type has that member (the stub got past the types through `as
+  unknown as`), so the check could not fail. The stub, `gutter` and the assertion are gone, and the case still asserts
+  the notice. This commit rests on that premise and a run (42 passed), not on a sabotage; the no-editor half it watched
+  in name is CODE-N's, below.
+- **CODE-D, `7feceee`, ruling D4, `web/src/pane-host.ts`.** `PaneHost` loses `focusPane`, which no caller outside the
+  module used, and its doc's rule ("ITS MEMBERS ARE WHAT `main.ts` ACTUALLY CALLS") reads as it did at `4687e79`; the
+  closure stays. `tsc` exited 0 and five browser files passed 36 tests.
+- **CODE-F, `cbe388a`, ruling D4, `web/src/main.ts`, `web/src/transport.ts`, `web/tests/node/sessions.test.ts`.**
+  `createTransport` takes the language server as a value where it took a thunk, and `main.ts` builds it as a `const`, so
+  building it after that call is a compile error. A scratch file showed the split the new docs state: a direct use above
+  the `const` gives `TS2448: Block-scoped variable 'client' used before its declaration`, a closure's use compiles.
+  sessions.test passed 23 tests and the eight LSP browser files 40.
+- **CODE-E, `0dcc308`, ruling D4, `web/src/style.css`.** The outline's `max-height: 40vh` and the three `max-height:
+  none` rules that lifted it are gone, with the web-src notes entry that backed the cap. A temporary browser probe took
+  63 records (three views; Explorer at 1280×900, 1280×500 and 390×844, the Stage at those and 390×500; open, then after
+  each of two maximise presses): before and after are identical, and a control that deleted only the overrides changed 5
+  heights, so the probe sees a live cap.
+- **CODE-G, `aec4f30`, ruling D5.** session-memory's `oneWorker`/`threeWorkers`; two-lambda-panes' `bindingOf`,
+  `binding`, `askerBinding`, `lambdaLabelsOf`, `boundBufferItemOf`, `itemA` and `itemB`, and tm-pane-follows-session's
+  `bindingOf`, name a view's title binding and menu items where they named a `<select>` and its options. The three files
+  passed 20 tests.
+- **CODE-G2, `93bda60`, ruling D7.** 11 of the 13 identifiers: inspector-phone's `BEFORE`/`SHORT_BEFORE` are
+  `HELD_BOXES`/`SHORT_PAGE_BOXES`, workspace-upgrade's `AS_2A` is `V2_WITHOUT_INSPECTOR`, seven menu-item
+  `select`/`option` names in scratch-app, scratch-rebind-editor, scratch-buffers and two-lambda-panes name items and
+  titles, and readout.test's `running` is `endedLeg`.
+- **CODE-A, `ca3d707`, CODE-B, `cbebbca`, CODE-A2, `f9c8c11`, and CODE-H, `2b827d2`, ruling D2 and call (f).** 21
+  strings in 16 browser files and 11 in 9 node files say what their cases hold, among them names ending "— Important
+  finding, review of this task" and "as it always has", a view-keys label saying the move keys come in "the second pull
+  request" (the view layouts spec's key table puts them in the third) and theme.test's "is the source the TokenClass
+  union is derived from" (`types.ts`: the union does not derive from the array). CODE-A2 renames inspector-phone's three
+  "where 53ecbfa drew it" names; CODE-H renames layout.test 226 ("still refuses"; CODE-M merged it into 212),
+  share-positions 306 and 312, strip.test 126 and workspace-upgrade's describe "a workspace stored by part 2a".
+- **CODE-K, `5a74261`, ruling D2 (class E).** It changes 10 lines in six files. Nine, in five files, make test names and
+  messages count the legs their cases have: menu-focus picks the TM leg, worker decodes the λ and TM legs, link-status
+  says every leg or two legs, tm-buffer-restore restores λ and TM buffers, and share-open-clamps-unseen waits for every
+  leg to stop. The tenth renames layout-app's close case for what it asserts (call (s)); CODE-O rewrote that case.
+  scratch.test's `describe('two legs, one collection'` stays: its nine cases fork λ and TM copies, and asm copies have
+  their own describe. link-status.test with scratch.test passed 93 tests and the five browser files 41.
+- **CODE-J, `a4ff287`, ruling D9, and CODE-J2, `6af3260`, ruling D13, `web/tests/node/bindings-contract.test.ts`.** The
+  contract pinned 11 nullable sites; it pins 19, which is the number of `| null` sites in the 29 generated binding
+  files, and its case reads `'admits null at every nullable site'`. Each commit was proven in a scratch worktree with a
+  Rust override that drops a `| null`, `ts(type = "number")` on `AsmState.next` for J and on `AsmStatus::total_steps`
+  for J2: the old file type-checks (exit 0), the new one fails with `TS2322: Type 'null' is not assignable to type
+  'number'`. The `TmStatus::total_steps` doc in `crates/redextape-wasm/src/session.rs` now names this test where it
+  credited three fixtures (`10fe9c4`, comment-only).
+- **CODE-L, `fe20f60`, ruling D11, `web/tests/node/sessions.test.ts`.** A case for the asm-fork handler, shaped like the
+  λ and TM arms: a non-cap error is re-thrown with nothing notified, drawn or counted, and a `BufferCapReached` reaches
+  the notice with one draw and no buffer-count report. With `forkCopy`'s catch changed to re-throw the asm leg's refusal
+  (`|| leg === 'asm'`), the old file passed 23 of 23, the whole node project stayed green (70 files, 1,406 tests), and
+  the new file failed at line 555, the refusal half.
+- **CODE-M, `0844ed4`, ruling D14, `web/tests/node/layout.test.ts`.** The cases at 212 and 226 both held
+  `splitLeaf(fourViews(), 'source', …)` throwing, and 226 also asserted the message. They are one case at 212, named for
+  the reason and asserting the message, `/source pane cannot be split/`, which implies 212's `/source/`. In a scratch
+  worktree: with `layout.ts`'s source guard deleted, the old file failed 3 cases (212, 226 and 657) and the new one 2
+  (the merged case and 657); with the message changed to `'the source pane refuses a split'`, the old 212 stayed green
+  and 226 failed, and the merged case failed. layout.test passed 97 tests, where it had 98.
+- **CODE-N, `03bd897`, ruling D14, `web/tests/node/replies.test.ts`, `web/tests/browser/scratch-fork.test.ts`.** No test
+  asserted that a failed fork mounts no editor: replies.test's `scratchDriver` and scratch-fork's failed-fork case
+  passed `editorHome: () => undefined`, which records nothing. Each now records the sessions `editorHome` is asked for
+  while answering `undefined`, and replies.test's notice case and scratch-fork's case each assert the record empty. With
+  `editorHome(session)?.setEditor(null)` added to `replies.ts`'s failed-fork arm in a scratch worktree, the old files
+  passed (42 and 6 tests) and the new ones each failed with `expected [ 'scratch-1' ] to deeply equal []`. Code review
+  5's Important finding was in this case's comment, which said `editorHomeFor` "has nothing to resolve", though
+  `pane-host.ts`'s wrapped `detach` records a claim on every fork; R5's fixup (`51cb65c` to `03bd897`) says the app's
+  `editorHome` would answer the pane and that the assertion is on the asking.
+- **CODE-O, `500ecfa`, ruling D14, `web/tests/browser/layout-app.test.ts`,
+  `web/tests/browser/pane-kind-switch.test.ts`.** layout-app's close case asserted only that the focus stayed inside
+  some pane. It is now 'closing the pane a split created moves focus into the pane it was split from, which takes its
+  space': it parks the focus on the `✕`, then asserts that `lambda-0` is the only pane whose area grew and that the
+  focus lands in `lambda-0`. Writing it found that the old case's own `splitRow('lambda-0')` created nothing: the cases
+  share one mount, the split test before it had already split `lambda-0`, and a second split would leave a view under
+  `MIN_VIEW_PX` (160), which `admit` refuses; a probe saw the same five panes before and after that split, with
+  `lambda-0` 311 px wide. So the old case had always closed the split test's pane, and the new one does so openly, its
+  doc saying why. Two comments that called the old form the weaker one, in layout-app and pane-kind-switch, are
+  reworded. With `main.ts`'s `neighbourOf` made to answer the view after the closed one, the old file passed 8 of 8 and
+  the new one failed with `expected 'asm-0' to be 'lambda-0'`; the area assertion has no sabotage of its own. The two
+  files passed 13 tests.
+
+##### CALLS THE CONTROLLER MADE WITHOUT A USER RULING
+
+- **(c), revised as (c').** "`main.ts`'s `draw()`" first stayed, both readings being true; the whole review found five
+  sites at `2afc7b7` (`style.css` 1593 and 1643, `tm-pane.ts` 507 and 672, `lambda-pane.ts` 724) using it where the rest
+  of `web/` said "`draw.ts`'s `createDraw`", so the five were aligned, and (l) set aside the review row that kept them.
+- **(d)** tm-blank-buffer's `settled()` row: no change, since that wait cannot race.
+- **(e)** `colour.ts`'s fence stays, a worked example colour.test asserts; only its "MEASURED" lead-in is reworded.
+- **(f)** A test name says what the case asserts; the commit a pinned oracle was measured at belongs in the comment that
+  pins the values. So CODE-A2 renames inspector-phone's three names, and its comments naming `53ecbfa` stay.
+- **(g)** CODE-C also asserts its precondition, a refused write, as program-quota.test does.
+- **(h)** The whole review read the reduced sample (743 blocks) in place of the full union of sampled and review-named
+  blocks (1,998); its known miss, B12024 in `style.css`, is identifier-only.
+- **(i)** "the controller's choice" in `layout.ts` names a role in the agent workflow, not a design or a ruling: the
+  credit is dropped and the reason kept.
+- **(j), (j'), (j'')** The recall pass covered the 519 lines A-B named, then all 976 dropped sentences, then the 157
+  with no backtick and the widened form; after that the boundary is written down, not chased.
+- **(k)** Dropped from the worklist: the 8 editor-moves rows of C-D §8 and the 5a-ii design's own "§11.9" (a doc,
+  outside the pass). Kept: 13 extra per-line citation rows, since a file-doc sentence must not mislabel a citation that
+  was bare at `4687e79`.
+- **(l)** Review rows that were one edit were merged (sessions.test 656; two-lambda-panes 64-66).
+- **(m)** The fix round ran as two lanes, FS and FT, cherry-picked together after.
+- **(n)** Fix groups from FS3 and FT3 on were split into halves of about 20 to 28 sites.
+- **(o)** `session-worker.ts` 247 was fixed by provenance, within D12.
+- **(p)** `style.css` 1495's "3,069,144px" stays only as one reason clause if it is the reason, else it goes; `1aab3c6`
+  cut it.
+- **(q)** "badge" for `copy · not linked` stays in comments and in copy-header.test's messages: it is the 5d-i design's
+  word.
+- **(r)** FIXUP-2 changed two comment commits, now `3dca394` and `d97473f`, which delete and re-add the
+  buffers-quota-restored notes entry; they still net to zero on it.
+- **(s)** layout-app's close case is renamed, not strengthened; ruling D14 then took the strengthening, as CODE-O.
+- **(t)** The fix round's commit subjects that say a file's comments "name the design their section citations mean" are
+  not reworded, though citations that were bare at `4687e79` stay bare in some of those files; the count is below.
+- **(u)** `9f0da7e` takes D14's item 7 past `web/`: the four `amendment N` with no part in `redextape-wasm`
+  (`session.rs` 263, 292 and 515, `tests/browser.rs` 1383), which R5's review and a sweep found, name the part 5 spec,
+  and `virtual-grid.ts` 269's "(Plan 5 design §5.1)" names the 5b design. The two in `redextape-core`, outside this PR's
+  files, are left (below).
+- **Unlettered.** "used to claim … see the history note" pointers were dropped branch-wide; `link-status.ts`'s 50–82%
+  figure stays as its reason clause, and its notes entry is deleted; scratch-fork.test's `yieldToEventLoop` figures stay
+  as a clause in the doc; the src-10 review's call on `style.css`'s measurement records was followed over the fix-T5
+  review's "keep or move"; seven commit messages were reworded in one rebase before any push, their trees unchanged
+  (`R/d/rewords-sha-map.tsv`).
+
+##### WHAT THIS DID NOT CLOSE
+
+- **Citations bare at `4687e79`.** The D12 audit listed 322 at `dfa14f9` that mislead no one
+  (`R/d/fix/D12-work/leftovers.tsv`); `547d668`, `f1bb04c`, `10fe9c4` and `9f0da7e` named 12 of them, and its
+  classifier, re-run at `9f0da7e`, finds the other 310 bare, in 74 files, each bare at `4687e79` too: 62 in `main.ts`,
+  18 in `style.css`, 15 in `pane-host.ts` and 9 in `tm-pane.ts` among them.
+- **Two `spec amendment N` with no part outside this PR's files:** `redextape-core`'s `src/viewmodel/tree.rs` 8
+  (amendment 3) and `tests/sourcemap_coverage.rs` 684 (amendment 14).
+- **The 5a-ii design's "§11.9"** (`docs/superpowers/specs/2026-08-08-plan5a-ii-state-table-design.md` line 151) means
+  the 5a design's §11, risk 9, as `app.test.ts` 1241 now says. Docs are records.
+- **`recompile` does not persist.** The 5d-ii-d design's §4.3 schedules a persist at `setText`; `scratch.ts`'s
+  `recompile` does not persist. FS5a cut the comment's false "design's persist sites do not include a bare edit"; the
+  code is unchanged.
+- **The asm ring is not measured (ruling D10).** buffer-affordability's reading (b) covers the λ and TM rings, and its
+  comments say so.
+- **`onBuffersPersist` in scratch-fork's failed-fork case** (line 577) is a plain no-op; like `editorHome`, it could
+  record and be asserted at zero.
+- **layout.test 653** ("still refuses to split the source leaf, whatever kind is requested") asserts only `/source/`.
+- **`layout.ts` 294's thrown message,** "the source pane cannot be split: there is one editor to duplicate", can be read
+  as saying there is an editor to duplicate.
+- **The TM view's maximise at Explorer 390×844.** CODE-E's probe saw the first press change nothing, in each run;
+  whether the probe or the app is at fault was not looked into.
+- **`navKeymap` and `lspHover` keep their thunks.** `main.ts` lines 2692 and 2700 pass `client: () => lspClient` for the
+  source editor; those thunks are `lsp-nav.ts`'s and `lsp-hover.ts`'s own interfaces, shared with the copy editors, and
+  outside ruling D4.
+- **Kept names.** `PRE_ASM_DEFAULT` and `.skin` (ruling D7), and "badge" (call (q)).
+- **A smaller item in the record.** The web-src notes' line 628 says "both legs decoded"; it is moved text, kept
+  verbatim.
+- **Records keep the old claims.** The PLAN 7 PART 6a-i entry (roadmap lines 22717 and 22810) and its plan (line 77)
+  list buffers-quota-empty as green and blind, which `b7c9469` closes; the nullability-gate entry of 2026-09-03 (lines
+  15585 and 15742) says "eleven named constants", now nineteen. Docs are records, so they stay.
+- **"The pane that grew."** The 5d-ii-a design (lines 335 and 375), its plan (2355, 2514 and 2566) and the roadmap
+  (6218) say a close focuses the pane that grew, which `main.ts`'s `neighbourOf` doc says is not always so; they are
+  records.
+- **Notes order (ruling D15).** In the web-tests notes, `web/tests/browser/app.test.ts` has entries in two runs; no
+  source file in the web-src notes does. Moving the entry conflicts with CODE-C's revert, since `b7c9469` deleted the
+  paragraph above its heading; the patch is `R/d/fix/X7-work/item6.patch`.
+- **Pointer sentences not read:** the 680 the enumerator marked LANDS, and those the recall pass's patterns cannot
+  reach: no backtick, no crediting construction and no possessive form.
+
+##### VERIFICATION
+
+The git counts and both checkers ran on 2026-10-21 at `9f0da7e`, in the main checkout: `check_moves.py` reads `git`
+objects, and `check_comment_only.py` reads the working tree, which was clean at `9f0da7e`. The comment-only proof ran on
+2026-10-21 at `332e5a2`, in a scratch worktree (`R/d/proof2-report.md`); the one commit after it, `9f0da7e`, changes
+comments only, by `cco_commit.py 332e5a2 9f0da7e`. The gate ran on 2026-10-21 at `5710d15`, CODE-O before R5's fixup,
+started by `R/d/gate-d2/run.sh` as the user unit `rxt-gate-d2`; its logs are in `R/d/gate-d2/`. The commits after it
+change comments only: `cco_commit.py 5710d15 9f0da7e` finds no code or fence change, and `git range-diff
+0844ed4..5710d15 0844ed4..500ecfa` shows the two rewritten commits differing only in comment lines
+(`R/d/fix/R5-report.md`). The gate ran `check-all.sh --no-llvm`, since this machine has `llvm22-libs` only, with no
+`llvm-config`: at `10fe9c4` the first gate's `check-all.sh` stopped with exit 1 at "error: no LLVM 22 found" after its
+base tier passed (`R/d/gate-d-report.md`). The branch's Rust changes are nine doc comments in four files, which
+`check_comment_only.py` passes as comment-only at `9f0da7e`, so CI's `rust-llvm` job covers that tier. Nothing has run
+in CI: the branch has not been pushed. The commit that adds this entry changes this one file.
+
+```
+python3 -I .superpowers/sdd/comment-pass/check_comment_only.py 4687e79
+  → exit 1: "303 source files changed only in comments; comment lines 27520 -> 25282";
+    47 FAIL lines, each CODE CHANGED, each a file the code commits change
+python3 -I .superpowers/sdd/comment-pass/check_comment_only.py --self-test
+  → exit 0, "self-test: 52/52 pass"
+python3 -I $R/d/check/check_moves.py 9f0da7e
+  → exit 0: "moves: 178 entries, 263 paragraphs, 0 failing";
+    "width: 9150 added comment lines, 0 over 120, 0 orphans"
+comment-only proof at 332e5a2, the 18 reverts, live checker with 4687e79 ($R/d/proof2-report.md)
+  → $R/d/fix/revert_check.sh 332e5a2: exit 0, 18 clean, "final tree 1f6058ce4911a51f761b4f995cb958e3b2c0c122";
+    git revert --no-commit of the 18 in a scratch worktree, then git write-tree: the same tree;
+    check_comment_only.py 4687e79 there: exit 0,
+    "347 source files changed only in comments; comment lines 36539 -> 33176";
+    with web/src/contrast.ts 38's `byte / 255` made `byte / 256`: exit 1, "FAIL M web/src/contrast.ts: CODE CHANGED"
+python3 -I $R/d/tests-15-review-work/cco_commit.py 332e5a2 9f0da7e
+  → exit 0, "3 source files, 0 with code or fence changes"
+python3 -I $R/d/tests-15-review-work/cco_commit.py 5710d15 9f0da7e
+  → exit 0, "8 source files, 0 with code or fence changes"
+scripts/check-all.sh --no-llvm at 5710d15 (user unit rxt-gate-d2, $R/d/gate-d2/check-all.log)
+  → exit 0, "green, but PARTIAL — these tiers were SKIPPED: LLVM. This is NOT a full gate on its own.";
+    7 nextest summaries, 0 failed (the first "1903 tests run: 1903 passed, 33 skipped");
+    wasm-pack test --headless --chrome crates/redextape-wasm: 33 passed
+git diff --stat 4687e79 9f0da7e -- crates
+  → 4 files changed, 29 insertions(+), 26 deletions(-): nine doc comments, no code
+cargo llvm-cov nextest --workspace --fail-under-lines 90
+  → exit 0; "1903 tests run: 1903 passed, 33 skipped"; TOTAL lines 95.59% (32273, 1423 missed)
+scripts/check-slow.sh
+  → exit 0, "slow tier green"
+the nine scans, --self-test then alone ($R/d/gate-d2/run.sh: text-bytes, citations, attributions,
+  doc-figures, shared-docs, colours, grammar-wasm, lua, licences)
+  → 18 exits, each 0; check-attributions: "checked 772 attribution sites, 2 excused by marker, 0 violations"
+in web/: build:wasm, build:lsp-wasm, build:bindings, biome ci --error-on-warnings, typecheck, test:coverage, build:app
+  → 7 exits, each 0; test:coverage "Test Files  280 passed (280)", "Tests  2906 passed (2906)":
+    node 70 files, 1,406 tests, and browser 210 files, 1,500 tests (its per-file lines, by directory)
+```
+
+**Every count this entry quotes, with what produces it.** From the repository root, `B=4687e79`, `H=9f0da7e`,
+`R=~/temp/redextape-comment-pass-record`, `W=.superpowers/sdd/comment-pass`, `C` = the 18 code-list SHAs (`500ecfa
+03bd897 0844ed4 6af3260 5a74261 fe20f60 a4ff287 2b827d2 93bda60 0dcc308 aec4f30 cbe388a 7feceee b7c9469 f9c8c11 a1c0c7c
+cbebbca ca3d707`, the list in `$R/d/fix/revert_check.sh`). The commands below are collected in
+`$R/d/draft-work/verify.sh` (`verify.sh 9f0da7e`), with their output in `verify-9f0da7e.log`, and in
+`$R/d/draft-work/finalize/` and `$R/d/draft-work/d12-9f0da7e/`. "Report" and "ledger" rows are results recorded in
+`$R/d/<name>` or `$R/d/ledger.md`, not commands run for this entry. Under zsh, write `${B}:path`: `$B:w` is a modifier.
+
+| Value | What | Produced by |
+|---|---|---|
+| 107; 18; 89 | commits; on the code list; outside it | `git rev-list --count $B..$H`; `git rev-list $B..$H \| cut -c1-7 \| grep -c -E '^(<C, joined by \|>)$'` (and `-v -c`) |
+| 352 files, +10,512 −12,712; 84; 258 (204, 54); 1; 1; 4; 1; 1; 2 | the range; `web/src`; `web/tests` (browser, node); `web/scripts`; `web/vite.config.ts`; `crates`; `.forgejo`; `scripts`; `docs` | `git diff --shortstat $B $H` (and `-- <path>` for each) |
+| A; M | the web-src and web-tests notes files | `git diff --name-status $B $H -- docs` |
+| 0 → 86 on 33; 8 → 92 on 44; 0 | notes entries (`^## `) at `$B` and `$H`, source files at `$H`; base web-tests headings left | `git show ${B}:<notes> \| grep -c '^## '` and `${H}:`; headings' first backticked path, `sort -u \| wc -l`; `comm -12` of the sorted headings at `$B` and `$H` |
+| 0 of 8 | base web-tests paragraphs left at `$H` | each base entry's paragraph, whitespace collapsed, searched in the file at `$H` (`$R/d/draft-work`, one-off `python3 -I`) |
+| 1 (`app.test.ts`); 0 | sources with entries in more than one run, web-tests; web-src | the headings' paths through `awk '{ if ($0 != p) { if (s[$0]) print $0; s[$0] = 1 } p = $0 }'` |
+| 303; 27,520 → 25,282; 47; 52/52 | comment-only files; their comment lines; CODE CHANGED; checker self-test | `check_comment_only.py 4687e79` at `$H` (clean tree), its summary and `^FAIL` lines; `--self-test` |
+| 51; 49; 2 | files the 18 touch; outside `docs/`; of those not CODE CHANGED (`lsp-restored-panel.test.ts`, `pane-kind-switch.test.ts`) | `git show --name-only --format=` on `C`, `sort -u`; `grep -v '^docs/'`; `comm -3` against the FAIL list |
+| 178, 263, 0; 9,150, 0, 0 | moved entries, paragraphs, failing; added comment lines, over 120, orphans | `check_moves.py 9f0da7e` |
+| 16; 0 | file-doc citation sentences at `$H`; at `$B` | `git grep -n -E '[Cc]itations here are the' $H -- web \| wc -l`; the same at `$B` |
+| 13; 5; 0 | "`main.ts`'s `draw()`" or "draw pass" lines at `$B`; at `2afc7b7`; at `$H` | ``git grep -n -i -E "main\.ts\`'s \`?draw" <rev> -- web \| wc -l`` |
+| 1; 0 each | `one <optgroup>`, `constructed once, at mount`, `BOTH ONE-LEGGED SHAPES` at `$B`; at `$H` | `git grep -n -i -E '<phrase>' <rev> -- web \| wc -l`, with `one .<optgroup>.` for the first (it is backticked) |
+| 2; 0 | "the source session's two legs" at `$B` (`buffer-affordability.test.ts` 541, `scratch-rebind-editor.test.ts` 126); at `$H` | the same |
+| 4; 2 | `check-attributions: allow` markers in `web/` at `$B`; at `$H` | `git grep -n -E 'check-attributions: allow[[:space:]]*$' <rev> -- web \| wc -l` |
+| 6,188; 29 (11, 18) | comment blocks cut; chunks (src, tests) | `sed 1d $W/d/chunks.tsv`: the sum of its `blocks` column; its rows, by prefix |
+| 1,340; 424 | the plan's keyword cut; unlisted blocks Part C's patterns hit | ledger: `$R/d/NEXT-SESSION.md`, "Measured before asking" |
+| 23; 38; 11; 11; 9; 15 | lane S; lane T; CODE-A to H; FS; FT; after FT | `git rev-list --count` over `$B..74c6956`, `74c6956..0b398c2`, `0b398c2..2b827d2`, `2b827d2..1aab3c6`, `1aab3c6..5a30787`, `5a30787..$H` |
+| 11 + 12; 18 + 20 | lane S chunks + fixes; lane T | ledger: the `src-NN`/`tests-NN` DONE rows and the fix S/T rows (`grep -o -E '^- fix [ST][0-9]+ DONE' \| sort -u \| wc -l` gives 32) |
+| 3,155; 1,100; 19; 401 (92); 680; 201; 47 | pointer sentences; kept; LIKELY-DANGLING; UNSURE (cross-lane); LANDS; notes headings; twins | ledger, "STEP 5 DANGLING ENUMERATION DONE"; `$R/d/dangling/candidates.md` line 9 |
+| 5, 12; 4, 12; 309; 37 | CONFIRMED, PRE-EXISTING first; in the verify batches; same-lane UNSURE; twins | ledger, "STEP 5 DANGLING ENUMERATION DONE" and "ALL VERIFY BATCHES DONE" |
+| 170; 346; 743; 16; 2 of 170 | tenth; fix-touched; sample blocks; Important; Important in the tenth | ledger, "SAMPLE BUILT" and "WHOLE REVIEW ALL 7 DONE" |
+| 1,112; 586; 1,698; 29; 4,490 | remainder blocks; changed blocks in the sample; changed blocks; Important; unchanged blocks | ledger, "REMAINDER PACKAGE BUILT", "WHOLE REVIEW ALL 7 DONE" and "REMAINDER REVIEW ALL 12 DONE"; 6,188 − 1,698 |
+| 1,998 | the full sample union | ledger, "SAMPLE BUILT" |
+| 2,272; 155 | A-B candidates; FALSE | `$R/d/classes/A-B.md`, its table's FALSE and "all" rows |
+| 519; 976; 157; 9; about 10 | recall slices | ledger, "CONTROLLER CALL (j)", "(j')", "RC2 no-backtick DONE" |
+| 1,372; 88; 9; 125; 175; 31; 15; 44; 29 | C-D citations; `amendment N`; WRONG; wrong-inheritance; made bare; bare amendments; ambiguous; label sightings; history labels | `$R/d/classes/C-D.md` line 168, §5 (line 1457); ledger, "CLASS C-D DONE" |
+| 2 | of C-D's 15 ambiguous `amendment N`, in `tm-pane.ts`, naming the part 5 spec at `10fe9c4` | C-D.md §5's AMBIGUOUS rows (`tm-pane.ts` 472 and 775 there); `git show 10fe9c4:web/src/tm-pane.ts \| grep -n 'amendment 21'` (473 and 779; the third line it prints, 499, is not one of the 15) |
+| 13 (11, 1, 1) | the rest, by `932c135`: named the part 5 spec, the part 4 spec, cut | report: `$R/d/fix/X7-report.md`, "Commit 2", its numbered list; ledger, "USER (2026-10-21)" (item 7) |
+| 3; 428; 19 | "spec amendment N" with no part and N at most 18, named by `332e5a2`; the `session-worker.ts` line; the tm-pointer.test line | `$R/d/code-review-5.md`, Minor M1; `git grep -n 'Plan 7 part [45] spec amendment 1[38]' $H -- web/src/session-worker.ts web/tests/browser/tm-pointer.test.ts` |
+| 22 | lines citing an amendment 1 to 18 with no part on the line at `332e5a2`, each resolving | report: `$R/d/fix/R5-report.md`, "Amendment sweep on `332e5a2`" |
+| 4 (263, 292, 515; 1383) | `crates/redextape-wasm` citations `9f0da7e` names (`session.rs`; `tests/browser.rs`) | `git diff 332e5a2 $H -- crates`; `git grep -n 'Plan 7 part 5 spec amendment' $H -- crates/redextape-wasm` |
+| 2 (8; 684) | `spec amendment N` with no part in `redextape-core` (`src/viewmodel/tree.rs`; `tests/sourcemap_coverage.rs`) | `git grep -n -i -E 'amendments? [0-9]+' $H -- crates/redextape-core` |
+| 8; 2 (`editor-custody.ts` 235, `lambda-pane.ts` 809); 0 | C-D §8's sites; bare at `10fe9c4`; at `$H` | `$R/d/classes/C-D.md` §8; `git grep -n -i 'editor-moves rule' <rev> -- web`, then `grep -v 5d-ii-a` |
+| 385; 44; 36; 8 | class E lines; FALSE; comment rows; code rows | `$R/d/classes/E.md` lines 32 and 100 |
+| 1,117; 1,107; 523 | worklist rows; live; sites | ledger, "MERGE DONE" |
+| 22 | cross-lane pointer groups, landing | `$R/d/fix/XL-report.md` §3 heading |
+| 0; 22 (16); 10 (3 + 7); 32; 322 in 75 | WRONG; wrong-inheritance (created by the fix round); made bare; rows fixed; bare-at-base leftovers | `$R/d/fix/D12-audit.md` §2; `sed 1d $R/d/fix/D12-work/leftovers.tsv \| wc -l` and `cut -f1 \| sort -u \| wc -l` |
+| 310 in 74; 62, 18, 15, 9 | bare at `$H`, each bare at `$B`; in `main.ts`, `style.css`, `pane-host.ts`, `tm-pane.ts` | the audit's `$R/d/fix/D12-work/all.py` run in a copy whose `tree` is `git archive $H web` (`$R/d/draft-work/d12-9f0da7e`): its "new sets x base" line, `('BARE', 'bare-at-base'): 310`, then `new-rows.json`'s BARE rows by file; `leftmap.py` there maps the 322 rows to `$H` and finds 310 lines unchanged and 12 changed |
+| 12 | leftovers named since the audit | `git show ${H}:<file> \| sed -n '<line>p'` at `virtual-grid.ts` 269, `draw.ts` 265, 335, 378, 387, `link-wiring.ts` 247, `style.css` 967, `tm-pane.ts` 139, 284, `stage.test.ts` 210, `scratch-app.test.ts` 75 (74 at the audit), 274, each naming a design (`verify.sh` row 16) |
+| 1,537; 908; 412; 4; 0 | provenance tokens; named; named by the branch; date rule; misnamed | `$R/d/fix/D12-provenance.md`, Verdict and Method 1-3 |
+| 13; 16 | file-doc sentences at the audit; at `$H` | `$R/d/fix/D12-audit.md` §1; the `git grep` above |
+| 0; 3 | Important; Minor in code review 4 | `$R/d/code-review-4.md`, "Overall verdict" |
+| 1; 3 | Important; Minor in code review 5 | `$R/d/code-review-5.md`, "Overall" |
+| 0; 0 | Important; Minor in R5's review | `$R/d/fix/R5-review.md`, "Verdict" |
+| 21 in 16; 11 in 9 | CODE-A strings in files; CODE-B | reports: `code-CODE-A-report.md`, `code-CODE-B-report.md`, first lines |
+| 42 | replies.test tests after CODE-B2 | report: `code-CODE-B2-report.md`, Runs |
+| 5; 36 | CODE-D's browser files; tests | report: `code-CODE-D-report.md`, Runs |
+| 1; 0 | the `focusPane(id: LeafId \| null): void` member at `$B`; at `$H` | `git show <rev>:web/src/pane-host.ts \| grep -c -E '^\s+focusPane\(id: LeafId \| null\): void'` |
+| 23; 8; 40; `TS2448` | sessions.test tests; LSP browser files; tests; the scratch probe's error | report: `code-CODE-F-report.md`, Runs and "The compile-time claim is measured" |
+| 441; 2692, 2700 | `const lspClient = new LspClient` line; `client: () => lspClient` lines | `git grep -n -E 'const lspClient = new LspClient' $H -- web/src/main.ts`; `git grep -n -F 'client: () => lspClient' $H -- web/src/main.ts` |
+| 63; 5; 1 → 0; 6 → 3 | CODE-E probe records; heights the control changed; `max-height: 40vh` in `style.css`; `max-height: none` | report: `code-CODE-E-report.md`, Probe; `git show <rev>:web/src/style.css \| grep -c '<decl>'` at `$B` and `$H` |
+| 20; 67; 33 | CODE-G browser tests; CODE-G2 browser tests; its node tests | reports: `code-CODE-G-report.md`, `code-CODE-G2-report.md`, Runs |
+| 11 of 13; 7 | D7's renames; menu-item names among them | ledger, "USER RULING (D7)" |
+| 10, 6; 9, 5; 9; 93, 41 | CODE-K's lines, files; leg-count lines, their files; cases in scratch.test's kept describe; node and browser tests | `git show --format= --stat 5a74261` and `-U0`; report: `code-CODE-K-report.md`, row 7 and Runs |
+| 11; 19; 19; 29 | nullable pins at `$B`; at `$H`; `\| null` sites outside comments; generated files | `git show <rev>:web/tests/node/bindings-contract.test.ts \| grep -c -E "^ +const [A-Za-z]+: [A-Za-z]+\['[a-z_]+'\](\[number\])? = null"`; `cat web/bindings/*.ts \| sed -E 's#//.*$##' \| grep -v -E '^\s*\*' \| grep -o -E '\| null' \| wc -l` (the generated bindings on disk, last built at 18:00 on 2026-10-21, from Rust code that `cco_commit.py 5710d15 9f0da7e` finds unchanged to `$H`); `ls web/bindings/*.ts \| wc -l` |
+| exit 0; `TS2322` | old and new contract files under each sabotage | reports: `code-CODE-J-report.md`, `code-CODE-J2-report.md`, Sabotage |
+| 499; 23 of 23; 70, 1,406; 555 | the asm arm's line; old sessions.test under the sabotage; node project files, tests; the failing line | `git show ${H}:web/tests/node/sessions.test.ts \| grep -n -F 'asm-fork handler'`; report: `code-CODE-L-report.md`, Sabotage |
+| 1593, 1643, 507, 672, 724 | the five (c') sites | ledger, "CONTROLLER CALL (c) REVISED" |
+| 22717, 22810; 77; 15585, 15742 | the open green-and-blind lines; the plan line; "eleven named constants" | ``git grep -n -F 'buffers-quota-empty.test.ts` is green and blind' $H -- docs``; `git grep -n -F 'eleven named constants' $H -- <roadmap>` |
+| 151 | the 5a-ii design's "§11.9" | `git grep -n -F '§11.9' $H -- docs/superpowers/specs/2026-08-08-plan5a-ii-state-table-design.md` |
+| 7 | messages reworded before the push | ledger, "REWORDS DONE" |
+| 126; 306, 312 | CODE-H's strip.test line; share-positions lines | report: `code-CODE-H-report.md`, Rows |
+| 1280×900, 1280×500, 390×844; 390×500; 3 | CODE-E's Explorer sizes; the Stage's fourth; views | report: `code-CODE-E-report.md`, Probe |
+| 3; 3 | inspector-phone names CODE-A2 renames; fixtures the old `TmStatus::total_steps` doc credited | report: `code-CODE-A2-report.md`, Rows; `git diff $B $H -- crates/redextape-wasm/src/session.rs` |
+| ~400 | the bare-at-base estimate ruling D12 names | ledger, "USER RULING (D12)" |
+| 656; 64-66 | call (l)'s merged rows | ledger, "CONTROLLER CALLS (l)" |
+| 7; 12 | whole-review parts (S1-S3, B1-B3, N1); remainder parts | ledger, "DISPATCHED WHOLE-BRANCH REVIEW" and "DISPATCHED REMAINDER REVIEW x12" |
+| 37 | twins left to the verify batches | ledger, "STEP 5 DANGLING ENUMERATION DONE" |
+| 31 of 32 | lane S and T fix commits with a narrow review (not fix T7) | `ls $R/d/fix-[ST]*-review.md \| wc -l`; ledger, "fix T7 DONE" |
+| up to about 200 KB | source per chunk (209,104 bytes at most) | the `bytes` column of `$W/d/chunks.tsv` |
+| 8 | those lines gone before (c') | 13 at `$B` less 5 at `2afc7b7` |
+| `1aab3c6` | the commit that cut "3,069,144px" (call (p)) | `git log -S'3,069,144' --format=%h $B..$H` |
+| 9 (3 + 1 + 5) | doc comments changed in `crates/` (by D6; by code review 4's M4-1; by D14 and call (u)) | `git diff -U0 $B $H -- crates`: the module doc and `handle` doc in `redextape-lsp-wasm/src/lib.rs`, `tm_text`'s and `TmStatus::total_steps`'s in `redextape-wasm/src/session.rs`; `tmText`'s in `redextape-wasm/src/lib.rs`, three in `session.rs` (263, 292, 515) and one in `redextape-wasm/tests/browser.rs` (1383) |
+| 13; 20 to 28; 247; 1495, 3,069,144px; 50–82% | call (k)'s kept rows; call (n)'s half-group size; call (o)'s line; call (p)'s line and figure; the link-status figure | ledger, "CONTROLLER CALLS (k)", "CONTROLLER CALL (n) extended", "(o)", "(p)"; `$R/d/carry.md`, "Controller calls to list in the PR" |
+| 212, 226; 212; 653 | layout.test's two refusal cases at `10fe9c4` (the grep's third line there, 657, is the "still refuses" case); the merged case at `$H`; the "still refuses" case at `$H` | `git show <rev>:web/tests/node/layout.test.ts \| grep -n -E "refuses to split the source leaf\|refuses the source leaf as its subject"` |
+| 3, 2; 97 (98) | CODE-M: cases failing with the guard deleted, old and new; layout.test tests after (before) | report: `code-CODE-M-report.md`, PROVE and Runs |
+| 42, 6 | CODE-N: replies.test and scratch-fork tests the old files passed under the sabotage | report: `code-CODE-N-report.md`, PROVE |
+| 8 of 8; 13; 160; 311 px; 5 | CODE-O: old layout-app under the sabotage; the two files' tests; `MIN_VIEW_PX`; `lambda-0`'s width; panes the probe saw | report: `code-CODE-O-report.md`, Verdicts, Runs and PROVE |
+| 577; 294 | scratch-fork's `onBuffersPersist`; `layout.ts`'s thrown message | `git show ${H}:web/tests/browser/scratch-fork.test.ts \| grep -n onBuffersPersist`; `git grep -n 'source pane cannot be split' $H -- web/src` |
+| 335, 375; 2355, 2514, 2566; 6218 | "the pane that grew" in the 5d-ii-a design; in its plan; in the roadmap | `git grep -n -i -F 'pane that grew' $H -- docs` |
+| 1241 | `app.test.ts`'s "§11, risk 9" | `git grep -n -i 'risk 9' $H -- web/tests/browser/app.test.ts` |
+| 628 | "both legs decoded" in the web-src notes | `git grep -n 'both legs decoded' $H -- docs/superpowers/notes` |
+| 3; 8 | source files `cco_commit.py` reads from `332e5a2` to `9f0da7e`; from `5710d15` to `9f0da7e`, each with "0 with code or fence changes" | `python3 -I $R/d/tests-15-review-work/cco_commit.py <a> <b>` |

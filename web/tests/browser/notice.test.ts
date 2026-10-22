@@ -40,10 +40,10 @@ describe('notices', () => {
   })
 
   /**
-   * **THE LINE CAN BE HOLDING THE FOCUS WHEN IT IS REDRAWN** — spec §11, the accessibility list's item 1.
-   * *undo* is offered for eight seconds; a user who tabs to it and waits, or who is still on it when any
-   * other gesture makes a notice, loses the button to the next repaint. Both routes are here, plus the
-   * case where the new notice has an action of its own to land on.
+   * **THE LINE CAN BE HOLDING THE FOCUS WHEN IT IS REDRAWN** — Plan 7 part 2 spec §11, the accessibility
+   * list's item 1. *undo* is offered for eight seconds; a user who tabs to it and waits, or who is still
+   * on it when any other gesture makes a notice, loses the button to the next repaint. Both routes are
+   * here, plus the case where the new notice has an action of its own to land on.
    */
   describe('the focus the line is holding', () => {
     const fallbackEl = () => document.querySelector<HTMLElement>('#fallback')

@@ -12,33 +12,22 @@ import { fakeClient, paint } from '../node/session-fixtures'
 import { newPaneHost, viewTitleOf } from './harness'
 
 /**
- * TWO PANES BOUND TO TWO DIFFERENT λ SESSIONS, RENDERING TWO DIFFERENT TERMS AT THE SAME TIME — plan
- * T7's test, in a real DOM against the real `LambdaPane`.
+ * TWO PANES BOUND TO TWO DIFFERENT λ SESSIONS, RENDERING TWO DIFFERENT TERMS AT THE SAME TIME, in a real
+ * DOM against the real `LambdaPane`. `two-lambda-panes.test.ts` holds that a user can get there through
+ * `main()`; this file holds the resolution and the rendering.
  *
- * WHY THIS IS NOT DRIVEN THROUGH `main()`, unlike most of this directory, and it is the same reason
- * `view-status.test.ts` gives one task earlier: the app cannot reach the state under test. `main.ts`
- * registers exactly one session, and nothing in this slice can add a second — a `LambdaScratch` session
- * needs a worker message `session-worker.ts` does not have (and this task may not touch that file), and
- * creating one by editing a source-derived λ view is design §4.3, which is T8. An app-level test would
- * have one λ session to bind two panes to, which is exactly the "single-session implementation" the
- * plan says anything weaker passes on.
- *
- * **T8 LANDED AND HALF OF THAT IS NOW HISTORY, WHICH IS WHY IT IS AMENDED RATHER THAN LEFT TO ROT.**
- * The app CAN add a second λ session now — `tests/browser/scratch-app.test.ts` drives the control that
- * does it. What has not changed is the sentence that matters here: this app has ONE λ pane, so two
- * panes side by side on two λ sessions is still not a state `main()` can reach, and the registry
- * below is still built by hand for exactly that reason.
- *
- * SO THE REGISTRY IS BUILT HERE AND THE PRODUCTION PATH IS SHARED RATHER THAN RE-IMPLEMENTED.
- * `main.ts`'s `draw()` is, for each pane, `slot.resolve(reg)` followed by `slot.render(reg, pane, leg)`
- * — the two calls `paint` below makes. Resolution, `controlState`, the selector's option list and the
- * `copy · not linked` status all live inside `PaneSlot.render`, so nothing about what a binding MEANS is
- * restated in this file.
+ * THE REGISTRY IS BUILT HERE AND THE PRODUCTION PATH IS SHARED RATHER THAN RE-IMPLEMENTED.
+ * The `draw()` that `draw.ts`'s `createDraw` builds is, for each pane, `slot.resolve(reg)` followed by
+ * `slot.render(reg, pane, leg)` — the two calls `paint` below makes. Resolution, `controlState`, the
+ * selector's option list and the `copy · not linked` status all live inside `PaneSlot.render`, so
+ * nothing about what a binding MEANS is restated in this file.
  *
  * `tests/node/sessions.test.ts` ASSERTS THE SAME CLAIM WITHOUT A DOM and is not redundant with this.
  * That tier drives recording fakes and says which binding resolved to which leg; this one says the
  * text a user would read is different in the two panes, and that the control which moves a binding is
  * on the page, is text, and works.
+ *
+ * Section citations here are the 5d-i design's unless they name another.
  */
 
 const SOURCE: SessionId = 'source'
@@ -63,9 +52,9 @@ function lambdaSession(id: SessionId, label: string, text: string, detached: boo
 }
 
 /**
- * A session with a λ and a TM leg — the source session's shape before the asm leg, and one the λ-only
- * helper above cannot make. It exists for the grouped-pairs test alone: a registry in which every session is λ-only can
- * never produce a TM `<optgroup>`, so the omission it asserts would hold vacuously.
+ * A session with a λ and a TM leg, one the λ-only helper above cannot make. It exists for the
+ * grouped-pairs test alone: a registry in which every session is λ-only can never offer a TM pair, so
+ * the omission it asserts would hold vacuously.
  */
 function bothLegs(id: SessionId, label: string, text: string): SessionEntry {
   const lambdaHist = new History<LambdaState>(1_000_000)
@@ -126,7 +115,7 @@ function offered(pane: HTMLElement): [string, string][] {
   return items
 }
 
-/** `PaneEvents`'s six required members. `rebind` is the only one any test here fires. */
+/** `PaneEvents`'s nine required members. `rebind` is the only one any test here fires. */
 const events = (slot: PaneSlot<'lambda'>, after: () => void): PaneEvents => ({
   back: () => undefined,
   forward: () => undefined,
@@ -136,14 +125,12 @@ const events = (slot: PaneSlot<'lambda'>, after: () => void): PaneEvents => ({
   extend: () => undefined,
   speed: () => 8,
   setSpeed: () => undefined,
-  // THE SESSION ONLY, THOUGH THE PICK NOW CARRIES A LEG — `PaneSlot<K>`'s leg is fixed at
-  // construction and has no writer, so this is the whole of what a same-leg pick can do. It is also
-  // exactly what `transport.ts`'s production handler does. **THE PANE MULTIPLEXER THAT ACTS ON A
-  // DIFFERENT LEG EXISTS NOW, AND THIS COMMENT USED TO CALL IT "a later slice"** — it lives in
-  // `pane-host.ts`, which answers a cross-leg pick by changing the LEAF's kind and rebuilding the
-  // entry. That needs a layout tree and these hand-built panes have none, which is why this harness
-  // still answers only the axis it can reach; `tests/browser/pane-kind-switch.test.ts` drives the
-  // other one through the mounted app.
+  // THE SESSION ONLY, THOUGH THE PICK CARRIES A LEG — `PaneSlot<K>`'s leg is fixed at construction and
+  // has no writer, so this is the whole of what a same-leg pick can do. It is also exactly what
+  // `transport.ts`'s production handler does. A cross-leg pick is answered in `pane-host.ts`, which
+  // changes the LEAF's kind and rebuilds the entry. That needs a layout tree and these hand-built panes
+  // have none, which is why this harness answers only the axis it can reach;
+  // `tests/browser/pane-kind-switch.test.ts` drives the other one through the mounted app.
   rebind: (binding: Binding<Leg>) => {
     slot.rebind(binding.session)
     after()
@@ -156,10 +143,9 @@ beforeEach(() => {
 
 describe('the title-selector', () => {
   /**
-   * THE TEST PLAN T7 NAMES, WORD FOR WORD. Both panes are painted before either is asserted, and both
-   * are asserted before anything is rebound — a "bind, read, rebind, read" sequence would pass on an
-   * implementation with one live session and a mutable global, which is what "simultaneously" rules
-   * out.
+   * Both panes are painted before either is asserted, and both are asserted before anything is rebound —
+   * a "bind, read, rebind, read" sequence would pass on an implementation with one live session and a
+   * mutable global, which is what "at the same time" rules out.
    *
    * THE TERMS DIFFER ON PURPOSE, the discriminator `pool-isolation.test.ts` uses for three sessions'
    * answers: two panes showing the same term would look identical whether or not the bindings were
@@ -188,19 +174,17 @@ describe('the title-selector', () => {
 
     expect(term(leftHost)).toBe('(λx. x) 1')
     expect(term(rightHost)).toBe('(λy. y y) 2')
-    // Said as an inequality too: the mutation this task runs — resolving every binding to the source
-    // session — leaves both panes reading `(λx. x) 1`, and this is the line that names that failure.
+    // Said as an inequality too: a mutation that resolves every binding to the source session leaves
+    // both panes reading `(λx. x) 1`, and this is the line that names that failure.
     expect(term(leftHost)).not.toBe(term(rightHost))
   })
 
   /**
-   * §5's JOINT DETACHMENT CASE, WHICH THE DESIGN OWED TO "THE TASK THAT WIRES `main.ts`" — its words,
-   * because it could not be written when the badge landed: "bind a pane to a scratch, see both,
-   * rebind, see neither ... It needs a binding to flip, and per §3.2b none exists."
+   * §5's JOINT DETACHMENT CASE: "bind a pane to a scratch, see both, rebind, see neither".
    *
-   * BOTH HALVES, AND ONLY ONE PANE. The badge must be gone after the rebind, not merely present
-   * before it; and the pane still bound to the source session must never have had one, which is
-   * §4.3's ordinary state (one pane detaches, the other keeps running against source).
+   * BOTH HALVES, AND ONLY ONE PANE. The status must be gone after the rebind, not merely present before
+   * it; and the pane still bound to the source session must never have had one, which is §4.3's ordinary
+   * state (one pane detaches, the other keeps running against source).
    */
   it('says copy · not linked on the view bound to a scratch, and drops it on rebind', () => {
     const reg = new SessionRegistry()
@@ -232,24 +216,19 @@ describe('the title-selector', () => {
   })
 
   /**
-   * THE CONTROL IS ABSENT WHILE IT COULD DO NOTHING, which is `pane-chrome.ts`'s stated idiom (added
+   * THE CONTROL IS ABSENT WHILE IT COULD DO NOTHING, which is `step-controls.ts`'s stated idiom (added
    * and removed, never disabled) and §4.5's standard (a thing that provably cannot work should not be
    * presented as though it might).
    *
-   * **IT IS NOT TODAY'S APP, AND THIS PARAGRAPH SAID IT WAS — whole-branch review, M1.** It read "It is
-   * also today's app exactly: one session, so no selector". The selector lists `(leg, session)` PAIRS,
-   * and `main.ts` registers the program session with all three legs, so `pairs()` contributes three on
-   * its own and the plain-text branch is unreachable in the running app (`main.ts`'s own comment on the
-   * registration says so). What reaches it here is this file's λ-ONLY source session, a shape the app
-   * never builds — the same kind of fixture the file's header comment already flags for the two-pane
-   * case. The branch is still worth holding, because `viewHeader` offers it and a later leg arrangement
-   * could reach it; what is not worth claiming is that a user can get there today.
+   * **THE RUNNING APP DOES NOT REACH IT.** The selector lists `(leg, session)` PAIRS, and `main.ts`
+   * registers the program session with all three legs, so `pairs()` contributes three on its own and the
+   * plain-text branch is unreachable in the running app (`main.ts`'s own comment on the registration says
+   * so). What reaches it here is this file's λ-ONLY source session, a shape the app never builds. The
+   * branch is worth holding, because `viewHeader` offers it and a later leg arrangement could reach it.
    *
    * ASSERTED IN BOTH DIRECTIONS AND BACK. A control that appears and never leaves passes the middle
    * assertion; the third is what catches it, and it is reachable IN THIS FIXTURE — retiring a buffer
-   * takes this λ-only registry's options back down to one. (That named `§4.3's recompile-from-source` as the gesture that does it,
-   * which 5d-ii-c decision 2 removed; what makes the third direction reachable is the retire itself,
-   * whichever surface triggers one.)
+   * takes this λ-only registry's options back down to one.
    */
   it('is a menu only once a second session offers this leg, and plain text again when one is retired', () => {
     const reg = new SessionRegistry()
@@ -269,13 +248,12 @@ describe('the title-selector', () => {
     reg.add(lambdaSession(SCRATCH, 'λ scratchpad', 'b', true))
     paint(reg, slot, pane)
     expect(viewTitleOf(el)).not.toBeNull()
-    // NAMED BY TEXT, NOT BY COLOUR OR POSITION. §6 forbids this slice adding a colour-carried state,
-    // and the sessions are told apart by their labels — which is also what a screen reader gets. An
-    // implementation that distinguished them any other way would leave these strings unset.
+    // NAMED BY TEXT, NOT BY COLOUR OR POSITION: the sessions are told apart by their labels — which is
+    // also what a screen reader gets. An implementation that distinguished them any other way would leave
+    // these strings unset.
     expect(offered(el).map(([, text]) => text)).toEqual(['λ · program', 'λ · λ scratchpad'])
     expect(viewTitleOf(el)?.dataset.binding).toBe(bindingKey('lambda', SOURCE))
-    // THE TITLE SAYS IT OPENS A MENU — the `shows` caption it replaced was a `<label>` naming a
-    // `<select>`; a button that opens something states it with `aria-haspopup`.
+    // THE TITLE SAYS IT OPENS A MENU: a button that opens something states it with `aria-haspopup`.
     expect(viewTitleOf(el)?.getAttribute('aria-haspopup')).toBe('menu')
 
     reg.remove(SCRATCH)
@@ -286,7 +264,7 @@ describe('the title-selector', () => {
   /**
    * THE CONTROL ACTUALLY MOVES THE BINDING, driven through the DOM rather than by calling `rebind`.
    * Everything above this asserts what a binding does once it has moved; this is the one that says a
-   * user can move it — and it is the path `main.ts` wires (`events(...).rebind` calls `slot.rebind`
+   * user can move it — and it is the path `transport.ts` wires (`events(...).rebind` calls `slot.rebind`
    * then `draw()`), reproduced here by the `after` callback repainting.
    */
   it('rebinds the pane when a session is picked, and follows it back', () => {
@@ -316,8 +294,8 @@ describe('the title-selector', () => {
   })
 
   /**
-   * **THE TITLE KEEPS THE FOCUS ACROSS THE PICK IT PERFORMED** — spec §11, "focus never falls to
-   * `<body>`", and umbrella §4 rule 5.
+   * **THE TITLE KEEPS THE FOCUS ACROSS THE PICK IT PERFORMED** — Plan 7 part 2 spec §11, "focus never
+   * falls to `<body>`", and umbrella §4 rule 5.
    *
    * **THIS IS THE ONE GESTURE WITH NO `focusPane` BEHIND IT**, deliberately: `pane-host.ts`'s same-leg
    * `rebind` arm leaves focus alone because the view is still there and only its contents changed. That
@@ -377,18 +355,18 @@ describe('the title-selector', () => {
   })
 
   /**
-   * THE CONTROL OFFERS `(leg, session)` PAIRS, NOT SESSIONS — the widening this task is, asserted on
-   * the two things that distinguish a pair list from a session list: the legs are GROUPED, and a pair
-   * naming a leg its session does not have is ABSENT rather than present-and-broken.
+   * THE CONTROL OFFERS `(leg, session)` PAIRS, NOT SESSIONS, asserted on the two things that distinguish
+   * a pair list from a session list: the legs are GROUPED, and a pair naming a leg its session does not
+   * have is ABSENT rather than present-and-broken.
    *
    * THE SCRATCH IS λ-ONLY AND THE SOURCE HAS BOTH, which is why the omission is observable at all.
    * `SessionRegistry.legOf` THROWS on a binding naming a leg the session lacks, so an option for
-   * `(tm, λ scratchpad)` would be an option that crashes the next render — the reason design §3.2's
-   * axes are not independent and the reason this is one control rather than two.
+   * `(tm, λ scratchpad)` would be an option that crashes the next render — the reason 5d-ii-b design
+   * §3.2's axes are not independent and the reason this is one control rather than two.
    *
-   * READ AS THE MENU'S ITEMS IN ORDER — the grouping is the order now, the `<optgroup>`s having gone with
-   * the `<select>`. The λ pairs come first because `SessionRegistry.pairs()` walks `LEGS` in that order,
-   * which is a value rather than a key walk for exactly this reason.
+   * READ AS THE MENU'S ITEMS IN ORDER — the grouping is the order. The λ pairs come first because
+   * `SessionRegistry.pairs()` walks `LEGS` in that order, which is a value rather than a key walk for
+   * exactly this reason.
    */
   it('lists both legs, grouped, and omits a pair the session has no leg for', () => {
     const reg = new SessionRegistry()

@@ -18,9 +18,9 @@ import {
 
 /**
  * VIEW KEYS, THROUGH THE PAGE — the view layouts spec §7: the prefix chord arms a mode from wherever the focus is, the
- * next key acts and the mode is over, and a key the mode does not know is the editor's as it always was.
- * `tests/node/view-keys.test.ts` holds the machine's table; this file holds the one listener that feeds it, which is
- * where an editor's keymap and the vim extension could take a key first.
+ * next key acts and the mode is over, and a key the mode does not know is the editor's, typing as it does while the
+ * mode is idle. `tests/node/view-keys.test.ts` holds the machine's table; this file holds the one listener that feeds
+ * it, which is where an editor's keymap and the vim extension could take a key first.
  *
  * **KEYS ARRIVE THROUGH `userEvent`**, for `vim-keymap.test.ts`'s reason: half of what is asserted is that a key DID
  * or DID NOT type a character, and a synthetic `keydown` types nothing whatever the page does with it.
@@ -94,8 +94,8 @@ describe('view keys', () => {
 
   afterEach(async () => {
     // A DIALOG A FAILED CASE LEFT OPEN GOES FIRST: under one the page takes no focus, and the mode does not hear
-    // Escape. Its `close` event comes a task later and hands the focus to `settings`, so it is waited for: measured
-    // without the wait, it took the focus from the next case's editor after the first of three keys it typed.
+    // Escape. Its `close` event comes a task later and hands the focus to `settings`, so it is waited for: without the
+    // wait, it would take the focus from the next case's editor.
     const dialog = document.querySelector<HTMLDialogElement>('dialog:modal')
     if (dialog !== null) {
       const closed = new Promise((done) => dialog.addEventListener('close', done, { once: true }))
@@ -165,10 +165,7 @@ describe('view keys', () => {
     caretKept()
   })
 
-  /**
-   * THE NATURAL MOTION, AND THE ONE THAT FOUND THE DEFECT (the user's report, 2026-10-11): `Ctrl` held down through
-   * both keys. With `n` for the next layout that was `Ctrl+N`, which the browser keeps and opens a window on.
-   */
+  /** THE NATURAL MOTION: `Ctrl` held down through both keys. */
   it('answers the second key with Ctrl still held', async () => {
     await start()
     await userEvent.keyboard('{Control>}.')
@@ -230,9 +227,8 @@ describe('view keys', () => {
   /**
    * A MODIFIER PRESSED ALONE DOES NOT END THE MODE (spec §7.3), a lock key among them. Each is pressed and let go by
    * `userEvent`, so its `keydown` is the browser's own: `Alt`'s says `Alt` is down, and a lock key's says nothing is.
-   * These eight are the modifier keys the test driver has; `tests/node/view-keys.test.ts` has the whole list.
-   * **`Control` AMONG THEM**, the prefix's own modifier, let go after the prefix and pressed again by itself: it was
-   * held at the node tier alone.
+   * These eight are the ones pressed here; `tests/node/view-keys.test.ts` has the whole list. **`Control` AMONG THEM**,
+   * the prefix's own modifier, let go after the prefix and pressed again by itself.
    */
   it.each(['Control', 'Shift', 'Alt', 'Meta', 'AltGraph', 'CapsLock', 'NumLock', 'ScrollLock'])(
     'stays armed through %s pressed alone, and the key after it acts',
@@ -248,7 +244,7 @@ describe('view keys', () => {
     },
   )
 
-  it('ends on a key it does not know, which types as it always did', async () => {
+  it('ends on a key it does not know, which types as it does while the mode is idle', async () => {
     await start()
     await prefix()
     await userEvent.keyboard('x')
@@ -388,9 +384,10 @@ describe('view keys', () => {
     })
 
     /**
-     * Under vim a digit is a count (the case below), so a repeat of the `2` that reached vim would stay as one, and
-     * the next `x` would delete that many characters. And vim's `.` does the last change again, the `x`: a repeat of
-     * the prefix's key that reached vim with `Ctrl` up would delete one more.
+     * Under vim a digit is a count, `2x` deleting two characters (the doc of `runs ahead of vim: …`, below), so a
+     * repeat of the `2` that reached vim would stay as one, and the next `x` would delete that many characters. And
+     * vim's `.` does the last change again, the `x`: a repeat of the prefix's key that reached vim with `Ctrl` up would
+     * delete one more.
      */
     it('leaves vim no count from the repeats of a table key, and no command from the prefix’s', async () => {
       await start()
@@ -442,9 +439,9 @@ describe('view keys', () => {
    * **THE PRESS THAT ENDS THE MODE IS STILL A PRESS, AND THE FOCUS IS WHERE IT PUT IT** (spec §14 item 19): in the
    * editor it lands in, or on the control it presses, which acts as it would with the mode idle.
    *
-   * **THE WORDMARK ABOVE IS NOT HELD TO IT.** It takes no focus, and a press on it leaves the focus on `<body>`
-   * with the mode armed and with it idle alike (measured 2026-10-12, at once and two frames on): the browser's own
-   * answer to a press on something that cannot be focused, which the mode has no part in.
+   * **THE WORDMARK ABOVE IS NOT HELD TO IT.** It takes no focus, and a press on it leaves the focus on `<body>` with
+   * the mode armed and with it idle alike: the browser's own answer to a press on something that cannot be focused,
+   * which the mode has no part in.
    */
   it('ends on a pointer press in the source editor, which keeps the focus', async () => {
     await start()
@@ -469,8 +466,8 @@ describe('view keys', () => {
 
   /**
    * **THE HINT TAKES NO POINTER** (spec §7.3): it floats over the foot of the page, and a press where it is drawn is
-   * for what is under it. With `pointer-events: none` taken off it in `style.css`, the press landed on the hint, the
-   * control under it got nothing, and every file passed.
+   * for what is under it. With `pointer-events: none` taken off it in `style.css`, the press would land on the hint and
+   * the control under it would get nothing.
    */
   it('lets a pointer press at the hint through to what is under it', async () => {
     await start()
@@ -510,12 +507,12 @@ describe('view keys', () => {
   })
 
   /**
-   * **A KEY THE MODE CONSUMES IS SEEN BY NOTHING UNDER THE WINDOW** (spec §7.3: the editor under the focus does not
-   * see it), and one it does not consume is seen as it always was. A listener on the document stands for whatever is
-   * under the window. **NOTHING ON THE PAGE TODAY ACTS ON A CONSUMED KEY IT IS SENT**: CodeMirror runs no handler,
-   * vim's among them, for a `keydown` whose default was prevented, and the app's own `keydown` listeners answer the
-   * arrows, Home, End, the page keys, Enter and Space, none of which is a view key. So this holds the sentence
-   * itself, for a key added to the table that one of them does answer.
+   * **A KEY THE MODE CONSUMES IS SEEN BY NOTHING UNDER THE WINDOW** (spec §7.3: the editor under the focus does not see
+   * it), and one it does not consume is seen as a key is while the mode is idle. A listener on the document stands for
+   * whatever is under the window. **NOTHING ON THE PAGE TODAY ACTS ON A CONSUMED KEY IT IS SENT**: CodeMirror runs no
+   * handler, vim's among them, for a `keydown` whose default was prevented, and the app's own `keydown` listeners
+   * answer the arrows, Home, End, the page keys, Enter and Space, none of which is a view key. So this holds the
+   * sentence itself, for a key added to the table that one of them does answer.
    */
   it('keeps a key it consumes from every listener under the window, and no other', async () => {
     await start()

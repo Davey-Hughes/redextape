@@ -24,17 +24,15 @@ import { TOKEN_CLASSES, type TokenClass } from '../../src/types'
  * `web-tree-sitter`, which is what the app actually colours from and which no Rust test can load. The
  * two meet in `grammars/capture-golden.json`, which that crate's `tests/golden.rs` emits and verifies.
  *
- * **SO THIS IS THE TEST THAT FAILS IF THE ARTEFACT MOVES**: a grammar ABI bump, a bumped tree-sitter
- * CLI, or a committed `.wasm` that no longer matches its own `grammar.js`. Every other check in the
- * tree reads either the C parser or the query, and none of them reads the `.wasm`.
+ * **SO THIS TEST FAILS IF THE ARTEFACT MOVES**: a grammar ABI bump, a bumped tree-sitter CLI, or a
+ * committed `.wasm` that no longer matches its own `grammar.js`.
  *
  * **THE COLLAPSE IS THE WHOLE COMPARISON, NOT A DETAIL OF IT.** `Grammar::captures` does not return a
  * raw capture list: it keys captures by `(start, end)` into a `BTreeMap`, rejects two captures on one
  * range that disagree, and drains in offset order. A raw list is a different sequence, and asserting one
  * against the other would be a reconciliation dressed as an equality. `colourSpans` — the app's own
- * function, from `src/colour.ts` — collapses identically and by design, so it is called here rather than
- * reimplemented. This file is its first non-test consumer, which is the other half of why it is called
- * rather than copied.
+ * function, from `src/colour.ts` — collapses identically and by design, so it is called here rather
+ * than reimplemented.
  *
  * **OFFSETS ARE UTF-16 CODE UNITS.** The golden is written in them and the Rust side does the converting,
  * because this side is the one under test and a conversion here would be a second thing that could be
@@ -47,8 +45,8 @@ import { TOKEN_CLASSES, type TokenClass } from '../../src/types'
  * for the same reason, and the Rust side asserts each language's fixture carries a class no other one
  * produces.
  *
- * **REAL TIMERS.** Three of the awaits below are wasm fetches; a fake clock plus an awaited fetch is a
- * deadlock rather than a slow test.
+ * **REAL TIMERS.** The awaits below are wasm fetches; a fake clock plus an awaited fetch is a deadlock
+ * rather than a slow test.
  */
 
 /** One golden span: a UTF-16 start, a UTF-16 end, and a `TokenClass` name. */
@@ -145,8 +143,9 @@ describe('the committed grammar .wasm agree with the Rust differential, span for
             //
             // **THE RANGE IS DOUBLED AND THE CAPTURED NODE'S OFFSETS ARE NOT.** `QueryOptions`'
             // `startIndex`/`endIndex` are 2 × UTF-16 code units in web-tree-sitter 0.27.0, while
-            // `node.startIndex` is plain code units — `colourSpans`'s own comment holds the
-            // measurement. The asymmetry has already shipped one Critical defect on this branch.
+            // `node.startIndex` is plain code units — `colourSpans`'s own comment holds the doubling, and
+            // `docs/superpowers/notes/2026-10-17-code-history-web-src.md`'s entry above `colourSpans` the
+            // measurement that tells code units from bytes.
             const seen = new Map<string, string>()
             for (const c of grammar.query.captures(tree.rootNode, {
               startIndex: 0,

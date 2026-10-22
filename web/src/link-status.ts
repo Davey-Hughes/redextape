@@ -7,8 +7,8 @@ import type { Leg } from './protocol'
  * SIX ABSENCES, AND THEY ARE WORDED DIFFERENTLY ON PURPOSE. Four of them mean "the λ pane shows no
  * link" and collapsing them into one message would tell a user nothing about whether to scrub, to
  * shrink the program, or to stop using a mutable capture. The TM absence is the common case, not an
- * edge to shrug off: measured across the demo corpus, 50–82% of clickable constructs carry a TM
- * block, so a substantial remainder — the transparent `let`/`seq` binders, the `Lambda`s, and the
+ * edge to shrug off: across the demo corpus, 50–82% of clickable constructs carry a TM block, so
+ * a substantial remainder — the transparent `let`/`seq` binders, the `Lambda`s, and the
  * statically-resolved callee `Var`s that `sourcemap.rs`'s module doc names — do not, and reporting
  * that absence has to be built as a first-class path rather than an edge case.
  *
@@ -24,7 +24,7 @@ export type LambdaLinkState =
   /** Shown: a node of the term on screen carries this construct. */
   | 'shown'
   /**
-   * No node of the term at this step carries it (Plan 7 part 4a). At step 0 every construct the map
+   * No node of the term at this step carries it (Plan 7 part 4 spec §5.4). At step 0 every construct the map
    * places has a node; a later step keeps only the ones an `App` still carries as its owner, since
    * reduction rewrites the rest away.
    */
@@ -40,11 +40,10 @@ export type LambdaLinkState =
   | 'declined'
   /**
    * THERE IS NO λ PANE ON SCREEN AT ALL — not an absence of a link, an absence of the surface every
-   * other member describes. Reachable since the layout tree: `closeLeaf` refuses only the last leaf in
-   * the tree, so closing a page's one λ pane is an ordinary gesture; and since the view layouts a fresh page
-   * opens with none (`layout.ts`'s `defaultLayout`). And in Stage, whenever
-   * the view it shows is not a λ view: the others are off the page, and a view off the page drew no tree
-   * this frame (`draw.ts`'s `createDraw`).
+   * other member describes. `closeLeaf` refuses only the last leaf in the tree, so closing a page's one
+   * λ pane is an ordinary gesture, and a fresh page opens with none (`layout.ts`'s `defaultLayout`). And
+   * in Stage, whenever the view it shows is not a λ view: the others are off the page, and a view off
+   * the page drew no tree this frame (`draw.ts`'s `createDraw`).
    *
    * IT RENDERS AS NOTHING, and that is the same uniform-suppression rule `linkStatus` already applies
    * to a DETACHED λ pane rather than a new exception: every λ clause explains why a term on screen
@@ -61,7 +60,7 @@ export type LambdaLinkState =
 
 /**
  * WHICH VIEWS ARE OUTSIDE THE CORRESPONDENCE — per leg, how many views it has and the title of each one that shows
- * a copy. Views detach independently. Design §4.3: editing a source-derived λ view seeds a `LambdaScratch` and
+ * a copy. Views detach independently. 5d-i design §4.3: editing a source-derived λ view seeds a `LambdaScratch` and
  * rebinds THAT view; the program keeps running and every other view stays on it. So "λ detached, TM still linked"
  * is the ordinary state, not a corner — and since a leg holds any number of views, so is "one asm view on a copy,
  * another on the program".
@@ -70,9 +69,9 @@ export type LambdaLinkState =
  * `sourceSpan`/`linkIndex` (§3.3); for `tm` a `TmScratch`, whose every `TmState` carries `source_node: null`
  * (§3.1); for `asm` an asm copy, whose instructions have no owner (Plan 7 part 5 spec, amendment 28).
  *
- * **EVERY VIEW, WHERE THIS WAS ONE BOOLEAN PER LEG READ OFF THE VIEW FOCUSED LAST.** With an asm view on the program
- * and a second on a copy, the line named the asm copy only while the copy's view was the one focused last, and
- * "asm view" did not say which of the two it meant. `copies` holds every view showing a copy, and `views` is what
+ * **EVERY VIEW, NOT ONE BOOLEAN PER LEG READ OFF THE VIEW FOCUSED LAST.** With an asm view on the program and a
+ * second on a copy, such a boolean would name the asm copy only while the copy's view was the one focused last, and
+ * "asm view" would not say which of the two it meant. `copies` holds every view showing a copy, and `views` is what
  * lets `linkStatus` tell a leg whose views all show copies from one that still has a view of the program.
  *
  * **THE TITLES ARE THE HEADERS' OWN** (`main.ts`'s `viewTitle`), which is how a leg with several views says which
@@ -98,20 +97,16 @@ export type LinkStatus = {
    * that pinned nothing, or with a live link — four states this union already distinguishes — so the arm
    * version is four more arms, and `linkStatus` would carry two parallel switches over the same four cases.
    *
-   * NOT `'stale'` AND NOT `'none'`, which is the trap this field exists to avoid. `'stale'` promises
-   * "linking resumes when this compiles", and for a detached pane a recompile does something else
-   * entirely (§4.3: it TERMINATES the scratch's worker and rebinds the pane back); `'none'` says
-   * nothing is pinned, which is silent, and §4.5's whole obligation is that detachment must not be.
+   * NOT `'stale'` AND NOT `'none'`, which is the trap this field exists to avoid. `'stale'` says "linking
+   * resumes when this compiles", which is about the program's index; said of detachment, it would promise
+   * that a compile brings a copy's view back, and a compile ends no buffer, so it reattaches nothing.
+   * `'none'` says nothing is pinned, which is silent, and 5d-i design §4.5's whole obligation is that
+   * detachment must not be.
    *
-   * OPTIONAL, AND THAT IS A COMPATIBILITY REQUIREMENT RATHER THAN A CONVENIENCE. It was written while
-   * the one place in the app that builds a `LinkStatus` could not fill it in — no pane had a binding to
-   * report (§3.2b: `main()`'s local scope was the state, and the session registry landed separately) —
-   * so absent means "every view attached" and adopting this was one added property against call sites that
-   * kept compiling unchanged. **THAT BUILDER IS `link-wiring.ts`'s `drawLink` NOW, AND IT DOES FILL
-   * THIS IN**, on every arm, from `detachedPanes()`; the optionality is what the other producers
-   * of this type — this file's own tests among them — still spend. Under `exactOptionalPropertyTypes`
-   * an optional property is added by spread, never assigned `undefined`, which is the idiom `drawLink`
-   * uses for it.
+   * OPTIONAL: absent means "every view attached". The app's builder, `link-wiring.ts`'s `drawLink`, fills
+   * it in on every arm, from `detachedPanes()`; the optionality is what the other producers of this type —
+   * this file's own tests among them — spend. Under `exactOptionalPropertyTypes` an optional property is
+   * never assigned `undefined`: a producer with no value leaves it out, and `drawLink` always has one.
    */
   detached?: DetachedPanes
 } & (
@@ -133,16 +128,14 @@ export type LinkStatus = {
       /**
        * Whether the TM leg's running focus — the construct its CURRENT δ-step belongs to,
        * `TmState.source_node` — names this SAME pinned construct right now (`link.ts`'s
-       * `isCoincident`). "The moment the app exists to show" (design §4.3), and worth a word here
-       * because THE δ-TABLE HAS NO VISUAL SIGNAL FOR IT AT ALL. `.state-row.is-focus` landing on an
-       * already-`.is-linked` row does not blend with it and does not combine into a third class the
-       * way the source pane's `.is-focus-coincident` does: both rules set `background` at equal
-       * specificity, `.is-focus` is declared second in `style.css`, and `.is-linked` sets no other
-       * property — so the focus wash REPLACES the pin's outright and a pinned-and-focused row is
-       * pixel-identical to a focused-only one. `TmPane.setFocus` never scrolls either, so the row can
-       * be off-screen entirely. THIS LINE IS THEREFORE THE WHOLE COINCIDENCE SIGNAL ON THE TM LEG, not
-       * a caption on a highlight the user can already see — which is more weight than a status line
-       * usually carries, and the reason to think twice before dropping it.
+       * `isCoincident`). "The moment the app exists to show" (`2026-08-10-plan5c-dual-focus-design.md`
+       * §4.3), and worth a word here because THE δ-TABLE HAS NO SIGNAL OF ITS OWN FOR IT.
+       * `.state-row.is-focus` landing on an already-`.is-linked` row does not combine into a third class
+       * the way the source pane's `.is-focus-coincident` does: both rules set `background` at equal
+       * specificity and `.is-focus` is declared second in `style.css`, so the focus wash replaces the
+       * pin's. `TmPane.setFocus` never scrolls either, so the row can be off-screen entirely. THIS LINE IS
+       * THEREFORE THE TM LEG'S ONE SIGNAL THAT NAMES THE COINCIDENCE — which is more weight than a status
+       * line usually carries, and the reason to think twice before dropping it.
        *
        * `#link-status` IS A PLAIN `<div>` THAT ANNOUNCES NOTHING TO A SCREEN READER. This is its
        * SECOND live-updating job (the pin's own answer above was its first) — both are deferred to
@@ -186,7 +179,7 @@ const allCopies = (leg: DetachedPanes[Leg]): boolean => leg.views > 0 && leg.cop
  *
  * "shows a copy" IS SAID IN THE SAME BREATH AS WHAT IT MEANS, deliberately. `copy · not linked` in the
  * view's header is the glanceable half, with the view's own title beside it to say which view. This
- * line is the authoritative narration (§4.5), and a reader who has never made a copy cannot derive
+ * line is the authoritative narration (5d-i design §4.5), and a reader who has never made a copy cannot derive
  * "not linked to the program" from the word (Plan 7 part 2 spec §12's vocabulary).
  *
  * **A LEG WITH ONE VIEW IS NAMED BY ITS LEG, AND A LEG WITH MORE BY THE TITLE OF EACH VIEW SHOWING A COPY.**
@@ -194,10 +187,9 @@ const allCopies = (leg: DetachedPanes[Leg]): boolean => leg.views > 0 && leg.cop
  * which, so each view showing a copy is named as its header reads — `asm · copy 1 view shows a copy`. A title two
  * views show is said once.
  *
- * **THE NAMES COME IN `LEGS`' ORDER AND ARE SAID WITH `LEG_NAME`**, where the three sentences were once written
- * out, one per combination of two legs — a third leg would have been in none of them. The words for one leg and
- * for two are the ones those sentences said: `λ view shows a copy`, `λ and TM views show copies`. More than two
- * join as a list does, `a, b and c`.
+ * **THE NAMES COME IN `LEGS`' ORDER AND ARE SAID WITH `LEG_NAME`**, rather than a sentence written out per
+ * combination of legs, which a new leg would be in none of. One leg reads `λ view shows a copy`, two `λ and TM
+ * views show copies`, and more than two join as a list does, `a, b and c`.
  */
 function detachedText(d: DetachedPanes): string {
   const names: string[] = []
@@ -216,23 +208,23 @@ function detachedText(d: DetachedPanes): string {
 /**
  * The `link-status` line's text. Empty means the line is blank, not that the line is absent.
  *
- * NO LONGER AN EARLY RETURN PER ARM, and the restructure is what detachment costs: a detached view is
- * a fact about views, independent of what is pinned, so it has to be reachable from `none` and
- * `stale` too — `{state:'none'}` with a detached λ view is the case where this line goes from blank
- * to speaking, which is exactly §4.5's obligation.
+ * NOT AN EARLY RETURN PER ARM, which is what detachment costs: a detached view is a fact about views,
+ * independent of what is pinned, so it has to be reachable from `none` and `stale` too —
+ * `{state:'none'}` with a detached λ view is the case where this line goes from blank to speaking, which
+ * is exactly §4.5's obligation.
  *
- * DETACHMENT LEADS, ahead of the coincidence that used to lead. Ordered most-global first — the rule
- * `draw.ts`'s `createDraw` follows for the λ state (no view, then a declined program, then the view's own
- * answer) — because "this pane is not part
- * of the correspondence" scopes every clause after it: those are about the panes still inside.
+ * DETACHMENT LEADS, ahead of the coincidence. Ordered most-global first — the rule `draw.ts`'s
+ * `createDraw` follows for the λ state (no view, then a declined program, then the view's own answer) —
+ * because "this pane is not part of the correspondence" scopes every clause after it: those are about
+ * the panes still inside.
  *
  * A LEG'S OWN CLAUSES ARE SUPPRESSED WHEN EVERY VIEW OF IT SHOWS A COPY, NOT MERELY PRECEDED. §4.5's standard
- * is the one that deleted `node_to_lambda`: a thing that provably cannot work should not be presented as
- * though it might. A λ view on a copy is showing a scratch term, so "this construct has no node in the λ term
- * at this step" describes a term that is not on screen; a TM view on a copy renders
- * states whose `source_node` is `null` by construction (§3.1), so neither the coincidence nor the
- * emits-no-states absence is a claim about anything the user is looking at. The asm leg's two clauses,
- * its coincidence and its emits-no-instructions absence, go by the asm entry the same way.
+ * is that a thing that provably cannot work should not be presented as though it might. A λ view on a copy is
+ * showing a scratch term, so "this construct has no node in the λ term at this step" describes a term that is
+ * not on screen; a TM view on a copy renders states whose `source_node` is `null` by construction (§3.1), so
+ * neither the coincidence nor the emits-no-states absence is a claim about anything the user is looking at.
+ * The asm leg's two clauses, its coincidence and its emits-no-instructions absence, go by the asm entry the
+ * same way.
  *
  * **A LEG WITH A VIEW OF THE PROGRAM KEEPS ITS CLAUSES, BESIDE ITS VIEWS ON COPIES.** They are about that view:
  * `draw.ts` reads each leg's running focus off a view of the program, and the λ link state off a view of the
@@ -249,19 +241,14 @@ function detachedText(d: DetachedPanes): string {
 export function linkStatus(s: LinkStatus): string {
   const detached = s.detached ?? ATTACHED
   const parts: string[] = []
-  // REFUSALS ARE NOT SAID HERE ANY MORE. This line carried a fork-failure report ahead of everything
-  // else until Plan 7 part 2 (spec §11): refusals are notices now (`notice.ts`), shown under the header
-  // and said in the one live region, and this line carries the link sentence only.
+  // REFUSALS ARE NOT SAID HERE (Plan 7 part 2 spec §11): they are notices (`notice.ts`), shown under the
+  // header and said in the one live region, and this line carries the link sentence only.
   const detachment = detachedText(detached)
   if (detachment !== '') parts.push(detachment)
   if (s.state === 'stale') {
-    // STILL TRUE OF A DETACHED PANE, AND THE ARGUMENT FOR IT CHANGED WITH 5d-ii-c DECISION 2. It ran:
-    // §4.3 says a recompile from source terminates the scratch's worker and rebinds its panes back, so
-    // the sentence is a promise the detached case keeps because the compile is the same event that
-    // reattaches the pane. A compile ends no buffer now, so it reattaches nothing — and the promise
-    // holds for the plainer reason that linking is a fact about the SOURCE program's index: it resumes
-    // when this compiles, for whichever pane is showing that session then, and a detached pane is one
-    // rebind away from being one.
+    // TRUE OF A DETACHED PANE TOO. A compile ends no buffer, so it reattaches nothing, but linking is a
+    // fact about the SOURCE program's index: it resumes when this compiles, for whichever pane is
+    // showing that session then, and a detached pane is one rebind away from being one.
     parts.push('linking resumes when this compiles')
   } else if (s.state === 'ownerless') {
     parts.push('this instruction has no source construct')

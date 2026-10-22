@@ -5,19 +5,19 @@ import { armed, host, mounted, notice, PREFIX, SHELL, stateIdle, toggle, until }
 import { viewKey } from './user-event-fixture'
 
 /**
- * VIEW KEYS UNDER AN OPEN POPOVER — the view layouts spec §7: a view key closes every open popover, as a pointer
- * press on the page behind one does, and then acts (`main.ts`'s `actOnViewKey` has the choice and what was measured
- * before it). Each case opens its popover with a real press, asserts it is open, and then reads four things after the
- * key: what is open, what the popover's button says of it, where the focus is, and the views.
+ * VIEW KEYS UNDER AN OPEN POPOVER — the view layouts spec §7: a view key closes every open popover, as a pointer press
+ * on the page behind one does, and then acts (`main.ts`'s VIEW KEYS doc, above `hintTitle`, has the choice). Each case
+ * opens its popover with a real press, asserts it is open, and then reads four things after the key: what is open, what
+ * the popover's button says of it, where the focus is, and the views.
  *
  * **AND THE TWO MENUS THAT OFFER `source` DO NOT OFFER IT ONCE A VIEW SHOWS IT**, by a road that is not a view key:
  * the source toggle, pressed from the keyboard with the menu still open. `+ view`'s menu is filled again when the tree
  * changes under it, and a view's `⋯` menu is closed, with its events, before its view's host is detached
  * (`pane-host.ts`'s `applyLayout`).
  *
- * **NO CASE FOR THE ENCODING SELECT'S LIST.** While it is open the browser gives the keys to the list, and the page
- * is sent no `keydown` for the prefix or for the key after it (measured in this Chromium, 2026-10-12): the mode does
- * not arm, nothing switches, and the focus stays on the select. There is no code of the app's in that to hold.
+ * **NO CASE FOR THE ENCODING SELECT'S LIST.** While it is open the browser gives the keys to the list, and the page is
+ * sent no `keydown` for the prefix or for the key after it in this Chromium: the mode does not arm, nothing switches,
+ * and the focus stays on the select. There is no code of the app's in that to hold.
  *
  * **EVERY CASE STARTS FROM ALL FOUR VIEWS WITH NOTHING OPEN**, which `start` puts back and asserts.
  */
@@ -26,7 +26,7 @@ const UNARMED = 'the prefix did not arm the mode with a popover open'
 const SOURCE = 'let x = 40;\nx + 2'
 
 let view: EditorView
-/** Every uncaught error since the case began: a stale menu item's press threw one. */
+/** Every uncaught error since the case began: a stale menu item's press would throw one. */
 const errors: string[] = []
 
 /** The popovers that are open, each by its id. */
@@ -84,8 +84,8 @@ describe('view keys under an open popover', () => {
     await start()
     const button = document.querySelector(selector) as HTMLElement
     const menu = await press(button)
-    // SO THAT THERE IS A FOCUS TO HAND BACK. Six of the seven take the focus as they open; the copies menu with no
-    // copy leaves it on its button, where this case passed with nothing handed anywhere, and `Tab` goes into it.
+    // SO THAT THERE IS A FOCUS TO HAND BACK. Six of the seven take the focus as they open; the copies menu with no copy
+    // leaves it on its button, where this case would pass with nothing handed anywhere, and `Tab` goes into it.
     if (!menu.contains(document.activeElement)) await userEvent.keyboard('{Tab}')
     expect(menu.contains(document.activeElement), 'precondition: the focus is inside the popover').toBe(true)
     await viewKey('2', UNARMED)
@@ -139,7 +139,7 @@ describe('view keys under an open popover', () => {
 
   /**
    * A view's own popovers, its `⋯` menu and its title's, are inside its host, and a rebuild detaches every host: left
-   * open, each came back shut with `aria-expanded="true"` on its button.
+   * open, each would come back shut with `aria-expanded="true"` on its button.
    */
   describe('a view’s own menus', () => {
     const more = (leaf: string): HTMLElement => host(leaf)?.querySelector('button.view-more') as HTMLElement

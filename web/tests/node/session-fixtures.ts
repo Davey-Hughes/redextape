@@ -53,6 +53,6 @@ export function fakePort(): FakePort {
 /** A `no-session` reply to the run `gen`, with no diagnostics. */
 export const noSessionReply = (gen: number): RunReply => ({ kind: 'no-session', gen, diagnostics: [] })
 
-/** `main.ts`'s `draw()`, for one slot: resolve once, then paint from what was resolved. */
+/** `draw.ts`'s per-pane loop, for one slot: resolve once, then paint from what was resolved. */
 export const paint = <K extends Leg>(reg: SessionRegistry, slot: PaneSlot<K>, pane: PaneView<LegFrame[K]>) =>
   slot.render(reg, pane, slot.resolve(reg))

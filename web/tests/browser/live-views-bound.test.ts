@@ -32,16 +32,13 @@ import { plusView, resetOffered, userPickInWorkspaceMenu } from './user-event-fi
  * `add-view-floor.test.ts` stores its own. **THE CASES RUN IN ORDER ON ONE PAGE**, each from the state the one before
  * left, and each asserts that state first.
  *
- * **BOTH SIDES OF THE BOUND**: the add at 63 goes through and the add at 64 does not. One side alone passed with the
- * bound a view lower (measured 2026-10-12, with 64 as the only case: `>= MAX_TREE_LEAVES - 1` in `pane-host.ts`'s
- * `admit`).
+ * **BOTH SIDES OF THE BOUND**: the add at 63 goes through and the add at 64 does not. With 64 as the only case, a
+ * bound a view lower (`>= MAX_TREE_LEAVES - 1` in `pane-host.ts`'s `admit`) would pass.
  *
- * **AND THE NOTICE IS HELD TO WHAT IS TRUE WHERE IT IS SHOWN.** It said "close one to add another" and no more. A `✕`
- * on a kind's last view leaves the tree before it remembered, with the closed view's leaf in it, so it makes no room.
- * Measured before `main.ts`'s `refused` said otherwise (2026-10-12), with four views on screen and 60 remembered: `✕`
- * on the TM view left 64 live views, and the next add was refused in the same words. The notice counts the views not
- * on screen now, and names *reset preset* for a close that makes no room. The cases here take each remedy in turn: a
- * `✕` that makes none, a `✕` that makes some, and the reset.
+ * **AND THE NOTICE IS HELD TO WHAT IS TRUE WHERE IT IS SHOWN.** A `✕` on a kind's last view leaves the tree before it
+ * remembered, with the closed view's leaf in it, so it makes no room, and "close one to add another" alone would not
+ * be true after it. The notice counts the views not on screen, and names *reset preset* for a close that makes no
+ * room. The cases here take each remedy in turn: a `✕` that makes none, a `✕` that makes some, and the reset.
  *
  * `live-views-bound-switch.test.ts` holds the bound for a switch. Each needs another stored workspace and so another
  * mount.
@@ -140,7 +137,7 @@ describe('+ view, with four views on screen and 59 more remembered', () => {
 
   /**
    * The source view's id is `source` wherever it is, so adding it where an arrangement still holds it adds no view
-   * to the workspace. `admit` asked only how many were live, and refused it (measured 2026-10-12).
+   * to the workspace: an `admit` that asked only how many were live would refuse it.
    */
   it('adds the source view at 64, where a remembered arrangement holds it already', async () => {
     await close('source')
@@ -155,8 +152,8 @@ describe('+ view, with four views on screen and 59 more remembered', () => {
   })
 
   /**
-   * **A SPLIT ADDS THE SOURCE VIEW THERE TOO.** `split` tells `admit` the id its leaf takes as `addView` does, and
-   * with that left out a split's *source* was refused at 64 where `+ view`'s was added, and every file passed.
+   * **A SPLIT ADDS THE SOURCE VIEW THERE TOO.** `split` tells `admit` the id its leaf takes as `addView` does; with
+   * that left out, a split's *source* would be refused at 64 where `+ view`'s is added.
    */
   it('adds the source view at 64 from a split as well', async () => {
     await close('source')
@@ -177,8 +174,8 @@ describe('+ view, with four views on screen and 59 more remembered', () => {
 
   /**
    * **A CUSTOM WORKSPACE'S MENU HAS NO *RESET PRESET*.** Its switches match no preset, and `app-header.ts`'s
-   * `workspaceItems` leaves the item out until one is chosen. The notice named it there all the same, for a close that
-   * makes no room; it names choosing a preset first now, which is what brings the item back.
+   * `workspaceItems` leaves the item out until one is chosen. For a close that makes no room, the notice names
+   * choosing a preset first there, which is what brings the item back.
    */
   it('names choosing a preset first in a custom workspace, whose menu has no reset preset', async () => {
     expect(liveViewCount(), 'precondition: the workspace is at the bound').toBe(MAX_TREE_LEAVES)

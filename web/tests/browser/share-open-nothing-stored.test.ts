@@ -22,7 +22,7 @@ import {
  * the view layouts spec §8. The link's workspace is in force from the first frame, so what storage would have opened on
  * is seen only when the open is undone: the first-load workspace, built for the views area's shape as a first visit's
  * is (`main.ts`'s `storedWorkspace`). `share-open.test.ts` holds the undo over a workspace that was stored; this is
- * the undo over none. ONE MOUNT FOR THE FILE, for the reason every sibling gives.
+ * the undo over none. ONE MOUNT FOR THE FILE, for the reason `app.test.ts` gives.
  *
  * **IN A WINDOW TALLER THAN IT IS WIDE**, where the first-load tree is a column and one built without the area's shape
  * is a row. **THE LINK CARRIES ALL FOUR VIEWS**, which the first load does not show, so the undo is seen to replace

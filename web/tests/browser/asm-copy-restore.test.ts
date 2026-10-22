@@ -27,7 +27,7 @@ const editorText = () => {
 describe('restoring an asm copy', () => {
   it('stores it on its leg at version 2, and brings it back in its view with its text', async () => {
     localStorage.clear()
-    // ALL FOUR VIEWS, WHICH AN EMPTY STORE OPENED ON WHEN THIS WAS WRITTEN: it opens on the source and TM now.
+    // ALL FOUR VIEWS: an empty store opens on the source and TM.
     storeFourViews()
     const view = await mount()
     view.dispatch({ changes: { from: 0, to: view.state.doc.length, insert: 'let x = 40; x + 2' } })
@@ -54,13 +54,13 @@ describe('restoring an asm copy', () => {
 
   /**
    * **A STORED COPY THAT DOES NOT BUILD COMES BACK IN ITS EDITOR, MARKED WHERE IT IS WRONG** (spec §8: "Diagnostics in
-   * its editor"). A jump to a label that names nothing refuses the whole copy, so its build answers no session, and
-   * the editor used to come only from a build that landed — the view read `building…` with no editor and no way to
-   * get one. The copy is stored by hand, as a page that last saw it would have stored it.
+   * its editor"). A jump to a label that names nothing refuses the whole copy, so its build answers no session, and an
+   * editor that came only from a build that landed would leave the view reading `building…` with no editor and no way
+   * to get one. The copy is stored by hand, as a page that last saw it would have stored it.
    */
   it('brings back a copy that does not build in its editor, with the label that names nothing marked', async () => {
     localStorage.clear()
-    // ALL FOUR VIEWS, WHICH AN EMPTY STORE OPENED ON WHEN THIS WAS WRITTEN: it opens on the source and TM now.
+    // ALL FOUR VIEWS: an empty store opens on the source and TM.
     storeFourViews()
     const text = 'result Nat\n\n    jmp\tnowhere\n'
     localStorage.setItem(

@@ -35,12 +35,15 @@ export type ControlState = {
   canToNewest: boolean
   canPlay: boolean
   canRestart: boolean
-  /** Whether playback is running, so the play button shows ⏸ and is named "pause" (spec §8, umbrella rule 3). */
+  /**
+   * Whether playback is running, so the play button shows ⏸ and is named "pause" (Plan 7 part 2 spec §8,
+   * umbrella rule 3).
+   */
   playing: boolean
   /**
    * The continue button's label, or `null` for NO BUTTON AT ALL. Whether asking the worker for more
    * frames would achieve anything is exactly `continueLabel !== null` — there is no separate
-   * `canExtend` flag carrying the same fact under a second name; `pane-chrome.ts`'s `update` checks
+   * `canExtend` flag carrying the same fact under a second name; `step-controls.ts`'s `update` checks
    * `continueLabel` directly.
    */
   continueLabel: string | null
@@ -84,21 +87,19 @@ function doneText(done: RecordEnd): string {
  * available — `depth-refused` in particular is a case where continuing provably cannot help, and a
  * second copy of that list is how one of the two ends up offering it anyway.
  *
- * `awaitingRun` IS A PARAMETER HERE RATHER THAN A CHECK INSIDE `controlState`, AND NOT BECAUSE THE
- * OTHER CALLER WOULD OTHERWISE MISBEHAVE — checked, it could not. This function's second caller is
- * the frontier `▶` click handler in `transport.ts`, and that handler cannot reach this gate's
- * `awaitingRun` half: `stepControls` renders the forward button `disabled` whenever `canForward` is
- * false, a disabled button receives no click from a user gesture, and while `awaitingRun` holds
- * `canForward` reduces to `head < length - 1` — which is exactly the case where `hist.forward()`
- * succeeds and short-circuits before this gate is consulted. The repaint that sets the flag is
- * synchronous, so no click lands in between. Established by READING the code, not by
- * running anything: the sabotage aimed at this gate reddens nothing, which is how the reachability
- * question came to be asked at all.
+ * `awaitingRun` IS A PARAMETER HERE RATHER THAN A CHECK INSIDE `controlState`, AND NOT BECAUSE
+ * `transport.ts`'S CALL WOULD OTHERWISE MISBEHAVE — it could not. That caller is the frontier `▶`
+ * click handler, and it cannot reach this gate's `awaitingRun` half: `stepControls` renders the
+ * forward button `disabled` whenever `canForward` is false, a disabled button receives no click from
+ * a user gesture, and while `awaitingRun` holds `canForward` reduces to `head < length - 1` — which
+ * is exactly the case where `hist.forward()` succeeds and short-circuits before this gate is
+ * consulted. The repaint that sets the flag is synchronous, so no click lands in between.
  *
- * IT IS A PARAMETER ANYWAY, AND THE REASON IS THE PARAGRAPH ABOVE'S: one gate rather than two. What
- * makes the second caller's copy unreachable is a rendering decision in `pane-chrome.ts` — a module
- * this one does not own and does not get to depend on. A narrower rule here would be a second
- * opinion about the same question, held correct only by a distant file's current choice.
+ * IT IS A PARAMETER ANYWAY, BECAUSE THIS FUNCTION IS THE ONE PLACE AVAILABILITY IS DECIDED: one gate
+ * rather than two. What makes `transport.ts`'s copy unreachable is a rendering decision in
+ * `step-controls.ts` — a module this one does not own and does not get to depend on. A narrower rule
+ * here would be a second opinion about the same question, held correct only by a distant file's
+ * current choice.
  */
 export function canRecordFurther(done: RecordEnd | null, awaitingRun: boolean): boolean {
   return !awaitingRun && (done === 'capped' || done === 'budget')
@@ -149,8 +150,8 @@ export function controlState(v: LegView): ControlState {
     canBack: v.head > 0,
     // `▶` STAYS LIVE AT THE FRONTIER WHEN THERE IS MORE TO RECORD. Forward means forward whether the
     // next frame has been recorded yet or not — `transport.ts` turns a frontier `▶` into the same
-    // `extend` request `[continue]` sends. Gating this on recorded frames alone left that branch unreachable:
-    // the button was disabled at exactly the moment it had something to do.
+    // `extend` request `[continue]` sends. Gating this on recorded frames alone would leave that branch
+    // unreachable: the button would be disabled at exactly the moment it had something to do.
     canForward: v.head < v.length - 1 || canRecordFurther(v.done, v.awaitingRun),
     canToNewest: v.head < v.length - 1,
     canPlay: v.length > 1,

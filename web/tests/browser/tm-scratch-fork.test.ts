@@ -6,30 +6,27 @@ import { editorViewOf } from './editor-view-fixture'
 import { editedToHaltImmediately, idle, SHELL, startStateGoesToHalt, tmPaneHost, until } from './harness'
 
 /**
- * **THE FORK GESTURE FOR THE TM LEG, DRIVEN THROUGH THE APP — 5d-iv Task 9, the headline task.**
- * Everything from Task 3 through Task 8 built the machinery — the cap (`MAX_FORK_RULES`), the
- * `tm-scratch` request/reply pair, the buffer collection's second leg, the editor region on `TmPane` —
- * with no control anywhere that could reach any of it. This file is the wiring that finally lets a user
- * click something: `PaneEvents.detachMachine`, `TmPane.setForkAvailable`, `transport.ts`'s handler, and
- * `replies.ts`'s `tm-scratch-compiled` arm.
+ * **THE FORK GESTURE FOR THE TM LEG, DRIVEN THROUGH THE APP**: the control a user clicks to reach the
+ * machinery — the cap (`MAX_FORK_RULES`), the `tm-scratch` request/reply pair, the buffer collection's second
+ * leg, the editor region on `TmPane` — and its wiring: `PaneEvents.detachMachine`, `TmPane.setForkAvailable`,
+ * `transport.ts`'s handler, and `replies.ts`'s `tm-scratch-compiled` arm.
  *
- * **MODELLED ON `scratch-fork.test.ts`'s DOM `describe` AND `scratch-edit.test.ts`, NOT ON EITHER
- * FILE'S NODE-LEVEL `describe`s.** Those drive `ScratchBuffers` directly over a hand-built registry
- * specifically because the claims under test there — pool size, a terminated worker's thread staying
- * silent — are not reachable from the DOM. Nothing here makes either claim; `fork`'s pool/registry
- * mechanics are leg-agnostic (`scratch.ts`'s own doc: "`#spawn` reads `state.leg`... to pick both the
- * request kind it posts and the one leg record it builds") and are already proven once, for λ, at that
- * layer. What is new and IS a DOM fact is the control existing, offering the right disabled reason, and
- * an edit in the mounted editor reaching a running machine — so this file drives the real app, the same
- * `SHELL` `scratch-app.test.ts` and `scratch-edit.test.ts` use.
+ * **MODELLED ON `scratch-fork.test.ts`'s DOM `describe` AND `scratch-edit.test.ts`, NOT ON
+ * `scratch-fork.test.ts`'s OTHER `describe`s.** Those drive `ScratchBuffers` directly over a hand-built
+ * registry specifically because the claims under test there — pool size, a terminated worker's thread staying
+ * silent — are not reachable from the DOM. Nothing here makes either claim; `fork`'s pool/registry mechanics
+ * are leg-agnostic (`scratch.ts`'s own doc: "`#spawn` below reads `state.leg`... to pick both the request kind
+ * it posts... and the one leg record it builds") and are already proven once, for λ, at that layer. What is
+ * new and IS a DOM fact is the control existing, offering the right disabled reason, and an edit in the
+ * mounted editor reaching a running machine — so this file drives the real app, the same `SHELL`
+ * `scratch-app.test.ts` and `scratch-edit.test.ts` use.
  *
- * **ONE MOUNT FOR THE FILE, FOR THOSE FILES' OWN REASON: ES module imports are cached, so `main()` runs
- * once per page and Vitest gives each test FILE its own page.** `mountApp` below only imports `../../src/main`
- * on its first call in this file; every later call reuses the already-mounted app and simply loads a new
- * program into it — the same "dispatch into the live editor" idiom `settled(view, src)` uses in those two
- * files, generalised into a small per-test entry point because this file's four tests are independent
- * claims (a control's presence, its disabled reason, the source surviving a fork, an edit reaching the
- * tapes) rather than stages of one sequence.
+ * **ONE MOUNT FOR THE FILE: ES module imports are cached, so `main()` runs once per page and Vitest gives each
+ * test FILE its own page.** `mountApp` below only imports `../../src/main` on its first call in this file;
+ * every later call reuses the already-mounted app and simply loads a new program into it — a small per-test
+ * entry point, because this file's five tests are independent claims (a control's presence, its disabled
+ * reason, the source surviving a fork, the control withdrawing from its own fork, an edit reaching the tapes)
+ * rather than stages of one sequence.
  *
  * **`mountApp` BRINGS THE TM PANE HOME BEFORE EVERY REUSE, WHICH IS WHAT KEEPS THE FIVE TESTS
  * INDEPENDENT DESPITE SHARING ONE PAGE.** The later tests fork the TM pane onto a scratch,
@@ -43,16 +40,14 @@ import { editedToHaltImmediately, idle, SHELL, startStateGoesToHalt, tmPaneHost,
 
 /**
  * `map`/`fold` over three elements — `tests/browser/scratch-fork.test.ts`'s own `BIG`, duplicated
- * rather than imported. `BIG` is a plain string — like `SHELL` before it moved to
- * `tests/browser/harness.ts` — so no shared-page argument forbids importing it; it stays duplicated
- * only because `scratch-fork.test.ts` does not export it. Needed here for the identical reason that
- * file states: its λ leg is a fast 555 β-steps but its TM leg is enormous
- * (design §3.1: 25,852 states, 266,863 δ-steps), and `session-worker.ts`'s `onRun` records λ to
+ * rather than imported. `BIG` is a plain string, so no shared-page argument forbids importing it; it
+ * stays duplicated only because `scratch-fork.test.ts` does not export it. Needed here because its λ
+ * leg is a fast 555 β-steps but its TM leg is enormous, and `session-worker.ts`'s `onRun` records λ to
  * completion before TM recording ever starts. So by the time this program's `compiled` reply lands —
  * enabling the fork control below — the source session is only just beginning several seconds of TM
- * recording, not finished with it. **`'leaves the source session running'`'s own doc has the argument
- * for why this file needs a slow-to-finish source at all**, where the other four tests are content
- * with the near-instant `'let x = 40; x + 2'`.
+ * recording, not finished with it.
+ * **`'leaves the source session running'`'s own doc has the argument for why this file needs a
+ * slow-to-finish source at all**.
  */
 const BIG = `fn map(xs, f) { if is_empty(xs) { nil } else { cons(f(head(xs)), map(tail(xs), f)) } }
 fn fold(xs, acc, f) { if is_empty(xs) { acc } else { fold(tail(xs), f(acc, head(xs)), f) } }
@@ -114,34 +109,21 @@ afterAll(() => {
 })
 
 /**
- * Whether the fork's own editor is mounted in `pane` — the fact the three fork gestures below wait on,
- * in place of the content quiescence they used to wait on.
+ * Whether the fork's own editor is mounted in `pane` — the fact the three fork gestures below wait on.
  *
- * **A QUIESCENCE POLL CANNOT SEE THIS ARRIVE, AND THAT IS NOT A TUNING PROBLEM.** `settleOn` (deleted
- * with this comment's arrival) declared the pane settled after 500 ms of unchanged text. The click's
- * own handler repaints the heading to `copy · not linked` SYNCHRONOUSLY (`tm-buffer-restore.test.ts`'s
- * `detachedWithNoEditorYet` doc measured that), so that change is already in the DOM before the poll
- * takes its first sample — and from that sample until the `tm-scratch-compiled` reply mounts this
- * editor, the text then does not change again AT ALL. Measured, not assumed: over five runs the first
- * post-click change and the editor's own mount were the same event, at 169/199/211/217/243 ms. So the
- * window had nothing left to reset it and was racing the round-trip directly, at a margin of about 2x
- * on this machine. A slower or busier runner crosses 500 ms and the poll returns "settled" having observed
- * nothing whatever, leaving the assertions to read a DOM that has not been repainted.
+ * **A QUIESCENCE POLL CANNOT SEE THIS ARRIVE, AND THAT IS NOT A TUNING PROBLEM.** The click's own handler
+ * repaints the heading to `copy · not linked` SYNCHRONOUSLY (`tm-buffer-restore.test.ts`'s
+ * `detachedWithNoEditorYet` doc), so that change is already in the DOM before a poll takes its first
+ * sample — and from that sample until the `tm-scratch-compiled` reply mounts this editor, the text does
+ * not change again AT ALL. A poll that declares the pane settled after a window of unchanged text then has
+ * nothing to reset the window and races the round-trip directly: a slower or busier runner crosses the
+ * window and the poll returns "settled" having observed nothing whatever, leaving the assertions to read a
+ * DOM that has not been repainted.
  *
- * That is not hypothetical: it is what reddened CI run 229, as `expected null not to be null` on the
- * `.cm-editor` query in `'leaves the source session running'`. Shrinking ONLY the window from 500 ms
- * to 100 ms reproduces that exact failure locally and deterministically.
- *
- * A DOCUMENT-WIDE quiescence check was never the escape either, and the reason is worth keeping from
- * the comment deleted alongside `settleOn`: the source session keeps recording its own λ leg
- * throughout this file's tests (design §4.3's entire point), repainting the λ pane continuously, so a
- * page-wide check could be starved of ever settling at all. Scoping it to this pane is what made it
- * terminate — and is also what left it with nothing to watch.
- *
- * Polling for the fact is immune by construction, which is `startStateGoesToHalt`'s own argument
- * (Important 4) applied to the gesture that precedes the edit rather than to the edit itself: this can
- * only become true once the reply has actually landed and mounted the editor, so there is no window to
- * expire and no interval to tune.
+ * Polling for the fact is immune by construction, which is `startStateGoesToHalt`'s own argument applied
+ * to the gesture that precedes the edit rather than to the edit itself: this can only become true once
+ * the reply has actually landed and mounted the editor, so there is no window to expire and no interval
+ * to tune.
  */
 const forkEditorMounted = (pane: HTMLElement): boolean => pane.querySelector('.cm-editor') !== null
 
@@ -180,12 +162,12 @@ const TM_HALF = 53_000
  * flag from a previous test).
  *
  * **`compiled` IS THREE WAITS: THE TM LEG STARTING TO RECORD, ITS RECORDING HALF WAY, THEN THE RUN'S END.** On the
- * 60-element list's machine, as one wait it took 9,211 ms at `CPUQuota=25%` (2026-10-05), against `until`'s 10 s; as
- * two, the second took up to 5,603 ms. The TM leg records last, after λ and asm, and its step line reads `…` from its
- * first frames until it stops, and counts them: the list's history fills at step 107,166, and `TM_HALF` is about half
- * of that. For a run with fewer TM frames, each wait ends at the result. The dispatch claims the compile and drops the
- * line's `…` (`compile.ts`'s `schedule`, `controls.ts`), which the assertions after it hold, and the assertion before
- * the second wait holds that the line it counts is this run's.
+ * 60-element list's machine, as one wait it took 9,211 ms of `until`'s 10 s at `CPUQuota=25%`. The TM leg records
+ * last, after λ and asm, and its step line reads `…` from its first frames until it stops, and counts them: the
+ * list's history fills at step 107,166, and `TM_HALF` is about half of that. For a run with fewer TM frames, each
+ * wait ends at the result. The dispatch claims the compile and drops the line's `…` (`compile.ts`'s `schedule`,
+ * `controls.ts`), which the assertions after it hold, and the assertion before the second wait holds that the line it
+ * counts is this run's.
  */
 async function mountApp(src: string): Promise<App> {
   if (!mounted) {
@@ -227,19 +209,17 @@ describe('forking a TM pane', () => {
   })
 
   /**
-   * **THE REFUSAL NAMES THE COUNT, BECAUSE A CONTROL THAT DOES NOTHING FOR AN INVISIBLE REASON IS
-   * WORSE THAN NO CONTROL.** `list60` is 94,182 rules against a cap of `MAX_FORK_RULES` (50,000) —
-   * `protocol.ts`'s own doc has the corpus measurement this figure comes from, and the note this task
-   * started with is what keeps 94,182 (a RULE count) from being confused with 127,881 (the δ-table's ROW
-   * count: states plus rules).
+   * **THE REFUSAL NAMES THE COUNT, BECAUSE A CONTROL THAT DOES NOTHING FOR AN INVISIBLE REASON IS WORSE
+   * THAN NO CONTROL.** `list60` is 94,182 rules against a cap of `MAX_FORK_RULES` (50,000) —
+   * `protocol.ts`'s own doc has the corpus measurement this figure comes from, and keeps 94,182 (a RULE
+   * count) apart from 127,881 (the δ-table's ROW count: states plus rules).
    */
   it('disables it with a count on a machine over the cap', { timeout: 120_000 }, async () => {
     const app = await mountApp(`[${Array.from({ length: 60 }, (_, i) => i + 1).join(', ')}]`)
     await app.compiled()
     const button = app.tmPane().querySelector<HTMLButtonElement>('button.detach')
     expect(button?.disabled).toBe(true)
-    // THE REASON IS THE ITEM'S DESCRIPTION NOW, AND ITS SECOND LINE — `viewMenu`'s `CopyState`; the old
-    // button carried it as its `title`.
+    // THE REASON IS THE ITEM'S DESCRIPTION AND ITS SECOND LINE — `viewMenu` writes a `CopyState`'s reason to both.
     expect(button?.getAttribute('aria-description')).toMatch(/94,?182/)
     expect(button?.querySelector('.view-menu-hint')?.textContent).toMatch(/94,?182/)
   })
@@ -248,33 +228,25 @@ describe('forking a TM pane', () => {
    * **THE SOURCE SESSION KEEPS RUNNING ACROSS A FORK**, which is the entire reason more than one
    * session exists.
    *
-   * **THE DOC USED TO CLAIM THIS WAS "ASSERTED BY WATCHING THE SOURCE'S STEP COUNT ADVANCE, THE SAME
-   * AXIS `scratch-fork.test.ts` USES FOR λ" — MEASURED FALSE, Important 5, whole-branch review before
-   * merge.** `app.compiled()` waits for `#results` to reach `idle`, which `session-worker.ts` only
-   * sets once the WHOLE run (both legs, decoded) has finished — so on `'let x = 40; x + 2'` the fork
-   * always landed on a session with nowhere left to go. Mutation-proven: narrowing
-   * `toBeGreaterThanOrEqual` to `toBe` still passed 5/5, printing `before=7 after=7`.
+   * **IT FORKS WHILE THE SOURCE IS GENUINELY MID-RUN.** `app.compiled()` waits for `#results` to reach
+   * `idle`, which it reaches only once the WHOLE run has finished, so a fork after it on
+   * `'let x = 40; x + 2'` lands on a session with nowhere left to go. `BIG` (this file's own copy of
+   * `scratch-fork.test.ts`'s fixture) is what makes the claim discriminating: its λ leg finishes in
+   * 555 steps before TM recording even starts (`onRun` awaits `recordLambda`, `recordAsm` and
+   * `recordTm` in turn, not interleaved), so by the time this pane's fork control is enabled the
+   * source is only just beginning several seconds of TM recording — `#results` reads `'running'`,
+   * checked directly below rather than assumed from the timing comment alone. The claim is the second
+   * of the two `scratch-fork.test.ts`'s λ version makes: the source "RUNS TO ITS OWN ANSWER, not
+   * merely one more frame."
    *
-   * **FIXED BY FORKING WHILE THE SOURCE IS GENUINELY MID-RUN, THE WAY THE λ ANALOGUE ACTUALLY DOES —
-   * not by comparing step counts, but by the analogue's OTHER assertion.**
-   * `scratch-fork.test.ts`'s own version makes two claims: the frontier advances DURING the build (not
-   * reachable here — see below), and the source "RUNS TO ITS OWN ANSWER, not merely one more frame."
-   * `BIG` (this file's own copy of that file's fixture) is what makes the second claim discriminating
-   * here too: its λ leg finishes in 555 steps before TM recording even starts (`onRun`'s `await
-   * recordLambda(...); await recordTm(...)` is sequential, not interleaved), so by the time this
-   * pane's fork control is enabled the source is only just beginning several seconds of TM recording —
-   * `#results` reads `'running'`, checked directly below rather than assumed from the timing
-   * comment alone.
-   *
-   * **THE STEP-COUNT AXIS ITSELF IS NOT REACHABLE FROM THIS FILE, WHICH IS WHY THE ASSERTION CHANGED
-   * SHAPE RATHER THAN JUST ITS FIXTURE.** The λ leg is already done by the time TM recording (the leg
-   * this gesture forks FROM) begins, so watching `lambda-0`'s own step readout proves nothing once
-   * `BIG` is the source. The TM leg IS still running, but `tm-0` — the one pane that shows it — is the
-   * pane this test forks away, and nothing else on this page displays the source's TM leg. What
-   * SURVIVES the fork and is still checkable is whether the source reaches its own answer at all: a
-   * regression that made `detachMachine` mutate or steal the source's own worker instead of minting a
-   * second one would leave `#results` stuck on `'running'` forever, which this fails on by timeout
-   * rather than by a value that already happened to be final.
+   * **THE STEP-COUNT AXIS ITSELF IS NOT REACHABLE FROM THIS FILE.** The λ leg is already done by the
+   * time TM recording (the leg this gesture forks FROM) begins, so watching `lambda-0`'s own step
+   * readout proves nothing once `BIG` is the source. The TM leg IS still running, but `tm-0` — the one
+   * pane that shows it — is the pane this test forks away, and nothing else on this page displays the
+   * source's TM leg. What SURVIVES the fork and is still checkable is whether the source reaches its
+   * own answer at all: a regression that made `detachMachine` mutate or steal the source's own worker
+   * instead of minting a second one would leave `#results` stuck on `'running'` forever, which this
+   * fails on by timeout rather than by a value that already happened to be final.
    */
   it('leaves the source session running', { timeout: 120_000 }, async () => {
     const app = await mountApp(BIG)
@@ -284,10 +256,8 @@ describe('forking a TM pane', () => {
     expect(document.querySelector<HTMLElement>('#results')?.dataset.state).toBe('running')
 
     detach()?.click()
-    // NO `expect(...querySelector('.cm-editor')).not.toBeNull()` AFTER THIS LINE, THOUGH ONE STOOD
-    // HERE UNTIL THE WAIT CHANGED SHAPE. The wait now guarantees exactly what that assertion checked,
-    // so it could no longer fail — and a check that cannot fail is the `/halt/i` defect this file
-    // already caught once (Important 3), wearing different clothes. The wait carries the claim
+    // NO `expect(...querySelector('.cm-editor')).not.toBeNull()` AFTER THIS LINE: the wait guarantees
+    // exactly what that assertion would check, so it could not fail. The wait carries the claim
     // instead, and names it in its own timeout message.
     await until(() => forkEditorMounted(app.tmPane()), "the fork's own editor to mount")
     expect(app.tmPane().textContent).toMatch(/copy · not linked/)
@@ -295,18 +265,10 @@ describe('forking a TM pane', () => {
     // THE ASSERTION: the source's own run finishes despite the fork, rather than stalling forever —
     // see this test's own doc for why this axis and not a step comparison.
     //
-    // **TWO WAITS, SPLIT ON THE SOURCE WORKER'S REPLIES.** No view shows the source's TM leg now, so the page has no
-    // state between the fork and the result; the worker's `tm-frames` replies still count its recording, 307 for
-    // `BIG`. As one wait this took 7,802 to 10,208 ms in six runs of this file at `CPUQuota=25%` (2026-10-05 and 06),
-    // failing once, at 10,104 ms under a load average of 17.79. The first wait ends half way from the count at the fork
-    // to the last reply, or at the result.
-    //
-    // **THE FIRST WAIT RAN PAST `until`'S 10 s, AND PASSED THEN ON `until`'S ORDER** (its doc), at 7,106 to 11,407 ms
-    // in three runs at `CPUQuota=25%` and 7,503 and 9,905 ms in two more at load averages of 8.28 and 12.01
-    // (2026-10-06): the page ran almost no poll while the two workers' frames came in. **A TM FRAME'S TAPES NOW CROSS
-    // AS ONE STRING EACH** (`viewmodel.rs`'s `TmState.window`), and in three runs at that quota, at load averages of
-    // 1.38 to 2.13, the two waits took 1,001 to 2,399 ms and 607 to 1,099 ms, where three runs taken in turn with
-    // them before that change took 4,405 to 4,902 ms and 2,998 to 4,494 ms (2026-10-07).
+    // **TWO WAITS, SPLIT ON THE SOURCE WORKER'S REPLIES.** No view shows the source's TM leg after the fork, so the
+    // page has no state between the fork and the result; the worker's `tm-frames` replies still count its recording,
+    // 307 for `BIG`. Split so that no one wait holds the whole recording. The first wait ends half way from the count
+    // at the fork to the last reply, or at the result.
     const atFork = sourceTmReplies
     expect(atFork, 'precondition: the replies counted are this compile’s').not.toBeNull()
     const halfWay = Math.ceil(((atFork ?? 0) + BIG_TM_REPLIES) / 2)
@@ -318,15 +280,14 @@ describe('forking a TM pane', () => {
   })
 
   /**
-   * **THE CONTROL MUST NOT SURVIVE ITS OWN FORK — Critical 1, fix round.** Measured in a real
-   * browser on the unfixed source: `button.detach` stays present AND enabled on the pane that just
-   * rebound onto its own new scratch, and a second click reaches `transport.ts`'s `detachMachine`
-   * with no machine text (a TM scratch's own `tmProgram.tmText` is always `null` —
-   * `replies.ts`'s `tm-scratch-compiled` arm constructs it that way on purpose) and throws
-   * `detachMachine reached with no machine text` rather than doing nothing. A view already showing a
-   * copy has nothing left to copy — `CopyEditor.#refreshDetach` states that rule and enforces it — so the
-   * control must withdraw the instant this pane's OWN session becomes the scratch it
-   * just made — not only when some later reply happens to tell it to.
+   * **THE CONTROL MUST NOT SURVIVE ITS OWN FORK.** Were `button.detach` to stay present AND enabled on
+   * the pane that just rebound onto its own new scratch, a second click would reach `transport.ts`'s
+   * `detachMachine` with no machine text (a TM scratch's own `tmProgram.tmText` is always `null` —
+   * `replies.ts`'s `tm-scratch-compiled` arm constructs it that way on purpose) and throw
+   * `detachMachine reached with no machine text` rather than do nothing. A view already showing a copy
+   * has nothing left to copy — `CopyEditor.#refreshDetach` states that rule and enforces it — so the
+   * control must withdraw the instant this pane's OWN session becomes the scratch it just made — not only
+   * when some later reply happens to tell it to.
    */
   it('withdraws its own fork control once it is showing the fork, so a second click cannot reach it', async () => {
     const app = await mountApp('let x = 40; x + 2')
@@ -344,8 +305,8 @@ describe('forking a TM pane', () => {
   })
 
   /**
-   * **THE HEADLINE CAPABILITY: EDIT A RULE, WATCH THE TAPES TAKE IT.** Everything above this test is
-   * plumbing; this is the thing the slice exists to make possible.
+   * **THE HEADLINE CAPABILITY: EDIT A RULE, WATCH THE TAPES TAKE IT.** Everything above this test
+   * is plumbing.
    */
   it('runs the edited machine', async () => {
     const app = await mountApp('let x = 40; x + 2')
@@ -360,11 +321,9 @@ describe('forking a TM pane', () => {
     const { text: edited, start } = editedToHaltImmediately(original)
     app.typeInto(app.tmPane(), edited)
 
-    // WAIT ON THE FACT ITSELF, NOT ON QUIESCENCE — Important 4. See `startStateGoesToHalt`'s own doc
-    // for why a content-quiescence poll can resolve before the debounced recompile ever reaches the
-    // worker, and why polling for this fact instead is immune to that race. The quiescence helper that
-    // reasoning was written against is gone entirely now: `forkEditorMounted`'s doc has the measurement
-    // that retired it from the three fork gestures above, which were its last callers.
+    // WAIT ON THE FACT ITSELF, NOT ON QUIESCENCE. See `startStateGoesToHalt`'s own doc for why a
+    // content-quiescence poll can resolve before the debounced recompile ever reaches the worker, and
+    // why polling for this fact instead is immune to that race.
     await until(() => startStateGoesToHalt(app.tmPane(), start), `the δ-table to show \`${start}\` going to halt`)
     expect(startStateGoesToHalt(app.tmPane(), start)).toBe(true)
   })

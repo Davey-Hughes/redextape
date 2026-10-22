@@ -5,7 +5,7 @@ import type { LambdaState } from '../../src/types'
 import { controlState, newPaneHost } from './harness'
 
 /**
- * Design §4.2's split body: the editor mounted (or not) above the existing frame renderer, and when
+ * 5d-iii design §4.2's split body: the editor mounted (or not) above the existing frame renderer, and when
  * the fork control is offered (`lambda-pane.ts`'s `#refreshDetach` doc).
  *
  * PANES ARE CONSTRUCTED DIRECTLY, matching `view-status.test.ts`'s idiom: this is chrome and body
@@ -13,7 +13,10 @@ import { controlState, newPaneHost } from './harness'
  * nothing on the path to it that needs `main()`.
  */
 
-/** `PaneEvents`'s members, all inert — no test here clicks a control. */
+/**
+ * `PaneEvents`'s members, all inert: the one control a test here clicks is the text panel's toggle, which
+ * reports through `collapse`, and this leaves `collapse` out.
+ */
 const events = (): PaneEvents => ({
   back: vi.fn(),
   forward: vi.fn(),
@@ -30,10 +33,9 @@ const events = (): PaneEvents => ({
 
 /**
  * A `LambdaState` fixture built through a helper typed as `LambdaState`, not an inline object literal
- * — so a field `2026-08-11-plan5d-iii-editable-lambda.md`'s sketch omitted (`owner`, missing from its
- * literal entirely) or mistyped (`spans` as `[]` inferred rather than the field's own type) is a compiler error
- * here instead of a silently wrong fixture. `viewmodel.rs`'s `LambdaState` is the real shape this is built
- * from.
+ * — so a field left out (`owner`) or mistyped (`spans` as `[]` inferred rather than the field's own type)
+ * is a compiler error here instead of a silently wrong fixture. `viewmodel.rs`'s `LambdaState` is the real
+ * shape this is built from.
  */
 const lambdaState = (over: Partial<LambdaState> = {}): LambdaState => ({
   text: '\\x. x',
@@ -66,9 +68,8 @@ describe('LambdaPane editor region', () => {
   })
 
   it('reopens the text panel on remount, not just on the next click', () => {
-    // The reviewer's repro for the stale-state defect, carried over from the collapse button this panel
-    // replaced: mount, collapse, unmount, remount. A remounted editor starts where its buffer's record
-    // says (open, here), so the control that names its state has to say so too.
+    // Mount, collapse, unmount, remount: a remounted editor starts where its buffer's record says (open,
+    // here), so the control that names its state has to say so too.
     const el = newPaneHost()
     const pane = new LambdaPane(el, events())
     pane.setEditor('\\x. x')
@@ -88,8 +89,8 @@ describe('LambdaPane editor region', () => {
     expect(el.querySelector('[data-panel="text"] .panel-toggle')?.getAttribute('aria-expanded')).toBe('true')
   })
 
-  // THE REFUSAL THIS FILE USED TO PIN IS GONE WITH THE LINK WINDOW (Plan 7 part 4a): the view shows the
-  // frame's own step, as a tree or as text, and there is no second body a fork could be taken from.
+  // A FORK IS TAKEN FROM THE FRAME'S OWN STEP, which the view shows as a tree or as text, so none is offered
+  // before a frame is on screen.
   it('offers a fork once a frame is on screen, and not before', () => {
     const el = newPaneHost()
     const pane = new LambdaPane(el, events())

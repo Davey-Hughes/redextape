@@ -20,10 +20,10 @@ import {
  * A COPY DELETED AND RESTORED WHILE A PARKED VIEW SHOWS IT: WHERE ITS EDITOR, AND THE FOCUS, COME BACK.
  *
  * A delete's *undo* moves back each view the delete moved, and the first of them gets the copy's editor and the focus
- * (`pane-host.ts`'s `moveBack`, `main.ts`'s `undo`). The views came in the order they were built, so the first could
- * be a view a switch had parked while a newer view of the copy was on screen. Measured on `8295dc1`: the editor was
- * mounted in the parked view, the view on screen showed the copy with none and offered *move the editor here*, and
- * the focus was on the copies button. `moveBack` takes the views of the tree on screen first.
+ * (`pane-host.ts`'s `moveBack`, `main.ts`'s `undo`). Taken in the order they were built, the first could be a view a
+ * switch had parked while a newer view of the copy was on screen: the editor would be mounted in the parked view, the
+ * view on screen would show the copy with none and offer *move the editor here*, and the focus would be on the
+ * copies button. `moveBack` takes the views of the tree on screen first.
  *
  * **THE PARKED VIEW IS THE OLDER ONE HERE**, which `parked-copy-editor.test.ts`'s is not: there the view on the page
  * is the first built, and gets the editor in either order.
@@ -33,10 +33,10 @@ import {
  *
  * **THE DELETE, ITS *UNDO* AND EVERY TOGGLE ARE PRESSED WITH THE POINTER** (`press`). A press puts the focus on the
  * *undo* button before its handler runs, so the notice line ends while it holds the focus and hands it to the copies
- * button (`notice.ts`'s `createNotices`), and `main.ts`'s `undo` then moves it. A `.click()` moved no focus, so the
- * line never held it. **SO THE COPIES BUTTON HAS THE FOCUS BY EITHER HAND WHERE NO VIEW ON SCREEN SHOWS THE COPY**:
- * with `undo` giving no focus at all, that case passed (measured 2026-10-12), and the case of a view on screen is the
- * one that fails.
+ * button (`notice.ts`'s `createNotices`), and `main.ts`'s `undo` then moves it. A `.click()` moves no focus, so the
+ * line would never hold it. **SO THE COPIES BUTTON HAS THE FOCUS BY EITHER HAND WHERE NO VIEW ON SCREEN SHOWS THE
+ * COPY**: with `undo` giving no focus at all, that case would pass, and the case of a view on screen is the one that
+ * would fail.
  */
 
 const errors: string[] = []

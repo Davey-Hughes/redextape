@@ -6,7 +6,7 @@
  * `.test.ts`, and this one does not.
  */
 
-/** See `frame-cost.test.ts`'s type of the same name for why this is local and not in `types.ts`. */
+/** See `frame-cost.test.ts`'s type of the same name for why `performance.memory` needs a cast. */
 type MemoryPerformance = Performance & { memory?: { usedJSHeapSize: number } }
 
 /** See `frame-cost.test.ts`'s type of the same name. Put here by `--js-flags=--expose-gc`. */
@@ -19,9 +19,9 @@ export const heapNow = (): number => (performance as MemoryPerformance).memory?.
  * Assert the two non-standard globals exist, and return the collector.
  *
  * IT THROWS `BLOCKED:` RATHER THAN SKIPPING, exactly as `frame-cost.test.ts` does. Without
- * `--enable-precise-memory-info` every heap delta in that file came back as exactly 0 (measured
- * 2026-08-10 by deleting the flag), so a probe that tolerated a missing flag would report a ratio of
- * 0/0 or 1.0 and call the threshold met. A probe that silently reads zeros is worse than no probe.
+ * `--enable-precise-memory-info` every heap delta in that file came back as exactly 0, so a probe
+ * that tolerated a missing flag would report a ratio of 0/0 or 1.0 and call the threshold met. A
+ * probe that silently reads zeros is worse than no probe.
  */
 export function requireHeapHarness(): () => void {
   if (!(performance as MemoryPerformance).memory) {

@@ -21,15 +21,15 @@ import { applyEdits, revealRange } from './lsp-text'
 export type ScratchEditorConfig = {
   host: HTMLElement
   initial: string
-  /** `compile.ts`'s `DEBOUNCE_MS`, passed in rather than imported — see the class doc. */
+  /** `editor-debounce.ts`'s `EDITOR_DEBOUNCE_MS` in the app, passed in rather than imported — see the class doc. */
   debounceMs: number
   /**
    * Where this editor's edits go — for the app, a rebuild of the copy it was built for (`PaneEvents.editSink`).
    *
    * **FIXED FOR THE EDITOR'S LIFE, BECAUSE AN EDITOR IS ONE COPY'S.** It moves between views, and the view it was
    * built on moves between copies, but it only ever holds one copy's text — `document` below is keyed the same way
-   * for the same reason. A sink that resolved "the copy the view shows now" when it fired sent typing into the copy
-   * a view had just moved to.
+   * for the same reason. A sink that resolved "the copy the view shows now" when it fired would send typing into the
+   * copy a view had just moved to.
    */
   onEdit: (src: string) => void
   /**
@@ -39,7 +39,7 @@ export type ScratchEditorConfig = {
    * loads each grammar once for the whole page (`colour.ts`'s `createGrammarRegistry`); a
    * `ScratchEditor` reaching for a module-level singleton would make every test that mounts one fetch
    * four `.wasm` files, and would put the app's failure policy — which notice, on which surface —
-   * inside a widget. The same argument `document.client` above is a config field for.
+   * inside a widget.
    *
    * Optional, and the callers that omit it are tests with no colouring to exercise.
    */
@@ -98,10 +98,9 @@ export type ScratchEditorConfig = {
         /**
          * How this editor reads to a screen reader — `λ · copy 1`, `TM · copy 2`.
          *
-         * **DEFERRED-ACCESSIBILITY ITEM 16: "NEITHER EDITABLE TEXT REGION CARRIES AN ACCESSIBLE
-         * NAME".** CodeMirror gives its content a `textbox` role and no name, so every editor on
-         * the page announced identically — which on a tiled workspace showing three of them is
-         * the difference between navigable and not.
+         * CodeMirror gives its content a `textbox` role and no name, so without one every editor on
+         * the page would announce identically — which on a tiled workspace showing three of them is
+         * the difference between navigable and not (deferred-accessibility item 16).
          */
         label: string
       }
@@ -111,40 +110,30 @@ export type ScratchEditorConfig = {
 }
 
 /**
- * **THE SCRATCH TEXT EDITOR — design §4.2's upper region and §4.3's recompile trigger, for any leg
- * a scratch buffer can hold.**
+ * **THE SCRATCH TEXT EDITOR — 5d-iii design §4.2's upper region and §4.3's recompile trigger, for any
+ * leg a scratch buffer can hold.**
  *
- * A CodeMirror 6 instance over a scratch session's text. It is the surface 5d-i's §6 said had no
- * home: `ScratchBuffers` gave a scratch a life of its own, and this is the thing that can change
- * its text.
+ * A CodeMirror 6 instance over a scratch session's text: `ScratchBuffers` gives a scratch a life of
+ * its own, and this is the thing that can change its text.
  *
- * **ITS OWN MODULE FOR THE REASON `scratch.ts` IS.** `lambda-pane.ts` is 289 lines and its whole job
- * is `(frame, controls) -> DOM`; a document surface, a debounce timer and a diagnostics channel mixed
- * into it would put it past 450 and put three concerns behind one name. It is also where the coverage
- * gate can see it, which `session-worker.ts` is not.
+ * **ITS OWN MODULE.** `lambda-pane.ts`'s job is `(frame, controls) -> DOM`; a document surface, a
+ * debounce timer and a diagnostics channel mixed into it would put three concerns behind one name. It
+ * is also where the coverage gate can see it, which `session-worker.ts` is not.
  *
- * **TWO COLOURING PATHS ON ONE PANE, ON DIFFERENT CLOCKS, AND THE OLDER ARGUMENT IS STILL HALF TRUE.**
- * The λ view's flat text colours tokens from `spans`, which the worker computes per frame from a term
- * it holds, and **that path is unchanged** — its frame is a printed term, so its colouring is a fact about
- * what the worker last sent. (A drawn tree colours by token kind instead; `lambda-body.ts`.) What this
- * class used to carry was the conclusion drawn from that: an editor's buffer is text the user is halfway
- * through typing, there is no frame for it, and a colouring computed from printed output is stale the
- * instant the user types. That half still holds, and it is exactly why the frame's spans are not reused
- * here.
+ * **TWO COLOURING PATHS ON ONE PANE, ON DIFFERENT CLOCKS.** The λ view's flat text colours tokens from
+ * `spans`, which the worker computes per frame from a term it holds — its frame is a printed term, so
+ * its colouring is a fact about what the worker last sent. (A drawn tree colours by token kind instead;
+ * `lambda-body.ts`.) An editor's buffer is text the user is halfway through typing, there is no frame
+ * for it, and a colouring computed from printed output is stale the instant the user types, which is
+ * why the frame's spans are not reused here. `colour.ts` parses the BUFFER rather than printed output,
+ * with a committed grammar per language (`grammars/`): the `colour` config field above is that parser,
+ * arriving per editor for whichever language this one holds. So this class colours from a tree over
+ * the text on screen, while the pane beside it colours a frame from the term the worker holds, and
+ * neither is derived from the other.
  *
- * **THE OTHER HALF WAS "λ HAS NO PARSER FOR BUFFER TEXT", AND TREE-SITTER IS THE ANSWER TO IT.** The
- * argument ran that `analyze` is the SOURCE language's parser rather than λ's, that colouring a buffer
- * would need a λ `linter`-shaped path the slice did not have, and — for `.tm` — that `print_tm_mapped`
- * exists in `redextape-core` but is not exported to wasm. There are four committed grammars now
- * (`grammars/`), one per language, and `colour.ts` parses the BUFFER rather than printed output: the
- * `colour` config field above is that parser, arriving per editor for whichever language this one
- * holds. So this class colours from a tree over the text on screen, while the pane beside it colours a
- * frame from the term the worker holds, and neither is derived from the other.
- *
- * **`debounceMs` IS INJECTED RATHER THAN IMPORTED FROM `main.ts`.** It is `DEBOUNCE_MS` (300), the
- * source pane's own constant, because it is the same gesture at the same speed — but importing from
- * `main.ts` would make a module that mounts the app a dependency of one of its widgets, and the test
- * above needs to drive it without one.
+ * **`debounceMs` IS INJECTED RATHER THAN IMPORTED.** It is the source pane's own speed, `compile.ts`'s
+ * `DEBOUNCE_MS` (300), because it is the same gesture at the same speed; the panes pass
+ * `editor-debounce.ts`'s `EDITOR_DEBOUNCE_MS`, and a test drives the editor at a speed of its own.
  */
 export class ScratchEditor {
   #view: EditorView
@@ -154,14 +143,14 @@ export class ScratchEditor {
    *
    * **SET BY `format()`, DISCHARGED BY WHICHEVER OF `flush()` OR `format()`'S OWN CONTINUATION GETS THERE
    * FIRST.** `format()` clears `#timer` at its start and carries the pending edit inside its own async closure
-   * until the server answers — so `flush()`, which used to look at `#timer` alone, saw nothing pending for the
+   * until the server answers — so a `flush()` that looked at `#timer` alone would see nothing pending for the
    * whole time a format is in flight. A delete or a pause reads a copy's record before any editor comes down
-   * (`EditorCustody.flush`), which is BEFORE that closure can ever run; without this field the record was read
-   * stale and undo restored text missing the keystrokes typed before *format*.
+   * (`EditorCustody.flush`), which is BEFORE that closure can ever run; without this field the record would be
+   * read stale and undo would restore text missing the keystrokes typed before *format*.
    *
    * **AND DROPPED BY `#send`, WHICH SENDS EVERYTHING THE EDITOR HOLDS.** Typing that overtakes the format sets a
    * debounce of its own, and once that has sent the editor's text this field holds nothing the copy lacks: it
-   * holds an older text. Kept, `flush()` sent it after the newer one.
+   * holds an older text. Kept, `flush()` would send it after the newer one.
    *
    * **`setText` READS IT TOO**, as it reads `#timer`: while either holds an edit, the editor is ahead of whatever
    * a build's reply carries.
@@ -199,8 +188,8 @@ export class ScratchEditor {
           // ABOVE BOTH KEYMAPS BELOW, NOT BETWEEN THEM — `editor-keymap.ts`'s `keymapSlot` has the
           // mechanism, which is about DOM event handlers rather than about key bindings.
           keymapSlot(config.keymap?.mode ?? DEFAULT_KEYMAP),
-          // BEFORE the default keymap, so a binding here wins — neither key is in it (74 bindings
-          // scanned, no F-keys), so today this is order for its own sake rather than a conflict.
+          // BEFORE the default keymap, so a binding here wins — neither key is in it, so this is order
+          // for its own sake rather than a conflict.
           keymap.of(
             navKeymap({
               uri: () => this.#document?.uri,
@@ -226,8 +215,8 @@ export class ScratchEditor {
             blur: () => {
               if (this.#document?.formatOnBlur() !== true) return false
               // CAUGHT, NOT `void`ed: an unhandled rejection in a browser reaches
-              // `window.onunhandledrejection` and prints as an uncaught error. `LspClient`'s
-              // `initialize` carries the same note, for the same reason.
+              // `window.onunhandledrejection` and prints as an uncaught error. The `initialize`
+              // request in `LspClient.start` carries the same note, for the same reason.
               this.format().catch(() => {})
               return false
             },
@@ -250,13 +239,12 @@ export class ScratchEditor {
   /**
    * This editor's own DOM root — CodeMirror's node, not a wrapper around it.
    *
-   * EXPOSED SO A CALLER CAN RELOCATE IT — `LambdaPane.receiveEditor` (wave 3's editor-moves rule) and
-   * `CopyEditor.receiveEditor` are the callers, and they exist precisely because moving `dom` into a
-   * different parent element is what CodeMirror already supports for free: `Node.append` on a node
-   * already in the document MOVES it rather than duplicating it — the DOM removes a node from its old
-   * parent before inserting it, so there is never a moment with two copies and never a detach call to
-   * write. No CodeMirror API is needed beyond that; this getter is the only reason `#view` was ever
-   * private.
+   * EXPOSED SO A CALLER CAN RELOCATE IT — `LambdaPane.receiveEditor` (the editor-moves rule, 5d-ii-a
+   * design §4.3) and `CopyEditor.receiveEditor` are the callers, and they exist precisely because
+   * moving `dom` into a different parent element is what CodeMirror already supports for free:
+   * `Node.append` on a node already in the document MOVES it rather than duplicating it — the DOM
+   * removes a node from its old parent before inserting it, so there is never a moment with two copies
+   * and never a detach call to write. No CodeMirror API is needed beyond that, so `#view` stays private.
    */
   get dom(): HTMLElement {
     return this.#view.dom
@@ -285,7 +273,7 @@ export class ScratchEditor {
     // WHATEVER `format()` TOOK IS SUPERSEDED BY THIS SEND, which carries the FULL current text, cumulative with
     // everything typed — the keystrokes that field was holding included. Dropped here and not only in `flush()`,
     // because the debounce reaches this on its own while a format is in flight; left set then, the next `flush()`
-    // sent the older text after this one.
+    // would send the older text after this one.
     this.#formatPending = null
     const text = this.#view.state.doc.toString()
     // TOLD TO THE SERVER ON THE SAME DEBOUNCE AS THE RECOMPILE, not on every keystroke. The
@@ -306,10 +294,10 @@ export class ScratchEditor {
    *
    * **A FORMAT IN FLIGHT HOLDS ITS OWN PENDING TEXT OUTSIDE `#timer`, AND THIS IS WHERE THAT GETS SENT TOO.**
    * `format()` clears `#timer` at its start and carries what it took off it inside its own async closure until the
-   * server answers, in `#formatPending` — so a `flush()` that looked at `#timer` alone found nothing pending for the
-   * whole time a format is in flight, and a delete's undo restored text missing the keystrokes typed before *format*.
-   * `#formatPending` is cleared when it is sent, here or by `#send`, so `format()`'s own completion does not send it
-   * again.
+   * server answers, in `#formatPending` — so a `flush()` that looked at `#timer` alone would find nothing pending for
+   * the whole time a format is in flight, and a delete's undo would restore text missing the keystrokes typed before
+   * *format*. `#formatPending` is cleared when it is sent, here or by `#send`, so `format()`'s own completion does not
+   * send it again.
    */
   flush(): void {
     if (this.#timer !== null) {
@@ -334,16 +322,15 @@ export class ScratchEditor {
    * **AND A NO-OP WHILE AN EDIT IS PENDING, because `text` is then older than the editor.** Every
    * build reply re-seeds through here, and a build carries what the editor held when its debounce
    * fired; whatever was typed after that is in the editor alone, with a debounce of its own still to
-   * fire. Replacing it lost the typing, and that debounce then posted the older text as the user's.
-   * Left alone, the pending build carries the typing, and its own reply re-seeds.
+   * fire. Replacing it would lose the typing, and that debounce would then post the older text as the
+   * user's. Left alone, the pending build carries the typing, and its own reply re-seeds.
    *
    * **A FORMAT IN FLIGHT HOLDS A PENDING EDIT TOO, OUTSIDE `#timer`, AND THE SAME RULE COVERS IT.**
    * `format()` takes the pending edit off `#timer` and owes it to `onEdit` in `#formatPending`, so
    * while that is set the editor holds an edit no build has carried, and no timer runs until more is
-   * typed. The reply
-   * to the build posted BEFORE that edit, landing then, re-seeded the editor with the older text; the
-   * format's answer was refused as overtaken (`applyEdits`), and the older text is what `format()`
-   * then sent as the edit it owed. `flush()` had the same blind spot, and its doc names it.
+   * typed. The reply to the build posted BEFORE that edit, landing then, would re-seed the editor with
+   * the older text; the format's answer would be refused as overtaken (`applyEdits`), and the older
+   * text is what `format()` would then send as the edit it owed.
    */
   setText(text: string): void {
     if (this.#timer !== null || this.#formatPending !== null) return
@@ -364,9 +351,7 @@ export class ScratchEditor {
   /**
    * Show `ds` in the gutter — this editor's own `DiagnosticsSink`, handed to `openDocument`.
    *
-   * **A PUSH, AS BEFORE, BUT FROM A DIFFERENT PUSHER.** These used to arrive on the session worker's
-   * run reply, which meant a λ copy got them and a TM copy got nothing — `tm-pane.ts` never called
-   * this method. They now arrive from the LSP worker for every editor alike.
+   * **A PUSH, FROM THE LSP WORKER, FOR EVERY EDITOR ALIKE.**
    *
    * No byte conversion: the server negotiates `positionEncoding: utf-16`, which is what CodeMirror
    * counts in. `lspLintRanges` still widens a zero-width range, because rendering nothing for
@@ -388,19 +373,15 @@ export class ScratchEditor {
   /**
    * Reformat this editor's document.
    *
-   * **IT FLUSHES THE PENDING EDIT FIRST, AND BOTH WAYS IN NEED THAT.** A copy's keystrokes reach the
-   * server on a 300 ms debounce, so a format asked for inside that window is answered from the text
-   * the server still holds — and `textDocumentSync` is Full, so the answer replaces the whole
-   * document and those keystrokes vanish. The blur path had this guard and the `⋯` menu's *format*
-   * item did not, which is the same exposure through a different door.
+   * **IT FLUSHES THE PENDING EDIT FIRST, AND BOTH WAYS IN — *FORMAT ON BLUR* AND THE VIEW MENU'S
+   * *FORMAT* — NEED THAT.** A copy's keystrokes reach the server on a 300 ms debounce, so a format
+   * asked for inside that window is answered from the text the server still holds — and
+   * `textDocumentSync` is Full, so the answer replaces the whole document and those keystrokes vanish.
    *
    * **THE RECOMPILE CARRIES THE POST-FORMAT TEXT, AND THAT IS THE LOAD-BEARING PART.** `#onEdit`
    * rebuilds the buffer, the reply redraws the pane, and the pane re-seeds this editor with whatever
    * the buffer now holds. Hand it the text as typed and it overwrites the formatting a moment after
-   * `applyEdits` put it there — measured while tracing it: the server returned the right edits, they
-   * were applied, and `setText` undid them. An earlier fix named the ORDER as the mechanism and was
-   * wrong; restoring the original order under the test left it green, and recompiling the pre-format
-   * text reddens it.
+   * `applyEdits` put it there: the server's edits are applied, and `setText` undoes them.
    *
    * A buffer that does not parse formats to nothing rather than to an error — `Language::format`
    * answers `None`, the server sends `null`, the client turns that into no edits — which is what
@@ -428,10 +409,10 @@ export class ScratchEditor {
     } catch {
       // Reported by the client, once, for the server rather than for this gesture.
     }
-    // **`destroy()` CAN NOW DISCHARGE THIS BEFORE THE AWAIT EVER RETURNS, WHERE IT ONCE COULD NOT.**
-    // `destroy()` calls `flush()`, and `flush()` sends `#formatPending` the moment it is asked —
-    // synchronously, from a delete or a pause that reads a copy's record before any editor comes down
-    // (`EditorCustody.flush`), and from `destroy()` itself when a pick or a close is what ends the view.
+    // **`destroy()` CAN DISCHARGE THIS BEFORE THE AWAIT EVER RETURNS.** `destroy()` calls `flush()`, and
+    // `flush()` sends `#formatPending` the moment it is asked — synchronously, from a delete or a pause
+    // that reads a copy's record before any editor comes down (`EditorCustody.flush`), and from
+    // `destroy()` itself when a pick or a close is what ends the view.
     // `owed` is what is LEFT for this method to send once the server answers: `false` when `flush()`
     // already sent it, or when typing that overtook the format was sent by a LATER debounce (`#send`), or
     // when a format started before this one answered first; `true` otherwise.
@@ -451,17 +432,15 @@ export class ScratchEditor {
   /**
    * Tear down the instance, **sending any pending edit first** (`flush`).
    *
-   * **THE PENDING EDIT IS SENT, WHERE THIS USED TO CANCEL IT, AND THE CANCEL LOST TYPING.** A TM or asm view destroys
-   * the editor it leaves (spec amendment 33) — a pick through its title, a close, a change to another leg — and a λ
-   * view destroys its editor when it moves to the program, so cancelling dropped whatever was typed in the last
-   * `debounceMs` before the view moved, silently. The cancel was there for a retirement: firing after one "would post
-   * a `lambda-scratch` to a session the pool has already unbound". Sending now reaches no worker either, because the
-   * sink an editor is built with is its own copy's (`ScratchEditorConfig.onEdit`), and `ScratchBuffers.recompile`
-   * posts nothing for a copy that is deleted or asleep — it records the text of one asleep, which is the pause
-   * keeping what was typed.
+   * **THE PENDING EDIT IS SENT, NOT CANCELLED.** A TM or asm view destroys the editor it leaves (spec amendment 33) —
+   * a pick through its title, a close, a change to another leg — and a λ view destroys its editor when it moves to
+   * the program, so cancelling would drop whatever was typed in the last `debounceMs` before the view moved,
+   * silently. Sending after a retirement reaches no worker, because the sink an editor is built with is its
+   * own copy's (`ScratchEditorConfig.onEdit`), and `ScratchBuffers.recompile` posts nothing for a copy that is
+   * deleted or asleep — it records the text of one asleep, which is the pause keeping what was typed.
    *
-   * **AND `flush()` NOW REACHES A FORMAT IN FLIGHT'S OWN PENDING TEXT TOO** (`#formatPending`), not only `#timer`'s —
-   * `format()`'s own doc has the reason a closure alone was not enough.
+   * **AND `flush()` REACHES A FORMAT IN FLIGHT'S OWN PENDING TEXT TOO** (`#formatPending`), not only `#timer`'s —
+   * `#formatPending`'s own doc has the reason a closure alone was not enough.
    */
   destroy(): void {
     this.flush()

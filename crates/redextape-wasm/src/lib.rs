@@ -533,7 +533,8 @@ impl Session {
     /// `tmText()` -> `string | null`. The machine as `.tm` text, for a fork to seed a `TmScratch` from.
     ///
     /// **NOT FALLIBLE AND SO NOT `Result`.** Unlike its neighbours it marshals a plain `String`, which
-    /// `JsValue::from` cannot fail on; a declined leg is `null`, which is a fact rather than an error.
+    /// `JsValue::from_str` cannot fail on; a declined leg, or a result type a `.tm` header cannot name (a
+    /// function-valued program), is `null`, which is a fact rather than an error.
     ///
     /// **RETURNS `JsValue`, NOT A BARE `Option<String>`.** wasm-bindgen's native ABI marshals `None` as
     /// `undefined`, never `null` — `serialize_missing_as_null(true)` is this crate's `to_value` helper's

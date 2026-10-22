@@ -21,16 +21,16 @@ import {
  *
  * A divider's press moves no focus (`layout-view.ts`'s `divider` prevents it, so a drag selects no text), so the caret
  * is still in its editor while the pointer drags. The drag's end is a rebuild, which detaches every view's host, and
- * the focus went to `<body>` with them: measured before `resized` (2026-10-12), with the caret in the source editor
- * and the divider beside it dragged 80 px, `document.activeElement` was `<body>` at once and two frames on, and a key
- * typed next went nowhere. `divider-drag.test.ts` makes its own pointer events and never reads the focus.
+ * without `resized` the focus would go to `<body>` with them and a key typed next would go nowhere.
+ * `divider-drag.test.ts` makes its own pointer events and reads no focus after a drag; its one focus check is a
+ * divider's own, across a held key.
  *
  * **EVERY DRAG HERE IS THE DRIVER'S OWN**, a press on the divider and a release 80 px along it, and every key is a
  * real one. Where the focus starts is arranged, by a click of the driver's or by `focus()`.
  *
  * **A POINTER'S GESTURE SCROLLS NOTHING** (`pane-host.ts`'s `moveFocus`), and a drag is always a pointer's where it
- * has a focus to give back: the second case has the caret out of sight, where a give-back that brought it into
- * sight moved the view from 500 px to 80, while the source view's own box was what scrolled a long program.
+ * has a focus to give back: a give-back that brought the caret into sight would move a view scrolled past it, and one
+ * case below has the caret out of sight.
  *
  * **A DIVIDER MOVED WITH ITS OWN KEYS HAS THE FOCUS ITSELF**, and is built again at the end of each press: the render
  * focuses the new one (`layout-view.ts`'s `renderLayout`), which is held here beside the rest.

@@ -5,7 +5,7 @@ import { vim } from '@replit/codemirror-vim'
 import { type KeymapMode, readKeymap, writeKeymap } from './editor-prefs'
 
 /**
- * **THE APP'S FIRST `Compartment`, AND WHAT A COMPARTMENT IS FOR** — Plan 7 part 3b task 6, design §9.
+ * **WHAT A `Compartment` IS FOR** — Plan 7 part 3b task 6, Plan 7 part 3 spec §9.
  *
  * A CodeMirror state's extension set is fixed when the state is created. A `Compartment` is the one
  * exception: it reserves a slot in that set whose contents a later transaction can replace, so an
@@ -56,15 +56,12 @@ export const keymapExtension = (mode: KeymapMode): Extension => (mode === 'vim' 
  * placed just above `keymap.of([...defaultKeymap, ...historyKeymap])` would sit BELOW the handler that
  * runs the whole facet.
  *
- * **WHAT THAT COSTS, MEASURED IN CHROMIUM RATHER THAN REASONED ABOUT, BECAUSE THE FIRST GUESS AT IT
- * WAS WRONG.** The obvious candidate was `Escape`, which `defaultKeymap` binds to `simplifySelection`
- * — and it cannot show the difference either way: with an empty selection that command declines and
- * passes the key on, and with a selection it collapses it, which vim's own `update` hook reads as a
- * selection change and leaves visual mode for. The keys that DO show it are the ones `defaultKeymap`
- * binds to an EDIT. With the slot below the first `keymap.of(...)`, caret at offset 1 of `abc\ndef`:
- * `Enter` produced `a\nbc\ndef` and `Backspace` produced `bc\ndef` — a normal-mode motion typing into
- * the document — against an unchanged document and a moved cursor with the slot above. A spy binding
- * placed first in the list confirms the mechanism directly: it sees `Escape` and vim never does.
+ * **WHAT THAT COSTS.** `Escape`, which `defaultKeymap` binds to `simplifySelection`, cannot show the
+ * difference either way: with an empty selection that command declines and passes the key on, and with
+ * a selection it collapses it, which vim's own `update` hook reads as a selection change and leaves
+ * visual mode for. The keys that DO show it are the ones `defaultKeymap` binds to an EDIT: with the slot
+ * below the first `keymap.of(...)`, `Enter` and `Backspace` in normal mode type into the document where,
+ * with the slot above, they leave it unchanged and move the cursor.
  *
  * Above all of them, vim gets first refusal on every key and passes on the ones it does not map: its
  * handler returns false for an unhandled key, so `F12`, `Shift-F12` and `Mod-'` still reach
@@ -72,15 +69,15 @@ export const keymapExtension = (mode: KeymapMode): Extension => (mode === 'vim' 
  * takes `Esc` and every normal-mode key, and the app's own shortcuts are the ones that carry a
  * modifier.
  *
- * **THAT RULE IS TRUE OF THE THREE BINDINGS THAT EXIST TODAY, AND IS NOT A GENERAL GUARANTEE.** The
- * slot sits above every `keymap.of(...)`, so vim wins ANY key it maps for itself — including a modifier
+ * **THAT RULE IS TRUE OF THE BINDINGS THAT EXIST TODAY, AND IS NOT A GENERAL GUARANTEE.** The slot sits
+ * above every `keymap.of(...)`, so vim wins ANY key it maps for itself — including a modifier
  * combination, if vim binds one — not only the unmodified normal-mode keys this file's other examples
- * use. Today's three in-editor app shortcuts (`F12` and `Shift-F12` in `lsp-nav.ts`'s `navKeymap`, and
- * `Mod-'` in `main.ts`'s link binding) happen not to collide because vim's normal mode does not bind
- * them. A future `Mod-<letter>` binding is not protected by the same reasoning: vim binds several
- * `Ctrl`-prefixed keys in normal mode (`<C-c>`, `<C-r>`, `<C-o>`, among others), and one of those chosen
- * for a new app shortcut would lose to vim the same way an unmodified key would. Anyone adding a fourth
- * binding should check it against vim's own bindings, not assume "it has a modifier" is enough.
+ * use. `F12` and `Shift-F12` in `lsp-nav.ts`'s `navKeymap`, and `Mod-'` in `main.ts`'s link binding,
+ * happen not to collide because vim's normal mode does not bind them. A future `Mod-<letter>` binding is
+ * not protected by the same reasoning: vim binds several `Ctrl`-prefixed keys in normal mode (`<C-c>`,
+ * `<C-r>`, `<C-o>`, among others), and one of those chosen for a new app shortcut would lose to vim the
+ * same way an unmodified key would. Anyone adding a binding should check it against vim's own bindings,
+ * not assume "it has a modifier" is enough.
  */
 export const keymapSlot = (mode: KeymapMode): Extension => keymapCompartment.of(keymapExtension(mode))
 

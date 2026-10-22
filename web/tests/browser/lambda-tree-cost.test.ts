@@ -12,12 +12,11 @@ import { lambdaSettled } from './lambda-text'
  * GATE: `pnpm test:probe:lambda-tree`, excluded from the default run by `vite.config.ts`'s `PROBE_FILES`.
  *
  * TWO CLOCKS, BOTH INSIDE THE APP, because the obvious one lies: timing a `◀` click to `lambdaSettled()`
- * measured the harness's 20 ms poll — every program came out at 21.6 to 22.1 ms median in the first draft of
- * this file. So: `round trip` is a `SessionClient.tree` request to the `LambdaTrees.store` of its answer (the
- * worker's replay from its nearest checkpoint, the arena, the transfer), and `draw` is the first
- * `LambdaPane.renderTree` call to receive each tree (the layout and the paint; later frames reuse the
- * layout). The numbers go to the console for the roadmap entry; the only assertion is that every step was
- * answered at all.
+ * measures the harness's 20 ms poll. So: `round trip` is a `SessionClient.tree` request to the
+ * `LambdaTrees.store` of its answer (the worker's replay from its nearest checkpoint, the arena, the
+ * transfer), and `draw` is the first `LambdaPane.renderTree` call to receive each tree (the layout and the
+ * paint; later frames reuse the layout). The numbers go to the console for the roadmap entry; the only
+ * assertion is that every step was answered at all.
  *
  * **THE LISTS ARE HERE FOR THE ARENA'S NAMING.** `listN` is a literal of `N` zeros. The arena names every
  * binder against the names in scope (spec §4.3's `fresh()` rule), and it was on these programs' terms that

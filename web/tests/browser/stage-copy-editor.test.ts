@@ -24,23 +24,22 @@ import {
  * A COPY DELETED, OR PAUSED, WHILE THE VIEW HOLDING ITS EDITOR IS A STAGE TAB THAT IS NOT SELECTED — the view layouts
  * spec §5.5.
  *
- * A view that stopped showing a copy had the copy's editor taken down by the next `draw()`, and `draw()` passes over a
- * view that is not on the page. So a hidden tab went on holding the editor of a copy it no longer showed. After a
- * delete and its *undo* the copy had a second editor on the first view moved back, and the next sweep handed that view
- * the stale one and threw `handed a second editor while still holding one`. After a pause nothing threw, and the
- * stale editor stayed where it was.
+ * `draw()` passes over a view that is not on the page, so a teardown left to the next `draw()` would leave a hidden tab
+ * holding the editor of a copy it no longer shows. After a delete and its *undo* the copy would have a second editor on
+ * the first view moved back, and the next sweep would hand that view the stale one and throw
+ * `handed a second editor while still holding one`. After a pause nothing would throw, and the stale editor would stay
+ * where it was.
  *
  * **THE STALE EDITOR IS LOOKED FOR WHERE IT WAS LEFT**, in the hidden view's host, which is kept while it is off the
  * page and can be asked what it holds. The throw is asserted too, but it says less than it seems to: the sweep takes
  * the stale editor off the hidden view before it throws, so every assertion made after the *undo* but the one on the
- * throw passed without the teardown (measured, 2026-10-12).
+ * throw would pass without the teardown.
  *
- * **EACH LEG HAS ITS OWN CASES**: a λ view's teardown is `LambdaPane`'s and a TM or asm view's is `CopyEditor`'s, and
- * a teardown that reached only a λ view passed every test while λ had the only case.
+ * **EACH LEG HAS ITS OWN CASES**: a λ view's teardown is `LambdaPane`'s and a TM or asm view's is `CopyEditor`'s, so a
+ * teardown that reached only a λ view would pass a file whose only case was λ's.
  *
- * **EVERY GESTURE HERE IS ONE THE APP HAD BEFORE THE VIEW LAYOUTS**: the Stage, a second view of a copy, *move the
- * editor here*, delete and undo, pause and resume. `pane-host.ts`'s `reseedingSlots` takes the editor down as it moves
- * a view off the page onto the program. `parked-copy-editor.test.ts` drives the same thing for a view a switch parked.
+ * `pane-host.ts`'s `reseedingSlots` takes the editor down as it moves a view off the page onto the program.
+ * `parked-copy-editor.test.ts` drives the same thing for a view a switch parked.
  *
  * **A DELETE, ITS *UNDO*, A PAUSE AND A RESUME ARE PRESSED WITH THE POINTER** (`press`), as a user presses them: the
  * copies button, then the row's control; the notice's *undo* where the pointer finds it. The copy, its second view,

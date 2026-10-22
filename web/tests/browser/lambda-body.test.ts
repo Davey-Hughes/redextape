@@ -160,9 +160,9 @@ describe('LambdaBody', () => {
   })
 
   /**
-   * A CLICK MAKES ITS ROW THE ACTIVE ONE, AND PAINTS IT SO. The body set the active row and left the paint to
-   * the redraw its event would bring; a click that links nothing brings none, so `.is-active` and
-   * `aria-activedescendant` stayed on the row before.
+   * A CLICK MAKES ITS ROW THE ACTIVE ONE, AND PAINTS IT SO, rather than leaving the paint to the redraw its event
+   * would bring: a click that links nothing brings none, so `.is-active` and `aria-activedescendant` would stay on
+   * the row before.
    */
   it('paints the clicked row active when the click redraws nothing', () => {
     const { body, link } = mount()
@@ -194,7 +194,7 @@ describe('LambdaBody', () => {
   /**
    * A ROW IS OPEN WHEN THE NODE IT DISCLOSES IS. An application whose head is too wide writes that head's
    * first line as its own, so a folded head's `… N nodes` sits on the row of an open application: read by
-   * "any fold on the row", the application showed `▸`, and ← and → each did the other's job.
+   * "any fold on the row", the application would show `▸`, and ← and → would each do the other's job.
    */
   it('reads an open application as open when its folded head shares its row, and opens that head by key', () => {
     const { body, toggle } = mount()
@@ -219,7 +219,7 @@ describe('LambdaBody', () => {
   /**
    * ENTER OPENS WHAT → OPENS, LIKE ANY FOLD (spec §5.2: "A chip opens on click or Enter, like any fold"). A row
    * with anything closed on it — a `… N nodes` or a chip — opens the first of them, and only a row with nothing
-   * closed links. Enter opened a chip and linked from every other row, so a folded row linked instead.
+   * closed links.
    */
   it('opens a folded row with Enter, as → does, and links only from a row with nothing closed', () => {
     const { body, toggle, link } = mount()
@@ -249,8 +249,8 @@ describe('LambdaBody', () => {
 
   /**
    * A CHIP OPENS BY KEY, LIKE ANY FOLD (spec §5.2). The layout gives a chip's row no disclosure — the chip is
-   * one line, and so, opened, is a small numeral — so → returned early, Enter linked from it, and once open
-   * nothing but "reset folds" could make it a chip again. A finished run's value is a root chip: the case.
+   * one line, and so, opened, is a small numeral — so → would return early, Enter would link from it, and once
+   * open nothing but "reset folds" could make it a chip again. A finished run's value is a root chip: the case.
    */
   it('opens a chip with → or Enter, and folds it back with ←, as an ordinary open λ row', () => {
     const { body, toggle, link } = mount()
@@ -288,8 +288,8 @@ describe('LambdaBody', () => {
 
   /**
    * A CHIP ANYWHERE ON ITS ROW, NOT ONLY FIRST. Numerals and booleans are mostly arguments: `g 2` is a row
-   * whose first token is `g`. Read only at the first token, it had no `aria-expanded`, → opened the chip,
-   * and nothing but "reset folds" made it a chip again.
+   * whose first token is `g`. Read only at the first token, it would have no `aria-expanded`, → would open the
+   * chip, and nothing but "reset folds" would make it a chip again.
    */
   it('discloses a chip in the middle of its row, and folds it back with ← or the gutter', () => {
     const { body, toggle, link } = mount()
@@ -361,7 +361,7 @@ describe('LambdaBody', () => {
   /**
    * A HEAD OPENED ON ITS APPLICATION'S ROW FOLDS BACK WITH ←. Opened, a λ head too wide for the row still
    * starts on its application's row — the layout gives a row to the outermost node that starts on it — so ←
-   * reached only the application, and only "reset folds" folded the head again: the redex path's shape
+   * would reach only the application, and only "reset folds" would fold the head again: the redex path's shape
    * whenever its head is over 200 nodes. The row's `▾` stays the application's.
    */
   it('folds a head opened on its application’s row before the application', () => {
@@ -424,7 +424,7 @@ describe('LambdaBody', () => {
 
   /**
    * A KEY THAT SCROLLS IS THE USER TAKING CONTROL. `Follow` hears of a scroll only when its event arrives, a
-   * frame later, so a key that wrote `scrollTop` and then redrew was put straight back on the redex: on any
+   * frame later, so a key that wrote `scrollTop` and then redrew would be put straight back on the redex: on any
    * term taller than the view the keyboard could not leave it. And the first draw of such a term follows
    * the redex far down, past the row the cursor starts on, so the active row has to come with the view.
    */
@@ -463,8 +463,8 @@ describe('LambdaBody', () => {
    * **A SCROLL OF THE USER'S THAT A PAINT COMES BEFORE IS STILL THE USER'S, WHERE THE PAINT RESIZED NOTHING.** A
    * scroll made on the main thread is reported with the next rendering update, and any draw of the page before then
    * paints this body. `#paint` records the position it finds as a clamp of its own only when it changed the spacer's
-   * height; recorded at every paint, the `scroll` that followed read as the body's own, and a body the user had
-   * scrolled went on following.
+   * height; recorded at every paint, the `scroll` that followed would read as the body's own, and a body the user had
+   * scrolled would go on following.
    *
    * **A TERM WITH NO REDEX, SINCE A PAINT WITH ONE TO CENTRE WRITES THE POSITION ITSELF** and the scroll is lost
    * either way. With none, as on a run's last step, nothing writes, and the scroll's own event is what is left to say

@@ -41,7 +41,7 @@ describe('linkStatus', () => {
     ).toBe('this construct emits no machine states')
   })
 
-  it('says nothing extra when both legs resolved and the focus is elsewhere', () => {
+  it('says nothing extra when every leg resolved and neither running focus is on the pinned construct', () => {
     expect(
       linkStatus({ state: 'linked', tm: true, instrs: true, lambda: 'shown', focus: false, asmFocus: false }),
     ).toBe('')
@@ -70,8 +70,8 @@ describe('linkStatus', () => {
     )
   })
 
-  // AMENDMENT 11: an asm instruction `defunc` minted links to nothing, and the line says so, where a click that
-  // cleared the pin with no word would read as a click that missed.
+  // PLAN 7 PART 5 SPEC AMENDMENT 11: an asm instruction `defunc` minted links to nothing, and the line says so,
+  // where a click that cleared the pin with no word would read as a click that missed.
   it('says an instruction with no owner has no source construct', () => {
     expect(linkStatus({ state: 'ownerless' })).toBe('this instruction has no source construct')
   })
@@ -80,9 +80,8 @@ describe('linkStatus', () => {
     expect(linkStatus({ state: 'stale' })).toBe('linking resumes when this compiles')
   })
 
-  // THE COINCIDENCE THIS SLICE EXISTS TO SURFACE. If `focus` regressed to being read nowhere, this
-  // test — the only one that sets it `true` against an otherwise-silent link — would still report ''
-  // and fail.
+  // THE COINCIDENCE OF THE RUNNING FOCUS AND THE PIN. If `focus` were read nowhere, this test, which sets
+  // it `true` against an otherwise-silent link, would report '' and fail.
   it('reports the running focus when it coincides with the pin', () => {
     expect(linkStatus({ state: 'linked', tm: true, instrs: true, lambda: 'shown', focus: true, asmFocus: false })).toBe(
       'the machine is here right now',
@@ -105,10 +104,10 @@ const views = (count: number, ...copies: string[]) => ({ views: count, copies })
 const ON_PROGRAM = { lambda: views(1), asm: views(1), tm: views(1) }
 
 /**
- * Design §4.5's first surface: the line that already narrates the correspondence states which views
- * are OUTSIDE it. The badge — the second surface — is `tests/browser/view-status.test.ts`, because
- * this module is pure logic and that one needs a DOM; §4.5's own note that the both-surfaces test
- * splits by runner.
+ * The 5d-i design §4.5's first surface: the line that already narrates the correspondence states which
+ * views are OUTSIDE it. The second surface, §4.5's badge, which the view shows as its own
+ * `copy · not linked` status, is `tests/browser/view-status.test.ts`, because this module is pure logic
+ * and that one needs a DOM; §4.5 says the both-surfaces test splits by runner.
  *
  * EVERY CASE HERE HAS AN ATTACHED COUNTERPART, per §5: "a test that only checks the badge appears
  * would pass an implementation that never removes it" is equally true of the sentence, and the
@@ -133,8 +132,8 @@ describe('linkStatus · detachment', () => {
     ).toBe('the machine is here right now')
   })
 
-  // VIEWS DETACH INDEPENDENTLY (§4.3: detaching one view leaves the program running and the others bound to
-  // it), which is why `detached` is a record and not a boolean. A shape that could only say "something is
+  // VIEWS DETACH INDEPENDENTLY (5d-i §4.3: detaching one view leaves the program running and the others bound
+  // to it), which is why `detached` is a record and not a boolean. A shape that could only say "something is
   // detached" passes every other case here and fails these two.
   it('names only the leg whose view shows a copy', () => {
     expect(linkStatus({ state: 'none', detached: { ...ON_PROGRAM, lambda: views(1, 'λ · copy 1') } })).toBe(
@@ -145,9 +144,9 @@ describe('linkStatus · detachment', () => {
     )
   })
 
-  // ONE CLAUSE, NOT THE SAME SENTENCE TWICE. "not linked to source" is one fact about one
+  // ONE CLAUSE, NOT THE SAME SENTENCE TWICE. "not linked to the program" is one fact about one
   // correspondence; repeating it verbatim either side of a `·` reads as two unrelated failures.
-  it('names both legs in one clause when both show copies', () => {
+  it('names two legs in one clause when two show copies', () => {
     expect(
       linkStatus({
         state: 'none',
@@ -156,9 +155,8 @@ describe('linkStatus · detachment', () => {
     ).toBe('λ and TM views show copies — not linked to the program')
   })
 
-  // THE CHECK BY HAND'S FIRST CASE: an asm view on the program and a second on a copy. The line read off each leg's
-  // view focused last, so with the program's view focused last it said "λ and TM views show copies" while
-  // `asm · copy 10` was on screen. Every view counts now, and a leg with more than one names its copy by title.
+  // AN ASM VIEW ON THE PROGRAM AND A SECOND ON A COPY: every view counts, not only each leg's view focused
+  // last, and a leg with more than one names its copy by title.
   it('names a leg’s view on a copy by its title when the leg has more than one view', () => {
     expect(
       linkStatus({
@@ -168,7 +166,7 @@ describe('linkStatus · detachment', () => {
     ).toBe('λ, asm · copy 10 and TM views show copies — not linked to the program')
   })
 
-  // THE SECOND CASE, THE REVERSE: with two asm views, one on a copy, "asm view shows a copy" did not say which.
+  // TWO ASM VIEWS, ONE ON A COPY: "asm view shows a copy" would not say which.
   it('says which of a leg’s views shows a copy, never the leg alone, when the leg has two', () => {
     expect(linkStatus({ state: 'none', detached: { ...ON_PROGRAM, asm: views(2, 'asm · copy 1') } })).toBe(
       'asm · copy 1 view shows a copy — not linked to the program',
@@ -193,10 +191,10 @@ describe('linkStatus · detachment', () => {
     )
   })
 
-  // §4.5's standard, applied to the clauses themselves: "a thing that provably cannot work should not
-  // be presented as though it might". A λ view on a copy is showing a scratch term, so
-  // `LAMBDA_TEXT['none-here']` would describe a term that is not on screen — while
-  // the TM clause, whose view is still bound to the program, stays.
+  // The 5d-i design §4.5's standard, applied to the clauses themselves: "a thing that provably cannot
+  // work should not be presented as though it might". A λ view on a copy is showing a scratch term, so
+  // `LAMBDA_TEXT['none-here']` would describe a term that is not on screen — while the TM clause, whose
+  // view is still bound to the program, stays.
   it('suppresses the λ clause when the λ view shows a copy and keeps the TM one', () => {
     expect(
       linkStatus({
@@ -212,7 +210,7 @@ describe('linkStatus · detachment', () => {
   })
 
   // The mirror, and `focus: true` is the load-bearing half: `TmState.source_node` is `None` for every
-  // state a `TmScratch` renders (§3.1), so "the machine is here right now" about a TM view on a copy
+  // state a `TmScratch` renders (5d-i §3.1), so "the machine is here right now" about a TM view on a copy
   // is a claim no scratch can make. Suppressed rather than trusted from the caller.
   it('suppresses the TM clauses when the TM view shows a copy and keeps the λ one', () => {
     expect(
@@ -263,7 +261,7 @@ describe('linkStatus · detachment', () => {
     )
   })
 
-  // A LEG WITH NO VIEW IS NOT DETACHED: there is no binding to read, so its clauses stand as they did.
+  // A LEG WITH NO VIEW IS NOT DETACHED: there is no binding to read, so its clauses stand.
   it('reads a leg with no view as attached', () => {
     expect(
       linkStatus({
@@ -278,7 +276,7 @@ describe('linkStatus · detachment', () => {
     ).toBe('this construct emits no machine states')
   })
 
-  it('leaves only the detachment clause when both legs show copies', () => {
+  it('leaves only the detachment clause when two legs show copies', () => {
     expect(
       linkStatus({
         state: 'linked',

@@ -6,7 +6,7 @@ import { box, focusInPage, mountAt, until } from './harness'
 /**
  * A FIRST VISIT IN A WINDOW TALLER THAN IT IS WIDE — the view layouts spec §4.4: the source above the TM view, where
  * a wide window has them side by side (`first-load-views.test.ts`). Its own file because `main()` measures the views
- * area once, as it builds the first workspace, and a file mounts the app once.
+ * area once, as it builds the first workspace, and this file mounts the app once.
  */
 
 localStorage.removeItem(LAYOUT_STORAGE_KEY)
@@ -30,8 +30,8 @@ describe('a first load, in a window taller than it is wide', () => {
 
   /**
    * ***RESET PRESET* MEASURES THE AREA TOO** (spec §4.6): it builds the first-load tree, and in this window that is a
-   * column. `main.ts`'s reset handler reads the shape for itself, apart from the start-up's read, and with its
-   * `viewsShape()` dropped it stored a row here while every browser file passed.
+   * column. `main.ts`'s reset handler reads the shape for itself, apart from the start-up's read, and without its
+   * `viewsShape()` it would store a row here.
    *
    * **FROM THREE VIEWS, SO THE COLUMN OF TWO IS THE RESET'S**: the page opened on that column, and a reset that left
    * the tree alone would pass a case that started there.

@@ -6,7 +6,8 @@ import { defaultWorkspace, parseWorkspace, serializeWorkspace } from '../../src/
 /**
  * **READING A LINK CANNOT THROW** (Plan 7 part 6a spec §5.3, amended 2026-10-01): a throw while its workspace is read
  * opens the program alone, and any other makes the link unreadable, so `main.ts` always clears the fragment and says
- * what became of it. The bound on a tree removed the throws a link was known to cause, so these cases make their own.
+ * what became of it. With a tree's bound, no link is known to make reading throw, so the throws here are planted:
+ * `parseWorkspace`'s through the mock below, and the decompressor's by replacing `DecompressionStream`.
  *
  * **A FILE OF ITS OWN FOR THE MOCK**: `parseWorkspace` is replaced for every case in a file, here by one that does what
  * the real one does until a case says otherwise.

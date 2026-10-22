@@ -28,11 +28,9 @@ export const LAMBDA_BYTE_BUDGET = 65_536
 /**
  * The λ printer's byte budget FOR A HISTORY FRAME.
  *
- * MEASURED, and the measurement moved it two orders of magnitude below the readout's budget
- * (`frame_cost_probe`, 2026-08-07). Dropping from 65,536 to 512 made rendering 10-31x faster and
- * frames ~22x smaller — `while4` went 59.67 -> 5.77 us/step and 229,528 -> 10,123 bytes/frame;
- * `list60` went 230.91 -> 7.40 us and 252,084 -> 11,464. `print_lambda_capped` short-circuits at the
- * budget, so speed and memory move together rather than trading against each other.
+ * MEASURED (`frame_cost_probe`): at 512 rather than the readout's 65,536, rendering is 10-31x faster and
+ * frames ~22x smaller. `print_lambda_capped` short-circuits at the budget, so speed and memory move together
+ * rather than trading against each other.
  *
  * The thousandth term nobody will look at does not need the budget the first one gets.
  */
@@ -50,8 +48,8 @@ export const TM_RADIUS = 40
  * top 8 call frames, and the newest 16 heap cells and 16 boxes — plus every cell or box a register the frame shows
  * points at, which `AsmState::window` adds so a back-reference always has its cell.
  *
- * **HERE, NOT IN THE CORE**, for `TM_RADIUS`'s reason: how much of the machine fits on screen is a fact about the
- * view, and the core's view model takes it as a parameter (`viewmodel.rs`'s module doc: core never picks a number).
+ * **HERE, NOT IN THE CORE**: how much of the machine fits on screen is a fact about the view, and the core's view
+ * model takes it as a parameter (`viewmodel.rs`'s module doc: core never picks a number).
  *
  * **EVERY CORPUS PROGRAM FITS WHOLE** (spec §2.5: at most 23 locals, 3 arguments, a call depth of 7 and 11 heap
  * cells), so the window only cuts a deep or a list-heavy run. The frame sizes these bounds produce are
@@ -62,60 +60,40 @@ export const ASM_WINDOW: AsmWindow = { locals: 64, args: 16, frames: 8, cells: 1
 /**
  * The ring's cap, PER LEG. ~3,200 λ frames at ~10 KB, or ~58,000 TM frames at ~550 B.
  *
- * It is also what bounds RECORDING, because a step count cannot: the probe measured the λ leg at
- * 555 steps and the TM leg at 266,863 for the SAME program (`map_fold`), so one step figure would
- * mean two different things. The worker stops when it has produced this many bytes and says so.
+ * It is also what bounds RECORDING, because a step count cannot: a program can take far more steps
+ * on its TM leg than on its λ leg, so one step figure would mean two different things. The worker
+ * stops when it has produced this many bytes and says so.
  *
- * **THIS IS THE KNOB design §4.4 NAMES — "one knob (bytes per leg)" — AND 5d-i T9 DID NOT MOVE IT.**
- * That task was a measurement; what it measured is below, and it changes what the number means
- * without changing the number.
+ * **THIS IS THE KNOB 5d-i design §4.4 NAMES — "one knob (bytes per leg)".**
  *
  * IT BOUNDS TWO DIFFERENT THINGS AT TWO DIFFERENT SITES, AND ONLY ONE OF THEM IS MEMORY.
  * `session-worker.ts`'s `allowance` bounds bytes PRODUCED — the worker posts each batch and clears
  * it, so it retains none of them. The `sessions.add` call in `main.ts` constructs the `History` rings,
- * one per leg, that bound bytes RETAINED. They happen to be the same constant, which is why the plan's
- * "one session is already 64 MB" was true of its two legs — 96 MB since the asm leg made three — but
- * it is `main.ts`'s rings and not the worker's `allowance` that make it true. The two come apart on
- * `[continue]`: `onExtend` (`session-worker.ts`) raises the allowance to `recorded + HISTORY_BYTES`
- * every click, so production is unbounded across clicks — while the ring's budget never moves, so
- * retention stays at one `HISTORY_BYTES` per leg, and the newest frame past it (`History`'s `#evict`),
- * however many times the user continues.
+ * one per leg, that bound bytes RETAINED. They happen to be the same constant, which is why one session
+ * of three legs is 96 MB — but it is `main.ts`'s rings and not the worker's `allowance` that make it
+ * true. The two come apart on `[continue]`: `onExtend` (`session-worker.ts`) raises the allowance to
+ * `recorded + HISTORY_BYTES` every click, so production is unbounded across clicks — while the ring's
+ * budget never moves, so retention stays at one `HISTORY_BYTES` per leg, and the newest frame past it
+ * (`History`'s `#evict`), however many times the user continues.
  *
- * **THE UNITS ARE THE RING'S ACCOUNTING AND NOT RETAINED HEAP, AND THE TWO LEGS TRADE AT DIFFERENT
- * RATES.** Measured 2026-08-11 by `tests/browser/session-memory.test.ts`, real Chromium, forced
- * collection before every reading, one discarded warm-up and three alternating rounds:
+ * **THE UNITS ARE THE RING'S ACCOUNTING AND NOT RETAINED HEAP, AND THE λ AND TM LEGS TRADE AT DIFFERENT
+ * RATES.** `tests/browser/session-memory.test.ts` reads the retained heap of a λ or TM leg's frames against
+ * what its sizer charges for them, in real Chromium after forced collection:
  *
- *   * λ leg — **1.071921708710566**: 6,799,213.33 bytes of retained heap against the 6,343,013
- *     `lambdaFrameBytes` charged for the same 253 frames. `SPAN_BYTES` being rounded up (80 against a
- *     measured 74.08) is most of what keeps this honest.
- *   * TM leg — **2.045480413555839**: 68,635,768 bytes of retained heap against the 33,554,840
- *     `tmFrameBytes` charged for 75,023 retained frames of 75,025 pushed — two dropped by a ring that
- *     then held only its budget, where it now keeps the newest frame past it. So a TM leg that actually
- *     spends this budget cost ~68.6 MB of heap for a 33.55 MB allowance. The TM figure reproduced to
- *     the byte across four runs; the λ one varied by ~6,600 bytes in 6.8 million.
- *   * **TM leg since a frame's tapes cross as one string each — 0.8744705880483015**: 29,342,720.67
- *     bytes against the same 33,554,840 for the same 75,023 frames, in two runs of the same file taken
- *     in turn with two on `08977f6`, before that change, which read 68,637,886.67 and 2.0455435539751248
- *     (2026-10-07).
- *     A full TM ring now retains 29.3 MB, against the 35.95 MB `buffer-affordability.test.ts` then
- *     measured for a full λ ring (7.9 MB since the row below).
- *   * **λ leg since a frame's spans cross as one byte string — 0.19451407924488462**: 1,233,805.33 bytes
- *     against the same 6,343,013 for the same 253 frames, in five runs of the same file, two of them taken in
- *     turn with two on `406676e`, before that change, which read 6,798,725.33 and 1.0718447736640826
- *     (2026-10-07). Every reading in those runs follows two forced collections, where the rows above follow
- *     one: a `Uint8Array` that has become garbage is still counted after one (`session-memory.test.ts`'s
- *     `round`). The ring is charged 5.14 bytes for each byte it holds, because `SPAN_BYTES` is (its doc).
+ *   * TM leg — **0.8744705880483015**: 29,342,720.67 bytes of retained heap against the 33,554,840
+ *     `tmFrameBytes` charged for 75,023 frames. A tape's window is one string, charged 2 bytes a UTF-16
+ *     unit, which V8 holds in one byte a character when every character is Latin-1.
+ *   * λ leg — **0.19451407924488462**: 1,233,805.33 bytes against the 6,343,013 `lambdaFrameBytes`
+ *     charged for 253 frames. The ring is charged 5.14 bytes for each byte it holds, because `SPAN_BYTES`
+ *     is (its doc).
  *
- * `tmFrameBytes` (below) charged 2 bytes a cell for a `window: string[][]` whose cells were
- * one-character JS strings, and nothing for the per-tape array headers around them; a tape's window is
- * now one string, charged 2 bytes a UTF-16 unit, which V8 holds in one byte a character when every
- * character is Latin-1. It charges nothing for the ring's own two parallel arrays — `History`'s `#frames` and `#sizes` are 8 bytes an entry each, about
- * 16 B/frame here by arithmetic rather than by separate measurement, and more on a ring that evicts,
- * whose arrays hold up to as many evicted places again as frames kept before each cut (`History`'s
- * `#evict`): twice the places, and 2.2 times the bytes at the peak. Measured in node for 69,008 frames
- * kept (2026-10-05), the two arrays held 1,208 to 2,708 KB through the evictions, against 1,208 to
- * 1,216 KB when `History` shifted them: about 1.5 MB at most, against the 29.3 MB a full TM ring
- * retains. **Left as is, and deliberately.**
+ * A full TM ring retains 29.3 MB (the TM row above), and a full λ ring 7.9 MB (the source λ ring at exhaustion
+ * that `buffer-affordability.test.ts`'s first case prints).
+ *
+ * `tmFrameBytes` charges nothing for the ring's own two parallel arrays — `History`'s `#frames` and
+ * `#sizes` are 8 bytes an entry each, about 16 B/frame here, and more on a ring that evicts, whose arrays
+ * hold up to as many evicted places again as frames kept before each cut (`History`'s `#evict`): about
+ * 1.5 MB at most, against the 29.3 MB a full TM ring retains. **Left as is, and deliberately.**
  * Re-scaling the constant to make its units retained bytes would change every recording length in the
  * app on the strength of one fixture's cell geometry, and the number the design cares about — what
  * three sessions cost against one — is a RATIO, in which a per-leg accounting error that is the same
@@ -125,58 +103,27 @@ export const HISTORY_BYTES = 32 * 1024 * 1024
 
 /**
  * Drop a leg's history when its pane loses focus. **`false`, and the default was MEASURED rather than
- * argued** — design §4.4, plan 5d-i T9.
+ * argued** — 5d-i design §4.4.
  *
  * THE THRESHOLD WAS PRE-REGISTERED BEFORE ANY NUMBER EXISTED: *three sessions at four legs must sit at
  * or below 2x the single-session resident figure the same harness measures today* — above that this
- * flips to `true`, and the threshold does not move. #28's entry is why that sentence was written down
- * first: a threshold quietly retired the first time it binds was never a threshold.
+ * flips to `true`, and the threshold does not move: a threshold quietly retired the first time it binds
+ * was never a threshold.
  *
- * **IT IS MET. 1.8160189425298086**, measured 2026-08-11 by `tests/browser/session-memory.test.ts` in
- * real Chromium under `vite.config.ts`'s browser `launchOptions` flags, driving three real
- * `session-worker.ts` threads
- * through a real `SessionPool` into real `History` rings. Mean resident heap over three alternating
- * rounds after one discarded warm-up pair: **92,435,664.67 bytes** for one session at two legs against
- * **167,864,918** for three sessions at four. Round-by-round, one session / three sessions:
- * 92,414,610 / 167,854,526, then 92,441,666 / 167,875,654, then 92,450,718 / 167,864,574. An earlier
- * run of the same file read 1.816478530039582 on a page baseline 46,565 bytes lower — the ratio moves
- * with that baseline and the next paragraph says why.
- *
- * **RE-MEASURED 2026-10-07, WHEN A TM FRAME'S TAPES BEGAN TO CROSS AS ONE STRING EACH, AND STILL MET.**
- * The same file, two runs on each side taken in turn: mean resident heap 93,080,893.67 and 93,085,205.67
- * bytes for one session against 168,507,487 and 168,514,131 for three before the change, ratios
- * 1.8103337899122949 and 1.8103213050142515; after it 53,797,982.33 and 53,802,203.67 against
- * 89,918,997.67 and 89,904,097.67, ratios 1.6714195173626927 and 1.6710114370718063. Baseline-free, the
- * ratio read 1.9998919540045792 and 1.999850460283213 before and 1.9990624867469862 and
- * 1.9985581174246312 after. **AND AGAIN WHEN A λ FRAME'S SPANS BEGAN TO CROSS AS ONE BYTE STRING, STILL MET**, every
- * reading after two forced collections (`HISTORY_BYTES`'s λ row says why): two runs on `406676e`, before the change,
- * taken in turn with two after it, and three more after it. Mean resident heap 53,789,385 and 53,793,529 bytes for one
- * session against 89,915,586.33 and 89,907,095.67 for three before, ratios 1.6716232456149727 and 1.6713366335691915;
- * after it 48,235,642.67 to 48,241,576.33 against 78,791,848 to 78,799,288.33, ratios 1.633412027325337 to
- * 1.6335864044580173. Baseline-free, 1.9997134462760306 and 1.9993872469182312 before and 1.9994881568813339 to
- * 1.9997022744737865 after (2026-10-07). Every other figure in this doc is the 2026-08-11 measurement's.
- *
- * THE PLAN'S ARITHMETIC HELD ON THE HISTORIES, AND THE MEASUREMENT IS WHY THAT IS NOW A FACT RATHER
- * THAN A COUNT. Stripping the harness page's ~17.0 MB baseline leaves what the session machinery
- * itself adds — 75,421,530.67 bytes against 150,836,014.67, a ratio of **1.99990656956171**. Four legs
- * is twice two legs to five significant figures, which is design §4.4's "128 MB: 2x today, not 3x"
- * confirmed in retained bytes instead of in budget bytes. **THE BASELINE-FREE READING HAS NO SIGN AT
- * THIS PRECISION** and that is stated rather than smoothed: four runs of this probe read
- * 2.000012445644004, 1.999953682804821, 1.9999763640919819 and 1.99990656956171 — one of them above 2
- * — straddling it by under a kilobyte in 150 MB while the round-to-round spread of the single-session
- * figure alone is ~7,700 bytes. "At or below 2x" is satisfied by "at", so the verdict is the same on
- * either reading, which is the only reason it was safe to name one.
+ * **IT IS MET.** `tests/browser/session-memory.test.ts`, driving three real `session-worker.ts` threads
+ * through a real `SessionPool` into real `History` rings in real Chromium, reads 1.6334 to 1.6336 for
+ * three sessions at four legs against one session at two, in mean resident heap. Stripping the harness
+ * page's baseline leaves what the session machinery itself adds, and there four legs is twice two legs,
+ * which is design §4.4's "128 MB: 2x today, not 3x" confirmed in retained bytes instead of in budget
+ * bytes; "at or below 2x" is satisfied by "at".
  *
  * **THE ONE READING THAT MISSES IS THE WASM SIDE, AND THE PLAN COUNTS LEGS WHERE IT SHOULD HAVE
  * COUNTED THREADS.** `usedJSHeapSize` is one V8 isolate's figure and a worker has its own, so the
  * harness the threshold names cannot see a worker at all — an extra worker bound and driven to a
  * result moved the main thread's heap by 11,395 bytes, which is the `Worker` handle and its client and
  * nothing else. Measured in its own units instead: the wasm module baseline is **8,454,144 bytes** and
- * decision 3 (§4.2, one worker per session) pays it **once per thread**. One worker holding a `Session`
- * for the probe fixture is 11,993,088 bytes; three workers holding that `Session`, a `LambdaScratch`
- * (65,536) and a `TmScratch` (0, absorbed by the previous page) are 28,966,912 — a ratio of
- * **2.4153005464480874**. Added to the heap figures: 1.884843254120645 against the resident reading
- * the threshold names, and **2.0568976838107504** against the baseline-free one, which is a miss.
+ * decision 3 (§4.2, one worker per session) pays it **once per thread**. Added to the heap figures, it
+ * puts the baseline-free reading above 2, which is a miss.
  *
  * **THAT OVERSHOOT DOES NOT FLIP THIS BOOLEAN, AND THE REASON IS NOT THAT THE THRESHOLD NAMED A
  * DIFFERENT READING.** It is that this boolean cannot reach the bytes that overshoot. Dropping an
@@ -187,10 +134,9 @@ export const HISTORY_BYTES = 32 * 1024 * 1024
  * threads or one shared instance, and decision 3 bought those bytes deliberately, for damage
  * containment; whoever revisits that decision inherits this number.
  *
- * **NOTHING READS THIS YET, AND THAT IS THE POINT OF WRITING IT DOWN.** There is no pane-focus model
- * in the tree — 5c's "focus" is the running redex, not a pane — so the behaviour this gates belongs to
- * whichever task first has an unfocus event. What T9 owed was the decision and its evidence, so that
- * task inherits both instead of re-deriving a default from an argument.
+ * **NOTHING READS THIS, AND THAT IS THE POINT OF WRITING IT DOWN.** No code drops a leg's history when
+ * its pane loses focus; whatever first does inherits the decision and its evidence instead of
+ * re-deriving a default from an argument.
  *
  * **AND IT STAYS ONE BOOLEAN WITH NO USER-FACING CONTROL** (§4.4). Three modes would triple the
  * wording of *"recording stopped, history is full at step N"* for a switch nobody has evidence anyone
@@ -203,9 +149,8 @@ export const DROP_HISTORY_ON_UNFOCUS = false
  * Steps recorded between worker yields. At `FRAME_BYTES = 512` the λ leg renders in ~4-7 us/step, so
  * 256 steps is one abandon check per ~1.5 ms of recording.
  *
- * NOT `CHUNK_STEPS`, WHICH IS GONE. That was 50,000 β-steps between yields, correct when a chunk was
- * one `runLambda` call and wrong the moment a chunk became 50,000 renders — the yield loop would stop
- * being a yield loop and supersession could not be seen for seconds at a time.
+ * A step is a render, so a chunk of 50,000 steps would stop the yield loop being a yield loop:
+ * supersession could not be seen for seconds at a time.
  */
 export const RECORD_CHUNK = 256
 
@@ -213,36 +158,16 @@ export const RECORD_CHUNK = 256
  * One `(Span, TokenClass)` entry's cost, MEASURED IN THE UNITS IT IS SPENT IN: retained JS heap
  * bytes, not JSON.
  *
- * `frame-cost.test.ts` measures it in a real Chromium with a heap differential — the only way to
- * isolate one entry's cost from array overhead and string data. Two runs step the same program
- * (`while4`, ~470 β-steps, 132,882 spans total) identically at `FRAME_BYTES`: run A pushes every full
- * `LambdaState` into a kept-alive array, run B pushes the same frames with `spans` dropped.
- * `(meanA - meanB) / totalSpans`, over three alternating A/B pairs after one discarded warm-up pair,
- * lands at 74.08289058462897 — that value TO THE BYTE across browser restarts, because every reading
- * is taken after a forced collection and so measures retained heap rather than a GC schedule. 80 is
- * that figure rounded up.
+ * `frame-cost.test.ts` measures a span's cost in a real Chromium with a heap differential, after forced
+ * collection, so that it measures retained heap rather than a GC schedule. 80 is 74.08, an entry's cost
+ * when a frame's spans crossed as `(Span, TokenClass)` entries, rounded up: a sizer that under-reports
+ * lets the ring hold more than `HISTORY_BYTES` says it does.
  *
- * IT WAS 60, AND 60 UNDER-REPORTED THE RING BY ~19% (corrected 2026-08-10). That figure came from
- * this same test before it collected the heap before each reading. `usedJSHeapSize` counts live
- * objects AND garbage not yet collected, so an uncollected delta is "bytes allocated minus whatever
- * the collector happened to do in that window" — a schedule as much as a size. The SAME build
- * reported 51.9, 74.6 and 91.4 bytes/span purely by varying V8's GC flags, and in the regime where
- * nothing was collected inside the spans-dropped window it reported a NEGATIVE figure. 51.9 was the
- * reading 60 was rounded up from: low, not noisy, and low is the direction that matters, because a
- * sizer that under-reports lets the ring hold more than `HISTORY_BYTES` says it does.
- *
- * THE OLD JSON ESTIMATE WAS ~76, AND IT WAS CLOSER THAN THE ARGUMENT AGAINST IT. That argument is
- * still true as far as it goes: `TokenClass` is one of only 14 string values and V8 interns repeated
- * string literals, so 132,882 entries share a handful of string objects instead of paying for one
- * each, where JSON re-writes the literal in full every time. The sharing is real; it is just smaller
- * than the structural cost of the pair around it — a two-element array with its backing store,
- * wrapping a two-field `Span` object.
- *
- * **SINCE 2026-10-07 A SPAN CROSSES AS `SPAN_WIRE_BYTES` BYTES, AND HOLDS 12.56** (`frame-cost.test.ts`): the spans of
- * a frame are one `Uint8Array`. **80 IS KEPT, AND CHARGES A SPAN 6.37 TIMES WHAT IT HOLDS**: it is what decides how
- * many λ frames a history holds, and keeping it keeps that number where it was. A smaller charge would hold more frames
- * in the same `HISTORY_BYTES`; that is a change to how far back a λ view can scrub, not to what a frame costs, and it
- * was not made here.
+ * **A SPAN CROSSES AS `SPAN_WIRE_BYTES` BYTES, AND HOLDS 12.56** (`frame-cost.test.ts`): the spans of a
+ * frame are one `Uint8Array`. **80 IS KEPT, AND CHARGES A SPAN 6.37 TIMES WHAT IT HOLDS**: it is what
+ * decides how many λ frames a history holds, and keeping it keeps that number where it was. A smaller
+ * charge would hold more frames in the same `HISTORY_BYTES`; that is a change to how far back a λ view
+ * can scrub, not to what a frame costs.
  */
 export const SPAN_BYTES = 80
 
@@ -255,14 +180,13 @@ export const SPAN_WIRE_BYTES = 12
 /**
  * One `redex_span`: a `Span` object, `{ start, end }`, and charged only by a frame that has one.
  *
- * MEASURED, not estimated, by the same forced-collection differential `SPAN_BYTES` is (2026-08-10):
- * a run retaining `redex_span` alongside `step`/`text`/`cut` against one retaining only those three
- * costs 35.1 bytes per NON-NULL span — the 264 of `while4`'s 471 frames that carry one. 40 is that
- * rounded up, the same way `SPAN_BYTES` rounds up its own measurement.
+ * MEASURED, not estimated, by the same forced-collection differential `SPAN_BYTES` is: 35.1 bytes per
+ * NON-NULL span, and 40 is that rounded up, the same way `SPAN_BYTES` rounds up its own measurement.
  *
  * THIS OVERLAPS `SPAN_BYTES`, DELIBERATELY. `SPAN_BYTES`'s own differential drops `redex_span`/`owner`
- * from its slim arm too (see `frame-cost.test.ts`'s `SlimFrame` comment), so its 74.08
- * bytes/span already carries ~0.45 bytes/span of this object's cost — about 127 B/frame at 282
+ * from its slim arm too (see `frame-cost.test.ts`'s `SlimFrame` comment; the third-arm measurement
+ * behind ~0.45 is in `docs/superpowers/notes/2026-10-17-code-history-web-tests.md`, under `SlimFrame`),
+ * so its 74.08 bytes/span already carries ~0.45 bytes/span of this object's cost — about 127 B/frame at 282
  * spans/frame — and `lambdaFrameBytes` charges this constant again on top, ≈130 B/frame for the same
  * object. Both directions over-report, so the double-charge is safe: ~1% of a ~13 KB frame, left as is
  * rather than reconciled.
@@ -276,10 +200,9 @@ export const SPAN_WIRE_BYTES = 12
  * redex at all, and a redex past the truncation cut records no span (see `LambdaState.redex_span`).
  *
  * THE REDEX **PATH** IS NOT CHARGED AT ALL, because it is not on the wire — `LambdaState.redex` is
- * `serde(skip)`ped, and the tree view did not change that: it marks the contractum through
- * `LambdaTree.contractum`, resolved from the path in the core (see that field's own doc). A
- * `PATH_ENTRY_BYTES` term lived here and charged ~74 B/frame for an array the app never received; it
- * would come back only if the field ever went on the wire.
+ * `serde(skip)`ped, and the tree view marks the contractum through `LambdaTree.contractum`, resolved
+ * from the path in the core (see that field's own doc). It would need a charge only if the field went
+ * on the wire.
  */
 export const REDEX_SPAN_BYTES = 40
 
@@ -312,13 +235,8 @@ export const EXTEND_CELLS = 100_000
  *
  *     cd web && pnpm run test:probe:tm-buffer
  *
- * **THE READINGS ARE ONE RUN OF THAT COMMAND AT THE COMMIT THAT ADDED THE PROBE'S RUN STAMP**
- * (`web/tests/browser/provided-context.d.ts`), on an AMD Ryzen 9 9950X3D, starting at a load average of 1.32, in the
- * probe's release build in the browser test tier's headless Chromium. That build skips `MAX_SCRATCH_TM_BYTES`' size
- * check, which runs once before a parse and never inside a chunk. Twelve reduced files whose recorded runs took
- * 1,242,325 to 185,898,088 steps ran out in chunks of this size at 63.9 to 72.4 million steps a second. On
- * `let x = 40; x + 2` reduced through `single-tape`, fifteen chunks of 500,000 steps took 7.6 ms at the median and
- * 7.8 ms at most. One more doubling measured 15.2 ms at the median, past the 10 ms the design allows a chunk.
+ * On `let x = 40; x + 2` reduced through `single-tape`, fifteen chunks of 500,000 steps took 7.6 ms at the median
+ * and 7.8 ms at most. One more doubling measured 15.2 ms at the median, past the 10 ms the design allows a chunk.
  */
 export const VALUE_CHUNK = 500_000
 
@@ -349,8 +267,7 @@ export type RecordEnd = 'ended' | 'capped' | 'depth-refused' | 'budget' | 'stack
  * A λ frame's size in bytes.
  *
  * SPANS ARE ~95% OF IT, at every text budget — `frame_cost_probe` measured 261 bytes of text
- * serializing to 5,621. `LAMBDA_BYTE_BUDGET` bounds `text` and bounds `spans` not at all, which is
- * why the design's first draft was wrong about a frame's maximum size by a factor of twelve.
+ * serializing to 5,621. `LAMBDA_BYTE_BUDGET` bounds `text` and bounds `spans` not at all.
  *
  * **A SPAN IS CHARGED `SPAN_BYTES` WHATEVER IT CROSSES AS**: the spans arrive as one byte string, `SPAN_WIRE_BYTES` a
  * span (`spans.ts`), and are counted in spans, so a history holds as many λ frames as it did when they crossed as
@@ -389,7 +306,7 @@ export function tmFrameBytes(f: TmState): number {
  * `RunStatus` variant degrades to a legible label instead of aborting the worker — and to `ended`, the
  * one end that offers no continue, so a variant nothing here knows cannot offer one that does nothing.
  *
- * **HERE AND NOT IN `session-worker.ts`**, where its callers are, for `asmRecordEnd`'s reason below.
+ * **HERE AND NOT IN `session-worker.ts`**, where the app calls it, for `asmRecordEnd`'s reason below.
  */
 export function endOf(run: RunStatus | null): RecordEnd {
   switch (run) {
@@ -412,12 +329,12 @@ export function endOf(run: RunStatus | null): RecordEnd {
  * **EVERY CAP IS AN ARM, AND THERE IS NO `default`.** A cap this `switch` folded in by default would be called
  * `capped` and offered a continue that cannot resume it; with an arm per cap, a cap added to `AsmCap` is a type error
  * here (TS2366) until someone decides what it ends as. A `Capped` status naming no cap cannot occur — `AsmStatus`
- * names one exactly when the run is capped — and reads as the step cap, as it always has.
+ * names one exactly when the run is capped — and reads as the step cap.
  *
- * **HERE AND NOT IN `session-worker.ts`**, where its one caller is, for `forkable`'s reason: the worker is outside the
- * coverage gate and no test reaches it, so a decision written there is a decision nothing holds. `Running` cannot
- * occur, since this is asked once `stepAsm` has answered `false`; it maps to `ended`, as `endOf` maps it, rather than
- * throwing.
+ * **HERE AND NOT IN `session-worker.ts`**, where the app calls it, as `forkable` is (its call site there says why):
+ * the coverage gate cannot see the worker (that file's module doc: v8 coverage does not attach to a dedicated worker's
+ * context), so a branch written there moves none of the gate's numbers. `Running` cannot occur, since this is asked
+ * once `stepAsm` has answered `false`; it maps to `ended`, as `endOf` maps it, rather than throwing.
  */
 export function asmRecordEnd(status: Pick<AsmStatus, 'run' | 'cap'>): RecordEnd {
   if (status.run !== 'Capped') return 'ended'
@@ -459,14 +376,11 @@ export function asmFrameBytes(f: AsmState): number {
 /**
  * The largest machine, in δ rules, that may be opened in an editor.
  *
- * **MEASURED (5d-iv T2), NOT CHOSEN.** Emit, structured clone and `tmScratch` parse were priced across
- * the corpus; this is the largest round count whose three costs total under the 250 ms an initiated
- * gesture may take. `list20` is **11,802 rules** and clears it; `list60` is **94,182** and does not.
- * **Those are RULE counts. An earlier draft quoted 16,250 and 127,881 — list20's LINES and list60's
- * δ-table ROWS. A row is a state or a rule: 33,699 states + 94,182 rules is where 127,881 comes from.**
- * These costs were measured on the branch merged as `ec6900b`, which set this cap, while the parse inside
- * `tmScratch` still found a duplicate state name by comparing it with every earlier one, as it had since
- * `50e6126` and no longer does.
+ * **MEASURED, NOT CHOSEN.** Emit, structured clone, `tmScratch` parse and the editor's mount were priced
+ * across the corpus (`tm-fork-cost.test.ts`); this is the largest round count whose four costs total
+ * under the 250 ms an initiated gesture may take. `list20` is **11,802 rules** and clears it; `list60`
+ * is **94,182** and does not. **Those are RULE counts**, not lines or δ-table rows: a row is a state or
+ * a rule, and `list60`'s 33,699 states + 94,182 rules make 127,881 rows.
  *
  * **RULES RATHER THAN BYTES, BECAUSE THE COUNT IS ANSWERABLE BEFORE ANYTHING IS EMITTED.** `TmProgram`
  * is projected once per compile and both threads hold it, so the refusal costs a reduce rather than a
@@ -527,30 +441,23 @@ export type LambdaTreeWire = {
 export type RunRequest =
   | { kind: 'run'; gen: number; src: string; encoding: string }
   /**
-   * Build a λ scratchpad from λ TEXT and record its reduction — design §4.3's fork, and **the message
-   * plan T7 recorded as the thing standing between the binding model and a second session**: "a
-   * `LambdaScratch` session needs a worker message `session-worker.ts` does not have, and creating one
-   * on edit is §4.3 = T8."
+   * Build a λ scratchpad from λ TEXT and record its reduction — 5d-i design §4.3's fork.
    *
-   * NO `encoding`, UNLIKE `run`, AND THAT IS DECISION 2 ARRIVING ON THE WIRE. An encoding says how a
+   * NO `encoding`, UNLIKE `run`, AND THAT IS 5d-i DECISION 2 ARRIVING ON THE WIRE. An encoding says how a
    * VALUE is decoded, decoding is type-directed, and a `LambdaScratch` has no `ty` to decode against —
-   * §3.3 puts `lambdaValue` off the type entirely rather than leaving it to decline. A scratch is
+   * 5d-i §3.3 puts `lambdaValue` off the type entirely rather than leaving it to decline. A scratch is
    * stepped and watched, not evaluated, so an `encoding` field here would be a parameter with no
    * reader on either side.
    *
-   * λ ONLY — `tm-scratch`, BELOW, IS THE VARIANT FOR THE MACHINE HALF OF §4.1's `TmScratch`. See that
-   * variant's own doc for why it needs neither `step` nor `encoding` either. **THIS REQUEST STAYS λ
-   * ONLY EVEN THOUGH THE SESSION SIDE NO LONGER DOES** — `ScratchBuffers`'s doc in `scratch.ts` used to
-   * draw the identical "only one leg exists" line about the whole class; 5d-iv T5 gave it a second one,
-   * and that doc now argues the opposite. What survives here is narrower and still true: THIS variant
-   * of the wire is still the λ-only half of a pair, `tm-scratch` below is its counterpart, and a
-   * `ScratchBuffers` buffer picks between the two per mint rather than this request growing a `leg`
-   * field of its own.
+   * λ ONLY — `tm-scratch`, BELOW, IS THE VARIANT FOR THE MACHINE HALF OF 5d-i §4.1's `TmScratch`. See
+   * that variant's own doc for why it needs neither `step` nor `encoding` either. **THIS REQUEST STAYS λ
+   * ONLY**: a `ScratchBuffers` buffer picks among it, `tm-scratch` and `asm-scratch` per mint (`#spawn`'s
+   * branch on the leg) rather than this request growing a `leg` field of its own.
    *
-   * **`step` IS WHICH FRAME THE PANE WAS SHOWING, AND THE WORKER REPLAYS TO IT** (design §4.1). It is
-   * not an offset into `src`: `src` is the SOURCE session's step-0 term at `LAMBDA_BYTE_BUDGET`, and
-   * `step` says how far to reduce it before forking. An edit posts `step: 0`, because the text in the
-   * box IS the term — which is why editing needs no message of its own.
+   * **`step` IS WHICH FRAME THE PANE WAS SHOWING, AND THE WORKER REPLAYS TO IT** (5d-iii design §4.1).
+   * It is not an offset into `src`: `src` is the SOURCE session's step-0 term at `LAMBDA_BYTE_BUDGET`,
+   * and `step` says how far to reduce it before forking. An edit posts `step: 0`, because the text in
+   * the box IS the term — which is why editing needs no message of its own.
    */
   | { kind: 'lambda-scratch'; gen: number; src: string; step: number }
   /**
@@ -561,15 +468,11 @@ export type RunRequest =
    * machine, and the scratch starts from its header's initial configuration. A `step` here would be a
    * field with no reader on either side.
    *
-   * **NO `encoding`, AND NOT FOR `lambda-scratch`'s REASON ANY MORE.** A headered TM buffer's value IS
+   * **NO `encoding`, AND NOT FOR `lambda-scratch`'s REASON.** A headered TM buffer's value IS
    * decoded, by the `TmValueRun` `tmScratch` builds beside the scratch, but under the encoding its own
    * header names, so a request field would be a second answer to a question the text already settles.
    * The scratch itself still has no `ty`: `tmValue`, `sourceSpan` and `linkIndex` are absent from it
    * rather than declining.
-   *
-   * **THIS IS THE VARIANT `lambda-scratch`'s DOC NOW POINTS AT.** §4.1's `TmScratch` exists at the
-   * boundary (plan T3, `tmScratch(src)` is exported and typed); this is the request that finally gives
-   * the app a surface that can send it — 5d-iv's TM pane.
    */
   | { kind: 'tm-scratch'; gen: number; src: string }
   /**
@@ -617,10 +520,10 @@ export type RunReply =
   | { kind: 'no-session'; gen: number; diagnostics: Diagnostic[] }
   /**
    * A λ scratchpad exists — `compiled`'s counterpart for a session with ONE leg and no compile behind
-   * it (design §4.1, §4.3).
+   * it (5d-i design §4.1, §4.3).
    *
-   * A SEPARATE VARIANT RATHER THAN `compiled` WITH FIVE NULLS, and that is decision 2 restated on the
-   * wire. `compiled` carries `tm`, `tmProgram`, `tapeNames`, `declinedSpan` and `linkIndex`; a
+   * A SEPARATE VARIANT RATHER THAN `compiled` WITH FIVE NULLS, and that is 5d-i decision 2 restated on
+   * the wire. `compiled` carries `tm`, `tmProgram`, `tapeNames`, `declinedSpan` and `linkIndex`; a
    * `LambdaScratch` has no TM leg, no `SourceMap` and no `ty`, so every one of those would be a
    * fabricated field on a message about a session that provably cannot have them — the shape §3.3
    * refuses at the type level and `session.rs`'s `Session::tm` prices. A consumer that receives this one
@@ -637,8 +540,7 @@ export type RunReply =
    * is longer than the byte budget; past step 0, and for text over the budget, it is the worker's print
    * of the term (`session.rs`'s `lambda_scratch_at`).
    *
-   * **IT IS NULLABLE DEFENSIVELY AND IS NEVER `null` ON THIS REPLY, and the distinction is worth
-   * stating because an earlier version of this comment got it wrong.** The type mirrors
+   * **IT IS NULLABLE DEFENSIVELY AND IS NEVER `null` ON THIS REPLY.** The type mirrors
    * `session::ForkedAt`, where `scratch` and `text` are one fact — null together or neither. But
    * `onLambdaScratch` posts `no-session` and returns the moment `scratch` is null, so the only path
    * that reaches `scratch-compiled` has already proved both are present. **Unparseable text and a
@@ -652,9 +554,9 @@ export type RunReply =
    * widening of it.
    *
    * **A SEPARATE ARM BECAUSE THE PAYLOADS SHARE NO FIELD.** `scratch-compiled` carries a
-   * `LambdaStatus` and the text the fork was built from; this carries a `TmScratchStatus` — five
-   * fields, no `total_steps` — and a machine. Folding them would put a union inside the arm and a
-   * switch in every consumer to open it.
+   * `LambdaStatus` and the text the fork was built from; this carries a `TmScratchStatus` — no
+   * `total_steps` — and a machine. Folding them would put a union inside the arm and a switch in every
+   * consumer to open it.
    *
    * **`tmProgram` IS NOT NULLABLE HERE, WHERE IT IS ON `compiled`.** A `TmScratch` exists only for text
    * that parsed to a machine, so the δ-table always has a program to render; text that did not parse
@@ -693,8 +595,8 @@ export type RunReply =
    * A session exists. Sent BEFORE any recording, so the panes can mount and show their declines
    * while the legs are still being stepped.
    *
-   * `tmProgram` IS SENT ONCE, HERE. It is ~123 states for `let x = 40; x + 2` and does not change
-   * as the cursor moves; putting it on every frame would send it 2,870 times.
+   * `tmProgram` IS SENT ONCE, HERE. It does not change as the cursor moves, so putting it on every
+   * frame would send the same machine again with each one.
    */
   | {
       kind: 'compiled'
@@ -712,11 +614,11 @@ export type RunReply =
        * The link index for this compile.
        *
        * NULLABLE DEFENSIVELY, NOT REACHABLY. A session-less compile emits the `no-session` variant
-       * instead of `compiled`, so no producer sends `null` here today — `main.ts`'s
+       * instead of `compiled`, so no producer sends `null` here — `replies.ts`'s
        * `reply.linkIndex === null ? null : new LinkIndex(reply.linkIndex)` ternary has no live path to
-       * its `null` arm under the current worker. The type stays `| null` and the consumer keeps
-       * checking for it anyway: a wire contract that hard-coded today's producer behavior would drop
-       * the guard exactly where a future change to `compile` could reopen this path silently.
+       * its `null` arm. The type stays `| null` and the consumer keeps checking for it anyway: a wire
+       * contract that hard-coded what its producer sends would drop the guard exactly where a future
+       * change to `compile` could reopen this path silently.
        *
        * RIDES `compiled` RATHER THAN GETTING ITS OWN MESSAGE, and eagerly rather than on first click.
        * A separate lazy fetch would spare every compile the user never clicks into — but it costs a
@@ -740,7 +642,7 @@ export type RunReply =
        * **`null` IS THE ONLY FACT BEHIND *WHETHER* THE CONTROL IS OFFERED.** There is no `canFork`
        * boolean beside it: a second encoding of one fact is how a control comes to be offered for a
        * fork that cannot happen. `tmResultDecodable` exists beside it anyway, for a narrower job: not
-       * deciding presence, but telling apart the two reasons `null` can now mean, so the pane can word
+       * deciding presence, but telling apart the two reasons `null` can mean, so the pane can word
        * the right one — `ruleCount(tmProgram)` for one, `tmResultDecodable` for the other.
        */
       tmText: string | null
@@ -779,7 +681,7 @@ export type RunReply =
    * The worker threw. EVERY `Session` method and every free export is fallible at the `lib.rs` layer
    * — `to_value` can fail even where `session.rs` cannot — and a throw inside an `async` message
    * handler rejects it with nothing catching, so no reply is posted and the caller waits forever.
-   * That is precisely the defect PR 3c shipped. This variant is what makes silence impossible: the
-   * handler catches, and the caller always hears something.
+   * This variant is what makes silence impossible: the handler catches, and the caller always
+   * hears something.
    */
   | { kind: 'worker-error'; gen: number; message: string }

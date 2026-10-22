@@ -31,35 +31,30 @@ import { seedTm } from './tm-seed'
 /**
  * ONE FRAME, PAINTED ONCE — the per-frame pass that runs on every recorded frame during playback.
  *
- * THE ORDER INSIDE IT IS LOAD-BEARING AND THE COMMENTS SAYING SO MOVED WITH IT. The tm-kind branch of
- * the render loop below calls `setFocus` before `PaneSlot.render` because `TmPane`'s `#drawTable` runs
- * unconditionally on every render, so a focus handed over afterwards would build every row against the
- * previous frame's value and rebuild them all on the next call. Read the inline notes before reordering
- * anything here.
+ * THE ORDER INSIDE IT IS LOAD-BEARING. The tm-kind branch of the render loop below calls `setFocus` before
+ * `PaneSlot.render` because `TmPane`'s `#drawTable` runs unconditionally on every render, so a focus handed
+ * over afterwards would build every row against the previous frame's value and rebuild them all on the next
+ * call. Read the inline notes before reordering anything here.
  *
- * `view` IS A THUNK, NOT A VALUE, AND NOT IN THE TASK'S ORIGINAL SIGNATURE — `main.ts` declares
- * `let view: EditorView` and does not assign it until the `EditorView` construction runs, well after
- * this factory is called, so a value parameter would capture `undefined` forever. Same shape
- * `link-wiring.ts` already uses for the same variable and the same reason.
+ * `view` IS A THUNK, NOT A VALUE — `main.ts` declares `let view: EditorView` and does not assign it until
+ * the `EditorView` construction runs, well after this factory is called, so a value parameter would
+ * capture `undefined` forever. Same shape `link-wiring.ts` already uses for the same variable and the
+ * same reason.
  *
- * `panes: PaneCollection` REPLACES `lambdaSlot`/`tmSlot`/`lambdaPane`/`tmPane` (T7). No longer "still
- * two panes, still the same two hosts" as of T12 (5d-ii-a): `pane-host.ts`'s `applyLayout` derives which
- * panes exist from the layout tree, so a leg can now hold any number of panes — only the route to them
- * (through the collection rather than a fixed pair of consts) stayed the same. See `PaneCollection`'s
- * own doc for why `of`/`ofSession` read the binding through the slot on every call rather than caching
- * it.
+ * `panes: PaneCollection`: `pane-host.ts`'s `applyLayout` derives which panes exist from the layout tree,
+ * so a leg can hold any number of panes, reached through the collection. See `PaneCollection`'s own doc
+ * for why `of`/`ofSession` read the binding through the slot on every call rather than caching it.
  *
- * `leaves: () => number` IS T12's OWN ADDITION, AND A THUNK RATHER THAN A NUMBER FOR THE SAME REASON
- * `view` IS ONE: the leaf count changes under a split or a close, and `draw()` runs on every recorded
- * frame during playback, so a value captured once at construction would go stale the first time either
- * happened. `draw.ts` DOES NOT IMPORT `layout.ts` TO COMPUTE THIS ITSELF — `main.ts` holds the one
- * `LayoutNode` this app has; a second way to ask "how many leaves" here would be a second opinion about
- * a tree this module has no other reason to know exists.
+ * `leaves: () => number` IS A THUNK RATHER THAN A NUMBER: the leaf count changes under a split or a close,
+ * and `draw()` runs on every recorded frame during playback, so a value captured once at construction would
+ * go stale the first time either happened. `draw.ts` DOES NOT IMPORT `layout.ts` TO COMPUTE THIS ITSELF —
+ * `main.ts` holds the one `LayoutNode` this app has; a second way to ask "how many leaves" here would be a
+ * second opinion about a tree this module has no other reason to know exists.
  *
  * `sourceAvailable: () => boolean` IS `leaves`' SIBLING IN EVERY RESPECT — another fact about the one
  * tree `main.ts` holds, asked live because a split or a close moves it, and phrased as a thunk over that
  * tree rather than as a `layout.ts` import here for the reason above. It is the one input the split
- * picker needs that this module cannot already see: `SessionRegistry.pairs()` and each pane's own
+ * menu needs that this module cannot already see: `SessionRegistry.pairs()` and each pane's own
  * binding, which are the rest of a `SplitChoices`, are both already in the loop below's hands.
  *
  * `hasEditor: (session) => boolean` IS THE SAME SHAPE AGAIN, over the OTHER thing `main.ts` owns and
@@ -82,7 +77,7 @@ export function createDraw(deps: {
   sourceAvailable: () => boolean
   /**
    * Whether the tree on screen holds this view — false for a view kept alive in an arrangement the workspace
-   * remembers (the view layouts spec §5). A hidden Stage tab is in the tree, so it answers true as it always has.
+   * remembers (the view layouts spec §5). A hidden Stage tab is in the tree, so it answers true.
    */
   arranged: (id: LeafId) => boolean
   hasEditor: (session: SessionId) => boolean
@@ -129,36 +124,31 @@ export function createDraw(deps: {
   } = deps
   return () => {
     // "THE" λ, ASM AND TM PANES, RESOLVED THROUGH THE COLLECTION RATHER THAN CLOSED OVER — AND ANY MAY
-    // BE ABSENT. This block used to destructure `of(leg)[0]` and throw when it came back `undefined`,
-    // on the strength of "`main.ts` always registers one pane of each leg before `draw` can be called".
-    // That was true while panes were two consts and false from the moment `applyLayout` began deriving
-    // them from the layout tree: `closeLeaf` refuses only the last leaf in the TREE, so `leaves() > 1`
-    // offered `close` on the single λ pane a fresh page then shipped, and clicking it left this throwing on
-    // every subsequent frame. Worse, `applyLayout` persists the new tree BEFORE calling `draw()`, so
-    // the λ-less arrangement was already committed to `localStorage` and the dead app came back on
-    // reload — only `reset preset` escaped it. `PaneCollection.active` is now the one place that
-    // answers this question, and it answers `undefined` when the leg is empty; see its own doc for why
-    // all four consumers were once holding the same expired invariant privately, and for how it now
+    // BE ABSENT. `closeLeaf` refuses only the last leaf in the TREE, so a leg can be left with no pane,
+    // and `applyLayout` persists the new tree BEFORE calling `draw()`: a throw here for an empty leg would
+    // repeat on every frame and come back on reload. `PaneCollection.active` is the one place that
+    // answers this question, and it answers `undefined` when the leg is empty; see its own doc for how it
     // picks among several panes on the same leg — the pane the user focused most recently, falling back
-    // to insertion order (5d-ii-b).
+    // to insertion order.
     //
     // A LEG WITH NO PANE CONTRIBUTES NOTHING, RATHER THAN BEING FAKED WITH A DEFAULT. The scalar reads
     // below (`tmFocus`'s `tm.hist...`, the source editor's `lam.hist...`) feed the ONE shared status
-    // line and the ONE source editor's decoration, neither of which has a per-pane identity yet. What a
-    // leg with NO pane should contribute has an answer today, and it is `null` at both sites.
+    // line and the ONE source editor's decoration, neither of which has a per-pane identity. What a
+    // leg with NO pane contributes is `null` at both sites.
     //
     // **EACH LEG'S RUNNING FOCUS IS THE PROGRAM'S, SO IT IS READ OFF A VIEW OF THE PROGRAM — `onProgram`.** It
     // resolves against the program's link index and marks the program's rows, and a copy's frames own no construct
-    // of the program's. Read off whichever view was focused last, it went blank the moment that view showed a copy:
-    // the program's own view lost its marks, in Stage even while it was the view shown and being stepped. So each
-    // leg asks for the most recently focused view that shows the program, and a copy's view is never the source.
-    // With no view of the program on a leg, that leg has no running focus, as a leg with no view has none.
+    // of the program's. Read off whichever view was focused last, it would go blank the moment that view showed
+    // a copy: the program's own view would lose its marks, in Stage even while it was the view shown and being
+    // stepped. So each leg asks for the most recently focused view that shows the program, and a copy's view is
+    // never the source. With no view of the program on a leg, that leg has no running focus, as a leg with no
+    // view has none.
     //
     // **WHICH PANE ANSWERS DEPENDS ON WHAT THE READER READS.** `lam`, `asm` and `tm` ask `active` — in Stage
     // possibly a view off the page. They read the leg's own history through the pane's binding, which is live
     // whether or not the pane is drawn, so a hidden pane still answers truly for its session; and part 2's spec §8
     // keeps the step bar on "the last view that could" step, so a hidden view's leg can still move. The λ link
-    // clause at the end of this function asks `shown` instead, because it reads a view's own pin and tree, which
+    // clause after the render loop asks `shown` instead, because it reads a view's own pin and tree, which
     // only a view on the page has fresh (`PaneCollection.shown`'s doc).
     //
     // **AND NEVER A VIEW THE TREE ON SCREEN DOES NOT HOLD** (the view layouts spec §5): a view kept alive in a
@@ -173,18 +163,17 @@ export function createDraw(deps: {
     const lam = panes.active('lambda', watched)?.slot.resolve(sessions)
     const tm = panes.active('tm', watched)?.slot.resolve(sessions)
     // THE TM LEG'S OWN RUNNING FOCUS — `TmState.source_node`, NOT `lam.hist.current?.owner` below.
-    // Design table (`2026-08-10-plan5c-dual-focus-design.md` §4.2): "TM: TmState.source_node,
-    // resolved through SourceMap::tm_owner ... none; shipped 2026-07-30." Each pane reports what ITS
-    // OWN leg is doing right now — the two clocks never synchronize (§0: `map_fold` is 555 β-steps
-    // against 266,863 δ-steps), so feeding the δ-table from the λ leg's owner would show it whatever
-    // the OTHER model was doing, not its own. `sourceNodeOwner` wraps the already-resolved node id as
-    // an `Owner` so it goes through the same `runningFocus` every other leg does.
+    // Design table (`2026-08-10-plan5c-dual-focus-design.md` §4.2). Each pane reports what ITS OWN leg
+    // is doing right now — the two clocks never synchronize (§0), so feeding the δ-table from the λ
+    // leg's owner would show it whatever the OTHER model was doing, not its own. `sourceNodeOwner` wraps
+    // the already-resolved node id as an `Owner` so it goes through the same `runningFocus` every other
+    // leg does.
     //
     // COMPUTED BEFORE THE RENDER LOOP BELOW, NOT AFTER — ONE `#drawTable` PER FRAME, NOT TWO. Nothing
     // here reads anything a render writes (`runningFocus` wants `linkable`/`index`/`tm.hist`, none of
-    // which `PaneSlot.render` touches), so hoisting this ahead of the (now leg-agnostic) render loop
-    // changes nothing observable — it only has to be resolved before the loop reaches a tm-kind pane,
-    // which the loop's own comment covers.
+    // which `PaneSlot.render` touches), so hoisting this ahead of the render loop changes nothing
+    // observable — it only has to be resolved before the loop reaches a tm-kind pane, which the loop's
+    // own comment covers.
     //
     // `tm !== undefined` IS A THIRD GATE ALONGSIDE `linkable`/`index`, NOT A NULL-CHECK BOLTED ON. With
     // no TM view of the program there is no TM leg of the program's being watched, so there is nothing for a
@@ -208,7 +197,7 @@ export function createDraw(deps: {
     const asmFocusLink: Link | null =
       asmFocus !== null && linkWiring.index !== null ? linkWiring.index.linkFor(asmFocus.node) : null
 
-    // THE PICKER'S TWO SHARED INPUTS, RESOLVED ONCE PER FRAME RATHER THAN ONCE PER PANE. Both answers
+    // THE SPLIT MENU'S TWO SHARED INPUTS, RESOLVED ONCE PER FRAME RATHER THAN ONCE PER PANE. Both answers
     // are app-wide — every pane may be pointed at the same set of pairs, and "is there a source leaf" is
     // a question about the one tree — so this is the same fan-out `tmFocusLink` above already performs,
     // and it keeps the per-pane cost of the `setLayoutControls` call below to one small object.
@@ -217,15 +206,14 @@ export function createDraw(deps: {
     const pairs = sessions.pairs()
     const canCreateSource = sourceAvailable()
 
-    // THE DRAW PASS, OVER EVERY PANE RATHER THAN EXACTLY TWO (T7's conversion of the render calls).
-    // `setFocus` still runs BEFORE `render` for a tm-kind pane and for the reason above; `tmFocusLink`
-    // is the SAME value handed to every tm-kind pane found here, matching `setFocus`'s per-leg
-    // classification — it is app-wide link state every pane on the tm leg follows, not something each
-    // pane recomputes for itself. `p.pane` NEEDS THE CAST: `PaneCollection` stores it as `PaneView<T>`,
-    // the narrow structural type `PaneSlot.render` needs (see that type's own doc in `sessions.ts`),
-    // which does not carry `setFocus` — a fact about the CONCRETE `TmPane` class, not about what a
-    // slot's render pass requires. Safe here because `p.slot.binding.leg === 'tm'` is exactly the
-    // condition under which `pane-host.ts` ever constructs a `PaneEntry` with a `TmPane` in `.pane`.
+    // THE DRAW PASS, OVER EVERY PANE. `setFocus` runs BEFORE `render` for a tm-kind pane and for the
+    // reason above; `tmFocusLink` is the SAME value handed to every tm-kind pane found here, matching
+    // `setFocus`'s per-leg classification — it is app-wide link state every pane on the tm leg follows,
+    // not something each pane recomputes for itself. `p.pane` NEEDS THE CAST: `PaneCollection` stores it
+    // as `PaneView<T>`, the narrow structural type `PaneSlot.render` needs (see that type's own doc in
+    // `sessions.ts`), which does not carry `setFocus` — a fact about the CONCRETE `TmPane` class, not
+    // about what a slot's render pass requires. Safe here because `p.slot.binding.leg === 'tm'` is exactly
+    // the condition under which `pane-host.ts` ever constructs a `PaneEntry` with a `TmPane` in `.pane`.
     for (const p of panes.all()) {
       // **A VIEW THAT IS NOT ON THE PAGE IS NOT PAINTED** (spec §5). In Stage every host but one is in
       // `pane-host.ts`'s map and out of the document, and a `render` into a detached subtree is work whose
@@ -274,7 +262,7 @@ export function createDraw(deps: {
       // `render` would be held against a `null` frame, and `render`'s own draw of this tick's frame would release it
       // at once. After it, the view shows this tick's frame, and the draw `setLink` makes holds against that.
       //
-      // **A COPY IS NOT LINKED (§4.5), so it marks nothing whatever is pinned** — `unlinked` above, as
+      // **A COPY IS NOT LINKED (5d-i design §4.5), so it marks nothing whatever is pinned** — `unlinked` above, as
       // `link-wiring.ts`'s fan-out guards its own. Resolved once, and only for a view seeded this frame.
       const seededPin =
         (tmSeeded || asmSeeded) &&
@@ -289,32 +277,30 @@ export function createDraw(deps: {
       if (asmSeeded) {
         asmPane.setLink(seededPin?.instrs ?? [], linkWiring.link !== null && linkWiring.link.origin !== 'asm')
       }
-      // WHICH LAYOUT GESTURES THIS PANE OFFERS — T12's own addition, driven from here for the same
-      // reason `setBindings` already is (`PaneSlot.render`'s doc): both are facts about something
-      // OTHER than the frame just rendered, so a caller with no render loop of its own has no other
-      // per-frame hook to drive them from. `leaves() > 1` is "not the last leaf on the page", not "not
-      // the last leaf on THIS pane's leg" — a lone TM pane still offers close as long as source or λ
-      // panes exist beside it. `p.kind !== 'source'` is the split refusal: one editor, nothing to
-      // duplicate into (`splitLeaf`'s own doc).
+      // WHICH LAYOUT GESTURES THIS PANE OFFERS — driven from here for the same reason `setBindings` already
+      // is (`PaneSlot.render`'s doc): both are facts about something OTHER than the frame just rendered, so
+      // a caller with no render loop of its own has no other per-frame hook to drive them from.
+      // `leaves() > 1` is "not the last leaf on the page", not "not the last leaf on THIS pane's leg" — a
+      // lone TM pane still offers close as long as any other view exists beside it.
       //
       // THE THIRD ARGUMENT IS WHAT THE SPLIT MAY CREATE, and it rides this call rather than a setter of
       // its own — `PaneView.setLayoutControls`'s own doc has that argument. `p.slot.binding` is the
-      // pane's own pair, which the menu puts first and labels `(same)`; it is read here rather than
-      // remembered by the pane for `PaneCollection`'s reason for reading bindings through the slot on
-      // every call — a copy is a second place to be wrong.
-      // `p.kind !== 'source' && !stage()` IS THE SPLIT REFUSAL, AND IT HAS TWO HALVES NOW. One editor,
+      // pane's own pair, which the split menu puts first; it is read here rather than remembered by the
+      // pane for `PaneCollection`'s reason for reading bindings through the slot on every call — a
+      // copy is a second place to be wrong.
+      // `p.kind !== 'source' && !stage()` IS THE SPLIT REFUSAL, AND IT HAS TWO HALVES. One editor,
       // nothing to duplicate into (`splitLeaf`'s own doc); and in Stage a split can never apply, because
       // the stage draws ONE view over a tab strip and a split of it would be invisible — umbrella §4
       // rule 4's "removed where it can never apply in that view". `+ view` is what adds a view there
-      // (spec §5), and it is in the app header rather than in this menu.
+      // (Plan 7 part 2 spec §5), and it is in the app header rather than in the view's `⋯` menu.
       p.pane.setLayoutControls(leaves() > 1, p.kind !== 'source' && !stage(), {
         options: pairs,
         sourceAvailable: canCreateSource,
         current: p.slot.binding,
       })
-      // WHICH STEP CONTROLS THIS VIEW DRAWS — driven from here for `setLayoutControls`' reason one line
-      // up: it is a fact about the workspace rather than about the frame just rendered, so this per-frame
-      // pass is the only hook a caller with no render loop of its own has.
+      // WHICH STEP CONTROLS THIS VIEW DRAWS — driven from here because it is a fact about the workspace
+      // rather than about the frame just rendered, so this per-frame pass is the only hook a caller with
+      // no render loop of its own has.
       p.pane.setStepsShown(stepsInView())
       // *MOVE THE EDITOR HERE* ON A TM OR ASM VIEW, fed from custody every frame as the λ pass below feeds a λ view's:
       // whether another view holds the copy's editor is a fact about other views (`CopyEditor.#editorAvailable`).
@@ -322,7 +308,7 @@ export function createDraw(deps: {
       if (machine !== null) machine.setEditorAvailable(hasEditor(p.slot.binding.session))
     }
 
-    // RESOLVED ONCE, HERE, FOR `drawLink` AT THE END. `draw()` runs on every recorded frame during
+    // RESOLVED ONCE, HERE, FOR `drawLink` BELOW. `draw()` runs on every recorded frame during
     // playback, and `index.linkFor` walks `#spanOf`/`#ownedBy` over the wire's parallel arrays — not
     // free. The λ views need none of it: each marks the pinned construct's nodes in the tree it draws.
     const l: Link | null =
@@ -330,28 +316,23 @@ export function createDraw(deps: {
         ? linkWiring.index.linkFor(linkWiring.link.node)
         : null
     // PER-LEG, NOT PER-PANE — every λ view marks the same pinned construct, read once and fanned out.
-    // SAME REASON AS `drawLink()` BELOW, AND NOT ONLY IN `setLinkTo`: each step's tree must be marked as
-    // it arrives, and every stepping control routes through `draw()` rather than through `setLinkTo`.
+    // READ HERE, AND NOT ONLY IN `setLinkTo`: each step's tree must be marked as it arrives, and every
+    // stepping control routes through `draw()` rather than through `setLinkTo`.
     const pin = linkWiring.linkable && linkWiring.link !== null ? linkWiring.link.node : null
-    // THE λ-ONLY PER-FRAME PASS, AND IT CARRIES TWO FACTS NOW. The pin is per-leg (one construct,
-    // fanned out); `setEditorAvailable` is PER PANE, because it is a question about each pane's own
-    // binding — two λ panes on two different buffers get two different answers, and two on the SAME
-    // buffer get the same one, which is exactly the state the control exists to resolve.
-    //
-    // WHY IT IS HERE AND NOT IN `PaneSlot.render` BESIDE `setDetached`, which it otherwise resembles in
-    // every way: that call is leg-agnostic (`PaneView`), and an editor-availability setter on `TmPane`
-    // would be a method that could only ever be ignored. The loop above is the render pass for EVERY
-    // leg; this one is already the place where "λ panes, and only λ panes" is said.
+    // THE λ-ONLY PER-FRAME PASS. The pin is per-leg (one construct, fanned out); `setEditorAvailable` is
+    // PER PANE, because it is a question about each pane's own binding — two λ panes on two different
+    // buffers get two different answers, and two on the SAME buffer get the same one, which is exactly
+    // the state the control exists to resolve.
     trees.prune((id) => sessions.has(id))
     for (const p of panes.of('lambda')) {
-      // THE SAME SKIP THE MAIN LOOP TAKES, for the same reason (spec §5) — and a hidden view therefore asks
-      // the worker for no tree until its tab is next selected (part 4's spec §5.5).
+      // THE SAME SKIP THE MAIN LOOP TAKES, for the same reason (Plan 7 part 2 spec §5) — and a hidden view
+      // therefore asks the worker for no tree until its tab is next selected (part 4's spec §5.5).
       if (!p.host.isConnected) continue
       const pane = p.pane as LambdaPane
       const session = p.slot.binding.session
       const leg = p.slot.resolve(sessions)
       pane.setBuild(trees.buildOf(session))
-      // A COPY IS NOT LINKED (§4.5), so it marks nothing whatever is pinned.
+      // A COPY IS NOT LINKED (5d-i design §4.5), so it marks nothing whatever is pinned.
       const pinned = sessions.entryOf(session).detached ? null : pin
       pane.renderTree(
         leg.hist.current === undefined ? { kind: 'none' } : trees.want(session, leg.hist.currentStep),
@@ -364,8 +345,8 @@ export function createDraw(deps: {
     // fed by `l` — `link` is the pin a click set, `focus` is the marker that moves every β-step, and
     // `runningFocus` deliberately knows nothing about `link` (see its own doc). GATED ON `linkable`,
     // NOT ONLY `index !== null` — the same distinction `linkAtSourceOffset` already draws: `index` can
-    // be non-null and still stale (see `linkable`'s own doc above), and `runningFocus` only ever sees
-    // `null` for the case where `index` itself is null.
+    // be non-null and still stale (see `linkable`'s own doc in `link-wiring.ts`), and `runningFocus`
+    // only ever sees `null` for the case where `index` itself is null.
     // `lam !== undefined` FOR THE REASON `tmFocus` ABOVE TAKES `tm !== undefined`, and here the
     // consequence is visible rather than internal: with no λ pane the source editor's focus decoration
     // is cleared by the `focus === null` branch below, which is what a user who just closed the last λ
@@ -391,22 +372,21 @@ export function createDraw(deps: {
       const claim = isCoincident(linkWiring.link, focus) ? 'coincident' : focus.claim
       view().dispatch({ effects: setFocus.of({ span: focusLink.source, claim }) })
     }
-    // `drawLink` NOW RUNS HERE, AT THE END, NOT AT THE TOP OF THIS FUNCTION — `link-status.ts`'s
-    // SECOND job needs `tmFocus` (resolved above the render loop) to answer whether it coincides with
-    // the pin. Still "at the end" in the sense the original comment meant: everything above it is a
-    // `history`/`index` read, nothing below reads `drawLink`'s output.
-    // THE λ HALF OF THE STATUS COMES FROM THE VIEW THAT DREW THE TREE (spec §5.4), after the loop above
-    // has handed it this frame's pin.
+    // `drawLink` RUNS HERE, AFTER THE RENDER LOOP, NOT AT THE TOP OF THIS FUNCTION — `link-status.ts`'s
+    // SECOND job needs `tmFocus` (resolved above the render loop) to answer whether it coincides with the
+    // pin. What it reads is settled by here, and the readout pass below reads nothing it writes.
+    // THE λ HALF OF THE STATUS COMES FROM THE VIEW THAT DREW THE TREE (Plan 7 part 4 spec §5.4), after the
+    // loop above has handed it this frame's pin.
     //
     // **A VIEW OFF THE PAGE DREW NOTHING.** The loop above skipped it, so its pin and its tree are whatever
-    // it last drew, and asking it answered for an earlier pin. So the view is `shown`'s: of the λ views on the
-    // page, the one focused most recently. With no λ view on the page there is no term on screen to explain,
-    // which is `'absent'`.
+    // it last drew, and asking it would answer for an earlier pin. So the view is `shown`'s: of the λ views on
+    // the page, the one focused most recently. With no λ view on the page there is no term on screen to
+    // explain, which is `'absent'`.
     //
     // **AND A VIEW OF THE PROGRAM, `onProgram`, AS FOR THE RUNNING FOCUSES.** The clause explains why the program's
-    // term does not show the pin, and a copy's view marks nothing whatever is pinned (§4.5). `linkStatus` keeps the
-    // λ clause while any λ view shows the program, so a copy's view answering here would put its term's answer in a
-    // sentence about the program's.
+    // term does not show the pin, and a copy's view marks nothing whatever is pinned (5d-i design §4.5).
+    // `linkStatus` keeps the λ clause while any λ view shows the program, so a copy's view answering here
+    // would put its term's answer in a sentence about the program's.
     const drewLambda = panes.shown('lambda', onPage, onProgram)
     const lambdaLink: LambdaLinkState =
       drewLambda === undefined
@@ -443,9 +423,9 @@ export function createDraw(deps: {
       // literal finds.
       const name = nameOf(session) ?? 'a copy'
       const leg = entry.slot.resolve(sessions)
-      // **THE LEG FACTS ARE HOISTED OUT OF THE OLD TERNARY**, because both thunks below read them and a
-      // value built inside one of them is a value the other cannot see. One value for every leg, as the copies
-      // menu's rows read it (`main.ts`'s `copyHolds`).
+      // **THE LEG FACTS ARE READ BEFORE THE SWITCH**, because both thunks below read them and a value built
+      // inside one of them is a value the other cannot see. One value for every leg, as the copies menu's
+      // rows read it (`main.ts`'s `copyHolds`).
       const copyLeg = copyLegOf(leg)
       switch (entry.slot.binding.leg) {
         case 'lambda':

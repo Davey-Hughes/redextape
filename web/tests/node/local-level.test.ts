@@ -3,6 +3,8 @@ import { localLevel, predecessors, REACH, ruleLabel } from '../../src/local-leve
 import type { RuleView, TmProgram } from '../../src/types'
 import { COMPILED, state } from './tm-machines'
 
+/** Section and amendment citations here are the Plan 7 part 4 spec's. */
+
 const rule = (over: Partial<RuleView>): RuleView => ({
   read: [null, null],
   write: [null, null],

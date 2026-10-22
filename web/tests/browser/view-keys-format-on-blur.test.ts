@@ -7,8 +7,8 @@ import { viewKey } from './user-event-fixture'
 
 /**
  * A VIEW KEY PRESSED FROM AN EDITOR DOES NOT FORMAT IT — the settings menu's *format on blur*, and the view layouts
- * spec §4.5 step 5: a switch takes the editor off the page and puts it back with the focus in it, and the `blur`
- * that sends the editor is not the user leaving it (`main.ts`'s `focusKept` has what was measured).
+ * spec §4.5 step 5: a switch takes the editor off the page and puts it back with the focus in it, and the `blur` that
+ * sends the editor is not the user leaving it (`focusKept`'s doc in `main.ts`).
  *
  * **WHAT IS COUNTED IS THE REQUEST TO FORMAT, AND NOT ONLY THE TEXT.** A format is asked of the language server and
  * its edits arrive a turn later, so "the text is unchanged" is true for a moment after any blur. `Worker`'s own
@@ -74,10 +74,9 @@ describe('a view key from an editor, with format on blur on', () => {
 
   /**
    * **THE COMPILE THE CASE BEFORE STARTED IS WAITED FOR FIRST.** Its last leave formats the program, which compiles
-   * again, and the page is laid out again when that lands: measured (2026-10-12), this menu's *edit a copy* moved 34
-   * px up a frame before the compile was idle, with the menu open. A press aimed before the move lands outside the
-   * menu, the browser shuts it, and the case waited out its cap for an item no longer on the page: once in two runs
-   * of 25 files at `CPUQuota=25%`.
+   * again, and the page is laid out again when that lands: with the menu open, this menu's *edit a copy* moves 34 px up
+   * a frame before the compile is idle. A press aimed before the move lands outside the menu, the browser shuts it, and
+   * the case would wait out its cap for an item no longer on the page.
    */
   it('leaves a machine copy’s editor’s text as it was typed', async () => {
     await until(stateIdle, 'the compile the case before started')

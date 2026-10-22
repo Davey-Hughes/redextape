@@ -49,10 +49,9 @@ const hostileStorage = (): Storage =>
   }) as Storage
 
 /**
- * **THIS FILE EXISTS BECAUSE A SABOTAGE DID NOT FIRE.** The browser test for *format on blur* sets
- * the checkbox and dispatches `change`, which writes the preference and updates the live flag — so
- * making `readFormatOnBlur` return `false` unconditionally left every one of those tests green. The
- * read path is what carries the setting across a page load, and nothing reached it.
+ * **THE READ PATH IS WHAT CARRIES THE SETTING ACROSS A PAGE LOAD.** A browser test that sets the
+ * checkbox and dispatches `change` writes the preference and updates the live flag without reading
+ * it back, so a `readFormatOnBlur` that returned `false` unconditionally would leave such a test green.
  */
 describe('format on blur, stored', () => {
   it('is off when nothing has been stored', () => {
@@ -93,10 +92,10 @@ describe('format on blur, stored', () => {
 })
 
 /**
- * **THE SAME SABOTAGE, AIMED AT THE SAME PLACE ONE SETTING LATER.** `vim-keymap.test.ts` drives the
- * keymap through the app and seeds storage before its one mount, so it does read this path back — but
- * it reads it once, through a whole page. These are the cases that page cannot reach: a value stored
- * by some other version of this app, and a storage that refuses.
+ * **THE SAME READ PATH, FOR THE KEYMAP.** `vim-keymap.test.ts` drives the keymap through the app and
+ * seeds storage before its one mount, so it does read this path back — but it reads it once, through
+ * a whole page. These are the cases that page cannot reach: a value stored by some other version of
+ * this app, and a storage that refuses.
  */
 describe('the keymap, stored', () => {
   it("is CodeMirror's own bindings when nothing has been stored", () => {

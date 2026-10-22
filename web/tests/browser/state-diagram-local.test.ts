@@ -39,12 +39,12 @@ beforeAll(async () => {
   await page.viewport(1280, 2400)
   document.body.innerHTML = SHELL
   view = await (await import('../../src/main')).ready
-  // **THE TM VIEW TAKES THE WHOLE ROW, AS IT DID WHEN EVERY WIDTH IN THIS FILE WAS CHOSEN.** The four-view tree
-  // puts asm beside TM (Plan 7 part 5 spec §3, row 4), which halves the view at any viewport: at 1280px the
-  // program row's sub-steps no longer fit, and the local level is already under its 750px floor, so narrowing
-  // to 1000px cannot shrink it — neither the fits-case nor the narrows-case would be the case it names. Closed
-  // through the asm view's own `✕`, and the width asserted rather than assumed, since every viewport below stands
-  // for the view's width.
+  // **THE TM VIEW TAKES THE WHOLE ROW, WHICH EVERY WIDTH IN THIS FILE IS CHOSEN FOR.** The four-view tree puts asm
+  // beside TM (Plan 7 part 5 spec §3, row 4), which halves the view at any viewport: at 1280px the program row's
+  // sub-steps would not fit, and the local level would already be under its 750px floor, so narrowing to 1000px
+  // could not shrink it — neither the fits-case nor the narrows-case would be the case it names. Closed through the
+  // asm view's own `✕`, and the width asserted rather than assumed, since every viewport below stands for the
+  // view's width.
   document.querySelector<HTMLButtonElement>('[data-leaf="asm-0"] button.view-close')?.click()
   await until(() => document.querySelector('[data-leaf="asm-0"]') === null, 'the asm view to close')
   expect(tmPane().getBoundingClientRect().width, 'the TM view does not span the row').toBe(
@@ -56,19 +56,18 @@ beforeAll(async () => {
 })
 /**
  * Inside `cmpeq`, where the current instruction opens onto its sub-steps and its states run in a line: from step 0,
- * 1,732 steps forward, where stepping back from the frontier took about 9,000, one redraw each, and ran past the test's
- * time under a full suite's load. **IN THREE HOOKS OF ITS OWN, AFTER THE MOUNT'S** (`harness.ts`' `walkInParts`): with
- * the walk at its end, the mount's one hook took 14.9 s of its 30 under half a CPU here, and 32.7 s under a quarter.
+ * 1,732 steps forward, where stepping back from the frontier would take about 9,000, one redraw each, and run past the
+ * test's time under a full suite's load. **IN THREE HOOKS OF ITS OWN, AFTER THE MOUNT'S** (`harness.ts`'
+ * `walkInParts`): with the walk at its end, the mount's one hook would run past its 30 s under a quarter of a CPU.
  */
 for (const part of intoCmpeq(tmPane)) beforeAll(part)
 
 describe('the local level (spec §8)', () => {
   it("is what the current instruction's show states opens, and the focus goes with it", async () => {
     // The button comes first in its row, so a long list of sub-steps cannot push it past the row's clipped end —
-    // forced here by narrowing the view rather than assumed: at the file's own 1280px default this row's 9
-    // sub-steps fit with room to spare (measured: cell.scrollWidth === cell.clientWidth), so the position
-    // assertion below would hold regardless of DOM order unless the row is actually made to overflow. Restored
-    // in a `finally`, since every later case in this file expects the 1280px layout.
+    // forced here by narrowing the view rather than assumed: at the file's own 1280px default this row's sub-steps
+    // fit, so the position assertion below would hold regardless of DOM order unless the row is actually made to
+    // overflow. Restored in a `finally`, since every later case in this file expects the 1280px layout.
     try {
       await page.viewport(400, 2400)
       await frame()

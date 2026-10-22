@@ -8,14 +8,12 @@ import { chooseStyle, frames, mountAt, pressed, toggle } from './harness'
  * THE FOCUS RING OF A `views` TOGGLE IS WHOLE, WHATEVER IS BESIDE IT — read off the page's own pixels.
  *
  * The ring is an outline 2px outside the button, and the four buttons are joined, so on each inner side it lies over
- * the neighbour's edge. A pressed toggle is positioned and filled, and it was painted over that part of the ring.
- * Looked at in each style before `style.css` drew the focused toggle over its neighbours (2026-10-12): an unpressed
- * toggle's ring had no side where a pressed one was beside it, and a pressed toggle's had none on its right where the
- * next one was pressed too.
+ * the neighbour's edge. A pressed toggle is positioned and filled, and would be painted over that part of the ring but
+ * for `style.css` drawing the focused toggle over its neighbours.
  *
  * **THE PIXELS ARE THE ASSERTION.** A screenshot of the header is read back, and along the middle half of each of the
  * ring's four sides every pixel is asked to be the ring's colour, which is the button's computed `outline-color`. The
- * computed style alone would say a ring is drawn, and it said so while a side was covered.
+ * computed style alone would say a ring is drawn while a side is covered.
  *
  * **IN A WINDOW 1000 px WIDE**: the tester's page is drawn scaled where it is wider than the browser's own window, and
  * a ring 2px wide does not survive that. The case asserts that the screenshot is a pixel to a CSS pixel.

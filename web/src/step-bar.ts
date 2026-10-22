@@ -30,7 +30,7 @@ export type BarTarget = {
 export type BarEvents = Pick<PaneEvents, 'back' | 'forward' | 'toNewest' | 'play' | 'restart' | 'extend'>
 
 /**
- * The state the bar shows when no view on the page can step (spec §8).
+ * The state the bar shows when no view on the page can step (Plan 7 part 2 spec §8).
  *
  * **DISABLED WITH ITS REASON, NOT REMOVED** (umbrella §4 rule 4): a bar that vanished when the last λ view
  * closed would leave a user who chose "one bar" with no step controls and nothing saying why. It could

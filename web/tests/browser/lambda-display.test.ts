@@ -9,9 +9,9 @@ import { wireOf } from '../node/tree-fixture'
 import { controlState, fixtureHost } from './harness'
 
 /**
- * A λ view's display settings (Plan 7 part 4a): the layout and the variables, chosen from its `⋯` menu,
- * reported so the app can keep them, "reset folds", and the reset a new binding makes. Panes are built
- * directly, as `lambda-pane-editor`'s are — nothing here needs `main()`.
+ * A λ view's display settings (Plan 7 part 4 spec §5.1): the layout and the variables, chosen from its `⋯`
+ * menu, reported so the app can keep them, "reset folds", and the reset a new binding makes. Panes are
+ * built directly, as `lambda-pane-editor`'s are — nothing here needs `main()`.
  */
 const host = (): HTMLElement => fixtureHost('lambda-display-fixture')
 
@@ -61,10 +61,10 @@ describe('a λ view’s display settings', () => {
 
   /**
    * **THE SETTINGS ARE IN THE MENU FROM CONSTRUCTION.** Every other item reaches the menu through a setter
-   * that sees a change, so a view whose other state never leaves its first value — here a copy, which
-   * offers no *edit a copy*, with no editor to move to it — had no `⋯` at all, and no way to its layout,
-   * its variables or "reset folds". The last line holds the header's order: `⋯` is mounted first now, and
-   * the view's own action must still come before it.
+   * that sees a change, so had the settings done the same, a view whose other state never leaves its first
+   * value — here a copy, which offers no *edit a copy*, with no editor to move to it — would have no `⋯` at
+   * all, and no way to its layout, its variables or "reset folds". The last line holds the header's order:
+   * `⋯` is mounted first, and the view's own action must still come before it.
    */
   it('offers its settings from construction, on a view whose other items never apply', () => {
     const el = host()
@@ -175,10 +175,9 @@ describe('a λ view’s display settings', () => {
 
   /**
    * **THE TERM HOLDS A SUBTERM OVER `AUTO_FOLD_NODES`, OR THE POLICY AND "EVERYTHING OPEN" ARE ONE PICTURE.**
-   * This test drew `WIDE`, 161 nodes, which the policy draws fully open, so a reset that opened every fold
-   * passed it. `h c0 … c109` is 221 nodes and the policy folds it; the reset has to put that fold back. It
-   * sits on the second of three lines because the body draws only the rows in view, and `.term-line`
-   * counts those.
+   * `WIDE`, 161 nodes, the policy draws fully open, so a reset that opened every fold would pass on it.
+   * `h c0 … c109` is 221 nodes and the policy folds it; the reset has to put that fold back. It sits on the
+   * second of three lines because the body draws only the rows in view, and `.term-line` counts those.
    */
   it('resets folds to the automatic policy', () => {
     const el = host()
@@ -206,8 +205,7 @@ describe('a λ view’s display settings', () => {
 describe('a λ view’s folds across bindings', () => {
   /**
    * A NEW BINDING STARTS FROM THE AUTOMATIC FOLDS. Folds are keyed by path, and a path in one session's term
-   * names nothing in another's — the prototype carried a copy's folds home onto the program's tree, and no
-   * app-level test noticed. `setBindings` runs every frame, so the same binding must keep them.
+   * names nothing in another's. `setBindings` runs every frame, so the same binding must keep them.
    */
   it('keeps its folds while bound to one session, and starts another from the automatic policy', () => {
     const el = host()
@@ -254,12 +252,12 @@ describe('a λ view’s folds across bindings', () => {
 
 /**
  * A TREE THE VIEW CANNOT LAY OUT LEAVES A WORKING VIEW AND ONE NOTE (spec §10). The view stores a tree before
- * laying it out, so a layout that threw left that tree in place, and every later frame threw on it again: the
- * view never drew another, even after a recompile. The wire here has no names to read, so any layout of it
- * throws, whatever the layouts' own depth limits are.
+ * laying it out, so a layout that threw and left that tree in place would throw on it again every later frame:
+ * the view would never draw another, even after a recompile. The wire here has no names to read, so any layout
+ * of it throws, whatever the layouts' own depth limits are.
  *
- * **THE ERROR IS LOGGED ONCE.** The layouts cannot overflow now, so anything this catches is a bug, and it
- * goes to the console — once per tree, which is also what shows the tree is not tried again every frame.
+ * **THE ERROR IS LOGGED ONCE.** The layouts cannot overflow, so anything this catches is a bug, and it goes to
+ * the console — once per tree, which is also what shows the tree is not tried again every frame.
  */
 describe('a λ view whose tree cannot be laid out', () => {
   it('shows the frame’s text with one note, answers every later frame, and draws the next tree', () => {

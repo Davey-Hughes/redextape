@@ -3,8 +3,7 @@
  *
  * NO LIBRARY AND NO DOM. Design §9 recorded that this ~40-line piece is the same work under any
  * framework, and keeping it as arithmetic is what lets it be tested without a browser — which matters
- * because it IS arithmetic under a shifting offset, the shape 5a-i's reviews found five surviving
- * mutants in.
+ * because it IS arithmetic under a shifting offset.
  *
  * `list60` is 127,881 rows (design §3.1). Nothing here may be linear in `rowCount`.
  */

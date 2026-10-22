@@ -7,10 +7,11 @@ import { defaultWorkspace, serializeWorkspace } from '../../src/workspace'
 import { mainLeafIds, readout, SHELL, stateIdle, until } from './harness'
 
 /**
- * **A LINK AT START-UP WHOSE TREE IS 6,000 SPLITS DEEP** — Plan 7 part 6a spec §5.3, amended 2026-10-01. Before the
- * bound on a tree, this link threw out of `decodeLink` before the fragment was cleared: `main()` rejected with no views,
- * no editor and nothing said, and every reload of the address did it again. Its program opens alone now, in the stored
- * workspace, and the fragment is cleared. ONE MOUNT FOR THE FILE, for the reason every sibling gives.
+ * **A LINK AT START-UP WHOSE TREE IS 6,000 SPLITS DEEP** — Plan 7 part 6a spec §5.3, amended 2026-10-01. Without
+ * the bound on a tree, this link would throw out of `decodeLink` before the fragment is cleared: `main()` would
+ * reject with no views, no editor and nothing said, and every reload of the address would do it again. Its program
+ * opens alone, in the stored workspace, and the fragment is cleared. ONE MOUNT FOR THE FILE, for the reason
+ * `app.test.ts` gives.
  *
  * **THE LINK CARRIES `unary` OVER A PROGRAM STORED UNDER `binary`, SO A START-UP THAT TOOK THE DEFAULT ENCODING, OR
  * STORAGE'S, IN PLACE OF THE LINK'S FAILS THE FIRST CASE.** `binary` is both of those. It cannot fail a start-up that
@@ -26,8 +27,7 @@ const PROGRAM = 'let y = 1; y + 2'
 const STORED = { text: 'let x = 40; x + 2', encoding: 'binary' }
 
 /**
- * `depth` splits deep down each split's second child, whose first child is a λ leaf, as `+ view` nested views until
- * 2026-10-04.
+ * `depth` splits deep down each split's second child, whose first child is a λ leaf.
  */
 function deepTree(depth: number): unknown {
   let node: unknown = { kind: 'leaf', id: `pane-${depth}`, pane: 'lambda' }

@@ -8,21 +8,16 @@ const errorMarkers = () => document.querySelectorAll('.cm-editor .cm-lintRange-e
 const gutterMarkers = () => document.querySelectorAll('.cm-editor .cm-lint-marker-error').length
 
 /**
- * **DIAGNOSTICS NOW COME FROM A WORKER, AND THIS FILE IS THE GUARD ON THAT SWAP RATHER THAN A PROOF
- * OF NEW BEHAVIOUR.** Before part 3a the source editor pulled them synchronously from `analyze`
- * through `lintFromAnalyze`; it now receives them pushed from the LSP worker. **The content is
- * identical and that is provable rather than hoped** — `Language::Redextape`'s diagnostics *are*
- * `redextape_core::analyze(src).diagnostics`, asserted by a test in `language.rs` — so no assertion
- * here can distinguish the two sources, and none tries to.
+ * **THE SOURCE EDITOR'S DIAGNOSTICS ARE PUSHED FROM THE LSP WORKER, AND THIS FILE GUARDS THAT PATH, NOT
+ * THEIR CONTENT.** `Language::Redextape`'s diagnostics *are* `redextape_core::analyze(src).diagnostics`,
+ * asserted by a test in `language.rs`, so no assertion here checks what they say.
  *
- * What it does catch is the swap going wrong: markers that never arrive because nothing opened the
+ * What it does catch is the path going wrong: markers that never arrive because nothing opened the
  * document, arrive at the wrong offsets because the UTF-16 conversion is wrong, or never clear
- * because `didChange` is not posted. Every one of those is a way this task could ship broken while
+ * because `didChange` is not posted. Every one of those is a way the app could ship broken while
  * the node tier stays green.
  *
- * The TM case — the one that could not pass before part 3a, because a TM copy's gutter had no
- * source of diagnostics at all — lives in `lsp-copy-diagnostics.test.ts`. This sentence used to
- * name a file that was never created and a `setDiagnostics` method that no longer exists.
+ * A copy's diagnostics, a TM copy's included, are `lsp-copy-diagnostics.test.ts`'s.
  */
 describe('source diagnostics, served by the LSP worker', () => {
   beforeAll(async () => {
@@ -33,17 +28,14 @@ describe('source diagnostics, served by the LSP worker', () => {
   it('marks a broken program, in the text and in the gutter', async () => {
     retype(view, 'let x = ;')
 
-    // ASYNCHRONOUS, UNLIKE THE PATH THIS REPLACED. `lintFromAnalyze` ran in the same frame as the
-    // keystroke; this is a worker round trip, so the marker cannot be asserted synchronously.
+    // ASYNCHRONOUS: this is a worker round trip, so the marker cannot be asserted synchronously.
     await until(() => errorMarkers() > 0, 'an error marker for `let x = ;`')
     expect(gutterMarkers()).toBeGreaterThan(0)
   })
 
   /**
-   * **`let x = ;` IS NOT A ZERO-WIDTH DIAGNOSTIC, AND THIS TEST USED IT UNDER THAT NAME.** Driven
-   * against the real server it reports `0:8-0:9` — an ordinary one-character range — so the test
-   * exercised the ordinary path while its name claimed the widening. `let x = ` reports `0:8-0:8`,
-   * twice. Ten of fifteen broken programs measured produce at least one zero-width range.
+   * **`let x = ` IS A ZERO-WIDTH DIAGNOSTIC, AND `let x = ;` IS NOT.** Against the real server `let x = ;`
+   * reports `0:8-0:9`, an ordinary one-character range, and `let x = ` reports `0:8-0:8`, twice.
    *
    * The conversion itself is pinned in `tests/node/lsp-diagnostics-ranges.test.ts`, where the
    * widening can be driven directly; this asserts it reaches the screen.
@@ -69,8 +61,7 @@ describe('source diagnostics, served by the LSP worker', () => {
     //
     // **BOTH SURFACES ARE WAITED ON, NOT ONE THEN THE OTHER.** The range decorations and
     // `lintGutter`'s markers are separate view plugins updating in separate cycles, so the text can
-    // be clear while the gutter is one frame behind — asserting the gutter the instant the text
-    // cleared failed on exactly that, with 1 marker left.
+    // be clear while the gutter is one frame behind.
     await until(
       () => errorMarkers() === 0 && gutterMarkers() === 0,
       'both the text and the gutter markers to clear once the program parses',

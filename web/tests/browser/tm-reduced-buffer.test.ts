@@ -25,15 +25,15 @@ import {
  * which fails if it is no longer the file `reduce` writes. Its value is 2, not 0, so a decode that read the reduced
  * tape as a lowered one cannot pass by coincidence.
  *
- * ONE BUFFER FOR THE WHOLE FILE, minted once: every sibling browser file shares its page across tests, and buffers
- * accumulate across them by design.
+ * ONE BUFFER FOR THE WHOLE FILE, minted once: this file's tests share one page, and buffers accumulate across them
+ * by design.
  */
 
 /**
  * A reduced file that never halts: one state that stays put forever, under a header recording `MAX_REDUCED_STEPS`,
  * 1,000,000,000. **THE COUNT HAS TO BE THE CEILING.** A release build steps some 65 million a second, so a spinner
- * recording 50,000,000 finished before the first poll could see it running; this one runs for about fifteen seconds
- * in release and far longer in a dev build.
+ * recording 50,000,000 would finish before the first poll could see it running; this one runs for about fifteen
+ * seconds in release and far longer in a dev build.
  */
 const SPINNER =
   'tapes 1\nstart go\nversion 2\nencoding unary\nwidth 4\nslots 0\nresult Nat\nreduced single-tape 5\n' +
@@ -42,7 +42,7 @@ const SPINNER =
 /**
  * A headered machine that accepts after one step with 1 on its REG bank: `redextape run` prints `1`. Its whole first
  * recording ends inside one `RECORD_CHUNK`, so the worker reaches its value run without ever yielding, which is the
- * build a re-entry flag held by an older, suspended value run used to turn away.
+ * build a re-entry flag held by an older, suspended value run would turn away.
  */
 const HALTS_AT_ONCE =
   'tapes 5\nstart s\nversion 1\nencoding unary\nwidth 4\nslots 1\nresult Nat\ntape 0 #1___#\n\n' +
@@ -59,11 +59,10 @@ const SPINNER_HALF = 200_000
 /**
  * **A BUILD PASTED INTO THE BUFFER, AS FAR AS ITS FIRST RECORDING'S HALF: TWO OF THE THREE WAITS EVERY BUILD HERE IS
  * WAITED ON IN.** A build's value, or its value run's first report, comes only after a whole first recording, 145,904
- * frames for the fixture and 409,201 for a spinner, and the value run after it. As one wait the fixture's took 7,792 to
- * 10,207 ms in six runs of this file on `53ecbfa` at `CPUQuota=25%`, timing out once, at 10,207 ms under a load average
- * of 30.17. As two, the build and then the value, the value's still held the whole recording and timed out at 10,001
- * ms under a load of 21.41, and a spinner's one wait took 7,589 ms under a load of 30.15. So the recording is waited on
- * in two: the copy's step line counts its frames from the first to `history is full`. The caller waits for the value.
+ * frames for the fixture and 409,201 for a spinner, and the value run after it. One wait for the value, or a wait for
+ * the build and then one for the value, holds the whole recording in a single wait, which can time out on a loaded
+ * runner. So the recording is waited on in two: the copy's step line counts its frames from the first to
+ * `history is full`. The caller waits for the value.
  *
  * **EACH WAIT STARTS FROM A STATE IT ASSERTS.** The caller asserts what is on the page before the paste. The build's
  * answer puts its `sentence` on the status line, empties the value line and resets the step line in one task, and the
@@ -71,10 +70,8 @@ const SPINNER_HALF = 200_000
  * count is short of half: a value or a count already there would mean a later wait measures nothing. The half-way wait
  * also ends at a recording already over, a state its line cannot skip.
  *
- * **THE COUNT READ AT THAT ASSERTION IS FAR SHORT OF HALF**: at most 14,336 of a spinner's 200,000 and 3,840 of the
- * fixture's 72,000 in 48 reads of this file unconstrained, and 2,048 and 512 in 8 at `CPUQuota=25%` (2026-10-06). The
- * frames a build records before the poll that sees its sentence are all it can count, so it can fail only falsely, on
- * a poll late by most of half a recording.
+ * **THE COUNT READ AT THAT ASSERTION IS FAR SHORT OF HALF**: the frames a build records before the poll that sees its
+ * sentence are all it can count, so it can fail only falsely, on a poll late by most of half a recording.
  */
 async function recordsHalf(
   text: string,
@@ -102,9 +99,8 @@ function paste(id: string, text: string): void {
 beforeAll(async () => {
   // WIDE ENOUGH FOR ITS ONE SPLIT, AND NO WIDER: the app refuses a split that leaves a view under `MIN_VIEW_PX`
   // (`layout.ts`), and `tm-0` split right gives halves of ((W − 12) / 2 − 12) / 2 px — 160 at 676, 171 at 720. Close to
-  // that boundary because this file's value runs share 25 % of a CPU with the page in the quota runs, and the
-  // re-review's interleaved runs found their waits longer at 1280 than at 414 or 676. The runner's 896 px height is
-  // kept.
+  // that boundary because this file's value runs share 25 % of a CPU with the page in the quota runs, and their waits
+  // measured longer at 1280 than at 414 or 676. The runner's 896 px height is kept.
   await page.viewport(720, 896)
   document.body.innerHTML = SHELL
   const view: EditorView = await (await import('../../src/main')).ready
@@ -136,7 +132,7 @@ beforeAll(async () => {
 describe('a reduced file in a TM buffer', () => {
   /**
    * **THE BUFFER'S FIRST BUILD, IN A HOOK, IN THREE WAITS (`recordsHalf`)**: the paste is the buffer's first build, on
-   * a worker that has just started, and a hook has Vitest's 30 s where the first case's body had 15 s.
+   * a worker that has just started, and a hook has Vitest's 30 s where the first case's body would have 15 s.
    */
   beforeAll(async () => {
     expect(statusOf('tm-0'), 'precondition: the buffer has not built').not.toContain('reduced:')
@@ -173,15 +169,13 @@ describe('a reduced file in a TM buffer', () => {
 
   /**
    * **ONE WHOLE RECORDING PER SCOPE.** `runValueLoop` starts only once a build's first recording has ended, so every
-   * wait here on a spinner or on the fixture is a whole recording: measured on 2026-09-19, 1.5 to 2.2 s unconstrained
-   * and 3.4 to 6.0 s under a 75% CPU quota. The supersession test once waited on three in one body, and on the slower
-   * of the two CI runners Vitest's 15,000 ms cap fired before any of the three could fail under its own name, the case
-   * `until`'s doc in `harness.ts` warns of: its bound holds per wait, and Vitest's per test. So the spinner starts in
-   * `beforeEach` and the fixture comes back in `afterEach`, each under its own hook timeout, and no body below waits on
-   * more than one recording.
+   * wait here on a spinner or on the fixture is a whole recording. A body that waits on several can meet Vitest's
+   * 15,000 ms cap before any of them fails under its own name, the case `until`'s doc in `harness.ts` warns of: its
+   * bound holds per wait, and Vitest's per test. So the spinner starts in `beforeEach` and the fixture comes back in
+   * `afterEach`, each under its own hook timeout, and no body below waits on more than one recording.
    *
-   * **THE SEQUENCE IS THE ONE EACH TEST USED TO RUN ITSELF.** Every test still pastes over a spinner whose value run
-   * has reported and leaves the fixture settled for the next, so none of them depends on which ran before it.
+   * Every test pastes over a spinner whose value run has reported and leaves the fixture settled for the next, so none
+   * of them depends on which ran before it.
    */
   describe('over a spinner whose value run is still going', () => {
     beforeEach(async () => {
@@ -201,8 +195,7 @@ describe('a reduced file in a TM buffer', () => {
 
     // AND BACK TO THE FIXTURE, so no test ends with a value run still spinning. Every test here starts from a busy
     // line, so every one is also held to a settled value clearing it. THREE WAITS (`recordsHalf`), as the first build's
-    // hook above: as one wait this took up to 7,405 ms at `CPUQuota=25%` (2026-10-05). No case leaves the fixture's
-    // sentence on the status line, which the first assertion holds.
+    // hook above. No case leaves the fixture's sentence on the status line, which the first assertion holds.
     afterEach(async () => {
       expect(statusOf('tm-0'), 'precondition: the fixture is not built').not.toContain('241,666 steps')
       await recordsHalf(
@@ -220,17 +213,16 @@ describe('a reduced file in a TM buffer', () => {
      * **THE SECOND BUILD IS ANOTHER LONG RUN, AND ITS FIRST COUNT IS THE EVIDENCE.** A stale loop that re-reads `live`
      * would step the new build's run, and the generation check at the top of each chunk is what ends it. Without the
      * check, the stale loop takes one `VALUE_CHUNK` of the new run at every yield of the new build's first recording,
-     * all before the new build's own loop starts, so that loop's first report is hundreds of millions of steps in: the
-     * pane's first count read 799,500,000 with the check removed. With it, nothing steps the new run before its own
-     * loop, and the first report is exactly one `VALUE_CHUNK`. Were the new run to end within one chunk, a loop without
-     * the check could finish it and the first report would be the right value, so the test could not tell.
+     * all before the new build's own loop starts, so that loop's first report is hundreds of millions of steps in. With
+     * it, nothing steps the new run before its own loop, and the first report is exactly one `VALUE_CHUNK`. Were the
+     * new run to end within one chunk, a loop without the check could finish it and the first report would be the right
+     * value, so the test could not tell.
      *
      * **OBSERVED, NOT SAMPLED, AS `running-focus.test.ts`'s playback test is and for its reason.** A poll lands on
-     * whichever count is current, and with the check in place a poll's first sighting of a spinner read as high as
-     * 98,500,000. Each `#drawValue` replaces the line's text node, so the nodes a record adds are the lines in the order
-     * the pane wrote them. The wait alone was once the evidence, and it was not enough: without the check the new
-     * build's first report came 9.2 to 9.3 s after the paste on an unconstrained machine, inside `until`'s bound, and
-     * this test passed.
+     * whichever count is current, so its first sighting of a spinner can be far past the first report. Each
+     * `#drawValue` replaces the line's text node, so the nodes a record adds are the lines in the order the pane wrote
+     * them. A wait alone cannot be the evidence: without the check the new build's first report can still come inside
+     * `until`'s bound.
      */
     it('lets an edit supersede a value run that is still going', async () => {
       // BUSY WHILE IT RUNS, so a screen reader hears the settled value rather than every count on the way.

@@ -22,27 +22,21 @@ import {
 /**
  * **THE TM VIEW ON A PHONE'S SCREEN** — Explorer at 320px and 390px, on `sum_to(5)`, the example a first visit opens,
  * picked from `examples ▾` (every browser file starts on `let x = 40; x + 2`, `setup.ts`), with the state diagram open
- * at its program level, drawn as arcs, and its runtime column beside the rows. The view scrolled sideways: at 390px its
- * `scrollWidth` was 209 against a `clientWidth` of 189, because the diagram panel's header never wrapped, so its
- * actions (*program | local* and *arcs | chips*) ran to x = 409.92, and at 320px the runtime column (`.program-side`,
- * 11rem) ran to x = 342 as well. Every panel header squeezed what it held instead: the panel's name on two lines, each
- * choice of a radio group on a line of its own, `follow current state` on three. And the column took the rows' room:
- * they were 13px wide at 390px and 0px at 320px. (The 189px and the 154px of a 320px page are the browser tier's:
- * headless, it draws no scrollbar.)
+ * at its program level, drawn as arcs, and its runtime column beside the rows. (The view's 189px on a 390px page and
+ * 154px on a 320px one are the browser tier's: headless, it draws no scrollbar.)
  *
  * What is held is that at a phone's width no box in the TM view lies past its edge, but those inside a box that scrolls
- * by design (`SCROLLS`); that no box clips text it did not clip before; that every panel header in Explorer, the TM
- * view's and every other view's, lies inside its view, its name on one line, each radio group's choices on one row, and
- * each action clickable without a sideways scroll; and that the program level's rows take its whole width, while the
- * runtime column, its connectors drawn whole and meeting their rows, is a sideways scroll of the level away. That last
- * is the user's choice (2026-10-05), over stacking the column under the rows and over letting it shrink, and for a
- * level narrower than 14rem only (the user's second choice, after the review, the same day; the third, on 2026-10-06,
- * kept the rule on the level's width, so a TM view under 224px in a desktop's window has it too). So in the desktop
- * layouts where the level is wider but the rows are squeezed (Debugger at 1024px, a split view at 1280px) the level
- * does not scroll and its rows and column are where `53ecbfa` drew them. A row's count draws its number whole or not at
- * all, and cuts only its unit, with an ellipsis, where a count cut as one text read as another number (`53 states` as
- * `5.`). At a desktop's width every panel header in Explorer is one row, as before, and the TM view's panels are where
- * `53ecbfa` drew them. ONE MOUNT FOR THE FILE, for the reason every sibling gives.
+ * by design (`SCROLLS`); that no other box clips text; that every panel header in Explorer, the TM view's and every
+ * other view's, lies inside its view, its name on one line, each radio group's choices on one row, and each action
+ * clickable without a sideways scroll; and that the program level's rows take its whole width, while the runtime
+ * column, its connectors drawn whole and meeting their rows, is a sideways scroll of the level away. That last is the
+ * user's choice, over stacking the column under the rows and over letting it shrink, and for a level narrower than
+ * 14rem only, so a TM view under 224px in a desktop's window has it too. So in the desktop layouts where the level is
+ * wider but the rows are squeezed (Debugger at 1024px, a split view at 1280px) the level does not scroll and its rows
+ * and column sit side by side. A row's count draws its number whole or not at all, and cuts only its unit, with an
+ * ellipsis, where a count cut as one text would read as another number (`53 states` as `5.`). At a desktop's width
+ * every panel header in Explorer is one row, and the TM view's panels are where the 1280px case's figures put them. ONE
+ * MOUNT FOR THE FILE, for the reason `app.test.ts` gives.
  */
 
 let view: EditorView
@@ -219,8 +213,7 @@ async function steady(read: () => number): Promise<number> {
 
 /**
  * **PUT EVERY SCROLL BACK, BOTH WAYS**: each view's, the program level's and the page's. A case that scrolled something
- * sideways leaves the next one's precondition failing instead of its property: on `53ecbfa`, where the level does not
- * scroll, the wheel at 320px scrolled the TM view 55px sideways, and the 390px case stopped on its precondition.
+ * sideways leaves the next one's precondition failing instead of its property.
  */
 function home(): void {
   for (const [leaf] of PANELS) leafEl(leaf).scrollTo(0, 0)
@@ -232,7 +225,7 @@ const explorer = (): void => presetOf('explorer')
 /** The workspace menu's *reset preset*, and then all four views, one TM view among them. */
 const resetPreset = async (): Promise<void> => {
   buttonOf('workspace').click()
-  // ALL FOUR VIEWS, AS *RESET PRESET* GAVE WHEN THIS WAS WRITTEN: it leaves the source beside the TM view now.
+  // ALL FOUR VIEWS, WHICH *RESET PRESET* ALONE DOES NOT GIVE: it leaves the source beside the TM view.
   await resetToFourViews()
   if (menuOfId('workspace').matches(':popover-open')) menuOfId('workspace').hidePopover()
 }
@@ -263,8 +256,7 @@ const recorded = (): number => {
  *
  * **A WAIT FOR EACH STRETCH OF A LONG RUN, EACH WITH ITS OWN NAME AND ITS OWN 10S**, as `view-strip-narrow.test.ts`
  * splits its two. `map and fold`'s TM leg records 69,008 steps, and under a 25% CPU quota one wait from its lines to
- * its result took 9,001, 9,394 and 9,600ms of the 10,000 (2026-10-06). A run that ends before a mark passes that
- * wait by its result.
+ * its result took up to 9,600ms of the 10,000. A run that ends before a mark passes that wait by its result.
  */
 async function pick(id: string, marks: readonly number[]): Promise<void> {
   await page.viewport(1280, 800)
@@ -319,7 +311,7 @@ beforeAll(async () => {
   )
   await until(stateIdle, 'sum_to(5)’s run to its result')
   // **EVERY VIEW TO ITS NEWEST STEP, BY ITS `⏭`**: a run opens on step 0 (`History`), and these cases measure the page
-  // at the run's end, where they were written to.
+  // at the run's end.
   for (const leaf of ['lambda-0', 'asm-0', 'tm-0']) {
     await userEvent.click(leafEl(leaf).querySelector('.view-steps button.to-newest') as HTMLElement)
   }
@@ -376,10 +368,10 @@ const PHONES = [
 
 describe('the TM view, on sum_to(5)', () => {
   /**
-   * **NO BOX IN THE TM VIEW LIES PAST ITS EDGE, AND NONE CLIPS TEXT.** The view first, since a view wider than its
-   * page column is what scrolled; then every box it draws outside a box that scrolls by design (`boxesOf`), against
-   * the view's padding box (`left + clientWidth`). A box inside a clipping box that does not scroll by design is a
-   * failure by itself (`strays`), and so is a clipping box, other than those, whose content runs past it.
+   * **NO BOX IN THE TM VIEW LIES PAST ITS EDGE, AND NONE CLIPS TEXT.** The view first, since a view wider than its page
+   * column is what would scroll; then every box it draws outside a box that scrolls by design (`boxesOf`), against the
+   * view's padding box (`left + clientWidth`). A box inside a clipping box that does not scroll by design is a failure
+   * by itself (`strays`), and so is a clipping box, other than those, whose content runs past it.
    *
    * **EVERY PANEL HEADER IN EXPLORER LIES INSIDE ITS VIEW AND SQUEEZES NOTHING.** Each box in it inside the view and
    * hiding no text (`hidesNothing`); the panel's name on one line; each radio group's choices on one row; and an action
@@ -388,10 +380,9 @@ describe('the TM view, on sum_to(5)', () => {
    * PANEL HEADER CAN BE CLICKED WITHOUT A SIDEWAYS SCROLL**: `elementFromPoint` at its centre is the control, once its
    * view and then the page are scrolled vertically to it.
    *
-   * **THE PROGRAM LEVEL'S ROWS TAKE ITS WHOLE WIDTH**, 154px and 189px, where the runtime column beside them left them
-   * 0px and 13px; **EACH CONNECTOR SVG'S DRAWING LIES INSIDE ITS BOX** (`drawingsInside`); and the level, which
-   * scrolls sideways, **NEVER SCROLLS DOWN**: its `overflow-x` makes its `overflow-y` `auto` too, and its two children
-   * stretch to its height, so only the grid inside it scrolls the rows.
+   * **THE PROGRAM LEVEL'S ROWS TAKE ITS WHOLE WIDTH**, 154px and 189px; **EACH CONNECTOR SVG'S DRAWING LIES INSIDE ITS
+   * BOX** (`drawingsInside`); and the level, which scrolls sideways, **NEVER SCROLLS DOWN**: its `overflow-x` makes its
+   * `overflow-y` `auto` too, and its two children stretch to its height, so only the grid inside it scrolls the rows.
    *
    * **EVERY GEOMETRY ASSERTION IS SOFT, EVERY PRECONDITION HARD**, here and at 1280px, so a red run names each
    * property that fails while a case whose state is not the one it means to measure stops before it measures anything.
@@ -478,9 +469,9 @@ describe('the TM view, on sum_to(5)', () => {
   )
 
   /**
-   * **AT A DESKTOP'S WIDTH EVERY PANEL HEADER IN EXPLORER IS ONE ROW, AS BEFORE**: 28px tall, `53ecbfa`'s height for
-   * each of them at 1280px, with every box in it on the toggle's vertical centre, to 1px, and hiding no text; with both
-   * grids detached too, where the *follow current …* actions join their rows.
+   * **AT A DESKTOP'S WIDTH EVERY PANEL HEADER IN EXPLORER IS ONE ROW**: 28px tall at 1280px, with every box in it on
+   * the toggle's vertical centre, to 1px, and hiding no text; with both grids detached too, where the
+   * *follow current …* actions join their rows.
    */
   it.each([false, true])('at 1280 px, with the grids detached: %s, every panel header is one row', async (detached) => {
     await at(1280, 800, detached)
@@ -499,19 +490,16 @@ describe('the TM view, on sum_to(5)', () => {
   })
 
   /**
-   * **AT 1280PX THE TM VIEW'S PANELS ARE WHERE `53ecbfa` DREW THEM**: each box of the rule table's panel and the state
-   * diagram's — the header, the toggle, the name, the actions, each radio group and choice, the body, the program
+   * **AT 1280PX THE TM VIEW'S PANELS ARE WHERE THE FIGURES BELOW PUT THEM**: each box of the rule table's panel and the
+   * state diagram's — the header, the toggle, the name, the actions, each radio group and choice, the body, the program
    * level, its grid, its runtime column and each of the column's boxes — at its left, top, width and height against the
-   * view's top-left corner, to 0.5px, as a throwaway probe measured them on `53ecbfa` (2026-10-05). The view is
-   * 634px wide at x = 646. The figures are the web fonts', which the browser tier loads.
+   * view's top-left corner, to 0.5px. The view is 634px wide at x = 646. The figures are the web fonts', which the
+   * browser tier loads.
    *
-   * **BUT FOR THE MAXIMISE BUTTON EACH HEADER GAINED** (the view layouts spec §11.3), 24.78px wide at the right end of
-   * its actions with the 8px gap before it: the diagram's actions and the radio groups in them are 32.78px further
-   * left than `53ecbfa` drew them and the box of the actions that much wider, and the rules' header has a box of
-   * actions where it had none (measured on the panel-resizing prototype, 2026-10-12). No panel, header, toggle, name
-   * or body moved: the boundary between the two panels is as tall as the gap it took the place of.
+   * **THEY INCLUDE THE MAXIMISE BUTTON** at the right end of each header's actions (the view layouts spec §11.3),
+   * 24.78px wide with the 8px gap before it.
    */
-  it('at 1280 px, the TM view’s panels are where 53ecbfa drew them, but for each header’s maximise button', async () => {
+  it('at 1280 px, the TM view’s panels are where the figures put them, each header with its maximise button', async () => {
     await at(1280, 800, false)
     expect(tm().scrollTop, 'precondition: the TM view is not scrolled').toBe(0)
     const origin = tm().getBoundingClientRect()
@@ -615,17 +603,15 @@ describe('the TM view, on sum_to(5)', () => {
   )
 
   /**
-   * **A WIDER LEVEL, IN A DESKTOP'S LAYOUT, DOES NOT SCROLL, AND ITS ROWS AND COLUMN ARE WHERE `53ecbfa` DREW THEM**,
-   * though its rows are squeezed beside the column: the sideways scroll is a narrow level's only, one under 14rem (the
-   * user's choice after the review, 2026-10-05). Three layouts from the review's table, each with every TM view's level
-   * wider than 14rem and narrower than the 26rem that rows and column need side by side: Debugger at 1024 by 768px, its
-   * one TM view 362px wide; and the TM view split right at 1280 by 800px, by its `⋯` menu, in Explorer, two views 311px
-   * wide, and in Debugger, two views 239px wide, the narrowest level the first review measured in a desktop's layout.
-   * For each view: the level's padding box the view's, its content no wider (`scrollWidth`), its `overflow-x`
-   * `visible`, its top at its panel header's bottom and its height 120px; the rows at the view's left, `view − 176`px
-   * wide; the column right after them, 176px wide; and each runtime box 47px into the column, 104px wide, a row apart
-   * from 1px below the level's top. The figures are a throwaway probe's on `53ecbfa`'s stylesheet (2026-10-05). The
-   * header above the level is not held here: in the split views it wraps where `53ecbfa` set the name on two lines.
+   * **A WIDER LEVEL, IN A DESKTOP'S LAYOUT, DOES NOT SCROLL, AND ITS ROWS AND COLUMN SIT SIDE BY SIDE**, though its
+   * rows are squeezed beside the column: the sideways scroll is a narrow level's only, one under 14rem (the user's
+   * choice). Three layouts, each with every TM view's level wider than 14rem and narrower than the 26rem that rows and
+   * column need side by side: Debugger at 1024 by 768px, its one TM view 362px wide; and the TM view split right at
+   * 1280 by 800px, by its `⋯` menu, in Explorer, two views 311px wide, and in Debugger, two views 239px wide. For each
+   * view: the level's padding box the view's, its content no wider (`scrollWidth`), its `overflow-x` `visible`, its top
+   * at its panel header's bottom and its height 120px; the rows at the view's left, `view − 176`px wide; the column
+   * right after them, 176px wide; and each runtime box 47px into the column, 104px wide, a row apart from 1px below the
+   * level's top. The header above the level is not held here: in the split views it wraps.
    */
   it.each([
     { name: 'Debugger at 1024 px', preset: 'debugger', width: 1024, height: 768, split: false, views: [[374, 362]] },
@@ -651,7 +637,7 @@ describe('the TM view, on sum_to(5)', () => {
         [753, 239],
       ],
     },
-  ] as const)('$name, the level does not scroll and is drawn as on 53ecbfa', async (layout) => {
+  ] as const)('$name, the level does not scroll and its rows and column sit side by side', async (layout) => {
     try {
       presetOf(layout.preset)
       await page.viewport(layout.width, layout.height)
@@ -721,10 +707,9 @@ describe('the TM view, on sum_to(5)', () => {
    * routine back to it (`linksOf`). A column that sat anywhere but beside the rows could draw neither of those two to
    * its row. The window first at 1280px, then the same window, the grid scrolled as far, at 390px and 320px.
    *
-   * **ONE STEP BACK, NOT 400 FORWARD.** The case first stepped from the start to step 400, where `pc22` is current and
-   * the window is this one, and took 5,867 to 10,093ms of its 15,000 over four runs under a 25% CPU quota (2026-10-05
-   * and 06), its 400 clicks alone 1,093ms unloaded. The step is taken forward again after, so the run is ended for
-   * whatever comes next.
+   * **ONE STEP BACK, NOT 400 FORWARD.** Stepping from the start to step 400, where `pc22` is current and the window is
+   * this one, took up to 10,093ms of the case's 15,000 under a 25% CPU quota. The step is taken forward again after,
+   * so the run is ended for whatever comes next.
    */
   it('one step back from the end, every runtime connector is drawn at 390 and 320 px as at 1280 px', async () => {
     await at(1280, 800, false)
@@ -915,19 +900,19 @@ function mayDraw(room: number, number: number, unit: number, character: number):
 
 /**
  * **A ROW'S COUNT DRAWS ITS NUMBER WHOLE OR NOT AT ALL, AND CUTS ONLY ITS UNIT, WITH AN ELLIPSIS.** A row's cell clips
- * (`overflow: hidden`), and a count of `flex: none` ran past it and lost its last characters, its digits too. Cut as
- * one text with an ellipsis it read as another number: the browser draws a line's first character whatever its box
- * and clips the ellipsis after it, so at 320px `map and fold`'s `53 states`, in a box of 9px, read `5.`, and
- * `fact(4)`'s `317 states`, in one of 27px, `31…` (screenshots, 2026-10-06). And not at a phone's width only: in
- * Explorer at 1280px with the TM view split right, `fact(4)`'s `49 states` read `4.`.
+ * (`overflow: hidden`), and a count of `flex: none` would run past it and lose its last characters, its digits too. Cut
+ * as one text with an ellipsis it would read as another number: the browser draws a line's first character whatever its
+ * box and clips the ellipsis after it, so `53 states` in a box of 9px reads `5.`, and `317 states` in one of 27px
+ * `31…`. And not at a phone's width only: in Explorer at 1280px with the TM view split right, `49 states` would read
+ * `4.` the same way.
  *
  * **WHAT IS HELD IS GLYPHS AGAINST THE BOXES THAT CLIP THEM**, for every row the program level draws, its grid scrolled
  * a window at a time. The number's glyphs, a `Range` over the digits the count's text starts with (`glyphsOf`), lie
  * wholly inside what shows of them (`windowOf`, up to the row's cell), and inside the count's own box, or wholly
  * outside it: never across its edge. No box around a drawn number that ends in an ellipsis, its content overflowing it,
  * leaves less than a character's width after the number: the ellipsis takes that width from the end of what its box
- * shows, and replaces characters a `Range` still measures in place, which is how `31…` was drawn with all three digits'
- * boxes inside the count's. The unit's glyphs, the rest of the text, are whole, or not drawn, or cut by a box of
+ * shows, and replaces characters a `Range` still measures in place, so `31…` is drawn with all three digits' boxes
+ * inside the count's. The unit's glyphs, the rest of the text, are whole, or not drawn, or cut by a box of
  * `overflow-x: hidden` and `text-overflow: ellipsis`, the innermost clipping box they run past, with at least two
  * characters' width of them showing, a space and the ellipsis, where less would clip the ellipsis itself. And a count
  * that does not draw its number draws nothing. The count's text is a number and `state` or `states` in the DOM,
@@ -940,30 +925,27 @@ function mayDraw(room: number, number: number, unit: number, character: number):
  * row by row.
  *
  * **EACH LAYOUT'S TALLY IS HELD TOO, OF ITS ROWS WITHOUT A ⚠, SO NONE PASSES ON NOTHING**: how many of them draw their
- * count whole, with the unit cut, as the number alone, and not at all, as this file measured them on the web fonts and
- * on the machines these two programs compile to (2026-10-06): a change to either moves them. At 390px `map and fold`
- * draws 97 counts with the unit cut, `53 st…`, and in Debugger at 1024px 97, `53 s…`. Two programs, since their rows
- * differ in what they leave a count: `fact(4)` at 320px draws 15 numbers alone, `map and fold`, with the widest arcs'
- * gutter (75px), 14, each of one digit, and 83 counts not at all. In *arcs* and in *chips*, whose rows hold their chips
- * before their count.
+ * count whole, with the unit cut, as the number alone, and not at all, as measured on the web fonts and on the machines
+ * these two programs compile to: a change to either moves them. At 390px `map and fold` draws 97 counts with the unit
+ * cut, `53 st…`, and in Debugger at 1024px 97, `53 s…`. Two programs, since their rows differ in what they leave a
+ * count: `fact(4)` at 320px draws 15 numbers alone, `map and fold`, with the widest arcs' gutter (75px), 14, each of
+ * one digit, and 83 counts not at all. In *arcs* and in *chips*, whose rows hold their chips before their count.
  *
  * **A ROW WITH A ⚠ IS HELD ROW BY ROW AND NOT TALLIED, SINCE ITS ⚠ IS AS WIDE AS THE MACHINE'S FONTS MAKE IT.** The ⚠
- * is U+26A0, which neither web font has, so a system font draws it. Where this was written the generic `monospace` at
- * the end of the rows' font list is Noto Sans Mono, which lacks it too, and the browser falls back to DejaVu Sans,
- * whose ⚠ is 11px wide. In CI's image, `node:26-bookworm`, `monospace` is DejaVu Sans Mono, which has it: 7.2px wide on
- * a machine made to choose it, where each such row leaves its count 3.8px more. At 390px three of `map and fold`'s ten
- * rows with a ⚠, those with a two-digit number, then have the two characters a cut unit needs; this file's first run on
- * CI failed on a tally that held all ten as the number alone, 100 for 97 with the unit cut and 7 for 10 alone, and so
- * did a run here on that font (2026-10-06). Every glyph of a row without a ⚠ is Hack's, by a throwaway probe of the
- * fonts the browser drew each with, and those rows' tallies are the same under both ⚠s and under one forced to 3, 7, 9,
- * 13, 15 and 19px. So of the rows with a ⚠ only their number is held, 2 and 10, the compiled program's; what they draw
- * is held by the properties above, and said on the console beside the tallies, with the ⚠'s width and a digit's. **THE
- * ROWS' FONT IS A PRECONDITION**: Hack loaded, in the hook, and first in the rows' font list, in each case, since a
- * page that could not load it would fail on its tallies with nothing to say why.
+ * is U+26A0, which neither web font has, so a system font draws it: where the generic `monospace` at the end of the
+ * rows' font list is Noto Sans Mono, which lacks it too, the browser falls back to DejaVu Sans, whose ⚠ is 11px wide;
+ * in CI's image, `node:26-bookworm`, `monospace` is DejaVu Sans Mono, whose ⚠ is 7.2px wide, and there each such row
+ * leaves its count 3.8px more and three of `map and fold`'s ten rows with a ⚠ at 390px, those with a two-digit number,
+ * then have the two characters a cut unit needs. Every glyph of a row without a ⚠ is Hack's, and those rows' tallies
+ * are the same under both ⚠s and under one forced to 3, 7, 9, 13, 15 and 19px. So of the rows with a ⚠ only their
+ * number is held, 2 and 10, the compiled program's; what they draw is held by the properties above, and said on the
+ * console beside the tallies, with the ⚠'s width and a digit's. **THE ROWS' FONT IS A PRECONDITION**: Hack loaded, in
+ * the hook, and first in the rows' font list, in each case, since a page that could not load it would fail on its
+ * tallies with nothing to say why.
  *
  * **THE EXAMPLE IS PICKED IN A HOOK, AND EACH LAYOUT IS A CASE**: under a 25% CPU quota `map and fold`'s pick and two
- * sweeps in one case took 11,582ms of a case's 15,000 (2026-10-06). Its pick waits past two marks, a third and two
- * thirds of the TM leg's 69,008 steps (`pick`). **LAST IN THE FILE**: they open other programs.
+ * sweeps in one case took 11,582ms of a case's 15,000. Its pick waits past two marks, a third and two thirds of the TM
+ * leg's 69,008 steps (`pick`). **LAST IN THE FILE**: they open other programs.
  */
 const COUNTED: readonly {
   readonly title: string

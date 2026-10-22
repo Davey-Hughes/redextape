@@ -9,8 +9,7 @@ import { mountAt, until } from './harness'
  * for the paint before `main.ts` runs. A stylesheet imports nothing, so the rule's width is written a second time.
  *
  * **EACH IS READ AT THE LAST WIDTH THAT HIDES AND AT THE FIRST THAT DOES NOT**, so a width that differs from the
- * other's by a pixel fails. The other files that narrow the window do it to 390, 414 and 600 px: with the rule at
- * 30rem, or the attribute's query at 38rem, every one of them passed.
+ * other's by a pixel fails.
  *
  * `tests/node/app-header.test.ts` holds the rule's text to the query's; this holds what each does on the page.
  */

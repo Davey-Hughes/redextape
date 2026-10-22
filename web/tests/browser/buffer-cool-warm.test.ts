@@ -7,34 +7,33 @@ import { asShown } from './lambda-text'
 import { typeIntoScratchEditor } from './scratch-editor-fixture'
 
 /**
- * **THE COOL → WARM → BIND ROUND TRIP, AND THE DEFECT IT USED TO END IN** — design §4.5's stated flow
- * ("warm from the header list, then bind a pane through the selector"), driven through the app.
+ * **THE COOL → WARM → BIND ROUND TRIP** — design §4.5's stated flow ("warm from the header list, then bind a
+ * pane through the selector"), driven through the app.
  *
- * **WHAT THIS FILE EXISTS FOR: A WARMED BUFFER USED TO COME BACK UNEDITABLE, FOREVER** — whole-branch
- * review before merge. `ScratchBuffers.cool` rebinds every pane away from the buffer it sleeps, which is
- * the invariant the whole cold/warm split rests on, and `LambdaPane.setDetached(false)`'s teardown then
- * destroys the editor. `warm` posts a build that lands with no pane claiming a leaf, so `replies.ts`'s
- * `scratch-compiled` arm resolved `editorHome(session)` to `undefined` and mounted nothing. Binding a
- * pane back through the selector re-posted no build and claimed no leaf, and "bring the term editor to
- * this pane" is correctly withheld when `custody.hasEditor` is false — there was no editor to bring. The
- * buffer's frames rendered and its text could never be reached again, which made `cool` — "the
- * non-destructive escape from the cap", its own doc — destructive of editability. `pane-host.ts`'s
- * `mountScratchEditor` is the fix and this file is what fails without it.
+ * **WHAT THIS FILE EXISTS FOR: A WARMED BUFFER COMES BACK EDITABLE.** `ScratchBuffers.cool` rebinds every
+ * pane away from the buffer it sleeps, which is the invariant the whole cold/warm split rests on, and
+ * `LambdaPane.setDetached(false)`'s teardown then destroys the editor. `warm` posts a build that lands with
+ * no pane claiming a leaf, so `replies.ts`'s `scratch-compiled` arm resolves `editorHome(session)` to
+ * `undefined` and mounts nothing, and the claim control, "move the editor here", is correctly withheld when
+ * `custody.hasEditor` is false. The selector's rebind posts no build and claims no leaf, so without
+ * `pane-host.ts`'s `mountScratchEditor`, binding a pane back through it would leave the buffer's frames
+ * rendered and its text never reachable again, which would make `cool` — "the non-destructive escape
+ * from the cap", its own doc — destructive of editability; this file is what fails without it.
  *
  * **IT DRIVES THE WHOLE SEQUENCE RATHER THAN THE LAST GESTURE, because every step before the last one is
- * what puts the app in the only state that reproduces it.** A buffer that has never been cooled always
- * has an editor somewhere — either mounted on the pane that forked it or waiting in `heldEditors` — so
- * `hasEditor` answers `true` and the claim control is offered. Cooling is what destroys the editor
+ * what puts the app in the only state that reproduces that failure.** A buffer that has never been cooled
+ * always has an editor somewhere — either mounted on the pane that forked it or waiting in `heldEditors` —
+ * so `hasEditor` answers `true` and the claim control is offered. Cooling is what destroys the editor
  * without ending the buffer, and it is the only gesture in the app that does.
  *
- * ONE SEQUENCED `it`, for `scratch-edit.test.ts`'s reason verbatim: `beforeAll` mounts ONE app for the
- * file (ES module imports are cached, so `main()` runs once per page), the states below are ordered, and
- * three separate `it`s would each depend on the previous having actually run. Every stage asserts before
- * it acts.
+ * ONE SEQUENCED `it`, for `scratch-edit.test.ts`'s reason: `beforeAll` mounts ONE app for the file
+ * (ES module imports are cached, so `main()` runs once per page), the states below are ordered, and
+ * three separate `it`s would each depend on the previous having actually run. Every stage asserts
+ * before it acts.
  *
  * IT SEEDS NO STORAGE OF ITS OWN. Every browser test file gets its own in-memory `Storage` from
  * `tests/browser/setup.ts` before this module body runs, holding the program and the four-view workspace that file
- * stores, so this page starts with no buffers — the four views, and a fork that mints `scratch 1`.
+ * stores, so this page starts with no buffers — the four views, and a fork that mints `scratch-1`.
  */
 
 /** `scratch-edit.test.ts`'s program, for its reason: it truncates at neither budget, so `✎ edit a copy` is
@@ -60,11 +59,11 @@ async function openList(): Promise<void> {
 /**
  * Close the list if it is open.
  *
- * **A ROW IS BUILT PER OPEN AND NEVER REPAINTED WHILE IT IS SHOWING** — `bufferList`'s rows thunk runs
- * from `beforetoggle` and from a temperature click's own rebuild, and `draw()` does not touch the list
- * at all. So a pane count that changes while the popover is open lands nowhere until it is opened again,
- * and a row assertion made across a rebind has to close and reopen first. `buffer-restore.test.ts`'s
- * `termsAfterReopen` states the same fact for the term line.
+ * **A ROW IS BUILT PER OPEN AND NEVER REPAINTED BY `draw()` WHILE IT IS SHOWING** — `bufferList`'s rows
+ * thunk runs from `beforetoggle` and from a temperature or delete click's own rebuild, and `draw()` does
+ * not touch the list at all. So a pane count that a rebind changes while the popover is open lands nowhere
+ * until it is opened again, and a row assertion made across a rebind has to close and reopen first.
+ * `buffer-restore.test.ts`'s `termsAfterReopen` states the same fact for the term line.
  */
 const closeList = () => {
   const button = document.querySelector<HTMLButtonElement>('#buffers')
@@ -107,7 +106,7 @@ describe('a cooled buffer warmed and bound to a pane again', () => {
 
     // STAGE 1 — COOL. The pane goes back to the source session and the editor comes down with it, which
     // is `setDetached(false)`'s teardown rather than anything the buffer did: the buffer is still listed
-    // and still holds its text. Both halves are asserted because the defect this file exists for lives
+    // and still holds its text. Both halves are asserted because the failure this file exists for lives
     // between them — a buffer that survives while its editor does not.
     await openList()
     clickRowControl('pause λ copy 1')
@@ -119,25 +118,23 @@ describe('a cooled buffer warmed and bound to a pane again', () => {
     // STAGE 2 — WARM. The row loses its asleep marker synchronously (`handleTemperature` rebuilds the
     // rows around the caller's handler returning), and NOTHING MOUNTS, which is correct and is asserted
     // rather than assumed: no pane is bound to this buffer, so there is no pane for an editor to mount
-    // onto. This is the state the fix must not change.
+    // onto. This is the state `mountScratchEditor` must not change.
     clickRowControl('resume λ copy 1 — restarts at step 0')
     expect(rowNames()).toEqual(['λ copy 1 · not shown'])
     expect(everyEditorHost()).toHaveLength(0)
     closeList()
 
     // STAGE 3 — BIND, WHICH IS THE GESTURE UNDER TEST. Design §4.5's own words for what a user does
-    // after a warm. Before `pane-host.ts`'s `mountScratchEditor` this produced a pane rendering the
-    // buffer's frames with no editor and no control able to summon one, and the wait below is what
-    // timed out.
+    // after a warm. Without `pane-host.ts`'s `mountScratchEditor` this would produce a pane rendering the
+    // buffer's frames with no editor and no control able to summon one, and the wait below is what would
+    // time out.
     pickBinding('lambda-0', bindingKey('lambda', 'scratch-1'))
     expect(lambdaHeading()).toContain('copy · not linked')
 
     // THE MOUNT IS SYNCHRONOUS WITH THE `change` EVENT, so anything past a frame or two is the absence
     // rather than a slow machine — which is why this wait is worth naming. The bound itself is
-    // `harness.ts`'s single default, chosen for exactly the reason this comment used to give locally:
-    // a wait bounded at or above Vitest's own lets Vitest kill the test first and print "Test timed
-    // out" with no name for what never arrived. Measured: with `pane-host.ts`'s `mountScratchEditor`
-    // reverted, this line is what fails.
+    // `harness.ts`'s single default, chosen because a wait bounded at or above Vitest's own lets Vitest
+    // kill the test first and print "Test timed out" with no name for what never arrived.
     await until(() => editorHost() !== null, 'the warmed buffer to mount an editor onto its newly bound pane')
     // ASSERTIONS THE WAIT ABOVE DOES NOT ALREADY IMPLY, which is the whole point of their being here:
     // the wait proves an editor exists, and these two prove it is the RIGHT one and the ONLY one. A

@@ -2,12 +2,11 @@
  * The worker's record loop, written once for every leg: step a leg's cursor, post its frames a chunk at a time, and
  * stop at the leg's end, at its allowance, or when a newer request replaces what it was stepping.
  *
- * **HERE AND NOT IN `session-worker.ts`, WHERE ITS ONLY CALLERS ARE**, for `asmRecordEnd`'s and `forkable`'s reason
- * (`protocol.ts`): the worker is outside the coverage gate and no test imports it (its own module doc), so a decision
- * written there is a decision nothing holds. The loop was written there once per leg — λ, TM, then asm — the same
- * tokens but for each leg's names, and it has needed fixing before: the `finally` below is the fix for a race over the
- * recording flag. The next fix would have had to land three times, with nothing to say whether it had.
- * `tests/node/record-loop.test.ts` holds its contract.
+ * **HERE AND NOT IN `session-worker.ts`, WHERE THE APP CALLS IT**, for the reason `asmRecordEnd` gives
+ * (`protocol.ts`): the coverage gate cannot see the worker (its own module doc: v8 coverage does not attach to a
+ * dedicated worker's context), so a branch written there moves none of the gate's numbers. **ONE LOOP RATHER THAN ONE
+ * PER LEG**, which would be the same tokens but for each leg's names, so a fix — the `finally` below is one, for a race
+ * over the recording flag — lands once. `tests/node/record-loop.test.ts` holds its contract.
  *
  * **WHAT DIFFERS BY LEG IS A `RecordLeg`, AND WHAT THE LOOP NEEDS OF THE WORKER IS A `RecordWorker`.** A leg's handle
  * and frame are type parameters, so each leg's pieces are checked against its own wasm type and its own reply, and

@@ -12,7 +12,7 @@ import { noticeText, picker, readout, SHELL, stateIdle, undoButton, until } from
  * **A LINK OPENED AT START-UP, THE PROGRAM ALONE** — Plan 7 part 6a spec §5.3 and §7. The link's encoding is not one
  * this build has and its workspace is not one `parseWorkspace` takes, so its program opens alone, under the encoding
  * storage would have opened on, and the stored workspace stays. The notice names what was left out, and its `undo` puts
- * back the program alone. ONE MOUNT FOR THE FILE, for the reason every sibling gives.
+ * back the program alone. ONE MOUNT FOR THE FILE, for the reason `app.test.ts` gives.
  *
  * **STORAGE HOLDS `unary` HERE, WHICH IS NOT THE DEFAULT ENCODING, SO A START-UP THAT FELL BACK TO THE DEFAULT FAILS
  * THIS FILE.** It cannot fail a start-up that fell back to the picker's first option, which is `unary` too: with two
@@ -20,8 +20,8 @@ import { noticeText, picker, readout, SHELL, stateIdle, undoButton, until } from
  * is the other half, the same open with `binary` stored, which fails that one and cannot fail this one. It takes the
  * pair to hold the encoding as storage's.
  *
- * **THE LINK CARRIES A TWO-LINE PROGRAM, NOT AN EXAMPLE**: no case here is about a recording, and at a tenth of a core
- * an example's first compile outlasted the start-up notice, and the `undo` on it.
+ * **THE LINK CARRIES A SHORT PROGRAM, NOT AN EXAMPLE**: no case here is about a recording, and at a tenth of a core an
+ * example's first compile would outlast the start-up notice, and the `undo` on it.
  */
 
 const LINKED = 'let y = 10; y + 5'

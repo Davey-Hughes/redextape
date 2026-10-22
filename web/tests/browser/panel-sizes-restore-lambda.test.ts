@@ -7,15 +7,13 @@ import { frames, heightOf, host, lambdaHost, SHELL, stateIdle, until } from './h
 /**
  * **A λ VIEW IS BUILT WITH THE SHARES ITS LEAF HOLDS** — the view layouts spec §11.4, `pane-host.ts`'s λ arm.
  * `panel-sizes-restore.test.ts` has the TM view and the source view; a λ view takes its shares through its options
- * and not as an argument of its own, and with that line gone nothing failed. Seeded before `main.ts` is imported:
- * the source beside a λ view, its map open, and the map given a share even with the term's where it is built 120 px
- * tall.
+ * and not as an argument of its own. Seeded before `main.ts` is imported: the source beside a λ view, its map open,
+ * and the map given a share even with the term's where it is built 120 px tall.
  *
- * **THE VIEW'S OWN HEIGHT SETTLES AS THE PAGE'S FONTS ARRIVE**: measured on this page (2026-10-13), 824 px at the
- * mount, 828 once they had loaded and 822 a frame later, the term and the map's panel moving together each time. The
- * map is drawn again at each, by a resize observer, which the browser delivers at its next frame. A reading taken
- * between a change and that frame found the canvas 360 px tall holding a drawing 363 tall, in one whole-suite run and
- * not in the file alone. So the case waits two frames before it reads the two.
+ * **THE VIEW'S OWN HEIGHT SETTLES AS THE PAGE'S FONTS ARRIVE**, the term and the map's panel moving together at
+ * each change. The map is drawn again at each change, by a resize observer, which the browser delivers at its next
+ * frame, so a reading taken between a change and that frame can find the canvas at one height holding a drawing of
+ * another. So the case waits two frames before it reads the two.
  */
 
 beforeAll(async () => {

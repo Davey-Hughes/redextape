@@ -7,15 +7,16 @@ import { chooseFromWorkspace } from './user-event-fixture'
 /**
  * A COPY'S VIEW HEADER FITS ONE ROW WHERE THE PROGRAM'S DOES, AND THE COPIES MENU'S NEW-COPY CONTROLS ARE STYLED.
  *
- * The check by hand's finding 8: in a half-width Explorer view the `copy · not linked` badge pushed `⋯` and `✕` onto a
- * second header row, where a view of the program the same width fits one; in a narrow split the title and the badge
- * each wrapped to two lines. `style.css` now breaks the header's line on the title alone and cuts the badge, and a
- * title with no room, with an ellipsis. Measured as `asm-pane.test.ts`'s geometry tests measure, with
+ * `style.css` breaks the header's line on the title alone and cuts the status, and a title with no room, with an
+ * ellipsis. Without that, in a half-width Explorer view the `copy · not linked` status would push `⋯` and `✕` onto
+ * a second header row, where a view of the program the same width fits one, and in a narrow split the title and the
+ * status would each wrap to two lines. Measured as `asm-pane.test.ts`'s geometry tests measure, with
  * `getBoundingClientRect`, and each case asserts first that a view of the program at the same width fits one row.
  *
- * Finding 7: *new asm copy* and *new TM copy* were the browser's own buttons, touching.
+ * *new asm copy* and *new TM copy* are held to the style of the copies menu's other controls and to a gap between
+ * them: unstyled, they would be the browser's own buttons, touching.
  *
- * Every gesture is a `userEvent` one. ONE MOUNT FOR THE FILE, for the reason every sibling gives.
+ * Every gesture is a `userEvent` one. ONE MOUNT FOR THE FILE, for the reason `app.test.ts` gives.
  */
 
 const SAMPLE = 'let x = 40; x + 2'
@@ -84,7 +85,7 @@ describe('a copy’s view header', () => {
     expect(
       Math.abs(rect(asm.querySelector('.view-header')).height - rect(tm.querySelector('.view-header')).height),
     ).toBeLessThan(1.5)
-    // THE BADGE IS ONE LINE, ON THE TITLE'S ROW, AND ITS MEANING STAYS WHOLE IN ITS `title`.
+    // THE STATUS IS ONE LINE, ON THE TITLE'S ROW, AND ITS MEANING STAYS WHOLE IN ITS `title`.
     const title = rect(asm.querySelector('.view-title'))
     expect(rect(status).top).toBeLessThan(title.bottom)
     expect(rect(status).height).toBeLessThan(title.height + 1)
@@ -129,13 +130,12 @@ describe('a view narrower than its title', () => {
   }
 
   /**
-   * **THE TITLE IS CUT, ON ONE LINE AND INSIDE THE VIEW**, where it used to wrap word by word. The view is made narrower
-   * than its title's text by narrowing the page, which is asserted first; the program's view beside it is held to the
-   * same rule.
+   * **THE TITLE IS CUT, ON ONE LINE AND INSIDE THE VIEW**, rather than wrapping word by word. The view is made
+   * narrower than its title's text by narrowing the page, which is asserted first; the program's view beside it is
+   * held to the same rule.
    *
-   * **320 PX, WHERE IT WAS 480**: at 480 px the Debugger inspector took 288 px beside the views, and each of the two
-   * split views was 39 px wide. It stacks under them there now, and they are 111 px wide, wider than either title (83.25
-   * and 95.77 px), and 88.5 px at 390; at 320 they are 71.
+   * **320 PX**: there each of the two split views is 71 px wide, narrower than either title (83.25 and 95.77 px);
+   * at 480 px, with the Debugger inspector stacked under them, they are 111 px, and 88.5 px at 390.
    */
   it('cuts the title with an ellipsis on one line, inside the view', async () => {
     const views = [...document.querySelectorAll<HTMLElement>('.pane[data-kind="asm"]')]

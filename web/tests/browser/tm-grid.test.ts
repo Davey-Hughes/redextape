@@ -31,7 +31,7 @@ async function settled(src: string): Promise<void> {
   await until(() => rows().length > 0, 'the rule table to draw')
 }
 
-// ONE MOUNT FOR THE FILE, outside both blocks, so either runs alone under `-t`.
+// ONE MOUNT FOR THE FILE, outside the `describe` blocks, so each runs alone under `-t`.
 beforeAll(async () => {
   // TALL ENOUGH THAT THE TM VIEW HAS ROOM ABOVE ITS PANELS' FLOORS, EVEN WITH A COPY'S EDITOR OPEN: the sharing
   // is only visible there. At 1600 the copy's editor and five tapes left both panels on their floors.
@@ -163,10 +163,10 @@ describe("the rule table's height is its view's (spec §9.1)", () => {
     await until(() => rows().length > 0, 'the copy to draw its table')
     // **AT A STEP WHOSE ROW IS PAST THE TABLE'S TOP, CHOSEN RATHER THAN CAUGHT.** The check below needs the table
     // scrolled at least `OVERSCAN` rows, or the window's first row is clamped at the top and its last runs further
-    // past the edge; following puts the table wherever the copy's current state is. That used to be whatever frame
-    // the copy's recording had painted when its rows appeared: a step mid-run while each chunk painted as it came,
-    // and as often as not the recording's end, `halt` at the table's top, once a chunk's paint waited for the next
-    // animation frame (`replies.ts`'s `scheduleDraw`). So the recording finishes, and the copy is stepped to step 1.
+    // past the edge; following puts the table wherever the copy's current state is. A step caught when the copy's
+    // rows appear is whatever frame its recording has painted by then, as often as not the recording's end, `halt` at
+    // the table's top, since a chunk's paint waits for the next animation frame (`replies.ts`'s `scheduleDraw`). So
+    // the recording finishes, and the copy is stepped to step 1.
     const stepText = () => tmPane().querySelector('.step')?.textContent ?? ''
     await until(() => /^step [\d,]+ of [\d,]+$/.test(stepText()), 'the copy to finish recording')
     control('↺')?.click()
@@ -179,8 +179,8 @@ describe("the rule table's height is its view's (spec §9.1)", () => {
     // **EVERY OTHER WAY IN TO THE TABLE'S DRAW IS HELD WHILE THE SHARES CHANGE** — `render`, `setLink` and
     // `setProgram`, the pane's public callers of it — so the rows can follow the table only through its resize
     // observer. A copy's value run renders the view on its own schedule, and a panel's toggle moves the focus
-    // and with it the link; each drew the rows for whatever height the table had then, and this passed with no
-    // observer at all, polled and then with `render` alone held.
+    // and with it the link; each draws the rows for whatever height the table has then, and would let this pass
+    // with no observer at all.
     const { render, setLink, setProgram } = TmPane.prototype
     Object.assign(TmPane.prototype, { render: () => undefined, setLink: () => undefined, setProgram: () => undefined })
     try {

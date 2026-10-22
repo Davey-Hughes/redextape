@@ -1,19 +1,17 @@
 /**
  * The slice of the Language Server Protocol this app speaks, hand-written.
  *
- * **NOT GENERATED, AND THAT IS THE ONE PLACE THIS PROJECT'S WIRE-TYPE CONVENTION DOES NOT APPLY.**
- * Every other type crossing the wasm boundary is generated from its Rust declaration by `ts-rs`
- * (`web/bindings/`, built by `scripts/build-web-bindings.sh`) because the Rust side DECLARES those
- * shapes. It does not declare these: LSP's types are generated into `gen-lsp-types` from Microsoft's
- * official MetaModel, so a generated TypeScript copy would be a second description of a shape nobody
- * in this repository owns — and it would be enormous, because the protocol is vastly larger than the
- * nine messages below.
+ * **NOT GENERATED, AN EXCEPTION TO THIS PROJECT'S WIRE-TYPE CONVENTION.** That convention generates a
+ * type crossing the wasm boundary from its Rust declaration by `ts-rs` (`web/bindings/`, built by
+ * `scripts/build-web-bindings.sh`) because the Rust side DECLARES the shape. It does not declare
+ * these: LSP's types are generated into `gen-lsp-types` from Microsoft's official MetaModel, so a
+ * generated TypeScript copy would be a second description of a shape nobody in this repository owns
+ * — and it would be enormous, because the protocol is vastly larger than the slice below.
  *
- * **SO THE RISK THIS FILE CARRIES IS DRIFT AGAINST THE SERVER, AND ONE TEST HOLDS IT.**
- * `tests/node/lsp-protocol.test.ts` asserts `LANGUAGE_IDS` is exactly what
- * `Language::from_language_id` matches. That is the one field where a mismatch is SILENT rather than
- * loud: an unmatched id makes the server answer every request with nothing, which on screen is
- * indistinguishable from a file with no problems in it. Every other field here fails visibly.
+ * **SO THE RISK THIS FILE CARRIES IS DRIFT AGAINST THE SERVER.** `tests/node/lsp-protocol.test.ts`
+ * asserts `LANGUAGE_IDS` is exactly what `Language::from_language_id` matches. That is a field where
+ * a mismatch is SILENT rather than loud: an unmatched id makes the server answer every request with
+ * nothing, which on screen is indistinguishable from a file with no problems in it.
  */
 
 import type { PaneKind } from './panes'
@@ -48,8 +46,9 @@ export type LspTextEdit = { range: LspRange; newText: string }
 export type LspLocation = { uri: string; range: LspRange }
 
 /**
- * What the server advertises it can render. The client asks for `plaintext` only, which is what
- * lets this app hold no markdown renderer for a tooltip — see `LspClient`'s `initialize`.
+ * What the server can render a hover as. The client asks for `plaintext` only, which is
+ * what lets this app hold no markdown renderer for a tooltip — see the `initialize` request
+ * `LspClient.start` sends.
  */
 export type LspMarkupContent = { kind: 'plaintext' | 'markdown'; value: string }
 
@@ -58,7 +57,7 @@ export type LspHover = { contents: LspMarkupContent; range?: LspRange }
 /**
  * One outline entry. `children` is what makes it the hierarchical shape rather than the flat
  * `SymbolInformation[]`, and the server only sends this shape when the client has declared
- * `hierarchicalDocumentSymbolSupport` — see `LspClient`'s `initialize`.
+ * `hierarchicalDocumentSymbolSupport` — see `LspClient.start`'s doc.
  */
 export type LspDocumentSymbol = {
   name: string
@@ -75,9 +74,7 @@ export type LspDocumentSymbol = {
  *
  * `Language::from_language_id` answers `None` for anything else, after which every language request
  * returns empty and no diagnostic is ever published for that document. There is no error, no
- * console warning and no visible difference from a clean file. This cost the part 3 design a whole
- * round of measurements that read nine times too fast, in the direction that made the decision they
- * informed look free.
+ * console warning and no visible difference from a clean file.
  */
 export const LANGUAGE_IDS = ['redextape', 'redextape_lambda', 'redextape_tm', 'redextape_asm'] as const
 
@@ -87,12 +84,12 @@ export type LanguageId = (typeof LANGUAGE_IDS)[number]
  * The language each kind of view's editor holds. An asm view's is an asm copy's, which takes `redextape_asm` from here
  * (Plan 7 part 5 spec §5.5, §7).
  *
- * **KEYED BY `PaneKind`, WHERE IT USED TO SPELL `'source' | 'lambda' | 'tm'` OUT.** The spelled union was a
- * second copy of `PaneKind` that nothing held to the first, so a new pane kind would have left this map
- * without it and `transport.ts`'s lookups by leg reading `undefined` as a language. Now a kind with no language
- * is a type error here (`legs.ts` has the class of bug) — and only here: an annotation rather than the
- * `as const satisfies` its neighbours take, for the reason `legs.ts`'s `LEG_NAME` gives. Those neighbours are
- * looked up by exactly the keys they have; this one is looked up by `Leg`.
+ * **KEYED BY `PaneKind`.** A union spelled out here would be a second copy of `PaneKind` that nothing held to the
+ * first, so a new pane kind would leave this map without it and `transport.ts`'s lookups by leg reading `undefined`
+ * as a language. Keyed by `PaneKind`, a kind with no language is a type error here (`legs.ts` has the class of
+ * bug) — and only here: an annotation rather than the `as const satisfies` its neighbours take, for the reason
+ * `legs.ts`'s `LEG_NAME` gives. Those neighbours are looked up by exactly the keys they have; this one is looked up
+ * by `Leg`.
  */
 export const LANGUAGE_OF_PANE: Readonly<Record<PaneKind, LanguageId>> = {
   source: 'redextape',
@@ -102,8 +99,8 @@ export const LANGUAGE_OF_PANE: Readonly<Record<PaneKind, LanguageId>> = {
 }
 
 /**
- * How each language reads in a sentence shown to a user — the colourer's failure notice is the one
- * caller, which `main.ts` builds from `colour.ts`'s `createGrammarRegistry`.
+ * How each language reads in a sentence shown to a user — the colourer's failure notice, which
+ * `main.ts` builds from `colour.ts`'s `createGrammarRegistry`, and its ceiling notice.
  *
  * **THE WORDS ARE THE APP'S EXISTING ONES, NOT NEW ONES**, per the umbrella's rule that every
  * user-visible word is the umbrella's: `source` is what `main.ts`'s `layoutChanged` calls the source

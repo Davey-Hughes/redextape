@@ -6,17 +6,16 @@ import { bindingKey, pairLabel } from './view-header'
 import { PRESETS, type Preset, presetOf, type Switches } from './workspace'
 
 /**
- * THE APP HEADER'S MENUS — Plan 7 part 2 spec §6: the workspace menu, `+ view` and settings, `examples ▾` since
- * part 6a, and `about ▾` since the about pages. Each is a native popover beside the button that opens it, declared in
- * `index.html` so the pre-paint script and the skin selects need no change; this module wires what markup cannot.
- * The `views` toggles (the view layouts spec §6) are the header's one group that is not a menu.
+ * THE APP HEADER'S MENUS — the workspace menu, `+ view` and settings (Plan 7 part 2 spec §6), `examples ▾` (part 6a
+ * spec §4.2) and `about ▾` (the about pages design §5). Each is a native popover beside the button that opens
+ * it, declared in `index.html` so the pre-paint script and the skin selects need no change; this module wires
+ * what markup cannot. The `views` toggles (the view layouts spec §6) are the header's one group that is not a menu.
  */
 
 /**
  * The popover wiring every header menu shares, and `share`'s popover too, which is a disclosure and not a menu (Plan 7
  * part 6a spec §6): the invoker relationship, `aria-expanded` kept true to the popover's state, and an optional
- * rebuild on open — the pattern the old split popovers established, which `view-header.ts`'s `viewHeader` and
- * `viewMenu` each kept.
+ * rebuild on open. `view-header.ts`'s `viewHeader` and `viewMenu` each keep their own copy of the pattern.
  */
 export function wireMenu(button: HTMLButtonElement, menu: HTMLElement, onOpen?: () => void): void {
   button.popoverTargetElement = menu
@@ -163,10 +162,9 @@ export const SWITCH_ROWS: readonly SwitchRow[] = [
  * walk to — every candidate `nearest` could name was detached by the same `replaceChildren`. The first item
  * of the rebuilt menu is the honest answer, and it is the one `wireMenu` already autofocuses on open.
  *
- * **`reset` IS THE CALLER'S OWN ELEMENT, NOT ONE BUILT HERE**, for `bufferList`'s reason: `main.ts` holds
- * `#reset-preset` from the markup and wired its click handler once. Rebuilding it per open would need the
- * handler rewired per open, and a menu item that is sometimes a different element is a second thing for a
- * test to select.
+ * **`reset` IS THE CALLER'S OWN ELEMENT, NOT ONE BUILT HERE**: `main.ts` holds `#reset-preset` from the markup
+ * and wired its click handler once. Rebuilding it per open would need the handler rewired per open, and a menu
+ * item that is sometimes a different element is a second thing for a test to select.
  */
 export function workspaceItems(
   menu: HTMLElement,
@@ -256,7 +254,7 @@ export function workspaceItems(
  * query. `style.css` has a media rule of the same width, for the paint before `main.ts` runs, and a stylesheet
  * imports nothing. `help.html` tells a reader the width in pixels. `tests/node/app-header.test.ts` reads the rule
  * and the page and holds each to this, and `tests/browser/view-toggles-narrow.test.ts` holds the attribute and the
- * rule to the same last pixel. With the rule at 30rem, or the query at 38rem, every test passed before those two.
+ * rule to the same last pixel.
  */
 export const NARROW_WINDOW_REM = 40
 export const NARROW_WINDOW = `(max-width: ${NARROW_WINDOW_REM}rem)`
@@ -266,13 +264,9 @@ export const NARROW_WINDOW = `(max-width: ${NARROW_WINDOW_REM}rem)`
  * on screen holds a view of that kind. `pick` is handed the kind a press asks to add or remove; `sync` is called with
  * the kinds on screen whenever they may have changed.
  *
- * **THE FOUR BUTTONS ARE THE PAGE'S OWN MARKUP, AND THIS ADOPTS THEM.** They were built here, which is after the
- * wasm has loaded, so they arrived in a header already painted. Measured at 1280 px in each style (2026-10-12): `+
- * view`, `copies`, `examples` and `encoding` each moved right by the group's width, 147.5 px in Paper, 149.1 in
- * Terminal and 154.0 in Instrument, and in Terminal the header went from one row to two, 46 px to 91. In `index.html`
- * they hold their place from the first paint, as not pressed, which is true of a page with no view built yet.
- * `tests/node/harness.test.ts` holds that markup to `HEADER_ORDER` and `KIND_WORD`, so the page cannot spell a kind
- * another way than the tables do.
+ * **THE FOUR BUTTONS ARE THE PAGE'S OWN MARKUP, AND THIS ADOPTS THEM.** In `index.html` they hold their place from the
+ * first paint, as not pressed, which is true of a page with no view built yet. `tests/node/harness.test.ts` holds that
+ * markup to `HEADER_ORDER` and `KIND_WORD`, so the page cannot spell a kind another way than the tables do.
  *
  * **THE NAME IS THE LABEL, AND THE TOOLTIP SAYS WHAT A PRESS DOES** (umbrella §4 rule 1). `source`, `λ`, `asm` and
  * `TM` are words a reader says, so each button is named by its own text, in a group named `views`, and `aria-pressed`
@@ -287,11 +281,9 @@ export const NARROW_WINDOW = `(max-width: ${NARROW_WINDOW_REM}rem)`
  * the views of the kind a press would hide, or would show (`main.ts`'s `viewsOfKind`).
  *
  * **DISABLED BY `aria-disabled`, AND NOT BY THE `disabled` ATTRIBUTE, SO IT KEEPS THE FOCUS IT HAS.** A view key hides
- * views while the focus is on a toggle, and the toggle left pressed alone is that one or another. Measured with the
- * attribute (2026-10-12): the λ toggle focused, then the keys that hide the source, asm and TM views, and
- * `document.activeElement` was `<body>` as the third key returned. A button that says it is disabled this way still
- * takes a press, so `pick` is handed the press like any other and answers it: `main.ts` says the tooltip's words on
- * the notice line, as it does for the toggle key.
+ * views while the focus is on a toggle, and the toggle left pressed alone is that one or another. A button that says
+ * it is disabled this way still takes a press, so `pick` is handed the press like any other and answers it: `main.ts`
+ * says the tooltip's words on the notice line, as it does for the toggle key.
  *
  * **UPDATED IN PLACE**: a press must not cost the button its focus, and a rebuild would.
  */
@@ -334,14 +326,13 @@ export function viewToggles(
  * | 1 | hide the TM view | show the TM view | the TM view is the only one shown — one view stays |
  * | 2 | hide the 2 TM views | show the 2 TM views | the 2 TM views are the only ones shown — one kind of view stays |
  *
- * **A TOGGLE ACTS ON EVERY VIEW OF ITS KIND, SO ITS SENTENCE COUNTS THEM.** Written for one view, it said *hide the
- * TM view* of a press that hid two, and *the TM view is the only one shown* with two TM views on screen and no other:
- * a first load, `+ view` and *TM · program*, then the source view's `✕` (measured 2026-10-12). **AND WHAT STAYS IS
- * ONE VIEW OF ONE, AND ONE KIND OF VIEW OF SEVERAL** (decided 2026-10-12): the several kept the one's reason
- * at first, *one view stays*, of two views that both stay.
+ * **A TOGGLE ACTS ON EVERY VIEW OF ITS KIND, SO ITS SENTENCE COUNTS THEM.**
+ *
+ * **AND WHAT STAYS IS ONE VIEW OF ONE, AND ONE KIND OF VIEW OF SEVERAL**: *one view stays* would be said of two views
+ * that both stay.
  *
  * **THE ONE PLACE THE SENTENCE IS BUILT.** The tooltip (`viewToggles`) and the notice line's answer to a refused press
- * or key (`main.ts`'s `toggleView`) are the same words, and were two template strings.
+ * or key (`main.ts`'s `toggleView`) are the same words.
  */
 export function toggleSentence(kind: PaneKind, count: number, state: 'shown' | 'hidden' | 'only'): string {
   const several = count > 1

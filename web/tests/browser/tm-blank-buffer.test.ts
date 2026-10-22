@@ -6,21 +6,19 @@ import { pickSessionBinding } from './binding-fixture'
 import { bufferRows, buffersButton, buffersMenu, idle, SHELL, tmPaneHost, until } from './harness'
 
 /**
- * **THE SECOND GESTURE — 5d-iv Task 10, design §4.7.** Task 9 wired the fork, which detaches a pane onto
- * a copy of what it was showing and is refused above `MAX_FORK_RULES`; this is the OTHER door, always
- * available, for a user who has nothing on screen to fork from and wants somewhere to paste a `.tm` file
- * `tm_emit` produced. `scratch.ts`'s `ScratchBuffers.forkBlank` is the collection-side half, landed in
- * Task 5 with nothing in `src/` calling it — this file is what calls it.
+ * **THE SECOND GESTURE — 5d-iv design §4.7.** The fork detaches a pane onto a copy of what it was showing
+ * and is refused above `MAX_FORK_RULES`; this is the OTHER door, always available, for a user who has
+ * nothing on screen to fork from and wants somewhere to paste a `.tm` file `tm_emit` produced:
+ * `scratch.ts`'s `ScratchBuffers.forkBlank`.
  *
  * **`mountApp` IS THIS FILE'S OWN, NOT `tm-scratch-fork.test.ts`'S, EVEN THOUGH THE IDLE POLL IS
  * IDENTICAL.** That file's helper has no route to the buffers button, the popover, a row count or the
- * binding selector — nothing here needed them before this task existed to test. Duplicating the MOUNT
- * rather than importing it is deliberate: each browser test file gets its own page (`main()` runs once
- * per module load), so a shared mount would be a shared page two files could not both own. That
- * argument reaches the mount and stops there — `SHELL` and `until` are an inert string and a pure poll
- * helper, share no page, and now live in `tests/browser/harness.ts`.
+ * binding selector. Duplicating the MOUNT rather than importing it is deliberate: each browser test file
+ * gets its own page (`main()` runs once per module load), so a shared mount would be a shared page two
+ * files could not both own. That argument reaches the mount and stops there — `SHELL` and `until` are an
+ * inert string and a pure poll helper, share no page, and live in `tests/browser/harness.ts`.
  *
- * ONE MOUNT FOR THE FILE, the same reason every sibling gives: ES module imports are cached, so `main()`
+ * ONE MOUNT FOR THE FILE, for the reason `app.test.ts` gives: ES module imports are cached, so `main()`
  * runs once per page and Vitest gives each test FILE its own page. Each `it` below calls `mountApp`
  * again; only the first call actually imports `../../src/main` and the rest reuse the page, loading a
  * fresh source program the way `tm-scratch-fork.test.ts`'s own `mountApp` does.
@@ -30,10 +28,8 @@ import { bufferRows, buffersButton, buffersMenu, idle, SHELL, tmPaneHost, until 
  * `ScratchBuffers.#minted` names `scratch-1`; the third test mints a second of its own (unused, left
  * orphan) and then binds the TM pane to `scratch-1` — the SECOND test's buffer, still live, not the
  * one it just minted. A reset between tests would retire that buffer out from under the third test's own
- * assertion, so there is deliberately none. The fourth test's retire click therefore lands on whichever
- * buffer is OLDEST at that point (`ScratchBuffers.list`'s own doc: "every live buffer, oldest first"),
- * not necessarily the one it just minted — its claim is that the control survives a retire and keeps
- * focus, which holds regardless of how many buffers remain after the click.
+ * assertion, so there is deliberately none. The fourth test therefore retires every buffer the open list
+ * shows, not only the one it mints.
  */
 
 /**
@@ -54,9 +50,7 @@ const paneBindings = (): Record<string, string> => {
   return bindings
 }
 
-/** Wait until the TM pane's own text stops changing — `tm-scratch-fork.test.ts`'s own `settleOn`,
- * scoped the same way and for the same reason: the source session keeps recording its own λ leg
- * throughout, which would starve a document-wide quiescence check of ever settling. */
+/** Wait until the TM pane's own text stops changing. */
 async function settleOn(snapshot: () => string, timeoutMs = 60_000): Promise<void> {
   const started = performance.now()
   let last = snapshot()
@@ -88,8 +82,7 @@ let mounted = false
 
 /**
  * Load `src` into the app's one source editor, mounting the app itself on the first call in this file
- * (`main()` runs once per page) and reusing the already-mounted page on every later one — the idiom
- * most browser test files in this directory state.
+ * (`main()` runs once per page) and reusing the already-mounted page on every later one.
  */
 async function mountApp(src: string): Promise<App> {
   if (!mounted) {
@@ -113,8 +106,8 @@ async function mountApp(src: string): Promise<App> {
 
 describe('the blank TM buffer', () => {
   /**
-   * **THE HOLE THIS TASK EXISTS TO CLOSE.** Every other buffer test forks first, so none of them can
-   * see that the menu is unreachable at zero — which is precisely when a user wants this control.
+   * **THE MENU OPENS WITH NO BUFFERS AT ALL**, which is precisely when a user wants this control; a buffer
+   * test that forks first cannot see whether it does.
    */
   it('opens the buffers menu with no buffers at all', async () => {
     const app = await mountApp('let x = 40; x + 2')
@@ -148,35 +141,24 @@ describe('the blank TM buffer', () => {
   })
 
   /**
-   * **RETIRING THE LAST BUFFER NO LONGER STRANDS FOCUS**, because the button no longer disappears —
-   * accessibility list item 1, one instance retired. Pinned so a future re-hide is caught.
+   * **RETIRING THE LAST BUFFER DOES NOT STRAND FOCUS**, because the button does not disappear at zero buffers.
    *
-   * **THIS TEST DID NOT REACH ZERO BUFFERS UNTIL THIS ROUND, EVEN THOUGH ITS NAME AND THE PARAGRAPH
-   * ABOVE ALWAYS SAID IT DID — a fix-round finding.** `buffersButton.hidden = live === 0` was
-   * reintroduced by hand and this test still passed, because this file's own buffers accumulate across
-   * its tests by design (this file's own doc) and this test used to retire only the buffer it had just
-   * minted: by the time it ran, two buffers from earlier tests were already live (`scratch-1`, bound to
-   * the TM pane by the previous test, and `scratch-2`, that same test's own orphan), so one retire left
-   * two live, not zero — the state this test's name describes was never actually reached. The real
-   * regression guard was `scratch-buffers.test.ts`'s own STAGE 3, which does retire down to zero and
-   * does fail when the bug is reintroduced. Fixed here by retiring every buffer the page holds, counted
-   * off the open list rather than assumed, so the state this test drives to is the state it claims to.
+   * **IT RETIRES EVERY BUFFER THE PAGE HOLDS, COUNTED OFF THE OPEN LIST.** This file's own buffers
+   * accumulate across its tests by design (this file's own doc), so retiring only the buffer this test
+   * mints would leave earlier ones live and never reach the state this test's name describes: the test
+   * would pass on a build that hid the button at zero (`buffersButton.hidden = live === 0`).
    *
    * **`button.buffer-delete`, NOT `button.retire`** — `buffer-list.ts`'s `bufferRow` gives the delete
    * control the class `buffer-delete`; `.retire` matches nothing, and a query that finds nothing here
    * would still pass this test on a build where the last copy was never actually deleted.
    *
-   * **`.focus()` BEFORE EVERY OPEN, WHICH `2026-08-17-plan5d-iv-editable-tm.md`'S TEST CODE DID NOT
-   * CALL FOR — VERIFIED AGAINST THE TREE RATHER THAN TAKEN ON FAITH.** A bare scripted `.click()`
-   * does not focus its target in this tier (`scratch-buffers.test.ts`'s own STAGE 2 comment: "a
-   * pointer press focuses the button and so does Enter on a tabbed-to one," neither of which a
-   * synthetic `.click()` is), so without this the popover's hide algorithm has nothing recorded as
-   * "focus was inside the popover" to hand back — `document.activeElement` is `<body>` both before
-   * and after a retire, which would pass the final assertion for no reason connected to the fix.
-   * Measured on the single-retire version of this test: it failed on exactly that line, on the fully
-   * fixed source, until the explicit `.focus()` was added — the same precondition
-   * `scratch-buffers.test.ts`'s own STAGE 3 assertion depends on, repeated here before every retire
-   * in the loop rather than only the last.
+   * **`.focus()` BEFORE EVERY OPEN.** A bare scripted `.click()` does not focus its target in this tier
+   * (`scratch-buffers.test.ts`'s own STAGE 2 comment: "a pointer press focuses the button and so does
+   * Enter on a tabbed-to one," neither of which a synthetic `.click()` is), so without this the popover's
+   * hide algorithm has nothing recorded as "focus was inside the popover" to hand back, and
+   * `document.activeElement` is `<body>` both before and after a retire: the final assertion would fail on
+   * a build with nothing wrong. It is the same precondition `scratch-buffers.test.ts`'s own STAGE 3
+   * assertion depends on, repeated here before every retire in the loop rather than only the last.
    */
   it('keeps focus on the buffers button when the last buffer is retired', async () => {
     const app = await mountApp('let x = 40; x + 2')

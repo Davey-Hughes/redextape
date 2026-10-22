@@ -31,7 +31,7 @@ beforeAll(async () => {
   await until(() => host('tm-0')?.querySelector('.state-table .state-row') != null, 'the rule table to draw')
   expect(drawn(), 'precondition: the page opened on the stored tree').toBe('row[50](source tm-0)')
   // THE PAGE'S FONTS FIRST: a line's height is the font's, and a floor of five lines, a header and the view's own
-  // height each settle as the fonts arrive (`panel-sizes-restore-lambda.test.ts` has the figures).
+  // height each settle as the fonts arrive.
   await document.fonts.ready
   await new Promise<void>((r) => requestAnimationFrame(() => requestAnimationFrame(() => r())))
 })

@@ -25,15 +25,15 @@ import {
  * carries `let y = 10; y + 5` under `binary` and the Debugger preset's workspace, whose λ view is drawn as an outline. A
  * link takes precedence over both stores: the page opens on it, drops the copy's binding without warming the copy, keeps
  * the copy listed, and clears the fragment; its `undo` puts back the stored program, workspace and the copy's view.
- * ONE MOUNT FOR THE FILE, for the reason every sibling gives.
+ * ONE MOUNT FOR THE FILE, for the reason `app.test.ts` gives.
  *
  * **THE LINK CARRIES `binary` OVER A PROGRAM STORED UNDER `unary`, SO A START-UP THAT TOOK STORAGE'S ENCODING, OR THE
  * PICKER'S FIRST OPTION, IN PLACE OF THE LINK'S FAILS HERE.** `unary` is both of those. It cannot fail a start-up that
  * took the default encoding, which is `binary` too. `share-open-deep.test.ts` is the other half, a link carrying
  * `unary` over a program stored under `binary`, which fails that one and cannot fail the picker's first option.
  *
- * **THE LINK CARRIES A TWO-LINE PROGRAM, NOT AN EXAMPLE**: no case here is about a recording, and at a tenth of a core
- * an example's first compile outlasted the start-up notice, and the `undo` on it.
+ * **THE LINK CARRIES A SHORT PROGRAM, NOT AN EXAMPLE**: no case here is about a recording, and at a tenth of a core an
+ * example's first compile would outlast the start-up notice, and the `undo` on it.
  */
 
 const LINKED = 'let y = 10; y + 5'

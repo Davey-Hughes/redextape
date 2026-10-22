@@ -13,11 +13,10 @@ import { boundary, controlState, drag, frame, heightOf, region } from './harness
 /**
  * THE REGIONS THAT DO NOT START WITH A SHARE, AND THE ONE THAT TAKES THE REST — the view layouts spec §11.1.
  *
- * Three regions kept their own height before a boundary could be dragged and still do until one beside them is: a
- * copy's text, as tall as what it holds up to eight lines; the λ view's term map, 120 px; and the source view's
- * outline, which `panel-sizes-stored.test.ts` has, since only the app builds that view. From the first drag each
- * has a share (`data-sized`). And the λ term, which was capped at six tenths of the WINDOW whatever its view's
- * height, takes what its view has spare.
+ * Three regions keep their own height until a boundary beside them is dragged: a copy's text, as tall as what it
+ * holds up to eight lines; the λ view's term map, 120 px; and the source view's outline, which
+ * `panel-sizes-stored.test.ts` has, since only the app builds that view. From the first drag each has a share
+ * (`data-sized`). And the λ term takes what its view has spare, past six tenths of the WINDOW.
  */
 
 const CONTROLS = controlState(false, '0')
@@ -166,8 +165,8 @@ describe('a copy’s text, in a TM view', () => {
   })
   /**
    * **A MAXIMISE ENDS WHEN ITS PANEL LEAVES THE VIEW.** A copy's text panel is hidden when its editor is taken down,
-   * and a maximise of it then drew every other panel closed for a panel nobody could see, with no pressed button
-   * left to press.
+   * and a maximise of it that went on would draw every other panel closed for a panel nobody could see, with no
+   * pressed button left to press.
    */
   it('ends a maximise of its panel when the editor is taken down', async () => {
     const { host, pane } = mount()

@@ -38,13 +38,9 @@ export function byteToIndex(text: string): Uint32Array {
  * A single byte offset, looked up in a `byteToIndex` map and clamped into it.
  *
  * ONE HOME, FOR EVERY CALLER. `decorationRanges` below, `highlight.ts`'s marks and `lambda-body.ts`'s
- * flat frame all need exactly this — a byte offset can come in negative,
- * past the map's end, or (its intended case) mid-character, and all of them must resolve it the same
- * way rather than risk drifting apart one clamp expression at a time.
- *
- * **NO COUNT AND NO LIST OF THREE**, because both were wrong. Part 3a rewrote this doc to drop a
- * reference to the deleted `lintRanges` and put `link.ts` in its place; `link.ts` does not call this
- * function at all, and the callers are four modules rather than three.
+ * flat frame all need exactly this — a byte offset can come in negative, past the map's end, or (its
+ * intended case) mid-character, and all of them must resolve it the same way rather than risk drifting
+ * apart one clamp expression at a time.
  */
 export function byteIndexAt(map: Uint32Array, byteOffset: number): number {
   return map[Math.min(Math.max(byteOffset, 0), map.length - 1)] as number
@@ -52,25 +48,24 @@ export function byteIndexAt(map: Uint32Array, byteOffset: number): number {
 
 /**
  * `print_lambda_capped`'s output as ordered, in-bounds decoration ranges, converted from byte offsets
- * to the UTF-16 indices CodeMirror and JS strings need.
+ * to the UTF-16 indices JS strings need.
  *
- * **THE λ PANE'S RENDERED FRAME IS THE CALLER, AND SINCE PLAN 7 PART 3b IT IS THE ONLY ONE.** This used
- * to colour the SOURCE EDITOR too, from `classify_source`'s spans, through a state field that no longer
- * exists in `highlight.ts`; both are gone — the source and copy editors take `colour.ts`'s `treeSitterColour`,
- * whose offsets are already UTF-16 code units and must NOT come through here. What is left is the λ
- * view's flat text (`lambda-body.ts`'s `flatText`, shown until a step's tree arrives), whose spans the
- * worker computes per frame from a term it holds, in bytes.
+ * **THE λ PANE'S RENDERED FRAME IS THE ONLY CALLER**: the λ view's flat text (`lambda-body.ts`'s `flatText`,
+ * shown until a step's tree arrives), whose spans the worker computes per frame from a term it holds, in bytes.
+ * The source and copy editors take `colour.ts`'s `treeSitterColour`, whose offsets are already UTF-16 code units
+ * and must NOT come through here.
  *
  * **THE SPANS ARRIVE AS ONE BYTE STRING, THREE LITTLE-ENDIAN `u32`S A SPAN** (`viewmodel.rs`'s `LambdaState.spans`):
  * its start and end, byte offsets into `text`, and its class's index in `TOKEN_CLASSES`. Read with a `DataView`, so
  * the byte order is the wire's and not the platform's. A class index past the last class is dropped rather than
  * coloured, and a trailing part of a span is not read.
  *
- * TWO RULES THAT LOOK LIKE PARANOIA AND ARE NOT. `RangeSetBuilder` throws on an out-of-order add, and
- * the lexer's ordering is an assumption this module cannot verify — so it sorts. And the document the
- * spans were computed from can be one keystroke behind the document CodeMirror holds, so a span past
- * the end is dropped or clamped rather than trusted — clamped against the byte-to-index map's own
- * length, not `text.length`, since those two lengths disagree the moment the text is non-ASCII.
+ * TWO RULES THAT LOOK LIKE PARANOIA AND ARE NOT. The spans' ordering is an assumption this module
+ * cannot verify — so it sorts: `flatText` walks the ranges in one pass and skips a range that starts
+ * before the last one ended, so a span out of order would lose its colour. And a span past the end is
+ * dropped or clamped rather than trusted, because a read past the end of the byte-to-index map is
+ * `undefined`, not an index — clamped against that map's own length, not `text.length`, since those
+ * two lengths disagree the moment the text is non-ASCII.
  */
 export function decorationRanges(spans: Uint8Array, text: string): DecorationRange[] {
   const map = byteToIndex(text)

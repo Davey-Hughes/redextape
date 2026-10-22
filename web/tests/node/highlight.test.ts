@@ -3,17 +3,17 @@ import { describe, expect, it } from 'vitest'
 import { declineMark, linkMark, setDecline, setLink } from '../../src/highlight'
 
 /**
- * `declineMark` had NO TEST AT ALL before this file — the byte→UTF-16 conversion it shares with
- * `decorationRanges` (`spans.ts`'s `byteIndexAt`) was only ever exercised through `decorationRanges`'
- * own tests. `EditorState` needs no DOM, so the conversion is checked here the same way
- * `decorationRanges` is checked in `spans.test.ts`, without a browser.
+ * `declineMark` converts a byte offset to UTF-16 with `spans.ts`'s `byteIndexAt`, as `decorationRanges`
+ * does, and `spans.test.ts` reaches `byteIndexAt` only through `decorationRanges`, so nothing there
+ * checks `declineMark`'s own use of it. `EditorState` needs no DOM, so that use is checked here the
+ * same way `decorationRanges` is checked in `spans.test.ts`, without a browser.
  */
 describe('declineMark', () => {
   it('marks the non-ASCII character a decline span names, not the byte-shifted one', () => {
-    // 'λf. λx. f x' — see `spans.test.ts`'s doc comment for the byte/UTF-16 breakdown. Byte offsets
-    // 5..7 are the SECOND 'λ', two bytes long; its UTF-16 index is 4, one code unit — the first 'λ'
-    // and its binder name shift every following byte offset by one without moving the UTF-16 index at
-    // all, so an unconverted reader would mark the wrong character.
+    // 'λf. λx. f x' — see `spans.test.ts`'s comment on its real λ-printer span set for the byte/UTF-16
+    // breakdown. Byte offsets 5..7 are the SECOND 'λ', two bytes long; its UTF-16 index is 4, one code
+    // unit — the first 'λ' shifts every following byte offset by one without moving the UTF-16 index
+    // at all, so an unconverted reader would mark the wrong character.
     const text = 'λf. λx. f x'
     let state = EditorState.create({ doc: text, extensions: [declineMark] })
     state = state.update({ effects: setDecline.of({ start: 5, end: 7 }) }).state
@@ -29,12 +29,11 @@ describe('declineMark', () => {
 })
 
 /**
- * `linkMark` SHARES `declineMark`'s CONVERSION CODE VERBATIM, and shares no test with it — the sample
- * program every other node test in this repo uses is pure ASCII, so a regression that dropped the
- * `byteToIndex`/`byteIndexAt` call entirely would still pass every one of them. This is the case that
- * would catch it, and the second checks the one place `linkMark` behaves DIFFERENTLY from
- * `declineMark`: clearing outright on a document change rather than mapping through it (`highlight.ts`'s
- * doc comment on `linkMark` explains why).
+ * `linkMark` SHARES `declineMark`'s CONVERSION CODE VERBATIM, and shares no test with it — over a
+ * pure-ASCII program, a regression that dropped the `byteToIndex`/`byteIndexAt` call entirely would
+ * still pass. This is the case that would catch it, and the second checks the one place `linkMark`
+ * behaves DIFFERENTLY from `declineMark`: clearing outright on a document change rather than mapping
+ * through it (the comment inside `linkMark` in `highlight.ts` explains why).
  */
 describe('linkMark', () => {
   it('marks the non-ASCII character a link span names, not the byte-shifted one', () => {

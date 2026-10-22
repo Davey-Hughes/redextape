@@ -10,11 +10,10 @@
  * something to own. A free function takes no handle, so a round trip to reach one is lag bought for
  * nothing, which is why that worker holds none of them. `LspServer` is exactly such a handle, and
  * this thread is idle between keystrokes rather than busy running reductions, so the round trip moves
- * work off the main thread instead of adding to it. The design measured what it costs: 0.15 ms for a
- * source document, 14.58 ms for an 814 KB TM, and 135.2 ms just past the 6,100,000-unit ceiling.
- * **THE 100 ms `@codemirror/lint` DEBOUNCE THIS ONCE CITED WENT WITH `lint.ts`** — the source editor
- * sends a `didChange` per keystroke now and the scratch editors send on the recompile's 300 ms — and
- * it changes nothing here, because every one of those figures is paid off the main thread.
+ * work off the main thread instead of adding to it. The design measured that work at 135.2 ms for
+ * a document just past `COLOUR_CEILING_UNITS`; how often a `didChange` arrives — per keystroke from
+ * the source editor, on the recompile's 300 ms from the scratch editors — changes nothing here,
+ * because all of it is paid off the main thread.
  *
  * **EVERY DECISION LIVES IN `lsp-client.ts`, NOT HERE, AND THE REASON IS TESTABILITY.** Policy in a
  * worker can only be exercised by standing up a thread; the same policy behind `LspPort` is
@@ -22,21 +21,15 @@
  * not when to format, not what to do about a dead worker. It receives a message, calls `handle`,
  * and posts what comes back.
  *
- * **THIS FILE IS EXCLUDED FROM COVERAGE, AND THE ENTRY WAS EARNED RATHER THAN INHERITED.** An
- * earlier draft of this comment claimed `vite.config.ts` excludes worker modules generally. It did
- * not — it excluded exactly one file, `src/session-worker.ts` — and for a window this module sat in
- * the denominator at 0% while that claim sat here.
+ * **THIS FILE IS EXCLUDED FROM COVERAGE, AND A TEST EARNED THE ENTRY.**
+ * `tests/browser/lsp-diagnostics.test.ts` mounts the real app, which spawns this worker, and asserts
+ * diagnostics that can only have come back through it. v8 reports 0% for this file all the same,
+ * because coverage collects through CDP against the page and does not attach to a dedicated worker's
+ * context. That is an instrumentation gap, which is what the exclusion is for; an untested worker
+ * would be a testing gap, which it is not for.
  *
- * It is excluded now, on a measurement taken once a test drove it: `tests/browser/lsp-diagnostics.test.ts`
- * mounts the real app, which spawns this worker, and asserts diagnostics that can only have come
- * back through it. That it is genuinely exercised is not inferred from the test passing — removing
- * either `lspClient.changeDocument` or `lspClient.openDocument` reddens all four of that file's
- * tests. v8 still reports 0%, because coverage collects through CDP against the page and does not
- * attach to a dedicated worker's context. That is an instrumentation gap, which is what the
- * exclusion is for; before the test existed it would have been a testing gap, which it is not for.
- *
- * **SO A NEW UNTESTED BRANCH IN THIS FILE MOVES NONE OF THE FOUR NUMBERS, AND THAT IS THE COST.**
- * The discipline above — no policy here — is what keeps that cost small.
+ * **SO A NEW UNTESTED BRANCH IN THIS FILE MOVES NONE OF THE FOUR COVERAGE NUMBERS, AND THAT IS THE
+ * COST.** The discipline above — no policy here — is what keeps that cost small.
  */
 import init, { LspServer } from '../../pkg-lsp/redextape_lsp_wasm.js'
 import type { LspOutgoing, LspReplyMessage, LspRequestMessage } from './lsp-protocol'
@@ -50,19 +43,20 @@ let server: LspServer | null = null
 /**
  * Messages that arrived before the module finished instantiating.
  *
- * **WITHOUT THIS, THE FIRST `initialize` IS DROPPED AND NOTHING EVER RECOVERS.** `init()` is a fetch
- * and an instantiation; the client posts as soon as it has constructed the worker, which is sooner.
- * The client also queues until `ready`, so this is the second of two guards against the same hazard
- * — kept because the two are on opposite sides of a boundary and only this one is ordered with
- * respect to `server` actually existing.
+ * **WITHOUT THIS, AN `initialize` POSTED BEFORE `init()` RESOLVES WOULD BE DROPPED, AND NOTHING WOULD
+ * EVER RECOVER.** `init()` is a fetch and an instantiation. The client also queues until `ready`, so
+ * this is the second of two guards against the same hazard — kept because the two are on opposite
+ * sides of a boundary and only this one is ordered with respect to `server` actually existing.
  */
 const pending: LspRequestMessage[] = []
 
 function answer(msg: LspRequestMessage): void {
   if (server === null) return
   // `handle` never throws: a message it cannot parse answers `[]` rather than raising, which is that
-  // method's documented contract and the reason this call is not wrapped. A throw here would kill the
-  // message handler and leave every later request unanswered.
+  // method's documented contract and the reason this call is not wrapped. A throw out of the message
+  // listener would reach `LspClient` as this worker's `error` event, which it treats as a dead worker:
+  // this thread is terminated and every pending request rejected, then a new one is started or, the
+  // second time, language features are turned off.
   const out: LspOutgoing[] = JSON.parse(server.handle(msg.json))
   // Parsed HERE rather than on the main thread: the string arrives from wasm on this side, and
   // handing the main thread a string it must parse would move that cost to the one thread the whole

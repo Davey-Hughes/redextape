@@ -5,19 +5,17 @@ import type { LspLocation, LspPosition, LspRange } from './lsp-protocol'
 import { offsetOf } from './lsp-text'
 
 /**
- * Go to definition, and cycle through references — Plan 7 part 3a.
+ * Go to definition, and cycle through references — Plan 7 part 3 spec §5.4.
  *
  * **EVERY TARGET IS IN THE DOCUMENT THAT WAS ASKED ABOUT, AND THAT IS THE SERVER'S SHAPE RATHER THAN
  * AN ASSUMPTION.** `Server::definition` builds its `Location` from `params.text_document.uri` and
  * `references` does the same; `NameIndex` is built per document and there is no workspace index. So a
  * jump lands in the editor it was made from, always.
  *
- * **AN EARLIER DRAFT ROUTED JUMPS BY URI THROUGH THE CLIENT, SO THAT A TARGET IN ANOTHER VIEW COULD
- * BE REVEALED THERE — AND THAT PATH WAS UNREACHABLE.** The umbrella's §5.4 says "including jumps
- * across views", which reads as a cross-document jump and is not one the server can produce. The
- * routing, and the notice for a target no view was showing, were a guard for a case that cannot
- * arise — the shape this repository has paid for before as timeout ceilings that could never fire.
- * If the server ever gains a workspace-wide index, this is the file that grows the routing back.
+ * The umbrella's §6 says "including jumps across views", which reads as a cross-document jump and
+ * is not one the server can produce. Routing a jump by URI to another view would be a guard for a
+ * case that cannot arise. If the server ever gains a workspace-wide index, this is the file that
+ * grows that routing.
  */
 
 /** What a navigation needs from the app: where the caret is, and how to say what happened. */
@@ -28,15 +26,15 @@ export type NavContext = {
    * The editor's state, not the editor.
    *
    * **NOTHING HERE DISPATCHES, WHICH IS WHY A STATE IS ENOUGH** — the caret and the document are
-   * all these two functions read, and landing the jump is `client.reveal`'s job. Taking a view
-   * would also make every rule in this file need a DOM to exercise; taking a state lets the node
-   * tier drive all of them.
+   * all these two functions read, and landing the jump is `reveal`'s job. Taking a view would also
+   * make every rule in this file need a DOM to exercise; taking a state lets the node tier drive all
+   * of them.
    */
   readonly state: EditorState
   readonly client: Pick<LspClient, 'definition' | 'references'>
   /** Put the caret on a range in THIS editor — the only place a target can be. */
   readonly reveal: (range: LspRange) => void
-  /** `notice.ts`'s `notify` — the one surface for "that did not go anywhere". */
+  /** `notice.ts`'s `notify`. */
   readonly notify: (text: string) => void
 }
 
@@ -69,9 +67,9 @@ export async function goToDefinition(ctx: NavContext): Promise<void> {
  * Move to the next reference to whatever the caret is on, wrapping at the end.
  *
  * **CYCLING RATHER THAN A LIST, BECAUSE A LIST IS A SURFACE AND THIS PART BUILDS NONE.** The outline
- * is the one new panel part 3a adds; a references panel would be a second, and the umbrella does not
- * ask for one. Pressing again moves on, and the notice says which of how many — so the count is
- * available without a place to put it.
+ * is the one new panel this part adds (Plan 7 part 3 spec §5.3); a references panel would be a
+ * second, and the umbrella does not ask for one. Pressing again moves on, and the notice says which
+ * of how many — so the count is available without a place to put it.
  *
  * **IT ASKS ABOUT THE NAME UNDER THE CARET, SO THE CARET HAS TO BE ON ONE.** Pressing this on a
  * keyword or on whitespace does nothing at all, because there is no name to have references to —
@@ -113,10 +111,9 @@ function keyOf(l: LspLocation): number {
 /**
  * The three navigation keys, for an editor that has a document.
  *
- * **`F12` AND `Shift-F12`, AND THE CHOICE WAS CHECKED RATHER THAN ASSUMED.** They are what every
- * other editor binds these to, and a scan of `defaultKeymap` and `historyKeymap` — 74 bindings —
- * found no F-key among them, so neither shadows anything CodeMirror already does. They also take no
- * modifier that vim's normal mode uses, which is the constraint part 3b inherits.
+ * **`F12` AND `Shift-F12`.** They are what every other editor binds these to, and `defaultKeymap`
+ * and `historyKeymap` bind no F-key, so neither shadows anything CodeMirror already does. They also
+ * take no modifier that vim's normal mode uses.
  *
  * **`F2` IS THE THIRD, AND IT LIVES HERE RATHER THAN BESIDE THE POINTER TOOLTIP IN `lsp-hover.ts`
  * SO ONE EDIT REACHES BOTH EDITORS.** Both editor construction sites already call this function to
@@ -156,22 +153,20 @@ export function navKeymap(deps: {
       },
     },
     {
-      // F2, and the choice was measured on both halves it has. Nothing in the app, CodeMirror or
-      // vim swallows it — a probe pressed F1/F2/F4/F8/F9 through `userEvent` and all five reached
-      // the editor. The other half a probe CANNOT show: Playwright injects keys through CDP at the
-      // renderer, so browser-chrome bindings never apply in a test. F2 is chosen because Chromium
-      // binds nothing to it, unlike F1, F3, F5, F6, F7, F10, F11 and F12.
+      // F2, because nothing in the app, CodeMirror or vim swallows it, and Chromium binds nothing
+      // to it, unlike F1, F3, F5, F6, F7, F10, F11 and F12. No test can show the Chromium half:
+      // Playwright injects keys through CDP at the renderer, so browser-chrome bindings never apply
+      // in a test.
       //
       // **THE FOURTH ARGUMENT IS NOT OPTIONAL, EVEN THOUGH ITS TYPE SAYS IT IS.** Calling
-      // `activateHover` with none — as an earlier version of this binding did — does not mean "no
-      // lock": CodeMirror's exported `activateHover` defaults a missing `until` to `() => false`,
-      // and `() => false` is still a function, so `HoverPlugin.activateHover`'s `done()` locks the
-      // tooltip unconditionally (it only skips the lock when `until` itself is falsy). A locked
-      // tooltip is invisible to `mousemove`'s and `mouseleave`'s own auto-close, which both check
-      // `!this.locked.has(active)` before doing anything, and `checkHover` refuses to run at all
-      // while `this.active.length` is nonzero — so the omission does not just leave the F2 tooltip
-      // open, it also stops the pointer tooltip from ever opening again in this editor. Measured by
-      // pressing F2 once and then hovering: neither closes, for the rest of the page's life.
+      // `activateHover` with none does not mean "no lock": CodeMirror's exported `activateHover`
+      // defaults a missing `until` to `() => false`, and `() => false` is still a function, so
+      // `HoverPlugin.activateHover`'s `done()` locks the tooltip unconditionally (it only skips the
+      // lock when `until` itself is falsy). A locked tooltip is invisible to `mousemove`'s and
+      // `mouseleave`'s own auto-close, which both check `!this.locked.has(active)` before doing
+      // anything, and `checkHover` refuses to run at all while `this.active.length` is nonzero — so
+      // the omission does not just leave the F2 tooltip open, it also stops the pointer tooltip from
+      // ever opening again in this editor.
       //
       // **THE POLARITY BELOW WAS READ OFF THE VENDORED SOURCE, NOT GUESSED.** The state field
       // `hoverTooltip` builds reads `lock = locked.get(value)` and, whenever it has an active

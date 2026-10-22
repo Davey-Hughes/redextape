@@ -20,6 +20,8 @@ import { lambdaSettled } from './lambda-text'
 
 const LAMBDA_DECLINES = 'let mut n = 1; fn apply0(g) { g(0) } let f = |x| x + n; n = 10; apply0(f)'
 
+// Section citations here are the 5a-ii design's unless they name another.
+//
 // NOT `[1, 2]`. Its 455 rows would render acceptably unvirtualized, so it cannot demonstrate the one
 // property this table exists for. `map_fold` is 25,852 rows (design §3.1). Module-scoped, not local to
 // `stepping`, because `BIG`'s `fn` definitions are also this file's example of a source construct
@@ -42,22 +44,19 @@ const TM_HALF = 39_000
 /**
  * `retype`, but waits for the run it triggers to finish before returning.
  *
- * THE INVARIANT IS NOW TRUE, AND IT WAS NOT BEFORE. `results.dataset.state` flips to `'idle'` only
- * from `onReply`'s `'no-session'` and `'result'` arms, and `onReply` only runs for the CURRENT
- * generation. `schedule` claims that generation synchronously inside the same `dispatch` this
- * function makes (`SessionClient.supersede`), so every reply belonging to a previous program is
- * already filtered by the time this starts polling. Until PR 5b the bump happened 300 ms later,
- * inside `request`, and a stale `result` landing in the gap resolved this against the OLD program —
- * two flakes on 5a-ii traced to exactly that.
+ * `results.dataset.state` flips to `'idle'` only from `onReply`'s `'no-session'`, `'result'` and `'worker-error'`
+ * arms, and `onReply` only runs for the CURRENT generation. `schedule` claims that generation synchronously inside
+ * the same `dispatch` this function makes (`SessionClient.supersede`), so every reply belonging to a previous
+ * program is already filtered by the time this starts polling.
  *
  * **THREE WAITS: THE TM LEG STARTING TO RECORD, ITS RECORDING HALF WAY, THEN THE RUN'S END.** `BIG`'s run ends only
- * once its TM leg has recorded a full history, to step 78,458, and as one wait it took 7,583 to 8,601 ms at
- * `CPUQuota=25%` (2026-10-05), against `until`'s 10 s; as two, the second took up to 7,400 ms. The TM leg records
- * last, after λ and asm, and its step line reads `…` from its first frames until it stops and counts them, so the first
- * wait ends where its recording begins and the second at `TM_HALF` steps; for a run with fewer TM frames, each ends at
- * the result. The compile is claimed synchronously at the dispatch (`compile.ts`'s `schedule`), and a step line
- * waiting on a compile drops its `…` (`controls.ts`): the first two assertions hold both, so no wait can pass on the
- * previous program, and the third holds that the line the second wait counts is this run's.
+ * once its TM leg has recorded a full history, to step 78,458, which as one wait ran close to `until`'s 10 s at
+ * `CPUQuota=25%`. The TM leg records last, after λ and asm, and its step line reads `…` from its first frames until
+ * it stops and counts them, so the first wait ends where its recording begins and the second at `TM_HALF` steps; for
+ * a run with fewer TM frames, each ends at the result. The compile is claimed synchronously at the dispatch
+ * (`compile.ts`'s `schedule`), and a step line waiting on a compile drops its `…` (`controls.ts`): the first two
+ * assertions hold both, so no wait can pass on the previous program, and the third holds that the line the second
+ * wait counts is this run's.
  */
 async function settled(v: EditorView, src: string): Promise<void> {
   const tmStep = () => document.querySelector('[data-leaf="tm-0"] .step')?.textContent ?? ''
@@ -75,7 +74,7 @@ async function settled(v: EditorView, src: string): Promise<void> {
 
 /**
  * `⏭` on a view's strip: its leg to the newest recorded step, once it is live. **A RUN OPENS ON STEP 0** (`History`),
- * and the cases that call this were written against the newest step, where a run opened before.
+ * and the cases that call this are written against the newest step.
  */
 async function toNewest(leg: 'lambda' | 'asm' | 'tm'): Promise<void> {
   const button = () => document.querySelector<HTMLButtonElement>(`[data-leaf="${leg}-0"] .controls button.to-newest`)
@@ -87,27 +86,14 @@ describe('the app, end to end', () => {
   // ONE MOUNT FOR THE FILE. ES module imports are cached, so `main()` runs once per page and Vitest
   // gives each test FILE its own page — mounting per test would silently reuse the first app.
   beforeAll(async () => {
-    // Each browser test file gets its own in-memory `Storage` now, installed in `tests/browser/setup.ts`
-    // before this file's own module body runs — every key starts empty for this page regardless of what
-    // an earlier run left behind, so none of the three keys this file used to clear (appearance, layout,
-    // buffers) needs clearing here any more; see that file's doc for why.
     document.body.innerHTML = SHELL
     view = await (await import('../../src/main')).ready
   })
 
   /**
-   * **THE SYNCHRONY WAS REAL, AND IT WAS GIVEN UP DELIBERATELY.** This test was named `highlights
-   * keywords synchronously` and asserted `.tok-keyword` in the same dispatch as the document, which
-   * held: `classifySource` ran on the main thread inside the update listener, so the colour landed in
-   * the keystroke's own frame. Plan 7 part 3b replaced it with `colour.ts`'s tree-sitter `ViewPlugin`,
-   * whose grammar arrives over a fetch — one mechanism serving four languages instead of one Rust
-   * function serving one, at the cost of the first frame after a mount. A test named for synchrony
-   * that awaits is a test whose name lies, so the name went with the contract.
-   *
    * `tests/browser/colour.test.ts` is where the colouring itself is asserted, for the source editor and
-   * each leg's copy editor. What this line keeps is the pairing: the same program that colours is the one
-   * that reports its legs — all three since the asm leg (Plan 7 part 5) — which is the end-to-end claim
-   * this test has always been about.
+   * each leg's copy editor. What this test keeps is the pairing: the same program that colours is the one
+   * that reports its legs, all three, which is the end-to-end claim this test is about.
    */
   it('colours keywords once the grammar lands, and reports all three legs', async () => {
     retype(view, 'let x = 40; x + 2')
@@ -122,15 +108,13 @@ describe('the app, end to end', () => {
     expect(resultsText()).toContain('42')
   })
 
-  // THE FIRST BINDER TOKEN IS EXACTLY `λ`, NOT `λ` PLUS ITS NAME. Written for a critical finding on the
-  // flat frame — `LambdaState.spans` are BYTE offsets, `λ` is 2 bytes but 1 UTF-16 code unit, and slicing
-  // `frame.text` by byte offset drew this span as `"λf"` — it now reads the step's tree, whose layout
-  // writes the glyph and the name as two tokens. The flat frame's byte conversion has its own test, in
-  // `lambda-body.test.ts`.
+  // THE FIRST BINDER TOKEN IS EXACTLY `λ`, NOT `λ` PLUS ITS NAME. The λ pane reads the step's tree, whose
+  // layout writes the glyph and the name as two tokens. The flat frame's byte conversion has its own test,
+  // in `lambda-body.test.ts`.
   it('renders the λ pane’s first binder span as exactly "λ", not "λ" plus its name', async () => {
     await until(() => resultsText().includes('reductions'))
     // STEP 0, WHERE THE TERM HAS BINDERS TO SHOW: the frontier is a normal form the λ view draws as the
-    // chip `42` (Plan 7 part 4a), which has none.
+    // chip `42`, which has none.
     ;[...document.querySelectorAll<HTMLButtonElement>('[data-leaf="lambda-0"] .controls button')]
       .find((b) => b.textContent === '↺')
       ?.click()
@@ -148,32 +132,31 @@ describe('the app, end to end', () => {
   it('lints a broken program and says it did not compile', async () => {
     retype(view, 'let x = ;')
     await until(() => resultsText().includes('not compiled'))
-    // **THE WAIT IS THE ASSERTION, AND THIS LINE USED TO RESTATE THE WAIT'S OWN PREDICATE.** It read
-    // `expect(resultsText()).toContain('not compiled')` directly under a wait for that same substring, so
-    // it could not fail on any run.
+    // **THE WAIT IS THE ASSERTION**: `expect(resultsText()).toContain('not compiled')` directly under a wait
+    // for that same substring could not fail on any run.
     //
     // WHAT THE WAIT CANNOT SAY IS THAT THE LAST GOOD RUN'S READOUT IS GONE. `#results` is rebuilt per
     // reply, and a rebuild that ADDED the failure row rather than replacing the rows would satisfy the
     // wait while still reporting the previous program's β-steps beside it — two contradictory answers on
     // one screen, which is the failure this test's name ("says it did not compile") is written to
-    // exclude. `lambdaRows` (`results.ts`) is the only producer of that string and it needs a compiled
-    // `state` to reach the line that emits it, so a non-compiling program cannot honestly show it. The
-    // test above this one leaves those β-steps on screen, so the string really is there to lose.
+    // exclude. Of the program's rows only `lambdaRows` (`results.ts`) writes that string, and it needs a
+    // compiled `state` to reach the line that emits it, so a non-compiling program cannot honestly show
+    // it; a λ copy's readout (`readout.ts`'s `lambdaCopyParts`) writes it too, and this file makes no
+    // copy. The tests above leave those β-steps on screen — 'colours keywords once the grammar lands, and
+    // reports all three legs' asserts them — so the string really is there to lose.
     expect(resultsText()).not.toContain('reductions')
-    // `lintGutter` renders its marker asynchronously, after the lint source resolves. Verified against
-    // the rendered DOM (not just read off `@codemirror/lint`'s source): `cm-lintRange` is the underline
-    // mark in the document and `cm-lint-marker` is the gutter dot `lintGutter()` adds — both classes are
-    // present in the installed 6.9.7 build.
+    // `lintGutter` renders its marker asynchronously, after the lint source resolves. `cm-lintRange` is the
+    // underline mark in the document and `cm-lint-marker` is the gutter dot `lintGutter()` adds.
     await until(() => document.querySelectorAll('.cm-lintRange, .cm-lint-marker').length > 0)
   })
 
   it('shows the λ refusal, marks where it happened, and still answers for TM', async () => {
-    // THROUGH `settled`, FOR ITS THREE WAITS: this compile's one wait for the word took 7,705 ms at `CPUQuota=15%`.
+    // THROUGH `settled`, FOR ITS THREE WAITS.
     await settled(view, LAMBDA_DECLINES)
     expect(resultsText()).toContain('declined')
-    // Measured, not guessed: this program's mutable capture is resolved as an unbound name during
-    // lowering (`LowerError::Unsupported`), not as `LowerError::StatefulClosure` — so the reason reads
-    // "the λ backend does not support unbound `n`" rather than anything naming "closure". See
+    // This program's mutable capture is resolved as an unbound name during lowering
+    // (`LowerError::Unsupported`), not as `LowerError::StatefulClosure` — so the reason reads "the λ backend
+    // does not support unbound `n`" rather than anything naming "closure". See
     // `crates/redextape-wasm/src/session.rs`'s `lambda_status`.
     expect(resultsText()).toContain('unbound')
     // The TM leg still answers — a declined backend is not a failed compile.
@@ -224,21 +207,19 @@ describe('the app, end to end', () => {
     await until(() => resultsText().includes('reductions'))
     expect(resultsText()).not.toContain('declined')
 
-    // Leave the buffer as the other tests found it, in case one is ever added after this.
+    // Leave the buffer as the other tests found it, for the tests after this one.
     retype(view, 'let x = 40; x + 2')
     await until(() => resultsText().includes('reductions'))
   })
 
-  // IMPORTANT 2's proof: a `worker-error` must not kill the app. `main.ts` used to answer it with
-  // `showBanner(root, ...)`, which is `root.replaceChildren(bannerEl)` — deleting the editor, both
-  // panes, and `#results` in one call, after which nothing on the page could ever dispatch again.
+  // A `worker-error` must not kill the app.
   //
   // TRIGGERED VIA THE PICKER, the one reachable path to `compile()` throwing without a second bug to
-  // manufacture: `EncodingKind::parse` (`redextape-wasm`'s `compile` doc) is the only thing in this
-  // path that throws, and it throws for any name outside the registry. The picker itself only ever
-  // offers registered names —
-  // this test appends one it does not, and selects it exactly the way a user's own click would, so the
-  // `change` event `main.ts` listens for is the real one, not a synthesized substitute for it.
+  // manufacture: `compile` throws for any name `EncodingKind::parse` does not recognise, which is any
+  // name outside the registry, and its doc expects no other throw (`redextape-wasm`'s `compile` doc).
+  // The picker itself only ever offers registered names — this test appends one it does not, and
+  // selects it exactly the way a user's own click would, so the `change` event `main.ts` listens for
+  // is the real one, not a synthesized substitute for it.
   it('recovers from a worker-error without killing the editor', async () => {
     await settled(view, 'let x = 40; x + 2')
 
@@ -268,12 +249,12 @@ describe('the app, end to end', () => {
     expect(resultsText()).toContain('7 reductions')
   })
 
-  // TASK 9's PROOF. `onReply`'s `compiled` arm now dispatches `setLink.of(null)` alongside
-  // `setDecline.of(...)` — without it, a link painted before a recompile survives one that comes with
-  // NO document edit, which is exactly what the `#encoding` picker's `change` listener causes: it
-  // calls `schedule` directly against the unchanged buffer, so `docChanged` never fires and `linkMark`
-  // never gets its own chance to clear the mark. The stale `.linked` would then be naming a construct
-  // resolved against the PREVIOUS compile's index, against a pane pair now showing a different one.
+  // `onReply`'s `compiled` arm dispatches `setLink.of(null)` alongside `setDecline.of(...)` — without it,
+  // a link painted before a recompile survives one that comes with NO document edit, which is exactly what
+  // the `#encoding` picker's `change` listener causes: it calls `schedule` directly against the unchanged
+  // buffer, so `docChanged` never fires and `linkMark` never gets its own chance to clear the mark. The
+  // stale `.linked` would then be naming a construct resolved against the PREVIOUS compile's index, against
+  // a pane pair now showing a different one.
   it('clears the link mark when the encoding picker recompiles with no document change', async () => {
     await settled(view, 'let x = 40; x + 2')
 
@@ -304,18 +285,17 @@ describe('the app, end to end', () => {
     await settled(view, 'let x = 40; x + 2')
   })
 
-  // THE COMMON PATH, NOT AN EDGE CASE. Measured across the corpus, 18-50% of clickable constructs emit
-  // no machine states at all (`link-status.ts`'s module doc) — the transparent `let`/`seq` binders, the
-  // `Lambda`s, and statically-resolved callee `Var`s. `let x = 40; x + 2` does not exercise this: every
-  // one of ITS constructs turns out to own at least one state (checked directly against the running
-  // app, not assumed). `BIG`'s `fn map(xs, f) { ... }` at offset 0 does — a function definition's own
-  // span never gets an instruction, only the defunctionalized call sites downstream of it do.
+  // THE COMMON PATH, NOT AN EDGE CASE. A substantial share of clickable constructs emit no machine states
+  // at all (`link-status.ts`'s module doc) — the transparent `let`/`seq` binders, the `Lambda`s, and
+  // statically-resolved callee `Var`s. `let x = 40; x + 2` does not exercise this: every one of ITS
+  // constructs owns at least one state. `BIG`'s `fn map(xs, f) { ... }` at offset 0 does — a function
+  // definition's own span never gets an instruction, only the defunctionalized call sites downstream of it do.
   it('reports the absence when a construct emits no instructions or machine states', async () => {
     await settled(view, BIG)
     linkAt(view, 0)
     await until(() => linkStatus() !== '')
     // A construct the machine bills no state to is one the asm lowering bills no instruction to — the machine is built
-    // from those instructions — and the line says both in one clause (Plan 7 part 5).
+    // from those instructions — and the line says both in one clause.
     expect(linkStatus()).toContain('no instructions or machine states')
     // No block can light for a construct that owns none.
     expect(linkedRowCount()).toBe(0)
@@ -329,11 +309,9 @@ describe('the app, end to end', () => {
     expect(table).not.toBeNull()
     if (!table) return
 
-    // FIND A ROW WHOSE STATE HAS AN OWNER, because most do not — measured, a large majority of TM
-    // states are scaffolding with no source owner at all (`sourcemap.rs`'s module doc). The table is
-    // virtualized, so the UNSCROLLED first page alone is not enough here — checked directly against
-    // this fixture, its first ~24 rendered rows resolve to nothing. This walks the table in slices,
-    // clicking every row rendered at each, until one resolves.
+    // FIND A ROW WHOSE STATE HAS AN OWNER, because most do not. The table is virtualized, so the UNSCROLLED
+    // first page alone is not enough here — its first ~24 rendered rows resolve to nothing. This walks the
+    // table in slices, clicking every row rendered at each, until one resolves.
     let lit = ''
     let clicked = 0
     const SLICES = 12
@@ -372,7 +350,7 @@ describe('the app, end to end', () => {
     if (!table) return
 
     // Dispatched directly rather than assigned-and-awaited, the same idiom the scroll/follow tests
-    // above use: a real user scroll delivers its `scroll` event asynchronously, at the next rendering
+    // below use: a real user scroll delivers its `scroll` event asynchronously, at the next rendering
     // update, and this test needs the redraw to have happened before it reads the DOM below.
     table.scrollTop = table.scrollHeight / 2
     table.dispatchEvent(new Event('scroll'))
@@ -415,7 +393,7 @@ describe('the app, end to end', () => {
       // This file's `Storage` starts empty (`tests/browser/setup.ts` installs a fresh one per file), so
       // the button mounted reading `system` — no `data-theme` attribute, since `system` is its absence,
       // not the literal string `"system"`.
-      // THE VISIBLE WORD IS THE NAME NOW (Plan 7 part 2 spec §6); `title` keeps the full label. `◐` is a
+      // THE VISIBLE WORD IS THE NAME (Plan 7 part 2 spec §6); `title` keeps the full label. `◐` is a
       // text glyph Hack draws, so it is part of the text; `☀`/`☾` are drawn icons and add none.
       expect(document.documentElement.hasAttribute('data-theme')).toBe(false)
       expect(button.textContent).toBe('◐system')
@@ -465,8 +443,6 @@ describe('the app, end to end', () => {
       b?.click()
       return b
     }
-    // Hoisted above the tests that use `BIG` for scroll assertions (Fix 4's regression guard, below),
-    // not only the ones further down this file that originally declared them.
     const table = () => document.querySelector('[data-leaf="tm-0"] .state-table') as HTMLElement
     const spacer = () => document.querySelector('[data-leaf="tm-0"] .state-spacer') as HTMLElement
     /** `BIG`'s whole table, and the readiness signal for it: unique to this program among the fixtures. */
@@ -513,7 +489,7 @@ describe('the app, end to end', () => {
       await toNewest('lambda')
       expect(stepText('lambda')).toContain('step 7')
       // EVERY READ WAITS FOR THE STEP'S OWN TREE: the view draws the last step's tree, marked stale, for the
-      // one worker round trip until this step's arrives (Plan 7 part 4a's `lambdaSettled`).
+      // one worker round trip until this step's arrives (`lambdaSettled`).
       await lambdaSettled()
       const atSeven = paneText('lambda')
       click('lambda', '◀')
@@ -561,10 +537,8 @@ describe('the app, end to end', () => {
     // so it is plainly not the redex itself: the path named a redex `App` in the PRE-step term and β
     // replaced it with this, its CONTRACTUM (`viewmodel.rs`'s `redex_span` doc).
     //
-    // THE FIXTURE WAS CHOSEN FOR LAYER 5b's WORST BUG, a byte span sliced as UTF-16: three `λ` precede
-    // this redex's span, so the two readings disagree. The tree marks by node and has no span to slice,
-    // so that conversion now happens only in the flat text a step shows before its tree arrives, and
-    // `lambda-body.test.ts` holds it there.
+    // The tree marks by node and has no span to slice, so the conversion from byte offsets to UTF-16 happens
+    // only in the flat text a step shows before its tree arrives, and `lambda-body.test.ts` holds it there.
     it('marks the contractum the step produced, and nothing at step 0', async () => {
       await settled(view, 'let x = 40; x + 2')
       await until(() => !stepText('lambda').includes('not run'))
@@ -578,8 +552,8 @@ describe('the app, end to end', () => {
 
       const lit = [...document.querySelectorAll('[data-leaf="lambda-0"] .term .is-contractum')]
       expect(lit.length).toBeGreaterThan(0)
-      // Whitespace squeezed out, as it was when this read the flat text: the contractum may break across
-      // lines at the view's width, and a line break is not a space in the DOM.
+      // Whitespace squeezed out: the contractum may break across lines at the view's width, and a line
+      // break is not a space in the DOM.
       expect(
         lit
           .map((e) => e.textContent)
@@ -609,14 +583,11 @@ describe('the app, end to end', () => {
       await settled(view, 'let x = ;')
       expect(paneText('lambda')).toBe('')
       expect(document.querySelectorAll('[data-leaf="tm-0"] .tape').length).toBe(0)
-      // Design §6's error table: "panes read 'not compiled'". `sessions.ts`'s `resetLegs` used to leave
-      // `reason: ''` here, so the control strip's step readout (`controls.ts`'s `controlState`, written onto
-      // the `.step` span `pane-chrome.ts` builds) was blank too, not merely the term/tape area above it.
+      // 5a design §6's error table: "panes read 'not compiled'", the control strip's step readout included.
       expect(stepText('lambda')).toBe('not compiled')
       expect(stepText('tm')).toBe('not compiled')
     })
 
-    // THE DEFECT CLASS THAT HID IN PR 3c, at the UI layer this time.
     it('leaves the TM pane steppable when the λ backend declines', async () => {
       await settled(view, LAMBDA_DECLINES)
       expect(stepText('lambda')).toContain('does not support')
@@ -631,13 +602,13 @@ describe('the app, end to end', () => {
       expect(click('lambda', '▶')?.disabled).toBe(false)
     })
 
-    // THE `'declined'` λ LINK STATE, NEVER EXERCISED END TO END BEFORE THIS.
-    // `link-status.test.ts` drives `linkStatus` directly with an ALREADY-DECIDED state, and every other
-    // link test in this file clicks a construct under a program whose λ leg is available — so the
-    // order `draw.ts`'s `createDraw` asks in (no view, then a declined program, then the view's own
-    // answer) was verified only by inspection. `LAMBDA_DECLINES` is this file's own λ-declining fixture,
-    // reused rather than invented — its λ backend refuses the whole PROGRAM, so whatever source construct
-    // is clicked must report `'declined'`, not merely "no link" or one of the narrower absences.
+    // THE `'declined'` λ LINK STATE, END TO END. `link-status.test.ts` drives `linkStatus` directly with an
+    // ALREADY-DECIDED state, and every other link test in this file clicks a construct under a program whose
+    // λ leg is available, so this test drives the order `draw.ts`'s `createDraw` asks in (no view, then a
+    // declined program, then the view's own answer) end to end. `LAMBDA_DECLINES` is this file's own
+    // λ-declining fixture, reused rather than invented — its λ backend refuses the whole PROGRAM, so
+    // whatever source construct is clicked must report `'declined'`, not merely "no link" or one of the
+    // narrower absences.
     it('reports the declined state when linking a construct under a λ-declining program', async () => {
       await settled(view, LAMBDA_DECLINES)
       linkAt(view, 0)
@@ -647,48 +618,21 @@ describe('the app, end to end', () => {
       await settled(view, 'let x = 40; x + 2')
     })
 
-    // THE `'too-large'` λ LINK STATE IS NOT COVERED END TO END HERE, AND NEITHER WAS `'truncated'`, THE
-    // STATE IT REPLACED (Plan 7 part 4a) — TRIED, AND SKIPPED, on the one program shape that reaches either.
-    // `let x = 20000; x + 1` was the candidate (this language lowers naturals to unary Church numerals,
-    // so one literal is O(n) bytes of printed λ text): verified directly against `LinkIndex::build`
-    // (`redextape-core`) and against `redextape-wasm`'s own `Session`, natively, that this exact program
-    // compiles, prints (truncated at 12,064 of 65,536 bytes), takes its one depth-refused "step", and
-    // link-resolves the cut "20000" literal — all in low single-digit milliseconds, with the TM leg
-    // overflowing just as fast. NATIVELY THIS IS CHEAP. Under the real wasm32 build in a real browser it
-    // is not merely slow: dispatching this program crashes the worker's session — `Error: attempted to
-    // take ownership of Rust value while it was borrowed`, thrown from `Session.free()`/`dropLive()` in
-    // `session-worker.ts` — and the app never recovers (`#results` stays on the previous program's stale
-    // text). Reproduced with a fresh mount, and again after letting the prior compile settle fully
-    // first, so it is not the ordinary supersession race `dropLive`'s own doc already accounts for.
-    //
-    // MOST LIKELY CAUSE, not chased further because fixing it is out of scope for a doc/test Minor:
-    // `lambda/reduce.rs`'s `depth_exceeds` doc says the guard is "effective only when the running
-    // thread's stack is large enough (WASM shadow-stack sizing is a Plan 4 follow-up)" — an already-
-    // named, still-open gap. The recursive printer (`lambda/syntax.rs`'s `write`) walks to the same
-    // `MAX_TERM_DEPTH` (3,000) bound to build this term's `lambdaText`, calibrated with ~2x margin
-    // against an 8 MiB NATIVE stack; wasm32's default stack is far smaller, so the identical walk that
-    // takes 2ms natively plausibly overflows it, and a Rust panic under wasm is a module-poisoning abort
-    // (`redextape-wasm/src/lib.rs`'s own doc) with no unwinding to report it — leaving a later, unrelated
-    // `.free()` call to surface this borrow error instead of the real one.
-    //
-    // WHAT IT WOULD TAKE: measure the wasm32 stack's actual safe recursion depth for this printer the
-    // way `lambda/lower.rs`'s doc measured the native one, then either lower `MAX_TERM_DEPTH` to a bound
-    // safe on both targets, give wasm builds a larger shadow stack, or make the printer's walk iterative
-    // (as `depth_exceeds` itself already was made, 2026-08-01). None of that belongs in a Minors pass —
-    // a browser test that crashes the module is worse than the coverage gap it would close.
+    // THE `'too-large'` λ LINK STATE IS NOT COVERED END TO END HERE. The attempt at its predecessor, `'truncated'`,
+    // is in `docs/superpowers/notes/2026-10-17-code-history-web-tests.md`. The module crash it met is what
+    // `MAX_PRINT_DEPTH` guards against: `docs/superpowers/plans/2026-08-09-print-depth-cap.md`, Task 5.
 
-    // `raise_cap` refuses to clear `depth_capped`, so a continue button here would offer something
-    // that provably cannot work. There must be no button, not a disabled one.
+    // An `'ended'` run has nothing more to record (`controls.ts`'s `canRecordFurther` answers false for it), so
+    // a continue button here would offer something that cannot work. There must be no button, not a disabled one.
     it('offers no continue affordance once a run has ended', async () => {
       await settled(view, 'let x = 40; x + 2')
       const extend = document.querySelector<HTMLButtonElement>('[data-leaf="lambda-0"] .controls .extend')
       expect(extend?.hidden).toBe(true)
     })
 
-    // THE CHEAP HALF OF THE PATH THREE DOC COMMENTS NAME AS MOST LIKELY TO BE GOTTEN WRONG
-    // (`transport.ts`'s `forward`, `controls.ts`'s `canRecordFurther`, `step-controls.ts`'s `stepControls`) —
-    // and nothing exercised it until now. `▶` at the frontier of an `'ended'` run must not ask the
-    // worker for anything: the step readout must not move and the extend button must stay hidden.
+    // THE CHEAP HALF OF THE PATH THROUGH `transport.ts`'s `forward`, `controls.ts`'s `canRecordFurther` and
+    // `step-controls.ts`'s `stepControls`. `▶` at the frontier of an `'ended'` run must not ask the worker for
+    // anything: the step readout must not move and the extend button must stay hidden.
     it('does nothing when ▶ is pressed at the frontier of a run that already ended', async () => {
       await settled(view, 'let x = 40; x + 2')
       await toNewest('lambda')
@@ -704,12 +648,9 @@ describe('the app, end to end', () => {
       expect(extend?.hidden).toBe(true)
     })
 
-    // THE OTHER HALF, BY MEASUREMENT. `capped` needs the cursor's own cap (5,000,000 steps —
-    // `redextape-core/src/tm/sim.rs`'s `DEFAULT_CAPS`) exhausted first, which is unaffordable in a
-    // test. `budget` only needs `HISTORY_BYTES` (32 MiB) spent, which a worker-only probe measured
-    // this fixture reaching at 75,025 TM frames (~129,300 δ-steps known total from `compile`, only
-    // 58% of them recorded) in ~1.9s, with `[continue]` recording the remaining 54,276 frames to
-    // `'ended'` in ~1.3s more — see `task-12-report.md`'s "Fix pass" section for the raw numbers.
+    // THE OTHER HALF. `capped` needs the cursor's own cap (5,000,000 steps — `redextape-core/src/tm/sim.rs`'s
+    // `DEFAULT_CAPS`) exhausted first, which is unaffordable in a test. `budget` only needs `HISTORY_BYTES`
+    // (32 MiB) spent.
     it('records further once the TM leg spends its history budget, and the step count advances', async () => {
       const src =
         'fn map(xs, f) { if is_empty(xs) { nil } else { cons(f(head(xs)), map(tail(xs), f)) } } fn add1(x) { x + 1 } [3, 1, 2, 4].map(add1)'
@@ -726,8 +667,7 @@ describe('the app, end to end', () => {
       // ▶ AND [continue] ARE THE SAME `extend` REQUEST WITH DIFFERENT LABELS (`controls.ts`'s
       // `canForward`, `transport.ts`'s `forward`) — reaching `'budget'` a second time just to click the
       // other button would double an already-slow test for no more coverage, so this exercises ▶ here
-      // instead of `[continue]`: it must be the live button the fix makes it, not the disabled one it
-      // used to render at exactly this frontier.
+      // instead of `[continue]`: it must be live, not disabled, at exactly this frontier.
       expect(click('tm', '▶')?.disabled).toBe(false)
       await until(() => stepNumber(stepText('tm')) > stoppedStep, 'the frontier to advance past the stop')
       expect(stepNumber(stepText('tm'))).toBeGreaterThan(stoppedStep)
@@ -751,8 +691,7 @@ describe('the app, end to end', () => {
     it('restart returns to step 0 and forward walks out again', async () => {
       await settled(view, 'let x = 40; x + 2')
       // `settled` resolves on the RESULTS pane going idle, which is not the same event as the λ pane
-      // holding frames — so this read `'not run'` and failed roughly one run in six, from before this
-      // slice. Same root cause as the state-table test below, found while chasing that one.
+      // holding frames.
       await until(() => !stepText('lambda').includes('not run'))
       click('lambda', '↺')
       expect(stepText('lambda')).toContain('step 0')
@@ -760,8 +699,7 @@ describe('the app, end to end', () => {
       expect(stepText('lambda')).toContain('step 1')
     })
 
-    // LINKING AT EVERY STEP (Plan 7 part 4a). This test pinned the sentence that said the λ link was
-    // defined at step 0 only; the tree carries the constructs an `App` still owns at any step, so a later
+    // LINKING AT EVERY STEP. The tree carries the constructs an `App` still owns at any step, so a later
     // step links what reduction has not yet rewritten away — and says so, per step, for what it has.
     // `drawLink()` runs from `draw()`, so the sentence follows the play head without a click.
     it('links a construct at a later step while the term still carries it, and says when it no longer does', async () => {
@@ -782,13 +720,8 @@ describe('the app, end to end', () => {
       expect(linkStatus()).toContain('this construct has no node in the λ term at this step')
     })
 
-    // FIX 2's PRIMARY-DIRECTION PROOF: design decision 3's "source -> both", the primary direction of
-    // the whole feature. Two tests were believed to cover it and both only ever checked
-    // `.cm-editor .linked` and the status text; the one place `is-linked` appears elsewhere in this
-    // file (`reports the absence when a construct emits no instructions or machine states`, above)
-    // FILTERS those tokens OUT without ever asserting any exist — its own `tokens.length > 0` would pass
-    // even if `.is-linked` were never applied to anything. Nothing anywhere asserted that a
-    // SOURCE-originated link actually paints the λ window and the δ table, not only the source echo.
+    // THE PRIMARY-DIRECTION PROOF: 5b design decision 3's "source -> both", the primary direction of the whole
+    // feature. A SOURCE-originated link must paint the λ window and the δ table, not only the source echo.
     it('a source-originated link lights both the λ view and the δ table', async () => {
       await settled(view, 'let x = 40; x + 2')
       // STEP 0, WHERE EVERY CONSTRUCT HAS A NODE, and where a run opens (`History`): the frontier, the chip `42`,
@@ -797,8 +730,8 @@ describe('the app, end to end', () => {
       expect(stepText('lambda')).toContain('step 0')
       await lambdaSettled()
 
-      // The second `x` in `x + 2`, a `Var` reference that reads the let-bound value — verified directly
-      // against the running app to own both a λ span and at least one machine state.
+      // The second `x` in `x + 2`, a `Var` reference that reads the let-bound value, owns both a λ span and
+      // at least one machine state.
       linkAt(view, 'let x = 40; x + 2'.indexOf('x + 2'))
       await until(() => document.querySelector('.term .is-linked') !== null)
 
@@ -839,15 +772,11 @@ describe('the app, end to end', () => {
       await settled(view, 'let x = 40; x + 2')
     })
 
-    // FIX 3's REGRESSION GUARD: `linkMark` clears its own decoration on `docChanged`, and `main.ts`'s
-    // update listener sets `linkable = false` / `link = null` in the SAME synchronous dispatch, well
-    // before any debounced worker round trip could confirm the edit even compiles — so the source echo
-    // went stale correctly. But the listener never told the OTHER two panes: the λ window and the
-    // δ-table's `.is-linked` rows stayed painted from the PREVIOUS index until the next `compiled`
-    // reply landed, up to `DEBOUNCE_MS` plus a compile — seconds on a larger program — all while the
-    // status line already said "linking resumes when this compiles". All the assertions below are
-    // checked with no `await` after the edit, for the same reason the original version of this test
-    // did: a version that needed one would be proving the wrong thing.
+    // AN EDIT CLEARS ALL THREE PANES. `linkMark` clears its own decoration on `docChanged`, and `main.ts`'s
+    // update listener calls `linkWiring.clearLink()`, which sets `linkable = false` / `link = null`, in the
+    // SAME synchronous dispatch, well before any debounced worker round trip could confirm the edit even
+    // compiles. All the assertions below are checked with no `await` after the edit: a version that needed
+    // one would be proving the wrong thing.
     it('clears all three panes on an edit, not only the source echo, and says linking will resume', async () => {
       await settled(view, 'let x = 40; x + 2')
       // Step 0, so this test can prove the λ view was actually painted before the edit, not merely that
@@ -862,7 +791,6 @@ describe('the app, end to end', () => {
       view.dispatch({ changes: { from: view.state.doc.length, insert: ' ' } })
       expect(linkedSource()).toBe('')
       expect(linkStatus()).toContain('resumes')
-      // THE FIX: before it, both of these still held their PREVIOUS values here.
       expect(document.querySelector('.term .is-linked')).toBeNull()
       expect(linkedRowCount()).toBe(0)
 
@@ -871,8 +799,7 @@ describe('the app, end to end', () => {
     })
 
     // THE THIRD LINK DIRECTION, λ -> SOURCE: a click on a token links the construct its node belongs to —
-    // its own link, or its nearest ancestor's (`Tree.linkedAncestor`, the innermost, as `nodeAtLambda`
-    // answered for the step-0 window this replaced).
+    // its own link, or its nearest ancestor's (`Tree.linkedAncestor`, the innermost).
     it('clicking a λ token lights the specific source construct its node belongs to', async () => {
       await settled(view, 'let x = 40; x + 2')
       click('lambda', '↺')
@@ -890,8 +817,7 @@ describe('the app, end to end', () => {
       expect(token?.classList.contains('is-linked')).toBe(false)
       token?.click()
       await until(() => linkedSource() !== first)
-      // THE SPECIFIC CONSTRUCT, measured against the running app: the first token is the root application's
-      // head, the `let`'s own lowering — the same answer the step-0 window gave for its first token.
+      // THE SPECIFIC CONSTRUCT: the first token is the root application's head, the `let`'s own lowering.
       expect(linkedSource()).toBe('let x = 40;')
       expect(view.state.doc.toString()).toContain(linkedSource())
     })
@@ -962,15 +888,11 @@ describe('the app, end to end', () => {
       expect(rowShown(term, line), 'the clicked row left the screen').toBe(true)
     })
 
-    // FIX 4's REGRESSION GUARD: `TmPane.setLink` wrote `scrollTop` and then called `#drawTable`, which
-    // — while `#follow.following` (the default state on every fresh compile; see `setProgram`'s
-    // `#follow.attach()`) — computed its OWN target from the machine's CURRENT frame and overwrote the
-    // link's write in the same synchronous turn, so a source-originated link scroll never moved the
-    // table at all while following. NEITHER SCROLL TEST ABOVE EXERCISES THIS: `follows the machine into
-    // view with no user scroll at all` only proves the table lands somewhere non-zero on its own, and
-    // `stops following once the user scrolls` scrolls the table MANUALLY first, which detaches `Follow`
-    // before any link is ever in play. This is the one that links from source while following is still
-    // on, which is the default a user hits on every fresh compile.
+    // A SOURCE-ORIGINATED LINK SCROLLS THE TABLE EVEN WHILE IT FOLLOWS THE MACHINE. NEITHER SCROLL TEST BELOW
+    // EXERCISES THIS: `follows the machine into view with no user scroll at all` only proves the table lands
+    // somewhere non-zero on its own, and `stops following once the user scrolls` scrolls the table MANUALLY
+    // first, which detaches `Follow` before any link is ever in play. This is the one that links from source
+    // while following is still on, which is the default a user hits on every fresh compile.
     it('a source-originated link scrolls the table into view even while it is still following the machine', async () => {
       await settled(view, BIG)
       await toNewest('tm')
@@ -983,25 +905,23 @@ describe('the app, end to end', () => {
       expect(reattach.hidden).toBe(true)
 
       // `f(head(xs))` — `map`'s higher-order `f` parameter, called through a closure rather than a
-      // statically-resolved callee — is the one construct in `BIG` that owns machine states at all;
-      // verified directly against the running app by scanning every source offset. Position `+1` lands
-      // on `(`, a byte no narrower child span (`f` alone, or `head(xs)`) covers, so it resolves to the
-      // call expression itself rather than the bare callee `Var`.
-      // THE SCROLL'S OWN EVENT IS AWAITED BEFORE ANYTHING IS READ. It comes a frame after the link and redraws the
-      // table, and while this read the table in the link's own turn it passed with that redraw scrolling straight
-      // back to the machine: the link's rows were never on screen for longer than the turn that drew them.
+      // statically-resolved callee — is the one construct in `BIG` that owns machine states at all.
+      // Position `+1` lands on `(`, a byte no narrower child span (`f` alone, or `head(xs)`) covers, so it
+      // resolves to the call expression itself rather than the bare callee `Var`.
+      // THE SCROLL'S OWN EVENT IS AWAITED BEFORE ANYTHING IS READ. It comes a frame after the link and
+      // redraws the table, so a read in the link's own turn cannot see what that redraw does.
       const echo = scrollEcho(table())
       linkAt(view, BIG.indexOf('f(head(xs))') + 1)
       await until(() => linkedRowCount() > 0)
       await echo()
 
-      // THE BUG, DIRECTLY: a linked block must actually be ON SCREEN, which virtualization only renders
-      // once the table has actually scrolled there. Under the reverted-scroll bug `scrollTop` never
-      // leaves `followedTop` and this stays null.
+      // A LINKED BLOCK MUST ACTUALLY BE ON SCREEN, which virtualization only renders once the table has
+      // actually scrolled there. Were following to overwrite the link's scroll, `scrollTop` would never
+      // leave `followedTop` and this would stay null.
       expect(document.querySelector('[data-leaf="tm-0"] .state-row.is-linked')).not.toBeNull()
       expect(table().scrollTop).not.toBe(followedTop)
 
-      // FOLLOWING ITSELF WAS NOT DISTURBED — the other half of design §5.1 and `setLink`'s own doc: a
+      // FOLLOWING ITSELF WAS NOT DISTURBED — the other half of 5b design §5.1 and `setLink`'s own doc: a
       // link's scroll holds until the machine moves and is not a reattach/detach decision, so `Follow`'s own
       // flag must read exactly as it did before the link ran.
       expect(reattach.hidden).toBe(true)
@@ -1011,11 +931,11 @@ describe('the app, end to end', () => {
     })
 
     /**
-     * THE SELF-LOOP CASE, THROUGH THE REAL TM VIEW (amendment 21). The rule table's follow row is the current
-     * state's own header row, and a step that loops in its state — the ordinary case in a compiled machine —
-     * leaves that row exactly where it was: a hold keyed on the followed row instead of the frame would
-     * outlive such a step, leaving the table parked on the link's block, the current rule off screen, with
-     * no reattach offered because following itself was never touched.
+     * THE SELF-LOOP CASE, THROUGH THE REAL TM VIEW (Plan 7 part 5 spec amendment 21). The rule table's follow
+     * row is the current state's own header row, and a step that loops in its state — the ordinary case in a
+     * compiled machine — leaves that row exactly where it was: a hold keyed on the followed row instead of the
+     * frame would outlive such a step, leaving the table parked on the link's block, the current rule off
+     * screen, with no reattach offered because following itself was never touched.
      *
      * THE SELF-LOOPING STEP IS FOUND, NOT HARDCODED. `BIG`'s compiled machine self-loops early and often, but
      * pinning a step number to it would make this test pass for the wrong reason the day `BIG` or its
@@ -1028,8 +948,8 @@ describe('the app, end to end', () => {
       expect(reattach.hidden).toBe(true)
 
       // RESTART TO THE OLDEST KEPT STEP, then walk forward until one step leaves the current state's name
-      // unchanged from the step before it. `BIG`'s history is capped well past this point (§3.1's design),
-      // so the oldest kept step is not step 0 — the scan does not assume it is.
+      // unchanged from the step before it. `BIG`'s history is capped well past this point, so the oldest
+      // kept step is not step 0 — the scan does not assume it is.
       click('tm', '↺')
       let prev = currentStateName()
       let loopStep = -1
@@ -1084,30 +1004,26 @@ describe('the app, end to end', () => {
     it('renders only the visible rows, not the whole machine', async () => {
       await settled(view, BIG)
       // `settled` resolves on the RESULTS pane going idle, which is not the same event as THIS
-      // program's table being on screen. Observed flaking 2 runs in 10, and fast — under 210 ms
-      // against a normal ~1 s — the signature of asserting before the table is ready.
+      // program's table being on screen.
       //
-      // WAITING FOR `.state-row` TO BE NON-EMPTY DOES NOT FIX IT, and that was the first attempt: the
-      // previous test leaves its own rows in the DOM, so the wait is satisfied instantly by a stale
-      // table and the geometry below is read against the wrong program. The readiness signal has to
-      // be specific to `BIG` — its spacer is exactly 25,852 rows x ROW_HEIGHT.
+      // WAITING FOR `.state-row` TO BE NON-EMPTY IS NOT ENOUGH: the previous test leaves its own rows in
+      // the DOM, so the wait is satisfied instantly by a stale table and the geometry below is read
+      // against the wrong program. The readiness signal has to be specific to `BIG` — its spacer is
+      // exactly 25,852 rows x ROW_HEIGHT.
       await until(() => spacer().style.height === BIG_SPACER)
       const rows = document.querySelectorAll('[data-leaf="tm-0"] .state-row')
       // THE SCROLL CONTAINER MUST ACTUALLY BE BOUNDED, and this asserts it rather than assuming it.
-      // The TM view's flex rules (spec §9.1) are what bound it, and Vitest serves its own tester HTML —
-      // `tests/browser/setup.ts` is what gets `style.css` onto that page. If that setup ever breaks, the
-      // box lays out at its full content height (measured: 271,968px for 11,332 rows), nothing bounds
-      // `#drawTable`'s window computation, and every draw during recording renders every row. THERE IS
-      // NO CLAMP IN `TmPane` TO FALL BACK ON — it was deleted a commit before this comment was first
-      // written, on the grounds that untested defence encoding a CSS rule in TypeScript is worse than
-      // the gap it papers over. So the failure is not an assertion below reading the wrong number: it is
-      // `await settled(view, BIG)` above never resolving, because recording 25,852 rows' worth of frames
-      // through a renderer that redraws all of them every step does not finish inside `until`'s 30s
-      // budget, and the whole test times out before reaching the expectations that follow.
-      // THIS is the bounded-container assertion. Two others used to sit here and both were drained by
-      // the `until` above: once the spacer is pinned to `BIG_SPACER`, asserting it exceeds 100,000 is a
-      // tautology, and `clientHeight * 10 < spacer` only restates `clientHeight < 62,044`, which this
-      // line already beats by a wide margin.
+      // The TM view's flex rules (Plan 7 part 4 spec §9.1) are what bound it, and Vitest serves its own
+      // tester HTML — `tests/browser/setup.ts` is what gets `style.css` onto that page. If that setup
+      // ever breaks, the box lays out at its full content height, nothing bounds the window
+      // `VirtualGrid`'s `draw` (through `TmPane`'s `#drawTable`) computes, and every draw during
+      // recording renders every row. THERE IS NO CLAMP IN `TmPane` TO FALL BACK ON:
+      // untested defence encoding a CSS rule in TypeScript is worse than the gap it papers over. So the
+      // failure is not an assertion below reading the wrong number: it is `await settled(view, BIG)` above
+      // never resolving, because recording 25,852 rows' worth of frames through a renderer that redraws
+      // all of them every step does not finish inside `until`'s budget, and the whole test times out
+      // before reaching the expectations that follow.
+      // THIS is the bounded-container assertion.
       expect(table().clientHeight).toBeLessThan(window.innerHeight)
       const bound = Math.ceil(table().clientHeight / ROW_HEIGHT) + 1 + 2 * OVERSCAN
       expect(rows.length).toBeLessThanOrEqual(bound)
@@ -1125,10 +1041,9 @@ describe('the app, end to end', () => {
     it('highlights the current state and outlines the rule about to fire', async () => {
       await settled(view, 'let x = 40; x + 2')
       await toNewest('tm')
-      // By the time `settled` resolves, the TM leg is fully recorded and its head sits at the
-      // frontier, which is `halt` — `frame.rule` is `null` there (`types.ts`'s doc: "at an accept
-      // state, at `halt`, or at a stuck configuration"), so `is-next` would be empty at this exact
-      // frame. `◀` once steps back to the frame whose rule fires INTO halt, which is where a rule is
+      // By the time `settled` resolves the TM leg is fully recorded, and `⏭` puts its head at the
+      // frontier, which is `halt` — `frame.rule` is `null` there, so `is-next` would be empty at this
+      // exact frame. `◀` once steps back to the frame whose rule fires INTO halt, which is where a rule is
       // actually about to fire.
       click('tm', '◀')
       expect(document.querySelectorAll('[data-leaf="tm-0"] .state-row.is-current').length).toBe(1)
@@ -1139,7 +1054,7 @@ describe('the app, end to end', () => {
       await settled(view, 'let x = 40; x + 2')
       await toNewest('tm')
       // Same frontier fact as above: `▶` is a no-op here (`transport.ts`'s `forward`, mirroring the λ
-      // leg's already-tested "does nothing at the frontier of a run that already ended"), so stepping
+      // leg's 'does nothing when ▶ is pressed at the frontier of a run that already ended'), so stepping
       // must go backward to move at all.
       const before = document.querySelector('[data-leaf="tm-0"] .state-row.is-current')?.textContent
       // Several steps, not one: a machine can re-enter the same state, so a single ◀ proves nothing.
@@ -1177,10 +1092,10 @@ describe('the app, end to end', () => {
       expect(table().scrollTop).toBe(0)
     })
 
-    // THE REATTACH CONTROL ITSELF. Design §3.7/§4 mandated it and nothing built it into the plan's
-    // tasks; `follow` above proves detach happens but never proves there is any way back short of a
-    // recompile. ADDED AND REMOVED, NEVER DISABLED (`pane-chrome.ts`'s idiom for the continue button):
-    // present only while detached, and clicking it must redraw immediately rather than wait for a step.
+    // THE REATTACH CONTROL ITSELF (design §3.7/§4). `stops following once the user scrolls` above proves
+    // detach happens but never proves there is any way back short of a recompile. ADDED AND REMOVED,
+    // NEVER DISABLED: present only while detached, and clicking it must redraw immediately rather than
+    // wait for a step.
     it('reattaches through its own control, which exists only while detached', async () => {
       await settled(view, BIG)
       await toNewest('tm')
@@ -1208,17 +1123,16 @@ describe('the app, end to end', () => {
 
     // A SCROLL EVENT ARRIVING WHILE THE TABLE IS HIDDEN MUST NOT DETACH IT.
     //
-    // `#drawTable` writes `scrollTop`, and the browser delivers that write's `scroll` event at the next
-    // rendering update rather than synchronously. Hiding the table in between lands the echo on a
-    // `display: none` box, where `scrollTop` reads back 0 — further from the expected position than any
-    // tolerance — so the table detached with no user gesture at all and the highlighted row left the
-    // DOM. Reproduced 5/5 in Chromium by stepping, hiding, then showing.
+    // `VirtualGrid`'s `draw` (through `TmPane`'s `#drawTable`) writes `scrollTop`, and the browser
+    // delivers that write's `scroll` event at the next rendering update rather than synchronously. Hiding
+    // the table in between lands the echo on a `display: none` box, where `scrollTop` reads back 0 —
+    // further from the expected position than any tolerance — so without a guard the table would detach
+    // with no user gesture at all and the highlighted row would leave the DOM.
     //
-    // THE EVENT IS DISPATCHED RATHER THAN AWAITED, deliberately. A version of this test that stepped
-    // and hid and waited two animation frames passed against the bug — whether a real echo is in flight
-    // at the moment of the hide depends on whether that step moved the follow target at all, which
-    // depends on the program. Dispatching puts the event where the mechanism needs it, so the test
-    // fails whenever the guard is removed instead of whenever the timing happens to line up.
+    // THE EVENT IS DISPATCHED RATHER THAN AWAITED, deliberately. Whether a real echo is in flight at the
+    // moment of the hide depends on whether that step moved the follow target at all, which depends on
+    // the program. Dispatching puts the event where the mechanism needs it, so the test fails whenever the
+    // guard is removed instead of whenever the timing happens to line up.
     it('ignores a scroll that arrives while the table is hidden', async () => {
       await settled(view, BIG)
       await toNewest('tm')
@@ -1236,12 +1150,8 @@ describe('the app, end to end', () => {
       expect(document.querySelector('[data-leaf="tm-0"] .state-row.is-current')).not.toBeNull()
     })
 
-    // THE CONTROL GOES AWAY WITH THE THING IT CONTROLS. `#reattach.hidden` is maintained inside
-    // `#drawTable`, which the toggle called only when REOPENING — so hiding a detached table left a
-    // live "follow" button with nothing under it, offering to reposition something not on screen.
-    // That is the idiom's own rule broken (`pane-chrome.ts`: a control is present only when it does
-    // something), and the closed-table term written for it could never fire, because `#drawTable`,
-    // where it is evaluated, did not run on the way down.
+    // THE CONTROL GOES AWAY WITH THE THING IT CONTROLS: a control is present only when it does something,
+    // and a "follow" button over a hidden table would offer to reposition something not on screen.
     it('takes the reattach control away with the table it belongs to', async () => {
       await settled(view, BIG)
       await toNewest('tm')
@@ -1261,14 +1171,14 @@ describe('the app, end to end', () => {
       expect(reattach.hidden).toBe(false)
     })
 
-    // A HIDE MUST NOT POISON THE ECHO EXPECTATION. Drawing while hidden reads `clientHeight` 0, so
-    // `targetScrollTop` returns the UNCENTRED position — exactly `floor(viewportHeight / 2)` below the
-    // real one — and records it as the scroll `Follow` should expect. The write itself is a no-op on a
-    // non-rendered box, but `#expected` sticks; and on reopen the correct target equals the restored
-    // `scrollTop`, so the write is skipped and `#expected` is never corrected. A real user scroll
-    // landing within the tolerance of that stale value is then absorbed as an echo, the table does not
-    // detach, and the next frame yanks the view back — the trap design §3.7 already names, reached by a
-    // zero-viewport movement rather than a clamped one.
+    // A HIDE MUST NOT POISON THE ECHO EXPECTATION. A draw while hidden would read `clientHeight` 0, so
+    // `targetScrollTop` would return the UNCENTRED position — exactly `floor(viewportHeight / 2)` below the
+    // real one — and record it as the scroll `Follow` should expect. The write itself would be a no-op on a
+    // non-rendered box, but `#expected` would stick; and on reopen the correct target equals the restored
+    // `scrollTop`, so the write would be skipped and `#expected` never corrected. A real user scroll
+    // landing within the tolerance of that stale value would then be absorbed as an echo, the table would
+    // not detach, and the next frame would yank the view back — the trap design §3.7 already names, reached
+    // by a zero-viewport movement rather than a clamped one.
     it('still detaches on a user scroll after the table has been hidden and shown', async () => {
       await settled(view, BIG)
       await toNewest('tm')
@@ -1278,7 +1188,7 @@ describe('the app, end to end', () => {
       const reattach = document.querySelector('[data-leaf="tm-0"] .table-reattach') as HTMLButtonElement
       expect(reattach.hidden).toBe(true)
 
-      // The poisoned value, computed the way the bug computes it rather than hardcoded.
+      // The poisoned value, computed the way a draw while hidden would compute it rather than hardcoded.
       const poisoned = table().scrollTop + Math.floor(table().clientHeight / 2)
       toggle.click()
       toggle.click()
@@ -1291,13 +1201,8 @@ describe('the app, end to end', () => {
     // THE SCROLL RANGE MUST SURVIVE A COMPILE THAT HAPPENS WHILE THE TABLE IS CLOSED, and this is a
     // plain user sequence: close the rules panel, edit the program, reopen it.
     //
-    // `#drawTable` writes `scrollTop` BEFORE it writes the spacer height, and a `scrollTop` write
-    // CLAMPS to the current scroll height. So a spacer left at the previous program's size silently
-    // truncates the reopen write: coming from `let x = 40; x + 2` (8,112px) into `map_fold`
-    // (620,448px), a request for 161,786 was clamped to 7,755 — the current row not on screen, and
-    // then the echo arriving against an unclamped expectation detached the table with no user gesture
-    // at all. From a program that declined the TM leg the spacer is 0px, the write clamps to 0, and no
-    // scroll event fires at all: parked at row 0, still nominally following, no reattach offered.
+    // A `scrollTop` write CLAMPS to the current scroll height, so a spacer left at the previous program's
+    // size would silently truncate the reopen write.
     it('keeps the scroll range honest across a compile with the table hidden', async () => {
       await settled(view, 'let x = 40; x + 2')
       const toggle = document.querySelector(
@@ -1333,11 +1238,12 @@ describe('the app, end to end', () => {
     })
 
     it('shows no table for a program that declines the TM leg', async () => {
-      // §11.9's known one-leg program: `200` under unary overflows the TM leg and leaves λ steppable.
+      // The 5a design's known one-leg program (§11, risk 9): `200` under unary overflows the TM leg and
+      // leaves λ steppable.
       await settled(view, 'let x = 200; x + 1')
       expect(document.querySelectorAll('[data-leaf="tm-0"] .state-row').length).toBe(0)
       // A row count of zero alone would also be satisfied by the app failing to render at all, or by
-      // `[data-leaf="tm-0"]` not existing. Pin that the page IS alive and the OTHER leg did compile, so this test
+      // `[data-leaf="tm-0"]` not existing. Pin that the page IS alive and the λ leg did compile, so this test
       // fails for a missing table rather than for a missing app.
       expect(document.querySelector('[data-leaf="tm-0"] .state-table')).not.toBeNull()
       expect(paneText('lambda')).not.toBe('')

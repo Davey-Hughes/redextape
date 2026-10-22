@@ -29,10 +29,10 @@ function askUntil(
 }
 
 /**
- * Collect EVERY reply for one request. PR 3c's worker answered once per generation; this one
- * answers many times, and a helper that resolved on the first message would silently test only the
- * `compiled` reply. A program's answer ends at its `result`, or at `no-session` for one that did not build; a copy
- * never gets a `result`, so its tests ask `askUntil` for its frames' end instead.
+ * Collect EVERY reply for one request. The worker answers many times per request, and a helper that resolved on the
+ * first message would silently test only the `compiled` reply. A program's answer ends at its `result`, or at
+ * `no-session` for one that did not build; a copy never gets a `result`, so its tests ask `askUntil` for its frames'
+ * end instead.
  */
 function askAll(req: RunRequest, timeoutMs = 30_000): Promise<{ replies: RunReply[]; worker: Worker }> {
   return askUntil(req, (r) => r.kind === 'result' || r.kind === 'no-session', timeoutMs)
@@ -41,7 +41,7 @@ function askAll(req: RunRequest, timeoutMs = 30_000): Promise<{ replies: RunRepl
 const run = (src: string, gen = 1, encoding = 'unary'): RunRequest => ({ kind: 'run', gen, src, encoding })
 
 describe('session-worker', () => {
-  it('drives the λ leg to a normal form and decodes both legs', async () => {
+  it('drives the λ leg to a normal form and decodes the λ and TM legs', async () => {
     const { replies, worker } = await askAll(run('let x = 40; x + 2'))
     worker.terminate()
     const reply = replies.at(-1)
@@ -76,10 +76,9 @@ describe('session-worker', () => {
     expect(reply.lambda.status.available).toBe(false)
     expect(reply.lambda.status.reason).not.toBe('')
     expect(reply.tm.status.available).toBe(true)
-    // `2026-08-07-web-app-first-consumer.md` guessed '0' here; the actual run says '10'. The TM leg
-    // has no closures to capture `n` at `f`'s creation, so `apply0(f)` reads `n`'s value at the point
-    // `g(0)` runs — after `n = 10` — giving `0 + 10`. That mutable-capture ambiguity is exactly why
-    // the λ leg declines this program instead.
+    // The TM leg captures `n` by reference (`defunc` boxes a mutable that a closure captures), so
+    // `apply0(f)` reads `n`'s value at the point `g(0)` runs — after `n = 10` — giving `0 + 10`. That
+    // mutable capture is exactly why the λ leg declines this program instead.
     expect(reply.tm.value).toEqual({ Value: { text: '10' } })
   })
 
@@ -160,9 +159,9 @@ describe('session-worker recording', () => {
     expect(frames.at(-1)?.step).toBeGreaterThan(100)
   })
 
-  // THE DEFECT THAT HID IN PR 3c, one layer further in. `runLambda` threw for a declined leg and the
-  // handler never replied; now there are more throwing call sites, and a declined λ leg must still
-  // produce a complete TM history.
+  // A declined λ leg must still leave a complete TM history: `Session`'s `lambdaState`, `lambdaValue`,
+  // `stepLambda` and `lambdaTree` throw for a declined leg, so the worker checks `lambdaStatus().available`
+  // before each (`recordLeg` in `record-loop.ts` for the recording, `session-worker.ts` for the rest).
   it('still records the TM leg when the λ backend declines', async () => {
     const src = 'let mut n = 1; fn apply0(g) { g(0) } let f = |x| x + n; n = 10; apply0(f)'
     const { replies, worker } = await askAll(run(src))
@@ -174,7 +173,7 @@ describe('session-worker recording', () => {
     expect(replies.at(-1)?.kind).toBe('result')
   })
 
-  // `num200` — found by `frame_cost_probe`. The mirror image: a live λ leg and a declined TM leg.
+  // `num200`, from `frame_cost_probe`. The mirror image: a live λ leg and a declined TM leg.
   it('still records the λ leg when the TM backend declines', async () => {
     const { replies, worker } = await askAll(run('let x = 200; x + 1'))
     worker.terminate()
@@ -209,8 +208,7 @@ describe('session-worker recording', () => {
     // one `RECORD_CHUNK` and suspended at `await yieldToEventLoop()`, still holding `recording.lambda`.
     // Posting generation 2 only after this point (not immediately, back-to-back) is what makes the
     // stale-flag race reachable: a `run` posted right away can land before the worker's wasm init
-    // (`ready`) even resolves, in which case generation 1 never becomes live and never records at all —
-    // a scenario this test used to accept as "abandoned" without ever exercising the race.
+    // (`ready`) even resolves, in which case generation 1 never becomes live and never records at all.
     let resolveGen1Recording: () => void
     const gen1Recording = new Promise<void>((resolve) => {
       resolveGen1Recording = resolve

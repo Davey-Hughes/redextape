@@ -38,8 +38,8 @@ const tm = (tapes: number, cells: number): TmState => ({
 })
 
 describe('frame sizers', () => {
-  // `frame_cost_probe` measured ~95% of a λ frame as SPANS, at every text budget: 261 bytes of text
-  // serialized to 5,621. A sizer that counted only `text` would under-report by ~20x and the ring
+  // SPANS DOMINATE A λ FRAME at every text budget (`frame_cost_probe`'s figures are in
+  // `lambdaFrameBytes`'s doc), so a sizer that counted only `text` would under-report and the ring
   // would evict far too late.
   it('counts spans, which dominate a λ frame', () => {
     const textOnly = lambdaFrameBytes(lam('x'.repeat(100), 0))
@@ -53,7 +53,7 @@ describe('frame sizers', () => {
   })
 
   it('counts a TM frame by its cells across every tape', () => {
-    // Five tapes at radius 40 is at most 5 x 81 cells; the probe measured ~550 bytes a frame there.
+    // Five tapes at radius 40 is at most 5 x 81 cells; `frame_cost_probe` measured ~550 bytes a frame there.
     const small = tmFrameBytes(tm(5, 10))
     const large = tmFrameBytes(tm(5, 20))
     expect(large).toBeGreaterThan(small)
@@ -64,7 +64,7 @@ describe('frame sizers', () => {
   })
 
   it('counts a tape’s window in UTF-16 units, so a symbol outside the basic plane is four bytes', () => {
-    // A TAPE IS ONE STRING NOW, AND ITS LENGTH IS ITS COST: `𝟙` is one cell and two units. Counting cells instead would
+    // A TAPE IS ONE STRING, AND ITS LENGTH IS ITS COST: `𝟙` is one cell and two units. Counting cells instead would
     // give the same answer for every symbol in the basic plane and under-count this one.
     const one = (tape: string): TmState => ({ ...tm(1, 0), window: [tape] })
     expect(tmFrameBytes(one('1𝟙')) - tmFrameBytes(one('1'))).toBe(4)
@@ -88,12 +88,11 @@ describe('lambdaFrameBytes', () => {
     expect(lambdaFrameBytes(exact)).toBe(lambdaFrameBytes(within))
   })
 
-  // THE ONLY REDEX TERM IN THE SUM. The `Path` behind this span is not on the wire (`types.ts`'s
-  // `redex_span` doc, and `LambdaState.redex`'s `serde(skip)`), so there is no per-entry term to charge
-  // and no sibling test for one. `redex_span` shipped
-  // with no term in `lambdaFrameBytes` at all, and the computed-total test below could not catch that:
-  // its reference formula listed the same terms the implementation did, so it agreed with a sum that
-  // was missing one. Charged only when there IS a span — most frames early in a run have none.
+  // THE ONLY REDEX TERM IN THE SUM. The `Path` behind this span is not on the wire
+  // (`LambdaState.redex`'s `serde(skip)`), so there is no per-entry term to charge and no sibling test
+  // for one. The computed-total test below cannot stand in for this one: its reference formula is
+  // built from the terms the implementation is documented to have, so a term missing from both passes
+  // it. Charged only when there IS a span — most frames early in a run have none.
   it('charges for redex_span when the frame has one, and nothing when it does not', () => {
     const withSpan: LambdaState = { ...base, redex_span: { start: 3, end: 9 } }
     expect(lambdaFrameBytes(withSpan) - lambdaFrameBytes(base)).toBe(REDEX_SPAN_BYTES)
@@ -114,9 +113,8 @@ describe('lambdaFrameBytes', () => {
   // — but a *term* dropped from the sum (e.g. `+ OWNER_BYTES` silently deleted) does, because the
   // right-hand side is built the same way `lambdaFrameBytes` is documented to compute it.
   //
-  // THE FRAME CARRIES EVERY OPTIONAL COMPONENT, which it did not before: `redex_span` was `null` here,
-  // so the reference formula had no term for it and could not have noticed that the implementation had
-  // none either. A test whose fixture omits a field can only ever be tautological about that field.
+  // THE FRAME CARRIES EVERY OPTIONAL COMPONENT: a test whose fixture omits a field can only ever be
+  // tautological about that field.
   it('charges every component, so a dropped term is visible', () => {
     const f: LambdaState = {
       text: 'ab',
@@ -173,9 +171,8 @@ describe('the fork cap', () => {
    * the fact the figure exists to control.
    */
   it('sits between list20 and list60', () => {
-    // **THESE BOUNDS WERE IN THE WRONG UNIT UNTIL TASK 2 MEASURED THEM.** They read 16,250 and 127,881 —
-    // list20's LINE count and list60's δ-table ROW count. A row is a state OR a rule (list60 is 33,699
-    // states + 94,182 rules = 127,881 exactly), and this constant gates on rules alone.
+    // **THESE BOUNDS ARE RULE COUNTS**, because this constant gates on rules alone; a δ-table ROW is a
+    // state OR a rule.
     expect(MAX_FORK_RULES).toBeGreaterThan(11_802) // list20's rules — must be forkable
     expect(MAX_FORK_RULES).toBeLessThan(94_182) // list60's rules — must be refused
   })
@@ -208,7 +205,7 @@ describe('asmRecordEnd', () => {
     expect(asmRecordEnd({ run: 'Capped', cap: 'Mem' })).toBe('memory-full')
   })
 
-  it('reads a capped run naming no cap as the step cap, which cannot occur and always read so', () => {
+  it('reads a capped run naming no cap as the step cap, a case that cannot occur', () => {
     expect(asmRecordEnd({ run: 'Capped', cap: null })).toBe('capped')
   })
 

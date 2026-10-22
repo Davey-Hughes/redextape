@@ -4,22 +4,20 @@ import { PRESETS } from '../../src/workspace'
 import { SHELL, stateIdle, until } from './harness'
 
 /**
- * **A WORKSPACE STORED BY PART 2a, BOOTED BY PART 2b** — spec §3's `inspector` rule, through the real app.
+ * **A VERSION 2 WORKSPACE STORED WITH NO INSPECTOR FIELD** — spec §3's `inspector` rule, through the real app.
  *
  * Part 2a shipped version 2 without an `inspector` field, so every workspace written before part 2b has
  * none. §3 holds every other field to `parseLayout`'s standard — an unknown value invalidates the whole
  * envelope and the layout silently resets — and this field is the one exception: MISSING means "the version
  * that wrote this did not have it", which is not the same claim as "this value is wrong".
  *
- * **NOTHING ELSE IN THE TIER BOOTS ON A 2a-SHAPED ENVELOPE, WHICH IS WHY THIS FILE EXISTS.** The pre-flight
- * sabotage that made a missing `inspector` invalidate the envelope reddened the node parser test and left
- * all 422 browser tests green — because every other browser file's stored envelope is written by this
- * build, which always includes the field. The harm §3 is protecting against is an upgrading user's layout
- * resetting, and only a boot can show it.
+ * **NOTHING ELSE IN THE TIER BOOTS ON A 2a-SHAPED ENVELOPE, WHICH IS WHY THIS FILE EXISTS**: every other
+ * version 2 envelope a browser file stores is `serializeWorkspace`'s, which always includes the field. The
+ * harm §3 is protecting against is an upgrading user's layout resetting, and only a boot can show it.
  */
 
 /** Exactly what `serializeWorkspace` emitted at part 2a: version 2, and no `inspector`. */
-const AS_2A = JSON.stringify({
+const V2_WITHOUT_INSPECTOR = JSON.stringify({
   version: 2,
   tree: {
     kind: 'split',
@@ -37,13 +35,13 @@ const AS_2A = JSON.stringify({
 })
 
 beforeAll(async () => {
-  localStorage.setItem(LAYOUT_STORAGE_KEY, AS_2A)
+  localStorage.setItem(LAYOUT_STORAGE_KEY, V2_WITHOUT_INSPECTOR)
   document.body.innerHTML = SHELL
   await (await import('../../src/main')).ready
   await until(stateIdle, 'the first compile')
 })
 
-describe('a workspace stored by part 2a', () => {
+describe('a version 2 workspace stored with no inspector field', () => {
   // THE WHOLE POINT: the stored tree is the source beside a λ view, not the default's source beside the TM view. If
   // the envelope had been refused, the app would have fallen back to `defaultLayout()` and this would read `tm-0`.
   it('keeps the tree it was stored with, rather than resetting to the default', () => {

@@ -7,25 +7,25 @@ import { isSpeed, SPEEDS } from './workspace'
 
 /**
  * THE STEP CONTROLS — Plan 7 part 2 spec §8: `↺ ◀ ▶ ⏭ ⏵ 8/s ▾ step 212 of 1,319 [continue]`. One component;
- * `controls.ts` decides what is live and this only reflects it, as `controlStrip` did.
+ * `controls.ts` decides what is live and this only reflects it.
  *
  * **EVERY BUTTON IS NAMED IN WORDS (umbrella §4 rule 1).** `↺ ◀ ▶` stay as text — Hack draws them, and a
  * glyph a user has seen on every transport is its own best label — with their tooltips as their accessible
- * names; `controlStrip` left the glyph as the name, so a screen reader said "black right-pointing
- * triangle". `⏭` is an icon, as `⏵` is: Hack lacks both (`icons.ts`).
+ * names; a glyph left as its own name is read out by a screen reader as "black right-pointing triangle".
+ * `⏭` is an icon, as `⏵` is: Hack lacks both (`icons.ts`).
  *
  * **`⏭` IS `↺`'S OTHER END.** A run opens on step 0 (`History`), so the newest recorded step is a click away
  * rather than a play through every step between.
  *
  * **PLAY SHOWS ITS STATE (rule 3).** While a leg plays, the button is `⏸` and named *pause*; a second click
- * pauses. The old button never changed, and playback looked like nothing had happened.
+ * pauses. A button that never changed would make playback look like nothing had happened.
  *
  * **ONE SPEED FOR THE WHOLE WORKSPACE**, shown here and set here, in steps a second. The select's options are
  * `workspace.ts`'s `SPEEDS`; `on.setSpeed` writes the workspace, and the next draw shows every step control
  * the new value.
  *
- * **THE CONTINUE BUTTON IS ADDED AND REMOVED, NEVER DISABLED** — `controlStrip`'s rule, kept: a
- * `depth-refused` leg has no honest continue, and a greyed-out button still says the operation exists.
+ * **THE CONTINUE BUTTON IS ADDED AND REMOVED, NEVER DISABLED**: a `depth-refused` leg has no honest
+ * continue, and a greyed-out button still says the operation exists.
  */
 export function stepControls(
   on: Pick<PaneEvents, 'back' | 'forward' | 'toNewest' | 'play' | 'restart' | 'extend' | 'speed' | 'setSpeed'>,
@@ -43,7 +43,7 @@ export function stepControls(
     return b
   }
   // `restart` IS `hist.seek(0)`, WHICH CLAMPS TO THE OLDEST RETAINED FRAME — the name says what it does
-  // rather than promising a step 0 an evicted history no longer holds (`controlStrip`'s own comment).
+  // rather than promising a step 0 an evicted history no longer holds.
   const restart = named('↺', 'back to the oldest kept step', on.restart)
   const back = named('◀', 'one step back', on.back)
   const forward = named('▶', 'one step forward', on.forward)
@@ -70,8 +70,8 @@ export function stepControls(
   speed.title = 'playback speed'
   speed.setAttribute('aria-label', 'playback speed')
   for (const s of SPEEDS) speed.append(new Option(`${n(s)}/s`, String(s)))
-  // `change`, NOT `input` — the binding selector's old reason: a keyboard user arrowing the list would
-  // otherwise set every speed they pass on the way.
+  // `change`, NOT `input`: a keyboard user arrowing the list would otherwise set every speed they pass
+  // on the way.
   speed.addEventListener('change', () => {
     const v = Number(speed.value)
     if (isSpeed(v)) on.setSpeed(v)
@@ -108,17 +108,17 @@ export function stepControls(
       step.textContent = c.stepText
       if (c.continueLabel === null) {
         // A CONTROL THAT GOES AWAY UNDER THE KEYBOARD MUST NOT TAKE THE FOCUS WITH IT (umbrella rule 5,
-        // spec §11). `focus-handoff.ts` is that rule, and this is one of its four call sites; the
-        // CANDIDATE ORDER stays this control's own, which is why it is spelled out here rather than
-        // computed. The nearest control that still works takes it: forward, then ⏭, play, back, restart.
+        // Plan 7 part 2 spec §11). `focus-handoff.ts` is that rule; the CANDIDATE ORDER stays this
+        // control's own, which is why it is spelled out here rather than computed. The nearest control
+        // that still works takes it: forward, then ⏭, play, back, restart.
         //
         // **AND WHEN NONE OF THEM IS LIVE, THE SPEED SELECT IS** — a leg that is not available disables
         // all five at once (`controls.ts`'s unavailable branch returns every `can*` false AND no
         // continue label), which is exactly the state a copy's worker throwing produces while the user
         // is on that view's continue button. The select is never disabled: the workspace's speed is a
-        // setting, not a property of this leg. **IN DOM ORDER THE SELECT COMES FIRST OF THE SIX**, so
-        // `focus-handoff.ts`'s own `nearest` would hand it the focus in every case — which is the whole
-        // reason this list is written down instead.
+        // setting, not a property of this leg. **OF THE SIX, THE SELECT IS THE NEAREST BEFORE THE CONTINUE
+        // BUTTON**, so `focus-handoff.ts`'s own `nearest` would hand it the focus in every case — which is
+        // the whole reason this list is written down instead.
         handOff(extend, [forward, toNewest, play, back, restart, speed])
         extend.hidden = true
       } else {

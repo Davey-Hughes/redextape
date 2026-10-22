@@ -7,7 +7,7 @@ import { SHELL, stateIdle, until } from './harness'
 /**
  * **THE ABOUT MENU** — about pages design §5: just before settings, a popover of links to the four pages and the
  * source, each opening in a new tab so the app keeps its stepping position, and the build beneath them. ONE MOUNT
- * FOR THE FILE, for the reason every sibling gives.
+ * FOR THE FILE, for the reason `app.test.ts` gives.
  */
 
 const button = () => document.querySelector<HTMLButtonElement>('#about') as HTMLButtonElement

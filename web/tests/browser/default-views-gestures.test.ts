@@ -28,8 +28,8 @@ import {
  * **`setup.ts` STORES ALL FOUR VIEWS IN TWO ROWS FOR EVERY FILE, AND NO DEFAULT BUILDS THAT TREE IN A WIDE WINDOW.**
  * What a `✕` does depends on which view is its neighbour, and what a view key does on which view is first in the tree
  * it shows; the files written against the two rows hold both for a tree nobody is given. A source view that lost its
- * scroll position to the focus a `✕` gave it went unseen there, the source view being the neighbour of no view those
- * files close (`focus-scroll.test.ts`).
+ * scroll position to the focus a `✕` gave it would go unseen there, the source view being the neighbour of no view
+ * those files close (`focus-scroll.test.ts`).
  *
  * **EACH GESTURE IS HELD TO FOUR THINGS**: the tree it leaves, by `drawn`; the view the focus is in, which is never
  * `<body>`; that a view whose box the gesture did not change is scrolled where it was; and that the stored workspace
@@ -223,8 +223,8 @@ describe.each([FIRST_LOAD, WIDE_FOUR])('on $name', (layout) => {
   /**
    * A DIVIDER DRAGGED WITH THE POINTER MOVES ITS OWN SPLIT AND NO OTHER. The press is the driver's, on the divider,
    * and the release 80 px along it; `divider-drag.test.ts` has the frames of a drag, with events it makes itself.
-   * **AND THE FOCUS IS ON WHAT HAD IT**, which the fixture leaves in the TM view: the drag's end left it on `<body>`
-   * until `pane-host.ts`'s `resized` (`divider-drag-focus.test.ts` has the caret in an editor).
+   * **AND THE FOCUS IS ON WHAT HAD IT**, which the fixture leaves in the TM view: the drag's end would leave it on
+   * `<body>` but for `pane-host.ts`'s `resized` (`divider-drag-focus.test.ts` has the caret in an editor).
    */
   it.each(Object.entries(layout.dividers))('the divider at %s, dragged with the pointer', async (path, sides) => {
     await layout.make()

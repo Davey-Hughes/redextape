@@ -6,7 +6,8 @@ describe('barTarget', () => {
     expect(barTarget('tm-0', ['lambda-0', 'tm-0'], 'lambda-0')).toBe('tm-0')
   })
 
-  // §8: "otherwise the last view that could". A focused SOURCE view is the ordinary way to reach this.
+  // Plan 7 part 2 spec §8: "otherwise the last view that could". A focused SOURCE view is the ordinary
+  // way to reach this.
   it('keeps the last view that could step when the focused one cannot', () => {
     expect(barTarget('source', ['lambda-0', 'tm-0'], 'tm-0')).toBe('tm-0')
   })

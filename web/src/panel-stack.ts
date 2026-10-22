@@ -14,7 +14,7 @@ import { pointerDrag, separatorGesture } from './separator'
  * **WHAT IS WRITTEN IS THE SHARES' RATIO, NEVER A FACTOR UNDER 1.** `--share` is a `flex-grow`, and where the factors
  * of the items that grow add up to less than 1 they take that much of the spare height and leave the rest. A drag can
  * leave a region any share above nothing, and closing its neighbours can leave it alone: a region with a share of a
- * half took half its view, and a maximised term map with a quarter took a quarter. So the open regions' shares are
+ * half would take half its view, and a maximised term map with a quarter a quarter. So the open regions' shares are
  * written scaled, the least of them as 1.
  *
  * A BOUNDARY IS DRAWN BETWEEN TWO OPEN REGIONS WITH NO OPEN REGION BETWEEN THEM, directly under the upper one. A
@@ -33,7 +33,7 @@ import { pointerDrag, separatorGesture } from './separator'
  * frame then moves pixels from one of the two to the other, held where either would go under its floor. When it ends,
  * the two regions' pixels are scaled to shares by what a pixel was worth to the regions that were over their floors,
  * and every other region is written the share it had. One on its floor has a height that is its floor's and not its
- * share's, and stored as measured it came back taller in the next view with room to show it.
+ * share's, and stored as measured it would come back taller in the next view with room to show it.
  */
 export type StackRegion = {
   /** The share's name in the workspace. */
@@ -152,9 +152,9 @@ export class PanelStack {
    * (`separator.ts`'s `data-dragging`) or holding the focus a key reached it by.
    *
    * **A GESTURE THAT IS NOT IS OVER, WHATEVER TOLD NOBODY.** While the stack holds a gesture it draws no boundary and
-   * writes no share, so one held for good froze the view's regions as they were. A view that leaves the page for
-   * good takes its handles with it. And a browser that blurs a separator after it has left the page gets no commit
-   * from `separator.ts`, which commits nothing for a separator off the page; the tests' Chromium blurs it first.
+   * writes no share, so one held for good would freeze the view's regions as they were. A view that leaves the page
+   * for good takes its handles with it. And a browser that blurs a separator after it has left the page gets no
+   * commit from `separator.ts`, which commits nothing for a separator off the page; the tests' Chromium blurs it first.
    */
   #alive(live: Live): boolean {
     if (!live.by.isConnected) return false
@@ -170,7 +170,7 @@ export class PanelStack {
       return
     }
     // A MAXIMISE ENDS WHEN ITS PANEL LEAVES THE VIEW: a copy's text panel is hidden when its editor is taken down,
-    // and every other panel was then drawn closed for a panel nobody could see, with no pressed button to press.
+    // and every other panel would then be drawn closed for a panel nobody could see, with no pressed button to press.
     if (this.#max?.el.hidden === true) {
       this.#setMax(null)
       return
@@ -330,10 +330,10 @@ export class PanelStack {
    * Say, on the boundary between `a` and `b`, how much of the two the upper one is drawn at: `aria-valuenow`.
    *
    * **AS DRAWN, NOT AS SHARED.** The shares say it only while both regions are over their floors, and a region that
-   * keeps its own height has none: an outline of two rows over an editor of forty read as 50. Measuring is a read of
-   * the layout, so it is done where the value is wanted, as a boundary is drawn, at its focus and at the end of a
-   * gesture, and not at every change of the view; a frame of a gesture knows the two heights it has just written. A
-   * view built off the page has no heights yet, and its boundaries say the middle until their focus.
+   * keeps its own height has none: an outline of two rows over an editor of forty would read as 50. Measuring is a
+   * read of the layout, so it is done where the value is wanted, as a boundary is drawn, at its focus and at the end
+   * of a gesture, and not at every change of the view; a frame of a gesture knows the two heights it has just written.
+   * A view built off the page has no heights yet, and its boundaries say the middle until their focus.
    */
   #say(a: StackRegion, b: StackRegion, heights?: readonly [number, number]): void {
     const el = this.#boundaries.get(`${a.name}|${b.name}`)
@@ -369,8 +369,8 @@ export class PanelStack {
     if (this.#live !== null) {
       if (this.#live.by === by && this.#alive(this.#live)) return this.#live
       // A GESTURE ON ANOTHER HANDLE ENDS THE ONE BEFORE IT. An arrow key held on one boundary is a gesture until its
-      // release, and a press on another boundary's header moves no focus: the second gesture was given the first's
-      // measurements, and wrote the heights of the first's two regions to its own.
+      // release, and a press on another boundary's header moves no focus: without this, the second gesture would be
+      // given the first's measurements, and write the heights of the first's two regions to its own.
       this.#commit()
     }
     const open = this.#regions.filter((r) => this.#isOpen(r))
@@ -433,15 +433,13 @@ export class PanelStack {
     if (live === null) return
     this.#live = null
     // A GESTURE THAT LEFT THE BOUNDARY WHERE IT WAS WRITES NOTHING, and the regions go back to the shares they had:
-    // two on their floors are as tall as their floors, and a press and a move between them stored the floors' ratio
-    // as their shares, for the next view tall enough to show it. Measured in a window 580 px tall (2026-10-13): the
-    // rules and the state diagram at 148 px each, 1.5 and 1.5 stored where the two are built with 2 and 1.
+    // two on their floors are as tall as their floors, and a press and a move between them would store the floors'
+    // ratio as their shares, for the next view tall enough to show it.
     if (live.offset !== 0) {
       // THE TWO REGIONS OF THE BOUNDARY, AND NO OTHER (this module's doc). **SIX FIGURES, NOT FOUR DECIMAL PLACES**:
       // a share is a ratio at whatever size the view's other shares are, and rounded to a ten-thousandth a small one
-      // lost its ratio, or came to 0, which `workspace.ts` refuses, and the whole stored workspace with it. Measured
-      // with three regions stored at 0.0001 each: the one dragged to its floor was stored a share of 0. A region is
-      // as tall as its floor at least, so no share here is nothing.
+      // would lose its ratio, or come to 0, which `workspace.ts` refuses, and the whole stored workspace with it. A
+      // region is as tall as its floor at least, so no share here is nothing.
       const share = (px: number): number => Number((px * live.scale).toPrecision(6))
       const sizes: Record<string, number> = {
         ...this.#sizes,

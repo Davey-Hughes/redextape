@@ -33,8 +33,9 @@ import { seededRandom } from './seeded-random'
 /**
  * WHICH VIEWS ARE ON SCREEN AND WHAT EACH COMBINATION REMEMBERS, AS VALUES — the view layouts spec §4.
  *
- * `enter` is the one function every write of the tree goes through, so its two properties are what a user's
- * "switching is reversible" rests on; both are asserted over generated sequences as well as by hand.
+ * `enter` is what every write of the tree goes through, except those that replace the workspace whole, so its two
+ * properties are what a user's "switching is reversible" rests on; both are asserted over generated sequences as
+ * well as by hand.
  */
 
 const of = (...kinds: PaneKind[]): LayoutNode => defaultArrangement(kinds, 'wide')
@@ -194,9 +195,10 @@ describe('enter', () => {
  * THE TWO PROPERTIES OF §4.3, AND WHAT A WORKSPACE HAS TO GO ON BEING, OVER GENERATED SEQUENCES OF SWITCHES AND EDITS
  * — spec §14 item 2.
  *
- * Each sequence makes 60 gestures, drawn by a seeded generator: a toggle, a cycle key, a `✕`, `+ view`, a pick in a
- * view's title that changes its kind, and a divider drag. A switch is made by `switched` below, which is this file's
- * copy of `main.ts`'s `switchTo`; an edit is `layout.ts`'s own function and then `enter`. After every gesture:
+ * Each sequence draws 60 gestures from a seeded generator and makes those its state allows: a toggle, a cycle key, a
+ * `✕`, `+ view`, a pick in a view's title that changes its kind, and a divider drag. A switch is made by `entering`
+ * below, which is this file's copy of `main.ts`'s `switchTo`; an edit is `layout.ts`'s own function and then `enter`.
+ * After every gesture made:
  *
  * - no entry is under the key of the tree on screen;
  * - every entry's key is its tree's own;
@@ -213,16 +215,13 @@ describe('enter', () => {
  * with ids of its own, and the sequence goes on from where it was.
  *
  * **TWELVE SEQUENCES START ON THE FIRST LOAD'S TWO VIEWS, AND TWELVE ON A WORKSPACE OF 60 LIVE VIEWS**, `CROWDED`.
- * From two views the most a sequence held was 19 live views, so no switch and no add was ever refused, and what this
- * doc said of the bound was held by nothing (measured 2026-10-12). From 60, both are.
+ * From two views a sequence holds at most 19 live views, so no switch and no add is refused; from 60, both are.
  *
  * **WHAT THE SEQUENCES REACHED IS ASSERTED TOO**, in the last case, which runs every sequence itself where the cases
  * before it have not (a run of it alone, as `-t` makes one): each gesture, each of the two properties, a switch that
  * gave a leaf a new id, a state with one id under two kinds, and a switch and an add refused at the bound. A
- * generator that stopped reaching one would leave the cases above passing on less than they say. Counted over the 12
- * seeds from two views (2026-10-12): 647 gestures made of the 720 drawn, between 95 and 128 of each; 9,226 switches
- * away and back; 1,306 closes and toggles; 75 switches that gave a leaf a new id; and 571 states with an id under two
- * kinds. Over the 12 from `CROWDED`: 53 switches and 32 adds refused. The floors below are about half.
+ * generator that stopped reaching one would leave the cases above passing on less than they say. The floors below
+ * are about half of what these seeds reach.
  */
 describe('enter, over generated sequences of switches and edits', () => {
   type State = { readonly tree: LayoutNode; readonly arrangements: Arrangements }
@@ -422,9 +421,9 @@ describe('enter, over generated sequences of switches and edits', () => {
         case 'drag': {
           if (now.tree.kind !== 'split') break
           // EVERY DRAG IS MADE, THE CROWD'S AMONG THEM. Of the crowd's row each view is a 58th, and two of them
-          // together cannot hold `MIN_PANE_FRACTION` each: `resize` answered shares of 0.1 and −0.066 there (measured
-          // 2026-10-12), a tree the loader refuses, and answers the tree as it was given now. The round trip through
-          // `parseWorkspace` after every gesture is what holds it here.
+          // together cannot hold `MIN_PANE_FRACTION` each, so `resize` answers the tree as it was given: shares under
+          // it would make a tree the loader refuses. The round trip through `parseWorkspace` after every gesture is
+          // what holds it here.
           made = enter(now, resize(now.tree, [], 0, pick([0.05, -0.05])))
           break
         }
@@ -459,7 +458,7 @@ describe('enter, over generated sequences of switches and edits', () => {
     expect(sum(two, (r) => r.closedAndToggled)).toBeGreaterThan(650)
     expect(sum(two, (r) => r.reidentified)).toBeGreaterThan(35)
     expect(sum(two, (r) => r.underTwoKinds)).toBeGreaterThan(280)
-    // NO SEQUENCE FROM TWO VIEWS COMES NEAR THE BOUND, which is why four start beside it.
+    // NO SEQUENCE FROM TWO VIEWS COMES NEAR THE BOUND, which is why twelve start beside it.
     expect(sum(two, (r) => r.switchesRefused + r.addsRefused)).toBe(0)
     const crowded = 'a workspace of 60 live views'
     expect(

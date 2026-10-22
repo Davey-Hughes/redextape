@@ -5,14 +5,14 @@ import type { LspPosition, LspRange, LspTextEdit } from './lsp-protocol'
 /**
  * One LSP position as a CodeMirror offset.
  *
- * **NO BYTE CONVERSION, AND THAT IS THE WHOLE DIFFERENCE FROM THE `analyze` PATH THIS REPLACED.** The
- * server negotiates `positionEncoding: utf-16` at `initialize`, so `character` is already a count of
- * UTF-16 code units within the line — the unit CodeMirror counts in.
+ * **NO BYTE CONVERSION.** The server negotiates `positionEncoding: utf-16` at `initialize`, so
+ * `character` is already a count of UTF-16 code units within the line — the unit CodeMirror counts in.
  *
  * **BOTH CLAMPS ARE LOAD-BEARING AGAINST A SERVER THAT IS AHEAD OF THE DOCUMENT.** `didChange` goes
  * out from an update listener and answers come back asynchronously, so a fast typist can delete the
  * line a message in flight refers to. `doc.line` THROWS on a line number past the end rather than
- * returning a null object, which would take out the whole worker message handler.
+ * returning a null object; on the diagnostics path that throw would leave `LspClient`'s listener for
+ * the worker's messages partway through a reply, and the rest of that reply would be dropped.
  */
 export function offsetOf(doc: Text, pos: LspPosition): number {
   const line = doc.line(Math.min(Math.max(pos.line, 0) + 1, doc.lines))
@@ -45,8 +45,8 @@ export function rangeOf(doc: Text, range: LspRange): { from: number; to: number 
  *
  * **NOTHING IS APPLIED IF THE DOCUMENT IS NO LONGER `asked`, the text the server held when it was
  * asked.** The answer is a round trip away, and what is typed in the meantime is not in it: applied
- * anyway, that one whole-buffer edit replaced the typing with the older text, formatted. A format
- * overtaken by typing does nothing, and asking again formats what is there now.
+ * anyway, that one whole-buffer edit would replace the typing with the older text, formatted. A
+ * format overtaken by typing does nothing, and asking again formats what is there now.
  */
 export function applyEdits(view: EditorView, edits: LspTextEdit[], asked: Text): void {
   if (edits.length === 0 || !view.state.doc.eq(asked)) return

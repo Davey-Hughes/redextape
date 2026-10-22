@@ -4,10 +4,9 @@
  * WHY NOT CHARACTERS. A control glyph (▸ ◀ ✕ ⌄ …) is drawn by whichever face has it, and the faces
  * differ: Inter has none of them and Hack lacks several (✕, ⌃ and ⏵ among them) — measured on their font files — while Paper
  * and Terminal draw with whatever faces the OS has. A glyph the face lacks falls back to a symbol face of
- * the OS's, so the same control could look different from one style or machine to the next. And one glyph
- * did two jobs: `⌄` was both "show the editor" and "bring the editor here". A name per meaning is what
- * makes the umbrella design's rule 2 (one glyph, one meaning) something the code enforces: two meanings
- * are two names.
+ * the OS's, so the same control could look different from one style or machine to the next. A name per
+ * meaning is what makes the umbrella design's rule 2 (one glyph, one meaning) something the code
+ * enforces: two meanings are two names.
  *
  * Each icon is decorative — `aria-hidden`, not focusable — and drawn in `currentColor`, so it follows
  * the palette and the text beside it. The control it sits in carries the accessible name.
@@ -44,8 +43,8 @@ const PATHS: Readonly<Record<IconName, string>> = {
   // `⏵`: Hack lacks it (part 1's roadmap entry), and `⏸` joins it so the play toggle's two faces match.
   play: 'M5 3.5 L12.5 8 L5 12.5 Z',
   pause: 'M5.5 3.5 V12.5 M10.5 3.5 V12.5',
-  // `⏭`, to the newest recorded step: Hack lacks it (`hack-regular.woff2`'s cmap, 2026-10-08). `play`'s triangle, moved
-  // left, against a bar.
+  // `⏭`, to the newest recorded step: Hack lacks it (`hack-regular.woff2`'s cmap). `play`'s triangle, moved left,
+  // against a bar.
   'to-newest': 'M3.5 3.5 L10 8 L3.5 12.5 Z M12.5 3.5 V12.5',
   // `☀` and `☾`: Hack lacks both (part 1's roadmap entry); `⚙` is drawn to match. `◐` stays text — Hack
   // draws it.

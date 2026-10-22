@@ -3,8 +3,8 @@ import type { Leg, RunReply, RunRequest } from './protocol'
 /**
  * What the client needs from a `Worker`, and nothing more.
  *
- * AN INTERFACE RATHER THAN `Worker` SO THE RULE BELOW IS TESTABLE. The staleness check is the only
- * logic in this file and it does not need a thread to exercise — it needs an object with two methods.
+ * AN INTERFACE RATHER THAN `Worker` SO THE RULE BELOW IS TESTABLE. The staleness check does not need
+ * a thread to exercise — it needs an object with two methods.
  */
 export type ClientPort = {
   postMessage(m: RunRequest): void
@@ -26,13 +26,12 @@ export class SessionClient {
       // a reply that was already in flight when the next request was posted, which the worker's own
       // check cannot see. Generation 0 is "no request yet" and matches nothing.
       //
-      // A GENERATION NOW PRODUCES MANY REPLIES — `compiled`, then frame batches, then `result` — so
+      // A GENERATION PRODUCES MANY REPLIES — `compiled`, then frame batches, then `result` — so
       // this fires repeatedly and nothing here may treat any one of them as terminal.
       if (this.#gen !== 0 && e.data.gen === this.#gen) {
         // CLEARED BEFORE `onReply`, NOT AFTER. `replies.ts` drives the repaint off that call, and a
         // repaint reading the flag while it was still set would paint the withdrawal one frame after
-        // the window it describes had already closed. Idempotent after the first reply of a
-        // generation, which is why it is unconditional rather than guarded.
+        // the window it describes had already closed. Idempotent after the first reply of a generation.
         // A TREE IS NOT A RUN'S ANSWER. It arrives between record chunks, often while the run is still
         // in flight, and letting it clear the flag would end "running…" before the run said anything.
         if (e.data.kind !== 'lambda-tree') this.#awaitingRun = false
@@ -63,13 +62,12 @@ export class SessionClient {
    * Claim the next generation, and return it. CALLED AT DISPATCH, NOT AT POST — that separation is
    * the whole point of this method existing.
    *
-   * `main.ts` debounces by `DEBOUNCE_MS` before posting, and `#gen` is the filter that drops replies
-   * from a superseded run. While the bump lived in `request`, the previous generation stayed current
-   * for the entire debounce — and far longer in practice, because a `setTimeout` competes with the
-   * worker's frame recording and can be starved for seconds. A stale `result` arriving in that window
-   * set the UI back to `'idle'` for a program the user had already replaced. Measured on PR 5a-ii:
-   * dispatch at 2 ms, the PREVIOUS generation's `result` at 4,679 ms, the new program's `compiled` at
-   * 4,710 ms. Bumping here closes the window at the instant of dispatch instead.
+   * `compile.ts` debounces by `DEBOUNCE_MS` before posting, and `#gen` is the filter that drops replies
+   * from a superseded run. A bump in `request` would leave the previous generation current for the
+   * entire debounce — and far longer in practice, because a `setTimeout` competes with the worker's
+   * frame recording and can be starved for seconds — and a stale `result` arriving in that window would
+   * set the UI back to `'idle'` for a program the user had already replaced. Bumping here closes the
+   * window at the instant of dispatch instead.
    */
   supersede(): number {
     this.#gen += 1
@@ -85,11 +83,10 @@ export class SessionClient {
    * TAKING THE GENERATION RATHER THAN CLAIMING ONE is what makes the debounce self-cancelling: two
    * keystrokes 100 ms apart claim two generations and schedule two timers — but `compile.ts`'s `schedule`
    * calls `clearTimeout` on the previous timer before arming the new one, so the FIRST timer never
-   * fires and this guard is unreachable from that call site today. It stays anyway, as
-   * defence-in-depth: it is the post-side half of the same house pattern the receive-side guard in the
-   * constructor above applies, and a future caller that posts without `schedule`'s clearTimeout
-   * discipline should not get to skip the generation check just because this one call site currently
-   * makes it redundant.
+   * fires and this guard is unreachable from that call site. It stays anyway, as defence-in-depth: it
+   * is the post-side half of the same house pattern the receive-side guard in the constructor above
+   * applies, and a future caller that posts without `schedule`'s clearTimeout discipline should not get
+   * to skip the generation check because one call site makes it redundant.
    */
   request(gen: number, src: string, encoding: string): void {
     if (gen !== this.#gen) return
@@ -98,17 +95,16 @@ export class SessionClient {
 
   /**
    * Post the λ scratchpad build for `gen`, or do nothing if a later `supersede` has already replaced
-   * it — design §4.3's fork. `src` HERE IS THE SOURCE'S STEP-0 TEXT, NOT THE TEXT A PANE WAS SHOWING —
-   * this doc's own wording predates the `step` parameter below, which is what turns that fixed text
-   * into the actual term a pane had on screen (`lambda_scratch_at`'s replay, `transport.ts`'s `detach`).
-   * Both arrive from the caller unresolved, for the same reason `detach`'s own doc gives: neither is
-   * this class's to go looking for.
+   * it — 5d-i design §4.3's fork. ON A FORK, `src` IS THE SOURCE'S STEP-0 TEXT, NOT THE TEXT A PANE WAS
+   * SHOWING — the `step` parameter below is what turns that fixed text into the actual term a pane had
+   * on screen (`lambda_scratch_at`'s replay, `transport.ts`'s `detach`). Both arrive from the caller
+   * unresolved, for the reason `ScratchBuffers.fork`'s doc gives for being handed the same two: neither
+   * is this class's to go looking for.
    *
    * THE SAME GUARD AS `request` AND FOR THE SAME REASON, spelled out rather than shared: both are
    * "post this generation's work if it is still the current one", and the two differ only in the
    * message they build. Folding them into one method taking a `RunRequest` would move the choice of
-   * message to every call site and put the `kind` string in `main.ts`, which is the one place design
-   * §3.2 keeps free of the wire.
+   * message to every call site.
    *
    * IT DOES NOT CLAIM A GENERATION EITHER, mirroring `request`: a scratchpad is seeded by a caller who
    * has just decided to supersede whatever that session was doing, and `SessionClient.supersede`'s own
@@ -120,7 +116,7 @@ export class SessionClient {
   }
 
   /**
-   * Build a TM scratchpad from `.tm` text and open a cursor on it — design §4.4.
+   * Build a TM scratchpad from `.tm` text and open a cursor on it — 5d-iv design §4.4.
    *
    * NO `step`, UNLIKE `scratch`, FOR THAT REQUEST'S OWN REASON STATED ON THE WIRE TYPE: a machine has
    * no step-k term to replay to, so the text in the box IS the term the scratch starts from.
@@ -157,8 +153,8 @@ export class SessionClient {
   }
 
   /**
-   * Ask for the λ tree at `step` (spec §4.1). Not a supersede: it names the live generation and builds
-   * nothing, so it is posted as `extend` is, and never before the first build.
+   * Ask for the λ tree at `step` (Plan 7 part 4 spec §4.1). Not a supersede: it names the live generation
+   * and builds nothing, so it is posted as `extend` is, and never before the first build.
    */
   tree(step: number, budget: number): void {
     if (this.#gen === 0) return
@@ -167,24 +163,21 @@ export class SessionClient {
 }
 
 /**
- * Identifies one session: the key into the pool below, and into `main.ts`'s registry of what each
+ * Identifies one session: the key into the pool below, and into `sessions.ts`'s registry of what each
  * session owns.
  *
- * A KEY ON THIS SIDE OF THE BOUNDARY ONLY — NOTHING EVER POSTS IT. Design §3.2: with one worker per
+ * A KEY ON THIS SIDE OF THE BOUNDARY ONLY — NOTHING EVER POSTS IT. 5d-i design §3.2: with one worker per
  * session the port a reply arrives on already identifies the session, so `RunRequest`/`RunReply` need
- * no routing field and `protocol.ts` does not change. If a session id ever appears on the wire,
- * something else is wrong. `SessionClient`'s `#gen` (`:15`) is the same claim seen from the other
- * side — a counter that is private and per instance is already per session, and there was only ever
- * one session for it to be per.
+ * no routing field. If a session id ever appears on the wire, something else is wrong.
+ * `SessionClient`'s `#gen` is the same claim seen from the other side — a counter that is private and
+ * per instance is already per session.
  *
- * A plain alias rather than a branded string: the only producers of an id are the constants in
- * `main.ts`, so a brand would cost a cast at every literal to rule out a confusion nothing can
- * currently make.
+ * A plain alias rather than a branded string: a brand would cost a cast at every literal to rule out a
+ * confusion nothing can currently make.
  *
- * IT MOVED HERE FROM `main.ts`, where it was declared, because a session id is now a key into two
- * containers in two modules and the shared key belongs in the lower one. `main.ts` keeps its own
- * registry under the same key — see `SessionPool`'s doc for why those two maps are two layers rather
- * than two copies.
+ * IT IS DECLARED HERE because a session id is a key into two containers in two modules and the shared
+ * key belongs in the lower one. `sessions.ts` keeps its registry under the same key — see
+ * `SessionPool`'s doc for why those two maps are two layers rather than two copies.
  */
 export type SessionId = string
 
@@ -197,11 +190,11 @@ export type SessionId = string
  * what the pool owns and the client does not. Widening `ClientPort` instead would put a lifecycle
  * method on the one interface whose whole job is to keep a rule testable without a thread.
  *
- * CONSEQUENCE FOR §3.2'S SKETCH, which says the pool is a `Map<SessionId, SessionClient>`: it cannot
- * literally be one, because a `SessionClient` holds its port privately (`#port`, `:16`) and offers no
- * way to terminate it. `#live` below carries the port beside the client instead. Nothing in the
- * design rests on the map's value type — §3.2's claim is "one client per session id", and that holds
- * — but the sketch is not the type.
+ * CONSEQUENCE FOR 5d-i DESIGN §3.2'S SKETCH, which says the pool is a `Map<SessionId, SessionClient>`:
+ * it cannot literally be one, because a `SessionClient` holds its port privately (`#port`) and offers
+ * no way to terminate it. `#live` below carries the port beside the client instead. Nothing in the
+ * design rests on the map's value type — §3.2's claim is one client per session id, and that holds —
+ * but the sketch is not the type.
  */
 export type PoolPort = ClientPort & { terminate(): void }
 
@@ -209,11 +202,11 @@ export type PoolPort = ClientPort & { terminate(): void }
 type Pooled = { readonly client: SessionClient; readonly port: PoolPort }
 
 /**
- * One worker per session (design decision 3, §4.2), and the only thing in the app that may spawn or
+ * One worker per session (5d-i design decision 3, §4.2), and the only thing in the app that may spawn or
  * terminate one.
  *
- * THE ARGUMENT IS DAMAGE CONTAINMENT, NOT TIDINESS, and it rests on two findings the print-depth-cap
- * slice (PR #25) already paid for:
+ * THE ARGUMENT IS DAMAGE CONTAINMENT, NOT TIDINESS, and it rests on two findings of the print-depth-cap
+ * slice (PR #25):
  *
  *   * a wasm call that aborts mid-flight leaves wasm-bindgen's reentrancy borrow TAKEN, so every
  *     later call on that module throws "attempted to take ownership of Rust value while it was
@@ -226,23 +219,20 @@ type Pooled = { readonly client: SessionClient; readonly port: PoolPort }
  * BOTH DAMAGES ARE PROPERTIES OF A WORKER, NOT OF A SESSION, which is the whole argument. One worker
  * holding three sessions shares both: a borrow left taken by the λ scratchpad poisons the source
  * session with it, and a ceiling pulled down by the scratchpad's deep print stays down for every
- * session on that thread. Separate workers keep each local, and `terminate` + respawn resets both —
- * which is also the mechanism §4.3 reused for recompile-from-source, so the app had ONE recovery path
- * and not two. **5d-ii-c decision 2 took the recompile out of that sentence**: a buffer survives a
- * source keystroke now, so the mechanism is the same and the trigger is a retire (design §4.4) — see
- * `compile.ts`, which records what the deletion cost.
+ * session on that thread. Separate workers keep each local, and `terminate` + respawn resets both;
+ * 5d-ii-c design §4.4 puts that recovery in the header list's retire.
  *
- * `session-worker.ts` IS UNTOUCHED, AND ITS ONE-LIVE-SESSION INVARIANT IS WHAT MAKES THIS SAFE
- * (§4.2). It frees the live handle at the top of every `run` (`dropLive`, called before `compile`),
- * so two sessions sharing one worker would not merely share damage — they could not coexist at all:
- * the second compile would free the first session's handle out from under a record loop still posting
- * frames for it. That invariant is the reason the pool goes here and not in the worker.
+ * `session-worker.ts`'S ONE-LIVE-SESSION INVARIANT IS WHAT MAKES THIS SAFE (5d-i design §4.2). It frees
+ * the live handle at the top of every `run` (`dropLive`, called before `compile`), so two sessions
+ * sharing one worker would not merely share damage — they could not coexist at all: the second compile
+ * would free the first session's handle out from under a record loop still posting frames for it. That
+ * invariant is the reason the pool goes here and not in the worker.
  *
- * TWO MAPS KEYED BY `SessionId` — THIS ONE AND `main.ts`'s REGISTRY — AND THEY ARE NOT THE SAME FACT
- * WRITTEN TWICE. This one says what a session RUNS ON and is the only thing allowed to change it; the
- * registry says what a session HAS (its histories, its playback flags), which are a renderer's nouns in a
- * module that owns the DOM. Merging them would either drag `History` and the player into this file
- * or put `new Worker` back in `main.ts`, and §4.2 places the pool here precisely to stop the second.
+ * TWO MAPS KEYED BY `SessionId` — THIS ONE AND `sessions.ts`'s REGISTRY — AND THEY ARE NOT THE SAME
+ * FACT WRITTEN TWICE. This one says what a session RUNS ON and is the only thing allowed to change it;
+ * the registry says what a session HAS (its histories, its playback flags). Merging them would either
+ * drag `History` and the player into this file or give `sessions.ts` the spawning and terminating
+ * that only this class may do.
  */
 export class SessionPool {
   #spawn: () => PoolPort
@@ -252,32 +242,22 @@ export class SessionPool {
   /**
    * @param spawn Makes the worker for a session that does not have one yet.
    *
-   * INJECTED RATHER THAN HARD-CODED, for the reason `ClientPort` exists one type up: everything in
-   * this class is a map, a spawn on first bind and a `terminate` on unbind, and none of it needs a
-   * thread to exercise. `tests/node/session-pool.test.ts` passes a factory returning a recording
-   * fake and drives the whole lifecycle in the node tier.
+   * INJECTED RATHER THAN HARD-CODED, for the reason `ClientPort` exists: everything in this class is a
+   * map, a spawn on first bind and a `terminate` on unbind, and none of it needs a thread to exercise.
+   * `tests/node/session-pool.test.ts` passes a factory returning a recording fake and drives the whole
+   * lifecycle in the node tier.
    *
    * IT IS ALSO WHERE THE FAILURE POLICY LIVES, which is the reason it is a constructor argument and
    * not a hard-coded `new Worker(new URL('./session-worker.ts', import.meta.url))` right here.
-   * `main.ts`'s factory attaches the `error` listener that raises the load-failure banner (design
-   * §6's second load-failure row), and a banner needs the app's root element — a decision about DOM,
-   * taken in a module that has none.
+   * `main.ts`'s factory attaches the `error` listener that raises the load-failure banner (the worker
+   * half of 5a design §6's "worker or wasm fails to load" row), and a banner needs the app's root
+   * element — a decision about DOM, taken in a module that has none.
    *
-   * IT TAKES NO `SessionId`, AND THAT IS A CHOICE RATHER THAN AN OVERSIGHT. §4.1's scratch types are
-   * a different wasm shape (`LambdaScratch`/`TmScratch`, not `Session`), so the task that lands them
-   * will need a session's KIND to pick its worker module — but nothing can pick today, there is one
-   * kind, and a parameter every call site ignores is a design decision taken without its evidence.
-   * The extension point is this signature, and widening it is a one-line diff in the task that first
-   * has a second kind to widen it for.
-   *
-   * **THAT TASK WAS T8 AND IT DID NOT WIDEN THIS, WHICH MAKES THE PARAGRAPH ABOVE A PREDICTION WORTH
-   * MARKING AS WRONG RATHER THAN QUIETLY LEAVING TRUE-LOOKING.** A λ scratchpad runs the SAME
-   * `session-worker.ts` module a source session does; what differs is the first message it is sent
-   * (`protocol.ts`'s `lambda-scratch` against `run`), because the module's job is "hold one wasm
-   * handle and answer about it" and both kinds of handle are that. So the kind is a fact about the
-   * CONVERSATION and not about the thread, there is still nothing for a `SessionId` here to select,
-   * and the extension point never bound. Refusing the parameter without its evidence is the call that
-   * held up; the reason given for why it would eventually be needed is the part that did not.
+   * IT TAKES NO `SessionId`. A scratch session runs the SAME `session-worker.ts` module a source session
+   * does; what differs is the first message it is sent (`protocol.ts`'s `lambda-scratch`, `tm-scratch`
+   * or `asm-scratch` against `run`), because the module's job is "hold one wasm handle and answer about
+   * it" and every kind of handle is that. So the kind is a fact about the CONVERSATION and not about the
+   * thread, and there is nothing for a `SessionId` here to select.
    *
    * @param onSupersede Repaint the app. Called by every client this pool makes, from `supersede()`.
    *
@@ -312,19 +292,14 @@ export class SessionPool {
    * Give `id` a worker and a client, and return the client.
    *
    * THROWS IF `id` IS ALREADY LIVE, rather than returning the client it already has. A
-   * `SessionClient` is constructed with exactly one `onReply` (`:18`) and there is no way to honour a
+   * `SessionClient` is constructed with exactly one `onReply` and there is no way to honour a
    * second one — returning the existing client would silently land this caller's frames in the
    * previous caller's legs, which is the same "two places to be wrong" failure `sessions.ts`'s `LegState`
    * doc refuses one layer up.
    *
-   * **THE CALL SITE THIS THROW USED TO NAME AS ITS REASON IS GONE, AND THE THROW IS NOT.** The
-   * sentence here read: *"§4.3's singleton rebinding ('a second edit rebinds to the EXISTING scratch')
-   * is served by asking `has` first: one branch at the call site, against a misdelivery here that
-   * nothing would report."* 5d-ii-c decision 1 deleted that branch — `ScratchBuffers.fork` mints a
-   * name no session has held, so nothing asks `has` on this method's behalf and no path in the app
-   * reaches this line any more. The misdelivery it names is a property of THIS method rather than of
-   * that caller: one client, one `onReply`, so any second binding of a live id is frames landing under
-   * the wrong name whoever asked for it.
+   * `ScratchBuffers.fork` mints a name no session has held, so no caller needs to ask `has` first. The
+   * misdelivery is a property of THIS method rather than of any caller: one client, one `onReply`, so
+   * any second binding of a live id is frames landing under the wrong name whoever asked for it.
    */
   bind(id: SessionId, onReply: (r: RunReply) => void): SessionClient {
     if (this.#live.has(id)) throw new Error(`session already has a worker: ${id}`)
@@ -338,13 +313,8 @@ export class SessionPool {
    * Terminate `id`'s worker and forget it. A no-op for a session that has none.
    *
    * IDEMPOTENT WHERE `bind` THROWS, AND THE ASYMMETRY IS DELIBERATE. A second `bind` asks for
-   * something that cannot be honoured; a second `unbind` asks for a state that is already true.
-   * §4.3's recompile-from-source was the caller that made this matter — it terminated the scratch's
-   * worker on every recompile, and most recompiles happened when no scratch existed at all — and
-   * 5d-ii-c decision 2 deleted it, leaving `ScratchBuffers.retire` as the only caller in the app (its
-   * own membership check answers the same question one layer up; nothing unbinds at page teardown, and
-   * this doc briefly claimed something did). The asymmetry is kept on its general ground rather than on
-   * that caller's: a guard every caller must write is a guard the callee should have.
+   * something that cannot be honoured; a second `unbind` asks for a state that is already true, and a
+   * guard every caller must write is a guard the callee should have.
    *
    * DELETED BEFORE TERMINATED, in that order, mirroring `session-worker.ts`'s `dropLive` ("NULLED
    * BEFORE FREED"): no caller may reach a client whose worker is gone, not even on the path where

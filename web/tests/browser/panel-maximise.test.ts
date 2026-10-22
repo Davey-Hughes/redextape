@@ -268,8 +268,8 @@ describe('a maximise in a view with a region that has no header', () => {
 
   /**
    * **A MAXIMISED PANEL TAKES ALL OF THE VIEW'S SPARE HEIGHT, WHATEVER SHARE A DRAG LEFT IT.** Under a maximise the
-   * term's share is nothing, and the map's own was the one factor left to grow by: a map dragged down to a quarter
-   * of a share took a quarter of the spare height.
+   * term's share is nothing, and were the map's own the one factor left to grow by, a map dragged down to a
+   * quarter of a share would take a quarter of the spare height.
    */
   it('gives a maximised map the view’s spare height where a drag left it a share under 1', async () => {
     const host = document.createElement('section')

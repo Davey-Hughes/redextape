@@ -77,14 +77,14 @@ describe('parseBuffers', () => {
     expect(parseBuffers(raw({ buffers: [{ ...VALID.buffers[0], leg: 'source' }] }))).toBeNull()
   })
 
-  // THE OTHER LEG IS ACCEPTED TOO — this rejects only a leg outside `Leg`, not `'tm'` itself.
+  // A TM BUFFER IS ACCEPTED TOO — this rejects only a leg outside `Leg`, not `'tm'` itself.
   it('accepts a tm buffer', () => {
     expect(parseBuffers(raw({ buffers: [{ ...VALID.buffers[0], leg: 'tm' }] }))?.buffers[0]?.leg).toBe('tm')
   })
 
-  // AN ASM COPY IS STORED AT VERSION 2 (Plan 7 part 5 spec, amendment 23): the version did not move, so a store written
-  // before asm copies existed and one holding one read under the same version.
-  it('accepts an asm buffer, at the version it always was', () => {
+  // AN ASM COPY IS STORED AT VERSION 2 (Plan 7 part 5 spec, amendment 23), as a copy on any other leg is, so a store
+  // with no asm copy and one holding one read under the same version.
+  it('accepts an asm buffer, under the version the other legs are stored at', () => {
     expect(BUFFERS_VERSION).toBe(2)
     expect(parseBuffers(raw({ buffers: [{ ...VALID.buffers[0], leg: 'asm' }] }))?.buffers[0]?.leg).toBe('asm')
   })
@@ -97,7 +97,7 @@ describe('parseBuffers', () => {
     expect(parseBuffers(raw({ bindings: { 'lambda-0': 'scratch-1', 'pane-3': 'scratch-1' } }))).not.toBeNull()
   })
 
-  // NO TEXT CAP, AND THIS TEST IS THE DECISION (design §4.1): the quota is the bound, not a number
+  // NO TEXT CAP, AND THIS TEST IS THE DECISION (5d-ii-d design §4.1): the quota is the bound, not a number
   // invented here, and a user may legitimately type a term longer than any constant would allow.
   it('accepts a very long term', () => {
     const long = 'x'.repeat(200_000)
@@ -106,10 +106,9 @@ describe('parseBuffers', () => {
 
   it('answers null for a version: 1 payload', () => {
     /**
-     * Version 1 payloads have no `leg` field on buffers, so parsing them is the only way to detect the old
-     * schema. A stale payload is garbage, not something to migrate — the version must be explicit about
-     * the contract. This test exercises the version check in parseBuffers, which runs before any buffer
-     * validation.
+     * Version 1 payloads have no `leg` field on buffers. A stale payload is garbage, not something to
+     * migrate — the version must be explicit about the contract. This test exercises the version check in
+     * parseBuffers, which runs before any buffer validation.
      */
     expect(BUFFERS_VERSION).toBeGreaterThan(1)
     // Literal 1 is correct here: the whole point is that a *stale* version is refused. This test must not

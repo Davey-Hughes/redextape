@@ -2,8 +2,8 @@ import { COLOUR_TOKENS, type ColourToken, type Variant } from './palettes'
 
 /**
  * WCAG 2 relative luminance and contrast ratio, and the floors a palette is held to — the built-ins in
- * `palettes.test.ts`, and an imported base16 scheme before it is applied (Plan 7 part 6b). The two are held
- * to one table and one binder rule, so an import is checked against exactly what the built-ins meet.
+ * `palettes.test.ts`, and an imported base16 scheme before it is applied (Plan 7 part 6b spec §5.3). The two are
+ * held to one table and one binder rule, so an import is checked against exactly what the built-ins meet.
  *
  * ONLY `#rrggbb`, deliberately. Every palette value is written that way (`palettes.test.ts` asserts it),
  * and a parser that also took shorthand, alpha or names would be code whose only callers are tests.
@@ -62,8 +62,7 @@ export const CONTRAST_FLOORS: readonly (readonly [ColourToken, ColourToken, numb
     [t, 'bg-chrome', 3],
   ]),
   // `--accent` and `--error` also colour text on `--bg` and `--bg-raised`, so there they meet the text
-  // floor, tighter than the 3:1 Plan 7 part 1 first set for both on every surface. Neither is text on
-  // chrome.
+  // floor. Neither is text on chrome.
   ...(['accent', 'error'] as ColourToken[]).flatMap((t): [ColourToken, ColourToken, number][] => [
     [t, 'bg', 4.5],
     [t, 'bg-raised', 4.5],

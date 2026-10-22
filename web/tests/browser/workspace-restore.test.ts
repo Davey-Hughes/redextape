@@ -35,8 +35,8 @@ describe('a restored workspace', () => {
   })
 
   /**
-   * **THE ASM VIEW READS ITS PANELS BACK TOO.** The TM view once shipped a panel it stored and never read back; each of
-   * the asm view's four is read back by name (`pane-host.ts`'s asm arm), and the ones not stored keep their default.
+   * **THE ASM VIEW READS ITS PANELS BACK TOO**, not only stores them: each of the asm view's four is read back by name
+   * (`pane-host.ts`'s asm arm), and the ones not stored keep their default.
    */
   it('opens the asm view with its heap panel closed, as stored, and the panels not stored open', () => {
     expect(asmToggle('heap')?.getAttribute('aria-expanded')).toBe('false')
@@ -50,11 +50,10 @@ describe('a restored workspace', () => {
    * which is the restore and the fan-out in one assertion: `main.ts`'s `setSpeed` draws so every step
    * control repaints, and `step-controls.ts` reads the workspace's speed on every update.
    */
-  // **SCOPED TO `.view-steps`, WHERE IT USED TO SWEEP THE PAGE.** Part 2b's step bar is a second
-  // `stepControls` instance (`step-bar.ts`), so a page-wide `.controls select.speed` now finds four —
-  // and this case's own name says "every view that steps", which is the λ, asm and TM views of the default
-  // tree (three since the asm view, Plan 7 part 5 spec §3, row 4). The bar's copy is asserted
-  // on its own line below rather than dropped: one global speed means the bar shows it too (spec §8).
+  // **SCOPED TO `.view-steps`.** The step bar is a second `stepControls` instance (`step-bar.ts`), so a
+  // page-wide `.controls select.speed` finds four — and this case's own name says "every view that steps",
+  // which is the λ, asm and TM views of the four-view tree this file seeds. The bar's copy is asserted on its
+  // own line below rather than dropped: one global speed means the bar shows it too (spec §8).
   it('shows the restored speed in every view that steps', () => {
     expect(
       [...document.querySelectorAll<HTMLSelectElement>('.view-steps .controls select.speed')].map((el) => el.value),
@@ -98,17 +97,16 @@ describe('a restored workspace', () => {
   /**
    * **A LEAF ID COMES BACK, AND ITS OLD PANEL STATE MUST NOT COME WITH IT.** A default arrangement re-mints
    * `source`, `lambda-0`, `asm-0` and `tm-0` as literals, so *reset preset* after closing the TM view hands the
-   * id to a new view. Until `main.ts` normalised the workspace against the live tree, the write dropped
-   * the closed view's panel state and MEMORY kept it — so this same sequence opened the rules panel
-   * closed, and opened it open after a reload, from the same clicks.
+   * id to a new view. Without `main.ts` normalising the workspace against the live tree, the write would drop
+   * the closed view's panel state and MEMORY would keep it — so this same sequence would open the rules panel
+   * closed, and open it open after a reload, from the same clicks.
    */
   /**
-   * **THE PANEL IS CLOSED FIRST, SO THAT `true` AFTERWARDS MEANS SOMETHING — whole-branch review, M8.**
-   * This used to assert `true`, close the view, reset, and assert `true` again. `TmPane`'s default is
-   * `panels.rules ?? true`, so both readings are `true` whether the re-minted view inherited the closed
-   * one's state or fell back to the default: the DOM half could not fail and only the `panels` line was
-   * doing any work. Toggling rules SHUT before the close makes the stored state `false` and the default
-   * `true`, so the assertion after the reset now distinguishes the two.
+   * **THE PANEL IS CLOSED FIRST, SO THAT `true` AFTERWARDS MEANS SOMETHING.** `TmPane`'s default is
+   * `panels.rules ?? true`, so with the panel open before the close, both readings would be `true` whether the
+   * re-minted view inherited the closed one's state or fell back to the default. Toggling rules SHUT before the
+   * close makes the stored state `false` and the default `true`, so the assertion after the reset distinguishes
+   * the two.
    */
   it('does not give a re-minted view the panel state of the one that closed', async () => {
     expect(rulesToggle()?.getAttribute('aria-expanded')).toBe('true')
@@ -135,7 +133,7 @@ describe('a restored workspace', () => {
 
   it('records which view has focus', () => {
     // THE TM VIEW FIRST, SINCE THE CASE ABOVE LEFT THE FOCUS IN THE λ VIEW (`showFourViews`): from there, the λ view
-    // was on record as focused before this case focused it, and the line below passed with its gesture taken out.
+    // would be on record as focused before this case focused it, and the line below would pass without its gesture.
     document.querySelector<HTMLElement>('[data-leaf="tm-0"] .controls button:not([disabled])')?.focus()
     expect(parseWorkspace(localStorage.getItem(LAYOUT_STORAGE_KEY))?.focused).toBe('tm-0')
     document.querySelector<HTMLElement>('[data-leaf="lambda-0"] .controls button:not([disabled])')?.focus()

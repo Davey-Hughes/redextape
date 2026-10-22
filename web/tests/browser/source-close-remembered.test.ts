@@ -10,8 +10,7 @@ import { drawn, mountAt, sourcePane, toggle } from './harness'
  * brings that tree back.
  *
  * **IT IS `main.ts`'S OWN HANDLER, AND NOT `pane-host.ts`'S `close`**: the source view has no pane entry, so its
- * `✕` is wired where its header is built, and calls `enterTree` itself. With a bare assignment of the tree there,
- * every browser file passed but one that pressed the source toggle after it for another reason.
+ * `✕` is wired where its header is built, and calls `enterTree` itself.
  *
  * **THE COMBINATION THE `✕` LEAVES HAS BEEN VISITED BEFORE, SO THE WORKSPACE REMEMBERS AN ARRANGEMENT FOR IT.**
  * `enter` drops that entry as it puts the combination on screen. Left there, the stored workspace holds an

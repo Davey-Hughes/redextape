@@ -53,8 +53,7 @@ describe('navigation', () => {
 
   /**
    * **THE CARET HAS TO BE ON A NAME**, because the question is "references to what". Starting at
-   * offset 0 — on `fn` — this does nothing, which is how this test first failed: the server
-   * correctly answered no references for a keyword, and the test blamed the keybinding.
+   * offset 0 — on `fn` — this does nothing: the server answers no references for a keyword.
    */
   it('does nothing when the caret is not on a name', async () => {
     view.dispatch({ selection: { anchor: 0 } })

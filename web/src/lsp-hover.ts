@@ -45,7 +45,7 @@ export function lspHover(deps: HoverDeps) {
      * `isOverRange`, which keeps the tooltip open anywhere between the two.
      *
      * `range` is optional in the protocol, so an answer with none falls back to the point `pos` the
-     * request was made at — the previous, `end`-less behaviour.
+     * request was made at.
      *
      * **`end` IS OMITTED RATHER THAN SET TO `undefined` WHEN THERE IS NO SPAN.** `Tooltip.end` is
      * optional, and this project's `exactOptionalPropertyTypes` treats "the key is absent" and "the

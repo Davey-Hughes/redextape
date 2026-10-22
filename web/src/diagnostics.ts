@@ -7,12 +7,9 @@ export type LintRange = { from: number; to: number; severity: 'error' | 'warning
 /**
  * `publishDiagnostics`' payload as `@codemirror/lint`'s shape.
  *
- * **THE ZERO-WIDTH CASE IS STILL THE COMMON ONE, AND THE WIDENING SURVIVES THE MOVE OFF BYTES.**
- * A zero-width range is not an edge case: driven against the real server, ten of fifteen broken
- * programs produce at least one. `let x = ` reports `0:8-0:8` twice. CodeMirror renders nothing at
- * all for `from === to`, so the marker would silently not appear on some of the most likely broken
- * programs there are. That is a property of CodeMirror rather than of the offsets, which is why
- * the byte arithmetic this replaced could go and this could not.
+ * **THE ZERO-WIDTH CASE IS THE COMMON ONE.** CodeMirror renders nothing at all for `from === to`, so
+ * the marker would silently not appear on some of the most likely broken programs there are. That is a
+ * property of CodeMirror rather than of the offsets.
  *
  * Widened by one CHARACTER rather than one UTF-16 code unit, and backwards at the end of the
  * document: widening by a code unit onto an astral character produces a position inside its
@@ -23,8 +20,8 @@ export function lspLintRanges(ds: LspDiagnostic[], doc: Text): LintRange[] {
   for (const d of ds) {
     const range: LspRange = d.range
     // **AN INVERTED RANGE IS SWAPPED, NOT COLLAPSED**, which is `lsp-text.ts`'s `rangeOf` policy —
-    // one rule for the situation rather than two. Collapsing to `end` threw away the extent and
-    // then relied on the zero-width widening below to invent a new one.
+    // one rule for the situation rather than two. Collapsing to `end` would throw away the extent and
+    // then rely on the zero-width widening below to invent a new one.
     let from = Math.min(offsetOf(doc, range.start), offsetOf(doc, range.end))
     let to = Math.max(offsetOf(doc, range.start), offsetOf(doc, range.end))
     if (from === to) {

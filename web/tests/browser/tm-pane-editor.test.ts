@@ -6,10 +6,10 @@ import { ONE_RULE_PROGRAM } from '../node/tm-machines'
 import { controlState, newPaneHost, paneEvents } from './harness'
 
 /**
- * Design §4.2/§4.1's split body, ported to the TM leg (5d-iv, Task 8): the editor mounted (or not)
+ * 5d-iii design §4.2's split body, ported to the TM leg (5d-iv design §4.1): the editor mounted (or not)
  * above the tape rows and δ-table, which stay on the unchanged code path — see `TmPane`'s own doc on
- * `#body` for why the collapse hides `#editorHost` itself through the text panel, the same mechanism
- * `LambdaPane` uses, rather than a class on an ancestor.
+ * `#body` for why the collapse hides the copy editor's host itself through the text panel, the same
+ * mechanism `LambdaPane` uses, rather than a class on an ancestor.
  *
  * PANES ARE CONSTRUCTED DIRECTLY, matching `lambda-pane-editor.test.ts`'s own idiom: this is chrome and
  * body wiring built in the constructor and moved by `setEditor` directly, with nothing on the path to
@@ -49,9 +49,8 @@ describe('the TM pane editor region', () => {
 
   /**
    * REMOVED, NOT HIDDEN — the property `view-header.ts`'s `setDetached` holds for the `copy · not linked`
-   * status, and this pane must share it. `hidden` would
-   * leave a live CodeMirror instance in the DOM holding a document and an update listener, and
-   * "reattaching removes the editor" would have no single answer.
+   * status, and this pane must share it. `hidden` would leave a live CodeMirror instance in the DOM holding
+   * a document and an update listener, and "reattaching removes the editor" would have no single answer.
    */
   it('removes the editor when the pane reattaches', () => {
     const { pane, host } = mountPane()
@@ -61,18 +60,15 @@ describe('the TM pane editor region', () => {
   })
 
   /**
-   * `.tm-row` DOES NOT EXIST — `2026-08-17-plan5d-iv-editable-tm.md`'s own sketch guessed at a class
-   * name. The δ-table's rows carry
-   * `.state-row` (`TmPane`'s `#drawTable`), which is what "the table renderer below" names in design
-   * §4.1's split-body note; `.tape` is the separate five-tape-row block above it.
+   * `.state-row`, NOT `.tm-row`: the δ-table's rows carry `.state-row` (`TmPane`'s `#drawTable`), which is
+   * what "the table renderer below" names in the 5d-iv design §4.1's split-body note; `.tape` is the separate
+   * five-tape-row block above it.
    *
-   * **`setProgram`/`render` RUN BEFORE THE CLICK, AND THAT IS THE FIX FOR A DEAD ASSERTION — Important
-   * finding, review of Task 8.** The committed version never called either, so `#index` stayed `null`,
-   * `#drawTable` returned early, and `rowsBefore` was 0 — `expect(0).toBe(0)` cannot fail for the reason
-   * this test exists, and a renderer that wiped the whole table on collapse would still report 0. Priced
-   * as its own class of defect one commit before this branch started (`dead-assertions`, #42). Seeding a
-   * real program first is what makes `rowsBefore > 0`, so the equality afterwards is actually pinning
-   * "collapsing does not disturb the table renderer's own path."
+   * **`setProgram`/`render` RUN BEFORE THE CLICK.** Without either, `#index` stays `null`, `#drawTable`
+   * returns early, and `rowsBefore` is 0 — `expect(0).toBe(0)` cannot fail for the reason this test exists,
+   * and a renderer that wiped the whole table on collapse would still report 0. Seeding a real program
+   * first is what makes `rowsBefore > 0`, so the equality afterwards is actually pinning "collapsing does
+   * not disturb the table renderer's own path."
    */
   it('collapses the text panel and leaves the table renderer alone', () => {
     const { pane, host } = mountPane()
@@ -88,18 +84,17 @@ describe('the TM pane editor region', () => {
 
   /**
    * **`header: false` IS SAID IN WORDS, NOT IN A COLOUR, AND `render` MUST NOT ERASE IT ON THE VERY NEXT
-   * FRAME — Critical finding, review of Task 8.** The accessibility list's item 7 forbids colour carrying
-   * state, and this is a fact nothing else in the app can tell the user: a headerless machine runs from
-   * blank tapes at `MIN_FIELD_WIDTH` rather than from the input the user thinks they pasted.
+   * FRAME.** The accessibility list's item 7 forbids colour carrying state, and this is a fact nothing else
+   * in the app can tell the user: a headerless machine runs from blank tapes at `MIN_FIELD_WIDTH` rather
+   * than from the input the user thinks they pasted.
    *
-   * **THIS DRIVES THE REAL SEQUENCE, NOT A PREFIX OF IT.** The pre-fix version of this test called only
-   * `setScratchStatus` and read `host.textContent` straight back — a call `render` never got a chance to
-   * interfere with, since `render` is what a real page calls on every subsequent frame (`draw()` ->
-   * `PaneSlot.render`). `resetLegs` clears history at compile time, so the very first render after a
-   * `tm-scratch-compiled` reply is `render(null, …)` — the frame-null branch — which used to write `''`
-   * unconditionally and erase the sentence before a single tape row was drawn. This test walks that exact
-   * sequence: a reply, the frame-null render right after it, a first real frame, a later reply that fixes
-   * the header, and a pane giving its editor up.
+   * **THIS DRIVES THE REAL SEQUENCE, NOT A PREFIX OF IT.** A test that called only `setScratchStatus` and
+   * read `host.textContent` straight back would give `render` no chance to interfere, and `render` is what a
+   * real page calls on every subsequent frame (`draw()` -> `PaneSlot.render`). `resetLegs` clears history at
+   * compile time, so the very first render after a `tm-scratch-compiled` reply is `render(null, …)` — the
+   * frame-null branch — which must not write `''` over the sentence before a single tape row is drawn. This
+   * test walks that exact sequence: a reply, the frame-null render right after it, a first real frame, a
+   * later reply that fixes the header, and a pane giving its editor up.
    */
   it('survives render across a reply, a first frame, a header fix, and an editor teardown', () => {
     const { pane, host } = mountPane()
@@ -111,9 +106,9 @@ describe('the TM pane editor region', () => {
     expect(host.textContent).toMatch(/no header/i)
     expect(host.textContent).toMatch(/blank tapes/i)
 
-    // 2. THE ASSERTION THAT FAILS ON THE COMMITTED CODE. Once a program and a frame exist, `render`'s
-    // OTHER branch used to overwrite `#status` with only the per-frame line, dropping the sentence the
-    // instant a tape moved. Both facts must be on screen together.
+    // 2. Once a program and a frame exist, `render`'s OTHER branch writes `#status`, and must not overwrite it
+    // with only the per-frame line, dropping the sentence the instant a tape moves. Both facts must be on
+    // screen together.
     pane.setProgram(ONE_RULE_PROGRAM, ['TAPE'])
     pane.render(FRAME, CONTROLS)
     expect(host.textContent).toMatch(/no header/i)
@@ -126,8 +121,8 @@ describe('the TM pane editor region', () => {
     expect(host.textContent).not.toMatch(/no header/i)
     expect(host.textContent).toContain(ONE_RULE_PROGRAM.states[0]?.name)
 
-    // 4. A pane that gives its editor up must stop narrating a scratch it no longer shows — the same
-    // fabricated-state defect `LambdaPane.setDetached`'s own doc records, pointed the other way.
+    // 4. A pane that gives its editor up must stop narrating a scratch it no longer shows — the hazard
+    // `LambdaPane.setDetached`'s own doc describes for its editor.
     pane.setScratchStatus({ available: true, reason: '', width: 4, run: 'Running', header: false, reduction: null })
     pane.setEditor(null)
     pane.render(FRAME, CONTROLS)
@@ -261,13 +256,11 @@ describe('the TM pane editor region', () => {
      * when the editor is built, so neither the view it moves to nor the copy the view that built it shows later can
      * redirect a keystroke. `builtFor` stands for the building view's binding: it moves on after the handover, as
      * the app's view does when it is picked onto another copy, and the keystroke must still reach the first.
-     */
-    /**
-     * `try`/`finally` AROUND THE FAKE-TIMER PAIR — Minor finding, review of Task 8. The sibling
-     * `describe` below installs and tears down fake timers through `beforeEach`/`afterEach`, which runs
-     * `vi.useRealTimers()` even when an assertion in between throws; this test called both directly with
-     * no such guarantee, so a failing assertion here would leak fake timers into every test that runs
-     * after it in this file.
+     *
+     * `try`/`finally` AROUND THE FAKE-TIMER PAIR. The sibling `describe` below installs and tears down fake
+     * timers through `beforeEach`/`afterEach`, which runs `vi.useRealTimers()` even when an assertion in
+     * between throws; this test calls both directly, so without the `finally` a failing assertion here
+     * would leak fake timers into every test that runs after it in this file.
      */
     it('keeps a moved editor’s edits on the copy it was built for, whichever view holds it', () => {
       vi.useFakeTimers()
@@ -304,10 +297,11 @@ describe('the TM pane editor region', () => {
   })
 
   /**
-   * The re-seed branch (`setEditor` called again while an editor is already mounted) and the debounced
-   * `editSink` callback — both unreachable from the tests above, and both real behaviour rather than
-   * padding: `ScratchBuffers.recompile` reseeds a live editor on every warm/cool cycle, and a keystroke
-   * is the whole reason this pane offers an editor at all.
+   * The re-seed branch (`setEditor` called again while an editor is already mounted), which no test above
+   * reaches, and the debounced `editSink` callback on the pane that built the editor, which the moved-editor
+   * case above reaches only through another pane — both real behaviour rather than padding: `replies.ts`'s
+   * `tm-scratch-compiled` arm reseeds a live editor after every build, and a keystroke is the whole reason
+   * this pane offers an editor at all.
    *
    * `EditorView.findFromDOM` PLUS A REAL CHANGE TRANSACTION, NOT `setEditor` A SECOND TIME —
    * `scratch-editor.test.ts`'s own file doc has the argument: `setText` sets a `#seeding` flag for the

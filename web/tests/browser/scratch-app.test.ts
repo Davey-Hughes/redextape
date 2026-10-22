@@ -20,52 +20,41 @@ import {
 import { lambdaSettled } from './lambda-text'
 
 /**
- * **THE FORK, DRIVEN THROUGH THE APP** — design §4.3's detach, plan T8, from the control a user
- * clicks to the second session it registers and back.
- *
- * THIS IS THE TIER THAT WAS MISSING ONE TASK AGO, AND SAYING SO IS THE POINT. T7's own doc records
- * why every test it shipped built its registry by hand: "nothing in this slice can put a second
- * session in `main()`'s registry — a `LambdaScratch` needs a worker message `session-worker.ts` does
- * not have, and creating one on edit is §4.3, which is T8." This file is the app doing it.
+ * **THE FORK, DRIVEN THROUGH THE APP** — 5d-i design §4.3's detach, from the control a user clicks to
+ * the second session it registers and back.
  *
  * WHAT IT DOES NOT ASSERT, AND WHERE THAT LIVES INSTEAD. Neither `pool.size` nor a worker's liveness
- * is reachable from the DOM, and this app has ONE λ pane, so the singleton (which the plan required
- * be asserted on pool size, "not on rendering") and the terminate-on-retire claim are
- * `tests/node/scratch.test.ts` and `tests/browser/scratch-fork.test.ts` respectively. What is only
- * assertable here is the wiring: that a control exists, that clicking it moves this pane onto a
- * detached session seeded with the term it was showing, and how the pane comes home.
+ * is reachable from the DOM, so the terminate-on-retire claim is `tests/browser/scratch-fork.test.ts`'s.
+ * What is only assertable here is the wiring: that a control exists, that clicking it moves this pane
+ * onto a detached session seeded with the term it was showing, and how the pane comes home.
  *
- * **"AND THAT RECOMPILING BRINGS IT HOME" IS WHAT THAT SENTENCE USED TO END WITH, AND IT IS THE ONE
- * CLAIM IN THIS FILE 5d-ii-c DECISION 2 REVERSED.** A recompile from source used to retire the buffer
- * synchronously on the keystroke; nothing but an explicit retire ends a buffer now (design §4.3's
- * table), so STAGE 4 below asserts the pane STAYS on its buffer and STAGE 5 brings it home through the
- * selector — the affordance the retire used to pre-empt. `tests/browser/scratch-buffers.test.ts` is
- * where the lifetime rule itself is pinned.
+ * Nothing but an explicit retire ends a buffer (5d-ii-c design §4.3's table), so STAGE 4 below asserts
+ * the pane STAYS on its buffer across a recompile and STAGE 5 brings it home through the selector.
+ * `tests/browser/scratch-buffers.test.ts` is where the lifetime rule itself is pinned.
  */
 
 let view: EditorView
 
 /**
- * The title menu's λ items, as `{ key, text }` — WHICH SESSIONS OFFER A λ LEG, which is the question every
- * assertion in this file was really asking of the selector before it listed both legs. Opens and closes
+ * The title menu's λ items, as `{ key, text }` — WHICH SESSIONS OFFER A λ LEG. Opens and closes
  * the menu to read it.
  *
- * FILTERED BY KEY, because the menu lists TM pairs too, so a fork that added nothing would still look right
- * the moment the source session's TM leg was counted. Reading the λ keys is what keeps the assertion
- * about λ.
+ * FILTERED BY KEY, because the menu lists asm and TM pairs too, so a fork that added nothing would still look
+ * right the moment one of the source session's other legs was counted. Reading the λ keys is what keeps the
+ * assertion about λ.
  */
-const lambdaOptionElements = (): { key: string; text: string }[] => {
+const lambdaItems = (): { key: string; text: string }[] => {
   const title = lambdaTitle()
   if (title === null) return []
   title.click()
   const menu = document.getElementById(title.getAttribute('aria-controls') ?? '')
   const items = [...(menu?.querySelectorAll<HTMLButtonElement>('button') ?? [])]
     .map((b) => ({ key: b.dataset.binding ?? '', text: b.textContent ?? '' }))
-    .filter((o) => o.key.startsWith('lambda:'))
+    .filter((i) => i.key.startsWith('lambda:'))
   menu?.hidePopover()
   return items
 }
-const lambdaOptions = () => lambdaOptionElements().map((o) => o.text)
+const lambdaItemTexts = () => lambdaItems().map((i) => i.text)
 /** Pick `key` (`bindingKey(leg, session)`) through the λ view's title menu, as a user does. */
 function pickBinding(leaf: string, key: string): void {
   const title = titleOf(leaf)
@@ -82,36 +71,31 @@ function pickBinding(leaf: string, key: string): void {
  * exactly as printed, so two prints of ALPHA-EQUIVALENT terms compare equal regardless of which
  * concrete fresh names the printer chose for their binders.
  *
- * **ADDED BY T8, AND THE FINDING IT RECORDS IS WORTH KEEPING.** This test used to compare `lambdaTermText()`
- * against `seed` with plain string equality — correct while the seed WAS the pane's own frame text
- * reparsed at `step: 0` (5d-i's stopgap), because that path never gave the printer's name generator a
- * reason to walk differently. Design §4.1 replaced that seed: the scratch's step 0 is now derived from
- * an INDEPENDENT print-parse-replay-print pipeline (`index.lambdaText` at `LAMBDA_BYTE_BUDGET`, replayed
- * to the step, re-printed — see `transport.ts`'s `detach` handler) — a second, unrelated walk that is free to
- * assign fresh names in a different order. Measured directly: forking `let x = 40; x + 2` at step 2
- * produces the SAME term with two binder names swapped end to end (`λx0. ... f0 (f0 (... x))) ... λx. f
- * (f x)` against `λx. ... f0 (f0 (... x0))) ... λx0. f (f x0)`) — alpha-equivalent, not byte-identical.
- * `lambda/syntax.rs`'s own round-trip property (`parse_print_round_trips`) only promises print -> parse
- * -> print is stable for ONE walk; it makes no claim across two independent ones, and this diff is
- * exactly that gap. Canonicalizing both sides is the textual stand-in for "same term up to
+ * The scratch's step 0 is derived from an INDEPENDENT print-parse-replay-print pipeline
+ * (5d-iii design §4.1: `index.lambdaText` at `LAMBDA_BYTE_BUDGET`, replayed to the step, re-printed —
+ * see `transport.ts`'s `detach` handler) — a second, unrelated walk that is free to assign fresh
+ * names in a different order. Measured directly: forking `let x = 40; x + 2` at step 2 produces the
+ * SAME term with two binder names swapped end to end (`λx0. ... f0 (f0 (... x))) ... λx. f (f x)`
+ * against `λx. ... f0 (f0 (... x0))) ... λx0. f (f x0)`) — alpha-equivalent, not byte-identical.
+ * `lambda/syntax.rs`'s own round-trip property (`print_is_idempotent_prop`) only promises print ->
+ * parse -> print is stable for ONE walk; it makes no claim across two independent ones, and this diff
+ * is exactly that gap. Canonicalizing both sides is the textual stand-in for "same term up to
  * alpha-equivalence" a browser test can check without a normalizer of its own.
  *
- * **REWRITTEN — code review found the first version over-normalised.** It matched every identifier
- * globally (`[a-zA-Z]` then any run of `[a-zA-Z0-9]`) and renamed EVERY one by first-appearance order,
- * free occurrences included, which is not what alpha-equivalence means and is not what the measured
- * divergence above needs. Two problems, both now fixed by construction rather than by a narrower regex:
+ * Two rules, both held by construction rather than by a narrower regex, because renaming every
+ * identifier by first-appearance order, free occurrences included, is not what alpha-equivalence means:
  *
- *   1. **Free variables were renamed too**, so `f (g x)` and `g (f x)` — two different terms — both
- *      canonicalised to `v0 (v1 v2)` and compared equal. This function now renames ONLY a name at its
- *      binder (the identifier immediately after `λ`) and at USES that resolve to a binder currently in
- *      scope; a name with no enclosing binder is left exactly as printed, so two prints that are
- *      genuinely different keep looking different.
- *   2. **It was not scope-aware.** The real printer's `fresh()` (`lambda/syntax.rs`) only avoids
+ *   1. **Free variables are not renamed.** Renaming them would canonicalise `f (g x)` and `g (f x)` —
+ *      two different terms — both to `v0 (v1 v2)`, and they would compare equal. This function renames
+ *      ONLY a name at its binder (the identifier immediately after `λ`) and at USES that resolve to a
+ *      binder currently in scope; a name with no enclosing binder is left exactly as printed, so two
+ *      prints that are genuinely different keep looking different.
+ *   2. **It is scope-aware.** The real printer's `fresh()` (`lambda/syntax.rs`) only avoids
  *      collisions with binders CURRENTLY IN SCOPE (`self.names`, pushed on entering an `Abs` and popped
  *      on leaving it), so it may — and does — reuse one concrete name across two INDEPENDENT,
- *      non-nested binders. First-appearance numbering does not: it hands out a new number to every
- *      binder regardless of nesting, so `(λx.x)(λx.x)` (one name reused) and `(λx.x)(λy.y)` (two names)
- *      canonicalised to different strings despite being alpha-equivalent. This function numbers a
+ *      non-nested binders. First-appearance numbering hands out a new number to every binder
+ *      regardless of nesting, so `(λx.x)(λx.x)` (one name reused) and `(λx.x)(λy.y)` (two names) would
+ *      canonicalise to different strings despite being alpha-equivalent. This function numbers a
  *      binder by its NESTING DEPTH at the point it is introduced (how many binders already enclose it),
  *      not by how many DISTINCT names have been seen — so two independent top-level binders both become
  *      `v0`, matching how alpha-equivalence is normally decided (de Bruijn levels) rather than how the
@@ -126,11 +110,11 @@ function pickBinding(leaf: string, key: string): void {
  *
  *   - On `(` / `)`, adjust depth; on `)`, pop any binder frame opened at a depth this `)` just left.
  *   - On `λ`, remember that the NEXT identifier is a declaration.
- *   - On a declaration, assign `v<stack.length>` (depth-based, per problem 2 above), push
+ *   - On a declaration, assign `v<stack.length>` (depth-based, per rule 2 above), push
  *     `{ name, canon, openDepth: depth }`, and emit the canonical name.
  *   - On any OTHER identifier, search the stack innermost-first (correct shadowing: `λx. λx. x` refers
  *     to the INNER `x`) and emit its canonical name if found, or the identifier UNCHANGED if not
- *     (problem 1 above — nothing in scope claims it, so it is left alone).
+ *     (rule 1 above — nothing in scope claims it, so it is left alone).
  *
  * **WHAT THIS DOES NOT HANDLE, SAID PLAINLY.** It trusts the input to be `print_lambda`'s own grammar —
  * adversarial text with, say, redundant parens around a bare variable would not necessarily scope the
@@ -154,7 +138,7 @@ function alphaCanonical(printedTerm: string): string {
       return tok
     }
     // THE `.` ENDS A BINDER LIST, NOT THE FIRST NAME AFTER `λ`: the λ view writes curried binders merged,
-    // `λa b c.` (Plan 7 part 4a), and every name in that list is a declaration.
+    // `λa b c.` (Plan 7 part 4 spec §5.1), and every name in that list is a declaration.
     if (tok === '.') {
       declaring = false
       return tok
@@ -188,9 +172,6 @@ describe('the fork control, end to end', () => {
   // ONE MOUNT FOR THE FILE, for `app.test.ts`'s reason: ES module imports are cached, so `main()` runs
   // once per page and Vitest gives each test FILE its own page.
   beforeAll(async () => {
-    // Each browser test file gets its own in-memory `Storage` now, installed in `tests/browser/setup.ts`
-    // before this file's own module body runs — see that file's doc for why clearing a shared key was
-    // not enough. Neither key needs clearing here any more.
     document.body.innerHTML = SHELL
     view = await (await import('../../src/main')).ready
     await until(idle, 'the first compile')
@@ -198,36 +179,28 @@ describe('the fork control, end to end', () => {
 
   /**
    * THE WHOLE CYCLE IN ONE `it`, WHICH IS A SEQUENCING DECISION RATHER THAN LAZINESS. The states are
-   * ordered — there is no scratchpad to retire until one has been forked, and no fork until the app
-   * has compiled — and `beforeAll` mounts one app for the file, so splitting them into four `it`s
-   * would make each depend on the previous having run, which is the shared-mutable-fixture failure
-   * `app.test.ts` documents in its own nested-`describe` note. Every stage below asserts before it
-   * acts.
+   * ordered — there is no scratchpad until one has been forked, and no fork until the app has
+   * compiled — and `beforeAll` mounts one app for the file, so splitting them into separate `it`s
+   * would make each depend on the previous having run. Every stage below asserts before it acts.
    */
   it('forks the λ pane onto a buffer seeded with the term it was showing, keeps it across a recompile, and comes home through the selector', async () => {
     await settled(view, 'let x = 40; x + 2')
 
-    // STAGE 1 — attached, and the app looks exactly as T7 left it, modulo one gate T8 removed and one
-    // control T7's own successor widened. The fork control is present because the pane is attached —
-    // it no longer also requires the frame to be whole (`LambdaPane.#refreshDetach`'s `frame.cut`
-    // check came out in T8; `scratch-fork.test.ts`'s "forks a truncated frame" `describe` is the test
-    // that would catch its return).
+    // STAGE 1 — attached. The fork control is present because the pane is attached, whether or not the
+    // frame is whole (`scratch-fork.test.ts`'s "forks a truncated frame" `describe` holds that).
     //
-    // **THE SELECTOR IS ON SCREEN HERE, AND THIS ASSERTION USED TO SAY IT WAS ABSENT** — "the selector
-    // is absent because one session offers λ (`bindingSelect`'s 'not shown at all below two
-    // options')". The threshold counts `(leg, session)` PAIRS now, and the source session has both
-    // legs, so it clears two on its own. The claim that sentence was really making — that only ONE
-    // session offers λ until a fork happens — is what the λ group's own contents say, and that is what
-    // is asserted instead. `main.ts`'s note on registering the source session carries the same
-    // correction.
+    // **THE SELECTOR IS ON SCREEN HERE**: it lists `(leg, session)` pairs, and the source session's own
+    // legs cross its two-option threshold with nothing forked (`main.ts`'s note on registering the
+    // source session). What this stage asserts of it is that only ONE session offers λ until a fork
+    // happens, which is what the λ group's own contents say.
     expect(lambdaHeading()).toBe('λ · program')
-    expect(lambdaOptions()).toEqual(['λ · program'])
+    expect(lambdaItemTexts()).toEqual(['λ · program'])
     expect(forkButton()).not.toBeNull()
 
-    // Two steps in, so the seed is a term the SOURCE SESSION IS NOT AT STEP 0 OF. §4.3 seeds with
-    // "that pane's current text", and a fork taken at step 0 would produce a scratchpad
-    // indistinguishable from the source's own λ leg — the whole claim would render identically either
-    // way, which is the trap the plan names for the singleton test and it applies here too.
+    // Two steps in, so the seed is a term the SOURCE SESSION IS NOT AT STEP 0 OF. The copy starts on the
+    // term at the pane's step (5d-iii design §4.1), and a fork taken at step 0 would produce a scratchpad
+    // indistinguishable from the source's own λ leg — the whole claim would render identically
+    // either way.
     //
     // `↺` FIRST, so the walk starts at step 0 whatever an earlier gesture left the pane on. A run opens
     // there too (`History`). `restart` seeks to the oldest retained frame, which is step 0 exactly until
@@ -245,40 +218,37 @@ describe('the fork control, end to end', () => {
     document.querySelector<HTMLButtonElement>('[data-leaf="lambda-0"] button.detach')?.click()
 
     expect(lambdaHeading()).toContain('copy · not linked')
-    // §4.5's OTHER SURFACE, and the pairing is the point: the badge is the glanceable one and the
-    // status line is the authoritative narration. `link-wiring.ts`'s `detachedPanes` reads the same
+    // 5d-i design §4.5's OTHER SURFACE, and the pairing is the point: the badge is the glanceable one and
+    // the status line is the authoritative narration. `link-wiring.ts`'s `detachedPanes` reads the same
     // `SessionEntry.detached` the badge does, so the two cannot disagree.
     expect(linkStatus()).toContain('λ view shows a copy')
     // The control is gone, because a pane already on the scratchpad has nothing to fork — and the
     // selector is the affordance for the same intent that still works: it is how a user comes back.
-    // It did not ARRIVE here, which this comment used to say. Since the control started listing
-    // `(leg, session)` pairs it has been on screen since STAGE 1; what the fork changed is the λ
-    // group's contents, asserted two lines below.
+    // It has been on screen since STAGE 1; what the fork changed is the λ group's contents,
+    // asserted below.
     expect(forkButton()).toBeNull()
-    const select = lambdaTitle()
-    if (select === null) throw new Error('the pane selector should be on screen from the first paint')
-    // THE λ GROUP, NOT `select.options`, WHICH FLATTENS THE GROUPS AWAY. The TM group is beside it and
-    // holds the source session's TM leg, which this stage says nothing about; what the fork changed is
-    // the λ group, and naming the group is what keeps this assertion about the fork.
+    const title = lambdaTitle()
+    if (title === null) throw new Error('the pane selector should be on screen from the first paint')
+    // THE λ GROUP. The asm and TM groups follow it and hold the source session's asm and TM legs, which
+    // this stage says nothing about; what the fork changed is the λ group, and naming the group is what
+    // keeps this assertion about the fork.
     //
-    // **THE SECOND ENTRY IS A MINTED NAME, WHERE THIS LINE USED TO READ `'λ scratchpad'`.** That was
-    // the label `main.ts` gave its one fixed scratch session, written down before the session existed;
-    // 5d-ii-c decision 1 makes a fork mint the buffer AND its name together (`ScratchBuffers.fork`), so
-    // the label is `λ scratch N` and N counts the forks this page has performed. The shape is asserted
-    // rather than the number for the reason `main()`-per-FILE makes unavoidable: N is a function of
-    // every earlier test's forks, so pinning it would make this test fail for something another test
-    // did. The GROUP'S LENGTH is what carries the claim the old line carried — one fork, one new λ
-    // session, not two and not none.
-    const buffer = lambdaOptionElements()[1]
-    expect(lambdaOptions()).toHaveLength(2)
-    expect(lambdaOptions()[0]).toBe('λ · program')
-    expect(lambdaOptions()[1]).toMatch(/^λ · copy \d+$/)
-    // AND THE PANE IS ON IT — against the option element the app itself built, not against a name this
+    // **THE SECOND ENTRY IS A MINTED NAME.** A fork mints the buffer AND its name together (5d-ii-c
+    // decision 1, `ScratchBuffers.fork`), so the label is `λ · copy N` and N counts the forks this
+    // page has performed. The shape is asserted rather than the number for the reason
+    // `main()`-per-FILE makes unavoidable: N is a function of every earlier test's forks, so pinning
+    // it would make this test fail for something another test did. The GROUP'S LENGTH is what
+    // carries the claim — one fork, one new λ session, not two and not none.
+    const buffer = lambdaItems()[1]
+    expect(lambdaItemTexts()).toHaveLength(2)
+    expect(lambdaItemTexts()[0]).toBe('λ · program')
+    expect(lambdaItemTexts()[1]).toMatch(/^λ · copy \d+$/)
+    // AND THE PANE IS ON IT — against the item the app itself built, not against a name this
     // file guessed. The second line is what stops that from being satisfied by the pane having stayed
     // where it was: `bindingKey('lambda', 'source')` is the one λ pair whose id this file can still
     // write down, and it is the value the selector held one line before the fork.
-    expect(select.dataset.binding).toBe(buffer?.key)
-    expect(select.dataset.binding).not.toBe(bindingKey('lambda', 'source'))
+    expect(title.dataset.binding).toBe(buffer?.key)
+    expect(title.dataset.binding).not.toBe(bindingKey('lambda', 'source'))
     // BEFORE ANY REPLY: the leg exists and has nothing in it yet, and the step readout says which of
     // those two it is. `controlState` renders `reason` while `!available`, which is what
     // `ScratchBuffers` seeds the leg's status with rather than leaving it `''`.
@@ -301,10 +271,10 @@ describe('the fork control, end to end', () => {
     expect(lambdaStepText()).toBe('step 0 of 5')
 
     // And its step 0 is the (alpha-equivalent) term the pane was showing when the button was clicked
-    // — not `seed` byte-for-byte, and that is §4.1 rather than a slip: the scratch's step 0 is
-    // RE-DERIVED, from the source's own step-0 print replayed forward, not read off the frame `seed`
-    // came from — see `alphaCanonical`'s doc above for the diff this comparison would otherwise trip
-    // on.
+    // — not `seed` byte-for-byte, and that is 5d-iii design §4.1 rather than a slip: the scratch's
+    // step 0 is RE-DERIVED, from the source's own step-0 print replayed forward, not read off the
+    // frame `seed` came from — see `alphaCanonical`'s doc above for the diff this comparison would
+    // otherwise trip on.
     clickLambda('↺')
     expect(lambdaStepText()).toBe('step 0 of 5')
     await lambdaSettled()
@@ -312,23 +282,20 @@ describe('the fork control, end to end', () => {
     // same term can break across lines where the program's did not, and a line break is not a space.
     expect(alphaCanonical(lambdaTermText()).replace(/\s/g, '')).toBe(alphaCanonical(seed).replace(/\s/g, ''))
 
-    // STAGE 4 — A RECOMPILE FROM SOURCE LEAVES THE BUFFER ALONE, AND THIS STAGE USED TO ASSERT THE
-    // EXACT OPPOSITE. It read "recompile from source retires it. Synchronous on the keystroke", and
-    // checked `lambdaHeading()` back to `lambda`, the status line without `detached`, and `lambdaOptions()`
-    // down to `['source']` — the registry having genuinely lost a session. 5d-ii-c decision 2 (design
-    // §4.3's table: "recompile from source: ended it -> **survives**") deletes that retire, so a
-    // keystroke in the source editor is no longer an event in the buffer's life at all. The same three
-    // surfaces are read here, inverted, plus the term — because a buffer that survived the keystroke
-    // and was silently re-seeded from the new program would satisfy all three and still have thrown
-    // the user's work away.
+    // STAGE 4 — A RECOMPILE FROM SOURCE LEAVES THE BUFFER ALONE (5d-ii-c design §4.3's table: "recompile
+    // from source: ended it -> **survives**"), so a keystroke in the source editor is not an event in the
+    // buffer's life at all. Three surfaces are read — the heading, the status line and the λ group —
+    // plus the term, because a buffer that survived the keystroke and was silently re-seeded from the
+    // new program would satisfy all three and still have thrown the user's work away.
     const bufferTerm = lambdaTermText()
     view.dispatch({ changes: { from: 0, to: view.state.doc.length, insert: 'let x = 40; x + 5' } })
 
-    // SYNCHRONOUSLY, because that is when the retire used to happen — before the debounce was armed.
+    // SYNCHRONOUSLY, because that is when a retire on the keystroke would happen —
+    // before the debounce is armed.
     expect(lambdaHeading()).toContain('copy · not linked')
     expect(linkStatus()).toContain('λ view shows a copy')
-    expect(lambdaOptions()).toHaveLength(2)
-    expect(select.dataset.binding).toBe(buffer?.key)
+    expect(lambdaItemTexts()).toHaveLength(2)
+    expect(title.dataset.binding).toBe(buffer?.key)
 
     focusProgram()
     await until(
@@ -340,15 +307,14 @@ describe('the fork control, end to end', () => {
     // same buffer, and still at the buffer's step 0: not the source's newly recorded leg, and not a
     // re-seed of the buffer from it.
     expect(lambdaHeading()).toContain('copy · not linked')
-    expect(select.dataset.binding).toBe(buffer?.key)
+    expect(title.dataset.binding).toBe(buffer?.key)
     expect(lambdaStepText()).toBe('step 0 of 5')
     expect(lambdaTermText()).toBe(bufferTerm)
     // The fork control stays away for the reason it went away: this pane is still on a buffer.
     expect(forkButton()).toBeNull()
 
-    // STAGE 5 — THE WAY HOME IS THE SELECTOR, which is the affordance STAGE 4's retire used to
-    // pre-empt, and the assertions below are the ones that stage used to make about the source leg.
-    // `scratch-rebind-editor.test.ts` is where the editor's half of this rebind is pinned.
+    // STAGE 5 — THE WAY HOME IS THE SELECTOR. `scratch-rebind-editor.test.ts` is where the editor's
+    // half of this rebind is pinned.
     pickBinding('lambda-0', bindingKey('lambda', 'source'))
 
     expect(lambdaHeading()).toBe('λ · program')
@@ -361,34 +327,32 @@ describe('the fork control, end to end', () => {
     expect(lambdaTermText()).not.toBe('')
     expect(lambdaTermText()).not.toBe(bufferTerm)
     // **AND THE BUFFER IS STILL THERE, WHICH IS THE HALF A REBIND IS NOT.** Coming home moves the pane;
-    // it ends nothing, so the λ group still offers the buffer to go back to. Under the old behaviour
-    // this list was `['source']` by now and there was nothing to go back to.
-    expect(lambdaOptions()).toHaveLength(2)
-    expect(lambdaOptionElements()[1]?.key).toBe(buffer?.key)
+    // it ends nothing, so the λ group still offers the buffer to go back to.
+    expect(lambdaItemTexts()).toHaveLength(2)
+    expect(lambdaItems()[1]?.key).toBe(buffer?.key)
   })
 })
 
 /**
- * **`alphaCanonical` ON ITS OWN — code review's finding that the helper above over-normalised, pinned
- * directly rather than only through the end-to-end fork test that happens not to exercise free
- * variables.** The two cases below are exactly the two problems that doc comment names, plus the
- * positive case the helper exists for in the first place.
+ * **`alphaCanonical` ON ITS OWN, pinned directly rather than only through the end-to-end fork test,
+ * which does not exercise free variables.** The cases below are the positive case the helper exists
+ * for, the two rules its doc comment names, and a shadowed name.
  */
 describe('alphaCanonical', () => {
   it('canonicalises the measured λx0./λx. divergence: two independent prints of one alpha-equivalent term', () => {
-    // The shape T8 actually measured (`f (f x)` under two different fresh-name choices for the SAME
-    // structure), reduced to a size this test can write by hand rather than reproducing the exact
-    // 40+2 fixture's full text.
+    // The shape of the divergence `alphaCanonical`'s doc measured (`f (f x)` under two different
+    // fresh-name choices for the SAME structure), reduced to a size this test can write by hand rather
+    // than reproducing the exact 40+2 fixture's full text.
     const a = 'λx0. λf0. f0 (f0 x0)'
     const b = 'λx. λf. f (f x)'
     expect(alphaCanonical(a)).toBe(alphaCanonical(b))
     expect(alphaCanonical(a)).toBe('λv0. λv1. v1 (v1 v0)')
   })
 
-  it('does NOT conflate structurally different terms that share no binders — the free-variable finding', () => {
-    // Problem 1: the old regex renamed every identifier by first-appearance order regardless of
-    // whether a binder ever introduced it, so these two — genuinely different terms, an application
-    // chain read one way and the other — both canonicalised to `v0 (v1 v2)`.
+  it('does NOT conflate structurally different terms that share no binders: free names stay as printed', () => {
+    // Rule 1: renaming every identifier by first-appearance order, whether or not a binder ever
+    // introduced it, would canonicalise these two — genuinely different terms, an application chain
+    // read one way and the other — both to `v0 (v1 v2)`.
     const left = alphaCanonical('f (g x)')
     const right = alphaCanonical('g (f x)')
     expect(left).not.toBe(right)
@@ -397,11 +361,11 @@ describe('alphaCanonical', () => {
     expect(right).toBe('g (f x)')
   })
 
-  it('reuses a canonical name across two INDEPENDENT, non-nested binders — the scope-awareness finding', () => {
-    // Problem 2: `fresh()` (`lambda/syntax.rs`) only avoids collisions with binders CURRENTLY IN
+  it('reuses a canonical name across two INDEPENDENT, non-nested binders: binders are numbered by depth', () => {
+    // Rule 2: `fresh()` (`lambda/syntax.rs`) only avoids collisions with binders CURRENTLY IN
     // SCOPE, so it is free to print the SAME name for two binders that never enclose one another. A
     // first-appearance counter does not know that and hands out a new number to each; a depth-based
-    // one — what this function does now — assigns both `v0`, since neither is nested inside the other.
+    // one — this function — assigns both `v0`, since neither is nested inside the other.
     expect(alphaCanonical('(λx. x) (λx. x)')).toBe(alphaCanonical('(λx. x) (λy. y)'))
     expect(alphaCanonical('(λx. x) (λy. y)')).toBe('(λv0. v0) (λv0. v0)')
   })

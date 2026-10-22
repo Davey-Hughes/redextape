@@ -9,9 +9,9 @@ import { live, mounted, noticeText, SHELL, sourceBeside, stateIdle, stepTextOf, 
 /**
  * **A CLAMP IS SAID ONLY OF A LEG THE PAGE HAS A VIEW OF** — Plan 7 part 6a spec §5.4, on a page of the view layouts,
  * which need not show every leg. A link carries a step for each leg with frames, whichever views its page showed, and
- * a clamp's notice ends *showing step …*: said of a leg with no view, it named a step nothing on the page shows
- * (`main.ts`'s `positions` has what was measured). Each link is pasted into the open page, a `hashchange`, and carries
- * a light program under `unary`, whose run ends long before the link's steps, so every position clamps.
+ * a clamp's notice ends *showing step …*: said of a leg with no view, it would name a step nothing on the page shows.
+ * Each link is pasted into the open page, a `hashchange`, and carries a light program under `unary`, whose run ends
+ * long before the link's steps, so every position clamps.
  *
  * **A CASE THAT EXPECTS NO WORD OF A CLAMP WAITS UNTIL THE CLAMP HAS HAPPENED.** The legs stop in the order λ, asm, TM
  * (`share-positions.ts`), so a later leg's notice says the earlier ones have stopped; and where no notice is due, the
@@ -63,7 +63,7 @@ describe('a clamp of a leg no view shows', () => {
     location.hash = await link(OTHER, sourceBeside('tm-0', 'tm'), { lambda: 100, asm: 100 })
     await until(
       () => view.state.doc.toString() === OTHER && runOver(15),
-      'the link’s run to be over, both legs stopped',
+      'the link’s run to be over, every leg stopped',
     )
     expect(mounted()).toEqual(['source', 'tm-0'])
     expect(noticeText(), 'a clamp was said of a leg no view shows').toBe('opened a shared link')

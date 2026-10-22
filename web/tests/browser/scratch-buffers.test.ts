@@ -19,31 +19,25 @@ import { lambdaSettled } from './lambda-text'
 import { typeIntoScratchEditor } from './scratch-editor-fixture'
 
 /**
- * **WHAT ENDS A BUFFER, DRIVEN THROUGH THE APP** — design §4.3's table, and the row this task changes:
- * *recompile from source: ended it -> **survives***.
+ * **WHAT ENDS A BUFFER, DRIVEN THROUGH THE APP** — 5d-ii-c design §4.3's table, its row *recompile from
+ * source: ended it -> **survives***.
  *
  * **THE CLAIM THIS FILE EXISTS TO PIN IS A NEGATIVE ONE**, which is why it is asserted on the RENDERED
  * TERM rather than on how many λ sessions the registry holds. A buffer that survived the keystroke but
  * was silently re-seeded from the new source program would keep every count right — same session, same
- * option in the selector, same pane binding — and would still have thrown the user's work away, which
+ * item in the title menu, same pane binding — and would still have thrown the user's work away, which
  * is the only thing a scratch buffer is for. The term the user typed into the buffer's own editor is
  * the one surface that can tell those two apart, so that is what this test reads.
  *
- * **IT IS THE OTHER SIDE OF TWO TESTS THAT ASSERTED THE OPPOSITE**, and both are re-pointed rather than
- * deleted: `scratch-app.test.ts`'s end-to-end fork test (its STAGE 4 read "recompile from source retires
- * it") and `scratch-edit.test.ts` (its STAGE 4 read "recompiling from source retires the scratchpad and
- * takes the editor with it"). Their own docs now name what they used to claim.
- *
  * **AND THE SECOND `describe` IS THE OTHER HALF OF THE SAME TABLE** — *closing its last pane: ended it
- * -> **survives, listed as `orphan`***, and *explicit retire: did not exist -> **ends it***. This file's
- * doc used to say "THE APP HAS NO WAY BACK FROM A WEDGED BUFFER WHILE THIS FILE HOLDS ONLY THIS TEST",
- * because 5d-i made a recompile the poison-recovery path (design §3.4) and nothing inherited that role
- * until the header list was wired (§4.4). It is wired, this file grew the orphan-and-retire test that
- * closes it, and the two tests are ordered: there is no orphan to reach until a buffer exists and no
- * buffer until something forks one.
+ * -> **survives, listed as `orphan`***, and *explicit retire: did not exist -> **ends it***. The two
+ * tests are ordered: there is no orphan to reach until a buffer exists and no buffer until something
+ * forks one.
  *
- * ONE MOUNT FOR THE FILE, the reason every sibling gives: ES module imports are cached, so `main()`
+ * ONE MOUNT FOR THE FILE, for the reason `app.test.ts` gives: ES module imports are cached, so `main()`
  * runs once per page and Vitest gives each test FILE its own page.
+ *
+ * Section and decision citations here are the 5d-ii-c design's unless they name another.
  */
 
 let view: EditorView
@@ -67,18 +61,17 @@ function offered(leaf: string): { key: string; text: string }[] {
  * source session is the only λ session whose id `main.ts` writes down.
  *
  * READ OUT OF THE DOM RATHER THAN WRITTEN DOWN, the idiom `scratch-rebind-editor.test.ts` and
- * `two-lambda-panes.test.ts` both settled on: 5d-ii-c decision 1 mints `scratch-N` per fork and never
- * reissues a retired name, and `main()` runs once per test FILE, so the number a fork lands on is a
- * function of every fork before it. A hard-coded `scratch-1` passes until an unrelated test above it
- * forks.
+ * `two-lambda-panes.test.ts` share: 5d-ii-c decision 1 mints `scratch-N` per fork and never reissues
+ * a retired name, and `main()` runs once per test FILE, so the number a fork lands on is a function of
+ * every fork before it. A hard-coded `scratch-1` passes until an unrelated test above it forks.
  *
  * IT THROWS UNLESS THERE IS EXACTLY ONE, because "the buffer" is not a thing the DOM can answer with
  * two of them live, and a helper that quietly took the first would make every assertion after it
  * describe whichever one happened to sort earliest.
  */
-const bufferOption = (): { key: string; text: string } => {
+const bufferItem = (): { key: string; text: string } => {
   const buffers = offered('lambda-0').filter(
-    (o) => o.key.startsWith('lambda:') && o.key !== bindingKey('lambda', 'source'),
+    (i) => i.key.startsWith('lambda:') && i.key !== bindingKey('lambda', 'source'),
   )
   const only = buffers[0]
   if (buffers.length !== 1 || only === undefined) {
@@ -92,10 +85,9 @@ const bufferOption = (): { key: string; text: string } => {
  * property.
  *
  * `hidden` IS AN ATTRIBUTE WHOSE EFFECT IS A UA RULE (`[hidden] { display: none }`), AND A STYLESHEET
- * CAN BEAT IT. `expect(button.hidden).toBe(true)` passes on a page where `.bar button { display: flex }`
- * puts the control back on screen — which is the whole of what "withheld at zero buffers" claims, defeated
- * with the assertion still green. `tests/browser/setup.ts` loads the app's own `style.css` into the
- * tester page, so this reads the rules the app ships rather than UA defaults.
+ * CAN BEAT IT, so the attribute does not say whether the control is on screen and the computed `display`
+ * does. `tests/browser/setup.ts` loads the app's own `style.css` into the tester page, so this reads the
+ * rules the app ships rather than UA defaults.
  */
 const buffersDisplay = () => {
   const button = buffersControl()
@@ -111,21 +103,12 @@ const retireControl = (name: string) =>
   document.querySelector<HTMLButtonElement>(`.buffer-list button[aria-label="delete ${name}"]`)
 
 /**
- * **THIS FILE USED TO GUARD THE SHARED-ORIGIN RACE ITSELF, WITH A `beforeAll` CLEAR ON ENTRY AND AN
- * `afterAll` CLEAR ON EXIT — BOTH ARE GONE NOW.** Every browser test file gets its own in-memory
- * `Storage`, installed in `tests/browser/setup.ts` before this file's own module body runs; that file's
- * doc carries the argument in full, including why a clear-on-mount mitigation could not close the race by
- * itself.
- *
- * TWO MEASURED INCIDENTS ARE WORTH KEEPING ON RECORD, BOTH FOUND THROUGH THIS FILE. First: the retire
- * test below closes `lambda-0`, so this was the first file in the tier to persist a layout tree with one
- * of `fourViews()`'s own leaves MISSING — it left `link-truncated.test.ts`'s `↺` lookup answering
- * `undefined` (a silent no-op `?.click()`), which then waited out its whole timeout for a step readout
- * nothing was ever going to change. Second: `redextape.buffers` survives a reload, so a page that forks —
- * this file does — leaves the next file's `main()` RESTORING those buffers; it broke
- * `scratch-cap.test.ts`'s stage-0 assertion (`expected 'buffers 1 ▾' to be 'buffers 0 ▾'`) and, on a
- * different interleaving, `link-truncated.test.ts` instead. Neither incident needed a hand-edited
- * fixture — both came from this file's own ordinary use of the app.
+ * **NOTHING THIS FILE STORES REACHES A SIBLING.** The retire test below closes `lambda-0`, so the layout
+ * tree it persists lacks one of `fourViews()`'s own leaves, and `redextape.buffers` survives a reload, so
+ * a page that forks leaves a `main()` mounted after it RESTORING those buffers. Neither needs clearing
+ * here: every browser test file gets its own in-memory `Storage`, installed in
+ * `tests/browser/setup.ts` before this file's own module body runs, and that file's doc has why
+ * clearing a shared key is not enough.
  */
 
 describe('a scratch buffer across a recompile of the source', () => {
@@ -154,7 +137,7 @@ describe('a scratch buffer across a recompile of the source', () => {
     expect(lambdaHeading()).toContain('copy · not linked')
     await until(() => editorHost() !== null, 'the editor to mount')
     await until(() => lambdaTermText() !== '', 'the buffer to produce its first frame')
-    const buffer = bufferOption()
+    const buffer = bufferItem()
     const label = buffer.text
     expect(label).toMatch(/^λ · copy \d+$/)
     expect(lambdaTitle()?.dataset.binding).toBe(buffer.key)
@@ -172,11 +155,10 @@ describe('a scratch buffer across a recompile of the source', () => {
     expect(edited).not.toBe('')
     expect(edited).toContain('λ')
 
-    // STAGE 3 — THE RECOMPILE. This is the keystroke that used to retire the buffer synchronously,
-    // before the debounce (`compile.ts` called `retire` at dispatch), so the state it used to produce
-    // was observable on the line after the dispatch: the pane home on `source`, the badge gone, the
-    // editor unmounted and the buffer's option out of the λ group. All four are asserted NOT to happen,
-    // first synchronously and then again once the source has actually finished compiling.
+    // STAGE 3 — THE RECOMPILE. A retire at the dispatch would be observable on the line after it: the
+    // pane home on `source`, the `copy · not linked` status gone, the editor unmounted and the buffer's
+    // item out of the λ group. All four are asserted NOT to happen, first synchronously and then again
+    // once the source has actually finished compiling.
     view.dispatch({ changes: { from: 0, to: view.state.doc.length, insert: 'let z = 9; z * 3' } })
 
     expect(lambdaHeading()).toContain('copy · not linked')
@@ -192,53 +174,42 @@ describe('a scratch buffer across a recompile of the source', () => {
     // it was minted with, and the term is the one the user typed — not the source's new λ leg, and not
     // a re-seed of the buffer from it.
     expect(lambdaHeading()).toContain('copy · not linked')
-    expect(bufferOption().text).toBe(label)
+    expect(bufferItem().text).toBe(label)
     expect(lambdaTitle()?.dataset.binding).toBe(buffer.key)
     expect(lambdaTitle()?.dataset.binding).not.toBe(bindingKey('lambda', 'source'))
     expect(lambdaTermText()).toBe(edited)
-    // AND THE EDITOR IS STILL THERE TO GO ON TYPING IN — the retire took it down with the session
-    // (`§4.3`: "the text in the box is lost"), and nothing takes it down now.
+    // AND THE EDITOR IS STILL THERE TO GO ON TYPING IN: a retire would take it down with the session
+    // (5d-iii design §4.3: "the text in the box is lost").
     expect(editorHost()).not.toBeNull()
   })
 })
 
 /**
- * **THE HEADER LIST, DRIVEN THROUGH THE APP — design §4.2's surface and §4.3's last two rows.** Closing
- * a buffer's last pane leaves it running with no pane chrome anywhere able to name it, so this list is
- * the only route to it; retiring from that list is the only thing in the app that ends a buffer.
+ * **THE HEADER LIST, DRIVEN THROUGH THE APP — 5d-ii-c design §4.2's surface and §4.3's first two rows.**
+ * Closing a buffer's last pane leaves it running with no view showing it; this list names it as *not
+ * shown*, and deleting it from the list ends it.
  *
- * **IT RUNS AFTER THE TEST ABOVE AND DEPENDS ON IT, WHICH IS THIS FILE'S STATED HOUSE RULE** (`beforeAll`
- * mounts ONE app for the file): there is no orphan to reach until a buffer exists, and no buffer until
- * something forks one. What it inherits is exactly one buffer, one λ pane bound to it, and that buffer's
- * editor mounted in the pane.
+ * **IT RUNS AFTER THE TEST ABOVE AND DEPENDS ON IT** (`beforeAll` mounts ONE app for the file): there is
+ * no orphan to reach until a buffer exists, and no buffer until something forks one. What it inherits is
+ * exactly one buffer, one λ pane bound to it, and that buffer's editor mounted in the pane.
  *
- * **THE HELD EDITOR IS THE ASSERTION THAT COSTS THE MOST AND IS WORTH THE MOST.** A retire is the one
- * event in the app that makes `editor-custody.ts`'s `!sessions.has(session)` true, and the retire
- * handler is the only thing that calls `custody.reconcile()` on that path — `applyLayout` is the sweep's
- * other caller and no layout gesture happens here. Delete that one line from `main.ts` and the app
- * leaks a live `EditorView`, with its own pending debounce, over a terminated worker: nothing on screen
- * changes, no count is wrong, and every other assertion below still passes. The editor's own DOM node is
- * what tells the two apart — `EditorView.destroy` removes it from its parent, and a node taken off a
- * pane by `takeEditor` keeps one.
+ * **THE EDITOR'S DESTROY IS NOT ASSERTED HERE**: nothing in the DOM tells a destroyed editor from a held
+ * one, and the note at the end of this test says where the destroy is covered instead.
  *
  * **AND IT PINS WHERE FOCUS LANDS**, which is not in its name because it is the same gesture rather than
- * a second one. **THIS USED TO PIN THAT RETIRING THE LAST BUFFER WITHDRAWS THE HEADER CONTROL FOCUS HAD
- * JUST LANDED ON, AND SENDS FOCUS TO `#restore-layout` INSTEAD — 5d-iv T10 RETIRED THAT.** The menu now
- * offers *new TM copy* and is therefore never empty, so `main.ts`'s `refreshBuffers` no longer hides
- * `#buffers` at zero and has nothing left to strand the keyboard over. Deleting the LAST row is the one
- * case that still closes the list: `buffer-list.ts`'s `handleDelete` finds no row to move focus to,
- * calls `menu.hidePopover()` and focuses the invoker itself — an invoker that is never taken out of the
- * tab order is there to receive it. What this test
- * still pins is that the button holds focus and stays reachable through the very delete that used to
- * evict it — the accessibility list's item 1, one instance retired.
+ * a second one. The menu offers *new TM copy* and is therefore never empty, so `#buffers` is not hidden
+ * at zero. Deleting the LAST row closes the list: `buffer-list.ts`'s `handleDelete` finds no row to move
+ * focus to, calls `menu.hidePopover()` and focuses the invoker itself, an invoker that is never taken out
+ * of the tab order. So the button holds focus and stays reachable through the delete — the accessibility
+ * list's item 1.
  */
 describe('the header buffer list', () => {
-  it('lists a copy no view is showing as not shown, and deleting it ends the copy and its editor', async () => {
+  it('lists a copy no view is showing as not shown, and deleting it ends the copy', async () => {
     // STAGE 0 — what the test above left, asserted rather than assumed. The button reads ONE buffer,
     // which is `transport.ts`'s fork telling the header its count changed; a readout wired only to the
     // retire would still read the zero-buffer label here.
     // THE MENU SAYS `λ · copy 1`; THE COPIES MENU SAYS `λ copy 1` — the same name, spelled for each.
-    const buffer = bufferOption()
+    const buffer = bufferItem()
     const label = buffer.text.replace(/^λ · /, 'λ ')
     expect(label).toMatch(/^λ copy \d+$/)
     const button = buffersControl()
@@ -246,15 +217,15 @@ describe('the header buffer list', () => {
     expect(button?.textContent).toBe('copies 1 ▾')
 
     // THE EDITOR'S OWN NODE, TAKEN WHILE IT IS STILL MOUNTED — `.cm-editor` IS the `EditorView`'s `dom`.
-    // It is read here for the mounted assertion below and for nothing else; see STAGE 3's own note for
-    // why the two lines that used to bracket the close are gone.
+    // It is read here for the mounted assertion below and for nothing else; the note at the end of this
+    // test has why no DOM check brackets the close.
     const editorNode = document.querySelector<HTMLElement>('[data-leaf="lambda-0"] .term-editor .cm-editor')
     if (editorNode === null) throw new Error('no editor mounted on the λ pane')
     expect(EditorView.findFromDOM(editorNode)).not.toBeNull()
 
     // STAGE 1 — close the only pane showing the buffer. Design §4.3: the buffer SURVIVES, and its editor
-    // goes into custody rather than being destroyed, so the pane that asks for it next gets that view
-    // back with its text and undo intact.
+    // goes into custody rather than being destroyed (5d-ii-a design §4.3), so the pane that asks for it
+    // next gets that view back with its text and undo intact.
     const close = document.querySelector<HTMLButtonElement>(
       '[data-leaf="lambda-0"] button[aria-label="close this view"]',
     )
@@ -264,16 +235,15 @@ describe('the header buffer list', () => {
     expect(buffersDisplay()).not.toBe('none')
     expect(button?.textContent).toBe('copies 1 ▾')
 
-    // STAGE 2 — THE *not shown* ROW, which is the whole reason this control exists: no view names this
-    // copy any more, and the row is asserted on its own rendered text (§5) rather than on a control existing.
+    // STAGE 2 — THE *not shown* ROW, which is the whole reason this control exists: no view shows this
+    // copy, and the row is asserted on its own rendered text (§5) rather than on a control existing.
     //
-    // **`focus()` BEFORE `click()`, AND IT IS THE PRECONDITION FOR STAGE 3'S LAST ASSERTION RATHER THAN
+    // **`focus()` BEFORE `click()`, AND IT IS THE PRECONDITION FOR STAGE 3'S FOCUS ASSERTION RATHER THAN
     // A FLOURISH.** A bare `element.click()` dispatches the event without focusing anything, which no
     // real activation does — a pointer press focuses the button and so does Enter on a tabbed-to one. It
     // matters because the popover records its previously-focused element at show time and hands focus
     // back to it on hide: with the invoker unfocused, `hidePopover` returns focus to whatever held it
-    // (in this file, the source editor) and the defect below is invisible. Measured both ways before the
-    // fix — unfocused invoker left `.cm-scroller`, focused invoker left `<body>`.
+    // (in this file, the source editor), and a keyboard stranded by the delete would not show.
     button?.focus()
     button?.click()
     expect(bufferRows()).toEqual([`${label} · not shown`])
@@ -284,54 +254,39 @@ describe('the header buffer list', () => {
     retireControl(label)?.click()
     expect(document.querySelector('.buffer-list')?.matches(':popover-open')).toBe(false)
 
-    // **THE BUFFER IS GONE FROM THE HEADER — AND THE BUTTON NO LONGER WITHDRAWS, WHICH IS A REVERSAL —
-    // 5d-iv T10.** This used to assert the button withdrew entirely rather than offering an empty list,
-    // which was `main.ts`'s decision at the time and the same standard pane chrome applies elsewhere.
-    // The menu is no longer ever empty (it offers *new TM copy*), which removed the premise for that
-    // decision along with the decision itself: the readout is the zero-buffer label, not an empty count,
-    // and the control stays reachable exactly when a user with nothing to reclaim wants somewhere to
-    // paste a `.tm` file.
+    // **THE BUFFER IS GONE FROM THE HEADER, AND THE BUTTON STAYS.** The menu is never empty (it offers
+    // *new TM copy*), so the readout is the zero-buffer label, not an empty count, and the control stays
+    // reachable exactly when a user with nothing to reclaim wants somewhere to paste a `.tm` file.
     expect(button?.textContent).toBe('copies ▾')
     expect(buffersDisplay()).not.toBe('none')
 
-    // **AND THE KEYBOARD IS STILL SOMEWHERE — ON THE BUTTON ITSELF, WHICH IS ALSO A REVERSAL.** This
-    // used to assert `#restore-layout`, because `#buffers` withdrew the instant the retire that had just
-    // focused it: `hidePopover` gave focus back to the invoker, and the very next line then took that
-    // invoker out of the tab order, so `main.ts` moved focus to `#restore-layout` deliberately rather
-    // than strand it on `<body>`. `#buffers` is never withdrawn now, so `handleDelete`'s own
-    // `button.focus()` on the empty list is the whole of what places focus, with nothing after it to
-    // undo — the accessibility list's item 1, "a control that hides itself on click strands the
-    // keyboard," retired by removing the withdrawal rather than by relocating the catch.
+    // **AND THE KEYBOARD IS ON THE BUTTON ITSELF.** `#buffers` is never withdrawn, so `handleDelete`'s own
+    // `button.focus()` on the empty list is the whole of what places focus, with nothing after it to undo —
+    // the accessibility list's item 1, "a control that hides itself on click strands the keyboard".
     expect(document.activeElement).toBe(button)
 
     // AND FROM EVERY PANE'S SELECTOR, which is the registry side of the same fact — design §5's
     // "retiring an orphan from the list removes it from every pane's selector", read off the TM pane
     // because the λ pane that was showing the buffer is the one this test closed.
-    // BY KEY, NOT BY TEXT: an item reads `λ · λ scratch 1`, so a text search for a bare label would pass
+    // BY KEY, NOT BY TEXT: an item reads `λ · copy 1`, so a text search for a bare label would pass
     // whether or not the buffer was still offered.
-    const keys = offered('tm-0').map((o) => o.key)
+    const keys = offered('tm-0').map((i) => i.key)
     expect(keys).toContain(bindingKey('tm', 'source'))
     expect(keys).not.toContain(buffer.key)
 
-    // **THE TWO LINES THAT BRACKETED THE CLOSE AND THE RETIRE ARE GONE, AND THE REASON IS A
-    // MEASUREMENT.** They read `expect(editorNode.parentElement).not.toBeNull()` after STAGE 1 (held in
-    // custody, not destroyed) and `.toBeNull()` here (the sweep destroyed it). That pair discriminated
-    // only by accident: `destroy()` removes the node, and `takeEditor` used to LEAVE it parented in the
-    // host it came from. `takeEditor` removes it now — it gained a caller whose pane survives the
-    // handover (`pane-host.ts`'s rebind), where a node left behind stayed visible and editable over the
-    // wrong buffer — so both states are parentless and the proxy stopped discriminating.
+    // **THE DESTROY IS NOT ASSERTED AT THIS TIER: NOTHING IN THE DOM TELLS IT FROM A HOLD.** `destroy()`
+    // removes the editor's node from its parent, and so does `takeEditor`, which hands a node to custody,
+    // so a held editor and a destroyed one are both parentless. In Chromium, across mounted / detached /
+    // destroyed, all three states of a real `ScratchEditor`: `parentElement`, `isConnected`,
+    // `EditorView.findFromDOM`, the presence of `.cm-content`, its `contenteditable`, `childElementCount`
+    // and `cmView` on the node are IDENTICAL for detached and destroyed. `EditorView.destroy()` tears down
+    // the view without clearing anything a query can reach, so a DOM proxy for the destroy would pass
+    // whether or not it ran.
     //
-    // **NOTHING IN THE DOM REPLACES IT.** Measured in Chromium across mounted / detached / destroyed,
-    // all three states of a real `ScratchEditor`: `parentElement`, `isConnected`, `EditorView.findFromDOM`,
-    // the presence of `.cm-content`, its `contenteditable`, `childElementCount` and `cmView` on the node
-    // are IDENTICAL for detached and destroyed. `EditorView.destroy()` tears down the view without
-    // clearing anything a query can reach. A replacement proxy would be the same mistake in a newer
-    // spelling, so this tier stops claiming the destroy.
-    //
-    // WHERE IT IS COVERED INSTEAD: `tests/browser/editor-custody.test.ts`, over the real
-    // `createEditorCustody`, on the one signal that does separate them — a destroyed editor's PENDING
-    // DEBOUNCE never fires. That test retires a session with a keystroke in flight and waits out a real
-    // multiple of the debounce window. It is a better assertion than this one ever was: it observes the
-    // thing the destroy exists to prevent rather than a side effect of where a node sat.
+    // WHERE IT IS COVERED INSTEAD: `tests/browser/editor-custody.test.ts`'s 'destroys the held editor,
+    // sending the edit it had pending as it comes down', over the real `createEditorCustody`, on a signal
+    // that does separate them — the editor's PENDING EDIT. That test retires a session with a keystroke in
+    // flight and asserts the edit is sent at the reconcile, before any timer could fire it: it observes
+    // what the destroy does rather than a side effect of where a node sat.
   })
 })

@@ -26,13 +26,11 @@ import { clickToggle, userPickWorkspace } from './user-event-fixture'
  * leaves two views, and `harness.ts`'s four-view fixtures leave two arrangements remembered, which the cases here
  * read. So no hook restores it between cases.
  *
- * **FIVE CASES PASS ALONE AND SEVEN DO NOT**, as a run of each alone found (`-t`, 2026-10-12). Alone: the start, a
- * kind hidden on a press, a view kept alive off the page, a scroll kept, and the pair's first visit. The seven start
- * from what the case before left, and **EACH BEGINS BY ASSERTING IT**, so run alone it fails on its precondition and
- * not on a wrong page: the default on a first visit and the second press, from the asm view hidden; the last toggle
- * disabled, the tree before a `✕` and *reset preset*, from the source beside the TM view; the link, from something
- * remembered; and the Stage's tabs, from source, λ and TM. Three of the seven asserted nothing first, and failed
- * alone on a view's height, on the views their own press left, and on the Stage's tabs.
+ * **FIVE CASES PASS ALONE AND SEVEN DO NOT.** Alone: the start, a kind hidden on a press, a view kept alive off the
+ * page, a scroll kept, and the pair's first visit. The seven start from what the case before left, and **EACH BEGINS BY
+ * ASSERTING IT**, so run alone it fails on its precondition and not on a wrong page: the default on a first visit and
+ * the second press, from the asm view hidden; the last toggle disabled, the tree before a `✕` and *reset preset*, from
+ * the source beside the TM view; the link, from something remembered; and the Stage's tabs, from source, λ and TM.
  *
  * **PRESSES ARE `userEvent.click`, NOT `.click()`**: a synthetic click reaches a handler a real pointer cannot, and
  * what these cases assert includes where the focus is after a real press.
@@ -119,9 +117,10 @@ describe('the views toggles', () => {
   })
 
   /**
-   * A REBUILD DETACHES EVERY HOST, AND A DETACHED ELEMENT COMES BACK SCROLLED TO ITS START (spec §5.2). Measured
-   * before `pane-host.ts` held the positions: this table, at 120 px, was at 0 after the ASM toggle was pressed. So the
-   * first half of this case is about a view that never leaves the page, and fails without the hold as the second does.
+   * A REBUILD DETACHES EVERY HOST, AND A DETACHED ELEMENT COMES BACK SCROLLED TO ITS START (spec §5.2), so
+   * `pane-host.ts` holds the positions: without the hold, this table, at 120 px, would be at 0 after the asm toggle is
+   * pressed. So the first half of this case is about a view that never leaves the page, and fails without the hold as
+   * the second does.
    */
   it('keeps where a view was scrolled to, through another view’s toggle and through its own', async () => {
     expect(
@@ -235,7 +234,7 @@ describe('the views toggles', () => {
 
   it('forgets every arrangement on reset preset, and is back on the source beside the TM view', async () => {
     // FROM THREE VIEWS, SO THE TWO ARE THE RESET'S: the case above left the page on the source beside the TM view, and
-    // from there this passed with a reset that left the tree alone.
+    // from there a reset that left the tree alone would pass.
     await clickToggle('lambda')
     expect(mounted(), 'precondition: more views than the reset leaves').toEqual(['source', 'lambda-0', 'tm-0'])
     expect(

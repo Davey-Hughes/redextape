@@ -74,9 +74,8 @@ describe('the outline', () => {
     openPanel('source')
     await until(() => rowsIn('source').length > 0, 'the outline to fill first')
 
-    // NOT `let x = 1; x + 1` — a `let` BINDING is a symbol too (kind 13), which is how this test
-    // first failed and how the doc on `renderOutline` was found to be wrong. A bare expression
-    // binds nothing and defines nothing.
+    // NOT `let x = 1; x + 1` — a `let` BINDING is a symbol too (kind 13). A bare expression binds
+    // nothing and defines nothing.
     view.dispatch({ changes: { from: 0, to: view.state.doc.length, insert: '42\n' } })
     await until(
       () => paneOrThrow('source').querySelector('.outline-empty') !== null,
@@ -96,8 +95,8 @@ describe('the outline', () => {
   })
 
   /**
-   * A TM view's symbols are its `state` blocks — measured against the real server, kind 5. The panel
-   * is withdrawn while the view shows the program, because there is no document to outline.
+   * A TM view's symbols are its `state` blocks, of kind 5. The panel is withdrawn while the view shows
+   * the program, because there is no document to outline.
    */
   it('is withdrawn from a TM view until it holds a copy', async () => {
     const panel = outlineOf('tm-0')

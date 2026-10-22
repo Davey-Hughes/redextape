@@ -1,5 +1,5 @@
 /**
- * WHAT IS NOT BEING SAVED — Plan 7 part 6a spec §4.3 and row 17: the notice line's one resting state, now said for two
+ * WHAT IS NOT BEING SAVED — Plan 7 part 6a spec §4.3 and row 17: the notice line's one resting state, said for two
  * writers. The copies' writer (`main.ts`'s `writeBuffersStorage`) and the program's each report a refused write only
  * when they have something to lose, and the line has one resting sentence, so the sentence names whichever of the two
  * is failing — the program, the copies, or both — and each writer's success takes back only its own half. It also
@@ -27,7 +27,7 @@ export function refusalOf(thrown: unknown): Refusal {
 
 /**
  * The resting sentence for what is failing and why, or `null` when nothing is. The copies' alone, refused for space, is
- * the sentence `buffers-quota.test.ts` has always pinned.
+ * the sentence `buffers-quota.test.ts` pins.
  */
 export function unsavedLine(program: boolean, copies: boolean, why: Refusal): string | null {
   const what = program ? (copies ? 'the program and copies are' : 'the program is') : copies ? 'copies are' : null

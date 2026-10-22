@@ -11,8 +11,7 @@ export type Appearance = 'light' | 'dark' | 'system'
  *
  * NAMESPACED, BECAUSE `localStorage` IS SCOPED TO AN ORIGIN AND NOT TO AN APP. Every dev server on
  * `http://localhost:5173` shares one store, so a bare `appearance` is a key any other project on
- * that port can read or overwrite — observed in practice, with an unrelated app's preferences
- * sitting alongside ours in the same origin.
+ * that port can read or overwrite.
  *
  * `prepaint.ts`'s `PREPAINT` duplicates this string rather than importing it, and has to: every page inlines it to run
  * before the module graph loads, which is the whole reason it exists. `prepaint.test.ts` holds the two equal.
@@ -45,11 +44,11 @@ export function readStored(raw: string | null): Appearance {
 }
 
 /**
- * The glyph and the `aria-label` text for one state, keyed by state. The label names the CURRENT
- * state rather than just "theme" — a glyph alone announces to a screen reader as a bare character,
- * not as a control with state.
+ * The glyph, the word and the tooltip for one state, keyed by state. The word and the label name the
+ * CURRENT state rather than just "theme" — a glyph alone announces to a screen reader as a bare
+ * character, not as a control with state.
  *
- * **`word` IS WHAT THE TOGGLE SHOWS BESIDE THE GLYPH NOW, AND ITS NAME** (Plan 7 part 2 spec §6): the
+ * **`word` IS WHAT THE TOGGLE SHOWS BESIDE THE GLYPH, AND ITS NAME** (Plan 7 part 2 spec §6): the
  * visible word is the accessible name, and `label` rides as the tooltip.
  */
 export const APPEARANCE_LABEL: Record<Appearance, { glyph: string; word: string; label: string }> = {

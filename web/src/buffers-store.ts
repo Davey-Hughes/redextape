@@ -18,18 +18,17 @@ import type { SessionId } from './session-client'
  * every other layout change (a split, a close, a rebind, `reset preset`) reaches the same writer just
  * as directly. A fork's seed is printed at `LAMBDA_BYTE_BUDGET` — 65,536 bytes — so buffer text behind
  * that key would put a few hundred kilobytes through `JSON.stringify` on every one of those ordinary
- * gestures, not only a drag. Two keys keeps the layout write exactly as cheap as it is today and needs
- * no change to that path.
+ * gestures, not only a drag.
  */
 export const BUFFERS_STORAGE_KEY = 'redextape.buffers'
 
 /**
  * Bumped when the stored shape changes. A mismatch falls back to nothing rather than migrating.
  *
- * **2, AS OF 5d-iv T5** — `PersistedBuffer` gained `leg`, a field a `version: 1` payload never wrote.
- * Refusing one under `parseBuffers`' own rule (this file's own doc: "a failed read is silent... it is
- * indistinguishable from a first visit") is what a stale-shape payload gets, same as any other
- * pre-existing hazard this function refuses rather than migrates.
+ * **2**: a `version: 1` payload never wrote `PersistedBuffer`'s `leg`. Refusing one under `parseBuffers`'
+ * own rule (this file's own doc: "a failed read is silent... it is indistinguishable from a first visit")
+ * is what a stale-shape payload gets, same as any other pre-existing hazard this function refuses rather
+ * than migrates.
  */
 export const BUFFERS_VERSION = 2
 
@@ -55,13 +54,13 @@ export type PersistedBuffer = {
  *
  * **THE BINDINGS LIVE HERE AND NOT WITH THE TREE, WHICH IS WHAT REMOVES A REPAIR PASS** (design §4.1).
  * A binding is meaningless without the buffer it names, so co-locating them makes "this key is absent
- * or garbage" degrade to *no bindings at all* — every pane on the source session, which is today's
- * behaviour exactly, reached without a line of reconciliation. The other direction needs nothing
- * either: a binding naming a leaf the restored tree does not hold is simply never read, because the
- * consumer (`pane-host.ts`'s `pendingBinding`) iterates the tree's leaves.
+ * or garbage" degrade to *no bindings at all* — every pane on the source session, reached without a
+ * line of reconciliation. The other direction needs nothing either: a binding naming a leaf the
+ * restored tree does not hold is simply never read, because the consumer (`pane-host.ts`'s
+ * `pendingBinding`) iterates the tree's leaves.
  *
  * `minted` IS THE COUNTER AND NOT THE COUNT. `ScratchBuffers.#minted` only ever goes up, so that a
- * retired buffer's name is never reissued; restoring the COUNT instead would hand `scratch 2` to a
+ * retired buffer's name is never reissued; restoring the COUNT instead would hand `copy 2` to a
  * second, different term the first time a user retires and re-forks across a reload.
  */
 export type PersistedBuffers = {

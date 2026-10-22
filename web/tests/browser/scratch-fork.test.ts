@@ -19,51 +19,46 @@ import { clickLambda, idle, lambdaStepText, SHELL, until } from './harness'
 import { lambdaSettled } from './lambda-text'
 
 /**
- * **THE TWO CLAIMS PLAN T8 MAKES THAT A FAKE PORT CANNOT ANSWER** — design §4.3, over real
- * `session-worker.ts` threads.
+ * **THE TWO CLAIMS A FAKE PORT CANNOT ANSWER**, over real `session-worker.ts` threads.
  *
- *   1. **The source session is untouched and KEEPS RUNNING across a detach**, which is "the entire
- *      reason three sessions exist rather than one mutable one". `tests/node/scratch.test.ts` asserts
- *      the structural half — same entry, same client, same frames, nothing posted to its port — and
- *      that half passes on an implementation that reuses the source's own thread and merely happens
- *      not to have touched the objects yet. Only a thread mid-recording can show the difference: the
- *      step count has to keep MOVING while the fork happens.
- *   2. **Retiring a scratchpad TERMINATES ITS WORKER**, not merely forgets it. The plan says outright
- *      that asserting the panes rebound lets the leak pass; `pool.size`, `pool.has` and every binding
- *      stay correct on an implementation that never calls `terminate`, while an 8.45 MB wasm module
- *      (T9's measurement) and its thread run on forever.
+ *   1. **The source session is untouched and KEEPS RUNNING across a detach** (5d-i design §4.3),
+ *      which is the reason the copy and the source are two sessions, not one mutable one.
+ *      `tests/node/scratch.test.ts` asserts the structural half — same entry, same client, same
+ *      frames — and that half passes on an implementation that reuses the source's own thread and
+ *      merely happens not to have touched the objects yet. Only a thread mid-recording can show the
+ *      difference: the step count has to keep MOVING while the fork happens.
+ *   2. **Retiring a scratchpad TERMINATES ITS WORKER** (5d-ii-c design §3.3), not merely forgets
+ *      it. Asserting that the panes rebound lets the leak pass: `pool.size`, `pool.has` and every
+ *      binding stay correct on an implementation that never calls `terminate`, while a wasm module
+ *      and its thread run on forever.
  *
- * NEITHER IS DRIVEN THROUGH THE APP, and that is T7's finding still holding one task later: the app
- * has ONE λ pane, so it cannot show two panes on one scratchpad, and neither `pool.size` nor a
- * worker's liveness is reachable from the DOM. `scratch-app.test.ts` drives the control and the app
- * wiring; this file drives the mechanism.
+ * NEITHER IS DRIVEN THROUGH THE APP: neither `pool.size` nor a worker's liveness is reachable from the
+ * DOM. `scratch-app.test.ts` drives the control and the app wiring; this file's first `describe` drives
+ * the mechanism.
  */
 
 const SOURCE: SessionId = 'source'
 /**
- * The ids `ScratchBuffers.fork` mints for the first and second buffers of a fresh collection — where
- * this file used to hold one `'lambda-scratch'` constant, because 5d-i's singleton meant every fork
- * produced that one name.
+ * The ids `ScratchBuffers.fork` mints for the first and second buffers of a fresh collection.
  *
  * WRITTEN DOWN RATHER THAN CAPTURED FROM `fork`'s RETURN because both are also needed in `finally`,
  * outside the scope each `fork` call sits in. `tests/node/scratch.test.ts` is where the minting rule
- * itself is asserted — against the returned id, which is the only place the app ever reads a name
- * from.
+ * itself is asserted — against the returned id.
  */
 const SCRATCH: SessionId = 'scratch-1'
 const SCRATCH_2: SessionId = 'scratch-2'
 
 /**
- * `map`/`fold` over three elements — chosen because its TM leg is enormous (design §3.1: 25,852 rows,
- * 266,863 δ-steps against 555 β-steps).
+ * `map`/`fold` over three elements — chosen because its TM leg is enormous (25,852 rows,
+ * 5a-ii design §3.1; 266,863 δ-steps against 555 β-steps, 5c design §0).
  *
  * THE ASYMMETRY IS THE POINT AND NOT A COINCIDENCE. The claim under test is that the source session
  * goes on recording WHILE a fork happens, so the fixture has to still be recording when the main
  * thread gets its turn: `session-worker.ts` posts `compiled` BEFORE it steps anything, then records
  * in `RECORD_CHUNK`-sized chunks with a macrotask yield between each. At ~58,000 retained TM frames
- * (`HISTORY_BYTES` / ~550 B) that is ~227 yields and seconds of wall clock — measured at ~2.1 s by
- * `session-worker.ts`'s own `MessageChannel` note — against the sub-millisecond it takes the main
- * thread to dequeue one message. A short program would finish before the detach and prove nothing.
+ * (`HISTORY_BYTES` / ~550 B) that is ~227 yields and seconds of wall clock, against the
+ * sub-millisecond it takes the main thread to dequeue one message. A short program would finish
+ * before the detach and prove nothing.
  */
 const BIG = `fn map(xs, f) { if is_empty(xs) { nil } else { cons(f(head(xs)), map(tail(xs), f)) } }
 fn fold(xs, acc, f) { if is_empty(xs) { acc } else { fold(tail(xs), f(acc, head(xs)), f) } }
@@ -104,10 +99,10 @@ function realPool(): { pool: SessionPool; spawned: Spawned[] } {
 }
 
 /**
- * The source session, wired to a real thread, with `main.ts`'s own frame-landing rules.
+ * The source session, wired to a real thread, with the frame-landing rules of `replies.ts`'s `onReply`.
  *
- * THE REPLY HANDLER IS `onReply`'s TWO FRAME ARMS AND NOTHING ELSE. What is under test is whether the
- * legs go on filling, so the arms that touch `#results`, the link index and the panes are not
+ * THE REPLY HANDLER IS `onReply`'s λ AND TM FRAME ARMS AND NOTHING ELSE. What is under test is whether
+ * the legs go on filling, so the arms that touch `#results`, the link index and the panes are not
  * reproduced — reproducing them would put a copy of the app in a test file, which is the failure
  * `tests/node/sessions.test.ts` avoids by sharing `PaneSlot.render` instead.
  */
@@ -136,9 +131,8 @@ function sourceSession(pool: SessionPool, seen: RunReply[]): SessionEntry {
 
 describe('detach is a fork', () => {
   /**
-   * **THE SOURCE SESSION'S STEP COUNT ADVANCES ACROSS A DETACH** — the assertion plan T8's mutation is
-   * aimed at ("make detach mutate the source session in place instead of forking. Expected failure:
-   * the source-keeps-running assertion, with a frozen step count").
+   * **THE SOURCE SESSION'S STEP COUNT ADVANCES ACROSS A DETACH** — a detach that mutated the source
+   * session in place instead of forking would leave it frozen.
    *
    * THE DETACH FIRES ON `compiled`, WHICH IS THE EARLIEST MOMENT A CLIENT CAN ACT AND THE LATEST ONE
    * THAT IS STILL DETERMINISTIC. `session-worker.ts` posts `compiled` before it records a single
@@ -226,8 +220,8 @@ describe('detach is a fork', () => {
       pad.fork(new PaneSlot('lambda', SOURCE), '(λx. x) (λy. y)', 0, 'lambda')
       await until(() => seen.some((r) => r.kind === 'lambda-frames' && r.done !== null), "the scratchpad's frames")
 
-      // `scratch-compiled`, NOT `compiled`, and never a `result`: §3.3 puts `lambdaValue`, `linkIndex`
-      // and the TM leg off this type, so the messages that carry them cannot be sent for it.
+      // `scratch-compiled`, NOT `compiled`, and never a `result`: 5d-i §3.3 puts `lambdaValue`,
+      // `linkIndex` and the TM leg off this type, so the messages that carry them cannot be sent for it.
       expect(seen.filter((r) => r.kind === 'scratch-compiled').length).toBe(1)
       expect(seen.some((r) => r.kind === 'compiled')).toBe(false)
       expect(seen.some((r) => r.kind === 'result')).toBe(false)
@@ -246,8 +240,7 @@ describe('detach is a fork', () => {
   })
 
   /**
-   * **RETIRING TERMINATES THE WORKER — ASSERTED ON THE THREAD, NOT ON THE MAP.** Plan T8: "assert the
-   * worker is gone, not merely that panes rebound. Otherwise the leak passes."
+   * **RETIRING TERMINATES THE WORKER — ASSERTED ON THE THREAD, NOT ON THE MAP.**
    *
    * THE PROBE IS SHOWN CAPABLE OF SUCCEEDING BEFORE IT IS USED AS EVIDENCE OF SILENCE. A test whose
    * pass condition is "no reply arrived" passes on a probe that never worked, which is the shape #30's
@@ -302,56 +295,35 @@ describe('detach is a fork', () => {
 })
 
 /**
- * **THE `no-session` REPORT — CRITICAL finding, plan 5d-iii's ninth task.** `fork` rebinds a pane to a
- * new λ buffer SYNCHRONOUSLY, before the worker has answered (`scratch.ts`'s own doc: "supersede
- * then post"), so a build that fails strands the pane there: `scratch-compiled` never
- * fires, so `LambdaPane.setEditor` is never called and `setDiagnostics` is a silent no-op against
- * `#editor === null`; the step readout is stuck on the `'building…'` placeholder `fork` seeds; and
- * `#refreshDetach`'s `!this.#detached` gate hides the only control that could recover it, because the
- * session the pane is stuck on IS the one that never works. `ScratchBuffers.noSessionReply` is what
- * reports it, and this is the test that would have failed before it existed.
- *
- * **THIS PARAGRAPH ENDED ON A REMEDY THAT 5d-ii-c DECISION 2 WITHDREW.** It read: *"Design §4.1a
- * promises the opposite: 'the pane keeps offering ✎ — the user can scrub to a smaller step and fork
- * there'. `ScratchBuffers.noSessionReply` is the fix"* — and the fix was the RETIRE, which put the pane
- * back on a session it was not stuck on and so let `#refreshDetach` offer the control again. Nothing
- * ends a buffer implicitly now (design §4.3), so the stranding above is the state a failed fork LEAVES,
- * and the diagnostic on `#link-status` is the whole of what this method delivers. §4.4 moved the way out
- * to the header list, which can reach a wedged buffer whether or not a pane still shows it — and the
- * first test below now drives that way out at this layer, one assertion after the one that pins the
- * stranding. The word "remedy" left this `describe`'s own name with it, and stays gone: this method
- * reports, and something the user aims at is what repairs.
+ * **THE `no-session` REPORT.** `fork` rebinds a pane to a new λ buffer SYNCHRONOUSLY, before the worker
+ * has answered (`ScratchBuffers.noSessionReply`'s doc: "`fork` has ALREADY rebound the pane
+ * synchronously"), so a build that fails strands the pane there: `scratch-compiled` never fires, so
+ * `LambdaPane.setEditor` is never called; the step readout is stuck on the `'building…'` placeholder
+ * `fork` seeds; and `#refreshDetach`'s `!this.#detached` gate hides the control that would fork again,
+ * because the session the pane is stuck on IS the one that never works. `ScratchBuffers.noSessionReply`
+ * is what reports it. Nothing ends a buffer implicitly (5d-ii-c §4.3), so the stranding is the state a
+ * failed fork LEAVES; 5d-ii-c §4.4 makes the header list the way out, which can reach a wedged buffer
+ * whether or not a pane still shows it, and the first test below drives that way out at this layer, one
+ * assertion after the one that pins the stranding. This method reports, and something the user aims at
+ * is what repairs.
  *
  * **AN UNPARSEABLE SEED, DELIBERATELY, NOT A GENUINELY OVER-BUDGET TERM.** Both reach the identical
  * `scratch === null` branch of `session-worker.ts`'s `onLambdaScratch` (`ForkedAt`'s doc in
- * `session.rs`: "`scratch` and `text` are null together"), but a real term over `LAMBDA_BYTE_BUDGET`
- * (65,536 bytes) needs a genuinely large fixture to construct and would make this test slow; garbage
- * text is one string literal and fails in the same place for a different reason `lambda_scratch_at`
- * already tests directly in Rust (`lambda_scratch_at_refuses_unparseable_text`).
+ * `session.rs`: "`text` IS `None` FOR EXACTLY THE CASES `scratch` IS"), but a real term over
+ * `LAMBDA_BYTE_BUDGET` (65,536 bytes) needs a genuinely large fixture to construct and would make this
+ * test slow; garbage text is one string literal and fails in the same place for a different reason
+ * `lambda_scratch_at` already tests directly in Rust (`lambda_scratch_at_refuses_unparseable_text`).
  *
  * **DRIVEN AT THE `ScratchBuffers`/`PaneSlot`/`LambdaPane` LAYER, NOT THROUGH `main.ts`'s `ready`
- * APP, AND THAT IS A DELIBERATE CHOICE RATHER THAN A SHORTCUT.** `main.ts`'s own `detach` handler
+ * APP, AND THAT IS A DELIBERATE CHOICE RATHER THAN A SHORTCUT.** `transport.ts`'s `detach` handler
  * always sends `index.lambdaText` — the SOURCE compile's own step-0 print, which round-trips by
  * construction (`lambda/syntax.rs`'s guarantee) unless it is itself cut at `LAMBDA_BYTE_BUDGET`, which
  * only a genuinely enormous program reaches. There is no seam in the mounted app to hand `detach` a
- * deliberately broken string instead, and ~~`onScratchReply` is a closure with no export~~ — so a test
- * that needed BOTH a cheap unparseable seed AND the exact production code path had nowhere to go
- * through `main.ts` at all.
- *
- * **THE STRUCK CLAUSE EXPIRED IN WAVE 1 AND NOBODY NOTICED FOR TWENTY-SEVEN COMMITS.** `replies.ts`
- * now exports `createReplies`, whose return type includes `onScratchReply`, so the seam this paragraph
- * says does not exist has existed since the extraction. **The counterexample is in this very file**, 130
- * lines below: the third-round test drives that exact production path. The reasoning above still holds
- * for the *seed* half — there is genuinely no way to hand `detach` a broken string — and only the
- * no-export half is dead.
- *
- * Recorded struck-through rather than deleted because this is the third instance on this branch of an
- * impossibility claim outliving the change that falsified it, and the pattern is worth more than the
- * sentence. This file's own siblings already establish the alternative this test
- * follows: `PaneSlot.render` is written to be "the SAME resolution the app's `draw()` does rather than
- * a re-implementation of it" (`sessions.ts`'s own doc), and the `describe` above drives
- * `ScratchBuffers` directly over real `session-worker.ts` threads for the identical reason. Nothing
- * here re-implements `noSessionReply`; it is the exact method `replies.ts`'s `onScratchReply` calls.
+ * deliberately broken string instead. `PaneSlot.render` is written to be "the SAME resolution the app's
+ * `draw()` does rather than a re-implementation of it" (`sessions.ts`'s own doc), and the `describe`
+ * above drives `ScratchBuffers` directly over real `session-worker.ts` threads for the identical
+ * reason. Nothing here re-implements `noSessionReply`; it is the exact method `replies.ts`'s
+ * `onScratchReply` calls.
  */
 describe('the no-session report for a failed fork', () => {
   it('keeps a phantom buffer and its pane and hands back a diagnostic to show — but answers null for an already-live scratch', {
@@ -365,13 +337,10 @@ describe('the no-session report for a failed fork', () => {
       registry: reg,
       pool,
       historyBytes: HISTORY_BYTES,
-      // **FRAMES LAND IN THE LEG OF THE BUFFER THAT SENT THEM, WHICH THIS HANDLER USED TO NAME AS A
-      // CONSTANT.** It read `reg.legOf({ session: SCRATCH, … })` — correct under the singleton, where
-      // the id a retire freed was re-registered by the next fork, and correct for as long as this test
-      // only ever had one buffer. It has two now: the phantom is retired half way through, and the
-      // live-edit buffer below is a SECOND session whose frames arrive after `SCRATCH` has left the
-      // registry — so the constant made `legOf` throw on the reply that proves the second buffer works
-      // (`bound to a session that is not in the registry: scratch-1`). Routing by the reply's own
+      // **FRAMES LAND IN THE LEG OF THE BUFFER THAT SENT THEM.** This test has two buffers: the phantom
+      // is retired half way through, and the live-edit buffer below is a SECOND session whose frames
+      // arrive after `SCRATCH` has left the registry, so a handler naming `SCRATCH` as a constant would
+      // make `legOf` throw on the reply that proves the second buffer works. Routing by the reply's own
       // session is what `ScratchBuffersConfig.onReply` curries the id in for, and it is the same
       // resolution `replies.ts`'s `onScratchReply` performs.
       onReply: (session, r) => {
@@ -414,8 +383,7 @@ describe('the no-session report for a failed fork', () => {
       slot.render(reg, pane, slot.resolve(reg))
       expect(host.querySelector('button.detach')).not.toBeNull()
 
-      // THE PHANTOM BUILD. `detach` has already rebound the slot by the time this call returns —
-      // the CRITICAL finding's own bug, reproduced here before it is fixed by what comes next.
+      // THE PHANTOM BUILD. `detach` has already rebound the slot by the time this call returns.
       pad.fork(slot, 'not a valid lambda term (((', 0, 'lambda')
       slot.render(reg, pane, slot.resolve(reg))
       expect(slot.binding.session).toBe(SCRATCH)
@@ -426,53 +394,42 @@ describe('the no-session report for a failed fork', () => {
       expect(failReply.diagnostics.length).toBeGreaterThan(0)
 
       // CALLED EXACTLY AS `replies.ts`'s `onScratchReply` CALLS IT — including the session, which that
-      // handler takes as its own first parameter and which this call used to omit. The `home` and
-      // `slots` arguments it also used to take went with the retire (5d-ii-c decision 2).
+      // handler takes as its own first parameter.
       const failed = pad.noSessionReply(SCRATCH, failReply.diagnostics)
       slot.render(reg, pane, slot.resolve(reg))
 
-      // **THE BUFFER SURVIVES ITS OWN FAILED BUILD, AND THESE THREE LINES USED TO ASSERT THE
-      // OPPOSITE** — `slot.binding.session` back on `SOURCE`, `reg.has(SCRATCH)` false, and a comment
-      // reading "NOT LEFT DETACHED". Design §4.3's table moved poison from *ended it* to *survives*.
+      // **THE BUFFER SURVIVES ITS OWN FAILED BUILD** — 5d-ii-c §4.3's table puts poison under *survives*.
       expect(failed).not.toBeNull()
       expect(slot.binding.session).toBe(SCRATCH)
       expect(reg.has(SCRATCH)).toBe(true)
-      // **AND THE FORK CONTROL IS NOT BACK, WHICH IS WHAT THAT COSTS THE USER.** This line read
-      // `expect(...).not.toBeNull()` under the heading "THE FORK CONTROL IS BACK IN THE DOM": the retire
-      // rebound the pane, `SessionEntry.detached` read `false` again, and `#refreshDetach` re-offered ✎
-      // — 5d-i design §4.1a's promised remedy. The pane is still on the buffer that will never build, so
-      // the gate hides it, and design §4.4's header list is what has to reach the buffer instead.
+      // **AND THE FORK CONTROL IS NOT BACK, WHICH IS WHAT THAT COSTS THE USER.** The pane is still on the
+      // buffer that will never build, so `#refreshDetach`'s gate hides ✎, and the header list is what
+      // has to reach the buffer instead (5d-ii-c §4.4).
       expect(host.querySelector('button.detach')).toBeNull()
 
-      // **AND THAT IS NO LONGER A DEAD END, WHICH IS THE REVISION THE COMMENT ABOVE ASKED FOR.** It
-      // ended "Asserted rather than merely described, so the day the list lands this line has to be
-      // revisited", because the state it pinned — pane stuck on `building…`, ✎ withheld, no route back —
-      // was the app's final answer while nothing in `src/` retired anything. §4.2's header list is wired
-      // now (`main.ts`), so the way out is one gesture: retire the row, and the rebind that used to
-      // happen behind the user's back on a failed fork happens because they asked for it. **DRIVEN AS
-      // THE CALL THE LIST'S HANDLER MAKES**, at the layer this whole `describe` drives — `retire`, then
-      // the render that any `draw()` performs — so what is asserted is the chrome the user gets back and
-      // not a fact about the registry.
+      // **AND THAT IS NOT A DEAD END: THE WAY OUT IS ONE GESTURE**, retiring the row from 5d-ii-c §4.2's
+      // header list, and the rebind happens because the user asked for it. **DRIVEN AS THE CALL THE
+      // LIST'S HANDLER MAKES**, at the layer this whole `describe` drives — `retire`, then the render
+      // that any `draw()` performs — so what is asserted is the chrome the user gets back and not a fact
+      // about the registry.
       expect(pad.retire(SCRATCH, SOURCE, [slot])).toBe(true)
       slot.render(reg, pane, slot.resolve(reg))
       expect(slot.binding.session).toBe(SOURCE)
       expect(host.querySelector('button.detach')).not.toBeNull()
 
-      // THE DIAGNOSTIC'S SURFACE IS A NOTICE NOW (Plan 7 part 2 spec §11), not a `#link-status` clause —
-      // so what is visible is asserted where the notice is raised: the `createReplies` test below
-      // reads what the production switch hands its `notify`.
+      // THE DIAGNOSTIC'S SURFACE IS A NOTICE (Plan 7 part 2 spec §11), so what is visible is asserted
+      // where the notice is raised: the `createReplies` test below reads what the production switch hands
+      // its `notify`.
       expect(failed).not.toBeNull()
 
-      // THE LIVE-EDIT CASE, FOR CONTRAST, ON THE SAME `ScratchBuffers` OBJECT. Design §4.4: "an edit
-      // that does not parse leaves the frames region showing the last good run" — and the contrast is
-      // now about WHERE THE DIAGNOSTICS GO rather than about what survives, since both buffers do. A
-      // `null` here routes them to this buffer's own editor gutter, which is the regression
-      // `scratch-edit.test.ts`'s STAGE 3 already pins through the app; this asserts the same rule at
-      // the method `main.ts` actually calls.
+      // THE LIVE-EDIT CASE, FOR CONTRAST, ON THE SAME `ScratchBuffers` OBJECT. 5d-iii §4.4: "an edit
+      // that does not parse leaves the frames region showing the last good run" — and since both buffers
+      // survive, the contrast is in the answer: `null` here is the live-edit path, whose gutter
+      // `scratch-edit.test.ts`'s STAGE 3 pins through the app; this asserts the same rule at the method
+      // `replies.ts`'s `onScratchReply` calls.
       //
-      // A SECOND NAME, BECAUSE THIS IS A SECOND BUFFER. Under the singleton the fork above and this
-      // one produced the same id; 5d-ii-c decision 1 mints per fork, so this line's buffer is
-      // `scratch 2` while `scratch 1` is still live above rather than spent.
+      // A SECOND NAME, BECAUSE THIS IS A SECOND BUFFER: 5d-ii-c decision 1 mints per fork and never
+      // reissues a retired name, so this line's buffer is `scratch 2`.
       expect(reg.has(SCRATCH_2)).toBe(false)
       pad.fork(slot, '(λx. x) (λy. y)', 0, 'lambda')
       await until(() => seen.some((r) => r.kind === 'lambda-frames' && r.done !== null), "the buffer's frames")
@@ -486,23 +443,18 @@ describe('the no-session report for a failed fork', () => {
       expect(reg.has(SCRATCH_2)).toBe(true)
       expect(slot.binding.session).toBe(SCRATCH_2)
 
-      // **AND A RETIRED BUFFER'S NAME NO LONGER REACHES ANYTHING — the half the unkeyed version could
-      // not express at all.** A `no-session` addressed to `SCRATCH` arrives after that buffer ended, and
-      // the answer is `null` with the live buffer untouched. Under the newest-buffer reading this call
-      // would have been answered on behalf of `SCRATCH_2` — a different buffer, still healthy.
+      // **AND A RETIRED BUFFER'S NAME REACHES NOTHING.** A `no-session` addressed to `SCRATCH` arrives
+      // after that buffer ended, and the answer is `null` with the live buffer untouched; answered
+      // on behalf of the newest buffer, it would be answered for `SCRATCH_2` — a different buffer,
+      // still healthy.
       //
-      // **THE RETIRE IS EXPLICIT HERE, WHERE THIS ARM USED TO PERFORM IT.** The phantom died half way
-      // up this test until 5d-ii-c decision 2, so reaching a spent name needed nothing but the failed
-      // build. It now takes the one call that ends a buffer — which is also the gesture design §4.4
-      // gives the user for a wedged one, and it is made ABOVE, where reclaiming the wedged pane is what
-      // it is for. **THE CALL HERE IS THEREFORE A SECOND ONE ON A SPENT NAME**, which is `retire`'s own
-      // idempotence and exactly the state the paragraph above needs: a name held across the retire that
-      // spent it. `false` rather than a second termination of a thread that is already gone.
+      // **THE `retire` HERE IS A SECOND ONE ON A SPENT NAME.** The first is made above, where reclaiming
+      // the wedged pane is what it is for, and this one is `retire`'s own idempotence and exactly the
+      // state the paragraph above needs: a name held across the retire that spent it. `false` rather than
+      // a second termination of a thread that is already gone.
       //
-      // THE MEMBERSHIP CHECK IS THE PRECONDITION AND IS READ FIRST, WHICH IS A REORDERING RATHER THAN AN
-      // ADDITION. It sat under the `retire` below and read as that call's consequence — which it stopped
-      // being the moment the reclamation above became the retire that spends this name. What it states
-      // is what makes the two calls after it interesting at all: the name in hand no longer resolves.
+      // THE MEMBERSHIP CHECK IS THE PRECONDITION AND IS READ FIRST: the name in hand no longer resolves,
+      // which is what makes the two calls after it interesting at all.
       expect(reg.has(SCRATCH)).toBe(false)
       expect(pad.retire(SCRATCH, SOURCE, [slot])).toBe(false)
       expect(pad.noSessionReply(SCRATCH, failReply.diagnostics)).toBeNull()
@@ -517,53 +469,19 @@ describe('the no-session report for a failed fork', () => {
   })
 
   /**
-   * **THE PRODUCTION ARM, DRIVEN AGAINST A REAL FAILED FORK — RE-POINTED BECAUSE 5d-ii-c DECISION 2
-   * DELETED WHAT IT USED TO ASSERT.**
+   * **THE PRODUCTION ARM, DRIVEN AGAINST A REAL FAILED FORK.** The production switch, handed a `no-session`
+   * for a fork that really failed to build, leaves the buffer registered, pooled and listed, leaves the pane
+   * on it, and hands the reason to `notify`: 5d-ii-c §4.3's rule that nothing ends a buffer implicitly,
+   * executed rather than argued. A call that ends no session has no editors to sweep, so this arm sweeps
+   * none; `tests/browser/editor-custody.test.ts` executes the sweep's destroy branch, over the real
+   * `createEditorCustody` rather than a stub.
    *
-   * **WHAT THIS TEST WAS FOR.** A Minor finding of the third review round: four doc comments asserted
-   * that BOTH retire sites call `reconcileEditors`, so "a custody entry cannot outlive its session's
-   * incarnation" is a property of the retire rather than of which caller happened to trigger it — while
-   * `pnpm test:coverage` reported the whole phantom-fork arm of `onScratchReply`, `reconcileEditors()`
-   * included, as never executed. **Deleting that line could not fail a test**, and this test was written
-   * so that it could. Its name was "sweeps editors on the phantom no-session, through `createReplies`
-   * rather than around it", and `swept` was its assertion.
-   *
-   * **THE RETIRE SITE THIS ARM HELD IS GONE, AND THE LINE THIS TEST GUARDED WITH IT.** Decision 2
-   * deleted `compile.ts`'s recompile-from-source first and this arm's retire second; a call that ends no
-   * session has no editors to sweep, so `reconcileEditors` left `createReplies`'s signature with it (see
-   * that factory's own doc).
-   *
-   * **WHAT THIS CALL CARRIED WAS ITS OWN EXECUTION; THE BRANCH'S GUARD WENT WITH THE RECOMPILE
-   * DELETION.** This paragraph read "THE COVERAGE THAT WENT WITH IT IS LOST RATHER THAN MOVED", which
-   * invites the reading that the deleted line had been covering `reconcileEditors`' destroy branch. **It
-   * never did**: the `reconcileEditors` this test passed to `createReplies` was a STUB, so what `swept`
-   * counted was a call at this site and never a destroy anywhere. The destroy branch is guarded by
-   * `!sessions.has(session)`, whose only producer is a retire — so what went missing was the PRODUCER,
-   * and it went missing when the recompile stopped ending buffers.
-   *
-   * **BOTH ARE PAID BACK.** `main.ts`'s header-list retire is the producer again, and
-   * `tests/browser/editor-custody.test.ts` executes the branch — over the real `createEditorCustody`
-   * rather than a stub, which is the distinction this paragraph exists to keep. It covers the two arms
-   * beside it as well: the claim drop, and the sweep's own `held.destroy()`, both dark for the same
-   * reason and neither with a paragraph of its own until now. `two-lambda-panes.test.ts` carried the same
-   * debt from the layout side and records the same discharge.
-   *
-   * **WHAT IT ASSERTS INSTEAD IS THE FACT THAT REPLACED THAT ONE**, at the same seam and against the
-   * same real worker: the production switch, handed a `no-session` for a fork that really failed to
-   * build, leaves the buffer registered, pooled and listed, leaves the pane on it, and puts the reason on
-   * `#link-status`. That is decision 2's governing rule executed rather than argued, which is what this
-   * test was always for.
-   *
-   * **IT DRIVES `createReplies` RATHER THAN `main()`, AND THAT SEAM DID NOT EXIST WHEN THE `describe`
-   * ABOVE EXPLAINED WHY IT COULD NOT.** That test's doc says a test needing both a cheap unparseable
-   * seed and the production code path "had nowhere to go through `main.ts` at all", because
-   * `onScratchReply` was a closure with no export. Wave 1 moved it into `replies.ts` behind an exported
-   * factory, so the production switch is now constructible over the same hand-built registry, pool and
-   * pane the tests above use. Everything here but the injected dependencies is the app's own object: the
-   * reply comes off a REAL `session-worker.ts` thread that really failed to build, and the survival and
-   * the fork-failed report are the production ones. (The count that stood here — "except **two** injected
-   * dependencies" — is the kind of arity this slice prefers not to restate: it was already one deletion
-   * away from being wrong when it was written, and the claim does not need it.)
+   * **IT DRIVES `createReplies` RATHER THAN `main()`.** The `describe` above says a test needing both a
+   * cheap unparseable seed and the production code path has no seam in the mounted app; `replies.ts`
+   * exports the production switch behind a factory, so it is constructible over the same hand-built
+   * registry, pool and pane the tests above use. Everything here but the injected dependencies is the
+   * app's own object: the reply comes off a REAL `session-worker.ts` thread that really failed to build,
+   * and the survival and the fork-failed report are the production ones.
    *
    * `notify` IS A RECORDER, AND THAT IS ALL THE REPORT NEEDS: the switch hands the notice to it, and the
    * notice line is `notice.ts`'s own concern (`tests/browser/notice.test.ts`).
@@ -609,13 +527,8 @@ describe('the no-session report for a failed fork', () => {
         // called: what is under test is whether the control is OFFERED.
         showEditor: () => undefined,
       })
-      // IN THE COLLECTION, AND THE REASON HAS INVERTED WITHOUT WEAKENING. It read: "BECAUSE THAT IS
-      // WHERE THE PRODUCTION ARM LOOKS FOR SLOTS TO REBIND (`panes.all().map((p) => p.slot)`) — a
-      // registry entry alone would leave the retire nothing to move, and the rebind assertion below
-      // would pass vacuously." The arm no longer asks for slots at all, so "the pane did not move" is
-      // now the claim, and it is exactly as vacuous without a pane the arm could have reached. The
-      // collection is also what the live-edit branch fans `setDiagnostics` over, so a switch that took
-      // the wrong branch would be visible here rather than silent.
+      // IN THE COLLECTION, because "the pane did not move" is the claim, and it is vacuous without a pane
+      // the arm could have reached.
       panes.add({ id: 'lambda-0', kind: 'lambda', slot, pane, host })
 
       let drawn = 0
@@ -632,6 +545,7 @@ describe('the no-session report for a failed fork', () => {
         arranged: () => true,
       })
       const notified: string[] = []
+      const editorAsked: SessionId[] = []
       const replies = createReplies({
         setProgram: () => undefined,
         trees: new LambdaTrees(() => undefined),
@@ -647,21 +561,23 @@ describe('the no-session report for a failed fork', () => {
         draw: () => {
           drawn += 1
         },
-        // `undefined` IS THE HONEST ANSWER HERE: this fork's build never reached `scratch-compiled`, so
-        // no editor was ever mounted for it and `editor-custody.ts`'s `editorHomeFor` has nothing to
-        // resolve. **THIS COMMENT USED TO SAY "AND THE REASON THIS ARM NEEDS THE SWEEP AT ALL" — that
-        // the narrow dependency was a no-op on this path AFTER A RETIRE, so a wider `reconcileEditors`
-        // had to be handed over beside it.** This arm performs no retire and takes no `reconcileEditors`
-        // parameter; `editor-custody.ts`'s own doc holds the sweep's argument, and its callers are
-        // `applyLayout` and `main.ts`'s header-list retire handler — neither of them this file.
-        editorHome: () => undefined,
-        // A NO-OP FOR `editorHome`'s REASON, ONE FIELD ALONG: the reply this test drives is a
-        // `no-session` for a fork whose build never reached `scratch-compiled`, and that is the only arm
-        // that persists. Nothing here would fire it, and a fake that counted would be counting zero.
+        // NO EDITOR WAS EVER MOUNTED FOR THIS FORK, whose build never reached `scratch-compiled`, so the
+        // failed fork's arm has none to reach. This arm performs no retire and sweeps nothing;
+        // `editor-custody.ts`'s own doc holds the sweep's argument, and none of the sweep's callers is this
+        // file. IT RECORDS WHO ASKS, and the assertion is on the asking, not on this `undefined`: the app's
+        // `editorHome`, `editor-custody.ts`'s `editorHomeFor`, would answer this pane, through the claim
+        // `pane-host.ts`'s wrapped `detach` records (restated below). A call recorded here means the arm
+        // has started reaching for an editor.
+        editorHome: (session) => {
+          editorAsked.push(session)
+          return undefined
+        },
+        // A NO-OP: the reply this test drives is a `no-session` for a fork whose build never reached
+        // `scratch-compiled`, and the `no-session` arm does not persist, so nothing here would fire it.
         onBuffersPersist: () => undefined,
       })
 
-      // THE PHANTOM BUILD — an unparseable seed, for the reason the test above records: it reaches the
+      // THE PHANTOM BUILD — an unparseable seed, for the reason this `describe`'s doc gives: it reaches the
       // identical `scratch === null` branch of `onLambdaScratch` as a genuinely over-budget term without
       // needing an enormous fixture.
       pad.fork(slot, 'not a valid lambda term (((', 0, 'lambda')
@@ -673,10 +589,9 @@ describe('the no-session report for a failed fork', () => {
       expect(notified).toEqual([])
       replies.onScratchReply(SCRATCH, failReply)
 
-      // **THE ASSERTIONS THE DELETED RETIRE OWNS, INVERTED.** These three read `reg.has(SCRATCH)` false,
-      // `slot.binding.session` back on `SOURCE`, and `expect(swept).toBe(1)` above them. The buffer is
-      // still registered, still on its own thread, still listed, and the pane the fork moved is still
-      // showing it — decision 2's governing rule, executed through the production switch.
+      // **THE BUFFER SURVIVES THE PRODUCTION SWITCH.** It is still registered, still on its own thread,
+      // still listed, and the pane the fork moved is still showing it — 5d-ii-c §4.3's rule, executed
+      // through the production switch.
       expect(reg.has(SCRATCH)).toBe(true)
       expect(pool.has(SCRATCH)).toBe(true)
       expect(pad.list().map((b) => b.id)).toEqual([SCRATCH])
@@ -688,13 +603,14 @@ describe('the no-session report for a failed fork', () => {
       expect(notified[0]).toContain('the copy did not build')
       for (const d of failReply.diagnostics) expect(notified[0] ?? '').toContain(d.message)
       expect(drawn).toBeGreaterThan(0)
+      expect(editorAsked).toEqual([])
 
       // **DEFERRED-A11Y ITEM 11, OVER THE BUILD THAT REALLY FAILED.** Everything above pins what the
       // stranding LEAVES; this pins what the chrome does about it, and it is here rather than only in
       // `editor-custody.test.ts` because that file reconstructs the state (`takeEditor` off a holder)
       // while this one arrives at it the way a user does — a real seed, a real thread, a real
-      // `no-session`. `setEditor` was never called on this path, so no editor for `SCRATCH` exists
-      // anywhere, and the old gate (`#detached && #editor === null`) was satisfied by exactly that.
+      // `no-session`. `setEditor` was never called on this path, so no editor for `SCRATCH`
+      // exists anywhere.
       //
       // THE CLAIM IS RECORDED FIRST, BECAUSE `pane-host.ts`'s WRAPPED `detach` RECORDS ONE. It fires the
       // moment the binding moves — before the worker has answered, therefore also on the fork that never
@@ -731,39 +647,25 @@ describe('the no-session report for a failed fork', () => {
 })
 
 /**
- * **THE DOM HALF OF §4.1A'S CLAIM, DRIVEN THROUGH THE REAL APP.** Every test above builds
- * `ScratchBuffers` over a hand-built `SessionRegistry`, with no `LambdaPane` anywhere in reach —
- * right for the mechanism (`scratch()`/`retire()`/the singleton), wrong for "the CONTROL forks a
- * frame the OLD gate would have hidden", which is a fact about `LambdaPane.#refreshDetach` and the
- * DOM it drives, not about the session underneath it. This block mounts the real app, the same
- * `SHELL` `scratch-app.test.ts` uses and for the same "one page per test FILE" reason its own comment
- * states.
+ * **THE DOM HALF OF 5d-iii §4.1A'S CLAIM, DRIVEN THROUGH THE REAL APP.** That the CONTROL forks a
+ * truncated frame is a fact about `LambdaPane.#refreshDetach` and the DOM it drives, not about the
+ * session underneath it, so this block mounts the real app, the same `SHELL` `scratch-app.test.ts` uses
+ * and for the same "one page per test FILE" reason its own comment states.
  *
- * `WHILE4` IS THE FIXTURE, AND IT WAS MEASURED TO TRUNCATE BEFORE BEING TRUSTED TO — which
- * `2026-08-11-plan5d-iii-editable-lambda.md` asked for in as many words ("verify it does before
- * relying on it"), rather than being this file's own initiative: a probe run against this exact
- * string during this task's development (`compile(WHILE4, 'unary')`, then `lambdaState(FRAME_BYTES)`
- * and `lambdaState(LAMBDA_BYTE_BUDGET)` at each step) found `cut === 'Bytes'` at the 512-byte budget
- * on EVERY one of steps 0 through 9, while the 65,536-byte budget stayed `cut === null` throughout
- * (777-2,095 bytes printed, nowhere near that budget) — truncated at the frame's own print, whole at
- * the readout's, exactly the pairing this test needs. `frame-cost.test.ts` uses the same source for
- * an unrelated reason (span cost, not truncation) and never checks `cut`; this file's own `BIG` was
- * picked for its TM leg's size and was never measured for λ truncation at all; programs the size
- * of `let x = 40; x + 2` (`scratch-app.test.ts`) never truncate at either budget. None of the existing fixtures
- * would have proven anything here.
+ * `WHILE4` IS THE FIXTURE BECAUSE IT TRUNCATES AT THE FRAME'S OWN PRINT AND STAYS WHOLE AT THE
+ * READOUT'S: `cut === 'Bytes'` at the 512-byte budget on every one of steps 0 through 9, and
+ * `cut === null` at the 65,536-byte budget throughout. Programs the size of `let x = 40; x + 2`
+ * (`scratch-app.test.ts`) never truncate at either budget.
  */
 describe('the fork control forks a truncated frame, through the app', () => {
   const WHILE4 = 'let mut n = 4; let mut acc = 0; while n > 0 { acc = acc + 1; n = n - 1; } acc'
 
   let view: EditorView
 
-  // ONE MOUNT FOR THE FILE — `scratch-app.test.ts`'s own reason: ES module imports are cached, so
-  // `main()` runs once per page. The three `describe` blocks above never import `../../src/main` at
+  // ONE MOUNT FOR THE FILE, for the reason `app.test.ts` gives: ES module imports are cached, so
+  // `main()` runs once per page. The two `describe` blocks above never import `../../src/main` at
   // all, so this is the first and only mount in this file; nothing above shares a page with it.
   beforeAll(async () => {
-    // Each browser test file gets its own in-memory `Storage` now, installed in `tests/browser/setup.ts`
-    // before this file's own module body runs — see that file's doc for why clearing a shared key was
-    // not enough. Neither key needs clearing here any more.
     document.body.innerHTML = SHELL
     view = await (await import('../../src/main')).ready
     await until(idle, 'the first compile')
@@ -773,20 +675,19 @@ describe('the fork control forks a truncated frame, through the app', () => {
 
   it('forks a TRUNCATED frame and seeds the editor with the whole term', async () => {
     // `↺` FIRST, so the walk starts at step 0 (`scratch-app.test.ts`'s own note).
-    // Two steps forward from there is not the free `step === 0` case §4.1a calls out — the worker has
-    // to do the replay, not skip it.
+    // Two steps forward from there is not the free `step === 0` case 5d-iii §4.1a calls out — the
+    // worker has to do the replay, not skip it.
     clickLambda('↺')
     clickLambda('▶')
     clickLambda('▶')
     expect(lambdaStepText()).toContain('step 2 of')
 
-    // THE CAPABILITY THIS SLICE EXISTS FOR. Before T8's fix to `#refreshDetach`, a frame this
-    // truncated hid the fork control outright — `lambda-pane.ts`'s own module doc calls this shape
-    // "most non-trivial terms".
+    // THE CAPABILITY UNDER TEST: the fork control is offered on a frame this truncated — `lambda-pane.ts`'s
+    // own module doc: "most non-trivial frames WILL truncate".
     //
-    // **THE TRUNCATION IS ASSERTED ON THE SEED BELOW, NOT ON SCREEN.** This line read `.truncated` off the
-    // flat frame; the λ view now draws the step's tree (Plan 7 part 4a), which is the whole term, and shows
-    // the 512-byte frame only until the tree arrives, so reading the screen would race the tree.
+    // **THE TRUNCATION IS ASSERTED ON THE SEED BELOW, NOT ON SCREEN.** The λ view draws the step's tree,
+    // which is the whole term, and shows the 512-byte frame only until the tree arrives, so reading the
+    // screen would race the tree.
     await lambdaSettled()
     const fork = document.querySelector<HTMLButtonElement>('[data-leaf="lambda-0"] button.detach')
     expect(fork).not.toBeNull()
@@ -809,7 +710,7 @@ describe('the fork control forks a truncated frame, through the app', () => {
     expect(new TextEncoder().encode(seed).length).toBeGreaterThan(FRAME_BYTES)
 
     // AND THE SOURCE SESSION IS STILL THE ONE THE PANE LEFT — the scratch is a second session, not a
-    // mutation of the first (§4.3, and this file's first `describe` proves the mechanism directly).
+    // mutation of the first (5d-i §4.3, and this file's first `describe` proves the mechanism directly).
     // `copy · not linked` is the DOM's own witness that a second session now exists at all.
     expect(document.querySelector('[data-leaf="lambda-0"] h2')?.textContent).toContain('copy · not linked')
   })

@@ -107,7 +107,7 @@ describe('the boundaries of a view', () => {
     expect(boundary(host, 'machine', 'heap').getAttribute('aria-valuenow')).toBe('50')
   })
 
-  it('share the view as the stylesheet fixed it before one could be dragged: two, one and one', () => {
+  it('part the view two, one and one, the shares its regions are built with', () => {
     const { host } = mount()
     const h = heights(host)
     expect(h.listing / h.machine, 'the listing is twice the row').toBeCloseTo(2, 1)
@@ -194,7 +194,7 @@ describe('a drag of a boundary', () => {
   /**
    * **A DRAG THAT COULD NOT MOVE ITS BOUNDARY WRITES NOTHING.** A gesture's first frame gives every open region its
    * measured height as its share, and in a view too short for its floors those are the floors': committed, they
-   * replaced two, one and one with the floors' ratio, for the next view tall enough to show the difference.
+   * would replace two, one and one with the floors' ratio, for the next view tall enough to show the difference.
    */
   it('writes nothing where neither neighbour has room to give, and leaves the shares as they are built', async () => {
     const { host, sizes } = mount({ height: 360 })
@@ -220,8 +220,8 @@ describe('a drag of a boundary', () => {
    * **A DRAG STORES THE TWO REGIONS IT PARTS, AND LEAVES EVERY OTHER REGION THE SHARE IT HAD.** In a view 500 px tall
    * the row and the heap are on their floors and the listing has room over its own. A drag between the listing and
    * the row moves those two; the heap is on its floor before it and after it, at the share it is built with. With
-   * every open region given its measured height as its share, the heap's floor was stored as its share, to show as a
-   * taller heap in the next view tall enough for the difference.
+   * every open region given its measured height as its share, the heap's floor would be stored as its share, to
+   * show as a taller heap in the next view tall enough for the difference.
    */
   it('stores a share for the two regions it parts and for no other, one on its floor among them', async () => {
     const { host, sizes } = mount({ height: 500 })
@@ -275,8 +275,9 @@ describe('a drag of a boundary', () => {
 
   /**
    * **A STORED SHARE KEEPS ITS RATIO HOWEVER SMALL THE VIEW'S SHARES ARE, AND IS NEVER 0**, which `workspace.ts`
-   * refuses, and the whole stored workspace with it. Rounded to a ten-thousandth, the heap's share here came to
-   * nothing, and the three regions' to 2, 1 and 1 of a ten-thousandth: the heap left its floor as the drag ended.
+   * refuses, and the whole stored workspace with it. Rounded to a ten-thousandth, the heap's share here would
+   * come to nothing, and the three regions' to 2, 1 and 1 of a ten-thousandth: the heap would leave its floor as
+   * the drag ended.
    */
   it('stores a share that keeps its ratio, and is not 0, however small the shares it starts from', async () => {
     const { host, sizes } = mount({ height: 1700, sizes: { listing: 0.0001, machine: 0.0001, heap: 0.0001 } })
@@ -311,8 +312,9 @@ describe('a drag of a boundary', () => {
 
   /**
    * **A GESTURE ON ANOTHER BOUNDARY ENDS THE ONE BEFORE IT.** An arrow key held on one boundary is a gesture until
-   * its release, and a press on another boundary's header moves no focus, so nothing ends the first. The second was
-   * then given the first's measurements: the heights of the listing and the row, written to the row and the heap.
+   * its release, and a press on another boundary's header moves no focus, so nothing else ends the first; left
+   * going, the second would be given the first's measurements: the heights of the listing and the row, written to
+   * the row and the heap.
    */
   it('ends a key’s gesture on one boundary when another boundary is dragged, and moves the right two regions', async () => {
     const { host, sizes } = mount()
@@ -352,10 +354,10 @@ describe('a drag of a boundary', () => {
   /**
    * **A GESTURE ENDS AT ITS POINTER'S RELEASE, WHEREVER THAT LANDS.** A view taken off the page under a press takes
    * the pointer's capture with it, put back or not, and the release goes to whatever is under the pointer: the
-   * boundary heard none and the stack went on holding the gesture. With one held it draws no boundary and writes no
-   * share, so the view kept the boundaries it had, whatever was opened or closed after. **A KEY'S GESTURE DOES NOT
-   * GET THERE IN THIS BROWSER**: a focused boundary hears its `blur` while it is still on the page, and commits
-   * (measured in the tests' Chromium, 2026-10-13, for a removal, a `replaceChildren` and a move to another parent).
+   * boundary hears none, and a stack waiting on it would go on holding the gesture. With one held it draws no
+   * boundary and writes no share, so the view would keep the boundaries it had, whatever was opened or closed
+   * after. **A KEY'S GESTURE DOES NOT GET THERE IN THIS BROWSER**: a focused boundary hears its `blur` while it is
+   * still on the page, and commits, for a removal, a `replaceChildren` and a move to another parent.
    */
   it('does not go on holding a pointer’s gesture whose view left the page under the press', async () => {
     const { host, sizes } = mount()
@@ -391,7 +393,7 @@ describe('a drag of a boundary', () => {
   /**
    * **A POINTER THAT OVERSHOOTS A FLOOR HAS TO COME ALL THE WAY BACK BEFORE THE BOUNDARY FOLLOWS IT.** Held with this
    * file's own pointer events, since the driver's drag is one move. With the two kept as one number, the boundary
-   * left the floor the moment the pointer turned, 2,000 px away from it.
+   * would leave the floor the moment the pointer turned, 2,000 px away from it.
    */
   it('follows a pointer that overshot a floor only once it is back', async () => {
     const { host } = mount()
@@ -586,7 +588,8 @@ describe('a view built with shares', () => {
   /**
    * **THE REGIONS THAT ARE OPEN FILL THE VIEW, WHATEVER THEIR SHARES ADD UP TO.** A share goes to `flex-grow`, and
    * where the factors of the growing items add up to less than 1 they take that much of the spare height and leave
-   * the rest: a region that a drag left a share of a half, alone once the others were closed, took half its view.
+   * the rest: a region that a drag left a share of a half, alone once the others were closed, would take half
+   * its view.
    */
   it('fills the view with the one region left open, where its share is under 1', async () => {
     const { host } = mount({ sizes: { listing: 0.5, machine: 2.5 } })

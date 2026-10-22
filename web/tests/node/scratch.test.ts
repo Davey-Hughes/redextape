@@ -14,12 +14,9 @@ import { type FakePort, fakeClient, fakePort, lambdaFrame } from './session-fixt
  * **A FORK MINTS A BUFFER** — 5d-ii-c design decision 1, at the level where the rule is decided rather
  * than where it is rendered.
  *
- * **THIS FILE USED TO ASSERT THE OPPOSITE, AND THE AXIS DID NOT MOVE.** Its heading read "DETACH IS A
- * FORK, AND SCRATCHPADS ARE SINGLETONS", and 5d-i's plan required that claim be asserted on POOL SIZE
- * rather than on rendering, because "rendering looks right either way": two panes bound to two
- * DIFFERENT `LambdaScratch` sessions showing the same term look exactly like two panes bound to one.
- * That reasoning survives its conclusion — pool size is still the only place the difference is
- * visible, so the assertions here INVERT (`pool.size` grows per fork) rather than disappear.
+ * **THE CLAIM IS ASSERTED ON POOL SIZE RATHER THAN ON RENDERING**, because rendering looks right either
+ * way: two panes bound to two DIFFERENT `LambdaScratch` sessions showing the same term look exactly like
+ * two panes bound to one. Pool size is where the difference is visible, so `pool.size` grows per fork.
  *
  * FAKE PORTS, REAL EVERYTHING ELSE. The registry, the pool, the clients, the slots and the buffers are
  * the app's own objects; only the thread is a recording fake, which is what `ClientPort` is structural
@@ -33,10 +30,10 @@ const SOURCE: SessionId = 'source'
 /**
  * The app's own objects over fake threads, plus every port spawned, in spawn order.
  *
- * `replies` RECORDS THE SESSION AS WELL AS THE REPLY, which is new and is not bookkeeping. One
- * `ScratchBuffers` now owns many buffers over one `onReply` dependency, so the id has to be curried in
- * per buffer at `pool.bind` — and a callback that forgot to would still deliver every reply, just
- * under the wrong name. Recording the pair is what lets a test see the difference.
+ * `replies` RECORDS THE SESSION AS WELL AS THE REPLY, which is not bookkeeping. One `ScratchBuffers`
+ * owns many buffers over one `onReply` dependency, so the id has to be curried in per buffer at
+ * `pool.bind` — and a callback that forgot to would still deliver every reply, just under the wrong
+ * name. Recording the pair is what lets a test see the difference.
  */
 function harness(): {
   reg: SessionRegistry
@@ -68,23 +65,21 @@ function harness(): {
   })
   // THE MOST RECENT PORT'S MOST RECENT `lambda-scratch` REQUEST, trimmed to the two fields a test
   // cares about — `cool`/`warm`'s round trip opens a NEW port (`SessionPool.bind` asks the factory
-  // again), so "most recent port" is what "the build `warm` just posted" means once a buffer can be
-  // spawned more than once.
+  // again), so "most recent port" is what "the build `warm` just posted" means.
   const lastScratchPost = (): { src: string; step: number } | undefined => {
     const req = ports.at(-1)?.sent.at(-1)
     return req?.kind === 'lambda-scratch' ? { src: req.src, step: req.step } : undefined
   }
-  // A FRESH SLOT PER CALL, BOUND TO `SOURCE` ON THE λ LEG — every new test below forks more than
-  // once and each fork wants its own `Detachable`, the way every test above builds its own
-  // `PaneSlot`. The leg is fixed at `'lambda'` because `Detachable` never reads it (`scratch.ts`'s own
-  // doc: it asks for the two members retirement actually uses), so the same slot shape works whether
-  // the buffer it ends up rebound to is on the λ leg or the TM one.
+  // A FRESH SLOT PER CALL, BOUND TO `SOURCE` ON THE λ LEG — a test that forks more than once wants its
+  // own `Detachable` per fork. The leg is fixed at `'lambda'` because `Detachable` never reads it
+  // (`scratch.ts`'s own doc: it asks for the two members retirement actually uses), so the same slot
+  // shape works whether the buffer it ends up rebound to is on the λ leg, the TM one or the asm one.
   const slotOf = (): PaneSlot<'lambda'> => new PaneSlot('lambda', SOURCE)
   // WHAT WAS POSTED TO ONE BUFFER'S OWN PORT, KEYED BY THE ID `fork`/`forkBlank` RETURNED — `ports` is
   // spawn order and says nothing about which port belongs to which buffer once a test wants to name
   // one. `pool.bind` is wrapped rather than `ScratchBuffers` itself, because that is the one place in
   // this harness that sees a `SessionId` and a freshly spawned port in the same call — `#spawn`'s own
-  // doc: "THE REPLY CARRIES THE ID BECAUSE THE WIRE DOES NOT... the name is closed over HERE, per
+  // comment: "THE REPLY CARRIES THE ID BECAUSE THE WIRE DOES NOT... the name is closed over HERE, per
   // buffer, at the one place that knows which thread it just made." This does the identical thing one
   // layer down, for a test rather than for `onReply`.
   const bind = pool.bind.bind(pool)
@@ -99,7 +94,7 @@ function harness(): {
 }
 
 /**
- * The source session, with both legs and one recorded λ frame.
+ * The source session, with only a λ leg and one recorded λ frame.
  *
  * ITS CLIENT IS NOT THE POOL'S. Nothing in this file drives the source session's thread, and giving it
  * one through `pool.bind` would put a second entry in the pool and make every `pool.size` assertion
@@ -140,19 +135,17 @@ describe('ScratchBuffers.fork', () => {
     expect(ports.length).toBe(1)
     // THE SEED IS ON THE WIRE, and it is the pane's text rather than anything re-derived from the leg
     // — the source leg's frame says `'from source'`. `gen: 1` is `supersede` claiming the fresh
-    // client's first generation before the post, without which `scratch` would drop its own message
-    // (generation 0 matches nothing).
+    // client's first generation before the post, without which the client's reply filter would drop
+    // the request's own replies (generation 0 matches nothing, `SessionClient`'s constructor).
     expect(ports[0]?.sent).toEqual([{ kind: 'lambda-scratch', gen: 1, src: '(λx. x) 1', step: 0 }])
-    // The pane moved, and it moved to the buffer `fork` MINTED rather than to a session that merely
-    // exists. `detach` returned `void` and this test used to name the id from a module constant; the
-    // returned id is now the only place that name is written down (design §4.1).
+    // The pane moved, and it moved to the buffer `fork` MINTED rather than to a session that
+    // merely exists: the binding names the id `fork` returned, which design §4.1 has the caller
+    // record rather than guess.
     expect(slot.binding).toEqual({ session: id, leg: 'lambda' })
   })
 
-  // T4 — design §4.1: `step` says how far the worker replays `src` before forking
-  // (`session-worker.ts`'s `onLambdaScratch`), and `fork` is handed it rather than resolving it — see
-  // `fork`'s own doc. A hard-coded `step: 0` here would pass every OTHER assertion in this file, since
-  // every other call site happens to pass `0`; this is the one that pins the real value.
+  // 5d-iii §4.1: `step` says how far the worker replays `src` before forking (`session-worker.ts`'s
+  // `onLambdaScratch`), and `fork` is handed it rather than resolving it — see `fork`'s own doc.
   it('posts the step it was forked at', () => {
     const { reg, buffers, ports } = harness()
     reg.add(sourceEntry())
@@ -164,10 +157,10 @@ describe('ScratchBuffers.fork', () => {
   })
 
   /**
-   * **THE SOURCE SESSION IS UNTOUCHED, WHICH IS THE ENTIRE REASON THREE SESSIONS EXIST** (5d-i §4.3).
-   * Here that is asserted structurally — its entry, its client and its history are the same objects,
-   * nothing was posted to its port, and its frames are still there. The browser tier asserts the
-   * behavioural half a fake port cannot: that it goes on STEPPING across a fork.
+   * **THE SOURCE SESSION IS UNTOUCHED, WHICH IS THE ENTIRE REASON SCRATCH SESSIONS EXIST** (5d-i §4.3).
+   * Here that is asserted structurally — its entry and its client are the same objects, and its frames
+   * are still there. The browser tier asserts the behavioural half a fake port cannot: that it goes on
+   * STEPPING across a fork.
    */
   it('leaves the source session entirely alone', () => {
     const { reg, buffers } = harness()
@@ -184,18 +177,12 @@ describe('ScratchBuffers.fork', () => {
   })
 
   /**
-   * **THE SINGLETON'S OWN ASSERTION, INVERTED.** This test used to be called "rebinds a second pane to
-   * the existing scratchpad instead of making a second one" and asserted `pool.size` was 1 after two
-   * detaches. 5d-i's plan chose that axis because rendering looks right either way; decision 1 changes
-   * the expected number on it, not the axis.
+   * BOTH CONTAINERS. `SessionRegistry.add` and `SessionPool.bind` both throw on an id they already
+   * hold, so a `fork` that reused a name would throw rather than quietly rebind, and registering both
+   * ids is the claim that the minted names really are fresh.
    *
-   * BOTH CONTAINERS, BECAUSE THE OLD RULE WAS THAT NEITHER MAY BE ASKED TWICE. `SessionRegistry.add`
-   * and `SessionPool.bind` both throw on an id they already hold, and `fork`'s removed `has` branch was
-   * what kept them from being asked; a `fork` that reused a name would now throw rather than quietly
-   * rebind, so registering both ids is the claim that the minted names really are fresh.
-   *
-   * THE SELECTOR SEES BOTH WITH NO NEW CODE — design §3.2. `options('lambda')` is the list every pane's
-   * binding picker is built from, and this is where a buffer's LABEL becomes user-visible text.
+   * THE SELECTOR SEES BOTH — design §3.2. `options('lambda')` is the λ group of `pairs()`, which every
+   * view's title-selector is built from, and this is where a buffer's LABEL becomes user-visible text.
    */
   it('mints a new buffer per fork rather than rebinding to one', () => {
     const { reg, pool, buffers } = harness()
@@ -221,19 +208,15 @@ describe('ScratchBuffers.fork', () => {
 
   /**
    * **EACH BUFFER CARRIES THE TEXT IT WAS FORKED WITH, AND THIS IS THE TEST THAT DISTINGUISHES ONE
-   * BUFFER PER FORK FROM TWO NAMES FOR ONE SEED.** The singleton deliberately did NOT re-seed on a
-   * second detach — 5d-i §4.3, "a second edit REBINDS TO THE EXISTING SCRATCH" — so a second pane
-   * joined the term the first one built. With one buffer per fork there is nothing for that rule to
-   * apply to.
+   * BUFFER PER FORK FROM TWO NAMES FOR ONE SEED.**
    *
    * ASSERTED PER PORT RATHER THAN OVER A FLATTENED LIST, which is what makes it fail for the right
    * reason. An implementation that minted two ids and posted both seeds down the FIRST buffer's client
    * would produce the same two messages in the same order on a flat list; requiring one message on each
    * of two ports says the seeds went to two different threads.
    *
-   * TWO DIFFERENT STEPS AS WELL AS TWO DIFFERENT TEXTS, which is the other half the singleton file
-   * asserted separately ("keeps ONE scratch across two forks at two different steps"): a second fork at
-   * a different step is a different fork, not a different reading of the same one.
+   * TWO DIFFERENT STEPS AS WELL AS TWO DIFFERENT TEXTS: a second fork at a different step is a different
+   * fork, not a different reading of the same one.
    */
   it('seeds each buffer from its own fork rather than sharing the first seed', () => {
     const { reg, buffers, ports } = harness()
@@ -272,14 +255,11 @@ describe('ScratchBuffers.fork', () => {
   })
 
   /**
-   * Forking from a pane that is ALREADY on a buffer is the degenerate case of the two tests above, and
-   * it used to be the singleton's clearest statement: "is a no-op for a pane already bound to the
-   * scratchpad". It is not a no-op any more — the gesture means "fork this view", and a view of a
-   * buffer is a view like any other — so the assertion that used to say "nothing happened" says what
-   * happens instead.
+   * Forking from a pane that is ALREADY on a buffer is the degenerate case of the two tests above. It is
+   * not a no-op — the gesture means "fork this view", and a view of a buffer is a view like any other.
    *
-   * THE FIRST BUFFER IS NOT DISTURBED, which is the half worth keeping from the old test: it is still
-   * live, still on its own thread, and its seed was not overwritten by the second fork's text.
+   * THE FIRST BUFFER IS NOT DISTURBED: it is still live, still on its own thread, and its seed was not
+   * overwritten by the second fork's text.
    */
   it('forks a pane that is already on a buffer onto a second buffer, leaving the first alone', () => {
     const { reg, pool, buffers, ports } = harness()
@@ -299,7 +279,8 @@ describe('ScratchBuffers.fork', () => {
 
   // A buffer's entry is `detached: true` BY CONSTRUCTION (5d-i §3.3: no `linkIndex`, no `sourceSpan` on
   // either scratch type), which is what makes §4.5's two surfaces one lookup — `PaneSlot.render` reads
-  // this field for the badge and `link-wiring.ts`'s `detachedPanes` reads it for the sentence.
+  // this field for the `copy · not linked` status and `link-wiring.ts`'s `detachedPanes` reads it for
+  // the sentence.
   it('registers a buffer detached, under its minted label, with one leg and no TM leg', () => {
     const { reg, buffers } = harness()
     reg.add(sourceEntry())
@@ -310,8 +291,9 @@ describe('ScratchBuffers.fork', () => {
     expect(entry.label).toBe('copy 1')
     expect(entry.legs.tm).toBeUndefined()
     expect(entry.legs.lambda?.status).toEqual({ available: false, reason: 'building…' })
-    // A λ-only session must not be offered to a TM slot: `legOf` throws for a leg a session lacks, and
-    // `options` is what keeps a selector from producing such a binding in the first place.
+    // A λ-only session must not be offered to a TM slot: `legOf` throws for a leg a session lacks.
+    // `options('tm')` is the TM group of the `pairs()` a selector lists, and its being empty is what
+    // keeps a selector from producing such a binding in the first place.
     expect(reg.options('tm')).toEqual([])
   })
 
@@ -360,24 +342,22 @@ describe('ScratchBuffers.fork', () => {
    * count of `list()` can see. The refused slot is still on the source session for the same reason —
    * `fork` rebinds last, and a pane moved onto a buffer that was never made is a pane bound to nothing.
    *
-   * THE MESSAGE IS ASSERTED, NOT JUST THE THROW. It reaches a user (`transport.ts`'s detach handler
-   * catches this and puts it on `#link-status`), and what it has to tell them is that the cap is real
-   * and that retiring one is the way to make room — so the cap's own figure and the instruction are read
-   * back out of it. `tests/browser/scratch-cap.test.ts` is where the same message is asserted on the
-   * surface a user actually reads it from.
+   * THE MESSAGE IS ASSERTED, NOT JUST THE THROW. It reaches a user (`transport.ts`'s `forkCopy` catches
+   * this and shows it as a notice), and what it has to tell them is that the cap is real and that
+   * pausing or deleting one is the way to make room — so the cap's own figure and the instruction are
+   * read back out of it. `tests/browser/scratch-cap.test.ts` is where the same message is asserted on
+   * the surface a user actually reads it from.
    *
-   * **AND A FOURTH LINE ASSERTED A LIVE BUFFER'S NAME (`/scratch 1/`) UNTIL THE MESSAGE STOPPED CARRYING
-   * ONE.** That sentence read "what it has to tell them is where the buffers ARE"; read on a real page,
-   * the enumeration is sixty characters of `scratch 1, scratch 2, …` — a counter's output, identical in
-   * shape for every buffer — between the diagnosis and the only clause the user can act on. `fork`'s own
-   * doc carries the reversal in full. The assertion is INVERTED rather than deleted, because a message
-   * that quietly grew the list back would otherwise pass everything left here.
+   * **AND IT NAMES NO LIVE BUFFER, WHICH THE `.not.toThrow(/copy 1/)` LINE ASSERTS**, because a message
+   * that listed the live buffers' names would otherwise pass every other line here. An enumeration of
+   * the names is a counter's output, identical in shape for every buffer, standing between the
+   * diagnosis and the only clause the user can act on — `fork`'s own doc has the argument.
    *
    * **THE ERROR'S TYPE IS ASSERTED TOO, AND IT IS NOT DECORATION.** `transport.ts` catches
    * `BufferCapReached` and RE-THROWS anything else, because the other throws reachable from `fork` are
    * `SessionRegistry.add`'s and `SessionPool.bind`'s invariant guards, which must stay loud rather than
    * become a status line. A refusal raised as a plain `Error` would fall through that `instanceof` and
-   * go back to being invisible — the exact Critical this test's file was extended to close.
+   * be invisible.
    */
   it('refuses a fork at the cap rather than evicting a buffer to make room', () => {
     const { reg, pool, buffers, ports } = harness()
@@ -404,7 +384,7 @@ describe('ScratchBuffers.fork', () => {
    * **THE CAP COUNTS LIVE BUFFERS, AND `#minted` COUNTS SOMETHING ELSE.** A guard written against the
    * mint counter passes the test above and makes the refusal permanent: retiring every buffer in the
    * app would still leave a fork refused, which turns a limit into a lifetime quota and makes the
-   * diagnostic's advice — retire one — a lie.
+   * diagnostic's advice — pause or delete one — a lie.
    *
    * THE NAME IS STILL NOT REISSUED. `#minted`'s own doc is why the fork that fits in the reclaimed room
    * is `scratch-${MAX_WARM_BUFFERS + 1}` rather than `scratch-1`, and asserting it here is what keeps "the cap reads the map"
@@ -429,17 +409,16 @@ describe('ScratchBuffers.fork', () => {
 describe('ScratchBuffers.retire', () => {
   /**
    * **RETIRING TERMINATES THE BUFFER'S WORKER AND REBINDS ITS PANES BACK** (5d-i §4.3, carried forward
-   * as 5d-ii-c decision 4), deliberately the same mechanism as §4.2's poison recovery.
+   * as 5d-ii-c decision 4), deliberately the same mechanism as 5d-i §4.2's poison recovery.
    *
    * `terminated` IS THE ASSERTION THAT MATTERS AND `pool.size` IS NOT. 5d-i's plan says so in as many
    * words — "assert the worker is gone, not merely that panes rebound. Otherwise the leak passes" —
    * and a `retire` that forgot `pool.unbind` would satisfy the registry, the bindings and the panes
-   * while leaving a wasm module and its 8.45 MB baseline running forever.
+   * while leaving a wasm module running forever.
    *
-   * **TWO PANES ON ONE BUFFER IS NOW A REBIND, NOT A SECOND FORK.** This test used to reach that state
-   * by detaching twice, which the singleton collapsed onto one scratch; a second fork would now mint a
-   * second buffer, so the second pane is pointed at the first buffer the way the binding selector
-   * points it — `PaneSlot.rebind`, the app's own writer.
+   * **TWO PANES ON ONE BUFFER IS A REBIND, NOT A SECOND FORK.** A second fork would mint a second
+   * buffer, so the second pane is pointed at the first buffer the way the binding selector points it —
+   * `PaneSlot.rebind`, the app's own writer.
    */
   it('terminates the worker, forgets the session, and brings its panes home', () => {
     const { reg, pool, buffers, ports } = harness()
@@ -462,8 +441,8 @@ describe('ScratchBuffers.retire', () => {
   })
 
   // A slot that was never on the buffer must not be dragged home by someone else's retirement — the TM
-  // pane is bound to the source session's TM leg throughout, and `retire` is handed both slots by
-  // `main.ts` because it cannot know which of them forked.
+  // pane is bound to the source session's TM leg throughout, and `main.ts` hands `retire` every view's
+  // slot because it cannot know which of them forked.
   it('moves only the panes that were on the buffer', () => {
     const { reg, buffers } = harness()
     const source = sourceEntry()
@@ -484,19 +463,12 @@ describe('ScratchBuffers.retire', () => {
   })
 
   /**
-   * **`retire` ENDS THE BUFFER IT IS HANDED, AND THE TEST THIS REPLACES SAID THE OPPOSITE ON PURPOSE.**
-   * It was called "ends only the newest buffer while it has no id to name one" and asserted that a
-   * `retire(SOURCE, [a, b])` naming NO buffer ended the most recently forked one — the singleton's
-   * exact behaviour, kept as a placeholder while "what is the key" and "what triggers a retire" were
-   * split across two tasks. The signature takes the id now, so the newest reading is gone: the OLDER
-   * buffer is retired here and the newer one is the sibling left running, which is the case the
-   * placeholder could not express at all.
+   * **`retire` ENDS THE BUFFER IT IS HANDED.** The OLDER buffer is retired here and the newer one is the
+   * sibling left running, which a `retire` that ended the newest buffer could not do.
    *
-   * **THE SIBLING SURVIVING WAS NEVER TRANSITIONAL AND IS ASSERTED THE SAME WAY.** Decision 2's
-   * governing rule is that nothing ends a buffer implicitly, so a call naming one buffer may not end
-   * the others; "retire them all" would be exactly that under another name. `ports[1].terminated` is
-   * what stops this from being written as a sweep — a `retire` that unbound every buffer would satisfy
-   * `pool.size` alone only by accident of there being two.
+   * **THE SIBLING SURVIVES.** Decision 2's governing rule is that nothing ends a buffer implicitly,
+   * so a call naming one buffer may not end the others; "retire them all" would be exactly that
+   * under another name.
    */
   it('retires one buffer and leaves its siblings running', () => {
     const { reg, pool, buffers, ports } = harness()
@@ -519,9 +491,7 @@ describe('ScratchBuffers.retire', () => {
   /**
    * **THE DISCRIMINATOR: A `retire` THAT REBOUND EVERY SLOT WOULD PASS THE TEST ABOVE.** Pool size,
    * registry membership and `list()` all describe the buffer that ended; none of them can see a pane
-   * dragged home from a buffer nobody retired. Under the newest-buffer placeholder there was no state
-   * in which the two came apart — the retired buffer was always the last one forked, so "every slot"
-   * and "the slots on it" agreed whenever a test had only one buffer to look at.
+   * dragged home from a buffer nobody retired.
    *
    * `slotB.binding.session` IS ASSERTED AS `b` RATHER THAN "NOT `SOURCE`", because a rebind to the
    * wrong buffer and a rebind home are two different bugs and only the identity check tells them apart.
@@ -583,20 +553,11 @@ describe('ScratchBuffers.retire', () => {
   })
 
   /**
-   * IDEMPOTENT AND CHEAP. **THAT USED TO BE JUSTIFIED BY THE CALLER — "`main.ts` calls this from
-   * `schedule`, which runs on every keystroke, and most recompiles happen with no buffer in existence
-   * at all" — AND 5d-ii-c DECISION 2 DELETED THAT CALLER.** A source keystroke ends no buffer now, so
-   * the case this pins is the one the second half of this test names: a name outliving the buffer it
-   * used to reach.
+   * IDEMPOTENT, AND A MISS TOUCHES NOTHING. The case this pins is the one the second half of this test
+   * names: a name outliving the buffer it used to reach.
    *
-   * THE RETURN VALUE IS THE WHOLE REASON IT IS NOT `void`. `false` used to be what kept `schedule` from
-   * repainting both panes on a keystroke that changed nothing; it is what a retire control has to read
-   * before it repaints a list around a row that ended nothing (design §4.4).
-   *
-   * **THE SECOND CALL NAMES THE BUFFER THE FIRST ONE SPENT, WHERE IT USED TO NAME NOTHING.** This test
-   * asserted `retire(SOURCE, [slot])` twice and read the second `false` as "there is no newest buffer
-   * any more". The id makes that a sharper claim: a caller holding the name of a buffer it already
-   * retired gets `false` rather than a second termination of a thread that is already gone.
+   * **THE LAST CALL NAMES THE BUFFER THE ONE BEFORE IT SPENT:** a caller holding the name of a buffer it
+   * already retired gets `false` rather than a second termination of a thread that is already gone.
    */
   it('answers false and touches nothing when there is no buffer', () => {
     const { reg, pool, buffers, ports } = harness()
@@ -617,8 +578,7 @@ describe('ScratchBuffers.retire', () => {
   // 5d-i §4.3's cycle in full: fork, retire, fork again. The second fork must get a NEW thread rather
   // than the terminated one — `terminate` + respawn is §4.2's "resets both", and a pool that handed
   // back the dead port would satisfy every count above and answer nothing ever again. The second fork
-  // also mints a name of its own, which is the difference from the singleton: the id a retired buffer
-  // gave up is not reissued.
+  // also mints a name of its own: the id a retired buffer gave up is not reissued.
   it('lets a later fork build a fresh buffer on a new thread, under a new name', () => {
     const { reg, buffers, ports } = harness()
     reg.add(sourceEntry())
@@ -672,41 +632,32 @@ describe('recordOf and reinstate — undoing a delete', () => {
 })
 
 /**
- * **THIS BLOCK USED TO ASSERT THAT A FAILED FORK ENDED ITS BUFFER, AND 5d-ii-c DECISION 2 REVERSES
- * EXACTLY THAT.** Design §4.3's table: worker error / poison went from *ended it* to **survives; retire
- * is the escape**. `noSessionReply` called `retire` on the phantom path — terminating the worker,
- * dropping the buffer from both containers, and rebinding its panes home — and the three cases below
- * were written around that. The DISCRIMINATOR is untouched and is what they assert now: which SURFACE
- * the diagnostics belong on, a notice (`notice.ts`) or the buffer's own editor gutter.
+ * **A FAILED FORK DOES NOT END ITS BUFFER** — 5d-ii-c decision 2. Design §4.3's table: worker error /
+ * poison **survives; retire is the escape**. The DISCRIMINATOR the cases below assert is whether a
+ * `no-session` is a failed fork, whose diagnostics go to a notice (`notice.ts`), or a mid-edit parse,
+ * whose diagnostics the buffer's own editor shows from its LSP document.
  *
- * WHAT ENDS A BUFFER IS NOW `retire` AND NOTHING ELSE, and `describe('ScratchBuffers.retire')` above is
+ * WHAT ENDS A BUFFER IS `retire` AND NOTHING ELSE, and `describe('ScratchBuffers.retire')` above is
  * where that is asserted. Its one caller in `src/` is the retire handler behind design §4.2's header
- * list (`main.ts`); this sentence read "Nothing in `src/` calls it until design §4.4's header list is
- * wired", which was true for three tasks.
+ * list (`main.ts`).
  */
 describe('ScratchBuffers.noSessionReply', () => {
   /**
-   * **THE DISCRIMINATOR FOR THE RE-KEY, AND THE STATE THE UNKEYED VERSION ANSWERED BACKWARDS IN.**
-   * `noSessionReply` used to read the most recently forked buffer for itself, which agreed with the
-   * reply whenever the failing fork was the newest one — every state a single pane could reach. Fork a
-   * phantom, then fork a buffer that BUILDS, and the two come apart: the newest buffer holds a frame, so
-   * the unkeyed method answered `null` for the phantom's own reply and left its pane with no report of
-   * why it was showing nothing. That is the CRITICAL finding this method exists to close, reopened by a
-   * second fork.
+   * **KEYED BY THE REPLY, NOT BY THE NEWEST BUFFER.** A `noSessionReply` that read the most recently
+   * forked buffer for itself would agree with the reply whenever the failing fork was the newest one —
+   * every state a single pane can reach. Fork a phantom, then fork a buffer that BUILDS, and the two
+   * come apart: the newest buffer holds a frame, so an unkeyed method would answer `null` for the
+   * phantom's own reply and leave its pane with no report of why it was showing nothing.
    *
    * **THE PHANTOM IS THE OLDER BUFFER ON PURPOSE.** With the phantom newest, both readings agree and
-   * this test would pass against the code it was written to reject.
+   * this test would pass against an unkeyed method.
    *
-   * **IT WAS CALLED "retires the buffer the reply names rather than the newest one" AND ASSERTED
-   * `reg.has(phantom) === false`, `slotA` HOME AND `pool.size === 1`.** Every one of those was the
-   * retire, and every one is inverted here: BOTH buffers are still registered, BOTH panes are still on
-   * the buffers they were forked onto, and both threads are still bound. The claim that survives is the
-   * one about keying — this answers for the buffer the reply names — and it is now asserted on the
-   * ANSWER alone, which is the only thing this method produces.
+   * **IT ENDS NEITHER BUFFER:** BOTH buffers are still registered, BOTH panes are still on the buffers
+   * they were forked onto, and both threads are still bound. The keying — this answers for the buffer
+   * the reply names — is asserted on the ANSWER alone, which is the only thing this method produces.
    *
-   * `slotB` IS STILL ASSERTED UNMOVED, and it is no longer the same claim: it used to say a healthy
-   * buffer's pane must not be dragged home by another buffer's retirement. It now says this method moves
-   * NO pane at all, which is what "nothing ends a buffer implicitly" reduces to at this layer.
+   * `slotB` IS ASSERTED UNMOVED: this method moves NO pane at all, which is what "nothing ends a buffer
+   * implicitly" reduces to at this layer.
    */
   it('answers for the buffer the reply names rather than the newest one, and ends neither', () => {
     const { reg, pool, buffers, ports } = harness()
@@ -736,12 +687,10 @@ describe('ScratchBuffers.noSessionReply', () => {
   })
 
   /**
-   * THE LIVE-EDIT PATH, WHICH IS THE ORDINARY ONE: design §4.4 promises "an edit that does not parse
+   * THE LIVE-EDIT PATH, WHICH IS THE ORDINARY ONE: 5d-iii §4.4 promises "an edit that does not parse
    * leaves the frames region showing the last good run", and most keystrokes mid-identifier do not
-   * parse. **THIS TEST WAS CALLED "leaves a buffer that has already built a frame alone" AND THAT NAME
-   * NO LONGER DISTINGUISHES IT FROM ANYTHING** — the phantom path leaves its buffer alone too now. What
-   * it pins is the ANSWER: `null` routes the caller to the buffer's own editor gutter, where a mid-edit
-   * parse failure belongs, rather than reporting it as a fork that failed.
+   * parse. What this pins is the ANSWER: `null` says this is no fork that failed, so the caller reports
+   * nothing, and the buffer's own editor shows the parse failure from its LSP document.
    */
   it('answers null for a buffer that has already built a frame', () => {
     const { reg, buffers } = harness()
@@ -756,11 +705,10 @@ describe('ScratchBuffers.noSessionReply', () => {
     expect(slot.binding.session).toBe(id)
   })
 
-  // A REPLY THAT OUTLIVED ITS BUFFER — the one way this can be handed an id that is not live, since
-  // `replies.ts` routes the source session's own `no-session` to `onReply` instead. There is no fork
-  // left to report a failure for, and `entryOf` would THROW rather than answer without the membership
-  // guard. **THE BUFFER IS SPENT BY AN EXPLICIT `retire` HERE, WHICH IS NOW THE ONLY WAY TO REACH THIS
-  // STATE AT ALL** — the reply arriving after the user ended the buffer from §4.4's header list.
+  // AN ID THAT IS NOT LIVE — a buffer `retire` has spent, the only way an id `fork` minted stops being
+  // one. A real worker's reply cannot arrive after the retire (`noSessionReply`'s doc: `terminate()`
+  // empties the parent port's queue), so this pins the method's answer rather than an app path: with no
+  // fork left to report a failure for, the membership guard answers `null` where `entryOf` would THROW.
   it('answers null for a buffer that is not live', () => {
     const { reg, buffers } = harness()
     reg.add(sourceEntry())
@@ -772,9 +720,9 @@ describe('ScratchBuffers.noSessionReply', () => {
     expect(slot.binding.session).toBe(SOURCE)
   })
 
-  // A REPLY THAT ARRIVES AFTER ITS BUFFER WAS COOLED RATHER THAN RETIRED — the record survives in
-  // `#buffers` (unlike the retired case above), but `cool` has already removed the registry entry
-  // `entryOf` would need to answer the old, unkeyed way. The `warm` guard added ahead of `entryOf` is
+  // A BUFFER THAT HAS BEEN COOLED RATHER THAN RETIRED — the record survives in `#buffers` (unlike the
+  // retired case above), but `cool` has already removed the registry entry `entryOf` needs, and as
+  // above a real worker's reply cannot arrive after the cool. The `warm` guard ahead of `entryOf` is
   // what turns that into `null` instead of a throw; if the guard were ever dropped or inverted,
   // `this.#reg.entryOf(id)` would throw here and this test would fail on the throw rather than pass.
   it('answers null for a buffer that has been cooled', () => {
@@ -791,9 +739,9 @@ describe('ScratchBuffers.noSessionReply', () => {
 
 /**
  * **A COPY'S FAILED BUILD IS JUDGED BY ITS OWN LEG** (Plan 7 part 5 spec, amendment 27). The discriminator — has this
- * copy recorded a frame — used to read the λ leg for every copy, and a TM or asm copy has none: every unparseable edit to
- * one that had built was answered as a failed build, which `replies.ts` says in a notice, where a λ copy's edit shows
- * its diagnostics in the editor alone.
+ * copy recorded a frame — reads the copy's own leg. Read on the λ leg, a TM or asm copy has no frame, so every
+ * unparseable edit to one that had built would be answered as a failed build, which `replies.ts` says in a notice,
+ * where a λ copy's edit shows its diagnostics in the editor alone.
  */
 describe('ScratchBuffers.noSessionReply, on the copy’s own leg', () => {
   const tmFrame: TmState = {
@@ -830,7 +778,7 @@ describe('ScratchBuffers.noSessionReply, on the copy’s own leg', () => {
 
 describe('ScratchBuffers.recompile', () => {
   /**
-   * **5d-i §4.3's EDIT PATH, AND `recompile`'s OWN DOC IS THE CLAIM UNDER TEST: "IT IS `fork` WITH
+   * **5d-iii §4.3's EDIT PATH, AND `recompile`'s OWN DOC IS THE CLAIM UNDER TEST: "IT IS `fork` WITH
    * `step: 0` AND NO CREATION."** `pool.size` staying put is what distinguishes reusing the existing
    * worker from spawning a second one — `ports.length` staying at 1 is the same claim from the other
    * container, since `SessionPool.bind` would either throw on the already-live id or, if that guard
@@ -851,11 +799,10 @@ describe('ScratchBuffers.recompile', () => {
   })
 
   /**
-   * **THE BUFFER IT NAMES, NOT THE NEWEST ONE** — the reason `recompile` took a buffer id in the task
-   * that made buffers plural rather than waiting for the task that re-keys `retire`. Its caller is
-   * the sink `transport.ts`'s `editSink` builds for each editor, and a pane editing an OLDER buffer while a newer
-   * one exists is reachable the moment two forks are: the newest-buffer reading would rebuild a term
-   * the user is not looking at and leave the one they are typing into untouched.
+   * **THE BUFFER IT NAMES, NOT THE NEWEST ONE.** Its caller is the sink `transport.ts`'s `editSink`
+   * builds for each editor, and a pane editing an OLDER buffer while a newer one exists is reachable the
+   * moment two forks are: a newest-buffer reading would rebuild a term the user is not looking at and
+   * leave the one they are typing into untouched.
    */
   it('recompiles the buffer it names rather than the most recent one', () => {
     const { reg, buffers, ports } = harness()
@@ -873,8 +820,8 @@ describe('ScratchBuffers.recompile', () => {
   })
 
   // No such buffer exists, so there is nothing to rebuild — `recompile` cannot mean "create one from
-  // nothing" (`fork` owns creation), so this is the caller-bug case `recompile`'s own doc names, not
-  // the common one. Nothing is posted and no worker is spawned.
+  // nothing" (`fork` owns creation), and `recompile`'s own doc names this answer for an id no fork ever
+  // minted. Nothing is posted and no worker is spawned.
   it('answers false when there is no buffer to recompile', () => {
     const { reg, pool, buffers, ports } = harness()
     reg.add(sourceEntry())
@@ -886,17 +833,11 @@ describe('ScratchBuffers.recompile', () => {
 })
 
 /**
- * **`setCollapsed`/`collapsedOf` — design §4.7, WITH NO DIRECT TEST UPSTREAM OF THIS ONE (review
- * finding 6).** Both are exercised end to end through `main.ts`'s wiring (`transport.ts`'s `collapse`
- * handler writes, `replies.ts`'s `scratch-compiled` arm reads) and through the browser tier's
- * `buffer-restore.test.ts`, but neither method has ever been called directly against a real
- * `ScratchBuffers`. `setCollapsed`'s `state !== undefined` guard and `collapsedOf`'s `?? false` fallback
- * are reachable only with an id that never named a buffer at all — `setText`'s own doc states the reason
- * neither throws the way `warm` does: the one caller each has always resolves an id off a live pane's
- * own binding, which can never name a buffer this map does not hold, so the guard exists for
- * correctness under a hypothetical caller rather than for a path this app's own wiring reaches. Both
- * arms are the whole of this task's branch-coverage margin (~6 branches above the floor), so leaving
- * them unexercised was the entire cushion.
+ * **`setCollapsed`/`collapsedOf` — 5d-ii-d §4.7, CALLED DIRECTLY AGAINST A REAL `ScratchBuffers`.**
+ * Both are exercised end to end through `main.ts`'s wiring (`transport.ts`'s `collapse` handler writes,
+ * `replies.ts`'s `scratch-compiled` arm reads) and through the browser tier's `buffer-restore.test.ts`.
+ * `setCollapsed`'s `state !== undefined` guard and `collapsedOf`'s `?? false` fallback are reachable
+ * only with an id that is not a buffer.
  */
 describe('ScratchBuffers.setCollapsed / collapsedOf', () => {
   it('collapsedOf answers false for a freshly forked buffer', () => {
@@ -923,8 +864,7 @@ describe('ScratchBuffers.setCollapsed / collapsedOf', () => {
 
   // THE DEFENSIVE ARM ON THE WRITER — an id that never named a buffer records nothing and throws
   // nothing, unlike `warm`'s `not a buffer` throw, because `setCollapsed`'s one caller resolves the id
-  // off a live pane's own binding (`setText`'s own doc carries the argument for why that reading can
-  // never name a buffer this map does not hold).
+  // off a live pane's own binding.
   it('setCollapsed on an id that is not a buffer is a silent no-op', () => {
     const { buffers } = harness()
 
@@ -941,9 +881,8 @@ describe('ScratchBuffers.setCollapsed / collapsedOf', () => {
     expect(buffers.collapsedOf('scratch-9')).toBe(false)
   })
 
-  // `setText`'s OWN DEFENSIVE ARM, THE SAME SHAPE AS `setCollapsed`'S ABOVE AND FOR THE SAME REASON —
-  // `setText`'s own doc: its two callers (`recompile` and `replies.ts`'s `scratch-compiled` arm) both
-  // resolve the id off a live pane's own binding, which can never name a buffer this map does not hold.
+  // `setText`'S OWN DEFENSIVE ARM, THE SAME SHAPE AS `setCollapsed`'S ABOVE: an id that is not a buffer
+  // records nothing and throws nothing.
   it('setText on an id that is not a buffer is a silent no-op', () => {
     const { buffers } = harness()
 
@@ -960,10 +899,9 @@ describe('cold and warm buffers', () => {
 
     expect(buffers.cool(id, SOURCE, [])).toBe(true)
 
-    // THE RECORD SURVIVES AND THE THREAD DOES NOT — the whole content of a cool. `terminated` is the
-    // assertion that actually says the worker is gone; `pool.has` alone would pass just as well if
-    // `cool` forgot `pool.unbind` but the fake pool happened to answer `false` for other reasons, the
-    // same gap `retire`'s own tests close with the same field.
+    // THE RECORD SURVIVES AND THE THREAD DOES NOT. `terminated` is the assertion that actually says the
+    // worker is gone: `pool.has` reads the pool's own map, which says the id was forgotten and not that
+    // its thread was stopped — the same gap `retire`'s own tests close with the same field.
     expect(ports[0]?.terminated).toBe(1)
     expect(buffers.list().map((b) => b.id)).toEqual([id])
     expect(buffers.list()[0]?.warm).toBe(false)
@@ -971,8 +909,7 @@ describe('cold and warm buffers', () => {
     expect(reg.has(id)).toBe(false)
   })
 
-  // FINDING 0 — cooling now rebinds exactly as retiring does, which is the whole content of the
-  // design change: a cold buffer must have no pane still naming it.
+  // Cooling rebinds exactly as retiring does: a cold buffer must have no pane still naming it.
   it('cool rebinds a bound pane to home', () => {
     const { reg, buffers } = harness()
     reg.add(sourceEntry())
@@ -992,12 +929,12 @@ describe('cold and warm buffers', () => {
     expect(buffers.cool(id, SOURCE, [])).toBe(false)
   })
 
-  // FINDING 3 (5d-ii-d review round 2) — an id that was never a buffer at all returns `false` BEFORE the
-  // rebind loop runs, which is a different path from the already-cold case above: that one still walks
-  // `slots` and finds nothing to rebind (`cool`'s own doc calls that "a pass that finds nothing to do"),
-  // while this one never walks `slots` at all. Binding a slot to the unknown id directly is what tells
-  // the two apart — if the early return ever moved to after the loop, this test would start failing
-  // where the already-cold test above would not.
+  // An id that was never a buffer at all returns `false` BEFORE the rebind loop runs, which is a
+  // different path from the already-cold case above: that one still walks `slots` and finds nothing to
+  // rebind (`cool`'s own doc calls that "a pass that finds nothing to do"), while this one never walks
+  // `slots` at all. Binding a slot to the unknown id directly is what tells the two apart — if the early
+  // return ever moved to after the loop, this test would start failing where the already-cold test
+  // above would not.
   it('cool answers false for an id that was never a buffer, and never reaches the rebind loop', () => {
     const { reg, buffers } = harness()
     reg.add(sourceEntry())
@@ -1041,8 +978,8 @@ describe('cold and warm buffers', () => {
     expect(() => buffers.warm('scratch-9')).toThrow(/not a buffer/)
   })
 
-  // THE EARLY RETURN — a buffer already warm has nothing for `warm` to do, and this is the one call
-  // site that would otherwise spawn a SECOND thread for a session `SessionPool.bind` already holds.
+  // THE EARLY RETURN — a buffer already warm has nothing for `warm` to do, and without it `#spawn` would
+  // ask `SessionPool.bind` for a session it already holds, which throws.
   it('warm is a no-op for a buffer that is already warm', () => {
     const { reg, pool, buffers, ports } = harness()
     reg.add(sourceEntry())
@@ -1056,11 +993,10 @@ describe('cold and warm buffers', () => {
     expect(reg.has(id)).toBe(true)
   })
 
-  // TASK 3 — `recompile` IS THE FIRST OF `setText`'S TWO REAL CALLERS (design §4.3): the text of
-  // record is the user's own typed text, written at the point a rebuild is posted. Read back the same
-  // way `warm posts the buffer text at step 0` above reads back an explicit `setText` call — cool,
-  // clear the recorded posts, warm, and check what got posted — because there is no accessor onto a
-  // buffer's text directly.
+  // `recompile` IS ONE OF `setText`'S TWO REAL CALLERS, WITH `replies.ts`'s `scratch-compiled` ARM
+  // (5d-ii-d §4.3): the text it records is the user's own typed text, written at the point a rebuild
+  // is posted. Read back the same way `warm posts the buffer text at step 0` above reads back an
+  // explicit `setText` call — cool, clear the recorded posts, warm, and check what got posted.
   it('recompile records the text it posts', () => {
     const { reg, buffers, ports, lastScratchPost } = harness()
     reg.add(sourceEntry())
@@ -1097,11 +1033,10 @@ describe('cold and warm buffers', () => {
     expect(lastScratchPost()).toEqual({ src: 'typed-after-the-pause', step: 0 })
   })
 
-  // FINDING 3.1 — the cap's new meaning (threads, not records) is easiest to get wrong on this path:
-  // `>=` vs `>`, or checking the cap before the already-warm early return would both let this through.
-  // `cooled` is COLD here (so the already-warm return does not short-circuit the cap check) while
-  // `warmCount()` is still at `MAX_WARM_BUFFERS` (because a fresh fork replaced the room `cooled` gave up),
-  // which is the one state that actually drives the check.
+  // The cap's meaning (threads, not records) is easiest to get wrong on this path: `>=` vs `>` would
+  // let this through. `cooled` is COLD here (so the already-warm return does not short-circuit the cap
+  // check) while `warmCount()` is still at `MAX_WARM_BUFFERS` (because a fresh fork replaced the room
+  // `cooled` gave up), which is the one state that actually drives the check.
   it('warm throws BufferCapReached when the cap is already spent', () => {
     const { reg, buffers } = harness()
     reg.add(sourceEntry())
@@ -1116,11 +1051,11 @@ describe('cold and warm buffers', () => {
     expect(buffers.list().find((b) => b.id === cooled)?.warm).toBe(false)
   })
 
-  // NOT `reg.has(id)` — `cool` already removes that entry two lines up, so that assertion would pass
-  // before `retire` even runs and could not fail for any implementation (5d-ii-d review round 2,
-  // Minor 1). `reg.has(SOURCE)` names a real defect instead: a `retire` that touched the registry beyond
-  // the one entry `cool` already forgot — e.g. by sweeping instead of keying — would strand the source
-  // session too. `expect(retire(...)).toBe(true)` above already covers "does not throw through `entryOf`".
+  // NOT `reg.has(id)` — `cool` already removes that entry two lines up, so that assertion would
+  // pass before `retire` even runs and could not fail for any implementation. `reg.has(SOURCE)`
+  // names a real defect instead: a `retire` that touched the registry beyond the one entry `cool`
+  // already forgot — e.g. by sweeping instead of keying — would strand the source session too.
+  // `expect(retire(...)).toBe(true)` above already covers "does not throw through `entryOf`".
   it('retire ends a cold buffer without touching the registry', () => {
     const { reg, buffers } = harness()
     reg.add(sourceEntry())
@@ -1161,9 +1096,8 @@ describe('cold and warm buffers', () => {
     expect(buffers.list()).toHaveLength(2)
   })
 
-  // FINDING 3.2 — THE SENTENCE THE WHOLE TASK EXISTS FOR: a cooled buffer's empty seat is exactly what
-  // a later fork may spend, without evicting the cooled buffer's own record. Nothing before this test
-  // drove a fork past the cap that a cool, rather than a retire, had made room for.
+  // A COOLED BUFFER'S EMPTY SEAT is exactly what a later fork may spend, without evicting the cooled
+  // buffer's own record.
   it('forking after cooling one of MAX_WARM_BUFFERS spends the room the cooled buffer gave up', () => {
     const { reg, buffers } = harness()
     reg.add(sourceEntry())
@@ -1186,14 +1120,14 @@ describe('cold and warm buffers', () => {
 })
 
 /**
- * **WHAT SURVIVES A RELOAD, AT THE LAYER THAT DECIDES IT** — design §4.9, and the pair `main.ts` puts
+ * **WHAT SURVIVES A RELOAD, AT THE LAYER THAT DECIDES IT** — 5d-ii-d §4.9, and the pair `main.ts` puts
  * either side of `localStorage`.
  *
- * EVERY TEST HERE BUILDS A SECOND `harness()` AND RESTORES INTO IT, rather than restoring into the one
- * that produced the snapshot. A restore is a statement about a page that has just started, and a
- * collection that already holds the buffers cannot tell "restored it" from "still had it" — the second
- * harness has its own registry and its own pool, so `pool.size` and `list()` below are answers about
- * the restore and nothing else.
+ * EVERY TEST HERE THAT TAKES A SNAPSHOT BUILDS A SECOND `harness()` AND RESTORES INTO IT, rather than
+ * restoring into the one that produced the snapshot. A restore is a statement about a page that has
+ * just started, and a collection that already holds the buffers cannot tell "restored it" from "still
+ * had it" — the second harness has its own registry and its own pool, so `pool.size` and `list()` below
+ * are answers about the restore and nothing else.
  */
 describe('snapshot and restore', () => {
   // A COPY STORED BEFORE PLAN 7 PART 2 IS SAID THE NEW WAY (spec §12) — and only a label of exactly that
@@ -1271,9 +1205,9 @@ describe('snapshot and restore', () => {
 
 describe('two legs, one collection', () => {
   /**
-   * **POOL SIZE IS THE AXIS, NOT RENDERING** — 5d-i's rule, restated for the leg. A test driven
-   * through the DOM cannot see how many threads exist, and "one cap across both legs" is a claim about
-   * threads.
+   * **THREADS ARE THE AXIS, NOT RENDERING.** `warmCount()` is how many buffers hold a worker — the
+   * quantity `MAX_WARM_BUFFERS` bounds — and a test driven through the DOM cannot see how many threads
+   * exist; "one cap across every leg" is a claim about threads.
    */
   it('spends one shared seat per warm buffer whichever leg it is', () => {
     const { buffers, slotOf } = harness()
@@ -1294,7 +1228,7 @@ describe('two legs, one collection', () => {
   })
 
   /**
-   * ONE COUNTER ACROSS BOTH LEGS, WHICH IS WHAT KEEPS `mintedIndex`'s `scratch-N` FORM AND THE
+   * ONE COUNTER ACROSS EVERY LEG, WHICH IS WHAT KEEPS `mintedIndex`'s `scratch-N` FORM AND THE
    * NEVER-REISSUED GUARANTEE. Two counters would mint `scratch-1` twice.
    */
   it('mints from one id space and says the leg in the name, not the label', () => {
@@ -1303,9 +1237,9 @@ describe('two legs, one collection', () => {
     expect(buffers.fork(slotOf(), 'b', 0, 'tm')).toBe('scratch-2')
     const rows = buffers.list()
     expect(rows.map((r) => r.leg)).toEqual(['lambda', 'tm'])
-    // **THE EXACT STRING, NOT `toContain` — 5d-iv T5 REVIEW FIX (Important 3).** The label is `copy N`
-    // since Plan 7 part 2 (spec §12), so the leg is `nameOf`'s to say, and the exact name is the only
-    // assertion that reads the PREFIX, which is the one thing the leg decides.
+    // **THE EXACT STRING, NOT `toContain`.** The label is `copy N` (Plan 7 part 2 spec §12), so the leg
+    // is `nameOf`'s to say, and the exact name is the only assertion that reads the PREFIX, which is the
+    // one thing the leg decides.
     expect(rows[0]?.label).toBe('copy 1')
     expect(rows[1]?.label).toBe('copy 2')
     expect(buffers.nameOf('scratch-1')).toBe('λ copy 1')
@@ -1331,12 +1265,10 @@ describe('two legs, one collection', () => {
   })
 
   /**
-   * **`recompile` BRANCHES ON THE BUFFER'S OWN LEG — 5d-iv T5 REVIEW FIX (Important 1).** Before this
-   * fix, `recompile` posted `client.scratch` (`lambda-scratch` on the wire) unconditionally, so editing
-   * a TM buffer sent its `.tm` text to `onLambdaScratch`, which parses it as a λ term and answers
-   * `no-session` with a λ syntax error every time — "fork failed — <λ syntax error>" on a machine the
-   * user never tried to fork. This is the gesture the whole slice exists to add: a TM buffer rebuilds
-   * with `tm-scratch`, mirroring `#spawn`'s own branch on `state.leg`.
+   * **`recompile` BRANCHES ON THE BUFFER'S OWN LEG.** A `recompile` that posted `client.scratch`
+   * (`lambda-scratch` on the wire) unconditionally would send a TM buffer's `.tm` text to
+   * `onLambdaScratch`, which parses it as a λ term and answers `no-session` with a λ syntax error every
+   * time. A TM buffer rebuilds with `tm-scratch`, mirroring `#spawn`'s own branch on `state.leg`.
    */
   it('recompile posts tm-scratch for a tm buffer, not lambda-scratch', () => {
     const { buffers, postedTo } = harness()
@@ -1350,10 +1282,10 @@ describe('two legs, one collection', () => {
     ])
   })
 
-  // `warm` MIRRORS `recompile`'S FIX AT THE OTHER CALL SITE `#spawn` SERVES — a cold TM buffer that
-  // comes back must post `tm-scratch` on its own fresh thread, not `lambda-scratch`. `postedTo` reads
-  // the NEWEST port bound to `id`, which is the one `warm`'s re-spawn just opened (`cool` terminated the
-  // old one), so this is the request that new thread actually received.
+  // `warm` POSTS BY LEG THROUGH `#spawn`'s BRANCH, AS `recompile` DOES THROUGH ITS OWN — a cold TM
+  // buffer that comes back must post `tm-scratch` on its own fresh thread, not `lambda-scratch`.
+  // `postedTo` reads the NEWEST port bound to `id`, which is the one `warm`'s re-spawn just opened
+  // (`cool` terminated the old one), so this is the request that new thread actually received.
   it('warm re-spawns a cold tm buffer with tm-scratch, not lambda-scratch', () => {
     const { buffers, postedTo } = harness()
     const id = buffers.forkBlank('tm')
@@ -1365,11 +1297,10 @@ describe('two legs, one collection', () => {
   })
 
   /**
-   * **A TM BUFFER'S LEG SURVIVES A SNAPSHOT/RESTORE ROUND TRIP — 5d-iv T5 REVIEW FIX (Important 3).**
-   * `restore`'s `leg: b.leg` is the one line standing between this and every restored buffer coming back
-   * λ — the report names it explicitly: "silently wrong the day a TM buffer's record needs to survive a
-   * reload." A second `harness()` restores into, for the file's own stated reason: a fresh collection
-   * cannot confuse "restored it" with "still had it".
+   * **A TM BUFFER'S LEG SURVIVES A SNAPSHOT/RESTORE ROUND TRIP.** `restore`'s `leg: b.leg` is the one
+   * line standing between this and every restored buffer coming back λ. A second `harness()` restores
+   * into, for the reason the `snapshot and restore` block's doc gives: a fresh collection cannot confuse
+   * "restored it" with "still had it".
    */
   it('round-trips a tm buffer’s leg through snapshot and restore', () => {
     const h = harness()

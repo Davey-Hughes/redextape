@@ -8,9 +8,9 @@ export const AUTO_FOLD_NODES = 200
  * is what a finished run's `42` is; the root otherwise always; anything holding the next redex, so the path
  * to it is always drawn; anything else while it is small.
  *
- * **THE CHIP TEST COMES FIRST.** The prototype asked about the root first, and every finished numeric
- * run drew its answer as `λf x. f (f (f …` instead of its value. A chip can never hold the next redex —
- * it is a normal form — so asking it first costs the redex rule nothing.
+ * **THE CHIP TEST COMES FIRST.** Asked about the root first, every finished numeric run would draw its
+ * answer as `λf x. f (f (f …` instead of its value. A chip can never hold the next redex — it is a normal
+ * form — so asking it first costs the redex rule nothing.
  */
 export function autoOpen(t: Tree, i: number): boolean {
   if (t.chip(i) !== null) return false

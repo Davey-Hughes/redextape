@@ -12,7 +12,7 @@ import { asmPane, linkAt, linkStatus, pickPreset, SHELL, sourceLinked, stageTab,
  */
 
 const SAMPLE = 'let x = 40; x + 2'
-/** `map` with a closure: `defunc` rewrites it, and the instructions its dispatch mints have no owner (5a's fixture). */
+/** `map` with a closure: `defunc` rewrites it, and the instructions its dispatch mints have no owner. */
 const MAP =
   'fn map(xs, f) { if is_empty(xs) { nil } else { cons(f(head(xs)), map(tail(xs), f)) } } map([3, 1, 2], |x| x + 1)'
 
@@ -107,9 +107,9 @@ describe('an instruction with no owner', () => {
 
 describe('a TM state with no owner', () => {
   /**
-   * AMENDMENT 11's OTHER HALF: a TM state with no owner — scaffolding, which most states are — unpins as it always
-   * has, and the line says nothing. Only an asm instruction with no owner earns a sentence. The line is made to say
-   * that sentence first, so the empty line after the click is the click's doing and not the line's resting state.
+   * AMENDMENT 11's OTHER HALF: a TM state with no owner — scaffolding, which most states are — unpins, and the line
+   * says nothing. Only an asm instruction with no owner earns a sentence. The line is made to say that sentence first,
+   * so the empty line after the click is the click's doing and not the line's resting state.
    */
   it('unpins without a word, where an instruction with no owner said why', async () => {
     // The case above left `MAP` compiled. The machine's state 0, `halt`, is the rule table's first row; whether it has
@@ -147,7 +147,7 @@ describe('a TM state with no owner', () => {
 describe('a following listing', () => {
   /**
    * THE PIN'S ROWS STAY IN VIEW AFTER THE SCROLL'S OWN EVENT. The listing follows the instruction about to run, and a
-   * link's scroll that won only the draw writing it lost the redraw that event causes, a frame later, to following.
+   * link's scroll that wins only the draw writing it loses the redraw that event causes, a frame later, to following.
    * `map`'s listing is long enough that the literal `3`, lowered after every function, is off the screen at pc0.
    */
   it('scrolls to a construct pinned in the source, and keeps it there past the scroll', async () => {

@@ -179,7 +179,8 @@ describe('controlState', () => {
   })
 
   // The app's own first compile supersedes from generation 0 with no history, and takes the
-  // unavailable early return — so it never reaches the new arms and needs no special case in them.
+  // unavailable early return — so it never reaches the `awaitingRun` arms and needs no special case
+  // in them.
   it('keeps an unavailable leg on its reason rather than on recompiling', () => {
     const c = controlState(view({ available: false, reason: 'not run', length: 0, awaitingRun: true }))
     expect(c.stepText).toBe('not run')
@@ -188,9 +189,9 @@ describe('controlState', () => {
   })
 })
 
-// THE ONE PLACE THIS IS DECIDED — see `canRecordFurther`'s doc comment. Both `controlState` (via
-// `continueLabel`) and `transport.ts`'s `▶`-at-frontier path call this same function now; a second
-// copy of the list would be how one of the two ends up offering `depth-refused` a continue anyway.
+// THE ONE PLACE THIS IS DECIDED — see `canRecordFurther`'s doc comment. `controlState` (via
+// `continueLabel`) and `transport.ts`'s `▶`-at-frontier path call this same function; a second copy
+// of the list would be how one of them ends up offering `depth-refused` a continue anyway.
 describe('canRecordFurther', () => {
   it('is true only for capped and budget, false for ended, depth-refused, and null', () => {
     expect(canRecordFurther('capped', false)).toBe(true)

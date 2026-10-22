@@ -8,14 +8,13 @@ import { stored } from './share-open-hashchange-fixture'
 
 /**
  * **A REFUSED PROGRAM WRITE IS REPORTED ONLY WHILE THE PAGE SHOWS A PROGRAM A RELOAD WOULD NOT RESTORE** — Plan 7 part
- * 6a spec §4.3 and row 17, which read "changed from what was loaded". Compared with what a reload restores — the last
- * program stored, or the one the page loaded if none has been — a program edited away and back again is no longer
- * reported as unsaved, since a reload gives back exactly what the page shows; one that still differs keeps being
- * reported.
+ * 6a spec §4.3 and row 17 as §4.3 refines it. Compared with what a reload restores — the last program stored, or the
+ * one the page loaded if none has been — a program edited away and back again is not reported as unsaved, since a
+ * reload gives back exactly what the page shows; one that still differs keeps being reported.
  *
  * **THE REFUSAL IS ARMED AT MODULE SCOPE, BEFORE `main()` RUNS**, as `program-quota.test.ts` arms its own, and only
  * for the program's key: the page opens on the first-load example with nothing stored, and every write of the program
- * is refused, and recorded, until a test lets one through. ONE MOUNT FOR THE FILE, for the reason every sibling gives.
+ * is refused, and recorded, until a test lets one through. ONE MOUNT FOR THE FILE, for the reason `app.test.ts` gives.
  */
 
 localStorage.removeItem(PROGRAM_STORAGE_KEY)

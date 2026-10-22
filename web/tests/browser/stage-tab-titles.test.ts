@@ -7,13 +7,12 @@ import { chooseFromWorkspace } from './user-event-fixture'
 /**
  * IN STAGE, A TAB NAMES WHAT ITS VIEW SHOWS, AS THE VIEW'S TITLE DOES (Plan 7 part 2 spec §5, §7).
  *
- * *Edit a copy*, a pick in the title's menu and a move back to the program each rebind a view in place. The view's
- * title changed on the frame the rebind drew, but its tab was built by `renderStage` and kept its old label until
- * another tab was selected — on every leg (the check by hand's finding 2). `draw()` now brings every tab up to its
- * view's title once per frame (`layout-view.ts`'s `retitleStage`), so each gesture below reads the tab against the
+ * *Edit a copy*, a pick in the title's menu and a move back to the program each rebind a view in place. `draw()` brings
+ * every tab up to its view's title once per frame (`layout-view.ts`'s `retitleStage`); a tab left as `renderStage`
+ * built it would keep its old label until another tab was selected. So each gesture below reads the tab against the
  * title as soon as the title has changed.
  *
- * Every gesture is a `userEvent` one. ONE MOUNT FOR THE FILE, for the reason every sibling gives.
+ * Every gesture is a `userEvent` one. ONE MOUNT FOR THE FILE, for the reason `app.test.ts` gives.
  */
 
 const SAMPLE = 'let x = 40; x + 2'
@@ -106,10 +105,10 @@ describe('a Stage tab', () => {
       await tabFollows(leaf, program, `${leg}’s edit a copy`)
       const first = title(leaf)
 
-      // A FIRST COPY, LEFT BEHIND ON THE MOVE BACK TO THE PROGRAM: neither leg has a *new blank copy*
-      // button of asm's own kind — a TM copy is one, but a λ copy is always made from a step of the
-      // program (`buffer-list.ts`'s `BLANK_COPY`) — so a second fork is what gives the title menu
-      // another copy to pick, the way the asm test's blank one does.
+      // A FIRST COPY, LEFT BEHIND ON THE MOVE BACK TO THE PROGRAM: λ has no *new blank copy* button,
+      // since a λ copy is always made from a step of the program (`buffer-list.ts`'s `BLANK_COPY`), so a
+      // second fork is what gives the title menu another copy to pick, the way the asm test's blank one
+      // does. TM, which has one, takes the same route in this loop.
       await pickTitle(leaf, (b) => b.dataset.binding === `${leg}:source`)
       await tabFollows(leaf, first, `${leg}’s move back to the program`)
       expect(label(leaf)).toBe(program)

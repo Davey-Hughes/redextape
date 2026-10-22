@@ -5,20 +5,13 @@ import { byteIndexAt, byteToIndex } from './spans'
 import type { Span } from './types'
 
 /**
- * THE THREE MARKS, AND THE `highlighting` FIELD THAT USED TO SIT ABOVE THEM IS GONE.
+ * THE THREE MARKS. Syntax colour is not among them: it is `colour.ts`'s `treeSitterColour`, a
+ * `ViewPlugin` over a committed tree-sitter grammar.
  *
- * It was a `StateField` fed a `setSpans` effect carrying `classify_source`'s byte-offset spans, pushed
- * from `main.ts`'s update listener in the same frame as every keystroke. Plan 7 part 3b replaced it
- * with `colour.ts`'s `treeSitterColour` — a `ViewPlugin` over a committed tree-sitter grammar, which
- * needs no effect because it reads the same `ViewUpdate` the editor already hands it, and which serves
- * the λ, asm and TM copies as well as this one. One mechanism across four languages, at the cost of the
- * synchrony: a grammar arrives over a fetch, so the first frame after a mount is uncoloured.
- *
- * WHAT STAYS HERE IS EVERYTHING THAT IS NOT SYNTAX. The three fields below are three other facts about
+ * WHAT IS HERE IS EVERYTHING THAT IS NOT SYNTAX. The three fields below are three other facts about
  * the SOURCE document on three other clocks — a backend's refusal, a click's link, the running focus —
- * and none of them is derivable from a parse tree. They keep the BYTE-offset contract — the one the
- * deleted field shared with them — because they read spans a Rust backend produced, not offsets a
- * parser read back.
+ * and none of them is derivable from a parse tree. They keep the BYTE-offset contract because they
+ * read spans a Rust backend produced, not offsets a parser read back.
  */
 
 /** The source range a backend's refusal names, or `null` to clear it. */
@@ -27,10 +20,9 @@ export const setDecline = StateEffect.define<Span | null>()
 /**
  * A backend's refusal, marked where it happened.
  *
- * A SEPARATE FIELD FROM THE COLOURER because it changes on a different clock — colouring on every
- * keystroke, this only when a compile comes back. Folding them together would mean recomputing one
- * whenever the other moved. (The colourer is `colour.ts`'s `treeSitterColour` now rather than a field
- * in this file; the clocks are what the argument was ever about.)
+ * SEPARATE FROM THE COLOURER (`colour.ts`'s `treeSitterColour`) because it changes on a different clock —
+ * colouring on every keystroke, this only when a compile comes back. Folding them together would mean
+ * recomputing one whenever the other moved.
  */
 export const declineMark = StateField.define<DecorationSet>({
   create: () => Decoration.none,
@@ -39,10 +31,9 @@ export const declineMark = StateField.define<DecorationSet>({
       if (!e.is(setDecline)) continue
       const span = e.value
       if (!span) return Decoration.none
-      // `sourceSpan` is the same BYTE-offset contract `classify_source` had — see `spans.ts`'s
-      // `byteToIndex` doc. Converted before clamping, same as there;
-      // the map's own last entry is the document's UTF-16 length, so clamping into the map already
-      // clamps into the document.
+      // `sourceSpan` is a BYTE-offset span — see `spans.ts`'s `byteToIndex` doc. Converted before
+      // clamping, same as there; the map's own last entry is the document's UTF-16 length, so clamping
+      // into the map already clamps into the document.
       const map = byteToIndex(tr.state.doc.toString())
       const from = byteIndexAt(map, span.start)
       const to = byteIndexAt(map, span.end)
@@ -76,7 +67,7 @@ export const linkMark = StateField.define<DecorationSet>({
       if (!e.is(setLink)) continue
       const span = e.value
       if (!span) return Decoration.none
-      // Byte offsets, converted before clamping — the same contract as `setDecline` above, and the
+      // Byte offsets, converted before clamping — the same contract as `declineMark` above, and the
       // same reason: the map's last entry is the document's UTF-16 length, so clamping into the map
       // already clamps into the document.
       const map = byteToIndex(tr.state.doc.toString())
@@ -96,7 +87,7 @@ export const linkMark = StateField.define<DecorationSet>({
 
 /**
  * The source span the running focus names, tagged with which class to paint, or `null` to clear it.
- * `'coincident'` is not one of `runningFocus`'s two claims (`link.ts`) — it is what `main.ts`'s
+ * `'coincident'` is not one of `runningFocus`'s two claims (`link.ts`) — it is what `draw.ts`'s
  * `draw()` substitutes when the focus names the same node as the pin (`link`), so the two states get
  * one combined look instead of two independently-coloured marks stacked on the same span.
  */
@@ -112,7 +103,7 @@ const FOCUS_CLASS: Record<'exact' | 'within' | 'coincident', string> = {
  * The construct the CURRENT β-step belongs to, painted as a SECOND LAYER beside `linkMark`'s pin.
  *
  * THE THIRD FIELD, ON THE FOURTH CLOCK — there is one more clock than there are fields here, because
- * the colourer is no longer one of them. It moves on every keystroke, `declineMark` on every compile,
+ * the colourer is not one of them. It moves on every keystroke, `declineMark` on every compile,
  * `linkMark` on every click; this one moves on every β-step, which is why it is not folded into either
  * of the other two rather than repeating their own "different clocks, different fields" reasoning for
  * a third time.
@@ -130,7 +121,7 @@ export const focusMark = StateField.define<DecorationSet>({
       if (!e.is(setFocus)) continue
       const value = e.value
       if (!value) return Decoration.none
-      // Same byte-offset contract as `linkMark`/`setDecline` above.
+      // Same byte-offset contract as `linkMark`/`declineMark` above.
       const map = byteToIndex(tr.state.doc.toString())
       const from = byteIndexAt(map, value.span.start)
       const to = byteIndexAt(map, value.span.end)

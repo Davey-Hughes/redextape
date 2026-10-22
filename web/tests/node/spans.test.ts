@@ -47,8 +47,9 @@ describe('decorationRanges', () => {
     expect(decorationRanges([], '')).toEqual([])
   })
 
-  // A RangeSetBuilder throws on out-of-order adds, and the lexer's order is an assumption rather than
-  // a guarantee this module can see. Sorting here is cheaper than a crash in a StateField.
+  // The spans' order is an assumption rather than a guarantee this module can see, and `lambda-body.ts`'s
+  // `flatText` walks the ranges in one pass, skipping a range that starts before the last one ended: a span
+  // out of order would lose its colour.
   it('sorts by start position', () => {
     const spans: Classified = [at(4, 5, 'Ident'), at(0, 3, 'Keyword')]
     expect(decorationRanges(spans, ascii20).map((r) => r.from)).toEqual([0, 4])
@@ -58,8 +59,8 @@ describe('decorationRanges', () => {
     expect(decorationRanges([at(2, 2, 'Punct')], ascii20)).toEqual([])
   })
 
-  // The document the spans were computed from and the document CodeMirror currently holds can differ
-  // by one keystroke. A stale span past the end is a crash, so it is clamped rather than trusted.
+  // A span past the end of the text is dropped or clamped rather than trusted: a read past the end of the
+  // byte-to-index map is `undefined`, not an index.
   it('drops spans that start past the end of the document', () => {
     expect(decorationRanges([at(30, 33, 'Keyword')], ascii20)).toEqual([])
   })
@@ -138,9 +139,9 @@ describe('byteToIndex', () => {
     expect(text.length).toBe(4)
   })
 
-  // THE REACHABLE GAP: the λ tests above pin the 0x80 boundary (1 vs 2 bytes) and the emoji test pins
-  // 0x10000 (3 vs 4 bytes), but nothing pinned 0x800 — so `codePoint < 0x800 ? 2 : …` could mutate to
-  // `< 0x8000` and every test here would still pass. '€' (U+20AC) is a realistic case a converter
+  // THE 0x800 BOUNDARY (2 vs 3 bytes): the λ tests above pin 0x80 (1 vs 2 bytes) and the emoji test pins
+  // 0x10000 (3 vs 4 bytes). `codePoint < 0x800 ? 2 : …` mutated to `< 0x8000` fails here, and in the
+  // mid-character test below, which reads the same '€'. '€' (U+20AC) is a realistic case a converter
   // actually meets: any non-ASCII `//` comment is a 2- or 3-byte character, not an emoji.
   it('advances the UTF-16 index by 3 bytes for a character in [U+0800, U+10000)', () => {
     const text = 'a€b'
@@ -153,10 +154,10 @@ describe('byteToIndex', () => {
     expect(Array.from(map)).toEqual([0, 1, 1, 1, 2, 3])
   })
 
-  // The doc above promises a byte offset landing MID-CHARACTER resolves to that character's own start
-  // — not an interpolated index, not the next character's start. The multi-byte tests above establish
-  // this only by bundling it into a whole-string array equality; asserted directly here against '€'
-  // (byte offsets 1, 2 and 3 all name the same 3-byte character starting at byte 1).
+  // `byteToIndex`'s doc promises a byte offset landing MID-CHARACTER resolves to that character's own
+  // start — not an interpolated index, not the next character's start. The multi-byte tests above
+  // establish this only by bundling it into a whole-string array equality; asserted directly here
+  // against '€' (byte offsets 1, 2 and 3 all name the same 3-byte character starting at byte 1).
   it('resolves a mid-character byte offset to the character’s own starting index', () => {
     const map = byteToIndex('a€b')
     expect(map[1]).toBe(1) // byte 1: '€''s own first byte
@@ -167,10 +168,9 @@ describe('byteToIndex', () => {
 
   // An unpaired surrogate is not a valid Unicode scalar value, but this converter's callers hand
   // whatever `TextEncoder` did with the actual document text — which is what a JS string can contain
-  // if, say, an edit splits a surrogate pair mid-keystroke. (The caller named here was
-  // `classifySource` until Plan 7 part 3b deleted it; `print_lambda_capped`'s frame spans and
-  // `sourceSpan` are the byte-offset producers left.) The converter is right here BY COINCIDENCE,
-  // and the coincidence is worth recording so a future rewrite does not break it silently.
+  // if, say, an edit splits a surrogate pair mid-keystroke. (`print_lambda_capped`'s frame spans and
+  // `sourceSpan` are the byte-offset producers.) The converter is right here BY COINCIDENCE, and the
+  // coincidence is worth recording so a future rewrite does not break it silently.
   it('agrees with TextEncoder on a lone surrogate, and the two agree by coincidence', () => {
     const lone = '\uD800' // an unpaired high surrogate.
     const text = `a${lone}b`

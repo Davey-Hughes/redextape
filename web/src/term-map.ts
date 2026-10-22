@@ -100,7 +100,7 @@ const TOKENS = ['--rule', '--tok-binder', '--tok-nat', '--tok-operator', '--link
  *
  * **RESOLVED THROUGH A COMPUTED `color`, NOT READ AS TEXT.** Every token is a `light-dark(…)` pair, in
  * `style.css`'s fallback and in what `skin.ts` writes alike, and a canvas's `fillStyle` ignores one: read as
- * text, the whole map was drawn in black. An element's computed `color` is the pair resolved against the
+ * text, the whole map would be drawn in black. An element's computed `color` is the pair resolved against the
  * page's colour scheme. So the colours are part of what the map last drew, too: the first draw after a theme
  * or palette change is not skipped as unchanged.
  */

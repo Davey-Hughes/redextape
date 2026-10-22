@@ -6,23 +6,22 @@ import type { LeafId } from './panes'
  * THE WORKSPACE — everything persisted about how the page is arranged: the layout tree, the three
  * switches, the playback speed, which view has focus, and each view's panel state (Plan 7 part 2 spec §3).
  *
- * **ONE ENVELOPE UNDER THE KEY THE LAYOUT ALREADY USED.** `redextape.layout` held `{ version: 1, tree }`;
- * it holds `{ version: 2, tree, switches, speed, focused, panels }` now, and `parseWorkspace` still reads
- * version 1 — the tree shape did not change, so a stored layout is migrated rather than reset. Any other
- * version is `null`, and the caller uses `defaultWorkspace()`, as `parseLayout`'s callers always have.
+ * **ONE ENVELOPE UNDER THE KEY `redextape.layout`, AT VERSION 2.** `parseWorkspace` also reads version 1,
+ * `{ version: 1, tree }` — the tree shape is the same, so a stored layout is migrated rather than reset. Any
+ * other version is `null`, and the caller uses `defaultWorkspace()`.
  *
- * **`arrangements` CAME LATER STILL, AS A FIELD THAT MAY BE ABSENT** (the view layouts spec §4.2): the tree each
- * combination of views was last seen in, except the one on screen, which is `tree`. The version stays 2.
+ * **`arrangements` IS A FIELD THAT MAY BE ABSENT** (the view layouts spec §4.2): the tree each
+ * combination of views was last seen in, except the one on screen, which is `tree`. The version is 2 either way.
  *
  * **THE PRESET IS NOT STORED.** `presetOf` derives it from the switches, because a stored preset would be
  * a second copy of three values that could disagree with them.
  */
 
-/** Where the step controls live: in each view's header, or once in a bar along the bottom (2b). */
+/** Where the step controls live: in each view's header, or once in a bar along the bottom. */
 export type StepsSwitch = 'view' | 'bar'
-/** How the views are drawn: tiled, or as one tabbed stage (2b). */
+/** How the views are drawn: tiled, or as one tabbed stage. */
 export type ViewsSwitch = 'tiles' | 'stage'
-/** How value and steps are shown: a one-line strip, or an inspector panel (2b). */
+/** How value and steps are shown: a one-line strip, or an inspector panel. */
 export type ReadoutSwitch = 'strip' | 'inspector'
 
 /** The three independent switches (spec §2 decision 2 of the umbrella). */
@@ -34,7 +33,7 @@ export type Switches = { readonly steps: StepsSwitch; readonly views: ViewsSwitc
  */
 export const SPEEDS = [1, 2, 4, 8, 15, 30, 60, 250, 1000, 5000] as const
 export type Speed = (typeof SPEEDS)[number]
-/** The rate the old per-leg interval player ran at — one step every 120 ms, about 8 a second. A default that changes nothing is the point. */
+/** 8 steps a second. */
 export const DEFAULT_SPEED: Speed = 8
 
 export function isSpeed(v: unknown): v is Speed {
@@ -87,7 +86,7 @@ export type TmDisplays = Readonly<Record<LeafId, TmDisplay>>
 
 /**
  * Per view, per region name, the share of the view's height the region takes (the view layouts spec §11.4). A region
- * with no entry has the share it is built with, and a view with none looks as it did before a boundary could move.
+ * with no entry has the share it is built with.
  */
 export type PanelSizes = Readonly<Record<LeafId, Readonly<Record<string, number>>>>
 
@@ -103,23 +102,23 @@ export type Workspace = {
   /**
    * Whether the inspector is open — spec §9, and the one field that is NOT a view's panel.
    *
-   * **NOT IN `panels`, THOUGH §9's SENTENCE ONCE READ THAT WAY.** `panels` is keyed by `LeafId` and
-   * `parseWorkspace` refuses an entry naming a leaf the tree does not hold; there is one inspector, it
-   * belongs to the workspace rather than to a view, and keying it on the FOCUSED view would collapse and
-   * re-open it as the focus moved between views. The spec was corrected to say so.
+   * **NOT IN `panels`.** `panels` is keyed by `LeafId` and `parseWorkspace` refuses an entry naming a leaf
+   * the tree does not hold; there is one inspector, it belongs to the workspace rather than to a view, and
+   * keying it on the FOCUSED view would collapse and re-open it as the focus moved between views.
    */
   readonly inspector: boolean
-  /** Each λ view's display settings (Plan 7 part 4a) — absent in a workspace stored before it. */
+  /** Each λ view's display settings — absent in a workspace stored before the field existed. */
   readonly display: Displays
   /**
-   * Each TM view's display settings (Plan 7 part 4b) — absent in a workspace stored before it. A field of its
+   * Each TM view's display settings — absent in a workspace stored before the field existed. A field of its
    * own rather than a second shape in `display`, so neither leg's parser has to tell the other's entries apart.
    */
   readonly tmDisplay: TmDisplays
   /**
    * The arrangement each combination of views remembers, by `arrangements.ts`'s key — every combination visited but
    * the one `tree` shows (the view layouts spec §4.2). Absent in a workspace stored before it, and not written
-   * while it is empty, so a workspace that has remembered nothing is stored as it always was.
+   * while it is empty, so a workspace that has remembered nothing is stored without it, as one stored before the
+   * field existed is.
    */
   readonly arrangements: Arrangements
 }
@@ -191,9 +190,9 @@ export function withPanel(panels: Panels, leaf: LeafId, name: string, open: bool
  *
  * **THE FOCUS IS HELD TO THE TREE ON SCREEN ALONE**: a focus on a view off the page falls back to `defaultFocus`.
  *
- * **`arrangements` IS WRITTEN ONLY WHILE IT HOLDS ONE**, last, so a workspace that remembers nothing is the string it
- * was before the field existed. A share link is written from a workspace whose `arrangements` the caller has emptied
- * (spec §4.7), and so carries none.
+ * **`arrangements` IS WRITTEN ONLY WHILE IT HOLDS ONE**, last, so a workspace that remembers nothing is stored without
+ * it, as one stored before the field existed is. A share link is written from a workspace whose `arrangements` the
+ * caller has emptied (spec §4.7), and so carries none.
  */
 export function serializeWorkspace(ws: Workspace): string {
   const live = liveLeaves(ws.tree, ws.arrangements)
@@ -238,9 +237,9 @@ export function parseSwitches(v: unknown): Switches | null {
 }
 
 /**
- * A stored `display`, or `null` for a malformed one. **ABSENT IS NOT MALFORMED**, for `inspector`'s reason:
- * a workspace stored before Plan 7 part 4a has none, and refusing it would reset the upgrading user's
- * layout; `parseWorkspace` maps absence to `{}`.
+ * A stored `display`, or `null` for a malformed one. **ABSENT IS NOT MALFORMED**: a workspace stored
+ * before the field existed has none, and refusing it would reset the upgrading user's layout;
+ * `parseWorkspace` maps absence to `{}`.
  */
 function parseDisplay(v: unknown, ids: ReadonlySet<string>): Displays | null {
   if (typeof v !== 'object' || v === null || Array.isArray(v)) return null
@@ -276,7 +275,7 @@ function parseTmDisplay(v: unknown, ids: ReadonlySet<string>): TmDisplays | null
  * another combination's key, an entry under the key of the tree on screen, and more ids between them all than one
  * tree may hold.
  *
- * **THE BOUND IS ON EVERY LIVE VIEW** (§5.6): `MAX_TREE_LEAVES` bounded what a link or a stored layout could make the
+ * **THE BOUND IS ON EVERY LIVE VIEW** (§5.6): `MAX_TREE_LEAVES` bounds what a link or a stored layout can make the
  * app build, and a view a remembered arrangement holds is built when it is entered.
  */
 function parseArrangements(v: unknown, tree: LayoutNode): Arrangements | null {
@@ -379,10 +378,10 @@ export function parseWorkspace(raw: string | null): Workspace | null {
   // A MISSING `panelSizes` IS NOT AN INVALID ONE, for `inspector`'s reason below.
   const panelSizes = e.panelSizes === undefined ? {} : parsePanelSizes(e.panelSizes, ids)
   if (panelSizes === null) return null
-  // **A MISSING `inspector` IS NOT AN INVALID ONE.** Version 2 shipped in part 2a without this field, so
-  // every workspace stored before part 2b has none — refusing them would reset the layout of exactly the
-  // users the version 2 envelope was built to carry across. A field that IS there and is not a boolean is
-  // held to the standard above like every other (spec §3).
+  // **A MISSING `inspector` IS NOT AN INVALID ONE.** A version 2 workspace stored before the field existed has
+  // none — refusing one would reset the layout of exactly the users the version 2 envelope was built to carry
+  // across. A field that IS there and is not a boolean is held to the standard above like every other
+  // (Plan 7 part 2 spec §3).
   if (e.inspector !== undefined && typeof e.inspector !== 'boolean') return null
   const display = e.display === undefined ? {} : parseDisplay(e.display, ids)
   if (display === null) return null

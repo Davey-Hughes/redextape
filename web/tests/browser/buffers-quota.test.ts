@@ -4,18 +4,18 @@ import { bindingKey } from '../../src/view-header'
 import { idle, noticeText, pickBinding, SHELL, until } from './harness'
 
 /**
- * **THE QUOTA REPORT — design §4.8, the one place this slice breaks symmetry with the layout writer.**
- * `main.ts`'s `writeLayoutStorage` swallows a failed write on the stated argument that a layout is a
- * preference and the page still works for the rest of the load. `writeBuffersStorage` does not: a buffer
- * is a user's work, and a user told nothing finds out at the next reload, by absence. This file is the
- * one exercise of the report that surface produces.
+ * **THE QUOTA REPORT — 5d-ii-d design §4.8: the buffers writer reports a failed write where the layout
+ * writer swallows one.** `main.ts`'s `writeLayoutStorage` swallows a failed write on the stated argument
+ * that a layout is a preference and the page still works for the rest of the load. `writeBuffersStorage` does
+ * not: a buffer is a user's work, and a user told nothing finds out at the next reload, by absence. This
+ * file is the one exercise of the report that surface produces.
  *
- * **ITS OWN FILE, FOR THE ONE-MOUNT-PER-FILE REASON EVERY SIBLING GIVES.** It needs `localStorage.setItem`
+ * **ITS OWN FILE, FOR THE ONE-MOUNT-PER-FILE REASON `app.test.ts` GIVES.** It needs `localStorage.setItem`
  * to throw for the buffers key from partway through the app's own lifetime, which is a different store
  * than any sibling file wants — `layout-restore.test.ts` and `scratch-cap.test.ts` both need every write
  * to succeed.
  *
- * **THE SHIM IS INSTALLED BY `tests/browser/setup.ts` NOW, NOT BY THIS FILE.** Every browser test file
+ * **THE SHIM IS INSTALLED BY `tests/browser/setup.ts`, NOT BY THIS FILE.** Every browser test file
  * gets its own in-memory `Storage` automatically, before this file's own module body runs (that file's
  * own doc has the argument). What this file adds on top, at module scope so it is in place before
  * `main()` ever calls `localStorage.setItem`, is a wrapper around the INSTALLED shim's `setItem` that
@@ -46,23 +46,17 @@ localStorage.setItem = (key: string, value: string): void => {
 beforeAll(async () => {
   document.body.innerHTML = SHELL
   await (await import('../../src/main')).ready
-  // THE LONGEST SINGLE WAIT IN THE BROWSER TIER, AND IT DELIBERATELY HAS NO OVERRIDE. This `beforeAll`
-  // is the one in the suite that pays for `main()`'s own wasm `init()` with no sibling in the file
-  // having amortised it already, so expect it to be the slowest first compile anywhere in the tier. It
-  // used to carry a local `30_000` for that reason; `harness.ts`'s shared default covers it, and that
-  // was measured rather than assumed — the whole tier passes with that default lowered to 2,000 ms,
-  // this wait included.
+  // THE FIRST COMPILE, AND IT DELIBERATELY HAS NO OVERRIDE: `harness.ts`'s shared default covers it, and
+  // a call site may not pass its own (`tests/node/browser-timeout-invariants.test.ts`).
   await until(idle, 'the first compile')
 })
 
 describe('a full store', () => {
   /**
-   * **THE SECOND FAILING WRITE IS THE FORK'S OWN `scratch-compiled` REPLY, NOT A SECOND CLICK — A
-   * DEVIATION FROM THE SKETCH IN `2026-08-16-plan5d-ii-d-persisted-buffers.md`, AND THE REASON IS
-   * WORTH RECORDING.** That plan's illustration clicks the fork control twice in a row. That does not
-   * reach a second write at all: the first fork detaches the view, and a view showing a copy offers no
-   * *edit a copy* (`LambdaPane`'s `#refreshDetach`: `!this.#detached`), so a literal second click finds
-   * nothing and is a silent no-op — the assertions after it would hold vacuously.
+   * **THE SECOND FAILING WRITE IS THE FORK'S OWN `scratch-compiled` REPLY, NOT A SECOND CLICK.** A second
+   * click on the fork control does not reach a second write at all: the first fork detaches the view, and a
+   * view showing a copy offers no *edit a copy* (`LambdaPane`'s `#refreshDetach`: `!this.#detached`), so a
+   * literal second click finds nothing and is a silent no-op — the assertions after it would hold vacuously.
    *
    * **THE FORK'S OWN REPLY IS A SECOND WRITE FOR FREE.** `replies.ts`'s `onScratchReply` calls
    * `onBuffersPersist()` on the `scratch-compiled` reply the copy's worker sends back (`main.ts`'s own
@@ -71,19 +65,12 @@ describe('a full store', () => {
    * `scratch-fork.test.ts`'s truncated-frame test uses: `.term-editor` mounts in the SAME handler,
    * synchronously before `onBuffersPersist()` runs — the `scratch-compiled` arm's own `setEditor` call,
    * reached through `editorHome` — so its arrival is proof the second persist has already been
-   * attempted. **`setEditor` IS `lambda-pane.ts`'s `LambdaPane` METHOD, NOT ANYTHING `replies.ts`
-   * DEFINES, and this sentence said otherwise until the whole-branch review.** It read
-   * `` `replies.ts`'s `LambdaPane.setEditor` ``, which sends a reader grepping `replies.ts` for a  check-attributions: allow
-   * definition that has never been there.
+   * attempted. **`setEditor` IS `lambda-pane.ts`'s `LambdaPane` METHOD, NOT ANYTHING `replies.ts` DEFINES.**
    *
-   * **WHAT THE OLD VERSION OF THIS TEST PROVED, AND WHY IT NO LONGER CAN.** The report used to be a
-   * once-per-page-load flag written onto `#link-status`, so the question was whether a second failing
-   * write RESTATED it, and the discriminating stage was a second fork whose success cleared the field
-   * first. Plan 7 part 2 made the report the notice line's RESTING STATE (`notice.ts`'s `Notices.rest`,
-   * `main.ts`'s `reportStorageFailure`): setting it twice with the same words is a no-op by
-   * construction, so "reported twice" is not a state this app can reach, and the flag is gone. What is
-   * worth holding now is what the resting state promises — said once when the condition begins, and on
-   * the line whenever nothing else is being said.
+   * **THE REPORT IS THE NOTICE LINE'S RESTING STATE** (`notice.ts`'s `Notices.rest`, `main.ts`'s
+   * `reportStorageFailure`): setting it twice with the same words is a no-op by construction, so "reported
+   * twice" is not a state this app can reach. What is worth holding is what the resting state promises —
+   * said once when the condition begins, and on the line whenever nothing else is being said.
    */
   it('says the condition once, however many writes fail, and lets the gesture speak', async () => {
     refuseWrites = true
@@ -115,8 +102,8 @@ describe('a full store', () => {
    * **THE ONE LONG WAIT IN THIS FILE, AND IT IS A CLOCK RATHER THAN A COMPUTATION.** The line returns to
    * the resting state when the notice over it ends, which is `NOTICE_MS` — eight seconds — after that
    * notice was made. Nothing in the app shortens it and fake timers cannot reach a timeout the app
-   * created before they were installed, so this test waits it out, alone in its own body: that is the
-   * rule #99 established after a body carrying three long waits timed out on the slower CI runner.
+   * created before they were installed, so this test waits it out, alone in its own body: that is
+   * #99's rule, since a body carrying three long waits can time out on the slower CI runner.
    */
   it('returns to the storage warning when the notice over it ends', async () => {
     await until(
@@ -126,10 +113,6 @@ describe('a full store', () => {
     expect(document.querySelector<HTMLElement>('#notice')?.hidden).toBe(false)
   })
 
-  /**
-   * **AND IT GOES WHEN THE CONDITION DOES.** `writeBuffersStorage` clears the resting state on a write
-   * that succeeds, because a warning that outlives its condition teaches a reader to ignore the line.
-   */
   /**
    * **A CONDITION THAT COMES BACK IS NOT NEWS TWICE.** A write refused by size succeeds and fails by
    * turns, so this cycle is ordinary; the line follows the condition, the live region says it once.
@@ -148,7 +131,7 @@ describe('a full store', () => {
     document.querySelector<HTMLButtonElement>('[data-leaf="lambda-0"] button.detach')?.click()
     // THE GESTURE'S OWN NOTICE, NOT THE RESTING STATE: the line comes back to the warning when this
     // notice ends, eight seconds later, and a body that waits that out beside another wait is the shape
-    // #99 took out of this tier. What this test is about is the live region, which is immediate.
+    // #99 rules out. What this test is about is the live region, which is immediate.
     await until(() => noticeText().endsWith('created — this view shows it'), "the copy's own notice")
     observer.disconnect()
     expect(
@@ -157,6 +140,10 @@ describe('a full store', () => {
     ).toHaveLength(0)
   })
 
+  /**
+   * **AND IT GOES WHEN THE CONDITION DOES.** `writeBuffersStorage` clears the resting state on a write
+   * that succeeds, because a warning that outlives its condition teaches a reader to ignore the line.
+   */
   it('clears the warning once a write succeeds', async () => {
     refuseWrites = false
     pickBinding('lambda-0', bindingKey('lambda', 'source'))

@@ -6,13 +6,9 @@ import { leafEl, retype, SHELL, stateIdle, until } from './harness'
  * **AN ANSWER COMPUTED FROM OLDER TEXT MUST NOT OVERWRITE WHAT WAS TYPED WHILE IT WAS IN FLIGHT.**
  * Two kinds of answer write into an editor after a round trip: a copy's build reply, which re-seeds
  * the copy's editor with the buffer's text, and a `format` answer, whose edits were computed against
- * the text the server held when it was asked. Each used to be applied whatever had been typed since,
- * and the typing was lost — then, for a copy, the pending debounce posted the older text back as if
- * the user had written it.
- *
- * Found on the slower CI runner, through `lsp-copy-diagnostics.test.ts`'s `leaves an unparseable copy
- * alone`: the previous test's `format` recompiled the copy, that build's reply landed after the next
- * test had typed a broken machine, and the re-seed put the valid text back, so no marker ever came.
+ * the text the server held when it was asked. Applied whatever had been typed since, either would lose
+ * the typing — and then, for a copy, the pending debounce would post the older text back as if the user
+ * had written it.
  *
  * **THE RACE IS PLACED, NOT WAITED FOR.** Each test types from INSIDE the app's own `postMessage` to
  * the worker, so the typing lands after the request leaves and before any answer can come back, on
@@ -243,14 +239,9 @@ describe("a copy's build reply", () => {
 /**
  * **A FORMAT TAKES THE PENDING EDIT OFF THE DEBOUNCE, AND FOR THAT ROUND TRIP NO TIMER SAYS THE EDITOR IS
  * NEWER THAN ITS COPY.** The build posted before the edit is still out, and its reply re-seeds with the
- * text before the edit: a TM or an asm copy's record, a λ copy's text as that build carried it. It used to
- * be applied, the format's own answer was then refused as overtaken, and the older text went back as the
- * edit the format owed.
- *
- * Found on the slower CI runner, through `lsp-copy-diagnostics.test.ts`'s `reformats a copy without losing
- * an edit made inside the debounce window`, which waits 400 ms after typing its settled text. The debounce
- * posts that text's build at 300 ms, so a reply more than 100 ms away lands after the test's edit and its
- * `format`. That it did so there is an inference: the race placed here ends on the text that run reported.
+ * text before the edit: a TM or an asm copy's record, a λ copy's text as that build carried it. Were that
+ * reply applied, the format's own answer would then be refused as overtaken, and the older text would go
+ * back as the edit the format owed.
  *
  * **THE `formatting` REQUEST IS KEPT BACK UNTIL THE BUILD'S REPLY HAS LANDED**, because the two answers
  * come from two workers and nothing else orders them. Answered first, the format posts a newer build and

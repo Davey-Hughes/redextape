@@ -65,7 +65,7 @@ describe('the pre-paint script', () => {
     expect(run({ [PALETTE_CSS_KEY]: css }).get('style')).toBe(css)
   })
 
-  it('still applies a stored appearance', () => {
+  it('applies a stored appearance', () => {
     expect(run({ [STORAGE_KEY]: 'dark' }).get('data-theme')).toBe('dark')
   })
 
@@ -138,7 +138,7 @@ describe('the pre-paint script', () => {
 /**
  * **THE BUILD INLINES IT, NOT ONLY THE FUNCTION**: each page run through the configured server — `vite.config.ts` as
  * the dev server and the build load it — comes out with the script in place of its slot. Without this, deleting the
- * plugin from the config left every case above green while every page shipped without the script.
+ * plugin from the config would leave every case above green while every page shipped without the script.
  */
 describe('the build', () => {
   let server: ViteDevServer

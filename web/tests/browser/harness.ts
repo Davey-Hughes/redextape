@@ -10,21 +10,19 @@ import { PREPAINT } from '../../src/prepaint'
 import { defaultWorkspace, parseWorkspace, serializeWorkspace, type Workspace } from '../../src/workspace'
 
 /**
- * Shared browser-tier fixtures: the app shell every test file mounts into, and the poll helper every test
- * file waits on; for the tests of what a reload draws first, the page's own pre-paint script, the palette
- * picked from the settings menu, and a colour as `getComputedStyle` writes it; and the other helpers the
- * test files share. The shell and the poll helper were duplicated — `SHELL` 29 times, `until` 23 times in 7
- * different bodies — the reload's helpers twice, and `rgb` four times, until this file replaced them.
+ * Shared browser-tier fixtures: the app shell the test files mount into, and the poll helper they wait on; for
+ * the tests of what a reload draws first, the page's own pre-paint script, the palette picked from the settings
+ * menu, and a colour as `getComputedStyle` writes it; and the other helpers the test files share.
  *
- * **WHY THIS DOES NOT BREAK THE DIRECTORY'S STANDING IDIOM.** Files in this directory have long carried
- * a comment saying that each browser test file gets its own page — `main()` runs once per module load
- * and Vitest gives each test file its own page — and concluding from it that duplicating a mount
- * helper is right, because "a shared mount would be a shared page two files could not both own". The
- * premise is a fact about the test runner and it holds; the conclusion is about a MOUNT. `SHELL` is an
- * inert template string and `until` closes over nothing, so importing either into two files shares no
- * page, no state and no mount. `setup.ts` already demonstrates a shared non-test module being loaded
- * once per page without sharing anything across pages. `mountApp` deliberately stays per-file: four
- * files declare one, all four bodies differ, and each owns its own page.
+ * **WHY THIS DOES NOT BREAK THE DIRECTORY'S STANDING IDIOM.** Files in this directory carry a comment
+ * saying that each browser test file gets its own page — `main()` runs once per module load and Vitest
+ * gives each test file its own page — and concluding from it that duplicating a mount helper is right,
+ * because "a shared mount would be a shared page two files could not both own". The premise is a fact
+ * about the test runner and it holds; the conclusion is about a MOUNT. `SHELL` is an inert template
+ * string and `until` closes over nothing, so importing either into two files shares no page, no state
+ * and no mount. `setup.ts` already demonstrates a shared non-test module being loaded once per page
+ * without sharing anything across pages. `mountApp` deliberately stays per-file: four files declare one,
+ * all four bodies differ, and each owns its own page.
  *
  * This file is not collected as a test — the browser project's `include` covers only files whose names
  * end in `.test.ts`, and this one does not.
@@ -107,53 +105,38 @@ const sourceOf = (predicate: () => boolean): string => {
 /**
  * Poll `predicate` until it holds, or throw naming what never happened.
  *
- * **THE PREDICATE IS EVALUATED BEFORE THE FIRST SLEEP**, so `until(() => true)` waits for nothing. Every
- * one of the seven bodies this replaced had that property and several call sites rely on it.
+ * **THE PREDICATE IS EVALUATED BEFORE THE FIRST SLEEP**, so `until(() => true)` waits for nothing.
+ * Several call sites rely on it.
  *
  * **AND AFTER EVERY SLEEP IT IS EVALUATED BEFORE THE DEADLINE IS CHECKED**, so a state that arrived during a
  * sleep resolves the wait even when that sleep ended past `timeoutMs`. A page whose main thread is held runs
- * no timer, and the first poll after it can come seconds past the deadline: at `CPUQuota=25%`, while `History`
- * moved every frame it kept at each eviction, *keep recording* in `readout-history-full.test.ts` and
- * `readout-history-held.test.ts` each ran one wait for 10.8 to 13.5 s, its last poll after a gap of 7.2 to
- * 12.9 s, and both passed because the recording had stopped by that poll. Checked the other way round, they
- * would have thrown on a state that had arrived. Those two waits took 991 to 2,204 ms there once it stopped,
- * in three interleaved runs each (each file's own comment). The first of `tm-scratch-fork.test.ts`'s two waits for
- * the source run after a fork passed on this order too, at 7,106 to 11,407 ms in three runs at `CPUQuota=25%` and
- * load averages of 11.60 to 56.53 (2026-10-06). On a quiet machine it fits: at that quota it took 4,405 to 4,902 ms
- * in three runs at load averages of 1.52 to 1.68, and 1,001 to 2,399 ms in three taken in turn with them, at 1.38 to
- * 2.13, once a TM frame's tapes crossed from the worker as one string each (2026-10-07; that file's comment). Whether it still passes
- * on this order under load was not measured. `tests/node/harness.test.ts` holds the order.
+ * no timer, and the first poll after it can come seconds past the deadline. Checked the other way round, such
+ * a wait would throw on a state that had arrived. `tests/node/harness.test.ts` holds the order.
  *
  * **THE DEFAULT IS BOUNDED BELOW VITEST'S OWN, WHICH IS THE ENTIRE REASON IT IS ONE NUMBER.** Browser
  * mode raises `testTimeout` to 15,000 ms and `hookTimeout` to 30,000 — both measured against this
  * project's own config, which sets neither — so a wait bounded at or above the harness's own lets Vitest
- * kill the test first and report `Test timed out in 15000ms.` with no name for what never arrived. Twelve
- * files shipped a default above the bound and eleven call sites shipped `60_000`, none of which could
- * ever fire. 10,000 clears both bounds. **That property is per WAIT, not per test.** Vitest's bound
- * covers a test as a whole, so one wait can reach this ceiling and still print its own name while two
- * in the same test cannot. This paragraph once added that no wait in this tier exceeded 2,000 ms. On
- * 2026-09-19 an unconstrained run of the whole tier, with every wait's time logged, put the slowest at
- * 2,227 ms: a spinner's first recording in `tm-reduced-buffer.test.ts`, whose supersession test waited
- * on three recordings in one body, and on the slower of the two CI runners Vitest's cap fired in that
- * test with no name, twice. That file now gives each such wait a hook or a body of its own.
+ * kill the test first and report `Test timed out in 15000ms.` with no name for what never arrived. 10,000
+ * clears both bounds. **That property is per WAIT, not per test.** Vitest's bound covers a test as a whole,
+ * so one wait can reach this ceiling and still print its own name while two in the same test cannot.
  *
  * **DO NOT PASS `timeoutMs` FROM A CALL SITE.** `tests/node/browser-timeout-invariants.test.ts` fails if
  * any call site under `tests/browser/` passes a numeric timeout. A wait that genuinely needs longer is a
  * reason to change this default and say why in the commit, not to add a number nothing re-checks.
  *
  * **THE REAL CEILING IS `timeoutMs + pollMs`, NOT `timeoutMs` ALONE**, because the throw only fires once
- * a sleep returns and finds the predicate still false. At today's defaults that is 10,000 + 20 = 10,020
- * ms, comfortably under both vitest bounds — but the gate above reads only `timeoutMs`; nothing checks
- * `pollMs`. A future `pollMs` raised high enough reintroduces the exact defect this file exists to close,
- * with the gate reporting green throughout, because it was never asked about the parameter that moved.
+ * a sleep returns and finds the predicate still false. At the defaults that is 10,000 + 20 = 10,020 ms,
+ * comfortably under both vitest bounds — but the gate above reads only the `timeoutMs` default; nothing
+ * checks the `pollMs` default. A future `pollMs` raised high enough reintroduces the exact defect the
+ * bound above closes, with the gate reporting green throughout, because it was never asked about the
+ * parameter that moved.
  *
  * **`pollMs` EXISTS FOR THE NODE-TIER UNIT TESTS IN `tests/node/harness.test.ts`, AND MUST NOT BE PASSED
  * FROM THE BROWSER TIER.** Shortening the poll interval there is what lets a unit test built around a
  * fake predicate finish in milliseconds instead of waiting out a real one; no file under `tests/browser/`
  * has a reason to pass it. The gate's own boundary does not distinguish which parameter a call site's
- * argument lands in, so a browser call passing only `pollMs` numerically is still rejected — with a
- * message reading "passes a numeric timeout", which is true of the ceiling this file protects and not of
- * which of the two parameters actually carried the number.
+ * argument lands in, so a browser call passing only `pollMs` numerically is still rejected, and its
+ * failure names the number it found, not which of the two parameters carried it.
  */
 export async function until(predicate: () => boolean, what?: string, timeoutMs = 10_000, pollMs = 20): Promise<void> {
   const started = performance.now()
@@ -182,22 +165,21 @@ export type Walk = {
   readonly step: () => number
 }
 
-/** The clicks the last part of a walk may make before it waits: the bound the walks had as one loop. */
+/** The clicks the last part of a walk may make before it waits. */
 const WALK_BOUND = 20_000
 
 /**
  * **A LONG WALK IN PARTS, EACH TO BE A HOOK OF ITS OWN.** A walk of many clicks is as slow as the machine it runs on:
- * each click is a step and a whole redraw, synchronously, and nothing in a test can make it faster. As one hook, the
- * 1,732 clicks from step 0 into `cmpeq` that three files make ran past Vitest's 30 s on the slower CI runner, in two of
- * the three files in one run (2026-10-06); the same runner had passed both 48 minutes before, the files at 60 s and
- * 31 s. A hook's cap is its own, so the walk is cut into parts and each part is registered as a hook: `for (const part
- * of walkInParts(...)) beforeAll(part)`. Hooks of one suite run in the order they are registered, one after another.
+ * each click is a step and a whole redraw, synchronously, and nothing in a test can make it faster. As one hook, such a
+ * walk can run past Vitest's 30 s on the slower CI runner. A hook's cap is its own, so the walk is cut into parts and
+ * each part is registered as a hook: `for (const part of walkInParts(...)) beforeAll(part)`. Hooks of one suite run in
+ * the order they are registered, one after another.
  *
  * **EACH PART CLICKS UP TO ITS SHARE, OR UNTIL THE WALK HAS ARRIVED, AND THEN CHECKS ITS OWN WORK**: the page's step
  * count has moved by exactly the clicks it made, and it made some unless the walk had arrived. A part whose clicks did
  * nothing fails there, by its number and with its figures, and not as a later hook's timeout. `shares` gives the clicks
- * of every part but the last; the last walks until the walk has arrived, to the bound the walks had as one loop, and
- * then waits for it as they did (`until`), so the machine ends where it did.
+ * of every part but the last; the last walks until the walk has arrived, to `WALK_BOUND` clicks, and then waits for
+ * it (`until`).
  */
 export function walkInParts(walk: Walk, shares: readonly number[]): (() => Promise<void>)[] {
   const parts = shares.length + 1
@@ -221,10 +203,9 @@ export function walkInParts(walk: Walk, shares: readonly number[]): (() => Promi
 }
 
 /**
- * A walk of a TM view by its own controls, as `state-diagram.test.ts`, `state-diagram-local.test.ts` and
- * `tm-pointer.test.ts` each read them: ▶ and ↺ among the view's `.controls` by their text, the state's name at the
- * start of its status line, and the step in its strip's `step N of M`. The walk ends at the first state whose status
- * matches `arrived`; `restart` starts it from ↺, the oldest kept step.
+ * A walk of a TM view by its own controls: ▶ and ↺ among the view's `.controls` by their text, the state's name at
+ * the start of its status line, and the step in its strip's `step N of M`. The walk ends at the first state whose
+ * status matches `arrived`; `restart` starts it from ↺, the oldest kept step.
  */
 export function tmWalk(pane: () => HTMLElement, arrived: RegExp, to: string, restart = false): Walk {
   const control = (label: string) =>
@@ -247,8 +228,8 @@ export function tmWalk(pane: () => HTMLElement, arrived: RegExp, to: string, res
 
 /**
  * **`fact(3)` FROM STEP 0 INTO `cmpeq`, IN THREE PARTS**: 1,732 steps forward to the first step inside `cmpeq`, the
- * first instruction whose gadget has named sub-steps, where stepping back from the frontier took about 9,000. The
- * first two parts click 578 times each and the third the 576 left.
+ * first instruction whose gadget has named sub-steps, where stepping back from the frontier would take about 9,000.
+ * The first two parts click 578 times each and the third the 576 left.
  */
 export const intoCmpeq = (pane: () => HTMLElement): (() => Promise<void>)[] =>
   walkInParts(tmWalk(pane, /^cmp/, 'inside cmpeq', true), [578, 578])
@@ -399,10 +380,9 @@ export const chooseStyle = (value: string): Promise<void> => chooseSetting('#sty
  * The host of the view `leaf`, or `null` where the page shows none.
  *
  * **NEVER ITS STAGE TAB.** A tab carries its view's `data-leaf` and comes before every host in the document, so on
- * the Stage a selector without `:not([role="tab"])` answers the tab, for the view that is shown as for the others
- * (read off the page, 2026-10-12): six of the files the view layouts added spelled it without, three as `host` and
- * three inside a `box`. None of them enters the Stage, so none read a tab; they use this now. A tab contains no
- * controls, so a `contains(document.activeElement)` against it reads false no matter where the focus is.
+ * the Stage a selector without `:not([role="tab"])` answers the tab, for the view that is shown as for the others.
+ * A tab contains no controls, so a `contains(document.activeElement)` against it reads false no matter where the
+ * focus is.
  */
 export const host = (leaf: string): HTMLElement | null =>
   document.querySelector<HTMLElement>(`#views [data-leaf="${leaf}"]:not([role="tab"])`)
@@ -549,13 +529,13 @@ export const tmLeaves = () =>
 export const leafIds = () => [...document.querySelectorAll<HTMLElement>('[data-leaf]')].map((e) => e.dataset.leaf ?? '')
 
 /**
- * The ids of every λ pane — by `data-kind`, NOT by an `id` prefix. `nextLeafId` now mints `pane-${n}`
+ * The ids of every λ pane — by `data-kind`, NOT by an `id` prefix. `nextLeafId` mints `pane-${n}`
  * regardless of which leg the split came from (`main.ts`'s own doc on `nextLeafId`: a pane can change
  * which leg it renders, so an id like `lambda-3` would describe something the pane is not), so
- * `dataset.kind` is the only truthful statement of what a leaf renders left to select on. This matters
- * MORE in `layout-restore.test.ts` than in its siblings: its `STORED` deliberately seeds a leaf spelled the OLD way
- * (`lambda-1`), so an id-prefix filter would still find it by luck while silently missing a freshly
- * split leaf spelled the new way (`pane-N`) — the exact mismatch that file exists to restore correctly.
+ * `dataset.kind` is the truthful statement of what a leaf renders. This matters MORE in
+ * `layout-restore.test.ts` than in its siblings: its `STORED` deliberately seeds a leaf spelled `lambda-1`,
+ * so an id-prefix filter would find it by luck while silently missing a freshly split leaf spelled `pane-N`
+ * — the exact mismatch that file exists to restore correctly.
  */
 export const lambdaLeaves = () =>
   [...document.querySelectorAll<HTMLElement>('[data-kind="lambda"]')].map((e) => e.dataset.leaf ?? '')
@@ -654,11 +634,11 @@ const BUDGET_HALF = 37_000
 
 /**
  * **THE CALLERS' `BUDGET_SRC`'S TM HISTORY FILLING, IN THREE WAITS: THE TM LEG STARTING TO RECORD, ITS HISTORY HALF FULL, THEN THE
- * FILL.** As one wait it took 7,504 and 8,590 ms at `CPUQuota=25%` (2026-10-05), against `until`'s 10 s; as two, the
- * second took up to 6,900 ms. The TM leg records last, after λ and asm, and its step line reads `…` from its first
- * frames until it stops, and counts them. Called right after a dispatch, which withdraws the stop before and drops the
- * line's `…` (`compile.ts`'s `schedule`, `controls.ts`): the first two assertions hold both, so no wait can pass on the
- * run before, and the third holds that the line the second wait counts is this run's.
+ * FILL.** As one wait it took up to 8,590 ms at `CPUQuota=25%`, against `until`'s 10 s, and as two the second took up
+ * to 6,900 ms. The TM leg records last, after λ and asm, and its step line reads `…` from its first frames until it
+ * stops, and counts them. Called right after a dispatch, which withdraws the stop before and drops the line's `…`
+ * (`compile.ts`'s `schedule`, `controls.ts`): the first two assertions hold both, so no wait can pass on the run
+ * before, and the third holds that the line the second wait counts is this run's.
  */
 export async function historyFills(): Promise<void> {
   expect(tmStepText(), 'precondition: the stop before is withdrawn').not.toContain('history is full')
@@ -728,7 +708,7 @@ export async function mountAt(width: number, height: number): Promise<void> {
 
 /**
  * The notice line's words, without the label of the action beside them: `#notice`'s own text ends in `undo` where the
- * notice offers one, which is what one file read.
+ * notice offers one.
  */
 export const notice = (): string => (document.querySelector('#notice .notice-text')?.textContent ?? '').trim()
 
@@ -747,7 +727,7 @@ export const noticeElText = () => noticeEl().querySelector('.notice-text')?.text
 /** What the notice line says, or `''` while it says nothing: unlike `notice`, not trimmed. */
 export const noticeText = () => document.querySelector('#notice .notice-text')?.textContent ?? ''
 
-/** The notice line's text — where a refusal is said since Plan 7 part 2 (spec §11) — or `''` while it is hidden. */
+/** The notice line's text — where a refusal is said (Plan 7 part 2 spec §11) — or `''` while it is hidden. */
 export const shownNoticeText = () => {
   const notice = document.querySelector<HTMLElement>('#notice')
   return notice === null || notice.hidden ? '' : (notice.querySelector('.notice-text')?.textContent ?? '')
@@ -790,7 +770,7 @@ export function linkAt(v: EditorView, pos: number): void {
   v.contentDOM.dispatchEvent(new KeyboardEvent('keydown', { key: "'", ctrlKey: true, cancelable: true }))
 }
 
-/** Replace `v`'s text and wait past the edit debounce, which is what posts `didChange`. */
+/** Replace `v`'s text. */
 export function retype(v: EditorView, text: string): void {
   v.dispatch({ changes: { from: 0, to: v.state.doc.length, insert: text } })
 }
@@ -830,10 +810,10 @@ export const PREFIX = '{Control>}.{/Control}'
  * (another view of this), `'source'`, or a `bindingKey(leg, session)`.
  *
  * **THE MENU IS REACHED THROUGH THE INVOKER'S `aria-controls`, NOT THROUGH `[data-leaf] .view-menu`.**
- * A view has ONE menu now, where a pane used to carry a picker per split control, so the scoped query
- * would find the right element too — but `aria-controls` is the relationship `view-header.ts`'s `viewMenu`
- * builds `⋯` for, and going through it means a header that ever stopped naming its own menu fails this helper
- * loudly (the `item == null` throw below) instead of every split here quietly turning into a no-op.
+ * A view has ONE menu, so the scoped query would find the right element too — but `aria-controls` is the
+ * relationship `view-header.ts`'s `viewMenu` builds `⋯` for, and going through it means a header that ever
+ * stopped naming its own menu fails this helper loudly (the `item == null` throw below) instead of every split
+ * here quietly turning into a no-op.
  *
  * IT THROWS WHEN THE ENTRY IS ABSENT, NAMING WHAT WAS ON OFFER. `find(...)?.click()` on a missing item is
  * a silent no-op, and every assertion after it would then describe a page nothing happened on — the same
@@ -858,32 +838,20 @@ export function splitVia(leaf: string, dir: 'row' | 'column', pick: string): voi
 }
 
 /**
- * Split `leaf` through `control` into a second pane of the same kind on the same session — the gesture
- * every test in `two-lambda-panes.test.ts` reached with a single `btn(leaf, 'split …')?.click()`.
+ * Split `leaf` into a second pane of the same kind on the same session.
  *
- * **A SPLIT IS TWO CLICKS NOW, AND THE FIRST MENU ENTRY IS WHY IT IS STILL ONE GESTURE.** The control
- * opens a picker (`view-header.ts`'s `viewMenu`), whose first item is the pane's own `(leg, session)`
- * pair labelled "another view of this" — put there precisely so the case that WAS the whole gesture stays one click
- * away. That is what keeps every test that calls it testing what it always tested: the same pane, duplicated,
- * on the same session, which is how `two-lambda-panes.test.ts` reaches two λ panes on one scratch without a rebind.
- *
- * THE MENU IS REACHED THROUGH `aria-controls`, AND THE LABEL IS CHECKED. A pane has two pickers and each
- * keeps the entries it was last opened with, so `[data-leaf] .view-menu button` could click an item in
- * a popover that is not open; and a missing entry clicked through `?.` is a silent no-op that would
- * leave every assertion after it describing a page nothing happened on.
+ * **THE PICK IS THE PANE'S OWN PAIR**, the item `view-header.ts`'s `viewMenu` labels "another view of this": the
+ * same pane, duplicated, on the same session, which is how `two-lambda-panes.test.ts` reaches two λ panes on one
+ * scratch without a rebind.
  */
 export const splitSame = (leaf: string, dir: 'row' | 'column'): void => splitVia(leaf, dir, 'same')
 
 /**
- * Split `leaf` into a second pane of the same kind on the same session — the gesture every test in
- * `layout-app.test.ts` used to reach with one click on the control its `splitRowOn` finds.
+ * Split `leaf` into a second pane of the same kind on the same session.
  *
- * **A SPLIT IS TWO CLICKS NOW, AND THE FIRST ENTRY IS WHY IT IS STILL ONE GESTURE.** The control opens a
- * picker (`view-header.ts`'s `viewMenu`), whose first item is the pane's own `(leg, session)` pair
- * labelled "another view of this" — put there precisely so the case that WAS the whole gesture stays one click away.
- * The label is checked rather than assumed: `find(...)?.click()` on a missing entry is a silent no-op,
- * and taking the first item of a menu that had reordered would quietly make every test that calls it a test of a
- * different split. `pane-picker.test.ts` is where the other entries are exercised.
+ * **THE PICK IS THE PANE'S OWN PAIR, FOUND BY ITS `data-same` RATHER THAN BY POSITION**: `find(...)?.click()` on a
+ * missing entry is a silent no-op, and taking the first item of a menu that had reordered would quietly make every
+ * test that calls it a test of a different split. `pane-picker.test.ts` is where the other entries are exercised.
  */
 export const splitRow = (leaf: string): void => splitVia(leaf, 'row', 'same')
 
@@ -954,9 +922,8 @@ export const frame = (): Promise<void> => new Promise((r) => requestAnimationFra
 
 /**
  * The next `scroll` event on `el`, once a listener registered before it, as `VirtualGrid`'s is in its constructor,
- * has run. **AWAITED RATHER THAN COUNTING FRAMES**: a scroll's event came later than two frames when
- * `virtual-grid.test.ts` ran whole, so an assertion after two frames could run before the event it was about, and
- * pass whatever the handler would have done.
+ * has run. **AWAITED RATHER THAN COUNTING FRAMES**: a scroll's event can come later than two frames, so an assertion
+ * after two frames could run before the event it was about, and pass whatever the handler would have done.
  */
 export const scrolled = (el: HTMLElement) =>
   new Promise<void>((r) => el.addEventListener('scroll', () => r(), { once: true }))
@@ -1127,13 +1094,12 @@ export const barButton = (name: string): HTMLButtonElement =>
   stepBar().querySelector<HTMLButtonElement>(`button[aria-label="${name}"]`) as HTMLButtonElement
 
 /**
- * All four views in two rows of two: source and λ over asm and TM. A fresh page built this tree until the view
- * layouts, and most files here were written against it; `layout.ts`'s `defaultLayout()` is the source beside the TM
- * view now. A file that wants four views says so with this, where it used to say `defaultLayout()`.
+ * All four views in two rows of two: source and λ over asm and TM. `layout.ts`'s `defaultLayout()` is the source
+ * beside the TM view. A file that wants four views says so with this.
  *
- * **SPELLED OUT, NOT TAKEN FROM `defaultArrangement`**: all four views' default there is two COLUMNS of two now, with
- * the same views in the same corners, and what these files measure is this tree — its row dividers, its paths, and
- * the order its leaves come in.
+ * **SPELLED OUT, NOT TAKEN FROM `defaultArrangement`**: all four views' default in a wide area is two COLUMNS of two,
+ * with the same views in the same corners, and what these files measure is this tree — its row dividers, its paths,
+ * and the order its leaves come in.
  */
 export const fourViews = (): LayoutNode => ({
   kind: 'split',
@@ -1163,7 +1129,7 @@ export const fourViews = (): LayoutNode => ({
 
 /**
  * The workspace a four-view page stored: `fourViews()`, Explorer, the focus on the λ view, nothing remembered. It is
- * what `defaultWorkspace()` answered until the view layouts, and what `setup.ts` stores for every file.
+ * what `setup.ts` stores for every file.
  */
 export const fourViewWorkspace = (): Workspace => ({
   ...defaultWorkspace('wide'),
@@ -1212,11 +1178,9 @@ export const drawn = (): string => {
  * Put a mounted page back on all four views, each on the program, as `fourViews()` arranges them: *reset preset*,
  * which leaves the source beside the TM view and forgets every other arrangement, then `showFourViews`.
  *
- * **A FIXTURE, NOT A GESTURE UNDER TEST**: files that reset between cases did it with *reset preset* alone while that
- * restored four views. `.click()` and no `userEvent`, as those files' own reset was.
+ * **A FIXTURE, NOT A GESTURE UNDER TEST**: `.click()` and no `userEvent`.
  *
- * **THE PAGE IT LEAVES IS NOT THE ONE *RESET PRESET* ALONE LEFT WHILE THAT GAVE FOUR VIEWS.** What it adds to a
- * reset, each held by `four-views-fixture.test.ts`:
+ * **WHAT IT ADDS TO A RESET**, each held by `four-views-fixture.test.ts`:
  *
  * - Two arrangements remembered in the stored workspace, the two the toggles pass through: the source beside the TM
  *   view, and those two with the λ view. The reset alone remembers none.
@@ -1240,31 +1204,30 @@ export async function resetToFourViews(): Promise<void> {
  * shows its default, and the default of all four in a wide window is two COLUMNS of two (`layout.ts`'s
  * `defaultArrangement`, the user's decision of 2026-10-11); in a tall one it is two rows of two, which is
  * `fourViews()`, the tree these files measure. The arrangement is remembered once it is on screen, so the window's
- * size afterwards does not change it. The toggles are hidden in a window this narrow and `.click()` reaches them
- * all the same.
+ * size afterwards does not change it. The toggles are hidden in a window this narrow and `.click()` reaches them all
+ * the same.
  *
  * **IT THROWS UNLESS THE PAGE ENDS ON `fourViews()`**, naming the arrangement it found, read off the page: a
  * combination visited before shows the arrangement it remembers and not its default, so on a page that remembers one
- * for a combination the toggles pass through, the presses end on some other tree. It asserted the tall window it
- * needs and not what came of it, and a miss went on to the caller as four views in another tree. *Reset preset*
- * first forgets them all, which is what `resetToFourViews` does. **IN STAGE THE PAGE DRAWS NO TREE**, and what is
- * held there is the tabs' order.
+ * for a combination the toggles pass through, the presses end on some other tree. The tall window alone does not
+ * hold that, and a miss would go on to the caller as four views in another tree. *Reset preset* first forgets them
+ * all, which is what `resetToFourViews` does. **IN STAGE THE PAGE DRAWS NO TREE**, and what is held there is the
+ * tabs' order.
  *
  * **NOTHING HERE WAITS AFTER THE SECOND RESIZE, AND NOTHING WAS SEEN TO ARRIVE LATE.** `page.viewport` resolves a
  * frame after the tester's frame is resized (Vitest 4.1.10's `setIframeViewport`), and the app's `ResizeObserver`s
- * and its narrow-window listener had run by then: a probe read the views area's and the rule table's observed sizes,
- * the toggles' `hidden`, the rule table's rows and the term's lines as `resetToFourViews` returned, two frames later
- * and 200 ms after that, and the three readings agreed in 40 rounds of 40, and in 40 of 40 at `CPUQuota=50%`
- * (2026-10-12).
+ * and its narrow-window listener had run by then, in the probe that
+ * `docs/superpowers/notes/2026-10-17-code-history-web-tests.md`'s entry above `showFourViews` gives.
  *
- * **THE FOCUS ENDS IN THE λ VIEW**, on its first control, where *reset preset* put it while λ was the first view of
- * the default: several files' cases start from "the λ view is the focused view", and `+ view` adds beside it.
+ * **THE FOCUS ENDS IN THE λ VIEW**, on its first control: several files' cases start from "the λ view is the focused
+ * view", and `+ view` adds beside it.
  */
 export async function showFourViews(): Promise<void> {
   const { page } = await import('vitest/browser')
   const [width, height] = [window.innerWidth, window.innerHeight]
   // 320 × 1400, NOT THE RUNNER'S 414 × 896: with the inspector stacked under the views, as Debugger and Stage have
-  // it in a narrow window, the views area there is about as wide as it is tall, and the default built was a wide one.
+  // it in a narrow window, the views area there is about as wide as it is tall, and the default built would be a
+  // wide one.
   await page.viewport(320, 1400)
   const area = (document.querySelector('#views') as HTMLElement).getBoundingClientRect()
   if (area.height <= area.width)
@@ -1449,9 +1412,8 @@ export const tmPaneHost = (): HTMLElement => {
 /**
  * Rewrite the start state's rule list to a single unconditional jump to `halt`, and hand back the
  * name that state was edited under — `tm-scratch-fork.test.ts`'s `runs the edited machine` reads it back rather
- * than hard-coding it a second time (Important 3, fix round: the assertion has to name the SAME state
- * this function edited, derived from the SAME text, or a future change to the lowering's naming could
- * silently desynchronize the two).
+ * than hard-coding it a second time: the assertion has to name the SAME state this function edited, derived from
+ * the SAME text, or a future change to the lowering's naming could silently desynchronize the two.
  *
  * **DERIVED FROM THE REAL TEXT, NOT HARD-CODED.** The state names are the lowering's (`pc0`,
  * `wl1s2.s.sk0`, …) and it is free to change them; a machine typed into this file would keep passing
@@ -1459,11 +1421,10 @@ export const tmPaneHost = (): HTMLElement => {
  * directive out of the emitted header and edits the state it names.
  *
  * **`halt` ITSELF IS NOT DERIVED, AND THAT IS SAFE RATHER THAN A SECOND HARD-CODE — `redextape-core`'s
- * `tm/lower_tm.rs`, `tm/build.rs`, `tm/encoding/unary.rs` ALL BUILD THE ACCEPT STATE WITH THE LITERAL
- * `"halt"`.** It is the lowering's own fixed name for the machine's one accept state, not a fact this
- * function reads off the source program the way `start`'s target is — every encoding path in
- * `redextape-core` calls `b.accept("halt")`, and `crates/redextape-core/tests/fixtures/list_1_2.tm`
- * (`state halt: accept`) is a committed instance of exactly that convention.
+ * `tm/lower_tm.rs` BUILDS THE ACCEPT STATE WITH THE LITERAL `"halt"`.** It is the lowering's own fixed name for
+ * the machine's one accept state, not a fact this function reads off the source program the way `start`'s target
+ * is, and `crates/redextape-core/tests/fixtures/list_1_2.tm` (`state halt: accept`) is a committed instance of
+ * exactly that convention.
  */
 export function editedToHaltImmediately(text: string): { text: string; start: string } {
   const start = /^start (\S+)$/m.exec(text)?.[1]
@@ -1487,9 +1448,8 @@ export function editedToHaltImmediately(text: string): { text: string; start: st
 /**
  * Whether the δ-table's rendered rows show `state`'s own header immediately followed by exactly the
  * one rule `editedToHaltImmediately` wrote — the fact worth waiting for and asserting, in place of
- * both the vacuous `/halt/i` this replaces (Important 3: `state halt: accept` is always somewhere in
- * the δ-table, forked or not, edited or not — the reviewer measured this true before the fork and
- * before the edit alike) and plain content quiescence (Important 4: `tm-scratch-fork.test.ts`'s `typeInto` changes
+ * both a vacuous `/halt/i` (`state halt: accept` is always somewhere in the δ-table, forked or not,
+ * edited or not) and plain content quiescence (`tm-scratch-fork.test.ts`'s `typeInto` changes
  * the editor's own text synchronously, well before the 300 ms debounce ever posts a recompile, so a quiescence
  * poll can settle in the gap before the worker answers at all — polling for this fact instead is
  * immune to that race by construction, since it can only become true once the reply that recompiled
@@ -1497,8 +1457,7 @@ export function editedToHaltImmediately(text: string): { text: string; start: st
  *
  * READS THE RENDERED TABLE, NOT THE EDITOR'S OWN TEXT. The editor shows whatever was typed the
  * instant `typeInto` runs, which proves a keystroke reached the document and nothing about whether
- * the worker ever recompiled it — `TmPane.setProgram` is the one thing that can move what this reads,
- * and it runs only from a `tm-scratch-compiled` reply.
+ * the worker ever recompiled it — `TmPane.setProgram` is the one thing that can move what this reads.
  */
 export function startStateGoesToHalt(pane: HTMLElement, start: string): boolean {
   const rows = [...pane.querySelectorAll<HTMLElement>('.state-row')]
@@ -1536,8 +1495,7 @@ export const buffersControl = () => document.querySelector<HTMLButtonElement>('#
 
 /**
  * The popover `bufferList` appends beside `#buffers` — present once `bufferList` has run at all
- * (`main.ts` constructs it unconditionally now, per this task: the button is never withheld), whether or
- * not it is currently open.
+ * (`main.ts` constructs it unconditionally: the button is never withheld), whether or not it is currently open.
  */
 export const buffersMenu = (): HTMLElement => {
   const el = document.querySelector<HTMLElement>('.buffer-list')
@@ -1549,13 +1507,12 @@ export const buffersMenu = (): HTMLElement => {
  * Every row the list currently holds — elements rather than text, since `it('mints a warm TM
  * buffer...')` in `tm-blank-buffer.test.ts` claims only the COUNT.
  *
- * **FORCES THE LIST OPEN FIRST, THE WAY `buffer-restore.test.ts`'s OWN `openList` DOES, AND FOR THE
- * SAME REASON.** `bufferList`'s rows are built on `beforetoggle` — a closed list keeps whatever it last
- * rendered, which can predate a mint that happened while it was shut (`buffer-list.ts`'s own doc: "A
- * closed list has no state to keep fresh"). The *new TM copy* control dismisses the popover before it
- * mints (`buffer-list.ts`'s own click handler, the one gesture in that menu that still does), so every mint leaves
- * the list closed on stale rows; reading it without reopening would answer what the list showed BEFORE
- * the mint, not what it holds now.
+ * **FORCES THE LIST OPEN FIRST, THE WAY `buffer-restore.test.ts`'s OWN `openList` DOES.** `bufferList`'s
+ * rows are built on `beforetoggle` — a closed list keeps whatever it last rendered, which can predate a
+ * mint that happened while it was shut (`buffer-list.ts`'s own doc: "A closed list has no state to keep
+ * fresh"). The *new TM copy* control dismisses the popover before it mints (`buffer-list.ts`'s own click
+ * handler), so every mint leaves the list closed on stale rows; reading it without reopening would answer
+ * what the list showed BEFORE the mint, not what it holds now.
  */
 export const bufferRows = (): HTMLElement[] => {
   const button = buffersButton()

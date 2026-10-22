@@ -29,8 +29,8 @@ export type BodyEvents = {
  *
  * **THE WORDS ARE CSS GENERATED CONTENT, NOT TEXT NODES** (`[data-marks]::before { content: attr(…) }`,
  * visually hidden). Generated content is part of what a screen reader reads, and it is not part of
- * `textContent` — which every reader of `.term` reads. The prototype put them in hidden spans, and every
- * comparison of the λ view's text then depended on which marks were showing at that moment.
+ * `textContent` — which every reader of `.term` reads. In hidden spans, every comparison of the λ view's
+ * text would depend on which marks were showing at that moment.
  */
 const MARKS = {
   'is-next-redex': 'next redex:',
@@ -61,13 +61,13 @@ function tokenClass(tok: Token): string {
  *
  * **OPEN IS THE DISCLOSED NODE'S STATE, NOT THE ROW'S.** An application whose head is too wide writes that
  * head's first line as its own (`codeLines`), so a folded head's `… N nodes` sits on the row of an open
- * application. Read as "any fold on the row", the application showed `▸` and ←/→ were inverted on it.
+ * application. Read as "any fold on the row", the application would show `▸`, with ←/→ inverted on it.
  *
- * **A ROW THE LAYOUT GIVES NO NODE DISCLOSES ITS CHIPS.** A chip is a fold with a label (spec §5.2), and one
- * line either way: closed it is its chip, and opened, a small numeral still fits the row it was on. So such a
- * row discloses the first chip on it that is open, or else the first that is closed — wherever it stands,
- * since numerals and booleans are mostly arguments (`g 2`). Open first, so that with two chips on a row,
- * opening both and folding one never strands the other open.
+ * **A ROW THE LAYOUT GIVES NO NODE DISCLOSES ITS CHIPS.** A chip is a fold with a label (Plan 7 part 4 spec
+ * §5.2), and one line either way: closed it is its chip, and opened, a small numeral still fits the row it was
+ * on. So such a row discloses the first chip on it that is open, or else the first that is closed — wherever
+ * it stands, since numerals and booleans are mostly arguments (`g 2`). Open first, so that with two chips on
+ * a row, opening both and folding one never strands the other open.
  *
  * **A ROW THE LAYOUT GIVES A NODE DISCLOSES THAT NODE,** and the head its application took the row from is
  * not it — a chip, or a λ that broke or is folded (`Line.inner`): the `▸`/`▾` stays the application's.
@@ -93,7 +93,7 @@ function firstClosed(line: Line | undefined): Token | undefined {
  *
  * **A `)` IS NOT A START.** `codeLines` closes a broken node's parenthesis on that node's last row, the one
  * place a node's token lands on a later row than its first; read as a chip there, a leaf row ending a broken
- * chip showed `▾`, said `aria-expanded`, and folded the chip from its closing line.
+ * chip would show `▾`, say `aria-expanded`, and fold the chip from its closing line.
  */
 function chipsOn(tree: Tree, line: Line): { node: number; open: boolean }[] {
   const out: { node: number; open: boolean }[] = []
@@ -106,7 +106,7 @@ function chipsOn(tree: Tree, line: Line): { node: number; open: boolean }[] {
 }
 
 /**
- * A frame's recorded text as today's λ view drew it: token spans, the contractum marked, and the cut.
+ * A frame's recorded text, flat: token spans, the contractum marked, and the cut.
  * What the body shows before a step's tree arrives, and when the tree was refused.
  */
 export function flatText(frame: LambdaState | null, note: string | null): Node[] {
@@ -156,7 +156,7 @@ function measurer(): CanvasRenderingContext2D | null {
 }
 
 /**
- * The λ view's body: a laid-out term, virtualized by line, or a frame's flat text (spec §5).
+ * The λ view's body: a laid-out term, virtualized by line, or a frame's flat text (Plan 7 part 4 spec §5).
  *
  * **ONE ELEMENT, `.term`, IN BOTH MODES.** Every test and every stylesheet rule that reads the λ term
  * reads `.term`; what changes between modes is what is inside it and which role it carries — `tree` for
@@ -175,8 +175,7 @@ export class LambdaBody {
   readonly el: HTMLElement
   /**
    * Told when a re-attach starts or stops having anything to do: while a tree is shown and following it has
-   * stopped. The view's `follow redex` action exists exactly then. Set by the view once it has built that
-   * action, as `ScratchEditor.onEdit` is.
+   * stopped. The view's `follow redex` action exists exactly then. Set by the view once it has built that action.
    */
   onDetached: ((detached: boolean) => void) | null = null
   /** What `onDetached` was last told, so it hears of a change and only of a change. */
@@ -216,14 +215,13 @@ export class LambdaBody {
     this.el.addEventListener('scroll', () => {
       // A SCROLL EVENT ON A BOX WITH NO HEIGHT IS NEVER USER INTENT (`VirtualGrid`'s scroll handler has the rule
       // table's case). A paint's write is reported at the next rendering update, not at once, and a view Stage takes
-      // off the page between the two is sent it where its `scrollTop` reads 0: read as the user's, it detached a view
-      // nobody had touched, which came back at the top with "follow redex" offered. Nobody can scroll a body that is
-      // not on the page, so there is nothing here to honour.
+      // off the page between the two is sent it where its `scrollTop` reads 0: read as the user's, it would detach a
+      // view nobody had touched, which would come back at the top with "follow redex" offered. Nobody can scroll a body
+      // that is not on the page, so there is nothing here to honour.
       if (this.el.clientHeight === 0) return
       // A BOX THAT CHANGED HEIGHT SINCE ITS LAST PAINT MAY HAVE HAD ITS SCROLL CLAMPED, and a window resize reports
-      // that clamp's `scroll` BEFORE the resize observer below runs: measured in the built app, a window grown from
-      // 600 to 1000 px tall clamped a body following a redex at its term's end from 400 to 160, and the clamp read as
-      // the user's scroll detached it. The observer's own `onResize` cannot record a clamp it runs after.
+      // that clamp's `scroll` BEFORE the resize observer below runs; read as the user's scroll, the clamp would detach
+      // a body following a redex at its term's end. The observer's own `onResize` cannot record a clamp it runs after.
       if (this.el.clientHeight !== this.#drawnHeight) this.#follow.onResize(this.el.scrollTop)
       this.#follow.onScroll(this.el.scrollTop)
       this.#paint()
@@ -231,12 +229,13 @@ export class LambdaBody {
     })
     this.el.addEventListener('click', (e) => this.#click(e))
     this.el.addEventListener('keydown', (e) => this.#key(e))
-    // THE BODY'S HEIGHT CHANGES WITH NOTHING THE VIEW DRAWS: `.term` is capped at `60vh`, so the window resizes it, and
-    // a view put back on the page comes back from 0. A body following near the term's end then has its scroll clamped,
-    // and the clamp's `scroll` must not read as the user's: when it comes after this callback, `Follow.onResize` here
-    // records it, and when it comes before — a window resize — the scroll handler's height check does. One following
-    // mid-term has rows to draw that the old window did not reach, and a redex to centre in the new height. The term
-    // map is told too: a box that grew or shrank shows other lines with no `scroll` to say so.
+    // THE BODY'S HEIGHT CHANGES WITH NOTHING THE VIEW DRAWS: `.term` takes the height its λ view has spare, so resizing
+    // the window resizes it, and a view put back on the page comes back from 0. A body following near the term's end
+    // then has its scroll clamped, and the clamp's `scroll` must not read as the user's: when it comes after this
+    // callback, `Follow.onResize` here records it, and when it comes before — a window resize — the scroll handler's
+    // height check does. One following mid-term has rows to draw that the old window did not reach, and a redex to
+    // centre in the new height. The term map is told too: a box that grew or shrank shows other lines with no `scroll`
+    // to say so.
     new ResizeObserver(() => {
       this.#follow.onResize(this.el.scrollTop)
       this.#paint()
@@ -248,7 +247,7 @@ export class LambdaBody {
    * Characters that fit one line at the body's current width — the layout's `width`.
    *
    * **MEASURED ON A CANVAS, NOT WITH A SPAN IN THE BODY.** A measuring span is text inside `.term`, and
-   * every reader of the λ view reads `.term`'s text; the prototype's span put `0000000000` at the head of
+   * every reader of the λ view reads `.term`'s text; such a span would put `0000000000` at the head of
    * every term it drew.
    */
   columns(): number {
@@ -279,8 +278,8 @@ export class LambdaBody {
 
   /**
    * Scroll so `line` is centred, as a user would — which detaches following, here and not on the scroll's own
-   * event: that comes a frame later, and a tree drawn before it, still following, put the view straight back on
-   * the redex — the keyboard's trap, met by a term map pick and by a pin's first scroll.
+   * event: that comes a frame later, and a tree drawn before it, still following, would put the view straight back
+   * on the redex — the keyboard's trap, met by a term map pick and by a pin's first scroll.
    */
   reveal(line: number): void {
     this.#follow.detach()
@@ -341,7 +340,7 @@ export class LambdaBody {
     this.#tell()
     // THE SPACER GOES, THE BROWSER CLAMPS `scrollTop` AND REPORTS THE CLAMP AS A SCROLL — `#paint`'s trap,
     // met on the way out of a tree. Unrecorded, every flat interlude (a recompile, a refused step, a rebind to
-    // a session with no tree yet) read as the user scrolling away, and the next tree was not followed.
+    // a session with no tree yet) would read as the user scrolling away, and the next tree would not be followed.
     // Recorded rather than ignoring every scroll while no tree is shown, so a user who scrolls a long flat
     // text still takes control as they would of a tree. Reading `scrollTop` forces the layout that clamps.
     if (this.el.scrollTop !== mine) this.#follow.onProgrammaticScroll(this.el.scrollTop)
@@ -378,9 +377,10 @@ export class LambdaBody {
     this.#tell()
     const tree = this.#tree
     if (tree === null) {
-      // FLAT TEXT'S HEIGHT IS RECORDED AS IT STANDS: the browser lays it out, not this paint. Left at the last tree's,
-      // every scroll of flat text of another height read as a clamp, and the user could not take control of it as they
-      // can of a tree. A paint reaches here after any change of the flat text's height, from the resize observer.
+      // FLAT TEXT'S HEIGHT IS RECORDED AS IT STANDS: the browser lays it out, not this paint. Left at the last
+      // tree's, every scroll of flat text of another height would read as a clamp, and the user could not take
+      // control of it as they can of a tree. A paint reaches here after any change of the flat text's height,
+      // from the resize observer.
       this.#drawnHeight = this.el.clientHeight
       return
     }
@@ -395,9 +395,9 @@ export class LambdaBody {
     // replacement below, which records the clamp it sees. The rows of a body that was off the page were last drawn at
     // its top, by the resize observer's paint; `pane-host.ts` then puts the body's scroll back where it was, and a
     // term laid out shorter for the width it returns at clamps that position on the read above. Where the clamp lands
-    // on the redex's own position nothing below writes, so nothing announces it: a body following at 602 px came back
-    // to a Stage tab at 162, the redex's place, and its `scroll` read as the user's. Recorded as a resize's clamp is,
-    // and only when the spacer's height changed, so a scroll of the user's that no paint resized is still theirs.
+    // on the redex's own position nothing below writes, so nothing announces it, and the body's `scroll` would read as
+    // the user's. Recorded as a resize's clamp is, and only when the spacer's height changed, so a scroll of the user's
+    // that no paint resized is still theirs.
     if (resized) this.#follow.onResize(this.el.scrollTop)
     const redex = tree.wire.nextRedex
     if (redex !== null) {
@@ -427,9 +427,9 @@ export class LambdaBody {
     this.#rows.replaceChildren(...rows)
     // A SHRINKING TERM CLAMPS `scrollTop` ONLY ONCE ITS OLD ROWS ARE GONE — they sit absolutely positioned
     // far down and hold the scroll height up until this replacement — AND THE BROWSER REPORTS THE CLAMP AS A
-    // SCROLL. Unrecorded, `Follow` reads it as the user scrolling away and stops following: found in the
-    // prototype when a run's last step, a one-line chip, detached the view, and stepping back then left the
-    // redex below the drawn window. Reading `scrollTop` here forces the layout that applies the clamp.
+    // SCROLL. Unrecorded, `Follow` would read it as the user scrolling away and stop following: a run's last
+    // step, a one-line chip, would detach the view, and stepping back would then leave the redex below the
+    // drawn window. Reading `scrollTop` here forces the layout that applies the clamp.
     if (this.el.scrollTop !== mine) this.#follow.onProgrammaticScroll(this.el.scrollTop)
     if (this.#active >= w.firstIndex && this.#active <= w.lastIndex) {
       this.el.setAttribute('aria-activedescendant', this.#rowId(this.#active))
@@ -551,8 +551,9 @@ export class LambdaBody {
         const first = line?.tokens[0]
         if (first === undefined) return
         e.preventDefault()
-        // ENTER OPENS WHAT → OPENS — "a chip opens on click or Enter, like any fold" (spec §5.2) — and links
-        // from a row with nothing closed on it. It opened only a chip, so a folded row linked instead.
+        // ENTER OPENS WHAT → OPENS — "a chip opens on click or Enter, like any fold" (Plan 7 part 4 spec
+        // §5.2) — and links from a row with nothing closed on it. Were it to open only a chip, a folded row
+        // would link instead.
         const closed = firstClosed(line)
         if (closed !== undefined) this.#on.toggle(closed.node)
         else this.#on.link(first.node)
@@ -566,7 +567,7 @@ export class LambdaBody {
     const top = this.#active * LINE_HEIGHT
     const to = top < this.el.scrollTop ? top : Math.max(this.el.scrollTop, top + LINE_HEIGHT - this.el.clientHeight)
     // A KEY THAT SCROLLS IS THE USER TAKING CONTROL, and `Follow` must hear so before the paint below: its
-    // `scroll` event comes a frame later, and a paint still following put the view back on the redex.
+    // `scroll` event comes a frame later, and a paint still following would put the view back on the redex.
     if (to !== this.el.scrollTop) {
       this.#follow.detach()
       this.el.scrollTop = to

@@ -7,39 +7,33 @@ import { chooseStyle, frames, pressed, queryEl, SHELL, until } from './harness'
  * THE `views` TOGGLES HOLD THEIR PLACE FROM THE FIRST PAINT — the view layouts spec §6. They are `index.html`'s own
  * markup, and `app-header.ts`'s `viewToggles` adopts them.
  *
- * It built them, after the wasm had loaded, in a header already on the page. Measured at 1280 px before that changed
- * (2026-10-12): `+ view`, `copies`, `examples` and `encoding` each moved right by the group's width as it arrived,
- * 147.5 px in Paper, 149.1 in Terminal and 154.0 in Instrument.
+ * Were they built after the wasm loads, in a header already on the page, `+ view`, `copies`, `examples` and `encoding`
+ * would each move right by the group's width as it arrived.
  *
- * **WHAT IS HELD IS THE GROUP AND THE CONTROLS BETWEEN IT AND THE `encoding` SELECT**: where each starts, and how wide
- * the group and each button in it is, in the page's markup alone and again once the app is up. The app presses the
- * toggles of the views it shows, so this also holds a pressed toggle to the size of one that is not.
+ * **WHAT IS HELD IS THE GROUP AND THE FOUR CONTROLS AFTER IT, THE `encoding` SELECT THE LAST**: where each starts,
+ * and how wide the group and each button in it is, in the page's markup alone and again once the app is up. The app
+ * presses the toggles of the views it shows, so this also holds a pressed toggle to the size of one that is not.
  *
- * **NOT HELD: THE REST OF THE HEADER, WHICH `main.ts` STILL FILLS LATE.** The `encoding` select has no options until
- * the wasm lists them, and `#appearance` no label, so `share`, `about` and `settings` move when those arrive, as they
- * did before the toggles existed. In Terminal at 1280 px the filled header was wider than the window, and `settings`
- * went to a second row then (46 px to 91); `style.css` halves Terminal's column gap up to 85rem since, and there the
- * header is 46 px in the markup alone and with the app up (measured 2026-10-12; `terminal-header-gap.test.ts` holds
- * the gap).
+ * **NOT HELD: THE REST OF THE HEADER, WHICH `main.ts` FILLS LATE.** The `encoding` select has no options until the wasm
+ * lists them, and `#appearance` no label, so `share`, `about` and `settings` move when those arrive. In Terminal at
+ * 1280 px the filled header keeps to one row because `style.css` halves Terminal's column gap up to 85rem
+ * (`terminal-header-gap.test.ts` holds the gap).
  *
  * **IN A WINDOW 40rem WIDE OR NARROWER THE GROUP IS NOT DRAWN, BEFORE THE APP IS UP AS AFTER.** `main.ts` hides it
- * there with an attribute, which is not set until it runs; `style.css` has a media rule for the paint before that.
- * Measured at 390 px without the rule: a header of 181 px that became 136. **WHAT IS HELD THERE IS WHAT KEEPS THE
+ * there with an attribute, which is not set until it runs; `style.css` has a media rule for the paint before that,
+ * without which the header at 390 px would shrink when the attribute is set. **WHAT IS HELD THERE IS WHAT KEEPS THE
  * GROUP OFF THE PAGE**: its computed `display` with no attribute set, before the app is up, and the attribute after.
- * **NOT THE HEADER'S HEIGHT AT 390 px**, which this compared before the app was up and after, in Instrument, where
- * the two agree: `main.ts` fills `encoding` and `#appearance` there as at any width, and the header is 136 px in each
- * style in the markup alone and, with the app up, 136 in Paper and Instrument and 181 in Terminal (measured
- * 2026-10-12).
+ * **NOT THE HEADER'S HEIGHT AT 390 px**: `main.ts` fills `encoding` and `#appearance` there as at any width, and with
+ * the app up Terminal's header is taller than in the markup alone.
  *
- * The page's markup is `SHELL`, which `tests/node/harness.test.ts` holds to `index.html`. **ONE MOUNT, SO EVERY
- * READING OF THE MARKUP ALONE IS TAKEN BEFORE IT, IN A HOOK OF ITS OWN**, and the cases that assert on one read what
- * the hook kept. The mount is the hook after it, as its siblings' is, so the wasm load and the first compile have a
- * hook's time and each case has only its own reading to make: this was one case under a case's cap, and took 6.2 s
- * of it at `CPUQuota=25%` (2026-10-12).
+ * The page's markup is `SHELL`, which `tests/node/harness.test.ts` holds to `index.html`. **ONE MOUNT, SO EVERY READING
+ * OF THE MARKUP ALONE IS TAKEN BEFORE IT, IN A HOOK OF ITS OWN**, and the cases that assert on one read what the hook
+ * kept. The mount is the hook after it, so the wasm load and the first compile have a hook's time and each case has
+ * only its own reading to make.
  */
 
 const tenth = (n: number): number => Math.round(n * 10) / 10
-/** Where the group and the three controls after it start, and how wide the group and each of its buttons is. */
+/** Where the group and the four controls after it start, and how wide the group and each of its buttons is. */
 const places = (): Record<string, number | number[]> => ({
   group: tenth(queryEl('#views-shown').getBoundingClientRect().left),
   groupWidth: tenth(queryEl('#views-shown').getBoundingClientRect().width),

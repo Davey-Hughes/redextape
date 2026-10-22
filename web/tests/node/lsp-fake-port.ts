@@ -6,10 +6,8 @@ import type { LspDiagnostic, LspOutgoing, LspReplyMessage, LspRequestMessage } f
  * real worker.
  *
  * **EXTRACTED RATHER THAN DUPLICATED.** `lsp-client.test.ts` owns the lifecycle, correlation and
- * restart rules and needed this harness first; `lsp-hover.test.ts` needs the identical harness for
- * one more method, and a second `FakePort` would drift from the first the moment either one grew a
- * case the other didn't. `tests/browser/harness.ts` sets the precedent for pulling a fixture out of
- * its first test file once a second one needs it.
+ * restart rules; `lsp-hover.test.ts` needs the identical harness for one more method, and a second
+ * `FakePort` would drift from the first the moment either one grew a case the other didn't.
  *
  * **NOT COLLECTED AS A TEST** — the node project's `include` in `vite.config.ts` covers only files
  * whose names end in `.test.ts`, and this one does not.
