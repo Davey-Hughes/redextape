@@ -56,6 +56,7 @@ import { createEditorCustody } from './editor-custody'
 import { KeymapSetting, keymapSlot } from './editor-keymap'
 import { KEYMAP_LABEL, KEYMAP_MODES, parseKeymapMode, readFormatOnBlur, writeFormatOnBlur } from './editor-prefs'
 import { EXAMPLE_ENCODING, EXAMPLES, type Example, FIRST_LOAD } from './examples'
+import { createFocusDraw } from './focus-draw'
 import { handOff, nearest } from './focus-handoff'
 import { declineMark, focusMark, linkMark } from './highlight'
 import { History } from './history'
@@ -1082,14 +1083,20 @@ async function main(): Promise<EditorView> {
   })
   const sourceLayout = { update: (canClose: boolean, canSplit: boolean) => sourceMenu.setLayout(canClose, canSplit) }
   sourceHost.append(sourceHeader.el, editorHost)
+  /**
+   * THE PAGE'S ONE PRESS STATE, AND THE DRAW EVERY VIEW'S `focusin` MAKES THROUGH IT: at once, or once a pointer press
+   * in progress has ended (`focus-draw.ts`). The source view's listener below and `pane-host.ts`'s `hostFor` share
+   * this one, so a press that moves the focus between them is the same press to both.
+   */
+  const focusDraw = createFocusDraw(() => draw())
   // THE SOURCE VIEW CAN HOLD THE FOCUS TOO (spec §3: `focused` is any leaf) — it drives the readout. Not
   // `markActive`: that one is per leg, and the source view is on neither (`hostFor`'s own comment in
-  // `pane-host.ts` has the argument).
+  // `pane-host.ts` has the argument, and the one for drawing through `focusDraw`).
   sourceHost.addEventListener('focusin', () => {
     if (ws.focused === SOURCE_LEAF) return
     ws = { ...ws, focused: SOURCE_LEAF }
     persistWorkspace()
-    draw()
+    focusDraw()
   })
 
   // `localStorage` ACCESS IS GUARDED, same reason and same shape as `readAppearanceStorage`/
@@ -1468,6 +1475,7 @@ async function main(): Promise<EditorView> {
     layoutChanged,
     refused,
     draw: () => draw(),
+    focusDraw,
     // THE SESSION QUESTIONS `pane-host.ts` ASKS OF THE REGISTRY, ANSWERED HERE BECAUSE THIS FILE IS WHERE
     // THE REGISTRY IS — that module's own doc argues why it takes these rather than the registry it would
     // otherwise need. `entryOf` throws for a session nothing registered, which is the policy `legOf`

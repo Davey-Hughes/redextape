@@ -28663,3 +28663,213 @@ ring's frames, steps and charge, and every test's outcome read the same; these f
 | exit 0 each; 429; 18 of 18 | biome, typecheck, `test:coverage`, `build:app` and the probe; biome's files; the scans, whose statuses only `gates-4/gates.log` records | `1c8eb75` | `G gates-4/gates.log 'exit\|scans'`; `tail -1 gates-4/{biome,typecheck,coverage,build,probe}.log`; `G gates-4/biome.log Checked` |
 | 280; 2,906; 97.59 / 92.19 / 98.39 / 98.92; 95 / 89 / 97 / 97 | the coverage run: files, tests and figures; its floors | `1c8eb75` | `G gates-4/coverage.log 'Test Files\|Tests \|All files'`; `grep -n thresholds web/vite.config.ts` |
 | 2 of 2; 24; 8 and 6 | the probe run: its tests, the λ cap (b), the TM caps (a) and (b) | `1c8eb75` | `G gates-4/probe.log 'Tests \|derived cap'` |
+
+#### A FOCUS MOVE MADE DURING A POINTER PRESS IS DRAWN ONCE THE PRESS HAS ENDED, AFTER ITS CLICK, SO A FIRST PRESS ON A CONTROL LOW IN ANOTHER VIEW AT A PHONE'S WIDTH LANDS, WHERE THE FRAME THAT FOCUS MOVE DREW MOVED THE CONTROL FROM UNDER THE RELEASE (2026-10-21, branch `tm-maximise-phone`, `349ac8c..55987c6`, 2 commits, plus this entry)
+
+**Part D's entry left the TM view's maximise at Explorer 390×844 open**: CODE-E's probe saw the first press change
+nothing. The app was at fault, and the cause is outside the maximise: any first press that moves the focus into
+another view can be lost at a phone's width, wherever the frame that focus move draws changes the layout above the
+control. CODE-E's probe had pressed the right control with real input and asserted no precondition (at 390×844 its
+button was below the viewport, and Playwright scrolled the pane to it); its state table read 120, 120, 0: the first
+press lost, the second maximised (dispatch 1's reading of its raw log).
+
+##### HOW A FIRST PRESS WAS LOST
+
+- **The press's `mousedown` moves the focus into the view it lands on, and `hostFor`'s `focusin` drew a frame at
+  once**, before the release.
+- **Explorer 390×844.** The strip's readout takes three lines for the program (72.6 px) and two for a TM copy (49.1
+  px). On a press of the copy's outline maximise, the focus left the source view, the strip shrank 72.6 → 49.1 px, and
+  the button moved 633.7 → 657.4 px before the `pointerup`, which landed on `svg.program-gutter`; the `click` went to
+  `div.tm-pane`, the nearest element holding both, and the maximise never ran. The copy's outline disclosure the same:
+  746.7 → 770.4 px. At 1280×900 the strip is 28.6 px either way, the button stays at 733.3 px, and the press lands.
+- **Debugger 390×844.** The inspector stacked under the views shrank 225.3 → 137.6 px on the same focus move, and the
+  copy's maximise moved 454.3 → 498.1 px.
+
+##### THE OPTIONS MEASURED, AND THE USER'S CHOICE
+
+- **A. The strip on one line at every width**: the press lands, and every segment of the readout is cut at 390 px
+  (`λ 1 · 64 reductions` shows 49 of its 152 px).
+- **B. The strip held at its tallest height at narrow widths**: with the height pinned at 72.6 px the press lands; it
+  costs the views 23.5 px whenever the copy holds the focus, and the tallest height depends on the readout and the
+  width, so no fixed value covers every readout.
+- **C. The strip laid over the views' bottom at narrow widths**: the maximise lands, and the strip covers controls:
+  at 390×844 its 72.6 px cover the copy's outline disclosure and maximise. It does not reach the stacked inspector, and
+  17 tests failed, in 2 of 20 files.
+- **D. The focus move's draw waits for the press to end**: on the prototype both first presses landed in Explorer and
+  in Debugger at 390×844, and the readout was drawn 10.9 and 19.2 ms after the press's `pointerdown`, where without it
+  it was drawn mid-press, 7.6 and 6.3 ms after.
+- **E. Leave it**, recorded as a known lost first press.
+
+**The user chose D (2026-10-21), and to ship it with its limit recorded** under WHAT THIS DID NOT CLOSE.
+
+##### WHAT D DOES
+
+- **`focus-draw.ts`'s `createFocusDraw` owns the page's one press state.** `main.ts` builds it once and hands the
+  function it returns to the source view's own `focusin` and to `createPaneHost` as `focusDraw`, which `hostFor`'s
+  `focusin` calls where it called `draw()`. A focus move during a press owes a draw; the press's end queues it as a task
+  of its own (`setTimeout(draw, 0)`), and since the browser fires a release's `pointerup`, `mouseup` and `click` in one
+  task, it runs after the click. A focus move with no press around it draws at once. The mark and the focused leaf are
+  still written at once; only the draw waits.
+- **A press begins at `pointerdown` or `mousedown` and ends at the `pointerup` or `mouseup` after it**, heard on the
+  window, capturing. The mouse pair holds a tap's focus move, which a tap makes at the `mousedown` after its
+  `pointerup`. The pointer pair holds a focus move that code makes while a finger is held down, before the lift brings
+  a tap's `mousedown`, or through a press whose `pointerdown` default is prevented, which no `mousedown` or `mouseup`
+  follows.
+- **Every press ends**: also at `pointercancel`, at `contextmenu` and at the window's own `blur`, where the release may
+  never reach the page; a press left open would leave every later focus move, a keyboard's too, undrawn. Such an early
+  end queues the owed draw there, and a release can still follow it.
+- **A press on a `<select>` begins none**: its list opens at the press, in a popup that can take the release.
+- **`VirtualGrid`'s `mousedown` still takes no focus for a row**, and its comment gives the two reasons left: a press
+  ended early queues the owed draw before the row's release, and the prevented `mousedown` keeps a press from starting
+  a text selection in the rows.
+
+##### THE TESTS AND THE SABOTAGES
+
+`focus-press.test.ts`, 9 cases on one mount at 390×844, with the source view and the TM view's copy
+sharing the bottom row. The 8 cases that press a control in a view first measure their premise (a focus move into the
+control's view with no press draws the control more than half its height away) and assert their precondition (the
+focus in the view the press leaves, the control in the viewport and what its centre hits). The `<select>` case, whose
+press is on the step bar, outside every view, asserts its own, among it that no press is held when it begins: a focus
+move made before its press draws at once. Every press is real input: `userEvent` clicks; CDP's
+`Input.dispatchTouchEvent` for a tap and for a touch the browser cancels; CDP's `Input.dispatchMouseEvent` for a press
+held across the window's loss of the focus, a right press's `contextmenu`, and a press on a `<select>`. Five cases
+press a control in another view (the copy's outline disclosure and maximise in Explorer, the maximise from a tap, the
+maximise in Debugger, and the source view's disclosure from the copy in Debugger); four end a press some other way
+than its release: a cancelled touch, the window's `blur`, a `contextmenu`, and a press on a `<select>`, which begins
+none. `harness.ts` gains `pageCentreOf`, the centre of an element in the top-level page's pixels, where CDP's
+input lands, and `share-open-clamps.test.ts` takes it where it carried its own.
+
+**RED at `fc0a8e7`'s `main.ts`, `pane-host.ts` and `virtual-grid.ts`, with `55987c6`'s test file and `harness.ts`: 6
+of 9 failed**, the five presses on their outcome (`the press maximised the outline: expected false to be true`) and the
+window's `blur` case on its precondition that the press has not drawn its focus move. The cancelled touch, the
+`contextmenu` and the `<select>` cases pass there, where every focus move draws at once; their sabotages below are
+what shows them able to fail.
+
+Sabotages on `fc0a8e7` with this branch's changes to `web/`, each one edit, the whole file run, each restored from a
+copy and compared with it.
+
+| Sabotage | Cases failed | First failure line |
+|---|---|---|
+| `focusDraw` draws at once (no deferral) | 6 of 9 | `the press opened the outline: expected false to be true` |
+| no end at `pointercancel` | 4 of 9 | `the copy’s readout, drawn at the focus move: expected 'program' to be 'copy'` |
+| no end at the window's `blur` | 3 of 9 | `timed out after 10000ms waiting for the copy’s readout, before any release` |
+| no end at `contextmenu` | 2 of 9 | `timed out after 10000ms waiting for the copy’s readout, before any release` |
+| the source view's `focusin` draws at once | 1 of 9 | `the press opened the source view’s outline: expected false to be true` |
+| a press begins at `pointerdown` alone | 1 of 9 | `the tap maximised the outline: expected false to be true` |
+| a press begins at `mousedown` alone | **0 of 9: did not fire** | none |
+| no `<select>` guard | 1 of 9 | `the copy’s readout, drawn at the focus move: expected 'program' to be 'copy'` |
+| the window's `blur` heard from any target | 6 of 9 | `the press opened the outline: expected false to be true` |
+
+**A sabotage that leaves a press open leaves it open for the cases after it**, so some later failures are that stuck
+press: with no end at `pointercancel`, the window's `blur` and `contextmenu` cases failed their premise (`by 0 px`);
+with no end at the window's `blur`, the `contextmenu` case did; and with no end at `pointercancel`, at the window's
+`blur` or at `contextmenu`, the `<select>` case failed its precondition (`precondition: no press held, so a focus move
+draws at once: expected 'program' to be 'copy'`).
+
+**A press begun at `mousedown` alone did not fire**: no case makes a focus move while the pointer pair alone has begun
+a press. That is the pointer pair's case: a focus move that code makes while a finger is held down, or through a press
+whose `pointerdown` default is prevented. No case holds a finger down while code moves the focus.
+
+##### THE REVIEW'S CALLS
+
+The branch's review found nothing critical:
+
+- **`VirtualGrid`'s `mousedown` comment said a focus taken at the press would lose every first click on a row**: that
+  draw is the view's `focusin` draw, which now waits for the press. The `preventDefault` is kept (no behaviour change),
+  and the comment gives the reasons left. A row's click does not depend on `focus-draw.ts` holding a draw, which a
+  press ended early queues before the row's release. And the prevented `mousedown` keeps a press from starting a text
+  selection in the rows, which no rule makes unselectable (in `web/src` only `.term-gutter` has `user-select: none`):
+  on a page of two plain rows, a double press by CDP mouse input selected `theta` with no prevented `mousedown` and
+  nothing with one. A drag by CDP mouse input selected nothing either way, so a drag's selection is not shown.
+- **The window's `blur` listener was registered without capture**, while its check and comment described a capturing
+  one. It is registered capturing, as the other six are, and keeps the check; the last sabotage above shows the check
+  holding the five presses and the window's `blur` case's precondition.
+- **"A press ended early costs only that a focus move later in it draws at once"** left out that an early end queues
+  the owed draw there, and a release can still follow it (after the window's `blur`; with two pointers down, the first
+  release ends the press while the other is still held), and `hostFor`'s comment said the owed draw runs after the
+  release. Both texts now say so.
+- **The pointer pair's doc claimed a current case**; it names the case it holds, a focus move that code makes while a
+  finger is held down.
+- **A press on a `<select>` could stay open**: a press dragged into the speed `<select>`'s popup and released there may
+  send the page no release, and none of the early ends. A press on a `<select>` now begins none, and a case holds such
+  a press with no release and shows a focus move during it drawn at once.
+- **Test text**: the `contextmenu` case names the platforms where a right press fires it before the release (Linux and
+  macOS; on Windows it follows the `mouseup`); the source view's disclosure case, named "with the inspector stacked",
+  asserts the stacking; the file doc lists every press made with CDP mouse input.
+
+##### WHAT THIS DID NOT CLOSE
+
+- **During playback a press can still be lost (the user's decision).** Only the focus move's own draw waits: a playing
+  run's next frame, drawn while the press is held, draws the new focus and moves the control with it.
+- **A press ended early can still be lost the same way**: after the window's `blur`, or with two pointers down, the
+  owed draw is queued at that end, and a release may still follow it.
+- **No case holds a finger down while code moves the focus**, the pointer pair's case, and its sabotage did not fire.
+  Code that moves the focus with no press behind it, `notice.ts` focusing its `leaving()` on a repaint among it, was
+  not checked against a finger's hold.
+- **The `<select>` reasoning is not measured on a real popup.** Headless Chrome's popup is not a desktop's: the case
+  reaches the press's `pointerdown` and `mousedown` on the `<select>`, not where a desktop popup sends the release.
+- **Touch was driven only by CDP's touch events**, not a device.
+- **Only Chromium ran.** WebKit and Firefox did not, and the `contextmenu` order on Windows was not run.
+- **`VirtualGrid`'s `preventDefault` on a row's `mousedown` is kept**, though the draw it was written against now waits
+  for the press in every case but an early end; a row's first click without it was not measured, and the text
+  selection was shown on plain rows, not the grid's.
+
+##### VERIFICATION
+
+Run on 2026-10-21 in the worktree `~/temp/redextape-tm-maximise-phone`, on branch `tm-maximise-phone`; each row of
+the block below says where it ran. `focus-press.test.ts` alone at `CPUQuota=25%`, RED, the sabotages and the
+text-selection probe ran on `fc0a8e7` with this branch's changes to `web/`, logs in the record's `d4/`; the coverage
+gate, `build:app`, `focus-press.test.ts` whole and `share-open-clamps.test.ts` at 25% ran with this branch's code
+commits on `bdd977d` (#148), logs in the record's `d5/`; biome, typecheck and the nine scans ran after the rebase,
+logs in the record's `d6/`. Every figure not run after the rebase was measured before this branch was rebased onto
+`349ac8c`, which brought in only `docs/`, comments in four Rust files and in `web/src/scratch.ts`, and two probe files
+outside the default suite (#148, #149); the rebase left this branch's code commits unchanged by patch-id. The commit
+that adds this entry changes only this file. No Rust file changed (`git diff --stat 349ac8c 55987c6 -- crates
+Cargo.toml Cargo.lock` prints nothing). No image was built here, and nothing has run in CI: the branch has not been
+pushed.
+
+```
+pnpm exec biome ci --error-on-warnings          → exit 0, 431 files                     (after the rebase: d6/biome.log)
+pnpm run typecheck                              → exit 0                                (after the rebase: d6/typecheck.log)
+pnpm run test:coverage                          → exit 0, 281 files / 2,916 tests; 97.59 / 92.21 / 98.39 / 98.92 against 95 / 89 / 97 / 97
+                                                                                        (this branch's code on bdd977d: d5/coverage.log)
+pnpm run build:app                              → exit 0                                (this branch's code on bdd977d: d5/build.log)
+scripts/check-{text-bytes,citations,attributions,doc-figures,shared-docs,colours,grammar-wasm,lua,licences}.sh,
+  --self-test then alone                        → 18 of 18 exit 0                       (after the rebase, at this entry's commit: d6/scans.log)
+focus-press.test.ts whole                       → exit 0, 9 of 9                        (this branch's code on bdd977d: d5/focus-press.log)
+focus-press.test.ts alone, CPUQuota=25%         → 9 of 9; slowest case 3,400 ms         (on fc0a8e7 with this branch's changes to web/: d4/q25-focus-press.log)
+share-open-clamps.test.ts alone, CPUQuota=25%   → exit 0, 3 of 3; slowest case 900 ms   (this branch's code on bdd977d: d5/q25-share.log)
+```
+
+**Every count this entry quotes, with what produces it.** "The record" is
+`~/temp/redextape-lanes-2026-10-21-record/c-tm-maximise/`, and its `d6/verify-counts.sh` prints each row's value from
+the command or log named here; git commands run from the worktree's root. A browser run is `pnpm exec vitest run
+--project browser tests/browser/focus-press.test.ts` from `web/`, under the lanes' lock and a 16G cap. Rows marked
+"findings" are dispatch 1's readings in the record's `findings.md`, not rerun for this entry.
+
+| Value | What | Produced by |
+|---|---|---|
+| 2 | commits in the range | `git rev-list --count 349ac8c..55987c6` |
+| 7 files, +519 −24 | the range | `git diff --shortstat 349ac8c 55987c6` |
+| 9 | cases in `focus-press.test.ts` | `grep -c '^  it(' web/tests/browser/focus-press.test.ts` |
+| 8 | cases that measure their premise | `grep -c 'await aim(' web/tests/browser/focus-press.test.ts` |
+| 72.6 → 49.1 px; 633.7 → 657.4 px; `svg.program-gutter`; `div.tm-pane` | the strip and the copy's outline maximise at Explorer 390×844, at the `pointerdown` and at the `pointerup`; the release's target; the click's | `grep 'PROBE\|390x844\|EVENT' probe3.log` in the record |
+| 746.7 → 770.4 px | the copy's outline disclosure, the same press | `grep 'PROBE\|toggle EVENT' probe3.log` |
+| 28.6 px; 733.3 px | the strip and the maximise at 1280×900, before and after | `grep 'PROBE\|1280x900\|EVENT' probe3.log` |
+| 225.3 → 137.6 px; 454.3 → 498.1 px | the stacked inspector and the copy's maximise, Debugger 390×844 | `grep 'debugger-press' base-probe-debugger.log` |
+| 120, 120, 0 | CODE-E's state table at 390×844: first read, after each press | findings, `## CODE-E's probe` |
+| 49 of 152 px | `λ 1 · 64 reductions` shown with the strip on one line (option A) | `grep 'one-line strip, program focused' probe4.log` |
+| 72.6 px; 23.5 px | the pinned strip with which the press landed (option B); the views' height it costs | findings, the evidence table's pinned row; its mechanism's step 4 (`grep 'grows by' findings.md`) |
+| 72.6 px over the copy's outline disclosure and maximise | option C at 390×844 | `grep 'explorer-390x844\|tm-0' c-probe-cover.log` |
+| 17 tests in 2 of 20 files | failing with option C | `grep -E 'Test Files\|Tests ' c-files.log` |
+| 7.6 and 6.3 ms; 10.9 and 19.2 ms | the readout after the press's `pointerdown`, disclosure and maximise, at `fc0a8e7` and on D's prototype | `grep EVENTS d-probe-base.log d-probe-patched.log` |
+| 6 of 9 | RED | `grep 'Tests ' d4/red/red-base-9.log`: a browser run with `fc0a8e7`'s `main.ts`, `pane-host.ts` and `virtual-grid.ts` put back, then restored from copies and compared |
+| 6, 4, 3, 2, 1, 1, 0, 1, 6 of 9; the first failure lines | the nine sabotages, on `fc0a8e7` with this branch's changes to `web/`, in the table's order | `grep 'Tests ' d4/sab/s{1..9}-*.log`, by `d4/batch1.sh`; the first `AssertionError` or `Error` line of each |
+| the failed cases and their failures, `by 0 px` and `no press held` among them | no end at `pointercancel`, at the window's `blur`, at `contextmenu` | `grep -A1 '^ FAIL ' d4/sab/s{2,3,4}-*.log` |
+| `theta`; nothing; nothing either way | a double press on plain rows without and with a prevented `mousedown`; a drag | `grep PROBE d4/probe-select-2.log`, from the probe `d4/zz-select-probe.test.ts` |
+| 1, on `.term-gutter` | `user-select` rules in `web/src` | `grep -rn 'user-select' web/src` |
+| 9 of 9 | the final file, whole, with this branch's code commits on `bdd977d` | `grep 'Tests ' d5/focus-press.log` |
+| exit 0, 431 files; exit 0; 18 of 18 exit 0 | biome, typecheck and the nine scans, after the rebase | `d6/biome.log`, `d6/typecheck.log`, `d6/scans.log` |
+| 9 of 9; 3,400 ms | `focus-press.test.ts` at 25%, on `fc0a8e7` with this branch's changes to `web/` | `d4/q25-focus-press.log` |
+| 281 / 2,916; 97.59 / 92.21 / 98.39 / 98.92; 3 of 3, 900 ms | the coverage gate, and `share-open-clamps.test.ts` at 25%, with this branch's code commits on `bdd977d` | `d5/coverage.log`, `d5/q25-share.log` |
+| 95 / 89 / 97 / 97 | the coverage floors | `grep thresholds web/vite.config.ts` |

@@ -291,6 +291,11 @@ export function createPaneHost(deps: {
   refused(r: AddRefused): void
   draw(): void
   /**
+   * Draw for a focus move into a view: at once, or once the pointer press in progress has ended (`focus-draw.ts`, whose
+   * one instance `main.ts` also gives the source view's own `focusin`).
+   */
+  focusDraw(): void
+  /**
    * The machine `session` last compiled, or `null` if it has not compiled one — what a freshly built
    * `TmPane` is seeded with in the creation pass below.
    *
@@ -370,6 +375,7 @@ export function createPaneHost(deps: {
     layoutChanged,
     refused,
     draw,
+    focusDraw,
     tmProgramOf,
     tmScratchOf,
     asmProgramOf,
@@ -574,24 +580,34 @@ export function createPaneHost(deps: {
     // free of the DOM: this listener knows only which host fired, and the collection already holds the
     // entry that says which leg that is.
     //
-    // `draw()` IS WHAT REPAINTS THE RUNNING FOCUSES FROM THE NEWLY ACTIVE PANE. It is a full frame for a
+    // THE DRAW IS WHAT REPAINTS THE RUNNING FOCUSES FROM THE NEWLY ACTIVE PANE. It is a full frame for a
     // focus click, which is the same cost every transport click already pays; `active`'s fallback makes
     // the whole listener a no-op in outcome for a leg holding one pane.
     //
-    // **`draw()` CAN MOVE THE FOCUS.** `step-controls.ts`'s `update()` hands the focus on (`focus-handoff.ts`'s
+    // **`focusDraw`, NOT `draw()`: A FOCUS MOVE MADE BY A POINTER PRESS DRAWS ONCE THE PRESS HAS ENDED.** That frame
+    // can change the page's layout, and drawn mid-press it would move the pressed control from under the release
+    // (`focus-draw.ts` has the argument). THE MARK AND THE FOCUSED LEAF ARE WRITTEN AT ONCE, AND ONLY THE DRAW WAITS:
+    // so the owed draw draws the focus as it is when it runs, and a later focus move's write is never overtaken by an
+    // earlier one's.
+    //
+    // **THE DRAW CAN MOVE THE FOCUS.** `step-controls.ts`'s `update()` hands the focus on (`focus-handoff.ts`'s
     // `handOff`), and it runs from `PaneSlot.render` and so from `draw()` itself, so that a control that
     // disappears under the keyboard does not take the focus with it (umbrella rule 5, Plan 7 part 2 spec §11).
     //
-    // **THE RE-ENTRANCY IS BOUNDED, BY THE HANDOFF'S OWN GUARD.** It fires only when `document.activeElement`
-    // is the departing control, in that same view, so the `focusin` it provokes names the leaf the focus was
-    // already on: `markActive` and `setFocused` are both no-ops, and the nested `draw()` terminates at depth 2
-    // because the departing control no longer has the focus and the guard is false on the way back through. A
-    // handoff that moved focus to a DIFFERENT leaf would not have that argument, which is why the guard is the
-    // thing to keep.
+    // **A FOCUS MOVE DURING A PRESS NESTS NO DRAW**: it only owes one, and the owed draw runs from a task of its own
+    // queued at the press's end, its release or an earlier end (`focus-draw.ts`), outside any `focusin`. **A FOCUS MOVE
+    // WITH NO PRESS IN PROGRESS DRAWS INSIDE ITS `focusin`, AND THAT RE-ENTRANCY IS BOUNDED BY THE HANDOFF'S OWN
+    // GUARD.** It fires only when `document.activeElement` is the departing control, in that same view, so the
+    // `focusin` it provokes names the leaf the focus was already on: `markActive` and `setFocused` are both no-ops, and
+    // the nested draw terminates at depth 2 because the departing control no longer has the focus and the guard is
+    // false on the way back through. A handoff that moved focus to a DIFFERENT leaf would not have that argument, which
+    // is why the guard is the thing to keep. **AND EVERY PRESS ENDS**: one that never did would leave every later focus
+    // move owing a draw nothing pays, which is why `focus-draw.ts` also ends a press whose release may never reach the
+    // page.
     el.addEventListener('focusin', () => {
       panes.markActive(id)
       setFocused(id)
-      draw()
+      focusDraw()
     })
     hosts.set(id, el)
     return el

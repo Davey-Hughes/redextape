@@ -3,7 +3,7 @@ import { beforeAll, describe, expect, it } from 'vitest'
 import { cdp, page } from 'vitest/browser'
 import { encodeLink, type Positions } from '../../src/share-link'
 import { serializeWorkspace } from '../../src/workspace'
-import { fourViewWorkspace, liveText, noticeText, SHELL, stateIdle, undoButton, until } from './harness'
+import { fourViewWorkspace, liveText, noticeText, pageCentreOf, SHELL, stateIdle, undoButton, until } from './harness'
 
 /**
  * **AN OPEN'S CLAMPS, AND A REAL PRESS ON ITS `undo` ACROSS ONE** — Plan 7 part 6a spec §5.5, and §5.4's note of
@@ -46,13 +46,6 @@ const LINKED = 'let y = 10; y + 5'
 const link = (positions: Positions, program = LINKED): Promise<string> =>
   encodeLink({ program, encoding: 'unary', workspace: serializeWorkspace(fourViewWorkspace()), positions })
 
-/** The centre of `el` in the top-level page's CSS pixels, where CDP's input lands: the tests run in a scaled frame. */
-function centre(el: HTMLElement): { x: number; y: number } {
-  const frame = (window.frameElement as HTMLElement).getBoundingClientRect()
-  const scale = frame.width / innerWidth
-  const r = el.getBoundingClientRect()
-  return { x: frame.left + (r.left + r.width / 2) * scale, y: frame.top + (r.top + r.height / 2) * scale }
-}
 const mouse = (type: 'mouseMoved' | 'mousePressed' | 'mouseReleased', at: { x: number; y: number }) =>
   cdp().send('Input.dispatchMouseEvent', { type, x: at.x, y: at.y, button: 'left', clickCount: 1 })
 const box = (el: HTMLElement | null) => {
@@ -76,7 +69,7 @@ describe("an open's clamps", () => {
     location.hash = await link({ lambda: 100 })
     await until(() => noticeText() === 'opened a shared link' && held.length === 1, 'the open, its compile held')
     const button = undoButton() as HTMLButtonElement
-    const at = centre(button)
+    const at = pageCentreOf(button)
     const before = box(button)
     const words = (document.querySelector('#notice .notice-text') as HTMLElement).getBoundingClientRect().height
     await mouse('mouseMoved', at)

@@ -264,6 +264,14 @@ export const centreOf = (el: Element): number => {
   return (box.top + box.bottom) / 2
 }
 
+/** The centre of `el` in the top-level page's CSS pixels, where CDP's input lands: the tests run in a scaled frame. */
+export function pageCentreOf(el: Element): { x: number; y: number } {
+  const frame = (window.frameElement as HTMLElement).getBoundingClientRect()
+  const scale = frame.width / innerWidth
+  const r = el.getBoundingClientRect()
+  return { x: frame.left + (r.left + r.width / 2) * scale, y: frame.top + (r.top + r.height / 2) * scale }
+}
+
 /** `el`'s box, as `getBoundingClientRect` measures it. */
 export const rect = (el: Element | null): DOMRect => (el as Element).getBoundingClientRect()
 
