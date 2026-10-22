@@ -28426,3 +28426,240 @@ is `$T/figures.sh`, and its output `$T/figures.log`.
 | 27; 1; 1 | `spec §N` citations in `crates/` at `$H`: on one line naming no doc; on one line naming one (`viewmodel.rs`'s "Plan 7 part 5 spec §5.3"); with the section wrapped, naming none | `git grep -n -i -E 'spec,? §[0-9]' $H -- crates/ \| grep -v -E 'Plan [0-9]+ part [0-9]+ spec' \| wc -l`, and the same with `grep -c -E` in place of `grep -v -E` and `wc -l`; `git grep -n -A1 -i -E 'spec,?$' $H -- crates/ \| grep -c -E '^[^ ]+-[0-9]+-\s*(///\|//!\|//)\s*§[0-9]'` |
 | 52/52 | the comment-only check's self-test | `python3 $T/tools/check_comment_only.py --self-test` |
 | 18 of 18; 772, 2, 0 | the scan runs that exited 0; attribution sites, excused, violations | `for s in text-bytes citations attributions doc-figures shared-docs colours grammar-wasm lua licences; do scripts/check-$s.sh --self-test; scripts/check-$s.sh; done`; `scripts/check-attributions.sh \| tail -1` |
+
+#### THE WARM-BUFFER PROBE'S READING (B) COUNTS THE SOURCE SESSION'S ASM RING, RECORDED FULL AND READ FROM THE HEAP, WHERE IT LEFT THAT RING OUT; ITS TM CASE DERIVES READING (B) TOO, 6 AGAINST `MAX_WARM_BUFFERS`' 8, AND REFUSES A COPY WHOSE RING IS NOT FULL, WHERE IT ASSERTED THAT EACH COPY'S RING EVICTED, WHICH A RING WHOSE RECORDING STOPS ON ITS ALLOWANCE HAS NOT DONE SINCE #140 (2026-10-21, branch `asm-ring-measured`, `bdd977d..1c8eb75`, 3 commits, plus this entry)
+
+**`buffer-affordability.test.ts` prices `MAX_WARM_BUFFERS`, and prints two readings of its threshold.** Reading (a)
+counts the warm buffers' rings at exhaustion; reading (b) adds the source session's own rings, exhausted at the same
+instant. `MAX_WARM_BUFFERS`' doc in `scratch.ts` records which one governs: "**TWO READINGS, THREE INTERCEPT COMPONENTS
+APART — THE PROJECT OWNER PICKED THE LITERAL ONE.**", then "**(a) buffers-only-at-exhaustion — GOVERNS, and SHIPS.**"
+and "**(b) everything-at-exhaustion — reference only, NOT what ships.**" This branch changes what reading (b) counts and
+what the probe's TM case asserts. VERIFICATION names the commit each figure was read at. `MAX_WARM_BUFFERS` stays 8, and
+the one change under `web/src` is to its doc comment. The file is a probe: `vite.config.ts`'s `PROBE_FILES` keeps it out
+of the browser project unless `REDEXTAPE_PROBE` is set, as `pnpm test:probe` sets it, so `test:coverage` and CI do not
+run it.
+
+##### THE ASM RING, AND HOW READING (B) COUNTS IT
+
+- **The source session has three rings, one a leg, and reading (b) counted two.** `main.ts`'s `sessions.add` builds a
+  `History` of `HISTORY_BYTES` for each of the λ, asm and TM legs, and `replies.ts`'s `asm-frames` arm pushes each asm
+  frame charged `asmFrameBytes`. A ring is bounded by the bytes it is charged, not the heap it holds. It is full when a
+  recording spends its `HISTORY_BYTES` allowance and `recordLeg` stops it on `budget`. No shipped example fills the asm
+  ring: all 7 `EXAMPLES` entries give `asm: 'ended'`. A user's program that runs long enough does. Before this branch
+  reading (b) added the λ ring, read in the file (the n=1 round's ring), and the TM ring, `TM_LEG_RETENTION_RATIO` of
+  `HISTORY_BYTES`, a ratio `session-memory.test.ts` recorded; its comment said the asm ring "is not measured, so this
+  reading leaves it out".
+- **`affordability-asm-worker.ts`, a new worker, records an asm leg as the app's worker does.** It compiles the program
+  into a `Session` and steps it as `session-worker.ts`'s `ASM_RECORDING` run by `recordLeg` does, to `HISTORY_BYTES`
+  charged. Neither existing probe worker can: one holds a `LambdaScratch`, the other a `TmScratch`. `sourceAsmRing`
+  builds the page's `History<AsmState>` from the frames it answers, refuses a ring charged under `HISTORY_BYTES` before
+  the reading, and reads the ring after two collections, as `round` reads a λ ring.
+- **`ASM_PROGRAM` is `fn main() { let mut i = 0; while true { i = i + 1; } i } main()`**, whose loop never ends. A
+  throwaway probe recorded eight programs' asm legs to `HISTORY_BYTES` and read each ring after two collections. This
+  loop's ring held 1.5623 heap bytes per charged byte, the most of the eight; the other seven held 1.3173 to 1.5286:
+
+  | Program | Heap per charged byte |
+  |---|---|
+  | `main-loop` (`ASM_PROGRAM`) | 1.5623, 1.5623 |
+  | `spin`, `fn spin(n) { let mut i = 0; while i < n { i = i + 1; } i } spin(1000000)` | 1.5285, 1.5228, 1.5278, 1.5286, 1.5278 |
+  | `down`, `fn down(n) { while n > 0 { n = n - 1; } n } down(1000000)` | 1.5171, 1.5230 |
+  | `sum_to` | 1.4880, 1.4923, 1.4924 |
+  | `idle`, `fn idle(n) { while n > 0 { } n } idle(1)` | 1.4729, 1.4732 |
+  | `top`, `let mut i = 0; while i < 1000000 { i = i + 1; } i` | 1.4427, 1.4361 |
+  | `fact(3000)` | 1.3182, 1.3181, 1.3181 |
+  | `upto(3000)` | 1.3173, 1.3181, 1.3181 |
+
+  The text of `sum_to`, `fact` and `upto` was in a version of the probe that was not kept.
+- **Reading (b) for a page of λ copies, before and after**, one whole run of the file each:
+
+  | Tree | Marginal | Intercept (b) | Cap (b) | Cap (a) |
+  |---|---|---|---|---|
+  | `fc0a8e7` | 16,419,566.67 | 76,583,442.88 | 28 | 30 |
+  | `1c8eb75` | 16,419,297.33 | 128,801,543.88 | 24 | 30 |
+
+  The asm ring run 1 at `1c8eb75` read: 52,166,226 bytes for 68,905 frames kept of 68,904 steps, 33,554,827 charged,
+  1.5547 heap bytes per charged byte. Cap (b) read 24 in all three runs at `1c8eb75`.
+
+##### THE TM CASE DERIVES READING (B)
+
+- **The TM case printed reading (a) only.** It now adds three source rings to its intercept (a): the λ ring from one λ
+  `round(1)`, read as the λ case's n=1 round reads it, since no round of the TM case builds a λ ring; the asm ring from
+  `sourceAsmRing`; and the TM ring as `TM_LEG_RETENTION_RATIO` of `HISTORY_BYTES`. The sum is over the TM copy's
+  marginal, and the case prints each component and the cap. Three whole runs at `1c8eb75`:
+
+  | Run | TM marginal | Cap (a) | Intercept (b) | Cap (b) | Cap (b) without the asm ring |
+  |---|---|---|---|---|---|
+  | 1 | 58,537,221.33 | 8 | 131,072,579.88 | 6 | 7.82, so 7 |
+  | 2 | 58,537,688 | 8 | 131,071,491.88 | 6 | 7.82, so 7 |
+  | 3 | 58,537,688 | 8 | 131,072,611.88 | 6 | 7.82, so 7 |
+
+- **Reading (b) derives 6 for TM copies, below `MAX_WARM_BUFFERS`' 8, and would derive 7 without the asm ring.** It is
+  reference only, by the choice `MAX_WARM_BUFFERS`' doc records, so the cap is unchanged and the user was not asked.
+- **Both cases print reading (b)'s cap under one label**, `READING_B_LABEL`: "[UPPER BOUND — pageBaseline is a floor,
+  each source ring one program's; REFERENCE ONLY, NOT WHAT SHIPS]". The two reasons it is an upper bound: `pageBaseline`
+  is a floor, and each source ring is one program's, so a program whose frames hold more heap per charged byte derives
+  less. `MAX_WARM_BUFFERS`' doc says the second in its reading (b) paragraph.
+
+##### THE TM CASE'S ASSERTION THAT COULD NOT PASS
+
+- **#138 (`8dc603d`) asserted that each TM copy's ring evicted**: `expect(kept).toBeLessThan((p.steps[i] ?? 0) + 1)`,
+  `kept` being the frames the ring holds. Its entry says what that stood for: "each copy's ring evicted, so its history
+  filled". The property it wanted is the second half.
+- **Since #140 (`7cbac7d`) a recording that stops on its allowance never makes its ring evict.** `History#evict` keeps
+  the newest frame past the budget, and `recordLeg` stops at the first frame that reaches the allowance, which equals
+  the ring's budget, so the ring keeps every frame recorded: steps plus one. At `fc0a8e7` the case fails with `expected
+  69009 to be less than 69009`.
+- **It went unseen because the file is a probe**, outside the default suite for the reason its header gives, run only by
+  `pnpm test:probe`.
+- **The replacement asserts the property.** `tmRound` sums each copy's `tmFrameBytes` and asserts, before the heap
+  reading, "precondition: TM copy ${i}'s recording stopped on `HISTORY_BYTES`, so its ring is full", that is `charged >=
+  HISTORY_BYTES`.
+
+##### THE SABOTAGES
+
+Each was one edit, with the whole probe file run under `REDEXTAPE_PROBE=1`. Sabotage 4 ran on `1c8eb75`, sabotages 1 to
+3 on trees with uncommitted changes besides the sabotage.
+
+1. **The asm worker's loop condition made `false && …`**: the λ case failed with ``precondition: the source asm ring is
+   full, its recording stopped on `HISTORY_BYTES`: expected 116 to be greater than or equal to 33554432``.
+2. **`ring.clear()` in `sourceAsmRing` before the reading**: the λ case failed with `expected 13898 to be greater than
+   3355443.2`, the bound `sourceAsmRingAtExhaustion > HISTORY_BYTES / 10`.
+3. **The TM worker's loop bound halved to `HISTORY_BYTES / 2`**: the TM case failed in its warm-up round with
+   ``precondition: TM copy 0's recording stopped on `HISTORY_BYTES`, so its ring is full: expected 16777294 to be
+   greater than or equal to 33554432``.
+4. **`ring.clear()` in `sourceAsmRing` again**: both cases failed on their asm-ring bound, the λ case with `expected
+   13818 to be greater than 3355443.2` and the TM case with `expected 2220 to be greater than 3355443.2`.
+
+**Not shown able to fail:** taking the asm ring out of `interceptEverything`, in either case, fails nothing: the file
+asserts no figure, for its header's reason, so what reading (b) counts is held by no assertion. The TM case's
+`expect(derivedEverything).toBeGreaterThan(0)` and `sourceLambdaRingAtExhaustion > 1_000_000`, and the λ case's
+`derivedEverything > 0`, passed in sabotage 4 and were not aimed at. The TM case's precondition was shown failing only
+in the warm-up round, on its first copy.
+
+##### THE REVIEW
+
+**A whole-branch review found nothing Critical.** Its Important findings are the asm ring's leftovers below. Its five
+Minor are fixed: the two cases' reading (b) labels differed, and neither said reading (b) is reference only (now
+`READING_B_LABEL`); `ASM_PROGRAM`'s doc said a loop's frames hold more heap per charged byte than a recursion's, a
+general relationship from the eight programs tried (now: this loop held the most of them);
+`MAIN_THREAD_WASM_MODULE_BASELINE_BYTES`' doc called it "THE FIFTH INTERCEPT COMPONENT", an ordinal from before this
+branch's count of six; the TM case's doc said `MAX_WARM_BUFFERS`' doc reads "the derived cap" where it now prints two
+(now: the cap reading (a) derives); and the asm worker's doc said it answers "the leg's status" where it answers
+`asmStatus().run`.
+
+**A narrower review found three comments untrue**, now fixed: `READING_B_LABEL`'s doc said both cases print under it at
+the two commits where only the λ case does (now: the λ case, until the third commit extends it to both);
+`MAX_WARM_BUFFERS`' doc headed its readings "ONE INTERCEPT COMPONENT APART", where reading (b) adds three of the six
+printed components to reading (a)'s three; and `ASM_PROGRAM`'s doc said its asm leg never ends, where its loop never
+ends and the leg is capped at `DEFAULT_CAPS.steps`, 5,000,000.
+
+##### WHAT THIS DID NOT CLOSE
+
+- **The asm ring holds more heap than it is charged.** `ASM_PROGRAM`'s full ring held 1.5547 heap bytes per charged
+  byte, where the λ ring held 0.2354 (this probe's n=1 round; `HISTORY_BYTES`' doc records 0.19451407924488462) and the
+  TM ring 0.8744705880483015 (`TM_LEG_RETENTION_RATIO`). At 52,166,226 bytes it is the largest of the source session's
+  three rings, over the 33,554,432 of `HISTORY_BYTES`. `ASM_WORD_BYTES`' doc says of its test: "that case fails if a
+  word ever costs more than this charges, which is the direction that would let the ring keep more than
+  `HISTORY_BYTES`". The ring keeps more anyway.
+- **Where the extra heap sits is not established.** A frame of `ASM_PROGRAM`'s ring holds 757 bytes against 487 charged:
+  `FRAME_OVERHEAD_BYTES`, 64, plus 8 words at `ASM_WORD_BYTES`, 52, plus 7 written bytes on average.
+  `FRAME_OVERHEAD_BYTES` is checked by no test for asm frames; its doc calls it "Approximate and small — it exists so a
+  frame is never sized at zero, not to be precise". `frame-cost.test.ts`'s `asm frame cost` case measures a word as the
+  heap of `upto(200)`'s frames with their words less the heap without them, at 87.8 words a frame, so a frame's other
+  fields are charged to its words there; and it reads frames made on the main thread, where the page's ring holds frames
+  structured-cloned from a worker. Among the eight programs, a frame held 761 to 1,356 bytes at 8 to 16 words and 5,747
+  to 5,751 at 82.5 words (`upto(3000)`, `fact(3000)`): about 67 bytes more a word from `ASM_PROGRAM`'s frame to theirs,
+  against 52 charged. That is a fit through the probe's readings, not a measurement, and it leaves open that the ring's
+  words are under-charged as well as the frame's fixed part.
+- **A fix changes how long an asm recording runs, so it is the project owner's call.** A larger charge a frame makes
+  `recordLeg` stop sooner on the same allowance; `HISTORY_BYTES`' doc declines to re-scale its units for the same reason
+  ("would change every recording length in the app").
+- **A copy of a user's looping asm program is likely costlier than the TM copy that sets the cap. This is an estimate:
+  no asm copy's cost to the page was priced, and `asm-copy-memory.test.ts` prices an asm copy's worker memory, not its
+  ring.** If its frames hold what `ASM_PROGRAM`'s do, its full ring alone is 52.17 MB of heap, and its worker's wasm
+  module at least 8,454,144 bytes (`SOURCE_WASM_MODULE_BASELINE_BYTES`), 60.62 MB together, against the TM copy's 58.54
+  MB marginal. `MAX_WARM_BUFFERS`' doc already names a copy a user writes as one no count prices.
+- **`HISTORY_BYTES`' doc gives retention rates for the λ and TM legs only**, and none for the asm leg.
+- **The eight programs' rings were read in one throwaway probe**, two to five times each, and the text of three of them
+  was not kept.
+- **One `test:coverage` run on this machine, at an earlier tree of this branch, stalled after `hidden.test.ts` failed
+  one test**, with the load average at 39.00 when the gates started (the first line of the record's `gates/gates.log`),
+  and was stopped, `exit 143` (`gates/gate-coverage-hung-1.log`). That log also shows 5 files whose tests were all
+  skipped, 13 tests: `skin-switcher.test.ts`, `share-open-unreadable.test.ts`, `share-open-alone-binary.test.ts`,
+  `share-open-start-clamp.test.ts` and `view-toggles-narrow.test.ts`. A rerun passed all 280 files, `hidden.test.ts`
+  among them, and 2,906 of 2,906 tests, none skipped (`gates/gate-coverage-2.log`). The cause was not found.
+
+##### VERIFICATION
+
+Run on 2026-10-21 in the worktree `~/temp/redextape-asm-ring-measured`, branch `asm-ring-measured`. The table's **At**
+column names the commit each figure was read at, or "uncommitted" for the throwaway probe and sabotages 1 to 3, whose
+trees had uncommitted changes besides the probe or the sabotage. The record's `gates-4/gates.log` holds the exit status
+of each gate and of the first probe run at `1c8eb75`; the logs of biome, typecheck, `test:coverage`, `build:app` and
+that probe run end with theirs as `exit N`, and the scans' logs do not. The three whole runs, the quarter-core run and
+sabotage 4 are in the record's `d6/`, each log ending with its `exit N`.
+
+`test:coverage` does not run the probe, so the probe ran by itself under `REDEXTAPE_PROBE=1`. The commit that adds this
+entry changes only this file. No Rust file changed and no image was built. Nothing has run in CI: the branch has not
+been pushed. Every figure was measured before this branch was rebased onto `bdd977d` (#148), which changed only `docs/`
+and comments in four Rust files; the rebase left this branch's code commits unchanged by patch-id.
+
+```
+at 1c8eb75:
+pnpm exec biome ci --error-on-warnings                    → exit 0, 429 files
+pnpm run typecheck                                        → exit 0
+pnpm run test:coverage                                    → exit 0, 280 files / 2,906 tests; 97.59 / 92.19 / 98.39 / 98.92 against 95 / 89 / 97 / 97
+pnpm run build:app                                        → exit 0
+scripts/check-{text-bytes,citations,attributions,doc-figures,shared-docs,colours,grammar-wasm,lua,licences}.sh,
+  --self-test then alone                                  → 18 of 18 exit 0
+the probe run                                             → exit 0, 2 of 2 tests; caps (b) 24 and 6, TM cap (a) 8
+the probe run, three times more                           → exit 0, 2 of 2 tests, each
+the probe run under -p CPUQuota=25%                       → exit 0, 2 of 2 tests; the λ case 18,801 ms, the TM case 134,494 ms
+```
+
+**Figures that moved on a re-run.** The three whole runs, the quarter-core run and sabotage 4 were first made at an
+earlier tree of this branch, before a rebase rewrote its commits, and were made again at `1c8eb75`. The caps, the asm
+ring's frames, steps and charge, and every test's outcome read the same; these figures moved:
+
+| Figure | Earlier run | At `1c8eb75` |
+|---|---|---|
+| λ marginal, run 1 | 16,418,393.33 | 16,419,297.33 |
+| λ intercept (b), run 1 | 128,801,091.88 | 128,801,543.88 |
+| the asm ring, run 1: bytes; heap per charged byte; bytes held a frame; MB | 52,164,802; 1.5546; 757.05; 52.16 | 52,166,226; 1.5547; 757.07; 52.17 |
+| the λ ring's heap per charged byte, runs 1 to 3 | 0.2354 to 0.2357 | 0.2354, 0.2354, 0.2354 |
+| TM marginal, runs 1 to 3 | 58,537,672; 58,537,688; 58,537,221.33 | 58,537,221.33; 58,537,688; 58,537,688 |
+| TM intercept (b), runs 1 to 3 | 131,067,463.88; 131,067,507.88; 131,073,319.88 | 131,072,579.88; 131,071,491.88; 131,072,611.88 |
+| sabotage 4's asm ring, the λ and TM cases | 13858; 2180 | 13818; 2220 |
+| the quarter-core run's λ and TM cases | 19,195 ms; 133,805 ms | 18,801 ms; 134,494 ms |
+
+**Every count this entry quotes, with what produces it.** "The record" is
+`~/temp/redextape-lanes-2026-10-21-record/d-asm-ring/`. "The probe run" is, from `web/`, `flock
+~/temp/redextape-lanes-2026-10-21-record/browser.lock systemd-run --user --scope -q -p MemoryMax=16G -p MemorySwapMax=0
+--setenv=REDEXTAPE_PROBE=1 pnpm exec vitest run --project browser tests/browser/buffer-affordability.test.ts
+--reporter=verbose` with `REDEXTAPE_PROBE=1` set, logged to the file the row names, in the record, whose
+`verify-counts.sh` prints every row. `G <log> <pattern>` is `sed 's/\x1b\[[0-9;]*m//g' <log> | grep -E <pattern>`.
+
+| Value | What | At | Produced by |
+|---|---|---|---|
+| 3; 3 files, +202 −21 | commits in the range; the range | `bdd977d..1c8eb75` | `git rev-list --count bdd977d..1c8eb75`; `git diff --stat bdd977d 1c8eb75 \| tail -1`, from the root |
+| 0 | lines of change under `crates`, `Cargo.toml` and `Cargo.lock` | `bdd977d..1c8eb75` | `git diff --stat bdd977d 1c8eb75 -- crates Cargo.toml Cargo.lock \| wc -l` |
+| 5,000,000 | `DEFAULT_CAPS.steps` for the asm leg | `1c8eb75` | `git grep -n 'pub const DEFAULT_CAPS' 1c8eb75 -- crates/redextape-core/src/tm/asm.rs` |
+| 5 | intercept components the baseline run printed | `fc0a8e7` | `grep -c '^intercept component' baseline-full.log` |
+| 7 | `EXAMPLES` entries, each `asm: 'ended'` | `1c8eb75` | `git show 1c8eb75:web/src/examples.ts \| grep -o "asm: '[a-z-]*'" \| sort \| uniq -c` |
+| the eight programs' ratios; 761 to 1,356 and 5,747 to 5,751 bytes a frame at 8 to 16 and 82.5 words | the throwaway probe's readings | uncommitted | `G <log> 'ZZ rep'` over the record's `probes/zz-run2.log` and `probes/zz-run3.log`, from `probes/zz-asm-ring-probe.test.ts` copied into `tests/browser/`, run with `pnpm exec vitest run --project browser`, and deleted; its `zz-run1.log` is left out, since a loop in that version kept one ring alive into the next reading |
+| 16,419,566.67; 76,583,442.88; 28; 30; `expected 69009 to be less than 69009` | the λ marginal, intercept (b), caps (b) and (a); the TM case's failure | `fc0a8e7` | `G baseline-full.log 'marginal per buffer\|derived cap\|expected 69009'`, the probe run |
+| 16,419,297.33; 128,801,543.88; 24; 30 | the same, run 1 | `1c8eb75` | `G d6/full-1.log 'marginal per buffer\|derived cap'` |
+| 2 of 2 and exit 0 in each | the three runs | `1c8eb75` | `G d6/full-{1,2,3}.log 'Tests \|^exit'` |
+| 24, 24, 24 | λ cap (b) in runs 1 to 3 | `1c8eb75` | `G d6/full-{1,2,3}.log 'derived cap \(b\)'` |
+| 52,166,226; 68,905; 68,904; 33,554,827; 1.5547 | run 1's asm ring: bytes, frames kept, steps, charged, heap per charged byte | `1c8eb75` | `G d6/full-1.log 'source asm ring at exhaustion'` |
+| 0.2354, 0.2354, 0.2354; 0.19451407924488462 | the λ ring's heap per charged byte in runs 1 to 3; the recorded one | `1c8eb75` | `G d6/full-{1,2,3}.log 'retention ratio'` |
+| the TM table's marginals, caps (a), intercepts (b) and caps (b) | runs 1 to 3 | `1c8eb75` | `G d6/full-{1,2,3}.log 'TM copy marginal\|TM copy derived cap'` |
+| 7.82, so 7; 757.07 and 486.97; 52.17, 60.62 and 58.54 MB | cap (b) without the TM case's asm ring, in each run; run 1's bytes held and charged a frame of the asm ring; run 1's ring, the ring with 8,454,144, the TM marginal | `1c8eb75` | the record's `verify-counts.sh`, an `awk` over each run's log: floor((536,870,912 − (intercept (b) − the TM case's asm ring)) / TM marginal), and the ring over its frames and its charge |
+| 87.80 | words a frame in `frame-cost.test.ts`'s asm case | `1c8eb75` | `echo 'scale=2; 247091/2814' \| bc`, the figures in `ASM_WORD_BYTES`' doc |
+| 66.97 | bytes a word from `ASM_PROGRAM`'s frame to `upto(3000)`'s | uncommitted | `echo 'scale=2; (5751-761)/(82.5-8)' \| bc` |
+| the four sabotages' failure lines; exit 1 | sabotages 1 to 4; sabotage 4's exit status | uncommitted for 1 to 3, `1c8eb75` for 4 | `G sabotage-{1,2,3}.log '→'`; `G d6/sabotage-4.log '→\|^exit'`, its edit in `d6/sabotage-4.diff` |
+| 18,801 ms, 134,494 ms; 24 and 6; 2 of 2, exit 0 | the 25% run's two cases; its caps (b); its tests | `1c8eb75` | `G d6/q25.log '✓\|derived cap \(b\)\|Tests \|^exit'`, the probe run with `-p CPUQuota=25%` |
+| the moved figures' earlier values | the earlier runs | an earlier tree of this branch | the same patterns over `d3-full-{1,2,3}.log`, `d3-q25.log` and `sabotage-4.log`; the record's `verify-counts-d5.sh` prints them |
+| 1; exit 143; 39.00; 5 files, 13 tests; 280 of 280, 2,906 of 2,906 | the stalled run's failed tests; its exit status; the load average when the gates started; the stalled run's files whose tests were all skipped, and their tests; the rerun's files and tests passed | an earlier tree of this branch | `G gates/gate-coverage-hung-1.log '×'`; `G gates/gates.log 'test:coverage'`; `head -1 gates/gates.log`; `G gates/gate-coverage-hung-1.log 'skipped\)'`; `G gates/gate-coverage-2.log 'Test Files\|Tests '` |
+| exit 0 each; 429; 18 of 18 | biome, typecheck, `test:coverage`, `build:app` and the probe; biome's files; the scans, whose statuses only `gates-4/gates.log` records | `1c8eb75` | `G gates-4/gates.log 'exit\|scans'`; `tail -1 gates-4/{biome,typecheck,coverage,build,probe}.log`; `G gates-4/biome.log Checked` |
+| 280; 2,906; 97.59 / 92.19 / 98.39 / 98.92; 95 / 89 / 97 / 97 | the coverage run: files, tests and figures; its floors | `1c8eb75` | `G gates-4/coverage.log 'Test Files\|Tests \|All files'`; `grep -n thresholds web/vite.config.ts` |
+| 2 of 2; 24; 8 and 6 | the probe run: its tests, the λ cap (b), the TM caps (a) and (b) | `1c8eb75` | `G gates-4/probe.log 'Tests \|derived cap'` |

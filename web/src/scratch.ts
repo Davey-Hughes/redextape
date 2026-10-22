@@ -105,7 +105,7 @@ type BufferState = {
  * grows each time it is, and a copy a user writes, which can be larger than any shipped one
  * (`asm-copy-memory.test.ts`).
  *
- * **TWO READINGS, ONE INTERCEPT COMPONENT APART — THE PROJECT OWNER PICKED THE LITERAL ONE.** The
+ * **TWO READINGS, THREE INTERCEPT COMPONENTS APART — THE PROJECT OWNER PICKED THE LITERAL ONE.** The
  * threshold's own words are "every warm BUFFER"; the source session's rings are not a buffer's, so
  * whether they count is a reading of the sentence, not a fact the probe can settle on its own:
  *
@@ -117,9 +117,10 @@ type BufferState = {
  *     module (the `init()` call in `main.ts`, invisible to a heap reading the same way every worker's
  *     module is), plus that source fixed cost.
  *   * **(b) everything-at-exhaustion — reference only, NOT what ships.** The stricter reading: the
- *     source session's own λ and TM rings ALSO driven to exhaustion at the same instant every
+ *     source session's own λ, asm and TM rings ALSO driven to exhaustion at the same instant every
  *     buffer's is, which the threshold's words do not require, since the source session's legs are
- *     not "buffers". The source session's asm ring is not measured, so this reading leaves it out.
+ *     not "buffers". Each of those rings is priced for one program, and a ring is bounded by the
+ *     bytes it is charged, not the heap it holds, so a program whose frames hold more derives less.
  *
  * **THE CAP IS AN UPPER BOUND, NEVER A MEASURED CEILING.** `pageBaseline` is a FLOOR — a
  * byte-conversion of the page baseline `session-memory.test.ts`'s three-sessions test gives in prose
