@@ -10,7 +10,8 @@ services:
     restart: unless-stopped
     ports:
       - "8085:80" # host 8085 -> container 80. Point your reverse proxy here.
-    # NO AUTO-UPDATE LABELS HERE, DELIBERATELY. CI publishes `:latest` on every push to `main` and
-    # `:sha-<short>` on every build, so an image-update watcher has something to follow — but which
-    # watcher, and whether you want unattended pulls at all, is a property of the deployment rather
-    # than of this repo. Add whatever labels your own stack expects.
+    # NO AUTO-UPDATE LABELS HERE, DELIBERATELY. CI publishes `:latest` and `:sha-<short>` on every push to
+    # `main`, and re-publishes both every Sunday and on a manual dispatch on `main` (a dispatch on a
+    # branch publishes a new `:sha-<short>` for that unmerged commit), so an image-update watcher has
+    # something to follow — but which watcher, and whether you want unattended pulls at all, is a property
+    # of the deployment rather than of this repo. Add whatever labels your own stack expects.

@@ -5,7 +5,8 @@
 # process, no runtime data, no volumes. Three stages: compile the WASM crates, bundle the web app,
 # serve the output.
 #
-# CI builds this image on every push to `main` (see .forgejo/workflows/ci.yml's `docker` job).
+# CI builds this image on every push to `main` (see .forgejo/workflows/ci.yml's `docker` job), and
+# again every Sunday and on a manual dispatch, because nothing else rebuilds `:latest` without a merge.
 
 ########################  1. WASM (Rust -> wasm32) → /app/pkg, /app/pkg-lsp  ###################
 FROM rust:slim-bookworm AS wasm

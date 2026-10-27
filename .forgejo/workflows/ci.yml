@@ -41,6 +41,11 @@ on:
     # diff would therefore skip this workflow entirely and never publish the release image from the
     # `docker` job. That gap is real; it is deferred along with the narrower fix above, not solved by it.
   workflow_dispatch:
+  # WEEKLY, Sundays 10:00 UTC (03:00 PDT / 02:00 PST), because nothing else rebuilds `:latest` without a
+  # merge; a dispatch rebuilds the same way. The full tier runs with it, because `docker` needs it. The
+  # rest is above the `docker` job's "Build & push" step.
+  schedule:
+    - cron: "0 10 * * 0"
 
 concurrency:
   group: ci-${{ github.ref }}
@@ -366,15 +371,16 @@ jobs:
 
   rust:
     needs: detect
-    # Non-draft PRs, pushes and dispatches. A DRAFT PR gets `rust-scoped` instead — see that job for
-    # why the draft boolean rather than a label decides. Note this runs on EVERY push to a non-draft
-    # PR, so a green full run always describes the head commit.
+    # Non-draft PRs, pushes, the schedule and dispatches. A DRAFT PR gets `rust-scoped` instead — see that
+    # job for why the draft boolean rather than a label decides. Note this runs on EVERY push to a
+    # non-draft PR, so a green full run always describes the head commit.
     #
     # IF FORGEJO EVER OMITS `draft`, THIS FAILS SAFE — worth stating because it is not obvious and nothing
     # else here says it. `null` is falsy, so `!github.event.pull_request.draft` is `true` and every
     # full-tier job RUNS; `rust-scoped`'s trailing `&& ...draft` yields `null`, which coerces to false,
     # so the only thing skipped is the non-gating job. The ambiguous case over-runs rather than under-runs.
-    # The `||` also short-circuits before `.draft` is touched at all on `push` and `workflow_dispatch`.
+    # The `||` also short-circuits before `.draft` is touched at all on `push`, `schedule` and
+    # `workflow_dispatch`.
     if: >-
       needs.detect.outputs.has_rust == 'true'
       && (github.event_name != 'pull_request' || !github.event.pull_request.draft)
@@ -443,9 +449,9 @@ jobs:
   # the whole point of the tier is that developers do not run it locally on every commit.
   rust-slow:
     needs: detect
-    # Non-draft PRs, pushes and dispatches. A DRAFT PR gets `rust-scoped` instead — see that job for
-    # why the draft boolean rather than a label decides. Note this runs on EVERY push to a non-draft
-    # PR, so a green full run always describes the head commit.
+    # Non-draft PRs, pushes, the schedule and dispatches. A DRAFT PR gets `rust-scoped` instead — see that
+    # job for why the draft boolean rather than a label decides. Note this runs on EVERY push to a
+    # non-draft PR, so a green full run always describes the head commit.
     if: >-
       needs.detect.outputs.has_rust == 'true'
       && (github.event_name != 'pull_request' || !github.event.pull_request.draft)
@@ -483,9 +489,9 @@ jobs:
   # are always registered) while still skipping the network download once the archive cache is warm.
   rust-llvm:
     needs: detect
-    # Non-draft PRs, pushes and dispatches. A DRAFT PR gets `rust-scoped` instead — see that job for
-    # why the draft boolean rather than a label decides. Note this runs on EVERY push to a non-draft
-    # PR, so a green full run always describes the head commit.
+    # Non-draft PRs, pushes, the schedule and dispatches. A DRAFT PR gets `rust-scoped` instead — see that
+    # job for why the draft boolean rather than a label decides. Note this runs on EVERY push to a
+    # non-draft PR, so a green full run always describes the head commit.
     if: >-
       needs.detect.outputs.has_rust == 'true'
       && (github.event_name != 'pull_request' || !github.event.pull_request.draft)
@@ -602,8 +608,8 @@ jobs:
   # run after the first.
   rust-browser:
     needs: detect
-    # Non-draft PRs, pushes and dispatches — matching the other full-tier jobs. A DRAFT PR gets
-    # `rust-scoped` instead.
+    # Non-draft PRs, pushes, the schedule and dispatches — matching the other full-tier jobs. A DRAFT PR
+    # gets `rust-scoped` instead.
     if: >-
       needs.detect.outputs.has_rust == 'true'
       && (github.event_name != 'pull_request' || !github.event.pull_request.draft)
@@ -872,6 +878,19 @@ jobs:
       # No registry cache export: Forgejo behind Cloudflare rejects large mode=max blobs (413). The
       # persistent redextape-builder keeps a local BuildKit cache instead — warm across runs. provenance
       # /sbom OFF so Forgejo registers a plain manifest. --push ships every tag in one pass.
+      #
+      # A REFRESH (THE SCHEDULE OR A DISPATCH) IS A PLAIN REBUILD, WITH NO EXTRA FLAG. The schedule exists
+      # because nothing rebuilds `:latest` without a merge. The docker-container builder set up above
+      # resolves each FROM tag against the registry on every build, so a rebuild picks up whichever base
+      # moved — `nginx:alpine` and the bases of the `wasm` and `web` stages alike — and the shipped
+      # `runtime` stage installs nothing a cache could hold back. A refresh pushes the tags a push of its
+      # ref would: on `main` the commit's `sha-` tag and `:latest` are re-pushed, so `sha-<short>` names
+      # that commit's code, not one frozen image. A dispatch on a branch publishes a new `sha-` tag for that
+      # unmerged commit; one on a `v*` tag re-pushes that tag's `sha-` and version tags. A later run of the
+      # same ref cancels the earlier, and a refresh that cancels a push run still pushes that commit's
+      # tags; WHAT IS LOST IS THE PUSH-ONLY STEPS, here the "Reject merge commits" tripwire for that push.
+      # Runs on different refs (a `v*` tag, a branch dispatch) can still overlap and kill each other's
+      # builder.
       - name: Build & push
         env:
           TAGS: ${{ steps.t.outputs.tags }}

@@ -242,7 +242,10 @@ are literally in the name. Alternates once in the running: *Turnstile*, *Betamax
   that `web/package.json` has landed — `web` (biome, typecheck, both Vitest projects under a
   coverage gate, build) and the `docker` build-and-push to `forge.daveynet.xyz`. **Every push to
   `main` now builds and pushes an image**; there is no way to land `web/` changes without arming
-  that job.
+  that job. The same build runs every Sunday and on a manual dispatch, because nothing else rebuilds
+  `:latest` without a merge: on `main` it re-pushes `:latest` and main's `sha-` tag; a dispatch on a
+  branch publishes a new `sha-` tag for that unmerged commit, and one on a `v*` tag re-pushes that
+  tag's `sha-` and version tags.
 - **Docker** — multi-stage `Dockerfile` (Rust→WASM → Vite bundle → nginx static image),
   `docker-compose.yml`, and `deploy/nginx.conf`. Buildable:
   stage 1 builds `crates/redextape-wasm`, stage 2 builds `web/`.
