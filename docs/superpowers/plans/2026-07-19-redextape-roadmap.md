@@ -2013,6 +2013,15 @@ the highlighting work no plan claimed, and a CLI dump is its natural consumer.
   **2026-09-17:** the TM state diagram and the assembly pane move into Plan 7 (parts 4 and 5);
   `redextape-lsp` shipped in #78–#83, and Plan 7's part 3 brings it to the browser.
 - **Research track:** bidirectional editing feasibility — report + prototype, not a feature (§7.3).
+- **Say what "asm" is, in the UI (raised 2026-10-27).** The asm view shows redextape's own
+  register-assembly IR (`tm::asm::Program`, `crates/redextape-core/src/tm/asm.rs`) — the TM backend's
+  intermediate stage, whose control flow becomes the machine's states and whose registers, stack and heap
+  become its tapes — stepped by the software interpreter in `trace/asm_cursor.rs`. It is not x86, ARM,
+  WebAssembly or anything LLVM emits, and nothing on the page says so: the header toggle
+  (`web/index.html`) has no title, and `web/help.html` names the view without defining it. Give the
+  toggle a tooltip, define the view in the help page, and decide whether the label itself should change
+  (e.g. "TM IR") — weighing that `asm` is also the name `redextape emit --lang asm`, the tree-sitter
+  grammar and the `.asm` filetype sniffing use.
 
 ### Extension tracks (raised 2026-07-22, expanded 2026-07-23 — placement recorded, not yet planned)
 

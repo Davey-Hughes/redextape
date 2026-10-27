@@ -3,7 +3,8 @@
 #
 # The `detect` job checks what exists and gates the rest: the Rust jobs run when there is a
 # Cargo.toml, and `web` (and the `docker` job behind it) when there is a web/package.json, SKIPPING
-# cleanly (green) when there is not. See docs/ for the design spec.
+# cleanly (green) when there is not. It also decides docs-only runs: when every changed path is under
+# docs/, the Rust and web jobs skip and `gate` does not require them. See docs/ for the design specs.
 #
 # Forgejo specifics (vs GitHub): actions come from the code.forgejo.org mirror, toolchains are
 # installed as steps (no fat preinstalled image), the image is built with `docker buildx build
@@ -16,7 +17,13 @@ on:
   push:
     branches: [main]
     tags: ["v*"]
-    paths-ignore: ["docs/**", "**/*.md", "LICENSE*"]
+    # A DOCS-ONLY PUSH TO `main` MUST START NO RUN, NOT A SHORT ONE. A run it started would join the
+    # `concurrency` group below and cancel a code merge's run still in progress, and being docs-only it
+    # would skip the jobs and the image that run was for, so that code would go untested on `main` and
+    # unpublished. `docs/**` and nothing wider: the same definition `scripts/ci-docs-only.sh` applies to
+    # pull requests (`LICENSE.md` feeds the licence check). A `v*` tag is not affected: Forgejo's
+    # `matchPushEvent` counts `paths`/`paths-ignore` as matched for any tag push, so a release always runs.
+    paths-ignore: ["docs/**"]
   pull_request:
     # `edited` is load-bearing, not decoration. Forgejo has NO `ready_for_review` event — its drafts
     # are a `WIP:` title prefix — so taking a PR out of draft surfaces as `edited`. Without it the
@@ -24,22 +31,16 @@ on:
     # be merged having never had a full run. The cost is that editing a non-draft PR's title or body
     # also re-runs the full jobs; that is the cheaper mistake.
     types: [opened, synchronize, reopened, edited]
-    # NO `paths-ignore` HERE, unlike `push` above — that asymmetry is deliberate, not an oversight. On
-    # `pull_request`, a path filter that matches the WHOLE diff means the workflow never runs at all,
-    # which means no `ci / gate (pull_request)` status is ever posted. A required context with no
-    # status never passes, and this repository has no bypass for that: `enable_push` is off. A
-    # docs-only PR would therefore be unmergeable forever, so docs-only PRs pay a full CI run instead.
-    # That is wasteful, and it is the correct trade: a wasted run is recoverable, a PR with no route to
-    # green is not.
+    # NO `paths-ignore` HERE, unlike `push` above, and that asymmetry is forced, not chosen. On
+    # `pull_request`, a path filter that matches the WHOLE diff means the workflow never runs at all, so no
+    # `ci / gate (pull_request)` status is ever posted. A required context with no status never passes,
+    # and this repository has no bypass for that (`enable_push` is off), so a docs-only PR would be
+    # unmergeable forever.
     #
-    # The narrower fix — a `detect` output that path-gates the heavy jobs so a docs-only PR runs only
-    # `detect`/`linear-history`/`gate` — is deliberately deferred: it needs `gate` to distinguish
-    # "legitimately not required" from "skipped", which is a second judgement call.
-    #
-    # `push` keeps its `paths-ignore` above: a skipped push to `main` blocks nothing, so it stays
-    # harmless — but the same `paths-ignore` also covers `tags: ["v*"]`. A `v*` tag on a docs-only
-    # diff would therefore skip this workflow entirely and never publish the release image from the
-    # `docker` job. That gap is real; it is deferred along with the narrower fix above, not solved by it.
+    # Docs-only pull requests are decided inside the workflow instead: `detect` publishes `docs_only` from
+    # `scripts/ci-docs-only.sh` (every changed path under docs/, failing closed), the Rust and web jobs
+    # skip on it, and `gate` accepts that. A docs-only PR into `main` runs `detect`, `linear-history` and
+    # `gate`. See docs/superpowers/specs/2026-10-27-docs-only-ci-design.md.
   workflow_dispatch:
   # WEEKLY, Sundays 10:00 UTC (03:00 PDT / 02:00 PST), because nothing else rebuilds `:latest` without a
   # merge; a dispatch rebuilds the same way. The full tier runs with it, because `docker` needs it. The
@@ -85,17 +86,43 @@ env:
 
 jobs:
   # Detect what exists so each tier runs only when its files exist.
+  #
+  # `docs_only` is `true` when a pull request INTO `main` changes only paths under docs/
+  # (`scripts/ci-docs-only.sh`). Every other run is `false` without asking:
+  #   * A PR into another base: a green `gate` is stored on the head commit, not on the base, so a head
+  #     docs-only against a branch holding untested code must not read green.
+  #   * A push: a docs-only push to `main` starts no run (`on.push.paths-ignore`), so any push that does
+  #     run changes more than docs — and a `v*` tag must publish its image either way.
+  #   * The schedule or a dispatch, which each ask for a full run (the schedule is how `docker` rebuilds).
+  # The self-test runs first, in the same step, so a broken classifier fails `detect`, which `gate`
+  # requires before it trusts any output here.
   detect:
     runs-on: docker
     outputs:
       has_rust: ${{ steps.c.outputs.has_rust }}
       has_web: ${{ steps.c.outputs.has_web }}
+      docs_only: ${{ steps.c.outputs.docs_only }}
     steps:
       - uses: https://code.forgejo.org/actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
+        with:
+          fetch-depth: 0               # the classifier diffs from the merge base, which needs the history
       - id: c
+        env:                           # values via env, not inline ${{ }}, as the `docker` job passes them
+          EVENT: ${{ github.event_name }}
+          PR_BASE: ${{ github.event.pull_request.base.sha }}
+          PR_HEAD: ${{ github.event.pull_request.head.sha }}
+          BASE_REF: ${{ github.base_ref }}
         run: |
+          set -eu
           if [ -f Cargo.toml ]; then echo "has_rust=true" >> "$GITHUB_OUTPUT"; else echo "has_rust=false" >> "$GITHUB_OUTPUT"; fi
           if [ -f web/package.json ]; then echo "has_web=true" >> "$GITHUB_OUTPUT"; else echo "has_web=false" >> "$GITHUB_OUTPUT"; fi
+          scripts/ci-docs-only.sh --self-test
+          docs_only=false
+          if [ "$EVENT" = pull_request ] && [ "${BASE_REF:-}" = main ]; then
+            docs_only=$(scripts/ci-docs-only.sh "${PR_BASE:-none}" "${PR_HEAD:-none}")
+          fi
+          echo "docs_only=$docs_only"
+          echo "docs_only=$docs_only" >> "$GITHUB_OUTPUT"
 
   # LINEAR HISTORY on main. The local `merge.ff = only` that `scripts/setup-dev.sh` sets is a
   # convenience — it cannot bind anyone, and it does not survive a fresh clone. This is the gate: a
@@ -301,6 +328,10 @@ jobs:
   # DRAFT pull requests only. Explicitly NOT a gate — the moment the PR leaves draft, the full-tier
   # jobs run on every push and this job stops.
   #
+  # A DOCS-ONLY DRAFT INTO `main` IS THE EXCEPTION: this job skips with the others (`docs_only`), and
+  # `gate` passes it, since the full tier would not be required out of draft either. Forgejo's `WIP:`
+  # title still blocks its merge.
+  #
   # It cannot scope against the PUSH INCREMENT:
   # `github.event.before` is EMPTY on Forgejo's `synchronize`, and `base.sha` is the merge-base with
   # `main`, so the payload offers no per-push increment at all — `check-scoped.sh` always takes its
@@ -319,6 +350,7 @@ jobs:
     needs: detect
     if: >-
       needs.detect.outputs.has_rust == 'true'
+      && needs.detect.outputs.docs_only != 'true'
       && github.event_name == 'pull_request'
       && github.event.pull_request.draft
     runs-on: docker
@@ -383,6 +415,7 @@ jobs:
     # `workflow_dispatch`.
     if: >-
       needs.detect.outputs.has_rust == 'true'
+      && needs.detect.outputs.docs_only != 'true'
       && (github.event_name != 'pull_request' || !github.event.pull_request.draft)
     runs-on: docker                    # -> catthehacker/ubuntu:act-latest (node+git+curl)
     steps:
@@ -454,6 +487,7 @@ jobs:
     # non-draft PR, so a green full run always describes the head commit.
     if: >-
       needs.detect.outputs.has_rust == 'true'
+      && needs.detect.outputs.docs_only != 'true'
       && (github.event_name != 'pull_request' || !github.event.pull_request.draft)
     runs-on: docker
     steps:
@@ -494,6 +528,7 @@ jobs:
     # non-draft PR, so a green full run always describes the head commit.
     if: >-
       needs.detect.outputs.has_rust == 'true'
+      && needs.detect.outputs.docs_only != 'true'
       && (github.event_name != 'pull_request' || !github.event.pull_request.draft)
     runs-on: docker
     env:
@@ -612,6 +647,7 @@ jobs:
     # gets `rust-scoped` instead.
     if: >-
       needs.detect.outputs.has_rust == 'true'
+      && needs.detect.outputs.docs_only != 'true'
       && (github.event_name != 'pull_request' || !github.event.pull_request.draft)
     runs-on: docker
     steps:
@@ -714,9 +750,10 @@ jobs:
           R_WEB: ${{ needs.web.result }}
           HAS_RUST: ${{ needs.detect.outputs.has_rust }}
           HAS_WEB: ${{ needs.detect.outputs.has_web }}
+          DOCS_ONLY: ${{ needs.detect.outputs.docs_only }}
         run: |
           set -eu
-          echo "detect=$R_DETECT linear-history=$R_LINEAR has_rust=$HAS_RUST has_web=$HAS_WEB"
+          echo "detect=$R_DETECT linear-history=$R_LINEAR has_rust=$HAS_RUST has_web=$HAS_WEB docs_only=$DOCS_ONLY"
           echo "rust=$R_RUST rust-slow=$R_SLOW rust-llvm=$R_LLVM rust-browser=$R_BROWSER web=$R_WEB"
 
           fail=0
@@ -729,30 +766,44 @@ jobs:
           require detect "$R_DETECT"
           require linear-history "$R_LINEAR"
 
-          # Only demand a tier when `detect` says there is something to build — the same "run only when it
-          # exists" contract `detect` gives the rest of the workflow. `detect` is already required above, so
-          # an EMPTY (unset) HAS_RUST/HAS_WEB can only mean a real absence, never a swallowed failure. That
-          # claim is about emptiness, not about `false`: an explicit `false` is a normal, legitimate value
-          # and is exactly what the `else` branches below are for — it is not the case the claim covers.
-          if [ "$HAS_RUST" = true ]; then
-            require rust "$R_RUST"
-            require rust-slow "$R_SLOW"
-            require rust-llvm "$R_LLVM"
-            # Gated on has_rust rather than has_web on purpose: the browser tier tests the RUST
-            # crate's wasm boundary, which exists whether or not `web/` does. Tying it to has_web
-            # would leave the boundary ungated for exactly as long as it has no consumer — the
-            # window in which it is easiest to break unnoticed.
-            require rust-browser "$R_BROWSER"
-          else
-            echo "detect reports no Rust — the Rust tier is not required on this run"
-          fi
+          # `docs_only` comes from `detect`, already required above, and must be exactly `true` or `false`: any
+          # other value fails here rather than being read as either. `true` is sound to trust: the classifier
+          # fails closed and its self-test ran in the same step, so a broken one fails `detect`, not this check.
+          # Nothing the Rust and web jobs run reads docs/, so on a docs-only change they would test the merge
+          # base's code again (docs/superpowers/specs/2026-10-27-docs-only-ci-design.md).
+          case "$DOCS_ONLY" in
+            true|false) ;;
+            *) echo "error: detect's docs_only is '$DOCS_ONLY', expected true or false" >&2; fail=1 ;;
+          esac
 
-          # `web` is required whenever `detect` reports it — this is what makes its running actually
-          # gate anything instead of silently leaving a failing `web` job out of a green `gate`.
-          if [ "$HAS_WEB" = true ]; then
-            require web "$R_WEB"
+          if [ "$DOCS_ONLY" = true ]; then
+            echo "docs-only change (every path under docs/): the Rust and web tiers are not required"
           else
-            echo "detect reports no web — the web tier is not required on this run"
+            # Only demand a tier when `detect` says there is something to build — the same "run only when it
+            # exists" contract `detect` gives the rest of the workflow. `detect` is already required above, so
+            # an EMPTY (unset) HAS_RUST/HAS_WEB can only mean a real absence, never a swallowed failure. That
+            # claim is about emptiness, not about `false`: an explicit `false` is a normal, legitimate value
+            # and is exactly what the `else` branches below are for — it is not the case the claim covers.
+            if [ "$HAS_RUST" = true ]; then
+              require rust "$R_RUST"
+              require rust-slow "$R_SLOW"
+              require rust-llvm "$R_LLVM"
+              # Gated on has_rust rather than has_web on purpose: the browser tier tests the RUST
+              # crate's wasm boundary, which exists whether or not `web/` does. Tying it to has_web
+              # would leave the boundary ungated for exactly as long as it has no consumer — the
+              # window in which it is easiest to break unnoticed.
+              require rust-browser "$R_BROWSER"
+            else
+              echo "detect reports no Rust — the Rust tier is not required on this run"
+            fi
+
+            # `web` is required whenever `detect` reports it — this is what makes its running actually
+            # gate anything instead of silently leaving a failing `web` job out of a green `gate`.
+            if [ "$HAS_WEB" = true ]; then
+              require web "$R_WEB"
+            else
+              echo "detect reports no web — the web tier is not required on this run"
+            fi
           fi
 
           if [ "$fail" -ne 0 ]; then
@@ -760,14 +811,15 @@ jobs:
             echo "THIS is the required check, not the jobs above it. A job that was SKIPPED" >&2
             echo "publishes 'success' to the status API, so requiring those directly would let a" >&2
             echo "draft PR — or any run where they were skipped — read green having never run." >&2
-            echo "A draft PR is EXPECTED to fail here: take it out of draft to run the full tier." >&2
+            echo "A draft PR is EXPECTED to fail here, unless it is docs-only into main: take it out" >&2
+            echo "of draft to run the full tier." >&2
             exit 1
           fi
           echo "all gating jobs ran and passed"
 
   web:
     needs: detect
-    if: needs.detect.outputs.has_web == 'true'
+    if: needs.detect.outputs.has_web == 'true' && needs.detect.outputs.docs_only != 'true'
     runs-on: docker
     container:
       image: node:26-bookworm          # node + git present; JS actions work
