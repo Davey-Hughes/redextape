@@ -249,6 +249,11 @@ are literally in the name. Alternates once in the running: *Turnstile*, *Betamax
 - **Docker** — multi-stage `Dockerfile` (Rust→WASM → Vite bundle → nginx static image),
   `docker-compose.yml`, and `deploy/nginx.conf`. Buildable:
   stage 1 builds `crates/redextape-wasm`, stage 2 builds `web/`.
+- **Advisories** (`.forgejo/workflows/advisories.yml`) — `cargo deny check advisories` against
+  `Cargo.lock`, configured by `deny.toml`, on pushes to `main`, a dispatch, Mondays 15:00 UTC, and PRs
+  that touch `Cargo.lock`, a manifest or its config. A workflow of its own, outside `gate`, so a newly
+  published advisory blocks no merge and no image. Its header says how to accept a finding, including the
+  `ADVISORIES_MODE` switch for all of them at once.
 - **Toolchain** — `rust-toolchain.toml` (stable), `rustfmt.toml` (`max_width = 120`),
   `.pre-commit-config.yaml`. `scripts/setup-dev.sh` is the once-per-clone setup — it installs
   cargo-nextest, the pre-commit hooks, and the git config the conventions below depend on.

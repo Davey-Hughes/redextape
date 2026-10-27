@@ -1,0 +1,149 @@
+# RustSec advisory check for Redextape: `cargo deny check advisories` against Cargo.lock, configured by
+# deny.toml, which gives the command to run it locally. ADVISORIES ONLY — not licenses, bans or sources.
+#
+# A WORKFLOW OF ITS OWN, NOT A JOB IN ci.yml, AND THAT IS THE WHOLE DESIGN. Its result moves without a
+# commit — the advisory database it compares against is cloned fresh each run — so a job that went red on a
+# Saturday advisory would hold up whatever waited on it. In ci.yml that would be `gate` and, behind the
+# full tier, the `docker` job, which is the last thing a new advisory should be able to stop. Nothing in
+# ci.yml needs this workflow, `gate` does not list it, and so a red run here blocks no merge and no image.
+#
+# TWO WAYS TO ACCEPT A FINDING, and they are not interchangeable. THIS IS THE ONE PLACE BOTH ARE DESCRIBED;
+# deny.toml and the README point here.
+#
+#   * ONE ADVISORY, THE NORMAL PATH: an entry in deny.toml's `ignore` list,
+#       { id = "RUSTSEC-…", reason = "…" },
+#     whose reason says WHY it is accepted — no fixed release, not reachable, or a fix that needs a major
+#     bump — and WHEN to revisit it. It goes through a pull request like any other change, so it is
+#     reviewed. Every run prints each accepted advisory as a note carrying its reason, so a green run still
+#     says what it let through. An entry that stops matching, because the crate moved past it or the
+#     advisory was withdrawn, prints `warning[advisory-not-detected]`: that is the cue to delete it.
+#   * EVERYTHING, FOR A WHILE, THE EMERGENCY PATH: set the repository variable `ADVISORIES_MODE` to `warn`
+#     (the repository's Settings → Actions → Variables). The job still runs and prints every finding exactly
+#     as it would fail, then passes, with a `WARN-ONLY MODE` line at the top of the step and another under
+#     any findings. Delete the variable to restore the gate. Unset, or ANY value other than `warn`, means
+#     findings fail — and a value that is set but is not `warn` is named in the log, so a typo cannot pass
+#     for a working switch.
+
+name: advisories
+
+on:
+  push:
+    branches: [main]
+  # PULL REQUESTS ONLY WHEN THEY TOUCH WHAT DECIDES THE GRAPH OR THIS JOB: the manifests, Cargo.lock,
+  # deny.toml, rust-toolchain.toml (the job installs its channel), the cargo config (which can change the
+  # resolved graph and the index source) or this file. Unfiltered, an advisory published today would turn
+  # every open PR red for a change none of them made. A push to `main`, the schedule and a dispatch stay
+  # unfiltered: they are what catch a new advisory against an unchanged Cargo.lock.
+  #
+  # THIS IS DELIBERATELY NOT A REQUIRED STATUS, AND THE FILTER IS WHY IT MUST STAY THAT WAY. A PR that touches
+  # none of these never reports it, so a required check would leave that PR pending forever — the hazard
+  # ci.yml's own `pull_request` comment describes. `gate` does not list this check, and must not. No `edited`
+  # either: there is no draft tier here.
+  pull_request:
+    paths:
+      - "**/Cargo.toml"
+      - "Cargo.lock"
+      - "deny.toml"
+      - "rust-toolchain.toml"
+      - ".cargo/config.toml"
+      - ".cargo/config"
+      - ".forgejo/workflows/advisories.yml"
+  workflow_dispatch:
+  # WEEKLY, Mondays 15:00 UTC (08:00 PDT / 07:00 PST), because an advisory can land against a Cargo.lock
+  # nobody has touched, and a week with no merges would otherwise never hear about it. A day clear of the
+  # Sunday image rebuild.
+  schedule:
+    - cron: "0 15 * * 1"
+
+# THE EVENT IS IN THE KEY, so a push, the schedule and a dispatch on `main` never cancel one another — a
+# weekly run cut short by a merge would be the one week's check that never finished. A newer push to a PR
+# still cancels that PR's older run, which is the cancellation worth having.
+concurrency:
+  group: advisories-${{ github.event_name }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  cargo-deny:
+    runs-on: docker                    # -> catthehacker/ubuntu:act-latest (node+git+curl)
+    # TWENTY MINUTES, NOT TEN, because nothing is cached and every run is a cold fetch: the fetch below
+    # measured 258 MB into an empty CARGO_HOME, and the other projects' fetches run to 530 MB.
+    timeout-minutes: 20
+    steps:
+      - uses: https://code.forgejo.org/actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
+      # CARGO-DENY COMPILES NOTHING; it needs cargo and rustc for `cargo metadata` and nothing else. The
+      # channel is read from rust-toolchain.toml, so pinning that file still governs this job, but it is
+      # installed with the minimal profile and none of the file's components: neither rustfmt nor clippy, for
+      # a job that never formats or lints. `RUSTUP_TOOLCHAIN`, exported for every later step, makes rustup
+      # ignore the file from then on, so it never adds them. A file the sed no longer reads FAILS THE STEP
+      # rather than guess. No wasm target: `cargo metadata` resolves every target's dependencies without one.
+      - name: Install Rust (rust-toolchain.toml's channel, minimal profile, no components)
+        run: |
+          set -eu
+          channel=$(sed -n 's/^channel *= *"\([^"]*\)".*/\1/p' rust-toolchain.toml)
+          : "${channel:?no channel line in rust-toolchain.toml}"
+          curl --proto '=https' --tlsv1.2 -fsSL https://sh.rustup.rs | sh -s -- -y --profile minimal --default-toolchain none
+          . "$HOME/.cargo/env"
+          echo "$HOME/.cargo/bin" >> "$GITHUB_PATH"
+          rustup toolchain install "$channel" --profile minimal
+          echo "RUSTUP_TOOLCHAIN=$channel" >> "$GITHUB_ENV"
+      # PINNED AND CHECKSUMMED, the same shape as scripts/install-nextest-ci.sh, inline because one job uses
+      # it. THE DIGEST IS UPSTREAM'S, unlike nextest's: the release publishes
+      # `cargo-deny-0.20.2-x86_64-unknown-linux-musl.tar.gz.sha256` beside the tarball, and it matched both
+      # GitHub's own digest for the asset and a sha256sum of the downloaded file. It is pinned HERE rather
+      # than fetched at run time, because whoever can replace a release asset in place can replace its
+      # `.sha256` too. The musl build is static, so it runs on any libc. Bump BOTH values together.
+      - name: Install cargo-deny (pinned + checksummed)
+        run: |
+          set -eu
+          curl -fsSL -o /tmp/cargo-deny.tar.gz \
+            https://github.com/EmbarkStudios/cargo-deny/releases/download/0.20.2/cargo-deny-0.20.2-x86_64-unknown-linux-musl.tar.gz
+          echo "9f12ed4c49936e09b48bf862b595cde2fe64fcbd9d74dfacac6131ca824c8d5f  /tmp/cargo-deny.tar.gz" | sha256sum -c -
+          tar -xzf /tmp/cargo-deny.tar.gz -C "$HOME/.cargo/bin" --strip-components=1 \
+            cargo-deny-0.20.2-x86_64-unknown-linux-musl/cargo-deny
+          cargo deny --version
+      # EVERYTHING THE CHECK NEEDS FROM THE NETWORK, ONCE, in a step that fails on any error whatever the mode:
+      # the advisory database (`db`, cloned from github.com/RustSec/advisory-db) and the crates and index
+      # entries of the graph (`index`). The check below then runs `--offline` — cargo-deny 0.20's replacement
+      # for `check --disable-fetch` — so both of its runs are judged against THIS ONE DATABASE SNAPSHOT, and a
+      # fetch that fails halfway cannot pass for a finding. `fetch db` ALONE IS NOT ENOUGH: measured, it
+      # downloads no crates, and an `--offline` check on a fresh CARGO_HOME then fails inside `cargo metadata`.
+      - name: Fetch the advisory database and the crate graph
+        run: |
+          set -eu
+          cargo deny --log-level info --locked fetch db index
+          # Informational only, so it can never fail the step.
+          for db in "${CARGO_HOME:-$HOME/.cargo}"/advisory-dbs/*/; do
+            [ -d "$db/.git" ] && git -C "$db" log -1 --format='advisory database snapshot: %H (committed %cI)' || true
+          done
+      # `--locked`: the committed Cargo.lock, never a fresh resolve. THE GRAPH IS SET IN deny.toml
+      # (`[graph] all-features`), so a local run checks the same one. `--log-level info`: each accepted
+      # advisory is printed as a note carrying its deny.toml reason.
+      #
+      # WARN MODE EXCUSES FINDINGS AND NOTHING ELSE. It runs the check as usual first, so the log shows every
+      # finding at the severity that fails it. Only when that fails does it run the same check again, quietly
+      # and just as offline, with `-W` for each kind of finding, which makes cargo-deny report findings as
+      # warnings: if THAT passes, findings were all that failed, and the step says so and passes. A broken
+      # deny.toml or a stale Cargo.lock HAS ALREADY FAILED THE FETCH STEP, in either mode, so this step never
+      # runs on one; anything else that is not a finding fails the re-run. A switch that also swallowed those
+      # would turn "the check passed" into "the check may not have run". NOT `-W` ON THE ONLY RUN: measured,
+      # it relabels the advisories deny.toml accepts as warnings too, and the log can no longer tell an
+      # accepted one from a failing one.
+      - name: Check advisories
+        env:                       # via env, not inline ${{ }}
+          MODE: ${{ vars.ADVISORIES_MODE }}
+        run: |
+          set -eu
+          case "$MODE" in
+            warn) echo "WARN-ONLY MODE: ADVISORIES_MODE=warn, so findings below are reported but do not fail this step" ;;
+            '') ;;
+            *) echo "ADVISORIES_MODE is '$MODE', not 'warn', so findings fail this step as usual" ;;
+          esac
+          rc=0
+          cargo deny --log-level info --locked --offline check --show-stats advisories || rc=$?
+          if [ "$rc" -ne 0 ] && [ "$MODE" = warn ]; then
+            cargo deny --log-level error --locked --offline check \
+              -W vulnerability -W notice -W unmaintained -W unsound -W yanked advisories
+            echo "WARN-ONLY MODE: the check above failed, and passed again with every kind of finding demoted to a warning, so findings are all that failed it. This step passes only because ADVISORIES_MODE=warn; delete the variable to restore the gate."
+            rc=0
+          fi
+          exit "$rc"

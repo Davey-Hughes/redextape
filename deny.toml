@@ -1,0 +1,26 @@
+# cargo-deny's configuration. `.forgejo/workflows/advisories.yml` runs the advisories check against it, and
+# so can you, checking the same graph CI does:
+#
+#   cargo deny --locked check advisories
+#
+# ONLY THAT CHECK IS CONFIGURED HERE. A bare `cargo deny check` runs all four, and licenses, which this file
+# does not configure, then rejects every dependency.
+#
+# `[graph]` TURNS EVERY FEATURE ON: `llvm`, `cranelift` and every other optional dependency in one graph, so
+# each config `scripts/check-all.sh` builds is inside it. It is set here rather than on the command line so
+# the local command and CI check the same graph.
+#
+# `[advisories]` KEEPS cargo-deny 0.20.2's DEFAULTS BUT ONE: a vulnerability, notice or unmaintained
+# advisory fails the check, and so does an unsound one ON ANY CRATE. That is `unsound = "all"`; the default,
+# "workspace", drops unsound advisories on transitive crates without even a note. A yanked crate only warns.
+# How to accept a finding, by an `ignore` entry or for everything at once, is in the workflow's header.
+#
+# EMPTY ON 2026-10-27, AND THAT IS A MEASUREMENT RATHER THAN A DEFAULT: the RustSec database of that day
+# reported nothing against this Cargo.lock, with every feature on.
+
+[graph]
+all-features = true
+
+[advisories]
+unsound = "all"
+ignore = []
