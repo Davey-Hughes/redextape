@@ -2022,6 +2022,19 @@ the highlighting work no plan claimed, and a CLI dump is its natural consumer.
   toggle a tooltip, define the view in the help page, and decide whether the label itself should change
   (e.g. "TM IR") — weighing that `asm` is also the name `redextape emit --lang asm`, the tree-sitter
   grammar and the `.asm` filetype sniffing use.
+- **The λ view's marks make a large node unreadable (raised 2026-10-28).** At step 0 of `sum_to 5`
+  every token in the λ tree sits in its own salmon box, and the tree cannot be read. The marks belong to
+  nodes but are drawn on tokens: `#marks` in `web/src/lambda-body.ts` gives the mark's class to every
+  token of every node inside a marked node, and `web/src/style.css` draws `.is-linked` as a wash with a
+  1px inset edge and `.is-next-redex` as a 1px dashed outline, each round its own token. A mark on a
+  small node reads as one box; a mark on the root reads as a box round every word. At step 0 the next
+  redex is the root, since the outermost `apply` is a β-redex, and the boxes' colour is `--link-edge`'s,
+  so a link covers the root too. Confirm in the browser first which link that is and why it lands on the
+  root. `.is-contractum` is painted per token too, so a large contractum will look the same. The fix
+  draws each mark once per node: for example one shape down the left of the rows a node spans, with the
+  per-token mark kept for a node that fits in one row. It must keep a distinct shape for each mark, not
+  colour alone (Plan 7 part 1 spec §11), and decide whether a link to the root is drawn at all. Test it
+  on geometry, by counting the boxes drawn for a marked root, not on class names.
 
 ### Extension tracks (raised 2026-07-22, expanded 2026-07-23 — placement recorded, not yet planned)
 
