@@ -1,0 +1,17 @@
+{
+  "crates/redextape-cli": 0.2894,
+  "crates/redextape-core": 0.3078,
+  "crates/redextape-grammar-check": 0.4312,
+  "crates/redextape-lsp": 0.3077,
+  "crates/redextape-lsp-wasm": 0.2556,
+  "crates/redextape-native": 0.3394,
+  "crates/redextape-native-rt": 0.3592,
+  "crates/redextape-test-support": 0.2982,
+  "crates/redextape-wasm": 0.4126,
+  "web/src": 0.4836,
+  "web/tests": 0.2641,
+  "web/scripts": 0.2094,
+  "scripts": 0.3200,
+  "grammars": 0.5866,
+  ".forgejo": 0.4973
+}

@@ -29100,3 +29100,232 @@ vitest run --project browser tests/browser/<file>.test.ts --reporter=verbose`, f
 | the slowest cases at 25% | each changed browser file alone | `grep -E '^q25\|slowest' $R/gates-47c8a40/gates.log` |
 | exit 0; 9 of 9; 882 ms | `focus-press.test.ts` whole, once: its exit, tests, slowest case | `cat $R/gates-47c8a40/focus-press-summary.log` |
 | 211 of 211; 1,517 | the browser project after the hung runs, at `82364c5`: files and tests passing | `grep -E 'Test Files\|Tests ' $R/d6-diag-debug.log`; the hung runs' logs are `$R/gates-47c8a40-hung/`, `$R/gates-47c8a40-hung2/` and `$R/d6-diag-browser.log` |
+
+#### A COMMENT GUARD FORKED FROM TAIYAKU'S FAILS A BRANCH THAT ADDS HISTORY TO A COMMENT, GROWS A COMMENT BLOCK PAST 8 LINES OF TEXT OR RAISES AN AREA'S COMMENT SHARE ABOVE ITS BUDGET; IT RUNS AS THE FOURTEENTH PRE-COMMIT HOOK AND AS TWO STEPS IN CI'S `linear-history` JOB (2026-10-30, branch `comment-guard`, `7da611b..4d1f7a0`, 27 commits, plus this entry's last edit)
+
+**The user asked on 2026-10-29 for taiyaku's comment guard** (taiyaku's #215, `af694710`), so that the comments the
+comment pass (#144–#147) left holding their why do not take on history and measurements again.
+`scripts/check-comments.mjs` is a fork of taiyaku's script, not a copy shared with it: its lexers, its diff and carry
+logic, its base resolution and much of its self-test are taiyaku's; its areas, budgets, retuned history patterns, three
+lexers, the moved-block rule and their test cases are redextape's. Its documentation is the spec,
+`docs/superpowers/specs/2026-10-29-comment-guard-design.md`, which the script's header and the README's "Checks" section
+point at; the plan is `docs/superpowers/plans/2026-10-29-comment-guard.md`. Of the 27 commits, 13 change only `docs/`:
+9 the spec, 1 the plan and 3 this entry. The other 14 change the guard, its budget, its wiring, the README or a comment
+in a sibling gate (`check-all.sh`, `check-citations.sh`, `check-doc-figures.sh`). The lane record is
+`~/temp/redextape-comment-guard-record/` (`R` below).
+
+##### WHAT THE GUARD DOES
+
+- **It reads** `.rs`; `.ts`, `.js`, `.mjs` and `.tsx` with the TypeScript lexer; `.css`; `.html`, whose `<!-- -->` is a
+  comment and whose inline `<script>` and `<style>` bodies go to the TypeScript and CSS lexers; whole-line `#` comments
+  in `.sh`, `Dockerfile`, every `.yml` and `.yaml`, `.toml` and `deploy/nginx.conf`; whole-line `;` in the tree-sitter
+  `.scm` queries; and whole-line `--` in `.lua`. The HTML, `;` and `--` lexers are new. It does not read Markdown,
+  `docs/`, the generated tree-sitter sources or the `.rxt`, `.tm` and `.asm` fixtures.
+- **Rule 1, history,** fails a comment on a line the branch adds when it holds a date, a timestamp among them
+  (`2026-10-28T09:00`), a commit hash, `PR #N`, `PR N`, `pull request #N` or `pull request N`, their plurals
+  (`PRs #12 and #13`) and each with a lowercase letter after its number (`PR 3c`), `pull request` in any case and
+  `PR` in capitals, `previously` (not the adjective `previously-`), `originally`, `formerly`, `before this fix`,
+  `before the change` or `~~`. A date passes in a file name, after `ruling(s)` or `decision(s)`, before a `§`, and
+  after `amended` or `note of` once a `§` has been named; a bare `#N` and a `#N` in backticks pass, and so does a
+  lowercase `pr`. A line whose comment text the diff also removes somewhere is carried, not added. Taiyaku's bare
+  `PR`, `was/were tried` and `used to` are dropped, for the reasons in the spec's "Rule 1".
+- **Rule 2, the block cap,** is taiyaku's: a block of whole-line comments fails when it has more than 8 counted lines
+  and the branch grew it, adding more counted lines inside it than the hunks touching it remove. A delimiter-only line,
+  fenced code and an `# Errors`, `# Panics`, `# Safety` or `# Examples` section in a doc comment, Rust `//!` module docs
+  and a file's leading header are not counted. **The fork adds the moved block:** a grown block is matched with a
+  removed run, a maximal run of counted lines inside one block at the base, all of which the diff removes, in any file,
+  leaving out the runs that hunks touching the grown block remove, since those already count as its trims. They match
+  when the words they share are at least half of the larger one's distinct words, and a matched block fails only when
+  it is over the cap and has more counted lines than the run it replaced.
+- **Rule 3, the comment share,** compares each area's comment lines ÷ (comment + code lines) with
+  `scripts/comment-budget.json` to 4 decimals. The 15 areas are each crate under `crates/` (nine), `web/src`,
+  `web/tests`, `web/scripts`, `scripts`, `grammars` and `.forgejo`. A share above its budget fails. A share more than
+  0.0050 below it fails as stale when the branch has fewer comment lines in that area than its base. Every budget is the
+  share of the tree at `4d1f7a0`.
+- **The base** for rules 1 and 2 is the merge base of `HEAD` and `origin/main` locally and in the hook. CI passes
+  `--base`: a pull request's `base.sha`; on a push to `main`, `github.event.before`, or `HEAD~1` when that is empty, all
+  zeros or not a commit; `HEAD` on a tag push, a dispatch and the schedule. With no base it fails.
+- **It runs** as the fourteenth pre-commit hook, `check-comments`, self-test then scan on every commit whatever is
+  staged, and as two steps in `linear-history`: `Prove the comment guard still detects`, the self-test, which prints
+  `node --version` first, and `Reject history, over-long blocks and share growth in comments`, the scan, which prints
+  the base it chose. The README's "Checks" section counts fourteen hooks and describes it.
+
+##### THE USER'S RULINGS
+
+1. A fork, in `scripts/check-comments.mjs`: not a core shared with taiyaku, and not TypeScript.
+2. Rule 2 is taiyaku's 8-line cap, unchanged.
+3. Rule 3 is taiyaku's exact budget, with its 0.0050 stale arm.
+4. A bare `#N` passes, since a comment may point at an issue's record, and Forgejo numbers issues and pull requests in
+   one series; `PR #N`, `PR N` and `pull request #N` fail.
+5. Dated decision pointers and spec-amendment pointers pass, a decision pointer only after the word `decision` or
+   `decisions`: `The user chose this on DATE` fails when a branch adds it, and is reworded to
+   `the user's decision, DATE` when a branch edits it.
+6. `.html` is lexed, each inline `<script>` with the TypeScript lexer.
+7. The moved-block rule matches a run of removed counted lines, not a whole block, leaving out the runs that hunks
+   touching the grown block remove, when the shared words are at least half of the larger of the two word counts.
+8. The commit-hash marker stays, although 2 of its 7 hits on `main` at `7da611b`, read as if every comment line there
+   were added, were legitimate.
+
+On 2026-10-30, after the final review:
+
+9. The self-test's expected `new.ts:1` failure is a plain string ending in the counted `check-citations: allow` marker,
+   the third that gate honours, not an interpolated line number.
+10. CI's two steps take the `linear-history` job's names: `Prove the comment guard still detects` and `Reject history,
+    over-long blocks and share growth in comments`.
+11. `scripts/check-doc-figures.sh`'s quoted example `(156 until PR 3 …)` is reworded on this branch.
+12. A `####` or `//////` line keeps counting as a line of text, as taiyaku counts it, although a `;;;;` or `----` line
+    is delimiter-only.
+
+##### THE PROOF
+
+**The self-test** passes 224 cases.
+
+**Four sabotages**, each a commit on its own branch off `992b2f4` in the scratch clone `$R/t6-clone`, each run as
+`node scripts/check-comments.mjs --base 992b2f4`. Each exited 1 with 1 failure, its own:
+
+| Rule | The edit | The failure |
+|---|---|---|
+| 1 | `// measured on 2026-10-28` added as a fourth line to `web/src/notice.ts`'s block at 157-159 | `web/src/notice.ts:160: a date, "2026-10-28", in a new comment: // measured on 2026-10-28` |
+| 2 | a ninth line added to `web/src/draw.ts`'s 8-line block at 209-216 | `web/src/draw.ts:209-217: a comment block of 9 counted lines, over the cap of 8, and this branch grew it (1 comment lines added, 0 removed).` |
+| 3 | one comment line added to `web/scripts/licences.ts`: `web/scripts` held 67 comment and 253 code lines, a share of 0.2094, and 68 ÷ 321 rounds to 0.2118 | `web/scripts: comment share 0.2118 is above its budget of 0.2094 (68 comment lines, 253 code lines).` |
+| 3, stale | three one-line docs removed from `licences.ts`, leaving 64 ÷ 317, 0.2019 | `web/scripts: comment share 0.2019 is more than 0.0050 below its budget of 0.2094, and this branch removed comment lines (67 at the base; now 64 comment lines, 253 code lines).` |
+
+Removing two of those docs leaves 65 ÷ 318, 0.2044, which is 0.0050 under the budget and not more, and the guard
+exited 0.
+
+**Five sabotages of the final review's fixes**, in the scratch clone `$R/final-fix-clone` at `8215732`, each an edit to
+the working tree that was then restored from a saved copy (`cmp` equal). Each exited 1, the first four failing only
+their own self-test cases and the fifth only its own `check-citations.sh` line:
+
+| The edit | The failure |
+|---|---|
+| `[a-z]?` dropped from both pull-request patterns | the self-test, 2 of 224: `// PR 3c built the menu` and `// is what pull request 6a recorded` want a pull request |
+| both replaced by the earlier `/\b(?:PRs?\|[Pp]ull [Rr]equests?)\s*#?\d+[a-z]?\b/g` | the self-test, 2 of 224: `# PULL REQUEST #12 BUILT THIS` and `# PULL REQUESTS 12 AND 13 BUILT THIS` |
+| the `i` flag added to the `PR` pattern | the self-test, 1 of 224: `// pr 2 is the second printer` wants none |
+| the date's `(?!T\d)` exception dropped | the self-test, 1 of 224: `// stamped 2026-10-28T09:00 on the runner` wants a date |
+| `check-citations: allow` dropped from the self-test's `new.ts:1` line | `check-citations.sh`: `scripts/check-comments.mjs:2262: cites new.ts:1 by line number` |
+
+No comment outside `docs/` holds a form rule 1 gained after `992b2f4`: `git grep` finds them only in the self-test's
+own cases and, for `PR 3c`, in `README.md`, which the guard does not read.
+
+**The replay:** rules 1 and 2 over each of the 10 squash commits up to and including `7da611b`, each with `--base
+<commit>^`, the script and budget from `992b2f4` copied into the clone and excluded there so the guard does not read
+itself, counting only rule-1 and rule-2 lines (C14 in `$R/inventory.md`), beside the same replay with taiyaku's
+settings (C6 there). Every run exited 1, since each also failed rule 3, `992b2f4`'s budgets against an older tree; at
+`7da611b` and `bdd977d` rule 3 was the only failure. No line these 10 commits add holds a form rule 1 gained after
+`992b2f4`, so the fork's columns hold for the patterns at `4d1f7a0`.
+
+| PR | Commit | Rule 1, taiyaku's settings → the fork | Rule 2, taiyaku's settings → the fork |
+|---|---|---|---|
+| #156 | `7da611b` | 0 → 0 | 0 → 0 |
+| #153 | `7f675a5` | 5 → 0 | 2 → 2 |
+| #155 | `b3fe23d` | 6 → 1 | 2 → 2 |
+| #152 | `6c9ad92` | 7 → 0 | 2 → 2 |
+| #151 | `dec47bb` | 0 → 0 | 12 → 12 |
+| #150 | `47c8a40` | 0 → 0 | 4 → 4 |
+| #149 | `349ac8c` | 0 → 0 | 3 → 3 |
+| #148 | `bdd977d` | 0 → 0 | 0 → 0 |
+| #147 | `fc0a8e7` | 16 → 8 | 26 → 25 |
+| #146 | `4687e79` | 18 → 1 | 16 → 14 |
+
+- **Gone, 42 rule-1 hits and 3 rule-2 hits:** 30 hits of the word `PR`; the bare `#99` twice
+  (`buffers-quota.test.ts`, #147); the four dated pointers #147 added that pass, `layout.ts`'s two decisions and the
+  spec notes in `examples.test.ts` and `share-open-deep.test.ts`; `used to` (#147); the two `previously-` adjectives and
+  the three `tried` (#146); and the three moved blocks, `web/src/pane-host.ts:182-225` (#147),
+  `scripts/check-all.sh:423-451` and `crates/redextape-test-support/src/ts_derive_scan.rs:881-892` (#146). The fork's
+  run adds no hit the taiyaku-settings run did not have, and every other rule-2 line is the same in place, size and
+  counts. No backticked `#N` hit occurs in these 10 commits under either setting; a backticked `#N` passes, as every
+  bare `#N` does.
+- **Still failing, as the spec predicts:** `deny.toml:18`'s dated measurement (#155); `PR #25` in
+  `session-client.ts`, `PR #20` in `style.css` and `53ecbfa` four times in `inspector-phone.test.ts` (#147); the new
+  blocks of 9 to 33 lines in #149 (1), #150 (2), #153 (1) and #155 (2).
+- **Still failing, by the ruling on decision pointers:** `style.css:2359`, "The user chose this on 2026-10-05", and
+  `style.css:2363`, "the user kept the rule on the level's width (2026-10-06)" (#147).
+- **Still failing, by rule 2 as ruled,** the other 58 rule-2 hits: 43 that added one counted line more than they
+  removed, 6 that added 2 or 3 more, 4 that added 4 or more, 3 new blocks under `web/tests` (2 in #151, 1 in #147) and
+  2 blocks grown with nothing removed (`ci.yml` in #152 and #153).
+- **Still failing, which the spec did not predict:** `scripts/check-doc-figures.sh:73` (#146), `PR 3` in "such as
+  `(156 until PR 3 …)`". The comment quotes a README's historical figure as an example of what that check leaves out; it
+  tells no history of its own. The fork fails `PR N` wherever it stands, and nothing in rule 1 reads backticks. The
+  taiyaku-settings run counted it among the hits of the word `PR`, which the spec expected gone. By ruling 11, this
+  branch rewords the example to `(156 until …)`, which the guard then judged as an added line and passed.
+
+##### WHAT THIS DID NOT CLOSE
+
+- **The blocks already over the cap:** 1,316 of the 12,916 blocks with a counted line on `main` at `7da611b`, measured
+  with the trial's adaptation of taiyaku's script, before the HTML, `;` and `--` lexers existed. Rule 2 judges only what
+  a branch adds, so they stand until a branch grows one.
+- **Taiyaku has neither the moved-block rule nor the timestamp case of the date pattern.** Carrying them back is a
+  taiyaku pull request of its own.
+- **The CI arms are proven in shell only,** under ten event arms with a stub and with the real `node`. This branch's
+  pull-request run is the first real run of the pull-request arm, and its log names the base; the run on `main` after
+  the merge is the first of the push arm. The runner's `node` version is in that log; the local
+  `catthehacker/ubuntu:act-latest` holds v24.19.0, and the script needs 16.9.
+- **What the guard does not see** is listed in the spec's "What it reads", among it a trailing comment in a whole-line
+  lexer, two 8-line paragraphs split by a blank line, history in words the patterns do not list, and one removed text
+  credited twice.
+
+##### VERIFICATION
+
+Run on 2026-10-30. The timing ran in the checkout with HEAD at `43f34b2` and the tree clean; the three commits after it
+in the range, `0170bf4`, `c708185` and `4d1f7a0`, change only `README.md` and files under `docs/`, which the guard does
+not read: it lexes no `.md` file and no file under `docs/`, and its areas hold none of them. The self-test, the scan and
+the two gates quoted below ran in the checkout with HEAD at `4d1f7a0`, the commit before this entry's last edit, which
+changes only this file, and with `git status --porcelain` printing 0 lines before and after them. The four sabotages and
+the replay ran in the scratch clone `$R/t6-clone`, and the five sabotages of the final review's fixes in
+`$R/final-fix-clone`. Logs are in `$R/sdd/t6/`, `$R/sdd/final-fix/` and `$R/sdd/final-fix2/`. The taiyaku-settings
+replay, the 1,316 over-cap blocks and the 7 commit-hash hits are the trial's, run on 2026-10-29 in a clone at `7da611b`
+(`$R/inventory.md`). The timing was taken under a 1-minute load average of 13.92 from other work on the machine. No
+image was built, and nothing has run in CI: the branch has not been pushed.
+
+```
+node scripts/check-comments.mjs --self-test            → exit 0, "self-test, 224 cases pass"
+node scripts/check-comments.mjs                        → exit 0, "15 areas, each within its comment budget";
+                                                         "no history and no grown block in 6 changed files since
+                                                         7da611b1ff"
+pre-commit run --all-files                             → exit 0, 14 of 14 hooks Passed
+scripts/check-doc-figures.sh --self-test && scripts/check-doc-figures.sh
+                                                       → exit 0, "46 documented figures match the tree."
+the four sabotages, in $R/t6-clone                     → exit 1 each, 1 failure each; two docs removed: exit 0
+the five fix sabotages, in $R/final-fix-clone          → exit 1 each, failing only their own cases or line
+the replay, in $R/t6-clone                             → rule 1: 52 → 10 hits; rule 2: 67 → 64
+time node scripts/check-comments.mjs --self-test, 5 runs
+                                                       → 0.091–0.102 s
+time node scripts/check-comments.mjs, 5 runs           → 0.463–0.503 s
+```
+
+**Every count this entry quotes, with what produces it.** Commands run from the checkout's root under zsh, with
+`B=7da611b`, `H=4d1f7a0` and `R=~/temp/redextape-comment-guard-record`; `$R/sdd/final-fix2/figures.sh` runs every
+command below that reads git or a log, and its output is `$R/sdd/final-fix2/figures.log`.
+
+| Value | What | Produced by |
+|---|---|---|
+| 27; 13 and 14 | commits in the range; those touching `docs/` and those touching anything else, which sum to 27, so no commit touches both | `git rev-list --count $B..$H`; the same with `-- docs` and with `-- . ':!docs'` |
+| 9, 1 and 3 | the `docs/` commits touching the spec, the plan and this roadmap, which sum to 13 | the same count with `-- docs/superpowers/specs`, `-- docs/superpowers/plans/2026-10-29-comment-guard.md` and `-- docs/superpowers/plans/2026-07-19-redextape-roadmap.md` |
+| the spec, the plan and this roadmap | every `docs/` path the range touches | `git log --format= --name-only $B..$H -- docs \| sort -u` |
+| the guard, its budget, `ci.yml`, `.pre-commit-config.yaml`, `README.md`, `check-all.sh`, `check-citations.sh`, `check-doc-figures.sh` | every other path the range touches | `git log --format= --name-only $B..$H -- . ':!docs' \| sort -u` |
+| 11 files, +3,204 −25 | the range | `git diff --shortstat $B $H` |
+| 15; 15 of 15 | budget entries; those equal to the share at `$H` | `git show $H:scripts/comment-budget.json \| grep -c '": '`; the `node` comparison in `figures.sh` of that file with `$R/sdd/final-fix2/shares-empty-h.log` |
+| 0; 0 | `git status --porcelain` lines before and after the four runs below, at `$H` | `git status --porcelain \| wc -l` (`$R/sdd/final-fix2/gates-h/state.log`) |
+| exit 0; 224 | the self-test at `$H`: its exit; its cases | `node scripts/check-comments.mjs --self-test`, then `echo "exit $?"` (`$R/sdd/final-fix2/gates-h/selftest.log`) |
+| exit 0; 15 areas; 6 changed files | the scan at `$H` | `node scripts/check-comments.mjs`, then `echo "exit $?"` (`$R/sdd/final-fix2/gates-h/scan.log`) |
+| exit 0; 14 of 14; 0 | `pre-commit run --all-files` at `$H`: its exit; hooks Passed; Failed or Skipped | `pre-commit run --all-files`, then `echo "exit $?"` (`$R/sdd/final-fix2/gates-h/precommit.log`); `grep -c 'Passed$'` and `grep -cE '(Failed\|Skipped)$'` on that log |
+| exit 0; 46 | the doc-figures gate at `$H`: its exit; documented figures | `{ scripts/check-doc-figures.sh --self-test && scripts/check-doc-figures.sh; }`, then `echo "exit $?"` (`$R/sdd/final-fix2/gates-h/doc-figures.log`) |
+| 67, 253, 0.2094 | `web/scripts`' comment lines, code lines and share at `992b2f4`, where the four sabotages ran, and at `$H` | in the clone, `scripts/comment-budget.json` set to `{}` and restored from a copy (`cmp` equal), `node scripts/check-comments.mjs --base <commit>` (`$R/sdd/t6/shares-empty.log`); the same with `--base $B` (`$R/sdd/final-fix2/shares-empty-h.log`, written by `$R/sdd/final-fix2/shares.sh`) |
+| the four failures; exit 1 and 1 failure each | the sabotages, commits `cd4b386`, `0196a2f`, `2ebafe3` and `c1782ed` in the clone | `cat $R/sdd/t6/{s1-rule1,s2-rule2,s3-rule3,s4-stale}.log`; their edits are `$R/sdd/t6/*.diff` |
+| exit 0 | two docs removed, commit `c860a02` in the clone | `cat $R/sdd/t6/s4b-stale-margin.log` |
+| the five failures; exit 1 each; 2, 2, 1 and 1 of 224 | the fix sabotages in `$R/final-fix-clone`; the self-test's failures under the first four | `cat $R/sdd/final-fix/sab-{s1-no-letter,s2-old-case,s3-pr-any-case,s4-no-timestamp,s5-no-marker}.log`; their edits and the restores are `$R/sdd/final-fix/sabotage.sh` (`$R/sdd/final-fix/sabotage-run.log`) |
+| `README.md` and the self-test's cases | the lines outside `docs/` that hold a form rule 1 gained after `992b2f4` | `git grep -nIP` with each new form (`-nIiP` for the `pull request` and timestamp forms), `-- . ':!docs'` (`$R/sdd/final-fix2/git-grep-new-forms-h.log`, written by `$R/sdd/final-fix2/git-grep.sh`) |
+| 0 in each of the 10 | lines the replayed commits add that hold a form rule 1 gained after `992b2f4` | `git show --format= -U0 <commit> -- . ':!docs' ':!*.md' \| grep '^+' \| grep -v '^+++' \| grep -cP` with the three forms (`$R/sdd/final-fix/replay-new-forms.log`) |
+| 3 | the escape-hatch markers `check-citations.sh` honours at `$H` | `scripts/check-citations.sh` (`$R/sdd/final-fix2/gates-h/citations.log`) |
+| the fork's columns; 10 and 64 | rule-1 and rule-2 lines per commit, and their totals | `grep -c 'in a new comment'` and `grep -c 'a comment block of'` on `$R/sdd/t6/replay/replay-<commit>.log` |
+| taiyaku's columns; 52 and 67 | the same with taiyaku's settings | the same greps on `$R/trial/replay-<commit>.log` |
+| the three moved blocks; 0 | rule-2 lines gone; rule-2 lines new | `comm -23` and `comm -13` of `$R/sdd/t6/replay/r2-old-<commit>.txt` and `r2-new-<commit>.txt`, the sorted `path:lines size +added -removed` of each run |
+| 42: 30, 2, 4, 1, 2, 3; 0 | rule-1 hits gone: the word `PR`, bare `#N`, dates, `used to`, `previously`, `tried`; hits new | `comm` of the `path:line` keys of `$R/sdd/t6/replay/r1-old-<commit>.txt` and `r1-new-<commit>.txt`, each gone key's marker read from the old line |
+| `PR #25`, `PR #20`, `PR 3` | the three hits in both runs whose marker the fork names differently | the same keys, `comm -12`, old and new lines compared |
+| 43, 6, 4, 3, 2 of 58 | the remaining rule-2 hits by kind; with the 6 predicted new blocks, the 64 | the awk in `figures.sh` over `r2-new-<commit>.txt`: net `+1`; `+2` and `+3`; `+4` and `+9`; new blocks less the 5 predicted; grown with 0 removed less `ci.yml:88-98` |
+| 1,316 of 12,916 | blocks over the cap on `main` at `$B` | `$R/inventory.md` §3c, commands C4 and C5 there |
+| 7; 2 | commit-hash hits with every comment line on `main` as added; those legitimate | `grep -c 'commit hash' $R/trial/rule1-all-added.txt` (C5); the reading in `$R/inventory.md` §3b |
+| v24.19.0 | `node` in the local CI image | `docker run --rm catthehacker/ubuntu:act-latest node --version` (`$R/sdd/t6/ci-image-node.log`) |
+| 10; 10; 10 | the event arms the CI step was run under, with the real `node`; with a stub under `bash`; under `sh` | `grep -c '^== '` on `$R/sdd/t5-arms-real.log`, `$R/sdd/t5-arms-stub-bash.log` and `$R/sdd/t5-arms-stub-sh.log` |
+| 0.091–0.102 s; 0.463–0.503 s; 13.92 | wall time over 5 runs of the self-test, then of the scan, at 01:30 on 2026-10-30 with HEAD at `43f34b2`; the 1-minute load average before, between and after them | `bash $R/sdd/final-fix/timing.sh` (`$R/sdd/final-fix/timing.log`): bash's `time`, with `TIMEFORMAT=%R`, around `node scripts/check-comments.mjs --self-test` and then `node scripts/check-comments.mjs`, and `uptime` |

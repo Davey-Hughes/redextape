@@ -70,7 +70,7 @@
 #      correct. Gating it would demand falsifying the record. The roadmap's own convention — a
 #      block headed "Every count this entry quotes, with what produces it" — is how those are held
 #      honest, at the time they are written, which is the only time they can be.
-#   3. HISTORICAL FIGURES INSIDE A README, such as `(156 until PR 3 …)` or `read 75 and 156 before
+#   3. HISTORICAL FIGURES INSIDE A README, such as `(156 until …)` or `read 75 and 156 before
 #      that`. Those are observations sitting in a present-tense document, and every locator below is
 #      anchored to exclude them. `--self-test` asserts that exclusion rather than trusting it.
 #   4. FIGURES THAT ARE NOT CHEAPLY DERIVABLE. The TM README's `18,905 bytes` and `6,865 spans`

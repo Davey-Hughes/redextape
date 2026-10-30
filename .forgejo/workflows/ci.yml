@@ -266,6 +266,39 @@ jobs:
         run: scripts/check-lua.sh --self-test
       - name: Reject unparsable lua or parser names that disagree with the exported symbols
         run: scripts/check-lua.sh
+      # THE COMMENT GUARD'S BASE IS CHOSEN HERE AND PASSED AS `--base`, because the script's default, the
+      # merge base with `origin/main`, would give rules 1 and 2 an empty diff on a push to `main`, where
+      # `origin/main` is `HEAD`. A pull request takes `base.sha`, the merge base with its target; an empty
+      # one reaches the script as `--base ''`, which it refuses, so a missing base fails. A push to `main`
+      # takes `before`, falling back to `HEAD~1` as `Reject merge commits` below does. A tag push and every
+      # other event take `HEAD`: nothing lands in them, so rules 1 and 2 judge an empty diff and rule 3
+      # checks every budget. The rules are in docs/superpowers/specs/2026-10-29-comment-guard-design.md.
+      # Self-test first, then the scan.
+      - name: Prove the comment guard still detects
+        run: node --version && node scripts/check-comments.mjs --self-test
+      - name: Reject history, over-long blocks and share growth in comments
+        env:
+          EVENT: ${{ github.event_name }}
+          REF: ${{ github.ref }}
+          PR_BASE: ${{ github.event.pull_request.base.sha }}
+          BEFORE: ${{ github.event.before }}
+        run: |
+          set -eu
+          case "$EVENT" in
+            pull_request) base="$PR_BASE" ;;
+            push)
+              if [ "$REF" != refs/heads/main ]; then
+                base=HEAD
+              elif [ -n "${BEFORE:-}" ] && [ "$BEFORE" != "0000000000000000000000000000000000000000" ] \
+                   && git cat-file -e "$BEFORE^{commit}" 2>/dev/null; then
+                base="$BEFORE"
+              else
+                base=HEAD~1
+              fi ;;
+            *) base=HEAD ;;
+          esac
+          echo "comment guard base: $base"
+          node scripts/check-comments.mjs --base "$base"
       # ON PUSHES TO `main` ONLY, AND THE NARROWING IS THE POINT RATHER THAN A RELAXATION. This job's
       # heading states the goal exactly: "a merge commit REACHING MAIN fails CI however it got there."
       # Running it on `pull_request` would check a different artifact — the PR branch's own shape — which

@@ -5,9 +5,9 @@
 # The pre-commit hooks deliberately do NOT run it — they stay fast: fmt and clippy on a Rust change, biome
 # and tsc on a web/ one, the Lua/parser check on a grammar one, plus the `always_run` tree-wide gates
 # (control bytes, `file:line` citations, symbol-citation attributions, documented figures, shared doc
-# regions, colour literals, grammar `.wasm`, third-party licences) on every commit; count them in
-# `.pre-commit-config.yaml`'s `always_run: true` entries, not in this comment. This script is the
-# before-a-merge check.
+# regions, colour literals, grammar `.wasm`, third-party licences, comment history, block size and
+# share) on every commit; count them in `.pre-commit-config.yaml`'s `always_run: true` entries, not in
+# this comment. This script is the before-a-merge check.
 #
 #   scripts/check-all.sh                  # everything: base, LLVM and browser configs
 #   scripts/check-all.sh --no-llvm        # skip LLVM (no toolchain installed)

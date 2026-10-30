@@ -311,15 +311,16 @@ nextest is missing rather than falling back, so the gate behaves the same everyw
 `scripts/setup-dev.sh` installs it. Because nextest does not run doctests, the script pairs every
 config with an explicit `cargo test --doc` at the same feature flags.
 
-There are **thirteen** pre-commit hooks. A Rust change runs `cargo fmt` and `cargo clippy` and nothing
+There are **fourteen** pre-commit hooks. A Rust change runs `cargo fmt` and `cargo clippy` and nothing
 heavier; a `web/` change runs `biome ci` and `tsc --noEmit`; a Lua or `parser.c` change runs
 `check-lua`, which parses the tracked Lua and asserts `plugin/redextape.lua`'s parser names still
 equal the `tree_sitter_*` symbols the committed parsers export — a mismatch there loads the wrong
 language in an editor rather than failing, so nothing else in this tree could see it. The other
-eight — `check-text-bytes`, `check-citations`, `check-attributions`, `check-doc-figures`,
-`check-shared-docs`, `check-colours`, `check-grammar-wasm` and `check-licences` — are unscoped and run
-on every commit whatever is staged, because all eight catch things that arrive in a path nobody thought
-to list; the first three walk `git ls-files`, the fourth reads four READMEs, the fifth holds every
+nine — `check-text-bytes`, `check-citations`, `check-attributions`, `check-doc-figures`,
+`check-shared-docs`, `check-colours`, `check-grammar-wasm`, `check-licences` and `check-comments` — are
+unscoped and run on every commit whatever is staged: the first eight because they catch things that
+arrive in a path nobody thought to list, the ninth because it reads the whole branch rather than the
+staged set. The first three walk `git ls-files`, the fourth reads four READMEs, the fifth holds every
 marked region in a document to the single copy under `grammars/shared/`, the sixth scans tracked
 `.css` and `.ts` files under `web/src/` for colour literals outside the palette, skipping
 `palettes.ts` itself and the marked fallback block in `style.css`, and the seventh hashes each
@@ -331,15 +332,22 @@ installed npm packages, `cargo tree` and the toolchain texts under `web/scripts/
 and compares it with the committed copy — unscoped because what makes it stale is a lockfile, an
 import or a dependency's own licence file, not the file being committed; it needs `web/node_modules`
 in step with `web/pnpm-lock.yaml`, and `cargo`, and took 0.51-0.78 s with its self-test over five
-runs (2026-10-08). `check-licences` is the newest of the eight and `check-attributions` the slowest,
-at ~3.2 s against the next slowest's ~1.25 s (each hook's `--self-test` and scan, measured
-2026-09-18), because it strips comments and string literals out of every cited file rather than
-matching patterns line by line — the price of being able to tell a file that OWNS a symbol from one
-that merely talks about it. All **thirteen** are fast enough for every commit: measured interleaved
-in one session (2026-09-21, five rounds, alternating which set went first, after one untimed warm-up
-of each), the unscoped six ran 5.867-5.955 s and the same six plus `check-grammar-wasm` ran
-6.042-6.084 s — the ranges do not overlap, so the ~0.09-0.22 s gap is the seventh hook's own cost and
-not run-to-run noise. Run `scripts/check-all.sh` before merging.
+runs (2026-10-08). The ninth, `check-comments`, fails a branch that adds history to a comment, grows
+a comment block past 8 lines of text or raises an area's comment share above its budget; its three
+rules are in `docs/superpowers/specs/2026-10-29-comment-guard-design.md`. The first two judge what
+the branch adds since its merge base with `origin/main`, and the third each area's share across the
+whole tree, which also fails as stale when a branch that removed comment lines leaves it more than
+0.0050 below its budget. Its `--self-test` took 0.091-0.102 s and its scan 0.463-0.503 s over five
+runs each (bash's `time` around `node scripts/check-comments.mjs --self-test`, then without the
+flag; 2026-10-30, at a 1-minute load average of 13.92 on 32 cores). `check-comments` is the newest
+of the nine and `check-attributions` the slowest, at ~3.2 s against the next slowest's ~1.25 s (each
+hook's `--self-test` and scan, measured 2026-09-18), because it strips comments and string literals
+out of every cited file rather than matching patterns line by line — the price of being able to tell
+a file that OWNS a symbol from one that merely talks about it. All **fourteen** are fast enough for
+every commit: measured interleaved in one session (2026-09-21, five rounds, alternating which set
+went first, after one untimed warm-up of each), the unscoped six ran 5.867-5.955 s and the same six
+plus `check-grammar-wasm` ran 6.042-6.084 s — the ranges do not overlap, so the ~0.09-0.22 s gap is
+the seventh hook's own cost and not run-to-run noise. Run `scripts/check-all.sh` before merging.
 
 `scripts/check-slow.sh` runs the **slow test tier**: exhaustive sweeps marked
 `#[ignore = "slow tier: ..."]` — nine of them today — which `cargo test` skips by default and CI

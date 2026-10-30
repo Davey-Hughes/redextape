@@ -86,13 +86,13 @@ readonly CITATION_RE='([A-Za-z0-9_./-]+\.(rs|ts|tsx|js|json|toml|yml|yaml|css|md
 # them; a marker sits on the line it excuses and is visible in review. If this count is ever above zero
 # without an argument beside it, that is a finding.
 #
-# **IT SHIPS AT TWO, AND THIS IS THE ARGUMENT THE SENTENCE ABOVE DEMANDS.** Both are in `report.rs`'s
-# byte-vs-char indexing test, on the two lines carrying `a.rxt:<line>:<col>`. That is the exact case the
-# message at the bottom of this file names — *"a stack-trace assertion, a source-map fixture"* — and it is a
-# stronger instance than either: `a.rxt` IS NOT A FILE. It is the `label` argument that test hands to
-# `render`, so the coordinate names a position in a string literal in the same function, and there is no
-# target it could ever drift away from. A pointer that cannot rot is not what this gate is for, and the
-# marker says so on the line rather than in a config nobody reads.
+# **IT SHIPS AT THREE, AND THIS IS THE ARGUMENT THE SENTENCE ABOVE DEMANDS.** Two are in `report.rs`'s
+# byte-vs-char indexing test, on the lines carrying `a.rxt:<line>:<col>`; the third is the failure that
+# `check-comments.mjs`'s self-test expects at `new.ts:<line>`. That is the case the message at the bottom
+# of this file names — *"a stack-trace assertion, a source-map fixture"* — and a stronger instance: NEITHER
+# POINTS INTO THE TREE. `a.rxt` is the `label` that test hands to `render`, and `new.ts` a file the
+# self-test writes into a throwaway repository, so each coordinate names text the same function wrote. A
+# pointer that cannot rot is not what this gate is for, and the marker says so on the line, not in a config.
 readonly ALLOW_RE='check-citations: allow[[:space:]]*$'
 
 # BINARY FILES ARE SKIPPED BY EXTENSION, reusing `check-text-bytes.sh`'s argument verbatim: an

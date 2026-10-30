@@ -104,6 +104,15 @@ repos:
         language: system
         always_run: true
         pass_filenames: false
+      # UNSCOPED FOR ITS OWN REASON: it judges the branch's whole diff against its merge base with
+      # `origin/main`, so what it reads is not the staged set. Its rules, and how to raise a budget, are in
+      # docs/superpowers/specs/2026-10-29-comment-guard-design.md. Self-test first, then the scan.
+      - id: check-comments
+        name: comments hold the why within their budget
+        entry: bash -c 'node scripts/check-comments.mjs --self-test && node scripts/check-comments.mjs'
+        language: system
+        always_run: true
+        pass_filenames: false
       # SCOPED, unlike the hooks above it: what it checks is a property of the tracked Lua, the grammars'
       # `src/parser.c` and `crates/redextape-lsp/src/language.rs`, and `files:` names only the first two,
       # so a commit touching only `language.rs` is checked by CI alone.
