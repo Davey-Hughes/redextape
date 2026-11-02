@@ -1,14 +1,19 @@
 import type { EditorView } from '@codemirror/view'
-import { beforeAll, describe, expect, it } from 'vitest'
+import { beforeAll, describe, expect, it, onTestFinished } from 'vitest'
 import { userEvent } from 'vitest/browser'
 import { STORAGE_KEY } from '../../src/appearance'
+import fact from '../../src/examples/fact.rxt?raw'
+import { LANES } from '../../src/lambda-body'
 import { OVERSCAN, ROW_HEIGHT } from '../../src/tm-pane'
 import {
   frames,
   idle,
+  lambdaMark,
+  lambdaTerm,
   linkAt,
   linkedSource,
   linkStatus,
+  markStart,
   resultsText,
   retype,
   SHELL,
@@ -37,6 +42,49 @@ let view: EditorView
 
 /** How many δ-table rows are currently painted `.is-linked`. Zero is a real answer, not an absence. */
 const linkedRowCount = () => document.querySelectorAll('[data-leaf="tm-0"] .state-row.is-linked').length
+
+/**
+ * The tokens of each node the λ view marks `mark`, in the order the nodes start: a one-row node's run, or a node
+ * over several rows from its first token — the last on its first row with the mark's words outside a run, as the
+ * node runs to the row's end — to the end of its last row, or to where the next node starts on it. A node's ticks
+ * pair like brackets: a row's end tick closes the innermost node opened on an earlier row, as one opened on this
+ * row ends on a later one. A bar cut off by the drawn rows fails rather than reading as fewer nodes.
+ */
+const markedNodes = (mark: 'contractum' | 'linked'): HTMLElement[][] => {
+  const words = mark === 'contractum' ? 'just produced' : 'linked'
+  const out: HTMLElement[][] = []
+  const open: HTMLElement[][] = []
+  for (const row of lambdaTerm()?.querySelectorAll<HTMLElement>('.term-line') ?? []) {
+    for (const run of row.querySelectorAll(`.term-mark.is-${mark}`)) {
+      out.push([...run.querySelectorAll<HTMLElement>('[data-node]')])
+    }
+    const pieces = row.querySelectorAll(`.term-bar[data-lane="${mark}"]`)
+    expect(pieces.length, `the ${mark}'s pieces on row ${row.dataset.line}`).toBeLessThanOrEqual(1)
+    const piece = pieces[0]
+    if (piece === undefined) {
+      expect(open, `a ${mark} bar's every row is drawn`).toEqual([])
+      continue
+    }
+    const tokens = [...row.querySelectorAll<HTMLElement>('[data-node]:not(.term-gutter)')]
+    const [starts, ends] = [piece.hasAttribute('data-first'), piece.hasAttribute('data-last')]
+    const from = starts
+      ? tokens.findLastIndex((t) => t.dataset.marks?.includes(words) && t.closest(`.term-mark.is-${mark}`) === null)
+      : tokens.length
+    expect(from, `the ${mark}'s first row holds its words`).toBeGreaterThanOrEqual(0)
+    // A piece that runs on through its row's top edge, or ends a node, continues one from a row above.
+    const fresh = starts && !ends && !piece.matches('[data-tee~="first"]')
+    expect(open.length > 0 || fresh, `a ${mark} bar's first row is drawn`).toBe(true)
+    for (const [k, node] of open.entries())
+      node.push(...tokens.slice(0, ends && k === open.length - 1 ? from : undefined))
+    if (ends) open.pop()
+    if (starts) {
+      open.push(tokens.slice(from))
+      out.push(open.at(-1) as HTMLElement[])
+    }
+  }
+  expect(open, `a ${mark} bar's last row is drawn`).toEqual([])
+  return out
+}
 
 /** About half of `BIG`'s TM recording, which stops with its history full at step 78,458. */
 const TM_HALF = 39_000
@@ -550,8 +598,9 @@ describe('the app, end to end', () => {
       expect(stepText('lambda')).toContain('step 6')
       await lambdaSettled()
 
-      const lit = [...document.querySelectorAll('[data-leaf="lambda-0"] .term .is-contractum')]
-      expect(lit.length).toBeGreaterThan(0)
+      const marked = markedNodes('contractum')
+      expect(marked, 'one node marked').toHaveLength(1)
+      const lit = marked[0] ?? []
       // Whitespace squeezed out: the contractum may break across lines at the view's width, and a line
       // break is not a space in the DOM.
       expect(
@@ -567,7 +616,7 @@ describe('the app, end to end', () => {
       click('lambda', '↺')
       expect(stepText('lambda')).toContain('step 0')
       await lambdaSettled()
-      expect(document.querySelector('[data-leaf="lambda-0"] .term .is-contractum')).toBeNull()
+      expect(lambdaMark('contractum')).toBeNull()
     })
 
     it('shows five labelled tape rows with the head inside the window', async () => {
@@ -709,14 +758,14 @@ describe('the app, end to end', () => {
       expect(stepText('lambda')).toContain('step 1')
       await lambdaSettled()
       linkAt(view, 'let x = 40; x + 2'.indexOf('+'))
-      await until(() => document.querySelector('[data-leaf="lambda-0"] .term .is-linked') !== null, 'x + 2 at step 1')
+      await until(() => lambdaMark('linked') !== null, 'x + 2 at step 1')
       expect(linkStatus()).not.toContain('no node in the λ term')
 
       // THE FRONTIER IS THE NORMAL FORM — the chip `42` — and nothing the source wrote survives into it.
       for (let s = 1; s < 7; s += 1) click('lambda', '▶')
       expect(stepText('lambda')).toContain('step 7')
       await lambdaSettled()
-      expect(document.querySelector('[data-leaf="lambda-0"] .term .is-linked')).toBeNull()
+      expect(lambdaMark('linked')).toBeNull()
       expect(linkStatus()).toContain('this construct has no node in the λ term at this step')
     })
 
@@ -733,17 +782,18 @@ describe('the app, end to end', () => {
       // The second `x` in `x + 2`, a `Var` reference that reads the let-bound value, owns both a λ span and
       // at least one machine state.
       linkAt(view, 'let x = 40; x + 2'.indexOf('x + 2'))
-      await until(() => document.querySelector('.term .is-linked') !== null)
+      await until(() => lambdaMark('linked') !== null)
 
-      const litToken = document.querySelector('.term .is-linked')
-      expect(litToken?.textContent).not.toBe('')
+      // `x` is one token, so its mark is the span round it, holding its text.
+      const litToken = lambdaTerm()?.querySelector('.term-mark.is-linked')
+      expect(litToken?.textContent ?? '').not.toBe('')
       expect(linkedRowCount()).toBeGreaterThan(0)
     })
 
     // EVERY NODE THAT CARRIES THE CONSTRUCT, NOT THE FIRST. `double` uses its argument twice and the term
     // reduces in normal order, so the argument is substituted unreduced: at step 7 the application `1 + 2`
-    // lowers to is in the term twice, and a source link to it marks both copies — two stretches of marked
-    // tokens with unmarked ones between them. A row's gutter is not a token of the term and is skipped.
+    // lowers to is in the term twice, and a source link to it marks both copies — one mark per copy, a run
+    // inside one row or a bar down several.
     it('a source link marks every copy of a construct that reduction has duplicated', async () => {
       const src = 'fn double(n) { n + n } double(1 + 2)'
       await settled(view, src)
@@ -753,21 +803,53 @@ describe('the app, end to end', () => {
       await lambdaSettled()
       linkAt(view, src.indexOf('1 + 2') + 2)
       await until(() => linkedSource() === '1 + 2', '1 + 2 linked')
-      await until(() => document.querySelector('[data-leaf="lambda-0"] .term .is-linked') !== null, '1 + 2 marked')
+      await until(() => lambdaMark('linked') !== null, '1 + 2 marked')
 
-      const runs: string[] = []
-      let run: string | null = null
-      for (const t of document.querySelectorAll<HTMLElement>('[data-leaf="lambda-0"] .term [data-node]')) {
-        if (t.classList.contains('term-gutter')) continue
-        if (t.classList.contains('is-linked')) run = (run ?? '') + (t.textContent ?? '')
-        else if (run !== null) {
-          runs.push(run)
-          run = null
-        }
-      }
-      if (run !== null) runs.push(run)
+      const runs = markedNodes('linked').map((n) => n.map((t) => t.textContent ?? '').join(''))
       expect(runs, 'the marked stretches of the term').toHaveLength(2)
       expect(runs[0], 'two copies of one construct print alike').toBe(runs[1])
+
+      await settled(view, 'let x = 40; x + 2')
+    })
+
+    // A REAL NESTED LINK: at step 27 of `fact(4)`, in the code layout, a link to `fact(n - 1)` marks one copy
+    // over many rows and another inside it. The term is sized inline for 80 columns and to draw every row, as a
+    // bar cut off by the drawn rows fails `markedNodes`; the first precondition shows the sizing took effect.
+    it('reads a linked copy nested inside another as two copies, the inner inside the outer', async () => {
+      const term = lambdaTerm() as HTMLElement
+      const style = term.getAttribute('style')
+      const ctx = document.createElement('canvas').getContext('2d') as CanvasRenderingContext2D
+      ctx.font = getComputedStyle(term).font
+      const ch = ctx.measureText('0000000000').width / 10
+      Object.assign(term.style, { flex: 'none', width: `${LANES + 84.5 * ch}px`, height: '700px' })
+      // RESTORED HOWEVER THE TEST ENDS, as every later test in the file shares this term.
+      onTestFinished(() => {
+        if (style === null) term.removeAttribute('style')
+        else term.setAttribute('style', style)
+      })
+      await settled(view, fact)
+      click('lambda', '↺')
+      for (let s = 0; s < 27; s += 1) click('lambda', '▶')
+      expect(stepText('lambda')).toContain('step 27')
+      await lambdaSettled()
+      linkAt(view, fact.indexOf('fact(n - 1)') + 'fact'.length)
+      await until(() => linkedSource() === 'fact(n - 1)', 'fact(n - 1) linked')
+      await until(() => lambdaMark('linked') !== null, 'fact(n - 1) marked')
+      const rows = term.querySelectorAll('.term-line')
+      expect(Math.floor((term.clientWidth - LANES) / ch) - 4, 'precondition: the inline width took').toBe(80)
+      expect(String(rows.length), 'precondition: every row drawn').toBe(rows[0]?.getAttribute('aria-setsize'))
+      const starts = term.querySelectorAll('.term-bar[data-lane="linked"][data-first]')
+      expect(starts, 'precondition: both copies over several rows, so both are bars').toHaveLength(2)
+
+      const copies = markedNodes('linked')
+      expect(copies, 'the marked stretches of the term').toHaveLength(2)
+      const [outer, inner] = copies as [HTMLElement[], HTMLElement[]]
+      expect(inner.length, 'precondition: the inner copy has words').toBeGreaterThan(0)
+      expect(
+        inner.every((t) => outer.includes(t)),
+        'the inner copy’s words are the outer’s',
+      ).toBe(true)
+      expect(outer.length, 'the outer copy has words of its own').toBeGreaterThan(inner.length)
 
       await settled(view, 'let x = 40; x + 2')
     })
@@ -785,13 +867,13 @@ describe('the app, end to end', () => {
       await lambdaSettled()
       linkAt(view, 'let x = 40; x + 2'.indexOf('x + 2'))
       await until(() => linkedSource() !== '')
-      await until(() => document.querySelector('.term .is-linked') !== null)
+      await until(() => lambdaMark('linked') !== null)
       expect(linkedRowCount()).toBeGreaterThan(0)
 
       view.dispatch({ changes: { from: view.state.doc.length, insert: ' ' } })
       expect(linkedSource()).toBe('')
       expect(linkStatus()).toContain('resumes')
-      expect(document.querySelector('.term .is-linked')).toBeNull()
+      expect(lambdaMark('linked')).toBeNull()
       expect(linkedRowCount()).toBe(0)
 
       // Leave the buffer settled, in case a test added after this one assumes it is.
@@ -806,7 +888,7 @@ describe('the app, end to end', () => {
       await lambdaSettled()
 
       linkAt(view, 12)
-      await until(() => document.querySelector('[data-leaf="lambda-0"] .term .is-linked') !== null)
+      await until(() => lambdaMark('linked') !== null)
       const first = linkedSource()
 
       // The first token of the first line — a node the target does not contain, so the assertion is that
@@ -814,7 +896,12 @@ describe('the app, end to end', () => {
       const token = document.querySelector<HTMLElement>(
         '[data-leaf="lambda-0"] .term-line [data-node]:not(.term-gutter)',
       )
-      expect(token?.classList.contains('is-linked')).toBe(false)
+      expect(token, 'the first line has a token').not.toBeNull()
+      expect(token?.closest('.term-mark.is-linked') ?? null, 'not in a linked run').toBeNull()
+      expect(
+        token?.closest('.term-line')?.querySelector('.term-bar[data-lane="linked"]') ?? null,
+        'nor a bar',
+      ).toBeNull()
       token?.click()
       await until(() => linkedSource() !== first)
       // THE SPECIFIC CONSTRUCT: the first token is the root application's head, the `let`'s own lowering.
@@ -860,7 +947,7 @@ describe('the app, end to end', () => {
       await frames()
       expect(term.scrollTop).toBeLessThan(before)
       expect(rowShown(term, 0), 'the first node’s row is still off screen').toBe(true)
-      expect(term.querySelector('.term-line .is-linked')?.closest<HTMLElement>('.term-line')?.dataset.line).toBe('0')
+      expect(term.querySelector(markStart('linked'))?.closest<HTMLElement>('.term-line')?.dataset.line).toBe('0')
     })
 
     // A CLICK IN THE VIEW PINS WHAT IS UNDER THE POINTER, so the view stays where it is — even when the

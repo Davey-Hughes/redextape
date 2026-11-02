@@ -878,24 +878,42 @@ button.view-title[aria-expanded="true"] {
 .term-spacer {
   position: relative;
 }
+/* AS WIDE AS THE WIDEST ROW DRAWN, so every row is: a row's strip is held in view only as far as its row
+   reaches, and a short row's would scroll away with it. */
 .term-rows {
+  /* A default only so the sheet declares every property it reads, as `palettes.test.ts` checks: `lambda-body.ts`
+     sets the strip's width here before it draws any row. */
+  --lanes: 18px;
   position: absolute;
-  inset-inline: 0;
+  inset-inline-start: 0;
   top: 0;
+  min-width: 100%;
+  width: max-content;
 }
 /* `LINE_HEIGHT` in `lambda-body.ts` is this height; the virtual window's arithmetic assumes it. */
 .term-line {
   height: 20px;
   line-height: 20px;
   white-space: pre;
-  padding-inline-start: 2ch;
 }
-/* THE GUTTER SITS IN THE LINE'S PADDING, pulled back by its own width, so indentation stays the line's
-   `padding-inline-start` and neither the glyph nor the indent is text a reader of `.term` would read. */
+/* THE STRIP THE MARK BARS ARE DRAWN IN (its width `--lanes`, set on `.term-rows` in `lambda-body.ts`), held
+   at the view's left edge when the term scrolls sideways. Opaque and over the words, so a word scrolled under it
+   is hidden, not drawn through a bar. The focus ring is drawn on it, as the opaque strip would cover a ring drawn
+   on the row. */
+.term-lanes {
+  position: sticky;
+  inset-inline-start: 0;
+  z-index: 1;
+  display: inline-block;
+  vertical-align: top;
+  width: var(--lanes);
+  height: 100%;
+  background: var(--bg);
+}
+/* `lambda-body.ts` sets the gutter's margin to the row's indent. */
 .term-gutter {
   display: inline-block;
   width: 2ch;
-  margin-inline-start: -2ch;
   color: var(--fg-dim);
   cursor: pointer;
   user-select: none;
@@ -906,7 +924,7 @@ button.view-title[aria-expanded="true"] {
 .term-gutter[data-open="false"]::before {
   content: "▸";
 }
-.term:focus-visible .term-line.is-active {
+.term:focus-visible .term-line.is-active > .term-lanes {
   box-shadow: inset 2px 0 0 var(--focus-ring);
 }
 .term-chip,
@@ -1694,8 +1712,8 @@ button.view-title[aria-expanded="true"] {
   padding: 0;
 }
 
-/* A linked node's tokens in the λ view. Layered over the token colour rather than replacing it —
-   the class is added alongside `.tok-*`, so the text keeps its syntax colour and gains a ground. */
+/* A linked node in the λ view, when it fits one row: one span round its run of tokens. A ground and
+   a box, not a colour, so the tokens inside keep their `.tok-*` syntax colour. */
 .term .is-linked {
   background: var(--link-bg);
   box-shadow: inset 0 0 0 1px var(--link-edge);
@@ -1715,6 +1733,75 @@ button.view-title[aria-expanded="true"] {
 .term .is-next-redex {
   outline: 1px dashed var(--tok-operator);
   outline-offset: -1px;
+}
+/* TWO MARKS ON ONE RUN BOTH SHOW: both washes, and the link's box over the contractum's underline. Without
+   this the later rule's `background` and `box-shadow` would replace the earlier's, and a link that is also the
+   contractum would lose its box. */
+.term .is-linked.is-contractum {
+  background:
+    linear-gradient(
+      color-mix(in oklab, var(--tok-operator) 22%, transparent),
+      color-mix(in oklab, var(--tok-operator) 22%, transparent)
+    ),
+    var(--link-bg);
+  box-shadow:
+    inset 0 0 0 1px var(--link-edge),
+    inset 0 -3px 0 var(--tok-operator);
+}
+/* A run's top and bottom are its row's, so a link's box and the next redex's outline meet on the same pixels
+   wherever one run holds the other, not only on one node. The dashed outline steps outside the box there. */
+.term .is-linked.is-next-redex,
+.term .is-linked .is-next-redex,
+.term .is-next-redex:has(.is-linked) {
+  outline-offset: 1px;
+}
+
+/* A MARK ON A NODE OF MORE THAN ONE ROW is a bar in the strip at the rows' start (`LANES` or `NARROW_LANES` in
+   `lambda-body.ts`), one piece per row, in a lane of its own: left to right the contractum, the next redex, a link.
+   Each lane keeps its mark's hue and has a shape of its own — solid, dashed, a bracket — so no two read apart by
+   colour alone (Plan 7 part 1 spec §11). A piece on a node's first or last row stops short of the row's edge, where
+   the row's text does, so two marked nodes one above the other read as two: a corner. Where the line runs on
+   through that edge, for another node, the piece does not stop and the tick is a tee: shape tells them apart.
+   EACH LANE'S PLACE AND WIDTH IS IN STROKES, a ninth of the strip, so the narrow strip draws the same shapes
+   thinner and closer; the first lane never starts under the focus ring's 2px. */
+.term-bar {
+  --bar-inset: 3px;
+  --bar-line: calc(var(--lanes) / 9);
+  position: absolute;
+  inset-block: 0;
+  pointer-events: none;
+}
+.term-bar[data-first]:not([data-tee~="first"]) {
+  top: var(--bar-inset);
+}
+.term-bar[data-last]:not([data-tee~="last"]) {
+  bottom: var(--bar-inset);
+}
+.term-bar[data-lane="contractum"] {
+  inset-inline-start: calc(var(--bar-line) + 1px);
+  width: calc(2 * var(--bar-line) - 1px);
+  background: var(--tok-operator);
+}
+/* Dashes of a period that divides `LINE_HEIGHT`, so each row's piece continues the one above it; the first
+   row's tiles are pulled back by its inset, to stay on that grid. */
+.term-bar[data-lane="next-redex"] {
+  inset-inline-start: calc(4 * var(--bar-line));
+  width: var(--bar-line);
+  background: linear-gradient(var(--tok-operator) 3px, transparent 3px) 0 0 / 100% 5px repeat-y;
+}
+.term-bar[data-lane="next-redex"][data-first] {
+  background-position-y: calc(-1 * var(--bar-inset));
+}
+.term-bar[data-lane="linked"] {
+  inset-inline-start: calc(6 * var(--bar-line));
+  width: calc(2 * var(--bar-line) + 1px);
+  border-inline-start: var(--bar-line) solid var(--link-edge);
+}
+.term-bar[data-lane="linked"][data-first] {
+  border-block-start: var(--bar-line) solid var(--link-edge);
+}
+.term-bar[data-lane="linked"][data-last] {
+  border-block-end: var(--bar-line) solid var(--link-edge);
 }
 
 /* The layout tree's containers and dividers.

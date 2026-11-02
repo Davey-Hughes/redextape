@@ -1,6 +1,6 @@
 import type { EditorView } from '@codemirror/view'
 import { beforeAll, describe, expect, it } from 'vitest'
-import { SHELL, stateIdle, until } from './harness'
+import { markStart, SHELL, stateIdle, until } from './harness'
 
 /** The program's numeral — see `deepTermSteppedBack`'s doc for why it is this and not nearer the depth guard. */
 const N = 2_000
@@ -75,7 +75,7 @@ export function deepTermSteppedBack(layout: 'code' | 'outline'): void {
       expect(term()?.dataset.layout).toBe(layout)
       expect(term()?.getAttribute('role')).toBe('tree')
       // THE FOLLOWED REDEX'S ROW IS DRAWN, NESTED UNDER EVERY APPLICATION ABOVE IT — the path is laid out open.
-      const row = term()?.querySelector('.is-next-redex')?.closest('.term-line')
+      const row = term()?.querySelector(markStart('next-redex'))?.closest('.term-line')
       expect(Number(row?.getAttribute('aria-level')), 'measured N + 2').toBeGreaterThan(N - 100)
     })
   })

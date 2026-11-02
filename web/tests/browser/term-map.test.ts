@@ -239,7 +239,7 @@ describe('the term map', () => {
     const body = el.querySelector<HTMLElement>('.term') as HTMLElement
     const ratio = canvas.width / canvas.clientWidth
     const line = Number(
-      el.querySelector<HTMLElement>('.term .is-next-redex')?.closest<HTMLElement>('.term-line')?.dataset.line,
+      el.querySelector<HTMLElement>('.term .term-mark.is-next-redex')?.closest<HTMLElement>('.term-line')?.dataset.line,
     )
     // THE REDEX'S LINE IS A LANDMARK ON THE MAP: fifteen lines under it is fifteen lines further down the term.
     const at = Math.min(...rowsWhere(canvas, like(resolved(el, '--tok-operator')))) / ratio
@@ -268,7 +268,7 @@ describe('the term map', () => {
     const canvas = el.querySelector<HTMLCanvasElement>('.term-map') as HTMLCanvasElement
     const ratio = canvas.width / canvas.clientWidth
     const line = Number(
-      el.querySelector<HTMLElement>('.term .is-contractum')?.closest<HTMLElement>('.term-line')?.dataset.line,
+      el.querySelector<HTMLElement>('.term .term-mark.is-contractum')?.closest<HTMLElement>('.term-line')?.dataset.line,
     )
     expect(line, 'the contractum is on a line of its own').toBeGreaterThan(0)
     const band = rowsWhere(canvas, like(resolved(el, '--tok-operator'), [16, 160], 4))

@@ -4,6 +4,7 @@ import { page } from 'vitest/browser'
 import {
   clickWorkspaceItem,
   lambdaControl,
+  lambdaMark,
   lambdaStepText,
   linkedSource,
   linkStatus,
@@ -251,7 +252,7 @@ describe('stage', () => {
     await until(() => linkedSource() === 'x + 2', 'x + 2 to be linked')
     expect(linkStatus(), 'the hidden λ view answered for the pin it last drew').not.toContain('λ')
     stageTab('lambda-0').click()
-    await until(() => document.querySelector('[data-leaf="lambda-0"] .term .is-linked') !== null, 'x + 2 marked')
+    await until(() => lambdaMark('linked') !== null, 'x + 2 marked')
     expect(linkStatus()).not.toContain('λ')
 
     // TWO λ VIEWS: `+ view` shows the one it creates, and the focus moving into its term marks it active;

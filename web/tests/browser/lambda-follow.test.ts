@@ -50,7 +50,7 @@ describe('a λ view’s follow redex action', () => {
     follow?.focus()
     follow?.click()
     expect(term.scrollTop).toBe(followed)
-    expect(el.querySelector('.term .is-next-redex')).not.toBeNull()
+    expect(el.querySelector('.term .term-mark.is-next-redex')).not.toBeNull()
     expect(follow?.hidden, 'following again').toBe(true)
     expect(document.activeElement).toBe(term)
   })
@@ -124,9 +124,9 @@ describe('a λ view whose box changes size under it', () => {
     const follow = [...el.querySelectorAll('button')].find((b) => b.textContent === 'follow redex') as HTMLButtonElement
     return { body, follow }
   }
-  /** Whether the redex's first token lies wholly inside the body's box, as it is drawn. */
+  /** Whether the redex's run, one row here, lies wholly inside the body's box, as it is drawn. */
   const redexShown = (body: HTMLElement) => {
-    const redex = body.querySelector('.is-next-redex')
+    const redex = body.querySelector('.term-mark.is-next-redex')
     if (redex === null) return false
     const a = redex.getBoundingClientRect()
     const b = body.getBoundingClientRect()
@@ -317,7 +317,7 @@ describe('a λ view whose box changes size under it', () => {
     // NO BAND WITHOUT ROWS: the drawn lines reach both edges of the box as it now is.
     expect(Math.min(...lines.map((l) => l.top))).toBeLessThanOrEqual(box.top)
     expect(Math.max(...lines.map((l) => l.bottom))).toBeGreaterThanOrEqual(box.bottom)
-    const redex = (body.querySelector('.is-next-redex') as HTMLElement).getBoundingClientRect()
+    const redex = (body.querySelector('.term-mark.is-next-redex') as HTMLElement).getBoundingClientRect()
     expect(Math.abs((redex.top + redex.bottom) / 2 - (box.top + box.bottom) / 2)).toBeLessThanOrEqual(LINE_HEIGHT)
     expect(follow.hidden).toBe(true)
   })

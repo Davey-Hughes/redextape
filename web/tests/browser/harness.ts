@@ -447,6 +447,63 @@ export const lambdaTerm = () => document.querySelector<HTMLElement>('[data-leaf=
 /** The text of the λ view `lambda-0`'s term, or `''` where it shows none. */
 export const lambdaTermText = () => document.querySelector('[data-leaf="lambda-0"] .term')?.textContent ?? ''
 
+/** A mark the λ view draws: a bar piece's `data-lane`, and the `is-` class of a one-row node's run. */
+export type LambdaMark = 'next-redex' | 'contractum' | 'linked'
+
+/** The selector for each element a λ view draws `mark` with, bar piece or run, so an absence it finds is the mark's. */
+const anyMark = (mark: LambdaMark) => `.term-bar[data-lane="${mark}"], .term-mark.is-${mark}`
+
+/** The selector for where a λ view's `mark` starts: its bar's piece on the node's first row, or a one-row run. */
+export const markStart = (mark: LambdaMark) => `.term-bar[data-lane="${mark}"][data-first], .term-mark.is-${mark}`
+
+/** The first element the λ view `lambda-0` draws `mark` with, in either form, or `null` where it draws none. */
+export const lambdaMark = (mark: LambdaMark): Element | null => lambdaTerm()?.querySelector(anyMark(mark)) ?? null
+
+/** Whether `s` draws a border on its `side`. */
+export const drawsEdge = (s: CSSStyleDeclaration, side: 'Top' | 'Bottom' | 'Left' | 'Right') =>
+  s[`border${side}Style`] !== 'none' && Number.parseFloat(s[`border${side}Width`]) > 0
+
+/** Each element in a λ term's rows drawing an edge — outline, box shadow or border — the bars and their strip aside. */
+export const wordEdges = (term: Element | null): HTMLElement[] =>
+  [...(term?.querySelectorAll<HTMLElement>('.term-rows *') ?? [])].filter((el) => {
+    if (el.matches('.term-lanes, .term-bar')) return false
+    const s = getComputedStyle(el)
+    const sides = ['Top', 'Bottom', 'Left', 'Right'] as const
+    return s.outlineStyle !== 'none' || s.boxShadow !== 'none' || sides.some((side) => drawsEdge(s, side))
+  })
+
+/** The pieces a λ term draws of `lane`'s bar, in the order drawn. */
+export const barPieces = (term: Element | null, lane: LambdaMark): HTMLElement[] => [
+  ...(term?.querySelectorAll<HTMLElement>(`.term-bar[data-lane="${lane}"]`) ?? []),
+]
+
+/** The width of the strip a λ term's rows are drawn with, which every drawn row must share. */
+export const stripWidth = (term: Element): number => {
+  const ws = [...term.querySelectorAll('.term-lanes')].map((s) => s.getBoundingClientRect().width)
+  expect(new Set(ws).size, 'every drawn row’s strip as wide').toBe(1)
+  return ws[0] as number
+}
+
+/** The lines of `lane`'s pieces' rows; each piece must lie in its row's first `strip` px, at the first piece's x. */
+export const barRows = (term: Element | null, lane: LambdaMark, strip: number): number[] => {
+  const ps = barPieces(term, lane)
+  const at = (p: HTMLElement) => {
+    const row = p.closest<HTMLElement>('.term-line') as HTMLElement
+    return { row, b: p.getBoundingClientRect(), r: row.getBoundingClientRect() }
+  }
+  const first = ps[0] && at(ps[0])
+  return ps.map((p) => {
+    const { row, b, r } = at(p)
+    const inside = [b.top >= r.top, b.bottom <= r.bottom, b.left >= r.left, b.right <= r.left + strip]
+    expect(inside, `${lane}'s piece on row ${row.dataset.line} in its row's strip`).toEqual([true, true, true, true])
+    expect(b.left - r.left, `${lane}'s piece on row ${row.dataset.line} in its lane`).toBeCloseTo(
+      (first?.b.left ?? 0) - (first?.r.left ?? 0),
+    )
+    expect(b.width, `${lane}'s piece on row ${row.dataset.line} as wide as its lane`).toBeCloseTo(first?.b.width ?? 0)
+    return Number(row.dataset.line)
+  })
+}
+
 /** The text of the view `leaf`'s term, or `''` where it shows none. */
 export const termOf = (leaf: string) => document.querySelector(`[data-leaf="${leaf}"] .term`)?.textContent ?? ''
 

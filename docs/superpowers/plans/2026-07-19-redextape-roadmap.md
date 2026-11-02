@@ -2022,19 +2022,6 @@ the highlighting work no plan claimed, and a CLI dump is its natural consumer.
   toggle a tooltip, define the view in the help page, and decide whether the label itself should change
   (e.g. "TM IR") — weighing that `asm` is also the name `redextape emit --lang asm`, the tree-sitter
   grammar and the `.asm` filetype sniffing use.
-- **The λ view's marks make a large node unreadable (raised 2026-10-28).** At step 0 of `sum_to 5`
-  every token in the λ tree sits in its own salmon box, and the tree cannot be read. The marks belong to
-  nodes but are drawn on tokens: `#marks` in `web/src/lambda-body.ts` gives the mark's class to every
-  token of every node inside a marked node, and `web/src/style.css` draws `.is-linked` as a wash with a
-  1px inset edge and `.is-next-redex` as a 1px dashed outline, each round its own token. A mark on a
-  small node reads as one box; a mark on the root reads as a box round every word. At step 0 the next
-  redex is the root, since the outermost `apply` is a β-redex, and the boxes' colour is `--link-edge`'s,
-  so a link covers the root too. Confirm in the browser first which link that is and why it lands on the
-  root. `.is-contractum` is painted per token too, so a large contractum will look the same. The fix
-  draws each mark once per node: for example one shape down the left of the rows a node spans, with the
-  per-token mark kept for a node that fits in one row. It must keep a distinct shape for each mark, not
-  colour alone (Plan 7 part 1 spec §11), and decide whether a link to the root is drawn at all. Test it
-  on geometry, by counting the boxes drawn for a marked root, not on class names.
 
 ### Extension tracks (raised 2026-07-22, expanded 2026-07-23 — placement recorded, not yet planned)
 
@@ -29329,3 +29316,354 @@ command below that reads git or a log, and its output is `$R/sdd/final-fix2/figu
 | v24.19.0 | `node` in the local CI image | `docker run --rm catthehacker/ubuntu:act-latest node --version` (`$R/sdd/t6/ci-image-node.log`) |
 | 10; 10; 10 | the event arms the CI step was run under, with the real `node`; with a stub under `bash`; under `sh` | `grep -c '^== '` on `$R/sdd/t5-arms-real.log`, `$R/sdd/t5-arms-stub-bash.log` and `$R/sdd/t5-arms-stub-sh.log` |
 | 0.091–0.102 s; 0.463–0.503 s; 13.92 | wall time over 5 runs of the self-test, then of the scan, at 01:30 on 2026-10-30 with HEAD at `43f34b2`; the 1-minute load average before, between and after them | `bash $R/sdd/final-fix/timing.sh` (`$R/sdd/final-fix/timing.log`): bash's `time`, with `TIMEFORMAT=%R`, around `node scripts/check-comments.mjs --self-test` and then `node scripts/check-comments.mjs`, and `uptime` |
+
+#### THE λ VIEW DRAWS EACH MARK ONCE PER NODE: A NODE OVER TWO OR MORE ROWS GETS A BAR IN ITS MARK'S OWN LANE, IN A STRIP THAT STAYS AT THE VIEW'S LEFT, 18 PX WIDE, OR 9 PX IN A TERM WHERE 18 WOULD LEAVE THE LAYOUT AT ITS FLOOR, LINKED COPIES THAT NEST OR MEET SHARE ONE LINE WITH A TICK AT EACH COPY'S ENDS, AND A NODE INSIDE ONE ROW GETS ONE SHAPE ROUND ITS WORDS, WHERE EVERY WORD OF A MARKED NODE WAS BOXED (2026-11-01 to 2026-11-02, branch `lambda-marks`, `29e6a83..ccff474`, 15 commits, plus this entry, `55ea0bd`; then `eabb1ae`, `46d5624`, `1bf93c7` and `4d5a136`, which draw the narrow strip and answer its reviews, and the commit that brings this entry up to date)
+
+**The user raised it on 2026-10-28**, in a bullet under "Deferred beyond v1" that #156 added and this entry replaces:
+at step 0 of `sum_to(5)` every token of the λ tree sat in a box of its own, and the tree could not be read. A
+prototype was built first and shown running, and the user accepted it before any plan. The design is this entry: by
+the controller's call there is no spec file. All 15 commits change `web/` and nothing else; 9 change `web/src/` and 12
+change the tests. The 4 after this entry's first version change `web/` alone too, all 4 `web/src/` and 3 the tests:
+while the entry was drafted, a measurement in desktop Chrome found the strip pushing the term sideways at 390 by
+844 px with the default folds, and the user chose a narrow strip (7 and 8 below). The lane record is
+`~/temp/redextape-lambda-marks-record/` (`$R` below).
+
+##### THE DEFECT
+
+The marks belong to nodes but were drawn on tokens. `#marks` in `web/src/lambda-body.ts` gave the mark's class to
+every token of every node inside a marked node, and `web/src/style.css` drew `.is-next-redex` as a 1px dashed outline,
+`.is-linked` as a wash with a 1px inset edge and `.is-contractum` as a wash with an underline, each round its own token.
+A mark on a small node read as one box; a mark on the root read as a box round every word. At step 0 the next redex is
+the root, since the outermost `apply` is a β-redex. On `main`, at 1400 by 900 px with the default folds, the view drew
+11 boxes on its 2 rows; with the root linked and every fold open, 341 on the 30 rows drawn at the top, each token both
+outlined and boxed. At step 1 the contractum is the root, and the whole tree was boxed again.
+
+**The salmon was a link on the root**, which the bullet asked to confirm in the browser first. The investigation found
+it to be a pin of the `LetRec` that binds `fn sum_to` round the program, whose one node at step 0 is the root. A click
+sets it: on a λ token whose node carries no link of its own, since `LambdaPane` links the innermost linked ancestor
+(`lambda-tree.ts`'s `linkedAncestor`), the `λ` of `λsum_to.` among them, or on the TM rule table's `pc0` row. No
+click in the source sets it: the function's `Lambda` has the same span, and `link.ts`'s `innermost` keeps the first of
+two identical spans. Two more faults sat beside it: every row's first token carried `data-marks`, so every row's
+accessible name began "next redex:"; and `.is-contractum` comes after `.is-linked` at equal specificity, so a token
+that was both lost the link's wash and box (read from the cascade, never seen in the browser).
+
+##### WHAT CHANGED
+
+- **A node over two or more rows** gets one bar piece on each drawn row it covers, in a lane of its mark's own: in the
+  18 px strip, from its left, the contractum a solid line at 3-6 px, the next redex a dashed line at 8-10 px, and a
+  link a bracket at 12-17 px, a line with a tick at its copy's first and last rows; the 9 px strip draws the same
+  shapes at 2-3, 4-5 and 6-9 px. A bar's first and last pieces stop 3 px short of the row's edge (`--bar-inset`, which
+  the dashes' offset reads too), so two marked nodes stacked read as two. The pieces have no text and are
+  `aria-hidden`, so the term's text is unchanged.
+- **The lanes are a strip** at the start of every row, 18 px (`LANES`) or 9 px (below), always there, so nothing
+  moves when a mark comes or goes: the first word is where it was with a mark and without one. `columns()` takes the
+  strip off the view's width before it divides by `ch`. The strip is sticky at the view's left and opaque, so a bar
+  stays in sight when the term scrolls sideways, over the words that pass under it. Every drawn row is as wide as the
+  widest, so each row's strip can stay, and the focus ring is drawn on the active row's strip, which would cover a ring
+  on the row; the ring may touch the first lane, not lie over it.
+- **In a narrow term the strip is 9 px** (`NARROW_LANES`): where the 18 px strip would leave `columns()` at its floor
+  of 24 columns, below a term about 245 px wide in desktop Chrome. `lanesFor` decides from the term's width with the
+  18 px strip whatever strip is drawn, so the columns the narrow strip gives back cannot turn it wide again, and
+  `columns()` takes off the strip it picks. `#paint` writes that width as `--lanes` on the rows, and the strip's width
+  and its lanes' strokes (`--bar-line`, a ninth of it) read it: 2 px strokes in the 18 px strip, 1 px in the 9 px one,
+  and the same shapes in both. The paint key holds the width, so a resize across the threshold redraws the rows.
+- **Linked copies that nest or meet** share the link lane: one piece on each row any of them covers, a corner where
+  the outermost copy starts and ends, and, for a copy inside another, a tick at the top of its first row and at the
+  bottom of its last, running through the row's edge (`data-tee`).
+- **A node inside one row** gets one run, a `.term-mark` wrapper round its words carrying its marks' classes, which
+  the stylesheet's rules for the three marks draw as before; tokens carry no mark class. Two marks on one node are one
+  run with both classes, and `.term .is-linked.is-contractum` draws both washes, the link's box and the underline. A
+  dashed outline that shares a run's edges with a link's box is drawn 1px outside it, by three selectors: a link on
+  the redex, round it and inside it.
+- **The words a screen reader hears** are on the node's first token, on its first row only, in `MARKS` order
+  ("next redex:", "just produced:", "linked:"), where every row's first token had them.
+- **Flat text's contractum** is one run round its tokens, the gaps between them inside it.
+- **`markSpans`** finds every node's first and last rows in one pass over the tokens and one back up the tree, so its
+  cost is the tokens and the nodes, not the tokens times the marks.
+
+On the branch, at `ccff474` and again at `eabb1ae`, in the state where `main` drew 341 boxes, the view draws none: 30
+next-redex pieces and 30 link pieces, one on each drawn row.
+
+##### DECISIONS
+
+The user's, on 2026-11-01:
+
+1. The shape: a bar for a node over two or more rows, and one shape round the words of a node inside one row.
+2. Fixed lanes, one per mark, left to right the contractum's solid line, the next redex's dashed line and the link's
+   bracket. They were asked for in the existing 2ch margin; the prototype found that margin is the `▸`/`▾` glyph's
+   slot, which moves with the indent and which the glyph fills at indent 0, the root's first row, so it drew an 18 px
+   strip of its own. The user saw it running and said "yes this seems acceptable".
+3. A prototype, shown running before any plan.
+4. A review by the `code-review` skill at HIGH.
+5. The screen-reader words on the node's first row only, when the review raised it: "First row only, as built", with
+   the trade-off listed here for Plan 7 part 7.
+6. Linked copies that nest, when the review found them: "One line, a tick per copy".
+
+Then, on 2026-11-02:
+
+7. A narrow strip, when told that with the default folds at 390 by 844 px the term scrolled sideways by 8 px, where
+   `main`'s did not scroll: "Narrow strip on phones".
+8. Told then that the 174 px term behind that figure is desktop Chrome's, whose classic scroll bar takes 15 px of the
+   λ pane's width, and that on a phone the term is 189 px, where the 18 px strip would fit: "Keep it". The narrow
+   strip stays, and the 390 by 844 px figures here are named as desktop Chrome's.
+
+The controller's, each told to the user and none overruled: the link on the root is kept, since the link is right
+and only its drawing was wrong, and it is drawn once, as a bracket; both marks show where they share a node; the
+words once, on the node's first row, which the user then kept (5); the term map's marks and the TM, asm and source
+views are out of scope, the views marking once per row already; the design lives in this entry.
+
+The controller's later calls, which the record does not show put to the user: the tests Task 1 moved find a mark by
+its class to prove what they proved before, and the rule that a test measures geometry and computed style holds for
+the tests of the new drawing; the strip stays at the view's left when the term scrolls sideways (the review's F1);
+`67e0c88`'s width test, which pins the right margin `columns()` leaves, is kept; the strip is chosen from the λ term's
+own width, narrow where the layout with the 18 px strip would be at its floor, a choice made from the width alone so
+that it cannot turn back and forth; the focus ring may touch the first lane but not lie over it (the narrow strip's
+review); and the 390 by 844 px app test holds the mechanism, with the 0.625 px desktop Chrome leaves held by no test
+(below).
+
+##### THE TESTS
+
+Nineteen new cases, 16 in `lambda-body.test.ts`, 2 in `lambda-tree-app.test.ts` and 1 in `app.test.ts`, and none
+removed; 3 of them run in a 640 px body and again in a 174 px one, the λ term's width at 390 by 844 px in desktop
+Chrome. A mark's pieces and runs are found by selector, and what is asserted of them is geometry and computed style:
+
+- a term whose root, over 9 rows, carries the next redex and a link, and one of whose nodes is the contractum, has one
+  piece per row its node covers in each lane, and no element in the rows draws an outline, a box shadow or a border
+  (`harness.ts`'s `wordEdges`), the strip and its pieces aside;
+- no piece lies over a word, every word's left is the same with the marks and without them, and every piece lies in
+  its row and its lane (`barRows`);
+- the link's ticks are on its first and last pieces only, the next redex's pieces are dashed (a gradient with a
+  transparent stop, repeated) and the contractum's solid, the three lanes' x ranges are disjoint, the first and last
+  pieces are inset, and the first lane starts no nearer the strip's edge than the focus ring reaches, its offset,
+  spread and blur together;
+- a row laid out as wide as `columns()` allows ends at least 2ch inside the view;
+- `columns()` takes the 9 px strip off where the 18 px one would leave the layout at its floor, and keeps the 18 px
+  one a column past it; and in a body the 18 px strip would push a first row as long as the default program's past,
+  the row does not scroll sideways;
+- scrolled sideways, every piece stays in the view's strip and covers the words under it, and the focus ring is on
+  the active row's strip at the view's left;
+- nested copies draw one line with corners at the outer ends and tees at the inner ones; copies on rows one after
+  the other draw two brackets; copies that meet on a row draw one line through it;
+- a one-row node's mark is one shape that encloses its words and no other; both marks on one node show both grounds,
+  the link's box and the underline; the dashed outline clears a link's box in all three nestings;
+- the words are in the accessible name of the node's first row only, before its first word;
+- a node longer than the window, scrolled to its end, has a piece on every drawn row and only the last tick;
+- in the app, `sum_to(5)` at step 0 with the root linked and every fold open draws a next-redex and a link piece on
+  each drawn row and boxes no word, at the top and at the end; `fact(4)` at step 27, sized to 80 columns, reads a link
+  to `fact(n - 1)` as two copies, the inner inside the outer; and at 390 by 844 px the default program's first row is
+  in view beside the 9 px strip, in a term sized to the widest the 18 px strip would push that row past. The tests'
+  headless browser draws the λ pane no scroll bar, so its term is 189 px there and the row fits beside either strip;
+  hence the sizing.
+
+The tests that read a mark's class on a token now find it by its bar or its run (`harness.ts`'s `lambdaMark` and
+`markStart`); `app.test.ts`'s `markedNodes` reads each marked node's words, from its bar's first row to its last, and
+fails on a bar cut off by the drawn rows or a piece with no copy open.
+
+**46 sabotages, each in a scratch worktree, each file restored from a saved copy and checked with `cmp`.** 27 were run
+on the tests as Task 2 left them, and 26 failed tests on the first run; per-token marks put back failed 22 of the 84
+cases in the three files. The 27th, `columns()` keeping the strip's 18 px for the words, failed nothing in the browser
+project: no test drew a row at the width `columns()` returns, and the 2ch right margin its `- 4` leaves hid most of
+the 18 px. `67e0c88` adds the width test, which fails under it in 2 runs of 2, with -2 px of room against a bound of
+15.5. One more edit was aimed wrong and changed nothing for its fixture, since the token it keyed on, an application's
+separating space, belongs to that application; it was aimed again, and fired. Eight sabotages of fix round 2's changes
+each failed a test, and a ninth, a tee drawn wherever a neighbouring row holds a copy, failed only the test for copies
+on rows one after the other, which round 2b added for it. Ten were run on the narrow strip. Five on `eabb1ae`'s tests
+each failed a test on its first run; the strip never turning narrow failed 7 of the 41 cases in `lambda-body.test.ts`.
+Of five on the narrow fix round's tests, four failed a test, among them an 18 px narrow strip, which fails the 390 by
+844 px app test. The fifth, a 10 px narrow strip, passed it: that test sizes its term to `ceil(LANES + 21ch) - 1`, so
+by its arithmetic any strip of up to 17 px passes, and it holds the mechanism, not the 0.625 px desktop Chrome leaves
+(below).
+
+##### THE REVIEW
+
+The `code-review` skill at HIGH read the branch at `67e0c88` and did not run it. It reported seven findings, and two
+minor points from the task reviews were added. Each fix began by reproducing its finding.
+
+- **F1, a bar scrolled out of sight when the term scrolled sideways.** Reproduced, and fixed by the sticky strip
+  (`53ddd91`); its test failed before the fix, on a piece outside the view's strip.
+- **F2, linked copies that nest drew two pieces on one row.** Reproduced on shipped programs: in `fact(4)` at step 27,
+  code layout at 80 columns, a link to `fact(n - 1)` marks a copy on rows 1-26 and one on rows 23-24, and rows 23 and
+  24 each drew two pieces in the link lane, which read as one bracket with stray ticks. A probe found linked copies
+  over two or more rows sharing a row in `fact(4)`, `map and fold`, `is_even(6)` and `fact(12)` with the automatic
+  folds, and none in `double(1 + 2)`, the review's own example. It went to the user, whose scheme (6) is `ba074f0`.
+- **F3, the words on the first row only.** Kept by the user (5).
+- **F4, `markSpans` paid a pass over the whole term per mark.** On `map` over 300 elements with every fold open,
+  34,896 tokens and a link with 413 copies, `showTree` took 19.6 ms with the link and 1.3 without it; `d984f69`
+  brings it to 1.4. The old and new functions gave the same spans on 20,664 inputs.
+- **F5 and F6, the strip's width and the bar's inset each written twice.** The width was set from `LANES` alone
+  (`a0ba2d8`), as `palettes.test.ts` fails a custom property nothing in `style.css` defines; `46d5624` then made it
+  one custom property, `--lanes`, which `lambda-body.ts` sets on the rows and `style.css` declares with an 18 px
+  default for that test. The inset is one property (`21199bb`).
+- **F7, two test helpers read only the one-row form.** Not reproduced: their fixtures' nodes stay on one row at every
+  width the tests reach, so nothing was changed.
+- **The two minor points** (`ad1078b`, `2177d91`): a width check without a message, and bounds one test repeated
+  from another.
+
+The fixes were reviewed again, three times. The first re-review approved round 1 and raised three minor points:
+the focus ring on the strip untested, a comment without its reason and a weak precondition (`81eea20`). The second
+found the scheme as the user gave it, and no test for two copies on rows one after the other, which a neighbouring-row
+rule passed; round 2b added it, and the ninth sabotage above, and a guard in `markedNodes` with the `fact(4)` app test
+(`c2fd87b`). The third found that guard unexercised, and raised comments that claimed too much and an inline size not
+restored when the test fails; round 2c fixed those (`ccff474`) and probed the guard (below).
+
+**The narrow strip was reviewed twice.** The review of `eabb1ae` found no app test at 390 by 844 px, the wide side of
+the threshold untested, the focus ring touching the contractum's lane in the 9 px strip, a size container and an
+inline width on every row where one custom property would do, and comments to fix, and noted that no one had looked at
+the narrow shapes. `46d5624` made the width one custom property, and `1bf93c7` added the tests and fixed the comments,
+the ring allowed to touch the first lane but not lie over it by the controller's call; a crop of the 9 px strip at 4x
+(`$R/nf-s1-strip-x4.png`) was looked at, and every shape reads at that scale. The re-review found that the app test's
+title claimed a page scroll bar the test never draws, that the test did not wait for the viewport, that `--lanes`'
+default did not say why it is there, and that the ring's reach left out its spread; `4d5a136` fixes those, and this
+revision the bullet below on the strip at a narrow width.
+
+##### WHAT THIS DID NOT CLOSE
+
+- **Two nested copies that start, or end, on the same row share one tick,** so counting ticks cannot pair them. The
+  code layout can start two nested nodes on one row (`λx. λy. …` prints as one `(λx y.` row). No real link where this
+  happens was looked for, so how often it does is unmeasured.
+- **Where two copies meet on a row,** counting pairs the next copy's start tick with the first's end tick. The test
+  for it merges two rows by hand; the code layout gave no such row for the fixtures tried, and how often a real link
+  does is unmeasured. Both limits come with the user's scheme, as the second re-review found.
+- **A screen reader hears a mark on its node's first row only.** The other rows say nothing, and where the first row is
+  not drawn no drawn row says the mark. The user kept this (5); it is for Plan 7 part 7.
+- **The term map tells the next redex from a link by colour alone:** its icicle strokes each as a 1.5px column, in
+  `--tok-operator` and `--link-edge` (`web/src/term-map.ts`, `column()`), against the Plan 7 part 1 spec's §11
+  (`docs/superpowers/specs/2026-09-17-plan7-part1-foundations-design.md`). Out of scope by the controller's call.
+- **Flat text's contractum has no words for a screen reader;** it had none before.
+- **The strip still widens a term with every fold open, and no test holds the 0.625 px the 9 px strip leaves in
+  desktop Chrome's 174 px term at 390 by 844 px.** In desktop Chrome at 390 by 844 px, `sum_to(5)` at step 0, the λ
+  pane scrolls down and its classic scroll bar takes 15 px of its 189, so the term is 174 px wide. With the default
+  folds the term scrolled sideways there by 8 px at `ccff474`, where `main` does not scroll; since `eabb1ae` it scrolls
+  by 0, the first row ending 0.625 px inside the view beside the 9 px strip. With every fold open it scrolls by at most
+  233 px at `eabb1ae`, where `main` scrolls by 225 and `ccff474` by 242; in desktop Chrome at 320 by 568 px, by 34 with
+  the default folds and at most 268 with every fold open, where `main` scrolls by 25 and 260. `columns()` is at its
+  floor of 24 there, on `main` and on the branch, so a strip adds to rows the layout cannot narrow. At 1400 by 900 px
+  neither scrolls. The 174 px is desktop Chrome's, not a phone's: on a phone, whose scroll bars overlay, the term would
+  be the pane's 189 px, as it is in the tests' headless browser, and the 18 px strip would fit the default program's
+  first row; no phone was measured. No test holds the 0.625 px: the tests' browser draws the pane no scroll bar and
+  measures `ch` at 8.0 px, where desktop Chrome measures 7.82, so the 390 by 844 px app test sizes its term and holds
+  the mechanism, the 9 px strip keeping in view a row the 18 px one would push past. A strip of up to 17 px passes it,
+  by its arithmetic, and an 18 px one fails it. Task 1's reading, that the branch scrolls only where `main` does, had
+  measured every fold open and not the default folds.
+- **`#paint` measures `ch` on every paint,** scrolls included, to pick the strip (`#lanesNow`: a `getComputedStyle`
+  and a `measureText`). What that costs was not measured.
+- **The width test pins the 2ch right margin `columns()`'s `- 4` leaves.** That `- 4` came in with #106 (`ec79f21`)
+  with no recorded reason; a change to it is a change to the test.
+- **`markedNodes`' guard against a copy cut off at the top is not shown to be needed.** A probe at `ccff474` cut the
+  `fact(4)` test's rows above its inner copy's start and above its end: the guard failed the read at the cut both
+  times, and a looser guard failed it too, in the first case at the row after the inner copy's end. By reading, not by
+  a run, the looser guard is silent only where nothing after the cut needs an open copy: a meet row drawn first, or a
+  tee start whose outer copy ends on the inner's last row. `fact(4)` at step 27 has neither.
+- **`fact(4)` at step 27 at 80 columns** laid out as 29 lines in a browser drive at `d984f69` and as 33 in the app test.
+  Round 2c showed the view's height does not change the layout; why the two differ is not known.
+- **One whole-suite run in fix round 1 hung,** after 22:35:44, with four browser files the branch does not touch
+  reported skipped; it was killed, and the run after it at the same tree passed. The cause is not known. At `c2fd87b`
+  two whole-suite runs failed in files the branch does not touch, one on a 10,000 ms timeout and one in four files,
+  where the log shows "Failed to fetch dynamically imported module"; each failing file passed alone, and the gates'
+  coverage run that followed passed whole. On the tree committed as `eabb1ae` one more failed in
+  `buffers-quota-restored.test.ts`, which the branch does not touch, with the same message, and passed alone. The
+  gates' coverage run at `eabb1ae` and the whole-suite runs at `1bf93c7` and `4d5a136` passed whole, which says
+  nothing of a fault that comes and goes.
+- **Round 2c's commit, `ccff474`, was read by the controller** and by no reviewer. `4d5a136`, written after the narrow
+  strip's last re-review, was read by the controller and by no reviewer.
+
+##### VERIFICATION
+
+The gates ran by `$R/gates/gates.sh` in the checkout at `eabb1ae`, started at 08:33 UTC on 2026-11-02, with `git
+status --porcelain` printing 0 lines before and after, under a 1-minute load average of 4.28 at the start; the same
+script had passed at `c2fd87b`, 30 of 30. `46d5624`, `1bf93c7` and `4d5a136`, after it, change `web/` alone, and on
+each the typecheck, `biome ci` and the comment guard passed; the gates did not run again. The one file outside `web/`
+the branch changes is this one, and no Rust source reads a file under `docs/`, so the gates ran no Rust job; in CI the
+Rust jobs run, as `docs_only` is false. Nothing has run in CI: the branch has not been pushed.
+
+```
+scripts/ci-docs-only.sh --self-test, then 29e6a83 eabb1ae → exit 0 each; docs_only=false
+scripts/check-{text-bytes,citations,attributions,doc-figures,shared-docs,colours,grammar-wasm,lua}.sh,
+  --self-test then alone                                   → 16 of 16 exit 0
+node scripts/check-comments.mjs --self-test, then --base 29e6a83
+                                                           → exit 0 each; 224 cases; 15 areas within budget,
+                                                             no history and no grown block in 10 changed files
+pnpm install --frozen-lockfile; build:wasm; build:lsp-wasm; build:bindings
+                                                           → exit 0 each
+../scripts/check-licences.sh --self-test, then alone       → exit 0 each
+pnpm exec biome ci --error-on-warnings                     → exit 0, 432 files
+pnpm run typecheck                                         → exit 0
+pnpm run test:coverage                                     → exit 0, 281 files / 2,950 tests; 97.64 / 92.32 / 98.41 /
+                                                             98.94 against 95 / 89 / 97 / 97
+pnpm run build:app                                         → exit 0; `term-bar` in 1 CSS and 1 JS asset
+docker build --build-arg COMMIT_HASH=eabb1ae…, then run    → healthy after 3 polls; / and /help.html 200; 7 .wasm
+                                                             assets; the commit in 1 bundle file; `term-bar` in 1 CSS
+                                                             and 1 JS file
+```
+
+At `4d5a136`, on 2026-11-02, the whole web suite passed: `pnpm exec vitest run` from `web/`, 281 files and 2,951
+tests; at `1bf93c7` it had passed with the same counts. Under a 50% CPU cap at `eabb1ae`, the three files that test
+the marks passed, 3 files and 96 tests, and the slowest new or changed case took 2,180 ms of its 15,000, the `fact(4)`
+app test. The cases changed after `eabb1ae` were not timed under the cap: in `lambda-body.test.ts` the case that takes
+the narrow strip off `columns()`, which `1bf93c7` extended past the threshold, and the bracket `it.each`, to which
+`1bf93c7` added the focus ring and `4d5a136` the ring's spread and blur; and the 390 by 844 px app test, which
+`1bf93c7` added and `4d5a136` renamed and made wait for the viewport.
+
+**The counts of boxes and the sideways scroll** were read on 2026-11-01 by `$R/t6-measure.js`, a script run in the
+page with chrome-devtools: `main` at `29e6a83` from a scratch worktree served on port 5174, and the branch at
+`ccff474` from the checkout's dev server on port 5173, each page in a browser context of its own with no stored site
+data. It opens the λ view, waits for step 0 of the default program, `sum_to(5)`, counts, clicks the first `λ` token,
+which links the root, counts, opens every fold, and then reads the rows at every half-view down the term. A box is an
+element in the rows that draws an outline, a box shadow or a border, the strip and its pieces aside (`harness.ts`'s
+`wordEdges`). In that Chrome the λ pane at 390 by 844 px draws a classic scroll bar, so the term is 174 px wide: the
+figures at that size, and at 320 by 568 px, are desktop Chrome's, not a phone's. On 2026-11-02 the same script, with
+a `strip` field added, read the branch on the tree that became `eabb1ae`, before two edits that change no value, and
+`main` at 320 by 568 px from a scratch worktree served on port 5174; the 390 by 844 px default-folds figure was read
+again at `eabb1ae`.
+
+**Every count this entry quotes, with what produces it.** Commands run from the checkout's root, or from `web/` for
+`pnpm`, with `R=~/temp/redextape-lambda-marks-record`.
+
+| Value | What | Produced by |
+|---|---|---|
+| 9; 12 | commits changing `web/src/`; commits changing `web/tests/` | `git rev-list --count 29e6a83..ccff474 -- web/src`, and `-- web/tests` |
+| 4; 4 and 3 | commits after this entry's first version; those changing `web/src/` and `web/tests/` | `git rev-list --count 55ea0bd..4d5a136`, alone, `-- web/src` and `-- web/tests` |
+| 0; 10 files, +845 −89 | files changed outside `web/`; the range | `git diff --name-only 29e6a83 ccff474 \| grep -cv '^web/'`; `git diff --shortstat 29e6a83 ccff474` |
+| 1; 10 files, +1,046 −93 | files changed outside `web/` to `4d5a136`, the roadmap; the range in `web/` | `git diff --name-only 29e6a83 4d5a136 \| grep -cv '^web/'`; `git diff --shortstat 29e6a83 4d5a136 -- web` |
+| 19; 16, 2 and 1; 0; 3 | test cases added to `4d5a136`; in `lambda-body`, `lambda-tree-app` and `app`; removed; those run at two widths | `git diff 29e6a83 4d5a136 -- web/tests \| grep -cE '^\+\s+it(\.each\([^)]*\))?\('`, by file, with `^-`, and `grep -cE '^\+\s+it\.each\('` |
+| 640 and 174 px | the two bodies the 3 cases run in | `WIDTHS` in `web/tests/browser/lambda-body.test.ts` |
+| 11 on 2 rows; 341 on 30 | boxes on `main` at 1400 by 900 px, step 0: default folds, before and after the click; every fold open, at the top | `edged` and `drawn` in `$R/t6-measure-main-1400.json` |
+| 0 then 11 | `main`'s tokens marked linked before and after the click on `λ`, at the default folds | `linkedClass` 0 under `defaultFolds` and 11 under `defaultFoldsPinned` in `$R/t6-measure-main-1400.json` |
+| 0; 30 and 30 | boxes on the branch in the same states; next-redex and link pieces at the top, every fold open | `edged`, `redexPieces` and `linkPieces` in `$R/t6-measure-branch-1400.json` at `ccff474` and `$R/narrow-measure-branch-1400.json` at `eabb1ae` |
+| 242 and 225; 8 and 0; 0 and 0 | in desktop Chrome, the most the term scrolls sideways at 390 by 844 px, every fold open, the branch at `ccff474` and `main`; at the default folds; at 1400 by 900 px | `maxOverflow`, and `overflow` under `defaultFolds`, in `$R/t6-measure-{branch,main}-{390,1400}.json` |
+| 0; 233 and 225; 0.625 px | in desktop Chrome at 390 by 844 px, the branch at `eabb1ae`: the sideways scroll at the default folds; the most with every fold open, and `main`'s; the first row's room to spare | `overflow` under `defaultFolds` and `maxOverflow` in `$R/narrow-measure-branch-390.json` and `$R/t6-measure-main-390.json`; the row's end at x 173.375 of 174, a drive at `eabb1ae`, in `$R/lm-narrow-report.md` |
+| 34 and 25; 268 and 260 | in desktop Chrome at 320 by 568 px, the branch at `eabb1ae` and `main`: the sideways scroll at the default folds; the most with every fold open | `overflow` under `defaultFolds` and `maxOverflow` in `$R/narrow-measure-{branch,main}-320.json` |
+| 174 and 189 px; 15 px | the λ term at 390 by 844 px in desktop Chrome, and the pane it sits in; the pane's scroll bar | `clientWidth` in `$R/t6-measure-*-390.json`; the pane's `offsetWidth` 189 and `clientWidth` 174, a drive in the narrow fix round, in `$R/lm-narrow-report.md` |
+| 8.0 and 7.82 px | `ch` in the tests' browser and in desktop Chrome | `$R/lm-narrow-report.md`, the narrow fix round's I1 and the width rule |
+| about 245 px | the term's width in desktop Chrome below which the strip is 9 px | `lanesFor` in `web/src/lambda-body.ts`, narrow where `room(width, LANES, ch)` is at most 24, so below 18 + 29ch, with `ch` 7.82 px |
+| 24 | the columns `columns()` returns in desktop Chrome at 390 by 844 px, on both, with either strip | its formula in `web/src/lambda-body.ts`, `Math.max(24, room(clientWidth, lanes, ch))` where `room` is `Math.floor((width - lanes) / ch) - 4`, `main`'s without `lanes`, with `clientWidth` 174 and 159 from the JSON files and desktop Chrome's `ch` 7.82 px from `$R/lm-narrow-report.md` |
+| 3-6, 8-10 and 12-17 px; 3 px; 18 px; 2-3, 4-5 and 6-9 px; 9 px | the 18 px strip's lanes; the inset; that strip; the 9 px strip's lanes; that strip | `web/src/style.css`, `.term-bar[data-lane=…]` in strokes of `--bar-line`, a ninth of `--lanes`, and `--bar-inset`; `LANES` and `NARROW_LANES` in `web/src/lambda-body.ts`; the 9 px strip's lanes read in a drive at 390 by 844 px, in `$R/lm-narrow-report.md` |
+| 46; 5 of 5; 4 of 5 | sabotages in all; those on `eabb1ae`'s tests failing a test on their first run; those on the narrow fix round's | the `Tests` lines of `$R/narrow-sab/s1.log` to `s5.log` and of the five `$R/nf-sab/s*.log` |
+| 7 of 41 | cases failing with the strip never turning narrow | `$R/narrow-sab/s1.log` |
+| 18; 10; 17 | the narrow strip that fails the 390 by 844 px app test; one that passes it; the widest that passes it, by its arithmetic | `$R/nf-sab/s2b-narrow-as-wide.log`, `sideways scroll in the sized term: expected 1 to be +0`; `$R/nf-sab/s1-narrow-10.log`, `Tests  9 passed (9)`; the term sized to `ceil(LANES + 21ch) - 1` in `web/tests/browser/lambda-tree-app.test.ts` |
+| 36; 27 and 9; 26 of 27 | sabotages before the narrow strip; on Task 2's tests and on fix rounds 2 and 2b; those on Task 2's tests failing a test on their first run | `numFailedTests` of at least 1 in each of the 29 `$R/t3-logs/*.json` and the 9 `$R/fix2/sab/*.json`, less `columns-no-lanes-run1.json`, a second run, and `run-opens-at-row-start.json`, the edit aimed wrong, at 0; for the 26, also less `columns-no-lanes.json`, a run after `67e0c88` |
+| 22 of 84 | cases failing under per-token marks | `$R/t3-logs/per-token.json` |
+| the 27th failing nothing | `columns()` keeping the strip, before `67e0c88` | `$R/lm-task-3-report.md` and `$R/progress.md` only: that run's log was overwritten by the two runs after `67e0c88` |
+| 2 of 2; -2 and 15.5 | those two runs, each failing `67e0c88`'s test alone; its message | `$R/t3-logs/columns-no-lanes.log` and `columns-no-lanes-run1.json` |
+| 8 of 8; 1 of 36 | fix round 2's sabotages failing a test; the ninth's failures, the adjacent-copies test alone | the `Tests` lines of `$R/fix2/sab/s1-*.log` to `s8-*.log`; `$R/fix2/sab/s9-tee-by-neighbour-row.json` |
+| rows 1-26 and 23-24; 29 | the `fact(4)` copies at step 27; its lines | `$R/fix2/before-fact4.txt`, a chrome-devtools drive at `d984f69` |
+| 33 | the same state in the app test | `$R/fix2/probe-2c-rows-strict.log`, `PROBE ticks 33` |
+| a piece outside the view's strip | F1's test before its fix | `$R/fix1/f1-red.log`: `a piece in the view’s strip: expected [ false, true ] to deeply equal [ true, true ]` |
+| `fact(4)`, `map and fold`, `is_even(6)`, `fact(12)`; `double(1 + 2)` | programs whose linked copies share a row with the automatic folds; one whose do not | `combos with a shared row`, above 0 and at 0 (`double`), in `$R/fix1/f2-probe-auto.log` |
+| 19.6, 1.3 and 1.4 ms; 34,896; 413 | `showTree` with the link, without it, and with it after `d984f69`; tokens; copies | `map300 folds open` in `$R/fix1/f4-before2.log` and `$R/fix1/f4-after.log` |
+| 20,664; 0 | inputs compared; those whose spans differ | `F4EQUIV` in `$R/fix1/f4-equiv.log` |
+| 25 and 28; 29 and 28; 25 and 28 | the rows at which the guard and the looser guard failed; the inner copy's start and end | `$R/fix2/probe-2c-rows-strict.log` and `probe-2c-rows-loosened.log` |
+| 22:35:44; 4 | the hung run's last output; the files reported skipped | `$R/fix1/full-suite-2.log` |
+| 2,940 | the run after it | `$R/fix1/full-suite-3.log` |
+| 1 of 2,950; 1 of 1 | the run on the tree committed as `eabb1ae` failing, in `buffers-quota-restored.test.ts`; that file alone | `$R/narrow-full-suite.log`; `$R/narrow-buffers-quota-rerun.log` |
+| 281 and 2,951 | files and tests of the whole web suite at `1bf93c7` and at `4d5a136` | `pnpm exec vitest run` from `web/`, `$R/nf-full-suite-2.log` and `$R/lf-a-full-suite.log` |
+| 10,000 ms; 4; 4 of 4 and 1 of 1 alone | the two failing runs at `c2fd87b`; the files of the second; each failing file run alone | `$R/fix2/full-suite-2b.log`, `full-suite-2b-2.log`, `rerun-four.log` and `buffers-quota-rerun.log` |
+| 30 of 30; 4.28 | gates at `eabb1ae`; the load at the start | `$R/gates/gates.txt` |
+| 30 of 30 | gates at `c2fd87b` | `$R/gates/gates-c2fd87b.txt` |
+| exit 0 each; 15 areas within budget | the typecheck, `biome ci` and the comment guard at `46d5624`, `1bf93c7` and `4d5a136` | `$R/lm-narrow-report.md` (`nf-m4-*.log`, `nf-*-2.log`); `$R/lf-a-typecheck.log`, `lf-a-biome.log` and `lf-a-comments.log` |
+| 224; 15; 10 | the comment guard's cases; areas; changed files | `$R/gates/g-comments--self-test.log` and `g-comments.log` |
+| 432 | files `biome` checked | `$R/gates/g-biome.log` |
+| 281 and 2,950; 97.64 / 92.32 / 98.41 / 98.94 against 95 / 89 / 97 / 97 | files and tests; coverage against the floors | `$R/gates/g-cov.log`; `thresholds` in `web/vite.config.ts` |
+| 3 and 96 | files and tests under the cap at `eabb1ae` | `$R/gates/timing.log` |
+| 2,180 of 15,000 ms | the slowest new or changed case under the cap at `eabb1ae`; its timeout | `systemd-run --user --scope -q -p CPUQuota=50% --setenv=PATH="$PATH"` round `pnpm exec vitest run --project browser` on the three files, `$R/gates/timing.json`; the timeout as `web/tests/browser/harness.ts` states it |
+| 15 | commits in the range | `git rev-list --count 29e6a83..ccff474` |

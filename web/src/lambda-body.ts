@@ -10,6 +10,38 @@ import { visibleWindow } from './virtual-list'
 export const LINE_HEIGHT = 20
 /** Rows drawn past each edge of the viewport, so a short scroll never shows an empty band. */
 const OVERSCAN = 6
+/**
+ * The wide strip at every row's start that a mark on a node of more than one row is drawn in, in CSS pixels.
+ * `style.css` draws its `.term-bar` lanes in strokes of a ninth of the strip, so this and `NARROW_LANES` stay
+ * multiples of 9, for whole-pixel strokes. It stays at the view's left edge when the term scrolls sideways, as a
+ * bar scrolled out of view would leave its node unmarked.
+ *
+ * **A STRIP OF ITS OWN, NOT THE ROW'S `2ch` MARGIN.** That margin is the `▸`/`▾` glyph's, and it moves with
+ * the indent: at indent 0 — the root's row, the one a mark on the root starts on — the glyph fills it. Every
+ * row keeps the strip whether or not a mark is showing, so no mark that comes or goes moves the text.
+ */
+export const LANES = 18
+/**
+ * The strip's width in a body too narrow for `LANES` (`lanesFor`): nine strokes of 1px, the thinnest. Nine is the
+ * least that holds the three lines and the gaps between them, the bracket's tick past its line, and the focus
+ * ring's 2px before the first line, touching it but not over it, so the lanes still differ by shape, not only by
+ * colour.
+ */
+export const NARROW_LANES = 9
+/** The fewest characters a line is laid out to, however narrow the body. */
+const FLOOR = 24
+
+/** Characters that fit a body `width` px wide past a strip `lanes` px wide, keeping the gutter and 2ch clear. */
+const room = (width: number, lanes: number, ch: number) => Math.floor((width - lanes) / ch) - 4
+
+/**
+ * The strip's width in a body `width` px wide, for characters `ch` px wide: `NARROW_LANES` where `LANES` would leave
+ * the layout at its floor, so a body at the floor gives less of its width to the strip.
+ *
+ * **DECIDED WITH `LANES` WHATEVER STRIP IS DRAWN.** The narrow strip raises `columns()`, and a choice made from
+ * the columns it gave would turn the strip wide again.
+ */
+const lanesFor = (width: number, ch: number) => (room(width, LANES, ch) <= FLOOR ? NARROW_LANES : LANES)
 
 /** What the λ view asks of its owner when a row is used. */
 export type BodyEvents = {
@@ -25,7 +57,7 @@ export type BodyEvents = {
 }
 
 /**
- * The class a mark adds, and the words a screen reader hears where it starts.
+ * The class a mark adds, and the words a screen reader hears where its node starts — once, on the node's first row.
  *
  * **THE WORDS ARE CSS GENERATED CONTENT, NOT TEXT NODES** (`[data-marks]::before { content: attr(…) }`,
  * visually hidden). Generated content is part of what a screen reader reads, and it is not part of
@@ -38,6 +70,94 @@ const MARKS = {
   'is-linked': 'linked:',
 } as const
 type Mark = keyof typeof MARKS
+
+/** A mark on one node, and the rows the node's tokens are on. */
+type MarkSpan = {
+  readonly mark: Mark
+  readonly node: number
+  /** The first row holding one of the node's tokens. */
+  readonly first: number
+  /** That token's place in its row: where the mark's words are read. */
+  readonly at: number
+  /** The last row holding one of the node's tokens. */
+  readonly last: number
+}
+
+/**
+ * Where each mark on `tree` falls in `lines`: the next redex, the contractum, and every node `linked` names. A
+ * mark whose node no line shows — folded away inside another node — is left out, as no token of it is drawn.
+ *
+ * **ONE PASS OVER EVERY TOKEN, NOT ONE PER ROW DRAWN.** A row outside the virtual window is not in the DOM, so a
+ * mark that spans rows is drawn by each of its rows from the line indices kept here, not measured from elements.
+ * **AND NOT ONE PER MARK**: every node's rows are found at once, as a link to a construct reduction has copied
+ * hundreds of times would otherwise pay the whole pass once per copy.
+ */
+function markSpans(tree: Tree, lines: readonly Line[], linked: readonly number[]): MarkSpan[] {
+  const marks: [Mark, number][] = []
+  const add = (mark: Mark, node: number | null) => {
+    if (node !== null) marks.push([mark, node])
+  }
+  add('is-next-redex', tree.wire.nextRedex)
+  add('is-contractum', tree.wire.contractum)
+  for (const l of linked) add('is-linked', l)
+  if (marks.length === 0) return []
+  // Each node's first token, as its row and its place in that row, and its last row; -1 where none is drawn.
+  const first = new Int32Array(tree.count).fill(-1)
+  const at = new Int32Array(tree.count)
+  const last = new Int32Array(tree.count).fill(-1)
+  for (const [i, line] of lines.entries()) {
+    for (const [k, tok] of line.tokens.entries()) {
+      if ((first[tok.node] as number) < 0) {
+        first[tok.node] = i
+        at[tok.node] = k
+      }
+      last[tok.node] = i
+    }
+  }
+  // A CHILD COMES AFTER ITS PARENT IN PRE-ORDER, so walking back reaches each node with its subtree folded in.
+  for (let c = tree.count - 1; c > 0; c -= 1) {
+    const f = first[c] as number
+    if (f < 0) continue
+    const p = tree.parent[c] as number
+    const fp = first[p] as number
+    if (fp < 0 || f < fp || (f === fp && (at[c] as number) < (at[p] as number))) {
+      first[p] = f
+      at[p] = at[c] as number
+    }
+    if ((last[c] as number) > (last[p] as number)) last[p] = last[c] as number
+  }
+  const out: MarkSpan[] = []
+  for (const [mark, node] of marks) {
+    const f = first[node] as number
+    if (f >= 0) out.push({ mark, node, first: f, at: at[node] as number, last: last[node] as number })
+  }
+  return out
+}
+
+/**
+ * Row `i`'s one piece of `mark`'s bar, for `spans`, the nodes of more than one row it marks that hold row `i`.
+ * **ONE PIECE HOWEVER MANY NODES**: a link's copies of one construct nest or meet on a row, and two pieces in
+ * one lane draw over each other. Each node's first and last rows get a tick; where the line runs on through
+ * that edge, for a node round it or one that meets it on that row, the tick is a tee (`data-tee`), so a corner
+ * is where the line stops.
+ */
+function bar(mark: Mark, spans: readonly MarkSpan[], i: number): HTMLElement {
+  const el = document.createElement('span')
+  el.className = 'term-bar'
+  el.dataset.lane = mark.slice('is-'.length)
+  const tee: string[] = []
+  if (spans.some((s) => s.first === i)) {
+    el.dataset.first = ''
+    if (spans.some((s) => s.first < i)) tee.push('first')
+  }
+  if (spans.some((s) => s.last === i)) {
+    el.dataset.last = ''
+    if (spans.some((s) => s.last > i)) tee.push('last')
+  }
+  if (tee.length > 0) el.dataset.tee = tee.join(' ')
+  el.setAttribute('aria-hidden', 'true')
+  return el
+}
 
 function tokenClass(tok: Token): string {
   switch (tok.kind) {
@@ -120,14 +240,30 @@ export function flatText(frame: LambdaState | null, note: string | null): Node[]
     to = byteIndexAt(map, frame.redex_span.end)
   }
   const out: Node[] = []
+  // THE CONTRACTUM IS ONE SPAN ROUND ITS RUN, the text between its tokens included, so it is drawn as one wash
+  // and one underline rather than one round each word.
+  let mark: HTMLElement | null = null
   let at = 0
   for (const r of ranges) {
     if (r.from < at) continue
-    if (r.from > at) out.push(document.createTextNode(frame.text.slice(at, r.from)))
+    const inside = to > from && r.from >= from && r.to <= to
+    if (!inside) mark = null
+    // A GAP GOES INSIDE ONLY BETWEEN TWO OF THE CONTRACTUM'S TOKENS: the one before its first is not its text.
+    if (r.from > at) {
+      const gap = document.createTextNode(frame.text.slice(at, r.from))
+      if (mark === null) out.push(gap)
+      else mark.append(gap)
+    }
+    if (inside && mark === null) {
+      mark = document.createElement('span')
+      mark.className = 'term-mark is-contractum'
+      out.push(mark)
+    }
     const el = document.createElement('span')
-    el.className = to > from && r.from >= from && r.to <= to ? `${r.className} is-contractum` : r.className
+    el.className = r.className
     el.textContent = frame.text.slice(r.from, r.to)
-    out.push(el)
+    if (mark === null) out.push(el)
+    else mark.append(el)
     at = r.to
   }
   if (at < frame.text.length) out.push(document.createTextNode(frame.text.slice(at)))
@@ -189,9 +325,13 @@ export class LambdaBody {
   #tree: Tree | null = null
   #lines: readonly Line[] = []
   #linked: readonly number[] = []
+  /** Where the marks on `#tree` fall in `#lines`, kept until either changes. */
+  #spans: readonly MarkSpan[] = []
   #outline = false
   #active = 0
   #painted = ''
+  /** The strip's width the drawn rows have, from `lanesFor` at the last paint. */
+  #lanes = LANES
   /** The body's height at its last paint: how its `scroll` handler tells a clamp from a user's scroll. */
   #drawnHeight = 0
 
@@ -251,12 +391,25 @@ export class LambdaBody {
    * every term it drew.
    */
   columns(): number {
+    const ch = this.#ch()
+    if (ch === null) return 80
+    const width = this.el.clientWidth
+    return Math.max(FLOOR, room(width, lanesFor(width, ch), ch))
+  }
+
+  /** The width of one character of the body's font, or `null` where there is none to measure. */
+  #ch(): number | null {
     const ctx = measurer()
-    if (ctx === null || this.el.clientWidth === 0) return 80
+    if (ctx === null || this.el.clientWidth === 0) return null
     ctx.font = getComputedStyle(this.el).font
     const ch = ctx.measureText('0000000000').width / 10
-    if (!(ch > 0)) return 80
-    return Math.max(24, Math.floor(this.el.clientWidth / ch) - 4)
+    return ch > 0 ? ch : null
+  }
+
+  /** The strip's width at the body's width now: the one `columns()` takes off the layout's. */
+  #lanesNow(): number {
+    const ch = this.#ch()
+    return ch === null ? LANES : lanesFor(this.el.clientWidth, ch)
   }
 
   get following(): boolean {
@@ -298,6 +451,7 @@ export class LambdaBody {
       this.#tree = tree
       this.#lines = lines
       this.#linked = linked
+      this.#spans = markSpans(tree, lines, linked)
       this.#outline = outline
       this.#active = Math.min(this.#active, Math.max(0, lines.length - 1))
       this.#painted = ''
@@ -348,16 +502,6 @@ export class LambdaBody {
 
   #rowId(i: number): string {
     return `term-${this.#id}-row-${i}`
-  }
-
-  #marks(tree: Tree, node: number): Mark[] {
-    const out: Mark[] = []
-    const r = tree.wire.nextRedex
-    if (r !== null && tree.contains(r, node)) out.push('is-next-redex')
-    const c = tree.wire.contractum
-    if (c !== null && tree.contains(c, node)) out.push('is-contractum')
-    if (this.#linked.some((l) => tree.contains(l, node))) out.push('is-linked')
-    return out
   }
 
   /**
@@ -417,11 +561,15 @@ export class LambdaBody {
       this.#active = Math.min(Math.max(this.#active, top), bottom, this.#lines.length - 1)
     }
     const w = visibleWindow(this.#lines.length, LINE_HEIGHT, viewport, this.el.scrollTop, OVERSCAN)
-    const key = `${w.firstIndex}:${w.lastIndex}:${this.#active}`
+    // THE STRIP'S WIDTH IS IN THE KEY: a resize across `lanesFor`'s threshold changes no drawn row's index.
+    this.#lanes = this.#lanesNow()
+    const key = `${w.firstIndex}:${w.lastIndex}:${this.#active}:${this.#lanes}`
     if (key === this.#painted) return
     this.#painted = key
     const mine = this.el.scrollTop
     this.#rows.style.transform = `translateY(${w.offsetY}px)`
+    // THE STRIP'S WIDTH HAS ONE SOURCE, the one `columns()` takes off the layout's width.
+    this.#rows.style.setProperty('--lanes', `${this.#lanes}px`)
     const rows: HTMLElement[] = []
     for (let i = w.firstIndex; i <= w.lastIndex; i += 1) rows.push(this.#row(tree, i))
     this.#rows.replaceChildren(...rows)
@@ -448,11 +596,14 @@ export class LambdaBody {
     el.setAttribute('aria-setsize', String(this.#lines.length))
     el.setAttribute('aria-posinset', String(i + 1))
     el.setAttribute('aria-level', String(line.level))
+    const lanes = document.createElement('span')
+    lanes.className = 'term-lanes'
+    lanes.setAttribute('aria-hidden', 'true')
     const gutter = document.createElement('span')
     gutter.className = 'term-gutter'
     gutter.setAttribute('aria-hidden', 'true')
-    // THE GLYPH IS CSS (`.term-gutter[data-open]::before`), NOT TEXT, and so is the indentation — a
-    // reader of `.term`'s text reads the term, not the chrome drawn around it.
+    // THE GLYPH IS CSS (`.term-gutter[data-open]::before`), NOT TEXT, and so is the indentation — the gutter's
+    // margin — so a reader of `.term`'s text reads the term, not the chrome drawn around it.
     const d = disclosure(tree, line)
     if (d !== null) {
       gutter.dataset.open = String(d.open)
@@ -462,19 +613,41 @@ export class LambdaBody {
       gutter.title = d.open ? 'fold' : 'open'
       el.setAttribute('aria-expanded', String(d.open))
     }
-    el.style.paddingInlineStart = `calc(2ch + ${line.indent}ch)`
-    el.append(gutter)
-    let before: Mark[] = []
-    for (const tok of line.tokens) {
-      const marks = this.#marks(tree, tok.node)
-      const starting = marks.filter((m) => !before.includes(m)).map((m) => MARKS[m])
-      before = marks
+    gutter.style.marginInlineStart = `${line.indent}ch`
+    el.append(lanes, gutter)
+    // A MARK IS DRAWN ONCE PER NODE, NEVER ONCE PER TOKEN: drawn round every word, a mark on the root boxes the
+    // whole term and the term cannot be read. A node of more than one row is marked by a bar in its mark's lane,
+    // one piece per row, so a bar never covers text; a node inside one row by one span round its run of tokens.
+    const here = this.#spans.filter((s) => s.first <= i && i <= s.last).sort((a, b) => a.node - b.node)
+    for (const mark of Object.keys(MARKS) as Mark[]) {
+      const tall = here.filter((s) => s.mark === mark && s.first < s.last)
+      if (tall.length > 0) lanes.append(bar(mark, tall, i))
+    }
+    // ONE SPAN PER NODE, ITS MARKS ITS CLASSES, so two marks on one node both show (`style.css` draws each pair).
+    // Nodes nest and a node's tokens are one unbroken run, so the runs on a row nest too; ascending order is
+    // outermost first, and each run opens inside the innermost one still open.
+    const runs = new Map<number, Mark[]>()
+    for (const s of here) if (s.first === s.last) runs.set(s.node, [...(runs.get(s.node) ?? []), s.mark])
+    const open: { node: number; el: HTMLElement }[] = []
+    for (const [k, tok] of line.tokens.entries()) {
+      const closed = open.findIndex((o) => !tree.contains(o.node, tok.node))
+      if (closed >= 0) open.length = closed
+      for (const [node, marks] of runs) {
+        if (!tree.contains(node, tok.node) || open.some((o) => o.node === node)) continue
+        const run = document.createElement('span')
+        run.className = ['term-mark', ...marks].join(' ')
+        ;(open.at(-1)?.el ?? el).append(run)
+        open.push({ node, el: run })
+      }
+      const starting = (Object.keys(MARKS) as Mark[]).filter((m) =>
+        here.some((s) => s.mark === m && s.first === i && s.at === k),
+      )
       const span = document.createElement('span')
-      span.className = [tokenClass(tok), ...marks].join(' ')
+      span.className = tokenClass(tok)
       span.dataset.node = String(tok.node)
-      if (starting.length > 0) span.dataset.marks = `${starting.join(' ')} `
+      if (starting.length > 0) span.dataset.marks = `${starting.map((m) => MARKS[m]).join(' ')} `
       span.textContent = tok.text
-      el.append(span)
+      ;(open.at(-1)?.el ?? el).append(span)
     }
     return el
   }
