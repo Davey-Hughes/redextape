@@ -6,7 +6,7 @@
   "packages": [
     {
       "name": "@codemirror/commands",
-      "version": "6.10.4",
+      "version": "6.11.1",
       "spdx": "MIT",
       "group": "code",
       "url": "https://code.haverbeke.berlin/codemirror/commands",
@@ -19,7 +19,7 @@
     },
     {
       "name": "@codemirror/language",
-      "version": "6.12.4",
+      "version": "6.13.1",
       "spdx": "MIT",
       "group": "code",
       "url": "https://code.haverbeke.berlin/codemirror/language",
@@ -58,7 +58,7 @@
     },
     {
       "name": "@codemirror/state",
-      "version": "6.7.1",
+      "version": "6.7.6",
       "spdx": "MIT",
       "group": "code",
       "url": "https://code.haverbeke.berlin/codemirror/state",
@@ -70,8 +70,21 @@
       ]
     },
     {
+      "name": "@codemirror/streamparser",
+      "version": "6.0.0",
+      "spdx": "MIT",
+      "group": "code",
+      "url": "https://code.haverbeke.berlin/codemirror/streamparser",
+      "files": [
+        {
+          "file": "LICENSE",
+          "text": "05c6130cda97e760"
+        }
+      ]
+    },
+    {
       "name": "@codemirror/view",
-      "version": "6.43.8",
+      "version": "6.43.15",
       "spdx": "MIT",
       "group": "code",
       "url": "https://code.haverbeke.berlin/codemirror/view",
@@ -84,10 +97,10 @@
     },
     {
       "name": "@lezer/common",
-      "version": "1.5.2",
+      "version": "1.5.5",
       "spdx": "MIT",
       "group": "code",
-      "url": "https://github.com/lezer-parser/common",
+      "url": "https://code.haverbeke.berlin/lezer/common",
       "files": [
         {
           "file": "LICENSE",
@@ -97,10 +110,10 @@
     },
     {
       "name": "@lezer/highlight",
-      "version": "1.2.3",
+      "version": "1.2.5",
       "spdx": "MIT",
       "group": "code",
-      "url": "https://github.com/lezer-parser/highlight",
+      "url": "https://code.haverbeke.berlin/lezer/highlight",
       "files": [
         {
           "file": "LICENSE",
@@ -110,7 +123,7 @@
     },
     {
       "name": "@lezer/lr",
-      "version": "1.4.10",
+      "version": "1.4.12",
       "spdx": "MIT",
       "group": "code",
       "url": "https://code.haverbeke.berlin/lezer/lr",
@@ -123,7 +136,7 @@
     },
     {
       "name": "@marijn/find-cluster-break",
-      "version": "1.0.3",
+      "version": "1.0.4",
       "spdx": "MIT",
       "group": "code",
       "url": "https://code.haverbeke.berlin/marijn/find-cluster-break",
@@ -175,7 +188,7 @@
     },
     {
       "name": "rolldown",
-      "version": "1.2.3",
+      "version": "1.2.16",
       "spdx": "MIT",
       "group": "code",
       "url": "https://rolldown.rs/",
@@ -192,10 +205,10 @@
     },
     {
       "name": "style-mod",
-      "version": "4.1.3",
+      "version": "4.1.4",
       "spdx": "MIT",
       "group": "code",
-      "url": "https://github.com/marijnh/style-mod",
+      "url": "https://code.haverbeke.berlin/marijn/style-mod",
       "files": [
         {
           "file": "LICENSE",
@@ -205,7 +218,7 @@
     },
     {
       "name": "vite",
-      "version": "8.2.1",
+      "version": "8.3.5",
       "spdx": "MIT",
       "group": "code",
       "url": "https://vite.dev",
@@ -231,7 +244,7 @@
     },
     {
       "name": "web-tree-sitter",
-      "version": "0.27.0",
+      "version": "0.27.1",
       "spdx": "MIT",
       "group": "code",
       "url": "https://github.com/tree-sitter/tree-sitter",

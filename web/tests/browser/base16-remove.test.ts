@@ -143,6 +143,7 @@ describe('a stored half, in the import dialog', () => {
     const label = base16Dialog().querySelector<HTMLElement>('.base16-now-changes .base16-changes-label') as HTMLElement
     expect(getComputedStyle(label).textTransform).toBe('uppercase')
     expect(getComputedStyle(label.querySelector('.base16-scheme-name') as HTMLElement).textTransform).toBe('none')
+    // biome-ignore lint/performance/useDomNodeTextContent: only innerText applies the label's text-transform
     expect(label.innerText).toBe('DARK — Ember')
     await userEvent.keyboard('{Escape}')
   })

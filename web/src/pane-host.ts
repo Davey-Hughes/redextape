@@ -1021,7 +1021,7 @@ export function createPaneHost(deps: {
    * **AN EDITOR IS FOCUSED BY ITS OWN `focus()`, WHICH WRITES ITS SELECTION BACK AS IT FOCUSES, AND SCROLLS NOTHING.**
    * An editor that left the document comes back with no selection in it, and the browser puts one at the start of its
    * text when the DOM's `focus()` focuses it. CodeMirror puts back the one its state holds only where it hears of the
-   * change within 200 ms of the focus (`@codemirror/view` 6.43.8, `readSelectionRange`), and takes the start of the
+   * change within 200 ms of the focus (`@codemirror/view` 6.43.15, `readSelectionRange`), and takes the start of the
    * text for the user's caret after that. With the DOM's `focus()`, a key's gesture would be saved by the `dispatch`
    * below, which writes the selection too, and a pointer's, which returns before it, would leave the caret at the
    * start of the text.
@@ -1278,7 +1278,7 @@ export function createPaneHost(deps: {
    * Tell the editors of the views built in this rebuild that they are at their start.
    *
    * **AN EDITOR REMEMBERS WHERE IT WAS SCROLLED TO, AND PUTS ITSELF BACK THERE WHEN IT IS FOCUSED AT 0**
-   * (`@codemirror/view` 6.43.8, `observers.focus`: "When focusing reset the scroll position, move it back to where it
+   * (`@codemirror/view` 6.43.15, `observers.focus`: "When focusing reset the scroll position, move it back to where it
    * was"). It learns its position from the `scroll` events of its own scroll box. For a view that is kept that is
    * harmless, since `giveScrollBack` writes the position it remembers. For one that starts at its top it is not,
    * where a focus reaches the editor before any event has told it of its new position: the source editor is one

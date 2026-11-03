@@ -1,6 +1,7 @@
 import type { EditorView } from '@codemirror/view'
 import { beforeAll, describe, expect, it } from 'vitest'
-import { forwardButton, historyFills, SHELL, tmStepText } from './harness'
+import { userEvent } from 'vitest/browser'
+import { historyFills, SHELL, tmStepText, until } from './harness'
 
 /** The fixture that reaches a `budget` stop on the TM leg — `extend-during-recompile.test.ts`'s `BUDGET_SRC`. */
 const BUDGET_SRC =
@@ -21,9 +22,10 @@ describe('focus when a frontier control is withdrawn', () => {
   })
 
   // HALF ONE — IS THE MECHANISM REAL? A control which hides itself strands focus on `<body>` (item 1 of
-  // the umbrella's §9 accessibility list). This asserts that against the controls a recompile withdraws,
+  // the umbrella's §9 accessibility list), and so does one that becomes disabled. This hides the continue button by
+  // its `hidden`, which is how a recompile withdraws it, and disables a button of the test's own under its own click,
   // so half two below is a statement about reachability rather than about whether the hazard exists at all.
-  it('hiding or disabling the focused frontier control strands focus on body', async () => {
+  it('hiding the focused continue button, or disabling a focused button, strands focus on body', async () => {
     view.dispatch({ changes: { from: 0, to: view.state.doc.length, insert: BUDGET_SRC } })
     await historyFills()
 
@@ -34,15 +36,28 @@ describe('focus when a frontier control is withdrawn', () => {
     expect(document.activeElement).toBe(document.body)
     extend.hidden = false
 
-    // `forwardButton()`, NOT THE STRIP'S FIRST BUTTON, which is `↺`. Disabling any focused button
-    // strands focus, so a positional lookup would pass while naming the wrong control.
-    const forward = forwardButton()
-    expect(forward).toBeDefined()
-    forward?.focus()
-    expect(document.activeElement).toBe(forward)
-    if (forward !== undefined) forward.disabled = true
-    expect(document.activeElement).toBe(document.body)
-    if (forward !== undefined) forward.disabled = false
+    // CHROMIUM MOVES THE FOCUS OFF A DISABLED CONTROL AT ITS NEXT RENDERING UPDATE (the HTML spec's focus fixup rule),
+    // not in the task that disables it, so this waits for `<body>`. Fixed at the corner, the button scrolls nothing
+    // into view; it is the test's own, so the app's step buttons stay free to hand the focus on.
+    const button = document.createElement('button')
+    button.type = 'button'
+    button.textContent = 'disable me'
+    button.style.cssText = 'position: fixed; left: 0; top: 0; z-index: 2147483647'
+    button.addEventListener('click', () => {
+      button.disabled = true
+    })
+    let held = false
+    button.addEventListener('focus', () => (held = true), { once: true })
+    document.body.append(button)
+    try {
+      await userEvent.click(button)
+      expect(held, 'the click focused the button').toBe(true)
+      expect(button.disabled).toBe(true)
+      await until(() => document.activeElement === document.body, 'the focus to leave the disabled button for <body>')
+    } finally {
+      await userEvent.unhover(button)
+      button.remove()
+    }
   }, 90_000)
 
   // HALF TWO — CAN A USER GESTURE REACH IT? Every gesture that opens the window is itself a

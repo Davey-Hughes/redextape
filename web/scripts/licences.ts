@@ -66,7 +66,7 @@ export type Package = {
  *   that release's `library/Cargo.lock`): both builds link its `__multi3` and `memcmp`;
  * - `dlmalloc`'s and `hashbrown`'s licence files, from the crates that lockfile names (0.2.14 and 0.17.1): both
  *   builds carry their source paths, `/rust/deps/dlmalloc-0.2.14` and `/rust/deps/hashbrown-0.17.1`;
- * - Emscripten's `LICENSE` at 4.0.15, the version `web-tree-sitter` 0.27.0 is built with.
+ * - Emscripten's `LICENSE` at 4.0.15, the version `web-tree-sitter` 0.27.1 is built with.
  *
  * No version is shown on the page: the runtimes are whatever the toolchain in use compiles in, under the same
  * licences. `crate` is the name a `/rust/deps/` path gives, for the test that holds this list to the built files.

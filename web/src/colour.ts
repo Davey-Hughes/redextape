@@ -212,7 +212,7 @@ export type ColourSpan = { readonly from: number; readonly to: number; readonly 
  * The captures for the visible ranges, one span per range, in offset order.
  *
  * **THE QUERY'S RANGE BOUNDS ARE 2 × UTF-16 CODE UNITS AND THE CAPTURED NODE'S ARE NOT. DO NOT DELETE
- * THE `* 2`.** `web-tree-sitter` 0.27.0 passes `startIndex`/`endIndex` through to the wasm unchanged,
+ * THE `* 2`.** `web-tree-sitter` 0.27.1 passes `startIndex`/`endIndex` through to the wasm unchanged,
  * where they are offsets into a UTF-16 buffer measured in bytes; the `startIndex`/`endIndex` read back
  * off a captured node are divided by two on the way out. The API is asymmetric, one half of it agrees
  * with CodeMirror, and the halves look identical at the call site. Without the `* 2` the query gets a

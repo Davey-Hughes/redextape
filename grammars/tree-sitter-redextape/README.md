@@ -91,8 +91,8 @@ cd grammars/tree-sitter-redextape
   v0.25.10 needs only GLIBC_2.34 and produces byte-identical `grammar.json` and `node-types.json` at
   ABI 15. **Do not bump this until the runner image has glibc 2.39+.**
 - An earlier pin to "0.27.0" was read off a locally installed
-  `tree-sitter-cli-git` build, which reports the version it is heading toward; no such release exists and
-  CI would have failed to download it.
+  `tree-sitter-cli-git` build, which reports the version it is heading toward; no such release existed yet
+  (0.27.0 came out on 2026-08-30), so CI would have failed to download it.
 - **`tree-sitter.json` must be present.** Without it the released CLI prints a warning and *silently*
   generates ABI 14 instead of 15, which the `tree-sitter` Rust crate then refuses to load. The file is
   not decoration — it is what makes the pin reproducible.

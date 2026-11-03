@@ -3,7 +3,7 @@ import { userEvent } from 'vitest/browser'
 import { ROW_HEIGHT } from '../../src/state-table'
 import { type GridOptions, type GridRows, OVERSCAN, VirtualGrid } from '../../src/virtual-grid'
 import type { VisibleWindow } from '../../src/virtual-list'
-import { frame, scrolled, until } from './harness'
+import { frame, scrolled, steady, until } from './harness'
 
 /**
  * `VirtualGrid` on its own, with nothing of a view around it: the contract the TM rule table and the rxm listing both
@@ -83,6 +83,18 @@ const indexOf = (row: HTMLElement) => Number(row.getAttribute('aria-rowindex')) 
 const centred = (row: number, height: number, count: number) =>
   Math.max(0, Math.min(row * ROW_HEIGHT - Math.floor(height / 2) + ROW_HEIGHT / 2, count * ROW_HEIGHT - height))
 
+/**
+ * A user's scroll to the top: a real wheel, then the box at rest. **TWO FRAMES FIRST**: the grid's resize observer
+ * reports once after the grid is made, and its draw scrolls the box to the row following or a link holds, so a scroll
+ * made before that report can be undone by it before its own event arrives, which then reads as the echo of that draw.
+ */
+async function wheelToTop(el: HTMLElement): Promise<void> {
+  await frame()
+  await frame()
+  await userEvent.wheel(el, { delta: { y: -el.scrollHeight } })
+  await steady(() => el.scrollTop, 'the box under the wheel')
+}
+
 afterEach(() => {
   document.body.innerHTML = ''
 })
@@ -157,7 +169,7 @@ describe('a virtual grid', () => {
     made.grid.draw()
     expect(made.grid.el.scrollTop).toBe(centred(500, 240, 1000))
     expect(made.grid.following).toBe(true)
-    made.grid.el.scrollTop = 0
+    await wheelToTop(made.grid.el)
     await until(() => !made.grid.following, 'a user scroll to detach following')
     made.grid.draw()
     expect(made.grid.el.scrollTop).toBe(0)
@@ -229,7 +241,7 @@ describe('a virtual grid', () => {
     made.grid.draw()
     made.grid.scrollToRow(10)
     made.grid.draw()
-    made.grid.el.scrollTop = 0
+    await wheelToTop(made.grid.el)
     await until(() => !made.grid.following, 'a user scroll to detach following')
     made.grid.attach()
     expect(made.grid.el.scrollTop).toBe(centred(500, 240, 1000))
@@ -278,12 +290,7 @@ describe('a virtual grid', () => {
     expect(made.grid.el.scrollTop, 'released, on the same frame').toBe(centred(500, 240, 1000))
     expect(made.grid.following).toBe(true)
 
-    // THE GRID'S RESIZE OBSERVER REPORTS ONCE AFTER IT IS MADE, and its draw, still following and no longer held,
-    // scrolls back to the followed row: a user scroll made before that report can be undone by it before its own
-    // event arrives, which then reads as the echo of that draw. Two frames let the report go by.
-    await frame()
-    await frame()
-    made.grid.el.scrollTop = 0
+    await wheelToTop(made.grid.el)
     await until(() => !made.grid.following, 'a user scroll to detach following')
     made.grid.scrollToRow(10)
     made.grid.draw()

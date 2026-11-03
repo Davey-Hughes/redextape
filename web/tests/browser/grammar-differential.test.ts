@@ -142,7 +142,7 @@ describe('the committed grammar .wasm agree with the Rust differential, span for
             // would compare a collapse whose soundness nothing on this side had checked.
             //
             // **THE RANGE IS DOUBLED AND THE CAPTURED NODE'S OFFSETS ARE NOT.** `QueryOptions`'
-            // `startIndex`/`endIndex` are 2 × UTF-16 code units in web-tree-sitter 0.27.0, while
+            // `startIndex`/`endIndex` are 2 × UTF-16 code units in web-tree-sitter 0.27.1, while
             // `node.startIndex` is plain code units — `colourSpans`'s own comment holds the doubling, and
             // `docs/superpowers/notes/2026-10-17-code-history-web-src.md`'s entry above `colourSpans` the
             // measurement that tells code units from bytes.

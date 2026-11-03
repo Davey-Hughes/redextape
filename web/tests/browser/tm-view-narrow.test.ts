@@ -16,6 +16,7 @@ import {
   resetToFourViews,
   SHELL,
   stateIdle,
+  steady,
   until,
 } from './harness'
 
@@ -197,18 +198,6 @@ function linksOf(): string[] {
     if (out !== null) return `a routine → ${rowAt(Number(out[1]))}`
     return 'box↔box'
   })
-}
-
-/** Wait until `read` gives the same value for six frames running, for a scroll that may animate; at most 240 frames. */
-async function steady(read: () => number): Promise<number> {
-  let last = read()
-  for (let same = 0, n = 0; same < 6 && n < 240; n += 1) {
-    await frame()
-    const now = read()
-    same = now === last ? same + 1 : 0
-    last = now
-  }
-  return last
 }
 
 /**
@@ -576,7 +565,7 @@ describe('the TM view, on sum_to(5)', () => {
         expect.soft(box.scrollWidth, 'the program level’s scroll width').toBeGreaterThan(box.clientWidth)
         await userEvent.wheel(box, { delta: { x: 400 } })
         const end = box.scrollWidth - box.clientWidth
-        const left = await steady(() => box.scrollLeft)
+        const left = await steady(() => box.scrollLeft, 'the program level’s sideways scroll')
         expect.soft(left, `the program level’s scroll, against its end at ${end}`).toBeGreaterThanOrEqual(end - 1)
         expect.soft(tm().scrollLeft, 'the TM view’s sideways scroll').toBe(0)
         expect.soft(scrollX, 'the page’s sideways scroll').toBe(0)

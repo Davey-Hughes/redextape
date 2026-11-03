@@ -204,7 +204,7 @@ body {
 }
 /* **EVERY SELECT'S OPEN LIST, IN THE PALETTE — ITS OWN RULE, OR A TRANSPARENT SELECT OPENS A WHITE ONE.**
    Chrome paints the list in the select's own background, and a transparent select's comes out WHITE in
-   Chromium 151, dark mode or not, so the palette's light text would sit on white. Each option carries the
+   Chromium 156, dark mode or not, so the palette's light text would sit on white. Each option carries the
    page's own pair instead — `color` too, though each select passes `--fg` down, so the pair holds whatever
    a select wears. The highlighted row's colour stays the browser's. `select option`, not a list of
    classes, so a select added later is covered without anyone remembering this rule. */

@@ -1015,12 +1015,30 @@ export const frames = (): Promise<void> =>
 export const frame = (): Promise<void> => new Promise((r) => requestAnimationFrame(() => r()))
 
 /**
+ * Wait until `read` gives the same value for six frames running, for a scroll that may animate, and answer it; fail,
+ * naming `what`, if it has not held still within 240 frames, rather than answer a value still moving.
+ */
+export async function steady(read: () => number, what: string): Promise<number> {
+  let last = read()
+  for (let same = 0, n = 0; n < 240; n += 1) {
+    await frame()
+    const now = read()
+    same = now === last ? same + 1 : 0
+    last = now
+    if (same >= 6) return last
+  }
+  throw new Error(`${what} did not hold still for 6 frames within 240`)
+}
+
+/**
  * The next `scroll` event on `el`, once a listener registered before it, as `VirtualGrid`'s is in its constructor,
  * has run. **AWAITED RATHER THAN COUNTING FRAMES**: a scroll's event can come later than two frames, so an assertion
- * after two frames could run before the event it was about, and pass whatever the handler would have done.
+ * after two frames could run before the event it was about, and pass whatever the handler would have done. **IT
+ * RESOLVES FROM A TASK AFTER THE EVENT**, so nothing after the await, the next case included, runs inside the event's
+ * dispatch, where a scroll it makes gets its own event a frame late and can read as the echo of an earlier one.
  */
 export const scrolled = (el: HTMLElement) =>
-  new Promise<void>((r) => el.addEventListener('scroll', () => r(), { once: true }))
+  new Promise<void>((r) => el.addEventListener('scroll', () => setTimeout(r), { once: true }))
 
 /** Dispatch a bubbling `keydown` of `key` on `body`'s element. */
 export const keyOnBody = (body: LambdaBody, key: string) =>
@@ -1309,7 +1327,7 @@ export async function resetToFourViews(): Promise<void> {
  * tabs' order.
  *
  * **NOTHING HERE WAITS AFTER THE SECOND RESIZE, AND NOTHING WAS SEEN TO ARRIVE LATE.** `page.viewport` resolves a
- * frame after the tester's frame is resized (Vitest 4.1.10's `setIframeViewport`), and the app's `ResizeObserver`s
+ * frame after the tester's frame is resized (Vitest 4.1.12's `setIframeViewport`), and the app's `ResizeObserver`s
  * and its narrow-window listener had run by then, in the probe that
  * `docs/superpowers/notes/2026-10-17-code-history-web-tests.md`'s entry above `showFourViews` gives.
  *
