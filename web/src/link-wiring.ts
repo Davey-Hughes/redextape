@@ -1,10 +1,10 @@
 import type { EditorView } from '@codemirror/view'
-import type { AsmPane } from './asm-pane'
 import { setLink } from './highlight'
 import { perLeg } from './legs'
 import type { Link, LinkIndex, Pin } from './link'
 import { type DetachedPanes, type LambdaLinkState, linkStatus } from './link-status'
 import type { LeafId, PaneCollection } from './panes'
+import type { RxmPane } from './rxm-pane'
 import type { SessionRegistry } from './sessions'
 import type { TmPane } from './tm-pane'
 
@@ -52,7 +52,7 @@ export type LinkWiring = {
   get linkable(): boolean
   get link(): Pin | null
   clearLink(): void
-  drawLink(l: Link | null, focusCoincident: boolean, asmCoincident: boolean, lambda: LambdaLinkState): void
+  drawLink(l: Link | null, focusCoincident: boolean, rxmCoincident: boolean, lambda: LambdaLinkState): void
   setLinkTo(node: number | null, origin: Pin['origin']): void
   linkAtSourceOffset(byteOffset: number): void
   /**
@@ -91,7 +91,7 @@ export function createLinkWiring(deps: {
    * `PaneSlot.render` sets from the same field — cannot disagree.
    *
    * **EVERY VIEW OF EVERY LEG.** Reading only each leg's active view — the one focused last — would leave an
-   * asm copy on screen unnamed while a view of the program beside it had been focused more recently, and a
+   * rxm copy on screen unnamed while a view of the program beside it had been focused more recently, and a
    * leg's views could not be told apart in the sentence. `linkStatus` names each view showing a copy, by its
    * title where its leg has more than one view, and suppresses a leg's own clauses only when every view of it
    * shows a copy. A view OFF the page, in Stage, is counted too: it is still a view, and its tab names it.
@@ -132,7 +132,7 @@ export function createLinkWiring(deps: {
   let linkable = false
   let link: Pin | null = null
   /**
-   * The last link gesture was a click on an asm instruction with no owner (Plan 7 part 5 spec §6.6, amendment 11): it
+   * The last link gesture was a click on an rxm instruction with no owner (Plan 7 part 5 spec §6.6, amendment 11): it
    * pinned nothing, and the status line says why until the next gesture, keystroke or compile replaces it. A TM state
    * with no owner does not set it — that click clears the pin silently, which the amendment keeps.
    */
@@ -151,14 +151,14 @@ export function createLinkWiring(deps: {
    * running focus against `link` (`isCoincident`) once, and re-deriving it here would need `tmFocus`
    * threaded in anyway — passing the boolean it produces is the smaller surface. Meaningless when
    * `l === null` (nothing is pinned to coincide with) or `!linkable` (both return before reading it).
-   * `asmCoincident` is the same boolean for the asm leg's running focus.
+   * `rxmCoincident` is the same boolean for the rxm leg's running focus.
    *
    * `detached` IS ON EVERY ARM, NOT ONLY `'linked'`, and that is §4.5's obligation rather than
    * symmetry: `{state:'none'}` with a detached λ pane is precisely the case where this line goes from
    * blank to speaking. `linkStatus` is the one function that reads the field and it suppresses a
    * detached pane's own clauses itself, so nothing here has to know which clauses those are.
    */
-  const drawLink = (l: Link | null, focusCoincident: boolean, asmCoincident: boolean, lambda: LambdaLinkState) => {
+  const drawLink = (l: Link | null, focusCoincident: boolean, rxmCoincident: boolean, lambda: LambdaLinkState) => {
     const detached = detachedPanes()
     if (!linkable) {
       linkStatusHost.textContent = linkStatus({ state: 'stale', detached })
@@ -174,13 +174,13 @@ export function createLinkWiring(deps: {
       instrs: l.instrs.length > 0,
       lambda,
       focus: focusCoincident,
-      asmFocus: asmCoincident,
+      rxmFocus: rxmCoincident,
       detached,
     })
   }
 
   /**
-   * Resolve a link and paint every view: the source editor's mark, and each λ, asm and TM view's.
+   * Resolve a link and paint every view: the source editor's mark, and each λ, rxm and TM view's.
    *
    * `origin` DRIVES SCROLLING ONLY. A scroll-into-view triggered by the pane the user is already
    * looking at moves the thing under their cursor, so the table scrolls for a source click and not
@@ -188,9 +188,9 @@ export function createLinkWiring(deps: {
    */
   const setLinkTo = (node: number | null, origin: Pin['origin']) => {
     link = node === null ? null : { node, origin }
-    // AN ASM INSTRUCTION THAT RESOLVED TO NO CONSTRUCT IS THE ONE CLICK THE LINE EXPLAINS (Plan 7 part 5 spec
-    // amendment 11); any other gesture, a resolved asm click included, replaces that explanation.
-    ownerless = node === null && origin === 'asm'
+    // AN RXM INSTRUCTION THAT RESOLVED TO NO CONSTRUCT IS THE ONE CLICK THE LINE EXPLAINS (Plan 7 part 5 spec
+    // amendment 11); any other gesture, a resolved rxm click included, replaces that explanation.
+    ownerless = node === null && origin === 'rxm'
     // ONE `linkFor` CALL, reused for the source editor's mark and both fan-outs below — the comment where `draw()`
     // resolves its own link (`draw.ts`) says why a `linkFor` call is not free.
     const l = node === null || index === null ? null : index.linkFor(node)
@@ -252,11 +252,11 @@ export function createLinkWiring(deps: {
       const states = sessions.entryOf(p.slot.binding.session).detached ? [] : (l?.states ?? [])
       ;(p.pane as TmPane).setLink(states, origin !== 'tm')
     }
-    // AND EVERY ASM VIEW, BY THE TM FAN-OUT'S RULES AND FOR ITS REASONS: hidden ones included, a copy marking nothing,
-    // and scrolled to the construct's first instruction unless the click came from an asm listing (spec §6.6).
-    for (const p of panes.of('asm')) {
+    // AND EVERY RXM VIEW, BY THE TM FAN-OUT'S RULES AND FOR ITS REASONS: hidden ones included, a copy marking nothing,
+    // and scrolled to the construct's first instruction unless the click came from an rxm listing (spec §6.6).
+    for (const p of panes.of('rxm')) {
       const instrs = sessions.entryOf(p.slot.binding.session).detached ? [] : (l?.instrs ?? [])
-      ;(p.pane as AsmPane).setLink(instrs, origin !== 'asm')
+      ;(p.pane as RxmPane).setLink(instrs, origin !== 'rxm')
     }
   }
 

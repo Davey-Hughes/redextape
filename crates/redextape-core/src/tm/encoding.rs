@@ -130,7 +130,7 @@ pub trait Encoding {
     /// Append a cons cell (head = field `rh`'s value, tail = field `rt`'s value) at the HEAP top, and
     /// write the new cell's 1-based pointer (= the cell count) into field `rd`. Flows `entry -> exit`,
     /// all heads home/top. PRECONDITION: `rd` distinct from `rh` and `rt` (`rd` is written last from the
-    /// count while `rh`/`rt` were already read — but keep them distinct; `lower_asm` emits fresh operands).
+    /// count while `rh`/`rt` were already read — but keep them distinct; `lower_rxm` emits fresh operands).
     fn cons(&self, b: &mut Builder, entry: StateId, exit: StateId, rh: Slot, rt: Slot, rd: Slot);
     /// `slot rd <- (field rl == 0) as 0/1`. Safe when `rl == rd` — `rl` is fully copied to WORK before
     /// `rd` is written.
@@ -141,7 +141,7 @@ pub trait Encoding {
     /// (Runtime); `rd` is not written. BOTH the head-word and the structural navigation follow the
     /// encoding: `Unary` walks the cell chain by counting marks, `Binary` skips whole fixed-width
     /// cells with a counted chain driven by a binary counter. PRECONDITION: `rd` distinct from `rl`
-    /// (`rd` is written last, after `rl` is fully read — but keep them distinct; `lower_asm` emits
+    /// (`rd` is written last, after `rl` is fully read — but keep them distinct; `lower_rxm` emits
     /// fresh operands).
     fn head_op(&self, b: &mut Builder, entry: StateId, exit: StateId, rl: Slot, rd: Slot);
     /// As `head_op`, but writes the tail-word into `rd`.

@@ -1,7 +1,7 @@
 import type { TmProgram } from './types'
 
 /**
- * How a machine's states group into the state diagram's program level (Plan 7 part 4, spec §7): by the asm
+ * How a machine's states group into the state diagram's program level (Plan 7 part 4, spec §7): by the rxm
  * instruction each was built for, by the first segment of its name, or not at all.
  *
  * **CHOSEN PER MACHINE, BY WHAT THE MACHINE CARRIES.** A compiled program's states carry `instr`, from the map

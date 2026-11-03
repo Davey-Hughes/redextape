@@ -128,10 +128,10 @@ describe("share's popover through an open", () => {
 describe("a link shared while its link's positions are being reached", () => {
   it("carries the link's positions while its compile is held, though no leg has its frames", async () => {
     holding = new Set(['run'])
-    location.hash = await link('let y = 10; y + 5', { lambda: 5, asm: 3, tm: 100 })
+    location.hash = await link('let y = 10; y + 5', { lambda: 5, rxm: 3, tm: 100 })
     await until(() => noticeText() === 'opened a shared link' && heldOf('run') === 1, 'the open, its compile held')
     // `toEqual` ON THE POSITIONS THEMSELVES: `toMatchObject` would take `{}` as a subset every positions object has.
-    expect(await sharedPositions()).toEqual({ lambda: 5, asm: 3, tm: 100 })
+    expect(await sharedPositions()).toEqual({ lambda: 5, rxm: 3, tm: 100 })
     letGo()
     await until(() => stateIdle(), "the link's compile")
   })

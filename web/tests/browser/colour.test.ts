@@ -11,19 +11,19 @@ import { idle, paneOrThrow, SHELL, until } from './harness'
  * ```text
  * source   .tok-operator    Operator   `@operator` in REDEXTAPE, and in no other table
  * λ copy   .tok-binder      Binder     `@keyword.function` and `@variable.parameter` in REDEXTAPE_LAMBDA
- * TM copy  .tok-statename   StateName  `@label.reference` in REDEXTAPE_TM, which asm maps to Label instead
- * asm copy .tok-mnemonic    Mnemonic   `@function` in REDEXTAPE_ASM, which the mini-language maps to Ident
+ * TM copy  .tok-statename   StateName  `@label.reference` in REDEXTAPE_TM, which rxm maps to Label instead
+ * rxm copy .tok-mnemonic    Mnemonic   `@function` in REDEXTAPE_RXM, which the mini-language maps to Ident
  * ```
  *
  * **THESE ARE `golden.rs`'s WITNESSES.** `each_language_carries_a_class_no_other_one_does` picks
  * `Operator`, `Binder`, `StateName` and `Mnemonic`, and so does this file, so the two sides make one
- * argument rather than two. `Keyword` is no witness: `REDEXTAPE`, `REDEXTAPE_TM` and `REDEXTAPE_ASM` all
+ * argument rather than two. `Keyword` is no witness: `REDEXTAPE`, `REDEXTAPE_TM` and `REDEXTAPE_RXM` all
  * map `@keyword` to it (`crates/redextape-core/src/capture_map.rs`), and the last test in this file finds
  * `tok-keyword` in the source editor AND in the TM editor on the same page.
  *
- * **AN ASM COPY'S EDITOR IS COLOURED BY THE SAME MECHANISM**, through `transport.ts`'s `colour` handler,
- * which hands each editor its own language's colourer, so the asm row is what would catch it handing an
- * asm editor another language's grammar — which every other test here would pass.
+ * **AN RXM COPY'S EDITOR IS COLOURED BY THE SAME MECHANISM**, through `transport.ts`'s `colour` handler,
+ * which hands each editor its own language's colourer, so the rxm row is what would catch it handing an
+ * rxm editor another language's grammar — which every other test here would pass.
  *
  * **EVERY WITNESS'S ASSERTION READS THE COMPUTED COLOUR AS WELL AS THE CLASS, BECAUSE A CLASS NO
  * STYLESHEET STYLES WOULD SATISFY A CLASS-ONLY ASSERTION WHILE RENDERING AS PLAIN TEXT.**
@@ -108,17 +108,17 @@ describe('the editors colour from their grammars', () => {
     // A state name is one identifier token; asserting it is non-empty rather than naming one keeps this
     // off the lowering's choice of state names, which is not what the colourer is being asked about.
     // `@label.reference` reaches it — a `start` or `goto` TARGET, never a defining position, which
-    // the TM table maps to `Label` and the asm table maps `@label.reference` to as well (Plan 7 part 3
+    // the TM table maps to `Label` and the rxm table maps `@label.reference` to as well (Plan 7 part 3
     // spec §6.1).
     expect(state.textContent).not.toBe('')
   })
 
-  it('colours an asm copy from the asm grammar, in the palette', async () => {
-    fork(paneOrThrow('asm-0'))
+  it('colours an rxm copy from the rxm grammar, in the palette', async () => {
+    fork(paneOrThrow('rxm-0'))
     const mnemonic = await colouredIn(
-      paneOrThrow('asm-0'),
+      paneOrThrow('rxm-0'),
       '.tok-mnemonic',
-      'the asm copy’s editor to colour a mnemonic',
+      'the rxm copy’s editor to colour a mnemonic',
     )
     // The program's first instruction is `li r0, #40`, the literal's load, and its mnemonic is the first in the text.
     expect(mnemonic.textContent).toBe('li')

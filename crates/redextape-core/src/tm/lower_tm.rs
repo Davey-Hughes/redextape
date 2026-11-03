@@ -1,4 +1,4 @@
-//! asm `Program` -> multi-tape `Machine`. Control flow becomes the TM's state graph: one entry state
+//! rxm `Program` -> multi-tape `Machine`. Control flow becomes the TM's state graph: one entry state
 //! per instruction index; each instruction is a block of states (a delta-gadget) that flows from its
 //! `pc` to a successor `pc`. Straight-line instructions fall through to `pc[i+1]`; `jmp`/`jz`
 //! jump to a label's `pc`. Value gadgets come from the `Encoding` seam. Total and panic-free on any
@@ -7,13 +7,13 @@
 //! `nil`/dangling have no value and spin to a cap (matching λ/reference).
 
 use crate::core::BinOp;
-use crate::tm::asm::{Instr, Program, Reg};
 use crate::tm::build::{Builder, MAX_MACHINE_STATES, RuleSpec, Slot};
 use crate::tm::encoding::{Encoding, stack_is_empty};
 use crate::tm::machine::{Machine, StateId};
+use crate::tm::rxm::{Instr, Program, Reg};
 
 /// Upper bound on the register-field count a program may lay out on the REG tape. Mirrors
-/// `asm.rs`'s `MAX_REGISTERS`: it keeps `init_reg`'s allocation bounded and every gadget's seek
+/// `rxm.rs`'s `MAX_REGISTERS`: it keeps `init_reg`'s allocation bounded and every gadget's seek
 /// chain finite, so `lower_tm`/`run_tm` stay total on ANY `Program` (a hand-built or fuzzed one
 /// with an absurd register index routes to a defensive halt instead of panicking or aborting).
 /// Far above any real first-order program's slot count.
@@ -71,8 +71,8 @@ pub(crate) fn mul_count_unrepresentable(prog: &Program) -> bool {
     n_mul > MAX_MUL_INSTRS as usize
 }
 
-/// Maps the asm register file onto REG-tape fields. Layout: slot 0 = `Rr` (the result), then the
-/// `Loc` bank, then the `Arg` bank. Distinct registers -> distinct slots, so `lower_asm`'s
+/// Maps the rxm register file onto REG-tape fields. Layout: slot 0 = `Rr` (the result), then the
+/// `Loc` bank, then the `Arg` bank. Distinct registers -> distinct slots, so `lower_rxm`'s
 /// "`ra`/`rb` fresh, `!= dst`" invariant carries to the `rd != ra, rb` slot precondition for free.
 pub(crate) struct SlotMap {
     n_loc: u32,
@@ -180,7 +180,7 @@ fn lower_tm_all(prog: &Program, enc: &dyn Encoding) -> (Machine, Vec<Option<usiz
     // `None` (scaffolding) rather than to whichever instruction's gadget happened to request it first.
     // Every guard rule targets this one state; see `Builder::overflow`.
     let overflow = b.overflow();
-    // An absurd register index (a hand-built or fuzzed Program; real `lower_asm` output stays tiny)
+    // An absurd register index (a hand-built or fuzzed Program; real `lower_rxm` output stays tiny)
     // would build a multi-million-state machine and an oversized init tape. Refuse to lay it out:
     // return a degenerate machine that halts immediately. Total, panic-free, no huge allocation.
     if sm.n_slots() > MAX_SLOTS {
@@ -350,7 +350,7 @@ fn lower_tm_all(prog: &Program, enc: &dyn Encoding) -> (Machine, Vec<Option<usiz
 ///
 /// `sourcemap.rs`'s `tm_half` is one. Reading "every state maps to `None`" as "no ownership recorded" is
 /// TRUE for it, and `SourceMap::build` already gives empty TM maps on every OTHER refusal along the same
-/// lowering path (`Unsupported`-then-`defunc`-failure, `TooDeep`), which `sourcemap.rs`'s `asm_half`
+/// lowering path (`Unsupported`-then-`defunc`-failure, `TooDeep`), which `sourcemap.rs`'s `rxm_half`
 /// returns as `None` before `tm_half` is ever called — so on this `None` `tm_half` returns those same
 /// empty maps.
 ///
@@ -430,12 +430,12 @@ mod tests {
     use crate::core::BinOp;
     use crate::desugar::desugar;
     use crate::parser::parse;
-    use crate::tm::asm::{Instr, Program, Reg};
     use crate::tm::build::REG;
     use crate::tm::build::TAPES;
     use crate::tm::build::WORK;
     use crate::tm::encoding::{Binary, Unary};
-    use crate::tm::lower_asm::lower_asm;
+    use crate::tm::lower_rxm::lower_rxm;
+    use crate::tm::rxm::{Instr, Program, Reg};
     use crate::tm::sim::{Caps, DEFAULT_CAPS as CAPS, Status, simulate, simulate_trace};
     use crate::tm::test_fixtures::{arithmetic_program, branch_program, head_of_tail_program};
 
@@ -446,7 +446,7 @@ mod tests {
         let (prog, ds) = parse("1 + 2 * 3");
         assert!(ds.is_empty(), "parse errors: {ds:?}");
         let core = desugar(&prog.unwrap());
-        let program = lower_asm(&core).expect("lowers");
+        let program = lower_rxm(&core).expect("lowers");
 
         let (m, overflow) = lower_tm_guarded(&program, &Unary::default()).expect("small demo must not be refused");
         assert!(m.states[overflow as usize].rules.is_empty());
@@ -465,7 +465,7 @@ mod tests {
         let (prog, ds) = parse(src);
         assert!(ds.is_empty(), "parse errors: {ds:?}");
         let core = desugar(&prog.unwrap());
-        let program = lower_asm(&core).expect("lowers");
+        let program = lower_rxm(&core).expect("lowers");
         let enc = Unary::at(width);
         let (m, overflow) = lower_tm_guarded(&program, &enc).expect("small demo must not be refused");
         let mut init = vec![Vec::new(); TAPES];
@@ -541,7 +541,7 @@ mod tests {
         assert!(ds.is_empty(), "parse errors: {ds:?}");
         let core = desugar(&prog.unwrap());
         let defunced = crate::tm::defunc::defunc(&core).expect("defuncs");
-        let program = lower_asm(&defunced).expect("lowers");
+        let program = lower_rxm(&defunced).expect("lowers");
         let enc = Unary::at(width);
         let (m, overflow) = lower_tm_guarded(&program, &enc).expect("small demo must not be refused");
         let mut init = vec![Vec::new(); TAPES];
@@ -646,7 +646,7 @@ mod tests {
     #[test]
     fn lower_tm_is_total_on_an_absurd_register_index() {
         // A hand-built Program with a huge register index must not panic or abort during lowering;
-        // it routes to a degenerate halt machine (real `lower_asm` never emits such indices).
+        // it routes to a degenerate halt machine (real `lower_rxm` never emits such indices).
         let prog = Program { code: vec![Instr::Li(Reg::Loc(u32::MAX), 1), Instr::Halt], labels: vec![] };
         let m = lower_tm(&prog, &Unary::default());
         assert!(m.validate().is_empty(), "degenerate machine must be valid: {:?}", m.validate());
@@ -658,7 +658,7 @@ mod tests {
     #[test]
     fn recursive_sum_through_the_tm() {
         // sum(n) = if n==0 {0} else { n + sum(n-1) };  sum(5) == 15.
-        // Identical to asm.rs's recursive_call_preserves_locals_across_the_call.
+        // Identical to rxm.rs's recursive_call_preserves_locals_across_the_call.
         let prog = Program {
             code: vec![
                 Instr::Li(Reg::Arg(0), 5),
@@ -841,7 +841,7 @@ mod tests {
             let (prog, ds) = parse(src);
             assert!(ds.is_empty(), "parse errors: {ds:?}");
             let core = desugar(&prog.unwrap());
-            let program = lower_asm(&core).expect("lowers");
+            let program = lower_rxm(&core).expect("lowers");
             let m = lower_tm(&program, &Unary::default());
             let sm = SlotMap::of(&program);
             let mut init = vec![Vec::new(); TAPES];
@@ -860,7 +860,7 @@ mod tests {
     #[test]
     fn tm_step_count_golden_higher_order() {
         // Mirrors `tm_step_count_goldens` above, but for a demo that is higher-order and so must run
-        // through `defunc` before `lower_asm`. Pins the TM step cost of the defunctionalized
+        // through `defunc` before `lower_rxm`. Pins the TM step cost of the defunctionalized
         // dispatch path (a HEAP closure `cons(tag, env)`, an `$apply1` dispatcher call per list element,
         // plus the existing list/recursion gadget costs) as a regression guard, same discipline as the
         // first-order goldens above. Keep the list SMALL (2 elements) so the trace stays cheap.
@@ -869,7 +869,7 @@ mod tests {
             assert!(ds.is_empty(), "parse errors: {ds:?}");
             let core = desugar(&prog.unwrap());
             let defunced = crate::tm::defunc::defunc(&core).expect("defunc succeeds");
-            let program = lower_asm(&defunced).expect("defunc'd core lowers first-order");
+            let program = lower_rxm(&defunced).expect("defunc'd core lowers first-order");
             let m = lower_tm(&program, &Unary::default());
             let sm = SlotMap::of(&program);
             let mut init = vec![Vec::new(); TAPES];
@@ -899,7 +899,7 @@ mod tests {
             let (prog, ds) = parse(src);
             assert!(ds.is_empty(), "parse errors: {ds:?}");
             let core = desugar(&prog.unwrap());
-            let program = lower_asm(&core).expect("lowers");
+            let program = lower_rxm(&core).expect("lowers");
             let m = lower_tm(&program, &Binary::default());
             let sm = SlotMap::of(&program);
             let mut init = vec![Vec::new(); TAPES];
@@ -924,7 +924,7 @@ mod tests {
             assert!(ds.is_empty(), "parse errors: {ds:?}");
             let core = desugar(&prog.unwrap());
             let defunced = crate::tm::defunc::defunc(&core).expect("defunc succeeds");
-            let program = lower_asm(&defunced).expect("defunc'd core lowers first-order");
+            let program = lower_rxm(&defunced).expect("defunc'd core lowers first-order");
             let m = lower_tm(&program, &Binary::default());
             let sm = SlotMap::of(&program);
             let mut init = vec![Vec::new(); TAPES];
@@ -977,7 +977,7 @@ mod tests {
     #[test]
     fn every_state_maps_to_the_instruction_that_built_it_or_to_scaffolding() {
         let core = desugar(&parse("fn sum(n){ if n==0 {0} else { n + sum(n-1) } } sum(3)").0.unwrap());
-        let prog = lower_asm(&core).expect("lowers");
+        let prog = lower_rxm(&core).expect("lowers");
         let (m, state_origins) = lower_tm_mapped(&prog, &Unary::default()).expect("small demo must not be refused");
         assert_eq!(state_origins.len(), m.states.len(), "state origins must be parallel to states");
         for (s, origin) in state_origins.iter().enumerate() {
@@ -1008,7 +1008,7 @@ mod tests {
     #[test]
     fn each_instructions_entry_state_bills_that_instruction() {
         let core = desugar(&parse("fn sum(n){ if n==0 {0} else { n + sum(n-1) } } sum(3)").0.unwrap());
-        let prog = lower_asm(&core).expect("lowers");
+        let prog = lower_rxm(&core).expect("lowers");
         let (m, state_origins) = lower_tm_mapped(&prog, &Unary::default()).expect("small demo must not be refused");
         for i in 0..prog.code.len() {
             let name = format!("pc{i}");

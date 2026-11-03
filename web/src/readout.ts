@@ -1,9 +1,9 @@
 import { showWorkerError } from './banner'
 import { counted, n } from './format'
 import { LEG_NAME, LEGS } from './legs'
-import type { AsmLeg, LambdaLeg, RecordEnd, TmLeg } from './protocol'
+import type { LambdaLeg, RecordEnd, RxmLeg, TmLeg } from './protocol'
 import { endedLine, noSessionRows, type Row, resultRows, valueLine } from './results'
-import type { AsmScratchReading, TmScratchReading } from './sessions'
+import type { RxmScratchReading, TmScratchReading } from './sessions'
 import type { Diagnostic } from './types'
 import type { ReadoutSwitch } from './workspace'
 
@@ -30,7 +30,7 @@ export type ProgramResult =
        */
       readonly gen: number
       readonly lambda: LambdaLeg
-      readonly asm: AsmLeg
+      readonly rxm: RxmLeg
       readonly tm: TmLeg
     }
   | { readonly kind: 'no-session'; readonly diagnostics: readonly Diagnostic[] }
@@ -54,12 +54,12 @@ export type RecordingLeg = {
  * pass `{}` would draw the readout with no fact and a type checker satisfied. λ's leg is not here: nothing reads it
  * (`programResultRows`' doc).
  */
-export type ProgramRecording = { readonly gen: number; readonly asm: RecordingLeg; readonly tm: RecordingLeg }
+export type ProgramRecording = { readonly gen: number; readonly rxm: RecordingLeg; readonly tm: RecordingLeg }
 
 /**
  * `results.ts`'s rows for the program, with a row saying where a machine leg's recording filled its history.
  *
- * **THE RESULT IS THE COMPILE'S RUN AND THE FACT IS THE RECORDING'S, SO THEY ARE TWO INPUTS.** `compile` runs the asm
+ * **THE RESULT IS THE COMPILE'S RUN AND THE FACT IS THE RECORDING'S, SO THEY ARE TWO INPUTS.** `compile` runs the rxm
  * and TM legs to their end, so the result counts the whole run; the recording the views step through can stop on its
  * history budget well before that end. Read off the result alone, the readout would say nothing of it while the TM
  * view's step line says `history is full`. The step named is `hist.newestStep`, which is that step line's `of N`,
@@ -90,10 +90,10 @@ export type ProgramRecording = { readonly gen: number; readonly asm: RecordingLe
  * records nothing, so it gets none.
  */
 function programResultRows(r: Extract<ProgramResult, { kind: 'result' }>, recording: ProgramRecording): Row[] {
-  const rows = resultRows(r.lambda, r.asm, r.tm)
+  const rows = resultRows(r.lambda, r.rxm, r.tm)
   if (r.gen !== recording.gen) return rows
   const full = new Map<string, string>()
-  for (const l of ['asm', 'tm'] as const) {
+  for (const l of ['rxm', 'tm'] as const) {
     const leg = recording[l]
     if (leg.done === 'budget' && leg.pending === undefined)
       full.set(LEG_NAME[l], `${STOPPED.budget} at ${n(leg.hist.newestStep)}`)
@@ -124,7 +124,7 @@ export function programSegments(r: ProgramResult | null, recording: ProgramRecor
     const width = name === 'TM' && r.tm.status.width !== null ? [`width ${n(r.tm.status.width)}`] : []
     return [value === undefined ? name : `${name} ${value}`, ...rest.map((row) => row.value), ...width].join(' · ')
   }
-  // ONE SEGMENT PER LEG, IN `LEGS`' ORDER — λ, asm, TM — named as `LEG_NAME` names them, which is what `results.ts`'s
+  // ONE SEGMENT PER LEG, IN `LEGS`' ORDER — λ, rxm, TM — named as `LEG_NAME` names them, which is what `results.ts`'s
   // rows are labelled with.
   return LEGS.map((l) => leg(LEG_NAME[l]))
 }
@@ -173,7 +173,7 @@ export function lambdaCopySegments(name: string, leg: LambdaCopyLeg): string[] {
  * at all, and a copy whose thread threw would read as a bare name for the rest of the page load: the
  * `worker-error` arm clears the retained reading and writes the reason onto the LEG (spec §13).
  *
- * **`done` IS READ AS THE λ AND ASM COPIES READ IT.** A TM copy records into the same history budget the program's TM
+ * **`done` IS READ AS THE λ AND RXM COPIES READ IT.** A TM copy records into the same history budget the program's TM
  * leg does (`HISTORY_BYTES`), so its recording can stop on that budget too, and without `done` this line would give
  * the count and the value and say nothing of it. It names no step where the program's readout names one: a copy's
  * count already is the newest step its recording holds.
@@ -208,18 +208,18 @@ export function tmCopySegments(name: string, reading: TmScratchReading | null, l
   return [tmCopyParts(name, reading, leg).join(' · ')]
 }
 
-/** What an asm copy's line reads of its leg: how far its recording has got, and whether it has a status yet. */
-export type AsmCopyLeg = {
+/** What an rxm copy's line reads of its leg: how far its recording has got, and whether it has a status yet. */
+export type RxmCopyLeg = {
   readonly newestStep: number
   readonly done: RecordEnd | null
   readonly status: { readonly available: boolean; readonly reason: string }
 }
 
 /**
- * An asm copy's facts after its name, one per element: how far its recording has got, why it stopped if a cap stopped
+ * An rxm copy's facts after its name, one per element: how far its recording has got, why it stopped if a cap stopped
  * it, and its value, which came with its build (spec amendment 26) and reads as its view's value line reads.
  */
-export function asmCopyFacts(reading: AsmScratchReading | null, leg: AsmCopyLeg): string[] {
+export function rxmCopyFacts(reading: RxmScratchReading | null, leg: RxmCopyLeg): string[] {
   if (!leg.status.available) return [leg.status.reason]
   const why = leg.done === null ? '' : STOPPED[leg.done]
   return [
@@ -229,20 +229,20 @@ export function asmCopyFacts(reading: AsmScratchReading | null, leg: AsmCopyLeg)
   ]
 }
 
-/** An asm copy's facts, by `lambdaCopyParts`' rule: its name, then `asmCopyFacts`. */
-export function asmCopyParts(name: string, reading: AsmScratchReading | null, leg: AsmCopyLeg): string[] {
-  return [name, ...asmCopyFacts(reading, leg)]
+/** An rxm copy's facts, by `lambdaCopyParts`' rule: its name, then `rxmCopyFacts`. */
+export function rxmCopyParts(name: string, reading: RxmScratchReading | null, leg: RxmCopyLeg): string[] {
+  return [name, ...rxmCopyFacts(reading, leg)]
 }
 
-export function asmCopySegments(name: string, reading: AsmScratchReading | null, leg: AsmCopyLeg): string[] {
-  return [asmCopyParts(name, reading, leg).join(' · ')]
+export function rxmCopySegments(name: string, reading: RxmScratchReading | null, leg: RxmCopyLeg): string[] {
+  return [rxmCopyParts(name, reading, leg).join(' · ')]
 }
 
 /**
  * What a TM copy's row in the copies menu says below its name: its readout line without the name, so a copy that
  * halted with a value, is still running its value run, filled its history, or has not built yet reads there as it
- * reads in the strip, in the strip's words. `asmCopyRow` is the asm copy's. Both say what stopped a copy's recording
- * short after its count, in `STOPPED`'s words, and the asm copy's value can be a fault.
+ * reads in the strip, in the strip's words. `rxmCopyRow` is the rxm copy's. Both say what stopped a copy's recording
+ * short after its count, in `STOPPED`'s words, and the rxm copy's value can be a fault.
  *
  * **A MACHINE COPY HAS NO TERM.** The row's second line is a λ copy's current term, and a `null` there reads `no term
  * yet` — "nothing has come back" — which is not true of a copy that has run to `value: 6`. What such a copy holds is
@@ -252,9 +252,9 @@ export function tmCopyRow(reading: TmScratchReading | null, leg: TmCopyLeg): str
   return tmCopyFacts(reading, leg).join(' · ')
 }
 
-/** What an asm copy's row in the copies menu says below its name — `tmCopyRow`'s rule, one leg over. */
-export function asmCopyRow(reading: AsmScratchReading | null, leg: AsmCopyLeg): string {
-  return asmCopyFacts(reading, leg).join(' · ')
+/** What an rxm copy's row in the copies menu says below its name — `tmCopyRow`'s rule, one leg over. */
+export function rxmCopyRow(reading: RxmScratchReading | null, leg: RxmCopyLeg): string {
+  return rxmCopyFacts(reading, leg).join(' · ')
 }
 
 /**
@@ -265,7 +265,7 @@ export function copyLegOf(leg: {
   readonly hist: { readonly newestStep: number }
   readonly done: RecordEnd | null
   readonly status: { readonly available: boolean; readonly reason: string }
-}): LambdaCopyLeg & AsmCopyLeg & TmCopyLeg {
+}): LambdaCopyLeg & RxmCopyLeg & TmCopyLeg {
   return { newestStep: leg.hist.newestStep, done: leg.done, status: leg.status }
 }
 

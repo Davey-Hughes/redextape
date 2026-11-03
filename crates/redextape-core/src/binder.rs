@@ -1,6 +1,6 @@
 //! Which binding each name in a `.rxt` document refers to.
 //!
-//! `.tm` and `.asm` resolve a name by looking it up in a flat table, which `NameIndex::link` does
+//! `.tm` and `.rxm` resolve a name by looking it up in a flat table, which `NameIndex::link` does
 //! for both. `.rxt` names are SCOPED: an occurrence resolves to a binding, and in
 //! `let x = 1; let x = x + 1;` the two `x`es on the second line resolve to different ones. So this
 //! is a pass and not a lookup.

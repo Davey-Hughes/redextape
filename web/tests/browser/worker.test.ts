@@ -271,16 +271,16 @@ describe('session-worker recording', () => {
   })
 })
 
-const recorded = (r: RunReply): boolean => (r.kind === 'asm-frames' && r.done !== null) || r.kind === 'no-session'
+const recorded = (r: RunReply): boolean => (r.kind === 'rxm-frames' && r.done !== null) || r.kind === 'no-session'
 
-describe('session-worker asm copies', () => {
+describe('session-worker rxm copies', () => {
   const FORTY_TWO = 'result Nat\n\n    li\trr, #42\n    halt\n'
 
-  it('sends the program’s asm as text on compiled, headed by its type, and null with no asm leg', async () => {
+  it('sends the program’s rxm as text on compiled, headed by its type, and null with no rxm leg', async () => {
     const { replies, worker } = await askAll(run('let x = 40; x + 2'))
     worker.terminate()
     const compiled = replies.find((r) => r.kind === 'compiled')
-    expect(compiled?.kind === 'compiled' && compiled.asmText).toBe(
+    expect(compiled?.kind === 'compiled' && compiled.rxmText).toBe(
       'result Nat\n\n    li\tr0, #40\n    mov\tr1, r0\n    li\tr2, #2\n    add\trr, r1, r2\n    halt\n',
     )
 
@@ -288,29 +288,29 @@ describe('session-worker asm copies', () => {
     const declined = await askAll(run(list))
     declined.worker.terminate()
     const second = declined.replies.find((r) => r.kind === 'compiled')
-    expect(second?.kind === 'compiled' && [second.asm.available, second.asmText]).toEqual([false, null])
+    expect(second?.kind === 'compiled' && [second.rxm.available, second.rxmText]).toEqual([false, null])
   })
 
-  it('builds an asm copy, answers with its status, listing and value, then records its frames', async () => {
-    const { replies, worker } = await askUntil({ kind: 'asm-scratch', gen: 1, src: FORTY_TWO }, recorded)
+  it('builds an rxm copy, answers with its status, listing and value, then records its frames', async () => {
+    const { replies, worker } = await askUntil({ kind: 'rxm-scratch', gen: 1, src: FORTY_TWO }, recorded)
     worker.terminate()
     const [built, ...rest] = replies
-    expect(built?.kind).toBe('asm-scratch-compiled')
-    if (built?.kind !== 'asm-scratch-compiled') return
-    expect(built.asm).toEqual({ available: true, reason: '', run: 'Running', cap: null, total_steps: 2 })
-    expect(built.asmProgram).toEqual({ listing: ['li\trr, #42', 'halt'], labels: [] })
+    expect(built?.kind).toBe('rxm-scratch-compiled')
+    if (built?.kind !== 'rxm-scratch-compiled') return
+    expect(built.rxm).toEqual({ available: true, reason: '', run: 'Running', cap: null, total_steps: 2 })
+    expect(built.rxmProgram).toEqual({ listing: ['li\trr, #42', 'halt'], labels: [] })
     expect(built.value).toEqual({ Value: { text: '42' } })
-    const frames = rest.flatMap((r) => (r.kind === 'asm-frames' ? r.frames : []))
+    const frames = rest.flatMap((r) => (r.kind === 'rxm-frames' ? r.frames : []))
     expect(frames.map((f) => [f.step, f.source_node])).toEqual([
       [0, null],
       [1, null],
       [2, null],
     ])
-    expect(rest.at(-1)).toMatchObject({ kind: 'asm-frames', done: 'ended' })
+    expect(rest.at(-1)).toMatchObject({ kind: 'rxm-frames', done: 'ended' })
   })
 
   it('refuses text with a label mistake, and names it', async () => {
-    const { replies, worker } = await askUntil({ kind: 'asm-scratch', gen: 1, src: '\tjmp\tnowhere\n' }, recorded)
+    const { replies, worker } = await askUntil({ kind: 'rxm-scratch', gen: 1, src: '\tjmp\tnowhere\n' }, recorded)
     worker.terminate()
     expect(replies.map((r) => r.kind)).toEqual(['no-session'])
     expect(replies[0]?.kind === 'no-session' && replies[0].diagnostics.map((d) => d.message)).toEqual([
@@ -318,19 +318,19 @@ describe('session-worker asm copies', () => {
     ])
   })
 
-  it('answers extend on an asm copy with its frames and its value, where a session gets a result', async () => {
-    const { worker } = await askUntil({ kind: 'asm-scratch', gen: 1, src: FORTY_TWO }, recorded)
+  it('answers extend on an rxm copy with its frames and its value, where a session gets a result', async () => {
+    const { worker } = await askUntil({ kind: 'rxm-scratch', gen: 1, src: FORTY_TWO }, recorded)
     const replies: RunReply[] = []
     const done = new Promise<void>((resolve) => {
       worker.addEventListener('message', (e: MessageEvent<RunReply>) => {
         replies.push(e.data)
-        if (e.data.kind === 'asm-value') resolve()
+        if (e.data.kind === 'rxm-value') resolve()
       })
     })
-    worker.postMessage({ kind: 'extend', gen: 1, leg: 'asm' })
+    worker.postMessage({ kind: 'extend', gen: 1, leg: 'rxm' })
     await done
     worker.terminate()
-    expect(replies.map((r) => r.kind)).toEqual(['asm-frames', 'asm-value'])
-    expect(replies.at(-1)).toEqual({ kind: 'asm-value', gen: 1, value: { Value: { text: '42' } } })
+    expect(replies.map((r) => r.kind)).toEqual(['rxm-frames', 'rxm-value'])
+    expect(replies.at(-1)).toEqual({ kind: 'rxm-value', gen: 1, value: { Value: { text: '42' } } })
   })
 })

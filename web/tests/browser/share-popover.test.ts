@@ -21,7 +21,7 @@ import {
  * **`share`: THE POPOVER, ITS LINK AND ITS COPY** — Plan 7 part 6a spec §5.1, §5.2 and §6. Driven by real pointer
  * clicks, because a synthetic `.click()` is not the gesture, but where a case needs what the popover holds before its
  * link is made, which a click that awaits the browser is too slow to see. The page opens on the program `setup.ts`
- * stores, `let x = 40; x + 2`, whose legs end at λ 7, asm 5 and TM 2,870 (spec §2.7). ONE MOUNT FOR THE FILE, for
+ * stores, `let x = 40; x + 2`, whose legs end at λ 7, rxm 5 and TM 2,870 (spec §2.7). ONE MOUNT FOR THE FILE, for
  * the reason `app.test.ts` gives.
  */
 
@@ -120,7 +120,7 @@ describe('share', () => {
       encoding: 'unary',
       workspace: parseWorkspace(localStorage.getItem(LAYOUT_STORAGE_KEY)),
       // STEP 0 IN EVERY LEG, where a run opens (`History`), and where each head is.
-      positions: { lambda: 0, asm: 0, tm: 0 },
+      positions: { lambda: 0, rxm: 0, tm: 0 },
     })
   })
 
@@ -135,7 +135,7 @@ describe('share', () => {
       document.querySelector('[data-leaf="lambda-0"] button[aria-label="one step back"]') as HTMLButtonElement,
     )
     const opened = await decodeLink(fragmentOf(await openShare()), ENCODINGS)
-    expect(opened.kind === 'whole' && opened.positions).toEqual({ lambda: 6, asm: 0, tm: 0 })
+    expect(opened.kind === 'whole' && opened.positions).toEqual({ lambda: 6, rxm: 0, tm: 0 })
   })
 
   it('carries no positions while the program is compiling', async () => {

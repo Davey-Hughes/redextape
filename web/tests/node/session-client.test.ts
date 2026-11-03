@@ -179,16 +179,16 @@ describe('SessionClient streaming', () => {
       kind: 'compiled',
       gen: 1,
       lambda: LAMBDA_OK,
-      asm: { available: false, reason: 'no asm leg', run: null, cap: null, total_steps: null },
+      rxm: { available: false, reason: 'no rxm leg', run: null, cap: null, total_steps: null },
       tm: TM_OK,
       declinedSpan: null,
       tmProgram: null,
-      asmProgram: null,
+      rxmProgram: null,
       tapeNames: [],
       linkIndex: null,
       tmText: null,
       tmResultDecodable: true,
-      asmText: null,
+      rxmText: null,
     })
     deliver({ kind: 'lambda-frames', gen: 1, frames: [], done: null })
     deliver({ kind: 'lambda-frames', gen: 1, frames: [], done: 'ended' })
@@ -196,7 +196,7 @@ describe('SessionClient streaming', () => {
       kind: 'result',
       gen: 1,
       lambda: LEG_OK,
-      asm: { status: { available: false, reason: 'no asm leg', run: null, cap: null, total_steps: null }, value: null },
+      rxm: { status: { available: false, reason: 'no rxm leg', run: null, cap: null, total_steps: null }, value: null },
       tm: TM_LEG_OK,
     })
     expect(seen).toEqual(['compiled', 'lambda-frames', 'lambda-frames', 'result'])
@@ -251,16 +251,16 @@ const compiled = (gen: number): RunReply => ({
   kind: 'compiled',
   gen,
   lambda: { available: true, reason: '', node: null, run: 'Running' },
-  asm: { available: false, reason: 'no asm leg', run: null, cap: null, total_steps: null },
+  rxm: { available: false, reason: 'no rxm leg', run: null, cap: null, total_steps: null },
   tm: { available: true, reason: '', width: null, run: 'Running', total_steps: null },
   declinedSpan: null,
   tmProgram: null,
-  asmProgram: null,
+  rxmProgram: null,
   tapeNames: [],
   linkIndex: null,
   tmText: null,
   tmResultDecodable: true,
-  asmText: null,
+  rxmText: null,
 })
 
 describe('tmScratch', () => {
@@ -288,13 +288,13 @@ describe('tmScratch', () => {
   })
 })
 
-describe('asmScratch', () => {
-  it('posts an asm-scratch request carrying only the text', () => {
+describe('rxmScratch', () => {
+  it('posts an rxm-scratch request carrying only the text', () => {
     const { port, sent } = fakePort()
     const c = new SessionClient(port, () => {})
     const gen = c.supersede()
-    c.asmScratch(gen, 'result Nat\n\thalt\n')
-    expect(sent).toEqual([{ kind: 'asm-scratch', gen, src: 'result Nat\n\thalt\n' }])
+    c.rxmScratch(gen, 'result Nat\n\thalt\n')
+    expect(sent).toEqual([{ kind: 'rxm-scratch', gen, src: 'result Nat\n\thalt\n' }])
   })
 
   it('drops a request whose generation has been superseded', () => {
@@ -303,7 +303,7 @@ describe('asmScratch', () => {
     const stale = c.supersede()
     c.supersede()
     sent.length = 0
-    c.asmScratch(stale, '\thalt\n')
+    c.rxmScratch(stale, '\thalt\n')
     expect(sent).toEqual([])
   })
 })

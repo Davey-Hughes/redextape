@@ -8,9 +8,9 @@
 //! result all agree. This extends `redextape-core`'s three-way oracle (`tests/three_way_oracle.rs`)
 //! with native as a validated leg.
 //!
-//! Native's PRIMARY new cross-check is narrower and sharper than the four-way: `native == asm-interp`
+//! Native's PRIMARY new cross-check is narrower and sharper than the four-way: `native == rxm-interp`
 //! on the SAME lowered `Program` isolates codegen (`run_native`/Cranelift) from interpretation
-//! (`run_asm`) — both share `lower_asm`/`defunc`, so any disagreement is a real codegen bug, not a
+//! (`run_rxm`) — both share `lower_rxm`/`defunc`, so any disagreement is a real codegen bug, not a
 //! front-end or lowering difference.
 //!
 //! ONE TEST PER ENCODING, not one test doing every encoding: `four_way_tests!` emits
@@ -61,12 +61,12 @@
 //! PAST 2^64 THE BACKENDS DIVERGE BY DESIGN, and that is pinned rather than left unexercised — see
 //! `past_the_u64_ceiling_the_backends_diverge_by_design` and `SATURATION_DEMOS`. It cannot be an
 //! agreement test: the reference and native SATURATE to `u64::MAX` (the
-//! `saturating_add`/`saturating_mul` in `tm/asm.rs`), while the TM halts in the rule-less
+//! `saturating_add`/`saturating_mul` in `tm/rxm.rs`), while the TM halts in the rule-less
 //! overflow-guard state `tm/build.rs`'s `Builder::overflow` allocates, at every width up to the
 //! ceiling. Both are deliberate.
 //!
 //! CAPS NOTE: native's step accounting is coarse (it only ticks loop back-edges and calls, enough to
-//! guarantee termination, not to match `run_asm`'s per-instruction step count). Every program here uses
+//! guarantee termination, not to match `run_rxm`'s per-instruction step count). Every program here uses
 //! `DEFAULT_CAPS`/`TM_DEFAULT_CAPS` (generous) and terminates well within them, so a tight cap never
 //! produces a spurious cross-backend "disagreement".
 
@@ -76,8 +76,8 @@ use redextape_core::desugar::desugar;
 use redextape_core::lambda::{LambdaRun, MAX_REDUCTION_STEPS, decode, run_lambda};
 use redextape_core::parser::parse;
 use redextape_core::tm::{
-    AsmRun, Binary, DEFAULT_CAPS, Encoding, EncodingKind, MAX_FIELD_WIDTH, TM_DEFAULT_CAPS, TmRun, Unary, decode_asm,
-    decode_tape, lower_program, run_asm, run_tm, run_tm_fitted,
+    Binary, DEFAULT_CAPS, Encoding, EncodingKind, MAX_FIELD_WIDTH, RxmRun, TM_DEFAULT_CAPS, TmRun, Unary, decode_rxm,
+    decode_tape, lower_program, run_rxm, run_tm, run_tm_fitted,
 };
 use redextape_core::value::Value;
 use redextape_core::{RunError, run};
@@ -161,7 +161,7 @@ fn assert_four_way(src: &str, kind: EncodingKind) {
                 kind.name()
             );
             assert_eq!(
-                decode_asm(&outcome, &reference),
+                decode_rxm(&outcome, &reference),
                 Some(reference.clone()),
                 "reference vs native disagree for: {src}"
             );
@@ -173,23 +173,23 @@ fn assert_four_way(src: &str, kind: EncodingKind) {
     }
 }
 
-/// Native's primary new cross-check: `run_native` and `run_asm` on the SAME lowered `Program` decode
-/// to the same `Value`. Since both share `lower_asm`/`defunc`, this isolates codegen (compile) from
+/// Native's primary new cross-check: `run_native` and `run_rxm` on the SAME lowered `Program` decode
+/// to the same `Value`. Since both share `lower_rxm`/`defunc`, this isolates codegen (compile) from
 /// interpretation.
-fn assert_native_matches_asm(src: &str) {
+fn assert_native_matches_rxm(src: &str) {
     let reference = run(src).unwrap_or_else(|e| panic!("reference run failed for `{src}`: {e:?}"));
     let core = core_of(src);
     let prog = lower_program(&core).unwrap_or_else(|e| panic!("lowering failed for `{src}`: {e:?}"));
-    let asm = run_asm(&prog, DEFAULT_CAPS);
+    let rxm = run_rxm(&prog, DEFAULT_CAPS);
     let native = run_native(&core, DEFAULT_CAPS);
-    match (asm, native) {
-        (AsmRun::Ran(asm_outcome), NativeRun::Ran(native_outcome)) => {
-            let asm_val = decode_asm(&asm_outcome, &reference);
-            assert_eq!(asm_val, Some(reference.clone()), "asm-interp vs reference disagree for: {src}");
-            let native_val = decode_asm(&native_outcome, &reference);
-            assert_eq!(native_val, asm_val, "native vs asm-interp disagree for: {src}");
+    match (rxm, native) {
+        (RxmRun::Ran(rxm_outcome), NativeRun::Ran(native_outcome)) => {
+            let rxm_val = decode_rxm(&rxm_outcome, &reference);
+            assert_eq!(rxm_val, Some(reference.clone()), "rxm-interp vs reference disagree for: {src}");
+            let native_val = decode_rxm(&native_outcome, &reference);
+            assert_eq!(native_val, rxm_val, "native vs rxm-interp disagree for: {src}");
         }
-        (a, n) => panic!("native vs asm-interp mismatch for {src}:\n  asm={a:?}\n  native={n:?}"),
+        (a, n) => panic!("native vs rxm-interp mismatch for {src}:\n  rxm={a:?}\n  native={n:?}"),
     }
 }
 
@@ -204,7 +204,7 @@ fn assert_native_matches_reference(src: &str) {
     match run_native(&core, DEFAULT_CAPS) {
         NativeRun::Ran(outcome) => {
             assert_eq!(
-                decode_asm(&outcome, &reference),
+                decode_rxm(&outcome, &reference),
                 Some(reference.clone()),
                 "native vs reference disagree for: {src}"
             );
@@ -273,7 +273,7 @@ const FIRST_ORDER_DEMOS: &[&str] = &[
      fn s1(n){ if n == 0 { 0 } else { 2 + s2(n - 1) } } \
      fn s2(n){ if n == 0 { 0 } else { 4 + s0(n - 1) } } s0(4)",
     // A group reaching the backends THROUGH `defunc` (`id` is used as a value), and a forward
-    // reference doing the same — the paths every case above skips, since they lower via `lower_asm`
+    // reference doing the same — the paths every case above skips, since they lower via `lower_rxm`
     // directly. See the matching comment in `three_way_oracle.rs`.
     "fn ev(n,k){ if n == 0 { k(1) } else { od(n - 1, k) } } \
      fn od(n,k){ if n == 0 { k(0) } else { ev(n - 1, k) } } fn id(x){ x } ev(4, id)",
@@ -307,7 +307,7 @@ const FIRST_ORDER_DEMOS: &[&str] = &[
     "fn v(x) { x * 10 } fn b(x) { x + 1 } fn ap(g, x) { g(x) } ap(v, 1) + ap(b, 1) + b(5)",
     "fn b(x) { x + 1 } fn v(x) { x * 10 } fn ap(g, x) { g(x) } ap(v, 1) + ap(b, 1) + b(5)",
     // A user `fn` shadowing a list builtin. `defunc` synthesizes `$head($clos)` for its dispatcher
-    // tag test, and `lower_asm` resolves a bound function BEFORE the builtin table — so with the
+    // tag test, and `lower_rxm` resolves a bound function BEFORE the builtin table — so with the
     // bare name this would silently miscompile. The `$` form is unforgeable in user source, so
     // scaffolding is uncapturable. 2 + 3 = 5.
     "fn head(x) { x + 1 } fn ap(g, x) { g(x) } fn add1(y) { y + 1 } head(1) + ap(add1, 2)",
@@ -334,7 +334,7 @@ const FIRST_ORDER_DEMOS: &[&str] = &[
     "fn nil(x) { x + 5 } fn ap(g, x) { g(x) } ap(nil, 0)",
     // A user `fn nil` called by name ONLY (never itself used as a value) sharing a program with an
     // unrelated CLOSED function-value (`add1`, passed to `ap`). Without the `$nil` alias, `add1`'s
-    // closed closure would be built as `cons(tag, nil)` — a bare `nil` that `lower_asm`'s
+    // closed closure would be built as `cons(tag, nil)` — a bare `nil` that `lower_rxm`'s
     // `reject_fn_value` would flag as a value-use of the user's KEPT `fn nil`, rejecting the whole
     // program on every lowering backend even though `nil` itself is never value-used anywhere.
     // 2 + 3 = 5.
@@ -349,7 +349,7 @@ const FIRST_ORDER_DEMOS: &[&str] = &[
 
 /// Programs that only TM/native can run three-way with the reference — the λ backend v1 REJECTS them
 /// (`LowerError`) since they involve mutable-in-closure capture or a `fn` inside a mutation region.
-/// Since native shares `lower_asm`/`defunc` with the TM, these still exercise `native == asm-interp`
+/// Since native shares `lower_rxm`/`defunc` with the TM, these still exercise `native == rxm-interp`
 /// (the boxing/mutable-capture codegen path), just without the λ leg.
 const LAMBDA_LIMITATION_DEMOS: &[&str] = &[
     "let mut x = 1; x = x + 1; let x = x + 10; x",
@@ -372,7 +372,7 @@ const BEYOND_FIELD_WIDTH_DEMOS: &[&str] = &[
 /// Values at or past 2⁶⁴ — the gap `past_the_u64_ceiling_the_backends_diverge_by_design` below exercises.
 ///
 /// IT CANNOT BE AN AGREEMENT TEST, and this must not be "fixed" into one. The backends diverge here BY
-/// DESIGN: the reference and native SATURATE (the `saturating_add`/`saturating_mul` in `tm/asm.rs`),
+/// DESIGN: the reference and native SATURATE (the `saturating_add`/`saturating_mul` in `tm/rxm.rs`),
 /// while the TM halts in the rule-less overflow-guard state `tm/build.rs`'s `Builder::overflow`
 /// allocates, and never saturates at any width up to the 64-cell ceiling. Both behaviours are
 /// deliberate; they are simply different.
@@ -444,18 +444,18 @@ fn every_encoding_has_a_four_way_test() {
 }
 
 #[test]
-fn native_matches_asm_interp_on_the_first_order_suite() {
+fn native_matches_rxm_interp_on_the_first_order_suite() {
     for src in FIRST_ORDER_DEMOS {
-        assert_native_matches_asm(src);
+        assert_native_matches_rxm(src);
     }
 }
 
 #[test]
-fn native_matches_asm_interp_on_lambda_limitation_demos() {
-    // λ refuses these; native (sharing `lower_asm`/`defunc` with the TM) still runs them and must
-    // agree with the asm interpreter — this is the mutable-capture / boxing codegen path.
+fn native_matches_rxm_interp_on_lambda_limitation_demos() {
+    // λ refuses these; native (sharing `lower_rxm`/`defunc` with the TM) still runs them and must
+    // agree with the rxm interpreter — this is the mutable-capture / boxing codegen path.
     for src in LAMBDA_LIMITATION_DEMOS {
-        assert_native_matches_asm(src);
+        assert_native_matches_rxm(src);
     }
 }
 
@@ -533,7 +533,7 @@ fn past_the_u64_ceiling_the_backends_diverge_by_design() {
         let core = core_of(src);
         match run_native(&core, DEFAULT_CAPS) {
             NativeRun::Ran(outcome) => assert_eq!(
-                decode_asm(&outcome, &reference),
+                decode_rxm(&outcome, &reference),
                 Some(reference.clone()),
                 "native must saturate exactly as the reference does: {src}"
             ),
@@ -577,10 +577,10 @@ proptest! {
     #![proptest_config(ProptestConfig { cases: 64, ..ProptestConfig::default() })]
 
     /// Random wide-range (no `MAX_FIELD_WIDTH` bound) arithmetic/comparison/if programs: `native ==
-    /// reference` AND `native == asm-interp`. The generator produces no loops/functions/faults, so a
+    /// reference` AND `native == rxm-interp`. The generator produces no loops/functions/faults, so a
     /// `HitCap`/`LowerError`/`Fault` would itself be a bug and trips the catch-all.
     #[test]
-    fn native_agrees_with_reference_and_asm_on_random_programs(src in arb_expr_below(1000)) {
+    fn native_agrees_with_reference_and_rxm_on_random_programs(src in arb_expr_below(1000)) {
         let reference = run(&src);
         let (prog, ds) = parse(&src);
         prop_assume!(ds.is_empty()); // skip anything that does not parse
@@ -588,13 +588,13 @@ proptest! {
         let native = run_native(&core, DEFAULT_CAPS);
         match (reference, native) {
             (Ok(rv), NativeRun::Ran(outcome)) => {
-                prop_assert_eq!(decode_asm(&outcome, &rv), Some(rv.clone()), "native vs reference disagree: {}", src);
-                let lowered = lower_program(&core).expect("first-order arithmetic/if must lower to asm");
-                match run_asm(&lowered, DEFAULT_CAPS) {
-                    AsmRun::Ran(asm_outcome) => {
-                        prop_assert_eq!(decode_asm(&asm_outcome, &rv), Some(rv), "native vs asm-interp disagree: {}", src);
+                prop_assert_eq!(decode_rxm(&outcome, &rv), Some(rv.clone()), "native vs reference disagree: {}", src);
+                let lowered = lower_program(&core).expect("first-order arithmetic/if must lower to rxm");
+                match run_rxm(&lowered, DEFAULT_CAPS) {
+                    RxmRun::Ran(rxm_outcome) => {
+                        prop_assert_eq!(decode_rxm(&rxm_outcome, &rv), Some(rv), "native vs rxm-interp disagree: {}", src);
                     }
-                    other => prop_assert!(false, "asm-interp did not run {}: {:?}", src, other),
+                    other => prop_assert!(false, "rxm-interp did not run {}: {:?}", src, other),
                 }
             }
             (r, n) => prop_assert!(false, "native mismatch for {}:\n  reference={:?}\n  native={:?}", src, r, n),
@@ -614,7 +614,7 @@ proptest! {
 /// under the 64-cell ceiling) and the wide `0..1000` range, weighted 4:1 toward the small range.
 ///
 /// `arb_expr_below(1000)` keeps its pure `0..1000` leaves
-/// (`native_agrees_with_reference_and_asm_on_random_programs` depends on them); this is a separate
+/// (`native_agrees_with_reference_and_rxm_on_random_programs` depends on them); this is a separate
 /// generator for the TM-legs proptest only.
 ///
 /// Do not read `0..8` as "sitting at 64 minus a little room" — it is nowhere near the ceiling. The

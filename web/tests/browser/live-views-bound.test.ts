@@ -47,7 +47,7 @@ import { plusView, resetOffered, userPickInWorkspaceMenu } from './user-event-fi
 /** 59 λ views in one row: the arrangement the stored workspace remembers for the λ view alone. */
 const REMEMBERED = rowOfLeaves(59)
 
-const FOUR = ['source', 'lambda-0', 'asm-0', 'tm-0']
+const FOUR = ['source', 'lambda-0', 'rxm-0', 'tm-0']
 /** The view the first add makes: the leaf counter steps past every live id at the load, the 59 off the screen too. */
 const ADDED = 'pane-60'
 /** The view added once `ADDED` is closed: a refused add mints no id, so it is the next number. */
@@ -85,7 +85,7 @@ describe('+ view, with four views on screen and 59 more remembered', () => {
     expect(opened?.focused, 'precondition: + view adds beside the λ view').toBe('lambda-0')
 
     await plusView('λ · program', '+ view’s λ · program')
-    expect(mounted(), 'the add at 63 live views was refused').toEqual(['source', 'lambda-0', ADDED, 'asm-0', 'tm-0'])
+    expect(mounted(), 'the add at 63 live views was refused').toEqual(['source', 'lambda-0', ADDED, 'rxm-0', 'tm-0'])
     expect(liveViewCount()).toBe(MAX_TREE_LEAVES)
   })
 
@@ -109,19 +109,19 @@ describe('+ view, with four views on screen and 59 more remembered', () => {
   })
 
   it('adds once a ✕ has made room: on a second view of a kind, which no arrangement remembers', async () => {
-    expect(mounted(), 'precondition: two λ views on screen').toEqual(['source', 'lambda-0', ADDED, 'asm-0', 'tm-0'])
+    expect(mounted(), 'precondition: two λ views on screen').toEqual(['source', 'lambda-0', ADDED, 'rxm-0', 'tm-0'])
     await close(ADDED)
     expect(liveViewCount(), 'precondition: the close took a live view away').toBe(MAX_TREE_LEAVES - 1)
     document.querySelector<HTMLElement>('#views [data-leaf="lambda-0"] button.view-title')?.focus()
     await plusView('λ · program', '+ view’s λ · program')
     expect(noticeText(), 'the add after a close that made room was refused').toBe('view added — λ · program')
-    expect(mounted()).toEqual(['source', 'lambda-0', AGAIN, 'asm-0', 'tm-0'])
+    expect(mounted()).toEqual(['source', 'lambda-0', AGAIN, 'rxm-0', 'tm-0'])
     expect(liveViewCount()).toBe(MAX_TREE_LEAVES)
   })
 
   it('is refused again after a ✕ that made no room, the closed view counted among those not on screen', async () => {
     await close('tm-0')
-    expect(mounted(), 'precondition: the TM view is closed').toEqual(['source', 'lambda-0', AGAIN, 'asm-0'])
+    expect(mounted(), 'precondition: the TM view is closed').toEqual(['source', 'lambda-0', AGAIN, 'rxm-0'])
     expect(liveViewCount(), 'precondition: the tree before the ✕ is remembered, and still names the closed view').toBe(
       MAX_TREE_LEAVES,
     )
@@ -141,7 +141,7 @@ describe('+ view, with four views on screen and 59 more remembered', () => {
    */
   it('adds the source view at 64, where a remembered arrangement holds it already', async () => {
     await close('source')
-    expect(mounted(), 'precondition: the source view is closed').toEqual(['lambda-0', AGAIN, 'asm-0'])
+    expect(mounted(), 'precondition: the source view is closed').toEqual(['lambda-0', AGAIN, 'rxm-0'])
     expect(liveViewCount(), 'precondition: the workspace is still at the bound, the source view among the 64').toBe(
       MAX_TREE_LEAVES,
     )
@@ -157,7 +157,7 @@ describe('+ view, with four views on screen and 59 more remembered', () => {
    */
   it('adds the source view at 64 from a split as well', async () => {
     await close('source')
-    expect(mounted(), 'precondition: the source view is closed').toEqual(['lambda-0', AGAIN, 'asm-0'])
+    expect(mounted(), 'precondition: the source view is closed').toEqual(['lambda-0', AGAIN, 'rxm-0'])
     expect(liveViewCount(), 'precondition: the workspace is at the bound, the source view among the 64').toBe(
       MAX_TREE_LEAVES,
     )
@@ -168,7 +168,7 @@ describe('+ view, with four views on screen and 59 more remembered', () => {
     await until(() => menu.querySelector('button[data-source]') !== null, 'the split’s source item')
     await userEvent.click(menu.querySelector('button[data-source]') as HTMLElement)
     expect(noticeText(), 'the split’s source view was refused').toBe('view added — source')
-    expect(mounted()).toEqual(['lambda-0', 'source', AGAIN, 'asm-0'])
+    expect(mounted()).toEqual(['lambda-0', 'source', AGAIN, 'rxm-0'])
     expect(liveViewCount(), 'the source view was counted as a 65th').toBe(MAX_TREE_LEAVES)
   })
 

@@ -48,7 +48,7 @@ export type StackRegion = {
    * not `data-sized`, and `style.css` gives it a share only where it is.
    */
   readonly share: number | null
-  /** The panels drawn in it: one, the asm view's two side by side, or none where the region has no header. */
+  /** The panels drawn in it: one, the rxm view's two side by side, or none where the region has no header. */
   readonly panels: readonly Panel[]
   /** The elements whose `min-height` is the region's floor. Asked at each gesture, since a view can swap one. */
   readonly bodies: () => readonly HTMLElement[]

@@ -33,9 +33,9 @@ import { clickToggle } from './user-event-fixture'
  * for the status line and the popover, which both read it.
  *
  * **`watched` IS ASKED ONCE A LEG, AND EACH LEG HAS A CASE.** The λ leg's running focus is the mark in the source
- * editor. The TM leg's and the asm leg's are marks in their own views, which are off the page with the view, so what
+ * editor. The TM leg's and the rxm leg's are marks in their own views, which are off the page with the view, so what
  * is read of them is the status line's sentence for a pin the run has reached: *the machine is here right now*, *the
- * asm run is here right now*. With the λ leg's case alone, the other two legs could read the unfiltered set and every
+ * rxm run is here right now*. With the λ leg's case alone, the other two legs could read the unfiltered set and every
  * file would pass.
  *
  * **THE CASES SHARE ONE PAGE, AND EACH PUTS IT BACK BEFORE IT STARTS** (`start`): Explorer and all four views, which
@@ -46,7 +46,7 @@ import { clickToggle } from './user-event-fixture'
  * up is `.click()` and `.focus()`.
  */
 
-const FOUR = ['source', 'lambda-0', 'asm-0', 'tm-0']
+const FOUR = ['source', 'lambda-0', 'rxm-0', 'tm-0']
 /** `link-status.ts`'s `detachedText` for the one λ view on a copy, verbatim. */
 const SHOWS_A_COPY = 'λ view shows a copy — not linked to the program'
 /** `share-popover.ts`'s `copiesLine` for that view, verbatim. */
@@ -206,24 +206,24 @@ describe('the surfaces the views share, with a view parked', () => {
     await unpin()
   })
 
-  /** THE ASM LEG'S. At step 0 the instruction about to run is `li r0, #40`, the literal `40` (`asm-link.test.ts`). */
-  it('stops saying the asm run is at the pin while the asm view is parked', async () => {
+  /** THE RXM LEG'S. At step 0 the instruction about to run is `li r0, #40`, the literal `40` (`rxm-link.test.ts`). */
+  it('stops saying the rxm run is at the pin while the rxm view is parked', async () => {
     start()
-    control('asm-0', '↺').click()
-    expect(stepOf('asm-0'), 'precondition: the asm leg is at step 0').toContain('step 0 of ')
+    control('rxm-0', '↺').click()
+    expect(stepOf('rxm-0'), 'precondition: the rxm leg is at step 0').toContain('step 0 of ')
     linkAt(view, view.state.doc.toString().indexOf('40'))
     await until(
-      () => linkStatus().includes('the asm run is here right now'),
-      'the status line to say the asm run is here',
+      () => linkStatus().includes('the rxm run is here right now'),
+      'the status line to say the rxm run is here',
     )
 
-    await clickToggle('asm')
-    expect(host('asm-0'), 'precondition: the asm view is parked').toBeNull()
-    expect(linkStatus(), 'the status line says where an asm run no view shows is').not.toContain('the asm run is here')
+    await clickToggle('rxm')
+    expect(host('rxm-0'), 'precondition: the rxm view is parked').toBeNull()
+    expect(linkStatus(), 'the status line says where an rxm run no view shows is').not.toContain('the rxm run is here')
 
-    await clickToggle('asm')
-    expect(stepOf('asm-0'), 'the asm leg moved while its view was parked').toContain('step 0 of ')
-    expect(linkStatus(), 'the sentence did not come back with the view').toContain('the asm run is here right now')
+    await clickToggle('rxm')
+    expect(stepOf('rxm-0'), 'the rxm leg moved while its view was parked').toContain('step 0 of ')
+    expect(linkStatus(), 'the sentence did not come back with the view').toContain('the rxm run is here right now')
     await unpin()
   })
 

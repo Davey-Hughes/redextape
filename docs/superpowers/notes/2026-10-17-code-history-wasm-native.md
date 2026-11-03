@@ -131,11 +131,11 @@ and answered with the print, an edit had whatever the printer spells differently
 
 as every text was:
 
-## `crates/redextape-wasm/src/session.rs`, above `pub const COPY_CAPS: tm::asm::Caps = tm::asm::Caps { heap: 2_000_000, mem: 12_000_000, ..t`
+## `crates/redextape-wasm/src/session.rs`, above `pub const COPY_CAPS: tm::rxm::Caps = tm::rxm::Caps { heap: 2_000_000, mem: 12_000_000, ..t`
 
 One run, on the machine above: 629.8 MiB for a million-word locals bank saved by every `call`, to the memory cap; 264.6 MiB for a `cons` a step, to the step cap; 136.6 MiB for a `box` a step; 18.4 MiB for bare recursion, to the stack cap. Under these caps the same cases read 133.1, 72.5, 40.4 and 18.4 MiB, and
 
-## `crates/redextape-wasm/src/session.rs`, above `pub const MAX_SCRATCH_ASM_BYTES: usize = 5_200_000;`
+## `crates/redextape-wasm/src/session.rs`, above `pub const MAX_SCRATCH_RXM_BYTES: usize = 5_200_000;`
 
 ON AN AMD RYZEN 9 9950X3D, RELEASE BUILD, THIS CHECK OFF (`probe-asm-copy`). The ledger's three quiet-machine runs found `both` heaviest at medians 38.4, 36.1 and 38.8 ms against the loop's 32.1, 30.7 and 32.9, and with `both` added 5,200,038 bytes stayed under the 250 ms budget in all three (241.5, 243.9, 245.5 ms) while 5,400,000 was over it in two of them (254.3, 256.7 ms). This fix wave's own run agrees: `both` 39.0 ms against the loop's 31.6, 5,200,038 bytes under budget at 245.4 ms and 5,300,019 bytes, the next size up, over it at 250.2 ms.
 

@@ -128,7 +128,7 @@ after it.
 
 It said "four" until the whole-branch review found the fifth;
 
-## `crates/redextape-core/examples/blowup_probe.rs`, above `Err(e @ LowerError::Unsupported { .. }) => match defunc(&core).and_then(|d| lower_asm(&d))`
+## `crates/redextape-core/examples/blowup_probe.rs`, above `Err(e @ LowerError::Unsupported { .. }) => match defunc(&core).and_then(|d| lower_rxm(&d))`
 
 THE CATCH-ALL THIS REPLACED DID NOT REPRODUCE IT. `Err(e) =>` fell into `defunc` on
 `TooDeep` as well, which `lower_program` returns IMMEDIATELY from its
@@ -942,7 +942,7 @@ rule "bucket by what a pass could DO about it" and applied it to the first of th
 these are the other two, removed by the same alternative mutable-capture strategy and by no
 amount of devirtualization. Leaving them in overstated this target by ~0.9pp.
 
-## `crates/redextape-core/examples/step_survey.rs`, above `println!("    ONE asm instruction each (`lower_asm.rs`'s `lower_builtin_apply`) — no frame`
+## `crates/redextape-core/examples/step_survey.rs`, above `println!("    ONE rxm instruction each (`lower_rxm.rs`'s `lower_builtin_apply`) — no frame`
 
 "a SINGLE" became "ONE" on the same line for width alone: the symbol is 18 characters longer
 than the coordinate it replaces, which puts the line 5 over `max_width = 120`; dropping

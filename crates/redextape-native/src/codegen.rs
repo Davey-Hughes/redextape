@@ -1,4 +1,4 @@
-//! The Module-generic Cranelift codegen: translate a register-asm `Program` into Cranelift IR by
+//! The Module-generic Cranelift codegen: translate an rxm `Program` into Cranelift IR by
 //! calling ONLY `cranelift_module::Module` trait methods, so the same codegen drives either a
 //! `JITModule` (see `jit.rs`) or an `ObjectModule` (AOT). Every entry point here takes
 //! `module: &mut dyn Module`; a concrete `&mut JITModule`/`&mut ObjectModule` coerces to it at the
@@ -7,9 +7,9 @@
 //! # The model
 //! * **Registers → `Variable`s.** Each function owns one `Variable` per `Loc(i)` (init `0`), per
 //!   referenced `Arg(i)` (the first `arity` from the function's params, the rest init `0`), and one
-//!   for `Rr` (init `0`). The native call stack provides the asm frame convention for free: a
+//!   for `Rr` (init `0`). The native call stack provides the rxm frame convention for free: a
 //!   callee's `Loc`/`Arg` are its own `Variable`s, so `Loc` is preserved across a `Call` and `Arg`
-//!   is volatile, exactly as `run_asm`'s frame save/restore intends.
+//!   is volatile, exactly as `run_rxm`'s frame save/restore intends.
 //! * **Blocks.** One Cranelift block per reachable body instruction, plus a prologue entry block and
 //!   a single shared exit block. `Jz`/`Jmp` branch to the target index's block; fall-through jumps to
 //!   the next index's block (guaranteed present in `body` by the reachability partition).
@@ -24,9 +24,9 @@
 //!   stack, for ANY program — never a process abort.
 //!
 //! # Step accounting is coarse (termination, not exact-count, parity)
-//! `run_asm` charges one `steps` tick per instruction executed; native ticks only *backward edges*
+//! `run_rxm` charges one `steps` tick per instruction executed; native ticks only *backward edges*
 //! and *calls* — enough to force any non-terminating run to trip a cap, but not an exact count. So a
-//! straight-line program that `run_asm` would `HitCap` on a `steps` cap *smaller than its
+//! straight-line program that `run_rxm` would `HitCap` on a `steps` cap *smaller than its
 //! instruction count* can still run to completion natively. This is deliberate: ticking every
 //! instruction would defeat the JIT. Native guarantees **termination**, not step-count equality, and
 //! the oracle compares terminating *outcomes*. Callers must therefore not pass a `steps` cap tighter
@@ -197,8 +197,8 @@ pub(crate) fn declare_subroutines(
     Ok((func_ids, arity))
 }
 
-/// Read register `r` as a value in the current block. Out-of-bank indices read `0`, mirroring the asm
-/// interpreter's `Vm::read` (behind `trace::AsmCursor`), whose `locals.get(n)` / `args.get(n)` fall back to
+/// Read register `r` as a value in the current block. Out-of-bank indices read `0`, mirroring the rxm
+/// interpreter's `Vm::read` (behind `trace::RxmCursor`), whose `locals.get(n)` / `args.get(n)` fall back to
 /// `0` (and keeping this total).
 fn read_reg(b: &mut FunctionBuilder, r: Reg, locs: &[Variable], args: &[Variable], rr: Variable) -> Value {
     match r {
@@ -238,7 +238,7 @@ fn emit_cmp(b: &mut FunctionBuilder, cc: IntCC, x: Value, y: Value) -> Value {
     b.ins().uextend(types::I64, c)
 }
 
-/// Emit `x op y` per the asm interpreter's `eval_bin` (`trace::AsmCursor`). All words are `u64`, so:
+/// Emit `x op y` per the rxm interpreter's `eval_bin` (`trace::RxmCursor`). All words are `u64`, so:
 /// `Add`/`Mul` SATURATE at `u64::MAX` on overflow (matching `saturating_add`/`saturating_mul`); `Sub` is
 /// saturating monus `x - min(x, y)`; comparisons are UNSIGNED. Cranelift 0.134 has no scalar `*_sat`
 /// (those are SIMD lane ops that don't lower for i64), so we detect overflow and clamp: `uadd_overflow`/
@@ -284,7 +284,7 @@ fn emit_guard(b: &mut FunctionBuilder, guard: FuncRef, rt_ptr: Value, exit: Bloc
 // over every `Instr` variant, each arm emitting that opcode's Cranelift IR and jumping to the next
 // block. Splitting it by opcode group would scatter the shared locals (`loc_vars`/`arg_vars`/
 // `rr_var`/`rt_ptr`/`exit_block`) across several signatures without reducing what a reader has to
-// hold at once — the whole point of reading this function is "what does each asm opcode lower to",
+// hold at once — the whole point of reading this function is "what does each rxm opcode lower to",
 // arm by arm, against the one shared block/register setup above the loop.
 #[allow(clippy::too_many_lines)]
 pub(crate) fn translate_subroutine(
@@ -365,7 +365,7 @@ pub(crate) fn translate_subroutine(
                 // through `as i64` at equal width, so this never truncates or changes `n`'s bits.
                 // Registers themselves carry no signedness (see the module doc's "Registers →
                 // `Variable`s": each is a plain 64-bit `Variable`, read/written as `u64` throughout
-                // this crate and `run_asm`), so there is no numeric meaning here to wrap either.
+                // this crate and `run_rxm`), so there is no numeric meaning here to wrap either.
                 #[allow(clippy::cast_possible_wrap)]
                 let v = b.ins().iconst(types::I64, *n as i64);
                 write_reg(b, *rd, v, &loc_vars, &arg_vars, rr_var);
@@ -424,7 +424,7 @@ pub(crate) fn translate_subroutine(
             // identically to a native `return rr` because `partition` (see `analysis.rs`) rejects any
             // NON-`$main` subroutine that contains a `Halt`, so a `Halt` here can only be `$main`'s
             // own — where "return to the driver" IS "stop the program". (`$main`'s `Ret` with the
-            // native stack empty likewise returns to the driver, matching `run_asm`'s empty-stack
+            // native stack empty likewise returns to the driver, matching `run_rxm`'s empty-stack
             // `Ret`.)
             Instr::Ret | Instr::Halt => {
                 let v = read_reg(b, Reg::Rr, &loc_vars, &arg_vars, rr_var);

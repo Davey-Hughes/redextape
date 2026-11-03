@@ -130,12 +130,12 @@ export class SessionClient {
   }
 
   /**
-   * Build an asm copy from `.asm` text and run it — Plan 7 part 5 spec §7. No `step`, for `tmScratch`'s reason: the
+   * Build an rxm copy from `.rxm` text and run it — Plan 7 part 5 spec §7. No `step`, for `tmScratch`'s reason: the
    * text is the program, and a copy starts at its first instruction. The same generation guard as its siblings.
    */
-  asmScratch(gen: number, src: string): void {
+  rxmScratch(gen: number, src: string): void {
     if (gen !== this.#gen) return
-    this.#port.postMessage({ kind: 'asm-scratch', gen, src })
+    this.#port.postMessage({ kind: 'rxm-scratch', gen, src })
   }
 
   /**
@@ -255,7 +255,7 @@ export class SessionPool {
    *
    * IT TAKES NO `SessionId`. A scratch session runs the SAME `session-worker.ts` module a source session
    * does; what differs is the first message it is sent (`protocol.ts`'s `lambda-scratch`, `tm-scratch`
-   * or `asm-scratch` against `run`), because the module's job is "hold one wasm handle and answer about
+   * or `rxm-scratch` against `run`), because the module's job is "hold one wasm handle and answer about
    * it" and every kind of handle is that. So the kind is a fact about the CONVERSATION and not about the
    * thread, and there is nothing for a `SessionId` here to select.
    *

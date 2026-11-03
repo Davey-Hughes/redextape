@@ -43,10 +43,10 @@ beforeEach(() => {
 })
 
 describe('the layout tree in the app', () => {
-  // (source | λ) above (asm | TM): `harness.ts`'s `fourViews()`, the workspace `setup.ts` stores for every file. What
+  // (source | λ) above (rxm | TM): `harness.ts`'s `fourViews()`, the workspace `setup.ts` stores for every file. What
   // a page with nothing stored opens on is `first-load-views.test.ts`'s.
   it('starts on the four views the stored workspace holds', () => {
-    expect(panes()).toEqual(['source', 'lambda-0', 'asm-0', 'tm-0'])
+    expect(panes()).toEqual(['source', 'lambda-0', 'rxm-0', 'tm-0'])
     expect(queryEl('#results')).not.toBeNull()
   })
 

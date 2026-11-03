@@ -49,7 +49,7 @@ repos:
         pass_filenames: false
       # UNSCOPED FOR A SHARPER VERSION OF THE REASON THE HOOKS ABOVE GIVE, and the sharpening is the
       # whole argument. A README figure goes stale because a DIFFERENT file changed: one line added to
-      # `grammars/tree-sitter-redextape-lambda/grammar.js` falsifies that grammar's README and the asm
+      # `grammars/tree-sitter-redextape-lambda/grammar.js` falsifies that grammar's README and the rxm
       # and TM ones, which cite λ's line count for comparison. The file that goes wrong is never the
       # file being staged, so a `files:`-scoped rule would fire on exactly the commits that do not need
       # it and stay silent on the ones that do. It reads only the files its table names rather than

@@ -1,17 +1,17 @@
 import { describe, expect, it } from 'vitest'
-import { asmRecordEnd, RECORD_CHUNK, type RecordEnd, type RunReply } from '../../src/protocol'
+import { RECORD_CHUNK, type RecordEnd, type RunReply, rxmRecordEnd } from '../../src/protocol'
 import { type RecordLeg, type RecordWorker, recordLeg } from '../../src/record-loop'
-import type { AsmState, AsmStatus } from '../../src/types'
-import { frameOf } from './asm-fixtures'
+import type { RxmState, RxmStatus } from '../../src/types'
+import { frameOf } from './rxm-fixtures'
 
 /**
- * `recordLeg`'s contract, against a fake leg and a fake worker. The fake leg is an asm leg — its frames are
- * `AsmState`s and its end is `asmRecordEnd` — over a cursor that is nothing but a step count: it runs `length` steps
+ * `recordLeg`'s contract, against a fake leg and a fake worker. The fake leg is an rxm leg — its frames are
+ * `RxmState`s and its end is `rxmRecordEnd` — over a cursor that is nothing but a step count: it runs `length` steps
  * and then finishes as `finish` says, and each frame is the step the cursor stands on, so a run of frames that skips a
  * step shows as a gap.
  */
 
-type Status = Pick<AsmStatus, 'run' | 'cap'>
+type Status = Pick<RxmStatus, 'run' | 'cap'>
 
 /** A cursor: where it stands, how far it runs, how it finishes, and how many times it was asked to step. */
 type Cursor = { at: number; readonly length: number; readonly finish: Status; stepCalls: number }
@@ -28,8 +28,8 @@ type Live = { gen: number; cursor: Cursor; hasLeg: boolean; available: boolean }
 
 const FRAME_BYTES = 10
 
-const fakeLeg = (live: { current: Live }): RecordLeg<Cursor, AsmState> => ({
-  leg: 'asm',
+const fakeLeg = (live: { current: Live }): RecordLeg<Cursor, RxmState> => ({
+  leg: 'rxm',
   handle: (gen) => (live.current.gen === gen && live.current.hasLeg ? live.current.cursor : null),
   available: () => live.current.available,
   frame: (c) => frameOf({ step: c.at }),
@@ -41,8 +41,8 @@ const fakeLeg = (live: { current: Live }): RecordLeg<Cursor, AsmState> => ({
     return true
   },
   // The status reads `Running` until the cursor has run its length, as a real cursor's does.
-  end: (c) => asmRecordEnd(c.at >= c.length ? c.finish : { run: 'Running', cap: null }),
-  reply: (gen, frames, done) => ({ kind: 'asm-frames', gen, frames, done }),
+  end: (c) => rxmRecordEnd(c.at >= c.length ? c.finish : { run: 'Running', cap: null }),
+  reply: (gen, frames, done) => ({ kind: 'rxm-frames', gen, frames, done }),
 })
 
 type Harness = {
@@ -50,7 +50,7 @@ type Harness = {
   worker: RecordWorker
   /** Every post and every yield, in order: a post as its frame count, a yield as where the cursor stood. */
   events: string[]
-  posts: Extract<RunReply, { kind: 'asm-frames' }>[]
+  posts: Extract<RunReply, { kind: 'rxm-frames' }>[]
   /** Make every yield wait until `release` lets it go, so a test can act while a loop is suspended. */
   gate(): void
   /** Let the oldest waiting yield go. */
@@ -64,12 +64,12 @@ function harness(first: Live, allowance = Number.POSITIVE_INFINITY): Harness {
   const waiting: (() => void)[] = []
   let gated = false
   const worker: RecordWorker = {
-    recording: { lambda: false, asm: false, tm: false },
-    recorded: { lambda: 0, asm: 0, tm: 0 },
-    allowance: { lambda: allowance, asm: allowance, tm: allowance },
+    recording: { lambda: false, rxm: false, tm: false },
+    recorded: { lambda: 0, rxm: 0, tm: 0 },
+    allowance: { lambda: allowance, rxm: allowance, tm: allowance },
     owns: (gen) => live.current.gen === gen,
     post: (reply) => {
-      if (reply.kind !== 'asm-frames') throw new Error(`the asm leg posted a ${reply.kind}`)
+      if (reply.kind !== 'rxm-frames') throw new Error(`the rxm leg posted a ${reply.kind}`)
       posts.push(reply)
       events.push(`post ${reply.frames.length}`)
     },
@@ -119,7 +119,7 @@ describe('recordLeg', () => {
     expect(h.live.current.cursor.stepCalls).toBe(3)
     expect(h.posts.map((p) => p.done)).toEqual(['budget'])
     expect(stepsOf(h.posts)).toEqual([1, 2, 3])
-    expect(h.worker.recorded.asm).toBe(30)
+    expect(h.worker.recorded.rxm).toBe(30)
   })
 
   it('loses no step across a `budget` stop: recording further resumes on the next frame', async () => {
@@ -127,7 +127,7 @@ describe('recordLeg', () => {
     const leg = fakeLeg(h.live)
     await recordLeg(leg, h.worker, 1, true)
     // What `onExtend` does before it records further.
-    h.worker.allowance.asm = h.worker.recorded.asm + 25
+    h.worker.allowance.rxm = h.worker.recorded.rxm + 25
     await recordLeg(leg, h.worker, 1, false)
     expect(h.posts.map((p) => p.done)).toEqual(['budget', 'budget'])
     expect(stepsOf(h.posts)).toEqual([0, 1, 2, 3, 4, 5])
@@ -157,7 +157,7 @@ describe('recordLeg', () => {
     ]) {
       const h = harness(current)
       expect(await recordLeg(fakeLeg(h.live), h.worker, 1, true)).toBe(false)
-      expect(h.worker.recording.asm).toBe(false)
+      expect(h.worker.recording.rxm).toBe(false)
       expect(h.events).toEqual([])
       expect(h.live.current.cursor.stepCalls).toBe(0)
     }
@@ -169,19 +169,19 @@ describe('recordLeg', () => {
     const leg = fakeLeg(h.live)
     const first = recordLeg(leg, h.worker, 1, true)
     expect(h.events).toEqual([`post ${RECORD_CHUNK + 1}`, `yield at ${RECORD_CHUNK}`])
-    expect(h.worker.recording.asm).toBe(true)
+    expect(h.worker.recording.rxm).toBe(true)
 
     // `onRun`'s loop suspended at a yield, and a `[continue]` for the same generation arrives.
     expect(await recordLeg(leg, h.worker, 1, false)).toBe(false)
     expect(h.events).toHaveLength(2)
-    expect(h.worker.recording.asm).toBe(true)
+    expect(h.worker.recording.rxm).toBe(true)
 
     h.release()
     expect(await first).toBe(true)
     expect(h.posts.map((p) => p.done)).toEqual([null, 'ended'])
     expect(stepsOf(h.posts)).toEqual(Array.from({ length: RECORD_CHUNK + 6 }, (_, i) => i))
     // The loop that set the flag, finishing while its generation owns what is live, clears it.
-    expect(h.worker.recording.asm).toBe(false)
+    expect(h.worker.recording.rxm).toBe(false)
   })
 
   it('leaves the flag alone on its way out once a newer generation owns what is live', async () => {
@@ -189,14 +189,14 @@ describe('recordLeg', () => {
     h.gate()
     const leg = fakeLeg(h.live)
     const stale = recordLeg(leg, h.worker, 1, true)
-    expect(h.worker.recording.asm).toBe(true)
+    expect(h.worker.recording.rxm).toBe(true)
 
     // A newer build replaces what is live and resets the flag, as `onRun` does, and its own loop sets it again and
     // suspends at its first yield.
     h.live.current = live(2, cursor(RECORD_CHUNK + 5))
-    h.worker.recording.asm = false
+    h.worker.recording.rxm = false
     const fresh = recordLeg(leg, h.worker, 2, true)
-    expect(h.worker.recording.asm).toBe(true)
+    expect(h.worker.recording.rxm).toBe(true)
     expect(h.posts).toHaveLength(2)
 
     // The superseded loop wakes, finds its generation gone, and returns without posting — and without clearing the
@@ -204,7 +204,7 @@ describe('recordLeg', () => {
     h.release()
     expect(await stale).toBe(true)
     expect(h.posts).toHaveLength(2)
-    expect(h.worker.recording.asm).toBe(true)
+    expect(h.worker.recording.rxm).toBe(true)
 
     // So a third call for the newer generation is still refused while the newer loop runs.
     expect(await recordLeg(leg, h.worker, 2, false)).toBe(false)
@@ -216,6 +216,6 @@ describe('recordLeg', () => {
       [2, null],
       [2, 'ended'],
     ])
-    expect(h.worker.recording.asm).toBe(false)
+    expect(h.worker.recording.rxm).toBe(false)
   })
 })

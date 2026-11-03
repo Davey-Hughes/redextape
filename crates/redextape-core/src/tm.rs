@@ -1,8 +1,6 @@
-//! The TM backend: Core AST -> register-assembly -> multi-tape Turing machine -> `Value`, plus a
+//! The TM backend: Core AST -> rxm -> multi-tape Turing machine -> `Value`, plus a
 //! round-tripping TM text form. See `docs/superpowers/specs/2026-07-22-tm-backend-design.md`.
 
-pub mod asm;
-pub mod asm_syntax;
 pub mod attribute;
 pub mod build;
 pub mod comments;
@@ -10,12 +8,14 @@ pub mod decode;
 pub mod defunc;
 pub mod encoding;
 pub mod header;
-pub mod lower_asm;
+pub mod lower_rxm;
 pub mod lower_tm;
 pub mod machine;
 pub mod one_way;
 pub mod reduced_file;
 pub mod reduction;
+pub mod rxm;
+pub mod rxm_syntax;
 pub mod sim;
 pub mod single_tape;
 pub mod syntax;
@@ -24,14 +24,6 @@ pub(crate) mod test_fixtures;
 pub mod two_symbol;
 pub mod universal;
 
-pub use asm::{
-    AsmHeader, AsmOutcome, AsmRun, Caps, DEFAULT_CAPS, DecodeFailure, Instr, Program, Reg, decode_asm,
-    decode_asm_reason, decode_asm_ty, decode_asm_ty_reason, print_asm, print_asm_doc, print_asm_mapped, print_asm_with,
-    print_asm_with_mapped, print_instr, run_asm,
-};
-pub use asm_syntax::{
-    AsmDocument, MnemonicDoc, asm_label_diagnostics, instr_at, parse_asm, parse_asm_full, parse_asm_nav,
-};
 pub use attribute::{Attribution, StepBucket, attribute, attribute_at, attribute_steps};
 pub use build::{
     AT, BOX, Builder, HEAP, MARK, MAX_FIELD_WIDTH, MAX_MACHINE_STATES, MAX_TAPES, MIN_FIELD_WIDTH, REG, RuleSpec, SEP,
@@ -44,10 +36,18 @@ pub use header::{
     EncodingKind, HEADER_VERSION, MAX_REDUCED_STEPS, REDUCED_HEADER_VERSION, Reduction, Stage, StageKind, TmHeader,
     is_stage_list,
 };
-pub use lower_asm::{LowerError, lower_asm, lower_asm_mapped};
+pub use lower_rxm::{LowerError, lower_rxm, lower_rxm_mapped};
 pub use lower_tm::{lower_tm, lower_tm_guarded, lower_tm_mapped, n_slots_of};
 pub use machine::{BLANK, Machine, Move, Rule, State, StateId, Symbol};
 pub use reduced_file::{ReduceError, RunFailure, decode_reduced, reduce, run_caps, value_of_run};
+pub use rxm::{
+    Caps, DEFAULT_CAPS, DecodeFailure, Instr, Program, Reg, RxmHeader, RxmOutcome, RxmRun, decode_rxm,
+    decode_rxm_reason, decode_rxm_ty, decode_rxm_ty_reason, print_instr, print_rxm, print_rxm_doc, print_rxm_mapped,
+    print_rxm_with, print_rxm_with_mapped, run_rxm,
+};
+pub use rxm_syntax::{
+    MnemonicDoc, RxmDocument, instr_at, parse_rxm, parse_rxm_full, parse_rxm_nav, rxm_label_diagnostics,
+};
 pub use sim::{
     Caps as TmCaps, DEFAULT_CAPS as TM_DEFAULT_CAPS, Status as TmStatus, Step, Tape, Trace, Watcher, simulate,
     simulate_counts, simulate_final, simulate_trace, simulate_watched,
@@ -59,7 +59,7 @@ pub use syntax::{
 
 use crate::core::Core;
 use crate::ty::Ty;
-// `Encoding`, `lower_asm`, `LowerError`, `lower_tm`, `simulate`, `Tape`, `TmCaps`, `TmStatus`, `REG`,
+// `Encoding`, `lower_rxm`, `LowerError`, `lower_tm`, `simulate`, `Tape`, `TmCaps`, `TmStatus`, `REG`,
 // and `TAPES` are in scope via this module's `pub use` re-exports.
 
 /// The outcome of lowering + simulating a program through the TM backend. Decoding to a `Value` is a
@@ -114,16 +114,16 @@ pub enum TmRun {
     /// only grows with width — so `search_width` returns on the first refusal, at whatever width
     /// reached it.
     TooLarge,
-    /// The program could not be lowered to asm (e.g. a higher-order use).
+    /// The program could not be lowered to rxm (e.g. a higher-order use).
     LowerError(LowerError),
 }
 
-/// Lower `core` to asm, trying direct (first-order) lowering before defunctionalizing.
+/// Lower `core` to rxm, trying direct (first-order) lowering before defunctionalizing.
 ///
-/// `lower_asm` is tried FIRST, not just as a fast path: `defunc`'s top-level peeling only recognizes a
+/// `lower_rxm` is tried FIRST, not just as a fast path: `defunc`'s top-level peeling only recognizes a
 /// `fn`-chain (`LetRec`-with-`Lambda`), not a directly-applied, call-only `let f = |params| body; ...`
-/// binding — a shape `lower_asm` already lowers directly (a named call-only lambda binding, pinned by
-/// `lower_asm`'s test `directly_applied_lambda_is_a_named_subroutine`). Defunctionalizing such a program
+/// binding — a shape `lower_rxm` already lowers directly (a named call-only lambda binding, pinned by
+/// `lower_rxm`'s test `directly_applied_lambda_is_a_named_subroutine`). Defunctionalizing such a program
 /// first would wrongly reject it (`defunc` treats any bare `Lambda` in `Let`'s value position as a
 /// higher-order value-use, since only its `LetRec` peel special-cases a call-only function binding),
 /// regressing a first-order demo (`"let add1 = |x| x + 1; add1(41)"`) from `Ran` to `LowerError`. So:
@@ -139,7 +139,7 @@ pub enum TmRun {
 /// retrying it is redundant work at best.
 ///
 /// PUBLIC SO A CALLER CAN STEP THE PROGRAM THE MACHINE WAS BUILT FROM. Every `run_tm*` entry point in
-/// this module lowers through it, via `lower_and_size`, so a `trace::AsmCursor` over its result runs the
+/// this module lowers through it, via `lower_and_size`, so a `trace::RxmCursor` over its result runs the
 /// very instructions whose `pc{i}` entry states their machines pass through — which is what lets the
 /// three-way oracle hold the two step for step. Not every lowering calls it: `attribute.rs` and
 /// `sourcemap.rs` repeat its dispatch over the `_mapped` lowerings, to keep each instruction's origin.
@@ -147,20 +147,20 @@ pub enum TmRun {
 /// # Errors
 ///
 /// `LowerError::Unsupported` when neither direct lowering nor `defunc` can express the program.
-/// `LowerError::TooDeep` when a depth guard refuses it: `lower_asm`'s `MAX_LOWER_DEPTH`, on `core` or on
+/// `LowerError::TooDeep` when a depth guard refuses it: `lower_rxm`'s `MAX_LOWER_DEPTH`, on `core` or on
 /// the Core `defunc` rewrote it to, or `defunc`'s own `MAX_DEFUNC_DEPTH`, which a program the first
 /// attempt refused as `Unsupported` can still reach.
 pub fn lower_program(core: &Core) -> Result<Program, LowerError> {
-    match lower_asm(core) {
+    match lower_rxm(core) {
         Ok(p) => return Ok(p),
         Err(LowerError::Unsupported { .. }) => {}
         Err(e @ LowerError::TooDeep { .. }) => return Err(e),
     }
     let defunced = defunc(core)?;
-    lower_asm(&defunced)
+    lower_rxm(&defunced)
 }
 
-/// Lower (`lower_asm`, defunctionalizing first if needed -> `lower_tm`) then simulate. The convenience
+/// Lower (`lower_rxm`, defunctionalizing first if needed -> `lower_tm`) then simulate. The convenience
 /// entry point; `enc` selects the numeric encoding. Panic-free and bounded by `caps`.
 ///
 /// Discards the width auto-fit settled on, which is fine for decoding — see `TmRun::Ran` — since both
@@ -331,8 +331,8 @@ pub struct DescribedRun {
 ///
 /// The single place either public entry point builds a `DescribedRun`, so the pinned path cannot
 /// drift from the fitted one — and so the one place a program's type becomes a header's `result`:
-/// through `ty::ground`, which writes a free type variable as `Nat`, the rule `AsmHeader::for_type`
-/// follows for asm. `[]` types as `List<t0>`, and a header naming `t0` is one `parse_tm_full` refuses,
+/// through `ty::ground`, which writes a free type variable as `Nat`, the rule `RxmHeader::for_type`
+/// follows for rxm. `[]` types as `List<t0>`, and a header naming `t0` is one `parse_tm_full` refuses,
 /// so without grounding, `redextape emit --lang tm` would write a file `run` cannot read.
 fn describe_at(
     prog: &Program,
@@ -366,7 +366,7 @@ fn describe_at(
 ///
 /// The error type is `TmRun` itself, not a dedicated error enum, because both failure shapes ARE
 /// `TmRun` outcomes that just never reached a configuration to describe: `Err(TmRun::LowerError(_))`
-/// if `core` could not be lowered to asm (see `lower_program`'s doc — an unsupported higher-order
+/// if `core` could not be lowered to rxm (see `lower_program`'s doc — an unsupported higher-order
 /// construct or a too-deep program), and `Err(TmRun::TooLarge)` if `lower_tm` refused to build a
 /// machine at all (`MAX_SLOTS`/`MAX_FRAME_LOC`/`MAX_MUL_INSTRS`/`MAX_MACHINE_STATES` — see
 /// `TmRun::TooLarge`'s doc). Neither is recoverable by retrying: the caller's only recourse is
@@ -409,7 +409,7 @@ pub fn run_tm_described(core: &Core, kind: EncodingKind, result: Ty, caps: TmCap
 /// `Err(TmRun::TooLarge)` when `width` is outside `MIN_FIELD_WIDTH..=MAX_FIELD_WIDTH`, checked first
 /// and before `core` is even lowered: no machine can be built at such a width, which is exactly what
 /// that variant means. Then the same two as `run_tm_described`: `Err(TmRun::LowerError(_))` when
-/// `core` has no asm lowering, and `Err(TmRun::TooLarge)` when `lower_tm` refuses to build a machine
+/// `core` has no rxm lowering, and `Err(TmRun::TooLarge)` when `lower_tm` refuses to build a machine
 /// at all.
 pub fn run_tm_described_at(
     core: &Core,
@@ -619,7 +619,7 @@ mod run_tm_tests {
     }
 
     /// A directly-applied, call-only `let`-bound lambda must run on the TM: `lower_program` tries
-    /// direct `lower_asm` first precisely so this (a shape `defunc`'s `LetRec`-only peel does not
+    /// direct `lower_rxm` first precisely so this (a shape `defunc`'s `LetRec`-only peel does not
     /// recognize) does not fall to `LowerError`.
     #[test]
     fn run_tm_runs_a_directly_applied_let_bound_lambda() {
@@ -628,9 +628,9 @@ mod run_tm_tests {
 
     /// Totality: a deep FIRST-order program (a huge list literal desugars to a ~40,000-deep
     /// `cons`/`Apply` spine) must make `run_tm` return cleanly, never crash the process. Mirrors
-    /// `asm_oracle.rs::deep_list_literal_lowers_without_overflowing` but end-to-end through
+    /// `rxm_oracle.rs::deep_list_literal_lowers_without_overflowing` but end-to-end through
     /// `run_tm`. Run on an explicit 8 MiB thread -- the production stack size
-    /// `lower_asm::MAX_LOWER_DEPTH` / `defunc::MAX_DEFUNC_DEPTH` are tuned against (see that doc
+    /// `lower_rxm::MAX_LOWER_DEPTH` / `defunc::MAX_DEFUNC_DEPTH` are tuned against (see that doc
     /// comment for why a smaller test thread would overflow before either guard fires; do NOT
     /// shrink this).
     #[test]
@@ -704,13 +704,13 @@ mod run_tm_tests {
     /// `run_tm_at` — so calling it directly here is the cheapest REAL exercise of the same
     /// classification those four callers depend on, not a substitute for it.
     ///
-    /// Built as asm rather than compiled from source: the front door refuses such a source (see above),
+    /// Built as rxm rather than compiled from source: the front door refuses such a source (see above),
     /// and `code.len()` alone is a lower bound on the state count, so this trips `lower_tm_all`'s cheap
     /// pre-check, allocating only the two scaffolding states (`halt`, `overflow`) before refusing.
     #[test]
     fn a_program_past_the_state_ceiling_is_too_large_not_ran() {
-        use crate::tm::asm::{Instr, Program};
         use crate::tm::build::MAX_MACHINE_STATES;
+        use crate::tm::rxm::{Instr, Program};
 
         let prog = Program { code: vec![Instr::Halt; MAX_MACHINE_STATES + 1], labels: Vec::new() };
         assert!(

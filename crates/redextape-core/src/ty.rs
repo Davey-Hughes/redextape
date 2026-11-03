@@ -123,13 +123,13 @@ pub fn parse_ty(s: &str) -> Option<Ty> {
 
 /// The round-trip half of `is_decodable` alone — `ty` MUST already be grounded, and this asks nothing
 /// about whether it is. Split out so a caller that has already run `ground` for its own reasons, as
-/// `AsmHeader::for_type` has (its own `result` field holds exactly the value this checks), asks this
+/// `RxmHeader::for_type` has (its own `result` field holds exactly the value this checks), asks this
 /// directly rather than paying for a second walk of the same tree through `is_decodable`'s own
 /// grounding.
 ///
 /// `pub`, NOT `pub(crate)`: `redextape-cli`'s `emit_tm` and `redextape-wasm`'s `Session::tm_text` are
 /// each in a caller's hands that grounded `ty` already — a refusal's own message and an already-grounded
-/// header's `result` — so they ask this directly too, for the identical reason `AsmHeader::for_type` does.
+/// header's `result` — so they ask this directly too, for the identical reason `RxmHeader::for_type` does.
 #[must_use]
 pub fn is_decodable_ground(ty: &Ty) -> bool {
     parse_ty(&show(ty)).is_some()
@@ -140,14 +140,14 @@ pub fn is_decodable_ground(ty: &Ty) -> bool {
 /// nested past `MAX_TY_DEPTH`; a free variable always does, once `ground` writes it as `Nat`.
 ///
 /// **THE ONE PREDICATE A HEADER WRITER ASKS BEFORE NAMING A `result` LINE — THROUGH `is_decodable_ground`
-/// ABOVE, NOT THIS FUNCTION, ONCE A CALLER HAS ALREADY GROUNDED ITS OWN TYPE.** `AsmHeader::for_type`,
+/// ABOVE, NOT THIS FUNCTION, ONCE A CALLER HAS ALREADY GROUNDED ITS OWN TYPE.** `RxmHeader::for_type`,
 /// `redextape emit --lang tm`'s refusal (`emit_tm`) and the wasm session's `tmText` each already hold a
 /// type they grounded themselves — `for_type`'s own `result` field, `emit_tm`'s local `grounded`,
 /// `tmText`'s `header.result` (`describe_at`'s own doc) — so all three ask `is_decodable_ground` of it
 /// directly, for the reason its own doc gives. THIS function is for a caller that has not: it grounds
 /// `ty` itself before asking, which is what `Session::tm_result_decodable` needs of `self.ty` (never
 /// grounded on its own) and what the tests below ask of a bare `Ty`. Both halves round-trip through the
-/// identical `parse_ty(&show(..))`, so the CLI, the session and the asm header cannot disagree with each
+/// identical `parse_ty(&show(..))`, so the CLI, the session and the rxm header cannot disagree with each
 /// other, or with `run`'s own refusal, about which programs get a header.
 #[must_use]
 pub fn is_decodable(ty: &Ty) -> bool {

@@ -1,0 +1,20 @@
+{
+  "grammars": [
+    {
+      "name": "redextape_rxm",
+      "camelcase": "RedextapeRxm",
+      "scope": "source.rxm",
+      "path": ".",
+      "file-types": ["rxm"],
+      "highlights": ["queries/highlights.scm"],
+      "injection-regex": "^rxm$"
+    }
+  ],
+  "metadata": {
+    "version": "0.1.0",
+    "license": "GPL-3.0-only",
+    "description": "Redextape rxm text form grammar for tree-sitter",
+    "authors": [{ "name": "davey" }],
+    "links": { "repository": "https://git.daveynet.xyz/davey/redextape" }
+  }
+}

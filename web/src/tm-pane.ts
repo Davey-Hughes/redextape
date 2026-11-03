@@ -39,7 +39,7 @@ let gridsMinted = 0
  * `editor-custody.ts`'s casts to `EditablePane` go through `unknown` of necessity, so without this clause `tsc`
  * verifies nothing about whether this class actually satisfies the shape custody casts to — a renamed method would
  * pass silently. The members below (`setEditor`, `takeEditor`, `receiveEditor`, `holdsEditor`, `flushEditor`) hand
- * off to `#copy`, the `CopyEditor` this view shares with the asm view, which carries the clause too; `LambdaPane`'s
+ * off to `#copy`, the `CopyEditor` this view shares with the rxm view, which carries the clause too; `LambdaPane`'s
  * members of the same names hold the arguments for their contracts, and `CopyEditor`'s docs add what differs for a
  * machine view.
  */
@@ -51,7 +51,7 @@ export class TmPane implements EditablePane {
   #header: ViewHeader
   /**
    * A copy's editor, its text panel and outline, and the facts behind *format* and *edit a copy* — the part this view
-   * shares with the asm view (`copy-editor.ts`), whose comments carry the reasons behind the handoff.
+   * shares with the rxm view (`copy-editor.ts`), whose comments carry the reasons behind the handoff.
    */
   #copy: CopyEditor
   /**

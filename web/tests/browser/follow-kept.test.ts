@@ -8,7 +8,7 @@ import { userPickWorkspace } from './user-event-fixture'
 /**
  * A BOX THAT FOLLOWS THE RUN IS STILL FOLLOWING IT WHEN ITS VIEW COMES BACK TO THE PAGE — the view layouts spec §5.2.
  *
- * The TM view's rule table and state diagram, the asm view's listing and the λ view's body each keep the run's place
+ * The TM view's rule table and state diagram, the rxm view's listing and the λ view's body each keep the run's place
  * in view until the user scrolls away, and offer a control to follow again once they have (`state-table.ts`'s
  * `Follow`). `pane-host.ts` puts each view's scroll positions back after a rebuild, and that write is reported as a
  * `scroll` a frame later: read as the user's, it would stop a box nobody had touched from following, so the write is
@@ -35,7 +35,7 @@ type Box = {
 const BOXES: readonly Box[] = [
   { name: 'the rule table', leaf: 'tm-0', kind: 'tm', box: '.state-table', again: '.table-reattach' },
   { name: 'the state diagram', leaf: 'tm-0', kind: 'tm', box: '.program-scroll', again: '.diagram-reattach' },
-  { name: 'the asm listing', leaf: 'asm-0', kind: 'asm', box: '.asm-listing', again: '.table-reattach' },
+  { name: 'the rxm listing', leaf: 'rxm-0', kind: 'rxm', box: '.rxm-listing', again: '.table-reattach' },
   { name: 'the λ body', leaf: 'lambda-0', kind: 'lambda', box: '.term', again: '.term-reattach' },
 ]
 
@@ -51,7 +51,7 @@ const control = (leaf: string, label: string): HTMLButtonElement | undefined =>
  * arrangement and not a gesture under test, so `.click()`.
  */
 const startOn = (preset: 'explorer' | 'stage'): void => {
-  for (const kind of ['source', 'asm', 'lambda', 'tm'])
+  for (const kind of ['source', 'rxm', 'lambda', 'tm'])
     if (toggle(kind).getAttribute('aria-pressed') !== 'true') toggle(kind).click()
   const staged = document.querySelector('#views [role="tab"]') !== null
   if (staged !== (preset === 'stage')) {
@@ -62,7 +62,7 @@ const startOn = (preset: 'explorer' | 'stage'): void => {
   }
   const sel = preset === 'stage' ? '#views [role="tab"]' : '#views [data-leaf]:not([role="tab"])'
   const found = [...document.querySelectorAll<HTMLElement>(sel)].map((el) => el.dataset.leaf).join(' ')
-  if (found !== 'source lambda-0 asm-0 tm-0') throw new Error(`startOn(${preset}) left the page on ${found}`)
+  if (found !== 'source lambda-0 rxm-0 tm-0') throw new Error(`startOn(${preset}) left the page on ${found}`)
 }
 /**
  * Have each of `boxes` follow from here, whatever the case before left, and assert that it does: a case that fails
@@ -88,7 +88,7 @@ describe('a box that follows the run, across a rebuild of the layout', () => {
     await until(stateIdle, 'the first compile')
     host('lambda-0')?.querySelector<HTMLButtonElement>('.view-menu-choice[data-value="outline"]')?.click()
     // ONE STEP SHORT OF THE LAST, on every leg: `⏭`, then `◀`.
-    for (const leaf of ['tm-0', 'asm-0', 'lambda-0']) {
+    for (const leaf of ['tm-0', 'rxm-0', 'lambda-0']) {
       host(leaf)?.querySelector<HTMLButtonElement>('.controls button.to-newest')?.click()
       await until(() => steps(leaf).length === 2 && steps(leaf)[0] === steps(leaf)[1], `${leaf} to reach its last step`)
       control(leaf, '◀')?.click()
@@ -187,14 +187,14 @@ describe('a box that follows the run, across a rebuild of the layout', () => {
       await pressToggle('tm')
       expect(host('tm-0'), 'the view is still on the page').toBeNull()
       await pressToggle('lambda')
-      await pressToggle('asm')
+      await pressToggle('rxm')
       await frames()
       await pressToggle('tm')
       await frames()
       const back = { top: box(diagram).scrollTop, height: box(diagram).clientHeight, offered: offered(diagram) }
       // THE FOUR VIEWS BACK BEFORE ANYTHING IS ASSERTED, so a failure here leaves the next case its page.
       await pressToggle('lambda')
-      await pressToggle('asm')
+      await pressToggle('rxm')
       await frames()
       expect(back.height, 'precondition: the diagram came back taller').toBeGreaterThan(before.height)
       expect(before.top - back.top, 'precondition: the restore was clamped').toBeGreaterThan(12)

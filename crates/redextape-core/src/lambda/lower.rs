@@ -29,14 +29,14 @@ const GROUP: &str = "$group";
 /// is lowered, so a counter carried by `lower_expr` alone would still abort on a shallow `fn` wrapping
 /// a deep list.
 ///
-/// 700 rather than the 580 of `lower_asm::MAX_LOWER_DEPTH`/`defunc::MAX_DEFUNC_DEPTH`: same 8 MiB
+/// 700 rather than the 580 of `lower_rxm::MAX_LOWER_DEPTH`/`defunc::MAX_DEFUNC_DEPTH`: same 8 MiB
 /// production stack and the same ~2x margin (the invariant is the margin, not a numeric match to
 /// another guard), but these frames differ in size from `lower_into`'s, so the number follows this
 /// module's own measurement: an unguarded lowering overflows an 8 MiB debug-build stack by depth 1473
 /// on its fattest reachable shape, a store-passing region's statement spine. 700 keeps ~2.1x below that,
 /// and it is exactly `interp::MAX_EVAL_DEPTH`, so the λ backend refuses nothing the reference
 /// interpreter can evaluate: structural nesting past 700 already faults there. Do NOT tune this against
-/// a smaller test thread — see `lower_asm::MAX_LOWER_DEPTH`'s doc for why.
+/// a smaller test thread — see `lower_rxm::MAX_LOWER_DEPTH`'s doc for why.
 const MAX_LAMBDA_LOWER_DEPTH: u32 = 700;
 
 // `lower` refuses nothing on shared-subterm grounds: `term.rs`'s `shift` and `subst` return their argument's

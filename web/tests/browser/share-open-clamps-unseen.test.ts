@@ -13,7 +13,7 @@ import { live, mounted, noticeText, SHELL, sourceBeside, stateIdle, stepTextOf, 
  * Each link is pasted into the open page, a `hashchange`, and carries a light program under `unary`, whose run ends
  * long before the link's steps, so every position clamps.
  *
- * **A CASE THAT EXPECTS NO WORD OF A CLAMP WAITS UNTIL THE CLAMP HAS HAPPENED.** The legs stop in the order λ, asm, TM
+ * **A CASE THAT EXPECTS NO WORD OF A CLAMP WAITS UNTIL THE CLAMP HAS HAPPENED.** The legs stop in the order λ, rxm, TM
  * (`share-positions.ts`), so a later leg's notice says the earlier ones have stopped; and where no notice is due, the
  * link's run is over once the readout shows its value, which is why each link's program has another value than the
  * one before it.
@@ -47,8 +47,8 @@ beforeAll(async () => {
 
 describe('a clamp of a leg no view shows', () => {
   it('says the TM leg’s clamp alone on a page of the source and TM views, in one leg’s words', async () => {
-    location.hash = await link(OPENER, sourceBeside('tm-0', 'tm'), { lambda: 100, asm: 100, tm: 1_000_000 })
-    // THE TM LEG STOPS LAST: its notice is on the line once the λ and asm legs have stopped, unsaid.
+    location.hash = await link(OPENER, sourceBeside('tm-0', 'tm'), { lambda: 100, rxm: 100, tm: 1_000_000 })
+    // THE TM LEG STOPS LAST: its notice is on the line once the λ and rxm legs have stopped, unsaid.
     await until(() => noticeText().includes('TM step'), 'the TM leg’s clamp')
     expect(mounted(), 'precondition: the page shows the source and TM views').toEqual(['source', 'tm-0'])
     const said = "the link's TM step 1,000,000 is past the end of this run — showing step 2,870"
@@ -60,7 +60,7 @@ describe('a clamp of a leg no view shows', () => {
 
   it('says nothing of clamps where no clamped leg has a view, and keeps the open’s notice and its undo', async () => {
     expect(runOver(15), 'precondition: the page is not on the link’s value already').toBe(false)
-    location.hash = await link(OTHER, sourceBeside('tm-0', 'tm'), { lambda: 100, asm: 100 })
+    location.hash = await link(OTHER, sourceBeside('tm-0', 'tm'), { lambda: 100, rxm: 100 })
     await until(
       () => view.state.doc.toString() === OTHER && runOver(15),
       'the link’s run to be over, every leg stopped',
@@ -71,11 +71,11 @@ describe('a clamp of a leg no view shows', () => {
   })
 
   /**
-   * THE λ LEG STOPS FIRST AND HAS A VIEW; THE asm LEG STOPS AFTER IT AND HAS NONE. The live region is written once
-   * for each thing said, so its writes are counted: the asm leg's clamp, said again with the λ leg's words, would be
+   * THE λ LEG STOPS FIRST AND HAS A VIEW; THE rxm LEG STOPS AFTER IT AND HAS NONE. The live region is written once
+   * for each thing said, so its writes are counted: the rxm leg's clamp, said again with the λ leg's words, would be
    * a second one.
    */
-  it('says the λ leg’s clamp once on a page of the source and λ views, and not again when the asm leg stops', async () => {
+  it('says the λ leg’s clamp once on a page of the source and λ views, and not again when the rxm leg stops', async () => {
     const writes: string[] = []
     const region = document.querySelector('#live') as HTMLElement
     const watch = new MutationObserver(() => writes.push((region.textContent ?? '').trimEnd()))
@@ -88,10 +88,10 @@ describe('a clamp of a leg no view shows', () => {
       await until(() => runOver(15), 'the other program’s run to be over')
       writes.length = 0
       expect(runOver(42), 'precondition: the page is not on the link’s value already').toBe(false)
-      location.hash = await link(OPENER, sourceBeside('lambda-0', 'lambda'), { lambda: 100, asm: 100 })
+      location.hash = await link(OPENER, sourceBeside('lambda-0', 'lambda'), { lambda: 100, rxm: 100 })
       const said = "the link's λ step 100 is past the end of this run — showing step 7"
       await until(() => noticeText() === said, 'the λ leg’s clamp')
-      await until(() => runOver(42), 'the link’s run to be over, the asm leg stopped')
+      await until(() => runOver(42), 'the link’s run to be over, the rxm leg stopped')
       // A FRAME MORE, FOR THE OBSERVER: its records are delivered after the script that wrote them.
       await new Promise((r) => requestAnimationFrame(() => r(null)))
       expect(mounted(), 'precondition: the page shows the source and λ views').toEqual(['source', 'lambda-0'])

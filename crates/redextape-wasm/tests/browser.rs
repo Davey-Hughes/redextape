@@ -23,7 +23,7 @@
 //! THE EXPECTED VALUES ARE PINNED IN `session.rs`'s NATIVE TESTS TOO, deliberately: "the values that
 //! come back are the ones a native run produces" is only a claim if both sides name the same numbers.
 //! `let x = 40; x + 2` reduces in 7 β-steps to Church 42, runs 2,870 δ-steps on a 5-tape machine of
-//! 123 states fitted to width 64, and runs 5 asm instructions.
+//! 123 states fitted to width 64, and runs 5 rxm instructions.
 
 // Test target: `wasm_bindgen_test` functions are not `#[test]` functions, so `clippy.toml`'s
 // `allow-expect-in-tests` does not reach them, and neither it nor `allow-panic-in-tests` reaches the
@@ -199,7 +199,7 @@ fn compile_step_and_read_both_legs() {
     assert_eq!(instrs.iter().filter(|i| i.as_f64().is_some()).count(), 121, "every billed state carries it");
     let listing: Array = get(&program, "listing").unchecked_into();
     assert_eq!(listing.length(), 5, "one line per instruction");
-    assert_eq!(listing.get(0).as_string().as_deref(), Some("li\tr0, #40"), "`print_asm`'s text, tab and all");
+    assert_eq!(listing.get(0).as_string().as_deref(), Some("li\tr0, #40"), "`print_rxm`'s text, tab and all");
     let labels: Array = get(&program, "labels").unchecked_into();
     assert_eq!(labels.length(), 0, "the sample has no label, and an empty list still crosses as an array");
 
@@ -916,7 +916,7 @@ fn link_index_crosses_as_typed_arrays() {
         "lambdaSpanClass must be a Uint8Array"
     );
     assert!(get(&index, "tmOwner").is_instance_of::<js_sys::Int32Array>(), "tmOwner must be an Int32Array");
-    assert!(get(&index, "asmOwner").is_instance_of::<js_sys::Int32Array>(), "asmOwner must be an Int32Array");
+    assert!(get(&index, "rxmOwner").is_instance_of::<js_sys::Int32Array>(), "rxmOwner must be an Int32Array");
 
     // The three legs must be internally consistent: every triad's three columns share one length, and
     // `tmOwner`'s length is checked against a count obtained INDEPENDENTLY rather than merely positive
@@ -944,12 +944,12 @@ fn link_index_crosses_as_typed_arrays() {
         f64::from(states.length()),
         "tmOwner must have exactly one entry per state tmProgram reports, obtained independently"
     );
-    let asm_program = call(&session, "asmProgram", &[]);
-    let listing: Array = get(&asm_program, "listing").unchecked_into();
+    let rxm_program = call(&session, "rxmProgram", &[]);
+    let listing: Array = get(&rxm_program, "listing").unchecked_into();
     assert_eq!(
-        len("asmOwner"),
+        len("rxmOwner"),
         f64::from(listing.length()),
-        "asmOwner must have exactly one entry per instruction asmProgram lists, obtained independently"
+        "rxmOwner must have exactly one entry per instruction rxmProgram lists, obtained independently"
     );
 }
 
@@ -992,7 +992,7 @@ fn link_index_survives_a_declined_lambda_leg() {
     }
     assert!(len("sourceNodeStart") > 0.0, "the source leg does not depend on the λ backend");
     assert!(len("tmOwner") > 0.0, "the TM leg compiled fine and owns at least one state");
-    assert!(len("asmOwner") > 0.0, "the program lowers to asm, so its instructions have owners too");
+    assert!(len("rxmOwner") > 0.0, "the program lowers to rxm, so its instructions have owners too");
 }
 
 /// n=2,900 because THIS test runs on the page thread, whose ceiling is term depth 2,833: at 2,900
@@ -1293,16 +1293,16 @@ mod scratch_methods_that_must_not_exist {
     }
     const _: fn(&redextape_wasm::TmScratch) -> (Absent, Absent, Absent) = tm_scratch_has_none_of_them;
 
-    /// An asm copy has no `SourceMap`, so no `sourceSpan` or `linkIndex`; its value is `asmValue`, the leg's
+    /// An rxm copy has no `SourceMap`, so no `sourceSpan` or `linkIndex`; its value is `rxmValue`, the leg's
     /// own, so neither of the other legs' value methods is on it either.
-    fn asm_scratch_has_none_of_them(s: &redextape_wasm::AsmScratch) -> (Absent, Absent, Absent, Absent) {
+    fn rxm_scratch_has_none_of_them(s: &redextape_wasm::RxmScratch) -> (Absent, Absent, Absent, Absent) {
         (s.lambda_value(), s.tm_value(), s.source_span(0), s.link_index(0))
     }
-    const _: fn(&redextape_wasm::AsmScratch) -> (Absent, Absent, Absent, Absent) = asm_scratch_has_none_of_them;
+    const _: fn(&redextape_wasm::RxmScratch) -> (Absent, Absent, Absent, Absent) = rxm_scratch_has_none_of_them;
 }
 
-/// An `AsmWindow` as a renderer builds one: a plain JS object with five named counts.
-fn asm_window(locals: u32, args: u32, frames: u32, cells: u32, boxes: u32) -> JsValue {
+/// An `RxmWindow` as a renderer builds one: a plain JS object with five named counts.
+fn rxm_window(locals: u32, args: u32, frames: u32, cells: u32, boxes: u32) -> JsValue {
     let w = Object::new();
     for (k, v) in [("locals", locals), ("args", args), ("frames", frames), ("cells", cells), ("boxes", boxes)] {
         Reflect::set(&w, &JsValue::from_str(k), &JsValue::from_f64(f64::from(v))).unwrap();
@@ -1310,33 +1310,33 @@ fn asm_window(locals: u32, args: u32, frames: u32, cells: u32, boxes: u32) -> Js
     w.into()
 }
 
-/// The asm leg through the glue, every method a renderer calls, on the sample `session.rs` pins natively:
+/// The rxm leg through the glue, every method a renderer calls, on the sample `session.rs` pins natively:
 /// 5 instructions over a 5-line listing, ending with 42 in `rr`.
 ///
 /// **THE WIRE SHAPES, MEASURED RATHER THAN DESIGNED**: counts cross as numbers and a missing one as `null`
 /// (`cap`, `wrote`, `next` at the end); a word crosses as a STRING and its tag as the variant's name, which
-/// is `AsmWord`'s whole argument; the value is `Decoded`'s tagged object; `raiseAsmCap` takes a plain
+/// is `RxmWord`'s whole argument; the value is `Decoded`'s tagged object; `raiseRxmCap` takes a plain
 /// number, so the call succeeding is that assertion (a `u64` parameter would throw converting it to a
-/// `BigInt`); and `asmState` takes the window as a JS object, which a malformed one makes it throw.
+/// `BigInt`); and `rxmState` takes the window as a JS object, which a malformed one makes it throw.
 #[wasm_bindgen_test]
-fn the_asm_leg_crosses_the_boundary() {
+fn the_rxm_leg_crosses_the_boundary() {
     let (_, session) = compile("let x = 40; x + 2");
 
-    let status = call(&session, "asmStatus", &[]);
+    let status = call(&session, "rxmStatus", &[]);
     assert_eq!(get(&status, "available"), JsValue::TRUE);
     assert_eq!(get(&status, "reason").as_string().as_deref(), Some(""));
     assert_eq!(get(&status, "run").as_string().as_deref(), Some("Running"), "a fresh cursor has not ended");
     assert!(get(&status, "cap").is_null(), "no cap beside a running cursor, and `None` crosses as null");
     assert_eq!(num(&status, "total_steps"), 5.0, "the whole run's length, from compile's own run");
 
-    let program = call(&session, "asmProgram", &[]);
+    let program = call(&session, "rxmProgram", &[]);
     let listing: Array = get(&program, "listing").unchecked_into();
     assert_eq!(listing.length(), 5, "one line per instruction");
     assert_eq!(listing.get(0).as_string().as_deref(), Some("li\tr0, #40"), "`print_instr`'s text, tab and all");
     assert!(get(&program, "labels").is_instance_of::<Array>(), "no labels still crosses as an array");
 
-    let window = asm_window(64, 16, 8, 16, 16);
-    let first = call(&session, "asmState", std::slice::from_ref(&window));
+    let window = rxm_window(64, 16, 8, 16, 16);
+    let first = call(&session, "rxmState", std::slice::from_ref(&window));
     assert_eq!((num(&first, "step"), num(&first, "pc"), num(&first, "next")), (0.0, 0.0, 0.0));
     assert!(get(&first, "wrote").is_null(), "nothing written before the first step");
     assert!(get(&first, "source_node").as_f64().is_some(), "instruction 0's owner crosses as a number");
@@ -1348,30 +1348,30 @@ fn the_asm_leg_crosses_the_boundary() {
     }
 
     let mut steps = 0;
-    while call(&session, "stepAsm", &[]) == JsValue::TRUE {
+    while call(&session, "stepRxm", &[]) == JsValue::TRUE {
         steps += 1;
         assert!(steps <= 100, "this program halts in 5 instructions");
     }
     assert_eq!(steps, 5, "the instruction count crosses the boundary intact");
-    let ended = call(&session, "asmStatus", &[]);
+    let ended = call(&session, "rxmStatus", &[]);
     assert_eq!(get(&ended, "run").as_string().as_deref(), Some("Ended"), "halted, not capped");
 
-    let last = call(&session, "asmState", &[window]);
+    let last = call(&session, "rxmState", &[window]);
     assert_eq!(num(&last, "step"), 5.0);
     assert_eq!(get(&get(&last, "rr"), "word").as_string().as_deref(), Some("42"));
     assert!(get(&last, "next").is_null(), "a halted run has nothing left to run, and says so as null");
 
-    let value = call(&session, "asmValue", &[]);
+    let value = call(&session, "rxmValue", &[]);
     assert_eq!(get(&get(&value, "Value"), "text").as_string().as_deref(), Some("42"), "got {value:?}");
-    call(&session, "raiseAsmCap", &[JsValue::from_f64(1000.0)]);
+    call(&session, "raiseRxmCap", &[JsValue::from_f64(1000.0)]);
 
-    let no_boxes = asm_window(1, 1, 1, 1, 1);
+    let no_boxes = rxm_window(1, 1, 1, 1, 1);
     Reflect::delete_property(no_boxes.unchecked_ref::<Object>(), &JsValue::from_str("boxes")).unwrap();
-    let f: Function = get(&session, "asmState").unchecked_into();
+    let f: Function = get(&session, "rxmState").unchecked_into();
     for bad in [JsValue::from_str("64"), no_boxes] {
         let args = Array::new();
         args.push(&bad);
-        assert!(Reflect::apply(&f, &session, &args).is_err(), "asmState must refuse {bad:?}");
+        assert!(Reflect::apply(&f, &session, &args).is_err(), "rxmState must refuse {bad:?}");
     }
 }
 
@@ -1385,33 +1385,33 @@ const SATURATES: &str = "let mut x = 2; let mut i = 0; while i < 7 { x = x * x; 
 #[wasm_bindgen_test]
 fn a_saturated_word_crosses_as_its_exact_decimal_text() {
     let (_, session) = compile(SATURATES);
-    while call(&session, "stepAsm", &[]) == JsValue::TRUE {}
-    let st = call(&session, "asmState", &[asm_window(64, 16, 8, 16, 16)]);
+    while call(&session, "stepRxm", &[]) == JsValue::TRUE {}
+    let st = call(&session, "rxmState", &[rxm_window(64, 16, 8, 16, 16)]);
     assert_eq!(get(&get(&st, "rr"), "word").as_string().as_deref(), Some("18446744073709551615"));
-    let value = call(&session, "asmValue", &[]);
+    let value = call(&session, "rxmValue", &[]);
     assert_eq!(get(&get(&value, "Value"), "text").as_string().as_deref(), Some("18446744073709551615"));
 }
 
-/// A program the asm lowering refuses: the status says why with every other field `null`, and every asm
+/// A program the rxm lowering refuses: the status says why with every other field `null`, and every rxm
 /// method throws rather than aborting the module. A 2,048-element list literal nests past the lowering's
 /// depth guard.
 #[wasm_bindgen_test]
-fn a_declined_asm_leg_reports_why_and_its_methods_throw() {
+fn a_declined_rxm_leg_reports_why_and_its_methods_throw() {
     let src = format!("[{}]", (0..2048).map(|i| i.to_string()).collect::<Vec<_>>().join(", "));
     let (diagnostics, session) = compile(&src);
     assert_eq!(diagnostics.length(), 0, "well-formed; only the backends refuse it");
-    let status = call(&session, "asmStatus", &[]);
+    let status = call(&session, "rxmStatus", &[]);
     assert_eq!(get(&status, "available"), JsValue::FALSE);
     assert!(get(&status, "reason").as_string().is_some_and(|r| !r.is_empty()), "the reason survives the crossing");
     for field in ["run", "cap", "total_steps"] {
         assert!(get(&status, field).is_null(), "{field} is null for an absent leg, got {:?}", get(&status, field));
     }
     for (method, arg) in [
-        ("asmProgram", None),
-        ("stepAsm", None),
-        ("asmState", Some(asm_window(64, 16, 8, 16, 16))),
-        ("raiseAsmCap", Some(JsValue::from_f64(1.0))),
-        ("asmValue", None),
+        ("rxmProgram", None),
+        ("stepRxm", None),
+        ("rxmState", Some(rxm_window(64, 16, 8, 16, 16))),
+        ("raiseRxmCap", Some(JsValue::from_f64(1.0))),
+        ("rxmValue", None),
     ] {
         let f: Function = get(&session, method).unchecked_into();
         let args = Array::new();
@@ -1422,59 +1422,59 @@ fn a_declined_asm_leg_reports_why_and_its_methods_throw() {
     }
 }
 
-/// A copy of the program's asm through the glue: `asmText` crosses as a string headed by the program's type,
-/// `asmScratch` builds a handle from it with no diagnostics, and every method a renderer calls answers as the
+/// A copy of the program's rxm through the glue: `rxmText` crosses as a string headed by the program's type,
+/// `rxmScratch` builds a handle from it with no diagnostics, and every method a renderer calls answers as the
 /// session's does — the same status, listing and value — but for `source_node`, `null` on every frame of a
-/// copy. `raiseAsmCap` takes a plain number, as on the session.
+/// copy. `raiseRxmCap` takes a plain number, as on the session.
 #[wasm_bindgen_test]
-fn an_asm_copy_crosses_the_boundary() {
+fn an_rxm_copy_crosses_the_boundary() {
     let (_, session) = compile("let x = 40; x + 2");
-    let text = call(&session, "asmText", &[]).as_string().expect("asmText crosses as a string");
+    let text = call(&session, "rxmText", &[]).as_string().expect("rxmText crosses as a string");
     assert!(text.starts_with("result Nat\n"), "headed by the program's type: {text}");
 
-    let out = redextape_wasm::asm_scratch(&text).expect("asmScratch must not throw");
+    let out = redextape_wasm::rxm_scratch(&text).expect("rxmScratch must not throw");
     let diagnostics: Array = get(&out, "diagnostics").unchecked_into();
     assert_eq!(diagnostics.length(), 0, "the program's own text has nothing to refuse");
     let copy = get(&out, "scratch");
     let json = |v: JsValue| JSON::stringify(&v).unwrap().as_string().unwrap();
-    for method in ["asmStatus", "asmProgram", "asmValue"] {
+    for method in ["rxmStatus", "rxmProgram", "rxmValue"] {
         assert_eq!(json(call(&copy, method, &[])), json(call(&session, method, &[])), "{method}");
     }
-    let window = asm_window(64, 16, 8, 16, 16);
+    let window = rxm_window(64, 16, 8, 16, 16);
     let mut steps = 0;
     loop {
-        let st = call(&copy, "asmState", std::slice::from_ref(&window));
+        let st = call(&copy, "rxmState", std::slice::from_ref(&window));
         assert!(get(&st, "source_node").is_null(), "a copy has no owners, and says so as null");
-        if call(&copy, "stepAsm", &[]) != JsValue::TRUE {
+        if call(&copy, "stepRxm", &[]) != JsValue::TRUE {
             break;
         }
         steps += 1;
         assert!(steps <= 100, "this program halts in 5 instructions");
     }
     assert_eq!(steps, 5);
-    call(&copy, "raiseAsmCap", &[JsValue::from_f64(1000.0)]);
-    let value = call(&copy, "asmValue", &[]);
+    call(&copy, "raiseRxmCap", &[JsValue::from_f64(1000.0)]);
+    let value = call(&copy, "rxmValue", &[]);
     assert_eq!(get(&get(&value, "Value"), "text").as_string().as_deref(), Some("42"), "got {value:?}");
 }
 
 /// Refused text crosses as diagnostics beside a `null` handle, as `tmScratch`'s does: here a jump to a label
-/// nothing defines, which parses and which `asm_label_diagnostics` refuses.
+/// nothing defines, which parses and which `rxm_label_diagnostics` refuses.
 #[wasm_bindgen_test]
-fn a_refused_asm_copy_crosses_as_diagnostics_and_a_null_handle() {
-    let out = redextape_wasm::asm_scratch("\tjmp\tnowhere\n").expect("asmScratch must not throw on bad input");
+fn a_refused_rxm_copy_crosses_as_diagnostics_and_a_null_handle() {
+    let out = redextape_wasm::rxm_scratch("\tjmp\tnowhere\n").expect("rxmScratch must not throw on bad input");
     let diagnostics: Array = get(&out, "diagnostics").unchecked_into();
     assert_eq!(diagnostics.length(), 1);
     assert_eq!(get(&diagnostics.get(0), "message").as_string().as_deref(), Some("undefined label `nowhere`"));
     assert_eq!(get(&out, "scratch"), JsValue::NULL, "no program, no handle — and `null`, not `undefined`");
 }
 
-/// A declined asm leg's `asmText` crosses as `null`, not `undefined` — `declined_tm_text_crosses_as_null_not
-/// _undefined`'s point, on the program `a_declined_asm_leg_reports_why_and_its_methods_throw` declines.
+/// A declined rxm leg's `rxmText` crosses as `null`, not `undefined` — `declined_tm_text_crosses_as_null_not
+/// _undefined`'s point, on the program `a_declined_rxm_leg_reports_why_and_its_methods_throw` declines.
 #[wasm_bindgen_test]
-fn declined_asm_text_crosses_as_null_not_undefined() {
+fn declined_rxm_text_crosses_as_null_not_undefined() {
     let src = format!("[{}]", (0..2048).map(|i| i.to_string()).collect::<Vec<_>>().join(", "));
     let (_, session) = compile(&src);
-    assert_eq!(get(&call(&session, "asmStatus", &[]), "available"), JsValue::FALSE, "the premise");
-    let text = call(&session, "asmText", &[]);
-    assert!(text.is_null(), "a declined asm leg's asmText must cross as `null`, got {text:?}");
+    assert_eq!(get(&call(&session, "rxmStatus", &[]), "available"), JsValue::FALSE, "the premise");
+    let text = call(&session, "rxmText", &[]);
+    assert!(text.is_null(), "a declined rxm leg's rxmText must cross as `null`, got {text:?}");
 }

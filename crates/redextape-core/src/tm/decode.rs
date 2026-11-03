@@ -1,13 +1,13 @@
-//! Final tapes -> `Value`, type-directed like the asm/lambda decoders: the reference value supplies
+//! Final tapes -> `Value`, type-directed like the rxm/lambda decoders: the reference value supplies
 //! the type witness (a bare tape is ambiguous). Nat/Bool are decoded directly from the result word;
 //! Nil/Cons are decoded by parsing the HEAP tape into cons cells and following the pointer chain from
-//! the result word, by calling `asm.rs`'s `decode_word`. `expected` is used ONLY for its shape, so a
+//! the result word, by calling `rxm.rs`'s `decode_word`. `expected` is used ONLY for its shape, so a
 //! machine that computed the wrong value decodes to a different `Value` (or `None`), still failing the
 //! oracle.
 
-use crate::tm::asm::{DecodeFailure, MAX_DECODE_NODES, decode_word_ty};
 use crate::tm::build::{HEAP, REG};
 use crate::tm::encoding::Encoding;
+use crate::tm::rxm::{DecodeFailure, MAX_DECODE_NODES, decode_word_ty};
 use crate::tm::sim::Tape;
 use crate::ty::Ty;
 use crate::value::Value;
@@ -41,7 +41,7 @@ pub fn decode_tape(tapes: &[Tape], expected: &Value, enc: &dyn Encoding) -> Opti
 pub fn decode_tape_reason(tapes: &[Tape], expected: &Value, enc: &dyn Encoding) -> Result<Value, DecodeFailure> {
     let Some((word, heap)) = read_result(tapes, enc) else { return Err(DecodeFailure::Mismatch) };
     let mut budget = MAX_DECODE_NODES;
-    crate::tm::asm::decode_word(word, &heap, expected, &mut budget)
+    crate::tm::rxm::decode_word(word, &heap, expected, &mut budget)
 }
 
 /// Decode the final `tapes` against a TYPE rather than a `Value` shape witness — what a reader holding
@@ -52,13 +52,13 @@ pub fn decode_tape_reason(tapes: &[Tape], expected: &Value, enc: &dyn Encoding) 
 /// and `Unit`. `decode_tape`'s strictness there is what makes the oracle catch a machine that returned
 /// a SHORTER list than the reference, so it cannot be expressed over this one — and the reverse needs a
 /// `Value -> Ty` function that is partial, since `Value::Nil` carries no recoverable element type.
-/// `asm.rs` keeps `decode_asm` and `decode_asm_ty` side by side for the same reason.
+/// `rxm.rs` keeps `decode_rxm` and `decode_rxm_ty` side by side for the same reason.
 ///
-/// Seeds a fresh `MAX_DECODE_NODES` budget for this call, same as `decode_asm_ty` — `tapes` and `ty`
+/// Seeds a fresh `MAX_DECODE_NODES` budget for this call, same as `decode_rxm_ty` — `tapes` and `ty`
 /// both come from a `.tm` FILE here, so both the heap's acyclicity (the spine loop's job) and its
 /// decoded SIZE under nested types (the budget's job) are file-supplied and unchecked before this call.
 ///
-/// `decode_tape_ty_reason`'s `.ok()` — see that function and `asm::DecodeFailure` for why a caller
+/// `decode_tape_ty_reason`'s `.ok()` — see that function and `rxm::DecodeFailure` for why a caller
 /// (`redextape-cli::run`) might want the reason a decode failed instead of just that it did.
 pub fn decode_tape_ty(tapes: &[Tape], ty: &Ty, enc: &dyn Encoding) -> Option<Value> {
     decode_tape_ty_reason(tapes, ty, enc).ok()
@@ -84,10 +84,10 @@ pub fn decode_tape_ty_reason(tapes: &[Tape], ty: &Ty, enc: &dyn Encoding) -> Res
 mod tests {
     use super::*;
     use crate::core::BinOp;
-    use crate::tm::asm::{Instr, Program, Reg};
     use crate::tm::build::{AT, MARK, SEP, TAPES};
     use crate::tm::encoding::Unary;
     use crate::tm::lower_tm::{SlotMap, lower_tm};
+    use crate::tm::rxm::{Instr, Program, Reg};
     use crate::tm::sim::{DEFAULT_CAPS as CAPS, simulate};
 
     /// Build [1, 2] on the TM: nil; cons(2, nil)->p1; cons(1, p1)->rr.

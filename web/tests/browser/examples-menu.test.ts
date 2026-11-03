@@ -84,7 +84,7 @@ describe('examples ▾', () => {
     expect(picker().value).toBe('binary')
     expect(noticeText()).toBe('opened the example fact(4)')
     expect(undoButton()?.textContent).toBe('undo')
-    await until(() => stateIdle() && (segments()[1] ?? '').startsWith('asm 24'), 'the example’s compile')
+    await until(() => stateIdle() && (segments()[1] ?? '').startsWith('rxm 24'), 'the example’s compile')
   })
 
   it('puts back the text and the encoding it replaced on undo, with the focus in the editor, and says so', async () => {

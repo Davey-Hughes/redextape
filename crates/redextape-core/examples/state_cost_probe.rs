@@ -55,9 +55,9 @@
 use redextape_core::core::BinOp;
 use redextape_core::desugar::desugar;
 use redextape_core::parser::{MAX_TOKENS, parse};
-use redextape_core::tm::asm::{Instr, Program, Reg};
 use redextape_core::tm::build::MAX_MACHINE_STATES;
-use redextape_core::tm::{Binary, Encoding, Machine, State, Unary, lower_asm, lower_tm_guarded, n_slots_of};
+use redextape_core::tm::rxm::{Instr, Program, Reg};
+use redextape_core::tm::{Binary, Encoding, Machine, State, Unary, lower_rxm, lower_tm_guarded, n_slots_of};
 
 #[path = "common/demos.rs"]
 mod demos;
@@ -156,7 +156,7 @@ fn part_a() {
                 break;
             };
             let core = desugar(&prog);
-            match lower_asm(&core) {
+            match lower_rxm(&core) {
                 Ok(p) => {
                     let ratio = p.code.len() as f64 / toks as f64;
                     println!(
@@ -165,7 +165,7 @@ fn part_a() {
                         n_slots_of(&p)
                     );
                 }
-                Err(e) => println!("{name:<14} {n:>10} {toks:>10}   lower_asm {e:?}"),
+                Err(e) => println!("{name:<14} {n:>10} {toks:>10}   lower_rxm {e:?}"),
             }
         }
     }
@@ -273,7 +273,7 @@ fn part_c() {
                 return None;
             }
             let core = desugar(&prog?);
-            lower_asm(&core).ok().map(|p| p.code.len())
+            lower_rxm(&core).ok().map(|p| p.code.len())
         };
         let (mut lo, mut hi) = (1usize, 1usize);
         while ok(hi).is_some() && hi < 200_000 {
@@ -311,7 +311,7 @@ fn part_d() {
         let (prog, _) = parse(&src);
         let Some(prog) = prog else { continue };
         let core = desugar(&prog);
-        let Ok(p) = lower_asm(&core) else { continue };
+        let Ok(p) = lower_rxm(&core) else { continue };
         let mu = lowered(&p, &Unary::default());
         let mb = lowered(&p, &Binary::default());
         let rules = mu
@@ -329,7 +329,7 @@ fn part_e() {
     let gens: Vec<Gen> =
         vec![("wide_let", wide_src as fn(usize) -> String), ("bin_chain", chain_src), ("wide_fns", wide_fns_src)];
     for (name, mk) in gens {
-        // desugar has no depth guard of its own, so push to the TOKEN limit, not lower_asm's.
+        // desugar has no depth guard of its own, so push to the TOKEN limit, not lower_rxm's.
         let mut best = (0usize, 0u32, 0usize);
         for n in [1_000usize, 5_000, 10_000, 20_000, 40_000] {
             let src = mk(n);
@@ -371,8 +371,8 @@ fn part_f() {
             break;
         };
         let core = desugar(&prog);
-        let Ok(p) = lower_asm(&core) else {
-            println!("{n:>8} {toks:>8}   lower_asm refused (TooDeep)");
+        let Ok(p) = lower_rxm(&core) else {
+            println!("{n:>8} {toks:>8}   lower_rxm refused (TooDeep)");
             continue;
         };
         let slots = n_slots_of(&p);
@@ -411,8 +411,8 @@ fn part_g() {
         };
         let core = desugar(&prog);
         // `lower_program`'s own order: direct, then `defunc` on `Unsupported`.
-        let asm = lower_asm(&core).or_else(|_| redextape_core::tm::defunc(&core).and_then(|d| lower_asm(&d)));
-        let Ok(p) = asm else {
+        let rxm = lower_rxm(&core).or_else(|_| redextape_core::tm::defunc(&core).and_then(|d| lower_rxm(&d)));
+        let Ok(p) = rxm else {
             println!("  lower refused: {src:.40}");
             continue;
         };
@@ -453,7 +453,7 @@ fn part_h() {
         let (prog, _) = parse(&src);
         let Some(prog) = prog else { continue };
         let core = desugar(&prog);
-        let Ok(p) = lower_asm(&core) else { continue };
+        let Ok(p) = lower_rxm(&core) else { continue };
         let before = rss_kb();
         let m = lowered(&p, &Binary::default());
         let after = rss_kb();

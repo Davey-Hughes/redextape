@@ -18,7 +18,7 @@ on every commit. `crates/redextape-wasm` compiles the compiler to WASM through *
 tenth, `tapeNames()`, labels the five Turing-machine tape rows from the lowering's own constants
 (`build.rs`) rather than a hand-copied list, so it can only speak for machines this compiler produced.
 `web/` is a real app: a source pane with lint diagnostics and syntax highlighting driven by a committed
-tree-sitter grammar — the same colourer the λ, TM and asm copy editors take, whose grammar loads
+tree-sitter grammar — the same colourer the λ, TM and rxm copy editors take, whose grammar loads
 asynchronously so only the first paint waits on it, while every reparse and rebuild after that runs
 inside the same `ViewUpdate` as the keystroke that triggered it — a λ pane, and a
 Turing-machine pane showing all five tapes, a status line, and — Plan 5a-ii — a virtualized δ-table
@@ -26,7 +26,7 @@ beside them: current state and the rule about to fire highlighted, following the
 a control to reattach it after a manual scroll detaches it, toggleable, and tested rendering only a
 viewport's worth of rows — 24 of `map_fold`'s 25,852 at CI's window size, counting the overscan —
 side by side, the first thing in this project a human can click. **All three legs — λ, Turing machine and
-asm — are steppable forward and backward** through a recorded, byte-budgeted history (◀ ▶ ⏵ ↺), with a caps
+rxm — are steppable forward and backward** through a recorded, byte-budgeted history (◀ ▶ ⏵ ↺), with a caps
 affordance (`[continue]`) for a run that outgrows its recording budget before it outgrows its answer.
 **The λ pane has no structural tree, and that is a decision, not a gap**: Plan 5a-ii measured one and cut
 it — a per-frame tree costs 850 MB against a 32 MB history ring, and most steps have no tree to draw at
@@ -59,7 +59,7 @@ Nine crates under `crates/`.
   call-by-name Y for recursion, store-passing for `mut`/`while`), a normal-order reducer that
   reports the redex path at each step, type-directed decode back to a `Value`, and a round-tripping
   λ text form.
-- **TM backend** (`src/tm/`) — Core → a register-assembly IR → a genuine multi-tape Turing machine,
+- **TM backend** (`src/tm/`) — Core → rxm, a register-machine IR → a genuine multi-tape Turing machine,
   with defunctionalization for higher-order programs, two interchangeable numeric encodings
   (`Unary` and `Binary`), a simulator, and a **self-describing** `.tm` text form whose optional
   header records the initial tapes, so a foreign simulator can run the file knowing nothing about
@@ -84,8 +84,8 @@ apart, where either alone looks right.
 
 **`redextape-lsp`** is the eighth, and the count above already included it before this paragraph
 did — the same drift named just above, one crate later. It is a stdio language server — diagnostics
-and formatting for all four text forms (`.rxt`, `.rxlambda`, `.tm`, `.asm`), navigation for three
-of them (`.tm`, `.asm` and `.rxt`), served over the Language
+and formatting for all four text forms (`.rxt`, `.rxlambda`, `.tm`, `.rxm`), navigation for three
+of them (`.tm`, `.rxm` and `.rxt`), served over the Language
 Server Protocol to Neovim from the same `redextape-core` front ends the CLI and the web UI already
 call. `lsp-server` (the transport) is confined to its `main.rs`; every other file in the crate is a
 pure function of one client message to the messages that go back, which is what holds the crate to
@@ -97,7 +97,7 @@ the workspace's coverage floor and is checked mechanically —
 diagnostics or formatting, with a warning naming both remedies, and highlighting is unaffected
 either way. For `conform.nvim` users who route formatting through it rather than
 `vim.lsp.buf.format()` directly, `formatters_by_ft` is keyed by FILETYPE and this server serves four
-of them, so opting in takes four entries rather than one — `redextape`, `redextape_asm`,
+of them, so opting in takes four entries rather than one — `redextape`, `redextape_rxm`,
 `redextape_lambda` and `redextape_tm`, each `{ lsp_format = "fallback" }`, or conform's `["_"]`
 catch-all. Not required either way.
 
@@ -196,7 +196,7 @@ as it diverges. Both are reachable only because control now returns from each β
   budget that is still affordable
   (`docs/superpowers/specs/2026-08-08-plan5a-ii-state-table-design.md` §2).
 - **LSP** — `crates/redextape-lsp` now serves diagnostics and formatting for all four text forms,
-  plus **go-to-definition, find-references and document symbols for `.tm`, `.asm` and `.rxt`**
+  plus **go-to-definition, find-references and document symbols for `.tm`, `.rxm` and `.rxt`**
   (Architecture, above); `.rxt`'s names are scoped, so its pass resolves against a binder rather
   than the flat lookup the other two share, and it landed in `binder`, not `analysis`. Still not
   built: navigation for `.rxlambda`, whose de Bruijn terms carry no source positions at all; hover;
@@ -206,15 +206,16 @@ as it diverges. Both are reachable only because control now returns from each β
 
 `crates/redextape-cli` is no longer on this list. All four subcommands work — `redextape fmt` /
 `redextape lint` (Roadmap Plan 6's first half, 2026-08-19), `redextape run` / `emit` (Plan 6's second
-half, 2026-08-23), and `parse_asm` (2026-08-25) rounding out `emit`'s three text forms so all of them
-round-trip — and a `redextape.toml` for four settings plus `--deny-warnings` close Plan 6's remaining
-two knobs; see that crate's own README for the schema, discovery and precedence. `.rxlambda` is the
-one emitted form `redextape run` still does not take — a bare λ term carries no result type to decode
-against. `redextape fmt` has since grown the same two forms `run` already read — `.tm` and `.asm`
-alongside `.rxt` (Roadmap `cli-fmt-tm-asm`, 2026-09-05) — chosen by extension, by `--form` where a
-caller needs to override it, or for stdin by asking the parsers themselves rather than a pattern.
-`--width` stays a line budget the `.rxt` printer alone reads; an explicit `--width` on a `.tm` or
-`.asm` input is refused rather than silently ignored.
+half, 2026-08-23), and a reader for the register-machine listing (2026-08-25; `parse_rxm` since the IR
+was renamed rxm) rounding out `emit`'s three text forms so all of them round-trip — and a
+`redextape.toml` for four settings plus `--deny-warnings` close Plan 6's remaining two knobs; see that
+crate's own README for the schema, discovery and precedence. `.rxlambda` is the one emitted form
+`redextape run` still does not take — a bare λ term carries no result type to decode against.
+`redextape fmt` has since grown the same two forms `run` already read — `.tm` and `.rxm` alongside
+`.rxt` (Roadmap `cli-fmt-tm-asm`, 2026-09-05, from when rxm was called asm) — chosen by extension, by
+`--form` where a caller needs to override it, or for stdin by asking the parsers themselves rather
+than a pattern. `--width` stays a line budget the `.rxt` printer alone reads; an explicit `--width` on
+a `.tm` or `.rxm` input is refused rather than silently ignored.
 
 The CLI and the web visualizer are both usable today. The examples below remain the most direct way to
 drive the raw backends, with no binary or browser involved:

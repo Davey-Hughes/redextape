@@ -33,7 +33,7 @@ describe('a workspace stored in Debugger', () => {
     ).toBe(true)
     // EVERY VIEW THAT STEPS, AND EACH FOUND ON THE PAGE FIRST: a view that is not there draws no step controls
     // either, so a missing view would pass the `null` check on its controls.
-    for (const leaf of ['lambda-0', 'asm-0', 'tm-0']) {
+    for (const leaf of ['lambda-0', 'rxm-0', 'tm-0']) {
       const view = document.querySelector(`#views [data-leaf="${leaf}"]`)
       expect(view, `no ${leaf} view on the page`).not.toBeNull()
       expect(view?.querySelector('.view-steps .controls'), `${leaf} still draws its own step controls`).toBeNull()

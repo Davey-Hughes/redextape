@@ -23,7 +23,7 @@ export type BufferRow = {
   readonly paneCount: number
   /**
    * What the copy holds, under its name: a λ copy's current term, or, with none, its leg's reason while the leg is
-   * not available (`building…`, `did not build`), or `null`; a TM or asm copy's run, as its readout line says it
+   * not available (`building…`, `did not build`), or `null`; a TM or rxm copy's run, as its readout line says it
    * without the name (`readout.ts`'s `tmCopyRow`). `main.ts`'s `copyHolds` resolves it.
    *
    * **WITHOUT IT A ROW IS A COUNTER'S OUTPUT AND A PANE COUNT, AND AT THE CAP EVERY PANE COUNT IS THE
@@ -233,8 +233,8 @@ const bufferRow = (
   return { id: row.id, el, retire, temperature }
 }
 
-/** Which legs the menu offers a blank copy on: asm and TM (spec §7), whose copy's text is the whole program. */
-const BLANK_COPY: Readonly<Record<Leg, boolean>> = { lambda: false, asm: true, tm: true }
+/** Which legs the menu offers a blank copy on: rxm and TM (spec §7), whose copy's text is the whole program. */
+const BLANK_COPY: Readonly<Record<Leg, boolean>> = { lambda: false, rxm: true, tm: true }
 
 /**
  * The header bar's buffer list — the only surface that can reach a buffer no pane is showing.
@@ -323,10 +323,10 @@ export function bufferList(
    * `handleTemperature` below can reach into the clicked buffer's own item to move focus back onto it
    * after the rebuild — see `handleTemperature`'s own doc for why.
    *
-   * **THE *new asm copy* AND *new TM copy* CONTROLS ARE BUILT HERE TOO, FIRST, AHEAD OF EVERY ROW — 5d-iv design §4.7,
-   * and Plan 7 part 5 spec §7 for asm.** "GIVE ME SOMEWHERE TO PASTE A `.tm` FILE" is a different intention from
+   * **THE *new rxm copy* AND *new TM copy* CONTROLS ARE BUILT HERE TOO, FIRST, AHEAD OF EVERY ROW — 5d-iv design §4.7,
+   * and Plan 7 part 5 spec §7 for rxm.** "GIVE ME SOMEWHERE TO PASTE A `.tm` FILE" is a different intention from
    * *edit a copy*, which detaches a view onto a copy of what it was showing (`ScratchBuffers.forkBlank`'s own doc) —
-   * there is no view to seed a blank copy FROM, and over `MAX_FORK_RULES` (`MAX_SCRATCH_ASM_BYTES` for asm) that
+   * there is no view to seed a blank copy FROM, and over `MAX_FORK_RULES` (`MAX_SCRATCH_RXM_BYTES` for rxm) that
    * gesture is disabled where this one never is; at `MAX_WARM_BUFFERS` both are refused.
    * It lives here rather than in the app header because this menu is where copies are managed, and it is what
    * makes the menu non-empty at zero — which is why `main.ts`'s `refreshBuffers` does not hide the invoking button.
@@ -340,7 +340,7 @@ export function bufferList(
     retire: HTMLButtonElement
     temperature: HTMLButtonElement
   }[] => {
-    // ONE PER LEG A BLANK COPY CAN BE MADE ON, IN `LEGS`' ORDER — asm and TM, whose text is a whole program or machine.
+    // ONE PER LEG A BLANK COPY CAN BE MADE ON, IN `LEGS`' ORDER — rxm and TM, whose text is a whole program or machine.
     // A blank λ copy would be a term with nothing in it, and a λ copy is always made from a step of the program.
     const news = LEGS.filter((leg) => BLANK_COPY[leg]).map((leg) => {
       const b = document.createElement('button')

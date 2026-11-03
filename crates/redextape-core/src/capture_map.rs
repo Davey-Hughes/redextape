@@ -58,8 +58,8 @@ pub const REDEXTAPE_LAMBDA: &[(&str, TokenClass)] = &[
     ("punctuation.bracket", TokenClass::Punct),
 ];
 
-/// TM. `@label.reference` is a `StateName` here and a `Label` in asm, because TM keeps a state name's
-/// defining and referencing positions apart and asm folds both label positions into one class.
+/// TM. `@label.reference` is a `StateName` here and a `Label` in rxm, because TM keeps a state name's
+/// defining and referencing positions apart and rxm folds both label positions into one class.
 ///
 /// **TWO ROWS PROJECT TO `Ident` AND BOTH ARE REQUIRED.** `@variable` is `encoding`'s operand and
 /// `@type` is `result`'s; `write_header` classifies both `Ident` because neither an encoding name nor
@@ -86,11 +86,11 @@ pub const REDEXTAPE_TM: &[(&str, TokenClass)] = &[
     ("punctuation.delimiter", TokenClass::Punct),
 ];
 
-/// asm. `@function` is a `Mnemonic` here and an `Ident` in the mini-language — the single row that
+/// rxm. `@function` is a `Mnemonic` here and an `Ident` in the mini-language — the single row that
 /// most obviously breaks if the four tables are merged.
 ///
 /// **TWO ROWS PROJECT TO `Label` AND THE DIFFERENTIAL CANNOT TELL THEM APART.** `Operand::class` maps
-/// a label operand to `Label` and `print_asm_mapped` pushes `Label` for a declaration too;
+/// a label operand to `Label` and `print_rxm_mapped` pushes `Label` for a declaration too;
 /// `TokenClass::StateName` is a TM-only distinction. The captures are kept separate so an editor can
 /// theme a definition differently from a reference — the projection map is allowed to be many-to-one.
 ///
@@ -98,7 +98,7 @@ pub const REDEXTAPE_TM: &[(&str, TokenClass)] = &[
 ///
 /// There is no `@punctuation.bracket` row and no `@operator` row: this form has no brackets and emits
 /// no `Operator` class.
-pub const REDEXTAPE_ASM: &[(&str, TokenClass)] = &[
+pub const REDEXTAPE_RXM: &[(&str, TokenClass)] = &[
     ("keyword", TokenClass::Keyword),
     ("type", TokenClass::Ident),
     ("function", TokenClass::Mnemonic),
@@ -115,7 +115,7 @@ pub static CAPTURE_MAPS: &[LanguageCaptures] = &[
     LanguageCaptures { language_id: "redextape", rows: REDEXTAPE },
     LanguageCaptures { language_id: "redextape_lambda", rows: REDEXTAPE_LAMBDA },
     LanguageCaptures { language_id: "redextape_tm", rows: REDEXTAPE_TM },
-    LanguageCaptures { language_id: "redextape_asm", rows: REDEXTAPE_ASM },
+    LanguageCaptures { language_id: "redextape_rxm", rows: REDEXTAPE_RXM },
 ];
 
 /// The class a capture projects to in one language, or `None`.
@@ -137,20 +137,20 @@ mod tests {
     #[test]
     fn the_four_languages_are_present_and_named_as_the_protocol_names_them() {
         let ids: Vec<_> = CAPTURE_MAPS.iter().map(|m| m.language_id).collect();
-        assert_eq!(ids, ["redextape", "redextape_lambda", "redextape_tm", "redextape_asm"]);
+        assert_eq!(ids, ["redextape", "redextape_lambda", "redextape_tm", "redextape_rxm"]);
     }
 
     /// **THE THREE DISAGREEMENTS ARE THE REASON THERE ARE FOUR TABLES AND NOT ONE.** A merged table
     /// would have to pick a winner for each of these rows, and every choice mis-colours one language:
-    /// an asm mnemonic would read as an identifier, or a λ binder would.
+    /// an rxm mnemonic would read as an identifier, or a λ binder would.
     #[test]
     fn the_tables_disagree_on_exactly_the_three_captures_that_must_disagree() {
         assert_eq!(capture_class("redextape", "function"), Some(TokenClass::Ident));
-        assert_eq!(capture_class("redextape_asm", "function"), Some(TokenClass::Mnemonic));
+        assert_eq!(capture_class("redextape_rxm", "function"), Some(TokenClass::Mnemonic));
         assert_eq!(capture_class("redextape", "variable.parameter"), Some(TokenClass::Ident));
         assert_eq!(capture_class("redextape_lambda", "variable.parameter"), Some(TokenClass::Binder));
         assert_eq!(capture_class("redextape_tm", "label.reference"), Some(TokenClass::StateName));
-        assert_eq!(capture_class("redextape_asm", "label.reference"), Some(TokenClass::Label));
+        assert_eq!(capture_class("redextape_rxm", "label.reference"), Some(TokenClass::Label));
     }
 
     /// A duplicate key would make the table's meaning depend on lookup order.

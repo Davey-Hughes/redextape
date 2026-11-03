@@ -216,7 +216,7 @@ jobs:
       # unscoped for a SHARPER version of the citation gate's reason. A README's figure goes stale
       # because a DIFFERENT file changed: adding one line to
       # `grammars/tree-sitter-redextape-lambda/grammar.js` falsifies that grammar's own README AND the
-      # TM and asm ones, which cite λ's line count in a comparison. The file that goes wrong is never
+      # TM and rxm ones, which cite λ's line count in a comparison. The file that goes wrong is never
       # the file being committed, so nothing keyed on changed paths would fire. Same script as
       # `.pre-commit-config.yaml` runs, so the local and CI gates cannot drift.
       # SELF-TEST FIRST. It asserts that digits, spelled-out words and a capitalised word all read;

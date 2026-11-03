@@ -1,15 +1,15 @@
 import { afterEach, beforeAll, describe, expect, it, vi } from 'vitest'
 import { page, userEvent } from 'vitest/browser'
-import type { AsmPanels } from '../../src/asm-pane'
-import { AsmPane } from '../../src/asm-pane'
 import type { PaneEvents } from '../../src/pane-chrome'
 import { BOUNDARY_KEY_STEP, type Shares } from '../../src/panel-stack'
-import { FACT3, frameOf } from '../node/asm-fixtures'
+import type { RxmPanels } from '../../src/rxm-pane'
+import { RxmPane } from '../../src/rxm-pane'
+import { FACT3, frameOf } from '../node/rxm-fixtures'
 import { boundary, controlState, drag, frame, inertEvents, panelOf, panelToggle, region } from './harness'
 
 /**
  * THE BOUNDARIES BETWEEN A VIEW'S REGIONS, AND THE HEADER THAT IS A HANDLE FOR ONE — the view layouts spec §11.2,
- * `panel-stack.ts`. Held on an asm view built directly, as `asm-pane.test.ts` builds one: it has three regions on a
+ * `panel-stack.ts`. Held on an rxm view built directly, as `rxm-pane.test.ts` builds one: it has three regions on a
  * view of the program, the listing, the row of registers and call stack, and the heap, so a drag has a region that
  * must NOT move. `panel-maximise.test.ts` has the maximise button and `panel-sizes-stored.test.ts` the workspace.
  *
@@ -22,17 +22,17 @@ const CONTROLS = controlState(true, 'step 3 of 55')
 
 /** A view of `FACT3` in a host `height` by `width`, on the page, with a frame drawn. */
 function mount(
-  o: { height?: number; width?: number; panels?: AsmPanels; sizes?: Shares; on?: Partial<PaneEvents> } = {},
+  o: { height?: number; width?: number; panels?: RxmPanels; sizes?: Shares; on?: Partial<PaneEvents> } = {},
 ) {
   const sizes = vi.fn<(s: Shares) => void>()
   const panel = vi.fn<(name: string, open: boolean) => void>()
   const host = document.createElement('section')
   host.className = 'pane'
-  host.dataset.kind = 'asm'
+  host.dataset.kind = 'rxm'
   host.style.height = `${o.height ?? 900}px`
   host.style.width = `${o.width ?? 1000}px`
   document.body.append(host)
-  const pane = new AsmPane(host, inertEvents({ panelSizes: sizes, panel, ...o.on }), o.panels ?? {}, o.sizes ?? {})
+  const pane = new RxmPane(host, inertEvents({ panelSizes: sizes, panel, ...o.on }), o.panels ?? {}, o.sizes ?? {})
   pane.setProgram(FACT3)
   pane.render(frameOf({ pc: 3, next: 3 }), CONTROLS)
   return { host, pane, sizes, panel }
@@ -175,7 +175,7 @@ describe('a drag of a boundary', () => {
 
   it('stops where a neighbour would go under its floor of five rows', async () => {
     const { host } = mount()
-    const body = panelOf(host, 'heap').querySelector('.asm-heap') as HTMLElement
+    const body = panelOf(host, 'heap').querySelector('.rxm-heap') as HTMLElement
     const floor = Number.parseFloat(getComputedStyle(body).minHeight)
     expect(floor, 'precondition: the heap’s body has a floor').toBeGreaterThan(50)
     expect(body.getBoundingClientRect().height, 'precondition: and is over it').toBeGreaterThan(floor + 50)
@@ -225,7 +225,7 @@ describe('a drag of a boundary', () => {
    */
   it('stores a share for the two regions it parts and for no other, one on its floor among them', async () => {
     const { host, sizes } = mount({ height: 500 })
-    const body = panelOf(host, 'heap').querySelector('.asm-heap') as HTMLElement
+    const body = panelOf(host, 'heap').querySelector('.rxm-heap') as HTMLElement
     const floor = Number.parseFloat(getComputedStyle(body).minHeight)
     expect(body.getBoundingClientRect().height, 'precondition: the heap is on its floor').toBeCloseTo(floor, 0)
     expect(host.scrollHeight, 'precondition: the view does not scroll').toBe(host.clientHeight)
@@ -259,9 +259,9 @@ describe('a drag of a boundary', () => {
     const body = (name: string, sel: string) => panelOf(host, name).querySelector(sel) as HTMLElement
     const over = (el: HTMLElement) =>
       el.getBoundingClientRect().height - Number.parseFloat(getComputedStyle(el).minHeight)
-    expect(over(body('registers', '.asm-registers')), 'precondition: the row is on its floor').toBeCloseTo(0, 0)
-    expect(over(body('heap', '.asm-heap')), 'precondition: the heap is over its floor').toBeGreaterThan(5)
-    expect(over(body('listing', '.asm-listing')), 'precondition: the listing has 40 px to give').toBeGreaterThan(40)
+    expect(over(body('registers', '.rxm-registers')), 'precondition: the row is on its floor').toBeCloseTo(0, 0)
+    expect(over(body('heap', '.rxm-heap')), 'precondition: the heap is over its floor').toBeGreaterThan(5)
+    expect(over(body('listing', '.rxm-listing')), 'precondition: the listing has 40 px to give').toBeGreaterThan(40)
     expect(host.scrollHeight, 'precondition: the view does not scroll').toBe(host.clientHeight)
     const before = heights(host)
     await drag(host, boundary(host, 'listing', 'machine'), -30)
@@ -293,10 +293,10 @@ describe('a drag of a boundary', () => {
     fire(b, 'pointerup', y + 2000)
     await frame()
     const floor = Number.parseFloat(
-      getComputedStyle(panelOf(host, 'heap').querySelector('.asm-heap') as HTMLElement).minHeight,
+      getComputedStyle(panelOf(host, 'heap').querySelector('.rxm-heap') as HTMLElement).minHeight,
     )
     expect(
-      (panelOf(host, 'heap').querySelector('.asm-heap') as HTMLElement).getBoundingClientRect().height,
+      (panelOf(host, 'heap').querySelector('.rxm-heap') as HTMLElement).getBoundingClientRect().height,
       'the heap is not on its floor once the drag has ended',
     ).toBeCloseTo(floor, 0)
     const stored = last(sizes)

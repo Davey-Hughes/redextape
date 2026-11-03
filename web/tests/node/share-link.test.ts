@@ -99,15 +99,17 @@ describe('encodeLink and decodeLink', () => {
 })
 
 /**
- * **THE FROZEN LINK: THE FORMAT'S FIRST VERSION, AS CHROME WROTE IT, WHICH MUST GO ON OPENING** (umbrella §8.4,
- * Plan 7 part 6a spec §5.1). Written once by `encodeLink` in Chrome, from `sum_to(5)` under `binary`, the Debugger
- * preset's workspace and a position on each leg. It pins the reading, never an encoder's bytes: node and Chrome deflate
- * one payload differently. Its workspace is `version: 2`, so it pins `parseWorkspace`'s reading of version 2 for good
- * too: a later workspace version migrates version 2 rather than refusing it.
+ * **THE FROZEN LINK: THE FORMAT'S FIRST VERSION, WHICH MUST GO ON OPENING** (umbrella §8.4, Plan 7 part 6a spec §5.1).
+ * **WHAT IS FROZEN IS THE FORMAT**: the payload's fields and their nesting in version 1, from `sum_to(5)` under
+ * `binary`, the Debugger preset's workspace and a position on each leg. A view's name is a value in it, so the fixture
+ * names the views as `KIND_ORDER` does: a link naming a view the page lacks opens the program alone. Node's raw
+ * deflate wrote these bytes, not `encodeLink`, and the test pins the reading, never an encoder's bytes: node and Chrome
+ * deflate one payload differently. Its workspace is `version: 2`, so it pins `parseWorkspace`'s reading of version 2
+ * for good too: a later workspace version migrates version 2 rather than refusing it.
  */
-describe('the frozen link from version 1', () => {
+describe('the frozen format of a version 1 link', () => {
   const FROZEN =
-    '#s=tZDRahsxEEV_ZZinhipBKTW0CulT_yJjiqwdxyLSaJG0Memy_16ktWnc0pQ-VA8SHO69czUzPnMuPgmaW4VjTo_ZRjS4FyhT_FbTO7mCmQQAIHCFOFWwzsE96LuVHg8-MAh8AX0WtrOK2v0e5O4nF7gHgWu4PbFlfaxzJAvJaejmigQVsrg0eHlEgzsvNr-gwmPKT2W0jtHgTOf6hOaDIqyZmdDMhE9eBkJDWMbgK6EiHHzuxKUwRemo-O9cCM2DvtkofbPZKkJ38GHI3CIf3g7K6fjPKYHtvpv8KTVN2XEnoxW-YIt6yxls3A32Wl96V0q4bC_d_6e9LfHXArbEvzWvv5lq7I23S-tz9NUdeqWZsFQeS9fsbO6mZ8_HlVQfmkwRZrZDmmqnXsrIrqbcarSPM7exnxThPrmp8B_WF_rEZnmVYGqeuC-tjMG-nBU1fn0FFlQ4puKrT1LQzKdsNButVVsImo9aYY1oPmutl-UH'
+    '#s=tZLRTsIwFIZfpemVxGGKkURH9Mq3oMSU7oAN6-nSdkwke3dPO4igEeOFS7aefDv_378n3fMt-GAc8nJS8Ma7tVeWl3yFLLT2JborHLG9REZPDZHZNjKlNXtkYjbQ7tXUwJA9MXFsTM_QlL7XDGefHIkiG7PJgfXDQo0SqT5sOh1J5AUH1K4yuKZAS4PK74h1zm9CozQQ3MtjfMnL20Ly6AGoJL4xWFEleWhqEyWnn5XxmWhXtxYzCuYdAsG5uJkW9C6IaTpQ5SFZzi8bedf92aUGtcoic3B1rdeQSaMQzlhfXFLWyi4rNRbn2oGSdnGu_p_0_s1-DUDot-TxmyjanJgyU57ORP2aI5FJiNCE3LNUPou2BrqBRLp5ITMPqnJtzNRgaEBH51OMdHCAtO091Sun2wA_jK_OOybJiUMZfQt5aDRAtTt2RPt8Anq6lo0LJtJFDAQO3rycClGkgfDyjopI64MQou8_AA'
 
   it('opens whole, as the program, the encoding, the workspace and the positions it was written with', async () => {
     expect(await decodeLink(FROZEN, ENCODINGS)).toEqual({
@@ -135,7 +137,7 @@ describe('the frozen link from version 1', () => {
               dir: 'row',
               sizes: [0.5, 0.5],
               children: [
-                { kind: 'leaf', id: 'asm-0', pane: 'asm' },
+                { kind: 'leaf', id: 'rxm-0', pane: 'rxm' },
                 { kind: 'leaf', id: 'tm-0', pane: 'tm' },
               ],
             },
@@ -153,7 +155,7 @@ describe('the frozen link from version 1', () => {
         // the arrangement on screen, as they were.
         arrangements: {},
       },
-      positions: { lambda: 500, asm: 40, tm: 9000 },
+      positions: { lambda: 500, rxm: 40, tm: 9000 },
     })
   })
 })
@@ -235,7 +237,7 @@ describe('a link that opens the program alone', () => {
     ['an array, even an empty one', []],
     ['a key that is not a leg', { lamda: 7 }],
     ['a negative step', { lambda: -1 }],
-    ['a step that is not an integer', { asm: 1.5 }],
+    ['a step that is not an integer', { rxm: 1.5 }],
     ['a step past the safe integers', { tm: 2 ** 53 }],
     ['a step written as a string', { lambda: '7' }],
     ['an object whose only key is `__proto__`', JSON.parse('{"__proto__":1}')],
@@ -260,7 +262,7 @@ describe('a link whose workspace carries remembered arrangements', () => {
   const FOUR = defaultArrangement(KIND_ORDER, 'wide')
   const carried = {
     ...defaultWorkspace('wide'),
-    arrangements: { 'source+lambda+asm+tm': FOUR },
+    arrangements: { 'source+lambda+rxm+tm': FOUR },
     // A VIEW ON SCREEN AND A VIEW ONLY THE REMEMBERED ARRANGEMENT HOLDS, each with something stored for it.
     panels: { 'tm-0': { rules: false }, 'lambda-0': { map: true } },
     display: { 'lambda-0': { layout: 'outline', vars: 'names', map: 'icicle' } },

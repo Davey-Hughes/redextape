@@ -11,18 +11,18 @@ import { SessionPool } from '../../src/session-client'
 import type { LegState, SessionEntry } from '../../src/sessions'
 import { PaneSlot, SessionRegistry } from '../../src/sessions'
 import type {
-  AsmProgram,
-  AsmState,
-  AsmStatus,
   Decoded,
   Diagnostic,
   LambdaState,
+  RxmProgram,
+  RxmState,
+  RxmStatus,
   TmProgram,
   TmScratchStatus,
   TmState,
 } from '../../src/types'
-import { frameOf } from './asm-fixtures'
 import { legState } from './leg-fixture'
+import { frameOf } from './rxm-fixtures'
 import { fakeClient, lambdaFrame } from './session-fixtures'
 import { ONE_RULE_PROGRAM, tmFrame } from './tm-machines'
 
@@ -77,13 +77,13 @@ function sourceEntry(): SessionEntry {
     client: fakeClient(),
     legs: {
       lambda: legState<LambdaState>(false, 1_000_000),
-      asm: legState<AsmState>(false, 1_000_000),
+      rxm: legState<RxmState>(false, 1_000_000),
       tm: legState<TmState>(false, 1_000_000),
     },
     tmProgram: null,
     tmScratch: null,
-    asmProgram: null,
-    asmScratch: null,
+    rxmProgram: null,
+    rxmScratch: null,
   }
 }
 
@@ -91,16 +91,16 @@ const compiled = (tmProgram: TmProgram | null, tapeNames: string[]): RunReply =>
   kind: 'compiled',
   gen: 1,
   lambda: { available: true, reason: '', node: null, run: null },
-  asm: { available: false, reason: 'no asm leg', run: null, cap: null, total_steps: null },
+  rxm: { available: false, reason: 'no rxm leg', run: null, cap: null, total_steps: null },
   tm: { available: true, reason: '', width: 8, run: null, total_steps: null },
   declinedSpan: null,
   tmProgram,
-  asmProgram: null,
+  rxmProgram: null,
   tapeNames,
   linkIndex: null,
   tmText: null,
   tmResultDecodable: true,
-  asmText: null,
+  rxmText: null,
 })
 
 /**
@@ -752,7 +752,7 @@ describe('a TM buffer retains what its panes were last told', () => {
  * one of them says nothing about the other five.
  */
 describe('a recording chunk redraws once per frame', () => {
-  const FRAMES_LEGS = ['lambda', 'tm', 'asm'] as const
+  const FRAMES_LEGS = ['lambda', 'tm', 'rxm'] as const
   type FramesLeg = (typeof FRAMES_LEGS)[number]
   const CASES = (['onReply', 'onScratchReply'] as const).flatMap((sw) => FRAMES_LEGS.map((l) => [sw, l] as const))
 
@@ -768,9 +768,9 @@ describe('a recording chunk redraws once per frame', () => {
         const frames = steps.map((step) => tmFrame(0, step, 'a'))
         return { reply: { kind: 'tm-frames', gen: 1, frames, done }, frames }
       }
-      case 'asm': {
+      case 'rxm': {
         const frames = steps.map((step) => frameOf({ step }))
-        return { reply: { kind: 'asm-frames', gen: 1, frames, done }, frames }
+        return { reply: { kind: 'rxm-frames', gen: 1, frames, done }, frames }
       }
     }
   }
@@ -870,15 +870,15 @@ describe('a recording chunk redraws once per frame', () => {
    * beside it, so a flag kept per switch, or per leg, would give each of them a frame of its own; the pair above lands in
    * one switch on one leg and cannot tell. One `createReplies` serves both switches here, as it does in the app.
    */
-  it("the program's λ and TM chunks and a copy's asm chunk landing before one frame share its one draw", () => {
+  it("the program's λ and TM chunks and a copy's rxm chunk landing before one frame share its one draw", () => {
     const q = frameQueue()
     let drawn = 0
     const d = scratchDriver({ draw: () => (drawn += 1), frame: q.frame })
     d.reg.add(sourceEntry())
-    const copy = d.buffers.forkBlank('asm')
+    const copy = d.buffers.forkBlank('rxm')
     d.replies.onReply(SOURCE, chunk('lambda', 0, null).reply)
     d.replies.onReply(SOURCE, chunk('tm', 0, null).reply)
-    d.replies.onScratchReply(copy, chunk('asm', 0, null).reply)
+    d.replies.onScratchReply(copy, chunk('rxm', 0, null).reply)
 
     expect(drawn).toBe(0)
     expect(q.pending.length).toBe(1)
@@ -888,38 +888,38 @@ describe('a recording chunk redraws once per frame', () => {
 })
 
 /**
- * An asm copy retains what its views were last told, as a TM copy does: its listing, its status and its value, all from
- * the one build reply (Plan 7 part 5 spec, amendment 26), the value replaced by an `asm-value`, the frames recorded
- * into its asm leg, and all of it written to storage with the build.
+ * An rxm copy retains what its views were last told, as a TM copy does: its listing, its status and its value, all from
+ * the one build reply (Plan 7 part 5 spec, amendment 26), the value replaced by an `rxm-value`, the frames recorded
+ * into its rxm leg, and all of it written to storage with the build.
  */
-describe('an asm copy retains what its views were last told', () => {
-  const STATUS: AsmStatus = { available: true, reason: '', run: 'Running', cap: null, total_steps: 1 }
-  const LISTING: AsmProgram = { listing: ['halt'], labels: [] }
+describe('an rxm copy retains what its views were last told', () => {
+  const STATUS: RxmStatus = { available: true, reason: '', run: 'Running', cap: null, total_steps: 1 }
+  const LISTING: RxmProgram = { listing: ['halt'], labels: [] }
   const built = (value: Decoded): RunReply => ({
-    kind: 'asm-scratch-compiled',
+    kind: 'rxm-scratch-compiled',
     gen: 1,
-    asm: STATUS,
-    asmProgram: LISTING,
+    rxm: STATUS,
+    rxmProgram: LISTING,
     value,
   })
 
   it('holds the listing, the status and the value its build reply carried, and persists the copy', () => {
     const { buffers, reg, replies, persists } = scratchDriver()
-    const id = buffers.forkBlank('asm')
+    const id = buffers.forkBlank('rxm')
     replies.onScratchReply(id, built({ Value: { text: '0 (no result type)' } }))
     const entry = reg.entryOf(id)
-    expect(entry.asmProgram).toEqual({ program: LISTING, asmText: null })
-    expect(entry.asmScratch).toEqual({ status: STATUS, value: { Value: { text: '0 (no result type)' } } })
-    expect(entry.legs.asm?.status).toEqual({ available: true, reason: '' })
+    expect(entry.rxmProgram).toEqual({ program: LISTING, rxmText: null })
+    expect(entry.rxmScratch).toEqual({ status: STATUS, value: { Value: { text: '0 (no result type)' } } })
+    expect(entry.legs.rxm?.status).toEqual({ available: true, reason: '' })
     expect(persists()).toBe(1)
   })
 
-  it('records its frames into its asm leg', () => {
+  it('records its frames into its rxm leg', () => {
     const { buffers, reg, replies } = scratchDriver()
-    const id = buffers.forkBlank('asm')
+    const id = buffers.forkBlank('rxm')
     replies.onScratchReply(id, built('Unfinished'))
-    replies.onScratchReply(id, { kind: 'asm-frames', gen: 1, frames: [frameOf(), frameOf({ step: 1 })], done: 'ended' })
-    const leg = reg.legOf({ session: id, leg: 'asm' })
+    replies.onScratchReply(id, { kind: 'rxm-frames', gen: 1, frames: [frameOf(), frameOf({ step: 1 })], done: 'ended' })
+    const leg = reg.legOf({ session: id, leg: 'rxm' })
     expect(leg.hist.length).toBe(2)
     expect(leg.hist.current?.step).toBe(0)
     expect(leg.done).toBe('ended')
@@ -927,56 +927,56 @@ describe('an asm copy retains what its views were last told', () => {
 
   it('takes the value a [continue] brings in place of the build’s', () => {
     const { buffers, reg, replies } = scratchDriver()
-    const id = buffers.forkBlank('asm')
+    const id = buffers.forkBlank('rxm')
     replies.onScratchReply(id, built('Unfinished'))
-    replies.onScratchReply(id, { kind: 'asm-value', gen: 1, value: { Value: { text: '[1, 2, 3]' } } })
-    expect(reg.entryOf(id).asmScratch).toEqual({ status: STATUS, value: { Value: { text: '[1, 2, 3]' } } })
+    replies.onScratchReply(id, { kind: 'rxm-value', gen: 1, value: { Value: { text: '[1, 2, 3]' } } })
+    expect(reg.entryOf(id).rxmScratch).toEqual({ status: STATUS, value: { Value: { text: '[1, 2, 3]' } } })
   })
 
   it('tells every view on the copy the value a [continue] brings, and the null a dead worker leaves', () => {
     const { buffers, reg, replies, panes } = scratchDriver()
-    const id = buffers.forkBlank('asm')
+    const id = buffers.forkBlank('rxm')
     const told: unknown[] = []
     panes.add({
-      id: 'asm-0',
-      kind: 'asm',
-      slot: new PaneSlot('asm', id),
-      pane: { setScratch: (r: unknown) => told.push(r) } as unknown as PaneEntry<'asm'>['pane'],
+      id: 'rxm-0',
+      kind: 'rxm',
+      slot: new PaneSlot('rxm', id),
+      pane: { setScratch: (r: unknown) => told.push(r) } as unknown as PaneEntry<'rxm'>['pane'],
       host: {} as HTMLElement,
     })
-    reg.entryOf(id).asmScratch = { status: STATUS, value: 'Unfinished' }
-    replies.onScratchReply(id, { kind: 'asm-value', gen: 1, value: { Value: { text: '6' } } })
+    reg.entryOf(id).rxmScratch = { status: STATUS, value: 'Unfinished' }
+    replies.onScratchReply(id, { kind: 'rxm-value', gen: 1, value: { Value: { text: '6' } } })
     replies.onScratchReply(id, { kind: 'worker-error', gen: 1, message: 'boom' })
     expect(told).toEqual([{ status: STATUS, value: { Value: { text: '6' } } }, null])
   })
 
   it('forgets its reading when its worker throws', () => {
     const { buffers, reg, replies } = scratchDriver()
-    const id = buffers.forkBlank('asm')
+    const id = buffers.forkBlank('rxm')
     replies.onScratchReply(id, built('Unfinished'))
     replies.onScratchReply(id, { kind: 'worker-error', gen: 1, message: 'boom' })
-    expect(reg.entryOf(id).asmScratch).toBeNull()
+    expect(reg.entryOf(id).rxmScratch).toBeNull()
   })
 })
 
-/** The program's asm text rides `compiled` beside its listing, for *edit a copy* — `tmText`'s arrangement. */
-describe('a session retains its asm text beside its listing', () => {
-  const LISTING: AsmProgram = { listing: ['li\trr, #1', 'halt'], labels: [] }
+/** The program's rxm text rides `compiled` beside its listing, for *edit a copy* — `tmText`'s arrangement. */
+describe('a session retains its rxm text beside its listing', () => {
+  const LISTING: RxmProgram = { listing: ['li\trr, #1', 'halt'], labels: [] }
 
   it('holds the text a `compiled` reply carried, and nothing when it carried no listing', () => {
     const entry = sourceEntry()
     const { replies } = driver(entry)
-    const asm: AsmStatus = { available: true, reason: '', run: 'Running', cap: null, total_steps: 2 }
+    const rxm: RxmStatus = { available: true, reason: '', run: 'Running', cap: null, total_steps: 2 }
     const text = 'result Nat\n\n    li\trr, #1\n    halt\n'
     replies.onReply(SOURCE, {
       ...compiled(ONE_RULE_PROGRAM, ['TAPE']),
-      asm,
-      asmProgram: LISTING,
-      asmText: text,
+      rxm,
+      rxmProgram: LISTING,
+      rxmText: text,
     } as RunReply)
-    expect(entry.asmProgram).toEqual({ program: LISTING, asmText: text })
+    expect(entry.rxmProgram).toEqual({ program: LISTING, rxmText: text })
 
     replies.onReply(SOURCE, compiled(ONE_RULE_PROGRAM, ['TAPE']))
-    expect(entry.asmProgram).toBeNull()
+    expect(entry.rxmProgram).toBeNull()
   })
 })

@@ -10,10 +10,10 @@ import { chooseFromWorkspace } from './user-event-fixture'
  * `style.css` breaks the header's line on the title alone and cuts the status, and a title with no room, with an
  * ellipsis. Without that, in a half-width Explorer view the `copy · not linked` status would push `⋯` and `✕` onto
  * a second header row, where a view of the program the same width fits one, and in a narrow split the title and the
- * status would each wrap to two lines. Measured as `asm-pane.test.ts`'s geometry tests measure, with
+ * status would each wrap to two lines. Measured as `rxm-pane.test.ts`'s geometry tests measure, with
  * `getBoundingClientRect`, and each case asserts first that a view of the program at the same width fits one row.
  *
- * *new asm copy* and *new TM copy* are held to the style of the copies menu's other controls and to a gap between
+ * *new rxm copy* and *new TM copy* are held to the style of the copies menu's other controls and to a gap between
  * them: unstyled, they would be the browser's own buttons, touching.
  *
  * Every gesture is a `userEvent` one. ONE MOUNT FOR THE FILE, for the reason `app.test.ts` gives.
@@ -64,47 +64,47 @@ beforeAll(async () => {
 
 describe('a copy’s view header', () => {
   it('is one row in a half-width Explorer view, as the program’s view beside it is', async () => {
-    const asm = paneByLeaf('asm-0')
+    const rxm = paneByLeaf('rxm-0')
     const tm = paneByLeaf('tm-0')
     // THE PRECONDITION: the two views are the same width, and the program's header fits one row there.
-    expect(Math.abs(rect(asm).width - rect(tm).width)).toBeLessThan(2)
-    expect(rect(asm).width).toBeLessThan(700)
-    expect(oneRow(asm), 'the program’s asm view fits one row').toBe(true)
+    expect(Math.abs(rect(rxm).width - rect(tm).width)).toBeLessThan(2)
+    expect(rect(rxm).width).toBeLessThan(700)
+    expect(oneRow(rxm), 'the program’s rxm view fits one row').toBe(true)
     expect(oneRow(tm), 'the program’s TM view fits one row').toBe(true)
 
-    await viewMenu(asm, 'button.detach')
-    await until(() => asm.querySelector('.view-status') !== null, 'the copy’s badge')
-    const status = asm.querySelector<HTMLElement>('.view-status') as HTMLElement
+    await viewMenu(rxm, 'button.detach')
+    await until(() => rxm.querySelector('.view-status') !== null, 'the copy’s badge')
+    const status = rxm.querySelector<HTMLElement>('.view-status') as HTMLElement
     expect(status.textContent).toBe('copy · not linked')
 
     // THE WEB FONT IS WHAT THE WIDTHS BELOW ARE READ IN: a fallback face is narrower, and a title cut only once the
     // font arrives would pass against it.
     await document.fonts.ready
-    expect(oneRow(asm), '`⋯` and `✕` on the title’s row').toBe(true)
-    expect(titleWhole(asm), 'the title, whole, with the badge giving way').toBe(true)
+    expect(oneRow(rxm), '`⋯` and `✕` on the title’s row').toBe(true)
+    expect(titleWhole(rxm), 'the title, whole, with the badge giving way').toBe(true)
     expect(
-      Math.abs(rect(asm.querySelector('.view-header')).height - rect(tm.querySelector('.view-header')).height),
+      Math.abs(rect(rxm.querySelector('.view-header')).height - rect(tm.querySelector('.view-header')).height),
     ).toBeLessThan(1.5)
     // THE STATUS IS ONE LINE, ON THE TITLE'S ROW, AND ITS MEANING STAYS WHOLE IN ITS `title`.
-    const title = rect(asm.querySelector('.view-title'))
+    const title = rect(rxm.querySelector('.view-title'))
     expect(rect(status).top).toBeLessThan(title.bottom)
     expect(rect(status).height).toBeLessThan(title.height + 1)
     expect(status.title).toBe('this view shows a copy, which is not linked to the program')
-    expect(asm.querySelector<HTMLElement>('.view-title-text')?.title).toMatch(/^asm · copy \d+$/)
+    expect(rxm.querySelector<HTMLElement>('.view-title-text')?.title).toMatch(/^rxm · copy \d+$/)
   })
 
   it('is one row in a narrow split, as the program’s view beside it is', async () => {
     await chooseFromWorkspace('[data-preset="debugger"]')
-    const copy = paneByLeaf('asm-0')
+    const copy = paneByLeaf('rxm-0')
     await viewMenu(copy, 'button.view-split[data-dir="row"]')
-    const before = new Set([...document.querySelectorAll<HTMLElement>('.pane[data-kind="asm"]')])
+    const before = new Set([...document.querySelectorAll<HTMLElement>('.pane[data-kind="rxm"]')])
     await userEvent.click(
       controlledMenu(copy.querySelector('button.view-more') as HTMLElement).querySelector(
-        'button[data-binding="asm:source"]',
+        'button[data-binding="rxm:source"]',
       ) as HTMLElement,
     )
     const made = () =>
-      [...document.querySelectorAll<HTMLElement>('.pane[data-kind="asm"]')].find((e) => !before.has(e) && e !== copy)
+      [...document.querySelectorAll<HTMLElement>('.pane[data-kind="rxm"]')].find((e) => !before.has(e) && e !== copy)
     await until(() => made() !== undefined, 'the split view of the program')
     const program = made() as HTMLElement
 
@@ -138,7 +138,7 @@ describe('a view narrower than its title', () => {
    * at 480 px, with the Debugger inspector stacked under them, they are 111 px, and 88.5 px at 390.
    */
   it('cuts the title with an ellipsis on one line, inside the view', async () => {
-    const views = [...document.querySelectorAll<HTMLElement>('.pane[data-kind="asm"]')]
+    const views = [...document.querySelectorAll<HTMLElement>('.pane[data-kind="rxm"]')]
     expect(views).toHaveLength(2)
     const titled = (v: HTMLElement) => v.querySelector('.view-title-text') as HTMLElement
     // EACH TITLE'S WIDTH ON ONE LINE, READ WHILE THE VIEWS STILL HAVE ROOM FOR IT.
@@ -163,9 +163,9 @@ describe('the copies menu’s new-copy controls', () => {
     await userEvent.click(document.querySelector<HTMLButtonElement>('#buffers') as HTMLButtonElement)
     await until(() => document.querySelector('.buffer-list .buffer-delete') !== null, 'a row’s delete control')
     const reference = getComputedStyle(document.querySelector('.buffer-list .buffer-delete') as Element)
-    const asm = document.querySelector<HTMLElement>('.buffer-list button.new-asm') as HTMLElement
+    const rxm = document.querySelector<HTMLElement>('.buffer-list button.new-rxm') as HTMLElement
     const tm = document.querySelector<HTMLElement>('.buffer-list button.new-tm') as HTMLElement
-    for (const b of [asm, tm]) {
+    for (const b of [rxm, tm]) {
       const style = getComputedStyle(b)
       for (const property of [
         'font-family',
@@ -185,8 +185,8 @@ describe('the copies menu’s new-copy controls', () => {
       }
     }
     // SIDE BY SIDE ON ONE LINE, WITH A GAP BETWEEN THEM.
-    expect(Math.abs(rect(asm).top - rect(tm).top)).toBeLessThan(1)
-    expect(rect(tm).left - rect(asm).right).toBeGreaterThanOrEqual(4)
+    expect(Math.abs(rect(rxm).top - rect(tm).top)).toBeLessThan(1)
+    expect(rect(tm).left - rect(rxm).right).toBeGreaterThanOrEqual(4)
     await userEvent.keyboard('{Escape}')
   })
 })

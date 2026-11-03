@@ -1,5 +1,6 @@
 import { beforeAll, describe, expect, it } from 'vitest'
 import { userEvent } from 'vitest/browser'
+import { KIND_GLOSS } from '../../src/app-header'
 import {
   focusInPage,
   host,
@@ -29,7 +30,7 @@ import { clickToggle, userPickWorkspace } from './user-event-fixture'
  * **FIVE CASES PASS ALONE AND SEVEN DO NOT.** Alone: the start, a kind hidden on a press, a view kept alive off the
  * page, a scroll kept, and the pair's first visit. The seven start from what the case before left, and **EACH BEGINS BY
  * ASSERTING IT**, so run alone it fails on its precondition and not on a wrong page: the default on a first visit and
- * the second press, from the asm view hidden; the last toggle disabled, the tree before a `✕` and *reset preset*, from
+ * the second press, from the rxm view hidden; the last toggle disabled, the tree before a `✕` and *reset preset*, from
  * the source beside the TM view; the link, from something remembered; and the Stage's tabs, from source, λ and TM.
  *
  * **PRESSES ARE `userEvent.click`, NOT `.click()`**: a synthetic click reaches a handler a real pointer cannot, and
@@ -37,26 +38,26 @@ import { clickToggle, userPickWorkspace } from './user-event-fixture'
  */
 
 type Stored = { tree: unknown; focused: string; arrangements?: Record<string, unknown> }
-const ALL = 'source+lambda+asm+tm'
+const ALL = 'source+lambda+rxm+tm'
 
 describe('the views toggles', () => {
   beforeAll(() => mountAt(1280, 896))
 
   it('starts with all four views on the page and all four toggles pressed', () => {
-    expect(mounted()).toEqual(['source', 'lambda-0', 'asm-0', 'tm-0'])
-    expect(pressed()).toEqual(['source', 'asm', 'lambda', 'tm'])
+    expect(mounted()).toEqual(['source', 'lambda-0', 'rxm-0', 'tm-0'])
+    expect(pressed()).toEqual(['source', 'rxm', 'lambda', 'tm'])
     expect(storedLayout<Stored>().arrangements, 'the stored workspace already remembers an arrangement').toBeUndefined()
   })
 
   it('hides a kind on a press: the view leaves the page, the toggle says so, and the focus stays on it', async () => {
     const four = storedLayout<Stored>().tree
-    await clickToggle('asm')
+    await clickToggle('rxm')
     expect(mounted()).toEqual(['source', 'lambda-0', 'tm-0'])
-    expect(host('asm-0'), 'the asm view is still on the page').toBeNull()
+    expect(host('rxm-0'), 'the rxm view is still on the page').toBeNull()
     expect(pressed()).toEqual(['source', 'lambda', 'tm'])
-    expect(toggle('asm').title).toBe('show the asm view')
+    expect(toggle('rxm').title).toBe(`show the rxm view\n${KIND_GLOSS.rxm}`)
     expect(live()).toBe('showing source, λ and TM')
-    expect(document.activeElement, 'the press cost the toggle its focus').toBe(toggle('asm'))
+    expect(document.activeElement, 'the press cost the toggle its focus').toBe(toggle('rxm'))
     // THE ARRANGEMENT LEFT IS REMEMBERED UNDER ITS OWN KEY, AND THE ONE ON SCREEN UNDER NONE.
     expect(storedLayout<Stored>().arrangements).toEqual({ [ALL]: four })
   })
@@ -66,7 +67,7 @@ describe('the views toggles', () => {
    * divider runs the whole width. Three views are the first beside a column of the other two.
    */
   it('shows a combination’s default on its first visit: source beside a column of λ over TM', () => {
-    expect(mounted(), 'precondition: the case before hid the asm view').toEqual(['source', 'lambda-0', 'tm-0'])
+    expect(mounted(), 'precondition: the case before hid the rxm view').toEqual(['source', 'lambda-0', 'tm-0'])
     expect(
       Object.keys(storedLayout<Stored>().arrangements ?? {}),
       'precondition: and it is these three’s first visit',
@@ -85,17 +86,17 @@ describe('the views toggles', () => {
   })
 
   it('shows it again on a second press, in the arrangement that was left', async () => {
-    expect(mounted(), 'precondition: the asm view is off the page').toEqual(['source', 'lambda-0', 'tm-0'])
+    expect(mounted(), 'precondition: the rxm view is off the page').toEqual(['source', 'lambda-0', 'tm-0'])
     const three = storedLayout<Stored>().tree
     const four = storedLayout<Stored>().arrangements?.[ALL]
     expect(four, 'precondition: the four views are remembered as they were left').toBeDefined()
-    await clickToggle('asm')
-    await focusInPage('a press on the asm toggle, which shows its view')
-    expect(mounted()).toEqual(['source', 'lambda-0', 'asm-0', 'tm-0'])
+    await clickToggle('rxm')
+    await focusInPage('a press on the rxm toggle, which shows its view')
+    expect(mounted()).toEqual(['source', 'lambda-0', 'rxm-0', 'tm-0'])
     expect(storedLayout<Stored>().tree, 'the four views did not come back as they were left').toEqual(four)
     expect(storedLayout<Stored>().arrangements).toEqual({ 'source+lambda+tm': three })
-    expect(live()).toBe('showing source, asm, λ and TM')
-    expect(toggle('asm').title).toBe('hide the asm view')
+    expect(live()).toBe('showing source, rxm, λ and TM')
+    expect(toggle('rxm').title).toBe(`hide the rxm view\n${KIND_GLOSS.rxm}`)
   })
 
   /**
@@ -118,7 +119,7 @@ describe('the views toggles', () => {
 
   /**
    * A REBUILD DETACHES EVERY HOST, AND A DETACHED ELEMENT COMES BACK SCROLLED TO ITS START (spec §5.2), so
-   * `pane-host.ts` holds the positions: without the hold, this table, at 120 px, would be at 0 after the asm toggle is
+   * `pane-host.ts` holds the positions: without the hold, this table, at 120 px, would be at 0 after the rxm toggle is
    * pressed. So the first half of this case is about a view that never leaves the page, and fails without the hold as
    * the second does.
    */
@@ -130,9 +131,9 @@ describe('the views toggles', () => {
     tmStateTable().scrollTop = 120
     tmStateTable().dispatchEvent(new Event('scroll'))
     await until(() => tmStateTable().scrollTop === 120, 'the table to hold its scroll')
-    await clickToggle('asm')
+    await clickToggle('rxm')
     expect(tmStateTable().scrollTop, 'another view’s toggle reset the table').toBe(120)
-    await clickToggle('asm')
+    await clickToggle('rxm')
     expect(tmStateTable().scrollTop, 'another view’s toggle reset the table on the way back').toBe(120)
     await clickToggle('tm')
     expect(host('tm-0')).toBeNull()
@@ -144,7 +145,7 @@ describe('the views toggles', () => {
 
   it('shows a pair side by side the first time it is visited', async () => {
     await clickToggle('lambda')
-    await clickToggle('asm')
+    await clickToggle('rxm')
     expect(mounted()).toEqual(['source', 'tm-0'])
     const source = (host('source') as HTMLElement).getBoundingClientRect()
     const tm = (host('tm-0') as HTMLElement).getBoundingClientRect()
@@ -166,7 +167,7 @@ describe('the views toggles', () => {
     expect(last.getAttribute('aria-pressed'), 'the one view shown reads as not shown').toBe('true')
     expect(last.title).toBe('the TM view is the only one shown — one view stays')
     expect(last.getAttribute('aria-description')).toBe(last.title)
-    expect([toggle('source'), toggle('lambda'), toggle('asm')].every((b) => !b.hasAttribute('aria-disabled'))).toBe(
+    expect([toggle('source'), toggle('lambda'), toggle('rxm')].every((b) => !b.hasAttribute('aria-disabled'))).toBe(
       true,
     )
     await clickToggle('source')
@@ -248,20 +249,20 @@ describe('the views toggles', () => {
     expect(notice()).toContain('the default views are back')
     // AND A TOGGLE PRESSED NEXT SHOWS THAT COMBINATION'S DEFAULT: the four views in two columns of two.
     await clickToggle('lambda')
-    await clickToggle('asm')
+    await clickToggle('rxm')
     const area = (document.querySelector('#views') as HTMLElement).getBoundingClientRect()
     const sourceBox = (host('source') as HTMLElement).getBoundingClientRect()
-    const asm = (host('asm-0') as HTMLElement).getBoundingClientRect()
+    const rxm = (host('rxm-0') as HTMLElement).getBoundingClientRect()
     const lambda = (host('lambda-0') as HTMLElement).getBoundingClientRect()
     const tm = (host('tm-0') as HTMLElement).getBoundingClientRect()
-    // TWO COLUMNS OF TWO: source over asm, beside λ over TM, so the document has them a column at a time.
-    expect(mounted()).toEqual(['source', 'asm-0', 'lambda-0', 'tm-0'])
-    expect(asm.top, 'the asm view is not under the source view').toBeGreaterThanOrEqual(sourceBox.bottom)
-    expect(Math.abs(asm.left - sourceBox.left)).toBeLessThan(1)
+    // TWO COLUMNS OF TWO: source over rxm, beside λ over TM, so the document has them a column at a time.
+    expect(mounted()).toEqual(['source', 'rxm-0', 'lambda-0', 'tm-0'])
+    expect(rxm.top, 'the rxm view is not under the source view').toBeGreaterThanOrEqual(sourceBox.bottom)
+    expect(Math.abs(rxm.left - sourceBox.left)).toBeLessThan(1)
     expect(tm.top, 'the TM view is not under the λ view').toBeGreaterThanOrEqual(lambda.bottom)
     expect(Math.abs(tm.left - lambda.left)).toBeLessThan(1)
     expect(sourceBox.right).toBeLessThanOrEqual(lambda.left)
-    for (const view of [sourceBox, asm, lambda, tm])
+    for (const view of [sourceBox, rxm, lambda, tm])
       expect(view.width, 'a view runs the whole width').toBeLessThan(area.width * 0.6)
   })
 })

@@ -6,14 +6,14 @@
 //! the actual tape, so it depends on none of my reasoning being correct — but it is an OBSERVATION over
 //! the programs that ran. Rung 1 raises that sample; it does not change the kind of claim.
 //!
-//! This changes the kind of claim, for a bounded space: for EVERY asm `Program` over a fixed small
+//! This changes the kind of claim, for a bounded space: for EVERY rxm `Program` over a fixed small
 //! alphabet, at every width in a range, no execution corrupts the register bank. Verified by
 //! enumeration rather than sampling, reusing layer 3's checker verbatim so nothing new is trusted.
 //!
-//! It enumerates the ASM IR rather than source text, because `Program` is the direct input to
+//! It enumerates the RXM IR rather than source text, because `Program` is the direct input to
 //! `lower_tm`, it is small, and `lower_tm` already CLAIMS totality on any `Program` (`MAX_SLOTS`,
 //! `MAX_FRAME_LOC`) without ever testing that claim exhaustively. An enumerated program need not be one
-//! `lower_asm` would emit — that is the point: the gadget library's safety must not depend on the
+//! `lower_rxm` would emit — that is the point: the gadget library's safety must not depend on the
 //! lowerer's habits.
 
 // Test target: a fixture that fails to build IS the failure this file reports, so panicking is

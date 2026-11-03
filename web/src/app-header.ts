@@ -268,10 +268,10 @@ export const NARROW_WINDOW = `(max-width: ${NARROW_WINDOW_REM}rem)`
  * first paint, as not pressed, which is true of a page with no view built yet. `tests/node/harness.test.ts` holds that
  * markup to `HEADER_ORDER` and `KIND_WORD`, so the page cannot spell a kind another way than the tables do.
  *
- * **THE NAME IS THE LABEL, AND THE TOOLTIP SAYS WHAT A PRESS DOES** (umbrella §4 rule 1). `source`, `λ`, `asm` and
+ * **THE NAME IS THE LABEL, AND THE TOOLTIP SAYS WHAT A PRESS DOES** (umbrella §4 rule 1). `source`, `λ`, `rxm` and
  * `TM` are words a reader says, so each button is named by its own text, in a group named `views`, and `aria-pressed`
- * carries its state. The tooltip is the sentence, which is `toggleSentence`'s: *hide the TM view*, *show the TM view*,
- * and with `count` saying two views of the kind, *hide the 2 TM views*.
+ * carries its state. The tooltip is `toggleTitle`'s: what a press does, *hide the TM view*, *show the TM view*, or with
+ * `count` saying two views of the kind, *hide the 2 TM views*, and for rxm a line saying what the view is.
  *
  * **THE LAST PRESSED BUTTON IS DISABLED, AND ITS TOOLTIP IS THE REASON** (rule 4): it could apply and cannot now,
  * since one view stays, or one kind of view where it stands for several (`toggleSentence`). `aria-description` says
@@ -308,7 +308,7 @@ export function viewToggles(
         b.setAttribute('aria-pressed', String(pressed))
         if (only) b.setAttribute('aria-disabled', 'true')
         else b.removeAttribute('aria-disabled')
-        const says = toggleSentence(kind, count(kind), only ? 'only' : pressed ? 'shown' : 'hidden')
+        const says = toggleTitle(kind, count(kind), only ? 'only' : pressed ? 'shown' : 'hidden')
         if (b.title !== says) b.title = says
         if (only) b.setAttribute('aria-description', says)
         else b.removeAttribute('aria-description')
@@ -331,8 +331,8 @@ export function viewToggles(
  * **AND WHAT STAYS IS ONE VIEW OF ONE, AND ONE KIND OF VIEW OF SEVERAL**: *one view stays* would be said of two views
  * that both stay.
  *
- * **THE ONE PLACE THE SENTENCE IS BUILT.** The tooltip (`viewToggles`) and the notice line's answer to a refused press
- * or key (`main.ts`'s `toggleView`) are the same words.
+ * **THE ONE PLACE THE SENTENCE IS BUILT.** The tooltip's first line (`toggleTitle`) and the notice line's answer to a
+ * refused press or key (`main.ts`'s `toggleView`) are the same words.
  */
 export function toggleSentence(kind: PaneKind, count: number, state: 'shown' | 'hidden' | 'only'): string {
   const several = count > 1
@@ -345,8 +345,27 @@ export function toggleSentence(kind: PaneKind, count: number, state: 'shown' | '
 }
 
 /**
+ * What a kind's word does not say, as the second line of its toggle's tooltip, or `null`. `rxm` is redextape's own name
+ * for its register machine (`tm::rxm::Program`), so no reader knows it on sight. **`help.html` SAYS WHAT THE VIEW IS
+ * TOO** and cannot import this: `tests/node/app-header.test.ts` checks that the page holds each clause of it.
+ */
+export const KIND_GLOSS: Readonly<Record<PaneKind, string | null>> = {
+  source: null,
+  rxm: "redextape's register machine: the IR between the source and the Turing machine",
+  lambda: null,
+  tm: null,
+}
+
+/** A `views` toggle's tooltip: `toggleSentence`'s words, then its kind's `KIND_GLOSS` line where it has one. */
+export function toggleTitle(kind: PaneKind, count: number, state: 'shown' | 'hidden' | 'only'): string {
+  const says = toggleSentence(kind, count, state)
+  const gloss = KIND_GLOSS[kind]
+  return gloss === null ? says : `${says}\n${gloss}`
+}
+
+/**
  * The kinds on screen as a sentence for the live region, in the header's order whatever order they are handed in:
- * `showing source and TM`, `showing source, asm, λ and TM`.
+ * `showing source and TM`, `showing source, rxm, λ and TM`.
  */
 export function shownSentence(shown: readonly PaneKind[]): string {
   const words = HEADER_ORDER.filter((k) => shown.includes(k)).map((k) => KIND_WORD[k])

@@ -9,8 +9,8 @@
 //! state on every step. `TmProgram` is built once per compile and `TmState` carries a bounded window instead —
 //! the same reasoning that made `trace.rs` refuse to materialize tapes per step.
 //!
-//! THE ASM LEG IS SPLIT THE SAME WAY, AND ITS FRAME'S BOUNDS ARE PARAMETERS TOO. `AsmProgram` is built once
-//! per compile; `AsmState` carries at most `AsmWindow`'s count of locals, arguments, call frames, cells and
+//! THE RXM LEG IS SPLIT THE SAME WAY, AND ITS FRAME'S BOUNDS ARE PARAMETERS TOO. `RxmProgram` is built once
+//! per compile; `RxmState` carries at most `RxmWindow`'s count of locals, arguments, call frames, cells and
 //! boxes, each beside the length it was cut from. The spec's `sum(1000)` reaches 1,001 frames and its
 //! `upto(200)` 200 cells (§2.5), so a frame that carried the whole machine would grow with the run; how
 //! much of it a view shows is the renderer's call, made where `TM_RADIUS` is, in `web/src/protocol.ts`.
@@ -23,9 +23,9 @@ use crate::core::NodeId;
 use crate::lambda::{Cut, LambdaTerm, Owner, Path, print_lambda_linked};
 use crate::sourcemap::SourceMap;
 use crate::span::Span;
-use crate::tm::asm::{Program, print_instr, reg_str};
 use crate::tm::machine::{Machine, Move, StateId, Symbol};
-use crate::trace::{AsmCursor, AsmStatus, LambdaCursor, TmCursor, WordTag};
+use crate::tm::rxm::{Program, print_instr, reg_str};
+use crate::trace::{LambdaCursor, RxmCursor, RxmStatus, TmCursor, WordTag};
 
 pub mod tree;
 
@@ -180,7 +180,7 @@ pub struct TmProgram {
     pub width: usize,
     /// The state the machine enters at step 0, as an index into `states`.
     pub start: StateId,
-    /// The asm program this machine was lowered from, one instruction per line as `print_instr` writes
+    /// The rxm program this machine was lowered from, one instruction per line as `print_instr` writes
     /// it — `SourceMap::tm_listing`. Empty for a machine with no map behind it.
     pub listing: Vec<String>,
     /// That program's labels, each with the `listing` line it precedes — `SourceMap::tm_labels`.
@@ -258,7 +258,7 @@ pub struct TmState {
     pub rule: Option<usize>,
 }
 
-/// How much of the asm machine one `AsmState` carries: the first `locals` locals, the first `args`
+/// How much of the rxm machine one `RxmState` carries: the first `locals` locals, the first `args`
 /// arguments, the top `frames` call frames, the newest `cells` cons cells and the newest `boxes` boxes.
 ///
 /// **FIVE BOUNDS, ALL THE RENDERER'S** — the module doc's rule that core picks no number. Each one bounds a
@@ -269,12 +269,12 @@ pub struct TmState {
 ///
 /// **`Deserialize` IS LOAD-BEARING HERE, WHERE IT IS NOT FOR ANY OTHER TYPE IN THIS FILE.** Every other type
 /// derives it and nothing reads it back; this one travels the other way, as the argument JavaScript passes
-/// to the asm leg's frame request, so a renderer states its window in one object rather than five
+/// to the rxm leg's frame request, so a renderer states its window in one object rather than five
 /// positional numbers it could transpose.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 #[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export))]
-pub struct AsmWindow {
+pub struct RxmWindow {
     pub locals: usize,
     pub args: usize,
     pub frames: usize,
@@ -298,7 +298,7 @@ pub struct AsmWindow {
 #[derive(Clone, Debug, PartialEq, Eq)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 #[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export))]
-pub struct AsmWord {
+pub struct RxmWord {
     pub word: String,
     pub tag: WordTag,
 }
@@ -307,19 +307,19 @@ pub struct AsmWord {
 /// `call`, with the length of the whole saved bank.
 ///
 /// **NO CALLEE.** The instruction before `ret_pc` is the `call` that pushed this frame, and it names the
-/// label it jumped to, so a renderer holding `AsmProgram.listing` reads the callee off line `ret_pc - 1`.
+/// label it jumped to, so a renderer holding `RxmProgram.listing` reads the callee off line `ret_pc - 1`.
 /// Carrying it here would send, per frame per step, a name the listing already holds once (spec §5.3).
 ///
 /// **NO WRITTEN BITS EITHER.** The view marks a local "left over from caller" in the CURRENT frame (§6.3); a
 /// saved frame's bits come back into play only when `ret` restores them, at which point they are the
-/// current frame's and `AsmState.written` carries them.
+/// current frame's and `RxmState.written` carries them.
 #[derive(Clone, Debug, PartialEq, Eq)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 #[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export))]
-pub struct AsmCallFrame {
+pub struct RxmCallFrame {
     pub ret_pc: usize,
-    /// The first `AsmWindow::locals` of the caller's saved locals.
-    pub saved: Vec<AsmWord>,
+    /// The first `RxmWindow::locals` of the caller's saved locals.
+    pub saved: Vec<RxmWord>,
     /// How many locals the frame saved, however many `saved` shows.
     pub saved_len: usize,
 }
@@ -332,59 +332,59 @@ pub struct AsmCallFrame {
 #[derive(Clone, Debug, PartialEq, Eq)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 #[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export))]
-pub struct AsmCell {
+pub struct RxmCell {
     pub cell: usize,
-    pub head: AsmWord,
-    pub tail: AsmWord,
+    pub head: RxmWord,
+    pub tail: RxmWord,
 }
 
-/// One box, named by the 1-based handle `box` returned for it, for `AsmCell::cell`'s reason: it is the word
+/// One box, named by the 1-based handle `box` returned for it, for `RxmCell::cell`'s reason: it is the word
 /// a register holds.
 #[derive(Clone, Debug, PartialEq, Eq)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 #[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export))]
-pub struct AsmBox {
+pub struct RxmBox {
     pub handle: usize,
-    pub content: AsmWord,
+    pub content: RxmWord,
 }
 
-/// The asm program, projected ONCE per compile and never per step, as `TmProgram` is.
+/// The rxm program, projected ONCE per compile and never per step, as `TmProgram` is.
 ///
 /// **THE LISTING IS `print_instr`'S TEXT, AND SO IS `TmProgram.listing`.** Both views show the same program
-/// from one printer — `SourceMap::tm_listing` is built the same way — so the asm view's line `pc5` and the
+/// from one printer — `SourceMap::tm_listing` is built the same way — so the rxm view's line `pc5` and the
 /// TM view's instruction 5 cannot read differently (spec §5.2).
 ///
-/// **NO OWNERS.** Each instruction's Core node reaches JavaScript in `LinkIndex::asm_owner`, beside
+/// **NO OWNERS.** Each instruction's Core node reaches JavaScript in `LinkIndex::rxm_owner`, beside
 /// `tm_owner`, for the reason `LinkIndex`'s own doc gives for one struct rather than an accessor per leg:
 /// every leg's owners must come from one compile. `TmProgram` carries no owners for the same reason.
 #[derive(Clone, Debug, PartialEq, Eq)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 #[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export))]
-pub struct AsmProgram {
+pub struct RxmProgram {
     /// One line per `Program::code` index, as `print_instr` writes it: `cmpeq\tr1, r2, r3`.
     pub listing: Vec<String>,
     /// `Program::labels`: each label with the `listing` line it precedes.
     pub labels: Vec<(String, usize)>,
 }
 
-/// One step of the asm run, BOUNDED BY CONSTRUCTION: every list the run can grow is cut at a bound
-/// `AsmWindow` supplies, and beside each cut list is the length it was cut from, so a view can say "+N
+/// One step of the rxm run, BOUNDED BY CONSTRUCTION: every list the run can grow is cut at a bound
+/// `RxmWindow` supplies, and beside each cut list is the length it was cut from, so a view can say "+N
 /// more" without the rest crossing (spec §5.3). `cells` and `boxes` are the one exception to "cut at the
 /// bound", and they are bounded too — see their docs.
 ///
 /// **`pc` IS WHERE THE MACHINE STANDS, `next` IS WHAT RUNS THERE, AND `source_node` IS ITS OWNER.** A frame
 /// is built between two steps, after `step` instructions have completed. While the run can go on, `pc` is
 /// the instruction about to run and `next` says so; once it has ended, `pc` is the instruction that halted
-/// or faulted — `AsmCursor::pc` says which two faults leave it elsewhere — and `next` is `None`.
+/// or faulted — `RxmCursor::pc` says which two faults leave it elsewhere — and `next` is `None`.
 ///
 /// **ALL THREE REGISTER KINDS KEEP THEIR TAGS, AND THE LOCALS KEEP THEIR WRITTEN BITS.** A local whose bit is
 /// clear holds a word the current frame did not write: the caller's, which `call` leaves in place, or a `0`
-/// the bank grew past (`AsmCursor::written`). The view dims it as "left over from caller" (§6.3).
+/// the bank grew past (`RxmCursor::written`). The view dims it as "left over from caller" (§6.3).
 #[derive(Clone, Debug, PartialEq, Eq)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 #[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export))]
-pub struct AsmState {
-    /// Instructions completed — `AsmCursor::steps_taken`.
+pub struct RxmState {
+    /// Instructions completed — `RxmCursor::steps_taken`.
     #[cfg_attr(feature = "ts", ts(type = "number"))]
     pub step: u64,
     pub pc: usize,
@@ -401,7 +401,7 @@ pub struct AsmState {
     /// program's last row never will.
     ///
     /// `Some` DOES NOT PROMISE THE CURSOR WILL STEP, `TmState::rule`'s caveat one leg over: at a spent cap
-    /// `AsmCursor::next` refuses before it runs anything, so this names an instruction the very next
+    /// `RxmCursor::next` refuses before it runs anything, so this names an instruction the very next
     /// `next()` will not execute.
     ///
     /// THAT IS DELIBERATE, AND ANSWERING `None` THERE WOULD BE WORSE. A step cap is raiseable, so a run
@@ -411,34 +411,34 @@ pub struct AsmState {
     /// the same: the instruction at `pc` is the one the cap refused, which is where the run stands. Whether
     /// the cursor may step is the status's question, and a consumer that needs both asks both.
     pub next: Option<usize>,
-    pub rr: AsmWord,
-    /// The first `AsmWindow::locals` locals.
-    pub locals: Vec<AsmWord>,
+    pub rr: RxmWord,
+    /// The first `RxmWindow::locals` locals.
+    pub locals: Vec<RxmWord>,
     /// Parallel to `locals`: whether the current frame has written each one.
     pub written: Vec<bool>,
     /// How many locals the cursor holds, however many `locals` shows.
     pub locals_len: usize,
-    /// The first `AsmWindow::args` argument registers.
-    pub args: Vec<AsmWord>,
+    /// The first `RxmWindow::args` argument registers.
+    pub args: Vec<RxmWord>,
     pub args_len: usize,
     /// The register the step that produced this frame wrote, spelled as the listing spells registers —
     /// `r3`, `a0`, `rr` — or `None` for a step that wrote none, and before the first step.
     ///
     /// **A NAME, NOT A `Reg`**, because a register crosses as the text the view matches it by, and
-    /// `tm::asm`'s printer is the one place that text is made. `Reg` has no serde form and needs none.
+    /// `tm::rxm`'s printer is the one place that text is made. `Reg` has no serde form and needs none.
     pub wrote: Option<String>,
     /// How many frames the stack holds, however many `frames` shows.
     pub depth: usize,
-    /// The top `AsmWindow::frames` call frames, TOP FIRST.
+    /// The top `RxmWindow::frames` call frames, TOP FIRST.
     ///
     /// **TOP FIRST, SO THE WINDOW CUTS THE OLDEST.** The frame nearest the running instruction is the one
-    /// its `ret` returns to, and the view reads the stack from there down (§6.4). `AsmCursor::stack` is
+    /// its `ret` returns to, and the view reads the stack from there down (§6.4). `RxmCursor::stack` is
     /// oldest first, which in a window of 8 over `sum(1000)`'s 1,001 frames would show the program's first
     /// seven calls and nothing of where it is now.
-    pub frames: Vec<AsmCallFrame>,
+    pub frames: Vec<RxmCallFrame>,
     /// How many cons cells the heap holds.
     pub heap_len: usize,
-    /// The newest `AsmWindow::cells` cells, PLUS every cell a list-tagged word in `rr`, `locals` or `args`
+    /// The newest `RxmWindow::cells` cells, PLUS every cell a list-tagged word in `rr`, `locals` or `args`
     /// points at, each once, NEWEST FIRST — descending `cell`.
     ///
     /// **THE REGISTER-NAMED CELLS ARE WHAT MAKE THE VIEW'S BACK-REFERENCE WHOLE.** The heap panel writes
@@ -448,21 +448,21 @@ pub struct AsmState {
     /// compiled program the tags are exact (`WordTag`'s doc), so every list register's cell is here and every
     /// back-reference the view draws is true.
     ///
-    /// **ONLY THE REGISTERS THIS FRAME SHOWS NAME CELLS.** A list word in a local past `AsmWindow::locals`, or
+    /// **ONLY THE REGISTERS THIS FRAME SHOWS NAME CELLS.** A list word in a local past `RxmWindow::locals`, or
     /// in a saved frame, is not on screen to be a back-reference, so it pulls in nothing, and the list stays
     /// bounded: at most `cells + locals + args + 1` entries. A value-tagged word pulls in nothing either,
     /// even when it equals some cell's number — that is the ambiguity the tags exist to resolve.
-    pub cells: Vec<AsmCell>,
+    pub cells: Vec<RxmCell>,
     /// How many boxes the machine holds.
     pub box_len: usize,
-    /// The newest `AsmWindow::boxes` boxes, plus every box a box-tagged word in `rr`, `locals` or `args`
+    /// The newest `RxmWindow::boxes` boxes, plus every box a box-tagged word in `rr`, `locals` or `args`
     /// names, each once, newest first — by `cells`' rule and for its reason.
-    pub boxes: Vec<AsmBox>,
-    /// The Core node whose lowering emitted instruction `pc`, through `SourceMap::asm_owner`. `None` with no
+    pub boxes: Vec<RxmBox>,
+    /// The Core node whose lowering emitted instruction `pc`, through `SourceMap::rxm_owner`. `None` with no
     /// map, for an instruction `defunc` minted, and for a `pc` past the program's end, where a fetch faulted.
     ///
-    /// **A MAP MUST INDEX THE PROGRAM THE CURSOR RUNS**, which `SourceMap`'s asm half does for the program
-    /// `tm::lower_program` returns — `sourcemap.rs`'s `asm_owner_covers_the_program_lower_program_returns`
+    /// **A MAP MUST INDEX THE PROGRAM THE CURSOR RUNS**, which `SourceMap`'s rxm half does for the program
+    /// `tm::lower_program` returns — `sourcemap.rs`'s `rxm_owner_covers_the_program_lower_program_returns`
     /// holds it — so a caller steps that program, or passes no map.
     pub source_node: Option<NodeId>,
 }
@@ -720,17 +720,17 @@ mod tape_windows {
     }
 }
 
-impl AsmProgram {
+impl RxmProgram {
     /// Project `p` once — see the module doc; this is built per compile, never per step.
     #[must_use]
-    pub fn of(p: &Program) -> AsmProgram {
-        AsmProgram { listing: p.code.iter().map(print_instr).collect(), labels: p.labels.clone() }
+    pub fn of(p: &Program) -> RxmProgram {
+        RxmProgram { listing: p.code.iter().map(print_instr).collect(), labels: p.labels.clone() }
     }
 }
 
-impl AsmWord {
-    fn of(word: u64, tag: WordTag) -> AsmWord {
-        AsmWord { word: word.to_string(), tag }
+impl RxmWord {
+    fn of(word: u64, tag: WordTag) -> RxmWord {
+        RxmWord { word: word.to_string(), tag }
     }
 }
 
@@ -748,7 +748,7 @@ fn tagged(words: &[u64], tags: &[WordTag], n: usize) -> Vec<(u64, WordTag)> {
 /// one; the heap never shrinks; so every list word names a cell that exists, and boxes likewise. The check
 /// stays because `window` is a library path a renderer calls per step, and `TmState::window`'s rule holds
 /// here: no word it could be handed may abort the process. `usize::try_from` routes a word a 32-bit target
-/// cannot index to the same `None`, as `AsmCursor`'s own cell lookup does.
+/// cannot index to the same `None`, as `RxmCursor`'s own cell lookup does.
 fn slot(word: u64, len: usize) -> Option<usize> {
     let i = usize::try_from(word.checked_sub(1)?).ok()?;
     (i < len).then_some(i)
@@ -762,7 +762,7 @@ fn shown(len: usize, newest: usize, named: impl IntoIterator<Item = u64>) -> BTr
     out
 }
 
-impl AsmState {
+impl RxmState {
     /// The cursor's machine between two steps, cut to `window` — never the whole machine (see the struct
     /// doc for what each field carries and why each list is cut where it is).
     ///
@@ -773,7 +773,7 @@ impl AsmState {
     /// **THE COST IS THE WINDOW'S, NOT THE MACHINE'S.** Each register list, each frame and each saved bank is
     /// read through `take`, and the heap and boxes are indexed only at the slots `shown` picks, so a frame of
     /// `sum(1000)` at its deepest reads eight of its 1,001 saved banks.
-    pub fn window<P: Borrow<Program>>(c: &AsmCursor<P>, map: Option<&SourceMap>, window: AsmWindow) -> AsmState {
+    pub fn window<P: Borrow<Program>>(c: &RxmCursor<P>, map: Option<&SourceMap>, window: RxmWindow) -> RxmState {
         let locals = tagged(c.locals(), c.local_tags(), window.locals);
         let args = tagged(c.args(), c.arg_tags(), window.args);
         let rr = (c.rr(), c.rr_tag());
@@ -787,7 +787,7 @@ impl AsmState {
             .iter()
             .rev()
             .take(window.frames)
-            .map(|f| AsmCallFrame {
+            .map(|f| RxmCallFrame {
                 ret_pc: f.ret_pc,
                 saved: words(&tagged(&f.saved_locals, &f.saved_tags, window.locals)),
                 saved_len: f.saved_locals.len(),
@@ -802,7 +802,7 @@ impl AsmState {
             .filter_map(|i| {
                 let (head, tail) = *conses.get(i)?;
                 let (head_tag, tail_tag) = c.heap_tags().get(i).copied().unwrap_or_default();
-                Some(AsmCell { cell: i + 1, head: AsmWord::of(head, head_tag), tail: AsmWord::of(tail, tail_tag) })
+                Some(RxmCell { cell: i + 1, head: RxmWord::of(head, head_tag), tail: RxmWord::of(tail, tail_tag) })
             })
             .collect();
         let held = c.boxes();
@@ -812,18 +812,18 @@ impl AsmState {
             .filter_map(|i| {
                 let content = *held.get(i)?;
                 let tag = c.box_tags().get(i).copied().unwrap_or_default();
-                Some(AsmBox { handle: i + 1, content: AsmWord::of(content, tag) })
+                Some(RxmBox { handle: i + 1, content: RxmWord::of(content, tag) })
             })
             .collect();
 
-        AsmState {
+        RxmState {
             step: c.steps_taken(),
             pc: c.pc(),
             next: match c.status() {
-                None | Some(AsmStatus::Capped(_)) => Some(c.pc()),
-                Some(AsmStatus::Halted | AsmStatus::Faulted(_)) => None,
+                None | Some(RxmStatus::Capped(_)) => Some(c.pc()),
+                Some(RxmStatus::Halted | RxmStatus::Faulted(_)) => None,
             },
-            rr: AsmWord::of(rr.0, rr.1),
+            rr: RxmWord::of(rr.0, rr.1),
             written: c.written().iter().take(window.locals).copied().collect(),
             locals: words(&locals),
             locals_len: c.locals().len(),
@@ -836,14 +836,14 @@ impl AsmState {
             cells,
             box_len: held.len(),
             boxes,
-            source_node: map.and_then(|m| m.asm_owner(c.pc())),
+            source_node: map.and_then(|m| m.rxm_owner(c.pc())),
         }
     }
 }
 
 /// `tagged`'s pairs as the words a frame carries.
-fn words(pairs: &[(u64, WordTag)]) -> Vec<AsmWord> {
-    pairs.iter().map(|(w, t)| AsmWord::of(*w, *t)).collect()
+fn words(pairs: &[(u64, WordTag)]) -> Vec<RxmWord> {
+    pairs.iter().map(|(w, t)| RxmWord::of(*w, *t)).collect()
 }
 
 /// The step-0 half of linking one construct across the panes, built ONCE PER COMPILE.
@@ -916,10 +916,10 @@ pub struct LinkIndex {
     /// Rust-side, and nothing Rust-side reads this field. Declining the leg is the only option that
     /// does not tell the UI something false about a state it can click.
     pub tm_owner: Vec<i32>,
-    /// `asm_owner[i]` is the Core node whose lowering emitted instruction `i`, or `-1` — `SourceMap`'s
-    /// `asm_owner` in the form `tm_owner` crosses to JavaScript in, and refused whole by the same rule when
-    /// an id would not fit `i32`. It needs no `TmProgram`: the asm half is built apart from the machine.
-    pub asm_owner: Vec<i32>,
+    /// `rxm_owner[i]` is the Core node whose lowering emitted instruction `i`, or `-1` — `SourceMap`'s
+    /// `rxm_owner` in the form `tm_owner` crosses to JavaScript in, and refused whole by the same rule when
+    /// an id would not fit `i32`. It needs no `TmProgram`: the rxm half is built apart from the machine.
+    pub rxm_owner: Vec<i32>,
 }
 
 impl LinkIndex {
@@ -931,8 +931,8 @@ impl LinkIndex {
     /// not be the layer that stops being. NARROWER REFUSALS join those two here, one per owner column: a
     /// `Some` program whose owner ids cannot all fit `i32` empties `tm_owner` rather than emitting a
     /// value that would misidentify a state's owner — see the field's own doc — and an instruction owner
-    /// that cannot fit `i32` empties `asm_owner` by the same rule, with or without a program, since the
-    /// asm column needs none.
+    /// that cannot fit `i32` empties `rxm_owner` by the same rule, with or without a program, since the
+    /// rxm column needs none.
     ///
     /// `byte_budget` AND `depth_cap` ARE PARAMETERS because this file picks no numbers — see the
     /// module header. The web app passes `LAMBDA_BYTE_BUDGET`; the wasm boundary passes
@@ -967,8 +967,8 @@ impl LinkIndex {
                     .collect::<Option<Vec<i32>>>()
             })
             .unwrap_or_default();
-        let asm_owner = map
-            .asm_owner
+        let rxm_owner = map
+            .rxm_owner
             .iter()
             .map(|owner| match owner {
                 None => Some(-1),
@@ -976,7 +976,7 @@ impl LinkIndex {
             })
             .collect::<Option<Vec<i32>>>()
             .unwrap_or_default();
-        LinkIndex { lambda_text, lambda_spans, lambda_cut, lambda_nodes, source_nodes, tm_owner, asm_owner }
+        LinkIndex { lambda_text, lambda_spans, lambda_cut, lambda_nodes, source_nodes, tm_owner, rxm_owner }
     }
 }
 
@@ -1039,12 +1039,12 @@ mod tests {
         );
     }
 
-    /// `asm_owner` refuses an id past `i32` the way `tm_owner` does, for the reason `tm_owner`'s own test
+    /// `rxm_owner` refuses an id past `i32` the way `tm_owner` does, for the reason `tm_owner`'s own test
     /// gives: `u32::MAX` would wrap onto `-1` and read as "no owner". It refuses with a program and
-    /// without one, as `LinkIndex::build` says, since the asm column needs none.
+    /// without one, as `LinkIndex::build` says, since the rxm column needs none.
     #[test]
-    fn asm_owner_declines_the_whole_leg_rather_than_wrap_an_id_into_the_no_owner_sentinel() {
-        let map = SourceMap { asm_owner: vec![Some(NodeId::MAX), None], ..SourceMap::default() };
+    fn rxm_owner_declines_the_whole_leg_rather_than_wrap_an_id_into_the_no_owner_sentinel() {
+        let map = SourceMap { rxm_owner: vec![Some(NodeId::MAX), None], ..SourceMap::default() };
         let program = TmProgram {
             states: Vec::new(),
             alphabet: Vec::new(),
@@ -1056,11 +1056,11 @@ mod tests {
         };
         for program in [None, Some(&program)] {
             let index = LinkIndex::build(None, program, &map, 0, 0);
-            assert!(index.asm_owner.is_empty(), "with a program: {}, got {:?}", program.is_some(), index.asm_owner);
+            assert!(index.rxm_owner.is_empty(), "with a program: {}, got {:?}", program.is_some(), index.rxm_owner);
         }
     }
 
-    /// A list word or box handle past the end names no slot, nor does `nil`'s 0, so `AsmState::window` shows
+    /// A list word or box handle past the end names no slot, nor does `nil`'s 0, so `RxmState::window` shows
     /// no cell for such a word rather than indexing past the heap. No real run hands `window` one — `slot`'s
     /// doc says why — so a hand-made word is the only way to reach the refusal. Of the three named words
     /// only 2 is in range, and it names slot 1 beside the newest, slot 2.

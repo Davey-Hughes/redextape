@@ -38,7 +38,7 @@
 
 use redextape_core::desugar::desugar;
 use redextape_core::parser::parse;
-use redextape_core::tm::{BLANK, BOX, MARK, REG, SEP, defunc, lower_asm, lower_tm_guarded};
+use redextape_core::tm::{BLANK, BOX, MARK, REG, SEP, defunc, lower_rxm, lower_tm_guarded};
 
 mod common;
 use common::{assert_delimiter_safe, encodings_at, unsafe_rules};
@@ -72,9 +72,9 @@ fn no_machine_in_the_corpus_can_write_over_a_delimiter() {
         let (prog, ds) = parse(src);
         assert!(ds.is_empty(), "parse errors in `{src}`: {ds:?}");
         let core = desugar(&prog.unwrap());
-        let program = match lower_asm(&core) {
+        let program = match lower_rxm(&core) {
             Ok(p) => p,
-            Err(_) => lower_asm(&defunc(&core).expect("defuncs")).expect("lowers after defunc"),
+            Err(_) => lower_rxm(&defunc(&core).expect("defuncs")).expect("lowers after defunc"),
         };
         for width in [2usize, 4, 8, 64] {
             for (name, enc) in encodings_at(width) {
@@ -95,7 +95,7 @@ fn the_property_holds_for_programs_that_never_terminate() {
         let (prog, ds) = parse(src);
         assert!(ds.is_empty(), "parse errors in `{src}`: {ds:?}");
         let core = desugar(&prog.unwrap());
-        let program = lower_asm(&core).expect("lowers");
+        let program = lower_rxm(&core).expect("lowers");
         for (name, enc) in encodings_at(4) {
             let (m, _) = lower_tm_guarded(&program, &*enc).expect("small diverging program must not be refused");
             assert_delimiter_safe(&m, &*enc, &format!("diverging `{src}` ({name})"));

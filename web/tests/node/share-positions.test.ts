@@ -35,7 +35,7 @@ beforeEach(() => {
     done: null,
     playing: false,
   })
-  legs = { lambda: leg(), asm: leg(), tm: leg() }
+  legs = { lambda: leg(), rxm: leg(), tm: leg() }
   awaiting = false
   extend = vi.fn()
   short = vi.fn()
@@ -49,7 +49,7 @@ const compiled = (declined: readonly Leg[] = [], gen = GEN): RunReply =>
     kind: 'compiled',
     gen,
     lambda: { available: !declined.includes('lambda'), reason: '' },
-    asm: { available: !declined.includes('asm'), reason: '' },
+    rxm: { available: !declined.includes('rxm'), reason: '' },
     tm: { available: !declined.includes('tm'), reason: '' },
   }) as unknown as RunReply
 
@@ -69,7 +69,7 @@ describe('LinkPositions', () => {
     positions.onReply(compiled(['tm']))
     expect(legs.lambda.pending).toBe(3)
     expect(legs.tm.pending).toBeUndefined()
-    expect(legs.asm.pending).toBeUndefined()
+    expect(legs.rxm.pending).toBeUndefined()
     expect(short).not.toHaveBeenCalled()
   })
 
@@ -134,20 +134,20 @@ describe('LinkPositions', () => {
     expect(extend).toHaveBeenCalledTimes(1)
   })
 
-  it('continues one leg at a time, λ then asm then TM', () => {
-    positions.hold(GEN, { lambda: 7, asm: 7, tm: 7 })
+  it('continues one leg at a time, λ then rxm then TM', () => {
+    positions.hold(GEN, { lambda: 7, rxm: 7, tm: 7 })
     positions.onReply(compiled())
     record('lambda', 0, 4, 'budget')
-    record('asm', 0, 4, 'budget')
+    record('rxm', 0, 4, 'budget')
     record('tm', 0, 4, 'capped')
     result()
     expect(extend.mock.calls).toEqual([['lambda']])
     record('lambda', 5, 9, 'budget')
     result()
-    expect(extend.mock.calls).toEqual([['lambda'], ['asm']])
-    record('asm', 5, 9, 'budget')
+    expect(extend.mock.calls).toEqual([['lambda'], ['rxm']])
+    record('rxm', 5, 9, 'budget')
     result()
-    expect(extend.mock.calls).toEqual([['lambda'], ['asm'], ['tm']])
+    expect(extend.mock.calls).toEqual([['lambda'], ['rxm'], ['tm']])
   })
 
   it(`stops a leg at its furthest step after ${MAX_LINK_CONTINUES} continues, says so, and asks the next leg`, () => {
@@ -193,19 +193,19 @@ describe('LinkPositions', () => {
 
   it('drops every position when the compile answers with no run, or the worker fails', () => {
     for (const kind of ['no-session', 'worker-error'] as const) {
-      positions.hold(GEN, { asm: 3 })
+      positions.hold(GEN, { rxm: 3 })
       positions.onReply(compiled())
-      expect(legs.asm.pending).toBe(3)
+      expect(legs.rxm.pending).toBe(3)
       positions.onReply({ kind, gen: GEN } as unknown as RunReply)
-      expect(legs.asm.pending, kind).toBeUndefined()
+      expect(legs.rxm.pending, kind).toBeUndefined()
     }
   })
 
   it("drops an earlier link's pending positions when a new link's are held", () => {
-    positions.hold(GEN, { lambda: 3, asm: 3 })
+    positions.hold(GEN, { lambda: 3, rxm: 3 })
     positions.onReply(compiled())
     positions.hold(GEN + 1, { tm: 2 })
-    expect([legs.lambda.pending, legs.asm.pending]).toEqual([undefined, undefined])
+    expect([legs.lambda.pending, legs.rxm.pending]).toEqual([undefined, undefined])
     positions.onReply(compiled([], GEN + 1))
     expect(legs.tm.pending).toBe(2)
   })
@@ -215,23 +215,23 @@ describe('LinkPositions', () => {
    * one before it in the same open, so a later clamp's notice does not take an earlier one's off the line unsaid.
    */
   it('names every leg stopped short so far, the earlier with the later', () => {
-    positions.hold(GEN, { lambda: 9, asm: 9 })
+    positions.hold(GEN, { lambda: 9, rxm: 9 })
     positions.onReply(compiled())
     record('lambda', 0, 2, 'ended')
     expect(short).toHaveBeenLastCalledWith([{ leg: 'lambda', wanted: 9, shown: 2, why: 'ended' }])
-    record('asm', 0, 3, 'ended')
+    record('rxm', 0, 3, 'ended')
     expect(short).toHaveBeenCalledTimes(2)
     expect(short).toHaveBeenLastCalledWith([
       { leg: 'lambda', wanted: 9, shown: 2, why: 'ended' },
-      { leg: 'asm', wanted: 9, shown: 3, why: 'ended' },
+      { leg: 'rxm', wanted: 9, shown: 3, why: 'ended' },
     ])
   })
 
   it('names a leg the continues did not take far enough with one whose run ended', () => {
-    positions.hold(GEN, { lambda: 1000, asm: 9 })
+    positions.hold(GEN, { lambda: 1000, rxm: 9 })
     positions.onReply(compiled())
     record('lambda', 0, 4, 'budget')
-    record('asm', 0, 3, 'ended')
+    record('rxm', 0, 3, 'ended')
     result()
     for (let n = 1; n <= MAX_LINK_CONTINUES; n++) {
       record('lambda', 5 * n, 5 * n + 4, 'budget')
@@ -239,7 +239,7 @@ describe('LinkPositions', () => {
     }
     expect(short).toHaveBeenCalledTimes(2)
     expect(short).toHaveBeenLastCalledWith([
-      { leg: 'asm', wanted: 9, shown: 3, why: 'ended' },
+      { leg: 'rxm', wanted: 9, shown: 3, why: 'ended' },
       { leg: 'lambda', wanted: 1000, shown: 5 * MAX_LINK_CONTINUES + 4, why: 'continues' },
     ])
   })
@@ -248,10 +248,10 @@ describe('LinkPositions', () => {
     positions.hold(GEN, { lambda: 9 })
     positions.onReply(compiled())
     record('lambda', 0, 2, 'ended')
-    positions.hold(GEN + 1, { asm: 9 })
+    positions.hold(GEN + 1, { rxm: 9 })
     positions.onReply(compiled([], GEN + 1))
-    record('asm', 0, 3, 'ended', GEN + 1)
-    expect(short).toHaveBeenLastCalledWith([{ leg: 'asm', wanted: 9, shown: 3, why: 'ended' }])
+    record('rxm', 0, 3, 'ended', GEN + 1)
+    expect(short).toHaveBeenLastCalledWith([{ leg: 'rxm', wanted: 9, shown: 3, why: 'ended' }])
   })
 
   /**
@@ -292,7 +292,7 @@ describe('LinkPositions', () => {
 /**
  * **WHAT THE OPEN'S NOTICE SAYS ABOUT THE LEGS STOPPED SHORT** (spec §5.4's note of 2026-10-01): one leg in the words
  * it had before the note; several with the same reason in one clause; mixed reasons in a clause each, the first leg's
- * first. Legs go λ, asm, TM, whatever order they stopped in.
+ * first. Legs go λ, rxm, TM, whatever order they stopped in.
  */
 describe('shortNotice', () => {
   const ended = (leg: Short['leg'], wanted: number, shown: number): Short => ({ leg, wanted, shown, why: 'ended' })
@@ -316,29 +316,29 @@ describe('shortNotice', () => {
   })
 
   it('says two legs with the same reason in one clause, each with the step it shows', () => {
-    expect(shortNotice([ended('asm', 100, 5), ended('lambda', 100, 7)])).toBe(
-      "the link's λ step 100 and asm step 100 are past the end of this run — showing λ step 7 and asm step 5",
+    expect(shortNotice([ended('rxm', 100, 5), ended('lambda', 100, 7)])).toBe(
+      "the link's λ step 100 and rxm step 100 are past the end of this run — showing λ step 7 and rxm step 5",
     )
   })
 
   it('says three legs with the same reason in one clause', () => {
-    expect(shortNotice([ended('lambda', 100, 7), ended('asm', 100, 5), ended('tm', 9000, 2870)])).toBe(
-      "the link's λ step 100, asm step 100 and TM step 9,000 are past the end of this run — " +
-        'showing λ step 7, asm step 5 and TM step 2,870',
+    expect(shortNotice([ended('lambda', 100, 7), ended('rxm', 100, 5), ended('tm', 9000, 2870)])).toBe(
+      "the link's λ step 100, rxm step 100 and TM step 9,000 are past the end of this run — " +
+        'showing λ step 7, rxm step 5 and TM step 2,870',
     )
   })
 
   it('says mixed reasons in a clause each', () => {
-    expect(shortNotice([ended('asm', 500, 84), continues('lambda', 17000, 15695)])).toBe(
+    expect(shortNotice([ended('rxm', 500, 84), continues('lambda', 17000, 15695)])).toBe(
       "the link's λ step 17,000 is further on than 10 continues went — showing step 15,695; " +
-        'its asm step 500 is past the end of this run — showing step 84',
+        'its rxm step 500 is past the end of this run — showing step 84',
     )
   })
 
   it('says mixed reasons for three legs, two of them sharing one', () => {
-    expect(shortNotice([ended('asm', 500, 84), continues('lambda', 17000, 15695), continues('tm', 90000, 40261)])).toBe(
+    expect(shortNotice([ended('rxm', 500, 84), continues('lambda', 17000, 15695), continues('tm', 90000, 40261)])).toBe(
       "the link's λ step 17,000 and TM step 90,000 are further on than 10 continues went — " +
-        'showing λ step 15,695 and TM step 40,261; its asm step 500 is past the end of this run — showing step 84',
+        'showing λ step 15,695 and TM step 40,261; its rxm step 500 is past the end of this run — showing step 84',
     )
   })
 })

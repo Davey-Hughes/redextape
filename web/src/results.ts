@@ -1,6 +1,6 @@
 import { counted, n } from './format'
-import type { AsmLeg, LambdaLeg, TmLeg } from './protocol'
-import type { AsmCap, Decoded, Diagnostic, RunStatus, ValueReading } from './types'
+import type { LambdaLeg, RxmLeg, TmLeg } from './protocol'
+import type { Decoded, Diagnostic, RunStatus, RxmCap, ValueReading } from './types'
 import { decodedText } from './types'
 
 export type Row = { leg: string; label: string; value: string; note?: string }
@@ -85,31 +85,31 @@ function tmRows(t: TmLeg): Row[] {
 }
 
 /** A full cap in words: what the machine ran out of. The step cap is not here — raising it resumes the run. */
-const FULL: Readonly<Record<Exclude<AsmCap, 'Steps'>, string>> = {
+const FULL: Readonly<Record<Exclude<RxmCap, 'Steps'>, string>> = {
   Stack: 'the call stack is full',
   Heap: 'the heap is full',
   Mem: 'its saved call frames are full',
 }
 
 /**
- * The asm leg's rows (Plan 7 part 5 spec §5.5): its steps as instructions, and its value.
+ * The rxm leg's rows (Plan 7 part 5 spec §5.5): its steps as instructions, and its value.
  *
- * **`total_steps` IS `compile`'S OWN RUN**, which drove the asm cursor to its end (amendment 13), so it is a length
+ * **`total_steps` IS `compile`'S OWN RUN**, which drove the rxm cursor to its end (amendment 13), so it is a length
  * once that run finished and the count it stopped at otherwise — `tmRows`' distinction, read the same way, off
  * whether the value is `Unfinished`. A fault is an end: it has a length, and its value says what faulted where.
  *
  * **A CAP IS NAMED ONLY WHEN THE RECORDED RUN HAS REACHED IT.** `cap` is the recording cursor's, and a recording that
  * stopped on its history budget first has none; "at a cap" is then all that is known, as for TM.
  */
-function asmRows(a: AsmLeg): Row[] {
-  if (!a.status.available) return [{ leg: 'asm', label: 'declined', value: a.status.reason }]
+function rxmRows(a: RxmLeg): Row[] {
+  if (!a.status.available) return [{ leg: 'rxm', label: 'declined', value: a.status.reason }]
   const rows: Row[] = []
   if (a.status.total_steps !== null) {
     const steps = counted(a.status.total_steps, 'instruction')
     const finished = a.value !== null && a.value !== 'Unfinished'
     const cap = a.status.run === 'Capped' ? a.status.cap : null
     rows.push({
-      leg: 'asm',
+      leg: 'rxm',
       label: 'steps',
       value: finished
         ? steps
@@ -118,13 +118,13 @@ function asmRows(a: AsmLeg): Row[] {
           : `stopped after ${steps} — ${FULL[cap]}`,
     })
   }
-  if (a.value) rows.push({ leg: 'asm', label: 'value', value: decodedText(a.value) })
+  if (a.value) rows.push({ leg: 'rxm', label: 'value', value: decodedText(a.value) })
   return rows
 }
 
-/** Every leg's rows, in the order the legs are listed: λ, asm, TM. */
-export function resultRows(lambda: LambdaLeg, asm: AsmLeg, tm: TmLeg): Row[] {
-  return [...lambdaRows(lambda), ...asmRows(asm), ...tmRows(tm)]
+/** Every leg's rows, in the order the legs are listed: λ, rxm, TM. */
+export function resultRows(lambda: LambdaLeg, rxm: RxmLeg, tm: TmLeg): Row[] {
+  return [...lambdaRows(lambda), ...rxmRows(rxm), ...tmRows(tm)]
 }
 
 /**
@@ -153,7 +153,7 @@ export function valueLine(reading: ValueReading | null): string | null {
 
 /**
  * The line an ended run's value shows, by `valueLine`'s rule: a real value takes the `value: ` prefix, and every other
- * ending already says what it is. An asm copy's value line is this, since its value arrives ended, with its build.
+ * ending already says what it is. An rxm copy's value line is this, since its value arrives ended, with its build.
  */
 export function endedLine(value: Decoded): string {
   if (typeof value === 'object' && 'Value' in value) return `value: ${value.Value.text}`

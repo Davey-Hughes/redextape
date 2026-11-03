@@ -19,7 +19,7 @@
 //!
 //! `lower` refuses no term for its logical size, so every ramp here runs to its own budget. Why `lower`
 //! has no shared-subterm guard is in `examples/guard_hole_probe.rs` and the design's §10. The `--tm`
-//! section goes through `lower_asm`, not `lower`.
+//! section goes through `lower_rxm`, not `lower`.
 //!
 //! MEASURED WITHOUT MATERIALIZING ANYTHING. Sizes come from `lambda::term::logical_size`, a memoized
 //! fold over the DAG, O(one visit per allocation) — NOT a walk of the logical tree — so the ratio of a
@@ -102,7 +102,7 @@ use redextape_core::lambda::reduce::MAX_TERM_DEPTH;
 use redextape_core::lambda::term::{LambdaTerm, Node, app, logical_size, var};
 use redextape_core::lambda::{MAX_REDUCTION_STEPS, lower, parse_lambda, print_lambda};
 use redextape_core::parser::parse;
-use redextape_core::tm::{LowerError, TM_DEFAULT_CAPS, TmCaps, TmRun, Unary, defunc, lower_asm, n_slots_of, run_tm};
+use redextape_core::tm::{LowerError, TM_DEFAULT_CAPS, TmCaps, TmRun, Unary, defunc, lower_rxm, n_slots_of, run_tm};
 use redextape_core::trace::LambdaCursor;
 
 #[path = "common/allocator.rs"]
@@ -654,12 +654,12 @@ fn beta_curve() {
 // --- part E: the same family through the TM backend ----------------------------------------------
 
 /// What actually bounds the SAME family on the TM side. The λ guard's design asserts the TM path
-/// cannot diverge the same way, because `lower_asm` / `defunc` produce a `Vec<Instr>` with no
+/// cannot diverge the same way, because `lower_rxm` / `defunc` produce a `Vec<Instr>` with no
 /// structural sharing. This checks it rather than repeating it.
 ///
 /// The STRUCTURAL half is settled by reading the types, and is written down here so the reading is not
-/// re-done: `asm::Instr` is a flat enum over `Reg` / `u64` / `String` with no self-reference,
-/// `asm::Program` is a `Vec<Instr>` plus a label table, and `core::Core` on the way in is `Box`-owned.
+/// re-done: `rxm::Instr` is a flat enum over `Reg` / `u64` / `String` with no self-reference,
+/// `rxm::Program` is a `Vec<Instr>` plus a label table, and `core::Core` on the way in is `Box`-owned.
 /// Nothing on that path holds an `Rc`, so a program's physical size IS its logical size and there is no
 /// ratio to measure.
 ///
@@ -669,7 +669,7 @@ fn beta_curve() {
 /// different shape: allocation proportional to what is actually built, failing loudly at lowering time
 /// rather than hanging inside one step. Only a measurement tells the two apart.
 ///
-/// The family is LINEAR on this side: `lower_asm` succeeds directly at every level (`defunc` is never
+/// The family is LINEAR on this side: `lower_rxm` succeeds directly at every level (`defunc` is never
 /// reached, so `MAX_DEFUNC_DEPTH` is not what bounds this), with `slots` FLAT at 6-7 and four orders under
 /// `MAX_SLOTS`. No refusal fires: not `MAX_SLOTS`, not `TmRun::TooLarge`, not either 580-deep bound.
 /// What bounds it is `TmCaps::steps`, reported as `HitCap`, and this family is genuinely non-terminating
@@ -697,31 +697,31 @@ fn tm_check() {
     /// Transcribed from `lower_tm::MAX_SLOTS`, which is `pub(crate)` and so unreachable from an example target.
     const MAX_SLOTS: u32 = 100_000;
 
-    head("TM — the same family through lower_asm / defunc / run_tm");
+    head("TM — the same family through lower_rxm / defunc / run_tm");
     line(&format!(
-        "  caps: {} steps, {} cells, Unary; MAX_SLOTS={MAX_SLOTS} (lower_asm/defunc's own depth bound is 580)",
+        "  caps: {} steps, {} cells, Unary; MAX_SLOTS={MAX_SLOTS} (lower_rxm/defunc's own depth bound is 580)",
         TM_DEFAULT_CAPS.steps, TM_DEFAULT_CAPS.cells
     ));
     for levels in [1u32, 4, 8, 12] {
         let src = nested_groups_src(levels - 1);
         let Some(core) = core_of(&src) else { break };
         let t0 = Instant::now();
-        let lowered = match lower_asm(&core) {
-            Ok(p) => format!("lower_asm ok: code={} labels={} slots={}", p.code.len(), p.labels.len(), n_slots_of(&p)),
+        let lowered = match lower_rxm(&core) {
+            Ok(p) => format!("lower_rxm ok: code={} labels={} slots={}", p.code.len(), p.labels.len(), n_slots_of(&p)),
             // `lower_program`'s own order, matched on the SAME variant it matches on: direct first,
             // `defunc` only on `Unsupported`. Reproduced rather than short-circuited, so what this
             // reports is what `run_tm` below actually did.
-            Err(e @ LowerError::Unsupported { .. }) => match defunc(&core).and_then(|d| lower_asm(&d)) {
+            Err(e @ LowerError::Unsupported { .. }) => match defunc(&core).and_then(|d| lower_rxm(&d)) {
                 Ok(p) => format!(
-                    "lower_asm {e:?} -> defunc ok: code={} labels={} slots={}",
+                    "lower_rxm {e:?} -> defunc ok: code={} labels={} slots={}",
                     p.code.len(),
                     p.labels.len(),
                     n_slots_of(&p)
                 ),
-                Err(e2) => format!("lower_asm {e:?} -> defunc {e2:?}"),
+                Err(e2) => format!("lower_rxm {e:?} -> defunc {e2:?}"),
             },
             Err(e @ LowerError::TooDeep { .. }) => {
-                format!("lower_asm {e:?} (returned directly, as lower_program does)")
+                format!("lower_rxm {e:?} (returned directly, as lower_program does)")
             }
         };
         let lower_s = t0.elapsed().as_secs_f64();

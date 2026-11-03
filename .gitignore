@@ -20,7 +20,7 @@
 !grammars/tree-sitter-redextape/tree-sitter-redextape.wasm
 !grammars/tree-sitter-redextape-lambda/tree-sitter-redextape-lambda.wasm
 !grammars/tree-sitter-redextape-tm/tree-sitter-redextape-tm.wasm
-!grammars/tree-sitter-redextape-asm/tree-sitter-redextape-asm.wasm
+!grammars/tree-sitter-redextape-rxm/tree-sitter-redextape-rxm.wasm
 
 # Generated TypeScript for the wasm boundary's wire types (ts-rs, via `pnpm run build:bindings`).
 # Stands to `web/src` as `/pkg/` above does — generated from the Rust declarations rather than

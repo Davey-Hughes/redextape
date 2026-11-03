@@ -13,8 +13,8 @@ import { clickToggle } from './user-event-fixture'
  * view only that arrangement held is in no tree after the edit: it is closed, its copy's editor goes as a close's
  * does, and the copies menu stops counting it.
  *
- * The case: a second λ view added in source, λ and asm, showing a copy only it shows; the TM toggle, which shows all
- * four and parks it; then `✕` on the TM view. The `✕` leaves source, λ and asm, the arrangement the parked view is in,
+ * The case: a second λ view added in source, λ and rxm, showing a copy only it shows; the TM toggle, which shows all
+ * four and parks it; then `✕` on the TM view. The `✕` leaves source, λ and rxm, the arrangement the parked view is in,
  * as all four less the TM view, which has no second λ view.
  *
  * `pane-host.ts`'s `applyLayout` drops a pane off the screen once its id is no longer live as its kind. Without that
@@ -30,8 +30,8 @@ const onError = (e: ErrorEvent): void => {
   errors.push(e.message)
 }
 
-const FOUR = ['source', 'lambda-0', 'asm-0', 'tm-0']
-const THREE = 'source+lambda+asm'
+const FOUR = ['source', 'lambda-0', 'rxm-0', 'tm-0']
+const THREE = 'source+lambda+rxm'
 
 /** The ids each stored tree holds, the one on screen under `screen`. */
 const storedIds = (): Record<string, string[]> => {
@@ -54,9 +54,9 @@ describe('a parked view of a copy, in an arrangement an edit then replaces', () 
   it('is closed by the edit: the copies menu says its copy is not shown', async () => {
     expect(mounted(), 'precondition: all four views').toEqual(FOUR)
 
-    // SOURCE, λ AND ASM, WITH A SECOND λ VIEW ONLY THIS ARRANGEMENT HOLDS, on a copy only that view shows.
+    // SOURCE, λ AND RXM, WITH A SECOND λ VIEW ONLY THIS ARRANGEMENT HOLDS, on a copy only that view shows.
     await clickToggle('tm')
-    expect(mounted(), 'precondition: source, λ and asm').toEqual(['source', 'lambda-0', 'asm-0'])
+    expect(mounted(), 'precondition: source, λ and rxm').toEqual(['source', 'lambda-0', 'rxm-0'])
     host('lambda-0')?.querySelector<HTMLElement>('button.view-title')?.focus()
     await userEvent.click(document.querySelector<HTMLButtonElement>('#new-view') as HTMLButtonElement)
     await until(() => newLambdaViewItem() !== undefined, '+ view’s λ · program')
@@ -73,11 +73,11 @@ describe('a parked view of a copy, in an arrangement an edit then replaces', () 
     expect(storedIds()[THREE], 'precondition: the arrangement left holds the second λ view').toContain(second)
     expect(copyNames(), 'precondition: the parked view counts as a view of its copy').toEqual(['λ copy 1 · 1 view'])
 
-    // THE ✕ LANDS IN SOURCE, λ AND ASM, and what that combination remembered is replaced by all four less TM.
+    // THE ✕ LANDS IN SOURCE, λ AND RXM, and what that combination remembered is replaced by all four less TM.
     await userEvent.click(host('tm-0')?.querySelector<HTMLButtonElement>('button.view-close') as HTMLButtonElement)
-    expect(mounted(), 'precondition: the TM view is closed').toEqual(['source', 'lambda-0', 'asm-0'])
+    expect(mounted(), 'precondition: the TM view is closed').toEqual(['source', 'lambda-0', 'rxm-0'])
     const trees = storedIds()
-    expect(Object.keys(trees), 'precondition: source, λ and asm is on screen, and remembered no longer').not.toContain(
+    expect(Object.keys(trees), 'precondition: source, λ and rxm is on screen, and remembered no longer').not.toContain(
       THREE,
     )
     expect(Object.values(trees).flat(), 'precondition: no tree holds the second λ view').not.toContain(second)

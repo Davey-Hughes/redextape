@@ -1,8 +1,5 @@
 import { describe, expect, it } from 'vitest'
 import {
-  ASM_WORD_BYTES,
-  asmFrameBytes,
-  asmRecordEnd,
   endOf,
   FRAME_OVERHEAD_BYTES,
   forkable,
@@ -10,12 +7,15 @@ import {
   MAX_FORK_RULES,
   OWNER_BYTES,
   REDEX_SPAN_BYTES,
+  RXM_WORD_BYTES,
   ruleCount,
+  rxmFrameBytes,
+  rxmRecordEnd,
   SPAN_BYTES,
   tmFrameBytes,
 } from '../../src/protocol'
 import type { Classified, LambdaState, TmProgram, TmState } from '../../src/types'
-import { frameOf } from './asm-fixtures'
+import { frameOf } from './rxm-fixtures'
 import { spanBytes } from './span-bytes'
 
 const lam = (text: string, spans: number): LambdaState => ({
@@ -178,11 +178,11 @@ describe('the fork cap', () => {
   })
 })
 
-describe('asmFrameBytes', () => {
+describe('rxmFrameBytes', () => {
   const v = { word: '7', tag: 'Value' as const }
 
   it('charges every word a frame carries, and a byte per written bit', () => {
-    expect(asmFrameBytes(frameOf())).toBe(FRAME_OVERHEAD_BYTES + ASM_WORD_BYTES)
+    expect(rxmFrameBytes(frameOf())).toBe(FRAME_OVERHEAD_BYTES + RXM_WORD_BYTES)
     const f = frameOf({
       locals: [v, v, v],
       written: [true, false, true],
@@ -192,25 +192,25 @@ describe('asmFrameBytes', () => {
       boxes: [{ handle: 1, content: v }],
     })
     // rr, three locals, one argument, two saved words, a cell's two halves and a box's content: ten words.
-    expect(asmFrameBytes(f)).toBe(FRAME_OVERHEAD_BYTES + 10 * ASM_WORD_BYTES + 3)
+    expect(rxmFrameBytes(f)).toBe(FRAME_OVERHEAD_BYTES + 10 * RXM_WORD_BYTES + 3)
   })
 })
 
-describe('asmRecordEnd', () => {
+describe('rxmRecordEnd', () => {
   it('ends a halt or a fault, and names each full cap, and calls only the step cap capped', () => {
-    expect(asmRecordEnd({ run: 'Ended', cap: null })).toBe('ended')
-    expect(asmRecordEnd({ run: 'Capped', cap: 'Steps' })).toBe('capped')
-    expect(asmRecordEnd({ run: 'Capped', cap: 'Stack' })).toBe('stack-full')
-    expect(asmRecordEnd({ run: 'Capped', cap: 'Heap' })).toBe('heap-full')
-    expect(asmRecordEnd({ run: 'Capped', cap: 'Mem' })).toBe('memory-full')
+    expect(rxmRecordEnd({ run: 'Ended', cap: null })).toBe('ended')
+    expect(rxmRecordEnd({ run: 'Capped', cap: 'Steps' })).toBe('capped')
+    expect(rxmRecordEnd({ run: 'Capped', cap: 'Stack' })).toBe('stack-full')
+    expect(rxmRecordEnd({ run: 'Capped', cap: 'Heap' })).toBe('heap-full')
+    expect(rxmRecordEnd({ run: 'Capped', cap: 'Mem' })).toBe('memory-full')
   })
 
   it('reads a capped run naming no cap as the step cap, a case that cannot occur', () => {
-    expect(asmRecordEnd({ run: 'Capped', cap: null })).toBe('capped')
+    expect(rxmRecordEnd({ run: 'Capped', cap: null })).toBe('capped')
   })
 
   it('reads a run that is still going as ended, since it is only asked once stepping has stopped', () => {
-    expect(asmRecordEnd({ run: 'Running', cap: null })).toBe('ended')
+    expect(rxmRecordEnd({ run: 'Running', cap: null })).toBe('ended')
   })
 })
 

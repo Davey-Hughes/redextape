@@ -9,18 +9,18 @@ export type LeafId = string
  * What a leaf renders.
  *
  * NOT A `Leg`, BECAUSE `'source'` IS NOT ONE. The source pane renders an editor rather than a leg's
- * frames, so a `Leg`-typed field could not name it. `'lambda'`, `'asm'` and `'tm'` coincide with `Leg`'s
+ * frames, so a `Leg`-typed field could not name it. `'lambda'`, `'rxm'` and `'tm'` coincide with `Leg`'s
  * members and are deliberately not aliased to it — the day another pane kind exists that is not a leg,
  * this type extends and `Leg` does not.
  */
-export type PaneKind = 'source' | 'lambda' | 'asm' | 'tm'
+export type PaneKind = 'source' | 'lambda' | 'rxm' | 'tm'
 
 /**
  * The leg a pane of `kind` renders, or `null` for the source pane, which renders an editor and no leg.
  *
  * **A `switch`, SO THAT A NEW KIND IS A TYPE ERROR HERE RATHER THAN A SILENT ANSWER.** Because the kinds that
  * are legs are not aliased to `Leg` (`PaneKind`'s own doc), asking "is this kind a leg" by listing them —
- * `kind === 'lambda' || kind === 'asm' || kind === 'tm'` — would answer `false` for a new leg's kind with
+ * `kind === 'lambda' || kind === 'rxm' || kind === 'tm'` — would answer `false` for a new leg's kind with
  * `tsc` green (`legs.ts` has the class of bug). Every arm returns, so a kind with no arm is TS2366.
  */
 export function legOfPane(kind: PaneKind): Leg | null {
@@ -29,8 +29,8 @@ export function legOfPane(kind: PaneKind): Leg | null {
       return null
     case 'lambda':
       return 'lambda'
-    case 'asm':
-      return 'asm'
+    case 'rxm':
+      return 'rxm'
     case 'tm':
       return 'tm'
   }

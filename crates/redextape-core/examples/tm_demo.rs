@@ -19,7 +19,7 @@ use redextape_core::lambda::{LambdaRun, MAX_REDUCTION_STEPS, decode, lower, redu
 use redextape_core::parser::parse;
 use redextape_core::run;
 use redextape_core::tm::{
-    LowerError, Machine, REG, TM_DEFAULT_CAPS, TmRun, Unary, decode_tape, defunc, lower_asm, lower_tm, print_asm,
+    LowerError, Machine, REG, TM_DEFAULT_CAPS, TmRun, Unary, decode_tape, defunc, lower_rxm, lower_tm, print_rxm,
     run_tm,
 };
 use redextape_core::value::{Value, format_value};
@@ -32,7 +32,7 @@ mod allocator;
 fn main() {
     println!("\n════════════════════════════════════════════════════════════════════");
     println!(" Redextape — Turing-machine backend demo");
-    println!(" mini-language  →  register-asm  →  multi-tape TM  →  simulate  →  decode,");
+    println!(" mini-language  →  rxm  →  multi-tape TM  →  simulate  →  decode,");
     println!(" checked against the reference interpreter AND the λ normal form");
     println!(" (the three-way oracle:  reference == λ == TM).");
     println!("════════════════════════════════════════════════════════════════════");
@@ -101,12 +101,12 @@ fn main() {
     }
 
     // 4. Peek inside the machine — the Church–Turing thesis, made literal. Take one small program and
-    //    show the register-asm it compiles to, the size of the Turing machine, and the final unary tape.
+    //    show the rxm it compiles to, the size of the Turing machine, and the final unary tape.
     println!("\n4. Peek inside the machine:  `1 + 2 * 3`\n");
     let core = core_of("1 + 2 * 3");
-    let prog = lower_asm(&core).expect("first-order, lowers directly");
-    println!("   register-assembly IR:\n");
-    for line in print_asm(&prog).lines() {
+    let prog = lower_rxm(&core).expect("first-order, lowers directly");
+    println!("   rxm IR:\n");
+    for line in print_rxm(&prog).lines() {
         println!("       {line}");
     }
     let machine = lower_tm(&prog, &Unary::default());
@@ -141,9 +141,9 @@ fn core_of(src: &str) -> Core {
 /// Compile Core to a TM the same way `run_tm` does: try first-order lowering, and defunctionalize
 /// only if the direct attempt rejects the program as higher-order. Returns the machine (for its size).
 fn compile_tm(core: &Core) -> Option<Machine> {
-    let prog = match lower_asm(core) {
+    let prog = match lower_rxm(core) {
         Ok(p) => p,
-        Err(LowerError::Unsupported { .. }) => lower_asm(&defunc(core).ok()?).ok()?,
+        Err(LowerError::Unsupported { .. }) => lower_rxm(&defunc(core).ok()?).ok()?,
         Err(_) => return None,
     };
     Some(lower_tm(&prog, &Unary::default()))

@@ -209,7 +209,7 @@ describe("fact(12)'s λ at 17,000", () => {
       await userEvent.click(document.querySelector<HTMLButtonElement>('#new-view') as HTMLButtonElement)
       await userEvent.click(
         document.querySelector<HTMLButtonElement>(
-          `#new-view-menu button[data-binding="${bindingKey('asm', 'source')}"]`,
+          `#new-view-menu button[data-binding="${bindingKey('rxm', 'source')}"]`,
         ) as HTMLButtonElement,
       )
       await until(() => noticeText().startsWith('view added'), 'the view')

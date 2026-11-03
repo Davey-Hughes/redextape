@@ -7,7 +7,7 @@ import type { TokenClass } from './types'
  * that ships quietly; `theme.test.ts` asserts the stylesheet covers `TOKEN_CLASSES` in full.
  *
  * The classes arrive from `capture_map.rs`, through `captureClasses()` and `colour.ts`'s `classMapFrom`, and
- * the four committed grammars between them reach every variant — `Mnemonic` and `Register` from asm, `Label`,
+ * the four committed grammars between them reach every variant — `Mnemonic` and `Register` from rxm, `Label`,
  * `StateName`, `TapeSymbol` and `Move` from TM, `Binder` from λ.
  *
  * That paragraph describes the producer, and goes stale the moment the producer changes with nothing in the

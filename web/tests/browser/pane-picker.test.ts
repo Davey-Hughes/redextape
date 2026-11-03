@@ -59,7 +59,7 @@ beforeEach(async () => {
   await until(
     () =>
       document.querySelector<HTMLElement>('#results')?.dataset.state === 'idle' &&
-      // ALL FOUR VIEWS: source, λ, asm and TM.
+      // ALL FOUR VIEWS: source, λ, rxm and TM.
       leafIds().length === 4 &&
       lambdaLeaves().length === 1,
     'all four views on a settled source program',
@@ -267,7 +267,7 @@ describe('the closed source pane comes back through the split menu', () => {
       expect(document.querySelector('[data-leaf="source"] .cm-content')?.textContent).toContain('let z = 9')
       // WHERE IT CAME BACK, AND THAT NOTHING ELSE MOVED: `reset preset` would answer
       // `['source', 'tm-0']` here, which is what this line is chosen to fail against.
-      expect(leafIds()).toEqual(['lambda-0', 'source', 'asm-0', 'tm-0', extra])
+      expect(leafIds()).toEqual(['lambda-0', 'source', 'rxm-0', 'tm-0', extra])
       expect(places().find((p) => p.startsWith(`${extra}@`))).toBe(extraPlace)
       expect(errors).toEqual([])
     } finally {

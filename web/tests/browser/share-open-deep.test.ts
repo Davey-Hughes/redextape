@@ -69,7 +69,7 @@ describe('a link at start-up whose tree is 6,000 splits deep', () => {
     expect(EXAMPLE_ENCODING, 'precondition: unary is not the default encoding').not.toBe('unary')
     expect(document.querySelector<HTMLSelectElement>('#encoding')?.value).toBe('unary')
     // THE FOUR `setup.ts` STORES, and not the two a page with nothing stored opens on.
-    expect(mainLeafIds()).toEqual(['source', 'lambda-0', 'asm-0', 'tm-0'])
+    expect(mainLeafIds()).toEqual(['source', 'lambda-0', 'rxm-0', 'tm-0'])
   })
 
   it('says what was left out, with an undo, and clears the fragment', () => {

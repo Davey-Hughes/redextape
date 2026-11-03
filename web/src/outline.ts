@@ -11,7 +11,7 @@ import { createPanel, type Panel } from './panel'
  * |---|---|
  * | `redextape` | its `fn` definitions (kind 12) AND its `let` bindings (kind 13) |
  * | `redextape_tm` | its `state` blocks, kind 5 |
- * | `redextape_asm` | its labels, kind 12 |
+ * | `redextape_rxm` | its labels, kind 12 |
  * | `redextape_lambda` | **none, by design** — a λ term carries no source positions |
  *
  * The server answers the hierarchical `DocumentSymbol` shape — that is what `initialize` negotiates,

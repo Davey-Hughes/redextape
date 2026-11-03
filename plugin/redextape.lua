@@ -44,12 +44,12 @@ local ROOT = vim.fs.normalize(vim.fn.fnamemodify(chunk:sub(2), ":p:h:h"))
 -- built from this one checkout. `scripts/check-lua.sh` is what actually holds the two in step.
 local GRAMMARS = {
   redextape = "tree-sitter-redextape",
-  redextape_asm = "tree-sitter-redextape-asm",
+  redextape_rxm = "tree-sitter-redextape-rxm",
   redextape_lambda = "tree-sitter-redextape-lambda",
   redextape_tm = "tree-sitter-redextape-tm",
 }
 
-local FILETYPES = { "redextape", "redextape_asm", "redextape_lambda", "redextape_tm" }
+local FILETYPES = { "redextape", "redextape_rxm", "redextape_lambda", "redextape_tm" }
 
 local group = vim.api.nvim_create_augroup("redextape", { clear = true })
 
@@ -98,27 +98,26 @@ vim.api.nvim_create_autocmd("User", {
   end,
 })
 
--- TWO EXTENSIONS ARE OURS ALONE AND TWO ARE CONTESTED, SO THEY ARE CLAIMED TWO DIFFERENT WAYS.
+-- THREE EXTENSIONS ARE OURS ALONE AND ONE IS CONTESTED, SO THEY ARE CLAIMED TWO DIFFERENT WAYS.
 --
--- `.rxt` and `.rxlambda` are unique to this project, so a plain extension mapping is right.
+-- `.rxt`, `.rxlambda` and `.rxm` are unique to this project, so a plain extension mapping is right.
 --
--- `.asm` and `.tm` are not. Neovim already maps `.asm` to `asm` and `.tm` to `tcl` — TeXmacs is the
--- collision the asm and TM READMEs name for `.tm`, but Neovim's own answer is `tcl`, a second one.
+-- `.tm` is not. Neovim already maps `.tm` to `tcl` — TeXmacs is the collision the TM README names,
+-- but Neovim's own answer is `tcl`, a second one.
 --
--- SO THEY ARE CLAIMED BY A PATTERN-KEYED FUNCTION THAT SNIFFS THE BUFFER, AND THE DIFFERENCE BETWEEN
+-- SO IT IS CLAIMED BY A PATTERN-KEYED FUNCTION THAT SNIFFS THE BUFFER, AND THE DIFFERENCE BETWEEN
 -- THE TWO KEYS IS THE WHOLE DESIGN. A function under `extension` REPLACES the built-in mapping, and
--- returning `nil` from it does not fall back — measured, a NASM listing and a TeXmacs document both
--- came back with an EMPTY filetype under that shape. A function under `pattern` does fall back:
--- returning `nil` leaves `asm` and `tcl` exactly as they were. Measured over a corpus of six Tcl
--- modules, two MASM listings (one of them ARM64, which also writes `#` immediates), a NASM listing
--- and a TeXmacs document: none is touched, and every artifact this project emits is claimed —
--- including from a directory with no `redextape` component in its path.
+-- returning `nil` from it does not fall back — measured, a TeXmacs document came back with an EMPTY
+-- filetype under that shape. A function under `pattern` does fall back: returning `nil` leaves `tcl`
+-- exactly as it was. Measured over a corpus of six Tcl modules and a TeXmacs document: none is
+-- touched, and every machine this project emits is claimed — including from a directory with no
+-- `redextape` component in its path.
 --
--- The path test is a fallback for the case content cannot answer: a NEW, EMPTY `.tm` or `.asm` buffer
--- inside a checkout has nothing to sniff yet.
+-- The path test is a fallback for the case content cannot answer: a NEW, EMPTY `.tm` buffer inside a
+-- checkout has nothing to sniff yet.
 --
--- Neither route helps an uppercase `.ASM` or `.TM`. `redextape run` dispatches on extension
--- ASCII-case-insensitively and will happily run `P.ASM`; these patterns are case-sensitive.
+-- No key here claims an uppercase `.RXM` or `.TM`, since both kinds are case-sensitive, while
+-- `redextape run` dispatches on extension ASCII-case-insensitively and will happily run `P.RXM`.
 local function head(bufnr)
   return table.concat(vim.api.nvim_buf_get_lines(bufnr, 0, 60, false), "\n")
 end
@@ -134,43 +133,14 @@ local function sniff_tm(path, bufnr)
   end
 end
 
-local function sniff_asm(path, bufnr)
-  local text = head(bufnr)
-  -- The emitted header, then the `result` type line, then mnemonics no real assembler has. `mov`,
-  -- `add`, `jmp`, `ret` and `cmp` are all x86 or ARM as well, so none of them is a signal on its own.
-  if text:match("Register%-assembly listing") then
-    return "redextape_asm"
-  end
-  if text:match("^result%s+%u") or text:match("\nresult%s+%u") then
-    return "redextape_asm"
-  end
-  for _, pat in ipairs({
-    "%f[%w]li%s+[ra][r%d]",
-    "%f[%w]cmp[a-z][a-z]%s+[ra][r%d]",
-    "%f[%w]isempty%s+[ra][r%d]",
-    "%f[%w]box_[gs]et%s+[ra][r%d]",
-    "%f[%w]cons%s+[ra][r%d]",
-    "%f[%w]head%s+[ra][r%d]",
-    "%f[%w]tail%s+[ra][r%d]",
-    "%f[%w]nil%s+[ra][r%d]",
-  }) do
-    if text:match(pat) then
-      return "redextape_asm"
-    end
-  end
-  if path:match("/redextape/") then
-    return "redextape_asm"
-  end
-end
-
 vim.filetype.add({
   extension = {
     rxt = "redextape",
     rxlambda = "redextape_lambda",
+    rxm = "redextape_rxm",
   },
   pattern = {
     [".*%.tm"] = sniff_tm,
-    [".*%.asm"] = sniff_asm,
   },
 })
 
@@ -196,7 +166,7 @@ vim.api.nvim_create_autocmd("FileType", {
         warned = true
         vim.notify(
           ("redextape: no tree-sitter parser for %q.\n"):format(lang)
-            .. "Run :TSInstall redextape redextape_asm redextape_lambda redextape_tm and restart.\n"
+            .. "Run :TSInstall redextape redextape_rxm redextape_lambda redextape_tm and restart.\n"
             .. "If that reports `skipping unsupported language`, you are on nvim-treesitter's "
             .. "`master` branch, which this plugin does not support — see the grammar READMEs for a "
             .. "hand-written block that does.",
@@ -212,7 +182,7 @@ vim.api.nvim_create_autocmd("FileType", {
 })
 
 -- THE LANGUAGE SERVER. Diagnostics and formatting for all four forms, plus go-to-definition,
--- find-references and document symbols for `.tm`, `.asm` and `.rxt`, from the same
+-- find-references and document symbols for `.tm`, `.rxm` and `.rxt`, from the same
 -- `redextape-core` the CLI and the web UI use — see crates/redextape-lsp. Navigation needs no
 -- wiring here: Neovim
 -- dispatches `vim.lsp.buf.definition` and friends off the capabilities the server advertises at

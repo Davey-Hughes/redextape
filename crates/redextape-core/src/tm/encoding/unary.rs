@@ -2135,14 +2135,14 @@ mod tests {
         use crate::desugar::desugar;
         use crate::parser::parse;
         use crate::tm::decode::decode_tape;
-        use crate::tm::lower_asm::lower_asm;
+        use crate::tm::lower_rxm::lower_rxm;
         use crate::tm::lower_tm::{lower_tm, n_slots_of};
         use crate::value::Value;
 
         let (prog, ds) = parse("1 + 2 * 3");
         assert!(ds.is_empty(), "parse errors: {ds:?}");
         let core = desugar(&prog.unwrap());
-        let program = lower_asm(&core).expect("lowers");
+        let program = lower_rxm(&core).expect("lowers");
         let enc = Unary::at(8);
         let m = lower_tm(&program, &enc);
         let mut init = vec![Vec::new(); TAPES];

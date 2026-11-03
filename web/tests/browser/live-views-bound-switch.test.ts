@@ -30,7 +30,7 @@ import { resetOffered, userPickInWorkspaceMenu } from './user-event-fixture'
  * view alone remembered: 63 live views. **THE CASES RUN IN ORDER ON ONE PAGE**, each from the state the one before
  * left, and each asserts that state first:
  *
- * 1. the asm toggle asks for a λ view beside an asm view, whose default needs `lambda-0` and `asm-0`: 65, refused;
+ * 1. the rxm toggle asks for a λ view beside an rxm view, whose default needs `lambda-0` and `rxm-0`: 65, refused;
  * 2. the source toggle asks for the source beside a λ view, whose default needs `lambda-0` alone: 64, entered;
  * 3. the TM toggle then asks for one view more, `tm-0`: 65, refused.
  *
@@ -81,11 +81,11 @@ describe('a switch, with 62 λ views on screen and the source view remembered', 
     expect(liveViewCount(), 'precondition: one short of the bound').toBe(MAX_TREE_LEAVES - 1)
 
     const before = { mounted: mounted(), pressed: pressed(), stored: storedLayoutText() }
-    await userEvent.click(toggle('asm'))
-    await focusInPage('a press on the asm toggle, whose switch is refused')
+    await userEvent.click(toggle('rxm'))
+    await focusInPage('a press on the rxm toggle, whose switch is refused')
     expect
       .soft(noticeText(), 'the switch was not refused, or not in words true of 63')
-      .toBe(refusedAt('asm and λ', 63, 65))
+      .toBe(refusedAt('rxm and λ', 63, 65))
     expect.soft(pressed(), 'the refused switch moved the toggles').toEqual(before.pressed)
     expect.soft(mounted(), 'the refused switch changed the views on the page').toEqual(before.mounted)
     expect.soft(storedLayoutText() === before.stored, 'the refused switch stored another workspace').toBe(true)

@@ -27,12 +27,12 @@ export type LinkIndexWire = {
   sourceNodeEnd: Uint32Array
   sourceNodeId: Uint32Array
   tmOwner: Int32Array
-  /** Each asm instruction's owning construct, `-1` for an instruction `defunc` minted — `LinkIndex::asm_owner`. */
-  asmOwner: Int32Array
+  /** Each rxm instruction's owning construct, `-1` for an instruction `defunc` minted — `LinkIndex::rxm_owner`. */
+  rxmOwner: Int32Array
 }
 
 /**
- * Where one Core node shows up: its source span, its machine states and its asm instructions. Any may be absent,
+ * Where one Core node shows up: its source span, its machine states and its rxm instructions. Any may be absent,
  * each for its own reason. **NO λ LEG** (Plan 7 part 4 spec §5.4): the λ view finds a construct's nodes in the tree
  * it draws (`Tree.nodesLinkedTo`), at whatever step is on screen, where this index knows only step 0's text.
  */
@@ -114,17 +114,17 @@ export class LinkIndex {
   }
 
   /**
-   * The Core node whose lowering emitted asm instruction `pc`, or `null` for an instruction `defunc` minted and for
-   * an index past the program (Plan 7 part 5 spec §6.6) — `nodeForState`'s rule, over `asmOwner`.
+   * The Core node whose lowering emitted rxm instruction `pc`, or `null` for an instruction `defunc` minted and for
+   * an index past the program (Plan 7 part 5 spec §6.6) — `nodeForState`'s rule, over `rxmOwner`.
    */
   nodeForInstr(pc: number): number | null {
-    if (pc < 0 || pc >= this.#w.asmOwner.length) return null
-    const owner = this.#w.asmOwner[pc] as number
+    if (pc < 0 || pc >= this.#w.rxmOwner.length) return null
+    const owner = this.#w.rxmOwner[pc] as number
     return owner < 0 ? null : owner
   }
 
   /**
-   * Where `node` shows up: its source span, its machine states and its asm instructions.
+   * Where `node` shows up: its source span, its machine states and its rxm instructions.
    *
    * NO OUTWARD WALK WHEN A LEG IS ABSENT. `sourcemap.rs` refuses to fall back to a surrounding block
    * and so does this: the walk from a transparent `let` goes Let -> Seq -> root, so "nearest enclosing
@@ -136,7 +136,7 @@ export class LinkIndex {
     return {
       source: this.#spanOf(node),
       states: this.#ownedBy(node, this.#w.tmOwner, this.#states),
-      instrs: this.#ownedBy(node, this.#w.asmOwner, this.#instrs),
+      instrs: this.#ownedBy(node, this.#w.rxmOwner, this.#instrs),
     }
   }
 
@@ -152,11 +152,11 @@ export class LinkIndex {
 
   /**
    * The ascending indices `owner` bills to `node` — a construct's states from `tmOwner`, its instructions from
-   * `asmOwner` — derived on first ask and kept in `cache`.
+   * `rxmOwner` — derived on first ask and kept in `cache`.
    *
    * DERIVED, NOT SHIPPED. Shipping node -> states alongside state -> node would be a second
    * representation of one association with nothing checking the two came from one lowering — the
-   * object `sourcemap.rs`'s module doc refuses to create, reintroduced at the boundary. The asm column is the same
+   * object `sourcemap.rs`'s module doc refuses to create, reintroduced at the boundary. The rxm column is the same
    * association one lowering earlier, and gets the same treatment rather than a second copy of the loop.
    */
   #ownedBy(node: number, owner: Int32Array, cache: Map<number, number[]>): number[] {

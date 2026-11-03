@@ -1,14 +1,14 @@
 import { describe, expect, it } from 'vitest'
 import init, { compile } from '../../../pkg/redextape_wasm.js'
 import {
-  ASM_WINDOW,
-  ASM_WORD_BYTES,
   FRAME_BYTES,
   lambdaFrameBytes,
+  RXM_WINDOW,
+  RXM_WORD_BYTES,
   SPAN_BYTES,
   SPAN_WIRE_BYTES,
 } from '../../src/protocol'
-import type { AsmState, AsmWindow, Cut, LambdaState } from '../../src/types'
+import type { Cut, LambdaState, RxmState, RxmWindow } from '../../src/types'
 import { heapNow, mean } from './probe-fixture'
 
 /**
@@ -24,8 +24,8 @@ import { heapNow, mean } from './probe-fixture'
 type Session = {
   stepLambda(): boolean
   lambdaState(byteBudget: number): LambdaState
-  stepAsm(): boolean
-  asmState(window: AsmWindow): AsmState
+  stepRxm(): boolean
+  rxmState(window: RxmWindow): RxmState
   free(): void
 }
 
@@ -196,10 +196,10 @@ describe('frame cost', () => {
 })
 
 /**
- * An asm frame's words, counted as `asmFrameBytes` counts them: `rr`, the windowed locals and arguments, each shown
+ * An rxm frame's words, counted as `rxmFrameBytes` counts them: `rr`, the windowed locals and arguments, each shown
  * frame's saved locals, both halves of each cell, and each box's content.
  */
-function asmWords(f: AsmState): number {
+function rxmWords(f: RxmState): number {
   let words = 1 + f.locals.length + f.args.length + 2 * f.cells.length + f.boxes.length
   for (const frame of f.frames) words += frame.saved.length
   return words
@@ -209,28 +209,28 @@ function asmWords(f: AsmState): number {
  * `upto(200)`: 2,813 steps, a call depth of 201 and 200 heap cells (Plan 7 part 5 spec §2.5), so its frames carry
  * every kind of word the window holds — nine locals, eight saved frames of nine locals each, and up to sixteen cells.
  */
-const ASM_SRC = 'fn upto(n) { if n == 0 { nil } else { cons(n, upto(n - 1)) } } upto(200)'
+const RXM_SRC = 'fn upto(n) { if n == 0 { nil } else { cons(n, upto(n - 1)) } } upto(200)'
 
-/** Steps a fresh session's asm leg to its end at `ASM_WINDOW`, recording every frame with `pick`. */
-function stepAsmAll<T>(pick: (st: AsmState) => T): { frames: T[]; totalWords: number } {
-  const { session } = compile(ASM_SRC, 'unary') as { session: Session | null }
-  if (!session) throw new Error('compile produced no session for the asm probe program')
+/** Steps a fresh session's rxm leg to its end at `RXM_WINDOW`, recording every frame with `pick`. */
+function stepRxmAll<T>(pick: (st: RxmState) => T): { frames: T[]; totalWords: number } {
+  const { session } = compile(RXM_SRC, 'unary') as { session: Session | null }
+  if (!session) throw new Error('compile produced no session for the rxm probe program')
   const frames: T[] = []
   let totalWords = 0
-  let st = session.asmState(ASM_WINDOW)
+  let st = session.rxmState(RXM_WINDOW)
   for (;;) {
-    totalWords += asmWords(st)
+    totalWords += rxmWords(st)
     frames.push(pick(st))
-    if (!session.stepAsm()) break
-    st = session.asmState(ASM_WINDOW)
+    if (!session.stepRxm()) break
+    st = session.rxmState(RXM_WINDOW)
   }
   session.free()
   return { frames, totalWords }
 }
 
-describe('asm frame cost', () => {
+describe('rxm frame cost', () => {
   /**
-   * `ASM_WORD_BYTES`, MEASURED THE WAY `SPAN_BYTES` IS: by heap differential after a full collection, full frames
+   * `RXM_WORD_BYTES`, MEASURED THE WAY `SPAN_BYTES` IS: by heap differential after a full collection, full frames
    * against the same frames with every word dropped, three alternating rounds after a discarded pair. The first
    * `frame cost` case's comments carry the reasons for each of those choices and are not repeated here.
    *
@@ -238,7 +238,7 @@ describe('asm frame cost', () => {
    * drops the locals, arguments, frames, cells and boxes arrays along with the words in them. The over-attribution
    * errs high, which is the safe direction for a charge the ring's budget depends on.
    */
-  it('measures bytes per asm word by heap differential, and the ring charges at least that', async () => {
+  it('measures bytes per rxm word by heap differential, and the ring charges at least that', async () => {
     await init()
     if (heapNow() === 0)
       throw new Error('BLOCKED: performance.memory.usedJSHeapSize reads 0 — cannot measure heap size')
@@ -247,7 +247,7 @@ describe('asm frame cost', () => {
       throw new Error('BLOCKED: globalThis.gc is unavailable — launch Chromium with --js-flags=--expose-gc')
     }
 
-    const retainedFull: AsmState[][] = []
+    const retainedFull: RxmState[][] = []
     const retainedSlim: { step: number; pc: number }[][] = []
     const readingsA: number[] = []
     const readingsB: number[] = []
@@ -255,7 +255,7 @@ describe('asm frame cost', () => {
     const roundA = (): number => {
       collect()
       const before = heapNow()
-      const a = stepAsmAll<AsmState>((st) => st)
+      const a = stepRxmAll<RxmState>((st) => st)
       collect()
       const after = heapNow()
       retainedFull.push(a.frames)
@@ -265,7 +265,7 @@ describe('asm frame cost', () => {
     const roundB = (): number => {
       collect()
       const before = heapNow()
-      const b = stepAsmAll((st) => ({ step: st.step, pc: st.pc }))
+      const b = stepRxmAll((st) => ({ step: st.step, pc: st.pc }))
       collect()
       const after = heapNow()
       retainedSlim.push(b.frames)
@@ -280,18 +280,18 @@ describe('asm frame cost', () => {
     for (const frames of retainedFull) expect(frames.length).toBeGreaterThan(0)
     for (const frames of retainedSlim) expect(frames.length).toBeGreaterThan(0)
 
-    console.log('asm run A (full AsmState) heap deltas, bytes:', readingsA)
-    console.log('asm run B (words dropped) heap deltas, bytes:', readingsB)
-    console.log('asm words per run:', totalWords, 'frames per run:', retainedFull[0]?.length)
+    console.log('rxm run A (full RxmState) heap deltas, bytes:', readingsA)
+    console.log('rxm run B (words dropped) heap deltas, bytes:', readingsB)
+    console.log('rxm words per run:', totalWords, 'frames per run:', retainedFull[0]?.length)
     const bytesPerWord = (mean(readingsA) - mean(readingsB)) / totalWords
-    console.log('asm bytes/word:', bytesPerWord)
+    console.log('rxm bytes/word:', bytesPerWord)
 
     // Sanity bounds, for the λ case's reason: they catch a broken measurement, not a machine.
     expect(bytesPerWord).toBeGreaterThan(8)
     expect(bytesPerWord).toBeLessThan(2000)
-    // THE ONE DIRECTION WITH A CONSEQUENCE: a word costing more than `asmFrameBytes` charges it means the ring keeps
+    // THE ONE DIRECTION WITH A CONSEQUENCE: a word costing more than `rxmFrameBytes` charges it means the ring keeps
     // more than `HISTORY_BYTES` says, `SPAN_BYTES`' failure one leg over.
-    expect(bytesPerWord).toBeLessThanOrEqual(ASM_WORD_BYTES)
+    expect(bytesPerWord).toBeLessThanOrEqual(RXM_WORD_BYTES)
   })
 })
 

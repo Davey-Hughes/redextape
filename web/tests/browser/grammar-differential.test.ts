@@ -3,10 +3,10 @@ import { Parser } from 'web-tree-sitter'
 import goldenRaw from '../../../grammars/capture-golden.json?raw'
 import redextapeHighlights from '../../../grammars/tree-sitter-redextape/queries/highlights.scm?raw'
 import redextapeWasmUrl from '../../../grammars/tree-sitter-redextape/tree-sitter-redextape.wasm?url'
-import asmHighlights from '../../../grammars/tree-sitter-redextape-asm/queries/highlights.scm?raw'
-import asmWasmUrl from '../../../grammars/tree-sitter-redextape-asm/tree-sitter-redextape-asm.wasm?url'
 import lambdaHighlights from '../../../grammars/tree-sitter-redextape-lambda/queries/highlights.scm?raw'
 import lambdaWasmUrl from '../../../grammars/tree-sitter-redextape-lambda/tree-sitter-redextape-lambda.wasm?url'
+import rxmHighlights from '../../../grammars/tree-sitter-redextape-rxm/queries/highlights.scm?raw'
+import rxmWasmUrl from '../../../grammars/tree-sitter-redextape-rxm/tree-sitter-redextape-rxm.wasm?url'
 import tmHighlights from '../../../grammars/tree-sitter-redextape-tm/queries/highlights.scm?raw'
 import tmWasmUrl from '../../../grammars/tree-sitter-redextape-tm/tree-sitter-redextape-tm.wasm?url'
 import init, { captureClasses } from '../../../pkg/redextape_wasm.js'
@@ -40,7 +40,7 @@ import { TOKEN_CLASSES, type TokenClass } from '../../src/types'
  * first binder sits at 1..2 in code units against 1..3 in bytes.
  *
  * **THE FOUR TABLES DISAGREE ON `@function`, `@variable.parameter` AND `@label.reference`, AND THAT IS
- * WHY THE LOOP BELOW IS PER LANGUAGE.** One merged pass over four grammars would colour an asm mnemonic
+ * WHY THE LOOP BELOW IS PER LANGUAGE.** One merged pass over four grammars would colour an rxm mnemonic
  * as an identifier and agree with itself while doing it. `capture-golden.json` is keyed by `languageId`
  * for the same reason, and the Rust side asserts each language's fixture carries a class no other one
  * produces.
@@ -72,7 +72,7 @@ const SOURCES: Record<LanguageId, { readonly wasmUrl: string; readonly highlight
   redextape: { wasmUrl: redextapeWasmUrl, highlights: redextapeHighlights },
   redextape_lambda: { wasmUrl: lambdaWasmUrl, highlights: lambdaHighlights },
   redextape_tm: { wasmUrl: tmWasmUrl, highlights: tmHighlights },
-  redextape_asm: { wasmUrl: asmWasmUrl, highlights: asmHighlights },
+  redextape_rxm: { wasmUrl: rxmWasmUrl, highlights: rxmHighlights },
 }
 
 /** The golden's class name as the app's `TokenClass`, or a failure naming the name it could not place. */

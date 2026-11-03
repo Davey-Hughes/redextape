@@ -11,7 +11,7 @@
 use std::rc::Rc;
 
 use redextape_core::tm::{
-    AsmOutcome, DecodeFailure, decode_asm, decode_asm_reason, decode_asm_ty, decode_asm_ty_reason,
+    DecodeFailure, RxmOutcome, decode_rxm, decode_rxm_reason, decode_rxm_ty, decode_rxm_ty_reason,
 };
 use redextape_core::ty::Ty;
 use redextape_core::value::Value;
@@ -19,7 +19,7 @@ use redextape_core::value::Value;
 /// `tails([1..m])` as the compiler leaves it. Inner cell `i` is `(i, i+1)` with the last tail nil, so
 /// the pointer `i` denotes the suffix `[i..m]`; the outer spine's `j`-th head is the pointer `j`.
 /// `2m` cells, and the result word points at the first outer cell.
-fn tails_heap(m: u64) -> AsmOutcome {
+fn tails_heap(m: u64) -> RxmOutcome {
     let mut heap = Vec::new();
     for i in 1..=m {
         heap.push((i, if i == m { 0 } else { i + 1 }));
@@ -28,7 +28,7 @@ fn tails_heap(m: u64) -> AsmOutcome {
         let idx = m + j;
         heap.push((j, if j == m { 0 } else { idx + 1 }));
     }
-    AsmOutcome { result: m + 1, heap }
+    RxmOutcome { result: m + 1, heap }
 }
 
 /// The same value as the reference interpreter holds it: `Builtin::Tail` returns `(**t).clone()`,
@@ -57,10 +57,10 @@ fn list_of_lists() -> Ty {
 fn tails_decodes_far_past_the_unmemoized_budget() {
     let m = 64_000;
     let o = tails_heap(m);
-    let got = decode_asm_ty(&o, &list_of_lists()).expect("type-directed decode of tails");
+    let got = decode_rxm_ty(&o, &list_of_lists()).expect("type-directed decode of tails");
     assert!(
         got == tails_value(m),
-        "decode_asm_ty(tails({m})) did not match the independently built value; mismatch omitted \
+        "decode_rxm_ty(tails({m})) did not match the independently built value; mismatch omitted \
          because at m={m} the two structures would Debug-format to on the order of m^2 (~4.1e9) nodes"
     );
 }
@@ -87,10 +87,10 @@ fn value_directed_tails_is_linear() {
     let m = 64_000;
     let o = tails_heap(m);
     let want = tails_value(m);
-    let got = decode_asm(&o, &want).expect("value-directed decode of tails");
+    let got = decode_rxm(&o, &want).expect("value-directed decode of tails");
     assert!(
         got == want,
-        "decode_asm(tails({m})) did not match the independently built value; mismatch omitted because \
+        "decode_rxm(tails({m})) did not match the independently built value; mismatch omitted because \
          at m={m} the two structures would Debug-format to on the order of m^2 (~4.1e9) nodes"
     );
 }
@@ -102,13 +102,13 @@ fn memoized_decode_equals_the_independently_built_value() {
     for m in [1_000_u64, 2_000, 4_000] {
         let o = tails_heap(m);
         let want = tails_value(m);
-        let got_ty = decode_asm_ty(&o, &list_of_lists()).unwrap();
+        let got_ty = decode_rxm_ty(&o, &list_of_lists()).unwrap();
         assert!(
             got_ty == want,
             "type-directed decode of tails({m}) did not match tails_value({m}); mismatch omitted, up \
              to ~m^2 nodes"
         );
-        let got_val = decode_asm(&o, &want).unwrap();
+        let got_val = decode_rxm(&o, &want).unwrap();
         assert!(
             got_val == want,
             "value-directed decode of tails({m}) did not match tails_value({m}); mismatch omitted, up \
@@ -121,9 +121,9 @@ fn memoized_decode_equals_the_independently_built_value() {
 #[test]
 fn a_cyclic_heap_is_still_a_mismatch() {
     // cell 1 = (7, 2), cell 2 = (7, 1): the chain never reaches nil.
-    let o = AsmOutcome { result: 1, heap: vec![(7, 2), (7, 1)] };
+    let o = RxmOutcome { result: 1, heap: vec![(7, 2), (7, 1)] };
     assert_eq!(
-        decode_asm_ty_reason(&o, &Ty::List(Box::new(Ty::Nat))),
+        decode_rxm_ty_reason(&o, &Ty::List(Box::new(Ty::Nat))),
         Err(DecodeFailure::Mismatch),
         "a cycle that never reaches nil must not decode"
     );
@@ -151,9 +151,9 @@ fn a_cycle_disjoint_from_a_populated_memo_is_still_a_mismatch() {
     // Cells 3,4: a cycle, 3 -> 4 -> 3, which never reaches either nil or cell 1.
     // Outer cells 5,6: heads are pointers 1 then 3.
     let heap = vec![(7, 2), (7, 0), (7, 4), (7, 3), (1, 6), (3, 0)];
-    let o = AsmOutcome { result: 5, heap };
+    let o = RxmOutcome { result: 5, heap };
     assert_eq!(
-        decode_asm_ty_reason(&o, &Ty::List(Box::new(Ty::List(Box::new(Ty::Nat))))),
+        decode_rxm_ty_reason(&o, &Ty::List(Box::new(Ty::List(Box::new(Ty::Nat))))),
         Err(DecodeFailure::Mismatch),
         "a cycle disjoint from a populated memo must not decode"
     );
@@ -166,14 +166,14 @@ fn a_spine_that_converges_on_a_memoized_pointer_still_decodes() {
     // Cells 1,2: 1 -> 2 -> nil. Cell 3: 3 -> 1, i.e. a longer spine sharing the tail.
     // Outer cells 4,5: heads are pointers 3 then 1.
     let heap = vec![(7, 2), (8, 0), (9, 1), (3, 5), (1, 0)];
-    let o = AsmOutcome { result: 4, heap };
+    let o = RxmOutcome { result: 4, heap };
     let got =
-        decode_asm_ty(&o, &Ty::List(Box::new(Ty::List(Box::new(Ty::Nat))))).expect("convergent, acyclic, must decode");
+        decode_rxm_ty(&o, &Ty::List(Box::new(Ty::List(Box::new(Ty::Nat))))).expect("convergent, acyclic, must decode");
     let inner_short =
         Value::Cons(Rc::new(Value::Nat(7)), Rc::new(Value::Cons(Rc::new(Value::Nat(8)), Rc::new(Value::Nil))));
     let inner_long = Value::Cons(Rc::new(Value::Nat(9)), Rc::new(inner_short.clone()));
     let want = Value::Cons(Rc::new(inner_long), Rc::new(Value::Cons(Rc::new(inner_short), Rc::new(Value::Nil))));
-    assert!(got == want, "decode_asm_ty of the convergent spine did not match the independently constructed value");
+    assert!(got == want, "decode_rxm_ty of the convergent spine did not match the independently constructed value");
 }
 
 /// The value-directed decoder is bounded, and says so. A 3-cell heap under a budget it cannot
@@ -182,9 +182,9 @@ fn a_spine_that_converges_on_a_memoized_pointer_still_decodes() {
 /// `None` — i.e. the reason channel exists and carries the right arm.
 #[test]
 fn value_directed_reports_a_reason() {
-    let o = AsmOutcome { result: 1, heap: vec![(5, 0)] };
+    let o = RxmOutcome { result: 1, heap: vec![(5, 0)] };
     let expected = Value::Cons(Rc::new(Value::Nat(0)), Rc::new(Value::Nil));
-    assert!(decode_asm_reason(&o, &expected).is_ok(), "an ordinary 1-cell decode must report Ok");
+    assert!(decode_rxm_reason(&o, &expected).is_ok(), "an ordinary 1-cell decode must report Ok");
 
     // A `Bool` expectation against the word 5: not 0 and not 1, so the DATA is wrong, not the budget.
     //
@@ -193,9 +193,9 @@ fn value_directed_reports_a_reason() {
     // size is its LOGICAL size, so a large one expands into a walk that OOMs instead of printing a
     // diff. This particular expectation is a `Bool` leaf and could never grow, but the idiom is
     // uniform across the file precisely so no future test has a same-file precedent to copy from.
-    let b = AsmOutcome { result: 5, heap: vec![] };
+    let b = RxmOutcome { result: 5, heap: vec![] };
     assert!(
-        decode_asm_reason(&b, &Value::Bool(false)) == Err(DecodeFailure::Mismatch),
+        decode_rxm_reason(&b, &Value::Bool(false)) == Err(DecodeFailure::Mismatch),
         "a word that is neither 0 nor 1 under a Bool expectation is the DATA's fault, not the budget's"
     );
 }

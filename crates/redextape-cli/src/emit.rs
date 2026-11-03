@@ -1,10 +1,10 @@
 //! `redextape emit` — compile a program to a backend text form.
 //!
 //! **ALL THREE TARGETS ROUND-TRIP; TWO OF THE THREE ARE ALSO EXECUTABLE.** `tm` re-parses through
-//! `parse_tm_full` and `lambda` through `parse_lambda`, and `asm` through `parse_asm` — all three
-//! emitted forms read back. `redextape run` executes an emitted `.tm` or `.asm` file directly; a
+//! `parse_tm_full` and `lambda` through `parse_lambda`, and `rxm` through `parse_rxm` — all three
+//! emitted forms read back. `redextape run` executes an emitted `.tm` or `.rxm` file directly; a
 //! `.rxlambda` file carries no result type to decode against, so it stays read-only from the command
-//! line. The asm target writes a header comment naming the function that reads it back.
+//! line. The rxm target writes a header comment naming the function that reads it back.
 
 use crate::input::{Input, write_atomic};
 use crate::report;
@@ -18,15 +18,15 @@ pub enum Lang {
     Tm,
     /// The λ-calculus lowering of the program, which `parse_lambda` and the editor grammar read.
     Lambda,
-    /// The register-machine lowering, read back by `parse_asm` and executable by `redextape run`.
-    Asm,
+    /// The register-machine lowering, read back by `parse_rxm` and executable by `redextape run`.
+    Rxm,
 }
 
-/// The asm form's emitted header comment. It names the function that reads it, because a file that
+/// The rxm form's emitted header comment. It names the function that reads it, because a file that
 /// states what opens it is worth more than a bare listing — `redextape run` takes the file it names,
 /// the same as for a `.tm`.
-const ASM_PREAMBLE: &str = "\
-; Register-assembly listing, read back by `parse_asm` and run by `redextape run`.
+const RXM_PREAMBLE: &str = "\
+; rxm listing, read back by `parse_rxm` and run by `redextape run`.
 ";
 
 /// Tape encoding for `--lang tm`. `Default` is what an omitted `--encoding` means; the flag itself
@@ -213,20 +213,20 @@ pub fn run(
                 return Ok(Outcome::ToolFailed);
             }
         },
-        Lang::Asm => match redextape_core::tm::lower_asm(&core) {
+        Lang::Rxm => match redextape_core::tm::lower_rxm(&core) {
             // A header only when the result type is one the directive can express, a free type variable
-            // written as `Nat` — `AsmHeader::for_type`, the function the wasm session's `asm_text` calls
+            // written as `Nat` — `RxmHeader::for_type`, the function the wasm session's `rxm_text` calls
             // too, so the file written here and the text a copy runs agree on which programs get one.
             Ok(prog) => {
-                let header = redextape_core::tm::AsmHeader::for_type(&ty);
+                let header = redextape_core::tm::RxmHeader::for_type(&ty);
                 let listing = match &header {
-                    Some(h) => redextape_core::tm::print_asm_with(&prog, h),
-                    None => redextape_core::tm::print_asm(&prog),
+                    Some(h) => redextape_core::tm::print_rxm_with(&prog, h),
+                    None => redextape_core::tm::print_rxm(&prog),
                 };
-                format!("{ASM_PREAMBLE}{listing}")
+                format!("{RXM_PREAMBLE}{listing}")
             }
             Err(e) => {
-                writeln!(err, "error: this program has no asm lowering: {e:?}")?;
+                writeln!(err, "error: this program has no rxm lowering: {e:?}")?;
                 return Ok(Outcome::ToolFailed);
             }
         },
@@ -261,18 +261,18 @@ fn emit_tm(
 ) -> std::io::Result<Option<String>> {
     // REFUSED BEFORE ANY LOWERING OR SIMULATION — a fact about `ty` alone, knowable before `core` is
     // even touched. A `.tm` file's `result` line names the type `run` will decode the final tapes
-    // against, and a function has no decoding (`ty::is_decodable`'s own doc). `AsmHeader::for_type`
-    // answers the identical question for the asm leg by simply omitting its header, which is optional;
+    // against, and a function has no decoding (`ty::is_decodable`'s own doc). `RxmHeader::for_type`
+    // answers the identical question for the rxm leg by simply omitting its header, which is optional;
     // a TM header is never optional (it also carries the initial tapes, `TmHeader`'s own doc), so there
     // is no headerless fallback here and the whole file is refused instead.
     //
-    // GROUNDED ONCE: `AsmHeader::for_type` grounds once and asks `ty::is_decodable_ground` of the
+    // GROUNDED ONCE: `RxmHeader::for_type` grounds once and asks `ty::is_decodable_ground` of the
     // result it already holds; this does the same. Cloned, not moved: `ty` itself still has to reach
     // the simulation below, ungrounded.
     let grounded = redextape_core::ty::ground(ty.clone());
     if !redextape_core::ty::is_decodable_ground(&grounded) {
         // GROUNDED, LIKE EVERY OTHER `result`-LINE MESSAGE: `ty::show(&ty)` alone would print a free
-        // type variable as `t0` (`ty::show`'s own doc), where `AsmHeader::for_type` and a `.tm`
+        // type variable as `t0` (`ty::show`'s own doc), where `RxmHeader::for_type` and a `.tm`
         // header's own `describe_at` both name the GROUND type. A function's own free variables are
         // grounded too (`ty::ground`'s "a `Fun` stays a `Fun`, its variables grounded like any other"),
         // so this is the one sentence naming a bare `t0` that this refusal could otherwise print for a
@@ -312,7 +312,7 @@ fn emit_tm(
             )?;
             Ok(None)
         }
-        // The same sentence `run --backend tm`, `--lang lambda` and `--lang asm` use for this exact
+        // The same sentence `run --backend tm`, `--lang lambda` and `--lang rxm` use for this exact
         // condition: nothing was built here, so header construction is not what went wrong.
         Err(redextape_core::tm::TmRun::LowerError(e)) => {
             writeln!(err, "error: this program has no TM lowering: {e:?}")?;
@@ -688,7 +688,7 @@ mod tests {
     /// **THE MESSAGE NAMES THE GROUNDED TYPE, NOT THE RAW ONE.** `|x| x`'s own inferred type is
     /// `(t1) -> t1` — a free variable in both a parameter and the result, unconstrained by any use —
     /// and `ty::show` alone would print exactly that (`ty::show`'s own doc: a `Var` prints `t{v}`).
-    /// Every other `result`-line consumer (`AsmHeader::for_type`, a `.tm` header's own `describe_at`)
+    /// Every other `result`-line consumer (`RxmHeader::for_type`, a `.tm` header's own `describe_at`)
     /// names the GROUND type instead, and `ty::ground`'s own doc says a `Fun`'s free variables are
     /// grounded exactly like any other's — so this refusal must too, or it is the one place in the
     /// tool that shows a user a bare `tN` for a program whose type is otherwise perfectly ordinary.
@@ -730,13 +730,13 @@ mod tests {
         assert!(term.is_some());
     }
 
-    /// The asm target's round trip: what `emit` writes, `parse_asm` reads — preamble comment and all.
+    /// The rxm target's round trip: what `emit` writes, `parse_rxm` reads — preamble comment and all.
     #[test]
-    fn emitted_asm_parses_back() {
-        let (text, err, outcome) = emit_case("asm", "1 + 2", Lang::Asm, None);
+    fn emitted_rxm_parses_back() {
+        let (text, err, outcome) = emit_case("rxm", "1 + 2", Lang::Rxm, None);
         assert!(err.is_empty(), "no stderr: {err}");
         assert!(matches!(outcome, Outcome::Emitted), "emit succeeded");
-        let (prog, ds) = redextape_core::tm::parse_asm(&text);
+        let (prog, ds) = redextape_core::tm::parse_rxm(&text);
         assert!(ds.is_empty(), "the emitted file parses: {ds:?}");
         assert!(!prog.expect("parses").code.is_empty(), "and it is not empty");
     }
@@ -758,7 +758,7 @@ mod tests {
     /// And omitting it is still fine off `tm`, which is the half the `Option` must not break.
     #[test]
     fn an_omitted_encoding_is_fine_off_the_tm_target() {
-        let (out, err, outcome) = emit_case("enc-absent", "1 + 2", Lang::Asm, None);
+        let (out, err, outcome) = emit_case("enc-absent", "1 + 2", Lang::Rxm, None);
         assert!(matches!(outcome, Outcome::Emitted), "stderr: {err}");
         assert_ne!(out, "");
     }
@@ -816,7 +816,7 @@ mod tests {
 
     #[test]
     fn reduce_is_rejected_off_the_tm_target() {
-        for lang in [Lang::Lambda, Lang::Asm] {
+        for lang in [Lang::Lambda, Lang::Rxm] {
             let (out, err, outcome) =
                 emit_opts(&format!("reduce-off-target-{lang:?}"), "1 + 2", lang, reduce_opts("fold"));
             assert_eq!(out, "", "{lang:?}");
@@ -968,17 +968,17 @@ mod tests {
         assert!(missing.is_empty(), "`Unverified` must name all four causes; missing {missing:?}:\n  {said}");
     }
 
-    /// `emit --lang asm` writes a header when `AsmHeader::for_type` can name the common path's `ty`
-    /// (already computed before `match lang`). A distinct case name from `emitted_asm_parses_back`'s
-    /// `"asm"` — `emit_case` keys a temp directory by case, and reusing one is a race two tests should
+    /// `emit --lang rxm` writes a header when `RxmHeader::for_type` can name the common path's `ty`
+    /// (already computed before `match lang`). A distinct case name from `emitted_rxm_parses_back`'s
+    /// `"rxm"` — `emit_case` keys a temp directory by case, and reusing one is a race two tests should
     /// not share even though, here, they would have written identical bytes.
     #[test]
-    fn emitted_asm_carries_a_result_header() {
-        let (text, err, outcome) = emit_case("asm-header", "1 + 2", Lang::Asm, None);
+    fn emitted_rxm_carries_a_result_header() {
+        let (text, err, outcome) = emit_case("rxm-header", "1 + 2", Lang::Rxm, None);
         assert!(err.is_empty(), "no stderr: {err}");
         assert!(matches!(outcome, Outcome::Emitted));
         assert!(text.contains("result Nat"), "the header names the result type:\n{text}");
-        let doc = redextape_core::tm::parse_asm_full(&text);
+        let doc = redextape_core::tm::parse_rxm_full(&text);
         let (prog, header, ds) = (doc.program, doc.header, doc.diagnostics);
         assert!(ds.is_empty(), "the emitted file parses: {ds:?}");
         assert_eq!(header.map(|h| h.result), Some(redextape_core::ty::Ty::Nat));
@@ -991,32 +991,32 @@ mod tests {
     /// a level deeper. Each file starts with its header and runs to the program's value.
     ///
     /// **NOT a function-typed fixture — `Fun` is unreachable here, and that is a real structural
-    /// fact, not a shortcut.** `lower_asm` has no register representation for a function value: a bare
+    /// fact, not a shortcut.** `lower_rxm` has no register representation for a function value: a bare
     /// lambda in value position (`Core::Lambda`) errors unconditionally, and a bare function name
     /// (`Core::Var` naming an `fn`) resolves against `ctx.resolve`, which only tracks local variable
     /// registers — function names live in `fn_scopes` instead, so the lookup misses and reports
     /// "unbound". Every fixture tried (`|x| x + 1`, a bare `fn` name, a `let`-bound closure) fails at
-    /// `lower_asm` itself with `Unsupported`, so `Outcome::Emitted` is never reached for `Fun`, and
+    /// `lower_rxm` itself with `Unsupported`, so `Outcome::Emitted` is never reached for `Fun`, and
     /// `for_type`'s unit test is where a type holding a function is shown to get no header.
     #[test]
     fn a_polymorphic_result_type_is_headered_with_nat() {
         for (case, src, header, value) in [
-            ("asm-var", "[]", "result List<Nat>\n", "[]"),
-            ("asm-var-nested", "[[]]", "result List<List<Nat>>\n", "[[]]"),
+            ("rxm-var", "[]", "result List<Nat>\n", "[]"),
+            ("rxm-var-nested", "[[]]", "result List<List<Nat>>\n", "[[]]"),
         ] {
-            let (text, err, outcome) = emit_case(case, src, Lang::Asm, None);
+            let (text, err, outcome) = emit_case(case, src, Lang::Rxm, None);
             assert!(matches!(outcome, Outcome::Emitted), "{src}: {err}");
-            let listing = text.strip_prefix(ASM_PREAMBLE).expect("the preamble comes first");
+            let listing = text.strip_prefix(RXM_PREAMBLE).expect("the preamble comes first");
             assert!(listing.starts_with(header), "{src}: the header names the type, `Nat` for its variable:\n{text}");
-            let doc = redextape_core::tm::parse_asm_full(&text);
+            let doc = redextape_core::tm::parse_rxm_full(&text);
             assert!(doc.diagnostics.is_empty(), "{src}: {:?}", doc.diagnostics);
             let (prog, header) = (doc.program.expect("parses"), doc.header.expect("headered"));
-            let redextape_core::tm::AsmRun::Ran(outcome) =
-                redextape_core::tm::run_asm(&prog, redextape_core::tm::asm::DEFAULT_CAPS)
+            let redextape_core::tm::RxmRun::Ran(outcome) =
+                redextape_core::tm::run_rxm(&prog, redextape_core::tm::rxm::DEFAULT_CAPS)
             else {
                 panic!("{src}: the emitted file halts")
             };
-            let got = redextape_core::tm::decode_asm_ty(&outcome, &header.result).expect("decodes");
+            let got = redextape_core::tm::decode_rxm_ty(&outcome, &header.result).expect("decodes");
             assert_eq!(redextape_core::value::format_value(&got), value, "{src}");
         }
     }

@@ -5,7 +5,7 @@
 //! half — that the two commands agree on WHAT a file is, while doing different things with it.
 //!
 //! **THE PROPERTY PINNED HERE IS NARROWER THAN "THEY BEHAVE THE SAME," AND THAT IS THE POINT.**
-//! `run` refuses `--backend` on an artifact because a `.tm`/`.asm` file is already a machine or a
+//! `run` refuses `--backend` on an artifact because a `.tm`/`.rxm` file is already a machine or a
 //! program with no backend to pick; `fmt` formats an artifact and refuses an explicit `--width` on
 //! one because those two printers lay out from their own content. A test asserting the two commands
 //! behave identically would be asserting something false — it would either fail immediately or, far
@@ -13,11 +13,11 @@
 //! to "WHICH FORM is this", read through two different observable refusals.
 //!
 //! **THE FORM, NOT A BOOLEAN, AND THE DIFFERENCE IS WHAT THIS FILE IS FOR.** Collapsing the table's
-//! second column to `*expected != "rxt"` before comparing would make `("p.asm", "asm")` and
-//! `("p.asm", "tm")` the same test: a defect mapping `.asm` onto `Form::Tm` would leave every row
+//! second column to `*expected != "rxt"` before comparing would make `("p.rxm", "rxm")` and
+//! `("p.rxm", "tm")` the same test: a defect mapping `.rxm` onto `Form::Tm` would leave every row
 //! green, because both forms are equally "an artifact". Both commands print a noun
 //! that names the form outright — `run` says "a `.tm` file, which is already a machine" against "a
-//! `.asm` file, which is already a program", `fmt` says "a `.tm` file, …" against "an `.asm` file,
+//! `.rxm` file, which is already a program", `fmt` says "a `.tm` file, …" against "an `.rxm` file,
 //! …" — so the form is observable, and the column is compared against it rather than against a
 //! boolean derived from it.
 //!
@@ -36,7 +36,7 @@ use assert_cmd::Command;
 /// The classification both commands must agree on. One table, read twice. The second column names
 /// the FORM, and `"rxt"` is the one value that fires no refusal at all.
 const CLASSIFICATION: &[(&str, &str)] =
-    &[("p.tm", "tm"), ("M.TM", "tm"), ("p.asm", "asm"), ("P.AsM", "asm"), ("p.rxt", "rxt"), ("p.txt", "rxt")];
+    &[("p.tm", "tm"), ("M.TM", "tm"), ("p.rxm", "rxm"), ("P.RxM", "rxm"), ("p.rxt", "rxt"), ("p.txt", "rxt")];
 
 /// The form a refusal message names, or `None` when `refusal` never appears — which is how both
 /// commands report `.rxt`: by not refusing.

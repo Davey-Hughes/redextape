@@ -658,7 +658,7 @@ fn lower_expr_at(g: &mut NodeGen, expr: &Expr, spans: &mut Vec<(NodeId, Span)>) 
         }
         // An expression position demands a value, so this is the one desugar arm that must produce
         // a node. `Core` has no fault variant and adding one would ripple into `interp`,
-        // `lambda/lower`, `tm/lower_asm`, `tm/defunc` and `redextape-native`'s codegen. An unbound
+        // `lambda/lower`, `tm/lower_rxm`, `tm/defunc` and `redextape-native`'s codegen. An unbound
         // `Core::Var` already faults rather than panics (`interp::eval_inner`'s `Core::Var` arm), and
         // `$` is unforgeable in user source (`lexer::lex` only starts an identifier on `_` or an
         // ASCII letter), so this collides with no program a user can write.

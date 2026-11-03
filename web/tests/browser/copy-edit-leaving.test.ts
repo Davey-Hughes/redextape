@@ -23,13 +23,13 @@ import { menuOf, moreOf, paneByLeaf, pick, SHELL, stateIdle, until, viewTitleOf 
  * `lambda-pane.ts` and `copy-editor.ts` take the debounce from, and this file's own import reads the replacement. The
  * gap is not a test's to bound: it holds the keyboard's reply and the whole of the click's round trip, the checks
  * Playwright makes before it presses among them, and a machine short of CPU stretches each — at `CPUQuota=25%` the
- * longest measured 1,012 ms — so it is the window that is widened and not the gap that is narrowed. The asm and TM
+ * longest measured 1,012 ms — so it is the window that is widened and not the gap that is narrowed. The rxm and TM
  * cases take no longer for it, their typing being sent as the view leaves; the λ case's reaches its copy when the
  * debounce fires, so that case and the last one each wait the window out.
  *
  * **THE LAST CASE IS WHAT MAKES THAT WINDOW THE APP'S AND NOT ONLY THIS FILE'S.** Were the replacement to reach this
  * file's import and miss an editor's, every gap above would be held to 3 s while the debounce fired at 300 ms, and
- * pass. So it types into a λ copy and an asm copy, leaves neither, and holds each copy's text of record to changing no
+ * pass. So it types into a λ copy and an rxm copy, leaves neither, and holds each copy's text of record to changing no
  * sooner than the window after its key — a bound a slow machine can only help.
  *
  * Every gesture is a real one — `userEvent` keys into the editor, `userEvent` clicks on the title, the menus and the
@@ -135,7 +135,7 @@ beforeAll(async () => {
   view.dispatch({ changes: { from: 0, to: view.state.doc.length, insert: SAMPLE } })
   await until(() => !stateIdle(), 'the compile to start')
   await until(stateIdle, 'the compile to finish')
-  await until(() => paneByLeaf('asm-0').querySelectorAll('.asm-row').length === 5, 'the program’s listing')
+  await until(() => paneByLeaf('rxm-0').querySelectorAll('.rxm-row').length === 5, 'the program’s listing')
   await until(() => paneByLeaf('tm-0').querySelectorAll('.state-row').length > 3, 'the program’s rules')
 })
 
@@ -162,61 +162,61 @@ describe('typing not yet sent when a view leaves its copy', () => {
     await until(() => stored(a) === '\\p. p p', 'the typing to reach the copy it was typed into')
   })
 
-  it('on asm, reaches the copy when the view moves to the program through its title', async () => {
-    const asm = paneByLeaf('asm-0')
-    const copy = await fork(asm)
+  it('on rxm, reaches the copy when the view moves to the program through its title', async () => {
+    const rxm = paneByLeaf('rxm-0')
+    const copy = await fork(rxm)
     await until(() => stored(copy) !== null, 'the copy to be stored')
     const text = 'result Nat\nli rr, #5\nhalt\n'
     expect(stored(copy)).not.toBe(text)
 
-    const toProgram = await titleItem(asm, bindingKey('asm', 'source'))
-    await typeInto(editorOf(asm) as EditorView, 'result Nat{Enter}li rr, #5{Enter}halt{Enter}', 'all')
-    expect(editorOf(asm)?.state.doc.toString()).toBe(text)
+    const toProgram = await titleItem(rxm, bindingKey('rxm', 'source'))
+    await typeInto(editorOf(rxm) as EditorView, 'result Nat{Enter}li rr, #5{Enter}halt{Enter}', 'all')
+    expect(editorOf(rxm)?.state.doc.toString()).toBe(text)
     await userEvent.click(toProgram)
     insideTheDebounce()
-    expect(shows(asm)).toBe(bindingKey('asm', 'source'))
+    expect(shows(rxm)).toBe(bindingKey('rxm', 'source'))
 
     await until(() => stored(copy) === text, 'the typing to reach the copy’s text of record')
-    await choose(asm, bindingKey('asm', copy))
-    await until(() => editorOf(asm)?.state.doc.toString() === text, 'the copy’s editor, holding what was typed')
+    await choose(rxm, bindingKey('rxm', copy))
+    await until(() => editorOf(rxm)?.state.doc.toString() === text, 'the copy’s editor, holding what was typed')
   })
 
-  it('on asm, comes back through undo when the copy is deleted before it was sent', async () => {
-    const asm = paneByLeaf('asm-0')
+  it('on rxm, comes back through undo when the copy is deleted before it was sent', async () => {
+    const rxm = paneByLeaf('rxm-0')
     // A COPY OF ITS OWN, from the program — so this test starts where it says whatever the one above left.
-    if (shows(asm) !== bindingKey('asm', 'source')) await choose(asm, bindingKey('asm', 'source'))
-    const copy = await fork(asm)
+    if (shows(rxm) !== bindingKey('rxm', 'source')) await choose(rxm, bindingKey('rxm', 'source'))
+    const copy = await fork(rxm)
     const text = 'result Nat\nli rr, #6\nhalt\n'
 
     // A COPY IS NAMED BY THE COUNTER ITS ID CARRIES: `scratch-3` is `copy 3`.
-    const del = await copiesItem(`delete asm copy ${copy.slice('scratch-'.length)}`)
-    await typeInto(editorOf(asm) as EditorView, 'result Nat{Enter}li rr, #6{Enter}halt{Enter}', 'all')
+    const del = await copiesItem(`delete rxm copy ${copy.slice('scratch-'.length)}`)
+    await typeInto(editorOf(rxm) as EditorView, 'result Nat{Enter}li rr, #6{Enter}halt{Enter}', 'all')
     await userEvent.click(del)
     insideTheDebounce()
-    await until(() => shows(asm) === bindingKey('asm', 'source'), 'the view to move to the program')
+    await until(() => shows(rxm) === bindingKey('rxm', 'source'), 'the view to move to the program')
 
     await userEvent.click(
       document.querySelector<HTMLButtonElement>('#notice button.notice-action') as HTMLButtonElement,
     )
-    await until(() => shows(asm) === bindingKey('asm', copy), 'the view to show the copy again')
+    await until(() => shows(rxm) === bindingKey('rxm', copy), 'the view to show the copy again')
     await until(
-      () => editorOf(asm)?.state.doc.toString() === text,
+      () => editorOf(rxm)?.state.doc.toString() === text,
       'the restored copy’s editor, holding what was typed',
     )
     expect(stored(copy)).toBe(text)
   })
 
-  it('on asm, is stored with the copy when it is paused before it was sent', async () => {
-    const asm = paneByLeaf('asm-0')
-    if (shows(asm) !== bindingKey('asm', 'source')) await choose(asm, bindingKey('asm', 'source'))
-    const copy = await fork(asm)
+  it('on rxm, is stored with the copy when it is paused before it was sent', async () => {
+    const rxm = paneByLeaf('rxm-0')
+    if (shows(rxm) !== bindingKey('rxm', 'source')) await choose(rxm, bindingKey('rxm', 'source'))
+    const copy = await fork(rxm)
     const text = 'result Nat\nli rr, #7\nhalt\n'
 
-    const pause = await copiesItem(`pause asm copy ${copy.slice('scratch-'.length)}`)
-    await typeInto(editorOf(asm) as EditorView, 'result Nat{Enter}li rr, #7{Enter}halt{Enter}', 'all')
+    const pause = await copiesItem(`pause rxm copy ${copy.slice('scratch-'.length)}`)
+    await typeInto(editorOf(rxm) as EditorView, 'result Nat{Enter}li rr, #7{Enter}halt{Enter}', 'all')
     await userEvent.click(pause)
     insideTheDebounce()
-    await until(() => shows(asm) === bindingKey('asm', 'source'), 'the view to move to the program')
+    await until(() => shows(rxm) === bindingKey('rxm', 'source'), 'the view to move to the program')
     // STORED BY THE PAUSE ITSELF: a paused copy has no worker, so no build will land to store it later.
     expect(stored(copy)).toBe(text)
     document.querySelector<HTMLElement>('.buffer-list')?.hidePopover()
@@ -242,38 +242,38 @@ describe('typing not yet sent when a view leaves its copy', () => {
     await until(() => stored(copy) === text, 'the typing to reach the copy’s text of record')
   })
 
-  it('is sent no sooner than this file’s window after its key, in a λ copy’s editor and an asm copy’s', async () => {
+  it('is sent no sooner than this file’s window after its key, in a λ copy’s editor and an rxm copy’s', async () => {
     // THE MOCK'S OWN NUMBER, so a file that lost its `vi.mock` fails here rather than passing at 300 ms.
     expect(EDITOR_DEBOUNCE_MS, 'the window `vi.mock` sets for this file').toBe(3000)
     // WHICHEVER VIEWS HOLD AN EDITOR ALREADY, so this case asks nothing of the ones above and runs alone as well.
     const lam = await editing('lambda', paneByLeaf('lambda-0'))
-    const asm = await editing('asm', paneByLeaf('asm-0'))
+    const rxm = await editing('rxm', paneByLeaf('rxm-0'))
     const lamCopy = shows(lam).slice('lambda:'.length)
-    const asmCopy = shows(asm).slice('asm:'.length)
-    await until(() => stored(lamCopy) !== null && stored(asmCopy) !== null, 'both copies to be stored')
+    const rxmCopy = shows(rxm).slice('rxm:'.length)
+    await until(() => stored(lamCopy) !== null && stored(rxmCopy) !== null, 'both copies to be stored')
     const lamBefore = stored(lamCopy)
-    const asmBefore = stored(asmCopy)
+    const rxmBefore = stored(rxmCopy)
 
     const started = performance.now()
     await typeInto(editorOf(lam) as EditorView, '\\q. q', 'all')
     const lamKey = lastKey
-    await typeInto(editorOf(asm) as EditorView, '{Enter}', 'end')
-    const asmKey = lastKey
+    await typeInto(editorOf(rxm) as EditorView, '{Enter}', 'end')
+    const rxmKey = lastKey
     expect(lamKey, 'the page saw the λ copy’s key').toBeGreaterThan(started)
-    expect(asmKey, 'the page saw the asm copy’s key').toBeGreaterThan(lamKey)
+    expect(rxmKey, 'the page saw the rxm copy’s key').toBeGreaterThan(lamKey)
 
     // NEITHER VIEW LEAVES, so the debounce alone sends each copy its typing, and a copy's text of record changes after.
     let lamSeen = 0
-    let asmSeen = 0
+    let rxmSeen = 0
     await until(() => {
       if (lamSeen === 0 && stored(lamCopy) !== lamBefore) lamSeen = performance.now()
-      if (asmSeen === 0 && stored(asmCopy) !== asmBefore) asmSeen = performance.now()
-      return lamSeen !== 0 && asmSeen !== 0
+      if (rxmSeen === 0 && stored(rxmCopy) !== rxmBefore) rxmSeen = performance.now()
+      return lamSeen !== 0 && rxmSeen !== 0
     }, 'both copies to be sent their typing')
     expect(lamSeen - lamKey, 'a λ copy’s editor waits the window this file sets').toBeGreaterThanOrEqual(
       EDITOR_DEBOUNCE_MS,
     )
-    expect(asmSeen - asmKey, 'an asm copy’s editor waits the window this file sets').toBeGreaterThanOrEqual(
+    expect(rxmSeen - rxmKey, 'an rxm copy’s editor waits the window this file sets').toBeGreaterThanOrEqual(
       EDITOR_DEBOUNCE_MS,
     )
   })

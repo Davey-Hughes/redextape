@@ -49,7 +49,7 @@ async function start(): Promise<void> {
   view.focus()
   await until(() => view.hasFocus, 'the source editor to take the focus')
   errors.length = 0
-  expect(mounted(), 'precondition: all four views').toEqual(['source', 'lambda-0', 'asm-0', 'tm-0'])
+  expect(mounted(), 'precondition: all four views').toEqual(['source', 'lambda-0', 'rxm-0', 'tm-0'])
   expect(open(), 'precondition: nothing is open').toEqual([])
   expect(armed(), 'precondition: the mode is not armed').toBe(false)
 }
@@ -92,7 +92,7 @@ describe('view keys under an open popover', () => {
     expect(open(), 'the popover stayed open over a page the key changed').toEqual([])
     expect(button.getAttribute('aria-expanded')).toBe('false')
     expect(document.activeElement, 'the focus is not on the popover’s button').toBe(button)
-    expect(mounted(), 'the key did not hide the asm view').toEqual(['source', 'lambda-0', 'tm-0'])
+    expect(mounted(), 'the key did not hide the rxm view').toEqual(['source', 'lambda-0', 'tm-0'])
     expect(errors).toEqual([])
   })
 
@@ -112,7 +112,7 @@ describe('view keys under an open popover', () => {
 
   it('says why a toggle key for the only view did nothing, with the popover closed over it', async () => {
     await start()
-    for (const kind of ['asm', 'lambda', 'tm']) await userEvent.click(toggle(kind))
+    for (const kind of ['rxm', 'lambda', 'tm']) await userEvent.click(toggle(kind))
     expect(mounted()).toEqual(['source'])
     const settings = document.querySelector('#settings') as HTMLElement
     await press(settings)
@@ -134,7 +134,7 @@ describe('view keys under an open popover', () => {
     expect(open(), 'the Escape that left the mode closed the menu too').toEqual([menu.id])
     await userEvent.keyboard('{Escape}')
     expect(open()).toEqual([])
-    expect(mounted()).toEqual(['source', 'lambda-0', 'asm-0', 'tm-0'])
+    expect(mounted()).toEqual(['source', 'lambda-0', 'rxm-0', 'tm-0'])
   })
 
   /**
@@ -150,13 +150,13 @@ describe('view keys under an open popover', () => {
       const menu = await press(button)
       expect(menu.contains(document.activeElement), 'precondition: the focus is on an item of the menu').toBe(true)
       await viewKey('4', UNARMED)
-      expect(mounted()).toEqual(['source', 'lambda-0', 'asm-0'])
+      expect(mounted()).toEqual(['source', 'lambda-0', 'rxm-0'])
       expect(open()).toEqual([])
       expect(button.getAttribute('aria-expanded'), 'the ⋯ left the page saying its menu is open').toBe('false')
       expect(document.activeElement, 'the focus fell to <body>').not.toBe(document.body)
       expect(document.querySelector('#views')?.contains(document.activeElement)).toBe(true)
       await viewKey('4', UNARMED)
-      expect(mounted()).toEqual(['source', 'lambda-0', 'asm-0', 'tm-0'])
+      expect(mounted()).toEqual(['source', 'lambda-0', 'rxm-0', 'tm-0'])
       expect(more('tm-0').getAttribute('aria-expanded'), 'the ⋯ came back saying its menu is open').toBe('false')
       expect(open()).toEqual([])
     })
@@ -185,12 +185,12 @@ describe('view keys under an open popover', () => {
     it('closes + view when a key shows the source view, and it opens again without the item', async () => {
       await start()
       await userEvent.click(toggle('source'))
-      expect(mounted()).toEqual(['lambda-0', 'asm-0', 'tm-0'])
+      expect(mounted()).toEqual(['lambda-0', 'rxm-0', 'tm-0'])
       const add = document.querySelector('#new-view') as HTMLElement
       const menu = await press(add)
       expect(sourceItem(menu), 'precondition: + view offers source').not.toBeNull()
       await viewKey('1', UNARMED)
-      expect(mounted()).toEqual(['source', 'lambda-0', 'asm-0', 'tm-0'])
+      expect(mounted()).toEqual(['source', 'lambda-0', 'rxm-0', 'tm-0'])
       expect(open(), '+ view stayed open').toEqual([])
       await press(add)
       expect(sourceItem(menu), '+ view offers a source view the page has').toBeNull()
@@ -199,7 +199,7 @@ describe('view keys under an open popover', () => {
 
     /**
      * NO VIEW KEY IN THIS ONE. A popover stays open while `Shift+Tab` walks out of it, so the source toggle can be
-     * pressed with `+ view` open: back from the menu's first item to `+ view`, then the TM, λ, asm and source toggles.
+     * pressed with `+ view` open: back from the menu's first item to `+ view`, then the TM, λ, rxm and source toggles.
      */
     it('takes source out of + view, still open, when the source toggle is pressed from the keyboard', async () => {
       await start()
@@ -211,7 +211,7 @@ describe('view keys under an open popover', () => {
       expect(document.activeElement, 'precondition: Shift+Tab reached the source toggle').toBe(toggle('source'))
       expect(open(), 'precondition: + view is still open').toEqual([menu.id])
       await userEvent.keyboard('{Enter}')
-      expect(mounted()).toEqual(['source', 'lambda-0', 'asm-0', 'tm-0'])
+      expect(mounted()).toEqual(['source', 'lambda-0', 'rxm-0', 'tm-0'])
       expect(open(), 'the menu closed').toEqual([menu.id])
       expect(sourceItem(menu), '+ view still offers a source view the page has').toBeNull()
       expect(menu.querySelectorAll('button').length, 'the menu lost its other items').toBe(others)
@@ -232,7 +232,7 @@ describe('view keys under an open popover', () => {
       toggle('source').focus()
       expect(open(), 'precondition: the list is still open').toEqual([menu.id])
       await userEvent.keyboard('{Enter}')
-      expect(mounted()).toEqual(['source', 'lambda-0', 'asm-0', 'tm-0'])
+      expect(mounted()).toEqual(['source', 'lambda-0', 'rxm-0', 'tm-0'])
       expect(open()).toEqual([])
       expect(button.getAttribute('aria-expanded'), 'the ⋯ says its menu is open').toBe('false')
       await press(button)

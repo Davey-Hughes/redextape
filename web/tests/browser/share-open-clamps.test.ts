@@ -41,7 +41,7 @@ const LINKED = 'let y = 10; y + 5'
 /**
  * A link to `program` under `unary`, in the four-view workspace, with `positions`. **FOUR VIEWS, SO EVERY LEG A CASE
  * CLAMPS HAS A VIEW**: a clamp is said only of a leg the tree shows (`share-open-clamps-unseen.test.ts`), and the
- * default workspace, the source beside the TM view, has none for the λ and asm legs these cases clamp.
+ * default workspace, the source beside the TM view, has none for the λ and rxm legs these cases clamp.
  */
 const link = (positions: Positions, program = LINKED): Promise<string> =>
   encodeLink({ program, encoding: 'unary', workspace: serializeWorkspace(fourViewWorkspace()), positions })
@@ -89,9 +89,9 @@ describe("an open's clamps", () => {
   })
 
   it('names every leg the run ended short of in one notice, with the open’s undo, and says it', async () => {
-    location.hash = await link({ lambda: 100, asm: 100 })
-    await until(() => noticeText().includes('asm step 100'), 'the second clamp')
-    const said = "the link's λ step 100 and asm step 100 are past the end of this run — showing λ step 7 and asm step 5"
+    location.hash = await link({ lambda: 100, rxm: 100 })
+    await until(() => noticeText().includes('rxm step 100'), 'the second clamp')
+    const said = "the link's λ step 100 and rxm step 100 are past the end of this run — showing λ step 7 and rxm step 5"
     expect(noticeText()).toBe(said)
     expect(liveText().trimEnd()).toBe(said)
     expect(undoButton()?.textContent).toBe('undo')

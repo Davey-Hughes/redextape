@@ -10,11 +10,11 @@ import type { SplitChoices } from './pane-chrome'
 import type { Leg, RecordEnd } from './protocol'
 import type { SessionClient, SessionId } from './session-client'
 import type {
-  AsmProgram,
-  AsmState,
-  AsmStatus,
   Decoded,
   LambdaState,
+  RxmProgram,
+  RxmState,
+  RxmStatus,
   TmProgram,
   TmScratchStatus,
   TmState,
@@ -55,14 +55,14 @@ export type LegState<T> = {
  * `LegState<TmState>` with no narrowing at either call site — the property `Binding`'s own doc below
  * is about. Two named resolvers would be the duplication 5d-i design §3.1 refused one layer down.
  */
-export type LegFrame = { lambda: LambdaState; asm: AsmState; tm: TmState }
+export type LegFrame = { lambda: LambdaState; rxm: RxmState; tm: TmState }
 
 /**
  * The legs one session owns — AT MOST ONE PER `Leg`.
  *
  * The content of "the source session offers source/λ/TM; a `LambdaScratch` offers only λ; a
  * `TmScratch` only TM" (5d-i design §2's decision 1, in the words of 5d-i's plan, T7), with the program
- * session's asm leg and an asm copy that offers only asm, is which keys an entry's `legs` record has.
+ * session's rxm leg and an rxm copy that offers only rxm, is which keys an entry's `legs` record has.
  *
  * OPTIONAL RATHER THAN A UNION OF NAMED SHAPES. A union would make `legOf` switch on a session KIND
  * that nothing else in this file needs, and the switch would have to be re-derived at every call site
@@ -118,18 +118,18 @@ export type TmCompiled = {
 }
 
 /**
- * The asm listing a session compiled, and the text *edit a copy* seeds a copy from — `TmCompiled`'s shape for the asm
+ * The rxm listing a session compiled, and the text *edit a copy* seeds a copy from — `TmCompiled`'s shape for the rxm
  * leg, and for its reason: the view that offers a copy needs both, and a view built after the reply is seeded from
- * here. `asmText` is `null` on a copy, which offers no copy of itself, and for a program whose text is longer than
- * `session.rs`'s `MAX_SCRATCH_ASM_BYTES`, which no copy could build.
+ * here. `rxmText` is `null` on a copy, which offers no copy of itself, and for a program whose text is longer than
+ * `session.rs`'s `MAX_SCRATCH_RXM_BYTES`, which no copy could build.
  */
-export type AsmCompiled = { readonly program: AsmProgram; readonly asmText: string | null }
+export type RxmCompiled = { readonly program: RxmProgram; readonly rxmText: string | null }
 
 /**
- * What an asm copy's views were last told about its run: the status and value its build reply carried, the value
- * replaced by any `asm-value` a `[continue]` brings. `null` on every session that is not an asm copy.
+ * What an rxm copy's views were last told about its run: the status and value its build reply carried, the value
+ * replaced by any `rxm-value` a `[continue]` brings. `null` on every session that is not an rxm copy.
  */
-export type AsmScratchReading = { readonly status: AsmStatus; readonly value: Decoded }
+export type RxmScratchReading = { readonly status: RxmStatus; readonly value: Decoded }
 
 /**
  * What a TM buffer's panes were last told about the FILE rather than the machine: its status, and its value run's
@@ -216,13 +216,13 @@ export type SessionEntry = {
    */
   tmScratch: TmScratchReading | null
   /**
-   * The asm listing a session's last `compiled` or `asm-scratch-compiled` reply carried, and the program's text,
-   * retained for `tmProgram`'s reason: an asm view created after that reply is seeded from here (`pane-host.ts`'s
-   * `seedAsmPane`). `null` for a session with no asm leg — a program that does not lower, and a λ or TM copy.
+   * The rxm listing a session's last `compiled` or `rxm-scratch-compiled` reply carried, and the program's text,
+   * retained for `tmProgram`'s reason: an rxm view created after that reply is seeded from here (`pane-host.ts`'s
+   * `seedRxmPane`). `null` for a session with no rxm leg — a program that does not lower, and a λ or TM copy.
    */
-  asmProgram: AsmCompiled | null
-  /** An asm copy's status and value, retained for `tmScratch`'s reason. `null` for every other session. */
-  asmScratch: AsmScratchReading | null
+  rxmProgram: RxmCompiled | null
+  /** An rxm copy's status and value, retained for `tmScratch`'s reason. `null` for every other session. */
+  rxmScratch: RxmScratchReading | null
 }
 
 /**
@@ -251,7 +251,7 @@ export type PaneOption = { readonly leg: Leg; readonly id: SessionId; readonly l
  *
  * `reason` is what a leg's control strip reads (`controls.ts`'s `controlState` returns it straight as
  * `stepText` while `!available`) when there is no status for the leg to read one from — no
- * `LambdaStatus`, `AsmStatus`, `TmStatus` or TM copy's `TmScratchStatus` — i.e. when no leg compiled at
+ * `LambdaStatus`, `RxmStatus`, `TmStatus` or TM copy's `TmScratchStatus` — i.e. when no leg compiled at
  * all. 5a design §6's error table says the panes "read 'not compiled'" for that case; an empty `reason`
  * would leave them reading nothing.
  *
@@ -267,7 +267,7 @@ export type PaneOption = { readonly leg: Leg; readonly id: SessionId; readonly l
  * silent rather than a throw.
  *
  * **ONE STATUS PER LEG, BY LEG, AND EACH ONLY ITS TWO FIELDS.** The body reads `available` and `reason` and nothing
- * else, so each caller passes whatever status its reply carries — a `LambdaStatus`, an `AsmStatus`, a `TmStatus`, or a
+ * else, so each caller passes whatever status its reply carries — a `LambdaStatus`, an `RxmStatus`, a `TmStatus`, or a
  * TM copy's `TmScratchStatus`, which shares those two fields with `TmStatus` and none of the others — without
  * fabricating fields this function never asks for. Keyed by `Leg`, a leg the caller has no status for is simply
  * left out.
@@ -413,8 +413,8 @@ export class SessionRegistry {
    * Every session a slot showing `leg` may be pointed at, in registration order.
    *
    * THIS IS "THE SOURCE SESSION OFFERS source/λ/TM; A `LambdaScratch` OFFERS ONLY λ; A `TmScratch` ONLY
-   * TM" (5d-i decision 1, in the words of 5d-i's plan, T7), with the program session's asm leg and an asm
-   * copy that offers only asm, evaluated from the session's side: a session appears in `options('lambda')`
+   * TM" (5d-i decision 1, in the words of 5d-i's plan, T7), with the program session's rxm leg and an rxm
+   * copy that offers only rxm, evaluated from the session's side: a session appears in `options('lambda')`
    * exactly when it has a λ leg to render. There is no second table of which kind offers what — the legs
    * an entry was built with ARE the answer, so the selector and the resolver cannot disagree about what
    * is bindable.
@@ -473,14 +473,14 @@ export class SessionRegistry {
 /**
  * What a `PaneSlot` needs from a pane, and nothing more.
  *
- * A STRUCTURAL TYPE RATHER THAN `LambdaPane | TmPane | AsmPane`, for the reason `ClientPort` exists one
+ * A STRUCTURAL TYPE RATHER THAN `LambdaPane | TmPane | RxmPane`, for the reason `ClientPort` exists one
  * module over: everything the slot does is resolve a binding and call three methods, and none of it needs
  * a DOM. `tests/node/sessions.test.ts` drives two slots over one registry with recording fakes, which is
  * where "two panes, two λ sessions, two different frames" is asserted without a browser; the browser
  * tier then asserts the same thing reaches real text on a real `LambdaPane`.
  *
- * `LambdaPane` SATISFIES `PaneView<LambdaState>`, `TmPane` `PaneView<TmState>` AND `AsmPane`
- * `PaneView<AsmState>`, with no `implements PaneView` clause on any — the parameterisation is what makes
+ * `LambdaPane` SATISFIES `PaneView<LambdaState>`, `TmPane` `PaneView<TmState>` AND `RxmPane`
+ * `PaneView<RxmState>`, with no `implements PaneView` clause on any — the parameterisation is what makes
  * handing the wrong pane to a slot a type error rather than a runtime surprise.
  */
 export type PaneView<T> = {
@@ -572,7 +572,7 @@ export function legControlState<K extends Leg>(
  *     the evidence the types hold.
  *
  * A SELECTOR THAT COULD WRITE `leg` WOULD DESTROY IT, and cheaply: `Binding<K>` would collapse
- * to `Binding<Leg>`, `legOf` would return `LegState<LambdaState | AsmState | TmState>`, and every
+ * to `Binding<Leg>`, `legOf` would return `LegState<LambdaState | RxmState | TmState>`, and every
  * render would narrow a union that the pane's own renderer type had already decided. That is the
  * duplication 5d-i design §3.1 refused one layer down, arriving from the other direction.
  *
@@ -591,7 +591,7 @@ export function legControlState<K extends Leg>(
  * cross-leg pick by changing the LEAF's kind — `setLeafKind`, keeping its place and size — and letting
  * `applyLayout` build a fresh entry: a different `PaneSlot`, on the picked leg, a different pane class,
  * the same host, and the old view's editor taken off on the way out (a λ copy's into custody, a TM or
- * asm copy's destroyed). A leg change is a new slot rather than a mutated one, so `K` never has to
+ * rxm copy's destroyed). A leg change is a new slot rather than a mutated one, so `K` never has to
  * change: the pane and the slot are replaced together, and `Binding<K>`'s type property is what makes
  * that replacement checked rather than something it stands in the way of.
  */

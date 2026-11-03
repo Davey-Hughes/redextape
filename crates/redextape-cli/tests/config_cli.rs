@@ -198,10 +198,10 @@ fn an_out_of_range_config_width_refuses_and_names_the_bound() {
 fn a_configured_encoding_does_not_break_a_lambda_emit() {
     let root = tree("emit-guard", "[emit]\nencoding = \"binary\"\nfield-width = 32\n");
     std::fs::write(root.join("p.rxt"), "1 + 2\n").unwrap();
-    // **BOTH NON-`tm` TARGETS, NOT JUST LAMBDA.** The guard is `lang != Lang::Tm`, so `asm` is
+    // **BOTH NON-`tm` TARGETS, NOT JUST LAMBDA.** The guard is `lang != Lang::Tm`, so `rxm` is
     // covered by the same branch — but "covered by the same branch" is a claim about today's code,
     // and the design's rule is stated for ANY non-`tm` target.
-    for lang in ["lambda", "asm"] {
+    for lang in ["lambda", "rxm"] {
         let out = Command::cargo_bin("redextape")
             .unwrap()
             .current_dir(&root)
@@ -224,10 +224,10 @@ fn a_configured_encoding_does_not_break_a_lambda_emit() {
 fn the_flags_on_a_non_tm_target_are_still_errors() {
     let root = tree("emit-guard-flag", "");
     std::fs::write(root.join("p.rxt"), "1 + 2\n").unwrap();
-    // Both flags against both non-`tm` targets: four cases, not two. `asm` is refused by the same
+    // Both flags against both non-`tm` targets: four cases, not two. `rxm` is refused by the same
     // `lang != Lang::Tm` branch as `lambda`, and pinning that here is what keeps it a tested fact
     // rather than an inference from reading the condition.
-    for lang in ["lambda", "asm"] {
+    for lang in ["lambda", "rxm"] {
         for flag in [["--encoding", "binary"], ["--field-width", "32"]] {
             let out = Command::cargo_bin("redextape")
                 .unwrap()

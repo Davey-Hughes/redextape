@@ -28,13 +28,13 @@ describe('the stage, under the gestures that add and remove views', () => {
    * **THE PRECONDITIONS ARE ASSERTED BECAUSE THEY PICK A CLOSE WHERE TWO LEAVES DIFFER.** `close` names the
    * view before the closed one (`main.ts`'s `neighbourOf`), and the stage mounts the focused view, which falls
    * back to `workspace.ts`'s `defaultFocus` where the named one was not recorded first. On `harness.ts`'s
-   * `fourViews()`, closing `lambda-0` names `source`, and the fallback is `asm-0`. Closing `asm-0` instead
+   * `fourViews()`, closing `lambda-0` names `source`, and the fallback is `rxm-0`. Closing `rxm-0` instead
    * makes them agree — both are `lambda-0`, the leaf before it and the first one left that is not the source —
    * so a version of this case that picked that view would pass against a stage that mounted the fallback.
    */
   it('does not strand the focus when the shown view is closed', () => {
     clickWorkspaceItem('[data-preset="stage"]')
-    expect(tabLeaves(), 'the stage is not showing the four views').toEqual(['source', 'lambda-0', 'asm-0', 'tm-0'])
+    expect(tabLeaves(), 'the stage is not showing the four views').toEqual(['source', 'lambda-0', 'rxm-0', 'tm-0'])
     expect(selectedTab(), 'the precondition is that lambda-0 is the shown view').toBe('lambda-0')
 
     const close = document.querySelector<HTMLButtonElement>('[data-leaf="lambda-0"] button.view-close')
@@ -43,7 +43,7 @@ describe('the stage, under the gestures that add and remove views', () => {
     expect(document.activeElement, 'the ✕ did not take the focus').toBe(close)
     close?.click()
 
-    expect(tabLeaves()).toEqual(['source', 'asm-0', 'tm-0'])
+    expect(tabLeaves()).toEqual(['source', 'rxm-0', 'tm-0'])
     expect(document.activeElement, 'focus fell to <body> when the shown view was closed').not.toBe(document.body)
     // AND IT IS IN THE VIEW THAT BECAME FOCUSED, which is what spec §11 actually promises — not merely
     // somewhere other than `<body>`.

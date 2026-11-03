@@ -55,10 +55,10 @@ use redextape_core::desugar::desugar;
 use redextape_core::lambda::lower;
 use redextape_core::lambda::term::{LambdaTerm, Node, logical_size, max_shared_logical_size};
 use redextape_core::parser::parse;
-use redextape_core::tm::asm::{Instr, Program, Reg};
 use redextape_core::tm::build::MAX_MACHINE_STATES;
+use redextape_core::tm::rxm::{Instr, Program, Reg};
 use redextape_core::tm::{
-    Binary, EncodingKind, TM_DEFAULT_CAPS, TmRun, Unary, defunc, lower_asm, lower_tm, lower_tm_guarded, run_tm_at,
+    Binary, EncodingKind, TM_DEFAULT_CAPS, TmRun, Unary, defunc, lower_rxm, lower_tm, lower_tm_guarded, run_tm_at,
     run_tm_described, run_tm_fitted,
 };
 use redextape_core::ty::Ty;
@@ -238,7 +238,7 @@ fn core_of(src: &str) -> redextape_core::core::Core {
     desugar(&prog.expect("parse produced no program"))
 }
 
-/// `n` leaves, balanced, so depth is log2(n) and `lower_asm`'s `MAX_LOWER_DEPTH` never fires. Shared
+/// `n` leaves, balanced, so depth is log2(n) and `lower_rxm`'s `MAX_LOWER_DEPTH` never fires. Shared
 /// by the two tests below rather than defined in each: they assert opposite outcomes about the SAME
 /// shape at different sizes, so a copy that drifted would silently stop testing the pair.
 fn balanced(lo: usize, hi: usize) -> String {
@@ -249,12 +249,12 @@ fn balanced(lo: usize, hi: usize) -> String {
     format!("({} + {})", balanced(lo, mid), balanced(mid, hi))
 }
 
-/// `Core` to asm: `lower_asm` directly, then, on ANY error — `TooDeep` included — again through `defunc`.
+/// `Core` to rxm: `lower_rxm` directly, then, on ANY error — `TooDeep` included — again through `defunc`.
 /// That is looser than `lower_program`, which retries through `defunc` only on `Unsupported` and returns
 /// `TooDeep` at once.
-fn asm_of(src: &str) -> redextape_core::tm::asm::Program {
+fn rxm_of(src: &str) -> redextape_core::tm::rxm::Program {
     let core = core_of(src);
-    lower_asm(&core).or_else(|_| defunc(&core).and_then(|d| lower_asm(&d))).expect("program must lower to asm")
+    lower_rxm(&core).or_else(|_| defunc(&core).and_then(|d| lower_rxm(&d))).expect("program must lower to rxm")
 }
 
 /// THE WORST PROGRAM THIS PROJECT SHIPS must still lower, with room to spare.
@@ -286,7 +286,7 @@ fn the_worst_shipped_demo_lowers_far_below_the_state_ceiling() {
         fn ap2(g, a, b) { g(a, b) }\n\
         head(map([1, 2], add1)) + head(ap2(map, [5, 6], add1))";
 
-    let prog = asm_of(WORST_SHIPPED_DEMO);
+    let prog = rxm_of(WORST_SHIPPED_DEMO);
     let (machine, _) =
         lower_tm_guarded(&prog, &Binary::default()).expect("the worst program this project ships must not be refused");
 
@@ -356,9 +356,9 @@ fn a_short_program_whose_gadgets_exceed_the_ceiling_is_refused() {
     );
 }
 
-/// THE TWO SIDES OF THE LINE, from source rather than hand-built asm.
+/// THE TWO SIDES OF THE LINE, from source rather than hand-built rxm.
 ///
-/// A BALANCED expression tree is depth-log, so `lower_asm`'s `MAX_LOWER_DEPTH` never fires and the
+/// A BALANCED expression tree is depth-log, so `lower_rxm`'s `MAX_LOWER_DEPTH` never fires and the
 /// whole token budget turns into instructions AND slots, which multiply: growth is about
 /// O(code.len()^1.9). Left-nested shapes hit the depth guard at ~580 and never get here.
 ///
@@ -377,7 +377,7 @@ fn a_short_program_whose_gadgets_exceed_the_ceiling_is_refused() {
 #[test]
 #[ignore = "slow tier: builds a ~400 MB machine; run via scripts/check-slow.sh"]
 fn the_balanced_tree_is_admitted_below_the_ceiling_and_refused_above_it() {
-    let admitted = asm_of(&balanced(0, 256));
+    let admitted = rxm_of(&balanced(0, 256));
     let (machine, _) = lower_tm_guarded(&admitted, &Binary::default())
         .expect("1,022 tokens builds 575,861 states, under the ceiling — it must still lower");
     assert!(machine.states.len() < MAX_MACHINE_STATES);
@@ -386,7 +386,7 @@ fn the_balanced_tree_is_admitted_below_the_ceiling_and_refused_above_it() {
     // before `overflowed()` trips), peaking this one test near 1.13 GB instead of ~727 MB.
     drop(machine);
 
-    let refused = asm_of(&balanced(0, 1_024));
+    let refused = rxm_of(&balanced(0, 1_024));
     assert!(
         lower_tm_guarded(&refused, &Binary::default()).is_none(),
         "4,094 tokens builds 8,595,317 states (6.0 GB) and must be refused: built, it would \
@@ -424,7 +424,7 @@ fn a_program_past_the_ceiling_reaches_the_caller_as_too_large() {
 /// describe: `300` then 32 `* 2`s then 194 `+ 1`s. Ordinary precedence left-associates the `* 2`
 /// chain first, so this is `(300 * 2^32) + 194`, not a flat left-to-right fold.
 ///
-/// **454 asm instructions**, matching the design doc's count: `lower_asm.rs`'s own test doc records
+/// **454 rxm instructions**, matching the design doc's count: `lower_rxm.rs`'s own test doc records
 /// that `2 * 3` lowers to two `Li`s and a `Bin` — the FIRST literal on each side needs loading, but a
 /// chained step's left operand is already sitting in a register from the step before it, so each
 /// subsequent `* 2` or `+ 1` costs one `Li` (the new literal) plus one `Bin`. That is 1 (`Li 300`) +

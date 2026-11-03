@@ -541,7 +541,7 @@
       ]
     }
   },
-  "redextape_asm": {
+  "redextape_rxm": {
     "that program, lowered to a headered listing": {
       "src": "result Nat\n\n    jmp\tskip1\ndouble.0:\n    mov\tr0, a0\n    mov\tr1, r0\n    li\tr2, #2\n    mul\trr, r1, r2\n    ret\nskip1:\n    li\tr0, #3\n    mov\ta0, r0\n    call\tdouble.0\n    halt\n",
       "spans": [

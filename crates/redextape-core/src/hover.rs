@@ -1,12 +1,12 @@
 //! What hover says, for each text form that has anything to say.
 //!
 //! **THE WORDS LIVE HERE, NOT IN THE SERVER.** `redextape-lsp` renders what this module returns and
-//! decides nothing about it. The reason is the drift test: the asm table `tm/asm_syntax.rs` carries
-//! is held to `MNEMONICS`, which carries no visibility modifier at all inside `tm::asm_syntax` —
+//! decides nothing about it. The reason is the drift test: the rxm table `tm/rxm_syntax.rs` carries
+//! is held to `MNEMONICS`, which carries no visibility modifier at all inside `tm::rxm_syntax` —
 //! private even to the rest of `tm`, so a table living in `redextape-lsp` could only be held to it by
 //! widening that constant across a crate boundary — a weaker claim than
 //! `table_agrees_with_the_printer`, the sibling it copies. That table and its drift tests are
-//! `asm_syntax.rs`'s own; this module only calls `instr_at`. Core already owns user-facing English;
+//! `rxm_syntax.rs`'s own; this module only calls `instr_at`. Core already owns user-facing English;
 //! every `Diagnostic` message is core's.
 //!
 //! **`None` IS THE ORDINARY ANSWER.** A cursor on whitespace, on a keyword, or in `.rxlambda` has
@@ -186,7 +186,7 @@ pub fn rxt(src: &str, offset: usize, nav: Option<&NameIndex>) -> Option<HoverAns
             },
             Lit::Bool(b) => HoverAnswer {
                 title: "Bool".to_string(),
-                // A Bool has no bases. What it has is a lowering: `lower_asm`'s `Core::Bool` arm
+                // A Bool has no bases. What it has is a lowering: `lower_rxm`'s `Core::Bool` arm
                 // emits `Li(dst, u64::from(*b))`, so the value below is that arm's and not a
                 // convention invented here.
                 lines: vec![format!("lowers to {} in a register", u64::from(b))],
@@ -284,13 +284,13 @@ fn line_of(src: &str, offset: usize) -> usize {
     src.get(..offset).unwrap_or(src).matches('\n').count() + 1
 }
 
-/// Hover for the `.asm` text form.
+/// Hover for the `.rxm` text form.
 ///
-/// `nav` is the caller's already-built `NameIndex` for `src` — `tm::parse_asm_nav(src).1`, which is
+/// `nav` is the caller's already-built `NameIndex` for `src` — `tm::parse_rxm_nav(src).1`, which is
 /// always `Some` for a form with no `MAX_TOKENS`-style ceiling. Building it here instead would be a
 /// second parse of `src` on every request — see `redextape-lsp`'s `Document::nav` for the cost.
 #[must_use]
-pub fn asm(src: &str, offset: usize, nav: Option<&NameIndex>) -> Option<HoverAnswer> {
+pub fn rxm(src: &str, offset: usize, nav: Option<&NameIndex>) -> Option<HoverAnswer> {
     if let Some((span, doc)) = crate::tm::instr_at(src, offset) {
         let mut lines = vec![doc.summary.to_string()];
         if !doc.operands.is_empty() {
@@ -302,7 +302,7 @@ pub fn asm(src: &str, offset: usize, nav: Option<&NameIndex>) -> Option<HoverAns
     let nav = nav?;
     let (i, occurrence) = nav.at(offset)?;
     // BOTH ARMS ARE STRUCT VARIANTS. `Role::Reference` carries a `def: Option<usize>` — a
-    // dangling reference is an ordinary value here, because `parse_asm_full` accepts
+    // dangling reference is an ordinary value here, because `parse_rxm_full` accepts
     // `jmp nowhere` with zero diagnostics — so this matches `{ .. }` rather than a bare name.
     //
     // **THE REFERENCE ROW NAMES A LINE, NOT JUST A ROLE.** §8's design table promises "where it is
@@ -346,10 +346,10 @@ mod tests {
         tm(src, offset, Some(&nav))
     }
 
-    /// `asm`, building its own `NameIndex` fresh — the label row's sibling of `rxt_with_nav`.
-    fn asm_with_nav(src: &str, offset: usize) -> Option<HoverAnswer> {
-        let nav = crate::tm::parse_asm_nav(src).1;
-        asm(src, offset, Some(&nav))
+    /// `rxm`, building its own `NameIndex` fresh — the label row's sibling of `rxt_with_nav`.
+    fn rxm_with_nav(src: &str, offset: usize) -> Option<HoverAnswer> {
+        let nav = crate::tm::parse_rxm_nav(src).1;
+        rxm(src, offset, Some(&nav))
     }
 
     #[test]
@@ -365,7 +365,7 @@ mod tests {
 
     #[test]
     fn a_bool_literal_hovers_with_what_it_lowers_to() {
-        // `1` and `0` are `lower_asm`'s, not this module's invention: `Core::Bool(_, b)` emits
+        // `1` and `0` are `lower_rxm`'s, not this module's invention: `Core::Bool(_, b)` emits
         // `Li(dst, u64::from(*b))`. A Bool has no bases, which is why this row says something else.
         let src = "let b = true;\nb\n";
         let at = src.find("true").expect("fixture holds it");
@@ -590,7 +590,7 @@ f:
     #[test]
     fn an_instruction_hovers_with_what_it_does_and_its_operand_roles() {
         let at = PROGRAM.find("li").expect("fixture holds it");
-        let a = asm(PROGRAM, at, None).expect("an instruction answers");
+        let a = rxm(PROGRAM, at, None).expect("an instruction answers");
         let t = text(&a);
         assert!(t.contains("li"), "{t}");
         assert!(t.to_lowercase().contains("immediate"), "{t}");
@@ -611,7 +611,7 @@ f:
         assert_eq!(g_line, 6, "fixture drifted under the test that assumes this");
 
         let at = LABELED.find("jz\tr0, g").map(|i| i + "jz\tr0, ".len()).expect("fixture holds it");
-        let reference = asm_with_nav(LABELED, at).expect("a reference answers");
+        let reference = rxm_with_nav(LABELED, at).expect("a reference answers");
         assert!(
             text(&reference).contains(&format!("line {g_line}")),
             "a reference must name where `g` is defined: {}",
@@ -619,7 +619,7 @@ f:
         );
 
         let at = LABELED.find("g:\n").expect("fixture holds it");
-        let definition = asm_with_nav(LABELED, at).expect("a definition answers");
+        let definition = rxm_with_nav(LABELED, at).expect("a definition answers");
         assert!(text(&definition).contains("Defined here."), "{}", text(&definition));
 
         // The two arms answer differently; the `line {g_line}` assertion above is what pins the location.

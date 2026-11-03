@@ -2,7 +2,7 @@
  * The worker's record loop, written once for every leg: step a leg's cursor, post its frames a chunk at a time, and
  * stop at the leg's end, at its allowance, or when a newer request replaces what it was stepping.
  *
- * **HERE AND NOT IN `session-worker.ts`, WHERE THE APP CALLS IT**, for the reason `asmRecordEnd` gives
+ * **HERE AND NOT IN `session-worker.ts`, WHERE THE APP CALLS IT**, for the reason `rxmRecordEnd` gives
  * (`protocol.ts`): the coverage gate cannot see the worker (its own module doc: v8 coverage does not attach to a
  * dedicated worker's context), so a branch written there moves none of the gate's numbers. **ONE LOOP RATHER THAN ONE
  * PER LEG**, which would be the same tokens but for each leg's names, so a fix — the `finally` below is one, for a race
@@ -18,8 +18,8 @@ import { RECORD_CHUNK } from './protocol'
 /**
  * One leg's pieces, for `recordLeg`. `H` is the wasm handle that carries the leg and `F` the frame it renders.
  *
- * **EACH LEG'S OWN END IS ITS OWN.** A λ or TM cursor's `RunStatus` is read by `protocol.ts`'s `endOf`; an asm
- * cursor's status by `protocol.ts`'s `asmRecordEnd`, which names a full cap where the other two have none to name.
+ * **EACH LEG'S OWN END IS ITS OWN.** A λ or TM cursor's `RunStatus` is read by `protocol.ts`'s `endOf`; an rxm
+ * cursor's status by `protocol.ts`'s `rxmRecordEnd`, which names a full cap where the other two have none to name.
  */
 export type RecordLeg<H, F> = {
   /** The leg whose flag, bytes and allowance the loop spends. */

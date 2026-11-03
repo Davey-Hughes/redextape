@@ -5,7 +5,7 @@ opens with the right filetype, a working parser, and no colour:
 
 ```lua
 vim.api.nvim_create_autocmd("FileType", {
-  pattern = { "redextape", "redextape_asm", "redextape_lambda", "redextape_tm" },
+  pattern = { "redextape", "redextape_rxm", "redextape_lambda", "redextape_tm" },
   callback = function(args) pcall(vim.treesitter.start, args.buf) end,
 })
 ```

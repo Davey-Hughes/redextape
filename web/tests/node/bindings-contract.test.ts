@@ -1,10 +1,10 @@
 import { describe, expect, it } from 'vitest'
 import type {
-  AsmState,
-  AsmStatus,
   LambdaState,
   LambdaStatus,
   RuleView,
+  RxmState,
+  RxmStatus,
   StateView,
   TmScratchStatus,
   TmState,
@@ -55,12 +55,12 @@ describe('the generated bindings keep the nullability the wire carries', () => {
     const stateViewInstr: StateView['instr'] = null
     const ruleViewRead: RuleView['read'][number] = null
     const ruleViewWrite: RuleView['write'][number] = null
-    const asmStateNext: AsmState['next'] = null
-    const asmStateWrote: AsmState['wrote'] = null
-    const asmStateSourceNode: AsmState['source_node'] = null
-    const asmStatusRun: AsmStatus['run'] = null
-    const asmStatusCap: AsmStatus['cap'] = null
-    const asmStatusTotalSteps: AsmStatus['total_steps'] = null
+    const rxmStateNext: RxmState['next'] = null
+    const rxmStateWrote: RxmState['wrote'] = null
+    const rxmStateSourceNode: RxmState['source_node'] = null
+    const rxmStatusRun: RxmStatus['run'] = null
+    const rxmStatusCap: RxmStatus['cap'] = null
+    const rxmStatusTotalSteps: RxmStatus['total_steps'] = null
 
     expect(lambdaStatusNode).toBeNull()
     expect(lambdaStatusRun).toBeNull()
@@ -75,11 +75,11 @@ describe('the generated bindings keep the nullability the wire carries', () => {
     expect(stateViewInstr).toBeNull()
     expect(ruleViewRead).toBeNull()
     expect(ruleViewWrite).toBeNull()
-    expect(asmStateNext).toBeNull()
-    expect(asmStateWrote).toBeNull()
-    expect(asmStateSourceNode).toBeNull()
-    expect(asmStatusRun).toBeNull()
-    expect(asmStatusCap).toBeNull()
-    expect(asmStatusTotalSteps).toBeNull()
+    expect(rxmStateNext).toBeNull()
+    expect(rxmStateWrote).toBeNull()
+    expect(rxmStateSourceNode).toBeNull()
+    expect(rxmStatusRun).toBeNull()
+    expect(rxmStatusCap).toBeNull()
+    expect(rxmStatusTotalSteps).toBeNull()
   })
 })

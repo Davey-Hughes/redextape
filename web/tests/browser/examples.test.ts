@@ -33,7 +33,7 @@ const RUN_MS = 20_000
 
 function run(example: Example): Promise<Heard> {
   const worker = new Worker(new URL('../../src/session-worker.ts', import.meta.url), { type: 'module' })
-  const done: Record<Leg, RecordEnd | null> = { lambda: null, asm: null, tm: null }
+  const done: Record<Leg, RecordEnd | null> = { lambda: null, rxm: null, tm: null }
   let compiled: Compiled | null = null
   return new Promise((resolve, reject) => {
     const timer = setTimeout(() => {
@@ -49,7 +49,7 @@ function run(example: Example): Promise<Heard> {
       const r = e.data
       if (r.kind === 'compiled') compiled = r
       else if (r.kind === 'lambda-frames') done.lambda = r.done
-      else if (r.kind === 'asm-frames') done.asm = r.done
+      else if (r.kind === 'rxm-frames') done.rxm = r.done
       else if (r.kind === 'tm-frames') done.tm = r.done
       else if (r.kind === 'result') {
         const c = compiled
@@ -90,7 +90,7 @@ describe.each(EXAMPLES)('$title', (example) => {
   })
 
   it('stops each leg where the manifest says', () => {
-    expect({ lambda: stopOf(heard, 'lambda'), asm: stopOf(heard, 'asm'), tm: stopOf(heard, 'tm') }).toEqual(
+    expect({ lambda: stopOf(heard, 'lambda'), rxm: stopOf(heard, 'rxm'), tm: stopOf(heard, 'tm') }).toEqual(
       example.outcomes,
     )
   })
@@ -101,7 +101,7 @@ describe.each(EXAMPLES)('$title', (example) => {
       if (example.outcomes[leg] === 'declined') expect(value, leg).toBeNull()
       // A λ LEG THAT FILLS ITS HISTORY HAS NOTHING TO HOLD: it has not reached its normal form.
       else if (leg === 'lambda' && example.outcomes[leg] === 'history-full') expect(value, leg).toBe('Unfinished')
-      // AN ENDED LEG, AND A TM OR ASM LEG WHOSE HISTORY FILLS: `compile` runs those two legs to their end, so both
+      // AN ENDED LEG, AND A TM OR RXM LEG WHOSE HISTORY FILLS: `compile` runs those two legs to their end, so both
       // carry the run's own value, and the legs that end agree on it.
       else expect(value, leg).toEqual({ Value: { text: example.value } })
     }

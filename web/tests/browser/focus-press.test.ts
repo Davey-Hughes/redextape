@@ -60,7 +60,7 @@ localStorage.setItem(
           sizes: [0.5, 0.5],
           children: [
             { kind: 'leaf', id: 'lambda-0', pane: 'lambda' },
-            { kind: 'leaf', id: 'asm-0', pane: 'asm' },
+            { kind: 'leaf', id: 'rxm-0', pane: 'rxm' },
           ],
         },
         {

@@ -39,9 +39,9 @@ describe('a first visit', () => {
 
   it('compiles it, and every leg ends at 15', async () => {
     await until(() => stateIdle() && segments().length > 0, 'the first compile')
-    const [lambda, asm, tm] = segments()
+    const [lambda, rxm, tm] = segments()
     expect(lambda).toMatch(/^λ 15 · /)
-    expect(asm).toMatch(/^asm 15 · /)
+    expect(rxm).toMatch(/^rxm 15 · /)
     expect(tm).toMatch(/^TM 15 · /)
   })
 

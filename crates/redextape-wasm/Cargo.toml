@@ -35,9 +35,9 @@ ts-rs = { version = "10", optional = true }
 # Forwards to core's so `ts` is ONE switch: without it, a run that enabled the feature only here would
 # compile derives for this crate's eight wire types and silently leave core's out of that run.
 #
-# IT IS LOAD-BEARING FOR IMPORTS, AND `AsmStatus::cap` IS WHY. That field is an `Option<AsmCap>`, core's
-# enum, so the generated `AsmStatus.ts` imports `./AsmCap` — and without core's `ts` switched on by this
-# line `AsmCap` has no `TS` impl and this crate's `ts` build does not compile. Every other field across the
+# IT IS LOAD-BEARING FOR IMPORTS, AND `RxmStatus::cap` IS WHY. That field is an `Option<RxmCap>`, core's
+# enum, so the generated `RxmStatus.ts` imports `./RxmCap` — and without core's `ts` switched on by this
+# line `RxmCap` has no `TS` impl and this crate's `ts` build does not compile. Every other field across the
 # eight types is `bool`, `String`, `Vec<String>`, `usize`, `u64`, the wasm-local `RunStatus` or
 # `ReductionStatus`, or `NodeId` — each bare or under one `Option` — and `NodeId` is a transparent alias for
 # `u32`, which inlines as a TypeScript `number`.
@@ -53,13 +53,13 @@ ts = ["dep:ts-rs", "redextape-core/ts"]
 # there holds what it does instead, and `scripts/check-all.sh` gives it a clippy and test leg of its own so that
 # test runs. No wasm build a gate or the app loads enables it.
 probe-no-tm-scratch-ceiling = []
-# `probe-no-tm-scratch-ceiling`'s twin for asm copies, and one thing more. It switches off the size check in
-# `asm_scratch_with_caps` (`src/session.rs`), so an asm copy parses text of any length, for
-# `web/tests/browser/asm-copy-cost.test.ts`, which prices a build on both sides of `MAX_SCRATCH_ASM_BYTES`; and it
-# exports `asmScratchWithCaps`, so `web/tests/browser/asm-copy-memory.test.ts` can build a copy under `DEFAULT_CAPS`
-# and under `COPY_CAPS` and read the worker's memory after each. Built by `web`'s `test:probe:asm-copy` script into
-# `target/probe-asm-copy-wasm/`, never into `pkg/`; `scripts/check-all.sh` gives it a clippy and test leg.
-probe-asm-copy = []
+# `probe-no-tm-scratch-ceiling`'s twin for rxm copies, and one thing more. It switches off the size check in
+# `rxm_scratch_with_caps` (`src/session.rs`), so an rxm copy parses text of any length, for
+# `web/tests/browser/rxm-copy-cost.test.ts`, which prices a build on both sides of `MAX_SCRATCH_RXM_BYTES`; and it
+# exports `rxmScratchWithCaps`, so `web/tests/browser/rxm-copy-memory.test.ts` can build a copy under `DEFAULT_CAPS`
+# and under `COPY_CAPS` and read the worker's memory after each. Built by `web`'s `test:probe:rxm-copy` script into
+# `target/probe-rxm-copy-wasm/`, never into `pkg/`; `scripts/check-all.sh` gives it a clippy and test leg.
+probe-rxm-copy = []
 
 [dev-dependencies]
 wasm-bindgen-test = "0.3.76"

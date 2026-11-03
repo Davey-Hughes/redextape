@@ -67,8 +67,8 @@ const PROBE_FILES = [
   'tests/browser/pane-floor.test.ts',
   'tests/browser/tm-buffer-cost.test.ts',
   'tests/browser/lambda-tree-cost.test.ts',
-  'tests/browser/asm-copy-cost.test.ts',
-  'tests/browser/asm-copy-memory.test.ts',
+  'tests/browser/rxm-copy-cost.test.ts',
+  'tests/browser/rxm-copy-memory.test.ts',
 ]
 const PROBE_EXCLUDE = process.env.REDEXTAPE_PROBE === undefined ? PROBE_FILES : []
 
@@ -81,7 +81,7 @@ export default defineConfig({
   // THREE DO NOT, FOR A REASON THAT HAS NOTHING TO DO WITH THE GRAMMARS THEMSELVES.
   //
   // `colour.ts` imports all four tree-sitter grammar `.wasm` with Vite's `?url` suffix. Three of
-  // them (`tree-sitter-redextape`, `tree-sitter-redextape-asm`, `tree-sitter-redextape-tm`, each
+  // them (`tree-sitter-redextape`, `tree-sitter-redextape-rxm`, `tree-sitter-redextape-tm`, each
   // 8-17 KiB) land as hashed files under `dist/assets/`. `tree-sitter-redextape-lambda.wasm` is
   // 2,514 bytes — under Vite's default `assetsInlineLimit` of 4096 — so it alone would be inlined
   // into the JS bundle as a `data:application/wasm;base64,...` URI instead of being emitted.
@@ -123,7 +123,7 @@ export default defineConfig({
     // Coverage spans BOTH projects because this block sits at the `test` root rather than inside
     // either one — a single `vitest run --coverage` merges the node and browser tiers into one
     // report. That merge is the point, not a convenience. The DOM and worker wiring (`main`, `pane-host`
-    // and the λ, TM and asm panes, the two workers) is code the `node` project cannot execute at all, so
+    // and the λ, TM and rxm panes, the two workers) is code the `node` project cannot execute at all, so
     // a node-only number would have to exclude exactly the layer where a regression hides best. The DOM
     // modules are covered by the merge; the two workers are excluded below for a reason that is about
     // INSTRUMENTATION rather than reach, and that entry documents both the reason and what it costs.
@@ -215,7 +215,7 @@ export default defineConfig({
           // learns its own run's stamp here, and refuses a corpus or a build under `target/` stamped by another.
           provide: {
             probeTmBufferRun: process.env.REDEXTAPE_PROBE_TM_BUFFER_RUN ?? '',
-            probeAsmCopyRun: process.env.REDEXTAPE_PROBE_ASM_COPY_RUN ?? '',
+            probeRxmCopyRun: process.env.REDEXTAPE_PROBE_RXM_COPY_RUN ?? '',
           },
           // Vitest serves its own tester HTML, so this project's `index.html` — and therefore its
           // `<link>` to `style.css` — never reaches the page. See `tests/browser/setup.ts`: without it

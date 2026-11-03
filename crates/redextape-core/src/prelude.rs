@@ -46,7 +46,7 @@ pub fn runtime_env() -> Vec<(String, Value)> {
         // already `$`-prefixed at its one and only spelling, so it has no bare form to shadow. Same
         // `Value`/`Builtin` variant as the bare name — identical behaviour, including faults (`$nil`
         // is `Value::Nil`, same as `nil`, not a `Builtin` — it is a value, not a function), for
-        // `lower_asm`/`run_asm` evaluating an already-lowered call — see `lower_asm.rs`'s
+        // `lower_rxm`/`run_rxm` evaluating an already-lowered call — see `lower_rxm.rs`'s
         // `dollar_aliases_match_their_bare_builtins`, which pins both a value and a fault pair per
         // alias. One hop upstream this is not quite true: `lower_program`'s retry through `defunc`
         // treats a bare `$cons`/`$head`/`$tail`/`$nil` as UNBOUND (deliberately absent

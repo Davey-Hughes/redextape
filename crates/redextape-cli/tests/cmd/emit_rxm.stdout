@@ -1,0 +1,7 @@
+; rxm listing, read back by `parse_rxm` and run by `redextape run`.
+result Nat
+
+    li	r0, #1
+    li	r1, #2
+    add	rr, r0, r1
+    halt

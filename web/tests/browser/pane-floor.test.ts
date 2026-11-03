@@ -17,7 +17,7 @@ import { SHELL, storeFourViews } from './harness'
  * pixel floor at every size; that relationship is what is being measured, on both axes.
  *
  * TWO DIVIDERS, BECAUSE THE FOUR-VIEW TREE HAS TWO KINDS OF SQUEEZE. `harness.ts`'s `fourViews()` nests a `row`
- * split (source | λ, a WIDTH constraint) inside a `column` split (that row above the asm | TM row, a
+ * split (source | λ, a WIDTH constraint) inside a `column` split (that row above the rxm | TM row, a
  * HEIGHT constraint). Each divider is dragged hard past the floor in its own axis — `clientX` for the
  * vertical (row) divider, `clientY` for the horizontal (column) one — so every pane kind's OWN floor
  * gets measured rather than TM's height being inferred from source's width by analogy.
@@ -149,7 +149,7 @@ describe('a pane at the floor', () => {
       const colSpan = hDivider.parentElement?.getBoundingClientRect().height ?? 0
 
       // Dragging DOWN (increasing `clientY`) grows the split's FIRST child (the source/λ row) and
-      // shrinks its SECOND (the asm/`tm` row) — the mirror image of "drag hard left" above, which shrinks the row
+      // shrinks its SECOND (the rxm/`tm` row) — the mirror image of "drag hard left" above, which shrinks the row
       // split's FIRST child (`source`). `tm` is in the column split's second neighbour, so the sign that
       // drives it to the floor flips accordingly.
       //

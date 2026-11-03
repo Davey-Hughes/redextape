@@ -18,9 +18,9 @@ use redextape_core::diagnostic::{Diagnostic, Severity};
 use redextape_core::lambda::{Cut, Owner};
 use redextape_core::span::Span;
 use redextape_core::tm::machine::Move;
-use redextape_core::trace::{AsmCap, WordTag};
+use redextape_core::trace::{RxmCap, WordTag};
 use redextape_core::viewmodel::{
-    AsmBox, AsmCallFrame, AsmCell, AsmProgram, AsmState, AsmWindow, AsmWord, LambdaState, RuleView, StateView,
+    LambdaState, RuleView, RxmBox, RxmCallFrame, RxmCell, RxmProgram, RxmState, RxmWindow, RxmWord, StateView,
     TmProgram, TmState,
 };
 use redextape_test_support::ts_derive_scan::{
@@ -32,20 +32,20 @@ use ts_rs::TS;
 /// Every type in this crate carrying `#[ts(export)]`, paired with the file it generates.
 fn generated() -> Vec<(&'static str, String)> {
     vec![
-        ("AsmBox", AsmBox::export_to_string().unwrap()),
-        ("AsmCallFrame", AsmCallFrame::export_to_string().unwrap()),
-        ("AsmCap", AsmCap::export_to_string().unwrap()),
-        ("AsmCell", AsmCell::export_to_string().unwrap()),
-        ("AsmProgram", AsmProgram::export_to_string().unwrap()),
-        ("AsmState", AsmState::export_to_string().unwrap()),
-        ("AsmWindow", AsmWindow::export_to_string().unwrap()),
-        ("AsmWord", AsmWord::export_to_string().unwrap()),
         ("Cut", Cut::export_to_string().unwrap()),
         ("Diagnostic", Diagnostic::export_to_string().unwrap()),
         ("LambdaState", LambdaState::export_to_string().unwrap()),
         ("Move", Move::export_to_string().unwrap()),
         ("Owner", Owner::export_to_string().unwrap()),
         ("RuleView", RuleView::export_to_string().unwrap()),
+        ("RxmBox", RxmBox::export_to_string().unwrap()),
+        ("RxmCallFrame", RxmCallFrame::export_to_string().unwrap()),
+        ("RxmCap", RxmCap::export_to_string().unwrap()),
+        ("RxmCell", RxmCell::export_to_string().unwrap()),
+        ("RxmProgram", RxmProgram::export_to_string().unwrap()),
+        ("RxmState", RxmState::export_to_string().unwrap()),
+        ("RxmWindow", RxmWindow::export_to_string().unwrap()),
+        ("RxmWord", RxmWord::export_to_string().unwrap()),
         ("Severity", Severity::export_to_string().unwrap()),
         ("Span", Span::export_to_string().unwrap()),
         ("StateView", StateView::export_to_string().unwrap()),
@@ -68,7 +68,7 @@ fn generated() -> Vec<(&'static str, String)> {
 /// field type rather than the integer inside it, so `ts(type = "number")` on an `Option<u64>` field
 /// would generate `field: number` — no `bigint`, so this gate passes, and the `| null` that `None`
 /// puts on the wire is gone. None of this crate's fields are `Option<u64>` today; `redextape-wasm`'s
-/// `TmStatus::total_steps` and `AsmStatus::total_steps` are. `no_override_misstates_a_field_s_nullability`
+/// `TmStatus::total_steps` and `RxmStatus::total_steps` are. `no_override_misstates_a_field_s_nullability`
 /// below catches that class in this crate, and its twin in `redextape-wasm`'s `ts_bindings.rs` catches it
 /// there. Naming the hole here is the point: a gate that implied it covered the whole override class
 /// would tell the next reader not to check.

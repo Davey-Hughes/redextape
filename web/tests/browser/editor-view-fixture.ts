@@ -1,6 +1,6 @@
 import { EditorView } from '@codemirror/view'
 import { expect } from 'vitest'
-import { asmPane, editorHost, until } from './harness'
+import { editorHost, rxmPane, until } from './harness'
 
 /**
  * The editor mounted in a pane and its CodeMirror view, for the files that read and edit the editor in a pane or make
@@ -41,10 +41,10 @@ export const typeIn = (host: HTMLElement, text: string, missing = 'no CodeMirror
   view.dispatch({ changes: { from: 0, to: view.state.doc.length, insert: text } })
 }
 
-/** Replace the whole text of the editor in the asm view `asm-0`'s pane, thrown on where none is mounted. */
-export const retypeAsm = (text: string): void => {
-  const v = editorOf(asmPane())
-  if (v === null) throw new Error('no editor in the asm view')
+/** Replace the whole text of the editor in the rxm view `rxm-0`'s pane, thrown on where none is mounted. */
+export const retypeRxm = (text: string): void => {
+  const v = editorOf(rxmPane())
+  if (v === null) throw new Error('no editor in the rxm view')
   v.dispatch({ changes: { from: 0, to: v.state.doc.length, insert: text } })
 }
 

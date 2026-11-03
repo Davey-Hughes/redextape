@@ -186,7 +186,7 @@ describe('a view’s shares, in the stored workspace', () => {
   })
 
   /**
-   * THE KEYS, IN THE THREE VIEWS THE APP BUILDS HERE (`panel-boundaries.test.ts` has them in an asm view): an arrow
+   * THE KEYS, IN THE THREE VIEWS THE APP BUILDS HERE (`panel-boundaries.test.ts` has them in an rxm view): an arrow
    * moves the focused boundary a fiftieth of what the open regions share, the two it parts and no more, and `Enter`
    * puts both back.
    */

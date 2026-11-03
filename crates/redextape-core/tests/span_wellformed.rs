@@ -22,8 +22,8 @@ use redextape_core::core::{BinOp, Core, NodeId};
 use redextape_core::lambda::{lower, print_lambda_mapped};
 use redextape_core::sourcemap::SourceMap;
 use redextape_core::tm::{
-    AsmHeader, Binary, EncodingKind, Machine, Move, Program, Rule, State, TmHeader, Unary, defunc, lower_asm, lower_tm,
-    print_asm_mapped, print_asm_with_mapped, print_tm_mapped, print_tm_with_mapped,
+    Binary, EncodingKind, Machine, Move, Program, Rule, RxmHeader, State, TmHeader, Unary, defunc, lower_rxm, lower_tm,
+    print_rxm_mapped, print_rxm_with_mapped, print_tm_mapped, print_tm_with_mapped,
 };
 use redextape_core::ty::Ty;
 
@@ -34,7 +34,7 @@ use common::core_of;
 /// entry below exercises the coverage assertion in `check` over a comment's bytes. The printed forms are
 /// unaffected: `parse` discards comments, so no form printed below carries a source comment.
 ///
-/// THE `if` IS NOT DECORATION. The other five programs lower to assembly with NO LABELS, so without it
+/// THE `if` IS NOT DECORATION. The other five programs lower to rxm with NO LABELS, so without it
 /// the coverage assertion could not see the label `:` at all: deleting its classification would leave
 /// this whole file green. A branch is the smallest program that emits one.
 const CORPUS: &[&str] = &[
@@ -46,11 +46,11 @@ const CORPUS: &[&str] = &[
     "// leading\nlet x = 1; // trailing\nx + 1",
 ];
 
-/// The same asm and TM the source map is built against.
-fn asm_and_tm(core: &Core) -> (Program, Machine) {
-    let prog = match lower_asm(core) {
+/// The same rxm and TM the source map is built against.
+fn rxm_and_tm(core: &Core) -> (Program, Machine) {
+    let prog = match lower_rxm(core) {
         Ok(p) => p,
-        Err(_) => lower_asm(&defunc(core).expect("defunc")).expect("lowers after defunc"),
+        Err(_) => lower_rxm(&defunc(core).expect("defunc")).expect("lowers after defunc"),
     };
     let m = lower_tm(&prog, &Unary::default());
     (prog, m)
@@ -124,15 +124,15 @@ fn every_classifier_produces_well_formed_spans() {
         let (lt, ls) = print_lambda_mapped(&term);
         check(&lt, &ls, &format!("lambda {src:?}"));
 
-        let (prog, m) = asm_and_tm(&core);
-        let (at, asm_spans) = print_asm_mapped(&prog);
-        check(&at, &asm_spans, &format!("asm {src:?}"));
+        let (prog, m) = rxm_and_tm(&core);
+        let (at, rxm_spans) = print_rxm_mapped(&prog);
+        check(&at, &rxm_spans, &format!("rxm {src:?}"));
 
-        // The HEADERED asm form too, for the same reason as the headered TM form below: the header's
+        // The HEADERED rxm form too, for the same reason as the headered TM form below: the header's
         // own `result` and `Ident` spans, and the listing spans shifted by the header's byte length,
         // get their coverage, ordering and bounds checked as the bare form's are.
-        let (aht, ahs) = print_asm_with_mapped(&prog, &AsmHeader { result: Ty::Nat });
-        check(&aht, &ahs, &format!("asm+header {src:?}"));
+        let (aht, ahs) = print_rxm_with_mapped(&prog, &RxmHeader { result: Ty::Nat });
+        check(&aht, &ahs, &format!("rxm+header {src:?}"));
 
         let (mt, ms) = print_tm_mapped(&m);
         check(&mt, &ms, &format!("tm {src:?}"));
@@ -154,7 +154,7 @@ fn every_classifier_produces_well_formed_spans() {
 fn tm_spans_attribute_to_the_source_constructs_that_produced_them() {
     for src in CORPUS {
         let core = core_of(src);
-        let (_, m) = asm_and_tm(&core);
+        let (_, m) = rxm_and_tm(&core);
         let map = SourceMap::build(&core, &Unary::default());
         let (text, spans) = print_tm_mapped(&m);
         let attributed: Attributed = attribute_tm_spans(&text, &map, &spans);
@@ -213,7 +213,7 @@ fn the_multiplication_owns_exactly_the_states_its_own_lowering_produced() {
     assert_eq!(muls.len(), 1, "this program has exactly one multiplication");
     let mul = muls[0];
 
-    let (_, m) = asm_and_tm(&core);
+    let (_, m) = rxm_and_tm(&core);
     let map = SourceMap::build(&core, &Unary::default());
     let block = map.tm_block(mul).expect("the multiplication lowers to TM states");
     let want: BTreeSet<&str> =
@@ -293,7 +293,7 @@ fn text_that_merely_looks_like_a_state_name_is_never_attributed() {
 #[test]
 fn spans_that_do_not_belong_to_the_text_yield_none_instead_of_panicking() {
     let core = core_of("1 + 2 * 3");
-    let (_, machine) = asm_and_tm(&core);
+    let (_, machine) = rxm_and_tm(&core);
     let map = SourceMap::build(&core, &Unary::default());
     let (text, spans) = print_tm_mapped(&machine);
     assert!(!spans.is_empty(), "the fixture must produce spans, or this pins nothing");
@@ -327,7 +327,7 @@ fn spans_that_do_not_belong_to_the_text_yield_none_instead_of_panicking() {
 #[test]
 fn a_map_built_at_one_encoding_declines_text_printed_at_another() {
     let core = core_of("let x = 1; let y = x + x; y * 3");
-    let prog = lower_asm(&core).expect("this corpus is first-order");
+    let prog = lower_rxm(&core).expect("this corpus is first-order");
     let unary = lower_tm(&prog, &Unary::at(6));
     let binary = lower_tm(&prog, &Binary::at(6));
 

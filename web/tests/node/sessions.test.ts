@@ -8,9 +8,9 @@ import type { SessionId } from '../../src/session-client'
 import type { Binding, LegState, PaneOption, PaneView, SessionEntry } from '../../src/sessions'
 import { PaneSlot, resetLegs, SessionRegistry } from '../../src/sessions'
 import { createTransport } from '../../src/transport'
-import type { AsmState, LambdaState, TmProgram, TmState } from '../../src/types'
-import { frameOf } from './asm-fixtures'
+import type { LambdaState, RxmState, TmProgram, TmState } from '../../src/types'
 import { legState } from './leg-fixture'
+import { frameOf } from './rxm-fixtures'
 import { fakeClient, lambdaFrame, paint } from './session-fixtures'
 import { tmFrame } from './tm-machines'
 
@@ -39,18 +39,18 @@ import { tmFrame } from './tm-machines'
  */
 function entry(
   id: SessionId,
-  opts: { label?: string; detached?: boolean; lambda?: string[]; asm?: number[]; tm?: number[] } = {},
+  opts: { label?: string; detached?: boolean; lambda?: string[]; rxm?: number[]; tm?: number[] } = {},
 ): SessionEntry {
-  const legs: { lambda?: LegState<LambdaState>; asm?: LegState<AsmState>; tm?: LegState<TmState> } = {}
+  const legs: { lambda?: LegState<LambdaState>; rxm?: LegState<RxmState>; tm?: LegState<TmState> } = {}
   if (opts.lambda !== undefined) {
     const l = legState<LambdaState>(true, 1_000_000)
     for (const [i, text] of opts.lambda.entries()) l.hist.push(lambdaFrame(text, i), 1)
     legs.lambda = l
   }
-  if (opts.asm !== undefined) {
-    const a = legState<AsmState>(true, 1_000_000)
-    for (const [i, pc] of opts.asm.entries()) a.hist.push(frameOf({ step: i, pc }), 1)
-    legs.asm = a
+  if (opts.rxm !== undefined) {
+    const a = legState<RxmState>(true, 1_000_000)
+    for (const [i, pc] of opts.rxm.entries()) a.hist.push(frameOf({ step: i, pc }), 1)
+    legs.rxm = a
   }
   if (opts.tm !== undefined) {
     const t = legState<TmState>(true, 1_000_000)
@@ -68,8 +68,8 @@ function entry(
     legs,
     tmProgram: null,
     tmScratch: null,
-    asmProgram: null,
-    asmScratch: null,
+    rxmProgram: null,
+    rxmScratch: null,
   }
 }
 
@@ -544,18 +544,18 @@ describe('PaneSlot', () => {
   })
 
   /**
-   * **THE IDENTICAL DISCRIMINATION, ON THE ASM LEG'S OWN HANDLER.** `detachAsm` reaches the same
+   * **THE IDENTICAL DISCRIMINATION, ON THE RXM LEG'S OWN HANDLER.** `detachRxm` reaches the same
    * `instanceof BufferCapReached` catch as `detach` and `detachMachine` above (`transport.ts`'s
-   * `forkCopy`). What it resolves BEFORE the `try` is `sessions.entryOf(session).asmProgram?.asmText`, so
-   * the session here is seeded with the `asmProgram` a real `compiled` reply would have left, as the TM
+   * `forkCopy`). What it resolves BEFORE the `try` is `sessions.entryOf(session).rxmProgram?.rxmText`, so
+   * the session here is seeded with the `rxmProgram` a real `compiled` reply would have left, as the TM
    * test's is with a `tmProgram`.
    */
-  it('re-throws a non-cap error out of the asm-fork handler and keeps only the cap refusal', () => {
+  it('re-throws a non-cap error out of the rxm-fork handler and keeps only the cap refusal', () => {
     const reg = new SessionRegistry()
-    const source = entry('source', { label: 'source', asm: [0] })
-    source.asmProgram = {
+    const source = entry('source', { label: 'source', rxm: [0] })
+    source.rxmProgram = {
       program: { listing: ['li\trr, #1', 'halt'], labels: [] },
-      asmText: 'result Nat\n\n    li\trr, #1\n    halt\n',
+      rxmText: 'result Nat\n\n    li\trr, #1\n    halt\n',
     }
     reg.add(source)
 
@@ -566,7 +566,7 @@ describe('PaneSlot', () => {
 
     const transport = createTransport({
       sessions: reg,
-      // THE ONLY METHOD `detachAsm` CALLS ON IT WHEN `fork` THROWS, mirroring the λ test's fake above.
+      // THE ONLY METHOD `detachRxm` CALLS ON IT WHEN `fork` THROWS, mirroring the λ test's fake above.
       scratchpad: {
         fork: () => {
           throw thrown
@@ -581,23 +581,23 @@ describe('PaneSlot', () => {
       formatOnBlur: () => false,
       // NEVER REACHED, SO A CAST: a keymap setting is joined by an EDITOR, and no fixture in this file builds one.
       keymap: {} as KeymapSetting,
-      // NO `index` FIELD HERE, AS IN THE TM TEST'S FAKE — `detachAsm` resolves its text from the session's
-      // `asmProgram`, not from `linkWiring()`.
+      // NO `index` FIELD HERE, AS IN THE TM TEST'S FAKE — `detachRxm` resolves its text from the session's
+      // `rxmProgram`, not from `linkWiring()`.
       linkWiring: () => ({}) as unknown as LinkWiring,
       notify: (t: string) => {
         notified.push(t)
       },
       onBuffersChanged: () => buffersChanged++,
       onBuffersPersist: () => {
-        throw new Error('an asm fork must not persist through the rebind dependency')
+        throw new Error('an rxm fork must not persist through the rebind dependency')
       },
     })
 
-    const slot = new PaneSlot('asm', 'source')
+    const slot = new PaneSlot('rxm', 'source')
     const events = transport.events(slot)
 
     // THE WIRING BUG, IDENTICAL IN SHAPE TO THE λ AND TM CASES ABOVE.
-    expect(() => events.detachAsm?.()).toThrow(/a pool invariant broke/)
+    expect(() => events.detachRxm?.()).toThrow(/a pool invariant broke/)
     expect(notified).toEqual([])
     expect(draws).toBe(0)
     expect(buffersChanged).toBe(0)
@@ -606,7 +606,7 @@ describe('PaneSlot', () => {
     thrown = new BufferCapReached(
       `cannot make a copy — all ${MAX_WARM_BUFFERS} copies are running; pause or delete one from the copies menu to make room`,
     )
-    expect(() => events.detachAsm?.()).not.toThrow()
+    expect(() => events.detachRxm?.()).not.toThrow()
     expect(notified.join(' ')).toContain('pause or delete one')
     expect(draws).toBe(1)
     expect(buffersChanged).toBe(0)
@@ -750,22 +750,22 @@ describe('resetLegs', () => {
   })
 
   /**
-   * THE THIRD LEG TOO. A recompile that left the asm leg's frames would step through a program the editor no longer
-   * holds; the loop reads `LEGS`, and this holds it to the asm leg as well.
+   * THE THIRD LEG TOO. A recompile that left the rxm leg's frames would step through a program the editor no longer
+   * holds; the loop reads `LEGS`, and this holds it to the rxm leg as well.
    */
-  it('clears every leg, asm included, and gives each the status its reply sent', () => {
-    const e = entry('source', { lambda: ['a'], asm: [0, 1, 2], tm: [0] })
-    const asmLeg = e.legs.asm
-    if (asmLeg === undefined) throw new Error('the fixture built the asm leg')
-    asmLeg.done = 'capped'
-    asmLeg.playing = true
+  it('clears every leg, rxm included, and gives each the status its reply sent', () => {
+    const e = entry('source', { lambda: ['a'], rxm: [0, 1, 2], tm: [0] })
+    const rxmLeg = e.legs.rxm
+    if (rxmLeg === undefined) throw new Error('the fixture built the rxm leg')
+    rxmLeg.done = 'capped'
+    rxmLeg.playing = true
 
-    resetLegs(e.legs, { asm: { available: false, reason: 'lowering failed' } }, 'not compiled')
+    resetLegs(e.legs, { rxm: { available: false, reason: 'lowering failed' } }, 'not compiled')
 
-    expect(asmLeg.hist.length).toBe(0)
-    expect(asmLeg.done).toBe(null)
-    expect(asmLeg.playing).toBe(false)
-    expect(asmLeg.status).toEqual({ available: false, reason: 'lowering failed' })
+    expect(rxmLeg.hist.length).toBe(0)
+    expect(rxmLeg.done).toBe(null)
+    expect(rxmLeg.playing).toBe(false)
+    expect(rxmLeg.status).toEqual({ available: false, reason: 'lowering failed' })
     expect(e.legs.lambda?.status).toEqual({ available: false, reason: 'not compiled' })
   })
 
@@ -775,7 +775,7 @@ describe('resetLegs', () => {
    * status whatever the session's shape; dropping the half that has nowhere to go is the whole
    * behaviour.
    *
-   * THE λ AND TM ONE-LEGGED SHAPES, NOT JUST THE λ ONE: §4.1 has two scratch types. An asm copy is a
+   * THE λ AND TM ONE-LEGGED SHAPES, NOT JUST THE λ ONE: §4.1 has two scratch types. An rxm copy is a
    * third one-legged shape, which this case does not build.
    */
   it('drops a status for a leg the session does not have rather than inventing one', () => {

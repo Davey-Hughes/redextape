@@ -17,9 +17,9 @@ import { countOf, fourViewWorkspace, newest, noticeText, results, resultsIdle, S
  * lets it go, and a counted one has been handled by the time it is counted. **AN `extend` THE APP POSTS CAN BE HELD
  * TOO**, by wrapping `postMessage`: a link's continue then waits, with the leg stopped where its history filled.
  *
- * **`sum_to(10000)` UNDER `unary`**, the encoding `setup.ts` stores the page's program under: its asm history fills
+ * **`sum_to(10000)` UNDER `unary`**, the encoding `setup.ts` stores the page's program under: its rxm history fills
  * at 36,921 of its 140,014 instructions and fills again on one *keep recording*, and `unary` declines its TM leg, so a
- * compile records only λ, which the depth guard stops at once, and asm. ONE MOUNT FOR THE FILE, for the reason
+ * compile records only λ, which the depth guard stops at once, and rxm. ONE MOUNT FOR THE FILE, for the reason
  * `app.test.ts` gives; the cases run in order, each from where the last left the page.
  */
 
@@ -85,8 +85,8 @@ const nothingHeld = (): void => {
 const SUM_TO_10000 = (EXAMPLES.find((e) => e.id === 'sum-to')?.text ?? '').replace('sum_to(5)', 'sum_to(10000)')
 
 const segments = () => [...results().querySelectorAll<HTMLElement>('.segment')].map((s) => s.title)
-const asmStep = () => document.querySelector('[data-leaf="asm-0"] .step')?.textContent ?? ''
-const extend = () => document.querySelector<HTMLButtonElement>('[data-leaf="asm-0"] .controls .extend')
+const rxmStep = () => document.querySelector('[data-leaf="rxm-0"] .step')?.textContent ?? ''
+const extend = () => document.querySelector<HTMLButtonElement>('[data-leaf="rxm-0"] .controls .extend')
 
 let view: EditorView
 
@@ -106,7 +106,7 @@ afterAll(() => {
 /**
  * **A FACT IS DRAWN ONLY BESIDE A RESULT OF THE COMPILE THE LEGS RECORD.** A recompile's `compiled` reply resets the
  * legs, and its `result` follows once they have recorded, so for that whole time the result drawn is the previous
- * program's. The new program's asm history fills while its `result` is held, and the strip must go on reading the old
+ * program's. The new program's rxm history fills while its `result` is held, and the strip must go on reading the old
  * result alone, dimmed for the compile in flight, until the new one lands with its own fact.
  */
 describe('a recompile whose result is held while its recording fills', () => {
@@ -123,22 +123,22 @@ describe('a recompile whose result is held while its recording fills', () => {
     nothingHeld()
     holdingResults = true
     view.dispatch({ changes: { from: 0, to: view.state.doc.length, insert: SUM_TO_10000 } })
-    await until(() => asmStep().includes('history is full'), 'the new program’s asm history to fill')
+    await until(() => rxmStep().includes('history is full'), 'the new program’s rxm history to fill')
     await until(() => heldResults.length === 1, 'the new program’s result to be posted, and held')
   })
 
   it('draws the previous program’s result alone while the new recording has filled', () => {
     expect(resultsTaken, 'precondition: no result has reached the app since the edit').toBe(taken)
-    expect(asmStep(), 'precondition: the new asm recording filled').toMatch(/^step [\d,]+ of [\d,]+ — history is full/)
+    expect(rxmStep(), 'precondition: the new rxm recording filled').toMatch(/^step [\d,]+ of [\d,]+ — history is full/)
     expect(results().dataset.state, 'precondition: the compile is in flight').toBe('running')
     expect(segments()).toEqual(before)
   })
 
   it('draws the new program’s own fact once its result lands', async () => {
     letResultsGo()
-    await until(() => resultsIdle() && segments()[1]?.startsWith('asm 50005000 ') === true, 'the new program’s result')
+    await until(() => resultsIdle() && segments()[1]?.startsWith('rxm 50005000 ') === true, 'the new program’s result')
     expect(segments()[1]).toMatch(
-      new RegExp(`^asm 50005000 · [\\d,]+ instructions · history is full at ${newest(asmStep())}$`),
+      new RegExp(`^rxm 50005000 · [\\d,]+ instructions · history is full at ${newest(rxmStep())}$`),
     )
   })
 })
@@ -146,59 +146,59 @@ describe('a recompile whose result is held while its recording fills', () => {
 /**
  * **THE FACT FOLLOWS *KEEP RECORDING*, READ ON EVERY FRAME AND NOT TAKEN WITH THE RESULT.** A continue's `result` is
  * posted once its recording stops, so a readout that took the legs with each result would show where the history
- * filled the time before until then. Holding that `result` back, the strip must already name the step where the asm
+ * filled the time before until then. Holding that `result` back, the strip must already name the step where the rxm
  * history filled again, beside the result it drew before the continue.
  */
-describe('keep recording on the asm leg, its result held', () => {
+describe('keep recording on the rxm leg, its result held', () => {
   afterAll(letAllGo)
 
   let first = ''
   let taken = 0
 
   beforeAll(async () => {
-    expect(asmStep(), 'precondition: the asm history is full').toContain('— history is full')
-    expect(extend()?.textContent, 'precondition: the asm view offers keep recording').toBe('keep recording')
-    first = newest(asmStep())
+    expect(rxmStep(), 'precondition: the rxm history is full').toContain('— history is full')
+    expect(extend()?.textContent, 'precondition: the rxm view offers keep recording').toBe('keep recording')
+    first = newest(rxmStep())
     taken = resultsTaken
     nothingHeld()
     holdingResults = true
     await userEvent.click(extend() as HTMLButtonElement)
     // FOUR WAITS, three on the recording and one on the held result, each with `until`'s 10 s to itself
     // on a slow runner.
-    await until(() => newest(asmStep()) !== first, 'the asm recording to move on')
+    await until(() => newest(rxmStep()) !== first, 'the rxm recording to move on')
     await until(
-      () => countOf(newest(asmStep())) >= countOf(first) * 1.5 || asmStep().includes('— history is full'),
-      'the asm recording to be half way to filling again',
+      () => countOf(newest(rxmStep())) >= countOf(first) * 1.5 || rxmStep().includes('— history is full'),
+      'the rxm recording to be half way to filling again',
     )
-    await until(() => asmStep().includes('— history is full'), 'the asm history to fill again')
+    await until(() => rxmStep().includes('— history is full'), 'the rxm history to fill again')
     await until(() => heldResults.length === 1, 'the continue’s result to be posted, and held')
   })
 
-  it('names the step where the asm history filled again, beside the result drawn before the continue', () => {
+  it('names the step where the rxm history filled again, beside the result drawn before the continue', () => {
     expect(resultsTaken, 'precondition: the continue’s result has not reached the app').toBe(taken)
-    const again = newest(asmStep())
+    const again = newest(rxmStep())
     expect(again, 'precondition: the history filled further on').not.toBe(first)
     expect(segments()[1]).toContain(`history is full at ${again}`)
-    expect(segments()[1]).toMatch(new RegExp(`^asm 50005000 · [\\d,]+ instructions · history is full at ${again}$`))
+    expect(segments()[1]).toMatch(new RegExp(`^rxm 50005000 · [\\d,]+ instructions · history is full at ${again}$`))
   })
 
   it('still names it once that result lands', async () => {
-    const again = newest(asmStep())
+    const again = newest(rxmStep())
     letResultsGo()
     await until(() => resultsTaken === taken + 1, 'the continue’s result')
-    expect(segments()[1]).toMatch(new RegExp(`^asm 50005000 · [\\d,]+ instructions · history is full at ${again}$`))
+    expect(segments()[1]).toMatch(new RegExp(`^rxm 50005000 · [\\d,]+ instructions · history is full at ${again}$`))
   })
 })
 
 /**
- * **NOT AT A STOP A LINK IS TAKING THE LEG PAST.** A link to `sum_to(10000)` with the asm leg at step 40,000: its history
+ * **NOT AT A STOP A LINK IS TAKING THE LEG PAST.** A link to `sum_to(10000)` with the rxm leg at step 40,000: its history
  * fills at 36,921, the run's `result` lands, and the link asks for a continue, held here. The step line says where the
  * link is taking the leg in place of `— history is full`, and the strip must not say the history is full either.
  *
  * **THE CONTINUE IS NOT FOLLOWED TO THE NEXT FILL HERE**: `readout.test.ts` holds what the strip says of a leg
  * with no pending step, that its history is full.
  */
-describe('a link taking the asm leg past where its history fills, its continue held', () => {
+describe('a link taking the rxm leg past where its history fills, its continue held', () => {
   afterAll(letAllGo)
 
   beforeAll(async () => {
@@ -209,7 +209,7 @@ describe('a link taking the asm leg past where its history fills, its continue h
       program: SUM_TO_10000,
       encoding: 'unary',
       workspace: serializeWorkspace(fourViewWorkspace()),
-      positions: { asm: 40_000 },
+      positions: { rxm: 40_000 },
     })
     await until(() => location.hash === '' && noticeText() === 'opened a shared link', 'the open')
     await until(() => resultsTaken > taken, 'the link’s run')
@@ -217,12 +217,12 @@ describe('a link taking the asm leg past where its history fills, its continue h
   })
 
   it('says nothing of a full history at the stop the link goes on past', () => {
-    expect(asmStep(), 'precondition: stopped where it filled, the link going further').toMatch(
+    expect(rxmStep(), 'precondition: stopped where it filled, the link going further').toMatch(
       // NO `…` AFTER THE COUNT: stopped. The head waits where the run opened until the frames reach the link's step.
       /^step [\d,]+ of [\d,]+ — going to step 40,000 from the link/,
     )
     expect(resultsIdle(), 'precondition: the link’s run has its result').toBe(true)
     expect(segments()[1]).not.toContain('history is full')
-    expect(segments()[1]).toMatch(/^asm 50005000 · [\d,]+ instructions$/)
+    expect(segments()[1]).toMatch(/^rxm 50005000 · [\d,]+ instructions$/)
   })
 })

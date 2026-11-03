@@ -2,12 +2,12 @@
 //! form's answer is.
 //!
 //! **THE `languageId` IS THE FILETYPE, AND THE FILETYPE IS ALREADY THIS REPOSITORY'S.**
-//! `plugin/redextape.lua` registers exactly `redextape`, `redextape_asm`, `redextape_lambda` and
+//! `plugin/redextape.lua` registers exactly `redextape`, `redextape_rxm`, `redextape_lambda` and
 //! `redextape_tm`, and Neovim sends the buffer's filetype as `languageId`. So dispatch is a
 //! four-arm match on strings this repository already owns: no extension sniffing here, and no
 //! second place where "which language is this" gets decided. The sniffing that IS needed — `.tm`
-//! and `.asm` are contested extensions — happens once, in that Lua file, before the server hears
-//! about the buffer at all.
+//! is a contested extension — happens once, in that Lua file, before the server hears about the
+//! buffer at all.
 
 use gen_lsp_types::SymbolKind;
 use redextape_core::Diagnostic;
@@ -22,8 +22,8 @@ pub enum Language {
     Lambda,
     /// `.tm`
     Tm,
-    /// `.asm`
-    Asm,
+    /// `.rxm`
+    Rxm,
 }
 
 impl Language {
@@ -38,7 +38,7 @@ impl Language {
             "redextape" => Some(Language::Redextape),
             "redextape_lambda" => Some(Language::Lambda),
             "redextape_tm" => Some(Language::Tm),
-            "redextape_asm" => Some(Language::Asm),
+            "redextape_rxm" => Some(Language::Rxm),
             _ => None,
         }
     }
@@ -46,14 +46,14 @@ impl Language {
     /// Every static diagnostic this form's front end reports over `src`.
     ///
     /// This adds no analysis of its own. All four of these are already written, already tested, and
-    /// already consumed by the web UI. The CLI consumes the `.rxt` and `.tm` ones and the `.asm` parse's;
-    /// it reads no λ text, and it reaches `.asm`'s label checks through `Program::validate` instead
+    /// already consumed by the web UI. The CLI consumes the `.rxt` and `.tm` ones and the `.rxm` parse's;
+    /// it reads no λ text, and it reaches `.rxm`'s label checks through `Program::validate` instead
     /// (below). Each returns the same spanned `Diagnostic`.
     ///
-    /// **`.asm` ADDS ITS LABEL MARKS TO THE PARSE'S DIAGNOSTICS**: a jump to a label nothing
+    /// **`.rxm` ADDS ITS LABEL MARKS TO THE PARSE'S DIAGNOSTICS**: a jump to a label nothing
     /// defines, a label defined twice, a label name the printer cannot write. The parser accepts
     /// all three and `Program::validate` refuses all three, so `redextape run` refuses the file
-    /// and a web copy will not run it; `asm_label_diagnostics` is the same check with spans, and
+    /// and a web copy will not run it; `rxm_label_diagnostics` is the same check with spans, and
     /// the index it reads outlives a parse that fails, so both kinds show together.
     #[must_use]
     pub fn diagnostics(self, src: &str) -> Vec<Diagnostic> {
@@ -61,10 +61,10 @@ impl Language {
             Language::Redextape => redextape_core::analyze(src).diagnostics,
             Language::Lambda => redextape_core::lambda::parse_lambda(src).1,
             Language::Tm => redextape_core::tm::parse_tm_full(src).diagnostics,
-            Language::Asm => {
-                let (doc, nav) = redextape_core::tm::parse_asm_nav(src);
+            Language::Rxm => {
+                let (doc, nav) = redextape_core::tm::parse_rxm_nav(src);
                 let mut all = doc.diagnostics;
-                all.extend(redextape_core::tm::asm_label_diagnostics(&nav));
+                all.extend(redextape_core::tm::rxm_label_diagnostics(&nav));
                 all
             }
         }
@@ -78,7 +78,7 @@ impl Language {
     /// returning a partial print would hand the editor a truncated buffer. The caller turns this
     /// into an empty edit list, which is what LSP says "no changes" is.
     ///
-    /// For `.tm` and `.asm` the comments survive formatting, which is the reason formatting
+    /// For `.tm` and `.rxm` the comments survive formatting, which is the reason formatting
     /// these two forms is offered at all.
     #[must_use]
     pub fn format(self, src: &str) -> Option<String> {
@@ -88,7 +88,7 @@ impl Language {
                 redextape_core::lambda::parse_lambda(src).0.as_ref().map(redextape_core::lambda::print_lambda)
             }
             Language::Tm => redextape_core::tm::print_tm_doc(&redextape_core::tm::parse_tm_full(src)),
-            Language::Asm => redextape_core::tm::print_asm_doc(&redextape_core::tm::parse_asm_full(src)),
+            Language::Rxm => redextape_core::tm::print_rxm_doc(&redextape_core::tm::parse_rxm_full(src)),
         }
     }
 
@@ -113,7 +113,7 @@ impl Language {
         match self {
             Language::Redextape => redextape_core::hover::rxt(src, offset, nav),
             Language::Tm => redextape_core::hover::tm(src, offset, nav),
-            Language::Asm => redextape_core::hover::asm(src, offset, nav),
+            Language::Rxm => redextape_core::hover::rxm(src, offset, nav),
             Language::Lambda => None,
         }
     }
@@ -126,13 +126,13 @@ impl Language {
     /// carries no source positions at all.
     ///
     /// `.rxt` answers `None` for a second reason: a document above `MAX_TOKENS` is refused by the
-    /// parser before it runs, so there is no tree to index. `.tm` and `.asm` are line-oriented and
+    /// parser before it runs, so there is no tree to index. `.tm` and `.rxm` are line-oriented and
     /// have no such cap, which makes this asymmetry `.rxt`'s alone.
     #[must_use]
     pub fn nav(self, src: &str) -> Option<NameIndex> {
         match self {
             Language::Tm => Some(redextape_core::tm::parse_tm_nav(src).1),
-            Language::Asm => Some(redextape_core::tm::parse_asm_nav(src).1),
+            Language::Rxm => Some(redextape_core::tm::parse_rxm_nav(src).1),
             Language::Redextape => redextape_core::binder::nav_rxt(src),
             Language::Lambda => None,
         }
@@ -152,7 +152,7 @@ impl Language {
 /// different question from what belongs in a document's outline.
 pub(crate) fn outline_kind(kind: DefKind) -> Option<SymbolKind> {
     match kind {
-        // A TM state is a place the machine can be in; an asm label names a point in a program.
+        // A TM state is a place the machine can be in; an rxm label names a point in a program.
         // `Class` and `Function` are the nearest of the protocol's fixed set.
         DefKind::State => Some(SymbolKind::Class),
         DefKind::Label | DefKind::Fn => Some(SymbolKind::Function),
@@ -170,7 +170,7 @@ mod tests {
         assert_eq!(Language::from_language_id("redextape"), Some(Language::Redextape));
         assert_eq!(Language::from_language_id("redextape_lambda"), Some(Language::Lambda));
         assert_eq!(Language::from_language_id("redextape_tm"), Some(Language::Tm));
-        assert_eq!(Language::from_language_id("redextape_asm"), Some(Language::Asm));
+        assert_eq!(Language::from_language_id("redextape_rxm"), Some(Language::Rxm));
 
         // Not a near miss the server should be generous about: `rust` is a real `languageId` a
         // misconfigured client could send, and guessing a front end for it would answer a Rust
@@ -196,17 +196,17 @@ mod tests {
         assert_eq!(Language::Tm.diagnostics(tm), redextape_core::tm::parse_tm_full(tm).diagnostics);
         assert_ne!(Language::Tm.diagnostics(tm), [] as [redextape_core::Diagnostic; 0]);
 
-        let asm = "li\n";
-        assert_eq!(Language::Asm.diagnostics(asm), redextape_core::tm::parse_asm_full(asm).diagnostics);
-        assert_ne!(Language::Asm.diagnostics(asm), [] as [redextape_core::Diagnostic; 0]);
+        let rxm = "li\n";
+        assert_eq!(Language::Rxm.diagnostics(rxm), redextape_core::tm::parse_rxm_full(rxm).diagnostics);
+        assert_ne!(Language::Rxm.diagnostics(rxm), [] as [redextape_core::Diagnostic; 0]);
     }
 
-    /// asm's label marks join the parse's own, and a parse that fails does not hide them: the one line
+    /// rxm's label marks join the parse's own, and a parse that fails does not hide them: the one line
     /// that does not parse and the jump to nothing are both reported, in that order.
     #[test]
-    fn asm_reports_its_label_marks_beside_its_parse_errors() {
+    fn rxm_reports_its_label_marks_beside_its_parse_errors() {
         let marked = |src: &str| {
-            Language::Asm
+            Language::Rxm
                 .diagnostics(src)
                 .into_iter()
                 .map(|d| src[d.span.start..d.span.end].to_string())
@@ -229,8 +229,8 @@ state q1: accept
 ";
 
     /// Clean. Note the TAB after `li` — that is what the printer emits and what the
-    /// existing `asm_comments.rs` fixture uses.
-    const ASM_COMMENTS: &str = "\
+    /// existing `rxm_comments.rs` fixture uses.
+    const RXM_COMMENTS: &str = "\
 ; a program
 result Nat
 f: ; the entry
@@ -268,13 +268,13 @@ f: ; the entry
              would otherwise pass against a `format` that returned `src` unchanged"
         );
 
-        let out = Language::Asm.format(ASM_COMMENTS).expect("the fixture parses");
+        let out = Language::Rxm.format(RXM_COMMENTS).expect("the fixture parses");
         assert!(out.contains("; a program"), "own-line comment lost:\n{out}");
         assert!(out.contains("; and a trailing one"), "trailing comment lost:\n{out}");
-        // Same, and asm's printer differs from its input twice over: the same trailing-comment
+        // Same, and rxm's printer differs from its input twice over: the same trailing-comment
         // spacing, plus a blank line written before the `f:` label the fixture does not have.
         assert_ne!(
-            out, ASM_COMMENTS,
+            out, RXM_COMMENTS,
             "format must answer with the PRINTER's output, not its input — the assertions above \
              would otherwise pass against a `format` that returned `src` unchanged"
         );
@@ -285,7 +285,7 @@ f: ; the entry
         // There is no partial format. A file with an error has no machine, so nothing will print
         // it — and handing the editor a truncated buffer is worse than handing it nothing.
         assert_eq!(Language::Tm.format("tapes\n"), None);
-        assert_eq!(Language::Asm.format("li\n"), None);
+        assert_eq!(Language::Rxm.format("li\n"), None);
         assert_eq!(Language::Lambda.format("λx."), None);
 
         // A PARSE error, not a type error. `redextape_core::format` calls `parser::parse_full` and
@@ -298,7 +298,7 @@ f: ; the entry
     #[test]
     fn three_of_the_four_forms_have_a_navigation_index() {
         assert!(Language::Tm.nav("tapes 1\nstart q0\nstate q0: accept\n").is_some());
-        assert!(Language::Asm.nav("f:\n\tret\n").is_some());
+        assert!(Language::Rxm.nav("f:\n\tret\n").is_some());
         assert!(Language::Redextape.nav("let x = 1;\nx\n").is_some(), "the binder pass ships here");
         // `.rxlambda` waits on a term type that carries no source positions at all. `None` is the
         // answer and not an empty index: an empty index would claim the file has no names in it.
@@ -319,10 +319,10 @@ f: ; the entry
         // arm never ran".
         assert_eq!(Language::Redextape.hover("let x = 1;\nx", 0, None), None);
         assert_eq!(Language::Tm.hover("tapes 1\nstart q0\nstate q0: accept\n", 0, None), None);
-        // On the `result` directive keyword — asm's own analogue of `.rxt`'s `let` and `.tm`'s
+        // On the `result` directive keyword — rxm's own analogue of `.rxt`'s `let` and `.tm`'s
         // `tapes` above: a header line names no mnemonic and no label, so neither `instr_at` nor the
         // navigation index has anything here, unlike `"f:\n\tret\n"`, whose `f:` and `ret` both answer.
-        assert_eq!(Language::Asm.hover("result Nat\n", 0, None), None);
+        assert_eq!(Language::Rxm.hover("result Nat\n", 0, None), None);
         // `.rxlambda` is the one arm that is deliberately hard-coded rather than dispatched — it
         // never reaches `redextape_core::hover` at all, which is the designed gap `Language::hover`'s
         // own doc comment names.
@@ -334,12 +334,12 @@ f: ; the entry
         // `hover::rxt` answers content for a literal, which is exactly the disagreement a swapped
         // `Redextape`/`Tm` arm in `Language::hover` needs to be caught: feeding this `.rxt` source
         // through `Language::Redextape` must answer something, and the SAME text through `Language::Tm`
-        // or `Language::Asm` must still answer `None`, a pair no crossed arm could satisfy.
+        // or `Language::Rxm` must still answer `None`, a pair no crossed arm could satisfy.
         let src = "let x = 42;\nx\n";
         let at = src.find("42").expect("fixture holds it");
         assert!(Language::Redextape.hover(src, at, None).is_some(), "a literal must hover through Redextape");
         assert_eq!(Language::Tm.hover(src, at, None), None);
-        assert_eq!(Language::Asm.hover(src, at, None), None);
+        assert_eq!(Language::Rxm.hover(src, at, None), None);
     }
 
     #[test]

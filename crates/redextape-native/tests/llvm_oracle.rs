@@ -20,14 +20,14 @@
 //! `default<O1..O3>`/`default<Os,Oz>` optimization never changes the observable outcome relative to
 //! the unoptimized `O0` build OR relative to the independently-implemented Cranelift backend.
 //!
-//! `llvm.rs`'s own unit tests already sweep `OptLevel` against `run_asm` on hand-built `Program`s
+//! `llvm.rs`'s own unit tests already sweep `OptLevel` against `run_rxm` on hand-built `Program`s
 //! (internal, white-box); this file instead drives the PUBLIC surface (`run_native_with`, `Core` ->
 //! `Program` lowering included) the way an external caller — or the other oracle files — would.
 
 use proptest::prelude::*;
 use redextape_core::desugar::desugar;
 use redextape_core::parser::parse;
-use redextape_core::tm::{DEFAULT_CAPS, decode_asm_reason};
+use redextape_core::tm::{DEFAULT_CAPS, decode_rxm_reason};
 use redextape_core::value::Value;
 use redextape_core::{RunError, run};
 use redextape_native::{Codegen, NativeRun, OptLevel, run_native_with};
@@ -45,7 +45,7 @@ const OPT_LEVELS: [OptLevel; 6] = [OptLevel::O0, OptLevel::O1, OptLevel::O2, Opt
 /// bug the oracle exists to catch.
 fn ran(run: &NativeRun, expected: &Value, label: &str) -> Value {
     match run {
-        NativeRun::Ran(o) => decode_asm_reason(o, expected).unwrap_or_else(|e| panic!("{label}: decode failed: {e:?}")),
+        NativeRun::Ran(o) => decode_rxm_reason(o, expected).unwrap_or_else(|e| panic!("{label}: decode failed: {e:?}")),
         other => panic!("{label}: expected Ran, got {other:?}"),
     }
 }
@@ -160,19 +160,19 @@ proptest! {
         let cl = run_native_with(&core, DEFAULT_CAPS, Codegen::Cranelift { opt: OptLevel::default() });
         match (reference, cl) {
             (Ok(rv), NativeRun::Ran(cl_outcome)) => {
-                let cl_value = decode_asm_reason(&cl_outcome, &rv).unwrap_or_else(|e| panic!("decode cranelift: {e:?}"));
+                let cl_value = decode_rxm_reason(&cl_outcome, &rv).unwrap_or_else(|e| panic!("decode cranelift: {e:?}"));
                 prop_assert_eq!(&cl_value, &rv, "cranelift vs reference disagree: {}", src);
                 for opt in OPT_LEVELS {
                     match run_native_with(&core, DEFAULT_CAPS, Codegen::Cranelift { opt }) {
                         NativeRun::Ran(o) => {
-                            let cl_at = decode_asm_reason(&o, &rv).unwrap_or_else(|e| panic!("decode cranelift: {e:?}"));
+                            let cl_at = decode_rxm_reason(&o, &rv).unwrap_or_else(|e| panic!("decode cranelift: {e:?}"));
                             prop_assert_eq!(&cl_at, &rv, "cranelift {:?} vs reference disagree: {}", opt, src);
                         }
                         other => prop_assert!(false, "cranelift {:?} did not run {}: {:?}", opt, src, other),
                     }
                     match run_native_with(&core, DEFAULT_CAPS, Codegen::Llvm { opt }) {
                         NativeRun::Ran(o) => {
-                            let llvm_value = decode_asm_reason(&o, &rv).unwrap_or_else(|e| panic!("decode llvm: {e:?}"));
+                            let llvm_value = decode_rxm_reason(&o, &rv).unwrap_or_else(|e| panic!("decode llvm: {e:?}"));
                             prop_assert_eq!(&llvm_value, &rv, "llvm {:?} vs reference disagree: {}", opt, src);
                             prop_assert_eq!(&llvm_value, &cl_value, "llvm {:?} vs cranelift disagree: {}", opt, src);
                         }

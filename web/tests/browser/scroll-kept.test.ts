@@ -148,9 +148,9 @@ describe('a view’s scroll position, across a rebuild made by another view', ()
 
   it('is kept when another view is closed', async () => {
     await armTiles()
-    await userEvent.click(host('asm-0')?.querySelector('button.view-close') as HTMLElement)
-    expect(host('asm-0'), 'the asm view is still on the page').toBeNull()
-    heldTiles('closing the asm view')
+    await userEvent.click(host('rxm-0')?.querySelector('button.view-close') as HTMLElement)
+    expect(host('rxm-0'), 'the rxm view is still on the page').toBeNull()
+    heldTiles('closing the rxm view')
   })
 
   it('is kept when a view is added', async () => {
@@ -211,7 +211,7 @@ describe('a view’s scroll position, across a rebuild made by another view', ()
   /**
    * **A VIEW THAT IS BUILT AGAIN IS A NEW VIEW, AND STARTS AT THE TOP.** Its host is the one the view before it had,
    * and that host still has the old view's scroll, or the record of it. In a window 500 px tall with three views, where
-   * an asm view is taller than its tile from the moment it is built: the claim is that the host is at 0 though it
+   * an rxm view is taller than its tile from the moment it is built: the claim is that the host is at 0 though it
    * could be elsewhere, which each case asserts beside it.
    *
    * **A PICK IN A VIEW'S TITLE AND *RESET PRESET* BUILD A VIEW AGAIN TOO, AND HAVE NO CASE HERE**, since neither can
@@ -219,15 +219,15 @@ describe('a view’s scroll position, across a rebuild made by another view', ()
    * it into view first; and *reset preset* builds only the TM view again.
    */
   describe('a view that is built again', () => {
-    const asm = (): HTMLElement => host('asm-0') as HTMLElement
+    const rxm = (): HTMLElement => host('rxm-0') as HTMLElement
 
     // AFTER THE HOOK ABOVE, which has put the page in tiles and the window back: three views in a short window.
     beforeEach(async () => {
       await page.viewport(1280, 500)
       await userPickWorkspace('#reset-preset')
       await until(() => host('lambda-0') === null && host('tm-0') !== null, 'the default views')
-      await pressToggle('asm')
-      await until(() => host('asm-0') !== null && scrollRange(asm()) > 60, 'an asm view taller than its tile')
+      await pressToggle('rxm')
+      await until(() => host('rxm-0') !== null && scrollRange(rxm()) > 60, 'an rxm view taller than its tile')
     })
 
     /**
@@ -238,15 +238,15 @@ describe('a view’s scroll position, across a rebuild made by another view', ()
      * its top already.
      */
     it('starts at the top when reset preset closed it and its toggle shows a new one', async () => {
-      asm().scrollTop = 60
-      expect(asm().scrollTop, 'precondition: the asm view’s own box is scrolled').toBe(60)
-      const closed = asm()
+      rxm().scrollTop = 60
+      expect(rxm().scrollTop, 'precondition: the rxm view’s own box is scrolled').toBe(60)
+      const closed = rxm()
       await userPickWorkspace('#reset-preset')
-      expect(host('asm-0'), 'the asm view is still on the page').toBeNull()
-      await pressToggle('asm')
-      expect(host('asm-0'), 'the new view is not in the host the closed one had').toBe(closed)
-      expect(scrollRange(asm()), 'precondition: the new view could be scrolled').toBeGreaterThan(60)
-      expect(asm().scrollTop, 'the new view was given the closed one’s scroll').toBe(0)
+      expect(host('rxm-0'), 'the rxm view is still on the page').toBeNull()
+      await pressToggle('rxm')
+      expect(host('rxm-0'), 'the new view is not in the host the closed one had').toBe(closed)
+      expect(scrollRange(rxm()), 'precondition: the new view could be scrolled').toBeGreaterThan(60)
+      expect(rxm().scrollTop, 'the new view was given the closed one’s scroll').toBe(0)
     })
 
     /** An opened link builds every view again and gives the source view another program: nothing is held. */

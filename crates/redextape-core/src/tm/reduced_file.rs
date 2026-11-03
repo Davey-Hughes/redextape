@@ -9,13 +9,13 @@
 
 use crate::tm::DescribedRun;
 use crate::tm::TmRun;
-use crate::tm::asm::DecodeFailure;
 use crate::tm::build::MAX_MACHINE_STATES;
 use crate::tm::decode::decode_tape_ty_reason;
 use crate::tm::header::{MAX_REDUCED_STEPS, Reduction, Stage, StageKind, TmHeader, is_stage_list};
 use crate::tm::machine::{Machine, StateId, Symbol};
 use crate::tm::one_way::{to_one_way_within, unzigzag, zigzag};
 use crate::tm::reduction::refusal;
+use crate::tm::rxm::DecodeFailure;
 use crate::tm::sim::{Caps, DEFAULT_CAPS, Status, Tape, simulate_final, simulate_origins};
 use crate::tm::single_tape::{deinterleave, interleave, layout_collision, to_single_tape_within};
 use crate::tm::two_symbol::{Code, bitify, to_two_symbol_within, unbitify};

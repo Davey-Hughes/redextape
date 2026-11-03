@@ -87,7 +87,7 @@ shim.setItem(PROGRAM_STORAGE_KEY, serializeProgram({ text: 'let x = 40; x + 2', 
  *
  * **A FIRST VISIT OPENS ON THE SOURCE BESIDE THE TM VIEW** (the view layouts spec §8), and every file's storage
  * above starts empty, so every file that mounts the app would start on two views, and a file that names `lambda-0`
- * or `asm-0` names a view that page does not hold. The workspace a four-view page stored is stored here instead, as
+ * or `rxm-0` names a view that page does not hold. The workspace a four-view page stored is stored here instead, as
  * a returning visitor's would be: all four views in two rows, Explorer, the focus on the λ view. A file about what
  * a first visit shows removes it before it mounts, as `first-load-views.test.ts` does, and a file that clears
  * storage before its mount starts on the two views too.

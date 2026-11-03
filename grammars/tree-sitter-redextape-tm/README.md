@@ -3,7 +3,7 @@
 A tree-sitter grammar for the **Redextape TM text form** — the flat, line-oriented, human-readable
 language a `Machine` prints to and `parse_tm` reads back. One of four grammars in this repository,
 alongside `tree-sitter-redextape` (the mini-language), `tree-sitter-redextape-lambda` (the λ form), and
-`tree-sitter-redextape-asm` (the asm form).
+`tree-sitter-redextape-rxm` (the rxm form).
 
 **It is for highlighting in external editors and it is not authoritative.** The hand-written parser in
 `redextape_core::tm::syntax` is the semantic source of truth and owns the canonical printer. This
@@ -101,8 +101,8 @@ equals the printer's own classification of the same text, byte range for byte ra
 The printer is the authority; a divergence is always a defect here.
 
 **The queries must be TOTAL over this grammar's own tokens** — a constraint exactly one of the three
-siblings shares. The asm grammar does: its `queries/highlights.scm` header states the same
-requirement, and `crates/redextape-grammar-check/tests/asm.rs` carries an
+siblings shares. The rxm grammar does: its `queries/highlights.scm` header states the same
+requirement, and `crates/redextape-grammar-check/tests/rxm.rs` carries an
 `every_printed_token_is_captured` of its own. The mini-language and λ grammars do not. TM's printer
 emits a span for every non-whitespace byte it writes — separators included — so there is no
 unclassified text a query could legitimately miss, and a dropped pattern shows up as a length
@@ -114,7 +114,7 @@ other file carries:
 
 | corpus | printer | how it is built | size |
 |---|---|---|---|
-| generated | `print_tm_mapped` | `parse` → `desugar` → `lower_asm` → `lower_tm` | 32 proptest cases |
+| generated | `print_tm_mapped` | `parse` → `desugar` → `lower_rxm` → `lower_tm` | 32 proptest cases |
 | headered | `print_tm_with_mapped` | `parse` → `result_type` → `desugar` → `run_tm_described` | 5 fixed programs |
 | reduced | `print_tm_with_mapped` | the headered path, then `reduce` | 4 fixed reductions of `3 - 5` |
 
@@ -249,7 +249,7 @@ is no way for this grammar to resolve that for you.
 Every editor loads the parser by looking up the C symbol `tree_sitter_<name>`, and this grammar
 exports `tree_sitter_redextape_tm` (`grep -n 'TS_PUBLIC const TSLanguage' src/parser.c`). Its three
 siblings in the same repository export `tree_sitter_redextape`, `tree_sitter_redextape_lambda`, and
-`tree_sitter_redextape_asm`. **All four install from the same clone at different subdirectories**, so
+`tree_sitter_redextape_rxm`. **All four install from the same clone at different subdirectories**, so
 getting the name wrong loads a different language rather than failing to find one.
 
 (**"clone" is loose for one of the three editors below.** Helix and Zed both really do clone this
@@ -282,14 +282,14 @@ is a separate thing that nothing else does. Neovim auto-starts treesitter only f
 filetypes, and nvim-treesitter ships no `FileType` autocmd, so a parser can be installed and a
 filetype set and the buffer still open with no colour at all.
 
-`.rxt` and `.rxlambda` are claimed by extension. `.asm` and `.tm` are claimed by **sniffing the
-buffer**, because Neovim already maps them to `asm` and `tcl`: a listing that is not this project's
-keeps the filetype it had. `lazy = false` is required — filetype registration has to happen at
+`.rxt`, `.rxlambda` and `.rxm` are claimed by extension. `.tm` is claimed by **sniffing the
+buffer**, because Neovim already maps it to `tcl`: a file that is not this project's keeps the
+filetype it had. `lazy = false` is required — filetype registration has to happen at
 startup, and a lazy-loaded spec would not register this project's extensions until something had
 already loaded it. Then, once:
 
 ```vim
-:TSInstall redextape redextape_asm redextape_lambda redextape_tm
+:TSInstall redextape redextape_rxm redextape_lambda redextape_tm
 ```
 
 **That one line requires nvim-treesitter's `main` branch**, and the next paragraph explains why that
@@ -301,9 +301,9 @@ use the hand-written block below.**
 
 **Everything below is for everyone else** — `master`, a different plugin manager, or nvim-treesitter
 driven by hand. It is close to what `plugin/redextape.lua` does, with two deliberate differences
-worth knowing before you copy it: the blocks below claim `.asm` and `.tm` **unconditionally by
-extension**, which is simpler and takes every such file on your machine away from `asm` and `tcl`,
-and they do not start the highlighter. If you want colour you need a `FileType` autocmd calling
+worth knowing before you copy it: the blocks below claim `.tm` **unconditionally by extension**,
+which is simpler and takes every such file on your machine away from `tcl`, and they do not start
+the highlighter. If you want colour you need a `FileType` autocmd calling
 `vim.treesitter.start()` as well — see the end of this section.
 
 **nvim-treesitter's `main` branch does not clone.** Its installer strips a trailing `.git` from
@@ -375,7 +375,7 @@ opens with the right filetype, a working parser, and no colour:
 
 ```lua
 vim.api.nvim_create_autocmd("FileType", {
-  pattern = { "redextape", "redextape_asm", "redextape_lambda", "redextape_tm" },
+  pattern = { "redextape", "redextape_rxm", "redextape_lambda", "redextape_tm" },
   callback = function(args) pcall(vim.treesitter.start, args.buf) end,
 })
 ```
@@ -485,7 +485,7 @@ Three things worth knowing before taking the Zed route:
 
 ## What the grammar covers
 
-`grammar.js` is **177 lines**, against the mini-language's **164**, asm's **160** and λ's **77** — what
+`grammar.js` is **177 lines**, against the mini-language's **164**, rxm's **160** and λ's **77** — what
 a fifteen-keyword, line-oriented form with three stage names costs, plus the comments recording what
 `fold`'s own token admits. `queries/highlights.scm`
 holds **15 patterns** over **11 capture names**, and `tm::CAPTURE_CLASSES` has **11 rows**, checked
@@ -501,9 +501,9 @@ literal CR, which `scripts/check-text-bytes.sh` allows: CR, TAB and LF are the C
 (`encoding`'s operand) and `@type` (`result`'s operand) both project to `Ident` — `write_header`'s own
 comment says why the class is `Ident` for each, and splitting the *capture* is what gets
 `result List<Nat>` coloured as a type in an editor. `@punctuation.bracket` and
-`@punctuation.delimiter` both project to `Punct`, as in the mini-language and λ grammars. The asm
+`@punctuation.delimiter` both project to `Punct`, as in the mini-language and λ grammars. The rxm
 grammar does not share this: its `CAPTURE_CLASSES` table has no `punctuation.bracket` row at all,
-because the asm form has no brackets.
+because the rxm form has no brackets.
 
 **`@label` and `@label.reference` are the pair the design's capture vocabulary section exists for.**
 `TokenClass` distinguishes `Label` (a state name where it is defined) from `StateName` (the same name

@@ -14,7 +14,7 @@ use crate::input::Input;
 
 /// One of the three text forms `redextape` reads from a file.
 ///
-/// `Rxt` is the source language; `Tm` and `Asm` are compiled output that the toolchain can also
+/// `Rxt` is the source language; `Tm` and `Rxm` are compiled output that the toolchain can also
 /// read back. **A total three-way answer, and both commands hold one.** `fmt` formats all three;
 /// `run` executes the two artifact forms and hands the third to a backend. Neither carries an
 /// `Option<Form>` past the point where the extension is read — the `None` collapses into `Rxt`
@@ -27,8 +27,8 @@ pub enum Form {
     Rxt,
     /// A Turing machine listing, `.tm`.
     Tm,
-    /// A register-assembly listing, `.asm`.
-    Asm,
+    /// A register-machine listing, `.rxm`.
+    Rxm,
 }
 
 impl Form {
@@ -46,7 +46,7 @@ impl Form {
         let ext = path.extension()?.to_string_lossy().to_ascii_lowercase();
         match ext.as_str() {
             "tm" => Some(Form::Tm),
-            "asm" => Some(Form::Asm),
+            "rxm" => Some(Form::Rxm),
             _ => None,
         }
     }
@@ -59,7 +59,7 @@ impl Form {
     #[must_use]
     pub fn is_artifact(self) -> bool {
         match self {
-            Form::Tm | Form::Asm => true,
+            Form::Tm | Form::Rxm => true,
             Form::Rxt => false,
         }
     }
@@ -67,14 +67,14 @@ impl Form {
     /// Which form this content is, judged by asking the real front ends — or `None` when none of
     /// them claims it.
     ///
-    /// **THERE IS NO PATTERN HERE, AND THAT IS THE POINT.** `plugin/redextape.lua` sniffs `.tm` and
-    /// `.asm` buffers by content too, and a second pattern set in Rust would be one rule in two
+    /// **THERE IS NO PATTERN HERE, AND THAT IS THE POINT.** `plugin/redextape.lua` sniffs `.tm`
+    /// buffers by content too, and a second pattern set in Rust would be one rule in two
     /// languages that no gate could hold in step — the two have different inputs (sixty buffer lines
     /// against whole stdin) and different fallbacks (a path test against none). Trial parsing has no
     /// rule to duplicate: the parser IS the definition of the language.
     ///
-    /// **A PATTERN RULE COULD NOT HAVE BEEN WRITTEN CORRECTLY ANYWAY.** The obvious asm signal, the
-    /// `result <Type>` line, is optional — a checked-in fixture `run_asm` exercises is two indented
+    /// **A PATTERN RULE COULD NOT HAVE BEEN WRITTEN CORRECTLY ANYWAY.** The obvious rxm signal, the
+    /// `result <Type>` line, is optional — a checked-in fixture `run_rxm` exercises is two indented
     /// mnemonics with no header, no `result` and no label.
     ///
     /// **The payload is the test, not an empty diagnostics list.** Both document types define the
@@ -83,7 +83,7 @@ impl Form {
     /// sniffer keyed to emptiness would then refuse a machine that parsed fine and merely warned.
     #[must_use]
     pub fn sniff(src: &str) -> Option<Form> {
-        // The one ambiguity in the matrix: an empty or whitespace-only file is accepted by the asm
+        // The one ambiguity in the matrix: an empty or whitespace-only file is accepted by the rxm
         // parser AND by `.rxt`. There is nothing to format either way, so the guard costs nothing
         // and removes the only case a precedence rule would have to arbitrate.
         if src.trim().is_empty() {
@@ -92,8 +92,8 @@ impl Form {
         if redextape_core::tm::parse_tm_full(src).machine.is_some() {
             return Some(Form::Tm);
         }
-        if redextape_core::tm::parse_asm_full(src).program.is_some() {
-            return Some(Form::Asm);
+        if redextape_core::tm::parse_rxm_full(src).program.is_some() {
+            return Some(Form::Rxm);
         }
         None
     }
@@ -139,28 +139,28 @@ mod tests {
 
     /// Parses clean. Printing it inserts a blank line after `result Nat` and doubles the spaces
     /// before each trailing comment. Note the literal tab after `li`.
-    const ASM_IN: &str = "; a program\nresult Nat\nf: ; the entry\n    li\tr0, #1 ; and a trailing one\n    ret\n";
+    const RXM_IN: &str = "; a program\nresult Nat\nf: ; the entry\n    li\tr0, #1 ; and a trailing one\n    ret\n";
 
-    /// `ASM_IN`'s printed form, byte-exact. The idempotence fixture.
-    const ASM_OUT: &str = "; a program\nresult Nat\n\nf:  ; the entry\n    li\tr0, #1  ; and a trailing one\n    ret\n";
+    /// `RXM_IN`'s printed form, byte-exact. The idempotence fixture.
+    const RXM_OUT: &str = "; a program\nresult Nat\n\nf:  ; the entry\n    li\tr0, #1  ; and a trailing one\n    ret\n";
 
     // Derived from design §4.1's matrix, not a copy of it. Three rows here have no counterpart there:
-    // `TM_OUT`, `ASM_IN` and `ASM_OUT`, the printed and round-trip fixtures the rest of this module
+    // `TM_OUT`, `RXM_IN` and `RXM_OUT`, the printed and round-trip fixtures the rest of this module
     // reads, which pin that a printer's own output sniffs back as the form it came from. Each row is
     // (input, what sniff must answer).
     const MATRIX: &[(&str, Option<Form>)] = &[
-        // Both degenerate rows are accepted by the asm parser AND by `.rxt`. They are the only
+        // Both degenerate rows are accepted by the rxm parser AND by `.rxt`. They are the only
         // ambiguity in the matrix, and the emptiness guard is why they resolve here rather than
         // through a precedence rule invented for a file with nothing in it.
         ("", None),
         ("   \n\n  \n", None),
-        ("; just a comment\n", Some(Form::Asm)),
-        ("    li\trr, #7\n    halt\n", Some(Form::Asm)),
-        ("result Nat\n    li\trr, #7\n    halt\n", Some(Form::Asm)),
+        ("; just a comment\n", Some(Form::Rxm)),
+        ("    li\trr, #7\n    halt\n", Some(Form::Rxm)),
+        ("result Nat\n    li\trr, #7\n    halt\n", Some(Form::Rxm)),
         (TM_IN, Some(Form::Tm)),
         (TM_OUT, Some(Form::Tm)),
-        (ASM_IN, Some(Form::Asm)),
-        (ASM_OUT, Some(Form::Asm)),
+        (RXM_IN, Some(Form::Rxm)),
+        (RXM_OUT, Some(Form::Rxm)),
         // Accepted by no front end at all, so the caller falls back to `.rxt` and the user gets a
         // real `.rxt` diagnostic rather than a shrug.
         ("let f = \\x. x; f 1", None),
@@ -176,25 +176,25 @@ mod tests {
     }
 
     #[test]
-    fn tm_and_asm_never_both_accept() {
-        // They LOOK disjoint — a TM's `tapes <n>` is an unknown mnemonic to the asm parser — and
+    fn tm_and_rxm_never_both_accept() {
+        // They LOOK disjoint — a TM's `tapes <n>` is an unknown mnemonic to the rxm parser — and
         // "looks disjoint" is a claim. This pins it over every row, so a grammar change that made
         // them overlap would redden here rather than silently making `sniff` order-dependent.
         for (src, _) in MATRIX {
             let tm = redextape_core::tm::parse_tm_full(src).machine.is_some();
-            let asm = redextape_core::tm::parse_asm_full(src).program.is_some();
-            assert!(!(tm && asm), "both front ends accepted {src:?}");
+            let rxm = redextape_core::tm::parse_rxm_full(src).program.is_some();
+            assert!(!(tm && rxm), "both front ends accepted {src:?}");
         }
     }
 
     #[test]
     fn the_extension_table_is_case_insensitive() {
         assert_eq!(Form::from_extension(Path::new("p.tm")), Some(Form::Tm));
-        assert_eq!(Form::from_extension(Path::new("p.asm")), Some(Form::Asm));
+        assert_eq!(Form::from_extension(Path::new("p.rxm")), Some(Form::Rxm));
         // `M.TM` is as much an artifact as `m.tm`: a byte-for-byte comparison would send it down
         // the `.rxt` path, and exit 1 would blame a valid file on the program.
         assert_eq!(Form::from_extension(Path::new("M.TM")), Some(Form::Tm));
-        assert_eq!(Form::from_extension(Path::new("P.AsM")), Some(Form::Asm));
+        assert_eq!(Form::from_extension(Path::new("P.RxM")), Some(Form::Rxm));
 
         // `.rxt` is NOT in the table: it is the fallback, not a recognised artifact extension.
         assert_eq!(Form::from_extension(Path::new("p.rxt")), None);
@@ -205,7 +205,7 @@ mod tests {
     #[test]
     fn only_the_two_compiled_forms_are_artifacts() {
         assert!(Form::Tm.is_artifact());
-        assert!(Form::Asm.is_artifact());
+        assert!(Form::Rxm.is_artifact());
         assert!(!Form::Rxt.is_artifact());
     }
 
@@ -231,13 +231,13 @@ mod tests {
 
         assert_eq!(Form::resolve(&Input::Path("p.tm".into()), None, ""), Form::Tm);
         assert_eq!(Form::resolve(&Input::Path("M.TM".into()), None, ""), Form::Tm);
-        assert_eq!(Form::resolve(&Input::Path("p.asm".into()), None, ""), Form::Asm);
+        assert_eq!(Form::resolve(&Input::Path("p.rxm".into()), None, ""), Form::Rxm);
     }
 
     #[test]
     fn stdin_is_sniffed_and_falls_back_to_rxt() {
         assert_eq!(Form::resolve(&Input::Stdin, None, TM_IN), Form::Tm);
-        assert_eq!(Form::resolve(&Input::Stdin, None, ASM_IN), Form::Asm);
+        assert_eq!(Form::resolve(&Input::Stdin, None, RXM_IN), Form::Rxm);
         assert_eq!(Form::resolve(&Input::Stdin, None, "let   x=1;\nx+1"), Form::Rxt);
         assert_eq!(Form::resolve(&Input::Stdin, None, ""), Form::Rxt);
     }

@@ -11,7 +11,7 @@ export type Edges = 'arcs' | 'chips'
 
 /** One row of the program level. Every row is `ROW_HEIGHT` tall, so the rows virtualize as the rule table's do. */
 export type ProgramRow =
-  /** A label from the asm listing, above the instruction it names (amendment 9). */
+  /** A label from the rxm listing, above the instruction it names (amendment 9). */
   | { readonly kind: 'label'; readonly name: string }
   /** One group: an instruction, a runtime routine, or a name group. */
   | { readonly kind: 'group'; readonly group: number }
@@ -28,7 +28,7 @@ type Labels = readonly (readonly [string, number])[]
 /**
  * The rows, in order, for `edges`, with `open`'s sub-steps under it.
  *
- * **AN INSTRUCTION'S LABELS COME FIRST**, in `labels` order, as `print_asm` prints them; a label one past the
+ * **AN INSTRUCTION'S LABELS COME FIRST**, in `labels` order, as `print_rxm` prints them; a label one past the
  * last instruction is printed after it, and so drawn after it. **THE RUNTIME ROUTINES ARE ROWS ONLY IN *CHIPS*,**
  * under a `runtime` heading: *arcs* draws them in a side column, where their connectors can reach them.
  */

@@ -17,7 +17,7 @@
  * exactly three classes — `Binder`, `Ident` and `Punct`. `tok-ident` is `fg` in all six variants and
  * `tok-punct` is `tok-neutral` or all but indistinguishable from it, so a λ editor whose binder also
  * drew `tok-neutral` would have two colours for three classes, with `λf` and `(` the same pixels. The
- * classes the TM and asm forms add keep sharing `tok-neutral`: they arrive in editors that already colour
+ * classes the TM and rxm forms add keep sharing `tok-neutral`: they arrive in editors that already colour
  * a keyword, a number and a state name apart. `palettes.test.ts`'s *keeps `tok-binder` apart from every
  * other token* is the gate, not this paragraph.
  */

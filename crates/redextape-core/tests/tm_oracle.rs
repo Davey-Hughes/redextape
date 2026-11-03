@@ -1,9 +1,9 @@
 //! Part of the backend oracle (spec §12.1): the reference tree-walker and the genuine multi-tape TM
 //! agree on straight-line, branching, call and list programs. Also carries the intermediate
-//! `asm-interp == TM` oracle (a disagreement localizes to asm->TM lowering) and cap-equivalence. The
+//! `rxm-interp == TM` oracle (a disagreement localizes to rxm->TM lowering) and cap-equivalence. The
 //! full `reference == lambda == TM` is `three_way_oracle.rs`. Every demo below runs under BOTH `Unary`
-//! and `Binary` (`assert_tm_agrees`/`assert_asm_interp_matches_tm` take `enc: &dyn Encoding` and each
-//! test calls the body twice), so this file's two legs (reference==TM, asm-interp==TM) both cover the
+//! and `Binary` (`assert_tm_agrees`/`assert_rxm_interp_matches_tm` take `enc: &dyn Encoding` and each
+//! test calls the body twice), so this file's two legs (reference==TM, rxm-interp==TM) both cover the
 //! binary TM too.
 //!
 //! Both helpers use `run_tm_fitted`, not `run_tm`, and decode with `enc.at_width(width)` at the width
@@ -21,8 +21,8 @@
 use redextape_core::desugar::desugar;
 use redextape_core::parser::parse;
 use redextape_core::tm::{
-    AsmRun, Binary, DEFAULT_CAPS as ASM_CAPS, Encoding, TM_DEFAULT_CAPS, TmRun, Unary, decode_asm_reason, decode_tape,
-    decode_tape_reason, lower_asm, run_asm, run_tm, run_tm_fitted,
+    Binary, DEFAULT_CAPS as RXM_CAPS, Encoding, RxmRun, TM_DEFAULT_CAPS, TmRun, Unary, decode_rxm_reason, decode_tape,
+    decode_tape_reason, lower_rxm, run_rxm, run_tm, run_tm_fitted,
 };
 use redextape_core::{RunError, run};
 
@@ -45,18 +45,18 @@ fn assert_tm_agrees(src: &str, enc: &dyn Encoding) {
     }
 }
 
-/// The intermediate oracle: the asm interpreter and the TM sim decode to the same value. Localizes a
-/// disagreement to asm->TM lowering (the reference==asm link is proven in `asm_oracle.rs`). `enc`
+/// The intermediate oracle: the rxm interpreter and the TM sim decode to the same value. Localizes a
+/// disagreement to rxm->TM lowering (the reference==rxm link is proven in `rxm_oracle.rs`). `enc`
 /// selects which encoding drives the TM leg.
-fn assert_asm_interp_matches_tm(src: &str, enc: &dyn Encoding) {
+fn assert_rxm_interp_matches_tm(src: &str, enc: &dyn Encoding) {
     let (prog, ds) = parse(src);
     assert!(ds.is_empty(), "parse errors: {ds:?}");
     let core = desugar(&prog.unwrap());
     let reference = run(src).expect("control-flow demos run to a value");
-    let program = lower_asm(&core).expect("lowering to asm succeeds");
-    let asm = match run_asm(&program, ASM_CAPS) {
-        AsmRun::Ran(o) => decode_asm_reason(&o, &reference).unwrap_or_else(|e| panic!("asm decode: {e:?}")),
-        other => panic!("asm did not run for {src}: {other:?}"),
+    let program = lower_rxm(&core).expect("lowering to rxm succeeds");
+    let rxm = match run_rxm(&program, RXM_CAPS) {
+        RxmRun::Ran(o) => decode_rxm_reason(&o, &reference).unwrap_or_else(|e| panic!("rxm decode: {e:?}")),
+        other => panic!("rxm did not run for {src}: {other:?}"),
     };
     let (outcome, width) = run_tm_fitted(&core, enc, TM_DEFAULT_CAPS);
     let tm = match outcome {
@@ -66,7 +66,7 @@ fn assert_asm_interp_matches_tm(src: &str, enc: &dyn Encoding) {
         }
         other => panic!("tm did not run for {src}: {other:?}"),
     };
-    assert_eq!(asm, tm, "asm-interp vs TM disagree for: {src}");
+    assert_eq!(rxm, tm, "rxm-interp vs TM disagree for: {src}");
 }
 
 /// The control-flow demo subset: arithmetic, monus, comparisons, if, let/let mut, assign, while, seq.
@@ -93,10 +93,10 @@ fn tm_agrees_with_reference_on_control_flow_demos() {
 }
 
 #[test]
-fn asm_interp_matches_tm_on_control_flow_demos() {
+fn rxm_interp_matches_tm_on_control_flow_demos() {
     for src in CONTROL_FLOW_DEMOS {
-        assert_asm_interp_matches_tm(src, &Unary::default());
-        assert_asm_interp_matches_tm(src, &Binary::default());
+        assert_rxm_interp_matches_tm(src, &Unary::default());
+        assert_rxm_interp_matches_tm(src, &Binary::default());
     }
 }
 
@@ -105,7 +105,7 @@ fn asm_interp_matches_tm_on_control_flow_demos() {
 ///
 /// Unary recursion is step-heavy (`Call`/`Ret` save/restore a whole frame per level, and each frame op
 /// is many TM steps), but these fit `TM_DEFAULT_CAPS` (5,000,000 steps/cells), so
-/// `assert_tm_agrees`/`assert_asm_interp_matches_tm` are used unmodified — no raised-cap variant needed.
+/// `assert_tm_agrees`/`assert_rxm_interp_matches_tm` are used unmodified — no raised-cap variant needed.
 const CALL_DEMOS: &[&str] = &[
     "let add1 = |x| x + 1; add1(41)",
     "fn sum(n) { if n == 0 { 0 } else { n + sum(n - 1) } } sum(5)",
@@ -124,10 +124,10 @@ fn tm_agrees_with_reference_on_call_demos() {
 }
 
 #[test]
-fn asm_interp_matches_tm_on_call_demos() {
+fn rxm_interp_matches_tm_on_call_demos() {
     for src in CALL_DEMOS {
-        assert_asm_interp_matches_tm(src, &Unary::default());
-        assert_asm_interp_matches_tm(src, &Binary::default());
+        assert_rxm_interp_matches_tm(src, &Unary::default());
+        assert_rxm_interp_matches_tm(src, &Binary::default());
     }
 }
 
@@ -144,10 +144,10 @@ fn tm_agrees_with_reference_on_list_build_demos() {
 }
 
 #[test]
-fn asm_interp_matches_tm_on_list_build_demos() {
+fn rxm_interp_matches_tm_on_list_build_demos() {
     for src in LIST_BUILD_DEMOS {
-        assert_asm_interp_matches_tm(src, &Unary::default());
-        assert_asm_interp_matches_tm(src, &Binary::default());
+        assert_rxm_interp_matches_tm(src, &Unary::default());
+        assert_rxm_interp_matches_tm(src, &Binary::default());
     }
 }
 
@@ -173,10 +173,10 @@ fn tm_agrees_with_reference_on_list_access_demos() {
 }
 
 #[test]
-fn asm_interp_matches_tm_on_list_access_demos() {
+fn rxm_interp_matches_tm_on_list_access_demos() {
     for src in LIST_ACCESS_DEMOS {
-        assert_asm_interp_matches_tm(src, &Unary::default());
-        assert_asm_interp_matches_tm(src, &Binary::default());
+        assert_rxm_interp_matches_tm(src, &Unary::default());
+        assert_rxm_interp_matches_tm(src, &Binary::default());
     }
 }
 

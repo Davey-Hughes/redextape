@@ -8,7 +8,7 @@ import { clickWorkspaceItem, linkAt, paneByLeaf, SHELL, sourceLinked, stageTab, 
  * A link's scroll hold through the whole app (Plan 7 part 5 spec, amendment 21), where `virtual-grid.test.ts` holds it
  * on a grid alone: a view shown after a link made in another opens on the pin and follows once the run moves, and so
  * does one that missed the compile before the link; a pin cleared from another view gives both grids back to
- * following; a click in the asm listing leaves the listing's own scroll alone; and a panel closed while a pin is made
+ * following; a click in the rxm listing leaves the listing's own scroll alone; and a panel closed while a pin is made
  * or cleared shows that pin, or follows, when it reopens.
  *
  * **"IN VIEW" IS READ OFF THE BOX'S GEOMETRY, NOT OFF THE DOM.** A grid draws `OVERSCAN` rows past each edge of its
@@ -35,15 +35,15 @@ const NOWHERE = BIG.indexOf('\n')
  */
 const OTHER = BIG.indexOf('a + b') + 2
 
-type Grid = 'tm-0' | 'asm-0'
+type Grid = 'tm-0' | 'rxm-0'
 
 let view: EditorView
 
 const box = (leaf: Grid) =>
-  paneByLeaf(leaf)?.querySelector<HTMLElement>(leaf === 'tm-0' ? '.state-table' : '.asm-listing') ?? null
-const LINKED: Record<Grid, string> = { 'tm-0': '.state-row.is-linked', 'asm-0': '.asm-row.is-linked' }
-/** The row following keeps in view: the TM view's current state, the asm view's instruction about to run. */
-const CURRENT: Record<Grid, string> = { 'tm-0': '.state-row.is-current', 'asm-0': '.asm-row.is-next' }
+  paneByLeaf(leaf)?.querySelector<HTMLElement>(leaf === 'tm-0' ? '.state-table' : '.rxm-listing') ?? null
+const LINKED: Record<Grid, string> = { 'tm-0': '.state-row.is-linked', 'rxm-0': '.rxm-row.is-linked' }
+/** The row following keeps in view: the TM view's current state, the rxm view's instruction about to run. */
+const CURRENT: Record<Grid, string> = { 'tm-0': '.state-row.is-current', 'rxm-0': '.rxm-row.is-next' }
 /** Whether `el`'s middle is inside `b`, the grid box that draws it. */
 function within(b: HTMLElement, el: HTMLElement): boolean {
   const r = b.getBoundingClientRect()
@@ -57,7 +57,7 @@ function inView(leaf: Grid, sel: string): boolean {
   return b !== null && [...b.querySelectorAll<HTMLElement>(sel)].some((el) => within(b, el))
 }
 const reattach = (leaf: Grid) => paneByLeaf(leaf)?.querySelector<HTMLButtonElement>('.table-reattach') ?? null
-/** The toggle of the panel each grid sits in: the TM view's rules, the asm view's listing. */
+/** The toggle of the panel each grid sits in: the TM view's rules, the rxm view's listing. */
 const toggle = (leaf: Grid) =>
   paneByLeaf(leaf)?.querySelector<HTMLButtonElement>(
     `[data-panel="${leaf === 'tm-0' ? 'rules' : 'listing'}"] .panel-toggle`,
@@ -167,7 +167,7 @@ const stateBox = (leaf: string) => paneByLeaf(leaf)?.querySelector<HTMLElement>(
 
 /**
  * Put both runs where one step moves the row each grid follows well away from the pin: the TM head one step back from
- * where recording left it, so `▶` walks the history rather than asking for more, and the asm run at its start. **THE
+ * where recording left it, so `▶` walks the history rather than asking for more, and the rxm run at its start. **THE
  * TM HEAD GETS THERE BY `⏭` THEN `◀`**: a run opens on step 0 (`History`).
  */
 async function park(): Promise<void> {
@@ -176,8 +176,8 @@ async function park(): Promise<void> {
   const tmStep = stepOf('tm-0')
   control('tm-0', '◀')?.click()
   await until(() => stepOf('tm-0') !== tmStep, 'the TM view to step back')
-  control('asm-0', '↺')?.click()
-  await until(() => stepOf('asm-0').startsWith('step 0 of'), 'the asm view to restart')
+  control('rxm-0', '↺')?.click()
+  await until(() => stepOf('rxm-0').startsWith('step 0 of'), 'the rxm view to restart')
 }
 
 beforeAll(async () => {
@@ -198,7 +198,7 @@ beforeAll(async () => {
     'the TM leg to be half way to a full history',
   )
   await until(stateIdle, 'the compile to finish')
-  await until(() => box('asm-0')?.getAttribute('aria-rowcount') === '123', 'the asm listing')
+  await until(() => box('rxm-0')?.getAttribute('aria-rowcount') === '123', 'the rxm listing')
   await until(() => box('tm-0')?.getAttribute('aria-rowcount') === '25852', 'the rule table')
 })
 
@@ -213,8 +213,8 @@ describe('a view the stage shows after a link made in another', () => {
     clickWorkspaceItem('[data-switch="views"][data-value="stage"]')
     stageTab('source')?.click()
     await until(
-      () => paneByLeaf('tm-0') === null && paneByLeaf('asm-0') === null,
-      'the TM and asm views to leave the page',
+      () => paneByLeaf('tm-0') === null && paneByLeaf('rxm-0') === null,
+      'the TM and rxm views to leave the page',
     )
     linkAt(view, PIN)
     await until(() => sourceLinked() === 'f(acc, head(xs))', 'the source to show the pin')
@@ -233,18 +233,18 @@ describe('a view the stage shows after a link made in another', () => {
     expect(inView('tm-0', CURRENT['tm-0']), 'the table follows the machine again').toBe(true)
   })
 
-  it('opens the asm view on the pin, following, and follows the run once it moves', async () => {
-    stageTab('asm-0')?.click()
-    await settle(box('asm-0'))
-    expect(inView('asm-0', LINKED['asm-0']), "the pin's instructions are on screen").toBe(true)
-    expect(reattach('asm-0')?.hidden, 'following is still on').toBe(true)
-    expect(inView('asm-0', CURRENT['asm-0']), 'the precondition: the instruction about to run is off screen').toBe(
+  it('opens the rxm view on the pin, following, and follows the run once it moves', async () => {
+    stageTab('rxm-0')?.click()
+    await settle(box('rxm-0'))
+    expect(inView('rxm-0', LINKED['rxm-0']), "the pin's instructions are on screen").toBe(true)
+    expect(reattach('rxm-0')?.hidden, 'following is still on').toBe(true)
+    expect(inView('rxm-0', CURRENT['rxm-0']), 'the precondition: the instruction about to run is off screen').toBe(
       false,
     )
 
-    control('asm-0', '▶')?.click()
-    await until(() => stepOf('asm-0').startsWith('step 1 of'), 'one step')
-    expect(inView('asm-0', CURRENT['asm-0']), 'the listing follows the run again').toBe(true)
+    control('rxm-0', '▶')?.click()
+    await until(() => stepOf('rxm-0').startsWith('step 1 of'), 'one step')
+    expect(inView('rxm-0', CURRENT['rxm-0']), 'the listing follows the run again').toBe(true)
     clickWorkspaceItem('[data-switch="views"][data-value="tiles"]')
   })
 })
@@ -256,19 +256,19 @@ describe('a pin cleared from another view', () => {
    * or for good once it had ended.
    */
   it('gives the rule table and the listing back to following', async () => {
-    await until(() => paneByLeaf('tm-0') !== null && paneByLeaf('asm-0') !== null, 'the tiles to show every view')
+    await until(() => paneByLeaf('tm-0') !== null && paneByLeaf('rxm-0') !== null, 'the tiles to show every view')
     await park()
     linkAt(view, NOWHERE)
     await until(() => sourceLinked() === null, 'the pin the stage cases made to clear')
-    await until(() => inView('tm-0', CURRENT['tm-0']) && inView('asm-0', CURRENT['asm-0']), 'both grids to follow')
+    await until(() => inView('tm-0', CURRENT['tm-0']) && inView('rxm-0', CURRENT['rxm-0']), 'both grids to follow')
 
     const tmEcho = settle(box('tm-0'))
-    const asmEcho = settle(box('asm-0'))
+    const rxmEcho = settle(box('rxm-0'))
     linkAt(view, PIN)
     await until(() => sourceLinked() === 'f(acc, head(xs))', 'the source to show the pin')
     await tmEcho
-    await asmEcho
-    for (const leaf of ['tm-0', 'asm-0'] as const) {
+    await rxmEcho
+    for (const leaf of ['tm-0', 'rxm-0'] as const) {
       expect(inView(leaf, LINKED[leaf]), `${leaf}: the link scrolled to its rows`).toBe(true)
       expect(inView(leaf, CURRENT[leaf]), `${leaf}: the precondition: the row it follows is off screen`).toBe(false)
     }
@@ -276,9 +276,9 @@ describe('a pin cleared from another view', () => {
     linkAt(view, NOWHERE)
     await until(() => sourceLinked() === null, 'the pin to clear')
     await until(() => inView('tm-0', CURRENT['tm-0']), 'the rule table to follow the machine again')
-    await until(() => inView('asm-0', CURRENT['asm-0']), 'the listing to follow the run again')
+    await until(() => inView('rxm-0', CURRENT['rxm-0']), 'the listing to follow the run again')
     expect(reattach('tm-0')?.hidden).toBe(true)
-    expect(reattach('asm-0')?.hidden).toBe(true)
+    expect(reattach('rxm-0')?.hidden).toBe(true)
   })
 })
 
@@ -289,14 +289,14 @@ describe('a pin made while the panel is closed', () => {
    * that link's block: neither the new pin nor the run, following on, nothing offered to re-attach.
    */
   it('shows the new pin when the rules and listing panels reopen', async () => {
-    await until(() => paneByLeaf('tm-0') !== null && paneByLeaf('asm-0') !== null, 'the tiles to show every view')
+    await until(() => paneByLeaf('tm-0') !== null && paneByLeaf('rxm-0') !== null, 'the tiles to show every view')
     const tmEcho = settle(box('tm-0'))
-    const asmEcho = settle(box('asm-0'))
+    const rxmEcho = settle(box('rxm-0'))
     linkAt(view, PIN)
     await until(() => sourceLinked() === 'f(acc, head(xs))', 'the source to show the pin')
     await tmEcho
-    await asmEcho
-    for (const leaf of ['tm-0', 'asm-0'] as const) {
+    await rxmEcho
+    for (const leaf of ['tm-0', 'rxm-0'] as const) {
       expect(inView(leaf, LINKED[leaf]), `${leaf}: the first link holds the box on its rows`).toBe(true)
       toggle(leaf)?.click()
       expect(box(leaf)?.hidden, `${leaf}: the precondition: the panel is closed`).toBe(true)
@@ -305,12 +305,12 @@ describe('a pin made while the panel is closed', () => {
     linkAt(view, OTHER)
     await until(() => sourceLinked() === 'a + b', 'the source to show the new pin')
     const tmShown = settle(box('tm-0'))
-    const asmShown = settle(box('asm-0'))
+    const rxmShown = settle(box('rxm-0'))
     toggle('tm-0')?.click()
-    toggle('asm-0')?.click()
+    toggle('rxm-0')?.click()
     await tmShown
-    await asmShown
-    for (const leaf of ['tm-0', 'asm-0'] as const) {
+    await rxmShown
+    for (const leaf of ['tm-0', 'rxm-0'] as const) {
       expect(inView(leaf, LINKED[leaf]), `${leaf}: the new pin's rows are on screen`).toBe(true)
       expect(reattach(leaf)?.hidden, `${leaf}: following is still on`).toBe(true)
       expect(inView(leaf, CURRENT[leaf]), `${leaf}: the precondition: the row it follows is off screen`).toBe(false)
@@ -320,12 +320,12 @@ describe('a pin made while the panel is closed', () => {
   /** A pin cleared while the panel is closed releases the hold as it does on screen, and the reopened grid follows. */
   it('follows again when the panels reopen after the pin was cleared behind them', async () => {
     const tmEcho = settle(box('tm-0'))
-    const asmEcho = settle(box('asm-0'))
+    const rxmEcho = settle(box('rxm-0'))
     linkAt(view, PIN)
     await until(() => sourceLinked() === 'f(acc, head(xs))', 'the source to show the pin')
     await tmEcho
-    await asmEcho
-    for (const leaf of ['tm-0', 'asm-0'] as const) {
+    await rxmEcho
+    for (const leaf of ['tm-0', 'rxm-0'] as const) {
       expect(inView(leaf, CURRENT[leaf]), `${leaf}: the precondition: the link holds the box off the run`).toBe(false)
       toggle(leaf)?.click()
       expect(box(leaf)?.hidden, `${leaf}: the precondition: the panel is closed`).toBe(true)
@@ -334,29 +334,29 @@ describe('a pin made while the panel is closed', () => {
     linkAt(view, NOWHERE)
     await until(() => sourceLinked() === null, 'the pin to clear')
     toggle('tm-0')?.click()
-    toggle('asm-0')?.click()
+    toggle('rxm-0')?.click()
     await until(() => inView('tm-0', CURRENT['tm-0']), 'the rule table to follow the machine again')
-    await until(() => inView('asm-0', CURRENT['asm-0']), 'the listing to follow the run again')
+    await until(() => inView('rxm-0', CURRENT['rxm-0']), 'the listing to follow the run again')
     expect(reattach('tm-0')?.hidden).toBe(true)
-    expect(reattach('asm-0')?.hidden).toBe(true)
+    expect(reattach('rxm-0')?.hidden).toBe(true)
   })
 })
 
-describe('a click in the asm listing', () => {
+describe('a click in the rxm listing', () => {
   /**
    * THE LISTING CLICKED IN DOES NOT SCROLL (spec §6.6): the construct it pins can own instructions far from the one
    * under the pointer, and scrolling to them would move that row out from under it. `fn map`'s `ret`, pc39 at row 46,
    * belongs to the definition, which owns pc16 at row 20 too.
    */
   it('marks the construct without moving the listing it was made in', async () => {
-    const listing = box('asm-0') as HTMLElement
+    const listing = box('rxm-0') as HTMLElement
     // THE USER'S SCROLL, WITH ITS EVENT DISPATCHED AT ONCE rather than at the next rendering update, as `app.test.ts`'s
     // scroll cases do: a draw landing in between — a λ tree coming back — would follow the run straight back to pc0.
     listing.scrollTop = 40 * 24
     listing.dispatchEvent(new Event('scroll'))
     const ret = () =>
-      [...listing.querySelectorAll<HTMLElement>('.asm-row')].find(
-        (r) => r.querySelector('.asm-pc')?.textContent === 'pc39',
+      [...listing.querySelectorAll<HTMLElement>('.rxm-row')].find(
+        (r) => r.querySelector('.rxm-pc')?.textContent === 'pc39',
       )
     await until(() => ret() !== undefined && within(listing, ret() as HTMLElement), 'pc39 to be on screen')
     const before = listing.scrollTop
@@ -370,8 +370,8 @@ describe('a click in the asm listing', () => {
     listing.scrollTop = 0
     listing.dispatchEvent(new Event('scroll'))
     const jmp = () =>
-      [...listing.querySelectorAll<HTMLElement>('.asm-row.is-linked')].find(
-        (r) => r.querySelector('.asm-pc')?.textContent === 'pc16',
+      [...listing.querySelectorAll<HTMLElement>('.rxm-row.is-linked')].find(
+        (r) => r.querySelector('.rxm-pc')?.textContent === 'pc16',
       )
     await until(() => jmp() !== undefined, 'pc16, row 20, to be marked as the same construct')
   })
@@ -388,12 +388,12 @@ describe('a view that missed the last compile', () => {
     clickWorkspaceItem('[data-switch="views"][data-value="stage"]')
     stageTab('source')?.click()
     await until(
-      () => paneByLeaf('tm-0') === null && paneByLeaf('asm-0') === null,
-      'the TM and asm views to leave the page',
+      () => paneByLeaf('tm-0') === null && paneByLeaf('rxm-0') === null,
+      'the TM and rxm views to leave the page',
     )
     await recompilesOffPage(() => view.dispatch({ changes: { from: view.state.doc.length, insert: '\n' } }))
     expect(
-      paneByLeaf('tm-0') ?? paneByLeaf('asm-0'),
+      paneByLeaf('tm-0') ?? paneByLeaf('rxm-0'),
       'the precondition: the compile landed with both views off the page',
     ).toBe(null)
     linkAt(view, PIN)
@@ -412,20 +412,20 @@ describe('a view that missed the last compile', () => {
     expect(inView('tm-0', CURRENT['tm-0']), 'the table follows the machine again').toBe(true)
   })
 
-  it('opens the asm view on the pin too, and follows once the run moves', async () => {
-    stageTab('asm-0')?.click()
-    await settle(box('asm-0'))
-    expect(inView('asm-0', LINKED['asm-0']), "the pin's instructions are on screen").toBe(true)
-    expect(reattach('asm-0')?.hidden, 'following is still on').toBe(true)
-    expect(inView('asm-0', CURRENT['asm-0']), 'the precondition: the instruction about to run is off screen').toBe(
+  it('opens the rxm view on the pin too, and follows once the run moves', async () => {
+    stageTab('rxm-0')?.click()
+    await settle(box('rxm-0'))
+    expect(inView('rxm-0', LINKED['rxm-0']), "the pin's instructions are on screen").toBe(true)
+    expect(reattach('rxm-0')?.hidden, 'following is still on').toBe(true)
+    expect(inView('rxm-0', CURRENT['rxm-0']), 'the precondition: the instruction about to run is off screen').toBe(
       false,
     )
 
     // A STEP FORWARD: the recompiled run opens on step 0 (`History`).
-    const at = stepOf('asm-0')
-    control('asm-0', '▶')?.click()
-    await until(() => stepOf('asm-0') !== at, 'one step')
-    expect(inView('asm-0', CURRENT['asm-0']), 'the listing follows the run again').toBe(true)
+    const at = stepOf('rxm-0')
+    control('rxm-0', '▶')?.click()
+    await until(() => stepOf('rxm-0') !== at, 'one step')
+    expect(inView('rxm-0', CURRENT['rxm-0']), 'the listing follows the run again').toBe(true)
     clickWorkspaceItem('[data-switch="views"][data-value="tiles"]')
   })
 })
@@ -439,7 +439,7 @@ describe('a pin made in a second view of the same leg', () => {
    * offers a split (`draw.ts`'s own refusal), so it is made first, in tiles.
    */
   it('paints the pin on reveal but leaves the view following, when a second TM view made it', async () => {
-    await until(() => paneByLeaf('tm-0') !== null && paneByLeaf('asm-0') !== null, 'the tiles to show every view')
+    await until(() => paneByLeaf('tm-0') !== null && paneByLeaf('rxm-0') !== null, 'the tiles to show every view')
     linkAt(view, NOWHERE)
     await until(() => sourceLinked() === null, 'the previous pin to clear')
 

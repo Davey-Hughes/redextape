@@ -24,10 +24,10 @@ describe('classMapFrom', () => {
   it('keeps the four tables apart, because three captures mean different things per language', () => {
     const map = classMapFrom([
       ['redextape', [['function', 'Ident']]],
-      ['redextape_asm', [['function', 'Mnemonic']]],
+      ['redextape_rxm', [['function', 'Mnemonic']]],
     ])
     expect(map.get('redextape')?.get('function')).toBe('tok-ident')
-    expect(map.get('redextape_asm')?.get('function')).toBe('tok-mnemonic')
+    expect(map.get('redextape_rxm')?.get('function')).toBe('tok-mnemonic')
   })
 
   it('answers undefined for a capture no table maps, rather than a default class', () => {

@@ -119,7 +119,7 @@ describe('a whole link pasted into an open page', () => {
   it("replaces the workspace, building every view again on the program in the link's display", async () => {
     expect(workspaceName()).toBe('Debugger ▾')
     expect(document.querySelector<HTMLElement>('#step-bar')?.hidden).toBe(false)
-    expect(leaves()).toEqual(['source', 'lambda-0', 'pane-2', 'asm-0', 'tm-0'])
+    expect(leaves()).toEqual(['source', 'lambda-0', 'pane-2', 'rxm-0', 'tm-0'])
     expect(shows('lambda-0')).toBe(bindingKey('lambda', 'source'))
     // THE λ VIEW'S LEAF AND KIND SURVIVE THE OPEN, AND IT WAS ON THE PROGRAM: only a rebuild shows the link's display.
     // **READ ONCE ITS TREE HAS ARRIVED**: until a step's tree lands, the view is drawn `flat` whatever its display.

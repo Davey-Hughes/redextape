@@ -6,7 +6,7 @@ import type { VisibleWindow } from '../../src/virtual-list'
 import { frame, scrolled, until } from './harness'
 
 /**
- * `VirtualGrid` on its own, with nothing of a view around it: the contract the TM rule table and the asm listing both
+ * `VirtualGrid` on its own, with nothing of a view around it: the contract the TM rule table and the rxm listing both
  * draw on. The rule table's own suites (`tm-grid`, `tm-pointer`, `tm-follow-clamp`, `app`) hold the same behaviour
  * through a real view; these hold it where a second view could not quietly depend on the first view's wiring.
  *

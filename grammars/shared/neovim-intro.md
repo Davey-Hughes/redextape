@@ -13,14 +13,14 @@ is a separate thing that nothing else does. Neovim auto-starts treesitter only f
 filetypes, and nvim-treesitter ships no `FileType` autocmd, so a parser can be installed and a
 filetype set and the buffer still open with no colour at all.
 
-`.rxt` and `.rxlambda` are claimed by extension. `.asm` and `.tm` are claimed by **sniffing the
-buffer**, because Neovim already maps them to `asm` and `tcl`: a listing that is not this project's
-keeps the filetype it had. `lazy = false` is required — filetype registration has to happen at
+`.rxt`, `.rxlambda` and `.rxm` are claimed by extension. `.tm` is claimed by **sniffing the
+buffer**, because Neovim already maps it to `tcl`: a file that is not this project's keeps the
+filetype it had. `lazy = false` is required — filetype registration has to happen at
 startup, and a lazy-loaded spec would not register this project's extensions until something had
 already loaded it. Then, once:
 
 ```vim
-:TSInstall redextape redextape_asm redextape_lambda redextape_tm
+:TSInstall redextape redextape_rxm redextape_lambda redextape_tm
 ```
 
 **That one line requires nvim-treesitter's `main` branch**, and the next paragraph explains why that
@@ -32,9 +32,9 @@ use the hand-written block below.**
 
 **Everything below is for everyone else** — `master`, a different plugin manager, or nvim-treesitter
 driven by hand. It is close to what `plugin/redextape.lua` does, with two deliberate differences
-worth knowing before you copy it: the blocks below claim `.asm` and `.tm` **unconditionally by
-extension**, which is simpler and takes every such file on your machine away from `asm` and `tcl`,
-and they do not start the highlighter. If you want colour you need a `FileType` autocmd calling
+worth knowing before you copy it: the blocks below claim `.tm` **unconditionally by extension**,
+which is simpler and takes every such file on your machine away from `tcl`, and they do not start
+the highlighter. If you want colour you need a `FileType` autocmd calling
 `vim.treesitter.start()` as well — see the end of this section.
 
 **nvim-treesitter's `main` branch does not clone.** Its installer strips a trailing `.git` from

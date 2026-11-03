@@ -12,7 +12,7 @@ import { claim, host, mountAt, toggle, until } from './harness'
  * view that returns must not write the scroll it remembers onto an editor another view has now.
  *
  * **TWO VIEWS OF ONE COPY, IN TWO COMBINATIONS OF VIEWS**: the second λ view is added while all four kinds show, so
- * the combination without the asm view, visited for the first time, has the first λ view and not the second.
+ * the combination without the rxm view, visited for the first time, has the first λ view and not the second.
  */
 
 const leaves = (): string[] =>
@@ -48,7 +48,7 @@ describe('a copy’s editor that another view took while its view was off the pa
     expect(editor.scrollLeft, 'precondition: the editor is scrolled in the second view').toBe(300)
 
     // THE SECOND VIEW LEAVES THE PAGE WITH THE EDITOR, and the first view takes it.
-    await userEvent.click(toggle('asm'))
+    await userEvent.click(toggle('rxm'))
     expect(host(second), 'precondition: the second view is off the page').toBeNull()
     expect(host('lambda-0'), 'precondition: the first view is on it').not.toBeNull()
     await until(() => claim('lambda-0') !== null, 'the first view to offer the editor')
@@ -58,7 +58,7 @@ describe('a copy’s editor that another view took while its view was off the pa
     expect(editor.scrollLeft, 'precondition: the editor is at its start in the first view').toBe(0)
 
     // THE SECOND VIEW COMES BACK, remembering where the editor was scrolled to while it held it.
-    await userEvent.click(toggle('asm'))
+    await userEvent.click(toggle('rxm'))
     expect(host(second), 'the second view did not come back').not.toBeNull()
     expect(editorIn('lambda-0'), 'the editor left the first view').toBe(editor)
     expect(editor.scrollLeft, 'the second view scrolled an editor it no longer holds').toBe(0)

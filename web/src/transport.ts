@@ -21,7 +21,7 @@ import type { Speed } from './workspace'
 const NO_TEXT: Record<Leg, string> = {
   lambda: 'detach reached with no term text',
   tm: 'detachMachine reached with no machine text',
-  asm: 'detachAsm reached with no asm text',
+  rxm: 'detachRxm reached with no rxm text',
 }
 
 /**
@@ -154,7 +154,7 @@ export function createTransport(deps: {
   /**
    * Make a copy on `slot`'s leg from `text` at `step`, move `slot`'s view onto it, and say what happened — the one body
    * behind every *edit a copy*: `detach` on the λ leg, from the source's term at the step the view shows, and
-   * `detachMachine` and `detachAsm` on the TM and asm legs, from the program's whole text at step 0. Each handler
+   * `detachMachine` and `detachRxm` on the TM and rxm legs, from the program's whole text at step 0. Each handler
    * resolves its own text and hands it here, so the three cannot drift apart in what follows.
    *
    * **`null` TEXT IS A WIRING BUG, NOT A USER ACTION — LOUD, NOT SWALLOWED.** Each view withdraws or disables its
@@ -174,7 +174,7 @@ export function createTransport(deps: {
    * **`BufferCapReached` AND NOT A BARE `catch`.** The other throws reachable from `fork` are `SessionRegistry.add`'s
    * and `SessionPool.bind`'s guards over their own invariants; those are wiring bugs, and rendering one as a status
    * line would swallow it. Anything else is re-thrown unchanged. `tests/node/sessions.test.ts` holds both arms, for
-   * the λ, TM and asm handlers.
+   * the λ, TM and rxm handlers.
    */
   const forkCopy = (slot: PaneSlot<Leg>, text: string | null, step: number): void => {
     // THE SLOT'S OWN LEG — a slot's leg has no writer (`PaneSlot`'s doc), so the copy is made on the leg the view
@@ -282,7 +282,7 @@ export function createTransport(deps: {
     //
     // **A CROSS-LEG PICK IS ACTED ON IN `pane-host.ts`, NOT HERE.** Following a leg change means
     // replacing the pane's whole entry — a different `PaneSlot`, a different pane class, its host, and
-    // its editor taken off (a λ copy's into custody, a TM or asm copy's destroyed) — which needs the
+    // its editor taken off (a λ copy's into custody, a TM or rxm copy's destroyed) — which needs the
     // layout tree, and this file has none.
     // `pane-host.ts`'s `paneEvents` wraps this handler, compares the picked leg against the slot's, and
     // delegates ONLY a same-leg pick here; a cross-leg pick changes the leaf's kind and rebuilds the
@@ -445,7 +445,7 @@ export function createTransport(deps: {
     //
     // **`slot.binding.session` NAMES THE BUFFER WHOSE EDITOR IS ON SCREEN**, because `pane-host.ts`'s
     // rebind wrapper takes the outgoing editor off the view before the binding moves (a λ view's into
-    // custody, a TM or asm view's destroyed). Without that, a pane could go on showing buffer A's live
+    // custody, a TM or rxm view's destroyed). Without that, a pane could go on showing buffer A's live
     // editor above buffer B's frames once its binding had moved to B, and clicking collapse would record
     // the flag against B while the editor on screen was A's.
     // The edit handler has a second hazard this one does not: a debounce still pending when the binding
@@ -470,7 +470,7 @@ export function createTransport(deps: {
     // page, so there is no later moment at which a spread could take effect anyway. The second reason is
     // `PaneSlot`'s: a slot's leg cannot change, so a fact decided from it at construction cannot go stale
     // the way one decided from its session would.
-    // THE ASM VIEW'S ROWS LINK THE SAME WAY, BY THE INSTRUCTION'S OWNER (Plan 7 part 5 spec §6.6) — an instruction
+    // THE RXM VIEW'S ROWS LINK THE SAME WAY, BY THE INSTRUCTION'S OWNER (Plan 7 part 5 spec §6.6) — an instruction
     // `defunc` minted has none, and `setLinkTo` says so on the status line rather than leaving it blank.
     //
     // **A ROW IN A COPY LINKS NOTHING AND SAYS NOTHING** (spec amendment 28), in either view that numbers its rows by
@@ -478,17 +478,17 @@ export function createTransport(deps: {
     // whatever the program has at that index: an unedited copy would line up with the program and pin its constructs,
     // and an edited one would pin whatever the program happens to have there. `detached` is the session's own fact,
     // read at click time since the view's binding moves.
-    ...(slot.binding.leg === 'asm'
+    ...(slot.binding.leg === 'rxm'
       ? {
           linkInstr: (pc: number) => {
             const wiring = linkWiring()
             if (!wiring.linkable || wiring.index === null) return
             if (sessions.entryOf(slot.binding.session).detached) return
-            wiring.setLinkTo(wiring.index.nodeForInstr(pc), 'asm')
+            wiring.setLinkTo(wiring.index.nodeForInstr(pc), 'rxm')
           },
-          // `detachMachine`'s handler below, for an asm copy: the program's text, as its session kept it from the
-          // `compiled` reply (`replies.ts`'s `setAsmProgram`), `null` only where the control is withdrawn or disabled.
-          detachAsm: () => forkCopy(slot, sessions.entryOf(slot.binding.session).asmProgram?.asmText ?? null, 0),
+          // `detachMachine`'s handler below, for an rxm copy: the program's text, as its session kept it from the
+          // `compiled` reply (`replies.ts`'s `setRxmProgram`), `null` only where the control is withdrawn or disabled.
+          detachRxm: () => forkCopy(slot, sessions.entryOf(slot.binding.session).rxmProgram?.rxmText ?? null, 0),
         }
       : {}),
     ...(slot.binding.leg === 'tm'

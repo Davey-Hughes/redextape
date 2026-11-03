@@ -432,7 +432,7 @@ export class ScratchEditor {
   /**
    * Tear down the instance, **sending any pending edit first** (`flush`).
    *
-   * **THE PENDING EDIT IS SENT, NOT CANCELLED.** A TM or asm view destroys the editor it leaves (spec amendment 33) —
+   * **THE PENDING EDIT IS SENT, NOT CANCELLED.** A TM or rxm view destroys the editor it leaves (spec amendment 33) —
    * a pick through its title, a close, a change to another leg — and a λ view destroys its editor when it moves to
    * the program, so cancelling would drop whatever was typed in the last `debounceMs` before the view moved,
    * silently. Sending after a retirement reaches no worker, because the sink an editor is built with is its

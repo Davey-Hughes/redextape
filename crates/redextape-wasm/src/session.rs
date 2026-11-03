@@ -11,12 +11,12 @@ use std::rc::Rc;
 use redextape_core::core::{Core, NodeId};
 use redextape_core::lambda::{self, LambdaTerm, LowerError};
 use redextape_core::sourcemap::SourceMap;
-use redextape_core::tm::asm::{AsmOutcome, Program};
 use redextape_core::tm::machine::Machine;
+use redextape_core::tm::rxm::{Program, RxmOutcome};
 use redextape_core::tm::{self, EncodingKind, Symbol, Tape, TmRun};
-use redextape_core::trace::{self, AsmCap, AsmCursor, LambdaCheckpoints, LambdaCursor, TmCursor};
+use redextape_core::trace::{self, LambdaCheckpoints, LambdaCursor, RxmCap, RxmCursor, TmCursor};
 use redextape_core::viewmodel::{
-    AsmProgram, AsmState, AsmWindow, LambdaState, LambdaTree, LinkIndex, TmProgram, TmState, TreeAnswer,
+    LambdaState, LambdaTree, LinkIndex, RxmProgram, RxmState, RxmWindow, TmProgram, TmState, TreeAnswer,
 };
 use redextape_core::{Diagnostic, Severity, Span, lints, parser, typeck};
 
@@ -75,8 +75,8 @@ pub enum SessionError {
     LambdaAbsent,
     /// A TM-leg method on a session whose TM backend declined. `tm_status()` says why.
     TmAbsent,
-    /// An asm-leg method on a session whose program did not lower to asm. `asm_status()` says why.
-    AsmAbsent,
+    /// An rxm-leg method on a session whose program did not lower to rxm. `rxm_status()` says why.
+    RxmAbsent,
     /// `tape_slice` named a tape the machine does not have.
     NoSuchTape { tape: usize, tapes: usize },
 }
@@ -86,7 +86,7 @@ impl std::fmt::Display for SessionError {
         match self {
             SessionError::LambdaAbsent => write!(f, "this program has no λ leg — see lambdaStatus()"),
             SessionError::TmAbsent => write!(f, "this program has no TM leg — see tmStatus()"),
-            SessionError::AsmAbsent => write!(f, "this program has no asm leg — see asmStatus()"),
+            SessionError::RxmAbsent => write!(f, "this program has no rxm leg — see rxmStatus()"),
             SessionError::NoSuchTape { tape, tapes } => {
                 write!(f, "no tape {tape}: this machine has {tapes}")
             }
@@ -133,7 +133,7 @@ pub enum RunStatus {
 /// | --- | --- | --- | --- | --- | --- |
 /// | `lambda_value` | ✅ | ✅ | ✅ | the cursor has not reached `Ended` | — |
 /// | `tm_value` | ✅ | ✅ | ✅ | a capped compile whose cursor has not since halted | — |
-/// | `asm_value` | ✅ | ✅ | ✅ | a capped compile whose cursor has not since ended | ✅ |
+/// | `rxm_value` | ✅ | ✅ | ✅ | a capped compile whose cursor has not since ended | ✅ |
 /// | `evaluate` | ✅ | ✅ | — | — | ✅ |
 ///
 /// `tm_value`'s `Unfinished` is NOT λ-specific: `compile` gives both `Ran` and `HitCap` a working
@@ -141,10 +141,10 @@ pub enum RunStatus {
 /// a raised cap can drive that cursor to a halt, and `tm_value` decodes the configuration it stopped
 /// on. There is no state in which the TM leg reports `Ended` and `Unfinished` together.
 ///
-/// **`asm_value` IS `tm_value`'S SHAPE WITH A FAULT ADDED.** It answers from the run `compile` performed and
-/// falls back on the cursor after a raised cap, so its `Unfinished` is the TM's; and an asm program can
+/// **`rxm_value` IS `tm_value`'S SHAPE WITH A FAULT ADDED.** It answers from the run `compile` performed and
+/// falls back on the cursor after a raised cap, so its `Unfinished` is the TM's; and an rxm program can
 /// fault — `head([])` types, and its `head` meets `nil` — which the cursor reports with the instruction and
-/// the reason. That run has ENDED (`asm_status().run` is `Ended`), so the fault is the leg's answer,
+/// the reason. That run has ENDED (`rxm_status().run` is `Ended`), so the fault is the leg's answer,
 /// "head of empty list at pc1", and not a status. Each ✅ in its row has a test of
 /// its own below, by the program that reaches it.
 ///
@@ -252,47 +252,47 @@ pub struct TmStatus {
     pub total_steps: Option<u64>,
 }
 
-/// Whether the asm leg is there, why not when it is not, how far its cursor has got, which cap stopped it,
+/// Whether the rxm leg is there, why not when it is not, how far its cursor has got, which cap stopped it,
 /// and how long the whole run is.
 ///
-/// **`TmStatus`'S SHAPE, LESS `width` AND PLUS `cap`.** An asm program has no encoding to fit, so it has no
+/// **`TmStatus`'S SHAPE, LESS `width` AND PLUS `cap`.** An rxm program has no encoding to fit, so it has no
 /// width. And `RunStatus::Capped` cannot say by itself whether "continue" is an honest offer, which on the TM
-/// it always is: the asm cursor has four caps and only the step cap resumes — `AsmCursor::raise_cap` leaves a
+/// it always is: the rxm cursor has four caps and only the step cap resumes — `RxmCursor::raise_cap` leaves a
 /// run its stack, heap or saved-frame memory stopped where it is, since more steps cannot deepen a stack —
 /// so a renderer that offered "continue" on `Capped` alone would offer it to three runs that cannot take it.
 /// `cap` says which cap it was, and the step line names it (Plan 7 part 5 spec amendment 10).
 ///
 /// **A FIELD, NOT MORE `RunStatus` VARIANTS.** λ's depth refusal is `RunStatus::DepthRefused` because it is
 /// one fact with one sentence. Three hard caps each need a sentence of their own, and a variant apiece would
-/// put three asm-only states into the vocabulary every leg's `run` shares, for the λ and TM renderers to
+/// put three rxm-only states into the vocabulary every leg's `run` shares, for the λ and TM renderers to
 /// match and never meet. The TM's `Capped` needs no cap beside it: both of its caps, steps and live cells,
 /// are ones `raise_tm_cap` raises.
 ///
-/// **A FAULT IS AN END.** `run` is `Ended` for a run that halted and for one that faulted, and `asm_value`
+/// **A FAULT IS AN END.** `run` is `Ended` for a run that halted and for one that faulted, and `rxm_value`
 /// carries the difference: the program's value, or `Decoded::Fault` naming the instruction and the reason
 /// (spec §8). A fault is the program's answer — `head([])` faults in the reference interpreter too — not a
 /// limit of this tool, so nothing about it invites continuing.
 #[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export))]
 #[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
-pub struct AsmStatus {
+pub struct RxmStatus {
     pub available: bool,
     /// Why the leg is absent — which way `tm::lower_program` refused the program — or empty when it is not.
     ///
     /// **NO `node`, AS `TmStatus` HAS NONE.** The TM leg lowers through the same function, so a program the
-    /// asm lowering refuses declines the TM leg too, with the same refusal behind it, and neither status
+    /// rxm lowering refuses declines the TM leg too, with the same refusal behind it, and neither status
     /// names a construct; `LambdaStatus::node` exists because the λ backend refuses things of its own.
     pub reason: String,
     /// Where the CURSOR stands: `Running`, `Ended` for a halt or a fault, or `Capped`. `None` exactly when
     /// the leg is absent. `DepthRefused` is λ's and never appears here.
     pub run: Option<RunStatus>,
     /// Which cap stopped the cursor. `Some` exactly when `run` is `Capped` — a cap beside `Running` or
-    /// `Ended` would name a stop that did not happen — and only `Some(AsmCap::Steps)` names one that
-    /// `raise_asm_cap` resumes.
-    pub cap: Option<AsmCap>,
+    /// `Ended` would name a stop that did not happen — and only `Some(RxmCap::Steps)` names one that
+    /// `raise_rxm_cap` resumes.
+    pub cap: Option<RxmCap>,
     /// How long the WHOLE run is, in instructions, from the run `compile` performed (Plan 7 part 5 spec amendment 13).
     ///
-    /// **`compile` RUNS THE PROGRAM TO ITS END TO KNOW THIS, AS IT RUNS THE TM.** `run_asm` returns no step
-    /// count, so `compile` drives an `AsmCursor` to the end and keeps the count and the outcome, and the
+    /// **`compile` RUNS THE PROGRAM TO ITS END TO KNOW THIS, AS IT RUNS THE TM.** `run_rxm` returns no step
+    /// count, so `compile` drives an `RxmCursor` to the end and keeps the count and the outcome, and the
     /// cursor a view records is a fresh one. It is a different number about a different thing than `run`,
     /// for `TmStatus::total_steps`'s reason: "instruction 23 of 55" reads the cursor for the first number
     /// and this for the second, and this does not move as the cursor does.
@@ -325,7 +325,7 @@ pub struct Compiled {
 /// Static diagnostics — parse and typecheck — with no backend and no session.
 ///
 /// **SEPARATE FROM `compile` BECAUSE OF WHAT `compile` COSTS.** `compile` lowers every backend, runs
-/// the TM to a halt (`run_tm_described`), which is 344,999 δ-steps on the `map` demo, and runs the asm
+/// the TM to a halt (`run_tm_described`), which is 344,999 δ-steps on the `map` demo, and runs the rxm
 /// program to its end, which for a program that never halts is the whole five-million-step cap. An editor
 /// linting on every keystroke cannot go through that path, and this is the one it goes through
 /// instead. `Analysis.core` is dropped: a `Core` has no boundary representation and no consumer here.
@@ -402,10 +402,10 @@ pub struct Session {
     /// `tm_status` is where that is withheld: a declined leg reports `None` however this field reads,
     /// because a length beside `available: false` describes a run the caller has no cursor to reach.
     pub(crate) total_steps: Option<u64>,
-    /// The asm leg, or the lowering's refusal. Absent ONLY when `tm::lower_program` fails: a program the TM
+    /// The rxm leg, or the lowering's refusal. Absent ONLY when `tm::lower_program` fails: a program the TM
     /// declines as too large to build or as overflowing every width still lowered, so it still runs here
-    /// (spec §5.2). See `AsmLeg` for what travels together inside it.
-    pub(crate) asm: Result<AsmLeg, tm::LowerError>,
+    /// (spec §5.2). See `RxmLeg` for what travels together inside it.
+    pub(crate) rxm: Result<RxmLeg, tm::LowerError>,
 }
 
 /// The shared tail of `compile`'s two non-declining arms. `Ran` and `HitCap` build the same cursor
@@ -469,30 +469,30 @@ fn tm_leg_at(
     (program, cursor)
 }
 
-/// The asm leg: the listing, the cursor a view records, and how `compile`'s own run of the program ended,
+/// The rxm leg: the listing, the cursor a view records, and how `compile`'s own run of the program ended,
 /// TRAVELLING TOGETHER in one `Result`, for the reason the `tm` field's doc gives for its pair — a cursor with
 /// no listing, or a total with no run behind it, is then a state the type cannot spell.
-pub(crate) struct AsmLeg {
-    /// Projected once, by `build_asm_leg`, and cloned per `asm_program` — never printed again.
-    program: AsmProgram,
+pub(crate) struct RxmLeg {
+    /// Projected once, by `build_rxm_leg`, and cloned per `rxm_program` — never printed again.
+    program: RxmProgram,
     /// A FRESH cursor, at step 0, over the program `compile`'s run stepped and under the caps it ran with —
     /// `build_tm_leg`'s rule: a cursor budgeted differently from the run whose outcome the session reports
     /// would stop somewhere that outcome never mentions.
-    cursor: AsmCursor<Rc<Program>>,
-    /// Instructions `compile`'s run completed. `AsmStatus::total_steps` says what it means for a capped run.
+    cursor: RxmCursor<Rc<Program>>,
+    /// Instructions `compile`'s run completed. `RxmStatus::total_steps` says what it means for a capped run.
     total_steps: u64,
     /// How `compile`'s run ended.
-    end: AsmEnd,
+    end: RxmEnd,
 }
 
-/// How the run `compile` performed ended: what `asm_value` answers from, until a raised cap lets the recording
+/// How the run `compile` performed ended: what `rxm_value` answers from, until a raised cap lets the recording
 /// cursor get further than that run did.
 ///
-/// **THE HALT KEEPS THE OUTCOME AND NOTHING ELSE.** `AsmCursor::into_outcome` consumes the cursor, keeping the
-/// result word and the heap, which is exactly what `tm::decode_asm_ty` reads; the rest of the machine is
+/// **THE HALT KEEPS THE OUTCOME AND NOTHING ELSE.** `RxmCursor::into_outcome` consumes the cursor, keeping the
+/// result word and the heap, which is exactly what `tm::decode_rxm_ty` reads; the rest of the machine is
 /// dropped with it rather than held for the session's life.
-enum AsmEnd {
-    Halted(AsmOutcome),
+enum RxmEnd {
+    Halted(RxmOutcome),
     /// The instruction that faulted — or the index a fetch past the end tried — and the fault's text.
     Faulted {
         pc: usize,
@@ -503,52 +503,52 @@ enum AsmEnd {
     Capped,
 }
 
-/// Lower `core` for the asm leg, run the program to its end under `caps`, and open the cursor a view records.
+/// Lower `core` for the rxm leg, run the program to its end under `caps`, and open the cursor a view records.
 ///
-/// **A THIRD LOWERING OF ONE `Core` PER COMPILE**, after `SourceMap`'s asm half and `run_tm_described`, and
+/// **A THIRD LOWERING OF ONE `Core` PER COMPILE**, after `SourceMap`'s rxm half and `run_tm_described`, and
 /// safe because all three go through one dispatch: `tm::lower_program` is a pure function of its `Core`, and
-/// `sourcemap.rs`'s `asm_owner_covers_the_program_lower_program_returns` holds that `SourceMap::asm_owner`
-/// indexes the program it returns, first-order and through `defunc` alike. So `asm_state`'s `source_node`
-/// and `link_index`'s asm column name this cursor's instructions. Sharing one lowering would mean the map
+/// `sourcemap.rs`'s `rxm_owner_covers_the_program_lower_program_returns` holds that `SourceMap::rxm_owner`
+/// indexes the program it returns, first-order and through `defunc` alike. So `rxm_state`'s `source_node`
+/// and `link_index`'s rxm column name this cursor's instructions. Sharing one lowering would mean the map
 /// handing its `Program` back out, for this one caller.
 ///
 /// **THE WHOLE RUN HAPPENS HERE, ONCE** (Plan 7 part 5 spec amendment 13): the step total and the value both
 /// come from it, and a program that never halts spends the whole step cap here, before `compile` returns.
-fn build_asm_leg(core: &Core, caps: tm::asm::Caps) -> Result<AsmLeg, tm::LowerError> {
-    Ok(AsmLeg::run(Rc::new(tm::lower_program(core)?), caps))
+fn build_rxm_leg(core: &Core, caps: tm::rxm::Caps) -> Result<RxmLeg, tm::LowerError> {
+    Ok(RxmLeg::run(Rc::new(tm::lower_program(core)?), caps))
 }
 
-/// The asm leg's run and four of its answers, **ONE IMPLEMENTATION FOR THE PROGRAM'S LEG AND A COPY'S.**
-/// `Session` and `AsmScratch` each hold an `AsmLeg` that `run` built, and their `asm_status`, `step_asm`,
-/// `asm_state` and `asm_value` forward to `status`, `step`, `state` and `value`; the two differ only in what
+/// The rxm leg's run and four of its answers, **ONE IMPLEMENTATION FOR THE PROGRAM'S LEG AND A COPY'S.**
+/// `Session` and `RxmScratch` each hold an `RxmLeg` that `run` built, and their `rxm_status`, `step_rxm`,
+/// `rxm_state` and `rxm_value` forward to `status`, `step`, `state` and `value`; the two differ only in what
 /// they hand in — the session its `SourceMap` and the program's type, a copy no map and its header's type, if
-/// it has one. Their `asm_program` and `raise_asm_cap` need no method here: each reads the `program` field or
-/// raises the `cursor`'s cap directly, as `Session::asm_text` prints the cursor's program.
-impl AsmLeg {
-    /// Run `program` to its end under `caps`, then open the cursor a view records: `build_asm_leg`'s whole
+/// it has one. Their `rxm_program` and `raise_rxm_cap` need no method here: each reads the `program` field or
+/// raises the `cursor`'s cap directly, as `Session::rxm_text` prints the cursor's program.
+impl RxmLeg {
+    /// Run `program` to its end under `caps`, then open the cursor a view records: `build_rxm_leg`'s whole
     /// run, for a program from a lowering or from text alike.
-    fn run(program: Rc<Program>, caps: tm::asm::Caps) -> AsmLeg {
-        let mut run = AsmCursor::new(Rc::clone(&program), caps);
+    fn run(program: Rc<Program>, caps: tm::rxm::Caps) -> RxmLeg {
+        let mut run = RxmCursor::new(Rc::clone(&program), caps);
         for _ in run.by_ref() {}
         let total_steps = run.steps_taken();
         let end = match run.status().cloned() {
-            Some(trace::AsmStatus::Halted) => AsmEnd::Halted(run.into_outcome()),
-            Some(trace::AsmStatus::Faulted(why)) => AsmEnd::Faulted { pc: run.pc(), why },
+            Some(trace::RxmStatus::Halted) => RxmEnd::Halted(run.into_outcome()),
+            Some(trace::RxmStatus::Faulted(why)) => RxmEnd::Faulted { pc: run.pc(), why },
             // `None` cannot be reached: a cursor stops only by latching a status. It answers as a cap, as
-            // `run_asm` does for the same arm, rather than panicking, since a panic under wasm aborts the module.
-            Some(trace::AsmStatus::Capped(_)) | None => AsmEnd::Capped,
+            // `run_rxm` does for the same arm, rather than panicking, since a panic under wasm aborts the module.
+            Some(trace::RxmStatus::Capped(_)) | None => RxmEnd::Capped,
         };
-        AsmLeg { program: AsmProgram::of(&program), cursor: AsmCursor::new(program, caps), total_steps, end }
+        RxmLeg { program: RxmProgram::of(&program), cursor: RxmCursor::new(program, caps), total_steps, end }
     }
 
-    /// `Session::asm_status` for a leg that is there.
-    fn status(&self) -> AsmStatus {
+    /// `Session::rxm_status` for a leg that is there.
+    fn status(&self) -> RxmStatus {
         let (run, cap) = match self.cursor.status() {
             None => (RunStatus::Running, None),
-            Some(trace::AsmStatus::Halted | trace::AsmStatus::Faulted(_)) => (RunStatus::Ended, None),
-            Some(trace::AsmStatus::Capped(cap)) => (RunStatus::Capped, Some(*cap)),
+            Some(trace::RxmStatus::Halted | trace::RxmStatus::Faulted(_)) => (RunStatus::Ended, None),
+            Some(trace::RxmStatus::Capped(cap)) => (RunStatus::Capped, Some(*cap)),
         };
-        AsmStatus { available: true, reason: String::new(), run: Some(run), cap, total_steps: Some(self.total_steps) }
+        RxmStatus { available: true, reason: String::new(), run: Some(run), cap, total_steps: Some(self.total_steps) }
     }
 
     /// Advance one instruction; `false` once the run has halted, faulted or been capped.
@@ -557,49 +557,49 @@ impl AsmLeg {
     }
 
     /// The cursor's machine cut to `window`; `map` resolves `source_node`, and a copy has none.
-    fn state(&self, map: Option<&SourceMap>, window: AsmWindow) -> AsmState {
-        AsmState::window(&self.cursor, map, window)
+    fn state(&self, map: Option<&SourceMap>, window: RxmWindow) -> RxmState {
+        RxmState::window(&self.cursor, map, window)
     }
 
     /// The run's answer: `rr` decoded by `ty` from the leg's own run, or from the cursor once a raised cap has
-    /// carried it further — `Session::asm_value` says why in that order. With no `ty`, the raw word, marked:
+    /// carried it further — `Session::rxm_value` says why in that order. With no `ty`, the raw word, marked:
     /// a copy with no `result` header has nothing to decode against.
     fn value(&self, ty: Option<&redextape_core::ty::Ty>) -> Decoded {
-        let decode = |outcome: &AsmOutcome| match ty {
-            Some(ty) => decoded_or_undecodable(tm::decode_asm_ty(outcome, ty)),
+        let decode = |outcome: &RxmOutcome| match ty {
+            Some(ty) => decoded_or_undecodable(tm::decode_rxm_ty(outcome, ty)),
             None => Decoded::Value { text: format!("{} (no result type)", outcome.result) },
         };
         match &self.end {
-            AsmEnd::Halted(outcome) => decode(outcome),
-            AsmEnd::Faulted { pc, why } => asm_fault(*pc, why),
-            AsmEnd::Capped => match self.cursor.status() {
-                Some(trace::AsmStatus::Halted) => {
-                    decode(&AsmOutcome { result: self.cursor.rr(), heap: self.cursor.heap().to_vec() })
+            RxmEnd::Halted(outcome) => decode(outcome),
+            RxmEnd::Faulted { pc, why } => rxm_fault(*pc, why),
+            RxmEnd::Capped => match self.cursor.status() {
+                Some(trace::RxmStatus::Halted) => {
+                    decode(&RxmOutcome { result: self.cursor.rr(), heap: self.cursor.heap().to_vec() })
                 }
-                Some(trace::AsmStatus::Faulted(why)) => asm_fault(self.cursor.pc(), why),
-                None | Some(trace::AsmStatus::Capped(_)) => Decoded::Unfinished,
+                Some(trace::RxmStatus::Faulted(why)) => rxm_fault(self.cursor.pc(), why),
+                None | Some(trace::RxmStatus::Capped(_)) => Decoded::Unfinished,
             },
         }
     }
 }
 
-/// What `asm_status().reason` says for each way `tm::lower_program` refuses a program. One arm per variant,
+/// What `rxm_status().reason` says for each way `tm::lower_program` refuses a program. One arm per variant,
 /// so a third refusal is a compile error here rather than a blank reason.
-fn asm_decline_reason(e: &tm::LowerError) -> String {
+fn rxm_decline_reason(e: &tm::LowerError) -> String {
     match e {
-        tm::LowerError::Unsupported { what, .. } => format!("the asm backend does not support {what}"),
-        tm::LowerError::TooDeep { .. } => "the program nests deeper than the asm lowering guard allows".to_string(),
+        tm::LowerError::Unsupported { what, .. } => format!("the rxm backend does not support {what}"),
+        tm::LowerError::TooDeep { .. } => "the program nests deeper than the rxm lowering guard allows".to_string(),
     }
 }
 
-/// A fault as the asm leg's value, "head of empty list at pc1" — the one wording for the two places a run can
+/// A fault as the rxm leg's value, "head of empty list at pc1" — the one wording for the two places a run can
 /// fault, `compile`'s run and the recording cursor after a raised cap.
 ///
 /// **WHAT FAULTED, THEN WHERE, AND NO "FAULTED".** Spec §8 wrote "faulted at pc12: head of empty list", but every
 /// reader of a `Decoded::Fault` already says it is one — `web/src/types.ts`'s `decodedText` prints `fault: ` before
 /// the message — so the spec's words would read "fault: faulted at pc12: …". The message carries the fault and the
 /// instruction, and the readout reads "fault: head of empty list at pc12".
-fn asm_fault(pc: usize, why: &str) -> Decoded {
+fn rxm_fault(pc: usize, why: &str) -> Decoded {
     Decoded::Fault { message: format!("{why} at pc{pc}") }
 }
 
@@ -738,7 +738,7 @@ fn grouped(n: u64) -> String {
 
 /// `decode_lambda_ty`/`decode_tape_ty`'s `Option<Value>` answer, turned into a `Decoded` — the shared
 /// "decode answered, print-or-refuse" step for `lambda_value` and `tm_value`. Extracted (mirroring
-/// `redextape-cli/src/run.rs`'s `report_tm_decode`/`report_asm_decode`) so a test can drive the
+/// `redextape-cli/src/run.rs`'s `report_tm_decode`/`report_rxm_decode`) so a test can drive the
 /// too-large-to-print refusal directly from a fixture `Value`, without an actual reduction or
 /// simulation that could build the shared DAG itself.
 fn decoded_or_undecodable(v: Option<redextape_core::value::Value>) -> Decoded {
@@ -769,15 +769,15 @@ impl Session {
     /// called until the width is known; `desugar` mints the same ids every time, and only the machine leaves
     /// the run.
     ///
-    /// **THE ASM PROGRAM RUNS TO ITS END TOO**, from the map's own `Core` — see `build_asm_leg` for why that
-    /// program is the one the map's `asm_owner` indexes, and for what the run costs a program that never halts.
+    /// **THE RXM PROGRAM RUNS TO ITS END TOO**, from the map's own `Core` — see `build_rxm_leg` for why that
+    /// program is the one the map's `rxm_owner` indexes, and for what the run costs a program that never halts.
     pub fn compile(src: &str, kind: EncodingKind) -> Compiled {
-        Session::compile_with_caps(src, kind, tm::TM_DEFAULT_CAPS, tm::asm::DEFAULT_CAPS)
+        Session::compile_with_caps(src, kind, tm::TM_DEFAULT_CAPS, tm::rxm::DEFAULT_CAPS)
     }
 
-    /// `compile` with the TM run's and the asm run's budgets as parameters rather than constants.
+    /// `compile` with the TM run's and the rxm run's budgets as parameters rather than constants.
     ///
-    /// PRIVATE, AND EVERY PRODUCT CALLER PASSES `TM_DEFAULT_CAPS` AND `tm::asm::DEFAULT_CAPS` — the
+    /// PRIVATE, AND EVERY PRODUCT CALLER PASSES `TM_DEFAULT_CAPS` AND `tm::rxm::DEFAULT_CAPS` — the
     /// boundary exposes no way to choose. They are parameters because `TM_DEFAULT_CAPS` is 5,000,000
     /// δ-steps, so the `HitCap` arm below is otherwise only reachable by simulating five million steps and
     /// then five million more through the cursor to reach the same wall. A test that cannot afford that is
@@ -785,11 +785,11 @@ impl Session {
     /// every question about a continued run is decided. With a budget of ten the same arm is reached in
     /// milliseconds, by the same code, from the same source program.
     ///
-    /// **THE ASM BUDGET IS THE SAME HOOK FOR THE SAME REASON, FOUR TIMES OVER.** Each of the asm cursor's
+    /// **THE RXM BUDGET IS THE SAME HOOK FOR THE SAME REASON, FOUR TIMES OVER.** Each of the rxm cursor's
     /// caps — steps, stack, heap and saved-frame memory — ends the run its own way, and at `DEFAULT_CAPS`
     /// reaching the stack cap takes 100,000 frames and the heap and memory caps millions of cells and words.
     /// A small budget reaches each in a few instructions of an ordinary program.
-    fn compile_with_caps(src: &str, kind: EncodingKind, caps: tm::TmCaps, asm_caps: tm::asm::Caps) -> Compiled {
+    fn compile_with_caps(src: &str, kind: EncodingKind, caps: tm::TmCaps, rxm_caps: tm::rxm::Caps) -> Compiled {
         let (program, mut diagnostics) = parser::parse(src);
         let Some(program) = program else {
             return Compiled { diagnostics, session: None };
@@ -824,7 +824,7 @@ impl Session {
             _ => tm::MIN_FIELD_WIDTH,
         };
         let (core, map) = SourceMap::build_from_program(&program, &*kind.at(width));
-        let asm = build_asm_leg(&core, asm_caps);
+        let rxm = build_rxm_leg(&core, rxm_caps);
 
         let (lambda, initial_lambda) = match lambda::lower(&core) {
             Ok(t) => (Ok(LambdaLeg::new(&t, lambda::MAX_REDUCTION_STEPS)), Some(t)),
@@ -880,7 +880,7 @@ impl Session {
 
         Compiled {
             diagnostics,
-            session: Some(Session { core, ty, lambda, initial_lambda, tm, map, final_tapes, kind, total_steps, asm }),
+            session: Some(Session { core, ty, lambda, initial_lambda, tm, map, final_tapes, kind, total_steps, rxm }),
         }
     }
 
@@ -1068,7 +1068,7 @@ impl Session {
         let (_, cursor, header) = self.tm.as_ref().ok()?;
         // `header.result` IS ALREADY GROUND (this method's own doc: `ty::ground(self.ty)`), so
         // `is_decodable_ground` asks the round-trip question directly rather than `is_decodable`
-        // grounding it a second time — `AsmHeader::for_type`'s own idiom for the identical reason.
+        // grounding it a second time — `RxmHeader::for_type`'s own idiom for the identical reason.
         if !redextape_core::ty::is_decodable_ground(&header.result) {
             return None;
         }
@@ -1158,50 +1158,50 @@ impl Session {
         Ok(decoded_or_undecodable(tm::decode_tape_ty(tapes, &self.ty, &*enc)))
     }
 
-    // --- the asm leg --------------------------------------------------------------------------
+    // --- the rxm leg --------------------------------------------------------------------------
 
-    /// Whether the asm leg is there, how its cursor stands and which cap stopped it — see `AsmStatus`. `run`
+    /// Whether the rxm leg is there, how its cursor stands and which cap stopped it — see `RxmStatus`. `run`
     /// and `cap` are read off the CURSOR, and `total_steps` off `compile`'s run, the split `tm_status` makes.
-    pub fn asm_status(&self) -> AsmStatus {
-        match &self.asm {
+    pub fn rxm_status(&self) -> RxmStatus {
+        match &self.rxm {
             Ok(leg) => leg.status(),
             Err(e) => {
-                AsmStatus { available: false, reason: asm_decline_reason(e), run: None, cap: None, total_steps: None }
+                RxmStatus { available: false, reason: rxm_decline_reason(e), run: None, cap: None, total_steps: None }
             }
         }
     }
 
     /// The cached listing, cloned — never printed again. Built once per compile, as `tm_program`'s
-    /// projection is, and read off `asm`, the same place `asm_status` reads availability.
-    pub fn asm_program(&self) -> Result<AsmProgram, SessionError> {
-        let leg = self.asm.as_ref().map_err(|_| SessionError::AsmAbsent)?;
+    /// projection is, and read off `rxm`, the same place `rxm_status` reads availability.
+    pub fn rxm_program(&self) -> Result<RxmProgram, SessionError> {
+        let leg = self.rxm.as_ref().map_err(|_| SessionError::RxmAbsent)?;
         Ok(leg.program.clone())
     }
 
-    /// Advance one instruction. `false` once the run has halted, faulted or been capped — `asm_status().run`
+    /// Advance one instruction. `false` once the run has halted, faulted or been capped — `rxm_status().run`
     /// and `.cap` say which, and are the only thing that can.
-    pub fn step_asm(&mut self) -> Result<bool, SessionError> {
-        let leg = self.asm.as_mut().map_err(|_| SessionError::AsmAbsent)?;
+    pub fn step_rxm(&mut self) -> Result<bool, SessionError> {
+        let leg = self.rxm.as_mut().map_err(|_| SessionError::RxmAbsent)?;
         Ok(leg.step())
     }
 
-    /// The cursor's machine cut to `window` — `AsmState::window` and nothing else, with the session's map, so
-    /// `source_node` resolves (`build_asm_leg` says why this map indexes this cursor's program).
-    pub fn asm_state(&self, window: AsmWindow) -> Result<AsmState, SessionError> {
-        let leg = self.asm.as_ref().map_err(|_| SessionError::AsmAbsent)?;
+    /// The cursor's machine cut to `window` — `RxmState::window` and nothing else, with the session's map, so
+    /// `source_node` resolves (`build_rxm_leg` says why this map indexes this cursor's program).
+    pub fn rxm_state(&self, window: RxmWindow) -> Result<RxmState, SessionError> {
+        let leg = self.rxm.as_ref().map_err(|_| SessionError::RxmAbsent)?;
         Ok(leg.state(Some(&self.map), window))
     }
 
     /// Extend the step budget, additively and saturating. It resumes a run the STEP cap stopped and nothing
-    /// else — `AsmCursor::raise_cap`'s rule — so raising it on a run a stack, heap or memory cap stopped, or
+    /// else — `RxmCursor::raise_cap`'s rule — so raising it on a run a stack, heap or memory cap stopped, or
     /// on one that ended, is harmless and changes nothing a caller can see.
-    pub fn raise_asm_cap(&mut self, extra_steps: u64) -> Result<(), SessionError> {
-        let leg = self.asm.as_mut().map_err(|_| SessionError::AsmAbsent)?;
+    pub fn raise_rxm_cap(&mut self, extra_steps: u64) -> Result<(), SessionError> {
+        let leg = self.rxm.as_mut().map_err(|_| SessionError::RxmAbsent)?;
         leg.cursor.raise_cap(extra_steps);
         Ok(())
     }
 
-    /// The asm leg's answer: `rr` decoded by the program's type (`tm::decode_asm_ty`), from the run `compile`
+    /// The rxm leg's answer: `rr` decoded by the program's type (`tm::decode_rxm_ty`), from the run `compile`
     /// performed.
     ///
     /// **AVAILABLE AT STEP 0, NOT ONLY AT THE END, BECAUSE THE ANSWER IS NOT THE CURSOR'S.** `compile` ran the
@@ -1210,50 +1210,50 @@ impl Session {
     /// withhold a known answer and invite a caller to step five million instructions to get it.
     ///
     /// **THE CURSOR IS THE FALLBACK, AND ONLY THE FALLBACK**, for `tm_value`'s reason: a compile the step cap
-    /// stopped has no answer, and `raise_asm_cap` can then carry the cursor to a halt or a fault that
+    /// stopped has no answer, and `raise_rxm_cap` can then carry the cursor to a halt or a fault that
     /// `compile`'s run never reached. The fallback decodes what the cursor already holds — no second run —
-    /// but it COPIES THE HEAP: `decode_asm_ty` reads an `AsmOutcome`, which owns its heap, and the cursor
-    /// cannot give its heap away without being consumed (`AsmCursor::into_outcome`). The copy is paid per
+    /// but it COPIES THE HEAP: `decode_rxm_ty` reads an `RxmOutcome`, which owns its heap, and the cursor
+    /// cannot give its heap away without being consumed (`RxmCursor::into_outcome`). The copy is paid per
     /// call, only on this path, and only for a run that outlasted its compile.
     ///
     /// `Unfinished` therefore means there is no end ANYWHERE: `compile`'s run was capped and the cursor has not
     /// since ended. For a run a stack, heap or memory cap stopped that is permanent, since no raise resumes it,
-    /// and `asm_status().cap` is how a renderer tells that apart from a step cap it can raise.
+    /// and `rxm_status().cap` is how a renderer tells that apart from a step cap it can raise.
     ///
-    /// `Fault` is a run that ended in a fault, in `asm_fault`'s wording; `Undecodable` a halt whose `rr` has no
+    /// `Fault` is a run that ended in a fault, in `rxm_fault`'s wording; `Undecodable` a halt whose `rr` has no
     /// value of the program's type, which is every function-typed program; `TooLargeToPrint` a decode that
     /// succeeded and a value too large for `decoded_value`'s capped print. See `Decoded`'s table.
-    pub fn asm_value(&self) -> Result<Decoded, SessionError> {
-        let leg = self.asm.as_ref().map_err(|_| SessionError::AsmAbsent)?;
+    pub fn rxm_value(&self) -> Result<Decoded, SessionError> {
+        let leg = self.rxm.as_ref().map_err(|_| SessionError::RxmAbsent)?;
         Ok(leg.value(Some(&self.ty)))
     }
 
-    /// This session's asm program as `.asm` text, headed by the program's result type — what *edit a copy*
-    /// seeds an `AsmScratch` from. `None` for a declined leg, and for text longer than `MAX_SCRATCH_ASM_BYTES`,
-    /// which a copy would refuse (`asm_text_within`).
+    /// This session's rxm program as `.rxm` text, headed by the program's result type — what *edit a copy*
+    /// seeds an `RxmScratch` from. `None` for a declined leg, and for text longer than `MAX_SCRATCH_RXM_BYTES`,
+    /// which a copy would refuse (`rxm_text_within`).
     ///
-    /// **THE PROGRAM THE CURSOR RUNS, `defunc` INCLUDED**, printed by `print_asm_with`, and read back by
-    /// `asm_scratch` to the same program: `asm_roundtrip.rs`'s
+    /// **THE PROGRAM THE CURSOR RUNS, `defunc` INCLUDED**, printed by `print_rxm_with`, and read back by
+    /// `rxm_scratch` to the same program: `rxm_roundtrip.rs`'s
     /// `every_program_the_web_app_runs_prints_to_text_a_copy_runs` holds both halves, and that
-    /// `asm_label_diagnostics` finds nothing to refuse in it.
+    /// `rxm_label_diagnostics` finds nothing to refuse in it.
     ///
-    /// **THE HEADER IS `AsmHeader::for_type`'s, THE ONE `redextape emit --lang asm` WRITES** — `Nat`, `Bool`,
+    /// **THE HEADER IS `RxmHeader::for_type`'s, THE ONE `redextape emit --lang rxm` WRITES** — `Nat`, `Bool`,
     /// `Unit` or a list of them, with a free type variable written as `Nat`, so a copy of `[]` reads `[]`. A
     /// program whose type holds a function prints with no header, and its copy's value is the raw word, marked,
     /// where the program's is `Undecodable`: there was never a value of its type to decode.
-    pub fn asm_text(&self) -> Option<String> {
-        self.asm_text_within(MAX_SCRATCH_ASM_BYTES)
+    pub fn rxm_text(&self) -> Option<String> {
+        self.rxm_text_within(MAX_SCRATCH_RXM_BYTES)
     }
 
-    /// `asm_text`, `None` too when the text is longer than `limit` bytes: a copy could not build it, so *edit a copy*
+    /// `rxm_text`, `None` too when the text is longer than `limit` bytes: a copy could not build it, so *edit a copy*
     /// is offered disabled with its reason rather than posted text a build refuses. A parameter so a test can reach
     /// the refusal without a program that prints megabytes.
-    fn asm_text_within(&self, limit: usize) -> Option<String> {
-        let leg = self.asm.as_ref().ok()?;
+    fn rxm_text_within(&self, limit: usize) -> Option<String> {
+        let leg = self.rxm.as_ref().ok()?;
         let program = leg.cursor.program();
-        let text = match tm::AsmHeader::for_type(&self.ty) {
-            Some(header) => tm::print_asm_with(program, &header),
-            None => tm::print_asm(program),
+        let text = match tm::RxmHeader::for_type(&self.ty) {
+            Some(header) => tm::print_rxm_with(program, &header),
+            None => tm::print_rxm(program),
         };
         (text.len() <= limit).then_some(text)
     }
@@ -1290,7 +1290,7 @@ impl Session {
     ///
     /// **CAN ANSWER `Decoded::TooLargeToPrint`, THE SAME AS THE TWO DECODED LEGS.** `Builtin::Tail` is
     /// `Ok((**t).clone())` — an `Rc` clone, O(1), no allocation — structurally the same sharing
-    /// mechanism `Instr::Tail` uses on the asm heap, so an ordinary non-recursive `tails`-style program
+    /// mechanism `Instr::Tail` uses on the rxm heap, so an ordinary non-recursive `tails`-style program
     /// builds an `m`-suffix shared `Value` in O(m) interpreter steps, and `decoded_value` refuses to
     /// print it past `MAX_PRINT_NODES` rather than handing it to the uncapped `format_value`.
     pub fn evaluate(&self) -> Decoded {
@@ -1342,8 +1342,8 @@ impl Session {
 
 /// What a scratchpad constructor answers: the thing, or the diagnostics saying why not.
 ///
-/// **THE SAME SHAPE AS `Compiled`, AND GENERIC RATHER THAN WRITTEN TWICE.** `lambda_scratch` and `asm_scratch`
-/// answer it: their parsers (`lambda::parse_lambda`, `tm::parse_asm_nav`) return a value alongside diagnostics,
+/// **THE SAME SHAPE AS `Compiled`, AND GENERIC RATHER THAN WRITTEN TWICE.** `lambda_scratch` and `rxm_scratch`
+/// answer it: their parsers (`lambda::parse_lambda`, `tm::parse_rxm_nav`) return a value alongside diagnostics,
 /// so both constructors answer the same pair. `tm_scratch` answers `TmScratched` instead, which carries a value
 /// run beside the pair. `Compiled` stays its own struct only because its payload field is named `session` and
 /// nothing is gained by renaming it. See the design's §4.1.
@@ -1397,31 +1397,31 @@ pub fn lambda_scratch(src: &str) -> Scratched<LambdaScratch> {
     Scratched { diagnostics, scratch }
 }
 
-/// An asm program typed or pasted into a copy: **an `AsmLeg` and the type its header names, and nothing else.**
+/// An rxm program typed or pasted into a copy: **an `RxmLeg` and the type its header names, and nothing else.**
 ///
-/// **THE PROGRAM'S LEG, NOT A COPY'S VARIANT OF IT.** `asm_scratch` runs the parsed program to its end and
-/// opens a fresh cursor exactly as `compile` does for a lowered one, so `asm_status`, `asm_program`,
-/// `step_asm`, `asm_state`, `raise_asm_cap` and `asm_value` are `AsmLeg`'s, and every field of `AsmStatus`
-/// is true of a copy — which is why this answers `AsmStatus` where `TmScratch` needs a status of its own.
+/// **THE PROGRAM'S LEG, NOT A COPY'S VARIANT OF IT.** `rxm_scratch` runs the parsed program to its end and
+/// opens a fresh cursor exactly as `compile` does for a lowered one, so `rxm_status`, `rxm_program`,
+/// `step_rxm`, `rxm_state`, `raise_rxm_cap` and `rxm_value` are `RxmLeg`'s, and every field of `RxmStatus`
+/// is true of a copy — which is why this answers `RxmStatus` where `TmScratch` needs a status of its own.
 ///
-/// **NO `SourceMap`, SO NO `sourceSpan` OR `linkIndex`** — `LambdaScratch`'s reason, and `asm_state`'s
+/// **NO `SourceMap`, SO NO `sourceSpan` OR `linkIndex`** — `LambdaScratch`'s reason, and `rxm_state`'s
 /// `source_node` is `null` on every frame. A copy links to nothing.
 ///
-/// **A HEADER'S TYPE, WHEN IT HAS ONE.** `.asm` text may carry `result <type>`, and a copy decodes its value
-/// by it; without one there is nothing to decode against, and `asm_value` is the raw `rr` word, marked as
+/// **A HEADER'S TYPE, WHEN IT HAS ONE.** `.rxm` text may carry `result <type>`, and a copy decodes its value
+/// by it; without one there is nothing to decode against, and `rxm_value` is the raw `rr` word, marked as
 /// having no result type.
-pub struct AsmScratch {
-    leg: AsmLeg,
+pub struct RxmScratch {
+    leg: RxmLeg,
     ty: Option<redextape_core::ty::Ty>,
 }
 
-/// Build an asm copy from `.asm` TEXT, or say why not.
+/// Build an rxm copy from `.rxm` TEXT, or say why not.
 ///
-/// **TEXT OVER `MAX_SCRATCH_ASM_BYTES` IS REFUSED FIRST, UNPARSED**, with a diagnostic naming both sizes — a
+/// **TEXT OVER `MAX_SCRATCH_RXM_BYTES` IS REFUSED FIRST, UNPARSED**, with a diagnostic naming both sizes — a
 /// bound on the build's cost that `redextape run` does not have.
 ///
 /// **OTHERWISE IT REFUSES WHAT `redextape run` REFUSES**: text that does not parse, and — through
-/// `asm_label_diagnostics` — a jump to a label nothing defines, a label defined twice, or a label name the
+/// `rxm_label_diagnostics` — a jump to a label nothing defines, a label defined twice, or a label name the
 /// printer cannot write back. The parser accepts those three and `Program::validate` refuses them; a copy's
 /// editor marks them, from the same function, so a refusal always has its reason on screen. `validate`'s one
 /// other check a text can fail, a register at or over `MAX_REGISTERS`, is not refused: it has no name to
@@ -1429,99 +1429,99 @@ pub struct AsmScratch {
 ///
 /// **THE WHOLE RUN HAPPENS HERE, ONCE**, as in `compile` (Plan 7 part 5 spec amendment 26), under `COPY_CAPS`
 /// rather than `compile`'s caps: the step total and the value come with the build.
-pub fn asm_scratch(src: &str) -> Scratched<AsmScratch> {
-    asm_scratch_with_caps(src, COPY_CAPS)
+pub fn rxm_scratch(src: &str) -> Scratched<RxmScratch> {
+    rxm_scratch_with_caps(src, COPY_CAPS)
 }
 
-/// The longest `.asm` text an asm copy builds, in bytes, and the longest `Session::asm_text` hands out for one
+/// The longest `.rxm` text an rxm copy builds, in bytes, and the longest `Session::rxm_text` hands out for one
 /// (Plan 7 part 5 spec amendment 24; the figure below is amendment 45's).
 ///
 /// **MEASURED, NOT CHOSEN, AGAINST THE 250 MS AN INITIATED GESTURE MAY TAKE** — `MAX_SCRATCH_TM_BYTES`' budget. A
-/// copy's build pays four costs before its first frame: the text's structured clone to the worker; `asm_scratch`,
+/// copy's build pays four costs before its first frame: the text's structured clone to the worker; `rxm_scratch`,
 /// which parses it, checks its labels, projects the listing and runs the program to its end; reading the reply's
-/// status, listing and value off the handle; and the reply's clone back. `web/tests/browser/asm-copy-cost.test.ts`
-/// prices the four together (`cd web && pnpm run test:probe:asm-copy`), over generated files that halt on their first
+/// status, listing and value off the handle; and the reply's clone back. `web/tests/browser/rxm-copy-cost.test.ts`
+/// prices the four together (`cd web && pnpm run test:probe:rxm-copy`), over generated files that halt on their first
 /// instruction, and prices every run the memory probe knows apart from that, since none of them grows with the text:
-/// a loop to the step cap, and `asm-copy-corpus.ts`'s `CASES` and its `both` at `COPY_CAPS`' heap cap — the
+/// a loop to the step cap, and `rxm-copy-corpus.ts`'s `CASES` and its `both` at `COPY_CAPS`' heap cap — the
 /// heaviest of those runs is what the figures below add, not the loop alone.
 ///
-/// FOUR RUNS, RELEASE BUILD, THIS CHECK OFF (`probe-asm-copy`). In three of them 5,200,038 bytes stayed under the 250
+/// FOUR RUNS, RELEASE BUILD, THIS CHECK OFF (`probe-rxm-copy`). In three of them 5,200,038 bytes stayed under the 250
 /// ms budget with `both` added while 5,400,000 was over it in two; in the fourth, 5,200,038 bytes stayed under and
 /// 5,300,019 bytes, the next size up, was over it at 250.2 ms. The ceiling is the largest size known under budget in
 /// every run, with the heaviest run known added, so it is 5,200,000.
 ///
 /// ONE CONSTANT FOR BOTH DIRECTIONS (Plan 7 part 5 spec amendment 24): the text a copy parses, and the text
 /// *edit a copy* would post, since a text over it is one the copy would refuse.
-pub const MAX_SCRATCH_ASM_BYTES: usize = 5_200_000;
+pub const MAX_SCRATCH_RXM_BYTES: usize = 5_200_000;
 
-/// The caps an asm copy runs under: `DEFAULT_CAPS` with fewer heap cells and fewer saved words
+/// The caps an rxm copy runs under: `DEFAULT_CAPS` with fewer heap cells and fewer saved words
 /// (Plan 7 part 5 spec amendment 25).
 ///
 /// **SET SO A COPY'S WORKER STAYS UNDER 256 MIB, THE BUDGET THE USER SET, AND MEASURED THERE.** Each warm copy has a
 /// worker of its own, up to `MAX_WARM_BUFFERS` of them, and a wasm memory only grows, so a copy that once filled its
 /// caps holds that memory until its worker ends. Under `DEFAULT_CAPS` a hand-written copy can fill far more:
-/// `web/tests/browser/asm-copy-memory.test.ts` (`cd web && pnpm run test:probe:asm-copy`) builds each worst case in a
+/// `web/tests/browser/rxm-copy-memory.test.ts` (`cd web && pnpm run test:probe:rxm-copy`) builds each worst case in a
 /// worker of its own, records it as the session worker does, and reads the worker's wasm memory. Under these caps a
 /// copy that fills the heap to its cap and then saves locals to theirs — the two together, since a run stops at the
 /// first cap it meets — reads 168.4 MiB.
 ///
 /// A copy of the program therefore stops, heap-full or with its saved frames full, where the program's own session
 /// runs on: the session keeps `DEFAULT_CAPS`, and the step line names the cap that ended a copy.
-pub const COPY_CAPS: tm::asm::Caps = tm::asm::Caps { heap: 2_000_000, mem: 12_000_000, ..tm::asm::DEFAULT_CAPS };
+pub const COPY_CAPS: tm::rxm::Caps = tm::rxm::Caps { heap: 2_000_000, mem: 12_000_000, ..tm::rxm::DEFAULT_CAPS };
 
-/// `asm_scratch` under `caps`, so a test can reach a cap without millions of steps, and the memory probe can price
-/// `DEFAULT_CAPS` beside `COPY_CAPS` (`probe-asm-copy`).
-pub(crate) fn asm_scratch_with_caps(src: &str, caps: tm::asm::Caps) -> Scratched<AsmScratch> {
+/// `rxm_scratch` under `caps`, so a test can reach a cap without millions of steps, and the memory probe can price
+/// `DEFAULT_CAPS` beside `COPY_CAPS` (`probe-rxm-copy`).
+pub(crate) fn rxm_scratch_with_caps(src: &str, caps: tm::rxm::Caps) -> Scratched<RxmScratch> {
     // BEFORE THE PARSE, FOR `tm_scratch_with_caps`' REASON: the parse is one of the costs the ceiling bounds. Off under
-    // `probe-asm-copy`, which prices both sides of it; `cfg!`, so the constant is read in every build.
-    if !cfg!(feature = "probe-asm-copy") && src.len() > MAX_SCRATCH_ASM_BYTES {
+    // `probe-rxm-copy`, which prices both sides of it; `cfg!`, so the constant is read in every build.
+    if !cfg!(feature = "probe-rxm-copy") && src.len() > MAX_SCRATCH_RXM_BYTES {
         let message = format!(
-            "this file is {} bytes; an asm copy builds files up to {} bytes — `redextape run` has no such limit",
+            "this file is {} bytes; an rxm copy builds files up to {} bytes — `redextape run` has no such limit",
             grouped(src.len() as u64),
-            grouped(MAX_SCRATCH_ASM_BYTES as u64)
+            grouped(MAX_SCRATCH_RXM_BYTES as u64)
         );
         return Scratched { diagnostics: vec![Diagnostic::error(Span { start: 0, end: 0 }, message)], scratch: None };
     }
-    let (doc, nav) = tm::parse_asm_nav(src);
+    let (doc, nav) = tm::parse_rxm_nav(src);
     let mut diagnostics = doc.diagnostics;
-    diagnostics.extend(tm::asm_label_diagnostics(&nav));
+    diagnostics.extend(tm::rxm_label_diagnostics(&nav));
     let scratch = match doc.program {
         Some(program) if diagnostics.is_empty() => {
-            Some(AsmScratch { leg: AsmLeg::run(Rc::new(program), caps), ty: doc.header.map(|h| h.result) })
+            Some(RxmScratch { leg: RxmLeg::run(Rc::new(program), caps), ty: doc.header.map(|h| h.result) })
         }
         _ => None,
     };
     Scratched { diagnostics, scratch }
 }
 
-impl AsmScratch {
-    /// See `Session::asm_status`; always `available`.
-    pub fn asm_status(&self) -> AsmStatus {
+impl RxmScratch {
+    /// See `Session::rxm_status`; always `available`.
+    pub fn rxm_status(&self) -> RxmStatus {
         self.leg.status()
     }
 
     /// The listing and labels, projected once when the copy was built.
-    pub fn asm_program(&self) -> AsmProgram {
+    pub fn rxm_program(&self) -> RxmProgram {
         self.leg.program.clone()
     }
 
-    /// See `Session::step_asm`.
-    pub fn step_asm(&mut self) -> bool {
+    /// See `Session::step_rxm`.
+    pub fn step_rxm(&mut self) -> bool {
         self.leg.step()
     }
 
     /// The cursor's machine cut to `window`, with no map: `source_node` is `None` on every frame.
-    pub fn asm_state(&self, window: AsmWindow) -> AsmState {
+    pub fn rxm_state(&self, window: RxmWindow) -> RxmState {
         self.leg.state(None, window)
     }
 
-    /// See `Session::raise_asm_cap`.
-    pub fn raise_asm_cap(&mut self, extra_steps: u64) {
+    /// See `Session::raise_rxm_cap`.
+    pub fn raise_rxm_cap(&mut self, extra_steps: u64) {
         self.leg.cursor.raise_cap(extra_steps);
     }
 
-    /// See `Session::asm_value`, decoded by the header's type; with no header, the raw word, marked.
-    pub fn asm_value(&self) -> Decoded {
+    /// See `Session::rxm_value`, decoded by the header's type; with no header, the raw word, marked.
+    pub fn rxm_value(&self) -> Decoded {
         self.leg.value(self.ty.as_ref())
     }
 }
@@ -1760,7 +1760,7 @@ pub struct TmScratch {
     header: Option<tm::TmHeader>,
 }
 
-/// Build a TM scratchpad from TM TEXT — the `.tm` form, not asm and not source.
+/// Build a TM scratchpad from TM TEXT — the `.tm` form, not rxm and not source.
 ///
 /// **A HEADERLESS FILE RUNS FROM BLANK TAPES AT `MIN_FIELD_WIDTH`, WHERE `examples/tm_emit.rs`'s `run`
 /// DECLINES THE SAME FILE**, on the grounds that it "genuinely cannot be run without the caller
@@ -2219,7 +2219,7 @@ mod tests {
     fn every_session_error_says_what_went_wrong() {
         assert!(SessionError::LambdaAbsent.to_string().contains("lambdaStatus"), "point the caller at the reason");
         assert!(SessionError::TmAbsent.to_string().contains("tmStatus"));
-        assert!(SessionError::AsmAbsent.to_string().contains("asmStatus"));
+        assert!(SessionError::RxmAbsent.to_string().contains("rxmStatus"));
         let msg = SessionError::NoSuchTape { tape: 9, tapes: 5 }.to_string();
         assert!(msg.contains('9') && msg.contains('5'), "name both the index asked for and the count: {msg}");
     }
@@ -2782,7 +2782,7 @@ mod tests {
     }
 
     /// `analyze` is the CHEAP diagnostics path, and its separation from `compile` is the whole point:
-    /// linting through `compile` would lower the program three ways, run its asm to the end and simulate
+    /// linting through `compile` would lower the program three ways, run its rxm to the end and simulate
     /// a Turing machine to a halt on every keystroke.
     #[test]
     fn analyze_reports_diagnostics_without_building_a_session() {
@@ -2937,7 +2937,7 @@ mod tests {
     #[test]
     fn a_raised_tm_cap_driven_to_a_halt_answers_what_the_status_claims() {
         let caps = tm::TmCaps { steps: 10, cells: tm::TM_DEFAULT_CAPS.cells };
-        let mut s = Session::compile_with_caps("[1, 2, 3]", EncodingKind::Unary, caps, tm::asm::DEFAULT_CAPS)
+        let mut s = Session::compile_with_caps("[1, 2, 3]", EncodingKind::Unary, caps, tm::rxm::DEFAULT_CAPS)
             .session
             .expect("a capped run yields a working session, which is the point of the HitCap arm");
         assert!(s.final_tapes.is_none(), "a capped compile reached no final configuration to record");
@@ -2972,25 +2972,25 @@ mod tests {
         assert_eq!(s.tm_value(), Err(SessionError::TmAbsent));
     }
 
-    // --- the asm leg --------------------------------------------------------------------------
+    // --- the rxm leg --------------------------------------------------------------------------
 
-    /// The window every asm test reads through: larger than any program below, so a frame is the whole
+    /// The window every rxm test reads through: larger than any program below, so a frame is the whole
     /// machine unless a test says otherwise.
-    const ASM_WHOLE: AsmWindow = AsmWindow { locals: 64, args: 16, frames: 8, cells: 16, boxes: 16 };
+    const RXM_WHOLE: RxmWindow = RxmWindow { locals: 64, args: 16, frames: 8, cells: 16, boxes: 16 };
 
-    /// A runaway counter: it never halts, the TM declines it as overflowing every width, and the asm leg
+    /// A runaway counter: it never halts, the TM declines it as overflowing every width, and the rxm leg
     /// spends its whole step cap on it at compile time.
     const RUNAWAY: &str = "let mut n = 1; while n > 0 { n = n + 1; } n";
 
-    /// `compile` with `asm_caps` for the asm run and the TM's default for the TM run.
-    fn compile_asm_capped(src: &str, asm_caps: tm::asm::Caps) -> Session {
-        Session::compile_with_caps(src, EncodingKind::Unary, tm::TM_DEFAULT_CAPS, asm_caps).session.expect("compiles")
+    /// `compile` with `rxm_caps` for the rxm run and the TM's default for the TM run.
+    fn compile_rxm_capped(src: &str, rxm_caps: tm::rxm::Caps) -> Session {
+        Session::compile_with_caps(src, EncodingKind::Unary, tm::TM_DEFAULT_CAPS, rxm_caps).session.expect("compiles")
     }
 
-    /// Step the asm cursor until it stops, and say how many steps it took.
-    fn run_asm_out(s: &mut Session) -> u64 {
+    /// Step the rxm cursor until it stops, and say how many steps it took.
+    fn run_rxm_out(s: &mut Session) -> u64 {
         let mut steps = 0;
-        while s.step_asm().expect("asm available") {
+        while s.step_rxm().expect("rxm available") {
             steps += 1;
         }
         steps
@@ -3000,103 +3000,103 @@ mod tests {
     /// sample's 5 instructions are known before the cursor moves, the cursor reaches exactly that many,
     /// and the total does not move with it. No cap is named beside a running or ended cursor.
     #[test]
-    fn the_asm_status_reports_the_whole_runs_length_alongside_the_cursors_position() {
+    fn the_rxm_status_reports_the_whole_runs_length_alongside_the_cursors_position() {
         let mut s = Session::compile("let x = 40; x + 2", EncodingKind::Unary).session.expect("compiles");
-        let before = AsmStatus {
+        let before = RxmStatus {
             available: true,
             reason: String::new(),
             run: Some(RunStatus::Running),
             cap: None,
             total_steps: Some(5),
         };
-        assert_eq!(s.asm_status(), before, "the whole run's length, and a cursor that has not moved");
-        assert_eq!(run_asm_out(&mut s), 5, "the cursor reaches the length compile's run reported");
-        assert_eq!(s.asm_status(), AsmStatus { run: Some(RunStatus::Ended), ..before }, "a halt is an end");
+        assert_eq!(s.rxm_status(), before, "the whole run's length, and a cursor that has not moved");
+        assert_eq!(run_rxm_out(&mut s), 5, "the cursor reaches the length compile's run reported");
+        assert_eq!(s.rxm_status(), RxmStatus { run: Some(RunStatus::Ended), ..before }, "a halt is an end");
     }
 
-    /// The asm leg's answer is known at step 0, from the run `compile` performed, and stays the same once
+    /// The rxm leg's answer is known at step 0, from the run `compile` performed, and stays the same once
     /// the cursor has run out — `tm_value`'s arrangement, not `lambda_value`'s.
     #[test]
-    fn asm_value_answers_from_the_run_compile_already_performed() {
+    fn rxm_value_answers_from_the_run_compile_already_performed() {
         let mut s = Session::compile("let x = 40; x + 2", EncodingKind::Unary).session.expect("compiles");
-        assert_eq!(s.asm_state(ASM_WHOLE).expect("asm available").step, 0, "the cursor has not moved");
-        assert_eq!(s.asm_value(), Ok(Decoded::Value { text: "42".to_string() }));
-        run_asm_out(&mut s);
-        assert_eq!(s.asm_value(), Ok(Decoded::Value { text: "42".to_string() }));
+        assert_eq!(s.rxm_state(RXM_WHOLE).expect("rxm available").step, 0, "the cursor has not moved");
+        assert_eq!(s.rxm_value(), Ok(Decoded::Value { text: "42".to_string() }));
+        run_rxm_out(&mut s);
+        assert_eq!(s.rxm_value(), Ok(Decoded::Value { text: "42".to_string() }));
     }
 
-    /// The asm leg agrees with the reference over the programs `all_three_legs_agree` runs, a list among
+    /// The rxm leg agrees with the reference over the programs `all_three_legs_agree` runs, a list among
     /// them, so the decode reads the heap as well as `rr`.
     #[test]
-    fn the_asm_leg_agrees_with_the_reference() {
+    fn the_rxm_leg_agrees_with_the_reference() {
         for src in ["let x = 40; x + 2", "[1, 2, 3]", "true", "1 + 2 * 3"] {
             let s = Session::compile(src, EncodingKind::Unary).session.unwrap_or_else(|| panic!("{src} compiles"));
-            assert_eq!(s.asm_value(), Ok(s.evaluate()), "{src}: asm disagrees with the reference");
+            assert_eq!(s.rxm_value(), Ok(s.evaluate()), "{src}: rxm disagrees with the reference");
         }
     }
 
-    /// A program the TM declines as overflowing every width still lowers, so it has an asm leg, and a
+    /// A program the TM declines as overflowing every width still lowers, so it has an rxm leg, and a
     /// program that never halts spends the whole step cap in `compile`: the total is the cap, 5,000,000,
     /// and there is no value. The cursor runs to the same wall, where the status names the step cap, and a
     /// raise lets it go on.
     #[test]
-    fn a_runaway_loop_caps_the_asm_leg_on_steps_where_the_tm_declines() {
+    fn a_runaway_loop_caps_the_rxm_leg_on_steps_where_the_tm_declines() {
         let mut s = Session::compile(RUNAWAY, EncodingKind::Unary).session.expect("compiles");
         assert_eq!(s.tm.as_ref().err(), Some(&TmDecline::Overflow), "the TM declines this program");
-        let st = s.asm_status();
+        let st = s.rxm_status();
         assert_eq!((st.available, st.run, st.cap), (true, Some(RunStatus::Running), None));
-        assert_eq!(st.total_steps, Some(tm::asm::DEFAULT_CAPS.steps), "compile's run spent the whole step cap");
-        assert_eq!(s.asm_value(), Ok(Decoded::Unfinished), "a capped compile has no value");
+        assert_eq!(st.total_steps, Some(tm::rxm::DEFAULT_CAPS.steps), "compile's run spent the whole step cap");
+        assert_eq!(s.rxm_value(), Ok(Decoded::Unfinished), "a capped compile has no value");
 
-        assert_eq!(run_asm_out(&mut s), tm::asm::DEFAULT_CAPS.steps, "the cursor stops at the same wall");
-        assert_eq!((s.asm_status().run, s.asm_status().cap), (Some(RunStatus::Capped), Some(AsmCap::Steps)));
-        s.raise_asm_cap(1).expect("asm available");
-        assert_eq!(s.step_asm(), Ok(true), "a step cap is the one a raise resumes");
+        assert_eq!(run_rxm_out(&mut s), tm::rxm::DEFAULT_CAPS.steps, "the cursor stops at the same wall");
+        assert_eq!((s.rxm_status().run, s.rxm_status().cap), (Some(RunStatus::Capped), Some(RxmCap::Steps)));
+        s.raise_rxm_cap(1).expect("rxm available");
+        assert_eq!(s.step_rxm(), Ok(true), "a step cap is the one a raise resumes");
     }
 
     /// A program the TM refuses to build — 33 multiplications, one past `MAX_MUL_INSTRS`, the fixture
-    /// `sourcemap.rs`'s `the_asm_half_survives_a_machine_the_tm_refuses` uses — still lowers, and runs.
+    /// `sourcemap.rs`'s `the_rxm_half_survives_a_machine_the_tm_refuses` uses — still lowers, and runs.
     #[test]
-    fn a_program_the_tm_refuses_to_build_keeps_its_asm_leg() {
+    fn a_program_the_tm_refuses_to_build_keeps_its_rxm_leg() {
         let src = vec!["1"; 34].join(" * ");
         let s = Session::compile(&src, EncodingKind::Unary).session.expect("compiles");
         assert_eq!(s.tm.as_ref().err(), Some(&TmDecline::TooLarge), "the TM refuses this machine");
-        let st = s.asm_status();
+        let st = s.rxm_status();
         assert_eq!((st.available, st.total_steps), (true, Some(68)));
-        assert_eq!(s.asm_value(), Ok(Decoded::Value { text: "1".to_string() }));
+        assert_eq!(s.rxm_value(), Ok(Decoded::Value { text: "1".to_string() }));
     }
 
-    /// A program `tm::lower_program` refuses has no asm leg: the status says why and nothing else, and
-    /// every asm method answers `AsmAbsent`. A 2,048-element list literal nests past the lowering's depth
+    /// A program `tm::lower_program` refuses has no rxm leg: the status says why and nothing else, and
+    /// every rxm method answers `RxmAbsent`. A 2,048-element list literal nests past the lowering's depth
     /// guard — the fixture `a_declined_tm_leg_reports_why_and_refuses_its_methods` uses — and the link
-    /// index has no asm column for it.
+    /// index has no rxm column for it.
     #[test]
-    fn a_program_that_does_not_lower_declines_the_asm_leg_and_refuses_its_methods() {
+    fn a_program_that_does_not_lower_declines_the_rxm_leg_and_refuses_its_methods() {
         let src = format!("[{}]", (0..2048).map(|i| i.to_string()).collect::<Vec<_>>().join(", "));
         let mut s = Session::compile(&src, EncodingKind::Unary).session.expect("a declined leg is still a session");
-        let reason = "the program nests deeper than the asm lowering guard allows".to_string();
-        assert_eq!(s.asm_status(), AsmStatus { available: false, reason, run: None, cap: None, total_steps: None });
-        assert_eq!(s.asm_program(), Err(SessionError::AsmAbsent));
-        assert_eq!(s.asm_state(ASM_WHOLE), Err(SessionError::AsmAbsent));
-        assert_eq!(s.step_asm(), Err(SessionError::AsmAbsent));
-        assert_eq!(s.raise_asm_cap(1), Err(SessionError::AsmAbsent));
-        assert_eq!(s.asm_value(), Err(SessionError::AsmAbsent));
-        assert!(s.link_index(65_536).asm_owner.is_empty(), "no program, no owners");
+        let reason = "the program nests deeper than the rxm lowering guard allows".to_string();
+        assert_eq!(s.rxm_status(), RxmStatus { available: false, reason, run: None, cap: None, total_steps: None });
+        assert_eq!(s.rxm_program(), Err(SessionError::RxmAbsent));
+        assert_eq!(s.rxm_state(RXM_WHOLE), Err(SessionError::RxmAbsent));
+        assert_eq!(s.step_rxm(), Err(SessionError::RxmAbsent));
+        assert_eq!(s.raise_rxm_cap(1), Err(SessionError::RxmAbsent));
+        assert_eq!(s.rxm_value(), Err(SessionError::RxmAbsent));
+        assert!(s.link_index(65_536).rxm_owner.is_empty(), "no program, no owners");
     }
 
-    /// `defunc`'s refusal declines the asm leg too, in its own words: `t` is both called by name and passed as
+    /// `defunc`'s refusal declines the rxm leg too, in its own words: `t` is both called by name and passed as
     /// a value, and its body applies its parameter at its own arity, closing a cycle through `t`'s dispatcher
-    /// — the shape `defunc.rs`'s module doc names first. The reference and λ legs run it; asm and TM cannot.
+    /// — the shape `defunc.rs`'s module doc names first. The reference and λ legs run it; rxm and TM cannot.
     #[test]
-    fn a_program_defunc_refuses_declines_the_asm_leg_with_its_reason() {
+    fn a_program_defunc_refuses_declines_the_rxm_leg_with_its_reason() {
         let src = "fn inc(x) { x + 1 } fn t(g) { g(3) } fn ap(h, y) { h(y) } t(inc) + ap(t, inc)";
         let s = Session::compile(src, EncodingKind::Unary).session.expect("compiles");
-        let st = s.asm_status();
+        let st = s.rxm_status();
         assert_eq!(
             (st.available, st.reason.as_str()),
-            (false, "the asm backend does not support cyclic higher-order call graph through `t`")
+            (false, "the rxm backend does not support cyclic higher-order call graph through `t`")
         );
-        assert!(s.lambda_status().available, "the λ leg runs it, so the refusal is the asm lowering's own");
+        assert!(s.lambda_status().available, "the λ leg runs it, so the refusal is the rxm lowering's own");
     }
 
     /// A stack, heap or memory cap ends the run as a cap that NAMES ITSELF, and no raise resumes it: `fact(3)`
@@ -3105,22 +3105,22 @@ mod tests {
     /// no end anywhere.
     #[test]
     fn a_hard_cap_names_itself_and_does_not_resume() {
-        let d = tm::asm::DEFAULT_CAPS;
+        let d = tm::rxm::DEFAULT_CAPS;
         let cases = [
-            (FACT3, tm::asm::Caps { stack: 2, ..d }, AsmCap::Stack),
-            ("[1, 2, 3]", tm::asm::Caps { heap: 1, ..d }, AsmCap::Heap),
-            (FACT3, tm::asm::Caps { mem: 0, ..d }, AsmCap::Mem),
+            (FACT3, tm::rxm::Caps { stack: 2, ..d }, RxmCap::Stack),
+            ("[1, 2, 3]", tm::rxm::Caps { heap: 1, ..d }, RxmCap::Heap),
+            (FACT3, tm::rxm::Caps { mem: 0, ..d }, RxmCap::Mem),
         ];
         for (src, caps, cap) in cases {
-            let mut s = compile_asm_capped(src, caps);
-            let total = s.asm_status().total_steps;
-            assert_eq!(Some(run_asm_out(&mut s)), total, "{cap:?}: the cursor stops where compile's run did");
+            let mut s = compile_rxm_capped(src, caps);
+            let total = s.rxm_status().total_steps;
+            assert_eq!(Some(run_rxm_out(&mut s)), total, "{cap:?}: the cursor stops where compile's run did");
             let capped = (Some(RunStatus::Capped), Some(cap));
-            assert_eq!((s.asm_status().run, s.asm_status().cap), capped, "{cap:?}");
-            s.raise_asm_cap(1_000_000).expect("asm available");
-            assert_eq!(s.step_asm(), Ok(false), "{cap:?}: more steps cannot resume it");
-            assert_eq!((s.asm_status().run, s.asm_status().cap), capped, "{cap:?}");
-            assert_eq!(s.asm_value(), Ok(Decoded::Unfinished), "{cap:?}");
+            assert_eq!((s.rxm_status().run, s.rxm_status().cap), capped, "{cap:?}");
+            s.raise_rxm_cap(1_000_000).expect("rxm available");
+            assert_eq!(s.step_rxm(), Ok(false), "{cap:?}: more steps cannot resume it");
+            assert_eq!((s.rxm_status().run, s.rxm_status().cap), capped, "{cap:?}");
+            assert_eq!(s.rxm_value(), Ok(Decoded::Unfinished), "{cap:?}");
         }
     }
 
@@ -3128,17 +3128,17 @@ mod tests {
     /// the halt, and the value is then decoded from the CURSOR — including the heap, which `[1, 2, 3]`
     /// needs and `compile`'s capped run never kept.
     #[test]
-    fn a_raised_step_cap_carries_the_asm_cursor_to_a_value() {
-        let mut s = compile_asm_capped("[1, 2, 3]", tm::asm::Caps { steps: 3, ..tm::asm::DEFAULT_CAPS });
-        assert_eq!(s.asm_status().total_steps, Some(3), "a capped run's total is where the cap fired");
-        assert_eq!(s.asm_value(), Ok(Decoded::Unfinished));
-        assert_eq!(run_asm_out(&mut s), 3);
-        assert_eq!((s.asm_status().run, s.asm_status().cap), (Some(RunStatus::Capped), Some(AsmCap::Steps)));
+    fn a_raised_step_cap_carries_the_rxm_cursor_to_a_value() {
+        let mut s = compile_rxm_capped("[1, 2, 3]", tm::rxm::Caps { steps: 3, ..tm::rxm::DEFAULT_CAPS });
+        assert_eq!(s.rxm_status().total_steps, Some(3), "a capped run's total is where the cap fired");
+        assert_eq!(s.rxm_value(), Ok(Decoded::Unfinished));
+        assert_eq!(run_rxm_out(&mut s), 3);
+        assert_eq!((s.rxm_status().run, s.rxm_status().cap), (Some(RunStatus::Capped), Some(RxmCap::Steps)));
 
-        s.raise_asm_cap(1_000_000).expect("asm available");
-        run_asm_out(&mut s);
-        assert_eq!((s.asm_status().run, s.asm_status().cap), (Some(RunStatus::Ended), None));
-        assert_eq!(s.asm_value(), Ok(Decoded::Value { text: "[1, 2, 3]".to_string() }));
+        s.raise_rxm_cap(1_000_000).expect("rxm available");
+        run_rxm_out(&mut s);
+        assert_eq!((s.rxm_status().run, s.rxm_status().cap), (Some(RunStatus::Ended), None));
+        assert_eq!(s.rxm_value(), Ok(Decoded::Value { text: "[1, 2, 3]".to_string() }));
     }
 
     /// A fault is an end and the leg's value, in spec §8's words: `head([])` types, and its `head` meets
@@ -3146,86 +3146,86 @@ mod tests {
     /// on the same fault; and a compile the step cap stopped short of it reaches it through a raise, with
     /// the fault then read off the cursor.
     #[test]
-    fn a_fault_ends_the_asm_run_and_is_its_value() {
+    fn a_fault_ends_the_rxm_run_and_is_its_value() {
         let fault = Decoded::Fault { message: "head of empty list at pc1".to_string() };
         let mut s = Session::compile("head([])", EncodingKind::Unary).session.expect("compiles");
-        assert_eq!(s.asm_value(), Ok(fault.clone()), "compile's run faulted");
-        run_asm_out(&mut s);
-        assert_eq!((s.asm_status().run, s.asm_status().cap), (Some(RunStatus::Ended), None), "a fault is an end");
-        assert_eq!(s.asm_value(), Ok(fault.clone()));
+        assert_eq!(s.rxm_value(), Ok(fault.clone()), "compile's run faulted");
+        run_rxm_out(&mut s);
+        assert_eq!((s.rxm_status().run, s.rxm_status().cap), (Some(RunStatus::Ended), None), "a fault is an end");
+        assert_eq!(s.rxm_value(), Ok(fault.clone()));
 
-        let mut s = compile_asm_capped("head([])", tm::asm::Caps { steps: 1, ..tm::asm::DEFAULT_CAPS });
-        assert_eq!(s.asm_value(), Ok(Decoded::Unfinished), "the cap stopped compile's run before the fault");
-        run_asm_out(&mut s);
-        s.raise_asm_cap(1_000_000).expect("asm available");
-        run_asm_out(&mut s);
-        assert_eq!(s.asm_value(), Ok(fault), "the cursor's own fault, in the same words");
+        let mut s = compile_rxm_capped("head([])", tm::rxm::Caps { steps: 1, ..tm::rxm::DEFAULT_CAPS });
+        assert_eq!(s.rxm_value(), Ok(Decoded::Unfinished), "the cap stopped compile's run before the fault");
+        run_rxm_out(&mut s);
+        s.raise_rxm_cap(1_000_000).expect("rxm available");
+        run_rxm_out(&mut s);
+        assert_eq!(s.rxm_value(), Ok(fault), "the cursor's own fault, in the same words");
     }
 
-    /// `|x| x + 1` types as a function, which `decode_asm_ty` has no value for, and the asm leg lowers and
+    /// `|x| x + 1` types as a function, which `decode_rxm_ty` has no value for, and the rxm leg lowers and
     /// runs it to a halt — so its value is `Undecodable`, the fixture `a_function_valued_program_decodes_as
     /// _undecodable_on_both_legs` uses for the other two.
     #[test]
-    fn a_function_valued_program_decodes_as_undecodable_on_the_asm_leg() {
+    fn a_function_valued_program_decodes_as_undecodable_on_the_rxm_leg() {
         let s = Session::compile("|x| x + 1", EncodingKind::Unary).session.expect("compiles");
-        assert!(s.asm_status().available, "the asm lowering accepts this — against a decline this proves nothing");
-        assert_eq!(s.asm_value(), Ok(Decoded::Undecodable));
+        assert!(s.rxm_status().available, "the rxm lowering accepts this — against a decline this proves nothing");
+        assert_eq!(s.rxm_value(), Ok(Decoded::Undecodable));
     }
 
-    /// A value `decode_asm_ty` builds but `decoded_value` refuses to print: every suffix of a 5,000-element
+    /// A value `decode_rxm_ty` builds but `decoded_value` refuses to print: every suffix of a 5,000-element
     /// list shares its cells, so the decode is small in memory and about 25 million nodes printed, past
     /// `MAX_PRINT_NODES`. The TM run is capped at ten steps, since the TM would otherwise simulate this for
-    /// its whole budget; the asm run is not.
+    /// its whole budget; the rxm run is not.
     #[test]
-    fn asm_value_reports_too_large_to_print_for_a_logically_enormous_decode() {
+    fn rxm_value_reports_too_large_to_print_for_a_logically_enormous_decode() {
         let src = "fn upto(n) { if n == 0 { nil } else { cons(n, upto(n - 1)) } } \
                    fn tails(xs) { if is_empty(xs) { nil } else { cons(xs, tails(tail(xs))) } } tails(upto(5000))";
         let tm_caps = tm::TmCaps { steps: 10, ..tm::TM_DEFAULT_CAPS };
-        let s = Session::compile_with_caps(src, EncodingKind::Unary, tm_caps, tm::asm::DEFAULT_CAPS)
+        let s = Session::compile_with_caps(src, EncodingKind::Unary, tm_caps, tm::rxm::DEFAULT_CAPS)
             .session
             .expect("compiles");
-        assert_eq!(s.asm_status().run, Some(RunStatus::Running), "the leg is there");
-        assert_eq!(s.asm_value(), Ok(Decoded::TooLargeToPrint));
+        assert_eq!(s.rxm_status().run, Some(RunStatus::Running), "the leg is there");
+        assert_eq!(s.rxm_value(), Ok(Decoded::TooLargeToPrint));
     }
 
     /// The frame at step 0 and at the end, through the session: nothing written, instruction 0 about to run
     /// and owned by the literal `40`; then `rr` holding 42 and nothing left to run.
     #[test]
-    fn the_asm_state_windows_the_cursor_and_names_its_owner() {
+    fn the_rxm_state_windows_the_cursor_and_names_its_owner() {
         let src = "let x = 40; x + 2";
         let mut s = Session::compile(src, EncodingKind::Unary).session.expect("compiles");
-        let st = s.asm_state(ASM_WHOLE).expect("asm available");
+        let st = s.rxm_state(RXM_WHOLE).expect("rxm available");
         assert_eq!((st.step, st.pc, st.next, st.wrote), (0, 0, Some(0), None));
         let owner = st.source_node.and_then(|n| s.source_span(n)).map(|sp| &src[sp.start..sp.end]);
         assert_eq!(owner, Some("40"), "instruction 0's owner, through the session's own map");
 
-        run_asm_out(&mut s);
-        let end = s.asm_state(ASM_WHOLE).expect("asm available");
+        run_rxm_out(&mut s);
+        let end = s.rxm_state(RXM_WHOLE).expect("rxm available");
         assert_eq!((end.step, end.rr.word.as_str(), end.next), (5, "42", None));
     }
 
-    /// The link index carries one asm owner per instruction the listing prints, and every instruction of a
+    /// The link index carries one rxm owner per instruction the listing prints, and every instruction of a
     /// first-order program has one.
     #[test]
     fn the_link_index_carries_one_owner_per_listed_instruction() {
         let s = Session::compile(FACT3, EncodingKind::Unary).session.expect("compiles");
-        let listing = s.asm_program().expect("asm available").listing;
-        let owners = s.link_index(65_536).asm_owner;
+        let listing = s.rxm_program().expect("rxm available").listing;
+        let owners = s.link_index(65_536).rxm_owner;
         assert_eq!(owners.len(), listing.len());
         assert!(owners.iter().all(|o| *o >= 0), "a first-order program owns every instruction: {owners:?}");
     }
 
-    // --- the asm copy -------------------------------------------------------------------------------
+    // --- the rxm copy -------------------------------------------------------------------------------
 
-    /// A higher-order program: `lower_asm` refuses it and `defunc` rewrites it, so its asm has labels
+    /// A higher-order program: `lower_rxm` refuses it and `defunc` rewrites it, so its rxm has labels
     /// `defunc` minted.
     const MAP: &str = "fn map(xs, f) { if is_empty(xs) { nil } else { cons(f(head(xs)), map(tail(xs), f)) } } \
                        map([3, 1, 2], |x| x + 1)";
 
     /// Step a copy's cursor until it stops, and say how many steps it took.
-    fn run_copy_out(sc: &mut AsmScratch) -> u64 {
+    fn run_copy_out(sc: &mut RxmScratch) -> u64 {
         let mut steps = 0;
-        while sc.step_asm() {
+        while sc.step_rxm() {
             steps += 1;
         }
         steps
@@ -3239,24 +3239,24 @@ mod tests {
     fn a_copy_of_the_programs_text_runs_as_the_program_does() {
         for src in ["let x = 40; x + 2", FACT3, "head([])", "[1, 2, 3]", MAP, "[]", "[[]]"] {
             let mut s = Session::compile(src, EncodingKind::Unary).session.expect("compiles");
-            let text = s.asm_text().expect("the asm leg is there");
-            let made = asm_scratch(&text);
+            let text = s.rxm_text().expect("the rxm leg is there");
+            let made = rxm_scratch(&text);
             assert_eq!(made.diagnostics, Vec::new(), "{src}");
             let mut sc = made.scratch.expect("the program's text builds a copy");
-            assert_eq!(sc.asm_status(), s.asm_status(), "{src}");
-            assert_eq!(Ok(sc.asm_program()), s.asm_program(), "{src}");
-            assert_eq!(Ok(sc.asm_value()), s.asm_value(), "{src}");
+            assert_eq!(sc.rxm_status(), s.rxm_status(), "{src}");
+            assert_eq!(Ok(sc.rxm_program()), s.rxm_program(), "{src}");
+            assert_eq!(Ok(sc.rxm_value()), s.rxm_value(), "{src}");
             loop {
-                let (mine, theirs) = (sc.asm_state(ASM_WHOLE), s.asm_state(ASM_WHOLE).expect("asm available"));
+                let (mine, theirs) = (sc.rxm_state(RXM_WHOLE), s.rxm_state(RXM_WHOLE).expect("rxm available"));
                 assert_eq!(mine.source_node, None, "{src}: a copy has no owners");
-                assert_eq!(mine, AsmState { source_node: None, ..theirs }, "{src}");
-                let (a, b) = (sc.step_asm(), s.step_asm().expect("asm available"));
+                assert_eq!(mine, RxmState { source_node: None, ..theirs }, "{src}");
+                let (a, b) = (sc.step_rxm(), s.step_rxm().expect("rxm available"));
                 assert_eq!(a, b, "{src}: the two stop together");
                 if !a {
                     break;
                 }
             }
-            assert_eq!(sc.asm_status(), s.asm_status(), "{src}: and end together");
+            assert_eq!(sc.rxm_status(), s.rxm_status(), "{src}: and end together");
         }
     }
 
@@ -3266,36 +3266,36 @@ mod tests {
     #[test]
     fn a_copy_decodes_by_its_header_and_marks_a_raw_word_without_one() {
         let s = Session::compile("[1, 2, 3]", EncodingKind::Unary).session.expect("compiles");
-        let text = s.asm_text().expect("the asm leg is there");
+        let text = s.rxm_text().expect("the rxm leg is there");
         assert!(text.starts_with("result List<Nat>\n"), "{text}");
         assert_eq!(
-            asm_scratch(&text).scratch.expect("builds").asm_value(),
+            rxm_scratch(&text).scratch.expect("builds").rxm_value(),
             Decoded::Value { text: "[1, 2, 3]".into() }
         );
 
         let s = Session::compile("[]", EncodingKind::Unary).session.expect("compiles");
         assert!(matches!(&s.ty, redextape_core::ty::Ty::List(t) if matches!(**t, redextape_core::ty::Ty::Var(_))));
-        let text = s.asm_text().expect("the asm leg is there");
+        let text = s.rxm_text().expect("the rxm leg is there");
         assert!(text.starts_with("result List<Nat>\n"), "a free variable is written as `Nat`: {text}");
 
         let s = Session::compile("|x| x + 1", EncodingKind::Unary).session.expect("compiles");
-        let text = s.asm_text().expect("the asm leg is there");
+        let text = s.rxm_text().expect("the rxm leg is there");
         assert!(!text.contains("result"), "a function type has no header: {text}");
-        let sc = asm_scratch(&text).scratch.expect("builds");
-        assert_eq!(s.asm_value(), Ok(Decoded::Undecodable), "the program's own value");
-        assert!(matches!(sc.asm_value(), Decoded::Value { text } if text.ends_with(" (no result type)")));
+        let sc = rxm_scratch(&text).scratch.expect("builds");
+        assert_eq!(s.rxm_value(), Ok(Decoded::Undecodable), "the program's own value");
+        assert!(matches!(sc.rxm_value(), Decoded::Value { text } if text.ends_with(" (no result type)")));
 
-        let sc = asm_scratch("\tli\trr, #42\n\thalt\n").scratch.expect("builds");
-        assert_eq!(sc.asm_value(), Decoded::Value { text: "42 (no result type)".into() });
+        let sc = rxm_scratch("\tli\trr, #42\n\thalt\n").scratch.expect("builds");
+        assert_eq!(sc.rxm_value(), Decoded::Value { text: "42 (no result type)".into() });
     }
 
-    /// No asm leg, no text.
+    /// No rxm leg, no text.
     #[test]
-    fn a_declined_asm_leg_has_no_text() {
+    fn a_declined_rxm_leg_has_no_text() {
         let src = format!("[{}]", (0..2048).map(|i| i.to_string()).collect::<Vec<_>>().join(", "));
         let s = Session::compile(&src, EncodingKind::Unary).session.expect("a declined leg is still a session");
-        assert!(!s.asm_status().available, "the premise");
-        assert_eq!(s.asm_text(), None);
+        assert!(!s.rxm_status().available, "the premise");
+        assert_eq!(s.rxm_text(), None);
     }
 
     /// A copy refuses what `redextape run` refuses, and says why in the diagnostics its editor shows: a line
@@ -3307,7 +3307,7 @@ mod tests {
             ("\tjmp\tnowhere\n", "undefined label `nowhere`"),
             ("f:\nf:\n\thalt\n", "label `f` is already defined, and every jump to it reaches the first"),
         ] {
-            let made = asm_scratch(text);
+            let made = rxm_scratch(text);
             assert!(made.scratch.is_none(), "{text:?} builds nothing");
             let said: Vec<_> = made.diagnostics.iter().map(|d| d.message.as_str()).collect();
             assert_eq!(said, [message], "{text:?}");
@@ -3322,11 +3322,11 @@ mod tests {
             ("\tli\tr1000000, #0\n\thalt\n", "register index exceeds MAX_REGISTERS at pc0"),
             ("", "ran past end of program at pc0"),
         ] {
-            let mut sc = asm_scratch(text).scratch.expect("it parses and has no label to mark");
-            assert_eq!(sc.asm_status().total_steps, Some(0), "{text:?}");
-            assert_eq!(sc.asm_value(), Decoded::Fault { message: fault.into() }, "{text:?}");
+            let mut sc = rxm_scratch(text).scratch.expect("it parses and has no label to mark");
+            assert_eq!(sc.rxm_status().total_steps, Some(0), "{text:?}");
+            assert_eq!(sc.rxm_value(), Decoded::Fault { message: fault.into() }, "{text:?}");
             assert_eq!(run_copy_out(&mut sc), 0, "{text:?}");
-            assert_eq!(sc.asm_status().run, Some(RunStatus::Ended), "{text:?}");
+            assert_eq!(sc.rxm_status().run, Some(RunStatus::Ended), "{text:?}");
         }
     }
 
@@ -3334,19 +3334,19 @@ mod tests {
     #[test]
     fn a_capped_copy_resumes_to_its_value() {
         let s = Session::compile("[1, 2, 3]", EncodingKind::Unary).session.expect("compiles");
-        let text = s.asm_text().expect("the asm leg is there");
-        let caps = tm::asm::Caps { steps: 3, ..tm::asm::DEFAULT_CAPS };
-        let mut sc = asm_scratch_with_caps(&text, caps).scratch.expect("builds");
-        assert_eq!((sc.asm_status().total_steps, sc.asm_value()), (Some(3), Decoded::Unfinished));
+        let text = s.rxm_text().expect("the rxm leg is there");
+        let caps = tm::rxm::Caps { steps: 3, ..tm::rxm::DEFAULT_CAPS };
+        let mut sc = rxm_scratch_with_caps(&text, caps).scratch.expect("builds");
+        assert_eq!((sc.rxm_status().total_steps, sc.rxm_value()), (Some(3), Decoded::Unfinished));
         assert_eq!(run_copy_out(&mut sc), 3);
-        assert_eq!(sc.asm_status().cap, Some(AsmCap::Steps));
-        sc.raise_asm_cap(1_000_000);
+        assert_eq!(sc.rxm_status().cap, Some(RxmCap::Steps));
+        sc.raise_rxm_cap(1_000_000);
         run_copy_out(&mut sc);
-        assert_eq!(sc.asm_value(), Decoded::Value { text: "[1, 2, 3]".into() });
+        assert_eq!(sc.rxm_value(), Decoded::Value { text: "[1, 2, 3]".into() });
     }
 
-    /// `.asm` text of exactly `bytes` bytes: one `halt`, and a comment to make up the rest.
-    fn asm_padded_to(bytes: usize) -> String {
+    /// `.rxm` text of exactly `bytes` bytes: one `halt`, and a comment to make up the rest.
+    fn rxm_padded_to(bytes: usize) -> String {
         let text = format!("    halt\n;{}\n", "x".repeat(bytes - "    halt\n;\n".len()));
         assert_eq!(text.len(), bytes);
         text
@@ -3354,43 +3354,43 @@ mod tests {
 
     /// The ceiling admits a file of exactly its size and refuses one byte more, before parsing it, in words that name
     /// both sizes.
-    #[cfg(not(feature = "probe-asm-copy"))]
+    #[cfg(not(feature = "probe-rxm-copy"))]
     #[test]
-    fn an_asm_copy_at_the_ceiling_builds_and_one_byte_more_is_refused_unparsed() {
-        let at = asm_scratch(&asm_padded_to(MAX_SCRATCH_ASM_BYTES));
+    fn an_rxm_copy_at_the_ceiling_builds_and_one_byte_more_is_refused_unparsed() {
+        let at = rxm_scratch(&rxm_padded_to(MAX_SCRATCH_RXM_BYTES));
         assert!(at.diagnostics.is_empty() && at.scratch.is_some(), "{:?}", at.diagnostics);
-        let over = asm_scratch(&asm_padded_to(MAX_SCRATCH_ASM_BYTES + 1));
+        let over = rxm_scratch(&rxm_padded_to(MAX_SCRATCH_RXM_BYTES + 1));
         assert!(over.scratch.is_none());
         let said: Vec<&str> = over.diagnostics.iter().map(|d| d.message.as_str()).collect();
         assert_eq!(
             said,
             [format!(
-                "this file is {} bytes; an asm copy builds files up to {} bytes — `redextape run` has no such limit",
-                grouped(MAX_SCRATCH_ASM_BYTES as u64 + 1),
-                grouped(MAX_SCRATCH_ASM_BYTES as u64)
+                "this file is {} bytes; an rxm copy builds files up to {} bytes — `redextape run` has no such limit",
+                grouped(MAX_SCRATCH_RXM_BYTES as u64 + 1),
+                grouped(MAX_SCRATCH_RXM_BYTES as u64)
             )]
         );
         // UNPARSED: a file too long and with a label mistake hears only about its size.
-        let both = asm_scratch(&format!("\tjmp\tnowhere\n{}", asm_padded_to(MAX_SCRATCH_ASM_BYTES)));
+        let both = rxm_scratch(&format!("\tjmp\tnowhere\n{}", rxm_padded_to(MAX_SCRATCH_RXM_BYTES)));
         assert_eq!(both.diagnostics.len(), 1, "{:?}", both.diagnostics);
         assert!(both.diagnostics[0].message.starts_with("this file is "), "{:?}", both.diagnostics);
     }
 
     /// The probe build parses what the product build refuses, so its probe can price both sides of the ceiling.
-    #[cfg(feature = "probe-asm-copy")]
+    #[cfg(feature = "probe-rxm-copy")]
     #[test]
-    fn the_probe_build_parses_asm_text_over_the_ceiling() {
-        let over = asm_scratch(&asm_padded_to(MAX_SCRATCH_ASM_BYTES + 1));
+    fn the_probe_build_parses_rxm_text_over_the_ceiling() {
+        let over = rxm_scratch(&rxm_padded_to(MAX_SCRATCH_RXM_BYTES + 1));
         assert!(over.diagnostics.is_empty() && over.scratch.is_some(), "{:?}", over.diagnostics);
     }
 
     /// A session hands out no text a copy would refuse.
     #[test]
-    fn a_session_hands_out_no_asm_text_longer_than_the_limit() {
+    fn a_session_hands_out_no_rxm_text_longer_than_the_limit() {
         let s = Session::compile("let x = 40; x + 2", EncodingKind::Unary).session.expect("compiles");
-        let text = s.asm_text().expect("the asm leg is there");
-        assert_eq!(s.asm_text_within(text.len()), Some(text.clone()), "exactly the limit is handed out");
-        assert_eq!(s.asm_text_within(text.len() - 1), None, "one byte over is not");
+        let text = s.rxm_text().expect("the rxm leg is there");
+        assert_eq!(s.rxm_text_within(text.len()), Some(text.clone()), "exactly the limit is handed out");
+        assert_eq!(s.rxm_text_within(text.len() - 1), None, "one byte over is not");
     }
 
     /// A copy runs under `COPY_CAPS`, not `DEFAULT_CAPS`: a `cons` a step stops heap-full at `COPY_CAPS.heap` cells, where
@@ -3399,20 +3399,20 @@ mod tests {
     #[test]
     fn a_copy_runs_under_copy_caps() {
         let cons = format!("    nil\tr0\nloop:\n{}    jmp\tloop\n", "    cons\tr0, r1, r0\n".repeat(100));
-        let mut sc = asm_scratch(&cons).scratch.expect("builds");
+        let mut sc = rxm_scratch(&cons).scratch.expect("builds");
         run_copy_out(&mut sc);
-        let end = sc.asm_state(AsmWindow { locals: 0, args: 0, frames: 0, cells: 0, boxes: 0 });
-        assert_eq!((sc.asm_status().cap, end.heap_len), (Some(AsmCap::Heap), 2_000_000));
+        let end = sc.rxm_state(RxmWindow { locals: 0, args: 0, frames: 0, cells: 0, boxes: 0 });
+        assert_eq!((sc.rxm_status().cap, end.heap_len), (Some(RxmCap::Heap), 2_000_000));
 
         let saved = "f:\n    li\tr999, #1\n    call\tf\n";
-        let mut sc = asm_scratch(saved).scratch.expect("builds");
+        let mut sc = rxm_scratch(saved).scratch.expect("builds");
         assert_eq!(
-            sc.asm_status().total_steps,
+            sc.rxm_status().total_steps,
             Some(2 * 12_000 + 1),
             "12,000 calls, and the `li` before the refused one"
         );
         run_copy_out(&mut sc);
-        assert_eq!(sc.asm_status().cap, Some(AsmCap::Mem));
+        assert_eq!(sc.rxm_status().cap, Some(RxmCap::Mem));
     }
 
     // --- the TM scratchpad -----------------------------------------------------------------------
@@ -4172,13 +4172,13 @@ state halt: accept
     ///
     /// **THIS COUNTS RATHER THAN STEPPING UNTIL ONE STATE RESOLVES AN OWNER**, which a map built at
     /// `MIN_FIELD_WIDTH` passes with 47 of the sample's 121 billed states unresolved: the authority is
-    /// `lower_tm_mapped` at the fitted width, over a program lowered by `lower_asm` and `defunc` rather than their
+    /// `lower_tm_mapped` at the fitted width, over a program lowered by `lower_rxm` and `defunc` rather than their
     /// `_mapped` twins the map uses, and every state must agree with it. Each fixture fits wider than
     /// `MIN_FIELD_WIDTH`, or it could not tell the two widths apart.
     ///
     /// **BOTH ARMS THAT YIELD A LEG, AND THE DEFUNC ROAD.** A budget of 10 steps stops the sample in `HitCap` at the
     /// narrowest width — the fitting loop retries only an overflow — so that case asks for no widening. A program
-    /// `lower_asm` refuses reaches the TM half only through `defunc`, whose minted constructs own nothing: there
+    /// `lower_rxm` refuses reaches the TM half only through `defunc`, whose minted constructs own nothing: there
     /// every owned state is billed, and some billed states are not owned.
     #[test]
     fn every_billed_state_resolves_at_the_width_the_run_fitted() {
@@ -4192,20 +4192,20 @@ state halt: accept
             ("let x = 40; x + 2", EncodingKind::Unary, capped, false),
             (higher, EncodingKind::Unary, tm::TM_DEFAULT_CAPS, true),
         ] {
-            let s = Session::compile_with_caps(src, kind, caps, tm::asm::DEFAULT_CAPS).session.expect("compiles");
+            let s = Session::compile_with_caps(src, kind, caps, tm::rxm::DEFAULT_CAPS).session.expect("compiles");
             let program = s.tm_program().expect("the TM leg runs this");
             if widens {
                 assert!(program.width > tm::MIN_FIELD_WIDTH, "{src} {kind:?}: fits at the narrowest width");
             }
 
-            let (asm, first_order) = match tm::lower_asm(&s.core) {
+            let (rxm, first_order) = match tm::lower_rxm(&s.core) {
                 Ok(p) => (p, true),
                 Err(tm::LowerError::Unsupported { .. }) => {
-                    (tm::lower_asm(&tm::defunc(&s.core).expect("defunc")).expect("lowers after defunc"), false)
+                    (tm::lower_rxm(&tm::defunc(&s.core).expect("defunc")).expect("lowers after defunc"), false)
                 }
                 Err(e) => panic!("{src}: the fixture lowers: {e:?}"),
             };
-            let (machine, origins) = tm::lower_tm_mapped(&asm, &*kind.at(program.width)).expect("the fixture lays out");
+            let (machine, origins) = tm::lower_tm_mapped(&rxm, &*kind.at(program.width)).expect("the fixture lays out");
             assert_eq!(machine.states.len(), program.states.len(), "{src} {kind:?}: the run's machine");
             let (mut billed, mut owned) = (0, 0);
             for (s_id, (state, origin)) in program.states.iter().zip(&origins).enumerate() {
@@ -4232,8 +4232,8 @@ state halt: accept
                 assert!(owned > 0 && owned < billed, "{src} {kind:?}: {owned} of {billed} owned through defunc");
             }
             assert_eq!(program.listing, s.map.tm_listing, "{src} {kind:?}");
-            assert_eq!(program.listing.len(), asm.code.len(), "{src} {kind:?}: one line per instruction");
-            assert_eq!(program.labels, asm.labels, "{src} {kind:?}");
+            assert_eq!(program.listing.len(), rxm.code.len(), "{src} {kind:?}: one line per instruction");
+            assert_eq!(program.labels, rxm.labels, "{src} {kind:?}");
         }
     }
 }

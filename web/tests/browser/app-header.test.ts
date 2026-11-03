@@ -29,11 +29,11 @@ describe('the app header', () => {
     document.querySelector<HTMLElement>('[data-leaf="lambda-0"] button.view-title')?.focus()
     document.querySelector<HTMLButtonElement>('#new-view')?.click()
     const items = [...document.querySelectorAll<HTMLButtonElement>('#new-view-menu button')]
-    expect(items.map((b) => b.textContent)).toEqual(['λ · program', 'asm · program', 'TM · program'])
-    // BY ITS LABEL, NOT ITS INDEX: the asm pair sits between the other two, so `items[1]` adds an asm view.
+    expect(items.map((b) => b.textContent)).toEqual(['λ · program', 'rxm · program', 'TM · program'])
+    // BY ITS LABEL, NOT ITS INDEX: the rxm pair sits between the other two, so `items[1]` adds an rxm view.
     items.find((b) => b.textContent === 'TM · program')?.click()
     await until(() => mainLeafIds().length === 5, 'a fifth view')
-    expect(mainLeafIds()).toEqual(['source', 'lambda-0', 'pane-1', 'asm-0', 'tm-0'])
+    expect(mainLeafIds()).toEqual(['source', 'lambda-0', 'pane-1', 'rxm-0', 'tm-0'])
     expect(document.querySelector('[data-leaf="pane-1"]')?.contains(document.activeElement)).toBe(true)
     expect(document.querySelector('#notice .notice-text')?.textContent).toBe('view added — TM · program')
     // **BESIDE MEANS TO ITS RIGHT** (spec §5). `leaves()` walks a row split and a column split in the

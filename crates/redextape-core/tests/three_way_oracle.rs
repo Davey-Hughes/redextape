@@ -6,11 +6,11 @@
 //! this a real fourth leg rather than a restatement of the third. Runtime faults are the shared "no
 //! value" outcome (reference Runtime, λ HitCap, both TM legs HitCap). Higher-order programs (map/fold,
 //! a function-valued argument) are four-way too: `run_tm` defunctionalizes -- rewrites higher-order
-//! Core into the first-order subset `lower_asm` already handles -- before lowering, so they run on the
+//! Core into the first-order subset `lower_rxm` already handles -- before lowering, so they run on the
 //! TM like everything else, under either encoding. The dual case is the λ-refuses side
 //! (`LAMBDA_LIMITATION_DEMOS`/`assert_tm_only`): latent traps that λ v1 REJECTS (`LowerError`) while
 //! the reference and both TM legs run them to a value. The per-category oracles (tm_oracle.rs's
-//! reference==TM / asm-interp==TM, lambda_oracle.rs's reference==λ) stay for localization; this file is
+//! reference==TM / rxm-interp==TM, lambda_oracle.rs's reference==λ) stay for localization; this file is
 //! the unified capstone.
 //!
 //! This file keeps the name `three_way_oracle.rs` even though the oracle it drives is four-way:
@@ -37,10 +37,10 @@ use redextape_core::desugar::desugar;
 use redextape_core::lambda::{LambdaRun, MAX_REDUCTION_STEPS, decode, run_lambda};
 use redextape_core::parser::parse;
 use redextape_core::tm::{
-    Binary, DEFAULT_CAPS as ASM_CAPS, Encoding, EncodingKind, MAX_FIELD_WIDTH, TM_DEFAULT_CAPS, TmCaps, TmRun, Unary,
+    Binary, DEFAULT_CAPS as RXM_CAPS, Encoding, EncodingKind, MAX_FIELD_WIDTH, TM_DEFAULT_CAPS, TmCaps, TmRun, Unary,
     decode_tape, lower_program, run_tm, run_tm_described, run_tm_fitted,
 };
-use redextape_core::trace::{AsmCursor, AsmStatus, StepEvent, TmCursor, WordTag};
+use redextape_core::trace::{RxmCursor, RxmStatus, StepEvent, TmCursor, WordTag};
 use redextape_core::ty::Ty;
 use redextape_core::typeck::result_type;
 use redextape_core::value::Value;
@@ -246,7 +246,7 @@ const FIRST_ORDER_DEMOS: &[&str] = &[
     "fn s0(n){ if n == 0 { 0 } else { 1 + s1(n - 1) } } \
      fn s1(n){ if n == 0 { 0 } else { 2 + s2(n - 1) } } \
      fn s2(n){ if n == 0 { 0 } else { 4 + s0(n - 1) } } s0(4)",
-    // A group that reaches the backends THROUGH `defunc`. Every group case above lowers via `lower_asm`
+    // A group that reaches the backends THROUGH `defunc`. Every group case above lowers via `lower_rxm`
     // directly, so none exercises `defunc`'s group handling — peeling a `LetRecGroup` and re-emitting it
     // as one ordered unit. `id` is used as a VALUE, which is what routes the program through `defunc`;
     // `ev`/`od` stay a genuine cycle inside it. The answer comes out of whichever member's base case the
@@ -285,7 +285,7 @@ const FIRST_ORDER_DEMOS: &[&str] = &[
     "fn v(x) { x * 10 } fn b(x) { x + 1 } fn ap(g, x) { g(x) } ap(v, 1) + ap(b, 1) + b(5)",
     "fn b(x) { x + 1 } fn v(x) { x * 10 } fn ap(g, x) { g(x) } ap(v, 1) + ap(b, 1) + b(5)",
     // A user `fn` shadowing a list builtin. `defunc` synthesizes `$head($clos)` for its dispatcher
-    // tag test, and `lower_asm` resolves a bound function BEFORE the builtin table — so with the
+    // tag test, and `lower_rxm` resolves a bound function BEFORE the builtin table — so with the
     // bare name this would silently miscompile. The `$` form is unforgeable in user source, so
     // scaffolding is uncapturable. 2 + 3 = 5.
     "fn head(x) { x + 1 } fn ap(g, x) { g(x) } fn add1(y) { y + 1 } head(1) + ap(add1, 2)",
@@ -312,7 +312,7 @@ const FIRST_ORDER_DEMOS: &[&str] = &[
     "fn nil(x) { x + 5 } fn ap(g, x) { g(x) } ap(nil, 0)",
     // A user `fn nil` called by name ONLY (never itself used as a value) sharing a program with an
     // unrelated CLOSED function-value (`add1`, passed to `ap`). Without the `$nil` alias, `add1`'s
-    // closed closure would be built as `cons(tag, nil)` — a bare `nil` that `lower_asm`'s
+    // closed closure would be built as `cons(tag, nil)` — a bare `nil` that `lower_rxm`'s
     // `reject_fn_value` would flag as a value-use of the user's KEPT `fn nil`, rejecting the whole
     // program on every lowering backend even though `nil` itself is never value-used anywhere.
     // 2 + 3 = 5.
@@ -481,31 +481,31 @@ fn tm_instructions(src: &str, core: &redextape_core::core::Core, ty: &Ty, kind: 
     entered
 }
 
-/// `src`'s Core, its result type, and an unstarted asm cursor over the program `lower_program` lowers
+/// `src`'s Core, its result type, and an unstarted rxm cursor over the program `lower_program` lowers
 /// that Core to.
-fn asm_run(src: &str) -> (redextape_core::core::Core, Ty, AsmCursor<redextape_core::tm::Program>) {
+fn rxm_run(src: &str) -> (redextape_core::core::Core, Ty, RxmCursor<redextape_core::tm::Program>) {
     let (prog, ds) = parse(src);
     assert!(ds.is_empty(), "parse errors in {src:?}: {ds:?}");
     let prog = prog.expect("a program with no diagnostics parses");
     let ty = result_type(&prog).unwrap_or_else(|e| panic!("type errors in {src:?}: {e:?}"));
     let core = desugar(&prog);
     let program = lower_program(&core).unwrap_or_else(|e| panic!("{src} did not lower: {e:?}"));
-    (core, ty, AsmCursor::new(program, ASM_CAPS))
+    (core, ty, RxmCursor::new(program, RXM_CAPS))
 }
 
-/// THE ASM CURSOR RUNS THE INSTRUCTIONS THE TM RUNS, STEP FOR STEP, under both encodings. `run_asm` is a
-/// loop over `AsmCursor`, so checking one against the other could not fail; the TM is a second
+/// THE RXM CURSOR RUNS THE INSTRUCTIONS THE TM RUNS, STEP FOR STEP, under both encodings. `run_rxm` is a
+/// loop over `RxmCursor`, so checking one against the other could not fail; the TM is a second
 /// implementation of every instruction, sharing no stepping code with the cursor (both do resolve labels
 /// through `Program::label_index`), and it enters `pc{i}` exactly when it begins instruction `i`. Every
 /// corpus program the TM runs to a value is checked, which is `FIRST_ORDER_DEMOS` and the latent traps.
 #[test]
-fn asm_steps_are_the_instructions_the_tm_enters() {
+fn rxm_steps_are_the_instructions_the_tm_enters() {
     for src in FIRST_ORDER_DEMOS.iter().chain(LAMBDA_LIMITATION_DEMOS) {
-        let (core, ty, mut cursor) = asm_run(src);
-        let asm: Vec<usize> = cursor.by_ref().map(|s| s.pc).collect();
-        assert_eq!(cursor.status(), Some(&AsmStatus::Halted), "{src} must halt on the asm cursor");
+        let (core, ty, mut cursor) = rxm_run(src);
+        let rxm: Vec<usize> = cursor.by_ref().map(|s| s.pc).collect();
+        assert_eq!(cursor.status(), Some(&RxmStatus::Halted), "{src} must halt on the rxm cursor");
         for kind in [EncodingKind::Unary, EncodingKind::Binary] {
-            assert_eq!(tm_instructions(src, &core, &ty, kind), asm, "asm and TM step apart for {src} under {kind:?}");
+            assert_eq!(tm_instructions(src, &core, &ty, kind), rxm, "rxm and TM step apart for {src} under {kind:?}");
         }
     }
 }
@@ -517,12 +517,12 @@ fn asm_steps_are_the_instructions_the_tm_enters() {
 #[test]
 fn the_result_register_is_tagged_by_the_result_type() {
     const UNIT: &str = "let x = 1;";
-    assert_eq!(asm_run(UNIT).1, Ty::Unit, "{UNIT} must return `Unit`");
+    assert_eq!(rxm_run(UNIT).1, Ty::Unit, "{UNIT} must return `Unit`");
     let mut seen = std::collections::BTreeSet::new();
     for src in FIRST_ORDER_DEMOS.iter().chain(LAMBDA_LIMITATION_DEMOS).chain([&UNIT]) {
-        let (_, ty, mut cursor) = asm_run(src);
+        let (_, ty, mut cursor) = rxm_run(src);
         cursor.by_ref().for_each(drop);
-        assert_eq!(cursor.status(), Some(&AsmStatus::Halted), "{src} must halt on the asm cursor");
+        assert_eq!(cursor.status(), Some(&RxmStatus::Halted), "{src} must halt on the rxm cursor");
         let want = if matches!(ty, Ty::List(_)) { WordTag::List } else { WordTag::Value };
         assert_eq!(cursor.rr_tag(), want, "{src} returns {ty:?}");
         seen.insert(match ty {

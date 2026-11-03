@@ -26,7 +26,7 @@ const UNFORMATTED = 'let   x   =   40;\nx   +   2'
 let view: EditorView
 
 /**
- * Put `messy` in `editor` with the focus in it and the caret at `caret`, press the view key that hides the asm view,
+ * Put `messy` in `editor` with the focus in it and the caret at `caret`, press the view key that hides the rxm view,
  * and hold that nothing asked for a format and the editor is as it was.
  */
 async function keepsItsTextAcrossAKey(editor: EditorView, messy: string, caret: number): Promise<void> {
@@ -36,7 +36,7 @@ async function keepsItsTextAcrossAKey(editor: EditorView, messy: string, caret: 
   await until(() => editor.hasFocus, 'the editor to take the focus')
   const before = formats.length
   await viewKey('2')
-  expect(mounted(), 'precondition: the key hid the asm view').not.toContain('asm-0')
+  expect(mounted(), 'precondition: the key hid the rxm view').not.toContain('rxm-0')
   expect(formats.length, 'the view key asked for a format of text the user had not left').toBe(before)
   expect(editor.state.doc.toString(), 'the view key changed the text').toBe(messy)
   expect(editor.hasFocus, 'the view key took the focus out of the editor').toBe(true)

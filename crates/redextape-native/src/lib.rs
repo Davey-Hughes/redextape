@@ -1,4 +1,4 @@
-//! The native backend: Core -> register-asm -> machine code (JIT/AOT via Cranelift, or JIT via
+//! The native backend: Core -> rxm -> machine code (JIT/AOT via Cranelift, or JIT via
 //! LLVM), a fourth oracle leg with two swappable codegen backends behind the `Codegen` seam.
 
 // Test code is exempt from `pedantic`, for the reason `clippy.toml` gives for the
@@ -14,7 +14,7 @@
 use redextape_core::core::{Core, NodeId};
 #[cfg(any(feature = "cranelift", feature = "llvm"))]
 use redextape_core::tm::lower_program;
-use redextape_core::tm::{AsmOutcome, Caps, LowerError};
+use redextape_core::tm::{Caps, LowerError, RxmOutcome};
 
 pub mod analysis;
 #[cfg(feature = "cranelift")]
@@ -42,7 +42,7 @@ pub enum AotError {
     /// The program is out of scope for AOT emission (higher-order/non-value result type, or an
     /// over-cap register index) — rejected before emitting, never a panic.
     Unsupported(String),
-    /// Partitioning the register-asm `Program` into subroutines failed (`analysis::partition`).
+    /// Partitioning the rxm `Program` into subroutines failed (`analysis::partition`).
     Lower(LowerError),
     /// The shared Cranelift codegen reported an error translating a subroutine.
     Codegen(String),
@@ -125,11 +125,11 @@ pub fn link_executable(_obj: &[u8], _out: &std::path::Path, _opts: &LinkOptions)
     Err(AotError::Unsupported("redextape-native built without the `cranelift` feature".into()))
 }
 
-/// The outcome of running a program natively. Decoding to a `Value` is separate (`decode_asm`),
+/// The outcome of running a program natively. Decoding to a `Value` is separate (`decode_rxm`),
 /// mirroring `run_tm` + `decode_tape`.
 #[derive(Clone, Debug)]
 pub enum NativeRun {
-    Ran(AsmOutcome),
+    Ran(RxmOutcome),
     HitCap,
     Fault(String),
     LowerError(LowerError),
@@ -248,7 +248,7 @@ pub fn run_native_with(_core: &Core, caps: Caps, codegen: Codegen) -> NativeRun 
     }
 }
 
-/// Lower `core` (reusing `lower_asm`/`defunc`), JIT-compile, and run on the Cranelift backend at the
+/// Lower `core` (reusing `lower_rxm`/`defunc`), JIT-compile, and run on the Cranelift backend at the
 /// default optimization level. Panic-free, bounded by `caps`. Exactly
 /// `run_native_with(core, caps, Codegen::Cranelift { opt: OptLevel::default() })`.
 #[must_use]
@@ -276,14 +276,14 @@ mod run_native_tests {
     #![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
 
     use super::*;
-    use redextape_core::tm::{DEFAULT_CAPS, decode_asm};
+    use redextape_core::tm::{DEFAULT_CAPS, decode_rxm};
     use redextape_core::{desugar::desugar, parser::parse, run, value::Value};
 
     fn native_value(src: &str) -> Value {
         let core = desugar(&parse(src).0.unwrap());
         let expected = run(src).unwrap();
         match run_native(&core, DEFAULT_CAPS) {
-            NativeRun::Ran(o) => decode_asm(&o, &expected).expect("decode"),
+            NativeRun::Ran(o) => decode_rxm(&o, &expected).expect("decode"),
             other => panic!("native did not run {src}: {other:?}"),
         }
     }

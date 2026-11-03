@@ -22,7 +22,7 @@ import { clickToggle } from './user-event-fixture'
  * does not open.
  */
 
-const FOUR = ['source', 'lambda-0', 'asm-0', 'tm-0']
+const FOUR = ['source', 'lambda-0', 'rxm-0', 'tm-0']
 
 type Stored = Pick<Workspace, 'panels' | 'display' | 'tmDisplay'>
 const rulesToggle = (): HTMLButtonElement | null =>
@@ -52,7 +52,7 @@ describe('what the workspace stores for a view a switch takes off the screen', (
     })
 
     await clickToggle('tm')
-    expect(mounted(), 'precondition: the TM view is off the screen').toEqual(['source', 'lambda-0', 'asm-0'])
+    expect(mounted(), 'precondition: the TM view is off the screen').toEqual(['source', 'lambda-0', 'rxm-0'])
     expect
       .soft(storedLayout<Stored>().panels['tm-0'], 'the switch dropped the parked view’s panel state')
       .toEqual({ rules: false })
@@ -78,7 +78,7 @@ describe('what the workspace stores for a view a switch takes off the screen', (
     expect(display?.layout, 'precondition: the display is stored').toBe('outline')
 
     await clickToggle('lambda')
-    expect(mounted(), 'precondition: the λ view is off the screen').toEqual(['source', 'asm-0', 'tm-0'])
+    expect(mounted(), 'precondition: the λ view is off the screen').toEqual(['source', 'rxm-0', 'tm-0'])
     expect(storedLayout<Stored>().display['lambda-0'], 'the switch dropped the parked view’s display').toEqual(display)
 
     await clickToggle('lambda')

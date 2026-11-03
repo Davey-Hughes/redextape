@@ -266,16 +266,16 @@ describe('hover, through the app', () => {
 
   /**
    * **THE TM VIEW GETS THE WHOLE ROW, AND THE HOVER'S TARGET IS ASSERTED ON SCREEN BEFORE THE POINTER MOVES.**
-   * The four-view tree puts asm beside TM (Plan 7 part 5 spec §3, row 4), and in half of this suite's 414px viewport
+   * The four-view tree puts rxm beside TM (Plan 7 part 5 spec §3, row 4), and in half of this suite's 414px viewport
    * `MACHINE`'s first rule runs past the copy's editor, with `q1` right of the viewport, where nothing answers a hit
    * test. `userEvent.hover` would then scroll it into view as part of the gesture, the span moving up a line with the
    * editor's sideways scroll, and the pointer would land on the second rule, whose tooltip reads `goto q0`. So
-   * `asm-0` is closed through its own `✕` first, which gives TM the whole row, and the precondition is the fact the
+   * `rxm-0` is closed through its own `✕` first, which gives TM the whole row, and the precondition is the fact the
    * gesture needs: the point at the centre of `q1` hits `q1`.
    */
   it('pointer hover over a TM rule names the goto target', async () => {
-    document.querySelector<HTMLButtonElement>('[data-leaf="asm-0"] button.view-close')?.click()
-    await until(() => document.querySelector('[data-leaf="asm-0"]') === null, 'the asm view to close')
+    document.querySelector<HTMLButtonElement>('[data-leaf="rxm-0"] button.view-close')?.click()
+    await until(() => document.querySelector('[data-leaf="rxm-0"]') === null, 'the rxm view to close')
     const pane = paneOrThrow('tm-0')
     const editor = await makeCopy(pane)
     retype(editor, MACHINE)

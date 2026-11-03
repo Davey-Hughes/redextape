@@ -89,9 +89,9 @@ describe('the focus ring of a views toggle', () => {
       await chooseStyle(style)
       await document.fonts.ready
       // ALL FOUR PRESSED, THEN THE SOURCE AND TM ALONE: a pressed toggle beside pressed ones, and each unpressed one
-      // beside a pressed one, asm on its left and λ on its right.
+      // beside a pressed one, rxm on its left and λ on its right.
       for (const shown of [
-        ['source', 'asm', 'lambda', 'tm'],
+        ['source', 'rxm', 'lambda', 'tm'],
         ['source', 'tm'],
       ]) {
         for (const kind of HEADER_ORDER) if (pressed().includes(kind) !== shown.includes(kind)) toggle(kind).click()

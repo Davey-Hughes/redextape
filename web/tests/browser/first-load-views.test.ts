@@ -1,4 +1,5 @@
 import { beforeAll, describe, expect, it } from 'vitest'
+import { KIND_GLOSS } from '../../src/app-header'
 import { LAYOUT_STORAGE_KEY } from '../../src/layout'
 import { box, mountAt, mounted, pressed, storedLayout, until } from './harness'
 
@@ -37,7 +38,7 @@ describe('a first load, in a window wider than it is tall', () => {
   it('shows the source and the TM view and no other', () => {
     expect(mounted()).toEqual(['source', 'tm-0'])
     expect(document.querySelector('[data-leaf="lambda-0"]'), 'a λ view is on the page').toBeNull()
-    expect(document.querySelector('[data-leaf="asm-0"]'), 'an asm view is on the page').toBeNull()
+    expect(document.querySelector('[data-leaf="rxm-0"]'), 'an rxm view is on the page').toBeNull()
   })
 
   it('puts them side by side, a half each', () => {
@@ -50,13 +51,13 @@ describe('a first load, in a window wider than it is tall', () => {
     expect(Math.abs(source.height - tm.height)).toBeLessThan(1)
   })
 
-  it('presses the source and TM toggles and leaves λ and asm unpressed', () => {
+  it('presses the source and TM toggles and leaves λ and rxm unpressed', () => {
     expect(pressed()).toEqual(['source', 'tm'])
     const all = [...document.querySelectorAll<HTMLButtonElement>('#views-shown button')]
-    expect(all.map((b) => b.textContent)).toEqual(['source', 'asm', 'λ', 'TM'])
+    expect(all.map((b) => b.textContent)).toEqual(['source', 'rxm', 'λ', 'TM'])
     expect(all.map((b) => b.title)).toEqual([
       'hide the source view',
-      'show the asm view',
+      `show the rxm view\n${KIND_GLOSS.rxm}`,
       'show the λ view',
       'hide the TM view',
     ])
@@ -78,7 +79,7 @@ describe('a first load, in a window wider than it is tall', () => {
     const all = [...document.querySelectorAll<HTMLButtonElement>('#views-shown button')]
     expect(all.map((b) => [b.dataset.shows, b.getAttribute('aria-pressed'), look(b)])).toEqual([
       ['source', 'true', { border: 'solid', underlined: true }],
-      ['asm', 'false', { border: 'dashed', underlined: false }],
+      ['rxm', 'false', { border: 'dashed', underlined: false }],
       ['lambda', 'false', { border: 'dashed', underlined: false }],
       ['tm', 'true', { border: 'solid', underlined: true }],
     ])

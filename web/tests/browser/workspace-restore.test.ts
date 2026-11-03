@@ -16,7 +16,7 @@ beforeAll(async () => {
       ...fourViewWorkspace(),
       speed: 250,
       focused: 'tm-0',
-      panels: { 'tm-0': { rules: false }, 'asm-0': { heap: false } },
+      panels: { 'tm-0': { rules: false }, 'rxm-0': { heap: false } },
     }),
   )
   document.body.innerHTML = SHELL
@@ -26,8 +26,8 @@ beforeAll(async () => {
 
 const rulesToggle = (): HTMLButtonElement | null =>
   document.querySelector<HTMLButtonElement>('[data-leaf="tm-0"] [data-panel="rules"] .panel-toggle')
-const asmToggle = (name: string): HTMLButtonElement | null =>
-  document.querySelector<HTMLButtonElement>(`[data-leaf="asm-0"] [data-panel="${name}"] .panel-toggle`)
+const rxmToggle = (name: string): HTMLButtonElement | null =>
+  document.querySelector<HTMLButtonElement>(`[data-leaf="rxm-0"] [data-panel="${name}"] .panel-toggle`)
 
 describe('a restored workspace', () => {
   it('opens the TM view with its rules panel closed, as stored', () => {
@@ -35,13 +35,13 @@ describe('a restored workspace', () => {
   })
 
   /**
-   * **THE ASM VIEW READS ITS PANELS BACK TOO**, not only stores them: each of the asm view's four is read back by name
-   * (`pane-host.ts`'s asm arm), and the ones not stored keep their default.
+   * **THE RXM VIEW READS ITS PANELS BACK TOO**, not only stores them: each of the rxm view's four is read back by name
+   * (`pane-host.ts`'s rxm arm), and the ones not stored keep their default.
    */
-  it('opens the asm view with its heap panel closed, as stored, and the panels not stored open', () => {
-    expect(asmToggle('heap')?.getAttribute('aria-expanded')).toBe('false')
+  it('opens the rxm view with its heap panel closed, as stored, and the panels not stored open', () => {
+    expect(rxmToggle('heap')?.getAttribute('aria-expanded')).toBe('false')
     for (const name of ['listing', 'registers', 'stack']) {
-      expect(asmToggle(name)?.getAttribute('aria-expanded'), name).toBe('true')
+      expect(rxmToggle(name)?.getAttribute('aria-expanded'), name).toBe('true')
     }
   })
 
@@ -52,7 +52,7 @@ describe('a restored workspace', () => {
    */
   // **SCOPED TO `.view-steps`.** The step bar is a second `stepControls` instance (`step-bar.ts`), so a
   // page-wide `.controls select.speed` finds four — and this case's own name says "every view that steps",
-  // which is the λ, asm and TM views of the four-view tree this file seeds. The bar's copy is asserted on its
+  // which is the λ, rxm and TM views of the four-view tree this file seeds. The bar's copy is asserted on its
   // own line below rather than dropped: one global speed means the bar shows it too (spec §8).
   it('shows the restored speed in every view that steps', () => {
     expect(
@@ -66,7 +66,7 @@ describe('a restored workspace', () => {
     if (first === null) throw new Error('no speed control on the λ view')
     first.value = '1000'
     first.dispatchEvent(new Event('change'))
-    expect(document.querySelector<HTMLSelectElement>('[data-leaf="asm-0"] select.speed')?.value).toBe('1000')
+    expect(document.querySelector<HTMLSelectElement>('[data-leaf="rxm-0"] select.speed')?.value).toBe('1000')
     expect(document.querySelector<HTMLSelectElement>('[data-leaf="tm-0"] select.speed')?.value).toBe('1000')
     // THE BAR IS A STEP CONTROL ON THE PAGE TOO, so "every step control reflects a change at once"
     // (spec §8) includes it — even while the `steps` switch has it hidden.
@@ -87,16 +87,16 @@ describe('a restored workspace', () => {
   it('records a panel toggle against the view it happened in', () => {
     rulesToggle()?.click()
     expect(parseWorkspace(localStorage.getItem(LAYOUT_STORAGE_KEY))?.panels['tm-0']).toEqual({ rules: true })
-    asmToggle('heap')?.click()
-    expect(parseWorkspace(localStorage.getItem(LAYOUT_STORAGE_KEY))?.panels['asm-0']).toEqual({ heap: true })
+    rxmToggle('heap')?.click()
+    expect(parseWorkspace(localStorage.getItem(LAYOUT_STORAGE_KEY))?.panels['rxm-0']).toEqual({ heap: true })
     // BACK TO WHAT WAS RESTORED, for the case below, which reads the whole stored `panels`.
-    asmToggle('heap')?.click()
-    expect(parseWorkspace(localStorage.getItem(LAYOUT_STORAGE_KEY))?.panels['asm-0']).toEqual({ heap: false })
+    rxmToggle('heap')?.click()
+    expect(parseWorkspace(localStorage.getItem(LAYOUT_STORAGE_KEY))?.panels['rxm-0']).toEqual({ heap: false })
   })
 
   /**
    * **A LEAF ID COMES BACK, AND ITS OLD PANEL STATE MUST NOT COME WITH IT.** A default arrangement re-mints
-   * `source`, `lambda-0`, `asm-0` and `tm-0` as literals, so *reset preset* after closing the TM view hands the
+   * `source`, `lambda-0`, `rxm-0` and `tm-0` as literals, so *reset preset* after closing the TM view hands the
    * id to a new view. Without `main.ts` normalising the workspace against the live tree, the write would drop
    * the closed view's panel state and MEMORY would keep it — so this same sequence would open the rules panel
    * closed, and open it open after a reload, from the same clicks.
@@ -114,21 +114,21 @@ describe('a restored workspace', () => {
     expect(rulesToggle()?.getAttribute('aria-expanded'), 'the rules panel did not shut').toBe('false')
     expect(parseWorkspace(localStorage.getItem(LAYOUT_STORAGE_KEY))?.panels).toEqual({
       'tm-0': { rules: false },
-      'asm-0': { heap: false },
+      'rxm-0': { heap: false },
     })
     document.querySelector<HTMLButtonElement>('[data-leaf="tm-0"] button.view-close')?.click()
     await until(() => document.querySelector('[data-leaf="tm-0"]') === null, 'the TM view to close')
     document.querySelector<HTMLButtonElement>('#reset-preset')?.click()
     await until(() => document.querySelector('[data-leaf="tm-0"]') !== null, 'the TM view to come back')
     expect(rulesToggle()?.getAttribute('aria-expanded'), 'the re-minted view inherited a closed panel').toBe('true')
-    // THE ASM VIEW LEFT WITH THE RESET, WHICH PUTS THE SOURCE BESIDE THE TM VIEW (the view layouts spec §4.6), and its
+    // THE RXM VIEW LEFT WITH THE RESET, WHICH PUTS THE SOURCE BESIDE THE TM VIEW (the view layouts spec §4.6), and its
     // stored heap panel went with it — from storage and from memory alike, which is the agreement this case is about:
     // the view its toggle brings back is a new one, with its heap panel open as a new view's is.
-    expect(document.querySelector('[data-leaf="asm-0"]'), 'the reset kept the asm view').toBeNull()
+    expect(document.querySelector('[data-leaf="rxm-0"]'), 'the reset kept the rxm view').toBeNull()
     expect(parseWorkspace(localStorage.getItem(LAYOUT_STORAGE_KEY))?.panels).toEqual({})
     await showFourViews()
-    await until(() => document.querySelector('[data-leaf="asm-0"]') !== null, 'the asm view to come back')
-    expect(asmToggle('heap')?.getAttribute('aria-expanded'), 'the new asm view inherited a closed panel').toBe('true')
+    await until(() => document.querySelector('[data-leaf="rxm-0"]') !== null, 'the rxm view to come back')
+    expect(rxmToggle('heap')?.getAttribute('aria-expanded'), 'the new rxm view inherited a closed panel').toBe('true')
   })
 
   it('records which view has focus', () => {

@@ -32,7 +32,7 @@ import {
  *
  * **THE STALE EDITOR IS LOOKED FOR WHERE IT WAS LEFT, AND EACH LEG HAS ITS OWN CASES** — `stage-copy-editor.test.ts`
  * has why: the sweep takes the stale editor off the view before it throws, so the throw says less than it seems, and a
- * λ view's teardown is `LambdaPane`'s where a TM or asm view's is `CopyEditor`'s.
+ * λ view's teardown is `LambdaPane`'s where a TM or rxm view's is `CopyEditor`'s.
  *
  * **A DELETE, ITS *UNDO*, A PAUSE, A RESUME AND EVERY TOGGLE ARE PRESSED WITH THE POINTER** (`press`), as a user
  * presses them: the copies button, then the row's control; the notice's *undo* where the pointer finds it. The copy,
@@ -44,14 +44,14 @@ const onError = (e: ErrorEvent): void => {
   errors.push(e.message)
 }
 
-const FOUR = ['source', 'lambda-0', 'asm-0', 'tm-0']
+const FOUR = ['source', 'lambda-0', 'rxm-0', 'tm-0']
 
 /** A leg's name in a title and in the copies menu, the view a default arrangement gives it, and its toggle. */
 type Leg = { readonly name: string; readonly view: string; readonly kind: string }
 const LEGS: readonly Leg[] = [
   { name: 'λ', view: 'lambda-0', kind: 'lambda' },
   { name: 'TM', view: 'tm-0', kind: 'tm' },
-  { name: 'asm', view: 'asm-0', kind: 'asm' },
+  { name: 'rxm', view: 'rxm-0', kind: 'rxm' },
 ]
 
 /** Press the toggle of each leg but `leg`'s: from all four views to the source beside `leg`'s, and back. */

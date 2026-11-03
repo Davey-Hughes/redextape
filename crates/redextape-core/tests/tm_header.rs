@@ -78,7 +78,7 @@ fn the_headers_recipe_reproduces_its_literal_tapes() {
 
 /// THE POINT OF THE HEADER: a file, and only a file, becomes a value.
 ///
-/// No `Core`, no `lower_asm`, no `lower_tm`, no reference run — the input is a checked-in `.tm` file
+/// No `Core`, no `lower_rxm`, no `lower_tm`, no reference run — the input is a checked-in `.tm` file
 /// read off disk. If any piece of the header were insufficient, this is the test that could not be
 /// written.
 #[test]
@@ -183,7 +183,7 @@ fn sabotaging_the_header_is_caught_by_the_end_to_end_decode() {
     // Wrong initial tapes: corrupt the leading delimiter of REG's OWN result field (slot 0, `Rr`).
     //
     // A DELIMITER, deliberately, not a data cell. The DESIGN INTENT is that every register
-    // `lower_asm`/`lower_tm` compiles -- `Rr` included -- is write-before-read (a well-typed program
+    // `lower_rxm`/`lower_tm` compiles -- `Rr` included -- is write-before-read (a well-typed program
     // never reads a variable it has not just assigned, and lowering is meant to realize that as an
     // unconditional, absolute write before any read; even `nil` compiles to an explicit `nil rr` rather
     // than relying on `rr` starting blank), so no DATA cell of the literal REG or WORK bank should

@@ -94,7 +94,7 @@ export type PaneEvents = {
    * Fork this pane's term into the λ scratchpad — 5d-i design §4.3, at the step the pane is showing.
    *
    * OPTIONAL, LIKE `linkState` AND UNLIKE `rebind`: a pane has this handler when it has the affordance
-   * the handler reports. A TM or asm pane has no term to fork.
+   * the handler reports. A TM or rxm pane has no term to fork.
    *
    * **IT CARRIES A STEP, NOT TEXT.** 5d-iii design §4.1's inputs are the SOURCE session's step-0 term —
    * the link index's `lambdaText`, which the `compiled` reply carries, not any pane — and the step,
@@ -127,7 +127,7 @@ export type PaneEvents = {
    * This pane asks to hold its scratch session's editor — the editor-moves rule (5d-ii-a design §4.3).
    *
    * OPTIONAL, FOR `detach`'s REASON: it exists only on a pane whose slot may be bound to a scratch —
-   * every λ, TM and asm view, since a TM or asm view showing a copy whose editor another view holds
+   * every λ, TM and rxm view, since a TM or rxm view showing a copy whose editor another view holds
    * offers it too (`CopyEditor.#refreshClaim`). IT CARRIES NOTHING, same as `close` below — the pane
    * knows it was asked; it does not know its own `LeafId` or which session it is bound to.
    * `pane-host.ts`'s `paneEvents` holds both and is what makes the request into
@@ -148,7 +148,7 @@ export type PaneEvents = {
    * `on.collapse?.(collapsed)` call with nothing on the other end.
    *
    * **NOT WITHHELD ON A TM PANE.** `TmPane` also `implements EditablePane` and builds a `textPanel` (in its
-   * `CopyEditor`, as the asm view's does) that wraps the editor's host in the pane body exactly like
+   * `CopyEditor`, as the rxm view's does) that wraps the editor's host in the pane body exactly like
    * `LambdaPane`'s, and calls `on.collapse?.(collapsed)` from it. `transport.ts`'s `events` provides this
    * handler on every leg: left λ-only, every `TmPane` would be built with `on.collapse === undefined`, so a
    * TM collapse would hide the host but never reach `scratchpad.setCollapsed`, and the buffer would come
@@ -188,13 +188,13 @@ export type PaneEvents = {
    */
   detachMachine?(): void
   /**
-   * Copy this view's asm PROGRAM into an asm copy — Plan 7 part 5 spec §7. `detachMachine`'s shape and for its reason:
+   * Copy this view's rxm PROGRAM into an rxm copy — Plan 7 part 5 spec §7. `detachMachine`'s shape and for its reason:
    * the seed is the program's whole text, which the session keeps, so the handler needs nothing from the view.
    */
-  detachAsm?(): void
+  detachRxm?(): void
   /** A state row was clicked. Absent on panes that have no table. */
   linkState?: (stateId: number) => void
-  /** An instruction row in the asm view's listing was clicked, or Enter pressed on it; `pc` is its index. */
+  /** An instruction row in the rxm view's listing was clicked, or Enter pressed on it; `pc` is its index. */
   linkInstr?: (pc: number) => void
   /** A token in the λ view was clicked; `node` is the construct its node belongs to. */
   linkLambda?: (node: number) => void

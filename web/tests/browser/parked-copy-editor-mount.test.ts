@@ -28,7 +28,7 @@ const onError = (e: ErrorEvent): void => {
   errors.push(e.message)
 }
 
-const FOUR = ['source', 'lambda-0', 'asm-0', 'tm-0']
+const FOUR = ['source', 'lambda-0', 'rxm-0', 'tm-0']
 
 /** Every copy's editor on the page, in whichever view: the source editor is not in a `.term-editor`. */
 const copyEditors = (): number => document.querySelectorAll('#views .term-editor .cm-editor').length
@@ -51,7 +51,7 @@ describe('a parked view of a TM copy whose other view, holding the editor, was c
 
     // THE SOURCE BESIDE TM, WHERE THE SECOND VIEW OF THE COPY IS ADDED: that arrangement alone holds it.
     await clickToggle('lambda')
-    await clickToggle('asm')
+    await clickToggle('rxm')
     expect(mounted(), 'precondition: the source beside the TM view').toEqual(['source', 'tm-0'])
     host('tm-0')?.querySelector<HTMLElement>('button.view-title')?.focus()
     await userEvent.click(document.querySelector<HTMLButtonElement>('#new-view') as HTMLButtonElement)
@@ -67,7 +67,7 @@ describe('a parked view of a TM copy whose other view, holding the editor, was c
     expect(claim(second), 'precondition: the second view offers to take the editor').not.toBeNull()
 
     // ALL FOUR AGAIN, BY TWO SWITCHES: neither arrangement names the second view, so it is parked.
-    await clickToggle('asm')
+    await clickToggle('rxm')
     await clickToggle('lambda')
     expect(mounted(), 'precondition: the second view is off the page').toEqual(FOUR)
     expect(titleText('tm-0'), 'precondition: the view on the page shows the copy').toBe('TM · copy 1')
@@ -76,7 +76,7 @@ describe('a parked view of a TM copy whose other view, holding the editor, was c
     // THE HOLDER IS CLOSED, WHICH DESTROYS THE EDITOR, and no view in the tree shows the copy to take a fresh one.
     await userEvent.click(host('tm-0')?.querySelector<HTMLButtonElement>('button.view-close') as HTMLButtonElement)
     await focusInPage('the ✕ of the view that held the copy’s editor')
-    expect(mounted(), 'precondition: the holder is closed').toEqual(['source', 'lambda-0', 'asm-0'])
+    expect(mounted(), 'precondition: the holder is closed').toEqual(['source', 'lambda-0', 'rxm-0'])
     expect(copyEditors(), 'precondition: the copy’s editor went with its view').toBe(0)
 
     // THE TM TOGGLE SHOWS THE TREE BEFORE THE ✕, WITH A NEW VIEW ON THE PROGRAM WHERE THE CLOSED ONE WAS.
@@ -88,7 +88,7 @@ describe('a parked view of a TM copy whose other view, holding the editor, was c
 
     // BACK TO THE ARRANGEMENT THAT HOLDS THE PARKED VIEW.
     await clickToggle('lambda')
-    await clickToggle('asm')
+    await clickToggle('rxm')
     expect(mounted()).toEqual(['source', 'tm-0', second])
     expect(errors, 'a handler threw').toEqual([])
     expect(titleText(second)).toBe('TM · copy 1')

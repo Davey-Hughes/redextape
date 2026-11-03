@@ -22,16 +22,16 @@ import {
  * on any tree but `fourViews()`.
  *
  * The page opens as a first visit's does, on the source beside the TM view, so the fixture's first call has the λ and
- * the asm view to bring. **THE CASES RUN IN ORDER ON ONE PAGE**, each from the state the one before left, and each
+ * the rxm view to bring. **THE CASES RUN IN ORDER ON ONE PAGE**, each from the state the one before left, and each
  * asserts that state first.
  */
 
 // BEFORE THE MOUNT, AT MODULE SCOPE: `main()` reads storage once, when it is imported below.
 localStorage.removeItem(LAYOUT_STORAGE_KEY)
 
-const FOUR = ['source', 'lambda-0', 'asm-0', 'tm-0']
-const ROWS = 'column[50](row[50](source lambda-0) row[50](asm-0 tm-0))'
-const COLUMNS = 'row[50](column[50](source asm-0) column[50](lambda-0 tm-0))'
+const FOUR = ['source', 'lambda-0', 'rxm-0', 'tm-0']
+const ROWS = 'column[50](row[50](source lambda-0) row[50](rxm-0 tm-0))'
+const COLUMNS = 'row[50](column[50](source rxm-0) column[50](lambda-0 tm-0))'
 
 const toggle = (kind: string): void =>
   document.querySelector<HTMLButtonElement>(`#views-shown button[data-shows="${kind}"]`)?.click()
@@ -64,15 +64,15 @@ describe('the four-view fixtures', () => {
 
   it('leaves two arrangements remembered, the live region on what is shown, and the focus in the λ view', () => {
     expect(Object.keys(storedLayout<Stored>().arrangements ?? {})).toEqual(['source+tm', 'source+lambda+tm'])
-    expect(live()).toBe('showing source, asm, λ and TM')
+    expect(live()).toBe('showing source, rxm, λ and TM')
     expect(focusedView()).toBe('lambda-0')
     expect(storedLayout<Stored>().focused).toBe('lambda-0')
   })
 
-  it('resetToFourViews builds the λ and the asm view new and keeps the TM view, from a reset that focused it', async () => {
+  it('resetToFourViews builds the λ and the rxm view new and keeps the TM view, from a reset that focused it', async () => {
     expect(mounted(), 'precondition: all four views').toEqual(FOUR)
-    const before = { lambda: pane('lambda-0'), asm: pane('asm-0'), tm: pane('tm-0') }
-    expect([before.lambda, before.asm, before.tm], 'precondition: each view has a pane').not.toContain(null)
+    const before = { lambda: pane('lambda-0'), rxm: pane('rxm-0'), tm: pane('tm-0') }
+    expect([before.lambda, before.rxm, before.tm], 'precondition: each view has a pane').not.toContain(null)
     // THE FIXTURE'S FIRST HALF BY ITSELF, FOR WHAT IT LEAVES BEFORE THE SECOND MOVES IT.
     document.querySelector<HTMLButtonElement>('#reset-preset')?.click()
     expect(mounted()).toEqual(['source', 'tm-0'])
@@ -84,7 +84,7 @@ describe('the four-view fixtures', () => {
     expect(Object.keys(storedLayout<Stored>().arrangements ?? {})).toEqual(['source+tm', 'source+lambda+tm'])
     expect(pane('tm-0'), 'the TM view was built again').toBe(before.tm)
     expect(pane('lambda-0'), 'the λ view is the one the reset closed').not.toBe(before.lambda)
-    expect(pane('asm-0'), 'the asm view is the one the reset closed').not.toBe(before.asm)
+    expect(pane('rxm-0'), 'the rxm view is the one the reset closed').not.toBe(before.rxm)
     expect(focusedView()).toBe('lambda-0')
   })
 
@@ -95,16 +95,16 @@ describe('the four-view fixtures', () => {
   it('showFourViews throws, naming what it found, where all four are remembered in another arrangement', async () => {
     document.querySelector<HTMLButtonElement>('#reset-preset')?.click()
     toggle('lambda')
-    toggle('asm')
+    toggle('rxm')
     expect(
       storedLayout<Stored>().tree,
       'precondition: a wide window’s default for all four is not fourViews()',
     ).not.toEqual(fourViews())
-    toggle('asm')
+    toggle('rxm')
     toggle('lambda')
     expect(mounted(), 'precondition: the source beside the TM view again').toEqual(['source', 'tm-0'])
     expect(Object.keys(storedLayout<Stored>().arrangements ?? {}), 'precondition: all four are remembered').toContain(
-      'source+lambda+asm+tm',
+      'source+lambda+rxm+tm',
     )
     let thrown = ''
     await showFourViews().catch((e: unknown) => {
@@ -118,14 +118,14 @@ describe('the four-view fixtures', () => {
     pickPreset('stage')
     expect(tabLeaves(), 'precondition: the Stage, on the columns the case above left').toEqual([
       'source',
-      'asm-0',
+      'rxm-0',
       'lambda-0',
       'tm-0',
     ])
     document.querySelector<HTMLButtonElement>('#reset-preset')?.click()
     toggle('lambda')
-    toggle('asm')
-    toggle('asm')
+    toggle('rxm')
+    toggle('rxm')
     toggle('lambda')
     expect(tabLeaves(), 'precondition: the source and the TM view, as tabs').toEqual(['source', 'tm-0'])
     let thrown = ''
@@ -133,7 +133,7 @@ describe('the four-view fixtures', () => {
       thrown = e instanceof Error ? e.message : String(e)
     })
     expect(thrown).toBe(
-      'showFourViews left the page on stage(source asm-0 lambda-0 tm-0), and not on stage(source lambda-0 asm-0 tm-0)',
+      'showFourViews left the page on stage(source rxm-0 lambda-0 tm-0), and not on stage(source lambda-0 rxm-0 tm-0)',
     )
     await resetToFourViews()
     expect(tabLeaves()).toEqual(FOUR)

@@ -62,36 +62,36 @@ beforeAll(async () => {
   await until(() => !stateIdle(), 'the compile to start')
   await until(stateIdle, 'the compile to finish')
   await chooseFromWorkspace('[data-switch="views"][data-value="stage"]')
-  await until(() => stageTab('asm-0') !== null, 'the stage’s tabs')
+  await until(() => stageTab('rxm-0') !== null, 'the stage’s tabs')
 })
 
 describe('a Stage tab', () => {
-  it('follows its asm view through edit a copy, a pick of another copy, and back to the program', async () => {
-    // A SECOND ASM COPY, FOR THE TITLE TO PICK: a blank one from the copies menu, which no view shows.
+  it('follows its rxm view through edit a copy, a pick of another copy, and back to the program', async () => {
+    // A SECOND RXM COPY, FOR THE TITLE TO PICK: a blank one from the copies menu, which no view shows.
     await userEvent.click(document.querySelector<HTMLButtonElement>('#buffers') as HTMLButtonElement)
-    await userEvent.click(document.querySelector<HTMLButtonElement>('.buffer-list button.new-asm') as HTMLElement)
+    await userEvent.click(document.querySelector<HTMLButtonElement>('.buffer-list button.new-rxm') as HTMLElement)
     await until(() => document.querySelector('#notice .notice-text')?.textContent?.endsWith('created') === true)
 
-    await show('asm-0')
-    expect(label('asm-0')).toBe('asm · program')
-    expect(title('asm-0')).toBe('asm · program')
+    await show('rxm-0')
+    expect(label('rxm-0')).toBe('rxm · program')
+    expect(title('rxm-0')).toBe('rxm · program')
 
-    await editACopy('asm-0')
-    await tabFollows('asm-0', 'asm · program', 'edit a copy')
-    expect(label('asm-0')).toMatch(/^asm · copy \d+$/)
+    await editACopy('rxm-0')
+    await tabFollows('rxm-0', 'rxm · program', 'edit a copy')
+    expect(label('rxm-0')).toMatch(/^rxm · copy \d+$/)
 
-    const made = title('asm-0')
+    const made = title('rxm-0')
     const picked = await pickTitle(
-      'asm-0',
+      'rxm-0',
       (b) =>
-        b.dataset.binding?.startsWith('asm:') === true && b.textContent !== made && b.dataset.binding !== 'asm:source',
+        b.dataset.binding?.startsWith('rxm:') === true && b.textContent !== made && b.dataset.binding !== 'rxm:source',
     )
-    await tabFollows('asm-0', made, 'a pick of another copy')
-    expect(label('asm-0')).toBe(picked)
+    await tabFollows('rxm-0', made, 'a pick of another copy')
+    expect(label('rxm-0')).toBe(picked)
 
-    await pickTitle('asm-0', (b) => b.dataset.binding === 'asm:source')
-    await tabFollows('asm-0', picked, 'a move back to the program')
-    expect(label('asm-0')).toBe('asm · program')
+    await pickTitle('rxm-0', (b) => b.dataset.binding === 'rxm:source')
+    await tabFollows('rxm-0', picked, 'a move back to the program')
+    expect(label('rxm-0')).toBe('rxm · program')
   })
 
   it('follows its TM and λ views through edit a copy, a pick of another copy, and back to the program', async () => {
@@ -107,7 +107,7 @@ describe('a Stage tab', () => {
 
       // A FIRST COPY, LEFT BEHIND ON THE MOVE BACK TO THE PROGRAM: λ has no *new blank copy* button,
       // since a λ copy is always made from a step of the program (`buffer-list.ts`'s `BLANK_COPY`), so a
-      // second fork is what gives the title menu another copy to pick, the way the asm test's blank one
+      // second fork is what gives the title menu another copy to pick, the way the rxm test's blank one
       // does. TM, which has one, takes the same route in this loop.
       await pickTitle(leaf, (b) => b.dataset.binding === `${leg}:source`)
       await tabFollows(leaf, first, `${leg}’s move back to the program`)

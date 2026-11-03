@@ -2013,7 +2013,9 @@ the highlighting work no plan claimed, and a CLI dump is its natural consumer.
   **2026-09-17:** the TM state diagram and the assembly pane move into Plan 7 (parts 4 and 5);
   `redextape-lsp` shipped in #78–#83, and Plan 7's part 3 brings it to the browser.
 - **Research track:** bidirectional editing feasibility — report + prototype, not a feature (§7.3).
-- **Say what "asm" is, in the UI (raised 2026-10-27).** The asm view shows redextape's own
+- **~~Say what "asm" is, in the UI (raised 2026-10-27).~~ CLOSED 2026-11-02 (`rxm`),** by the entry below
+  that renames asm to rxm: the label is `rxm`, the rxm toggle's tooltip says on a second line what it is, and
+  the help page defines it. Original filing: The asm view shows redextape's own
   register-assembly IR (`tm::asm::Program`, `crates/redextape-core/src/tm/asm.rs`) — the TM backend's
   intermediate stage, whose control flow becomes the machine's states and whose registers, stack and heap
   become its tapes — stepped by the software interpreter in `trace/asm_cursor.rs`. It is not x86, ARM,
@@ -29667,3 +29669,256 @@ again at `eabb1ae`.
 | 3 and 96 | files and tests under the cap at `eabb1ae` | `$R/gates/timing.log` |
 | 2,180 of 15,000 ms | the slowest new or changed case under the cap at `eabb1ae`; its timeout | `systemd-run --user --scope -q -p CPUQuota=50% --setenv=PATH="$PATH"` round `pnpm exec vitest run --project browser` on the three files, `$R/gates/timing.json`; the timeout as `web/tests/browser/harness.ts` states it |
 | 15 | commits in the range | `git rev-list --count 29e6a83..ccff474` |
+
+#### `asm` IS RENAMED `rxm` WHEREVER IT NAMED REDEXTAPE'S REGISTER-MACHINE IR, IN THE UI, THE CLI, `.rxm` FILES, THE GRAMMAR, THE LSP, THE NEOVIM PLUGIN AND THE CODE, AND THE `rxm` TOGGLE'S TOOLTIP AND THE HELP PAGE SAY WHAT IT IS; NOTHING READS THE OLD NAME, SO A STORED LAYOUT OR COPY STORE THAT NAMES `asm` IS REFUSED WHOLE AND A SHARE LINK THAT NAMES IT OPENS THE PROGRAM ALONE (2026-11-02, branch `rxm`, `1b305e0..2b9d67c`, 14 commits, plus this entry)
+
+**This answers the bullet "Say what "asm" is, in the UI"** under "Deferred beyond v1", which #153 added on
+2026-10-27 and this entry marks closed. It asked for a tooltip on the header toggle, a definition in the help page,
+and a decision on whether the label should change, since `asm` was also the name `redextape emit --lang asm`, the
+tree-sitter grammar and the `.asm` filetype sniffing used. The toggle did have a title at run time, set by
+`viewToggles`' `sync` from `toggleSentence` ("show the asm view"); the bullet's "has no title" holds of the markup in
+`web/index.html` only. The user chose to change the name, everywhere (DECISIONS below). Of the 14 commits,
+`b72bb16` is a rename script's whole output and the 13 after it are hand fixes. The lane record is
+`~/temp/redextape-asm-ui-record/` (`$R` below).
+
+##### WHAT CHANGED
+
+**The names.** Everywhere `asm` named the IR it is `rxm`, in lower case, like `source`:
+
+- **The web page:** the view's toggle, and every label built from `KIND_WORD.rxm` (`web/src/layout.ts`) and
+  `LEG_NAME.rxm` (`web/src/legs.ts`): the view headers, the ⋯ and + view menus, the stage tabs, the copies menu, the
+  results readout, the link-status and share-position notices and the view-keys hint; the help and about pages. The
+  pane kind is `'rxm'`, in stored layouts and links too.
+- **The CLI:** `redextape emit --lang rxm` (`Lang::Rxm`), `--form rxm` (`Form::Rxm`) and the `.rxm` extension. The
+  emitted listing's first line is ``; rxm listing, read back by `parse_rxm` and run by `redextape run`.``, where it
+  was ``; Register-assembly listing, read back by `parse_asm` and run by `redextape run`.``; it is a comment, and
+  nothing parses its text.
+- **The grammar:** `grammars/tree-sitter-redextape-rxm/`, named `redextape_rxm`, scope `source.rxm`, its parser
+  symbol `tree_sitter_redextape_rxm` and its wasm `tree-sitter-redextape-rxm.wasm`, regenerated with the pinned
+  tree-sitter CLI 0.25.10 and rebuilt, not edited.
+- **The LSP language id and the Neovim parser and filetype:** `redextape_rxm`. The plugin claims `.rxm` by its
+  extension and no longer sniffs a buffer's first line (`21a229b`). An upper-case `.RXM` runs but is not coloured,
+  as the rxm grammar's README says.
+- **The code and its files:** `tm::rxm`, `tm/rxm_syntax.rs`, `lower_rxm`, `trace/rxm_cursor.rs` and `RxmCursor`,
+  `web/src/rxm-pane.ts`, `rxm-seed.ts` and `rxm-view.ts`, the wasm crate's `probe-rxm-copy` feature and `pnpm run
+  test:probe:rxm-copy`, and the tests and their file names.
+
+Prose that called the IR "assembly" or "register-assembly", in the help and about pages, the CLI's help, the core and
+grammar docs and the README, now says rxm or register machine. Where "assemble" means build, and in the crate name
+`cranelift-assembler-x64`, the word stays.
+
+**What rxm is, in the UI.** `KIND_GLOSS` in `web/src/app-header.ts` holds a second tooltip line for a kind, and only
+`rxm` has one. `toggleTitle` puts it under `toggleSentence`'s words, and the last toggle pressed, which carries its
+tooltip as its `aria-description`, carries the line there too. The line, verbatim:
+
+> redextape's register machine: the IR between the source and the Turing machine
+
+The help page, where it names the views, verbatim:
+
+> The rxm view shows redextape's register machine, the IR between the source and the Turing machine: its control flow
+> becomes the machine's states, and its registers, stack and heap become the machine's tapes. A software interpreter
+> steps it, and it is not x86, ARM, WebAssembly or LLVM output.
+
+The about page says "the rxm view shows the register-machine program the machine is lowered from", where it said an
+assembly view showed the register-assembly program.
+
+**How it was done.** `$R/rename.sh <worktree>` runs on a clean worktree whose base still says asm. It rewrites every
+`asm` not preceded by `w` or `dis`, in any case, to `rxm` with each letter's case kept, and `register-asm` to `rxm`,
+except inside its protect list: dated doc file names, the wasm magic `\0asm`, real assemblers' names (NASM, MASM and
+others) and the scratch probes `asmbench` and `asmprobe`. Of `docs/` it rewrites only the IR views groundwork spec
+and the `## ` headings of the code-history notes files, which name code files. It moves every path outside `docs/`
+that names asm with `git mv`, regenerates the grammar with the pinned CLI rather than editing its generated files,
+rebuilds every grammar .wasm in Docker and stops if one of the three it does not touch comes back different, makes the
+one exact edit the comment guard needs (a re-added comment that named a commit), and runs `cargo fmt` and biome's
+import sort. On `1b305e0` it edited 316 files, replacing 6,320 tokens and 12 phrases, kept 12 spans and moved 48
+files; `b72bb16` is that output. Three sets of hand fixes follow, kept in the record as patches:
+`$R/fixes-rust.patch` (`21a229b` and `38da964`), `$R/fixes-web.patch` (`41744e7` to `eab8e03`, 4 commits) and
+`$R/fixes-docs.patch` (`8ccf42c` to `2b9d67c`, 7 commits).
+
+**The replay.** In a fresh worktree at `1b305e0`, the script and then the three patches, applied with `git apply
+--index`, rebuild the branch. At `38da964`, with the .wasm rebuilt, the index matched `b72bb16` and then `38da964`
+exactly. At `eab8e03`, `ac571fa` and `2b9d67c`, run with `SKIP_WASM=1`, it matched everywhere but the rxm .wasm and
+`grammars/wasm-manifest.json`, which that switch does not rebuild. A rebase of this branch is that replay on the new
+base.
+
+**What is still spelled asm outside `docs/`,** at `2b9d67c`: 8 lines. The README's pointer to the roadmap entry
+`cli-fmt-tm-asm`, by the name the roadmap gives it; two lines of a doc comment in `trace/rxm_cursor.rs` naming the
+probe `asmbench`, the dated plan file it lives in and `run_asm`, that plan's name for `run_rxm`; a dated plan file
+named in `tests/rxm_roundtrip.rs`; and four `\0asm` in `scripts/check-grammar-wasm.sh`'s self-test.
+
+##### DECISIONS
+
+The user's, on 2026-11-02:
+
+1. **Rename `asm` everywhere it names the IR**, code identifiers and file names included. The controller had
+   recommended keeping the label.
+2. **The name `rxm`**, which the user suggested in place of `RM`: "RM reads like the rm remove command". **The
+   extension `.rxm`.** The user approved the design with "go".
+3. **A clean break:** old share links, stored layouts, `.asm` files and `--lang asm` are not accepted. Told then that
+   the loaders refuse a whole store, not only its asm part, the user confirmed it: "nobody is using this so a full
+   clean break is fine". No code anywhere recognises `asm`.
+4. **A `.asm` file fails to parse, as it is,** with no message of its own.
+5. **A review by the `code-review` skill at HIGH** before this entry.
+6. **A shorter tooltip line**, "redextape's register machine: the IR between the source and the Turing machine"
+   (`8ccf42c`), with the help page unchanged. `41744e7`'s line had gone on to say a software interpreter steps it and
+   that it is not x86, ARM, WebAssembly or LLVM output, which the help page still says.
+
+The controller's, each told to the user:
+
+- **Dated history in `docs/` is left as written**: roadmap entries, merged plans and specs record the code as it was.
+  Docs that describe the code now follow the rename: the IR views groundwork spec, the README and the notes files'
+  headings. This entry is the roadmap's record of the rename.
+- **The frozen version 1 share link's promise is its FORMAT**, so its fixture is re-frozen with rxm (`649fc0e`), and
+  an asm-era link opening the program alone is the clean break.
+- **The Neovim plugin maps `.rxm` by extension,** with no sniff.
+
+The controller's verdicts on the review, which the record does not show put to the user: findings 1-3 and 5-7 are
+the user's clean break and get no fix; 4, 8 and 10 are fixed; 9 is recorded below.
+
+##### BEHAVIOUR CHANGES: WHAT THE CLEAN BREAK GIVES UP
+
+1. **A stored copy store with any asm copy is refused whole, so every copy is lost.** `buffers-store.ts`'s
+   `validBuffer` checks each record's leg, and one record whose leg is `asm` makes the page refuse
+   `redextape.buffers`: every saved copy, λ and TM ones included, and its text, with no notice.
+2. **A stored layout with an asm view or an asm key is refused whole, and the page loads the default.** A
+   `redextape.layout` workspace holding a view whose pane is `asm` fails `layout.ts`'s `validate`, and an arrangement
+   key that spells `asm` fails `arrangements.ts`'s `parseKey`; either refuses the whole envelope, its arrangements,
+   panels and preset switches with it.
+3. **An old link with asm opens the program alone.** `share-link.ts`'s `readWorkspace` and `parsePositions` refuse
+   its workspace and its positions, so the views and positions it carried are dropped. Sabotage S4 below shows it on
+   the asm-era frozen fixture.
+4. **A `.asm` file is read as `.rxt` and fails to parse, and `--lang asm` and `--form asm` are usage errors** from
+   clap.
+5. **Old Neovim configs naming `redextape_asm` stop matching,** and a `.asm` listing from an earlier build loses its
+   filetype: the plugin's parser and filetype are `redextape_rxm`, and it no longer claims `.asm`. The controller
+   checked that the snippets in `grammars/shared/*.md` do not name `redextape_asm`.
+
+##### THE REVIEW
+
+The `code-review` skill at HIGH read `main...rxm` at `ac571fa` and did not run the tests. It found no `asm` token left
+outside `docs/` and dated pointers, and nothing like `wasm`, `disasm` or `plasma` mangled. It reported ten findings.
+
+- **1-3 and 5-7 are the clean break**, stated above; 5 asked for one alias step at the storage and link boundary,
+  which the user's choice of no code that recognises `asm` declines. No fix.
+- **4, the re-frozen fixture's provenance.** Its doc said it was the link as Chrome's `encodeLink` wrote version 1,
+  but node's raw deflate wrote it. `459c16e` says so ("Node's raw deflate wrote these bytes, not `encodeLink`") and
+  keeps the ruling that the format is what is frozen.
+- **8, a coupling claimed but not tested.** `KIND_GLOSS`'s doc said `app-header.test.ts` "holds the two", the gloss
+  and the help page, but the test pinned each to a literal of its own, so they could drift apart unseen. `ca6cdcf`
+  adds a test that splits `KIND_GLOSS.rxm` at `: ` and asserts that `help.html` holds each clause, and the doc says
+  that is what the test checks. A sabotage of the gloss alone fails it (S6 below).
+- **10, a comment naming the wrong function.** The doc comment in `trace/rxm_cursor.rs` that points at the frozen
+  plan's `asmbench` said the probe measures `run_rxm`, where that plan's probe calls `run_asm`. `2b9d67c` says it
+  "measures its effect on `run_rxm`, which that plan calls `run_asm`".
+- **9, minor:** rxm is described three times, in `KIND_GLOSS`, `help.html` and `about.html`, and no test reads
+  `about.html`'s. Fix 8 ties the first two; the third is in WHAT THIS DID NOT CLOSE.
+
+The ledger records no review of `459c16e`, `ca6cdcf` and `2b9d67c`.
+
+##### THE TESTS AND SABOTAGES
+
+Five new cases and none removed, all in `b72bb16..2b9d67c`:
+
+- `web/tests/node/app-header.test.ts`: `toggleTitle` is the sentence alone for the source, λ and TM toggles; for rxm
+  it is the sentence, a newline and the gloss, in each of the three states; the help page holds its definition of
+  rxm, as a literal, where it names the views; and the help page holds each clause of the gloss (`ca6cdcf`).
+- `web/tests/browser/view-toggle-tooltips.test.ts`, a new file: the rxm toggle, pressed last, has the whole tooltip,
+  gloss included, as its title and its `aria-description`.
+
+Changed: `view-toggles.test.ts` and `first-load-views.test.ts` expect the rxm toggle's title to end in the gloss;
+`share-link.test.ts`'s frozen version 1 link is re-frozen with rxm's names, its doc says the format is what is frozen
+and names what wrote the bytes, and its `describe` is 'the frozen format of a version 1 link'; two sorted literals in
+`lsp-protocol.test.ts` and `arrangements.test.ts`, and the ts-rs coverage lists in core's and the wasm crate's
+`tests/ts_bindings.rs`, are in alphabetical order again; the CLI's `emit_rxm.stdout` and `fmt_help.stdout` and the
+test input in `crates/redextape-grammar-check/src/rxm.rs` carry the new header and help line.
+
+**Six sabotages, each file restored from a saved copy and checked with `cmp`, and each failed a test:**
+
+- **S1**, on `41744e7`'s longer gloss, "a software interpreter" made "an interpreter": 1 of 8 in
+  `app-header.test.ts`.
+- **S2**, `viewToggles` wired to `toggleSentence` in place of `toggleTitle`: 4 of 20 in the three browser files.
+- **S3**, the help page's sentence "A software interpreter steps it, and it is not x86, ARM, WebAssembly or LLVM
+  output." dropped: 1 of 8, the help-page definition test.
+- **S4**, the frozen fixture put back to its asm-era fragment: 1 of 41 in `share-link.test.ts`, `expected { kind:
+  'program', …(2) } to deeply equal { kind: 'whole', …(4) }`. That is the clean break: the old link opens the
+  program alone.
+- **S5**, on `8ccf42c`'s gloss, "the IR between" made "an IR between": 1 of 8.
+- **S6**, the same edit with `ca6cdcf`'s test in place: 2 of 9, the new clause test among them.
+
+##### WHAT THIS DID NOT CLOSE
+
+- **Finding 9: `about.html`'s description of the rxm view is pinned by no test.** A change to the gloss and the help
+  page can leave it saying something else.
+- **IR views groundwork PR 2 is to follow this rename,** as the lane's design orders it; the groundwork spec already
+  names rxm's paths (`ac571fa`).
+- **The ir-bumps branch runs in parallel, and whichever merges second rebases;** this branch rebases by the replay.
+  At `f4f2172`, ir-bumps' head when this entry was written, `git merge-tree --write-tree rxm ir-bumps` merges
+  cleanly, and the one file both branches change is `crates/redextape-wasm/Cargo.toml`. Its plan,
+  `docs/superpowers/plans/2026-11-02-ir-views-pr1-bumps.md` on that branch, meets this one in three places: Task 5,
+  not yet done at `f4f2172`, modifies `crates/redextape-grammar-check/tests/asm.rs`, which this branch moves to
+  `tests/rxm.rs`; Task 9 appends a roadmap entry, as this one does; and its M-browser measurement runs `pnpm run
+  test:probe:asm-copy`, which this branch names `test:probe:rxm-copy`.
+- **Dated docs still say asm,** by the ruling: this file's earlier entries and the bullet this entry closes, the
+  merged plans and specs, and the code-history notes' bodies. Pointers from current text into them keep the old
+  names: the README's `cli-fmt-tm-asm`, and the plan file names in `trace/rxm_cursor.rs` and
+  `tests/rxm_roundtrip.rs`.
+- **The full gates ran at `ac571fa`, before the three review fixes,** and did not run again (VERIFICATION).
+- **Nothing has run in CI:** the branch has not been pushed.
+
+##### VERIFICATION
+
+The gates ran at `ac571fa` in one systemd unit, `asm-ui-gates-d4`, with `MemoryMax=16G` and `MemorySwapMax=0`,
+started at 13:59:07 on 2026-11-02 under a load average of 29.57. Each leg's exit status is in
+`$R/logs/d4-gates.status` and its output in `$R/logs/d4-<leg>.log`. `check-all.sh` ran its LLVM legs on LLVM 22 at
+`~/.cache/redextape-ir-bumps-llvm22`.
+
+```
+scripts/check-all.sh                      → exit 0, "all configs green — base, LLVM and browser"; workspace 1,903
+                                            passed, 33 skipped; core serde 1,319, core ts 1,343, wasm ts 130,
+                                            probe-no-tm-scratch-ceiling 118, probe-rxm-copy 119, native
+                                            --no-default-features 10, native llvm 104 and 45; wasm-pack browser 33
+scripts/check-slow.sh                     → exit 0, "slow tier green", 33 passed
+cargo llvm-cov nextest --workspace --fail-under-lines 90
+                                          → exit 0, 1,903 passed, 33 skipped; lines 95.59%
+pnpm run test:coverage                    → exit 0, 282 files / 2,955 tests; 97.64 / 92.32 / 98.41 / 98.94 against
+                                            95 / 89 / 97 / 97
+biome ci; pnpm run typecheck; build:app   → exit 0, one status for the three; 433 files checked
+docker build -t redextape-rxm-check .     → exit 0
+```
+
+The image was then run with `docker run -p 8099:80`: it went healthy, `/`, `/help.html` and `/about.html` answered
+200, its assets held the four grammar .wasm, and the index JS carried the new gloss. That run is recorded in
+`$R/progress.md` only, with no log.
+
+The three review fixes after `ac571fa` change a doc comment in `web/src/app-header.ts`, two node test files and a
+doc comment in `trace/rxm_cursor.rs`. For them, the node files `share-link` and `app-header` passed, 2 files and 50
+tests; the three browser files, 3 files and 20 tests, under the browser lock; and `cargo nextest run -p
+redextape-core`, 1,313 passed and 32 skipped. At `2b9d67c` the twenty scans, each of ten with `--self-test` and then
+alone, exited 0, among them `check-citations.sh`, 841 files and 0 violations, and the comment guard, 15 areas within
+budget and no history and no grown block in 294 changed files since `1b305e0`; and each commit passed the pre-commit
+hooks.
+
+**Every count this entry quotes, with what produces it.** Commands run from the worktree's root, or from `web/` for
+`pnpm`, with `R=~/temp/redextape-asm-ui-record`.
+
+| Value | What | Produced by |
+|---|---|---|
+| 14; 13 | commits in the range; those after `b72bb16` | `git rev-list --count 1b305e0..2b9d67c`, and `b72bb16..2b9d67c` |
+| 0.25.10 | the tree-sitter CLI the grammar was regenerated with | `PINNED` in `$R/rename.sh`; the `regenerating` line of `$R/logs/rename-run1.log` |
+| 2, 4 and 7 | commits in the three patches | `grep -c '^From [0-9a-f]\{40\} '` on `$R/fixes-rust.patch`, `fixes-web.patch` and `fixes-docs.patch` |
+| 316; 6,320 and 12; 12; 48 | files the script edited; tokens and phrases it replaced; spans it kept; files it moved | the `==>` lines of `$R/logs/rename-run1.log`, and the same in `replay-rename.log` and `d4-replay2-rename.log` |
+| 337 files, +5,148 −5,097; 332 files, +4,994 −4,994; 36 files, +212 −161 | the range; `b72bb16`; the hand fixes | `git diff --shortstat 1b305e0 2b9d67c`, `1b305e0 b72bb16` and `b72bb16 2b9d67c` |
+| matched; matched but for the rxm .wasm and the manifest | the replay at `38da964`; those at `eab8e03`, `ac571fa` and `2b9d67c` | `$R/progress.md` sections (5) to (7), which record `git diff --cached --quiet`'s result and keep no log of it; the script's runs in `$R/logs/replay-rename.log`, `d3-replay-rename.log`, `d4-replay-rename.log` and `d4-replay2-rename.log` |
+| 10 | the review's findings | `$R/review-high.md` |
+| 8 | lines outside `docs/` still spelled asm at `2b9d67c` | `git grep -n -i -I -P '(?<![wW])(?<![dD][iI][sS])asm' -- ':!docs' \| wc -l` at `2b9d67c` |
+| 5; 4 and 1; 0 | test cases added; in `app-header.test.ts` and `view-toggle-tooltips.test.ts`; removed | `git diff b72bb16 2b9d67c -- web/tests crates \| grep -cE '^\+\s+it(\.each\([^)]*\))?\('`, by file, and with `^-` |
+| 1 of 8; 4 of 20; 1 of 8; 1 of 41; 1 of 8; 2 of 9 | S1 to S6's failing tests | the `Tests` lines of `$R/logs/d3-sab-S1-gloss-text.log`, `d3-sab-S2-wiring.log`, `d3-sab-S3-help.log`, `d3-sab-S4-frozen-old.log`, `d4-sab-gloss.log` and `d4-sab-fix8.log`; the edits as `$R/progress.md` records them |
+| 13:59:07; 29.57 | the gates' start and the load then | `$R/logs/d4-gates.status` |
+| 1,903 and 33; 1,319, 1,343, 130, 118, 119 and 10; 104 and 45; 33 | `check-all.sh`'s workspace run; its feature and native legs; its LLVM legs; its wasm-pack browser leg | the `Summary` lines and the wasm-pack `test result` line of `$R/logs/d4-check-all.log` |
+| 33 | the slow tier's tests | the `passed` counts of the `test result` lines of `$R/logs/d4-check-slow.log`, summed |
+| 1,903 and 33; 95.59% | `llvm-cov`'s tests; its line coverage | the `Summary` and `TOTAL` lines of `$R/logs/d4-llvm-cov.log`; the command as `$R/progress.md` records it |
+| 282 and 2,955; 97.64 / 92.32 / 98.41 / 98.94 against 95 / 89 / 97 / 97 | files and tests; coverage against the floors | `$R/logs/d4-coverage.log`; `thresholds` in `web/vite.config.ts` |
+| 433 | files `biome` checked | `$R/logs/d4-web-rest.log` |
+| 2 and 50; 3 and 20; 1,313 and 32 | the fixes' node, browser and core runs | `$R/logs/d4-fix-node.log`, `d4-fix-browser.log` and `d4-fix-core.log` |
+| 20 of 20; 841 and 0; 15 and 294 | scans at `2b9d67c`; citations' files and violations; the comment guard's areas and changed files | `$R/logs/d4-scans-2.log` |
+| 1; exit 0 | files both `rxm` and `ir-bumps` change, at `f4f2172`; the trial merge | `comm -12` of the sorted `git diff --name-only 1b305e0 ir-bumps` and `1b305e0 rxm`; `git merge-tree --write-tree --name-only rxm ir-bumps` |

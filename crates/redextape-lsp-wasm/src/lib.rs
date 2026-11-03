@@ -146,7 +146,7 @@ mod tests {
             ("redextape", "rxt", "let x = ;"),
             ("redextape_lambda", "rxlambda", "(\\x. x"),
             ("redextape_tm", "tm", "tapes 1\ntapes 2\nstart s\nstate s: accept\n"),
-            ("redextape_asm", "asm", "    mov r0,\n"),
+            ("redextape_rxm", "rxm", "    mov r0,\n"),
         ] {
             let mut s = initialized();
             let out = call(
@@ -318,20 +318,20 @@ mod tests {
         assert!(out[0]["error"].is_object(), "an unserved request must answer an error: {:?}", out[0]);
     }
 
-    /// **ASM HOVER AT THE BOUNDARY, THROUGH `handle`'s JSON EXACTLY AS A WORKER SENDS IT.** An asm
-    /// copy's editor is served by this server, and `web/tests/browser/asm-copy.test.ts` hovers one
+    /// **RXM HOVER AT THE BOUNDARY, THROUGH `handle`'s JSON EXACTLY AS A WORKER SENDS IT.** An rxm
+    /// copy's editor is served by this server, and `web/tests/browser/rxm-copy.test.ts` hovers one
     /// label in it through the UI. This test checks below the UI what that one gesture does not: an
     /// instruction's answer, and a label's two roles, each answering its own sentence.
     ///
     /// The fixture below carries a label defined once and referenced twice, so both roles get hovered,
-    /// including `hover::asm`'s `Role::Reference` branch (`"A jump or call target."`), and their answers
+    /// including `hover::rxm`'s `Role::Reference` branch (`"A jump or call target."`), and their answers
     /// are checked to actually differ: a bug that swapped the two arms' messages fails here.
     #[test]
-    fn asm_hover_answers_an_instruction_and_tells_a_label_reference_from_its_definition() {
-        // The same fixture `asm_syntax.rs`'s `NAV_ASM` uses, whose own doc comment records it as
+    fn rxm_hover_answers_an_instruction_and_tells_a_label_reference_from_its_definition() {
+        // The same fixture `rxm_syntax.rs`'s `NAV_RXM` uses, whose own doc comment records it as
         // parsing clean: `g` is defined once (`g:`) and referenced twice (`jz`'s second operand,
         // `jmp`'s first).
-        const ASM: &str = "result Nat\nf:\n\tli\tr0, #1\n\tjz\tr0, g\n\tjmp\tg\ng:\n\tret\n";
+        const RXM: &str = "result Nat\nf:\n\tli\tr0, #1\n\tjz\tr0, g\n\tjmp\tg\ng:\n\tret\n";
 
         let mut s = initialized();
         let opened = call(
@@ -340,7 +340,7 @@ mod tests {
                 "jsonrpc": "2.0",
                 "method": "textDocument/didOpen",
                 "params": { "textDocument": {
-                    "uri": "redextape:///view/a.asm", "languageId": "redextape_asm", "version": 1, "text": ASM,
+                    "uri": "redextape:///view/a.rxm", "languageId": "redextape_rxm", "version": 1, "text": RXM,
                 } },
             }),
         );
@@ -353,7 +353,7 @@ mod tests {
                 s,
                 &serde_json::json!({
                     "jsonrpc": "2.0", "id": 2, "method": "textDocument/hover",
-                    "params": { "textDocument": { "uri": "redextape:///view/a.asm" },
+                    "params": { "textDocument": { "uri": "redextape:///view/a.rxm" },
                                 "position": { "line": line, "character": character } },
                 }),
             )[0]["result"]

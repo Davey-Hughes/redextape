@@ -1,9 +1,9 @@
 //! `redextape-native-rt`: the native backend's runtime — heap/box arenas plus the `extern "C"`
 //! host functions that JIT-generated code calls for heap allocation, faults, and cap
-//! checks. Semantics mirror the asm interpreter's `Cons`/`Head`/`Tail`/`IsEmpty`/`Box`/`BoxGet`/`BoxSet`
-//! arms (`redextape_core::trace::AsmCursor`, which `run_asm` loops over) EXACTLY: 1-based heap/box
+//! checks. Semantics mirror the rxm interpreter's `Cons`/`Head`/`Tail`/`IsEmpty`/`Box`/`BoxGet`/`BoxSet`
+//! arms (`redextape_core::trace::RxmCursor`, which `run_rxm` loops over) EXACTLY: 1-based heap/box
 //! pointers, `0` = nil, the same fault and cap conditions. This is what lets the native backend reuse
-//! `decode_asm` and agree with the asm interpreter in the oracle.
+//! `decode_rxm` and agree with the rxm interpreter in the oracle.
 //!
 //! This crate is split out from `redextape-native` (which depends on Cranelift) so its `rt_*`
 //! functions can be **linked** into a standalone AOT binary without dragging Cranelift along:
@@ -20,16 +20,16 @@
 // production warnings still surface from the other one.
 #![cfg_attr(test, allow(clippy::pedantic))]
 
-use redextape_core::tm::{AsmOutcome, Caps};
+use redextape_core::tm::{Caps, RxmOutcome};
 use redextape_core::ty::Ty;
 
 /// The native backend's runtime state: heap/box arenas, step/depth counters, and fault/cap
 /// flags. JIT-generated code holds a `*mut Runtime` for the duration of a run and calls
 /// the `rt_*` host functions below for every heap/box operation and every cap check, mirroring
-/// the asm interpreter's machine state (`trace::AsmCursor`) one-for-one (`heap`/`boxes`/`steps`/`caps`
+/// the rxm interpreter's machine state (`trace::RxmCursor`) one-for-one (`heap`/`boxes`/`steps`/`caps`
 /// are the same fields; `depth` plays the role the cursor's `stack().len()` plays for the stack cap,
 /// without needing the actual frame data — the JIT-generated code keeps locals on the native stack
-/// instead of a `Vec<AsmFrame>`).
+/// instead of a `Vec<RxmFrame>`).
 pub struct Runtime {
     pub heap: Vec<(u64, u64)>,
     pub boxes: Vec<u64>,
@@ -37,7 +37,7 @@ pub struct Runtime {
     pub depth: u64,
     pub caps: Caps,
     /// The recursion-depth limit `rt_enter` trips at. Distinct from `caps.stack` because native
-    /// keeps each frame's locals on the *real* OS call stack (not a `Vec<AsmFrame>`), so the backend
+    /// keeps each frame's locals on the *real* OS call stack (not a `Vec<RxmFrame>`), so the backend
     /// derives a FRAME-SIZE-AWARE cap: `min(caps.stack, safe_depth)`, where `safe_depth` is how many
     /// worst-case frames fit in the run thread's reserved stack (see `redextape_native::codegen`).
     /// This guarantees the depth cap always trips *before* the native stack overflows, for any
@@ -82,14 +82,14 @@ impl Runtime {
     }
 
     /// Finish a run: pair the register-`rr` result word with the heap needed to decode it,
-    /// mirroring `AsmCursor::into_outcome`, which `run_asm` answers `AsmRun::Ran` with.
+    /// mirroring `RxmCursor::into_outcome`, which `run_rxm` answers `RxmRun::Ran` with.
     #[must_use]
-    pub fn into_outcome(self, result: u64) -> AsmOutcome {
-        AsmOutcome { result, heap: self.heap }
+    pub fn into_outcome(self, result: u64) -> RxmOutcome {
+        RxmOutcome { result, heap: self.heap }
     }
 }
 
-/// `rd <- cons(rh, rt)`. Mirrors the asm interpreter's `Instr::Cons` arm: cap-checks `heap.len()` against
+/// `rd <- cons(rh, rt)`. Mirrors the rxm interpreter's `Instr::Cons` arm: cap-checks `heap.len()` against
 /// `caps.heap` (matching `self.heap.len() as u64 >= caps.heap`), else pushes `(h, t)` and
 /// returns the new 1-based pointer (`heap.len()` after the push).
 ///
@@ -110,7 +110,7 @@ pub unsafe extern "C" fn rt_cons(rt: *mut Runtime, h: u64, t: u64) -> u64 {
     rt.heap.len() as u64 // 1-based
 }
 
-/// `rd <- head(rl)`. Mirrors the asm interpreter's `Instr::Head` arm: `p == 0` faults ("head of empty
+/// `rd <- head(rl)`. Mirrors the rxm interpreter's `Instr::Head` arm: `p == 0` faults ("head of empty
 /// list"); a non-null pointer past the heap end faults ("head of invalid list pointer") rather
 /// than indexing out of bounds; else returns the cell's head field.
 ///
@@ -138,7 +138,7 @@ pub unsafe extern "C" fn rt_head(rt: *mut Runtime, p: u64) -> u64 {
     }
 }
 
-/// `rd <- tail(rl)`. Mirrors the asm interpreter's `Instr::Tail` arm: `p == 0` faults ("tail of empty
+/// `rd <- tail(rl)`. Mirrors the rxm interpreter's `Instr::Tail` arm: `p == 0` faults ("tail of empty
 /// list"); a dangling pointer faults ("tail of invalid list pointer"); else returns the cell's
 /// tail field.
 ///
@@ -164,7 +164,7 @@ pub unsafe extern "C" fn rt_tail(rt: *mut Runtime, p: u64) -> u64 {
     }
 }
 
-/// `rd <- is_empty(rl)`. Mirrors the asm interpreter's `Instr::IsEmpty` arm: `1` if `p == 0`, else `0`.
+/// `rd <- is_empty(rl)`. Mirrors the rxm interpreter's `Instr::IsEmpty` arm: `1` if `p == 0`, else `0`.
 /// Never faults and never touches the heap, so it is not gated by `stopped` (there is nothing for
 /// it to corrupt).
 ///
@@ -175,7 +175,7 @@ pub unsafe extern "C" fn rt_is_empty(_rt: *mut Runtime, p: u64) -> u64 {
     u64::from(p == 0)
 }
 
-/// `rd <- box(rv)`. Mirrors the asm interpreter's `Instr::Box` arm: cap-checks `boxes.len()` against
+/// `rd <- box(rv)`. Mirrors the rxm interpreter's `Instr::Box` arm: cap-checks `boxes.len()` against
 /// `caps.heap` (the box arena shares the heap cap, matching `self.boxes.len() as u64 >=
 /// caps.heap`), else pushes `v` and returns the new 1-based pointer.
 ///
@@ -195,7 +195,7 @@ pub unsafe extern "C" fn rt_box(rt: *mut Runtime, v: u64) -> u64 {
     rt.boxes.len() as u64 // 1-based
 }
 
-/// `rd <- box_get(rb)`. Mirrors the asm interpreter's `Instr::BoxGet` arm: `p == 0` faults ("box_get of
+/// `rd <- box_get(rb)`. Mirrors the rxm interpreter's `Instr::BoxGet` arm: `p == 0` faults ("box_get of
 /// null handle"); a dangling handle faults ("box_get of invalid handle"); else returns the box's
 /// value.
 ///
@@ -226,7 +226,7 @@ pub unsafe extern "C" fn rt_box_get(rt: *mut Runtime, p: u64) -> u64 {
     }
 }
 
-/// `box_set(rb, rv)`. Mirrors the asm interpreter's `Instr::BoxSet` arm: `p == 0` faults ("box_set of null
+/// `box_set(rb, rv)`. Mirrors the rxm interpreter's `Instr::BoxSet` arm: `p == 0` faults ("box_set of null
 /// handle"); a dangling handle faults ("box_set of invalid handle"); else overwrites the box in
 /// place.
 ///
@@ -253,7 +253,7 @@ pub unsafe extern "C" fn rt_box_set(rt: *mut Runtime, p: u64, v: u64) {
     }
 }
 
-/// Advance the step counter by one, mirroring the asm interpreter's per-instruction step-cap check
+/// Advance the step counter by one, mirroring the rxm interpreter's per-instruction step-cap check
 /// (`steps`/`caps.steps`). Returns `1` (a trip signal for the generated code to branch on)
 /// once `steps` exceeds `caps.steps`, setting `hit_cap`; else `0`.
 ///
@@ -278,9 +278,9 @@ pub unsafe extern "C" fn rt_tick(rt: *mut Runtime) -> u64 {
     0
 }
 
-/// Enter a call frame, incrementing `depth`, mirroring the asm interpreter's `Instr::Call` stack-cap check
+/// Enter a call frame, incrementing `depth`, mirroring the rxm interpreter's `Instr::Call` stack-cap check
 /// (`self.stack.len()`/`caps.stack`) — the JIT-generated code keeps locals on the native call
-/// stack rather than a `Vec<AsmFrame>`, so `depth` is the counter that stands in for `stack.len()`.
+/// stack rather than a `Vec<RxmFrame>`, so `depth` is the counter that stands in for `stack.len()`.
 /// Returns `1` (a trip signal) once `depth` exceeds `depth_cap`, setting `hit_cap`; else `0`.
 ///
 /// The cap is `depth_cap` (the frame-size-aware `min(caps.stack, safe_depth)` the backend supplied),
@@ -307,7 +307,7 @@ pub unsafe extern "C" fn rt_enter(rt: *mut Runtime) -> u64 {
     0
 }
 
-/// Leave a call frame, decrementing `depth`, mirroring the asm interpreter's `Instr::Ret` popping a frame
+/// Leave a call frame, decrementing `depth`, mirroring the rxm interpreter's `Instr::Ret` popping a frame
 /// off the cursor's call stack. Uses `saturating_sub` so a spurious `rt_leave` (e.g. one emitted on a path the
 /// matching `rt_enter` never reached) can never wrap `depth` around — defense in depth, not a case
 /// the generated code is expected to hit.
@@ -383,9 +383,9 @@ pub(crate) mod config {
 
 /// A decoded `Value` in hand, printed through the CAPPED printer rather than the uncapped
 /// `format_value` — the same cap `redextape-cli/src/run.rs`'s five capped print sites and
-/// `redextape-wasm`'s `decoded_value` apply, here on this crate's own decode (`decode_asm_ty`,
+/// `redextape-wasm`'s `decoded_value` apply, here on this crate's own decode (`decode_rxm_ty`,
 /// bounded by `MAX_DECODE_NODES` on DISTINCT nodes) whose answer can still be logically enormous once
-/// the memo shares Rc nodes across the output. `decode_asm_ty` succeeding is no guarantee
+/// the memo shares Rc nodes across the output. `decode_rxm_ty` succeeding is no guarantee
 /// `format_value` would ever return.
 ///
 /// Separate from `print_outcome` so a test can drive the too-large-to-print refusal directly from a
@@ -420,7 +420,7 @@ fn print_value_or_refuse(
 /// distinguish "faulted" from "internal decode failure" — both would otherwise collapse to
 /// `outcome: None`.
 pub(crate) fn print_outcome(
-    outcome: Option<AsmOutcome>,
+    outcome: Option<RxmOutcome>,
     hit_cap: bool,
     ty: &Ty,
     out: &mut dyn std::io::Write,
@@ -434,7 +434,7 @@ pub(crate) fn print_outcome(
     // before ever calling `print_outcome`, and only ever passes `Some(outcome)` here) — kept as a
     // defensive exit-4 so `print_outcome` is total for any caller.
     let Some(o) = outcome else { return 4 };
-    if let Some(v) = redextape_core::tm::decode_asm_ty(&o, ty) {
+    if let Some(v) = redextape_core::tm::decode_rxm_ty(&o, ty) {
         print_value_or_refuse(&v, out, err)
     } else {
         // Decode failure is a diagnostic → `err` (stderr), NOT `out`, so it can't be mistaken
@@ -563,7 +563,7 @@ mod tests {
 
     #[test]
     fn cons_and_box_trip_the_heap_cap() {
-        // A `heap` cap of 1 lets the first alloc through and trips the second (matching `run_asm`).
+        // A `heap` cap of 1 lets the first alloc through and trips the second (matching `run_rxm`).
         let mut r = Runtime::new(Caps { heap: 1, ..DEFAULT_CAPS });
         assert_eq!(unsafe { rt_cons(&mut r, 7, 0) }, 1); // fills the sole slot
         assert_eq!(unsafe { rt_cons(&mut r, 8, 0) }, 0); // trips
@@ -639,7 +639,7 @@ mod tests {
         let mut out = Vec::new();
         let mut err = Vec::new();
         let code =
-            super::print_outcome(Some(AsmOutcome { result: 5, heap: vec![] }), false, &Ty::Nat, &mut out, &mut err);
+            super::print_outcome(Some(RxmOutcome { result: 5, heap: vec![] }), false, &Ty::Nat, &mut out, &mut err);
         assert_eq!((code, String::from_utf8(out).unwrap()), (0, "5\n".to_string()));
         assert!(err.is_empty(), "value run must write nothing to stderr");
         // Cap → "hit cap" on `err`, nothing on `out`, exit 3.
@@ -654,13 +654,13 @@ mod tests {
     #[test]
     fn print_outcome_routes_decode_failure_to_stderr_not_stdout() {
         use redextape_core::ty::Ty;
-        // A `Bool` result whose word is 7 (not 0/1) fails `decode_asm_ty`. The failure is a
+        // A `Bool` result whose word is 7 (not 0/1) fails `decode_rxm_ty`. The failure is a
         // diagnostic: it must go to `err` (exit 4) and leave `out` EMPTY, so a caller grepping
         // stdout can never mistake it for a value.
         let mut out = Vec::new();
         let mut err = Vec::new();
         let code =
-            super::print_outcome(Some(AsmOutcome { result: 7, heap: vec![] }), false, &Ty::Bool, &mut out, &mut err);
+            super::print_outcome(Some(RxmOutcome { result: 7, heap: vec![] }), false, &Ty::Bool, &mut out, &mut err);
         assert_eq!(code, 4);
         assert!(out.is_empty(), "decode failure must write NOTHING to stdout");
         assert_eq!(String::from_utf8(err).unwrap(), "internal: could not decode result\n");
@@ -670,7 +670,7 @@ mod tests {
     /// levels of self-sharing, 65 allocations, 2^64 logical nodes — small enough to build here, but far
     /// too large for `format_value_capped` to walk within `MAX_PRINT_NODES`. Drives
     /// `print_value_or_refuse` directly rather than through a run that could build one:
-    /// `print_outcome`'s only path to a `Value` is `decode_asm_ty`, which this fixture was never built to
+    /// `print_outcome`'s only path to a `Value` is `decode_rxm_ty`, which this fixture was never built to
     /// survive as a heap.
     fn tiny_but_logically_enormous_dag() -> redextape_core::value::Value {
         use redextape_core::value::Value;

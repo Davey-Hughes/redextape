@@ -35,7 +35,7 @@ import {
  * the stale editor off the hidden view before it throws, so every assertion made after the *undo* but the one on the
  * throw would pass without the teardown.
  *
- * **EACH LEG HAS ITS OWN CASES**: a λ view's teardown is `LambdaPane`'s and a TM or asm view's is `CopyEditor`'s, so a
+ * **EACH LEG HAS ITS OWN CASES**: a λ view's teardown is `LambdaPane`'s and a TM or rxm view's is `CopyEditor`'s, so a
  * teardown that reached only a λ view would pass a file whose only case was λ's.
  *
  * `pane-host.ts`'s `reseedingSlots` takes the editor down as it moves a view off the page onto the program.
@@ -57,7 +57,7 @@ type Leg = { readonly name: string; readonly view: string }
 const LEGS: readonly Leg[] = [
   { name: 'λ', view: 'lambda-0' },
   { name: 'TM', view: 'tm-0' },
-  { name: 'asm', view: 'asm-0' },
+  { name: 'rxm', view: 'rxm-0' },
 ]
 
 const tab = (id: string): void => document.querySelector<HTMLElement>(`#views [role="tab"][data-leaf="${id}"]`)?.click()
@@ -126,7 +126,7 @@ afterAll(() => window.removeEventListener('error', onError))
 beforeEach(async () => {
   deleteEveryCopy()
   await resetToFourViews()
-  expect(tabLeaves(), 'precondition: the four views, as tabs').toEqual(['source', 'lambda-0', 'asm-0', 'tm-0'])
+  expect(tabLeaves(), 'precondition: the four views, as tabs').toEqual(['source', 'lambda-0', 'rxm-0', 'tm-0'])
   errors.length = 0
 })
 

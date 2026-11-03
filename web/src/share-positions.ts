@@ -43,7 +43,7 @@ const listed = (items: readonly string[]): string =>
  * What the open's notice says about the legs stopped short of the link's steps — spec §5.4's note of 2026-10-01: each
  * leg, why it stopped, and the step it shows. **ONE LEG IN THE WORDS IT HAD BEFORE THE NOTE**; several stopped for the
  * same reason in one clause, naming the leg of each step shown; and a clause for each reason, the one with the first
- * leg first. The legs go λ, asm, TM, whatever order they stopped in.
+ * leg first. The legs go λ, rxm, TM, whatever order they stopped in.
  */
 export function shortNotice(shorts: readonly Short[]): string {
   const clauses: Short[][] = []
@@ -83,7 +83,7 @@ export class LinkPositions {
   #gen: number | null = null
   /** The positions not yet given to a leg: all of them, until the link's compile says which legs exist. */
   #held: Positions = {}
-  #continues: Record<Leg, number> = { lambda: 0, asm: 0, tm: 0 }
+  #continues: Record<Leg, number> = { lambda: 0, rxm: 0, tm: 0 }
   /** The legs stopped short of their link's steps in this open, which its one notice names together. */
   #shorts: Short[] = []
 
@@ -106,7 +106,7 @@ export class LinkPositions {
   #drop(): void {
     this.#gen = null
     this.#held = {}
-    this.#continues = { lambda: 0, asm: 0, tm: 0 }
+    this.#continues = { lambda: 0, rxm: 0, tm: 0 }
     this.#shorts = []
     for (const leg of LEGS) delete this.#deps.legOf(leg).pending
   }
@@ -152,8 +152,8 @@ export class LinkPositions {
       case 'lambda-frames':
         this.#frames('lambda')
         return
-      case 'asm-frames':
-        this.#frames('asm')
+      case 'rxm-frames':
+        this.#frames('rxm')
         return
       case 'tm-frames':
         this.#frames('tm')
@@ -199,7 +199,7 @@ export class LinkPositions {
   }
 
   /**
-   * A run's or a continue's `result`. **NOT BEFORE IT, AND ONE LEG AT A TIME, λ THEN asm THEN TM**: a continue posted
+   * A run's or a continue's `result`. **NOT BEFORE IT, AND ONE LEG AT A TIME, λ THEN rxm THEN TM**: a continue posted
    * while the run still records a later leg would interleave the two recordings, and post its `result` before the run's
    * (spec §5.4). The first leg in order still short of its position continues, up to `MAX_LINK_CONTINUES` times; past
    * that it stops at its furthest step, and the next leg is asked.

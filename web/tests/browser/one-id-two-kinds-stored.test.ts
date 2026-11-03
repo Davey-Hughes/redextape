@@ -29,10 +29,10 @@ import {
  * before `arrangements.ts`'s `reidentified` can hold any number of them. Each tree is valid alone, so the workspace
  * parses; a switch into such a tree gives the leaf a new id, and no view is built over another.
  *
- * The page opens on the source, an asm view and a TM view, 63 live views in all:
+ * The page opens on the source, an rxm view and a TM view, 63 live views in all:
  *
- * - `source+tm` is remembered as the source beside `asm-0`, a TM view there and the asm view on screen;
- * - `source+asm` is remembered as the source beside `tm-0`, an asm view there and the TM view on screen;
+ * - `source+tm` is remembered as the source beside `rxm-0`, a TM view there and the rxm view on screen;
+ * - `source+rxm` is remembered as the source beside `tm-0`, an rxm view there and the TM view on screen;
  * - `lambda` is remembered as 60 λ views, which are there to count.
  *
  * **AND THE BOUND IS ASKED OF THE TREE AS IT IS ENTERED** (§5.6): a leaf entered under a new id is one more live view.
@@ -56,20 +56,20 @@ const ON_SCREEN: LayoutNode = {
   kind: 'split',
   dir: 'row',
   sizes: [0.4, 0.3, 0.3],
-  children: [leafOf('source', 'source'), leafOf('asm-0', 'asm'), leafOf('tm-0', 'tm')],
+  children: [leafOf('source', 'source'), leafOf('rxm-0', 'rxm'), leafOf('tm-0', 'tm')],
 }
 const SEEDED = serializeWorkspace({
   ...fourViewWorkspace(),
   tree: ON_SCREEN,
-  focused: 'asm-0',
+  focused: 'rxm-0',
   arrangements: {
-    'source+tm': pair(leafOf('source', 'source'), leafOf('asm-0', 'tm')),
-    'source+asm': pair(leafOf('source', 'source'), leafOf('tm-0', 'asm')),
+    'source+tm': pair(leafOf('source', 'source'), leafOf('rxm-0', 'tm')),
+    'source+rxm': pair(leafOf('source', 'source'), leafOf('tm-0', 'rxm')),
     lambda: SIXTY,
   },
 })
 const REFUSED =
-  'showing source and asm would take the workspace from 64 views to 65, and it can keep 64 — reset preset makes room'
+  'showing source and rxm would take the workspace from 64 views to 65, and it can keep 64 — reset preset makes room'
 
 /** The stored workspace's trees, and how many ids they name between them; a throw where it does not parse. */
 const storedTrees = (): { live: number; twoKinds: string[]; screen: string[] } => {
@@ -96,35 +96,35 @@ beforeAll(async () => {
   await until(stateIdle, 'the first compile')
 })
 
-describe('a stored workspace with asm-0 and tm-0 each under two kinds', () => {
-  let asmView: { inner: Element; editor: Element }
+describe('a stored workspace with rxm-0 and tm-0 each under two kinds', () => {
+  let rxmView: { inner: Element; editor: Element }
 
   it('opens as it was stored', () => {
     // A WORKSPACE THE LOADER REFUSED WOULD HAVE OPENED ON THE DEFAULT, the source beside the TM view.
-    expect(mounted()).toEqual(['source', 'asm-0', 'tm-0'])
-    expect(['asm-0', 'tm-0'].map(hostKind)).toEqual(['asm', 'tm'])
+    expect(mounted()).toEqual(['source', 'rxm-0', 'tm-0'])
+    expect(['rxm-0', 'tm-0'].map(hostKind)).toEqual(['rxm', 'tm'])
     const opened = storedTrees()
-    expect(opened.twoKinds, 'precondition: two ids are stored under two kinds').toEqual(['asm-0', 'tm-0'])
+    expect(opened.twoKinds, 'precondition: two ids are stored under two kinds').toEqual(['rxm-0', 'tm-0'])
     expect(opened.live, 'precondition: one short of the bound').toBe(MAX_TREE_LEAVES - 1)
   })
 
-  it('enters the tree that names the asm view’s id as a TM view under a new id, and parks the asm view', async () => {
-    host('asm-0')?.querySelector<HTMLButtonElement>('button.detach')?.click()
-    await until(() => titleText('asm-0') === 'asm · copy 1' && editorsOf('asm-0') === 1, 'the copy and its editor')
-    const inner = host('asm-0')?.firstElementChild
-    const editor = host('asm-0')?.querySelector('.term-editor .cm-editor')
+  it('enters the tree that names the rxm view’s id as a TM view under a new id, and parks the rxm view', async () => {
+    host('rxm-0')?.querySelector<HTMLButtonElement>('button.detach')?.click()
+    await until(() => titleText('rxm-0') === 'rxm · copy 1' && editorsOf('rxm-0') === 1, 'the copy and its editor')
+    const inner = host('rxm-0')?.firstElementChild
+    const editor = host('rxm-0')?.querySelector('.term-editor .cm-editor')
     if (inner === null || inner === undefined || editor === null || editor === undefined)
       throw new Error('the copy’s view has nothing to recognise it by')
-    asmView = { inner, editor }
-    expect(copyNames(), 'precondition: one view shows the copy').toEqual(['asm copy 1 · 1 view'])
+    rxmView = { inner, editor }
+    expect(copyNames(), 'precondition: one view shows the copy').toEqual(['rxm copy 1 · 1 view'])
 
-    await userEvent.click(toggle('asm'))
-    await focusInPage('a press on the asm toggle, which parks the asm view')
+    await userEvent.click(toggle('rxm'))
+    await focusInPage('a press on the rxm toggle, which parks the rxm view')
     expect
-      .soft(copyNames(), 'the switch built a TM view over the asm view of the copy')
-      .toEqual(['asm copy 1 · 1 view'])
+      .soft(copyNames(), 'the switch built a TM view over the rxm view of the copy')
+      .toEqual(['rxm copy 1 · 1 view'])
     const built = mounted().filter((id) => id !== 'source')
-    expect.soft(built, 'the TM view was built under the asm view’s id').not.toEqual(['asm-0'])
+    expect.soft(built, 'the TM view was built under the rxm view’s id').not.toEqual(['rxm-0'])
     expect(built).toHaveLength(1)
     const fresh = built[0] as string
     // THE LEAF COUNTER STEPPED PAST EVERY LIVE ID AT THE LOAD, the 60 off the screen included.
@@ -137,26 +137,26 @@ describe('a stored workspace with asm-0 and tm-0 each under two kinds', () => {
     expect(now.live, 'the view built is one more live view').toBe(MAX_TREE_LEAVES)
   })
 
-  it('shows the asm view as it was left when the asm toggle is pressed again', async () => {
+  it('shows the rxm view as it was left when the rxm toggle is pressed again', async () => {
     expect(pressed(), 'precondition: the source beside a TM view').toEqual(['source', 'tm'])
-    await userEvent.click(toggle('asm'))
-    await focusInPage('a press on the asm toggle, which shows the asm view again')
-    expect(mounted()).toEqual(['source', 'asm-0', 'tm-0'])
-    expect(titleText('asm-0')).toBe('asm · copy 1')
-    expect(host('asm-0')?.firstElementChild, 'the asm view was built again').toBe(asmView.inner)
-    expect(host('asm-0')?.querySelector('.term-editor .cm-editor'), 'the copy’s editor is another one').toBe(
-      asmView.editor,
+    await userEvent.click(toggle('rxm'))
+    await focusInPage('a press on the rxm toggle, which shows the rxm view again')
+    expect(mounted()).toEqual(['source', 'rxm-0', 'tm-0'])
+    expect(titleText('rxm-0')).toBe('rxm · copy 1')
+    expect(host('rxm-0')?.firstElementChild, 'the rxm view was built again').toBe(rxmView.inner)
+    expect(host('rxm-0')?.querySelector('.term-editor .cm-editor'), 'the copy’s editor is another one').toBe(
+      rxmView.editor,
     )
-    expect(copyNames()).toEqual(['asm copy 1 · 1 view'])
+    expect(copyNames()).toEqual(['rxm copy 1 · 1 view'])
   })
 
   /**
-   * The TM toggle asks for the source beside asm, remembered as the source beside `tm-0`: both ids are live, so the
+   * The TM toggle asks for the source beside rxm, remembered as the source beside `tm-0`: both ids are live, so the
    * tree as it is remembered would leave the workspace at 64. `tm-0` is the TM view on screen, so the leaf is
    * entered under a new id, and that is a 65th.
    */
   it('refuses a switch whose leaf under a new id would be a 65th live view, and changes nothing', async () => {
-    expect(mounted(), 'precondition: the source, the asm view and the TM view').toEqual(['source', 'asm-0', 'tm-0'])
+    expect(mounted(), 'precondition: the source, the rxm view and the TM view').toEqual(['source', 'rxm-0', 'tm-0'])
     expect(storedTrees().live, 'precondition: the workspace is at the bound').toBe(MAX_TREE_LEAVES)
     expect(toggle('tm').getAttribute('aria-disabled'), 'precondition: the TM toggle can be pressed').toBeNull()
     const before = { mounted: mounted(), pressed: pressed(), stored: storedLayoutText() }

@@ -163,7 +163,7 @@ const TM_HALF = 53_000
  *
  * **`compiled` IS THREE WAITS: THE TM LEG STARTING TO RECORD, ITS RECORDING HALF WAY, THEN THE RUN'S END.** On the
  * 60-element list's machine, as one wait it took 9,211 ms of `until`'s 10 s at `CPUQuota=25%`. The TM leg records
- * last, after λ and asm, and its step line reads `…` from its first frames until it stops, and counts them: the
+ * last, after λ and rxm, and its step line reads `…` from its first frames until it stops, and counts them: the
  * list's history fills at step 107,166, and `TM_HALF` is about half of that. For a run with fewer TM frames, each
  * wait ends at the result. The dispatch claims the compile and drops the line's `…` (`compile.ts`'s `schedule`,
  * `controls.ts`), which the assertions after it hold, and the assertion before the second wait holds that the line it
@@ -232,7 +232,7 @@ describe('forking a TM pane', () => {
    * `idle`, which it reaches only once the WHOLE run has finished, so a fork after it on
    * `'let x = 40; x + 2'` lands on a session with nowhere left to go. `BIG` (this file's own copy of
    * `scratch-fork.test.ts`'s fixture) is what makes the claim discriminating: its λ leg finishes in
-   * 555 steps before TM recording even starts (`onRun` awaits `recordLambda`, `recordAsm` and
+   * 555 steps before TM recording even starts (`onRun` awaits `recordLambda`, `recordRxm` and
    * `recordTm` in turn, not interleaved), so by the time this pane's fork control is enabled the
    * source is only just beginning several seconds of TM recording — `#results` reads `'running'`,
    * checked directly below rather than assumed from the timing comment alone. The claim is the second

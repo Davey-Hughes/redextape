@@ -1,7 +1,7 @@
 //! §10.4: every Core node maps into BOTH backends — with the exclusions the module doc of
 //! `sourcemap.rs` spells out, each pinned here rather than papered over.
 //!
-//! The TM half's claim is deliberately NOT "every node has a state block". `lower_asm` emits no
+//! The TM half's claim is deliberately NOT "every node has a state block". `lower_rxm` emits no
 //! instruction at all for a transparent binder, so demanding a block for one can only be satisfied by
 //! inventing an owner — which is exactly the fallback this suite exists to forbid. The claim is
 //! "every node OF A KIND THAT EMITS CODE has a non-empty block", and its complement
@@ -16,7 +16,7 @@
 use redextape_core::core::{Core, NodeId};
 use redextape_core::sourcemap::SourceMap;
 use redextape_core::tm::{
-    EncodingKind, LowerError, MIN_FIELD_WIDTH, Program, Unary, defunc, lower_asm, lower_tm_mapped, print_asm,
+    EncodingKind, LowerError, MIN_FIELD_WIDTH, Program, Unary, defunc, lower_rxm, lower_tm_mapped, print_rxm,
 };
 
 mod common;
@@ -26,7 +26,7 @@ use common::core_of;
 /// that array does not contain: a `Let`-bound lambda and a mutually recursive group, each nested under
 /// an outer `let` so the construct itself is NOT the root (the root always emits regardless of what
 /// `classify` says about its kind — see `classify`'s doc — so a root example cannot pin these arms);
-/// and a self-assigning `Var` that exercises `lower_asm`'s `src == dst` short-circuit through an `If`.
+/// and a self-assigning `Var` that exercises `lower_rxm`'s `src == dst` short-circuit through an `If`.
 /// Both backends accept all of these, so both halves of the map must cover them.
 const BOTH_BACKENDS: &[&str] = &[
     "1 + 2 * 3",
@@ -45,8 +45,8 @@ const BOTH_BACKENDS: &[&str] = &[
 ];
 
 /// Higher-order demos, from `examples/tm_demo.rs`'s `higher_order` array. EVERY ONE of these is
-/// rejected by `lower_asm` and reaches the TM half only through `defunc` — which is the point: a
-/// corpus that is entirely first-order never runs `asm_half`'s defunc branch, and an invariant that
+/// rejected by `lower_rxm` and reaches the TM half only through `defunc` — which is the point: a
+/// corpus that is entirely first-order never runs `rxm_half`'s defunc branch, and an invariant that
 /// holds only on the direct path (such as "the root is always covered") looks true forever. The λ
 /// backend accepts all four, so the λ half is still exhaustive for them; the TM half is NOT, because
 /// `defunc` rewrites the tree and a node it dissolves has no lowering left to point at.
@@ -84,7 +84,7 @@ fn find_first<'a>(core: &'a Core, pred: &dyn Fn(&Core) -> bool) -> Option<&'a Co
 }
 
 /// Split every node into (emits at least one instruction of its own, emits none), by the rule
-/// `lower_asm::lower_inner` actually follows: an instruction is billed to `ctx.current`, which each
+/// `lower_rxm::lower_inner` actually follows: an instruction is billed to `ctx.current`, which each
 /// `lower_into` sets to the node it is lowering, so a node "emits code" iff its own arm calls
 /// `ctx.emit`/`lower_function*` outside of a nested `lower_into`. Reading it off that function:
 ///
@@ -98,7 +98,7 @@ fn find_first<'a>(core: &'a Core, pred: &dyn Fn(&Core) -> bool) -> Option<&'a Co
 /// * the callee `Var` of an `Apply` — read off as a label by the `Apply` arm (user function OR
 ///   builtin), never lowered into a register.
 /// * a non-callee `Var` whose resolved register is the SAME register `lower_into` is asked to fill
-///   (the `if src != dst` in `lower_asm.rs`'s `lower_inner`, in its `Core::Var` arm) — emits nothing,
+///   (the `if src != dst` in `lower_rxm.rs`'s `lower_inner`, in its `Core::Var` arm) — emits nothing,
 ///   not even a `Mov`. `dst` only ever equals a variable's own slot while lowering the value of an
 ///   `Assign` to that same name (`Assign` looks the slot up and lowers its value straight into it),
 ///   and that identity survives being handed down through `If`'s branches, a non-shadowing
@@ -111,7 +111,7 @@ fn find_first<'a>(core: &'a Core, pred: &dyn Fn(&Core) -> bool) -> Option<&'a Co
 /// (`Jz`+`Jmp`+`Li`), `Assign` (`Li`), `Apply` (`Call` or a builtin instruction), `LetRec` /
 /// `LetRecGroup` (the group's `jmp skip` and each body's `ret`).
 ///
-/// THE ROOT ALWAYS EMITS, whatever its kind: `lower_asm_mapped` sets `ctx.current = core.id()` and
+/// THE ROOT ALWAYS EMITS, whatever its kind: `lower_rxm_mapped` sets `ctx.current = core.id()` and
 /// emits the program's terminating `Halt` itself, so a transparent construct at top level still owns
 /// that one block.
 ///
@@ -183,7 +183,7 @@ fn every_core_node_maps_into_both_backends() {
         // `classify` is honest only about the first-order path; a corpus entry that silently routes
         // through defunc would still pass the loop below (its TM keys would just be a subset of
         // `defunc`'s rewritten tree) with a misleading "inherited a TM block" failure mode instead.
-        assert!(lower_asm(&core).is_ok(), "{src:?}: does not lower first-order, so `classify` is not valid for it");
+        assert!(lower_rxm(&core).is_ok(), "{src:?}: does not lower first-order, so `classify` is not valid for it");
         let map = SourceMap::build(&core, &Unary::default());
         for id in all_ids(&core) {
             assert!(map.lambda_path(id).is_some(), "{src:?}: node {id} has no lambda path");
@@ -231,14 +231,14 @@ fn transparent_nodes_map_to_none() {
     assert_eq!(seen_kinds, ["Lambda", "Let", "Seq", "callee Var"], "the corpus must exercise every transparent kind");
 }
 
-/// The defunc branch of `asm_half`, which a first-order corpus never reaches, and the TM half
+/// The defunc branch of `rxm_half`, which a first-order corpus never reaches, and the TM half
 /// built through it. The two halves are asserted SEPARATELY here — see `HIGHER_ORDER`'s doc for why the
 /// TM half cannot be exhaustive.
 #[test]
 fn higher_order_programs_exercise_the_defunc_branch() {
     for src in HIGHER_ORDER {
         let core = core_of(src);
-        assert!(lower_asm(&core).is_err(), "{src:?}: lowers first-order, so it does not test the defunc branch");
+        assert!(lower_rxm(&core).is_err(), "{src:?}: lowers first-order, so it does not test the defunc branch");
         let map = SourceMap::build(&core, &Unary::default());
         let ids = all_ids(&core);
         for id in &ids {
@@ -625,14 +625,14 @@ fn node_id_allocation_order_is_pinned_for_every_order_sensitive_site() {
     assert_eq!(*expr_lambda_id, 3, "Expr::Lambda (`|y| y + 1`)'s id");
 }
 
-/// The asm program `asm_half` lowers, and the TM half builds its machine from, reached by the OTHER road:
-/// `lower_asm` and `defunc` rather than their `_mapped` twins, retrying through `defunc` on `Unsupported`
+/// The rxm program `rxm_half` lowers, and the TM half builds its machine from, reached by the OTHER road:
+/// `lower_rxm` and `defunc` rather than their `_mapped` twins, retrying through `defunc` on `Unsupported`
 /// as `run_tm`'s own lowering does. The map's instruction indices are only worth checking against a
 /// program the map did not build.
-fn asm_of(core: &Core) -> Program {
-    match lower_asm(core) {
+fn rxm_of(core: &Core) -> Program {
+    match lower_rxm(core) {
         Ok(p) => p,
-        Err(LowerError::Unsupported { .. }) => lower_asm(&defunc(core).expect("defunc")).expect("lowers after defunc"),
+        Err(LowerError::Unsupported { .. }) => lower_rxm(&defunc(core).expect("defunc")).expect("lowers after defunc"),
         Err(e) => panic!("the corpus lowers: {e:?}"),
     }
 }
@@ -644,7 +644,7 @@ fn asm_of(core: &Core) -> Program {
 fn tm_instr_is_the_instruction_each_state_was_built_for() {
     for src in BOTH_BACKENDS.iter().chain(HIGHER_ORDER) {
         let core = core_of(src);
-        let prog = asm_of(&core);
+        let prog = rxm_of(&core);
         for kind in [EncodingKind::Unary, EncodingKind::Binary] {
             for width in [MIN_FIELD_WIDTH, 64] {
                 let enc = kind.at(width);
@@ -661,16 +661,16 @@ fn tm_instr_is_the_instruction_each_state_was_built_for() {
     }
 }
 
-/// The listing is `print_asm`'s own instruction lines, in `prog.code` order, without their indentation; and
+/// The listing is `print_rxm`'s own instruction lines, in `prog.code` order, without their indentation; and
 /// the labels are the program's. A listing that dropped, reordered or re-spelled an instruction would put
 /// every state after it on the wrong line.
 #[test]
-fn the_listing_is_print_asm_line_for_line() {
+fn the_listing_is_print_rxm_line_for_line() {
     for src in BOTH_BACKENDS.iter().chain(HIGHER_ORDER) {
         let core = core_of(src);
-        let prog = asm_of(&core);
+        let prog = rxm_of(&core);
         let map = SourceMap::build(&core, &Unary::default());
-        let printed = print_asm(&prog);
+        let printed = print_rxm(&prog);
         let lines: Vec<&str> = printed.lines().filter_map(|l| l.strip_prefix("    ")).collect();
         assert_eq!(lines.len(), prog.code.len(), "{src:?}: one indented line per instruction");
         assert_eq!(map.tm_listing, lines, "{src:?}");
@@ -686,7 +686,7 @@ fn the_listing_is_print_asm_line_for_line() {
 #[test]
 fn a_map_built_at_another_width_misses_the_states_only_this_width_names() {
     let core = core_of("let x = 40; x + 2");
-    let prog = asm_of(&core);
+    let prog = rxm_of(&core);
     let (machine, origins) = lower_tm_mapped(&prog, &*EncodingKind::Unary.at(64)).expect("lays out");
     let narrow = SourceMap::build(&core, &*EncodingKind::Unary.at(MIN_FIELD_WIDTH));
     let wide = SourceMap::build(&core, &*EncodingKind::Unary.at(64));

@@ -43,7 +43,7 @@ export const SHELL = `
     </div>
     <div id="views-shown" class="views-shown" role="group" aria-label="views">
       <button type="button" class="view-toggle" data-shows="source" aria-pressed="false">source</button>
-      <button type="button" class="view-toggle" data-shows="asm" aria-pressed="false">asm</button>
+      <button type="button" class="view-toggle" data-shows="rxm" aria-pressed="false">rxm</button>
       <button type="button" class="view-toggle" data-shows="lambda" aria-pressed="false">λ</button>
       <button type="button" class="view-toggle" data-shows="tm" aria-pressed="false">TM</button>
     </div>
@@ -635,11 +635,11 @@ export const newest = (line: string) => /of ([\d,]+)/.exec(line)?.[1] ?? ''
 /** The number `printed` writes, without its thousands separators. */
 export const countOf = (printed: string) => Number(printed.replaceAll(',', ''))
 
-/** The asm view `asm-0`'s pane. */
-export const asmPane = () => paneByLeaf('asm-0')
+/** The rxm view `rxm-0`'s pane. */
+export const rxmPane = () => paneByLeaf('rxm-0')
 
-/** The text of the asm view's value readout, or `''` where it shows none. */
-export const asmValue = () => asmPane().querySelector('.asm-value')?.textContent ?? ''
+/** The text of the rxm view's value readout, or `''` where it shows none. */
+export const rxmValue = () => rxmPane().querySelector('.rxm-value')?.textContent ?? ''
 
 /** The text of `pane`'s step readout, or `''` where it shows none. */
 export const paneStepText = (pane: HTMLElement) => pane.querySelector('.step')?.textContent ?? ''
@@ -700,7 +700,7 @@ const BUDGET_HALF = 37_000
 /**
  * **THE CALLERS' `BUDGET_SRC`'S TM HISTORY FILLING, IN THREE WAITS: THE TM LEG STARTING TO RECORD, ITS HISTORY HALF FULL, THEN THE
  * FILL.** As one wait it took up to 8,590 ms at `CPUQuota=25%`, against `until`'s 10 s, and as two the second took up
- * to 6,900 ms. The TM leg records last, after λ and asm, and its step line reads `…` from its first frames until it
+ * to 6,900 ms. The TM leg records last, after λ and rxm, and its step line reads `…` from its first frames until it
  * stops, and counts them. Called right after a dispatch, which withdraws the stop before and drops the line's `…`
  * (`compile.ts`'s `schedule`, `controls.ts`): the first two assertions hold both, so no wait can pass on the run
  * before, and the third holds that the line the second wait counts is this run's.
@@ -1188,7 +1188,7 @@ export const barButton = (name: string): HTMLButtonElement =>
   stepBar().querySelector<HTMLButtonElement>(`button[aria-label="${name}"]`) as HTMLButtonElement
 
 /**
- * All four views in two rows of two: source and λ over asm and TM. `layout.ts`'s `defaultLayout()` is the source
+ * All four views in two rows of two: source and λ over rxm and TM. `layout.ts`'s `defaultLayout()` is the source
  * beside the TM view. A file that wants four views says so with this.
  *
  * **SPELLED OUT, NOT TAKEN FROM `defaultArrangement`**: all four views' default in a wide area is two COLUMNS of two,
@@ -1214,7 +1214,7 @@ export const fourViews = (): LayoutNode => ({
       dir: 'row',
       sizes: [0.5, 0.5],
       children: [
-        { kind: 'leaf', id: 'asm-0', pane: 'asm' },
+        { kind: 'leaf', id: 'rxm-0', pane: 'rxm' },
         { kind: 'leaf', id: 'tm-0', pane: 'tm' },
       ],
     },
@@ -1238,7 +1238,7 @@ export const storeFourViews = (): void => {
 
 /**
  * An arrangement as one line, each split by its direction, its dividers' shares in hundredths and its children:
- * `column[50](row[50](source lambda-0) row[50](asm-0 tm-0))`. In Stage it is the tabs in their order, which is all the
+ * `column[50](row[50](source lambda-0) row[50](rxm-0 tm-0))`. In Stage it is the tabs in their order, which is all the
  * page draws of a tree there.
  */
 const described = (tree: LayoutNode, stage: boolean): string => {
@@ -1278,8 +1278,8 @@ export const drawn = (): string => {
  *
  * - Two arrangements remembered in the stored workspace, the two the toggles pass through: the source beside the TM
  *   view, and those two with the λ view. The reset alone remembers none.
- * - The live region on `showing source, asm, λ and TM`, the last switch's sentence.
- * - A λ and an asm view built new, and the TM view kept where it showed the program: the reset closes the first two,
+ * - The live region on `showing source, rxm, λ and TM`, the last switch's sentence.
+ * - A λ and an rxm view built new, and the TM view kept where it showed the program: the reset closes the first two,
  *   which its tree does not hold, and their toggles build others under their ids.
  * - The focus in the λ view, on its first control, and `lambda-0` as the workspace's focused view. The reset alone
  *   leaves both on the TM view.
@@ -1291,7 +1291,7 @@ export async function resetToFourViews(): Promise<void> {
 }
 
 /**
- * `resetToFourViews`' second half, for a file that performs the reset itself: the λ and the asm toggle pressed where
+ * `resetToFourViews`' second half, for a file that performs the reset itself: the λ and the rxm toggle pressed where
  * they are not, and the focus in the λ view.
  *
  * **THE TOGGLES ARE PRESSED IN A WINDOW TALLER THAN IT IS WIDE, WHICH IS THEN PUT BACK.** A combination's first visit
@@ -1326,7 +1326,7 @@ export async function showFourViews(): Promise<void> {
   const area = (document.querySelector('#views') as HTMLElement).getBoundingClientRect()
   if (area.height <= area.width)
     throw new Error(`the views area is not taller than wide: ${area.width} × ${area.height}`)
-  for (const kind of ['lambda', 'asm'])
+  for (const kind of ['lambda', 'rxm'])
     document
       .querySelector<HTMLButtonElement>(`#views-shown button[data-shows="${kind}"][aria-pressed="false"]`)
       ?.click()
@@ -1360,7 +1360,7 @@ export async function resetToFirstLoad(): Promise<void> {
 
 /**
  * Put a mounted page on all four views as a wide window's default arranges them, two columns of two with the source
- * over the asm view and the λ over the TM view: `resetToFirstLoad`, then the asm and the λ toggle, which is each
+ * over the rxm view and the λ over the TM view: `resetToFirstLoad`, then the rxm and the λ toggle, which is each
  * combination's first visit. `showFourViews` leaves the two ROWS these files' stored start has, which no default
  * builds in a wide window.
  *
@@ -1368,9 +1368,9 @@ export async function resetToFirstLoad(): Promise<void> {
  */
 export async function showWideDefault(): Promise<void> {
   await resetToFirstLoad()
-  for (const kind of ['asm', 'lambda'])
+  for (const kind of ['rxm', 'lambda'])
     document.querySelector<HTMLButtonElement>(`#views-shown button[data-shows="${kind}"]`)?.click()
-  const [found, wanted] = [drawn(), 'row[50](column[50](source asm-0) column[50](lambda-0 tm-0))']
+  const [found, wanted] = [drawn(), 'row[50](column[50](source rxm-0) column[50](lambda-0 tm-0))']
   if (found !== wanted) throw new Error(`showWideDefault left the page on ${found}, and not on ${wanted}`)
 }
 

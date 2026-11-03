@@ -69,7 +69,7 @@ beforeEach(async () => {
   await until(
     () =>
       document.querySelector<HTMLElement>('#results')?.dataset.state === 'idle' &&
-      // ALL FOUR VIEWS: source, λ, asm and TM.
+      // ALL FOUR VIEWS: source, λ, rxm and TM.
       leafIds().length === 4 &&
       lambdaLeaves().length === 1,
     'all four views on a settled source program',

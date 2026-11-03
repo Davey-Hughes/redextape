@@ -124,8 +124,8 @@ function sourceSession(pool: SessionPool, seen: RunReply[]): SessionEntry {
     legs,
     tmProgram: null,
     tmScratch: null,
-    asmProgram: null,
-    asmScratch: null,
+    rxmProgram: null,
+    rxmScratch: null,
   }
 }
 

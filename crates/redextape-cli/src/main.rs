@@ -51,7 +51,7 @@ fn main() -> ExitCode {
     match args.command {
         cli::Command::Fmt { paths, check, width, form } => {
             // THE `Option` SURVIVES ON PURPOSE. `fmt` refuses an explicit `--width` on a `.tm` or
-            // `.asm` input, and collapsing the flag with the config default here would make every
+            // `.rxm` input, and collapsing the flag with the config default here would make every
             // such format fail on any machine that has a `redextape.toml`.
             let explicit_width = width;
             let width = width.unwrap_or(cfg.fmt.width);

@@ -2,13 +2,13 @@
 
     redextape fmt foo.rxt            rewrite in place
     redextape fmt foo.tm             rewrite in place, comments preserved
-    redextape fmt foo.asm            rewrite in place, comments preserved
+    redextape fmt foo.rxm            rewrite in place, comments preserved
     redextape fmt --check src/*.rxt  diff what would change; rewrite nothing
     redextape fmt -                  stdin to stdout
     redextape lint foo.rxt           parse, type and lint diagnostics
     redextape run foo.rxt            evaluate the program, print the value
     redextape run foo.tm             simulate the machine, decode its tapes
-    redextape run foo.asm            execute the listing, decode its result
+    redextape run foo.rxm            execute the listing, decode its result
     redextape emit foo.rxt --lang tm compile to a backend text form
     redextape.toml                   repo-level defaults for four settings (see below)
 
@@ -31,9 +31,9 @@ the rule.
 
 `fmt` is exactly `print ∘ parse` for all three forms, each through its own parser and printer:
 `.rxt` through `redextape_core::format_with_width`, which is `format` with the line budget passed in
-rather than read off `printer::MAX_WIDTH`; `.tm` through `parse_tm_full` and `print_tm_doc`; `.asm`
-through `parse_asm_full` and `print_asm_doc`. Formatting `.tm` and `.asm` preserves their comments,
-which is the whole reason formatting is offered for those two forms at all — `print_tm`/`print_asm`,
+rather than read off `printer::MAX_WIDTH`; `.tm` through `parse_tm_full` and `print_tm_doc`; `.rxm`
+through `parse_rxm_full` and `print_rxm_doc`. Formatting `.tm` and `.rxm` preserves their comments,
+which is the whole reason formatting is offered for those two forms at all — `print_tm`/`print_rxm`,
 the plain printers `emit` uses, drop every one. **What survives is each comment's text and the line
 it sits on — not its column, and not the blank lines around it**, which is worth knowing before
 running a command whose headline mode rewrites files in place. A comment body is trimmed and
@@ -47,11 +47,11 @@ byte-identical to the same file authored with LF. **The consequence worth knowin
 `--check` rather than about a rewrite**: a CRLF file can never converge, so `redextape fmt --check`
 reports it as needing a change on every run and a pipeline that gates on that exit code fails
 permanently rather than once. Convert the file, or keep it out of the check. `--width` is a line budget only
-the `.rxt` printer reads; an explicit `--width` on a `.tm` or `.asm` input is refused rather than
+the `.rxt` printer reads; an explicit `--width` on a `.tm` or `.rxm` input is refused rather than
 silently ignored, because those two printers lay out from their own content and have no width to
-apply it to. `--form {rxt,tm,asm}` names the form outright, overriding both the file's extension
+apply it to. `--form {rxt,tm,rxm}` names the form outright, overriding both the file's extension
 and, for standard input, the content sniffing that otherwise identifies it; standard input given no
-`--form` is identified by what parses — `parse_tm_full`, then `parse_asm_full`, falling back to
+`--form` is identified by what parses — `parse_tm_full`, then `parse_rxm_full`, falling back to
 `.rxt` when neither accepts it. A file that does not parse is reported and left untouched. Every
 other file named on the same command line is still processed, and the worst outcome across them is
 what sets the exit code.
@@ -143,16 +143,16 @@ path that is not allowed to panic. Neither is a mistake the person who typed it 
     redextape run p.rxt --backend lambda   the same program through the λ-calculus lowering
     redextape run p.rxt --backend tm       …and through the Turing machine
     redextape run p.tm                     a machine: parse, simulate, decode the tapes
-    redextape run p.asm                    a register-machine listing: parse, validate, require a header, execute, decode
+    redextape run p.rxm                    a register-machine listing: parse, validate, require a header, execute, decode
     redextape run -                        stdin, always read as a program
 
 `--backend {reference,lambda,tm}` chooses the evaluator for a `.rxt` program and defaults to
 `reference`, the tree-walker that `redextape_core::run` already is. The other two lower first —
-`lambda` through `lower` and `run_lambda`, `tm` through `lower_asm` and `run_tm_fitted` — and then
+`lambda` through `lower` and `run_lambda`, `tm` through `lower_rxm` and `run_tm_fitted` — and then
 decode the result back to a value. On a program all three can answer for, all three print the same
 line, and that agreement is the property the whole project is built on.
 
-**`--backend` on a `.tm` or `.asm` file is an error, not a silent ignore.** The artifact already *is* a
+**`--backend` on a `.tm` or `.rxm` file is an error, not a silent ignore.** The artifact already *is* a
 Turing machine or a register-machine program, so there is nothing left to choose, and accepting the
 flag would imply otherwise.
 
@@ -185,13 +185,13 @@ decode, exit `2`. The same decode refusal under `--backend tm` is always a `2`, 
 reason: there the type comes from the program's own static inference rather than a file's `result`
 header, so there is nothing the file could have lied about.
 
-**A `.asm` file needs its header for the opposite reason a `.tm` file does.** A `.tm` header carries
+**A `.rxm` file needs its header for the opposite reason a `.tm` file does.** A `.tm` header carries
 the *initial* tapes, so a header-less machine has nothing to run at all. A register-machine listing
 runs perfectly well with no header — it is a complete program — the header only names the type its
-result register should decode as. So a header-less `.asm` file parses, validates and would execute
+result register should decode as. So a header-less `.rxm` file parses, validates and would execute
 fine; `run` refuses it anyway, before running it, because it would otherwise spend up to
 `DEFAULT_CAPS.steps` (five million) reaching an answer it then has no declared type to print. The
-refusal points at `redextape emit --lang asm`, which writes a `result` header whenever the program's
+refusal points at `redextape emit --lang rxm`, which writes a `result` header whenever the program's
 result type can be expressed — any type that holds no function, with a free type variable written as
 `Nat`, so `[]` is headered `result List<Nat>` (a closed list of `t` holds no `t`). A run that hits the step, stack or heap cap, or that faults, is the
 program's fault (`1`). A run that finishes decodes its result against the header's declared type, and
@@ -212,7 +212,7 @@ command.
     redextape emit p.rxt --lang tm -o p.tm            …to a file
     redextape emit p.rxt --lang tm --encoding binary  packed tapes instead of unary
     redextape emit p.rxt --lang lambda -o p.rxlambda
-    redextape emit p.rxt --lang asm
+    redextape emit p.rxt --lang rxm
 
 Output goes to stdout unless `-o` names a file, so `emit` composes with a pipe. `--encoding
 {unary,binary}` selects the tape encoding and applies to `--lang tm` only; passing it anywhere else
@@ -243,15 +243,15 @@ check took. `redextape run` takes it like any other `.tm` file; see `run` above.
 |---|---|---|
 | `tm` | a complete self-describing machine, header included | yes — `parse_tm_full`, and `redextape run` |
 | `lambda` | the λ-calculus lowering of the program | yes — `parse_lambda` |
-| `asm` | the register-machine lowering, headered when the result type can be expressed, a type variable as `Nat` | yes — `parse_asm`, and `redextape run` |
+| `rxm` | the register-machine lowering, headered when the result type can be expressed, a type variable as `Nat` | yes — `parse_rxm`, and `redextape run` |
 
 **All three emitted forms read back, and two of the three are also runnable from the command line.**
-`parse_asm` is the newest of the three readers, landing alongside `Program::validate` and two
+`parse_rxm` is the newest of the three readers, landing alongside `Program::validate` and two
 round-trip properties, so nothing `emit` writes is write-only anymore — every emitted file opens by
-naming the parser that reads it back. `run` dispatches on extension among a `.tm` machine, a `.asm`
+naming the parser that reads it back. `run` dispatches on extension among a `.tm` machine, a `.rxm`
 listing, and `.rxt` (or stdin) source, so
 
-    $ redextape emit p.rxt --lang asm -o p.asm && redextape run p.asm
+    $ redextape emit p.rxt --lang rxm -o p.rxm && redextape run p.rxm
 
 is the second of the two artifact forms `run` executes — `.tm`'s pair, below, is the first: compiled
 to the register machine, written to disk, read back by a parser that shares no code with the

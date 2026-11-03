@@ -7,7 +7,7 @@ import { SessionPool } from '../../src/session-client'
 import type { LegState, SessionEntry } from '../../src/sessions'
 import { PaneSlot, SessionRegistry } from '../../src/sessions'
 import type { LambdaState, TmState } from '../../src/types'
-import { frameOf } from './asm-fixtures'
+import { frameOf } from './rxm-fixtures'
 import { type FakePort, fakeClient, fakePort, lambdaFrame } from './session-fixtures'
 
 /**
@@ -73,7 +73,7 @@ function harness(): {
   // A FRESH SLOT PER CALL, BOUND TO `SOURCE` ON THE λ LEG — a test that forks more than once wants its
   // own `Detachable` per fork. The leg is fixed at `'lambda'` because `Detachable` never reads it
   // (`scratch.ts`'s own doc: it asks for the two members retirement actually uses), so the same slot
-  // shape works whether the buffer it ends up rebound to is on the λ leg, the TM one or the asm one.
+  // shape works whether the buffer it ends up rebound to is on the λ leg, the TM one or the rxm one.
   const slotOf = (): PaneSlot<'lambda'> => new PaneSlot('lambda', SOURCE)
   // WHAT WAS POSTED TO ONE BUFFER'S OWN PORT, KEYED BY THE ID `fork`/`forkBlank` RETURNED — `ports` is
   // spawn order and says nothing about which port belongs to which buffer once a test wants to name
@@ -114,8 +114,8 @@ function sourceEntry(text = 'from source'): SessionEntry {
     legs: { lambda },
     tmProgram: null,
     tmScratch: null,
-    asmProgram: null,
-    asmScratch: null,
+    rxmProgram: null,
+    rxmScratch: null,
   }
 }
 
@@ -762,7 +762,7 @@ describe('ScratchBuffers.noSessionReply', () => {
 
 /**
  * **A COPY'S FAILED BUILD IS JUDGED BY ITS OWN LEG** (Plan 7 part 5 spec, amendment 27). The discriminator — has this
- * copy recorded a frame — reads the copy's own leg. Read on the λ leg, a TM or asm copy has no frame, so every
+ * copy recorded a frame — reads the copy's own leg. Read on the λ leg, a TM or rxm copy has no frame, so every
  * unparseable edit to one that had built would be answered as a failed build, which `replies.ts` says in a notice,
  * where a λ copy's edit shows its diagnostics in the editor alone.
  */
@@ -788,11 +788,11 @@ describe('ScratchBuffers.noSessionReply, on the copy’s own leg', () => {
     expect(buffers.noSessionReply(never, diagnostics)).toEqual(diagnostics)
   })
 
-  it('answers null for an asm copy that has built a frame, and the diagnostics for one that has not', () => {
+  it('answers null for an rxm copy that has built a frame, and the diagnostics for one that has not', () => {
     const { reg, buffers } = harness()
-    const built = buffers.forkBlank('asm')
-    const never = buffers.forkBlank('asm')
-    reg.legOf({ session: built, leg: 'asm' }).hist.push(frameOf(), 1)
+    const built = buffers.forkBlank('rxm')
+    const never = buffers.forkBlank('rxm')
+    reg.legOf({ session: built, leg: 'rxm' }).hist.push(frameOf(), 1)
 
     expect(buffers.noSessionReply(built, diagnostics)).toBe(null)
     expect(buffers.noSessionReply(never, diagnostics)).toEqual(diagnostics)
@@ -1340,52 +1340,52 @@ describe('two legs, one collection', () => {
   })
 })
 
-/** An asm copy is a copy on a third leg: the same collection, one seat, one id space, and its own request. */
-describe('asm copies', () => {
-  it('sends asm-scratch for an asm copy, whether forked or blank', () => {
+/** An rxm copy is a copy on a third leg: the same collection, one seat, one id space, and its own request. */
+describe('rxm copies', () => {
+  it('sends rxm-scratch for an rxm copy, whether forked or blank', () => {
     const { buffers, slotOf, postedTo } = harness()
-    const forked = buffers.fork(slotOf(), 'result Nat\n\thalt\n', 0, 'asm')
-    const blank = buffers.forkBlank('asm')
-    expect(postedTo(forked)).toEqual([{ kind: 'asm-scratch', gen: 1, src: 'result Nat\n\thalt\n' }])
-    expect(postedTo(blank)).toEqual([{ kind: 'asm-scratch', gen: 1, src: '' }])
+    const forked = buffers.fork(slotOf(), 'result Nat\n\thalt\n', 0, 'rxm')
+    const blank = buffers.forkBlank('rxm')
+    expect(postedTo(forked)).toEqual([{ kind: 'rxm-scratch', gen: 1, src: 'result Nat\n\thalt\n' }])
+    expect(postedTo(blank)).toEqual([{ kind: 'rxm-scratch', gen: 1, src: '' }])
   })
 
-  it('registers an asm copy detached, with one asm leg building and nothing retained yet', () => {
+  it('registers an rxm copy detached, with one rxm leg building and nothing retained yet', () => {
     const { reg, buffers } = harness()
-    const id = buffers.forkBlank('asm')
+    const id = buffers.forkBlank('rxm')
     const entry = reg.entryOf(id)
     expect(entry.detached).toBe(true)
-    expect(Object.keys(entry.legs)).toEqual(['asm'])
-    expect(entry.legs.asm?.status).toEqual({ available: false, reason: 'building…' })
-    expect([entry.asmProgram, entry.asmScratch, entry.tmProgram, entry.tmScratch]).toEqual([null, null, null, null])
-    expect(buffers.nameOf(id)).toBe('asm copy 1')
+    expect(Object.keys(entry.legs)).toEqual(['rxm'])
+    expect(entry.legs.rxm?.status).toEqual({ available: false, reason: 'building…' })
+    expect([entry.rxmProgram, entry.rxmScratch, entry.tmProgram, entry.tmScratch]).toEqual([null, null, null, null])
+    expect(buffers.nameOf(id)).toBe('rxm copy 1')
   })
 
-  it('recompile posts asm-scratch for an asm copy', () => {
+  it('recompile posts rxm-scratch for an rxm copy', () => {
     const { buffers, postedTo } = harness()
-    const id = buffers.forkBlank('asm')
+    const id = buffers.forkBlank('rxm')
     expect(buffers.recompile(id, '\thalt\n')).toBe(true)
     expect(postedTo(id)).toEqual([
-      { kind: 'asm-scratch', gen: 1, src: '' },
-      { kind: 'asm-scratch', gen: 2, src: '\thalt\n' },
+      { kind: 'rxm-scratch', gen: 1, src: '' },
+      { kind: 'rxm-scratch', gen: 2, src: '\thalt\n' },
     ])
   })
 
-  it('warm re-spawns a cold asm copy with asm-scratch', () => {
+  it('warm re-spawns a cold rxm copy with rxm-scratch', () => {
     const { buffers, postedTo } = harness()
-    const id = buffers.forkBlank('asm')
+    const id = buffers.forkBlank('rxm')
     buffers.setText(id, '\thalt\n')
     buffers.cool(id, SOURCE, [])
     buffers.warm(id)
-    expect(postedTo(id)).toEqual([{ kind: 'asm-scratch', gen: 1, src: '\thalt\n' }])
+    expect(postedTo(id)).toEqual([{ kind: 'rxm-scratch', gen: 1, src: '\thalt\n' }])
   })
 
-  it('round-trips an asm copy’s leg through snapshot and restore', () => {
+  it('round-trips an rxm copy’s leg through snapshot and restore', () => {
     const h = harness()
-    const id = h.buffers.forkBlank('asm')
+    const id = h.buffers.forkBlank('rxm')
     h.buffers.setText(id, '\thalt\n')
     const fresh = harness()
     fresh.buffers.restore(h.buffers.snapshot({}))
-    expect(fresh.buffers.list()).toEqual([{ id, label: 'copy 1', warm: false, leg: 'asm' }])
+    expect(fresh.buffers.list()).toEqual([{ id, label: 'copy 1', warm: false, leg: 'rxm' }])
   })
 })

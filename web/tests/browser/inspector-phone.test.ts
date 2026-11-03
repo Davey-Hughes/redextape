@@ -124,7 +124,7 @@ async function at(
  * and the top border of the inspector, its panel and its header; each border that draws, with a width, a style and a
  * colour that is not transparent. **ONE LINE, 1 PX, THE HEADER'S** — the user's decision; the inspector's own top
  * border beside it would make 2 px. What a view draws inside its box is the view's: in Explorer with the readout
- * switch at `inspector`, closed, at 390×844, the asm view's `registers` panel header ends on that edge, and its own
+ * switch at `inspector`, closed, at 390×844, the rxm view's `registers` panel header ends on that edge, and its own
  * 1 px bottom border lies on the rule there.
  */
 function rulesBetween(): [string, number][] {
@@ -307,7 +307,7 @@ const HELD_BOXES: Readonly<Record<string, Readonly<Record<string, Box>>>> = {
     body: [993, 102.5, 287, 650.5],
     source: [0, 74.5, 490, 333.25],
     'lambda-0': [502, 74.5, 490, 333.25],
-    'asm-0': [0, 419.75, 490, 333.25],
+    'rxm-0': [0, 419.75, 490, 333.25],
     'tm-0': [502, 419.75, 490, 333.25],
   },
   'debugger@1280x800 closed': {
@@ -317,7 +317,7 @@ const HELD_BOXES: Readonly<Record<string, Readonly<Record<string, Box>>>> = {
     header: [993, 74.5, 287, 28],
     source: [0, 74.5, 490, 333.25],
     'lambda-0': [502, 74.5, 490, 333.25],
-    'asm-0': [0, 419.75, 490, 333.25],
+    'rxm-0': [0, 419.75, 490, 333.25],
     'tm-0': [502, 419.75, 490, 333.25],
   },
   'debugger@481x800 open': {
@@ -328,7 +328,7 @@ const HELD_BOXES: Readonly<Record<string, Readonly<Record<string, Box>>>> = {
     body: [194, 192.5, 287, 538.5],
     source: [0, 164.5, 90.5, 277.25],
     'lambda-0': [102.5, 164.5, 90.5, 277.25],
-    'asm-0': [0, 453.75, 90.5, 277.25],
+    'rxm-0': [0, 453.75, 90.5, 277.25],
     'tm-0': [102.5, 453.75, 90.5, 277.25],
   },
   'debugger@481x800 closed': {
@@ -338,7 +338,7 @@ const HELD_BOXES: Readonly<Record<string, Readonly<Record<string, Box>>>> = {
     header: [194, 164.5, 287, 28],
     source: [0, 164.5, 90.5, 277.25],
     'lambda-0': [102.5, 164.5, 90.5, 277.25],
-    'asm-0': [0, 453.75, 90.5, 277.25],
+    'rxm-0': [0, 453.75, 90.5, 277.25],
     'tm-0': [102.5, 453.75, 90.5, 277.25],
   },
   'stage@1280x800 open': {
@@ -380,7 +380,7 @@ const HELD_BOXES: Readonly<Record<string, Readonly<Record<string, Box>>>> = {
     views: [0, 164.5, 390, 610.25],
     source: [0, 164.5, 189, 299.125],
     'lambda-0': [201, 164.5, 189, 299.125],
-    'asm-0': [0, 475.625, 189, 299.125],
+    'rxm-0': [0, 475.625, 189, 299.125],
     'tm-0': [201, 475.625, 189, 299.125],
   },
   'explorer@320x568': {
@@ -388,7 +388,7 @@ const HELD_BOXES: Readonly<Record<string, Readonly<Record<string, Box>>>> = {
     views: [0, 229, 320, 246.25],
     source: [0, 229, 154, 117.125],
     'lambda-0': [166, 229, 154, 117.125],
-    'asm-0': [0, 358.125, 154, 117.125],
+    'rxm-0': [0, 358.125, 154, 117.125],
     'tm-0': [166, 358.125, 154, 117.125],
   },
 }
@@ -580,7 +580,7 @@ const SHORT_PAGE_BOXES: Readonly<Record<string, Readonly<Record<string, Box>>>> 
     views: [0, 229, 320, 78.25],
     source: [0, 229, 154, 33.125],
     'lambda-0': [166, 229, 154, 33.125],
-    'asm-0': [0, 274.125, 154, 33.125],
+    'rxm-0': [0, 274.125, 154, 33.125],
     'tm-0': [166, 274.125, 154, 33.125],
     strip: [0, 307.25, 320, 92.75],
     page: [0, 0, 320, 400],
@@ -590,7 +590,7 @@ const SHORT_PAGE_BOXES: Readonly<Record<string, Readonly<Record<string, Box>>>> 
     views: [0, 229, 320, 0],
     source: [0, 229, 154, 0],
     'lambda-0': [166, 229, 154, 0],
-    'asm-0': [0, 241, 154, 0],
+    'rxm-0': [0, 241, 154, 0],
     'tm-0': [166, 241, 154, 0],
     strip: [0, 229, 320, 92.75],
     page: [0, 0, 320, 322],
@@ -600,7 +600,7 @@ const SHORT_PAGE_BOXES: Readonly<Record<string, Readonly<Record<string, Box>>>> 
     views: [0, 181, 320, 126.25],
     source: [0, 181, 154, 57.125],
     'lambda-0': [166, 181, 154, 57.125],
-    'asm-0': [0, 250.125, 154, 57.125],
+    'rxm-0': [0, 250.125, 154, 57.125],
     'tm-0': [166, 250.125, 154, 57.125],
     strip: [0, 307.25, 320, 92.75],
     page: [0, 0, 320, 400],
@@ -610,7 +610,7 @@ const SHORT_PAGE_BOXES: Readonly<Record<string, Readonly<Record<string, Box>>>> 
     views: [0, 181, 320, 46.25],
     source: [0, 181, 154, 17.125],
     'lambda-0': [166, 181, 154, 17.125],
-    'asm-0': [0, 210.125, 154, 17.125],
+    'rxm-0': [0, 210.125, 154, 17.125],
     'tm-0': [166, 210.125, 154, 17.125],
     strip: [0, 227.25, 320, 92.75],
     page: [0, 0, 320, 320],

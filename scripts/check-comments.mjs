@@ -1351,7 +1351,7 @@ const LANG_CASES = [
   ['grammars/x/src/tree_sitter/parser.h', undefined],
   ['crates/redextape-cli/tests/cmd/config_bad_width.in/a.rxt', undefined],
   ['crates/redextape-cli/tests/cmd/roundtrip.in/p.tm', undefined],
-  ['crates/redextape-cli/tests/cmd/run_asm.in/p.asm', undefined],
+  ['crates/redextape-cli/tests/cmd/run_rxm.in/p.rxm', undefined],
   ['grammars/x/README.md', undefined],
 ]
 

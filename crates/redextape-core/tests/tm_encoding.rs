@@ -1,5 +1,5 @@
 //! The unary gadgets compose into a multi-step computation on a genuine simulated multi-tape TM;
-//! `lower_tm` produces machines of exactly this shape from register-assembly.
+//! `lower_tm` produces machines of exactly this shape from an rxm program.
 
 // Test target: a fixture that fails to build IS the failure this file reports, so panicking is
 // deliberate here. The `allow-*-in-tests` keys in `clippy.toml` only reach `#[test]` functions and

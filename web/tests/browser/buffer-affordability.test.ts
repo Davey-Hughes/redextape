@@ -2,9 +2,9 @@ import { describe, expect, it } from 'vitest'
 import init, { compile } from '../../../pkg/redextape_wasm.js'
 import { EXAMPLE_ENCODING, EXAMPLES } from '../../src/examples'
 import { History } from '../../src/history'
-import { asmFrameBytes, FRAME_BYTES, HISTORY_BYTES, lambdaFrameBytes, tmFrameBytes } from '../../src/protocol'
+import { FRAME_BYTES, HISTORY_BYTES, lambdaFrameBytes, rxmFrameBytes, tmFrameBytes } from '../../src/protocol'
 import { MAX_WARM_BUFFERS } from '../../src/scratch'
-import type { AsmState, LambdaState, TmProgram, TmState } from '../../src/types'
+import type { LambdaState, RxmState, TmProgram, TmState } from '../../src/types'
 import { heapNow, requireHeapHarness } from './probe-fixture'
 
 /**
@@ -26,7 +26,7 @@ import { heapNow, requireHeapHarness } from './probe-fixture'
  * stepping the divergent term, capped at `HISTORY_BYTES` charged (~3,200 frames per worker — `protocol.ts`'s
  * `HISTORY_BYTES` doc's own figure for a real λ ring), and `buildRings` pushes those. **THE INTERCEPT IS NOT
  * ZERO**: a real page at the cap also carries a DOM/CodeMirror/main-thread-wasm baseline and a source session
- * with its own module, arena and rings (λ, asm and TM) — none of which any buffer's cost ever included. The
+ * with its own module, arena and rings (λ, rxm and TM) — none of which any buffer's cost ever included. The
  * intercept below is measured and printed as SEPARATE components, and two derived caps are printed from it —
  * see "THE TWO READINGS" below for what each includes.
  *
@@ -59,12 +59,12 @@ const BUDGET_BYTES = 512 * 1024 * 1024
 const TERM = '(\\f. (\\x. f (x x)) (\\x. f (x x))) (\\g. \\n. g n)'
 
 /**
- * A program whose loop never ends, as `TERM` never ends: the source asm ring is priced full, so its recording has
+ * A program whose loop never ends, as `TERM` never ends: the source rxm ring is priced full, so its recording has
  * to stop on its allowance and not at its end. The ring is bounded by the bytes it is charged, not the heap its frames
  * hold, so the program priced is the one whose frames held the most heap per charged byte of the programs tried (the
- * roadmap entry on reading (b)'s asm ring lists them).
+ * roadmap entry on reading (b)'s rxm ring lists them).
  */
-const ASM_PROGRAM = 'fn main() { let mut i = 0; while true { i = i + 1; } i } main()'
+const RXM_PROGRAM = 'fn main() { let mut i = 0; while true { i = i + 1; } i } main()'
 
 /**
  * **BOTH CASES PRINT THE CAP READING (b) DERIVES UNDER THIS ONE LABEL**, so the two say the same thing: the cap is an
@@ -254,50 +254,50 @@ async function round(
 }
 
 /**
- * The source session's asm ring driven to exhaustion: `affordability-asm-worker.ts` records `ASM_PROGRAM`'s asm leg to
+ * The source session's rxm ring driven to exhaustion: `affordability-rxm-worker.ts` records `RXM_PROGRAM`'s rxm leg to
  * `HISTORY_BYTES` charged, and the ring is built from its frames and read as `round` reads a λ ring, after two
  * collections, with the reply's frame array dropped first because the page keeps no array of a reply's frames.
  *
  * **THE RING IS REFUSED BEFORE THE READING UNLESS IT IS FULL**: a recording charged under `HISTORY_BYTES` ended before
  * its allowance, so its ring is not the exhausted one reading (b) prices, and the reading would price a smaller one.
  */
-async function sourceAsmRing(
+async function sourceRxmRing(
   collect: () => void,
 ): Promise<{ ring: number; steps: number; run: string; charged: number; retained: number }> {
   await new Promise((r) => setTimeout(r, 100))
   collect()
   collect()
   const before = heapNow()
-  type Reply = { outcome: string; message?: string; steps: number; run: string; frames: AsmState[] | null }
-  const worker = new Worker(new URL('./affordability-asm-worker.ts', import.meta.url), { type: 'module' })
+  type Reply = { outcome: string; message?: string; steps: number; run: string; frames: RxmState[] | null }
+  const worker = new Worker(new URL('./affordability-rxm-worker.ts', import.meta.url), { type: 'module' })
   let reply: Reply
   try {
     reply = await new Promise<Reply>((resolve, reject) => {
       worker.addEventListener('message', (e: MessageEvent<Reply>) =>
         e.data.outcome === 'ok'
           ? resolve(e.data)
-          : reject(new Error(`BLOCKED: asm probe worker answered ${e.data.outcome}: ${e.data.message ?? ''}`)),
+          : reject(new Error(`BLOCKED: rxm probe worker answered ${e.data.outcome}: ${e.data.message ?? ''}`)),
       )
-      worker.addEventListener('error', () => reject(new Error('BLOCKED: asm probe worker failed to load')))
+      worker.addEventListener('error', () => reject(new Error('BLOCKED: rxm probe worker failed to load')))
       worker.addEventListener('messageerror', () =>
-        reject(new Error('BLOCKED: asm probe worker reply failed to clone')),
+        reject(new Error('BLOCKED: rxm probe worker reply failed to clone')),
       )
-      worker.postMessage({ src: ASM_PROGRAM, encoding: EXAMPLE_ENCODING })
+      worker.postMessage({ src: RXM_PROGRAM, encoding: EXAMPLE_ENCODING })
     })
   } finally {
     worker.terminate()
   }
-  const ring = new History<AsmState>(HISTORY_BYTES)
+  const ring = new History<RxmState>(HISTORY_BYTES)
   let charged = 0
   for (const f of reply.frames ?? []) {
-    const bytes = asmFrameBytes(f)
+    const bytes = rxmFrameBytes(f)
     ring.push(f, bytes)
     charged += bytes
   }
   reply.frames = null
   expect(
     charged,
-    'precondition: the source asm ring is full, its recording stopped on `HISTORY_BYTES`',
+    'precondition: the source rxm ring is full, its recording stopped on `HISTORY_BYTES`',
   ).toBeGreaterThanOrEqual(HISTORY_BYTES)
   collect()
   collect()
@@ -481,12 +481,12 @@ describe('worker affordability', () => {
       `λ retention ratio (this probe, n=1 round): ${sourceLambdaRingAtExhaustion / firstRingChargedTotal} against protocol.ts's recorded ${LAMBDA_LEG_RETENTION_RATIO}`,
     )
 
-    // SOURCE ASM RING AT EXHAUSTION — MEASURED DIRECTLY, as the λ ring is: no buffer in this file is an asm copy,
-    // so no round prices one, and `sourceAsmRing` drives one ring of its own.
-    const asm = await sourceAsmRing(collect)
-    const sourceAsmRingAtExhaustion = asm.ring
+    // SOURCE RXM RING AT EXHAUSTION — MEASURED DIRECTLY, as the λ ring is: no buffer in this file is an rxm copy,
+    // so no round prices one, and `sourceRxmRing` drives one ring of its own.
+    const rxm = await sourceRxmRing(collect)
+    const sourceRxmRingAtExhaustion = rxm.ring
     console.log(
-      `source asm ring at exhaustion — measured directly: ${sourceAsmRingAtExhaustion} bytes for ${asm.retained} frames kept of ${asm.steps} steps recorded (run ${asm.run}), ${asm.charged} charged, ${sourceAsmRingAtExhaustion / asm.charged} retained per charged byte`,
+      `source rxm ring at exhaustion — measured directly: ${sourceRxmRingAtExhaustion} bytes for ${rxm.retained} frames kept of ${rxm.steps} steps recorded (run ${rxm.run}), ${rxm.charged} charged, ${sourceRxmRingAtExhaustion / rxm.charged} retained per charged byte`,
     )
 
     // THE SIX INTERCEPT COMPONENTS. `first.total` alone is a page with ZERO fixed cost: no DOM, no
@@ -497,14 +497,14 @@ describe('worker affordability', () => {
     console.log(`intercept component — main-thread wasm module: ${MAIN_THREAD_WASM_MODULE_BASELINE_BYTES}`)
     console.log(`intercept component — source session fixed cost (module+arena): ${sourceFixedCost}`)
     console.log(`intercept component — source λ ring at exhaustion: ${sourceLambdaRingAtExhaustion}`)
-    console.log(`intercept component — source asm ring at exhaustion: ${sourceAsmRingAtExhaustion}`)
+    console.log(`intercept component — source rxm ring at exhaustion: ${sourceRxmRingAtExhaustion}`)
     console.log(`intercept component — source TM ring at exhaustion: ${sourceTmRingAtExhaustion}`)
 
     // THE TWO READINGS. Which one governs `MAX_WARM_BUFFERS` is the project owner's decision; this
     // file prints both, labelled.
     //
     // (a) BUFFERS-ONLY-AT-EXHAUSTION — the literal reading of the threshold's own words, "every warm
-    // BUFFER holding a real term and its ring driven to exhaustion". The source session's λ, asm and TM
+    // BUFFER holding a real term and its ring driven to exhaustion". The source session's λ, rxm and TM
     // legs are on every page, regardless of how many buffers exist, but they are not SIMULTANEOUSLY
     // exhausted the instant a buffer's rings are — the source session is ordinarily mid-recording or
     // idle, not pinned at its own ring cap at the same moment N buffers are all pinned at theirs. This
@@ -513,16 +513,16 @@ describe('worker affordability', () => {
     // source session, and is on every page exactly as unconditionally as the DOM and CodeMirror already
     // counted in `pageBaseline`.
     const interceptBuffersOnly = pageBaseline + MAIN_THREAD_WASM_MODULE_BASELINE_BYTES + sourceFixedCost
-    // (b) EVERYTHING-AT-EXHAUSTION — the source session's λ, asm and TM rings ALSO driven to exhaustion at
-    // the same instant every buffer's ring is, on top of reading (a). The λ and asm rings are read here (the
-    // n=1 round's ring and `sourceAsmRing`'s), the TM ring is `TM_LEG_RETENTION_RATIO` of `HISTORY_BYTES`.
+    // (b) EVERYTHING-AT-EXHAUSTION — the source session's λ, rxm and TM rings ALSO driven to exhaustion at
+    // the same instant every buffer's ring is, on top of reading (a). The λ and rxm rings are read here (the
+    // n=1 round's ring and `sourceRxmRing`'s), the TM ring is `TM_LEG_RETENTION_RATIO` of `HISTORY_BYTES`.
     // This is the more conservative reading and the one the pre-registered threshold's wording does not
     // literally require, since the source session's legs are not "buffers". **EACH SOURCE RING IS ONE
     // PROGRAM'S**: a ring is bounded by the bytes it is CHARGED, and how much heap a charged byte holds
     // depends on the program's frames, so a program whose frames hold more would lower this cap — on top
     // of `pageBaseline` being a floor (below), the second reason it is an upper bound.
     const interceptEverything =
-      interceptBuffersOnly + sourceLambdaRingAtExhaustion + sourceAsmRingAtExhaustion + sourceTmRingAtExhaustion
+      interceptBuffersOnly + sourceLambdaRingAtExhaustion + sourceRxmRingAtExhaustion + sourceTmRingAtExhaustion
 
     const derivedBuffersOnly = Math.floor((BUDGET_BYTES - interceptBuffersOnly) / marginal)
     const derivedEverything = Math.floor((BUDGET_BYTES - interceptEverything) / marginal)
@@ -600,9 +600,9 @@ describe('worker affordability', () => {
     for (const p of points) {
       expect(p.rings).toBeGreaterThan(p.n * 1_000_000)
     }
-    // The same for the source asm ring, which charged a full `HISTORY_BYTES`: a reading taken after the ring was
-    // collected would price nothing and still pass `sourceAsmRing`'s precondition.
-    expect(sourceAsmRingAtExhaustion).toBeGreaterThan(HISTORY_BYTES / 10)
+    // The same for the source rxm ring, which charged a full `HISTORY_BYTES`: a reading taken after the ring was
+    // collected would price nothing and still pass `sourceRxmRing`'s precondition.
+    expect(sourceRxmRingAtExhaustion).toBeGreaterThan(HISTORY_BYTES / 10)
 
     // A LOOSE BOUND ON FRAME COUNT. A ring of featherweight fixture frames (~88 bytes each, ~381,000 of
     // them to reach `HISTORY_BYTES`) would still charge to budget, still pass the ring-bytes bound just
@@ -705,16 +705,16 @@ describe('worker affordability', () => {
       )
     }
 
-    // READING (b), AS THE CASE ABOVE DERIVES IT FOR λ COPIES: intercept (a) plus the source session's λ, asm and TM
+    // READING (b), AS THE CASE ABOVE DERIVES IT FOR λ COPIES: intercept (a) plus the source session's λ, rxm and TM
     // rings at exhaustion, over this case's marginal. NO ROUND HERE BUILDS A λ RING, so one λ round reads the source
-    // λ ring as the case above's n=1 round does; the asm ring is `sourceAsmRing`'s and the TM ring
+    // λ ring as the case above's n=1 round does; the rxm ring is `sourceRxmRing`'s and the TM ring
     // `TM_LEG_RETENTION_RATIO` of `HISTORY_BYTES`, as there. Its cap is an upper bound for the two reasons reading (b)
     // gives there.
     const sourceLambdaRingAtExhaustion = (await round(1, collect)).rings
-    const sourceAsmRingAtExhaustion = (await sourceAsmRing(collect)).ring
+    const sourceRxmRingAtExhaustion = (await sourceRxmRing(collect)).ring
     const sourceTmRingAtExhaustion = TM_LEG_RETENTION_RATIO * HISTORY_BYTES
     const interceptEverything =
-      intercept + sourceLambdaRingAtExhaustion + sourceAsmRingAtExhaustion + sourceTmRingAtExhaustion
+      intercept + sourceLambdaRingAtExhaustion + sourceRxmRingAtExhaustion + sourceTmRingAtExhaustion
     const derivedEverything = Math.floor((BUDGET_BYTES - interceptEverything) / marginal)
     console.log(`TM copy intercept component — page/app baseline: ${pageBaseline}`)
     console.log(`TM copy intercept component — main-thread wasm module: ${MAIN_THREAD_WASM_MODULE_BASELINE_BYTES}`)
@@ -722,7 +722,7 @@ describe('worker affordability', () => {
       `TM copy intercept component — source session fixed cost (module+arena): ${SOURCE_WASM_MODULE_BASELINE_BYTES + SOURCE_SESSION_ARENA_BYTES}`,
     )
     console.log(`TM copy intercept component — source λ ring at exhaustion: ${sourceLambdaRingAtExhaustion}`)
-    console.log(`TM copy intercept component — source asm ring at exhaustion: ${sourceAsmRingAtExhaustion}`)
+    console.log(`TM copy intercept component — source rxm ring at exhaustion: ${sourceRxmRingAtExhaustion}`)
     console.log(`TM copy intercept component — source TM ring at exhaustion: ${sourceTmRingAtExhaustion}`)
     console.log(`TM copy derived cap (b) ${READING_B_LABEL} — intercept=${interceptEverything}: ${derivedEverything}`)
 
@@ -733,7 +733,7 @@ describe('worker affordability', () => {
     expect(derived).toBeGreaterThan(0)
     expect(derivedEverything).toBeGreaterThan(0)
     expect(sourceLambdaRingAtExhaustion).toBeGreaterThan(1_000_000)
-    expect(sourceAsmRingAtExhaustion).toBeGreaterThan(HISTORY_BYTES / 10)
+    expect(sourceRxmRingAtExhaustion).toBeGreaterThan(HISTORY_BYTES / 10)
     for (const p of points) {
       expect(p.rings).toBeGreaterThan((p.n * HISTORY_BYTES) / 10)
       for (const r of p.valueRun) expect(r).toBe('Ended')

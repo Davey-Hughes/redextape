@@ -46,8 +46,8 @@ function lambdaSession(id: SessionId, label: string, text: string, detached: boo
     legs: { lambda: leg },
     tmProgram: null,
     tmScratch: null,
-    asmProgram: null,
-    asmScratch: null,
+    rxmProgram: null,
+    rxmScratch: null,
   }
 }
 
@@ -76,8 +76,8 @@ function bothLegs(id: SessionId, label: string, text: string): SessionEntry {
     // `pane-host.ts`, so nothing in this file reads it.
     tmProgram: null,
     tmScratch: null,
-    asmProgram: null,
-    asmScratch: null,
+    rxmProgram: null,
+    rxmScratch: null,
   }
 }
 

@@ -39,14 +39,14 @@ beforeAll(async () => {
   await page.viewport(1280, 2400)
   document.body.innerHTML = SHELL
   view = await (await import('../../src/main')).ready
-  // **THE TM VIEW TAKES THE WHOLE ROW, WHICH EVERY WIDTH IN THIS FILE IS CHOSEN FOR.** The four-view tree puts asm
+  // **THE TM VIEW TAKES THE WHOLE ROW, WHICH EVERY WIDTH IN THIS FILE IS CHOSEN FOR.** The four-view tree puts rxm
   // beside TM (Plan 7 part 5 spec §3, row 4), which halves the view at any viewport: at 1280px the program row's
   // sub-steps would not fit, and the local level would already be under its 750px floor, so narrowing to 1000px
   // could not shrink it — neither the fits-case nor the narrows-case would be the case it names. Closed through the
-  // asm view's own `✕`, and the width asserted rather than assumed, since every viewport below stands for the
+  // rxm view's own `✕`, and the width asserted rather than assumed, since every viewport below stands for the
   // view's width.
-  document.querySelector<HTMLButtonElement>('[data-leaf="asm-0"] button.view-close')?.click()
-  await until(() => document.querySelector('[data-leaf="asm-0"]') === null, 'the asm view to close')
+  document.querySelector<HTMLButtonElement>('[data-leaf="rxm-0"] button.view-close')?.click()
+  await until(() => document.querySelector('[data-leaf="rxm-0"]') === null, 'the rxm view to close')
   expect(tmPane().getBoundingClientRect().width, 'the TM view does not span the row').toBe(
     document.querySelector('main')?.getBoundingClientRect().width,
   )

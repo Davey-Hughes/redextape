@@ -139,7 +139,7 @@ pub static TM: Grammar = Grammar {
 /// refusing past it rather than growing. A reviewer should treat a `simulate` in this function as
 /// a defect.
 ///
-/// **Lowering is allowed to fail and that is not this function's failure to report** — `lower_asm`
+/// **Lowering is allowed to fail and that is not this function's failure to report** — `lower_rxm`
 /// returns `Result` because `LowerError` outcomes are expected for some programs. Callers filter on
 /// `None`. The filter is real; design §11.5 says what actually needs sizing.
 ///
@@ -150,7 +150,7 @@ pub fn printed_machine(src: &str) -> Option<(String, Vec<(Span, TokenClass)>)> {
     let (program, _diagnostics) = redextape_core::parser::parse(src);
     let program = program?;
     let core = redextape_core::desugar::desugar(&program);
-    let prog = redextape_core::tm::lower_asm(&core).ok()?;
+    let prog = redextape_core::tm::lower_rxm(&core).ok()?;
     let machine = redextape_core::tm::lower_tm(&prog, &redextape_core::tm::Unary::at(8));
     Some(redextape_core::tm::print_tm_mapped(&machine))
 }

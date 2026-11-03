@@ -50,7 +50,7 @@ Measured directly on commit `a148c6c`, where the fixture this test used before t
 
 neither the favorable (longest-suffix-first, `tails`-shaped) order nor the adversarial (increasing) order Task 3's review once used as a counterexample reaches the budget cheaply
 
-## `crates/redextape-cli/src/run.rs`, above `/// MISMATCH, `.asm` form. `result Bool` over a machine that leaves `rr = 7` (not `0`/`1`)`
+## `crates/redextape-cli/src/run.rs`, above `/// MISMATCH, `.rxm` form. `result Bool` over a machine that leaves `rr = 7` (not `0`/`1`)`
 
 `Mismatch` (the file's fault, exit 1) and `BudgetExhausted` (the tool's limit, exit 2) used to be conflated on the `.asm` path (always `ToolFailed`) and on the `.tm` path (always `ProgramFailed` — the pre-existing bug `decode_tape_ty_reason` also fixes). These four tests pin the corrected, SYMMETRIC behaviour: both runners now give the same cause the same exit code and an honest message.
 
@@ -62,7 +62,7 @@ a balanced expression tree reaches it from about 6 KB of source, and the allocat
 
 this task's safety note forbids constructing a `tails`-shaped result via a running program, and this function needs nothing but a `Value` to test.
 
-## `crates/redextape-cli/src/run.rs`, above `fn run_asm_artifact(`
+## `crates/redextape-cli/src/run.rs`, above `fn run_rxm_artifact(`
 
 An earlier revision of this function gave the whole decode ONE treatment — always `ToolFailed`, always "does not decode as `Ty`" — which was backwards for a lying header and right only by coincidence for a budget exhaustion; `run_artifact_text` had the opposite bug, always blaming the file.
 
@@ -104,15 +104,15 @@ confirmed directly: `format_with_width(SRC, 120) == SRC` (clean) and `format_wit
 
 An earlier version collapsed the table's second column to `*expected != "rxt"` before comparing, which made `("p.asm", "asm")` and `("p.asm", "tm")` the same test: a defect mapping `.asm` onto `Form::Tm` left every row green, because both forms are equally "an artifact".
 
-## `crates/redextape-grammar-check/src/asm.rs`, above `#[must_use]`
+## `crates/redextape-grammar-check/src/rxm.rs`, above `#[must_use]`
 
 Measured over 64 samples of `arb_expr_over` at the leaf range in use: nothing refused.
 
-## `crates/redextape-grammar-check/src/asm.rs`, above `fn lower_via_program_template(core: &redextape_core::core::Core) -> Option<redextape_core:`
+## `crates/redextape-grammar-check/src/rxm.rs`, above `fn lower_via_program_template(core: &redextape_core::core::Core) -> Option<redextape_core:`
 
 reproduced while `redextape_core::tm::lower_program` was private (it is public now)
 
-## `crates/redextape-grammar-check/src/asm.rs`, above `use crate::grammar::{Grammar, compare_classified};`
+## `crates/redextape-grammar-check/src/rxm.rs`, above `use crate::grammar::{Grammar, compare_classified};`
 
 which went through review
 
@@ -140,11 +140,11 @@ Measured over `arb_expr_over` at both leaf ranges in use, 128 samples each: noth
 
 , which is the fact design §6.3 got wrong until PR 3's survey corrected it
 
-## `crates/redextape-grammar-check/tests/asm.rs`, above `#[test]`
+## `crates/redextape-grammar-check/tests/rxm.rs`, above `#[test]`
 
 — the standard every PR in the tree-sitter slice has met, and PR 1's review found `compare_classified` had shipped entirely untested.
 
-## `crates/redextape-grammar-check/tests/asm.rs`, above `#[test]`
+## `crates/redextape-grammar-check/tests/rxm.rs`, above `#[test]`
 
 fifteen runs observed on 2026-08-26 ranged from 8,384 to 9,620. Even at the top of that range this leg compares less than a sixteenth of what λ's 256-case leg does (163K) and less than a twenty-ninth of TM's 32-case leg (282,006).
 
@@ -546,7 +546,7 @@ SILENT PASSES, fifth review — four containers the hand-written descent did not
 
 **THE LAYER THIS REPLACES WAS DELETED, AND THIS PINS WHY.** A round added checks for macros in statement, expression, `impl`, trait, `extern` and type position on a report that one had declared a type and written a binding.
 
-## `crates/redextape-grammar-check/src/asm.rs`, above `pub const FIXED_CORPUS: &[&str] = &[`
+## `crates/redextape-grammar-check/src/rxm.rs`, above `pub const FIXED_CORPUS: &[&str] = &[`
 
 measured, `DEMOS` plus the closure reaches 20 of 24 mnemonics and this list reaches all 24 (`the_fixed_corpus_reaches_every_mnemonic`).
 
@@ -554,7 +554,7 @@ measured, `DEMOS` plus the closure reaches 20 of 24 mnemonics and this list reac
 
 **roughly 700 MB at the 700-725 bytes per state `examples/state_cost_probe.rs` measures**
 
-## `crates/redextape-grammar-check/tests/asm.rs`, above `#[test]`
+## `crates/redextape-grammar-check/tests/rxm.rs`, above `#[test]`
 
 One printed asm listing averages 146 bytes and 36 spans against λ's 912/637 and TM's 18,905/6,865. Both asm figures are FLOORS of a measured 256-case total rather than figures a total can be derived from, so multiplying either out undercounts. The measured span total is roughly 9,000 and moves with the seed
 
@@ -596,6 +596,6 @@ Extraction tracks the outcome across all three. A regex token is extracted under
 
 BEING ALL LETTERS NEITHER CAUSES NOR PREVENTS EXTRACTION, which this comment also once claimed: the keyword lexer here holds `head_move`, which is `/[LRS]/`, and omits the all-letter `version`, `encoding` and `result`, all three of which main's holds.
 
-## `grammars/tree-sitter-redextape-asm/grammar.js`, above `const NULLARY = ['ret', 'halt'];`
+## `grammars/tree-sitter-redextape-rxm/grammar.js`, above `const NULLARY = ['ret', 'halt'];`
 
 This was probed against `.tools/tree-sitter` 0.25.10 before it was written: a minimal grammar without the aliases parsed `add:` as `(ERROR [0, 0] - [0, 4])` while `foo:` parsed clean; with the aliases, `add:`, `halt:` and `foo:` all parsed as `(label name: (identifier))` and `add r0, r1` still parsed as an instruction.

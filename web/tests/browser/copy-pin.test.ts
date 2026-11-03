@@ -33,7 +33,7 @@ import {
 const SAMPLE = 'let x = 40; x + 2'
 /** The construct pinned, with the caret on its `+`: `x + 2` lowers to `pc3`, `add rr, r1, r2`, and owns TM states. */
 const PINNED = 'x + 2'
-/** An edited asm copy: five instructions, as the program has, so its `pc3` is there to be mis-marked. */
+/** An edited rxm copy: five instructions, as the program has, so its `pc3` is there to be mis-marked. */
 const EDITED = 'result Nat\n\n    li\tr1, #5\n    li\tr2, #6\n    li\tr3, #7\n    li\trr, #8\n    halt\n'
 /** The same copy edited again while its view is off the page, so its rebuild lands there. */
 const EDITED_AGAIN = 'result Nat\n\n    li\tr1, #1\n    li\tr2, #2\n    li\tr3, #3\n    li\trr, #9\n    halt\n'
@@ -41,12 +41,12 @@ const EDITED_AGAIN = 'result Nat\n\n    li\tr1, #1\n    li\tr2, #2\n    li\tr3, 
 let view: EditorView
 
 /** The two views' hosts, held from the mount: `pane-host.ts` keeps a host for good, on the page or off it. */
-let asmHost: HTMLElement
+let rxmHost: HTMLElement
 let tmHost: HTMLElement
-const asm = () => asmHost
+const rxm = () => rxmHost
 const tm = () => tmHost
-const pcs = () => [...asm().querySelectorAll<HTMLElement>('.asm-row .asm-pc')].map((e) => e.textContent)
-const value = () => asm().querySelector('.asm-value')?.textContent ?? ''
+const pcs = () => [...rxm().querySelectorAll<HTMLElement>('.rxm-row .rxm-pc')].map((e) => e.textContent)
+const value = () => rxm().querySelector('.rxm-value')?.textContent ?? ''
 const sourceLinked = () => view.dom.querySelector('.linked')?.textContent ?? null
 const frame = () => new Promise((r) => requestAnimationFrame(() => r(undefined)))
 
@@ -68,7 +68,7 @@ beforeAll(async () => {
   await page.viewport(1280, 1600)
   document.body.innerHTML = SHELL
   view = await (await import('../../src/main')).ready
-  asmHost = document.querySelector<HTMLElement>('.pane[data-leaf="asm-0"]') as HTMLElement
+  rxmHost = document.querySelector<HTMLElement>('.pane[data-leaf="rxm-0"]') as HTMLElement
   tmHost = document.querySelector<HTMLElement>('.pane[data-leaf="tm-0"]') as HTMLElement
   retype(view, SAMPLE)
   await until(() => !stateIdle(), 'the compile to start')
@@ -80,16 +80,16 @@ beforeAll(async () => {
 afterAll(() => unrecord())
 
 describe('a view on the page showing a copy', () => {
-  it('marks no instruction of an edited asm copy, where a view of the program marks the pin', async () => {
-    await pickInViewMenu(asm(), 'detach')
-    await until(() => editorOf(asm()) !== null, 'the asm copy’s editor')
-    retype(editorOf(asm()) as EditorView, EDITED)
+  it('marks no instruction of an edited rxm copy, where a view of the program marks the pin', async () => {
+    await pickInViewMenu(rxm(), 'detach')
+    await until(() => editorOf(rxm()) !== null, 'the rxm copy’s editor')
+    retype(editorOf(rxm()) as EditorView, EDITED)
     await until(() => value() === 'value: 8', 'the edited copy to build')
     expect(pcs()).toEqual(['pc0', 'pc1', 'pc2', 'pc3', 'pc4'])
 
     await pin()
     await until(() => tm().querySelector('.state-row.is-linked') !== null, 'the program’s TM view to mark the pin')
-    expect(asm().querySelector('.asm-row.is-linked')).toBeNull()
+    expect(rxm().querySelector('.rxm-row.is-linked')).toBeNull()
   })
 
   it('marks no state of a TM copy', async () => {
@@ -106,13 +106,13 @@ describe('a view on the page showing a copy', () => {
     await until(() => sourceLinked() === null, 'the earlier pin to clear')
     await pin()
     expect(tm().querySelector('.state-row.is-linked')).toBeNull()
-    expect(asm().querySelector('.asm-row.is-linked')).toBeNull()
+    expect(rxm().querySelector('.rxm-row.is-linked')).toBeNull()
   })
 })
 
 describe('a view on the page showing a copy, beside a view of the program', () => {
   /** Split `pane` with the program's pair on `leg`, through its menu with the pointer; the new view takes the focus. */
-  async function splitToProgram(pane: HTMLElement, leg: 'asm' | 'tm'): Promise<HTMLElement> {
+  async function splitToProgram(pane: HTMLElement, leg: 'rxm' | 'tm'): Promise<HTMLElement> {
     const before = new Set([...document.querySelectorAll<HTMLElement>(`.pane[data-kind="${leg}"]`)])
     await userEvent.click(pane.querySelector<HTMLButtonElement>('button.view-more') as HTMLButtonElement)
     await until(() => viewMenu(pane).matches(':popover-open'), 'the view menu to open')
@@ -140,14 +140,14 @@ describe('a view on the page showing a copy, beside a view of the program', () =
     return found
   }
 
-  it('marks no instruction of an asm copy for the program’s running focus', async () => {
-    const program = await splitToProgram(asm(), 'asm')
+  it('marks no instruction of an rxm copy for the program’s running focus', async () => {
+    const program = await splitToProgram(rxm(), 'rxm')
     // STEP 0, WHERE `pc0` — `li r0, #40`, the literal `40`'s — RUNS NEXT, AND THE FOCUS IS ITS CONSTRUCT.
     await userEvent.click(controlIn(program, '↺') as HTMLButtonElement)
     await until(() => paneStepText(program).startsWith('step 0 of'), 'the program’s view to restart')
-    await until(() => program.querySelector('.asm-row.is-focus') !== null, 'the program’s view to mark the focus')
-    expect(copyShown(asm()), 'the first view still shows its copy').toBe(true)
-    expect(asm().querySelector('.asm-row.is-focus')).toBeNull()
+    await until(() => program.querySelector('.rxm-row.is-focus') !== null, 'the program’s view to mark the focus')
+    expect(copyShown(rxm()), 'the first view still shows its copy').toBe(true)
+    expect(rxm().querySelector('.rxm-row.is-focus')).toBeNull()
   })
 
   it('marks no state of a TM copy for the program’s running focus', async () => {
@@ -166,7 +166,7 @@ describe('a view on the page showing a copy, beside a view of the program', () =
 
 describe('a view off the page when its copy rebuilt, and shown after the pin', () => {
   it('marks nothing on either leg once it is shown', async () => {
-    const asmEditor = editorOf(asm()) as EditorView
+    const rxmEditor = editorOf(rxm()) as EditorView
     const tmEditor = editorOf(tm()) as EditorView
     // STAGE: ONE VIEW ON THE PAGE, the source's, so both copies' views are off it.
     await userEvent.click(document.querySelector<HTMLButtonElement>('#workspace') as HTMLButtonElement)
@@ -177,24 +177,24 @@ describe('a view off the page when its copy rebuilt, and shown after the pin', (
     if (menu?.matches(':popover-open')) await userEvent.keyboard('{Escape}')
     await until(() => stageTab('source') !== null, 'the stage’s tabs')
     await userEvent.click(stageTab('source'))
-    await until(() => !asm().isConnected && !tm().isConnected, 'both copies’ views to be off the page')
+    await until(() => !rxm().isConnected && !tm().isConnected, 'both copies’ views to be off the page')
 
     // EACH COPY REBUILDS OFF THE PAGE, which puts its view in `replies.ts`'s `unseen`. The wait is on each build's
     // reply (`build-reply-fixture.ts`), not on the stored copies: an edit is stored as it is sent, before its build
     // lands.
-    retype(asmEditor, EDITED_AGAIN)
-    await until(() => replyTo(EDITED_AGAIN) === 'asm-scratch-compiled', 'the asm copy’s rebuild to land off the page')
+    retype(rxmEditor, EDITED_AGAIN)
+    await until(() => replyTo(EDITED_AGAIN) === 'rxm-scratch-compiled', 'the rxm copy’s rebuild to land off the page')
     const tmText = `${tmEditor.state.doc.toString()}\n`
     retype(tmEditor, tmText)
     await until(() => replyTo(tmText) === 'tm-scratch-compiled', 'the TM copy’s rebuild to land off the page')
 
     await pin()
 
-    await userEvent.click(stageTab('asm-0'))
-    await until(() => asm().isConnected && value() === 'value: 9', 'the asm view, seeded with its rebuilt copy')
+    await userEvent.click(stageTab('rxm-0'))
+    await until(() => rxm().isConnected && value() === 'value: 9', 'the rxm view, seeded with its rebuilt copy')
     await frame()
     expect(pcs()).toEqual(['pc0', 'pc1', 'pc2', 'pc3', 'pc4'])
-    expect(asm().querySelector('.asm-row.is-linked')).toBeNull()
+    expect(rxm().querySelector('.rxm-row.is-linked')).toBeNull()
 
     await userEvent.click(stageTab('tm-0'))
     await until(() => tm().isConnected && tm().querySelectorAll('.state-row').length > 3, 'the TM view’s rules')

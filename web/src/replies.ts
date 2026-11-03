@@ -1,6 +1,4 @@
 import type { EditorView } from '@codemirror/view'
-import type { AsmPane } from './asm-pane'
-import { seedAsm } from './asm-seed'
 import type { EditablePane } from './editor-custody'
 import { setDecline, setLink } from './highlight'
 import type { LambdaTrees } from './lambda-trees'
@@ -9,11 +7,13 @@ import { LinkIndex } from './link'
 import type { LinkWiring } from './link-wiring'
 import type { Notice } from './notice'
 import type { PaneCollection } from './panes'
-import { asmFrameBytes, lambdaFrameBytes, type RunReply, ruleCount, tmFrameBytes } from './protocol'
+import { lambdaFrameBytes, type RunReply, ruleCount, rxmFrameBytes, tmFrameBytes } from './protocol'
 import type { ProgramResult } from './readout'
+import type { RxmPane } from './rxm-pane'
+import { seedRxm } from './rxm-seed'
 import type { ScratchBuffers } from './scratch'
 import type { SessionId } from './session-client'
-import { type AsmCompiled, resetLegs, type SessionRegistry, type TmCompiled } from './sessions'
+import { type RxmCompiled, resetLegs, type SessionRegistry, type TmCompiled } from './sessions'
 import type { TmPane } from './tm-pane'
 
 /**
@@ -37,7 +37,7 @@ import type { TmPane } from './tm-pane'
  * straight into `#results` would be wrong the moment a copy's view held the focus.
  *
  * `editorHome` is read by each copy build's arm — `scratch-compiled`, `tm-scratch-compiled` and
- * `asm-scratch-compiled` — which mounts text onto the home pane, and by `worker-error`, which unmounts from
+ * `rxm-scratch-compiled` — which mounts text onto the home pane, and by `worker-error`, which unmounts from
  * a pane whose session is still live and still bound.
  *
  * **NO `root: HTMLElement`.** Neither handler reads it — `showBanner(root, ...)` is `main.ts`'s wasm-load
@@ -57,10 +57,10 @@ export function createReplies(deps: {
   links: LinkWiring
   trees: LambdaTrees
   /**
-   * TM and asm views a machine reached while they were off the page — `draw()` seeds each when it is next shown. Optional:
+   * TM and rxm views a machine reached while they were off the page — `draw()` seeds each when it is next shown. Optional:
    * a caller that never hides a view (every direct test of this module) needs none, and gets a set nothing reads.
    */
-  unseen?: WeakSet<TmPane | AsmPane>
+  unseen?: WeakSet<TmPane | RxmPane>
   draw: () => void
   /**
    * Schedule a callback for the next paint — `requestAnimationFrame`, injectable so a node test can drive
@@ -116,7 +116,7 @@ export function createReplies(deps: {
     panes,
     links: linkWiring,
     trees,
-    unseen = new WeakSet<TmPane | AsmPane>(),
+    unseen = new WeakSet<TmPane | RxmPane>(),
     draw,
     frame = (cb: () => void) => void requestAnimationFrame(cb),
     editorHome,
@@ -204,29 +204,29 @@ export function createReplies(deps: {
   }
 
   /**
-   * Store `session`'s asm listing on its entry and tell every asm view bound to it that is on the page, by
+   * Store `session`'s rxm listing on its entry and tell every rxm view bound to it that is on the page, by
    * `storeAndSetProgram`'s rule: a view off the page goes in `unseen`, and `draw()` seeds it from the entry when it is
    * shown. One call, so the entry always agrees with what the views were told.
    */
-  const setAsmProgram = (session: SessionId, compiled: AsmCompiled | null): void => {
+  const setRxmProgram = (session: SessionId, compiled: RxmCompiled | null): void => {
     const entry = sessions.entryOf(session)
-    entry.asmProgram = compiled
-    for (const p of panes.ofSession('asm', session)) {
-      const pane = p.pane as AsmPane
+    entry.rxmProgram = compiled
+    for (const p of panes.ofSession('rxm', session)) {
+      const pane = p.pane as RxmPane
       if (!p.host.isConnected) {
         unseen.add(pane)
         continue
       }
       // EVERYTHING THE SESSION KEEPS, THROUGH THE ONE SEED A VIEW BUILT LATER GETS: the listing, whether it can be
       // copied, and a copy's value, which its build reply writes on the entry before this runs.
-      seedAsm(pane, compiled, entry.asmScratch)
+      seedRxm(pane, compiled, entry.rxmScratch)
     }
   }
 
   /**
    * Coalesce a redraw to at most one per animation frame, for the replies that arrive in a stream: a TM copy's
    * `tm-value` while its run is `Running`, which the worker posts once per `VALUE_CHUNK`, and every `lambda-frames`,
-   * `tm-frames` and `asm-frames` chunk that does not end its recording, which `record-loop.ts`'s `recordLeg` posts
+   * `tm-frames` and `rxm-frames` chunk that does not end its recording, which `record-loop.ts`'s `recordLeg` posts
    * once per `RECORD_CHUNK` while any leg records. Either comes far more often than a display paints, and a `draw()`
    * per reply is a full, synchronous redraw the browser cannot skip, even behind a hidden tab.
    *
@@ -297,15 +297,15 @@ export function createReplies(deps: {
         // NOTHING TO SHOW, AND THE SESSION IS LEFT HOLDING NOTHING EITHER — one call, so a view shown
         // later, which `draw()` seeds from the entry, reads what the views on the page were just told.
         setTmProgram(session, null)
-        setAsmProgram(session, null)
+        setRxmProgram(session, null)
         linkWiring.setIndex(null)
         view().dispatch({ effects: [setDecline.of(null), setLink.of(null)] })
         // `draw()` calls `drawLink()` itself, after its render loop and before its readout pass.
         draw()
         return
       case 'compiled':
-        resetLegs(legs, { lambda: reply.lambda, asm: reply.asm, tm: reply.tm })
-        setAsmProgram(session, reply.asmProgram === null ? null : { program: reply.asmProgram, asmText: reply.asmText })
+        resetLegs(legs, { lambda: reply.lambda, rxm: reply.rxm, tm: reply.tm })
+        setRxmProgram(session, reply.rxmProgram === null ? null : { program: reply.rxmProgram, rxmText: reply.rxmText })
         // THE ONE REPLY THAT CARRIES A MACHINE, RETAINED AS IT IS FANNED OUT. `tmProgram` is `null` on the
         // wire for a program with no TM leg, so a reply with no machine in it leaves the session holding
         // nothing rather than an envelope around a `null`.
@@ -352,9 +352,9 @@ export function createReplies(deps: {
         else flushDraw()
         return
       }
-      case 'asm-frames': {
-        const leg = sessions.legOf({ session, leg: 'asm' })
-        for (const f of reply.frames) leg.hist.push(f, asmFrameBytes(f))
+      case 'rxm-frames': {
+        const leg = sessions.legOf({ session, leg: 'rxm' })
+        for (const f of reply.frames) leg.hist.push(f, rxmFrameBytes(f))
         leg.done = reply.done
         if (reply.done === null) scheduleDraw()
         else flushDraw()
@@ -362,7 +362,7 @@ export function createReplies(deps: {
       }
       case 'result':
         results.dataset.state = 'idle'
-        setProgram({ kind: 'result', gen: reply.gen, lambda: reply.lambda, asm: reply.asm, tm: reply.tm })
+        setProgram({ kind: 'result', gen: reply.gen, lambda: reply.lambda, rxm: reply.rxm, tm: reply.tm })
         draw()
         return
       case 'worker-error':
@@ -385,7 +385,7 @@ export function createReplies(deps: {
         resetLegs(legs, {}, 'not compiled')
         // NOTHING TO SHOW AND NOTHING RETAINED, same as the `no-session` arm above.
         setTmProgram(session, null)
-        setAsmProgram(session, null)
+        setRxmProgram(session, null)
         linkWiring.setIndex(null)
         view().dispatch({ effects: [setDecline.of(null), setLink.of(null)] })
         setProgram({ kind: 'error', error: new Error(reply.message) })
@@ -393,14 +393,14 @@ export function createReplies(deps: {
         return
       // FIVE KINDS THAT NEVER REACH THE PROGRAM'S SESSION, WRITTEN OUT so that a kind added to `RunReply` is a
       // type error at `unhandled` below rather than a reply this switch drops with `tsc` green (Plan 7 part 5's
-      // spec, amendment 8). `scratch-compiled`, `tm-scratch-compiled` and `asm-scratch-compiled` answer a copy's
-      // build, which only `ScratchBuffers` posts; `tm-value` is a TM copy's value run and `asm-value` an asm copy's
+      // spec, amendment 8). `scratch-compiled`, `tm-scratch-compiled` and `rxm-scratch-compiled` answer a copy's
+      // build, which only `ScratchBuffers` posts; `tm-value` is a TM copy's value run and `rxm-value` an rxm copy's
       // value after a `[continue]`, where the program's value arrives in `result`.
       case 'scratch-compiled':
       case 'tm-scratch-compiled':
       case 'tm-value':
-      case 'asm-scratch-compiled':
-      case 'asm-value':
+      case 'rxm-scratch-compiled':
+      case 'rxm-value':
         return
       default:
         unhandled(reply)
@@ -419,17 +419,17 @@ export function createReplies(deps: {
    * `lambda-scratch` request with exactly `scratch-compiled`, `lambda-frames`, `no-session` or
    * `worker-error`; a `tm-scratch` request with `tm-scratch-compiled`, `tm-frames`, `tm-value`,
    * `no-session` or `worker-error` (`onTmScratch`, `session-worker.ts`'s TM counterpart to
-   * `onLambdaScratch`); and an `asm-scratch` request with `asm-scratch-compiled`, `asm-frames`, `no-session` or
-   * `worker-error` (`onAsmScratch`), and its `[continue]` with `asm-value`. `tm-value` and `asm-value` are the
-   * machine legs' extra shapes: a headered TM buffer's value run reports through the first, and an asm copy's
+   * `onLambdaScratch`); and an `rxm-scratch` request with `rxm-scratch-compiled`, `rxm-frames`, `no-session` or
+   * `worker-error` (`onRxmScratch`), and its `[continue]` with `rxm-value`. `tm-value` and `rxm-value` are the
+   * machine legs' extra shapes: a headered TM buffer's value run reports through the first, and an rxm copy's
    * value read again once `[continue]` carries it past its build's cap through the second, where a compiled
    * session's value arrives in `result`. A λ copy's views ask for `lambda-tree` too. `compiled`/`result`
    * need a `SourceMap`/`ty` no buffer has, on any leg, so their arm does nothing — written out for the reason
    * `onReply`'s own do-nothing arm is. `no-session` and `worker-error` are genuinely shared, one arm apiece for
    * every leg — a buffer's failure to build or its worker's death read the same whichever leg minted it.
-   * `lambda-frames`, `tm-frames` and `asm-frames` are not shareable in the same way (`hist.push` closes over a
+   * `lambda-frames`, `tm-frames` and `rxm-frames` are not shareable in the same way (`hist.push` closes over a
    * different `LegState`), so each gets its own arm; `scratch-compiled`, `tm-scratch-compiled` and
-   * `asm-scratch-compiled` likewise, because their payloads share no field (`tm-scratch-compiled`'s own doc in
+   * `rxm-scratch-compiled` likewise, because their payloads share no field (`tm-scratch-compiled`'s own doc in
    * `protocol.ts` has the argument).
    *
    * IT NEVER TOUCHES `results.dataset.state` AT ALL — `onReply` above holds this file's writes of it. That
@@ -592,38 +592,38 @@ export function createReplies(deps: {
         else flushDraw()
         return
       }
-      case 'asm-scratch-compiled': {
-        // `tm-scratch-compiled`'s arm for an asm copy: one status, the listing stored and fanned out, and the copy's
+      case 'rxm-scratch-compiled': {
+        // `tm-scratch-compiled`'s arm for an rxm copy: one status, the listing stored and fanned out, and the copy's
         // status and value retained on the entry for a view built after this reply. The value comes with the build
-        // (`protocol.ts`'s own doc on this reply). No `asmText`: a copy offers no copy of itself.
-        resetLegs(sessions.entryOf(session).legs, { asm: reply.asm })
+        // (`protocol.ts`'s own doc on this reply). No `rxmText`: a copy offers no copy of itself.
+        resetLegs(sessions.entryOf(session).legs, { rxm: reply.rxm })
         built(session)
-        sessions.entryOf(session).asmScratch = { status: reply.asm, value: reply.value }
-        setAsmProgram(session, { program: reply.asmProgram, asmText: null })
+        sessions.entryOf(session).rxmScratch = { status: reply.rxm, value: reply.value }
+        setRxmProgram(session, { program: reply.rxmProgram, rxmText: null })
         // THE EDITOR FROM THE BUFFER'S OWN TEXT OF RECORD, as `tm-scratch-compiled`'s arm mounts a TM copy's, and for
         // its reason: a fork and an edit both write the text before posting the build.
-        const asmSeed = scratchpad.editorSeed(session)
-        if (asmSeed !== null) editorHome(session)?.setEditor(asmSeed.text, asmSeed.collapsed)
+        const rxmSeed = scratchpad.editorSeed(session)
+        if (rxmSeed !== null) editorHome(session)?.setEditor(rxmSeed.text, rxmSeed.collapsed)
         // INTO STORAGE UNCONDITIONALLY AND DEFENSIVELY, as `tm-scratch-compiled`'s arm stores and for its reason: this
-        // reply carries no text either, every route that posts an asm build has stored the text already, and the write
+        // reply carries no text either, every route that posts an rxm build has stored the text already, and the write
         // keeps a build that landed stored if a route that posts without storing is ever added.
         onBuffersPersist()
         draw()
         return
       }
-      case 'asm-value': {
+      case 'rxm-value': {
         // A `[continue]` carried the copy's cursor past its build's cap. Retained over the build's value, which it
         // replaces; a reading with no build before it cannot happen, for `tm-value`'s reason.
         const entry = sessions.entryOf(session)
-        if (entry.asmScratch !== null) entry.asmScratch = { ...entry.asmScratch, value: reply.value }
-        for (const p of panes.ofSession('asm', session)) (p.pane as AsmPane).setScratch(entry.asmScratch)
+        if (entry.rxmScratch !== null) entry.rxmScratch = { ...entry.rxmScratch, value: reply.value }
+        for (const p of panes.ofSession('rxm', session)) (p.pane as RxmPane).setScratch(entry.rxmScratch)
         draw()
         return
       }
-      case 'asm-frames': {
-        // The asm counterpart of `lambda-frames` below, unguarded for the identical reason.
-        const leg = sessions.legOf({ session, leg: 'asm' })
-        for (const f of reply.frames) leg.hist.push(f, asmFrameBytes(f))
+      case 'rxm-frames': {
+        // The rxm counterpart of `lambda-frames` below, unguarded for the identical reason.
+        const leg = sessions.legOf({ session, leg: 'rxm' })
+        for (const f of reply.frames) leg.hist.push(f, rxmFrameBytes(f))
         leg.done = reply.done
         if (reply.done === null) scheduleDraw()
         else flushDraw()
@@ -733,8 +733,8 @@ export function createReplies(deps: {
         // holding the editor, which `setEditor(null)` below reaches. A split pane showing the same buffer would
         // otherwise go on reading `running` over a thread that will never answer again.
         sessions.entryOf(session).tmScratch = null
-        sessions.entryOf(session).asmScratch = null
-        for (const p of panes.ofSession('asm', session)) (p.pane as AsmPane).setScratch(null)
+        sessions.entryOf(session).rxmScratch = null
+        for (const p of panes.ofSession('rxm', session)) (p.pane as RxmPane).setScratch(null)
         for (const p of panes.ofSession('tm', session)) {
           const pane = p.pane as TmPane
           pane.setScratchStatus(null)

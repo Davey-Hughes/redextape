@@ -3,8 +3,8 @@
 use crate::core::{BinOp, Core};
 use crate::desugar::desugar;
 use crate::parser::parse;
-use crate::tm::asm::{Instr, Program, Reg};
 use crate::tm::machine::{Machine, Move, Rule, State, Symbol};
+use crate::tm::rxm::{Instr, Program, Reg};
 
 /// A one-tape unary incrementer: skip the `1`s, write a `1` on the first blank, accept.
 pub(crate) fn increment() -> Machine {

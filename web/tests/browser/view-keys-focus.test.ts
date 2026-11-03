@@ -50,7 +50,7 @@ async function start(): Promise<void> {
   for (const b of document.querySelectorAll<HTMLButtonElement>('#views-shown button[aria-pressed="false"]')) b.click()
   view.focus()
   await until(() => view.hasFocus, 'the source editor to take the focus')
-  expect(mounted(), 'precondition: all four views').toEqual(['source', 'lambda-0', 'asm-0', 'tm-0'])
+  expect(mounted(), 'precondition: all four views').toEqual(['source', 'lambda-0', 'rxm-0', 'tm-0'])
   expect(togglesHidden(), 'precondition: the toggles are shown').toBe(false)
   expect(armed(), 'precondition: the mode is not armed').toBe(false)
 }
@@ -107,7 +107,7 @@ describe('the focus after a view key', () => {
 
     it('stays on the TM toggle when a key hides the source view beside it', async () => {
       await start()
-      await userEvent.click(toggle('asm'))
+      await userEvent.click(toggle('rxm'))
       await userEvent.click(toggle('lambda'))
       expect(mounted(), 'precondition: the source and TM views').toEqual(['source', 'tm-0'])
       const tm = toggle('tm')
@@ -120,7 +120,7 @@ describe('the focus after a view key', () => {
 
     it('refuses a pointer press on the only toggle pressed, and says why', async () => {
       await start()
-      for (const kind of ['source', 'asm', 'tm']) await userEvent.click(toggle(kind))
+      for (const kind of ['source', 'rxm', 'tm']) await userEvent.click(toggle(kind))
       expect(mounted()).toEqual(['lambda-0'])
       expect(toggle('lambda').getAttribute('aria-disabled'), 'precondition: the λ toggle is disabled').toBe('true')
       // `force`, BECAUSE THE TEST DRIVER WAITS FOR A CONTROL TO BE ENABLED BEFORE IT PRESSES ONE, and it reads
@@ -219,7 +219,7 @@ describe('the focus after a view key', () => {
       old.focus()
       expect(document.activeElement, 'precondition: the divider has the focus').toBe(old)
       await viewKey('4')
-      expect(mounted()).toEqual(['source', 'lambda-0', 'asm-0'])
+      expect(mounted()).toEqual(['source', 'lambda-0', 'rxm-0'])
       expect(dividers().map(named), 'precondition: the tree kept a divider at [] 0').toContain('[] 0')
       expect(old.isConnected, 'precondition: the divider was built again').toBe(false)
       await holdsFocus(divider('[] 0'), 'the focus is not on the divider built in its place')
@@ -253,7 +253,7 @@ describe('the focus after a view key', () => {
       expect(tabs(), 'precondition: four tabs, the source’s selected').toEqual([
         'source, selected',
         'lambda-0',
-        'asm-0',
+        'rxm-0',
         'tm-0',
       ])
       expect(mounted(), 'precondition: the source view alone is on the page').toEqual(['source'])
@@ -264,7 +264,7 @@ describe('the focus after a view key', () => {
       const old = stageTab('source')
       old.focus()
       await viewKey('4')
-      expect(tabs(), 'the key did not take the TM view’s tab away').toEqual(['source, selected', 'lambda-0', 'asm-0'])
+      expect(tabs(), 'the key did not take the TM view’s tab away').toEqual(['source, selected', 'lambda-0', 'rxm-0'])
       expect(old.isConnected, 'precondition: the tab was built again').toBe(false)
       await holdsFocus(stageTab('source'), 'the focus is not on the tab built in its place')
     })
@@ -277,7 +277,7 @@ describe('the focus after a view key', () => {
         stageTab('lambda-0'),
       )
       await viewKey('4')
-      expect(tabs()).toEqual(['source, selected', 'lambda-0', 'asm-0'])
+      expect(tabs()).toEqual(['source, selected', 'lambda-0', 'rxm-0'])
       await holdsFocus(stageTab('lambda-0'), 'the focus is not on the λ view’s tab')
       expect(mounted(), 'the key selected a tab').toEqual(['source'])
     })
@@ -288,7 +288,7 @@ describe('the focus after a view key', () => {
       await userEvent.keyboard('{End}')
       expect(document.activeElement, 'precondition: End moved the focus to the TM view’s tab').toBe(stageTab('tm-0'))
       await viewKey('4')
-      expect(tabs()).toEqual(['source, selected', 'lambda-0', 'asm-0'])
+      expect(tabs()).toEqual(['source, selected', 'lambda-0', 'rxm-0'])
       expect(document.activeElement, 'the focus fell to <body>').not.toBe(document.body)
       expect(viewOfFocus(), 'the focus is not in the view on the page').toBe('source')
     })
@@ -299,11 +299,11 @@ describe('the focus after a view key', () => {
       view.dispatch({ selection: { anchor: 14 } })
       await until(() => view.hasFocus, 'the source editor to take the focus')
       await viewKey('4')
-      expect(tabs()).toEqual(['source, selected', 'lambda-0', 'asm-0'])
+      expect(tabs()).toEqual(['source, selected', 'lambda-0', 'rxm-0'])
       expect(view.hasFocus, 'the key took the focus out of the editor').toBe(true)
       expect(view.state.selection.main.head, 'the caret is not where it was').toBe(14)
       await viewKey('1')
-      expect(tabs(), 'hiding the view on the page did not select another').toEqual(['lambda-0, selected', 'asm-0'])
+      expect(tabs(), 'hiding the view on the page did not select another').toEqual(['lambda-0, selected', 'rxm-0'])
       expect(mounted()).toEqual(['lambda-0'])
       expect(viewOfFocus(), 'the focus is not in the view that took the page').toBe('lambda-0')
     })
@@ -344,7 +344,7 @@ describe('the focus after a view key', () => {
       expect(document.activeElement, 'the focus fell to <body>').not.toBe(document.body)
       expect(viewOfFocus(), 'the focus is not in the focused view').toBe(mounted().find((l) => l !== 'source'))
       await viewKey(own)
-      expect(mounted()).toEqual(['source', 'lambda-0', 'asm-0', 'tm-0'])
+      expect(mounted()).toEqual(['source', 'lambda-0', 'rxm-0', 'tm-0'])
       const back = EditorView.findFromDOM((host(leaf) as HTMLElement).querySelector(editor) as HTMLElement)
       expect(back?.state.doc.toString(), 'the copy’s editor did not come back with its text').toBe(text)
     })

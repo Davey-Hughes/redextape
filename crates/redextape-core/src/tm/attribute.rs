@@ -1,8 +1,8 @@
 //! Attribute TM steps back to the Core constructs that caused them.
 //!
-//! Composition: per-state step counts (`sim::simulate_counts`) → the asm instruction that built each
+//! Composition: per-state step counts (`sim::simulate_counts`) → the rxm instruction that built each
 //! state (`lower_tm_mapped`) → the `Core` node whose lowering emitted that instruction
-//! (`lower_asm_mapped`) → and, for higher-order programs, whether that node is something the user
+//! (`lower_rxm_mapped`) → and, for higher-order programs, whether that node is something the user
 //! wrote or scaffolding `defunc` synthesized (`defunc_mapped`).
 //!
 //! The structural property is exhaustiveness: every step lands in exactly one bucket, so the
@@ -21,7 +21,7 @@ use crate::core::{Core, NodeId};
 use crate::tm::build::{REG, TAPES, WORK};
 use crate::tm::defunc::defunc_mapped;
 use crate::tm::encoding::{Encoding, Unary};
-use crate::tm::lower_asm::{LowerError, lower_asm_mapped};
+use crate::tm::lower_rxm::{LowerError, lower_rxm_mapped};
 use crate::tm::lower_tm::{SlotMap, lower_tm_mapped};
 use crate::tm::machine::{Machine, Symbol};
 use crate::tm::sim::{self, Status};
@@ -132,7 +132,7 @@ struct Mapped {
     machine: Machine,
     /// Parallel to `machine.states`: the `code` index that built each state (`None` = scaffolding).
     state_origins: Vec<Option<usize>>,
-    /// Parallel to the asm program's `code`: the `Core` node whose lowering emitted each instruction.
+    /// Parallel to the rxm program's `code`: the `Core` node whose lowering emitted each instruction.
     origins: Vec<NodeId>,
     /// The ids `defunc` minted, empty when the program lowered first-order (so `defunc` never ran).
     synthetic: BTreeSet<NodeId>,
@@ -155,11 +155,11 @@ fn lower_mapped(core: &Core, enc: &dyn Encoding) -> Result<Option<Mapped>, Lower
     // `Unsupported`. `TooDeep` is returned immediately, exactly as `lower_program` does — a looser
     // `or_else` would swallow it and replay a deep Core through `defunc`'s own recursive passes. The
     // match is exhaustive rather than wildcarded so a future `LowerError` variant must decide here too.
-    let (prog, origins, synthetic) = match lower_asm_mapped(core) {
+    let (prog, origins, synthetic) = match lower_rxm_mapped(core) {
         Ok((p, o)) => (p, o, BTreeSet::new()),
         Err(LowerError::Unsupported { .. }) => {
             let (defunced, synthetic) = defunc_mapped(core)?;
-            let (p, o) = lower_asm_mapped(&defunced)?;
+            let (p, o) = lower_rxm_mapped(&defunced)?;
             (p, o, synthetic)
         }
         Err(e @ LowerError::TooDeep { .. }) => return Err(e),
@@ -230,7 +230,7 @@ fn parse_core(src: &str) -> Result<Core, LowerError> {
 /// # Errors
 ///
 /// `Err(LowerError::Unsupported { node: 0, .. })` if `src` does not parse (`node: 0` because there is
-/// no tree to blame). Otherwise the error is whatever `defunc`/`lower_asm` reported while lowering the
+/// no tree to blame). Otherwise the error is whatever `defunc`/`lower_rxm` reported while lowering the
 /// desugared program — see `lower_mapped`'s doc for the exact sequence and `defunc_mapped`'s `# Errors`
 /// for what each variant means. A caller cannot recover an `Attribution` for a program that fails
 /// here; a program `lower_tm_mapped` refuses to lay out (over `MAX_SLOTS`/`MAX_FRAME_LOC`/
@@ -306,7 +306,7 @@ mod tests {
                 [("Unary", Box::new(Unary::default()) as Box<dyn Encoding>), ("Binary", Box::new(Binary::default()))]
             {
                 let core = parse_core(src).expect("parses");
-                let prog = crate::tm::lower_asm::lower_asm(&core).expect("lowers first-order");
+                let prog = crate::tm::lower_rxm::lower_rxm(&core).expect("lowers first-order");
                 let sm = SlotMap::of(&prog);
                 let machine = lower_tm(&prog, &*enc);
                 // Exactly as `tm.rs`'s `attempt` seeds it — both banks.
@@ -417,7 +417,7 @@ mod tests {
     ///
     /// `2 * 3` desugars to a `BinOp` over two `Nat`s, so the three buckets are the two literals and
     /// the multiply — and the multiply's bucket also carries the trailing `Halt`, which
-    /// `lower_asm_mapped` bills to the top-level node. Note the literal `3` costs more than the
+    /// `lower_rxm_mapped` bills to the top-level node. Note the literal `3` costs more than the
     /// literal `2`: the tape is unary.
     ///
     /// The three ids are READ OFF the parsed Core rather than written out as `Node(0..2)`, so the
@@ -458,10 +458,10 @@ mod tests {
     ///
     /// Two mutants it catches:
     ///
-    ///   1. `lower_asm::lower_function` re-billing the prologue (`Mov` per param) and the `Ret` from
+    ///   1. `lower_rxm::lower_function` re-billing the prologue (`Mov` per param) and the `Ret` from
     ///      the enclosing `LetRec` to the body node — e.g. by lowering the `Lambda` through
     ///      `lower_into`. That is exactly the attribution `defunc.rs`'s `Origin` doc cites as the reason
-    ///      a kept function carries its source id ("`lower_asm` bills a function's prologue (one `Mov`
+    ///      a kept function carries its source id ("`lower_rxm` bills a function's prologue (one `Mov`
     ///      per parameter) and its `Ret` to the binder node, and those run on EVERY call"). Here it
     ///      empties the `LetRec` bucket.
     ///   2. Anything that drops the `at` source-id carry in `defunc`'s `box_get1`/`box_set2` — see
@@ -598,7 +598,7 @@ mod tests {
     ///
     /// The cheap `code.len()` pre-check in `lower_tm_all` (`n >= MAX_MACHINE_STATES`) is UNREACHABLE
     /// from source here, but not because `MAX_LOWER_DEPTH` bounds `code.len()` in general — it does
-    /// not. `lower_asm::MAX_LOWER_DEPTH` (580) bounds Core *depth*; it holds `code.len()` down only for
+    /// not. `lower_rxm::MAX_LOWER_DEPTH` (580) bounds Core *depth*; it holds `code.len()` down only for
     /// DEPTH-LIMITED shapes. THIS program is not depth-limited — it is BALANCED, depth 11 for 2,048
     /// leaves — so `MAX_LOWER_DEPTH` never fires. What actually keeps the pre-check unreached is
     /// `n_slots`: for this shape `n_slots` tracks `code.len()`, so `MAX_SLOTS` (100,000) refuses the
@@ -633,7 +633,7 @@ mod tests {
         // lowering change should move `code.len()`/`n_slots`, not silently relocate this test onto a
         // guard it no longer exercises while staying green.
         let core = parse_core(&src).expect("parses");
-        let prog = crate::tm::lower_asm::lower_asm(&core).expect("lowers first-order");
+        let prog = crate::tm::lower_rxm::lower_rxm(&core).expect("lowers first-order");
         assert!(
             prog.code.len() < crate::tm::build::MAX_MACHINE_STATES,
             "must stay under the cheap `code.len()` pre-check, or THAT refusal fires instead of the \
@@ -647,12 +647,12 @@ mod tests {
             crate::tm::n_slots_of(&prog)
         );
         assert!(
-            !prog.code.iter().any(|i| matches!(i, crate::tm::asm::Instr::Bin(crate::core::BinOp::Mul, ..))),
+            !prog.code.iter().any(|i| matches!(i, crate::tm::rxm::Instr::Bin(crate::core::BinOp::Mul, ..))),
             "must contain no `Mul`, or `mul_count_unrepresentable` could fire instead of the guard \
              this test exists to pin"
         );
         assert!(
-            !prog.code.iter().any(|i| matches!(i, crate::tm::asm::Instr::Call(_))),
+            !prog.code.iter().any(|i| matches!(i, crate::tm::rxm::Instr::Call(_))),
             "must contain no `Call`, or `frame_bank_unrepresentable` could fire instead of the guard \
              this test exists to pin (that guard is dormant on any call-free program)"
         );

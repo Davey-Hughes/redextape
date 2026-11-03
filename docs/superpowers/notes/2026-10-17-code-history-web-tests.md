@@ -90,23 +90,23 @@ Until PR 5b the bump happened 300 ms later, inside `request`, and a stale `resul
 
 `BIG`'s run ends only once its TM leg has recorded a full history, to step 78,458, and as one wait it took 7,583 to 8,601 ms at `CPUQuota=25%` (2026-10-05), against `until`'s 10 s; as two, the second took up to 7,400 ms.
 
-## `web/tests/browser/asm-app.test.ts`, above `const UPTO = 'fn upto(n) { if n == 0 { nil } else { cons(n, upto(n - 1)) } } upto(600)'`
+## `web/tests/browser/rxm-app.test.ts`, above `const UPTO = 'fn upto(n) { if n == 0 { nil } else { cons(n, upto(n - 1)) } } upto(600)'`
 
 `upto(600)`: 8,413 instructions, whose frames carry up to eight saved frames and sixteen cells, so recording them passes `HISTORY_BYTES` at about step 7,400 — measured against `asmFrameBytes` by stepping the same lowering in node.
 
-## `web/tests/browser/asm-copy-cost.test.ts`, above `type Copy = { asmStatus(): AsmStatus; asmProgram(): AsmProgram; asmValue(): Decoded; free(`
+## `web/tests/browser/rxm-copy-cost.test.ts`, above `type Copy = { rxmStatus(): RxmStatus; rxmProgram(): RxmProgram; rxmValue(): Decoded; free(`
 
 Amendment 36 priced only the loop; amendment 45 found `both` heavier in every run measured and moved the rule to whichever run turns out heaviest, rather than naming one in advance.
 
-## `web/tests/browser/asm-copy-restore.test.ts`, above `it('brings back a copy that does not build in its editor, with the label that names nothin`
+## `web/tests/browser/rxm-copy-restore.test.ts`, above `it('brings back a copy that does not build in its editor, with the label that names nothin`
 
 A jump to a label that names nothing refuses the whole copy, so its build answers no session, and the editor used to come only from a build that landed — the view read `building…` with no editor and no way to get one.
 
-## `web/tests/browser/asm-copy.test.ts`, above `await userEvent.click(tm.querySelectorAll<HTMLElement>('.state-row')[3] as HTMLElement)`
+## `web/tests/browser/rxm-copy.test.ts`, above `await userEvent.click(tm.querySelectorAll<HTMLElement>('.state-row')[3] as HTMLElement)`
 
 THE ROW `let x = 40`'s CONSTRUCT OWNS IN THE PROGRAM — measured on `main`, where a click on it in the copy pinned `40` in the source through the program's index.
 
-## `web/tests/browser/bindings-stored.test.ts`, above `const FOUR = ['source', 'lambda-0', 'asm-0', 'tm-0']`
+## `web/tests/browser/bindings-stored.test.ts`, above `const FOUR = ['source', 'lambda-0', 'rxm-0', 'tm-0']`
 
 The bindings were written at a fork, a pick in a title, a pause and a delete, and not when a view was closed, added, or built again. So a `✕` on a view of a copy left its leaf bound in storage, the view its toggle built there next was on the program, and a reload put that view on the closed view's copy: measured on `5ff63af` by seeding a second page with what the first had stored, which opened reading `λ · copy 1`. `pane-host.ts`'s `applyLayout` writes the bindings now, each time it has built or dropped views.
 

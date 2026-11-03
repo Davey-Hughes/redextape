@@ -193,7 +193,7 @@ describe('notices', () => {
       const oneLine = text().getBoundingClientRect().height
       const before = box()
       n.notify(
-        "the link's λ step 100 and asm step 100 are past the end of this run — showing λ step 7 and asm step 5",
+        "the link's λ step 100 and rxm step 100 are past the end of this run — showing λ step 7 and rxm step 5",
         { action },
       )
       expect(text().getBoundingClientRect().height).toBeGreaterThan(oneLine)

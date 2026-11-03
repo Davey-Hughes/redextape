@@ -40,10 +40,10 @@ describe('stage', () => {
   })
 
   it('draws one tab per leaf, in leaves() order, over the focused view alone', () => {
-    expect(mounted()).toEqual(['source', 'lambda-0', 'asm-0', 'tm-0'])
+    expect(mounted()).toEqual(['source', 'lambda-0', 'rxm-0', 'tm-0'])
     clickWorkspaceItem('[data-switch="views"][data-value="stage"]')
-    expect(tabs().map((t) => t.dataset.leaf)).toEqual(['source', 'lambda-0', 'asm-0', 'tm-0'])
-    expect(tabs().map((t) => t.textContent)).toEqual(['source', 'λ · program', 'asm · program', 'TM · program'])
+    expect(tabs().map((t) => t.dataset.leaf)).toEqual(['source', 'lambda-0', 'rxm-0', 'tm-0'])
+    expect(tabs().map((t) => t.textContent)).toEqual(['source', 'λ · program', 'rxm · program', 'TM · program'])
     // EXACTLY ONE HOST IS ON THE PAGE; the others are in `pane-host.ts`'s map, off it.
     expect(mounted()).toEqual(['lambda-0'])
   })
@@ -56,28 +56,28 @@ describe('stage', () => {
   })
 
   // Plan 7 part 2 spec §5: arrow keys move with a roving tabindex; Enter or Space selects. The tab after λ's
-  // is asm's in the four-view tree (Plan 7 part 5 spec §3, row 4).
+  // is rxm's in the four-view tree (Plan 7 part 5 spec §3, row 4).
   it('moves between tabs with the arrow keys and selects with Enter, keeping the focus', () => {
     expect(stageTab('lambda-0').tabIndex).toBe(0)
-    expect(stageTab('asm-0').tabIndex).toBe(-1)
+    expect(stageTab('rxm-0').tabIndex).toBe(-1)
     stageTab('lambda-0').focus()
     stageTab('lambda-0').dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowRight', bubbles: true }))
-    expect(document.activeElement).toBe(stageTab('asm-0'))
+    expect(document.activeElement).toBe(stageTab('rxm-0'))
     // **THE TAB STOP MOVES WITH THE FOCUS — a roving `tabindex` that does not rove is not one.** Without
     // this, `Tab` out of the strip and `Shift+Tab` back returns to the SELECTED tab rather than the one
     // the user arrowed to. Selection is manual here, so the stop follows focus, not selection.
-    expect(stageTab('asm-0').tabIndex, 'the arrowed-to tab is not the tab stop').toBe(0)
+    expect(stageTab('rxm-0').tabIndex, 'the arrowed-to tab is not the tab stop').toBe(0)
     expect(stageTab('lambda-0').tabIndex, 'the tab stop was left behind on the selected tab').toBe(-1)
     // MOVING IS NOT SELECTING — manual activation, which is what §5's "Enter or Space selects" means.
     expect(selectedTab()).toBe('lambda-0')
     ;(document.activeElement as HTMLElement).dispatchEvent(
       new KeyboardEvent('keydown', { key: 'Enter', bubbles: true }),
     )
-    expect(selectedTab()).toBe('asm-0')
-    expect(mounted()).toEqual(['asm-0'])
+    expect(selectedTab()).toBe('rxm-0')
+    expect(mounted()).toEqual(['rxm-0'])
     // THE REBUILD DOES NOT DROP THE FOCUS: `renderStage` restores it by `data-leaf`, as `renderLayout`
     // restores a divider by `data-path`/`data-index`.
-    expect(document.activeElement).toBe(stageTab('asm-0'))
+    expect(document.activeElement).toBe(stageTab('rxm-0'))
   })
 
   // Plan 7 part 2 spec §5: "In Stage the ⋯ menu's split items are removed" (umbrella §4 rule 4 — they
@@ -155,7 +155,7 @@ describe('stage', () => {
   it('gives back the arrangement when the switch goes to tiles', () => {
     clickWorkspaceItem('[data-switch="views"][data-value="tiles"]')
     expect(tabs()).toHaveLength(0)
-    expect(mounted()).toEqual(['source', 'lambda-0', 'asm-0', 'tm-0'])
+    expect(mounted()).toEqual(['source', 'lambda-0', 'rxm-0', 'tm-0'])
     expect(document.querySelectorAll('#views .layout-divider').length).toBeGreaterThan(0)
     // **THE SIZES, NOT JUST THE LEAVES.** `renderStage` writes nothing to the tree, which is what makes
     // the arrangement survive — but a version that renormalised `sizes` on the way through would pass a

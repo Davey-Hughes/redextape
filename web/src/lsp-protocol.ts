@@ -76,12 +76,12 @@ export type LspDocumentSymbol = {
  * returns empty and no diagnostic is ever published for that document. There is no error, no
  * console warning and no visible difference from a clean file.
  */
-export const LANGUAGE_IDS = ['redextape', 'redextape_lambda', 'redextape_tm', 'redextape_asm'] as const
+export const LANGUAGE_IDS = ['redextape', 'redextape_lambda', 'redextape_tm', 'redextape_rxm'] as const
 
 export type LanguageId = (typeof LANGUAGE_IDS)[number]
 
 /**
- * The language each kind of view's editor holds. An asm view's is an asm copy's, which takes `redextape_asm` from here
+ * The language each kind of view's editor holds. An rxm view's is an rxm copy's, which takes `redextape_rxm` from here
  * (Plan 7 part 5 spec §5.5, §7).
  *
  * **KEYED BY `PaneKind`.** A union spelled out here would be a second copy of `PaneKind` that nothing held to the
@@ -94,7 +94,7 @@ export type LanguageId = (typeof LANGUAGE_IDS)[number]
 export const LANGUAGE_OF_PANE: Readonly<Record<PaneKind, LanguageId>> = {
   source: 'redextape',
   lambda: 'redextape_lambda',
-  asm: 'redextape_asm',
+  rxm: 'redextape_rxm',
   tm: 'redextape_tm',
 }
 
@@ -104,11 +104,11 @@ export const LANGUAGE_OF_PANE: Readonly<Record<PaneKind, LanguageId>> = {
  *
  * **THE WORDS ARE THE APP'S EXISTING ONES, NOT NEW ONES**, per the umbrella's rule that every
  * user-visible word is the umbrella's: `source` is what `main.ts`'s `layoutChanged` calls the source
- * view, and `λ`/`asm`/`TM` are `legs.ts`'s `LEG_NAME` — the same names every view title and
+ * view, and `λ`/`rxm`/`TM` are `legs.ts`'s `LEG_NAME` — the same names every view title and
  * every menu item already carries. A second vocabulary for the same four surfaces is what this map
  * exists to avoid.
  *
- * `redextape_asm` IS AN ASM COPY'S EDITOR'S, and its entry reaches the notice when the asm grammar fails to
+ * `redextape_rxm` IS AN RXM COPY'S EDITOR'S, and its entry reaches the notice when the rxm grammar fails to
  * load. `satisfies Record<LanguageId, string>` is what keeps this map total, so a language added without a
  * word here fails here rather than at the call site.
  */
@@ -116,7 +116,7 @@ export const LANGUAGE_LABEL = {
   redextape: 'source',
   redextape_lambda: 'λ',
   redextape_tm: 'TM',
-  redextape_asm: 'asm',
+  redextape_rxm: 'rxm',
 } as const satisfies Record<LanguageId, string>
 
 /** The file extension each language's synthetic document URI carries. Never fetched, never parsed. */
@@ -124,7 +124,7 @@ export const EXTENSION_OF_LANGUAGE = {
   redextape: 'rxt',
   redextape_lambda: 'rxlambda',
   redextape_tm: 'tm',
-  redextape_asm: 'asm',
+  redextape_rxm: 'rxm',
 } as const satisfies Record<LanguageId, string>
 
 /**

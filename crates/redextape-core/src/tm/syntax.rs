@@ -25,7 +25,7 @@
 //!
 //! Each printer has a `_mapped` counterpart returning the same text plus a class per span:
 //! `print_tm`/`print_tm_mapped` and `print_tm_with`/`print_tm_with_mapped`. The suffix means the same
-//! thing here as in `print_asm`/`print_asm_mapped` and `print_lambda`/`print_lambda_mapped` — adding
+//! thing here as in `print_rxm`/`print_rxm_mapped` and `print_lambda`/`print_lambda_mapped` — adding
 //! it never changes WHICH text is produced, only whether the classification comes back with it.
 //!
 //! ## What a reader must assume beyond δ and q₀
@@ -247,7 +247,7 @@ fn parse_sym(tok: &str) -> Option<Symbol> {
 /// `trim_start` only ever removes bytes, so its result is never longer than its input.
 ///
 /// **THE PAD IS ONLY MEANINGFUL IF THE CALLER PASSES UN-TRIMMED TEXT.** `trimmed_at` has five callers —
-/// three in this file (`goto`, `start`, `state`) and two in `asm_syntax`. The two NAME-KEYWORD sites
+/// three in this file (`goto`, `start`, `state`) and two in `rxm_syntax`. The two NAME-KEYWORD sites
 /// here, `start` and `state`, must not feed this `comments::content_before_comment(..)`, which is
 /// `split_trailing(..).0.trim()`: the pad would be structurally zero, and every name span correct only
 /// when exactly one space followed its keyword (`start  scan` would report a span beginning on the
@@ -748,7 +748,7 @@ pub fn parse_tm_nav(src: &str) -> (TmDocument, NameIndex) {
 mod tests {
     use super::*;
     use crate::tm::encoding::Unary;
-    use crate::tm::lower_asm::lower_asm;
+    use crate::tm::lower_rxm::lower_rxm;
     use crate::tm::lower_tm::lower_tm;
     use crate::tm::machine::{Rule, State};
     use crate::tm::test_fixtures::increment;
@@ -1043,7 +1043,7 @@ state halt: accept
             let (prog, ds) = parse(src);
             assert!(ds.is_empty(), "parse errors for {src}: {ds:?}");
             let core = desugar(&prog.unwrap());
-            let m = lower_tm(&lower_asm(&core).expect("lowers"), &Unary::default());
+            let m = lower_tm(&lower_rxm(&core).expect("lowers"), &Unary::default());
             assert!(m.validate().is_empty(), "compiled machine must be validate()-clean for {src}: {:?}", m.validate());
             assert_eq!(parse_tm(&print_tm(&m)), (Some(m.clone()), vec![]), "round-trip must equal m for {src}");
         }
@@ -1615,7 +1615,7 @@ state s: accept
     fn a_duplicate_state_line_records_both_definitions() {
         // §3.1 of the LSP navigation design (`docs/superpowers/specs/2026-09-06-lsp-navigation-design.md`)
         // claims the index records BOTH definitions of a duplicated name. A duplicate `state` IS diagnosed
-        // here (unlike `.asm`, which accepts it silently), so `machine` is `None` and this doubles as a
+        // here (unlike `.rxm`, which accepts it silently), so `machine` is `None` and this doubles as a
         // per-line-recovery case.
         let src = "tapes 1\nstart scan\nstate scan: accept\nstate scan: accept\n";
         let (doc, nav) = parse_tm_nav(src);
@@ -1705,7 +1705,7 @@ state s: accept
 
     #[test]
     fn a_trailing_comment_does_not_shift_any_span() {
-        // The sibling invariant to `asm_syntax`'s test of the same name, which pins an
+        // The sibling invariant to `rxm_syntax`'s test of the same name, which pins an
         // off-by-the-comment-length defect there. This form's arithmetic uses a LEADING pad and is
         // not exposed to it — which is a thing to hold with a test rather than to conclude from
         // reading, since the two parsers compute their offsets differently.

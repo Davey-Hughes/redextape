@@ -7,7 +7,7 @@ import type { SessionRegistry } from './sessions'
  * What custody needs a pane to be able to do — **a shape rather than a class, so the panes satisfy it
  * without importing one another.**
  *
- * `LambdaPane`, `TmPane` and `AsmPane` implement it, the two machine views through the `CopyEditor` they share. A
+ * `LambdaPane`, `TmPane` and `RxmPane` implement it, the two machine views through the `CopyEditor` they share. A
  * union of the classes would make this module import all of them, and a change to any one's constructor would reach a
  * file that only ever calls these methods.
  *
@@ -126,7 +126,7 @@ export function createEditorCustody(deps: {
    * which is the state 5d-ii-a design §4.2 refuses movement for — `editorHomeFor` below is what makes a
    * stale entry (closed, or rebound away) resolve to "no home" rather than to a fallback pane.
    * `heldEditors` below is where the unmounted view WAITS in the meantime, and without it "the next pane
-   * to ask re-mounts the same view" would be a sentence with nothing behind it. A TM or asm copy's editor
+   * to ask re-mounts the same view" would be a sentence with nothing behind it. A TM or rxm copy's editor
    * is not held: closing its view destroys it, and `pane-host.ts`'s `mountOnViewOf` mounts a fresh one,
    * and claims it, on the first view in the tree still showing the copy.
    *
@@ -161,7 +161,7 @@ export function createEditorCustody(deps: {
    *
    * **A LEAF ID IS A WEAKER KEY THAN A SESSION, NOT MERELY A DIFFERENTLY-SHAPED ONE.** `nextLeafId`
    * only counts up, but it is not the only source of ids: `layout.ts`'s `defaultArrangement` writes `source`,
-   * `lambda-0`, `asm-0` and `tm-0` down as literals, and `reset preset` and a combination's first visit mint
+   * `lambda-0`, `rxm-0` and `tm-0` down as literals, and `reset preset` and a combination's first visit mint
    * them again, so a closed `lambda-0` comes back — and `parseWorkspace` can restore any id a stored tree holds. A
    * leaf id can therefore be inherited by a pane that has nothing to do with the one that claimed the editor.
    * `applyLayout`'s pane-creation loop drops exactly that inheritance for `editorOwner` (which IS keyed by leaf)
@@ -213,7 +213,7 @@ export function createEditorCustody(deps: {
     // not be read as being only about `reset preset`'s re-minted ids.
     //
     // (2) THE BINDING CHECK DOES NOT CATCH IT. `pane-host.ts`'s `claiming` wraps `detachMachine` (and
-    // `detachAsm`) to claim a TM or asm copy's session the same way it wraps `detach` for a λ one's, so a
+    // `detachRxm`) to claim a TM or rxm copy's session the same way it wraps `detach` for a λ one's, so a
     // key in `editorOwner` can name a machine-legged scratch. `SessionRegistry.pairs()` DOES offer a TM
     // pair for that session — the machine fork's own copy — so a rebind CAN produce a TM slot bound to
     // exactly the session a claim names.
@@ -222,7 +222,7 @@ export function createEditorCustody(deps: {
     //
     // NEITHER FACT MAKES THE CAST'S CONFORMANCE TRUE ON ITS OWN — THIS MODULE NEVER CHECKS IT. What
     // checks it is `implements EditablePane` on each pane class's own definition (`LambdaPane`, `TmPane`
-    // and `AsmPane`, each in its own file): a `LambdaPane` missing one of its members fails to compile AT
+    // and `RxmPane`, each in its own file): a `LambdaPane` missing one of its members fails to compile AT
     // THAT CLASS, not here, because nothing in this file ever assigns a `LambdaPane` value to an
     // `EditablePane`-typed position except through this `unknown` cast and its siblings in
     // `reconcileEditors` and `flush` below. That `implements` clause is the anchor a reader should trust
@@ -271,7 +271,7 @@ export function createEditorCustody(deps: {
    * **IT IS NOT THE `held.destroy()` BELOW THAT TAKES IT OFF.** A rebound-away pane no longer names the
    * session, so the binding predicate on the loop skips it. A rebind through the view's own selector hands
    * the editor over before the binding moves (`pane-host.ts`'s same-leg `rebind` arm: a λ view's into
-   * custody, a TM or asm view's destroyed), and `scratch-rebind-editor.test.ts` is the test that pins it.
+   * custody, a TM or rxm view's destroyed), and `scratch-rebind-editor.test.ts` is the test that pins it.
    * A pause or a delete moves a view onto the program instead, and the view's `setDetached` teardown
    * takes the editor down — it fires from `PaneSlot.render` on the very next `draw()`, which is the same
    * tick. **A VIEW THAT IS NOT ON THE PAGE IS NOT DRAWN**, a Stage tab that is not selected and a view a
@@ -285,7 +285,7 @@ export function createEditorCustody(deps: {
    * scratch→scratch rebind are detached, so it never fires — nothing HERE takes that editor down. What
    * does is upstream: `pane-host.ts`'s same-leg `rebind` arm calls `takeEditor()` on the outgoing pane
    * BEFORE `base.rebind` moves the binding, and holds a λ view's editor in `heldEditors`
-   * (`custody.hold(leaving, held)`) or destroys a TM or asm view's, so the editor is off the pane by the
+   * (`custody.hold(leaving, held)`) or destroys a TM or rxm view's, so the editor is off the pane by the
    * time this sweep could ever reach it.
    * `scratch-rebind-editor.test.ts` — the test named above as pinning this — drives the rebind both
    * ways, not only back to SOURCE. **THE BINDING PREDICATE ON THE SWEEP'S LOOP BELOW IS THEREFORE
@@ -371,7 +371,7 @@ export function createEditorCustody(deps: {
         continue
       }
       const home = editorHomeFor(session)
-      // **EVERY VIEW, NOT ONLY THE λ ONES — *move the editor here* is offered on a TM or asm view too**, and this
+      // **EVERY VIEW, NOT ONLY THE λ ONES — *move the editor here* is offered on a TM or rxm view too**, and this
       // sweep is what moves the editor another view of the copy holds onto the view that asked (`pane-host.ts`'s
       // `showEditor`). The predicates below are about a view's binding and which view is home, never its leg.
       for (const p of panes.all()) {
@@ -398,14 +398,14 @@ export function createEditorCustody(deps: {
         //
         // **A REBIND THROUGH THE VIEW'S OWN SELECTOR TAKES THE EDITOR OFF BY ANOTHER ROUTE — NOT THROUGH
         // THIS LINE.** `pane-host.ts`'s same-leg `rebind` arm takes the outgoing editor off the view (a λ
-        // view's into custody, a TM or asm view's destroyed) before `base.rebind` changes the binding this
+        // view's into custody, a TM or rxm view's destroyed) before `base.rebind` changes the binding this
         // predicate reads, whatever the destination, so by the time this loop runs there is normally
         // nothing left for it to skip — even on a scratch→scratch rebind, where `setDetached` does not
         // fire its teardown. Stated in full, with what closes it, in this function's own doc above.
         if (p.slot.binding.session !== session) continue
         // `as unknown as EditablePane`, THE SAME STEP AND FOR THE SAME REASON AS `editorHomeFor`'s OWN
         // CAST ABOVE — `p.pane` here is a `PaneView`, which shares no member with `EditablePane` for TS to
-        // narrow through directly. Sound because every entry in `panes` is a λ, TM or asm view, and each
+        // narrow through directly. Sound because every entry in `panes` is a λ, TM or rxm view, and each
         // `implements EditablePane` (the source view has no entry).
         const pane = p.pane as unknown as EditablePane
         if (pane === home) continue
@@ -449,7 +449,7 @@ export function createEditorCustody(deps: {
     homeFor: editorHomeFor,
     /**
      * Whether an editor for `session` EXISTS (deferred-a11y item 11). `draw()` fans it over every view
-     * once a frame — a TM or asm view's *move the editor here* asks it too (`CopyEditor.#refreshClaim`).
+     * once a frame — a TM or rxm view's *move the editor here* asks it too (`CopyEditor.#refreshClaim`).
      *
      * **`homeFor(session) !== undefined` IS NOT THIS QUESTION.** `editorOwner` is a map of CLAIMS, and the
      * claim for a fork is recorded by `pane-host.ts`'s wrapped `detach` at the moment the binding moves —
@@ -472,7 +472,7 @@ export function createEditorCustody(deps: {
      * `!detached`, which a scratch→scratch rebind never reaches because both bindings are detached.
      * **WHAT KEEPS ONE FROM BEING LEFT MOUNTED THERE IS UPSTREAM OF BOTH**: `pane-host.ts`'s same-leg
      * `rebind` arm takes the outgoing editor off the view before the binding moves (a λ view's into
-     * custody, a TM or asm view's destroyed), so a pane whose binding has moved away is, in the ordinary
+     * custody, a TM or rxm view's destroyed), so a pane whose binding has moved away is, in the ordinary
      * case, holding nothing by the time anyone asks. See the
      * **AND A SCRATCH→SCRATCH REBIND CANNOT LEAK THE EDITOR** paragraph in `reconcileEditors`' doc
      * for what closes it.

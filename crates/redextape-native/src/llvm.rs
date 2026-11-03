@@ -1,15 +1,15 @@
 //! The LLVM (inkwell) native codegen backend — a second native path behind the `Codegen` seam.
 //! Reuses the shared runtime (`rt_*`), `analysis::partition`, the frame-size-aware depth cap, and the
-//! `Runtime`/decode/totality machinery; only the asm->LLVM-IR walk is new (mirrors `codegen`).
+//! `Runtime`/decode/totality machinery; only the rxm->LLVM-IR walk is new (mirrors `codegen`).
 //!
 //! # The model (deliberately the same shape as `codegen.rs`, arm for arm)
 //! * **Registers → entry-block `alloca`s.** Each LLVM function owns one `i64` slot per `Loc(i)` (init
 //!   `0`), per referenced `Arg(i)` (the first `param_count` from the function's params, the rest init
 //!   `0`), and one for `Rr` (init `0`). Cranelift's `Variable`s are SSA-with-a-frontend; LLVM's
 //!   equivalent at IR-build time is a stack slot the `mem2reg`/SROA pass promotes back into SSA. The
-//!   native call stack therefore provides the asm frame convention for free: a callee's `Loc`/`Arg`
+//!   native call stack therefore provides the rxm frame convention for free: a callee's `Loc`/`Arg`
 //!   are its own slots, so `Loc` is preserved across a `Call` and `Arg` is volatile, exactly as
-//!   `run_asm`'s frame save/restore intends. Every `alloca` lives in the function's `prologue` block
+//!   `run_rxm`'s frame save/restore intends. Every `alloca` lives in the function's `prologue` block
 //!   (never in a loop), so a frame's size is fixed no matter how long the function runs.
 //! * **Blocks.** One `BasicBlock` per reachable body instruction, plus the `prologue` and a single
 //!   shared `exit` block. `Jz`/`Jmp` branch to the target index's block; fall-through branches to the
@@ -20,10 +20,10 @@
 //!   stack still has room — never a process abort). Each guard `br`s to the shared `exit` block once
 //!   its signal is nonzero.
 //! * **Step accounting is COARSE** (termination parity, not exact-step parity), exactly as for
-//!   Cranelift. `run_asm` charges one `steps` tick per instruction executed; native ticks only
+//!   Cranelift. `run_rxm` charges one `steps` tick per instruction executed; native ticks only
 //!   *backward edges* and *calls* — enough to force any non-terminating run to trip a cap, but not
 //!   an exact count, because ticking every instruction would defeat the point of compiling. So a
-//!   straight-line program that `run_asm` would `HitCap` on a `steps` cap *smaller than its
+//!   straight-line program that `run_rxm` would `HitCap` on a `steps` cap *smaller than its
 //!   instruction count* can still run to completion natively; callers must not pass a `steps` cap
 //!   tighter than a terminating program needs (`DEFAULT_CAPS`, or larger, is what the oracle uses).
 //!   Native guarantees **termination**, not step-count equality, and the oracle compares terminating
@@ -33,12 +33,12 @@
 //! * **Heap/box.** Lists and boxes live in the host `Runtime`'s arenas, exactly as for Cranelift:
 //!   each `Cons`/`Head`/`Tail`/`IsEmpty`/`Box`/`BoxGet`/`BoxSet` is a call to the matching `rt_*`
 //!   host function, so the pointer representation (1-based, `0` = nil) and every fault/cap condition
-//!   are `run_asm`'s by construction rather than by reimplementation. Each op that can fault or trip
+//!   are `run_rxm`'s by construction rather than by reimplementation. Each op that can fault or trip
 //!   the heap cap is followed by an `rt_faulted` guard (the same `br exit` pattern as the cap
 //!   guards), so a latched fault short-circuits to the driver's `Fault`/`HitCap` classification
 //!   instead of running on with a bogus `0`. (`Nil` needs no call at all: it is a pure register write
 //!   of `0`.)
-//! * **Agreement.** `compile_and_run` must produce the same `NativeRun` outcome as `run_asm` and as
+//! * **Agreement.** `compile_and_run` must produce the same `NativeRun` outcome as `run_rxm` and as
 //!   the Cranelift JIT on every `Program`: `Add`/`Mul` SATURATE at `u64::MAX` (via
 //!   `llvm.uadd.sat.i64` and `llvm.umul.with.overflow.i64` + `select`, NOT wrapping `add`/`mul`),
 //!   `Sub` is monus (`llvm.usub.sat.i64`), and every comparison is UNSIGNED.
@@ -237,9 +237,9 @@ fn set_host_target(module: &Module<'_>, machine: &TargetMachine) {
 /// Run the `-O1`/`-O2`/`-O3` IR pass pipeline over the built module (a no-op at `O0`).
 ///
 /// This is the knob that actually OPTIMIZES: `opt_level` alone only tells MCJIT how hard to work in
-/// instruction selection, which leaves the register banks as `alloca` traffic and the block-per-asm
+/// instruction selection, which leaves the register banks as `alloca` traffic and the block-per-rxm
 /// -instruction CFG intact. `default<O_>` promotes the banks into SSA (`mem2reg`/SROA), folds the
-/// constants the asm lowering leaves behind, and collapses the CFG.
+/// constants the rxm lowering leaves behind, and collapses the CFG.
 ///
 /// Every guard the totality argument rests on survives this by construction, not by luck: `rt_tick`
 /// / `rt_enter` / `rt_faulted` are opaque external declarations, so no pass may assume them
@@ -355,7 +355,7 @@ fn map_rt_symbols(ee: &ExecutionEngine<'_>, module: &Module<'_>) {
     }
 }
 
-/// The intrinsics the SATURATING arithmetic arms lower to. The asm interpreter's `eval_bin` uses
+/// The intrinsics the SATURATING arithmetic arms lower to. The rxm interpreter's `eval_bin` uses
 /// `saturating_add`/`saturating_mul` and monus, so plain `add`/`mul`/`sub` (which WRAP) would
 /// disagree with the reference on overflow.
 ///
@@ -365,11 +365,11 @@ fn map_rt_symbols(ee: &ExecutionEngine<'_>, module: &Module<'_>) {
 /// subtraction coincide. The consequence worth recording: "grep the optimized IR for `.sat`" is NOT
 /// a valid way to check the saturating-arithmetic invariant, at any level above `O0`. Only the
 /// differential is — see `add_and_mul_saturate_rather_than_wrap`, which pins the boundary values
-/// against `run_asm` at every opt level rather than inspecting the IR.
+/// against `run_rxm` at every opt level rather than inspecting the IR.
 struct SatFns<'ctx> {
     /// `llvm.uadd.sat.i64` — clamps to `u64::MAX`, matching `u64::saturating_add`.
     add: FunctionValue<'ctx>,
-    /// `llvm.usub.sat.i64` — clamps to `0`, i.e. monus, matching the asm interpreter's `eval_bin`, whose
+    /// `llvm.usub.sat.i64` — clamps to `0`, i.e. monus, matching the rxm interpreter's `eval_bin`, whose
     /// `saturating_sub` is `x - min(x, y)`.
     sub: FunctionValue<'ctx>,
     /// `llvm.umul.with.overflow.i64` → `{i64, i1}`. LLVM has **no** scalar `llvm.umul.sat` (the only
@@ -460,8 +460,8 @@ fn load_i64<'ctx>(ctx: &'ctx Context, b: &Builder<'ctx>, slot: PointerValue<'ctx
     }
 }
 
-/// Read register `r`. Out-of-bank indices read `0`, mirroring the asm interpreter's `Vm::read` (behind
-/// `trace::AsmCursor`), whose `locals.get(n)` / `args.get(n)` fall back to `0` (and `codegen::read_reg`).
+/// Read register `r`. Out-of-bank indices read `0`, mirroring the rxm interpreter's `Vm::read` (behind
+/// `trace::RxmCursor`), whose `locals.get(n)` / `args.get(n)` fall back to `0` (and `codegen::read_reg`).
 fn read_reg<'ctx>(ctx: &'ctx Context, b: &Builder<'ctx>, f: &Fun<'ctx>, r: Reg) -> Result<IntValue<'ctx>, IrError> {
     let slot = match r {
         Reg::Loc(n) => f.locs.get(n as usize).copied(),
@@ -518,7 +518,7 @@ fn emit_cmp<'ctx>(
     b.build_int_z_extend(bit, ctx.i64_type(), "cmpw").map_err(ir_err)
 }
 
-/// Emit `x op y` per the asm interpreter's `eval_bin`, mirroring `codegen::emit_bin` arm for arm. All words are
+/// Emit `x op y` per the rxm interpreter's `eval_bin`, mirroring `codegen::emit_bin` arm for arm. All words are
 /// `u64`, so: `Add`/`Mul` SATURATE at `u64::MAX` on overflow; `Sub` is saturating monus; comparisons
 /// are UNSIGNED. The saturating arms are intrinsic calls (see `SatFns`), *never* plain `add`/`mul`.
 fn emit_bin<'ctx>(
@@ -634,8 +634,8 @@ fn build_prologue<'ctx>(
 // holds at once.
 #[allow(clippy::too_many_lines)]
 // `h`/`t`/`p`/`v`/`x`/`y`/`l`/`r`/`f`/`b` follow the SAME compiler-codegen convention as
-// `codegen::translate_subroutine` and the asm interpreter's own `Instr` arms, in `Vm::exec` behind
-// `trace::AsmCursor` (head/tail/pointer/value/left-operand/right-operand/label/register/function/
+// `codegen::translate_subroutine` and the rxm interpreter's own `Instr` arms, in `Vm::exec` behind
+// `trace::RxmCursor` (head/tail/pointer/value/left-operand/right-operand/label/register/function/
 // builder) — arm-for-arm identical to the Cranelift version, which reads the same way.
 #[allow(clippy::many_single_char_names)]
 fn translate_subroutine<'ctx>(
@@ -825,7 +825,7 @@ fn declare_subroutines<'ctx>(
 
 /// Compile `prog` to LLVM IR at `opt`, JIT it, and run against a fresh `Runtime`.
 ///
-/// Agreement contract: the same `NativeRun` outcome (`Ran`/`HitCap`/`Fault`) as `run_asm` and as the
+/// Agreement contract: the same `NativeRun` outcome (`Ran`/`HitCap`/`Fault`) as `run_rxm` and as the
 /// Cranelift JIT, for every `Program`. `partition` failures and any inkwell/JIT failure surface as
 /// `NativeRun::LowerError`; nothing here panics. Everything after the up-front `Program` checks runs
 /// on a dedicated big-stack thread (`RUN_STACK_SIZE`, a scoped thread so the borrowed `prog`/`subs`
@@ -1015,11 +1015,11 @@ pub fn object_bytes(prog: &Program, _caps: Caps, opt: OptLevel) -> Result<Vec<u8
 #[cfg(test)]
 mod tests {
     use super::*;
-    use redextape_core::tm::{AsmRun, DEFAULT_CAPS, decode_asm, lower_asm, lower_program, run_asm};
+    use redextape_core::tm::{DEFAULT_CAPS, RxmRun, decode_rxm, lower_program, lower_rxm, run_rxm};
     use redextape_core::{desugar::desugar, parser::parse, run, value::Value};
 
     /// Every level `OptLevel` offers, the size-oriented ones included. The agreement contract is
-    /// "same outcome as `run_asm` and as Cranelift on every `Program`, at EVERY opt level", so every
+    /// "same outcome as `run_rxm` and as Cranelift on every `Program`, at EVERY opt level", so every
     /// test that pins an outcome — a value, a fault, a cap trip — sweeps this rather than checking
     /// `O0` and hoping.
     const OPT_LEVELS: [OptLevel; 6] =
@@ -1033,20 +1033,20 @@ mod tests {
         let prog = lower_program(&core).unwrap();
         let expected = run(src).unwrap();
         match compile_and_run(&prog, DEFAULT_CAPS, OptLevel::O0) {
-            NativeRun::Ran(o) => decode_asm(&o, &expected).expect("decode"),
+            NativeRun::Ran(o) => decode_rxm(&o, &expected).expect("decode"),
             other => panic!("llvm did not run {src}: {other:?}"),
         }
     }
 
-    /// The LLVM backend must agree with the asm interpreter on a hand-built `Program`: same `Ran`
+    /// The LLVM backend must agree with the rxm interpreter on a hand-built `Program`: same `Ran`
     /// outcome, or both `Fault`, or both `HitCap`. Mirrors `jit::tests::agree_caps`.
     fn agree_caps(prog: Program, caps: Caps, opt: OptLevel) {
         let native = compile_and_run(&prog, caps, opt);
-        match (run_asm(&prog, caps), native) {
-            (AsmRun::Ran(a), NativeRun::Ran(n)) => assert_eq!(a, n, "outcome mismatch"),
-            (AsmRun::Fault(_), NativeRun::Fault(_)) => {}
-            (AsmRun::HitCap, NativeRun::HitCap) => {}
-            (a, n) => panic!("llvm vs asm-interp mismatch:\n asm={a:?}\n llvm={n:?}"),
+        match (run_rxm(&prog, caps), native) {
+            (RxmRun::Ran(a), NativeRun::Ran(n)) => assert_eq!(a, n, "outcome mismatch"),
+            (RxmRun::Fault(_), NativeRun::Fault(_)) => {}
+            (RxmRun::HitCap, NativeRun::HitCap) => {}
+            (a, n) => panic!("llvm vs rxm-interp mismatch:\n rxm={a:?}\n llvm={n:?}"),
         }
     }
 
@@ -1075,7 +1075,7 @@ mod tests {
     fn heap_and_higher_order() {
         assert_eq!(llvm_value("head(tail([1, 2, 3]))"), Value::Nat(2));
         assert_eq!(llvm_value("[1,2,3]"), Value::list_of_nats(&[1, 2, 3]));
-        // Higher-order: `lower_asm` rejects `map` as `Unsupported`, so this only reaches the backend
+        // Higher-order: `lower_rxm` rejects `map` as `Unsupported`, so this only reaches the backend
         // via `defunc` — which lowers the closure to `Cons`/`Head`/`Tail` heap ops plus a dispatcher.
         assert_eq!(
             llvm_value(
@@ -1093,7 +1093,7 @@ mod tests {
         // this is also the check that the optimizer did not treat the `rt_head` call as removable
         // (it returns a value nothing but the guard consumes) or fold away its `rt_faulted` guard.
         let core = desugar(&parse("head(nil)").0.unwrap());
-        let prog = lower_asm(&core).unwrap();
+        let prog = lower_rxm(&core).unwrap();
         for opt in OPT_LEVELS {
             let run = compile_and_run(&prog, DEFAULT_CAPS, opt);
             assert!(matches!(run, NativeRun::Fault(_)), "head(nil) at {opt:?} must Fault, got {run:?}");
@@ -1107,7 +1107,7 @@ mod tests {
         // deleting it as a side-effect-free infinite recursion) would change the outcome — the
         // `rt_enter` guard is what makes both illegal.
         let core = desugar(&parse("fn spin(n){ spin(n) } spin(0)").0.unwrap());
-        let prog = lower_asm(&core).unwrap();
+        let prog = lower_rxm(&core).unwrap();
         for opt in OPT_LEVELS {
             let run = compile_and_run(&prog, DEFAULT_CAPS, opt);
             assert!(matches!(run, NativeRun::HitCap), "spin at {opt:?} must HitCap, got {run:?}");
@@ -1132,7 +1132,7 @@ mod tests {
     fn add_and_mul_saturate_rather_than_wrap() {
         // The known trap: saturating intrinsics, NOT plain `add`/`mul`. `u64::MAX + u64::MAX` must be
         // `u64::MAX` (wrapping gives `u64::MAX - 1`) and `u64::MAX * u64::MAX` must be `u64::MAX`
-        // (wrapping gives 1). `agree_at_every_opt_level` compares against `run_asm`'s saturating
+        // (wrapping gives 1). `agree_at_every_opt_level` compares against `run_rxm`'s saturating
         // semantics.
         //
         // Swept over EVERY opt level, not just `O0`: the saturating intrinsics are precisely what
@@ -1215,7 +1215,7 @@ mod tests {
     #[test]
     fn main_reading_an_arg_sees_zero() {
         // The entry `$main` takes no args (the driver calls it as `(rt_ptr) -> i64`); a `$main` that
-        // reads `Arg(0)` must see the init-0 value, matching `run_asm`.
+        // reads `Arg(0)` must see the init-0 value, matching `run_rxm`.
         agree(Program {
             code: vec![Instr::Bin(BinOp::Add, Reg::Rr, Reg::Arg(0), Reg::Arg(0)), Instr::Halt],
             labels: vec![],
@@ -1261,7 +1261,7 @@ mod tests {
             let run = compile_and_run(&prog, caps, opt);
             assert!(matches!(run, NativeRun::HitCap), "runaway recursion at {opt:?} must HitCap, got {run:?}");
         }
-        assert!(matches!(run_asm(&prog, caps), AsmRun::HitCap));
+        assert!(matches!(run_rxm(&prog, caps), RxmRun::HitCap));
     }
 
     /// A recursive `countdown(n)` whose subroutine writes `fillers` extra `Loc` registers and reads
@@ -1286,11 +1286,11 @@ mod tests {
     /// test claims.
     ///
     /// The chain is seeded from `Arg(0)` (not from `Loc(0)`'s own init-`0` value) so that no
-    /// instruction here READS a `Loc` this body has not already written: `run_asm`'s `Call` clones
+    /// instruction here READS a `Loc` this body has not already written: `run_rxm`'s `Call` clones
     /// the caller's locals into the saved frame and leaves the locals in place, so a callee
     /// INHERITS the caller's `Loc` values, whereas both native backends give the callee a zeroed
     /// bank. The same divergence class applies to `Rr`, not just `Loc`: `$main: li rr, 1; call g;
-    /// halt` with `g: ret` (a callee that `Ret`s without ever writing `Rr`) yields `run_asm` → `1`
+    /// halt` with `g: ret` (a callee that `Ret`s without ever writing `Rr`) yields `run_rxm` → `1`
     /// (the interpreter's `Rr` is one global VM register) vs. both native backends → `0` (each
     /// compiled function owns its own `Rr` slot, zero-initialised).
     ///
@@ -1298,7 +1298,7 @@ mod tests {
     /// `jit::compile_and_run` are both `pub` and take a `Program`, so a hand-built `Program` reaching
     /// this divergence is public-API-reachable. What actually keeps every oracle leg from tripping
     /// over it is narrower: a definite-assignment dataflow analysis over 30 real programs found that no
-    /// `Program` produced by `lower_asm`/`defunc` ever reads a `Loc` or `Rr` before writing it on every
+    /// `Program` produced by `lower_rxm`/`defunc` ever reads a `Loc` or `Rr` before writing it on every
     /// path, so the two backends' initial values never actually differ for real output. (`Arg` is
     /// structurally immune for a different reason: `analysis::partition` sets `arity = max_arg_read + 1`,
     /// so every `Arg` a body reads is a parameter by construction.) A hand-built body that read an
@@ -1355,7 +1355,7 @@ mod tests {
     #[test]
     fn a_shallow_but_fat_frame_still_runs_to_a_value() {
         // The converse: the frame-size-aware cap must not spuriously `HitCap` a shallow fat-frame
-        // program. 150 locals, recursion depth 2 → a real value, agreeing with `run_asm`.
+        // program. 150 locals, recursion depth 2 → a real value, agreeing with `run_rxm`.
         agree_at_every_opt_level(&fat_recursive_countdown(150, 2), DEFAULT_CAPS);
     }
 
@@ -1595,7 +1595,7 @@ mod tests {
 
     #[test]
     fn every_opt_level_agrees_with_the_interpreter() {
-        // `opt` drives both LLVM knobs (IR pass pipeline + codegen level). This is the register-asm
+        // `opt` drives both LLVM knobs (IR pass pipeline + codegen level). This is the rxm
         // -level smoke check that raising the level does not change outcomes;
         // `every_opt_level_agrees_on_source_programs` is the same claim over real source programs.
         let prog = Program {
@@ -1657,7 +1657,7 @@ mod tests {
             let mut decoded = Vec::new();
             for opt in OPT_LEVELS {
                 match compile_and_run(&prog, DEFAULT_CAPS, opt) {
-                    NativeRun::Ran(o) => decoded.push((opt, decode_asm(&o, &expected).expect("decode"))),
+                    NativeRun::Ran(o) => decoded.push((opt, decode_rxm(&o, &expected).expect("decode"))),
                     other => panic!("{src} at {opt:?}: {other:?}"),
                 }
             }
@@ -1763,7 +1763,7 @@ mod tests {
         for opt in OPT_LEVELS {
             agree_caps(prog.clone(), DEFAULT_CAPS, opt);
             match compile_and_run(&prog, DEFAULT_CAPS, opt) {
-                NativeRun::Ran(o) => assert_eq!(decode_asm(&o, &expected).expect("decode"), Value::Nat(42)),
+                NativeRun::Ran(o) => assert_eq!(decode_rxm(&o, &expected).expect("decode"), Value::Nat(42)),
                 other => panic!("twice(21) at {opt:?} must Ran(42), got {other:?}"),
             }
         }

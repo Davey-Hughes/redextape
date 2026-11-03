@@ -68,7 +68,7 @@ export type GridOptions = {
   readonly afterDraw?: (drawn: VisibleWindow) => void
   /**
    * Whether the count can fall between two draws of the same content — the state diagram's, whose sub-steps row goes
-   * when the run steps into a routine that has no row of its own. The rule table's and the asm listing's counts are
+   * when the run steps into a routine that has no row of its own. The rule table's and the rxm listing's counts are
    * fixed for a program, and `reset` covers a new one; a grid that says so here pays two more reads of the layout per
    * draw for the clamp a shrinking spacer causes (`draw`).
    */
@@ -76,12 +76,12 @@ export type GridOptions = {
 }
 
 /**
- * A virtualized grid of fixed-height rows with one roving active row: the TM view's rule table, and the asm
+ * A virtualized grid of fixed-height rows with one roving active row: the TM view's rule table, and the rxm
  * view's listing (Plan 7 part 5 spec, amendment 7).
  *
  * **ONE COPY, SO A FIX IS MADE ONCE.** The drawn window, the active row, the keys, a click that survives the redraw
  * focusing causes, and following with its clamp handling are written here once, so a fix to one — a lost click, a
- * clamp read as a user's scroll — reaches the rule table, the asm listing and the state diagram's program level
+ * clamp read as a user's scroll — reaches the rule table, the rxm listing and the state diagram's program level
  * together. The λ body keeps its own: it is a tree of lines, not a grid of cells, a click on it is a token's, and
  * its arrows fold.
  *

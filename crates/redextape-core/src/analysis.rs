@@ -5,7 +5,7 @@
 //! the web UI), which keeps this crate WASM-clean and matches the model/renderer split §9.1 locks in.
 //!
 //! Why the printers report spans instead of something re-lexing their output: only the source language
-//! has a reusable lexer. λ's parser scans chars inline with no token type, and TM's and asm's are
+//! has a reusable lexer. λ's parser scans chars inline with no token type, and TM's and rxm's are
 //! line-oriented and hand back a `Machine` and a `Program` — a shape, never a classified span. So
 //! "re-lex the printed text" would still mean three new scanners recovering structure the printer
 //! just discarded, each obliged to stay in step with its printer and nothing forcing them to agree.
@@ -36,16 +36,16 @@ pub enum TokenClass {
     Comment,
     /// A λ binder: the `λ` and the name it binds.
     Binder,
-    /// An asm mnemonic (`add`, `jz`, `cons`).
+    /// An rxm mnemonic (`add`, `jz`, `cons`).
     Mnemonic,
-    /// An asm register (`r0`, `a1`, `rr`).
+    /// An rxm register (`r0`, `a1`, `rr`).
     Register,
-    /// An asm label in EITHER position — a definition or a `jz`/`jmp`/`call` target — or a TM state
-    /// name in DEFINING position. Asm's printer collapses both label positions into this one class;
+    /// An rxm label in EITHER position — a definition or a `jz`/`jmp`/`call` target — or a TM state
+    /// name in DEFINING position. Rxm's printer collapses both label positions into this one class;
     /// TM keeps them apart, which is what `StateName` below is for.
     Label,
-    /// A TM state name in REFERENCE position (a `start`/`goto` target). TM-only: asm has no
-    /// equivalent row, because asm folds a label reference into `Label` above instead.
+    /// A TM state name in REFERENCE position (a `start`/`goto` target). TM-only: rxm has no
+    /// equivalent row, because rxm folds a label reference into `Label` above instead.
     StateName,
     /// A symbol on a TM tape, or a wildcard.
     TapeSymbol,

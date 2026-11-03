@@ -48,7 +48,7 @@ pub fn decode(nf: &LambdaTerm, expected: &Value) -> Option<Value> {
 /// `Cons` witness, and `Unit`. `decode`'s strictness there is what makes the oracle catch a backend
 /// that returned a SHORTER list than the reference, so it cannot be expressed over this one — and the
 /// reverse needs a `Value -> Ty` function that is partial, since `Value::Nil` carries no recoverable
-/// element type. `tm::decode` and `asm` keep their two decoders side by side for the same reason.
+/// element type. `tm::decode` and `rxm` keep their two decoders side by side for the same reason.
 ///
 /// Unlike the TM pair there is nothing to share: both take the term directly, with no analogue of
 /// `read_result`'s tape read.

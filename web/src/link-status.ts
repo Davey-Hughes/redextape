@@ -62,20 +62,20 @@ export type LambdaLinkState =
  * WHICH VIEWS ARE OUTSIDE THE CORRESPONDENCE — per leg, how many views it has and the title of each one that shows
  * a copy. Views detach independently. 5d-i design §4.3: editing a source-derived λ view seeds a `LambdaScratch` and
  * rebinds THAT view; the program keeps running and every other view stays on it. So "λ detached, TM still linked"
- * is the ordinary state, not a corner — and since a leg holds any number of views, so is "one asm view on a copy,
+ * is the ordinary state, not a corner — and since a leg holds any number of views, so is "one rxm view on a copy,
  * another on the program".
  *
  * A view shows a copy when it is bound to one: for `lambda` a `LambdaScratch`, which has no `SourceMap` and so no
  * `sourceSpan`/`linkIndex` (§3.3); for `tm` a `TmScratch`, whose every `TmState` carries `source_node: null`
- * (§3.1); for `asm` an asm copy, whose instructions have no owner (Plan 7 part 5 spec, amendment 28).
+ * (§3.1); for `rxm` an rxm copy, whose instructions have no owner (Plan 7 part 5 spec, amendment 28).
  *
- * **EVERY VIEW, NOT ONE BOOLEAN PER LEG READ OFF THE VIEW FOCUSED LAST.** With an asm view on the program and a
- * second on a copy, such a boolean would name the asm copy only while the copy's view was the one focused last, and
- * "asm view" would not say which of the two it meant. `copies` holds every view showing a copy, and `views` is what
+ * **EVERY VIEW, NOT ONE BOOLEAN PER LEG READ OFF THE VIEW FOCUSED LAST.** With an rxm view on the program and a
+ * second on a copy, such a boolean would name the rxm copy only while the copy's view was the one focused last, and
+ * "rxm view" would not say which of the two it meant. `copies` holds every view showing a copy, and `views` is what
  * lets `linkStatus` tell a leg whose views all show copies from one that still has a view of the program.
  *
  * **THE TITLES ARE THE HEADERS' OWN** (`main.ts`'s `viewTitle`), which is how a leg with several views says which
- * of them shows a copy: `asm · copy 1`.
+ * of them shows a copy: `rxm · copy 1`.
  *
  * **A `Record` OVER `Leg`**, so a new leg is a required entry here and a type error at every literal that leaves it
  * out, rather than a view whose copy the status line never mentions (`legs.ts` has the class of bug).
@@ -113,7 +113,7 @@ export type LinkStatus = {
   | { state: 'none' }
   | { state: 'stale' }
   /**
-   * An asm instruction with no owner was clicked (Plan 7 part 5 spec §6.6, amendment 11): one `defunc` minted, which
+   * An rxm instruction with no owner was clicked (Plan 7 part 5 spec §6.6, amendment 11): one `defunc` minted, which
    * no construct of the program wrote. Nothing is pinned, and unlike `none` the line says why — the click did
    * something, and a line left blank would read as a click that missed. A TM state with no owner still clears the pin
    * silently, which amendment 11 keeps.
@@ -122,7 +122,7 @@ export type LinkStatus = {
   | {
       state: 'linked'
       tm: boolean
-      /** Whether the pinned construct emits any asm instruction — `Link.instrs` is not empty. */
+      /** Whether the pinned construct emits any rxm instruction — `Link.instrs` is not empty. */
       instrs: boolean
       lambda: LambdaLinkState
       /**
@@ -143,12 +143,12 @@ export type LinkStatus = {
        */
       focus: boolean
       /**
-       * Whether the asm leg's running focus — the construct its CURRENT instruction belongs to, `AsmState.source_node`
-       * — names this same pinned construct right now: `focus` one leg over (spec §6.6). The asm view marks its focus
+       * Whether the rxm leg's running focus — the construct its CURRENT instruction belongs to, `RxmState.source_node`
+       * — names this same pinned construct right now: `focus` one leg over (spec §6.6). The rxm view marks its focus
        * rows beside its linked ones, so unlike the TM table's this is not the leg's only signal, but it is the only one
        * a user watching another view hears of.
        */
-      asmFocus: boolean
+      rxmFocus: boolean
     }
 )
 
@@ -183,8 +183,8 @@ const allCopies = (leg: DetachedPanes[Leg]): boolean => leg.views > 0 && leg.cop
  * "not linked to the program" from the word (Plan 7 part 2 spec §12's vocabulary).
  *
  * **A LEG WITH ONE VIEW IS NAMED BY ITS LEG, AND A LEG WITH MORE BY THE TITLE OF EACH VIEW SHOWING A COPY.**
- * `λ view shows a copy` is exact while the leg has one view; beside a second asm view, "asm view" would not say
- * which, so each view showing a copy is named as its header reads — `asm · copy 1 view shows a copy`. A title two
+ * `λ view shows a copy` is exact while the leg has one view; beside a second rxm view, "rxm view" would not say
+ * which, so each view showing a copy is named as its header reads — `rxm · copy 1 view shows a copy`. A title two
  * views show is said once.
  *
  * **THE NAMES COME IN `LEGS`' ORDER AND ARE SAID WITH `LEG_NAME`**, rather than a sentence written out per
@@ -223,7 +223,7 @@ function detachedText(d: DetachedPanes): string {
  * showing a scratch term, so "this construct has no node in the λ term at this step" describes a term that is
  * not on screen; a TM view on a copy renders states whose `source_node` is `null` by construction (§3.1), so
  * neither the coincidence nor the emits-no-states absence is a claim about anything the user is looking at.
- * The asm leg's two clauses, its coincidence and its emits-no-instructions absence, go by the asm entry the
+ * The rxm leg's two clauses, its coincidence and its emits-no-instructions absence, go by the rxm entry the
  * same way.
  *
  * **A LEG WITH A VIEW OF THE PROGRAM KEEPS ITS CLAUSES, BESIDE ITS VIEWS ON COPIES.** They are about that view:
@@ -258,12 +258,12 @@ export function linkStatus(s: LinkStatus): string {
     // surface. A leg whose every view shows a copy has its own clauses suppressed, each leg by its own entry (this
     // function's doc).
     const off = perLeg((leg) => allCopies(detached[leg]))
-    if (!off.asm && s.asmFocus) parts.push('the asm run is here right now')
+    if (!off.rxm && s.rxmFocus) parts.push('the rxm run is here right now')
     if (!off.tm && s.focus) parts.push('the machine is here right now')
-    // ONE ABSENCE CLAUSE FOR THE TWO LOWERINGS, NOT TWO SIDE BY SIDE. A construct the asm lowering bills nothing to —
+    // ONE ABSENCE CLAUSE FOR THE TWO LOWERINGS, NOT TWO SIDE BY SIDE. A construct the rxm lowering bills nothing to —
     // a transparent `let`, a `Lambda` — bills nothing to the machine built from it either, so two clauses would say
     // one fact twice on the constructs that are most often clicked.
-    const noInstrs = !off.asm && !s.instrs
+    const noInstrs = !off.rxm && !s.instrs
     const noStates = !off.tm && !s.tm
     if (noInstrs && noStates) parts.push('this construct emits no instructions or machine states')
     else if (noInstrs) parts.push('this construct emits no instructions')

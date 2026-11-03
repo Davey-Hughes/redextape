@@ -5,7 +5,7 @@
 //! definition introduces — and containment over extents is the whole rule: a definition is a child
 //! of the innermost extent that contains its name.
 //!
-//! **`.tm` AND `.asm` CARRY NO EXTENT.** Nothing is ever pushed on the stack for them, the stack
+//! **`.tm` AND `.rxm` CARRY NO EXTENT.** Nothing is ever pushed on the stack for them, the stack
 //! stays empty, every definition is a root, and the outline is a flat list. That is not a fallback
 //! path — it is the same pass reading a form that records no construct spans.
 
@@ -23,8 +23,8 @@ use crate::language::outline_kind;
 /// sticky scroll and nvim-navic report no symbol for every position except the few columns of the
 /// name itself. The name span still goes to `selectionRange`, which is what it is for.
 ///
-/// A line rather than a whole `state` block: `.tm` and `.asm` record no construct extent, so a line
-/// is the smallest span that makes the cursor test behave, and is exact for `.asm`, where a label
+/// A line rather than a whole `state` block: `.tm` and `.rxm` record no construct extent, so a line
+/// is the smallest span that makes the cursor test behave, and is exact for `.rxm`, where a label
 /// IS its line. `.rxt` records an extent for every `fn`/`let`, so it never reaches this function —
 /// `outline` calls it only when `o.extent()` is `None`.
 pub(crate) fn enclosing_line(text: &str, span: Span) -> Span {

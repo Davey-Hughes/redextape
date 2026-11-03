@@ -315,32 +315,32 @@ describe('the scroll of the view a gesture gives the focus to', () => {
   })
 
   describe('on all four views, in the wide default', () => {
-    /** The source view is over the asm view, and is the neighbour its `✕` gives the focus to. */
-    it('is kept by the source view when the asm view under it is closed with the pointer', async () => {
+    /** The source view is over the rxm view, and is the neighbour its `✕` gives the focus to. */
+    it('is kept by the source view when the rxm view under it is closed with the pointer', async () => {
       await showWideDefault()
       await scrolled('source', 120)
-      await userEvent.click((host('asm-0') as HTMLElement).querySelector('button.view-close') as HTMLElement)
+      await userEvent.click((host('rxm-0') as HTMLElement).querySelector('button.view-close') as HTMLElement)
       expect(drawn()).toBe('row[50](source column[50](lambda-0 tm-0))')
       const focused = await focusedOn('source', 'after the ✕')
       expect(focused.matches(':focus-visible')).toBe(false)
-      expect(sourceScroller().scrollTop, 'the ✕ on the asm view reset the source view over it').toBe(120)
+      expect(sourceScroller().scrollTop, 'the ✕ on the rxm view reset the source view over it').toBe(120)
     })
 
     /**
      * **A VIEW KEY THAT MAKES THE EDITOR'S VIEW SHORTER BRINGS THE CARET BACK INTO SIGHT.** With three views the
-     * source view is the window's height; `2` shows the asm view under it and halves it. The caret is put lower in
+     * source view is the window's height; `2` shows the rxm view under it and halves it. The caret is put lower in
      * the view than the halved view is tall, so the view has to move for it to show.
      */
     it('follows the caret when a view key halves the view its editor is in', async () => {
       await showWideDefault()
-      toggle('asm').click()
-      await until(() => mounted().join() === 'source,lambda-0,tm-0', 'the asm view to be hidden')
+      toggle('rxm').click()
+      await until(() => mounted().join() === 'source,lambda-0,tm-0', 'the rxm view to be hidden')
       const tall = sourcePane().clientHeight
       await caretAt(tall - 80)
       const down = caret().top - sourcePane().getBoundingClientRect().top
       const before = sourceScroller().scrollTop
       await viewKey('2')
-      expect(drawn()).toBe('row[50](column[50](source asm-0) column[50](lambda-0 tm-0))')
+      expect(drawn()).toBe('row[50](column[50](source rxm-0) column[50](lambda-0 tm-0))')
       await frames()
       expect(sourcePane().clientHeight, 'precondition: the source view was made shorter').toBeLessThan(tall - 100)
       expect(down, 'precondition: the caret was lower than the view is now tall').toBeGreaterThan(

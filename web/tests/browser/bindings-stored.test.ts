@@ -38,7 +38,7 @@ import {
  * each, are arranged with `.click()`.
  */
 
-const FOUR = ['source', 'lambda-0', 'asm-0', 'tm-0']
+const FOUR = ['source', 'lambda-0', 'rxm-0', 'tm-0']
 
 /**
  * Make a copy in `view` and wait for its build's reply, which is the last write a copy makes by itself. Answers the
@@ -80,7 +80,7 @@ describe('the stored bindings', () => {
     const { session } = await copyIn('lambda-0')
 
     await press('#views [data-leaf="lambda-0"]:not([role="tab"]) button.view-close')
-    expect(mounted(), 'precondition: the view is closed').toEqual(['source', 'asm-0', 'tm-0'])
+    expect(mounted(), 'precondition: the view is closed').toEqual(['source', 'rxm-0', 'tm-0'])
     expect(storedBindings(), 'a closed view is still stored as showing its copy').toEqual({})
 
     await pressShownToggle('lambda')
@@ -109,12 +109,12 @@ describe('the stored bindings', () => {
     const { session, onCopy } = await copyIn('lambda-0')
 
     await pressShownToggle('lambda')
-    expect(mounted(), 'precondition: the λ view is parked').toEqual(['source', 'asm-0', 'tm-0'])
+    expect(mounted(), 'precondition: the λ view is parked').toEqual(['source', 'rxm-0', 'tm-0'])
     expect(storedBindings(), 'a parked view still shows its copy, and is stored so').toEqual({ 'lambda-0': session })
     await pressShownToggle('lambda')
     expect(titleText('lambda-0'), 'precondition: the parked view comes back showing its copy').toBe(onCopy)
     await pressShownToggle('lambda')
-    expect(mounted(), 'precondition: the λ view is parked again').toEqual(['source', 'asm-0', 'tm-0'])
+    expect(mounted(), 'precondition: the λ view is parked again').toEqual(['source', 'rxm-0', 'tm-0'])
 
     // *RESET PRESET* FORGETS THE ARRANGEMENT THAT HELD THE PARKED VIEW, which closes it; the λ toggle then builds
     // another view under its id.

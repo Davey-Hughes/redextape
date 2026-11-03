@@ -72,7 +72,7 @@ use redextape_core::tm::build::{REG, TAPES, WORK};
 use redextape_core::tm::machine::Machine;
 use redextape_core::tm::sim::DEFAULT_CAPS;
 use redextape_core::tm::{
-    Binary, Encoding, Unary, defunc, lower_asm, lower_tm_guarded, n_slots_of, simulate, simulate_trace,
+    Binary, Encoding, Unary, defunc, lower_rxm, lower_tm_guarded, n_slots_of, simulate, simulate_trace,
 };
 use redextape_core::trace::{LambdaCursor, StepEvent, TmCursor};
 
@@ -108,9 +108,9 @@ fn core_of(src: &str) -> Option<Core> {
 /// Lower to a machine plus its initial tapes, defunctionalizing first if the direct path declines.
 fn machine_of(src: &str, enc: &dyn Encoding) -> Option<(Machine, Vec<Vec<char>>)> {
     let core = core_of(src)?;
-    let program = match lower_asm(&core) {
+    let program = match lower_rxm(&core) {
         Ok(p) => p,
-        Err(_) => lower_asm(&defunc(&core).ok()?).ok()?,
+        Err(_) => lower_rxm(&defunc(&core).ok()?).ok()?,
     };
     let (m, _overflow) = lower_tm_guarded(&program, enc).expect("probe program must not be refused");
     let mut init = vec![Vec::new(); TAPES];

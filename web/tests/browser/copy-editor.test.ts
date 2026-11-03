@@ -4,10 +4,10 @@ import type { CopyState } from '../../src/view-header'
 import { paneEvents } from './harness'
 
 /**
- * `CopyEditor`, the copy-editing part the TM and asm views share, built on its own for behaviours no view's test
+ * `CopyEditor`, the copy-editing part the TM and rxm views share, built on its own for behaviours no view's test
  * reaches. Most of the copy control's three answers, the noun in its reason, the unmount on leaving a copy, the edits
- * following the view, and the outline are held by the views' own tests (`tm-pane-editor.test.ts`, `asm-pane.test.ts`,
- * `asm-copy.test.ts`, `tm-scratch-fork.test.ts`, `lsp-outline.test.ts` and their siblings).
+ * following the view, and the outline are held by the views' own tests (`tm-pane-editor.test.ts`, `rxm-pane.test.ts`,
+ * `rxm-copy.test.ts`, `tm-scratch-fork.test.ts`, `lsp-outline.test.ts` and their siblings).
  *
  * No view's test holds *format* withheld while there is no editor, only offered while there is one. And the app cannot
  * show a `takeEditor`'s unmount: a view that gives its editor up that way is reseeded or removed next (`pane-host.ts`'s

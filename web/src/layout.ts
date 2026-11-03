@@ -61,7 +61,7 @@ export const MIN_PANE_FRACTION = 0.1
 export const SOURCE_LEAF: LeafId = 'source'
 
 /**
- * The four kinds, in the order a combination's key spells them and a default arrangement places them: source, λ, asm,
+ * The four kinds, in the order a combination's key spells them and a default arrangement places them: source, λ, rxm,
  * TM (the view layouts spec §4.1) — the order all four views have on the page.
  *
  * **KEYED BY `PaneKind` AND THEN LISTED**: a kind left out is a type error here, and the keys are the list.
@@ -72,19 +72,19 @@ export const SOURCE_LEAF: LeafId = 'source'
 export const KIND_ORDER: readonly PaneKind[] = Object.keys({
   source: 0,
   lambda: 0,
-  asm: 0,
+  rxm: 0,
   tm: 0,
 } satisfies Record<PaneKind, 0>) as PaneKind[]
 
 /**
- * The four kinds in the order the header's `views` toggles have them: source, asm, λ, TM (the user's decision,
+ * The four kinds in the order the header's `views` toggles have them: source, rxm, λ, TM (the user's decision,
  * 2026-10-11). The toggle keys `1` to `4`, the cycle and the sentence the live region reads follow it, so what is said
  * and pressed runs left to right across the header.
  *
  * **A SECOND LIST, SO IT IS HELD TO THE FIRST**: `tests/node/arrangements.test.ts` asserts it is `KIND_ORDER`'s kinds,
  * each once. A kind added to `PaneKind` is a type error in `KIND_ORDER`, and that test is what then asks for it here.
  */
-export const HEADER_ORDER: readonly PaneKind[] = ['source', 'asm', 'lambda', 'tm']
+export const HEADER_ORDER: readonly PaneKind[] = ['source', 'rxm', 'lambda', 'tm']
 
 /**
  * A kind's word where the app says it to a reader: in what its `views` toggle says in its tooltip and on the notice
@@ -95,7 +95,7 @@ export const HEADER_ORDER: readonly PaneKind[] = ['source', 'asm', 'lambda', 'tm
  * label to its word here, and `tests/node/pages.test.ts` the help page's list of the layouts the cycle keys step
  * through, so a kind spelled another way in either fails a test.
  */
-export const KIND_WORD: Readonly<Record<PaneKind, string>> = { source: 'source', lambda: 'λ', asm: 'asm', tm: 'TM' }
+export const KIND_WORD: Readonly<Record<PaneKind, string>> = { source: 'source', lambda: 'λ', rxm: 'rxm', tm: 'TM' }
 
 /** Whether the views area is wider than it is tall (`wide`) or taller than it is wide (`tall`) — spec §4.4. */
 export type Shape = 'wide' | 'tall'
@@ -104,7 +104,7 @@ export type Shape = 'wide' | 'tall'
 const DEFAULT_LEAF: Readonly<Record<PaneKind, LeafId>> = {
   source: SOURCE_LEAF,
   lambda: 'lambda-0',
-  asm: 'asm-0',
+  rxm: 'rxm-0',
   tm: 'tm-0',
 }
 
@@ -117,14 +117,14 @@ const DEFAULT_LEAF: Readonly<Record<PaneKind, LeafId>> = {
  * | 1 | the leaf | the leaf |
  * | 2 | a row of the two | a column of the two |
  * | 3 | a row: the first, beside a column of the other two | a column: the first, over a row of the other two |
- * | 4 | a row of two columns: source over asm, beside λ over TM | a column of two rows: source and λ, over asm and TM |
+ * | 4 | a row of two columns: source over rxm, beside λ over TM | a column of two rows: source and λ, over rxm and TM |
  *
  * **IN A WIDE AREA NO DIVIDER AND NO VIEW RUNS THE WHOLE WIDTH** (the user's decision, 2026-10-11): the views are
  * columns side by side, each with its own stack, so the one divider that spans the area is the vertical one and each
  * side's views are resized on their own. A tall area gets the same trees turned on their side, since there a view
  * across the width is the only view wide enough to read.
  *
- * **ALL FOUR SIT IN THE SAME CORNERS IN BOTH**: source top left, λ top right, asm bottom left, TM bottom right. What
+ * **ALL FOUR SIT IN THE SAME CORNERS IN BOTH**: source top left, λ top right, rxm bottom left, TM bottom right. What
  * differs is which pairs share a divider.
  *
  * **IT THROWS FOR NO KINDS**: a tree has a leaf or more, and every caller holds a combination, which is not empty.

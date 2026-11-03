@@ -30,7 +30,7 @@ import type { Leg } from './protocol'
  * the literal type it keeps has no key for the new leg, so one missing entry would be reported once per site
  * that only reads it.
  */
-export const LEG_NAME: Readonly<Record<Leg, string>> = { lambda: 'λ', asm: 'asm', tm: 'TM' }
+export const LEG_NAME: Readonly<Record<Leg, string>> = { lambda: 'λ', rxm: 'rxm', tm: 'TM' }
 
 /**
  * Every leg, in the order the app lists them — the title-selector's groups (`SessionRegistry.pairs`) and the

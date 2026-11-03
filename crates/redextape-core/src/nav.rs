@@ -1,6 +1,6 @@
 //! Where names are written in one document, and which of them define rather than mention.
 //!
-//! **THIS MODULE HOLDS NO GRAMMAR.** It does not know what a TM state is, what an asm label is,
+//! **THIS MODULE HOLDS NO GRAMMAR.** It does not know what a TM state is, what an rxm label is,
 //! or which of the three a given document contains. The parsers push occurrences as they scan —
 //! they are the only things in this crate that know where a name begins — and the server maps a
 //! definition to a `SymbolKind` per occurrence, via `outline_kind(DefKind)`, because a `.rxt`
@@ -53,7 +53,7 @@ pub struct Occurrence {
 pub enum DefKind {
     /// A `.tm` `state <name>:` header.
     State,
-    /// A `.asm` `<name>:` label.
+    /// A `.rxm` `<name>:` label.
     Label,
     /// A `.rxt` `let` binding.
     Let,
@@ -70,7 +70,7 @@ pub enum Role {
         kind: DefKind,
         /// The span of the construct this name introduces — a `.rxt` `let` statement or `fn`
         /// declaration, terminator and body included. `None` for a form whose parser does not
-        /// record one: no `.tm` parser knows where a state's rules end, and no `.asm` parser knows
+        /// record one: no `.tm` parser knows where a state's rules end, and no `.rxm` parser knows
         /// where a label's instructions end, which is the same fact `documentSymbol`'s line-shaped
         /// range is built on. `None` also for a `.rxt` parameter: it is navigable and has no
         /// extent — its statement is the whole `fn`, which is its parent's extent and not its own.
@@ -91,9 +91,9 @@ pub enum Role {
     },
     Reference {
         /// Index into the document's occurrences. `None` when nothing in this document defines
-        /// the name — `parse_asm_full` accepts `jmp nowhere` with zero diagnostics, so a
+        /// the name — `parse_rxm_full` accepts `jmp nowhere` with zero diagnostics, so a
         /// dangling reference is an ordinary value here. Whether it is an error is a language's
-        /// answer, not this module's: for asm, `asm_label_diagnostics` says it is.
+        /// answer, not this module's: for rxm, `rxm_label_diagnostics` says it is.
         def: Option<usize>,
     },
 }
@@ -115,18 +115,18 @@ impl NameIndex {
     /// RATHER THAN A FLAG ON THE FIRST.** `link` points every reference at the FIRST definition of
     /// its name; in `let x = 1; let x = x + 1;` the right-hand `x` is bound by the first `let` and
     /// the tail by the second, and no name-keyed rule can answer both. `binder` resolves against
-    /// the scope chain as it walks and calls this; the `.tm` and `.asm` parsers keep calling
+    /// the scope chain as it walks and calls this; the `.tm` and `.rxm` parsers keep calling
     /// `push_reference` and `link`. That split is a convention the two call paths follow, not one
     /// this module enforces: `push_reference(n, s)` is exactly `push_resolved_reference(n, s,
     /// None)`, and `link` stays `pub(crate)` and callable after either. Each caller keeps to its
     /// own entry point because its own linking rule is the one it wants — a flat namespace for
-    /// `.tm`/`.asm`, a scope chain for `.rxt` — not because a mode of the other is unreachable.
+    /// `.tm`/`.rxm`, a scope chain for `.rxt` — not because a mode of the other is unreachable.
     pub(crate) fn push_resolved_reference(&mut self, name: &str, span: Span, def: Option<usize>) {
         self.occurrences.push(Occurrence { name: name.to_string(), span, role: Role::Reference { def } });
     }
 
     /// Point every reference at the FIRST definition of its name. Called once, by the `.tm` and
-    /// `.asm` parsers, after the whole document has been scanned.
+    /// `.rxm` parsers, after the whole document has been scanned.
     pub(crate) fn link(&mut self) {
         let mut first: HashMap<&str, usize> = HashMap::new();
         for (i, o) in self.occurrences.iter().enumerate() {
@@ -182,8 +182,8 @@ impl NameIndex {
         }
     }
 
-    /// Every definition, in source order. A name defined twice appears twice — `.asm`'s parser
-    /// accepts that with no diagnostic (`asm_label_diagnostics` marks it), and an outline should
+    /// Every definition, in source order. A name defined twice appears twice — `.rxm`'s parser
+    /// accepts that with no diagnostic (`rxm_label_diagnostics` marks it), and an outline should
     /// show the file that exists.
     pub fn definitions(&self) -> impl Iterator<Item = &Occurrence> {
         self.occurrences.iter().filter(|o| matches!(o.role, Role::Definition { .. }))
@@ -195,7 +195,7 @@ impl NameIndex {
     /// **THIS MATCHES ON NAME, WHICH THIS TYPE REFUSES EVERYWHERE ELSE, AND THE REASON IT IS RIGHT
     /// HERE IS THAT THERE IS NOTHING ELSE TO MATCH ON.** `references_to` keys on the link because
     /// a name can be bound twice and the binding is what a reference belongs to. A DANGLING
-    /// reference has no binding: `parse_asm_full` accepts `jmp nowhere` with zero diagnostics, and
+    /// reference has no binding: `parse_rxm_full` accepts `jmp nowhere` with zero diagnostics, and
     /// a `.tm` file mid-edit has every `goto X` dangling the moment its `state X:` header is being
     /// retyped. Grouping those by name is not a shortcut past a better answer, it is the only
     /// answer available.
@@ -281,7 +281,7 @@ mod tests {
 
     #[test]
     fn a_reference_to_a_name_nothing_defines_links_to_nothing() {
-        // NOT AN ERROR STATE. `parse_asm_full` accepts `jmp nowhere` with zero diagnostics,
+        // NOT AN ERROR STATE. `parse_rxm_full` accepts `jmp nowhere` with zero diagnostics,
         // so a dangling reference is an ordinary value this index must be able to hold.
         let n = fixture();
         assert_eq!(n.definition_of(4), None);
@@ -330,7 +330,7 @@ mod tests {
 
     #[test]
     fn the_first_definition_wins_when_a_name_is_defined_twice() {
-        // `.asm`'s parser accepts a duplicate label with no diagnostic (`asm_label_diagnostics` marks
+        // `.rxm`'s parser accepts a duplicate label with no diagnostic (`rxm_label_diagnostics` marks
         // it) — `labels` comes back as [("f", 0), ("f", 0)] — so this is a shape the index really
         // meets, not a hypothetical.
         // BOTH definitions stay listed; only the link is singular.
@@ -431,10 +431,10 @@ mod tests {
     }
 
     /// This only pins the ACCESSOR: it builds the `NameIndex` by hand and asserts `extent()`
-    /// returns the `None` it was just given — it does not run `parse_tm_nav` or `parse_asm_nav`,
+    /// returns the `None` it was just given — it does not run `parse_tm_nav` or `parse_rxm_nav`,
     /// so it cannot notice either parser's real call site changing what it passes. That coverage is
-    /// `tm_navigation_definitions_carry_no_extent` and `asm_navigation_definitions_carry_no_extent`, in
-    /// `tm/syntax.rs` and `tm/asm_syntax.rs`.
+    /// `tm_navigation_definitions_carry_no_extent` and `rxm_navigation_definitions_carry_no_extent`, in
+    /// `tm/syntax.rs` and `tm/rxm_syntax.rs`.
     #[test]
     fn an_artifact_form_definition_has_no_extent() {
         let mut n = NameIndex::default();

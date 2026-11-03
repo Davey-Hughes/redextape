@@ -28,7 +28,7 @@ import {
  */
 
 /** Explorer's three views that step, in the order the page draws them. The source view has no strip. */
-const STEPPED = ['lambda-0', 'asm-0', 'tm-0'] as const
+const STEPPED = ['lambda-0', 'rxm-0', 'tm-0'] as const
 type Leaf = (typeof STEPPED)[number]
 
 const headerOf = (leaf: Leaf) => leafEl(leaf).querySelector<HTMLElement>('.view-header') as HTMLElement
@@ -137,7 +137,7 @@ type Line = {
 /**
  * **THE TWO LINES.** `sum_to(5)` ends in every leg, so each view's line is the step count alone and no view has a
  * continue button. `fact(4)` fills the λ leg's history, and once `keep recording` has filled it again the ring has
- * dropped its oldest steps, so the λ view's line names both, and its strip carries `keep recording`; the asm and TM
+ * dropped its oldest steps, so the λ view's line names both, and its strip carries `keep recording`; the rxm and TM
  * legs end, so their lines are short. **THE ONE `keep recording` IS WHAT MAKES THE LINE LONG**: a ring keeps the
  * whole of its first recording (`History`'s `#evict`), whose line names no oldest kept step.
  */
@@ -161,7 +161,7 @@ const LINES: readonly Line[] = [
       expect(stepText('lambda-0'), 'precondition: the λ view’s long line').toMatch(/history is full \(oldest kept: /)
       expect(extendOf('lambda-0').textContent, 'precondition: the λ view’s continue button').toBe('keep recording')
       expect(isShown(extendOf('lambda-0')), 'precondition: the continue button is drawn').toBe(true)
-      for (const leaf of ['asm-0', 'tm-0'] as const) {
+      for (const leaf of ['rxm-0', 'tm-0'] as const) {
         expect(stepText(leaf), `precondition: ${leaf}’s short line`).toMatch(SHORT)
         expect(isShown(extendOf(leaf)), `precondition: no continue button in ${leaf}`).toBe(false)
       }
@@ -307,7 +307,7 @@ describe.each(LINES)('Explorer’s step strips, under $name', (line) => {
    * **THAT IS ALL IT HOLDS, NOT WHERE EACH BOX IS.** A box that grows inside its row's room moves every box after it
    * and keeps every gap, so it leaves every case here passing. Grown past that room, the view's actions take a second
    * row, which this case catches. The roadmap entry "EXPLORER'S STEP STRIP WRAPS INSIDE ITS VIEW" gives the x ranges
-   * of some boxes at 1280 px: four in `fact(4)`'s asm view, and the λ view's `keep recording`.
+   * of some boxes at 1280 px: four in `fact(4)`'s rxm view, and the λ view's `keep recording`.
    */
   it('at 1280 px, a short line is one row beside the title and a long line is two rows of one line', async () => {
     await at(line, 1280, 800)

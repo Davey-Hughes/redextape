@@ -12,15 +12,15 @@ import { controlledMenu, linkStatus, noticeText, paneByLeaf, SHELL, stateIdle, u
  * in the copies menu, and with their editors when a view shows them again.
  *
  * **THE DEFAULT IS THE SOURCE BESIDE THE TM VIEW** (the view layouts spec §8), so the reset keeps one of the three
- * views, `tm-0`, and that is the one a kept binding would show. The λ and asm views leave the page with the reset and
+ * views, `tm-0`, and that is the one a kept binding would show. The λ and rxm views leave the page with the reset and
  * every remembered arrangement is forgotten, so the views their toggles bring back are new ones.
  *
  * Every gesture is a `userEvent` one. ONE MOUNT FOR THE FILE, for the reason `app.test.ts` gives.
  */
 
 const SAMPLE = 'let x = 40; x + 2'
-const LEAVES = ['lambda-0', 'asm-0', 'tm-0'] as const
-const LEG: Record<(typeof LEAVES)[number], string> = { 'lambda-0': 'lambda', 'asm-0': 'asm', 'tm-0': 'tm' }
+const LEAVES = ['lambda-0', 'rxm-0', 'tm-0'] as const
+const LEG: Record<(typeof LEAVES)[number], string> = { 'lambda-0': 'lambda', 'rxm-0': 'rxm', 'tm-0': 'tm' }
 
 const title = (leaf: string) => paneByLeaf(leaf).querySelector('button.view-title')?.textContent?.trim() ?? ''
 
@@ -43,7 +43,7 @@ describe('reset preset', () => {
       await until(() => / · copy \d+$/.test(title(leaf)), `${leaf} to show its copy`)
       // THE FORK'S BUILD REPLY, NOT JUST ITS TITLE: `detach` rebinds the slot (and so the title)
       // synchronously, before the worker answers, but the copy's editor only mounts once
-      // `scratch-compiled` (or its TM/asm twin) lands (`replies.ts`). Racing `reset preset` ahead of
+      // `scratch-compiled` (or its TM/rxm twin) lands (`replies.ts`). Racing `reset preset` ahead of
       // that reply finds `LambdaPane.takeEditor()` empty, so `applyLayout`'s pass 1 has nothing to
       // hand to custody — `editor-custody.ts`'s `dropClaimsOn` then erases the claim the late reply
       // needed, and the copy's editor mounts FRESH on the next pick instead of waiting in custody for
@@ -67,9 +67,9 @@ describe('reset preset', () => {
     expect(linkStatus()).not.toContain('copy')
 
     // AND THE TWO VIEWS THE RESET TOOK OFF THE PAGE COME BACK ON THE PROGRAM, as new views: nothing remembers them.
-    for (const kind of ['lambda', 'asm'])
+    for (const kind of ['lambda', 'rxm'])
       await userEvent.click(document.querySelector(`#views-shown button[data-shows="${kind}"]`) as HTMLElement)
-    expect(LEAVES.map(title)).toEqual(['λ · program', 'asm · program', 'TM · program'])
+    expect(LEAVES.map(title)).toEqual(['λ · program', 'rxm · program', 'TM · program'])
     expect(document.querySelectorAll('.pane .view-status')).toHaveLength(0)
     expect(linkStatus()).not.toContain('copy')
   })

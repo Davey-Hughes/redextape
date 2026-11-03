@@ -2,13 +2,13 @@
 
 Text moved verbatim out of code comments when they were trimmed to their why. Each entry names the file and the line of code the comment sat above.
 
-## `crates/redextape-core/tests/asm_oracle.rs`, above `std::thread::Builder::new()`
+## `crates/redextape-core/tests/rxm_oracle.rs`, above `std::thread::Builder::new()`
 
 On 8 MiB the guard fires at depth 580 (yielding TooDeep) with ~2x margin below the measured ~1175-deep native crash point, while the
 
 (A 512 KiB thread would hold only ~90 lower_into frames and so overflow before the guard fires; the constant must be dictated by the real production stack.)
 
-## `crates/redextape-core/tests/asm_roundtrip.rs`, above `#[test]`
+## `crates/redextape-core/tests/rxm_roundtrip.rs`, above `#[test]`
 
 Measured, not guessed: an earlier draft of this test predicted 13 of 16, naming `Box`, `BoxGet` and `BoxSet` as the gap. Running it found 12 of 16 instead — `Tail` was also unreached, because `DEMOS` exercised `head(cons(7, nil))` but no demo called `tail(...)`. Adding `tail(cons(7, nil))` brought the measured count to 13 of 16, leaving `Box`, `BoxGet` and `BoxSet` as the remaining gap.
 
@@ -570,7 +570,7 @@ none of that was true of any test before this one: `printing_a_document_emits_ev
 
 verified by hand, not left as an unasserted claim.
 
-## `crates/redextape-core/tests/asm_roundtrip.rs`, above `#[test]`
+## `crates/redextape-core/tests/rxm_roundtrip.rs`, above `#[test]`
 
 measured rather than assumed under this test's original name in `2026-08-24-asm-reader.md` (`a_label_name_with_a_space_does_not_survive_the_trip`).
 

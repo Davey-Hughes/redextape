@@ -47,7 +47,7 @@
 
 use redextape_core::analysis::{TokenClass, token_class_names};
 use redextape_core::tm::EncodingKind;
-use redextape_grammar_check::{ASM, Grammar, LAMBDA, MINI, TM, asm, lambda, mini, tm};
+use redextape_grammar_check::{Grammar, LAMBDA, MINI, RXM, TM, lambda, mini, rxm, tm};
 
 /// The golden, relative to this crate rather than to whatever directory the test was run from.
 const GOLDEN: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/../../grammars/capture-golden.json");
@@ -113,7 +113,7 @@ struct Computed {
 #[allow(clippy::expect_used)]
 fn fixtures() -> Vec<Fixture> {
     let (lambda_text, _) = lambda::printed_term(PROGRAM).expect("the λ printer must lower PROGRAM");
-    let (asm_text, _) = asm::printed_program_with_header(PROGRAM).expect("the asm printer must lower PROGRAM");
+    let (rxm_text, _) = rxm::printed_program_with_header(PROGRAM).expect("the rxm printer must lower PROGRAM");
     let (tm_text, _) =
         tm::printed_machine_with_header(TM_PROGRAM, EncodingKind::Unary).expect("the TM printer must lower TM_PROGRAM");
     vec![
@@ -137,10 +137,10 @@ fn fixtures() -> Vec<Fixture> {
             src: tm_text,
         },
         Fixture {
-            language_id: "redextape_asm",
+            language_id: "redextape_rxm",
             name: "that program, lowered to a headered listing",
-            grammar: &ASM,
-            src: asm_text,
+            grammar: &RXM,
+            src: rxm_text,
         },
     ]
 }
@@ -389,9 +389,9 @@ fn every_fixture_agrees_with_its_own_authority() {
     if let Err(why) = tm::compare_printed(&text, &want) {
         panic!("the TM fixture diverges from print_tm_with_mapped:\n{why}");
     }
-    let (text, want) = asm::printed_program_with_header(PROGRAM).expect("the asm printer must lower PROGRAM");
-    if let Err(why) = asm::compare_printed(&text, &want) {
-        panic!("the asm fixture diverges from print_asm_with_mapped:\n{why}");
+    let (text, want) = rxm::printed_program_with_header(PROGRAM).expect("the rxm printer must lower PROGRAM");
+    if let Err(why) = rxm::compare_printed(&text, &want) {
+        panic!("the rxm fixture diverges from print_rxm_with_mapped:\n{why}");
     }
 }
 
@@ -399,11 +399,11 @@ fn every_fixture_agrees_with_its_own_authority() {
 ///
 /// **THE FOUR TABLES DISAGREE ON `@function`, `@variable.parameter` AND `@label.reference`, AND A
 /// COMPARISON THAT MERGED LANGUAGES WOULD HIDE EXACTLY THAT.** Two of the four witnesses below are
-/// produced by one capture name and nothing else: `Mnemonic` only by asm's `@function` — the mini
-/// language's `@function` is an `Ident` — and `StateName` only by TM's `@label.reference`, where asm's
+/// produced by one capture name and nothing else: `Mnemonic` only by rxm's `@function` — the mini
+/// language's `@function` is an `Ident` — and `StateName` only by TM's `@label.reference`, where rxm's
 /// is a `Label`. `Binder` is λ's `@keyword.function`/`@variable.parameter` pair, whose
 /// `@variable.parameter` is an `Ident` in the mini-language. `Operator` is the mini-language's, and it
-/// is exclusive because neither TM's table nor asm's has an `@operator` row at all.
+/// is exclusive because neither TM's table nor rxm's has an `@operator` row at all.
 ///
 /// **THE MINI-LANGUAGE HAS TWO FIXTURES, AND `Operator` NEED ONLY LIVE ON ONE OF THEM.** The
 /// boolean-literal fixture, for `Bool` coverage, carries no `@operator` capture, so the check below
@@ -419,7 +419,7 @@ fn each_language_carries_a_class_no_other_one_does() {
         ("redextape", "Operator"),
         ("redextape_lambda", "Binder"),
         ("redextape_tm", "StateName"),
-        ("redextape_asm", "Mnemonic"),
+        ("redextape_rxm", "Mnemonic"),
     ];
     for (language, witness) in witnesses {
         let mut any_carries = false;

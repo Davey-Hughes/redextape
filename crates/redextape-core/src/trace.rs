@@ -1,8 +1,8 @@
 //! One step-event vocabulary over both backends (§9), stepped lazily so a renderer never holds the
 //! whole run. Materializing is not viable: `sim::Step` copies every tape each step.
 //!
-//! The asm cursor lives here too, lazy in the same way, and is deliberately OUTSIDE that vocabulary:
-//! `AsmCursor` yields its own `AsmStep`, never a `StepEvent`, for the reason its module doc gives.
+//! The rxm cursor lives here too, lazy in the same way, and is deliberately OUTSIDE that vocabulary:
+//! `RxmCursor` yields its own `RxmStep`, never a `StepEvent`, for the reason its module doc gives.
 //!
 //! THE TM DELTA IS A RULE REFERENCE, NOT A COPY OF ITS EFFECTS. The machine is immutable for the
 //! duration of a run, so `(state, rule)` determines the writes and head moves — they are recoverable
@@ -21,10 +21,10 @@ use crate::tm::machine::{Machine, StateId, Symbol};
 use crate::tm::sim::{Caps as TmCaps, Status as TmStatus, Tape, apply, rule_matches};
 use std::borrow::Borrow;
 
-mod asm_cursor;
+mod rxm_cursor;
 mod zipper;
 
-pub use asm_cursor::{AsmCap, AsmCursor, AsmFrame, AsmStatus, AsmStep, WordTag};
+pub use rxm_cursor::{RxmCap, RxmCursor, RxmFrame, RxmStatus, RxmStep, WordTag};
 pub use zipper::ZipperCursor;
 
 /// One step of either backend. `Delta`'s `state` is the state BEFORE the transition, matching the

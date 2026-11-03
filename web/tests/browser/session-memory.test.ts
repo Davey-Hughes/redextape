@@ -159,7 +159,7 @@ async function load(slots: Slot[]): Promise<Loaded> {
 
 /**
  * Arm A: one session with the two legs `Slot` models, λ and TM. The app's program session also has an
- * asm leg, for which this harness keeps no ring.
+ * rxm leg, for which this harness keeps no ring.
  */
 const ONE_SESSION: Slot[] = [{ id: 'source', legs: { lambda: true, tm: true } }]
 

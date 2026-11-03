@@ -1,4 +1,4 @@
-Format `.rxt`, `.tm` and `.asm` files in place
+Format `.rxt`, `.tm` and `.rxm` files in place
 
 Usage: redextape fmt [OPTIONS] <PATHS>...
 
@@ -25,7 +25,7 @@ Options:
           Possible values:
           - rxt: The source language, `.rxt`. The default when nothing else identifies the input
           - tm:  A Turing machine listing, `.tm`
-          - asm: A register-assembly listing, `.asm`
+          - rxm: A register-machine listing, `.rxm`
 
   -h, --help
           Print help (see a summary with '-h')

@@ -13,7 +13,7 @@
 // pass, so production warnings still surface from the other one.
 #![cfg_attr(test, allow(clippy::pedantic))]
 
-#[cfg(feature = "probe-asm-copy")]
+#[cfg(feature = "probe-rxm-copy")]
 mod probe;
 mod session;
 
@@ -29,7 +29,7 @@ mod session;
 /// anywhere in it fails the canonical-line check. Under default features — which is every browser
 /// build — this line does not exist.
 #[cfg(feature = "ts")]
-pub use session::{AsmStatus, Decoded, LambdaStatus, ReductionStatus, RunStatus, TmScratchStatus, TmStatus, ValueRun};
+pub use session::{Decoded, LambdaStatus, ReductionStatus, RunStatus, RxmStatus, TmScratchStatus, TmStatus, ValueRun};
 
 use redextape_core::tm::EncodingKind;
 use serde::Serialize;
@@ -228,20 +228,20 @@ pub fn tm_scratch(src: &str) -> Result<JsValue, JsValue> {
     Ok(out.into())
 }
 
-/// An asm program typed or pasted into a copy, with no program behind it. Owns the listing, the cursor and
+/// An rxm program typed or pasted into a copy, with no program behind it. Owns the listing, the cursor and
 /// the outcome of its own run.
 ///
-/// **SIX OF THE ASM LEG'S METHODS, UNDER THE SESSION'S NAMES, AND NOTHING ELSE** — all but `asmText`, since a
-/// copy's text is what built it. `asmStatus` answers the same `AsmStatus` a `Session` does — every field is true
-/// of a copy (`session::AsmScratch` says why). `sourceSpan` and `linkIndex` are absent, since a copy has no
+/// **SIX OF THE RXM LEG'S METHODS, UNDER THE SESSION'S NAMES, AND NOTHING ELSE** — all but `rxmText`, since a
+/// copy's text is what built it. `rxmStatus` answers the same `RxmStatus` a `Session` does — every field is true
+/// of a copy (`session::RxmScratch` says why). `sourceSpan` and `linkIndex` are absent, since a copy has no
 /// `SourceMap`; `tests/browser.rs` pins that at compile time.
 #[wasm_bindgen]
-pub struct AsmScratch(session::AsmScratch);
+pub struct RxmScratch(session::RxmScratch);
 
-/// `asmScratch(src)` -> `{ diagnostics: Diagnostic[], scratch: AsmScratch | null }`.
+/// `rxmScratch(src)` -> `{ diagnostics: Diagnostic[], scratch: RxmScratch | null }`.
 ///
-/// `scratch` is null for text over `MAX_SCRATCH_ASM_BYTES`, refused before it is parsed, for text that does not
-/// parse and for text with a label mistake, and the diagnostics say which — see `session::asm_scratch`. Assembled by
+/// `scratch` is null for text over `MAX_SCRATCH_RXM_BYTES`, refused before it is parsed, for text that does not
+/// parse and for text with a label mistake, and the diagnostics say which — see `session::rxm_scratch`. Assembled by
 /// hand for the reason `compile` and `lambdaScratch` give: a handle and plain data cross two different ways.
 ///
 /// # Errors
@@ -249,15 +249,15 @@ pub struct AsmScratch(session::AsmScratch);
 /// Returns `Err` only if `to_value` cannot marshal the diagnostics, or if a `Reflect::set` on the freshly
 /// created object fails; neither is expected for this crate's own types. Text that is refused is NOT an
 /// error — it arrives as diagnostics beside a null `scratch`.
-#[wasm_bindgen(js_name = asmScratch)]
-pub fn asm_scratch(src: &str) -> Result<JsValue, JsValue> {
-    let made = session::asm_scratch(src);
+#[wasm_bindgen(js_name = rxmScratch)]
+pub fn rxm_scratch(src: &str) -> Result<JsValue, JsValue> {
+    let made = session::rxm_scratch(src);
 
     let out = js_sys::Object::new();
     let diagnostics = to_value(&made.diagnostics)?;
     js_sys::Reflect::set(&out, &JsValue::from_str("diagnostics"), &diagnostics)?;
     let handle = match made.scratch {
-        Some(s) => JsValue::from(AsmScratch(s)),
+        Some(s) => JsValue::from(RxmScratch(s)),
         None => JsValue::NULL,
     };
     js_sys::Reflect::set(&out, &JsValue::from_str("scratch"), &handle)?;
@@ -319,7 +319,7 @@ pub fn token_classes() -> Result<JsValue, JsValue> {
 /// a table in another language is a second authoritative registry that not even the compiler is
 /// watching. This one is worse than most, because the four tables **disagree** on three capture names
 /// — `@function`, `@variable.parameter` and `@label.reference` — so a hand copy that merged them would
-/// colour an asm mnemonic as an identifier and nothing in either language would notice.
+/// colour an rxm mnemonic as an identifier and nothing in either language would notice.
 ///
 /// AN ARRAY OF PAIRS RATHER THAN AN OBJECT, because `serde-wasm-bindgen` marshals a Rust map to a JS
 /// `Map` rather than to a plain object: a consumer that wrote `tables[languageId]` against a `Map`
@@ -610,36 +610,36 @@ impl Session {
         to_value(&self.0.tm_value().map_err(err)?)
     }
 
-    // --- the asm leg --------------------------------------------------------------------------
+    // --- the rxm leg --------------------------------------------------------------------------
 
     /// # Errors
     ///
     /// Returns `Err` only if `to_value` cannot marshal the status to a JS value; not expected for this
     /// crate's own types.
-    #[wasm_bindgen(js_name = asmStatus)]
-    pub fn asm_status(&self) -> Result<JsValue, JsValue> {
-        to_value(&self.0.asm_status())
+    #[wasm_bindgen(js_name = rxmStatus)]
+    pub fn rxm_status(&self) -> Result<JsValue, JsValue> {
+        to_value(&self.0.rxm_status())
     }
 
     /// # Errors
     ///
-    /// Returns `Err` when this session's asm leg is absent — check `asmStatus().available` first.
-    #[wasm_bindgen(js_name = asmProgram)]
-    pub fn asm_program(&self) -> Result<JsValue, JsValue> {
-        let p = self.0.asm_program().map_err(err)?;
+    /// Returns `Err` when this session's rxm leg is absent — check `rxmStatus().available` first.
+    #[wasm_bindgen(js_name = rxmProgram)]
+    pub fn rxm_program(&self) -> Result<JsValue, JsValue> {
+        let p = self.0.rxm_program().map_err(err)?;
         to_value(&p)
     }
 
     /// # Errors
     ///
-    /// Returns `Err` when this session's asm leg is absent — check `asmStatus().available` first. No
+    /// Returns `Err` when this session's rxm leg is absent — check `rxmStatus().available` first. No
     /// `to_value` call is involved: the return type is a bare `bool`.
-    #[wasm_bindgen(js_name = stepAsm)]
-    pub fn step_asm(&mut self) -> Result<bool, JsValue> {
-        self.0.step_asm().map_err(err)
+    #[wasm_bindgen(js_name = stepRxm)]
+    pub fn step_rxm(&mut self) -> Result<bool, JsValue> {
+        self.0.step_rxm().map_err(err)
     }
 
-    /// `asmState(window)` -> `AsmState`, where `window` is an `AsmWindow` — `{ locals, args, frames, cells,
+    /// `rxmState(window)` -> `RxmState`, where `window` is an `RxmWindow` — `{ locals, args, frames, cells,
     /// boxes }`, each a count.
     ///
     /// **ONE OBJECT RATHER THAN FIVE NUMBERS**, read with `serde_wasm_bindgen::from_value`: five positional
@@ -648,13 +648,13 @@ impl Session {
     ///
     /// # Errors
     ///
-    /// Returns `Err` when this session's asm leg is absent, and when `window` is not an `AsmWindow` — a
+    /// Returns `Err` when this session's rxm leg is absent, and when `window` is not an `RxmWindow` — a
     /// missing field, or a count that is not a non-negative integer — with the deserializer's message.
-    #[wasm_bindgen(js_name = asmState)]
-    pub fn asm_state(&self, window: JsValue) -> Result<JsValue, JsValue> {
-        let window: redextape_core::viewmodel::AsmWindow = serde_wasm_bindgen::from_value(window)
-            .map_err(|e| JsValue::from_str(&format!("asmState: not an AsmWindow: {e}")))?;
-        let st = self.0.asm_state(window).map_err(err)?;
+    #[wasm_bindgen(js_name = rxmState)]
+    pub fn rxm_state(&self, window: JsValue) -> Result<JsValue, JsValue> {
+        let window: redextape_core::viewmodel::RxmWindow = serde_wasm_bindgen::from_value(window)
+            .map_err(|e| JsValue::from_str(&format!("rxmState: not an RxmWindow: {e}")))?;
+        let st = self.0.rxm_state(window).map_err(err)?;
         to_value(&st)
     }
 
@@ -662,31 +662,31 @@ impl Session {
     ///
     /// # Errors
     ///
-    /// Returns `Err` when this session's asm leg is absent. Raising the cap on a run it cannot resume is
-    /// harmless, so this only ever fires for a session with no asm leg at all.
-    #[wasm_bindgen(js_name = raiseAsmCap)]
-    pub fn raise_asm_cap(&mut self, extra_steps: u32) -> Result<(), JsValue> {
-        self.0.raise_asm_cap(u64::from(extra_steps)).map_err(err)
+    /// Returns `Err` when this session's rxm leg is absent. Raising the cap on a run it cannot resume is
+    /// harmless, so this only ever fires for a session with no rxm leg at all.
+    #[wasm_bindgen(js_name = raiseRxmCap)]
+    pub fn raise_rxm_cap(&mut self, extra_steps: u32) -> Result<(), JsValue> {
+        self.0.raise_rxm_cap(u64::from(extra_steps)).map_err(err)
     }
 
     /// # Errors
     ///
-    /// Returns `Err` when this session's asm leg is absent — check `asmStatus().available` first. A run
+    /// Returns `Err` when this session's rxm leg is absent — check `rxmStatus().available` first. A run
     /// with no end yet is NOT an error, and neither is a fault: they decode as `Decoded::Unfinished` and
     /// `Decoded::Fault`.
-    #[wasm_bindgen(js_name = asmValue)]
-    pub fn asm_value(&self) -> Result<JsValue, JsValue> {
-        to_value(&self.0.asm_value().map_err(err)?)
+    #[wasm_bindgen(js_name = rxmValue)]
+    pub fn rxm_value(&self) -> Result<JsValue, JsValue> {
+        to_value(&self.0.rxm_value().map_err(err)?)
     }
 
-    /// `asmText()` -> `string | null`. The asm program as `.asm` text, for a copy to seed an `AsmScratch` from;
-    /// `null` for a declined leg, and for text longer than `MAX_SCRATCH_ASM_BYTES`, which `asmScratch` would
+    /// `rxmText()` -> `string | null`. The rxm program as `.rxm` text, for a copy to seed an `RxmScratch` from;
+    /// `null` for a declined leg, and for text longer than `MAX_SCRATCH_RXM_BYTES`, which `rxmScratch` would
     /// refuse. `JsValue` rather than `Option<String>` for `tmText`'s reason: a bare `None` would cross as
     /// `undefined`.
-    #[wasm_bindgen(js_name = asmText)]
+    #[wasm_bindgen(js_name = rxmText)]
     #[must_use]
-    pub fn asm_text(&self) -> JsValue {
-        match self.0.asm_text() {
+    pub fn rxm_text(&self) -> JsValue {
+        match self.0.rxm_text() {
             Some(s) => JsValue::from_str(&s),
             None => JsValue::NULL,
         }
@@ -740,7 +740,7 @@ impl Session {
     /// which a structured clone of 48,332 objects is not.
     ///
     /// This is `web/src/state-table.ts`'s row-index trade — one `Int32Array` rather than an object per
-    /// row — applied to every leg at once. `tmOwner` and `asmOwner` are two columns of one kind, an
+    /// row — applied to every leg at once. `tmOwner` and `rxmOwner` are two columns of one kind, an
     /// owner per state and an owner per instruction, `-1` for none, and one closure builds both.
     ///
     /// # Errors
@@ -825,7 +825,7 @@ impl Session {
         set("sourceNodeEnd", &src_end)?;
         set("sourceNodeId", &src_id)?;
         set("tmOwner", &owners(&index.tm_owner))?;
-        set("asmOwner", &owners(&index.asm_owner))?;
+        set("rxmOwner", &owners(&index.rxm_owner))?;
         Ok(out.into())
     }
 }
@@ -985,60 +985,60 @@ impl TmScratch {
     }
 }
 
-/// The asm leg's methods on a copy. Two of the six drop the `Result` `Session`'s carry, `stepAsm` and
-/// `raiseAsmCap`, for the reason `TmScratch`'s impl records: `SessionError::AsmAbsent` is unreachable on a type
-/// that holds a leg rather than a `Result`. `asmStatus`, `asmProgram` and `asmValue` keep one for `to_value`
-/// alone, and `asmState` for `to_value` and for a `window` that is not an `AsmWindow`, as `Session`'s does.
+/// The rxm leg's methods on a copy. Two of the six drop the `Result` `Session`'s carry, `stepRxm` and
+/// `raiseRxmCap`, for the reason `TmScratch`'s impl records: `SessionError::RxmAbsent` is unreachable on a type
+/// that holds a leg rather than a `Result`. `rxmStatus`, `rxmProgram` and `rxmValue` keep one for `to_value`
+/// alone, and `rxmState` for `to_value` and for a `window` that is not an `RxmWindow`, as `Session`'s does.
 #[wasm_bindgen]
-impl AsmScratch {
+impl RxmScratch {
     /// # Errors
     ///
     /// Returns `Err` only if `to_value` cannot marshal the status; not expected for this crate's own types.
-    #[wasm_bindgen(js_name = asmStatus)]
-    pub fn asm_status(&self) -> Result<JsValue, JsValue> {
-        to_value(&self.0.asm_status())
+    #[wasm_bindgen(js_name = rxmStatus)]
+    pub fn rxm_status(&self) -> Result<JsValue, JsValue> {
+        to_value(&self.0.rxm_status())
     }
 
     /// # Errors
     ///
     /// Returns `Err` only if `to_value` cannot marshal the listing; not expected for this crate's own types.
-    #[wasm_bindgen(js_name = asmProgram)]
-    pub fn asm_program(&self) -> Result<JsValue, JsValue> {
-        to_value(&self.0.asm_program())
+    #[wasm_bindgen(js_name = rxmProgram)]
+    pub fn rxm_program(&self) -> Result<JsValue, JsValue> {
+        to_value(&self.0.rxm_program())
     }
 
-    /// `false` once the run has halted, faulted or been capped — `asmStatus().run` and `.cap` say which.
-    #[wasm_bindgen(js_name = stepAsm)]
+    /// `false` once the run has halted, faulted or been capped — `rxmStatus().run` and `.cap` say which.
+    #[wasm_bindgen(js_name = stepRxm)]
     #[must_use]
-    pub fn step_asm(&mut self) -> bool {
-        self.0.step_asm()
+    pub fn step_rxm(&mut self) -> bool {
+        self.0.step_rxm()
     }
 
     /// `source_node` is always `null`: a copy has no lowering to have recorded an owner. `window` is read as
-    /// `Session::asmState` reads it.
+    /// `Session::rxmState` reads it.
     ///
     /// # Errors
     ///
-    /// Returns `Err` when `window` is not an `AsmWindow`, with the deserializer's message.
-    #[wasm_bindgen(js_name = asmState)]
-    pub fn asm_state(&self, window: JsValue) -> Result<JsValue, JsValue> {
-        let window: redextape_core::viewmodel::AsmWindow = serde_wasm_bindgen::from_value(window)
-            .map_err(|e| JsValue::from_str(&format!("asmState: not an AsmWindow: {e}")))?;
-        to_value(&self.0.asm_state(window))
+    /// Returns `Err` when `window` is not an `RxmWindow`, with the deserializer's message.
+    #[wasm_bindgen(js_name = rxmState)]
+    pub fn rxm_state(&self, window: JsValue) -> Result<JsValue, JsValue> {
+        let window: redextape_core::viewmodel::RxmWindow = serde_wasm_bindgen::from_value(window)
+            .map_err(|e| JsValue::from_str(&format!("rxmState: not an RxmWindow: {e}")))?;
+        to_value(&self.0.rxm_state(window))
     }
 
     /// `u32` and widened, for the reason `Session::raiseLambdaCap` records.
-    #[wasm_bindgen(js_name = raiseAsmCap)]
-    pub fn raise_asm_cap(&mut self, extra_steps: u32) {
-        self.0.raise_asm_cap(u64::from(extra_steps));
+    #[wasm_bindgen(js_name = raiseRxmCap)]
+    pub fn raise_rxm_cap(&mut self, extra_steps: u32) {
+        self.0.raise_rxm_cap(u64::from(extra_steps));
     }
 
     /// # Errors
     ///
     /// Returns `Err` only if `to_value` cannot marshal the `Decoded`; not expected for this crate's own types.
-    #[wasm_bindgen(js_name = asmValue)]
-    pub fn asm_value(&self) -> Result<JsValue, JsValue> {
-        to_value(&self.0.asm_value())
+    #[wasm_bindgen(js_name = rxmValue)]
+    pub fn rxm_value(&self) -> Result<JsValue, JsValue> {
+        to_value(&self.0.rxm_value())
     }
 }
 
@@ -1049,6 +1049,6 @@ mod tests {
     fn capture_classes_carries_all_four_tables_unchanged() {
         let want: Vec<(&str, usize)> =
             redextape_core::capture_map::CAPTURE_MAPS.iter().map(|m| (m.language_id, m.rows.len())).collect();
-        assert_eq!(want, vec![("redextape", 11), ("redextape_lambda", 5), ("redextape_tm", 11), ("redextape_asm", 9)]);
+        assert_eq!(want, vec![("redextape", 11), ("redextape_lambda", 5), ("redextape_tm", 11), ("redextape_rxm", 9)]);
     }
 }

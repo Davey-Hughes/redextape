@@ -99,7 +99,7 @@ const TM_HALF = 39_000
  *
  * **THREE WAITS: THE TM LEG STARTING TO RECORD, ITS RECORDING HALF WAY, THEN THE RUN'S END.** `BIG`'s run ends only
  * once its TM leg has recorded a full history, to step 78,458, which as one wait ran close to `until`'s 10 s at
- * `CPUQuota=25%`. The TM leg records last, after λ and asm, and its step line reads `…` from its first frames until
+ * `CPUQuota=25%`. The TM leg records last, after λ and rxm, and its step line reads `…` from its first frames until
  * it stops and counts them, so the first wait ends where its recording begins and the second at `TM_HALF` steps; for
  * a run with fewer TM frames, each ends at the result. The compile is claimed synchronously at the dispatch
  * (`compile.ts`'s `schedule`), and a step line waiting on a compile drops its `…` (`controls.ts`): the first two
@@ -124,7 +124,7 @@ async function settled(v: EditorView, src: string): Promise<void> {
  * `⏭` on a view's strip: its leg to the newest recorded step, once it is live. **A RUN OPENS ON STEP 0** (`History`),
  * and the cases that call this are written against the newest step.
  */
-async function toNewest(leg: 'lambda' | 'asm' | 'tm'): Promise<void> {
+async function toNewest(leg: 'lambda' | 'rxm' | 'tm'): Promise<void> {
   const button = () => document.querySelector<HTMLButtonElement>(`[data-leaf="${leg}-0"] .controls button.to-newest`)
   await until(() => button()?.disabled === false, `${leg}'s ⏭ to be live`)
   button()?.click()
@@ -342,7 +342,7 @@ describe('the app, end to end', () => {
     await settled(view, BIG)
     linkAt(view, 0)
     await until(() => linkStatus() !== '')
-    // A construct the machine bills no state to is one the asm lowering bills no instruction to — the machine is built
+    // A construct the machine bills no state to is one the rxm lowering bills no instruction to — the machine is built
     // from those instructions — and the line says both in one clause.
     expect(linkStatus()).toContain('no instructions or machine states')
     // No block can light for a construct that owns none.

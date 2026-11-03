@@ -22,10 +22,10 @@ import {
 /**
  * A SWITCH DOES NOT DESTROY THE VIEW THAT HOLDS AN ID ANOTHER TREE NAMES AS ANOTHER KIND — the view layouts spec §5.4.
  *
- * A pick in a view's title changes its kind and keeps its id. So with *TM · program* picked in the asm view, `asm-0` is
- * a TM view, while the arrangement remembered for all four still names `asm-0` as an asm view, and so does the default
- * of every combination with asm in it. Entered under that id, such a tree would have `pane-host.ts`'s `applyLayout`
- * build an asm view over the TM one.
+ * A pick in a view's title changes its kind and keeps its id. So with *TM · program* picked in the rxm view, `rxm-0` is
+ * a TM view, while the arrangement remembered for all four still names `rxm-0` as an rxm view, and so does the default
+ * of every combination with rxm in it. Entered under that id, such a tree would have `pane-host.ts`'s `applyLayout`
+ * build an rxm view over the TM one.
  *
  * A leaf whose id is live as another kind is entered under a new id, so the view that holds the id stays parked and
  * comes back as it left.
@@ -47,8 +47,8 @@ const onError = (e: ErrorEvent): void => {
   errors.push(e.message)
 }
 
-const FOUR = ['source', 'lambda-0', 'asm-0', 'tm-0']
-const ALL = 'source+lambda+asm+tm'
+const FOUR = ['source', 'lambda-0', 'rxm-0', 'tm-0']
+const ALL = 'source+lambda+rxm+tm'
 const PICKED = 'source+lambda+tm'
 
 /** A press on `kind`'s toggle with the pointer, after which the focus is somewhere in the page (spec §14 item 19). */
@@ -61,7 +61,7 @@ const editorOf = (id: string): HTMLElement | null =>
 const textOf = (editor: HTMLElement | null): string | null =>
   editor === null ? null : (EditorView.findFromDOM(editor)?.state.doc.toString() ?? null)
 
-/** The stored trees by key, the one on screen under `screen`, each as its leaves: `asm-0:tm`. */
+/** The stored trees by key, the one on screen under `screen`, each as its leaves: `rxm-0:tm`. */
 const storedTrees = (): Record<string, string[]> => {
   const ws = parseWorkspace(localStorage.getItem(LAYOUT_STORAGE_KEY))
   if (ws === null) throw new Error('the stored workspace does not parse')
@@ -93,7 +93,7 @@ const pageIsTheStoredTree = (): void => {
 }
 
 /**
- * What every case starts with: *TM · program* picked in the asm view's title, then *edit a copy* in it. Answers the
+ * What every case starts with: *TM · program* picked in the rxm view's title, then *edit a copy* in it. Answers the
  * copy's view as it is then: its title, the copies menu's row for one view of it, its editor's element, the first
  * element of its host, and its text.
  *
@@ -101,28 +101,28 @@ const pageIsTheStoredTree = (): void => {
  */
 type CopysView = { title: string; row: string; editor: HTMLElement; inner: Element; text: string }
 async function pickThenCopy(): Promise<CopysView> {
-  const picker = host('asm-0')?.querySelector<HTMLButtonElement>('button.view-title')
+  const picker = host('rxm-0')?.querySelector<HTMLButtonElement>('button.view-title')
   picker?.click()
   document
     .getElementById(picker?.getAttribute('aria-controls') ?? '')
     ?.querySelector<HTMLButtonElement>(`button[data-binding="${bindingKey('tm', 'source')}"]`)
     ?.click()
-  expect(hostKind('asm-0'), 'precondition: the pick made the asm view a TM view under its own id').toBe('tm')
-  expect(titleText('asm-0')).toBe('TM · program')
-  expect(storedTrees()[ALL], 'precondition: the tree before the pick is remembered, with asm-0 an asm view').toEqual([
+  expect(hostKind('rxm-0'), 'precondition: the pick made the rxm view a TM view under its own id').toBe('tm')
+  expect(titleText('rxm-0')).toBe('TM · program')
+  expect(storedTrees()[ALL], 'precondition: the tree before the pick is remembered, with rxm-0 an rxm view').toEqual([
     'source:source',
     'lambda-0:lambda',
-    'asm-0:asm',
+    'rxm-0:rxm',
     'tm-0:tm',
   ])
-  expect(underTwoKinds(), 'precondition: the pick left asm-0 under two kinds').toEqual(['asm-0'])
+  expect(underTwoKinds(), 'precondition: the pick left rxm-0 under two kinds').toEqual(['rxm-0'])
 
-  host('asm-0')?.querySelector<HTMLButtonElement>('button.detach')?.click()
-  await until(() => /^TM · copy \d+$/.test(titleText('asm-0')) && editorsOf('asm-0') === 1, 'the copy and its editor')
-  const title = titleText('asm-0')
+  host('rxm-0')?.querySelector<HTMLButtonElement>('button.detach')?.click()
+  await until(() => /^TM · copy \d+$/.test(titleText('rxm-0')) && editorsOf('rxm-0') === 1, 'the copy and its editor')
+  const title = titleText('rxm-0')
   const row = `${title.replace(' · ', ' ')} · 1 view`
-  const editor = editorOf('asm-0')
-  const inner = host('asm-0')?.firstElementChild
+  const editor = editorOf('rxm-0')
+  const inner = host('rxm-0')?.firstElementChild
   const text = textOf(editor)
   if (editor === null || inner === null || inner === undefined || text === null)
     throw new Error('the copy’s view has no editor to recognise it by')
@@ -133,11 +133,11 @@ async function pickThenCopy(): Promise<CopysView> {
 
 /** The copy's view is on the page as it was left: its title, its elements, its text, and the copies menu's count. */
 function expectTheCopysView(was: CopysView, when: string): void {
-  expect(titleText('asm-0'), `${when}: the view under asm-0 does not show the copy`).toBe(was.title)
-  expect(hostKind('asm-0'), when).toBe('tm')
-  expect(host('asm-0')?.firstElementChild, `${when}: the copy’s view was built again`).toBe(was.inner)
-  expect(editorOf('asm-0'), `${when}: the copy’s editor is another one`).toBe(was.editor)
-  expect(textOf(editorOf('asm-0')), `${when}: the editor’s text`).toBe(was.text)
+  expect(titleText('rxm-0'), `${when}: the view under rxm-0 does not show the copy`).toBe(was.title)
+  expect(hostKind('rxm-0'), when).toBe('tm')
+  expect(host('rxm-0')?.firstElementChild, `${when}: the copy’s view was built again`).toBe(was.inner)
+  expect(editorOf('rxm-0'), `${when}: the copy’s editor is another one`).toBe(was.editor)
+  expect(textOf(editorOf('rxm-0')), `${when}: the editor’s text`).toBe(was.text)
   expect(copyNames(), when).toEqual([was.row])
 }
 
@@ -154,98 +154,98 @@ beforeEach(async () => {
   deleteEveryCopyInline()
   await resetToFourViews()
   expect(mounted(), 'precondition: all four views').toEqual(FOUR)
-  expect(FOUR.map(hostKind), 'precondition: each view is its default kind').toEqual(['source', 'lambda', 'asm', 'tm'])
+  expect(FOUR.map(hostKind), 'precondition: each view is its default kind').toEqual(['source', 'lambda', 'rxm', 'tm'])
   expect(copyNames(), 'precondition: no copies').toEqual([])
   expect(underTwoKinds(), 'precondition: no id is under two kinds').toEqual([])
 })
 
-describe('a TM view picked in the asm view’s title, showing a copy', () => {
-  it('is parked by the asm toggle’s default, which builds its asm view under a new id', async () => {
+describe('a TM view picked in the rxm view’s title, showing a copy', () => {
+  it('is parked by the rxm toggle’s default, which builds its rxm view under a new id', async () => {
     const was = await pickThenCopy()
 
     // THE λ TOGGLE: the source beside TM, which holds neither id. The copy's view is parked.
     await press('lambda')
     expect(mounted(), 'precondition: the source beside the TM view').toEqual(['source', 'tm-0'])
     expect(copyNames(), 'the parked view stopped counting as a view of its copy').toEqual([was.row])
-    expect(storedTrees()[PICKED], 'precondition: the picked tree is remembered, left last').toContain('asm-0:tm')
+    expect(storedTrees()[PICKED], 'precondition: the picked tree is remembered, left last').toContain('rxm-0:tm')
     expect(Object.keys(storedTrees()).at(-1), 'precondition: the picked tree is the last entry').toBe(PICKED)
-    expect(underTwoKinds(), 'neither tree that names asm-0 was entered').toEqual(['asm-0'])
+    expect(underTwoKinds(), 'neither tree that names rxm-0 was entered').toEqual(['rxm-0'])
 
-    // THE asm TOGGLE: the first visit of source, asm and TM, whose default names asm-0 as an asm view. SOFT, SO A
+    // THE rxm TOGGLE: the first visit of source, rxm and TM, whose default names rxm-0 as an rxm view. SOFT, SO A
     // SWITCH THAT BUILT THAT VIEW OVER THE PARKED ONE IS REPORTED BY BOTH: the copy lost its view, and no id was new.
-    await press('asm')
+    await press('rxm')
     expect.soft(copyNames(), 'the switch destroyed the parked view of the copy').toEqual([was.row])
     const built = mounted().filter((id) => !FOUR.includes(id))
-    expect.soft(built, 'the default’s asm view was not built under an id of its own').toHaveLength(1)
+    expect.soft(built, 'the default’s rxm view was not built under an id of its own').toHaveLength(1)
     const fresh = built[0] as string
     expect(fresh).toMatch(/^pane-\d+$/)
     expect(mounted()).toEqual(['source', fresh, 'tm-0'])
-    expect(titleText(fresh)).toBe('asm · program')
-    expect(storedTrees().screen).toEqual(['source:source', `${fresh}:asm`, 'tm-0:tm'])
+    expect(titleText(fresh)).toBe('rxm · program')
+    expect(storedTrees().screen).toEqual(['source:source', `${fresh}:rxm`, 'tm-0:tm'])
     pageIsTheStoredTree()
-    expect(underTwoKinds(), 'neither tree that names asm-0 was entered').toEqual(['asm-0'])
+    expect(underTwoKinds(), 'neither tree that names rxm-0 was entered').toEqual(['rxm-0'])
 
     // BACK TO THE COMBINATION THE COPY'S VIEW WAS PARKED IN, THROUGH THE SOURCE BESIDE TM. The tree for all four
-    // still names asm-0 as an asm view, and it was left before the picked tree, so the view is what the picked tree
+    // still names rxm-0 as an rxm view, and it was left before the picked tree, so the view is what the picked tree
     // says and is entered under its own id.
-    await press('asm')
+    await press('rxm')
     expect(mounted(), 'precondition: the source beside the TM view again').toEqual(['source', 'tm-0'])
     await press('lambda')
     expect(mounted()).toEqual(FOUR)
     expectTheCopysView(was, 'back in source, λ and TM')
     pageIsTheStoredTree()
-    expect(storedTrees()[ALL], 'precondition: the tree for all four still names asm-0 as an asm view').toContain(
-      'asm-0:asm',
+    expect(storedTrees()[ALL], 'precondition: the tree for all four still names rxm-0 as an rxm view').toContain(
+      'rxm-0:rxm',
     )
 
-    // ALL FOUR, WHOSE REMEMBERED TREE IS THE ONE BEFORE THE PICK: its asm view takes a new id too, and no id is
+    // ALL FOUR, WHOSE REMEMBERED TREE IS THE ONE BEFORE THE PICK: its rxm view takes a new id too, and no id is
     // under two kinds any longer.
-    await press('asm')
+    await press('rxm')
     const second = mounted().filter((id) => !FOUR.includes(id))
-    expect(second, 'the remembered tree’s asm view was not built under an id of its own').toHaveLength(1)
+    expect(second, 'the remembered tree’s rxm view was not built under an id of its own').toHaveLength(1)
     expect(second[0], 'the two new views share an id').not.toBe(fresh)
     expect(mounted()).toEqual(['source', 'lambda-0', second[0], 'tm-0'])
-    expect(hostKind(second[0] as string)).toBe('asm')
+    expect(hostKind(second[0] as string)).toBe('rxm')
     pageIsTheStoredTree()
     expect(copyNames(), 'the switch destroyed the parked view of the copy').toEqual([was.row])
-    expect(underTwoKinds(), 'the tree that named asm-0 as an asm view was entered under that id').toEqual([])
+    expect(underTwoKinds(), 'the tree that named rxm-0 as an rxm view was entered under that id').toEqual([])
 
-    await press('asm')
+    await press('rxm')
     expect(mounted()).toEqual(FOUR)
     expectTheCopysView(was, 'back in source, λ and TM a second time')
     expect(errors, 'a handler threw').toEqual([])
   })
 
-  it('is parked by the asm toggle alone, which enters the tree before the pick under a new id', async () => {
+  it('is parked by the rxm toggle alone, which enters the tree before the pick under a new id', async () => {
     const was = await pickThenCopy()
 
-    // THE asm TOGGLE: all four, remembered as the tree before the pick, which names asm-0 as an asm view. SOFT, AS
+    // THE rxm TOGGLE: all four, remembered as the tree before the pick, which names rxm-0 as an rxm view. SOFT, AS
     // IN THE CASE ABOVE.
-    await press('asm')
+    await press('rxm')
     expect.soft(copyNames(), 'the switch destroyed the view of the copy it parked').toEqual([was.row])
     const built = mounted().filter((id) => !FOUR.includes(id))
-    expect.soft(built, 'the remembered tree’s asm view was not built under an id of its own').toHaveLength(1)
+    expect.soft(built, 'the remembered tree’s rxm view was not built under an id of its own').toHaveLength(1)
     const fresh = built[0] as string
     expect(fresh).toMatch(/^pane-\d+$/)
     expect(mounted()).toEqual(['source', 'lambda-0', fresh, 'tm-0'])
-    expect(titleText(fresh)).toBe('asm · program')
+    expect(titleText(fresh)).toBe('rxm · program')
     pageIsTheStoredTree()
     expect(storedTrees()[PICKED], 'the picked tree is not remembered as it was left').toEqual([
       'source:source',
       'lambda-0:lambda',
-      'asm-0:tm',
+      'rxm-0:tm',
       'tm-0:tm',
     ])
     expect(underTwoKinds(), 'the switch left an id under two kinds').toEqual([])
 
-    await press('asm')
+    await press('rxm')
     expect(mounted()).toEqual(FOUR)
-    expectTheCopysView(was, 'after the asm toggle twice')
+    expectTheCopysView(was, 'after the rxm toggle twice')
     pageIsTheStoredTree()
     expect(underTwoKinds()).toEqual([])
 
-    // A THIRD PRESS SHOWS THE ASM VIEW THE FIRST ONE BUILT, and mints nothing.
-    await press('asm')
+    // A THIRD PRESS SHOWS THE RXM VIEW THE FIRST ONE BUILT, and mints nothing.
+    await press('rxm')
     expect(mounted()).toEqual(['source', 'lambda-0', fresh, 'tm-0'])
     expect(copyNames()).toEqual([was.row])
     expect(errors, 'a handler threw').toEqual([])
@@ -255,8 +255,8 @@ describe('a TM view picked in the asm view’s title, showing a copy', () => {
    * **AN EDIT THAT REPLACES THE ARRANGEMENT A PARKED VIEW IS IN CLOSES THE VIEW, WHATEVER ELSE NAMES ITS ID.** `+ view`
    * adds a λ view beside the source and the TM view, which is the combination the copy's view is parked in, so the
    * tree it was left in is replaced by the edit (spec §4.3) and no tree holds the view. The tree for all four still
-   * names `asm-0`, as an asm view. Were `applyLayout` to keep a parked pane on its id alone, the copies menu would go
-   * on reading `TM copy 1 · 1 view` here, until the asm toggle built an asm view over it.
+   * names `rxm-0`, as an rxm view. Were `applyLayout` to keep a parked pane on its id alone, the copies menu would go
+   * on reading `TM copy 1 · 1 view` here, until the rxm toggle built an rxm view over it.
    */
   it('is closed when an edit replaces the arrangement it is parked in, though another still names its id', async () => {
     const was = await pickThenCopy()
@@ -277,7 +277,7 @@ describe('a TM view picked in the asm view’s title, showing a copy', () => {
     expect(Object.keys(trees), 'precondition: the edit replaced the tree the copy’s view was parked in').not.toContain(
       PICKED,
     )
-    expect(trees[ALL], 'precondition: the tree for all four still names asm-0, as an asm view').toContain('asm-0:asm')
+    expect(trees[ALL], 'precondition: the tree for all four still names rxm-0, as an rxm view').toContain('rxm-0:rxm')
     expect(copyNames(), 'a view no tree holds still counts as a view of its copy').toEqual([
       was.row.replace('1 view', 'not shown'),
     ])

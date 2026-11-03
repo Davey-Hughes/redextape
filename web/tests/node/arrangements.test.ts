@@ -41,8 +41,8 @@ import { seededRandom } from './seeded-random'
 const of = (...kinds: PaneKind[]): LayoutNode => defaultArrangement(kinds, 'wide')
 const FOUR = of(...KIND_ORDER)
 const ALL = treeKey(FOUR)
-/** All four views after *TM · program* is picked in the asm view's title: `asm-0` is a TM view, under its own id. */
-const PICKED = setLeafKind(FOUR, 'asm-0', 'tm')
+/** All four views after *TM · program* is picked in the rxm view's title: `rxm-0` is a TM view, under its own id. */
+const PICKED = setLeafKind(FOUR, 'rxm-0', 'tm')
 
 /** Every combination: the 15 sets of kinds that are not empty, each in `KIND_ORDER`. */
 const COMBINATIONS: PaneKind[][] = []
@@ -51,7 +51,7 @@ for (let mask = 1; mask < 1 << KIND_ORDER.length; mask++)
 
 describe('a combination and its key', () => {
   it('reads a tree’s kinds in KIND_ORDER, each once', () => {
-    expect(combinationOf(FOUR)).toEqual(['source', 'lambda', 'asm', 'tm'])
+    expect(combinationOf(FOUR)).toEqual(['source', 'lambda', 'rxm', 'tm'])
     expect(combinationOf(of('tm', 'source'))).toEqual(['source', 'tm'])
     const twoLambdas = insertBeside(of('source', 'lambda'), 'lambda-0', 'row', 'pane-1', 'lambda')
     expect(combinationOf(twoLambdas)).toEqual(['source', 'lambda'])
@@ -59,8 +59,8 @@ describe('a combination and its key', () => {
 
   it('spells a key as the kinds joined by +', () => {
     expect(keyOf(['source', 'tm'])).toBe('source+tm')
-    expect(treeKey(FOUR)).toBe('source+lambda+asm+tm')
-    expect(treeKey(of('asm'))).toBe('asm')
+    expect(treeKey(FOUR)).toBe('source+lambda+rxm+tm')
+    expect(treeKey(of('rxm'))).toBe('rxm')
   })
 
   it('has 15 combinations, each with a key of its own that parses back to it', () => {
@@ -87,9 +87,9 @@ describe('toggled', () => {
   it('adds a kind that is missing, in KIND_ORDER, and removes one that is there', () => {
     expect(toggled(['source', 'tm'], 'lambda')).toEqual(['source', 'lambda', 'tm'])
     expect(toggled(['source', 'lambda', 'tm'], 'lambda')).toEqual(['source', 'tm'])
-    // λ BEFORE ASM, WHERE THE HEADER HAS ASM FIRST: the one pair the two orders disagree about.
-    expect(toggled(['source', 'asm', 'tm'], 'lambda')).toEqual(['source', 'lambda', 'asm', 'tm'])
-    expect(toggled(['source', 'lambda', 'tm'], 'asm')).toEqual(['source', 'lambda', 'asm', 'tm'])
+    // λ BEFORE RXM, WHERE THE HEADER HAS RXM FIRST: the one pair the two orders disagree about.
+    expect(toggled(['source', 'rxm', 'tm'], 'lambda')).toEqual(['source', 'lambda', 'rxm', 'tm'])
+    expect(toggled(['source', 'lambda', 'tm'], 'rxm')).toEqual(['source', 'lambda', 'rxm', 'tm'])
   })
 
   it('is empty when the only kind is toggled, which the caller refuses', () => {
@@ -126,12 +126,12 @@ describe('enter', () => {
   it('puts the tree it leaves after every entry it keeps, so the record is in the order its trees were left', () => {
     const pair = enter(start, FOUR)
     const lambda = enter(pair, of('source', 'lambda'))
-    expect(Object.keys(lambda.arrangements)).toEqual(['source+tm', 'source+lambda+asm+tm'])
+    expect(Object.keys(lambda.arrangements)).toEqual(['source+tm', 'source+lambda+rxm+tm'])
     // BACK TO THE FIRST ONE LEFT, WHICH IS ON SCREEN AND SO REMEMBERED NO LONGER; left again, it is the last.
     const back = enter(lambda, lambda.arrangements['source+tm'] as LayoutNode)
-    expect(Object.keys(back.arrangements)).toEqual(['source+lambda+asm+tm', 'source+lambda'])
-    const again = enter(back, of('source', 'asm'))
-    expect(Object.keys(again.arrangements)).toEqual(['source+lambda+asm+tm', 'source+lambda', 'source+tm'])
+    expect(Object.keys(back.arrangements)).toEqual(['source+lambda+rxm+tm', 'source+lambda'])
+    const again = enter(back, of('source', 'rxm'))
+    expect(Object.keys(again.arrangements)).toEqual(['source+lambda+rxm+tm', 'source+lambda', 'source+tm'])
   })
 
   it('shows the tree that was left after a switch away and back', () => {
@@ -158,9 +158,9 @@ describe('enter', () => {
   })
 
   it('treats a title pick that changes the combination as any other edit that does', () => {
-    const picked = setLeafKind(start.tree, 'tm-0', 'asm')
+    const picked = setLeafKind(start.tree, 'tm-0', 'rxm')
     const next = enter(start, picked)
-    expect(treeKey(next.tree)).toBe('source+asm')
+    expect(treeKey(next.tree)).toBe('source+rxm')
     expect(next.arrangements).toEqual({ 'source+tm': start.tree })
   })
 
@@ -473,30 +473,30 @@ describe('enter, over generated sequences of switches and edits', () => {
 })
 
 describe('the cycle', () => {
-  it('has four stops: the source beside asm, λ and TM in turn, as the header has them, then all four', () => {
-    expect(CYCLE.map(keyOf)).toEqual(['source+asm', 'source+lambda', 'source+tm', 'source+lambda+asm+tm'])
+  it('has four stops: the source beside rxm, λ and TM in turn, as the header has them, then all four', () => {
+    expect(CYCLE.map(keyOf)).toEqual(['source+rxm', 'source+lambda', 'source+tm', 'source+lambda+rxm+tm'])
     for (const stop of CYCLE) expect(parseKey(keyOf(stop)), keyOf(stop)).toEqual(stop)
   })
 
   it('steps to the next and the previous stop, wrapping', () => {
-    expect(cycleFrom(['source', 'asm'], 1)).toEqual(['source', 'lambda'])
+    expect(cycleFrom(['source', 'rxm'], 1)).toEqual(['source', 'lambda'])
     expect(cycleFrom(['source', 'lambda'], 1)).toEqual(['source', 'tm'])
     expect(cycleFrom(['source', 'tm'], 1)).toEqual(KIND_ORDER)
-    expect(cycleFrom(KIND_ORDER, 1)).toEqual(['source', 'asm'])
-    expect(cycleFrom(['source', 'asm'], -1)).toEqual(KIND_ORDER)
+    expect(cycleFrom(KIND_ORDER, 1)).toEqual(['source', 'rxm'])
+    expect(cycleFrom(['source', 'rxm'], -1)).toEqual(KIND_ORDER)
     expect(cycleFrom(['source', 'tm'], -1)).toEqual(['source', 'lambda'])
   })
 
   it('goes to the first stop forward and the last stop back from a combination that is not a stop', () => {
-    expect(cycleFrom(['tm'], 1)).toEqual(['source', 'asm'])
+    expect(cycleFrom(['tm'], 1)).toEqual(['source', 'rxm'])
     expect(cycleFrom(['tm'], -1)).toEqual(KIND_ORDER)
-    expect(cycleFrom(['source', 'lambda', 'tm'], 1)).toEqual(['source', 'asm'])
+    expect(cycleFrom(['source', 'lambda', 'tm'], 1)).toEqual(['source', 'rxm'])
   })
 })
 
 describe('the header’s order', () => {
-  it('is source, asm, λ, TM: every kind of KIND_ORDER, each once', () => {
-    expect(HEADER_ORDER).toEqual(['source', 'asm', 'lambda', 'tm'])
+  it('is source, rxm, λ, TM: every kind of KIND_ORDER, each once', () => {
+    expect(HEADER_ORDER).toEqual(['source', 'rxm', 'lambda', 'tm'])
     expect([...HEADER_ORDER].sort()).toEqual([...KIND_ORDER].sort())
     expect(new Set(HEADER_ORDER).size).toBe(KIND_ORDER.length)
   })
@@ -505,30 +505,30 @@ describe('the header’s order', () => {
 describe('liveLeaves', () => {
   it('is the leaves of the tree on screen and of every remembered tree, each id once', () => {
     const live = liveLeaves(of('source', 'tm'), { [treeKey(FOUR)]: FOUR, lambda: of('lambda') })
-    expect([...live.keys()].sort()).toEqual(['asm-0', 'lambda-0', 'source', 'tm-0'])
-    expect(live.get('asm-0')).toBe('asm')
+    expect([...live.keys()].sort()).toEqual(['lambda-0', 'rxm-0', 'source', 'tm-0'])
+    expect(live.get('rxm-0')).toBe('rxm')
   })
 
   it('takes the kind the tree on screen gives an id two trees hold', () => {
-    const onScreen = setLeafKind(of('source', 'tm'), 'tm-0', 'asm')
+    const onScreen = setLeafKind(of('source', 'tm'), 'tm-0', 'rxm')
     const live = liveLeaves(onScreen, { 'source+tm': of('source', 'tm') })
-    expect(live.get('tm-0')).toBe('asm')
+    expect(live.get('tm-0')).toBe('rxm')
     expect(live.size).toBe(2)
     // AND WHEREVER THE ARRANGEMENT STANDS IN THE RECORD: the tree on screen is asked first.
-    const last = liveLeaves(onScreen, { asm: of('asm'), 'source+tm': of('source', 'tm') })
-    expect(last.get('tm-0')).toBe('asm')
+    const last = liveLeaves(onScreen, { rxm: of('rxm'), 'source+tm': of('source', 'tm') })
+    expect(last.get('tm-0')).toBe('rxm')
   })
 
   /**
    * The view off the screen is what the arrangement left last made it (spec §5.4). `PICKED` is all four with a TM
-   * view picked in the asm view's title: `asm-0` is a TM view there and an asm view in `FOUR`.
+   * view picked in the rxm view's title: `rxm-0` is a TM view there and an rxm view in `FOUR`.
    */
   it('takes, for an id only remembered trees hold, the kind of the one left last', () => {
     const pair = of('source', 'tm')
     const stale = liveLeaves(pair, { [treeKey(FOUR)]: FOUR, [treeKey(PICKED)]: PICKED })
-    expect(stale.get('asm-0')).toBe('tm')
+    expect(stale.get('rxm-0')).toBe('tm')
     const other = liveLeaves(pair, { [treeKey(PICKED)]: PICKED, [treeKey(FOUR)]: FOUR })
-    expect(other.get('asm-0')).toBe('asm')
+    expect(other.get('rxm-0')).toBe('rxm')
     expect(stale.size).toBe(4)
   })
 })
@@ -550,7 +550,7 @@ describe('reidentified', () => {
     }
   }
   const idsOf = (tree: LayoutNode): string[] => leaves(tree).map((l) => `${l.id}:${l.pane}`)
-  /** The four views, then the pick: `PICKED` on screen, `FOUR` remembered, and `asm-0` under two kinds. */
+  /** The four views, then the pick: `PICKED` on screen, `FOUR` remembered, and `rxm-0` under two kinds. */
   const picked = enter({ tree: FOUR, arrangements: {} }, PICKED)
 
   it('is the tree it was handed where no leaf’s id is live as another kind, and mints nothing', () => {
@@ -568,32 +568,32 @@ describe('reidentified', () => {
     const { mint, minted } = minting()
     expect(picked.arrangements, 'precondition: the tree before the pick is remembered').toEqual({ [ALL]: FOUR })
     const hidden = enter(picked, of('source', 'tm'))
-    const three = of('source', 'asm', 'tm')
+    const three = of('source', 'rxm', 'tm')
     const live = liveLeaves(hidden.tree, hidden.arrangements)
-    expect(live.get('asm-0'), 'precondition: asm-0 is a TM view, parked').toBe('tm')
+    expect(live.get('rxm-0'), 'precondition: rxm-0 is a TM view, parked').toBe('tm')
     const entered = reidentified(three, live, mint)
-    expect(idsOf(entered)).toEqual(['source:source', 'fresh-1:asm', 'tm-0:tm'])
+    expect(idsOf(entered)).toEqual(['source:source', 'fresh-1:rxm', 'tm-0:tm'])
     expect(minted).toEqual(['fresh-1'])
     // THE TREE IS WHAT IT WAS BUT FOR THE ID, and what it was is left as it was.
     expect(parseTree(entered)).not.toBeNull()
-    expect(JSON.stringify(entered).replace('fresh-1', 'asm-0')).toBe(JSON.stringify(three))
-    expect(idsOf(three)).toEqual(['source:source', 'asm-0:asm', 'tm-0:tm'])
+    expect(JSON.stringify(entered).replace('fresh-1', 'rxm-0')).toBe(JSON.stringify(three))
+    expect(idsOf(three)).toEqual(['source:source', 'rxm-0:rxm', 'tm-0:tm'])
   })
 
   it('gives a remembered tree’s leaf a new id where the tree on screen has the id as another kind', () => {
     const { mint } = minting()
     const entered = reidentified(FOUR, liveLeaves(picked.tree, picked.arrangements), mint)
-    expect(idsOf(entered)).toEqual(['source:source', 'fresh-1:asm', 'lambda-0:lambda', 'tm-0:tm'])
+    expect(idsOf(entered)).toEqual(['source:source', 'fresh-1:rxm', 'lambda-0:lambda', 'tm-0:tm'])
     expect(idsOf(FOUR), 'the remembered tree was changed').toEqual([
       'source:source',
-      'asm-0:asm',
+      'rxm-0:rxm',
       'lambda-0:lambda',
       'tm-0:tm',
     ])
   })
 
   /**
-   * With the pair on screen, `asm-0` is in two remembered trees only: an asm view in `FOUR`, and a TM view in `PICKED`,
+   * With the pair on screen, `rxm-0` is in two remembered trees only: an rxm view in `FOUR`, and a TM view in `PICKED`,
    * which was left last and so is what the parked view is. `FOUR` is entered under a new id, and `PICKED` as it is.
    */
   it('gives a remembered tree’s leaf a new id where a tree left later has the id as another kind', () => {
@@ -605,12 +605,12 @@ describe('reidentified', () => {
     ])
     expect(
       leaves(hidden.tree).map((l) => l.id),
-      'precondition: the tree on screen does not hold asm-0',
+      'precondition: the tree on screen does not hold rxm-0',
     ).toEqual(['source', 'tm-0'])
     const live = liveLeaves(hidden.tree, hidden.arrangements)
     expect(idsOf(reidentified(FOUR, live, mint))).toEqual([
       'source:source',
-      'fresh-1:asm',
+      'fresh-1:rxm',
       'lambda-0:lambda',
       'tm-0:tm',
     ])
@@ -626,7 +626,7 @@ describe('reidentified', () => {
     const { mint, minted } = minting()
     const live = new Map<LeafId, PaneKind>([
       ['source', 'lambda'],
-      ['tm-0', 'asm'],
+      ['tm-0', 'rxm'],
     ])
     expect(idsOf(reidentified(of('source', 'tm'), live, mint))).toEqual(['source:source', 'fresh-1:tm'])
     expect(minted).toEqual(['fresh-1'])
@@ -634,13 +634,13 @@ describe('reidentified', () => {
 
   it('gives two such leaves an id each, and leaves a split with neither as it was', () => {
     const { mint, minted } = minting()
-    // λ AND TM EACH LIVE AS AN ASM VIEW: the two on the right of all four, whose left column holds neither.
+    // λ AND TM EACH LIVE AS AN RXM VIEW: the two on the right of all four, whose left column holds neither.
     const live = new Map<LeafId, PaneKind>([
-      ['lambda-0', 'asm'],
-      ['tm-0', 'asm'],
+      ['lambda-0', 'rxm'],
+      ['tm-0', 'rxm'],
     ])
     const entered = reidentified(FOUR, live, mint)
-    expect(idsOf(entered)).toEqual(['source:source', 'asm-0:asm', 'fresh-1:lambda', 'fresh-2:tm'])
+    expect(idsOf(entered)).toEqual(['source:source', 'rxm-0:rxm', 'fresh-1:lambda', 'fresh-2:tm'])
     expect(new Set(minted).size).toBe(2)
     if (entered.kind !== 'split' || FOUR.kind !== 'split') throw new Error('all four views are a split')
     expect(entered.children[0], 'a split no leaf of which took an id was built again').toBe(FOUR.children[0])

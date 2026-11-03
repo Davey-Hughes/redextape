@@ -1,8 +1,8 @@
 //! The Cranelift JIT driver: build a `JITModule`, drive the shared `codegen` against it, finalize,
 //! and run `$main` on a big-stack thread.
 //!
-//! The contract is agreement with `redextape_core::tm::run_asm`: `compile_and_run(prog, caps, opt)`
-//! must produce the same outcome (`Ran`/`HitCap`/`Fault`) as the asm interpreter on every `Program`,
+//! The contract is agreement with `redextape_core::tm::run_rxm`: `compile_and_run(prog, caps, opt)`
+//! must produce the same outcome (`Ran`/`HitCap`/`Fault`) as the rxm interpreter on every `Program`,
 //! at every `OptLevel` — optimization changes the code generated, never the answer. We reach it by
 //! compiling **one Cranelift function per subroutine** (from `analysis::partition`) via
 //! `codegen::translate_subroutine`, and threading a `*mut Runtime` through every function so
@@ -39,7 +39,7 @@ fn internal_error(msg: impl std::fmt::Display) -> NativeRun {
     NativeRun::LowerError(LowerError::Unsupported { node: NodeId::default(), what: format!("native codegen: {msg}") })
 }
 
-/// JIT-compile `prog` at `opt` and run it against a fresh `Runtime`, agreeing with `run_asm`.
+/// JIT-compile `prog` at `opt` and run it against a fresh `Runtime`, agreeing with `run_rxm`.
 ///
 /// `opt` reaches the host ISA as Cranelift's `opt_level` setting (see `codegen::cranelift_opt_level`
 /// for the six-to-three collapse); it changes only how the machine code is generated, never the
@@ -52,7 +52,7 @@ fn internal_error(msg: impl std::fmt::Display) -> NativeRun {
 pub fn compile_and_run(prog: &Program, caps: Caps, opt: OptLevel) -> NativeRun {
     // Reject an absurd register index BEFORE building any function: materialising a billion-plus
     // register `Variable` bank would attempt a multi-GB allocation whose failure aborts the process.
-    // `run_asm` guards the same way (returning `Fault`); we return `LowerError` (see `reg_over_cap`).
+    // `run_rxm` guards the same way (returning `Fault`); we return `LowerError` (see `reg_over_cap`).
     if reg_over_cap(prog) {
         return internal_error(format!("register index exceeds MAX_REGISTERS ({MAX_REGISTERS})"));
     }
@@ -203,7 +203,7 @@ fn build_and_run(prog: &Program, subs: &[Subroutine], caps: Caps, opt: OptLevel)
     // `module` outlives this call, so the code stays mapped and executable.
     let main: extern "C" fn(*mut Runtime) -> u64 = unsafe { std::mem::transmute::<*const u8, _>(code) };
 
-    // `caps.mem` (the reference's cap on words held across cloned `Vec<AsmFrame>` locals) has no native
+    // `caps.mem` (the reference's cap on words held across cloned `Vec<RxmFrame>` locals) has no native
     // analog: each subroutine's `Loc`/`Arg` are fixed-size `Variable`s on the real call stack, so a
     // `Call` clones nothing. Native recursion is instead bounded by the frame-size-aware
     // `native_depth_cap` (= `min(caps.stack, safe_depth)`) via `rt_enter`'s depth counter, checked
@@ -230,7 +230,7 @@ mod tests {
 
     use super::*;
     use redextape_core::core::BinOp;
-    use redextape_core::tm::{AsmRun, DEFAULT_CAPS, Instr, Program, Reg, lower_program, run_asm};
+    use redextape_core::tm::{DEFAULT_CAPS, Instr, Program, Reg, RxmRun, lower_program, run_rxm};
 
     /// Every Cranelift opt level. The frame-size estimate behind `native_depth_cap` is calibrated
     /// against OPTIMIZED frames (Cranelift's binding case), so each level must still be checked
@@ -238,15 +238,15 @@ mod tests {
     const OPT_LEVELS: [OptLevel; 6] =
         [OptLevel::O0, OptLevel::O1, OptLevel::O2, OptLevel::O3, OptLevel::Os, OptLevel::Oz];
 
-    /// native `compile_and_run` must agree with `run_asm` (same `Ran` outcome incl. heap, or both
+    /// native `compile_and_run` must agree with `run_rxm` (same `Ran` outcome incl. heap, or both
     /// `Fault`, or both `HitCap`) under `caps`, compiled at `opt`.
     fn agree_caps_at(prog: Program, caps: Caps, opt: OptLevel) {
         let native = compile_and_run(&prog, caps, opt);
-        match (run_asm(&prog, caps), native) {
-            (AsmRun::Ran(a), NativeRun::Ran(n)) => assert_eq!(a, n, "outcome mismatch at {opt:?}"),
-            (AsmRun::Fault(_), NativeRun::Fault(_)) => {}
-            (AsmRun::HitCap, NativeRun::HitCap) => {}
-            (a, n) => panic!("native vs asm-interp mismatch at {opt:?}:\n asm={a:?}\n native={n:?}"),
+        match (run_rxm(&prog, caps), native) {
+            (RxmRun::Ran(a), NativeRun::Ran(n)) => assert_eq!(a, n, "outcome mismatch at {opt:?}"),
+            (RxmRun::Fault(_), NativeRun::Fault(_)) => {}
+            (RxmRun::HitCap, NativeRun::HitCap) => {}
+            (a, n) => panic!("native vs rxm-interp mismatch at {opt:?}:\n rxm={a:?}\n native={n:?}"),
         }
     }
 
@@ -279,7 +279,7 @@ mod tests {
         // only the other one. Without this test, replacing `cranelift_opt_level(opt)` in `host_isa`
         // with a literal `"none"` (or switching to `JITBuilder::new`, which has no way to reach
         // `opt_level` at all) leaves the WHOLE suite green while every native oracle leg —
-        // `reference == λ == TM == native`, `native == asm-interp`, the cross-backend sweep — quietly
+        // `reference == λ == TM == native`, `native == rxm-interp`, the cross-backend sweep — quietly
         // validates unoptimized codegen. It cannot be caught by the object-size baseline either:
         // Cranelift's optimized-vs-`none` object deltas on that corpus sit well inside its ±10% band
         // (see `tests/size_baseline.rs`).
@@ -486,7 +486,7 @@ mod tests {
 
     #[test]
     fn all_comparisons_agree() {
-        // Exercise every comparison opcode against run_asm on a fixed pair (7 vs 4).
+        // Exercise every comparison opcode against run_rxm on a fixed pair (7 vs 4).
         for op in [BinOp::Eq, BinOp::Ne, BinOp::Lt, BinOp::Le, BinOp::Gt, BinOp::Ge] {
             agree(Program {
                 code: vec![
@@ -697,8 +697,8 @@ mod tests {
             compile_and_run(&prog, Caps { stack: 5000, ..DEFAULT_CAPS }, OptLevel::default()),
             NativeRun::HitCap
         ));
-        // And it agrees with run_asm, which also HitCaps on the same program.
-        assert!(matches!(run_asm(&prog, Caps { stack: 5000, ..DEFAULT_CAPS }), AsmRun::HitCap));
+        // And it agrees with run_rxm, which also HitCaps on the same program.
+        assert!(matches!(run_rxm(&prog, Caps { stack: 5000, ..DEFAULT_CAPS }), RxmRun::HitCap));
     }
 
     #[test]
@@ -722,18 +722,18 @@ mod tests {
 
     #[test]
     fn a_huge_register_index_is_rejected_not_a_process_abort() {
-        // `run_asm` scans for `Reg::Loc/Arg(n) >= MAX_REGISTERS` and faults to avoid a multi-GB
+        // `run_rxm` scans for `Reg::Loc/Arg(n) >= MAX_REGISTERS` and faults to avoid a multi-GB
         // `Vec::resize` abort. Native must likewise reject up front (as `LowerError`) rather than
         // materialise a billion-slot `Variable` bank and abort the whole process.
         let prog = Program { code: vec![Instr::Li(Reg::Loc(4_000_000_000), 0), Instr::Halt], labels: vec![] };
         assert!(matches!(compile_and_run(&prog, DEFAULT_CAPS, OptLevel::default()), NativeRun::LowerError(_)));
-        // `run_asm` faults on the same program; both are "not a value" (out of oracle scope).
-        assert!(matches!(run_asm(&prog, DEFAULT_CAPS), AsmRun::Fault(_)));
+        // `run_rxm` faults on the same program; both are "not a value" (out of oracle scope).
+        assert!(matches!(run_rxm(&prog, DEFAULT_CAPS), RxmRun::Fault(_)));
     }
 
     #[test]
-    fn add_saturates_on_overflow_like_run_asm() {
-        // u64::MAX + u64::MAX saturates to u64::MAX (run_asm uses `saturating_add`).
+    fn add_saturates_on_overflow_like_run_rxm() {
+        // u64::MAX + u64::MAX saturates to u64::MAX (run_rxm uses `saturating_add`).
         agree(Program {
             code: vec![
                 Instr::Li(Reg::Loc(0), u64::MAX),
@@ -745,8 +745,8 @@ mod tests {
     }
 
     #[test]
-    fn mul_saturates_on_overflow_like_run_asm() {
-        // u64::MAX * u64::MAX saturates to u64::MAX (run_asm uses `saturating_mul`).
+    fn mul_saturates_on_overflow_like_run_rxm() {
+        // u64::MAX * u64::MAX saturates to u64::MAX (run_rxm uses `saturating_mul`).
         agree(Program {
             code: vec![
                 Instr::Li(Reg::Loc(0), u64::MAX),
@@ -759,7 +759,7 @@ mod tests {
 
     #[test]
     fn a_faulting_callee_in_a_loop_is_fault_not_hit_cap() {
-        // `main` loops calling `crash`, which faults (head of nil). `run_asm` faults on the
+        // `main` loops calling `crash`, which faults (head of nil). `run_rxm` faults on the
         // first iteration. Native must ALSO report `Fault`: without the `stopped()` guard in
         // `rt_tick`/`rt_enter`, the loop's back-edge keeps ticking and eventually sets `hit_cap`,
         // masking the fault as `HitCap` (the driver checks `hit_cap` before `fault`).
@@ -778,7 +778,7 @@ mod tests {
 
     #[test]
     fn a_non_main_callee_containing_halt_is_rejected_not_miscompiled() {
-        // `f` (a `Call` target) contains a `Halt`, which under `run_asm` ends the whole program
+        // `f` (a `Call` target) contains a `Halt`, which under `run_rxm` ends the whole program
         // with rr==7. Lowering it as a plain `Ret` would resume `main` and yield the WRONG rr==99, so a
         // non-`$main` `Halt` is rejected at partition time → `LowerError` (never `Ran(99)`).
         let prog = Program {
@@ -798,7 +798,7 @@ mod tests {
     #[test]
     fn main_reading_an_arg_sees_zero() {
         // The entry `$main` takes no args (the driver calls it as `(rt_ptr) -> i64`); a `$main`
-        // that reads `Arg(0)` must see the init-0 value, matching `run_asm` (args empty → get(0)=0),
+        // that reads `Arg(0)` must see the init-0 value, matching `run_rxm` (args empty → get(0)=0),
         // not garbage from a mis-shaped multi-param signature called as a one-param fn.
         agree(Program {
             code: vec![Instr::Bin(BinOp::Add, Reg::Rr, Reg::Arg(0), Reg::Arg(0)), Instr::Halt],
@@ -834,10 +834,10 @@ mod tests {
     /// this test is what would notice if the estimate's headroom over this frame closed.
     ///
     /// Each `Loc(i)` is seeded by its own `Li` before being read, so no instruction here READS a
-    /// `Loc` this body has not already written: `run_asm`'s `Call` leaves the caller's locals in
+    /// `Loc` this body has not already written: `run_rxm`'s `Call` leaves the caller's locals in
     /// place, so a callee INHERITS them, whereas the native backends give each callee a zeroed
     /// bank. This helper's program is only ever asserted to `HitCap` (never compared against
-    /// `run_asm`), but keeping it inside the definite-assignment contract every `lower_asm`/`defunc`
+    /// `run_rxm`), but keeping it inside the definite-assignment contract every `lower_rxm`/`defunc`
     /// output satisfies means it stays usable in an agreement test too.
     fn fat_recursive_countdown(fillers: u32, depth: u64) -> Program {
         // Sweeps over the whole filler bank after the self-call; 4 is where the frame saturates.
@@ -925,11 +925,11 @@ mod tests {
     #[test]
     fn shallow_but_fat_frame_still_runs_to_a_value_at_every_opt_level() {
         // The frame-size-aware cap must NOT spuriously `HitCap` a non-recursive fat-frame program:
-        // ~150 locals but only one call deep. Native must `Ran` the value, agreeing with `run_asm` —
+        // ~150 locals but only one call deep. Native must `Ran` the value, agreeing with `run_rxm` —
         // at every opt level, since a level that made the cap too tight would show up here as a
         // spurious `HitCap` (the opposite failure mode to the deep-recursion sweep above).
         for opt in OPT_LEVELS {
-            // 42 + 150*1 = 192; agree_caps_at checks native == run_asm (both Ran, same value).
+            // 42 + 150*1 = 192; agree_caps_at checks native == run_rxm (both Ran, same value).
             agree_caps_at(fat_shallow_call(150), DEFAULT_CAPS, opt);
         }
     }
@@ -965,7 +965,7 @@ mod tests {
             NativeRun::Ran(o) => assert_eq!(o.result, 5050, "sum(100) should be 5050"),
             other => panic!("sum(100) must Ran(5050), got {other:?}"),
         }
-        // And it agrees with the asm interpreter.
-        assert!(matches!(run_asm(&prog, DEFAULT_CAPS), AsmRun::Ran(o) if o.result == 5050));
+        // And it agrees with the rxm interpreter.
+        assert!(matches!(run_rxm(&prog, DEFAULT_CAPS), RxmRun::Ran(o) if o.result == 5050));
     }
 }

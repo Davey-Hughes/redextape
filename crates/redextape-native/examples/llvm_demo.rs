@@ -11,7 +11,7 @@
 
 #[cfg(feature = "llvm")]
 fn main() {
-    use redextape_core::tm::{DEFAULT_CAPS, decode_asm};
+    use redextape_core::tm::{DEFAULT_CAPS, decode_rxm};
     use redextape_core::{desugar::desugar, parser::parse, run, value::format_value};
     use redextape_native::{Codegen, NativeRun, OptLevel, run_native_with};
 
@@ -21,14 +21,14 @@ fn main() {
 
     println!("\n════════════════════════════════════════════════════════════════════");
     println!(" Redextape — LLVM backend demo");
-    println!(" mini-language  →  register-asm  →  LLVM IR  →  optimize  →  JIT  →  decode,");
+    println!(" mini-language  →  rxm  →  LLVM IR  →  optimize  →  JIT  →  decode,");
     println!(" checked against Cranelift and the reference interpreter.");
     println!("════════════════════════════════════════════════════════════════════\n");
     println!("program  : {src}");
     println!("expected : {}\n", format_value(&expected));
 
     let cranelift = match run_native_with(&core, DEFAULT_CAPS, Codegen::Cranelift { opt: OptLevel::O3 }) {
-        NativeRun::Ran(o) => format_value(&decode_asm(&o, &expected).unwrap()),
+        NativeRun::Ran(o) => format_value(&decode_rxm(&o, &expected).unwrap()),
         other => format!("{other:?}"),
     };
     println!("cranelift -O3: {cranelift}");
@@ -42,7 +42,7 @@ fn main() {
         ("llvm -Oz", OptLevel::Oz),
     ] {
         let result = match run_native_with(&core, DEFAULT_CAPS, Codegen::Llvm { opt }) {
-            NativeRun::Ran(o) => format_value(&decode_asm(&o, &expected).unwrap()),
+            NativeRun::Ran(o) => format_value(&decode_rxm(&o, &expected).unwrap()),
             other => format!("{other:?}"),
         };
         println!("{label:<12} : {result}");

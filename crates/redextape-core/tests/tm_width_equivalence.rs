@@ -25,7 +25,7 @@ use redextape_core::parser::parse;
 use redextape_core::run;
 use redextape_core::tm::{
     BLANK, BOX, Binary, Encoding, EncodingKind, MARK, MAX_FIELD_WIDTH, MIN_FIELD_WIDTH, REG, SEP, TAPES,
-    TM_DEFAULT_CAPS, Tape, TmCaps, TmRun, TmStatus, Unary, WORK, ZERO, decode_tape, defunc, lower_asm,
+    TM_DEFAULT_CAPS, Tape, TmCaps, TmRun, TmStatus, Unary, WORK, ZERO, decode_tape, defunc, lower_rxm,
     lower_tm_guarded, n_slots_of, run_tm, run_tm_at, run_tm_fitted, simulate_counts, simulate_watched,
 };
 
@@ -265,7 +265,7 @@ fn the_box_tape_stays_well_formed_at_every_step_and_every_width() {
         let (prog, ds) = parse(src);
         assert!(ds.is_empty(), "parse errors in `{src}`: {ds:?}");
         let core = desugar(&prog.unwrap());
-        let program = lower_asm(&defunc(&core).expect("defuncs")).expect("lowers after defunc");
+        let program = lower_rxm(&defunc(&core).expect("defuncs")).expect("lowers after defunc");
         for width in widths() {
             for (name, enc) in encodings_at(width) {
                 let enc = enc.as_ref();
@@ -453,9 +453,9 @@ fn step_count_is_non_decreasing_in_the_field_width() {
         let (prog, ds) = parse(src);
         assert!(ds.is_empty(), "parse errors in `{src}`: {ds:?}");
         let core = desugar(&prog.unwrap());
-        let program = match lower_asm(&core) {
+        let program = match lower_rxm(&core) {
             Ok(p) => p,
-            Err(_) => lower_asm(&defunc(&core).expect("defuncs")).expect("lowers after defunc"),
+            Err(_) => lower_rxm(&defunc(&core).expect("defuncs")).expect("lowers after defunc"),
         };
         for &kind in EncodingKind::ALL {
             let name = kind.name();

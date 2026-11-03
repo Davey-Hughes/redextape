@@ -129,7 +129,7 @@ describe('ScratchEditor', () => {
   /**
    * **A FORMAT TAKES THE PENDING EDIT OFF THE TIMER, AND `flush()` IS WHAT REACHES IT WHILE THE FORMAT WAITS** — and
    * *format on blur* starts one on the very click that leaves the copy, a click on the view's title, whose pick
-   * destroys a TM or asm view's editor. `destroy()` calls `flush()` first (its own doc), and `flush()` sends a
+   * destroys a TM or rxm view's editor. `destroy()` calls `flush()` first (its own doc), and `flush()` sends a
    * format's own pending text the moment it is asked rather than waiting on the server — so the edit format owed is
    * sent AT ONCE, not deferred. The server's answer is held back here until after the destroy, which is the order
    * the race takes when the server is slower than the pick; format's own continuation, finding nothing left in

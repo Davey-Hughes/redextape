@@ -1,12 +1,12 @@
 //! Core -> Core defunctionalization: rewrite higher-order Core into the first-order subset
-//! `lower_asm`/`lower_tm`/`decode` handle, or `LowerError::Unsupported`.
+//! `lower_rxm`/`lower_tm`/`decode` handle, or `LowerError::Unsupported`.
 //!
 //! A function or lambda *used as a value* (occurring anywhere other than as the immediate callee of
 //! an `Apply`) becomes a closure `cons(tag, env)` on the HEAP; an `Apply` of a value becomes a call
 //! to a generated per-arity `applyN` dispatcher that inlines the target bodies as its arms. The
 //! output BINDERS are emitted in dependency order (callees outer of callers); a mutually recursive
 //! `LetRecGroup` is ONE binder, so calls among its own members need no ordering at all — the
-//! reference and `lower_asm` both bind every name in a group before evaluating any of its values. A
+//! reference and `lower_rxm` both bind every name in a group before evaluating any of its values. A
 //! cycle between two *distinct* binders remains `Unsupported`.
 //!
 //! **Immutable environment capture**: an anonymous `Lambda` used as a value (e.g. as an `Apply`
@@ -49,13 +49,13 @@
 //! closes on `f`'s own dispatcher without either hop looking like "applies at its own arity" or "calls
 //! another kept `fn`" — it leaves through one dispatcher and comes back through a different one.
 //! `topo_order`'s cycle check catches it regardless, because it walks the actual graph rather than
-//! testing for these two named shapes. TM/asm/native: `Unsupported { "cyclic higher-order call graph
+//! testing for these two named shapes. TM/rxm/native: `Unsupported { "cyclic higher-order call graph
 //! through `f`" }`.
 
 use std::collections::{BTreeMap, BTreeSet};
 
 use crate::core::{BinOp, Core, NodeGen, NodeId};
-use crate::tm::lower_asm::LowerError;
+use crate::tm::lower_rxm::LowerError;
 
 /// Bounds every recursive tree-walk in this module (`analyze`, `free_vars`/`fv_into`,
 /// `Rewriter::rewrite`/`rewrite_apply`/`rewrite_lambda_value`, `collect_calls`, `visit`) so `defunc`
@@ -71,9 +71,9 @@ use crate::tm::lower_asm::LowerError;
 /// walk the *rewritten* output instead (structurally close to the input, plus a small constant), so
 /// they additionally carry their own depth counter as defense-in-depth (cheap to add).
 ///
-/// Same bound as `lower_asm::MAX_LOWER_DEPTH` (580): both are tuned against the same 8 MiB production
+/// Same bound as `lower_rxm::MAX_LOWER_DEPTH` (580): both are tuned against the same 8 MiB production
 /// stack, and `defunc`'s frames are not meaningfully fatter than `lower_into`'s, so reusing the
-/// measured ~2x-margin bound is conservative rather than a guess. See `lower_asm`'s doc comment for why
+/// measured ~2x-margin bound is conservative rather than a guess. See `lower_rxm`'s doc comment for why
 /// this must NOT be tuned against a smaller test thread.
 const MAX_DEFUNC_DEPTH: u32 = 580;
 
@@ -120,7 +120,7 @@ impl SynthGen {
 
 /// Which source binder a peeled function came from — and therefore which node re-emits it, and with
 /// which id. A KEPT (name-called) function is re-emitted as exactly the `fn` it was, so it carries
-/// the source id rather than a fresh one: `lower_asm` bills a function's prologue (one `Mov` per
+/// the source id rather than a fresh one: `lower_rxm` bills a function's prologue (one `Mov` per
 /// parameter) and its `Ret` to the binder node, and those run on EVERY call, so minting here would
 /// report a user function's whole per-call frame cost as defunctionalization scaffolding.
 #[derive(Clone, Copy, Debug)]
@@ -1347,7 +1347,7 @@ fn cons(g: &mut SynthGen, head: Core, tail: Core) -> Core {
     // never be able to capture it. `$` is rejected by the lexer in an identifier, so no user
     // binding can ever collide with this name — the same holds for its three siblings, `$head`/
     // `$tail`/`$nil` (see the comment in `prelude.rs`'s `runtime_env`, which enumerates all four, and
-    // `lower_asm.rs`).
+    // `lower_rxm.rs`).
     let c = var(g, "$cons");
     apply(g, c, vec![head, tail])
 }
@@ -1382,7 +1382,7 @@ fn nil_scaffold(g: &mut SynthGen) -> Core {
 // Box builders: `$box(init)` allocates a fresh cell, `$box_get(h)` reads it, and
 // `$box_set(h, v)` writes it (evaluating to unit). `$box*` are `BUILTIN_FNS`, so these applications
 // stay static direct calls — the reference resolves them to the `Builtin::Box*` builtins and
-// `lower_asm` to the `Box`/`BoxGet`/`BoxSet` instructions.
+// `lower_rxm` to the `Box`/`BoxGet`/`BoxSet` instructions.
 //
 // `box1` is the only one of the three with no source analogue: the cell allocation is new (the `let`
 // that holds it keeps its own id), so its `Apply` is minted. `box_get1`/`box_set2` each REPLACE a
@@ -1543,9 +1543,9 @@ mod tests {
 
     /// Reference-equivalence: `defunc` preserves meaning. Parse+desugar `src`, run the reference on the
     /// ORIGINAL and on `defunc(original)`, and require the same value. Also require `defunc`'s output to
-    /// lower first-order (lower_asm accepts it) — the whole point.
+    /// lower first-order (lower_rxm accepts it) — the whole point.
     fn defunc_preserves_and_lowers(src: &str) {
-        use crate::tm::lower_asm::lower_asm;
+        use crate::tm::lower_rxm::lower_rxm;
         let (prog, ds) = parse(src);
         assert!(ds.is_empty(), "parse errors: {ds:?}");
         let core = desugar(&prog.unwrap());
@@ -1554,13 +1554,13 @@ mod tests {
         // 1. meaning preserved: the reference evaluates defunc(core) to the same value.
         let via_defunc = crate::interp::eval(&d).expect("defunc'd core runs on the reference");
         assert_eq!(via_defunc, reference, "defunc changed the meaning of: {src}");
-        // 2. defunc(core) is first-order: lower_asm accepts it (no fn-as-value left).
-        lower_asm(&d).unwrap_or_else(|e| panic!("defunc(core) must lower first-order for {src}: {e:?}"));
+        // 2. defunc(core) is first-order: lower_rxm accepts it (no fn-as-value left).
+        lower_rxm(&d).unwrap_or_else(|e| panic!("defunc(core) must lower first-order for {src}: {e:?}"));
     }
 
     #[test]
     fn one_closed_function_value_through_a_dispatcher() {
-        // `lower_asm`'s `function_as_a_value_is_unsupported` program: `apply2` takes a function argument.
+        // `lower_rxm`'s `function_as_a_value_is_unsupported` program: `apply2` takes a function argument.
         defunc_preserves_and_lowers("fn apply2(f, x) { f(x) } fn add1(x) { x + 1 } apply2(add1, 5)");
     }
 
@@ -1625,7 +1625,7 @@ mod tests {
     /// cyclic-call-graph rejection (`map -> $apply1 -> map`, induced by dispatcher aggregation).
     #[test]
     fn nested_hof_callback_is_cleanly_unsupported() {
-        use crate::tm::lower_asm::LowerError;
+        use crate::tm::lower_rxm::LowerError;
         let (prog, ds) = parse(
             "fn map(xs,f){ if is_empty(xs){nil} else {cons(f(head(xs)), map(tail(xs),f))} } fn ap(f,x){f(x)} ap(|x| head([x].map(|y| y + x)), 3)",
         );
@@ -1701,7 +1701,7 @@ mod tests {
     /// rejection than the one the case names.
     #[test]
     fn unsupported_boundary() {
-        use crate::tm::lower_asm::LowerError;
+        use crate::tm::lower_rxm::LowerError;
         fn rejects(src: &str, needle: &str) {
             let (prog, ds) = parse(src);
             assert!(ds.is_empty(), "{src}: {ds:?}");
@@ -1759,7 +1759,7 @@ mod tests {
         );
 
         // The half of the `Unit` rule a group does not relax. `topo_order` drops edges *within* a
-        // binder (a group's members call each other freely, since `lower_asm` binds every name in the
+        // binder (a group's members call each other freely, since `lower_rxm` binds every name in the
         // group before lowering any body) but KEEPS every edge in and out of one, so a cycle running
         // THROUGH a group is rejected: `b` is value-used, so its body becomes an `$apply1` arm
         // that calls `a` by name, giving group{a,b} -> `ap` -> `$apply1` -> group{a,b}.
@@ -1823,7 +1823,7 @@ mod tests {
         let core = desugar(&parse(src).0.unwrap());
         let d = defunc(&core).expect("lowers");
         // It lowers first-order (the ultimate structural check).
-        assert!(crate::tm::lower_asm(&d).is_ok(), "defunc'd boxing program must be first-order");
+        assert!(crate::tm::lower_rxm(&d).is_ok(), "defunc'd boxing program must be first-order");
     }
 
     /// A purely imperative mutable (never captured by any lambda) is NOT boxed.
@@ -1831,7 +1831,7 @@ mod tests {
     fn uncaptured_mutable_is_not_boxed() {
         let src = "let mut n = 3; let mut acc = 0; while n > 0 { acc = acc + 1; n = n - 1; } acc";
         let core = desugar(&parse(src).0.unwrap());
-        // defunc is only invoked on higher-order fallback; here lower_asm already handles it directly,
+        // defunc is only invoked on higher-order fallback; here lower_rxm already handles it directly,
         // but defunc must still be identity-preserving if called: reference matches.
         let reference = crate::interp::eval(&core).unwrap();
         let d = defunc(&core).expect("a purely-imperative program (no higher-order construct) must defunc");
@@ -1886,7 +1886,7 @@ mod tests {
     /// never `Ok` with a free variable.
     #[test]
     fn boxed_mutable_reused_as_a_parameter_is_unsupported() {
-        use crate::tm::lower_asm::LowerError;
+        use crate::tm::lower_rxm::LowerError;
         // Both are well-typed programs the full pipeline evaluates to Nat(14); a lambda param `n` (first
         // case) / fn param `n` (second case) shadows the outer boxed `let mut n`.
         for src in [
@@ -1915,7 +1915,7 @@ mod tests {
     /// `Unsupported`, never `Ok` with a free/misbound `$boxh`.
     #[test]
     fn boxed_mutable_reused_as_a_function_name_is_unsupported() {
-        use crate::tm::lower_asm::LowerError;
+        use crate::tm::lower_rxm::LowerError;
         // Well-typed, 0 diagnostics: the outer boxed `let mut n` (captured by `g`) shares its name with
         // the top-level `fn n`. Reference = ap(n) + g(5) = n(0) + (5 + 0) = 1 + 5 = 6.
         let src = "let mut n = 0; let g = |x| x + n; fn n(z) { z + 1 } fn ap(h) { h(0) } ap(n) + g(5)";
@@ -2022,7 +2022,7 @@ mod tests {
         let (out, synthetic) = defunc_mapped(&core).expect("defuncs");
         let after = all_node_ids(&out);
 
-        // KEPT function: this IS the user's `fn map`, only with its body rewritten. `lower_asm` bills
+        // KEPT function: this IS the user's `fn map`, only with its body rewritten. `lower_rxm` bills
         // a function's per-call prologue (a `Mov` per parameter) and its `Ret` to the `LetRec`, and
         // those run on EVERY call — minting here would report a recursive user function's entire
         // frame cost as defunctionalization scaffolding.
@@ -2083,7 +2083,7 @@ mod tests {
     }
 
     /// A mutually recursive binding group survives defunctionalization: `ev`/`od` are BOTH mutually
-    /// recursive AND higher-order (they take a continuation `k` and apply it), so `lower_asm` alone
+    /// recursive AND higher-order (they take a continuation `k` and apply it), so `lower_rxm` alone
     /// reports `Unsupported` and the real pipeline routes the program through `defunc` — exactly the
     /// shape that reaches this pass.
     ///
@@ -2099,15 +2099,15 @@ mod tests {
         let core = crate::desugar::desugar(&crate::parser::parse(src).0.unwrap());
         // The premise: this program really is beyond the first-order backend on its own.
         assert!(
-            matches!(crate::tm::lower_asm(&core), Err(LowerError::Unsupported { .. })),
-            "the test program must be higher-order enough that `lower_asm` alone rejects it"
+            matches!(crate::tm::lower_rxm(&core), Err(LowerError::Unsupported { .. })),
+            "the test program must be higher-order enough that `lower_rxm` alone rejects it"
         );
         let out = defunc(&core).expect("a binding group must defunctionalize");
-        let prog = crate::tm::lower_asm(&out).expect("and then lower");
+        let prog = crate::tm::lower_rxm(&out).expect("and then lower");
         let expected = crate::run(src).unwrap();
         assert_eq!(expected, crate::value::Value::Nat(15), "the members' per-level arithmetic must differ");
-        match crate::tm::run_asm(&prog, crate::tm::DEFAULT_CAPS) {
-            crate::tm::AsmRun::Ran(o) => assert_eq!(crate::tm::decode_asm(&o, &expected), Some(expected)),
+        match crate::tm::run_rxm(&prog, crate::tm::DEFAULT_CAPS) {
+            crate::tm::RxmRun::Ran(o) => assert_eq!(crate::tm::decode_rxm(&o, &expected), Some(expected)),
             other => panic!("did not run: {other:?}"),
         }
 
@@ -2215,7 +2215,7 @@ mod tests {
     }
 
     /// A user `fn` named after a list builtin must not capture `defunc`'s own scaffolding:
-    /// `lower_asm` resolves a bound function before the builtin table, so the dispatcher's
+    /// `lower_rxm` resolves a bound function before the builtin table, so the dispatcher's
     /// synthesized `head($clos)` tag test would resolve to the user's `head` and MISCOMPILE SILENTLY;
     /// the `$`-aliases avoid that.
     #[test]
@@ -2244,7 +2244,7 @@ mod tests {
     /// directly, bypassing `rewrite`/`rewrite_apply` entirely. Since `$` is rejected by the lexer, no
     /// real user program can ever contain a `$`-prefixed `Var`, so this path is unreachable from
     /// source. The only way to even exercise it is a hand-built `Core` (the `$`-name idiom from
-    /// `lower_asm.rs`'s `dollar_aliases_match_their_bare_builtins`) — so build the one input shape at
+    /// `lower_rxm.rs`'s `dollar_aliases_match_their_bare_builtins`) — so build the one input shape at
     /// EACH call site where membership would matter, and confirm `defunc` rejects it safely (a
     /// `LowerError::Unsupported` naming it a "free variable"/"unbound", never a panic and never a
     /// silent accept) with `$cons`/`$head`/`$tail` absent from `BUILTIN_FNS`. That is the demonstration

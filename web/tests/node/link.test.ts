@@ -19,7 +19,7 @@ function wire(over: Partial<LinkIndexWire> = {}): LinkIndexWire {
     sourceNodeEnd: new Uint32Array([17, 5, 17]),
     sourceNodeId: new Uint32Array([100, 101, 102]),
     tmOwner: new Int32Array([-1, 100, 101, 100, -1]),
-    asmOwner: new Int32Array([100, -1, 101, 100]),
+    rxmOwner: new Int32Array([100, -1, 101, 100]),
     ...over,
   }
 }

@@ -57,7 +57,7 @@ export type ControlState = {
  * `Running` and costs nothing to continue; a spent cursor cap needs the cap raised; and a depth refusal
  * cannot be continued at all. `session.rs`'s `run_lambda` records the first distinction one layer in ("A
  * SPENT `budget` IS NOT A SPENT CAP"), and `trace.rs`'s `LambdaCursor::raise_cap` records the second. The
- * asm leg's three full caps are the depth refusal's kind — no continue — and each names its cap
+ * rxm leg's three full caps are the depth refusal's kind — no continue — and each names its cap
  * (`RecordEnd`'s doc, Plan 7 part 5 spec amendment 10).
  */
 function doneText(done: RecordEnd): string {

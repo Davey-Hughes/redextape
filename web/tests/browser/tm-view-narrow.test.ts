@@ -62,15 +62,15 @@ const tmViews = () => [...document.querySelectorAll<HTMLElement>('.pane[data-kin
 /**
  * **EVERY PANEL EXPLORER DRAWS ON `sum_to(5)`, BY VIEW AND NAME**, in the page's order. `.panel-header` and
  * `.panel-actions` are every panel's (`panel.ts`), so a rule that fits the TM view's headers is held against all of
- * them. The text panel of a copy and the outline of a TM or asm copy are not drawn here: no view holds a copy.
+ * them. The text panel of a copy and the outline of a TM or rxm copy are not drawn here: no view holds a copy.
  */
 const PANELS = [
   ['source', 'outline'],
   ['lambda-0', 'map'],
-  ['asm-0', 'listing'],
-  ['asm-0', 'registers'],
-  ['asm-0', 'stack'],
-  ['asm-0', 'heap'],
+  ['rxm-0', 'listing'],
+  ['rxm-0', 'registers'],
+  ['rxm-0', 'stack'],
+  ['rxm-0', 'heap'],
   ['tm-0', 'rules'],
   ['tm-0', 'diagram'],
 ] as const
@@ -312,7 +312,7 @@ beforeAll(async () => {
   await until(stateIdle, 'sum_to(5)’s run to its result')
   // **EVERY VIEW TO ITS NEWEST STEP, BY ITS `⏭`**: a run opens on step 0 (`History`), and these cases measure the page
   // at the run's end.
-  for (const leaf of ['lambda-0', 'asm-0', 'tm-0']) {
+  for (const leaf of ['lambda-0', 'rxm-0', 'tm-0']) {
     await userEvent.click(leafEl(leaf).querySelector('.view-steps button.to-newest') as HTMLElement)
   }
   await until(() => /^step ([\d,]+) of \1$/.test(stepOf('tm-0')), 'the TM view on its newest step')

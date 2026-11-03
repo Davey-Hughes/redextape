@@ -64,11 +64,11 @@ describe('defaultFocus', () => {
     expect(defaultFocus({ kind: 'leaf', id: 'source', pane: 'source' })).toBe('source')
   })
 
-  /** An asm view is a view like the others: a `defaultFocus` that took the first λ or TM leaf would pass it over. */
-  it('is the asm leaf where that is the first leaf that is not the source', () => {
-    expect(defaultFocus(defaultArrangement(['source', 'asm'], 'wide'))).toBe('asm-0')
-    expect(defaultFocus(defaultArrangement(['asm', 'tm'], 'wide'))).toBe('asm-0')
-    expect(defaultFocus({ kind: 'leaf', id: 'asm-0', pane: 'asm' })).toBe('asm-0')
+  /** An rxm view is a view like the others: a `defaultFocus` that took the first λ or TM leaf would pass it over. */
+  it('is the rxm leaf where that is the first leaf that is not the source', () => {
+    expect(defaultFocus(defaultArrangement(['source', 'rxm'], 'wide'))).toBe('rxm-0')
+    expect(defaultFocus(defaultArrangement(['rxm', 'tm'], 'wide'))).toBe('rxm-0')
+    expect(defaultFocus({ kind: 'leaf', id: 'rxm-0', pane: 'rxm' })).toBe('rxm-0')
   })
 })
 

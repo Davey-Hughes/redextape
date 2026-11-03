@@ -1,4 +1,0 @@
-bin.name = "redextape"
-args = ["run", "p.asm"]
-fs.sandbox = true
-status.code = 2

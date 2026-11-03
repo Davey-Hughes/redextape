@@ -1,6 +1,4 @@
 import { EditorView } from '@codemirror/view'
-import { AsmPane } from './asm-pane'
-import { seedAsm } from './asm-seed'
 import type { EditablePane, EditorCustody } from './editor-custody'
 import { LambdaPane } from './lambda-pane'
 import {
@@ -23,13 +21,15 @@ import type { PaneChoice, PaneEvents } from './pane-chrome'
 import type { Shares } from './panel-stack'
 import type { LeafId, PaneCollection, PaneKind } from './panes'
 import type { Leg } from './protocol'
+import { RxmPane } from './rxm-pane'
+import { seedRxm } from './rxm-seed'
 import type { Detachable } from './scratch'
 import type { SessionId } from './session-client'
 import {
-  type AsmCompiled,
-  type AsmScratchReading,
   type Binding,
   PaneSlot,
+  type RxmCompiled,
+  type RxmScratchReading,
   type TmCompiled,
   type TmScratchReading,
 } from './sessions'
@@ -150,11 +150,11 @@ export type AddRefused = { readonly leaf: LeafId; readonly gesture: 'view' | Dir
 
 /**
  * Whether a pane of `kind` can hold a copy's editor — what `rebind`'s same-leg arm asks before it takes the
- * outgoing editor off the view (a λ view's into custody, a TM or asm view's destroyed) and mounts one on the
+ * outgoing editor off the view (a λ view's into custody, a TM or rxm view's destroyed) and mounts one on the
  * arriving side.
  *
  * **A `switch`, SO THAT A NEW KIND HAS TO SAY WHETHER ITS VIEW EDITS.** A list — `kind === 'lambda' || kind ===
- * 'asm' || kind === 'tm'` — would answer `false` for a new kind with `tsc` green (`legs.ts` has the class of bug),
+ * 'rxm' || kind === 'tm'` — would answer `false` for a new kind with `tsc` green (`legs.ts` has the class of bug),
  * the same shape as the defect the TM arm below guards against.
  */
 function holdsEditor(kind: PaneKind): boolean {
@@ -165,8 +165,8 @@ function holdsEditor(kind: PaneKind): boolean {
       return false
     case 'lambda':
       return true
-    case 'asm':
-      // AN ASM VIEW HOLDS AN ASM COPY'S EDITOR (Plan 7 part 5 spec, amendment 28), and comes to show a blank one only
+    case 'rxm':
+      // AN RXM VIEW HOLDS AN RXM COPY'S EDITOR (Plan 7 part 5 spec, amendment 28), and comes to show a blank one only
       // through this arm, as a TM view does — the TM arm below has what leaving it out cost that leg.
       return true
     case 'tm':
@@ -317,13 +317,13 @@ export function createPaneHost(deps: {
    */
   tmScratchOf(session: SessionId): TmScratchReading | null
   /**
-   * The asm listing `session` last compiled and its text, or `null` — `tmProgramOf`'s twin for an asm view: a view
+   * The rxm listing `session` last compiled and its text, or `null` — `tmProgramOf`'s twin for an rxm view: a view
    * that comes to show `session` after the reply that told the others has to be told from what the session kept.
-   * The text is what *edit a copy* seeds a copy from (`sessions.ts`'s `AsmCompiled`).
+   * The text is what *edit a copy* seeds a copy from (`sessions.ts`'s `RxmCompiled`).
    */
-  asmProgramOf(session: SessionId): AsmCompiled | null
-  /** An asm copy's retained reading, or `null` for any other session — `tmScratchOf`'s twin for an asm view. */
-  asmScratchOf(session: SessionId): AsmScratchReading | null
+  rxmProgramOf(session: SessionId): RxmCompiled | null
+  /** An rxm copy's retained reading, or `null` for any other session — `tmScratchOf`'s twin for an rxm view. */
+  rxmScratchOf(session: SessionId): RxmScratchReading | null
   /**
    * The text and collapse flag a pane newly bound to `session` should mount its editor from, or
    * `null` when `session` is not a warm scratch buffer — `mountScratchEditor` below is the one caller.
@@ -331,7 +331,7 @@ export function createPaneHost(deps: {
    * **THE EDITOR'S HALF OF `tmProgramOf`, AND IT IS THE SAME REPAIR.** That dependency exists because
    * "the reply that would have told it has already been and gone" (the comment on the creation pass's
    * `seedTmPane` call); a copy's build reply in `replies.ts` (`scratch-compiled`, `tm-scratch-compiled`,
-   * `asm-scratch-compiled`) is what mounts its editor, and it fires once per build, so a pane that arrives
+   * `rxm-scratch-compiled`) is what mounts its editor, and it fires once per build, so a pane that arrives
    * at the buffer afterwards has nothing to mount from. Adding another session question is what
    * `createPaneHost`'s doc says has to argue for itself, and this is the argument: the alternative is a
    * pane bound to a buffer whose frames it renders and whose text it can never edit, which is the state
@@ -378,8 +378,8 @@ export function createPaneHost(deps: {
     focusDraw,
     tmProgramOf,
     tmScratchOf,
-    asmProgramOf,
-    asmScratchOf,
+    rxmProgramOf,
+    rxmScratchOf,
     scratchSeedOf,
   } = deps
 
@@ -389,7 +389,7 @@ export function createPaneHost(deps: {
    * **`pane: EditablePane`, NOT `LambdaPane`.** A `ScratchBuffers.forkBlank`'d buffer binds no pane at mint
    * (unlike a fork, which rebinds its own slot), so a view of any leg can come to show a copy with no editor, and
    * `editor-custody.ts`'s `EditablePane` lets this cover every view without a union, as it does `homeFor`/`hold`.
-   * `TmPane` and `AsmPane` implement `EditablePane` exactly as `LambdaPane` does.
+   * `TmPane` and `RxmPane` implement `EditablePane` exactly as `LambdaPane` does.
    *
    * **WITHOUT THIS, A `cool` FOLLOWED BY A `warm` LEAVES A BUFFER THAT CAN NEVER BE EDITED AGAIN.**
    * `ScratchBuffers.cool` rebinds every pane away from the buffer it sleeps (that is the invariant the
@@ -431,8 +431,8 @@ export function createPaneHost(deps: {
    * included.
    *
    * **EVERY VIEW, ON EVERY LEG, THAT COMES TO SHOW A COPY WHOSE EDITOR IS MOUNTED NOWHERE.** Without this, a TM
-   * or asm view's editor would come only from a build that landed, so a copy whose stored text does not build
-   * would come back after a reload as a view with no editor and no way to one — the plainest case an asm copy
+   * or rxm view's editor would come only from a build that landed, so a copy whose stored text does not build
+   * would come back after a reload as a view with no editor and no way to one — the plainest case an rxm copy
    * with a jump before its label — and a view picked onto a copy from another leg, split onto it, added with
    * `+ view` or brought back by undo would show it the same way. Each of those routes calls this (the creation
    * pass, `moveBack`), and so do the two ways a copy's editor comes down while another view shows it: the view
@@ -450,7 +450,7 @@ export function createPaneHost(deps: {
 
   /**
    * Mount `session`'s editor on the first view in the tree still showing it — after the view that held it destroyed
-   * it by closing, changing leg or moving to another session, which a TM or asm view does (spec amendment 33).
+   * it by closing, changing leg or moving to another session, which a TM or rxm view does (spec amendment 33).
    *
    * **THE TREE'S ORDER, THE RESTORE'S RULE** (`main.ts`'s restore loop): stable, visible on screen, and nothing moves
    * the editor afterwards but a click. A λ view never needs this — the editor it leaves waits in custody, and a view
@@ -491,12 +491,12 @@ export function createPaneHost(deps: {
   }
 
   /**
-   * Tell an asm view the listing `session` holds, or that it holds none — `seedTmPane`'s twin, and for its reason: a
+   * Tell an rxm view the listing `session` holds, or that it holds none — `seedTmPane`'s twin, and for its reason: a
    * view comes to show a session after the reply that told the others, by being built or by being moved. The program's
-   * session and an asm copy's both keep a listing — `compiled` and `asm-scratch-compiled` retain it.
+   * session and an rxm copy's both keep a listing — `compiled` and `rxm-scratch-compiled` retain it.
    */
-  const seedAsmPane = (pane: AsmPane, session: SessionId): void => {
-    seedAsm(pane, asmProgramOf(session), asmScratchOf(session))
+  const seedRxmPane = (pane: RxmPane, session: SessionId): void => {
+    seedRxm(pane, rxmProgramOf(session), rxmScratchOf(session))
   }
 
   /**
@@ -679,7 +679,7 @@ export function createPaneHost(deps: {
    * `transport.ts` resolves a fork against the registry and the session's own program, neither of which
    * knows a `LeafId` exists; `editorOwner` is keyed by one, so pairing the two has to happen here, the same
    * division `splitRow`/`splitColumn`/`close` draw for the layout gestures below them. `showEditor` is every
-   * leg's: a TM or asm view showing a copy whose editor another view of the copy holds offers *move the
+   * leg's: a TM or rxm view showing a copy whose editor another view of the copy holds offers *move the
    * editor here* as a λ view does, and it moves the editor the same way.
    */
   const paneEvents = <K extends Leg>(id: LeafId, slot: PaneSlot<K>): PaneEvents => {
@@ -754,7 +754,7 @@ export function createPaneHost(deps: {
 
     /**
      * A fork handler of `base`'s, wrapped so this leaf claims the copy it made — THE FIRST-MOUNT HALF OF
-     * `editorOwner`, one wrapper for every leg's *edit a copy* (`detach`, `detachMachine`, `detachAsm`). Each base
+     * `editorOwner`, one wrapper for every leg's *edit a copy* (`detach`, `detachMachine`, `detachRxm`). Each base
      * handler (when it fires at all — the guards inside `transport.ts`'s own handlers can decline, and a fork refused
      * at the cap declines too) REBINDS `slot` SYNCHRONOUSLY, before this wrapper resumes, so `slot.binding.session`
      * already names the new copy by the time the claim is made — checked rather than assumed, because a declined
@@ -796,7 +796,7 @@ export function createPaneHost(deps: {
       // That is also why the same-leg arm of `rebind` below needs no such call: it rebuilds no layout,
       // so nothing detaches what the restoration targeted.
       //
-      // **ON EVERY LEG.** A TM or asm view showing a copy whose editor another view holds offers
+      // **ON EVERY LEG.** A TM or rxm view showing a copy whose editor another view holds offers
       // it too (`CopyEditor.#refreshClaim`), and the sweep that moves it covers every view (`editor-custody.ts`'s
       // `reconcileEditors`), so the same three lines move a machine copy's editor.
       showEditor: () => {
@@ -806,7 +806,7 @@ export function createPaneHost(deps: {
       },
       // EACH MACHINE LEG'S FORK, CLAIMED BY THE SAME WRAPPER AS λ's — `claiming`'s doc.
       ...(slot.binding.leg === 'tm' ? { detachMachine: claiming(base.detachMachine) } : {}),
-      ...(slot.binding.leg === 'asm' ? { detachAsm: claiming(base.detachAsm) } : {}),
+      ...(slot.binding.leg === 'rxm' ? { detachRxm: claiming(base.detachRxm) } : {}),
       // **THE PICK, SPLIT BY ITS LEG — and the cross-leg arm is what makes a pane able to change what
       // it shows at all.** The selector offers `pairs()`, every `(leg, session)` pair in the registry,
       // to every pane (`PaneSlot.render`), so a pick can name the leg this pane does not render. The
@@ -821,7 +821,7 @@ export function createPaneHost(deps: {
       // siblings and every size (its own doc: that is what makes a leg change different from
       // close-then-split), and `applyLayout`'s two passes below do the rest: pass 1 drops the entry
       // whose kind no longer matches its leaf — taking its editor on the way out, exactly as a close
-      // does: a λ copy's to `custody`, a TM or asm copy's destroyed — and pass 2 builds the pane the leaf
+      // does: a λ copy's to `custody`, a TM or rxm copy's destroyed — and pass 2 builds the pane the leaf
       // now names.
       //
       // `pendingBinding` ANSWERS THE SAME QUESTION IT WAS BUILT FOR, ONE GESTURE EARLIER. It exists to
@@ -863,7 +863,7 @@ export function createPaneHost(deps: {
            * reason `heldEditors`' doc in `editor-custody.ts` gives: a λ copy's editor whose view is going
            * away — by closing, by changing leg, or here by moving to another session — is unmounted and NOT
            * destroyed, and waits in custody until a view asks for it through the claim control (`hasEditor`
-           * reads `heldEditors` first). A TM or asm view's is destroyed instead, as the drop pass destroys one,
+           * reads `heldEditors` first). A TM or rxm view's is destroyed instead, as the drop pass destroys one,
            * for the reason the comment on the handover below gives.
            *
            * **BEFORE `base.rebind`, WHERE `detach`'s WRAPPER ABOVE ACTS AFTER, AND THE ASYMMETRY IS
@@ -880,9 +880,9 @@ export function createPaneHost(deps: {
            * makes the cast sound; `slot.binding.leg` would answer the same today, and the entry's own
            * kind is the fact the cast is actually about.
            *
-           * **`holdsEditor` ANSWERS FOR EVERY KIND OF VIEW THAT EDITS — λ, TM AND ASM**, and its TM arm says
+           * **`holdsEditor` ANSWERS FOR EVERY KIND OF VIEW THAT EDITS — λ, TM AND RXM**, and its TM arm says
            * what a narrower check would cost this arm. `entry.pane as unknown as EditablePane`, not `as
-           * LambdaPane`: `TmPane` and `AsmPane` implement `EditablePane` exactly as `LambdaPane` does
+           * LambdaPane`: `TmPane` and `RxmPane` implement `EditablePane` exactly as `LambdaPane` does
            * (`editor-custody.ts`'s own doc), and `PaneView<LegFrame[K]>` — what `entry.pane` is actually typed
            * as — shares no member with any of the three classes, which is why the cast needs the `unknown` step
            * `editor-custody.ts`'s `editorHomeFor` takes for the identical reason.
@@ -905,10 +905,10 @@ export function createPaneHost(deps: {
           let unmounted: SessionId | null = null
           if (moved !== null) {
             const held = moved.takeEditor()
-            // **HELD ONLY FOR A λ VIEW.** A λ view's held editor waits for its `move the editor here`. A TM or asm
+            // **HELD ONLY FOR A λ VIEW.** A λ view's held editor waits for its `move the editor here`. A TM or rxm
             // view's would wait in a map nothing reads — since `mountScratchEditor` mounts nothing while custody has
             // an editor for the session, a view moved off a copy and back would find no editor, for good (spec
-            // amendment 33). Destroyed, as the drop pass destroys a closed TM or asm view's, sending what was typed
+            // amendment 33). Destroyed, as the drop pass destroys a closed TM or rxm view's, sending what was typed
             // first (`ScratchEditor.destroy`); the next view to show the copy mounts a fresh editor from its text of
             // record, and a view showing it now does so at once (`mountOnViewOf`, below).
             if (held !== null) {
@@ -919,8 +919,8 @@ export function createPaneHost(deps: {
               }
             }
           }
-          // **A TM OR ASM PANE IS RESEEDED FROM THE SESSION IT MOVES ONTO** — a TM pane whether or not it held the
-          // editor, which `seedTmPane`'s doc has the reason for, and an asm pane for `seedAsmPane`'s twin reason.
+          // **A TM OR RXM PANE IS RESEEDED FROM THE SESSION IT MOVES ONTO** — a TM pane whether or not it held the
+          // editor, which `seedTmPane`'s doc has the reason for, and an rxm pane for `seedRxmPane`'s twin reason.
           // BEFORE `base.rebind`, for the reason the handover above is: the `draw()` inside it then renders the new
           // session's frame against the new session's program.
           if (entry !== undefined) {
@@ -932,8 +932,8 @@ export function createPaneHost(deps: {
               case 'tm':
                 seedTmPane(entry.pane as unknown as TmPane, choice.session)
                 break
-              case 'asm':
-                seedAsmPane(entry.pane as unknown as AsmPane, choice.session)
+              case 'rxm':
+                seedRxmPane(entry.pane as unknown as RxmPane, choice.session)
                 break
               default:
                 unhandled(entry.kind)
@@ -1321,7 +1321,7 @@ export function createPaneHost(deps: {
    *    still holds it, so it closes with its events: pass 2 replaces what a host holds, and the render detaches every
    *    host.
    * 2. **Pass 1 drops each pane these rules do not keep**, taking its editor first: a λ copy's goes to `custody`, and
-   *    a TM or asm copy's is destroyed and its copy noted for step 7. Before pass 2, which can build a pane into the
+   *    a TM or rxm copy's is destroyed and its copy noted for step 7. Before pass 2, which can build a pane into the
    *    host a dropped one had, and empties the host as it does.
    *    - A pane whose leaf is in the tree on screen as the pane's own kind is kept, unless `rebuild` drops it.
    *    - A pane whose leaf is not in the tree on screen is kept where `liveLeaves` has the leaf as the pane's kind,
@@ -1337,7 +1337,7 @@ export function createPaneHost(deps: {
    * 5. **`laidOut` becomes the leaves of this tree.**
    * 6. **Pass 2 builds a pane for each leaf of the tree that has none**, the source's apart. Any editor claim held
    *    against the leaf's id is dropped, the host is put in `fresh` and given its kind, and the pane starts on the
-   *    session `pendingBinding` holds for the leaf, or on the program. A TM or asm pane is told what that session
+   *    session `pendingBinding` holds for the leaf, or on the program. A TM or rxm pane is told what that session
    *    has compiled, and each kind mounts its copy's editor where none is mounted or held. The source view's host,
    *    which no pass builds a pane into, is in `fresh` from before pass 1 where `rebuild` is `'every'`: an opened
    *    link gives that view another program (`keepScroll`'s doc).
@@ -1446,9 +1446,9 @@ export function createPaneHost(deps: {
           }
           break
         }
-        case 'asm': {
+        case 'rxm': {
           // DESTROYED, NOT HELD, FOR THE TM ARM'S REASON.
-          const held = (p.pane as AsmPane).takeEditor()
+          const held = (p.pane as RxmPane).takeEditor()
           if (held !== null) {
             held.destroy()
             unmounted.push(p.slot.binding.session)
@@ -1632,15 +1632,15 @@ export function createPaneHost(deps: {
           panes.add({ id: l.id, kind: 'tm', slot, pane, host })
           break
         }
-        case 'asm': {
-          const slot = new PaneSlot('asm', session)
+        case 'rxm': {
+          const slot = new PaneSlot('rxm', session)
           // EVERY PANEL READ BACK, each passed only when stored so it keeps its own default — the TM arm's rule.
           const listing = panelOpen(l.id, 'listing')
           const registers = panelOpen(l.id, 'registers')
           const stack = panelOpen(l.id, 'stack')
           const heap = panelOpen(l.id, 'heap')
           const outline = panelOpen(l.id, 'outline')
-          const pane = new AsmPane(
+          const pane = new RxmPane(
             host,
             paneEvents(l.id, slot),
             {
@@ -1653,11 +1653,11 @@ export function createPaneHost(deps: {
             panelSizesOf(l.id) ?? {},
           )
           // SEEDED FROM ITS SESSION, for the TM arm's reason just above: the `compiled` reply that told the other
-          // asm views has already been and gone for a view built by a split, a pick or a views toggle.
-          seedAsmPane(pane, session)
+          // rxm views has already been and gone for a view built by a split, a pick or a views toggle.
+          seedRxmPane(pane, session)
           // AND ITS COPY'S EDITOR WHEN NO VIEW HOLDS ONE, the TM arm's line for the TM arm's reason.
           mountScratchEditor(l.id, pane, session)
-          panes.add({ id: l.id, kind: 'asm', slot, pane, host })
+          panes.add({ id: l.id, kind: 'rxm', slot, pane, host })
           break
         }
         default:
@@ -1810,8 +1810,8 @@ export function createPaneHost(deps: {
             case 'tm':
               seedTmPane(p.pane as unknown as TmPane, session)
               break
-            case 'asm':
-              seedAsmPane(p.pane as unknown as AsmPane, session)
+            case 'rxm':
+              seedRxmPane(p.pane as unknown as RxmPane, session)
               break
             default:
               unhandled(p.kind)
@@ -1858,8 +1858,8 @@ export function createPaneHost(deps: {
           case 'tm':
             seedTmPane(p.pane as unknown as TmPane, to)
             break
-          case 'asm':
-            seedAsmPane(p.pane as unknown as AsmPane, to)
+          case 'rxm':
+            seedRxmPane(p.pane as unknown as RxmPane, to)
             break
           default:
             unhandled(p.kind)

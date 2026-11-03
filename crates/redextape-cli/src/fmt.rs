@@ -90,22 +90,22 @@ fn one(
         }
     };
     let form = Form::resolve(input, explicit_form, &src);
-    // `--width` is a line budget for the `.rxt` pretty-printer. The `.tm` and `.asm` printers take
+    // `--width` is a line budget for the `.rxt` pretty-printer. The `.tm` and `.rxm` printers take
     // no width at all — they lay out from their own content — so an explicit `--width` on either is
     // refused rather than silently ignored, the same way `run` refuses `--backend` on them. Keyed on
     // `explicit_width`, never on the effective `width`: `redextape.toml` carries a `fmt.width`, and
-    // keying this on the collapsed value would refuse every `.tm`/`.asm` format on any machine that
+    // keying this on the collapsed value would refuse every `.tm`/`.rxm` format on any machine that
     // has a config file.
     if explicit_width.is_some() && form.is_artifact() {
         let noun = match form {
             Form::Tm => "a `.tm` file, which the printer lays out from its own content",
-            Form::Asm => "an `.asm` file, which the printer lays out from its own content",
+            Form::Rxm => "an `.rxm` file, which the printer lays out from its own content",
             Form::Rxt => unreachable!("is_artifact() is false for Rxt"),
         };
         writeln!(err, "error: `--width` does not apply to {noun}")?;
         return Ok(Outcome::Failed);
     }
-    // The `.tm` and `.asm` printers take no width — they lay out from their own content, which is
+    // The `.tm` and `.rxm` printers take no width — they lay out from their own content, which is
     // exactly why an explicit `--width` is refused above rather than threaded through to them.
     let formatted = match form {
         Form::Rxt => match redextape_core::format_with_width(&src, width) {
@@ -124,9 +124,9 @@ fn one(
                 return Ok(Outcome::Failed);
             }
         }
-        Form::Asm => {
-            let doc = redextape_core::tm::parse_asm_full(&src);
-            if let Some(f) = redextape_core::tm::print_asm_doc(&doc) {
+        Form::Rxm => {
+            let doc = redextape_core::tm::parse_rxm_full(&src);
+            if let Some(f) = redextape_core::tm::print_rxm_doc(&doc) {
                 f
             } else {
                 render(err, &label, &src, &doc.diagnostics, color)?;
@@ -575,15 +575,15 @@ mod tests {
 
     /// Parses clean. Printing it inserts a blank line after `result Nat` and doubles the spaces
     /// before each trailing comment. Note the literal tab after `li`. Verbatim from `form.rs`'s own
-    /// `ASM_IN`.
-    const ASM_IN: &str = "; a program\nresult Nat\nf: ; the entry\n    li\tr0, #1 ; and a trailing one\n    ret\n";
+    /// `RXM_IN`.
+    const RXM_IN: &str = "; a program\nresult Nat\nf: ; the entry\n    li\tr0, #1 ; and a trailing one\n    ret\n";
 
-    /// `ASM_IN`'s printed form, byte-exact. Verbatim from `form.rs`'s own `ASM_OUT`.
-    const ASM_OUT: &str = "; a program\nresult Nat\n\nf:  ; the entry\n    li\tr0, #1  ; and a trailing one\n    ret\n";
+    /// `RXM_IN`'s printed form, byte-exact. Verbatim from `form.rs`'s own `RXM_OUT`.
+    const RXM_OUT: &str = "; a program\nresult Nat\n\nf:  ; the entry\n    li\tr0, #1  ; and a trailing one\n    ret\n";
 
     #[test]
     fn comments_survive_fmt_on_both_forms() {
-        for (name, input, expected) in [("p.tm", TM_IN, TM_OUT), ("p.asm", ASM_IN, ASM_OUT)] {
+        for (name, input, expected) in [("p.tm", TM_IN, TM_OUT), ("p.rxm", RXM_IN, RXM_OUT)] {
             let dir = redextape_test_support::ScratchDir::new(&format!("fmt-comments-{name}")).unwrap();
             let p = dir.join(name);
             std::fs::write(&p, input).unwrap();
@@ -603,7 +603,7 @@ mod tests {
     #[test]
     fn formatting_an_already_formatted_file_is_clean() {
         // What stops `fmt --check` flapping in CI, and the property a formatter is for.
-        for (name, formatted) in [("p.tm", TM_OUT), ("p.asm", ASM_OUT)] {
+        for (name, formatted) in [("p.tm", TM_OUT), ("p.rxm", RXM_OUT)] {
             let dir = redextape_test_support::ScratchDir::new(&format!("fmt-idem-{name}")).unwrap();
             let p = dir.join(name);
             std::fs::write(&p, formatted).unwrap();
@@ -616,7 +616,7 @@ mod tests {
 
     #[test]
     fn an_unparseable_artifact_reports_and_writes_nothing() {
-        for (name, src) in [("p.tm", "tapes\n"), ("p.asm", "li\n")] {
+        for (name, src) in [("p.tm", "tapes\n"), ("p.rxm", "li\n")] {
             let dir = redextape_test_support::ScratchDir::new(&format!("fmt-bad-{name}")).unwrap();
             let p = dir.join(name);
             std::fs::write(&p, src).unwrap();
@@ -654,7 +654,7 @@ mod tests {
     // before either assertion below runs.
     #[test]
     fn check_on_an_artifact_reports_would_change_and_writes_nothing() {
-        for (name, input, expected) in [("p.tm", TM_IN, TM_OUT), ("p.asm", ASM_IN, ASM_OUT)] {
+        for (name, input, expected) in [("p.tm", TM_IN, TM_OUT), ("p.rxm", RXM_IN, RXM_OUT)] {
             let dir = redextape_test_support::ScratchDir::new(&format!("fmt-check-artifact-{name}")).unwrap();
             let p = dir.join(name);
             std::fs::write(&p, input).unwrap();

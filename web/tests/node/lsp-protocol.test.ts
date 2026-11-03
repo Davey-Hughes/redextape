@@ -26,9 +26,9 @@ describe('the language ids the client sends', () => {
   })
 
   it('cover every pane kind that has an editor, and every id has an extension', () => {
-    // EVERY `PaneKind`, asm included: an asm view's editor is an asm copy's, which takes its language from here.
-    expect(Object.keys(LANGUAGE_OF_PANE).sort()).toEqual(['asm', 'lambda', 'source', 'tm'])
-    expect(LANGUAGE_OF_PANE.asm).toBe('redextape_asm')
+    // EVERY `PaneKind`, rxm included: an rxm view's editor is an rxm copy's, which takes its language from here.
+    expect(Object.keys(LANGUAGE_OF_PANE).sort()).toEqual(['lambda', 'rxm', 'source', 'tm'])
+    expect(LANGUAGE_OF_PANE.rxm).toBe('redextape_rxm')
     for (const id of Object.values(LANGUAGE_OF_PANE)) expect(LANGUAGE_IDS).toContain(id)
     for (const id of LANGUAGE_IDS) expect(EXTENSION_OF_LANGUAGE[id]).toBeTruthy()
   })
@@ -45,7 +45,7 @@ describe('document URIs', () => {
   it('carry each language extension', () => {
     expect(documentUri('v1', 'redextape')).toBe('redextape:///view/v1.rxt')
     expect(documentUri('v1', 'redextape_lambda')).toBe('redextape:///view/v1.rxlambda')
-    expect(documentUri('v1', 'redextape_asm')).toBe('redextape:///view/v1.asm')
+    expect(documentUri('v1', 'redextape_rxm')).toBe('redextape:///view/v1.rxm')
   })
 })
 

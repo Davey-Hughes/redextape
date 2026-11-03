@@ -334,12 +334,12 @@ A regression has to FAIL this test, not hang the run: at depth 16 the exponentia
 
 `[[[…]]]` nested 16 deep, 202 bytes of input, took 11.5 SECONDS, and 20 deep did not finish. With this counter each doomed attempt stops at the first newline its own depth produces, and the same input formats in microseconds.
 
-## `crates/redextape-core/src/tm/asm.rs`, above `#[test]`
+## `crates/redextape-core/src/tm/rxm.rs`, above `#[test]`
 
 Confirmed directly: a probe read of `bytes_used` at HEAD prints `0`, on
 every one of `cargo test --release`, its debug build, `--include-ignored`, and `cargo nextest`.
 
-## `crates/redextape-core/src/tm/asm.rs`, above `struct CountingAlloc;`
+## `crates/redextape-core/src/tm/rxm.rs`, above `struct CountingAlloc;`
 
 THAT divergence is what made an earlier version of this counter wrong: it was one process-wide
 `AtomicUsize`, exact under cargo-nextest (one OS process per test) but not under plain `cargo
@@ -349,7 +349,7 @@ deterministically (300KB-600KB of concurrent tests' allocations landing inside t
 window, against a 4,096-byte bound), even though every CI job would have stayed green: the
 `rust-slow` job filters this test out via `--ignored`, and every other Rust job uses nextest.
 
-## `crates/redextape-core/src/tm/asm.rs`, above `#[test]`
+## `crates/redextape-core/src/tm/rxm.rs`, above `#[test]`
 
 this test used to pin
 exactly that, asserting `None` at n = 6000 (`6000^2 + 6000 + 1` = 36,006,001 nodes, ~1.8x
@@ -358,20 +358,20 @@ exactly that, asserting `None` at n = 6000 (`6000^2 + 6000 + 1` = 36,006,001 nod
 The heap and the answer are unchanged; only the work to
 reach it dropped from ~36,006,001 nodes to a few thousand.
 
-## `crates/redextape-core/src/tm/asm.rs`, above `assert!(memo.len() <= spent, "memo {} entries against {spent} units spent", memo.len());`
+## `crates/redextape-core/src/tm/rxm.rs`, above `assert!(memo.len() <= spent, "memo {} entries against {spent} units spent", memo.len());`
 
 (A second assertion here used to claim linear-vs-quadratic too, `spent < 10 * (2 * m)`, but it never bit: decoding each of this fixture's `m` inner lists
 with NO memo at all — 3 * (m - j + 1) + 1 summed over j, plus the outer spine's 2m + 1 — spends
 exactly 82 against that 120 threshold at `m = 6`, since `m` is too small for the O(m^2) a
 no-memo run would actually cost to cross it.
 
-## `crates/redextape-core/src/tm/asm.rs`, above `pub(crate) fn decode_word_ty(`
+## `crates/redextape-core/src/tm/rxm.rs`, above `pub(crate) fn decode_word_ty(`
 
 **That claim used to be qualified, and the qualification was false.** It read: the VALUE-directed sibling `decode_word` IS
 duplicated, "but safely, since both recurse structurally on a finite reference `Value` already in
 memory and need no budget at all".
 
-## `crates/redextape-core/src/tm/asm.rs`, above `#[allow(clippy::cast_possible_truncation)]`
+## `crates/redextape-core/src/tm/rxm.rs`, above `#[allow(clippy::cast_possible_truncation)]`
 
 It used to carry a documented residual gap:
 `Instr::Tail` is a pointer read rather than an allocation, so an ordinary `tails`-style function
@@ -381,7 +381,7 @@ into it. Breakeven was `m ~ 4_471`, three orders of magnitude below `DEFAULT_CAP
 correct, fast, cap-respecting program could be refused. Memoization closes it: the same fixture at
 `m = 64_000` decodes in about 192,000 nodes.
 
-## `crates/redextape-core/src/tm/asm.rs`, above `let mut seen: HashSet<&str> = HashSet::new();`
+## `crates/redextape-core/src/tm/rxm.rs`, above `let mut seen: HashSet<&str> = HashSet::new();`
 
 `.contains` on a `Vec` is O(n) inside a loop over `self.labels`, making the whole pass O(n²) — measured on the release
 binary at 20,000/40,000/80,000 labels, about 5x per doubling, while the parser that builds
@@ -508,7 +508,7 @@ shape, not a universal constant): 143 states at width 4, 821 at width 16, and 7,
 at width 64 for a single `Mul` instruction — thousands, not "several hundred". A
 known trade regardless.
 
-## `crates/redextape-core/src/tm/lower_asm.rs`, above `const MAX_LOWER_DEPTH: u32 = 580;`
+## `crates/redextape-core/src/tm/lower_rxm.rs`, above `const MAX_LOWER_DEPTH: u32 = 580;`
 
 Empirically, an unguarded `lower_into` overflows the 8 MiB stack at a recursion depth of ~1175 (measured in both debug and coverage-instrumented builds by lowering list literals of increasing length until the native stack aborts; a `lower_into`/`lower_inner` frame is fatter than an `eval` frame, so this crashes shallower than `interp::MAX_EVAL_DEPTH`'s reference point).
 
@@ -769,15 +769,15 @@ same shape as the reviewer's reproduction with the comment removed
 
 The reviewer's other half of the finding: the CURRENT bug forces a two-link chain that would otherwise fit on one line into the full vertical form even when the only thing that actually needs a break is the comment's own end-of-line.
 
-## `crates/redextape-core/src/tm/asm.rs`, above `unsafe fn realloc(&self, ptr: *mut u8, layout: std::alloc::Layout, new_size: usize) -> *mu`
+## `crates/redextape-core/src/tm/rxm.rs`, above `unsafe fn realloc(&self, ptr: *mut u8, layout: std::alloc::Layout, new_size: usize) -> *mu`
 
 That default was live here for every one of this binary's 685 tests, not just this one — every in-place `Vec`/`String` growth anywhere in `redextape-core`'s lib tests was silently paying for a fresh allocation and a copy it would not have paid running under `System` alone, which is also most of why the noise floor a shared-process counter saw ran to hundreds of KB.
 
-## `crates/redextape-core/src/tm/asm.rs`, above `#[test]`
+## `crates/redextape-core/src/tm/rxm.rs`, above `#[test]`
 
 including a chain long enough that the old recursive shape was the only thing under test.
 
-## `crates/redextape-core/src/tm/asm.rs`, above `let named: Vec<(&str, TokenClass)> = spans.iter().map(|(s, c)| (&text[s.start..s.end], *c)`
+## `crates/redextape-core/src/tm/rxm.rs`, above `let named: Vec<(&str, TokenClass)> = spans.iter().map(|(s, c)| (&text[s.start..s.end], *c)`
 
 ASSERT THE WHOLE ORDERED SEQUENCE. Every weaker form has now failed on this branch.
 
@@ -1103,7 +1103,7 @@ rule that then shadows it matches on the very inputs the behavioural test uses. 
 NOT catching a silent disable that behaviour would miss, at least for the guards as currently
 written.
 
-## `crates/redextape-core/src/tm/lower_asm.rs`, above `const MAX_LOWER_DEPTH: u32 = 580;`
+## `crates/redextape-core/src/tm/lower_rxm.rs`, above `const MAX_LOWER_DEPTH: u32 = 580;`
 
 so an artificially tiny 512 KiB thread would overflow at depth ~90 — long before the guard
 fires.

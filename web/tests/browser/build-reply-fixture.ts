@@ -21,10 +21,10 @@ export type Answered = { readonly src: string; readonly reply: string }
 export const answered: Answered[] = []
 
 /** The three requests that build a copy, one per leg (`ScratchBuffers.recompile`'s switch on the leg). */
-const BUILDS = new Set(['lambda-scratch', 'tm-scratch', 'asm-scratch'])
+const BUILDS = new Set(['lambda-scratch', 'tm-scratch', 'rxm-scratch'])
 
 /** The replies that answer one of those builds: its leg's success, or the failure every leg shares. */
-const REPLIES = new Set(['scratch-compiled', 'tm-scratch-compiled', 'asm-scratch-compiled', 'no-session'])
+const REPLIES = new Set(['scratch-compiled', 'tm-scratch-compiled', 'rxm-scratch-compiled', 'no-session'])
 
 /**
  * Wrap `Worker`'s own `postMessage` so that each copy build is added to `answered` when its worker answers it, matched

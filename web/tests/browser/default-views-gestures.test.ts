@@ -49,7 +49,7 @@ let view: EditorView
 /** A place in each view that takes the focus when it is pressed and opens nothing. */
 const INSIDE: Readonly<Record<string, string>> = {
   source: '.cm-line',
-  'asm-0': '.asm-listing',
+  'rxm-0': '.rxm-listing',
   'lambda-0': '.term',
   'tm-0': '.state-table',
 }
@@ -124,10 +124,10 @@ const FIRST_LOAD: Layout = {
   },
   keyed: {
     '1': 'tm-0',
-    '2': 'row[50](source column[50](asm-0 tm-0))',
+    '2': 'row[50](source column[50](rxm-0 tm-0))',
     '3': 'row[50](source column[50](lambda-0 tm-0))',
     '4': 'source',
-    ']': 'row[50](column[50](source asm-0) column[50](lambda-0 tm-0))',
+    ']': 'row[50](column[50](source rxm-0) column[50](lambda-0 tm-0))',
     '[[': 'row[50](source lambda-0)',
   },
   dividers: { '[]': ['source', 'tm-0'] },
@@ -136,26 +136,26 @@ const FIRST_LOAD: Layout = {
 const WIDE_FOUR: Layout = {
   name: 'all four views in two columns',
   make: showWideDefault,
-  views: ['source', 'asm-0', 'lambda-0', 'tm-0'],
+  views: ['source', 'rxm-0', 'lambda-0', 'tm-0'],
   closed: {
-    source: ['row[50](asm-0 column[50](lambda-0 tm-0))', 'asm-0'],
-    'asm-0': ['row[50](source column[50](lambda-0 tm-0))', 'source'],
-    // THE VIEW BEFORE IT IN THE TREE'S ORDER TAKES THE FOCUS, which is the asm view, in the other column; the TM
+    source: ['row[50](rxm-0 column[50](lambda-0 tm-0))', 'rxm-0'],
+    'rxm-0': ['row[50](source column[50](lambda-0 tm-0))', 'source'],
+    // THE VIEW BEFORE IT IN THE TREE'S ORDER TAKES THE FOCUS, which is the rxm view, in the other column; the TM
     // view under it takes its space.
-    'lambda-0': ['row[50](column[50](source asm-0) tm-0)', 'asm-0'],
-    'tm-0': ['row[50](column[50](source asm-0) lambda-0)', 'lambda-0'],
+    'lambda-0': ['row[50](column[50](source rxm-0) tm-0)', 'rxm-0'],
+    'tm-0': ['row[50](column[50](source rxm-0) lambda-0)', 'lambda-0'],
   },
   keyed: {
-    '1': 'row[50](lambda-0 column[50](asm-0 tm-0))',
+    '1': 'row[50](lambda-0 column[50](rxm-0 tm-0))',
     '2': 'row[50](source column[50](lambda-0 tm-0))',
-    '3': 'row[50](source column[50](asm-0 tm-0))',
-    '4': 'row[50](source column[50](lambda-0 asm-0))',
-    ']': 'row[50](source asm-0)',
+    '3': 'row[50](source column[50](rxm-0 tm-0))',
+    '4': 'row[50](source column[50](lambda-0 rxm-0))',
+    ']': 'row[50](source rxm-0)',
     '[[': 'row[50](source tm-0)',
   },
   dividers: {
-    '[]': ['source', 'asm-0', 'lambda-0', 'tm-0'],
-    '[0]': ['source', 'asm-0'],
+    '[]': ['source', 'rxm-0', 'lambda-0', 'tm-0'],
+    '[0]': ['source', 'rxm-0'],
     '[1]': ['lambda-0', 'tm-0'],
   },
 }

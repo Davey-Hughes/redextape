@@ -45,7 +45,7 @@ const SIXTY_FOUR: LayoutNode = {
       kind: 'split',
       dir: 'row',
       sizes: Array.from({ length: 63 }, () => 1 / 63),
-      children: Array.from({ length: 63 }, (_, i) => ({ kind: 'leaf', id: `pane-${i + 1}`, pane: 'asm' }) as const),
+      children: Array.from({ length: 63 }, (_, i) => ({ kind: 'leaf', id: `pane-${i + 1}`, pane: 'rxm' }) as const),
     },
   ],
 }
@@ -123,7 +123,7 @@ async function resetPreset(p: 'explorer' | 'stage' = 'explorer'): Promise<void> 
   expect(focused()).toBe('tm-0')
   // ALL FOUR VIEWS: the reset leaves the source beside the TM view.
   await showFourViews()
-  expect(tabLeaves().length > 0 ? tabLeaves() : ids()).toEqual(['source', 'lambda-0', 'asm-0', 'tm-0'])
+  expect(tabLeaves().length > 0 ? tabLeaves() : ids()).toEqual(['source', 'lambda-0', 'rxm-0', 'tm-0'])
   // WHERE `showFourViews` PUTS THE FOCUS, AND WHERE EACH CASE'S `+ view` ADDS: the cases' start.
   expect(focused()).toBe('lambda-0')
 }
@@ -287,12 +287,12 @@ describe('+ view and the splits, at 1280×800', () => {
     expect(host(at).contains(document.activeElement), 'the focus left the view the split was chosen on').toBe(true)
 
     // A VIEW WITH ROOM FOR TWO HALVES IS STILL SPLIT IN TWO.
-    expect(width(host('asm-0'))).toBe(634)
-    await userEvent.click(await openSplit('asm-0', 'row'))
+    expect(width(host('rxm-0'))).toBe(634)
+    await userEvent.click(await openSplit('rxm-0', 'row'))
     await until(() => ids().length === 7, 'the split')
     const made = focused() as string
-    expect(made).not.toBe('asm-0')
-    expect(width(host('asm-0'))).toBe(311)
+    expect(made).not.toBe('rxm-0')
+    expect(width(host('rxm-0'))).toBe(311)
     expect(width(host(made))).toBe(311)
   })
 

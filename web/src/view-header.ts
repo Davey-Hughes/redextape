@@ -64,7 +64,7 @@ export type ViewHeader = {
 
 /**
  * Unique ids for the title menus, so each title's `aria-controls` names exactly one menu — per module, because
- * every λ, TM and asm view on the page builds one.
+ * every λ, TM and rxm view on the page builds one.
  */
 let menuSeq = 0
 

@@ -18,8 +18,8 @@ import { fourViews, fourViewWorkspace, noticeText, SHELL, shows, stateIdle, undo
 
 /** A tree of `n` λ views beside the source view, split in halves so none goes under the pane floor. */
 function lambdaViews(n: number): { tree: LayoutNode; leaves: string[] } {
-  let tree = setLeafKind(setLeafKind(fourViews(), 'asm-0', 'lambda'), 'tm-0', 'lambda')
-  const leaves = ['lambda-0', 'asm-0', 'tm-0']
+  let tree = setLeafKind(setLeafKind(fourViews(), 'rxm-0', 'lambda'), 'tm-0', 'lambda')
+  const leaves = ['lambda-0', 'rxm-0', 'tm-0']
   for (let i = 0; leaves.length < n; i++) {
     const id = `pane-${i + 1}`
     tree = splitLeaf(tree, leaves[i] as string, i % 2 === 0 ? 'row' : 'column', id, 'lambda')

@@ -1,7 +1,7 @@
 # IR views groundwork — design
 
 The rework that has to land before the browser can show more stages of the compiler. The user's request
-(2026-10-27): add views for Cranelift IR (CLIF), LLVM IR and machine code beside source, λ, asm and TM —
+(2026-10-27): add views for Cranelift IR (CLIF), LLVM IR and machine code beside source, λ, rxm and TM —
 steppable where possible, linked to the other views, and forkable into editable copies — **without creating
 a second path that does essentially the same work differently**. Rework of existing code is welcome; parallel
 implementations are not.
@@ -10,28 +10,29 @@ This document covers only the groundwork. It ships no new view. Every workstream
 that exists today, or generalises something written for exactly four views, so that the five feature pieces
 after it (§9) are mostly configuration.
 
-Code facts in §2 were read at `dec47bb` (#151).
+Code facts in §2 were read at `dec47bb` (#151). Their names and paths follow the later rename of the asm IR
+to rxm, so `tm/rxm.rs`, for example, is the file `dec47bb` calls `tm/asm.rs`.
 
 ## §1 Intent, goals, anti-goals
 
-**Why.** The asm view already is redextape's own IR (the TM backend's middle stage). The native backends
-lower that same asm `Program` to CLIF and to LLVM IR, and the user wants to watch those stages run in the
+**Why.** The rxm view already is redextape's own IR (the TM backend's middle stage). The native backends
+lower that same rxm `Program` to CLIF and to LLVM IR, and the user wants to watch those stages run in the
 browser. Investigating how to add them found that the obvious route — write a CLIF pane, a CLIF leg, a CLIF
 runtime and an LLVM text writer beside what exists — would add third and fourth copies of logic that is
 already written twice.
 
 **Goals.**
 
-- G1. One per-instruction lowering walk from asm `Program` to native code, shared by the Cranelift backend,
+- G1. One per-instruction lowering walk from rxm `Program` to native code, shared by the Cranelift backend,
   the inkwell LLVM backend, and (later, §9) the browser's LLVM IR text writer.
 - G2. CLIF generation that builds for `wasm32-unknown-unknown` through the same code the JIT and AOT use.
-- G3. One heap implementation (cells, boxes, the heap cap, their faults) in `redextape-core`, used by the asm
+- G3. One heap implementation (cells, boxes, the heap cap, their faults) in `redextape-core`, used by the rxm
   interpreter and by the native runtime.
 - G4. The web app's leg machinery driven by per-leg tables, so adding a leg is entries, not switch arms.
-- G5. Pane building blocks extracted from the asm and TM panes, so a new pane composes them.
+- G5. Pane building blocks extracted from the rxm and TM panes, so a new pane composes them.
 - G6. Layout and header handle any number of view kinds.
-- G7. A link can name one asm instruction (pc), not only a source construct.
-- G8. Shared Rust wire types, a serialisable `Program`, and one lowering of Core to asm per compile.
+- G7. A link can name one rxm instruction (pc), not only a source construct.
+- G8. Shared Rust wire types, a serialisable `Program`, and one lowering of Core to rxm per compile.
 - G9. Rust dependencies bumped as far as they can safely move; web (pnpm) dependencies too, as a separate
   step (§4.1a).
 
@@ -45,7 +46,7 @@ shows or how it behaves, except where §8 lists one.
   text we wrote.** Our own LLVM IR text writer (§9, piece 4) exists only for the browser explorer.
 - Generated code changes. Every refactor of the native backends is a no-op on the generated CLIF and LLVM IR
   (§7.1).
-- A hot path gets slower: the browser's asm stepping/recording, native runtime calls, or compile time
+- A hot path gets slower: the browser's rxm stepping/recording, native runtime calls, or compile time
   (§7.2).
 - A second representation of something appears: a second owner column beside a pc column, a second
   register-naming scheme, a second fault-message table, a second listing-row builder.
@@ -73,8 +74,8 @@ shows or how it behaves, except where §8 lists one.
 - The runtime symbol list is written four times: `codegen.rs:165-177`, `jit.rs:83-93`, `llvm.rs:296-308`,
   `llvm.rs:316-328`.
 - Registers: Cranelift declares `Variable`s Arg, then Loc, then Rr (`codegen.rs:321-337`); LLVM allocas
-  are named `a{i}`, `l{i}`, `rr` (`llvm.rs:594`, `:608`, `:612`) while the asm printer names locals `r{n}`
-  (`tm/asm.rs:157-163`, `reg_str`, `pub(crate)`).
+  are named `a{i}`, `l{i}`, `rr` (`llvm.rs:594`, `:608`, `:612`) while the rxm printer names locals `r{n}`
+  (`tm/rxm.rs:157-163`, `reg_str`, `pub(crate)`).
 - Neither backend sets `set_srcloc` or `set_val_label`.
 
 ### §2.2 Two heaps
@@ -84,30 +85,30 @@ shows or how it behaves, except where §8 lists one.
   "C"` over `*mut Runtime` (`rt_cons` `:100-111`, `rt_head`/`rt_tail` `:120-165`, `rt_is_empty`
   `:174-176`, `rt_box` `:185-196`, `rt_box_get`/`rt_box_set` `:210-254`, `rt_tick` `:263-279`,
   `rt_enter`/`rt_leave` `:295-321`, `rt_faulted` `:332-335`, `rt_run` `:467-504`).
-- The asm interpreter's private `Vm` (`trace/asm_cursor.rs:101-127`) keeps its own `heap`, `heap_tags`,
+- The rxm interpreter's private `Vm` (`trace/rxm_cursor.rs:101-127`) keeps its own `heap`, `heap_tags`,
   `boxes`, `box_tags`; `cell` (`:173-182`) and `box_slot` (`:187-195`) look up with the same fault strings,
   formatted separately; the heap cap check is at `:282` and `:308`.
 - They agree only end to end: `jit.rs` `agree_caps_at`, `llvm.rs` `agree_caps`, `tests/native_oracle.rs`,
   and native-rt's own fault-string unit tests.
-- **Differences that are not heap and stay** (§4.3): the asm interpreter counts every instruction as a step,
-  native ticks only backward edges and calls (`codegen.rs:26-34`); only asm has the mem cap; the stack cap
-  is `stack.len() >= caps.stack` in asm and `depth > min(caps.stack, safe_depth)` natively; a callee
-  inherits the caller's locals in asm (`asm_cursor.rs:259-261`) and starts them at zero natively
-  (`codegen.rs:328-334`, `llvm.rs:606-611`); malformed programs fault at run time in asm and are refused as
+- **Differences that are not heap and stay** (§4.3): the rxm interpreter counts every instruction as a step,
+  native ticks only backward edges and calls (`codegen.rs:26-34`); only rxm has the mem cap; the stack cap
+  is `stack.len() >= caps.stack` in rxm and `depth > min(caps.stack, safe_depth)` natively; a callee
+  inherits the caller's locals in rxm (`rxm_cursor.rs:259-261`) and starts them at zero natively
+  (`codegen.rs:328-334`, `llvm.rs:606-611`); malformed programs fault at run time in rxm and are refused as
   `LowerError` natively; after a faulted callee returns, native runs on to its next guard.
 
 ### §2.3 The wasm session (Rust)
 
 - No leg trait. λ has `LambdaLeg` (`session.rs:620-664`); TM is a tuple on `Session.tm` (`:381`) and loose
   fields on `TmScratch` (`:1754-1761`), and its cursor-to-`RunStatus` match is written three times
-  (`:1008-1012`, `:1871-1875`, `:2004-2008`); asm has `AsmLeg` (`:475-584`), shared by `Session` and
-  `AsmScratch`.
-- `RunStatus`, `Decoded`, the per-leg status structs, `decoded_value`/`decoded_or_undecodable`/`asm_fault`/
+  (`:1008-1012`, `:1871-1875`, `:2004-2008`); rxm has `RxmLeg` (`:475-584`), shared by `Session` and
+  `RxmScratch`.
+- `RunStatus`, `Decoded`, the per-leg status structs, `decoded_value`/`decoded_or_undecodable`/`rxm_fault`/
   `grouped`, and `to_value` with `serialize_missing_as_null` (`lib.rs:385-388`) are private to `redextape-wasm`
   (re-exported only under `ts`, `lib.rs:31-32`).
-- `Program`, `Instr`, `Reg`, `Caps` derive no serde (`tm/asm.rs:19`, `:27`, `:65`, `:444`).
-- Each compile lowers Core to asm three times: for the `SourceMap` (`:826`), in `run_tm_described`, and in
-  `build_asm_leg` (`:508-513`, which calls itself "a third lowering"); a test holds them equal
+- `Program`, `Instr`, `Reg`, `Caps` derive no serde (`tm/rxm.rs:19`, `:27`, `:65`, `:444`).
+- Each compile lowers Core to rxm three times: for the `SourceMap` (`:826`), in `run_tm_described`, and in
+  `build_rxm_leg` (`:508-513`, which calls itself "a third lowering"); a test holds them equal
   (`sourcemap.rs:337`).
 - The size-ceiling-then-parse prologue of a scratch build is written twice (`:1477-1484`, `:1825-1836`).
 
@@ -119,7 +120,7 @@ bar, `extend(leg)`, share-link `Positions`, link-status's `DetachedPanes`.
 
 Written once per leg — about 60 sites in about 20 files. The heaviest:
 
-- `protocol.ts`: per-leg scratch requests, `*-scratch-compiled`, `tm-value`/`asm-value`, per-leg fields on
+- `protocol.ts`: per-leg scratch requests, `*-scratch-compiled`, `tm-value`/`rxm-value`, per-leg fields on
   `compiled` (`:601-672`), three `*-frames` variants (`:673-675`), per-leg frame-bytes functions.
 - `session-worker.ts`: three `*_RECORDING` objects (`:363`, `:394`, `:431`) each switching over every
   `live.kind`; `onRun`'s per-leg fields and record calls (`:537-606`); three `on*Scratch` handlers
@@ -130,7 +131,7 @@ Written once per leg — about 60 sites in about 20 files. The heaviest:
   `:1805-1818`, `:1853-1866`) plus per-leg spreads.
 - `draw.ts` (~8 per-leg blocks), `transport.ts` (`NO_TEXT` and four spreads), `scratch.ts` (three
   switches), `pane-chrome.ts` (per-leg optional handlers), `link-wiring.ts`, `link-status.ts`,
-  `readout.ts`, `results.ts`, `SessionEntry`'s `tmProgram`/`tmScratch`/`asmProgram`/`asmScratch`.
+  `readout.ts`, `results.ts`, `SessionEntry`'s `tmProgram`/`tmScratch`/`rxmProgram`/`rxmScratch`.
 
 Per-leg *encodings* are deliberate and stay: λ frames cross as one byte string (#137); frame byte counts
 differ per leg.
@@ -140,12 +141,12 @@ differ per leg.
 
 ### §2.5 Panes
 
-`AsmPane` holds a listing `VirtualGrid` (labels, pc, mnemonic, runs-next marker, linked/focus marks,
+`RxmPane` holds a listing `VirtualGrid` (labels, pc, mnemonic, runs-next marker, linked/focus marks,
 follow/re-attach), a registers panel, a call-stack panel, a heap panel, a `CopyEditor`, `PanelStack`
 regions, header/menu/steps and `EditablePane` delegates. `TmPane` repeats the header/steps/menu
-construction (asm `:116-137` vs tm `:175-204`), the `EditablePane` delegates (`:342-375` vs `:547-596`) and
+construction (rxm `:116-137` vs tm `:175-204`), the `EditablePane` delegates (`:342-375` vs `:547-596`) and
 the bindings/layout/steps setters. Two label-placement row builders exist: `listingRows`
-(`asm-view.ts:20`) and `programRows` (`program-level.ts:35`).
+(`rxm-view.ts:20`) and `programRows` (`program-level.ts:35`).
 
 ### §2.6 Layout
 
@@ -158,7 +159,7 @@ validates kinds against `KIND_ORDER`, so new kinds need no version bump.
 ### §2.7 Linking
 
 `SourceMap` (`sourcemap.rs:45-74`) → `LinkIndex` (`viewmodel.rs:873-923`) with owner columns `tm_owner`
-(by state) and `asm_owner` (by pc). `Pin = {node, origin}` (`link.ts:184`): every link is pinned by Core
+(by state) and `rxm_owner` (by pc). `Pin = {node, origin}` (`link.ts:184`): every link is pinned by Core
 node. The TM leg already knows each state's pc (`tm_name_to_instr`, `StateView.instr`) but uses it only for
 display. `link-wiring.ts` `setLinkTo` (`:189-261`) and `draw.ts` (`:182-198`, `:247-279`) fan out by hand per
 leg; `link-status.ts` has one clause per leg. Copies are unlinked by design.
@@ -174,11 +175,11 @@ Taken with the user on 2026-10-27:
   away for native code.
 - D3. Machine code (piece 3) is a panel inside the CLIF view, not its own kind — so the groundwork needs no
   non-leg pane kind.
-- D4. The compiled `Program` crosses to an optional module by serde (option 2), not as asm text to re-parse.
+- D4. The compiled `Program` crosses to an optional module by serde (option 2), not as rxm text to re-parse.
 - D5. New views run inside the existing session worker, their wasm module loaded by `import()` on first use
   (approach A). The worker's one-occupant invariant is generalised in piece 1, not here.
 - D6. Bump dependency versions as far as they safely move.
-- D7. Values in CLIF/LLVM views show the asm register they belong to where known, using the asm printer's
+- D7. Values in CLIF/LLVM views show the rxm register they belong to where known, using the rxm printer's
   register names.
 
 ### §3.1 Approaches considered
@@ -189,7 +190,7 @@ Taken with the user on 2026-10-27:
 | A2 | Make our LLVM text writer the compiler's source and parse it in `llvm.rs` | Rejected by the user: the compiler must build its IR through LLVM |
 | A3 | Shared lowering walk with backend sinks; shared heap core; table-driven legs | **Chosen** |
 
-Heap alternatives (D2): (a) steppers reuse native-rt and asm keeps its `Vm` — rejected, it keeps two heaps
+Heap alternatives (D2): (a) steppers reuse native-rt and rxm keeps its `Vm` — rejected, it keeps two heaps
 and the CLIF/LLVM heap panels would lack tags unless a third path tracked them. (b) one heap core — chosen.
 
 ## §4 Rust workstreams
@@ -240,8 +241,8 @@ IR instructions, so Cranelift and inkwell keep their current spellings.
   steps is materialised, so compile time does not move (§7.2).
 - The runtime import table (names, arities, return kinds) is defined once and used by both backends,
   `jit.rs`'s symbol registration and `llvm.rs`'s `rt_symbols`/`map_rt_symbols`.
-- Register naming comes from one place: export the asm printer's `reg_str` (or its equivalent) from
-  `redextape-core`; LLVM allocas take the asm names (`r{n}`, `a{n}`, `rr`) instead of `l{i}`. This changes
+- Register naming comes from one place: export the rxm printer's `reg_str` (or its equivalent) from
+  `redextape-core`; LLVM allocas take the rxm names (`r{n}`, `a{n}`, `rr`) instead of `l{i}`. This changes
   LLVM value names only — the snapshot gate (§7.1) treats this one rename as the expected diff, made in its
   own commit.
 - The walk calls `set_srcloc(pc)`-equivalent on the sink before each instruction; the Cranelift sink sets
@@ -272,16 +273,16 @@ the faults — `head`/`tail` of empty list / of invalid list pointer, `box_get`/
 of invalid handle — as one fault type whose `Display` is the message, defined once. The 32-bit-safe index
 conversion (`usize::try_from(p - 1)`) moves with it.
 
-**Tags.** Generic over a recorder: the asm interpreter's recorder keeps `heap_tags` and `box_tags` exactly as
+**Tags.** Generic over a recorder: the rxm interpreter's recorder keeps `heap_tags` and `box_tags` exactly as
 `Vm` does now; native-rt's is a zero-sized no-op. Tags are read after the heap decides, as today ("a missing
-tag changes what the view shows and never what the program does", `asm_cursor.rs:170-172`).
+tag changes what the view shows and never what the program does", `rxm_cursor.rs:170-172`).
 
 **native-rt.** `Runtime` holds the heap core. Each `rt_*` body becomes a safe `impl Runtime` method;
 the `extern "C"` functions become thin wrappers. `stopped()`, ticks, depth and `rt_faulted` stay
 native-rt's — they are native semantics, not heap. `rt_run` (spawns a thread) is `cfg`'d out of wasm32
 builds. Add a wasm32 check of `redextape-native-rt`.
 
-**asm interpreter.** `Vm` holds the heap core with the tagging recorder; `Instr::Cons`/`Head`/`Tail`/
+**rxm interpreter.** `Vm` holds the heap core with the tagging recorder; `Instr::Cons`/`Head`/`Tail`/
 `IsEmpty`/`Box`/`BoxGet`/`BoxSet` go through it. Register tags, `written`, frames and the mem cap stay in
 `Vm`.
 
@@ -297,8 +298,8 @@ technical page, piece 4) states each and why.
 - `Program`, `Instr`, `Reg`, `BinOp`, `Caps` derive `Serialize`/`Deserialize` behind core's `serde` feature.
 - One TM cursor → `RunStatus` mapping, replacing the three.
 - One scratch-build prologue (size ceiling, parse, diagnostics), replacing the two.
-- **One lowering per compile.** Lower Core to asm once in `compile_with_caps`; the `SourceMap`, the TM run
-  and the asm leg all take that `Program`. The equality test (`sourcemap.rs:337`) becomes unnecessary for
+- **One lowering per compile.** Lower Core to rxm once in `compile_with_caps`; the `SourceMap`, the TM run
+  and the rxm leg all take that `Program`. The equality test (`sourcemap.rs:337`) becomes unnecessary for
   the session path; keep it if other callers still lower separately.
 - A Rust leg trait is **not** required by this design; extract one only if it removes the duplication above
   more simply than functions do (builder's call).
@@ -325,14 +326,14 @@ Pure refactor; behaviour unchanged. Targets, from §2.4:
 
 ### §5.2 Pane building blocks (G5)
 
-Extract from `AsmPane` and `TmPane`, then have both use the extractions:
+Extract from `RxmPane` and `TmPane`, then have both use the extractions:
 
 - `MachineViewChrome` (working name): header, steps, menu, `CopyEditor`, `EditablePane` delegates,
   bindings/layout/steps setters — the code §2.5 lists as repeated.
 - `ListingPanel`: the `VirtualGrid` listing with labels, pc, runs-next, linked/focus marks and re-attach,
   generic over `{listing, labels}` plus a per-row fill. One label-placement row builder: `listingRows` and
   `programRows` become one.
-- Values, call-stack and heap panels as components taking row data, with the asm-specific pieces
+- Values, call-stack and heap panels as components taking row data, with the rxm-specific pieces
   (`registerRows`, `calleeOf`, `wordText`) passed in. The heap panel reads the heap core's tagged view (§4.3).
 
 No visual change; the browser tier's existing pane tests are the check, plus a walkthrough (§7.3).
@@ -348,13 +349,13 @@ No visual change; the browser tier's existing pane tests are the check, plus a w
 
 ### §5.4 Links by instruction (G7)
 
-- `Pin` can name an asm pc as well as a node. A pc pin resolves to its node through `asmOwner` in one place
+- `Pin` can name an rxm pc as well as a node. A pc pin resolves to its node through `rxmOwner` in one place
   (`link.ts`), never through a second column.
 - `link-wiring.ts`, `draw.ts` and `link-status.ts` fan out over a table of linked legs, not one block per
   leg.
-- **Existing behaviour is kept**: clicking an asm instruction still pins its node and highlights every asm
+- **Existing behaviour is kept**: clicking an rxm instruction still pins its node and highlights every rxm
   instruction of that node, as now. The pc is carried so later views can mark exactly their instruction; using
-  it to narrow the asm or TM highlight is a separate decision, not taken here.
+  it to narrow the rxm or TM highlight is a separate decision, not taken here.
 
 ## §6 Order
 
@@ -399,7 +400,7 @@ Plus the existing oracles unchanged: `native_oracle.rs`, `llvm_oracle.rs`, `aot_
 Measured before and after on the same machine — the x86-64 Linux development machine unless the user says
 otherwise — recorded in the roadmap entry with the machine and the command:
 
-- browser asm stepping and recording (the existing probes that measure asm rings, e.g. the warm-buffer and
+- browser rxm stepping and recording (the existing probes that measure rxm rings, e.g. the warm-buffer and
   share-positions probes);
 - native runtime-call-heavy programs (list and box builders) under JIT at O0 and O3, both backends;
 - native compile time over the corpus.
@@ -417,7 +418,7 @@ roadmap, 5d-ii-a and 5d-ii-c entries).
 
 Only these, each deliberate:
 
-- LLVM allocas named after asm registers (`r{n}`, `a{n}`, `rr`) — visible only in LLVM IR.
+- LLVM allocas named after rxm registers (`r{n}`, `a{n}`, `rr`) — visible only in LLVM IR.
 - Cranelift source locations per instruction — no runtime effect.
 - Whatever the Cranelift/inkwell bumps change in generated code — recorded, oracle-checked.
 
@@ -427,7 +428,7 @@ Each gets its own brainstorm, design and plan, in this order:
 
 1. **CLIF view** — steppable, linked, read-only: the optional wasm module and lazy load (D5), the worker's
    second occupant, a resumable driver over `cranelift_interpreter::step` intercepting runtime calls into
-   native-rt's `Runtime`, a CLIF grammar, values annotated with asm registers via `set_val_label` side
+   native-rt's `Runtime`, a CLIF grammar, values annotated with rxm registers via `set_val_label` side
    tables (D7), "Cranelift's actual output" labelling, the optimised CLIF.
 2. **CLIF copies** — `cranelift-reader` parse in the optional module (spike: builds and steps in wasm).
 3. **Machine code** — x86-64 / ARM64 text panel in the CLIF view (D3), its own optional download (~800 KB
@@ -436,7 +437,7 @@ Each gets its own brainstorm, design and plan, in this order:
    text into the module inkwell builds (before target setup), the technical page and/or source link.
 5. **LLVM copies** — a parser for the subset.
 
-Separately: the roadmap entry "Say what 'asm' is, in the UI" (2026-10-27).
+Separately: the roadmap entry **Say what "asm" is, in the UI** (2026-10-27).
 
 The spike behind these is `~/temp/clif-spike` on the development machine, not committed (and
 `~/temp/clif-spike-noisa`, the same with no ISA, for the ~150 KB figure): CLIF built with `cranelift-frontend`,

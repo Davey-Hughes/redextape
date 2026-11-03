@@ -25,8 +25,8 @@ const STACK_MARGIN: usize = 8 << 20;
 ///   self-call. Frames measured (aarch64, `sub sp` + saved-register pushes), unoptimized → optimized:
 ///   50 locals `432 → 832`, 100 `832 → 2368`, 200 `1632 → 4656`, 400 `3232 → 9376`,
 ///   800 `6432 → 18976`, 1600 `12832 → 38192`, 3200 `25632 → 76592`. Optimization roughly TRIPLES
-///   the frame (live-range splitting spills more distinct values than there are asm registers), and
-///   the ratio converges from below to **~3.0 words per asm register** — bounded, not growing.
+///   the frame (live-range splitting spills more distinct values than there are rxm registers), and
+///   the ratio converges from below to **~3.0 words per rxm register** — bounded, not growing.
 /// * LLVM, a 203-local frame (`8832` bytes charged): ~1680 bytes actual, and the opt level barely
 ///   moves it — by under 2%, in a direction that is SHAPE-dependent rather than structural: `O1+` is
 ///   LARGER than `O0` for the independent shape `jit.rs`'s totality sweep ships (+1.9% at 200 fillers,
@@ -67,14 +67,14 @@ const FRAME_BASE: u64 = 2048;
 /// `Variable`s codegen introduces beyond the `Loc`/`Arg` banks.
 const FRAME_SLACK_WORDS: u64 = 8;
 
-/// Upper bound on a `Reg::Loc`/`Reg::Arg` index, matching `run_asm`'s `MAX_REGISTERS` (`asm.rs`).
+/// Upper bound on a `Reg::Loc`/`Reg::Arg` index, matching `run_rxm`'s `MAX_REGISTERS` (`rxm.rs`).
 /// Each register becomes a `Variable`, so a bank sized to a billion-plus index would make the
 /// per-function `Vec::with_capacity(n_locals)`/arg allocation attempt tens of GB, whose failure
 /// aborts the whole process. We reject any such `Program` up front (see `reg_over_cap`).
 pub(crate) const MAX_REGISTERS: u32 = 1_000_000;
 
 /// True if any `Reg::Loc(n)`/`Reg::Arg(n)` operand anywhere in `prog` reaches `MAX_REGISTERS`.
-/// `run_asm` faults on this to avoid an allocation-abort; we reject it as `LowerError` (both are
+/// `run_rxm` faults on this to avoid an allocation-abort; we reject it as `LowerError` (both are
 /// "not a value", so the oracle treats an over-cap register bank as out of scope). The KEY property
 /// is that we never build a function for such a `Program`, so there is no multi-GB allocation.
 pub(crate) fn reg_over_cap(prog: &Program) -> bool {
@@ -120,7 +120,7 @@ pub(crate) fn n_arg_vars(prog: &Program, sub: &Subroutine) -> u32 {
 /// The frame-size-aware recursion-depth cap: `min(caps.stack, safe_depth)`, where `safe_depth` is
 /// how many worst-case native frames fit in the reserved recursion budget.
 ///
-/// Native keeps each call frame's `Loc`/`Arg`/`Rr` on the REAL OS call stack (not a `Vec<AsmFrame>`
+/// Native keeps each call frame's `Loc`/`Arg`/`Rr` on the REAL OS call stack (not a `Vec<RxmFrame>`
 /// like the reference) — as Cranelift `Variable`s, or as LLVM entry-block `alloca`s — so a program
 /// whose worst subroutine has many registers builds a fat native frame. If the plain depth cap
 /// (`caps.stack`) let such a program recurse that deep, it would overflow the run thread's stack —
@@ -129,7 +129,7 @@ pub(crate) fn n_arg_vars(prog: &Program, sub: &Subroutine) -> u32 {
 /// `FRAME_SLACK_WORDS`) × `BYTES_PER_VAR` + `FRAME_BASE` conservatively over-estimates one native
 /// frame, and `safe_depth = budget / frame_bytes` is how many fit.
 ///
-/// The estimate is BACKEND- and OPT-LEVEL-agnostic by construction: it is computed from the ASM
+/// The estimate is BACKEND- and OPT-LEVEL-agnostic by construction: it is computed from the RXM
 /// `Program` alone, and `BYTES_PER_VAR` is calibrated (see its doc) against **Cranelift at
 /// `speed`/`speed_and_size` — the binding case for both backends**. LLVM is nowhere near binding at
 /// any level (see `BYTES_PER_VAR`). Inlining, where a backend does it, preserves the

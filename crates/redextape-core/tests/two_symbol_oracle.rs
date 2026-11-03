@@ -97,7 +97,7 @@ fn live_tapes(want: &[Tape]) -> Vec<&'static str> {
 /// **NOTHING IN THIS FILE ENFORCES THAT THE FOURTH MEMBER REACHES THE STACK-FRAME GADGETS.** The
 /// per-program floor asserts only that some tape discriminates a head position; it would pass
 /// identically if `Instr::Call` lowering never ran at all. Enforcing it would mean lowering the
-/// program a second time to inspect its asm, which this leg does not do.
+/// program a second time to inspect its rxm, which this leg does not do.
 const CORPUS: &[&str] = &[
     "3 - 5",
     "if 2 > 1 { 10 } else { 20 }",

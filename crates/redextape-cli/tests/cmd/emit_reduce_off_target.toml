@@ -1,4 +1,4 @@
 bin.name = "redextape"
-args = ["emit", "p.rxt", "--lang", "asm", "--reduce", "fold"]
+args = ["emit", "p.rxt", "--lang", "rxm", "--reduce", "fold"]
 fs.sandbox = true
 status.code = 2

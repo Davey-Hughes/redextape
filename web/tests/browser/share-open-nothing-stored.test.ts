@@ -53,7 +53,7 @@ beforeAll(async () => {
 describe('a link at start-up, whole, with no workspace stored', () => {
   it('opens on the link’s four views, in a views area taller than it is wide: the preconditions', () => {
     expect(view.state.doc.toString()).toBe(LINKED)
-    expect(mounted()).toEqual(['source', 'lambda-0', 'asm-0', 'tm-0'])
+    expect(mounted()).toEqual(['source', 'lambda-0', 'rxm-0', 'tm-0'])
     expect(noticeText()).toBe('opened a shared link')
     const area = (document.querySelector('#views') as HTMLElement).getBoundingClientRect()
     expect(area.height).toBeGreaterThan(area.width)

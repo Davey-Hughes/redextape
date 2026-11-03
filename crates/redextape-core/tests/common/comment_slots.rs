@@ -1,4 +1,4 @@
-//! The comment-placement generators `asm_comments.rs` and `tm_comments.rs` both build their
+//! The comment-placement generators `rxm_comments.rs` and `tm_comments.rs` both build their
 //! round-trip documents from.
 //!
 //! Each of those files includes this one by `#[path]` rather than through `common/mod.rs`, because

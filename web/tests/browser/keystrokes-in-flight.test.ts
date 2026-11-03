@@ -190,7 +190,7 @@ beforeAll(async () => {
   await until(stateIdle, 'the app to settle')
   await fork('tm-0')
   await fork('lambda-0')
-  await fork('asm-0')
+  await fork('rxm-0')
 })
 
 afterAll(() => {
@@ -239,7 +239,7 @@ describe("a copy's build reply", () => {
 /**
  * **A FORMAT TAKES THE PENDING EDIT OFF THE DEBOUNCE, AND FOR THAT ROUND TRIP NO TIMER SAYS THE EDITOR IS
  * NEWER THAN ITS COPY.** The build posted before the edit is still out, and its reply re-seeds with the
- * text before the edit: a TM or an asm copy's record, a λ copy's text as that build carried it. Were that
+ * text before the edit: a TM or an rxm copy's record, a λ copy's text as that build carried it. Were that
  * reply applied, the format's own answer would then be refused as overtaken, and the older text would go
  * back as the edit the format owed.
  *
@@ -283,15 +283,15 @@ describe("a copy's build reply, landing while a format is in flight", () => {
     expect(sent, 'the copy was not built from the formatted edit').toBe('λy. y y')
   })
 
-  it('keeps the edit the format took off the debounce, in an asm copy', async () => {
-    await settle('asm-0', 'result Nat\n\n    li\trr, #3\n    halt\n', 'asm-scratch', 'asm-scratch-compiled')
+  it('keeps the edit the format took off the debounce, in an rxm copy', async () => {
+    await settle('rxm-0', 'result Nat\n\n    li\trr, #3\n    halt\n', 'rxm-scratch', 'rxm-scratch-compiled')
     const typed = 'result Nat\nli rr,#5\nhalt\n'
     const { editor, atReply, overtaken, sent } = await formatWhileBuilding(
-      'asm-0',
+      'rxm-0',
       'result Nat\n\n    li\trr, #4\n    halt\n',
       typed,
-      'asm-scratch',
-      'asm-scratch-compiled',
+      'rxm-scratch',
+      'rxm-scratch-compiled',
     )
     expect(overtaken, 'the reply has to land while the format holds the edit').toBe(false)
     expect(atReply, 'the reply re-seeded the editor over the edit').toBe(typed)

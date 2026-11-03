@@ -111,7 +111,7 @@ beforeEach(async () => {
   await until(
     () =>
       document.querySelector<HTMLElement>('#results')?.dataset.state === 'idle' &&
-      // ALL FOUR VIEWS: source, λ, asm and TM.
+      // ALL FOUR VIEWS: source, λ, rxm and TM.
       leafIds().length === 4 &&
       lambdaLeaves().length === 1,
     'all four views on a settled source program',
@@ -176,7 +176,7 @@ describe('the app-wide surfaces beside a λ view on a copy', () => {
    * **THE SOURCE EDITOR'S FOCUS DECORATION IS THE PROGRAM'S λ RUNNING FOCUS, WHICHEVER λ VIEW HAS THE FOCUS** — the
    * λ half of 'keeps marking the program’s running focus when the copy’s view is focused last' and 'moves the
    * program’s marks when the program steps, with the copy’s view focused last again', which
-   * `copy-beside-program.test.ts` holds for asm and for TM. `draw.ts` reads it off the most recently focused view of
+   * `copy-beside-program.test.ts` holds for rxm and for TM. `draw.ts` reads it off the most recently focused view of
    * the program, so focusing the copy's view leaves it where the program's view put it.
    *
    * **WHY THE DECORATION COULD DISAGREE BETWEEN THE TWO VIEWS AT ALL**: a scratch session has no lowering behind it,

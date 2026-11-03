@@ -1,4 +1,4 @@
-//! Ahead-of-time object emission: compile a first-order register-asm `Program` to a host `.o`,
+//! Ahead-of-time object emission: compile a first-order rxm `Program` to a host `.o`,
 //! reusing the exact same `Module`-generic codegen the JIT drives (`codegen`), plus an emitted C
 //! `main` entry and a CONFIG data blob.
 //!
@@ -62,7 +62,7 @@ fn serialize_ty(ty: &Ty, out: &mut Vec<u8>) -> Result<(), AotError> {
 /// [32..)   Ty, tag-encoded (see `serialize_ty`)
 /// ```
 ///
-/// `caps.mem` is intentionally omitted: it bounds the reference interpreter's cloned-`Vec<AsmFrame>`
+/// `caps.mem` is intentionally omitted: it bounds the reference interpreter's cloned-`Vec<RxmFrame>`
 /// words and has no native analog (native recursion is bounded by `depth_cap` instead — see
 /// `shared::native_depth_cap`).
 fn serialize_config(caps: Caps, depth_cap: u64, ty: &Ty) -> Result<Vec<u8>, AotError> {
@@ -101,7 +101,7 @@ pub fn emit_object(prog: &Program, caps: Caps, ty: &Ty, opt: OptLevel) -> Result
     serialize_ty(ty, &mut Vec::new())?;
 
     // Reject an absurd register index BEFORE building any function (a billion-slot `Variable` bank
-    // would attempt a multi-GB allocation whose failure aborts the process). `run_asm`/the JIT guard
+    // would attempt a multi-GB allocation whose failure aborts the process). `run_rxm`/the JIT guard
     // the same way; here it becomes `Unsupported` (a "not a value" outcome, out of oracle scope).
     if reg_over_cap(prog) {
         return Err(AotError::Unsupported("register index exceeds MAX_REGISTERS".into()));
@@ -378,12 +378,12 @@ mod tests {
 
     use super::*;
     use cranelift_object::object::{Object, ObjectSymbol};
-    use redextape_core::tm::{DEFAULT_CAPS, lower_asm};
+    use redextape_core::tm::{DEFAULT_CAPS, lower_rxm};
     use redextape_core::ty::Ty;
     use redextape_core::{desugar::desugar, parser::parse};
 
     fn prog(src: &str) -> redextape_core::tm::Program {
-        lower_asm(&desugar(&parse(src).0.unwrap())).unwrap()
+        lower_rxm(&desugar(&parse(src).0.unwrap())).unwrap()
     }
 
     #[test]

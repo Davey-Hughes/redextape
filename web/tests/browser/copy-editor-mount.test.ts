@@ -7,7 +7,7 @@ import { editorOf } from './editor-view-fixture'
 import { menuOf, moreOf, paneByLeaf, pick, SHELL, stateIdle, until, viewTitleOf } from './harness'
 
 /**
- * A TM or asm view showing a copy has the copy's editor, or a way to it: one editor per copy, in one view (spec
+ * A TM or rxm view showing a copy has the copy's editor, or a way to it: one editor per copy, in one view (spec
  * amendments 28 and 33). A view that comes to show a copy whose editor is mounted nowhere mounts one — by a pick from
  * another leg, a split, `+ view`, or the view that held it closing or leaving while another shows the copy — and a
  * view showing a copy whose editor another view holds offers *move the editor here*, which moves that editor.
@@ -82,7 +82,7 @@ async function close(pane: HTMLElement): Promise<void> {
  * Make a copy on `leg` from `leaf`'s program and take `leaf` back to the program, so the copy is warm with its editor
  * mounted nowhere — asserted, since that is the state each test that calls this starts from. Returns the copy's key.
  */
-async function orphanCopy(leaf: string, leg: 'asm' | 'tm'): Promise<string> {
+async function orphanCopy(leaf: string, leg: 'rxm' | 'tm'): Promise<string> {
   const pane = paneByLeaf(leaf)
   if (shows(pane) !== bindingKey(leg, 'source')) await choose(pane, bindingKey(leg, 'source'))
   await pick(pane, 'detach')
@@ -123,16 +123,16 @@ beforeAll(async () => {
   view.dispatch({ changes: { from: 0, to: view.state.doc.length, insert: SAMPLE } })
   await until(() => !stateIdle(), 'the compile to start')
   await until(stateIdle, 'the compile to finish')
-  await until(() => paneByLeaf('asm-0').querySelectorAll('.asm-row').length === 5, 'the program’s listing')
+  await until(() => paneByLeaf('rxm-0').querySelectorAll('.rxm-row').length === 5, 'the program’s listing')
   await until(() => paneByLeaf('tm-0').querySelectorAll('.state-row').length > 3, 'the program’s rules')
 })
 
-describe('a TM or asm view that comes to show a copy whose editor is mounted nowhere', () => {
-  it('mounts one when a view on another leg is picked onto an asm copy', async () => {
-    const key = await orphanCopy('asm-0', 'asm')
+describe('a TM or rxm view that comes to show a copy whose editor is mounted nowhere', () => {
+  it('mounts one when a view on another leg is picked onto an rxm copy', async () => {
+    const key = await orphanCopy('rxm-0', 'rxm')
     const tm = paneByLeaf('tm-0')
     await choose(tm, key)
-    expect(tm.dataset.kind).toBe('asm')
+    expect(tm.dataset.kind).toBe('rxm')
     await until(() => editorOf(tm) !== null, 'the copy’s editor in the view that changed leg')
     expect(editorOf(tm)?.state.doc.toString()).toBe(stored(sessionOf(key)))
     await choose(tm, bindingKey('tm', 'source'))
@@ -140,17 +140,17 @@ describe('a TM or asm view that comes to show a copy whose editor is mounted now
 
   it('mounts one when a view on another leg is picked onto a TM copy', async () => {
     const key = await orphanCopy('tm-0', 'tm')
-    const asm = paneByLeaf('asm-0')
-    await choose(asm, key)
-    expect(asm.dataset.kind).toBe('tm')
-    await until(() => editorOf(asm) !== null, 'the copy’s editor in the view that changed leg')
-    expect(editorOf(asm)?.state.doc.toString()).toBe(stored(sessionOf(key)))
-    await choose(asm, bindingKey('asm', 'source'))
+    const rxm = paneByLeaf('rxm-0')
+    await choose(rxm, key)
+    expect(rxm.dataset.kind).toBe('tm')
+    await until(() => editorOf(rxm) !== null, 'the copy’s editor in the view that changed leg')
+    expect(editorOf(rxm)?.state.doc.toString()).toBe(stored(sessionOf(key)))
+    await choose(rxm, bindingKey('rxm', 'source'))
   })
 
   it('mounts one in a view split onto the copy', async () => {
-    const key = await orphanCopy('asm-0', 'asm')
-    const other = await split(paneByLeaf('asm-0'), key)
+    const key = await orphanCopy('rxm-0', 'rxm')
+    const other = await split(paneByLeaf('rxm-0'), key)
     await until(() => editorOf(other) !== null, 'the copy’s editor in the split')
     expect(editorOf(other)?.state.doc.toString()).toBe(stored(sessionOf(key)))
     await close(other)
@@ -165,10 +165,10 @@ describe('a TM or asm view that comes to show a copy whose editor is mounted now
   })
 
   it('mounts one in the view still showing the copy when the one holding it closes', async () => {
-    const asm = paneByLeaf('asm-0')
-    if (shows(asm) !== bindingKey('asm', 'source')) await choose(asm, bindingKey('asm', 'source'))
+    const rxm = paneByLeaf('rxm-0')
+    if (shows(rxm) !== bindingKey('rxm', 'source')) await choose(rxm, bindingKey('rxm', 'source'))
     // THE HOLDER IS A VIEW OF ITS OWN, so closing it leaves the four views as they were.
-    const holder = await split(asm, bindingKey('asm', 'source'))
+    const holder = await split(rxm, bindingKey('rxm', 'source'))
     await pick(holder, 'detach')
     await until(() => editorOf(holder) !== null, 'the copy’s editor')
     const key = shows(holder)
@@ -203,52 +203,52 @@ describe('a view an undone delete moves back onto its copy', () => {
    * amendment 22), and the copy keeps its last run while its text of record is what was typed.
    */
   it('mounts the copy’s editor there, whether or not the copy builds', async () => {
-    const asm = paneByLeaf('asm-0')
-    if (shows(asm) !== bindingKey('asm', 'source')) await choose(asm, bindingKey('asm', 'source'))
-    await pick(asm, 'detach')
-    await until(() => editorOf(asm) !== null, 'the copy’s editor')
-    const key = shows(asm)
+    const rxm = paneByLeaf('rxm-0')
+    if (shows(rxm) !== bindingKey('rxm', 'source')) await choose(rxm, bindingKey('rxm', 'source'))
+    await pick(rxm, 'detach')
+    await until(() => editorOf(rxm) !== null, 'the copy’s editor')
+    const key = shows(rxm)
     const broken = 'result Nat\n\n    jmp\tnowhere\n'
-    const editor = editorOf(asm) as EditorView
+    const editor = editorOf(rxm) as EditorView
     editor.dispatch({ changes: { from: 0, to: editor.state.doc.length, insert: broken } })
-    const mark = () => asm.querySelector('.cm-editor .cm-lintRange-error')?.textContent ?? null
+    const mark = () => rxm.querySelector('.cm-editor .cm-lintRange-error')?.textContent ?? null
     await until(() => mark() === 'nowhere', 'the editor to mark the label that names nothing')
 
     await userEvent.click(document.querySelector<HTMLButtonElement>('#buffers') as HTMLButtonElement)
-    const label = `delete asm copy ${sessionOf(key).slice('scratch-'.length)}`
+    const label = `delete rxm copy ${sessionOf(key).slice('scratch-'.length)}`
     const del = () => document.querySelector<HTMLButtonElement>(`.buffer-list button[aria-label="${label}"]`)
     await until(() => del() !== null, 'the copies menu')
     await userEvent.click(del() as HTMLButtonElement)
-    await until(() => shows(asm) === bindingKey('asm', 'source'), 'the view to move to the program')
-    expect(editorOf(asm)).toBeNull()
+    await until(() => shows(rxm) === bindingKey('rxm', 'source'), 'the view to move to the program')
+    expect(editorOf(rxm)).toBeNull()
 
     await userEvent.click(
       document.querySelector<HTMLButtonElement>('#notice button.notice-action') as HTMLButtonElement,
     )
-    await until(() => shows(asm) === key, 'the view to show the copy again')
-    await until(() => editorOf(asm)?.state.doc.toString() === broken, 'the restored copy’s editor')
+    await until(() => shows(rxm) === key, 'the view to show the copy again')
+    await until(() => editorOf(rxm)?.state.doc.toString() === broken, 'the restored copy’s editor')
     await until(() => mark() === 'nowhere', 'the restored editor to mark the label that names nothing')
   })
 })
 
-describe('a TM or asm view showing a copy whose editor another view holds', () => {
-  it('offers move the editor here, which moves that editor, on asm', async () => {
-    const asm = paneByLeaf('asm-0')
-    if (shows(asm) !== bindingKey('asm', 'source')) await choose(asm, bindingKey('asm', 'source'))
-    await pick(asm, 'detach')
-    await until(() => editorOf(asm) !== null, 'the copy’s editor')
-    const key = shows(asm)
-    const editor = editorOf(asm)
-    const other = await split(asm, key)
+describe('a TM or rxm view showing a copy whose editor another view holds', () => {
+  it('offers move the editor here, which moves that editor, on rxm', async () => {
+    const rxm = paneByLeaf('rxm-0')
+    if (shows(rxm) !== bindingKey('rxm', 'source')) await choose(rxm, bindingKey('rxm', 'source'))
+    await pick(rxm, 'detach')
+    await until(() => editorOf(rxm) !== null, 'the copy’s editor')
+    const key = shows(rxm)
+    const editor = editorOf(rxm)
+    const other = await split(rxm, key)
     expect(editorOf(other)).toBeNull()
-    expect(menuItem(asm, 'claim-editor'), 'the view holding the editor offers no move').toBeNull()
+    expect(menuItem(rxm, 'claim-editor'), 'the view holding the editor offers no move').toBeNull()
     expect(menuItem(other, 'claim-editor'), 'the view without it offers the move').not.toBeNull()
 
     await pick(other, 'claim-editor')
     await until(() => editorOf(other) !== null, 'the editor in the view that asked for it')
     expect(editorOf(other), 'the same editor, moved').toBe(editor)
-    expect(editorOf(asm)).toBeNull()
-    expect(menuItem(asm, 'claim-editor'), 'the view that gave it up offers the move back').not.toBeNull()
+    expect(editorOf(rxm)).toBeNull()
+    expect(menuItem(rxm, 'claim-editor'), 'the view that gave it up offers the move back').not.toBeNull()
 
     // IT STILL EDITS ITS COPY FROM THERE, the view showing the copy's value says what it built, and the outline beside
     // the editor lists what the server now says — opened first, so only the server's update can bring the label in.
@@ -260,7 +260,7 @@ describe('a TM or asm view showing a copy whose editor another view holds', () =
     const moved = editorOf(other) as EditorView
     const text = 'result Nat\nstart:\nli rr, #3\nhalt\n'
     moved.dispatch({ changes: { from: 0, to: moved.state.doc.length, insert: text } })
-    await until(() => other.querySelector('.asm-value')?.textContent === 'value: 3', 'the copy to rebuild')
+    await until(() => other.querySelector('.rxm-value')?.textContent === 'value: 3', 'the copy to rebuild')
     await until(() => listed().includes('start'), 'the outline of the view holding the editor to list the label')
     await close(other)
   })

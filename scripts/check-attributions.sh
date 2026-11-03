@@ -62,11 +62,11 @@
 # declaration that live sites rest on.
 #
 # **A FAMILY OF LINE-BASED HOLES A PER-LINE EXTRACTOR CANNOT CLOSE.** A Rust `use` whose import list wraps
-# puts the bare names on CONTINUATION lines, so `crates/redextape-grammar-check/tests/asm.rs` reads as
+# puts the bare names on CONTINUATION lines, so `crates/redextape-grammar-check/tests/rxm.rs` reads as
 # declaring `CORPUS` — a name sitting alone on a wrapped line — when
-# `crates/redextape-grammar-check/src/asm.rs` is the file that actually declares it. A Rust struct LITERAL
+# `crates/redextape-grammar-check/src/rxm.rs` is the file that actually declares it. A Rust struct LITERAL
 # at statement position (`Program {`) is indistinguishable from a struct-variant declaration, so
-# `crates/redextape-native/src/jit.rs` reads as declaring `Program`, which `tm/asm.rs` declares — NOT
+# `crates/redextape-native/src/jit.rs` reads as declaring `Program`, which `tm/rxm.rs` declares — NOT
 # `ast.rs`: `jit.rs` imports `redextape_core::tm::Program` at its top and again in its test module, and
 # `crates/redextape-core/src/ast.rs` declares a different, surface `Program` of the same name. A Rust
 # TUPLE-variant match arm in that same file — `Ok(subs) => subs,` — is indistinguishable from a
@@ -79,7 +79,7 @@
 # **THREE MORE MEMBERS OF THAT FAMILY.** A Rust struct LITERAL's field lines read as field declarations,
 # which is the Rust twin of the config-object-key hole above: `crates/redextape-native/src/jit.rs` builds
 # `Program { code: vec![..], labels: vec![], .. }`, so it reads as declaring `code` and `labels`, which
-# `crates/redextape-core/src/tm/asm.rs` declares. Qualification does not help here — `Program::code`
+# `crates/redextape-core/src/tm/rxm.rs` declares. Qualification does not help here — `Program::code`
 # really is a member, so the field rule has to keep satisfying it. An `if let Some(v)` or `if let Ok(w)`
 # makes a file declare `Some` or `Ok`; that one is NARROWED rather than open, because the `let` rule
 # emits behind `local:`, so only a BARE citation can rest on the `if let` line — a qualified
@@ -394,7 +394,7 @@ lang_of() { [[ $1 == *.rs ]] && echo rust || echo ts; }
 # directory, then its own crate or package, then the whole tree.
 #
 # **WITHOUT THE NEAREST-FIRST RULE THIS GATE IS UNUSABLE ON THIS REPO, WHICH IS WHY IT IS HERE RATHER
-# THAN IN A TODO.** By basename alone, `lib.rs`, `syntax.rs`, `asm.rs` and `decode.rs` each name
+# THAN IN A TODO.** By basename alone, `lib.rs`, `syntax.rs`, `rxm.rs` and `decode.rs` each name
 # more than one file in this workspace. An unresolvable citation is reported, not silently skipped.
 declare -A RESOLVE_CACHE=()
 RESOLVED=''

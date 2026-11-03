@@ -56,7 +56,7 @@ describe('the readout, when the TM history fills', () => {
     await userEvent.click(
       document.querySelector<HTMLButtonElement>('#examples-menu [data-example="map-fold"]') as HTMLElement,
     )
-    // λ AND ASM RECORD FIRST, SO THE TM LEG STARTS LAST; its history then fills at 69,008 on `047b0dd`, and the two
+    // λ AND RXM RECORD FIRST, SO THE TM LEG STARTS LAST; its history then fills at 69,008, and the two
     // middle waits stop at a third and two thirds of that way, or at the fill if it comes first.
     // A STATE THE LINE CANNOT SKIP: no poll may land while the TM records, and the line then goes straight to full.
     await until(

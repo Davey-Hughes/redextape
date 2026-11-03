@@ -24,7 +24,7 @@ import { fourViews, fourViewWorkspace, mounted, rowNames, SHELL, stateIdle, titl
  * which would no longer say *paused*, and the view's title.
  *
  * **SEEDED BEFORE THE ONE MOUNT**, as `buffer-restore.test.ts` seeds its own and for its reason, and built with the
- * app's own writers: the source over the asm and TM views, all four remembered, and `lambda-0` bound to the copy.
+ * app's own writers: the source over the rxm and TM views, all four remembered, and `lambda-0` bound to the copy.
  */
 
 /** The tree on screen when the page was left: the λ view switched off, out of `fourViews()`. */
@@ -39,7 +39,7 @@ const WITHOUT_LAMBDA: LayoutNode = {
       dir: 'row',
       sizes: [0.5, 0.5],
       children: [
-        { kind: 'leaf', id: 'asm-0', pane: 'asm' },
+        { kind: 'leaf', id: 'rxm-0', pane: 'rxm' },
         { kind: 'leaf', id: 'tm-0', pane: 'tm' },
       ],
     },
@@ -69,7 +69,7 @@ beforeAll(async () => {
 
 describe('a reload while a parked view shows a copy', () => {
   it('opens on the stored tree, with the copy kept and shown by no view', () => {
-    expect(mounted(), 'precondition: the stored tree, which has no λ view').toEqual(['source', 'asm-0', 'tm-0'])
+    expect(mounted(), 'precondition: the stored tree, which has no λ view').toEqual(['source', 'rxm-0', 'tm-0'])
     expect(
       storedBuffers()?.buffers.map((b) => b.id),
       'the copy is kept',
@@ -88,7 +88,7 @@ describe('a reload while a parked view shows a copy', () => {
     expect(mounted(), 'precondition: the remembered arrangement, with the λ view').toEqual([
       'source',
       'lambda-0',
-      'asm-0',
+      'rxm-0',
       'tm-0',
     ])
     expect(titleText('lambda-0'), 'the view built under the parked view’s id took its stored binding').toBe(

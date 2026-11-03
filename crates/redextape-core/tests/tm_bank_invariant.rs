@@ -26,7 +26,7 @@ mod common;
 use common::{box_tape_is_well_formed, encodings_at, heap_tape_is_well_formed, reg_bank_is_well_formed, widths};
 use redextape_core::tm::{
     AT, BLANK, Binary, Builder, Encoding, MARK, Move, REG, RuleSpec, SEP, TAPES, TM_DEFAULT_CAPS, Tape, TmCaps, TmRun,
-    TmStatus, Unary, WORK, ZERO, defunc, lower_asm, lower_tm_guarded, n_slots_of, run_tm_at, simulate_watched,
+    TmStatus, Unary, WORK, ZERO, defunc, lower_rxm, lower_tm_guarded, n_slots_of, run_tm_at, simulate_watched,
 };
 
 /// A representative spread of the survey corpus: arithmetic, monus, comparison, `if`, `let`/assign,
@@ -61,9 +61,9 @@ fn check_reg_bank_unit(src: &str, width: usize, name: &str, enc: &dyn Encoding) 
     let (prog, ds) = parse(src);
     assert!(ds.is_empty(), "parse errors in `{src}`: {ds:?}");
     let core = desugar(&prog.unwrap());
-    let program = match lower_asm(&core) {
+    let program = match lower_rxm(&core) {
         Ok(p) => p,
-        Err(_) => lower_asm(&defunc(&core).expect("defuncs")).expect("lowers after defunc"),
+        Err(_) => lower_rxm(&defunc(&core).expect("defuncs")).expect("lowers after defunc"),
     };
     let slots = n_slots_of(&program) as usize;
 
@@ -241,9 +241,9 @@ fn first_violation(src: &str, width: usize, name: &str, enc: &dyn Encoding) -> O
         return None; // not a program; the generators' shapes are valid, this is belt-and-braces
     }
     let core = desugar(&prog.unwrap());
-    let program = match lower_asm(&core) {
+    let program = match lower_rxm(&core) {
         Ok(p) => p,
-        Err(_) => defunc(&core).ok().and_then(|d| lower_asm(&d).ok())?,
+        Err(_) => defunc(&core).ok().and_then(|d| lower_rxm(&d).ok())?,
     };
     let slots = n_slots_of(&program) as usize;
     let (m, _) = lower_tm_guarded(&program, enc).expect("proptest-generated program must lower");

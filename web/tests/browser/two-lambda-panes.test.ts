@@ -62,7 +62,7 @@ function itemsOf(leaf: string): { value: string; textContent: string }[] {
 }
 /**
  * The labels of the title menu's λ items on `leaf` — WHICH SESSIONS OFFER A λ LEG. The menu lists
- * every leg, so an unfiltered list would mix the source session's asm and TM legs into every count;
+ * every leg, so an unfiltered list would mix the source session's rxm and TM legs into every count;
  * filtering by key is what keeps an assertion about the λ sessions about λ.
  */
 const lambdaLabelsOf = (leaf: string) =>
@@ -227,7 +227,7 @@ beforeEach(async () => {
   await until(
     () =>
       document.querySelector<HTMLElement>('#results')?.dataset.state === 'idle' &&
-      // ALL FOUR VIEWS: source, λ, asm and TM.
+      // ALL FOUR VIEWS: source, λ, rxm and TM.
       leafIds().length === 4 &&
       lambdaLeaves().length === 1 &&
       // THE λ PANE IS ATTACHED AGAIN, which is the precondition a test's first fork click depends on.
@@ -443,7 +443,7 @@ describe('two λ panes on two λ sessions', () => {
     try {
       btn('lambda-0', 'close this view')?.click()
       await until(() => lambdaLeaves().length === 0)
-      expect(leafIds()).toEqual(['source', 'asm-0', 'tm-0'])
+      expect(leafIds()).toEqual(['source', 'rxm-0', 'tm-0'])
 
       // THE PER-FRAME PATH, DRIVEN ON PURPOSE AND ASSERTED ON ITS OUTPUT. Scrubbing the δ leg runs
       // `draw()` — the function that would throw — and `.step` is painted by that same pass, so a

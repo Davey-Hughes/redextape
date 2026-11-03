@@ -1,7 +1,7 @@
 //! Comments recovered from authored text, positioned by what they sit against.
 //!
 //! WHY AN ANCHOR AND NOT A SPAN. `token::Comment` carries a `Span` because the source form's
-//! formatter walks tokens and can order a comment against them. The TM and asm printers walk a
+//! formatter walks tokens and can order a comment against them. The TM and rxm printers walk a
 //! `Machine` and a `Program` — they never see a token — so a byte offset into the text a comment
 //! CAME from cannot say where to write it in the text being produced. Naming the printed line the
 //! comment belongs to is what survives reformatting.
@@ -75,9 +75,9 @@ pub enum TmAnchor {
     Eof,
 }
 
-/// Which printed line an asm comment sits against. Total over `print_asm_with_inner`'s output.
+/// Which printed line an rxm comment sits against. Total over `print_rxm_with_inner`'s output.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
-pub enum AsmAnchor {
+pub enum RxmAnchor {
     /// The `result <ty>` directive.
     Result,
     /// A label line, by its index into `Program::labels` — not by name, because several labels may
@@ -108,7 +108,7 @@ pub(crate) fn split_trailing(content: &str) -> (&str, Option<&str>) {
 /// not the comment. It exists so that "where does this line's content end" is decided by one
 /// function rather than at each site that happens to need it. Both grammars reach that decision
 /// through `split_trailing` — TM's content side through this wrapper and its comment side through
-/// `attach`, asm's both halves through a single destructured call — so a change to what starts a
+/// `attach`, rxm's both halves through a single destructured call — so a change to what starts a
 /// comment lands in one place. That is the property.
 ///
 /// The hazard in hand-rolling `line.split(';').next().unwrap_or("").trim()` beside `split_trailing` is
@@ -132,7 +132,7 @@ pub(crate) fn whole_line(trimmed: &str) -> Option<&str> {
 
 /// The comment-emission rule, written once for both printers.
 ///
-/// ONE IMPLEMENTATION BECAUSE IT IS ONE RULE, not two that happen to agree. The TM and asm
+/// ONE IMPLEMENTATION BECAUSE IT IS ONE RULE, not two that happen to agree. The TM and rxm
 /// printers differ in what a line IS and agree completely on what to do with the comments around
 /// one, so a second copy would be one rule maintained in two places — the drift this repository
 /// treats as a defect rather than a style choice.
@@ -143,7 +143,7 @@ pub(crate) struct CommentWriter<'a, A> {
 
 impl<'a, A: Copy + Eq + Hash> CommentWriter<'a, A> {
     /// Bucket by anchor once rather than rescanning per printed line — the reason
-    /// `print_asm_mapped` buckets its labels, since both lists grow with program size.
+    /// `print_rxm_mapped` buckets its labels, since both lists grow with program size.
     pub(crate) fn new(comments: &'a [AnchoredComment<A>]) -> Self {
         let mut own: HashMap<A, Vec<&'a str>> = HashMap::new();
         let mut trailing: HashMap<A, Vec<&'a str>> = HashMap::new();
@@ -193,16 +193,16 @@ impl<'a, A: Copy + Eq + Hash> CommentWriter<'a, A> {
     /// **This argument is `parse_tm_nav`-specific.** `CommentWriter` is generic over its anchor type,
     /// and the reasoning above does not transfer to another instantiation by itself.
     ///
-    /// **`AsmAnchor` is the second instantiation, and for it the argument is DISCHARGED.**
-    /// `print_asm_with_inner` is the printer that instantiates `CommentWriter<AsmAnchor>`.
-    /// `AsmAnchor::Result` is diagnosed on either of its two branches — a second `result` line takes
+    /// **`RxmAnchor` is the second instantiation, and for it the argument is DISCHARGED.**
+    /// `print_rxm_with_inner` is the printer that instantiates `CommentWriter<RxmAnchor>`.
+    /// `RxmAnchor::Result` is diagnosed on either of its two branches — a second `result` line takes
     /// "duplicate `result` directive" when nothing has parsed yet, or "must precede the first
     /// instruction or label" once anything has — under one tail check that empties `comments` for the
     /// whole document whichever fired, so no second trailing comment ever reaches it.
-    /// `AsmAnchor::Label(i)`/`Instr(i)` are positional, so no two lines in one clean parse can share an
-    /// index. `AsmAnchor::Eof` is drained own-line only and is never passed to `trailing` at all. The
+    /// `RxmAnchor::Label(i)`/`Instr(i)` are positional, so no two lines in one clean parse can share an
+    /// index. `RxmAnchor::Eof` is drained own-line only and is never passed to `trailing` at all. The
     /// full argument is written out in `printing_and_reparsing_all_anchors_recovers_the_document_exactly`'s
-    /// doc comment in `crates/redextape-core/tests/asm_comments.rs`, which is what the strict `.asm`
+    /// doc comment in `crates/redextape-core/tests/rxm_comments.rs`, which is what the strict `.rxm`
     /// round trip rests on.
     ///
     /// **The two obligations still stand for a genuinely third anchor type.** Whoever instantiates

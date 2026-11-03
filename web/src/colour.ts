@@ -7,10 +7,10 @@ import { Edit, Language, Parser, Query } from 'web-tree-sitter'
 import runtimeWasmUrl from 'web-tree-sitter/web-tree-sitter.wasm?url'
 import redextapeHighlights from '../../grammars/tree-sitter-redextape/queries/highlights.scm?raw'
 import redextapeWasmUrl from '../../grammars/tree-sitter-redextape/tree-sitter-redextape.wasm?url'
-import asmHighlights from '../../grammars/tree-sitter-redextape-asm/queries/highlights.scm?raw'
-import asmWasmUrl from '../../grammars/tree-sitter-redextape-asm/tree-sitter-redextape-asm.wasm?url'
 import lambdaHighlights from '../../grammars/tree-sitter-redextape-lambda/queries/highlights.scm?raw'
 import lambdaWasmUrl from '../../grammars/tree-sitter-redextape-lambda/tree-sitter-redextape-lambda.wasm?url'
+import rxmHighlights from '../../grammars/tree-sitter-redextape-rxm/queries/highlights.scm?raw'
+import rxmWasmUrl from '../../grammars/tree-sitter-redextape-rxm/tree-sitter-redextape-rxm.wasm?url'
 import tmHighlights from '../../grammars/tree-sitter-redextape-tm/queries/highlights.scm?raw'
 import tmWasmUrl from '../../grammars/tree-sitter-redextape-tm/tree-sitter-redextape-tm.wasm?url'
 import type { LanguageId } from './lsp-protocol'
@@ -60,10 +60,10 @@ export function classMapFrom(tables: readonly CaptureTable[]): Map<string, Map<s
  * The document size past which an editor goes uncoloured, in UTF-16 code units.
  *
  * THE LARGER OF THE SESSION'S TWO COPY CEILINGS, NOT A NUMBER OF THIS MODULE'S OWN: a TM copy's,
- * `MAX_SCRATCH_TM_BYTES` at 6,100,000, where an asm copy's, `MAX_SCRATCH_ASM_BYTES`, is 5,200,000. A
+ * `MAX_SCRATCH_TM_BYTES` at 6,100,000, where an rxm copy's, `MAX_SCRATCH_RXM_BYTES`, is 5,200,000. A
  * document no copy will hold is not one worth parsing on the main thread.
  *
- * **ONE CEILING FOR EVERY EDITOR, SO AN ASM DOCUMENT BETWEEN THE TWO IS STILL COLOURED**, though no asm copy
+ * **ONE CEILING FOR EVERY EDITOR, SO AN RXM DOCUMENT BETWEEN THE TWO IS STILL COLOURED**, though no rxm copy
  * builds it: refusing a document is the session's to say, and this gate only refuses the absurd. A ceiling
  * per language would be a second place for each copy's number to be kept.
  *
@@ -88,7 +88,7 @@ const SOURCES: Record<LanguageId, GrammarSource> = {
   redextape: { wasmUrl: redextapeWasmUrl, highlights: redextapeHighlights },
   redextape_lambda: { wasmUrl: lambdaWasmUrl, highlights: lambdaHighlights },
   redextape_tm: { wasmUrl: tmWasmUrl, highlights: tmHighlights },
-  redextape_asm: { wasmUrl: asmWasmUrl, highlights: asmHighlights },
+  redextape_rxm: { wasmUrl: rxmWasmUrl, highlights: rxmHighlights },
 }
 
 export type LoadedGrammar = { readonly language: TsLanguage; readonly query: TsQuery }
@@ -301,9 +301,9 @@ export const PARSE_SLICE_MS = 8
  *
  * **A BOUND, BECAUSE THIS PARSE RUNS IN ONE GO INSIDE AN UPDATE.** A screen further down than this shows plain text
  * until the whole parse lands. Text the grammars make more work of costs more: 31,995 units of one mnemonic repeated
- * took 14.5 ms as asm.
+ * took 14.5 ms as rxm.
  *
- * **EXACT WHERE A LINE END IS A PLACE THE GRAMMAR CAN STOP.** That is the TM text form, and every item of an asm text
+ * **EXACT WHERE A LINE END IS A PLACE THE GRAMMAR CAN STOP.** That is the TM text form, and every item of an rxm text
  * is a line too. A program cut at a line end may be cut inside a bracket, and the parser then recovers as it can.
  * **A λ COPY'S TEXT IS ONE LINE**, so its last visible line ends where it does: one longer than this bound has no
  * first screen and is plain until its whole parse lands.

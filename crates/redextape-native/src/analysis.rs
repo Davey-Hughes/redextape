@@ -1,10 +1,10 @@
-//! Pure analysis over a register-asm `Program`: partition its flat `code` into per-subroutine
-//! bodies (`$main` plus each `fn`, per `lower_asm`'s calling convention — `Call`/`Ret`, `$main`
+//! Pure analysis over an rxm `Program`: partition its flat `code` into per-subroutine
+//! bodies (`$main` plus each `fn`, per `lower_rxm`'s calling convention — `Call`/`Ret`, `$main`
 //! ends in `Halt`), and compute each subroutine's arity, local-register count, and internal block
 //! labels. The Cranelift codegen compiles one native function per `Subroutine`.
 //!
-//! **Why reachability, not slicing.** `lower_asm` emits every `fn` *inline*, at its definition
-//! site, guarded by a `Jmp` that jumps over the body (see `lower_asm::lower_function`):
+//! **Why reachability, not slicing.** `lower_rxm` emits every `fn` *inline*, at its definition
+//! site, guarded by a `Jmp` that jumps over the body (see `lower_rxm::lower_function`):
 //! `jmp skip; <fn-entry>: <body>; ret; skip: <rest of the enclosing scope>`. So a top-level `fn`'s
 //! body physically sits *between* two pieces of `$main`'s own code (the prologue up to the guard
 //! `Jmp`, and everything after `skip`). `$main`'s code is therefore **non-contiguous** in the raw
@@ -35,7 +35,7 @@ pub struct Subroutine {
     /// The `code` index this subroutine is entered at.
     pub entry: usize,
     /// The instruction indices reachable from `entry` (sorted ascending). Bodies of distinct
-    /// subroutines are pairwise disjoint for real `lower_asm` output.
+    /// subroutines are pairwise disjoint for real `lower_rxm` output.
     pub body: Vec<usize>,
     /// `1 + max Arg(i) READ` across `body` (`0` if no `Arg` is ever read).
     pub arity: u32,
@@ -150,11 +150,11 @@ fn reachable_from(prog: &Program, entry: usize) -> Result<BTreeSet<usize>, Lower
 /// disjoint, well-formed subroutines:
 /// - a `Call`/`Jz`/`Jmp` targets an undefined label, or control flow reaches an index past
 ///   `prog.code.len()` (both surfaced from `reachable_from`);
-/// - two subroutines' bodies overlap — only reachable via a producer other than `lower_asm`, or a
-///   hand-built `Program`, since `lower_asm` always emits a guard `Jmp` over every inline `fn` body
+/// - two subroutines' bodies overlap — only reachable via a producer other than `lower_rxm`, or a
+///   hand-built `Program`, since `lower_rxm` always emits a guard `Jmp` over every inline `fn` body
 ///   (see the module doc);
 /// - a non-`$main` subroutine's body contains `Halt`, which would wrongly stop the whole program
-///   from inside a callee instead of returning to its caller (`lower_asm` never emits this).
+///   from inside a callee instead of returning to its caller (`lower_rxm` never emits this).
 ///
 /// A caller cannot repair any of these programmatically — they indicate a malformed or
 /// adversarially hand-built `Program` — so the only useful response is to reject the input (e.g.
@@ -172,7 +172,7 @@ pub fn partition(prog: &Program) -> Result<Vec<Subroutine>, LowerError> {
         }
     }
 
-    // `lower_asm` always emits an unconditional `Jmp` over each inline fn body, so a fn entry is
+    // `lower_rxm` always emits an unconditional `Jmp` over each inline fn body, so a fn entry is
     // only ever reachable via `Call` and bodies are disjoint in practice (see the module doc). But
     // `partition` must DEFEND against a future producer change (or an adversarial hand-built
     // `Program`) where an entry is *also* reachable via fall-through from an earlier subroutine —
@@ -188,10 +188,10 @@ pub fn partition(prog: &Program) -> Result<Vec<Subroutine>, LowerError> {
         }
         claimed.extend(visited.iter().copied());
 
-        // `Halt` stops the WHOLE program (`run_asm`); `Ret` returns to the caller. A non-`$main`
+        // `Halt` stops the WHOLE program (`run_rxm`); `Ret` returns to the caller. A non-`$main`
         // subroutine compiles into a native function that can only `return` to its caller, so a `Halt`
         // inside a `fn` body would wrongly resume the caller (returning `rr`) instead of ending the
-        // program. `lower_asm` only ever emits `Halt` in `$main` (`entry == 0`), so this never rejects
+        // program. `lower_rxm` only ever emits `Halt` in `$main` (`entry == 0`), so this never rejects
         // real lowered output — it turns a constructible wrong answer into a loud reject.
         // (`entry == 0` is always `$main`; every other entry is a `Call` target.)
         if entry != 0 && visited.iter().any(|&i| prog.code.get(i) == Some(&Instr::Halt)) {
@@ -240,7 +240,7 @@ mod tests {
     use redextape_core::core::BinOp;
     use redextape_core::desugar::desugar;
     use redextape_core::parser::parse;
-    use redextape_core::tm::{defunc, lower_asm};
+    use redextape_core::tm::{defunc, lower_rxm};
 
     #[test]
     fn partitions_main_and_one_subroutine() {
@@ -281,12 +281,12 @@ mod tests {
     }
 
     #[test]
-    fn partitions_a_real_lower_asm_program() {
-        // `lower_asm` emits `sum` inline (guarded by `jmp skip1`). Reachability gives the correct,
+    fn partitions_a_real_lower_rxm_program() {
+        // `lower_rxm` emits `sum` inline (guarded by `jmp skip1`). Reachability gives the correct,
         // non-contiguous body for `$main` (prologue index 0, then the post-`skip` epilogue) and a
         // clean, disjoint body for `sum.0`.
         let core = desugar(&parse("fn sum(n) { if n == 0 { 0 } else { n + sum(n - 1) } } sum(3)").0.unwrap());
-        let prog = lower_asm(&core).unwrap();
+        let prog = lower_rxm(&core).unwrap();
         let subs = partition(&prog).unwrap();
 
         let main = subs.iter().find(|s| s.name == "$main").expect("a `$main` subroutine");
@@ -308,16 +308,16 @@ mod tests {
 
     #[test]
     fn partitions_a_multi_fn_higher_order_program_into_disjoint_bodies() {
-        // A higher-order program: `map` takes a function `f`. `lower_asm` rejects it directly (a
+        // A higher-order program: `map` takes a function `f`. `lower_rxm` rejects it directly (a
         // function-as-value), so defunctionalize first — yielding two inline subroutines
         // (`$apply1.*`, `map.*`), each guarded by its own jump-over, plus `$main`. Every fn entry
         // must partition into a disjoint body.
         let src = "fn map(xs, f) { if is_empty(xs) { nil } else { cons(f(head(xs)), map(tail(xs), f)) } } \
                    fn add1(x) { x + 1 } [1, 2].map(add1)";
         let core = desugar(&parse(src).0.unwrap());
-        let prog = match lower_asm(&core) {
+        let prog = match lower_rxm(&core) {
             Ok(p) => p,
-            Err(_) => lower_asm(&defunc(&core).expect("defunctionalizes")).expect("lowers after defunc"),
+            Err(_) => lower_rxm(&defunc(&core).expect("defunctionalizes")).expect("lowers after defunc"),
         };
         let subs = partition(&prog).unwrap();
 
@@ -357,10 +357,10 @@ mod tests {
     #[test]
     fn a_non_main_subroutine_containing_halt_is_unsupported() {
         // main: call f; li rr, 99; halt   |   f: li rr, 7; halt.
-        // `f` (a `Call` target, entry 3) contains a `Halt`. Under `run_asm` that `Halt` ends the
+        // `f` (a `Call` target, entry 3) contains a `Halt`. Under `run_rxm` that `Halt` ends the
         // whole program with rr==7; a native function compiled for `f` could only `return` to the
         // caller (yielding the wrong rr==99). `partition` must reject it loudly, not silently
-        // miscompile. (`lower_asm` never emits `Halt` outside `$main`, so real output is unaffected.)
+        // miscompile. (`lower_rxm` never emits `Halt` outside `$main`, so real output is unaffected.)
         let prog = Program {
             code: vec![
                 Instr::Call("f".into()),
@@ -397,7 +397,7 @@ mod tests {
     #[test]
     fn overlapping_subroutine_bodies_are_unsupported_not_silently_merged() {
         // main falls through (no guard Jmp) directly into index 1, which is ALSO `f`'s Call-target
-        // entry. `lower_asm` never produces this (every inline fn body is guarded by an
+        // entry. `lower_rxm` never produces this (every inline fn body is guarded by an
         // unconditional `Jmp` over it), but `partition` must defend against a hand-built/adversarial
         // `Program` where it happens, rather than silently emitting two overlapping subroutines.
         let prog = Program {

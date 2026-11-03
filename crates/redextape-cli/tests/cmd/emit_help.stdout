@@ -11,12 +11,12 @@ Options:
           Read settings from this file instead of searching for one. Naming a file that does not exist is an error, where finding no file during the search is not
 
       --lang <LANG>
-          Which text form to write. All three read back — `tm` through `parse_tm_full`, `lambda` through `parse_lambda`, `asm` through `parse_asm`. `tm` and `asm` are also executable from the command line: `redextape run` takes an emitted `.tm` or `.asm` file directly
+          Which text form to write. All three read back — `tm` through `parse_tm_full`, `lambda` through `parse_lambda`, `rxm` through `parse_rxm`. `tm` and `rxm` are also executable from the command line: `redextape run` takes an emitted `.tm` or `.rxm` file directly
 
           Possible values:
           - tm:     A complete self-describing Turing machine, header included, that `redextape run` executes
           - lambda: The λ-calculus lowering of the program, which `parse_lambda` and the editor grammar read
-          - asm:    The register-machine lowering, read back by `parse_asm` and executable by `redextape run`
+          - rxm:    The register-machine lowering, read back by `parse_rxm` and executable by `redextape run`
 
       --encoding <ENCODING>
           Tape encoding, defaulting to unary. `--lang tm` only: passing it with any other target is an error rather than a silent no-op. `binary` packs a far larger value into the same field width, so it can express programs unary refuses

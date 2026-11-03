@@ -261,8 +261,8 @@ describe.each(STATES)('every control in $name', ({ name, picks, tiled }) => {
   it("with every view's title and ⋯ menu open", () => {
     const leaves = viewLeaves(tiled)
     expect(leaves.length, `${name}: no view to walk`).toBeGreaterThan(0)
-    // THE WALK REACHES EVERY KIND OF VIEW THE FOUR-VIEW PAGE HAS: a tiled state shows all of them, the asm view too.
-    if (tiled) expect(leaves, `${name}: the views walked`).toEqual(['lambda-0', 'asm-0', 'tm-0'])
+    // THE WALK REACHES EVERY KIND OF VIEW THE FOUR-VIEW PAGE HAS: a tiled state shows all of them, the rxm view too.
+    if (tiled) expect(leaves, `${name}: the views walked`).toEqual(['lambda-0', 'rxm-0', 'tm-0'])
     for (const leaf of leaves) {
       for (const sel of [`[data-leaf="${leaf}"] button.view-title`, `[data-leaf="${leaf}"] button.view-more`]) {
         const button = document.querySelector<HTMLButtonElement>(sel)
@@ -464,7 +464,7 @@ describe('every control in Explorer, in a window wide enough for the views toggl
     const walked = check('wide: page')
     expect(toggles()).toHaveLength(4)
     for (const b of toggles()) expect(walked, `the walk skipped the ${b.textContent} toggle`).toContain(b)
-    expect(toggles().map(nameOf)).toEqual(['source', 'asm', 'λ', 'TM'])
+    expect(toggles().map(nameOf)).toEqual(['source', 'rxm', 'λ', 'TM'])
   })
 
   // DISABLED BY `aria-disabled` (`app-header.ts`'s `viewToggles`), so the walk holds it to taking the focus too.

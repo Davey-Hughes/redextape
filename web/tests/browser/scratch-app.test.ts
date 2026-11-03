@@ -39,7 +39,7 @@ let view: EditorView
  * The title menu's λ items, as `{ key, text }` — WHICH SESSIONS OFFER A λ LEG. Opens and closes
  * the menu to read it.
  *
- * FILTERED BY KEY, because the menu lists asm and TM pairs too, so a fork that added nothing would still look
+ * FILTERED BY KEY, because the menu lists rxm and TM pairs too, so a fork that added nothing would still look
  * right the moment one of the source session's other legs was counted. Reading the λ keys is what keeps the
  * assertion about λ.
  */
@@ -229,7 +229,7 @@ describe('the fork control, end to end', () => {
     expect(forkButton()).toBeNull()
     const title = lambdaTitle()
     if (title === null) throw new Error('the pane selector should be on screen from the first paint')
-    // THE λ GROUP. The asm and TM groups follow it and hold the source session's asm and TM legs, which
+    // THE λ GROUP. The rxm and TM groups follow it and hold the source session's rxm and TM legs, which
     // this stage says nothing about; what the fork changed is the λ group, and naming the group is what
     // keeps this assertion about the fork.
     //

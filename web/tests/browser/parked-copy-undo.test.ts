@@ -44,14 +44,14 @@ const onError = (e: ErrorEvent): void => {
   errors.push(e.message)
 }
 
-const FOUR = ['source', 'lambda-0', 'asm-0', 'tm-0']
+const FOUR = ['source', 'lambda-0', 'rxm-0', 'tm-0']
 
 /** A leg's name in a title and in the copies menu, the view a default arrangement gives it, and its toggle. */
 type Leg = { readonly name: string; readonly view: string; readonly kind: string }
 const LEGS: readonly Leg[] = [
   { name: 'λ', view: 'lambda-0', kind: 'lambda' },
   { name: 'TM', view: 'tm-0', kind: 'tm' },
-  { name: 'asm', view: 'asm-0', kind: 'asm' },
+  { name: 'rxm', view: 'rxm-0', kind: 'rxm' },
 ]
 
 /** What a case holds once `leg`'s view shows a copy of its own. */

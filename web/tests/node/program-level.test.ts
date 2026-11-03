@@ -49,7 +49,7 @@ describe('the rows', () => {
     ])
   })
 
-  it('prints a label one past the last instruction after it, as `print_asm` does', () => {
+  it('prints a label one past the last instruction after it, as `print_rxm` does', () => {
     const trailing = [['end', 4]] as const
     expect(programRows(compiled, trailing, 'arcs', null).map(shown()).at(-1)).toBe('L:end')
   })

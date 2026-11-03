@@ -294,7 +294,7 @@ impl Server {
     ///
     /// **THIS DOES NOT GO THROUGH `locate`, THOUGH IT SHARES WHAT `locate` CACHES.** That helper
     /// answers "the name under the cursor", and three of hover's seven answers are not about a name
-    /// at all — a TM rule, an asm instruction and a `.rxt` literal are resolved from the text itself,
+    /// at all — a TM rule, an rxm instruction and a `.rxt` literal are resolved from the text itself,
     /// not from an occurrence `NameIndex` records — so `locate`'s question is the wrong one for
     /// those three, and hover does not ask it. But the *index* `locate` reaches into `doc.nav` for is
     /// exactly what the other four rows want, so `doc.nav.as_ref()` is passed straight through to
@@ -381,7 +381,7 @@ impl Server {
     /// state's extent, and `outline` therefore never nests a rule under one.
     ///
     /// `selection_range` is the name; `range` is the construct's extent when the form records one
-    /// and the enclosing line when it does not. `.tm` and `.asm` record none — no parser knows
+    /// and the enclosing line when it does not. `.tm` and `.rxm` record none — no parser knows
     /// where a state's rules end — so both keep the line-shaped range, and `.rxt` gets the `fn` or
     /// `let` statement itself. `outline` builds the nesting; see that module for why containment is
     /// the rule.
@@ -608,7 +608,7 @@ state q1: accept
     #[test]
     fn references_on_a_name_nothing_defines_lists_its_other_mentions() {
         // This parses with `program: Some` and no diagnostics of the parser's own — the
-        // parser never checks jump targets; `asm_label_diagnostics` marks both, and navigation
+        // parser never checks jump targets; `rxm_label_diagnostics` marks both, and navigation
         // answers anyway — and records two dangling references to `nowhere`.
         // `include_declaration` has nothing to include: with no binding, every
         // occurrence IS a reference, so both are listed either way.
@@ -616,7 +616,7 @@ state q1: accept
         server.handle(notification(
             "textDocument/didOpen",
             &json!({"textDocument": {
-                "uri": "file:///d.asm", "languageId": "redextape_asm", "version": 1,
+                "uri": "file:///d.rxm", "languageId": "redextape_rxm", "version": 1,
                 "text": "result Nat\nf:\n\tjmp\tnowhere\n\tjz\tr0, nowhere\n\tret\n"
             }}),
         ));
@@ -625,7 +625,7 @@ state q1: accept
                 3,
                 "textDocument/references",
                 &json!({
-                    "textDocument": {"uri": "file:///d.asm"},
+                    "textDocument": {"uri": "file:///d.rxm"},
                     "position": {"line": 2, "character": 5},
                     "context": {"includeDeclaration": include}
                 }),
@@ -959,7 +959,7 @@ state q1: accept
             ("file:///a.rxt", "redextape", "1 + true"),
             ("file:///a.rxlambda", "redextape_lambda", "λx."),
             ("file:///a.tm", "redextape_tm", "tapes\n"),
-            ("file:///a.asm", "redextape_asm", "li\n"),
+            ("file:///a.rxm", "redextape_rxm", "li\n"),
         ] {
             let out = did_open(&mut server, uri, id, src);
             let p = published(&out);
@@ -1273,7 +1273,7 @@ state q1: accept
     }
 
     #[test]
-    fn a_tm_state_and_an_asm_label_get_different_symbol_kinds() {
+    fn a_tm_state_and_an_rxm_label_get_different_symbol_kinds() {
         // The `SymbolKind` comes from `outline_kind(DefKind)` per occurrence, not per document —
         // a single `.rxt` file mixes several kinds, so knowing the document's language does not
         // determine the kind. A single hardcoded kind would pass a test that only looked at one
@@ -1284,7 +1284,7 @@ state q1: accept
         server.handle(notification(
             "textDocument/didOpen",
             &json!({"textDocument": {
-                "uri": "file:///a.asm", "languageId": "redextape_asm", "version": 1,
+                "uri": "file:///a.rxm", "languageId": "redextape_rxm", "version": 1,
                 "text": "result Nat\nf:\n\tret\n"
             }}),
         ));
@@ -1293,9 +1293,9 @@ state q1: accept
             success_value(&out)[0]["kind"].as_u64()
         };
         let tm = kind(&mut server, "file:///a.tm");
-        let asm = kind(&mut server, "file:///a.asm");
-        assert!(tm.is_some() && asm.is_some());
-        assert_ne!(tm, asm, "a state and a label are not the same kind of thing");
+        let rxm = kind(&mut server, "file:///a.rxm");
+        assert!(tm.is_some() && rxm.is_some());
+        assert_ne!(tm, rxm, "a state and a label are not the same kind of thing");
     }
 
     #[test]
@@ -1613,7 +1613,7 @@ state q1: accept
         //
         // **EACH FORM IS DRIVEN AT A POSITION WITH REAL CONTENT, NOT ONE CHOSEN TO HAVE NOTHING TO
         // SAY.** Three `null`s prove far less than three distinct sentences would: a crossed
-        // dispatch — `.tm`'s request reaching `hover::asm`, or `self.documents` handing back the wrong
+        // dispatch — `.tm`'s request reaching `hover::rxm`, or `self.documents` handing back the wrong
         // document for a URI — usually ALSO answers `null`, because a `.tm` rule grammar has nothing
         // to say about `.rxt` source and vice versa (true of every pairing this test exercises).
         // A null-only assertion cannot tell "wired correctly, nothing here" from "wired
@@ -1629,16 +1629,16 @@ state q1: accept
         init_hierarchical(&mut server);
         did_open(&mut server, "file:///a.rxt", "redextape", "let x = 1;\nx");
         did_open(&mut server, "file:///a.tm", "redextape_tm", NAV_TM);
-        did_open(&mut server, "file:///a.asm", "redextape_asm", "result Nat\nf:\n\tret\n");
+        did_open(&mut server, "file:///a.rxm", "redextape_rxm", "result Nat\nf:\n\tret\n");
 
         // rxt: the literal `1` on line 0 — its own "Nat" row. tm: the DEFINITION of state `scan` on
         // line 2, character 6 (`state scan:` — the keyword itself has nothing to say) — its own rule
         // count, asserted by the word "rule" rather than by the name `scan`, since a crossed dispatch into
-        // `hover::asm`'s label fallback would answer "label state scan" for this position (`.asm`'s
+        // `hover::rxm`'s label fallback would answer "label state scan" for this position (`.rxm`'s
         // label grammar reads any colon-terminated line as a label, `state scan` included) and a
-        // `scan`-only assertion would not catch that. asm: the `r` of `ret` on line 2, character 1.
+        // `scan`-only assertion would not catch that. rxm: the `r` of `ret` on line 2, character 1.
         for (uri, line, character, own_content) in
-            [("file:///a.rxt", 0, 8, "Nat"), ("file:///a.tm", 2, 6, "rule"), ("file:///a.asm", 2, 1, "ret")]
+            [("file:///a.rxt", 0, 8, "Nat"), ("file:///a.tm", 2, 6, "rule"), ("file:///a.rxm", 2, 1, "ret")]
         {
             let out = server.handle(request(
                 7,

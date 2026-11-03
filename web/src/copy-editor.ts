@@ -19,13 +19,13 @@ export type CopyEditorOptions = {
   /**
    * Called by `setEditor(null)`, whether or not an editor was mounted — not by a take, since a view that gives its
    * editor to another view of the copy still shows the copy (`takeEditor`'s doc). `TmPane` clears its copy's status
-   * line here; the asm view has nothing to clear (`AsmPane.setDetached`'s doc).
+   * line here; the rxm view has nothing to clear (`RxmPane.setDetached`'s doc).
    */
   readonly onUnmount?: () => void
 }
 
 /**
- * The part of a machine view that edits a copy — the TM view's and the asm view's (spec amendment 28: the asm view
+ * The part of a machine view that edits a copy — the TM view's and the rxm view's (spec amendment 28: the rxm view
  * holds a copy's editor as the TM view does). It owns the editor's host and the text panel around it, the outline,
  * and the facts behind the view menu's *format* and *edit a copy*; the view puts `textPanel` first in its body and
  * `outline` last, and delegates `EditablePane`'s members here.
@@ -92,15 +92,15 @@ export class CopyEditor implements EditablePane {
    * is what lets a LATER call that has nothing to do with forking — `setDetached`, driven every frame by
    * `PaneSlot.render` regardless of which session the view is bound to — still re-derive the right answer. Same idiom
    * `LambdaPane.#detached`'s own doc states: a fact two different calls both need has to be readable by whichever
-   * one runs second. The asm view's facts arrive the same ways (`asm-seed.ts`'s `seedAsm`).
+   * one runs second. The rxm view's facts arrive the same ways (`rxm-seed.ts`'s `seedRxm`).
    */
   #forkText: string | null = null
   #count = 0
   /**
    * Whether `#forkText === null`'s reason is NOT the result type — the TM view's third `setForkAvailable` argument,
-   * `true` by default for the asm view's own two-argument calls (`AsmPane.setForkAvailable`), which never have a
-   * second reason to distinguish (the asm leg's header is optional, so a function-valued program still gets text —
-   * `AsmHeader::for_type`'s doc). `#refreshDetach` reads it only when `#forkText` is `null`, and before it looks at
+   * `true` by default for the rxm view's own two-argument calls (`RxmPane.setForkAvailable`), which never have a
+   * second reason to distinguish (the rxm leg's header is optional, so a function-valued program still gets text —
+   * `RxmHeader::for_type`'s doc). `#refreshDetach` reads it only when `#forkText` is `null`, and before it looks at
    * `#count` at all: `false` here means the control is disabled with the function-valued reason regardless of
    * `#count`, since a function-valued program's own machine can have as few rules as a declined leg has (zero) —
    * `#refreshDetach`'s own doc carries the argument for why `#count` cannot be asked first.
@@ -136,7 +136,7 @@ export class CopyEditor implements EditablePane {
     this.#collapse = textPanel(this.#editorHost, (collapsed) => on.collapse?.(collapsed))
     this.textPanel = this.#collapse.el
     this.text = this.#collapse.panel
-    // THE OUTLINE IS WHAT THE SERVER LISTS FOR THE COPY'S DOCUMENT — a TM copy's states, an asm copy's labels;
+    // THE OUTLINE IS WHAT THE SERVER LISTS FOR THE COPY'S DOCUMENT — a TM copy's states, an rxm copy's labels;
     // `TmPane`'s constructor says why a TM view's starts closed.
     this.#outline = createOutlinePanel({
       open: opts.outlineOpen,
@@ -255,7 +255,7 @@ export class CopyEditor implements EditablePane {
    *
    * **ONE GESTURE HANDS A MACHINE VIEW AN EDITOR: *move the editor here*, from another view of the same copy.** Custody
    * calls this from `reconcileEditors`' sweep, which takes the editor off the view holding it. Nothing HOLDS a machine
-   * view's editor for later, as custody holds a λ view's: a TM or asm view destroys the editor it leaves (spec
+   * view's editor for later, as custody holds a λ view's: a TM or rxm view destroys the editor it leaves (spec
    * amendment 33, `pane-host.ts`'s drop pass and its same-leg rebind arm), and a view still showing the copy mounts a
    * fresh one.
    *
@@ -340,7 +340,7 @@ export class CopyEditor implements EditablePane {
    * whether the result type is the reason `text` is withheld — `viewMenu`'s `CopyState` rule, as a data
    * dependency rather than a convention — 5d-iv design §4.3. `text` is the program's text, or `null` when there
    * is none to copy; `count` is how many rules or instructions it has; `resultDecodable` defaults to
-   * `true`, which is every asm call's own answer (`#resultDecodable`'s own doc — the asm leg's header is
+   * `true`, which is every rxm call's own answer (`#resultDecodable`'s own doc — the rxm leg's header is
    * optional, so it has no second reason to distinguish). Stores the facts and defers to `#refreshDetach`,
    * the same split `setDetached` above and `LambdaPane.setEditor`/`setDetached` already use: a setter that only ever
    * WROTE the control from here would go stale the moment the view stopped being one `replies.ts`'s fan-out still
@@ -372,12 +372,12 @@ export class CopyEditor implements EditablePane {
    * is genuinely forkable — `tests/node/sessions.test.ts`'s own fixture for the machine-fork handler constructs
    * exactly that shape (one state, no rules). `count > 0` alone would withdraw the control for it though nothing
    * about the machine makes it unforkable; `text !== null` is the worker's own decision (`forkable` for a machine,
-   * the byte ceiling for asm text) — a count disagrees with it only in the direction count-but-no-text, which
+   * the byte ceiling for rxm text) — a count disagrees with it only in the direction count-but-no-text, which
    * `text === null` below still catches — and is the fact that actually decides presence.
    *
    * `text === null` IS WHETHER IT IS DISABLED, ONCE `#resultDecodable` HAS BEEN CHECKED. A session WITH a
    * program whose text was withheld (`text === null`) for a reason that is not "there is no program at all" — a
-   * machine over `MAX_FORK_RULES`, a function-valued program's TM text, or asm text over `MAX_SCRATCH_ASM_BYTES` —
+   * machine over `MAX_FORK_RULES`, a function-valued program's TM text, or rxm text over `MAX_SCRATCH_RXM_BYTES` —
    * is the one case the view presents disabled rather than absent: the program exists, the refusal is not an
    * absence, and `CopyState`'s own doc has the argument for why that distinction is worth a visible control.
    * Guarded by `!this.#detached` too, for the same reason presence is: a view that has just withdrawn the control

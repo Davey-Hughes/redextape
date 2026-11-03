@@ -57,7 +57,7 @@ use redextape_core::run;
 use redextape_core::tm::attribute::{Attribution, StepBucket, attribute, attribute_at};
 use redextape_core::tm::{
     Binary, Encoding, LowerError, MIN_FIELD_WIDTH, Program, REG, TAPES, TM_DEFAULT_CAPS, TmRun, TmStatus, Unary, WORK,
-    defunc, lower_asm, lower_tm_guarded, n_slots_of, run_tm_fitted, simulate_counts, simulate_final,
+    defunc, lower_rxm, lower_tm_guarded, n_slots_of, run_tm_fitted, simulate_counts, simulate_final,
 };
 
 #[path = "common/allocator.rs"]
@@ -132,7 +132,7 @@ const FIRST_ORDER_DEMOS: &[&str] = &[
     "fn s0(n){ if n == 0 { 0 } else { 1 + s1(n - 1) } } \
      fn s1(n){ if n == 0 { 0 } else { 2 + s2(n - 1) } } \
      fn s2(n){ if n == 0 { 0 } else { 4 + s0(n - 1) } } s0(4)",
-    // A group that reaches the backends THROUGH `defunc`. Every group case above lowers via `lower_asm`
+    // A group that reaches the backends THROUGH `defunc`. Every group case above lowers via `lower_rxm`
     // directly, so none exercises `defunc`'s group handling — peeling a `LetRecGroup` and re-emitting it
     // as one ordered unit. `id` is used as a VALUE, which is what routes the program through `defunc`;
     // `ev`/`od` stay a genuine cycle inside it. The answer comes out of whichever member's base case the
@@ -171,7 +171,7 @@ const FIRST_ORDER_DEMOS: &[&str] = &[
     "fn v(x) { x * 10 } fn b(x) { x + 1 } fn ap(g, x) { g(x) } ap(v, 1) + ap(b, 1) + b(5)",
     "fn b(x) { x + 1 } fn v(x) { x * 10 } fn ap(g, x) { g(x) } ap(v, 1) + ap(b, 1) + b(5)",
     // A user `fn` shadowing a list builtin. `defunc` synthesizes `$head($clos)` for its dispatcher
-    // tag test, and `lower_asm` resolves a bound function BEFORE the builtin table — so with the
+    // tag test, and `lower_rxm` resolves a bound function BEFORE the builtin table — so with the
     // bare name this would silently miscompile. The `$` form is unforgeable in user source, so
     // scaffolding is uncapturable. 2 + 3 = 5.
     "fn head(x) { x + 1 } fn ap(g, x) { g(x) } fn add1(y) { y + 1 } head(1) + ap(add1, 2)",
@@ -198,7 +198,7 @@ const FIRST_ORDER_DEMOS: &[&str] = &[
     "fn nil(x) { x + 5 } fn ap(g, x) { g(x) } ap(nil, 0)",
     // A user `fn nil` called by name ONLY (never itself used as a value) sharing a program with an
     // unrelated CLOSED function-value (`add1`, passed to `ap`). Without the `$nil` alias, `add1`'s
-    // closed closure would be built as `cons(tag, nil)` — a bare `nil` that `lower_asm`'s
+    // closed closure would be built as `cons(tag, nil)` — a bare `nil` that `lower_rxm`'s
     // `reject_fn_value` would flag as a value-use of the user's KEPT `fn nil`, rejecting the whole
     // program on every lowering backend even though `nil` itself is never value-used anywhere. 2 + 3 = 5.
     "fn nil(x) { x + 1 } fn ap(g, x) { g(x) } fn add1(y) { y + 1 } nil(1) + ap(add1, 2)",
@@ -334,7 +334,7 @@ fn main() {
     println!("    strategy. Merging them would overstate the devirtualization headline.");
     println!("  • Apply is DECOMPOSED BY CALLEE, because one `Apply` bucket would merge populations with");
     println!("    opposite optimizer implications. In particular `cons`/`head`/`tail`/`is_empty` lower to");
-    println!("    ONE asm instruction each (`lower_asm.rs`'s `lower_builtin_apply`) — no frame, no Call, no Ret. They");
+    println!("    ONE rxm instruction each (`lower_rxm.rs`'s `lower_builtin_apply`) — no frame, no Call, no Ret. They");
     println!("    are heap ops, and there is NOTHING THERE FOR AN INLINER TO INLINE.");
     println!("  • A Node(id) bucket identifies a construct by KIND and NodeId only. Core carries no");
     println!("    source span, so this report cannot and does not print a line/column.");
@@ -361,7 +361,7 @@ fn main() {
         let a = attribute(src).unwrap_or_else(|e| panic!("corpus program failed to attribute: {src}: {e:?}"));
         any_capped |= a.capped;
         // ONE `core_for_display` per program, shared by the printer and both rollups: it
-        // re-runs `lower_asm`/`defunc`.
+        // re-runs `lower_rxm`/`defunc`.
         let (core, first_order) = core_for_display(src);
         print_program_attribution(src, &a, &core);
         all.add(src, &a, &core);
@@ -533,9 +533,9 @@ fn steps_at(src: &str, enc: &dyn Encoding) -> Option<u64> {
     let (prog, ds) = parse(src);
     assert!(ds.is_empty(), "parse errors in `{src}`: {ds:?}");
     let core = desugar(&prog.unwrap());
-    let program = match lower_asm(&core) {
+    let program = match lower_rxm(&core) {
         Ok(p) => p,
-        Err(_) => lower_asm(&defunc(&core).ok()?).ok()?,
+        Err(_) => lower_rxm(&defunc(&core).ok()?).ok()?,
     };
     let (m, overflow) = lower_tm_guarded(&program, enc).expect("survey demo must not be refused");
     let mut init = vec![Vec::new(); TAPES];
@@ -668,7 +668,7 @@ fn print_conclusion(all: &Rollup, first_order: &Rollup, ceilings: &BTreeMap<&str
         pct(dispatch, all.total)
     );
     println!(
-        "  {:.1}% ({} steps) is `cons`/`head`/`tail`/`is_empty` — ONE asm instruction each, no frame,",
+        "  {:.1}% ({} steps) is `cons`/`head`/`tail`/`is_empty` — ONE rxm instruction each, no frame,",
         pct(builtin, all.total),
         builtin
     );
@@ -713,7 +713,7 @@ fn print_conclusion(all: &Rollup, first_order: &Rollup, ceilings: &BTreeMap<&str
     println!("  2. `Ret`'s FRAME-RESTORE / LIVE-Loc-BANK REDUCTION — target {:.1}%", pct(all.machine, all.total));
     println!("       MachineScaffold is the largest SINGLE bucket in the survey — larger than any user");
     println!("       construct kind — and the scaling table above measures it growing QUADRATICALLY in");
-    println!("       locals live across a call (constant 2nd differences). It is asm->asm rather than");
+    println!("       locals live across a call (constant 2nd differences). It is rxm->rxm rather than");
     println!("       Core->Core, so a Core->Core pass set may not cover it; per step saved per unit of engineering");
     println!("       it is nonetheless the largest measured target.");
     println!();
@@ -1200,7 +1200,7 @@ const CLOSURE_BOX_ROW: &str = "ClosureScaffold ($box alloc + $boxh reads)";
 /// rollup holds.
 #[derive(Clone, Copy, PartialEq, Eq)]
 enum ApplyClass {
-    /// `cons`/`head`/`tail`/`is_empty` — ONE asm instruction each (`lower_asm.rs`'s
+    /// `cons`/`head`/`tail`/`is_empty` — ONE rxm instruction each (`lower_rxm.rs`'s
     /// `lower_builtin_apply`). No frame, no `Call`, no `Ret`. A heap op wearing call syntax; nothing
     /// here for an inliner.
     Builtin,
@@ -1212,7 +1212,7 @@ enum ApplyClass {
     Direct,
     /// Any other `$`-prefixed callee defunc minted. On this corpus the row is entirely `$box_get` +
     /// `$box_set` — defunc's mutable-capture boxing, nothing else. Kept OUT of `Builtin` deliberately,
-    /// even though `$box*` also lowers to one asm instruction: the two have opposite optimizer
+    /// even though `$box*` also lowers to one rxm instruction: the two have opposite optimizer
     /// implications, which is precisely what the `Apply` split exists to stop hiding.
     /// `cons`/`head`/`tail` is irreducible heap work; `$box_get`/`$box_set` is an artifact of THIS
     /// mutable-capture strategy and a different one could avoid it.
@@ -1334,7 +1334,7 @@ fn core_for_display(src: &str) -> (Core, bool) {
     let (prog, ds) = redextape_core::parser::parse(src);
     assert!(ds.is_empty(), "corpus program does not parse/typecheck: {src}: {ds:?}");
     let core = redextape_core::desugar::desugar(&prog.expect("parses"));
-    match lower_asm(&core) {
+    match lower_rxm(&core) {
         Ok(_) => (core, true),
         // Propagate loudly rather than falling back to the un-defunc'd Core: a silent fallback would
         // label buckets against a tree the machine never ran, matching `lower_mapped`'s own discipline.

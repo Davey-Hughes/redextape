@@ -26,7 +26,7 @@ use redextape_core::core::Core;
 use redextape_core::desugar::desugar;
 use redextape_core::parser::parse;
 use redextape_core::run;
-use redextape_core::tm::{DEFAULT_CAPS, decode_asm};
+use redextape_core::tm::{DEFAULT_CAPS, decode_rxm};
 use redextape_core::value::format_value;
 use redextape_native::{NativeRun, run_native};
 
@@ -35,7 +35,7 @@ use redextape_native::{NativeRun, run_native};
 fn main() {
     println!("\n════════════════════════════════════════════════════════════════════");
     println!(" Redextape — native backend demo");
-    println!(" mini-language  →  register-asm  →  Cranelift JIT  →  real machine code  →  decode,");
+    println!(" mini-language  →  rxm  →  Cranelift JIT  →  real machine code  →  decode,");
     println!(" checked against the reference interpreter (reference == native).");
     println!("════════════════════════════════════════════════════════════════════");
 
@@ -54,7 +54,7 @@ fn main() {
     }
 
     // 2. Higher-order programs, defunctionalized first (the same Core→Core pass the TM backend
-    //    uses) so the first-order-only asm lowering can compile them.
+    //    uses) so the first-order-only rxm lowering can compile them.
     println!("\n2. Higher-order programs (defunctionalized, same pass as the TM backend)\n");
     println!("   {:<64} {:>10}  {}", "program", "result", "oracle");
     println!("   {}", "─".repeat(94));
@@ -115,7 +115,7 @@ fn report(src: &str) {
     let native = run_native(&core, DEFAULT_CAPS);
     let (result, ok) = match &native {
         NativeRun::Ran(o) => {
-            let decoded = decode_asm(o, &reference);
+            let decoded = decode_rxm(o, &reference);
             let ok = decoded.as_ref() == Some(&reference);
             (decoded.as_ref().map_or("<none>".to_string(), format_value), ok)
         }

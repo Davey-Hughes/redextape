@@ -452,7 +452,7 @@ describe('restoring λ and TM buffers', () => {
    *
    * **THE WAIT IS ON THE BUILD'S ANSWER**: a failed build leaves the page as it was, so the reply is the one fact to
    * wait on (`build-reply-fixture.ts`'s own doc), and that it is `no-session` is the precondition these cases are
-   * about. The restored view then marks the text where it is wrong, as `asm-copy-restore.test.ts` holds for an asm
+   * about. The restored view then marks the text where it is wrong, as `rxm-copy-restore.test.ts` holds for an rxm
    * copy.
    */
   async function keepsTextThatDoesNotBuild(pane: (app: App) => HTMLElement, typed: (original: string) => string) {

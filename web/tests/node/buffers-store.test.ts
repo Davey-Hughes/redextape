@@ -82,11 +82,11 @@ describe('parseBuffers', () => {
     expect(parseBuffers(raw({ buffers: [{ ...VALID.buffers[0], leg: 'tm' }] }))?.buffers[0]?.leg).toBe('tm')
   })
 
-  // AN ASM COPY IS STORED AT VERSION 2 (Plan 7 part 5 spec, amendment 23), as a copy on any other leg is, so a store
-  // with no asm copy and one holding one read under the same version.
-  it('accepts an asm buffer, under the version the other legs are stored at', () => {
+  // AN RXM COPY IS STORED AT VERSION 2 (Plan 7 part 5 spec, amendment 23), as a copy on any other leg is, so a store
+  // with no rxm copy and one holding one read under the same version.
+  it('accepts an rxm buffer, under the version the other legs are stored at', () => {
     expect(BUFFERS_VERSION).toBe(2)
-    expect(parseBuffers(raw({ buffers: [{ ...VALID.buffers[0], leg: 'asm' }] }))?.buffers[0]?.leg).toBe('asm')
+    expect(parseBuffers(raw({ buffers: [{ ...VALID.buffers[0], leg: 'rxm' }] }))?.buffers[0]?.leg).toBe('rxm')
   })
 
   it('answers null for a binding naming no buffer in the same payload', () => {

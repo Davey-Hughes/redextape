@@ -60,7 +60,7 @@ async function start(): Promise<void> {
   view.focus()
   view.dispatch({ selection: { anchor: CARET } })
   await until(() => view.hasFocus, 'the source editor to take the focus')
-  expect(mounted(), 'precondition: all four views').toEqual(['source', 'lambda-0', 'asm-0', 'tm-0'])
+  expect(mounted(), 'precondition: all four views').toEqual(['source', 'lambda-0', 'rxm-0', 'tm-0'])
   expect(armed(), 'precondition: the mode is not armed').toBe(false)
 }
 
@@ -140,17 +140,17 @@ describe('view keys', () => {
     expect(hint().getBoundingClientRect().height, 'the hint is still drawn once the mode is left').toBe(0)
     expect(view.state.doc.toString(), 'the prefix or Escape typed something').toBe(SOURCE)
     caretKept()
-    expect(mounted()).toEqual(['source', 'lambda-0', 'asm-0', 'tm-0'])
+    expect(mounted()).toEqual(['source', 'lambda-0', 'rxm-0', 'tm-0'])
   })
 
   it('goes to the next layout on ] and the previous on [, with the caret where it was in the editor', async () => {
     await start()
     await prefix()
     await userEvent.keyboard(']')
-    // ALL FOUR IS THE CYCLE'S LAST STOP, SO THE NEXT IS ITS FIRST: the source beside asm, the header's second toggle.
-    expect(mounted()).toEqual(['source', 'asm-0'])
+    // ALL FOUR IS THE CYCLE'S LAST STOP, SO THE NEXT IS ITS FIRST: the source beside rxm, the header's second toggle.
+    expect(mounted()).toEqual(['source', 'rxm-0'])
     expect(armed(), 'the mode stayed armed after its one action').toBe(false)
-    expect(live()).toBe('showing source and asm')
+    expect(live()).toBe('showing source and rxm')
     expect(view.state.doc.toString(), 'the ] was typed').toBe(SOURCE)
     caretKept()
     await prefix()
@@ -160,7 +160,7 @@ describe('view keys', () => {
     await userEvent.keyboard(PREVIOUS)
     await prefix()
     await userEvent.keyboard(PREVIOUS)
-    expect(mounted()).toEqual(['source', 'lambda-0', 'asm-0', 'tm-0'])
+    expect(mounted()).toEqual(['source', 'lambda-0', 'rxm-0', 'tm-0'])
     expect(view.state.doc.toString(), 'a [ was typed').toBe(SOURCE)
     caretKept()
   })
@@ -171,10 +171,10 @@ describe('view keys', () => {
     await userEvent.keyboard('{Control>}.')
     expect(armed(), 'the prefix did not arm the mode').toBe(true)
     await userEvent.keyboard(']{/Control}')
-    expect(mounted(), 'Ctrl held through ] did not go to the next layout').toEqual(['source', 'asm-0'])
+    expect(mounted(), 'Ctrl held through ] did not go to the next layout').toEqual(['source', 'rxm-0'])
     expect(armed()).toBe(false)
     await userEvent.keyboard('{Control>}.4{/Control}')
-    expect(mounted(), 'Ctrl held through 4 did not show the TM view').toEqual(['source', 'asm-0', 'tm-0'])
+    expect(mounted(), 'Ctrl held through 4 did not show the TM view').toEqual(['source', 'rxm-0', 'tm-0'])
     expect(view.state.doc.toString(), 'a key was typed').toBe(SOURCE)
     caretKept()
   })
@@ -183,15 +183,15 @@ describe('view keys', () => {
     await start()
     for (const [key, without] of [
       ['2', ['source', 'lambda-0', 'tm-0']],
-      ['3', ['source', 'asm-0', 'tm-0']],
-      ['4', ['source', 'lambda-0', 'asm-0']],
+      ['3', ['source', 'rxm-0', 'tm-0']],
+      ['4', ['source', 'lambda-0', 'rxm-0']],
     ] as const) {
       await prefix()
       await userEvent.keyboard(key)
       expect(mounted(), `after ${key}`).toEqual(without)
       await prefix()
       await userEvent.keyboard(key)
-      expect(mounted(), `after ${key} again`).toEqual(['source', 'lambda-0', 'asm-0', 'tm-0'])
+      expect(mounted(), `after ${key} again`).toEqual(['source', 'lambda-0', 'rxm-0', 'tm-0'])
     }
     expect(view.state.doc.toString(), 'a digit was typed').toBe(SOURCE)
     caretKept()
@@ -199,10 +199,10 @@ describe('view keys', () => {
     // second `1` is pressed from there.
     await prefix()
     await userEvent.keyboard('1')
-    expect(mounted(), 'after 1').toEqual(['lambda-0', 'asm-0', 'tm-0'])
+    expect(mounted(), 'after 1').toEqual(['lambda-0', 'rxm-0', 'tm-0'])
     await prefix()
     await userEvent.keyboard('1')
-    expect(mounted(), 'after 1 again').toEqual(['source', 'lambda-0', 'asm-0', 'tm-0'])
+    expect(mounted(), 'after 1 again').toEqual(['source', 'lambda-0', 'rxm-0', 'tm-0'])
     expect(view.state.doc.toString(), 'a digit was typed').toBe(SOURCE)
   })
 
@@ -210,7 +210,7 @@ describe('view keys', () => {
     await start()
     await prefix()
     await userEvent.keyboard('1')
-    expect(mounted()).toEqual(['lambda-0', 'asm-0', 'tm-0'])
+    expect(mounted()).toEqual(['lambda-0', 'rxm-0', 'tm-0'])
     expect(document.activeElement, 'the focus fell to <body>').not.toBe(document.body)
     // THE FOCUSED VIEW, AND NOT ANY VIEW ON THE PAGE: the source view was the focused one and left, so it is the first
     // view of the new tree that is not the source (`workspace.ts`'s `defaultFocus`).
@@ -250,7 +250,7 @@ describe('view keys', () => {
     await userEvent.keyboard('x')
     expect(armed()).toBe(false)
     expect(view.state.doc.toString(), 'the key after the prefix did not reach the editor').toBe(typed('x'))
-    expect(mounted()).toEqual(['source', 'lambda-0', 'asm-0', 'tm-0'])
+    expect(mounted()).toEqual(['source', 'lambda-0', 'rxm-0', 'tm-0'])
   })
 
   it('is over after one action: the next 3 is the editor’s, typed where the caret was', async () => {
@@ -260,7 +260,7 @@ describe('view keys', () => {
     caretKept()
     await userEvent.keyboard('3')
     expect(view.state.doc.toString(), 'a second key was taken as an action, or the caret moved').toBe(typed('3'))
-    expect(mounted()).toEqual(['source', 'lambda-0', 'asm-0'])
+    expect(mounted()).toEqual(['source', 'lambda-0', 'rxm-0'])
   })
 
   /**
@@ -286,7 +286,7 @@ describe('view keys', () => {
       await start()
       await prefix()
       await userEvent.keyboard('{2>3/}')
-      expect(mounted(), 'a held 2 did not hide the asm view once').toEqual(['source', 'lambda-0', 'tm-0'])
+      expect(mounted(), 'a held 2 did not hide the rxm view once').toEqual(['source', 'lambda-0', 'tm-0'])
       expect(armed()).toBe(false)
       expect(view.state.doc.toString(), 'the repeats of 2 were typed').toBe(SOURCE)
       caretKept()
@@ -295,7 +295,7 @@ describe('view keys', () => {
     it('acts once with Ctrl held through a held ], and its repeats are not the editor’s Ctrl+]', async () => {
       await start()
       await userEvent.keyboard('{Control>}.{]>3/}{/Control}')
-      expect(mounted(), 'a held ] did not go to the next layout once').toEqual(['source', 'asm-0'])
+      expect(mounted(), 'a held ] did not go to the next layout once').toEqual(['source', 'rxm-0'])
       // CODEMIRROR'S `Ctrl+]` INDENTS THE LINE: each repeat that reached the editor would be an indent.
       expect(view.state.doc.toString(), 'the repeats of Ctrl+] indented the line').toBe(SOURCE)
       caretKept()
@@ -317,7 +317,7 @@ describe('view keys', () => {
       await userEvent.keyboard('{x>3/}')
       expect(armed()).toBe(false)
       expect(view.state.doc.toString(), 'the press and its two repeats were not all typed').toBe(typed('xxx'))
-      expect(mounted()).toEqual(['source', 'lambda-0', 'asm-0', 'tm-0'])
+      expect(mounted()).toEqual(['source', 'lambda-0', 'rxm-0', 'tm-0'])
     })
 
     /**
@@ -398,7 +398,7 @@ describe('view keys', () => {
         await until(() => view.hasFocus, 'the source editor to take the focus')
         await prefix()
         await userEvent.keyboard('{2>3/}')
-        expect(mounted(), 'a held 2 did not hide the asm view once').toEqual(['source', 'lambda-0', 'tm-0'])
+        expect(mounted(), 'a held 2 did not hide the rxm view once').toEqual(['source', 'lambda-0', 'tm-0'])
         await userEvent.keyboard('x')
         expect(view.state.doc.toString(), 'vim took the repeats of 2 as a count').toBe(cut(1))
         try {
@@ -450,7 +450,7 @@ describe('view keys', () => {
     expect(armed(), 'a pointer press left the mode armed').toBe(false)
     await focusInPage('a pointer press in the source editor, which ends the mode')
     expect(view.hasFocus, 'the press took the focus out of the editor it landed in').toBe(true)
-    expect(mounted(), 'the press acted as a view key').toEqual(['source', 'lambda-0', 'asm-0', 'tm-0'])
+    expect(mounted(), 'the press acted as a view key').toEqual(['source', 'lambda-0', 'rxm-0', 'tm-0'])
   })
 
   it('ends on a pointer press on a toggle, which acts and has the focus', async () => {
@@ -461,7 +461,7 @@ describe('view keys', () => {
     expect(armed(), 'a pointer press left the mode armed').toBe(false)
     await focusInPage('a pointer press on the TM toggle, which ends the mode')
     expect(document.activeElement, 'the focus is not on the toggle that was pressed').toBe(toggle)
-    expect(mounted(), 'the press that ended the mode did not reach the toggle').toEqual(['source', 'lambda-0', 'asm-0'])
+    expect(mounted(), 'the press that ended the mode did not reach the toggle').toEqual(['source', 'lambda-0', 'rxm-0'])
   })
 
   /**
@@ -580,7 +580,7 @@ describe('view keys', () => {
     const field = document.querySelector('dialog:modal textarea') as HTMLTextAreaElement
     expect(document.activeElement, 'precondition: the dialog’s field has the focus').toBe(field)
     await userEvent.keyboard('2')
-    expect(mounted(), 'a view key acted behind a modal dialog').toEqual(['source', 'lambda-0', 'asm-0', 'tm-0'])
+    expect(mounted(), 'a view key acted behind a modal dialog').toEqual(['source', 'lambda-0', 'rxm-0', 'tm-0'])
     expect(armed(), 'the mode stayed armed under the dialog').toBe(false)
     expect(field.value, 'the key was kept from the dialog').toBe('2')
     await userEvent.keyboard('{Escape}')
@@ -628,7 +628,7 @@ describe('view keys', () => {
       await until(() => view.hasFocus, 'the source editor to take the focus')
       await prefix()
       await userEvent.keyboard('2')
-      expect(mounted(), '2 did not hide the asm view').toEqual(['source', 'lambda-0', 'tm-0'])
+      expect(mounted(), '2 did not hide the rxm view').toEqual(['source', 'lambda-0', 'tm-0'])
       caretKept()
       await userEvent.keyboard('x')
       expect(view.state.doc.toString(), 'vim took the 2 as a count, or did not get the x').toBe(cut(1))

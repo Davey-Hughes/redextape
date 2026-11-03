@@ -82,7 +82,7 @@ describe('controlState', () => {
     expect(c.stepText).toContain('deeper than')
   })
 
-  // THE ASM LEG'S FULL CAPS ARE THE DEPTH REFUSAL'S KIND (Plan 7 part 5 spec amendment 10): raising the step cap
+  // THE RXM LEG'S FULL CAPS ARE THE DEPTH REFUSAL'S KIND (Plan 7 part 5 spec amendment 10): raising the step cap
   // leaves the stack, the heap or the saved frames exactly as full, so there is no continue — and the line says which.
   it.each([
     ['stack-full', 'the call stack is full'],

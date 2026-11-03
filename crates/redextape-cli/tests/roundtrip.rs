@@ -68,18 +68,18 @@ fn a_file_reduced_through_all_three_stages_runs_to_the_reference_answer() {
 }
 
 /// The same oracle, the second of the two artifact forms `run` executes (`.tm`'s, above, is the
-/// first): `emit --lang asm` then `run` on the emitted `.asm` file, compiled to the register
+/// first): `emit --lang rxm` then `run` on the emitted `.rxm` file, compiled to the register
 /// machine rather than a Turing machine.
 #[test]
-fn emit_then_run_asm_reproduces_the_reference_answer() {
-    let dir = redextape_test_support::ScratchDir::new("roundtrip-asm").unwrap();
+fn emit_then_run_rxm_reproduces_the_reference_answer() {
+    let dir = redextape_test_support::ScratchDir::new("roundtrip-rxm").unwrap();
     let src = dir.join("p.rxt");
-    let art = dir.join("p.asm");
+    let art = dir.join("p.rxm");
     std::fs::write(&src, "[1, 2, 3]").unwrap();
 
     assert_cmd::Command::cargo_bin("redextape")
         .unwrap()
-        .args(["emit", src.to_str().unwrap(), "--lang", "asm", "-o", art.to_str().unwrap()])
+        .args(["emit", src.to_str().unwrap(), "--lang", "rxm", "-o", art.to_str().unwrap()])
         .assert()
         .success();
 

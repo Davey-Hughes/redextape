@@ -1,11 +1,11 @@
 import { afterEach, beforeAll, describe, expect, it, vi } from 'vitest'
 import { page, userEvent } from 'vitest/browser'
-import type { AsmPanels } from '../../src/asm-pane'
-import { AsmPane } from '../../src/asm-pane'
 import { LambdaPane } from '../../src/lambda-pane'
 import type { Shares } from '../../src/panel-stack'
+import type { RxmPanels } from '../../src/rxm-pane'
+import { RxmPane } from '../../src/rxm-pane'
 import type { LambdaState } from '../../src/types'
-import { FACT3, frameOf } from '../node/asm-fixtures'
+import { FACT3, frameOf } from '../node/rxm-fixtures'
 import { wireOf } from '../node/tree-fixture'
 import { controlState, frame, heightOf, inertEvents, panelOf, panelToggle } from './harness'
 
@@ -14,22 +14,22 @@ import { controlState, frame, heightOf, inertEvents, panelOf, panelToggle } from
  *
  * Pressed, its panel takes all of the view's spare height and every other panel of the view is DRAWN closed, its
  * header alone; what each one stores is not changed, which is held here by the view's `panel` event, the one thing
- * that writes a panel's state to the workspace. Held on an asm view built directly, which has four panels in three
+ * that writes a panel's state to the workspace. Held on an rxm view built directly, which has four panels in three
  * regions, and on a λ view for the region that has no header to be drawn closed as.
  */
 
 const CONTROLS = controlState(true, 'step 3 of 55')
 
-function mount(panels: AsmPanels = {}) {
+function mount(panels: RxmPanels = {}) {
   const sizes = vi.fn<(s: Shares) => void>()
   const panel = vi.fn<(name: string, open: boolean) => void>()
   const host = document.createElement('section')
   host.className = 'pane'
-  host.dataset.kind = 'asm'
+  host.dataset.kind = 'rxm'
   host.style.height = '900px'
   host.style.width = '1000px'
   document.body.append(host)
-  const pane = new AsmPane(host, inertEvents({ panelSizes: sizes, panel }), panels)
+  const pane = new RxmPane(host, inertEvents({ panelSizes: sizes, panel }), panels)
   pane.setProgram(FACT3)
   pane.render(frameOf({ pc: 3, next: 3 }), CONTROLS)
   return { host, pane, sizes, panel }
@@ -121,14 +121,14 @@ describe('a panel’s maximise button', () => {
 
   it('draws the listing again when a maximise that hid it ends, and does not draw into it while it is hidden', async () => {
     const { host, pane } = mount()
-    const rows = () => host.querySelectorAll('.asm-listing .asm-row').length
+    const rows = () => host.querySelectorAll('.rxm-listing .rxm-row').length
     expect(rows(), 'precondition: the listing is drawn').toBeGreaterThan(3)
     await userEvent.click(maximise(host, 'heap'))
     await frame()
     pane.render(frameOf({ pc: 13, next: 13 }), CONTROLS)
     await userEvent.click(maximise(host, 'heap'))
     await frame()
-    const next = host.querySelector('.asm-listing .asm-row.is-next')
+    const next = host.querySelector('.rxm-listing .rxm-row.is-next')
     expect(next?.textContent, 'the listing was not drawn at the step the view is on').toContain('pc13')
   })
 
@@ -148,7 +148,7 @@ describe('a panel’s maximise button', () => {
     await userEvent.click(maximise(host, 'registers'))
     await frame()
     expect(drawn(host)).toEqual({ listing: false, registers: true, stack: false, heap: false })
-    const row = host.querySelector('.asm-machine') as HTMLElement
+    const row = host.querySelector('.rxm-machine') as HTMLElement
     expect(heightOf(row), 'the row did not take the spare height').toBeGreaterThan(600)
     expect(heightOf(panelOf(host, 'registers')), 'the registers did not take the row’s').toBeCloseTo(heightOf(row), 0)
   })

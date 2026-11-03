@@ -148,7 +148,7 @@ everything else:
   since `parens` is reached only for an `Abs` in function position and for a non-`Var` atom. The
   pattern is *correct* and stays — an editor's user can type `(x)` — and what was missing was proof
   that anything exercised it. The guard is on `Grammar`, so every grammar in this repository carries
-  it — the TM and asm grammars inherited it when they arrived.
+  it — the TM and rxm grammars inherited it when they arrived.
 - **`every_corpus_program_parses_without_error_nodes`** — `Grammar::parse` **succeeds on a syntax
   error**, returning a tree that contains `ERROR`/`MISSING` nodes, and `captures` never inspects them.
   Without this, a corpus entry that stopped parsing cleanly would still pass every capture test with a
@@ -258,7 +258,7 @@ Every editor below loads the parser by looking up the C symbol `tree_sitter_<nam
 this grammar exports is `tree_sitter_redextape_lambda` — `grammar.js` declares
 `name: 'redextape_lambda'`, and `grep -n 'TS_PUBLIC const TSLanguage' src/parser.c` shows the result.
 The other grammars in this repository export `tree_sitter_redextape`, `tree_sitter_redextape_tm`, and
-`tree_sitter_redextape_asm`. **All four are installed from the same clone at different
+`tree_sitter_redextape_rxm`. **All four are installed from the same clone at different
 subdirectories**, so getting the name wrong loads the wrong language rather than failing to find one —
 they live side by side and none shadows another.
 
@@ -294,14 +294,14 @@ is a separate thing that nothing else does. Neovim auto-starts treesitter only f
 filetypes, and nvim-treesitter ships no `FileType` autocmd, so a parser can be installed and a
 filetype set and the buffer still open with no colour at all.
 
-`.rxt` and `.rxlambda` are claimed by extension. `.asm` and `.tm` are claimed by **sniffing the
-buffer**, because Neovim already maps them to `asm` and `tcl`: a listing that is not this project's
-keeps the filetype it had. `lazy = false` is required — filetype registration has to happen at
+`.rxt`, `.rxlambda` and `.rxm` are claimed by extension. `.tm` is claimed by **sniffing the
+buffer**, because Neovim already maps it to `tcl`: a file that is not this project's keeps the
+filetype it had. `lazy = false` is required — filetype registration has to happen at
 startup, and a lazy-loaded spec would not register this project's extensions until something had
 already loaded it. Then, once:
 
 ```vim
-:TSInstall redextape redextape_asm redextape_lambda redextape_tm
+:TSInstall redextape redextape_rxm redextape_lambda redextape_tm
 ```
 
 **That one line requires nvim-treesitter's `main` branch**, and the next paragraph explains why that
@@ -313,9 +313,9 @@ use the hand-written block below.**
 
 **Everything below is for everyone else** — `master`, a different plugin manager, or nvim-treesitter
 driven by hand. It is close to what `plugin/redextape.lua` does, with two deliberate differences
-worth knowing before you copy it: the blocks below claim `.asm` and `.tm` **unconditionally by
-extension**, which is simpler and takes every such file on your machine away from `asm` and `tcl`,
-and they do not start the highlighter. If you want colour you need a `FileType` autocmd calling
+worth knowing before you copy it: the blocks below claim `.tm` **unconditionally by extension**,
+which is simpler and takes every such file on your machine away from `tcl`, and they do not start
+the highlighter. If you want colour you need a `FileType` autocmd calling
 `vim.treesitter.start()` as well — see the end of this section.
 
 **nvim-treesitter's `main` branch does not clone.** Its installer strips a trailing `.git` from
@@ -389,7 +389,7 @@ opens with the right filetype, a working parser, and no colour:
 
 ```lua
 vim.api.nvim_create_autocmd("FileType", {
-  pattern = { "redextape", "redextape_asm", "redextape_lambda", "redextape_tm" },
+  pattern = { "redextape", "redextape_rxm", "redextape_lambda", "redextape_tm" },
   callback = function(args) pcall(vim.treesitter.start, args.buf) end,
 })
 ```

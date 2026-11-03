@@ -16,11 +16,11 @@ describe('the line naming the views a link opens on the program', () => {
   })
 
   it('lists two with `and`, and more with commas and a last `and`', () => {
-    expect(copiesLine(['λ · copy 1', 'asm · copy 2'])).toBe(
-      'copies are not included — the λ · copy 1 and asm · copy 2 views will open on the program',
+    expect(copiesLine(['λ · copy 1', 'rxm · copy 2'])).toBe(
+      'copies are not included — the λ · copy 1 and rxm · copy 2 views will open on the program',
     )
-    expect(copiesLine(['λ · copy 1', 'asm · copy 2', 'TM · copy 3'])).toBe(
-      'copies are not included — the λ · copy 1, asm · copy 2 and TM · copy 3 views will open on the program',
+    expect(copiesLine(['λ · copy 1', 'rxm · copy 2', 'TM · copy 3'])).toBe(
+      'copies are not included — the λ · copy 1, rxm · copy 2 and TM · copy 3 views will open on the program',
     )
   })
 
@@ -41,11 +41,11 @@ describe('the line naming the views a link opens on the program', () => {
   })
 
   it('groups a mix by copy, in the order each is first seen', () => {
-    expect(copiesLine(['asm · copy 2', 'λ · copy 1', 'λ · copy 1'])).toBe(
-      'copies are not included — the asm · copy 2 view and both λ · copy 1 views will open on the program',
+    expect(copiesLine(['rxm · copy 2', 'λ · copy 1', 'λ · copy 1'])).toBe(
+      'copies are not included — the rxm · copy 2 view and both λ · copy 1 views will open on the program',
     )
-    expect(copiesLine(['λ · copy 1', 'asm · copy 2', 'λ · copy 1'])).toBe(
-      'copies are not included — both λ · copy 1 views and the asm · copy 2 view will open on the program',
+    expect(copiesLine(['λ · copy 1', 'rxm · copy 2', 'λ · copy 1'])).toBe(
+      'copies are not included — both λ · copy 1 views and the rxm · copy 2 view will open on the program',
     )
   })
 })

@@ -25,7 +25,7 @@ use redextape_test_support::ts_derive_scan::{
     assert_overrides_match_field_nullability,
 };
 use redextape_wasm::{
-    AsmStatus, Decoded, LambdaStatus, ReductionStatus, RunStatus, TmScratchStatus, TmStatus, ValueRun,
+    Decoded, LambdaStatus, ReductionStatus, RunStatus, RxmStatus, TmScratchStatus, TmStatus, ValueRun,
 };
 use ts_rs::TS;
 
@@ -37,11 +37,11 @@ use ts_rs::TS;
 /// without an entry in core's `generated()` fails core's gate, not this one.
 fn generated() -> Vec<(&'static str, String)> {
     vec![
-        ("AsmStatus", AsmStatus::export_to_string().unwrap()),
         ("Decoded", Decoded::export_to_string().unwrap()),
         ("LambdaStatus", LambdaStatus::export_to_string().unwrap()),
         ("ReductionStatus", ReductionStatus::export_to_string().unwrap()),
         ("RunStatus", RunStatus::export_to_string().unwrap()),
+        ("RxmStatus", RxmStatus::export_to_string().unwrap()),
         ("TmScratchStatus", TmScratchStatus::export_to_string().unwrap()),
         ("TmStatus", TmStatus::export_to_string().unwrap()),
         ("ValueRun", ValueRun::export_to_string().unwrap()),

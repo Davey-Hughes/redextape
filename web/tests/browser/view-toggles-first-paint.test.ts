@@ -46,7 +46,7 @@ const places = (): Record<string, number | number[]> => ({
   encoding: tenth(queryEl('label.encoding').getBoundingClientRect().left),
 })
 
-const FOUR = ['source', 'asm', 'lambda', 'tm']
+const FOUR = ['source', 'rxm', 'lambda', 'tm']
 
 /**
  * What the markup alone drew, read before the mount: the group at 390 px, and `places()` in each style at 1280 px.

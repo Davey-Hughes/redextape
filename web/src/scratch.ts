@@ -5,7 +5,7 @@ import type { LeafId } from './panes'
 import type { Leg, RunReply } from './protocol'
 import type { SessionId, SessionPool } from './session-client'
 import { resetLegs, type SessionLegs, type SessionRegistry } from './sessions'
-import type { AsmState, Diagnostic, LambdaState, TmState } from './types'
+import type { Diagnostic, LambdaState, RxmState, TmState } from './types'
 
 /**
  * What retiring a buffer needs from a pane slot: which session it is on, and the ability to move it
@@ -108,7 +108,7 @@ type BufferState = {
  *
  * **TWO COPIES COST MORE, AND NO COUNT PRICES THEM**: a λ copy whose recording is continued, which
  * grows each time it is, and a copy a user writes, which can be larger than any shipped one
- * (`asm-copy-memory.test.ts`).
+ * (`rxm-copy-memory.test.ts`).
  *
  * **TWO READINGS, THREE INTERCEPT COMPONENTS APART — THE PROJECT OWNER PICKED THE LITERAL ONE.** The
  * threshold's own words are "every warm BUFFER"; the source session's rings are not a buffer's, so
@@ -122,7 +122,7 @@ type BufferState = {
  *     module (the `init()` call in `main.ts`, invisible to a heap reading the same way every worker's
  *     module is), plus that source fixed cost.
  *   * **(b) everything-at-exhaustion — reference only, NOT what ships.** The stricter reading: the
- *     source session's own λ, asm and TM rings ALSO driven to exhaustion at the same instant every
+ *     source session's own λ, rxm and TM rings ALSO driven to exhaustion at the same instant every
  *     buffer's is, which the threshold's words do not require, since the source session's legs are
  *     not "buffers". Each of those rings is priced for one program, and a ring is bounded by the
  *     bytes it is charged, not the heap it holds, so a program whose frames hold more derives less.
@@ -223,10 +223,10 @@ export type ScratchBuffersConfig = {
  * four numbers; the worker therefore holds only the wasm call, and the minting, the rebinding and the
  * retirement order live here.
  *
- * **EVERY LEG.** A `TmScratch` is built from `.tm` TEXT, and an asm copy from asm text, the same way a
+ * **EVERY LEG.** A `TmScratch` is built from `.tm` TEXT, and an rxm copy from rxm text, the same way a
  * `LambdaScratch` is built from λ text, and `#spawn` below reads `state.leg` — set once, at mint, and
  * never written again — to pick both the request kind it posts (`client.scratch`, `client.tmScratch`
- * or `client.asmScratch`) and the one leg record it builds for the registry. One class with a field,
+ * or `client.rxmScratch`) and the one leg record it builds for the registry. One class with a field,
  * not a class per leg, because everything past that branch — the id, the cap, the retirement order,
  * the snapshot shape — is identical work for every leg.
  *
@@ -620,7 +620,7 @@ export class ScratchBuffers {
    *
    * **THIS EXISTS BECAUSE A PANE CAN ARRIVE AT A BUFFER LONG AFTER THE REPLY THAT WOULD HAVE SEEDED IT
    * — the editor's half of the repair `pane-host.ts`'s `tmProgramOf` performs.** A copy's build reply in
-   * `replies.ts` (`scratch-compiled`, `tm-scratch-compiled`, `asm-scratch-compiled`) mounts its editor,
+   * `replies.ts` (`scratch-compiled`, `tm-scratch-compiled`, `rxm-scratch-compiled`) mounts its editor,
    * and it fires once per build; a pane that binds to the buffer afterwards has nothing to mount from,
    * because the reply has been and gone. A `cool` followed by a `warm` is the path that reaches that
    * state: `cool` rebinds every pane away (its own invariant), so the editor is destroyed by
@@ -703,17 +703,17 @@ export class ScratchBuffers {
       // **`null` AT CONSTRUCTION FOR EVERY LEG, AND THE REASON IS NOT THE SAME FOR EVERY ONE.** A λ buffer
       // never gets a machine at all — its worker answers `scratch-compiled`, which carries no
       // `TmProgram` (5d-i §3.3: no TM leg, no `SourceMap`), and no TM pane can ever bind to it either,
-      // so nothing will ever write here; nor does an asm copy's `asm-scratch-compiled` carry one. A TM
+      // so nothing will ever write here; nor does an rxm copy's `rxm-scratch-compiled` carry one. A TM
       // buffer's worker DOES answer `tm-scratch-compiled`, which DOES carry a `TmProgram`, and
       // `replies.ts`'s `onScratchReply` stores it here, with the file's status and value reading in
       // `tmScratch`, once that reply arrives. What is shared between the legs is that none has either at
-      // the moment this entry is created, and for a λ or asm buffer that is permanent.
+      // the moment this entry is created, and for a λ or rxm buffer that is permanent.
       tmProgram: null,
       tmScratch: null,
-      // AN ASM COPY'S LISTING AND READING, written by `replies.ts`'s `asm-scratch-compiled` arm as a TM copy's machine
-      // is; `null` for good on a λ or TM copy, which has no asm leg.
-      asmProgram: null,
-      asmScratch: null,
+      // AN RXM COPY'S LISTING AND READING, written by `replies.ts`'s `rxm-scratch-compiled` arm as a TM copy's machine
+      // is; `null` for good on a λ or TM copy, which has no rxm leg.
+      rxmProgram: null,
+      rxmScratch: null,
     })
     state.warm = true
     // A NEW WORKER'S FIRST BUILD IS A GESTURE'S, SO ITS FAILURE IS SAID AGAIN (`noSessionReply`'s doc).
@@ -733,9 +733,9 @@ export class ScratchBuffers {
         // goes unread on the arm that has nothing to replay.
         client.tmScratch(gen, src)
         break
-      case 'asm':
-        // NO STEP, FOR THE TM ARM'S REASON: an asm copy's text is its program, run from its first instruction.
-        client.asmScratch(gen, src)
+      case 'rxm':
+        // NO STEP, FOR THE TM ARM'S REASON: an rxm copy's text is its program, run from its first instruction.
+        client.rxmScratch(gen, src)
         break
       default:
         unhandled(state.leg)
@@ -755,8 +755,8 @@ export class ScratchBuffers {
         return { lambda: { hist: new History<LambdaState>(this.#bytes), status, done: null, playing: false } }
       case 'tm':
         return { tm: { hist: new History<TmState>(this.#bytes), status, done: null, playing: false } }
-      case 'asm':
-        return { asm: { hist: new History<AsmState>(this.#bytes), status, done: null, playing: false } }
+      case 'rxm':
+        return { rxm: { hist: new History<RxmState>(this.#bytes), status, done: null, playing: false } }
     }
   }
 
@@ -936,8 +936,8 @@ export class ScratchBuffers {
       case 'tm':
         client.tmScratch(gen, src)
         break
-      case 'asm':
-        client.asmScratch(gen, src)
+      case 'rxm':
+        client.rxmScratch(gen, src)
         break
       default:
         unhandled(state.leg)
@@ -1024,7 +1024,7 @@ export class ScratchBuffers {
    * whose run 5d-iii design §4.4 keeps on screen under an edit that does not parse ("an edit that does not parse leaves
    * the frames region showing the last good run"), so its failures are edits on any worker. The leg read is
    * `legs[state.leg]`, the one leg `#spawn` gave the buffer's entry (Plan 7 part 5 spec amendment 27): `#spawn` gives
-   * a TM or asm buffer's entry no `lambda` leg at all, so reading `legs.lambda` would find no frame on every call for
+   * a TM or rxm buffer's entry no `lambda` leg at all, so reading `legs.lambda` would find no frame on every call for
    * one.
    *
    * **A PANE ON A COPY THAT HAS NOT BUILT STAYS ON IT**, reading `did not build`, the reason `replies.ts`'s

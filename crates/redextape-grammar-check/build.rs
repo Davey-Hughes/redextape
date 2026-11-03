@@ -36,5 +36,5 @@ fn main() {
     compile_grammar("tree-sitter-redextape");
     compile_grammar("tree-sitter-redextape-lambda");
     compile_grammar("tree-sitter-redextape-tm");
-    compile_grammar("tree-sitter-redextape-asm");
+    compile_grammar("tree-sitter-redextape-rxm");
 }

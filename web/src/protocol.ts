@@ -1,14 +1,14 @@
 import type { LinkIndexWire } from './link'
 import type {
-  AsmProgram,
-  AsmState,
-  AsmStatus,
-  AsmWindow,
   Decoded,
   Diagnostic,
   LambdaState,
   LambdaStatus,
   RunStatus,
+  RxmProgram,
+  RxmState,
+  RxmStatus,
+  RxmWindow,
   Span,
   TmProgram,
   TmScratchStatus,
@@ -44,18 +44,18 @@ export const FRAME_BYTES = 512
 export const TM_RADIUS = 40
 
 /**
- * How much of the asm machine one frame carries (Plan 7 part 5 spec §5.3): the first 64 locals and 16 arguments, the
+ * How much of the rxm machine one frame carries (Plan 7 part 5 spec §5.3): the first 64 locals and 16 arguments, the
  * top 8 call frames, and the newest 16 heap cells and 16 boxes — plus every cell or box a register the frame shows
- * points at, which `AsmState::window` adds so a back-reference always has its cell.
+ * points at, which `RxmState::window` adds so a back-reference always has its cell.
  *
  * **HERE, NOT IN THE CORE**: how much of the machine fits on screen is a fact about the view, and the core's view
  * model takes it as a parameter (`viewmodel.rs`'s module doc: core never picks a number).
  *
  * **EVERY CORPUS PROGRAM FITS WHOLE** (spec §2.5: at most 23 locals, 3 arguments, a call depth of 7 and 11 heap
  * cells), so the window only cuts a deep or a list-heavy run. The frame sizes these bounds produce are
- * `asmFrameBytes`'s to charge.
+ * `rxmFrameBytes`'s to charge.
  */
-export const ASM_WINDOW: AsmWindow = { locals: 64, args: 16, frames: 8, cells: 16, boxes: 16 }
+export const RXM_WINDOW: RxmWindow = { locals: 64, args: 16, frames: 8, cells: 16, boxes: 16 }
 
 /**
  * The ring's cap, PER LEG. ~3,200 λ frames at ~10 KB, or ~58,000 TM frames at ~550 B.
@@ -240,7 +240,7 @@ export const EXTEND_CELLS = 100_000
  */
 export const VALUE_CHUNK = 500_000
 
-export type Leg = 'lambda' | 'asm' | 'tm'
+export type Leg = 'lambda' | 'rxm' | 'tm'
 
 /**
  * Why recording stopped. FOUR OUTCOMES, NOT THREE, and conflating any two of them is the trap
@@ -251,7 +251,7 @@ export type Leg = 'lambda' | 'asm' | 'tm'
  *   * `depth-refused`— the depth guard. `raise_cap` REFUSES to clear it, so there is no continue.
  *   * `budget`       — `HISTORY_BYTES`. The run is still `Running` and continuing costs nothing.
  *
- * **AND THREE MORE FOR THE ASM LEG, ONE PER CAP A STEP CAP CANNOT HELP** (Plan 7 part 5 spec §8, amendment 10):
+ * **AND THREE MORE FOR THE RXM LEG, ONE PER CAP A STEP CAP CANNOT HELP** (Plan 7 part 5 spec §8, amendment 10):
  *
  *   * `stack-full`   — the call stack reached its frame cap.
  *   * `heap-full`    — the heap reached its cell cap, or the boxes did.
@@ -306,7 +306,7 @@ export function tmFrameBytes(f: TmState): number {
  * `RunStatus` variant degrades to a legible label instead of aborting the worker — and to `ended`, the
  * one end that offers no continue, so a variant nothing here knows cannot offer one that does nothing.
  *
- * **HERE AND NOT IN `session-worker.ts`**, where the app calls it, for `asmRecordEnd`'s reason below.
+ * **HERE AND NOT IN `session-worker.ts`**, where the app calls it, for `rxmRecordEnd`'s reason below.
  */
 export function endOf(run: RunStatus | null): RecordEnd {
   switch (run) {
@@ -320,23 +320,23 @@ export function endOf(run: RunStatus | null): RecordEnd {
 }
 
 /**
- * A finished asm cursor's status as a `RecordEnd`: `ended` for a halt or a fault, and a cap named.
+ * A finished rxm cursor's status as a `RecordEnd`: `ended` for a halt or a fault, and a cap named.
  *
  * **ONLY THE STEP CAP IS `capped`.** Raising the step cap resumes a run it stopped and does nothing for one the stack,
  * the heap or the saved frames stopped, so each of those is its own end with no continue (Plan 7 part 5 spec §8,
  * amendment 10). A fault is `Ended`, since the run is over, and its text is the leg's value.
  *
  * **EVERY CAP IS AN ARM, AND THERE IS NO `default`.** A cap this `switch` folded in by default would be called
- * `capped` and offered a continue that cannot resume it; with an arm per cap, a cap added to `AsmCap` is a type error
- * here (TS2366) until someone decides what it ends as. A `Capped` status naming no cap cannot occur — `AsmStatus`
+ * `capped` and offered a continue that cannot resume it; with an arm per cap, a cap added to `RxmCap` is a type error
+ * here (TS2366) until someone decides what it ends as. A `Capped` status naming no cap cannot occur — `RxmStatus`
  * names one exactly when the run is capped — and reads as the step cap.
  *
  * **HERE AND NOT IN `session-worker.ts`**, where the app calls it, as `forkable` is (its call site there says why):
  * the coverage gate cannot see the worker (that file's module doc: v8 coverage does not attach to a dedicated worker's
  * context), so a branch written there moves none of the gate's numbers. `Running` cannot occur, since this is asked
- * once `stepAsm` has answered `false`; it maps to `ended`, as `endOf` maps it, rather than throwing.
+ * once `stepRxm` has answered `false`; it maps to `ended`, as `endOf` maps it, rather than throwing.
  */
-export function asmRecordEnd(status: Pick<AsmStatus, 'run' | 'cap'>): RecordEnd {
+export function rxmRecordEnd(status: Pick<RxmStatus, 'run' | 'cap'>): RecordEnd {
   if (status.run !== 'Capped') return 'ended'
   switch (status.cap) {
     case 'Stack':
@@ -352,25 +352,25 @@ export function asmRecordEnd(status: Pick<AsmStatus, 'run' | 'cap'>): RecordEnd 
 }
 
 /**
- * What one word of an asm frame is charged: an `AsmWord` object, its decimal string and its tag.
+ * What one word of an rxm frame is charged: an `RxmWord` object, its decimal string and its tag.
  *
- * **MEASURED, AS `SPAN_BYTES` IS, AND ROUNDED UP.** `frame-cost.test.ts`'s `asm frame cost` case keeps every frame of
+ * **MEASURED, AS `SPAN_BYTES` IS, AND ROUNDED UP.** `frame-cost.test.ts`'s `rxm frame cost` case keeps every frame of
  * `upto(200)` — 2,814 frames, 247,091 words — and the same frames with the words dropped, and reads the difference in
  * retained heap after a full collection: 48.23 bytes a word, the same to four places across runs. The difference
  * charges the arrays that hold the words to the words too, which errs high. 52 leaves the margin `SPAN_BYTES`
  * leaves over its own figure, and that case fails if a word ever costs more than this charges, which is the direction
  * that would let the ring keep more than `HISTORY_BYTES`.
  */
-export const ASM_WORD_BYTES = 52
+export const RXM_WORD_BYTES = 52
 
 /**
- * An asm frame's size in bytes. **WORDS DOMINATE** — `rr`, the windowed locals and arguments, each shown frame's
+ * An rxm frame's size in bytes. **WORDS DOMINATE** — `rr`, the windowed locals and arguments, each shown frame's
  * saved locals, both halves of each cell and each box's content — and a written bit is charged a byte.
  */
-export function asmFrameBytes(f: AsmState): number {
+export function rxmFrameBytes(f: RxmState): number {
   let words = 1 + f.locals.length + f.args.length + 2 * f.cells.length + f.boxes.length
   for (const frame of f.frames) words += frame.saved.length
-  return FRAME_OVERHEAD_BYTES + words * ASM_WORD_BYTES + f.written.length
+  return FRAME_OVERHEAD_BYTES + words * RXM_WORD_BYTES + f.written.length
 }
 
 /**
@@ -451,7 +451,7 @@ export type RunRequest =
    *
    * λ ONLY — `tm-scratch`, BELOW, IS THE VARIANT FOR THE MACHINE HALF OF 5d-i §4.1's `TmScratch`. See
    * that variant's own doc for why it needs neither `step` nor `encoding` either. **THIS REQUEST STAYS λ
-   * ONLY**: a `ScratchBuffers` buffer picks among it, `tm-scratch` and `asm-scratch` per mint (`#spawn`'s
+   * ONLY**: a `ScratchBuffers` buffer picks among it, `tm-scratch` and `rxm-scratch` per mint (`#spawn`'s
    * branch on the leg) rather than this request growing a `leg` field of its own.
    *
    * **`step` IS WHICH FRAME THE PANE WAS SHOWING, AND THE WORKER REPLAYS TO IT** (5d-iii design §4.1).
@@ -476,10 +476,10 @@ export type RunRequest =
    */
   | { kind: 'tm-scratch'; gen: number; src: string }
   /**
-   * Build an asm copy from `.asm` TEXT and run it — Plan 7 part 5 spec §7. `tm-scratch`'s shape and for its reasons: no
+   * Build an rxm copy from `.rxm` TEXT and run it — Plan 7 part 5 spec §7. `tm-scratch`'s shape and for its reasons: no
    * `step`, since the text is the program, and no `encoding`, since a copy decodes by its own `result` header.
    */
-  | { kind: 'asm-scratch'; gen: number; src: string }
+  | { kind: 'rxm-scratch'; gen: number; src: string }
   /**
    * Record further. For a `capped` leg the worker raises the cursor cap first; for a `budget` leg it
    * simply allows another `HISTORY_BYTES` and resumes.
@@ -503,8 +503,8 @@ export type LambdaLeg = {
   declinedSpan: Span | null
 }
 export type TmLeg = { status: TmStatus; value: Decoded | null }
-/** The asm leg's answer after recording: its status and its value — `null` for an absent leg, as TM's. */
-export type AsmLeg = { status: AsmStatus; value: Decoded | null }
+/** The rxm leg's answer after recording: its status and its value — `null` for an absent leg, as TM's. */
+export type RxmLeg = { status: RxmStatus; value: Decoded | null }
 
 export type RunReply =
   /**
@@ -577,20 +577,20 @@ export type RunReply =
    */
   | { kind: 'tm-value'; gen: number; run: ValueRun; value: Decoded }
   /**
-   * An asm copy was built: its status, its listing and its value — `tm-scratch-compiled`'s counterpart.
+   * An rxm copy was built: its status, its listing and its value — `tm-scratch-compiled`'s counterpart.
    *
-   * **THE VALUE COMES WITH THE BUILD**, where a TM copy's streams in on `tm-value`: `asmScratch` runs the program to
-   * its end before it answers, as `compile` does (spec amendment 26). `asm` is the same `AsmStatus` `compiled`
+   * **THE VALUE COMES WITH THE BUILD**, where a TM copy's streams in on `tm-value`: `rxmScratch` runs the program to
+   * its end before it answers, as `compile` does (spec amendment 26). `rxm` is the same `RxmStatus` `compiled`
    * carries, since every field of it is true of a copy. No `text` echo, for `tm-scratch-compiled`'s reason: the main
    * thread sent the text.
    */
-  | { kind: 'asm-scratch-compiled'; gen: number; asm: AsmStatus; asmProgram: AsmProgram; value: Decoded }
+  | { kind: 'rxm-scratch-compiled'; gen: number; rxm: RxmStatus; rxmProgram: RxmProgram; value: Decoded }
   /**
-   * An asm copy's value after `[continue]` carried its cursor further — where a compiled session's arrives in
+   * An rxm copy's value after `[continue]` carried its cursor further — where a compiled session's arrives in
    * `result`, which a copy never gets. Only a step cap can be continued, so this changes a value only for a copy
    * whose build that cap stopped.
    */
-  | { kind: 'asm-value'; gen: number; value: Decoded }
+  | { kind: 'rxm-value'; gen: number; value: Decoded }
   /**
    * A session exists. Sent BEFORE any recording, so the panes can mount and show their declines
    * while the legs are still being stepped.
@@ -602,13 +602,13 @@ export type RunReply =
       kind: 'compiled'
       gen: number
       lambda: LambdaStatus
-      /** The asm leg: absent only when the program does not lower, including where TM declines it (spec §5.2). */
-      asm: AsmStatus
+      /** The rxm leg: absent only when the program does not lower, including where TM declines it (spec §5.2). */
+      rxm: RxmStatus
       tm: TmStatus
       declinedSpan: Span | null
       tmProgram: TmProgram | null
-      /** The asm listing and its labels, sent once for `tmProgram`'s reason; `null` when there is no asm leg. */
-      asmProgram: AsmProgram | null
+      /** The rxm listing and its labels, sent once for `tmProgram`'s reason; `null` when there is no rxm leg. */
+      rxmProgram: RxmProgram | null
       tapeNames: string[]
       /**
        * The link index for this compile.
@@ -658,23 +658,23 @@ export type RunReply =
        */
       tmResultDecodable: boolean
       /**
-       * This session's asm program as `.asm` text, for *edit a copy* — the role `tmText` plays for the TM view — or
-       * `null` when there is no asm leg or the text is longer than `session.rs`'s `MAX_SCRATCH_ASM_BYTES`, which no
+       * This session's rxm program as `.rxm` text, for *edit a copy* — the role `tmText` plays for the TM view — or
+       * `null` when there is no rxm leg or the text is longer than `session.rs`'s `MAX_SCRATCH_RXM_BYTES`, which no
        * copy could build. As with `tmText`, `null` is the only fact behind a refusal: the view words its reason from
        * the listing's instruction count, and offers *edit a copy* disabled where there is a program and no text.
        *
-       * **NO EQUIVALENT OF `tmResultDecodable` FOR ASM.** A function-valued program's asm text is still
-       * `Some`, headerless (`AsmHeader::for_type` answers `None` and `asm_text` falls back to
-       * `print_asm`) — the asm leg's header is optional, unlike TM's, so it has no analogous refusal to
+       * **NO EQUIVALENT OF `tmResultDecodable` FOR RXM.** A function-valued program's rxm text is still
+       * `Some`, headerless (`RxmHeader::for_type` answers `None` and `rxm_text` falls back to
+       * `print_rxm`) — the rxm leg's header is optional, unlike TM's, so it has no analogous refusal to
        * word.
        */
-      asmText: string | null
+      rxmText: string | null
     }
   | { kind: 'lambda-frames'; gen: number; frames: LambdaState[]; done: RecordEnd | null }
   | { kind: 'tm-frames'; gen: number; frames: TmState[]; done: RecordEnd | null }
-  | { kind: 'asm-frames'; gen: number; frames: AsmState[]; done: RecordEnd | null }
+  | { kind: 'rxm-frames'; gen: number; frames: RxmState[]; done: RecordEnd | null }
   /** Every leg interrogated after recording finished — what `results.ts` renders. */
-  | { kind: 'result'; gen: number; lambda: LambdaLeg; asm: AsmLeg; tm: TmLeg }
+  | { kind: 'result'; gen: number; lambda: LambdaLeg; rxm: RxmLeg; tm: TmLeg }
   /** The answer to `lambda-tree`; `tree.step` is the step it answers, clamped to the run. */
   | { kind: 'lambda-tree'; gen: number; tree: LambdaTreeWire }
   /**
