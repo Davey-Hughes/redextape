@@ -23,13 +23,13 @@ redextape-core = { path = "../redextape-core", features = ["serde"] }
 # through `js_sys::Reflect` in `lib.rs`, which would move branching into the shell — the one thing
 # §5.2 says the shell must not have.
 serde = { version = "1", features = ["derive"] }
-wasm-bindgen = "0.2.126"
+wasm-bindgen = "0.2.130"
 serde-wasm-bindgen = "0.6.5"
-js-sys = "0.3.103"
+js-sys = "0.3.107"
 console_error_panic_hook = "0.1.7"
 # Optional and default-off, exactly as in `redextape-core` — see that manifest for why the
 # TypeScript is generated rather than hand-written. `wasm-pack` never enables this feature.
-ts-rs = { version = "10", optional = true }
+ts-rs = { version = "12", optional = true }
 
 [features]
 # Forwards to core's so `ts` is ONE switch: without it, a run that enabled the feature only here would
@@ -62,7 +62,7 @@ probe-no-tm-scratch-ceiling = []
 probe-rxm-copy = []
 
 [dev-dependencies]
-wasm-bindgen-test = "0.3.76"
+wasm-bindgen-test = "0.3.80"
 
 # `redextape-test-support` HOLDS THE DERIVE-SITE SCANNER `tests/ts_bindings.rs` RUNS, and it is behind
 # a target gate for the same reason `redextape-core`'s `mimalloc` is: `wasm-pack test` builds this

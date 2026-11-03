@@ -228,7 +228,7 @@ pub struct TmStatus {
     /// the cursor and never reduces. There is no honest number to put there.
     ///
     /// **`ts(type = "number | null")`, NOT `ts(type = "number")`.** `ts-rs` maps `u64` to `bigint`
-    /// unconditionally, which is not what the wire carries: `serde_wasm_bindgen` puts it across as a JS number,
+    /// by default, which is not what the wire carries: `serde_wasm_bindgen` puts it across as a JS number,
     /// which `all_three_legs_agree_across_the_boundary` in `crates/redextape-wasm/tests/browser.rs` measures
     /// directly against a real browser. So an override is needed. But `ts(type = ...)` substitutes the WHOLE
     /// field type, `Option` and all, so `ts(type = "number")` would generate `total_steps: number` and silently

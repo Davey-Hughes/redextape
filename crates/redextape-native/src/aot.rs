@@ -109,12 +109,12 @@ pub fn emit_object(prog: &Program, caps: Caps, ty: &Ty, opt: OptLevel) -> Result
     let subs = crate::analysis::partition(prog).map_err(AotError::Lower)?;
 
     // Host ISA. `is_pic` (position-independent) is friendliest to the system linker across macOS and
-    // Linux; the JIT sets it the other way (`false`, which `JITModule` requires), so each driver states
-    // its own. `opt_level` goes through the SAME mapping the JIT uses (`codegen::cranelift_opt_level`),
-    // so an object and a JIT run at the same `OptLevel` share both the codegen (`codegen.rs`, driven
-    // identically here and in `jit.rs`) and the optimization settings; only `is_pic` differs, so the
-    // emitted code is equivalent but not byte-for-byte identical (PIC changes how globals and calls
-    // are addressed).
+    // Linux; the JIT sets it the other way (`false`, the value `JITModule` accepts on every host; see
+    // `jit::host_isa`), so each driver states its own. `opt_level` goes through the SAME mapping the
+    // JIT uses (`codegen::cranelift_opt_level`), so an object and a JIT run at the same `OptLevel`
+    // share both the codegen (`codegen.rs`, driven identically here and in `jit.rs`) and the
+    // optimization settings; only `is_pic` differs, so the emitted code is equivalent but not
+    // byte-for-byte identical (PIC changes how globals and calls are addressed).
     let mut flags = settings::builder();
     flags.set("is_pic", "true").map_err(|e| AotError::Object(e.to_string()))?;
     flags.set("opt_level", codegen::cranelift_opt_level(opt)).map_err(|e| AotError::Object(e.to_string()))?;
@@ -189,7 +189,7 @@ pub fn emit_object(prog: &Program, caps: Caps, ty: &Ty, opt: OptLevel) -> Result
         let main_addr = b.ins().func_addr(ptr, inner_main);
         let config_gv = module.declare_data_in_func(config_id, b.func);
         // `declare_data_in_func` yields a `Symbol`-kind global value; `symbol_value` materialises its
-        // address (`InstBuilder` has no `global_value` instruction in Cranelift 0.134).
+        // address (`InstBuilder` has no `global_value` instruction).
         let config_addr = b.ins().symbol_value(ptr, config_gv);
         let len_val = b.ins().iconst(types::I64, config_len);
         let run_ref = module.declare_func_in_func(rt_run_id, b.func);

@@ -147,7 +147,7 @@ impl Grammar {
         let mut by_span: std::collections::BTreeMap<(usize, usize), TokenClass> = std::collections::BTreeMap::new();
         let mut it = cursor.matches(&q, tree.root_node(), src.as_bytes());
         while let Some(m) = it.next() {
-            for c in m.captures {
+            for c in m.captures() {
                 let name = names[c.index as usize];
                 let class = self
                     .class_for(name)

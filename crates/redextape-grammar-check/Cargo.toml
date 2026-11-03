@@ -10,7 +10,7 @@ publish = false
 workspace = true
 
 [dependencies]
-tree-sitter = "0.26"
+tree-sitter = "0.27"
 # Gives `language()` a safe, ecosystem-sanctioned constructor for the raw `tree_sitter_redextape`
 # symbol (`LanguageFn::from_raw`, the same idiom every generated `bindings/rust/lib.rs` uses) instead
 # of `std::mem::transmute`. `tree-sitter` already depends on this crate transitively; naming it here

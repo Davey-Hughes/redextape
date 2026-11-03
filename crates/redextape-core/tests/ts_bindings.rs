@@ -31,35 +31,40 @@ use ts_rs::TS;
 
 /// Every type in this crate carrying `#[ts(export)]`, paired with the file it generates.
 fn generated() -> Vec<(&'static str, String)> {
+    // ts-rs's defaults, not `Config::from_env`, so a `TS_RS_LARGE_INT` in the environment cannot
+    // make the bigint gate pass vacuously. The derived export tests call `from_env`.
+    // `scripts/build-web-bindings.sh` and `scripts/check-all.sh` start cargo without each variable
+    // ts-rs 12.0.1 reads but `TS_RS_EXPORT_DIR`; a cargo `[env]` table can still set any of them.
+    let cfg = ts_rs::Config::new();
     vec![
-        ("Cut", Cut::export_to_string().unwrap()),
-        ("Diagnostic", Diagnostic::export_to_string().unwrap()),
-        ("LambdaState", LambdaState::export_to_string().unwrap()),
-        ("Move", Move::export_to_string().unwrap()),
-        ("Owner", Owner::export_to_string().unwrap()),
-        ("RuleView", RuleView::export_to_string().unwrap()),
-        ("RxmBox", RxmBox::export_to_string().unwrap()),
-        ("RxmCallFrame", RxmCallFrame::export_to_string().unwrap()),
-        ("RxmCap", RxmCap::export_to_string().unwrap()),
-        ("RxmCell", RxmCell::export_to_string().unwrap()),
-        ("RxmProgram", RxmProgram::export_to_string().unwrap()),
-        ("RxmState", RxmState::export_to_string().unwrap()),
-        ("RxmWindow", RxmWindow::export_to_string().unwrap()),
-        ("RxmWord", RxmWord::export_to_string().unwrap()),
-        ("Severity", Severity::export_to_string().unwrap()),
-        ("Span", Span::export_to_string().unwrap()),
-        ("StateView", StateView::export_to_string().unwrap()),
-        ("TmProgram", TmProgram::export_to_string().unwrap()),
-        ("TmState", TmState::export_to_string().unwrap()),
-        ("TokenClass", TokenClass::export_to_string().unwrap()),
-        ("WordTag", WordTag::export_to_string().unwrap()),
+        ("Cut", Cut::export_to_string(&cfg).unwrap()),
+        ("Diagnostic", Diagnostic::export_to_string(&cfg).unwrap()),
+        ("LambdaState", LambdaState::export_to_string(&cfg).unwrap()),
+        ("Move", Move::export_to_string(&cfg).unwrap()),
+        ("Owner", Owner::export_to_string(&cfg).unwrap()),
+        ("RuleView", RuleView::export_to_string(&cfg).unwrap()),
+        ("RxmBox", RxmBox::export_to_string(&cfg).unwrap()),
+        ("RxmCallFrame", RxmCallFrame::export_to_string(&cfg).unwrap()),
+        ("RxmCap", RxmCap::export_to_string(&cfg).unwrap()),
+        ("RxmCell", RxmCell::export_to_string(&cfg).unwrap()),
+        ("RxmProgram", RxmProgram::export_to_string(&cfg).unwrap()),
+        ("RxmState", RxmState::export_to_string(&cfg).unwrap()),
+        ("RxmWindow", RxmWindow::export_to_string(&cfg).unwrap()),
+        ("RxmWord", RxmWord::export_to_string(&cfg).unwrap()),
+        ("Severity", Severity::export_to_string(&cfg).unwrap()),
+        ("Span", Span::export_to_string(&cfg).unwrap()),
+        ("StateView", StateView::export_to_string(&cfg).unwrap()),
+        ("TmProgram", TmProgram::export_to_string(&cfg).unwrap()),
+        ("TmState", TmState::export_to_string(&cfg).unwrap()),
+        ("TokenClass", TokenClass::export_to_string(&cfg).unwrap()),
+        ("WordTag", WordTag::export_to_string(&cfg).unwrap()),
     ]
 }
 
 /// No generated type may carry `bigint`.
 ///
 /// THE DEFAULT IS WRONG SILENTLY AND ONLY THE BROWSER TIER COULD OTHERWISE CATCH IT. `ts-rs` maps
-/// `u64` to `bigint` unconditionally; `serde_wasm_bindgen` puts a `u64` on the wire as a JS number,
+/// `u64` to `bigint` by default; `serde_wasm_bindgen` puts a `u64` on the wire as a JS number,
 /// which `redextape-wasm`'s browser tests measure directly. A field of that class added without the
 /// `#[ts(type = "number")]` override generates TypeScript that typechecks, ships, and is wrong at
 /// runtime. This fails at the commit instead.
@@ -123,7 +128,7 @@ fn the_gate_covers_every_exported_type() {
 ///
 /// THE RULE AND ITS REASONING LIVE IN `redextape_test_support::ts_derive_scan` — read
 /// `assert_overrides_match_field_nullability`'s own doc for why it parses with `syn`, the rule over the
-/// three keys that say anything about null, and what it names as outside its reach rather than closed.
+/// keys that say anything about null, and what it names as outside its reach rather than closed.
 /// One implementation with two callers is deliberate: a second copy drifts the moment one is widened and
 /// the other is not.
 #[test]

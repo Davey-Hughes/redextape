@@ -4,14 +4,14 @@
 //!
 //! # What this gate does and does not protect (read before trusting it)
 //!
-//! It catches an **LLVM** pass that has stopped firing, and **not a Cranelift one**. That is
-//! arithmetic, not a bug: an optimizer that stops firing makes a level's measured size revert to its
-//! `O0` size, and the gate compares that against the OPTIMIZED baseline row. Off this repo's own
-//! `baselines/aarch64-apple-darwin.txt` (`O0` size vs the `O3` row it would be measured against),
-//! every LLVM row clears the ±10% band (`list30000` by the thinnest margin); every Cranelift row sits
-//! an order of magnitude inside it. Cranelift's ISA-level optimizer changes *which* instructions are
-//! selected far more than *how many* there are, so its object sizes barely move. Mapping all six
-//! levels onto `"none"` in `codegen::cranelift_opt_level` leaves THIS TEST GREEN.
+//! It can catch an **LLVM** pass that has stopped firing, and **not a Cranelift one**. That is
+//! arithmetic, not a bug: an optimizer that stops firing makes a level's measured size revert to
+//! its `O0` size, and the gate compares that against the OPTIMIZED baseline row, so it sees a dead
+//! pass only in a row whose `O0` size lies outside the band around that row's optimized size. A
+//! row's margin is read off its baseline file, beside the `O0` row of its program and backend.
+//! Cranelift's ISA-level optimizer changes *which* instructions are selected far more than *how
+//! many* there are, so its object sizes barely move, and the gate cannot see it stop.
+//! Mapping all six levels onto `"none"` in `codegen::cranelift_opt_level` leaves THIS TEST GREEN.
 //!
 //! **Do not tighten `TOLERANCE` to chase the Cranelift deltas.** A band narrow enough to catch 1%
 //! would fire on ordinary codegen churn — a gate that cries wolf gets deleted. Cranelift's

@@ -27,7 +27,7 @@ fn ranges_by_capture(src: &str, name: &str) -> Vec<(usize, usize)> {
     let mut out = Vec::new();
     let mut it = cursor.matches(&q, tree.root_node(), src.as_bytes());
     while let Some(m) = it.next() {
-        for c in m.captures {
+        for c in m.captures() {
             if names[c.index as usize] == name {
                 out.push((c.node.start_byte(), c.node.end_byte()));
             }

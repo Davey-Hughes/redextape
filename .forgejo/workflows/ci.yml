@@ -65,7 +65,7 @@ concurrency:
 # pays the traffic. Same setting, opposite answer.
 #
 # Job-level `env:` blocks (see `rust-llvm`) MERGE with this rather than replacing it — same-key wins
-# at the more specific level, and `LLVM_SYS_221_PREFIX` shares no key with this.
+# at the more specific level, and `LLVM_SYS_231_PREFIX` shares no key with this.
 env:
   CARGO_INCREMENTAL: "0"
 
@@ -546,14 +546,14 @@ jobs:
   # default-feature signal from `rust`. Deliberately NOT continue-on-error: a job permitted to fail
   # is not coverage.
   #
-  # Caches /var/cache/apt/archives (the downloaded .deb payloads), NOT /usr/lib/llvm-22 itself, and
-  # the install step always runs. `llvm-config` dynamically NEEDs (`objdump -p`) libz3.so.4 and
-  # libzstd.so.1, which come from the separate libz3-4/libzstd1 packages that dpkg installs to
-  # /usr/lib/x86_64-linux-gnu/, outside /usr/lib/llvm-22. A directory-only cache that skips the whole
-  # install step on a hit would restore an llvm-config that can't even execute (missing shared libs)
-  # on every run after the first, on a fresh per-job container that never retains apt state. Caching
-  # the apt archive instead keeps `apt-get install` unconditional and idempotent (so the runtime deps
-  # are always registered) while still skipping the network download once the archive cache is warm.
+  # Caches /var/cache/apt/archives (the downloaded .debs), NOT /usr/lib/llvm-23 itself, and the
+  # install step always runs. Past the C and C++ runtimes, `llvm-config` dynamically NEEDs
+  # (`objdump -p`) libz3.so.4, libz.so.1 and libzstd.so.1, all in /usr/lib/x86_64-linux-gnu/,
+  # outside /usr/lib/llvm-23. The image has the last two; libz3-4 comes with LLVM. A directory-only
+  # cache that skips the install step on a hit would restore an llvm-config that cannot execute (a
+  # library it NEEDs is missing) on every run after the first, as each job's fresh container keeps
+  # no apt state. Caching the apt archive keeps `apt-get install` unconditional and idempotent (so
+  # the runtime deps are always registered) and still skips the download once the cache is warm.
   rust-llvm:
     needs: detect
     # Non-draft PRs, pushes, the schedule and dispatches. A DRAFT PR gets `rust-scoped` instead — see that
@@ -565,7 +565,7 @@ jobs:
       && (github.event_name != 'pull_request' || !github.event.pull_request.draft)
     runs-on: docker
     env:
-      LLVM_SYS_221_PREFIX: /usr/lib/llvm-22
+      LLVM_SYS_231_PREFIX: /usr/lib/llvm-23
     steps:
       - uses: https://code.forgejo.org/actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
       - name: Install Rust (respects rust-toolchain.toml)
@@ -579,7 +579,7 @@ jobs:
       # has to happen in this job.
       - name: Install cargo-nextest (pinned + checksummed)
         run: ./scripts/install-nextest-ci.sh
-      - name: Cache the LLVM 22 apt archive (avoids re-downloading ~300MB of .debs)
+      - name: Cache the LLVM 23 apt archive (avoids re-downloading ~300MB of .debs)
         uses: https://code.forgejo.org/actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
         with:
           path: /var/cache/apt/archives
@@ -588,9 +588,9 @@ jobs:
           # component the runner can change underneath us: if its value moves, the key moves with it
           # and the previous cache becomes unreachable. `restore-keys` is the prefix fallback that
           # softens exactly that.
-          key: apt-llvm-22
-          restore-keys: apt-llvm-22
-      - name: Install LLVM 22 (unconditional — apt skips re-downloading cached .debs, but always installs)
+          key: apt-llvm-23
+          restore-keys: apt-llvm-23
+      - name: Install LLVM 23 (unconditional — apt skips re-downloading cached .debs, but always installs)
         run: |
           # WITHOUT THIS THE CACHE STEP ABOVE SAVES AN EMPTY DIRECTORY. Debian/Ubuntu container
           # images ship /etc/apt/apt.conf.d/docker-clean, whose DPkg::Post-Invoke deletes every .deb
@@ -605,19 +605,21 @@ jobs:
           apt-get update && apt-get install -y --no-install-recommends lsb-release wget software-properties-common gnupg
           wget -qO /tmp/llvm.sh https://apt.llvm.org/llvm.sh
           chmod +x /tmp/llvm.sh
-          /tmp/llvm.sh 22
-          # `llvm.sh` does not install Polly, but LLVM 22 is BUILT with it — so `llvm-config
-          # --libnames`, which llvm-sys's build script reads, lists Polly and llvm-sys emits
+          /tmp/llvm.sh 23
+          # `llvm.sh` does not install Polly, but LLVM 23 is BUILT with it — so `llvm-config --libnames
+          # --link-static`, which llvm-sys's build script reads, lists Polly and llvm-sys emits
           # `cargo:rustc-link-lib=static=Polly`. Without the separate dev package the link fails with
           # "could not find native static library `Polly`". This does not reproduce on macOS, where
           # Homebrew's keg and its own llvm-config agree.
-          apt-get install -y --no-install-recommends libpolly-22-dev
-          "$LLVM_SYS_221_PREFIX/bin/llvm-config" --version   # fail loudly on a version mismatch
-          # Prove the libraries llvm-config advertises are actually present, rather than discovering
-          # it during a link several minutes later.
-          for lib in $("$LLVM_SYS_221_PREFIX/bin/llvm-config" --libnames); do
-            find "$LLVM_SYS_221_PREFIX/lib" /usr/lib -name "$lib" -print -quit | grep -q . \
-              || { echo "llvm-config advertises $lib but it is not installed"; exit 1; }
+          apt-get install -y --no-install-recommends libpolly-23-dev
+          v=$("$LLVM_SYS_231_PREFIX/bin/llvm-config" --version); echo "llvm-config $v"
+          case $v in 23.1.*) ;; *) echo "llvm-sys 231 binds LLVM 23.1, not $v"; exit 1 ;; esac
+          # Fail here, not minutes into a link, if a static archive llvm-sys links is missing (plain
+          # `--libfiles` names only libLLVM). A missing component archive fails this assignment,
+          # where a loop over its output never runs; the loop checks the rest (Polly's archives).
+          libs=$("$LLVM_SYS_231_PREFIX/bin/llvm-config" --libfiles --link-static)
+          for f in $libs; do
+            [ -e "$f" ] || { echo "llvm-config advertises $f but it is not installed"; exit 1; }
           done
       - uses: https://code.forgejo.org/actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
         with:
@@ -697,7 +699,7 @@ jobs:
       # both install it because their tiers do have `test` rows.
       - name: Install wasm-pack (the browser leg drives the boundary through it)
         run: |
-          curl -fsSL https://github.com/rustwasm/wasm-pack/releases/download/v0.15.0/wasm-pack-v0.15.0-x86_64-unknown-linux-musl.tar.gz \
+          curl -fsSL https://github.com/rustwasm/wasm-pack/releases/download/v0.15.1/wasm-pack-v0.15.1-x86_64-unknown-linux-musl.tar.gz \
             | tar xzf - --strip-components=1 -C /usr/local/bin --wildcards '*/wasm-pack'
           wasm-pack --version
       - name: Cache the Chrome apt archive (avoids re-downloading the .deb every run)
@@ -869,7 +871,7 @@ jobs:
           echo "$HOME/.cargo/bin" >> "$GITHUB_PATH"
           rustup show
           rustup target add wasm32-unknown-unknown
-          curl -fsSL https://github.com/rustwasm/wasm-pack/releases/download/v0.15.0/wasm-pack-v0.15.0-x86_64-unknown-linux-musl.tar.gz \
+          curl -fsSL https://github.com/rustwasm/wasm-pack/releases/download/v0.15.1/wasm-pack-v0.15.1-x86_64-unknown-linux-musl.tar.gz \
             | tar xzf - --strip-components=1 -C /usr/local/bin --wildcards '*/wasm-pack'
       - name: Install pnpm
         run: npm install -g pnpm@11.20.0

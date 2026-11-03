@@ -151,7 +151,7 @@ fn unsupported(feature: &str) -> NativeRun {
 /// code can name it in any build configuration.
 ///
 /// The naming follows LLVM, which is the backend that can express every variant distinctly: `O0`..`O3`
-/// are its speed-oriented ladder, and `Os`/`Oz` are its two SIZE-oriented pipelines, which are not
+/// are its speed-oriented ladder, and `Os`/`Oz` are its two SIZE-oriented levels, which are not
 /// simply points on that ladder — they trade throughput for code size. They are opt-in: `O3` remains
 /// the default. See `llvm::pass_pipeline` / `llvm::opt_level` / `llvm::size_attributes` for how each
 /// variant reaches LLVM, and `codegen::cranelift_opt_level` for how the six collapse onto Cranelift's
@@ -168,12 +168,12 @@ pub enum OptLevel {
     /// `-O3`: the most aggressive speed-oriented pipeline (more inlining and unrolling than `-O2`).
     #[default]
     O3,
-    /// `-Os`: optimize for SIZE while keeping most of `-O2`'s speed work — the pipeline backs off
+    /// `-Os`: optimize for SIZE while keeping most of `-O2`'s speed work — the passes back off
     /// the transforms that trade code size for throughput (inlining thresholds, loop unrolling,
-    /// vectorization). Carried by the `default<Os>` pipeline plus the `optsize` function attribute.
+    /// vectorization). Carried by the `default<O2>` pipeline plus the `optsize` function attribute.
     Os,
     /// `-Oz`: aggressively MINIMIZE size, accepting a speed cost `Os` would not. Carried by the
-    /// `default<Oz>` pipeline plus the `minsize` AND `optsize` function attributes (matching what
+    /// `default<O2>` pipeline plus the `minsize` AND `optsize` function attributes (matching what
     /// `clang -Oz` emits).
     Oz,
 }

@@ -36,22 +36,24 @@ use ts_rs::TS;
 /// in the other one is invisible to it from here. That is the correct division: a core type added
 /// without an entry in core's `generated()` fails core's gate, not this one.
 fn generated() -> Vec<(&'static str, String)> {
+    // ts-rs's defaults, not `from_env`, for the reason core's `ts_bindings.rs` gives.
+    let cfg = ts_rs::Config::new();
     vec![
-        ("Decoded", Decoded::export_to_string().unwrap()),
-        ("LambdaStatus", LambdaStatus::export_to_string().unwrap()),
-        ("ReductionStatus", ReductionStatus::export_to_string().unwrap()),
-        ("RunStatus", RunStatus::export_to_string().unwrap()),
-        ("RxmStatus", RxmStatus::export_to_string().unwrap()),
-        ("TmScratchStatus", TmScratchStatus::export_to_string().unwrap()),
-        ("TmStatus", TmStatus::export_to_string().unwrap()),
-        ("ValueRun", ValueRun::export_to_string().unwrap()),
+        ("Decoded", Decoded::export_to_string(&cfg).unwrap()),
+        ("LambdaStatus", LambdaStatus::export_to_string(&cfg).unwrap()),
+        ("ReductionStatus", ReductionStatus::export_to_string(&cfg).unwrap()),
+        ("RunStatus", RunStatus::export_to_string(&cfg).unwrap()),
+        ("RxmStatus", RxmStatus::export_to_string(&cfg).unwrap()),
+        ("TmScratchStatus", TmScratchStatus::export_to_string(&cfg).unwrap()),
+        ("TmStatus", TmStatus::export_to_string(&cfg).unwrap()),
+        ("ValueRun", ValueRun::export_to_string(&cfg).unwrap()),
     ]
 }
 
 /// No generated type may carry `bigint`.
 ///
 /// THE DEFAULT IS WRONG SILENTLY AND ONLY THE BROWSER TIER COULD OTHERWISE CATCH IT. `ts-rs` maps
-/// `u64` to `bigint` unconditionally; `serde_wasm_bindgen` puts a `u64` on the wire as a JS number,
+/// `u64` to `bigint` by default; `serde_wasm_bindgen` puts a `u64` on the wire as a JS number,
 /// which `browser.rs` measures directly in this very crate. A field of that class added without an
 /// override generates TypeScript that typechecks, ships, and is wrong at runtime. This fails at the
 /// commit instead.
@@ -98,7 +100,7 @@ fn the_gate_covers_every_exported_type() {
 ///
 /// THE RULE AND ITS REASONING LIVE IN `redextape_test_support::ts_derive_scan` — read
 /// `assert_overrides_match_field_nullability`'s own doc for why it parses with `syn`, the rule over
-/// the three keys that say anything about null, and what it names as outside its reach rather than
+/// the keys that say anything about null, and what it names as outside its reach rather than
 /// closed. One implementation with two callers is deliberate: a second copy drifts the moment one is
 /// widened and the other is not.
 #[test]

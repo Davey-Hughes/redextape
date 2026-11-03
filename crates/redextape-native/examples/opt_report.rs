@@ -1,5 +1,5 @@
 //! `cargo run --release --example opt_report -p redextape-native` (add `--features llvm`, with
-//! `LLVM_SYS_221_PREFIX=/opt/homebrew/opt/llvm` set, to include the LLVM backend too). Run
+//! `LLVM_SYS_231_PREFIX=/opt/homebrew/opt/llvm` set, to include the LLVM backend too). Run
 //! `--release` — a debug build of a compiler dominates every number here with unoptimized rustc
 //! output.
 //!
@@ -63,7 +63,7 @@ fn main() {
         let have = available.iter().map(|b| b.name()).collect::<Vec<_>>().join(", ");
         eprintln!("error: --write-baseline needs BOTH backends; this build has only: {have}");
         eprintln!(
-            "       rerun with: LLVM_SYS_221_PREFIX=<llvm-22-prefix> cargo run --release --example opt_report -p redextape-native --features llvm -- --write-baseline"
+            "       rerun with: LLVM_SYS_231_PREFIX=<llvm-23-prefix> cargo run --release --example opt_report -p redextape-native --features llvm -- --write-baseline"
         );
         std::process::exit(2);
     }

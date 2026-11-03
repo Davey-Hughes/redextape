@@ -95,7 +95,7 @@ fn ir_err(e: impl std::fmt::Display) -> IrError {
 ///
 /// `Os`/`Oz` both map to `Default` (`-O2`) DELIBERATELY, not by oversight: inkwell's codegen
 /// `OptimizationLevel` is LLVM's four-point `CodeGenOptLevel` enum, which has no size variant at all
-/// (in LLVM proper, `-Os`/`-Oz` are a *pipeline* plus per-function attributes, and clang drives their
+/// (in LLVM proper, `-Os`/`-Oz` are `-O2`'s pipeline plus per-function attributes, and clang drives their
 /// codegen at the `-O2`-equivalent level — `CodeGenOpt::Default` — for exactly this reason). The size
 /// preference reaches codegen through the `optsize`/`minsize` function attributes instead; see
 /// `size_attributes`.
@@ -111,8 +111,8 @@ fn opt_level(opt: OptLevel) -> OptimizationLevel {
 /// The new-pass-manager pipeline string for `opt`, or `None` at `O0` (where the pipeline is skipped
 /// entirely — `default<O0>` is not a no-op, it still runs the always-inliner and the coroutine
 /// passes, and `O0` is meant to be the *unoptimized* leg the differential compares against).
-/// `default<O_>` is LLVM's stable textual spelling of the same pipeline `clang -O_` builds — size
-/// levels included: `default<Os>`/`default<Oz>` are what `clang -Os`/`-Oz` construct.
+/// `default<O_>` is LLVM's stable textual spelling of the same pipeline `clang -O_` builds. The size
+/// levels run `default<O2>`, as `clang -Os`/`-Oz` do, and differ from `O2` only by `size_attributes`.
 ///
 /// Deliberately NOT here: the `lto-pre-link<O_>`/`lto<O_>` pipelines. This backend builds a single
 /// module and JITs it in-process, so there is no second translation unit for LTO to link against.
@@ -120,21 +120,19 @@ fn pass_pipeline(opt: OptLevel) -> Option<&'static str> {
     match opt {
         OptLevel::O0 => None,
         OptLevel::O1 => Some("default<O1>"),
-        OptLevel::O2 => Some("default<O2>"),
+        OptLevel::O2 | OptLevel::Os | OptLevel::Oz => Some("default<O2>"),
         OptLevel::O3 => Some("default<O3>"),
-        OptLevel::Os => Some("default<Os>"),
-        OptLevel::Oz => Some("default<Oz>"),
     }
 }
 
 /// The function attributes that carry `opt`'s SIZE preference, by LLVM attribute name.
 ///
-/// The pipeline string is only half of `-Os`/`-Oz`. The other half is per-function: the inliner's
+/// They are the whole of `-Os`/`-Oz`, since the size levels run `O2`'s pipeline: the inliner's
 /// threshold, the loop unroller, the vectorizer and the backend all read `optsize`/`minsize` off the
-/// individual function rather than off the pipeline, so a `default<Oz>` run over functions carrying
-/// neither attribute gets a fraction of the intended effect.
+/// individual function rather than off the pipeline, so a size level over functions carrying
+/// neither attribute is `O2`.
 ///
-/// The mapping is exactly what clang emits: on the pinned LLVM 22.1, `clang -Os -S -emit-llvm` puts
+/// The mapping is exactly what clang emits: on the pinned LLVM 23.1, `clang -Os -S -emit-llvm` puts
 /// `optsize` in the function's attribute group, `clang -Oz` puts `minsize` AND `optsize`, and
 /// `-O0`..`-O3` put neither.
 fn size_attributes(opt: OptLevel) -> &'static [&'static str] {
@@ -187,7 +185,7 @@ fn apply_size_attributes<'ctx>(ctx: &'ctx Context, module: &Module<'ctx>, opt: O
 /// `Target::initialize_native` once per process instead of once per compile.
 ///
 /// The `OnceLock` is MEMOIZATION, not synchronisation. Registration is already thread-safe in the
-/// pinned inkwell 0.9: `targets.rs` defines a global `TARGET_LOCK: RwLock<()>` and
+/// pinned inkwell 0.11: `targets.rs` defines a global `TARGET_LOCK: LazyLock<RwLock<()>>` and
 /// `initialize_native` takes `TARGET_LOCK.write()` around every init step — including when it is
 /// called from inside `Module::create_jit_execution_engine`, which invokes it unconditionally on the
 /// module's behalf. So there is no race here to close and nothing upstream that needs fixing. What
@@ -1801,37 +1799,36 @@ mod tests {
     /// compile" test would be worthless here. Four strict inequalities, each pinning a distinct way
     /// the levels could have collapsed into an existing one:
     ///
-    /// - `Oz < O3` and `Os < O3`: the size pipelines really do produce a smaller module.
-    /// - `Oz < O2`: `opt_level` maps `Os`/`Oz` onto the SAME codegen level as `O2`, so if the size
-    ///   levels were just `O2` wearing a different name they would tie here.
+    /// - `Oz < O3` and `Os < O3`: the size levels really do produce a smaller module.
+    /// - `Oz < O2`: `pass_pipeline` gives `O2`, `Os` and `Oz` one `default<O2>` for `optimize` to run,
+    ///   and `opt_level` one codegen level, so only the size attributes tell `Oz` from `O2`.
     /// - `Oz < Os`: the two size levels are distinct from each other, not one knob spelled twice.
     ///   This is the one VERSION-FRAGILE assertion of the four: it rests on LLVM's loop unroller
     ///   treating `minsize` more aggressively than `optsize` — a cost-model threshold, not a
-    ///   guarantee — with a measured margin of only 6 instructions (`Os` 38, `Oz` 32). If a future
-    ///   LLVM upgrade closes that gap and turns this line red, relax `oz < os` alone to `<=`;
-    ///   `the_size_levels_attach_their_attributes_to_defined_functions_only` independently pins `Os`
-    ///   (`optsize`) and `Oz` (`minsize`+`optsize`) as structurally distinct, so `Oz < Os` is not the
-    ///   only thing keeping the two levels apart. The other three inequalities are NOT soft in this
-    ///   way — one of those breaking is a real regression, not a threshold shift.
+    ///   guarantee — and the measured margin is narrow. If a future LLVM upgrade closes that gap
+    ///   and turns this line red, relax `oz < os` alone to `<=`;
+    ///   `the_size_levels_attach_their_attributes_to_defined_functions_only` independently pins
+    ///   `Os` (`optsize`) and `Oz` (`minsize`+`optsize`) as structurally distinct, so `Oz < Os` is
+    ///   not the only thing keeping the two levels apart. The other three inequalities are NOT soft
+    ///   in this way — one of those breaking is a real regression, not a threshold shift.
     ///
-    /// On the pinned LLVM 22.1 `O2` and `O3` measure 61. Suppressing only the `optsize`/`minsize`
-    /// attributes (leaving `default<Os>`/`default<Oz>` in place) puts `Os` at 61 and `Oz` at 63 — the
-    /// pipeline string ALONE buys nothing here, and this test fails without `apply_size_attributes`. That
-    /// is what makes the attribute half load-bearing rather than decorative, and the concrete reason those
-    /// attributes must be attached before `run_passes` rather than merely before codegen.
+    /// Both size levels run `O2`'s pipeline (`pass_pipeline`), so without `apply_size_attributes` they
+    /// ARE `O2`, and this test fails. That is what makes the attributes load-bearing rather than
+    /// decorative, and the concrete reason they must be attached before `run_passes` rather than
+    /// merely before codegen.
     #[test]
-    fn the_size_pipelines_produce_strictly_smaller_ir_than_the_speed_pipelines() {
+    fn the_size_attributes_make_oz_ir_strictly_smaller_than_os_o2_and_o3_and_os_smaller_than_o3() {
         let o2 = optimized_instruction_count(SIZE_FIXTURE, OptLevel::O2);
         let o3 = optimized_instruction_count(SIZE_FIXTURE, OptLevel::O3);
         let os = optimized_instruction_count(SIZE_FIXTURE, OptLevel::Os);
         let oz = optimized_instruction_count(SIZE_FIXTURE, OptLevel::Oz);
-        assert!(oz < o3, "default<Oz> must shrink the IR relative to default<O3>, got Oz={oz} vs O3={o3}");
-        assert!(os < o3, "default<Os> must shrink the IR relative to default<O3>, got Os={os} vs O3={o3}");
+        assert!(oz < o3, "Oz must shrink the IR relative to O3, got Oz={oz} vs O3={o3}");
+        assert!(os < o3, "Os must shrink the IR relative to O3, got Os={os} vs O3={o3}");
         assert!(oz < o2, "the size preference must do more than default<O2>, got Oz={oz} vs O2={o2}");
-        assert!(oz < os, "default<Oz> must be strictly smaller than default<Os>, got Oz={oz} vs Os={os}");
+        assert!(oz < os, "Oz must be strictly smaller than Os, got Oz={oz} vs Os={os}");
     }
 
-    /// The other half of the size levels (the pipeline string is only one of the two knobs): the
+    /// What sets the size levels apart (their pipeline string is `O2`'s): the
     /// `optsize`/`minsize` function attributes must actually be ON the defined subroutines BEFORE the
     /// pipeline runs, since that is where the inliner/unroller/vectorizer read the size preference
     /// from. Matches what `clang -Os`/`-Oz` emit: `-Os` sets `optsize`, `-Oz` sets `minsize` AND
@@ -1898,8 +1895,8 @@ mod tests {
 
     /// `object_bytes` must emit a real, host-recognisable object file, and `Oz` must actually shrink
     /// it relative to `O0` — the same shrink-under-size-pressure evidence
-    /// `the_size_pipelines_produce_strictly_smaller_ir_than_the_speed_pipelines` gives the IR, but
-    /// here on the artifact this function exists to measure.
+    /// `the_size_attributes_make_oz_ir_strictly_smaller_than_os_o2_and_o3_and_os_smaller_than_o3`
+    /// gives the IR, but here on the artifact this function exists to measure.
     #[test]
     fn object_bytes_emits_a_real_object_that_shrinks_under_oz() {
         let core = desugar(&parse("fn twice(x){ x + x } twice(21)").0.unwrap());

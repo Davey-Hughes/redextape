@@ -46,6 +46,8 @@ cd "$(dirname "$0")/.."
 # `web/bindings/` and a crate-relative `bindings/` disagree. Absolute, and set once for every leg, so
 # the gate writes the same bindings the web build consumes instead of a stray copy nobody reads.
 export TS_RS_EXPORT_DIR="$PWD/web/bindings"
+# ts-rs also reads these three, and each changes the text it writes rather than where it goes.
+unset TS_RS_IMPORT_EXTENSION TS_RS_LARGE_INT TS_RS_USE_V11_HASHMAP
 
 # THE SCRIPT ASSUMES CWD == REPO ROOT IN SEVERAL PLACES, AND THE `cd` ABOVE ENFORCES IT.
 # `check_grammars` walks `grammars/` for `tree-sitter.json`, the browser leg passes the relative
@@ -288,7 +290,7 @@ test_cfg() { run cargo nextest run "$@"; run cargo test "$@" --doc; }
 # error message, where removing this call would let a leg run without its precondition and fail inside cargo
 # instead. It is a `grep` against a list rustup already has in memory, so repeating it per row costs nothing
 # worth saving. `ensure_llvm_prefix` is NOT called this way for a different reason: its own guard
-# (`if [ -z "${LLVM_SYS_221_PREFIX:-}" ]`) memoizes the probe, so the exported variable persists for the
+# (`if [ -z "${LLVM_SYS_231_PREFIX:-}" ]`) memoizes the probe, so the exported variable persists for the
 # rest of the process and a repeat call would add nothing but a duplicate log line. One call suffices — that
 # is why one row calls it, not that a second call would cost something.
 ensure_wasm_target() {
@@ -307,36 +309,36 @@ ensure_wasm_target() {
 
 # llvm-sys locates LLVM via a version-specific variable. Honor an existing setting; otherwise probe
 # the usual locations. If broadening the supported LLVM range later, derive the variable NAME from
-# the selected inkwell feature rather than hardcoding 221.
+# the selected inkwell feature rather than hardcoding 231.
 #
 # `/usr` is in the list because that is where most Linux distributions put LLVM (Arch, Fedora, and
 # openSUSE all ship `/usr/bin/llvm-config`); without it this gate could not run its LLVM configs on
-# those systems at all, and would report "no LLVM 22 found" on a machine with LLVM 22 installed.
+# those systems at all, and would report "no LLVM 23 found" on a machine with LLVM 23 installed.
 #
 # THE VERSION CHECK IS THE POINT, not decoration. Three of the four entries are UNVERSIONED
-# (`/opt/homebrew/opt/llvm`, `/usr/local/opt/llvm`, `/usr`) — only `/usr/lib/llvm-22` names 22 in the
+# (`/opt/homebrew/opt/llvm`, `/usr/local/opt/llvm`, `/usr`) — only `/usr/lib/llvm-23` names 23 in the
 # path. Accepting an unversioned prefix on the strength of `llvm-config` merely EXISTING is how a box
-# with, say, LLVM 18 at `/usr` gets handed to llvm-sys as if it were 22: the failure then surfaces as
+# with, say, LLVM 18 at `/usr` gets handed to llvm-sys as if it were 23: the failure then surfaces as
 # an llvm-sys build error naming a version nobody asked for, far from the line that chose it. Probing
 # for the right LLVM and probing for any LLVM are different questions, and this asks the first.
 ensure_llvm_prefix() {
-  local llvm_probe_paths="/opt/homebrew/opt/llvm /usr/lib/llvm-22 /usr/local/opt/llvm /usr"
-  # An explicit LLVM_SYS_221_PREFIX is deliberately NOT version-checked: setting it is a statement of
+  local llvm_probe_paths="/opt/homebrew/opt/llvm /usr/lib/llvm-23 /usr/local/opt/llvm /usr"
+  # An explicit LLVM_SYS_231_PREFIX is deliberately NOT version-checked: setting it is a statement of
   # intent, and a wrong one already fails loudly in llvm-sys. The guard below is for the GUESS.
-  if [ -z "${LLVM_SYS_221_PREFIX:-}" ]; then
+  if [ -z "${LLVM_SYS_231_PREFIX:-}" ]; then
     local p
     for p in $llvm_probe_paths; do
       [ -x "$p/bin/llvm-config" ] || continue
-      [ "$("$p/bin/llvm-config" --version 2>/dev/null | cut -d. -f1)" = 22 ] || continue
-      export LLVM_SYS_221_PREFIX="$p"; break
+      [ "$("$p/bin/llvm-config" --version 2>/dev/null | cut -d. -f1)" = 23 ] || continue
+      export LLVM_SYS_231_PREFIX="$p"; break
     done
   fi
-  if [ -z "${LLVM_SYS_221_PREFIX:-}" ]; then
-    echo "error: no LLVM 22 found; set LLVM_SYS_221_PREFIX or pass --no-llvm" >&2
-    echo "  probed (needs bin/llvm-config reporting major version 22): $llvm_probe_paths" >&2
+  if [ -z "${LLVM_SYS_231_PREFIX:-}" ]; then
+    echo "error: no LLVM 23 found; set LLVM_SYS_231_PREFIX or pass --no-llvm" >&2
+    echo "  probed (needs bin/llvm-config reporting major version 23): $llvm_probe_paths" >&2
     exit 1
   fi
-  echo "==> using LLVM at $LLVM_SYS_221_PREFIX"
+  echo "==> using LLVM at $LLVM_SYS_231_PREFIX"
 }
 
 # The tree-sitter CLI, which regenerates the committed parsers. PINNED to v0.25.10 — NOT the newest

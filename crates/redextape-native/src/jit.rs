@@ -95,28 +95,14 @@ fn register_symbols(builder: &mut JITBuilder) {
 
 /// Build the host ISA the JIT compiles against, with `opt` as its `opt_level` setting.
 ///
-/// The ISA is built explicitly rather than via `JITBuilder::new`, which constructs its own from
-/// default flags and offers no way to reach `opt_level`. `JITBuilder::new` delegates to
-/// `with_flags(&[], ..)`, whose whole ISA setup is (cranelift-jit 0.134.2, `src/backend.rs`):
-///
-/// ```text
-///     let mut flag_builder = settings::builder();
-///     for (name, value) in flags { flag_builder.set(name, value)?; }
-///     // On at least AArch64, "colocated" calls use shorter-range relocations,
-///     // which might not reach all definitions; we can't handle that here, so
-///     // we require long-range relocation types.
-///     flag_builder.set("use_colocated_libcalls", "false").unwrap();
-///     flag_builder.set("is_pic", "false").unwrap();
-///     let isa_builder = cranelift_native::builder().unwrap_or_else(..);
-///     let isa = isa_builder.finish(settings::Flags::new(flag_builder))?;
-///     Ok(Self::with_isa(isa, libcall_names))
-/// ```
-///
-/// We reproduce exactly those two flags (dropping either would change JIT behaviour: `is_pic=false`
-/// in particular is a hard requirement — `JITModule::new` asserts `!isa.flags().is_pic()`), add
-/// `opt_level`, and hand the finished ISA to the same `with_isa` constructor. Building it ourselves
-/// also removes `with_flags`'s two internal panics (`.unwrap()` on the flag set, `unwrap_or_else`
-/// on an unsupported host): here both are `LowerError`s.
+/// The ISA is built here, not by `JITBuilder::new`: that delegates to `with_flags`, which builds an
+/// ISA from default flags with no way to reach `opt_level`. Doing so also turns `with_flags`'s two
+/// internal panics into `LowerError`s. The other two flags need not match `with_flags`, which sets
+/// `is_pic` per architecture. With `use_colocated_libcalls` and `is_pic` both `false`, every libcall
+/// and runtime import is called through its absolute address, with no ±2 GiB reach limit, and
+/// `JITModule::new` accepts `is_pic=false` on every host. On x86-64 that flag makes a module-local
+/// symbol's address (`func_addr`, `symbol_value`) a RIP-relative `lea` the JIT cannot redirect when
+/// out of reach, so the JIT's code takes none. `shared::BYTES_PER_VAR` assumes `is_pic=false` too.
 ///
 /// This is the JIT's ONLY ISA construction site, and it is a separate function so that
 /// `tests::the_opt_level_reaches_the_jits_own_isa` can measure the code it actually emits (see
@@ -307,7 +293,7 @@ mod tests {
     fn agreement_holds_at_every_opt_level() {
         // Per-level Cranelift agreement in the DEFAULT (cranelift-only) build. Without it, the default
         // build checks cross-level agreement on one fat-frame shape alone; the rest is asserted only in
-        // `tests/llvm_oracle.rs`, which needs an LLVM 22 toolchain. Everything else here goes through
+        // `tests/llvm_oracle.rs`, which needs an LLVM 23 toolchain. Everything else here goes through
         // `agree`, which is default-level only.
         //
         // Deliberately small programs — this runs on every `cargo test`. Between them they cover the

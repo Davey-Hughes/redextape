@@ -52,7 +52,7 @@ impl Parse for CfgAttrTail {
 
 /// The ts-rs field keys that say something about whether the field can be null.
 ///
-/// **`optional` IS THE THIRD.** `ts-rs-macros` 10.1.0 documents it on `FieldAttr`:
+/// **`optional` IS THE THIRD.** `ts-rs-macros` 12.0.1 documents it on `FieldAttr`'s `Optional`:
 /// `#[ts(optional)]` turns `t: Option<T>` into `t?: T`, and only `#[ts(optional = nullable)]` turns
 /// it into `t?: T | null`. So the bare flag drops the null exactly as `ts(type = "number")` does, on
 /// a boundary where `serde_wasm_bindgen` really does put `null` in the value rather than omitting the
@@ -599,25 +599,25 @@ pub fn assert_generated_covers_every_derive_site(crate_root: &Path, generated: &
 /// with a bad override is caught by this rule directly, rather than only refused by the sibling's
 /// guard.
 ///
-/// **THE RULE, OVER THE THREE KEYS THAT SAY ANYTHING ABOUT NULL** — see [`NULLABILITY_KEYS`] for why
-/// those three and not the others. A field is an `Option` exactly when its override claims a null,
-/// and any disagreement is a panic: `ts(type = "X")` claims one when `X` has a top-level `null` union
-/// member, `ts(as = "Y")` when `Y` parses as a Rust `Option`, and `ts(optional)` claims one only in
-/// its `= nullable` form — the bare flag generates `field?: T` and drops it.
+/// **THE RULE, OVER THE KEYS THAT SAY ANYTHING ABOUT NULL** — see [`NULLABILITY_KEYS`] for a field's own, and
+/// [`check_fields`] for the `optional_fields` it inherits. A field is an `Option` exactly when its override claims
+/// a null, and any disagreement is a panic: `ts(type = "X")` claims one when `X` has a top-level `null` union
+/// member, `ts(as = "Y")` when `Y` parses as a Rust `Option`, and `ts(optional)` as `= nullable`, or as
+/// `= false` on an `Option`, which it leaves as it is — the bare flag generates `field?: T` and drops it.
 ///
-/// **WHAT THIS DOES NOT COVER, NAMED RATHER THAN DENIED.** A field with NO override is never
-/// examined: ts-rs maps `Option` to `| null` on its own, and nothing here would notice that changing.
-/// Nullability INSIDE a generic is invisible — `RuleView::read` is `Vec<Option<Symbol>>`, and an
-/// override rewriting the element type passes a rule that asks only whether the field's own outermost
-/// type is an `Option`. A `type` alias for an `Option` reads as not-an-`Option`, because `syn` parses
-/// one file and resolves no names. And a field introduced by a macro is invisible, because nothing
-/// here expands macros — the same boundary the sibling scan names.
+/// **WHAT THIS DOES NOT COVER, NAMED RATHER THAN DENIED.** A field with NO override and no inherited
+/// `optional_fields` is never examined: ts-rs maps `Option` to `| null` on its own, and nothing here
+/// would notice that changing. Nullability INSIDE a generic is invisible — `RuleView::read` is
+/// `Vec<Option<Symbol>>`, and an override rewriting the element type passes a rule that asks only
+/// whether the field's own outermost type is an `Option`. A `type` alias for an `Option` reads as
+/// not-an-`Option`, because `syn` parses one file and resolves no names. And a field introduced by a
+/// macro is invisible, because nothing here expands macros — the same boundary the sibling scan names.
 ///
 /// **AN OVERRIDE WRITTEN ON AN ENUM VARIANT RATHER THAN ON A FIELD IS NOT SEEN.** `ts-rs-macros`'s
-/// `VariantAttr` carries `type` and `as` keys of its own, so that is a real override and not a
-/// mistake the compiler would catch — this rule reads field attributes only. What a variant-level
-/// override does to the nullability of the variant's payload has not been measured, and a rule
-/// guessing at it would be an unmeasured mechanism. Named here, pinned by a test, and left open.
+/// `VariantAttr` carries `type` and `as` keys of its own, so that is a real override and not a mistake
+/// the compiler would catch — this rule reads no variant key but `optional_fields`. What a
+/// variant-level override does to the nullability of the variant's payload has not been measured, and a
+/// rule guessing at it would be an unmeasured mechanism. Named here, pinned by a test, and left open.
 pub fn assert_overrides_match_field_nullability(crate_root: &Path) {
     fn walk(dir: &Path) {
         for entry in fs::read_dir(dir).unwrap() {
@@ -673,51 +673,84 @@ struct FieldWalk<'a> {
 
 impl<'ast> syn::visit::Visit<'ast> for FieldWalk<'_> {
     fn visit_item_struct(&mut self, node: &'ast syn::ItemStruct) {
-        check_fields(self.path, &node.ident.to_string(), &node.fields);
+        let owner = node.ident.to_string();
+        let container = optional_fields_on(self.path, &owner, &node.attrs);
+        check_fields(self.path, &owner, &node.fields, &container);
         syn::visit::visit_item_struct(self, node);
     }
 
     fn visit_item_enum(&mut self, node: &'ast syn::ItemEnum) {
+        let on_enum = optional_fields_on(self.path, &node.ident.to_string(), &node.attrs);
         for variant in &node.variants {
-            check_fields(self.path, &format!("{}::{}", node.ident, variant.ident), &variant.fields);
+            let owner = format!("{}::{}", node.ident, variant.ident);
+            let on_variant = optional_fields_on(self.path, &owner, &variant.attrs);
+            let container = if on_variant.is_empty() { &on_enum } else { &on_variant };
+            check_fields(self.path, &owner, &variant.fields, container);
         }
         syn::visit::visit_item_enum(self, node);
     }
 
+    // ts-rs derives `TS` for no union, so no `optional_fields` can reach one's fields.
     fn visit_item_union(&mut self, node: &'ast syn::ItemUnion) {
-        check_fields(self.path, &node.ident.to_string(), &syn::Fields::Named(node.fields.clone()));
+        check_fields(self.path, &node.ident.to_string(), &syn::Fields::Named(node.fields.clone()), &[]);
         syn::visit::visit_item_union(self, node);
     }
 }
 
+/// Each `optional_fields` value among a struct's, an enum's or a variant's own `ts(...)` keys.
+fn optional_fields_on(path: &Path, owner: &str, attrs: &[syn::Attribute]) -> Vec<Option<String>> {
+    ts_keys_on(path, owner, attrs).into_iter().filter(|(key, _)| key == "optional_fields").map(|(_, v)| v).collect()
+}
+
 /// A tuple field has no name, so it is reported by its index.
-fn check_fields(path: &Path, owner: &str, fields: &syn::Fields) {
+///
+/// **`container` HOLDS THE `optional_fields` VALUES OF THE FIELDS' STRUCT, OR OF THEIR VARIANT ELSE
+/// ITS ENUM**, one per occurrence, each judged alone as a field's own keys are. `ts-rs-macros` 12.0.1
+/// gives that key to each field with no `optional` or `type` of its own, in any field list but a
+/// newtype's, as the field's `optional`; inherited, it does nothing to a field that is not an
+/// `Option`. So only its bare form can drop a null, and only from an `Option` field.
+fn check_fields(path: &Path, owner: &str, fields: &syn::Fields, container: &[Option<String>]) {
+    let newtype = matches!(fields, syn::Fields::Unnamed(f) if f.unnamed.len() == 1);
     for (index, field) in fields.iter().enumerate() {
         let name = field.ident.as_ref().map_or_else(|| index.to_string(), ToString::to_string);
-        for (key, value) in ts_keys_on(path, owner, &name, &field.attrs) {
+        let keys = ts_keys_on(path, &format!("{owner}.{name}"), &field.attrs);
+        for (key, value) in &keys {
             if NULLABILITY_KEYS.contains(&key.as_str()) {
-                check_override(path, owner, &name, &key, value.as_deref(), &field.ty);
+                check_override(path, owner, &name, key, value.as_deref(), &field.ty);
             }
+        }
+        let own = keys.iter().any(|(key, _)| key == "optional" || key == "type");
+        if !newtype && !own && container.contains(&None) && type_is_option(&field.ty) {
+            panic!(
+                "{}: `{owner}.{name}: {}` takes the bare `ts(optional_fields)` on its struct, enum or \
+                 variant, which generates `field?: T` for an `Option` field with no `optional` or \
+                 `type` of its own. That says the KEY MAY BE ABSENT, but this boundary sends the key \
+                 with a `null` in it. Write `optional_fields = nullable` there instead, or give this \
+                 field `ts(optional = nullable)` or `ts(optional = false)`, each of which keeps the null.",
+                path.display(),
+                field.ty.to_token_stream()
+            );
         }
     }
 }
 
-/// Every `ts(...)` key on one field, from a bare `#[ts(...)]` and from inside any `#[cfg_attr(...)]`.
-fn ts_keys_on(path: &Path, owner: &str, field: &str, attrs: &[syn::Attribute]) -> Vec<(String, Option<String>)> {
+/// Every `ts(...)` key on one field or container, from a bare `#[ts(...)]` and from inside any
+/// `#[cfg_attr(...)]`. `site` names it in a panic.
+fn ts_keys_on(path: &Path, site: &str, attrs: &[syn::Attribute]) -> Vec<(String, Option<String>)> {
     let mut found = Vec::new();
     for attr in attrs {
         if attr.path().is_ident("ts") {
-            found.extend(ts_keys_in(path, owner, field, &attr.meta));
+            found.extend(ts_keys_in(path, site, &attr.meta));
         } else if attr.path().is_ident("cfg_attr") {
             let inner = attr.parse_args_with(CfgAttrTail::parse).map(|t| t.0).unwrap_or_else(|e| {
                 panic!(
-                    "{}: `{owner}.{field}` carries a `cfg_attr` whose contents this scan cannot \
+                    "{}: `{site}` carries a `cfg_attr` whose contents this scan cannot \
                          read ({e}). This module's stated rule is that an unreadable attribute is a \
                          panic and never a skip.",
                     path.display()
                 )
             });
-            found.extend(ts_keys_under(path, owner, field, inner.iter()));
+            found.extend(ts_keys_under(path, site, inner.iter()));
         }
     }
     found
@@ -733,18 +766,17 @@ fn ts_keys_on(path: &Path, owner: &str, field: &str, attrs: &[syn::Attribute]) -
 /// blacklist-versus-whitelist lesson [`ts_deriving_type_names_in_crate`]'s doc records.
 fn ts_keys_under<'a>(
     path: &Path,
-    owner: &str,
-    field: &str,
+    site: &str,
     metas: impl Iterator<Item = &'a syn::Meta>,
 ) -> Vec<(String, Option<String>)> {
     let mut found = Vec::new();
     for meta in metas {
         if meta.path().is_ident("ts") {
-            found.extend(ts_keys_in(path, owner, field, meta));
+            found.extend(ts_keys_in(path, site, meta));
         } else if meta.path().is_ident("cfg_attr") {
             let syn::Meta::List(list) = meta else {
                 panic!(
-                    "{}: `{owner}.{field}` carries a `cfg_attr` whose nested entry is not a list \
+                    "{}: `{site}` carries a `cfg_attr` whose nested entry is not a list \
                      ({}), which this scan cannot read. Skipping it silently is the defect this \
                      module refuses everywhere else.",
                     path.display(),
@@ -753,21 +785,21 @@ fn ts_keys_under<'a>(
             };
             let inner = list.parse_args_with(CfgAttrTail::parse).map(|t| t.0).unwrap_or_else(|e| {
                 panic!(
-                    "{}: `{owner}.{field}` carries a nested `cfg_attr` this scan cannot read \
+                    "{}: `{site}` carries a nested `cfg_attr` this scan cannot read \
                          ({e}). An attribute it cannot read is one it cannot check.",
                     path.display()
                 )
             });
-            found.extend(ts_keys_under(path, owner, field, inner.iter()));
+            found.extend(ts_keys_under(path, site, inner.iter()));
         }
     }
     found
 }
 
-fn ts_keys_in(path: &Path, owner: &str, field: &str, meta: &syn::Meta) -> Vec<(String, Option<String>)> {
+fn ts_keys_in(path: &Path, site: &str, meta: &syn::Meta) -> Vec<(String, Option<String>)> {
     let syn::Meta::List(list) = meta else {
         panic!(
-            "{}: `{owner}.{field}` carries a bare `ts` attribute with no key list, which this scan \
+            "{}: `{site}` carries a bare `ts` attribute with no key list, which this scan \
              cannot read. Skipping it silently is the defect this module refuses everywhere else.",
             path.display()
         )
@@ -775,7 +807,7 @@ fn ts_keys_in(path: &Path, owner: &str, field: &str, meta: &syn::Meta) -> Vec<(S
     match syn::parse2::<TsKeys>(list.tokens.clone()) {
         Ok(keys) => keys.0,
         Err(e) => panic!(
-            "{}: `{owner}.{field}` carries a `ts(...)` attribute this scan cannot read ({e}). A key \
+            "{}: `{site}` carries a `ts(...)` attribute this scan cannot read ({e}). A key \
              it cannot read is a key it cannot check, so this is a panic rather than a skip.",
             path.display()
         ),
@@ -788,8 +820,8 @@ fn ts_keys_in(path: &Path, owner: &str, field: &str, meta: &syn::Meta) -> Vec<(S
 /// the inside of these attributes even though it reads the outside of them perfectly well.
 ///
 /// **A VALUE MAY BE AN UNQUOTED IDENT, AND REQUIRING QUOTES BREAKS THE ONE SPELLING THAT COMPILES.**
-/// `ts-rs-macros` reads `optional`'s argument with `Ident::parse`, so `#[ts(optional = nullable)]` is
-/// the correct form and `#[ts(optional = "nullable")]` does not compile. A parser demanding a string
+/// `ts-rs-macros` reads `optional`'s argument with `Ident::parse_any`, so `optional = nullable` is
+/// the correct form and `optional = "nullable"` does not compile. A parser demanding a string
 /// literal panics `cannot parse` on the only spelling a real crate can contain, and a fixture using
 /// the quoted form proves nothing, being a shape no compiling tree can hold.
 struct TsKeys(Vec<(String, Option<String>)>);
@@ -804,8 +836,18 @@ impl Parse for TsKeys {
                 if input.peek(syn::LitStr) {
                     Some(input.parse::<syn::LitStr>()?.value())
                 } else {
-                    Some(syn::Ident::parse_any(input)?.to_string())
+                    // A container's `rename` and `export_to` take any expression, so an unquoted
+                    // value runs to the next top-level comma. One ident reads as its own name.
+                    let mut tokens = proc_macro2::TokenStream::new();
+                    while !input.is_empty() && !input.peek(Token![,]) {
+                        tokens.extend([input.parse::<proc_macro2::TokenTree>()?]);
+                    }
+                    Some(tokens.to_string())
                 }
+            } else if input.peek(syn::token::Paren) {
+                // A container's `concrete(..)` and `repr(..)` take a list, which no rule here reads.
+                input.parse::<proc_macro2::TokenTree>()?;
+                None
             } else {
                 None
             };
@@ -952,13 +994,14 @@ fn union_admits_null(ts_type: &str) -> bool {
     })
 }
 
-/// The rule itself, in both directions, over all three keys.
+/// The rule itself, in both directions, over each key in [`NULLABILITY_KEYS`].
 fn check_override(path: &Path, owner: &str, field_name: &str, key: &str, value: Option<&str>, field_ty: &syn::Type) {
     let is_option = type_is_option(field_ty);
     let claims_null = match (key, value) {
         // `optional` is a FLAG, and its bare form is the wrong one: `#[ts(optional)]` generates
         // `t?: T`, which says the key may be ABSENT — while this boundary sends the key with a `null`
-        // in it. Only `optional = nullable` keeps the null.
+        // in it. `optional = nullable` keeps the null, and `optional = false` leaves the type as is.
+        ("optional", Some("false")) => is_option,
         ("optional", v) => v == Some("nullable"),
         ("type", Some(v)) => union_admits_null(v),
         // PARSED AS A RUST TYPE AND ASKED THE SAME QUESTION THE FIELD IS ASKED, rather than matched
@@ -1007,7 +1050,10 @@ fn check_override(path: &Path, owner: &str, field_name: &str, key: &str, value: 
              `ts(as = \"Option<...>\")`, which carries the optionality in the Rust type by \
              construction"
         }
-        (true, _) => "the field is an `Option`, so this must be `ts(optional = nullable)` or nothing at all",
+        (true, _) => {
+            "the field is an `Option`, so this must be `ts(optional = nullable)` or `ts(optional = false)`, \
+             each of which keeps the null"
+        }
         (false, "type") => {
             "the field is not an `Option`, so nothing on the wire can be null and the override must \
              not claim otherwise — drop the `null` member"
@@ -1915,8 +1961,8 @@ pub struct TmStatus {
 
     /// A NAMED BOUNDARY, PINNED RATHER THAN CLAIMED CLOSED. `ts-rs-macros`'s `VariantAttr` carries
     /// `type` and `as` of its own, so an override written on the VARIANT is a real ts-rs override —
-    /// and this scan reads field attributes only, so it does not see one. What such an override does
-    /// to a variant's nullability has not been measured here, so no rule guesses at it.
+    /// and this scan reads no variant key but `optional_fields`, so it does not see one. What such an
+    /// override does to a variant's nullability has not been measured here, so no rule guesses at it.
     #[test]
     fn an_override_on_the_variant_itself_is_not_seen_by_this_rule() {
         check(
@@ -1929,7 +1975,7 @@ pub enum Decoded {
         );
     }
 
-    /// The ONE spelling of the nullable form that compiles: ts-rs reads it with `Ident::parse`, so
+    /// The ONE spelling of the nullable form that compiles: ts-rs reads it with `Ident::parse_any`, so
     /// `optional = "nullable"` is rejected by the compiler and a parser demanding a string literal
     /// here would panic on every tree that could exist.
     #[test]
@@ -1938,6 +1984,148 @@ pub enum Decoded {
             r#"
 pub struct TmStatus {
     #[cfg_attr(feature = "ts", ts(optional = nullable))]
+    pub total_steps: Option<u64>,
+}
+"#,
+        );
+    }
+
+    /// ts-rs 12's container key: the bare form gives every `Option` field `field?: T`, as the bare
+    /// field `optional` does, with nothing written on the field for a field-only rule to read.
+    #[test]
+    #[should_panic(expected = "TmStatus.total_steps")]
+    fn a_bare_optional_fields_on_a_struct_drops_its_option_fields_null_and_panics() {
+        check(
+            r#"
+#[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export))]
+#[cfg_attr(feature = "ts", ts(optional_fields))]
+pub struct TmStatus {
+    pub step: u64,
+    pub total_steps: Option<u64>,
+}
+"#,
+        );
+    }
+
+    #[test]
+    #[should_panic(expected = "Decoded::Text.at")]
+    fn a_bare_optional_fields_on_an_enum_reaches_each_variants_fields() {
+        check(
+            r#"
+#[cfg_attr(feature = "ts", ts(optional_fields))]
+pub enum Decoded {
+    Text { at: Option<u64> },
+}
+"#,
+        );
+    }
+
+    /// The key on one variant reaches that variant alone, so `Text` passes and `Bytes` panics.
+    #[test]
+    #[should_panic(expected = "Decoded::Bytes.at")]
+    fn a_bare_optional_fields_on_a_variant_reaches_that_variants_fields() {
+        check(
+            r#"
+pub enum Decoded {
+    Text { at: Option<u64> },
+    #[cfg_attr(feature = "ts", ts(optional_fields))]
+    Bytes { at: Option<u64> },
+}
+"#,
+        );
+    }
+
+    /// A variant's own `optional_fields` replaces its enum's, whichever form either takes.
+    #[test]
+    fn a_variants_own_optional_fields_replaces_its_enums() {
+        check(
+            r#"
+#[cfg_attr(feature = "ts", ts(optional_fields))]
+pub enum Decoded {
+    #[cfg_attr(feature = "ts", ts(optional_fields = nullable))]
+    Text { at: Option<u64> },
+    #[cfg_attr(feature = "ts", ts(optional_fields = false))]
+    Bytes { at: Option<u64> },
+}
+"#,
+        );
+    }
+
+    #[test]
+    #[should_panic(expected = "Span.1")]
+    fn a_tuple_struct_of_two_fields_takes_optional_fields_too() {
+        check(
+            r#"
+#[cfg_attr(feature = "ts", ts(optional_fields))]
+pub struct Span(u64, Option<u64>);
+"#,
+        );
+    }
+
+    /// What ts-rs does not apply the key to: a newtype, and a field with an `optional` or `type` of
+    /// its own. Inherited, the key does nothing to a field that is not an `Option`, and its
+    /// `nullable` form keeps the null.
+    #[test]
+    fn optional_fields_passes_where_it_keeps_the_null_or_does_not_apply() {
+        check(
+            r#"
+#[cfg_attr(feature = "ts", ts(optional_fields))]
+pub struct TmStatus {
+    pub step: u64,
+    #[cfg_attr(feature = "ts", ts(optional = nullable))]
+    pub total_steps: Option<u64>,
+    #[cfg_attr(feature = "ts", ts(type = "number | null"))]
+    pub halted_at: Option<u64>,
+}
+
+#[cfg_attr(feature = "ts", ts(optional_fields))]
+pub struct Steps(Option<u64>);
+
+#[cfg_attr(feature = "ts", ts(optional_fields = nullable))]
+pub struct TmState {
+    pub total_steps: Option<u64>,
+}
+"#,
+        );
+    }
+
+    /// `optional = false` leaves the field's type as it is, `Option` and all, so it keeps the null
+    /// whether or not the container carries `optional_fields`.
+    #[test]
+    fn optional_false_keeps_the_null_and_passes() {
+        check(
+            r#"
+#[cfg_attr(feature = "ts", ts(optional_fields))]
+pub struct TmStatus {
+    #[cfg_attr(feature = "ts", ts(optional = false))]
+    pub total_steps: Option<u64>,
+}
+
+pub struct TmState {
+    #[cfg_attr(feature = "ts", ts(optional = false))]
+    pub total_steps: Option<u64>,
+    #[cfg_attr(feature = "ts", ts(optional = false))]
+    pub step: u64,
+}
+"#,
+        );
+    }
+
+    /// A container key may take a parenthesised list or an expression, and the scan reads past both
+    /// to the `optional_fields` after them.
+    #[test]
+    #[should_panic(expected = "TmStatus.total_steps")]
+    fn container_keys_with_a_list_or_an_expression_are_read_past() {
+        check(
+            r#"
+#[cfg_attr(feature = "ts", ts(repr(enum = name)))]
+pub enum Side {
+    Left,
+}
+
+#[cfg_attr(feature = "ts", ts(concrete(T = u32), rename = concat!("Tm", "Status"), optional_fields))]
+pub struct TmStatus<T> {
+    pub step: T,
     pub total_steps: Option<u64>,
 }
 "#,

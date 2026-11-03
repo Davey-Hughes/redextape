@@ -20,7 +20,7 @@ serde = { version = "1", features = ["derive"], optional = true }
 # added here cannot reach the browser unhandled. Optional and default-off, so the browser build never
 # sees it — and `scripts/check-all.sh` builds the `ts` configuration for wasm32 anyway rather than
 # trusting that.
-ts-rs = { version = "10", optional = true }
+ts-rs = { version = "12", optional = true }
 
 [features]
 serde = ["dep:serde"]

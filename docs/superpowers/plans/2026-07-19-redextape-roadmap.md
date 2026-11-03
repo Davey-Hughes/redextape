@@ -29922,3 +29922,612 @@ hooks.
 | 2 and 50; 3 and 20; 1,313 and 32 | the fixes' node, browser and core runs | `$R/logs/d4-fix-node.log`, `d4-fix-browser.log` and `d4-fix-core.log` |
 | 20 of 20; 841 and 0; 15 and 294 | scans at `2b9d67c`; citations' files and violations; the comment guard's areas and changed files | `$R/logs/d4-scans-2.log` |
 | 1; exit 0 | files both `rxm` and `ir-bumps` change, at `f4f2172`; the trial merge | `comm -12` of the sorted `git diff --name-only 1b305e0 ir-bumps` and `1b305e0 rxm`; `git merge-tree --write-tree --name-only rxm ir-bumps` |
+
+#### THE IR VIEWS GROUNDWORK'S DEPENDENCY BUMPS: A `cargo update`, CRANELIFT 0.137.1, INKWELL 0.11 ON LLVM 23, WHERE `Os` AND `Oz` RUN `O2`'S PIPELINE AND KEEP THEIR SIZE ATTRIBUTES, TREE-SITTER 0.27.1, TS-RS 12.0.1 AND WASM-PACK 0.15.1, WITH AN X86-64 LINUX SIZE BASELINE, SO THE NATIVE SIZE GATE CHECKS OBJECT SIZES ON LINUX (2026-11-02, branch `ir-bumps`, `337147d..8c623cf`, 16 commits, plus this entry, `d9c0cc0`; then `369d534`, `741c586`, `c3df447`, `df44a12`, `f4c2654` and `ab40fec`, which answer its review and a gap found while answering it, `7d55814` and `bc455ed`, which answer its final re-review, and the commits that bring this entry up to date)
+
+**Spec §4.1's steps 0 to 4** (`docs/superpowers/specs/2026-10-27-ir-views-groundwork-design.md`), the groundwork's
+first pull request, with three changes the user made on 2026-11-02: ts-rs 10 → 12 and wasm-pack 0.15.0 → 0.15.1 came
+in ("Add both"), and the LLVM backend moved to LLVM 23 in place of 22 ("can we bump redextape to use llvm 23
+instead?"). The plan is `docs/superpowers/plans/2026-11-02-ir-views-pr1-bumps.md`, written at `e810f70` and amended
+for those three at `c787101`; Task 4 amends the spec's §4.1 step 3, whose condition named LLVM 22.1, to 23.1. Of the
+16 commits, `e810f70` and `c787101` change only `docs/`, and the other 14 change something outside it. The lane record
+is `~/temp/redextape-ir-bumps-record/` (`$R` below).
+
+**The rebase.** After the review the branch was rebased onto `337147d` (#159). This entry names each of the branch's
+commits by its SHA after the rebase, but `7398103`, where the §7.2 A/B's final side ran and the Mac's baseline was
+rewritten: that is `690c5d4` as it was before the rebase, and the branch's commits before the rebase are kept as the
+local branch `ir-bumps-pre-rebase`. What this entry says ran at one of the branch's commits ran there before the rebase,
+but the whole-branch gate, which ran at `3e2022d`, and what ran at `bc455ed` (VERIFICATION). The rebase brought in
+#159's rename and no other code change: each commit's own changed lines are as before, but `dd2fbdb`'s in the two
+`ts_bindings.rs`, which pass `&cfg` to #159's `Rxm` types, in #159's order, where before the rebase they passed it to
+the `Asm` ones (AFTER THE BUMPS).
+
+##### WHAT MOVED, STEP BY STEP
+
+- **Task 1 (spec step 0), `92dba87`: an x86-64 Linux size baseline at the old versions.** `opt_report
+  --write-baseline` wrote `crates/redextape-native/baselines/x86_64-unknown-linux-gnu.txt` at Cranelift 0.134.2 and
+  llvm-sys 221.0.1, against LLVM 22.1.8: 48 rows, 4 programs by 2 backends by 6 levels. `main` has no such file, so on
+  Linux the size test prints `NOTE: no size baseline` and passes; from this commit it compares. On an edited copy the
+  gate failed three ways, once each: `loop1000000`'s LLVM `O3` row raised from 1,105 to 1,326 B, a row deleted, and a
+  row added for a program the corpus does not hold.
+- **Task 2 (spec step 1), `16a5cc9`: `cargo update` inside the requirements.** It locked 84 packages, among them the
+  `cranelift-*` crates 0.134.2 → 0.134.4, wasm-bindgen 0.2.126 → 0.2.130, js-sys 0.3.103 → 0.3.107, tree-sitter
+  0.26.12 → 0.26.13, llvm-sys 221.0.1 → 221.1.2, and proptest 1.11.0 → 1.12.0, which takes `rand` from 0.9 to 0.10.
+  `tokio` 1.54.1 joined the lock through `wasm-bindgen-futures`' `rt` feature, under `wasm-bindgen-test`, a dev
+  dependency. The wasm crates' floors rose to what the lock holds, `wasm-bindgen` to "0.2.130" in both,
+  `wasm-bindgen-test` to "0.3.80" and `js-sys` to "0.3.107", by the controller's ruling that the wasm-bindgen family
+  moves together. No size row moved; the baseline's two version lines did. `web/src/third-party-licences.json`
+  changed in its `wasm` group only.
+- **Task 3 (spec step 2), `31c12ef`: Cranelift 0.137.1.** The six `cranelift-*` requirements went from "0.134" to
+  "0.137", and the lock moved 20 packages: 16 `cranelift-*` crates 0.134.4 → 0.137.1, `object` 0.39.1 → 0.40.0,
+  `wasmtime-internal-core` and `wasmtime-internal-jit-icache-coherence` 47.0.4 → 50.0.1, and `mach2` 0.6.0, added. It
+  built with no source change. 0.137's `JITBuilder::with_flags` sets `is_pic=true` on x86-64, and `JITModule::new`
+  asserts `!is_pic || arch == X86_64`. The JIT builds its own ISA with `is_pic=false`, which that assertion accepts on
+  every host, and by the controller's ruling it stays `false`: nothing depends on matching `with_flags`, and
+  `shared::BYTES_PER_VAR` assumes `false`. The comments on the ISA flags in `jit.rs` and `aot.rs` say what holds at
+  0.137 and why, and two comments that named Cranelift 0.134, on `codegen.rs`'s `emit_bin` and on `aot.rs`'s lack of
+  a `global_value` instruction, dropped the version, their claims checked again in 0.137.1's source. 13 Cranelift
+  rows of the x86-64 baseline moved, each by 8 B.
+- **Task 4 (spec step 3, on the LLVM the user chose), `155437c`: inkwell 0.11 on LLVM 23.** `inkwell` went from "0.9"
+  with `llvm22-1` to "0.11" with `llvm23-1`, and the lock moved inkwell 0.9.0 → 0.11.0, inkwell_internals 0.14.0 →
+  0.16.0 and llvm-sys 221.1.2 → 231.0.2. LLVM 23 removed the `default<Os>` and `default<Oz>` pipelines: with the bump
+  alone, 40 tests failed at run time, 22 of 104 under `--features llvm` and 18 of 45 under `--no-default-features
+  --features llvm`, 38 on `LLVM ERROR: The optimization level "Os" is no longer supported. Use O2 in conjunction with
+  the optsize attribute instead.` and 2 on the same for `"Oz"` and `minsize`. `pass_pipeline` now maps `O2`, `Os` and
+  `Oz` to `default<O2>`, and `size_attributes` still puts `optsize` on the defined functions at `Os` and `minsize`
+  with `optsize` at `Oz`, the attributes clang 23.1.4 emits at `-Os` and `-Oz` (and neither at `-O2`). CI,
+  `scripts/check-all.sh`, the README, the doc comments and the spec name LLVM 23, and `check-all.sh` reads
+  `LLVM_SYS_231_PREFIX` and probes `/usr/lib/llvm-23`. All 24 LLVM rows of the x86-64 baseline moved.
+- **Task 5 (spec step 4), `771ac87`: tree-sitter 0.27.1.** The lock moved tree-sitter 0.26.13 → 0.27.1 and nothing
+  else. 0.27 made `QueryMatch::captures` private, with a `captures()` method in its place, so the two reads of it, in
+  `grammar.rs` and `tests/rxm.rs`, call the method. 0.27.1 loads language ABI 13 to 15, and the four grammars'
+  `parser.c`, which the pinned 0.25.10 CLI generates, are ABI 15. With the TM parser's `LANGUAGE_VERSION` set to 12,
+  16 of the crate's 64 tests failed, on `Incompatible language version 12. Expected minimum 13, maximum 15`.
+- **Task 6 (the user's addition), `dd2fbdb`: ts-rs 12.0.1.** ts-rs and ts-rs-macros 10.1.0 → 12.0.1. In 12,
+  `TS::export_to_string` takes a `&Config`, so the 29 calls in the two `ts_bindings.rs` guards, 21 in `redextape-core`
+  and 8 in `redextape-wasm`, pass one: `Config::from_env()` at this commit, `Config::new()` since `e2b2d33` (below).
+  The 29 files `pnpm run build:bindings` writes were byte-identical to ts-rs 10's at this commit.
+- **Task 7 (the user's addition), `4bda226`: wasm-pack 0.15.1** at its three install sites, the Dockerfile's `wasm`
+  stage and CI's `rust-browser` and `web` jobs. Built with 0.15.0 and then 0.15.1 at the same lock, the 12 files of
+  `pkg/` and `pkg-lsp/` were byte-identical. The URLs keep `github.com/rustwasm/wasm-pack`, which redirects to
+  `wasm-bindgen/wasm-pack`.
+- **Task 8, `bd0079f`: the Mac baseline,** rewritten on the Mac, an aarch64 machine with Homebrew's LLVM 23.1.4 and
+  rustc 1.99.1, at `7398103`. First, at `1b305e0` against Homebrew's LLVM 22.1.8, the size test passed there and
+  `--write-baseline` wrote `main`'s file back byte for byte; at `7398103` the size test passed against that file before
+  it was rewritten.
+
+##### WHAT WAS LEFT OUT
+
+No bump failed its checks, so none was left out. The plan's "Not in this PR" holds the rest: spec §4.1a's web bumps,
+`web-tree-sitter` among them, in a pull request of their own; the §7.1 generated-code snapshot test, PR 2's first task;
+§4.2 onward; an LLVM 22 leg beside 23, as inkwell takes one `llvm*` feature; moving the wasm-pack URLs to their new
+home; and the tree-sitter CLI, which stays at 0.25.10 because releases from 0.26.0 on need GLIBC_2.39. Two crates
+stayed where they were inside the lock: `minicov` 0.3.8, which `wasm-bindgen-test` 0.3.80 holds below 0.3.9, and `syn`
+2.0.119, which the proc-macro crates require at 2.x.
+
+##### THE SIZE BASELINES
+
+Each column is the file at that commit, in bytes. Task 2's `16a5cc9` matches `92dba87` in every row, and `8c623cf`
+matches `155437c` and `bd0079f`. "CI image" is the file `--write-baseline` wrote at `155437c`'s tree in
+`node:22-bookworm` with apt.llvm.org's 23.1.5 snapshot (`$R/t4-ci-baseline-bookworm.txt`); it is not committed. Every
+Cranelift row from `O1` to `Oz` holds one size per program in every column.
+
+| program | backend | level | x86-64, `92dba87` | `31c12ef` | `155437c` | CI image | Mac, `1b305e0` | `bd0079f` |
+|---|---|---|---|---|---|---|---|---|
+| `loop1000000` | cranelift | O0 | 1,552 | 1,544 | 1,544 | 1,544 | 1,112 | 1,088 |
+| `loop1000000` | cranelift | O1–Oz | 1,568 | 1,576 | 1,576 | 1,576 | 1,104 | 1,104 |
+| `loop1000000` | llvm | O0 | 1,377 | 1,377 | 1,376 | 1,376 | 1,009 | 1,008 |
+| `loop1000000` | llvm | O1 | 1,105 | 1,105 | 1,136 | 1,136 | 873 | 904 |
+| `loop1000000` | llvm | O2 | 1,105 | 1,105 | 1,136 | 1,136 | 873 | 904 |
+| `loop1000000` | llvm | O3 | 1,105 | 1,105 | 1,136 | 1,136 | 873 | 928 |
+| `loop1000000` | llvm | Os | 1,097 | 1,097 | 1,136 | 1,128 | 873 | 904 |
+| `loop1000000` | llvm | Oz | 1,089 | 1,089 | 1,088 | 1,088 | 873 | 872 |
+| `sum30000` | cranelift | O0 | 1,856 | 1,848 | 1,848 | 1,848 | 1,304 | 1,288 |
+| `sum30000` | cranelift | O1–Oz | 1,824 | 1,816 | 1,816 | 1,816 | 1,296 | 1,272 |
+| `sum30000` | llvm | O0 | 1,737 | 1,737 | 1,736 | 1,728 | 1,393 | 1,392 |
+| `sum30000` | llvm | O1 | 1,417 | 1,417 | 1,416 | 1,392 | 1,209 | 1,200 |
+| `sum30000` | llvm | O2 | 1,409 | 1,409 | 1,408 | 1,384 | 1,201 | 1,200 |
+| `sum30000` | llvm | O3 | 1,433 | 1,433 | 1,432 | 1,432 | 1,217 | 1,216 |
+| `sum30000` | llvm | Os | 1,393 | 1,393 | 1,392 | 1,384 | 1,201 | 1,200 |
+| `sum30000` | llvm | Oz | 1,385 | 1,385 | 1,384 | 1,376 | 1,265 | 1,264 |
+| `list30000` | cranelift | O0 | 1,912 | 1,912 | 1,912 | 1,912 | 1,384 | 1,376 |
+| `list30000` | cranelift | O1–Oz | 1,888 | 1,888 | 1,888 | 1,888 | 1,360 | 1,352 |
+| `list30000` | llvm | O0 | 1,881 | 1,881 | 1,880 | 1,880 | 1,521 | 1,520 |
+| `list30000` | llvm | O1 | 1,585 | 1,585 | 1,608 | 1,592 | 1,353 | 1,352 |
+| `list30000` | llvm | O2 | 1,577 | 1,577 | 1,576 | 1,552 | 1,345 | 1,344 |
+| `list30000` | llvm | O3 | 1,601 | 1,601 | 1,600 | 1,600 | 1,377 | 1,376 |
+| `list30000` | llvm | Os | 1,561 | 1,561 | 1,560 | 1,552 | 1,345 | 1,344 |
+| `list30000` | llvm | Oz | 1,561 | 1,561 | 1,560 | 1,552 | 1,465 | 1,464 |
+| `map30000` | cranelift | O0 | 3,160 | 3,152 | 3,152 | 3,152 | 2,440 | 2,408 |
+| `map30000` | cranelift | O1–Oz | 3,144 | 3,144 | 3,144 | 3,144 | 2,400 | 2,376 |
+| `map30000` | llvm | O0 | 4,017 | 4,017 | 4,016 | 4,008 | 3,281 | 3,280 |
+| `map30000` | llvm | O1 | 2,553 | 2,553 | 2,568 | 2,560 | 2,297 | 2,288 |
+| `map30000` | llvm | O2 | 2,537 | 2,537 | 2,536 | 2,528 | 2,289 | 2,288 |
+| `map30000` | llvm | O3 | 2,545 | 2,545 | 2,544 | 2,536 | 2,337 | 2,336 |
+| `map30000` | llvm | Os | 2,529 | 2,529 | 2,528 | 2,512 | 2,289 | 2,288 |
+| `map30000` | llvm | Oz | 2,529 | 2,529 | 2,528 | 2,520 | 2,633 | 2,632 |
+
+**On x86-64,** Task 2 moved no row, only the version lines, to `# cranelift: 0.134.4` and `# llvm: 221.1.2`. Task 3
+moved 13 Cranelift rows by 8 B each. Task 4 moved all 24 LLVM rows and no Cranelift row: 18 shrank by exactly 1 B
+(below), and 6 grew, `loop1000000`'s `O1`, `O2` and `O3` from 1,105 to 1,136 B (+2.81%) and its `Os` from 1,097 to
+1,136 (+3.56%), `list30000`'s `O1` from 1,585 to 1,608 (+1.45%) and `map30000`'s `O1` from 2,553 to 2,568 (+0.59%).
+At Tasks 2, 3 and 4 the size test passed against the previous step's file before the file was written again.
+**On the Mac,** 43 of the 48 rows moved between `main`'s file and `bd0079f`. 19 Cranelift rows shrank, by 8 to 32 B;
+the other 5 are `loop1000000`'s `O1` to `Oz`, at 1,104. Of the LLVM rows, 18 lost 1 B, `sum30000`'s and `map30000`'s
+`O1` lost 9, `loop1000000`'s `O1`, `O2` and `Os` went from 873 to 904 B (+3.55%), and its `O3` from 873 to 928
+(+6.30%), the largest move, inside the band.
+
+**CI's LLVM 23 is not the local one.** 16 of the CI image's 24 LLVM rows differ from the committed 23.1.4 file, each
+smaller, by 8 to 24 B, at most 1.70% (`sum30000`'s `O2`, 1,408 against 1,384). The size test passed in that container
+against the committed file. Whether the point release or the distribution's build makes the difference was not
+established.
+
+**Each file's margins:** each LLVM program's `O0` size over each of its optimized rows, `(O0 − row) / row`, in the
+x86-64 file as `155437c` left it and in the Mac's as `bd0079f` did. The test fails a row whose measured size is more
+than 10% off its baseline, so a level whose size fell back to `O0`'s fails it only where the figure here is over 10%.
+
+| program | file | `O1` | `O2` | `O3` | `Os` | `Oz` |
+|---|---|---|---|---|---|---|
+| `loop1000000` | x86-64 | 21.13% | 21.13% | 21.13% | 21.13% | 26.47% |
+| `loop1000000` | Mac | 11.50% | 11.50% | 8.62% | 11.50% | 15.60% |
+| `sum30000` | x86-64 | 22.60% | 23.30% | 21.23% | 24.71% | 25.43% |
+| `sum30000` | Mac | 16.00% | 16.00% | 14.47% | 16.00% | 10.13% |
+| `list30000` | x86-64 | 16.92% | 19.29% | 17.50% | 20.51% | 20.51% |
+| `list30000` | Mac | 12.43% | 13.10% | 10.47% | 13.10% | 3.83% |
+| `map30000` | x86-64 | 56.39% | 58.36% | 57.86% | 58.86% | 58.86% |
+| `map30000` | Mac | 43.36% | 43.36% | 40.41% | 43.36% | 24.62% |
+
+Two Mac rows are inside the band, `loop1000000`'s `O3` and `list30000`'s `Oz` (below). Cranelift's `O0` rows lie within
+2.03% of its optimized rows in the x86-64 file and within 1.78% in the Mac's.
+
+##### CI'S LLVM
+
+`runs-on: docker` starts `node:22-bookworm`, Debian 12. Run in that image, the job's install step (`llvm.sh 23`, then
+an `apt-get install` of `libpolly-23-dev`) installs `llvm-23`, `llvm-23-dev` and `libpolly-23-dev` at
+`1:23.1.5~++20261028083858+a738f2737189-1~exp1~20261028203909.94`: a snapshot of LLVM's `release/23.x` branch
+labelled 23.1.5, a version not released when the plan was written, on 2026-11-02, the newest release then being
+`llvmorg-23.1.4`. `llvm-sys` 231 accepts any 23.1. In that container at Task 4, with `llvm-config` 23.1.5,
+`cargo test -p redextape-native --features llvm` passed 104 tests and `--no-default-features --features llvm` 45,
+with no `NOTE` line.
+
+**The presence loop reads `--link-static`.** On this LLVM 23, `llvm-config --libnames` prints only `libLLVM-23.so`, so a
+loop over it never looks for Polly. llvm-sys 231.0.2's build script prefers static linking when no feature says
+otherwise, and inkwell 0.11's `llvm23-1` sets none, so it reads `--libnames --link-static`, which lists `libPolly.a` and
+`libPollyISL.a` with the LLVM archives; the loop read the same from Task 4 until `741c586` (below). Since `85d0873` the
+step captures the listing before the loop: when a component's static archive is missing, `llvm-config --libnames
+--link-static` exits 1 with nothing on stdout, and a loop over its output ran zero times and passed. In
+`node:22-bookworm`, with `libLLVMCore.a` deleted after a full install, the step as it was exited 0 and the step at
+`8c623cf` exits 1; without `libpolly-23-dev` that step exits 1, naming `libPolly.a`; and with everything installed the
+step exits 0.
+
+##### THE SIZE TEST ON LLVM 23
+
+`the_size_attributes_make_oz_ir_strictly_smaller_than_os_o2_and_o3_and_os_smaller_than_o3` counts the instructions
+left in `SIZE_FIXTURE`'s IR after each level's pipeline. In the plan's probe, on LLVM 23.1.4 with the `default<O2>`
+arm and a print of the counts added, they were `O2` 61, `O3` 61, `Os` 38 and `Oz` 32, the four figures the test's doc
+gave at `31c12ef` on LLVM 22.1. With the size attributes suppressed, `Os` and `Oz` measured 61 each and the test failed
+at `Oz < O3`; on LLVM 22.1, with the `default<Os>` and `default<Oz>` pipelines still in place, the doc gave 61 and 63.
+On LLVM 23 the attributes are what sets the size levels apart from `O2`. The doc's measured margin, "(`Os` 38, `Oz`
+32)", came out of the comment in `a211c55` and is here instead.
+
+##### THE §7.2 MEASUREMENTS
+
+The per-task timings the plan names, M-browser before and after Task 2 and M-native before and after Tasks 3 and 4, and
+the A/B re-runs the implementers added to them, were taken while other work loaded the machine: the 1-minute load
+average at their starts was 22.11 to 42.62, on 32 threads. By the controller's ruling they were redone as one
+interleaved A/B of `main`'s build, at `1b305e0`, against this branch's, at `7398103`, and none of their timings is
+quoted here but one ratio of Task 4's, below. `bd0079f` and `8c623cf` change nothing either side builds: the Mac
+baseline, and `//!` lines in a test.
+
+**The machine.** Davey-Endeavor, the x86-64 Linux development machine, 32 threads, from 19:01:37 to 19:04:17 on
+2026-11-02. Three other sessions stopped their Docker builds and an Android emulator for it: their containers had exited
+at 18:52:46 and the emulator at 19:00:59, and the controller ended the hold at 19:04. Still running, by the A/B agent's
+`top` and `/proc` reads: the win11 VM, at about 0.19 of a core; a Forgejo CI runner's `taiyaku` jobs; another session's
+`git log -S`, at about one core at 19:01:51; and desktop applications, `steamwebhelper` at 90% of a core at 19:04:02.
+The A/B's 24 `uptime` lines, one at the start and one at the end of each run, read a 1-minute load of 12.50 to 23.79.
+Browser pair 3, from 19:03:19, overlapped the runner's `clippy-driver` and `rustc`: `vmstat` read 32% to 43% idle in its
+four samples, against 66% to 71% in the five inside pairs 1 and 2, and its timing figures over 1 ms read a median 1.248
+times the mean of runs 1 and 2 on base and 1.227 on final. The runs alternated, so both sides took that alike, but it
+widens the base spread.
+
+**The commands.** Each side ran in a scratch worktree at its commit, with its own `CARGO_TARGET_DIR`.
+
+- M-native ran `opt_report`, built under rustc 1.99.1 with `cargo build --release --example opt_report -p
+  redextape-native --features llvm`. Base's sha256 is `9ae296e4caf9a962ea79ceac11408fc03fbb4b847c0a3db6b23b7aec212683d5`
+  and it loads `/usr/lib/libLLVM.so.22.1`, llvm22-libs 22.1.8-2; final's is
+  `934f081417d2ea151650c72fbac1ed6d5dc9f029b8312b8f8c5bcb69a6c59c16` and it loads `/usr/lib/libLLVM.so.23.1`, llvm-libs
+  23.1.4-1. Every run's object sizes equal the committed x86-64 baseline's, at `92dba87` for base and at `7398103` for
+  final, in all 48 rows.
+- M-browser ran each worktree's `cd web && pnpm run test:probe:asm-copy`, the script's name at both sides' commits,
+  which predate #159's rename of it to `test:probe:rxm-copy`. It builds that side's wasm, with the wasm-pack release
+  its commit's CI installs first on `PATH`: 0.15.0 for base (sha256 `c6c3d54702f4bae4…`) and 0.15.1 for final
+  (`beeec12d4600d64c…`).
+- The A/B is `$R/e2-ab.zsh`, run in one transient unit, `systemd-run --user --unit=ir-bumps-e2-ab --collect --wait -q -p
+  MemoryMax=16G -p MemorySwapMax=0`. It takes the heavy and browser locks with `flock`, runs three native pairs, base
+  then final, each `systemd-run --user --scope -q -p MemoryMax=8G -p MemorySwapMax=0 -- opt_report-<side>`, into
+  `$R/m-native-ab-final-{base,final}-{1,2,3}.txt`, then three browser pairs into
+  `$R/m-browser-ab-final-{base,final}-{1,2,3}.log`, and writes `uptime` at each run's start and end. All 12 runs exited
+  0. A repeat native round, the same three pairs into `$R/m-native-ab2-final-*`, ran from 19:05:22 to 19:05:32, after
+  the window, at a 1-minute load of 14.13 to 15.34.
+- The comparers, `$R/e2-mnative_cmp.py` and `$R/e2-mbrowser_cmp.py`, take each figure's median over a side's three runs
+  and flag a final median above base's by more than the base runs' spread, their largest less their smallest. The
+  browser one also checks that the figures which must not vary are equal across all six runs. `$R/sdd/e4/ab_stats.py`
+  pools the two native rounds and reads the spreads, through the comparers' own parsing.
+
+**M-native.** Round 1 flagged 7 of the 96 figures, the 48 rows' `compile` and `compile+run`: `loop1000000`'s Cranelift
+`O1` `compile+run` and `Oz` `compile` and its LLVM `O1` `compile+run`, `sum30000`'s Cranelift `Oz` `compile`, and
+`map30000`'s Cranelift `O1` and `Os` `compile` and `Oz` `compile+run`. The repeat round flagged 3, none of those 7:
+`list30000`'s Cranelift `O3` and `Oz` `compile` and `Os` `compile+run`. Pooled, six runs a side, the same rule flags 0
+of 96. Of the 10 figures either round flagged, the pooled ratios run from 0.981 to 1.239, the two highest `list30000`
+Cranelift `O3` `compile`, 1.239, and `map30000` Cranelift `O1` `compile`, 1.214. The median final/base ratio of LLVM's
+`compile` is 0.863 in round 1, 0.895 in round 2 and 0.879 pooled; Cranelift's is 1.018, 1.012 and 1.012. The
+cons/head/tail builders at `O0` and `O3`, as final/base ratios of the medians:
+
+| row | `compile`, round 1 | round 2 | `compile+run`, round 1 | round 2 |
+|---|---|---|---|---|
+| `list30000` Cranelift `O0` | 1.022 | 1.015 | 0.981 | 0.963 |
+| `list30000` Cranelift `O3` | 0.951 | 1.399, flagged | 1.013 | 1.140 |
+| `list30000` LLVM `O0` | 0.772 | 0.911 | 1.085 | 0.966 |
+| `list30000` LLVM `O3` | 0.867 | 0.879 | 0.897 | 1.055 |
+| `map30000` Cranelift `O0` | 1.030 | 1.052 | 0.944 | 1.017 |
+| `map30000` Cranelift `O3` | 1.049 | 1.008 | 1.091 | 0.969 |
+| `map30000` LLVM `O0` | 0.995 | 0.950 | 0.944 | 1.000 |
+| `map30000` LLVM `O3` | 0.840 | 0.920 | 0.904 | 0.801 |
+
+Round 2's flag there, `list30000` Cranelift `O3` `compile`, is 204.5 µs on base, with a spread of 71.3, against 286.1 on
+final. Task 4's own second A/B round read that row at 1.376 (`m-native-t4-ab2-compare.txt`), between Task 3's and Task
+4's frozen `opt_report` binaries, which embed the same `cranelift-codegen` 0.137.1, so a ratio that size comes up on
+that row between two builds of one Cranelift.
+
+**What the native spread can and cannot rule out.** The base runs' spread is a median 18.4% of the base median in round
+1, quartiles 10.5% and 27.2%, with 22 of the 96 figures under 10%, and 20.6% in round 2. The rule flags a figure only
+when final's median is above base's by more than base's spread, so on a figure of the median spread it cannot tell a
+slowdown of under about a fifth from noise. With no change at all, three runs against three drawn from one normal
+distribution flag 8.77% of figures, 8.4 of 96, in a seeded simulation of 200,000 trials; the rounds flagged 7 and 3, and
+no figure in both. A slowdown across the rows would move the median ratios, which over both metrics and both rounds are
+1.001 to 1.018 for Cranelift and 0.863 to 0.950 for LLVM.
+
+**M-browser.** The comparer flagged 0 of 124 figures. The 24 that must not vary, the instruction count per text size and
+the steps, cap and frames per memory case, were equal across all six runs, and each of the 10 MiB figures read the same
+in all six. The six RUN medians were 1.5 to 38.7 ms on base, at final/base ratios of 0.842 to 1.006. The two rows the
+review of Task 2 raised from its loaded run read 1.006 for "loop to the step cap" (base 31.8 ms with a spread of 1.3,
+final 32.0) and 0.978 for "heap cells" (31.4 with 4.1, final 30.7). The base spread is a median 35.7% of the base median
+over the 98 SIZE figures and 36.6% over the 10 MEM `build_ms` figures, so on a typical one of those the rule cannot tell
+a slowdown of under about a third from noise; on the RUN figures it is 4.1% to 13.4%, but for "call frames" at 33.3% and
+"saved locals" at 105.3%.
+
+**The ruling.** No slowdown reproduced, so by the controller's ruling §7.2's rule is met by the repeat round and the
+pooled result. The spec says "A slowdown beyond run-to-run noise blocks the PR until explained or removed", and the plan
+reads it as "A slowdown larger than the spread of the three before-runs is a finding: report it, and do not ship it
+unexplained". Round 1's 7 native flags are not flagged again in the repeat round, the repeat round's 3 were not flagged
+in round 1, the pooled six runs a side flag none of the 96, and M-browser flags none of its 124.
+
+##### THE ONE-BYTE LLVM DIFFERENCE
+
+At Task 4, 18 of the 24 LLVM rows on x86-64 shrank by exactly 1 B, and on the Mac 18 of its 24 did. The byte was never
+in the object. inkwell 0.9.0's `MemoryBuffer::get_size` returns `LLVMGetBufferSize(..) + 1`, counting the NUL that
+LLVM guarantees after a buffer, and `as_slice`, which `llvm::object_bytes` copies, is that long; inkwell 0.11.0's
+returns `LLVMGetBufferSize(..)`. So under inkwell 0.9 every LLVM row read 1 B more than its object. A dump of
+`object_bytes` for `loop1000000` at `O0` read 1,377 B under `31c12ef` and 1,376 under `155437c`'s tree, equal in the
+first 1,376 bytes and with the same `readelf -S`; the extra byte is a `00` after the section header table, which ends
+at byte 1,376. So at `O0` LLVM 22.1.8 and 23.1.4 emitted the same object for that program. The plan's probe had seen
+the byte first: inkwell 0.11.0 on LLVM 22.1.8 shrank all 24 LLVM rows by exactly 1 B.
+
+##### AFTER THE BUMPS
+
+- **`a211c55`:** `jit.rs`'s comment on `host_isa` says `JITBuilder::new` delegates to `with_flags`, which builds an ISA
+  of its own, and that `shared::BYTES_PER_VAR` assumes `is_pic=false`. The LLVM size test is named for what the size
+  attributes do, and its doc keeps no measured margin. The README says `rust-llvm` runs `scripts/check-all.sh
+  --llvm-only`, as the job does.
+- **`85d0873`:** CI's LLVM install step captures `llvm-config --libnames --link-static` before its loop, so a missing
+  component archive fails the step (above).
+- **`b3497bf`:** the `rust-llvm` job's comment on its apt cache names what LLVM 23's `llvm-config` NEEDs past the C
+  and C++ runtimes, as `objdump -p` read it in `node:22-bookworm`: `libz3.so.4`, `libz.so.1` and `libzstd.so.1`. A
+  fresh image has the last two, and `libz3-4` comes with LLVM.
+- **`e2b2d33`:** the size test is named
+  `the_size_attributes_make_oz_ir_strictly_smaller_than_os_o2_and_o3_and_os_smaller_than_o3`, the four relations its
+  body asserts. Both `ts_bindings.rs` guards build `ts_rs::Config::new()`, ts-rs's defaults, in place of
+  `Config::from_env()`, which reads `TS_RS_LARGE_INT`, so that variable cannot change what the no-`bigint` gate checks;
+  the derived `export_bindings_*` tests still use `from_env`, so the shipped bindings are written as before. The
+  guards' docs say ts-rs maps `u64` to `bigint` "by default", where they said "unconditionally". CI's comments say
+  "(Polly's archives)" and "(a library it NEEDs is missing)".
+- **`690c5d4`:** `TmStatus::total_steps`'s doc says the same "by default". ts-rs copies the doc into the JSDoc it
+  writes, so `web/bindings/TmStatus.ts` changes in one line, its 31st, from "unconditionally" to "by default"
+  (`$R/e1-bindings.diff`). It is the one change to the generated bindings after `dd2fbdb`.
+- **`bd0079f`:** the Mac baseline (Task 8, above).
+- **`8c623cf`:** the size test's header reads its margins off `baselines/x86_64-unknown-linux-gnu.txt`, the file CI
+  checks, where it had read them off the Mac file, which no longer bears them out (below). Its Cranelift clause says
+  "well inside" the band, where it said "an order of magnitude inside": the widest Cranelift gap between `O0` and
+  `O3` in either file is 2.03%, `loop1000000` on x86-64.
+- **`d9c0cc0`:** this entry.
+- **`369d534`:** `scripts/build-web-bindings.sh` runs both derived export tests under `env -u TS_RS_IMPORT_EXTENSION -u
+  TS_RS_LARGE_INT -u TS_RS_USE_V11_HASHMAP`, and `scripts/check-all.sh` unsets the three beside its `TS_RS_EXPORT_DIR`
+  export. ts-rs 12.0.1's `Config::from_env`, which those tests build, reads these three and `TS_RS_EXPORT_DIR`, where
+  ts-rs 10.1.0 read only the last. With `TS_RS_IMPORT_EXTENSION=js`, `TS_RS_LARGE_INT=number` and
+  `TS_RS_USE_V11_HASHMAP=1` exported, each script wrote 15 of the 29 files differently from a clean run before this
+  commit, a 91-line `diff -r` in which every changed line is an import that gains `.js`, and none differently after it.
+  The other two variables change no file today, so a `cargo` wrapper first on `PATH` logged what reached each cargo
+  call: all three, in the 2 calls of `build:bindings` and the 30 of `check-all.sh`, before, and none of them after. The
+  comment in `redextape-core`'s `ts_bindings.rs` says the two scripts unset each variable ts-rs 12.0.1 reads but
+  `TS_RS_EXPORT_DIR`.
+- **`741c586`:** CI's LLVM install step fails unless `llvm-config --version` prints a 23.1 release, by `case $v in
+  23.1.*)`, where the step printed the version and compared it with nothing; llvm-sys 231.0.2's build script, without
+  strict versioning, accepts any LLVM of major version 23 or later. Its presence loop reads `llvm-config --libfiles
+  --link-static` and tests each path with `[ -e ]`, where it ran one `find` over `$LLVM_SYS_231_PREFIX/lib` and
+  `/usr/lib` for each name `--libnames --link-static` gave. In `node:22-bookworm` with apt.llvm.org's 23.1.5 snapshot
+  the two listings give 212 entries each, every `--libfiles` path under `/usr/lib/llvm-23/lib`. The step at this commit
+  exits 0 with everything installed; without `libpolly-23-dev` it exits 1 at the loop, naming
+  `/usr/lib/llvm-23/lib/libPolly.a`, and with `libLLVMCore.a` deleted it exits 1 at the assignment, as the step before
+  it did in both cases. With a stand-in `llvm-config` that prints 24.1.0, and one that prints 23.10.0, the step before
+  this commit exits 0 and the step at it exits 1.
+- **`c3df447`:** `init_native_target`'s doc names inkwell 0.11, where it named the pinned 0.9, for the `TARGET_LOCK` in
+  `targets.rs` that makes target registration thread-safe, and gives the lock's type, `LazyLock<RwLock<()>>`, where it
+  said `RwLock<()>`. The size test's `Oz < O2` bullet credits the size attributes, which are what make `Oz` smaller than
+  `O2`; `pass_pipeline`, which gives `O2`, `Os` and `Oz` one `default<O2>`, and `opt_level`, which gives them one
+  codegen level, are only why the three would otherwise tie. It had given `opt_level`'s shared codegen level as the
+  reason they would tie. The `Oz < Os` paragraph is reflowed in the same words.
+- **`df44a12`:** the size test's header states when the gate can see a dead LLVM pass, in a row whose `O0` size lies
+  outside the band around that row's optimized size, and says this entry gives each baseline file's margins, which THE
+  SIZE BASELINES does; it had read the margins off the x86-64 file. Its paragraph keeps 8 lines.
+- **`f4c2654`:** the doc of the nullability keys in `ts_derive_scan.rs` cites ts-rs-macros 12.0.1 for what
+  `#[ts(optional)]` does, where it cited 10.1.0; 12.0.1 keeps the sentence it relies on, now on `Optional` in
+  `src/optional.rs`.
+- **`ab40fec`:** the nullability gate reads ts-rs 12's container key `#[ts(optional_fields)]`, which ts-rs 10.1.0 does
+  not have. Its bare form gives each `Option` field outside a newtype that has no `optional` or `type` of its own a
+  `field?: T`, which drops the `| null`, and the gate read field attributes only, so a struct carrying it passed that
+  gate. The gate now reads the key on each struct, enum and variant, takes a variant's own in place of its enum's, and
+  fails an `Option` field the bare form reaches. It accepts the field form `optional = false`, also new in 12, which
+  leaves the field's type as it is, where it reported a mismatch, and its key parser reads past a container key's list
+  or expression value. Put on the real `LambdaStatus` in `redextape-wasm`, the bare key made ts-rs 12.0.1 write `node?:
+  number, run?: RunStatus`, and that crate's nullability test passed against `f4c2654`'s gate and failed against this
+  one, naming `LambdaStatus.node`. Of the 8 tests the commit adds, 6 failed against `f4c2654`'s gate: the 5 that expect
+  the gate to fail a fixture the bare key reaches, and the `optional = false` one. The crate's 78 lib tests pass at this
+  commit, and each of 7 sabotages of the change fails at least one of the 8.
+- **The rebase onto `337147d`:** in `dd2fbdb` both `ts_bindings.rs` conflicted with #159, which renamed the `Asm`
+  types in each file's list `Rxm` and re-sorted the list; each is resolved as #159's list with ts-rs 12's `(&cfg)` on
+  every call. The roadmap conflicted in `d9c0cc0` and `3023461`, and each is rebuilt as `337147d`'s file followed by
+  this entry as that commit left it, since the branch only appends to the roadmap. `3e2022d` names `tests/rxm.rs`, the
+  name #159 gave the test `771ac87` changes, in Task 5's account, and says `test:probe:asm-copy` was the M-browser
+  script's name at both A/B sides' commits.
+- **`7d55814`:** the comment in `redextape-core`'s `ts_bindings.rs` says the derived export tests call `from_env`, that
+  the two scripts start cargo without each variable ts-rs 12.0.1 reads but `TS_RS_EXPORT_DIR`, and that a cargo `[env]`
+  table can still set any of them, where it said those tests write the same strings into `web/bindings/` (WHAT THIS DID
+  NOT CLOSE). The nullability rule's heading in `ts_derive_scan.rs`, and the pointers to it in both `ts_bindings.rs`,
+  name the keys that say anything about null with no count, where they said three, which `ab40fec` had made false by
+  reading `optional_fields`; the heading points at `check_fields` for that key. `check_override`'s doc says it covers
+  each key in `NULLABILITY_KEYS`, where it said all three.
+- **`bc455ed`:** the size test's header says a row's margin is read off its baseline file, beside the `O0` row of its
+  program and backend, where it said this entry gives each file's margins, which describe the files as `155437c` and
+  `bd0079f` left them. Its paragraph keeps 8 lines.
+
+##### WHAT THIS DID NOT CLOSE
+
+- **The size gate on the Mac would not see every LLVM pass stop, and CI runs no job on that triple.** In
+  `baselines/aarch64-apple-darwin.txt` at `bd0079f`, `loop1000000`'s LLVM `O0` is 1,008 B against an `O3` row of 928,
+  8.62% over it and inside the ±10% band, so an `O3` pipeline that stopped firing for that program on the Mac would
+  leave the size test green; in `main`'s Mac file that margin was 15.58%. Set against every level and not `O3` alone,
+  `list30000`'s `Oz` row, 1,464 B against an `O0` of 1,520, is 3.83% inside, and it was 3.82% in `main`'s file, so that
+  one predates this branch. In the x86-64 file every LLVM row clears the band at every level, the thinnest `list30000`'s
+  `O1` at 16.92%. The Mac file is checked only where someone runs the size test on a Mac. Since `df44a12` the header of
+  `tests/size_baseline.rs` names no file's margins, and since `bc455ed` it points at no document: it says a row's margin
+  is read off its baseline file.
+- **The coverage run's "Failed to fetch dynamically imported module" failures, under load.** At Task 6,
+  `pnpm run test:coverage` failed twice before it passed: in 2 files at a 1-minute load of 56.53, then in 3 files and
+  1 test at 30.02, each failing file on `TypeError: Failed to fetch dynamically imported module:
+  http://localhost:63315/src/main.ts`; the third run passed, 281 files and 2,951 tests. Both failed logs carry vite's
+  "Re-optimizing dependencies because vite config has changed". The full runs that passed at Task 6's third try, at
+  Task 7 and in the whole-branch gate carry none, but Task 2's coverage re-run and Task 6's run of the two failed
+  files alone carry it and passed, so the line does not separate the runs. Task 6's change cannot reach what vitest
+  loads there: neither wasm build links ts-rs, and the bindings were byte-identical. The cause was not established.
+- **The session-memory test failed once, under load.** At Task 2, `test:coverage` failed in
+  `session-memory.test.ts`, "measures what a leg of history really costs against what the ring charged it", on
+  `expected -1.3466548678574888 to be greater than 0.1`, at a 1-minute load of 31.47; one of its rounds read
+  `real=-28090148` against `accounted=6343013`. The file alone passed 3 times of 3, and the whole leg, run again,
+  passed, 281 files and 2,951 tests. The cause was not established.
+- **The apt cache starts cold.** The `rust-llvm` job's cache key moved from `apt-llvm-22` to `apt-llvm-23`, which no run
+  has saved, and its `restore-keys` is the same string, so the first run downloads every .deb. The install step ran only
+  in local `node:22-bookworm` containers; that its cold path and the save after it work on the runner is unproven until
+  CI runs it. The key is fixed, and the cache action saves nothing after a hit on it, so once a run has saved it and the
+  snapshot then moves, every run downloads the packages again.
+- **CI's LLVM is whatever `release/23.x` snapshot apt.llvm.org serves that day.** The step requires `23.1.*` (`741c586`)
+  and pins no package version. The committed x86-64 baseline came from Arch's 23.1.4, and the 23.1.5 snapshot of
+  2026-10-28 already gives 16 of the 24 LLVM rows other sizes, by at most 1.70% (THE SIZE BASELINES), so a later
+  snapshot can move rows further on a pull request that changes nothing the size test measures, and a row moved past the
+  band fails it.
+- **`loop1000000`'s `Os` object is the size of its `O2` object on LLVM 23.1.4,** 1,136 B each on x86-64 and 904 on
+  the Mac, where on LLVM 22 x86-64 gave 1,097 against 1,105; on the Mac they were equal on LLVM 22 too, at 873. CI's
+  23.1.5 snapshot gives 1,128 against 1,136. Nothing asserts that a size level's object is smaller than `O2`'s: the
+  size test counts instructions in `SIZE_FIXTURE`'s IR.
+- **No box builder in `measure::CORPUS`.** Spec §7.2 asks for list and box builders; the corpus holds `loop1000000`,
+  `sum30000`, `list30000` and `map30000`, so the A/B measures list builders and no box builder. PR 2, whose heap core
+  needs box measurements, is where one comes in.
+- **`cargo deny check advisories` was not run here,** as cargo-deny is not installed; the advisories workflow runs it
+  on this branch's pull request, since the workflow's `pull_request` paths include `Cargo.lock`.
+- **`redextape-cli`'s `toml = "1.1.4"` floor is behind the lock,** which Task 2's `cargo update` took from
+  1.1.4+spec-1.1.0 to 1.1.8+spec-1.1.0. It was left alone by the controller's ruling: floors rise here only for the
+  wasm-bindgen family.
+- **The nullability gate fails some `optional_fields` shapes that keep the null** (`ab40fec`): a container carrying the
+  bare key and `= nullable` in two `ts(...)` lists, in either order, or in one list with `= nullable` after the bare
+  key, or the bare key and then `= false`, in one list or in two; an `Option<Option<T>>` field, from which ts-rs strips
+  one `Option`; a field with `ts(skip)`; and a variant whose own `type` replaces its payload. In each ts-rs 12.0.1
+  writes `| null` or no field at all, so there the gate fails where it need not, and asks for `optional = nullable` or
+  `= false`. In one list ts-rs keeps the later key, so `optional_fields = nullable, optional_fields` writes `field?: T`,
+  which drops the null, and the gate is right to fail it.
+- **A cargo `[env]` table can still set the three variables the bindings scripts drop.** `369d534` takes
+  `TS_RS_IMPORT_EXTENSION`, `TS_RS_LARGE_INT` and `TS_RS_USE_V11_HASHMAP` out of the environment cargo starts with, and
+  cargo sets an `[env]` entry of a `config.toml` it reads for the processes it runs when that variable is absent: in a
+  scratch crate whose `.cargo/config.toml` sets all three, a test run under `env -u` on each read each one set. ts-rs
+  12.0.1's `Config::from_env`, which the derived export tests build, reads all three, so under such a table the written
+  bindings can differ from what both guards check, and the guards, which build `Config::new()`, still pass. The repo's
+  `.cargo/config.toml` sets only `RUST_MIN_STACK` in `[env]`, and `$CARGO_HOME/config.toml` has no `[env]` table. Since
+  `7d55814` the comment in `redextape-core`'s `ts_bindings.rs` says that the table can still set them.
+- **Nothing has run in CI:** the branch has not been pushed. Its first `rust-llvm` run is the first CI run in which the
+  size test reads a baseline.
+
+##### VERIFICATION
+
+The whole-branch gate ran at `3e2022d` by `$R/sdd/r1-gates.zsh`, in one transient unit, from 21:01:06 to 21:17:55 on
+2026-11-02, the image's wasm-stage check among its legs, with each log's header naming HEAD `3e2022d` and index tree
+`f0e1c0f1`, under a 1-minute load average of 8.66 to 30.30 at the legs' starts, with wasm-pack 0.15.1 first on `PATH`.
+The comment guard's base was `337147d`, the merge base with `origin/main`. Nothing has run in CI.
+
+```
+scripts/check-all.sh --no-browser                      → exit 0; 0 "not found"; LLVM at /usr; nextest 1911 passed,
+                                                         33 skipped; the feature legs 1319, 1343, 130, 118, 119 and
+                                                         10 passed; the LLVM tier 104 and 45 passed
+scripts/check-all.sh --browser-only                    → exit 0; 0 "not found"; 33 passed
+cargo llvm-cov nextest --workspace --fail-under-lines 90
+                                                       → exit 0; 1911 passed, 33 skipped; lines 95.60%
+scripts/check-slow.sh                                  → exit 0; 33 passed, 0 failed
+the eight scans and the comment guard, --self-test then alone
+                                                       → 0 SCAN_FAILED
+pnpm install --frozen-lockfile; build:wasm; build:lsp-wasm; build:bindings;
+  ../scripts/check-licences.sh --self-test, then alone; biome ci --error-on-warnings; typecheck
+                                                       → exit 0 each; 433 files (biome)
+pnpm run test:coverage                                 → exit 0, first run; 282 files / 2,956 tests; 97.64 / 92.32 /
+                                                         98.41 / 98.94
+pnpm run build:app                                     → exit 0; 7 .wasm in web/dist/assets
+docker build --no-cache-filter wasm, then run          → exit 0; HTTP 200; healthy; 7 .wasm assets; the wasm stage's
+                                                         wasm-pack prints 0.15.1
+```
+
+**After the final re-review.** `7d55814` and `bc455ed` change only comments. At `bc455ed` the `redextape-test-support`
+tests, both `ts_bindings` suites under `--features ts` and the size test under `--features llvm` passed, by
+`$R/sdd/g2/g2-gates.zsh`, and the eight scans and the comment guard, on `bc455ed` with this entry's update staged and
+the guard's base `337147d`, gave 0 `SCAN_FAILED`.
+
+**Every count this entry quotes, with what produces it.** Commands run from the worktree's root under zsh, with
+`R=~/temp/redextape-ir-bumps-record`, `X=crates/redextape-native/baselines/x86_64-unknown-linux-gnu.txt` and
+`M=crates/redextape-native/baselines/aarch64-apple-darwin.txt`. `$R/sdd/e3/figures.zsh` runs every command below that
+reads git, a file or a log, and its output is `$R/sdd/e3/figures.log`.
+
+| Value | What | Produced by |
+|---|---|---|
+| 16; 14; `155437c`, `c787101`, `e810f70` | commits in the range; those changing something outside `docs/`; those changing `docs/` | `git rev-list --count 337147d..8c623cf`, then `-- . ':!docs'`; `git log --format=%h 337147d..8c623cf -- docs` |
+| 28 files, +1,166 −499 | the range | `git diff --shortstat 337147d 8c623cf` |
+| "Add both"; "can we bump redextape to use llvm 23 instead?" | the user's words | line 7 of the lane ledger, `$R/ledger.md` |
+| 48; 48 | rows in each baseline | `grep -vc '^#' $X`; the same on `$M` |
+| absent | the x86-64 file on `main` | `git ls-tree --name-only 337147d crates/redextape-native/baselines/` |
+| 0; 13; 24; 0 | x86-64 rows moved by Tasks 2, 3 and 4, and after Task 4 | `git diff -U0 <a> <b> -- $X \| grep -c '^+[^+#]'` for `92dba87 16a5cc9`, `16a5cc9 31c12ef`, `31c12ef 155437c` and `155437c 8c623cf` |
+| 43 | Mac rows moved | the same for `1b305e0 bd0079f` on `$M`; `head -1 $R/mac-deltas.txt` |
+| the size table | every row at each commit | `python3 -I $R/sdd/e3/table.py`, which reads each file with `git show <commit>:<file>` and the CI image's from `$R/t4-ci-baseline-bookworm.txt`, and exits if a Cranelift `O1`–`Oz` row is not one size |
+| 1,326; exit 100 each | the raised `O3` row; the three sabotages of Task 1 | `$R/logs/t1-sabotage-{grow,delete,extra}.log` |
+| 18 by 1 B; 6 grew, +2.81%, +3.56%, +1.45%, +0.59% | Task 4's x86-64 LLVM rows | `$R/t4-baseline-deltas.txt` |
+| 1 passed, exit 0, each | the size test at Tasks 2, 3 and 4 against the previous step's file | `$R/logs/t2-size-test-vs-t1.log`, `t3-size-test-vs-t2.log` and `t4-size-test-vs-t3.log` |
+| 19 by 8 to 32 B; 18 by 1 B, 2 by 9 B; +3.55%, +6.30% | the Mac's moved Cranelift and LLVM rows | `$R/mac-deltas.txt` |
+| 23.1.4, 22.1.8, 1.99.1; 1 passed, an empty diff; 1 passed | the Mac's LLVMs and rustc; the size test and `--write-baseline` at `1b305e0`; the size test at `7398103` | `$R/sdd/group-f-report.md`, "The Mac"; `$R/mac-logs/before-test.log`, `before-worktree-diff.txt` (0 bytes) and `after-test.log` |
+| 8 | lines of the size test's paragraph on what the gate protects at `bc455ed`, from its first line to the first that is not a `//!` line with text | `git show bc455ed:crates/redextape-native/tests/size_baseline.rs \| awk '/^\/\/! It can catch an \*\*LLVM\*\*/ {on=1} on && !/^\/\/! ./ {exit} on {n++} END {print n+0}'` |
+| 16; 8 to 24 B; 1.70% | CI image rows that differ; by how much; the most, `sum30000` `O2` | `grep -c '^>' $R/t4-ci-baseline.diff`; `$X` at `155437c` against the CI image's file, the `join` and `awk` in `figures.zsh` |
+| 84 | packages `cargo update` locked | `grep Locking $R/logs/t2-cargo-update.log` |
+| `minicov` 0.3.8, 0.3.9 available; `syn` 2.0.119, 3.0.9 available | the two held back | `grep Unchanged $R/cargo-update-dry-run.txt`; the plan's "Held back" line for why |
+| the versions of Tasks 2 to 6 | each step's lock changes | `python3 -I $R/sdd/e3/lockdiff.py <a> <b>`, which compares the `name`/`version` pairs of two commits' `Cargo.lock` |
+| 20, 16 of them `cranelift-*`; 3; 1; 2 | lock names changed by Tasks 3, 4, 5 and 6 | the same, for `16a5cc9 31c12ef`, `31c12ef 155437c`, `155437c 771ac87` and `771ac87 dd2fbdb`; `grep -c '^  cranelift-'` on the first |
+| `tokio` 1.54.1 under `wasm-bindgen-futures` 0.4.80's `rt`, under `wasm-bindgen-test` 0.3.80 | how `tokio` enters | `cargo tree --offline -i tokio -e all --all-features --target all` |
+| the floors | the manifests' requirements | `git diff 337147d 8c623cf -- '*.toml'` |
+| `[dev-dependencies]` | where `wasm-bindgen-test` sits | `crates/redextape-wasm/Cargo.toml` |
+| `wasm`, the group of all 25 package entries in one file and not the other | Task 2's change to `web/src/third-party-licences.json` | its `packages` at `337147d` against `16a5cc9`, the `python3` in `figures.zsh` |
+| 104 run, 22 failed; 45 run, 18 failed; 38 and 2 | Task 4's bump alone; the `"Os"` and `"Oz"` errors | the `Summary` lines of `$R/logs/t4-step2.log`; `grep -c '"Os" is no longer supported'` and `'"Oz" is no longer supported'` on it |
+| `optsize`; `minsize optsize`; neither | clang 23.1.4's attributes at `-Os`, `-Oz` and `-O2` | `echo 'int f(int x){return x*2;}' \| clang -x c -S -emit-llvm -O<level> -o - -`, the `attributes #0` line |
+| 64 run, 16 failed | tree-sitter at ABI 12 | the `Summary` line of `$R/logs/t5-step4-sabotage.log` |
+| 4 | grammars at `LANGUAGE_VERSION 15` | `grep -c 'LANGUAGE_VERSION 15' grammars/*/src/parser.c` |
+| 21; 8 | `export_to_string(&cfg)` calls in core and wasm | `grep -c 'export_to_string(&cfg)'` on the two `tests/ts_bindings.rs` |
+| `Config::new()` in both guards; `from_env` reads `TS_RS_LARGE_INT`; `Config::from_env()` in the derived test | `e2b2d33`'s guards; ts-rs 12.0.1; ts-rs-macros 12.0.1's `export_bindings_*` | `grep -c 'ts_rs::Config::new()'` on the two guards; `grep -n` on `src/lib.rs` of each crate in `$CARGO_HOME/registry/src/*/` |
+| line 31, one line | the bindings' one change since ts-rs 10 | `$R/e1-bindings.diff`; `diff -r $R/bindings-t6-before web/bindings` as `figures.zsh` ran it at `ab40fec`, before the rebase, in `$R/sdd/r2-figures.log.before` |
+| `FILES=12 DIFFERENT=0` | wasm-pack 0.15.0 against 0.15.1 | `$R/logs/t7-step4-same-artefacts.log` |
+| 1; 2 | 0.15.1 install lines in the Dockerfile and in `ci.yml` | `grep -c 'wasm-pack/releases/download/v0.15.1'` on each |
+| `1:23.1.5~++20261028083858+a738f2737189-1~exp1~20261028203909.94`; 23.1.5 | the CI packages; `llvm-config --version` there | `$R/logs/c6-full.log` |
+| `node:22-bookworm`; `llvmorg-23.1.4`; any 23.1 | CI's image; the newest LLVM release on 2026-11-02; what llvm-sys 231 accepts | the plan's "Verified facts": line 4 of run 621's `rust-llvm` log, and GitHub's releases |
+| 104; 45; 0 | the native tests in that container; `NOTE` lines | the `test result` lines of `$R/logs/t4-ci-probe.log`, summed per command; `grep -c NOTE` on it |
+| `libLLVM-23.so`; `libPolly.a`, `libPollyISL.a` | plain `--libnames` there; Polly's archives in the `--link-static` listing | `$R/logs/t4-ci-probe.log` |
+| prefer static; `["llvm-sys-231"]` | llvm-sys 231.0.2's default with no link feature; inkwell 0.11.0's `llvm23-1` | `LinkingPreferences::init` in llvm-sys 231.0.2's `build.rs`; `grep 'llvm23-1 =' ` on inkwell 0.11.0's `Cargo.toml`, both in `$CARGO_HOME/registry/src/*/` |
+| `libz3.so.4`, `libz.so.1`, `libzstd.so.1`; `libz3-4` absent | what `llvm-config` NEEDs past the runtimes; the fresh image | `NEEDED` in `$R/logs/c6-full.log`; `$R/logs/c7-base-image-libs.log` |
+| `"true"` on x86-64; `!is_pic \|\| … X86_64` | cranelift-jit 0.137.1's `with_flags` and `JITModule::new` | `grep -n -E 'is_pic\|X86_64'` on its `src/backend.rs` in `$CARGO_HOME/registry/src/*/` |
+| no match | ts-rs in the wasm builds | `cargo tree --offline -p redextape-wasm -p redextape-lsp-wasm --target wasm32-unknown-unknown -e normal -i ts-rs` |
+| 24, each 1 B | rows inkwell 0.11.0 on LLVM 22.1.8 shrank in the plan's probe | `$R/baseline-step2.txt` against `$R/baseline-step3.txt`, the `join` in `figures.zsh` |
+| 0; 1; 0 and 1 | the step at `8c623cf` with everything installed; without `libpolly-23-dev`; with `libLLVMCore.a` deleted, the step before `85d0873` and the one at `8c623cf` | `grep EXIT_ $R/logs/c6-{full,nopolly,nocore}.log`; the step's commands at `8c623cf` are unchanged since `85d0873`: `git diff 85d0873 8c623cf -- .forgejo/workflows/ci.yml`, comment lines aside, is empty |
+| `apt-llvm-22`; `apt-llvm-23` | the cache key on `main` and on the branch | `git show 337147d:.forgejo/workflows/ci.yml \| grep -c apt-llvm-22`; `grep -c apt-llvm-23 .forgejo/workflows/ci.yml` |
+| 61, 61, 38, 32; 61, 61, 61, 61 | `O2`, `O3`, `Os`, `Oz` instructions on LLVM 23.1.4, with and without the attributes | `grep PROBE_COUNTS $R/probe-llvm23-nextest-fixed.log $R/probe-llvm23-noattrs.log` |
+| 61; 38, 32; 61, 63 | the test's doc on LLVM 22.1: `O2` and `O3`; `Os`, `Oz`; without the attributes | `git show 31c12ef:crates/redextape-native/src/llvm.rs \| grep -n -E 'measure 61\|Os. 38'`; the margin's `-` line in `git show a211c55 -- crates/redextape-native/src/llvm.rs`, and none in `llvm.rs` now |
+| `+ 1`; none | inkwell's `get_size` in 0.9.0 and 0.11.0 | `grep -A3 'pub fn get_size'` on `src/memory_buffer.rs` of each in `$CARGO_HOME/registry/src/*/` |
+| 1,377 and 1,376 B | the `loop1000000` `O0` dump | `$R/sdd/group-b-report.md`, step 7; `$R/logs/t4-dump-t3-readelf-S.txt` |
+| 22.11 to 42.62; 32 | the 1-minute load at the start of each earlier timing run; threads | the first `load average` of `$R/logs/m-browser-*-t2-*.log` and `$R/m-native-{before,after}-*-[123].txt`; `nproc` |
+| `1b305e0`, `7398103`; 0 lines each | the A/B's two sides; `git status --short` in each scratch worktree | the `SIDE` lines of `$R/m-browser-ab-final-*.log` and `$R/sdd/e2-prep-{base,final}.log` |
+| `test:probe:asm-copy`; `test:probe:rxm-copy` | the M-browser script at both A/B sides' commits; its name since #159 | `grep -o '"test:probe:[a-z-]*"'` on `git show <side>:web/package.json` for each side, and on `web/package.json` |
+| 2 files; 0 | what `bd0079f` and `8c623cf` change after `690c5d4`; the size test's changed lines that are not `//!` | `git diff --stat 690c5d4 8c623cf`; `git diff -U0 690c5d4 8c623cf -- crates/redextape-native/tests/size_baseline.rs`, its `+` and `-` lines not starting `//!` |
+| three; 18:52:46; 19:00:59; 19:04; "loop to the step cap", "heap cells" | the other sessions holding; their containers exiting; the emulator off; the hold's end; the two rows Task 2's review raised | the lane ledger, `$R/ledger.md`: its "18:32" line naming the three owners, and its "18:52:46", "19:01 emulator off", "Released" and "Spec ❌" lines |
+| 0.19 of a core; `taiyaku`; `git log -S`, about one core; `steamwebhelper`, 90%; `clippy-driver` and `rustc` | what still ran | `$R/sdd/group-e2-report.md`, "The machine during the run": the A/B agent's `top` and `/proc` reads, which no log keeps |
+| 24; 19:01:37 to 19:04:17; 12.50 to 23.79 | the A/B's `uptime` lines; its first START and last END; their 1-minute load | the `START` and `END` lines of `$R/m-native-ab-final-*-[123].txt` and `$R/m-browser-ab-final-*-[123].log`, the `up` function in `figures.zsh`; the unit's start and end in `journalctl --user -u ir-bumps-e2-ab` |
+| 19:05:22 to 19:05:32; 14.13 to 15.34 | the repeat round | the same on `$R/m-native-ab2-final-*-[123].txt`; its six `opt_report` starts in `journalctl --user` |
+| 32% to 43%; 66% to 71% | idle in pair 3's four `vmstat` samples; in the five inside pairs 1 and 2 | `$R/e2-ab-vmstat.log`, from `vmstat -t 15`: the samples stamped 19:03:35 to 19:04:20, and 19:02:05 to 19:03:05 |
+| 1.248; 1.227 | pair 3's timing figures over 1 ms against the mean of runs 1 and 2, base and final | `python3 -I $R/sdd/e4/ab_stats.py $R` |
+| the two sha256; `/usr/lib/libLLVM.so.22.1`, llvm22-libs 22.1.8-2; `/usr/lib/libLLVM.so.23.1`, llvm-libs 23.1.4-1 | the M-native binaries | `sha256sum`, `ldd` and `pacman -Qo` on `~/.cache/redextape-ir-bumps-mnative/opt_report-{base,final}` |
+| rustc 1.99.1; the `cargo build` | how each binary was built | `$R/sdd/e2-prep-{base,final}.log`, each with `CARGO_EXIT=0`; `$R/sdd/e2-prep.zsh` |
+| 48 rows, 6 runs of 6 each; 37 | the A/B's object sizes against `$X` at `92dba87` (base) and at `7398103` (final); rows that differ with base set against `7398103`, the control | the `cmp` loop in `figures.zsh` |
+| 0.15.0, `c6c3d54702f4bae4…`; 0.15.1, `beeec12d4600d64c…` | each side's wasm-pack | the `wasm-pack:` lines of the browser logs; `sha256sum` on `~/.cache/redextape-ir-bumps-wasmpack/v0.15.{0,1}/wasm-pack`; `grep -c 'wasm-pack/releases/download/v0.15.0'` on `git show 1b305e0:` of `ci.yml` and the Dockerfile, 2 and 1 |
+| `ir-bumps-e2-ab`; `-p MemoryMax=16G -p MemorySwapMax=0` | the transient unit | `$R/sdd/group-e2-report.md`, "Phase 2 plan" step 2; the unit's name in the journal |
+| 12, exit 0; 48 rows each native run; `Tests 2 passed` each browser run | the A/B's runs | `grep -c '^EXIT=0'`, the row count and the `Tests` line of each log, the "ab run order" loop in `figures.zsh` |
+| 7 of 96; 3 of 96; the flagged figures; 204.5, 71.3 and 286.1 | M-native round 1; the repeat round; their `FINDINGS` | `python3 -I $R/e2-mnative_cmp.py $R ab-final-base ab-final-final`, then with `ab2-final-base ab2-final-final`; each output equals `$R/m-native-ab-final-compare.txt` and `$R/m-native-ab2-final-compare.txt` |
+| the builders' 32 ratios; 0.863, 0.895; 1.018, 1.012 | the cons/head/tail table; the `compile` median ratios of LLVM and Cranelift per round | the same: "the cons/head/tail builders" and the `compile` median-ratio lines |
+| 0 of 96; 0; 0.981 to 1.239, 1.239, 1.214; 0.879, 1.012; 1.001 to 1.018, 0.863 to 0.950 | pooled; flagged in both rounds; the pooled ratios of the 10 flagged figures; the pooled `compile` median ratios, LLVM and Cranelift; the median ratios over both metrics and rounds | `python3 -I $R/sdd/e4/ab_stats.py $R` |
+| 18.4%, 10.5%, 27.2%, 22; 20.6%; 8.77%, 8.4 | the native base spread, round 1 and the repeat round; the rule's flag rate with no change | the same |
+| 1.376; `cranelift-codegen-0.137.1` in both | Task 4's second round on `list30000` Cranelift `O3` `compile`; its two binaries | `python3 -I $R/t4-mnative_cmp.py $R before-t4-ab2 after-t4-ab2`; the `BINARY` lines of its logs; `strings` on `~/.cache/redextape-ir-bumps-mnative/opt_report-{t3,t4}` |
+| 0 of 124; 0 of 24; 10 | M-browser's flags; the fixed figures that differ; the MiB figures equal in all six runs | `python3 -I $R/e2-mbrowser_cmp.py "$R/m-browser-ab-final-base-{i}.log" "$R/m-browser-ab-final-final-{i}.log"`, whose output equals `$R/m-browser-ab-final-compare.txt`; the `MiB=` values of the six logs, through `sort \| uniq -c` |
+| 1.5 to 38.7 ms; 0.842 to 1.006; 31.8, 1.3, 32.0, 1.006; 31.4, 4.1, 30.7, 0.978 | the base RUN medians; their ratios; the two rows Task 2's review raised | that comparer's `RUN` lines; `ab_stats.py` |
+| 35.7% of 98; 36.6% of 10; 4.1% to 13.4%, 33.3%, 105.3% | the browser base spread on SIZE, MEM `build_ms` and RUN | `python3 -I $R/sdd/e4/ab_stats.py $R` |
+| the ruling; the two quotes | §7.2's rule met by the repeat round and the pooled result; the spec's and the plan's wording | the controller's brief, `$R/sdd/group-e4-brief.md`, step 1; spec §7.2 and the plan's "§7.2 measurements" |
+| 56.53 and 30.02; 2 and 3 files; 1 test | the two failed coverage runs at Task 6 | `$R/logs/g5-6-test-coverage.log` and `g5-6-test-coverage-rerun.log`, ANSI stripped: the first `load average`, `Test Files`, `Tests` |
+| yes, yes; no, no, no; yes, yes | "Re-optimizing dependencies" in the two failed runs; in Task 6's third run, Task 7's and the gate's; in Task 2's re-run and Task 6's two-file run | `grep -c 'Re-optimizing dependencies'` on those logs, ANSI stripped: `g5-6-test-coverage{,-rerun}.log`; `g5-6-test-coverage-rerun2.log`, `g5-7-test-coverage.log`, `$R/g5-r1-test-coverage.log`; `g5-2-test-coverage-rerun.log`, `g5-6-rerun-two-files.log` |
+| 281 and 2,951 | files and tests of Task 6's third run | `Test Files` and `Tests` in `$R/logs/g5-6-test-coverage-rerun2.log`, ANSI stripped |
+| −1.3466548678574888; 31.47; `real=-28090148` | the session-memory failure; its load; the round | `$R/logs/g5-2-test-coverage.log`, ANSI stripped |
+| 3 of 3; 281 and 2,951 | the file alone; the leg re-run | `$R/logs/t2-session-memory-rerun-{1,2,3}.log`; `$R/logs/g5-2-test-coverage-rerun.log` |
+| 8.62%; 15.58%; 3.83%; 3.82%; 16.92%; 17.50% | the Mac's `loop1000000` `O3` margin at `bd0079f` and on `main`; its `list30000` `Oz` at both; x86-64's thinnest, `list30000` `O1`, and its `O3` | `awk -F'\t' -f $R/sdd/e3/margins.awk $M`, the same on `git show 1b305e0:$M`, and on `$X` |
+| 2.03%; 1.78% | the widest Cranelift gap, `loop1000000` on x86-64; the widest on the Mac | the same awk on `$X` and `$M` |
+| 1911 / 33; 1319, 1343, 130, 118, 119, 10; 104, 45; 0; /usr | the gate's nextest legs; `not found`; the LLVM it used | the `Summary` lines of `$R/g1-r1-native.log`; `grep -c 'not found'` on it and `$R/g1-r1-browser.log`; `using LLVM` in the former |
+| 33 | the browser tier | `test result` in `$R/g1-r1-browser.log` |
+| 1911 / 33; 95.60% | the coverage run's tests; its line coverage | `Summary` and `TOTAL` in `$R/g2-r1.log` |
+| 33 and 0 | the slow tier | the `test result` lines of `$R/g3-r1.log`, summed |
+| 433; 282 and 2,956, first run; 97.64 / 92.32 / 98.41 / 98.94; 7 | biome's files; the coverage run's files and tests; its row; the built `.wasm` | `$R/g5-r1-biome.log`; `Test Files`, `Tests` and `All files` in `$R/g5-r1-test-coverage.log`, ANSI stripped, the one run in it; `DIST_WASM_ASSETS` in `$R/g5-r1-build-app.log` |
+| 200; healthy; 7; 0.15.1 | the image | `HTTP`, `HEALTH` and `WASM_ASSETS` in `$R/g6-r1.log`; `$R/g6-r1-wasm-stage.log` |
+| 8.66 to 30.30; 17 | the load at the gate's legs' starts; logs naming HEAD `3e2022d` and index tree `f0e1c0f1` | the `START` and `HEAD` lines of `$R/g*-r1*.log` |
+| 21:01:06; 21:17:55; 21:17:45 | the gate's start and end; the wasm-stage check's start | `START` in `$R/g4-r1.log`; `$R/r1-gates.done`; `START` in `$R/g6-r1-wasm-stage.log` |
+| 0; `337147d` | `SCAN_FAILED` at `3e2022d`; the comment guard's base, the merge base with `origin/main` | `grep -c SCAN_FAILED $R/g4-r1.log`; `changed files since` in it; `git merge-base origin/main 3e2022d` |
+| `d9c0cc0`; `369d534`, `741c586`, `c3df447`, `df44a12`, `f4c2654`, `ab40fec`; 7 | this entry's first commit and the commits after it, in order; their count | `git log --reverse --format=%h 8c623cf..ab40fec`; `git rev-list --count 8c623cf..ab40fec` |
+| every one exists; on `337147d..` the branch, on `1b305e0..ir-bumps-pre-rebase` (`7398103` alone), a base (`1b305e0`, `337147d`) or a tree (`f0e1c0f1`) | each commit this entry names | `git cat-file -e`, `git cat-file -t` and `git merge-base --is-ancestor` on each backticked 7-to-40-character hex string in the entry, the loop in `figures.zsh` |
+| the margins table; 8.62%, 3.83% | each LLVM program's `O0` over each optimized row, in `$X` and `$M`; the two Mac rows inside the band | `awk -F'\t' -f $R/sdd/e3/margins.awk $X`, the same on `$M` |
+| `155437c`; `bd0079f` | the last commit to change each file | `git log -1 --format=%h ab40fec -- $X`, the same for `$M` |
+| more than 10% | what the size test fails | `delta.abs() > TOLERANCE` and `TOLERANCE: f64 = 0.10` in `crates/redextape-native/tests/size_baseline.rs` |
+| 15 of 29; 91 lines; every changed line an import gaining `.js`; none after | before `369d534`, a clean run of each script against one with the three variables exported; after it | `grep -c '^diff -r'` and `wc -l` on `$R/sdd/g/f1-before-{bwb,ca}.diff`, `ls $R/sdd/g/f1-before-bwb-clean \| wc -l`, its `>` lines against `import type .*\.js";$`; `wc -l` on `$R/sdd/g/f1-after-{bwb,ca}.diff`; made by `$R/sdd/g/f1-sabotage.zsh` |
+| 2; 30; all three each time; none | `cargo` calls of `build:bindings` and of `check-all.sh`; the variables that reached them before and after | `grep -c '^cargo '` and `grep -c -E '^TS_RS_(IMPORT_EXTENSION\|LARGE_INT\|USE_V11_HASHMAP)='` on `$R/sdd/g/f1-{before,after}-{bwb,ca}-sabotage.cargo-env.log` |
+| `TS_RS_LARGE_INT`, `TS_RS_EXPORT_DIR`, `TS_RS_IMPORT_EXTENSION`, `TS_RS_USE_V11_HASHMAP`; `TS_RS_EXPORT_DIR` | what ts-rs 12.0.1 and 10.1.0 read | `grep -n 'env::var'` on ts-rs 12.0.1's `src/lib.rs` and over ts-rs 10.1.0's `src/`, in `$CARGO_HOME/registry/src/*/` |
+| `23.1.*`; 212 and 212; `/usr/lib/llvm-23/lib`; 0; 1, `/usr/lib/llvm-23/lib/libPolly.a`; 1; 0 and 1, for 24.1.0 and for 23.10.0 | `741c586`'s step: its version test; the two listings; their one directory; everything installed; no Polly; no `libLLVMCore.a`; the stand-ins, before and at the commit | `.forgejo/workflows/ci.yml`; the `words`, `directories`, `EXIT_STEP`, `EXIT_OLD_STEP` and `advertises` lines of `$R/ci-probe-g/g-{full,nopolly,nocomp,version}.log`; the steps run, `$R/ci-probe-g/new/`, equal `$R/ci-probe-g/committed/`, taken from `f4c2654`, and `git diff 741c586 ab40fec -- .forgejo/workflows/ci.yml` is empty |
+| 23 or later | the major versions llvm-sys 231.0.2 accepts without strict versioning | `is_compatible_llvm` in its `build.rs` in `$CARGO_HOME/registry/src/*/` |
+| `LazyLock<RwLock<()>>` | inkwell 0.11.0's `TARGET_LOCK` | `grep -n 'static TARGET_LOCK'` on its `src/targets.rs` |
+| the same words | `c3df447`'s `Oz < Os` paragraph before and after | the words of its `-` and `+` lines, compared by the `python3` in `figures.zsh` |
+| 8 | lines of the size test's paragraph at `ab40fec`, counted the same way | `git show ab40fec:crates/redextape-native/tests/size_baseline.rs \| awk '/^\/\/! It can catch an \*\*LLVM\*\*/ {on=1} on && !/^\/\/! ./ {exit} on {n++} END {print n+0}'` |
+| the same sentence | ts-rs-macros 10.1.0's doc on `optional` and 12.0.1's on `Optional` | `grep -A2 'turns an .t: Option<T>. into'` on 10.1.0's `src/attr/field.rs` and 12.0.1's `src/optional.rs` |
+| `optional_fields`, new on `StructAttr`, `EnumAttr` and `VariantAttr`; `optional = false`, new | the attribute keys ts-rs-macros 12.0.1 parses and 10.1.0 does not | `python3 -I $R/sdd/e5/keys.py` on each version's source, every key of every `impl_parse!` block; `parse_optional` in 12.0.1's `src/optional.rs`, and 10.1.0's `optional` arm in `src/attr/field.rs`, which takes `nullable` alone |
+| `node?: number, run?: RunStatus`; passed against `f4c2654`'s gate; failed against `ab40fec`'s, naming `LambdaStatus.node` | the bare key on `LambdaStatus` | `$R/sdd/e5/known-positive.zsh`, run once with each gate's `ts_derive_scan.rs` in place: `$R/sdd/e5/known-positive-head.log` and `$R/sdd/e5/known-positive.log` |
+| 6 of the 8; 5; 78; 7, each failing one or more of the 8 | the new tests against `f4c2654`'s gate; those expecting a failure; the lib tests at `ab40fec`; the sabotages | `$R/sdd/e5/before.log`, run with the tests added to `f4c2654`'s file; `$R/sdd/e5/gate-test-support.log`; `$R/sdd/e5/sabotage.log` and `$R/sdd/e5/sabotage-s7.log`, made by `$R/sdd/e5/sabotage.zsh` |
+| the generated types | what ts-rs 12.0.1 writes for each `optional_fields` shape; for each spelling of two keys on one container, in one `ts(...)` list and in two | `$R/sdd/e5/tsrs-probe.log`, from `cargo run --offline` in `$R/sdd/e5/tsrs-probe`; `$R/sdd/g2/tsrs-probe.log`, the same in `$R/sdd/g2/tsrs-probe` |
+| fails, or passes | the gate's verdict on each shape; at `bc455ed`, on each spelling, with the words of its panic | `$R/sdd/e5/gate-probe.log`, from `cargo run --offline` in `$R/sdd/e5/gate-probe`, one directory per shape; `$R/sdd/g2/gate-probe.log`, the same in `$R/sdd/g2/gate-probe` |
+| `apt-llvm-23` twice; nothing saved after a hit on the primary key | the cache's `key` and `restore-keys`; the cache action's save step | `grep -n -E 'key: apt\|restore-keys: apt' .forgejo/workflows/ci.yml`; `isExactKeyMatch` in `src/saveImpl.ts` of actions/cache at the commit `ci.yml` pins, `$R/sdd/e5/actions-cache/saveImpl.ts` |
+| `23.1.*` and no version | what the step requires and pins | `.forgejo/workflows/ci.yml`: the `case` line, `/tmp/llvm.sh 23` and `apt-get install -y --no-install-recommends libpolly-23-dev` |
+| `toml = "1.1.4"`; 1.1.4+spec-1.1.0 → 1.1.8+spec-1.1.0 | the floor; Task 2's lock change | `grep -n '^toml' crates/redextape-cli/Cargo.toml`; `python3 -I $R/sdd/e3/lockdiff.py 337147d 16a5cc9` |
+| 301 to `github.com/wasm-bindgen/wasm-pack` | the old wasm-pack URL | `curl -sI https://github.com/rustwasm/wasm-pack`, `$R/sdd/e5/claims.log` |
+| 0 | Task 3's changed Rust lines that are not comments | `git diff -U0 16a5cc9 31c12ef -- '*.rs'`, its `+` and `-` lines not starting `//` |
+| 8, 4, 2, 1, 1; 7; 2 | lines naming LLVM 23 in CI, `check-all.sh`, the README, the spec and `llvm.rs` at `155437c`; `LLVM_SYS_231_PREFIX` and `/usr/lib/llvm-23` in `check-all.sh` | `git show 155437c:<file> \| grep -c -E 'LLVM 23\|llvm-23\|llvm23'`, `LLVM 23` alone for `llvm.rs`, then the other two greps, in `$R/sdd/e5/claims.zsh` and `figures.zsh` |
+| a private `captures` field and a `captures()` method; 13 and 15 | tree-sitter 0.27.1's `QueryMatch`; the ABI range it loads | its `binding_rust/lib.rs`; `TREE_SITTER_MIN_COMPATIBLE_LANGUAGE_VERSION` and `TREE_SITTER_LANGUAGE_VERSION` in `binding_rust/bindings.rs` |
+| `--llvm-only` | what the README and the `rust-llvm` job run | `grep -n -- '--llvm-only' README.md`; `grep -n 'check-all.sh --llvm-only' .forgejo/workflows/ci.yml` |
+| Davey-Endeavor | the machine | `hostname` |
+| 1; 2 | install lines that keep `github.com/rustwasm/wasm-pack`, in the Dockerfile and in `ci.yml` | `grep -c 'github.com/rustwasm/wasm-pack'` on each |
+| `690c5d4`, `7398103`; the same subjects and bodies, in order | the A/B's final side after and before the rebase, the 14th commit of each range; the 24 commits of `337147d..3023461` and of `1b305e0..ir-bumps-pre-rebase` | `git log --reverse --format=%h` on each range, its 14th line; `git log --reverse --format='%s%n%b'` on each, compared |
+| 23 of 24; `dd2fbdb`'s, sorted, with `Asm` read as `Rxm`; `dd2fbdb`'s in its other files, in order | the commits whose `+` and `-` lines are as before the rebase, in order; the one that is not | `git show --format= -M` of each pair, its `+` and `-` lines but the file headers, compared, in the "r2" part of `figures.zsh` |
+| 338 files, +5,404 −5,098, both; 18 lines a side, `(&cfg)` on the rebase's | #159's change and the rebase's change to the branch; the `+` and `-` lines one has and the other not, the 9 renamed entries' calls in the two `ts_bindings.rs` | `git diff -M --shortstat 337147d~1 337147d` and `ir-bumps-pre-rebase 3023461`; the `python3` in `figures.zsh` over both diffs' lines |
+| both `ts_bindings.rs`, in `dd2fbdb`; the roadmap, in `d9c0cc0` and `3023461` | the rebase's conflicts | `$R/r1-conflicts.md`, its three "Stop" sections |
+| #159's list with `(&cfg)`; 0 | the calls in each `ts_bindings.rs` at `dd2fbdb`; those without `&cfg` | `git show 337147d:<file> \| grep export_to_string`, `()` read as `(&cfg)`, against the same at `dd2fbdb`; `grep -c 'export_to_string()'` |
+| 0 deletions; the first 29,924 lines `337147d`'s | the roadmap at `d9c0cc0`, `3023461` and `3e2022d`, against `337147d`'s | `git diff --numstat 337147d <commit> -- docs/superpowers/plans/2026-07-19-redextape-roadmap.md`; `cmp` of its first lines with `git show 337147d:` of it |
+| `tests/rxm.rs` | the test `771ac87` changes, #159's name for it, which `3e2022d` puts in Task 5's account | `git show --stat --format= 771ac87`; the `R` line of `git show -M --name-status --format= 337147d` for `tests/asm.rs`; the `+` lines of `git show 3e2022d` |
+| `7d55814`, `bc455ed`; 0 | the commits that answer the final re-review, in order; their changed Rust lines that are not comments | `git log --reverse --format=%h e0a5ab6..bc455ed`; `git diff -U0 e0a5ab6 bc455ed -- '*.rs'`, its `+` and `-` lines not starting `//` after their indent |
+| `Ok("number")`, `Ok("js")`, `Ok("1")` | what a test reads for the three variables under `env -u` on each, with all three in its crate's `[env]` | `$R/sdd/g2/envdemo.log`, from `cargo test --offline -- --nocapture` in `$R/sdd/g2/envdemo` |
+| `RUST_MIN_STACK`; no `[env]` | the `[env]` keys of the repo's `.cargo/config.toml`; the tables of `$CARGO_HOME/config.toml` | `$R/sdd/g2/cargo-configs.log`: an `awk` over `.cargo/config.toml`'s `[env]` table, and `grep '^\['` on `$CARGO_HOME/config.toml` |
+| 78; 3 and 3; 1, 0 `NOTE`; 0; `337147d` | at `bc455ed`: the test-support lib tests; the two `ts_bindings` suites; the size test; `SCAN_FAILED`; the comment guard's base | `test result` in `$R/sdd/g2/gate-test-support.log`; `Summary` in `$R/sdd/g2/gate-tsb-redextape-{core,wasm}.log`; `test result` and `grep -c NOTE` in `$R/sdd/g2/gate-size-baseline.log`; `grep -c SCAN_FAILED $R/g4-g2.log`; `changed files since` in it, and `git merge-base origin/main bc455ed` |

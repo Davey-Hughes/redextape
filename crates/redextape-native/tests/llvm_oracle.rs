@@ -17,7 +17,7 @@
 //! which would let a cranelift-only or llvm-only bug hide behind "both happen to match the
 //! interpreter"): a DIRECT `cranelift == llvm` comparison, at every `OptLevel` (`O0`..`O3` plus the
 //! size-oriented `Os`/`Oz`). This is the literal cross-backend leg, and it checks that
-//! `default<O1..O3>`/`default<Os,Oz>` optimization never changes the observable outcome relative to
+//! `default<O1..O3>` optimization, size attributes included, never changes the observable outcome relative to
 //! the unoptimized `O0` build OR relative to the independently-implemented Cranelift backend.
 //!
 //! `llvm.rs`'s own unit tests already sweep `OptLevel` against `run_rxm` on hand-built `Program`s

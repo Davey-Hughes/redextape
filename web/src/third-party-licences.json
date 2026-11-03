@@ -244,7 +244,7 @@
     },
     {
       "name": "cfg-if",
-      "version": "1.0.4",
+      "version": "1.0.5",
       "spdx": "MIT OR Apache-2.0",
       "group": "wasm",
       "url": "https://github.com/rust-lang/cfg-if",
@@ -278,7 +278,7 @@
     },
     {
       "name": "crossbeam-channel",
-      "version": "0.5.16",
+      "version": "0.5.17",
       "spdx": "MIT OR Apache-2.0",
       "group": "wasm",
       "url": "https://github.com/crossbeam-rs/crossbeam",
@@ -299,7 +299,7 @@
     },
     {
       "name": "crossbeam-utils",
-      "version": "0.8.22",
+      "version": "0.8.23",
       "spdx": "MIT OR Apache-2.0",
       "group": "wasm",
       "url": "https://github.com/crossbeam-rs/crossbeam",
@@ -316,7 +316,7 @@
     },
     {
       "name": "futures-core",
-      "version": "0.3.33",
+      "version": "0.3.34",
       "spdx": "MIT OR Apache-2.0",
       "group": "wasm",
       "url": "https://github.com/rust-lang/futures-rs",
@@ -333,7 +333,7 @@
     },
     {
       "name": "futures-task",
-      "version": "0.3.33",
+      "version": "0.3.34",
       "spdx": "MIT OR Apache-2.0",
       "group": "wasm",
       "url": "https://github.com/rust-lang/futures-rs",
@@ -350,7 +350,7 @@
     },
     {
       "name": "futures-util",
-      "version": "0.3.33",
+      "version": "0.3.34",
       "spdx": "MIT OR Apache-2.0",
       "group": "wasm",
       "url": "https://github.com/rust-lang/futures-rs",
@@ -397,7 +397,7 @@
     },
     {
       "name": "js-sys",
-      "version": "0.3.103",
+      "version": "0.3.107",
       "spdx": "MIT OR Apache-2.0",
       "group": "wasm",
       "url": "https://github.com/wasm-bindgen/wasm-bindgen/tree/master/crates/js-sys",
@@ -414,7 +414,7 @@
     },
     {
       "name": "log",
-      "version": "0.4.33",
+      "version": "0.4.35",
       "spdx": "MIT OR Apache-2.0",
       "group": "wasm",
       "url": "https://github.com/rust-lang/log",
@@ -464,23 +464,6 @@
         {
           "file": "UNLICENSE",
           "text": "7e12e5df4bae12cb"
-        }
-      ]
-    },
-    {
-      "name": "once_cell",
-      "version": "1.21.4",
-      "spdx": "MIT OR Apache-2.0",
-      "group": "wasm",
-      "url": "https://github.com/matklad/once_cell",
-      "files": [
-        {
-          "file": "LICENSE-APACHE",
-          "text": "a60eea8175145316"
-        },
-        {
-          "file": "LICENSE-MIT",
-          "text": "23f18e03dc49df91"
         }
       ]
     },
@@ -550,7 +533,7 @@
     },
     {
       "name": "serde_json",
-      "version": "1.0.151",
+      "version": "1.0.154",
       "spdx": "MIT OR Apache-2.0",
       "group": "wasm",
       "url": "https://github.com/serde-rs/json",
@@ -580,7 +563,7 @@
     },
     {
       "name": "unicode-ident",
-      "version": "1.0.24",
+      "version": "1.0.27",
       "spdx": "(MIT OR Apache-2.0) AND Unicode-3.0",
       "group": "wasm",
       "url": "https://github.com/dtolnay/unicode-ident",
@@ -601,7 +584,7 @@
     },
     {
       "name": "wasm-bindgen",
-      "version": "0.2.126",
+      "version": "0.2.130",
       "spdx": "MIT OR Apache-2.0",
       "group": "wasm",
       "url": "https://github.com/wasm-bindgen/wasm-bindgen",
@@ -618,7 +601,7 @@
     },
     {
       "name": "wasm-bindgen-shared",
-      "version": "0.2.126",
+      "version": "0.2.130",
       "spdx": "MIT OR Apache-2.0",
       "group": "wasm",
       "url": "https://github.com/wasm-bindgen/wasm-bindgen/tree/master/crates/shared",

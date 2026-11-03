@@ -236,7 +236,7 @@ are literally in the name. Alternates once in the running: *Turnstile*, *Betamax
 - **Forgejo Actions** (`.forgejo/workflows/ci.yml`) — a `detect` job gates each build job on what
   exists in the tree. **Live:** `linear-history` (unconditional), `rust` (fmt, clippy,
   `scripts/check-all.sh --no-llvm`, then `cargo llvm-cov nextest` against a 90% line floor),
-  `rust-llvm` (installs LLVM 22, runs the full `scripts/check-all.sh`, then an informational
+  `rust-llvm` (installs LLVM 23, runs `scripts/check-all.sh --llvm-only`, then an informational
   optimization report), `rust-slow` (the exhaustive sweeps), `rust-scoped` (the cheap path for a
   change that touches one crate), `rust-browser` (the wasm boundary under headless Chrome), `gate`
   (the required check — it fails loudly rather than letting a skipped tier pass quietly), and — now
@@ -273,7 +273,7 @@ are literally in the name. Alternates once in the running: *Turnstile*, *Betamax
 `scripts/check-all.sh` runs the full feature matrix — `cargo fmt` once, then clippy *and* tests for
 each of the four configurations: the default (`cranelift`), `--no-default-features`, `--features
 llvm`, and `--no-default-features --features llvm`. CI runs this same script. Pass `--no-llvm` to
-skip the LLVM configurations when no LLVM 22 toolchain is installed.
+skip the LLVM configurations when no LLVM 23 toolchain is installed.
 
 That gate covered **1,156 tests** at default features **when counted on 2026-08-24**
 (`redextape-core` 890, `redextape-cli` 78, `redextape-wasm` 67, `redextape-native` 66,

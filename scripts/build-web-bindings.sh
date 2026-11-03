@@ -166,8 +166,11 @@ acquire_lock() {
   done
 }
 
-TS_RS_EXPORT_DIR="$CORE_DIR" cargo test -p redextape-core --features ts export_bindings
-TS_RS_EXPORT_DIR="$WASM_DIR" cargo test -p redextape-wasm --features ts export_bindings
+# ts-rs also reads these three, and each changes the text it writes rather than where it goes.
+env -u TS_RS_IMPORT_EXTENSION -u TS_RS_LARGE_INT -u TS_RS_USE_V11_HASHMAP \
+  TS_RS_EXPORT_DIR="$CORE_DIR" cargo test -p redextape-core --features ts export_bindings
+env -u TS_RS_IMPORT_EXTENSION -u TS_RS_LARGE_INT -u TS_RS_USE_V11_HASHMAP \
+  TS_RS_EXPORT_DIR="$WASM_DIR" cargo test -p redextape-wasm --features ts export_bindings
 
 # Checked independently, one leg at a time: an empty CORE_DIR must fail loudly even when WASM_DIR is full,
 # and vice versa — see the header comment for why a single combined check cannot catch that.

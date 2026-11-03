@@ -212,8 +212,8 @@ In this order, each its own commit with the full checks green:
    The generated-code snapshots of §7.1 will move, because Cranelift's own output changes between
    releases: take the snapshots *after* this bump, and require the oracle tests and the size baseline
    (`tests/size_baseline.rs`) to pass, recording size deltas in the roadmap entry.
-3. inkwell 0.9 → the newest release (0.11 at writing), **only if** it supports LLVM 22.1 (the CI's pinned
-   LLVM); otherwise stay and record why.
+3. inkwell 0.9 → the newest release (0.11 at writing), **only if** it supports LLVM 23.1 (the CI's pinned
+   LLVM; the user moved the pin from 22.1 on 2026-11-02); otherwise stay and record why.
 4. tree-sitter crate 0.26 → 0.27, only if the grammars' pinned 0.25.10 CLI output still loads and every
    grammar check passes; otherwise stay and record why.
 

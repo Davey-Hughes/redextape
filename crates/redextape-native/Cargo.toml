@@ -12,13 +12,13 @@ llvm = ["dep:inkwell"]
 [dependencies]
 redextape-core = { path = "../redextape-core" }
 redextape-native-rt = { path = "../redextape-native-rt" }
-cranelift-jit = { version = "0.134", optional = true }
-cranelift-module = { version = "0.134", optional = true }
-cranelift-frontend = { version = "0.134", optional = true }
-cranelift-codegen = { version = "0.134", optional = true }
-cranelift-object = { version = "0.134", optional = true }
-cranelift-native = { version = "0.134", optional = true }
-inkwell = { version = "0.9", optional = true, features = ["llvm22-1"] }
+cranelift-jit = { version = "0.137", optional = true }
+cranelift-module = { version = "0.137", optional = true }
+cranelift-frontend = { version = "0.137", optional = true }
+cranelift-codegen = { version = "0.137", optional = true }
+cranelift-object = { version = "0.137", optional = true }
+cranelift-native = { version = "0.137", optional = true }
+inkwell = { version = "0.11", optional = true, features = ["llvm23-1"] }
 
 [dev-dependencies]
 proptest = "1"

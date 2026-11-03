@@ -240,7 +240,7 @@ fn emit_cmp(b: &mut FunctionBuilder, cc: IntCC, x: Value, y: Value) -> Value {
 
 /// Emit `x op y` per the rxm interpreter's `eval_bin` (`trace::RxmCursor`). All words are `u64`, so:
 /// `Add`/`Mul` SATURATE at `u64::MAX` on overflow (matching `saturating_add`/`saturating_mul`); `Sub` is
-/// saturating monus `x - min(x, y)`; comparisons are UNSIGNED. Cranelift 0.134 has no scalar `*_sat`
+/// saturating monus `x - min(x, y)`; comparisons are UNSIGNED. Cranelift has no scalar `*_sat`
 /// (those are SIMD lane ops that don't lower for i64), so we detect overflow and clamp: `uadd_overflow`/
 /// `umul_overflow` return `(result, overflow_flag)`, and `select(of, MAX, result)` picks `u64::MAX`
 /// (`iconst(I64, -1)`) when the flag is set.

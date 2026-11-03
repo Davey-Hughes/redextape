@@ -1,0 +1,54 @@
+# redextape native object-size baseline
+# target: x86_64-unknown-linux-gnu
+# cranelift: 0.137.1
+# llvm: 231.0.2
+# regenerate: cargo run --release --example opt_report -p redextape-native --features llvm -- --write-baseline
+# program	backend	opt	bytes
+loop1000000	cranelift	O0	1544
+loop1000000	cranelift	O1	1576
+loop1000000	cranelift	O2	1576
+loop1000000	cranelift	O3	1576
+loop1000000	cranelift	Os	1576
+loop1000000	cranelift	Oz	1576
+loop1000000	llvm	O0	1376
+loop1000000	llvm	O1	1136
+loop1000000	llvm	O2	1136
+loop1000000	llvm	O3	1136
+loop1000000	llvm	Os	1136
+loop1000000	llvm	Oz	1088
+sum30000	cranelift	O0	1848
+sum30000	cranelift	O1	1816
+sum30000	cranelift	O2	1816
+sum30000	cranelift	O3	1816
+sum30000	cranelift	Os	1816
+sum30000	cranelift	Oz	1816
+sum30000	llvm	O0	1736
+sum30000	llvm	O1	1416
+sum30000	llvm	O2	1408
+sum30000	llvm	O3	1432
+sum30000	llvm	Os	1392
+sum30000	llvm	Oz	1384
+list30000	cranelift	O0	1912
+list30000	cranelift	O1	1888
+list30000	cranelift	O2	1888
+list30000	cranelift	O3	1888
+list30000	cranelift	Os	1888
+list30000	cranelift	Oz	1888
+list30000	llvm	O0	1880
+list30000	llvm	O1	1608
+list30000	llvm	O2	1576
+list30000	llvm	O3	1600
+list30000	llvm	Os	1560
+list30000	llvm	Oz	1560
+map30000	cranelift	O0	3152
+map30000	cranelift	O1	3144
+map30000	cranelift	O2	3144
+map30000	cranelift	O3	3144
+map30000	cranelift	Os	3144
+map30000	cranelift	Oz	3144
+map30000	llvm	O0	4016
+map30000	llvm	O1	2568
+map30000	llvm	O2	2536
+map30000	llvm	O3	2544
+map30000	llvm	Os	2528
+map30000	llvm	Oz	2528
