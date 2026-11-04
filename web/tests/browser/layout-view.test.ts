@@ -1,6 +1,7 @@
-import { beforeEach, describe, expect, it } from 'vitest'
+import { beforeAll, beforeEach, describe, expect, it } from 'vitest'
 import { type LayoutNode, resize } from '../../src/layout'
 import { KEY_STEP, type ResizeHandlers, renderLayout, syncSizes } from '../../src/layout-view'
+import { mousePointerId } from './engine'
 
 /**
  * THE TREE AS DOM — geometry, dividers, and the keyboard path design §6.2 refuses to defer.
@@ -39,6 +40,7 @@ const tree = (): LayoutNode => ({
 
 let root: HTMLElement
 const hosts = new Map<string, HTMLElement>()
+let mouseId: number
 
 function host(id: string): HTMLElement {
   const el = document.createElement('section')
@@ -49,6 +51,10 @@ function host(id: string): HTMLElement {
 
 /** Handlers that record nothing — for the tests that assert geometry rather than reporting. */
 const inert = (): ResizeHandlers => ({ resize: () => {}, commit: () => {} })
+
+beforeAll(async () => {
+  mouseId = await mousePointerId()
+})
 
 beforeEach(() => {
   document.body.innerHTML = ''
@@ -99,9 +105,15 @@ describe('renderLayout', () => {
     })
     const divider = root.querySelector('[role="separator"][aria-orientation="vertical"]') as HTMLElement
 
-    divider.dispatchEvent(new PointerEvent('pointerdown', { bubbles: true, clientX: 400, clientY: 300, pointerId: 1 }))
-    divider.dispatchEvent(new PointerEvent('pointermove', { bubbles: true, clientX: 480, clientY: 300, pointerId: 1 }))
-    divider.dispatchEvent(new PointerEvent('pointerup', { bubbles: true, clientX: 480, clientY: 300, pointerId: 1 }))
+    divider.dispatchEvent(
+      new PointerEvent('pointerdown', { bubbles: true, clientX: 400, clientY: 300, pointerId: mouseId }),
+    )
+    divider.dispatchEvent(
+      new PointerEvent('pointermove', { bubbles: true, clientX: 480, clientY: 300, pointerId: mouseId }),
+    )
+    divider.dispatchEvent(
+      new PointerEvent('pointerup', { bubbles: true, clientX: 480, clientY: 300, pointerId: mouseId }),
+    )
 
     // The divider's split box spans the full 800px root (source/lambda's row fills the column split
     // above it), so an 80px drag is a fraction of 80/800 = 0.1 — not merely "positive". Asserting only

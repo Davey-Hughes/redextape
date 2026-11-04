@@ -6,6 +6,7 @@ import { FRAME_BYTES, HISTORY_BYTES, lambdaFrameBytes, TM_RADIUS, tmFrameBytes }
 import type { PoolPort, SessionId } from '../../src/session-client'
 import { SessionPool } from '../../src/session-client'
 import type { LambdaState, TmState } from '../../src/types'
+import { chromiumOnly } from './engine'
 import { heapNow, mean, requireHeapHarness } from './probe-fixture'
 
 /**
@@ -35,6 +36,8 @@ import { heapNow, mean, requireHeapHarness } from './probe-fixture'
  *
  * Section and decision citations here are the 5d-i design's unless they name another.
  */
+
+const HEAP = 'its figures are V8 heap bytes, read through performance.memory and gc, which only Chromium gives a page'
 
 /**
  * The most collections `round` will spend waiting for the heap to stop falling before it reads `base`,
@@ -217,7 +220,8 @@ const shapeOf = (loaded: Loaded): Shape[] =>
   }))
 
 describe('session memory', () => {
-  it('measures three sessions at four legs against one session at two', { timeout: 300_000 }, async () => {
+  it('measures three sessions at four legs against one session at two', { timeout: 300_000 }, async (ctx) => {
+    chromiumOnly(ctx, HEAP)
     const collect = requireHeapHarness()
 
     // THE ROUND'S SESSIONS ARE HELD IN THIS OUTER SCOPE — `frame-cost.test.ts`'s rule, for its
@@ -380,7 +384,10 @@ describe('session memory', () => {
    * ONE LEG PER ROUND AND THE OTHER DISCARDED, so each figure is that leg's ring and nothing else.
    * Both arms still run the whole program in the worker; only the retention differs.
    */
-  it('measures what a leg of history really costs against what the ring charged it', { timeout: 300_000 }, async () => {
+  it('measures what a leg of history really costs against what the ring charged it', {
+    timeout: 300_000,
+  }, async (ctx) => {
+    chromiumOnly(ctx, HEAP)
     const collect = requireHeapHarness()
     const LAMBDA_ONLY: Slot[] = [{ id: 'x', legs: { lambda: true, tm: false } }]
     const TM_ONLY: Slot[] = [{ id: 'x', legs: { lambda: false, tm: true } }]

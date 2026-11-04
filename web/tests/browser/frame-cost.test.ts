@@ -9,7 +9,10 @@ import {
   SPAN_WIRE_BYTES,
 } from '../../src/protocol'
 import type { Cut, LambdaState, RxmState, RxmWindow } from '../../src/types'
+import { chromiumOnly } from './engine'
 import { heapNow, mean } from './probe-fixture'
+
+const HEAP = 'its figures are V8 heap bytes, read through performance.memory and gc, which only Chromium gives a page'
 
 /**
  * What a span costs, measured in a real browser, the only place it can be measured.
@@ -83,7 +86,8 @@ function stepAll<T>(pick: (st: LambdaState) => T): { frames: T[]; totalSpans: nu
 }
 
 describe('frame cost', () => {
-  it('measures bytes per span by heap differential, not JSON size', async () => {
+  it('measures bytes per span by heap differential, not JSON size', async (ctx) => {
+    chromiumOnly(ctx, HEAP)
     await init()
 
     const memory = (performance as MemoryPerformance).memory
@@ -238,7 +242,8 @@ describe('rxm frame cost', () => {
    * drops the locals, arguments, frames, cells and boxes arrays along with the words in them. The over-attribution
    * errs high, which is the safe direction for a charge the ring's budget depends on.
    */
-  it('measures bytes per rxm word by heap differential, and the ring charges at least that', async () => {
+  it('measures bytes per rxm word by heap differential, and the ring charges at least that', async (ctx) => {
+    chromiumOnly(ctx, HEAP)
     await init()
     if (heapNow() === 0)
       throw new Error('BLOCKED: performance.memory.usedJSHeapSize reads 0 — cannot measure heap size')

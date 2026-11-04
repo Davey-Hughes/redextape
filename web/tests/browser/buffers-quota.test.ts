@@ -46,7 +46,7 @@ localStorage.setItem = (key: string, value: string): void => {
 beforeAll(async () => {
   document.body.innerHTML = SHELL
   await (await import('../../src/main')).ready
-  // THE FIRST COMPILE, AND IT DELIBERATELY HAS NO OVERRIDE: `harness.ts`'s shared default covers it, and
+  // THE FIRST COMPILE, AND IT DELIBERATELY HAS NO OVERRIDE: `until.ts`'s shared default covers it, and
   // a call site may not pass its own (`tests/node/browser-timeout-invariants.test.ts`).
   await until(idle, 'the first compile')
 })

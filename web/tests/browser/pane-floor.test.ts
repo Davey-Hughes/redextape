@@ -1,6 +1,7 @@
 import type { EditorView } from '@codemirror/view'
-import { describe, expect, it } from 'vitest'
+import { beforeAll, describe, expect, it } from 'vitest'
 import { MIN_PANE_FRACTION } from '../../src/layout'
+import { mousePointerId } from './engine'
 import { SHELL, storeFourViews } from './harness'
 
 /**
@@ -28,6 +29,7 @@ import { SHELL, storeFourViews } from './harness'
  */
 
 let remountSeq = 0
+let mouseId: number
 async function freshMain(): Promise<{ ready: Promise<EditorView> }> {
   const spec = remountSeq === 0 ? '../../src/main' : `../../src/main?remount=${remountSeq}`
   remountSeq += 1
@@ -87,6 +89,10 @@ function overflowRatio(el: HTMLElement | null, selector: string): string {
   return `${ratio.toFixed(2)}x`
 }
 
+beforeAll(async () => {
+  mouseId = await mousePointerId()
+})
+
 describe('a pane at the floor', () => {
   it('reports what each pane kind shows when driven to MIN_PANE_FRACTION', async () => {
     const rows: string[] = []
@@ -116,13 +122,13 @@ describe('a pane at the floor', () => {
 
       // `resize` clamps, so this lands the source pane exactly on the floor.
       vDivider.dispatchEvent(
-        new PointerEvent('pointerdown', { bubbles: true, clientX: 400, clientY: 300, pointerId: 1 }),
+        new PointerEvent('pointerdown', { bubbles: true, clientX: 400, clientY: 300, pointerId: mouseId }),
       )
       vDivider.dispatchEvent(
-        new PointerEvent('pointermove', { bubbles: true, clientX: -2000, clientY: 300, pointerId: 1 }),
+        new PointerEvent('pointermove', { bubbles: true, clientX: -2000, clientY: 300, pointerId: mouseId }),
       )
       vDivider.dispatchEvent(
-        new PointerEvent('pointerup', { bubbles: true, clientX: -2000, clientY: 300, pointerId: 1 }),
+        new PointerEvent('pointerup', { bubbles: true, clientX: -2000, clientY: 300, pointerId: mouseId }),
       )
 
       const source = root.querySelector<HTMLElement>('[data-leaf="source"]')
@@ -153,20 +159,18 @@ describe('a pane at the floor', () => {
       // split's FIRST child (`source`). `tm` is in the column split's second neighbour, so the sign that
       // drives it to the floor flips accordingly.
       //
-      // `pointerId: 1` AGAIN, NOT A FRESH ID — matching `divider-drag.test.ts`'s own convention. `1` is the
-      // reserved mouse-pointer id and is always active, so `setPointerCapture` accepts it unconditionally,
-      // including on a page's very first `pointerdown` — it is not about having been "seen" by the vertical
-      // divider's own pointerdown above. Any OTHER id (`0`, `2`) makes Chromium's `setPointerCapture` throw
-      // `NotFoundError` ("no active pointer with the given id"), surfacing as an unhandled error at the end
-      // of the run even though the gesture itself still completes.
+      // The same id as the drag above, the one a real move on the page reported (`engine.ts`'s `mousePointerId`):
+      // `setPointerCapture` throws `NotFoundError` for an id the browser holds no active pointer for, which a synthetic
+      // event can carry, and that surfaces as an unhandled error at the end of the run even though the gesture itself
+      // still completes.
       hDivider.dispatchEvent(
-        new PointerEvent('pointerdown', { bubbles: true, clientX: 300, clientY: 400, pointerId: 1 }),
+        new PointerEvent('pointerdown', { bubbles: true, clientX: 300, clientY: 400, pointerId: mouseId }),
       )
       hDivider.dispatchEvent(
-        new PointerEvent('pointermove', { bubbles: true, clientX: 300, clientY: 5000, pointerId: 1 }),
+        new PointerEvent('pointermove', { bubbles: true, clientX: 300, clientY: 5000, pointerId: mouseId }),
       )
       hDivider.dispatchEvent(
-        new PointerEvent('pointerup', { bubbles: true, clientX: 300, clientY: 5000, pointerId: 1 }),
+        new PointerEvent('pointerup', { bubbles: true, clientX: 300, clientY: 5000, pointerId: mouseId }),
       )
 
       const tmAtHeightFloor = root.querySelector<HTMLElement>('[data-leaf="tm-0"]')

@@ -3,6 +3,7 @@ import { beforeAll, describe, expect, it } from 'vitest'
 import { cdp, page, userEvent } from 'vitest/browser'
 import { LAYOUT_STORAGE_KEY } from '../../src/layout'
 import { defaultWorkspace, serializeWorkspace } from '../../src/workspace'
+import { chromiumOnly } from './engine'
 import {
   clickWorkspaceItem,
   compile,
@@ -41,6 +42,8 @@ import {
  * its controls only where its row's top moves, and the top row's does not. **SIXTY FUNCTIONS**, the program whose
  * readout takes three lines of the strip at 390 px. ONE MOUNT FOR THE FILE, for the reason `app.test.ts` gives.
  */
+
+const HELD = 'a press held with no release is CDP’s Input.dispatchMouseEvent, which only Chromium has'
 
 const MANY = `${Array.from({ length: 60 }, (_, i) => `fn f${i}(n) { n }`).join('\n')}\nf0(1)\n`
 
@@ -142,8 +145,11 @@ async function aim(el: () => HTMLElement, from: HTMLElement, back: () => Promise
 /** A finger's tap at `el`'s centre, as CDP sends one: its touch, then its release. */
 async function tap(el: HTMLElement): Promise<void> {
   const at = pageCentreOf(el)
-  await cdp().send('Input.dispatchTouchEvent', { type: 'touchStart', touchPoints: [at] })
-  await cdp().send('Input.dispatchTouchEvent', { type: 'touchEnd', touchPoints: [] })
+  try {
+    await cdp().send('Input.dispatchTouchEvent', { type: 'touchStart', touchPoints: [at] })
+  } finally {
+    await cdp().send('Input.dispatchTouchEvent', { type: 'touchEnd', touchPoints: [] })
+  }
 }
 
 beforeAll(async () => {
@@ -183,7 +189,8 @@ describe('a first press into the TM copy at 390×844, the focus in the source vi
    * `mousedown` whose default moves the focus, and the `mouseup` and `click` after it. So the press a tap's focus move
    * is made in is that `mousedown`'s.
    */
-  it('maximises the copy’s outline from a tap, in Explorer', async () => {
+  it('maximises the copy’s outline from a tap, in Explorer', async (ctx) => {
+    chromiumOnly(ctx, 'a tap is CDP’s Input.dispatchTouchEvent, and vitest/browser sends no touch')
     await focusSource()
     expect(maximised(copy()), 'precondition: the outline is not maximised').toBe(false)
     await aim(() => maximise(copy()), source(), focusSource)
@@ -231,7 +238,8 @@ describe('a press whose release never comes', () => {
    * **A TOUCH THE BROWSER CANCELS ENDS IN `pointercancel`**, with no `pointerup` after it. Left pressed, the page would
    * hold every later focus move's draw until some other press ended, and a keyboard's focus move would draw nothing.
    */
-  it('leaves a keyboard’s focus move after a cancelled touch drawn at once', async () => {
+  it('leaves a keyboard’s focus move after a cancelled touch drawn at once', async (ctx) => {
+    chromiumOnly(ctx, 'a cancelled touch is CDP’s Input.dispatchTouchEvent, which only Chromium has')
     await focusSource()
     await aim(() => maximise(copy()), source(), focusSource)
     const heard: string[] = []
@@ -263,7 +271,8 @@ describe('a press whose release never comes', () => {
    * none. The press is held here, the focus moved by it; the top-level page takes the focus, and the owed draw is made
    * before the release is sent at all.
    */
-  it('draws a press’s focus move when the window loses the focus before the release', async () => {
+  it('draws a press’s focus move when the window loses the focus before the release', async (ctx) => {
+    chromiumOnly(ctx, HELD)
     await focusSource()
     await aim(() => maximise(copy()), source(), focusSource)
     const at = pageCentreOf(maximise(copy()))
@@ -298,7 +307,8 @@ describe('a press whose release never comes', () => {
    * the browser fires it at a right press itself, before any release, and the owed draw is made then; on Windows it
    * follows the `mouseup`, which has ended the press already.
    */
-  it('draws a right press’s focus move at its contextmenu, before the release', async () => {
+  it('draws a right press’s focus move at its contextmenu, before the release', async (ctx) => {
+    chromiumOnly(ctx, HELD)
     await focusSource()
     await aim(() => maximise(copy()), source(), focusSource)
     let menus = 0
@@ -339,7 +349,8 @@ describe('a press whose release never comes', () => {
    * with the window keeping the focus and nothing else ending the press. **WHAT IT DOES NOT**: whether a desktop's
    * popup sends the release anywhere, which headless Chrome's popup does not show.
    */
-  it('draws a focus move made while a press on a `<select>` is held, at once', async () => {
+  it('draws a focus move made while a press on a `<select>` is held, at once', async (ctx) => {
+    chromiumOnly(ctx, HELD)
     await focusSource()
     ;(copy().querySelector('button.view-more') as HTMLElement).focus()
     expect(results().dataset.describes, 'precondition: no press held, so a focus move draws at once').toBe('copy')

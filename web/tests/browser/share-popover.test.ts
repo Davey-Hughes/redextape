@@ -5,6 +5,7 @@ import { cdp, page, userEvent } from 'vitest/browser'
 import { LAYOUT_STORAGE_KEY } from '../../src/layout'
 import { decodeLink } from '../../src/share-link'
 import { PRESETS, parseWorkspace } from '../../src/workspace'
+import { chromiumOnly } from './engine'
 import {
   noticeText,
   SHELL,
@@ -48,8 +49,11 @@ async function context(): Promise<string> {
   return targetInfo.browserContextId
 }
 
+let permissionSet = false
+
 afterAll(async () => {
-  await cdp().send('Browser.resetPermissions', { browserContextId: await context() })
+  // ON WHAT A CASE DID, NOT ON THE ENGINE, so a permission set by a case that ran is always undone.
+  if (permissionSet) await cdp().send('Browser.resetPermissions', { browserContextId: await context() })
 })
 
 /** Open the popover with a click, and answer its link once it is made. */
@@ -165,7 +169,9 @@ describe('share', () => {
     expect(computeAccessibleName(copyButton() as HTMLButtonElement)).toBe('copy link')
   })
 
-  it('copies the link on a click, and says so', async () => {
+  it('copies the link on a click, and says so', async (ctx) => {
+    chromiumOnly(ctx, 'it grants the clipboard through CDP, and Playwright’s Firefox knows no clipboard permission')
+    permissionSet = true
     await cdp().send('Browser.grantPermissions', {
       permissions: ['clipboardReadWrite', 'clipboardSanitizedWrite'],
       browserContextId: await context(),
@@ -177,7 +183,9 @@ describe('share', () => {
   })
 
   // REFUSED AFTER THE CASE ABOVE GRANTED IT, so the refusal is the permission's and not the context's default.
-  it('says the link is selected in the field when the clipboard refuses it', async () => {
+  it('says the link is selected in the field when the clipboard refuses it', async (ctx) => {
+    chromiumOnly(ctx, 'it refuses the clipboard through CDP, and Playwright’s Firefox knows no clipboard permission')
+    permissionSet = true
     await cdp().send('Browser.setPermission', {
       permission: { name: 'clipboard-write' },
       setting: 'denied',

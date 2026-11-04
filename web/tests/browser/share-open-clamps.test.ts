@@ -3,6 +3,7 @@ import { beforeAll, describe, expect, it } from 'vitest'
 import { cdp, page } from 'vitest/browser'
 import { encodeLink, type Positions } from '../../src/share-link'
 import { serializeWorkspace } from '../../src/workspace'
+import { chromiumOnly } from './engine'
 import { fourViewWorkspace, liveText, noticeText, pageCentreOf, SHELL, stateIdle, undoButton, until } from './harness'
 
 /**
@@ -64,7 +65,8 @@ beforeAll(async () => {
 })
 
 describe("an open's clamps", () => {
-  it("takes a press on undo, held while a clamp redraws the open's notice, as a click, and undoes the open", async () => {
+  it("takes a press on undo, held while a clamp redraws the open's notice, as a click, and undoes the open", async (ctx) => {
+    chromiumOnly(ctx, 'a press held with no release is CDP’s Input.dispatchMouseEvent, which only Chromium has')
     holding = true
     location.hash = await link({ lambda: 100 })
     await until(() => noticeText() === 'opened a shared link' && held.length === 1, 'the open, its compile held')

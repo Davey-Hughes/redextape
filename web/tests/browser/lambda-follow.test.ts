@@ -5,6 +5,7 @@ import { LambdaPane } from '../../src/lambda-pane'
 import type { LambdaState } from '../../src/types'
 import { lambdaFrame } from '../node/session-fixtures'
 import { wireOf } from '../node/tree-fixture'
+import { chromiumOnly } from './engine'
 import { controlState, fixtureHost, frames, inertEvents, scrolled, until } from './harness'
 
 /**
@@ -202,7 +203,11 @@ describe('a λ view whose box changes size under it', () => {
     if (failed !== null) throw failed.error
   }
 
-  it('stays following when the WINDOW grows and its clamp is reported before its resize', async () => {
+  it('stays following when the WINDOW grows and its clamp is reported before its resize', async (ctx) => {
+    chromiumOnly(
+      ctx,
+      'it resizes the top-level window through CDP’s Emulation.setDeviceMetricsOverride, which only Chromium has',
+    )
     await inWindow(600, async (grow) => {
       const { body, follow } = mount(TALL)
       await frames()

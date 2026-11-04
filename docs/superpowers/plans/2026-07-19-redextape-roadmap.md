@@ -30758,3 +30758,413 @@ escapes stripped (`$R/figures.sh <log>`). `$R/entry4-figures.sh` runs every comm
 | 01:27:00; 01:29:29 | the final checks' start and end | `START` and `END` in `$R/logs/final-d337369.out` |
 | 282 and 2,956; 97.64 / 92.32 / 98.41 / 98.94; 95 / 89 / 97 / 97 | the baseline at `14621b1`; the floor | `$R/figures.sh $R/logs/gate-baseline.log`; `grep -n -A6 'thresholds' web/vite.config.ts` |
 | 13 | the commits in the range | `git rev-list --count 14621b1..d337369` |
+
+#### FIREFOX PR 1: AN OPT-IN `firefox` BROWSER PROJECT, `pnpm test:firefox`, RUNS THE BROWSER TIER IN PLAYWRIGHT'S FIREFOX, WHERE THE 16 TESTS THAT NEED WHAT ONLY CHROMIUM HAS ARE SKIPPED WITH THEIR REASONS, `collect.ts` COLLECTS THROUGH PLAYWRIGHT'S `page.requestGC()` AND THE SYNTHETIC POINTER EVENTS CARRY THE ID A REAL MOVE REPORTED; THIS PR LEAVES CI AS IT WAS, AND THE FIREFOX RUN'S FAILURES ARE LEFT TO PRS 2 TO 5 (2026-11-03, branch `firefox-local`, `e9bbf67..9040ffa`, 13 commits, plus this entry, `362d3e2`, and the two commits that correct it, `964a038` and the one that records the user's ruling on base16-remove's cases)
+
+**The first of five Firefox PRs.** On 2026-11-03 the user asked "Can you add Firefox to CI", and ruled its scope to
+be the web browser tier, less the files that use APIs only Chromium has, and the wasm boundary. Measured at `e9bbf67`
+in a scratch worktree, Chromium passed the tier's 1,540 tests in
+212 files. With `$R/firefox-measure.patch` applied to `collect.ts` and `vite.config.ts`, so that Firefox could run the
+tier at all, Firefox failed 145 of them with 19 unhandled errors in one run, and 139, again with 19, in a second, made
+with `firefox-measure-diag.patch`, the same plus a print of `document.hasFocus()` per file. The wasm boundary passed
+33 of 33 in Firefox. The user chose to fix every failure before Firefox runs in CI, in five PRs (THE USER'S
+DECISIONS below). PR 1 is there to give the later PRs a Firefox run whose failures are Firefox's own: one command
+runs it, `collect.ts` works there, the tests that need what only Chromium has are skipped there with their reasons,
+and no synthetic pointer event throws there. The spec is
+`docs/superpowers/specs/2026-11-03-firefox-pr1-local-project-design.md` and the plan
+`docs/superpowers/plans/2026-11-03-firefox-pr1-local-project.md`. The lane record is
+`~/temp/redextape-firefox-ci-record/` (`$R` below): the base measurement is `$R/measure-report.md` with its logs in
+`$R/logs/`, this PR's runs are in `$R/logs/pr1/`, and the task reports and reviews are in `$R/tasks/`.
+
+##### WHAT CHANGED
+
+- **The spec and the plan.** `be23df0` is the design, `719aa58` applied the user's three decisions to it, and
+  `c6e72ba` is the plan, in 5 tasks. A read-only pre-flight of the plan made thirteen findings; `acb67fd` (the spec)
+  and `f31f943` (the plan) answered them, with the user's rulings on three of them (F3 to F5 below).
+- **Task 1, `68b88a4`: `until.ts`, `engine.ts`, the Firefox project, and `collect.ts` in every engine.**
+  - `until`, with `sourceOf` and `MAX_SOURCE_CHARS`, moved from `web/tests/browser/harness.ts` to a new
+    `web/tests/browser/until.ts` that imports nothing. `harness.ts` imports it and re-exports it, so none of its
+    importers had to change its import. `tests/node/browser-timeout-invariants.test.ts` reads the default bound from
+    `until.ts`, and its alias check matches an import from either module, with a new case for that.
+  - `web/vite.config.ts` builds each browser project with one function, `browserProject(name, browser, provider,
+    commands)`. The `firefox` project is among the projects only when `REDEXTAPE_FIREFOX` is set, which
+    `pnpm test:firefox` (`web/package.json`) does. It registers one browser command, `requestGC`, which calls
+    Playwright's `page.requestGC()`. With the variable unset, the projects are `node` and `browser`, whose fields
+    are the base project's plus an empty `commands` (the whole-branch review).
+  - `web/tests/browser/engine.ts` exports `CHROMIUM`; `chromiumOnly(ctx, reason)`, a test's first statement, which
+    skips the test outside Chromium with its reason; and `mousePointerId()`, which on its first call hovers a
+    temporary element at two points and resolves with the `pointerId` of the last `pointermove` it heard, waiting
+    with `until` at its default bound, and keeps that answer in a module-scoped variable for later calls.
+    `engine.test.ts` holds the gate to `server.browser` in an `afterAll`, and checks that the capture of a synthetic
+    press carrying the reported id does not throw.
+  - `collect.ts` collects as before in Chromium. In any other engine it calls `commands.requestGC()` in place of
+    `gc`, under the same pages-alive guard.
+  - The README's Checks section names `pnpm test:firefox`. Comments the change made inexact were corrected: one line
+    for one, the four that named `harness.ts` as `until`'s home, in buffers-quota, buffer-cool-warm,
+    tm-reduced-buffer and tm-blank-buffer, and five in `vite.config.ts` (spec §4); and two lines for two,
+    `vite.config.ts`'s v8 coverage comment, which said that `instances` is Chromium-only.
+- **Task 2, `4d3d21c`: the gates and the finger.**
+  - The 15 tests that need CDP, `performance.memory` and `gc`, or an AltGraph press, which Playwright's Firefox
+    cannot send, start with `chromiumOnly` and their reasons: focus-press 5, frame-cost 2, session-memory 2,
+    share-popover 2, view-keys 2, lambda-follow 1 and share-open-clamps 1. view-keys' modifier table became
+    `it.for`, so that its AltGraph row can take `ctx`. share-open-clamps' two cascades are not gated: they pass in
+    Firefox once the case before them is skipped.
+  - share-popover's `afterAll` resets the browser's permissions only when a case set one, through a flag the two
+    gated cases set before their first CDP call, so in Firefox it sends nothing.
+  - panel-boundaries' "leaves a finger’s press alone, which the boundary itself takes" (U1) sends a real touch
+    through CDP's `Input.dispatchTouchEvent` in Chromium, where it had dispatched synthetic `PointerEvent`s, and is
+    the 16th gated test. A `finally` lifts the finger, and focus-press's `tap` lifts its own in a `finally` too.
+    `fire` lost its `pointerType` parameter.
+- **Task 3, `1b09226` and `87feecf`: the reported pointer id.**
+  - `1b09226`: panel-boundaries' file doc no longer counts the cases that make their own pointer events or says
+    that each gives its reason, which Task 2's review found false (its Important 1): five cases do, one for a
+    reason the doc did not name and one with none.
+  - `87feecf`: divider-drag, layout-view, panel-boundaries, panel-regions and pane-floor await `mousePointerId()`
+    once, in a top-level `beforeAll` before any mount, and every synthetic pointer event that carried `pointerId: 1`
+    carries that id. In Firefox, `setPointerCapture` throws for a synthetic id until real mouse input has reached the
+    tab and then takes 0, never 1 (spec §3.5, probe P2), so no fixed id serves both engines. `separator.ts`'s comment
+    and pane-floor's say that capture throws for an id the browser holds no active pointer for.
+- **The whole-branch review's fixes, `dce5c96`, `2149bfb`, `fc9edad` and `9040ffa`, text only**
+  (`$R/tasks/whole-branch-review.md`).
+  - `dce5c96`: `style.css`'s comments on two of its `position-area` fallbacks said the browser tier runs Chromium
+    only; they say that Chromium and the opt-in Firefox both have `position-area`, so the fallback fires in neither
+    (the review's probe, cited in spec §4). `session-worker.ts`'s "needs Chrome" became "needs a browser".
+  - `2149bfb`: `until.ts`'s doc said the invariant test fails for "any call site under `tests/browser/`"; it says a
+    call site in a `.test.ts` file there, which is what the test scans. panel-boundaries' doc lost "with `fire`",
+    which the held case's hand-built release made false. lsp-hover's "Playwright injects keys through CDP" is scoped
+    to Chromium.
+  - `fc9edad`: the README says that `--reporter=verbose` prints every skip's reason, where the default reporter
+    leaves some out, and that the run still has known failures.
+  - `9040ffa`: the spec's A3, §3.1, §3.5, §4 and §8 say what was built.
+
+##### THE USER'S DECISIONS
+
+All on 2026-11-03, from the Log of `$R/progress.md`:
+
+1. **Scope:** the whole web browser tier, less the files that use APIs only Chromium has, and the wasm boundary
+   (`rust-browser`, wasm-bindgen-test) in Firefox.
+2. **Approach B:** every failure fixed first, then Firefox switched on in CI, with no expected-to-fail marks and no
+   advisory job. Not chosen: A, Firefox on at once with marks; C, an advisory job first.
+3. **Five PRs, one at a time:** (1) this local project with the Chromium-only tests gated, (2) tab contention, (3)
+   engine-difference test fixes, (4) the caret bug, after step-focus merges, (5) Firefox in CI; Playwright's Firefox
+   in both tiers, and geckodriver pinned.
+4. **U1 = (b):** the finger case becomes a real touch through CDP in Chromium, and is gated in Firefox.
+5. **U2 = (a):** real gestures through Playwright commands, as a follow-up after PR 5, recorded under WHAT THIS DID
+   NOT CLOSE.
+6. **U3 = (a):** a CI check that the Chromium run skips nothing lands in PR 5; in PR 1 it was checked by hand.
+7. **On the plan's pre-flight:** F3, `until` moves to a module free of `src` and `engine.ts` waits with it at its
+   default bound (one bound, still under browser-timeout-invariants); F4, panel-regions takes its id in its file's
+   `beforeAll`, as the plan had it, and the spec was amended to match; F5, a `finally` lifts the finger, in the new
+   helper and in focus-press's `tap`.
+8. **base16-remove's chained cases,** ruled on 2026-11-03 when the question was asked again: the file keeps its
+   design, one mount with its cases run in order, each on what the one before left, and for a file whose cases are
+   chained that way, T3's alone check re-runs a case together with the cases before it. Not chosen: redesigning the
+   file, in PR 1 or in its own PR. This superseded a first answer, to fix the case in PR 1, given before it was known
+   that 11 of the file's 15 cases failed alone (VERIFICATION).
+
+The controller's and the reviewers':
+
+- Task 2's review found a false count in panel-boundaries' doc, which the plan had told the implementer to write.
+  The controller had it fixed (`1b09226`) under the user's standing ruling to say the truth, without asking again
+  (the Log).
+- Spec §3.5 at `acb67fd`, and the Log's line for the pre-flight's answers, said that under F3 `until` "moves
+  unchanged"; the user's F3 ruling in the Log does not say "unchanged". The whole-branch review read the words as
+  being about the move, so the one sentence of the moved doc that was false was reworded (`2149bfb`;
+  `$R/tasks/whole-branch-review.md`, T1-M1).
+
+##### WHAT THIS DID NOT CLOSE
+
+- **The Firefox run fails.** At `87feecf`, `pnpm test:firefox` failed 129 of its 1,542 tests in one full run and
+  141 in a second. The spec's figures for those counts were 128 and 122, the two base runs' 145 and 139 less
+  cluster (a)'s 17, to be recorded and not asserted (spec §5.2, T4): run 1 was 1 above its figure, and run 2 was 19
+  above its figure. Of run 1's 129, 18 lie outside the base union, and 7 tests did not run, skipped behind its two
+  lost `beforeAll` clicks (below), so the nearness to 128 is not the base less cluster (a). The README at `9040ffa`
+  says that the run still has known failures.
+
+**For U2's follow-up, after PR 5:**
+
+- Playwright commands over `page.mouse` (a press held, one move at a time), `page.setViewportSize` and the
+  context's clipboard permissions. They could bring 6 gated cases to Firefox, focus-press's 3 held presses,
+  share-open-clamps' held press, lambda-follow's window and share-popover's copy, and turn the synthetic pointer
+  sites into real input in both engines, except panel-boundaries' "keeps its ratio" and pane-floor, whose points
+  lie outside the window, and divider-drag's move with no displacement. The driver could carry three sites at
+  `9040ffa`: divider-drag's "never moved" and "across a reload", and layout-view's fraction case (spec §3.5's
+  table). They wait for U2's follow-up because converting them changes what Chromium runs (spec A4), and whether
+  real Firefox input is dependable is PR 2's question.
+
+**For PR 2, tab contention:**
+
+- **Firefox's tab count or file parallelism.**
+- **T3's 37 cases.** 18 tests in run 1 and 16 in run 2 failed outside the base union, 2 of them in both runs, and the
+  one-tab re-run failed 5 more outside it. 36 of the 37 passed when run alone in one tab, which the spec's T3 rule lists
+  as contention for PR 2. T3's case 2, base16-remove's "is undone exactly: …", failed alone; it is in a file whose cases
+  run in order by design, so under the user's reading (THE USER'S DECISIONS, 8) T3 re-runs it with the cases before it,
+  and it passed that way (VERIFICATION), so it is listed here too. Task 4 read every first error as a real gesture that
+  did not land or a focus that moved, and T3's case 2's in run 2 as the cascade of T3's case 1, the removal before it in
+  the file: a menu, dialog or popover a click should have opened that was not open, the focus on `<body>` or on the
+  wrong view, a drag or press that did nothing, or an element an earlier press should have made that was not there. They
+  lie in copy-editor-mount, default-views-gestures, panel-sizes-stored, view-keys-focus and other files; the table is
+  `$R/logs/pr1/t4-t3-table.md`.
+- **The one-tab split.** Of run 1's 129 failures, 88 failed again in one tab, all of them in the base union, and 41
+  passed, among them all 18 of run 1's T3 cases. The one-tab run failed 12 tests that run 1 had not failed: 7 that
+  run 1 passed and 5 that it skipped behind a lost `beforeAll` click. 5 of the 12 are outside the union.
+- **Run 1's two lost `beforeAll` clicks.** tm-view-narrow's "the program level’s counts, on 'fact(4)'" (5 tests)
+  and view-keys-format-on-blur's "a view key from an editor, with format on blur on" (2 tests) skipped their tests
+  when the menu or the dialog their click opens did not open, so run 1 skipped 26 tests. The spec expects 19, the 17
+  skipped by design and share-open-deep's 2, and 23 more if tm-view-narrow's `beforeAll` times out, as it did in
+  base run 1 (spec §5.2, T4): tm-view-narrow's 5 are 5 of those 23, and view-keys-format-on-blur's 2 are outside
+  what the spec named. Both hooks passed in the one-tab run.
+- **The base's contention.** `$R/scripts/cluster.py` counts 16 drags that did not move under 12 tabs and 27 tests
+  that passed in one tab, in base run 1; `document.hasFocus()` was false at the start of all 212 files in base run
+  2; and two waits for `view.hasFocus` never came true, in storage-blocked and view-keys-focus.
+- **Memory at the slower runner's 3 tabs** (`$R/measure-report.md`, question 5), and **whether real Firefox input
+  is dependable**, which U2's follow-up needs.
+- **T3's alone rule in a file whose cases are chained.** Spec §5.2's T3 text still states the alone rule without the
+  chained-file reading; PR 2's spec carries the ruling (THE USER'S DECISIONS, 8). Only base16-remove was searched
+  for chained cases; the other 36 T3 cases passed alone.
+- **A popover asserted open straight after the click that opens it.** At `9040ffa`, share-popover's `openShare` and
+  header-menus-narrow's `openAt` read `:popover-open` after `userEvent.click` with no wait, so a failure there cannot
+  tell a menu that closed from one not yet open. `openAt` failed in T3's cases 17 and 18. share-popover's popover
+  cases failed outside the union in each of Task 2's three nine-file Firefox runs with the gates in place (3, 1 and
+  4 cases: two runs of its tree before its commit, and S1's, whose throws the gates skip in Firefox), in neither of
+  its two runs without them, and in neither of Task 4's full runs.
+- **Focus failures in one tab.** The one-tab re-run's 5 failures outside the union are all focus losses, at a
+  1-minute load of 30.83 when it started and 27.56 when it ended.
+- **panel-boundaries' "skip a closed region, and are drawn beside it again once it is open"** failed in Task 3's
+  five-file Firefox mix, in 3 of 3 runs at `87feecf` and in 3 of 3 with S4's throwing captures, on assertions about
+  the boundaries drawn, which Task 3 read as one real click that did not toggle its panel; it passed in one tab.
+  Task 3's capture instrument and its cross-tab probe (VERIFICATION) found no synthetic capture held. It passed in
+  both of Task 4's full runs.
+- **The timeout invariant's scope.** At `9040ffa`, `tests/node/browser-timeout-invariants.test.ts` scans `.test.ts`
+  files only, so nothing but reading holds the 9 other modules under `tests/browser/` that call `until` to its
+  default bound: `engine.ts`, `harness.ts`, `lambda-deep.ts`, `lambda-text.ts` and the fixtures
+  `build-reply-fixture.ts`, `editor-view-fixture.ts`, `format-on-leave-fixture.ts`, `share-open-hashchange-fixture.ts`
+  and `user-event-fixture.ts`. F3's premise, one bound "still under browser-timeout-invariants", holds for the default
+  the invariant reads; `engine.ts`'s call passes no timeout, which only reading shows. The scope predates this
+  branch. It is placed with PR 2, which works on the waits, since a numeric timeout added to one of these modules
+  would pass the invariant.
+
+**For PR 3, engine differences and tolerances:**
+
+- Clusters 3 to 9 and 11 of the base measurement (`$R/measure-report.md`): sub-pixel scroll positions pinned
+  exactly, the wheel, text metrics and layout geometry, the anchored menus' gutter against the viewport edge, focus
+  semantics, no scroll event for a box taken off the page, SpiderMonkey's limit on `JSON.stringify` depth in
+  share-open-deep's fixture, whose `beforeAll` throws and skips its 2 tests, and the cases not explained.
+- Whether cluster 6, the menus' gutter, is a product bug (b) rather than an engine difference: the measure report
+  rates it "c, maybe b" (`$R/measure-report.md`, question 7).
+- Comments at `9040ffa` whose truth in Firefox no run checked: tm-view-narrow's and lambda-tree-app's "headless, it
+  draws no scrollbar", buffer-affordability's bound, and what Playwright's Firefox does with keys, where lsp-hover
+  says that in Chromium they enter through CDP at the renderer.
+
+**For PR 4:** the caret bug, cluster 2, 25 tests in base run 1, after step-focus merges.
+
+**For PR 5, CI:**
+
+- `playwright install --with-deps firefox` and a `pnpm test:firefox` step in the `web` job, and the job's place in
+  `gate`.
+- U3's check that the Chromium run's JSON has `numPendingTests` 0.
+- The wasm boundary's Firefox leg: a `--firefox` leg in `check-all.sh`, `moz:firefoxOptions` in `webdriver.json`, and
+  geckodriver pinned.
+- `v8_native_limits`' Firefox figure (`$R/measure-report.md`, question 9).
+- The README's "The run still has known failures, which later PRs fix, and nothing else runs it, CI included."
+- Vite's dependency re-optimisation in a tree's first run. Task 1's first full run in each engine, on `f31f943` with
+  Task 1's changes uncommitted, printed "optimized dependencies changed. reloading" and then broke module loading,
+  with `Failed to fetch dynamically imported module` in Chromium and `Vitest failed to find the runner` in Firefox
+  (`$R/logs/pr1/t1-chromium-cold.log`, `t1-firefox-cold.log`); Task 4 ran a short warm-up in each tree first. A CI
+  step starts in a fresh tree.
+
+**Left as written:**
+
+- The plan's file table and its Task 1 Step 7 say that the README gets "one sentence"; they record what Task 1 was
+  told. At `9040ffa` the README's Firefox lines are three sentences, and the spec's §3.1 and §8 say what they say
+  rather than counting them.
+- The task reviews' Minors that the whole-branch review's triage left, each with its reason there: `tap` and
+  `finger` are shaped differently, and a `touchEnd` that rejects in their `finally` replaces the case's own error
+  (T2-M1); view-keys' AltGraph guard is an unbraced two-line `if`, as Biome formats it (T2-M2); the invariant
+  test's doc says "the module's name", in the singular, beside a bullet that names both modules (T1-M2); Task 3's
+  report took Step 3's logs on a dirty tree and labelled its T1 recheck with the wrong SHA, which its fix round
+  corrected, so the head runs of Task 3 that this entry cites are the fix round's, on a clean tree (T3-M2); and
+  pre-commit's "Unstaged files detected" in Task 3's first commit log is noise (T3-M3).
+
+When this entry was written, nothing of the branch had run in CI.
+
+##### VERIFICATION
+
+**What PR 1 shows, against spec §1 and §5.** G1: `pnpm test:firefox` runs the Firefox project; with
+`REDEXTAPE_FIREFOX` unset, `vitest run --project firefox` exits 1 on `No projects matched the filter "firefox".`;
+with it set, `pnpm run test:coverage` exits 1 on `@vitest/coverage-v8 does not work with`; and `git diff --stat
+e9bbf67 9040ffa -- .forgejo scripts` is empty. G2 and T1: cluster (a)'s 17 were as specified in both full runs, the
+15 skipped and the 2 cascades passed. G3 and T2: neither full run printed an `Errors` line, an `[Unhandled error]` or
+`BLOCKED`. T5: neither printed "pages this tab ran before this file are still alive". G4: Chromium ran 213 files
+and 1,542 tests, all passed, `numPendingTests` 0, and coverage read the same four figures at `87feecf` and at
+`e9bbf67`. T3 did not hold: 37 cases failed outside the base union. 36 of them passed alone in one tab, which the spec's
+rule lists as contention for PR 2. T3's case 2, base16-remove's "is undone exactly: …", failed alone in one Firefox tab
+at `87feecf`, and alone in Chromium at `362d3e2`, whose `web/` is `9040ffa`'s, it failed in both of two runs, on the
+first error it failed on alone in Firefox. It is in a file outside the branch's diff whose cases run in order by design:
+its doc says "ONE MOUNT FOR THE FILE, and the cases run in order, each on what the one before left". At `964a038`, whose
+`web/` is `9040ffa`'s, each of the file's 15 cases was run alone in one tab in each engine: 11 failed in Chromium and
+the same 11 in Firefox, the file's 2nd, 4th and 7th to 15th, of which T3's case 2 is the 4th. Under the user's reading
+(THE USER'S DECISIONS, 8), T3 re-runs a case of such a file with the cases before it. Run that way in one Firefox tab at
+`87feecf`, it passed: with T3's case 1, the removal before it in its `describe`, both passed, and the whole file passed
+15 of 15. T4's failure counts are under WHAT THIS DID NOT CLOSE.
+
+Every browser run of PR 1's tasks that this entry counts, but the two opt-in refusals, went through
+`$R/scripts/pr1/run.sh`: the browser lock, a 16 GiB memory cap with no swap, `--reporter=verbose` and a JSON report,
+and a log whose first line names the tree, its head and its count of changed tracked files. The base runs went
+through `$R/scripts/run-web.sh`, under the same lock and cap (`$R/measure-report.md`, "Exact commands"). S10 and S11
+ran the node invariant test alone. Task 4's runs were on clean trees, at `87feecf` but for the base's coverage run at
+`e9bbf67`. `87feecf..9040ffa` changed comment lines in `web/`, the README and the spec. The only browser runs on
+clean trees at the branch's later commits were base16-remove's, at two commits whose `web/` is `9040ffa`'s: T3's
+case 2 alone in Chromium twice, at `362d3e2`, and each of the file's 15 cases alone in each engine, at `964a038`.
+At `9040ffa` biome, typecheck, the comment guard, `scripts/check-doc-figures.sh` and `scripts/check-citations.sh`
+exited 0 (`$R/tasks/whole-branch-review.md`, "Exit codes"). Task 4 also ran, at `87feecf`, the `web` job's install,
+its three builds, the licence check with its self-test, biome, typecheck and `build:app`, and `linear-history`'s
+eight scans and comment guard, each with its self-test, each step exiting 0 (`$R/logs/pr1/t4-steps.tsv`).
+
+```
+pnpm run test:coverage at 87feecf / at e9bbf67 (in $S)  → rc=0 / rc=0; 283 files, 2,959 tests / 282, 2,956;
+                                                           97.64 / 92.31 / 98.41 / 98.94 at both
+pnpm run test:browser                                    → rc=0; 213 files, 1,542 passed, numPendingTests 0
+pnpm test                                                → rc=0; 283 files, 2,959 passed; tags |browser (chromium)|
+                                                           1,542 and |node| 1,417, no other
+pnpm test:firefox, run 1 / run 2                         → T1 17 of 17 / 17 of 17; failed 129 / 141, 18 / 16
+                                                           outside the union; skipped 26 / 19; 213 files, 1,542 tests
+VITEST_MAX_WORKERS=1 pnpm test:firefox <run 1's 31 failed files>
+                                                         → 31 files, 488 tests: 100 failed, 5 outside the union;
+                                                           382 passed; 6 skipped
+the 37 cases alone, one tab                              → 36 passed; case 2 failed, passed with case 1; its file
+                                                           15 of 15
+VITEST_MAX_WORKERS=1 pnpm test:browser base16-remove.test.ts -t '<case 2>', at 362d3e2, twice
+                                                         → rc=1 / rc=1; 1 failed, 14 skipped / the same; each at
+                                                           line 169, expected <body>…(8)</body> to be <button
+                                                           type="button" …(5)>…(1)</button>, as in Firefox alone
+VITEST_MAX_WORKERS=1 pnpm test:browser / test:firefox base16-remove.test.ts -t '<each case>', at 964a038
+                                                         → 11 of 15 failed / the same 11: the file's 2nd, 4th and
+                                                           7th to 15th
+```
+
+The 1-minute load was 32.67 when run 1 started, 42.84 when it ended and run 2 started, and 40.46 when run 2 ended.
+
+**The sabotages,** each run in the scratch worktree `$S` (`~/temp/redextape-firefox-local-sab`, removed at Task 4's
+end), the file saved to `$R/sab/` first and restored from it after, then compared with `cmp` against the copy and
+against `git show HEAD:<path>` (the task reports):
+
+- **S1**, a `throw new Error('S1')` after each of the 16 gates, at `4d3d21c`: Chromium failed exactly 16 tests,
+  each on `S1`; Firefox skipped 17, the 16 and `engine.test.ts`'s own, and none failed on `S1`.
+- **S2**, `chromiumOnly` skipping in every engine: `engine.test.ts` failed at its `afterAll`, "the gate let its test
+  past in chromium", alone at `68b88a4` and among Task 2's nine files at `4d3d21c`, where the JSON had 17 skipped.
+- **S3**, `CHROMIUM` comparing with `'chrome'`, at `68b88a4`: both files of the run, `engine.test.ts` and
+  `layout-view.test.ts`, failed at setup on `TypeError: commands.requestGC is not a function`, with no tests run.
+- **S4**, `mousePointerId()` resolving with the id it heard plus 1: at `68b88a4`, `engine.test.ts`'s capture case
+  failed in both engines; at `87feecf`, in Task 3's five files, 18 unhandled errors in each engine, 9 from
+  divider-drag, 6 from panel-boundaries, 2 from panel-regions and 1 from layout-view, all `NotFoundError` ("No
+  active pointer with the given id is found" in Chromium, "Element.setPointerCapture: Invalid pointer id" in
+  Firefox), and the capture case failed in both.
+- **S5**, `mousePointerId()` resolving with 0 without hovering, at `87feecf`: divider-drag alone in one Firefox tab
+  passed 14 of 14 with 9 unhandled errors, all from divider-drag; at the clean head, in Task 3's fix round's re-run of
+  its Step 3.5 in the worktree and not in `$S`, it passed 14 of 14 with none.
+- **S6**, `collect.ts`'s `requestGC` call deleted, at `68b88a4`, in Firefox: 8 files failed to import `collect.ts`,
+  and the log prints one cause for the 8, the guard's error, "9 of the 20 pages this tab ran before this file are
+  still alive after a full collection"; the run collected 1,489 tests.
+- **S7**, share-open-clamps' gate removed, at `4d3d21c`, in Firefox: the case failed on "CDP session is only
+  available in Chromium", and the two cascades timed out waiting for "the second clamp" and "the clamp's notice".
+- **S8**, share-popover's reset sending `Browser.resetPermission`, at `4d3d21c`: Chromium failed the file's
+  `afterAll` on "'Browser.resetPermission' wasn't found", with its 14 tests passed; Firefox passed 12, skipped 2 and
+  exited 0.
+- **S9**, `panel-stack.ts`'s refusal of a finger removed, at `4d3d21c`: Chromium failed 1 test of 25, the finger
+  case, on "a finger’s press on the bar drew it held"; Firefox skipped it, with no failure outside the union.
+- **S10**, `until.ts`'s default raised to 15,000, at `68b88a4`: the node invariant test failed 1 of 15, "the shared
+  until default is below vitest browser testTimeout".
+- **S11**, the alias patterns matching `harness` alone again, at `68b88a4`: the new case failed 1 of 15, at its first
+  `expect`; with only the namespace pattern reverted, it failed at its second (S11b).
+
+**Task 3's discriminating runs** (its fix round, at `87feecf` with a clean tree, except where `$S` carried the
+sabotage or the instrument): in the five-file Firefox mix, "skip a closed region" failed 3 of 3 at the head and 3 of
+3 under S4, and passed in one tab, where nothing fell outside the union. With a `console.error` in `separator.ts`'s
+`pointerdown`, each of 3 runs logged 18 synthetic presses, all `held=false`, and 14 real ones, all `held=true`,
+with 14 `gotpointercapture` events, all real. A pair of files in two tabs, one making 60 real clicks while the other
+looped synthetic captures with the reported id, logged 2,400 captures with none held and none thrown, and with the
+id plus 1, 2,401, all thrown; the clicking tab lost 0 of 60 clicks both times. A synthetic capture with the mouse's
+id and no button down does nothing in Firefox, so the change took away a `NotFoundError` and held no capture.
+
+**Every count this entry quotes, with what produces it.** `bash $R/scripts/pr1/entry-figures.sh
+~/temp/redextape-firefox-local` runs every command below, into `$R/logs/pr1/t5upd-figures.log`; it reads each log with
+its ANSI escapes stripped, runs `targets.py` and `split.py` (both in `$R/scripts/pr1/`) from `$R/logs/pr1/`, and
+writes nothing else. `$L` is `$R/logs/pr1`; "summary" is a log's `Test Files`, `Tests` and `Errors` lines; "JSON" is
+the run's `testResults` count and `numTotalTests`, `numPassedTests`, `numFailedTests` and `numPendingTests`.
+
+| value | what | command |
+|---|---|---|
+| 13 | the commits in the range | `git rev-list --count e9bbf67..9040ffa` |
+| comment lines only | `87feecf..9040ffa` in `web/` | `git diff -U0 87feecf 9040ffa -- web`, its `+`/`-` lines |
+| empty; 0 | CI and `scripts` since the base; floor edits | `git diff --stat e9bbf67 9040ffa -- .forgejo scripts \| wc -l`; `git diff e9bbf67 9040ffa -- web/vite.config.ts \| grep -c thresholds` |
+| 212, 1,540, all passed | the base's Chromium run | JSON of `$R/logs/chromium-full.json` |
+| 145, 1,370, 25, 19; 139, 1,399, 2, 19 | the base's Firefox runs: failed, passed, skipped, unhandled errors | JSON and summary of `$R/logs/firefox-full` and `firefox-full2`; each log's first line reads `2 files changed`, the patch applied; run 2's patch, `firefox-measure-diag.patch`, is named in `$R/measure-report.md` |
+| 33 of 33 | the wasm boundary in Firefox at the base | `test result: ok. 33` in `$R/logs/wasm-firefox.log` |
+| 5 tasks; thirteen | the plan; the pre-flight's findings | `grep -c '^### Task '` on the plan at `9040ffa`; `git log -1 --format=%s f31f943` |
+| the four; five, one line for one; two lines for two | the comments Task 1 corrected: `until`'s home; `vite.config.ts`'s; its v8 comment | `git show 68b88a4 --` buffers-quota's, buffer-cool-warm's, tm-reduced-buffer's and tm-blank-buffer's test files, its `-` lines naming `harness.ts`; `git show 68b88a4 -- web/vite.config.ts`, its `-` comment lines with no identical `+` line, beside `grep -n 'five in'` on the spec at `9040ffa` (§4) |
+| two | the `position-area` fallbacks whose comments `dce5c96` reworded | `git show dce5c96 -- web/src/style.css`, its hunks; the `@supports not (position-area` lines of `style.css` at `9040ffa` |
+| 15; 5, 2, 2, 2, 2, 1, 1; 16 | the gated tests by file; with the finger case | `grep -c 'chromiumOnly('` on each `web/tests/browser/*.test.ts` at `9040ffa` (`git ls-tree`, `git show`), less `engine.test.ts`'s 1 and panel-boundaries' 1 |
+| CDP 10, heap 4, AltGraph 1; 2 cascades; 17 | cluster (a) at the base | `$R/scripts/cluster.py firefox-full-failures.tsv firefox-rerun-1tab-failures.tsv` in `$R/logs`, its `A ` rows |
+| five, one, one | the cases `1b09226` names | `git log -1 --format=%s 1b09226` |
+| 0, never 1 | the synthetic id Firefox's capture takes after real input | spec §2.5's P2 and §3.5; the `PROBE firefox` lines of `$R/logs/pr1-probes/probe2.log` |
+| 129 of 1,542; 141 | the full runs' failures | `targets.py t4-firefox-1.json t4-firefox-2.json`, its `T4` lines |
+| 128, 122; 1 and 19 above | the spec's figures; the runs against them | spec §5.2 (145 − 17, 139 − 17); 129 − 128, 141 − 122 |
+| 6 gated cases; three sites | U2's follow-up | spec §7 (U2), `grep -n '6 gated cases'`, and §3.5's table, its `\| none: … (U2) \|` rows, at `9040ffa` |
+| 18, 16, 2, 5, 37; 175 | T3: run 1, run 2, in both, one-tab only, all; the base union | `split.py` |
+| 88, 41, 18; 12 = 7 + 5; 5 | the one-tab split | `split.py` |
+| 5 and 2, 7; 26; 19 = 17 + 2 | the lost `beforeAll`s' tests; run 1's skips; the spec's expected skips, by design and share-open-deep's | the per-file skip counts of `t4-firefox-1.json` and `t4-firefox-2.json` (the script's "skips by file"); `grep -n 'Skipped: 17 by design'` on the spec at `9040ffa` |
+| 23; 5 of those 23 | the spec's further skips if tm-view-narrow's `beforeAll` times out; run 1's tm-view-narrow skips among them | `grep -n 'Add 23 more'` on the spec at `9040ffa` (§5.2, T4); the per-describe skip counts of `$R/logs/firefox-full.json` (13, 5 and 5) and `t4-firefox-1.json` (tm-view-narrow's 5 under 'fact(4)') |
+| 16; 27; 12 tabs | the base's drags that did not move; tests that passed in one tab; its tab count | `cluster.py`'s `D drag-under-tabs` and `E tab-contention` rows; `grep -n '12 tabs' $R/measure-report.md` |
+| 212 | the files with `document.hasFocus()` false at their start, base run 2 | the `FIREFOX-FOCUS` lines of `$R/logs/firefox-full2.log`, by value and by distinct file |
+| two | the `view.hasFocus` waits | `cluster.py`'s `E page-focus` row |
+| 3 tabs; questions 5, 7 and 9 | the measure report's open questions | `grep -nE '^(5\|7\|9)\. ' $R/measure-report.md` |
+| 15 of 15; with T3's case 1, the removal before it in its `describe`, both passed; case 2 failed alone | base16-remove in one Firefox tab at `87feecf`: the file; T3's case 2 with the case before it; alone | JSON of `$L/t4-base16-1tab.json`, `t4-alone-2-with-1.json` and `t4-alone-2.json`; the `TABS=` and `head=` of their logs' first lines; `t4-alone-2-with-1.log`'s `-t` pattern and the titles that passed, by `describe` |
+| outside the branch's diff | base16-remove's file | `git diff --stat e9bbf67 9040ffa -- web/tests/browser/base16-remove.test.ts`, empty |
+| "ONE MOUNT FOR THE FILE, and the cases run in order, each on what the one before left" | base16-remove's doc at `9040ffa` | `git show 9040ffa:web/tests/browser/base16-remove.test.ts \| grep -n 'ONE MOUNT FOR THE FILE'` |
+| 15; 11 failed in Chromium and the same 11 in Firefox; the 2nd, 4th and 7th to 15th; one tab | base16-remove's cases, each run alone at `964a038`, in each engine | `$R/scripts/pr1/case2fix-alone.sh c2f-before-<engine> <engine>`, which runs each case through `run.sh` with `VITEST_MAX_WORKERS=1` and `-t '<describe>.*<name>$'`; `numFailedTests` of `$L/c2f-before-{chromium,firefox}-{1..15}.json`, each run's case placed by its title among the file's `it(` titles at `9040ffa`; the `TABS=`, `head=` and `dirty=` of their logs' first lines, counted |
+| the 4th | T3's case 2 in its file | `$L/t4-t3-table.md`, its row 2's title placed among the file's `it(` titles at `9040ffa` |
+| rc=1 twice, 1 failed and 14 skipped each; line 169, `expected <body>…(8)</body> to be <button type="button" …(5)>…(1)</button>`, as in Firefox alone | case 2 alone in one Chromium tab at `362d3e2`, two runs; their first error and `t4-alone-2`'s | `VITEST_MAX_WORKERS=1 $R/scripts/pr1/run.sh t5fix-alone-2-chromium-<n> ~/temp/redextape-firefox-local test:browser tests/browser/base16-remove.test.ts -t` with `t4-alone-2.log`'s pattern, n = 1 and 2; JSON, summary and `EXIT` of `$L/t5fix-alone-2-chromium-{1,2}`; the `AssertionError` and `❯ tests/` lines of those logs and of `t4-alone-2.log` |
+| `362d3e2`'s and `964a038`'s `web/` are `9040ffa`'s; two commits; T3's case 2 twice at `362d3e2` and the 15 cases in each engine at `964a038` | the trees of the runs after `87feecf..9040ffa`; the only browser runs on clean trees at the branch's later commits | `git diff --stat 9040ffa 362d3e2 -- web` and `git diff --stat 9040ffa 964a038 -- web`, both empty; the `head=` and `dirty=` of each `$L/*.log`'s first line whose head descends from `87feecf`, is not it and is an ancestor of `964a038`, counted with the test file its `args=` names: 2 at `362d3e2` and 30 at `964a038` with `dirty=0`, all base16-remove's, and 2 more at `964a038` with `dirty=1` |
+| 17 and 18 | the `openAt` cases | `$L/t4-t3-table.md`, its rows 17 and 18 (`header-menus-narrow.test.ts`) |
+| 3, 1 and 4; 0 and 0; 0 and 0 | share-popover's cases outside the union: Task 2's gated nine-file runs; its base runs; Task 4's full runs | `targets.py` on `t2-firefox`, `t2-firefox-2`, `t2-s1-firefox`, `t2-firefox-base9`, `t2-firefox-base9-2`, `t4-firefox-1` and `t4-firefox-2`, its `T3 share-popover` lines counted |
+| 30.83; 27.56 | the one-tab run's load at its start and end | `grep -E '^t4-firefox-1tab' $L/t4-load.txt` |
+| 32.67, 42.84, 40.46 | the full runs' load | `grep -E '^t4-firefox-(1\|2) ' $L/t4-load.txt` |
+| 3 of 3; 3 of 3; passed | "skip a closed region" at the head, under S4, in one tab | `targets.py` on `t3f-head-{1,2,3}`, `t3f-s4-{1,2,3}` and `t3f-head-1tab`, its `T3` lines |
+| passed and passed | "skip a closed region" in Task 4's full runs | its status in `t4-firefox-1.json` and `t4-firefox-2.json` |
+| 9 | the non-test modules that call `until` | each `.ts` under `web/tests/browser/` at `9040ffa` (`git ls-tree`, `git show`) but the tests and `until.ts`, with an `until(` call outside a comment line |
+| 25 | cluster 2 | `cluster.py`'s `B caret` row |
+| 2 | share-open-deep's skipped tests | the per-file skip counts of both full runs |
+| three sentences | the README's Firefox lines | `git show 9040ffa:README.md \| sed -n '301,305p'` |
+| "one sentence" | the plan's README count | `grep -n 'One sentence in Checks\|one sentence:'` on the plan at `9040ffa` (its lines 141 and 417) |
+| 283 / 2,959; 282 / 2,956; 97.64 / 92.31 / 98.41 / 98.94 | coverage at `87feecf`; at `e9bbf67`; `All files` at both | summary, `All files` and `EXIT` of `$L/t4-coverage-head.log` and `t4-coverage-base.log`, whose first lines read `head=87feecf` and `head=e9bbf67` |
+| 3 | the tests the head has and the base does not, `engine.test.ts`'s 2 and the invariant's new case | the test ids of `t4-coverage-head.json` less `t4-coverage-base.json` |
+| 213, 1,542, 0 | Chromium at `87feecf` | JSON of `$L/t4-chromium.json`; no `Errors` line in its summary |
+| 1,542 and 1,417 | `pnpm test`'s tags | `grep -oE` of the three project tags in `$L/t4-test.log`, `uniq -c` |
+| rc=1 twice | the opt-in refusals | `No projects matched` and `EXIT` in `$L/t4-ff-unset.log`; `coverage-v8 does not work with` and `EXIT` in `t4-ff-coverage.log` |
+| 17 of 17; 0, 0, 0; 0 | T1; T2's `Errors` line, `[Unhandled error]` and `BLOCKED`; T5 | `targets.py`'s `T1` lines; `grep -cE` of each in `$L/t4-firefox-{1,2}.log` |
+| 31; 31 files, 488, 100, 382, 6; 5 | run 1's failed files; the one-tab re-run's files, tests, failed, passed and skipped; outside the union | summary of `$L/t4-firefox-1.log` and `t4-firefox-1tab.log`; `targets.py t4-firefox-1tab.json` |
+| 36 and 1 | the alone runs: passed, failed | `numPassedTests` and `numFailedTests` of `$L/t4-alone-{1..37}.json`, `uniq -c` |
+| 16 on `S1`; 17 and 0 | S1 in Chromium; in Firefox | JSON `failureMessages` and `grep -c 'Error: S1'` on `$L/t2-s1-chromium`; summary and `grep -c` on `t2-s1-firefox` |
+| the `afterAll`; 17 | S2 | `the gate let its test past` in `$L/t1-s2.log` and `t2-s2.log`; JSON of `t2-s2.json` |
+| `TypeError`, no tests | S3 | summary and `commands.requestGC is not a function` in `$L/t1-s3.log` |
+| the capture case; 18; 9, 6, 2, 1 | S4 | the failed titles of `$L/t1-s4-{chromium,firefox}.json` and `t3-s4-{chromium,firefox}.json`; `Errors` in `t3-s4-*.log`; their `originated in "…"` lines counted by file; their `NotFoundError` lines |
+| 14 of 14 with 9; 14 of 14 with none | S5; divider-drag at the clean head, in Task 3's fix round | summary and `originated in` of `$L/t3-s5.log`; summary of `t3f-firefox-divider.log` |
+| 8; 1,489 | S6's files that failed to import `collect.ts`; its tests | JSON `message`s naming `collect.ts` in `$L/t1-s6.json`; summary of `t1-s6.log`. Caveat: `grep -c` of the guard's message gives 1, since vitest prints one of identical import errors |
+| 3 | S7 | the failed titles of `$L/t2-s7.json` and their `→` lines |
+| 14 passed, the `afterAll`; 12 and 2, rc=0 | S8 in Chromium; in Firefox | summary, `Failed Suites` and `Browser.resetPermission` in `$L/t2-s8-chromium.log`; summary of `t2-s8-firefox.log` |
+| 1 of 25; skipped, 0 | S9 in Chromium; in Firefox | the failed titles of `$L/t2-s9-chromium.json`; the `↓` line and `targets.py`'s `T3` line for `t2-s9-firefox` |
+| 1 of 15 | S10, S11 and S11b | summary and `FAIL` lines of `$L/t1-s10.log`, `t1-s11.log` and `t1-s11b.log` |
+| 18 and 14; 14 | the instrument's synthetic and real presses per run; real `gotpointercapture`s | the `^PROBE` lines of `$L/t3f-inst-{1,2,3}.log`, by kind. Caveat: each event prints twice, once through vite's console forward and once on vitest's stderr, so a count of every line naming `PROBE` gives 92 a run, and Task 3's report gives the doubled 36 and 28 |
+| 2,400, 0 held, 0 thrown; 2,401 thrown; 0 of 60 | the cross-tab probe at offset 0; at offset 1; the clicks lost | the `^PROBE` lines of `$L/t3f-probe-off0.log` and `t3f-probe-off1.log` |
+| the reload, then the two messages | Task 1's cold runs | `optimized dependencies changed. reloading`, `Failed to fetch dynamically imported module` and `Vitest failed to find the runner` counted in `$L/t1-chromium-cold.log` and `t1-firefox-cold.log` (1, 23, 0 and 1, 0, 1); their first lines read `head=f31f943` |
+| 16 GiB, no swap | `run.sh`'s cap | `MemoryMax` and `MemorySwapMax` in `$R/scripts/pr1/run.sh` |
+| 26 at 0; 2 at 1 | the `web` job's steps and `linear-history`'s at `87feecf`; the two opt-in refusals | the exit column of `$L/t4-steps.tsv`, counted, and its non-zero rows |
+| three; eight | the builds; the scans | `$L/t4-steps.tsv`'s `build-` rows less `build-app`; its `scan-` rows less the `-self` ones; which job runs each, the `run:` lines under `web:` and under `linear-history:` in `.forgejo/workflows/ci.yml` at `9040ffa` |
+| clusters 1 to 11; 1b; cluster 6's "c, maybe b" | the base's clusters, their numbers and ratings | the cluster table of `$R/measure-report.md` |
+| five PRs; U1 = (b), U2 = (a), U3 = (a); F3 to F5 | the user's decisions | the `USER` lines of the Log of `$R/progress.md`; the letters, the `**U` lines of spec §7 at `9040ffa` |
+| 8: the file keeps its design, the chained-file reading of T3; redesigning the file, in PR 1 or its own PR, not chosen; a first answer, to fix the case in PR 1, before the 11 of 15 were known | the user's ruling on base16-remove, and the answer it superseded | the Log of `$R/progress.md`, in its order: the `USER RULING (I1)` line, the case-2 fix's line, which first reports the 11 of 15, and the `USER RULING (re-asked with the class)` line |
+| still states the alone rule without the chained-file reading | spec §5.2's T3 | `git show 9040ffa:` the spec, its T3 lines (425 to 429) and its 0 lines matching `chained\|in order\|with the cases before`; `git diff --stat 9040ffa 964a038 --` the spec, empty |
+| only base16-remove; the other 36 | the files searched for chained cases; the T3 cases that passed alone | the `Scope:` line of `$R/tasks/case2-fix-report.md`; the `36 and 1` row's command |
+| "moves unchanged" | spec §3.5 at `acb67fd`; the Log | `grep -n unchanged` on the spec at `acb67fd` and on `$R/progress.md` (its pre-flight line, not the user's F3 line) |
+| 15,000; plus 1; 0; `'chrome'`; the 16 throws | the sabotages' edits | the sabotage tables and lists of `$R/tasks/task-1-report.md`, `task-2-report.md` and `task-3-report.md` |

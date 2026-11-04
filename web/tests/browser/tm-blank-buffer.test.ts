@@ -16,7 +16,7 @@ import { bufferRows, buffersButton, buffersMenu, idle, SHELL, tmPaneHost, until 
  * binding selector. Duplicating the MOUNT rather than importing it is deliberate: each browser test file
  * gets its own page (`main()` runs once per module load), so a shared mount would be a shared page two
  * files could not both own. That argument reaches the mount and stops there — `SHELL` and `until` are an
- * inert string and a pure poll helper, share no page, and live in `tests/browser/harness.ts`.
+ * inert string and a pure poll helper, share no page, and live in `tests/browser/harness.ts` and `until.ts`.
  *
  * ONE MOUNT FOR THE FILE, for the reason `app.test.ts` gives: ES module imports are cached, so `main()`
  * runs once per page and Vitest gives each test FILE its own page. Each `it` below calls `mountApp`

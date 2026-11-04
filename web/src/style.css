@@ -1217,9 +1217,9 @@ button.view-title[aria-expanded="true"] {
    earlier spelling `inset-area` first, and those versions take this branch too — correctly, since the
    rule above is inert for them either way.
 
-   THIS BRANCH IS UNTESTABLE IN THIS REPO AND THAT IS THE ARGUMENT FOR IT, NOT AGAINST. The browser tier
-   runs Chromium only (`vite.config.ts`'s provider), where `@supports not (...)` never applies, so
-   nothing here can regress the tested path and nothing here will report the untested one either. A
+   THIS BRANCH IS UNTESTABLE IN THIS REPO AND THAT IS THE ARGUMENT FOR IT, NOT AGAINST. The browser tier's
+   engines, Chromium and the opt-in Firefox, both have `position-area`, so `@supports not (...)` never
+   applies there: nothing here can regress the tested path, and nothing here will report the untested one. A
    fallback that cannot fire in CI beats a comment recording the same risk and doing nothing about it. */
 @supports not (position-area: block-end) {
   .view-menu {
@@ -1307,7 +1307,7 @@ button.view-title[aria-expanded="true"] {
 }
 /* WITHOUT ANCHOR POSITIONING, GIVE THE MARGIN BACK — `.view-menu`'s `@supports` block above states
    this in full, including why the test is written `not (position-area: block-end)` rather than against
-   a feature name, and why a branch that cannot fire in a Chromium-only browser tier is still worth
+   a feature name, and why a branch that cannot fire in the browser tier is still worth
    writing. The same two declarations fail the same way, so they take the same fallback. */
 @supports not (position-area: block-end) {
   .buffer-list {

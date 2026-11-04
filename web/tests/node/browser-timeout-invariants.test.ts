@@ -7,19 +7,19 @@ import { expect, it } from 'vitest'
 /**
  * **THE SHAPES THIS GATE COVERS, NAMED SO A FUTURE READER KNOWS THE EDGE WITHOUT REDISCOVERING IT.**
  * Every wait in `tests/browser/` is meant to be bounded by one number, declared once, in
- * `harness.ts`. This file catches a numeric timeout that reappears at:
+ * `until.ts`. This file catches a numeric timeout that reappears at:
  *
  * - a call site, in decimal, hex, scientific, decimal-point, or underscore-grouped form, however deep
  *   the comment or string ahead of it tries to hide the separator (`isNumericLiteral`, `stripped`);
  * - a call site reached through a local alias of `until` (`import { until as X } from '<any relative
- *   specifier ending in harness>'`) or through a namespace import (`import * as X from '<the same>'`
+ *   specifier ending in harness or until>'`) or through a namespace import (`import * as X from '<the same>'`
  *   then `X.until(...)`), at any directory depth — the specifier match is on the module's name, not
  *   the literal `./harness`, so `../harness` and deeper reach it too (`untilNames`);
  * - a call site nested arbitrarily deep under `tests/browser/`, not just its top level, while still
  *   ignoring a directory whose own name happens to end in `.test.ts` (`testFilesUnder`);
  * - a file-local re-declaration of `until` itself, in either the `function until` form or the
  *   `const until = async (...) =>` form; and
- * - `harness.ts`'s own declared default, read as a whole token rather than truncated at its first
+ * - `until.ts`'s own declared default, read as a whole token rather than truncated at its first
  *   non-digit character, so a hex or scientific default cannot silently read as its leading digit.
  *
  * **What it cannot see, by construction rather than oversight**: a numeric timeout reached through a
@@ -137,7 +137,7 @@ const testFilesUnder = (dir: string): string[] => {
 
 /**
  * The name(s) a call in this file may invoke `until` by: `until` itself, any local alias bound by
- * `import { until as X } from '<a relative specifier ending in harness>'`, and any `X.until` reached
+ * `import { until as X } from '<a relative specifier ending in harness or until>'`, and any `X.until` reached
  * through `import * as X from '<the same>'`. Reads the RAW source, not the comment/string-stripped form
  * the rest of this scanner uses — both imports are recognised by their quoted specifier, which
  * `stripped()` blanks out along with every other string.
@@ -146,8 +146,8 @@ const testFilesUnder = (dir: string): string[] => {
  * `tests/browser/` reaches the module as `./harness`; one recursed into a subdirectory — the shape
  * `testFilesUnder` reaches — must write `../harness`, and one two levels down `../../harness`. A
  * specifier anchored to `./` alone would match the first and miss every other depth, so recursion and
- * alias detection would not compose. `[^'"]*\bharness` matches any relative prefix in front of the
- * module's own name.
+ * alias detection would not compose. `[^'"]*\b(?:harness|until)` matches any relative prefix in front of the
+ * name of either module: `until.ts` declares the wait, and `harness.ts` re-exports it.
  *
  * A text scanner cannot see an alias created any other way (a `require`, a re-export, a second `import`
  * binding the same name under a different local identifier via a barrel file); this covers the two
@@ -155,7 +155,7 @@ const testFilesUnder = (dir: string): string[] => {
  */
 const untilNames = (raw: string): string[] => {
   const names = new Set<string>(['until'])
-  const namedRe = /import\s*\{([^}]*)\}\s*from\s*['"][^'"]*\bharness['"]/g
+  const namedRe = /import\s*\{([^}]*)\}\s*from\s*['"][^'"]*\b(?:harness|until)['"]/g
   let m: RegExpExecArray | null = namedRe.exec(raw)
   while (m !== null) {
     for (const spec of (m[1] as string).split(',')) {
@@ -164,7 +164,7 @@ const untilNames = (raw: string): string[] => {
     }
     m = namedRe.exec(raw)
   }
-  const namespaceRe = /import\s*\*\s*as\s+(\w+)\s*from\s*['"][^'"]*\bharness['"]/g
+  const namespaceRe = /import\s*\*\s*as\s+(\w+)\s*from\s*['"][^'"]*\b(?:harness|until)['"]/g
   let n: RegExpExecArray | null = namespaceRe.exec(raw)
   while (n !== null) {
     names.add(`${n[1]}.until`)
@@ -177,7 +177,7 @@ const untilNames = (raw: string): string[] => {
  * Scans `dir` (defaulting to the real `tests/browser/`) for a numeric argument at a call site — any
  * numeric argument, not only a timeout. `until`'s fourth parameter is `pollMs`, and the ceiling a wait
  * actually gets is `timeoutMs + pollMs`, since the throw fires only after a sleep returns; a large poll
- * interval would stretch that ceiling with `timeoutMs` untouched. Both live in `harness.ts` and neither
+ * interval would stretch that ceiling with `timeoutMs` untouched. Both live in `until.ts` and neither
  * belongs at a call site, so a failure here names the value rather than assuming which one it is. Takes
  * `dir` as a parameter, rather than closing over `DIR` alone, so a test below can point it at a
  * throwaway directory and prove the recursion and the alias/namespace detection compose, instead of
@@ -207,7 +207,7 @@ const numericTimeoutSites = (dir: string = DIR): string[] => {
 }
 
 /**
- * Read `harness.ts`'s `until` signature and return the `timeoutMs` default as a number, or throw if the
+ * Read `until.ts`'s `until` signature and return the `timeoutMs` default as a number, or throw if the
  * default is missing or is not a numeric literal the gate can read. Captures the WHOLE token up to the
  * next comma or paren, not `[\d_]+` — that pattern stops at a literal's first non-digit character, so
  * `0xea60` would read as `"0"` and `6e4` as `"6"`, both silently passing a gate meant to reject a default
@@ -216,10 +216,10 @@ const numericTimeoutSites = (dir: string = DIR): string[] => {
  */
 const declaredTimeoutMsDefault = (src: string): number => {
   const m = src.match(/timeoutMs = ([^,)]+)/)
-  if (m === null) throw new Error('harness.ts does not declare a timeoutMs default')
+  if (m === null) throw new Error('until.ts does not declare a timeoutMs default')
   const token = (m[1] as string).trim()
   if (!isNumericLiteral(token)) {
-    throw new Error(`harness.ts's timeoutMs default (${token}) is not a numeric literal`)
+    throw new Error(`until.ts's timeoutMs default (${token}) is not a numeric literal`)
   }
   return Number(token.replace(/_/g, ''))
 }
@@ -314,6 +314,12 @@ it('untilNames matches an aliased import reached through a relative parent-direc
   expect(untilNames("import { until as waitFor } from '../../harness'\n")).toContain('waitFor')
 })
 
+/** `until.ts` declares the wait that `harness.ts` re-exports, so a name imported from either module is `until`. */
+it('untilNames matches an aliased or namespace import of the until module as well as of harness', () => {
+  expect(untilNames("import { until as waitFor } from './until'\n")).toContain('waitFor')
+  expect(untilNames("import * as u from '../until'\n")).toContain('u.until')
+})
+
 /**
  * **THE COMBINATION NO TEST ABOVE EXERCISES.** That `testFilesUnder`'s recursion and `untilNames`'s
  * alias detection each work alone does not prove they compose: a file reached only by recursing into a
@@ -391,7 +397,7 @@ it('no file under tests/browser re-declares until locally', () => {
 })
 
 it('the shared until default is below vitest browser testTimeout', () => {
-  const src = readFileSync(fileURLToPath(new URL('../browser/harness.ts', import.meta.url)), 'utf8')
+  const src = readFileSync(fileURLToPath(new URL('../browser/until.ts', import.meta.url)), 'utf8')
   expect(declaredTimeoutMsDefault(src)).toBeLessThan(BROWSER_TEST_TIMEOUT_MS)
 })
 

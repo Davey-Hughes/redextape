@@ -298,7 +298,11 @@ from the breakdown entirely. Recount rather than trust them.
 has **33** browser tests (`wasm-pack test --headless --chrome crates/redextape-wasm`), run by CI's
 `rust-browser` job. `web/` has **246** of its own across two Vitest projects — 187 in Node for the
 pure modules, 59 in real Chromium for the worker and the app end to end — run by CI's `web` job
-under the coverage gate. Recount with `pnpm test`.
+under the coverage gate. Recount with `pnpm test`. `pnpm test:firefox` runs the browser tier in
+Playwright's Firefox (install it once with `pnpm exec playwright install firefox`), where each test
+that needs what only Chromium has is skipped with its reason. `pnpm test:firefox --reporter=verbose`
+prints every reason, where the default reporter leaves some out. The run still has known failures,
+which later PRs fix, and nothing else runs it, CI included.
 
 All three numbers in the last two paragraphs were stale when measured on 2026-08-09, and the web one
 badly: it read **48** from PR 3c while the suite grew fivefold underneath it. That is what the

@@ -1,5 +1,6 @@
 import { expect, inject } from 'vitest'
-import { cdp } from 'vitest/browser'
+import { cdp, commands } from 'vitest/browser'
+import { CHROMIUM } from './engine'
 
 /**
  * Browser-tier setup, the FIRST of its two files: collect the pages the test files before this one left behind, and
@@ -44,21 +45,30 @@ import { cdp } from 'vitest/browser'
  * Whether coverage is on comes from `global-setup.ts`: starting precise coverage in a run without it would put the
  * leak back, and a page cannot read the run's settings itself.
  */
-const gc = (
-  globalThis as typeof globalThis & {
-    gc?: (options?: { type: 'major'; execution: 'sync'; flavor: 'last-resort' }) => void
+if (CHROMIUM) {
+  const gc = (
+    globalThis as typeof globalThis & {
+      gc?: (options?: { type: 'major'; execution: 'sync'; flavor: 'last-resort' }) => void
+    }
+  ).gc
+  if (typeof gc !== 'function') {
+    throw new Error('BLOCKED: globalThis.gc is unavailable — launch Chromium with --js-flags=--expose-gc')
   }
-).gc
-if (typeof gc !== 'function') {
-  throw new Error('BLOCKED: globalThis.gc is unavailable — launch Chromium with --js-flags=--expose-gc')
-}
-const coverage = inject('coverageOn')
-if (coverage) await cdp().send('Profiler.stopPreciseCoverage')
-gc()
-gc()
-if (coverage) {
-  gc({ type: 'major', execution: 'sync', flavor: 'last-resort' })
-  await cdp().send('Profiler.startPreciseCoverage', { callCount: true, detailed: true })
+  const coverage = inject('coverageOn')
+  if (coverage) await cdp().send('Profiler.stopPreciseCoverage')
+  gc()
+  gc()
+  if (coverage) {
+    gc({ type: 'major', execution: 'sync', flavor: 'last-resort' })
+    await cdp().send('Profiler.startPreciseCoverage', { callCount: true, detailed: true })
+  }
+} else {
+  // ANY OTHER ENGINE GIVES A PAGE NO `gc`, AND PRECISE COVERAGE IS CHROMIUM'S ALONE: a coverage run that starts the
+  // Firefox project fails before any of its tests runs. Playwright's own collection, `page.requestGC()`, frees the
+  // earlier pages in its place, through a command only the Firefox project registers (`vite.config.ts`). The guard
+  // below holds every engine to the same bound, since a page Firefox keeps alive keeps its WebAssembly memories as
+  // Chromium's does.
+  await commands.requestGC()
 }
 
 /**

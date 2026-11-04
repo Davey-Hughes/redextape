@@ -1,11 +1,23 @@
 import { afterEach, beforeAll, describe, expect, it, vi } from 'vitest'
-import { page, userEvent } from 'vitest/browser'
+import { cdp, page, userEvent } from 'vitest/browser'
 import type { PaneEvents } from '../../src/pane-chrome'
 import { BOUNDARY_KEY_STEP, type Shares } from '../../src/panel-stack'
 import type { RxmPanels } from '../../src/rxm-pane'
 import { RxmPane } from '../../src/rxm-pane'
 import { FACT3, frameOf } from '../node/rxm-fixtures'
-import { boundary, controlState, drag, frame, inertEvents, panelOf, panelToggle, region } from './harness'
+import { chromiumOnly, mousePointerId } from './engine'
+import {
+  boundary,
+  controlState,
+  drag,
+  frame,
+  inertEvents,
+  pageCentreOf,
+  panelOf,
+  panelToggle,
+  region,
+  until,
+} from './harness'
 
 /**
  * THE BOUNDARIES BETWEEN A VIEW'S REGIONS, AND THE HEADER THAT IS A HANDLE FOR ONE — the view layouts spec §11.2,
@@ -14,8 +26,8 @@ import { boundary, controlState, drag, frame, inertEvents, panelOf, panelToggle,
  * must NOT move. `panel-maximise.test.ts` has the maximise button and `panel-sizes-stored.test.ts` the workspace.
  *
  * **EVERY DRAG IS THE DRIVER'S OWN WHERE ONE MOVE IS ENOUGH** (`userEvent.dragAndDrop`: a press, a move, a release).
- * Three cases need more than the driver gives and make their own pointer events, and each says so: a pointer that
- * overshoots a floor and comes back, a finger, and a press that is held.
+ * A case that needs more than the driver gives makes its own pointer events. A finger is a real touch
+ * through CDP, which only Chromium has.
  */
 
 const CONTROLS = controlState(true, 'step 3 of 55')
@@ -49,22 +61,64 @@ const header = (host: HTMLElement, name: string) => panelOf(host, name).querySel
 /** The last shares a gesture reported. */
 const last = (sizes: ReturnType<typeof vi.fn>): Shares => sizes.mock.calls.at(-1)?.[0] as Shares
 
+let mouseId: number
+
 /** A pointer event of this file's own making on `el`, at `y`, for what the driver's one-move drag cannot do. */
-const fire = (el: HTMLElement, type: string, y: number, pointerType = 'mouse'): void => {
+const fire = (el: HTMLElement, type: string, y: number): void => {
   const box = el.getBoundingClientRect()
   el.dispatchEvent(
     new PointerEvent(type, {
-      pointerId: 1,
+      pointerId: mouseId,
       bubbles: true,
       cancelable: true,
       clientX: box.left + box.width / 2,
       clientY: y,
       isPrimary: true,
       button: 0,
-      pointerType,
+      pointerType: 'mouse',
     }),
   )
 }
+
+/**
+ * A finger's press at `el`'s centre, a move of `dy` px and its release, sent through CDP as a real touch: `pressed`
+ * looks right after the press, and `moved` a frame after the move.
+ */
+async function finger(el: HTMLElement, dy: number, pressed: () => void, moved: () => void): Promise<void> {
+  const at = pageCentreOf(el)
+  const scale = (window.frameElement as HTMLElement).getBoundingClientRect().width / innerWidth
+  let down = false
+  let after = false
+  const heard = () => {
+    after = true
+  }
+  el.addEventListener(
+    'pointerdown',
+    () => {
+      down = true
+    },
+    { once: true },
+  )
+  el.addEventListener('pointermove', heard, { once: true })
+  el.addEventListener('pointercancel', heard, { once: true })
+  await cdp().send('Input.dispatchTouchEvent', { type: 'touchStart', touchPoints: [at] })
+  try {
+    await until(() => down, 'the finger’s press')
+    pressed()
+    await cdp().send('Input.dispatchTouchEvent', {
+      type: 'touchMove',
+      touchPoints: [{ x: at.x, y: at.y + dy * scale }],
+    })
+    await until(() => after, 'the finger’s move')
+    await frame()
+    moved()
+  } finally {
+    // LIFTED WHATEVER FAILED: a finger left down would hold the tab's touch for every case and file after this one.
+    await cdp().send('Input.dispatchTouchEvent', { type: 'touchEnd', touchPoints: [] })
+  }
+  await frame()
+}
+
 const middle = (el: HTMLElement): number => el.getBoundingClientRect().top + el.getBoundingClientRect().height / 2
 
 // A VIEWPORT AS WIDE AND AS TALL AS A VIEW: a real press aimed past the page's edge lands on nothing.
@@ -73,6 +127,7 @@ beforeAll(async () => {
   // THE PAGE'S FONTS FIRST, ASKED FOR BY NAME, since nothing on the page has used them yet: a line's height is the
   // font's, and a floor of five lines and a header's height settle as the fonts arrive.
   await Promise.all([document.fonts.load('12px "Hack"'), document.fonts.load('12px "Inter"')])
+  mouseId = await mousePointerId()
 })
 
 afterEach(() => {
@@ -375,7 +430,13 @@ describe('a drag of a boundary', () => {
     await frame()
     // THE RELEASE, ON THE PAGE'S BODY: the boundary no longer holds the pointer.
     document.body.dispatchEvent(
-      new PointerEvent('pointerup', { pointerId: 1, bubbles: true, isPrimary: true, button: 0, pointerType: 'mouse' }),
+      new PointerEvent('pointerup', {
+        pointerId: mouseId,
+        bubbles: true,
+        isPrimary: true,
+        button: 0,
+        pointerType: 'mouse',
+      }),
     )
     await frame()
     await userEvent.click(panelToggle(host, 'heap'))
@@ -468,25 +529,29 @@ describe('a panel’s header, as the handle for the boundary above it', () => {
   })
 
   /** A finger's press on a bar is left alone: a header is most of what a narrow view offers to scroll by. */
-  it('leaves a finger’s press alone, which the boundary itself takes', async () => {
+  it('leaves a finger’s press alone, which the boundary itself takes', async (ctx) => {
+    chromiumOnly(ctx, 'a real touch is CDP’s Input.dispatchTouchEvent, which only Chromium has')
     const { host, sizes } = mount()
     const before = heights(host)
     const bar = header(host, 'heap')
-    const y = middle(bar)
-    fire(bar, 'pointerdown', y, 'touch')
-    fire(bar, 'pointermove', y - 60, 'touch')
-    await frame()
-    fire(bar, 'pointerup', y - 60, 'touch')
-    expect(heights(host), 'a finger on the bar dragged').toEqual(before)
+    // ALSO AT THE PRESS: the bar leaves a finger's pan to the browser, which cancels the pointer once the pan
+    // starts, so the checks after the move hold only while a move comes before that cancel.
+    await finger(
+      bar,
+      -60,
+      () => expect(bar.dataset.dragging, 'a finger’s press on the bar drew it held').toBeUndefined(),
+      () => expect(heights(host), 'a finger on the bar dragged').toEqual(before),
+    )
     expect(bar.dataset.dragging, 'the bar is drawn held').toBeUndefined()
     expect(sizes).not.toHaveBeenCalled()
     const b = boundary(host, 'machine', 'heap')
     expect(getComputedStyle(b).touchAction, 'the boundary leaves a finger’s drag to the gesture').toBe('none')
-    fire(b, 'pointerdown', middle(b), 'touch')
-    fire(b, 'pointermove', middle(b) - 60, 'touch')
-    await frame()
-    expect(heights(host).heap, 'a finger on the boundary did not drag').toBeCloseTo(before.heap + 60, 0)
-    fire(b, 'pointerup', middle(b), 'touch')
+    await finger(
+      b,
+      -60,
+      () => expect(b.dataset.dragging, 'a finger’s press on the boundary').toBe('true'),
+      () => expect(heights(host).heap, 'a finger on the boundary did not drag').toBeCloseTo(before.heap + 60, 0),
+    )
   })
 
   /** An open hand over a handle, and a closed one from the press to the release: `data-dragging`. */

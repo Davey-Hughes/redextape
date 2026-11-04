@@ -2,6 +2,7 @@ import { EditorView } from '@codemirror/view'
 import { afterEach, beforeAll, describe, expect, it } from 'vitest'
 import { cdp, page, userEvent } from 'vitest/browser'
 import { HINT_ROWS, HINT_SENTENCE } from '../../src/view-keys'
+import { chromiumOnly } from './engine'
 import {
   armed,
   chooseOption,
@@ -230,9 +231,11 @@ describe('view keys', () => {
    * These eight are the ones pressed here; `tests/node/view-keys.test.ts` has the whole list. **`Control` AMONG THEM**,
    * the prefix's own modifier, let go after the prefix and pressed again by itself.
    */
-  it.each(['Control', 'Shift', 'Alt', 'Meta', 'AltGraph', 'CapsLock', 'NumLock', 'ScrollLock'])(
+  it.for(['Control', 'Shift', 'Alt', 'Meta', 'AltGraph', 'CapsLock', 'NumLock', 'ScrollLock'])(
     'stays armed through %s pressed alone, and the key after it acts',
-    async (modifier) => {
+    async (modifier, ctx) => {
+      if (modifier === 'AltGraph')
+        chromiumOnly(ctx, 'Playwright’s Firefox cannot press AltGraph: its keyboard.down fails with a protocol error')
       await start()
       await prefix()
       await userEvent.keyboard(`{${modifier}}`)
@@ -541,7 +544,8 @@ describe('view keys', () => {
    * A composition is begun through the browser's own input method interface, which no key of `userEvent`'s can do,
    * and the prefix pressed during it is `userEvent`'s: the browser marks its `keydown` as part of the composition.
    */
-  it('is not armed by a prefix pressed during a composition', async () => {
+  it('is not armed by a prefix pressed during a composition', async (ctx) => {
+    chromiumOnly(ctx, 'a composition is CDP’s Input.imeSetComposition, which only Chromium has')
     await start()
     await cdp().send('Input.imeSetComposition', { text: 'か', selectionStart: 1, selectionEnd: 1 })
     try {

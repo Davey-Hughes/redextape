@@ -11,14 +11,15 @@ import { playwright } from '@vitest/browser-playwright'
 // fine (Vite ignores the extra `test` key at runtime either way) but fails `tsc --noEmit` with
 // TS2769 because the `test` property is invisible to the checker. `vitest/config` re-exports the
 // same Vite `defineConfig` plus that import path.
-import { configDefaults, defineConfig } from 'vitest/config'
+import { configDefaults, defineConfig, type TestProjectInlineConfiguration } from 'vitest/config'
+import type { BrowserCommand } from 'vitest/node'
 import { inlinePrepaint } from './src/prepaint.ts'
 
 // `pkg/` is built to the REPO ROOT, one level above this Vite root, because the Dockerfile places
 // stage 1's output at /app/pkg beside /app/web. Vite's dev server refuses to serve outside its root
 // unless that path is allow-listed.
 //
-// ABSOLUTE, AND REPEATED ON THE BROWSER PROJECT — a relative `'..'` here is not enough, and the
+// ABSOLUTE, AND REPEATED ON THE BROWSER PROJECTS — a relative `'..'` here is not enough, and the
 // failure it produces is remote from its cause. Vitest's browser mode stands up its own nested Vite
 // server and rebuilds `server.fs.allow` against THAT server's root, so a relative entry resolves
 // somewhere else and the wasm fetch dies with "outside of Vite serving allow list" — while the same
@@ -29,7 +30,7 @@ const REPO_ROOT = fileURLToPath(new URL('..', import.meta.url))
 const PAGES = ['index', 'about', 'help', 'licences', 'privacy']
 
 /**
- * The probes' own files, excluded from the browser project's default set unless `REDEXTAPE_PROBE` is
+ * The probes' own files, excluded from both browser projects' default sets unless `REDEXTAPE_PROBE` is
  * set — the `pnpm test:probe*` scripts are what set it.
  *
  * **IT IS A MEASUREMENT WHOSE CONSOLE OUTPUT IS THE DELIVERABLE, AND A DELIVERABLE NOBODY READS ON EVERY PUSH IS
@@ -72,6 +73,57 @@ const PROBE_FILES = [
 ]
 const PROBE_EXCLUDE = process.env.REDEXTAPE_PROBE === undefined ? PROBE_FILES : []
 
+/**
+ * Whether this run has the Firefox project: `pnpm test:firefox` sets `REDEXTAPE_FIREFOX`, and nothing else does.
+ * OPT-IN, BECAUSE A FIREFOX PROJECT IN EVERY RUN WOULD BREAK TWO OF THEM: `pnpm test` would run it, and an unfiltered
+ * run with coverage stops at startup with it in the projects, which `test:coverage`, CI's `web` job, is.
+ */
+const FIREFOX = process.env.REDEXTAPE_FIREFOX !== undefined
+
+/**
+ * A browser project in one engine. Both engines' projects are built here, so they cannot drift apart in the files
+ * they run, their setup or what they are given.
+ */
+function browserProject(
+  name: string,
+  browser: 'chromium' | 'firefox',
+  provider: ReturnType<typeof playwright>,
+  commands: Record<string, BrowserCommand<[]>> = {},
+): TestProjectInlineConfiguration {
+  return {
+    server: { fs: { allow: [REPO_ROOT] } },
+    test: {
+      name,
+      include: ['tests/browser/**/*.test.ts'],
+      // THE PROBE IS NOT IN THE DEFAULT SET — see `PROBE_FILES` above for the whole argument.
+      // Each `pnpm test:probe*` script sets `REDEXTAPE_PROBE`, and this list is then empty.
+      //
+      // `...configDefaults.exclude` FIRST, BECAUSE A BARE `exclude: PROBE_EXCLUDE` REPLACES
+      // VITEST'S DEFAULT LIST RATHER THAN ADDING TO IT — `**/node_modules/**` and `**/.git/**` would
+      // silently drop out. Harmless only because `include` above is confined to
+      // `tests/browser/`, so nothing under `node_modules` or `.git` could match it anyway; the
+      // moment that glob widens, the omission bites without a test to catch it.
+      exclude: [...configDefaults.exclude, ...PROBE_EXCLUDE],
+      // `tm-buffer-cost.test.ts`'s run stamp, which `pnpm run test:probe:tm-buffer` sets and every other run
+      // leaves empty. A browser test cannot read `process.env` (`PROBE_FILES`' doc says why), so the probe
+      // learns its own run's stamp here, and refuses a corpus or a build under `target/` stamped by another.
+      provide: {
+        probeTmBufferRun: process.env.REDEXTAPE_PROBE_TM_BUFFER_RUN ?? '',
+        probeRxmCopyRun: process.env.REDEXTAPE_PROBE_RXM_COPY_RUN ?? '',
+      },
+      // Vitest serves its own tester HTML, so this project's `index.html` — and therefore its
+      // `<link>` to `style.css` — never reaches the page. See `tests/browser/setup.ts`: without it
+      // the browser tier measures a different geometry than the app ships. `tests/browser/collect.ts`
+      // comes FIRST: it collects the pages of the files before, and restarts coverage, before any
+      // module of `src` is compiled in this one (`sequence.setupFiles` below).
+      setupFiles: ['tests/browser/collect.ts', 'tests/browser/setup.ts'],
+      // Whether coverage is on, for `collect.ts`, which cannot read the run's settings itself.
+      globalSetup: ['tests/browser/global-setup.ts'],
+      browser: { enabled: true, provider, headless: true, commands, instances: [{ browser }] },
+    },
+  }
+}
+
 export default defineConfig({
   server: { fs: { allow: [REPO_ROOT] } },
   plugins: [{ name: 'redextape-prepaint', transformIndexHtml: { order: 'pre', handler: inlinePrepaint } }],
@@ -113,12 +165,12 @@ export default defineConfig({
   },
   test: {
     // SETUP FILES IN THE ORDER LISTED, ONE AFTER ANOTHER, WHERE VITEST'S DEFAULT IMPORTS THEM ALL AT
-    // ONCE. Only the browser project has any, and its first, `tests/browser/collect.ts`, stops and
+    // ONCE. Only the browser projects have any, and their first, `tests/browser/collect.ts`, stops and
     // restarts V8's precise coverage: a module `setup.ts` imports, compiled while that is under way,
     // would be counted at function granularity for the rest of its file. A root option and not the
     // project's own, because Vitest reads this one from the root config alone.
     sequence: { setupFiles: 'list' },
-    // No `passWithNoTests`: both projects have tests, so a project reporting no test files means a
+    // No `passWithNoTests`: every project has tests, so a project reporting no test files means a
     // broken `include` glob, and that should fail rather than pass quietly.
     // Coverage spans BOTH projects because this block sits at the `test` root rather than inside
     // either one — a single `vitest run --coverage` merges the node and browser tiers into one
@@ -128,8 +180,8 @@ export default defineConfig({
     // modules are covered by the merge; the two workers are excluded below for a reason that is about
     // INSTRUMENTATION rather than reach, and that entry documents both the reason and what it costs.
     //
-    // v8 works here only because `instances` below is chromium-only; on any other browser Vitest
-    // throws at config-resolution time rather than silently under-reporting.
+    // v8 works here only because a coverage run starts no Firefox: with `REDEXTAPE_FIREFOX` set, an unfiltered run
+    // stops at startup, and `--project firefox` fails before any test runs, rather than under-report.
     coverage: {
       provider: 'v8',
       // LOAD-BEARING, AND NOT A DEFAULT WORTH INHERITING. Left unset, `coverage.include` counts only
@@ -196,64 +248,40 @@ export default defineConfig({
           include: ['tests/node/**/*.test.ts'],
         },
       },
-      {
-        server: { fs: { allow: [REPO_ROOT] } },
-        test: {
-          name: 'browser',
-          include: ['tests/browser/**/*.test.ts'],
-          // THE PROBE IS NOT IN THE DEFAULT SET — see `PROBE_FILES` above for the whole argument.
-          // Each `pnpm test:probe*` script sets `REDEXTAPE_PROBE`, and this list is then empty.
+      browserProject(
+        'browser',
+        'chromium',
+        playwright({
+          // TWO FLAGS, AND `frame-cost.test.ts` NEEDS BOTH — one to make the reading move at all,
+          // the other to make it mean something. Chromium-only. The second is not the probes'
+          // alone: `tests/browser/collect.ts` calls `gc` at the start of every browser file, to collect
+          // the page the file before it left, and throws if this flag is missing.
           //
-          // `...configDefaults.exclude` FIRST, BECAUSE A BARE `exclude: PROBE_EXCLUDE` REPLACES
-          // VITEST'S DEFAULT LIST RATHER THAN ADDING TO IT — `**/node_modules/**` and `**/.git/**` would
-          // silently drop out. Harmless only because `include` above is confined to
-          // `tests/browser/`, so nothing under `node_modules` or `.git` could match it anyway; the
-          // moment that glob widens, the omission bites without a test to catch it.
-          exclude: [...configDefaults.exclude, ...PROBE_EXCLUDE],
-          // `tm-buffer-cost.test.ts`'s run stamp, which `pnpm run test:probe:tm-buffer` sets and every other run
-          // leaves empty. A browser test cannot read `process.env` (`PROBE_FILES`' doc says why), so the probe
-          // learns its own run's stamp here, and refuses a corpus or a build under `target/` stamped by another.
-          provide: {
-            probeTmBufferRun: process.env.REDEXTAPE_PROBE_TM_BUFFER_RUN ?? '',
-            probeRxmCopyRun: process.env.REDEXTAPE_PROBE_RXM_COPY_RUN ?? '',
-          },
-          // Vitest serves its own tester HTML, so this project's `index.html` — and therefore its
-          // `<link>` to `style.css` — never reaches the page. See `tests/browser/setup.ts`: without it
-          // the browser tier measures a different geometry than the app ships. `tests/browser/collect.ts`
-          // comes FIRST: it collects the pages of the files before, and restarts coverage, before any
-          // module of `src` is compiled in this one (`sequence.setupFiles` above).
-          setupFiles: ['tests/browser/collect.ts', 'tests/browser/setup.ts'],
-          // Whether coverage is on, for `collect.ts`, which cannot read the run's settings itself.
-          globalSetup: ['tests/browser/global-setup.ts'],
-          browser: {
-            enabled: true,
-            provider: playwright({
-              // TWO FLAGS, AND `frame-cost.test.ts` NEEDS BOTH — one to make the reading move at all,
-              // the other to make it mean something. Chromium-only. The second is not the probes'
-              // alone: `tests/browser/collect.ts` calls `gc` at the start of every browser file, to collect
-              // the page the file before it left, and throws if this flag is missing.
-              //
-              // `--enable-precise-memory-info` — `frame-cost.test.ts` reads
-              // `performance.memory.usedJSHeapSize` to measure `SPAN_BYTES` for real. WITHOUT IT the
-              // value is frozen at a stale sample for tens of seconds regardless of allocation, and every
-              // heap delta in that test reads exactly 0. WITH IT, the reading tracks allocation and
-              // collection within one read.
-              //
-              // `--js-flags=--expose-gc` — exposes `globalThis.gc()`, a full synchronous collection.
-              // WITHOUT IT the heap delta across a window is "bytes allocated MINUS whatever the
-              // collector happened to do in that window", which is a schedule, not a size: partial
-              // collection lands asymmetrically between the two windows, with no fixed sign or bound
-              // (the readings are in `docs/superpowers/notes/2026-10-17-code-history-web-tests.md`, in
-              // `frame-cost.test.ts`'s entry above `THE READINGS ARE TAKEN AFTER A FULL COLLECTION`).
-              // WITH IT that test collects before every reading, so each delta is retained heap, and
-              // the result is reproducible to the byte across browser restarts.
-              launchOptions: { args: ['--enable-precise-memory-info', '--js-flags=--expose-gc'] },
+          // `--enable-precise-memory-info` — `frame-cost.test.ts` reads
+          // `performance.memory.usedJSHeapSize` to measure `SPAN_BYTES` for real. WITHOUT IT the
+          // value is frozen at a stale sample for tens of seconds regardless of allocation, and every
+          // heap delta in that test reads exactly 0. WITH IT, the reading tracks allocation and
+          // collection within one read.
+          //
+          // `--js-flags=--expose-gc` — exposes `globalThis.gc()`, a full synchronous collection.
+          // WITHOUT IT the heap delta across a window is "bytes allocated MINUS whatever the
+          // collector happened to do in that window", which is a schedule, not a size: partial
+          // collection lands asymmetrically between the two windows, with no fixed sign or bound
+          // (the readings are in `docs/superpowers/notes/2026-10-17-code-history-web-tests.md`, in
+          // `frame-cost.test.ts`'s entry above `THE READINGS ARE TAKEN AFTER A FULL COLLECTION`).
+          // WITH IT that test collects before every reading, so each delta is retained heap, and
+          // the result is reproducible to the byte across browser restarts.
+          launchOptions: { args: ['--enable-precise-memory-info', '--js-flags=--expose-gc'] },
+        }),
+      ),
+      ...(FIREFOX
+        ? [
+            browserProject('firefox', 'firefox', playwright(), {
+              // Playwright's own collection, for `collect.ts` in an engine that gives a page no `gc`.
+              requestGC: async ({ page }) => page.requestGC(),
             }),
-            headless: true,
-            instances: [{ browser: 'chromium' }],
-          },
-        },
-      },
+          ]
+        : []),
     ],
   },
 })

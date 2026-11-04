@@ -8,6 +8,7 @@ import { TmPane } from '../../src/tm-pane'
 import type { LambdaState, TmProgram, TmState } from '../../src/types'
 import { DEFAULT_DISPLAY } from '../../src/workspace'
 import { wireOf } from '../node/tree-fixture'
+import { mousePointerId } from './engine'
 import { boundary, controlState, drag, frame, heightOf, region } from './harness'
 
 /**
@@ -36,6 +37,8 @@ const events = (over: Partial<PaneEvents> = {}): PaneEvents => ({
   ...over,
 })
 
+let mouseId: number
+
 const hostOf = (kind: string, height: number, width = 640): HTMLElement => {
   const el = document.createElement('section')
   el.className = 'pane'
@@ -51,6 +54,7 @@ beforeAll(async () => {
   // THE PAGE'S FONTS FIRST, ASKED FOR BY NAME, since nothing on the page has used them yet: a line's height is the
   // font's, and a floor of five lines and a header's height settle as the fonts arrive.
   await Promise.all([document.fonts.load('12px "Hack"'), document.fonts.load('12px "Inter"')])
+  mouseId = await mousePointerId()
 })
 
 afterEach(() => {
@@ -271,7 +275,14 @@ describe('the λ view’s term and its map', () => {
       const [x, y0] = [at.left + at.width / 2, at.top + at.height / 2]
       const fire = (type: string, y: number) =>
         b.dispatchEvent(
-          new PointerEvent(type, { pointerId: 1, bubbles: true, clientX: x, clientY: y, isPrimary: true, button: 0 }),
+          new PointerEvent(type, {
+            pointerId: mouseId,
+            bubbles: true,
+            clientX: x,
+            clientY: y,
+            isPrimary: true,
+            button: 0,
+          }),
         )
       /** How far the drawn rows fall short of the term's box, top and bottom: 0 where they cover it. */
       const gap = (): { top: number; bottom: number } => {

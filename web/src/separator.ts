@@ -61,10 +61,10 @@ export function pointerDrag(
     el.ownerDocument.addEventListener('pointercancel', stop, true)
     moved = false
     last = axis === 'x' ? e.clientX : e.clientY
-    // BEFORE `setPointerCapture`, NOT AFTER. Capture throws `NotFoundError` for a synthetic
-    // `PointerEvent` whose `pointerId` is anything other than `1`, because `1` is the reserved
-    // mouse-pointer id and is always active, even on a page's very first `pointerdown`. A test that
-    // dispatched one with another id would throw here, and `preventDefault` is what stops a drag from
+    // BEFORE `setPointerCapture`, NOT AFTER. Capture throws `NotFoundError` for a `pointerId` the
+    // browser holds no active pointer for, which a test's synthetic `PointerEvent` can carry: Firefox
+    // holds none for a synthetic id until real mouse input has reached the tab. A test whose event
+    // carried such an id would throw here, and `preventDefault` is what stops a drag from
     // selecting text across the panes, so it must not be the thing a throw skips.
     e.preventDefault()
     el.setPointerCapture(e.pointerId)

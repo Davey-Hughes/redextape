@@ -170,7 +170,7 @@ describe('a reduced file in a TM buffer', () => {
   /**
    * **ONE WHOLE RECORDING PER SCOPE.** `runValueLoop` starts only once a build's first recording has ended, so every
    * wait here on a spinner or on the fixture is a whole recording. A body that waits on several can meet Vitest's
-   * 15,000 ms cap before any of them fails under its own name, the case `until`'s doc in `harness.ts` warns of: its
+   * 15,000 ms cap before any of them fails under its own name, the case `until`'s doc in `until.ts` warns of: its
    * bound holds per wait, and Vitest's per test. So the spinner starts in `beforeEach` and the fixture comes back in
    * `afterEach`, each under its own hook timeout, and no body below waits on more than one recording.
    *

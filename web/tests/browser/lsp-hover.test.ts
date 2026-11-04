@@ -17,7 +17,7 @@ import { idle, markersIn, paneOrThrow, retype, SHELL, until } from './harness'
  * dispatches its own `KeyboardEvent` and this file deliberately does not copy it: a synthetic event
  * proves the keymap routes a key it was handed, not that the browser delivers one.
  *
- * **WHAT THE F2 CASE CANNOT SHOW.** Playwright injects keys through CDP at the renderer, so
+ * **WHAT THE F2 CASE CANNOT SHOW.** In Chromium, Playwright injects keys through CDP at the renderer, so
  * browser-chrome bindings never apply here. This asserts nothing in the app stack swallows F2; that
  * Chromium itself binds nothing to it is why F2 was chosen and is not what this test checks.
  *

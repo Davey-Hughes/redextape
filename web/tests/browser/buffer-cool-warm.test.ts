@@ -133,7 +133,7 @@ describe('a cooled buffer warmed and bound to a pane again', () => {
 
     // THE MOUNT IS SYNCHRONOUS WITH THE `change` EVENT, so anything past a frame or two is the absence
     // rather than a slow machine — which is why this wait is worth naming. The bound itself is
-    // `harness.ts`'s single default, chosen because a wait bounded at or above Vitest's own lets Vitest
+    // `until.ts`'s single default, chosen because a wait bounded at or above Vitest's own lets Vitest
     // kill the test first and print "Test timed out" with no name for what never arrived.
     await until(() => editorHost() !== null, 'the warmed buffer to mount an editor onto its newly bound pane')
     // ASSERTIONS THE WAIT ABOVE DOES NOT ALREADY IMPLY, which is the whole point of their being here:

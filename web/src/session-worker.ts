@@ -629,7 +629,7 @@ async function onRun(req: Extract<RunRequest, { kind: 'run' }>): Promise<void> {
  * **THE REPLAY HAPPENS INSIDE `lambdaScratchAt`, NOT HERE, AND THAT IS DELIBERATE.** Every method the
  * loop needs is on `LambdaScratchHandle`, so ~8 lines of TypeScript here would work and need no new
  * export. It is in Rust because this file is excluded from the coverage include set and is reachable
- * only from the browser tier, which needs Chrome and is skippable. The rule this file states is that
+ * only from the browser tier, which needs a browser and is skippable. The rule this file states is that
  * it holds the wasm call and not the logic.
  */
 async function onLambdaScratch(req: Extract<RunRequest, { kind: 'lambda-scratch' }>): Promise<void> {

@@ -1,8 +1,9 @@
 import type { EditorView } from '@codemirror/view'
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest'
 import { LAYOUT_STORAGE_KEY } from '../../src/layout'
 import { KEY_STEP } from '../../src/layout-view'
 import { parseWorkspace } from '../../src/workspace'
+import { mousePointerId } from './engine'
 import { SHELL, storeFourViews } from './harness'
 
 /**
@@ -71,8 +72,14 @@ const storedRowSizes = (): number[] => {
   return inner.sizes
 }
 
+let mouseId: number
+
+beforeAll(async () => {
+  mouseId = await mousePointerId()
+})
+
 const pointer = (type: string, x: number): PointerEvent =>
-  new PointerEvent(type, { bubbles: true, clientX: x, clientY: 300, pointerId: 1 })
+  new PointerEvent(type, { bubbles: true, clientX: x, clientY: 300, pointerId: mouseId })
 
 describe('dragging a divider on a mounted app', () => {
   /**
