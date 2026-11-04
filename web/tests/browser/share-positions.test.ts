@@ -6,7 +6,7 @@ import { encodeLink, type Positions } from '../../src/share-link'
 import { MAX_LINK_CONTINUES } from '../../src/share-positions'
 import { bindingKey } from '../../src/view-header'
 import { serializeWorkspace } from '../../src/workspace'
-import { fourViewWorkspace, noticeText, SHELL, stateIdle, stepTextOf, undoButton, until } from './harness'
+import { fourViewWorkspace, noticeText, pressable, SHELL, stateIdle, stepTextOf, undoButton, until } from './harness'
 
 /**
  * **A LINK'S POSITIONS, IN THE APP** — Plan 7 part 6a spec §5.4 and §8's positions row, on the real session worker:
@@ -168,7 +168,7 @@ describe('a step gesture before the first continue', () => {
     before = await open(FACT, { lambda: 3000 })
     // FORWARD: the head waits on step 0, where a run opens (`History`), until the frames reach the link's step.
     await until(
-      () => stepTextOf('lambda-0').includes('— going to step 3,000 from the link') && !forwardButton().disabled,
+      () => stepTextOf('lambda-0').includes('— going to step 3,000 from the link') && pressable(forwardButton()),
       'the pending position, with a step to take',
     )
     await userEvent.click(forwardButton())

@@ -1,7 +1,7 @@
 import type { EditorView } from '@codemirror/view'
 import { beforeAll, describe, expect, it } from 'vitest'
 import { userEvent } from 'vitest/browser'
-import { historyFills, SHELL, tmStepText, until } from './harness'
+import { historyFills, pressable, SHELL, tmStepText, until } from './harness'
 
 /** The fixture that reaches a `budget` stop on the TM leg — `extend-during-recompile.test.ts`'s `BUDGET_SRC`. */
 const BUDGET_SRC =
@@ -107,6 +107,6 @@ describe('focus when a frontier control is withdrawn', () => {
     const now = document.activeElement
     expect(now).not.toBe(document.body)
     expect(now?.closest('[data-leaf="tm-0"] .controls')).not.toBeNull()
-    expect(now instanceof HTMLButtonElement && !now.disabled && !now.hidden).toBe(true)
+    expect(now instanceof HTMLButtonElement && pressable(now) && !now.hidden).toBe(true)
   }, 90_000)
 })

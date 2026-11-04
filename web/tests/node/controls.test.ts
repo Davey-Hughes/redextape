@@ -1,21 +1,6 @@
 import { describe, expect, it } from 'vitest'
-import { canRecordFurther, controlState, type LegView } from '../../src/controls'
-
-const view = (over: Partial<LegView> = {}): LegView => ({
-  available: true,
-  reason: '',
-  head: 0,
-  length: 1,
-  oldestStep: 0,
-  currentStep: 0,
-  newestStep: 0,
-  evicted: false,
-  done: null,
-  awaitingRun: false,
-  playing: false,
-  pending: null,
-  ...over,
-})
+import { canRecordFurther, controlState } from '../../src/controls'
+import { legView as view } from '../browser/harness'
 
 describe('controlState', () => {
   it('disables everything for a declined leg and shows the reason', () => {
@@ -108,6 +93,14 @@ describe('controlState', () => {
     expect(controlState(view({ done: 'ended', length: 5, head: 2, currentStep: 2, newestStep: 4 })).stepText).toBe(
       'step 2 of 4',
     )
+  })
+
+  it('is recording exactly while the count carries the ellipsis', () => {
+    expect(controlState(view({ length: 5, head: 4 })).recording).toBe(true)
+    expect(controlState(view({ length: 5, head: 4, done: 'budget' })).recording).toBe(false)
+    expect(controlState(view({ length: 5, head: 4, awaitingRun: true })).recording).toBe(false)
+    expect(controlState(view({ length: 0 })).recording).toBe(false)
+    expect(controlState(view({ available: false, length: 5 })).recording).toBe(false)
   })
 
   // Scrubbing past the eviction point must SAY where history begins. The alternatives are lying

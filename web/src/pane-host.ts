@@ -1,5 +1,6 @@
 import { EditorView } from '@codemirror/view'
 import type { EditablePane, EditorCustody } from './editor-custody'
+import { keepFocusOn } from './focus-handoff'
 import { LambdaPane } from './lambda-pane'
 import {
   type AddRefusal,
@@ -597,13 +598,13 @@ export function createPaneHost(deps: {
     // **A FOCUS MOVE DURING A PRESS NESTS NO DRAW**: it only owes one, and the owed draw runs from a task of its own
     // queued at the press's end, its release or an earlier end (`focus-draw.ts`), outside any `focusin`. **A FOCUS MOVE
     // WITH NO PRESS IN PROGRESS DRAWS INSIDE ITS `focusin`, AND THAT RE-ENTRANCY IS BOUNDED BY THE HANDOFF'S OWN
-    // GUARD.** It fires only when `document.activeElement` is the departing control, in that same view, so the
-    // `focusin` it provokes names the leaf the focus was already on: `markActive` and `setFocused` are both no-ops, and
-    // the nested draw terminates at depth 2 because the departing control no longer has the focus and the guard is
-    // false on the way back through. A handoff that moved focus to a DIFFERENT leaf would not have that argument, which
-    // is why the guard is the thing to keep. **AND EVERY PRESS ENDS**: one that never did would leave every later focus
-    // move owing a draw nothing pays, which is why `focus-draw.ts` also ends a press whose release may never reach the
-    // page.
+    // GUARD.** It fires only when `focusHolder` names the departing control, in that same view: the control has the
+    // focus, or a rebuild that gives it the focus back has left the focus on `<body>`. So the `focusin` it provokes
+    // names the leaf the focus was already on: `markActive` and `setFocused` are both no-ops, and the nested draw
+    // terminates at depth 2 because the departing control no longer has the focus and the guard is false on the way
+    // back through. A handoff that moved focus to a DIFFERENT leaf would not have that argument, which is why the guard
+    // is the thing to keep. **AND EVERY PRESS ENDS**: one that never did would leave every later focus move owing a
+    // draw nothing pays, which is why `focus-draw.ts` also ends a press whose release may never reach the page.
     el.addEventListener('focusin', () => {
       panes.markActive(id)
       setFocused(id)
@@ -1095,9 +1096,9 @@ export function createPaneHost(deps: {
   }
 
   /**
-   * Run `rebuild`, and give the keyboard focus back to the element under `root` that had it, where the rebuild took
-   * it and left the element on the page: by `moveFocus`, told whether the gesture was a `pointer`'s. Answers whether
-   * the focus was under `root` to begin with.
+   * Run `rebuild`, **WHICH MUST DEFER NOTHING** (`focus-handoff.ts`'s `keepFocusOn` says why), and give the keyboard
+   * focus back to the element under `root` that had it, where the rebuild took it and left the element on the page: by
+   * `moveFocus`, told whether the gesture was a `pointer`'s. Answers whether the focus was under `root` to begin with.
    *
    * **A REBUILD TAKES THE FOCUS FROM ANYTHING INSIDE `root`, WHETHER OR NOT ITS VIEW STAYS**: `renderLayout` and
    * `renderStage` take every host off the page and put back the ones they show, which in tiles is every one the tree
@@ -1122,7 +1123,9 @@ export function createPaneHost(deps: {
     const held = document.activeElement
     const within = held instanceof HTMLElement && root.contains(held) ? held : null
     try {
-      rebuilding(rebuild)
+      // THE FOCUS IS `within`'s FOR THE REBUILD'S LENGTH (`focus-handoff.ts`'s `keepFocusOn`), so that a step button
+      // waiting on a recording is still waiting, and still takes the focus, when it is given it back.
+      rebuilding(() => keepFocusOn(within, rebuild))
     } finally {
       if (within !== null && root.contains(within) && document.activeElement !== within) moveFocus(within, pointer)
     }

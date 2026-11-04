@@ -1,6 +1,6 @@
 import type { EditorView } from '@codemirror/view'
 import { beforeAll, describe, expect, it } from 'vitest'
-import { extendButton, forwardButton, historyFills, SHELL, tmStepText } from './harness'
+import { extendButton, forwardButton, historyFills, pressable, SHELL, tmStepText } from './harness'
 
 /**
  * The fixture that reaches a `budget` stop on the TM leg. `capped` would need the cursor's 5,000,000-step cap,
@@ -30,7 +30,7 @@ describe('the frontier controls during a recompile', () => {
     expect(tmStepText(), 'precondition: the head at the frontier').toMatch(/^step ([\d,]+) of \1 /)
     expect(extendButton()?.hidden).toBe(false)
     expect(extendButton()?.textContent).toBe('keep recording')
-    expect(forwardButton()?.disabled).toBe(false)
+    expect(pressable(forwardButton())).toBe(true)
 
     // ONE CHARACTER, AND THE WITHDRAWAL IS SYNCHRONOUS. CodeMirror runs its update listeners inside
     // `dispatch`, that listener calls `schedule`, and `schedule` calls `supersede()` — which sets the
@@ -48,6 +48,6 @@ describe('the frontier controls during a recompile', () => {
     toNewest()
     expect(tmStepText(), 'precondition: the head at the frontier').toMatch(/^step ([\d,]+) of \1 /)
     expect(extendButton()?.hidden).toBe(false)
-    expect(forwardButton()?.disabled).toBe(false)
+    expect(pressable(forwardButton())).toBe(true)
   }, 90_000)
 })

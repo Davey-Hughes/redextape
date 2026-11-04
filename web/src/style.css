@@ -1067,6 +1067,22 @@ button.view-title[aria-expanded="true"] {
   opacity: 0.35;
   cursor: default;
 }
+/* A STEP BUTTON WAITING ON A RECORDING WITH THE FOCUS ON IT IS OFF BY `aria-disabled` (`step-controls.ts`), as the
+   `views` toggles are, and drawn as faint as a disabled one by its colours rather than by `opacity`, which would fade
+   its focus ring below the 3:1 every palette gives it. */
+.controls button[aria-disabled="true"] {
+  color: color-mix(in srgb, currentColor 35%, transparent);
+  border-color: color-mix(in srgb, var(--fg-dim) 35%, transparent);
+  cursor: default;
+}
+/* FORCED COLOURS REPLACE THOSE COLOURS WITH THE LIVE BUTTON'S, and the browser's own sheet draws a disabled button in
+   `GrayText`: the waiting one says it is off in the same colour, or it would look live while its press is dropped. */
+@media (forced-colors: active) {
+  .controls button[aria-disabled="true"] {
+    color: GrayText;
+    border-color: GrayText;
+  }
+}
 .controls button[hidden] {
   display: none;
 }

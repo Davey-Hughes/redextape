@@ -36,6 +36,12 @@ export type ControlState = {
   canPlay: boolean
   canRestart: boolean
   /**
+   * Whether frames are still arriving for a run that has some, which is when the readout's count carries `…`. A `▶`
+   * or `⏭` that this recording turns off under the focus waits for it rather than handing the focus on
+   * (`step-controls.ts`).
+   */
+  recording: boolean
+  /**
    * Whether playback is running, so the play button shows ⏸ and is named "pause" (Plan 7 part 2 spec §8,
    * umbrella rule 3).
    */
@@ -89,11 +95,11 @@ function doneText(done: RecordEnd): string {
  *
  * `awaitingRun` IS A PARAMETER HERE RATHER THAN A CHECK INSIDE `controlState`, AND NOT BECAUSE
  * `transport.ts`'S CALL WOULD OTHERWISE MISBEHAVE — it could not. That caller is the frontier `▶`
- * click handler, and it cannot reach this gate's `awaitingRun` half: `stepControls` renders the
- * forward button `disabled` whenever `canForward` is false, a disabled button receives no click from
- * a user gesture, and while `awaitingRun` holds `canForward` reduces to `head < length - 1` — which
- * is exactly the case where `hist.forward()` succeeds and short-circuits before this gate is
- * consulted. The repaint that sets the flag is synchronous, so no click lands in between.
+ * click handler, which cannot reach this gate's `awaitingRun` half: `stepControls` renders the
+ * forward button off whenever `canForward` is false (`disabled`, or `aria-disabled` with its press
+ * dropped), and while `awaitingRun` holds `canForward` reduces to `head < length - 1`, exactly where
+ * `hist.forward()` succeeds and short-circuits before this gate is consulted. The repaint that sets
+ * the flag is synchronous, so no click lands in between.
  *
  * IT IS A PARAMETER ANYWAY, BECAUSE THIS FUNCTION IS THE ONE PLACE AVAILABILITY IS DECIDED: one gate
  * rather than two. What makes `transport.ts`'s copy unreachable is a rendering decision in
@@ -113,6 +119,7 @@ export function controlState(v: LegView): ControlState {
       canToNewest: false,
       canPlay: false,
       canRestart: false,
+      recording: false,
       playing: false,
       continueLabel: null,
       stepText: v.reason,
@@ -131,7 +138,8 @@ export function controlState(v: LegView): ControlState {
 
   // `…` MEANS "THIS COUNT IS NOT FINAL", which is why `awaitingRun` drops it: the run this readout
   // describes has been superseded and will record nothing more, whatever the new one goes on to do.
-  const of = v.done === null && !v.awaitingRun ? `${n(v.newestStep)}…` : n(v.newestStep)
+  const recording = v.length > 0 && v.done === null && !v.awaitingRun
+  const of = recording ? `${n(v.newestStep)}…` : n(v.newestStep)
   const oldest = v.evicted ? ` (oldest kept: step ${n(v.oldestStep)})` : ''
   // THE READOUT SAYS WHAT THE USER DID; THE FIELD NAMES WHAT IS TRUE OF THE SESSION. They are the
   // same state from the two ends, and this is the existing narration rather than a second channel.
@@ -156,6 +164,7 @@ export function controlState(v: LegView): ControlState {
     canToNewest: v.head < v.length - 1,
     canPlay: v.length > 1,
     canRestart: v.length > 0,
+    recording,
     playing: v.playing,
     continueLabel,
     stepText,

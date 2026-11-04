@@ -14,6 +14,7 @@ import {
   linkedSource,
   linkStatus,
   markStart,
+  pressable,
   resultsText,
   retype,
   SHELL,
@@ -126,7 +127,7 @@ async function settled(v: EditorView, src: string): Promise<void> {
  */
 async function toNewest(leg: 'lambda' | 'rxm' | 'tm'): Promise<void> {
   const button = () => document.querySelector<HTMLButtonElement>(`[data-leaf="${leg}-0"] .controls button.to-newest`)
-  await until(() => button()?.disabled === false, `${leg}'s ⏭ to be live`)
+  await until(() => pressable(button()), `${leg}'s ⏭ to be live`)
   button()?.click()
 }
 
@@ -641,14 +642,14 @@ describe('the app, end to end', () => {
       await settled(view, LAMBDA_DECLINES)
       expect(stepText('lambda')).toContain('does not support')
       expect(document.querySelectorAll('[data-leaf="tm-0"] .tape').length).toBe(5)
-      expect(click('tm', '▶')?.disabled).toBe(false)
+      expect(pressable(click('tm', '▶'))).toBe(true)
     })
 
     it('leaves the λ pane steppable when the TM backend declines', async () => {
       await settled(view, 'let x = 200; x + 1')
       expect(document.querySelectorAll('[data-leaf="tm-0"] .tape').length).toBe(0)
       expect(paneText('lambda')).not.toBe('')
-      expect(click('lambda', '▶')?.disabled).toBe(false)
+      expect(pressable(click('lambda', '▶'))).toBe(true)
     })
 
     // THE `'declined'` λ LINK STATE, END TO END. `link-status.test.ts` drives `linkStatus` directly with an
@@ -717,7 +718,7 @@ describe('the app, end to end', () => {
       // `canForward`, `transport.ts`'s `forward`) — reaching `'budget'` a second time just to click the
       // other button would double an already-slow test for no more coverage, so this exercises ▶ here
       // instead of `[continue]`: it must be live, not disabled, at exactly this frontier.
-      expect(click('tm', '▶')?.disabled).toBe(false)
+      expect(pressable(click('tm', '▶'))).toBe(true)
       await until(() => stepNumber(stepText('tm')) > stoppedStep, 'the frontier to advance past the stop')
       expect(stepNumber(stepText('tm'))).toBeGreaterThan(stoppedStep)
     }, 60_000)
@@ -727,7 +728,7 @@ describe('the app, end to end', () => {
     it('keeps the keyboard on the strip when ⏭ takes the head to the newest step', async () => {
       await settled(view, 'let x = 40; x + 2')
       const newest = document.querySelector<HTMLButtonElement>('[data-leaf="lambda-0"] .controls button.to-newest')
-      await until(() => newest?.disabled === false, 'the λ view’s ⏭ to be live')
+      await until(() => pressable(newest), 'the λ view’s ⏭ to be live')
       newest?.focus()
       expect(document.activeElement, 'precondition: ⏭ holds the focus').toBe(newest)
       await userEvent.keyboard('{Enter}')

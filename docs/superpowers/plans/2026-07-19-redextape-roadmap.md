@@ -31168,3 +31168,397 @@ the run's `testResults` count and `numTotalTests`, `numPassedTests`, `numFailedT
 | only base16-remove; the other 36 | the files searched for chained cases; the T3 cases that passed alone | the `Scope:` line of `$R/tasks/case2-fix-report.md`; the `36 and 1` row's command |
 | "moves unchanged" | spec §3.5 at `acb67fd`; the Log | `grep -n unchanged` on the spec at `acb67fd` and on `$R/progress.md` (its pre-flight line, not the user's F3 line) |
 | 15,000; plus 1; 0; `'chrome'`; the 16 throws | the sabotages' edits | the sabotage tables and lists of `$R/tasks/task-1-report.md`, `task-2-report.md` and `task-3-report.md` |
+
+#### THE STEP BUTTONS HAND THE FOCUS ON WHEN THEY GO OFF UNDER IT, AND A ▶ OR ⏭ THAT A RECORDING TURNS OFF UNDER THE FOCUS WAITS FOR IT, FOCUSED AND OFF BY `aria-disabled`, SO THAT THE ENTER AT A `capped` OR `budget` STOP RECORDS FURTHER; THE WAIT HOLDS THROUGH A REBUILD THAT GIVES THE FOCUS BACK, AND ENDS ONCE ITS BUTTON IS TAKEN OFF THE PAGE (2026-11-03, branch `step-focus`, `1b2f0cb..940295c`, 17 commits, plus this entry and the commit that corrects it; then `f2ad034`, which corrects when `offPage`'s comment says the guard reads the focus, and the two commits that bring this entry up to date)
+
+**A PR of its own after web-bumps.** At `1b2f0cb`, ◀ pressed at step 1, and ▶ pressed onto a finished run's last step,
+disable themselves under their own click or Enter with no hand-off, so the focus drops to `<body>`. Web-bumps' review
+3 added that ↺ and ⏵ have no hand-off either, and that on Chromium 156, which defers the blur of a disabled focused
+button, the test of ⏭'s hand-off no longer catches its call order (its findings 4 and 3, as
+`~/temp/redextape-step-focus-record/progress.md`'s opening lines record them, and WEB'S DEPENDENCY BUMPS, WHAT
+THIS DID NOT CLOSE).
+The lane record is `~/temp/redextape-step-focus-record/` (`$R` below): `$R/progress.md` holds the user's rulings and
+every round, `$R/design.md` the hand-off map and the three choices it put to the user, `$R/reviews/` the reviews, the
+delta reads, their fix reports and the rebase report, `$R/try-it.md` the script for a try by hand, and `$R/logs/`
+every log named below. The branch began on web-bumps' `2f6d787`. It was rebased onto `e9bbf67` once #161 merged, its
+trees unchanged, and onto `1b2f0cb` once #162 merged, with no conflict and its 16 patches unchanged, and `940295c`
+followed. A figure from before the second rebase names the commit it ran at and the commit that commit is now, as
+"`530e44e` (now `3c5cd28`)"; the map is `$R/rebase-map-1b2f0cb.txt`.
+
+##### WHAT CHANGED
+
+Over the range, 14 files change, with 1,147 lines added and 76 removed.
+
+- **Every step button hands the focus on, `92102c5`, `c0ce50e` and `1ad67ee`.** At `1b2f0cb`, of the five, ⏭ alone
+  handed the focus on, to ◀, ↺, ▶, ⏵ and the speed select. At `940295c` `step-controls.ts`'s `buttons` table, built
+  once, gives each of the five the `ControlState` field that keeps it live and its hand-off list, and `update` reads
+  it against the focus (`1ad67ee`, review 1's findings 4 to 7):
+
+  | goes off | the focus goes to the first live of |
+  |---|---|
+  | ↺, under a state change only | ▶, ⏭, ⏵, ◀, the speed select |
+  | ◀ | ▶, ⏭, ⏵, ↺, the speed select |
+  | ▶ | ◀, ↺, ⏭, ⏵, the speed select |
+  | ⏭ | ▶, ◀, ↺, ⏵, the speed select |
+  | ⏵, under a state change only | ⏭, ▶, ◀, ↺, the speed select |
+
+  ⏭'s list starts at ▶ since `3c5cd28` (THE USER'S DECISIONS, 5). The button holding the focus takes its state after
+  the other four, so its hand-off reads the strip as the update leaves it, and it hands the focus on before its own
+  `disabled` is set, so the focus never rests on a disabled control, whenever the browser blurs it. `c0ce50e` makes
+  the call-order tests name the control that held the focus when the button was disabled.
+- **The hand-off's tests, `92102c5`, `2f17d10` and `d85f226`.** Each button by click and by Enter, the focus read
+  once it settles and the call order read inside the `disabled` setter. ◀, ▶ and ⏭ are also turned off by a state
+  change under a focus a real gesture put there: playback reaching the end for ▶ and ⏭, and for ◀ a recording's
+  evictions, through a real `History` moved as `transport.ts`'s handlers move it (`d85f226`). ↺ and ⏵ are turned off
+  by an unavailable leg and by a new run.
+- **A ▶ or ⏭ that a recording turns off under the focus waits for it, `41b2b28`, `3c5cd28` and `0cc3dd5`.** Review
+  1's finding 1: with the hand-off, Enter on ▶ at a `capped` or `budget` stop started a recording that turned ▶ off
+  under the focus, the focus went to ◀, and the next Enter stepped back. Before the branch the focus went to `<body>`
+  and that Enter did nothing. Review 1's fix round showed ▶'s case to be a regression and ⏭'s to be older
+  (`$R/reviews/review-1-fixes.md`). At `940295c`:
+  - The focused ▶ or ⏭ that a recording turns off keeps the focus and waits, off by `aria-disabled`, while
+    `ControlState`'s new `recording` holds, which is while frames still arrive and the readout's count carries `…`
+    (`controls.ts`). A click or Enter on a waiting button runs nothing. At a `capped` or `budget` stop ▶ is live
+    again with the focus on it, and a waiting ⏭ hands the focus to it, so the next Enter records further; at a
+    finished run's end either hands to ◀. Only the focused button waits, and a waiting button the focus leaves is
+    disabled at its `blur` (`41b2b28`). It waits only while a recording runs, read from the state and the focus
+    alone, so no wait outlives the leg it waited on (`3c5cd28`, review 2's findings 2 and 6).
+  - The continue button (`[keep recording]` at a `budget` stop, `[continue — raise the step cap]` at a `capped` one)
+    going away under its own press hands the focus to ▶, which waits, where it had handed it to ⏵ and the Enter at
+    the next stop played (`3c5cd28`, review 2's finding 5). `0cc3dd5` makes that hand-off run before the buttons take
+    their state, and reads the waiting button from the focus afterwards, so a ▶ the focus did not reach is disabled
+    rather than a dead Tab stop (review 3's findings 1 and 5).
+  - `style.css` draws a waiting button as faint as a disabled one by its colours rather than by `opacity`, so its
+    focus ring stays whole (`41b2b28`), and in `GrayText` under forced colours (`0cc3dd5`, review 3's finding 3).
+- **The wait and the page, `efb3f92`, `ccf8ded`, `a96edf9` and `468ce1a`.**
+  - `efb3f92`, the user's guard: while a ▶ or ⏭ waits, a `MutationObserver` on `document`'s child lists ends the
+    wait at the next microtask checkpoint after the script that took the button off, if the button does not hold the
+    focus then, as Firefox sends a focused button taken off the page no `blur` (review 3's finding 2). The `blur`
+    comment no longer says that a strip off the page is sent the recording's updates (the round-3 delta read's M1).
+  - `ccf8ded`: `focus-handoff.ts`'s `keepFocusOn(el, rebuild)` and `focusHolder()`. `pane-host.ts`'s `keepingFocus`
+    runs its rebuild under `keepFocusOn`, naming the element it will give the focus back to, and the strip, its
+    `blur` and `handOff` read the focus through `focusHolder`. So a divider's drag (`resized`) and a view key
+    (`switchViews`) leave a waiting button focused and waiting, where the drag had dropped the focus to `<body>` and
+    the view key had moved it to the view's title (the round-3 delta read's I1 and M2).
+  - `a96edf9`: the strip test of such a rebuild runs it without drawing the strip as well as drawing it. `468ce1a`,
+    comments only: `keepFocusOn`'s and `keepingFocus`'s docs say that the rebuild must defer nothing, and the
+    `focusin` comment says that the guard reads `focusHolder` (the round-4 delta read's m1 and m2).
+- **The tests in the app, and the helpers, `41b2b28`, `3393f02`, `4fa7a4c`, `0252408` and `e245324`.**
+  `step-focus-recording.test.ts` is new. It runs the app with its worker and holds the session workers' replies, so
+  that a gesture lands inside a recording at a chosen point, which ⏭'s case cannot reach by hand (WHAT THIS DID NOT
+  CLOSE). Its waits are `historyFills` and stages of 37,000 steps, each within `until`'s one bound (`4fa7a4c`). It
+  holds only the session workers' replies (`0252408`, review 2's finding 1), with one listener of its own on each, and
+  gives the page its `Worker` back after its cases (`e245324`, review 3's finding 7). `harness.ts` gains
+  `controlName`, `settledFocus` (`0252408`), `legView` and `pressable` (`e245324`). The helpers in `app.test.ts`,
+  `extend-during-recompile.test.ts`, `extend-focus-probe.test.ts` and `share-positions.test.ts` that wait for a step
+  button to be live ask `pressable`, which a waiting button is not (review 3's finding 4).
+  `tests/node/controls.test.ts` tests `recording` and builds its legs with `legView`.
+- **`940295c`, after the rebase onto `1b2f0cb`.** Two step-control tests start with Firefox PR 1's `chromiumOnly` and
+  their reasons: "a waiting ⏭ taken off the page with the focus is disabled, so it is no Tab stop when it is back",
+  which reads the button straight after taking it off, before the guard's observer runs, and so needs Chromium's
+  `blur` (the no-`blur` case beside it runs in Firefox), and "looks off in forced colours as a disabled step button
+  does, and keeps its focus ring", which sets forced colours through CDP.
+- **`f2ad034`, comments only, after this entry.** `step-controls.ts`'s comment on `offPage` said that a waiting
+  button taken off the page stops waiting "ONCE THE TASK THAT TOOK IT OFF IS DONE", "Read after the task". It says
+  that the button stops waiting at the next microtask checkpoint, and that a rebuild that gives it the focus back in
+  the same synchronous call leaves it waiting, as `keepFocusOn`'s doc says; a give-back left to the task's end would
+  find it disabled. `step-focus-recording.test.ts`'s doc of a view key that hides the TM view said that the watch
+  ends the wait "once the key is done", and says the next microtask checkpoint too (the entry check's M7, its code
+  half; `$R/reviews/comment-fix.md`).
+
+##### THE USER'S DECISIONS
+
+All on 2026-11-03, as `$R/progress.md` states them:
+
+1. On web-bumps' review 2: "Separate PR after" for the step buttons' focus hand-off; then "Start now on web-bumps",
+   the branch made from web-bumps' head and rebased once it merged.
+2. `$R/design.md`'s three choices, each the pick: ↺ and ⏵ covered; ▶ at the end hands to ◀; ⏵ hands leftwards along
+   the strip, the speed select last.
+3. Reviews: the built-in `code-review` at HIGH, each round, as web-bumps had; each finding reproduced before it is
+   fixed; "fix all".
+4. Review 1's finding 1 = option C: the button keeps the focus, off by `aria-disabled`, while the recording its own
+   press started runs, Enter doing nothing; live again when the recording stops; handing to ◀ only if the run ends;
+   for ▶ AND ⏭.
+5. ⏭ at a stop: "hand to ▶ when live". ⏭'s hand-off tries ▶ first, so ⏭ pressed during a recording that stops and ⏭
+   pressed at a stopped run both land on ▶; at a finished end ▶ is off and ⏭ hands to ◀.
+6. The round-3 delta read's I1 and M2: the focus stays on the waiting button through a rebuild that gives it back, a
+   divider's drag and a view key.
+7. Review 3's finding 2, Firefox's missing `blur` on removal: "add a guard", so that a waiting button no longer on the
+   page stops waiting, though Firefox is not in CI.
+8. His try on 5181, at `4567370` (now `468ce1a`): "ok overall seems to work". His two further asks are new work for
+   another lane (WHAT THIS DID NOT CLOSE).
+
+The lane's own calls: round 3's fixer added no guard for finding 2 and said why (`$R/reviews/review-3-fixes.md`),
+which decision 7 reversed; after three HIGH rounds, one read-only reviewer read each later round's delta, round 3's
+(`$R/reviews/round-3-delta-read.md`) and round 4's (`round-4-delta-read.md`), in place of a fourth and a fifth HIGH
+round. The round-4 read found two Minors and no Important or Critical finding, and `468ce1a` fixed both. The wait
+was built on `ControlState`'s `recording`, which holds for any recording that carries the head, wider than decision
+4's "the recording its own press started": a ⏭ pressed into a recording already running waits (`41b2b28`), and so
+does the ▶ that the continue button's press hands the focus to (`3c5cd28`).
+
+##### WHAT THIS DID NOT CLOSE
+
+- **A Firefox leak victim, for the Firefox CI lane's PR 2 (tab contention) or PR 3 (engine-difference test fixes).**
+  `step-focus-recording.test.ts`'s "⏭ at a `budget` stop hands the focus to ▶, which by Enter keeps it while it
+  records; Enter at the stop records further" fails in one Firefox tab when it runs after
+  `extend-focus-probe.test.ts`, whose failing case's body is as at `1b2f0cb`, on ``where the focus settles after ⏭ at
+  the `budget` stop: expected 'BODY' to be 'one step forward'``, and passes alone, before the probe and at default tabs
+  (VERIFICATION). The lane reads it as the class of `step-controls.test.ts`'s "still hands the focus on when nothing
+  in the strip is live", whose body is `1b2f0cb`'s plus `recording: false`, and which fails on `1b2f0cb` as on
+  `940295c` in one tab, after `app.test.ts`, and
+  passes at `940295c`'s default tabs: a focus moved after a neighbour file in the same Firefox tab that does not land
+  (`$R/reviews/rebase-report.md`, cause 3). `app.test.ts`'s sub-pixel `scrollTop` and the probe's "hiding the focused
+  continue button, or disabling a focused button, strands focus on body" fail on both commits too; that case's body is
+  as at `1b2f0cb`, but it failed at a different check on each (VERIFICATION).
+- **The guard's Firefox proof runs only by hand.** Its strip test, "a waiting ⏭ taken off the page with no `blur`
+  stops waiting there, and is no Tab stop when it is back", passes in `pnpm test:firefox` at `940295c` at both tab
+  counts. CI runs Chromium alone until Firefox PR 5. Chromium blurs a focused button taken off the page, so in
+  Chromium the test stops that `blur` at a capturing listener and asserts that it did, leaving the guard alone to
+  end the wait.
+- **⏭'s wait during a recording cannot be checked by hand** (`$R/try-it.md`). A recording that a ⏭ press can join
+  ends within half a second of starting, and no program or setting found makes it slower. In the try-it drive at
+  `4567370` (now `468ce1a`), ⏭ waited 219 ms with the gestures 150 ms apart, 111 ms at 250 ms, and not at all at
+  400 ms. The tests and the drives that hold the worker's replies are what see it.
+- **Round 4's concerns, which the round-4 delta read judged and which stay as they are:**
+  - A rebuild that gives the focus back must stay one synchronous call: a `keepingFocus` rebuild that awaited would
+    let the guard end the wait before the give-back. No caller is async, and `keepFocusOn`'s and `keepingFocus`'s
+    docs say so since `468ce1a`, and `offPage`'s comment since `f2ad034`, but the types do not hold it, as
+    `rebuild: () => void` accepts an async function.
+  - While a ▶ or ⏭ waits, the observer watches every child-list change on the page. The read's probe, from a
+    release to a `budget` stop, counted 36 callbacks over 152 records, and the watch disconnected at each of the four
+    exits it drove. The callback time it read, 0.10 ms in all and 0.100 ms for the longest call, is at the floor of
+    headless Chromium's coarsened `performance.now()`, the read says, not a measurement. No test holds the
+    disconnection, which the read counts as a cost, not behaviour.
+  - `main.ts`'s `focusKept` and `focus-handoff.ts`'s `kept` both answer whether a rebuild that gives the focus back
+    is running. No reachable read sees them disagree; folding the first into the second is left undone.
+- **The user's two asks from his try** (`~/temp/redextape-history-restart-record/progress.md`): "the restart button
+  after pressing 'history is full' doesn't go back to step 1, and there doesn't seem to be a way to do so", and "there
+  should be a way to do 'keep recording' forever and just let it execute while ejecting old history from memory".
+  They became the history-restart lane. Its design, the hidden recording, is a separate design that the user approved
+  on 2026-11-03, with a PR A, ↺ back to step 0, and a PR B, the hidden recording, both after this branch merges. It
+  changes the step bar this branch builds on, `[keep recording]`, ⏭ and the waiting rule among it. Its decisions are
+  that lane's, in its `progress.md` (Q1 to Q8 and §1 to §4), and this entry does not restate them.
+- **What the reviews left:**
+  - `style.css`'s forced-colours comment says that forced colours replace the waiting button's colours with "the
+    live button's", which is true of the glyph only (the round-3 delta read; not counted).
+  - `pane-host.ts`'s "THE FOCUS IS `within`'s FOR THE REBUILD'S LENGTH" holds for `focusHolder` only while the focus
+    is on `<body>` (the round-4 delta read; read as shorthand, not counted).
+  - On a `blur` with no draw, `stop` does not disconnect the observer; the focus move's draw or the next child-list
+    change does (the round-4 delta read; a cost, not behaviour).
+  - Review 2's finding 2, a ⏭ waiting on one leg that kept waiting on another, and review 3's finding 1, a ▶ left
+    waiting when the continue button's hand-off missed, were reproduced and fixed at the strip; no app route to
+    either was found (`$R/reviews/review-2-fixes.md`, `review-3-fixes.md`).
+  - A focused ▶ or ⏭ waits on any recording at the frontier, whoever moved the head, wider than decision 4 (THE
+    USER'S DECISIONS, the lane's own calls), so the step bar's ⏭ waits on a second leg that is itself recording
+    (`$R/reviews/review-2-fixes.md`, Concerns). It goes to the hidden-recording design, which changes the waiting rule
+    (the user's two asks, above).
+  - A waiting button, like a disabled one, says nothing of why it is off (`controls-gate.test.ts` exempts the
+    transport buttons); the readout's `…` says that the run records (`$R/reviews/finding-1-fix.md`).
+- **Vite's dependency re-optimisation at the gate's start-up**, which can cost the coverage step a test file, with
+  `Failed to fetch dynamically imported module` (review 1's fix round, `$R/reviews/review-1-fixes.md`, Concerns, and
+  `finding-1-fix.md`'s g3b), goes to FIREFOX PR 1's item "Vite's dependency re-optimisation in a tree's first run",
+  under its WHAT THIS DID NOT CLOSE, for its PR 5.
+- When this entry was written, at `3e58565` on 2026-11-03, and when it was brought up to `f2ad034` on 2026-11-04,
+  nothing had been pushed and nothing had run in CI.
+
+##### VERIFICATION
+
+**The gate of record, `rebase-1b2f0cb-3`,** ran `bash $R/run-gate.sh rebase-1b2f0cb-3` at `940295c` with the tree
+clean, from 23:26:45 on 2026-11-03: `$R/gate.sh` under both shared locks, in a transient unit capped at 16 GiB with
+no swap, every step from `web/`. Two `portwait` steps, each rc 0 in 0s, waited for port 63315 before the browser
+steps.
+
+| step | command | rc | time | figures |
+|---|---|---|---|---|
+| biome | `pnpm exec biome ci --error-on-warnings` | 0 | 2s | 437 files |
+| typecheck | `pnpm run typecheck` | 0 | 5s | |
+| node | `pnpm run test:node` | 0 | 7s | 70 files, 1,418 tests passed |
+| touched-browser | `pnpm exec vitest run --project browser` on `step-controls`, `step-focus-recording`, `step-bar` and `extend-focus-probe` | 0 | 23s | 4 files, 70 tests passed |
+| coverage | `pnpm run test:coverage` | 0 | 166s | 284 files, 3,012 tests passed; All files 97.65 / 92.36 / 98.42 / 98.94 |
+
+The floors are 95 / 89 / 97 / 97 for statements, branches, functions and lines. Of the source the branch changes,
+`step-controls.ts` read 100 / 97.67 / 100 / 100, its one uncovered branch at line 81, the speed select's `isSpeed`
+guard, last changed by `d6b57c2`, outside the range; `focus-handoff.ts` and `controls.ts` 100 in all four;
+`pane-host.ts` 97.82 / 91.32 / 100 / 98.11; and `step-bar.ts` 97.5 / 88.88 / 100 / 100. Two earlier runs of the same
+gate at `940295c` are not counted. Each failed at its coverage step alone, with rc 1: `rebase-1b2f0cb`, from
+22:39:31, on 5 browser files that failed to load, with `Failed to fetch dynamically imported module`, all 5 of which
+passed in the full tier below, and `rebase-1b2f0cb-2`, from 22:56:09, on `Cannot connect to the iframe`, under
+another session's load (`$R/reviews/rebase-report.md`, section 4).
+
+**The full Chromium tier,** `bash $R/chromium-full.sh rebase-1b2f0cb` at `940295c`, from 22:41:47, with the tree
+clean: `pnpm test:browser` at default tabs, under both locks and the same cap, rc 0; 214 files and 1,594 tests,
+1,594 passed, 0 failed, 0 pending and 0 todo. `step-controls.test.ts` holds 51 of them, against 7 in
+`1b2f0cb`'s Firefox run below, and `step-focus-recording.test.ts`, which the branch adds, 8.
+
+**The comment guard,** `node scripts/check-comments.mjs --base origin/main` at `940295c`: rc 0, with 15 areas each
+within its comment budget and no history and no grown block in 14 changed files. `scripts/check-doc-figures.sh` and
+`scripts/check-citations.sh` passed in the pre-commit hook of `3e58565`, this entry's first commit.
+
+**`f2ad034`** changes one comment in each of 2 files and no code, with 6 lines added and 6 removed, after the gate
+of record and the full tier; no test ran on it. Its pre-commit hook passed, the comment guard, `biome ci` and the
+typecheck among its checks (`$L/comment-fix-commit.log`). `scripts/check-doc-figures.sh` and
+`scripts/check-citations.sh` passed before `dd0ef53`, which brings this entry up to it, and in its hook.
+
+**Firefox,** through PR 1's project: `$R/ff-run.sh <label> <tabs> <web dir> <files>` runs `REDEXTAPE_FIREFOX=1 pnpm
+exec vitest run --project firefox --reporter=verbose --reporter=json` on the six browser test files the branch
+changes, under the browser lock and the same cap, and `node $R/ff-summary.mjs` counts each file's tests from the
+JSON. `1b2f0cb`'s run was in a scratch worktree at `1b2f0cb`, since removed. Passed / failed / skipped:
+
+| file | `468ce1a`, 1 tab | `1b2f0cb`, 1 tab | `940295c`, 1 tab | `940295c`, default tabs |
+|---|---|---|---|---|
+| `app` | 46 / 1 / 0 | 46 / 1 / 0 | 46 / 1 / 0 | 46 / 1 / 0 |
+| `extend-during-recompile` | 1 / 0 / 0 | 1 / 0 / 0 | 1 / 0 / 0 | 1 / 0 / 0 |
+| `extend-focus-probe` | 2 / 1 / 0 | 2 / 1 / 0 | 2 / 1 / 0 | 2 / 1 / 0 |
+| `share-positions` | 17 / 0 / 0 | 17 / 0 / 0 | 17 / 0 / 0 | 17 / 0 / 0 |
+| `step-controls` | 48 / 3 / 0 | 6 / 1 / 0 | 48 / 1 / 2 | 49 / 0 / 2 |
+| `step-focus-recording` | 8 / 0 / 0 | not at `1b2f0cb` | 7 / 1 / 0 | 8 / 0 / 0 |
+| total | 122 / 5 / 0 | 72 / 3 / 0 | 121 / 4 / 2 | 123 / 2 / 2 |
+
+By cause:
+- **Gated in `940295c`:** the two skips, each printed with its reason, "Firefox sends a focused button taken off the
+  page no `blur`; the no-`blur` case below runs in both" and "forced colours are CDP’s Emulation.setEmulatedMedia,
+  which only Chromium has". At `468ce1a`
+  both failed, among `step-controls`' 3.
+- **Failing on `1b2f0cb` too,** whose run was in one tab: `app`'s "a step that loops in its own state still releases a
+  source-originated link's hold on the table", with the same assertion on both commits (`expected 465047.65625 to be
+  465048.375`), and failing at `940295c`'s default tabs too; `step-controls`' "still hands the focus on when nothing
+  in the strip is live", where it runs after `app`, with the same assertion (`expected <body>…(1)</body> not to be
+  <body>…(1)</body>`), and passing at `940295c`'s default tabs; and `extend-focus-probe`'s "hiding the focused
+  continue button, or disabling a focused button, strands focus on body", failing at `940295c` at both tab counts.
+  The probe failed at `extend.focus()`'s check on `1b2f0cb` (`expected <body>…(8)</body> to be <button type="button"
+  …(1)></button>`), and at both of `940295c`'s tab counts at the next check, after the button was hidden (`expected
+  <button type="button" …(2)></button> to be <body>…(8)</body>`).
+- **The leak victim:** `step-focus-recording`'s "⏭ at a `budget` stop …" failed in each of 3 one-tab runs in which
+  it ran after `extend-focus-probe`: `940295c`'s six-file run and two runs of the pair alone. It passed in 2 runs of
+  its file alone in one tab, in `468ce1a`'s one-tab run, where it ran before the probe, and at default tabs.
+- The guard's strip test and the three rebuild tests passed in Firefox at `940295c` at both tab counts. In round 4's
+  local Firefox 157 runs, the guard's test and two of the rebuild tests failed at `f116edb` (now `0cc3dd5`) and
+  passed at `feef4fd` (now `a96edf9`).
+
+**The sabotages.** Each made one exact replacement in one file, or two in one file for round 1's S5. The file was
+saved first and restored by copying it back, then compared with `cmp`; every restore compared equal. The build
+round's ran in the lane's worktree, the later rounds' in scratch worktrees with copied `node_modules`, `bindings`,
+`pkg` and `pkg-lsp`, since removed. Each ran the round's touched browser files; "of" is their test count. Per-run
+logs and summaries are `$R/logs/sabotage-*`, `fix1-sabotage-*`, `fix2-sabotage-*`, `fix3-sabotage-*`,
+`fix4-sabotage-*` and `round4-sabotage-*`. Of the 47 runs, 46 failed a test; the one that did not is round 4's S3 at
+`55b855d` (now `ccf8ded`).
+
+| round, where, of | sabotage | failed | which |
+|---|---|---|---|
+| build, the dispatch that made `706d6e8` and `ccb101d` (now `92102c5` and `c0ce50e`), of 20 | S1, the disable before the hand-off | 6 | the four "before the button is disabled" reads, and ↺'s and ⏵'s state-change tests |
+| | S2a to S2e, ◀'s, ▶'s, ⏭'s, ⏵'s and ↺'s list emptied | 6, 3, 3, 1, 1 | that button's tests |
+| | S3, the focused button takes its state first | 5 | ◀ at step 1 of two, its 3 tests, and ↺'s and ⏵'s state-change tests |
+| | S4, ◀ hands to ↺ first | 6 | the six ◀ tests |
+| round 1, after `e2d7b06` (now `2f17d10`), of 23 | S5, a hand-off only inside the button's own press | 5 | the five state-change tests |
+| | S6, S7 and S8, ▶'s, ⏭'s and ◀'s list emptied | 4, 4, 7 | that button's press tests and its state-change test |
+| | S9, the disable before the hand-off | 9 | the 9 call-order reads |
+| | S10, ▶ hands to ↺ first | 4 | the ▶ tests |
+| finding 1, at `bb8e8d8` (now `3393f02`), of 34 | S1, `waits = false` | 11 | the 9 new strip tests and both app tests |
+| | S2, no press guard | 4 | ▶ and ⏭, each by click and by Enter |
+| | S3, a wait only while it records | 4 | ⏭ by click and by Enter, the focus-leaves test, the app's ⏭ case |
+| | S4, a wait without the focus too | 3 | ⏭ by click and by Enter, the look test |
+| | S5, no `blur` handler | 1 | the focus-leaves test |
+| | S6, `opacity: 0.35` for the waiting rule | 1 | the look test |
+| | S7, ◀'s list emptied | 7 | the six ◀ press tests and the `History`-driven eviction test |
+| | S8, the disable before the hand-off | 11 | the 9 earlier call-order reads and the two run-ends tests' |
+| round 2, at `530e44e` (now `3c5cd28`), of 46 | S1, ⏭'s list in its old order | 12 | the 6 `PRESSES` stop entries, path (a) twice, path (b), the bar test, app tests 1 and 2 |
+| | S2, the old wait through a stop | 4 | path (a) twice, the bar test, app test 2 |
+| | S3, `holder = focused`, no hand to ▶ from the continue button | 3 | `[keep recording]` twice, app test 3 |
+| | S4, no `blur` handler | 2 | the removal test and the focus-leaves test |
+| round 3, at `f116edb` (now `0cc3dd5`), of 52 | S1, the continue button's focus taken as ▶'s whether the hand-off got there or not | 2 | the `hidden` and `display: none` tests |
+| | S2, no hand-off to ▶ first | 3 | `[keep recording]` by click and by Enter, app test 3 |
+| | S3 and S4, no forced-colours rule; the rule without `border-color` | 1, 1 | the forced-colours test |
+| | S5, `pressable` as `!b.disabled` | 1 | the `pressable` test |
+| | S6, no `afterAll`; S7, the app's listeners wrapped per worker | 1, 1 | the `Worker` restore test; the listener test |
+| | S8, the continue button's list starting at ⏵ | 1 | that list's own test |
+| round 3, at `530e44e` (now `3c5cd28`), of 52 | S8 | 9 | its 5 baseline reds, `[keep recording]` twice, app test 3, the list's test |
+| round 4, at `55b855d` (now `ccf8ded`) with `feef4fd`'s test file, so `feef4fd`'s `web/` (now `a96edf9`'s), of 59 | S1, `keepingFocus` without `keepFocusOn` | 2 | the app's drag and `]` |
+| | S2, `update` reads `document.activeElement` | 4 | the strip rebuild that draws, the strip run-ends test, the app's drag and `]` |
+| | S3, `stop` reads `document.activeElement` | 1 | the strip rebuild that does not draw |
+| | S4, no guard | 2 | the strip no-`blur` removal, the app's view key that hides the view |
+| | S5, `holdsFocus` reads `document.activeElement` | 1 | the strip run-ends test |
+| | S6, the give-back only to a waiting button | 1 | the app's drag, at its ◀ tail |
+| round 4, at `55b855d` (now `ccf8ded`), of 58 | S1, S2, S4, S5 and S6 | 2, 4, 2, 1, 1 | the same tests as above, the strip rebuild test under its name before `feef4fd` |
+| | S3 | 0 | none: every rebuild the tests made drew the strip, which put the wait back; `feef4fd` (now `a96edf9`) added the rebuild without the draw |
+
+**The drives on 5181,** each with real Playwright input against the dev server serving the worktree:
+- At `940295c`, `$R/try/rebase-drive-1-5.mjs`, `$R/try-it.md`'s steps 1 to 5, rc 0 (`$R/logs/rebase-drive.log`):
+  the readout settled at `step 0 of 91,181 — history is full`; a click on ▶ and Tab put the ring on ⏭ at `step 1 of
+  91,181`; Enter on ⏭ put it on ▶, ⏭ disabled, at `step 91,181 of 91,181`; Enter on ▶ made ▶ WAITING for 543 ms
+  with the focus on it, then live at `step 182,366 of 182,366 — history is full (oldest kept: step 91,182)`, the
+  focus still on it.
+- Before the rebase, in `$R/logs/`: `try-drive.log`, after `ccb101d` (now `c0ce50e`), and `fix1-try-drive.log`, after
+  `e2d7b06` (now `2f17d10`): ◀ → ▶, ⏭ → ◀ and ▶ → ◀ on a run of 12,976 steps. `fix2-drive.log`, at `adbe737` (now
+  `41b2b28`): Enter on ▶ at the `budget` stop at 100,317 went ▶ live, waiting, live, with the focus on ▶ throughout,
+  to 181,667, and the next Enter recorded to 249,920. `fix3-drive.log`, in the dispatch that made `530e44e` (now
+  `3c5cd28`): ⏭ at a stopped run, `[keep recording]`, and ⏭ waiting through a recording each left the focus on a
+  live ▶ at the stop, where Enter recorded further. `fix4-drive.log`, at `feef4fd` (now `a96edf9`): a waiting ⏭ kept
+  the focus and its wait through a divider's drag and through `]`, Enter at the stop recorded further, and `4`, which
+  hides the view, ended the wait. `try-script-drive.log`, at `4567370` (now `468ce1a`), all 12 steps of
+  `$R/try-it.md` with no reply held: ▶ waited 234 ms, the held Enter kept the ring on ▶, `[keep recording]` handed to
+  ▶, which waited 448 ms, and ⏭'s waits are under WHAT THIS DID NOT CLOSE.
+
+**The user's try** on 5181, at `4567370` (now `468ce1a`), on 2026-11-03: "ok overall seems to work"
+(`$R/progress.md`, Session 4).
+
+**Every count this entry quotes, with what produces it.** Commands run from the worktree's root,
+`~/temp/redextape-step-focus`, with `R=~/temp/redextape-step-focus-record` and `L=$R/logs`; a log's figures are read
+with ANSI escapes stripped. `bash $R/entry-figures.sh [out]` runs every command below, into `out`, by default
+`$R/logs/entry-figures.log`, computing each value from the git history, the logs and the JSON reports; the run for
+the commit that corrects this entry is `$R/logs/entry-figures-fix.log`, and for `dd0ef53`, which brings it up to
+`f2ad034`, `$R/logs/entry-figures-c.log`.
+
+| value | what | command |
+|---|---|---|
+| 17 | the commits in the range | `git rev-list --count 1b2f0cb..940295c` |
+| 14 files, 1,147 added, 76 removed | the range's diff | `git diff --shortstat 1b2f0cb 940295c` |
+| 16, all `=`; trees unchanged; no conflict | the second rebase's patches; the first rebase; both | `git range-diff e9bbf67..4567370 1b2f0cb..468ce1a`; `git diff --quiet ccb101d 94653c3` and `git diff --quiet 2f6d787 e9bbf67`; the worktree's reflog, its `rebase (finish)` and `rebase (continue)` entries |
+| each "(now …)" | the old commit to the new | `git range-diff`'s pairs, as above, and `git range-diff 2f6d787..ccb101d e9bbf67..94653c3` for `706d6e8` and `ccb101d` |
+| ⏭ alone; the five lists | the step buttons' `handOff` at `1b2f0cb`, beside the continue button's; the `buttons` table at `940295c` | `git grep -n 'handOff(' 1b2f0cb -- web/src/step-controls.ts`; the `handTo:` lines of `git show 940295c:web/src/step-controls.ts` |
+| three; #161, #162 | `$R/design.md`'s choices; the PRs the rebases followed | `grep -cE '^[0-9]\. \*\*'` on `$R/design.md`; `git log -1 --format=%s` of `e9bbf67` and `1b2f0cb` |
+| 37,000 | the app test's stages | `git log -1 --format=%s 4fa7a4c`; `grep -c 37_000` on `step-focus-recording.test.ts` at `940295c` |
+| six | the browser test files the branch changes | `git diff --name-only 1b2f0cb 940295c -- web/tests/browser`, less `harness.ts` |
+| 16 GiB, no swap; 63315 | the units' cap; the port the browser steps wait for | `MemoryMax` and `MemorySwapMax` in `$R/run-gate.sh`, `chromium-full.sh` and `ff-run.sh`; `grep 63315 $R/gate.sh` |
+| Firefox 157 | round 4's local Firefox | `grep -n 'Firefox 157' $R/reviews/round-4-fixes.md` |
+| decisions 1 to 8 | the user's rulings | `grep -nE 'USER\|user.s rulings\|USER RULINGS'` on `$R/progress.md` |
+| "Separate PR after"; the two asks | the quotes | `grep -o` of each on `$R/progress.md` and `~/temp/redextape-history-restart-record/progress.md` |
+| PR A and PR B; Q1 to Q8 and §1 to §4; `[keep recording]`, ⏭ and the waiting rule | the history-restart design and what it changes | `grep -nE 'PR A =\|USER Q[1-8]\|approved design §[1-4]'` on `~/temp/redextape-history-restart-record/progress.md`; in it, the Q5 line's ⏭ and the §1 line's `keep recording` and `step-focus waiting rule` |
+| `[continue — raise the step cap]` at `capped` | the continue button's other label | `continueLabel` in `git show 940295c:web/src/controls.ts` |
+| `41b2b28`, `3c5cd28`; wider than decision 4 | the wait on any recording that carries the head | `git log -1 --format=%s 41b2b28`; `const waits` in `git show 940295c:web/src/step-controls.ts`; `$R/reviews/review-2-fixes.md`, Concerns |
+| three HIGH rounds; two Minors | the reviews; the round-4 read | `ls $R/reviews/review-*-high.md`; `Minor (2)` under `## Counted` in `$R/reviews/round-4-delta-read.md` |
+| Two step-control tests | the `chromiumOnly` calls `940295c` adds | `git diff 1b2f0cb 940295c -- web/tests/browser/step-controls.test.ts`, its `+` lines with `chromiumOnly(` |
+| `4567370` (now `468ce1a`) | the try's commit | in `$R/progress.md`, the HANDOFF's branch line naming `4567370` before `USER TRIED IT`, and `Rebase + gate dispatched` after it; the rebase map for `468ce1a` |
+| Vite's re-optimisation; FIREFOX PR 1's item, for PR 5 | the gate's start-up failure | `grep -n 're-optimisation'` on `$R/reviews/review-1-fixes.md`, `finding-1-fix.md`'s g3b, and on this file, PR 1's item under its `**For PR 5, CI:**` |
+| `3e58565`, 2026-11-03; nothing pushed; the hook | this entry's first commit | `git log -1 --format=%cd 3e58565`; no `step-focus` in `git for-each-ref refs/remotes`; `$L/entry-commit.log` |
+| `f2ad034`, 2026-11-04; 2 files, 6 added, 6 removed; its hook | the comment fix | `git log -1 --format=%cd f2ad034`; `git diff --shortstat fb6e1a3 f2ad034`; the `Passed` lines of `$L/comment-fix-commit.log` |
+| half a second | a recording ⏭ can join | `grep -n 'half a second' $R/try-it.md` |
+| 12 steps | `$R/try-it.md` | `grep -cE '^[0-9]+\. ' $R/try-it.md` |
+| 219, 111, none; 150, 250, 400 | ⏭'s waits by pace | the `⏭ WAITING` lines under each `10. click keep recording` in `$L/try-script-drive.log` |
+| 234; 448 | ▶'s wait at step 5; at step 8 | the `▶ WAITING` line under `5. Enter` and under `8. Enter` in `$L/try-script-drive.log` |
+| 36, 152, 0.10 ms, 0.100 ms; four exits; the floor | the observer probe | `P1b` in `$L/round4-delta-observer-probe.log`; the `watchers 0` lines of `P1c`, `P2b`, `P3b` and `P4b`; `grep -n floor $R/reviews/round-4-delta-read.md` |
+| rc 0 each; 2s, 5s, 7s, 23s, 166s; 0s twice | the gate's steps | `===== END` lines of `$L/gate-rebase-1b2f0cb-3.plain.log` |
+| `940295c`; 23:26:45; clean | its tree and start | its first line, and no line between it and `===== STEP biome` |
+| 437 | biome's files | `Checked` in that log |
+| 70 / 1,418; 4 / 70; 284 / 3,012 | node; touched-browser; coverage | its `Test Files` and `Tests` lines, in order |
+| 97.65 / 92.36 / 98.42 / 98.94 | coverage, All files | its `All files` row |
+| the five source rows | `step-controls.ts`, `focus-handoff.ts`, `controls.ts`, `pane-host.ts`, `step-bar.ts` | their rows in that log |
+| a branch at 81; `isSpeed`; `d6b57c2`, outside | the uncovered branch, its row's lines at 100 | `git blame -L81,81 940295c -- web/src/step-controls.ts`; `git merge-base --is-ancestor d6b57c2 1b2f0cb` |
+| 95 / 89 / 97 / 97 | the floors | `grep thresholds web/vite.config.ts` |
+| 22:39:31, 22:56:09; rc 1 at coverage, 0 before it; 5 files; the iframe | the two earlier runs | the first lines, `===== END` lines, `FAIL` file names and the two messages in `$L/gate-rebase-1b2f0cb.plain.log` and `gate-rebase-1b2f0cb-2.plain.log` |
+| the 5 passed | those files in the full tier | their status in `$L/chromium-full-rebase-1b2f0cb.json` |
+| 22:41:47; 214, 1,594, 1,594, 0, 0, 0; rc 0 | the full tier | the first line and `CHROMIUM rc` of `$L/chromium-full-rebase-1b2f0cb.plain.log`; its JSON's `testResults` count and `numTotalTests`, `numPassedTests`, `numFailedTests`, `numPendingTests`, `numTodoTests` |
+| 51; 8; 7; new | the two files' tests; `step-controls` at `1b2f0cb`; the added file | the JSON's per-file counts; `$L/ff-main-1b2f0cb-tabs1.json`; `git diff --name-status --diff-filter=A 1b2f0cb 940295c` |
+| rc 0, 15 areas, 14 files | the comment guard | `$L/rebase-check-comments.log` |
+| the four columns | Firefox per file | `node $R/ff-summary.mjs` on `$L/ff-branch-468ce1a-tabs1.json`, `ff-main-1b2f0cb-tabs1.json`, `ff-branch-940295c-tabs1.json` and `ff-branch-940295c-tabsdef.json`; the `head` and `tabs=` of each log's `ff run in` line |
+| the two reasons | the skips | the `↓` lines of `$L/ff-branch-940295c-tabsdef.plain.log` |
+| the assertions; 2 the same on `1b2f0cb`, the probe's not | the failures | the `AssertionError` lines of `$L/ff-branch-940295c-tabs1.plain.log` and `ff-main-1b2f0cb-tabs1.plain.log`, and `comm -12` of the two; the probe's check, the `extend-focus-probe.test.ts:<line>` of each JSON's failure stack, against `git show 940295c:web/tests/browser/extend-focus-probe.test.ts` |
+| 3 of 3 after the probe; 2 of 2 alone; before it at `468ce1a` | the leak victim | its status in `$L/ff-branch-940295c-tabs1.json`, `ff-pair-940295c-{1,2}.json` and `ff-alone-940295c-{1,2}.json`; the files' `startTime` order in each one-tab JSON |
+| three; passed at both tab counts | the guard's and the rebuild tests at `940295c` | their status in `$L/ff-branch-940295c-tabs1.json` and `ff-branch-940295c-tabsdef.json`, the tests whose titles name a rebuild |
+| two; red at `f116edb` (now `0cc3dd5`), green at `feef4fd` (now `a96edf9`) | round 4's Firefox | the `×` and `✓` lines of `$L/round4-firefox-f116edb.log` and `round4-firefox-feef4fd.log` naming "no `blur`" and "rebuild" |
+| every row's "failed" and "of"; 47 runs, 46 that failed a test; every restore OK | the sabotages | the `failed \| … passed (N)` and `restore` fields of `$L/sabotage-run.log`, `fix1-sabotage-summary.txt`, `fix2-sabotage-summary.txt`, `fix3-sabotage-summary.txt`, `fix4-sabotage-summary-{f116edb,530e44e}.txt` and `round4-sabotage-summary-{feef4fd,55b855d}.txt` |
+| one replacement, two for round 1's S5 | the replacements each sabotage made | the `(old, new)` pairs under each name in `$R/sabotage/run.py` and `run-fix1.py`; one `(name, file, old, new)` per run in `run-fix2.py`, `run-fix3.py`, `run-fix4.py` and `run-round4.py` |
+| each row's "which" | the failed tests | the `red:` lines of the first two files; the sabotage tables of `$R/reviews/finding-1-fix.md`, `review-2-fixes.md`, `review-3-fixes.md` and `round-4-fixes.md`; for the five at `55b855d`, `diff` of their `red:` lines in `round4-sabotage-summary-55b855d.txt` against `round4-sabotage-summary-feef4fd.txt` |
+| each round's "where" | the commit a run was at | each report's Sabotages section; the logs' modification times against `git log -1 --format=%cd` of `706d6e8`, `ccb101d`, `e2d7b06`, `adbe737`, `bb8e8d8`, `530e44e`, `feef4fd` and `4567370` |
+| the drive's readouts; 543 ms; rc 0 | at `940295c` | `$L/rebase-drive.log`, its first line, its `readout` lines and its `WAITING` line |
+| 12,976; 100,317, 181,667, 249,920 | the earlier drives' runs | the readouts of `$L/try-drive.log` and `fix1-try-drive.log`; of `fix2-drive.log` |
+| "ok overall seems to work" | the user's try | `grep -n 'ok overall'` on `$R/progress.md` |

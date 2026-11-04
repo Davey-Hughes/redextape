@@ -31,9 +31,41 @@ function usable(el: Element | null | undefined): el is HTMLElement {
   )
 }
 
+/** The element a rebuild that gives the focus back took it from, while that rebuild runs (`keepFocusOn`). */
+let kept: Element | null = null
+
+/**
+ * Run `rebuild`, which may take the focus from `el`; the caller gives it back to `el` once `rebuild` returns
+ * (`pane-host.ts`'s `keepingFocus`). **WHILE IT RUNS, `focusHolder` NAMES `el` WHERE THE REBUILD HAS LEFT THE FOCUS ON
+ * `<body>`**, so that a control which answers the focus leaving it keeps what it is to be given back with: a step
+ * button waiting on a recording, disabled at its rebuild's `blur`, could not take the focus back.
+ *
+ * **THE CALLER GIVES THE FOCUS BACK IN THE SAME SYNCHRONOUS CALL, SO `rebuild` MUST DEFER NOTHING**:
+ * `step-controls.ts`'s `offPage` reads the focus at the next microtask checkpoint, and disables a waiting step button
+ * that does not hold it then, which a give-back after that cannot focus.
+ */
+export function keepFocusOn(el: Element | null, rebuild: () => void): void {
+  const outer = kept
+  kept = el
+  try {
+    rebuild()
+  } finally {
+    kept = outer
+  }
+}
+
+/**
+ * What holds the keyboard focus: `document.activeElement`, or `keepFocusOn`'s element while its rebuild has left the
+ * focus on `<body>`.
+ */
+export function focusHolder(): Element | null {
+  const active = document.activeElement
+  return kept !== null && (active === null || active === document.body) ? kept : active
+}
+
 /** Whether the focus is on `el` or on something inside it. */
 function holdsFocus(el: Element): boolean {
-  const active = document.activeElement
+  const active = focusHolder()
   return active !== null && (active === el || el.contains(active))
 }
 

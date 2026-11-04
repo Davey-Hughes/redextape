@@ -42,6 +42,7 @@ export const NO_TARGET: ControlState = {
   canToNewest: false,
   canPlay: false,
   canRestart: false,
+  recording: false,
   playing: false,
   continueLabel: null,
   stepText: 'no view can step',

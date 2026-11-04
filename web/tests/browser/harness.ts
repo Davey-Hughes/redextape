@@ -1,7 +1,7 @@
 import type { EditorView } from '@codemirror/view'
 import { expect, vi } from 'vitest'
 import html from '../../index.html?raw'
-import type { ControlState } from '../../src/controls'
+import type { ControlState, LegView } from '../../src/controls'
 import type { LambdaBody } from '../../src/lambda-body'
 import { insertBeside, LAYOUT_STORAGE_KEY, type LayoutNode, leaves } from '../../src/layout'
 import type { PaneEvents } from '../../src/pane-chrome'
@@ -977,6 +977,23 @@ export async function steady(read: () => number, what: string): Promise<number> 
   throw new Error(`${what} did not hold still for 6 frames within 240`)
 }
 
+/** A control's accessible name, the tag of an element without one (`BODY`), or `nothing`. */
+export const controlName = (el: Element | null): string => el?.getAttribute('aria-label') ?? el?.tagName ?? 'nothing'
+
+/**
+ * The name of whatever holds the focus once it has held still for six frames, so a failure reads as two names. **NOT ONE
+ * READ AFTER THE GESTURE**: Chromium leaves the focus on a control disabled under it until a later rendering update (the
+ * HTML spec's focus fixup rule), so a read in the same frame names the disabled button and a read one frame on may too.
+ */
+export async function settledFocus(): Promise<string> {
+  const seen: (Element | null)[] = []
+  const i = await steady(() => {
+    if (!seen.includes(document.activeElement)) seen.push(document.activeElement)
+    return seen.indexOf(document.activeElement)
+  }, 'the focus')
+  return controlName(seen[i] ?? null)
+}
+
 /**
  * The next `scroll` event on `el`, once a listener registered before it, as `VirtualGrid`'s is in its constructor,
  * has run. **AWAITED RATHER THAN COUNTING FRAMES**: a scroll's event can come later than two frames, so an assertion
@@ -1413,10 +1430,35 @@ export const controlState = (
   canForward,
   canToNewest,
   canPlay,
+  recording: false,
   playing: false,
   stepText,
   continueLabel: null,
 })
+
+/** A leg as `controls.ts`'s `controlState` reads it: available, on its one recorded step, recording, unless `over` differs. */
+export const legView = (over: Partial<LegView> = {}): LegView => ({
+  available: true,
+  reason: '',
+  head: 0,
+  length: 1,
+  oldestStep: 0,
+  currentStep: 0,
+  newestStep: 0,
+  evicted: false,
+  done: null,
+  awaitingRun: false,
+  playing: false,
+  pending: null,
+  ...over,
+})
+
+/**
+ * Whether a press on `b` will act: it is there, enabled, and not waiting on a recording, which `step-controls.ts` marks
+ * by `aria-disabled` alone on a button it leaves enabled, and whose press it drops.
+ */
+export const pressable = (b: HTMLButtonElement | null | undefined): boolean =>
+  b !== null && b !== undefined && !b.disabled && b.getAttribute('aria-disabled') !== 'true'
 
 /** What the results line says. */
 export const resultsText = () => document.querySelector('#results')?.textContent ?? ''

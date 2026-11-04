@@ -1,5 +1,5 @@
 import type { ControlState } from './controls'
-import { handOff } from './focus-handoff'
+import { focusHolder, handOff } from './focus-handoff'
 import { n } from './format'
 import { icon } from './icons'
 import type { PaneEvents } from './pane-chrome'
@@ -7,7 +7,7 @@ import { isSpeed, SPEEDS } from './workspace'
 
 /**
  * THE STEP CONTROLS — Plan 7 part 2 spec §8: `↺ ◀ ▶ ⏭ ⏵ 8/s ▾ step 212 of 1,319 [continue]`. One component;
- * `controls.ts` decides what is live and this only reflects it.
+ * `controls.ts` decides what is live, and this draws it from that state and the focus alone.
  *
  * **EVERY BUTTON IS NAMED IN WORDS (umbrella §4 rule 1).** `↺ ◀ ▶` stay as text — Hack draws them, and a
  * glyph a user has seen on every transport is its own best label — with their tooltips as their accessible
@@ -39,7 +39,11 @@ export function stepControls(
     b.textContent = text
     b.title = name
     b.setAttribute('aria-label', name)
-    b.addEventListener('click', run)
+    // A BUTTON WAITING ON A RECORDING (`update`) IS OFF AND STILL TAKES A PRESS, which must do nothing, as on a
+    // disabled one: `transport.ts` answers a press that moves nothing by still taking the leg from a link's position.
+    b.addEventListener('click', () => {
+      if (b.ariaDisabled !== 'true') run()
+    })
     return b
   }
   // `restart` IS `hist.seek(0)`, WHICH CLAMPS TO THE OLDEST RETAINED FRAME — the name says what it does
@@ -90,18 +94,88 @@ export function stepControls(
 
   el.append(restart, back, forward, toNewest, play, speed, step, extend)
 
+  // EACH STEP BUTTON, WHAT KEEPS IT LIVE, AND WHERE ITS FOCUS GOES WHEN IT IS DISABLED UNDER IT, which would drop the
+  // focus to `<body>` (`extend-focus-probe.test.ts`). `◀`, `▶` and `⏭` go off under their own press at the end they
+  // move towards, and all five under a state change: playback reaching the end, a recording moving the head, a new run,
+  // an unavailable leg. `◀` and `▶` hand to the button that steps the other way, then on along the strip that way, then
+  // the rest; `⏭` to `▶`, live where the run can record further, so that the next Enter does, and else as `▶`'s does;
+  // `⏵` to the strip leftwards, nearest first; every list ends on the speed select, which is never disabled. `↺` goes
+  // off only with the history empty or the leg unavailable, when the other four are off too, so it reaches the speed
+  // select; its list runs from `▶` as `◀`'s does in case `controls.ts` turns it off alone.
+  const buttons: readonly {
+    readonly button: HTMLButtonElement
+    readonly can: Extract<keyof ControlState, `can${string}`>
+    readonly handTo: readonly HTMLElement[]
+    /** Whether a recording carrying the head can turn it off, so that it waits for the recording (`update`). */
+    readonly waits: boolean
+  }[] = [
+    { button: restart, can: 'canRestart', handTo: [forward, toNewest, play, back, speed], waits: false },
+    { button: back, can: 'canBack', handTo: [forward, toNewest, play, restart, speed], waits: false },
+    { button: forward, can: 'canForward', handTo: [back, restart, toNewest, play, speed], waits: true },
+    { button: toNewest, can: 'canToNewest', handTo: [forward, back, restart, play, speed], waits: true },
+    { button: play, can: 'canPlay', handTo: [toNewest, forward, back, restart, speed], waits: false },
+  ]
+  const waitable = buttons.filter((x) => x.waits).map((x) => x.button)
+  const stop = (b: HTMLButtonElement): void => {
+    if (b.ariaDisabled !== 'true' || focusHolder() === b) return
+    b.ariaDisabled = null
+    b.disabled = true
+  }
+  // A WAITING BUTTON THE FOCUS LEAVES IS DISABLED AT ONCE, so that it leaves the Tab order now rather than at the
+  // recording's next update, which a strip off the page is not sent. It still holds the focus where the window loses
+  // it, which leaves `activeElement` on the button, and through a rebuild that gives the focus back (`focusHolder`).
+  for (const b of waitable) b.addEventListener('blur', () => stop(b))
+  // **A WAITING BUTTON TAKEN OFF THE PAGE STOPS WAITING AT THE NEXT MICROTASK CHECKPOINT**, whether or not a `blur`
+  // said so: Firefox sends a focused button taken off the page none, and `stop` passes over the one a rebuild that
+  // gives the focus back sends. Read then, so that a rebuild that puts the button back and gives it the focus in the
+  // same synchronous call (`focus-handoff.ts`'s `keepFocusOn`) leaves it waiting, and one that puts its view away does
+  // not. Disabled, it is no Tab stop; the speed select, never disabled, still is.
+  let watching = false
+  const offPage = new MutationObserver(() => {
+    for (const b of waitable) stop(b)
+    watch(waitable.some((b) => b.ariaDisabled === 'true'))
+  })
+  const watch = (on: boolean): void => {
+    if (on === watching) return
+    watching = on
+    if (on) offPage.observe(document, { childList: true, subtree: true })
+    else offPage.disconnect()
+  }
+
   return {
     el,
     update(c: ControlState): void {
-      restart.disabled = !c.canRestart
-      back.disabled = !c.canBack
-      forward.disabled = !c.canForward
-      play.disabled = !c.canPlay
-      // **`⏭` DISABLES ITSELF EVERY TIME IT IS PRESSED**: the newest step has no newer one. A focused button that is
-      // disabled drops the focus to `<body>` (`extend-focus-probe.test.ts`), so the focus is handed on first, to `◀`,
-      // one step back from where `⏭` landed, and down the strip from there.
-      if (!c.canToNewest) handOff(toNewest, [back, restart, forward, play, speed])
-      toNewest.disabled = !c.canToNewest
+      // **`[continue]` GOING AWAY UNDER THE FOCUS AS ITS RECORDING STARTS HANDS IT TO `▶` FIRST**, live as `[continue]`
+      // was, the two being one operation (`controls.ts`'s `canRecordFurther`): `▶` then takes its state as the button
+      // holding the focus, and waits, so that the Enter after the next stop records further rather than playing on `⏵`.
+      // The holder is read after this hand-off, so a button the focus did not reach never waits.
+      if (c.continueLabel === null && c.recording) handOff(extend, [forward])
+      // **THE BUTTON HOLDING THE FOCUS TAKES ITS STATE LAST**, so its hand-off reads the strip as this update leaves it
+      // (`◀` at a two-step run's step 1 turns `▶` on), and **ITS HAND-OFF COMES BEFORE ITS DISABLE**, so the focus is
+      // never left on a disabled control for the browser to blur, whenever it does. Read by `focusHolder`, so that a
+      // rebuild that gives the focus back draws the button it took it from as holding it.
+      const focused = focusHolder()
+      let held: (typeof buttons)[number] | undefined
+      for (const b of buttons) {
+        if (b.button === focused) held = b
+        else {
+          if (b.waits) b.button.ariaDisabled = null
+          b.button.disabled = !c[b.can]
+        }
+      }
+      if (held !== undefined) {
+        const live = c[held.can]
+        // **A `▶` OR `⏭` A RECORDING CARRYING THE HEAD TURNS OFF UNDER THE FOCUS WAITS FOR IT, FOCUSED**, off by
+        // `aria-disabled`, while it records: a hand-off then would pass `▶`, off while it records, and leave the Enter
+        // after a `capped` or `budget` stop on `◀`, stepping back. At such a stop `▶` is live again and `⏭` hands to it,
+        // as at a run already stopped there, so that Enter records further. Only the focused button waits: elsewhere it
+        // is a dead Tab stop.
+        const waits = !live && held.waits && c.recording
+        held.button.ariaDisabled = waits ? 'true' : null
+        if (!live && !waits) handOff(held.button, held.handTo)
+        held.button.disabled = !live && !waits
+      }
+      watch(held?.button.ariaDisabled === 'true')
       paintPlay(c.playing)
       const want = String(on.speed())
       if (speed.value !== want) speed.value = want
