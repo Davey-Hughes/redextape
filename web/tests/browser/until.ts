@@ -30,7 +30,7 @@ const sourceOf = (predicate: () => boolean): string => {
  * so one wait can reach this ceiling and still print its own name while two in the same test cannot.
  *
  * **DO NOT PASS `timeoutMs` FROM A CALL SITE.** `tests/node/browser-timeout-invariants.test.ts` fails if a call
- * site in a `.test.ts` file under `tests/browser/` passes a numeric timeout. A wait that genuinely needs longer is a
+ * site under `tests/browser/` or `tests/firefox/` passes a numeric timeout. A wait that genuinely needs longer is a
  * reason to change this default and say why in the commit, not to add a number nothing re-checks.
  *
  * **THE REAL CEILING IS `timeoutMs + pollMs`, NOT `timeoutMs` ALONE**, because the throw only fires once
@@ -42,8 +42,8 @@ const sourceOf = (predicate: () => boolean): string => {
  *
  * **`pollMs` EXISTS FOR THE NODE-TIER UNIT TESTS IN `tests/node/harness.test.ts`, AND MUST NOT BE PASSED
  * FROM THE BROWSER TIER.** Shortening the poll interval there is what lets a unit test built around a
- * fake predicate finish in milliseconds instead of waiting out a real one; no file under `tests/browser/`
- * has a reason to pass it. The gate's own boundary does not distinguish which parameter a call site's
+ * fake predicate finish in milliseconds instead of waiting out a real one; no browser-tier file has a reason
+ * to pass it. The gate's own boundary does not distinguish which parameter a call site's
  * argument lands in, so a browser call passing only `pollMs` numerically is still rejected, and its
  * failure names the number it found, not which of the two parameters carried it.
  */

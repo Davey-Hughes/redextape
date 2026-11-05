@@ -4,6 +4,7 @@ import { fileURLToPath } from 'node:url'
 // package, is the documented factory — see the JSDoc on `BrowserConfigOptions.provider` in
 // `@vitest/browser`'s own shipped types.
 import { playwright } from '@vitest/browser-playwright'
+import type { Browser } from 'playwright'
 // `defineConfig` comes from `vitest/config`, not `vite`, even though this file is also the Vite
 // config. Vitest augments Vite's `UserConfig` type with the `test` field via a `declare module
 // "vite"` block in its own type-only entry point — TypeScript only applies that augmentation to
@@ -30,7 +31,7 @@ const REPO_ROOT = fileURLToPath(new URL('..', import.meta.url))
 const PAGES = ['index', 'about', 'help', 'licences', 'privacy']
 
 /**
- * The probes' own files, excluded from both browser projects' default sets unless `REDEXTAPE_PROBE` is
+ * The probes' own files, excluded from every browser project's default set unless `REDEXTAPE_PROBE` is
  * set — the `pnpm test:probe*` scripts are what set it.
  *
  * **IT IS A MEASUREMENT WHOSE CONSOLE OUTPUT IS THE DELIVERABLE, AND A DELIVERABLE NOBODY READS ON EVERY PUSH IS
@@ -74,52 +75,160 @@ const PROBE_FILES = [
 const PROBE_EXCLUDE = process.env.REDEXTAPE_PROBE === undefined ? PROBE_FILES : []
 
 /**
- * Whether this run has the Firefox project: `pnpm test:firefox` sets `REDEXTAPE_FIREFOX`, and nothing else does.
+ * Whether this run has the Firefox projects: `pnpm test:firefox` sets `REDEXTAPE_FIREFOX`, and nothing else does.
  * OPT-IN, BECAUSE A FIREFOX PROJECT IN EVERY RUN WOULD BREAK TWO OF THEM: `pnpm test` would run it, and an unfiltered
  * run with coverage stops at startup with it in the projects, which `test:coverage`, CI's `web` job, is.
  */
 const FIREFOX = process.env.REDEXTAPE_FIREFOX !== undefined
 
 /**
- * A browser project in one engine. Both engines' projects are built here, so they cannot drift apart in the files
- * they run, their setup or what they are given.
+ * The files that take a pointer capture that holds through real input: they run in `firefox-capture`, one at a time.
+ * In one Firefox every page's mouse is one pointer, so while a page holds a capture the clicks of every other tab go
+ * to it. A file that captures and is not listed fails in `firefox` on `firefox-input.ts`'s guard, which names this
+ * list. Paths are relative to `web/`.
+ */
+export const CAPTURE_FILES = [
+  'tests/browser/default-views-gestures.test.ts',
+  'tests/browser/divider-drag-focus.test.ts',
+  'tests/browser/divider-drag-format-on-blur.test.ts',
+  'tests/browser/panel-boundaries.test.ts',
+  'tests/browser/panel-regions.test.ts',
+  'tests/browser/panel-sizes-stored.test.ts',
+  'tests/browser/step-focus-recording.test.ts',
+  'tests/browser/view-keys.test.ts',
+  'tests/firefox/two-browsers.test.ts',
+]
+
+/** Each Firefox project's browser, by the name Vitest gives the project, for `two-browsers.test.ts`. */
+const browsers = new Map<string, Browser>()
+
+/** The capture-project files whose span has begun and not ended, by their path. */
+const captureFilesInFlight = new Set<string>()
+
+const registerBrowser: BrowserCommand<[]> = ({ page, project }) => {
+  const browser = page.context().browser()
+  if (browser !== null) browsers.set(project.name, browser)
+  return {
+    others: [...browsers.keys()].filter((n) => n !== project.name).length,
+    browsers: new Set(browsers.values()).size,
+  }
+}
+
+/**
+ * A real press at the middle of `selector` in the test frame, a click on a counting button in a page of a new context
+ * of `browserOf`'s browser during the press, a move of 80 px in 5 steps and the release, then a click on the decoy
+ * alone. A decoy in the case's own browser loses its click to the capture; one in the other project's does not.
+ */
+const decoyDuringCapture: BrowserCommand<[selector: string, browserOf: 'own' | 'rest']> = async (
+  { page, iframe, project },
+  selector,
+  browserOf,
+) => {
+  const browser =
+    browserOf === 'own' ? page.context().browser() : [...browsers].find(([name]) => name !== project.name)?.[1]
+  if (browser === null || browser === undefined) throw new Error(`no browser registered for ${browserOf}`)
+  const box = await iframe.locator(selector).boundingBox()
+  if (box === null) throw new Error(`${selector} has no box in the test frame`)
+  const context = await browser.newContext()
+  try {
+    const decoy = await context.newPage()
+    await decoy.setContent(
+      '<button style="position:fixed;left:0;top:0;width:60px;height:60px" onclick="window.n=(window.n??0)+1">decoy</button>',
+    )
+    const clicks = (): Promise<number> => decoy.evaluate(() => (window as Window & { n?: number }).n ?? 0)
+    const [x, y] = [box.x + box.width / 2, box.y + box.height / 2]
+    await page.mouse.move(x, y)
+    await page.mouse.down()
+    await decoy.mouse.click(5, 5)
+    const decoyClicks = await clicks()
+    await page.mouse.move(x, y + 80, { steps: 5 })
+    await page.mouse.up()
+    await decoy.mouse.click(5, 5)
+    return { decoyClicks, decoyAlone: (await clicks()) - decoyClicks }
+  } finally {
+    await context.close()
+  }
+}
+
+/**
+ * The capture project's one-at-a-time check: `'begin'` adds the calling file to the files in flight and replies with
+ * them, `'end'` removes it. A reply that names another file means two capture-project files ran at once.
+ */
+const captureFileSpan: BrowserCommand<[edge: 'begin' | 'end']> = ({ testPath }, edge) => {
+  if (testPath === undefined) return []
+  if (edge === 'begin') captureFilesInFlight.add(testPath)
+  else captureFilesInFlight.delete(testPath)
+  return [...captureFilesInFlight]
+}
+
+/** What each Firefox project registers. */
+const FIREFOX_COMMANDS = {
+  // Playwright's own collection, for `collect.ts` in an engine that gives a page no `gc`.
+  requestGC: async ({ page }) => page.requestGC(),
+  registerBrowser,
+  decoyDuringCapture,
+  captureFileSpan,
+} satisfies Record<string, BrowserCommand<never[]>>
+
+/** What a project adds to the shared definition: an `include` given replaces the shared one. */
+interface ProjectOptions {
+  include?: string[]
+  exclude?: string[]
+  fileParallelism?: boolean
+  pointerCaptureRefused?: boolean
+}
+
+/**
+ * A browser project in one engine. Both engines' projects are built here, so they cannot drift apart in their setup;
+ * what one changes is named in its `options`.
  */
 function browserProject(
   name: string,
   browser: 'chromium' | 'firefox',
   provider: ReturnType<typeof playwright>,
-  commands: Record<string, BrowserCommand<[]>> = {},
+  commands: Record<string, BrowserCommand<never[]>> = {},
+  options: ProjectOptions = {},
 ): TestProjectInlineConfiguration {
   return {
     server: { fs: { allow: [REPO_ROOT] } },
     test: {
       name,
-      include: ['tests/browser/**/*.test.ts'],
+      include: options.include ?? ['tests/browser/**/*.test.ts'],
       // THE PROBE IS NOT IN THE DEFAULT SET — see `PROBE_FILES` above for the whole argument.
       // Each `pnpm test:probe*` script sets `REDEXTAPE_PROBE`, and this list is then empty.
       //
       // `...configDefaults.exclude` FIRST, BECAUSE A BARE `exclude: PROBE_EXCLUDE` REPLACES
       // VITEST'S DEFAULT LIST RATHER THAN ADDING TO IT — `**/node_modules/**` and `**/.git/**` would
-      // silently drop out. Harmless only because `include` above is confined to
-      // `tests/browser/`, so nothing under `node_modules` or `.git` could match it anyway; the
+      // silently drop out. Harmless only because each `include` is confined to `tests/browser/` and
+      // `tests/firefox/`, so nothing under `node_modules` or `.git` could match it anyway; the
       // moment that glob widens, the omission bites without a test to catch it.
-      exclude: [...configDefaults.exclude, ...PROBE_EXCLUDE],
+      exclude: [...configDefaults.exclude, ...PROBE_EXCLUDE, ...(options.exclude ?? [])],
       // `tm-buffer-cost.test.ts`'s run stamp, which `pnpm run test:probe:tm-buffer` sets and every other run
       // leaves empty. A browser test cannot read `process.env` (`PROBE_FILES`' doc says why), so the probe
       // learns its own run's stamp here, and refuses a corpus or a build under `target/` stamped by another.
+      // `pointerCaptureRefused` tells `firefox-input.ts`'s guard whether this project refuses a pointer capture.
       provide: {
         probeTmBufferRun: process.env.REDEXTAPE_PROBE_TM_BUFFER_RUN ?? '',
         probeRxmCopyRun: process.env.REDEXTAPE_PROBE_RXM_COPY_RUN ?? '',
+        pointerCaptureRefused: options.pointerCaptureRefused ?? false,
       },
       // Vitest serves its own tester HTML, so this project's `index.html` — and therefore its
       // `<link>` to `style.css` — never reaches the page. See `tests/browser/setup.ts`: without it
       // the browser tier measures a different geometry than the app ships. `tests/browser/collect.ts`
       // comes FIRST: it collects the pages of the files before, and restarts coverage, before any
-      // module of `src` is compiled in this one (`sequence.setupFiles` below).
-      setupFiles: ['tests/browser/collect.ts', 'tests/browser/setup.ts'],
+      // module of `src` is compiled in this one (`sequence.setupFiles` below). `tests/browser/firefox-input.ts`
+      // comes second, before `setup.ts` imports `src`, and installs no wrapper, hook or command call in Chromium.
+      setupFiles: ['tests/browser/collect.ts', 'tests/browser/firefox-input.ts', 'tests/browser/setup.ts'],
       // Whether coverage is on, for `collect.ts`, which cannot read the run's settings itself.
       globalSetup: ['tests/browser/global-setup.ts'],
-      browser: { enabled: true, provider, headless: true, commands, instances: [{ browser }] },
+      browser: {
+        enabled: true,
+        provider,
+        headless: true,
+        commands,
+        instances: [{ browser }],
+        ...(options.fileParallelism === undefined ? {} : { fileParallelism: options.fileParallelism }),
+      },
     },
   }
 }
@@ -181,7 +290,7 @@ export default defineConfig({
     // INSTRUMENTATION rather than reach, and that entry documents both the reason and what it costs.
     //
     // v8 works here only because a coverage run starts no Firefox: with `REDEXTAPE_FIREFOX` set, an unfiltered run
-    // stops at startup, and `--project firefox` fails before any test runs, rather than under-report.
+    // stops at startup, and `--project firefox` or `firefox-capture` exits 1 on coverage-v8's error in each file.
     coverage: {
       provider: 'v8',
       // LOAD-BEARING, AND NOT A DEFAULT WORTH INHERITING. Left unset, `coverage.include` counts only
@@ -276,9 +385,19 @@ export default defineConfig({
       ),
       ...(FIREFOX
         ? [
-            browserProject('firefox', 'firefox', playwright(), {
-              // Playwright's own collection, for `collect.ts` in an engine that gives a page no `gc`.
-              requestGC: async ({ page }) => page.requestGC(),
+            // Its tab count is `test:firefox`'s `VITEST_MAX_WORKERS`: 6 unless the caller sets one (README, Checks).
+            browserProject('firefox', 'firefox', playwright(), FIREFOX_COMMANDS, {
+              include: ['tests/browser/**/*.test.ts', 'tests/firefox/**/*.test.ts'],
+              exclude: CAPTURE_FILES,
+              pointerCaptureRefused: true,
+            }),
+            // ONE FILE AT A TIME, AND BESIDE THE REST: `browser.fileParallelism`, not `maxWorkers` or the top-level
+            // `fileParallelism` its deprecation points to, either of which puts this project in a group of its own,
+            // run after the rest. Its own `playwright()` gives it its own browser. `firefox-input.ts`'s one-at-a-time
+            // check fails the run if the option stops holding.
+            browserProject('firefox-capture', 'firefox', playwright(), FIREFOX_COMMANDS, {
+              include: CAPTURE_FILES,
+              fileParallelism: false,
             }),
           ]
         : []),

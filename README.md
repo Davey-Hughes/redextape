@@ -301,8 +301,15 @@ pure modules, 59 in real Chromium for the worker and the app end to end — run 
 under the coverage gate. Recount with `pnpm test`. `pnpm test:firefox` runs the browser tier in
 Playwright's Firefox (install it once with `pnpm exec playwright install firefox`), where each test
 that needs what only Chromium has is skipped with its reason. `pnpm test:firefox --reporter=verbose`
-prints every reason, where the default reporter leaves some out. The run still has known failures,
-which later PRs fix, and nothing else runs it, CI included.
+prints every reason, where the default reporter leaves some out. `pnpm test:firefox` runs two
+Firefox projects, each in a Firefox of its own: `firefox-capture` runs the files on
+`vite.config.ts`'s `CAPTURE_FILES` one at a time, since each takes a pointer capture through real
+input and, in one Firefox, a capture takes the clicks of every other tab; `firefox` runs the rest in
+one Firefox at 6 tabs, since that Firefox's one parent process synthesises every tab's real input,
+and with more tabs on a loaded machine its clicks come late enough to time cases out
+(`VITEST_MAX_WORKERS` sets another count). A file outside the list that takes a capture fails in
+`firefox` with a message naming the list: add it to `CAPTURE_FILES`. The run still has known
+failures, which later PRs fix, and nothing else runs it, CI included.
 
 All three numbers in the last two paragraphs were stale when measured on 2026-08-09, and the web one
 badly: it read **48** from PR 3c while the suite grew fivefold underneath it. That is what the

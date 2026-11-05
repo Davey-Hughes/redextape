@@ -14,6 +14,7 @@ import {
   tmPane,
   until,
 } from './harness'
+import { lambdaSettled } from './lambda-text'
 
 /**
  * **A COMPILE WITH NO MACHINE DRAWS NOTHING OVER THE EMPTY DIAGRAM.** `StateDiagram.setProgram(null)`
@@ -124,6 +125,11 @@ describe('the state diagram with no machine to draw', () => {
 
   it('follows the new machine after a recompile, though the old one was scrolled away from', async () => {
     const reattach = diagram().querySelector('.diagram-reattach') as HTMLElement
+    // THE CASE ABOVE'S RECOMPILE HAS NOT DRAWN ITS LAST WHEN `compile` RETURNS: the λ view's tree for the new run can
+    // come back after the run's result, and its reply redraws every view. Such a draw between the scroll written below
+    // and that scroll's own event, a frame later, finds the grid still following and scrolls it back to its row, so
+    // the event reads as the echo of the grid's own write and following never detaches.
+    await lambdaSettled()
     await until(() => programScroll().scrollHeight > programScroll().clientHeight, 'the listing to outgrow the diagram')
     programScroll().scrollTop = programScroll().scrollTop === 0 ? programScroll().scrollHeight : 0
     await until(() => !reattach.hidden, 'following to detach')

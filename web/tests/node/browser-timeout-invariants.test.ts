@@ -1,4 +1,4 @@
-import { mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
+import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { fileURLToPath } from 'node:url'
@@ -6,7 +6,7 @@ import { expect, it } from 'vitest'
 
 /**
  * **THE SHAPES THIS GATE COVERS, NAMED SO A FUTURE READER KNOWS THE EDGE WITHOUT REDISCOVERING IT.**
- * Every wait in `tests/browser/` is meant to be bounded by one number, declared once, in
+ * Every wait in `tests/browser/` and `tests/firefox/` is meant to be bounded by one number, declared once, in
  * `until.ts`. This file catches a numeric timeout that reappears at:
  *
  * - a call site, in decimal, hex, scientific, decimal-point, or underscore-grouped form, however deep
@@ -15,8 +15,8 @@ import { expect, it } from 'vitest'
  *   specifier ending in harness or until>'`) or through a namespace import (`import * as X from '<the same>'`
  *   then `X.until(...)`), at any directory depth — the specifier match is on the module's name, not
  *   the literal `./harness`, so `../harness` and deeper reach it too (`untilNames`);
- * - a call site nested arbitrarily deep under `tests/browser/`, not just its top level, while still
- *   ignoring a directory whose own name happens to end in `.test.ts` (`testFilesUnder`);
+ * - a call site in a test file or a helper module, nested arbitrarily deep under `tests/browser/` or
+ *   `tests/firefox/`, while ignoring a directory whose own name ends in `.ts` (`modulesUnder`);
  * - a file-local re-declaration of `until` itself, in either the `function until` form or the
  *   `const until = async (...) =>` form; and
  * - `until.ts`'s own declared default, read as a whole token rather than truncated at its first
@@ -39,12 +39,20 @@ import { expect, it } from 'vitest'
 const BROWSER_TEST_TIMEOUT_MS = 15_000
 
 /**
- * The directory scanned. `REDEXTAPE_SCAN_DIR` points it at a checkout of an older tree so the gate's
- * red half can be demonstrated without a worktree or a second `pnpm install`. Unset in every normal run.
+ * The browser tier's directory, scanned with `FIREFOX_DIR` beside it. `REDEXTAPE_SCAN_DIR` points it at a checkout
+ * of an older tree so the gate's red half can be demonstrated without a worktree or a second `pnpm install`. Unset in
+ * every normal run.
  */
 const DIR = process.env.REDEXTAPE_SCAN_DIR
   ? `${process.env.REDEXTAPE_SCAN_DIR.replace(/\/?$/, '/')}`
   : fileURLToPath(new URL('../browser/', import.meta.url))
+
+/**
+ * `tests/firefox/`, which holds test files only the Firefox projects run. A normal run reads it without asking
+ * whether it exists, so a wrong path throws instead of scanning nothing; it may be missing only under
+ * `REDEXTAPE_SCAN_DIR`, since an older tree may have none.
+ */
+const FIREFOX_DIR = `${DIR}../firefox/`
 
 /** Blank out comments and string/template literals so a number inside either is never read as code. */
 const stripped = (s: string): string => {
@@ -117,23 +125,30 @@ const isNumericLiteral = (arg: string): boolean => {
 }
 
 /**
- * Every `.test.ts` FILE under `dir`, recursed rather than listed one level deep — the browser project's
- * own `include` is `tests/browser/**\/*.test.ts`, so a call site two directories down runs under the
- * same gate and must be scanned the same way. Checked with `dirent.isFile()` rather than a name filter
- * alone: `tests/browser/__screenshots__/` holds directories named for the test file they belong to
- * (e.g. `app.test.ts/`, holding PNGs), and a name filter alone reads a directory as readily as a file.
+ * Every `.ts` FILE under `dir`, the helper modules as well as the test files: `engine.ts` and the fixtures call
+ * `until` too, and a number passed there is as unbounded as one in a test file. Recursed rather than listed one
+ * level deep, since the projects' `include` globs recurse, so a call site two directories down runs under the same
+ * gate and must be scanned the same way. Checked with `dirent.isFile()` rather than a name filter alone:
+ * `tests/browser/__screenshots__/` holds directories named for the test file they belong to (e.g. `app.test.ts/`,
+ * holding PNGs), and a name filter alone reads a directory as readily as a file.
  */
-const testFilesUnder = (dir: string): string[] => {
+const modulesUnder = (dir: string): string[] => {
   const out: string[] = []
   for (const entry of readdirSync(dir, { withFileTypes: true })) {
     if (entry.isDirectory()) {
-      out.push(...testFilesUnder(`${dir}${entry.name}/`))
-    } else if (entry.isFile() && entry.name.endsWith('.test.ts')) {
+      out.push(...modulesUnder(`${dir}${entry.name}/`))
+    } else if (entry.isFile() && entry.name.endsWith('.ts')) {
       out.push(`${dir}${entry.name}`)
     }
   }
   return out
 }
+
+/** Whether the scan reads `FIREFOX_DIR`: in every normal run, and under `REDEXTAPE_SCAN_DIR` when the tree has it. */
+const FIREFOX_SCANNED = !process.env.REDEXTAPE_SCAN_DIR || existsSync(FIREFOX_DIR)
+
+/** One list for the scan and the re-declaration case, so that the two cannot read different trees. */
+const defaultModules = (): string[] => [...modulesUnder(DIR), ...(FIREFOX_SCANNED ? modulesUnder(FIREFOX_DIR) : [])]
 
 /**
  * The name(s) a call in this file may invoke `until` by: `until` itself, any local alias bound by
@@ -144,7 +159,7 @@ const testFilesUnder = (dir: string): string[] => {
  *
  * **THE SPECIFIER MATCH IS ON THE MODULE'S NAME, NOT THE LITERAL `./harness`.** A file directly under
  * `tests/browser/` reaches the module as `./harness`; one recursed into a subdirectory — the shape
- * `testFilesUnder` reaches — must write `../harness`, and one two levels down `../../harness`. A
+ * `modulesUnder` reaches — must write `../harness`, and one two levels down `../../harness`. A
  * specifier anchored to `./` alone would match the first and miss every other depth, so recursion and
  * alias detection would not compose. `[^'"]*\b(?:harness|until)` matches any relative prefix in front of the
  * name of either module: `until.ts` declares the wait, and `harness.ts` re-exports it.
@@ -174,19 +189,20 @@ const untilNames = (raw: string): string[] => {
 }
 
 /**
- * Scans `dir` (defaulting to the real `tests/browser/`) for a numeric argument at a call site — any
- * numeric argument, not only a timeout. `until`'s fourth parameter is `pollMs`, and the ceiling a wait
- * actually gets is `timeoutMs + pollMs`, since the throw fires only after a sleep returns; a large poll
- * interval would stretch that ceiling with `timeoutMs` untouched. Both live in `until.ts` and neither
- * belongs at a call site, so a failure here names the value rather than assuming which one it is. Takes
- * `dir` as a parameter, rather than closing over `DIR` alone, so a test below can point it at a
- * throwaway directory and prove the recursion and the alias/namespace detection compose, instead of
- * asserting each in isolation.
+ * Scans `dir` (by default `tests/browser/` and `tests/firefox/`) for a numeric argument at a call site — any
+ * numeric argument, not only a timeout. `until`'s fourth parameter is `pollMs`, and the ceiling a wait actually gets
+ * is `timeoutMs + pollMs`, since the throw fires only after a sleep returns; a large poll interval would stretch
+ * that ceiling with `timeoutMs` untouched. Both live in `until.ts` and neither belongs at a call site, so a failure
+ * here names the value rather than assuming which one it is. A hit is named by its path from `DIR`, so one in
+ * `tests/firefox/` begins `../firefox/`. Takes `dir` as a parameter, rather than closing over `DIR` alone, so a test
+ * below can point it at a throwaway directory, scanned alone, and prove the recursion and the alias/namespace
+ * detection compose, instead of asserting each in isolation.
  */
-const numericTimeoutSites = (dir: string = DIR): string[] => {
+const numericTimeoutSites = (dir?: string): string[] => {
   const hits: string[] = []
-  for (const path of testFilesUnder(dir).sort()) {
-    const name = path.slice(dir.length)
+  const base = dir ?? DIR
+  for (const path of (dir === undefined ? defaultModules() : modulesUnder(dir)).sort()) {
+    const name = path.slice(base.length)
     const raw = readFileSync(path, 'utf8')
     const code = stripped(raw)
     for (const callee of untilNames(raw)) {
@@ -304,7 +320,7 @@ it('the scanner treats an aliased import of until as another name for it', () =>
 
 /**
  * **`'./harness'` IS WHAT ONLY A TOP-LEVEL FILE WRITES.** A file one directory down under
- * `tests/browser/` — a depth `testFilesUnder`'s recursion reaches — must import the module as
+ * `tests/browser/` — a depth `modulesUnder`'s recursion reaches — must import the module as
  * `../harness`, and one two levels down as `../../harness`. An alias regex hardcoded to
  * `'./harness'` would match none of those, so recursion and alias detection could each pass a
  * test and still not compose.
@@ -321,7 +337,7 @@ it('untilNames matches an aliased or namespace import of the until module as wel
 })
 
 /**
- * **THE COMBINATION NO TEST ABOVE EXERCISES.** That `testFilesUnder`'s recursion and `untilNames`'s
+ * **THE COMBINATION NO TEST ABOVE EXERCISES.** That `modulesUnder`'s recursion and `untilNames`'s
  * alias detection each work alone does not prove they compose: a file reached only by recursing into a
  * subdirectory, importing `until` under a local alias through the one-level-longer relative specifier
  * that depth requires. This runs the real scanner — `numericTimeoutSites`, not a hand-built stand-in —
@@ -338,6 +354,21 @@ it('the scanner sees a numeric timeout reached through both recursion and an ali
       "import { until as waitFor } from '../harness'\nawait waitFor(() => true, 'x', 60_000)\n",
     )
     expect(numericTimeoutSites(dir)).toEqual([expect.stringMatching(/^sub\/zz\.test\.ts:\d+ passes 60_000$/)])
+  } finally {
+    rmSync(root, { recursive: true, force: true })
+  }
+})
+
+/** A helper module is not a test file, and a number it passes to `until` bounds a wait of every test that calls it. */
+it('the scanner sees a numeric timeout in a helper module, not only in a test file', () => {
+  const root = mkdtempSync(join(tmpdir(), 'redextape-timeout-gate-'))
+  try {
+    const dir = `${root}/`
+    writeFileSync(
+      `${dir}zz-helper.ts`,
+      "import { until } from './until'\nexport const settle = () => until(() => true, 'x', 5)\n",
+    )
+    expect(numericTimeoutSites(dir)).toEqual([expect.stringMatching(/^zz-helper\.ts:\d+ passes 5$/)])
   } finally {
     rmSync(root, { recursive: true, force: true })
   }
@@ -378,18 +409,31 @@ it('the scanner sees a namespaced until call and still ignores an unrelated memb
   }
 })
 
-it('no until call site under tests/browser passes a numeric timeout or poll interval', () => {
+it('no until call site under tests/browser or tests/firefox passes a numeric timeout or poll interval', () => {
   expect(numericTimeoutSites()).toEqual([])
+})
+
+/**
+ * **THE CALL-SITE CASE AND THE RE-DECLARATION CASE ARE GREEN ON AN EMPTY LIST**, so this one holds the list's
+ * reach: a module under `FIREFOX_DIR`, and one under `DIR` that is not a test file.
+ */
+it('the default scan reads tests/firefox and the helper modules of tests/browser, not only its test files', () => {
+  const modules = defaultModules()
+  expect({
+    firefox: modules.some((path) => path.startsWith(FIREFOX_DIR)),
+    helper: modules.some((path) => !path.startsWith(FIREFOX_DIR) && !path.endsWith('.test.ts')),
+  }).toEqual({ firefox: FIREFOX_SCANNED, helper: true })
 })
 
 /**
  * **A DECLARATION DEFAULT IS NOT A CALL-SITE ARGUMENT, AND THE SCANNER ABOVE CANNOT SEE ONE.**
  * `numericTimeoutSites` only ever looks inside an argument list, so a file that re-declares `until`
  * locally, in either the `function until` form or the `const until = async (...) =>` form, is invisible
- * to that scanner no matter what its own default is.
+ * to that scanner no matter what its own default is. `until.ts`, which holds the one declaration, is left out by path.
  */
-it('no file under tests/browser re-declares until locally', () => {
-  const offenders = testFilesUnder(DIR)
+it('no file under tests/browser or tests/firefox re-declares until locally', () => {
+  const offenders = defaultModules()
+    .filter((path) => path !== `${DIR}until.ts`)
     .filter((path) => /function\s+until\s*\(|const\s+until\s*=\s*async/.test(stripped(readFileSync(path, 'utf8'))))
     .map((path) => path.slice(DIR.length))
     .sort()

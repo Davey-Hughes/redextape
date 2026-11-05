@@ -9,8 +9,17 @@ import { until } from './until'
 
 declare module 'vitest/browser' {
   interface BrowserCommands {
-    /** Playwright's `page.requestGC()`, a full collection, registered by the Firefox project alone. */
+    /** Playwright's `page.requestGC()`, a full collection, registered by the Firefox projects alone. */
     requestGC: () => Promise<void>
+    /** Registers this project's browser in the config's process; replies how many other projects have, and browsers. */
+    registerBrowser: () => Promise<{ others: number; browsers: number }>
+    /** A real press on `selector` with a decoy click during it in `browserOf`'s browser: `two-browsers.test.ts`. */
+    decoyDuringCapture: (
+      selector: string,
+      browserOf: 'own' | 'rest',
+    ) => Promise<{ decoyClicks: number; decoyAlone: number }>
+    /** The capture project's span of a file, `'begin'` and `'end'`; replies with the files in flight. */
+    captureFileSpan: (edge: 'begin' | 'end') => Promise<string[]>
   }
 }
 

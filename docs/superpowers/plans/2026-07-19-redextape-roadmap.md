@@ -31562,3 +31562,442 @@ the commit that corrects this entry is `$R/logs/entry-figures-fix.log`, and for 
 | the drive's readouts; 543 ms; rc 0 | at `940295c` | `$L/rebase-drive.log`, its first line, its `readout` lines and its `WAITING` line |
 | 12,976; 100,317, 181,667, 249,920 | the earlier drives' runs | the readouts of `$L/try-drive.log` and `fix1-try-drive.log`; of `fix2-drive.log` |
 | "ok overall seems to work" | the user's try | `grep -n 'ok overall'` on `$R/progress.md` |
+
+#### FIREFOX PR 2: `pnpm test:firefox` RUNS TWO FIREFOX PROJECTS, EACH IN A FIREFOX OF ITS OWN: `firefox-capture` RUNS THE EIGHT FILES WHOSE REAL PRESSES TAKE A POINTER CAPTURE AND THE TEST THAT THE PROJECTS HAVE TWO BROWSERS, ONE AT A TIME, AND `firefox` THE REST AT 6 TABS; A GUARD FAILS A CAPTURE OUTSIDE THE LIST, TWO CHECKS HOLD THE SPLIT, AND IN FIREFOX THE TEST FRAME IS GIVEN THE FOCUS AT EACH FILE'S START AND BEFORE A `focus()` IT WOULD IGNORE; CI IS AS IT WAS, AND WHAT IS LEFT GOES TO PRS 3 TO 5 (2026-11-04, branch `firefox-contention`, `ec4f11a..10c3560`, 26 commits, the last that changes code `6f19fe8`, plus this entry, `5a555c6`, and the commit that corrects it)
+
+**The second of five Firefox PRs** (PR 1's entry above, its THE USER'S DECISIONS, 3). PR 1 left `pnpm test:firefox`
+running the browser tier in one Firefox at Vitest's default tab count, 12 on this machine, with failures beyond what
+fails in one tab. PR 2 is about those. Its measurements before the spec (M1, `$R/pr2/measure-report.md`; M2,
+`$R/pr2/measure-2.md`) found two causes. Cause 1: Playwright synthesises every page's mouse in one Firefox's one
+browser process, so a pointer capture that real input takes in one tab takes the clicks of every other tab of that
+Firefox (spec §3.1). Cause 2: a `focus()` made while the test frame lacks the focus leaves its element unfocused and
+fires no event (spec §3.4). The plan's Task 2 found a third. Cause 3: that one process carries every tab's real input,
+and on a loaded machine it ran on about half a core, so a case of many real clicks could cross its 15,000 ms bound
+(spec §3.8). The spec is `docs/superpowers/specs/2026-11-04-firefox-pr2-tab-contention-design.md` and the plan
+`docs/superpowers/plans/2026-11-04-firefox-pr2-tab-contention.md`, in 11 tasks. The lane record is
+`~/temp/redextape-firefox-ci-record/` (`$R` below): this PR's runs are in `$R/logs/pr2/`, the R6 probe's in
+`$R/logs/pr2-r6/`, the measurements in `$R/pr2/`, and the task reports, the reviews and the record of failures outside
+R (`outside-r.md`) in `$R/tasks/pr2/`. `$W` is the worktree `~/temp/redextape-firefox-contention` and `$S` the
+sabotage worktree `~/temp/redextape-firefox-contention-sab`. R, the one-tab set, is the failures of three one-tab
+runs, `tabs1-1` (M1), `focusobs-1` (M2) and `t1-base-1tab` (Task 1), by file and name, with the files that fail as a
+whole in them (spec §6.2).
+
+##### WHAT CHANGED
+
+- `08ec2b4`, spec: the design: two Firefox projects split by pointer capture, a guard that fails a capture outside the
+  list, a test that the projects get two browsers, and the test frame focused before a case's first `focus()`.
+- `29f187d`, spec: the user's six answers to its §10 (THE USER'S DECISIONS, 2).
+- `67b81cc`, spec: ruling 5 read as "Blocks now" (THE USER'S DECISIONS, 4).
+- `f22e855`, spec: corrections of fact from the plan's probes: a project's `include` replaces the shared one, the
+  guard's records live on the window, since a test file's import evaluates the module again, and Vitest names the
+  projects by their instance.
+- `c44d793`, plan: 11 tasks, from the base at `ec4f11a` to this entry.
+- `355c4df`, spec, and `d08803e`, plan: the answers to a read-only pre-flight of the plan's Tasks 3 to 7. The
+  one-at-a-time check spans each file in an `aroundAll` (THE CONTROLLER'S CALLS, 1); "Yes, every run"; a file that
+  fails as a whole counts in R and in C1; the three tests S3's 16-file run must fail; S10; a record of failures
+  outside R that every task's runs feed, each with an alone run at once, and Task 10's cause-finding over it.
+- `0a1ad67`, spec: the user's R6, and Task 2's cause as cause 3 with its evidence and M3's options; Task 2's 32
+  alone-passing cases under cause 3 (THE CONTROLLER'S CALLS, 3); C5 and C6 read with the rest at 6 tabs.
+- `afe7974`, plan: R6 in Task 3, `test:firefox`'s `VITEST_MAX_WORKERS=${VITEST_MAX_WORKERS:-6}`, with checks of the
+  rest's peak in flight and of a caller's count winning; every later full run at 6 tabs; M3's and the R6 probe's
+  view-keys rows in Task 10's sweep.
+- `381991d`, Task 3: `web/vite.config.ts` builds two Firefox projects when `REDEXTAPE_FIREFOX` is set, each with a
+  `playwright()` provider of its own and so a Firefox of its own. `firefox-capture` runs the files of a new exported
+  list, `CAPTURE_FILES`, with `browser.fileParallelism: false`; `firefox` runs the rest. The list holds the 8 files
+  whose real presses take a pointer capture, and from Task 4 `two-browsers.test.ts`. `pnpm test:firefox` is
+  `REDEXTAPE_FIREFOX=1 VITEST_MAX_WORKERS=${VITEST_MAX_WORKERS:-6} vitest run --project firefox --project
+  firefox-capture`. A node test, `tests/node/capture-files.test.ts`, fails a listed path that names no file. Comments
+  in `collect.ts`, `engine.ts` and `provided-context.d.ts` speak of the projects in the plural, and the README says
+  what the two projects are.
+- `4e57b37`, Task 4: a new setup file, `web/tests/browser/firefox-input.ts`, which in Chromium installs no wrapper, hook
+  or command call. In Firefox it wraps `setPointerCapture` and records each capture, and a capture that holds fails its
+  case in the `firefox` project with a message naming `CAPTURE_FILES`. `web/tests/firefox/two-browsers.test.ts` checks
+  that the projects' browsers are separate: a decoy click in the other project's browser survives a held capture, and
+  one in its own does not. `vite.config.ts` registers the commands the two need.
+- `6f0e3c1`, Task 5: the one-at-a-time check. The setup file's `aroundAll` calls a `captureFileSpan` command at each
+  capture-project file's start and end, whatever the file's own hooks throw, and a file that begins while another of the
+  project is in flight fails, so `browser.fileParallelism: false` is held by a check in every Firefox run of two or more
+  of the project's files.
+- `085874c`, Task 6: the frame-focus step. In Firefox the setup file wraps `HTMLElement` and `SVGElement`'s `focus`,
+  and gives the frame the focus with `window.focus()` before a `focus()` it would otherwise ignore, the app's own
+  included. `web/tests/firefox/frame-focus.test.ts` checks a case's first such call and a later one.
+- `d765441`, fix round A (the reviews of Tasks 3 to 6), comments: a coverage run of either Firefox project exits 1 on
+  coverage-v8's error in each file with its tests running, not before any test; the setup file names the two Vitest
+  defaults its guard relies on and the true reason it imports nothing of `src`; its message names a capture made with
+  no event in dispatch as such; the README's paragraph is rewrapped to 100 columns.
+- `fa7b5b2`, fix round A, plan and spec: about-menu's first error is `<a …>` or `<body>` with and without the step, on
+  its last assertion, so the focus counts keep its case apart and F1 reads it by name; C9 is S8's reading, since C4
+  reads 1 under S8 by construction; the coverage runs of both Firefox projects.
+- `e305ab5`, Task 7: `tests/node/browser-timeout-invariants.test.ts` reads every module under `tests/browser/` and
+  `tests/firefox/`, not only the test files under `tests/browser/`, with a case for a helper module; `until.ts`'s
+  sentence on the scan's reach follows.
+- `66ff467`, Task 9: in Firefox the setup file calls `window.focus()` once at each file's start, so that after a file
+  whose frame ended focused, a real click's or a popover's `autofocus` focus reaches its element and not the frame's
+  window alone (Task 8's one cause of six cases and a leak). The step stays, for a frame that loses the focus
+  mid-file.
+- `b525285`, Task 9, the Minors of Task 7's review: a case that the default scan reads `tests/firefox/` and a helper
+  module; `defaultModules`' doc; `until.ts` says no browser-tier file has a reason to pass `pollMs`.
+- `fb73350`, Task 9, plan and spec: S3 is `frame-focus.test.ts`'s cases from `66ff467` on, since the setup call leaves
+  S3's 16-file half nothing to show; S9 holds the step past a case's first call; the two engine differences in focus
+  that Task 8 found go to PR 3 with their evidence.
+- `0ff60cd`, fix round B (Task 9's review and the whole-branch review), code: `frame-focus.test.ts` starts with a case
+  that the frame holds the focus, which only the setup call gives it; the guard's comment names its third Vitest
+  default, cases one at a time; `CaptureRecord` is no longer exported; the invariant's reach case expects no
+  `tests/firefox/` on a `REDEXTAPE_SCAN_DIR` tree that has none.
+- `55c712e`, fix round B, plan and spec: the setup call's design in spec §4.6, held by that case and S11, its
+  sufficiency left to F1 to F3; the coverage check as one `test:firefox --coverage` run, its failures outside R
+  blocking, and fix round A's four rows explained (THE USER'S DECISIONS, 8); C4 in `targets.py`'s exit status, and C8
+  and C9 over every error of a failure.
+- `81d3758`, Task 10: buffer-cool-warm's keystroke case waits for the λ view to draw its own step (`lambdaSettled()`)
+  before it reads the term, as scratch-edit does: between a recompile's start and its first frame the term is empty,
+  and the wait for any change of it could end there.
+- `49c9718`, Task 10, plan and spec: view-keys' held-key case in R by name until PR 4 (THE USER'S DECISIONS, 9).
+- `6f19fe8`, Task 10: state-diagram-no-machine's "follows the new machine" case waits for the λ view to draw its own
+  step before it scrolls the diagram away. The case before's recompile could still be drawing: the λ tree's reply can
+  come after the run's result, and a draw between the case's scroll and its `scroll` event put the following grid back
+  on its row, so following never detached.
+- `bfba5ab`, Task 10, plan and spec: view-keys' failures in the caret class's shape are in R until PR 4 (THE USER'S
+  DECISIONS, 10), in place of the one case by name; F4 is judged on the full runs, since under `--coverage` a file
+  loses its last results; the scroll-event item below.
+- `10c3560`, Task 11, spec and plan: the shape is the caret at offset 0, keys typed there or the caret read there (THE
+  CONTROLLER'S CALLS, 8).
+
+##### THE USER'S DECISIONS
+
+Each ruled on 2026-11-04, and worded as the Log of `$R/progress.md` has it:
+
+1. **Approach "D: split by capture":** two Firefox projects with separate browsers, the capture files one at a time in
+   their own Firefox beside the rest at the default tab count, and a guard that fails when a file outside the list takes
+   a real capture. Not chosen: A, a Firefox per tab (Vitest internals); B, one tab. **Cause 2 → "PR 2":** the
+   frame-focus step for the five focus failures M2's step cleared, and the other four worked out in PR 2 (the ruling's
+   count: spec §4.6 and §8 make them five, with live-views-bound-switch's "65 of 63" case, which M2's join had left
+   out).
+2. **The six answers to spec §10, at `08ec2b4`:** (1) "Add it": step-focus-recording joins the capture list (8 files);
+   (2) "Add a permanent check": a test that fails if two capture files run at once, the deprecated
+   `browser.fileParallelism: false` kept; (3) "PR 3": an engine difference in focus that §4.6 finds is recorded in PR
+   2 and fixed in PR 3; (4) "Yes, every one": the step arms for every `focus()` made while the frame lacks the focus;
+   (5) "Blocks PR 2": a failure outside R that passes alone blocks PR 2 until its cause is found; (6) "Accept": C5 and
+   C6 at most 300 s and 8 GiB at the default tab count, 450 s and 4.5 GiB at 3.
+3. **The spec approved:** "Approved, write the plan".
+4. **Ruling 5 read as "Blocks now":** parked-copy-editor-mount's failure in M2's `d-split-2` blocks PR 2 until its
+   cause is found, whether or not a run at the head repeats it.
+5. **"Yes, every run",** on the pre-flight of Task 3: a failure outside R that passes alone, in any run made during PR
+   2, blocks it until its cause is found. Not chosen: the final runs only.
+6. **"R6: one Firefox, 6 tabs",** on Task 2's STOP, with M3's figures: the rest stays in one Firefox at 6 tabs, the
+   capture project unchanged. Not chosen: S3, three Firefoxes of 4 tabs (8.80 GiB, over C6); keeping D and lifting
+   ruling 5 for the class.
+7. **"Yes, they block too":** failures outside R in the Firefox coverage check block PR 2 until their cause is found.
+   Not chosen: record only.
+8. **"Explained, don't block",** asked again with the fact the first question lacked: fix round A's four coverage
+   rows, from direct `--project` calls (three in the rest at Vitest's 12 tabs, cause 3; two-browsers without a
+   `firefox` file, failing by design), do not block, and the check runs through `test:firefox`, its failures blocking
+   as ruled. Not chosen: a cause-finding for each.
+9. **"Explained; add it to R by name":** view-keys' held-key case, which failed in Task 10's two R6 runs, is PR 4's
+   caret bug and joins R by name until PR 4. Not chosen: leaving it in C1; holding PR 2 for PR 4. Replaced by 10.
+10. **"The shape, until PR 4":** any view-keys failure whose first error is the caret-at-offset-0 shape counts as in R
+    until PR 4; a view-keys failure of any other shape still blocks. Not chosen: adding the second case by name.
+
+##### THE CONTROLLER'S CALLS
+
+Made by the lane's controller, not ruled by the user (the Log and the reports named):
+
+1. **The span in an `aroundAll`:** the one-at-a-time check sends a file's end from an `aroundAll`, since a file's own
+   `afterAll` that throws ends the hook list before an `afterAll` of the setup file could send it; probed in the
+   plan's fix round, where with an `afterAll` 5 later files failed "began while" and with an `aroundAll` none did
+   (`$R/tasks/pr2/planfix-report.md`).
+2. **Base and sabotage runs outside ruling 5:** their causes are known, so their failures outside R take no alone run.
+3. **Task 2's 32 cases under cause 3:** the cases that failed in Task 2's D runs and passed alone take Task 2's cause,
+   and one of them that fails again in a later run that counts takes a cause-finding of its own: buffer-cool-warm's
+   keystroke case after fix round B's `frb-coverage` (`81d3758`), and state-diagram-no-machine's "follows the new
+   machine …" after Task 8's `t8-16-win-1` and `t8-pair-live-views-bound-switch` (`6f19fe8`). Two more failed again in
+   fix round A's `fra-coverage-firefox`, lsp-hover's and share-positions', at Vitest's 12 tabs, which the user ruled
+   explained (THE USER'S DECISIONS, 8). Each is a row of `outside-r.md`, and none of the 32 failed in Task 10b's full
+   runs (VERIFICATION).
+4. **F4 judged on the full runs:** the coverage check loses a file's last results, so F4 is read on Task 10's full
+   runs and not on it (`bfba5ab`).
+5. **The two engine differences under ruling 3:** view-keys-focus's narrowing and extend-focus-probe's just-hidden
+   `activeElement` are recorded for PR 3. view-keys-focus's case is in R, since `tabs1-1`, `focusobs-1` and
+   `t1-base-1tab` each hold it, and it fails alone, so neither C1 nor the alone rule makes it block; the user was told,
+   with an offer to fix it sooner in a PR of its own.
+6. **Five C1 sources of Task 10's sweep that are not rows** of `outside-r.md`, each explained there: fix round A's
+   probe files (`zz-hookcap-afterall`, `zz-m4-await`), untracked and made to fire the guard; its M6 sabotage
+   (`fra-m6`); `t4-alone`'s two-browsers, failing by design without a `firefox` file; and `t2-timed-d-4`'s
+   parked-copy-editor-mount, Task 2's subject.
+7. **The pre-PR 1 scan accepted:** the timeout invariant run with `REDEXTAPE_SCAN_DIR` on a tree from before PR 1
+   fails its re-declaration case, since `until` was declared in `harness.ts` there (`$R/tasks/pr2/task-7-report.md`).
+8. **The shape's reading:** "caret-at-offset-0" takes in view-keys' caret read, "the caret is not where it was: expected
+   +0 to be N", beside keys typed at offset 0; a vim deletion at offset 0 stays out. Over the 362 JSON reports of
+   `$R/logs/pr2` and `$R/logs/pr2-r6` at `10c3560`, 6 of them `.split.json` re-cuts of M3's runs that crash `targets.py`
+   before the change and after it alike, it moves no failure (VERIFICATION).
+9. **M3's runs and the R6 probe's under ruling 5:** a run in the configuration the user chose counts, so `m3-r6-1`'s
+   view-keys failure and the R6 probe's (`r6-base-12`, `r6-default`, `r6a-filtered`) are rows of `outside-r.md`, each
+   with an alone run, `r6-base-12`'s with the rest at 12 included, since view-keys runs in the capture project, which is
+   the same whatever the rest's count. M3's D, S3 and S4 runs, measurements of configurations not chosen, do not count,
+   so `m3-d-1`'s two copy-edit-leaving failures on rxm, outside R, got no row and no alone run. This reads decision 5's
+   "in any run made during PR 2" more narrowly; the reasoning is the one the user ruled later for fix round A's rows at
+   12 tabs, cause 3 (THE USER'S DECISIONS, 8).
+10. **state-diagram's `-t` alone failure, not a STOP:** in Task 2, state-diagram's "keeps a runtime box's focus while
+    the run moves, …" failed its alone run, made with `-t`, since the hooks of the `describe` before it, which walk the
+    machine into `sub`, do not run under `-t`; its whole file passed alone, 16 of 16 (`t2-d-2-alone-6-file`), so the
+    case counts as passing alone, one of Task 2's 32 (`outside-r.md`'s row `2` `t2-d-2`).
+
+##### WHAT THIS DID NOT CLOSE
+
+**For PR 3, engine differences and tolerances:**
+
+- **Two engine differences in focus** that Task 8 recorded (`$R/tasks/pr2/t8-focus.md`), each still failing with Task
+  9's fix in place (`t10-16`; `t10-leak-1` to `-3`):
+  - view-keys-focus's "goes to + view when the window is narrowed past 40rem, …" ("the focus is not on + view in the
+    narrow window, at once: expected `<body>`"). `style.css`'s `@media (max-width: 40rem)` rule hides the views toggles
+    at the style update, and Firefox blurs the focused toggle (`focusout button.view-toggle rel=null`) before it
+    dispatches the media query's `change` event (`media-change matches=1 … active=body`), on which `main.ts`'s
+    `placeToggles` calls `handOff`, which then finds `<body>` and moves nothing (the trace of
+    `t8-alone-view-keys-focus-none`). It failed in every Firefox run of Task 8, alone included, and passes in every
+    Chromium run of the record; Chromium's order, which lets the listener see the toggle focused, is inferred from that
+    and was not traced. It would be user-visible in Firefox if a top-level window's resize orders the two as the test
+    frame's does, which is unmeasured: a user who narrows the window with the focus on a toggle would be left on
+    `<body>`. Its fix is in `web/src` (A3).
+  - extend-focus-probe's "hiding the focused continue button, or disabling a focused button, strands focus on body":
+    right after `extend.hidden = true`, `activeElement` reads `expected <button …(2)> to be <body>`, and the frame's
+    `focusout` comes later. Firefox keeps a just-hidden focused element as `activeElement` until a later style update,
+    where Chromium answers `<body>` at once. The file probes the engine, so no app path is shown wrong by it.
+- **PR 1's list for PR 3,** the menus' gutter among it (header-menus-narrow's 9, spec §7).
+- **Two cases another lane's gate failed alone at `ec4f11a`,** in its alone runs, one per file with `-t` set to the
+  file's failing titles (the history-restart lane, `~/temp/redextape-history-restart-record/tasks/task-6-report.md`),
+  with no cause-finding in PR 2: base16-import's "forgets a check when the text is edited" (`locator.fill: Timeout
+  14897ms exceeded`), which is in the failure tables of two runs of PR 2's record, `t1-base-default-1` and M2's
+  `e2-serial-1`; and state-diagram's "keeps a runtime box's focus while the run moves, …", whose file passed alone (THE
+  CONTROLLER'S CALLS, 10). base16-import is one of spec §3.6's chained files, which the alone rule runs whole, and PR
+  2's record has no run of that file alone, so it is not shown that the case fails alone.
+
+**For PR 4, the caret bug:**
+
+- Cluster B, the view-keys caret test included ("a key held down > acts once with Ctrl held through a held ], and its
+  repeats are not the editor's", spec §3.5), which runs in `firefox-capture`.
+- `targets.py`'s `R_BY_SHAPE` rule, which holds view-keys' failures with the caret at offset 0 in R until PR 4 (spec
+  §6.2), leaves when PR 4 lands. Over the 361 runs of the record that `targets.py` reads, the gate's at `5a555c6`
+  included (every JSON report but the six `.split.json` re-cuts), it holds 10 failures: the held-key case's 4 and "ends
+  on a key it does not know, …"'s 6, `gh-r6-1`'s among them.
+
+**For PR 5, CI:**
+
+- Both Firefox projects in the `web` job; memory and wall time on the runners, measured on this machine only (the rest
+  at 6, and at 3 + 1); Firefox as root, unmeasured.
+- Chromium's wall time: the tier loads one more setup module per file. `run.sh`'s `WALL` was 108 s for `t1-chromium` at
+  the base's `web/`, 90 s for `t10-chromium` at `55c712e` and 64 s for `gh-chromium` at `5a555c6`, each under other
+  lanes' load, so the three do not measure the module's cost.
+
+**For U2's follow-up, after PR 5:** a file that holds a press across `page.mouse` commands joins the capture list.
+
+**What holds each premise, and what does not:**
+
+- The projects together and the rest at 6: C4, in `targets.py`'s exit status since fix round B. One browser per
+  project: two-browsers. One file at a time: the one-at-a-time check (C9). C4 cannot see an overlap that check
+  catches: it fails a file before its first case, and the JSON gives such a file the run's start as its start and end,
+  so under S8 C4 read a peak of 1.
+- The setup call's presence: `frame-focus.test.ts`'s first case (S11), in every `firefox` run of the file, and not in
+  `firefox-capture`, where the file does not run. Its sufficiency, a focused start letting a real click's or a popover's
+  `autofocus` focus reach its element after a file whose frame ended focused, is held by runs alone: F1's 16 files hold
+  about-menu, lambda-display, live-views-bound-switch and view-toggles; F2's full one-tab run (`t10-1tab`, a tab in each
+  of the two Firefoxes) those, add-view-floor, follow-kept and view-header; F3 the leak's victim. `e305ab5` is the tree
+  without the call. There Task 8's `none` runs fail the other six and the victim (`t8-16-none-1` and `-2`, the `none`
+  pairs of add-view-floor and follow-kept, `t8-leak-1` to `-3`); view-header passed in its `none` runs, and fails in
+  `t8-1tab` and in Task 9's `t9-pair-view-header-after-active-pane-base`. A two-file pair for it needs the record's
+  untracked `Ordered` sequencer (`vite.focus.config.ts`): Vitest orders files by cached duration and size.
+- The per-call step: `frame-focus.test.ts`'s step cases alone, since with the setup call it fired on 0 of 257 calls in
+  Task 8's `t8-16-win-1`. Its `SVGElement` half and its reach into a file's own hooks are held by the code's shape, a
+  two-prototype array and no per-case state, not by a case: no `focus()` in `web/src` targets an SVG element at
+  `085874c` (Task 6's review, M2).
+- The guard sees a `setPointerCapture` that holds in the frame's realm, and only that. Whether a native HTML drag
+  session or a pointer lock takes the shared mouse the same way is unmeasured; neither is in `web/src` or `web/tests`
+  at `fb73350`. The guard relies on three Vitest defaults, `'stack'` hooks, a page per file and cases one at a time
+  (spec §4.3).
+- The capture list's third direction is unchecked: a listed file that no longer captures (spec §8).
+  `browser.fileParallelism` is deprecated and stays, held by the one-at-a-time check at each Vitest bump.
+- two-browsers needs a file of `firefox` beside it: a run that names it among capture files alone fails it by design,
+  as fix round A's `--project firefox-capture` run did.
+- C8 and C9 read every error of a failure since fix round B; C1 says nothing of R's 127 tests, which `errdiff.py`'s
+  DIFF lines cover.
+
+**Recorded, with no ruling:**
+
+- **The coverage check's lost results.** Under `--coverage` in Firefox a file loses its last results: the JSON has 111
+  cases `pending` in `frb-coverage`, 219 in `t10-coverage`, 251 in `t10-coverage-2`, 289 in `t10-fix-cov-1` and 262 in
+  `gh-coverage`, and the check's C1 judges none of them. Whether those cases ran and their results were dropped, or did
+  not run, is not shown.
+- **F2's four DIFFs** against `t1-base-1tab` (`t10-1tab.errdiff.out`), each in R, where `t10-1tab` ran a tab in each of
+  the two Firefoxes and `t1-base-1tab` one project in one tab: view-keys' "is over after one action …" and "runs ahead
+  of vim …", from the caret read to the typed text at offset 0, the same caret state read by the case's other assertion;
+  extend-focus-probe's first case, from `expected <body> to be <button>` to `expected <button> to be <body>`, the engine
+  difference above, which shows once the frame has the focus; virtual-grid's "moves the active row by index …", from
+  `'g-0' to be 'g-999'` to `'g-8' to be 'g-10'`, the base's own first error in its default runs.
+- **The scroll-event window.** The product reads a user's scroll of a following grid only from its `scroll` event, so
+  a redraw that lands between a real wheel scroll and its event could take the scroll back; a key that scrolls
+  detaches at once and has no such window. It was seen only as state-diagram-no-machine's test race (`6f19fe8`);
+  whether a real gesture can land in that window is unmeasured. Where it goes is the user's call. The other
+  `scrollTop` writes under `tests/browser/` (52 in 25 files) were not audited one by one.
+- **The two test fixes' sabotages.** `81d3758`'s race was not made to fire on demand, so no run shows the unfixed case
+  failing beside the fixed one passing. For `6f19fe8`, the forced-order runs do (3 of 3 failed without the fix, 3 of 3
+  passed with it), but under emulated load the unfixed file passed 20 of 20, as the fixed one did.
+- **Memory:** `t10-r6-1` peaked at 7.13 GiB, within C6 but above M3's R6 runs (5.30 and 5.25 GiB).
+- **parked-copy-editor-mount under R6** took 6,422 and 4,702 ms in M3, against 1,344 and 1,522 ms under D: two runs
+  each, unexplained.
+- **The full runs at `6f19fe8`'s code,** all with the rest at 6 tabs: `t10c-fix-r6-1`, and at `5a555c6`, whose code is
+  `6f19fe8`'s, `gh-r6-1` and the coverage check `gh-coverage`. The 3-tab and one-tab full runs are at `55c712e`;
+  `81d3758` and `6f19fe8` change one test file each.
+- **`collect.ts`'s page guard in `firefox-capture`:** it trips at a tab's tenth file, and that project's one tab runs 9,
+  so it cannot fire there until the list grows, as U2's follow-up may make it (the whole-branch review's "Checked"
+  list).
+- **Firefox's events on a frame given back its focus:** whether Firefox fires `focus` and `focusin` again on the frame's
+  remembered `activeElement` when the step's `window.focus()` gives the frame its focus back is unmeasured; if it does,
+  the app's handlers on that element run once more (Task 6's review).
+- **`pnpm test:firefox --project firefox` cannot narrow,** since the caller's flags append to the script's two
+  `--project` flags; it is undocumented (the whole-branch review).
+- **`$S` is not removed** (`~/temp/redextape-firefox-contention-sab`).
+
+When this entry was written, nothing of the branch had run in CI.
+
+##### VERIFICATION
+
+**What PR 2 shows, against spec §6.** §6.1, at `5a555c6`, whose code is `6f19fe8`'s (the gate run again,
+`$R/logs/pr2/gh-*`): the `web` job's steps but `playwright install`, and `linear-history`'s scans and comment guard,
+exit 0; coverage reads 97.65 / 92.36 / 98.42 / 98.94 over 285 files and 3,015 tests, as at `55c712e`, and as at the base
+over 284 and 3,012; Chromium runs 214 files and 1,594 tests, all passed, as at the base's `web/`; `pnpm test` passes 285
+files and 3,015 tests, tagged `|browser (chromium)|` and `|node|` alone. The same steps exited 0 at `55c712e` (Task
+10a), and so did the rest of CI's jobs on a PR, not run again: from `55c712e` to `5a555c6` only two test files under
+`web/` and the docs change. `git diff --stat ec4f11a 10c3560 -- .forgejo scripts web/src` is empty and no coverage
+threshold moved. §6.3, on the full runs from `55c712e` on: in `t10-r6-1`, `t10-r6-2` and `t10-tabs3-1` (`55c712e`),
+`t10-fix-r6-1` (`81d3758`), `t10c-fix-r6-1` (`6f19fe8`) and `gh-r6-1` (`5a555c6`), C1 is 0 by `targets.py` as at
+`10c3560`, C2 0, C3 21, C4 met (the capture group 9 files at 1 in flight inside the rest's span, the rest 207 files at
+6, or 3), C7 37 of 37, C8 0, C9 0, F4 met, and every one exits 0. When they were run, `t10-r6-1` and `t10-r6-2` exited 1
+on C1, view-keys' held-key case, which the user then ruled into R (THE USER'S DECISIONS, 9 and 10). C5 and C6: 136 to
+167 s and 5.27 to 7.13 GiB at 6 tabs, 265 s and 4.00 GiB at 3. None of Task 2's 32 cases failed in Task 10b's full runs
+(its report, Step 5). §6.4: F1, F2 and F3 met at `55c712e`, with the two engine differences above as their only
+focus-kind failures; F4 in every full run above. The coverage check (`--coverage`) exits 1 as expected, on 432
+coverage-v8 errors, with C1 0 in `t10-coverage`, `-2`, `t10-fix-cov-1` and `gh-coverage`; in `frb-coverage`, at
+`0ff60cd`, C1 was 1, buffer-cool-warm's case, whose cause-finding is `81d3758`. §6.5: every sabotage fired as the spec
+names it.
+
+Every Firefox run this entry counts went through `$R/scripts/pr2/run.sh`, but M1's and M2's (`tabs1-1`, `focusobs-1`,
+`d-split-1`, `d-split-2` and `e2-serial-1` among those named here), which went through its predecessor `run2.sh`. Both
+take the browser lock with the heavy lock outside it (`run.sh` when it builds, `run2.sh` always), cap memory at 16 GiB
+with no swap, and pass `--reporter=verbose` and a JSON report. A `run.sh` log's first line names the tree, the script,
+its head, its count of changed tracked files and the tab count; a `run2.sh` log's names all but the tree and the script.
+`targets.py` (`$R/scripts/pr2/`) reads a run's JSON, log and memory samples and prints C1 to C9 and F4, with `RSET=(--r
+tabs1-1 --r focusobs-1 --r t1-base-1tab)`, the floor `--floor 21` and the tab count `--tabs`. The machine was shared
+with other lanes: the 1-minute load at the locks was 35 to 95 in Task 1, 35 to 72 in Task 10a, 5 to 31 in Task 10b and
+15 to 34 in the gate at `5a555c6`.
+
+**The sabotages,** each in `$S`, the file saved to `$R/sab/` first and restored from it after, then compared with `cmp`
+against the copy and against `git show HEAD:<path>`, but for S10, which changed no tracked file: its file, the untracked
+`zz-hookcap.test.ts`, was copied in and removed after (each task's report; Task 10b's Step 8 table,
+`$R/tasks/pr2/task-10b-report.md`):
+
+- **S1**, `CAPTURE_FILES` without view-keys (`t4-s1`): 20 failed, and the hint case "lets a pointer press at the hint
+  through to what is under it" failed with the guard's message, "took a pointer capture that held, on
+  div.layout-divider (real input)".
+- **S2**, the guard's wrapper reading `hasPointerCapture` first (`t4-s2`): two-browsers failed at "the guard recorded
+  the real presses’ captures"; with S1 too (`t4-s2-s1`), 18 failed, the hint case passed and no line carried the
+  guard's message.
+- **S3**, the step's `window.focus()` removed (`frb-s3`, at `0ff60cd`): the two step cases failed at "the button took
+  the focus" and "the later button took the focus", and the setup call's case passed. Its 16-file half fired at
+  `085874c` (`t6-s3-16`, 34 failed) and no longer does from `66ff467` on (`t9-s3-16`), as spec §6.5 records.
+- **S4**, the rest's decoy in the case's own browser (`t4-s4`): two-browsers failed at "a decoy in the other project’s
+  browser keeps its click", `decoyClicks: +0`.
+- **S5**, `engine.ts`'s and two-browsers' `until` given `10_000` (`t7-s5`): the invariant failed 1 of 16, naming
+  `../firefox/two-browsers.test.ts:28 passes 10_000` and `engine.ts:63 passes 10_000`; with `ec4f11a`'s scan in place
+  (`t7-s5-control`) 15 of 15 passed.
+- **S6**, no `registerBrowser` (`t4-s6`): two-browsers failed waiting for the `firefox` project to register its
+  browser.
+- **S7**, a listed path misspelt (`t3-s7`): the node test failed, naming `tests/browser/panel-region.test.ts`;
+  unsabotaged, it passed.
+- **S8**, `firefox-capture`'s `fileParallelism: true` (`t5-s8`, a full run): C9 8, 8 of the 9 capture files failing as
+  whole files with "began while … had not ended", each naming another; C4 read the capture group's peak as 1, as
+  above.
+- **S9**, the step on a case's first `focus()` only (`frb-s9`): the later-call case failed at "the later button took
+  the focus", the other two passed.
+- **S10**, a capture in an untracked file's own hook (`t4-s10`): its case passed and the file failed with the guard's
+  message.
+- **S11**, the setup call's `window.focus()` removed (`frb-sa-ff-1tab`, `frb-sa-ff-pair`, `frb-sa-full`): the first
+  case failed at "the frame has the focus at the file’s start: expected false to be true" in each; in the full run C1
+  was 1, that case, and F4 was not met.
+- **Task 5's precondition**, `captureFileSpan` answering `[]` (`t5-pre`): three capture files failed as whole files,
+  "the one-at-a-time check did not hear … begin", and lsp-hover, in the rest, passed 6 of 6.
+
+**Every figure this entry quotes, with what produces it.** `zsh $R/scripts/pr2/t11-entry-figures.sh
+~/temp/redextape-firefox-contention <scratch dir>` runs every command below into `$R/logs/pr2/entry-fix-figures.log`,
+last, at `5a555c6` with this entry's correction in the working tree; each git figure names the SHA it reads. Task 11's
+run, before the correction's sections, is `t11-entry-figures.sh.pre-fix` into `t11-entry-figures.log`. The script reads
+each log with its ANSI escapes stripped and runs a copy of `targets.py` at `10c3560`'s record state whose
+`-failures.tsv` go to the scratch dir. `$L` is `$R/logs/pr2`; "JSON" is a run's `testResults` count, `numTotalTests`,
+`numPassedTests`, `numFailedTests` and `numPendingTests`, and the statuses of its tests; "targets" is `targets.py
+"${RSET[@]}"` on the run, with `--floor 21` and `--tabs` where named.
+
+| value | what | command |
+|---|---|---|
+| 26; `6f19fe8`; 11; 15 | the commits in the range; the last outside `docs/`; those touching `web/` or the README; those touching `docs/` alone | `git rev-list --count ec4f11a..10c3560`; `git log -1 --format=%h ec4f11a..10c3560 -- . ':(exclude)docs'`; `git rev-list --count ec4f11a..10c3560 -- web README.md`; each commit's `git diff-tree --name-only` |
+| 11 tasks | the plan | `grep -c '^### Task '` on the plan at `10c3560` |
+| 9 | `firefox-capture`'s files: the eight capture files and two-browsers | `CAPTURE_FILES`' entries in `web/vite.config.ts` at `10c3560` |
+| 2 files; none | outside `docs/` from `55c712e` to `5a555c6`; from `6f19fe8` to `5a555c6` | `git diff --stat 55c712e 5a555c6 -- . ':(exclude)docs'`; the same from `6f19fe8`, `\| wc -l` |
+| empty; 0; 14 files | CI, scripts and `web/src` since the base; threshold edits; the branch's `web/` and README | `git diff --stat ec4f11a 10c3560 -- .forgejo scripts web/src \| wc -l`; `git diff ec4f11a 10c3560 -- web/vite.config.ts \| grep -c thresholds`; `git diff --stat ec4f11a 10c3560 -- web README.md` |
+| 214, 1,594, all passed | Chromium at the base's `web/` (`c44d793`) and at `55c712e` | JSON of `$L/t1-chromium.json` and `t10-chromium.json`; their logs' first lines |
+| 118, 1,455, 21; 2.54 GiB | the one-tab base run: failed, passed, skipped; its memory peak | JSON of `$L/t1-base-1tab.json`; the largest `mem_current` of `t1-base-1tab.mem.tsv` |
+| 146 and 145; 23 and 21; 6.71 and 6.42 GiB | the two base runs at the default tab count: failed; skipped; memory peaks | JSON of `$L/t1-base-default-{1,2}.json`; their `.mem.tsv` |
+| 127 tests and 1 file | R | targets' `R:` line |
+| 9 of 29 | header-menus-narrow's failures in `tabs1-1`, `d-split-1`, `d-split-2`, `t1-base-1tab`, `t10-r6-1`, `t10-r6-2`, `t10-1tab`, `t10c-fix-r6-1` and `gh-r6-1` | the file's statuses in each JSON |
+| `tabs1-1`, `focusobs-1`, `t1-base-1tab` | the runs that hold view-keys-focus's "goes to + view …" in R | its status in each JSON |
+| `head=1b2f0cb`, no `tree=` | the first line of M1's and M2's logs, `run2.sh`'s form | the first line of each `$L/*.log` without `tree=` |
+| 21 | the skip floor, the least of the three base runs' 21, 23 and 21 | JSON of the three |
+| 8; 0 | the files whose real captures held; the synthetic captures that held | the rows of `$L/t1-capdiag-table.out` (`capdiag.py t1-capdiag`) with a call |
+| 16,700 ms; 680 ms | the original case failing in `t2-timed-d-4`; its click's timeout in M2's `d-split-2` | the failed test's `duration` in `$L/t2-timed-d-4.json`; `locator.click: Timeout` in `$L/d-split-2.log` |
+| 74; 850, 1,010, 734 and 577 ms | the median of the timed copy's 10 real clicks alone; in `t2-timed-d-1` to `-4` | the `PCEM-T` lines of `$L/t2-timed-alone-1.log` and `t2-timed-d-{1..4}.log` whose step is a `clickToggle` or a `click`, their third field |
+| 47% running, 51% waiting, load 67 to 70 | the rest's Firefox parent main thread over the failing case's file | `python3 -I $R/scripts/pr2/t2/schedan.py t2-timed-d-4 /parked-copy-editor-mount.test.ts` |
+| 3.0 and 2.0; 0 and 0; 0 and 0.5; 8.80 GiB; 5.30 and 5.25 GiB; 229 and 198 s | M3's means outside R, timeouts and others, for D, S3 and R6; S3's mean memory peak; R6's peaks; R6's walls | the rows of `$L/m3-an.out` (`m3an.py`), and their means, two runs each |
+| 1,344 and 1,522 ms; 6,422 and 4,702 ms | parked-copy-editor-mount's time in M3's D runs; in its R6 runs | the rows of `$L/m3-an.out` |
+| 2 | `m3-d-1`'s copy-edit-leaving failures, on rxm | their status in `$L/m3-d-1.json` |
+| `m3-r6-1`; `r6-base-12`, `r6-default`, `r6a-filtered` | the M3 and R6 rows of `outside-r.md` | its rows whose Task is `M3` or `R6` |
+| 32 in 15 files; `fra-coverage-firefox` 2, `t8-16-win-1`, `t8-pair-live-views-bound-switch`, `frb-coverage` | Task 2's cases; the later rows of one of them | the rows of `outside-r.md`, those whose Task is `2` and those of another Task with the same file and name |
+| 12; 6; 3; 1; 1 | the R6 probe's rest peak in flight with Vitest's own count (`r6-base-12`), the script's 6 (`r6-default`), and 3 and 1 asked for; the capture project's | `$R/logs/pr2-r6/inflight.out`, its `peak in flight` lines |
+| 97.65 / 92.36 / 98.42 / 98.94; 285 and 3,015; 284 and 3,012 | coverage `All files` at `55c712e` and `ec4f11a`; their files and tests | `All files`, summary and `EXIT` of `$L/t10-coverage-head.log` and `t10-coverage-base.log`, whose first lines read `head=55c712e` and `head=ec4f11a` |
+| 27 at 0; 7 at 0 | Task 10a's `web` steps and scans; CI's other jobs | the last `EXIT=` of each `$L/t10-s1-*.log` and `t10-s3-*.log`, counted; of `t10-ci-docs-only{,-self-test}.log` and `t10-x-*.log` but `-no-pin` |
+| 1,594 and 1,421 | `pnpm test`'s tags | `grep -oE` of the project tags in `$L/t10-test.log`, `uniq -c` |
+| rc=1 three times | the opt-in refusals | `No projects matched` and `coverage-v8 does not work with` with `EXIT` in `$L/t10-s4-*.log` |
+| 27 at 0; 30 at `head=5a555c6 dirty=0` and `dirty_after=0` | the gate at `5a555c6`: its `web` steps and scans; each step's tree before and after | the last `EXIT=` of each `$L/gh-s1-*.log` and `gh-s3-*.log`, counted; the first line and the last `dirty_after=` of each `gh-s{1,3,4}-*.log` |
+| 97.65 / 92.36 / 98.42 / 98.94, 285 and 3,015; 214 and 1,594, all passed; 285 and 3,015, tags 1,594 and 1,421; rc=1 three times | coverage, Chromium, `pnpm test` and the refusals at `5a555c6` | `All files`, summary and `EXIT` of `$L/gh-coverage-head.log`; JSON of `gh-chromium.json` and `gh-test.json`; the tags in `gh-test.log`; `gh-s4-*.log` |
+| 0 each; 21; 37; 0 and 0; met; exit 0 | C1, C3, C7, C8 and C9, F4, `targets.py` on the six full runs from `55c712e` on | targets `--floor 21 --tabs default` on `t10-r6-1 t10-r6-2 t10-fix-r6-1 t10c-fix-r6-1` and `gh-r6-1`, and `--tabs 3` on `t10-tabs3-1` |
+| 159, 136, 150, 148 and 167 s; 7.13, 5.27, 6.23, 6.39 and 5.93 GiB; 265 s and 4.00 GiB | C5 and C6 at 6 tabs; at 3 | the same, its `C5` lines |
+| 9 at 1; 207 at 6, or 3; 1.6 to 3.2 s after the rest | C4 on those six | the same, its `C4` lines |
+| 1 each, the held-key case | C1 of `t10-r6-1` and `-2` when they were run | `$L/t10-r6.targets.out`, made by the `targets.py` of then |
+| 432; 111, 219, 251, 289 and 262 pending; C1 1, 0, 0, 0 and 0; F4 met, not, not, met, met | the coverage runs `frb-coverage`, `t10-coverage`, `t10-coverage-2`, `t10-fix-cov-1` and `gh-coverage` | the `Errors` line of each log; their JSON statuses; targets `--tabs default` on the five |
+| 23, 140, 3; C1 0; 1 focus-kind; about-menu's case passed; NEW 0, DIFF 0 | F1, `t10-16` | summary of `$L/t10-16.log`; targets on `t10-16`; the case's status in its JSON; `$L/t10-16.errdiff.out` |
+| 99, 1,478, 21; C1 0; 2 focus-kind; 3.05 GiB; NEW 2, DIFF 4 | F2, `t10-1tab` | summary of `$L/t10-1tab.log`; targets `--floor 21` on `t10-1tab`; `$L/t10-1tab.errdiff.out` |
+| 3 of 3 | F3: the victim passed after extend-focus-probe | its status in `$L/t10-leak-{1,2,3}.json`; their `FFTRACE-FILE` lines, `before=extend-focus-probe.test.ts` |
+| 3 of 3; 3 of 3, 4 of 4, 1 of 1 | buffer-cool-warm's case alone before its fix; its fix alone, beside focus.test.ts, in Chromium | summaries of `$L/t10-bcw-alone-{1,2,3}.log`; `t10-fix-alone-{1,2,3}.log`, `t10-fix-pair.log`, `t10-fix-chromium.log` |
+| 7 of 7 three times; 12 of 12 three times; 7 of 7 | state-diagram-no-machine's file at `6f19fe8` alone; in its pair; in Chromium | summaries of `$L/t10c-fix-alone-{1,2,3}.log`, `t10c-fix-pair-{1,2,3}.log`, `t10c-fix-chromium.log` |
+| 0 of 23; 3 of 39; 3 of 3, 0 of 3; 0 of 20 and 0 of 20 | its race's failures quiet; under emulated load; the forced order without and with the fix; the fixed and unfixed file under load | `waiting for following to detach` in `$L/t10c-sdnm-{alone,q50,pair}-*.log` and `t10c-sdnm-order-[0-9].log`; `t10c-pin-*.log` and `t10c-pin2-*.log`; `t10c-hold-[0-9].log`, `t10c-hold-fix-*.log`; `t10c-fix-pin-*.log`, `t10c-base-pin-*.log` |
+| 52 in 25 files | the `scrollTop` writes not audited | `$R/tasks/pr2/task-10c-report.md`, "Siblings" |
+| `t1-base-default-1`, `e2-serial-1` | base16-import's case in the record's failure tables | `grep -l 'forgets a check when the text is edited' $L/*-failures.tsv` |
+| 14897ms; `-t` | base16-import's failure in the other lane's alone runs; how they were made | `grep` in `~/temp/redextape-history-restart-record/tasks/task-6-report.md` |
+| 1; 0 | base16-import among spec §3.6's chained files; the record's logs of its file | `grep` in the spec at `10c3560`; `find $L -name '*base16-import*'` |
+| 16 of 16 | state-diagram's file alone, one tab, at `c44d793` | summary of `$L/t2-d-2-alone-6-file.log` |
+| 15,000 ms | a browser case's bound | `Test timed out in 15000ms` in `$L/t2-timed-d-4.log` |
+| 4 and 6, 10 over 361 runs | the caret shape's held failures, the held-key case's and "ends on a key …"'s | targets on every JSON of `$L` and `$R/logs/pr2-r6` but the `.split.json`, its `R by shape` lines |
+| identical in 362; 9 and 9; 0 differing; 6 and 6 | the widened shape against the one before (`targets.py.pre-11`), over the record's 362 JSON reports at `10c3560`: exit codes; failures held; outputs, its name and the `R:` lines aside; the `.split.json` re-cuts that crash both | `zsh $R/scripts/pr2/t11/allruns.sh <scratch dir>`, then `$R/logs/pr2-t11/allruns-compare.log` |
+| exit 0, held | `syn-caret-read`, Task 10d's synthetic caret read, with the widened rule (exit 1 before); the other five unchanged | `$R/logs/pr2-t11/synthetic.log` |
+| 20, 17, 2; 1 failed, 6 passed; 18 and 19; 1 and 6; 1 and 6 | S1; S2; S2 with S1; S4; S6 | summaries of `$L/t4-s1.log`, `t4-s2.log`, `t4-s2-s1.log`, `t4-s4.log`, `t4-s6.log`, and their messages counted |
+| 2 failed, 1 passed; 1 failed, 2 passed | S3; S9 | summaries and messages of `$L/frb-s3.log` and `frb-s9.log` |
+| 1 failed and 15 passed; 15 passed | S5; its control | summaries of `$L/t7-s5.log` and `t7-s5-control.log` |
+| 1 failed; 1 passed | S7; its baseline | summaries of `$L/t3-s7.log` and `t3-s7-baseline.log` |
+| C9 8; C4 peak 1, span 22 s | S8 | targets on `t5-s8` |
+| 1 passed, the file failed; `dirty=0` | S10; its tree | summary and the guard's message in `$L/t4-s10.log`; its first line |
+| frame-focus 1 failed and 2 passed in each, of 3, 6 and 1,598 tests (100 failed in `frb-sa-full`); C1 1; F4 `{'passed': 3, 'failed': 1}` | S11 | summaries of `$L/frb-sa-ff-1tab.log`, `frb-sa-ff-pair.log`, `frb-sa-full.log`, and frame-focus's statuses in their JSON; targets `--floor 21 --tabs default` on `frb-sa-full` |
+| 3 failed files, 6 passed | Task 5's precondition | summary and `did not hear` in `$L/t5-pre.log` |
+| 34; 23 | S3's 16-file half at `085874c`; at `66ff467` | `$R/tasks/pr2/task-6-report.md` (`t6-s3-16`) and `task-9-report.md` (`t9-s3-16`) |
+| 0 of 257 | the per-call step's firings with the setup call | `$R/tasks/pr2/t8-focus.md` (`t8-16-win-1`) |
+| 1 passed, 6 skipped; 8 passed; failed; failed | view-header's case at `e305ab5` in `t8-alone-view-header-none` and `t8-pair-view-header-none`; in `t8-1tab`; in `t9-pair-view-header-after-active-pane-base` | their summaries; the case's status in each JSON |
+| 28 and 26 failed; 1; 5; 2 each | Task 8's `none` runs: `t8-16-none-1` and `-2`; the add-view-floor and follow-kept pairs; `t8-leak-1` to `-3` | their summaries |
+| 108, 90 and 64 s | `run.sh`'s `WALL` for Chromium at the base's `web/`, at `55c712e` and at `5a555c6` | `WALL=` in `$L/t1-chromium.log`, `t10-chromium.log` and `gh-chromium.log` |
+| 35 to 95; 35 to 72; 5 to 31; 15 to 34 | the load at the locks in Task 1, Task 10a, Task 10b and the gate at `5a555c6` | the first `lock=` line of each `$L/t1-*.log`; of Task 10a's (`t10-{s1,s3,s4,ci,x}-*`, `t10-coverage*`, `t10-chromium`, `t10-test`); of Task 10b's (`t10-{r6,bcw,fix,leak}-*`, `t10-tabs3-1`, `t10-16`, `t10-1tab`); of `gh-*`; the least and the greatest |
+| 16 GiB, no swap; both locks | `run.sh`'s cap, and `run2.sh`'s; their locks | `MemoryMax`, `MemorySwapMax` and the lock files in `$R/scripts/pr2/run.sh` and `run2.sh` |
+| none of the 32 | Task 2's cases in Task 10b's full runs | `$R/tasks/pr2/task-10b-report.md`, Step 5, from the C1 lines of those runs' `.targets.out` |
+| the ten decisions; the ten calls | THE USER'S DECISIONS; THE CONTROLLER'S CALLS | the `USER` lines of the Log of `$R/progress.md`; its `CONTROLLER` lines that rule what a run counts or how a ruling or a rule reads, the others ordering the work |

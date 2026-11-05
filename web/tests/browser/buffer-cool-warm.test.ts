@@ -3,7 +3,7 @@ import { beforeAll, describe, expect, it } from 'vitest'
 import { bindingKey } from '../../src/view-header'
 import { lambdaEditorDoc } from './editor-view-fixture'
 import { editorHost, idle, lambdaHeading, lambdaTermText, pickBinding, rowNames, SHELL, until } from './harness'
-import { asShown } from './lambda-text'
+import { asShown, lambdaSettled } from './lambda-text'
 import { typeIntoScratchEditor } from './scratch-editor-fixture'
 
 /**
@@ -162,6 +162,9 @@ describe('a cooled buffer warmed and bound to a pane again', () => {
     const beforeEdit = lambdaTermText()
     typeIntoScratchEditor('(λa. a a) (λb. b)')
     await until(() => lambdaTermText() !== beforeEdit, 'the re-bound buffer to recompile from a keystroke')
+    // SETTLED BEFORE THE ASSERTION, as `scratch-edit.test.ts` does: the term is empty between a recompile's start and
+    // its first frame, and the wait above can end on that empty text.
+    await lambdaSettled()
     expect(lambdaTermText()).toContain('b')
     // AND NOTHING FORKED A SECOND BUFFER TO GET HERE. A fix that answered the mount by forking would
     // satisfy every assertion above and read two rows here. Reopened first, per `closeList`'s doc: the

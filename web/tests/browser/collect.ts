@@ -3,7 +3,7 @@ import { cdp, commands } from 'vitest/browser'
 import { CHROMIUM } from './engine'
 
 /**
- * Browser-tier setup, the FIRST of its two files: collect the pages the test files before this one left behind, and
+ * Browser-tier setup, the FIRST of its three files: collect the pages the test files before this one left behind, and
  * stop coverage from keeping them.
  *
  * A FINISHED FILE'S PAGE IS NOT REMOVED WHEN IT FINISHES, BUT WHEN ITS TAB STARTS THE NEXT FILE. Vitest's browser
@@ -40,7 +40,7 @@ import { CHROMIUM } from './engine'
  *
  * FIRST, AND IMPORTING NOTHING OF `src`, for the same reason: a module this page compiles before coverage starts
  * again is counted at function granularity. `sequence.setupFiles: 'list'` in `vite.config.ts` is what makes this file
- * finish before `setup.ts`'s imports begin; Vitest's default imports the two at once.
+ * finish before `setup.ts`'s imports begin; Vitest's default imports them at once.
  *
  * Whether coverage is on comes from `global-setup.ts`: starting precise coverage in a run without it would put the
  * leak back, and a page cannot read the run's settings itself.
@@ -63,11 +63,11 @@ if (CHROMIUM) {
     await cdp().send('Profiler.startPreciseCoverage', { callCount: true, detailed: true })
   }
 } else {
-  // ANY OTHER ENGINE GIVES A PAGE NO `gc`, AND PRECISE COVERAGE IS CHROMIUM'S ALONE: a coverage run that starts the
-  // Firefox project fails before any of its tests runs. Playwright's own collection, `page.requestGC()`, frees the
-  // earlier pages in its place, through a command only the Firefox project registers (`vite.config.ts`). The guard
-  // below holds every engine to the same bound, since a page Firefox keeps alive keeps its WebAssembly memories as
-  // Chromium's does.
+  // ANY OTHER ENGINE GIVES A PAGE NO `gc`, AND PRECISE COVERAGE IS CHROMIUM'S ALONE: a coverage run that starts a
+  // Firefox project exits 1, on coverage-v8's error in each file's page. Playwright's own collection,
+  // `page.requestGC()`, frees the earlier pages in its place, through a command only the Firefox projects register
+  // (`vite.config.ts`). The guard below holds every engine to the same bound, since a page Firefox keeps alive keeps
+  // its WebAssembly memories as Chromium's does.
   await commands.requestGC()
 }
 
