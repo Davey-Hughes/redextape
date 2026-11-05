@@ -872,18 +872,24 @@ async function main(): Promise<EditorView> {
         status: { available: false, reason: '' },
         done: null,
         playing: false,
+        epoch: 0,
+        gen: 0,
       },
       rxm: {
         hist: new History<RxmState>(HISTORY_BYTES),
         status: { available: false, reason: '' },
         done: null,
         playing: false,
+        epoch: 0,
+        gen: 0,
       },
       tm: {
         hist: new History<TmState>(HISTORY_BYTES),
         status: { available: false, reason: '' },
         done: null,
         playing: false,
+        epoch: 0,
+        gen: 0,
       },
     } satisfies Required<SessionLegs>,
     // NOTHING COMPILED YET, AND THIS SESSION IS THE ONE THAT EVER WILL — `compiled` is the reply the
@@ -935,6 +941,9 @@ async function main(): Promise<EditorView> {
     // beside `writeBuffersStorage`, below this call, because it reads `panes` and `scratchpad`.
     onBuffersPersist: () => persistBuffers(),
     notify: (text: string) => notices.notify(text),
+    // A CLOSURE OVER `custody`, WHICH IS BUILT BELOW AFTER THE PANE COLLECTION IT READS, and read only at a press of
+    // `↺`, long after `main()` has run.
+    flushEdit: (session: SessionId) => custody.flush(session),
   })
 
   /**
@@ -1983,7 +1992,8 @@ async function main(): Promise<EditorView> {
    */
   const positions = new LinkPositions({
     legOf: (leg) => sessions.legOf({ session: SOURCE_SESSION, leg }),
-    extend: (leg) => sessions.entryOf(SOURCE_SESSION).client.extend(leg),
+    extend: (leg) =>
+      sessions.entryOf(SOURCE_SESSION).client.extend(leg, sessions.legOf({ session: SOURCE_SESSION, leg }).epoch),
     awaitingRun: () => sessions.entryOf(SOURCE_SESSION).client.awaitingRun,
     short: (shorts) => {
       const viewed = shorts.filter((short) => combinationOf(tree).includes(short.leg))

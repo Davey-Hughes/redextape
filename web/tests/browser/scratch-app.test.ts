@@ -203,8 +203,8 @@ describe('the fork control, end to end', () => {
     // either way.
     //
     // `↺` FIRST, so the walk starts at step 0 whatever an earlier gesture left the pane on. A run opens
-    // there too (`History`). `restart` seeks to the oldest retained frame, which is step 0 exactly until
-    // eviction has happened (`stepControls`' own note).
+    // there too (`History`). The three synchronous clicks rely on nothing being evicted, which makes `↺` a
+    // seek: a rewind leaves `▶` off until the leg's first frames come.
     clickLambda('↺')
     clickLambda('▶')
     clickLambda('▶')

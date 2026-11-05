@@ -69,10 +69,11 @@ describe('deleting a copy', () => {
     // state `mountScratchEditor`'s own doc prices, reached here by a different road.
     await until(() => document.querySelector('[data-leaf="lambda-0"] .term-editor') !== null, "the copy's editor")
     // "AT STEP 0" IS WHERE THE RUN RESTARTS, and where a run opens (`History`), so the readout's own step
-    // proves nothing. What proves a fresh run is that its oldest kept step is 0 — `↺` goes back to the
-    // oldest kept step.
+    // proves nothing, nor does `↺`'s, which reaches step 0 on the run waited for below whatever that run dropped. What
+    // proves a fresh run is the wait's pattern, which allows no tail after the count, the one an eviction adds among
+    // them.
     await until(() => /^step [\d,]+ of [\d,]+$/.test(stepText()), 'the copy to run again')
-    leafEl('lambda-0')?.querySelector<HTMLButtonElement>('[aria-label="back to the oldest kept step"]')?.click()
+    leafEl('lambda-0')?.querySelector<HTMLButtonElement>('[aria-label="back to step 0"]')?.click()
     expect(stepText()).toMatch(/^step 0 of /)
   })
 })

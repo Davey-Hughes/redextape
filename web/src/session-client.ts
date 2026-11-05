@@ -139,13 +139,22 @@ export class SessionClient {
   }
 
   /**
-   * Ask for more frames on one leg. ADDRESSES THE CURRENT GENERATION AND DOES NOT ADVANCE IT: this
-   * continues the run already in the worker, and bumping the generation would abandon the very
-   * session it is trying to extend.
+   * Ask for more frames on one leg, at `epoch`, the leg's (`LegState.epoch`). ADDRESSES THE CURRENT GENERATION AND
+   * DOES NOT ADVANCE IT: this continues the run already in the worker, and bumping the generation would abandon the
+   * very session it is trying to extend.
    */
-  extend(leg: Leg): void {
+  extend(leg: Leg, epoch: number): void {
     if (this.#gen === 0) return
-    this.#port.postMessage({ kind: 'extend', gen: this.#gen, leg })
+    this.#port.postMessage({ kind: 'extend', gen: this.#gen, leg, epoch })
+  }
+
+  /**
+   * Ask the worker to take one leg back to step 0 and record its first fill again, under `epoch`, the leg's raised
+   * one. Not a supersede, for `extend`'s reason: the other legs keep their recordings. Never before the first build.
+   */
+  rewind(leg: Leg, epoch: number): void {
+    if (this.#gen === 0) return
+    this.#port.postMessage({ kind: 'rewind', gen: this.#gen, leg, epoch })
   }
   /** This client's generation — the one a `lambda-tree` request must carry to be answered. */
   get gen(): number {

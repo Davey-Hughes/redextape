@@ -231,7 +231,7 @@ pub fn tm_scratch(src: &str) -> Result<JsValue, JsValue> {
 /// An rxm program typed or pasted into a copy, with no program behind it. Owns the listing, the cursor and
 /// the outcome of its own run.
 ///
-/// **SIX OF THE RXM LEG'S METHODS, UNDER THE SESSION'S NAMES, AND NOTHING ELSE** — all but `rxmText`, since a
+/// **SEVEN OF THE RXM LEG'S METHODS, UNDER THE SESSION'S NAMES, AND NOTHING ELSE** — all but `rxmText`, since a
 /// copy's text is what built it. `rxmStatus` answers the same `RxmStatus` a `Session` does — every field is true
 /// of a copy (`session::RxmScratch` says why). `sourceSpan` and `linkIndex` are absent, since a copy has no
 /// `SourceMap`; `tests/browser.rs` pins that at compile time.
@@ -486,6 +486,16 @@ impl Session {
         self.0.raise_lambda_cap(u64::from(extra)).map_err(err)
     }
 
+    /// Back to step 0 under compile's cap.
+    ///
+    /// # Errors
+    ///
+    /// Returns `Err` when this session's λ leg is absent.
+    #[wasm_bindgen(js_name = rewindLambda)]
+    pub fn rewind_lambda(&mut self) -> Result<(), JsValue> {
+        self.0.rewind_lambda().map_err(err)
+    }
+
     /// # Errors
     ///
     /// Returns `Err` when this session's λ leg is absent — check `lambdaStatus().available` first. An
@@ -601,6 +611,16 @@ impl Session {
         self.0.raise_tm_cap(u64::from(extra_steps), u64::from(extra_cells)).map_err(err)
     }
 
+    /// Back to step 0 under compile's caps.
+    ///
+    /// # Errors
+    ///
+    /// Returns `Err` when this session's TM leg is absent.
+    #[wasm_bindgen(js_name = rewindTm)]
+    pub fn rewind_tm(&mut self) -> Result<(), JsValue> {
+        self.0.rewind_tm().map_err(err)
+    }
+
     /// # Errors
     ///
     /// Returns `Err` when this session's TM leg is absent — check `tmStatus().available` first. A
@@ -667,6 +687,16 @@ impl Session {
     #[wasm_bindgen(js_name = raiseRxmCap)]
     pub fn raise_rxm_cap(&mut self, extra_steps: u32) -> Result<(), JsValue> {
         self.0.raise_rxm_cap(u64::from(extra_steps)).map_err(err)
+    }
+
+    /// Back to step 0 under compile's caps.
+    ///
+    /// # Errors
+    ///
+    /// Returns `Err` when this session's rxm leg is absent.
+    #[wasm_bindgen(js_name = rewindRxm)]
+    pub fn rewind_rxm(&mut self) -> Result<(), JsValue> {
+        self.0.rewind_rxm().map_err(err)
     }
 
     /// # Errors
@@ -830,13 +860,13 @@ impl Session {
     }
 }
 
-/// **SIX METHODS, AND THE SEVENTH'S ABSENCE IS LOAD-BEARING.** §3.3's audit puts `lambdaStatus`,
-/// `stepLambda`, `lambdaState`, `lambdaTree`, `raiseLambdaCap` and `runLambda` on this type unchanged —
-/// they read nothing but the cursor. `lambdaValue` reads `self.ty`, `sourceSpan` and `linkIndex` read
-/// `self.map`, and none of the three is declared below; `tests/browser.rs` pins that at compile time
-/// rather than in prose.
+/// **SEVEN METHODS, AND THE EIGHTH'S ABSENCE IS LOAD-BEARING.** §3.3's audit puts `lambdaStatus`, `stepLambda`,
+/// `lambdaState`, `lambdaTree`, `raiseLambdaCap` and `runLambda` on this type unchanged — they read nothing but the
+/// cursor — and `rewindLambda` joins them, reading nothing but its checkpoints. `lambdaValue` reads `self.ty`,
+/// `sourceSpan` and `linkIndex` read `self.map`, and none of the three is declared below; `tests/browser.rs` pins
+/// that at compile time rather than in prose.
 ///
-/// **TWO OF THEM DROP THE `Result` `Session`'s CARRY, AND THE JS TYPE IS UNCHANGED BY IT.**
+/// **THREE OF THEM DROP THE `Result` `Session`'s CARRY, AND THE JS TYPE IS UNCHANGED BY IT.**
 /// `Session::stepLambda` throws `SessionError::LambdaAbsent` for a session whose λ backend declined;
 /// a `LambdaScratch` holds a cursor rather than a `Result`, so that error is a state nothing here can
 /// reach and declaring it would put an unreachable `# Errors` clause on the boundary. `bool` and
@@ -889,6 +919,12 @@ impl LambdaScratch {
         self.0.raise_lambda_cap(u64::from(extra));
     }
 
+    /// Back to the first step this copy holds, under the cap it was built with.
+    #[wasm_bindgen(js_name = rewindLambda)]
+    pub fn rewind_lambda(&mut self) {
+        self.0.rewind_lambda();
+    }
+
     /// `u32` and widened, for the reason `raiseLambdaCap` above records.
     ///
     /// # Errors
@@ -902,18 +938,18 @@ impl LambdaScratch {
     }
 }
 
-/// **FIVE METHODS FROM §3.3's AUDIT, WITH ITS ABSENCES AND ONE RESHAPE, AND `tapeNames`.** The audit puts
-/// `tmProgram`, `stepTm`, `tapeSlice` and `raiseTmCap` on this type unchanged, and `tmState` too — but only because
-/// `TmState::window` takes `Option<&SourceMap>`; otherwise the method a TM pane renders from every frame could not
-/// exist here at all. `tapeNames` is on this type because the fixed export's names are wrong for a file reduced to
+/// **FIVE METHODS FROM §3.3's AUDIT, WITH ITS ABSENCES AND ONE RESHAPE, AND `tapeNames` AND `rewindTm`.** The audit
+/// puts `tmProgram`, `stepTm`, `tapeSlice` and `raiseTmCap` on this type unchanged, and `tmState` too — but only
+/// because `TmState::window` takes `Option<&SourceMap>`; otherwise the method a TM pane renders from every frame could
+/// not exist here at all. `tapeNames` is on this type because the fixed export's names are wrong for a file reduced to
 /// one tape, and only the scratch knows its own stage list.
 ///
 /// `tmValue` is absent (it reads `ty` + `final_tapes` + `kind`), and so are `sourceSpan` and
 /// `linkIndex`. `tmStatus` is present with a DIFFERENT RETURN SHAPE — see `session::TmScratchStatus`.
 /// `tests/browser.rs` pins the absences at compile time.
 ///
-/// Two of the five drop the `Result` `Session`'s carry, `stepTm` and `raiseTmCap`, for the reason
-/// `LambdaScratch`'s impl records: `SessionError::TmAbsent` is unreachable on a type that holds a cursor
+/// Two of the five drop the `Result` `Session`'s carry, `stepTm` and `raiseTmCap`, and so does `rewindTm`, for the
+/// reason `LambdaScratch`'s impl records: `SessionError::TmAbsent` is unreachable on a type that holds a cursor
 /// rather than a `Result`. `tmProgram` and `tmState` keep one for `to_value` alone, and `tapeSlice` keeps
 /// its throw because `NoSuchTape` is genuinely reachable.
 #[wasm_bindgen]
@@ -973,6 +1009,12 @@ impl TmScratch {
         self.0.raise_tm_cap(u64::from(extra_steps), u64::from(extra_cells));
     }
 
+    /// Back to step 0 under the caps it was built with.
+    #[wasm_bindgen(js_name = rewindTm)]
+    pub fn rewind_tm(&mut self) {
+        self.0.rewind_tm();
+    }
+
     /// What to label each tape — per scratch, unlike the fixed `tapeNames()` export, because a reduced file's
     /// single-tape stage changes what its one tape is.
     ///
@@ -985,8 +1027,8 @@ impl TmScratch {
     }
 }
 
-/// The rxm leg's methods on a copy. Two of the six drop the `Result` `Session`'s carry, `stepRxm` and
-/// `raiseRxmCap`, for the reason `TmScratch`'s impl records: `SessionError::RxmAbsent` is unreachable on a type
+/// The rxm leg's methods on a copy. Three of the seven drop the `Result` `Session`'s carry, `stepRxm`, `raiseRxmCap`
+/// and `rewindRxm`, for the reason `TmScratch`'s impl records: `SessionError::RxmAbsent` is unreachable on a type
 /// that holds a leg rather than a `Result`. `rxmStatus`, `rxmProgram` and `rxmValue` keep one for `to_value`
 /// alone, and `rxmState` for `to_value` and for a `window` that is not an `RxmWindow`, as `Session`'s does.
 #[wasm_bindgen]
@@ -1031,6 +1073,12 @@ impl RxmScratch {
     #[wasm_bindgen(js_name = raiseRxmCap)]
     pub fn raise_rxm_cap(&mut self, extra_steps: u32) {
         self.0.raise_rxm_cap(u64::from(extra_steps));
+    }
+
+    /// Back to step 0 under the caps it was built with.
+    #[wasm_bindgen(js_name = rewindRxm)]
+    pub fn rewind_rxm(&mut self) {
+        self.0.rewind_rxm();
     }
 
     /// # Errors

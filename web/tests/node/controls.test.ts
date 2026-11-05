@@ -180,6 +180,30 @@ describe('controlState', () => {
     expect(c.continueLabel).toBeNull()
     expect(c.canForward).toBe(false)
   })
+
+  /**
+   * **A REWIND'S EMPTY RING IS A RECORDING FROM STEP 0, NOT A LEG NOTHING HAS RUN**: `↺` waits for the first frames
+   * on the `…`, rather than reading `not run` with every step button off.
+   */
+  it('reads a rewinding leg as recording from step 0, with ↺ off until its first frame', () => {
+    const c = controlState(view({ length: 0, rewinding: true }))
+    expect({ recording: c.recording, canRestart: c.canRestart, stepText: c.stepText }).toEqual({
+      recording: true,
+      canRestart: false,
+      stepText: 'step 0 of 0…',
+    })
+    expect(controlState(view({ length: 0 })).stepText).toBe('not run')
+  })
+
+  // ↺ FIRST AND THEN AN EDIT, which `restart`'s test cannot see, the edit coming after it: the recompile supersedes the
+  // rewind's recording.
+  it('reads a rewinding leg during a recompile as recompiling, and not as recording', () => {
+    const c = controlState(view({ length: 0, rewinding: true, awaitingRun: true }))
+    expect({ recording: c.recording, stepText: c.stepText }).toEqual({
+      recording: false,
+      stepText: 'step 0 of 0 — recompiling',
+    })
+  })
 })
 
 // THE ONE PLACE THIS IS DECIDED — see `canRecordFurther`'s doc comment. `controlState` (via

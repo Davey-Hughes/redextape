@@ -8,7 +8,7 @@ import { createStepBar } from '../../src/step-bar'
 import { stepControls } from '../../src/step-controls'
 import type { Speed } from '../../src/workspace'
 import { chromiumOnly } from './engine'
-import { controlName, controlState, legView, pressable, settledFocus, tick } from './harness'
+import { alphaOf, controlName, controlState, legView, pressable, settledFocus, tick } from './harness'
 
 const STATE = controlState(true, 'step 3 of 12')
 
@@ -43,7 +43,7 @@ describe('the step controls', () => {
     const { s } = build()
     s.update(STATE)
     for (const name of [
-      'back to the oldest kept step',
+      'back to step 0',
       'one step back',
       'one step forward',
       'to the newest recorded step',
@@ -133,10 +133,11 @@ describe('the step controls', () => {
 
 /**
  * A strip whose handlers move a `History` as `transport.ts`'s do and repaint at once, with `controls.ts`'s own rules
- * deciding what is live. A frame costs one byte and the budget holds `length` frames, so the history starts full and
- * each frame `record` pushes evicts the oldest, as `replies.ts` pushes a batch and sets `done`. `done` is how the
- * recording stopped, `null` while it records; `ended` offers no more. `tick` is one step of `player.ts`'s loop. `log`
- * names each handler a press reached; `asked` counts the presses that would ask the worker for more.
+ * deciding what is live. Its `restart` is the seek alone, which `transport.ts`'s `↺` is while step 0 is kept. A frame
+ * costs one byte and the budget holds `length` frames, so the history starts full and each frame `record` pushes evicts
+ * the oldest, as `replies.ts` pushes a batch and sets `done`. `done` is how the recording stopped, `null` while it
+ * records; `ended` offers no more. `tick` is one step of `player.ts`'s loop. `log` names each handler a press reached;
+ * `asked` counts the presses that would ask the worker for more.
  */
 const driven = (head: number, length: number, done: RecordEnd | null = 'ended') => {
   const hist = new History<number>(length - 1)
@@ -292,8 +293,8 @@ describe('a step button that turns itself off hands the focus on', () => {
 /**
  * **A STATE CHANGE, NOT THE BUTTON'S OWN PRESS, TURNS IT OFF UNDER THE FOCUS**: playback reaching the end (`▶`, `⏭`), a
  * recording's evictions carrying the head to the oldest kept step (`◀`), a new run (`⏵`), an unavailable leg (`↺`). A
- * real gesture puts the focus there; the change is the test's, as it is a timer's or a worker's in the app. `↺` and `⏵`
- * never turn themselves off: their presses leave the history's length alone, which is all their `can*` reads.
+ * real gesture puts the focus there; the change is the test's, as it is a timer's or a worker's in the app. `⏵` never
+ * turns itself off: its press leaves the history's length alone, which is all its `can*` reads.
  */
 describe('a step button a state change turns off hands the focus on', () => {
   for (const [what, name, shiftTabs] of [
@@ -339,14 +340,14 @@ describe('a step button a state change turns off hands the focus on', () => {
     leg.hist.clear()
     leg.hist.push(0, 1)
     draw()
-    const restart = mustName(s.el, 'back to the oldest kept step')
+    const restart = mustName(s.el, 'back to step 0')
     expect.soft(seen, 'the focus when ⏵ was disabled').toEqual([controlName(restart)])
     expect.soft(await settledFocus(), 'where the focus settles').toBe(controlName(restart))
   })
 
   it('↺, when the leg becomes unavailable and only the speed select is left', async () => {
     const { s } = driven(3, 12)
-    const restart = mustName(s.el, 'back to the oldest kept step')
+    const restart = mustName(s.el, 'back to step 0')
     const seen = focusAtDisable(restart)
     restart.focus()
     expect(document.activeElement, 'precondition: ↺ holds the focus').toBe(restart)
@@ -366,17 +367,50 @@ describe('a step button a state change turns off hands the focus on', () => {
   })
 })
 
+/**
+ * **↺ ON A LEG WHOSE STEP 0 WAS DROPPED TURNS ITSELF OFF UNDER ITS OWN PRESS, AND WAITS**: its rewind empties the ring
+ * and records the leg again, and `controlState` gives that leg every `can*` off and `recording` on. `↺` keeps the
+ * focus, off by `aria-disabled`, until the first frames turn it on again. The gesture is a real one, and the state the
+ * rewind gives is the test's, as it is the worker's in the app. Found by its text, whatever ↺ is named.
+ */
+describe('↺ that its own rewind turns off waits with the focus', () => {
+  for (const [gesture, perform] of Object.entries(GESTURES)) {
+    it(`↺ pressed by ${gesture}, when its rewind empties the ring, waits with the focus until the first frames come`, async () => {
+      const { s } = driven(3, 12)
+      const restart = [...s.el.querySelectorAll('button')].find((b) => b.textContent === '↺')
+      if (restart === undefined) throw new Error('no ↺ button')
+      const seen = focusAtDisable(restart)
+      await perform(restart)
+      expect(document.activeElement, 'precondition: ↺ holds the focus').toBe(restart)
+      s.update({
+        canBack: false,
+        canForward: false,
+        canToNewest: false,
+        canPlay: false,
+        canRestart: false,
+        recording: true,
+        playing: false,
+        continueLabel: null,
+        stepText: 'step 0 of 0…',
+      })
+      expect.soft(await settledFocus(), 'where the focus settles while the rewind records').toBe(controlName(restart))
+      expect.soft({ waiting: waiting(restart), disabledEver: seen }).toEqual({ waiting: true, disabledEver: [] })
+
+      s.update(STATE)
+      expect({ ariaDisabled: restart.getAttribute('aria-disabled'), disabled: restart.disabled }).toEqual({
+        ariaDisabled: null,
+        disabled: false,
+      })
+      expect(document.activeElement, 'the focus once the first frames come').toBe(restart)
+    })
+  }
+})
+
 /** Whether `b` is waiting on a recording: off by `aria-disabled` alone, so that it keeps the focus. */
 const waiting = (b: HTMLButtonElement): boolean => b.getAttribute('aria-disabled') === 'true' && !b.disabled
 
 /** A button off in the ordinary way: disabled, and not saying it waits. */
 const off = (b: HTMLButtonElement): boolean => b.disabled && b.getAttribute('aria-disabled') === null
-
-/** The alpha of a computed colour, in either of the forms Chromium writes one. */
-const alphaOf = (colour: string): number => {
-  const m = /(?:\/\s*|rgba\((?:[^,]+,){3}\s*)([\d.]+)\)$/.exec(colour)
-  return m === null ? 1 : Number(m[1])
-}
 
 /**
  * **A `▶` OR `⏭` THAT A RECORDING CARRYING THE HEAD TURNS OFF UNDER THE FOCUS WAITS FOR IT** (`step-controls.ts`'s

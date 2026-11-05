@@ -10,7 +10,7 @@ import { createPlayer } from './player'
 import type { Leg } from './protocol'
 import { BufferCapReached, type ScratchBuffers } from './scratch'
 import type { SessionId } from './session-client'
-import type { Binding, LegFrame, LegState, PaneSlot, SessionRegistry } from './sessions'
+import { type Binding, type LegFrame, type LegState, type PaneSlot, rewindLeg, type SessionRegistry } from './sessions'
 import { pairLabel } from './view-header'
 import type { Speed } from './workspace'
 
@@ -116,6 +116,11 @@ export function createTransport(deps: {
    * readable at the call site (`main.ts`'s `persistBuffers` / `refreshBuffers` pair).
    */
   onBuffersPersist: () => void
+  /**
+   * Send a copy's edit still in its editor's debounce now, wherever its editor is — `EditorCustody.flush`, which sends
+   * nothing for a session with no edit pending. `↺` asks it first (`restart` below).
+   */
+  flushEdit: (session: SessionId) => void
 }): {
   play<T>(leg: LegState<T>): void
   events<K extends Leg>(slot: PaneSlot<K>): PaneEvents
@@ -132,6 +137,7 @@ export function createTransport(deps: {
     formatOnBlur,
     keymap,
     colour,
+    flushEdit,
   } = deps
   const player = createPlayer({ speed: deps.speed, draw })
 
@@ -245,7 +251,7 @@ export function createTransport(deps: {
       const leg = taken(slot)
       const entry = sessions.entryOf(slot.binding.session)
       if (!leg.hist.forward() && canRecordFurther(leg.done, entry.client.awaitingRun)) {
-        entry.client.extend(slot.binding.leg)
+        entry.client.extend(slot.binding.leg, leg.epoch)
       }
       draw()
     },
@@ -265,13 +271,26 @@ export function createTransport(deps: {
     // playback. The player stops at the frontier, so an unwatched run is bounded rather than forever. See
     // `PaneSlot.rebind` for the same decision stated where the rebind happens.
     play: () => play(taken(slot)),
+    // **A REWIND ONLY WHERE A SEEK CANNOT REACH STEP 0 AND THE WORKER CAN ANSWER ONE** (hidden-recording spec §6). The
+    // ring keeps step 0 exactly while nothing was evicted, and the worker holds the leg's recording only while its
+    // frames are the client's generation: during a recompile the new generation's `compiled` reply would reset the
+    // epoch under a rewind the worker took for it, and after a copy's edit that did not parse it holds nothing, though
+    // `awaitingRun` is false. There a seek goes as far back as the ring keeps; a recompile's new generation starts from
+    // 0. **A COPY'S EDIT STILL IN ITS EDITOR'S DEBOUNCE IS SENT FIRST**, so that it claims its generation before the
+    // test reads one, as the program's edit does at its first key (`compile.ts`).
     restart: () => {
-      taken(slot).hist.seek(0)
+      flushEdit(slot.binding.session)
+      const leg = taken(slot)
+      const { client } = sessions.entryOf(slot.binding.session)
+      if (leg.hist.evicted && leg.gen === client.gen) {
+        rewindLeg(leg)
+        client.rewind(slot.binding.leg, leg.epoch)
+      } else leg.hist.seek(0)
       draw()
     },
     extend: () => {
-      taken(slot)
-      sessions.entryOf(slot.binding.session).client.extend(slot.binding.leg)
+      const { epoch } = taken(slot)
+      sessions.entryOf(slot.binding.session).client.extend(slot.binding.leg, epoch)
     },
     // THE SELECTOR'S PICK, ON THE SESSION AXIS. `PaneSlot.rebind` writes the session and nothing else —
     // the leg is fixed by `K` and has no writer anywhere in the app, which is what keeps `Binding<K>`'s

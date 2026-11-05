@@ -61,7 +61,7 @@ const boxNameOf = (leaf: Leaf, el: HTMLElement): string =>
 const namesOf = (leaf: Leaf): string[] => drawn(leaf).map((el) => boxNameOf(leaf, el))
 /** What a strip draws: the transport, the speed and the step text, and `keep recording` under a long line. */
 const boxesFor = (line: Line, leaf: Leaf): string[] => [
-  'back to the oldest kept step',
+  'back to step 0',
   'one step back',
   'one step forward',
   'to the newest recorded step',
@@ -317,7 +317,7 @@ describe.each(LINES)('Explorer’s step strips, under $name', (line) => {
       if (leaf === line.long) {
         expect.soft(rowNamesOf(leaf), `${leaf}’s rows`).toEqual([
           [
-            'back to the oldest kept step',
+            'back to step 0',
             'one step back',
             'one step forward',
             'to the newest recorded step',
@@ -347,9 +347,7 @@ describe.each(LINES)('Explorer’s step strips, under $name', (line) => {
         expect.soft(Math.abs(centreOf(el) - centreOf(title)), `${nameOf(leaf, el)} on the title’s row`).toBeLessThan(1)
       }
       const [first, ...rest] = drawn(leaf)
-      expect(first?.getAttribute('aria-label'), `precondition: ${leaf}’s strip starts at ↺`).toBe(
-        'back to the oldest kept step',
-      )
+      expect(first?.getAttribute('aria-label'), `precondition: ${leaf}’s strip starts at ↺`).toBe('back to step 0')
       const lead = (first as HTMLElement).getBoundingClientRect().left - title.getBoundingClientRect().right
       expect.soft(Math.abs(lead - space('--space-3')), `${leaf}: the gap before ↺, ${lead}px`).toBeLessThanOrEqual(0.5)
       let before = first as HTMLElement

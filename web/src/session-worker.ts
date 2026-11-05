@@ -31,7 +31,17 @@
 import init, { compile, lambdaScratchAt, rxmScratch, tapeNames, tmScratch } from '../../pkg/redextape_wasm.js'
 import { LEGS, perLeg, unhandled } from './legs'
 import type { LinkIndexWire } from './link'
-import type { LambdaLeg, LambdaTreeWire, Leg, RunReply, RunRequest, RxmLeg, TmLeg } from './protocol'
+import type {
+  HeldLegs,
+  LambdaLeg,
+  LambdaTreeWire,
+  Leg,
+  ResultLegs,
+  RunReply,
+  RunRequest,
+  RxmLeg,
+  TmLeg,
+} from './protocol'
 import {
   EXTEND_CELLS,
   EXTEND_STEPS,
@@ -39,6 +49,8 @@ import {
   FRAME_BYTES,
   forkable,
   HISTORY_BYTES,
+  keepDecided,
+  keepInFlight,
   LAMBDA_BYTE_BUDGET,
   lambdaFrameBytes,
   RXM_WINDOW,
@@ -77,17 +89,20 @@ type Session = {
   stepLambda(): boolean
   lambdaTree(step: number, nodeBudget: number): LambdaTreeWire
   raiseLambdaCap(extra: number): void
+  rewindLambda(): void
   tmStatus(): TmStatus
   tmProgram(): TmProgram
   tmState(radius: number): TmState
   stepTm(): boolean
   raiseTmCap(extraSteps: number, extraCells: number): void
+  rewindTm(): void
   tmValue(): Decoded
   rxmStatus(): RxmStatus
   rxmProgram(): RxmProgram
   rxmState(window: RxmWindow): RxmState
   stepRxm(): boolean
   raiseRxmCap(extraSteps: number): void
+  rewindRxm(): void
   rxmValue(): Decoded
   sourceSpan(node: number): Span | null
   linkIndex(byteBudget: number): LinkIndexWire
@@ -118,7 +133,7 @@ type Session = {
  * The wasm-bindgen `LambdaScratch`, described structurally for the reason `Session` above is — and it
  * is a STRICT SUBSET of `Session`'s λ part, which is design §3.3's table as a type.
  *
- * THE SIX λ METHODS TRANSPLANT UNCHANGED (§3.3: "nothing but the λ cursor"), so `LAMBDA_RECORDING` below
+ * THE λ METHODS ARE `Session`'S, UNCHANGED, a λ copy being a λ cursor and nothing else, so `LAMBDA_RECORDING` below
  * needs no second implementation and no cast: it reads `lambdaStatus`, `lambdaState` and `stepLambda`,
  * all three identical in name and signature on both kinds, and a `Session` satisfies this type
  * structurally. The ones named here are the ones this file calls.
@@ -135,6 +150,7 @@ type LambdaScratchHandle = {
   stepLambda(): boolean
   lambdaTree(step: number, nodeBudget: number): LambdaTreeWire
   raiseLambdaCap(extra: number): void
+  rewindLambda(): void
   free(): void
 }
 
@@ -159,6 +175,7 @@ type TmScratchHandle = {
   stepTm(): boolean
   tmState(radius: number): TmState
   raiseTmCap(extraSteps: number, extraCells: number): void
+  rewindTm(): void
   free(): void
 }
 
@@ -174,7 +191,7 @@ type TmValueRunHandle = {
 }
 
 /**
- * The wasm-bindgen `RxmScratch`, described structurally for the reason `Session` above is: the rxm leg's six methods.
+ * The wasm-bindgen `RxmScratch`, described structurally for the reason `Session` above is: the rxm leg's seven methods.
  * A copy's rxm leg answers every one of them as a session's does (`session.rs`'s `RxmScratch`), so `RXM_RECORDING`
  * and `onExtend`'s rxm arm call it as they call a session. No `rxmText`, since a copy offers no copy of itself, and
  * no `sourceSpan` or `linkIndex`: a copy has no `SourceMap`.
@@ -185,6 +202,7 @@ type RxmScratchHandle = {
   rxmState(window: RxmWindow): RxmState
   stepRxm(): boolean
   raiseRxmCap(extraSteps: number): void
+  rewindRxm(): void
   rxmValue(): Decoded
   free(): void
 }
@@ -279,8 +297,39 @@ const allowance: Record<Leg, number> = perLeg(() => HISTORY_BYTES)
  * SAME generation, so nothing in `live.gen` can distinguish them — two loops would step one cursor
  * and interleave their frames. The same race reaches `onRun`: an `extend` can land while `onRun`'s
  * `await recordTm` is still in flight, once the λ leg has already posted its `budget` stop.
+ *
+ * **`postResult` READS IT TOO, AS "THIS LEG MAY BE MID-FILL"**: a `result` keeps a recording leg's last part
+ * (`keepInFlight`), so a flag cleared before its loop stops would let a rewound fill be read mid-way.
  */
 const recording: Record<Leg, boolean> = perLeg(() => false)
+
+/**
+ * Each leg's epoch: 0 at a build and set by each `rewind` to the page's count of that leg's rewinds, so that a reply
+ * or a request of an older epoch is told apart from the rewound leg's (the `rewind` request, in `protocol.ts`'s
+ * `RunRequest`).
+ */
+const epoch: Record<Leg, number> = perLeg(() => 0)
+
+/**
+ * The legs the live generation's last `result` posted, `null` before its first: what `keepDecided` keeps a decided
+ * value from, across a rewind, and `keepInFlight` a leg still recording, which takes `rewoundFrom`'s before the first.
+ */
+let posted: ResultLegs | null = null
+
+/**
+ * Each leg's part as a rewind of a session found it before the generation's first `result`, else `null`. **READ BEFORE
+ * THE CURSOR GOES BACK**, so that it is the part the leg stood at and not one of the fill the rewind records again:
+ * with no `result` posted, a `result` posted while that fill records would otherwise read it mid-way.
+ */
+const rewoundFrom: HeldLegs = { lambda: null, rxm: null, tm: null }
+
+/** Each leg's part of a session's `result`, read off its cursor. */
+const PART: { readonly [K in Leg]: (session: Session) => ResultLegs[K] } = { lambda: lambdaLeg, rxm: rxmLeg, tm: tmLeg }
+
+/** `rewoundFrom`'s part for `leg`, read as `postResult` reads it. */
+function holdPart<K extends Leg>(leg: K, session: Session): void {
+  rewoundFrom[leg] = PART[leg](session)
+}
 
 function dropLive(): void {
   const held = live
@@ -345,6 +394,7 @@ const worker: RecordWorker = {
   recording,
   recorded,
   allowance,
+  epoch,
   owns: (gen) => live?.gen === gen,
   post: (reply) => ctx.postMessage(reply),
   yieldToEventLoop,
@@ -382,7 +432,7 @@ const LAMBDA_RECORDING: RecordLeg<Session | LambdaScratchHandle, LambdaState> = 
   bytes: lambdaFrameBytes,
   step: (s) => s.stepLambda(),
   end: (s) => endOf(s.lambdaStatus().run),
-  reply: (gen, frames, done) => ({ kind: 'lambda-frames', gen, frames, done }),
+  reply: (gen, epoch, frames, done) => ({ kind: 'lambda-frames', gen, epoch, frames, done }),
 }
 
 /**
@@ -418,7 +468,7 @@ const TM_RECORDING: RecordLeg<Session | TmScratchHandle, TmState> = {
   bytes: tmFrameBytes,
   step: (s) => s.stepTm(),
   end: (s) => endOf(s.tmStatus().run),
-  reply: (gen, frames, done) => ({ kind: 'tm-frames', gen, frames, done }),
+  reply: (gen, epoch, frames, done) => ({ kind: 'tm-frames', gen, epoch, frames, done }),
 }
 
 /**
@@ -447,7 +497,7 @@ const RXM_RECORDING: RecordLeg<Session | RxmScratchHandle, RxmState> = {
   bytes: rxmFrameBytes,
   step: (s) => s.stepRxm(),
   end: (s) => rxmRecordEnd(s.rxmStatus()),
-  reply: (gen, frames, done) => ({ kind: 'rxm-frames', gen, frames, done }),
+  reply: (gen, epoch, frames, done) => ({ kind: 'rxm-frames', gen, epoch, frames, done }),
 }
 
 /** Record the λ leg — `recordLeg`'s doc has the contract, and its answer is `recordLeg`'s. */
@@ -503,6 +553,17 @@ function rxmLeg(session: Session): RxmLeg {
   return { status, value: session.rxmValue() }
 }
 
+/**
+ * Post the live session's `result`, through `keepInFlight` so that a leg a rewind is recording again is not read
+ * mid-fill, and `keepDecided` so that a value decided before a rewind is not taken away by the rewound cursor's
+ * `Unfinished`, and keep what it posted as `posted`. `onRun` and `onExtend` both post here.
+ */
+function postResult(gen: number, session: Session): void {
+  const read = { lambda: lambdaLeg(session), rxm: rxmLeg(session), tm: tmLeg(session) }
+  posted = keepDecided(posted, keepInFlight(posted ?? rewoundFrom, read, recording))
+  ctx.postMessage({ kind: 'result', gen, ...posted })
+}
+
 async function onRun(req: Extract<RunRequest, { kind: 'run' }>): Promise<void> {
   await ready
   // FREED BEFORE THE NEXT COMPILE, not after. Two `Session` handles are never simultaneously live.
@@ -517,7 +578,10 @@ async function onRun(req: Extract<RunRequest, { kind: 'run' }>): Promise<void> {
     // stale loop that resumes afterwards returns at its own `live?.gen !== gen` check without
     // touching the flag it no longer owns.
     recording[leg] = false
+    epoch[leg] = 0
+    rewoundFrom[leg] = null
   }
+  posted = null
 
   // `compile` RUNS THE WHOLE TM LEG and is one uninterruptible call. Off the main thread that can only
   // delay the next result; it can never block input, highlighting or linting.
@@ -597,13 +661,7 @@ async function onRun(req: Extract<RunRequest, { kind: 'run' }>): Promise<void> {
   // Deliberate silence: superseded while recording ran. The generation that wanted this result is gone.
   // The `kind` half is the type restating the `gen` half — see `TM_RECORDING`'s `handle` for the argument.
   if (live?.gen !== req.gen || live.kind !== 'session') return
-  ctx.postMessage({
-    kind: 'result',
-    gen: req.gen,
-    lambda: lambdaLeg(live.session),
-    rxm: rxmLeg(live.session),
-    tm: tmLeg(live.session),
-  })
+  postResult(req.gen, live.session)
 }
 
 /**
@@ -639,7 +697,10 @@ async function onLambdaScratch(req: Extract<RunRequest, { kind: 'lambda-scratch'
     recorded[leg] = 0
     allowance[leg] = HISTORY_BYTES
     recording[leg] = false
+    epoch[leg] = 0
+    rewoundFrom[leg] = null
   }
+  posted = null
 
   const { diagnostics, scratch, text } = lambdaScratchAt(req.src, req.step, LAMBDA_BYTE_BUDGET) as ForkedAtResult
   if (scratch === null) {
@@ -704,7 +765,10 @@ async function onTmScratch(req: Extract<RunRequest, { kind: 'tm-scratch' }>): Pr
     recorded[leg] = 0
     allowance[leg] = HISTORY_BYTES
     recording[leg] = false
+    epoch[leg] = 0
+    rewoundFrom[leg] = null
   }
+  posted = null
 
   const { diagnostics, scratch, value } = tmScratch(req.src) as TmScratchResult
   if (scratch === null) {
@@ -775,7 +839,10 @@ async function onRxmScratch(req: Extract<RunRequest, { kind: 'rxm-scratch' }>): 
     recorded[leg] = 0
     allowance[leg] = HISTORY_BYTES
     recording[leg] = false
+    epoch[leg] = 0
+    rewoundFrom[leg] = null
   }
+  posted = null
 
   const { diagnostics, scratch } = rxmScratch(req.src) as RxmScratchResult
   if (scratch === null) {
@@ -803,6 +870,11 @@ async function onExtend(req: Extract<RunRequest, { kind: 'extend' }>): Promise<v
   // Deliberate silence: the generation being extended is not the live one anymore (superseded by a
   // later `run`, or there was never a session for it).
   if (live?.gen !== req.gen) return
+  // Deliberate silence, and a state the page cannot reach: it raises a leg's epoch only as it posts `rewind`, and
+  // this thread takes messages in order, so no `extend` of an older epoch arrives after the `rewind` that replaced
+  // it. Checked as the generation is, so that a stale request records nothing whoever posts it, as
+  // `tests/browser/worker.test.ts` does.
+  if (req.epoch !== epoch[req.leg]) return
   // ONE MORE ALLOWANCE FROM WHERE RECORDING STOPPED, not stacked on the old allowance. On a `budget`
   // stop `recorded[leg] >= allowance[leg]`, but not necessarily equal to it: the check runs BEFORE
   // that iteration's frame is added, so `recorded` can overshoot the old `allowance` by up to one
@@ -817,10 +889,10 @@ async function onExtend(req: Extract<RunRequest, { kind: 'extend' }>): Promise<v
   let ran: boolean
   switch (req.leg) {
     case 'lambda': {
-      // TWO OF THE FOUR KINDS TAKE THIS ARM, which is §3.3's "six methods transplant unchanged" doing
-      // its work: `[continue]` on a λ scratchpad's pane is the same two calls as on a session's, against
-      // the same method names on a different wasm type. That is why the pane needs no per-kind control
-      // strip for THOSE two — a TM or rxm copy is an occupant of `live` with no λ leg to extend.
+      // TWO OF THE FOUR KINDS TAKE THIS ARM, A SESSION AND A λ COPY, which carries the λ methods under `Session`'s
+      // names and signatures (`LambdaScratchHandle`): `[continue]` on a λ copy's view is the same two calls as on a
+      // session's, against a different wasm type. That is why the pane needs no per-kind control strip for THOSE
+      // two — a TM or rxm copy is an occupant of `live` with no λ leg to extend.
       //
       // Deliberate silence, for `LAMBDA_RECORDING`'s reason: a TM or rxm copy has no λ leg, so
       // there is no cap to raise and nothing to record. Returning before `allowance` is spent would be
@@ -865,10 +937,11 @@ async function onExtend(req: Extract<RunRequest, { kind: 'extend' }>): Promise<v
       return
   }
   // A SUPPRESSED CALL MUST NOT POST A RESULT. `ran === false` means a loop already in flight for this
-  // leg owns it — that loop will post its own frames and its own `result` when it finishes. Posting
+  // leg owns it — that loop posts its own frames, and its caller any `result`, when it finishes. Posting
   // one here too would answer with whatever partial state that other loop had reached at this
-  // instant, then let the real loop post a second, later `result` for the same generation (the two
-  // rapid `extend`s, e.g. a double-click before the UI disables the affordance, this exists to guard).
+  // instant, then let the real loop's caller post a second, later `result` for the same generation (the
+  // two rapid `extend`s, e.g. a double-click before the UI disables the affordance, this exists to guard).
+  // `true` from a loop a rewind cut short posts one, which keeps the rewound leg's last part (`keepInFlight`).
   if (!ran) return
 
   // Deliberate silence: superseded while recording ran, same as `onRun`'s post-record check.
@@ -878,19 +951,60 @@ async function onExtend(req: Extract<RunRequest, { kind: 'extend' }>): Promise<v
   // and a scratch has no `ty` to decode against. The frames this call just recorded, and their
   // `RecordEnd`, are its whole answer; a headered TM buffer's value arrives separately, as the
   // `tm-value` replies `runValueLoop` posts, which `[continue]` neither starts nor extends. An rxm copy's value is read
-  // off its cursor once a raise has carried it past its build's cap, so it is posted again here, on its own.
+  // off its cursor where its build's cap stopped the build's run, which a raise or a rewind moves, so it is posted
+  // again here, on its own.
   if (live.kind === 'rxm-scratch') {
     ctx.postMessage({ kind: 'rxm-value', gen: req.gen, value: live.session.rxmValue() })
     return
   }
   if (live.kind !== 'session') return
-  ctx.postMessage({
-    kind: 'result',
-    gen: req.gen,
-    lambda: lambdaLeg(live.session),
-    rxm: rxmLeg(live.session),
-    tm: tmLeg(live.session),
-  })
+  postResult(req.gen, live.session)
+}
+
+/**
+ * Take one leg back to step 0 and record its first fill again, under the epoch the request carries (hidden-recording
+ * spec §5.4): the `rewind` the page posts when ↺ finds the leg's step 0 dropped from its ring.
+ *
+ * **A STALE GENERATION, A LIVE THING WITHOUT THE LEG, OR A LEG THAT DID NOT COMPILE ANSWERS NOTHING**, the questions
+ * the leg's `handle` and `available` ask: a `Session`'s rewind throws for an absent leg, and a throw drops the session.
+ * **NOR DOES AN EPOCH NO NEWER THAN THE LEG'S**: the loop in flight would not stop, and two loops would step a cursor.
+ *
+ * **THE LOOP IN FLIGHT IS LEFT TO RETURN, NOT AWAITED.** The raised epoch stops it at its next chunk, and it leaves
+ * the flag, cleared here, to the new loop. **NO `result` OF ITS OWN** (spec §5.2): one posted while this fill records
+ * keeps the leg's last part, read here first if none was posted (`keepInFlight`), and later its decided value.
+ */
+async function onRewind(req: Extract<RunRequest, { kind: 'rewind' }>): Promise<void> {
+  switch (req.leg) {
+    case 'lambda':
+      return rewindAndRecord(LAMBDA_RECORDING, req, (s) => s.rewindLambda())
+    case 'tm':
+      return rewindAndRecord(TM_RECORDING, req, (s) => s.rewindTm())
+    case 'rxm':
+      return rewindAndRecord(RXM_RECORDING, req, (s) => s.rewindRxm())
+    default:
+      // A leg with no arm rewinds nothing, as `onExtend`'s `default` records nothing.
+      unhandled(req.leg)
+  }
+}
+
+/** `onRewind` for one leg: its books handed to a new epoch, its cursor rewound, and its first fill recorded. */
+async function rewindAndRecord<H, F>(
+  leg: RecordLeg<H, F>,
+  req: Extract<RunRequest, { kind: 'rewind' }>,
+  rewind: (held: H) => void,
+): Promise<void> {
+  const held = leg.handle(req.gen)
+  if (held === null || !leg.available(held)) return
+  // A state the page cannot reach, since it raises the epoch as it posts: checked as `onExtend` checks its epoch, so
+  // that it holds whoever posts it, as `tests/browser/worker.test.ts` does.
+  if (req.epoch <= epoch[leg.leg]) return
+  epoch[leg.leg] = req.epoch
+  recording[leg.leg] = false
+  if (posted === null && live?.kind === 'session') holdPart(leg.leg, live.session)
+  rewind(held)
+  recorded[leg.leg] = 0
+  allowance[leg.leg] = HISTORY_BYTES
+  await recordLeg(leg, worker, req.gen, true)
 }
 
 /**
@@ -954,6 +1068,9 @@ ctx.addEventListener('message', async (e: MessageEvent<RunRequest>) => {
         break
       case 'extend':
         await onExtend(req)
+        break
+      case 'rewind':
+        await onRewind(req)
         break
       case 'lambda-tree':
         onLambdaTree(req)

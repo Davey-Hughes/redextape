@@ -54,6 +54,20 @@ describe('SessionClient', () => {
     expect(c.gen).toBe(gen)
   })
 
+  it('asks for a rewind at the live generation, with the epoch it is given, and not before the first build', () => {
+    const { port, sent } = fakePort()
+    const c = new SessionClient(port, () => {})
+    c.rewind('tm', 1)
+    expect(sent).toEqual([])
+    const gen = c.supersede()
+    c.rewind('tm', 1)
+    c.rewind('lambda', 2)
+    expect(sent).toEqual([
+      { kind: 'rewind', gen, leg: 'tm', epoch: 1 },
+      { kind: 'rewind', gen, leg: 'lambda', epoch: 2 },
+    ])
+  })
+
   it('stamps each request with a fresh generation', () => {
     const { port, sent } = fakePort()
     const c = new SessionClient(port, () => {})
@@ -190,8 +204,8 @@ describe('SessionClient streaming', () => {
       tmResultDecodable: true,
       rxmText: null,
     })
-    deliver({ kind: 'lambda-frames', gen: 1, frames: [], done: null })
-    deliver({ kind: 'lambda-frames', gen: 1, frames: [], done: 'ended' })
+    deliver({ kind: 'lambda-frames', gen: 1, epoch: 0, frames: [], done: null })
+    deliver({ kind: 'lambda-frames', gen: 1, epoch: 0, frames: [], done: 'ended' })
     deliver({
       kind: 'result',
       gen: 1,
@@ -208,8 +222,8 @@ describe('SessionClient streaming', () => {
     const client = new SessionClient(port, (r) => seen.push(r.kind))
     client.request(client.supersede(), 'x', 'unary')
     client.request(client.supersede(), 'y', 'unary')
-    deliver({ kind: 'lambda-frames', gen: 1, frames: [], done: null })
-    deliver({ kind: 'lambda-frames', gen: 2, frames: [], done: null })
+    deliver({ kind: 'lambda-frames', gen: 1, epoch: 0, frames: [], done: null })
+    deliver({ kind: 'lambda-frames', gen: 2, epoch: 0, frames: [], done: null })
     expect(seen).toEqual(['lambda-frames'])
   })
 
@@ -217,16 +231,16 @@ describe('SessionClient streaming', () => {
     const { port, sent } = fakePort()
     const client = new SessionClient(port, () => {})
     client.request(client.supersede(), 'x', 'unary')
-    client.extend('lambda')
-    expect(sent.at(-1)).toEqual({ kind: 'extend', gen: 1, leg: 'lambda' })
-    client.extend('tm')
-    expect(sent.at(-1)).toEqual({ kind: 'extend', gen: 1, leg: 'tm' })
+    client.extend('lambda', 0)
+    expect(sent.at(-1)).toEqual({ kind: 'extend', gen: 1, leg: 'lambda', epoch: 0 })
+    client.extend('tm', 3)
+    expect(sent.at(-1)).toEqual({ kind: 'extend', gen: 1, leg: 'tm', epoch: 3 })
   })
 
   it('ignores extend before any request', () => {
     const { port, sent } = fakePort()
     const client = new SessionClient(port, () => {})
-    client.extend('lambda')
+    client.extend('lambda', 0)
     expect(sent).toEqual([])
   })
 })
@@ -345,7 +359,7 @@ describe('SessionClient generation', () => {
     const c = new SessionClient(p, () => {})
     const g = c.supersede()
     c.request(g, 'a', 'binary')
-    c.extend('lambda')
-    expect(p.sent[1]).toEqual({ kind: 'extend', gen: g, leg: 'lambda' })
+    c.extend('lambda', 2)
+    expect(p.sent[1]).toEqual({ kind: 'extend', gen: g, leg: 'lambda', epoch: 2 })
   })
 })

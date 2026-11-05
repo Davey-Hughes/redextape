@@ -152,7 +152,8 @@ export function walkInParts(walk: Walk, shares: readonly number[]): (() => Promi
 /**
  * A walk of a TM view by its own controls: ▶ and ↺ among the view's `.controls` by their text, the state's name at
  * the start of its status line, and the step in its strip's `step N of M`. The walk ends at the first state whose
- * status matches `arrived`; `restart` starts it from ↺, the oldest kept step.
+ * status matches `arrived`; `restart` starts it from ↺, step 0, and its clicks after ↺ rely on ↺ being a seek, with
+ * nothing evicted.
  */
 export function tmWalk(pane: () => HTMLElement, arrived: RegExp, to: string, restart = false): Walk {
   const control = (label: string) =>
@@ -667,6 +668,12 @@ export async function historyFills(): Promise<void> {
     'the TM history to be half full',
   )
   await until(() => tmStepText().includes('history is full'), 'the TM history to fill')
+}
+
+/** The alpha of a computed colour, written `rgba(r, g, b, a)` or with `/ a)` at its end. */
+export const alphaOf = (colour: string): number => {
+  const m = /(?:\/\s*|rgba\((?:[^,]+,){3}\s*)([\d.]+)\)$/.exec(colour)
+  return m === null ? 1 : Number(m[1])
 }
 
 /** `tmPane`'s state table. */
@@ -1450,6 +1457,7 @@ export const legView = (over: Partial<LegView> = {}): LegView => ({
   awaitingRun: false,
   playing: false,
   pending: null,
+  rewinding: false,
   ...over,
 })
 

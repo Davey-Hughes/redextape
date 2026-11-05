@@ -46,9 +46,10 @@ export function stepControls(
     })
     return b
   }
-  // `restart` IS `hist.seek(0)`, WHICH CLAMPS TO THE OLDEST RETAINED FRAME — the name says what it does
-  // rather than promising a step 0 an evicted history no longer holds.
-  const restart = named('↺', 'back to the oldest kept step', on.restart)
+  // `↺` IS ONE NAME FOR TWO OPERATIONS: a seek as far back as the ring keeps, which is step 0 until it is dropped, and
+  // once it was, where the worker can answer one (`transport.ts`'s `restart`), a rewind of this view's leg alone, which
+  // records it again from step 0 while every other view keeps its place.
+  const restart = named('↺', 'back to step 0', on.restart)
   const back = named('◀', 'one step back', on.back)
   const forward = named('▶', 'one step forward', on.forward)
   const toNewest = named('', 'to the newest recorded step', on.toNewest)
@@ -99,17 +100,20 @@ export function stepControls(
   // move towards, and all five under a state change: playback reaching the end, a recording moving the head, a new run,
   // an unavailable leg. `◀` and `▶` hand to the button that steps the other way, then on along the strip that way, then
   // the rest; `⏭` to `▶`, live where the run can record further, so that the next Enter does, and else as `▶`'s does;
-  // `⏵` to the strip leftwards, nearest first; every list ends on the speed select, which is never disabled. `↺` goes
-  // off only with the history empty or the leg unavailable, when the other four are off too, so it reaches the speed
-  // select; its list runs from `▶` as `◀`'s does in case `controls.ts` turns it off alone.
+  // `⏵` to the strip leftwards, nearest first; every list ends on the speed select, which is never disabled. `↺` waits
+  // while its rewind brings the leg's first frames, else goes off only with the history empty or the leg unavailable,
+  // the other four off with it, so it reaches the speed select; its list runs from `▶` as `◀`'s should it go off alone.
   const buttons: readonly {
     readonly button: HTMLButtonElement
     readonly can: Extract<keyof ControlState, `can${string}`>
     readonly handTo: readonly HTMLElement[]
-    /** Whether a recording carrying the head can turn it off, so that it waits for the recording (`update`). */
+    /**
+     * Whether a recording carrying the head, or for `↺` the rewind its press starts, can turn it off under the focus,
+     * so that it waits for the recording (`update`).
+     */
     readonly waits: boolean
   }[] = [
-    { button: restart, can: 'canRestart', handTo: [forward, toNewest, play, back, speed], waits: false },
+    { button: restart, can: 'canRestart', handTo: [forward, toNewest, play, back, speed], waits: true },
     { button: back, can: 'canBack', handTo: [forward, toNewest, play, restart, speed], waits: false },
     { button: forward, can: 'canForward', handTo: [back, restart, toNewest, play, speed], waits: true },
     { button: toNewest, can: 'canToNewest', handTo: [forward, back, restart, play, speed], waits: true },
@@ -165,11 +169,12 @@ export function stepControls(
       }
       if (held !== undefined) {
         const live = c[held.can]
-        // **A `▶` OR `⏭` A RECORDING CARRYING THE HEAD TURNS OFF UNDER THE FOCUS WAITS FOR IT, FOCUSED**, off by
-        // `aria-disabled`, while it records: a hand-off then would pass `▶`, off while it records, and leave the Enter
-        // after a `capped` or `budget` stop on `◀`, stepping back. At such a stop `▶` is live again and `⏭` hands to it,
-        // as at a run already stopped there, so that Enter records further. Only the focused button waits: elsewhere it
-        // is a dead Tab stop.
+        // **A `▶` OR `⏭` A RECORDING CARRYING THE HEAD TURNS OFF UNDER THE FOCUS WAITS FOR IT, FOCUSED, AS `↺` DOES
+        // UNDER THE REWIND ITS PRESS STARTS**, off by `aria-disabled`, while it records: a hand-off then would pass
+        // `▶`, off while it records, and leave the Enter after a `capped` or `budget` stop on `◀`, stepping back. At
+        // such a stop `▶` is live again and `⏭` hands to it, as at a run already stopped there, so that Enter records
+        // further; `↺` is live again at the rewind's first frames. Only the focused button waits: elsewhere it is a
+        // dead Tab stop.
         const waits = !live && held.waits && c.recording
         held.button.ariaDisabled = waits ? 'true' : null
         if (!live && !waits) handOff(held.button, held.handTo)

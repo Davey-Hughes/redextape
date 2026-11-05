@@ -1035,9 +1035,9 @@ describe('the app, end to end', () => {
       const reattach = document.querySelector('[data-leaf="tm-0"] .table-reattach') as HTMLButtonElement
       expect(reattach.hidden).toBe(true)
 
-      // RESTART TO THE OLDEST KEPT STEP, then walk forward until one step leaves the current state's name
-      // unchanged from the step before it. `BIG`'s history is capped well past this point, so the oldest
-      // kept step is not step 0 — the scan does not assume it is.
+      // `↺` TO STEP 0, then walk forward until one step leaves the current state's name unchanged from the
+      // step before it. The 500 synchronous `▶` clicks rely on `↺` being a seek, with nothing evicted: a
+      // rewind would leave `▶` off until the leg's first frames come.
       click('tm', '↺')
       let prev = currentStateName()
       let loopStep = -1

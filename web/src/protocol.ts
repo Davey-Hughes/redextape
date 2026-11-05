@@ -482,9 +482,18 @@ export type RunRequest =
   | { kind: 'rxm-scratch'; gen: number; src: string }
   /**
    * Record further. For a `capped` leg the worker raises the cursor cap first; for a `budget` leg it
-   * simply allows another `HISTORY_BYTES` and resumes.
+   * simply allows another `HISTORY_BYTES` and resumes. `epoch` is the leg's, as `rewind`'s doc says.
    */
-  | { kind: 'extend'; gen: number; leg: Leg }
+  | { kind: 'extend'; gen: number; leg: Leg; epoch: number }
+  /**
+   * Take one leg back to step 0 and record its first fill again (hidden-recording spec §5.4), under `epoch`, the
+   * leg's count of rewinds, which the page raised as it posted this.
+   *
+   * **AN EPOCH PER LEG, BESIDE THE GENERATION.** Every frames reply carries the epoch it was recorded under, and each
+   * side drops the other's messages of an older epoch for that leg alone: frames a rewind replaced, an `extend` asked
+   * before it. A new `gen` cannot say that, since a generation is a build and claiming one resets every leg.
+   */
+  | { kind: 'rewind'; gen: number; leg: Leg; epoch: number }
   /**
    * The λ tree at `step` for the live session (spec §4.1). NOT A BUILD: it claims no generation and
    * supersedes nothing, and the worker drops a request whose generation is no longer live.
@@ -505,6 +514,56 @@ export type LambdaLeg = {
 export type TmLeg = { status: TmStatus; value: Decoded | null }
 /** The rxm leg's answer after recording: its status and its value — `null` for an absent leg, as TM's. */
 export type RxmLeg = { status: RxmStatus; value: Decoded | null }
+/** The three legs a `result` reply carries. */
+export type ResultLegs = { lambda: LambdaLeg; rxm: RxmLeg; tm: TmLeg }
+
+/**
+ * The legs a `result` posts: `next`, except that a leg whose value `prev` had decided keeps `prev`'s part while
+ * `next`'s value is `Unfinished`. `prev` is what the generation's last `result` posted, `null` before its first.
+ *
+ * **SO THAT A REWIND DOES NOT TAKE A KNOWN VALUE AWAY** (hidden-recording spec §11 call 6). A rewound cursor stands on
+ * step 0 again, and the next `result`, posted after a `[continue]` of any leg, would read `Unfinished` off it. Without
+ * a rewind a cursor only moves on, so no decided value meets an `Unfinished` after it and this changes nothing. An
+ * undecided part is `next`'s, so an unfinished λ's count of reductions drops back to the rewound recording's.
+ *
+ * **HERE AND NOT IN `session-worker.ts`**, for `rxmRecordEnd`'s reason: the coverage gate cannot see the worker.
+ */
+export function keepDecided(prev: ResultLegs | null, next: ResultLegs): ResultLegs {
+  if (prev === null) return next
+  return {
+    lambda: keepDecidedPart(prev.lambda, next.lambda),
+    rxm: keepDecidedPart(prev.rxm, next.rxm),
+    tm: keepDecidedPart(prev.tm, next.tm),
+  }
+}
+
+/**
+ * `keepDecided`'s rule for one part: `prev` when its value is decided and `next`'s is `Unfinished`, else `next`. An rxm
+ * copy's reading takes it too (`replies.ts`'s `rxm-value` arm), since a copy's value comes in no `result`.
+ */
+export function keepDecidedPart<P extends { readonly value: Decoded | null }>(prev: P, next: P): P {
+  return prev.value !== null && prev.value !== 'Unfinished' && next.value === 'Unfinished' ? prev : next
+}
+
+/** Each leg's part of a `result`, or `null` for a leg with none: what `keepInFlight` keeps for a leg in flight. */
+export type HeldLegs = { [K in keyof ResultLegs]: ResultLegs[K] | null }
+
+/**
+ * The legs a `result` posts: `next`, except that a leg whose recording is in flight keeps its `held` part when it has
+ * one, which is what the generation's last `result` posted, or before its first the part a rewind found the leg at.
+ *
+ * **SO THAT A REWIND'S FILL IS NOT READ MID-WAY.** A rewind posts no `result` (hidden-recording spec §5.2), so a count
+ * a `result` of another request read off the rewound cursor mid-fill would stay on the readout until the next
+ * `[continue]`. Any other loop in flight is a request's that posts its own `result` when it stops, which reads the leg,
+ * so a leg with no part held is read as it stands.
+ */
+export function keepInFlight(held: HeldLegs, next: ResultLegs, recording: Readonly<Record<Leg, boolean>>): ResultLegs {
+  return {
+    lambda: recording.lambda && held.lambda !== null ? held.lambda : next.lambda,
+    rxm: recording.rxm && held.rxm !== null ? held.rxm : next.rxm,
+    tm: recording.tm && held.tm !== null ? held.tm : next.tm,
+  }
+}
 
 export type RunReply =
   /**
@@ -586,9 +645,10 @@ export type RunReply =
    */
   | { kind: 'rxm-scratch-compiled'; gen: number; rxm: RxmStatus; rxmProgram: RxmProgram; value: Decoded }
   /**
-   * An rxm copy's value after `[continue]` carried its cursor further — where a compiled session's arrives in
-   * `result`, which a copy never gets. Only a step cap can be continued, so this changes a value only for a copy
-   * whose build that cap stopped.
+   * An rxm copy's value after a `[continue]` — where a compiled session's arrives in `result`, which a copy never
+   * gets. Only a step cap can be continued, so this changes a value only for a copy whose build that cap stopped: a
+   * raise past it can decide the value, and after a rewind the cursor is under it again and reads `Unfinished`, which
+   * the page keeps a decided value against (`keepDecidedPart`).
    */
   | { kind: 'rxm-value'; gen: number; value: Decoded }
   /**
@@ -670,10 +730,15 @@ export type RunReply =
        */
       rxmText: string | null
     }
-  | { kind: 'lambda-frames'; gen: number; frames: LambdaState[]; done: RecordEnd | null }
-  | { kind: 'tm-frames'; gen: number; frames: TmState[]; done: RecordEnd | null }
-  | { kind: 'rxm-frames'; gen: number; frames: RxmState[]; done: RecordEnd | null }
-  /** Every leg interrogated after recording finished — what `results.ts` renders. */
+  /** One chunk of a leg's recording, under the leg's epoch when it was recorded (`rewind`'s doc). */
+  | { kind: 'lambda-frames'; gen: number; epoch: number; frames: LambdaState[]; done: RecordEnd | null }
+  | { kind: 'tm-frames'; gen: number; epoch: number; frames: TmState[]; done: RecordEnd | null }
+  | { kind: 'rxm-frames'; gen: number; epoch: number; frames: RxmState[]; done: RecordEnd | null }
+  /**
+   * Every leg interrogated once a request's recording stopped — what `results.ts` renders. A leg still recording keeps
+   * the part last posted for it, or before the generation's first `result` the part a rewind found, where there is one
+   * (`keepInFlight`); one whose decided value a rewind took away keeps its last `result`'s (`keepDecided`).
+   */
   | { kind: 'result'; gen: number; lambda: LambdaLeg; rxm: RxmLeg; tm: TmLeg }
   /** The answer to `lambda-tree`; `tree.step` is the step it answers, clamped to the run. */
   | { kind: 'lambda-tree'; gen: number; tree: LambdaTreeWire }

@@ -6,5 +6,12 @@ import type { LegState } from '../../src/sessions'
  * It is kept out of `session-fixtures.ts` because it needs `History` at run time.
  */
 export function legState<T>(available: boolean, budgetBytes: number): LegState<T> {
-  return { hist: new History<T>(budgetBytes), status: { available, reason: '' }, done: null, playing: false }
+  return {
+    hist: new History<T>(budgetBytes),
+    status: { available, reason: '' },
+    done: null,
+    playing: false,
+    epoch: 0,
+    gen: 0,
+  }
 }

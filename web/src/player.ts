@@ -12,7 +12,8 @@
  * else cleared, rather than keeping a second copy of "is this playing" that could disagree.
  *
  * Play walks recorded frames, stops at the recorded frontier, and never asks the worker for more — `▶` at
- * the frontier and *continue* do that, so play cannot run away with a cap raise nobody clicked.
+ * the frontier and *continue* do that, so play cannot run away with a cap raise nobody clicked. A playing leg whose
+ * ring is empty holds, still playing, so that one a rewind emptied plays on from step 0 once its first frames come.
  */
 
 /**
@@ -34,8 +35,8 @@ export function advance(carry: number, speed: number, elapsedMs: number): { step
   return { steps, carry: total - steps }
 }
 
-/** What the player needs of a leg: its flag, and a history it can step forward. `LegState` is one. */
-export type Playable = { playing: boolean; readonly hist: { forward(): boolean } }
+/** What the player needs of a leg: its flag, and a history it can step forward and count. `LegState` is one. */
+export type Playable = { playing: boolean; readonly hist: { readonly length: number; forward(): boolean } }
 
 export type Player = {
   /** Start `leg` playing, or stop it if it is playing — the play button's one gesture. */
@@ -75,6 +76,7 @@ export function createPlayer(deps: {
         carries.delete(leg)
         continue
       }
+      if (leg.hist.length === 0) continue
       const { steps, carry: rest } = advance(carry, deps.speed(), elapsed)
       carries.set(leg, rest)
       for (let i = 0; i < steps; i++) {

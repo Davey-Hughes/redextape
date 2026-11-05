@@ -48,6 +48,8 @@ function lambdaSession(id: SessionId): SessionEntry {
     status: { available: false, reason: '' },
     done: null,
     playing: false,
+    epoch: 0,
+    gen: 0,
   }
   return {
     id,

@@ -1,6 +1,7 @@
 /**
  * The worker's record loop, written once for every leg: step a leg's cursor, post its frames a chunk at a time, and
- * stop at the leg's end, at its allowance, or when a newer request replaces what it was stepping.
+ * stop at the leg's end, at its allowance, when a newer request replaces what it was stepping, or when a rewind takes
+ * its leg back to step 0.
  *
  * **HERE AND NOT IN `session-worker.ts`, WHERE THE APP CALLS IT**, for the reason `rxmRecordEnd` gives
  * (`protocol.ts`): the coverage gate cannot see the worker (its own module doc: v8 coverage does not attach to a
@@ -42,23 +43,29 @@ export type RecordLeg<H, F> = {
   step(handle: H): boolean
   /** How a finished cursor's run ended, read from the leg's status. */
   end(handle: H): RecordEnd
-  /** The leg's `*-frames` reply, carrying one chunk. */
-  reply(gen: number, frames: F[], done: RecordEnd | null): RunReply
+  /** The leg's `*-frames` reply, carrying one chunk recorded under `epoch`. */
+  reply(gen: number, epoch: number, frames: F[], done: RecordEnd | null): RunReply
 }
 
 /**
  * What the loop needs of the worker: its books, whether a generation still owns what is live, and its two effects.
  *
  * **THE BOOKS ARE THE WORKER'S OWN RECORDS, PASSED BY REFERENCE**, since the worker also writes them: a build resets
- * all three per leg, and `[continue]` raises an allowance before it records further.
+ * all four per leg, a rewind raises its leg's epoch and resets the other three for it, and `[continue]` raises an
+ * allowance before it records further.
  */
 export type RecordWorker = {
-  /** One loop per leg at a time: set by the loop that records the leg, and cleared only by it. */
+  /**
+   * One loop per leg at a time: set by the loop that records the leg and cleared by it, or by a build or a rewind,
+   * which hand the leg to a loop of their own.
+   */
   readonly recording: Record<Leg, boolean>
   /** Bytes recorded per leg. */
   readonly recorded: Record<Leg, number>
   /** The bytes each leg may record before it stops at `budget`. */
   readonly allowance: Record<Leg, number>
+  /** Each leg's epoch, raised by a rewind: a loop whose leg's epoch has moved is stepping a cursor rewound under it. */
+  readonly epoch: Record<Leg, number>
   /** Whether generation `gen` still owns what is live, whatever kind it is. */
   owns(gen: number): boolean
   post(reply: RunReply): void
@@ -67,22 +74,22 @@ export type RecordWorker = {
 }
 
 /**
- * Step-and-record one leg until it finishes, its allowance runs out, or a newer request replaces what it steps.
+ * Step-and-record one leg until it finishes, its allowance runs out, or a build or a rewind replaces what it steps.
  *
  * **RETURNS WHETHER IT RAN.** `false` is a call turned away at the door, before it set the leg's flag: a stale
  * generation, a live handle without this leg, a leg that did not compile, or a loop for this leg already in flight —
  * which is how `onRun` and a concurrent `[continue]`, or two `[continue]`s, both reach here for one generation. The
- * loop in flight posts the frames and its own caller the `result`, so a caller turned away must not post one on top.
- * `true` once the loop has run, including when a newer request replaced its handle mid-way.
+ * loop in flight posts the frames, and its caller any `result` (a rewind's posts none), so a caller turned away posts
+ * none on top. `true` once the loop has run, including when a newer request or a rewind cut it short.
  *
  * **THE ALLOWANCE IS CHECKED BEFORE EACH STEP, NOT AFTER.** A leg whose allowance is spent is not stepped again, so
  * the cursor stays on the last frame recorded and `[continue]` resumes from exactly there; the recorded bytes can pass
  * the allowance by at most the last frame's.
  *
- * **ONLY THE CALL THAT STILL OWNS THIS GENERATION MAY CLEAR THE FLAG IT SET.** A loop that wakes after being
- * superseded returns at the handle check with a newer generation live, and that generation's build has reset the flag
- * and its own loop may have set it again; clearing unconditionally would reopen the race the flag exists to close.
- * The ownership check is the same question the handle check asks of the generation, so a superseded loop touches
+ * **ONLY THE CALL THAT STILL OWNS THIS GENERATION AND THIS EPOCH MAY CLEAR THE FLAG IT SET.** A loop that wakes after
+ * being superseded or rewound returns at the chunk check with a newer generation live or its leg's epoch raised, and
+ * that build or rewind has reset the flag and its own loop may have set it again; clearing unconditionally would
+ * reopen the race the flag exists to close. The two checks ask what the chunk check asks, so such a loop touches
  * nothing on its way out.
  */
 export async function recordLeg<H, F>(
@@ -96,6 +103,7 @@ export async function recordLeg<H, F>(
   if (!leg.available(held)) return false
   if (worker.recording[leg.leg]) return false
   worker.recording[leg.leg] = true
+  const epoch = worker.epoch[leg.leg]
   try {
     let batch: F[] = []
     if (emitInitial) {
@@ -105,9 +113,9 @@ export async function recordLeg<H, F>(
     }
 
     for (;;) {
-      // Deliberate silence: superseded mid-loop. The caller who wanted these frames is gone.
+      // Deliberate silence: superseded or rewound mid-loop. The caller who wanted these frames is gone.
       const s = leg.handle(gen)
-      if (s === null) return true
+      if (s === null || worker.epoch[leg.leg] !== epoch) return true
       let done: RecordEnd | null = null
       let n = 0
       while (n < RECORD_CHUNK) {
@@ -124,12 +132,12 @@ export async function recordLeg<H, F>(
         worker.recorded[leg.leg] += leg.bytes(f)
         n += 1
       }
-      worker.post(leg.reply(gen, batch, done))
+      worker.post(leg.reply(gen, epoch, batch, done))
       batch = []
       if (done !== null) return true
       await worker.yieldToEventLoop()
     }
   } finally {
-    if (worker.owns(gen)) worker.recording[leg.leg] = false
+    if (worker.owns(gen) && worker.epoch[leg.leg] === epoch) worker.recording[leg.leg] = false
   }
 }

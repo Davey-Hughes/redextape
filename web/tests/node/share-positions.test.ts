@@ -34,6 +34,8 @@ beforeEach(() => {
     status: { available: true, reason: '' },
     done: null,
     playing: false,
+    epoch: 0,
+    gen: 0,
   })
   legs = { lambda: leg(), rxm: leg(), tm: leg() }
   awaiting = false

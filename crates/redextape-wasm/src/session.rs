@@ -370,15 +370,15 @@ pub struct Session {
     ///
     /// The projection is built ONCE and cached — see `build_tm_leg`.
     ///
-    /// **THE HEADER JOINS THE PAIR RATHER THAN SITTING BESIDE IT AS A FOURTH `Option` FIELD, FOR
-    /// THE REASON THE PARAGRAPHS ABOVE GIVE FOR THE PAIR ITSELF.** A header exists exactly when
-    /// this `Result` is `Ok` — `compile` reads it off `run_tm_described`, which always produces one
-    /// on a non-declining arm — so an `Option<TmHeader>` next to this field could spell "an
-    /// available leg with no header", a state no program can reach and every reader would have to
-    /// handle. It is retained because `tm_text` needs it: `print_tm` without a header reparses to a
-    /// machine running from blank tapes at `MIN_FIELD_WIDTH` instead of from this program's input.
-    /// Cost is O(tapes x width), not O(states).
-    pub(crate) tm: Result<(TmProgram, TmCursor<Rc<Machine>>, tm::TmHeader), TmDecline>,
+    /// **THE HEADER JOINS THE PAIR RATHER THAN SITTING BESIDE IT AS A FOURTH `Option` FIELD, FOR THE REASON THE
+    /// PARAGRAPHS ABOVE GIVE FOR THE PAIR ITSELF.** A header exists exactly when this `Result` is `Ok` — `compile`
+    /// reads it off `run_tm_described`, which always produces one on a non-declining arm — so an `Option<TmHeader>`
+    /// next to this field could spell "an available leg with no header", a state no program can reach and every reader
+    /// would have to handle. It is retained because `tm_text` needs it: `print_tm` without a header reparses to a
+    /// machine running from blank tapes at `MIN_FIELD_WIDTH` instead of from this program's input. Cost is
+    /// O(tapes x width), not O(states). The `TmStart` joins too, for the same reason: it is what the cursor was opened
+    /// from, for `rewind_tm` to open again.
+    pub(crate) tm: Result<TmLegParts, TmDecline>,
     pub(crate) map: SourceMap,
     /// The halted run's final tapes, from `TmRun::Ran`. `None` for `HitCap` — a capped run never
     /// reached a final configuration, which is what `tm_value` reports as `Unfinished` rather than
@@ -440,13 +440,14 @@ fn build_tm_leg(
     machine: Rc<Machine>,
     caps: tm::TmCaps,
     map: Option<&SourceMap>,
-) -> (TmProgram, TmCursor<Rc<Machine>>) {
+) -> (TmProgram, TmCursor<Rc<Machine>>, TmStart) {
     let init = header.init(machine.tapes);
     tm_leg_at(machine, header.width, &init, caps, map)
 }
 
-/// Project a machine and open a cursor on it at an explicit `width` and initial configuration — the
-/// part of building a TM leg that has nothing to do with where those two came from.
+/// Project a machine and open a cursor on it at an explicit `width` and initial configuration, kept beside it as the
+/// `TmStart` a rewind opens it from again — the part of building a TM leg that has nothing to do with where those two
+/// came from.
 ///
 /// EXTRACTED SO THERE IS ONE PROJECTION SITE, not two. `build_tm_leg` (above) derives `width`/`init`
 /// from a `TmHeader`; `tm_scratch` derives them from a header or, absent one, from §3.4's defaults.
@@ -460,13 +461,30 @@ fn tm_leg_at(
     init: &[Vec<Symbol>],
     caps: tm::TmCaps,
     map: Option<&SourceMap>,
-) -> (TmProgram, TmCursor<Rc<Machine>>) {
+) -> (TmProgram, TmCursor<Rc<Machine>>, TmStart) {
     // `TmProgram` is projected ONCE, here, and cached — never per step. The `map` demo is 3,203 states
     // over 344,999 steps; re-projecting per `tmState` is the cost the `TmProgram`/`TmState` split
     // exists to avoid.
     let program = TmProgram::of(&machine, width, map);
-    let cursor = TmCursor::new(machine, init, caps);
-    (program, cursor)
+    let start = TmStart { machine, init: init.to_vec(), caps };
+    (program, start.cursor(), start)
+}
+
+/// The TM leg's parts: the projection, the cursor, the header and what the cursor was opened from.
+pub(crate) type TmLegParts = (TmProgram, TmCursor<Rc<Machine>>, tm::TmHeader, TmStart);
+
+/// What a TM leg's cursor was opened from, kept so that a rewind opens the same cursor again.
+pub(crate) struct TmStart {
+    machine: Rc<Machine>,
+    init: Vec<Vec<Symbol>>,
+    caps: tm::TmCaps,
+}
+
+impl TmStart {
+    /// A fresh cursor at step 0, under the caps the first one was opened with.
+    fn cursor(&self) -> TmCursor<Rc<Machine>> {
+        TmCursor::new(Rc::clone(&self.machine), &self.init, self.caps)
+    }
 }
 
 /// The rxm leg: the listing, the cursor a view records, and how `compile`'s own run of the program ended,
@@ -483,6 +501,10 @@ pub(crate) struct RxmLeg {
     total_steps: u64,
     /// How `compile`'s run ended.
     end: RxmEnd,
+    /// The program `cursor` runs and the caps `run` opened it with, kept so that a rewind opens a fresh one under
+    /// those caps rather than a raised one's.
+    source: Rc<Program>,
+    caps: tm::rxm::Caps,
 }
 
 /// How the run `compile` performed ended: what `rxm_value` answers from, until a raised cap lets the recording
@@ -518,12 +540,12 @@ fn build_rxm_leg(core: &Core, caps: tm::rxm::Caps) -> Result<RxmLeg, tm::LowerEr
     Ok(RxmLeg::run(Rc::new(tm::lower_program(core)?), caps))
 }
 
-/// The rxm leg's run and four of its answers, **ONE IMPLEMENTATION FOR THE PROGRAM'S LEG AND A COPY'S.**
+/// The rxm leg's run, its rewind and four of its answers, **ONE IMPLEMENTATION FOR THE PROGRAM'S LEG AND A COPY'S.**
 /// `Session` and `RxmScratch` each hold an `RxmLeg` that `run` built, and their `rxm_status`, `step_rxm`,
-/// `rxm_state` and `rxm_value` forward to `status`, `step`, `state` and `value`; the two differ only in what
-/// they hand in — the session its `SourceMap` and the program's type, a copy no map and its header's type, if
-/// it has one. Their `rxm_program` and `raise_rxm_cap` need no method here: each reads the `program` field or
-/// raises the `cursor`'s cap directly, as `Session::rxm_text` prints the cursor's program.
+/// `rxm_state`, `rxm_value` and `rewind_rxm` forward to `status`, `step`, `state`, `value` and `rewind`; the two
+/// differ only in what they hand in — the session its `SourceMap` and the program's type, a copy no map and its
+/// header's type, if it has one. Their `rxm_program` and `raise_rxm_cap` need no method here: each reads the
+/// `program` field or raises the `cursor`'s cap directly, as `Session::rxm_text` prints the cursor's program.
 impl RxmLeg {
     /// Run `program` to its end under `caps`, then open the cursor a view records: `build_rxm_leg`'s whole
     /// run, for a program from a lowering or from text alike.
@@ -538,7 +560,14 @@ impl RxmLeg {
             // `run_rxm` does for the same arm, rather than panicking, since a panic under wasm aborts the module.
             Some(trace::RxmStatus::Capped(_)) | None => RxmEnd::Capped,
         };
-        RxmLeg { program: RxmProgram::of(&program), cursor: RxmCursor::new(program, caps), total_steps, end }
+        RxmLeg {
+            program: RxmProgram::of(&program),
+            cursor: RxmCursor::new(Rc::clone(&program), caps),
+            total_steps,
+            end,
+            source: program,
+            caps,
+        }
     }
 
     /// `Session::rxm_status` for a leg that is there.
@@ -549,6 +578,11 @@ impl RxmLeg {
             Some(trace::RxmStatus::Capped(cap)) => (RunStatus::Capped, Some(*cap)),
         };
         RxmStatus { available: true, reason: String::new(), run: Some(run), cap, total_steps: Some(self.total_steps) }
+    }
+
+    /// Back to step 0 under the caps `run` opened the cursor with.
+    fn rewind(&mut self) {
+        self.cursor = RxmCursor::new(Rc::clone(&self.source), self.caps);
     }
 
     /// Advance one instruction; `false` once the run has halted, faulted or been capped.
@@ -637,6 +671,14 @@ impl LambdaLeg {
         let cursor = LambdaCursor::new(term, cap);
         let marks = LambdaCheckpoints::new(&cursor, LAMBDA_CHECKPOINT_EVERY);
         LambdaLeg { cursor, marks }
+    }
+
+    /// Back to the first step this leg holds, under the cap it began with, with the later checkpoints dropped.
+    pub(crate) fn rewind(&mut self) {
+        // `None` is unreachable, since `new` saves a first checkpoint, and would leave the cursor where it is.
+        if let Some(c) = self.marks.rewind() {
+            self.cursor = c;
+        }
     }
 
     /// Advance one β-step; `false` once the run has ended.
@@ -861,12 +903,12 @@ impl Session {
                 // a run that spent its budget is resumable through `raise_tm_cap`, so flattening it
                 // into a decline would throw away a session the user can still drive.
                 TmRun::Ran { tapes } => {
-                    let (p, c) = build_tm_leg(&d.header, Rc::new(d.machine), caps, Some(&map));
-                    Ok(((p, c, d.header), Some(tapes)))
+                    let (p, c, start) = build_tm_leg(&d.header, Rc::new(d.machine), caps, Some(&map));
+                    Ok(((p, c, d.header, start), Some(tapes)))
                 }
                 TmRun::HitCap => {
-                    let (p, c) = build_tm_leg(&d.header, Rc::new(d.machine), caps, Some(&map));
-                    Ok(((p, c, d.header), None))
+                    let (p, c, start) = build_tm_leg(&d.header, Rc::new(d.machine), caps, Some(&map));
+                    Ok(((p, c, d.header, start), None))
                 }
             },
         };
@@ -964,6 +1006,12 @@ impl Session {
         Ok(())
     }
 
+    /// Back to step 0 under compile's cap.
+    pub fn rewind_lambda(&mut self) -> Result<(), SessionError> {
+        self.lambda.as_mut().map_err(|_| SessionError::LambdaAbsent)?.rewind();
+        Ok(())
+    }
+
     /// The λ leg's answer, decoded against the program's type.
     ///
     /// `Unfinished` UNTIL THE RUN ENDS, and that is a check on `RunStatus` rather than on the shape
@@ -1002,7 +1050,7 @@ impl Session {
 
     pub fn tm_status(&self) -> TmStatus {
         match &self.tm {
-            Ok((p, c, _)) => {
+            Ok((p, c, _, _)) => {
                 // No depth guard on this leg — the machine has no term to recurse over — so `HitCap`
                 // has one producer and `Capped` is unambiguous here in a way it is not for λ.
                 let run = match c.status() {
@@ -1040,7 +1088,7 @@ impl Session {
     /// AVAILABILITY IS READ OFF `tm`, the same place `tm_status` reads it, so the two cannot disagree
     /// about whether this leg is there.
     pub fn tm_program(&self) -> Result<TmProgram, SessionError> {
-        let (p, _, _) = self.tm.as_ref().map_err(|_| SessionError::TmAbsent)?;
+        let (p, _, _, _) = self.tm.as_ref().map_err(|_| SessionError::TmAbsent)?;
         Ok(p.clone())
     }
 
@@ -1065,7 +1113,7 @@ impl Session {
     /// `print_tm_with` AND NOT `print_tm`: without the header the text reparses to a machine running
     /// from blank tapes at `MIN_FIELD_WIDTH`, which is decision 6's state and is not this machine.
     pub fn tm_text(&self) -> Option<String> {
-        let (_, cursor, header) = self.tm.as_ref().ok()?;
+        let (_, cursor, header, _) = self.tm.as_ref().ok()?;
         // `header.result` IS ALREADY GROUND (this method's own doc: `ty::ground(self.ty)`), so
         // `is_decodable_ground` asks the round-trip question directly rather than `is_decodable`
         // grounding it a second time — `RxmHeader::for_type`'s own idiom for the identical reason.
@@ -1094,12 +1142,12 @@ impl Session {
     /// Advance one δ-step. `false` once the run has halted or hit a cap — `tm_status().run` says
     /// which, and is the only thing that can.
     pub fn step_tm(&mut self) -> Result<bool, SessionError> {
-        let (_, c, _) = self.tm.as_mut().map_err(|_| SessionError::TmAbsent)?;
+        let (_, c, _, _) = self.tm.as_mut().map_err(|_| SessionError::TmAbsent)?;
         Ok(c.next().is_some())
     }
 
     pub fn tm_state(&self, radius: usize) -> Result<TmState, SessionError> {
-        let (_, c, _) = self.tm.as_ref().map_err(|_| SessionError::TmAbsent)?;
+        let (_, c, _, _) = self.tm.as_ref().map_err(|_| SessionError::TmAbsent)?;
         Ok(TmState::window(c, Some(&self.map), radius))
     }
 
@@ -1109,7 +1157,7 @@ impl Session {
     /// `get`, NEVER `[]`: an absent tape answers `Err` rather than indexing out of bounds. `from`/`to`
     /// need no such guard because `Tape::slice` clamps both.
     pub fn tape_slice(&self, tape: usize, from: usize, to: usize) -> Result<Vec<Symbol>, SessionError> {
-        let (_, c, _) = self.tm.as_ref().map_err(|_| SessionError::TmAbsent)?;
+        let (_, c, _, _) = self.tm.as_ref().map_err(|_| SessionError::TmAbsent)?;
         let tapes = c.tapes();
         let t = tapes.get(tape).ok_or(SessionError::NoSuchTape { tape, tapes: tapes.len() })?;
         Ok(t.slice(from, to))
@@ -1117,8 +1165,15 @@ impl Session {
 
     /// Extend a capped run's budget. Additive and saturating, like the λ leg's.
     pub fn raise_tm_cap(&mut self, extra_steps: u64, extra_cells: u64) -> Result<(), SessionError> {
-        let (_, c, _) = self.tm.as_mut().map_err(|_| SessionError::TmAbsent)?;
+        let (_, c, _, _) = self.tm.as_mut().map_err(|_| SessionError::TmAbsent)?;
         c.raise_cap(extra_steps, extra_cells);
+        Ok(())
+    }
+
+    /// Back to step 0 under compile's caps.
+    pub fn rewind_tm(&mut self) -> Result<(), SessionError> {
+        let (_, c, _, start) = self.tm.as_mut().map_err(|_| SessionError::TmAbsent)?;
+        *c = start.cursor();
         Ok(())
     }
 
@@ -1148,7 +1203,7 @@ impl Session {
     /// apart. Under the second, `total_steps` is the count reached when cells ran out — well below
     /// `caps.steps` — so a reader must not take a capped run's length as evidence of which wall it hit.
     pub fn tm_value(&self) -> Result<Decoded, SessionError> {
-        let (_, cursor, _) = self.tm.as_ref().map_err(|_| SessionError::TmAbsent)?;
+        let (_, cursor, _, _) = self.tm.as_ref().map_err(|_| SessionError::TmAbsent)?;
         let tapes: &[Tape] = match &self.final_tapes {
             Some(t) => t,
             None if cursor.status() == Some(tm::TmStatus::Halted) => cursor.tapes(),
@@ -1198,6 +1253,12 @@ impl Session {
     pub fn raise_rxm_cap(&mut self, extra_steps: u64) -> Result<(), SessionError> {
         let leg = self.rxm.as_mut().map_err(|_| SessionError::RxmAbsent)?;
         leg.cursor.raise_cap(extra_steps);
+        Ok(())
+    }
+
+    /// Back to step 0 under compile's caps.
+    pub fn rewind_rxm(&mut self) -> Result<(), SessionError> {
+        self.rxm.as_mut().map_err(|_| SessionError::RxmAbsent)?.rewind();
         Ok(())
     }
 
@@ -1333,7 +1394,7 @@ impl Session {
     /// declined leg yields an empty leg rather than an error — the same shape `SourceMap::build`
     /// already has. There is nothing here for a caller to handle.
     pub fn link_index(&self, byte_budget: usize) -> LinkIndex {
-        let program = self.tm.as_ref().ok().map(|(p, _, _)| p);
+        let program = self.tm.as_ref().ok().map(|(p, _, _, _)| p);
         LinkIndex::build(self.initial_lambda.as_ref(), program, &self.map, byte_budget, MAX_PRINT_DEPTH)
     }
 }
@@ -1401,8 +1462,8 @@ pub fn lambda_scratch(src: &str) -> Scratched<LambdaScratch> {
 ///
 /// **THE PROGRAM'S LEG, NOT A COPY'S VARIANT OF IT.** `rxm_scratch` runs the parsed program to its end and
 /// opens a fresh cursor exactly as `compile` does for a lowered one, so `rxm_status`, `rxm_program`,
-/// `step_rxm`, `rxm_state`, `raise_rxm_cap` and `rxm_value` are `RxmLeg`'s, and every field of `RxmStatus`
-/// is true of a copy — which is why this answers `RxmStatus` where `TmScratch` needs a status of its own.
+/// `step_rxm`, `rxm_state`, `raise_rxm_cap`, `rxm_value` and `rewind_rxm` are `RxmLeg`'s, and every field of
+/// `RxmStatus` is true of a copy — which is why this answers `RxmStatus` where `TmScratch` needs a status of its own.
 ///
 /// **NO `SourceMap`, SO NO `sourceSpan` OR `linkIndex`** — `LambdaScratch`'s reason, and `rxm_state`'s
 /// `source_node` is `null` on every frame. A copy links to nothing.
@@ -1518,6 +1579,11 @@ impl RxmScratch {
     /// See `Session::raise_rxm_cap`.
     pub fn raise_rxm_cap(&mut self, extra_steps: u64) {
         self.leg.cursor.raise_cap(extra_steps);
+    }
+
+    /// Back to step 0 under the build's caps.
+    pub fn rewind_rxm(&mut self) {
+        self.leg.rewind();
     }
 
     /// See `Session::rxm_value`, decoded by the header's type; with no header, the raw word, marked.
@@ -1665,6 +1731,11 @@ impl LambdaScratch {
         self.lambda.cursor.raise_cap(extra);
     }
 
+    /// Back to the first step this copy holds, under the cap it began with.
+    pub fn rewind_lambda(&mut self) {
+        self.lambda.rewind();
+    }
+
     /// Rebuild the cursor with a small cap, so a test has something to raise from. TEST-ONLY, for the
     /// reason `Session::cap_lambda_at` records: there is no product reason to lower a budget, and
     /// `MAX_REDUCTION_STEPS` is 5,000,000, so `Capped` is otherwise only reachable by actually spending
@@ -1758,6 +1829,8 @@ pub struct TmScratch {
     /// more than one question for it — `result`, `encoding` and the literal `tape` lines are all in
     /// here — and because `tm_status().header` is a fact about the FILE, not about the width.
     header: Option<tm::TmHeader>,
+    /// What `cursor` was opened from, for `rewind_tm`.
+    start: TmStart,
 }
 
 /// Build a TM scratchpad from TM TEXT — the `.tm` form, not rxm and not source.
@@ -1844,7 +1917,7 @@ fn tm_scratch_with_caps(src: &str, caps: tm::TmCaps) -> TmScratched {
     // run to a million rules, and cloning one for a second cursor would double the largest thing a scratch holds.
     let value = header.clone().map(|h| TmValueRun::new(Rc::clone(&m), h));
     let scratch = {
-        let (program, cursor) = match &header {
+        let (program, cursor, start) = match &header {
             // The IDENTICAL function `compile` builds its leg with, not a copy of it — which is what
             // makes "a headered scratch matches the `Session` path" a property of one code path rather
             // than an agreement between two.
@@ -1857,7 +1930,7 @@ fn tm_scratch_with_caps(src: &str, caps: tm::TmCaps) -> TmScratched {
             // one.
             None => tm_leg_at(m, tm::MIN_FIELD_WIDTH, &[], caps, None),
         };
-        TmScratch { program, cursor, header }
+        TmScratch { program, cursor, header, start }
     };
     TmScratched { diagnostics: doc.diagnostics, scratch: Some(scratch), value }
 }
@@ -1944,6 +2017,11 @@ impl TmScratch {
     /// Extend a capped run's budget. Additive and saturating, like every other cap raise here.
     pub fn raise_tm_cap(&mut self, extra_steps: u64, extra_cells: u64) {
         self.cursor.raise_cap(extra_steps, extra_cells);
+    }
+
+    /// Back to step 0 under the build's caps.
+    pub fn rewind_tm(&mut self) {
+        self.cursor = self.start.cursor();
     }
 }
 
@@ -2502,6 +2580,245 @@ mod tests {
         assert!(tree(&at).link.iter().all(|&l| l == redextape_core::viewmodel::tree::NO_LINK));
     }
 
+    // --- the rewind ---------------------------------------------------------------------------
+
+    /// Every frame `step` takes `s` through from where it stands to its end, its first frame included: what a
+    /// view records of a leg.
+    fn frames_to_end<S, F>(s: &mut S, frame: impl Fn(&S) -> F, step: impl Fn(&mut S) -> bool) -> Vec<F> {
+        let mut out = vec![frame(s)];
+        while step(s) {
+            out.push(frame(s));
+        }
+        out
+    }
+
+    /// The rewind drops a raised cap, the step cap or the cells cap: the leg records what a fresh build does, to the
+    /// cap compile ran under. `[1, 2, 3]` reaches 40 cells long before the step cap, so there the cells cap stops it.
+    #[test]
+    fn a_rewound_tm_leg_records_what_a_fresh_one_does() {
+        let by_steps = tm::TmCaps { steps: 10, cells: tm::TM_DEFAULT_CAPS.cells };
+        let by_cells = tm::TmCaps { steps: tm::TM_DEFAULT_CAPS.steps, cells: 40 };
+        for (caps, (extra_steps, extra_cells), frames) in [(by_steps, (5, 0), 11), (by_cells, (0, 1), 224)] {
+            let compile = || {
+                Session::compile_with_caps("[1, 2, 3]", EncodingKind::Unary, caps, tm::rxm::DEFAULT_CAPS)
+                    .session
+                    .expect("compiles")
+            };
+            let mut s = compile();
+            while s.step_tm().expect("TM available") {}
+            s.raise_tm_cap(extra_steps, extra_cells).expect("TM available");
+            for _ in 0..3 {
+                assert!(s.step_tm().expect("TM available"), "{caps:?}");
+            }
+            s.rewind_tm().expect("TM available");
+            let mut fresh = compile();
+            let frame = |s: &Session| s.tm_state(40).expect("TM available");
+            let step = |s: &mut Session| s.step_tm().expect("TM available");
+            let (a, b) = (frames_to_end(&mut s, frame, step), frames_to_end(&mut fresh, frame, step));
+            assert_eq!(a.len(), frames, "{caps:?}");
+            assert_eq!(a, b, "{caps:?}");
+            assert_eq!(s.tm_status(), fresh.tm_status(), "{caps:?}");
+        }
+    }
+
+    /// A TM copy's rewind goes back to the caps it was built with, as the session's goes back to compile's, a raised
+    /// step cap and a raised cells cap alike. The machine takes a new cell at every step, so either cap of 3 stops it.
+    #[test]
+    fn a_rewound_tm_copy_records_what_a_fresh_one_does() {
+        let spin = "tapes 1\nstart go\n\nstate go:\n  [*] -> write [*], move [R], goto go\n";
+        let by_steps = tm::TmCaps { steps: 3, cells: tm::TM_DEFAULT_CAPS.cells };
+        let by_cells = tm::TmCaps { steps: tm::TM_DEFAULT_CAPS.steps, cells: 3 };
+        for (caps, (extra_steps, extra_cells)) in [(by_steps, (4, 0)), (by_cells, (0, 4))] {
+            let build = || tm_scratch_with_caps(spin, caps).scratch.expect("parses");
+            let mut sc = build();
+            while sc.step_tm() {}
+            sc.raise_tm_cap(extra_steps, extra_cells);
+            assert!(sc.step_tm(), "{caps:?}");
+            sc.rewind_tm();
+            let mut fresh = build();
+            let frame = |s: &TmScratch| s.tm_state(40);
+            let (a, b) = (
+                frames_to_end(&mut sc, frame, TmScratch::step_tm),
+                frames_to_end(&mut fresh, frame, TmScratch::step_tm),
+            );
+            assert_eq!(a.len(), 4, "{caps:?}");
+            assert_eq!(a, b, "{caps:?}");
+            assert_eq!(sc.tm_status(), fresh.tm_status(), "{caps:?}");
+        }
+    }
+
+    /// The rxm leg's rewind drops a raised cap too, and records what a fresh build does.
+    #[test]
+    fn a_rewound_rxm_leg_records_what_a_fresh_one_does() {
+        let caps = tm::rxm::Caps { steps: 3, ..tm::rxm::DEFAULT_CAPS };
+        let compile = || {
+            Session::compile_with_caps("[1, 2, 3]", EncodingKind::Unary, tm::TM_DEFAULT_CAPS, caps)
+                .session
+                .expect("compiles")
+        };
+        let mut s = compile();
+        while s.step_rxm().expect("rxm available") {}
+        s.raise_rxm_cap(5).expect("rxm available");
+        assert!(s.step_rxm().expect("rxm available"));
+        s.rewind_rxm().expect("rxm available");
+        let mut fresh = compile();
+        let frame = |s: &Session| s.rxm_state(RXM_WHOLE).expect("rxm available");
+        let step = |s: &mut Session| s.step_rxm().expect("rxm available");
+        let (a, b) = (frames_to_end(&mut s, frame, step), frames_to_end(&mut fresh, frame, step));
+        assert_eq!(a.len(), 4);
+        assert_eq!(a, b);
+        assert_eq!(s.rxm_status(), fresh.rxm_status());
+        assert_eq!(s.rxm_value(), fresh.rxm_value());
+    }
+
+    /// The rxm rewind leaves `end` as compile's run left it (spec §5.4): a run that halted keeps its value while the
+    /// cursor records from step 0 again, as a fresh build's does.
+    #[test]
+    fn a_rewound_rxm_leg_keeps_the_value_compile_s_run_ended_with() {
+        let compile = || Session::compile("[1, 2, 3]", EncodingKind::Unary).session.expect("compiles");
+        let mut s = compile();
+        assert!(s.step_rxm().expect("rxm available"));
+        s.rewind_rxm().expect("rxm available");
+        assert_eq!(s.rxm_state(RXM_WHOLE).expect("rxm available").step, 0);
+        let value = Ok(Decoded::Value { text: "[1, 2, 3]".to_string() });
+        assert_eq!(s.rxm_value(), value);
+        assert_eq!(compile().rxm_value(), value);
+    }
+
+    /// An rxm copy's rewind goes back to the caps it was built with.
+    #[test]
+    fn a_rewound_rxm_copy_records_what_a_fresh_one_does() {
+        let text =
+            Session::compile("[1, 2, 3]", EncodingKind::Unary).session.expect("compiles").rxm_text().expect("rxm");
+        let caps = tm::rxm::Caps { steps: 3, ..tm::rxm::DEFAULT_CAPS };
+        let build = || rxm_scratch_with_caps(&text, caps).scratch.expect("builds");
+        let mut sc = build();
+        while sc.step_rxm() {}
+        sc.raise_rxm_cap(5);
+        assert!(sc.step_rxm());
+        sc.rewind_rxm();
+        let mut fresh = build();
+        let frame = |s: &RxmScratch| s.rxm_state(RXM_WHOLE);
+        let (a, b) = (
+            frames_to_end(&mut sc, frame, RxmScratch::step_rxm),
+            frames_to_end(&mut fresh, frame, RxmScratch::step_rxm),
+        );
+        assert_eq!(a.len(), 4);
+        assert_eq!(a, b);
+        assert_eq!(sc.rxm_status(), fresh.rxm_status());
+        assert_eq!(sc.rxm_value(), fresh.rxm_value());
+    }
+
+    /// The λ rewind drops the raised cap and every checkpoint past step 0, and the run it records again takes
+    /// the same checkpoints a fresh one does: its past steps rebuild alike.
+    #[test]
+    fn a_rewound_lambda_leg_records_what_a_fresh_one_does() {
+        let compile = || {
+            let mut s = Session::compile(FACT3, EncodingKind::Unary).session.expect("compiles");
+            s.cap_lambda_at(600);
+            s
+        };
+        let mut s = compile();
+        while s.step_lambda().expect("λ available") {}
+        s.raise_lambda_cap(100).expect("λ available");
+        for _ in 0..50 {
+            assert!(s.step_lambda().expect("λ available"));
+        }
+        let saved = |s: &Session| s.lambda.as_ref().expect("λ available").marks.saved_steps();
+        assert_eq!(saved(&s), vec![0, 256, 512]);
+        s.rewind_lambda().expect("λ available");
+        assert_eq!(saved(&s), vec![0]);
+        let mut fresh = compile();
+        let frame = |s: &Session| s.lambda_state(512).expect("λ available");
+        let step = |s: &mut Session| s.step_lambda().expect("λ available");
+        let (a, b) = (frames_to_end(&mut s, frame, step), frames_to_end(&mut fresh, frame, step));
+        assert_eq!(a.len(), 601);
+        assert_eq!(a, b);
+        assert_eq!(saved(&s), vec![0, 256, 512], "the run recorded again takes its checkpoints again");
+        assert_eq!(saved(&s), saved(&fresh));
+        assert_eq!(s.lambda_status(), fresh.lambda_status());
+        assert_eq!(
+            s.lambda_tree(300, usize::MAX).expect("λ available").answer,
+            fresh.lambda_tree(300, usize::MAX).expect("λ available").answer
+        );
+    }
+
+    /// FACT3's step-0 λ text, which a copy made at step 0 is built from.
+    fn fact3_lambda_text() -> String {
+        Session::compile(FACT3, EncodingKind::Unary)
+            .session
+            .expect("compiles")
+            .lambda_state(usize::MAX)
+            .expect("λ")
+            .text
+    }
+
+    /// A λ copy's rewind drops its raised cap and its later checkpoints, as the session's does, and the run it
+    /// records again takes the same checkpoints a fresh one does.
+    #[test]
+    fn a_rewound_lambda_copy_records_what_a_fresh_one_does() {
+        let text = fact3_lambda_text();
+        let build = || {
+            let mut sc = lambda_scratch(&text).scratch.expect("parses");
+            sc.cap_lambda_at(600);
+            sc
+        };
+        let mut sc = build();
+        while sc.step_lambda() {}
+        sc.raise_lambda_cap(100);
+        assert!(sc.step_lambda());
+        sc.rewind_lambda();
+        let saved = |s: &LambdaScratch| s.lambda.marks.saved_steps();
+        assert_eq!(saved(&sc), vec![0]);
+        let mut fresh = build();
+        let frame = |s: &LambdaScratch| s.lambda_state(512);
+        let (a, b) = (
+            frames_to_end(&mut sc, frame, LambdaScratch::step_lambda),
+            frames_to_end(&mut fresh, frame, LambdaScratch::step_lambda),
+        );
+        assert_eq!(a.len(), 601);
+        assert_eq!(a, b);
+        assert_eq!(saved(&sc), vec![0, 256, 512], "the run recorded again takes its checkpoints again");
+        assert_eq!(saved(&sc), saved(&fresh));
+        assert_eq!(sc.lambda_status(), fresh.lambda_status());
+    }
+
+    /// A copy forked at a step is built from that step's term, so its first step is that term and its rewind goes
+    /// back there, not to the program's step 0 (spec §5.4).
+    #[test]
+    fn a_rewound_lambda_copy_forked_at_a_step_starts_at_that_step() {
+        let text = fact3_lambda_text();
+        let fork = || lambda_scratch_at(&text, 300, usize::MAX);
+        let forked = fork();
+        let at = forked.text.expect("the step-300 term prints whole");
+        let mut sc = forked.scratch.expect("the step-300 term reparses");
+        for _ in 0..40 {
+            assert!(sc.step_lambda());
+        }
+        sc.rewind_lambda();
+        let first = sc.lambda_state(usize::MAX);
+        assert_eq!((first.step, first.text), (0, at));
+        let mut fresh = fork().scratch.expect("the step-300 term reparses");
+        let frame = |s: &LambdaScratch| s.lambda_state(512);
+        let (a, b) = (
+            frames_to_end(&mut sc, frame, LambdaScratch::step_lambda),
+            frames_to_end(&mut fresh, frame, LambdaScratch::step_lambda),
+        );
+        assert_eq!(a, b);
+        assert_eq!(sc.lambda_status(), fresh.lambda_status());
+    }
+
+    /// An absent leg has no cursor to rewind: each rewind answers its leg's `Absent`, as `step_*` does.
+    #[test]
+    fn a_rewind_on_an_absent_leg_is_an_error() {
+        let mut s = Session::compile(LAMBDA_DECLINES, EncodingKind::Unary).session.expect("the TM leg handles it");
+        assert_eq!(s.rewind_lambda(), Err(SessionError::LambdaAbsent));
+        let src = format!("[{}]", (0..2048).map(|i| i.to_string()).collect::<Vec<_>>().join(", "));
+        let mut s = Session::compile(&src, EncodingKind::Unary).session.expect("a declined leg is still a session");
+        assert_eq!(s.rewind_tm(), Err(SessionError::TmAbsent));
+        assert_eq!(s.rewind_rxm(), Err(SessionError::RxmAbsent));
+    }
+
     // --- the λ scratchpad ------------------------------------------------------------------------
 
     #[test]
@@ -2773,6 +3090,7 @@ mod tests {
         assert_eq!(s.tape_slice(0, 0, 4), Err(SessionError::TmAbsent));
         assert_eq!(s.step_tm(), Err(SessionError::TmAbsent));
         assert_eq!(s.raise_tm_cap(1, 1), Err(SessionError::TmAbsent));
+        assert_eq!(s.rewind_tm(), Err(SessionError::TmAbsent));
 
         // 2048 is above BOTH lowering guards, so this is also the case where every method on the
         // session refuses — the shape §7 says the UI must render honestly rather than as an error.
@@ -3081,6 +3399,7 @@ mod tests {
         assert_eq!(s.step_rxm(), Err(SessionError::RxmAbsent));
         assert_eq!(s.raise_rxm_cap(1), Err(SessionError::RxmAbsent));
         assert_eq!(s.rxm_value(), Err(SessionError::RxmAbsent));
+        assert_eq!(s.rewind_rxm(), Err(SessionError::RxmAbsent));
         assert!(s.link_index(65_536).rxm_owner.is_empty(), "no program, no owners");
     }
 

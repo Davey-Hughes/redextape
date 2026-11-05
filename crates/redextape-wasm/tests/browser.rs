@@ -405,8 +405,10 @@ fn a_lambda_limitation_program_reports_a_tm_only_session() {
     // certainly not a made-up "Ended".
     assert!(get(&lambda, "run").is_null(), "there is no λ run to have a status, got {:?}", get(&lambda, "run"));
 
-    // Every λ method throws rather than aborting the module.
-    for method in ["stepLambda", "lambdaState", "lambdaTree"] {
+    // Every λ method but `lambdaStatus`, asked above, throws rather than aborting the module.
+    for method in
+        ["stepLambda", "lambdaState", "lambdaTree", "raiseLambdaCap", "rewindLambda", "lambdaValue", "runLambda"]
+    {
         let f: Function = get(&session, method).unchecked_into();
         let args = Array::new();
         args.push(&JsValue::from_f64(1_000_000.0));
@@ -1017,7 +1019,7 @@ fn a_term_past_the_print_cap_is_bounded_rather_than_fatal() {
     assert!(!again.is_null(), "the session survives its own bounded print");
 }
 
-/// A `LambdaScratch` crosses as a HANDLE beside plain diagnostics, and its six methods are
+/// A `LambdaScratch` crosses as a HANDLE beside plain diagnostics, and six of its methods are
 /// reachable on the prototype. Same shape as `compile`, and asserted the same way — through `Reflect`,
 /// because a method missing from the generated glue is exactly what this tier exists to catch and
 /// holding the Rust value would prove nothing about the glue.
@@ -1412,6 +1414,7 @@ fn a_declined_rxm_leg_reports_why_and_its_methods_throw() {
         ("rxmState", Some(rxm_window(64, 16, 8, 16, 16))),
         ("raiseRxmCap", Some(JsValue::from_f64(1.0))),
         ("rxmValue", None),
+        ("rewindRxm", None),
     ] {
         let f: Function = get(&session, method).unchecked_into();
         let args = Array::new();
@@ -1477,4 +1480,36 @@ fn declined_rxm_text_crosses_as_null_not_undefined() {
     assert_eq!(get(&call(&session, "rxmStatus", &[]), "available"), JsValue::FALSE, "the premise");
     let text = call(&session, "rxmText", &[]);
     assert!(text.is_null(), "a declined rxm leg's rxmText must cross as `null`, got {text:?}");
+}
+
+/// The rewinds through the glue, on a session and on each copy: each leg steps once, rewinds, and reads `step` 0
+/// again. A rewind returns nothing on either, and on the session it throws only for an absent leg: a declined TM
+/// leg's here, and λ's and rxm's in the loops of `a_lambda_limitation_program_reports_a_tm_only_session` and
+/// `a_declined_rxm_leg_reports_why_and_its_methods_throw`.
+#[wasm_bindgen_test]
+fn the_rewind_bindings_cross_on_a_session_and_on_each_copy() {
+    let (_, session) = compile("let x = 40; x + 2");
+    let lambda = get(&redextape_wasm::lambda_scratch("(\\x. x) (\\y. y)").expect("lambdaScratch"), "scratch");
+    let blank_to_mark = "tapes 1\nstart go\n\nstate go:\n  [*] -> write [1], move [S], goto halt\nstate halt: accept\n";
+    let tm = get(&redextape_wasm::tm_scratch(blank_to_mark).expect("tmScratch"), "scratch");
+    let text = call(&session, "rxmText", &[]).as_string().expect("rxmText crosses as a string");
+    let rxm = get(&redextape_wasm::rxm_scratch(&text).expect("rxmScratch"), "scratch");
+    let legs = [
+        (lambda, "stepLambda", "rewindLambda", "lambdaState", JsValue::from_f64(1_000_000.0)),
+        (tm, "stepTm", "rewindTm", "tmState", JsValue::from_f64(3.0)),
+        (rxm, "stepRxm", "rewindRxm", "rxmState", rxm_window(64, 16, 8, 16, 16)),
+    ];
+    let step_of = |on: &JsValue, state: &str, arg: &JsValue| num(&call(on, state, std::slice::from_ref(arg)), "step");
+    for (copy, step, rewind, state, arg) in &legs {
+        for (on, what) in [(&session, "session"), (copy, "copy")] {
+            assert_eq!(call(on, step, &[]), JsValue::TRUE, "the {what} takes a step: {step}");
+            assert_eq!(step_of(on, state, arg), 1.0, "{what} {state}");
+            assert!(call(on, rewind, &[]).is_undefined(), "{what} {rewind} returns nothing");
+            assert_eq!(step_of(on, state, arg), 0.0, "{what} {state} after {rewind}");
+        }
+    }
+    let (_, declined) = compile("let mut n = 1; while n > 0 { n = n + 1; } n");
+    assert_eq!(get(&call(&declined, "tmStatus", &[]), "available"), JsValue::FALSE, "the TM leg must decline");
+    let f: Function = get(&declined, "rewindTm").unchecked_into();
+    assert!(Reflect::apply(&f, &declined, &Array::new()).is_err(), "rewindTm must throw for an absent leg");
 }

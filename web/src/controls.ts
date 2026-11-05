@@ -23,6 +23,11 @@ export type LegView = {
   playing: boolean
   /** The step a shared link's position is taking this leg to, or `null` — `LegState.pending`. */
   pending: number | null
+  /**
+   * Whether a rewind emptied the ring and its first frames have not come (`LegState.epoch` above 0 and nothing
+   * recorded): the leg is recording from step 0, which `recording` and the step line say, rather than not run.
+   */
+  rewinding: boolean
 }
 
 export type ControlState = {
@@ -36,9 +41,9 @@ export type ControlState = {
   canPlay: boolean
   canRestart: boolean
   /**
-   * Whether frames are still arriving for a run that has some, which is when the readout's count carries `…`. A `▶`
-   * or `⏭` that this recording turns off under the focus waits for it rather than handing the focus on
-   * (`step-controls.ts`).
+   * Whether frames are still arriving for a run that has some, or for a rewind's first, which is when the readout's
+   * count carries `…`. A `▶` or `⏭` that this recording turns off under the focus, or a `↺` whose press started it,
+   * waits for it rather than handing the focus on (`step-controls.ts`).
    */
   recording: boolean
   /**
@@ -138,7 +143,7 @@ export function controlState(v: LegView): ControlState {
 
   // `…` MEANS "THIS COUNT IS NOT FINAL", which is why `awaitingRun` drops it: the run this readout
   // describes has been superseded and will record nothing more, whatever the new one goes on to do.
-  const recording = v.length > 0 && v.done === null && !v.awaitingRun
+  const recording = (v.length > 0 || v.rewinding) && v.done === null && !v.awaitingRun
   const of = recording ? `${n(v.newestStep)}…` : n(v.newestStep)
   const oldest = v.evicted ? ` (oldest kept: step ${n(v.oldestStep)})` : ''
   // THE READOUT SAYS WHAT THE USER DID; THE FIELD NAMES WHAT IS TRUE OF THE SESSION. They are the
@@ -152,7 +157,7 @@ export function controlState(v: LegView): ControlState {
       : v.done === null
         ? ''
         : doneText(v.done)
-  const stepText = v.length === 0 ? 'not run' : `step ${n(v.currentStep)} of ${of}${tail}${oldest}`
+  const stepText = v.length === 0 && !v.rewinding ? 'not run' : `step ${n(v.currentStep)} of ${of}${tail}${oldest}`
 
   return {
     canBack: v.head > 0,

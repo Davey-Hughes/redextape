@@ -243,6 +243,15 @@ impl LambdaCheckpoints {
         }
         Some(c)
     }
+
+    /// Drop every checkpoint after the first and answer a cursor at the first, under the cap it was saved
+    /// with: the run again from where it began. `at(0)` would not do, since it lifts the cap. `None` only
+    /// for checkpoints with no first, which `new` never builds.
+    #[must_use]
+    pub fn rewind(&mut self) -> Option<LambdaCursor> {
+        self.saved.truncate(1);
+        self.saved.first().cloned()
+    }
 }
 
 /// Lazy δ-stepping, and THE δ-stepping loop in this crate. `sim::run` — the single implementation
@@ -542,6 +551,40 @@ mod tests {
         assert_eq!(tr.status, Status::HitCap);
         assert_eq!(tr.steps.len() as u64, cap);
         assert_eq!(tr.normal_form, *c.term());
+    }
+
+    /// A rewind answers the first checkpoint under the cap it was saved with, not `at`'s lifted one, and drops
+    /// every later checkpoint, so the run recorded again takes its own.
+    #[test]
+    fn a_rewind_keeps_the_first_checkpoint_at_its_own_cap() {
+        let t = term_of("let x = 1; let y = x + x; y * 3");
+        assert!(
+            reduce_trace(&t, MAX_REDUCTION_STEPS).steps.len() >= 9,
+            "the run must outlast the first cap by the four steps taken after the raise"
+        );
+        let mut c = LambdaCursor::new(&t, 5);
+        let mut marks = LambdaCheckpoints::new(&c, 2);
+        while c.next().is_some() {
+            marks.observe(&c);
+        }
+        assert_eq!(c.status(), Some(Status::HitCap));
+        c.raise_cap(10);
+        for _ in 0..4 {
+            assert!(c.next().is_some());
+            marks.observe(&c);
+        }
+        assert_eq!(marks.saved_steps(), vec![0, 2, 4, 6, 8]);
+        let mut rewound = marks.rewind().expect("`new` saves a first checkpoint");
+        assert_eq!(marks.saved_steps(), vec![0]);
+        assert_eq!(rewound.steps_taken(), 0);
+        let mut steps = 0;
+        while rewound.next().is_some() {
+            marks.observe(&rewound);
+            steps += 1;
+        }
+        assert_eq!(steps, 5);
+        assert_eq!(rewound.status(), Some(Status::HitCap));
+        assert_eq!(marks.saved_steps(), vec![0, 2, 4], "the run recorded again takes its checkpoints again");
     }
 
     /// ADDING A `StepEvent` VARIANT MUST FAIL TO COMPILE HERE, and that is this test's whole purpose —

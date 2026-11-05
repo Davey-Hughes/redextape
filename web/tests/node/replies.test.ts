@@ -748,29 +748,34 @@ describe('a TM buffer retains what its panes were last told', () => {
  * the next frame; the chunk that ends the recording paints at once, since a copy's run gets no `result` reply to
  * paint its last frame.
  *
- * EVERY CASE RUNS FOR BOTH SWITCHES AND ALL THREE LEGS. The six arms are written out separately, so a case run against
- * one of them says nothing about the other five.
+ * EVERY CASE RUNS FOR BOTH SWITCHES AND ALL THREE LEGS. Each of the six arms passes its own leg and sizer to the
+ * helper they share, and a wrong one is wrong in that arm alone, so a case run against one says nothing of the rest.
  */
 describe('a recording chunk redraws once per frame', () => {
   const FRAMES_LEGS = ['lambda', 'tm', 'rxm'] as const
   type FramesLeg = (typeof FRAMES_LEGS)[number]
   const CASES = (['onReply', 'onScratchReply'] as const).flatMap((sw) => FRAMES_LEGS.map((l) => [sw, l] as const))
 
-  /** A `*-frames` reply for `leg` carrying steps `from` to `from + 1`, and the frames it carries. */
-  const chunk = (leg: FramesLeg, from: number, done: RecordEnd | null): { reply: RunReply; frames: unknown[] } => {
+  /** A `*-frames` reply for `leg` carrying steps `from` to `from + 1` under `epoch`, and the frames it carries. */
+  const chunk = (
+    leg: FramesLeg,
+    from: number,
+    done: RecordEnd | null,
+    epoch = 0,
+  ): { reply: RunReply; frames: unknown[] } => {
     const steps = [from, from + 1]
     switch (leg) {
       case 'lambda': {
         const frames = steps.map((step) => ({ ...lambdaFrame(`t${step}`), step }))
-        return { reply: { kind: 'lambda-frames', gen: 1, frames, done }, frames }
+        return { reply: { kind: 'lambda-frames', gen: 1, epoch, frames, done }, frames }
       }
       case 'tm': {
         const frames = steps.map((step) => tmFrame(0, step, 'a'))
-        return { reply: { kind: 'tm-frames', gen: 1, frames, done }, frames }
+        return { reply: { kind: 'tm-frames', gen: 1, epoch, frames, done }, frames }
       }
       case 'rxm': {
         const frames = steps.map((step) => frameOf({ step }))
-        return { reply: { kind: 'rxm-frames', gen: 1, frames, done }, frames }
+        return { reply: { kind: 'rxm-frames', gen: 1, epoch, frames, done }, frames }
       }
     }
   }
@@ -832,6 +837,40 @@ describe('a recording chunk redraws once per frame', () => {
     expect(h.leg().done).toBe('budget')
     expect(h.drawn()).toBe(1)
     expect(h.q.pending.length).toBe(0)
+  })
+
+  /**
+   * **A CHUNK OF ANOTHER EPOCH THAN ITS LEG'S IS FROM A RECORDING A REWIND REPLACED**, posted before the worker took
+   * the rewind: it pushes nothing, leaves the leg's end and draws nothing, and a chunk at the leg's epoch lands.
+   */
+  it.each(CASES)('%s, %s: a chunk of another epoch is dropped whole, and one of the leg’s own lands', (sw, leg) => {
+    const h = harness(sw, leg)
+    h.leg().epoch = 1
+    h.send(chunk(leg, 0, null).reply)
+    h.send(chunk(leg, 2, 'ended').reply)
+
+    expect({ length: h.leg().hist.length, done: h.leg().done }).toEqual({ length: 0, done: null })
+    expect({ drawn: h.drawn(), pending: h.q.pending.length }).toEqual({ drawn: 0, pending: 0 })
+
+    const own = chunk(leg, 0, 'budget', 1)
+    h.send(own.reply)
+    expect({ length: h.leg().hist.length, done: h.leg().done }).toEqual({ length: 2, done: 'budget' })
+    expect(h.leg().hist.current).toEqual(own.frames[0])
+    expect(h.drawn()).toBe(1)
+  })
+
+  /**
+   * **A LEG'S `gen` IS THE GENERATION OF THE FRAMES ITS RING HOLDS**, which `restart` reads to tell whether the
+   * worker still holds their recording: set from each chunk the leg takes, and left by one it drops.
+   */
+  it.each(CASES)('%s, %s: a chunk of the leg’s epoch sets its gen, and one of another epoch leaves it', (sw, leg) => {
+    const h = harness(sw, leg)
+    h.leg().epoch = 1
+    h.send({ ...chunk(leg, 0, null).reply, gen: 3 })
+    expect(h.leg().gen).toBe(0)
+
+    h.send({ ...chunk(leg, 0, null, 1).reply, gen: 3 })
+    expect(h.leg().gen).toBe(3)
   })
 
   /**
@@ -918,7 +957,13 @@ describe('an rxm copy retains what its views were last told', () => {
     const { buffers, reg, replies } = scratchDriver()
     const id = buffers.forkBlank('rxm')
     replies.onScratchReply(id, built('Unfinished'))
-    replies.onScratchReply(id, { kind: 'rxm-frames', gen: 1, frames: [frameOf(), frameOf({ step: 1 })], done: 'ended' })
+    replies.onScratchReply(id, {
+      kind: 'rxm-frames',
+      gen: 1,
+      epoch: 0,
+      frames: [frameOf(), frameOf({ step: 1 })],
+      done: 'ended',
+    })
     const leg = reg.legOf({ session: id, leg: 'rxm' })
     expect(leg.hist.length).toBe(2)
     expect(leg.hist.current?.step).toBe(0)
@@ -931,6 +976,16 @@ describe('an rxm copy retains what its views were last told', () => {
     replies.onScratchReply(id, built('Unfinished'))
     replies.onScratchReply(id, { kind: 'rxm-value', gen: 1, value: { Value: { text: '[1, 2, 3]' } } })
     expect(reg.entryOf(id).rxmScratch).toEqual({ status: STATUS, value: { Value: { text: '[1, 2, 3]' } } })
+  })
+
+  /** A rewind takes the copy's cursor back under its build's cap, where its next `[continue]` reads `Unfinished`. */
+  it('keeps a decided value when a later [continue] brings Unfinished, as after a rewind', () => {
+    const { buffers, reg, replies } = scratchDriver()
+    const id = buffers.forkBlank('rxm')
+    replies.onScratchReply(id, built('Unfinished'))
+    replies.onScratchReply(id, { kind: 'rxm-value', gen: 1, value: { Value: { text: '6' } } })
+    replies.onScratchReply(id, { kind: 'rxm-value', gen: 1, value: 'Unfinished' })
+    expect(reg.entryOf(id).rxmScratch).toEqual({ status: STATUS, value: { Value: { text: '6' } } })
   })
 
   it('tells every view on the copy the value a [continue] brings, and the null a dead worker leaves', () => {

@@ -37,7 +37,14 @@ const SCRATCH: SessionId = 'lambda-scratch'
 function lambdaSession(id: SessionId, label: string, text: string, detached: boolean): SessionEntry {
   const hist = new History<LambdaState>(1_000_000)
   hist.push({ text, spans: new Uint8Array(), cut: null, step: 0, redex_span: null, owner: 'None' }, 1)
-  const leg: LegState<LambdaState> = { hist, status: { available: true, reason: '' }, done: null, playing: false }
+  const leg: LegState<LambdaState> = {
+    hist,
+    status: { available: true, reason: '' },
+    done: null,
+    playing: false,
+    epoch: 0,
+    gen: 0,
+  }
   return {
     id,
     label,
@@ -68,8 +75,8 @@ function bothLegs(id: SessionId, label: string, text: string): SessionEntry {
     detached: false,
     client: fakeClient(),
     legs: {
-      lambda: { hist: lambdaHist, status: ok, done: null, playing: false },
-      tm: { hist: tmHist, status: ok, done: null, playing: false },
+      lambda: { hist: lambdaHist, status: ok, done: null, playing: false, epoch: 0, gen: 0 },
+      tm: { hist: tmHist, status: ok, done: null, playing: false, epoch: 0, gen: 0 },
     },
     // A TM LEG WITH NO MACHINE BEHIND IT, WHICH IS A STATE THE APP HAS TOO — between registering the
     // source session and its first `compiled` reply. The panes here are built directly rather than by

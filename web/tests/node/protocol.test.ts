@@ -3,18 +3,25 @@ import {
   endOf,
   FRAME_OVERHEAD_BYTES,
   forkable,
+  type HeldLegs,
+  keepDecided,
+  keepInFlight,
+  type LambdaLeg,
   lambdaFrameBytes,
   MAX_FORK_RULES,
   OWNER_BYTES,
   REDEX_SPAN_BYTES,
+  type ResultLegs,
   RXM_WORD_BYTES,
+  type RxmLeg,
   ruleCount,
   rxmFrameBytes,
   rxmRecordEnd,
   SPAN_BYTES,
+  type TmLeg,
   tmFrameBytes,
 } from '../../src/protocol'
-import type { Classified, LambdaState, TmProgram, TmState } from '../../src/types'
+import type { Classified, Decoded, LambdaState, TmProgram, TmState } from '../../src/types'
 import { frameOf } from './rxm-fixtures'
 import { spanBytes } from './span-bytes'
 
@@ -224,5 +231,91 @@ describe('endOf', () => {
     expect(endOf('Ended')).toBe('ended')
     expect(endOf('Running')).toBe('ended')
     expect(endOf(null)).toBe('ended')
+  })
+})
+
+/** One leg's part of a `result`, decided or not, at a step that tells the parts apart. */
+const lambda = (value: Decoded | null, step: number): LambdaLeg => ({
+  status: { available: true, reason: '', node: null, run: value === 'Unfinished' ? 'Capped' : 'Ended' },
+  state: { ...lam(`t${step}`, 0), step },
+  value,
+  declinedSpan: null,
+})
+const rxm = (value: Decoded | null): RxmLeg => ({
+  status: { available: true, reason: '', run: 'Ended', cap: null, total_steps: 4 },
+  value,
+})
+const tmLeg = (value: Decoded | null): TmLeg => ({
+  status: { available: true, reason: '', width: 4, run: 'Ended', total_steps: 9 },
+  value,
+})
+const TWO: Decoded = { Value: { text: '2' } }
+const legs = (l: LambdaLeg, r: RxmLeg, t: TmLeg): ResultLegs => ({ lambda: l, rxm: r, tm: t })
+
+/**
+ * A rewind posts no `result`, so the readout keeps a leg's decided value across it (spec §11 call 6), and the next
+ * `result` must not take that value away with the rewound cursor's `Unfinished`. An undecided part, a count of
+ * reductions so far, is replaced, so it drops back to where the rewound recording stands.
+ */
+describe('keepDecided', () => {
+  it('answers the new legs whole when nothing was posted before', () => {
+    const next = legs(lambda('Unfinished', 5), rxm('Unfinished'), tmLeg('Unfinished'))
+    expect(keepDecided(null, next)).toBe(next)
+  })
+
+  it('keeps each leg’s decided part where the new one is unfinished, a fault and an undecodable value among them', () => {
+    const prev = legs(lambda(TWO, 40), rxm({ Fault: { message: 'stack' } }), tmLeg('Undecodable'))
+    const next = legs(lambda('Unfinished', 5), rxm('Unfinished'), tmLeg('Unfinished'))
+    expect(keepDecided(prev, next)).toEqual(prev)
+  })
+
+  it('takes the new part in the other pairings: decided twice, decided after undecided, and undecided twice', () => {
+    const three: Decoded = { Value: { text: '3' } }
+    expect(
+      keepDecided(legs(lambda(TWO, 40), rxm(TWO), tmLeg(TWO)), legs(lambda(three, 41), rxm(three), tmLeg(three))),
+    ).toEqual(legs(lambda(three, 41), rxm(three), tmLeg(three)))
+    expect(
+      keepDecided(legs(lambda('Unfinished', 9), rxm(null), tmLeg(null)), legs(lambda(TWO, 40), rxm(TWO), tmLeg(TWO))),
+    ).toEqual(legs(lambda(TWO, 40), rxm(TWO), tmLeg(TWO)))
+    // THE DROP-BACK: an unfinished λ seen at step 900 and then, after a rewind, at step 300 reads step 300.
+    const after = legs(lambda('Unfinished', 300), rxm('Unfinished'), tmLeg('Unfinished'))
+    expect(keepDecided(legs(lambda('Unfinished', 900), rxm(null), tmLeg('Unfinished')), after)).toEqual(after)
+  })
+
+  it('judges the legs apart: a decided λ is kept while the TM leg moves on', () => {
+    const prev = legs(lambda(TWO, 40), rxm('Unfinished'), tmLeg('Unfinished'))
+    const next = legs(lambda('Unfinished', 5), rxm('Unfinished'), tmLeg(TWO))
+    expect(keepDecided(prev, next)).toEqual(legs(lambda(TWO, 40), rxm('Unfinished'), tmLeg(TWO)))
+  })
+})
+
+/**
+ * A rewind posts no `result`, so a `result` another request posts while the rewound leg's fill records must not read
+ * that leg mid-way: it keeps the part last posted, or before any was the one the rewind found, as the readout kept it
+ * across the rewind (spec §5.2).
+ */
+describe('keepInFlight', () => {
+  const none = { lambda: false, rxm: false, tm: false }
+  const all = { lambda: true, rxm: true, tm: true }
+
+  it('reads a leg with no part held as it stands, recording or not', () => {
+    const next = legs(lambda('Unfinished', 5), rxm('Unfinished'), tmLeg('Unfinished'))
+    expect(keepInFlight({ lambda: null, rxm: null, tm: null }, next, all)).toEqual(next)
+  })
+
+  it('keeps a part held for one leg alone while it records, as a rewind before the first result holds one', () => {
+    const next = legs(lambda('Unfinished', 256), rxm(TWO), tmLeg('Unfinished'))
+    const held: HeldLegs = { lambda: lambda('Unfinished', 1846), rxm: null, tm: null }
+    expect(keepInFlight(held, next, all)).toEqual(legs(lambda('Unfinished', 1846), rxm(TWO), tmLeg('Unfinished')))
+    expect(keepInFlight(held, next, none)).toEqual(next)
+  })
+
+  it('keeps the posted part of each leg still recording, whatever either value is, and takes the rest new', () => {
+    const prev = legs(lambda('Unfinished', 900), rxm('Unfinished'), tmLeg('Unfinished'))
+    const next = legs(lambda('Unfinished', 256), rxm(TWO), tmLeg(TWO))
+    expect(keepInFlight(prev, next, { lambda: true, rxm: true, tm: false })).toEqual(
+      legs(lambda('Unfinished', 900), rxm('Unfinished'), tmLeg(TWO)),
+    )
+    expect(keepInFlight(prev, next, none)).toEqual(next)
   })
 })

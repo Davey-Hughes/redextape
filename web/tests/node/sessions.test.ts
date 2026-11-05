@@ -4,14 +4,14 @@ import type { KeymapSetting } from '../../src/editor-keymap'
 import type { LinkWiring } from '../../src/link-wiring'
 import type { Leg } from '../../src/protocol'
 import { BufferCapReached, MAX_WARM_BUFFERS, type ScratchBuffers } from '../../src/scratch'
-import type { SessionId } from '../../src/session-client'
+import { SessionClient, type SessionId } from '../../src/session-client'
 import type { Binding, LegState, PaneOption, PaneView, SessionEntry } from '../../src/sessions'
-import { PaneSlot, resetLegs, SessionRegistry } from '../../src/sessions'
+import { legControlState, PaneSlot, resetLegs, rewindLeg, SessionRegistry } from '../../src/sessions'
 import { createTransport } from '../../src/transport'
 import type { LambdaState, RxmState, TmProgram, TmState } from '../../src/types'
 import { legState } from './leg-fixture'
 import { frameOf } from './rxm-fixtures'
-import { fakeClient, lambdaFrame, paint } from './session-fixtures'
+import { fakeClient, fakePort, lambdaFrame, noSessionReply, paint } from './session-fixtures'
 import { tmFrame } from './tm-machines'
 
 /**
@@ -280,6 +280,7 @@ describe('PaneSlot', () => {
       // `bindings` map is exactly what it does change. One of these two must fire and the other must not,
       // and only asserting both says so.
       onBuffersPersist: () => persists++,
+      flushEdit: () => undefined,
     })
     let draws = 0
     let persists = 0
@@ -355,6 +356,7 @@ describe('PaneSlot', () => {
         throw new Error('an edit must not report a change to the buffer count')
       },
       onBuffersPersist: () => order.push('persist'),
+      flushEdit: () => undefined,
     })
 
     const sinkOf = (session: SessionId) => {
@@ -430,6 +432,7 @@ describe('PaneSlot', () => {
       onBuffersPersist: () => {
         throw new Error('a fork must not persist through the rebind dependency')
       },
+      flushEdit: () => undefined,
     })
 
     const slot = new PaneSlot('lambda', 'source')
@@ -522,6 +525,7 @@ describe('PaneSlot', () => {
       onBuffersPersist: () => {
         throw new Error('a machine fork must not persist through the rebind dependency')
       },
+      flushEdit: () => undefined,
     })
 
     const slot = new PaneSlot('tm', 'source')
@@ -591,6 +595,7 @@ describe('PaneSlot', () => {
       onBuffersPersist: () => {
         throw new Error('an rxm fork must not persist through the rebind dependency')
       },
+      flushEdit: () => undefined,
     })
 
     const slot = new PaneSlot('rxm', 'source')
@@ -644,6 +649,7 @@ describe('PaneSlot', () => {
       notify: () => undefined,
       onBuffersChanged: () => undefined,
       onBuffersPersist: () => undefined,
+      flushEdit: () => undefined,
     })
 
     const events = transport.events(new PaneSlot('tm', 'source'))
@@ -731,13 +737,15 @@ describe('PaneSlot', () => {
 })
 
 describe('resetLegs', () => {
-  it('clears every leg the session has and stops its playback', () => {
+  it('clears every leg the session has, stops its playback and puts its epoch back to 0', () => {
     const e = entry('source', { lambda: ['a', 'b'], tm: [0, 1] })
     const lambdaLeg = e.legs.lambda
     const tmLeg = e.legs.tm
     if (lambdaLeg === undefined || tmLeg === undefined) throw new Error('the fixture built both legs')
     lambdaLeg.done = 'ended'
     lambdaLeg.playing = true
+    lambdaLeg.epoch = 2
+    tmLeg.epoch = 1
 
     resetLegs(e.legs, {}, 'not compiled')
 
@@ -745,6 +753,7 @@ describe('resetLegs', () => {
     expect(tmLeg.hist.length).toBe(0)
     expect(lambdaLeg.done).toBe(null)
     expect(lambdaLeg.playing).toBe(false)
+    expect([lambdaLeg.epoch, tmLeg.epoch]).toEqual([0, 0])
     expect(lambdaLeg.status).toEqual({ available: false, reason: 'not compiled' })
     expect(tmLeg.status).toEqual({ available: false, reason: 'not compiled' })
   })
@@ -759,12 +768,14 @@ describe('resetLegs', () => {
     if (rxmLeg === undefined) throw new Error('the fixture built the rxm leg')
     rxmLeg.done = 'capped'
     rxmLeg.playing = true
+    rxmLeg.epoch = 3
 
     resetLegs(e.legs, { rxm: { available: false, reason: 'lowering failed' } }, 'not compiled')
 
     expect(rxmLeg.hist.length).toBe(0)
     expect(rxmLeg.done).toBe(null)
     expect(rxmLeg.playing).toBe(false)
+    expect(rxmLeg.epoch).toBe(0)
     expect(rxmLeg.status).toEqual({ available: false, reason: 'lowering failed' })
     expect(e.legs.lambda?.status).toEqual({ available: false, reason: 'not compiled' })
   })
@@ -824,6 +835,25 @@ describe('SessionRegistry.pairs', () => {
   })
 })
 
+/** A transport over `reg` for its step handlers alone: everything else it is given is inert, but for `flushEdit`. */
+const stepTransport = (reg: SessionRegistry, flushEdit: (session: SessionId) => void = () => undefined) =>
+  createTransport({
+    sessions: reg,
+    scratchpad: {} as ScratchBuffers,
+    draw: () => undefined,
+    speed: () => 8,
+    setSpeed: () => undefined,
+    lspClient: LSP_STUB,
+    colour: () => [],
+    formatOnBlur: () => false,
+    keymap: {} as KeymapSetting,
+    linkWiring: () => ({}) as LinkWiring,
+    notify: () => undefined,
+    onBuffersChanged: () => undefined,
+    onBuffersPersist: () => undefined,
+    flushEdit,
+  })
+
 /**
  * **A STEP GESTURE TAKES THE LEG FROM ITS LINK** — Plan 7 part 6a spec §5.4 names five: stepping back, stepping
  * forward, play, restart and continue. Each resolves its leg through `transport.ts`'s `taken`, which deletes
@@ -847,21 +877,7 @@ describe('a step gesture on a leg with a position pending', () => {
     vi.stubGlobal('requestAnimationFrame', () => 0)
     const reg = new SessionRegistry()
     reg.add(entry('source', { label: 'source', lambda: ['a', 'b', 'c'] }))
-    const transport = createTransport({
-      sessions: reg,
-      scratchpad: {} as ScratchBuffers,
-      draw: () => undefined,
-      speed: () => 8,
-      setSpeed: () => undefined,
-      lspClient: LSP_STUB,
-      colour: () => [],
-      formatOnBlur: () => false,
-      keymap: {} as KeymapSetting,
-      linkWiring: () => ({}) as LinkWiring,
-      notify: () => undefined,
-      onBuffersChanged: () => undefined,
-      onBuffersPersist: () => undefined,
-    })
+    const transport = stepTransport(reg)
     const slot = new PaneSlot('lambda', 'source')
     const lambda = slot.resolve(reg)
     lambda.pending = 3000
@@ -869,5 +885,134 @@ describe('a step gesture on a leg with a position pending', () => {
     transport.events(slot)[gesture]()
     expect(lambda.pending).toBeUndefined()
     expect('pending' in lambda).toBe(false)
+  })
+})
+
+describe('rewindLeg', () => {
+  it('raises the epoch by one and empties the ring and its end', () => {
+    const tm = entry('source', { tm: [0, 1, 2] }).legs.tm
+    if (tm === undefined) throw new Error('the fixture built the TM leg')
+    tm.done = 'budget'
+    tm.epoch = 2
+
+    rewindLeg(tm)
+
+    expect({ epoch: tm.epoch, length: tm.hist.length, done: tm.done }).toEqual({ epoch: 3, length: 0, done: null })
+  })
+
+  /**
+   * **A REWOUND LEG IS RECORDING FROM STEP 0 UNTIL ITS FIRST FRAMES COME**, where an empty ring with no rewind behind
+   * it is a leg nothing has run.
+   */
+  it('reads as recording from step 0 with its ring empty, where an empty leg at epoch 0 reads not run', () => {
+    const reg = new SessionRegistry()
+    reg.add(entry('source', { tm: [0, 1, 2] }))
+    reg.add(entry('copy', { tm: [] }))
+    const source = { session: 'source', leg: 'tm' } as const
+    const copy = { session: 'copy', leg: 'tm' } as const
+    const tm = reg.legOf(source)
+    tm.done = 'ended'
+
+    rewindLeg(tm)
+
+    const c = legControlState(reg, source, tm)
+    expect({ recording: c.recording, stepText: c.stepText }).toEqual({ recording: true, stepText: 'step 0 of 0…' })
+    expect(legControlState(reg, copy, reg.legOf(copy)).stepText).toBe('not run')
+  })
+})
+
+/**
+ * **↺ REWINDS ONLY WHERE STEP 0 WAS DROPPED AND THE WORKER STILL HOLDS THE LEG'S RECORDING**, and seeks everywhere
+ * else, where the worker would answer a rewind with nothing the page keeps. Through the production handler, over a
+ * client whose posts are kept. Each branch's leg holds six frames of the generation a frames reply answered: `kept` in
+ * a ring that holds them all; the rest in one that keeps the newest three. `awaiting` then claims a generation no reply
+ * has answered, `unparsed` one a copy's `no-session` answered, which clears `awaitingRun` while the frames stay the
+ * generation before, and `pending` one that a copy's edit still in its editor's debounce claims as ↺ sends it.
+ */
+describe('↺ on a leg', () => {
+  const setup = (branch: 'evicted' | 'kept' | 'awaiting' | 'unparsed' | 'pending') => {
+    const port = fakePort()
+    const client = new SessionClient(port, () => undefined)
+    const tm = legState<TmState>(true, branch === 'kept' ? 1_000_000 : 2)
+    for (let i = 0; i < 6; i += 1) tm.hist.push(tmFrame(0, i, '_'), 1)
+    tm.hist.seek(tm.hist.length - 1)
+    tm.done = 'budget'
+    const gen = client.supersede()
+    port.deliver({ kind: 'tm-frames', gen, epoch: 0, frames: [], done: 'budget' })
+    tm.gen = gen
+    if (branch === 'awaiting') client.supersede()
+    if (branch === 'unparsed') port.deliver(noSessionReply(client.supersede()))
+    const reg = new SessionRegistry()
+    reg.add({ ...entry('source'), client, legs: { tm } })
+    const flushed: SessionId[] = []
+    // AS `ScratchBuffers.recompile` CLAIMS ONE for the edit a flush sends.
+    const flushEdit = (session: SessionId) => {
+      flushed.push(session)
+      if (branch === 'pending') client.supersede()
+    }
+    const restart = stepTransport(reg, flushEdit).events(new PaneSlot('tm', 'source')).restart
+    return { port, client, tm, restart, flushed }
+  }
+
+  it('rewinds the leg when step 0 was dropped and its frames are the generation the worker holds', () => {
+    const { port, tm, restart } = setup('evicted')
+    expect(tm.hist.evicted, 'precondition: the ring dropped step 0').toBe(true)
+
+    restart()
+
+    expect(port.sent).toEqual([{ kind: 'rewind', gen: 1, leg: 'tm', epoch: 1 }])
+    expect({ epoch: tm.epoch, length: tm.hist.length, done: tm.done }).toEqual({ epoch: 1, length: 0, done: null })
+  })
+
+  it('seeks to step 0 and posts nothing while step 0 is kept', () => {
+    const { port, tm, restart } = setup('kept')
+    expect(tm.hist.evicted, 'precondition: the ring kept step 0').toBe(false)
+
+    restart()
+
+    expect({ head: tm.hist.head, step: tm.hist.currentStep, length: tm.hist.length }).toEqual({
+      head: 0,
+      step: 0,
+      length: 6,
+    })
+    expect({ sent: port.sent, epoch: tm.epoch, done: tm.done }).toEqual({ sent: [], epoch: 0, done: 'budget' })
+  })
+
+  it.each([
+    ['awaiting', 'a recompile no reply has answered', true],
+    ['unparsed', "a copy's edit the worker answered with no session", false],
+  ] as const)('seeks as far back as the ring keeps and posts nothing while %s: %s', (branch, _, awaiting) => {
+    const { port, client, tm, restart } = setup(branch)
+    expect(
+      { evicted: tm.hist.evicted, awaitingRun: client.awaitingRun, behind: tm.gen < client.gen },
+      'precondition: step 0 was dropped, and the frames are a generation behind the client',
+    ).toEqual({ evicted: true, awaitingRun: awaiting, behind: true })
+
+    restart()
+
+    expect({ head: tm.hist.head, step: tm.hist.currentStep, length: tm.hist.length }).toEqual({
+      head: 0,
+      step: 3,
+      length: 3,
+    })
+    expect({ sent: port.sent, epoch: tm.epoch, done: tm.done }).toEqual({ sent: [], epoch: 0, done: 'budget' })
+  })
+
+  it('sends the view’s pending edit before it tests, and seeks when that edit claims a generation', () => {
+    const { port, client, tm, restart, flushed } = setup('pending')
+    expect(
+      { evicted: tm.hist.evicted, awaitingRun: client.awaitingRun, behind: tm.gen < client.gen },
+      'precondition: step 0 was dropped, and the frames are the client’s generation until the edit is sent',
+    ).toEqual({ evicted: true, awaitingRun: false, behind: false })
+
+    restart()
+
+    expect({ flushed, awaitingRun: client.awaitingRun }).toEqual({ flushed: ['source'], awaitingRun: true })
+    expect({ head: tm.hist.head, step: tm.hist.currentStep, length: tm.hist.length }).toEqual({
+      head: 0,
+      step: 3,
+      length: 3,
+    })
+    expect({ sent: port.sent, epoch: tm.epoch, done: tm.done }).toEqual({ sent: [], epoch: 0, done: 'budget' })
   })
 })

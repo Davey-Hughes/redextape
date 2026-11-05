@@ -2,14 +2,21 @@ import { describe, expect, it } from 'vitest'
 import { advance, createPlayer, MAX_FRAME_MS, type Playable } from '../../src/player'
 import { SPEEDS } from '../../src/workspace'
 
-/** A leg whose history has `frames` steps left to take. */
-const leg = (frames: number): Playable & { taken: number } => {
+/**
+ * A leg whose history holds `length` frames, with `frames` steps left to take. An empty one takes none, as a
+ * `History` with no frames does not.
+ */
+const leg = (
+  frames: number,
+  length = frames + 1,
+): Playable & { taken: number; hist: { length: number; forward(): boolean } } => {
   const l = {
     playing: false,
     taken: 0,
     hist: {
+      length,
       forward: (): boolean => {
-        if (l.taken >= frames) return false
+        if (l.hist.length === 0 || l.taken >= frames) return false
         l.taken += 1
         return true
       },
@@ -153,6 +160,32 @@ describe('createPlayer', () => {
     expect(a.taken).toBe(1)
     expect(b.taken).toBe(1)
     expect(draws).toBe(1)
+  })
+
+  /**
+   * **A PLAYING LEG WHOSE RING A REWIND EMPTIED PLAYS ON FROM STEP 0**: it holds through every frame until its first
+   * frames come, still playing and drawing nothing, rather than stopping as at its frontier.
+   */
+  it('holds a playing leg whose history is empty, and steps it on once a frame arrives', () => {
+    const c = clock()
+    let draws = 0
+    const p = createPlayer({ speed: () => 60, draw: () => draws++, frame: c.frame })
+    const l = leg(100, 0)
+    p.toggle(l)
+    c.run(0)
+    c.run(100)
+    c.run(200)
+    expect({ taken: l.taken, playing: l.playing, draws, pending: c.pending }).toEqual({
+      taken: 0,
+      playing: true,
+      draws: 0,
+      pending: 1,
+    })
+
+    // 50 ms AT 60/s IS THREE STEPS.
+    l.hist.length = 101
+    c.run(250)
+    expect({ taken: l.taken, playing: l.playing, draws }).toEqual({ taken: 3, playing: true, draws: 1 })
   })
 
   it('lets go of a leg whose flag something else cleared', () => {

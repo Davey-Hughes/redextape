@@ -40,6 +40,18 @@ export type LegState<T> = {
    */
   playing: boolean
   /**
+   * How many times the leg has been rewound since its build, which set it to 0 (`resetLegs`). Frames carrying another
+   * epoch are from a recording a rewind replaced, and the requests for the leg carry this one (the `rewind` request,
+   * in `protocol.ts`'s `RunRequest`).
+   */
+  epoch: number
+  /**
+   * The generation of the frames the ring holds, which `replies.ts`'s `pushFrames` sets from each reply it takes and
+   * nothing else writes; 0 on a leg no frames have reached. While it is the client's generation the worker holds
+   * their recording, which `transport.ts`'s `restart` needs before it asks for a rewind (hidden-recording spec §6).
+   */
+  gen: number
+  /**
    * The step a shared link's position is taking this leg to, while the frames have not reached it — Plan 7 part 6a
    * spec §5.4: set and spent, and dropped at a recompile, by `share-positions.ts`'s `LinkPositions`; read by the step
    * line; and taken away by a gesture on the leg's step controls. Absent on every leg no link is taking anywhere.
@@ -283,9 +295,21 @@ export function resetLegs(
     leg.hist.clear()
     leg.done = null
     leg.playing = false
+    leg.epoch = 0
     const status = statuses[l]
     leg.status = { available: status?.available ?? false, reason: status?.reason ?? reason }
   }
+}
+
+/**
+ * Take a leg back to step 0 for a rewind of its recording: a new epoch, so that frames from the recording it replaces
+ * are dropped (`pushFrames`), and an empty ring with no end, which the leg's first frames under that epoch fill
+ * (hidden-recording spec §5.4). The `rewind` request is the caller's, as a reset's request is.
+ */
+export function rewindLeg(leg: LegState<unknown>): void {
+  leg.epoch += 1
+  leg.hist.clear()
+  leg.done = null
 }
 
 /** Whether a leg is there and, when it is not, why — all of a leg's status that `resetLegs` reads. */
@@ -556,6 +580,7 @@ export function legControlState<K extends Leg>(
     awaitingRun: reg.entryOf(binding.session).client.awaitingRun,
     playing: leg.playing,
     pending: leg.pending ?? null,
+    rewinding: leg.epoch > 0 && leg.hist.length === 0,
   })
 }
 

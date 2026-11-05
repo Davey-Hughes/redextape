@@ -7,13 +7,21 @@ import { LinkIndex } from './link'
 import type { LinkWiring } from './link-wiring'
 import type { Notice } from './notice'
 import type { PaneCollection } from './panes'
-import { lambdaFrameBytes, type RunReply, ruleCount, rxmFrameBytes, tmFrameBytes } from './protocol'
+import {
+  keepDecidedPart,
+  lambdaFrameBytes,
+  type RecordEnd,
+  type RunReply,
+  ruleCount,
+  rxmFrameBytes,
+  tmFrameBytes,
+} from './protocol'
 import type { ProgramResult } from './readout'
 import type { RxmPane } from './rxm-pane'
 import { seedRxm } from './rxm-seed'
 import type { ScratchBuffers } from './scratch'
 import type { SessionId } from './session-client'
-import { type RxmCompiled, resetLegs, type SessionRegistry, type TmCompiled } from './sessions'
+import { type LegState, type RxmCompiled, resetLegs, type SessionRegistry, type TmCompiled } from './sessions'
 import type { TmPane } from './tm-pane'
 
 /**
@@ -269,6 +277,30 @@ export function createReplies(deps: {
   }
 
   /**
+   * One `*-frames` chunk applied to its leg: its frames pushed, each sized by `bytes`, its end and generation set, and
+   * a draw asked for as `scheduleDraw`'s doc says. **A CHUNK OF ANOTHER EPOCH THAN THE LEG'S IS DROPPED WHOLE**: it is
+   * from a recording a rewind replaced, posted before the worker took the rewind, and the page emptied the ring for
+   * the rewound recording at the press.
+   */
+  const pushFrames = <F>(
+    leg: LegState<F>,
+    reply: {
+      readonly gen: number
+      readonly epoch: number
+      readonly frames: readonly F[]
+      readonly done: RecordEnd | null
+    },
+    bytes: (frame: F) => number,
+  ): void => {
+    if (reply.epoch !== leg.epoch) return
+    leg.gen = reply.gen
+    for (const f of reply.frames) leg.hist.push(f, bytes(f))
+    leg.done = reply.done
+    if (reply.done === null) scheduleDraw()
+    else flushDraw()
+  }
+
+  /**
    * One session's replies, applied to that session's legs.
    *
    * THE SESSION IS A PARAMETER, NOT A CLOSED-OVER CONST, even though exactly one exists. A reply
@@ -336,30 +368,15 @@ export function createReplies(deps: {
       // is a wiring bug rather than a state to render. `legOf`'s throw is the one policy for that
       // whole class — see its doc — and reusing it here is what keeps this file from inventing a
       // second answer (a silent drop) for the same question.
-      case 'lambda-frames': {
-        const leg = sessions.legOf({ session, leg: 'lambda' })
-        for (const f of reply.frames) leg.hist.push(f, lambdaFrameBytes(f))
-        leg.done = reply.done
-        if (reply.done === null) scheduleDraw()
-        else flushDraw()
+      case 'lambda-frames':
+        pushFrames(sessions.legOf({ session, leg: 'lambda' }), reply, lambdaFrameBytes)
         return
-      }
-      case 'tm-frames': {
-        const leg = sessions.legOf({ session, leg: 'tm' })
-        for (const f of reply.frames) leg.hist.push(f, tmFrameBytes(f))
-        leg.done = reply.done
-        if (reply.done === null) scheduleDraw()
-        else flushDraw()
+      case 'tm-frames':
+        pushFrames(sessions.legOf({ session, leg: 'tm' }), reply, tmFrameBytes)
         return
-      }
-      case 'rxm-frames': {
-        const leg = sessions.legOf({ session, leg: 'rxm' })
-        for (const f of reply.frames) leg.hist.push(f, rxmFrameBytes(f))
-        leg.done = reply.done
-        if (reply.done === null) scheduleDraw()
-        else flushDraw()
+      case 'rxm-frames':
+        pushFrames(sessions.legOf({ session, leg: 'rxm' }), reply, rxmFrameBytes)
         return
-      }
       case 'result':
         results.dataset.state = 'idle'
         setProgram({ kind: 'result', gen: reply.gen, lambda: reply.lambda, rxm: reply.rxm, tm: reply.tm })
@@ -422,13 +439,13 @@ export function createReplies(deps: {
    * `onLambdaScratch`); and an `rxm-scratch` request with `rxm-scratch-compiled`, `rxm-frames`, `no-session` or
    * `worker-error` (`onRxmScratch`), and its `[continue]` with `rxm-value`. `tm-value` and `rxm-value` are the
    * machine legs' extra shapes: a headered TM buffer's value run reports through the first, and an rxm copy's
-   * value read again once `[continue]` carries it past its build's cap through the second, where a compiled
+   * value read again after each of its `[continue]`s through the second, where a compiled
    * session's value arrives in `result`. A λ copy's views ask for `lambda-tree` too. `compiled`/`result`
    * need a `SourceMap`/`ty` no buffer has, on any leg, so their arm does nothing — written out for the reason
    * `onReply`'s own do-nothing arm is. `no-session` and `worker-error` are genuinely shared, one arm apiece for
    * every leg — a buffer's failure to build or its worker's death read the same whichever leg minted it.
-   * `lambda-frames`, `tm-frames` and `rxm-frames` are not shareable in the same way (`hist.push` closes over a
-   * different `LegState`), so each gets its own arm; `scratch-compiled`, `tm-scratch-compiled` and
+   * `lambda-frames`, `tm-frames` and `rxm-frames` get an arm each, which passes its own leg and sizer to the
+   * `pushFrames` the three share; `scratch-compiled`, `tm-scratch-compiled` and
    * `rxm-scratch-compiled` likewise, because their payloads share no field (`tm-scratch-compiled`'s own doc in
    * `protocol.ts` has the argument).
    *
@@ -612,43 +629,32 @@ export function createReplies(deps: {
         return
       }
       case 'rxm-value': {
-        // A `[continue]` carried the copy's cursor past its build's cap. Retained over the build's value, which it
-        // replaces; a reading with no build before it cannot happen, for `tm-value`'s reason.
+        // A `[continue]`'s reading of the copy's value, retained over the build's, which it replaces; a reading with no
+        // build before it cannot happen, for `tm-value`'s reason. **A DECIDED VALUE STAYS AGAINST `Unfinished`**
+        // (`keepDecided`'s rule), which a `[continue]` after a rewind reads under the build cap.
         const entry = sessions.entryOf(session)
-        if (entry.rxmScratch !== null) entry.rxmScratch = { ...entry.rxmScratch, value: reply.value }
+        if (entry.rxmScratch !== null)
+          entry.rxmScratch = keepDecidedPart(entry.rxmScratch, { ...entry.rxmScratch, value: reply.value })
         for (const p of panes.ofSession('rxm', session)) (p.pane as RxmPane).setScratch(entry.rxmScratch)
         draw()
         return
       }
-      case 'rxm-frames': {
+      case 'rxm-frames':
         // The rxm counterpart of `lambda-frames` below, unguarded for the identical reason.
-        const leg = sessions.legOf({ session, leg: 'rxm' })
-        for (const f of reply.frames) leg.hist.push(f, rxmFrameBytes(f))
-        leg.done = reply.done
-        if (reply.done === null) scheduleDraw()
-        else flushDraw()
+        pushFrames(sessions.legOf({ session, leg: 'rxm' }), reply, rxmFrameBytes)
         return
-      }
       case 'lambda-frames': {
         // UNGUARDED FOR THE REASON THE `scratch-compiled` ARM ABOVE STATES: `legOf` throws for a session
         // the registry no longer holds, and a cooled buffer's worker cannot deliver a reply at all
         // because `cool`'s `terminate()` empties the parent side of the port. See
         // `ScratchBuffers.noSessionReply` for the argument in full.
-        const leg = sessions.legOf({ session, leg: 'lambda' })
-        for (const f of reply.frames) leg.hist.push(f, lambdaFrameBytes(f))
-        leg.done = reply.done
-        if (reply.done === null) scheduleDraw()
-        else flushDraw()
+        pushFrames(sessions.legOf({ session, leg: 'lambda' }), reply, lambdaFrameBytes)
         return
       }
       case 'tm-frames': {
         // THE TM COUNTERPART OF `lambda-frames` ABOVE, UNGUARDED FOR THE IDENTICAL REASON — a cooled
         // buffer's worker cannot deliver this reply at all.
-        const leg = sessions.legOf({ session, leg: 'tm' })
-        for (const f of reply.frames) leg.hist.push(f, tmFrameBytes(f))
-        leg.done = reply.done
-        if (reply.done === null) scheduleDraw()
-        else flushDraw()
+        pushFrames(sessions.legOf({ session, leg: 'tm' }), reply, tmFrameBytes)
         return
       }
       case 'no-session': {

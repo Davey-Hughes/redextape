@@ -42,7 +42,7 @@ const fakeLeg = (live: { current: Live }): RecordLeg<Cursor, RxmState> => ({
   },
   // The status reads `Running` until the cursor has run its length, as a real cursor's does.
   end: (c) => rxmRecordEnd(c.at >= c.length ? c.finish : { run: 'Running', cap: null }),
-  reply: (gen, frames, done) => ({ kind: 'rxm-frames', gen, frames, done }),
+  reply: (gen, epoch, frames, done) => ({ kind: 'rxm-frames', gen, epoch, frames, done }),
 })
 
 type Harness = {
@@ -67,6 +67,7 @@ function harness(first: Live, allowance = Number.POSITIVE_INFINITY): Harness {
     recording: { lambda: false, rxm: false, tm: false },
     recorded: { lambda: 0, rxm: 0, tm: 0 },
     allowance: { lambda: allowance, rxm: allowance, tm: allowance },
+    epoch: { lambda: 0, rxm: 0, tm: 0 },
     owns: (gen) => live.current.gen === gen,
     post: (reply) => {
       if (reply.kind !== 'rxm-frames') throw new Error(`the rxm leg posted a ${reply.kind}`)
@@ -216,6 +217,36 @@ describe('recordLeg', () => {
       [2, null],
       [2, 'ended'],
     ])
+    expect(h.worker.recording.rxm).toBe(false)
+  })
+
+  it('stops a loop whose leg was rewound under it, leaves the flag to the new loop, and tags each post with its epoch', async () => {
+    const h = harness(live(1, cursor(RECORD_CHUNK + 5)))
+    h.gate()
+    const leg = fakeLeg(h.live)
+    const stale = recordLeg(leg, h.worker, 1, false)
+    expect(h.posts).toHaveLength(1)
+
+    // The rewind arm: a new epoch, the flag handed over, a cursor back at step 0, and the first fill.
+    h.worker.epoch.rxm = 1
+    h.worker.recording.rxm = false
+    h.live.current.cursor = cursor(RECORD_CHUNK + 5)
+    const fresh = recordLeg(leg, h.worker, 1, true)
+    expect(h.posts).toHaveLength(2)
+
+    h.release()
+    expect(await stale).toBe(true)
+    expect(h.posts).toHaveLength(2)
+    expect(h.worker.recording.rxm).toBe(true)
+
+    h.release()
+    expect(await fresh).toBe(true)
+    expect(h.posts.map((p) => [p.epoch, p.done])).toEqual([
+      [0, null],
+      [1, null],
+      [1, 'ended'],
+    ])
+    expect(h.posts[1]?.frames[0]?.step).toBe(0)
     expect(h.worker.recording.rxm).toBe(false)
   })
 })

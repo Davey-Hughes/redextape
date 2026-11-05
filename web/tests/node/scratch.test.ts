@@ -104,7 +104,14 @@ function harness(): {
 function sourceEntry(text = 'from source'): SessionEntry {
   const hist = new History<LambdaState>(1_000_000)
   hist.push(lambdaFrame(text), 1)
-  const lambda: LegState<LambdaState> = { hist, status: { available: true, reason: '' }, done: null, playing: false }
+  const lambda: LegState<LambdaState> = {
+    hist,
+    status: { available: true, reason: '' },
+    done: null,
+    playing: false,
+    epoch: 0,
+    gen: 0,
+  }
   // NO MACHINE — nothing here sends a `compiled` reply, which is the only thing that retains one.
   return {
     id: SOURCE,
@@ -451,6 +458,8 @@ describe('ScratchBuffers.retire', () => {
       status: { available: true, reason: '' },
       done: null,
       playing: false,
+      epoch: 0,
+      gen: 0,
     }
     reg.add(source)
     const lambda = new PaneSlot('lambda', SOURCE)

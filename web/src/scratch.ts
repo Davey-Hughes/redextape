@@ -752,11 +752,15 @@ export class ScratchBuffers {
     const status = { available: false, reason: 'building…' }
     switch (leg) {
       case 'lambda':
-        return { lambda: { hist: new History<LambdaState>(this.#bytes), status, done: null, playing: false } }
+        return {
+          lambda: { hist: new History<LambdaState>(this.#bytes), status, done: null, playing: false, epoch: 0, gen: 0 },
+        }
       case 'tm':
-        return { tm: { hist: new History<TmState>(this.#bytes), status, done: null, playing: false } }
+        return { tm: { hist: new History<TmState>(this.#bytes), status, done: null, playing: false, epoch: 0, gen: 0 } }
       case 'rxm':
-        return { rxm: { hist: new History<RxmState>(this.#bytes), status, done: null, playing: false } }
+        return {
+          rxm: { hist: new History<RxmState>(this.#bytes), status, done: null, playing: false, epoch: 0, gen: 0 },
+        }
     }
   }
 

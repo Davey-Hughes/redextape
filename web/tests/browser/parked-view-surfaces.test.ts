@@ -134,7 +134,7 @@ describe('the surfaces the views share, with a view parked', () => {
     expect(stepBar().hidden, 'precondition: the step controls are the one bar').toBe(false)
     focusLambda()
     expect(barTitle(), 'precondition: the bar drives the focused λ view').toBe('λ · program')
-    barButton('back to the oldest kept step').click()
+    barButton('back to step 0').click()
     barButton('one step forward').click()
     const left = barStep()
     expect(left, 'precondition: the λ leg is at step 1').toMatch(/^step 1 of /)
@@ -163,7 +163,7 @@ describe('the surfaces the views share, with a view parked', () => {
    */
   it('takes the λ leg’s running focus off the source editor while the λ view is parked', async () => {
     start()
-    lambdaButton('back to the oldest kept step').click()
+    lambdaButton('back to step 0').click()
     lambdaButton('one step forward').click()
     expect(lambdaStep(), 'precondition: the λ leg is at step 1').toContain('step 1 of ')
     expect(sourceFocus(), 'precondition: the source editor marks the construct the λ leg is at').toBe(

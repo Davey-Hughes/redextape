@@ -32001,3 +32001,533 @@ each log with its ANSI escapes stripped and runs a copy of `targets.py` at `10c3
 | 16 GiB, no swap; both locks | `run.sh`'s cap, and `run2.sh`'s; their locks | `MemoryMax`, `MemorySwapMax` and the lock files in `$R/scripts/pr2/run.sh` and `run2.sh` |
 | none of the 32 | Task 2's cases in Task 10b's full runs | `$R/tasks/pr2/task-10b-report.md`, Step 5, from the C1 lines of those runs' `.targets.out` |
 | the ten decisions; the ten calls | THE USER'S DECISIONS; THE CONTROLLER'S CALLS | the `USER` lines of the Log of `$R/progress.md`; its `CONTROLLER` lines that rule what a run counts or how a ruling or a rule reads, the others ordering the work |
+
+#### HIDDEN RECORDING PR A: ↺ GOES BACK TO STEP 0 OF ITS OWN VIEW, A SEEK WHILE STEP 0 IS KEPT AND OTHERWISE A REWIND OF THAT VIEW'S LEG ALONE, WHICH RECORDS THE LEG'S FIRST FILL AGAIN UNDER A NEW EPOCH WHILE THE OTHER VIEWS KEEP THEIR STEPS; DURING A RECOMPILE, OR ON A COPY WHOSE LAST EDIT DID NOT PARSE, IT STAYS A SEEK, AND ITS NAME IS `back to step 0` (2026-11-04, branch `hidden-recording`, `92f2b55..b36a102`, 19 commits, then `caee6db`, which brings the plan and the spec up to the last of them, plus this entry)
+
+**PR A of the hidden-recording design.** At `ec4f11a` ↺ is `hist.seek(0)`, named "back to the oldest kept step": once
+a recording has dropped step 0, ↺ goes to the oldest step the ring keeps, and only a recompile, which resets every
+view, records from step 0 again (`$R/facts.md`). The user's try of step-focus on 5181 asked for a way back (THE STEP
+BUTTONS HAND THE FOCUS ON …, WHAT THIS DID NOT CLOSE, the user's two asks). The design he approved splits the answer
+in two (spec §9): PR A, this branch, takes ↺ back to step 0 on today's recording UI, and PR B, the hidden recording,
+gets a plan of its own after PR A. The spec is `docs/superpowers/specs/2026-11-03-hidden-recording-design.md`, the
+plan `docs/superpowers/plans/2026-11-04-hidden-recording-pr-a-rewind.md`, whose plan calls P1 to P8 and sabotage rows
+this entry names.
+The lane record is `~/temp/redextape-history-restart-record/` (`$R` below): `$R/progress.md` holds the user's rulings
+and every dispatch, `$R/tasks/` the briefs, the reports and the reviews, `$R/logs/pr-a/` (`$L`) each log named below
+without a directory, `$R/scripts/pr-a/` the scripts that ran them, and `$R/sab/` the copy each sabotage saved before it
+changed a file. The sabotages ran in a scratch worktree, `~/temp/redextape-hidden-recording-sab` (`$S`), with its own
+target dir and copied `web/node_modules`, `pkg`, `pkg-lsp` and `web/bindings`.
+
+**The branch was rebased twice.** Before its first code commit, its two spec commits, `1646438` and `5af1333` on
+`1b2f0cb`, were rebased onto `ec4f11a` once step-focus merged as #163, and two fix rounds that ran on branches of their
+own were cherry-picked onto it: the plan's pre-flight fix round's `88a5a2f` and `3f75dbc`, and Task 1's fix round's
+`139a7cc` and `a367e92`. After this entry was written, the whole branch was rebased onto `92f2b55` once Firefox PR 2
+merged as #164. Every SHA this entry gives a commit of the branch is that commit after the second rebase, and
+`$R/rebase-map.txt` pairs each of the 22 with the commit it replaces. The six above are now `edd1d86`, `d64353a`,
+`806270c`, `f324bd6`, `1404763` and `1fc5ff0`, each with the patch-id of its original. Of the 22, each has the patch-id
+of the commit it replaces but `3bf0e69`, the entry's first commit, whose added lines are the same and whose context
+lines are #164's entry where they were `ec4f11a`'s last lines; and each one's files differ from that commit's in the
+17 files #164 changes alone, which outside `README.md` and the roadmap differ by #164's diff, byte for byte. A run, a
+sabotage, a review or the gate this entry places at a commit ran before the second rebase, at the commit the map pairs
+with it; what ran again after it is in VERIFICATION, **After the rebase**.
+
+##### WHAT CHANGED
+
+Over `92f2b55..b36a102`, 43 files change, with 3,905 lines added and 278 removed. `caee6db` changes the plan and the
+spec alone, and `scripts/comment-budget.json` is unchanged over both.
+
+- **The design and the spec, `edd1d86`, `d64353a`, `04af228` and `806270c`.** `edd1d86` writes out the design the user
+  approved on 2026-11-03: ↺ back to step 0 of its own view by a rewind of that leg alone, the worker recording ahead of
+  the play head, and the split into PR A and PR B. `d64353a` takes his answers to its open questions, Q-a to Q-d.
+  `04af228` moves its line references into `controls.ts` and `step-controls.ts` to `ec4f11a`'s. `806270c`, the
+  pre-flight fix round's, records his ruling on P4, the controller's call P3, and that ↺ during a recompile stays a
+  seek.
+- **The plan, `e55b1b9`, and its corrections, `f324bd6`, `79dfcda`, `1fc5ff0`, `b37c993`, `d9d8c6e` and `caee6db`.**
+  `e55b1b9` plans the six Rust rewind methods, the epoch on both sides with the worker's `rewind` request, ↺ on the
+  page, the app tests in Chromium and Firefox, the gate and this entry. `f324bd6` takes the three read-only
+  pre-flights (`$R/planfix-report.md`): ↺ during a recompile stays a seek (P8), the worker tests wait by `until` and
+  post each request's epoch, Task 2's sabotages become a Task 3 of their own, and the tasks are renumbered to seven.
+  `79dfcda`, the plan and the spec, takes Task 2's review: ↺ rewinds only while the leg's frames are the client's
+  generation (P8), P3's two further rules, P6's turned-away `rewind`, N13 to N16, T9 and T10. `1fc5ff0` labels R1 for
+  what it sabotages and adds R1a and R1b. `b37c993` takes fix round 3 (P3's first-`result` rule, P8's flushed edit,
+  N17, T11), `d9d8c6e` fix round 4 (↺ live again at the rewind's first frames in P4, B6's row corrected, B8 to B11),
+  and `caee6db`, the plan and the spec, the whole-branch fix round (B12 to B16, N18, N19, Task 5's cases 7 and 8, and
+  fix round 3's two controller calls in spec §6 and §9).
+- **Task 1, the six rewind methods, `6d05cd8`, and its fix round, `1404763`.** Each leg's cursor goes back to step 0
+  in Rust, on `Session` and on the copy that carries the leg, as `rewind_lambda`, `rewind_tm` and `rewind_rxm`, bound
+  as `rewindLambda`, `rewindTm` and `rewindRxm`. A TM leg keeps the `TmStart` its cursor was opened from (P1), an rxm
+  leg its program and caps, and `LambdaCheckpoints::rewind` drops the checkpoints after the first and answers
+  `Option<LambdaCursor>` (P2), so each leg records again under the caps it began with. Of nine native tests, six
+  compare a rewound leg's or copy's frames with a fresh build's, and three hold the first checkpoint, a λ copy forked at
+  a step, and a rewind on an absent leg; one wasm-bindgen test crosses the boundary, which takes README's browser-test
+  figure from 33 to 34. `1404763` answers Task 1's review: the λ re-recording's checkpoints are asserted, the TM tests
+  run under a cells cap as well as a step cap, a rewind on a declined leg throws in the boundary tests and answers
+  `Err` natively, and a tenth native test, `a_rewound_rxm_leg_keeps_the_value_compile_s_run_ended_with`, holds rxm's
+  value.
+- **Task 2, the epoch, `aa92a6d`, and its fix round, `ed264f6`.** A leg carries an epoch on the page
+  (`LegState.epoch`) and in the worker, 0 at a build and raised by one per rewind. `extend` and the three frames replies
+  carry it, and each side drops the other's stale messages for that leg alone: `record-loop.ts` checks it per chunk and
+  in its `finally`, and `replies.ts`'s `pushFrames` drops a frames reply of another epoch. The worker's `rewind` arm,
+  `onRewind` through `rewindAndRecord`, stops the leg's recording, rewinds the cursor and records its first fill again,
+  one `HISTORY_BYTES`, and posts no `result`. `protocol.ts`'s `keepDecided` keeps a decided value against a later
+  `Unfinished` (P3). `ed264f6` answers Task 2's review: `keepInFlight`, so that a `result` posted while a rewind records
+  a leg keeps that leg's last part (I1); `keepDecidedPart` on an rxm copy's `rxm-value` (M5); a `rewind` of no newer
+  epoch turned away (M6, P6). The review's I2 went to the plan as P8's generation test.
+- **Task 3, Task 2's sabotages, and Task 6, the whole-branch gate,** made no commit (VERIFICATION).
+- **Task 4, ↺ on the page, `4d1ac65`.** ↺ is named `back to step 0` in the step strip and in the help page's sentence,
+  and no line under `web/` names it "back to the oldest kept step". `transport.ts`'s `restart` rewinds when the ring is
+  `evicted` and `leg.gen === client.gen`, and seeks otherwise (P8). A rewind is `sessions.ts`'s `rewindLeg`, which
+  raises the epoch, empties the ring and clears `done`, then `client.rewind(leg, epoch)`. While its first frames are on
+  their way the leg reads as `rewinding`: the step line reads `step 0 of 0…` and ↺ waits, greyed with its focus kept,
+  until the first of them comes (P4). The player holds a playing leg whose ring is empty, so ⏵ plays on from step 0
+  (P5), and ⏸ is off until the first reply. `pushFrames` sets `LegState.gen` from each reply it takes.
+- **Task 5, ↺ in the app by real gestures, `2191b49`.** `web/tests/browser/restart-rewind.test.ts` is new. It runs the
+  app with its worker and holds the session workers' replies, as `step-focus-recording.test.ts` does, so that a gesture
+  lands inside a rewind's first fill; its waits are `until` at its default. It held six cases at `2191b49`, and at
+  `b36a102` it holds eight and the hold's two self-tests:
+  1. TM ↺ on `LONG_SRC` after *keep recording* dropped step 0 records the first fill again, the rxm and λ views, stepped
+     to step 3, keep their steps, and ↺ on the rxm view, its step 0 kept, seeks;
+  2. λ ↺ after a λ run that ended past a dropped step 0 records the first fill again, and the readout keeps the λ value;
+  3. rxm ↺ on `EXAMPLE`, then *keep recording* and ▶ at its newest step record on from the rewound leg;
+  4. ⏵ plays on from step 0 across a rewind, with ⏸ off until the first frames come;
+  5. ↺ by Enter waits, greyed, with the focus while the first frames come, and is live with it once they have;
+  6. frames still arriving from the recording that dropped step 0 are dropped;
+  7. ↺ during a recompile, on the TM view whose step 0 was dropped, seeks, and the recompile records from step 0;
+  8. ↺ on a copy's view inside the debounce of an edit that does not parse sends the edit and seeks, and seeks again
+     once the copy has answered.
+- **Fix round 3, `caade15`,** on the fix rounds' re-read and Task 4's review. Before the generation's first `result` a
+  rewind holds the leg's part (`rewoundFrom`, `holdPart`, `HeldLegs`), so that the `result` of the extend it cuts short
+  keeps it (the re-read's I1, worker case 9). `restart` sends the view's pending edit first, through `flushEdit`, which
+  `main.ts` wires to `EditorCustody.flush` (Task 4's review, M7; the copy case, now case 8, and a `sessions.test.ts`
+  branch). Docs and comments the two reads found false are made true, and `step-controls.test.ts`'s ↺ wait case runs
+  by click and by Enter.
+- **Fix round 4, `4f7ea91`,** on Task 5's review, in `restart-rewind.test.ts` alone. Case 5 holds ↺ live at the
+  rewind's first frames, through `releaseThrough`; `compiled` waits for the compile's own `result`; cases 1 and 2 step
+  the other views to step 3 before the ↺; case 4 asserts its 60/s and ⏸ live mid-fill; case 5 asserts the focus its
+  `.focus()` gives; and the hold's two self-tests are copied.
+- **The whole-branch fix round, `b36a102`,** on the whole-branch review, in tests alone. Case 3 goes on from the
+  rewound leg by *keep recording* and by ▶ at its newest step, each posting the leg's epoch (I1). Worker case 10 runs
+  two generations and holds that the second's first `result` posts its own rxm part (I2). Cases 7 and 8 press ↺ in
+  P8's two states by real gestures (M3). Case 5 reads ↺'s greyed colour against ▶'s `opacity`, `alphaOf` moving to
+  `harness.ts` (M4).
+
+##### THE USER'S DECISIONS
+
+As `$R/progress.md` records them:
+
+1. 2026-11-03, the design's Q1, "↺ goes to step 0": ↺ always means the start, and where step 0 was dropped it records
+   again from 0, dropping the window; its tooltip is "back to step 0". Not chosen: a separate start-over control; ↺
+   pressed twice.
+2. 2026-11-03, Q2, "Only that view": ↺ rewinds only its own view's leg, and the other views keep their place. Not
+   chosen: a rerun of the whole session.
+3. 2026-11-04, the spec's approval, "Approved, plan PR A": a plan for PR A alone, PR B's after it.
+4. 2026-11-04, the plan's call P4, "`step 0 of 0…`, ↺ waits": while a rewind's first frames are on their way, the step
+   line reads `step 0 of 0…` and ↺ waits, greyed with its focus kept. Not chosen: `step 0…`; the old window kept shown.
+5. 2026-11-04, ⏸ while a playing leg rewinds, "Grey it out": ⏸ is off until the first reply, then play carries on from
+   step 0. Not chosen: ⏸ live, cancelling the held play.
+
+The design's other answers, Q3 to Q8 on 2026-11-03 and Q-a to Q-d on the spec on 2026-11-04, are in spec §2 and shape
+PR B.
+
+**The controller's calls,** not asked: P3 and P5 carry out what the user approved with the spec (§11 call 6; §6 and
+§11 call 4), and P8 leaves the screen doing what it does today. The paragraph that closes the plan's Plan calls names
+P3 and P5 the controller's calls and P8 "settled with them and not asked", and names P3's three later rules and P8's
+later two states the controller's calls on the reviews. The spec names P3 the controller's call in §9, and P8's copy
+state and flushed edit the controller's calls in §6, where P8's recompile state was "settled with PR A's plan
+(2026-11-04) and not asked"; the spec does not name P5. `$R/progress.md`'s session-5 HANDOFF records P3 and P8, with
+the copy state and the flushed edit, as told to the user.
+
+- **P3, 2026-11-04:** a `result` never replaces a leg's decided value with `Unfinished` (`keepDecided`), and an
+  unfinished λ's count drops back after a λ ↺ to the rewound recording's, which is intended. On Task 2's review, a
+  `result` posted while a rewind records a leg keeps that leg's last part (`keepInFlight`), and an rxm copy keeps a
+  decided value on the page (`keepDecidedPart`). On the fix rounds' re-read, the first-`result` rule: before the
+  generation's first `result` a rewind reads the leg's part before its cursor goes back, and a `result` posted while
+  that fill records keeps it. Spec §9 records the three.
+- **P5, 2026-11-04:** the player holds a playing leg whose ring is empty, so that ⏵ plays on from step 0 across a
+  rewind (spec §6, §11 call 4).
+- **P8, 2026-11-04:** ↺ during a recompile is a seek, as today, even with step 0 dropped. On Task 2's review, the same
+  on a copy whose last edit did not parse, which made the test the generation: ↺ rewinds only while the leg's frames
+  are the client's generation, and a recompile in flight fails that too. On Task 4's review, the flushed edit: ↺ sends
+  a copy's edit still in its editor's debounce before it tests, so that the edit claims its generation and ↺ seeks.
+  Spec §6 records the three.
+- **The two copy states P8 leaves** (WHAT THIS DID NOT CLOSE): left as they are, and put to the user with a fix
+  offered; he has not answered.
+
+P1, P2, P6 and P7 are the plan's own, inside the code and the tests.
+
+##### WHAT THIS DID NOT CLOSE
+
+- **PR B, all of spec §9's PR B list:** the modes and `head`, `run` and `stop` (§5.1 to §5.3), the compile request's
+  rename, the λ memory limit with its per-tab budget, whose figure PR B's plan measures (§5.5), links (§5.6), head
+  reporting (§5.7), the step bar and step line (§4.1, §4.2), the help page (§4.3) and the step-focus waiting rule
+  (§4.4), with their tests. Its plan is not written.
+- **What PR A keeps,** as the approved split has it (spec §9): *keep recording*, "history is full", "(oldest kept: step
+  N)" and the ten-continue cap. PR A reverses ↺'s name alone (§10), and the old name stays in dated docs as the record
+  of what was.
+- **The two copy states P8 names and leaves** (the controller's call; offered to the user, no answer):
+  - On a copy whose last edit did not parse, ▶ at the frontier and *keep recording* post an `extend` the worker drops,
+    as at `ec4f11a`.
+  - ↺ on a copy, then an edit that does not parse before the rewind's first frames come: the leg reads `step 0 of 0…`,
+    with ↺ waiting, until an edit parses, as a copy's first fill that such an edit cuts short keeps its `…` at
+    `ec4f11a`. Where part of the refill lands before that edit, the whole-branch review reads the line as `step 0 of
+    N…`; no test or run reaches that state. P8 does not say that a leg playing in this state stays playing with ⏸
+    greyed, the player running every frame.
+- **The readout after a λ ↺** keeps the last λ part until the next continue of any leg. Its count can stand above the
+  refill's, and before the generation's first `result` it is the cut extend's count (P3; worker cases 6 and 9).
+- **A `result` posted while another request's loop records a leg** keeps that leg's posted part, or before the first
+  `result` reads it mid-fill, as at `ec4f11a`. Worker case 10 runs that state and holds only that the part is the
+  generation's own.
+- **States only a worker test reaches:** worker case 4's rewind during `onRun`'s first fill, and case 10's rewind
+  before the generation's first `result`.
+- **↺ sends a copy's pending edit at the press,** a kept seek's included, up to one debounce earlier than the editor
+  would have (P8's flushed edit).
+- **The link's epoch** at `main.ts`'s `LinkPositions.extend` is held by reading alone: it is always 0, since ↺'s
+  `taken` deletes the link's `pending` and a link continues only a leg that has one. The whole-branch review's other
+  untested properties are each held now: its I1 by B12 and B13, I2 by N18 and N19, M3 by B14 and B15, M4 by B16.
+- **The plan's Task 1 Step 2 still says** that the module's tests have no program whose rxm leg is absent. They have
+  one, and `a_rewind_on_an_absent_leg_is_an_error` asserts `rewind_rxm` on it (`$R/tasks/task-1-report.md`, plan
+  difference 1).
+- **Firefox, for the Firefox CI lane:**
+  - Tab contention, the subject of its PR 2, which has merged as #164: the 36 of the whole tier's 38 failures outside
+    PR 1's base union that passed alone in the gate's run, 3 of them in `step-controls.test.ts`, which PR A changes,
+    PR A's own case "↺ pressed by click, when its rewind empties the ring, waits with the focus until the first frames
+    come" among them (`$L/t6-ff-alone.out`). The whole tier has not run on this branch under #164's `test:firefox`;
+    PR A's 12 browser test files have, all 200 tests in the `firefox` project (VERIFICATION, **After the rebase**).
+  - Main's, failing alone at `caee6db` and alone at `ec4f11a` with the same error, in files PR A does not change:
+    `base16-import.test.ts`'s "forgets a check when the text is edited" (`TimeoutError: locator.fill: Timeout 14897ms
+    exceeded.`) and `state-diagram.test.ts`'s "keeps a runtime box's focus while the run moves, and the column is one
+    tab stop" (`timed out after 10000ms waiting for the machine to reach /^mv|^mul|^pc/`). #164's entry lists both for
+    Firefox PR 3, and records state-diagram's whole file passing alone, where a `-t` run of the case skips the hooks of
+    the `describe` before it.
+  - `app.test.ts`'s "a step that loops in its own state still releases a source-originated link's hold on the table",
+    the one failure in each Firefox run of PR A's 12 browser test files, before the rebase and after it, is in the base
+    union.
+- **Task 6's Step 6 was not done.** The permission check refused `git -C ~/temp/redextape-hidden-recording worktree
+  remove --force` of `$S`. The B1 and B7 re-run moved `$S` to `fa308d9`, the commit `3bf0e69` replaces, and rebuilt its
+  `pkg`, `pkg-lsp` and `web/bindings` there (`$L/rr17-build-{wasm,lsp-wasm,bindings}.log`), and `$S` is left there,
+  detached and clean; the rebase did not move it. The
+  image `redextape-pr-a:latest` and `$S`'s target dir, `~/.cache/redextape-hidden-recording-sab-target`, are left too,
+  and files git ignores: in `$W`, 154 in `web/.vitest-attachments/` and 153 in `web/tests/browser/__screenshots__/`,
+  written from 09:31 to 21:35, and Task 6's coverage report in `web/coverage/`; in `$S`, 2 in each of the first two.
+- **The gate's wasm-pack was 0.15.0,** the one on `PATH`, where CI's two installs and the image's first stage download
+  0.15.1.
+- When this entry was last edited, on 2026-11-04 after the rebase onto `92f2b55`, nothing had been pushed and nothing
+  had run in CI.
+
+##### VERIFICATION
+
+**The gate of record, Task 6,** ran at `caee6db` on 2026-11-04 from 12:12:23 to 13:14:44, the tree clean before and
+after every step (`dirty=0` in each step log's first line, taken before the step, and on each line of
+`$L/t6-summary.log`, taken after it): `$R/scripts/pr-a/t6-gate.sh`, one step at a time
+through `t6-step.sh`, each step under its locks in a `systemd-run --user --scope` capped at 16 GiB with no swap,
+logging to `$L/t6-<step>.log`. The machine was loaded: check-all waited 747 s for the locks, and the 1-minute load
+read 40.27 to 95.91 at the steps' starts and ends.
+
+| step | command, from `$W` (`~/temp/redextape-hidden-recording`) or its `web/` | rc | time | figures | log |
+|---|---|---|---|---|---|
+| scans | `bash $R/scripts/pr-a/t6-scans.sh` | 0 | 23s | 21 commands, each `EXIT=0`: the eight scans and `check-licences.sh`, each by `--self-test` and then alone, `node --version`, and `check-comments.mjs --self-test` and `--base ec4f11a`, the last with 15 areas, each within its budget, and no history and no grown block in 40 changed files | `t6-scans.log` |
+| check-all | `scripts/check-all.sh --no-llvm` | 0 | 415s | workspace nextest 1,921 passed, 33 skipped; the feature legs 1,320, 1,344, 139, 127, 128 and 10; the wasm-pack browser leg 34; "green, but PARTIAL", LLVM skipped | `t6-check-all.log` |
+| llvm-cov | `cargo llvm-cov nextest --workspace --fail-under-lines 90` | 0 | 139s | 1,921 passed, 33 skipped; TOTAL lines 95.59%, 1,441 of 32,705 missed | `t6-llvm-cov.log` |
+| slow | `scripts/check-slow.sh` | 0 | 885s | "slow tier green"; 33 passed over its `test result` lines, none failed | `t6-slow.log` |
+| check-all-llvm | `scripts/check-all.sh --llvm-only` | 0 | 53s | LLVM at `/usr`; 104 and 45 passed | `t6-check-all-llvm.log` |
+| web builds | `pnpm install --frozen-lockfile`; `pnpm run build:wasm`, `build:lsp-wasm`, `build:bindings` | 0 each | 2s, 13s, 13s, 5s | | `t6-web-install.log`, `t6-web-build-{wasm,lsp-wasm,bindings}.log` |
+| biome | `pnpm exec biome ci --error-on-warnings` | 0 | 3s | 438 files | `t6-web-biome.log` |
+| typecheck | `pnpm run typecheck` | 0 | 4s | | `t6-web-typecheck.log` |
+| coverage | `pnpm run test:coverage` | 0 | 134s | 285 files, 3,066 tests passed; All files 97.65 / 92.39 / 98.43 / 98.94 | `t6-coverage.log` |
+| build:app | `pnpm run build:app` | 0 | 6s | | `t6-web-build-app.log` |
+| docker | `docker build --build-arg COMMIT_HASH=<ab3c8b9's hash> -t redextape-pr-a .`, `ab3c8b9` being the commit `caee6db` replaces | 0 | 53s | | `t6-docker.log` |
+| docker-run | `bash $R/scripts/pr-a/t6-docker-run.sh` | 0 | 4s | healthy after ~6 s; `/` and `/help.html` 200; 1 line of `/help.html` holds `back to step 0`; 7 `.wasm` assets; `docker rm -f` rc 0, no container left | `t6-docker-run.log` |
+
+The floors are 95 / 89 / 97 / 97 for statements, branches, functions and lines. Of the source the branch changes, the
+text table's rows read `protocol.ts` 100 / 96.96 / 100 / 100, `replies.ts` 97.84 / 83.33 / 100 / 97.64,
+`session-client.ts` 98.07 / 96 / 100 / 100, `step-controls.ts` 100 / 97.67 / 100 / 100, `transport.ts` 95.18 / 86 /
+100 / 100, `scratch.ts` 98.42 / 95.23 / 100 / 98.09 and `main.ts` 95.41 / 85.8 / 96.49 / 97. The table leaves out a
+file at 100 in all four, and the step's HTML report gives `controls.ts`, `player.ts`, `record-loop.ts` and
+`sessions.ts` 100 in all four (`$L/t6-coverage-html/`, the four pages copied from `web/coverage/` with their 12:55:00
+modification time, the step's `end=`). `session-worker.ts` is in the coverage `exclude`, as worker code;
+`worker.test.ts` drives it.
+
+**Firefox, the whole tier, recorded and not asserted** (Task 6 Step 5), at `caee6db`, before the rebase, under both
+locks, where `pnpm test:firefox` ran the one `firefox` project at Vitest's default tab count, as before #164: `pnpm run
+test:firefox --reporter=verbose --reporter=json --outputFile.json=$L/t6-firefox.json`, rc 1 (`t6-firefox.log`): 215
+files, 41 of them failed; 1,616 tests, 1,444 passed, 151 failed and 21 skipped. `python3 -I
+~/temp/redextape-firefox-ci-record/scripts/pr1/targets.py $L/t6-firefox.json` (`t6-firefox-targets.log`): T1's
+cluster (a) 17 of 17 as expected, and T3 151 failures, 38 outside PR 1's base union.
+Each of the 38 ran alone in one tab, one run per file with `-t` set to its titles (`$R/scripts/pr-a/t6-ff-alone.py`;
+`t6-ff-alone.out`, `t6-ffalone-<file>.log`): 36 passed and 2 failed. The 2 ran alone in `$S` at `ec4f11a` and failed
+there with the same errors (`t6-ff-base.out`, `t6-ffbase-<file>.log`). PR A's 12 browser test files, named, in one
+Firefox run in that project (`t6-firefox-pr-a.log`, `.json`): 200 tests, 197 passed, 1 failed and 2 skipped;
+`restart-rewind` 10 of 10, `worker` 29 of 29, `step-controls` 51 passed and 2 skipped, `app` 46 passed and 1 failed,
+in the base union.
+
+**After the rebase** onto `92f2b55`, at `938bb7c`, which changes only docs after `b36a102`, the tree clean before and
+after each run: `bash $R/scripts/pr-a/rb-runs.sh`, each run through `rb-step.sh`, which is `t6-step.sh` logging to
+`$L/rb/`.
+
+- The node tier, `pnpm run test:node`: 1,453 passed in 71 files (`rb/node.log`), three more than the 1,450 below:
+  #164 adds `capture-files.test.ts`, 1 case, and takes `browser-timeout-invariants.test.ts` from 15 cases at `ec4f11a`
+  to 17 at `92f2b55`.
+- Chromium, `restart-rewind.test.ts` and `worker.test.ts`: 39 passed, 10 and 29 (`rb/chromium.log`).
+- Firefox, `pnpm run test:firefox` with PR A's 12 browser test files named, rc 1 (`rb/firefox-pr-a.log`, `.json`).
+  #164's script runs two Firefox projects, `firefox` at 6 tabs and `firefox-capture` one file at a time; none of the
+  12 is on `vite.config.ts`'s `CAPTURE_FILES`, so all 200 tests ran in `firefox`, where `firefox-input.ts`'s guard
+  fails a case that takes a pointer capture that holds, with a message naming the list; no line of the log carries it.
+  197 passed, 1 failed and 2 skipped, each file's counts as before the rebase, and the one failure is the same `app`
+  case, failing the same assertion, `expected 465047.65625 to be 465048.375`.
+- The hook's checks ran on each of the 22 commits as the rebase replayed them (**The hook**, below).
+
+**The user's try,** 2026-11-04: he tried the branch at `43328b5`, the commit `938bb7c` replaces, before the rebase,
+on a dev server on port 5182, on the five checks `$R/progress.md` lists (↺ after step 0 was dropped, by keyboard,
+while playing, with step 0 kept, and on its own view only), and answered "ok those seem fine".
+
+**The tiers the branch grows**, each before and after:
+
+| tier | before | after |
+|---|---|---|
+| web node tier, `vitest run --project node` (`pnpm run test:node`) | 1,418 passed in 70 files at `ec4f11a`'s `web/` (`t2-node-base.log`) | 1,450 in 70 at `b36a102`'s `web/` (`wbf-w-node.log`) |
+| `worker.test.ts` | 19 cases at `ec4f11a` | 29, passed in Chromium and in Firefox at `b36a102`'s `web/` (`wbf-w-rr-2.log`, `wbf-w-ffworker.log`) |
+| `step-controls.test.ts` | 51 passed beside Task 4's new case, red at `1fc5ff0` (`t4-red-browser.log`) | 53 passed (`wbf-w-sc.log`) |
+| `restart-rewind.test.ts` | not at `ec4f11a` | 10 passed in Chromium and in Firefox (`wbf-w-rr-2.log`, `wbf-w-ff-1.log`) |
+| the wasm browser tier | 33, README's gated figure at `ec4f11a` | 34 (`t6-check-all.log`) |
+| Rust native tests | | the range adds ten `#[test]`s; the workspace ran 1,921 (`t6-check-all.log`) |
+
+**Each task's runs,** with `L=$R/logs/pr-a`, every heavy run under `flock ~/temp/redextape-heavy.lock` and every
+browser run under `flock ~/temp/redextape-browser.lock`, Chromium unless named:
+
+| task, at | command | result | log |
+|---|---|---|---|
+| 1, `6d05cd8` | `cargo nextest run -p redextape-core -p redextape-wasm --no-fail-fast -E "$F"`, `F='test(rewound) \| test(a_rewind_)'` | red first, 11 `E0599`; then 9 passed, 1,470 skipped | `t1-red.log`, `t1-green.log` |
+| | the same without `-E` | 1,447 passed, 32 skipped | `t1-packages.log` |
+| | the boundary leg, `scripts/check-all.sh --browser-only` | 34 passed, `the_rewind_bindings_cross_on_a_session_and_on_each_copy` among them | `t1-boundary.log` |
+| 1's fixes, `139a7cc` (now `1404763`) | `bash $R/scripts/pr-a/t1fix-counts.sh before\|after`, each package alone | core 1,314 passed, 32 skipped, both; wasm 127, then 128 | `t1fix-{before,after}-redextape-{core,wasm}.log` |
+| | the boundary leg | 34 passed | `t1fix-boundary.log` |
+| 2, `aa92a6d` | the node tier | 1,430 passed | `t2-node.log` |
+| | `worker.test.ts`, one tab | 25 passed | `t2-worker-2.log` |
+| | Task 2 Step 7's eight browser files, `VITEST_MAX_WORKERS=2` | 122 passed | `t2-browser.log` |
+| 2's fixes, `ed264f6` | the node tier; `worker.test.ts`; the eight files | 1,433; 27; 124 passed | `t2fix-node-after.log`, `t2fix-green-worker.log`, `t2fix-browser.log` |
+| 4, `4d1ac65` | the four node files, before the code | 12 failed, 117 passed | `t4-red.log` |
+| | the node tier | 1,433 before, 1,448 after | `t4-node-before.log`, `t4-node.log` |
+| | Task 4 Step 4's 13 browser files, `VITEST_MAX_WORKERS=2` | 167 passed | `t4-browser.log` |
+| 5, `2191b49` | `restart-rewind.test.ts`, one tab, Chromium and Firefox | 6 passed in each | `t5-chromium.log`, `t5-firefox.log` |
+| | the same, Chromium under `systemd-run --user --scope -p CPUQuota=25%` | 6 passed | `t5-chromium-cpu25.log` |
+| fix round 3, `caade15` | `bash $R/scripts/pr-a/fr3-counts.sh after`: the node tier; 4 browser files; Firefox `restart-rewind`; the wasm browser tier | 1,450; 92; 7; 34 passed | `fr3-after-{node,chromium,firefox,wasm-browser}.log` |
+| fix round 4, `4f7ea91` | `restart-rewind.test.ts`, one tab, twice in each engine | 9 passed in each run | `fr4-{chromium,firefox}-{1,2}.log` |
+| whole-branch fixes, `b36a102` | the node tier; `restart-rewind` and `worker` in Chromium, the second run; `step-controls`; `restart-rewind` and `worker` in Firefox | 1,450; 39; 53; 10 and 29 passed | `wbf-w-node.log`, `wbf-w-rr-2.log`, `wbf-w-sc.log`, `wbf-w-ff-1.log`, `wbf-w-ffworker.log` |
+
+`wbf-w-rr-1.log`, the first run, before the round's last edits to case 7 and worker case 10, failed 2 of 39: case 7's
+wait read `not run` between the recompile's `compiled` and its frames, and worker case 10 expected `'Unfinished'`
+where the rxm value is decided at compile (`$R/tasks/whole-branch-fixes.md`).
+
+The two packages run together count six more than apart: 1,447 at `6d05cd8` (`t1-packages.log`) against 1,314 and 127,
+and 1,448 at `139a7cc` (I1's and I1core's sabotage runs) against 1,314 and 128 (`t1fix-{before,after}-*.log`).
+`redextape-wasm`'s `Cargo.toml` turns on `redextape-core`'s `serde` feature, so a run of both builds core with it, and
+`t6-check-all.log`'s leg `cargo nextest run -p redextape-core --features serde` runs 1,320 at `caee6db`, where
+`git diff 6d05cd8 caee6db -- crates/redextape-core` changes `src/trace.rs` alone and adds no test: 1,320 + 127 = 1,447
+and 1,320 + 128 = 1,448. That is arithmetic over the logs; no log runs the two side by side.
+
+**`restart-rewind.test.ts`, each case's time** in ms, from the JSON reports of one-tab runs at `b36a102`'s `web/`
+(`wbf-w-rr-2.json`, `wbf-w-ff-1.json`; `python3 -I $R/scripts/pr-a/t7-durations.py <json>`), cases 1 to 8 each with
+a `90_000` timeout:
+
+| case | 1 | 2 | 3 | 4 | 5 | 6 | 7 | 8 | the two self-tests |
+|---|---|---|---|---|---|---|---|---|---|
+| Chromium | 4,936 | 4,050 | 5,679 | 2,355 | 1,880 | 1,537 | 2,592 | 2,201 | 5, 0 |
+| Firefox | 4,493 | 3,330 | 7,521 | 6,114 | 4,067 | 2,791 | 4,591 | 3,683 | 3, 2 |
+
+At `2191b49`, Task 5's six cases took 3,823 / 1,474 / 1,404 / 1,375 / 1,434 / 1,248 in Chromium and 3,083 / 1,996 /
+2,125 / 4,091 / 4,620 / 3,965 in Firefox (`t5-chromium.json`, `t5-firefox.json`), and 14,778 / 10,496 / 11,394 /
+11,005 / 9,301 / 8,301 in Chromium at `CPUQuota=25%` (`t5-chromium-cpu25.log`). Fix round 4's slowest case was case 5
+in its second Firefox run, 11,957 (`fr4-firefox-2.json`). `worker.test.ts`'s ten rewind cases at `b36a102`'s `web/`
+took 160 / 261 / 81 / 805 / 10,332 / 3,462 / 6,332 / 900 / 1,052 / 767 in Chromium (`wbf-w-rr-2.json`) and 226 / 528 /
+149 / 1,799 / 18,636 / 4,286 / 14,583 / 3,570 / 5,860 / 2,029 in Firefox (`wbf-w-ffworker.json`).
+
+**The sabotages.** Each saved its file to `$R/sab/`, made exact replacements that each had to match once, ran, copied
+the file back and compared it with `cmp` against the saved copy and against `git show HEAD:<path>`, then counted `git
+status --porcelain`'s lines. Across the nine summary logs, `t1-sab-summary.log`, `t1-sab-R5-summary.log`,
+`t1-sab-extra-summary.log`, `t1fix-sab-summary.log`, `t3-sab-summary.log`, `t4-sab-summary.log`, `sf-summary.log`,
+`wbf-summary.log` and `rr17-summary.log`, 99 restores read `(cmp saved, cmp HEAD)` and none failed, and every
+porcelain count, taken after each sabotage or, in Task 1's three scripts, at each script's end, was 0. "Of" is the
+tests the run held; node + browser counts are each run's failed tests, from its JSON report (`python3 -I
+$R/scripts/pr-a/ef-sab-counts.py $L`).
+
+Task 1's, in `$S` at `6d05cd8`, by `-E "$F"` of 9 tests, R5 by the boundary leg of 34 (`$R/scripts/pr-a/t1-sab.sh`,
+`t1-sab-extra.sh`, `t1-sab-R5.sh`; `$L/t1-sab-<id>.log`):
+
+| id | sabotage | failed | which, the value against the fresh build's |
+|---|---|---|---|
+| R1 | `TmStart::cursor` opens with `steps` 4 over the kept caps, a fresh build's cursor too | 2 | the TM leg, 15 frames against 11, and the TM copy, 8 against 4 |
+| R2 | `LambdaCheckpoints::rewind` truncates and answers `self.at(0)` | 3 | the core test, 15 steps against 5; the λ leg and λ copy, 1,320 frames against 601 |
+| R3 | `LambdaCheckpoints::rewind` answers the first entry without truncating | 3 | the core test, `[0, 2, 4, 6, 8]` against `[0]`; the λ leg and copy, `[0, 256, 512]` against `[0]` |
+| R4 | `RxmLeg::rewind` opens with `steps` 5 over its caps | 2 | the rxm leg and copy, 9 frames against 4 |
+| R5 | `TmScratch`'s binding named `rewindTM` | 1 of 34 | the boundary test: `rewindTm threw: … Function.prototype.apply was called on undefined` |
+| R6, beyond the plan | `LambdaLeg::rewind` keeps the old cursor | 3 | the three λ tests, the forked copy at step 40 against 0, the others at 100 and 51 frames against 601 |
+| R7, beyond the plan | `Session::rewind_rxm` answers `TmAbsent` | 1 | the absent-leg test |
+
+Task 1's fix round's, in `$S` at `139a7cc` (now `1404763`), by `-E "$F"` of 10, the packages of 1,448, or the boundary
+leg of 34 (`$R/scripts/pr-a/t1fix-sab.sh`, `t1fix-swaps.py`; `$L/t1fix-sab-<id>.log`). Before the fix, at `6d05cd8`,
+I1's, M4's two and M5's sabotages together left all 9 passing (`pre`), and so did I1core alone:
+
+| id | sabotage | failed | which |
+|---|---|---|---|
+| R1a (run as I2a) | `Session::rewind_tm` raises the cursor it opens by 5 steps | 1 of 10 | the TM leg's step case, 16 frames against 11 |
+| R1b (run as I2b) | `TmScratch::rewind_tm` raises it by 4 | 1 of 10 | the TM copy's step case, 8 against 4 |
+| I1 | `LambdaLeg::rewind` resets its checkpoints with `every` at `u64::MAX` | 2 of 1,448 | the λ leg and copy, `[0]` against `[0, 256, 512]` |
+| I1core | `LambdaCheckpoints::rewind` sets `every` to `u64::MAX` | 3 of 1,448 | the core test, `[0]` against `[0, 2, 4]`; the λ leg and copy |
+| M4a, M4b | the session's and the copy's TM rewind keep a cells raise | 1 of 10 each | each TM test's cells case, 253 against 224 and 8 against 4 |
+| M5 | `RxmLeg::rewind` sets `end` to `Capped` | 1 of 10 | the new rxm value test, `Ok(Unfinished)` against `Ok(Value { text: "[1, 2, 3]" })` |
+| M2 | the three `Session` rewind bindings answer `Ok` | 3 of 34 | "rewindTm", "rewindLambda" and "rewindRxm must throw for an absent leg" |
+
+Task 3's N1 to N16, in `$S` at `1fc5ff0`, whose `web/` is `ed264f6`'s, each on the node tier of 1,433 and Task 2 Step
+7's eight browser files of 124 (`$R/scripts/pr-a/t3-sab.sh`, `t3-swaps.py`; `$L/t3-sab-<id>.log`); N17 to N19 later,
+as named. Worker cases are `worker.test.ts`'s rewind cases, 1 to 10:
+
+| id | sabotage | node + browser | which |
+|---|---|---|---|
+| N1 | the record loop's per-chunk epoch check removed | 1 + 2 | record-loop's new case; worker cases 4 and 7 |
+| N2 | its `finally` clears the flag whatever the epoch | 1 + 1 | record-loop's new case; worker case 7 |
+| N3 | `pushFrames` pushes whatever the epoch | 6 + 0 | replies' epoch case, each of its six arms |
+| N4 | `SessionClient.rewind` posts at generation 0 too | 1 + 0 | session-client's `rewind` case |
+| N5 | `keepDecided` answers `next` | 2 + 1 | protocol's two `keepDecided` cases; worker case 5 |
+| N6 | `resetLegs` leaves the epoch | 2 + 0 | sessions' two reset cases |
+| N7 | `onRewind` leaves `recorded` | 0 + 4 | worker cases 5 and 6, the fill stopping at its first frame; cases 7 and 8 at their precondition |
+| N8 | `onRewind` skips the rewind method | 0 + 6 | worker cases 1, 2, 4, 5, 6 and 7 |
+| N9 | `onRewind` posts a `result` after its fill | 0 + 3 | worker case 3; cases 7 and 8 by a wait's timeout |
+| N10 | `SessionClient.extend` posts epoch 0 | 2 + 0 | session-client's two `extend` cases |
+| N11 | `onExtend`'s epoch check removed | 0 + 1 | worker case 3 |
+| N12 | `keepDecided` keeps an undecided `prev` too | 1 + 1 | protocol's undecided pairing; worker case 6 at its precondition, 1,334 against 1,334 |
+| N12b, beyond the plan | the λ part keeps an undecided `prev` only while it is further on | 1 + 1 | the same pairing; worker case 6 at its drop-back assertion |
+| N13 | `keepInFlight` answers `next` | 1 + 2 | protocol's `keepInFlight` case; worker cases 7 and 8 |
+| N14 | `rewindAndRecord`'s epoch guard removed | 0 + 1 | worker case 3 |
+| N15 | the `rxm-value` arm takes its value without `keepDecidedPart` | 1 + 0 | replies' decided-value case |
+| N16 | `onRewind`'s λ arm rewinds a session's TM leg too | 0 + 1 | worker case 5 |
+| N17, at `d9d8c6e` | `rewindAndRecord`'s `holdPart` call removed | 0 of 1,450 + 1 of 28 | worker case 9, step 256 against 1,846 (`sf-N17.log`) |
+| N18, at `b36a102` | `onRun` leaves `posted` | 0 of 1,450 + 1 of 29 | worker case 10, 594 steps against 1,000,008 (`wbf-N18.log`) |
+| N19, at `b36a102` | `onRun` leaves `rewoundFrom` | 1 of 29 | worker case 10, the same (`wbf-N19.log`) |
+
+N12 stops worker case 6 at its precondition, so the case's drop-back assertion is reached by N12b and not by N12.
+
+Task 4's T1 to T10, in `$S` at `4d1ac65`, each on the node tier of 1,448 and Task 4 Step 4's 13 browser files of 167
+(`$R/scripts/pr-a/t4-sab.sh`, `t4-swaps.py`; `$L/t4-sab-<id>.log`); T11 later. The `restart` branches are
+`sessions.test.ts`'s:
+
+| id | sabotage | node + browser | which |
+|---|---|---|---|
+| T1 | `rewindLeg` leaves `done` | 3 + 0 | the two `rewindLeg` cases; `restart`'s evicted branch |
+| T2 | `recording` ignores `rewinding` | 2 + 0 | controls' rewinding case; sessions' `legControlState` case |
+| T3 | the `not run` short cut applies while rewinding | 3 + 0 | controls' two rewinding cases; the `legControlState` case |
+| T4 | the player's hold removed | 1 + 0 | player's hold case |
+| T5 | ↺'s row `waits: false` | 0 + 1 | step-controls' ↺ wait case |
+| T6 | `restart` always seeks | 1 + 0 | the evicted branch |
+| T7 | `restart` rewinds whenever the ring is evicted | 2 + 0 | the awaiting and unparsed branches |
+| T8 | `restart` always rewinds | 3 + 19 | the kept, awaiting and unparsed branches; 19 tests in 7 browser files whose walks start with ↺ as a seek |
+| T9 | `restart`'s test is `!client.awaitingRun` | 1 + 0 | the unparsed branch |
+| T10 | `pushFrames` leaves `gen` | 6 + 0 | replies' `gen` case, its six arms, at the epoch's chunk setting `gen` |
+| T10b, beyond the plan | `gen` set before the epoch check | 6 + 0 | the same, at another epoch's chunk leaving `gen` |
+| T11, at `d9d8c6e` | `restart` sends no pending edit first | 1 of 1,450 + 1 of 9 | the pending branch; Task 5's copy case, step 0 against 930 (`sf-T11.log`) |
+
+Task 5's B1 to B11, in `$S` at `d9d8c6e`, by `restart-rewind.test.ts` of 9 in one Chromium tab, and in Firefox too for
+B2 and B9; B12 to B16 at `b36a102`, of 10; B1 and B7 again at `3bf0e69`, of 10, in one Chromium tab, once `$S`'s `pkg`,
+`pkg-lsp` and `web/bindings` were rebuilt there (`$R/scripts/pr-a/sf-sab.sh`, `sf-swaps.py`, `wbf-sab.sh`,
+`wbf-swaps.py`, `rr17-sab.sh`, which takes `sf-swaps.py`'s swaps; `$L/sf-<id>.log`, `wbf-<id>.log`, `rr17-<id>.log`).
+The cases are numbered as at `b36a102`: the copy case, 7 at `d9d8c6e`, is 8, and case 7, ↺ during a recompile, was not
+yet in the file B2 to B11 ran on. B1's and B7's rows are their runs at `3bf0e69`, with the file unsabotaged 10 of 10
+there (`rr17-base.log`); at `d9d8c6e` they failed 6 of 9 and 2 of 9:
+
+| id | sabotage | failed | which |
+|---|---|---|---|
+| B1 | `restart`'s branch as `ec4f11a`'s `seek(0)`, `flushEdit` kept | 6 of 10 | cases 1 to 6; cases 7 and 8 passed, as the plan's row has them |
+| B2 | `rewindAndRecord` leaves `recorded` | 6 of 9, in each engine | cases 1 to 6 |
+| B3 | the player's hold removed | 1 | case 4, at "⏸ while the first frames are held" |
+| B4 | ↺'s row `waits: false` | 1 | case 5, the focus on `playback speed`, not `back to step 0` |
+| B5 | `postResult` without `keepDecided` | 1 | case 2, `λ not finished · 1,334 reductions · …` against `λ [4, 2, 3, 5, …` |
+| B6 | `pushFrames`' epoch check removed | 1 | case 6, at `refills`, by a timeout |
+| B7 | `restart` always rewinds | 3 of 10 | case 1, `step 0 of 0…` against `step 0 of 594`; case 7, step 0 against 100,318; case 8 at its first ↺, step 0 against 930, so its second ↺ is B14's |
+| B8 | `rewindLeg` keeps the ring, and `pushFrames` empties it at the epoch's first chunk | 3 | cases 4, 5 and 6, case 6 at `past` |
+| B9 | `canRestart` as `v.length > 0 && v.done !== null` | 2, in each engine | case 5, at "↺ at the rewind's first frames"; case 6, at its ↺ click, by a timeout, the case taking 90,286 ms, in Firefox 90,011 |
+| B10 | `restart` also seeks every other leg of the session to step 0 | 2 | cases 1 and 2, at the other views |
+| B11 | the file's `EDITOR_DEBOUNCE_MS` at 0 | 1 | the copy case, at its precondition, which the row aims at |
+| B12 | *keep recording* posts epoch 0 | 1 of 10 | case 3, in the second run, `wbf-B12b.log`; the first, `wbf-B12.log`, failed to load `main.ts`, ran 1 test and skipped 9, and is not counted |
+| B13 | ▶ at the frontier posts epoch 0 | 1 of 10 | case 3 |
+| B14 | `restart`'s test is `!client.awaitingRun` | 1 of 10, + 1 node | case 8's last step; sessions' unparsed branch |
+| B15 | `restart` rewinds whenever the ring is evicted | 2 of 10, + 3 node | cases 7 and 8; the awaiting, unparsed and pending branches |
+| B16 | the waiting step button keeps its colour, `color: inherit` | 1 of 10, + 1 of 53 | case 5, at "↺ greyed", alpha 1 against 0.35; step-controls' waiting ▶'s look |
+| R-epoch, a twin beyond the plan | `onRun`'s prologue leaves `epoch` | 6 of 10 | cases 2 and 4 to 8; `worker.test.ts` and the node tier passed |
+
+Before the whole-branch fixes, at `d9d8c6e`, the review's two Important findings turned nothing red when sabotaged:
+R-I1, ▶ at the frontier and *keep recording* posting epoch 0, passed the node tier and the 9 cases, and R-I2 and
+R-I2b, `onRun`'s prologue leaving `posted` and leaving `rewoundFrom`, passed `worker.test.ts`'s 28
+(`$L/wbf-R-I1.log`, `wbf-R-I2.log`, `wbf-R-I2b.log`).
+
+**The reviews,** each read-only, each finding reproduced before it was fixed, by its fix report: Task 1's, 0 Critical,
+2 Important and 5 Minor (`$R/tasks/task-1-review.md`, `task-1-fixes.md`); Task 2's, 0, 2 and 6 (`task-2-review.md`,
+`task-2-fixes.md`); the re-read of those two fix rounds, 0, 1 and 4, and Task 4's, 0, 0 and 7, both answered by fix
+round 3 (`fixes-review.md`, `task-4-review.md`, `fix-round-3.md`); Task 5's, 0, 3 and 5 (`task-5-review.md`,
+`fix-round-4.md`); and the whole-branch review of `92f2b55..d9d8c6e`, 0, 2 and 5 (`whole-branch-review.md`,
+`whole-branch-fixes.md`).
+
+**The hook** ran on each commit as it was first made, and the reports record no amend and no `--no-verify`. The first
+rebase and the two cherry-picks made six commits, now `edd1d86`, `d64353a`, `806270c`, `f324bd6`, `1404763` and
+`1fc5ff0`, on which git ran no pre-commit hook as it made them; each has the patch-id of a commit the hook passed on
+another base, `1646438`, `5af1333`, `88a5a2f`, `3f75dbc`, `139a7cc` and `a367e92`. The logs, every hook in them
+`Passed` or `Skipped`: in `$L`, 16, `t1-commit.log`, `t2-commit.log`, `t2fix-commit-{1,2}.log`, `t4-commit.log`,
+`t5-commit.log`, `fr3-commit-{code,docs}.log`, `fr4-commit-{tests,plan}.log`, `wbf-commit-{tests,docs}.log`,
+`t7-commit.log` and `ef-commit.log` for the 14 commits from `6d05cd8` to `938bb7c` that are not picks, and
+`t1fix-commit-{1,2}.log` for `139a7cc` and `a367e92`;
+`$R/logs/plan-a/commit-{spec-facts,plan}.log` for `04af228` and `e55b1b9`; and `$R/logs/planfix/commit-{spec,plan}.log`
+for `88a5a2f` and `3f75dbc`. `$R/progress.md` records the spec writer's two, `1646438` and `5af1333`, as hook green.
+Task 1's and Task 2's first attempts failed `check-doc-figures` (README's browser-test figure) and `check-attributions`
+(a citation of `protocol.ts`'s `rewind`), and nothing was committed until each was fixed. The rebase onto `92f2b55`
+ran the hook's checks on each of the 22 commits as it replayed them: `git rebase --exec` with
+`$R/scripts/pr-a/rb-hook.sh`, which runs `pre-commit run --from-ref HEAD~1 --to-ref HEAD`, the hooks that run always
+and those the commit's files match, as at commit time (`$L/rb/hook-<n>-<sha>.log`, one per commit). Each ran rc 0
+with every hook `Passed` or `Skipped`, `cargo clippy` among them on the 3 commits that change Rust and `web
+typecheck` on the 7 that change TypeScript. The commit that brings this entry up to the rebase ran the hook as it was
+made (`$L/rb/commit.log`), and so did the one that answers the read-only fact-check of the rebase's changes
+(`$R/tasks/rebase-factcheck.md`, `$L/rb/fix-commit.log`).
+
+**Every count this entry quotes, with what produces it.** Commands run from `$W`, with `L=$R/logs/pr-a`; a log's
+figures are read with ANSI escapes stripped. `bash $R/scripts/pr-a/rb-entry-figures.sh` runs the git and log commands
+below into `$L/rb/entry-figures.log`, each SHA the rebased one; its last run was at `56e68ca`, with this entry's edits
+for the rebase's fact-check in the tree, after every other edit.
+
+| value | what | command |
+|---|---|---|
+| 19; 20 | the commits in `92f2b55..b36a102`; with `caee6db` | `git rev-list --count 92f2b55..b36a102` and `92f2b55..caee6db` |
+| 43 files, 3,905 added, 278 removed | the range's diff | `git diff --shortstat 92f2b55 b36a102` |
+| the plan and the spec alone; `comment-budget.json` unchanged | `caee6db`; the range | `git diff --name-only b36a102 caee6db`; `git diff --quiet 92f2b55 caee6db -- scripts` |
+| 2026-11-04 | every commit's dates | `git log --format='%ai %ci' 92f2b55..caee6db` |
+| each "now"; the 22 pairs, their patch-ids and their files | the two rebases and the two cherry-picked rounds | `git show <commit> \| git patch-id --stable` for each pair, equal, but `3bf0e69`'s; `$R/rebase-map.txt`, written by `bash $R/scripts/pr-a/rb-map.sh 938bb7c`, which also asserts each pair's `git diff` outside `README.md` and the roadmap equal to `git diff ec4f11a 92f2b55`'s (`$L/rb/map.log`); `git show` of `fa308d9` and `3bf0e69`, their `+` lines equal |
+| `hist.seek(0)`; the old name | ↺ at `ec4f11a` | `restart:` in `git show ec4f11a:web/src/transport.ts`; `named('↺'` in `git show ec4f11a:web/src/step-controls.ts` |
+| the six methods and their bindings | Task 1 | `grep -n 'pub fn rewind_'` on `crates/redextape-wasm/src/session.rs`; `js_name = rewind` on `lib.rs` |
+| ten `#[test]`s, one `#[wasm_bindgen_test]`; 33, 34 | the Rust tests the range adds; README's figure at each end | `git diff 92f2b55 b36a102 -- crates`, its `+#[test]` and `+#[wasm_bindgen_test]` lines; `has **N** browser tests` in `git show <end>:README.md` |
+| 19, 29; 10 tests and 8 cases; `90_000`; `until` at its default | the worker cases at each end; `restart-rewind.test.ts` | `grep -cE '^\s*(it\|test)\('` on `worker.test.ts` at `92f2b55` and `b36a102`; `it(`, `90_000`, and no `timeout` or `interval`, in `restart-rewind.test.ts` |
+| the `restart` branch; `rewindLeg`; no "back to the oldest kept step" | Task 4 | `flushEdit`, `hist.evicted` and `seek(0)` in `web/src/transport.ts`; `rewindLeg` in `web/src/sessions.ts`; `git grep -c 'back to the oldest kept step' b36a102 -- web`, which prints nothing |
+| 12 browser test files | PR A's | `git diff --name-only 92f2b55 b36a102 -- web/tests/browser`, less `harness.ts` |
+| the user's five decisions; the controller's calls, where each is named so, and those told to him; the offer with no answer | the rulings | the `USER` lines and the session-5 `HANDOFF`'s `USER RULINGS` line of `$R/progress.md`; P3 to P8 and the attribution paragraph of the plan's Plan calls; spec §6 and §9, `grep -n "controller's call\|not asked"`, and `grep -c P5` on the spec, 0 |
+| 12:12:23 to 13:14:44; rc, time, `dirty=0` of each step; 747 s; 40.27, 95.91 | the gate | the first `start=` and last `end=` of `$L/t6-summary.log`, and its lines; the `dirty=` of each `$L/t6-*.log`'s first line; the `load=` fields of `$L/t6-*.log`, the lowest and highest |
+| 21 commands, 15 areas, 40 files | the scans | `^=== EXIT=0 WALL=` lines and `check-comments:` lines of `$L/t6-scans.log` |
+| 1,921, 33; the six legs; 34; PARTIAL | check-all | `Summary` and `test result` lines of `$L/t6-check-all.log` |
+| 95.59%, 32,705, 1,441 | llvm-cov | `TOTAL` in `$L/t6-llvm-cov.log` |
+| 33, none failed | the slow tier | the `test result` lines of `$L/t6-slow.log`, summed; `slow tier green` |
+| 104, 45 | the LLVM tier | `Summary` lines of `$L/t6-check-all-llvm.log` |
+| 438; 285, 3,066; the All files row and the seven source rows | biome; coverage | `Checked` in `$L/t6-web-biome.log`; `Test Files`, `Tests`, `All files` and the rows of `$L/t6-coverage.log` |
+| 95 / 89 / 97 / 97; `exclude` | the floors; the worker | `thresholds` and `exclude` in `web/vite.config.ts` |
+| the four files at 100; 12:55:00 | the HTML report | the four `strong` figures of each page in `$L/t6-coverage-html/`; its mtime against the coverage line's `end=` in `$L/t6-summary.log` |
+| ~6 s, 200, 200, 1, 7, rc 0 | the image | `$L/t6-docker-run.log` |
+| 215, 41; 1,616, 1,444, 151, 21; 17 of 17; 151, 38; one project, the default tab count | Firefox's whole tier | `Test Files` and `Tests` of `$L/t6-firefox.log`; `T1` and `T3` lines of `t6-firefox-targets.log` |
+| 36, 2; the 2 at `ec4f11a`; the two errors | the 38 alone | `passed` and `failed` lines of `$L/t6-ff-alone.out` and `t6-ff-base.out`; the head of each `t6-ffbase-*.log`; `TimeoutError` and `timed out after` in `t6-ffalone-*` and `t6-ffbase-*` |
+| 200, 197, 1, 2; each file's | PR A's files in Firefox | `Tests` of `$L/t6-firefox-pr-a.log`; per-file statuses of its JSON |
+| 1,453 in 71; #164's 1 and 15 to 17; 39, 10, 29; 200, 197, 1, 2, each file's, all in `firefox`, no guard message, the same `app` failure; 6 tabs, two projects; none on the list | after the rebase | `Test Files` and `Tests` of `$L/rb/node.log`, `rb/chromium.log` and `rb/firefox-pr-a.log`, and per-file statuses of their JSON; `grep -cE '^\s*(it\|test)\('` on `web/tests/node/capture-files.test.ts` at `92f2b55` and on `browser-timeout-invariants.test.ts` at `ec4f11a` and `92f2b55`; each test line's `\|firefox (firefox)\|`, `took a pointer capture` none, and the `AssertionError` lines of `rb/firefox-pr-a.log` and `t6-firefox-pr-a.log`; `test:firefox` in `web/package.json`; `CAPTURE_FILES` in `web/vite.config.ts`; the `dirty=` of `$L/rb/summary.log` and each run log's first line |
+| each runs table row | the task runs | `Test Files`, `Tests`, `Summary` and `test result` lines of each named log; `error[E0599]` lines of `t1-red.log` |
+| each case's time | the cases | `python3 -I $R/scripts/pr-a/t7-durations.py` on the named JSON reports; `t5-chromium-cpu25.log`'s `✓` lines |
+| each sabotage's failed counts; 99 restores, 0 failed, every porcelain 0 | the sabotages | `python3 -I $R/scripts/pr-a/ef-sab-counts.py $L` for the JSON-reported rounds, `rr17`'s among them; `Summary` and `test result` lines of the `t1*-sab-*.log`; `restored`, `RESTORE FAILED` and `porcelain` lines of the nine summaries |
+| B1's and B7's values at `3bf0e69`; `$S` at `fa308d9`, clean | the re-run | the `AssertionError` and `Error:` lines of `$L/rr17-summary.log`; `git -C $S rev-parse --short HEAD` and `status --porcelain`; the `Done in` lines of `$L/rr17-build-{wasm,lsp-wasm}.log` and the `test result: ok` line of `rr17-build-bindings.log` |
+| each sabotage's values | the failing assertions | `left:` and `right:` lines of the `t1*-sab-*.log`; the `AssertionError` and `expected` lines of the others; each round's report table |
+| N12's precondition; B12's first run; R-epoch | the notes | `$R/tasks/task-3-report.md`, N12; `Failed to fetch dynamically imported module` and `Tests` in `$L/wbf-B12.log`; `wbf-R-epoch-rr.json` |
+| the review verdicts | the reviews | each review's verdict line or its `## Critical`, `## Important` and `## Minor` headings' findings |
+| 1,447, 1,448; 1,314, 127, 128; 1,320; `src/trace.rs` alone | the packages together and apart | `Summary` of `$L/t1-packages.log`, `t1fix-sab-I1.log`, `t1fix-sab-I1core.log` and `t1fix-{before,after}-redextape-{core,wasm}.log`; the `--features serde` leg's `Summary` in `t6-check-all.log`; `redextape-core` in `crates/redextape-wasm/Cargo.toml`; `git diff --stat 6d05cd8 caee6db -- crates/redextape-core`, and its `+` lines holding `#[test]`, none |
+| 16 logs, each one's commit; every hook `Passed` or `Skipped`; the six picks; the 22 replays, rc 0, 3 with clippy and 7 with typecheck | the hook | `ls $L/*commit*.log`; each log's modification time against the `%ci` of the commit `rebase-map.txt` pairs with its commit, and the SHA `t1fix-commit-{1,2}.log` print; `grep -c Failed` on each, 0; the same on the four in `$R/logs/plan-a/` and `$R/logs/planfix/`; the six picks' patch-ids, above; `bash $R/scripts/pr-a/ef-pick-hook-probe.sh`, whose pre-commit hook in a throwaway repository runs on 4 commits and on neither a cherry-pick nor a rebase (`$L/ef-pick-hook-probe.log`, git 2.56.0); the `end=` line's `rc=` of each `$L/rb/hook-<n>-<sha>.log`, and the logs holding `cargo clippy` and `web typecheck` `Passed`; the commits of `92f2b55..938bb7c` whose files include a `.rs` file and a `web/` `.ts` file |
+| 0.15.0; 0.15.1 | wasm-pack | `you are using: 0.15.0` in `$L/t6-web-build-wasm.log`, `t6-web-build-lsp-wasm.log` and `t6-check-all.log`; `wasm-pack/releases/download/v0.15.1` in `.forgejo/workflows/ci.yml`, twice, and `Dockerfile`'s first stage |
+| "ok those seem fine"; 5182; the five checks | the user's try | `grep -n 'seem fine\|5182'` on `$R/progress.md` |
+| 154, 153, 09:31 to 21:35; 2 and 2 | the files git ignores | `find <dir> -type f` in `$W`'s and `$S`'s `web/.vitest-attachments/` and `web/tests/browser/__screenshots__/`, counted, and their oldest and newest `%TH:%TM` in `$W` |
+| nothing pushed | this entry's commit | no `hidden-recording` in `git for-each-ref refs/remotes` |

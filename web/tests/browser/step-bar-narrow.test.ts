@@ -28,7 +28,7 @@ type Preset = 'debugger' | 'stage'
 const title = () => stepBar().querySelector<HTMLElement>('.step-bar-title') as HTMLElement
 const step = () => stepBar().querySelector<HTMLElement>('.step') as HTMLElement
 const extend = () => stepBar().querySelector<HTMLButtonElement>('.extend') as HTMLButtonElement
-const restart = () => stepBar().querySelector<HTMLButtonElement>('button[aria-label="back to the oldest kept step"]')
+const restart = () => stepBar().querySelector<HTMLButtonElement>('button[aria-label="back to step 0"]')
 const stepText = () => step().textContent ?? ''
 
 /** Every box the bar draws, in the order it draws them: the title, each control, and the step text. */

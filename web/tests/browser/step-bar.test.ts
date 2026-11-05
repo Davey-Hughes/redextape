@@ -84,7 +84,7 @@ describe('the step bar', () => {
     // would be comparing against nothing.
     const step = barStep
 
-    barButton('back to the oldest kept step').click()
+    barButton('back to step 0').click()
     expect(step()).toContain('step 0 ')
     barButton('one step forward').click()
     expect(step()).toContain('step 1 ')
@@ -92,7 +92,7 @@ describe('the step bar', () => {
     expect(step()).toContain('step 0 ')
     barButton('to the newest recorded step').click()
     expect(step()).toMatch(/^step ([\d,]+) of \1$/)
-    barButton('back to the oldest kept step').click()
+    barButton('back to step 0').click()
     expect(step()).toContain('step 0 ')
 
     barButton('play').click()
