@@ -2,7 +2,10 @@
 //! subroutine arity, and the frame-size-aware recursion-depth cap. No codegen-library types here —
 //! only `Program`/`Subroutine` analysis — so both backends (and neither-needs-the-other) reuse it.
 
-use redextape_core::tm::{Caps, Program, Reg};
+#[cfg(any(feature = "cranelift", feature = "llvm"))]
+use redextape_core::tm::Caps;
+use redextape_core::tm::{Program, Reg};
+#[cfg(any(feature = "cranelift", feature = "llvm"))]
 use redextape_native_rt::RUN_STACK_SIZE;
 
 use crate::analysis::{Subroutine, for_each_operand};
@@ -11,6 +14,7 @@ use crate::analysis::{Subroutine, for_each_operand};
 /// in `redextape_native_rt` and shared by the JIT drivers' run threads and the AOT run thread in
 /// `rt_run`, so they can never drift) for the outermost run frame plus host bookkeeping; the
 /// recursion budget is `RUN_STACK_SIZE - STACK_MARGIN`.
+#[cfg(any(feature = "cranelift", feature = "llvm"))]
 const STACK_MARGIN: usize = 8 << 20;
 
 /// Deliberately conservative bytes charged per register slot when estimating a native frame — one
@@ -43,7 +47,7 @@ const STACK_MARGIN: usize = 8 << 20;
 ///
 /// The Cranelift numbers above were read off AOT objects (`aot::emit_object`, the path `objdump` can
 /// read) and transfer to the JIT verbatim: emitting with `is_pic=false` — the JIT's exact flag, see
-/// `jit::host_isa` — produces byte-identical `countdown` prologues and identical object sizes. There is
+/// `codegen::jit_flags` — produces byte-identical `countdown` prologues and identical object sizes. There is
 /// no separate JIT calibration to keep in sync with this one.
 ///
 /// `32` = 4 words charged per register slot, against the ~3.0 words optimized Cranelift was measured
@@ -56,15 +60,18 @@ const STACK_MARGIN: usize = 8 << 20;
 /// subroutines' worth of slots: inlining a call also inlines that callee's own `rt_enter`, so the
 /// bytes-per-`rt_enter` ratio is preserved — a frame that is `k` merged frames deep also charges the
 /// depth counter `k` times before recursing again.
+#[cfg(any(feature = "cranelift", feature = "llvm"))]
 const BYTES_PER_VAR: u64 = 32;
 
 /// Fixed per-frame overhead added on top of the per-slot estimate: return address, saved registers,
 /// the backend's prologue (Cranelift's, or the one LLVM's register allocator emits), and ABI slop.
 /// Also guarantees `frame_bytes >= 1`, so the `safe_depth` division can never divide by zero.
+#[cfg(any(feature = "cranelift", feature = "llvm"))]
 const FRAME_BASE: u64 = 2048;
 
 /// A few extra "words" folded into every subroutine's frame estimate to cover `Rr` and the temporary
 /// `Variable`s codegen introduces beyond the `Loc`/`Arg` banks.
+#[cfg(any(feature = "cranelift", feature = "llvm"))]
 const FRAME_SLACK_WORDS: u64 = 8;
 
 /// Upper bound on a `Reg::Loc`/`Reg::Arg` index, matching `run_rxm`'s `MAX_REGISTERS` (`rxm.rs`).
@@ -148,6 +155,7 @@ pub(crate) fn n_arg_vars(prog: &Program, sub: &Subroutine) -> u32 {
 /// `safe_depth * frame_bytes <= RUN_STACK_SIZE - STACK_MARGIN`, and `native_depth_cap <= safe_depth`,
 /// so the depth cap ALWAYS trips before the native stack is exhausted — for ANY program, no process
 /// abort, ever. `frame_bytes >= FRAME_BASE >= 1`, so the division never divides by zero.
+#[cfg(any(feature = "cranelift", feature = "llvm"))]
 pub(crate) fn native_depth_cap(prog: &Program, subs: &[Subroutine], caps: Caps) -> u64 {
     let max_frame_words =
         subs.iter().map(|sub| u64::from(n_arg_vars(prog, sub)) + u64::from(sub.n_locals)).max().unwrap_or(0)

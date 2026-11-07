@@ -181,6 +181,11 @@ LEGS=(
   "base|build|-p redextape-native --no-default-features"
   "base|clippy|-p redextape-native --no-default-features --all-targets"
   "base|test|-p redextape-native --no-default-features"
+  # `clif` alone builds CLIF with no ISA and no `Module`, for the browser, so it must build for wasm32.
+  "base|clippy|-p redextape-native --no-default-features --features clif --all-targets"
+  "base|test|-p redextape-native --no-default-features --features clif"
+  "base|wasm|-p redextape-native --lib --no-default-features --features clif"
+  "base|wasm|-p redextape-native-rt --lib"
   "llvm|probe|"
   "llvm|clippy|-p redextape-native --features llvm --all-targets"
   "llvm|test|-p redextape-native --features llvm"

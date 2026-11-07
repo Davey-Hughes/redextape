@@ -13,8 +13,8 @@
 //! are DESIGNED to hit a cap/diverge (a "no value" outcome has no completed steps to attribute), which
 //! is outside this survey's scope (every program here must complete under `DEFAULT_CAPS`).
 //! Hand-checking is not enough: `three_way_oracle.rs::first_order_demos_stay_synced_across_every_copy`
-//! asserts all four copies — this one, `native_oracle.rs`'s, `examples/common/demos.rs`'s and the
-//! canonical — are textually identical, so a future drift fails a test instead of silently stale-ing
+//! asserts all four copies — this one, `redextape-native/tests/common/corpus.rs`'s, `examples/common/demos.rs`'s
+//! and the canonical — are textually identical, so a future drift fails a test instead of silently stale-ing
 //! this report's corpus count. The enumeration is `git grep -l 'const FIRST_ORDER_DEMOS' -- crates`, not
 //! a count anyone maintains from memory.
 //!

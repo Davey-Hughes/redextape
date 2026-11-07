@@ -79,7 +79,7 @@ pub const MAX_FIELD_WIDTH: usize = 64;
 /// At about 727 bytes per state (`docs/superpowers/specs/2026-08-11-count-bounds-design.md` §3.1)
 /// this ceiling is about 727 MB. Three facts fix it:
 ///
-///   * The worst program this project SHIPS (the `map` + `ap2` demo in `native_oracle.rs`'s
+///   * The worst program this project SHIPS (the `map` + `ap2` demo in `corpus.rs`'s
 ///     `FIRST_ORDER_DEMOS`) is 20x under the ceiling in states; spec §3.4 gives its per-token cost and
 ///     the gap to `MAX_TOKENS`'s own limit (100,000).
 ///   * The ceiling admits the largest balanced arithmetic tree measured to work and refuses the first

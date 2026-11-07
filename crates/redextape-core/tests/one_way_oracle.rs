@@ -1,5 +1,5 @@
 //! The sixth oracle leg: `multitape-TM == one-way-TM`, on programs whose earlier equalities
-//! `native_oracle.rs`'s `FIRST_ORDER_DEMOS` suite already asserts. Compared per tape relative to the
+//! `native_oracle.rs` already asserts over `corpus.rs`'s `FIRST_ORDER_DEMOS`. Compared per tape relative to the
 //! ORIGIN, not with `single_tape.rs`'s `normalize`: the tapes that cross into the left half include
 //! tapes that end all blank, where `normalize` keeps no head position.
 //!
@@ -62,8 +62,8 @@ fn assert_fold_agrees(label: &str, m: &Machine, inits: &[Vec<Symbol>], caps: Cap
 
 const TAPE_NAMES: [&str; 5] = ["reg", "work", "stack", "heap", "box"];
 
-/// Every member is a member of `native_oracle.rs`'s `FIRST_ORDER_DEMOS`, whose four-way oracle supplies
-/// the earlier equalities, and the same four programs `two_symbol_oracle.rs` runs.
+/// Every member is a member of `corpus.rs`'s `FIRST_ORDER_DEMOS`, on which `native_oracle.rs`'s four-way
+/// oracle supplies the earlier equalities, and the same four programs `two_symbol_oracle.rs` runs.
 const CORPUS: &[&str] = &[
     "3 - 5",
     "if 2 > 1 { 10 } else { 20 }",

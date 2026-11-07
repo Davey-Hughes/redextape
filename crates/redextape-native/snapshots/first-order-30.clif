@@ -1,0 +1,2172 @@
+;; first-order-30
+;; source:
+;;   fn a(n){ b(n) + 1 } fn b(n){ n * 2 } a(3)
+;; ==== built ====
+function u0:11(i64) -> i64 system_v {
+    sig0 = (i64, i64, i64) -> i64 system_v
+    sig1 = (i64, i64) -> i64 system_v
+    sig2 = (i64, i64) -> i64 system_v
+    sig3 = (i64, i64) -> i64 system_v
+    sig4 = (i64, i64) -> i64 system_v
+    sig5 = (i64, i64) -> i64 system_v
+    sig6 = (i64, i64, i64) system_v
+    sig7 = (i64) -> i64 system_v
+    sig8 = (i64) -> i64 system_v
+    sig9 = (i64) system_v
+    sig10 = (i64) -> i64 system_v
+    sig11 = (i64) -> i64 system_v
+    sig12 = (i64, i64) -> i64 system_v
+    sig13 = (i64, i64) -> i64 system_v
+    fn0 = u0:0 sig0
+    fn1 = u0:1 sig1
+    fn2 = u0:2 sig2
+    fn3 = u0:3 sig3
+    fn4 = u0:4 sig4
+    fn5 = u0:5 sig5
+    fn6 = u0:6 sig6
+    fn7 = u0:7 sig7
+    fn8 = u0:8 sig8
+    fn9 = u0:9 sig9
+    fn10 = u0:10 sig10
+    fn11 = colocated u0:11 sig11
+    fn12 = colocated u0:12 sig12
+    fn13 = colocated u0:13 sig13
+
+                                block0(v0: i64):
+                                    v1 = iconst.i64 0
+                                    v2 = iconst.i64 0
+                                    v3 = iconst.i64 0
+                                    jump block1
+
+                                block1:
+@0000                               jump block2
+
+                                block2:
+@0006                               jump block3
+
+                                block3:
+@000f                               v4 = iconst.i64 3
+                                    v5 -> v4
+                                    v7 -> v4
+@000f                               jump block4
+
+                                block4:
+@0010                               jump block5
+
+                                block5:
+@0011                               v6 = call fn8(v0)
+@0011                               brif v6, block7, block8
+
+                                block8:
+@0011                               v8 = call fn13(v0, v7)  ; v7 = 3
+                                    v9 -> v8
+@0011                               call fn9(v0)
+@0011                               jump block6
+
+                                block6:
+@0012                               return v9
+
+                                block7:
+                                    v10 = iconst.i64 0
+                                    return v10  ; v10 = 0
+}
+
+function u0:12(i64, i64) -> i64 system_v {
+    sig0 = (i64, i64, i64) -> i64 system_v
+    sig1 = (i64, i64) -> i64 system_v
+    sig2 = (i64, i64) -> i64 system_v
+    sig3 = (i64, i64) -> i64 system_v
+    sig4 = (i64, i64) -> i64 system_v
+    sig5 = (i64, i64) -> i64 system_v
+    sig6 = (i64, i64, i64) system_v
+    sig7 = (i64) -> i64 system_v
+    sig8 = (i64) -> i64 system_v
+    sig9 = (i64) system_v
+    sig10 = (i64) -> i64 system_v
+    sig11 = (i64) -> i64 system_v
+    sig12 = (i64, i64) -> i64 system_v
+    sig13 = (i64, i64) -> i64 system_v
+    fn0 = u0:0 sig0
+    fn1 = u0:1 sig1
+    fn2 = u0:2 sig2
+    fn3 = u0:3 sig3
+    fn4 = u0:4 sig4
+    fn5 = u0:5 sig5
+    fn6 = u0:6 sig6
+    fn7 = u0:7 sig7
+    fn8 = u0:8 sig8
+    fn9 = u0:9 sig9
+    fn10 = u0:10 sig10
+    fn11 = colocated u0:11 sig11
+    fn12 = colocated u0:12 sig12
+    fn13 = colocated u0:13 sig13
+
+                                block0(v0: i64, v1: i64):
+                                    v6 -> v1
+                                    v7 -> v1
+                                    v9 -> v1
+                                    v2 = iconst.i64 0
+                                    v3 = iconst.i64 0
+                                    v4 = iconst.i64 0
+                                    v5 = iconst.i64 0
+                                    jump block1
+
+                                block1:
+@0001                               jump block2
+
+                                block2:
+@0002                               jump block3
+
+                                block3:
+@0003                               v8 = iconst.i64 2
+                                    v10 -> v8
+@0003                               jump block4
+
+                                block4:
+@0004                               v11, v12 = umul_overflow.i64 v9, v10  ; v10 = 2
+@0004                               v13 = iconst.i64 -1
+@0004                               v14 = select v12, v13, v11  ; v13 = -1
+                                    v15 -> v14
+@0004                               jump block5
+
+                                block5:
+@0005                               return v15
+
+                                block6:
+                                    v16 = iconst.i64 0
+                                    return v16  ; v16 = 0
+}
+
+function u0:13(i64, i64) -> i64 system_v {
+    sig0 = (i64, i64, i64) -> i64 system_v
+    sig1 = (i64, i64) -> i64 system_v
+    sig2 = (i64, i64) -> i64 system_v
+    sig3 = (i64, i64) -> i64 system_v
+    sig4 = (i64, i64) -> i64 system_v
+    sig5 = (i64, i64) -> i64 system_v
+    sig6 = (i64, i64, i64) system_v
+    sig7 = (i64) -> i64 system_v
+    sig8 = (i64) -> i64 system_v
+    sig9 = (i64) system_v
+    sig10 = (i64) -> i64 system_v
+    sig11 = (i64) -> i64 system_v
+    sig12 = (i64, i64) -> i64 system_v
+    sig13 = (i64, i64) -> i64 system_v
+    fn0 = u0:0 sig0
+    fn1 = u0:1 sig1
+    fn2 = u0:2 sig2
+    fn3 = u0:3 sig3
+    fn4 = u0:4 sig4
+    fn5 = u0:5 sig5
+    fn6 = u0:6 sig6
+    fn7 = u0:7 sig7
+    fn8 = u0:8 sig8
+    fn9 = u0:9 sig9
+    fn10 = u0:10 sig10
+    fn11 = colocated u0:11 sig11
+    fn12 = colocated u0:12 sig12
+    fn13 = colocated u0:13 sig13
+
+                                block0(v0: i64, v1: i64):
+                                    v7 -> v1
+                                    v8 -> v1
+                                    v9 -> v1
+                                    v11 -> v1
+                                    v2 = iconst.i64 0
+                                    v3 = iconst.i64 0
+                                    v4 = iconst.i64 0
+                                    v5 = iconst.i64 0
+                                    v6 = iconst.i64 0
+                                    jump block1
+
+                                block1:
+@0007                               jump block2
+
+                                block2:
+@0008                               jump block3
+
+                                block3:
+@0009                               jump block4
+
+                                block4:
+@000a                               v10 = call fn8(v0)
+@000a                               brif v10, block9, block10
+
+                                block10:
+@000a                               v12 = call fn12(v0, v11)
+                                    v13 -> v12
+                                    v15 -> v12
+@000a                               call fn9(v0)
+@000a                               jump block5
+
+                                block5:
+@000b                               jump block6
+
+                                block6:
+@000c                               v14 = iconst.i64 1
+                                    v16 -> v14
+@000c                               jump block7
+
+                                block7:
+@000d                               v17, v18 = uadd_overflow.i64 v15, v16  ; v16 = 1
+@000d                               v19 = iconst.i64 -1
+@000d                               v20 = select v18, v19, v17  ; v19 = -1
+                                    v21 -> v20
+@000d                               jump block8
+
+                                block8:
+@000e                               return v21
+
+                                block9:
+                                    v22 = iconst.i64 0
+                                    return v22  ; v22 = 0
+}
+;; ==== x86_64-unknown-linux-gnu none: optimised ====
+function u0:11(i64) -> i64 system_v {
+    sig0 = (i64, i64, i64) -> i64 system_v
+    sig1 = (i64, i64) -> i64 system_v
+    sig2 = (i64, i64) -> i64 system_v
+    sig3 = (i64, i64) -> i64 system_v
+    sig4 = (i64, i64) -> i64 system_v
+    sig5 = (i64, i64) -> i64 system_v
+    sig6 = (i64, i64, i64) system_v
+    sig7 = (i64) -> i64 system_v
+    sig8 = (i64) -> i64 system_v
+    sig9 = (i64) system_v
+    sig10 = (i64) -> i64 system_v
+    sig11 = (i64) -> i64 system_v
+    sig12 = (i64, i64) -> i64 system_v
+    sig13 = (i64, i64) -> i64 system_v
+    fn0 = u0:0 sig0
+    fn1 = u0:1 sig1
+    fn2 = u0:2 sig2
+    fn3 = u0:3 sig3
+    fn4 = u0:4 sig4
+    fn5 = u0:5 sig5
+    fn6 = u0:6 sig6
+    fn7 = u0:7 sig7
+    fn8 = u0:8 sig8
+    fn9 = u0:9 sig9
+    fn10 = u0:10 sig10
+    fn11 = colocated u0:11 sig11
+    fn12 = colocated u0:12 sig12
+    fn13 = colocated u0:13 sig13
+
+                                block0(v0: i64):
+                                    v1 = iconst.i64 0
+                                    v2 = iconst.i64 0
+                                    v3 = iconst.i64 0
+                                    jump block1
+
+                                block1:
+@0000                               jump block2
+
+                                block2:
+@0006                               jump block3
+
+                                block3:
+@000f                               v4 = iconst.i64 3
+@000f                               jump block4
+
+                                block4:
+@0010                               jump block5
+
+                                block5:
+@0011                               v6 = call fn8(v0)
+@0011                               brif v6, block7, block8
+
+                                block8:
+@0011                               v8 = call fn13(v0, v4)  ; v4 = 3
+@0011                               call fn9(v0)
+@0011                               jump block6
+
+                                block6:
+@0012                               return v8
+
+                                block7:
+                                    v10 = iconst.i64 0
+                                    return v10  ; v10 = 0
+}
+
+function u0:12(i64, i64) -> i64 system_v {
+    sig0 = (i64, i64, i64) -> i64 system_v
+    sig1 = (i64, i64) -> i64 system_v
+    sig2 = (i64, i64) -> i64 system_v
+    sig3 = (i64, i64) -> i64 system_v
+    sig4 = (i64, i64) -> i64 system_v
+    sig5 = (i64, i64) -> i64 system_v
+    sig6 = (i64, i64, i64) system_v
+    sig7 = (i64) -> i64 system_v
+    sig8 = (i64) -> i64 system_v
+    sig9 = (i64) system_v
+    sig10 = (i64) -> i64 system_v
+    sig11 = (i64) -> i64 system_v
+    sig12 = (i64, i64) -> i64 system_v
+    sig13 = (i64, i64) -> i64 system_v
+    fn0 = u0:0 sig0
+    fn1 = u0:1 sig1
+    fn2 = u0:2 sig2
+    fn3 = u0:3 sig3
+    fn4 = u0:4 sig4
+    fn5 = u0:5 sig5
+    fn6 = u0:6 sig6
+    fn7 = u0:7 sig7
+    fn8 = u0:8 sig8
+    fn9 = u0:9 sig9
+    fn10 = u0:10 sig10
+    fn11 = colocated u0:11 sig11
+    fn12 = colocated u0:12 sig12
+    fn13 = colocated u0:13 sig13
+
+                                block0(v0: i64, v1: i64):
+                                    v2 = iconst.i64 0
+                                    v3 = iconst.i64 0
+                                    v4 = iconst.i64 0
+                                    v5 = iconst.i64 0
+                                    jump block1
+
+                                block1:
+@0001                               jump block2
+
+                                block2:
+@0002                               jump block3
+
+                                block3:
+@0003                               v8 = iconst.i64 2
+@0003                               jump block4
+
+                                block4:
+@0004                               v11, v12 = umul_overflow.i64 v1, v8  ; v8 = 2
+@0004                               v13 = iconst.i64 -1
+@0004                               v14 = select v12, v13, v11  ; v13 = -1
+@0004                               jump block5
+
+                                block5:
+@0005                               return v14
+}
+
+function u0:13(i64, i64) -> i64 system_v {
+    sig0 = (i64, i64, i64) -> i64 system_v
+    sig1 = (i64, i64) -> i64 system_v
+    sig2 = (i64, i64) -> i64 system_v
+    sig3 = (i64, i64) -> i64 system_v
+    sig4 = (i64, i64) -> i64 system_v
+    sig5 = (i64, i64) -> i64 system_v
+    sig6 = (i64, i64, i64) system_v
+    sig7 = (i64) -> i64 system_v
+    sig8 = (i64) -> i64 system_v
+    sig9 = (i64) system_v
+    sig10 = (i64) -> i64 system_v
+    sig11 = (i64) -> i64 system_v
+    sig12 = (i64, i64) -> i64 system_v
+    sig13 = (i64, i64) -> i64 system_v
+    fn0 = u0:0 sig0
+    fn1 = u0:1 sig1
+    fn2 = u0:2 sig2
+    fn3 = u0:3 sig3
+    fn4 = u0:4 sig4
+    fn5 = u0:5 sig5
+    fn6 = u0:6 sig6
+    fn7 = u0:7 sig7
+    fn8 = u0:8 sig8
+    fn9 = u0:9 sig9
+    fn10 = u0:10 sig10
+    fn11 = colocated u0:11 sig11
+    fn12 = colocated u0:12 sig12
+    fn13 = colocated u0:13 sig13
+
+                                block0(v0: i64, v1: i64):
+                                    v2 = iconst.i64 0
+                                    v3 = iconst.i64 0
+                                    v4 = iconst.i64 0
+                                    v5 = iconst.i64 0
+                                    v6 = iconst.i64 0
+                                    jump block1
+
+                                block1:
+@0007                               jump block2
+
+                                block2:
+@0008                               jump block3
+
+                                block3:
+@0009                               jump block4
+
+                                block4:
+@000a                               v10 = call fn8(v0)
+@000a                               brif v10, block9, block10
+
+                                block10:
+@000a                               v12 = call fn12(v0, v1)
+@000a                               call fn9(v0)
+@000a                               jump block5
+
+                                block5:
+@000b                               jump block6
+
+                                block6:
+@000c                               v14 = iconst.i64 1
+@000c                               jump block7
+
+                                block7:
+@000d                               v17, v18 = uadd_overflow.i64 v12, v14  ; v14 = 1
+@000d                               v19 = iconst.i64 -1
+@000d                               v20 = select v18, v19, v17  ; v19 = -1
+@000d                               jump block8
+
+                                block8:
+@000e                               return v20
+
+                                block9:
+                                    v22 = iconst.i64 0
+                                    return v22  ; v22 = 0
+}
+;; ==== x86_64-unknown-linux-gnu none: machine code ====
+;; function u0:11: 136 bytes, fnv1a64 a52f5754df54b6ba
+  pushq %rbp
+  unwind PushFrameRegs { offset_upward_to_caller_sp: 16 }
+  movq %rsp, %rbp
+  unwind DefineNewFrame { offset_upward_to_caller_sp: 16, offset_downward_to_clobbers: 32 }
+  subq $0x20, %rsp
+  movq %r12, (%rsp)
+  unwind SaveReg { clobber_offset: 0, reg: p12i }
+  movq %r13, 8(%rsp)
+  unwind SaveReg { clobber_offset: 8, reg: p13i }
+  movq %r14, 0x10(%rsp)
+  unwind SaveReg { clobber_offset: 16, reg: p14i }
+block0:
+  movq %rdi, %r13
+  jmp     label1
+block1:
+  jmp     label2
+block2:
+  jmp     label3
+block3:
+  movl $0x3, %r12d
+  jmp     label4
+block4:
+  jmp     label5
+block5:
+  load_ext_name userextname8+0, %rcx
+  movq %r13, %rdi
+  call    *%rcx
+  testq %rax, %rax
+  jnz     label8; j label6
+block6:
+  movq %r12, %rsi
+  movq %r13, %rdi
+  call    User(userextname13)
+  movq %rax, %r14
+  load_ext_name userextname9+0, %rax
+  movq %r13, %rdi
+  call    *%rax
+  jmp     label7
+block7:
+  movq %r14, %rax
+  movq (%rsp), %r12
+  movq 8(%rsp), %r13
+  movq 0x10(%rsp), %r14
+  addq $0x20, %rsp
+  movq %rbp, %rsp
+  popq %rbp
+  retq
+block8:
+  uninit  %rax
+  xorq %rax, %rax
+  movq (%rsp), %r12
+  movq 8(%rsp), %r13
+  movq 0x10(%rsp), %r14
+  addq $0x20, %rsp
+  movq %rbp, %rsp
+  popq %rbp
+  retq
+
+;; function u0:12: 48 bytes, fnv1a64 54794dce901614a2
+  pushq %rbp
+  unwind PushFrameRegs { offset_upward_to_caller_sp: 16 }
+  movq %rsp, %rbp
+  unwind DefineNewFrame { offset_upward_to_caller_sp: 16, offset_downward_to_clobbers: 0 }
+block0:
+  jmp     label1
+block1:
+  jmp     label2
+block2:
+  jmp     label3
+block3:
+  jmp     label4
+block4:
+  movq %rsi, %rax
+  mulq (%rip) ;; implicit: %rax, %rdx
+  cmovoq (%rip), %rax
+  jmp     label5
+block5:
+  movq %rbp, %rsp
+  popq %rbp
+  retq
+
+;; function u0:13: 160 bytes, fnv1a64 51e8fc4c11c25d33
+  pushq %rbp
+  unwind PushFrameRegs { offset_upward_to_caller_sp: 16 }
+  movq %rsp, %rbp
+  unwind DefineNewFrame { offset_upward_to_caller_sp: 16, offset_downward_to_clobbers: 32 }
+  subq $0x20, %rsp
+  movq %rbx, (%rsp)
+  unwind SaveReg { clobber_offset: 0, reg: p3i }
+  movq %r12, 8(%rsp)
+  unwind SaveReg { clobber_offset: 8, reg: p12i }
+  movq %r14, 0x10(%rsp)
+  unwind SaveReg { clobber_offset: 16, reg: p14i }
+block0:
+  movq %rsi, %rbx
+  movq %rdi, %r12
+  jmp     label1
+block1:
+  jmp     label2
+block2:
+  jmp     label3
+block3:
+  jmp     label4
+block4:
+  load_ext_name userextname8+0, %rax
+  movq %r12, %rdi
+  call    *%rax
+  testq %rax, %rax
+  jnz     label10; j label5
+block5:
+  movq %rbx, %rsi
+  movq %r12, %rdi
+  call    User(userextname12)
+  movq %rax, %r14
+  load_ext_name userextname9+0, %rax
+  movq %r12, %rdi
+  call    *%rax
+  jmp     label6
+block6:
+  jmp     label7
+block7:
+  jmp     label8
+block8:
+  movq %r14, %rax
+  addq $0x1, %rax
+  cmovbq (%rip), %rax
+  jmp     label9
+block9:
+  movq (%rsp), %rbx
+  movq 8(%rsp), %r12
+  movq 0x10(%rsp), %r14
+  addq $0x20, %rsp
+  movq %rbp, %rsp
+  popq %rbp
+  retq
+block10:
+  uninit  %rax
+  xorq %rax, %rax
+  movq (%rsp), %rbx
+  movq 8(%rsp), %r12
+  movq 0x10(%rsp), %r14
+  addq $0x20, %rsp
+  movq %rbp, %rsp
+  popq %rbp
+  retq
+;; ==== x86_64-unknown-linux-gnu speed: optimised ====
+function u0:11(i64) -> i64 system_v {
+    sig0 = (i64, i64, i64) -> i64 system_v
+    sig1 = (i64, i64) -> i64 system_v
+    sig2 = (i64, i64) -> i64 system_v
+    sig3 = (i64, i64) -> i64 system_v
+    sig4 = (i64, i64) -> i64 system_v
+    sig5 = (i64, i64) -> i64 system_v
+    sig6 = (i64, i64, i64) system_v
+    sig7 = (i64) -> i64 system_v
+    sig8 = (i64) -> i64 system_v
+    sig9 = (i64) system_v
+    sig10 = (i64) -> i64 system_v
+    sig11 = (i64) -> i64 system_v
+    sig12 = (i64, i64) -> i64 system_v
+    sig13 = (i64, i64) -> i64 system_v
+    fn0 = u0:0 sig0
+    fn1 = u0:1 sig1
+    fn2 = u0:2 sig2
+    fn3 = u0:3 sig3
+    fn4 = u0:4 sig4
+    fn5 = u0:5 sig5
+    fn6 = u0:6 sig6
+    fn7 = u0:7 sig7
+    fn8 = u0:8 sig8
+    fn9 = u0:9 sig9
+    fn10 = u0:10 sig10
+    fn11 = colocated u0:11 sig11
+    fn12 = colocated u0:12 sig12
+    fn13 = colocated u0:13 sig13
+
+                                block0(v0: i64):
+                                    jump block1
+
+                                block1:
+@0000                               jump block2
+
+                                block2:
+@0006                               jump block3
+
+                                block3:
+@000f                               jump block4
+
+                                block4:
+@0010                               jump block5
+
+                                block5:
+@0011                               v6 = call fn8(v0)
+@0011                               brif v6, block7, block8
+
+                                block8:
+@000f                               v4 = iconst.i64 3
+@0011                               v8 = call fn13(v0, v4)  ; v4 = 3
+@0011                               call fn9(v0)
+@0011                               jump block6
+
+                                block6:
+@0012                               return v8
+
+                                block7:
+                                    v1 = iconst.i64 0
+                                    return v1  ; v1 = 0
+}
+
+function u0:12(i64, i64) -> i64 system_v {
+    sig0 = (i64, i64, i64) -> i64 system_v
+    sig1 = (i64, i64) -> i64 system_v
+    sig2 = (i64, i64) -> i64 system_v
+    sig3 = (i64, i64) -> i64 system_v
+    sig4 = (i64, i64) -> i64 system_v
+    sig5 = (i64, i64) -> i64 system_v
+    sig6 = (i64, i64, i64) system_v
+    sig7 = (i64) -> i64 system_v
+    sig8 = (i64) -> i64 system_v
+    sig9 = (i64) system_v
+    sig10 = (i64) -> i64 system_v
+    sig11 = (i64) -> i64 system_v
+    sig12 = (i64, i64) -> i64 system_v
+    sig13 = (i64, i64) -> i64 system_v
+    fn0 = u0:0 sig0
+    fn1 = u0:1 sig1
+    fn2 = u0:2 sig2
+    fn3 = u0:3 sig3
+    fn4 = u0:4 sig4
+    fn5 = u0:5 sig5
+    fn6 = u0:6 sig6
+    fn7 = u0:7 sig7
+    fn8 = u0:8 sig8
+    fn9 = u0:9 sig9
+    fn10 = u0:10 sig10
+    fn11 = colocated u0:11 sig11
+    fn12 = colocated u0:12 sig12
+    fn13 = colocated u0:13 sig13
+
+                                block0(v0: i64, v1: i64):
+                                    jump block1
+
+                                block1:
+@0001                               jump block2
+
+                                block2:
+@0002                               jump block3
+
+                                block3:
+@0003                               jump block4
+
+                                block4:
+@0003                               v8 = iconst.i64 2
+@0004                               v11, v12 = umul_overflow.i64 v1, v8  ; v8 = 2
+@0004                               jump block5
+
+                                block5:
+@0004                               v13 = iconst.i64 -1
+@0004                               v14 = select v12, v13, v11  ; v13 = -1
+@0005                               return v14
+}
+
+function u0:13(i64, i64) -> i64 system_v {
+    sig0 = (i64, i64, i64) -> i64 system_v
+    sig1 = (i64, i64) -> i64 system_v
+    sig2 = (i64, i64) -> i64 system_v
+    sig3 = (i64, i64) -> i64 system_v
+    sig4 = (i64, i64) -> i64 system_v
+    sig5 = (i64, i64) -> i64 system_v
+    sig6 = (i64, i64, i64) system_v
+    sig7 = (i64) -> i64 system_v
+    sig8 = (i64) -> i64 system_v
+    sig9 = (i64) system_v
+    sig10 = (i64) -> i64 system_v
+    sig11 = (i64) -> i64 system_v
+    sig12 = (i64, i64) -> i64 system_v
+    sig13 = (i64, i64) -> i64 system_v
+    fn0 = u0:0 sig0
+    fn1 = u0:1 sig1
+    fn2 = u0:2 sig2
+    fn3 = u0:3 sig3
+    fn4 = u0:4 sig4
+    fn5 = u0:5 sig5
+    fn6 = u0:6 sig6
+    fn7 = u0:7 sig7
+    fn8 = u0:8 sig8
+    fn9 = u0:9 sig9
+    fn10 = u0:10 sig10
+    fn11 = colocated u0:11 sig11
+    fn12 = colocated u0:12 sig12
+    fn13 = colocated u0:13 sig13
+
+                                block0(v0: i64, v1: i64):
+                                    jump block1
+
+                                block1:
+@0007                               jump block2
+
+                                block2:
+@0008                               jump block3
+
+                                block3:
+@0009                               jump block4
+
+                                block4:
+@000a                               v10 = call fn8(v0)
+@000a                               brif v10, block9, block10
+
+                                block10:
+@000a                               v12 = call fn12(v0, v1)
+@000a                               call fn9(v0)
+@000a                               jump block5
+
+                                block5:
+@000b                               jump block6
+
+                                block6:
+@000c                               jump block7
+
+                                block7:
+@000c                               v14 = iconst.i64 1
+@000d                               v17, v18 = uadd_overflow.i64 v12, v14  ; v14 = 1
+@000d                               jump block8
+
+                                block8:
+@000d                               v19 = iconst.i64 -1
+@000d                               v20 = select v18, v19, v17  ; v19 = -1
+@000e                               return v20
+
+                                block9:
+                                    v2 = iconst.i64 0
+                                    return v2  ; v2 = 0
+}
+;; ==== x86_64-unknown-linux-gnu speed: machine code ====
+;; function u0:11: 117 bytes, fnv1a64 caf6910994e0d806
+  pushq %rbp
+  unwind PushFrameRegs { offset_upward_to_caller_sp: 16 }
+  movq %rsp, %rbp
+  unwind DefineNewFrame { offset_upward_to_caller_sp: 16, offset_downward_to_clobbers: 16 }
+  subq $0x10, %rsp
+  movq %r12, (%rsp)
+  unwind SaveReg { clobber_offset: 0, reg: p12i }
+  movq %r13, 8(%rsp)
+  unwind SaveReg { clobber_offset: 8, reg: p13i }
+block0:
+  movq %rdi, %r12
+  jmp     label1
+block1:
+  jmp     label2
+block2:
+  jmp     label3
+block3:
+  jmp     label4
+block4:
+  jmp     label5
+block5:
+  load_ext_name userextname8+0, %rax
+  movq %r12, %rdi
+  call    *%rax
+  testq %rax, %rax
+  jnz     label8; j label6
+block6:
+  movl $0x3, %esi
+  movq %r12, %rdi
+  call    User(userextname13)
+  movq %rax, %r13
+  load_ext_name userextname9+0, %rax
+  movq %r12, %rdi
+  call    *%rax
+  jmp     label7
+block7:
+  movq %r13, %rax
+  movq (%rsp), %r12
+  movq 8(%rsp), %r13
+  addq $0x10, %rsp
+  movq %rbp, %rsp
+  popq %rbp
+  retq
+block8:
+  uninit  %rax
+  xorq %rax, %rax
+  movq (%rsp), %r12
+  movq 8(%rsp), %r13
+  addq $0x10, %rsp
+  movq %rbp, %rsp
+  popq %rbp
+  retq
+
+;; function u0:12: 64 bytes, fnv1a64 30d0e2f284ee4833
+  pushq %rbp
+  unwind PushFrameRegs { offset_upward_to_caller_sp: 16 }
+  movq %rsp, %rbp
+  unwind DefineNewFrame { offset_upward_to_caller_sp: 16, offset_downward_to_clobbers: 0 }
+block0:
+  jmp     label1
+block1:
+  jmp     label2
+block2:
+  jmp     label3
+block3:
+  jmp     label4
+block4:
+  movq %rsi, %rax
+  mulq (%rip) ;; implicit: %rax, %rdx
+  movq %rax, %r8
+  jmp     label5
+block5:
+  movq %rsi, %rax
+  mulq (%rip) ;; implicit: %rax, %rdx
+  movq %r8, %rax
+  cmovoq (%rip), %rax
+  movq %rbp, %rsp
+  popq %rbp
+  retq
+
+;; function u0:13: 160 bytes, fnv1a64 7772455020e38a5a
+  pushq %rbp
+  unwind PushFrameRegs { offset_upward_to_caller_sp: 16 }
+  movq %rsp, %rbp
+  unwind DefineNewFrame { offset_upward_to_caller_sp: 16, offset_downward_to_clobbers: 32 }
+  subq $0x20, %rsp
+  movq %rbx, (%rsp)
+  unwind SaveReg { clobber_offset: 0, reg: p3i }
+  movq %r13, 8(%rsp)
+  unwind SaveReg { clobber_offset: 8, reg: p13i }
+  movq %r15, 0x10(%rsp)
+  unwind SaveReg { clobber_offset: 16, reg: p15i }
+block0:
+  movq %rsi, %rbx
+  movq %rdi, %r13
+  jmp     label1
+block1:
+  jmp     label2
+block2:
+  jmp     label3
+block3:
+  jmp     label4
+block4:
+  load_ext_name userextname8+0, %rax
+  movq %r13, %rdi
+  call    *%rax
+  testq %rax, %rax
+  jnz     label10; j label5
+block5:
+  movq %rbx, %rsi
+  movq %r13, %rdi
+  call    User(userextname12)
+  movq %rax, %r15
+  load_ext_name userextname9+0, %rax
+  movq %r13, %rdi
+  call    *%rax
+  jmp     label6
+block6:
+  jmp     label7
+block7:
+  jmp     label8
+block8:
+  movq %r15, %rcx
+  movq %rcx, %rax
+  addq $0x1, %rax
+  jmp     label9
+block9:
+  addq $0x1, %rcx
+  cmovbq (%rip), %rax
+  movq (%rsp), %rbx
+  movq 8(%rsp), %r13
+  movq 0x10(%rsp), %r15
+  addq $0x20, %rsp
+  movq %rbp, %rsp
+  popq %rbp
+  retq
+block10:
+  uninit  %rax
+  xorq %rax, %rax
+  movq (%rsp), %rbx
+  movq 8(%rsp), %r13
+  movq 0x10(%rsp), %r15
+  addq $0x20, %rsp
+  movq %rbp, %rsp
+  popq %rbp
+  retq
+;; ==== x86_64-unknown-linux-gnu speed_and_size: optimised ====
+function u0:11(i64) -> i64 system_v {
+    sig0 = (i64, i64, i64) -> i64 system_v
+    sig1 = (i64, i64) -> i64 system_v
+    sig2 = (i64, i64) -> i64 system_v
+    sig3 = (i64, i64) -> i64 system_v
+    sig4 = (i64, i64) -> i64 system_v
+    sig5 = (i64, i64) -> i64 system_v
+    sig6 = (i64, i64, i64) system_v
+    sig7 = (i64) -> i64 system_v
+    sig8 = (i64) -> i64 system_v
+    sig9 = (i64) system_v
+    sig10 = (i64) -> i64 system_v
+    sig11 = (i64) -> i64 system_v
+    sig12 = (i64, i64) -> i64 system_v
+    sig13 = (i64, i64) -> i64 system_v
+    fn0 = u0:0 sig0
+    fn1 = u0:1 sig1
+    fn2 = u0:2 sig2
+    fn3 = u0:3 sig3
+    fn4 = u0:4 sig4
+    fn5 = u0:5 sig5
+    fn6 = u0:6 sig6
+    fn7 = u0:7 sig7
+    fn8 = u0:8 sig8
+    fn9 = u0:9 sig9
+    fn10 = u0:10 sig10
+    fn11 = colocated u0:11 sig11
+    fn12 = colocated u0:12 sig12
+    fn13 = colocated u0:13 sig13
+
+                                block0(v0: i64):
+                                    jump block1
+
+                                block1:
+@0000                               jump block2
+
+                                block2:
+@0006                               jump block3
+
+                                block3:
+@000f                               jump block4
+
+                                block4:
+@0010                               jump block5
+
+                                block5:
+@0011                               v6 = call fn8(v0)
+@0011                               brif v6, block7, block8
+
+                                block8:
+@000f                               v4 = iconst.i64 3
+@0011                               v8 = call fn13(v0, v4)  ; v4 = 3
+@0011                               call fn9(v0)
+@0011                               jump block6
+
+                                block6:
+@0012                               return v8
+
+                                block7:
+                                    v1 = iconst.i64 0
+                                    return v1  ; v1 = 0
+}
+
+function u0:12(i64, i64) -> i64 system_v {
+    sig0 = (i64, i64, i64) -> i64 system_v
+    sig1 = (i64, i64) -> i64 system_v
+    sig2 = (i64, i64) -> i64 system_v
+    sig3 = (i64, i64) -> i64 system_v
+    sig4 = (i64, i64) -> i64 system_v
+    sig5 = (i64, i64) -> i64 system_v
+    sig6 = (i64, i64, i64) system_v
+    sig7 = (i64) -> i64 system_v
+    sig8 = (i64) -> i64 system_v
+    sig9 = (i64) system_v
+    sig10 = (i64) -> i64 system_v
+    sig11 = (i64) -> i64 system_v
+    sig12 = (i64, i64) -> i64 system_v
+    sig13 = (i64, i64) -> i64 system_v
+    fn0 = u0:0 sig0
+    fn1 = u0:1 sig1
+    fn2 = u0:2 sig2
+    fn3 = u0:3 sig3
+    fn4 = u0:4 sig4
+    fn5 = u0:5 sig5
+    fn6 = u0:6 sig6
+    fn7 = u0:7 sig7
+    fn8 = u0:8 sig8
+    fn9 = u0:9 sig9
+    fn10 = u0:10 sig10
+    fn11 = colocated u0:11 sig11
+    fn12 = colocated u0:12 sig12
+    fn13 = colocated u0:13 sig13
+
+                                block0(v0: i64, v1: i64):
+                                    jump block1
+
+                                block1:
+@0001                               jump block2
+
+                                block2:
+@0002                               jump block3
+
+                                block3:
+@0003                               jump block4
+
+                                block4:
+@0003                               v8 = iconst.i64 2
+@0004                               v11, v12 = umul_overflow.i64 v1, v8  ; v8 = 2
+@0004                               jump block5
+
+                                block5:
+@0004                               v13 = iconst.i64 -1
+@0004                               v14 = select v12, v13, v11  ; v13 = -1
+@0005                               return v14
+}
+
+function u0:13(i64, i64) -> i64 system_v {
+    sig0 = (i64, i64, i64) -> i64 system_v
+    sig1 = (i64, i64) -> i64 system_v
+    sig2 = (i64, i64) -> i64 system_v
+    sig3 = (i64, i64) -> i64 system_v
+    sig4 = (i64, i64) -> i64 system_v
+    sig5 = (i64, i64) -> i64 system_v
+    sig6 = (i64, i64, i64) system_v
+    sig7 = (i64) -> i64 system_v
+    sig8 = (i64) -> i64 system_v
+    sig9 = (i64) system_v
+    sig10 = (i64) -> i64 system_v
+    sig11 = (i64) -> i64 system_v
+    sig12 = (i64, i64) -> i64 system_v
+    sig13 = (i64, i64) -> i64 system_v
+    fn0 = u0:0 sig0
+    fn1 = u0:1 sig1
+    fn2 = u0:2 sig2
+    fn3 = u0:3 sig3
+    fn4 = u0:4 sig4
+    fn5 = u0:5 sig5
+    fn6 = u0:6 sig6
+    fn7 = u0:7 sig7
+    fn8 = u0:8 sig8
+    fn9 = u0:9 sig9
+    fn10 = u0:10 sig10
+    fn11 = colocated u0:11 sig11
+    fn12 = colocated u0:12 sig12
+    fn13 = colocated u0:13 sig13
+
+                                block0(v0: i64, v1: i64):
+                                    jump block1
+
+                                block1:
+@0007                               jump block2
+
+                                block2:
+@0008                               jump block3
+
+                                block3:
+@0009                               jump block4
+
+                                block4:
+@000a                               v10 = call fn8(v0)
+@000a                               brif v10, block9, block10
+
+                                block10:
+@000a                               v12 = call fn12(v0, v1)
+@000a                               call fn9(v0)
+@000a                               jump block5
+
+                                block5:
+@000b                               jump block6
+
+                                block6:
+@000c                               jump block7
+
+                                block7:
+@000c                               v14 = iconst.i64 1
+@000d                               v17, v18 = uadd_overflow.i64 v12, v14  ; v14 = 1
+@000d                               jump block8
+
+                                block8:
+@000d                               v19 = iconst.i64 -1
+@000d                               v20 = select v18, v19, v17  ; v19 = -1
+@000e                               return v20
+
+                                block9:
+                                    v2 = iconst.i64 0
+                                    return v2  ; v2 = 0
+}
+;; ==== x86_64-unknown-linux-gnu speed_and_size: machine code ====
+;; function u0:11: 117 bytes, fnv1a64 caf6910994e0d806
+  pushq %rbp
+  unwind PushFrameRegs { offset_upward_to_caller_sp: 16 }
+  movq %rsp, %rbp
+  unwind DefineNewFrame { offset_upward_to_caller_sp: 16, offset_downward_to_clobbers: 16 }
+  subq $0x10, %rsp
+  movq %r12, (%rsp)
+  unwind SaveReg { clobber_offset: 0, reg: p12i }
+  movq %r13, 8(%rsp)
+  unwind SaveReg { clobber_offset: 8, reg: p13i }
+block0:
+  movq %rdi, %r12
+  jmp     label1
+block1:
+  jmp     label2
+block2:
+  jmp     label3
+block3:
+  jmp     label4
+block4:
+  jmp     label5
+block5:
+  load_ext_name userextname8+0, %rax
+  movq %r12, %rdi
+  call    *%rax
+  testq %rax, %rax
+  jnz     label8; j label6
+block6:
+  movl $0x3, %esi
+  movq %r12, %rdi
+  call    User(userextname13)
+  movq %rax, %r13
+  load_ext_name userextname9+0, %rax
+  movq %r12, %rdi
+  call    *%rax
+  jmp     label7
+block7:
+  movq %r13, %rax
+  movq (%rsp), %r12
+  movq 8(%rsp), %r13
+  addq $0x10, %rsp
+  movq %rbp, %rsp
+  popq %rbp
+  retq
+block8:
+  uninit  %rax
+  xorq %rax, %rax
+  movq (%rsp), %r12
+  movq 8(%rsp), %r13
+  addq $0x10, %rsp
+  movq %rbp, %rsp
+  popq %rbp
+  retq
+
+;; function u0:12: 64 bytes, fnv1a64 30d0e2f284ee4833
+  pushq %rbp
+  unwind PushFrameRegs { offset_upward_to_caller_sp: 16 }
+  movq %rsp, %rbp
+  unwind DefineNewFrame { offset_upward_to_caller_sp: 16, offset_downward_to_clobbers: 0 }
+block0:
+  jmp     label1
+block1:
+  jmp     label2
+block2:
+  jmp     label3
+block3:
+  jmp     label4
+block4:
+  movq %rsi, %rax
+  mulq (%rip) ;; implicit: %rax, %rdx
+  movq %rax, %r8
+  jmp     label5
+block5:
+  movq %rsi, %rax
+  mulq (%rip) ;; implicit: %rax, %rdx
+  movq %r8, %rax
+  cmovoq (%rip), %rax
+  movq %rbp, %rsp
+  popq %rbp
+  retq
+
+;; function u0:13: 160 bytes, fnv1a64 7772455020e38a5a
+  pushq %rbp
+  unwind PushFrameRegs { offset_upward_to_caller_sp: 16 }
+  movq %rsp, %rbp
+  unwind DefineNewFrame { offset_upward_to_caller_sp: 16, offset_downward_to_clobbers: 32 }
+  subq $0x20, %rsp
+  movq %rbx, (%rsp)
+  unwind SaveReg { clobber_offset: 0, reg: p3i }
+  movq %r13, 8(%rsp)
+  unwind SaveReg { clobber_offset: 8, reg: p13i }
+  movq %r15, 0x10(%rsp)
+  unwind SaveReg { clobber_offset: 16, reg: p15i }
+block0:
+  movq %rsi, %rbx
+  movq %rdi, %r13
+  jmp     label1
+block1:
+  jmp     label2
+block2:
+  jmp     label3
+block3:
+  jmp     label4
+block4:
+  load_ext_name userextname8+0, %rax
+  movq %r13, %rdi
+  call    *%rax
+  testq %rax, %rax
+  jnz     label10; j label5
+block5:
+  movq %rbx, %rsi
+  movq %r13, %rdi
+  call    User(userextname12)
+  movq %rax, %r15
+  load_ext_name userextname9+0, %rax
+  movq %r13, %rdi
+  call    *%rax
+  jmp     label6
+block6:
+  jmp     label7
+block7:
+  jmp     label8
+block8:
+  movq %r15, %rcx
+  movq %rcx, %rax
+  addq $0x1, %rax
+  jmp     label9
+block9:
+  addq $0x1, %rcx
+  cmovbq (%rip), %rax
+  movq (%rsp), %rbx
+  movq 8(%rsp), %r13
+  movq 0x10(%rsp), %r15
+  addq $0x20, %rsp
+  movq %rbp, %rsp
+  popq %rbp
+  retq
+block10:
+  uninit  %rax
+  xorq %rax, %rax
+  movq (%rsp), %rbx
+  movq 8(%rsp), %r13
+  movq 0x10(%rsp), %r15
+  addq $0x20, %rsp
+  movq %rbp, %rsp
+  popq %rbp
+  retq
+;; ==== aarch64-unknown-linux-gnu none: optimised ====
+function u0:11(i64) -> i64 system_v {
+    sig0 = (i64, i64, i64) -> i64 system_v
+    sig1 = (i64, i64) -> i64 system_v
+    sig2 = (i64, i64) -> i64 system_v
+    sig3 = (i64, i64) -> i64 system_v
+    sig4 = (i64, i64) -> i64 system_v
+    sig5 = (i64, i64) -> i64 system_v
+    sig6 = (i64, i64, i64) system_v
+    sig7 = (i64) -> i64 system_v
+    sig8 = (i64) -> i64 system_v
+    sig9 = (i64) system_v
+    sig10 = (i64) -> i64 system_v
+    sig11 = (i64) -> i64 system_v
+    sig12 = (i64, i64) -> i64 system_v
+    sig13 = (i64, i64) -> i64 system_v
+    fn0 = u0:0 sig0
+    fn1 = u0:1 sig1
+    fn2 = u0:2 sig2
+    fn3 = u0:3 sig3
+    fn4 = u0:4 sig4
+    fn5 = u0:5 sig5
+    fn6 = u0:6 sig6
+    fn7 = u0:7 sig7
+    fn8 = u0:8 sig8
+    fn9 = u0:9 sig9
+    fn10 = u0:10 sig10
+    fn11 = colocated u0:11 sig11
+    fn12 = colocated u0:12 sig12
+    fn13 = colocated u0:13 sig13
+
+                                block0(v0: i64):
+                                    v1 = iconst.i64 0
+                                    v2 = iconst.i64 0
+                                    v3 = iconst.i64 0
+                                    jump block1
+
+                                block1:
+@0000                               jump block2
+
+                                block2:
+@0006                               jump block3
+
+                                block3:
+@000f                               v4 = iconst.i64 3
+@000f                               jump block4
+
+                                block4:
+@0010                               jump block5
+
+                                block5:
+@0011                               v6 = call fn8(v0)
+@0011                               brif v6, block7, block8
+
+                                block8:
+@0011                               v8 = call fn13(v0, v4)  ; v4 = 3
+@0011                               call fn9(v0)
+@0011                               jump block6
+
+                                block6:
+@0012                               return v8
+
+                                block7:
+                                    v10 = iconst.i64 0
+                                    return v10  ; v10 = 0
+}
+
+function u0:12(i64, i64) -> i64 system_v {
+    sig0 = (i64, i64, i64) -> i64 system_v
+    sig1 = (i64, i64) -> i64 system_v
+    sig2 = (i64, i64) -> i64 system_v
+    sig3 = (i64, i64) -> i64 system_v
+    sig4 = (i64, i64) -> i64 system_v
+    sig5 = (i64, i64) -> i64 system_v
+    sig6 = (i64, i64, i64) system_v
+    sig7 = (i64) -> i64 system_v
+    sig8 = (i64) -> i64 system_v
+    sig9 = (i64) system_v
+    sig10 = (i64) -> i64 system_v
+    sig11 = (i64) -> i64 system_v
+    sig12 = (i64, i64) -> i64 system_v
+    sig13 = (i64, i64) -> i64 system_v
+    fn0 = u0:0 sig0
+    fn1 = u0:1 sig1
+    fn2 = u0:2 sig2
+    fn3 = u0:3 sig3
+    fn4 = u0:4 sig4
+    fn5 = u0:5 sig5
+    fn6 = u0:6 sig6
+    fn7 = u0:7 sig7
+    fn8 = u0:8 sig8
+    fn9 = u0:9 sig9
+    fn10 = u0:10 sig10
+    fn11 = colocated u0:11 sig11
+    fn12 = colocated u0:12 sig12
+    fn13 = colocated u0:13 sig13
+
+                                block0(v0: i64, v1: i64):
+                                    v2 = iconst.i64 0
+                                    v3 = iconst.i64 0
+                                    v4 = iconst.i64 0
+                                    v5 = iconst.i64 0
+                                    jump block1
+
+                                block1:
+@0001                               jump block2
+
+                                block2:
+@0002                               jump block3
+
+                                block3:
+@0003                               v8 = iconst.i64 2
+@0003                               jump block4
+
+                                block4:
+@0004                               v11, v12 = umul_overflow.i64 v1, v8  ; v8 = 2
+@0004                               v13 = iconst.i64 -1
+@0004                               v14 = select v12, v13, v11  ; v13 = -1
+@0004                               jump block5
+
+                                block5:
+@0005                               return v14
+}
+
+function u0:13(i64, i64) -> i64 system_v {
+    sig0 = (i64, i64, i64) -> i64 system_v
+    sig1 = (i64, i64) -> i64 system_v
+    sig2 = (i64, i64) -> i64 system_v
+    sig3 = (i64, i64) -> i64 system_v
+    sig4 = (i64, i64) -> i64 system_v
+    sig5 = (i64, i64) -> i64 system_v
+    sig6 = (i64, i64, i64) system_v
+    sig7 = (i64) -> i64 system_v
+    sig8 = (i64) -> i64 system_v
+    sig9 = (i64) system_v
+    sig10 = (i64) -> i64 system_v
+    sig11 = (i64) -> i64 system_v
+    sig12 = (i64, i64) -> i64 system_v
+    sig13 = (i64, i64) -> i64 system_v
+    fn0 = u0:0 sig0
+    fn1 = u0:1 sig1
+    fn2 = u0:2 sig2
+    fn3 = u0:3 sig3
+    fn4 = u0:4 sig4
+    fn5 = u0:5 sig5
+    fn6 = u0:6 sig6
+    fn7 = u0:7 sig7
+    fn8 = u0:8 sig8
+    fn9 = u0:9 sig9
+    fn10 = u0:10 sig10
+    fn11 = colocated u0:11 sig11
+    fn12 = colocated u0:12 sig12
+    fn13 = colocated u0:13 sig13
+
+                                block0(v0: i64, v1: i64):
+                                    v2 = iconst.i64 0
+                                    v3 = iconst.i64 0
+                                    v4 = iconst.i64 0
+                                    v5 = iconst.i64 0
+                                    v6 = iconst.i64 0
+                                    jump block1
+
+                                block1:
+@0007                               jump block2
+
+                                block2:
+@0008                               jump block3
+
+                                block3:
+@0009                               jump block4
+
+                                block4:
+@000a                               v10 = call fn8(v0)
+@000a                               brif v10, block9, block10
+
+                                block10:
+@000a                               v12 = call fn12(v0, v1)
+@000a                               call fn9(v0)
+@000a                               jump block5
+
+                                block5:
+@000b                               jump block6
+
+                                block6:
+@000c                               v14 = iconst.i64 1
+@000c                               jump block7
+
+                                block7:
+@000d                               v17, v18 = uadd_overflow.i64 v12, v14  ; v14 = 1
+@000d                               v19 = iconst.i64 -1
+@000d                               v20 = select v18, v19, v17  ; v19 = -1
+@000d                               jump block8
+
+                                block8:
+@000e                               return v20
+
+                                block9:
+                                    v22 = iconst.i64 0
+                                    return v22  ; v22 = 0
+}
+;; ==== aarch64-unknown-linux-gnu none: machine code ====
+;; function u0:11: 120 bytes, fnv1a64 b50e3ea99867f2f7
+  stp fp, lr, [sp, #-16]!
+  unwind PushFrameRegs { offset_upward_to_caller_sp: 16 }
+  mov fp, sp
+  unwind DefineNewFrame { offset_upward_to_caller_sp: 16, offset_downward_to_clobbers: 16 }
+  stp x19, x20, [sp, #-16]!
+  unwind SaveReg { clobber_offset: 0, reg: p19i }
+  unwind SaveReg { clobber_offset: 8, reg: p20i }
+block0:
+  mov x20, x0
+  b label1
+block1:
+  b label2
+block2:
+  b label3
+block3:
+  movz x19, #3
+  b label4
+block4:
+  b label5
+block5:
+  load_ext_name_far x12, User(userextname8)+0
+  mov x0, x20
+  blr x12
+  cbnz x0, label8 ; b label6
+block6:
+  mov x1, x19
+  mov x0, x20
+  bl 0
+  mov x19, x0
+  load_ext_name_far x13, User(userextname9)+0
+  mov x0, x20
+  blr x13
+  b label7
+block7:
+  mov x0, x19
+  ldp x19, x20, [sp], #16
+  ldp fp, lr, [sp], #16
+  ret
+block8:
+  movz x0, #0
+  ldp x19, x20, [sp], #16
+  ldp fp, lr, [sp], #16
+  ret
+
+;; function u0:12: 28 bytes, fnv1a64 6676c60ae39ef2c4
+block0:
+  b label1
+block1:
+  b label2
+block2:
+  b label3
+block3:
+  movz x9, #2
+  b label4
+block4:
+  madd x10, x1, x9, xzr
+  movn x11, #0
+  umulh x9, x1, x9
+  subs xzr, x9, #0
+  csel x0, x11, x10, ne
+  b label5
+block5:
+  ret
+
+;; function u0:13: 136 bytes, fnv1a64 0d6c25314a389cea
+  stp fp, lr, [sp, #-16]!
+  unwind PushFrameRegs { offset_upward_to_caller_sp: 16 }
+  mov fp, sp
+  unwind DefineNewFrame { offset_upward_to_caller_sp: 16, offset_downward_to_clobbers: 16 }
+  stp x19, x20, [sp, #-16]!
+  unwind SaveReg { clobber_offset: 0, reg: p19i }
+  unwind SaveReg { clobber_offset: 8, reg: p20i }
+block0:
+  mov x19, x0
+  mov x20, x1
+  b label1
+block1:
+  b label2
+block2:
+  b label3
+block3:
+  b label4
+block4:
+  load_ext_name_far x15, User(userextname8)+0
+  mov x0, x19
+  blr x15
+  cbnz x0, label10 ; b label5
+block5:
+  mov x1, x20
+  mov x0, x19
+  bl 0
+  mov x20, x0
+  load_ext_name_far x1, User(userextname9)+0
+  mov x0, x19
+  blr x1
+  b label6
+block6:
+  b label7
+block7:
+  movz x0, #1
+  b label8
+block8:
+  movn x1, #0
+  mov x2, x20
+  adds x0, x2, x0
+  csel x0, x1, x0, hs
+  b label9
+block9:
+  ldp x19, x20, [sp], #16
+  ldp fp, lr, [sp], #16
+  ret
+block10:
+  movz x0, #0
+  ldp x19, x20, [sp], #16
+  ldp fp, lr, [sp], #16
+  ret
+;; ==== aarch64-unknown-linux-gnu speed: optimised ====
+function u0:11(i64) -> i64 system_v {
+    sig0 = (i64, i64, i64) -> i64 system_v
+    sig1 = (i64, i64) -> i64 system_v
+    sig2 = (i64, i64) -> i64 system_v
+    sig3 = (i64, i64) -> i64 system_v
+    sig4 = (i64, i64) -> i64 system_v
+    sig5 = (i64, i64) -> i64 system_v
+    sig6 = (i64, i64, i64) system_v
+    sig7 = (i64) -> i64 system_v
+    sig8 = (i64) -> i64 system_v
+    sig9 = (i64) system_v
+    sig10 = (i64) -> i64 system_v
+    sig11 = (i64) -> i64 system_v
+    sig12 = (i64, i64) -> i64 system_v
+    sig13 = (i64, i64) -> i64 system_v
+    fn0 = u0:0 sig0
+    fn1 = u0:1 sig1
+    fn2 = u0:2 sig2
+    fn3 = u0:3 sig3
+    fn4 = u0:4 sig4
+    fn5 = u0:5 sig5
+    fn6 = u0:6 sig6
+    fn7 = u0:7 sig7
+    fn8 = u0:8 sig8
+    fn9 = u0:9 sig9
+    fn10 = u0:10 sig10
+    fn11 = colocated u0:11 sig11
+    fn12 = colocated u0:12 sig12
+    fn13 = colocated u0:13 sig13
+
+                                block0(v0: i64):
+                                    jump block1
+
+                                block1:
+@0000                               jump block2
+
+                                block2:
+@0006                               jump block3
+
+                                block3:
+@000f                               jump block4
+
+                                block4:
+@0010                               jump block5
+
+                                block5:
+@0011                               v6 = call fn8(v0)
+@0011                               brif v6, block7, block8
+
+                                block8:
+@000f                               v4 = iconst.i64 3
+@0011                               v8 = call fn13(v0, v4)  ; v4 = 3
+@0011                               call fn9(v0)
+@0011                               jump block6
+
+                                block6:
+@0012                               return v8
+
+                                block7:
+                                    v1 = iconst.i64 0
+                                    return v1  ; v1 = 0
+}
+
+function u0:12(i64, i64) -> i64 system_v {
+    sig0 = (i64, i64, i64) -> i64 system_v
+    sig1 = (i64, i64) -> i64 system_v
+    sig2 = (i64, i64) -> i64 system_v
+    sig3 = (i64, i64) -> i64 system_v
+    sig4 = (i64, i64) -> i64 system_v
+    sig5 = (i64, i64) -> i64 system_v
+    sig6 = (i64, i64, i64) system_v
+    sig7 = (i64) -> i64 system_v
+    sig8 = (i64) -> i64 system_v
+    sig9 = (i64) system_v
+    sig10 = (i64) -> i64 system_v
+    sig11 = (i64) -> i64 system_v
+    sig12 = (i64, i64) -> i64 system_v
+    sig13 = (i64, i64) -> i64 system_v
+    fn0 = u0:0 sig0
+    fn1 = u0:1 sig1
+    fn2 = u0:2 sig2
+    fn3 = u0:3 sig3
+    fn4 = u0:4 sig4
+    fn5 = u0:5 sig5
+    fn6 = u0:6 sig6
+    fn7 = u0:7 sig7
+    fn8 = u0:8 sig8
+    fn9 = u0:9 sig9
+    fn10 = u0:10 sig10
+    fn11 = colocated u0:11 sig11
+    fn12 = colocated u0:12 sig12
+    fn13 = colocated u0:13 sig13
+
+                                block0(v0: i64, v1: i64):
+                                    jump block1
+
+                                block1:
+@0001                               jump block2
+
+                                block2:
+@0002                               jump block3
+
+                                block3:
+@0003                               jump block4
+
+                                block4:
+@0003                               v8 = iconst.i64 2
+@0004                               v11, v12 = umul_overflow.i64 v1, v8  ; v8 = 2
+@0004                               jump block5
+
+                                block5:
+@0004                               v13 = iconst.i64 -1
+@0004                               v14 = select v12, v13, v11  ; v13 = -1
+@0005                               return v14
+}
+
+function u0:13(i64, i64) -> i64 system_v {
+    sig0 = (i64, i64, i64) -> i64 system_v
+    sig1 = (i64, i64) -> i64 system_v
+    sig2 = (i64, i64) -> i64 system_v
+    sig3 = (i64, i64) -> i64 system_v
+    sig4 = (i64, i64) -> i64 system_v
+    sig5 = (i64, i64) -> i64 system_v
+    sig6 = (i64, i64, i64) system_v
+    sig7 = (i64) -> i64 system_v
+    sig8 = (i64) -> i64 system_v
+    sig9 = (i64) system_v
+    sig10 = (i64) -> i64 system_v
+    sig11 = (i64) -> i64 system_v
+    sig12 = (i64, i64) -> i64 system_v
+    sig13 = (i64, i64) -> i64 system_v
+    fn0 = u0:0 sig0
+    fn1 = u0:1 sig1
+    fn2 = u0:2 sig2
+    fn3 = u0:3 sig3
+    fn4 = u0:4 sig4
+    fn5 = u0:5 sig5
+    fn6 = u0:6 sig6
+    fn7 = u0:7 sig7
+    fn8 = u0:8 sig8
+    fn9 = u0:9 sig9
+    fn10 = u0:10 sig10
+    fn11 = colocated u0:11 sig11
+    fn12 = colocated u0:12 sig12
+    fn13 = colocated u0:13 sig13
+
+                                block0(v0: i64, v1: i64):
+                                    jump block1
+
+                                block1:
+@0007                               jump block2
+
+                                block2:
+@0008                               jump block3
+
+                                block3:
+@0009                               jump block4
+
+                                block4:
+@000a                               v10 = call fn8(v0)
+@000a                               brif v10, block9, block10
+
+                                block10:
+@000a                               v12 = call fn12(v0, v1)
+@000a                               call fn9(v0)
+@000a                               jump block5
+
+                                block5:
+@000b                               jump block6
+
+                                block6:
+@000c                               jump block7
+
+                                block7:
+@000c                               v14 = iconst.i64 1
+@000d                               v17, v18 = uadd_overflow.i64 v12, v14  ; v14 = 1
+@000d                               jump block8
+
+                                block8:
+@000d                               v19 = iconst.i64 -1
+@000d                               v20 = select v18, v19, v17  ; v19 = -1
+@000e                               return v20
+
+                                block9:
+                                    v2 = iconst.i64 0
+                                    return v2  ; v2 = 0
+}
+;; ==== aarch64-unknown-linux-gnu speed: machine code ====
+;; function u0:11: 116 bytes, fnv1a64 f42e0da4aa1b74ec
+  stp fp, lr, [sp, #-16]!
+  unwind PushFrameRegs { offset_upward_to_caller_sp: 16 }
+  mov fp, sp
+  unwind DefineNewFrame { offset_upward_to_caller_sp: 16, offset_downward_to_clobbers: 16 }
+  stp x19, x20, [sp, #-16]!
+  unwind SaveReg { clobber_offset: 0, reg: p19i }
+  unwind SaveReg { clobber_offset: 8, reg: p20i }
+block0:
+  mov x19, x0
+  b label1
+block1:
+  b label2
+block2:
+  b label3
+block3:
+  b label4
+block4:
+  b label5
+block5:
+  load_ext_name_far x12, User(userextname8)+0
+  mov x0, x19
+  blr x12
+  cbnz x0, label8 ; b label6
+block6:
+  movz x1, #3
+  mov x0, x19
+  bl 0
+  mov x20, x0
+  load_ext_name_far x13, User(userextname9)+0
+  mov x0, x19
+  blr x13
+  b label7
+block7:
+  mov x0, x20
+  ldp x19, x20, [sp], #16
+  ldp fp, lr, [sp], #16
+  ret
+block8:
+  movz x0, #0
+  ldp x19, x20, [sp], #16
+  ldp fp, lr, [sp], #16
+  ret
+
+;; function u0:12: 28 bytes, fnv1a64 29310b1a01a78ab7
+block0:
+  b label1
+block1:
+  b label2
+block2:
+  b label3
+block3:
+  b label4
+block4:
+  movz x11, #2
+  madd x10, x1, x11, xzr
+  b label5
+block5:
+  movn x12, #0
+  umulh x11, x1, x11
+  subs xzr, x11, #0
+  csel x0, x12, x10, ne
+  ret
+
+;; function u0:13: 140 bytes, fnv1a64 3fce2df855f7b858
+  stp fp, lr, [sp, #-16]!
+  unwind PushFrameRegs { offset_upward_to_caller_sp: 16 }
+  mov fp, sp
+  unwind DefineNewFrame { offset_upward_to_caller_sp: 16, offset_downward_to_clobbers: 16 }
+  stp x19, x20, [sp, #-16]!
+  unwind SaveReg { clobber_offset: 0, reg: p19i }
+  unwind SaveReg { clobber_offset: 8, reg: p20i }
+block0:
+  mov x19, x1
+  mov x20, x0
+  b label1
+block1:
+  b label2
+block2:
+  b label3
+block3:
+  b label4
+block4:
+  load_ext_name_far x1, User(userextname8)+0
+  mov x0, x20
+  blr x1
+  cbnz x0, label10 ; b label5
+block5:
+  mov x1, x19
+  mov x0, x20
+  bl 0
+  mov x19, x0
+  load_ext_name_far x1, User(userextname9)+0
+  mov x0, x20
+  blr x1
+  b label6
+block6:
+  b label7
+block7:
+  b label8
+block8:
+  movz x0, #1
+  mov x2, x19
+  add x1, x2, x0
+  b label9
+block9:
+  movn x3, #0
+  adds x0, x2, x0
+  csel x0, x3, x1, hs
+  ldp x19, x20, [sp], #16
+  ldp fp, lr, [sp], #16
+  ret
+block10:
+  movz x0, #0
+  ldp x19, x20, [sp], #16
+  ldp fp, lr, [sp], #16
+  ret
+;; ==== aarch64-unknown-linux-gnu speed_and_size: optimised ====
+function u0:11(i64) -> i64 system_v {
+    sig0 = (i64, i64, i64) -> i64 system_v
+    sig1 = (i64, i64) -> i64 system_v
+    sig2 = (i64, i64) -> i64 system_v
+    sig3 = (i64, i64) -> i64 system_v
+    sig4 = (i64, i64) -> i64 system_v
+    sig5 = (i64, i64) -> i64 system_v
+    sig6 = (i64, i64, i64) system_v
+    sig7 = (i64) -> i64 system_v
+    sig8 = (i64) -> i64 system_v
+    sig9 = (i64) system_v
+    sig10 = (i64) -> i64 system_v
+    sig11 = (i64) -> i64 system_v
+    sig12 = (i64, i64) -> i64 system_v
+    sig13 = (i64, i64) -> i64 system_v
+    fn0 = u0:0 sig0
+    fn1 = u0:1 sig1
+    fn2 = u0:2 sig2
+    fn3 = u0:3 sig3
+    fn4 = u0:4 sig4
+    fn5 = u0:5 sig5
+    fn6 = u0:6 sig6
+    fn7 = u0:7 sig7
+    fn8 = u0:8 sig8
+    fn9 = u0:9 sig9
+    fn10 = u0:10 sig10
+    fn11 = colocated u0:11 sig11
+    fn12 = colocated u0:12 sig12
+    fn13 = colocated u0:13 sig13
+
+                                block0(v0: i64):
+                                    jump block1
+
+                                block1:
+@0000                               jump block2
+
+                                block2:
+@0006                               jump block3
+
+                                block3:
+@000f                               jump block4
+
+                                block4:
+@0010                               jump block5
+
+                                block5:
+@0011                               v6 = call fn8(v0)
+@0011                               brif v6, block7, block8
+
+                                block8:
+@000f                               v4 = iconst.i64 3
+@0011                               v8 = call fn13(v0, v4)  ; v4 = 3
+@0011                               call fn9(v0)
+@0011                               jump block6
+
+                                block6:
+@0012                               return v8
+
+                                block7:
+                                    v1 = iconst.i64 0
+                                    return v1  ; v1 = 0
+}
+
+function u0:12(i64, i64) -> i64 system_v {
+    sig0 = (i64, i64, i64) -> i64 system_v
+    sig1 = (i64, i64) -> i64 system_v
+    sig2 = (i64, i64) -> i64 system_v
+    sig3 = (i64, i64) -> i64 system_v
+    sig4 = (i64, i64) -> i64 system_v
+    sig5 = (i64, i64) -> i64 system_v
+    sig6 = (i64, i64, i64) system_v
+    sig7 = (i64) -> i64 system_v
+    sig8 = (i64) -> i64 system_v
+    sig9 = (i64) system_v
+    sig10 = (i64) -> i64 system_v
+    sig11 = (i64) -> i64 system_v
+    sig12 = (i64, i64) -> i64 system_v
+    sig13 = (i64, i64) -> i64 system_v
+    fn0 = u0:0 sig0
+    fn1 = u0:1 sig1
+    fn2 = u0:2 sig2
+    fn3 = u0:3 sig3
+    fn4 = u0:4 sig4
+    fn5 = u0:5 sig5
+    fn6 = u0:6 sig6
+    fn7 = u0:7 sig7
+    fn8 = u0:8 sig8
+    fn9 = u0:9 sig9
+    fn10 = u0:10 sig10
+    fn11 = colocated u0:11 sig11
+    fn12 = colocated u0:12 sig12
+    fn13 = colocated u0:13 sig13
+
+                                block0(v0: i64, v1: i64):
+                                    jump block1
+
+                                block1:
+@0001                               jump block2
+
+                                block2:
+@0002                               jump block3
+
+                                block3:
+@0003                               jump block4
+
+                                block4:
+@0003                               v8 = iconst.i64 2
+@0004                               v11, v12 = umul_overflow.i64 v1, v8  ; v8 = 2
+@0004                               jump block5
+
+                                block5:
+@0004                               v13 = iconst.i64 -1
+@0004                               v14 = select v12, v13, v11  ; v13 = -1
+@0005                               return v14
+}
+
+function u0:13(i64, i64) -> i64 system_v {
+    sig0 = (i64, i64, i64) -> i64 system_v
+    sig1 = (i64, i64) -> i64 system_v
+    sig2 = (i64, i64) -> i64 system_v
+    sig3 = (i64, i64) -> i64 system_v
+    sig4 = (i64, i64) -> i64 system_v
+    sig5 = (i64, i64) -> i64 system_v
+    sig6 = (i64, i64, i64) system_v
+    sig7 = (i64) -> i64 system_v
+    sig8 = (i64) -> i64 system_v
+    sig9 = (i64) system_v
+    sig10 = (i64) -> i64 system_v
+    sig11 = (i64) -> i64 system_v
+    sig12 = (i64, i64) -> i64 system_v
+    sig13 = (i64, i64) -> i64 system_v
+    fn0 = u0:0 sig0
+    fn1 = u0:1 sig1
+    fn2 = u0:2 sig2
+    fn3 = u0:3 sig3
+    fn4 = u0:4 sig4
+    fn5 = u0:5 sig5
+    fn6 = u0:6 sig6
+    fn7 = u0:7 sig7
+    fn8 = u0:8 sig8
+    fn9 = u0:9 sig9
+    fn10 = u0:10 sig10
+    fn11 = colocated u0:11 sig11
+    fn12 = colocated u0:12 sig12
+    fn13 = colocated u0:13 sig13
+
+                                block0(v0: i64, v1: i64):
+                                    jump block1
+
+                                block1:
+@0007                               jump block2
+
+                                block2:
+@0008                               jump block3
+
+                                block3:
+@0009                               jump block4
+
+                                block4:
+@000a                               v10 = call fn8(v0)
+@000a                               brif v10, block9, block10
+
+                                block10:
+@000a                               v12 = call fn12(v0, v1)
+@000a                               call fn9(v0)
+@000a                               jump block5
+
+                                block5:
+@000b                               jump block6
+
+                                block6:
+@000c                               jump block7
+
+                                block7:
+@000c                               v14 = iconst.i64 1
+@000d                               v17, v18 = uadd_overflow.i64 v12, v14  ; v14 = 1
+@000d                               jump block8
+
+                                block8:
+@000d                               v19 = iconst.i64 -1
+@000d                               v20 = select v18, v19, v17  ; v19 = -1
+@000e                               return v20
+
+                                block9:
+                                    v2 = iconst.i64 0
+                                    return v2  ; v2 = 0
+}
+;; ==== aarch64-unknown-linux-gnu speed_and_size: machine code ====
+;; function u0:11: 116 bytes, fnv1a64 f42e0da4aa1b74ec
+  stp fp, lr, [sp, #-16]!
+  unwind PushFrameRegs { offset_upward_to_caller_sp: 16 }
+  mov fp, sp
+  unwind DefineNewFrame { offset_upward_to_caller_sp: 16, offset_downward_to_clobbers: 16 }
+  stp x19, x20, [sp, #-16]!
+  unwind SaveReg { clobber_offset: 0, reg: p19i }
+  unwind SaveReg { clobber_offset: 8, reg: p20i }
+block0:
+  mov x19, x0
+  b label1
+block1:
+  b label2
+block2:
+  b label3
+block3:
+  b label4
+block4:
+  b label5
+block5:
+  load_ext_name_far x12, User(userextname8)+0
+  mov x0, x19
+  blr x12
+  cbnz x0, label8 ; b label6
+block6:
+  movz x1, #3
+  mov x0, x19
+  bl 0
+  mov x20, x0
+  load_ext_name_far x13, User(userextname9)+0
+  mov x0, x19
+  blr x13
+  b label7
+block7:
+  mov x0, x20
+  ldp x19, x20, [sp], #16
+  ldp fp, lr, [sp], #16
+  ret
+block8:
+  movz x0, #0
+  ldp x19, x20, [sp], #16
+  ldp fp, lr, [sp], #16
+  ret
+
+;; function u0:12: 28 bytes, fnv1a64 29310b1a01a78ab7
+block0:
+  b label1
+block1:
+  b label2
+block2:
+  b label3
+block3:
+  b label4
+block4:
+  movz x11, #2
+  madd x10, x1, x11, xzr
+  b label5
+block5:
+  movn x12, #0
+  umulh x11, x1, x11
+  subs xzr, x11, #0
+  csel x0, x12, x10, ne
+  ret
+
+;; function u0:13: 140 bytes, fnv1a64 3fce2df855f7b858
+  stp fp, lr, [sp, #-16]!
+  unwind PushFrameRegs { offset_upward_to_caller_sp: 16 }
+  mov fp, sp
+  unwind DefineNewFrame { offset_upward_to_caller_sp: 16, offset_downward_to_clobbers: 16 }
+  stp x19, x20, [sp, #-16]!
+  unwind SaveReg { clobber_offset: 0, reg: p19i }
+  unwind SaveReg { clobber_offset: 8, reg: p20i }
+block0:
+  mov x19, x1
+  mov x20, x0
+  b label1
+block1:
+  b label2
+block2:
+  b label3
+block3:
+  b label4
+block4:
+  load_ext_name_far x1, User(userextname8)+0
+  mov x0, x20
+  blr x1
+  cbnz x0, label10 ; b label5
+block5:
+  mov x1, x19
+  mov x0, x20
+  bl 0
+  mov x19, x0
+  load_ext_name_far x1, User(userextname9)+0
+  mov x0, x20
+  blr x1
+  b label6
+block6:
+  b label7
+block7:
+  b label8
+block8:
+  movz x0, #1
+  mov x2, x19
+  add x1, x2, x0
+  b label9
+block9:
+  movn x3, #0
+  adds x0, x2, x0
+  csel x0, x3, x1, hs
+  ldp x19, x20, [sp], #16
+  ldp fp, lr, [sp], #16
+  ret
+block10:
+  movz x0, #0
+  ldp x19, x20, [sp], #16
+  ldp fp, lr, [sp], #16
+  ret

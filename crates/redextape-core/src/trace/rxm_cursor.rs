@@ -20,6 +20,7 @@
 //! holds this over random hand-built programs; its doc says why not compiled ones.
 
 use crate::core::BinOp;
+use crate::heap::{self, Heap, HeapCapped, HeapFault, VecTags};
 use crate::tm::rxm::{Caps, Instr, Program, Reg, RxmOutcome, instr_reg_over_cap};
 use std::borrow::Borrow;
 
@@ -61,6 +62,18 @@ pub enum RxmStatus {
     Capped(RxmCap),
 }
 
+impl From<HeapFault> for RxmStatus {
+    fn from(fault: HeapFault) -> RxmStatus {
+        RxmStatus::Faulted(fault.to_string())
+    }
+}
+
+impl From<HeapCapped> for RxmStatus {
+    fn from(_: HeapCapped) -> RxmStatus {
+        RxmStatus::Capped(RxmCap::Heap)
+    }
+}
+
 /// Which kind of instruction made a word. `li`, arithmetic, comparisons and `isempty` make a value;
 /// `cons` and `nil` make a list pointer (`nil` is the list word 0); `box` makes a box handle. Everything
 /// else copies the tag of the word it moves: `mov` its source's, `head` and `tail` the tag stored with
@@ -92,9 +105,6 @@ pub struct RxmFrame {
     pub saved_written: Vec<bool>,
 }
 
-/// A cons cell's head and tail, and their tags.
-type TaggedCell = ((u64, u64), (WordTag, WordTag));
-
 /// The register machine's state. Kept apart from the program so a step can borrow the program and
 /// mutate the state at once.
 #[derive(Clone, Debug, Default)]
@@ -109,12 +119,8 @@ struct Vm {
     arg_tags: Vec<WordTag>,
     rr: u64,
     rr_tag: WordTag,
-    heap: Vec<(u64, u64)>,
-    /// Parallel to `heap`: the tags of each cell's head and tail. Only `cons` pushes, and it pushes both.
-    heap_tags: Vec<(WordTag, WordTag)>,
-    boxes: Vec<u64>,
-    /// Parallel to `boxes`: `box` pushes both and `box_set` writes both.
-    box_tags: Vec<WordTag>,
+    /// The cells and boxes, and a tag for each word in them.
+    heap: Heap<VecTags<WordTag>>,
     /// The register the instruction `exec` last ran wrote. `exec` clears it first, so it is `None` after an
     /// instruction that wrote no register and after one a fault or cap refused.
     wrote: Option<Reg>,
@@ -161,37 +167,6 @@ impl Vm {
             }
         }
         self.wrote = Some(reg);
-    }
-
-    /// The cell a list pointer names, with its tags. Null faults as "`op` of empty list"; a pointer past
-    /// the heap's end faults as "`op` of invalid list pointer", never an index. `p` is a register word a
-    /// program can set to any `u64`, so `p - 1` may not fit `usize` on a 32-bit target; `try_from` routes
-    /// that case to the same fault rather than truncating into a wrong, in-range index.
-    ///
-    /// The heap alone decides the fault: the tags are read afterwards, with a default, so a missing tag
-    /// changes what the view shows and never what the program does.
-    fn cell(&self, p: u64, op: &str) -> Result<TaggedCell, RxmStatus> {
-        if p == 0 {
-            return Err(RxmStatus::Faulted(format!("{op} of empty list")));
-        }
-        let (i, cell) = usize::try_from(p - 1)
-            .ok()
-            .and_then(|i| Some((i, *self.heap.get(i)?)))
-            .ok_or_else(|| RxmStatus::Faulted(format!("{op} of invalid list pointer")))?;
-        Ok((cell, self.heap_tags.get(i).copied().unwrap_or_default()))
-    }
-
-    /// The box a handle names — its index, for the tag, and its slot — by the same rules as `cell`: null
-    /// and dangling handles fault. The lookup that finds the slot is the only bounds check, and `boxes`
-    /// alone decides it; the caller reads or writes the tag afterwards, and a missing tag gates nothing.
-    fn box_slot(&mut self, p: u64, op: &str) -> Result<(usize, &mut u64), RxmStatus> {
-        if p == 0 {
-            return Err(RxmStatus::Faulted(format!("{op} of null handle")));
-        }
-        usize::try_from(p - 1)
-            .ok()
-            .and_then(|i| Some((i, self.boxes.get_mut(i)?)))
-            .ok_or_else(|| RxmStatus::Faulted(format!("{op} of invalid handle")))
     }
 
     /// Run the instruction at `pc`. `Ok(true)` when it ended the program, `Ok(false)` when the run goes
@@ -279,53 +254,38 @@ impl Vm {
                 self.pc += 1;
             }
             Instr::Cons(rd, rh, rt) => {
-                if self.heap.len() as u64 >= caps.heap {
-                    return Err(RxmStatus::Capped(RxmCap::Heap));
-                }
-                let (h, t) = (self.read(*rh), self.read(*rt));
-                self.heap.push((h, t));
-                self.heap_tags.push((self.tag(*rh), self.tag(*rt)));
-                let ptr = self.heap.len() as u64; // 1-based
+                let (h, t) = ((self.read(*rh), self.tag(*rh)), (self.read(*rt), self.tag(*rt)));
+                let ptr = self.heap.cons(caps.heap, h, t)?;
                 self.write(*rd, ptr, WordTag::List);
                 self.pc += 1;
             }
             Instr::Head(rd, rl) => {
-                let ((h, _), (th, _)) = self.cell(self.read(*rl), "head")?;
+                let (h, th) = self.heap.head(self.read(*rl))?;
                 self.write(*rd, h, th);
                 self.pc += 1;
             }
             Instr::Tail(rd, rl) => {
-                let ((_, t), (_, tt)) = self.cell(self.read(*rl), "tail")?;
+                let (t, tt) = self.heap.tail(self.read(*rl))?;
                 self.write(*rd, t, tt);
                 self.pc += 1;
             }
             Instr::IsEmpty(rd, rl) => {
-                let empty = u64::from(self.read(*rl) == 0);
+                let empty = u64::from(heap::is_empty(self.read(*rl)));
                 self.write(*rd, empty, WordTag::Value);
                 self.pc += 1;
             }
             Instr::Box(rd, rv) => {
-                if self.boxes.len() as u64 >= caps.heap {
-                    return Err(RxmStatus::Capped(RxmCap::Heap));
-                }
-                let v = self.read(*rv);
-                self.boxes.push(v);
-                self.box_tags.push(self.tag(*rv));
-                let ptr = self.boxes.len() as u64; // 1-based
+                let ptr = self.heap.new_box(caps.heap, (self.read(*rv), self.tag(*rv)))?;
                 self.write(*rd, ptr, WordTag::Box);
                 self.pc += 1;
             }
             Instr::BoxGet(rd, rb) => {
-                let (i, v) = self.box_slot(self.read(*rb), "box_get").map(|(i, slot)| (i, *slot))?;
-                let t = self.box_tags.get(i).copied().unwrap_or_default();
+                let (v, t) = self.heap.box_get(self.read(*rb))?;
                 self.write(*rd, v, t);
                 self.pc += 1;
             }
             Instr::BoxSet(rb, rv) => {
-                let (v, t) = (self.read(*rv), self.tag(*rv));
-                let (i, slot) = self.box_slot(self.read(*rb), "box_set")?;
-                *slot = v;
-                grow_set(&mut self.box_tags, i, t);
+                self.heap.box_set(self.read(*rb), (self.read(*rv), self.tag(*rv)))?;
                 self.pc += 1;
             }
         }
@@ -445,22 +405,22 @@ impl<P: Borrow<Program>> RxmCursor<P> {
 
     /// The cons cells, in allocation order; list pointer `p` names cell `p - 1`.
     pub fn heap(&self) -> &[(u64, u64)] {
-        &self.vm.heap
+        self.vm.heap.cells()
     }
 
     /// Parallel to `heap`: each cell's head and tail tags.
     pub fn heap_tags(&self) -> &[(WordTag, WordTag)] {
-        &self.vm.heap_tags
+        &self.vm.heap.tags().cells
     }
 
     /// The boxes, in allocation order; handle `p` names box `p - 1`.
     pub fn boxes(&self) -> &[u64] {
-        &self.vm.boxes
+        self.vm.heap.boxes()
     }
 
     /// Parallel to `boxes`.
     pub fn box_tags(&self) -> &[WordTag] {
-        &self.vm.box_tags
+        &self.vm.heap.tags().boxes
     }
 
     /// The register the last step wrote: `None` before any step, after one that wrote no register (a jump,
@@ -493,7 +453,7 @@ impl<P: Borrow<Program>> RxmCursor<P> {
 
     /// The result word and the heap a decode needs, for a caller that has driven the run to its end.
     pub fn into_outcome(self) -> RxmOutcome {
-        RxmOutcome { result: self.vm.rr, heap: self.vm.heap }
+        RxmOutcome { result: self.vm.rr, heap: self.vm.heap.into_cells() }
     }
 }
 
@@ -946,8 +906,8 @@ mod tests {
         whole.by_ref().for_each(drop);
         let mut bare = RxmCursor::new(prog(), DEFAULT_CAPS);
         bare.by_ref().take(4).for_each(drop);
-        bare.vm.heap_tags.clear();
-        bare.vm.box_tags.clear();
+        bare.vm.heap.tags_mut().cells.clear();
+        bare.vm.heap.tags_mut().boxes.clear();
         bare.by_ref().for_each(drop);
         assert_eq!((whole.status(), whole.rr(), whole.locals().get(6)), (Some(&RxmStatus::Halted), 1, Some(&7)));
         let words = |c: &RxmCursor<Program>| {
@@ -1056,8 +1016,9 @@ mod tests {
         vm.written.iter_mut().for_each(|w| *w = next().1);
         vm.arg_tags.iter_mut().for_each(|t| *t = next().0);
         vm.rr_tag = next().0;
-        vm.heap_tags.iter_mut().for_each(|(h, t)| (*h, *t) = (next().0, next().0));
-        vm.box_tags.iter_mut().for_each(|t| *t = next().0);
+        let tags = vm.heap.tags_mut();
+        tags.cells.iter_mut().for_each(|(h, t)| (*h, *t) = (next().0, next().0));
+        tags.boxes.iter_mut().for_each(|t| *t = next().0);
         for frame in &mut vm.stack {
             frame.saved_tags.iter_mut().for_each(|t| *t = next().0);
             frame.saved_written.iter_mut().for_each(|w| *w = next().1);

@@ -1,9 +1,9 @@
-//! `redextape-native-rt`: the native backend's runtime — heap/box arenas plus the `extern "C"`
-//! host functions that JIT-generated code calls for heap allocation, faults, and cap
-//! checks. Semantics mirror the rxm interpreter's `Cons`/`Head`/`Tail`/`IsEmpty`/`Box`/`BoxGet`/`BoxSet`
-//! arms (`redextape_core::trace::RxmCursor`, which `run_rxm` loops over) EXACTLY: 1-based heap/box
-//! pointers, `0` = nil, the same fault and cap conditions. This is what lets the native backend reuse
-//! `decode_rxm` and agree with the rxm interpreter in the oracle.
+//! `redextape-native-rt`: the native backend's runtime — the heap, the step and depth counters, and the
+//! `extern "C"` host functions that JIT-generated code calls for heap allocation, faults, and cap
+//! checks. The heap is `redextape_core::heap::Heap`, the core the rxm interpreter
+//! (`redextape_core::trace::RxmCursor`, which `run_rxm` loops over) holds too, so the 1-based pointers,
+//! `0` = nil, the faults with their text and the cap check are the interpreter's own code. This is what
+//! lets the native backend reuse `decode_rxm` and agree with the rxm interpreter in the oracle.
 //!
 //! This crate is split out from `redextape-native` (which depends on Cranelift) so its `rt_*`
 //! functions can be **linked** into a standalone AOT binary without dragging Cranelift along:
@@ -20,26 +20,26 @@
 // production warnings still surface from the other one.
 #![cfg_attr(test, allow(clippy::pedantic))]
 
+use redextape_core::heap::{self, Heap, HeapCapped, HeapFault, NoTags};
 use redextape_core::tm::{Caps, RxmOutcome};
 use redextape_core::ty::Ty;
 
-/// The native backend's runtime state: heap/box arenas, step/depth counters, and fault/cap
-/// flags. JIT-generated code holds a `*mut Runtime` for the duration of a run and calls
-/// the `rt_*` host functions below for every heap/box operation and every cap check, mirroring
-/// the rxm interpreter's machine state (`trace::RxmCursor`) one-for-one (`heap`/`boxes`/`steps`/`caps`
-/// are the same fields; `depth` plays the role the cursor's `stack().len()` plays for the stack cap,
-/// without needing the actual frame data — the JIT-generated code keeps locals on the native stack
-/// instead of a `Vec<RxmFrame>`).
+/// The native backend's runtime state: the heap, step/depth counters, and fault/cap flags.
+/// JIT-generated code holds a `*mut Runtime` for the duration of a run and calls the `rt_*` host
+/// functions below for every heap/box operation and every cap check, mirroring the rxm interpreter's
+/// machine state (`trace::RxmCursor`) one-for-one (`heap`/`steps`/`caps` are the same fields, `heap`
+/// with no tags; `depth` plays the role the cursor's `stack().len()` plays for the stack cap, without
+/// needing the actual frame data — the JIT-generated code keeps locals on the native stack instead of
+/// a `Vec<RxmFrame>`).
 pub struct Runtime {
-    pub heap: Vec<(u64, u64)>,
-    pub boxes: Vec<u64>,
+    heap: Heap<NoTags>,
     pub steps: u64,
     pub depth: u64,
     pub caps: Caps,
     /// The recursion-depth limit `rt_enter` trips at. Distinct from `caps.stack` because native
     /// keeps each frame's locals on the *real* OS call stack (not a `Vec<RxmFrame>`), so the backend
     /// derives a FRAME-SIZE-AWARE cap: `min(caps.stack, safe_depth)`, where `safe_depth` is how many
-    /// worst-case frames fit in the run thread's reserved stack (see `redextape_native::codegen`).
+    /// worst-case frames fit in the run thread's reserved stack (see `redextape_native::shared::native_depth_cap`).
     /// This guarantees the depth cap always trips *before* the native stack overflows, for any
     /// program — no process abort. `Runtime::new` defaults it to `caps.stack` (the depth-only bound)
     /// for callers with no frame-size knowledge (e.g. this module's own unit tests below).
@@ -61,16 +61,7 @@ impl Runtime {
     /// stack is exhausted.
     #[must_use]
     pub fn with_depth_cap(caps: Caps, depth_cap: u64) -> Runtime {
-        Runtime {
-            heap: Vec::new(),
-            boxes: Vec::new(),
-            steps: 0,
-            depth: 0,
-            caps,
-            depth_cap,
-            fault: None,
-            hit_cap: false,
-        }
+        Runtime { heap: Heap::default(), steps: 0, depth: 0, caps, depth_cap, fault: None, hit_cap: false }
     }
 
     /// Once a fault or a cap trip has been recorded, every further faultable op is a no-op
@@ -81,176 +72,198 @@ impl Runtime {
         self.fault.is_some() || self.hit_cap
     }
 
+    /// Record `fault` as the run's; `0` is the word a faulted access returns.
+    #[inline]
+    fn latch(&mut self, fault: HeapFault) -> u64 {
+        self.fault = Some(fault.to_string());
+        0
+    }
+
+    #[inline]
+    fn cons(&mut self, h: u64, t: u64) -> u64 {
+        if self.stopped() {
+            return 0;
+        }
+        self.heap.cons(self.caps.heap, (h, ()), (t, ())).unwrap_or_else(|HeapCapped| {
+            self.hit_cap = true;
+            0
+        })
+    }
+
+    #[inline]
+    fn head(&mut self, p: u64) -> u64 {
+        if self.stopped() {
+            return 0;
+        }
+        match self.heap.head(p) {
+            Ok((h, ())) => h,
+            Err(f) => self.latch(f),
+        }
+    }
+
+    #[inline]
+    fn tail(&mut self, p: u64) -> u64 {
+        if self.stopped() {
+            return 0;
+        }
+        match self.heap.tail(p) {
+            Ok((t, ())) => t,
+            Err(f) => self.latch(f),
+        }
+    }
+
+    #[inline]
+    fn new_box(&mut self, v: u64) -> u64 {
+        if self.stopped() {
+            return 0;
+        }
+        self.heap.new_box(self.caps.heap, (v, ())).unwrap_or_else(|HeapCapped| {
+            self.hit_cap = true;
+            0
+        })
+    }
+
+    #[inline]
+    fn box_get(&mut self, p: u64) -> u64 {
+        if self.stopped() {
+            return 0;
+        }
+        match self.heap.box_get(p) {
+            Ok((v, ())) => v,
+            Err(f) => self.latch(f),
+        }
+    }
+
+    #[inline]
+    fn box_set(&mut self, p: u64, v: u64) {
+        if self.stopped() {
+            return;
+        }
+        if let Err(f) = self.heap.box_set(p, (v, ())) {
+            self.latch(f);
+        }
+    }
+
+    #[inline]
+    fn tick(&mut self) -> u64 {
+        // If a fault (or an earlier cap) has already latched, divert immediately *without* touching
+        // `hit_cap`. Otherwise a back-edge reached after a callee faulted would keep ticking `steps`
+        // and eventually set `hit_cap`, and the driver (which checks `hit_cap` before `fault`) would
+        // misreport a `Fault` run as `HitCap`. Returning `1` sends the generated code to its exit
+        // block so the latched `fault` classification survives.
+        if self.stopped() {
+            return 1;
+        }
+        self.steps += 1;
+        if self.steps > self.caps.steps {
+            self.hit_cap = true;
+            return 1;
+        }
+        0
+    }
+
+    #[inline]
+    fn enter(&mut self) -> u64 {
+        // As in `tick`: once stopped, divert without setting `hit_cap`, so a `Call` reached after a
+        // callee faulted cannot mask the latched `fault` as a stack-cap `HitCap`.
+        if self.stopped() {
+            return 1;
+        }
+        self.depth += 1;
+        if self.depth > self.depth_cap {
+            self.hit_cap = true;
+            return 1;
+        }
+        0
+    }
+
+    #[inline]
+    fn leave(&mut self) {
+        self.depth = self.depth.saturating_sub(1);
+    }
+
+    #[inline]
+    fn faulted(&self) -> u64 {
+        u64::from(self.stopped())
+    }
+
     /// Finish a run: pair the register-`rr` result word with the heap needed to decode it,
     /// mirroring `RxmCursor::into_outcome`, which `run_rxm` answers `RxmRun::Ran` with.
     #[must_use]
     pub fn into_outcome(self, result: u64) -> RxmOutcome {
-        RxmOutcome { result, heap: self.heap }
+        RxmOutcome { result, heap: self.heap.into_cells() }
     }
 }
 
-/// `rd <- cons(rh, rt)`. Mirrors the rxm interpreter's `Instr::Cons` arm: cap-checks `heap.len()` against
-/// `caps.heap` (matching `self.heap.len() as u64 >= caps.heap`), else pushes `(h, t)` and
-/// returns the new 1-based pointer (`heap.len()` after the push).
+/// `rd <- cons(rh, rt)`: a new cell's 1-based pointer. The heap's `cons` refuses a cell once
+/// `caps.heap` cells exist, which sets `hit_cap` and returns `0`.
 ///
 /// # Safety
 /// `rt` must be a valid, non-null, non-aliased `*mut Runtime` for the duration of the call (the
 /// pointer the JIT-generated code was handed for this run).
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn rt_cons(rt: *mut Runtime, h: u64, t: u64) -> u64 {
-    let rt = unsafe { &mut *rt };
-    if rt.stopped() {
-        return 0;
-    }
-    if rt.heap.len() as u64 >= rt.caps.heap {
-        rt.hit_cap = true;
-        return 0;
-    }
-    rt.heap.push((h, t));
-    rt.heap.len() as u64 // 1-based
+    unsafe { &mut *rt }.cons(h, t)
 }
 
-/// `rd <- head(rl)`. Mirrors the rxm interpreter's `Instr::Head` arm: `p == 0` faults ("head of empty
-/// list"); a non-null pointer past the heap end faults ("head of invalid list pointer") rather
-/// than indexing out of bounds; else returns the cell's head field.
+/// `rd <- head(rl)`: the cell's head field. Nil latches `HeadOfEmpty` and a pointer past the last
+/// cell `HeadOfInvalid`, each as its `HeapFault` text, and returns `0`.
 ///
 /// # Safety
 /// `rt` must be a valid, non-null, non-aliased `*mut Runtime` for the duration of the call.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn rt_head(rt: *mut Runtime, p: u64) -> u64 {
-    let rt = unsafe { &mut *rt };
-    if rt.stopped() {
-        return 0;
-    }
-    if p == 0 {
-        rt.fault = Some("head of empty list".to_string());
-        return 0;
-    }
-    // `p - 1` is a u64 heap index from the JIT-generated caller; on a 32-bit target it may not fit
-    // `usize`. Rather than truncating it into a possibly-in-bounds index (which would silently
-    // alias a real cell instead of faulting), `try_from`'s `Err` folds into the SAME "invalid list
-    // pointer" fault an in-range-but-dangling `p` already takes via `.get()` returning `None`.
-    if let Some(&(h, _)) = usize::try_from(p - 1).ok().and_then(|i| rt.heap.get(i)) {
-        h
-    } else {
-        rt.fault = Some("head of invalid list pointer".to_string());
-        0
-    }
+    unsafe { &mut *rt }.head(p)
 }
 
-/// `rd <- tail(rl)`. Mirrors the rxm interpreter's `Instr::Tail` arm: `p == 0` faults ("tail of empty
-/// list"); a dangling pointer faults ("tail of invalid list pointer"); else returns the cell's
-/// tail field.
+/// `rd <- tail(rl)`: the cell's tail field, faulting `TailOfEmpty` and `TailOfInvalid` as
+/// `rt_head` does.
 ///
 /// # Safety
 /// `rt` must be a valid, non-null, non-aliased `*mut Runtime` for the duration of the call.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn rt_tail(rt: *mut Runtime, p: u64) -> u64 {
-    let rt = unsafe { &mut *rt };
-    if rt.stopped() {
-        return 0;
-    }
-    if p == 0 {
-        rt.fault = Some("tail of empty list".to_string());
-        return 0;
-    }
-    // See `rt_head`'s comment: `try_from`'s `Err` (32-bit targets only) folds into the same
-    // "invalid list pointer" fault a dangling-but-representable `p` already takes.
-    if let Some(&(_, t)) = usize::try_from(p - 1).ok().and_then(|i| rt.heap.get(i)) {
-        t
-    } else {
-        rt.fault = Some("tail of invalid list pointer".to_string());
-        0
-    }
+    unsafe { &mut *rt }.tail(p)
 }
 
-/// `rd <- is_empty(rl)`. Mirrors the rxm interpreter's `Instr::IsEmpty` arm: `1` if `p == 0`, else `0`.
-/// Never faults and never touches the heap, so it is not gated by `stopped` (there is nothing for
-/// it to corrupt).
+/// `rd <- is_empty(rl)`: `1` for nil, else `0`. Never faults and never touches the heap, so it is not
+/// gated by `stopped` (there is nothing for it to corrupt).
 ///
 /// # Safety
 /// `rt` must be a valid, non-null, non-aliased `*mut Runtime` for the duration of the call.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn rt_is_empty(_rt: *mut Runtime, p: u64) -> u64 {
-    u64::from(p == 0)
+    u64::from(heap::is_empty(p))
 }
 
-/// `rd <- box(rv)`. Mirrors the rxm interpreter's `Instr::Box` arm: cap-checks `boxes.len()` against
-/// `caps.heap` (the box arena shares the heap cap, matching `self.boxes.len() as u64 >=
-/// caps.heap`), else pushes `v` and returns the new 1-based pointer.
+/// `rd <- box(rv)`: a new box's 1-based handle. The heap's `new_box` refuses a box once `caps.heap`
+/// boxes exist, counted apart from the cells, which sets `hit_cap` and returns `0`.
 ///
 /// # Safety
 /// `rt` must be a valid, non-null, non-aliased `*mut Runtime` for the duration of the call.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn rt_box(rt: *mut Runtime, v: u64) -> u64 {
-    let rt = unsafe { &mut *rt };
-    if rt.stopped() {
-        return 0;
-    }
-    if rt.boxes.len() as u64 >= rt.caps.heap {
-        rt.hit_cap = true;
-        return 0;
-    }
-    rt.boxes.push(v);
-    rt.boxes.len() as u64 // 1-based
+    unsafe { &mut *rt }.new_box(v)
 }
 
-/// `rd <- box_get(rb)`. Mirrors the rxm interpreter's `Instr::BoxGet` arm: `p == 0` faults ("box_get of
-/// null handle"); a dangling handle faults ("box_get of invalid handle"); else returns the box's
-/// value.
+/// `rd <- box_get(rb)`: the box's word. Handle `0` latches `BoxGetOfNull` and a handle past the last
+/// box `BoxGetOfInvalid`, each as its `HeapFault` text, and returns `0`.
 ///
 /// # Safety
 /// `rt` must be a valid, non-null, non-aliased `*mut Runtime` for the duration of the call.
-// The two quoted fault strings above are the LITERAL fault text (asserted byte-for-byte by
-// `box_get_and_set_fault_on_null_and_dangling_handles` below), not code references — backticking
-// `box_get` inside them would break the "this is a verbatim literal" convention the quotes signal, so
-// this allow keeps `doc_markdown` from adding backticks inside the quoted text.
-#[allow(clippy::doc_markdown)]
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn rt_box_get(rt: *mut Runtime, p: u64) -> u64 {
-    let rt = unsafe { &mut *rt };
-    if rt.stopped() {
-        return 0;
-    }
-    if p == 0 {
-        rt.fault = Some("box_get of null handle".to_string());
-        return 0;
-    }
-    // See `rt_head`'s comment: `try_from`'s `Err` (32-bit targets only) folds into the same
-    // "invalid handle" fault a dangling-but-representable `p` already takes.
-    if let Some(&v) = usize::try_from(p - 1).ok().and_then(|i| rt.boxes.get(i)) {
-        v
-    } else {
-        rt.fault = Some("box_get of invalid handle".to_string());
-        0
-    }
+    unsafe { &mut *rt }.box_get(p)
 }
 
-/// `box_set(rb, rv)`. Mirrors the rxm interpreter's `Instr::BoxSet` arm: `p == 0` faults ("box_set of null
-/// handle"); a dangling handle faults ("box_set of invalid handle"); else overwrites the box in
-/// place.
+/// `box_set(rb, rv)`: overwrites the box in place, faulting `BoxSetOfNull` and `BoxSetOfInvalid` as
+/// `rt_box_get` does; a fault writes nothing.
 ///
 /// # Safety
 /// `rt` must be a valid, non-null, non-aliased `*mut Runtime` for the duration of the call.
-// As on `rt_box_get`: the two quoted strings are the exact fault bytes (see
-// `box_get_and_set_fault_on_null_and_dangling_handles`), not code references.
-#[allow(clippy::doc_markdown)]
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn rt_box_set(rt: *mut Runtime, p: u64, v: u64) {
-    let rt = unsafe { &mut *rt };
-    if rt.stopped() {
-        return;
-    }
-    if p == 0 {
-        rt.fault = Some("box_set of null handle".to_string());
-        return;
-    }
-    // See `rt_head`'s comment: `try_from`'s `Err` (32-bit targets only) folds into the same
-    // "invalid handle" fault a dangling-but-representable `p` already takes.
-    match usize::try_from(p - 1).ok().and_then(|i| rt.boxes.get_mut(i)) {
-        Some(slot) => *slot = v,
-        None => rt.fault = Some("box_set of invalid handle".to_string()),
-    }
+    unsafe { &mut *rt }.box_set(p, v);
 }
 
 /// Advance the step counter by one, mirroring the rxm interpreter's per-instruction step-cap check
@@ -261,21 +274,7 @@ pub unsafe extern "C" fn rt_box_set(rt: *mut Runtime, p: u64, v: u64) {
 /// `rt` must be a valid, non-null, non-aliased `*mut Runtime` for the duration of the call.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn rt_tick(rt: *mut Runtime) -> u64 {
-    let rt = unsafe { &mut *rt };
-    // If a fault (or an earlier cap) has already latched, divert immediately *without* touching
-    // `hit_cap`. Otherwise a back-edge reached after a callee faulted would keep ticking `steps`
-    // and eventually set `hit_cap`, and the driver (which checks `hit_cap` before `fault`) would
-    // misreport a `Fault` run as `HitCap`. Returning `1` sends the generated code to its exit
-    // block so the latched `fault` classification survives.
-    if rt.stopped() {
-        return 1;
-    }
-    rt.steps += 1;
-    if rt.steps > rt.caps.steps {
-        rt.hit_cap = true;
-        return 1;
-    }
-    0
+    unsafe { &mut *rt }.tick()
 }
 
 /// Enter a call frame, incrementing `depth`, mirroring the rxm interpreter's `Instr::Call` stack-cap check
@@ -293,18 +292,7 @@ pub unsafe extern "C" fn rt_tick(rt: *mut Runtime) -> u64 {
 /// `rt` must be a valid, non-null, non-aliased `*mut Runtime` for the duration of the call.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn rt_enter(rt: *mut Runtime) -> u64 {
-    let rt = unsafe { &mut *rt };
-    // As in `rt_tick`: once stopped, divert without setting `hit_cap`, so a `Call` reached after a
-    // callee faulted cannot mask the latched `fault` as a stack-cap `HitCap`.
-    if rt.stopped() {
-        return 1;
-    }
-    rt.depth += 1;
-    if rt.depth > rt.depth_cap {
-        rt.hit_cap = true;
-        return 1;
-    }
-    0
+    unsafe { &mut *rt }.enter()
 }
 
 /// Leave a call frame, decrementing `depth`, mirroring the rxm interpreter's `Instr::Ret` popping a frame
@@ -316,8 +304,7 @@ pub unsafe extern "C" fn rt_enter(rt: *mut Runtime) -> u64 {
 /// `rt` must be a valid, non-null, non-aliased `*mut Runtime` for the duration of the call.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn rt_leave(rt: *mut Runtime) {
-    let rt = unsafe { &mut *rt };
-    rt.depth = rt.depth.saturating_sub(1);
+    unsafe { &mut *rt }.leave();
 }
 
 /// Returns `1` if the run has stopped — a fault was latched (`fault.is_some()`) or a cap was hit
@@ -330,8 +317,7 @@ pub unsafe extern "C" fn rt_leave(rt: *mut Runtime) {
 /// `rt` must be a valid, non-null, non-aliased `*mut Runtime` for the duration of the call.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn rt_faulted(rt: *mut Runtime) -> u64 {
-    let rt = unsafe { &*rt };
-    u64::from(rt.fault.is_some() || rt.hit_cap)
+    unsafe { &*rt }.faulted()
 }
 
 /// Deserialize the CONFIG data blob `redextape_native::aot::emit_object` writes into an AOT
@@ -535,12 +521,17 @@ mod tests {
 
     #[test]
     fn head_of_nil_and_dangling_fault() {
-        let mut r = rt();
-        let _ = unsafe { rt_head(&mut r, 0) };
-        assert!(r.fault.is_some());
-        let mut r2 = rt();
-        let _ = unsafe { rt_tail(&mut r2, 99) }; // dangling
-        assert!(r2.fault.is_some());
+        let cases: [(unsafe extern "C" fn(*mut Runtime, u64) -> u64, u64, &str); 4] = [
+            (rt_head, 0, "head of empty list"),
+            (rt_head, 99, "head of invalid list pointer"),
+            (rt_tail, 0, "tail of empty list"),
+            (rt_tail, 99, "tail of invalid list pointer"),
+        ];
+        for (op, p, words) in cases {
+            let mut r = rt();
+            assert_eq!(unsafe { op(&mut r, p) }, 0);
+            assert_eq!(r.fault.as_deref(), Some(words));
+        }
     }
 
     #[test]
@@ -600,6 +591,21 @@ mod tests {
         assert!(!r.hit_cap, "a latched fault must not be reclassified as a cap trip");
         assert_eq!(r.steps, steps_before, "rt_tick must not advance steps once stopped");
         assert_eq!(r.depth, 0, "rt_enter must not grow depth once stopped");
+    }
+
+    /// Each call here would succeed or fault anew on a running runtime, so any one of them that is not
+    /// gated by `stopped` changes a word returned, an arena or the latched text.
+    #[test]
+    fn a_latched_fault_stops_every_heap_call() {
+        let mut r = rt();
+        let (cell, b) = unsafe { (rt_cons(&mut r, 7, 0), rt_box(&mut r, 5)) };
+        let _ = unsafe { rt_head(&mut r, 0) };
+        let words = unsafe { [rt_cons(&mut r, 8, 0), rt_head(&mut r, cell), rt_tail(&mut r, 99), rt_box(&mut r, 6)] };
+        let got = unsafe { rt_box_get(&mut r, b) };
+        unsafe { rt_box_set(&mut r, b, 9) };
+        assert_eq!((words, got), ([0; 4], 0));
+        assert_eq!(r.fault.as_deref(), Some("head of empty list"));
+        assert_eq!((r.heap.cells(), r.heap.boxes()), (&[(7, 0)][..], &[5][..]));
     }
 
     #[test]

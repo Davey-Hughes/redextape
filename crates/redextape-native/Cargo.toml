@@ -6,7 +6,12 @@ license = "GPL-3.0-only"
 
 [features]
 default = ["cranelift"]
-cranelift = ["dep:cranelift-jit", "dep:cranelift-module", "dep:cranelift-frontend", "dep:cranelift-codegen", "dep:cranelift-object", "dep:cranelift-native"]
+# `clif` builds CLIF with no ISA, for wasm32, so it leaves off `cranelift-codegen`'s default features, which are
+# for compiling on a native host; `cranelift` turns each one back on, so the native build gets all of them.
+clif = ["dep:cranelift-codegen", "dep:cranelift-frontend"]
+cranelift = ["clif", "cranelift-codegen/host-arch", "cranelift-codegen/std", "cranelift-codegen/unwind",
+             "cranelift-codegen/timing", "dep:cranelift-jit", "dep:cranelift-module", "dep:cranelift-object",
+             "dep:cranelift-native"]
 llvm = ["dep:inkwell"]
 
 [dependencies]
@@ -15,12 +20,13 @@ redextape-native-rt = { path = "../redextape-native-rt" }
 cranelift-jit = { version = "0.137", optional = true }
 cranelift-module = { version = "0.137", optional = true }
 cranelift-frontend = { version = "0.137", optional = true }
-cranelift-codegen = { version = "0.137", optional = true }
+cranelift-codegen = { version = "0.137", optional = true, default-features = false }
 cranelift-object = { version = "0.137", optional = true }
 cranelift-native = { version = "0.137", optional = true }
 inkwell = { version = "0.11", optional = true, features = ["llvm23-1"] }
 
 [dev-dependencies]
+cranelift-codegen = { version = "0.137", features = ["x86", "arm64"] }
 proptest = "1"
 redextape-test-support = { path = "../redextape-test-support" }
 

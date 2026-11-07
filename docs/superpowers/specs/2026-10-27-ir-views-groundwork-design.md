@@ -91,11 +91,13 @@ shows or how it behaves, except where §8 lists one.
 - They agree only end to end: `jit.rs` `agree_caps_at`, `llvm.rs` `agree_caps`, `tests/native_oracle.rs`,
   and native-rt's own fault-string unit tests.
 - **Differences that are not heap and stay** (§4.3): the rxm interpreter counts every instruction as a step,
-  native ticks only backward edges and calls (`codegen.rs:26-34`); only rxm has the mem cap; the stack cap
-  is `stack.len() >= caps.stack` in rxm and `depth > min(caps.stack, safe_depth)` natively; a callee
-  inherits the caller's locals in rxm (`rxm_cursor.rs:259-261`) and starts them at zero natively
-  (`codegen.rs:328-334`, `llvm.rs:606-611`); malformed programs fault at run time in rxm and are refused as
-  `LowerError` natively; after a faulted callee returns, native runs on to its next guard.
+  native ticks only backward edges (`rt_tick`), and a call's `rt_enter` counts depth, not steps (native-rt's
+  `rt_enter`, `lib.rs:295-307`, `Runtime::enter` after PR 2); only rxm has the mem cap; both stop a call at the
+  same `caps.stack` (rxm checks `stack.len() >= caps.stack` before it pushes the frame, native adds the call to
+  `depth` and then checks `depth > min(caps.stack, safe_depth)`), and only native lowers that bound to
+  `safe_depth`; a callee inherits the caller's locals in rxm (`rxm_cursor.rs:259-261`) and starts them at zero
+  natively (`codegen.rs:328-334`, `llvm.rs:606-611`); malformed programs fault at run time in rxm and are refused
+  as `LowerError` natively; after a faulted callee returns, native runs on to its next guard.
 
 ### §2.3 The wasm session (Rust)
 
@@ -242,9 +244,10 @@ IR instructions, so Cranelift and inkwell keep their current spellings.
 - The runtime import table (names, arities, return kinds) is defined once and used by both backends,
   `jit.rs`'s symbol registration and `llvm.rs`'s `rt_symbols`/`map_rt_symbols`.
 - Register naming comes from one place: export the rxm printer's `reg_str` (or its equivalent) from
-  `redextape-core`; LLVM allocas take the rxm names (`r{n}`, `a{n}`, `rr`) instead of `l{i}`. This changes
-  LLVM value names only — the snapshot gate (§7.1) treats this one rename as the expected diff, made in its
-  own commit.
+  `redextape-core`; LLVM allocas take the rxm names (`r{n}`, `a{n}`, `rr`) instead of `l{i}`, and each load
+  from a slot takes the slot's name with a `.v` suffix (`%r0.v = load i64, ptr %r0`; LLVM numbers a repeat
+  within a function, as `%r0.v1`), so no loaded value reads as a register of its own. Each rename changes
+  LLVM value names only — the snapshot gate (§7.1) treats each as an expected diff, made in its own commit.
 - The walk calls `set_srcloc(pc)`-equivalent on the sink before each instruction; the Cranelift sink sets
   `FunctionBuilder::set_srcloc(SourceLoc::new(pc))`. This is invisible to the native run and is what pieces
   1 and 3 link by. Whether it changes the emitted machine code at all is checked by the snapshot gate; if it
@@ -279,8 +282,8 @@ tag changes what the view shows and never what the program does", `rxm_cursor.rs
 
 **native-rt.** `Runtime` holds the heap core. Each `rt_*` body becomes a safe `impl Runtime` method;
 the `extern "C"` functions become thin wrappers. `stopped()`, ticks, depth and `rt_faulted` stay
-native-rt's — they are native semantics, not heap. `rt_run` (spawns a thread) is `cfg`'d out of wasm32
-builds. Add a wasm32 check of `redextape-native-rt`.
+native-rt's — they are native semantics, not heap. `rt_run` (spawns a thread) needs no `cfg` for wasm32
+builds: native-rt builds for wasm32 with it (plan D6). Add a wasm32 check of `redextape-native-rt`.
 
 **rxm interpreter.** `Vm` holds the heap core with the tagging recorder; `Instr::Cons`/`Head`/`Tail`/
 `IsEmpty`/`Box`/`BoxGet`/`BoxSet` go through it. Register tags, `written`, frames and the mem cap stay in
@@ -387,10 +390,11 @@ cranelift-codegen's `x86` and `arm64` features); LLVM with the triple and datala
 - the LLVM module as built (`print_to_string`, before the passes), once, and after the passes per
   `OptLevel`.
 
-Every PR 2 commit keeps every snapshot byte-identical except two commits, each alone and each with exactly
-the diff named: the LLVM alloca rename (§4.2), whose diff is value names only; and the `set_srcloc` commit,
-whose diff is the `@xxxx` source-location annotations in CLIF and nothing in machine code or LLVM. The
-snapshot test stays in the suite (the LLVM half in the `rust-llvm` job).
+Every PR 2 commit keeps every snapshot byte-identical except three commits, each alone and each with exactly
+the diff named: the LLVM alloca rename (§4.2), whose diff is value names only; the LLVM load rename (§4.2),
+whose diff is value names only; and the `set_srcloc` commit, whose diff is the `@xxxx` source-location
+annotations in CLIF and nothing in machine code or LLVM. The snapshot test stays in the suite (the LLVM half
+in the `rust-llvm` job).
 
 Plus the existing oracles unchanged: `native_oracle.rs`, `llvm_oracle.rs`, `aot_oracle.rs`, `jit.rs`/
 `llvm.rs` unit tests at all six levels, native-rt's fault-string tests.
@@ -419,7 +423,11 @@ roadmap, 5d-ii-a and 5d-ii-c entries).
 Only these, each deliberate:
 
 - LLVM allocas named after rxm registers (`r{n}`, `a{n}`, `rr`) — visible only in LLVM IR.
+- LLVM loads named after the slot they read (`r{n}.v`, `a{n}.v`, `rr.v`, LLVM numbering a repeat) — visible
+  only in LLVM IR.
 - Cranelift source locations per instruction — no runtime effect.
+- CLIF imports a function's callees in declaration order (plan D3), so the CLIF and vcode text are the same on
+  every build; no machine-code byte changes.
 - Whatever the Cranelift/inkwell bumps change in generated code — recorded, oracle-checked.
 
 ## §9 What follows (not in this design)
@@ -459,7 +467,7 @@ stepper, ~985 KB with both ISAs and the reader; the app's current module is ~316
 Settled by the designer after a builder's review, not by the user; open to the user's correction:
 
 - §7.1: snapshots on fixed targets (x86-64 and aarch64 Linux for Cranelift, x86-64 Linux for LLVM) so they
-  are host-independent; the snapshot covers machine code too; the `set_srcloc` commit is a second allowed
+  are host-independent; the snapshot covers machine code too; the `set_srcloc` commit is another allowed
   diff, limited to CLIF annotations.
 - §4.2: the `Module`-free Cranelift path ships in this groundwork, proven byte-identical to the `Module`
   path by a native test.

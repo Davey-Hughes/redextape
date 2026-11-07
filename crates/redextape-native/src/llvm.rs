@@ -1,8 +1,9 @@
 //! The LLVM (inkwell) native codegen backend — a second native path behind the `Codegen` seam.
-//! Reuses the shared runtime (`rt_*`), `analysis::partition`, the frame-size-aware depth cap, and the
-//! `Runtime`/decode/totality machinery; only the rxm->LLVM-IR walk is new (mirrors `codegen`).
+//! Reuses the shared runtime (`rt_*`), `analysis::partition`, the lowering walk (`lower`), the
+//! frame-size-aware depth cap, and the `Runtime`/decode/totality machinery; its own part is
+//! `LlvmSink`, which spells each of the walk's operations in LLVM IR.
 //!
-//! # The model (deliberately the same shape as `codegen.rs`, arm for arm)
+//! # The model
 //! * **Registers → entry-block `alloca`s.** Each LLVM function owns one `i64` slot per `Loc(i)` (init
 //!   `0`), per referenced `Arg(i)` (the first `param_count` from the function's params, the rest init
 //!   `0`), and one for `Rr` (init `0`). Cranelift's `Variable`s are SSA-with-a-frontend; LLVM's
@@ -14,22 +15,22 @@
 //! * **Blocks.** One `BasicBlock` per reachable body instruction, plus the `prologue` and a single
 //!   shared `exit` block. `Jz`/`Jmp` branch to the target index's block; fall-through branches to the
 //!   next index's block (guaranteed present in `body` by the reachability partition).
-//! * **Totality.** Identical to the Cranelift backend: `rt_tick` before every backward `Jz`/`Jmp`
-//!   (so any loop trips the step cap) and `rt_enter` at every `Call`, *before* the guarded call is
-//!   made (so infinite recursion trips the frame-size-aware `native_depth_cap` while the real call
-//!   stack still has room — never a process abort). Each guard `br`s to the shared `exit` block once
-//!   its signal is nonzero.
+//! * **Totality.** The lowering walk places the guards, so they are the Cranelift backend's:
+//!   `rt_tick` before every backward `Jz`/`Jmp` (so any loop trips the step cap) and `rt_enter` at
+//!   every `Call`, *before* the guarded call is made (so infinite recursion trips the
+//!   frame-size-aware `native_depth_cap` while the real call stack still has room — never a process
+//!   abort). Each guard `br`s to the shared `exit` block once its signal is nonzero.
 //! * **Step accounting is COARSE** (termination parity, not exact-step parity), exactly as for
 //!   Cranelift. `run_rxm` charges one `steps` tick per instruction executed; native ticks only
-//!   *backward edges* and *calls* — enough to force any non-terminating run to trip a cap, but not
-//!   an exact count, because ticking every instruction would defeat the point of compiling. So a
-//!   straight-line program that `run_rxm` would `HitCap` on a `steps` cap *smaller than its
-//!   instruction count* can still run to completion natively; callers must not pass a `steps` cap
-//!   tighter than a terminating program needs (`DEFAULT_CAPS`, or larger, is what the oracle uses).
-//!   Native guarantees **termination**, not step-count equality, and the oracle compares terminating
-//!   *outcomes*. (Spelled out here rather than cross-referenced: under
-//!   `--no-default-features --features llvm` the Cranelift module is not compiled at all, so a
-//!   "see `codegen.rs`" pointer would name a module that does not exist in that config's rustdoc.)
+//!   *backward edges* and bounds *calls* by depth — enough to force any non-terminating run to trip
+//!   a cap, but not an exact count, because ticking every instruction would defeat the point of
+//!   compiling. So a straight-line program that `run_rxm` would `HitCap` on a `steps` cap *smaller
+//!   than its instruction count* can still run to completion natively; callers must not pass a
+//!   `steps` cap tighter than a terminating program needs (`DEFAULT_CAPS`, or larger, is what the
+//!   oracle uses). Native guarantees **termination**, not step-count equality, and the oracle
+//!   compares terminating *outcomes*. (Spelled out here rather than cross-referenced: under
+//!   `--no-default-features --features llvm` the Cranelift module is not compiled at all, so a "see
+//!   `codegen.rs`" pointer would name a module that does not exist in that config's rustdoc.)
 //! * **Heap/box.** Lists and boxes live in the host `Runtime`'s arenas, exactly as for Cranelift:
 //!   each `Cons`/`Head`/`Tail`/`IsEmpty`/`Box`/`BoxGet`/`BoxSet` is a call to the matching `rt_*`
 //!   host function, so the pointer representation (1-based, `0` = nil) and every fault/cap condition
@@ -38,10 +39,11 @@
 //!   guards), so a latched fault short-circuits to the driver's `Fault`/`HitCap` classification
 //!   instead of running on with a bogus `0`. (`Nil` needs no call at all: it is a pure register write
 //!   of `0`.)
-//! * **Agreement.** `compile_and_run` must produce the same `NativeRun` outcome as `run_rxm` and as
-//!   the Cranelift JIT on every `Program`: `Add`/`Mul` SATURATE at `u64::MAX` (via
-//!   `llvm.uadd.sat.i64` and `llvm.umul.with.overflow.i64` + `select`, NOT wrapping `add`/`mul`),
-//!   `Sub` is monus (`llvm.usub.sat.i64`), and every comparison is UNSIGNED.
+//! * **Agreement.** `compile_and_run` must produce the `NativeRun` outcome the Cranelift JIT does, and
+//!   the one `run_rxm` does except where the crate doc's "What native and the rxm interpreter do
+//!   differently" says they part: `Add`/`Mul` SATURATE at `u64::MAX` (via `llvm.uadd.sat.i64` and
+//!   `llvm.umul.with.overflow.i64` + `select`, NOT wrapping `add`/`mul`), `Sub` is monus
+//!   (`llvm.usub.sat.i64`), and every comparison is UNSIGNED.
 
 use std::collections::HashMap;
 use std::sync::OnceLock;
@@ -54,20 +56,19 @@ use inkwell::execution_engine::{ExecutionEngine, JitFunction};
 use inkwell::intrinsics::Intrinsic;
 use inkwell::module::{Linkage, Module};
 use inkwell::passes::PassBuilderOptions;
-use inkwell::targets::{CodeModel, FileType, InitializationConfig, RelocMode, Target, TargetMachine};
+use inkwell::targets::{CodeModel, FileType, InitializationConfig, RelocMode, Target, TargetMachine, TargetTriple};
 use inkwell::types::BasicMetadataTypeEnum;
 use inkwell::values::{BasicMetadataValueEnum, BasicValueEnum, FunctionValue, IntValue, PointerValue};
 use inkwell::{AddressSpace, IntPredicate, OptimizationLevel};
 
 use redextape_core::core::{BinOp, NodeId};
-use redextape_core::tm::{Caps, Instr, LowerError, Program, Reg};
-use redextape_native_rt::{
-    RUN_STACK_SIZE, Runtime, rt_box, rt_box_get, rt_box_set, rt_cons, rt_enter, rt_faulted, rt_head, rt_is_empty,
-    rt_leave, rt_tail, rt_tick,
-};
+use redextape_core::tm::{Caps, LowerError, Program, Reg, reg_str};
+use redextape_native_rt::{RUN_STACK_SIZE, Runtime};
 
 use crate::analysis::{Subroutine, partition};
-use crate::shared::{MAX_REGISTERS, n_arg_vars, native_depth_cap, param_count, reg_over_cap};
+use crate::lower::{Banks, BodyPos, LowerFault, LowerSink, lower_subroutine};
+use crate::rt_imports::{PerRtFn, RtFn};
+use crate::shared::{MAX_REGISTERS, native_depth_cap, param_count, reg_over_cap};
 use crate::{NativeRun, OptLevel};
 
 /// Wrap any inkwell/LLVM/JIT failure as a `LowerError` outcome. None of these paths is expected to
@@ -204,28 +205,36 @@ fn init_native_target() -> Result<(), IrError> {
 /// compile wants its own `opt` level anyway.
 fn host_target_machine(opt: OptLevel) -> Result<TargetMachine, IrError> {
     init_native_target()?;
-    let triple = TargetMachine::get_default_triple();
-    let target = Target::from_triple(&triple).map_err(ir_err)?;
-    target
-        .create_target_machine(
-            &triple,
-            &TargetMachine::get_host_cpu_name().to_string_lossy(),
-            &TargetMachine::get_host_cpu_features().to_string_lossy(),
-            opt_level(opt),
-            RelocMode::Default,
-            CodeModel::JITDefault,
-        )
-        .ok_or_else(|| "could not create a target machine for the host".to_string())
+    target_machine(
+        &TargetMachine::get_default_triple(),
+        &TargetMachine::get_host_cpu_name().to_string_lossy(),
+        &TargetMachine::get_host_cpu_features().to_string_lossy(),
+        opt,
+    )
 }
 
-/// Point the module at the host target BEFORE any IR is built. LLVM bakes an alignment into every
+/// A `TargetMachine` for `triple`, `cpu` and `features` at `opt`'s codegen level, with the JIT's
+/// relocation and code models. The target must have been initialized.
+pub(crate) fn target_machine(
+    triple: &TargetTriple,
+    cpu: &str,
+    features: &str,
+    opt: OptLevel,
+) -> Result<TargetMachine, IrError> {
+    let target = Target::from_triple(triple).map_err(ir_err)?;
+    target
+        .create_target_machine(triple, cpu, features, opt_level(opt), RelocMode::Default, CodeModel::JITDefault)
+        .ok_or_else(|| format!("could not create a target machine for {triple}"))
+}
+
+/// Point the module at `machine`'s target BEFORE any IR is built. LLVM bakes an alignment into every
 /// `alloca`/`load`/`store` at construction time from the module's current data layout, so a module
 /// left with LLVM's empty default layout (where `i64` has ABI alignment 4) emits under-aligned
 /// memory operations that survive into codegen even though the JIT later attaches the real layout.
-/// Setting the host triple + data layout up front makes the register slots naturally aligned, and is
+/// Setting the triple + data layout up front makes the register slots naturally aligned, and is
 /// also what lets the IR pass pipeline reason about the target at all (`mem2reg`/SROA promoting the
 /// register banks, the cost model behind inlining and unrolling).
-fn set_host_target(module: &Module<'_>, machine: &TargetMachine) {
+fn set_target(module: &Module<'_>, machine: &TargetMachine) {
     // Both taken FROM the machine, so the module the pass pipeline sees can never describe a
     // different target than the machine that pipeline (and MCJIT) reasons with.
     module.set_triple(&machine.get_triple());
@@ -243,87 +252,31 @@ fn set_host_target(module: &Module<'_>, machine: &TargetMachine) {
 /// / `rt_enter` / `rt_faulted` are opaque external declarations, so no pass may assume them
 /// side-effect-free, reorder them past each other, or delete the `br exit` edges they feed. The
 /// `llvm-O0 == llvm-O1..O3` differential is what checks that claim empirically.
-fn optimize(module: &Module<'_>, machine: &TargetMachine, opt: OptLevel) -> Result<(), IrError> {
+pub(crate) fn optimize(module: &Module<'_>, machine: &TargetMachine, opt: OptLevel) -> Result<(), IrError> {
     match pass_pipeline(opt) {
         None => Ok(()),
         Some(pipeline) => module.run_passes(pipeline, machine, PassBuilderOptions::create()).map_err(ir_err),
     }
 }
 
-/// The `rt_*` host functions this backend imports, as LLVM declarations — the same set
-/// `codegen::RtIds` imports for Cranelift, so both backends drive one shared runtime.
-struct RtFns<'ctx> {
-    /// `rt_cons(rt, h, t) -> u64` — allocates a cell; returns its 1-based pointer.
-    cons: FunctionValue<'ctx>,
-    /// `rt_head(rt, p) -> u64` — faults on a nil/dangling pointer.
-    head: FunctionValue<'ctx>,
-    /// `rt_tail(rt, p) -> u64` — faults on a nil/dangling pointer.
-    tail: FunctionValue<'ctx>,
-    /// `rt_is_empty(rt, p) -> u64` — `1` iff `p == 0`; never faults.
-    is_empty: FunctionValue<'ctx>,
-    /// `rt_box(rt, v) -> u64` — allocates a box; returns its 1-based handle.
-    box_new: FunctionValue<'ctx>,
-    /// `rt_box_get(rt, p) -> u64` — faults on a null/dangling handle.
-    box_get: FunctionValue<'ctx>,
-    /// `rt_box_set(rt, p, v)` — in-place write; faults on a null/dangling handle. Returns void.
-    box_set: FunctionValue<'ctx>,
-    /// `rt_tick(rt) -> u64` — step cap, called before every backward branch.
-    tick: FunctionValue<'ctx>,
-    /// `rt_enter(rt) -> u64` — stack-depth cap, called *before* every `Call`.
-    enter: FunctionValue<'ctx>,
-    /// `rt_leave(rt)` — pops the depth counter after a `Call` returns.
-    leave: FunctionValue<'ctx>,
-    /// `rt_faulted(rt) -> u64` — `1` once a fault or a cap has latched; the guard emitted after every
-    /// faultable/allocating heap op.
-    faulted: FunctionValue<'ctx>,
-}
-
-/// Declare the `rt_*` imports. Their LLVM types must match the `extern "C"` signatures in
-/// `redextape_native_rt` exactly — the JIT binds these by ADDRESS (see `map_rt_symbols`), so a
-/// mismatched declaration would be a silent ABI miscompile rather than a link error. The
-/// `*mut Runtime` is always the leading parameter; `rt_leave`/`rt_box_set` return void and every
-/// other import returns `i64`.
-fn declare_rt<'ctx>(ctx: &'ctx Context, module: &Module<'ctx>) -> RtFns<'ctx> {
+/// Declare the `rt_*` imports, in `RtFn::ALL`'s order. Their LLVM types must match the `extern "C"`
+/// signatures in `redextape_native_rt` exactly — the JIT binds these by ADDRESS (see
+/// `map_rt_symbols`), so a mismatched declaration would be a silent ABI miscompile rather than a
+/// link error. The `*mut Runtime` is always the leading `ptr` parameter, then the entry's words.
+fn declare_rt<'ctx>(ctx: &'ctx Context, module: &Module<'ctx>) -> PerRtFn<FunctionValue<'ctx>> {
     let ptr = ctx.ptr_type(AddressSpace::default());
     let i64t = ctx.i64_type();
-    let guard_ty = i64t.fn_type(&[ptr.into()], false); // (rt) -> i64
-    let leave_ty = ctx.void_type().fn_type(&[ptr.into()], false); // (rt)
-    let word1_ty = i64t.fn_type(&[ptr.into(), i64t.into()], false); // (rt, w) -> i64
-    let word2_ty = i64t.fn_type(&[ptr.into(), i64t.into(), i64t.into()], false); // (rt, w, w) -> i64
-    let set_ty = ctx.void_type().fn_type(&[ptr.into(), i64t.into(), i64t.into()], false); // (rt, w, w)
-    RtFns {
-        cons: module.add_function("rt_cons", word2_ty, Some(Linkage::External)),
-        head: module.add_function("rt_head", word1_ty, Some(Linkage::External)),
-        tail: module.add_function("rt_tail", word1_ty, Some(Linkage::External)),
-        is_empty: module.add_function("rt_is_empty", word1_ty, Some(Linkage::External)),
-        box_new: module.add_function("rt_box", word1_ty, Some(Linkage::External)),
-        box_get: module.add_function("rt_box_get", word1_ty, Some(Linkage::External)),
-        box_set: module.add_function("rt_box_set", set_ty, Some(Linkage::External)),
-        tick: module.add_function("rt_tick", guard_ty, Some(Linkage::External)),
-        enter: module.add_function("rt_enter", guard_ty, Some(Linkage::External)),
-        leave: module.add_function("rt_leave", leave_ty, Some(Linkage::External)),
-        faulted: module.add_function("rt_faulted", guard_ty, Some(Linkage::External)),
-    }
+    PerRtFn::from_fn(|f| {
+        let mut params: Vec<BasicMetadataTypeEnum> = vec![ptr.into()];
+        params.extend(std::iter::repeat_n(BasicMetadataTypeEnum::from(i64t), f.word_params()));
+        let ty = if f.returns_word() { i64t.fn_type(&params, false) } else { ctx.void_type().fn_type(&params, false) };
+        module.add_function(f.symbol(), ty, Some(Linkage::External))
+    })
 }
 
 /// Every `rt_*` import as (LLVM name, in-process address of the Rust function implementing it).
-/// These names must match the ones `declare_rt` adds to the module, or the import would resolve to
-/// nothing and the JIT would call address `0` — `every_rt_import_is_mapped` is the test that pins
-/// the two lists together.
-fn rt_symbols() -> [(&'static str, usize); 11] {
-    [
-        ("rt_cons", rt_cons as *const u8 as usize),
-        ("rt_head", rt_head as *const u8 as usize),
-        ("rt_tail", rt_tail as *const u8 as usize),
-        ("rt_is_empty", rt_is_empty as *const u8 as usize),
-        ("rt_box", rt_box as *const u8 as usize),
-        ("rt_box_get", rt_box_get as *const u8 as usize),
-        ("rt_box_set", rt_box_set as *const u8 as usize),
-        ("rt_tick", rt_tick as *const u8 as usize),
-        ("rt_enter", rt_enter as *const u8 as usize),
-        ("rt_leave", rt_leave as *const u8 as usize),
-        ("rt_faulted", rt_faulted as *const u8 as usize),
-    ]
+fn rt_symbols() -> [(&'static str, usize); RtFn::ALL.len()] {
+    RtFn::ALL.map(|f| (f.symbol(), f.address() as usize))
 }
 
 /// Bind each surviving `rt_*` declaration to the address of the Rust function that implements it —
@@ -333,10 +286,10 @@ fn rt_symbols() -> [(&'static str, usize); 11] {
 ///
 /// That claim is scoped to the `rt_*` imports specifically, not to the module's imports as a whole:
 /// at `O2`/`O3` loop-idiom recognition may in principle synthesize an `llvm.memcpy`/`llvm.memset`,
-/// which lowers to a libc call that appears in neither `declare_rt` nor `rt_symbols` and would fall
-/// back to `dlsym`. Negligible in practice — the emitted IR has no memory-copy idiom to recognize
-/// (the register banks are scalar `alloca`s the pipeline promotes away) — but the module's import
-/// set is not provably closed, so the guarantee is stated only over the imports we do declare.
+/// which lowers to a libc call that is not in the `RtFn` table and would fall back to `dlsym`.
+/// Negligible in practice — the emitted IR has no memory-copy idiom to recognize (the register
+/// banks are scalar `alloca`s the pipeline promotes away) — but the module's import set is not
+/// provably closed, so the guarantee is stated only over the imports we do declare.
 ///
 /// The handle is re-fetched from the POST-pass module by name rather than reusing the `FunctionValue`
 /// `declare_rt` returned: the `default<O_>` pipeline may delete a declaration that ended up unused
@@ -423,7 +376,7 @@ fn emit_saturating_mul<'ctx>(
 /// helpers plus every subroutine's `FunctionValue` and arity (so a `Call` can reference a callee
 /// defined later). Mirrors `codegen::Decls`.
 struct Decls<'ctx> {
-    rt: RtFns<'ctx>,
+    rt: PerRtFn<FunctionValue<'ctx>>,
     sat: SatFns<'ctx>,
     /// entry index → the subroutine's LLVM function.
     funcs: HashMap<usize, FunctionValue<'ctx>>,
@@ -431,59 +384,18 @@ struct Decls<'ctx> {
     arity: HashMap<usize, u32>,
 }
 
-/// The per-function state the instruction walk reads: the function itself, its hidden `*mut Runtime`
-/// param, the three register banks (as `alloca` slots), the shared exit block, and the body-index →
-/// block map. Immutable once the prologue is built.
-struct Fun<'ctx> {
-    func: FunctionValue<'ctx>,
-    rt_ptr: PointerValue<'ctx>,
-    args: Vec<PointerValue<'ctx>>,
-    locs: Vec<PointerValue<'ctx>>,
-    rr: PointerValue<'ctx>,
-    exit: BasicBlock<'ctx>,
-    blocks: HashMap<usize, BasicBlock<'ctx>>,
-}
-
-/// The block compiled for body index `idx`. Absent only for a malformed `Program` whose control flow
-/// leaves the partitioned body, which `partition` already rejects — so this is defensive.
-fn block_at<'ctx>(f: &Fun<'ctx>, idx: usize) -> Result<BasicBlock<'ctx>, IrError> {
-    f.blocks.get(&idx).copied().ok_or_else(|| format!("no block for index {idx}"))
-}
-
-/// Load one `i64` from a register slot.
-fn load_i64<'ctx>(ctx: &'ctx Context, b: &Builder<'ctx>, slot: PointerValue<'ctx>) -> Result<IntValue<'ctx>, IrError> {
-    match b.build_load(ctx.i64_type(), slot, "r").map_err(ir_err)? {
+/// Load one `i64` from `slot`, register `r`'s slot, named after it with a `.v` suffix (`%r0.v`; LLVM
+/// numbers a repeat), so a loaded value names its register and never reads as another register's slot.
+fn load_i64<'ctx>(
+    ctx: &'ctx Context,
+    b: &Builder<'ctx>,
+    slot: PointerValue<'ctx>,
+    r: Reg,
+) -> Result<IntValue<'ctx>, IrError> {
+    match b.build_load(ctx.i64_type(), slot, &format!("{}.v", reg_str(r))).map_err(ir_err)? {
         BasicValueEnum::IntValue(v) => Ok(v),
         other => Err(format!("register slot did not load as an i64: {other:?}")),
     }
-}
-
-/// Read register `r`. Out-of-bank indices read `0`, mirroring the rxm interpreter's `Vm::read` (behind
-/// `trace::RxmCursor`), whose `locals.get(n)` / `args.get(n)` fall back to `0` (and `codegen::read_reg`).
-fn read_reg<'ctx>(ctx: &'ctx Context, b: &Builder<'ctx>, f: &Fun<'ctx>, r: Reg) -> Result<IntValue<'ctx>, IrError> {
-    let slot = match r {
-        Reg::Loc(n) => f.locs.get(n as usize).copied(),
-        Reg::Arg(n) => f.args.get(n as usize).copied(),
-        Reg::Rr => Some(f.rr),
-    };
-    match slot {
-        Some(p) => load_i64(ctx, b, p),
-        None => Ok(ctx.i64_type().const_zero()),
-    }
-}
-
-/// Write `val` to register `r`. Out-of-bank indices are no-ops (they never occur — the banks are
-/// sized to every register the body references — but this stays panic-free defensively).
-fn write_reg<'ctx>(b: &Builder<'ctx>, f: &Fun<'ctx>, r: Reg, val: IntValue<'ctx>) -> Result<(), IrError> {
-    let slot = match r {
-        Reg::Loc(n) => f.locs.get(n as usize).copied(),
-        Reg::Arg(n) => f.args.get(n as usize).copied(),
-        Reg::Rr => Some(f.rr),
-    };
-    if let Some(p) = slot {
-        b.build_store(p, val).map_err(ir_err)?;
-    }
-    Ok(())
 }
 
 /// `call` a function whose LLVM return type is `i64`, yielding the result as an `IntValue`. Every
@@ -540,102 +452,215 @@ fn emit_bin<'ctx>(
     }
 }
 
-/// Call a `(rt) -> u64` guard (`rt_tick`/`rt_enter`/`rt_faulted`) and branch to the shared `exit`
-/// block on a nonzero signal, continuing in a fresh `cont` block otherwise — the inkwell analog of
-/// `codegen::emit_guard`. The caller keeps translating in `cont` (the builder is left positioned
-/// there).
-fn emit_guard<'ctx>(
-    ctx: &'ctx Context,
-    b: &Builder<'ctx>,
-    f: &Fun<'ctx>,
-    guard: FunctionValue<'ctx>,
-) -> Result<(), IrError> {
-    let signal = call_i64(b, guard, &[f.rt_ptr.into()], "guard")?;
-    let trip = b.build_int_compare(IntPredicate::NE, signal, ctx.i64_type().const_zero(), "trip").map_err(ir_err)?;
-    let cont = ctx.append_basic_block(f.func, "cont");
-    b.build_conditional_branch(trip, f.exit, cont).map_err(ir_err)?;
-    b.position_at_end(cont);
-    Ok(())
+/// The name a call to `f` gives its result in the IR. A guard's is `guard` whichever guard it is.
+fn rt_value_name(f: RtFn) -> &'static str {
+    match f {
+        RtFn::Cons => "cons",
+        RtFn::Head => "head",
+        RtFn::Tail => "tail",
+        RtFn::IsEmpty => "isempty",
+        RtFn::Box => "box",
+        RtFn::BoxGet => "boxget",
+        RtFn::BoxSet => "boxset",
+        RtFn::Leave => "leave",
+        RtFn::Tick | RtFn::Enter | RtFn::Faulted => "guard",
+    }
 }
 
-/// Build the prologue: the register-bank `alloca`s (all in one block, so a frame is fixed-size), the
-/// `exit` block's `ret`, and the branch into the subroutine's entry block. Returns the `Fun` the
-/// instruction walk reads.
-fn build_prologue<'ctx>(
+impl From<LowerFault> for IrError {
+    fn from(f: LowerFault) -> Self {
+        f.0
+    }
+}
+
+/// The LLVM spelling of the lowering walk's operations. Registers are `alloca` slots in the
+/// `prologue` block. Blocks are created `prologue` first, then one `i<index>` per `body` entry,
+/// then the shared `exit`, whose `ret` the prologue emits; each guard appends its `cont` block
+/// after them.
+struct LlvmSink<'a, 'ctx> {
     ctx: &'ctx Context,
-    b: &Builder<'ctx>,
-    prog: &Program,
-    sub: &Subroutine,
+    b: &'a Builder<'ctx>,
+    decls: &'a Decls<'ctx>,
     func: FunctionValue<'ctx>,
-) -> Result<Fun<'ctx>, IrError> {
-    let i64t = ctx.i64_type();
-    let prologue = ctx.append_basic_block(func, "prologue");
-    let mut blocks: HashMap<usize, BasicBlock<'ctx>> = HashMap::with_capacity(sub.body.len());
-    for &idx in &sub.body {
-        blocks.insert(idx, ctx.append_basic_block(func, &format!("i{idx}")));
-    }
-    let exit = ctx.append_basic_block(func, "exit");
-
-    b.position_at_end(prologue);
-    let Some(BasicValueEnum::PointerValue(rt_ptr)) = func.get_nth_param(0) else {
-        return Err(format!("subroutine `{}` has no `*mut Runtime` parameter", sub.name));
-    };
-
-    // Size the `Arg` bank to every `Arg` the body references (read or write); the `Loc` bank to
-    // `n_locals`. The first `param_count` args come from the function's params; any extra `Arg`
-    // (written only to set up a callee's arguments, or every `Arg` of the entry `$main`, which the
-    // driver invokes with no args) starts at `0`. Identical to `codegen::translate_subroutine`.
-    let n_params = param_count(sub);
-    let n_args = n_arg_vars(prog, sub);
-    let mut args = Vec::with_capacity(n_args as usize);
-    for i in 0..n_args {
-        let slot = b.build_alloca(i64t, &format!("a{i}")).map_err(ir_err)?;
-        let init = if i < n_params {
-            match func.get_nth_param(i + 1) {
-                Some(BasicValueEnum::IntValue(v)) => v,
-                _ => return Err(format!("subroutine `{}` parameter {} is not an i64", sub.name, i + 1)),
-            }
-        } else {
-            i64t.const_zero()
-        };
-        b.build_store(slot, init).map_err(ir_err)?;
-        args.push(slot);
-    }
-    let mut locs = Vec::with_capacity(sub.n_locals as usize);
-    for i in 0..sub.n_locals {
-        let slot = b.build_alloca(i64t, &format!("l{i}")).map_err(ir_err)?;
-        b.build_store(slot, i64t.const_zero()).map_err(ir_err)?;
-        locs.push(slot);
-    }
-    let rr = b.build_alloca(i64t, "rr").map_err(ir_err)?;
-    b.build_store(rr, i64t.const_zero()).map_err(ir_err)?;
-
-    let f = Fun { func, rt_ptr, args, locs, rr, exit, blocks };
-
-    // The shared exit block returns a sentinel `0`; the driver classifies by the runtime flags. It is
-    // only ever reached with `hit_cap` or `fault` already latched (every guard that branches here
-    // returns nonzero exactly then), so its return value is never the program's result.
-    b.position_at_end(exit);
-    b.build_return(Some(&i64t.const_zero())).map_err(ir_err)?;
-
-    b.position_at_end(prologue);
-    b.build_unconditional_branch(block_at(&f, sub.entry)?).map_err(ir_err)?;
-    Ok(f)
+    rt_ptr: PointerValue<'ctx>,
+    args: Vec<PointerValue<'ctx>>,
+    locs: Vec<PointerValue<'ctx>>,
+    rr: PointerValue<'ctx>,
+    /// One block per `body` entry, in `body`'s order, so a `BodyPos` indexes it.
+    blocks: Vec<BasicBlock<'ctx>>,
+    exit: BasicBlock<'ctx>,
 }
 
-/// Translate one subroutine into `func`'s body — the inkwell analog of
-/// `codegen::translate_subroutine`, arm for arm.
-// Same shape, same reasoning as `codegen::translate_subroutine`: one coherent state machine (a
-// single `match instr` over every `Instr` variant, each arm emitting that opcode's IR against the
-// shared `f`/`b`/`decls` state above the loop), not several concerns bundled together — splitting
-// it would scatter that shared state across multiple signatures without shrinking what a reader
-// holds at once.
-#[allow(clippy::too_many_lines)]
-// `h`/`t`/`p`/`v`/`x`/`y`/`l`/`r`/`f`/`b` follow the SAME compiler-codegen convention as
-// `codegen::translate_subroutine` and the rxm interpreter's own `Instr` arms, in `Vm::exec` behind
-// `trace::RxmCursor` (head/tail/pointer/value/left-operand/right-operand/label/register/function/
-// builder) — arm-for-arm identical to the Cranelift version, which reads the same way.
-#[allow(clippy::many_single_char_names)]
+impl<'a, 'ctx> LlvmSink<'a, 'ctx> {
+    /// The `prologue` block: the register banks' `alloca`s (all in this one block, so a frame is
+    /// fixed-size), initialised from the parameters, then the `exit` block's `ret` and the branch to
+    /// the block at `entry`. `name` is the subroutine's, for the errors.
+    // The walk's three prologue inputs, plus the function and the module-wide state it builds into.
+    #[allow(clippy::too_many_arguments)]
+    fn prologue(
+        ctx: &'ctx Context,
+        b: &'a Builder<'ctx>,
+        decls: &'a Decls<'ctx>,
+        func: FunctionValue<'ctx>,
+        name: &str,
+        banks: Banks,
+        body: &[usize],
+        entry: BodyPos,
+    ) -> Result<Self, IrError> {
+        let i64t = ctx.i64_type();
+        let prologue = ctx.append_basic_block(func, "prologue");
+        let blocks: Vec<BasicBlock<'ctx>> =
+            body.iter().map(|idx| ctx.append_basic_block(func, &format!("i{idx}"))).collect();
+        let exit = ctx.append_basic_block(func, "exit");
+
+        b.position_at_end(prologue);
+        let Some(BasicValueEnum::PointerValue(rt_ptr)) = func.get_nth_param(0) else {
+            return Err(format!("subroutine `{name}` has no `*mut Runtime` parameter"));
+        };
+        let mut args = Vec::with_capacity(banks.args as usize);
+        for i in 0..banks.args {
+            let slot = b.build_alloca(i64t, &reg_str(Reg::Arg(i))).map_err(ir_err)?;
+            let init = if i < banks.params {
+                match func.get_nth_param(i + 1) {
+                    Some(BasicValueEnum::IntValue(v)) => v,
+                    _ => return Err(format!("subroutine `{name}` parameter {} is not an i64", i + 1)),
+                }
+            } else {
+                i64t.const_zero()
+            };
+            b.build_store(slot, init).map_err(ir_err)?;
+            args.push(slot);
+        }
+        let mut locs = Vec::with_capacity(banks.locals as usize);
+        for i in 0..banks.locals {
+            let slot = b.build_alloca(i64t, &reg_str(Reg::Loc(i))).map_err(ir_err)?;
+            b.build_store(slot, i64t.const_zero()).map_err(ir_err)?;
+            locs.push(slot);
+        }
+        let rr = b.build_alloca(i64t, &reg_str(Reg::Rr)).map_err(ir_err)?;
+        b.build_store(rr, i64t.const_zero()).map_err(ir_err)?;
+
+        // The shared exit block returns a sentinel `0`; the driver classifies by the runtime flags. It is
+        // only ever reached with `hit_cap` or `fault` already latched (every guard that branches here
+        // returns nonzero exactly then), so its return value is never the program's result.
+        b.position_at_end(exit);
+        b.build_return(Some(&i64t.const_zero())).map_err(ir_err)?;
+
+        b.position_at_end(prologue);
+        b.build_unconditional_branch(blocks[entry.get()]).map_err(ir_err)?;
+        Ok(LlvmSink { ctx, b, decls, func, rt_ptr, args, locs, rr, blocks, exit })
+    }
+
+    /// The slot holding `r`, or `None` for an index past its bank.
+    fn slot(&self, r: Reg) -> Option<PointerValue<'ctx>> {
+        match r {
+            Reg::Loc(n) => self.locs.get(n as usize).copied(),
+            Reg::Arg(n) => self.args.get(n as usize).copied(),
+            Reg::Rr => Some(self.rr),
+        }
+    }
+
+    /// The runtime pointer followed by `words`: a call's arguments.
+    fn with_rt_ptr(&self, words: &[IntValue<'ctx>]) -> Vec<BasicMetadataValueEnum<'ctx>> {
+        let mut args = Vec::with_capacity(1 + words.len());
+        args.push(self.rt_ptr.into());
+        args.extend(words.iter().map(|&w| BasicMetadataValueEnum::from(w)));
+        args
+    }
+}
+
+impl<'ctx> LowerSink for LlvmSink<'_, 'ctx> {
+    type Value = IntValue<'ctx>;
+    type Callee = FunctionValue<'ctx>;
+    type Error = IrError;
+
+    // To LLVM a missing entry is one more index with no block.
+    fn missing_entry(entry: usize) -> LowerFault {
+        LowerFault(format!("no block for index {entry}"))
+    }
+
+    fn begin(&mut self, at: BodyPos) -> Result<(), IrError> {
+        self.b.position_at_end(self.blocks[at.get()]);
+        Ok(())
+    }
+
+    fn read(&mut self, r: Reg) -> Result<IntValue<'ctx>, IrError> {
+        match self.slot(r) {
+            Some(p) => load_i64(self.ctx, self.b, p, r),
+            None => Ok(self.ctx.i64_type().const_zero()),
+        }
+    }
+
+    fn write(&mut self, r: Reg, v: IntValue<'ctx>) -> Result<(), IrError> {
+        if let Some(p) = self.slot(r) {
+            self.b.build_store(p, v).map_err(ir_err)?;
+        }
+        Ok(())
+    }
+
+    fn constant(&mut self, n: u64) -> Result<IntValue<'ctx>, IrError> {
+        Ok(self.ctx.i64_type().const_int(n, false))
+    }
+
+    fn bin(&mut self, op: BinOp, x: IntValue<'ctx>, y: IntValue<'ctx>) -> Result<IntValue<'ctx>, IrError> {
+        emit_bin(self.ctx, self.b, &self.decls.sat, op, x, y)
+    }
+
+    fn call_rt(&mut self, f: RtFn, words: &[IntValue<'ctx>]) -> Result<IntValue<'ctx>, IrError> {
+        call_i64(self.b, self.decls.rt[f], &self.with_rt_ptr(words), rt_value_name(f))
+    }
+
+    fn call_rt_void(&mut self, f: RtFn, words: &[IntValue<'ctx>]) -> Result<(), IrError> {
+        self.b.build_call(self.decls.rt[f], &self.with_rt_ptr(words), rt_value_name(f)).map_err(ir_err)?;
+        Ok(())
+    }
+
+    fn guard(&mut self, f: RtFn) -> Result<(), IrError> {
+        let signal = call_i64(self.b, self.decls.rt[f], &[self.rt_ptr.into()], rt_value_name(f))?;
+        let zero = self.ctx.i64_type().const_zero();
+        let trip = self.b.build_int_compare(IntPredicate::NE, signal, zero, "trip").map_err(ir_err)?;
+        let cont = self.ctx.append_basic_block(self.func, "cont");
+        self.b.build_conditional_branch(trip, self.exit, cont).map_err(ir_err)?;
+        self.b.position_at_end(cont);
+        Ok(())
+    }
+
+    fn callee(&self, entry: usize) -> Option<FunctionValue<'ctx>> {
+        self.decls.funcs.get(&entry).copied()
+    }
+
+    // Optimised IR marks this call `tail`. LLVM's `tail` says the callee does not access the caller's
+    // stack frame, and it is not `musttail`: it is a hint the code generator takes only for a call in
+    // tail position, and the walk's `rt_leave` after the call keeps this one out of it, so its frame
+    // is never reused.
+    fn call_sub(&mut self, callee: FunctionValue<'ctx>, args: &[IntValue<'ctx>]) -> Result<IntValue<'ctx>, IrError> {
+        call_i64(self.b, callee, &self.with_rt_ptr(args), "call")
+    }
+
+    fn jump(&mut self, to: BodyPos) -> Result<(), IrError> {
+        self.b.build_unconditional_branch(self.blocks[to.get()]).map_err(ir_err)?;
+        Ok(())
+    }
+
+    fn jump_if_zero(&mut self, cond: IntValue<'ctx>, target: BodyPos, next: BodyPos) -> Result<(), IrError> {
+        let zero = self.ctx.i64_type().const_zero();
+        let is_zero = self.b.build_int_compare(IntPredicate::EQ, cond, zero, "jz").map_err(ir_err)?;
+        self.b.build_conditional_branch(is_zero, self.blocks[target.get()], self.blocks[next.get()]).map_err(ir_err)?;
+        Ok(())
+    }
+
+    fn ret(&mut self, v: IntValue<'ctx>) -> Result<(), IrError> {
+        self.b.build_return(Some(&v)).map_err(ir_err)?;
+        Ok(())
+    }
+
+    // The prologue emitted the exit block's `ret`, and every block ends where the walk ends it.
+    fn finish(self) -> Result<(), IrError> {
+        Ok(())
+    }
+}
+
+/// Translate one subroutine into `func`'s body through an `LlvmSink`.
 fn translate_subroutine<'ctx>(
     ctx: &'ctx Context,
     b: &Builder<'ctx>,
@@ -644,146 +669,12 @@ fn translate_subroutine<'ctx>(
     func: FunctionValue<'ctx>,
     decls: &Decls<'ctx>,
 ) -> Result<(), IrError> {
-    let i64t = ctx.i64_type();
-    let f = build_prologue(ctx, b, prog, sub, func)?;
-    let resolve =
-        |l: &str| -> Result<usize, IrError> { prog.label_index(l).ok_or_else(|| format!("undefined label `{l}`")) };
-
-    for &idx in &sub.body {
-        b.position_at_end(block_at(&f, idx)?);
-        let instr = prog.code.get(idx).ok_or_else(|| format!("index {idx} is past the end of code"))?;
-        match instr {
-            Instr::Li(rd, n) => {
-                write_reg(b, &f, *rd, i64t.const_int(*n, false))?;
-                b.build_unconditional_branch(block_at(&f, idx + 1)?).map_err(ir_err)?;
-            }
-            Instr::Mov(rd, rs) => {
-                let v = read_reg(ctx, b, &f, *rs)?;
-                write_reg(b, &f, *rd, v)?;
-                b.build_unconditional_branch(block_at(&f, idx + 1)?).map_err(ir_err)?;
-            }
-            // `Nil` is a plain register write of the nil pointer (`0`) — no host call, no fault.
-            Instr::Nil(rd) => {
-                write_reg(b, &f, *rd, i64t.const_zero())?;
-                b.build_unconditional_branch(block_at(&f, idx + 1)?).map_err(ir_err)?;
-            }
-            Instr::Bin(op, rd, ra, rb) => {
-                let x = read_reg(ctx, b, &f, *ra)?;
-                let y = read_reg(ctx, b, &f, *rb)?;
-                let v = emit_bin(ctx, b, &decls.sat, *op, x, y)?;
-                write_reg(b, &f, *rd, v)?;
-                b.build_unconditional_branch(block_at(&f, idx + 1)?).map_err(ir_err)?;
-            }
-            Instr::Jz(r, l) => {
-                let target = resolve(l)?;
-                if target <= idx {
-                    emit_guard(ctx, b, &f, decls.rt.tick)?; // backward edge → step cap
-                }
-                let cond = read_reg(ctx, b, &f, *r)?;
-                // Jz: cond == 0 → target; else → fall through to idx + 1.
-                let is_zero = b.build_int_compare(IntPredicate::EQ, cond, i64t.const_zero(), "jz").map_err(ir_err)?;
-                b.build_conditional_branch(is_zero, block_at(&f, target)?, block_at(&f, idx + 1)?).map_err(ir_err)?;
-            }
-            Instr::Jmp(l) => {
-                let target = resolve(l)?;
-                if target <= idx {
-                    emit_guard(ctx, b, &f, decls.rt.tick)?; // backward edge → step cap
-                }
-                b.build_unconditional_branch(block_at(&f, target)?).map_err(ir_err)?;
-            }
-            Instr::Call(l) => {
-                let target = resolve(l)?;
-                emit_guard(ctx, b, &f, decls.rt.enter)?; // stack-depth cap, checked before the call
-                let callee = *decls.funcs.get(&target).ok_or("call to non-subroutine")?;
-                let callee_arity = *decls.arity.get(&target).ok_or("unknown callee arity")?;
-                let mut argv: Vec<BasicMetadataValueEnum<'ctx>> = Vec::with_capacity(1 + callee_arity as usize);
-                argv.push(f.rt_ptr.into());
-                for i in 0..callee_arity {
-                    argv.push(read_reg(ctx, b, &f, Reg::Arg(i))?.into());
-                }
-                let result = call_i64(b, callee, &argv, "call")?;
-                write_reg(b, &f, Reg::Rr, result)?;
-                // `rt_leave`'s placement AFTER the call is load-bearing for TOTALITY, not merely for
-                // balancing the depth counter — and the optimized IR is easy to misread on this
-                // point. The pipeline does mark this call `tail`, but LLVM's `tail` marker only means
-                // "the callee does not access the caller's stack frame"; it is NOT `musttail` and it
-                // is not tail-call optimization. No TCO can fire here, because `rt_leave` (an opaque
-                // external call) is always emitted after the call, so the call is never in tail
-                // position and the native frame is never reused. That is what makes "each nested
-                // `Call` costs one real frame, which `rt_enter` has already counted" true — the whole
-                // argument that the frame-size-aware `native_depth_cap` trips before the OS stack is
-                // exhausted. Emitting `rt_leave` BEFORE the call would put a self-call in tail
-                // position and let TCO turn unbounded recursion into a loop whose depth counter never
-                // grows: no stack overflow, but no `HitCap` either — a hang, which is just as much a
-                // totality violation.
-                b.build_call(decls.rt.leave, &[f.rt_ptr.into()], "leave").map_err(ir_err)?;
-                b.build_unconditional_branch(block_at(&f, idx + 1)?).map_err(ir_err)?;
-            }
-            // `Ret` returns `rr` to the caller; `Halt` stops the whole program with `rr`. They lower
-            // identically to a native `return rr` because `partition` rejects any NON-`$main`
-            // subroutine that contains a `Halt`, so a `Halt` here can only be `$main`'s own — where
-            // "return to the driver" IS "stop the program". (Same reasoning as `codegen.rs`.)
-            Instr::Ret | Instr::Halt => {
-                let v = read_reg(ctx, b, &f, Reg::Rr)?;
-                b.build_return(Some(&v)).map_err(ir_err)?;
-            }
-            // The heap/box arms below each mirror `codegen.rs`'s Cranelift arm exactly: the same
-            // `rt_*` call with the same arguments in the same order, the destination written from the
-            // call's result, and — for every op that can fault or trip the heap cap — an `rt_faulted`
-            // guard emitted at the same point (after the write, before the fall-through branch).
-            Instr::Cons(rd, rh, rt_reg) => {
-                let h = read_reg(ctx, b, &f, *rh)?;
-                let t = read_reg(ctx, b, &f, *rt_reg)?;
-                let v = call_i64(b, decls.rt.cons, &[f.rt_ptr.into(), h.into(), t.into()], "cons")?;
-                write_reg(b, &f, *rd, v)?;
-                emit_guard(ctx, b, &f, decls.rt.faulted)?; // heap cap
-                b.build_unconditional_branch(block_at(&f, idx + 1)?).map_err(ir_err)?;
-            }
-            Instr::Head(rd, rl) => {
-                let p = read_reg(ctx, b, &f, *rl)?;
-                let v = call_i64(b, decls.rt.head, &[f.rt_ptr.into(), p.into()], "head")?;
-                write_reg(b, &f, *rd, v)?;
-                emit_guard(ctx, b, &f, decls.rt.faulted)?; // nil / dangling pointer
-                b.build_unconditional_branch(block_at(&f, idx + 1)?).map_err(ir_err)?;
-            }
-            Instr::Tail(rd, rl) => {
-                let p = read_reg(ctx, b, &f, *rl)?;
-                let v = call_i64(b, decls.rt.tail, &[f.rt_ptr.into(), p.into()], "tail")?;
-                write_reg(b, &f, *rd, v)?;
-                emit_guard(ctx, b, &f, decls.rt.faulted)?; // nil / dangling pointer
-                b.build_unconditional_branch(block_at(&f, idx + 1)?).map_err(ir_err)?;
-            }
-            Instr::IsEmpty(rd, rl) => {
-                let p = read_reg(ctx, b, &f, *rl)?;
-                let v = call_i64(b, decls.rt.is_empty, &[f.rt_ptr.into(), p.into()], "isempty")?;
-                write_reg(b, &f, *rd, v)?;
-                b.build_unconditional_branch(block_at(&f, idx + 1)?).map_err(ir_err)?; // never faults
-            }
-            Instr::Box(rd, rv) => {
-                let v_in = read_reg(ctx, b, &f, *rv)?;
-                let v = call_i64(b, decls.rt.box_new, &[f.rt_ptr.into(), v_in.into()], "box")?;
-                write_reg(b, &f, *rd, v)?;
-                emit_guard(ctx, b, &f, decls.rt.faulted)?; // heap cap
-                b.build_unconditional_branch(block_at(&f, idx + 1)?).map_err(ir_err)?;
-            }
-            Instr::BoxGet(rd, rb) => {
-                let p = read_reg(ctx, b, &f, *rb)?;
-                let v = call_i64(b, decls.rt.box_get, &[f.rt_ptr.into(), p.into()], "boxget")?;
-                write_reg(b, &f, *rd, v)?;
-                emit_guard(ctx, b, &f, decls.rt.faulted)?; // null / dangling handle
-                b.build_unconditional_branch(block_at(&f, idx + 1)?).map_err(ir_err)?;
-            }
-            // `rt_box_set` returns void: there is no result to write, only the guard.
-            Instr::BoxSet(rb, rv) => {
-                let p = read_reg(ctx, b, &f, *rb)?;
-                let v = read_reg(ctx, b, &f, *rv)?;
-                b.build_call(decls.rt.box_set, &[f.rt_ptr.into(), p.into(), v.into()], "boxset").map_err(ir_err)?;
-                emit_guard(ctx, b, &f, decls.rt.faulted)?; // null / dangling handle
-                b.build_unconditional_branch(block_at(&f, idx + 1)?).map_err(ir_err)?;
-            }
-        }
-    }
-    Ok(())
+    lower_subroutine(
+        prog,
+        sub,
+        |entry| decls.arity.get(&entry).copied(),
+        |banks, body, entry| LlvmSink::prologue(ctx, b, decls, func, &sub.name, banks, body, entry),
+    )
 }
 
 /// Declare one LLVM function per subroutine up front so a `Call` can reference a callee defined
@@ -823,12 +714,12 @@ fn declare_subroutines<'ctx>(
 
 /// Compile `prog` to LLVM IR at `opt`, JIT it, and run against a fresh `Runtime`.
 ///
-/// Agreement contract: the same `NativeRun` outcome (`Ran`/`HitCap`/`Fault`) as `run_rxm` and as the
-/// Cranelift JIT, for every `Program`. `partition` failures and any inkwell/JIT failure surface as
-/// `NativeRun::LowerError`; nothing here panics. Everything after the up-front `Program` checks runs
-/// on a dedicated big-stack thread (`RUN_STACK_SIZE`, a scoped thread so the borrowed `prog`/`subs`
-/// need not be `'static`) — both because the generated code recurses on that stack up to the
-/// frame-size-aware depth cap, and because inkwell's `Context`/`ExecutionEngine` are not `Send`, so
+/// Agreement contract: the `NativeRun` outcome (`Ran`/`HitCap`/`Fault`) the Cranelift JIT gives, and the one
+/// `run_rxm` gives except where the crate doc's "What native and the rxm interpreter do differently" says they
+/// part. `partition` failures and any inkwell/JIT failure surface as `NativeRun::LowerError`; nothing here panics.
+/// Everything after the up-front `Program` checks runs on a dedicated big-stack thread (`RUN_STACK_SIZE`, a scoped
+/// thread so the borrowed `prog`/`subs` need not be `'static`) — both because the generated code recurses on that
+/// stack up to the frame-size-aware depth cap, and because inkwell's `Context`/`ExecutionEngine` are not `Send`, so
 /// the module must be built *and* run on one thread.
 #[must_use]
 pub fn compile_and_run(prog: &Program, caps: Caps, opt: OptLevel) -> NativeRun {
@@ -858,7 +749,7 @@ pub fn compile_and_run(prog: &Program, caps: Caps, opt: OptLevel) -> NativeRun {
     })
 }
 
-/// Build and verify the whole module: the host target, the `rt_*`/intrinsic imports, one LLVM
+/// Build and verify the whole module: `machine`'s target, the `rt_*`/intrinsic imports, one LLVM
 /// function per subroutine, and every subroutine's body. Returns the module plus the name LLVM
 /// actually gave the entry function (`entry == 0`, nominally `"$main"` — `add_function` uniquifies
 /// on a name clash, so reading it back is what keeps the later lookup correct for an adversarial
@@ -868,7 +759,7 @@ pub fn compile_and_run(prog: &Program, caps: Caps, opt: OptLevel) -> NativeRun {
 /// Split out of `build_and_run` so the IR is observable between "built" and "optimized" — which is
 /// how `the_o3_pipeline_actually_transforms_the_ir` proves the pipeline is doing real work rather
 /// than passing the differential by doing nothing.
-fn build_module<'ctx>(
+pub(crate) fn build_module<'ctx>(
     ctx: &'ctx Context,
     machine: &TargetMachine,
     prog: &Program,
@@ -877,7 +768,7 @@ fn build_module<'ctx>(
 ) -> Result<(Module<'ctx>, String), IrError> {
     let module = ctx.create_module("redextape");
     let builder = ctx.create_builder();
-    set_host_target(&module, machine);
+    set_target(&module, machine);
 
     let rt = declare_rt(ctx, &module);
     let sat = declare_sat(ctx, &module)?;
@@ -1013,13 +904,11 @@ pub fn object_bytes(prog: &Program, _caps: Caps, opt: OptLevel) -> Result<Vec<u8
 #[cfg(test)]
 mod tests {
     use super::*;
-    use redextape_core::tm::{DEFAULT_CAPS, RxmRun, decode_rxm, lower_program, lower_rxm, run_rxm};
+    use redextape_core::tm::{DEFAULT_CAPS, Instr, RxmRun, decode_rxm, lower_program, lower_rxm, run_rxm};
     use redextape_core::{desugar::desugar, parser::parse, run, value::Value};
 
-    /// Every level `OptLevel` offers, the size-oriented ones included. The agreement contract is
-    /// "same outcome as `run_rxm` and as Cranelift on every `Program`, at EVERY opt level", so every
-    /// test that pins an outcome — a value, a fault, a cap trip — sweeps this rather than checking
-    /// `O0` and hoping.
+    /// Every level `OptLevel` offers, the size-oriented ones included: the agreement contract
+    /// (`compile_and_run`'s doc) holds at each of them.
     const OPT_LEVELS: [OptLevel; 6] =
         [OptLevel::O0, OptLevel::O1, OptLevel::O2, OptLevel::O3, OptLevel::Os, OptLevel::Oz];
 
@@ -1036,13 +925,13 @@ mod tests {
         }
     }
 
-    /// The LLVM backend must agree with the rxm interpreter on a hand-built `Program`: same `Ran`
-    /// outcome, or both `Fault`, or both `HitCap`. Mirrors `jit::tests::agree_caps`.
+    /// Assert that the LLVM backend agrees with the rxm interpreter on `prog` under `caps`, compiled at `opt`:
+    /// same `Ran` outcome, or both `Fault` with one text, or both `HitCap`. Mirrors `jit::tests::agree_caps_at`.
     fn agree_caps(prog: Program, caps: Caps, opt: OptLevel) {
         let native = compile_and_run(&prog, caps, opt);
         match (run_rxm(&prog, caps), native) {
             (RxmRun::Ran(a), NativeRun::Ran(n)) => assert_eq!(a, n, "outcome mismatch"),
-            (RxmRun::Fault(_), NativeRun::Fault(_)) => {}
+            (RxmRun::Fault(a), NativeRun::Fault(n)) => assert_eq!(a, n, "fault text mismatch"),
             (RxmRun::HitCap, NativeRun::HitCap) => {}
             (a, n) => panic!("llvm vs rxm-interp mismatch:\n rxm={a:?}\n llvm={n:?}"),
         }
@@ -1052,8 +941,8 @@ mod tests {
         agree_caps(prog, DEFAULT_CAPS, OptLevel::O0);
     }
 
-    /// `agree_caps` at every opt level — the form every totality/guard test uses, because the
-    /// optimizer is exactly what could disturb the `rt_*` guard calls and their `br exit` edges.
+    /// `agree_caps` at every opt level, because the optimizer is exactly what could disturb the `rt_*`
+    /// guard calls and their `br exit` edges.
     fn agree_at_every_opt_level(prog: &Program, caps: Caps) {
         for opt in OPT_LEVELS {
             agree_caps(prog.clone(), caps, opt);
@@ -1551,11 +1440,11 @@ mod tests {
         }];
         let (funcs, _arity) = declare_subroutines(&ctx, &module, &subs);
         let sub_fn = funcs[&3];
-        assert_ne!(sub_fn, rt.cons, "the subroutine must not BE the import");
+        assert_ne!(sub_fn, rt[RtFn::Cons], "the subroutine must not BE the import");
         assert_ne!(sub_fn.get_name().to_string_lossy(), "rt_cons", "the subroutine must have been uniquified");
         assert_eq!(
             module.get_function("rt_cons"),
-            Some(rt.cons),
+            Some(rt[RtFn::Cons]),
             "the bare name must still resolve to the import `map_rt_symbols` binds by address"
         );
     }
@@ -1879,18 +1768,64 @@ mod tests {
         assert_eq!(module.print_to_string().to_string(), before, "O0 must not touch the IR");
     }
 
-    /// The `rt_symbols` table and `declare_rt` must name the same imports: a name in the table that
-    /// `declare_rt` never adds would silently go unmapped, and the JIT would call address `0`.
+    /// The IR views line LLVM up with rxm by register name, so each slot carries the listing's spelling.
+    #[test]
+    fn register_slots_take_the_rxm_names() {
+        let ctx = Context::create();
+        let (module, _machine) = built_module(&ctx, "let x = 1; let y = x + x; y * 3", OptLevel::O0);
+        let ir = module.print_to_string().to_string();
+        assert!(ir.contains("%r0 = alloca i64"), "the first local slot must be named `r0`:\n{ir}");
+        assert!(!ir.contains("%l0"), "rxm spells a local `r{{n}}`, never `l{{n}}`:\n{ir}");
+    }
+
+    /// A load takes its slot's name plus a suffix, so a loaded value names the register it came from
+    /// and never reads as a register of its own; LLVM numbers a repeat.
+    #[test]
+    fn register_loads_take_their_slots_names() {
+        let ctx = Context::create();
+        let (module, _machine) = built_module(&ctx, "fn twice(x){ let y = x + x; y + y } twice(21)", OptLevel::O0);
+        let ir = module.print_to_string().to_string();
+        let is_slot_name = |n: &str| {
+            n == "rr"
+                || n.strip_prefix(['a', 'r']).is_some_and(|d| !d.is_empty() && d.bytes().all(|c| c.is_ascii_digit()))
+        };
+        let defs: Vec<(&str, &str)> = ir
+            .lines()
+            .filter_map(|line| line.trim_start().strip_prefix('%').and_then(|l| l.split_once(" = ")))
+            .collect();
+        for &(name, rhs) in &defs {
+            assert!(
+                !is_slot_name(name) || rhs.starts_with("alloca i64"),
+                "only a register slot may take a register's name: `%{name} = {rhs}`\n{ir}"
+            );
+        }
+        let mut loads: HashMap<&str, usize> = HashMap::new();
+        for &(name, rhs) in &defs {
+            if let Some(slot) = rhs.strip_prefix("load i64, ptr %").and_then(|r| r.split(',').next()) {
+                assert!(
+                    name.strip_prefix(slot).is_some_and(|s| s.starts_with('.')),
+                    "a load must take the name of the slot it reads: `%{name} = {rhs}`\n{ir}"
+                );
+                *loads.entry(slot).or_default() += 1;
+            }
+        }
+        assert!(loads.values().any(|&n| n >= 2), "the program must read one register twice: {loads:?}\n{ir}");
+        assert!(ir.contains("%r0.v = load i64, ptr %r0"), "a load of `r0` must be named `r0.v`:\n{ir}");
+    }
+
+    /// `declare_rt` must declare every `RtFn` entry, and nothing else, under the name
+    /// `map_rt_symbols` looks it up by, and every entry must have an address: an import left
+    /// unmapped would make the JIT call address `0`.
     #[test]
     fn every_rt_import_is_mapped() {
         let ctx = Context::create();
         let module = ctx.create_module("rt-names");
         declare_rt(&ctx, &module);
         for (name, addr) in rt_symbols() {
-            assert!(module.get_function(name).is_some(), "`{name}` is in rt_symbols but not declared");
+            assert!(module.get_function(name).is_some(), "`{name}` is in the table but not declared");
             assert_ne!(addr, 0, "`{name}` has a null host address");
         }
-        assert_eq!(module.get_functions().count(), rt_symbols().len(), "declare_rt added an unmapped import");
+        assert_eq!(module.get_functions().count(), RtFn::ALL.len(), "declare_rt added an import the table lacks");
     }
 
     /// `object_bytes` must emit a real, host-recognisable object file, and `Oz` must actually shrink

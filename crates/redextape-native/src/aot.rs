@@ -23,14 +23,9 @@ use cranelift_object::{ObjectBuilder, ObjectModule};
 use redextape_core::tm::{Caps, Program};
 use redextape_core::ty::Ty;
 
-use crate::codegen::{self, CodegenError};
-use crate::shared::{native_depth_cap, param_count, reg_over_cap};
+use crate::codegen::{self, DefineError};
+use crate::shared::{native_depth_cap, reg_over_cap};
 use crate::{AotError, OptLevel};
-
-/// Map a backend-agnostic `CodegenError` (bare cause) into this driver's `AotError::Codegen`.
-fn cg(e: CodegenError) -> AotError {
-    AotError::Codegen(e.0)
-}
 
 /// Append `ty`, tag-encoded, to `out`. The layout is matched byte-for-byte by
 /// `redextape_native_rt::config::deserialize`: `0=Nat 1=Bool 2=Unit 3=List<elem follows>`.
@@ -110,11 +105,11 @@ pub fn emit_object(prog: &Program, caps: Caps, ty: &Ty, opt: OptLevel) -> Result
 
     // Host ISA. `is_pic` (position-independent) is friendliest to the system linker across macOS and
     // Linux; the JIT sets it the other way (`false`, the value `JITModule` accepts on every host; see
-    // `jit::host_isa`), so each driver states its own. `opt_level` goes through the SAME mapping the
-    // JIT uses (`codegen::cranelift_opt_level`), so an object and a JIT run at the same `OptLevel`
-    // share both the codegen (`codegen.rs`, driven identically here and in `jit.rs`) and the
-    // optimization settings; only `is_pic` differs, so the emitted code is equivalent but not
-    // byte-for-byte identical (PIC changes how globals and calls are addressed).
+    // `codegen::jit_flags`), so each driver states its own. `opt_level` goes through the SAME mapping
+    // the JIT uses (`codegen::cranelift_opt_level`), so an object and a JIT run at the same `OptLevel`
+    // share both the codegen (`codegen::define_all`, the loop the JIT runs) and the optimization
+    // settings; only `is_pic` differs, so the emitted code is equivalent but not byte-for-byte
+    // identical (PIC changes how globals and calls are addressed).
     let mut flags = settings::builder();
     flags.set("is_pic", "true").map_err(|e| AotError::Object(e.to_string()))?;
     flags.set("opt_level", codegen::cranelift_opt_level(opt)).map_err(|e| AotError::Object(e.to_string()))?;
@@ -124,21 +119,11 @@ pub fn emit_object(prog: &Program, caps: Caps, ty: &Ty, opt: OptLevel) -> Result
         .map_err(|e| AotError::Object(e.to_string()))?;
     let mut module = ObjectModule::new(builder);
 
-    // Shared codegen (the same `codegen` calls the JIT makes): declare the `rt_*` imports and every
-    // subroutine, then translate + define each one.
-    let rt = codegen::declare_rt(&mut module).map_err(cg)?;
-    let (func_ids, arity) = codegen::declare_subroutines(&mut module, &subs).map_err(cg)?;
-    let decls = codegen::Decls { rt, func_ids, arity };
     let mut fbctx = cranelift_frontend::FunctionBuilderContext::new();
-    for sub in &subs {
-        let mut ctx = module.make_context();
-        ctx.func.signature = codegen::word_signature(&module, param_count(sub));
-        let fid = decls.func_ids[&sub.entry];
-        ctx.func.name = UserFuncName::user(0, fid.as_u32());
-        codegen::translate_subroutine(&mut module, &mut ctx, &mut fbctx, prog, sub, &decls).map_err(cg)?;
-        module.define_function(fid, &mut ctx).map_err(|e| AotError::Object(e.to_string()))?;
-        module.clear_context(&mut ctx);
-    }
+    let decls = codegen::define_all(&mut module, prog, &subs, &mut fbctx, |_, _, _| {}).map_err(|e| match e {
+        DefineError::Codegen(m) => AotError::Codegen(m),
+        DefineError::Module(e) => AotError::Object(e.to_string()),
+    })?;
 
     // CONFIG data object: `caps` + the frame-size-aware `depth_cap` + the result `ty`.
     let depth_cap = native_depth_cap(prog, &subs, caps);

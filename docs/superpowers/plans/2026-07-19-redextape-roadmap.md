@@ -32531,3 +32531,692 @@ for the rebase's fact-check in the tree, after every other edit.
 | "ok those seem fine"; 5182; the five checks | the user's try | `grep -n 'seem fine\|5182'` on `$R/progress.md` |
 | 154, 153, 09:31 to 21:35; 2 and 2 | the files git ignores | `find <dir> -type f` in `$W`'s and `$S`'s `web/.vitest-attachments/` and `web/tests/browser/__screenshots__/`, counted, and their oldest and newest `%TH:%TM` in `$W` |
 | nothing pushed | this entry's commit | no `hidden-recording` in `git for-each-ref refs/remotes` |
+
+#### THE IR VIEWS GROUNDWORK'S PR 2: ONE LOWERING WALK DRIVES BOTH NATIVE BACKENDS, NATIVE-RT AND THE RXM INTERPRETER SHARE ONE HEAP CORE IN `redextape-core`, AND A SNAPSHOT GATE HOLDS THE GENERATED CLIF, MACHINE CODE AND LLVM IR TO THE FOUR OF §8'S CHANGES THAT ARE THIS PR'S (2026-11-06, branch `ir-lowering`, `18c5272..73dc741`, 37 commits, plus this entry)
+
+**Spec §4.2 and §4.3** (`docs/superpowers/specs/2026-10-27-ir-views-groundwork-design.md`), the groundwork's second
+pull request in §6's order, gated by §7.1 (generated code changes only as §8 names) and §7.2 (no hot path slows). The
+plan is `docs/superpowers/plans/2026-11-02-ir-views-pr2-lowering-heap.md`, written at `f69779f`. The user decided D1 to
+D4 on 2026-11-03 and revised D1 the same day, after Task 1's container run (THE SNAPSHOT GATE); on 2026-11-03 he also
+added Task 8b, the LLVM load rename, as its own commit. D5, a quiet machine for §7.2, was his word: "I'll tell you
+when", then "can we work on this: ir-lowering Task 13" and "is it possible to run now" on 2026-11-05, and "Targeted
+re-measure" for what the first rounds left undecided. Of the 37 commits, 7 change only `docs/` and 30 change something
+outside it. The lane record is `~/temp/redextape-ir-lowering-record/` (`$R` below); its ledger is `$R/progress.md`.
+`$F` is `$R/task14a/figures.log`, the output of `$R/task14a/figures.zsh`, which re-reads the figures below that git, a
+baseline file or a Task 13 or rebase log gives.
+
+**The rebases.** The branch was built on `14621b1`. After Task 12 it was rebased onto `e9bbf67` (#161), 30 commits,
+`273520f` → `50710a8` (`$R/rebase-map.txt`), and after every §7.2 round but the browser 8-pair round and the
+code-placement test onto `18c5272`, 37 commits, `7670b52` → `73dc741` (`$R/rebase-map2.txt`). This entry names each
+commit by its SHA after the second rebase, but where it names a side of §7.2 as it ran. Each rebase brought in main's
+change and nothing else: `git diff 273520f 50710a8` is byte-identical to `git diff 14621b1 e9bbf67` (16 files),
+`git diff 7670b52 73dc741` to `git diff e9bbf67 18c5272` (87 files), and `git range-diff` marks all 37 of the second
+rebase's commits `=` (`$R/range-diff2.txt`). So what this entry says ran at a commit ran at the commit it replaces:
+Tasks 1 to 12 and their reviews on `14621b1`, and the whole-branch review, its gate, the fix rounds and §7.2 on
+`e9bbf67`. Only what VERIFICATION places after the second rebase ran at `73dc741`, and its final gate at `9c45e4c`.
+
+##### WHAT SHIPPED, TASK BY TASK
+
+- **The plan, `f69779f`.**
+- **Task 1 (§7.1), `016de34`, `dcc32e9`, `c7ff52d` and `ab3faef`, then `a21ec0b` and `0e11ae4`.** `016de34` moves the
+  oracle corpus into `crates/redextape-native/tests/common/corpus.rs`, which `native_oracle.rs` and the snapshot test
+  share. `dcc32e9` adds `src/codegen_snapshots.rs` with `every_build_prints_the_same_clif`, which failed first, and
+  imports a function's callees in declaration order (D3, THE GENERATED-CODE CHANGES). `c7ff52d` adds the compare and
+  write machinery, its three compare tests and 211 files under `crates/redextape-native/snapshots/`. `ab3faef` corrects
+  two comments the corpus move made wrong. After the review, `a21ec0b` is D1 as revised, and `0e11ae4` puts it in the
+  plan's gate, which now opens with an `llvm-config --version` check against `llvm-version.txt`.
+- **Task 2, `d8f9862` and `c76ebe2`.** `d8f9862` makes the plan's gate block a `( set -e … )` subshell, so a STOP exits
+  1 where the old block exited 0. `c76ebe2` adds `box30000` to `measure::CORPUS`, with 12 rows in each size baseline
+  and three snapshots (THE BOX BUILDER). It is §7.2's base.
+- **Task 3, `5f0da58`.** `codegen::define_all` is the one driver loop for the JIT, the AOT emitter and the snapshot
+  test, and `codegen::jit_flags` the one flag set that `jit::host_isa` and the snapshots' fixed ISAs take.
+- **Task 4, `2de3249` and `80a7d6d`.** One runtime import table for both backends. After the review one `rt_imports!`
+  macro list generates the `RtFn` enum, its `ALL` list, each symbol (by `stringify!`) and each address, so a misspelt
+  or missing row fails to build.
+- **Task 5, `b334cd4`, `c6888e3` and `18b00c8`.** `lower::lower_subroutine` walks a subroutine once and drives a
+  `LowerSink`; `codegen::ClifSink` is its first sink, and the arm-by-arm Cranelift body is gone. The plan's sabotage,
+  the `Jz` tick moved after the register read, did not fire: the corpus's 68 `jz` were all forward. `c6888e3` adds
+  `rxm-backward-jz`, a hand-written rxm loop with a backward `jz`, to the snapshot corpus alone, its snapshots recorded
+  by `80a7d6d`'s code, and the sabotage then fails `rxm-backward-jz.clif`. `18b00c8` changes comments.
+- **Task 6, `aca2333`.** `llvm::LlvmSink` is the walk's second sink, and LLVM's `translate_subroutine` is one
+  `lower_subroutine` call. The trait's `missing_entry` keeps each backend's own error text for a missing entry block.
+- **Task 7, `b2f62d0`.** Cranelift off `dyn Module`. `module_free::build_clif` builds CLIF with no `Module`, and
+  `module_free_clif_equals_the_module_paths` holds it to the `Module` paths' CLIF. A `clif` feature, which `cranelift`
+  (the default) turns on, builds for wasm32, checked by check-all's `base|wasm|-p redextape-native --lib
+  --no-default-features --features clif` leg.
+- **Task 8, `3f06b63`.** LLVM's register slots take the rxm printer's names, `a{i}`, `r{i}` and `rr`, from
+  `tm::reg_str`, which becomes public.
+- **Task 9, `61b3c93`.** Each CLIF instruction carries its rxm pc as a source location, and
+  `each_instruction_carries_its_pc` checks it.
+- **Task 8b, `1b3bbb7` and `9e62986`.** LLVM's loads take their slot's name, `S.v`, with LLVM numbering a repeat.
+  `9e62986` lists the rename in the spec's §4.2, §7.1 and §8 and adds Task 8b to the plan.
+- **Task 10, `b4f446a`.** `redextape_core::heap`: `Heap<R>` over a `Tags` recorder, the 8 fault texts once in
+  `HeapFault`, `HeapCapped` for an allocation past the cap, and two recorders, the zero-sized `NoTags` and `VecTags<W>`.
+  The rxm interpreter's cursor holds a `Heap<VecTags<WordTag>>`.
+- **Task 11, `ecac1ba` and `8ae0f9c`.** native-rt's `Runtime` holds one private `Heap<NoTags>`, and each runtime import
+  `RtFn` lists other than `rt_is_empty` is a thin wrapper over an `#[inline]` `Runtime` method; `rt_is_empty` calls
+  the core's `heap::is_empty`.
+  native-rt's tests pin all 8 fault texts, the JIT and LLVM `agree` helpers compare fault texts, and check-all gains a
+  `base|wasm|-p redextape-native-rt --lib` leg. `8ae0f9c` brings the plan's heap lines up to the code.
+- **Task 12, `050b1d7` and `e772257`, then `b90ce37`, `5e033ab`, `464512e` and `cf1dfed`.** The native crate's doc
+  says where the two machines differ, and why: steps, the memory cap, the stack cap, registers across a call, malformed
+  programs, and what follows a fault (§4.3's "not unified"). After the review the register, memory-cap and stack-cap
+  items say what the code does; `codegen.rs`, `llvm.rs`, `native_oracle.rs`, `measure.rs`, the spec's §2.2 and the plan
+  say a call counts depth, not a step; two JIT tests run where the machines' registers differ across a call; and the
+  heap doc excepts the test-only `tags_mut` from "everything is `#[inline]`".
+- **The whole-branch review's answers, `1533790`, `a395948`, `4b8b3bd`, `183cb24` and `084fff6`, then the re-read's,
+  `0fad3d9` and `73dc741`.** The review's Important finding (the JIT and LLVM drivers promised `run_rxm`'s outcome on
+  every program, which the crate doc contradicts), its 5 new Minors and the 12 carried Minors it marked to fix; then the
+  re-read's Important finding (an `OPT_LEVELS` doc said every test that pins an outcome sweeps it) and its 4 Minors.
+  `183cb24` adds a test that `build_clif` refuses a register index of exactly `MAX_REGISTERS`, and `084fff6` makes the
+  heap's out-of-range test probe `(1 << 32) + 1`, which a 32-bit `as` cast would wrap onto a live cell. The rest change
+  docs and comments, and `1533790` also renames `llvm.rs`'s `set_host_target` to `set_target`.
+
+##### THE GENERATED-CODE CHANGES
+
+§8 names five; four are this PR's, each in a commit of its own (the fifth is whatever PR 1's bumps changed).
+
+- **D3, the import order, `dcc32e9`.** `translate_subroutine` imported a function's callees by iterating a `HashMap`.
+  The plan's probe (its fact V5; `$R/probe-out/run-a1.log` and `run-s1.log`) found two builds in one process differing
+  in as-built and optimised CLIF in 17 of 18 multi-subroutine configurations, in vcode text in 8 of the 9 x86-64 ones
+  and in none of the aarch64 ones, and in machine-code bytes in none; in declaration order, 0 of 18 differ, and two
+  processes' dumps are byte-identical (`cmp $R/probe-out/clif-s1.txt $R/probe-out/clif-s2.txt`). No snapshot predates
+  the fix. `every_build_prints_the_same_clif` failed before it, on `first-order-11`, and its declaration-order assertion
+  fires on a reversed sort (`$R/tasks/task-1-report.md`, B2 and sabotage B-ii).
+- **The alloca rename, Task 8, `3f06b63`.** 124 snapshot files, 72 `.ll` and 52 `.opt.ll`, no `.clif`, 27,932 lines
+  in and 27,932 out (`$F`). `$R/task8-logs/names-only-check.py` masks every value name and label definition and also
+  requires the renaming to be one-to-one within each `define`: 124 equal, 0 not-equal. In the new `.ll` files' 489
+  function bodies the 4,707 allocas are named `a0`…, `r0`… and `rr`, none renamed by LLVM
+  (`$R/tasks/task-8-report.md`).
+- **The source locations, Task 9, `61b3c93`.** 72 files, every `.clif`, no `.ll` or `.opt.ll`, 61,805 lines in and
+  61,805 out (`$F`). `$R/task9-logs/srcloc-only-check.py`, on the tree before the commit and on its pair of commits:
+  72 equal, 0 not-equal, each file's 6 machine-code sections byte-identical, hash lines and vcode included, and every
+  `@` the one leading annotation of its line (`$R/tasks/task-9-report.md`).
+- **The load rename, Task 8b, `1b3bbb7`.** 124 files, the set Task 8 changed, 19,689 lines in and 19,689 out (`$F`).
+  `$R/task8b-logs/names-only-check.py`: 124 equal. Across the 72 `.ll` files, 5,556 loads, 4,623 named `S.v` and 933
+  `S.v<N>`, and the 4,707 allocas as Task 8 left them (`$R/tasks/task-8b-report.md`).
+
+**Over the branch.** Between `c7ff52d`, the first snapshot commit, and `73dc741`, 6 snapshot files are added
+(`measure-box30000.*` at `c76ebe2`, `rxm-backward-jz.*` at `c6888e3`) and 190 modified, and in those 190 no
+`;; function u0:` line, which holds a function's code size and fnv1a64 hash, changes (`$F`). Only `c7ff52d`, those
+two, `3f06b63`, `61b3c93` and `1b3bbb7` change a snapshot file (`$F`). The whole-branch review compared the 190 at the
+first rebase's `50710a8` (now `cf1dfed`) with every machine-code section byte for byte, every CLIF section without its
+`@` tokens and every LLVM section with names and labels masked, and found `bad: 0` (`$R/tasks/whole-branch-review.md`;
+its `snapcheck2.py` is not in the record). It also found that no line the branch adds outside the snapshots calls the
+IR `asm`, the name #159 replaced.
+
+##### THE SNAPSHOT GATE
+
+**Where.** `crates/redextape-native/snapshots/` holds 217 files at `73dc741`: for each of 72 corpus keys a `.clif`, a
+`.ll` and a `.opt.ll`, and `llvm-version.txt`, which reads 23.1.4; 8,240,032 bytes by `git ls-tree -l`. At `c7ff52d`
+it held 211 files and 6,196,430 bytes (`$F`). By D2, decided before Task 1, the user kept all of the text the plan put
+to him, about 6.1 MB in about 210 files; the ledger, `$R/progress.md`, records no decision on the growth to 8,240,032
+bytes. The keys, in order: `first-order-NN`, `lambda-limitation-NN`, `beyond-field-width-NN`, `saturation-NN`,
+`fault-NN`, `example-<stem>` for each `web/src/examples/<stem>.rxt`, `measure-<name>` for each `measure::CORPUS` entry
+and `rxm-<name>` for each hand-written rxm program. A `.clif` holds the CLIF as built, then for
+`x86_64-unknown-linux-gnu` and `aarch64-unknown-linux-gnu` at Cranelift's `none`, `speed` and `speed_and_size` the
+optimised CLIF and each function's code size, fnv1a64 hash and vcode, on ISAs looked up by name with the JIT's flags and
+no host CPU feature. A `.ll` holds the LLVM module as built, for `x86_64-unknown-linux-gnu`; a `.opt.ll` the module
+after each of `O1` to `Oz`'s passes. The tests are in `crates/redextape-native/src/codegen_snapshots.rs`: 7 under
+`--features llvm`, 3 under `--no-default-features --features llvm`.
+
+**Regenerating.** On LLVM 23.1, `REDEXTAPE_WRITE_SNAPSHOTS=1 cargo nextest run -p redextape-native --features llvm
+--lib codegen_snapshots`, then `git diff --stat -- crates/redextape-native/snapshots`. Under the variable each compare
+test rewrites its own files and deletes its own orphans.
+
+**The per-commit gate** is the block in the plan's "The snapshot gate": it stops unless `llvm-config --version` equals
+`llvm-version.txt`, runs both test sets, and fails on a dirty `snapshots/`. It ran after each task's commits, and last
+at `73dc741`; at `9c45e4c` the final gate's `check-all.sh` ran both test sets, 7 and 3 passed (VERIFICATION).
+
+**D1 as revised.** The user's first D1 compared post-pass IR only on the release `llvm-version.txt` names. After Task
+1's container run he revised it on 2026-11-03: `.opt.ll` is compared on every release; on 23.1.4, the recorded one, a
+difference fails; on any other a difference prints `NOTE: this is LLVM <running>, the post-pass IR snapshots are LLVM
+<recorded>'s, so <n> differing file(s) pass:` with the files, and the test passes; a missing or orphan `.opt.ll` fails
+on every release. `.clif` and `.ll` fail on any difference everywhere. **So CI fails on post-pass IR only on the
+recorded release.** The `rust` job's `check-all.sh --no-llvm --no-browser` runs the Cranelift half in its
+`base|test|--workspace` leg; the `rust-llvm` job's `check-all.sh --llvm-only` runs the LLVM half in its `llvm|test|-p
+redextape-native --features llvm` and `--no-default-features --features llvm` legs (`$F`). CI's LLVM is apt.llvm.org's
+`release/23.x` of the day (C4 drew `1:23.1.5~++20261028083858+a738f2737189-1~exp1~20261028203909.94` from
+`llvm-toolchain-bookworm-23`, `$R/task1-logs/c4-container.log`), and nextest hides a passing test's stdout, so a `NOTE:`
+there reaches no log; it shows under `--no-capture` (`$R/tasks/task-1-report.md`, sabotage C2(d)).
+
+**On the Mac.** At `c76ebe2`'s pre-rebase commit the gate ran on `davids-macbook-pro`, aarch64-apple-darwin, with
+Homebrew's LLVM 23.1.4: 5 passed, 3 passed, `snapshots/` clean, so the 71 programs' files then matched there
+(`$R/task2-logs/mac-logs/gate-mac-2.log`; the host, LLVM release and commit, `$R/tasks/task-2-report.md`, "The Mac
+session"). It has not run there since.
+
+##### CI'S LLVM, IN A CONTAINER (TASK 1'S C4)
+
+Under the heavy lock, `docker run --rm node:22-bookworm` ran `$R/task1-logs/ci-llvm-container.sh`: the `rust-llvm`
+job's "Install LLVM 23" commands, rustup and `scripts/install-nextest-ci.sh`, then the writer in a `git archive` copy
+of `c7ff52d`'s pre-rebase commit with `LLVM_SYS_231_PREFIX=/usr/lib/llvm-23` (`$R/task1-logs/c4-container.log`). The
+container's `llvm-config --version` read 23.1.5 and the writer passed 5 of 5. `diff -rq` against the committed
+`snapshots/` found 1 file differing, `llvm-version.txt`, and of the 70 programs' files 0 `.clif`, 0 `.ll` and 0
+`.opt.ll` (`$R/task1-logs/c4-diff.txt`). That 23.1.5's post-pass IR matched 23.1.4's is what the user revised D1 on.
+It ran before 6 files were added and 190 rewritten (WHAT THIS DID NOT CLOSE).
+
+##### THE BOX BUILDER (D4)
+
+`box30000` joins `measure::CORPUS` at `c76ebe2`, the box builder spec §7.2 asks for and #160 left open. Each size
+baseline gains 12 rows and changes none, and holds 60; no baseline changes after `c76ebe2` (`$F`). The Mac's file was
+written on the MacBook (macOS 27.0.1, rustc 1.99.1, Homebrew LLVM 23.1.4) by `cargo run --release --example opt_report
+-p redextape-native --features llvm -- --write-baseline`, which at the commit's own tree rewrote it byte for byte, and
+the size test passed there (`$R/tasks/task-2-report.md`, "The Mac session"). The rows, in bytes:
+
+| backend | level | `x86_64-unknown-linux-gnu.txt` | `aarch64-apple-darwin.txt` |
+|---|---|---|---|
+| Cranelift | `O0` | 3,080 | 2,328 |
+| Cranelift | `O1` to `Oz`, each | 3,048 | 2,304 |
+| LLVM | `O0` | 4,136 | 3,128 |
+| LLVM | `O1` | 2,440 | 2,200 |
+| LLVM | `O2` | 2,440 | 2,192 |
+| LLVM | `O3` | 2,456 | 2,288 |
+| LLVM | `Os` | 2,408 | 2,192 |
+| LLVM | `Oz` | 2,296 | 2,208 |
+
+**Its LLVM margins,** `(O0 − row) / row`, by the `awk` in `$R/task14a/figures.zsh` over each file at `73dc741`, its
+output in `$F`:
+
+| file | `O1` | `O2` | `O3` | `Os` | `Oz` |
+|---|---|---|---|---|---|
+| `x86_64-unknown-linux-gnu.txt` | 69.51% | 69.51% | 68.40% | 71.76% | 80.14% |
+| `aarch64-apple-darwin.txt` | 42.18% | 42.70% | 36.71% | 42.70% | 41.67% |
+
+Each is above the size test's band, `TOLERANCE` 0.10 in `tests/size_baseline.rs`, so the test would see an LLVM level
+of `box30000` that fell back to its `O0` size. By the rows above, Cranelift's `O0` row is 1.05% over its `O1` to `Oz`
+rows on x86-64 and 1.04% on the Mac, inside the band.
+
+##### THE §7.2 MEASUREMENTS
+
+Two interleaved rounds, then an 8-pair round for each half and a 16-pair code-placement round for the native half, all
+with base `c76ebe2`, measured as `0c5babe`, against final `73dc741`, measured as `7670b52`, and each side in a scratch
+worktree with its own `CARGO_TARGET_DIR`; `$T` below is `$R/task13`. `git diff` between the sides is empty under `web/`
+(`$F`), and `Cargo.lock` and `web/pnpm-lock.yaml` are byte-identical between them (`$R/tasks/task-13-report.md`). A
+first attempt, from 20:51:00 on 2026-11-05, waited its 15 minutes for a 1-minute load under 6 and measured nothing.
+
+**The machine.** Davey-Endeavor, x86-64, Linux 7.2.14-arch1-1, an AMD Ryzen 9 9950X3D, 32 threads, 60 GiB, governor and
+EPP `performance` (`$R/tasks/task-13-report.md`). Round 1 ran from 23:27:56 to 23:30:41 and round 2 from 23:30:54 to
+23:35:31 on 2026-11-05, by the `### window` lines of `$T/load-r1.txt` and `$T/load-r2.txt`. Each file's 24 `uptime`
+lines read a 1-minute load of 4.42 to 10.12 in round 1 and 3.61 to 51.90 in round 2 (`$F`). What else ran, by the top
+lists at each run's start and end (`$R/tasks/task-13-analysis.md`, Q1): through round 1, other sessions' builds from the
+RetroArch and subcheck projects, among them a `rustc` at 976% of a core just before final's first native run and one at
+1592% just after base's second; in round 2's first pair a single-threaded `settings_capture_test` at 100%; and from
+about 23:31:18, `sh -c while :; do :; done` busy loops, 39 distinct PIDs across round 2's top lists, from a session
+nobody traced, which took the load to 51.90 at 23:34:21. They covered round 2's last native run of final, its browser
+runs base 1, final 1 and base 2, from 23:31:29 at a 1-minute load of 12.52, and the start of final 2, whose 23:34:23
+start sample is the last top list to show them; `$T/vmstat-r2.log`'s 5-s lines read us+sy 100 from 23:31:24 to 23:34:24
+and 27 at 23:34:29. Base 3 and final 3, from 23:34:44 to 23:35:30, ran after them, though two 5-s lines in final 3 read
+us+sy 90 and 64, at 23:35:19 and 23:35:24.
+
+**The commands.**
+
+- M-native ran `opt_report`, built by `$T/build.zsh` with `cargo build --release --example opt_report -p
+  redextape-native --features llvm` under rustc 1.99.1. Base's sha256 is
+  `a6ee4bb29d28fd4265e4fbb8c05c4d892c07ca810e4c984ea88f4ea315c154f0` and final's
+  `7b3fa7931a21f87d3e924ad65b273f986d5eb70a53a4b3d723c495ba1727398f`; both load `/usr/lib/libLLVM.so.23.1`, llvm-libs
+  23.1.4-1.
+- M-browser ran each worktree's `cd web && pnpm run test:probe:rxm-copy`, which builds that side's wasm with
+  wasm-pack 0.15.0. Its sha256 is `a0e8e728821bebb0bee9c2a6e9d5a986feaadb451c966f996b083399e38d4746` on base and
+  `90b1896f6ba0df5b068ea82faaa46592307d8cf8b4fb20ccd0ee6bc3ff6b4175` on final, the same before and after each of a
+  side's 6 runs (`$T/wasm-sha-r1.tsv`, `$T/wasm-sha-r2.tsv`, `$F`). Both sides ran node v26.13.0, vitest 4.1.12 and
+  Playwright 1.64.1's `chromium-headless-shell` revision 1248, Chromium 156.0.8078.4.
+- The A/B is `$T/ab.zsh <round> both 3`, run by `$T/run-unit.zsh` in one unit, `systemd-run --user
+  --unit=ir-lowering-s72-ab-<round> --collect --wait -q -p MemoryMax=16G -p MemorySwapMax=0`, under the heavy and
+  browser locks: three native pairs, base then final, each `systemd-run --user --scope -q -p MemoryMax=8G -p
+  MemorySwapMax=0 -- opt_report-<side>`, then three browser pairs, with `uptime`, `vmstat` and the top CPU consumers
+  at each run's start and end. All 24 runs exited 0 (`$T/runs-r1.tsv`, `$T/runs-r2.tsv`), and both units 0.
+- The comparer is `python3 $T/cmp.py <kind> $T r1 [r2]`, its output in `$T/logs/cmp-{native,browser}-{r1,r1r2}.log`.
+  Per figure it takes each side's median over its runs and flags a final median above base's by more than base's
+  spread, the largest run less the smallest; object sizes, and the 68 browser figures that must not vary, must be
+  equal across every run. It drew the verdict wanted on 17 of 17 doctored inputs and on the pooled path
+  (`$T/doctored-proof.txt`, `$T/doctored-proof-pooled.txt`). With no change at all, 3 runs against 3 flag 8.62% of
+  figures and 6 against 6 flag 0.42%, in `$T/sim.py`'s seeded simulation of 200,000 trials (`$T/logs/sim.txt`).
+- The rule, #160's, as the plan's Task 13 states it: any flag calls for a repeat round and the pooled six against six,
+  and a figure flagged after pooling blocks the PR until explained or removed.
+
+**M-native.** Object sizes were equal in all 60 rows, base against final and across all 12 runs. Round 1 flagged 31 of
+the 120 figures (each row's `compile` and `compile+run`); round 2, run because both kinds had flagged, 51 on its own;
+the pooled six against six, 22. 64 figures flagged in either round, at pooled ratios of 0.932 to 2.041. The median
+final/base ratios, the last column from the analysis below:
+
+| backend, metric | round 1 | pooled | clean subset |
+|---|---|---|---|
+| Cranelift `compile` | 1.060 | 1.069 | 0.988 |
+| Cranelift `compile+run` | 1.053 | 1.122 | 0.997 |
+| LLVM `compile` | 1.053 | 1.120 | 0.999 |
+| LLVM `compile+run` | 1.002 | 1.066 | 0.995 |
+
+The base spread is a median 16.9% of the base median in round 1 (quartiles 10.1% and 30.0%) and 30.9% pooled (20.3%
+and 42.4%). The runtime-call-heavy rows, pooled, as final/base ratios of the medians:
+
+| row | `compile` | `compile+run` |
+|---|---|---|
+| `list30000` Cranelift `O0` | 1.283, flagged | 1.482, flagged |
+| `list30000` Cranelift `O3` | 0.959 | 1.060 |
+| `list30000` LLVM `O0` | 1.068 | 1.072 |
+| `list30000` LLVM `O3` | 1.167, flagged | 0.931 |
+| `map30000` Cranelift `O0` | 1.409 | 1.439, flagged |
+| `map30000` Cranelift `O3` | 1.345 | 1.180 |
+| `map30000` LLVM `O0` | 1.167 | 2.041, flagged |
+| `map30000` LLVM `O3` | 1.093 | 1.026 |
+| `box30000` Cranelift `O0` | 0.966 | 1.028 |
+| `box30000` Cranelift `O3` | 0.920 | 1.003 |
+| `box30000` LLVM `O0` | 1.042 | 1.169 |
+| `box30000` LLVM `O3` | 1.351, flagged | 1.173, flagged |
+
+**The 22, run by run.** `$R/tasks/task-13-analysis.md` read the 12 runs one at a time, by `python3 -I
+analysis/runs.py q<N>` from `$T`, into `$T/analysis/q1.log` to `q7.log`. Round 2's last final run took 5.652 s at 100%
+busy, against 1.483 to 2.292 s for the other 11, with 114 of its 120 figures above base's pooled maximum. Of the 22:
+
+- **18 are interference.** Each has at least one final run at or below base's pooled maximum. The raised runs follow
+  the load the logs recorded, inside each run in time order, and a base run hit by a burst at its tail, round 1's
+  second, shows the same signature.
+- **1 is undecided and probably noise:** `list30000` Cranelift `O1` `compile`, where final's minimum, 178.6 µs, is above
+  base's maximum, 177.5, by 0.6%, and the same program's other levels swing by up to 90% on both sides. The native
+  8-pair round below does not flag it.
+- **3 were undecided:** `loop1000000` Cranelift `compile+run` at `O1`, `O2` and `Oz`. That family, `O1` to `Oz`, was 5
+  to 10% slower in every final run, the cleanest included, except round 2's last, which ran under the busy loops; and it
+  is the first block each process runs, so this design could not tell a cost from a first-block effect.
+- **The heavy rows:** in 0 of the 24 above is final's minimum above base's maximum (Q4).
+
+**The clean subset.** The analysis fixed a criterion before it first ran the rule on any subset: every 5-s `vmstat`
+line that could have covered the run at us+sy ≤ 20, and both bracketing 1-s lines at us+sy ≤ 20 and r ≤ 8. By then it
+had already read the logs' `vmstat` and load values and the pooled log's per-run lists, and it says so. The criterion
+keeps 3 base runs and 2 final runs, whose medians give the last column above. The rule on that subset flags 24 of 120;
+put alone against the same clean base, the cleanest final run flags 14 and base runs flag 9 to 43 (Q7).
+
+**The native 8-pair round.** On the user's "Targeted re-measure", `$R/tasks/task-13b-report.md` first read what load
+cannot move. `loop1000000`'s JIT code is byte-identical on both sides at all six levels and starts at the same page
+offset (host dumps by the record's harness, with the `rt_*` addresses zeroed, compared by `cmp`). Per call, final runs
+0.99990 of base's user-space instructions at `O1` to `Oz` and 0.99994 at `O0` (`zsh -f $T/b/count.zsh r5 5`,
+`perf stat -e instructions:u`, 5 repeats a side, each side's range at most 71 instructions in 33.5 million). Then one
+round ran from 01:01:07 to 01:02:51 on 2026-11-06, in a gap another session opened by holding its CI jobs (the ledger's
+01:01 line, which reads a 1-minute load of 18.12 at the start, another project's tests running):
+`zsh -f $T/b/run-unit2.zsh r1 8`, 8 pairs in ABBA order, each slot three processes pinned by `taskset -c 8-15,24-31`,
+each under `perf stat` and each started only on a 1-s `vmstat` line at us+sy ≤ 20 and r ≤ 8, which all 48 were after
+49.1 s of waiting in all. `opt` is `opt_report` as above; `iso` is the record's harness, `ab_rows`, with `loop1000000`
+alone in its process, pass 0 shown and pass 1, after a discarded pass, the verdict; `rot` is the harness over the whole
+grid, rotated so `loop1000000` runs last. `python3 -I $T/b/cmp2.py $T/b/rounds/r1` (`$T/b/logs/cmp2-r1.log`), #160's
+rule over `loop1000000` Cranelift's 12 figures, flagged 0 of 12 in each of its four views over all 8 pairs and exited 0.
+`compile+run` final/base: `opt` 1.028 to 1.072, `iso` pass 0 0.985 to 1.032, `iso` pass 1 0.985 to 1.007, `rot` 0.969 to
+0.999. Over `opt`'s processes, final/base instructions 0.99776 and cycles 1.024, IPC 1.666 against 1.710. Only pairs 7
+and 8 had every 1-s line from a second before each of their runs to a second after inside the gate; over those two,
+`opt` flags 5 of 12, four of them `compile+run` at 1.043 to 1.066, and `iso` pass 1 and `rot` flag 3 each, all
+`compile`.
+
+**The native 8-pair round's whole grid.** `cmp2.py` counts the flags over all 120 figures of the `opt` and `rot` views
+as context, not its verdict, and `python3 -I $T/c/native-grid.py $T/b/rounds/r1` (`$T/c/logs/native-grid-r1.log`),
+which imports `cmp2.py`'s readers and `$T/cmp.py`'s rule unedited, names them. Over all 8 pairs `rot` flags 0 of 120
+and `opt` 1: `loop1000000` LLVM `O0` `compile+run`, base 2345 µs with a spread of 120 against final 2505, 1.068, with
+final's minimum, 2270, below base's maximum, 2410. Neither round 1 nor round 2 flagged it. Named on the script's
+command line (`$R/task14c/native-grid-figures.log`), it reads 1.139 in `opt` over pairs 7 and 8, with final's minimum,
+2500, above base's maximum, 2300; in `rot` it reads 0.985 over all pairs, where base's pair 5, at 5040.61 µs, makes
+base's spread 112.4% of its median, and 1.003 over pairs 7 and 8. `list30000` Cranelift `O1` `compile`, the analysis's
+probable noise, is flagged in neither view. Over all 8 pairs `opt` reads base 172.82 µs with a spread of 117.31, 67.9%
+of its median, against final 182.84, 1.058, with final's minimum, 168.94, below base's maximum, 278.96, and `rot` reads
+1.035; over pairs 7 and 8, 1.062 and 0.938. Base's 278.96 is its pair 4, and with pair 4 dropped from both sides `opt`
+reads 169.62 with a spread of 18.80 against 179.30, still not flagged (`$R/task14c/figures.log`). Over pairs 7 and 8 the
+whole grid flags 38 of 120 in `opt` and 25 of 120 in `rot`.
+
+**The `rt_tick` lead.** `rt_tick` is the one host function the loop calls. Its instructions are the same in all four
+binaries (`objdump -d --disassemble=rt_tick`, addresses stripped, by sha256), but by `nm -S` it starts at 0 mod 64 in
+`opt_report-base`, all 50 bytes in one cache line, and at 16 mod 64 in `opt_report-final` and in both harness binaries,
+where its common path runs into the next line. In the native 8-pair round `compile+run` reads 1.028 to 1.072 in the
+`opt` view, which runs the `opt_report` binaries, and 0.969 to 1.032 in the three views that run the harness, where both
+sides place `rt_tick` alike. The whole grid's one flag, `loop1000000` LLVM `O0` `compile+run`, is the same program,
+flagged in `opt` and not in `rot`. That is consistent with a link-layout accident rather than a cost of the change. **It
+is not proven:** the native 8-pair round did not move `rt_tick`, and nothing measured whether the crossing costs a
+cycle. The code-placement test below moved it, with every other function the build compiles.
+
+**The code-placement test.** On the user's "Test the lead (Recommended)", `$R/tasks/task-13d-report.md` rebuilt both
+sides' `opt_report` with `-C llvm-args=-align-all-functions=6`, which starts each function the build compiles at 0 mod
+64, by `zsh -f $T/d/build-a64.zsh` (`$T/d/logs/build-a64.log`, exit 0). That script runs M-native's `cargo build` with
+`-v` and `--example ab_rows` added, in a new `CARGO_TARGET_DIR` a side, under `RUSTFLAGS`
+`-Clink-arg=--ld-path=wild -Cllvm-args=-align-all-functions=6`, repeating the linker flag because a `RUSTFLAGS` in the
+environment replaces the cargo config's flags rather than joining them. Base-a64's sha256 is
+`608b33f5c7b8daac5c274dc0dbdc954d15e65f5d28cfda068a174fe90f9d34de` and final-a64's
+`dc1ca70f3dae0ba02a816189e85f072315dce91708459c8e51536a7a18cf024c`. By `zsh -f $T/d/align-check.zsh`
+(`$T/d/logs/align-check.log`), all 11 `rt_*` functions start at 0 mod 64 in both aligned binaries, while `rt_tick` still
+starts at 0 in `opt_report-base` and at 16 in `opt_report-final`; all 1,112 and 1,145 workspace functions start at 0 mod
+64, and 592 other symbols a side do not, the precompiled standard library and a few C symbols (the report, section 2).
+Every function whose name, its Rust hash stripped, is unique in both of a side's builds has the same size in each, 8,312
+of 8,312 and 8,351 of 8,351: the flag moved where functions start and changed none of those sizes. `loop1000000`'s
+Cranelift JIT bytes, dumped by the aligned `ab_rows` builds, are `cmp`-equal to the unaligned dumps and to each other at
+all six levels (`zsh -f $T/d/dump-check.zsh`, `$T/d/logs/dump-check.log`), and the `Runtime` whose address `rt_tick`
+receives sits at 16 mod 64 in both base builds and at 40 mod 64 in both final builds (`$T/d/logs/runtime-addr.log`).
+
+**The code-placement round.** `zsh -f $T/d/run-unit4.zsh r1 16` ran 16 pairs of four arms, base and final (M-native's
+binaries) and base-a64 and final-a64, in one unit under the heavy and browser locks, from 03:34:39 to 03:38:04 on
+2026-11-06, in a gap opened by holds from four other sessions (the ledger's 03:38 line). Each run is one whole
+`opt_report` grid, pinned by `taskset -c 8-15,24-31`, under `perf stat` and started on the native 8-pair round's 1-s
+`vmstat` gate, which all 64 runs passed after 103.3 s of waiting in all; all 64 exited 0, and the unit 0. Pair indices 1
+and 2, 3 and 4 and so on each run every two arms once in each order, and the two arms of a compared pair always run next
+to each other. The 1-minute load at the starts read 3.33 to 23.61. Of the 64 runs, 23 had a 1-s line outside the gate
+from a second before the run to a second after, all in pairs 4 to 8, 12, 15 and 16, and their top lists name a
+`threaded_video_test`, Steam's `fossilize_replay`, `rustc` builds and, in pairs 15 and 16, RetroArch; the other 8 pairs,
+1 to 3, 9 to 11, 13 and 14, are the clean pairs. `python3 -I $T/d/cmp4.py $T/d/rounds/r1`, whose output is
+`$T/d/logs/cmp4-r1.log` and whose exit status was 0, imports `$T/cmp.py`'s rule and `$T/b/cmp2.py`'s readers unedited,
+drew the verdict wanted on 17 of 17 doctored inputs (`$T/d/logs/doctor4-dry1.log`), and rules on the unaligned pair,
+base against final, as the control and on the aligned pair, base-a64 against final-a64, as the test.
+
+**The code-placement round's figures** (`$T/d/logs/cmp4-r1.log`). Object sizes are equal in all 60 rows across the four
+arms. Over all 16 pairs #160's rule flags 0 of 120 figures in each pair. `loop1000000` LLVM `O0` `compile+run`, the
+native 8-pair round's one whole-grid flag, reads 1.028 unaligned and 1.002 aligned, and 1.024 and 0.989 over the clean
+pairs: it did not reproduce. `loop1000000` Cranelift `compile+run` at `O0` to `Oz` follows the layout: 1.035 to 1.061
+unaligned and 0.996 to 1.021 aligned over all pairs, 1.014 to 1.067 and 0.982 to 1.004 over the clean pairs. Aligned,
+`box30000` leans instead: its 12 `compile+run` figures read 1.018 to 1.093 over all pairs, all 12 above 1, against 0.953
+to 1.042 unaligned, and over the clean pairs the aligned pair flags 3 of 120, all `box30000` `compile+run`: Cranelift
+`O2` at 1.085, `Os` at 1.077 and LLVM `O3` at 1.052. Over the clean pairs the unaligned pair flags 1, `map30000`
+Cranelift `O1` `compile` at 1.189, final's runs 476 to 773 µs against base's 438 to 497. Over the clean pairs'
+processes, final against base reads task-clock 1.001, cycles 1.000, instructions 0.998 and IPC 1.808 against 1.810
+unaligned, and task-clock 1.029, cycles 1.017, instructions 0.997 and IPC 1.799 against 1.834 aligned. `list30000`
+Cranelift `O1` `compile`, 1.058 in the native 8-pair round's `opt` view, reads 0.943 unaligned and 1.025 aligned, 0.920
+and 1.014 over the clean pairs. Over all pairs the log's context lines, each arm's aligned build over its unaligned one,
+read 0.934 to 0.970 for final and 0.983 to 0.996 for base on `loop1000000` Cranelift `compile+run`, and 0.988 to 1.058
+for final and 0.934 to 1.018 for base on `box30000` `compile+run`.
+
+**The reading, not a proof.** A lean of about 5% moves between programs with the host binary's layout, `loop1000000`
+unaligned and `box30000` aligned, while final runs 0.2 to 0.3% fewer instructions in both layouts. It does not single
+out `rt_tick`, as the test aligned every function the build compiles, and it left uncontrolled the page offsets,
+`rt_tick` at 0x540 in base-a64 and 0x600 in final-a64, the `Runtime`'s 16 against 40 mod 64, and the 592 symbols a side
+the flag does not reach. The LLVM JIT bytes were not dumped: the harness dumps Cranelift only (the report, "Concerns and
+limits").
+
+**M-browser.** The 68 figures that must not vary (the byte and instruction counts per text size; the caps, steps, cap
+and frames per memory case) were equal across round 1's 6 runs and both rounds' 12, and the 10 MiB figures read the
+same in every run. Round 1 flagged 14 of 124, at 1.014 to 1.136: `build` at SIZE#01, #05, #06, #08, #09, #10 and #11,
+`total` and `with_worst_run` at SIZE#09, `project`, `back`, `total` and `with_worst_run` at SIZE#10, and `build_ms`
+for COPY_CAPS call frames. Round 2 flagged 0, and the pooled six against six 0, the 14 pooling at 1.007 to 1.058. But
+the busy loops covered round 2's first three browser runs and the start of its fourth, and the pooled base spread is a
+median 230.3% of the base median over the 98 SIZE timings, against 5.9% in round 1: on a typical SIZE figure the pooled
+rule flags only a final median above 3.3 times base's. The RUN medians, round 1 final/base: loop to the step cap 0.981,
+saved locals 1.000, heap cells 0.640, boxes 0.767, call frames 0.917, both 0.689.
+
+**The browser 8-pair round.** As the busy loops covered round 2's first three browser runs and the start of its fourth,
+its pooled pass does not count, and the browser half was measured again, on the same two sides (the `head` lines of
+`$T/c/rounds/r1/meta.txt`), from 02:53:56 to 03:00:04 on 2026-11-06, builds included, in a gap three other sessions
+opened by holding their builds and tests (the ledger's 03:00 line). `zsh -f $T/c/run-unit3.zsh r1 8` runs `$T/c/ab3.zsh`
+in one `systemd-run --user` unit with `MemoryMax=16G` and `MemorySwapMax=0`, under the heavy and browser locks. It
+builds each side's probe wasm once, before the window, by `test:probe:rxm-copy`'s `wasm-pack build` line, and each run
+is that script's vitest command alone, `REDEXTAPE_PROBE=1 pnpm exec vitest run --project browser` over
+`tests/browser/rxm-copy-cost.test.ts` and `tests/browser/rxm-copy-memory.test.ts`, started under `taskset -c 8-15,24-31`
+and only on a 1-s `vmstat` line at us+sy ≤ 20 and r ≤ 8. The wasm sha256s are Task 13's, the same on each side before
+and after every run. One discarded warm-up a side, then 8 pairs in ABBA order: all 18 runs started on a clean gate line,
+after 31.1 s of waiting in all, and exited 0, and so did the unit (`$T/c/rounds/r1/runs.tsv`,
+`$T/c/rounds/unit-r1.status`). The load did not stay down: by `cmp3.py`'s RUNS table, which reads every 1-s line from a
+second before each run to a second after it, 11 of the 18 runs went past us+sy 20 or r 8 during the run, at peaks of up
+to us+sy 53 and r 16, and both runs of a pair stayed inside only in pairs 5 and 8. The ledger's 03:00 line names a
+Windows VM's boot, Melvor and a stray `gcc`.
+
+`python3 -I $T/c/cmp3.py $T/c/rounds/r1` (`$T/c/logs/cmp3-r1.log`) imports Task 13's parser, classing and rule from
+`$T/cmp.py` unedited; the rule over all 8 pairs is its verdict, and it shows the clean pairs beside it. All 68
+must-not-vary figures were equal across the 18 runs, warm-ups included. Over all 8 pairs the rule flags 1 of 124,
+`SIZE#07 clone`: base 0.9 ms with a spread of 0.4 against final 3.5, 3.632, with final's minimum, 0.7, below base's
+maximum, 1.1. `cmp3.py` exited 1, which it gives for a flag or a must-not-vary figure that varied, where 2 is a
+structural failure. None of round 1's 14 flags is flagged again. The base spread is a median 12.2% of the base median
+over the 98 SIZE timings. The RUN medians, final/base: loop to the step cap 1.015, saved locals 0.983, heap cells
+0.639, boxes 0.773, call frames 1.042, both 0.716.
+
+**The clone stall.** Per run and size (`python3 -I $R/task14c/clone-table.py $T/c/rounds/r1 3.0`,
+`$R/task14c/clone-table.log`, from the `SIZE` lines of `$T/c/rounds/r1/run-{base,final}-<N>.log`), every `clone`
+reading is either 2.4 ms or less or 5.8 to 7.2 ms: a stall of about 5 ms lands in the clone window at 0 to 3 of a run's
+14 sizes, in both builds. Base has it at SIZE#09 in 4 runs, #12 in 3, #13 in 2 and #10 in 1, 10 in all, and final at #07
+in 4, #10 in 3 and #13 in 6, 13 in all; base's discarded warm-up has it at #07 and #13. With 4 of final's 8 runs stalled
+at SIZE#07, its median, 3.45, is the mean of 1.1 and 5.8; by the same effect base's SIZE#09 clone median is 3.65 against
+final's 1.00, which the rule, looking only for a slower final, does not flag. **What causes the stall is not proven:**
+GC timing is a guess that nothing measured.
+
+**Per column over all 8 pairs** (`python3 -I $T/c/cols.py $T/c/rounds/r1`, `$T/c/logs/cols-r1.log`), the median over
+the 14 sizes of final/base, each the ratio of the two medians: `clone` 1.000, `build` 0.995, `project` 1.002, `back`
+1.000, `total` 1.002, `with_worst_run` 0.957 and `mount` 0.999. The sum of `total` over the 14 sizes, as a mean per
+run, is 2092.8 ms on base and 2086.1 on final, 0.997.
+
+**Pairs 5 and 8 alone,** two runs a side, which `cmp3.py` shows and does not rule on: the rule flags 18 of 124, among
+them `SIZE#07 clone` and `SIZE#13 clone`, where both of final's runs stalled. Per column `total` reads 1.019, above 1
+at 12 of the 14 sizes, `project` 1.021, at 12, `back` 1.042, at 11, and `build` 0.999, and the sum of `total` 2059.9 ms
+on base and 2092.4 on final, 1.016. That lean is inside base's own spread over those pairs, a median 4.5% of the base
+median over the 98 SIZE timings, and two runs a side do not resolve it.
+
+**The `rt_*` listings, Task 11's, beside it.** At `c76ebe2`'s and `ecac1ba`'s pre-rebase commits, `objdump -d -C
+--no-show-raw-insn --disassemble=<sym>` over each side's `libredextape_native_rt.a`, from `cargo build --release -p
+redextape-native-rt` (`$R/tasks/task-11-report.md`, "objdump"; `$R/task11-logs/objdump-table.txt`). 7 of the 11
+listings are identical instruction for instruction: `rt_cons`, `rt_is_empty`, `rt_box`, `rt_tick`, `rt_enter`,
+`rt_leave` and `rt_faulted`. `rt_head` and `rt_tail` go from 77 instructions to 69, `rt_box_get` from 77 to 68 and
+`rt_box_set` from 83 to 62, with no new call, conditional branch or memory access on the non-fault return, which goes
+from 19 instructions to 17 in `rt_head` and `rt_tail` and from 18 to 16 in `rt_box_get` and `rt_box_set`. In `rt_head`,
+`rt_tail` and `rt_box_get` the two `stopped()` checks are now taken branches, where base fell through. The fault path,
+which runs at most once a run, now formats `HeapFault`'s text through `Display`. After `ecac1ba`, `git diff ecac1ba
+73dc741` touches only `heap.rs` and native-rt's `lib.rs` in native-rt, core, `Cargo.toml`, `Cargo.lock` and the
+toolchain file (`$F`), and Task 13 found those two files' non-test code identical at both ends, as `bf58281` and
+`7670b52`, each cut at its first column-0 `#[cfg(test)]` with its doc lines blanked and compared by `cmp`. So the
+listings hold at final for the same compiler; `rust-toolchain.toml` names `stable`, and Task 11's logs record no rustc
+version. On the taken branches, the heavy rows' 0 of 24 above is §7.2's reading.
+
+**The outcome.** The plan's rule blocks the PR on the 22 pooled native flags until each is explained. The controller
+recorded Task 13 complete (`$R/progress.md`, its "Task 13: complete" line) on these explanations: 18 are interference, 1
+is noise, and the 3 undecided are flagged in none of the native 8-pair round's four views over all its pairs. That
+round's whole grid then read the noise figure unflagged at 1.058, and flagged one figure outside `cmp2.py`'s verdict,
+`loop1000000` LLVM `O0` `compile+run` in `opt` at 1.068, which `rot` does not flag. The code-placement test's 4-arm
+round did not reproduce it over 16 pairs, at 1.028 unaligned and 1.002 aligned with 0 of 120 flagged in either pair over
+all pairs, and read the noise figure at 0.943 and 1.025; the lean of about 5% it shows moves between programs with the
+host binary's layout, and the test does not tie it to `rt_tick`. The same ledger line reads "browser pooled clean",
+which the ledger's later "CONTROLLER CORRECTION" line withdraws: round 2's pooled pass does not count. The busy loops
+covered round 2's first three browser runs and the start of its fourth, not all six as that line says. The browser half
+rests on the browser 8-pair round, whose one flag over all 8 pairs, `SIZE#07 clone`, is the clone stall, seen in both
+builds, with its cause not proven. Object sizes are equal in all 60 rows, which the plan requires, as no task is meant
+to change machine code.
+
+##### WHAT THE PLAN STATED THAT NO GATE HELD
+
+The whole-branch review asked for these to be recorded: Task 5's sabotage could not fire on a corpus with no backward
+`jz`, and the plan's gate section did not name the rxm program that answered it until `4b8b3bd`; Task 12's mandated
+`>=`/`>` wording read as an off-by-one; and D3's and Task 8b's sentences went false as later tasks landed, until
+`4b8b3bd`.
+
+##### WHAT THIS DID NOT CLOSE
+
+- **CI's LLVM has not run the snapshots added or renamed since Task 1's container run:** box30000's and
+  `rxm-backward-jz`'s 6 files, and the 72 `.ll` and 52 `.opt.ll` that Tasks 8 and 8b renamed. A `.ll` fails on any
+  difference on every release, so the PR's first `rust-llvm` run is their first check on whatever `release/23.x`
+  snapshot apt.llvm.org serves that day. And on CI's LLVM a post-pass difference only prints a `NOTE:` that nextest
+  hides, so CI fails on post-pass IR only on 23.1.4.
+- **No gate runs core's tests on a 32-bit target.** check-all and CI only `cargo check` wasm32, so `084fff6`'s `(1 <<
+  32) + 1` probe shows a 64-bit host only a pointer past the end, and the wrap it is there for was shown only by an
+  emulation (`$R/tasks/whole-branch-fixes-review.md`).
+- **9 rustdoc warnings in core's `tm/`, all from before the branch:** an unresolved link to `reduce` in `tm/header.rs`,
+  and public docs linking the private `refused`, `pads` and `StateTable` in `one_way.rs`, `reduced_file.rs`,
+  `reduction.rs`, `single_tape.rs` and `two_symbol.rs` (`cargo doc -p redextape-native -p redextape-native-rt -p
+  redextape-core --no-deps` at `8e9ca0c`, `084fff6`'s pre-rebase commit, `$R/fix-logs/final-doc.log`;
+  `$R/tasks/whole-branch-fixes.md`).
+- **28 carried Minors the whole-branch review left as they are** (`$R/tasks/whole-branch-review.md`, "Carried
+  Minors", 40 rows, 12 fixed). Four it asks the roadmap to name: `aot_oracle.rs` has no program that uses a box (T4c; no
+  line of it names a box, `$F`), and with it nothing checks native-rt's `#[unsafe(no_mangle)]`, which only AOT linking
+  depends on (T4a); a wasm32 caller cannot build the `TargetFrontendConfig` that `build_clif` takes without
+  `target-lexicon`, which is piece 1's to solve (T7e); and Task 13's verdict on the two taken `stopped()` branches,
+  which §7.2's `rt_*` listings give (T11-3). The other 24 are in that table, each with its reason. One row it fixed in
+  part, T7c, leaves this: the `cranelift` feature's list of `cranelift-codegen` features matches 0.137.1's `default`,
+  and a Cranelift bump must check it again.
+- **What drives the leans of about 5% is not known.** The code-placement test aligned every function the build compiles,
+  so its reading, that the lean moves from `loop1000000` to `box30000` with the host binary's layout, does not single
+  out `rt_tick`; page offsets, the `Runtime`'s 16 against 40 mod 64 and the 592 symbols a side the flag does not reach
+  were not controlled.
+- **The aligned pair's `box30000` lean is not explained:** `compile+run` 1.018 to 1.093 over all 16 pairs, all 12 above
+  1, and over the clean pairs 3 flags, Cranelift `O2` at 1.085, `Os` at 1.077 and LLVM `O3` at 1.052. Over all pairs
+  #160's rule flags none of them, and no round re-measured it.
+- **The unaligned pair's clean-pair flag is not explained:** `map30000` Cranelift `O1` `compile`, 1.189 over the clean
+  pairs, final's runs 476 to 773 µs against base's 438 to 497. Over all pairs #160's rule does not flag it, and no
+  round re-measured it.
+- **The LLVM JIT bytes were not dumped:** the harness dumps Cranelift only, so that `loop1000000` LLVM `O0`'s JIT code
+  is the same in a side's two builds rests on their same IR and the dynamically linked `/usr/lib/libLLVM.so.23.1`, which
+  the rustc flag cannot reach, and not on a dump.
+- **The A/B harness lives only in the record:** `$T/b/src/ab_rows.rs` (sha256 `169368e059874c5d…`), `$T/ab.zsh`,
+  `$T/cmp.py`, `$T/b/ab2.zsh`, `$T/b/cmp2.py`, `$T/c/ab3.zsh`, `$T/c/cmp3.py`, `$T/c/cols.py`, `$T/c/native-grid.py`,
+  `$R/task14c/clone-table.py` and the seven scripts `$T/d/SHA256SUMS-scripts` names; `git ls-files` names no `ab_rows`
+  (`$F`).
+- **§7.2's browser 8-pair round was partly loaded:** 11 of its 18 runs went past the gate's line during the run, and
+  only pairs 5 and 8 stayed inside it. Over those two pairs `total` leans to 1.019 at the median and the sum of
+  `total` to 1.016, inside base's spread there and not resolved at two runs a side. What causes the clone stall behind
+  the round's one flag is not proven.
+- **The snapshot gate has not run on the Mac since Task 2.**
+- **The final gate at `9c45e4c` ran its local wasm-pack steps on 0.15.0 and built the image with `docker build`,** where
+  CI pins 0.15.1 and runs `docker buildx build` on a `docker-container` builder (VERIFICATION).
+- **Nothing has run in CI:** the branch has not been pushed.
+
+##### VERIFICATION
+
+**The final gate** ran at `9c45e4c`, from 03:57:47 to 04:12:07 on 2026-11-06, each step in its own `systemd-run --user`
+unit with `MemoryMax=16G` and `MemorySwapMax=0`, a heavy step under the heavy lock and a browser step under it and the
+browser lock (`$G/chain.log` launches `s4-scans`, `s6a-pnpm-install`, `s5-licences`, `s6e-biome` and `s7b-docker-serve`
+under neither), each log ending in the step's exit status (`$G/gate.md`; logs `$G/s*.log`, which each figure below
+names; `G=$R/gate-logs/final-9c45e4c`). Every commit after `73dc741` changes only docs:
+`git log --format= --name-only 73dc741..ir-lowering | sort -u` names only the roadmap and the plan, and
+`git diff --stat 73dc741 9c45e4c` lists the roadmap alone. The comment guard's base was `18c5272`, the merge base with
+`origin/main`.
+
+```
+scripts/check-all.sh --no-browser                → exit 0; 48 ==> lines; 10 nextest runs, 5,193 passed, 0 failed,
+                                                   97 skipped; 3 doctests (s1a-check-all-nobrowser.log)
+scripts/check-all.sh --browser-only              → exit 0; 34 passed, Chrome 157 (s1b-check-all-browser.log)
+cargo llvm-cov nextest --workspace --fail-under-lines 90
+                                                 → exit 0; 1936 passed, 33 skipped; lines 95.60% (s2-llvm-cov.log)
+scripts/check-slow.sh                            → exit 0; 33 passed (s3-check-slow.log)
+the eight scans, --self-test then alone          → exit 0, 16 of 16 (s4-scans.log)
+node scripts/check-comments.mjs --self-test, then --base 18c5272
+                                                 → exit 0, 0; 224 self-test cases (s4-scans.log)
+../scripts/check-licences.sh --self-test, then alone, from web/
+                                                 → exit 0, 0 (s5-licences.log)
+pnpm install --frozen-lockfile; build:wasm; build:lsp-wasm; build:bindings;
+  biome ci --error-on-warnings; typecheck        → exit 0 each (s6a-*.log to s6f-*.log); 442 files (biome)
+pnpm run test:coverage                           → exit 0; 286 files, 3,069 tests; 97.65 / 92.39 / 98.43 / 98.94
+                                                   against the floors 95 / 89 / 97 / 97, unchanged
+                                                   (s6g-test-coverage.log)
+pnpm run build:app                               → exit 0 (s6h-build-app.log)
+docker build --build-arg COMMIT_HASH=<9c45e4c's hash> -t redextape:ir-lowering-9c45e4c .
+                                                 → exit 0; image 2dd32235d0ba, 99,329,260 bytes (s7a-docker-build.log)
+docker run -d -p 127.0.0.1:18089:80, then curl -sS -D - -o /dev/null
+                                                 → exit 0; /, the hashed JS and both wasm 200, the three assets
+                                                   Cache-Control: public, immutable (s7b-docker-serve.log)
+```
+
+Both `check-all.sh` steps set `TREE_SITTER` to the main checkout's pinned 0.25.10, as the worktree has no `.tools/`
+(`$G/cmds/s1a-check-all-nobrowser.cmd`, `s1b-check-all-browser.cmd`). `web/tests/browser/rxm-blank-copy.test.ts`, which
+reads a heap fault in the browser, passed 5 of 5 against the `pkg/` that `build:wasm` had rebuilt from `9c45e4c`
+(`s6b-build-wasm.log`, `s6g-test-coverage.log`). The gate's local wasm-pack was 0.15.0 (`s1b-check-all-browser.log`'s
+`[WARN]` line), where CI and the `Dockerfile` pin 0.15.1. The gate built the image with `docker build` on the default
+builder (`cmds/s7a-docker-build.cmd`), in dockerd and so outside the `MemoryMax` of the `s7a-docker-build` step's unit,
+where CI runs `docker buildx build` on a `docker-container` builder. The gate's serve step read the image's health only
+as `starting` (`s7b-docker-serve.log`). The controller then ran the image twice more. The first run went `healthy`
+within about 10 s, its check exiting 0 at 04:13:59 (the ledger's 04:14 line on 2026-11-06). The second, from 04:35:07
+on the same image ID, read `healthy` after about 10 s, its check exiting 0 at 04:35:10, and left no container
+(`docker-health.log`).
+
+**The whole-branch gate** ran at `cf1dfed` as `50710a8`, from 15:56:32 to 16:18:01 on 2026-11-03: the final gate's steps
+but the two Docker ones, and the plan's snapshot gate, each exit 0, with the comment guard's base at `e9bbf67`
+(`$R/gate-logs/whole-branch-gate.md`; logs `$R/gate-logs/s*.log`). Its first `check-all.sh` stopped on
+`/usr/bin/tree-sitter` 0.28.0, and the rerun set `TREE_SITTER`.
+
+**The fix rounds** after it ran the snapshot gate after each commit, 7 passed and 3 passed, with no snapshot changed
+(`$R/tasks/whole-branch-fixes.md`).
+
+**After the second rebase,** at `73dc741`, from 01:05:11 to 01:06:14 on 2026-11-06 under the heavy lock, each log
+headed `# HEAD 73dc741` and ending in its exit status (`$R/rebase2-logs/`, chain in `chain.log`):
+
+```
+cargo nextest run -p redextape-native --features llvm   → exit 0; 117 passed
+cargo nextest run -p redextape-native-rt                → exit 0; 13 passed
+cargo nextest run -p redextape-core                     → exit 0; 1319 passed, 32 skipped
+the plan's snapshot gate                                → exit 0; 7 passed, 3 passed; snapshots/ clean
+cargo clippy --workspace --all-targets --features llvm -- -D warnings
+                                                        → exit 0
+cd web && pnpm install --frozen-lockfile                → exit 0
+```
+
+**Every count this entry quotes, with what produces it.** Commands run from the worktree's root under zsh, with
+`R=~/temp/redextape-ir-lowering-record`, `T=$R/task13`, `G=$R/gate-logs/final-9c45e4c` and
+`S=crates/redextape-native/snapshots`.
+`$R/task14a/figures.zsh` runs every command below that reads git, a baseline file or a Task 13 or rebase log, into `$F`,
+but for the row on round 2's busy loops and the wasm row's `sort -u`, which no script runs and whose outputs
+`$R/tasks/task-14g-report.md` gives (items 7 and 8), for the rows naming `$T/c/` or `$R/task14c/`, whose commands
+`$R/task14c/figures.zsh` runs into `$R/task14c/figures.log`, re-running each comparer named and comparing its output
+with its log by `cmp`, and for the rows naming `$T/d/`, whose figures `$R/task14d/figures.zsh` reads into
+`$R/task14d/figures.log`, re-running `cmp4.py` and comparing its output with its log by `cmp`. None of the three runs a
+build, test or timing; the other rows name the report or log a figure comes from.
+
+| Value | What | Produced by |
+|---|---|---|
+| 37; 30; `f69779f`, `d8f9862`, `9e62986`, `8ae0f9c`, `e772257`, `cf1dfed`, `4b8b3bd` | the branch's commits; those changing something outside `docs/`; those changing only `docs/` | `git rev-list --count 18c5272..73dc741`, then `-- . ':!docs'`; per commit, `git diff --name-only <c>~1 <c> -- . ':!docs'` empty |
+| 16 files, byte-identical; 87 files, byte-identical; 37 of 37 `=` | each rebase's change against main's | `cmp` of `git diff 273520f 50710a8` with `git diff 14621b1 e9bbf67`, and of `git diff 7670b52 73dc741` with `git diff e9bbf67 18c5272`; `awk '{print $3}' $R/range-diff2.txt \| sort \| uniq -c` |
+| 01:07, before 02:53:56 and 03:34:39 | the second rebase, before the browser 8-pair round and the code-placement round | the ledger's 01:07 line on 2026-11-06; `build base start` in `$T/c/rounds/r1/meta.txt`; the first start in `$T/d/rounds/r1/runs.tsv` |
+| old → new SHAs | every SHA named here that was not made after the second rebase | `$R/rebase-map.txt`, then `$R/rebase-map2.txt` |
+| 68 `jz`, all forward | Task 5's corpus | `$R/tasks/task-5-report.md`; the ledger's Task 5 line |
+| 17 of 18; 8 of 9; 0; 0 of 18 | V5: the configurations whose CLIF, x86-64 vcode text and machine-code bytes differed between builds, and after declaration order | the plan's "Verified facts", V5, from `$R/probe-out/run-a1.log`, `run-s1.log` and `cmp clif-s1.txt clif-s2.txt` |
+| 124: 72 and 52, 0; 27,932 | Task 8's files: `.ll` and `.opt.ll`, `.clif`; lines each way | `git diff --shortstat b2f62d0 3f06b63 -- $S`; `git diff --name-only` of it, by suffix |
+| 72, 0; 61,805 | Task 9's `.clif` and LLVM files; lines each way | the same for `3f06b63 61b3c93` |
+| 124: 72 and 52, 0; 19,689 | Task 8b's | the same for `61b3c93 1b3bbb7` |
+| 124 equal; 489, 4,707 | Task 8's check; function bodies and allocas | `$R/task8-logs/names-only-check.log`; `$R/tasks/task-8-report.md` |
+| 72 equal, 6 sections each | Task 9's check | `$R/task9-logs/srcloc-only-check.log`, `srcloc-only-check-committed.log` |
+| 124 equal; 5,556, 4,623, 933 | Task 8b's check; loads, `S.v`, `S.v<N>` | `$R/task8b-logs/`; `$R/tasks/task-8b-report.md` |
+| 190; 0; 6 | snapshot files modified `c7ff52d..73dc741`; their changed `;; function u0:` lines; files added | `git diff --diff-filter=M --name-only c7ff52d 73dc741 -- $S \| wc -l`; `git diff --diff-filter=M c7ff52d 73dc741 -- $S \| grep -c '^[-+];; function u0:'`; `git diff --name-status <c>~1 <c> -- $S` for `c76ebe2` and `c6888e3` |
+| `c7ff52d`, `c76ebe2`, `c6888e3`, `3f06b63`, `61b3c93`, `1b3bbb7` | the commits changing a snapshot file | per commit, `git diff --name-only <c>~1 <c> -- $S \| wc -l` above 0 |
+| `bad: 0` over 190 | the review's masked compare, at `50710a8` (now `cf1dfed`) | `$R/tasks/whole-branch-review.md`, "Strengths" |
+| 217; 72 each; 23.1.4; 8,240,032 | snapshot files at `73dc741`; `.clif`, `.ll`, `.opt.ll`; the recorded LLVM; bytes | `git ls-tree --name-only 73dc741 $S/ \| wc -l`, the same by suffix; `git show 73dc741:$S/llvm-version.txt`; `git ls-tree -r -l 73dc741 $S \| awk '{s+=$4} END {print s}'` |
+| 211; 6,196,430 | the same at `c7ff52d` | the same commands at `c7ff52d` |
+| 7; 3 | snapshot tests under `--features llvm` and under `--no-default-features --features llvm` | `Summary` in `$R/rebase2-logs/s-snapshot-gate.log` |
+| the three legs; the two jobs | CI's snapshot legs | `grep -n` of `base\|test\|--workspace` and the two `llvm\|test\|-p redextape-native` rows in `scripts/check-all.sh`; the `check-all.sh` lines in `.forgejo/workflows/ci.yml` |
+| 23.1.5; 5 of 5; 1 file, 0, 0, 0 | C4: the container's LLVM; the writer; what `diff -rq` found | `$R/task1-logs/c4-container.log`; `$R/task1-logs/c4-diff.txt`; `$R/tasks/task-1-report.md`, "CI container (C4)" |
+| 5, 3, 71 programs | the gate on the Mac at Task 2 | `$R/task2-logs/mac-logs/gate-mac-2.log`; `$R/tasks/task-2-report.md`, "The Mac session" |
+| 60; 12; the rows; the margins | each baseline's rows; `box30000`'s; their sizes; `(O0 − row) / row` | `grep -vc '^#' <file>`; `grep -c '^box30000'`; the two `awk` lines in `figures.zsh`; `git diff --stat c76ebe2 73dc741 -- crates/redextape-native/baselines` empty |
+| 0.10 | the size test's band | `grep -n 'const TOLERANCE' crates/redextape-native/tests/size_baseline.rs` |
+| 23:27:56 to 23:30:41; 23:30:54 to 23:35:31 | §7.2's two windows | `grep '^### window' $T/load-r1.txt $T/load-r2.txt` |
+| 24 each; 4.42 to 10.12; 3.61 to 51.90; 12.52 | the `uptime` lines; their 1-minute loads per round; at round 2's first browser run | the `load average` lines of `$T/load-r1.txt` and `$T/load-r2.txt`, sorted |
+| 23:31:29, 12.52; 23:34:23; 100 from 23:31:24 to 23:34:24, 27 at 23:34:29; 23:34:44 to 23:35:30; 90, 64 | round 2's first browser run's start and its 1-minute load; the last top list showing the busy loops; round 2's 5-s us+sy; its last two browser runs; their two raised 5-s lines, at 23:35:19 and 23:35:24 | the `### browser r2` lines of `$T/load-r2.txt` and the `uptime` line after each; `awk '/^###/{h=$0} /while :/{n[h]++} END{for(k in n) print n[k], k}' $T/load-r2.txt`; `awk '{print $NF, $13+$14}' $T/vmstat-r2.log` |
+| 24, exit 0; 0, 0 | the runs; the two units | the last column of `$T/runs-r1.tsv` and `$T/runs-r2.tsv`; `$T/unit-r1.status`, `$T/unit-r2.status` |
+| the machine, tools and sha256s | §7.2's machine and binaries | `$R/tasks/task-13-report.md`, "The machine" and "Binaries, wasm, tools" |
+| 12 and 12, one hash a side; 6 runs a side | each side's wasm, read before and after each of its runs | `$T/wasm-sha-r1.tsv` and `$T/wasm-sha-r2.tsv`, their side and hash columns, `sort \| uniq -c`; their round, side and run columns, `sort -u` |
+| 60 equal; 31, 51, 22, 64; 0.932 to 2.041; the ratios; 16.9, 30.9 | M-native | `$T/logs/cmp-native-r1.log` and `$T/logs/cmp-native-r1r2.log`, from `python3 $T/cmp.py native $T r1` and `... r1 r2` |
+| 68 equal; 14, 0, 0; 1.014 to 1.136; 1.007 to 1.058; 230.3, 5.9; the RUN ratios | M-browser | `$T/logs/cmp-browser-r1.log` and `$T/logs/cmp-browser-r1r2.log`, from `python3 $T/cmp.py browser $T r1` and `... r1 r2` |
+| 17 of 17; 8.62%, 0.42% | the comparer's proof; the simulation | `$T/doctored-proof.txt`, `$T/doctored-proof-pooled.txt`; `$T/logs/sim.txt` |
+| 18, 1, 3; 5.652, 1.483 to 2.292, 114; 39; 976%, 1592%; 178.6, 177.5; 0 of 24; 24, 14, 9 to 43; the clean column | the analysis | `$R/tasks/task-13-analysis.md`, from `python3 -I analysis/runs.py q<N>` in `$T`, outputs `$T/analysis/q1.log` to `q7.log` |
+| bytes equal; 0.99990, 0.99994, 71 | `loop1000000`'s JIT code; instructions per call | `$R/tasks/task-13b-report.md`, 1a and 1e; `$T/b/logs/count-r5.log` |
+| 0 mod 64, 16 mod 64, 50 bytes | `rt_tick`'s placement | `$R/tasks/task-13b-report.md`, 1c, from `nm -S` and `objdump -d --disassemble=rt_tick` |
+| 01:01:07 to 01:02:51; 48 `clean`; 49.1 s | the native 8-pair round's window, gates and wait | the first start and last end of `$T/b/rounds/r1/runs.tsv`; its status and gate columns; `total wait` in `$T/b/rounds/r1/meta.txt` |
+| 18.12 | the load at the native 8-pair round's start | the ledger's 01:01 line on 2026-11-06 |
+| 0 of 12 ×4; the ratio ranges; 0.99776, 1.024, 1.666, 1.710; pairs 7 and 8, 5, 3, 3 | the native 8-pair round | `$T/b/logs/cmp2-r1.log`, from `python3 -I $T/b/cmp2.py $T/b/rounds/r1` |
+| 1 of 120, 0 of 120; 2345, 120, 2505, 1.068, 2270, 2410; 172.82, 117.31, 67.9%, 182.84, 1.058, 168.94, 278.96; 1.035; 1.062, 0.938; 38, 25 | the native 8-pair round's whole grid | `$T/c/logs/native-grid-r1.log`, from `python3 -I $T/c/native-grid.py $T/b/rounds/r1` |
+| 1.139, 2500, 2300; 0.985, 5040.61, 112.4%; 1.003 | `loop1000000` LLVM `O0` `compile+run` in each view | `$R/task14c/native-grid-figures.log`, from `python3 -I $T/c/native-grid.py $T/b/rounds/r1 loop1000000 llvm O0 compile+run list30000 cranelift O1 compile` |
+| not flagged | `loop1000000` LLVM `O0` `compile+run` in rounds 1 and 2 | `grep -c 'loop1000000 llvm O0 compile+run'` in `$R/task14c/figures.zsh`, 0 on each of `$T/logs/cmp-native-r1.log` and `$T/logs/cmp-native-r1r2.log`, whose lists name every flagged figure |
+| 169.62, 18.80, 179.30 | `list30000` Cranelift `O1` `compile` in `opt` without pair 4 | the `python3 -I -c` over `native-grid-r1.log`'s runs in `$R/task14c/figures.zsh` |
+| `-Clink-arg=--ld-path=wild -Cllvm-args=-align-all-functions=6`; the build command; exit 0; the two sha256s | the code-placement test's aligned builds | `export RUSTFLAGS` and `cargo build` in `$T/d/build-a64.zsh`; `EXIT` in `$T/d/logs/build-a64.log`; `$T/d/bin/SHA256SUMS` |
+| 11 of 11; 0, 16; 1,112 of 1,112, 1,145 of 1,145; 592; 8,312 of 8,312, 8,351 of 8,351; 0x540, 0x600 | the aligned builds: `rt_*` at 0 mod 64, `rt_tick` unaligned, workspace functions, other symbols not at 0 mod 64, shared functions' sizes, `rt_tick`'s address mod 4096 | `$T/d/logs/align-check.log`, from `zsh -f $T/d/align-check.zsh`; what the 592 are, `$R/tasks/task-13d-report.md`, 2 |
+| equal at all six levels | `loop1000000`'s Cranelift JIT bytes, aligned against unaligned | `$T/d/logs/dump-check.log`, from `zsh -f $T/d/dump-check.zsh` |
+| 16 and 40 mod 64 | the `Runtime` whose address `rt_tick` receives, in base's and final's builds | `$T/d/logs/runtime-addr.log`, from the `gdb` line in `$R/tasks/task-13d-report.md`, 2 |
+| 17 of 17 | `cmp4.py`'s doctored inputs | `17 cases, 0 wrong` in `$T/d/logs/doctor4-dry1.log`, from `python3 -I $T/d/doctor4.py $T/d/rounds/dry1 $T/d/doctored` |
+| 03:34:39 to 03:38:04; 64, exit 0, `clean`; 103.3 s; 0; 3.33 to 23.61 | the code-placement round's window, runs, gates, wait, unit and loads | the first start and last end of `$T/d/rounds/r1/runs.tsv`, and its status, gate and load1 columns; `total wait` in `$T/d/rounds/r1/meta.txt`; `$T/d/rounds/unit-r1.status` |
+| the gap; the holds | the code-placement round | the ledger's 03:38 line on 2026-11-06 |
+| 23 of 64; pairs 4 to 8, 12, 15 and 16; what loaded them; the clean pairs | the code-placement round's load | the run list's `busy` entries, `busy runs' top consumers` and the first line of `$T/d/logs/cmp4-r1.log` |
+| 60 equal; 0 of 120 ×2; 1.028, 1.002, 1.024, 0.989; 1.035 to 1.061, 0.996 to 1.021, 1.014 to 1.067, 0.982 to 1.004; 0.943, 1.025, 0.920, 1.014 | the code-placement round's verdict and key figures | `object sizes`, `FLAGGED (… all pairs)` and the two KEY FIGURES blocks of `$T/d/logs/cmp4-r1.log`, from `python3 -I $T/d/cmp4.py $T/d/rounds/r1` |
+| 1.018 to 1.093, 12 of 12, 0.953 to 1.042; 3 of 120, 1.085, 1.077, 1.052; 1 of 120, 1.189, 476 to 773, 438 to 497; 1.001, 1.000, 0.998, 1.808, 1.810; 1.029, 1.017, 0.997, 1.799, 1.834; 0.934 to 0.970, 0.983 to 0.996, 0.988 to 1.058, 0.934 to 1.018 | the code-placement round's `box30000`, its clean pairs' flags and counters, and its context lines | the same log's `FLAG` lines and clean-pairs counters; the ranges, by the `awk` over its ratio and context columns in `$R/task14d/figures.zsh` |
+| 02:53:56 to 03:00:04; 18, exit 0, `clean`; 31.1 s; 0 | the browser 8-pair round's window, runs, gates, wait and unit | `build base start` and `end` in `$T/c/rounds/r1/meta.txt`, and its `total wait`; the status and gate columns of `$T/c/rounds/r1/runs.tsv`; `$T/c/rounds/unit-r1.status` |
+| the sides; `taskset -c 8-15,24-31`; the build and run commands | the browser 8-pair round's method | the `head` lines and `cpus=` of `$T/c/rounds/r1/meta.txt`; the `wasm-pack build` and `vitest run` lines of `$T/c/ab3.zsh`; `$T/c/run-unit3.zsh` |
+| the gap; what loaded the machine | the browser 8-pair round | the ledger's 03:00 line on 2026-11-06 |
+| 11 of 18; 53, 16; pairs 5 and 8 | the browser 8-pair round's load | the RUNS table of `$T/c/logs/cmp3-r1.log`: `busy` against `CLEAN`, and the peak us+sy and r per run |
+| Task 13's sha256s; 68 equal; 1 of 124, 0.9, 0.4, 3.5, 3.632, 0.7, 1.1; exit 1; 12.2; the RUN ratios; 18 of 124; 4.5 | the browser 8-pair round's verdict and its clean pairs | `$T/c/logs/cmp3-r1.log`, from `python3 -I $T/c/cmp3.py $T/c/rounds/r1` |
+| none of 14 | round 1's browser flags, flagged again | the names under `FLAGGED (r1)` in `$T/logs/cmp-browser-r1.log` against those under `FLAGGED (all pairs)` in `$T/c/logs/cmp3-r1.log`, by `comm -12` |
+| the column ratios; 2092.8, 2086.1, 0.997; 1.019, 1.021, 1.042, 0.999, 12, 12, 11; 2059.9, 2092.4, 1.016 | the browser 8-pair round per column, all pairs and pairs 5 and 8 | `$T/c/logs/cols-r1.log`, from `python3 -I $T/c/cols.py $T/c/rounds/r1` |
+| 2.4, 5.8 to 7.2; 0 to 3; the stalls by size, 10 and 13; #07 and #13; 3.45, 1.1, 5.8; 3.65, 1.00 | the clone stall | `$R/task14c/clone-table.log`, from `python3 -I $R/task14c/clone-table.py $T/c/rounds/r1 3.0`, over the `SIZE` lines of `$T/c/rounds/r1/{run,warm}-{base,final}-<N>.log` |
+| 7 of 11; 77 → 69, 77 → 68, 83 → 62; 19 → 17, 18 → 16 | Task 11's listings | `$R/tasks/task-11-report.md`, "objdump"; `$R/task11-logs/objdump-table.txt` |
+| `heap.rs`, `lib.rs` | what changed in native-rt, core, the lock and the toolchain after `ecac1ba` | `git diff --stat ecac1ba 73dc741 -- crates/redextape-native-rt crates/redextape-core Cargo.toml Cargo.lock 'rust-toolchain*'` |
+| 40, 12, 28; T4a, T4c, T7c, T7e, T11-3 | the carried Minors; fixed; left; those named here | the numbered rows of `$R/tasks/whole-branch-review.md`'s "Carried Minors" table, by their verdict column; its Recommendations, item 3 |
+| 0; 0 | `aot_oracle.rs` lines naming a box; tracked files named `ab_rows` | `grep -ci box crates/redextape-native/tests/aot_oracle.rs`; `git ls-files \| grep -c ab_rows` |
+| 9 | core's rustdoc warnings, at `8e9ca0c` (now `084fff6`) | `$R/tasks/whole-branch-fixes.md`, "The `cargo doc` warnings"; `$R/fix-logs/final-doc.log` |
+| 03:57:47 to 04:12:07; exit 0 each; `s4-scans`, `s6a-pnpm-install`, `s5-licences`, `s6e-biome`, `s7b-docker-serve` | the final gate at `9c45e4c`: its run; every step; the steps under no lock | the first `launch` and the last `chain done` line of `$G/chain.log`; the last line, `EXIT=`, of each `$G/s*.log`; the `(none)` launches in `$G/chain.log` |
+| 48; 10, 5,193, 0, 97; 3; 7, 3; 0.25.10 | check-all `--no-browser`: its `==>` lines; its nextest runs, passed, failed and skipped; its doctests; the snapshot tests of its two LLVM legs; the tree-sitter both check-all steps set | in `$G/s1a-check-all-nobrowser.log`: `grep -c '^==>'`; the `Summary` lines, counted and summed, none naming a failure; `grep -c 'test result: ok\. [1-9]'`; `grep -c 'PASS .*/117) redextape-native codegen_snapshots'`, then with `/50)`; `using tree-sitter`; and the `export TREE_SITTER` line of `$G/cmds/s1a-check-all-nobrowser.cmd` and `s1b-check-all-browser.cmd` |
+| 34; 157; 0.15.0 | check-all `--browser-only`: wasm-pack's tests; Chrome; the local wasm-pack | `test result: ok. 34`, `using chromedriver` and the `[WARN]` line in `$G/s1b-check-all-browser.log` |
+| 1936, 33, 95.60%; 33; 16 of 16, 224, `18c5272` | llvm-cov's tests and lines; the slow tier; the scans, the comment guard's self-test cases and its base | `Summary` and `TOTAL` in `$G/s2-llvm-cov.log`; the `test result` lines of `$G/s3-check-slow.log`, summed; the `SCAN`, `check-comments:` and `merge-base` lines of `$G/s4-scans.log` |
+| 442; 286, 3,069; 97.65, 92.39, 98.43, 98.94; 95, 89, 97, 97, unchanged; 5 of 5 | biome's files; web's test files and tests; their coverage; its floors; `rxm-blank-copy.test.ts` | `Checked` in `$G/s6e-biome.log`; `Test Files`, `Tests`, `All files` and the `rxm-blank-copy` line of `$G/s6g-test-coverage.log`; `thresholds` in `web/vite.config.ts`, and the `test:coverage` row of `$G/gate.md` |
+| 2dd32235d0ba, `sha256:2dd32235d0ba1a5868e4eee35eb0123f6ccd163e0a7938db27fc093f554c38d9`, 99,329,260 bytes; 200 ×4; `public, immutable` ×3; `starting` | the image; `/`, `/assets/index-BleXqFv4.js`, `/assets/redextape_wasm_bg-CnFJ5Z-s.wasm` and `/assets/redextape_lsp_wasm_bg-CFnrlJyl.wasm`; the three assets' `Cache-Control`; its health at the serve step | `IMAGE` in `$G/s7a-docker-build.log`; the `HTTP/1.1`, `Cache-Control` and `health` lines of `$G/s7b-docker-serve.log` |
+| `docker build`, the default builder, dockerd; 0.15.1; `docker buildx build`, `docker-container` | the gate's image build; CI's and the `Dockerfile`'s wasm-pack; CI's image build | `$G/cmds/s7a-docker-build.cmd` and `$G/gate.md`, "How this run differs from CI"; the `wasm-pack-v0.15.1` URLs in `.forgejo/workflows/ci.yml` and `Dockerfile`; `buildx create` in `.forgejo/workflows/ci.yml` |
+| `healthy`, about 10 s, 04:13:59; 04:35:07, `sha256:2dd32235d0ba1a5868e4eee35eb0123f6ccd163e0a7938db27fc093f554c38d9`, `healthy`, about 10 s, 04:35:10, 0 | the image's health on the controller's first run after the gate; its second run's start, image, health, check exit and containers left | the ledger's 04:14 line on 2026-11-06; the date line and the `image:`, `status after`, `check exit 0` and `containers left` lines of `$G/docker-health.log` |
+| exit 0 each; 0.28.0; `e9bbf67` | the whole-branch gate's steps, at `50710a8` (now `cf1dfed`); the tree-sitter its first `check-all.sh` stopped on; the comment guard's base | `$R/gate-logs/whole-branch-gate.md`, from the logs it names |
+| 117; 13; 1319, 32; 7, 3; exit 0 each | after the second rebase | `Summary` and `EXIT=` in `$R/rebase2-logs/{n1-native-llvm,n2-native-rt,n3-core,s-snapshot-gate,c-clippy,p-pnpm-install}.log` |
+| the user's words | D5, the re-measure and the code-placement test | the `USER` lines of `$R/progress.md` |

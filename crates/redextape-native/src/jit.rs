@@ -2,35 +2,30 @@
 //! and run `$main` on a big-stack thread.
 //!
 //! The contract is agreement with `redextape_core::tm::run_rxm`: `compile_and_run(prog, caps, opt)`
-//! must produce the same outcome (`Ran`/`HitCap`/`Fault`) as the rxm interpreter on every `Program`,
-//! at every `OptLevel` — optimization changes the code generated, never the answer. We reach it by
-//! compiling **one Cranelift function per subroutine** (from `analysis::partition`) via
-//! `codegen::translate_subroutine`, and threading a `*mut Runtime` through every function so
-//! the `rt_*` host functions can perform the heap/box operations and cap checks with identical
-//! semantics. This module owns only the JIT-specific concerns: registering the in-process `rt_*`
-//! symbols, finalizing definitions, and transmuting + calling the finalized `$main`. The
-//! `Module`-generic translation lives in `codegen` so an `ObjectModule` (AOT) can reuse it.
+//! must produce the outcome (`Ran`/`HitCap`/`Fault`) the rxm interpreter does, except where the crate
+//! doc's "What native and the rxm interpreter do differently" says they part, at every `OptLevel` —
+//! optimization changes the code generated, never the answer. We reach it by compiling **one Cranelift
+//! function per subroutine** (from `analysis::partition`) via `codegen::translate_subroutine`, and
+//! threading a `*mut Runtime` through every function so the `rt_*` host functions run the heap/box
+//! operations on the heap core the rxm interpreter holds, and make the cap checks. This module owns
+//! only the JIT-specific concerns: registering the in-process `rt_*` symbols, finalizing definitions,
+//! and transmuting + calling the finalized `$main`. The `Module`-generic translation lives in
+//! `codegen` so an `ObjectModule` (AOT) can reuse it.
 
-use cranelift_codegen::ir::UserFuncName;
 use cranelift_codegen::isa::OwnedTargetIsa;
-use cranelift_codegen::settings::{self, Configurable};
 use cranelift_frontend::FunctionBuilderContext;
 use cranelift_jit::{JITBuilder, JITModule};
-use cranelift_module::{Module, default_libcall_names};
+use cranelift_module::default_libcall_names;
 
 use redextape_core::core::NodeId;
 use redextape_core::tm::{Caps, LowerError, Program};
 
 use crate::analysis::{Subroutine, partition};
-use crate::codegen::{
-    CodegenError, Decls, cranelift_opt_level, declare_rt, declare_subroutines, translate_subroutine, word_signature,
-};
-use crate::shared::{MAX_REGISTERS, native_depth_cap, param_count, reg_over_cap};
+use crate::codegen::{Decls, DefineError, Stage, define_all, jit_flags};
+use crate::rt_imports::RtFn;
+use crate::shared::{MAX_REGISTERS, native_depth_cap, reg_over_cap};
 use crate::{NativeRun, OptLevel};
-use redextape_native_rt::{
-    RUN_STACK_SIZE, Runtime, rt_box, rt_box_get, rt_box_set, rt_cons, rt_enter, rt_faulted, rt_head, rt_is_empty,
-    rt_leave, rt_tail, rt_tick,
-};
+use redextape_native_rt::{RUN_STACK_SIZE, Runtime};
 
 /// Wrap any Cranelift/module error as a `LowerError` outcome. These paths are not expected to fire
 /// for a partitioned `Program` (the label/CFG invariants are already checked by `partition`); this
@@ -39,7 +34,8 @@ fn internal_error(msg: impl std::fmt::Display) -> NativeRun {
     NativeRun::LowerError(LowerError::Unsupported { node: NodeId::default(), what: format!("native codegen: {msg}") })
 }
 
-/// JIT-compile `prog` at `opt` and run it against a fresh `Runtime`, agreeing with `run_rxm`.
+/// JIT-compile `prog` at `opt` and run it against a fresh `Runtime`, agreeing with `run_rxm` except
+/// where the crate doc's "What native and the rxm interpreter do differently" says they part.
 ///
 /// `opt` reaches the host ISA as Cranelift's `opt_level` setting (see `codegen::cranelift_opt_level`
 /// for the six-to-three collapse); it changes only how the machine code is generated, never the
@@ -80,42 +76,22 @@ pub fn compile_and_run(prog: &Program, caps: Caps, opt: OptLevel) -> NativeRun {
 
 /// Register the `rt_*` host-function addresses on a fresh `JITBuilder`.
 fn register_symbols(builder: &mut JITBuilder) {
-    builder.symbol("rt_cons", rt_cons as *const u8);
-    builder.symbol("rt_head", rt_head as *const u8);
-    builder.symbol("rt_tail", rt_tail as *const u8);
-    builder.symbol("rt_is_empty", rt_is_empty as *const u8);
-    builder.symbol("rt_box", rt_box as *const u8);
-    builder.symbol("rt_box_get", rt_box_get as *const u8);
-    builder.symbol("rt_box_set", rt_box_set as *const u8);
-    builder.symbol("rt_tick", rt_tick as *const u8);
-    builder.symbol("rt_enter", rt_enter as *const u8);
-    builder.symbol("rt_leave", rt_leave as *const u8);
-    builder.symbol("rt_faulted", rt_faulted as *const u8);
+    for f in RtFn::ALL {
+        builder.symbol(f.symbol(), f.address());
+    }
 }
 
-/// Build the host ISA the JIT compiles against, with `opt` as its `opt_level` setting.
+/// Build the host ISA the JIT compiles against, with `codegen::jit_flags(opt)`.
 ///
 /// The ISA is built here, not by `JITBuilder::new`: that delegates to `with_flags`, which builds an
 /// ISA from default flags with no way to reach `opt_level`. Doing so also turns `with_flags`'s two
-/// internal panics into `LowerError`s. The other two flags need not match `with_flags`, which sets
-/// `is_pic` per architecture. With `use_colocated_libcalls` and `is_pic` both `false`, every libcall
-/// and runtime import is called through its absolute address, with no ±2 GiB reach limit, and
-/// `JITModule::new` accepts `is_pic=false` on every host. On x86-64 that flag makes a module-local
-/// symbol's address (`func_addr`, `symbol_value`) a RIP-relative `lea` the JIT cannot redirect when
-/// out of reach, so the JIT's code takes none. `shared::BYTES_PER_VAR` assumes `is_pic=false` too.
-///
-/// This is the JIT's ONLY ISA construction site, and it is a separate function so that
-/// `tests::the_opt_level_reaches_the_jits_own_isa` can measure the code it actually emits (see
-/// `build_module`'s returned byte count). The AOT driver builds its own ISA in `aot.rs`; a liveness
-/// test over that one says nothing about this one.
+/// internal panics into `LowerError`s. This is the JIT's ONLY ISA construction site, and it is a
+/// separate function so that `tests::the_opt_level_reaches_the_jits_own_isa` can measure the code it
+/// actually emits (see `build_module`'s returned byte count). The AOT driver builds its own ISA in
+/// `aot.rs`; a liveness test over that one says nothing about this one.
 fn host_isa(opt: OptLevel) -> Result<OwnedTargetIsa, NativeRun> {
-    let mut flags = settings::builder();
-    for (name, value) in
-        [("use_colocated_libcalls", "false"), ("is_pic", "false"), ("opt_level", cranelift_opt_level(opt))]
-    {
-        flags.set(name, value).map_err(internal_error)?;
-    }
-    cranelift_native::builder().map_err(internal_error)?.finish(settings::Flags::new(flags)).map_err(internal_error)
+    let flags = jit_flags(opt).map_err(internal_error)?;
+    cranelift_native::builder().map_err(internal_error)?.finish(flags).map_err(internal_error)
 }
 
 /// Build the JIT module against `host_isa(opt)` and define every subroutine, returning the module,
@@ -130,42 +106,19 @@ fn build_module(prog: &Program, subs: &[Subroutine], opt: OptLevel) -> Result<(J
     let mut jb = JITBuilder::with_isa(host_isa(opt)?, default_libcall_names());
     register_symbols(&mut jb);
     let mut module = JITModule::new(jb);
-
-    // The shared, `Module`-generic codegen declares/translates against `&mut dyn Module`; a
-    // `&mut JITModule` coerces automatically. A `CodegenError(m)` becomes this driver's `LowerError`.
-    let rt = match declare_rt(&mut module) {
-        Ok(rt) => rt,
-        Err(CodegenError(m)) => return Err(internal_error(m)),
-    };
-
-    // Declare every subroutine up front so `Call` can reference callees defined later.
-    let (func_ids, arity) = match declare_subroutines(&mut module, subs) {
-        Ok(v) => v,
-        Err(CodegenError(m)) => return Err(internal_error(m)),
-    };
-    let decls = Decls { rt, func_ids, arity };
-
-    // Define each subroutine.
-    let mut fbctx = FunctionBuilderContext::new();
     let mut code_bytes: u64 = 0;
-    for sub in subs {
-        let mut ctx = module.make_context();
-        ctx.func.signature = word_signature(&module, param_count(sub));
-        let fid = decls.func_ids[&sub.entry];
-        ctx.func.name = UserFuncName::user(0, fid.as_u32());
-        if let Err(CodegenError(m)) = translate_subroutine(&mut module, &mut ctx, &mut fbctx, prog, sub, &decls) {
-            return Err(internal_error(m));
-        }
-        if let Err(e) = module.define_function(fid, &mut ctx) {
-            return Err(internal_error(e));
-        }
-        // Cranelift leaves the emitted size on the context until `clear_context`, so read it here.
+    let decls = define_all(&mut module, prog, subs, &mut FunctionBuilderContext::new(), |stage, _, ctx| {
         // `None` cannot occur after a successful `define_function` (it is what populates
         // `compiled_code`); counting it as 0 rather than unwrapping keeps this path total.
-        code_bytes =
-            code_bytes.saturating_add(ctx.compiled_code().map_or(0, |cc| u64::from(cc.code_info().total_size)));
-        module.clear_context(&mut ctx);
-    }
+        if let Stage::Defined = stage {
+            code_bytes =
+                code_bytes.saturating_add(ctx.compiled_code().map_or(0, |cc| u64::from(cc.code_info().total_size)));
+        }
+    })
+    .map_err(|e| match e {
+        DefineError::Codegen(m) => internal_error(m),
+        DefineError::Module(e) => internal_error(e),
+    })?;
     Ok((module, decls, code_bytes))
 }
 
@@ -225,12 +178,12 @@ mod tests {
         [OptLevel::O0, OptLevel::O1, OptLevel::O2, OptLevel::O3, OptLevel::Os, OptLevel::Oz];
 
     /// native `compile_and_run` must agree with `run_rxm` (same `Ran` outcome incl. heap, or both
-    /// `Fault`, or both `HitCap`) under `caps`, compiled at `opt`.
+    /// `Fault` with one text, or both `HitCap`) under `caps`, compiled at `opt`.
     fn agree_caps_at(prog: Program, caps: Caps, opt: OptLevel) {
         let native = compile_and_run(&prog, caps, opt);
         match (run_rxm(&prog, caps), native) {
             (RxmRun::Ran(a), NativeRun::Ran(n)) => assert_eq!(a, n, "outcome mismatch at {opt:?}"),
-            (RxmRun::Fault(_), NativeRun::Fault(_)) => {}
+            (RxmRun::Fault(a), NativeRun::Fault(n)) => assert_eq!(a, n, "fault text mismatch at {opt:?}"),
             (RxmRun::HitCap, NativeRun::HitCap) => {}
             (a, n) => panic!("native vs rxm-interp mismatch at {opt:?}:\n rxm={a:?}\n native={n:?}"),
         }
@@ -260,15 +213,14 @@ mod tests {
 
     #[test]
     fn the_opt_level_reaches_the_jits_own_isa() {
-        // LIVENESS GUARD for `host_isa`. There are TWO Cranelift ISA construction sites — this module's
-        // and `aot::emit_object`'s — and `aot::tests::the_opt_level_reaches_the_cranelift_isa` covers
-        // only the other one. Without this test, replacing `cranelift_opt_level(opt)` in `host_isa`
-        // with a literal `"none"` (or switching to `JITBuilder::new`, which has no way to reach
-        // `opt_level` at all) leaves the WHOLE suite green while every native oracle leg —
-        // `reference == λ == TM == native`, `native == rxm-interp`, the cross-backend sweep — quietly
-        // validates unoptimized codegen. It cannot be caught by the object-size baseline either:
-        // Cranelift's optimized-vs-`none` object deltas on that corpus sit well inside its ±10% band
-        // (see `tests/size_baseline.rs`).
+        // LIVENESS GUARD for `host_isa`. `aot::tests::the_opt_level_reaches_the_cranelift_isa` covers
+        // only the AOT's own ISA, and the snapshot test only `codegen::jit_flags`. Without this test,
+        // `host_isa` dropping `opt` (passing `jit_flags` a fixed level, or switching to
+        // `JITBuilder::new`, which has no way to reach `opt_level` at all) leaves the WHOLE suite green
+        // while every native oracle leg — `reference == λ == TM == native`, `native == rxm-interp`,
+        // the cross-backend sweep — quietly validates unoptimized codegen. The object-size baseline
+        // cannot catch it either: Cranelift's optimized-vs-`none` object deltas on that corpus sit
+        // well inside its ±10% band (see `tests/size_baseline.rs`).
         //
         // The fixture is chosen for margin, not for parity with the AOT test: redundant `a + b`
         // subexpressions are exactly what `speed`'s GVN eliminates. The AOT test's
@@ -291,10 +243,8 @@ mod tests {
 
     #[test]
     fn agreement_holds_at_every_opt_level() {
-        // Per-level Cranelift agreement in the DEFAULT (cranelift-only) build. Without it, the default
-        // build checks cross-level agreement on one fat-frame shape alone; the rest is asserted only in
-        // `tests/llvm_oracle.rs`, which needs an LLVM 23 toolchain. Everything else here goes through
-        // `agree`, which is default-level only.
+        // Per-level Cranelift agreement in the DEFAULT (cranelift-only) build: `tests/llvm_oracle.rs`
+        // sweeps the levels too but needs an LLVM 23 toolchain, and `agree` runs at the default level only.
         //
         // Deliberately small programs — this runs on every `cargo test`. Between them they cover the
         // shapes where an optimizer could plausibly change the ANSWER rather than just the code:
@@ -790,6 +740,53 @@ mod tests {
             code: vec![Instr::Bin(BinOp::Add, Reg::Rr, Reg::Arg(0), Reg::Arg(0)), Instr::Halt],
             labels: vec![],
         });
+    }
+
+    /// `prog`'s result from the rxm interpreter and from native, each of which must run to a value.
+    fn rxm_and_native_results(prog: &Program) -> (u64, u64) {
+        let rxm = match run_rxm(prog, DEFAULT_CAPS) {
+            RxmRun::Ran(o) => o.result,
+            other => panic!("rxm did not run to a value: {other:?}"),
+        };
+        let native = match compile_and_run(prog, DEFAULT_CAPS, OptLevel::default()) {
+            NativeRun::Ran(o) => o.result,
+            other => panic!("native did not run to a value: {other:?}"),
+        };
+        (rxm, native)
+    }
+
+    /// The crate doc's "Registers across a call", which `agree` cannot test: the two differ on purpose.
+    #[test]
+    fn a_callee_finds_its_callers_locals_and_rr_in_rxm_and_zero_natively() {
+        let callee_reads = |reg| Program {
+            code: vec![
+                Instr::Li(Reg::Loc(0), 3),
+                Instr::Li(Reg::Rr, 1),
+                Instr::Call("g".into()),
+                Instr::Halt,
+                Instr::Mov(Reg::Rr, reg), // 4  g:
+                Instr::Ret,
+            ],
+            labels: vec![("g".into(), 4)],
+        };
+        assert_eq!(rxm_and_native_results(&callee_reads(Reg::Loc(0))), (3, 0), "the callee's `l0`");
+        assert_eq!(rxm_and_native_results(&callee_reads(Reg::Rr)), (1, 0), "the callee's `rr`");
+    }
+
+    #[test]
+    fn after_a_call_an_rxm_caller_finds_what_its_callee_left_in_the_args() {
+        let prog = Program {
+            code: vec![
+                Instr::Li(Reg::Arg(0), 5),
+                Instr::Call("g".into()),
+                Instr::Mov(Reg::Rr, Reg::Arg(0)),
+                Instr::Halt,
+                Instr::Li(Reg::Arg(0), 7), // 4  g:
+                Instr::Ret,
+            ],
+            labels: vec![("g".into(), 4)],
+        };
+        assert_eq!(rxm_and_native_results(&prog), (7, 5));
     }
 
     /// Build a recursive `countdown(n)` whose `countdown` subroutine writes `fillers` extra `Loc`

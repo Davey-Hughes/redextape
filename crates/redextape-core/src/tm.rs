@@ -43,7 +43,7 @@ pub use reduced_file::{ReduceError, RunFailure, decode_reduced, reduce, run_caps
 pub use rxm::{
     Caps, DEFAULT_CAPS, DecodeFailure, Instr, Program, Reg, RxmHeader, RxmOutcome, RxmRun, decode_rxm,
     decode_rxm_reason, decode_rxm_ty, decode_rxm_ty_reason, print_instr, print_rxm, print_rxm_doc, print_rxm_mapped,
-    print_rxm_with, print_rxm_with_mapped, run_rxm,
+    print_rxm_with, print_rxm_with_mapped, reg_str, run_rxm,
 };
 pub use rxm_syntax::{
     MnemonicDoc, RxmDocument, instr_at, parse_rxm, parse_rxm_full, parse_rxm_nav, rxm_label_diagnostics,

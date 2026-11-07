@@ -151,10 +151,12 @@ pub(crate) fn label_name_representable(name: &str) -> bool {
 
 /// A register as the listing spells it: `r3`, `a0`, `rr`.
 ///
-/// `pub(crate)` FOR ONE OTHER READER, `viewmodel::RxmState::window`, which names the register the last
-/// step wrote in the same spelling, so the rxm view can find the register a frame calls changed by the
-/// name the listing prints for it. A second spelling there would agree with this one until either moved.
-pub(crate) fn reg_str(r: Reg) -> String {
+/// Public because two readers outside the printer must spell a register exactly as the listing does:
+/// `viewmodel::RxmState::window`, so the rxm view finds the register a step wrote by its printed name,
+/// and the native LLVM backend, which names each register's stack slot so the IR views can line LLVM
+/// up with rxm. A second spelling in either would agree with this one until either moved.
+#[must_use]
+pub fn reg_str(r: Reg) -> String {
     match r {
         Reg::Loc(n) => format!("r{n}"),
         Reg::Arg(n) => format!("a{n}"),

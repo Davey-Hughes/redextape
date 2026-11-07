@@ -261,7 +261,7 @@ fn rxm_of(src: &str) -> redextape_core::tm::rxm::Program {
 ///
 /// `MAX_MACHINE_STATES` is the first guard in this tree that a REAL program comes anywhere near, so
 /// "never rejects a legitimate program" has to be a test. This is the largest member of
-/// `native_oracle.rs`'s `FIRST_ORDER_DEMOS`: 97 tokens, and 49,135 states under `Binary` — 4.9% of
+/// `corpus.rs`'s `FIRST_ORDER_DEMOS`: 97 tokens, and 49,135 states under `Binary` — 4.9% of
 /// the ceiling.
 ///
 /// `FIRST_ORDER_DEMOS` has 46 entries and this file only ever hand-copies one of them, so nothing

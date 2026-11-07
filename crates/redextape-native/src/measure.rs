@@ -44,16 +44,16 @@ pub const RUNS: usize = 5;
 
 /// The measured programs, chosen to span the shapes where optimization behaves differently:
 /// a counted loop (unrolling has room), self-recursion (the inliner declines, so the
-/// `rt_enter`/`rt_leave` structure dominates), list building (opaque `rt_*` heap calls the
-/// optimizer cannot see through), and a defunctionalized higher-order program (dispatch through
-/// `$applyN`).
+/// `rt_enter`/`rt_leave` structure dominates), list and box building (opaque `rt_*` heap calls the
+/// optimizer cannot see through; the box builder's closure captures a `let mut`), and a
+/// defunctionalized higher-order program (dispatch through `$applyN`).
 ///
-/// Sized, not just shaped: native ticks the step counter only on backward edges and calls, not per
+/// Sized, not just shaped: native ticks the step counter only on backward edges and counts depth on calls, not per
 /// instruction, so a loop's cost scales with its iteration count and a recursive program's with its
 /// call depth — NOT with how much arithmetic each iteration/call does. Sized so each program's own
 /// execution is a meaningful share of `compile_and_run` while staying comfortably inside
 /// `redextape_core::tm::DEFAULT_CAPS` (`steps: 5_000_000, stack: 100_000, heap: 5_000_000`): the
-/// loop's 1,000,000 backward edges are 20% of the step cap; the three recursive programs' call depth
+/// loop's 1,000,000 backward edges are 20% of the step cap; the four recursive programs' call depth
 /// of 30,000 is 30% of the 100,000 stack (recursion-depth) cap, with steps and heap far under their
 /// caps too. Every `time_runs` call asserts `NativeRun::Ran(_)`, so headroom here is not optional —
 /// a program that trips a cap panics the whole grid instead of silently reporting a fault as a time.
@@ -61,10 +61,14 @@ pub const RUNS: usize = 5;
 /// Names are the baseline file's keys AND must describe the source below — a size change without a
 /// matching rename would silently mislabel that row (e.g. a `loop100` that actually runs a million
 /// iterations).
-pub const CORPUS: [(&str, &str); 4] = [
+pub const CORPUS: [(&str, &str); 5] = [
     ("loop1000000", "let mut i = 0; let mut acc = 0; while i < 1000000 { acc = acc + i; i = i + 1; } acc"),
     ("sum30000", "fn sum(n){ if n==0 {0} else { n + sum(n-1) } } sum(30000)"),
     ("list30000", "fn build(n){ if n==0 {nil} else { cons(n, build(n-1)) } } build(30000)"),
+    (
+        "box30000",
+        "fn build(n) { if n == 0 { 0 } else { let mut v = n; let get = |x| v + x; v = v + 1; get(0) + build(n - 1) } } build(30000)",
+    ),
     // Builds its own 30,000-element list (rather than a 3-element literal) so `map`'s
     // recursion is deep enough to matter; `build`'s and `map`'s recursions run one after the other
     // (the argument is fully evaluated before `map` is called), so peak call depth is ~30,000, not

@@ -1,5 +1,41 @@
 //! The native backend: Core -> rxm -> machine code (JIT/AOT via Cranelift, or JIT via
 //! LLVM), a fourth oracle leg with two swappable codegen backends behind the `Codegen` seam.
+//!
+//! # What native and the rxm interpreter do differently
+//! Both machines hold the heap core (`redextape_core::heap`), so cells, boxes, the heap cap and the heap faults are
+//! one piece of code. Outside it they differ as follows, each for the reason given.
+//!
+//! * **Steps.** The rxm interpreter charges a step for every instruction it completes; native charges one only at a
+//!   backward `jz` or `jmp`, and bounds calls with the depth cap instead. A guard is a runtime call, so one per
+//!   instruction would cost what the JIT saves, and a guard on every loop and every call is enough to end any run
+//!   that would not end. A run the rxm interpreter stops at its step cap can therefore run to its end natively.
+//! * **The mem cap.** Only the rxm interpreter has one. It bounds the words the interpreter copies aside at a `call`
+//!   to save the caller's locals. A native `call` passes only its argument words: the caller's registers stay in the
+//!   caller's own native frame, and the depth cap bounds how many of those frames there are.
+//! * **The stack cap.** Both refuse a `call` made while `caps.stack` calls have not returned: the rxm interpreter
+//!   checks `stack.len() >= caps.stack` before it saves a frame, and native counts the call into `depth` first and
+//!   checks `depth > min(caps.stack, safe_depth)`. The one difference is `safe_depth`, a safe-side estimate of how
+//!   many of the program's largest frames fit on the run thread's stack (`shared::native_depth_cap`): native frames
+//!   are on that real stack, and a call past its end would abort the process instead of ending the run at a cap.
+//! * **Registers across a call.** Both keep the convention `tm::Reg` states: a `call` keeps the caller's `Loc`s and
+//!   promises nothing for its `Arg`s or `rr`. The rxm interpreter runs every frame in one register file and saves
+//!   only what the convention keeps, the caller's locals. Native compiles each subroutine to a function of its own,
+//!   whose registers are its own: its parameter `Arg`s from the call's arguments and every other register at zero.
+//!   So an rxm callee finds its caller's locals and `rr` where a native one finds zero, and after a `call` an rxm
+//!   caller finds what its callee left in the `Arg`s where a native one finds its own.
+//! * **A malformed program.** Native compiles every subroutine before the run starts, so it refuses, as a
+//!   `NativeRun::LowerError` (an `AotError` from `emit_object`), a program `analysis::partition` cannot split into
+//!   subroutines (an undefined label, control flow past the end of `code`, a `halt` in a callee, two subroutines
+//!   sharing code) and one with a register index at or over `MAX_REGISTERS`. The rxm interpreter needs no
+//!   subroutines and resolves a label only when a run takes it: it faults when a run takes a jump or call to an
+//!   undefined label or runs past the end of `code`, faults before its first step on an over-cap register, and runs
+//!   a `halt` in a callee or shared code as written.
+//! * **After a fault.** The rxm interpreter stops on the instruction that faulted. A native callee that faults or
+//!   trips a cap leaves through its exit block, which returns to its caller, and the caller runs on to its next guard
+//!   or its own `ret` before it leaves too: a native return leaves only the callee, and the walk puts no guard after
+//!   a call. Running on cannot change the answer: once the runtime has latched the stop its heap calls do nothing
+//!   and every guard leaves, every loop and every recursion passes a guard, and the driver reports the latched fault
+//!   or cap, not the word returned.
 
 // Test code is exempt from `pedantic`, for the reason `clippy.toml` gives for the
 // unwrap/expect/panic set: an assertion is a deliberate panic, and a probe that casts a `u64` step
@@ -7,7 +43,7 @@
 // module — under `--all-targets` each lib compiles twice, and `cfg(test)` holds only in the
 // test-harness pass, so production warnings still surface from the other one.
 //
-// This ALSO covers the four `#[cfg(all(test, feature = "..."))]` modules in redextape-native that
+// This ALSO covers the five `#[cfg(all(test, ...))]` modules in redextape-native that
 // clippy.toml's header calls out as unreachable by clippy's own in-test detection: that limitation
 // is specific to clippy's `is_in_test` heuristic, and this is ordinary `cfg` evaluation.
 #![cfg_attr(test, allow(clippy::pedantic))]
@@ -19,19 +55,29 @@ use redextape_core::tm::{Caps, LowerError, RxmOutcome};
 pub mod analysis;
 #[cfg(feature = "cranelift")]
 pub mod aot;
-#[cfg(feature = "cranelift")]
+#[cfg(feature = "clif")]
 pub mod codegen;
+#[cfg(all(test, any(feature = "cranelift", feature = "llvm")))]
+mod codegen_snapshots;
 #[cfg(feature = "cranelift")]
 pub mod jit;
 #[cfg(feature = "llvm")]
 pub mod llvm;
+#[cfg(any(feature = "clif", feature = "llvm"))]
+mod lower;
 #[cfg(any(feature = "cranelift", feature = "llvm"))]
 pub mod measure;
-#[cfg(any(feature = "cranelift", feature = "llvm"))]
+#[cfg(feature = "clif")]
+mod module_free;
+#[cfg(any(feature = "clif", feature = "llvm"))]
+mod rt_imports;
+#[cfg(any(feature = "clif", feature = "llvm"))]
 pub mod shared;
 
 #[cfg(feature = "cranelift")]
 pub use aot::{LinkOptions, LinkerChoice, emit_object, link_executable};
+#[cfg(feature = "clif")]
+pub use module_free::build_clif;
 
 /// An ahead-of-time (AOT) object-emission / link failure. Defined unconditionally (not behind the
 /// `cranelift` feature) so the no-`cranelift` `emit_object` stub can name it too. `Link`/`NoLinker`/

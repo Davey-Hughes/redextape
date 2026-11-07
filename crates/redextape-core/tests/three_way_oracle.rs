@@ -403,7 +403,7 @@ fn extract_str_array(source: &str, const_name: &str) -> Vec<String> {
     out
 }
 
-/// `examples/step_survey.rs`, `redextape-native/tests/native_oracle.rs` and `examples/common/demos.rs`
+/// `examples/step_survey.rs`, `redextape-native/tests/common/corpus.rs` and `examples/common/demos.rs`
 /// each hand-copy this file's `FIRST_ORDER_DEMOS` — an example is a separate binary crate and cannot
 /// `use` an integration test's module, and no shared fixtures crate holds the array — so all three are
 /// duplicated by hand rather than referencing this array. This test reads all four files as TEXT (via
@@ -430,7 +430,7 @@ fn first_order_demos_stay_synced_across_every_copy() {
     // hand-written `read_to_string`/`assert_eq!` pairs, where each new copy would mean editing three places.
     let copies: &[(&str, &str)] = &[
         ("examples/step_survey.rs", "examples/step_survey.rs"),
-        ("../redextape-native/tests/native_oracle.rs", "redextape-native/tests/native_oracle.rs"),
+        ("../redextape-native/tests/common/corpus.rs", "redextape-native/tests/common/corpus.rs"),
         ("examples/common/demos.rs", "examples/common/demos.rs"),
     ];
 

@@ -1024,7 +1024,7 @@ mod tests {
 
     /// The premise the two budget tests above never checked: does `sum(5)`'s ratio (first-order
     /// recursion) transfer to the machine that actually sets the 49,135 floor in the ceiling those
-    /// tests use? `state_cost_probe`'s section G lowers every entry of `native_oracle.rs`'s
+    /// tests use? `state_cost_probe`'s section G lowers every entry of `corpus.rs`'s
     /// `FIRST_ORDER_DEMOS` under both encodings and finds 49,135 states there — the `map`/`ap2` demo
     /// under `Binary` at `MAX_FIELD_WIDTH` (also `guard_counterexamples.rs`'s
     /// `the_worst_shipped_demo_lowers_far_below_the_state_ceiling`, which asserts that same figure is

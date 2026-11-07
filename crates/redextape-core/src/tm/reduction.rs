@@ -112,7 +112,7 @@ impl StateTable {
 }
 
 /// The largest machine the shipped demos build, with the initial tapes it runs on: the `map` + `ap2` entry
-/// of `native_oracle.rs`'s `FIRST_ORDER_DEMOS`, which `state_cost_probe`'s section G finds as the corpus's
+/// of `corpus.rs`'s `FIRST_ORDER_DEMOS`, which `state_cost_probe`'s section G finds as the corpus's
 /// maximum, lowered as section G lowers it — under `Binary` at `MAX_FIELD_WIDTH`.
 ///
 /// The source is byte-identical to `guard_counterexamples.rs`'s `WORST_SHIPPED_DEMO`, which an

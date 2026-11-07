@@ -72,12 +72,12 @@ fn assert_single_tape_agrees_capped(src: &str, caps: Caps) {
     assert!(got_steps > want_steps, "the reduction should cost more steps, not fewer");
 }
 
-/// Every member here MUST be a member of `native_oracle.rs`'s `FIRST_ORDER_DEMOS`
-/// (`crates/redextape-native/tests/native_oracle.rs`), which is what this file's own doc claims a
-/// fourth leg onto: that array's `four_way_oracle_on_the_first_order_suite_unary` already asserts
-/// `reference == λ == multitape-TM == native` for every one of its entries, so a program drawn
-/// from it gets `reference == λ == multitape-TM` for free and this test only has to add the
-/// fourth equality, `== singletape-TM`. A program NOT in that array gets no such thing: this leg
+/// Every member here MUST be a member of `corpus.rs`'s `FIRST_ORDER_DEMOS`
+/// (`crates/redextape-native/tests/common/corpus.rs`), which is what this file's own doc claims a
+/// fourth leg onto: `native_oracle.rs` runs `four_way_oracle_on_the_first_order_suite_unary`, which
+/// already asserts `reference == λ == multitape-TM == native` for every entry of the array, so a
+/// program drawn from it gets `reference == λ == multitape-TM` for free and this test only has to add
+/// the fourth equality, `== singletape-TM`. A program NOT in that array gets no such thing: this leg
 /// would then establish only `multitape-TM == singletape-TM`, not the four-way chain the module
 /// doc claims.
 #[test]

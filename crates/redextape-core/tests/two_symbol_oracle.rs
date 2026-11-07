@@ -82,8 +82,8 @@ fn live_tapes(want: &[Tape]) -> Vec<&'static str> {
     want.iter().zip(NAMES).filter(|(t, _)| t.snapshot().0.iter().any(|c| *c != BLANK)).map(|(_, name)| name).collect()
 }
 
-/// Every member MUST be a member of `native_oracle.rs`'s `FIRST_ORDER_DEMOS`
-/// (`crates/redextape-native/tests/native_oracle.rs`) — that array's four-way oracle already asserts
+/// Every member MUST be a member of `corpus.rs`'s `FIRST_ORDER_DEMOS`
+/// (`crates/redextape-native/tests/common/corpus.rs`) — `native_oracle.rs`'s four-way oracle already asserts
 /// `reference == λ == multitape-TM == native` for each, so a program drawn from it gets the earlier
 /// equalities for free and this leg only adds the fifth. A non-member would establish
 /// `multitape-TM == two-symbol-TM` and nothing else.

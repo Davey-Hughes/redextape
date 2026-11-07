@@ -1,8 +1,8 @@
-//! The Module-generic Cranelift codegen: translate an rxm `Program` into Cranelift IR by
-//! calling ONLY `cranelift_module::Module` trait methods, so the same codegen drives either a
-//! `JITModule` (see `jit.rs`) or an `ObjectModule` (AOT). Every entry point here takes
-//! `module: &mut dyn Module`; a concrete `&mut JITModule`/`&mut ObjectModule` coerces to it at the
-//! call site.
+//! The Cranelift codegen: translate an rxm `Program` into Cranelift IR. `translate_subroutine`
+//! reaches its callees only through `FuncImports`, so it builds the same CLIF over a
+//! `cranelift_module::Module` (`define_all`, which drives a `JITModule` in `jit.rs` and an
+//! `ObjectModule` in `aot.rs`) and without one (`module_free`, which needs no ISA and so builds for
+//! wasm32). The `Module` half is compiled under the `cranelift` feature only.
 //!
 //! # The model
 //! * **Registers → `Variable`s.** Each function owns one `Variable` per `Loc(i)` (init `0`), per
@@ -13,40 +13,51 @@
 //! * **Blocks.** One Cranelift block per reachable body instruction, plus a prologue entry block and
 //!   a single shared exit block. `Jz`/`Jmp` branch to the target index's block; fall-through jumps to
 //!   the next index's block (guaranteed present in `body` by the reachability partition).
-//! * **Totality.** Straight-line code always terminates. Any cycle in a lowered CFG contains a
-//!   *backward* `Jz`/`Jmp` (target index ≤ current), and any unbounded recursion goes through a
-//!   `Call`; we emit `rt_tick` before every backward branch and `rt_enter` at every `Call`, each of
-//!   which `brif`s to the exit block once its cap trips. So an infinite loop trips the step cap and
-//!   infinite recursion trips the stack-depth cap — the latter *before* the guarded native call is
-//!   made, so the real call stack never overflows. The depth cap is FRAME-SIZE-AWARE
-//!   (`native_depth_cap` = `min(caps.stack, safe_depth)`): a fat-frame subroutine gets a
-//!   proportionally shallower cap so it `HitCap`s before exhausting the reserved 512 MiB JIT thread
-//!   stack, for ANY program — never a process abort.
+//! * **Source locations.** Every instruction a body instruction lowers to carries that instruction's
+//!   code index as its `SourceLoc`, which links CLIF back to rxm; the prologue and the exit carry none.
+//! * **Totality.** Where the guards go is the lowering walk's decision (`lower`'s module doc says
+//!   why they make a run total); here each one is a call that `brif`s to the exit block when it
+//!   returns nonzero. `rt_enter` trips *before* the guarded native call is made, so the real call stack
+//!   never overflows. The depth cap is FRAME-SIZE-AWARE (`native_depth_cap` = `min(caps.stack, safe_depth)`):
+//!   a fat-frame subroutine gets a proportionally shallower cap so it `HitCap`s before exhausting the
+//!   reserved 512 MiB JIT thread stack, for ANY program — never a process abort.
 //!
 //! # Step accounting is coarse (termination, not exact-count, parity)
 //! `run_rxm` charges one `steps` tick per instruction executed; native ticks only *backward edges*
-//! and *calls* — enough to force any non-terminating run to trip a cap, but not an exact count. So a
-//! straight-line program that `run_rxm` would `HitCap` on a `steps` cap *smaller than its
-//! instruction count* can still run to completion natively. This is deliberate: ticking every
-//! instruction would defeat the JIT. Native guarantees **termination**, not step-count equality, and
-//! the oracle compares terminating *outcomes*. Callers must therefore not pass a `steps` cap tighter
-//! than a terminating program needs (use `DEFAULT_CAPS`, or a cap large enough to complete); the
-//! `agree`/oracle helpers do exactly that.
+//! and bounds *calls* by depth (`rt_enter`) — enough to force any non-terminating run to trip a
+//! cap, but not an exact count. So a straight-line program that `run_rxm` would `HitCap` on a
+//! `steps` cap *smaller than its instruction count* can still run to completion natively. This is
+//! deliberate: ticking every instruction would defeat the JIT. Native guarantees **termination**,
+//! not step-count equality, and the oracle compares terminating *outcomes*. Callers must therefore
+//! not pass a `steps` cap tighter than a terminating program needs (use `DEFAULT_CAPS`, or a cap
+//! large enough to complete); the `agree`/oracle helpers do exactly that.
 
 use std::collections::HashMap;
 
+#[cfg(feature = "cranelift")]
 use cranelift_codegen::Context;
+#[cfg(feature = "cranelift")]
+use cranelift_codegen::ir::UserFuncName;
 use cranelift_codegen::ir::condcodes::IntCC;
-use cranelift_codegen::ir::{AbiParam, Block, FuncRef, InstBuilder, Signature, Value, types};
+use cranelift_codegen::ir::{
+    AbiParam, Block, FuncRef, Function, Inst, InstBuilder, Signature, SourceLoc, Value, types,
+};
+use cranelift_codegen::isa::TargetFrontendConfig;
+#[cfg(feature = "cranelift")]
+use cranelift_codegen::settings::{self, Configurable};
 use cranelift_frontend::{FunctionBuilder, FunctionBuilderContext, Variable};
-use cranelift_module::{FuncId, Linkage, Module};
+#[cfg(feature = "cranelift")]
+use cranelift_module::{FuncId, Linkage, Module, ModuleError};
 
 use redextape_core::core::BinOp;
-use redextape_core::tm::{Instr, Program, Reg};
+use redextape_core::tm::{Program, Reg};
 
+#[cfg(feature = "cranelift")]
 use crate::OptLevel;
 use crate::analysis::Subroutine;
-use crate::shared::{n_arg_vars, param_count};
+use crate::lower::{Banks, BodyPos, LowerFault, LowerSink, lower_subroutine};
+use crate::rt_imports::{PerRtFn, RtFn};
+use crate::shared::param_count;
 
 /// A backend-agnostic codegen error: a human-readable message the driver wraps into its own outcome
 /// type (`jit.rs` maps it to `NativeRun::LowerError`). Kept free of any JIT/AOT-specific type so the
@@ -55,6 +66,7 @@ pub(crate) struct CodegenError(pub String);
 
 /// Build a `CodegenError` from any displayable value. The driver adds its own framing when it wraps
 /// this into its outcome type, so the message here is the bare cause.
+#[cfg(feature = "cranelift")]
 fn codegen_error(msg: impl std::fmt::Display) -> CodegenError {
     CodegenError(msg.to_string())
 }
@@ -67,6 +79,7 @@ fn codegen_error(msg: impl std::fmt::Display) -> CodegenError {
 ///
 /// Both Cranelift drivers (`jit::build_and_run` and `aot::emit_object`) route through here, so the
 /// JIT and the AOT object can never be built at different levels for the same `OptLevel`.
+#[cfg(feature = "cranelift")]
 pub(crate) fn cranelift_opt_level(opt: OptLevel) -> &'static str {
     match opt {
         OptLevel::O0 => "none",
@@ -75,73 +88,43 @@ pub(crate) fn cranelift_opt_level(opt: OptLevel) -> &'static str {
     }
 }
 
+/// The ISA flags the JIT compiles with at `opt`, which the snapshot test's fixed ISAs share. They need
+/// not match `JITBuilder::with_flags`, which sets `is_pic` per architecture. With
+/// `use_colocated_libcalls` and `is_pic` both `false`, every libcall and runtime import is called
+/// through its absolute address, with no ±2 GiB reach limit, and `JITModule::new` accepts
+/// `is_pic=false` on every host. On x86-64 that flag makes a module-local symbol's address
+/// (`func_addr`, `symbol_value`) a RIP-relative `lea` the JIT cannot redirect when out of reach, so
+/// the JIT's code takes none. `shared::BYTES_PER_VAR` assumes `is_pic=false` too.
+#[cfg(feature = "cranelift")]
+pub(crate) fn jit_flags(opt: OptLevel) -> Result<settings::Flags, settings::SetError> {
+    let mut flags = settings::builder();
+    for (name, value) in
+        [("use_colocated_libcalls", "false"), ("is_pic", "false"), ("opt_level", cranelift_opt_level(opt))]
+    {
+        flags.set(name, value)?;
+    }
+    Ok(settings::Flags::new(flags))
+}
+
 /// The host pointer type (`module.target_config().pointer_type()`), e.g. `I64` on 64-bit targets.
 /// Used by the AOT driver (`aot.rs`) to build `main`/`func_addr` code; a `Module`-trait accessor so
 /// it works for any backend. (The JIT driver needs no `main` shim, so it never calls this.)
+#[cfg(feature = "cranelift")]
 pub(crate) fn pointer_type(module: &dyn Module) -> types::Type {
     module.target_config().pointer_type()
 }
 
-/// `FuncId`s of the imported `rt_*` host functions.
-pub(crate) struct RtIds {
-    pub(crate) cons: FuncId,
-    pub(crate) head: FuncId,
-    pub(crate) tail: FuncId,
-    pub(crate) is_empty: FuncId,
-    pub(crate) box_new: FuncId,
-    pub(crate) box_get: FuncId,
-    pub(crate) box_set: FuncId,
-    pub(crate) tick: FuncId,
-    pub(crate) enter: FuncId,
-    pub(crate) leave: FuncId,
-    pub(crate) faulted: FuncId,
-}
-
-/// The same functions imported into a specific `Function` (as `FuncRef`s ready for `call`).
-struct RtRefs {
-    cons: FuncRef,
-    head: FuncRef,
-    tail: FuncRef,
-    is_empty: FuncRef,
-    box_new: FuncRef,
-    box_get: FuncRef,
-    box_set: FuncRef,
-    tick: FuncRef,
-    enter: FuncRef,
-    leave: FuncRef,
-    faulted: FuncRef,
-}
-
-impl RtRefs {
-    fn declare(module: &mut dyn Module, builder: &mut FunctionBuilder, ids: &RtIds) -> RtRefs {
-        RtRefs {
-            cons: module.declare_func_in_func(ids.cons, builder.func),
-            head: module.declare_func_in_func(ids.head, builder.func),
-            tail: module.declare_func_in_func(ids.tail, builder.func),
-            is_empty: module.declare_func_in_func(ids.is_empty, builder.func),
-            box_new: module.declare_func_in_func(ids.box_new, builder.func),
-            box_get: module.declare_func_in_func(ids.box_get, builder.func),
-            box_set: module.declare_func_in_func(ids.box_set, builder.func),
-            tick: module.declare_func_in_func(ids.tick, builder.func),
-            enter: module.declare_func_in_func(ids.enter, builder.func),
-            leave: module.declare_func_in_func(ids.leave, builder.func),
-            faulted: module.declare_func_in_func(ids.faulted, builder.func),
-        }
-    }
-}
-
-/// Everything the per-function translation needs beyond the function itself.
+/// The `FuncId`s `define_all` declared.
+#[cfg(feature = "cranelift")]
 pub(crate) struct Decls {
-    pub(crate) rt: RtIds,
+    pub(crate) rt: PerRtFn<FuncId>,
     /// entry index → the subroutine's `FuncId`.
     pub(crate) func_ids: HashMap<usize, FuncId>,
-    /// entry index → the subroutine's arity (number of `Arg` params it takes).
-    pub(crate) arity: HashMap<usize, u32>,
 }
 
 /// A signature `(rt_ptr: I64, arg0: I64, ..) -> I64` — all words are `I64`.
-pub(crate) fn word_signature(module: &dyn Module, n_args: u32) -> Signature {
-    let mut sig = module.make_signature();
+pub(crate) fn word_signature(config: TargetFrontendConfig, n_args: u32) -> Signature {
+    let mut sig = Signature::new(config.default_call_conv);
     sig.params.push(AbiParam::new(types::I64)); // the hidden `*mut Runtime`
     for _ in 0..n_args {
         sig.params.push(AbiParam::new(types::I64));
@@ -150,51 +133,101 @@ pub(crate) fn word_signature(module: &dyn Module, n_args: u32) -> Signature {
     sig
 }
 
-/// Declare the `rt_*` imports in `module`, returning their `FuncId`s.
-pub(crate) fn declare_rt(module: &mut dyn Module) -> Result<RtIds, CodegenError> {
-    let mut decl = |name: &str, n_params: usize, has_ret: bool| -> Result<FuncId, CodegenError> {
-        let mut sig = module.make_signature();
-        for _ in 0..n_params {
-            sig.params.push(AbiParam::new(types::I64));
-        }
-        if has_ret {
-            sig.returns.push(AbiParam::new(types::I64));
-        }
-        module.declare_function(name, Linkage::Import, &sig).map_err(codegen_error)
-    };
-    Ok(RtIds {
-        cons: decl("rt_cons", 3, true)?,
-        head: decl("rt_head", 2, true)?,
-        tail: decl("rt_tail", 2, true)?,
-        is_empty: decl("rt_is_empty", 2, true)?,
-        box_new: decl("rt_box", 2, true)?,
-        box_get: decl("rt_box_get", 2, true)?,
-        box_set: decl("rt_box_set", 3, false)?,
-        tick: decl("rt_tick", 1, true)?,
-        enter: decl("rt_enter", 1, true)?,
-        leave: decl("rt_leave", 1, false)?,
-        faulted: decl("rt_faulted", 1, true)?,
-    })
+/// The signature of the runtime import `f`: the `*mut Runtime`, its word parameters, and a word
+/// return unless it returns nothing.
+pub(crate) fn rt_signature(config: TargetFrontendConfig, f: RtFn) -> Signature {
+    let mut sig = Signature::new(config.default_call_conv);
+    sig.params.push(AbiParam::new(types::I64)); // the `*mut Runtime`
+    for _ in 0..f.word_params() {
+        sig.params.push(AbiParam::new(types::I64));
+    }
+    if f.returns_word() {
+        sig.returns.push(AbiParam::new(types::I64));
+    }
+    sig
 }
 
-/// Declare every subroutine up front so `Call` can reference callees defined later. Returns the
-/// entry-index → `FuncId` and entry-index → arity maps that seed `Decls`. Uses only `word_signature`
-/// and `module.declare_function`, so it is backend-agnostic. The paired-`HashMap` return is the
-/// exact shape `Decls` and the AOT `main` both consume, so it is kept explicit rather than aliased.
-#[allow(clippy::type_complexity)]
+/// Declare the `rt_*` imports in `module`, in `RtFn::ALL`'s order, returning their `FuncId`s.
+#[cfg(feature = "cranelift")]
+pub(crate) fn declare_rt(module: &mut dyn Module) -> Result<PerRtFn<FuncId>, CodegenError> {
+    let mut ids = Vec::with_capacity(RtFn::ALL.len());
+    for f in RtFn::ALL {
+        let sig = rt_signature(module.target_config(), f);
+        ids.push(module.declare_function(f.symbol(), Linkage::Import, &sig).map_err(codegen_error)?);
+    }
+    Ok(PerRtFn::from_fn(|f| ids[f as usize])) // `ids` is in `RtFn::ALL`'s order, which `f as usize` indexes
+}
+
+/// Declare every subroutine up front so `Call` can reference callees defined later, returning each
+/// one's `FuncId` by entry index.
+#[cfg(feature = "cranelift")]
 pub(crate) fn declare_subroutines(
     module: &mut dyn Module,
     subs: &[Subroutine],
-) -> Result<(HashMap<usize, FuncId>, HashMap<usize, u32>), CodegenError> {
+) -> Result<HashMap<usize, FuncId>, CodegenError> {
     let mut func_ids: HashMap<usize, FuncId> = HashMap::new();
-    let mut arity: HashMap<usize, u32> = HashMap::new();
     for sub in subs {
-        let sig = word_signature(module, param_count(sub));
+        let sig = word_signature(module.target_config(), param_count(sub));
         let id = module.declare_function(&sub.name, Linkage::Local, &sig).map_err(codegen_error)?;
         func_ids.insert(sub.entry, id);
-        arity.insert(sub.entry, param_count(sub));
     }
-    Ok((func_ids, arity))
+    Ok(func_ids)
+}
+
+/// When `define_all` hands a subroutine's `Context` to its observer.
+#[cfg(feature = "cranelift")]
+pub(crate) enum Stage {
+    /// Translated, not yet defined: `ctx.func` is the CLIF as built.
+    Built,
+    /// After `define_function`, which compiles `ctx` and optimises `ctx.func` in place.
+    Defined,
+}
+
+/// Why `define_all` failed. The AOT driver reports the two kinds as different `AotError`s.
+#[cfg(feature = "cranelift")]
+#[derive(Debug)]
+pub(crate) enum DefineError {
+    /// Declaring or translating failed, with `CodegenError`'s message.
+    Codegen(String),
+    /// `define_function` failed. Boxed, as `ModuleError` is large and this path is cold.
+    Module(Box<ModuleError>),
+}
+
+#[cfg(feature = "cranelift")]
+impl From<CodegenError> for DefineError {
+    fn from(e: CodegenError) -> Self {
+        DefineError::Codegen(e.0)
+    }
+}
+
+/// Declare the `rt_*` imports and every subroutine in `module`, then translate and define each
+/// subroutine in `subs`' order, handing `observe` its `FuncId` and `Context` at each `Stage`. The JIT,
+/// the AOT emitter and the snapshot test all run this one loop, so the snapshots record what this loop
+/// builds and compiles, for the fixed targets with the JIT's flags.
+#[cfg(feature = "cranelift")]
+pub(crate) fn define_all(
+    module: &mut dyn Module,
+    prog: &Program,
+    subs: &[Subroutine],
+    fbctx: &mut FunctionBuilderContext,
+    mut observe: impl FnMut(Stage, FuncId, &mut Context),
+) -> Result<Decls, DefineError> {
+    let rt = declare_rt(module)?;
+    let func_ids = declare_subroutines(module, subs)?;
+    let decls = Decls { rt, func_ids };
+    for sub in subs {
+        let mut ctx = module.make_context();
+        ctx.func.signature = word_signature(module.target_config(), param_count(sub));
+        let fid = decls.func_ids[&sub.entry];
+        ctx.func.name = UserFuncName::user(0, fid.as_u32());
+        let mut imports = ModuleImports { module: &mut *module, decls: &decls, subs };
+        translate_subroutine(&mut imports, &mut ctx.func, fbctx, prog, sub, subs)?;
+        observe(Stage::Built, fid, &mut ctx);
+        module.define_function(fid, &mut ctx).map_err(|e| DefineError::Module(Box::new(e)))?;
+        observe(Stage::Defined, fid, &mut ctx);
+        module.clear_context(&mut ctx);
+    }
+    Ok(decls)
 }
 
 /// Read register `r` as a value in the current block. Out-of-bank indices read `0`, mirroring the rxm
@@ -279,221 +312,243 @@ fn emit_guard(b: &mut FunctionBuilder, guard: FuncRef, rt_ptr: Value, exit: Bloc
     b.switch_to_block(cont);
 }
 
-/// Translate one subroutine into `ctx.func`.
-// One coherent state machine, not several concerns bundled together: a single `match &prog.code[idx]`
-// over every `Instr` variant, each arm emitting that opcode's Cranelift IR and jumping to the next
-// block. Splitting it by opcode group would scatter the shared locals (`loc_vars`/`arg_vars`/
-// `rr_var`/`rt_ptr`/`exit_block`) across several signatures without reducing what a reader has to
-// hold at once — the whole point of reading this function is "what does each rxm opcode lower to",
-// arm by arm, against the one shared block/register setup above the loop.
-#[allow(clippy::too_many_lines)]
+/// The source location that links a CLIF instruction to the rxm instruction at code index `pc`. A
+/// `SourceLoc` holds 31 bits and its all-ones value is the default, which links to none, so a `pc`
+/// it cannot hold gets the default.
+fn srcloc(pc: usize) -> SourceLoc {
+    let none = SourceLoc::default();
+    u32::try_from(pc).ok().filter(|&bits| bits < none.bits()).map_or(none, SourceLoc::new)
+}
+
+impl From<LowerFault> for CodegenError {
+    fn from(f: LowerFault) -> Self {
+        CodegenError(f.0)
+    }
+}
+
+/// The Cranelift spelling of the lowering walk's operations. Registers are `Variable`s. Blocks are
+/// created entry first, then one per `body` entry, then the shared exit block, whose `return` is
+/// emitted last, in `finish`.
+struct ClifSink<'a> {
+    b: FunctionBuilder<'a>,
+    config: TargetFrontendConfig,
+    rt: PerRtFn<FuncRef>,
+    /// entry index → that subroutine's `FuncRef` in this function.
+    subs: HashMap<usize, FuncRef>,
+    rt_ptr: Value,
+    args: Vec<Variable>,
+    locs: Vec<Variable>,
+    rr: Variable,
+    /// One block per `body` entry, in `body`'s order, so a `BodyPos` indexes it.
+    blocks: Vec<Block>,
+    /// Each `body` entry's code index as the source location its instructions carry, by `BodyPos`.
+    srclocs: Vec<SourceLoc>,
+    exit: Block,
+}
+
+impl<'a> ClifSink<'a> {
+    /// The function's entry block: the register banks, initialised from the parameters, and the
+    /// jump to the block at `entry`.
+    fn prologue(
+        mut b: FunctionBuilder<'a>,
+        config: TargetFrontendConfig,
+        rt: PerRtFn<FuncRef>,
+        subs: HashMap<usize, FuncRef>,
+        banks: Banks,
+        body: &[usize],
+        entry: BodyPos,
+    ) -> Self {
+        let entry_block = b.create_block();
+        b.append_block_params_for_function_params(entry_block);
+        b.switch_to_block(entry_block);
+        let params: Vec<Value> = b.block_params(entry_block).to_vec();
+        let rt_ptr = params[0];
+        let mut args = Vec::with_capacity(banks.args as usize);
+        for i in 0..banks.args {
+            let var = b.declare_var(types::I64);
+            let init = if i < banks.params { params[1 + i as usize] } else { b.ins().iconst(types::I64, 0) };
+            b.def_var(var, init);
+            args.push(var);
+        }
+        let mut locs = Vec::with_capacity(banks.locals as usize);
+        for _ in 0..banks.locals {
+            let var = b.declare_var(types::I64);
+            let zero = b.ins().iconst(types::I64, 0);
+            b.def_var(var, zero);
+            locs.push(var);
+        }
+        let rr = b.declare_var(types::I64);
+        let zero = b.ins().iconst(types::I64, 0);
+        b.def_var(rr, zero);
+        let blocks: Vec<Block> = (0..body.len()).map(|_| b.create_block()).collect();
+        let srclocs = body.iter().copied().map(srcloc).collect();
+        let exit = b.create_block();
+        b.ins().jump(blocks[entry.get()], &[]);
+        ClifSink { b, config, rt, subs, rt_ptr, args, locs, rr, blocks, srclocs, exit }
+    }
+
+    /// Call `callee` on the runtime pointer followed by `words`.
+    fn call(&mut self, callee: FuncRef, words: &[Value]) -> Inst {
+        let mut args = Vec::with_capacity(1 + words.len());
+        args.push(self.rt_ptr);
+        args.extend_from_slice(words);
+        self.b.ins().call(callee, &args)
+    }
+}
+
+impl LowerSink for ClifSink<'_> {
+    type Value = Value;
+    type Callee = FuncRef;
+    type Error = CodegenError;
+
+    fn missing_entry(entry: usize) -> LowerFault {
+        LowerFault(format!("entry {entry} not in body"))
+    }
+
+    // The source location stays set through the blocks a guard opens, which lower the same instruction.
+    fn begin(&mut self, at: BodyPos) -> Result<(), CodegenError> {
+        self.b.switch_to_block(self.blocks[at.get()]);
+        self.b.set_srcloc(self.srclocs[at.get()]);
+        Ok(())
+    }
+
+    fn read(&mut self, r: Reg) -> Result<Value, CodegenError> {
+        Ok(read_reg(&mut self.b, r, &self.locs, &self.args, self.rr))
+    }
+
+    fn write(&mut self, r: Reg, v: Value) -> Result<(), CodegenError> {
+        write_reg(&mut self.b, r, v, &self.locs, &self.args, self.rr);
+        Ok(())
+    }
+
+    // `iconst`'s `i64` is Cranelift's spelling of a 64-bit immediate bit pattern, not a signed value:
+    // `as i64` keeps every bit of a `u64`, and a register is a plain 64-bit word with no sign.
+    #[allow(clippy::cast_possible_wrap)]
+    fn constant(&mut self, n: u64) -> Result<Value, CodegenError> {
+        Ok(self.b.ins().iconst(types::I64, n as i64))
+    }
+
+    fn bin(&mut self, op: BinOp, x: Value, y: Value) -> Result<Value, CodegenError> {
+        Ok(emit_bin(&mut self.b, op, x, y))
+    }
+
+    fn call_rt(&mut self, f: RtFn, words: &[Value]) -> Result<Value, CodegenError> {
+        let call = self.call(self.rt[f], words);
+        Ok(self.b.inst_results(call)[0])
+    }
+
+    fn call_rt_void(&mut self, f: RtFn, words: &[Value]) -> Result<(), CodegenError> {
+        self.call(self.rt[f], words);
+        Ok(())
+    }
+
+    fn guard(&mut self, f: RtFn) -> Result<(), CodegenError> {
+        emit_guard(&mut self.b, self.rt[f], self.rt_ptr, self.exit);
+        Ok(())
+    }
+
+    fn callee(&self, entry: usize) -> Option<FuncRef> {
+        self.subs.get(&entry).copied()
+    }
+
+    fn call_sub(&mut self, callee: FuncRef, args: &[Value]) -> Result<Value, CodegenError> {
+        let call = self.call(callee, args);
+        Ok(self.b.inst_results(call)[0])
+    }
+
+    fn jump(&mut self, to: BodyPos) -> Result<(), CodegenError> {
+        self.b.ins().jump(self.blocks[to.get()], &[]);
+        Ok(())
+    }
+
+    // `brif` takes its first block on a nonzero `cond`, so `next` comes first.
+    fn jump_if_zero(&mut self, cond: Value, target: BodyPos, next: BodyPos) -> Result<(), CodegenError> {
+        self.b.ins().brif(cond, self.blocks[next.get()], &[], self.blocks[target.get()], &[]);
+        Ok(())
+    }
+
+    fn ret(&mut self, v: Value) -> Result<(), CodegenError> {
+        self.b.ins().return_(&[v]);
+        Ok(())
+    }
+
+    // The shared exit block returns a sentinel `0`; the driver classifies the run by the runtime's
+    // flags, which every guard that branches here has set. Every guard shares it, so it lowers no one
+    // instruction and carries no source location.
+    fn finish(mut self) -> Result<(), CodegenError> {
+        self.b.switch_to_block(self.exit);
+        self.b.set_srcloc(SourceLoc::default());
+        let sentinel = self.b.ins().iconst(types::I64, 0);
+        self.b.ins().return_(&[sentinel]);
+        self.b.seal_all_blocks();
+        self.b.finalize(self.config);
+        Ok(())
+    }
+}
+
+/// A function a subroutine's code can call: a runtime import, or the subroutine at this position in
+/// `partition`'s order.
+#[derive(Clone, Copy)]
+pub(crate) enum Callee {
+    Rt(RtFn),
+    Sub(usize),
+}
+
+/// How `translate_subroutine` brings its callees into a function, and the target it builds for.
+pub(crate) trait FuncImports {
+    fn frontend_config(&self) -> TargetFrontendConfig;
+    /// Import `callee` into `func`.
+    fn import(&mut self, func: &mut Function, callee: Callee) -> FuncRef;
+}
+
+/// The callees `define_all` declared in `module`.
+#[cfg(feature = "cranelift")]
+struct ModuleImports<'a> {
+    module: &'a mut dyn Module,
+    decls: &'a Decls,
+    subs: &'a [Subroutine],
+}
+
+#[cfg(feature = "cranelift")]
+impl FuncImports for ModuleImports<'_> {
+    fn frontend_config(&self) -> TargetFrontendConfig {
+        self.module.target_config()
+    }
+
+    fn import(&mut self, func: &mut Function, callee: Callee) -> FuncRef {
+        let id = match callee {
+            Callee::Rt(f) => self.decls.rt[f],
+            Callee::Sub(k) => self.decls.func_ids[&self.subs[k].entry],
+        };
+        self.module.declare_func_in_func(id, func)
+    }
+}
+
+/// Translate `sub` into `func`: import the runtime functions and every subroutine of `subs`, so a
+/// `Call` can reach any of them, then lower the body through a `ClifSink`.
 pub(crate) fn translate_subroutine(
-    module: &mut dyn Module,
-    ctx: &mut Context,
+    imports: &mut impl FuncImports,
+    func: &mut Function,
     fbctx: &mut FunctionBuilderContext,
     prog: &Program,
     sub: &Subroutine,
-    decls: &Decls,
+    subs: &[Subroutine],
 ) -> Result<(), CodegenError> {
-    let mut builder = FunctionBuilder::new(&mut ctx.func, fbctx);
-
-    // Import the `rt_*` helpers and every subroutine (so `Call` can reference any of them).
-    let rt = RtRefs::declare(module, &mut builder, &decls.rt);
-    let mut sub_refs: HashMap<usize, FuncRef> = HashMap::new();
-    for (&entry, &fid) in &decls.func_ids {
-        sub_refs.insert(entry, module.declare_func_in_func(fid, builder.func));
-    }
-
-    // Prologue: initialise the register banks from the function params.
-    let entry_block = builder.create_block();
-    builder.append_block_params_for_function_params(entry_block);
-    builder.switch_to_block(entry_block);
-    let params: Vec<Value> = builder.block_params(entry_block).to_vec();
-    let rt_ptr = params[0];
-
-    // Size the `Arg` bank to every `Arg` the body references (read or write); the `Loc` bank to
-    // `n_locals`. The first `param_count` args come from the function's params; any extra `Arg`
-    // (written only to set up a callee's arguments, or every `Arg` of the entry `$main`, which the
-    // driver invokes with no args) starts at `0`.
-    let n_params = param_count(sub);
-    let n_args = n_arg_vars(prog, sub);
-
-    let mut arg_vars = Vec::with_capacity(n_args as usize);
-    for i in 0..n_args {
-        let var = builder.declare_var(types::I64);
-        let init = if i < n_params { params[1 + i as usize] } else { builder.ins().iconst(types::I64, 0) };
-        builder.def_var(var, init);
-        arg_vars.push(var);
-    }
-    let mut loc_vars = Vec::with_capacity(sub.n_locals as usize);
-    for _ in 0..sub.n_locals {
-        let var = builder.declare_var(types::I64);
-        let zero = builder.ins().iconst(types::I64, 0);
-        builder.def_var(var, zero);
-        loc_vars.push(var);
-    }
-    let rr_var = builder.declare_var(types::I64);
-    let zero = builder.ins().iconst(types::I64, 0);
-    builder.def_var(rr_var, zero);
-
-    // One block per body instruction, plus a shared fault/cap exit block.
-    let mut block_for: HashMap<usize, Block> = HashMap::new();
-    for &idx in &sub.body {
-        block_for.insert(idx, builder.create_block());
-    }
-    let exit_block = builder.create_block();
-
-    let entry_target =
-        *block_for.get(&sub.entry).ok_or_else(|| codegen_error(format!("entry {} not in body", sub.entry)))?;
-    builder.ins().jump(entry_target, &[]);
-
-    // Resolve a label to the block of the index it precedes.
-    let resolve = |l: &str| -> Result<usize, CodegenError> {
-        prog.label_index(l).ok_or_else(|| codegen_error(format!("undefined label `{l}`")))
-    };
-    let block_at = |idx: usize| -> Result<Block, CodegenError> {
-        block_for.get(&idx).copied().ok_or_else(|| codegen_error(format!("no block for index {idx}")))
-    };
-
-    for &idx in &sub.body {
-        builder.switch_to_block(block_for[&idx]);
-        let b = &mut builder;
-        match &prog.code[idx] {
-            Instr::Li(rd, n) => {
-                // `iconst`'s `i64` parameter is Cranelift's ABI for "a 64-bit immediate bit
-                // pattern", not a signed value — every `u64` bit pattern round-trips losslessly
-                // through `as i64` at equal width, so this never truncates or changes `n`'s bits.
-                // Registers themselves carry no signedness (see the module doc's "Registers →
-                // `Variable`s": each is a plain 64-bit `Variable`, read/written as `u64` throughout
-                // this crate and `run_rxm`), so there is no numeric meaning here to wrap either.
-                #[allow(clippy::cast_possible_wrap)]
-                let v = b.ins().iconst(types::I64, *n as i64);
-                write_reg(b, *rd, v, &loc_vars, &arg_vars, rr_var);
-                b.ins().jump(block_at(idx + 1)?, &[]);
-            }
-            Instr::Mov(rd, rs) => {
-                let v = read_reg(b, *rs, &loc_vars, &arg_vars, rr_var);
-                write_reg(b, *rd, v, &loc_vars, &arg_vars, rr_var);
-                b.ins().jump(block_at(idx + 1)?, &[]);
-            }
-            Instr::Nil(rd) => {
-                let v = b.ins().iconst(types::I64, 0);
-                write_reg(b, *rd, v, &loc_vars, &arg_vars, rr_var);
-                b.ins().jump(block_at(idx + 1)?, &[]);
-            }
-            Instr::Bin(op, rd, ra, rb) => {
-                let x = read_reg(b, *ra, &loc_vars, &arg_vars, rr_var);
-                let y = read_reg(b, *rb, &loc_vars, &arg_vars, rr_var);
-                let v = emit_bin(b, *op, x, y);
-                write_reg(b, *rd, v, &loc_vars, &arg_vars, rr_var);
-                b.ins().jump(block_at(idx + 1)?, &[]);
-            }
-            Instr::Jz(r, l) => {
-                let target = resolve(l)?;
-                if target <= idx {
-                    emit_guard(b, rt.tick, rt_ptr, exit_block); // backward edge → step cap
-                }
-                let cond = read_reg(b, *r, &loc_vars, &arg_vars, rr_var);
-                // Jz: cond == 0 → target; else → fall through to idx + 1.
-                b.ins().brif(cond, block_at(idx + 1)?, &[], block_at(target)?, &[]);
-            }
-            Instr::Jmp(l) => {
-                let target = resolve(l)?;
-                if target <= idx {
-                    emit_guard(b, rt.tick, rt_ptr, exit_block); // backward edge → step cap
-                }
-                b.ins().jump(block_at(target)?, &[]);
-            }
-            Instr::Call(l) => {
-                let target = resolve(l)?;
-                emit_guard(b, rt.enter, rt_ptr, exit_block); // stack-depth cap, checked before the call
-                let callee = *sub_refs.get(&target).ok_or_else(|| codegen_error("call to non-subroutine"))?;
-                let callee_arity = *decls.arity.get(&target).ok_or_else(|| codegen_error("unknown callee arity"))?;
-                let mut args = Vec::with_capacity(1 + callee_arity as usize);
-                args.push(rt_ptr);
-                for i in 0..callee_arity {
-                    args.push(read_reg(b, Reg::Arg(i), &loc_vars, &arg_vars, rr_var));
-                }
-                let call = b.ins().call(callee, &args);
-                let result = b.inst_results(call)[0];
-                write_reg(b, Reg::Rr, result, &loc_vars, &arg_vars, rr_var);
-                b.ins().call(rt.leave, &[rt_ptr]);
-                b.ins().jump(block_at(idx + 1)?, &[]);
-            }
-            // `Ret` returns `rr` to the caller; `Halt` stops the whole program with `rr`. They lower
-            // identically to a native `return rr` because `partition` (see `analysis.rs`) rejects any
-            // NON-`$main` subroutine that contains a `Halt`, so a `Halt` here can only be `$main`'s
-            // own — where "return to the driver" IS "stop the program". (`$main`'s `Ret` with the
-            // native stack empty likewise returns to the driver, matching `run_rxm`'s empty-stack
-            // `Ret`.)
-            Instr::Ret | Instr::Halt => {
-                let v = read_reg(b, Reg::Rr, &loc_vars, &arg_vars, rr_var);
-                b.ins().return_(&[v]);
-            }
-            Instr::Cons(rd, rh, rt_reg) => {
-                let h = read_reg(b, *rh, &loc_vars, &arg_vars, rr_var);
-                let t = read_reg(b, *rt_reg, &loc_vars, &arg_vars, rr_var);
-                let call = b.ins().call(rt.cons, &[rt_ptr, h, t]);
-                let v = b.inst_results(call)[0];
-                write_reg(b, *rd, v, &loc_vars, &arg_vars, rr_var);
-                emit_guard(b, rt.faulted, rt_ptr, exit_block); // heap cap
-                b.ins().jump(block_at(idx + 1)?, &[]);
-            }
-            Instr::Head(rd, rl) => {
-                let p = read_reg(b, *rl, &loc_vars, &arg_vars, rr_var);
-                let call = b.ins().call(rt.head, &[rt_ptr, p]);
-                let v = b.inst_results(call)[0];
-                write_reg(b, *rd, v, &loc_vars, &arg_vars, rr_var);
-                emit_guard(b, rt.faulted, rt_ptr, exit_block);
-                b.ins().jump(block_at(idx + 1)?, &[]);
-            }
-            Instr::Tail(rd, rl) => {
-                let p = read_reg(b, *rl, &loc_vars, &arg_vars, rr_var);
-                let call = b.ins().call(rt.tail, &[rt_ptr, p]);
-                let v = b.inst_results(call)[0];
-                write_reg(b, *rd, v, &loc_vars, &arg_vars, rr_var);
-                emit_guard(b, rt.faulted, rt_ptr, exit_block);
-                b.ins().jump(block_at(idx + 1)?, &[]);
-            }
-            Instr::IsEmpty(rd, rl) => {
-                let p = read_reg(b, *rl, &loc_vars, &arg_vars, rr_var);
-                let call = b.ins().call(rt.is_empty, &[rt_ptr, p]);
-                let v = b.inst_results(call)[0];
-                write_reg(b, *rd, v, &loc_vars, &arg_vars, rr_var);
-                b.ins().jump(block_at(idx + 1)?, &[]); // never faults
-            }
-            Instr::Box(rd, rv) => {
-                let v_in = read_reg(b, *rv, &loc_vars, &arg_vars, rr_var);
-                let call = b.ins().call(rt.box_new, &[rt_ptr, v_in]);
-                let v = b.inst_results(call)[0];
-                write_reg(b, *rd, v, &loc_vars, &arg_vars, rr_var);
-                emit_guard(b, rt.faulted, rt_ptr, exit_block); // heap cap
-                b.ins().jump(block_at(idx + 1)?, &[]);
-            }
-            Instr::BoxGet(rd, rb) => {
-                let p = read_reg(b, *rb, &loc_vars, &arg_vars, rr_var);
-                let call = b.ins().call(rt.box_get, &[rt_ptr, p]);
-                let v = b.inst_results(call)[0];
-                write_reg(b, *rd, v, &loc_vars, &arg_vars, rr_var);
-                emit_guard(b, rt.faulted, rt_ptr, exit_block);
-                b.ins().jump(block_at(idx + 1)?, &[]);
-            }
-            Instr::BoxSet(rb, rv) => {
-                let p = read_reg(b, *rb, &loc_vars, &arg_vars, rr_var);
-                let v = read_reg(b, *rv, &loc_vars, &arg_vars, rr_var);
-                b.ins().call(rt.box_set, &[rt_ptr, p, v]);
-                emit_guard(b, rt.faulted, rt_ptr, exit_block);
-                b.ins().jump(block_at(idx + 1)?, &[]);
-            }
-        }
-    }
-
-    // The shared exit block returns a sentinel `0`; the driver classifies by the runtime flags.
-    builder.switch_to_block(exit_block);
-    let sentinel = builder.ins().iconst(types::I64, 0);
-    builder.ins().return_(&[sentinel]);
-
-    builder.seal_all_blocks();
-    builder.finalize(module.target_config());
-    Ok(())
+    let builder = FunctionBuilder::new(func, fbctx);
+    let rt = PerRtFn::from_fn(|f| imports.import(builder.func, Callee::Rt(f)));
+    // In `subs`' order, the order they are declared in: the import order numbers the `fnN` refs, and
+    // the CLIF and vcode text must be the same on every build for the snapshot gate to compare them.
+    let callees: HashMap<usize, FuncRef> = subs
+        .iter()
+        .enumerate()
+        .map(|(k, callee)| (callee.entry, imports.import(builder.func, Callee::Sub(k))))
+        .collect();
+    let arity: HashMap<usize, u32> = subs.iter().map(|callee| (callee.entry, param_count(callee))).collect();
+    let config = imports.frontend_config();
+    lower_subroutine(
+        prog,
+        sub,
+        |entry| arity.get(&entry).copied(),
+        |banks, body, entry| Ok(ClifSink::prologue(builder, config, rt, callees, banks, body, entry)),
+    )
 }
